@@ -37,7 +37,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			noisy++
 		}
 	}
-	fmt.Fprintf(w, "Lapilli  %s → %s %s\n", r.From.In(loc).Format(stamp), r.To.In(loc).Format(stamp), loc)
+	fmt.Fprintf(w, "Lapilli  %s → %s %s\n", r.From.In(loc).Format(stamp), r.To.In(loc).Format(stamp), Zone(loc, r.From, r.To))
 	fmt.Fprintf(w, "%d firings, %d incidents written down", firings, written)
 	if found > 0 {
 		fmt.Fprintf(w, ", %d more found by --impact", found)

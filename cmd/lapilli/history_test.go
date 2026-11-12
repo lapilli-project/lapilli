@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -176,11 +177,11 @@ func TestRulesSelect(t *testing.T) {
 		t.Errorf("versions %+v", vs)
 	}
 	var said strings.Builder
-	f.sayPicked(&said)
+	f.sayPicked(&said, "")
 	if said.String() != "lapilli verdict: the rule files read held 2 documents that hold no rules, and 2 documents of rules the selector doesn't match: passed over\n" {
 		t.Errorf("said %q", said.String())
 	}
-	if f.sayPicked(&said); strings.Count(said.String(), "\n") != 1 {
+	if f.sayPicked(&said, ""); strings.Count(said.String(), "\n") != 1 {
 		t.Errorf("said twice: %q", said.String())
 	}
 	// Without it, both rules, and the Deployments still passed over.
@@ -208,6 +209,24 @@ func TestRulesSelect(t *testing.T) {
 		if code := run(c.args, io.Discard, &errs); code != 2 || !strings.Contains(errs.String(), c.says) {
 			t.Errorf("%v: exit %d, want 2 saying %q:\n%s", c.args, code, c.says, errs.String())
 		}
+	}
+}
+
+// Set beside each other, the rules --rules and --compare read each say what
+// they passed over, and which they are.
+func TestCompareSaysWhichSide(t *testing.T) {
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
+	now = func() time.Time { return t0 }
+	proposed := write(t, "proposed.yaml", renderedChart("15m"))
+	inPlace := write(t, "in-place.yaml", renderedChart("2m")+"---\napiVersion: v1\nkind: Service\nmetadata: {name: shop}\n")
+	var out, errs strings.Builder
+	if code := run([]string{"verdict", "--rules", proposed, "--compare", inPlace, "--rules-select", "grafana_alert=1", "--prometheus", "http://x"}, &out, &errs); code != 0 {
+		t.Fatalf("exit %d\n%s", code, errs.String())
+	}
+	want := "lapilli verdict: the rule files --rules read held 1 document that holds no rules, and 1 document of rules the selector doesn't match: passed over\n" +
+		"lapilli verdict: the rule files --compare read held 2 documents that hold no rules, and 1 document of rules the selector doesn't match: passed over\n"
+	if errs.String() != want {
+		t.Errorf("said:\n%s\nwant:\n%s", errs.String(), want)
 	}
 }
 

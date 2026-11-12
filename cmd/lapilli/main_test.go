@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/replay"
+	"lapilli.dev/internal/verdict"
 )
 
 var t0 = time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
@@ -265,6 +267,32 @@ func TestRun(t *testing.T) {
 		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --changed-only --prometheus http://p --incidents " + incidents,
 			code: 0, stdout: "  after   no changed rule fired"},
 		{args: "verdict --rules " + rulesFile + " --changed-only --prometheus http://p --incidents y", code: 2, stderr: "--changed-only goes with --compare"},
+		// Compared without incidents: the firings counted, not judged.
+		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --prometheus http://p --tz UTC",
+			code: 0, stdout: "Lapilli  2026-10-26 00:00 → 2026-11-02 00:00 UTC\nRules compared: 1 changed, 0 added, 0 taken away, 2 the same\nFiring" +
+				"s 1 → 0\n\nRULE            FIRED  REFIRED\nCheckoutErrors  1 → 0  0 → 0\n"},
+		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --prometheus http://p --json",
+			code: 0, stdout: `"incidents_given": false,`},
+		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --prometheus http://p --incidents " + incidents + " --json",
+			code: 0, stdout: `"incidents_given": true,`},
+		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --changed-only --prometheus http://p --markdown --tz Asia/Seoul",
+			code: 0, stdout: "### Lapilli backtest, 2026-10-26 09:00 → 2026-11-02 09:00 Asia/Seoul (+09:00)\n\nRules compared: **1 changed, 0 added, 0 taken away**, 2 the same. " +
+				"No incidents were given: the firings are counted, not judged.\n\n| | Before | After |\n|---|--:|--:|\n| Firings of the changed rules | 1 | 0 |\n\n" +
+				"#### Rules that differ\n\n| Rule | Fired | Refired |\n| --- | --: | --: |\n| `CheckoutErrors` | 1 → 0 | 0 → 0 |\n"},
+		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --prometheus http://p --markdown --incidents " + incidents,
+			code: 0, stdout: "| Incidents with no alert, of 1 | 0 | 1 |\n"},
+		{args: "verdict --rules " + rulesFile + " --compare " + rulesFile + " --prometheus http://p --markdown",
+			code: 0, stdout: `"nothing_changed":true,"changed":0,"added":0,"removed":0,"same":3,`},
+		{args: "verdict --rules " + rulesFile + " --compare " + rulesFile + " --prometheus http://p --markdown",
+			code: 0, stdout: ")\n### Lapilli backtest: nothing changed\n\nNothing that decides when the 3 rules fire has changed: nothing to replay.\n"},
+		{args: "verdict --rules " + rulesFile + " --compare " + rulesFile + " --prometheus http://p --json",
+			code: 0, stdout: `"nothing_changed": true,`},
+		{args: "verdict --rules " + rulesFile + " --prometheus http://p --markdown --incidents y", code: 2, stderr: "--markdown writes --compare's report"},
+		{args: "verdict --rules x --compare y --prometheus http://p --markdown --json", code: 2, stderr: "--json and --markdown don't go together"},
+		{args: "verdict --rules x --prometheus http://p", code: 2, stderr: "say what went wrong"},
+		{args: "verdict --rules " + rulesFile + " --prometheus http://p --incidents " + incidents + " --tz Asia/Seoul",
+			code: 0, stdout: "Lapilli  2026-10-26 09:00 → 2026-11-02 09:00 Asia/Seoul (+09:00)\n"},
+		{args: "serve --rules " + rulesFile + " --prometheus http://p --markdown", code: 2, stderr: "lapilli serve doesn't take --markdown"},
 		{args: "verdict --rules x --noisy-precision 120% --prometheus http://p --incidents y", code: 2, stderr: "want a share like 20% or 0.2"},
 		{args: "verdict --loaded-rules --prometheus http://p --incidents " + incidents + " --tz UTC",
 			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00  CheckoutErrors +5m"},
@@ -662,4 +690,25 @@ func TestServeCheckReplayOn(t *testing.T) {
 			t.Errorf("%q: on %v, want %v", args, got, want)
 		}
 	}
+}
+
+// What --markdown writes for a pull request doesn't say where the history
+// is: a failed query's reason names the URL it asked, and its host.
+func TestHideWhere(t *testing.T) {
+	f := &verdictFlags{promURL: "https://prometheus.internal.example:9090/prom", gcpProj: "shop-prod-123456", loki: "http://p"}
+	reason := `query failed: Post "https://prometheus.internal.example:9090/prom/api/v1/query_range": dial tcp: lookup prometheus.internal.example: no such host`
+	before := &verdict.Report{Rules: []verdict.RuleResult{{Rule: "A", Unsupported: reason}, {Rule: "B", Unsupported: "projects/shop-prod-123456 denied, p failed"}}}
+	after := &verdict.Report{Rules: []verdict.RuleResult{{Rule: "A", Unsupported: replay.Unfinished}}}
+	f.hideWhere(&verdict.Comparison{Before: before, After: after})
+	if got := before.Rules[0].Unsupported; got != `query failed: Post "[--prometheus]/api/v1/query_range": dial tcp: lookup [--prometheus]: no such host` {
+		t.Errorf("hidden: %s", got)
+	}
+	// A host of a letter isn't taken out of every word it is in.
+	if got := before.Rules[1].Unsupported; got != "projects/[--gcp-project] denied, p failed" {
+		t.Errorf("hidden: %s", got)
+	}
+	if after.Rules[0].Unsupported != replay.Unfinished {
+		t.Errorf("unfinished: %s", after.Rules[0].Unsupported)
+	}
+	f.hideWhere(&verdict.Comparison{}) // nothing compared: nothing to hide
 }

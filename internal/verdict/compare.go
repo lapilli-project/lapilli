@@ -3,7 +3,6 @@ package verdict
 import (
 	"fmt"
 	"io"
-	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -29,6 +28,99 @@ type Comparison struct {
 	Incidents []IncidentChange `json:"incidents"`
 	Before    *Report          `json:"before"`
 	After     *Report          `json:"after"`
+	// Summary is the comparison in numbers, for a tool to read. lapilli
+	// verdict --compare gives it; lapilli serve keeps none.
+	Summary *Summary `json:"summary,omitempty"`
+}
+
+// Summary is a comparison in numbers, for a tool to read: lapilli verdict
+// --compare --json gives it as "summary", and --markdown on its first
+// line. Every field is always there, and its meaning doesn't change
+// (README, "Pull request backtests in CI").
+type Summary struct {
+	// NothingChanged says nothing that decides when a rule fires differs
+	// between the two sets of rules: nothing was replayed.
+	NothingChanged bool `json:"nothing_changed"`
+	// Changed, Added and Removed are the rules that differ: in both sets,
+	// only in the rules proposed (--rules), only in those in place
+	// (--compare). Same are those alike in both.
+	Changed int `json:"changed"`
+	Added   int `json:"added"`
+	Removed int `json:"removed"`
+	Same    int `json:"same"`
+	// Alike are the rules that differ but fire as they did: as often,
+	// catching as much.
+	Alike int `json:"alike"`
+	// Unreplayed are the rules that differ that couldn't be replayed, on
+	// one side or both.
+	Unreplayed int `json:"unreplayed"`
+	// FiringsBefore and FiringsAfter are the firings on each side: of the
+	// rules that differ alone, with --changed-only.
+	FiringsBefore int `json:"firings_before"`
+	FiringsAfter  int `json:"firings_after"`
+	// IncidentsGiven says the firings were judged against incidents,
+	// --incidents or --impact. Without them nothing was judged: no firing
+	// caught anything, each counts as a black stone, and Incidents is 0.
+	IncidentsGiven bool `json:"incidents_given"`
+	// Incidents are the incidents in the period, and IncidentsChanged
+	// those the two sets catch differently.
+	Incidents        int `json:"incidents"`
+	IncidentsChanged int `json:"incidents_changed"`
+}
+
+// Summarize sets c.Summary from the rest of c; incidents says whether
+// incidents were given to judge against.
+func (c *Comparison) Summarize(incidents bool) {
+	p := c.parts()
+	s := &Summary{Changed: p.changed, Added: p.added, Removed: p.gone, Same: c.Same, Alike: len(p.alike),
+		Unreplayed: len(p.broken), IncidentsGiven: incidents, IncidentsChanged: len(c.Incidents)}
+	s.NothingChanged = s.Changed+s.Added+s.Removed == 0
+	if c.Before != nil {
+		s.FiringsBefore, s.Incidents = len(c.Before.Firings), len(c.Before.Incidents)
+	}
+	if c.After != nil {
+		s.FiringsAfter = len(c.After.Firings)
+	}
+	c.Summary = s
+}
+
+// judged says the firings were judged against incidents: always, unless
+// the summary says none were given.
+func (c *Comparison) judged() bool { return c.Summary == nil || c.Summary.IncidentsGiven }
+
+// compareParts is a comparison's rules that differ, sorted for showing.
+type compareParts struct {
+	changed, added, gone int
+	// alike fire as they did; broken couldn't be replayed on one side or
+	// both; shown are the rest, and those replayed on one side of broken.
+	alike, broken, shown []RuleChange
+}
+
+func (c *Comparison) parts() compareParts {
+	var p compareParts
+	unreplayed := func(r *RuleResult) bool { return r != nil && r.Unsupported != "" }
+	for _, rc := range c.Rules {
+		switch {
+		case rc.Before == nil:
+			p.added++
+		case rc.After == nil:
+			p.gone++
+		default:
+			p.changed++
+		}
+		if unreplayed(rc.Before) || unreplayed(rc.After) {
+			p.broken = append(p.broken, rc)
+		}
+		switch {
+		case rc.Alike():
+			p.alike = append(p.alike, rc)
+		case (rc.Before == nil || unreplayed(rc.Before)) && (rc.After == nil || unreplayed(rc.After)):
+			// nothing replayed on either side: only the reason to show
+		default:
+			p.shown = append(p.shown, rc)
+		}
+	}
+	return p
 }
 
 // RuleChange is a rule's stones before and after: Before is nil for a rule
@@ -101,36 +193,16 @@ func Compare(before, after *Report, changed []string, same int) *Comparison {
 	return c
 }
 
-// CompareText writes a comparison for a person, times in loc.
+// CompareText writes a comparison for a person, times in loc. Without
+// incidents to judge against (see Summary), the firings are counted, not
+// judged: no catches, no precision, nothing of incidents.
 func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 	const stamp = "2006-01-02 15:04"
-	var changed, added, gone int
-	var alike, broken []RuleChange
-	var shown []RuleChange
-	for _, rc := range c.Rules {
-		switch {
-		case rc.Before == nil:
-			added++
-		case rc.After == nil:
-			gone++
-		default:
-			changed++
-		}
-		unreplayed := func(r *RuleResult) bool { return r != nil && r.Unsupported != "" }
-		if unreplayed(rc.Before) || unreplayed(rc.After) {
-			broken = append(broken, rc)
-		}
-		switch {
-		case rc.Alike():
-			alike = append(alike, rc)
-		case (rc.Before == nil || unreplayed(rc.Before)) && (rc.After == nil || unreplayed(rc.After)):
-			// nothing replayed on either side: only the reason to show
-		default:
-			shown = append(shown, rc)
-		}
-	}
-	fmt.Fprintf(w, "Lapilli  %s → %s %s\n", c.From.In(loc).Format(stamp), c.To.In(loc).Format(stamp), loc)
-	fmt.Fprintf(w, "Rules compared: %d changed, %d added, %d taken away, %d the same\n", changed, added, gone, c.Same)
+	p := c.parts()
+	alike, broken, shown := p.alike, p.broken, p.shown
+	judged := c.judged()
+	fmt.Fprintf(w, "Lapilli  %s → %s %s\n", c.From.In(loc).Format(stamp), c.To.In(loc).Format(stamp), Zone(loc, c.From, c.To))
+	fmt.Fprintf(w, "Rules compared: %d changed, %d added, %d taken away, %d the same\n", p.changed, p.added, p.gone, c.Same)
 	if c.ChangedOnly {
 		fmt.Fprintf(w, "Firings of the changed rules %d → %d\n", len(c.Before.Firings), len(c.After.Firings))
 	} else {
@@ -139,9 +211,11 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 	if by := bySeverity(c.Before, c.After); by != "" {
 		fmt.Fprintf(w, "By severity: %s\n", by)
 	}
-	if n := len(c.Before.Incidents); n > 0 && c.ChangedOnly {
+	if n := len(c.Before.Incidents); n == 0 || !judged {
+		// nothing judged: nothing to say of incidents
+	} else if c.ChangedOnly {
 		fmt.Fprintln(w, "Rules left alone weren't replayed (--changed-only): incidents show the changed rules' catches alone.")
-	} else if n > 0 {
+	} else {
 		count := func(r *Report, f func(IncidentResult) bool) int {
 			m := 0
 			for _, in := range r.Incidents {
@@ -163,26 +237,20 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 		sev := slices.ContainsFunc(shown, func(rc RuleChange) bool {
 			return rc.Before != nil && rc.Before.Severity != "" || rc.After != nil && rc.After.Severity != ""
 		})
-		rows := [][]string{withSeverity(sev, "RULE", "SEVERITY", "FIRED", "○ CAUGHT", "● NOTHING", "PRECISION", "REFIRED")}
+		rows := [][]string{judgedColumns(judged, withSeverity(sev, "RULE", "SEVERITY", "FIRED", "○ CAUGHT", "● NOTHING", "PRECISION", "REFIRED"))}
 		for _, rc := range shown {
-			rows = append(rows, withSeverity(sev, Clean(rc.Rule), severities(rc),
-				both(rc, func(r RuleResult) string { return fmt.Sprint(r.Firings) }),
-				both(rc, func(r RuleResult) string { return fmt.Sprint(r.White) }),
-				both(rc, func(r RuleResult) string { return fmt.Sprint(r.Black) }),
-				both(rc, func(r RuleResult) string {
-					if p, ok := r.Precision(); ok {
-						return fmt.Sprintf("%.0f%%", 100*p)
-					}
-					return "–"
-				}),
-				both(rc, func(r RuleResult) string { return fmt.Sprint(r.Refired) })))
+			rows = append(rows, judgedColumns(judged, withSeverity(sev, Clean(rc.Rule), severities(rc), stones(rc)...)))
 		}
 		if err := table(w, rows); err != nil {
 			return err
 		}
 	}
 	if len(alike) > 0 {
-		fmt.Fprintf(w, "\n%d changed rules keep the same stones:\n", len(alike))
+		keep := "keep the same stones"
+		if !judged {
+			keep = "fire as they did"
+		}
+		fmt.Fprintf(w, "\n%d changed rules %s:\n", len(alike), keep)
 		for _, rc := range alike {
 			fmt.Fprintf(w, "  %s\n", Clean(rc.Rule))
 		}
@@ -201,7 +269,7 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 		}
 	}
 
-	if len(c.Before.Incidents) == 0 {
+	if len(c.Before.Incidents) == 0 || !judged {
 		return nil
 	}
 	fmt.Fprintln(w)
@@ -231,6 +299,35 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 	return err
 }
 
+// stones are a changed rule's cells after its severity, before → after:
+// fired, caught, nothing, precision, refired.
+func stones(rc RuleChange) []string {
+	return []string{
+		both(rc, func(r RuleResult) string { return fmt.Sprint(r.Firings) }),
+		both(rc, func(r RuleResult) string { return fmt.Sprint(r.White) }),
+		both(rc, func(r RuleResult) string { return fmt.Sprint(r.Black) }),
+		both(rc, func(r RuleResult) string {
+			if p, ok := r.Precision(); ok {
+				return fmt.Sprintf("%.0f%%", 100*p)
+			}
+			return "–"
+		}),
+		both(rc, func(r RuleResult) string { return fmt.Sprint(r.Refired) }),
+	}
+}
+
+// judgedColumns is a row of a table of stones as it is shown: without
+// its caught, nothing and precision when nothing was judged, which
+// would say nothing. The row ends fired, caught, nothing, precision,
+// refired.
+func judgedColumns(judged bool, row []string) []string {
+	if judged {
+		return row
+	}
+	n := len(row)
+	return append(slices.Clone(row[:n-4]), row[n-1])
+}
+
 // severities is a rule's severity before → after, or the one it keeps.
 func severities(rc RuleChange) string {
 	side := func(r *RuleResult) string {
@@ -249,31 +346,13 @@ func severities(rc RuleChange) string {
 // bySeverity counts the firings of each severity before → after, or is
 // empty when no firing has a severity.
 func bySeverity(before, after *Report) string {
-	count := func(r *Report) map[string]int {
-		m := map[string]int{}
-		for _, f := range r.Firings {
-			m[f.Labels["severity"]]++
-		}
-		return m
-	}
-	b, a := count(before), count(after)
-	keys := map[string]bool{}
-	for k := range b {
-		keys[k] = true
-	}
-	for k := range a {
-		keys[k] = true
-	}
-	if len(keys) == 0 || len(keys) == 1 && keys[""] {
-		return ""
-	}
 	var parts []string
-	for _, k := range slices.Sorted(maps.Keys(keys)) {
-		name := Clean(k)
-		if k == "" {
+	for _, s := range severityCounts(before, after) {
+		name := Clean(s.name)
+		if s.name == "" {
 			name = "none"
 		}
-		parts = append(parts, fmt.Sprintf("%s %d → %d", name, b[k], a[k]))
+		parts = append(parts, fmt.Sprintf("%s %d → %d", name, s.before, s.after))
 	}
 	return strings.Join(parts, ", ")
 }

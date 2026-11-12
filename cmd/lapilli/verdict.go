@@ -112,9 +112,16 @@ Before a change to the rules:
   --compare FILE      the rules in place, to set --rules beside (repeatable):
                       both are replayed over the same period, and the rules
                       that differ and the incidents caught differently are
-                      shown before → after
+                      shown before → after. Without --incidents or --impact,
+                      the firings are counted, not judged
   --changed-only      with --compare, replay only the rules that differ:
                       much faster, but an incident shows only their catches
+  --markdown          with --compare, the report as Markdown, to post on a
+                      pull request or a merge request: under 64,000
+                      characters, and what comes from the rules written so
+                      that it can't format, link or mention anything. Its
+                      first line, and --json's "summary", say whether
+                      anything changed, and how much (see the README)
 
 What the rules say:
   --check-content     check what each rule says when it fires, and how it is
@@ -172,7 +179,7 @@ Is the replay right?
                       replayed (CloudWatch, Google Cloud, Azure), which keep
                       no series: each tied by its alarm_id, or its name
 
-What went wrong:
+What went wrong (with --compare, if you have them):
   --incidents FILE    incidents written down, in YAML; see below
   --impact PROMQL     an expression that returns something while users are
                       hurt, such as a 5xx ratio above 1%; its windows become
@@ -255,7 +262,10 @@ Output:
   --json              the whole report, every firing included
   --metrics           Prometheus metrics, for node_exporter's textfile
                       collector or Pushgateway
-  --tz ZONE           show times in this zone (default: local)
+  --tz ZONE           show times in this zone, an IANA name such as
+                      Asia/Seoul or UTC (default: the machine's own, as TZ
+                      or /etc/localtime says); the header names it, with
+                      its offset
   --push URL          also put the metrics on this Pushgateway, as job lapilli;
                       or in the group a URL ending /metrics/job/... names
   --slack-webhook-file FILE
@@ -319,6 +329,7 @@ type verdictFlags struct {
 	ruleRE              *regexp.Regexp
 	late                rules.Lateness
 	json, metrics       bool
+	markdown            bool
 	loc                 *time.Location
 	timeout             time.Duration
 	parallel            int
@@ -381,6 +392,9 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			continue
 		case "--json":
 			f.json = true
+			continue
+		case "--markdown":
+			f.markdown = true
 			continue
 		case "--metrics":
 			f.metrics = true
@@ -723,7 +737,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			on   bool
 			flag string
 		}{{f.firings != "", "--firings"}, {len(f.compare) > 0, "--compare"}, {f.changedOnly, "--changed-only"},
-			{f.json, "--json"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
+			{f.json, "--json"}, {f.markdown, "--markdown"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"}} {
 			if no.on {
@@ -798,6 +812,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--compare doesn't go with --metrics or --push")
 	case f.changedOnly && len(f.compare) == 0:
 		return nil, errors.New("--changed-only goes with --compare")
+	case f.markdown && len(f.compare) == 0:
+		return nil, errors.New("--markdown writes --compare's report, for a pull request: it goes with --compare")
+	case f.markdown && f.json:
+		return nil, errors.New("--json and --markdown don't go together")
 	case validHistory(f) != nil:
 		return nil, validHistory(f)
 	case needsHistory && f.promURL == "" && f.gcpProj == "":
@@ -806,7 +824,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--from and --to go together")
 	case !f.from.IsZero() && !f.to.After(f.from):
 		return nil, errors.New("--to must be after --from")
-	case f.incidents == "" && f.impact == "" && !f.checkReplay:
+	case f.incidents == "" && f.impact == "" && !f.checkReplay && len(f.compare) == 0:
+		// --compare counts the firings on each side even with nothing to
+		// judge them against: what a change to the rules does to how often
+		// they fire is worth knowing alone.
 		return nil, errors.New("say what went wrong: --incidents FILE, --impact PROMQL, or both")
 	}
 	return f, nil
@@ -960,7 +981,11 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
-	f.sayPicked(stderr)
+	if len(f.compare) > 0 {
+		f.sayPicked(stderr, "--rules")
+	} else {
+		f.sayPicked(stderr, "")
+	}
 	// On-call schedules, read once: their turns, each person's hours.
 	if f.onCall != nil {
 		for _, sc := range f.onCall.Schedules {
@@ -996,7 +1021,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			f.replaying().Apply(rs)
 			was = append(was, rs...)
 		}
-		f.sayPicked(stderr)
+		f.sayPicked(stderr, "--compare")
 	}
 	// Rules that share a name are told apart alike in every set, so a
 	// rule's name doesn't hang on its neighbours in one of them.
@@ -1012,10 +1037,15 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		}
 		same, before, after = source.Split(was, is)
 		if len(before)+len(after) == 0 {
-			if f.json {
-				err = verdict.JSON(stdout, &verdict.Comparison{From: f.opts.From, To: f.opts.To, Same: len(same),
-					Rules: []verdict.RuleChange{}, Incidents: []verdict.IncidentChange{}})
-			} else {
+			c := &verdict.Comparison{From: f.opts.From, To: f.opts.To, Same: len(same), ChangedOnly: f.changedOnly,
+				Rules: []verdict.RuleChange{}, Incidents: []verdict.IncidentChange{}}
+			c.Summarize(f.incidents != "" || f.impact != "")
+			switch {
+			case f.json:
+				err = verdict.JSON(stdout, c)
+			case f.markdown:
+				err = verdict.CompareMarkdown(stdout, c, f.loc)
+			default:
 				_, err = fmt.Fprintf(stdout, "Nothing that decides when the %d rules fire has changed: nothing to replay.\n", len(same))
 			}
 			if err != nil {
@@ -1078,6 +1108,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			verdict.Judge(slices.Concat(ran[0], ran[2]), slices.Concat(fired[0], fired[2]), incs, o),
 			changed, len(was)-len(before))
 		cmp.ChangedOnly = f.changedOnly
+		cmp.Summarize(f.incidents != "" || f.impact != "")
 	case len(versions) > 0:
 		known, fs = replay.Run(ctx, h, versions, f.opts.From, f.opts.To, f.step, f.parallel)
 	case f.alerts:
@@ -1153,6 +1184,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	switch {
 	case f.json && cmp != nil:
 		err = verdict.JSON(stdout, cmp)
+	case f.markdown:
+		f.hideWhere(cmp)
+		err = verdict.CompareMarkdown(stdout, cmp, f.loc)
 	case f.json:
 		err = verdict.JSON(stdout, rep)
 	case f.metrics:
@@ -1203,6 +1237,40 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// hideWhere takes out of the reasons rules couldn't be replayed, as
+// --markdown writes them for a pull request, where the history and the
+// rules are read from: the URLs given, their hosts, and a Google Cloud
+// project, which a failed query names. A comment on a pull request is read
+// by more people than the job's log.
+func (f *verdictFlags) hideWhere(c *verdict.Comparison) {
+	var hide []string
+	for _, w := range []struct{ flag, val string }{{"--prometheus", f.promURL}, {"--loki", f.loki}, {"--grafana", f.grafana},
+		{"--ruler", f.ruler}, {"--gcp-project", f.gcpProj}} {
+		if w.val == "" {
+			continue
+		}
+		hide = append(hide, w.val, "["+w.flag+"]")
+		// A host as short as "p" is in too many words to take out.
+		if u, err := url.Parse(w.val); err == nil && len(u.Hostname()) >= 4 {
+			hide = append(hide, u.Host, "["+w.flag+"]", u.Hostname(), "["+w.flag+"]")
+		}
+	}
+	if len(hide) == 0 {
+		return
+	}
+	r := strings.NewReplacer(hide...)
+	for _, rep := range []*verdict.Report{c.Before, c.After} {
+		if rep == nil {
+			continue
+		}
+		for i := range rep.Rules {
+			if rep.Rules[i].Unsupported != replay.Unfinished {
+				rep.Rules[i].Unsupported = r.Replace(rep.Rules[i].Unsupported)
+			}
+		}
+	}
 }
 
 // replaying is how the rules are replayed: --late and --scrape-interval,
@@ -1423,10 +1491,15 @@ var newRuler = func(ctx context.Context, f *verdictFlags, stderr io.Writer) (*so
 }
 
 // sayPicked says what reading the rule files passed over, if anything, and
-// forgets it.
-func (f *verdictFlags) sayPicked(stderr io.Writer) {
+// forgets it. side is the flag that named them, when there are two sets
+// of rules to tell apart: --rules or --compare.
+func (f *verdictFlags) sayPicked(stderr io.Writer, side string) {
 	if said := f.picked.String(); said != "" {
-		fmt.Fprintf(stderr, "lapilli verdict: the rule files read held %s: passed over\n", said)
+		files := "the rule files read"
+		if side != "" {
+			files = "the rule files " + side + " read"
+		}
+		fmt.Fprintf(stderr, "lapilli verdict: %s held %s: passed over\n", files, said)
 	}
 	f.picked = rules.Picked{}
 }
