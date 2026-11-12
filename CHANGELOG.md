@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.31.2] - 2026-11-13
+
+SQLite 3.54.1, held back since 0.20.1, and a week of firings written
+faster for it. No ledger schema change.
+
 ### Changed
 
 - **SQLite 3.54.1** (`modernc.org/sqlite` v1.62.0, from v1.60.1 and
