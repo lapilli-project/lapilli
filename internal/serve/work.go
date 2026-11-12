@@ -759,8 +759,12 @@ func (s *Server) history(ctx context.Context) error {
 		docs []rules.Doc
 	}
 	var reads []read
+	var picked rules.Picked
 	for _, h := range hs[first:] {
-		rs, docs, err := rules.Read(h.Path)
+		// Of a version, its rules alone: what else a chart rendered isn't
+		// kept in the ledger.
+		rs, docs, p, err := rules.ReadPicked(h.Path, rules.Picking{Select: s.cfg.RulesSelect, Trim: true})
+		picked.Add(p)
 		if err == nil && len(s.matching(rs)) == 0 {
 			err = errors.New("no alert rules to replay")
 		}
@@ -781,6 +785,9 @@ func (s *Server) history(ctx context.Context) error {
 		last = h.Path
 	}
 	s.log.Info("--rules-history: versions of the rules from before the ledger began", "dir", s.cfg.RulesHistory, "versions", added)
+	if said := picked.String(); said != "" {
+		s.log.Info("--rules-history: the versions held "+said+": passed over", "versions", len(hs[first:]))
+	}
 	// The rules read now should be the newest version's; if they aren't, they
 	// are taken as changed now, and the directory may be stale.
 	if rs, _, err := s.readRules(ctx); err == nil {
@@ -790,6 +797,19 @@ func (s *Server) history(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// sayPicked logs what reading the rule files passed over, when it isn't
+// what was said last: they are read every --watch.
+func (s *Server) sayPicked(what string, p rules.Picked) {
+	said := p.String()
+	if was, _ := s.picked.Load().(string); said == was {
+		return
+	}
+	s.picked.Store(said)
+	if said != "" {
+		s.log.Info(what + ": the rule files hold " + said + ": passed over")
+	}
 }
 
 // matching are the rules --rule-re keeps.
@@ -842,7 +862,9 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 	case s.ruler != nil:
 		rs, docs, err = s.ruler.Read(ctx)
 	case s.cfg.RulesPath != "":
-		rs, docs, err = rules.Read(s.cfg.RulesPath)
+		var picked rules.Picked
+		rs, docs, picked, err = rules.ReadPicked(s.cfg.RulesPath, rules.Picking{Select: s.cfg.RulesSelect})
+		s.sayPicked("--rules", picked)
 	}
 	if err != nil {
 		return nil, nil, err

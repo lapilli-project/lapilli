@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/rules"
 )
 
 // historyDir writes versions of the rules, each with its "for", into a
@@ -181,5 +182,99 @@ func TestRulesHistoryPassedOver(t *testing.T) {
 	s.cfg.RulesHistory = filepath.Join(dir, "gone")
 	if err := s.history(ctx); err != nil {
 		t.Errorf("a later start with no directory: %v", err)
+	}
+}
+
+// renderedVersion is a chart as helm template writes it, its rule as of
+// "for": the rule in a ConfigMap labelled for Grafana's sidecar, another
+// in one that isn't, and a Secret.
+func renderedVersion(forDur string) string {
+	indented := "    " + strings.ReplaceAll(strings.Replace(ruleFile, "for: 2m", "for: "+forDur, 1), "\n", "\n    ")
+	return `---
+# Source: monitoring/templates/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata: {name: shop}
+stringData: {password: hunter2}
+---
+# Source: monitoring/templates/alerts.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shop-alerts
+  labels: {grafana_alert: "1"}
+data:
+  shop.yaml: |
+` + indented + `
+---
+# Source: monitoring/templates/other.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: other-alerts}
+data:
+  other.yaml: |
+    groups: [{name: other, rules: [{alert: Other, expr: errors > 1}]}]
+`
+}
+
+// Versions rendered from a chart are read for their rules alone, those
+// --rules-select keeps: the ledger keeps neither the Secret nor the rules
+// it left out, and judges each day with that day's.
+func TestRulesHistoryRendered(t *testing.T) {
+	ctx := context.Background()
+	tuned := now.Add(-40 * time.Hour)
+	hist := t.TempDir()
+	for at, forDur := range map[time.Time]string{now.Add(-90 * time.Hour): "2m", tuned: "15m"} {
+		v := filepath.Join(hist, at.Format("20060102T150405Z"))
+		os.MkdirAll(v, 0o755)
+		if err := os.WriteFile(filepath.Join(v, "rules.yaml"), []byte(renderedVersion(forDur)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sel, err := rules.ParseSelector("grafana_alert=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, rulesDir := server(t, func(c *Config) { c.RulesHistory, c.RulesSelect = hist, sel })
+	os.WriteFile(filepath.Join(rulesDir, "shop.yaml"), []byte(renderedVersion("15m")), 0o644)
+	if err := s.history(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	vs, err := s.l.Versions(ctx, time.Unix(0, 0), now, true)
+	if err != nil || len(vs) != 2 || !vs[1].Since.Equal(tuned) {
+		t.Fatalf("versions %+v %v", vs, err)
+	}
+	for _, v := range vs {
+		for _, d := range v.Docs {
+			if strings.Contains(string(d.Data), "hunter2") || strings.Contains(string(d.Data), "Other") {
+				t.Errorf("version %d kept what was passed over:\n%s", v.ID, d.Data)
+			}
+		}
+		if rs, err := rules.FromDocs(v.Docs); err != nil || len(rs) != 1 || rs[0].Name != "Errors" {
+			t.Errorf("version %d reads as %+v %v", v.ID, rs, err)
+		}
+	}
+	s.jobs(ctx, true)
+	if fs := searchFirings(t, s); len(fs) != 10 {
+		t.Errorf("%d firings of the search alert, want the 10 before the change", len(fs))
+	}
+
+	// Without a selector, every rule, and still not the Secret.
+	s2, rulesDir2 := server(t, func(c *Config) { c.RulesHistory = hist })
+	os.WriteFile(filepath.Join(rulesDir2, "shop.yaml"), []byte(renderedVersion("15m")), 0o644)
+	if err := s2.history(ctx); err != nil {
+		t.Fatal(err)
+	}
+	vs, err = s2.l.Versions(ctx, time.Unix(0, 0), now, true)
+	if err != nil || len(vs) != 2 {
+		t.Fatalf("versions %+v %v", vs, err)
+	}
+	for _, v := range vs {
+		if rs, err := rules.FromDocs(v.Docs); err != nil || len(rs) != 2 || strings.Contains(string(v.Docs[0].Data), "hunter2") {
+			t.Errorf("version %d: %+v %v\n%s", v.ID, rs, err, v.Docs[0].Data)
+		}
 	}
 }

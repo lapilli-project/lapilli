@@ -50,6 +50,14 @@ Where the firings come from (pick one):
                       by when it took effect (2026-10-14T16:40:31Z or
                       20261014T164031Z): as each given as --rules DIR@TIME.
                       recipes/versions/git.sh writes one from git
+  --rules-select SEL  of the Kubernetes objects in the files --rules,
+                      --rules-history and --compare read, keep those whose
+                      labels match SEL, a label selector as kubectl -l takes
+                      it: grafana_alert=1, team in (shop,pay), !draft. A file
+                      may be a chart rendered whole, with helm template or
+                      kustomize build: its documents that hold no rules are
+                      passed over, and counted, with or without it. A rule
+                      file that isn't an object has no labels, and is kept
   --loaded-rules      replay the alert rules the API at --prometheus has
                       loaded (GET /api/v1/rules): Prometheus, Thanos, Mimir,
                       vmalert, Amazon Managed Service for Prometheus
@@ -265,6 +273,8 @@ lapilli only reads history and files. It sends the report nowhere but to
 type verdictFlags struct {
 	rules              []ruleFile
 	rulesHistory       string
+	rulesSelect        rules.Selector
+	picked             rules.Picked // what reading the rule files passed over
 	loadedRules        bool
 	grafana, grafanaTk string
 
@@ -444,6 +454,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.rules = append(f.rules, rf)
 		case "--rules-history":
 			f.rulesHistory = val
+		case "--rules-select":
+			if f.rulesSelect, err = rules.ParseSelector(val); err != nil {
+				return nil, fmt.Errorf("--rules-select %v", err)
+			}
 		case "--compare":
 			f.compare = append(f.compare, val)
 		case "--check-series":
@@ -662,6 +676,9 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 				f.rules = append(f.rules, ruleFile{path: h.Path, from: h.At})
 			}
 		}
+	}
+	if !f.rulesSelect.Empty() && len(f.rules) == 0 && f.rulesHistory == "" && len(f.compare) == 0 {
+		return nil, errors.New("--rules-select picks among the documents of rule files: give --rules or --rules-history")
 	}
 	sources := 0
 	for _, on := range []bool{len(f.rules) > 0, f.loadedRules, f.grafana != "", f.ruler != "", f.alerts, f.firings != ""} {
@@ -918,6 +935,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
+	f.sayPicked(stderr)
 	// On-call schedules, read once: their turns, each person's hours.
 	if f.onCall != nil {
 		for _, sc := range f.onCall.Schedules {
@@ -946,13 +964,14 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	var same, before, after, was []rules.Rule
 	if len(f.compare) > 0 {
 		for _, p := range f.compare {
-			rs, err := loadRules(p, f.ruleRE)
+			rs, err := loadRules(f, p)
 			if err != nil && !errors.Is(err, rules.ErrNoneInDir) {
 				return fail(err)
 			}
 			f.replaying().Apply(rs)
 			was = append(was, rs...)
 		}
+		f.sayPicked(stderr)
 	}
 	// Rules that share a name are told apart alike in every set, so a
 	// rule's name doesn't hang on its neighbours in one of them.
@@ -1378,6 +1397,15 @@ var newRuler = func(ctx context.Context, f *verdictFlags, stderr io.Writer) (*so
 	return r, nil
 }
 
+// sayPicked says what reading the rule files passed over, if anything, and
+// forgets it.
+func (f *verdictFlags) sayPicked(stderr io.Writer) {
+	if said := f.picked.String(); said != "" {
+		fmt.Fprintf(stderr, "lapilli verdict: the rule files read held %s: passed over\n", said)
+	}
+	f.picked = rules.Picked{}
+}
+
 // loadVersions reads the --rules files, one version of the rules for each
 // time they were given with, in order.
 func loadVersions(f *verdictFlags) ([]replay.Version, error) {
@@ -1392,7 +1420,7 @@ func loadVersions(f *verdictFlags) ([]replay.Version, error) {
 			versions = append(versions, replay.Version{From: rf.from})
 			i = len(versions) - 1
 		}
-		rs, err := loadRules(rf.path, f.ruleRE)
+		rs, err := loadRules(f, rf.path)
 		if err != nil && !(len(f.compare) > 0 && errors.Is(err, rules.ErrNoneInDir)) {
 			return nil, err
 		}
@@ -1421,16 +1449,21 @@ func loadVersions(f *verdictFlags) ([]replay.Version, error) {
 	return versions, nil
 }
 
-// loadRules reads the rules in a file or directory whose names match re, or
-// all of them when re is nil.
-func loadRules(path string, re *regexp.Regexp) ([]rules.Rule, error) {
-	rs, err := rules.Load(path)
+// loadRules reads the rules in a file or directory that --rules-select
+// keeps, whose names match --rule, or all of them; what it passed over is
+// added to f.picked.
+func loadRules(f *verdictFlags, path string) ([]rules.Rule, error) {
+	rs, _, picked, err := rules.ReadPicked(path, rules.Picking{Select: f.rulesSelect})
+	f.picked.Add(picked)
+	if errors.Is(err, rules.ErrNoneSelected) {
+		err = fmt.Errorf("--rules-select %w", err)
+	}
 	if err != nil {
 		return nil, err
 	}
 	kept := rs[:0]
 	for _, r := range rs {
-		if re == nil || re.MatchString(r.Name) {
+		if f.ruleRE == nil || f.ruleRE.MatchString(r.Name) {
 			kept = append(kept, r)
 		}
 	}

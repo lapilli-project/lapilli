@@ -37,6 +37,9 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
   --on-call FILE      as for lapilli verdict, each feed read again every so
                       often (every: in the file), its turns kept in the
                       ledger past what the feed holds
+  --rules-select SEL  as for lapilli verdict, for --rules and --rules-history:
+                      what it and the documents that hold no rules leave
+                      out of a file isn't kept in the ledger with it
   --rules-history DIR earlier versions of those rules, one directory each,
                       named by when it took effect (2026-10-14T16:40:31Z or
                       20261014T164031Z), so a first start's backfill replays
@@ -661,7 +664,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	if len(f.rules) == 1 {
 		cfg.RulesPath = f.rules[0].path
 	}
-	cfg.RulesHistory = f.rulesHistory
+	cfg.RulesHistory, cfg.RulesSelect = f.rulesHistory, f.rulesSelect
 	cfg.Loaded, cfg.Grafana, cfg.GrafanaToken, cfg.Alerts = f.loadedRules, f.grafana, f.grafanaTk, f.alerts
 	cfg.Loki, cfg.LokiToken, cfg.LokiTenant, cfg.LokiLoaded = f.loki, f.lokiTk, f.lokiTenant, f.lokiLoaded
 	if len(f.lokiRules) == 1 {
