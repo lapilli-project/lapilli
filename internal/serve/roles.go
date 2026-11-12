@@ -245,12 +245,14 @@ func CheckRoles(c Config) error {
 	return nil
 }
 
-// notLetIn is a person signed in whom no role lets in.
-type notLetIn struct{ user string }
+// notLetIn is a person signed in whom no role lets in. Who is said where
+// the refusal is written for them (notLetInText), and never logged.
+type notLetIn struct{}
 
-func (n notLetIn) Error() string {
-	return fmt.Sprintf("you are signed in as %s, whom lapilli doesn't let in: ask its admins to name you", n.user)
-}
+func (notLetIn) Error() string { return "lapilli doesn't let you in: ask its admins to name you" }
+
+// notLetInText is the refusal of a person no role lets in, in a language.
+const notLetInText = "you are signed in as %s, whom lapilli doesn't let in: ask its admins to name you"
 
 // need is a handler that changes the ledger, for those of a role or above:
 // refused with --read-only, its body limited.

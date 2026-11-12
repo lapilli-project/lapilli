@@ -286,7 +286,7 @@ func (s *Server) signedIn(h http.Handler) http.Handler {
 		}
 		if !s.letIn(r) {
 			w.Header().Set("Cache-Control", "no-store")
-			s.oops(w, r, notLetIn{s.user(r)})
+			s.oops(w, r, notLetIn{})
 			return
 		}
 		h.ServeHTTP(w, r)

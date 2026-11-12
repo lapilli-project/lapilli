@@ -45,11 +45,13 @@ type Claims struct {
 // ErrNoName is a token that names no one lapilli can take.
 var ErrNoName = errors.New("no name")
 
-// Plain reports whether a name shows as what it is: no space before or
-// after it, no space but the ASCII one (U+00A0, U+3000 and the other
-// separators look like it, or like nothing), and no character that doesn't
-// show (a format character, a control character). One that isn't could
-// read as another's, an admin's, in a comment or an approval.
+// Plain reports whether a name's spacing shows as what it is: no space
+// before or after it, no space but the ASCII one (U+00A0, U+3000 and the
+// other separators look like it), no control character, nothing that
+// wasn't UTF-8. One that isn't could read as another's, an admin's, in a
+// comment or an approval. Characters that don't show (a zero-width space,
+// a soft hyphen) are lapilli serve's to judge (ledger.Hidden), which tells
+// them from the joiners names in some scripts are written with.
 func Plain(name string) bool {
 	if name == "" || strings.TrimSpace(name) != name {
 		return false
@@ -57,7 +59,7 @@ func Plain(name string) bool {
 	for _, r := range name {
 		switch {
 		case r == ' ':
-		case unicode.Is(unicode.Zs, r), unicode.Is(unicode.Cf, r), unicode.IsControl(r), r == unicode.ReplacementChar:
+		case unicode.Is(unicode.Zs, r), unicode.IsControl(r), r == unicode.ReplacementChar:
 			return false
 		}
 	}

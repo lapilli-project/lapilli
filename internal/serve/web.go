@@ -776,10 +776,14 @@ func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
 	if code == http.StatusInternalServerError {
 		s.log.Error("serving", "path", r.URL.Path, "err", err)
 	}
+	text := func(lang string) string { return message(lang, err) }
+	if errors.As(err, new(notLetIn)) {
+		text = func(lang string) string { return tr(lang, notLetInText, s.user(r)) }
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		json.NewEncoder(w).Encode(map[string]string{"error": text("en")})
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -792,7 +796,7 @@ func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
 	p.View = struct {
 		Code int
 		Err  string
-	}{code, message(p.Lang, err)}
+	}{code, text(p.Lang)}
 	pagesIn[p.Lang].ExecuteTemplate(&b, "error", p)
 	w.Write(b.Bytes())
 }
@@ -814,10 +818,7 @@ func bad(format string, args ...any) error {
 func message(lang string, err error) string {
 	var b badRequest
 	var inv ledger.ErrInvalid
-	var out notLetIn
 	switch {
-	case errors.As(err, &out):
-		return tr(lang, "you are signed in as %s, whom lapilli doesn't let in: ask its admins to name you", out.user)
 	case errors.As(err, &b) && b.format != "":
 		return tr(lang, b.format, b.args...)
 	case errors.As(err, &inv):

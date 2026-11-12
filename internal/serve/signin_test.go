@@ -616,7 +616,7 @@ func TestSignInPages(t *testing.T) {
 		}
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Header.Set("Accept-Language", n.Code)
-		for _, err := range []error{errBadState, errSignInDown, errSignInBroken, errNoName, errSignInFails, errTooManyGrp, errNoOne, s.forbidden(editor), notLetIn{"x"},
+		for _, err := range []error{errBadState, errSignInDown, errSignInBroken, errNoName, errSignInFails, errTooManyGrp, errNoOne, s.forbidden(editor),
 			forbiddenSignIn{bad("the identity provider didn't sign you in (%s)", "access_denied")}} {
 			s.oops(httptest.NewRecorder(), r, err)
 			if msg := message(n.Code, err); n.Code != "en" && msg == err.Error() {
