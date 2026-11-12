@@ -81,7 +81,6 @@ func TestRulesHistoryRefused(t *testing.T) {
 		{[]string{"verdict", "--rules-history", hist, "--loaded-rules", "--prometheus", "http://x", "--incidents", inc}, "goes with --rules, not --loaded-rules"},
 		{[]string{"verdict", "--rules-history", hist, "--grafana", "http://g", "--prometheus", "http://x", "--incidents", inc}, "goes with --rules, not --loaded-rules"},
 		{[]string{"verdict", "--rules-history", hist, "--rules", rules, "--compare", rules, "--prometheus", "http://x", "--incidents", inc}, "leave out --rules-history"},
-		{[]string{"serve", "--rules-history", hist, "--prometheus", "http://x"}, "give --rules as well"},
 		{[]string{"serve", "--rules-history", hist, "--loaded-rules", "--prometheus", "http://x"}, "goes with --rules, not --loaded-rules"},
 		{[]string{"serve", "--rules-history", bad, "--rules", rules, "--prometheus", "http://x"}, "last-week"},
 	} {
@@ -90,10 +89,18 @@ func TestRulesHistoryRefused(t *testing.T) {
 			t.Errorf("%v: exit %d, want 2 saying %q:\n%s", c.args, code, c.says, errs.String())
 		}
 	}
-	// serve keeps the directory for itself, beside the one --rules.
+	// serve keeps the directory for itself, beside the one --rules; or,
+	// without it, follows the directory.
 	f, err := parseFlags([]string{"--rules", rules, "--rules-history", hist, "--prometheus", "http://x"}, func(string, string) (bool, error) { return false, nil })
 	if err != nil || f.rulesHistory != hist || len(f.rules) != 1 {
 		t.Errorf("serve: %+v %v", f, err)
+	}
+	f, err = parseFlags([]string{"--rules-history", hist, "--rules-select", "grafana_alert=1", "--prometheus", "http://x"}, func(string, string) (bool, error) { return false, nil })
+	if err != nil || f.rulesHistory != hist || len(f.rules) != 0 || f.rulesSelect.String() != "grafana_alert=1" {
+		t.Errorf("serve following: %+v %v", f, err)
+	}
+	if _, err := parseFlags([]string{"--rules-history", hist}, func(string, string) (bool, error) { return false, nil }); err == nil {
+		t.Error("serve following without a history to replay against")
 	}
 }
 

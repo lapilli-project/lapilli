@@ -193,6 +193,17 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 	if cursor.IsZero() {
 		cursor, settle = now.Add(-s.cfg.Backfill), 0
 	}
+	// A version of the rules recorded since the hours it was in effect were
+	// replayed: replayed again from there.
+	again, err := s.l.AgainFrom(ctx)
+	if err != nil {
+		s.fail("the ledger", err)
+		return
+	}
+	if !again.IsZero() && again.Before(cursor) {
+		s.log.Info("replaying again from when a version of the rules recorded since took effect", "from", again)
+		cursor = again
+	}
 	piece := 24 * time.Hour
 	for cursor.Before(now) && ctx.Err() == nil {
 		from := cursor.Add(-settle).Truncate(s.cfg.Step)
@@ -234,6 +245,12 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		}
 		s.status.Unlock()
 		s.log.Info("run", "kind", kind, "from", from, "to", to, "firings", len(found.Firings), "failed", len(found.Run.Failed), "took", s.now().Sub(began).Round(time.Millisecond))
+		if !again.IsZero() {
+			if err := s.l.AgainDone(ctx, again); err != nil {
+				s.fail("the ledger", err)
+			}
+			again = time.Time{}
+		}
 		cursor, settle = to, s.cfg.Settle
 		if !unfinished && piece < 24*time.Hour {
 			piece *= 2
@@ -604,6 +621,13 @@ func identity(r rules.Rule) string {
 func (s *Server) look(ctx context.Context, raw *string) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
+	// Following a history, the versions added to it are recorded from their
+	// own times first: the rules read now are the newest's.
+	if s.following() {
+		if err := s.follow(ctx); err != nil {
+			return err
+		}
+	}
 	rs, docs, err := s.readRules(ctx)
 	if err != nil {
 		return err
@@ -716,6 +740,8 @@ func (s *Server) history(ctx context.Context) error {
 	// reached starts as it would without.
 	if _, ok, err := s.l.Latest(ctx); err != nil {
 		return err
+	} else if ok && s.following() {
+		return nil // what was added since, the watcher records
 	} else if ok {
 		s.log.Info("--rules-history: the ledger has versions of the rules of its own, which it keeps; the directory is passed over",
 			"dir", s.cfg.RulesHistory)
@@ -763,7 +789,7 @@ func (s *Server) history(ctx context.Context) error {
 	for _, h := range hs[first:] {
 		// Of a version, its rules alone: what else a chart rendered isn't
 		// kept in the ledger.
-		rs, docs, p, err := rules.ReadPicked(h.Path, rules.Picking{Select: s.cfg.RulesSelect, Trim: true})
+		rs, docs, p, err := rules.ReadPicked(h.Path, s.pickHistory())
 		picked.Add(p)
 		if err == nil && len(s.matching(rs)) == 0 {
 			err = errors.New("no alert rules to replay")
@@ -783,6 +809,9 @@ func (s *Server) history(ctx context.Context) error {
 			added++
 		}
 		last = h.Path
+		if err := s.l.SetMeta(ctx, "followed", strconv.FormatInt(h.At.Unix(), 10)); err != nil {
+			return err
+		}
 	}
 	s.log.Info("--rules-history: versions of the rules from before the ledger began", "dir", s.cfg.RulesHistory, "versions", added)
 	if said := picked.String(); said != "" {
@@ -861,6 +890,8 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 		}
 	case s.ruler != nil:
 		rs, docs, err = s.ruler.Read(ctx)
+	case s.following():
+		rs, docs, err = s.newest()
 	case s.cfg.RulesPath != "":
 		var picked rules.Picked
 		rs, docs, picked, err = rules.ReadPicked(s.cfg.RulesPath, rules.Picking{Select: s.cfg.RulesSelect})

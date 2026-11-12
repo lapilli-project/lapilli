@@ -660,8 +660,6 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			return nil, errors.New("--rules-history is earlier versions of rule files: it goes with --rules, not --loaded-rules, --grafana, --ruler, --alerts or --firings")
 		case len(f.compare) > 0:
 			return nil, errors.New("--compare sets two sets of rules side by side over one period: leave out --rules-history")
-		case serve != nil && len(f.rules) == 0:
-			return nil, errors.New("--rules-history is the history of the rules --rules reads: give --rules as well")
 		case serve == nil:
 			// As each given as --rules DIR@TIME. The rules --rules gives
 			// with no time are the rules as they are now, as serve takes
@@ -680,13 +678,16 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 	if !f.rulesSelect.Empty() && len(f.rules) == 0 && f.rulesHistory == "" && len(f.compare) == 0 {
 		return nil, errors.New("--rules-select picks among the documents of rule files: give --rules or --rules-history")
 	}
+	// serve given --rules-history without --rules follows it: the history
+	// is the rules.
+	following := serve != nil && f.rulesHistory != "" && len(f.rules) == 0
 	sources := 0
-	for _, on := range []bool{len(f.rules) > 0, f.loadedRules, f.grafana != "", f.ruler != "", f.alerts, f.firings != ""} {
+	for _, on := range []bool{len(f.rules) > 0 || following, f.loadedRules, f.grafana != "", f.ruler != "", f.alerts, f.firings != ""} {
 		if on {
 			sources++
 		}
 	}
-	needsHistory := len(f.rules) > 0 || f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) > 0 || f.alerts || f.impact != "" ||
+	needsHistory := len(f.rules) > 0 || following || f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) > 0 || f.alerts || f.impact != "" ||
 		f.checkReplay && f.checkReplaySet
 	lokiToo := len(f.lokiRules) > 0 || f.lokiLoaded
 	rulesToo := sources > 0 || len(f.alarms) > 0 || lokiToo

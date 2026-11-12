@@ -45,7 +45,13 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       20261014T164031Z), so a first start's backfill replays
                       each day with that day's rules; a ledger with versions
                       of its own passes them over. recipes/versions/git.sh
-                      writes one from git
+                      writes one from git. Of each version, only its
+                      documents of rules are kept in the ledger.
+                      Without --rules, it is the rules, followed: its
+                      newest version is in effect, read again every
+                      --watch, and each version added to it later, as
+                      recipes/versions/follow.sh adds them, is recorded
+                      from its own time, the hours since replayed again
   --loki-rules PATH   one file or directory of Loki ruler rules, read again
                       every --watch, beside the rest
   --incidents FILE    read again each run; optional, as incidents can be
