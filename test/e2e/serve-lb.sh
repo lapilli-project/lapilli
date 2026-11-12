@@ -28,8 +28,11 @@ cpk=
 
 CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o "dist/image/lapilli-linux-$arch" ./cmd/lapilli
 docker buildx build --load --platform "linux/$arch" -t lapilli:e2e .
-go install sigs.k8s.io/kind@v0.27.0
+# cloud-provider-kind's Gateway reads the cluster's ServiceCIDRs, an API
+# Kubernetes serves from 1.33: a newer kind and node than run.sh's.
+go install sigs.k8s.io/kind@v0.33.0
 go install sigs.k8s.io/cloud-provider-kind@v0.12.0
+node=kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
 bin=$(go env GOPATH)/bin
 
 cleanup() {
@@ -52,7 +55,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'echo "stopped at line $LINENO: $BASH_COMMAND" >&2' ERR
 
-"$bin/kind" get clusters | grep -qx "$cluster" || "$bin/kind" create cluster --name "$cluster" --wait 2m
+"$bin/kind" get clusters | grep -qx "$cluster" || "$bin/kind" create cluster --name "$cluster" --image "$node" --wait 3m
 "$bin/kind" load docker-image lapilli:e2e --name "$cluster"
 kubectl config use-context "kind-$cluster"
 # A single node: load balancers may send to it.
