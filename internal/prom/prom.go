@@ -71,10 +71,21 @@ func Loki() Option {
 // IsLoki reports whether the client asks a Loki.
 func (c *Client) IsLoki() bool { return c.loki }
 
+// client is what a Client asks with, unless WithHTTPClient replaces it. It
+// follows no redirect: a query, a token or a signature goes only to the API
+// it was given. Go would send a bearer token on to the same host's other
+// ports and schemes, AWS's session token and a 307's body to any host. It
+// gives up on a request after five minutes, past the two Prometheus gives a
+// query.
+var client = &http.Client{
+	Timeout:       5 * time.Minute,
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
 // New returns a client for the API under base, such as
 // http://prometheus:9090.
 func New(base, userAgent string, opts ...Option) *Client {
-	c := &Client{base: strings.TrimRight(base, "/"), http: http.DefaultClient, agent: userAgent}
+	c := &Client{base: strings.TrimRight(base, "/"), http: client, agent: userAgent}
 	for _, o := range opts {
 		o(c)
 	}
