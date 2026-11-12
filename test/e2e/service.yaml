@@ -1,0 +1,284 @@
+# What service.sh runs Lapilli beside, laid out as a team would: a shop
+# whose errors the test turns on and off, in a namespace of its own;
+# Prometheus and Grafana in monitoring, where the Lapilli chart goes too;
+# Dex, for signing in. Grafana's alert rule watches the shop, sends its
+# notifications to Lapilli, and Grafana shows the dashboard the Lapilli
+# chart ships (its ConfigMap, lapilli-dashboard, mounted).
+apiVersion: v1
+kind: Namespace
+metadata: {name: shop}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: monitoring}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: dex}
+---
+# The shop: a tiny exporter of the share of its requests that fail, read
+# from /tmp/errors, which the test writes with kubectl exec. A new pod
+# starts with none.
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: shop, namespace: shop}
+data:
+  shop.py: |
+    import http.server, os
+    VERSION = os.environ.get("VERSION", "")
+    class Shop(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path != "/metrics":
+                self.send_error(404)
+                return
+            try:
+                with open("/tmp/errors") as f:
+                    ratio = float(f.read())
+            except (OSError, ValueError):
+                ratio = 0.0
+            body = ("# HELP shop_error_ratio The share of the shop's requests that failed.\n"
+                    "# TYPE shop_error_ratio gauge\n"
+                    f'shop_error_ratio{{service="shop"}} {ratio}\n'
+                    "# TYPE shop_build_info gauge\n"
+                    f'shop_build_info{{service="shop",version="{VERSION}"}} 1\n').encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; version=0.0.4")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        def log_message(self, *args):
+            pass
+    http.server.ThreadingHTTPServer(("", 8080), Shop).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: shop, namespace: shop}
+spec:
+  selector: {matchLabels: {app: shop}}
+  template:
+    metadata: {labels: {app: shop}}
+    spec:
+      terminationGracePeriodSeconds: 1
+      containers:
+        - name: shop
+          image: python:3.13-alpine@sha256:7984cf56ceaddebe4fefeb75d64000b9f45d8b77b11a09b24524da6cdc3af0c8
+          command: [python, -u, /app/shop.py]
+          env: [{name: VERSION, value: v1}]
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /metrics, port: 8080}, periodSeconds: 2}
+          volumeMounts: [{name: app, mountPath: /app}]
+      volumes: [{name: app, configMap: {name: shop}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: shop, namespace: shop}
+spec: {selector: {app: shop}, ports: [{port: 8080}]}
+---
+# Prometheus: the shop, and Lapilli's metrics port, every five seconds.
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: prometheus, namespace: monitoring}
+data:
+  prometheus.yml: |
+    global: {scrape_interval: 5s, evaluation_interval: 5s}
+    scrape_configs:
+      - job_name: shop
+        static_configs: [{targets: [shop.shop.svc.cluster.local:8080]}]
+      - job_name: lapilli
+        static_configs: [{targets: [lapilli.monitoring.svc.cluster.local:9091]}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: prometheus, namespace: monitoring}
+spec:
+  selector: {matchLabels: {app: prometheus}}
+  template:
+    metadata: {labels: {app: prometheus}}
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
+          args: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.path=/prometheus]
+          ports: [{containerPort: 9090}]
+          readinessProbe: {httpGet: {path: /-/ready, port: 9090}}
+          volumeMounts: [{name: config, mountPath: /etc/prometheus}]
+      volumes: [{name: config, configMap: {name: prometheus}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: prometheus, namespace: monitoring}
+spec: {selector: {app: prometheus}, ports: [{port: 9090}]}
+---
+# The shop team's alert rule, kept as code and provisioned to Grafana: more
+# than 2% of requests failing for 30 seconds. Lapilli reads it back from
+# Grafana's API, as Grafana holds it.
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: shop-alerts, namespace: monitoring}
+data:
+  shop.yaml: |
+    apiVersion: 1
+    groups:
+      - orgId: 1
+        name: shop
+        folder: Shop
+        interval: 10s
+        rules:
+          - uid: shop-errors
+            title: ShopErrors
+            condition: C
+            data:
+              - refId: A
+                relativeTimeRange: {from: 60, to: 0}
+                datasourceUid: prom
+                model: {refId: A, expr: shop_error_ratio, instant: true}
+              - refId: B
+                datasourceUid: __expr__
+                model: {refId: B, type: reduce, expression: A, reducer: last}
+              - refId: C
+                datasourceUid: __expr__
+                model: {refId: C, type: threshold, expression: B, conditions: [{evaluator: {type: gt, params: [0.02]}}]}
+            noDataState: OK
+            execErrState: Error
+            for: 30s
+            labels: {severity: critical}
+            annotations:
+              summary: More than 2% of the shop's requests fail
+              runbook_url: https://runbooks.example/shop/errors
+---
+# Grafana's own: Prometheus as its data source; Lapilli's notifications port
+# as its contact point, each notification signed with the secret in the
+# Secret grafana-webhook (Lapilli checks it with the same Secret); a policy
+# that sends at once, so the test needn't wait; and the dashboards in
+# /var/lib/grafana/dashboards.
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: grafana-provisioning, namespace: monitoring}
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - {name: Prometheus, uid: prom, type: prometheus, access: proxy, url: "http://prometheus:9090", isDefault: true, jsonData: {timeInterval: 5s}}
+  notifications.yaml: |
+    apiVersion: 1
+    contactPoints:
+      - orgId: 1
+        name: lapilli
+        receivers:
+          - uid: lapilli
+            type: webhook
+            settings:
+              url: http://lapilli.monitoring.svc.cluster.local:8083/v1/grafana
+              hmacConfig:
+                secret: $__file{/etc/grafana/webhook/secret}
+                header: X-Grafana-Alerting-Signature
+                timestampHeader: X-Grafana-Alerting-Timestamp
+    policies:
+      - orgId: 1
+        receiver: lapilli
+        group_by: [grafana_folder, alertname]
+        group_wait: 1s
+        group_interval: 10s
+        repeat_interval: 1h
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - {name: lapilli, type: file, options: {path: /var/lib/grafana/dashboards}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: grafana, namespace: monitoring}
+spec:
+  selector: {matchLabels: {app: grafana}}
+  template:
+    metadata: {labels: {app: grafana}}
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
+          env:
+            - {name: GF_SECURITY_ADMIN_PASSWORD, value: e2e-admin-pass}
+            - {name: GF_ANALYTICS_REPORTING_ENABLED, value: "false"}
+            - {name: GF_ANALYTICS_CHECK_FOR_UPDATES, value: "false"}
+          ports: [{containerPort: 3000}]
+          readinessProbe: {httpGet: {path: /api/health, port: 3000}}
+          volumeMounts:
+            - {name: provisioning, mountPath: /etc/grafana/provisioning}
+            - {name: dashboards, mountPath: /var/lib/grafana/dashboards}
+            - {name: webhook, mountPath: /etc/grafana/webhook}
+      volumes:
+        - name: provisioning
+          projected:
+            sources:
+              - configMap:
+                  name: grafana-provisioning
+                  items:
+                    - {key: datasources.yaml, path: datasources/prometheus.yaml}
+                    - {key: notifications.yaml, path: alerting/notifications.yaml}
+                    - {key: dashboards.yaml, path: dashboards/lapilli.yaml}
+              - configMap:
+                  name: shop-alerts
+                  items: [{key: shop.yaml, path: alerting/shop.yaml}]
+        # The Lapilli chart's dashboard (dashboard.enabled), as it ships it.
+        - name: dashboards
+          configMap: {name: lapilli-dashboard}
+        - name: webhook
+          secret: {secretName: grafana-webhook}
+---
+# Grafana at an address of its own, as people open it, and the test asks
+# its API.
+apiVersion: v1
+kind: Service
+metadata: {name: grafana, namespace: monitoring}
+spec:
+  type: LoadBalancer
+  selector: {app: grafana}
+  ports: [{port: 80, targetPort: 3000}]
+---
+# Dex, at a LoadBalancer of its own: Lapilli reaches it by its cluster
+# name, the browser by the load balancer's address. The hash is bcrypt's
+# of "password", as in Dex's own examples.
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: dex, namespace: dex}
+data:
+  config.yaml: |
+    issuer: http://dex.dex.svc.cluster.local:5556/dex
+    storage: {type: memory}
+    web: {http: 0.0.0.0:5556}
+    oauth2: {skipApprovalScreen: true, passwordConnector: local}
+    staticClients:
+      - id: lapilli
+        name: lapilli
+        secret: lapilli-e2e-client-secret
+        redirectURIs: [http://lapilli.localhost/auth/callback]
+    enablePasswordDB: true
+    staticPasswords:
+      - {email: boss@example.com, hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W", username: boss, userID: "1", groups: [ops]}
+      - {email: ed@example.com, hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W", username: ed, userID: "2"}
+      - {email: viewer@example.com, hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W", username: viewer, userID: "3"}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: dex, namespace: dex}
+spec:
+  selector: {matchLabels: {app: dex}}
+  template:
+    metadata: {labels: {app: dex}}
+    spec:
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.46.1@sha256:65b72ca0f4b0bf6d4ada84ec21da8851782563404ac7b8f926923d27ceced9ab
+          args: [dex, serve, /etc/dex/config.yaml]
+          ports: [{containerPort: 5556}]
+          readinessProbe: {httpGet: {path: /dex/healthz, port: 5556}}
+          volumeMounts: [{name: config, mountPath: /etc/dex}]
+      volumes: [{name: config, configMap: {name: dex}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: dex, namespace: dex}
+spec:
+  type: LoadBalancer
+  selector: {app: dex}
+  ports: [{port: 5556, targetPort: 5556}]

@@ -19,6 +19,8 @@ test/e2e/loki.sh         # rules in LogQL replayed against a real Loki and Grafa
 test/e2e/signin.sh       # lapilli's own sign-in against a real Dex; needs Docker, curl
 test/e2e/serve-lb.sh     # the chart at a URL on kind: a LoadBalancer, Gateway API, an Ingress, Dex; Linux
 test/e2e/rendered.sh     # rules a chart renders, from a real Gitea, replayed and followed; needs Docker, jq, helm, yq
+test/e2e/dashboard.sh    # the chart's Grafana dashboard on a real Grafana and Prometheus; needs Docker, jq, python3
+test/e2e/service.sh      # the whole service on kind: Grafana's alerts, Lapilli at a LoadBalancer, Dex, a browser; Linux
 test/a11y/axe.sh         # axe-core (WCAG 2.2 AA) over every page, in a headless Chromium; needs Docker
 ```
 
@@ -47,6 +49,8 @@ tests, so a change that slows a run or a page fails.
 - **CI runs:**
   - the tests on Linux, macOS and the latest Go
   - the chart end to end on kind, and served at a URL there
+  - the whole service on kind: a scenario of user impact, a re-fire and a
+    deploy, Grafana's alerts and notifications, the dashboard, a browser
   - the sign-in against a real identity provider
   - govulncheck
   - CodeQL
