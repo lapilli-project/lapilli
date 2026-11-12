@@ -9,6 +9,10 @@ metadata:
   name: {{ include "lapilli.fullname" . }}
   labels:
     {{- include "lapilli.labels" . | nindent 4 }}
+  {{- with $s.ingress.serviceAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   # Inside the cluster: every port, as jobs, alert managers and Prometheus
   # reach them. The UI outside it is FULLNAME-ui's (serve.service.type).

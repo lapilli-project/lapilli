@@ -156,7 +156,7 @@ func TestChartIngressAndRoute(t *testing.T) {
 	m, _ := render(t, append(signedIn, "--set", "serve.ingress.enabled=true", "--set", "serve.ingress.className=nginx",
 		"--set", "serve.ingress.hosts={*.example.com,lapilli.example.com,ui.example.org}", "--set", "serve.ingress.tls[0].secretName=lapilli-tls",
 		"--set", "serve.ingress.tls[0].hosts={lapilli.example.com}", "--set", "serve.ingress.annotations.example\\.com/x=y",
-		"--set", "serve.allowedHosts={proxy.example.net}")...)
+		"--set", "serve.allowedHosts={proxy.example.net}", "--set", "serve.ingress.serviceAnnotations.cloud\\.google\\.com/backend-config=lapilli-backend")...)
 	ing := m["Ingress/ops-lapilli"]
 	switch {
 	case ing == nil:
@@ -169,6 +169,9 @@ func TestChartIngressAndRoute(t *testing.T) {
 		dig(ing, "spec", "rules", 1, "http", "paths", 0, "backend", "service", "port", "name") != "http",
 		dig(ing, "spec", "rules", 1, "http", "paths", 0, "pathType") != "Prefix":
 		t.Errorf("its rules: %v", dig(ing, "spec", "rules"))
+	}
+	if a := dig(m["Service/ops-lapilli"], "metadata", "annotations", "cloud.google.com/backend-config"); a != "lapilli-backend" {
+		t.Errorf("the Ingress's Service's annotations: %v", a)
 	}
 	args := m.args(t)
 	if !slices.Contains(args, "--external-url=https://lapilli.example.com") || !slices.Contains(args, "--allowed-hosts=proxy.example.net,lapilli.example.com,ui.example.org") {

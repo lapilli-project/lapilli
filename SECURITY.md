@@ -54,15 +54,18 @@ redirects. Of particular interest besides the above:
   link run script, or to make a form go back to another site;
 - a way to change what a role doesn't allow, or to get a role without the
   proxy's headers (including as whoever it didn't name);
-- with `--oidc-issuer` or `--proxy-jwt`: a way to be taken for someone the
-  provider or the sign-in in front didn't sign in (a token for another
+- with `--oidc-issuer` or `--proxy-jwt`: a way in for someone no role
+  names (`--viewers`, `--editors`, `--admins`, `--approvers`, a role given
+  in the UI), or a way to be taken for someone the provider or the sign-in
+  in front didn't sign in (a token for another
   client or audience, expired, unsigned, signed with a secret, a key made
   up, a nonce or state not the sign-in's, a callback replayed, a cookie
   changed or kept after signing out), to make lapilli fetch keys from
   anywhere but the URLs it was given, or often, to send a browser to
   another site after signing in, to sign someone in as another (login
   CSRF) or out from another site, or to approve a change with a bearer
-  token;
+  token; a way to make a session without the session key (which is never
+  kept in the ledger);
 - a way to make a notice show a webhook's URL, notify everyone in Slack
   (`<!channel>`), or go somewhere other than the URL in its file.
 

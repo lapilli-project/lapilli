@@ -421,6 +421,9 @@ serve:
     path: /           # lapilli is served at the root of its host
     pathType: Prefix
     tls: []           # - {secretName: lapilli-tls, hosts: [lapilli.example.com]}
+    # Annotations for FULLNAME, the Service the Ingress and the HTTPRoute
+    # send to, such as GKE's cloud.google.com/backend-config.
+    serviceAnnotations: {}
     # People reach it over https, for externalURL: TLS ended here (tls) or
     # at the load balancer in front (an ALB's certificate, a managed
     # certificate). false only for a host on this machine (NAME.localhost).

@@ -1070,13 +1070,23 @@ in, one way of three ([docs/design/signin.md](docs/design/signin.md)):
   changes are recorded under it; the proxy must then be the only way in.
 
 With the first two, every page and API call but the health checks needs
-someone signed in, and `--user-claim` (`email`) and `--groups-claim`
-(`groups`) name the person and their groups. `--read-only` takes no
-changes. With `--editors` and `--admins`, people or groups
-(`--groups-header`, `--groups-claim`), only editors may write and only
-admins may change the settings and the teams; the rest may only look.
-`*` is everyone signed in. Write `user:NAME` or `group:NAME` where someone
-could pick a name that is a group's.
+someone signed in, and only those a role names come in: an identity
+provider signs in whoever it knows, which for a public one (Google's for
+any account, GitLab.com, GitHub through Dex, a multi-tenant Entra ID app)
+is anyone. `--viewers` names who may look; `--editors` and `--admins` who
+may change. `--user-claim` (`email`) and `--groups-claim` (`groups`) name
+the person and their groups, and `--oidc-hosted-domain` checks Google's
+Workspace domain. `--read-only` takes no changes. With `--editors` and
+`--admins`, people or groups (`--groups-header`, `--groups-claim`), only
+editors may write and only admins may change the settings and the teams;
+the rest may only look. Lists take `*@DOMAIN`, everyone whose name ends in
+`@DOMAIN`, and `*`, everyone signed in, which with a sign-in of lapilli's
+own gives a role only once `--viewers` says who comes in. Write
+`user:NAME` or `group:NAME` where someone could pick a name that is a
+group's. Sessions are signed with `--session-key-file`'s key, or one made
+for the process; with an http `--external-url` (this machine only), give
+it a name of its own under `.localhost`, as cookies aren't kept to a
+port.
 
 With no roles, who may change what depends on where it listens. On
 loopback alone (`127.0.0.1`, `localhost`, the default), everyone who

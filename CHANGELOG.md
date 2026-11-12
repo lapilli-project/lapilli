@@ -4,7 +4,8 @@
 
 For 0.29.0: lapilli serve served the way Grafana and Argo CD are, at a URL
 people open, behind a load balancer, an ingress or a Gateway, signing them
-in itself ([docs/design/signin.md](docs/design/signin.md)). No ledger
+in itself ([docs/design/signin.md](docs/design/signin.md)). Reviewed from
+an attacker's point of view and for correctness before release. No ledger
 schema change.
 
 ### Added
@@ -13,32 +14,48 @@ schema change.
   `--oidc-client-id` and `--oidc-client-secret-file` sign people in with any
   provider (Google, Microsoft Entra ID, Okta, Keycloak, Dex, AWS Cognito, an
   OCI IAM identity domain, GitLab...): the authorization code flow with
-  PKCE, state and nonce, the ID token's signature, issuer, audience, `azp`,
-  expiry and nonce checked, and `email_verified` asked of an `email` name. A
+  PKCE, state and nonce; the ID token's signature, issuer, audience, `azp`
+  (`--oidc-trusted-clients`), expiry and nonce checked, Google's `hd` with
+  `--oidc-hosted-domain`, and `email_verified` asked of an `email` name. A
   browser keeps a session in a signed cookie (`__Host-`, HttpOnly, Secure,
-  SameSite=Lax; `--session-max-age`, 12h; `--session-key-file`, or a key
-  kept in the ledger); `POST /auth/logout` ends every session of that person
-  made until then, in every browser, for good, kept in the ledger. An API client or an agent sends an ID token
-  the provider gave the client as a bearer token; it never approves a
-  change. `--user-claim` (`email`) and `--groups-claim` (`groups`) give the
-  roles `--editors`, `--admins` and `--approvers` name. Every page and API
-  call but the health checks then needs someone signed in.
+  SameSite=Lax; `--session-max-age`, 12h; signed with
+  `--session-key-file`, or a key made for the process: never kept in the
+  ledger). `POST /auth/logout` ends every session of that person made
+  until then, in every browser, and every token issued before, kept in the
+  ledger. An API client or an agent sends an ID token the provider gave the
+  client as a bearer token (`--oidc-bearer=false` takes none); it never
+  approves a change, and a refused one gets `error="invalid_token"` with
+  the reason. `/.well-known/oauth-protected-resource` (RFC 9728) names the
+  provider. `--user-claim` (`email`) and `--groups-claim` (`groups`) give the
+  roles.
+- **Only those a role names come in.** An identity provider signs in
+  whoever it knows, which for a public one (Google's for any account,
+  GitLab.com, GitHub through Dex, a multi-tenant Entra ID app) is anyone.
+  With a sign-in of lapilli's own, every page and API call but the health
+  checks needs someone signed in whom `--viewers`, `--editors`, `--admins`,
+  `--approvers` or a role given in the UI names; everyone else gets 403.
+  Lists take people, `group:NAME` and `*@DOMAIN`; `'*'` gives a role only
+  once `--viewers` says who comes in. `--viewers` works with
+  `--user-header` too. There is no anonymous viewing with a sign-in.
 - **A sign-in in front, by the header it signs.** `--proxy-jwt google-iap`
   (Google Cloud's Identity-Aware Proxy), `aws-alb` (an Application Load
   Balancer's sign-in) or `jwks` (oauth2-proxy, an Azure App Service's
   sign-in, an access proxy) takes who each request comes from from the JWT
-  that sign-in puts in a header, checked against its keys on every request,
-  in place of a plain header only a NetworkPolicy keeps others from
-  setting. Keys are fetched only from the URLs given, a key not held at most
-  once a minute (a load balancer's, ten seconds).
-- **The chart serves the UI at a URL.** `serve.service.type` (ClusterIP,
-  LoadBalancer, NodePort) with `annotations`, `loadBalancerClass`,
-  `loadBalancerSourceRanges`, `externalTrafficPolicy` and `nodePort`; a
-  LoadBalancer or NodePort serves the UI's port alone, and the metrics and
-  token ports go on `FULLNAME-internal`. `serve.ingress` (networking.k8s.io/v1)
-  and `serve.httpRoute` (Gateway API), whose hosts become `--external-url`
-  and `--allowed-hosts` when they aren't given. `serve.signIn` gives the
-  sign-in's flags and mounts its Secrets. The chart's README has each
+  that sign-in puts in a header, checked against its keys on every
+  request, in place of a plain header only a NetworkPolicy keeps others
+  from setting. Keys are fetched only from the URLs given, or the hosts a
+  load balancer's ARN names, a key not held at most once a minute, a load
+  balancer's from a budget of its own, and a key id it doesn't have
+  remembered.
+- **The chart serves the UI at a URL.** `serve.service.type` puts the UI
+  alone on `FULLNAME-ui`, a LoadBalancer or a NodePort (`port`,
+  `annotations`, `loadBalancerClass`, `loadBalancerSourceRanges`,
+  `externalTrafficPolicy`, `nodePort`); `FULLNAME` stays a ClusterIP with
+  every port. `serve.ingress` (networking.k8s.io/v1) and `serve.httpRoute`
+  (Gateway API), whose hosts become `--external-url` (https unless their
+  `https` says not) and `--allowed-hosts`. `serve.signIn` gives the
+  sign-in's flags and mounts its Secrets, and makes the session key's
+  Secret and keeps it. `serve.roles.viewers`. The chart's README has each
   cloud's load balancer, GKE, EKS, AKS and OKE alike.
 - `test/e2e/signin.sh`, against a real Dex in Docker, and
   `test/e2e/serve-lb.sh`, the chart on kind behind a LoadBalancer, a
@@ -47,19 +64,30 @@ schema change.
 
 ### Changed
 
-- With `--oidc-issuer` or `--proxy-jwt` and no roles, everyone signed in may
-  only look, on loopback too: a sign-in means people come from elsewhere,
-  often through a proxy on the same machine. `--everyone-admin` is refused
-  beside a sign-in; `--admins '*'` is everyone signed in. `--user-header`
-  keeps the 0.28.1 rule.
-- The chart's readiness probe is `/readyz`, ready once the first run is
-  done, so a load balancer sends people to a UI with something in it;
-  `serve.readinessPath: /healthz` is ready at once, as before. The liveness
-  probe stays `/healthz`.
+- **`/readyz` is ready once the ledger has a run recorded**: at once after
+  a restart, after the backfill's first day on a first install. Before, it
+  waited for the process's first round of jobs, up to `--timeout` (the
+  chart's 50 minutes) with a slow Prometheus. The chart's readiness probe
+  is now `/readyz` (it was `/healthz`), so `helm install --wait`, `helm
+  upgrade --wait` and Argo CD's health wait for that on a first install;
+  `serve.readinessPath: /healthz` is ready at once, as before. The
+  liveness probe stays `/healthz`.
+- With `--oidc-issuer` or `--proxy-jwt`, loopback makes no one an admin,
+  and `--everyone-admin` is refused. `--user-header` keeps the 0.28.1
+  rule.
+- A name from a header or a claim with spaces around it, or spacing other
+  than the ASCII space (U+00A0, U+3000), is no one's, as one with a
+  character that doesn't show already was.
 - The chart refuses to serve the UI outside the cluster (a LoadBalancer or
   NodePort, an Ingress, an HTTPRoute) with no sign-in, unless
-  `serve.exposeWithoutSignIn`, and `serve.roles` and `serve.changes` take
-  `serve.signIn` as they take `serve.userHeader`.
+  `serve.exposeWithoutSignIn`; `serve.userHeader` on a LoadBalancer or a
+  NodePort, unless `loadBalancerSourceRanges` names the proxy's addresses
+  and `serve.service.sourceRangesAreTheProxy` says so; and, with
+  `serve.signIn.oidc`, an http URL but to this machine. `serve.roles` and
+  `serve.changes` take `serve.signIn` as they take `serve.userHeader`.
+  `--external-url` and `serve.ingress.path` take no path but `/`.
+- Upgrading the chart with `--reuse-values` from 0.28.1 works: the values
+  added since are filled in where missing.
 - New dependencies: `github.com/coreos/go-oidc/v3` v3.21.0 and
   `github.com/go-jose/go-jose/v4` v4.1.6, both Apache-2.0.
 

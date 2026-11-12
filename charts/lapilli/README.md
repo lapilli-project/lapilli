@@ -122,6 +122,7 @@ or the `series` given; a rule whose replay differs over a week (`differs`,
 
 ## Who people are
 
+
 By default no one signs in, and the Service is a ClusterIP: reach the UI
 with `kubectl port-forward`. To serve it at a URL people open, sign them
 in, one way of three (`docs/design/signin.md` in the repository):
@@ -133,8 +134,11 @@ in, one way of three (`docs/design/signin.md` in the repository):
   Secret). A browser is sent to the provider and comes back with a session
   in a signed cookie; `POST /auth/logout` ends it. An API client or an
   agent (MCP) sends an ID token the provider gave this client as a bearer
-  token. The pod must reach the provider: with
-  `serve.networkPolicy.egress`, name it in `to`.
+  token (`bearer: false` takes none). `hostedDomains` checks Google's
+  Workspace domain; `trustedClients` are the provider's other clients whose
+  tokens are taken. The pod must reach the provider: with
+  `serve.networkPolicy.egress`, name it in `to`. Lapilli asks it at start,
+  and a wrong `issuer` is an ERROR in its log.
 - `serve.signIn.proxyJWT`: the JWT a sign-in in front signs, checked
   against its keys: `google-iap` (Google Cloud's Identity-Aware Proxy;
   `audience` is the backend service's,
@@ -143,19 +147,40 @@ in, one way of three (`docs/design/signin.md` in the repository):
   other: oauth2-proxy with `--pass-authorization-header`, an Azure App
   Service's sign-in, an access proxy; `header`, `jwks`, `issuer`,
   `audience`). A request without it, or with one that doesn't verify, gets
-  401: reaching the pod around the proxy gets nowhere.
+  401: reaching the pod around the proxy gets nowhere. A program let
+  through IAP or an ALB comes with the same header as a person's browser:
+  keep programs out of the roles that approve.
 - `serve.userHeader`: the plain header a proxy that signs people in puts
   the person in, such as `X-Forwarded-Email`. Anyone who reaches the pod
   can set it, so it is refused without `serve.networkPolicy` (below), unless
   `serve.networkPolicy.othersKeptOut` says something else keeps the rest
-  out.
+  out; and with a LoadBalancer or a NodePort, which no proxy sits in front
+  of, unless `serve.service.loadBalancerSourceRanges` names the proxy's
+  addresses alone and `serve.service.sourceRangesAreTheProxy` says so.
+
+With `serve.signIn`, only those a role names come in, and everyone else
+gets 403: an identity provider signs in whoever it knows, which for a
+public one (Google's for any account, a client whose consent screen is
+External; GitLab.com; GitHub through Dex without an organization; a
+multi-tenant Microsoft Entra ID app) is anyone. Name who may look in
+`serve.roles.viewers` (people, `group:NAME`, `*@DOMAIN`), and who may
+change in `editors` and `admins`; a sign-in with no role list is refused.
+`'*'` in `editors` or `admins` is everyone `viewers` lets in, and refused
+until `viewers` names who. There is no anonymous viewing with a sign-in.
 
 `serve.signIn.userClaim` (`email`) and `groupsClaim` (`groups`) are the
 claims that name the person and list their groups; with `oidc`, `email`
-needs `email_verified` beside it, so take `preferred_username` or `sub` from
-a provider that doesn't send it (Microsoft Entra ID). Sessions last
-`sessionMaxAge` (12h), signed with the key in `sessionKeySecret`, or one
-made once and kept in the ledger.
+needs `email_verified` beside it, so take `preferred_username` or `oid` from
+a provider that doesn't send it (Microsoft Entra ID), and with any sign-in
+`email_verified: false` is refused. The design note has a table of what
+each provider sends (GitLab's `groups_direct`, Keycloak's group paths,
+Entra ID's group overage). Sessions last `sessionMaxAge` (12h), signed with
+a key whoever holds can sign in as anyone: by default a Secret the chart
+makes, `FULLNAME-session-key`, kept across upgrades and when the release
+is uninstalled (delete it to sign everyone out), or one of yours,
+`sessionKeySecret.name`. Give one of yours when a GitOps tool renders the
+chart without the cluster (Argo CD, Flux): it would make a new key each
+time.
 
 - `serve.roles` limits who may change what, by the name the sign-in gives
   and the groups it lists (`groupsHeader` with `userHeader`). `editors`
@@ -190,22 +215,35 @@ made once and kept in the ledger.
 
 ## Serving it at a URL
 
-- `serve.service.type`: `ClusterIP` (the default), `LoadBalancer` or
-  `NodePort`, with `annotations`, `loadBalancerClass`,
-  `loadBalancerSourceRanges`, `externalTrafficPolicy` and `nodePort`. A
-  LoadBalancer or a NodePort serves the UI's port alone; the metrics port
-  and the ports that take a token go on a ClusterIP of their own,
-  `FULLNAME-internal`, which the chart's own jobs then use.
-- `serve.ingress`: an Ingress (`className`, `annotations`, `hosts`, `tls`).
-- `serve.httpRoute`: a Gateway API HTTPRoute (`parentRefs`, `hostnames`;
-  `https: false` when the Gateway's listener is plain http).
+- `serve.service.type`: `LoadBalancer` or `NodePort` puts the UI alone on a
+  Service of its own, `FULLNAME-ui`, on `serve.service.port` (80), with
+  `annotations`, `loadBalancerClass`, `loadBalancerSourceRanges`,
+  `externalTrafficPolicy` and `nodePort`. `FULLNAME` stays a ClusterIP with
+  every port, as jobs, alert managers, the recipes and Prometheus reach it.
+- `serve.ingress`: an Ingress (`className`, `annotations`, `hosts`, `tls`,
+  `https`).
+- `serve.httpRoute`: a Gateway API HTTPRoute (`parentRefs`, `hostnames`,
+  `https`).
 
-`serve.externalURL` is worked out from the Ingress's first host (https when
-`tls` names it) or the HTTPRoute's first hostname when not given, and their
-hosts are added to `serve.allowedHosts`, so the host check and the sign-in's
-redirect hold. Serving the UI outside the cluster with no sign-in is refused,
-since anyone who reaches it reads the ledger, unless
+`serve.externalURL` is worked out from the Ingress's first host or the
+HTTPRoute's first hostname when not given, https unless their `https` is
+false (TLS is often ended in front of an Ingress, which then has no `tls`),
+and their hosts are added to `serve.allowedHosts`, so the host check and
+the sign-in's redirect hold. Lapilli is served at the root of its host: a
+path is refused. Serving the UI outside the cluster with no sign-in is
+refused, since anyone who reaches it reads the ledger, unless
 `serve.exposeWithoutSignIn` says it is meant.
+
+`/readyz`, the readiness probe, is ready once the ledger has a run
+recorded: at once after a restart; on a first install after the
+backfill's first day, which `helm install --wait` and Argo CD's health wait
+for (`serve.readinessPath: /healthz` doesn't).
+
+`serve.signIn.oidc` needs https, but on this machine (a name under
+`.localhost`): end TLS at an Ingress or a Gateway, or at a load balancer
+that ends it (an AWS Network Load Balancer's TLS listener, an OCI load
+balancer's). GKE's and AKS's load balancers for a Service are TCP, and
+don't.
 
 A load balancer's health checks reach `/healthz` on the UI's port without a
 sign-in. With `serve.networkPolicy`, `from` must let in what the load
@@ -219,7 +257,8 @@ Local`). Each cloud, alike:
   GKE's Ingress (`className: gce` or `gce-internal`) and Gateway check
   health on the serving port: point them at `/healthz` (a BackendConfig's
   `healthCheck.requestPath`, named by the Service's
-  `cloud.google.com/backend-config` annotation, or a HealthCheckPolicy).
+  `cloud.google.com/backend-config` annotation, in
+  `serve.ingress.serviceAnnotations`, or a HealthCheckPolicy).
   Health checks come from `35.191.0.0/16` and `130.211.0.0/22`.
   Identity-Aware Proxy turned on in the BackendConfig or a GCPBackendPolicy
   goes with `serve.signIn.proxyJWT.kind: google-iap`; the audience is the

@@ -4,7 +4,7 @@ values, not the new chart's): every template reads them through this. */}}
 {{- define "lapilli.defaults" -}}
 {{- $s := .Values.serve -}}
 {{- include "lapilli.fill" (dict "in" $s "key" "service" "with" (dict "type" "ClusterIP" "port" 80 "annotations" (dict) "loadBalancerClass" "" "loadBalancerSourceRanges" (list) "externalTrafficPolicy" "" "nodePort" nil "sourceRangesAreTheProxy" false)) -}}
-{{- include "lapilli.fill" (dict "in" $s "key" "ingress" "with" (dict "enabled" false "className" "" "annotations" (dict) "hosts" (list) "path" "/" "pathType" "Prefix" "tls" (list) "https" true)) -}}
+{{- include "lapilli.fill" (dict "in" $s "key" "ingress" "with" (dict "enabled" false "className" "" "annotations" (dict) "hosts" (list) "path" "/" "pathType" "Prefix" "tls" (list) "https" true "serviceAnnotations" (dict))) -}}
 {{- include "lapilli.fill" (dict "in" $s "key" "httpRoute" "with" (dict "enabled" false "annotations" (dict) "parentRefs" (list) "hostnames" (list) "https" true)) -}}
 {{- include "lapilli.fill" (dict "in" $s "key" "signIn" "with" (dict "userClaim" "email" "groupsClaim" "groups" "sessionMaxAge" "")) -}}
 {{- include "lapilli.fill" (dict "in" $s.signIn "key" "oidc" "with" (dict "issuer" "" "clientId" "" "scopes" (list) "hostedDomains" (list) "trustedClients" (list) "bearer" true)) -}}
