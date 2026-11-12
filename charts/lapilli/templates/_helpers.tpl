@@ -53,6 +53,8 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if $r.loaded }}{{ $from = add1 $from }}{{ end }}
 {{- if $r.grafana.url }}{{ $from = add1 $from }}{{ end }}
 {{- if $r.ruler.url }}{{ $from = add1 $from }}{{ end }}
+{{- /* Followed, the rules history is the rules. */}}
+{{- if include "lapilli.historyFollows" . }}{{ $from = add1 $from }}{{ end }}
 {{- /* A Loki ruler's rules, given through extraArgs (--loki URL
      --loki-loaded-rules), go beside the rest, or alone, as rules.alarms do. */}}
 {{- $loki := false }}
@@ -60,7 +62,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if or (hasPrefix "--loki-loaded-rules" (toString .)) (hasPrefix "--loki-rules" (toString .)) }}{{ $loki = true }}{{ end }}
 {{- end }}
 {{- if or (gt (int $from) 1) (and (eq (int $from) 0) (not $copied) (not $r.alarms) (not $loki)) }}
-{{- fail "rules: give one of rules.configMaps, rules.loaded, rules.grafana.url and rules.ruler.url, or rules.alarms, or a Loki's rules through extraArgs" }}
+{{- fail "rules: give one of rules.configMaps, rules.loaded, rules.grafana.url, rules.ruler.url and serve.rulesHistory (with no rules.configMaps, the rules are the repository's, followed), or rules.alarms, or a Loki's rules through extraArgs" }}
 {{- end }}
 {{- $sources := dict }}
 {{- range $r.alarms }}
@@ -94,9 +96,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (eq .Values.mode "serve") (gt (len $r.configMaps) 1) }}
 {{- fail "rules.configMaps: serve reads one; put the rules in one ConfigMap" }}
 {{- end }}
-{{- if and $s.rulesHistory.repository (or (ne .Values.mode "serve") (not $r.configMaps)) }}
-{{- fail "serve.rulesHistory is the history of the rules in rules.configMaps, for mode: serve" }}
-{{- end }}
+{{- include "lapilli.historyChecks" . }}
 {{- if and (eq .Values.mode "cronjob") (not .Values.incidents) (not .Values.impact) }}
 {{- fail "give incidents, impact, or both" }}
 {{- end }}
@@ -461,11 +461,11 @@ labels:
   {{- end }}
 {{- $a := deepCopy (.Values.podAnnotations | default dict) }}
 {{- if and (eq .Values.mode "serve") .Values.serve.rulesHistory.repository }}
-{{- /* The rules history's init containers run git, and RENDER, on what a
+{{- /* The rules history's containers run git, and RENDER, on what a
 repository holds: EKS's webhook (IRSA, Pod Identity) and Azure's give them
 no cloud identity. GKE's metadata server answers every container alike. */ -}}
 {{- range $k, $sep := dict "eks.amazonaws.com/skip-containers" "," "azure.workload.identity/skip-containers" ";" }}
-{{- $skip := printf "rules-history-clone%srules-history" $sep }}
+{{- $skip := include "lapilli.historyContainers" $ | splitList " " | join $sep }}
 {{- with index $a $k }}{{ $skip = printf "%s%s%s" (toString .) $sep $skip }}{{ end }}
 {{- $_ := set $a $k $skip }}
 {{- end }}

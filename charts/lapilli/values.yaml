@@ -156,28 +156,54 @@ serve:
     enabled: true
     severities: []      # the severities the team uses; any other is a problem
     scrapeInterval: ""  # for the range check; Prometheus's own, each job's, unless given
-  # Earlier versions of the rules in rules.configMaps, read from the git
-  # repository they are kept in, so a first start's backfill replays each
-  # day with that day's rules (docs/design/history.md). An init container
-  # clones the branch and runs recipes/versions/git.sh on each start; a
-  # ledger with versions of its own passes them over. Off when repository
-  # is empty.
+  # Versions of the rules, read from the git repository they are kept in
+  # (docs/design/history.md). An init container clones the branch and runs
+  # recipes/versions/git.sh on each start, so a first start's backfill
+  # replays each day with that day's rules; a ledger with versions of its
+  # own passes them over. With rules.configMaps, they are its history. With
+  # none, the repository is the rules, followed: two containers beside
+  # lapilli fetch the branch every `every` seconds and add the versions of
+  # its new commits (recipes/versions/follow.sh), each recorded from its own
+  # time. Off when repository is empty.
   rulesHistory:
     repository: ""   # what git clone takes, such as https://github.com/example/monitoring.git
     branch: ""       # the default branch when empty
-    paths: ""        # the rule files or directories in it, space-separated, such as alerts/
+    paths: ""        # the rule files or directories in it, space-separated, such as alerts/ or charts/monitoring/
     since: ""        # from when, such as 2026-10-01; backfill and a day before now when empty
+    max: 500         # the most versions written; more is refused: give a later since
     # For rules rendered from a chart: a command run in each commit's files
-    # that writes the rules on its stdout, such as
-    # helm template monitoring charts/monitoring (the image needs helm then).
+    # that writes them on its stdout, such as
+    # helm template monitoring charts/monitoring, or
+    # kustomize build overlays/prod. What else it writes (Deployments,
+    # Secrets) is passed over and not kept.
     render: ""
+    # Run before render in each commit's files, for what a commit lacks,
+    # such as the dependencies older commits don't vendor:
+    # helm repo add grafana https://grafana.github.io/helm-charts >&2 && helm dependency build charts/monitoring
+    # (the chart repositories must then be reachable: see networkPolicy.egress).
+    renderPrepare: ""
+    # A commit that can't be rendered: fail writes no history and says
+    # which; skip passes it over, saying which and why.
+    unrendered: fail
+    # Of the objects render writes, keep those whose labels this selector
+    # matches, as --rules-select takes it: grafana_alert=1 keeps the
+    # ConfigMaps labelled for Grafana's sidecar.
+    select: ""
+    every: 300       # following, seconds between fetches of the branch
     # A Secret holding a token for an https repository that needs one, read
-    # as the password of x-access-token.
+    # as the password of x-access-token. Only the containers that clone and
+    # fetch have it, never those that run render.
     tokenSecret:
       name: ""
       key: token
-    # An image with git and sh, pinned by digest.
+    # An image with git and sh, pinned by digest, which clones and fetches,
+    # and without render writes the versions.
     image: alpine/git:v2.52.0@sha256:4a0e72d49596a1f5d3701aeedafdadc5c0da4062be4657c7bdc4017387f591cc
+    # An image with git, helm and kustomize, pinned by digest, which writes
+    # the versions with render: Argo CD's, so a chart renders as Argo CD
+    # v3.5.6 renders it. Give one with the versions that deploy the chart.
+    renderImage: quay.io/argoproj/argocd:v3.5.6@sha256:8e5cc5bb008df8a09dba439462e58c94c55b7735888d3ebde0c25fc05e4e5335
+    resources: {}    # of each of its containers
   # The UI has no sign-in of its own, and the Service is a ClusterIP: reach
   # it with kubectl port-forward, or put it behind a proxy that signs people
   # in (oauth2-proxy, an ingress's or a cloud's) and name the header that
@@ -429,13 +455,14 @@ serve:
     from: []
     metricsFrom: []
     othersKeptOut: false
-    # Where lapilli serve, and its rules history's init containers, may
+    # Where lapilli serve, and its rules history's containers, may
     # connect, as NetworkPolicy egress rules (to, ports), beside the
     # cluster's DNS (dns): a NetworkPolicy of its own, off unless enabled.
     # Without it the pod reaches whatever the cluster lets it, a cloud's
     # metadata server (169.254.169.254) and the Kubernetes API among them.
     # With it, name each place it talks to: the Prometheus, the rules' API
-    # (Grafana, a ruler), the rules history's repository, Slack and the
+    # (Grafana, a ruler), the rules history's repository and the chart
+    # repositories its renderPrepare fetches from, Slack and the
     # webhooks, and a cloud's APIs and its identity's token endpoint. A
     # cloud's workload identity may need its metadata server let through
     # (GKE's does: see Google's documentation on network policies with

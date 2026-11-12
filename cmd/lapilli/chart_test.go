@@ -127,6 +127,7 @@ func TestChartIdentityOnlyLapilli(t *testing.T) {
 		"aws, the rules history":   {aws, true, true},
 		"oci alarms":               {oci, true, false},
 		"no cloud":                 {append(append([]string{}, serveValues...), history...), false, true},
+		"following":                {append([]string{"--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090"}, history...), false, true},
 		"no cloud, no history":     {serveValues, false, false},
 		"the CronJob, google":      {[]string{"--set", "gcpProject=p", "--set", "rules.configMaps={rules}", "--set", "impact=up"}, true, false},
 		"the CronJob, no identity": {[]string{"--set", "prometheus.url=http://p:9090", "--set", "rules.configMaps={rules}", "--set", "impact=up"}, false, false},
@@ -168,8 +169,12 @@ func TestChartIdentityOnlyLapilli(t *testing.T) {
 			}
 		}
 		a := pod.Spec.Template.Metadata.Annotations
-		skips := a["eks.amazonaws.com/skip-containers"] == "rules-history-clone,rules-history" &&
-			a["azure.workload.identity/skip-containers"] == "rules-history-clone;rules-history"
+		eks, azure := "rules-history-clone,rules-history", "rules-history-clone;rules-history"
+		if name == "following" {
+			eks += ",rules-history-fetch,rules-history-follow"
+			azure += ";rules-history-fetch;rules-history-follow"
+		}
+		skips := a["eks.amazonaws.com/skip-containers"] == eks && a["azure.workload.identity/skip-containers"] == azure
 		if skips != c.skip {
 			t.Errorf("%s: init containers passed over: %v, want %v (%v)", name, skips, c.skip, a)
 		}
@@ -260,4 +265,177 @@ func TestChartTrackersImageDigest(t *testing.T) {
 			t.Errorf("%q: %v\n%s", image, err, out)
 		}
 	}
+}
+
+// historyPod is the Deployment's pod as the rules history makes it.
+type historyPod struct {
+	InitContainers []historyContainer `yaml:"initContainers"`
+	Containers     []historyContainer
+}
+
+type historyContainer struct {
+	Name         string
+	Image        string
+	Args         []string
+	Env          []struct{ Name, Value string }
+	VolumeMounts []struct {
+		Name      string
+		MountPath string `yaml:"mountPath"`
+		ReadOnly  bool   `yaml:"readOnly"`
+	} `yaml:"volumeMounts"`
+}
+
+func (c historyContainer) env(name string) string {
+	for _, e := range c.Env {
+		if e.Name == name {
+			return e.Value
+		}
+	}
+	return ""
+}
+
+// mounts says how a container mounts a volume: "", "rw" or "ro".
+func (c historyContainer) mounts(volume string) string {
+	for _, m := range c.VolumeMounts {
+		if m.Name == volume {
+			if m.ReadOnly {
+				return "ro"
+			}
+			return "rw"
+		}
+	}
+	return ""
+}
+
+func historyPodOf(t *testing.T, out string) map[string]historyContainer {
+	t.Helper()
+	var d struct {
+		Spec struct {
+			Template struct{ Spec historyPod }
+		}
+	}
+	for _, doc := range strings.Split(out, "\n---\n") {
+		if strings.Contains(doc, "kind: Deployment") {
+			if err := yaml.Unmarshal([]byte(doc), &d); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	cs := map[string]historyContainer{}
+	for _, c := range append(d.Spec.Template.Spec.InitContainers, d.Spec.Template.Spec.Containers...) {
+		cs[c.Name] = c
+	}
+	return cs
+}
+
+// With rules.configMaps, the rules history is theirs, written on each
+// start. With none, the repository is the rules, followed: a container
+// fetches the branch with the token, and another, without it, adds the
+// versions of its new commits, which lapilli serve reads with
+// --rules-history and no --rules. Those that run render have the clone
+// read-only, so nothing render runs can change what the next fetch runs
+// with; render runs in renderImage, pinned by digest.
+func TestChartRulesHistory(t *testing.T) {
+	base := []string{"--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090",
+		"--set", "serve.rulesHistory.repository=https://git.example.com/ops/platform.git", "--set", "serve.rulesHistory.paths=charts/monitoring/",
+		"--set", "serve.rulesHistory.tokenSecret.name=git"}
+	rendered := append(append([]string{}, base...), "--set", "serve.rulesHistory.render=helm template m charts/monitoring",
+		"--set", "serve.rulesHistory.renderPrepare=helm dependency build charts/monitoring", "--set", "serve.rulesHistory.unrendered=skip",
+		"--set", "serve.rulesHistory.max=50", "--set", "serve.rulesHistory.every=120", "--set", "serve.rulesHistory.select=grafana_alert=1")
+	out, err := helmTemplate(t, rendered...)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	cs := historyPodOf(t, out)
+	lapilli := strings.Join(cs["lapilli"].Args, " ")
+	if !strings.Contains(lapilli, "--rules-history=/var/lib/lapilli-history/versions --rules-select=grafana_alert=1") || strings.Contains(lapilli, "--rules=") {
+		t.Errorf("lapilli's args: %s", lapilli)
+	}
+	values := chartValues(t)
+	for name, want := range map[string]struct {
+		image, repo, history, token string
+	}{
+		"rules-history-clone":  {values.image, "rw", "", "ro"},
+		"rules-history":        {values.renderImage, "ro", "rw", ""},
+		"rules-history-fetch":  {values.image, "rw", "", "ro"},
+		"rules-history-follow": {values.renderImage, "ro", "rw", ""},
+		"lapilli":              {"ghcr.io/lapilli-project/lapilli:dev", "", "ro", ""},
+	} {
+		c, ok := cs[name]
+		if !ok {
+			t.Errorf("no %s", name)
+			continue
+		}
+		if c.Image != want.image || c.mounts("rules-history-repo") != want.repo || c.mounts("rules-history") != want.history ||
+			c.mounts("rules-history-token") != want.token || (c.env("TOKEN_FILE") != "") != (want.token != "") {
+			t.Errorf("%s: %s, the clone %q, the history %q, the token %q %q", name, c.Image, c.mounts("rules-history-repo"),
+				c.mounts("rules-history"), c.mounts("rules-history-token"), c.env("TOKEN_FILE"))
+		}
+	}
+	for _, name := range []string{"rules-history", "rules-history-follow"} {
+		c := cs[name]
+		if c.env("RENDER_PREPARE") != "helm dependency build charts/monitoring" || c.env("UNRENDERED") != "skip" || c.env("MAX") != "50" {
+			t.Errorf("%s: %+v", name, c.Env)
+		}
+	}
+	if cs["rules-history-fetch"].env("EVERY") != "120" || cs["rules-history-follow"].env("EVERY") != "120" || cs["rules-history-clone"].env("EVERY") != "0" {
+		t.Error("every")
+	}
+
+	// Without render, the image with git writes the versions.
+	out, err = helmTemplate(t, base...)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if cs := historyPodOf(t, out); cs["rules-history"].Image != values.image || cs["rules-history-follow"].Image != values.image {
+		t.Errorf("without render: %s %s", cs["rules-history"].Image, cs["rules-history-follow"].Image)
+	}
+	// The history of rules.configMaps: written on each start, not followed.
+	out, err = helmTemplate(t, append(append([]string{}, rendered...), "--set", "rules.configMaps={rules}")...)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	cs = historyPodOf(t, out)
+	if _, ok := cs["rules-history-fetch"]; ok || !strings.Contains(strings.Join(cs["lapilli"].Args, " "), "--rules=/etc/lapilli/rules/0") {
+		t.Errorf("with rules.configMaps: %v", cs)
+	}
+
+	for _, c := range []struct {
+		more []string
+		says string
+	}{
+		{[]string{"--set", "serve.rulesHistory.unrendered=maybe"}, "unrendered: fail or skip"},
+		{[]string{"--set", "serve.rulesHistory.max=-1"}, "serve.rulesHistory.max"},
+		{[]string{"--set", "serve.rulesHistory.every=10"}, "30 at least"},
+		{[]string{"--set", "serve.rulesHistory.render=", "--set", "serve.rulesHistory.renderPrepare=true"}, "give render too"},
+		{[]string{"--set", "serve.rulesHistory.renderImage=quay.io/argoproj/argocd:v3.5.6"}, "renderImage: NAME@sha256"},
+		{[]string{"--set", "rules.loaded=true"}, "give one of"},
+		{[]string{"--set", "serve.rulesHistory.repository=", "--set", "rules.configMaps={rules}"}, "go with serve.rulesHistory.repository"},
+		{[]string{"--set", "mode=cronjob", "--set", "rules.configMaps={rules}", "--set", "impact=up"}, "serve.rulesHistory is for mode: serve"},
+	} {
+		if out, err := helmTemplate(t, append(append([]string{}, rendered...), c.more...)...); err == nil || !strings.Contains(out, c.says) {
+			t.Errorf("%v: %v, want %q\n%s", c.more, err, c.says, out)
+		}
+	}
+}
+
+// chartValues are the rules history's images in values.yaml.
+func chartValues(t *testing.T) (v struct{ image, renderImage string }) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("..", "..", "charts", "lapilli", "values.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var values struct {
+		Serve struct {
+			RulesHistory struct {
+				Image       string
+				RenderImage string `yaml:"renderImage"`
+			} `yaml:"rulesHistory"`
+		}
+	}
+	if err := yaml.Unmarshal(b, &values); err != nil {
+		t.Fatal(err)
+	}
+	return struct{ image, renderImage string }{values.Serve.RulesHistory.Image, values.Serve.RulesHistory.RenderImage}
 }
