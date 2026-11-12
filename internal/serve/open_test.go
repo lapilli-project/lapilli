@@ -3,6 +3,7 @@ package serve
 import (
 	"bytes"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -75,5 +76,43 @@ func TestLoopbackOnly(t *testing.T) {
 		if got := LoopbackOnly(addr); got != want {
 			t.Errorf("%q: %v, want %v", addr, got, want)
 		}
+	}
+}
+
+// Without roles, everyone is an admin only where the listener is bound to
+// loopback, whatever --listen said: localhost is what the resolver says,
+// and /etc/hosts can make it another address. A listener bound beyond
+// loopback is closed; --everyone-admin opens it anyway.
+func TestOpenOnlyWhereBound(t *testing.T) {
+	for _, c := range []struct {
+		listen        string
+		everyoneAdmin bool
+		bound         net.Addr
+		role          string
+	}{
+		{"localhost:8080", false, &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080}, "admin"},
+		{"localhost:8080", false, &net.TCPAddr{IP: net.ParseIP("::1"), Port: 8080}, "admin"},
+		{"localhost:8080", false, &net.TCPAddr{IP: net.ParseIP("10.0.0.5"), Port: 8080}, "viewer"},
+		{"127.0.0.1:8080", false, &net.TCPAddr{IP: net.ParseIP("192.168.1.2"), Port: 8080}, "viewer"},
+		{":8080", false, &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8080}, "viewer"},
+		{"localhost:8080", false, &net.UnixAddr{Name: "/tmp/x", Net: "unix"}, "viewer"},
+		{":8080", true, &net.TCPAddr{IP: net.IPv6unspecified, Port: 8080}, "admin"},
+	} {
+		s, _ := server(t, func(cfg *Config) { cfg.Listen, cfg.EveryoneAdmin = c.listen, c.everyoneAdmin })
+		s.listening(c.bound)
+		if _, body, _ := get(t, s.Handler(), "/api/v1/me"); !strings.Contains(body, `"role":"`+c.role+`"`) {
+			t.Errorf("--listen %s bound to %s: %s, want %s", c.listen, c.bound, body, c.role)
+		}
+	}
+	// As Run binds it.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer ln.Close()
+	s, _ := server(t, func(cfg *Config) { cfg.Listen = ln.Addr().String() })
+	s.listening(ln.Addr())
+	if _, body, _ := get(t, s.Handler(), "/api/v1/me"); !strings.Contains(body, `"role":"admin"`) {
+		t.Errorf("bound to %s: %s", ln.Addr(), body)
 	}
 }

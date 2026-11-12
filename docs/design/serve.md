@@ -445,7 +445,8 @@ as instructions.
   Service is a ClusterIP. There is no sign-in of its own: reach it with
   `kubectl port-forward`, or behind the sign-in proxy you have. With no
   roles, everyone is an admin only on a listener on loopback alone, this
-  machine's users; listening beyond it (the chart's `:8080`, which every
+  machine's users, as `--listen` says and the address it is bound to is
+  (`localhost` is what `/etc/hosts` says); listening beyond it (the chart's `:8080`, which every
   pod in the cluster reaches) everyone may only look, unless
   `--everyone-admin` says otherwise (0.28.1: before, everyone was an admin
   wherever it listened, and a review found any pod in a cluster could write

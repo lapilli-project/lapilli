@@ -256,8 +256,8 @@ type Server struct {
 	now func() time.Time
 
 	// open says that, with no roles, everyone is an admin: it listens on
-	// loopback alone, or EveryoneAdmin says so.
-	open bool
+	// loopback alone, or EveryoneAdmin says so. Run says where it is bound.
+	open atomic.Bool
 	// ledgerID names the ledger, made at random when it is first opened:
 	// the change recipes' branches carry it.
 	ledgerID string
@@ -394,8 +394,7 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		l.Close()
 		return nil, fmt.Errorf("--ledger: %w", err)
 	}
-	s.open = cfg.EveryoneAdmin || LoopbackOnly(cfg.Listen)
-	s.logWho()
+	s.open.Store(cfg.EveryoneAdmin || LoopbackOnly(cfg.Listen))
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"
 	}
@@ -555,6 +554,7 @@ func (s *Server) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("--listen: %w", err)
 	}
+	s.listening(ln.Addr())
 	srv := &http.Server{
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,

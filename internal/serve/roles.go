@@ -68,7 +68,7 @@ func (s *Server) role(r *http.Request) role {
 		// No roles: what anyone who reaches it may do. A listener beyond
 		// loopback is reached by whatever shares its network, every pod in
 		// a cluster, which shouldn't change the ledger unasked.
-		if s.open {
+		if s.open.Load() {
 			return admin
 		}
 		return viewer
@@ -244,7 +244,7 @@ func (f forbidden) Error() string {
 
 // forbidden is the refusal of a change that needs a role the reader hasn't.
 func (s *Server) forbidden(at role) forbidden {
-	return forbidden{need: at, closed: !s.cfg.ReadOnly && len(s.cfg.Editors)+len(s.cfg.Admins) == 0 && !s.open}
+	return forbidden{need: at, closed: !s.cfg.ReadOnly && len(s.cfg.Editors)+len(s.cfg.Admins) == 0 && !s.open.Load()}
 }
 
 // LoopbackOnly reports whether an address to listen on is this machine's
@@ -261,6 +261,18 @@ func LoopbackOnly(addr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// listening is told where the UI's listener was bound. Without roles,
+// everyone is an admin only when --listen said loopback and the address
+// it was bound to is loopback: localhost is what the resolver says, and
+// /etc/hosts can make it another. It then says who may change what.
+func (s *Server) listening(a net.Addr) {
+	if !s.cfg.EveryoneAdmin {
+		tcp, ok := a.(*net.TCPAddr)
+		s.open.Store(s.open.Load() && ok && tcp.IP.IsLoopback())
+	}
+	s.logWho()
+}
+
 // logWho says at start who may change what.
 func (s *Server) logWho() {
 	switch {
@@ -270,7 +282,7 @@ func (s *Server) logWho() {
 		s.log.Info("roles: those --editors and --admins name, as the sign-in proxy names them, change what their role allows; everyone else may only look")
 	case s.cfg.EveryoneAdmin:
 		s.log.Warn("--everyone-admin: everyone who reaches the UI and the API changes anything, as an admin, with no sign-in", "listen", s.cfg.Listen)
-	case s.open:
+	case s.open.Load():
 		s.log.Info("no roles: everyone who reaches the UI and the API changes anything, as an admin; it listens on this machine alone", "listen", s.cfg.Listen)
 	default:
 		s.log.Warn("no roles, listening beyond this machine: everyone may only look. To take changes, give roles behind a sign-in proxy (--user-header with --editors or --admins), or --everyone-admin", "listen", s.cfg.Listen)
