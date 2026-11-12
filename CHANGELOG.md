@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **SQLite 3.54.1** (`modernc.org/sqlite` v1.62.0, from v1.60.1 and
+  SQLite 3.53.4). 0.20.1 held it back: with v1.61.0 a week of 100,000
+  firings copied in was written a fifth slower. The driver was why, not
+  SQLite or the ledger. It cleared a prepared statement's arguments after
+  each run, and SQLite 3.54 then planned a statement with a `col = ?` term
+  and an `ORDER BY` again at its next run, as it does the query for an
+  alert's firing before those being judged: run once for each alert,
+  about 99,000 times for that week, at twice the cost. v1.61.1 keeps the
+  arguments in place (https://gitlab.com/cznic/sqlite/-/issues/264). With
+  v1.62.0 the week is written in 1.98 s, against 2.15 s with v1.60.1 and
+  2.68 s with v1.61.0 (medians of 20 runs on a laptop), and twelve weeks
+  are backfilled a tenth faster. No ledger schema change.
+
 ## [0.31.1] - 2026-11-12
 
 Two fixes the new end-to-end run found (`test/e2e/service.sh`: the whole
