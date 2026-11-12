@@ -3,8 +3,9 @@
 ## [Unreleased]
 
 A security release, after two reviews of 0.28.0 from an attacker's point
-of view: the change recipes, the chart, the release workflow, and what
-lapilli serve takes. Ledger schema 016 (tasks' ids), applied at start.
+of view, and a third of the fixes: the change recipes, the chart, the
+release workflow, and what lapilli serve takes. Ledger schema 016 (tasks'
+ids), applied at start.
 
 ### Changed (security)
 
@@ -14,8 +15,9 @@ lapilli serve takes. Ledger schema 016 (tasks' ids), applied at start.
   roles by default, so any pod in the cluster could write incidents, tasks,
   quiet windows and the settings (medium). Now, with no roles, everyone is
   an admin only on a listener on loopback alone (`127.0.0.1`, `::1`,
-  `localhost`, the binary's default); beyond it everyone may only look,
-  and the log says so at start. To write: give roles behind a sign-in
+  `localhost`, the binary's default), as `--listen` says and the address
+  it is bound to is; beyond it everyone may only look, and the log says so
+  at start. To write: give roles behind a sign-in
   proxy (`--user-header` with `--editors` or `--admins`), or, to keep what
   0.28.0 did, `--everyone-admin`, in the chart `serve.everyoneAdmin: true`
   (off by default). Chart users with no `serve.roles` who wrote through
@@ -30,7 +32,8 @@ lapilli serve takes. Ledger schema 016 (tasks' ids), applied at start.
   request by hand). A 0.28.1 recipe with an older Lapilli, which names no
   ledger, keeps `lapilli/proposal-ID`.
 - **Release tags are `vX.Y.Z` on main.** Others (`v1.0.0-rc.1`, a tag off
-  main) no longer build.
+  main) no longer build. Releases publish one at a time, and `latest`, the
+  image's and GitHub's, is always the highest version released.
 
 ### Fixed (security)
 
@@ -42,12 +45,21 @@ lapilli serve takes. Ledger schema 016 (tasks' ids), applied at start.
   `include: local:` file, a build's configuration, a case variant of
   `.gitlab-ci.yml`, or `RULES_PATHS` itself naming one. CI that runs on a
   branch's push would run it with the repository's secrets before anyone
-  reviewed it. The recipes now write only a rule file, both the file and
-  the document: mode 100644, named `*.yml`, `*.yaml`, `*.json` or
-  `*.rules`, not what a CI system runs (a longer list, any letter case,
-  `RULES_PATHS` too), and holding, by its top keys, a Prometheus rule
-  file, a Grafana provisioning file, a `PrometheusRule` or a `ConfigMap`
-  alone. Anything else fails, with the reason on the proposal's page.
+  reviewed it. The recipes now write only to a file of rules: mode 100644,
+  named `*.yml`, `*.yaml`, `*.json` or `*.rules`, not what a CI system runs
+  (a longer list, any letter case, `RULES_PATHS` too), one document of it
+  at least a Prometheus rule file, a Grafana provisioning file, a
+  `PrometheusRule` or a `ConfigMap`, and each document read as YAML reads
+  it. And in it they change only the rules: each document as it was, or,
+  rules in both, the same but for a rule file's `groups`, a
+  `PrometheusRule`'s `spec`, or a `ConfigMap`'s entries, each changed one
+  a file of rules alone. Anything else fails, with the reason on the
+  proposal's page. (The review of the fixes found a document indented as
+  a whole, a `ClusterRoleBinding` after a `PrometheusRule`, taken unseen,
+  and a ConfigMap of rules rewritten as `aws-auth`, or a Grafana file
+  given contact points, taken for their shape; and real files refused: a
+  `ServiceMonitor` beside its `PrometheusRule`, a byte order mark, a
+  `ConfigMap` with `immutable`. All fixed before release.)
 - **A reviewed pull request could be changed under its approvals
   (medium).** The recipes pushed their branch with `--force` and took the
   pull request open from it: a stolen Lapilli handing an opened change out
@@ -61,9 +73,13 @@ lapilli serve takes. Ledger schema 016 (tasks' ids), applied at start.
   excuse inside the ledger's one write transaction: 1,500 of a team's took
   re-judging 20,000 firings to about 106 s. The ledger now keeps 500
   windows, the last 50 for editors and admins to make, and a team's
-  editors keep 20 of its windows. What may excuse a firing is worked out
-  once a span, by rule and team: 10,000 firings beside 500 windows judge
-  in 58 ms, against 9.5 s before.
+  editors keep 20 of its windows, wherever they move them. What may
+  excuse a firing is worked out once a span: by rule and team, and, for a
+  window repeating by its schedule, the times it falls due in the span,
+  which each firing is set beside by a search. A day's 10,000 firings
+  recorded beside 500 windows that fall due in it take 0.63 s (0.34 s
+  beside none; 25.9 s before), and judged again beside 500 that don't,
+  58 ms (9.5 s before).
 - **The release job held every write permission while it ran the
   repository's code (medium),** and restored a Go cache main's CI wrote.
   `release.yml` is now three jobs: `build`, which may write nothing and
@@ -73,7 +89,8 @@ lapilli serve takes. Ledger schema 016 (tasks' ids), applied at start.
   Sigstore bundles and immutability are as before. A dry run
   (`gh workflow run release.yml --ref main -f version=vX.Y.Z`) builds and
   verifies and never publishes. Helm is pinned by version and sha256,
-  BuildKit by digest, and `latest` is tagged only once the release is out.
+  BuildKit by digest, and `latest` is tagged only once the release is out,
+  one release at a time, and only to the highest version.
 - **`--prometheus` followed redirects (low).** Whatever answered as the
   Prometheus could send the query elsewhere, a bearer token to the same
   host's other ports, and with `--auth aws` the session token to any host.
@@ -81,9 +98,14 @@ lapilli serve takes. Ledger schema 016 (tasks' ids), applied at start.
   a request after five minutes.
 - **A deleted task's id was given again (low).** The next task, maybe
   another team's, took over the deleted one's tracker issue: its comments
-  both ways, and its close. Schema 016 makes task ids never repeat (past
-  those deleted before the upgrade too), and a proposal made into a
-  deleted task is made into none.
+  both ways, and its close. Schema 016 makes task ids never repeat, and a
+  proposal made into a deleted task is made into none. Upgrading, new ids
+  start past the highest the ledger still knows was given (its tasks, the
+  changes it keeps noted of tasks, the proposals made into them): a task
+  deleted with none made after it, whose changes `--keep` has dropped
+  since, leaves no trace, and its id can be given once more, its issue
+  taken. The tracker recipes don't yet hold an issue to its task's time
+  (`docs/design/trackers.md`).
 - **The digest's preview skipped the one-heavy-request-at-a-time turn
   (low),** a regression of 0.25: any viewer could ask for many at once. It
   now waits its turn, as a report's preview does.
