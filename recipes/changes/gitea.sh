@@ -37,7 +37,7 @@ find_pr() {
     fi
   fi
   code=$(host GET "$GITEA_API/repos/$GITEA_REPO/pulls?state=open&limit=50")
-  case $code in 2??) ;; *) say "Gitea didn't list pull requests ($code): $(head -c 300 "$out")"; return 1 ;; esac
+  case $code in 2??) ;; *) say "Gitea didn't list pull requests ($code): $(shown "$out")"; return 1 ;; esac
   jq -r --arg b "$1" --arg repo "$GITEA_REPO" --arg base "$BASE" --arg me "$me" '[.[] | select(.head.ref == $b
     and (.head.repo.full_name // "" | ascii_downcase) == ($repo | ascii_downcase) and .base.ref == $base
     and ($me == "" or (.user.login // "" | ascii_downcase) == ($me | ascii_downcase)))][0].html_url // ""' "$out"
@@ -46,7 +46,7 @@ find_pr() {
 create_pr() {
   jq --arg head "$1" --arg base "$BASE" '{title, body, head: $head, base: $base}' "$2" >"$tmp/body"
   code=$(host POST "$GITEA_API/repos/$GITEA_REPO/pulls" "$tmp/body")
-  case $code in 2??) ;; *) say "Gitea didn't open a pull request ($code): $(head -c 300 "$out")"; return 1 ;; esac
+  case $code in 2??) ;; *) say "Gitea didn't open a pull request ($code): $(shown "$out")"; return 1 ;; esac
   jq -r '.html_url // ""' "$out"
 }
 

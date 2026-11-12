@@ -124,5 +124,13 @@ axe-core over them in a browser.
 A maintainer tags `vX.Y.Z` on `main`. `.github/workflows/release.yml` builds
 the binaries, the image and the chart, checks them with govulncheck,
 attests their provenance, and puts the attestations' Sigstore bundles
-beside the release as `lapilli-vX.Y.Z.intoto.jsonl` (SECURITY.md). `lapilli.dev` is built from `site/` by
+beside the release as `lapilli-vX.Y.Z.intoto.jsonl` (SECURITY.md). The job
+that runs the repository's code (`build`) may write nothing; the one that
+publishes (`publish`) runs none of it, and checks the sha256 of each file
+`build` hands on. Before tagging, a dry run builds and checks everything and
+publishes nothing:
+
+```sh
+gh workflow run release.yml --ref main -f version=vX.Y.Z
+``` `lapilli.dev` is built from `site/` by
 `.github/workflows/pages.yml`.

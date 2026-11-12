@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"slices"
 	"strconv"
@@ -13,9 +14,11 @@ import (
 )
 
 // Roles: who may change what. Without --editors or --admins, everyone may
-// change everything, as before; with either, whoever the sign-in proxy
-// names (--user-header), or a group it names them in (--groups-header),
-// gets the role the lists give them, and everyone else may only look.
+// change everything when lapilli serve listens on loopback alone, or with
+// --everyone-admin; listening beyond it, everyone may only look. With
+// either, whoever the sign-in proxy names (--user-header), or a group it
+// names them in (--groups-header), gets the role the lists give them, and
+// everyone else may only look.
 //
 //	viewer  looks
 //	editor  writes incidents, tasks, comments, quiet windows, notes on rules;
@@ -62,7 +65,13 @@ func (s *Server) role(r *http.Request) role {
 	case s.cfg.ReadOnly:
 		return viewer
 	case len(s.cfg.Editors) == 0 && len(s.cfg.Admins) == 0:
-		return admin
+		// No roles: what anyone who reaches it may do. A listener beyond
+		// loopback is reached by whatever shares its network, every pod in
+		// a cluster, which shouldn't change the ledger unasked.
+		if s.open.Load() {
+			return admin
+		}
+		return viewer
 	}
 	// Whoever the proxy didn't name may only look, whatever the lists say.
 	if s.user(r) == "anonymous" {
@@ -180,7 +189,7 @@ func (s *Server) need(at role, h http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		if s.role(r) < at {
-			s.oops(w, r, forbidden{at})
+			s.oops(w, r, s.forbidden(at))
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
@@ -200,7 +209,7 @@ func (s *Server) teamWrite(h http.HandlerFunc) http.HandlerFunc {
 		if s.role(r) < editor {
 			teams := s.editsTeams(r)
 			if len(teams) == 0 {
-				s.oops(w, r, forbidden{editor})
+				s.oops(w, r, s.forbidden(editor))
 				return
 			}
 			r = r.WithContext(ledger.WithTeams(r.Context(), teams))
@@ -215,13 +224,69 @@ func (s *Server) teamWrite(h http.HandlerFunc) http.HandlerFunc {
 func scoped(r *http.Request) ([]int64, bool) { return ledger.TeamsOf(r.Context()) }
 
 // forbidden is a change the reader's role doesn't allow.
-type forbidden struct{ need role }
+// forbidden is a change the reader's role doesn't allow; closed, one no
+// one may make, as there are no roles and the server listens beyond
+// loopback.
+type forbidden struct {
+	need   role
+	closed bool
+}
 
 func (f forbidden) Error() string {
-	if f.need == admin {
+	switch {
+	case f.closed:
+		return "no one changes anything here: lapilli serve listens beyond this machine with no roles. Give roles behind a sign-in proxy (--user-header with --editors or --admins), or --everyone-admin"
+	case f.need == admin:
 		return "only an admin can change this"
 	}
 	return "only an editor can change this"
+}
+
+// forbidden is the refusal of a change that needs a role the reader hasn't.
+func (s *Server) forbidden(at role) forbidden {
+	return forbidden{need: at, closed: !s.cfg.ReadOnly && len(s.cfg.Editors)+len(s.cfg.Admins) == 0 && !s.open.Load()}
+}
+
+// LoopbackOnly reports whether an address to listen on is this machine's
+// alone: a loopback address, or localhost. ":8080", any address, isn't.
+func LoopbackOnly(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// listening is told where the UI's listener was bound. Without roles,
+// everyone is an admin only when --listen said loopback and the address
+// it was bound to is loopback: localhost is what the resolver says, and
+// /etc/hosts can make it another. It then says who may change what.
+func (s *Server) listening(a net.Addr) {
+	if !s.cfg.EveryoneAdmin {
+		tcp, ok := a.(*net.TCPAddr)
+		s.open.Store(s.open.Load() && ok && tcp.IP.IsLoopback())
+	}
+	s.logWho()
+}
+
+// logWho says at start who may change what.
+func (s *Server) logWho() {
+	switch {
+	case s.cfg.ReadOnly:
+		s.log.Info("--read-only: no one changes anything through the UI or the API")
+	case len(s.cfg.Editors)+len(s.cfg.Admins) > 0:
+		s.log.Info("roles: those --editors and --admins name, as the sign-in proxy names them, change what their role allows; everyone else may only look")
+	case s.cfg.EveryoneAdmin:
+		s.log.Warn("--everyone-admin: everyone who reaches the UI and the API changes anything, as an admin, with no sign-in", "listen", s.cfg.Listen)
+	case s.open.Load():
+		s.log.Info("no roles: everyone who reaches the UI and the API changes anything, as an admin; it listens on this machine alone", "listen", s.cfg.Listen)
+	default:
+		s.log.Warn("no roles, listening beyond this machine: everyone may only look. To take changes, give roles behind a sign-in proxy (--user-header with --editors or --admins), or --everyone-admin", "listen", s.cfg.Listen)
+	}
 }
 
 // me says who the reader is, and what they may do.

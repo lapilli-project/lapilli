@@ -185,6 +185,13 @@ serve:
   # recorded under it. Set it only when the proxy strips it from callers.
   userHeader: ""
   readOnly: false  # take no changes through the UI or API
+  # Without roles (below), everyone may only look: lapilli serve listens on
+  # the pod's address, which every pod in the cluster can reach. Changes
+  # then need roles, behind a sign-in proxy (userHeader), or this, which
+  # lets everyone who reaches the UI or the API change anything, as an
+  # admin: for a cluster where only people who may already reach it with
+  # kubectl port-forward can, with serve.networkPolicy keeping the rest out.
+  everyoneAdmin: false
   # Who may change what, once the proxy names people: with editors or
   # admins, only those listed may change anything, and the rest may only
   # look. People as userHeader names them, groups as groupsHeader lists them,
@@ -279,7 +286,8 @@ serve:
     # people write on tasks to whoever can read the issue; who wrote it
     # only with COMMENT_NAMES: "true" in env (often their email).
     comments: false
-    # An image with sh, curl and jq, pinned by digest: required with tracker.
+    # An image with sh, curl and jq, pinned by digest (NAME@sha256:...):
+    # required with tracker.
     image: ""
     resources: {}
   # On-call schedules read from the iCalendar feeds on-call tools export
@@ -323,7 +331,8 @@ serve:
   # Agents reach /mcp and read what the pages show. Who an agent must act
   # for to replay a change to the rules it proposes: editors or admins. Off
   # when empty: it runs PromQL the agent writes, with lapilli's access to
-  # Prometheus. It needs roles.editors or roles.admins.
+  # Prometheus, and for a Loki's rules LogQL, with its access to Loki. It
+  # needs roles.editors or roles.admins.
   mcpCompare: ""
   # Who an agent must act for to propose a change to a rule over MCP, kept
   # as an agent's for a person to approve: editors or admins. Off when
@@ -338,8 +347,9 @@ serve:
   # Grafana, applied through its API with grafanaTokenSecret's token, a
   # service account that may write the rules Lapilli may change. Lapilli
   # also proposes, each week. It needs userHeader, roles.editors or
-  # roles.admins (without roles everyone is an admin), and approvers or
-  # roles.admins: the admins approve, unless approvers says who. To stop
+  # roles.admins (without roles, whoever may change anything is an
+  # admin), and approvers or roles.admins: the admins approve, unless
+  # approvers says who. To stop
   # changes at once, an admin pauses them in the UI, or anyone
   # who may make a ConfigMap in the namespace makes FULLNAME-changes-paused,
   # FULLNAME being the release's name followed by -lapilli, unless the
@@ -419,6 +429,26 @@ serve:
     from: []
     metricsFrom: []
     othersKeptOut: false
+    # Where lapilli serve, and its rules history's init containers, may
+    # connect, as NetworkPolicy egress rules (to, ports), beside the
+    # cluster's DNS (dns): a NetworkPolicy of its own, off unless enabled.
+    # Without it the pod reaches whatever the cluster lets it, a cloud's
+    # metadata server (169.254.169.254) and the Kubernetes API among them.
+    # With it, name each place it talks to: the Prometheus, the rules' API
+    # (Grafana, a ruler), the rules history's repository, Slack and the
+    # webhooks, and a cloud's APIs and its identity's token endpoint. A
+    # cloud's workload identity may need its metadata server let through
+    # (GKE's does: see Google's documentation on network policies with
+    # Workload Identity), which every container in the pod can then reach.
+    #   to:
+    #     - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}}]
+    #       ports: [{port: 9090, protocol: TCP}]
+    #     - to: [{ipBlock: {cidr: 0.0.0.0/0, except: [169.254.169.254/32, 10.0.0.0/8]}}]
+    #       ports: [{port: 443, protocol: TCP}]
+    egress:
+      enabled: false
+      dns: true
+      to: []
   port: 8080
   # /metrics and the health checks, alone, for Prometheus and the probes.
   metricsPort: 9091
@@ -446,6 +476,11 @@ dashboard:
 image:
   repository: ghcr.io/lapilli-project/lapilli
   tag: ""        # the chart's appVersion when empty
+  # The image's digest, sha256:...: the pod runs exactly that image. A
+  # release's chart has its own image's, written by the release workflow,
+  # the image it built and attested; give image.tag another version and
+  # give that version's digest too, or empty this.
+  digest: ""
   pullPolicy: IfNotPresent
 
 serviceAccount:

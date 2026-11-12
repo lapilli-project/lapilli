@@ -1062,6 +1062,15 @@ change the settings and the teams; the rest may only look. Write
 `user:NAME` or `group:NAME` where someone could pick a name that is a
 group's.
 
+With no roles, who may change what depends on where it listens. On
+loopback alone (`127.0.0.1`, `localhost`, the default), everyone who
+reaches it is an admin: that is this machine's users. Beyond it (`:8080`,
+as the chart listens, a pod's address), everyone may only look, since every
+pod or machine that shares its network can reach it; give roles behind the
+proxy, or `--everyone-admin` to let everyone change anything anyway. The
+log says at start which applies. (Before 0.28.1, everyone was an admin
+wherever it listened.)
+
 With `--admins`, admins can also give roles on the Roles page (from the
 Teams page) or with `/api/v1/roles`, kept in the ledger: an editor's, of
 every team or of one, to `user:NAME` or `group:NAME`. A team's editors
@@ -1384,8 +1393,8 @@ Nothing is changed until a person approves it, on its page, in a browser:
 
 - `--approvers` names who may (people and groups, as `--editors` does); the
   admins when it isn't given. `--changes` needs roles (`--editors` or
-  `--admins`), as without them everyone is an admin, and someone to
-  approve. `--approvals 2` asks for two people, of a proposal approved by
+  `--admins`), as without them whoever may change anything is an admin,
+  and someone to approve. `--approvals 2` asks for two people, of a proposal approved by
   one before it was raised too, unless it was carried out already. No one
   approves their own proposal, or one an agent made for them, in any letter
   case.
@@ -1550,8 +1559,10 @@ approve in the UI. No tool approves or applies one.
 
 - **Access.** Agents come through the same sign-in proxy as the pages, and
   everyone gets the tools that read. `compare` runs PromQL the agent wrote
-  with Lapilli's access to Prometheus, so only those `--mcp-compare` names
-  get it, and one comparison runs at a time.
+  with Lapilli's access to Prometheus, and, for a rule kept in Loki, LogQL
+  the agent wrote, sent to the Loki (or through Grafana's data source
+  proxy) with Lapilli's token, so only those `--mcp-compare` names get it,
+  and one comparison runs at a time.
 - **Browsers.** Requests from web pages are refused: a browser sends an
   `Origin`, an agent doesn't. The one exception is a request from
   `--external-url`.

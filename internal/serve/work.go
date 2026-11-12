@@ -1113,9 +1113,7 @@ func (s *Server) replayInput(ctx context.Context, rep *verdict.Report, from, to 
 	if err != nil {
 		return replayInput{}, err
 	}
-	in.excuse = func(f firing.Firing) bool {
-		return slices.ContainsFunc(quiet, func(w ledger.Window) bool { return w.Excuses(f) })
-	}
+	in.excuse = ledger.Excusing(quiet, from, to)
 	return in, nil
 }
 

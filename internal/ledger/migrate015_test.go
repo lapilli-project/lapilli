@@ -48,7 +48,7 @@ func schemaVersion(t *testing.T) int {
 func TestMigrate015(t *testing.T) {
 	ctx := context.Background()
 	files, _ := fs.Glob(schema, "schema/*.sql")
-	if len(files) != 15 || files[13] != "schema/014.sql" || files[14] != "schema/015.sql" {
+	if len(files) < 15 || files[13] != "schema/014.sql" || files[14] != "schema/015.sql" {
 		t.Fatalf("schema files %v", files)
 	}
 	path := filepath.Join(t.TempDir(), "l.db")
@@ -58,7 +58,7 @@ func TestMigrate015(t *testing.T) {
 	}
 	var v int
 	l.w.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v)
-	if v != 15 {
+	if v != len(files) {
 		t.Fatalf("a new ledger at %d", v)
 	}
 	task, err := l.PutTask(ctx, Task{Title: "Tune Errors"}, "ana")
@@ -68,7 +68,7 @@ func TestMigrate015(t *testing.T) {
 	if _, err := l.PutComment(ctx, Comment{On: "task", Key: "1", Body: "Raised it."}, "ana"); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range append(undo015, "PRAGMA user_version = 14") {
+	for _, q := range append(append(undo016, undo015...), "PRAGMA user_version = 14") {
 		if _, err := l.w.ExecContext(ctx, q); err != nil {
 			t.Fatal(q, err)
 		}
@@ -80,7 +80,7 @@ func TestMigrate015(t *testing.T) {
 	}
 	defer l2.Close()
 	l2.w.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v)
-	if v != 15 {
+	if v != len(files) {
 		t.Errorf("migrated to %d", v)
 	}
 	cs, err := l2.Comments(ctx, "task", "1")

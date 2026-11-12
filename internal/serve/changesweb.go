@@ -472,7 +472,7 @@ func (s *Server) postDrop(w http.ResponseWriter, r *http.Request) {
 	}
 	from := s.droppable(r)
 	if len(from) == 0 {
-		s.oops(w, r, forbidden{editor})
+		s.oops(w, r, s.forbidden(editor))
 		return
 	}
 	ctx := r.Context()
@@ -493,7 +493,7 @@ func (s *Server) postDrop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !slices.Contains(from, p.State) {
-		s.oops(w, r, forbidden{admin})
+		s.oops(w, r, s.forbidden(admin))
 		return
 	}
 	why := strings.TrimSpace(strings.Map(func(c rune) rune {
@@ -664,9 +664,12 @@ func (s *Server) changesTokenRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/v1/changes/{id}", s.withToken(tk, s.apiPatchChange))
 }
 
-// handedOut is a change as a recipe reads it.
+// handedOut is a change as a recipe reads it. Ledger names the ledger in
+// its branch, lapilli/LEDGER/proposal-ID, so two ledgers' proposals to one
+// repository never share a branch.
 type handedOut struct {
 	ID       int64  `json:"id"`
+	Ledger   string `json:"ledger"`
 	Rule     string `json:"rule"`
 	Kind     string `json:"kind"`
 	State    string `json:"state"`
@@ -702,8 +705,8 @@ func (s *Server) apiChanges(w http.ResponseWriter, r *http.Request) {
 		if p.State == ledger.StateReady && p.Kind != ledger.KindUndo && len(p.Approvals) < s.approvals() {
 			continue
 		}
-		h := handedOut{ID: p.ID, Rule: p.Rule, Kind: p.Kind, State: p.State, Source: p.Source, DocHash: p.DocHash, Link: p.Link,
-			Branch: fmt.Sprintf("lapilli/proposal-%d", p.ID), Title: prTitle(p), Body: s.prBody(p)}
+		h := handedOut{ID: p.ID, Ledger: s.ledgerID, Rule: p.Rule, Kind: p.Kind, State: p.State, Source: p.Source, DocHash: p.DocHash,
+			Link: p.Link, Branch: fmt.Sprintf("lapilli/%s/proposal-%d", s.ledgerID, p.ID), Title: prTitle(p), Body: s.prBody(p)}
 		if p.State == ledger.StateReady {
 			h.Document = p.Document
 		}

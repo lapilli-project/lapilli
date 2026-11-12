@@ -6,6 +6,17 @@ lapilli serve is replaying the last {{ .Values.serve.backfill }} into its ledger
 
 It has no sign-in of its own: keep the Service inside the cluster, or put it
 behind a proxy that signs people in and set serve.userHeader.
+{{- $s := .Values.serve }}
+{{- if $s.readOnly }}
+It is read-only (serve.readOnly): no one changes anything through the UI or the API.
+{{- else if or $s.roles.editors $s.roles.admins }}
+Those serve.roles names, as the proxy names them, change what their role allows; everyone else may only look.
+{{- else if $s.everyoneAdmin }}
+With serve.everyoneAdmin, everyone who reaches the UI or the API changes anything, as an admin.
+{{- else }}
+With no serve.roles, everyone may only look: give roles behind a sign-in
+proxy (serve.userHeader, serve.roles), or set serve.everyoneAdmin.
+{{- end }}
 Prometheus can scrape /metrics{{ if not .Values.serve.serviceMonitor.enabled }} (serve.serviceMonitor.enabled makes a ServiceMonitor){{ end }}.
 {{- if .Values.serve.changes.enabled }}
 

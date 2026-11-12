@@ -63,7 +63,10 @@ spec:
             {{- include "lapilli.podSecurity" . | nindent 12 }}
           containers:
             - name: trackers
-              image: {{ required "serve.trackers.image: an image with sh, curl and jq, pinned by digest" $t.image | quote }}
+              {{- if not (regexMatch "@sha256:[0-9a-f]{64}$" ($t.image | toString)) }}
+              {{- fail "serve.trackers.image: an image with sh, curl and jq, pinned by digest: NAME@sha256:..." }}
+              {{- end }}
+              image: {{ $t.image | quote }}
               imagePullPolicy: IfNotPresent
               command: [sh, {{ printf "/recipes/%s.sh" $t.tracker | quote }}]
               env:

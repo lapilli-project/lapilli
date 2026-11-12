@@ -5,6 +5,8 @@ package serve
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -125,6 +127,11 @@ type Config struct {
 	AllowedHosts []string
 	ReadOnly     bool
 	Version      string
+	// EveryoneAdmin lets everyone who reaches the UI and the API change
+	// anything, as an admin, with no roles given and Listen beyond
+	// loopback. Without roles, and without it, only a server listening on
+	// loopback alone takes changes: beyond it, everyone may only look.
+	EveryoneAdmin bool
 
 	// Roles: with Editors or Admins (users or groups, "*" for everyone),
 	// the rest may only look. GroupsHeader names the header a sign-in
@@ -247,6 +254,13 @@ type Server struct {
 	l   *ledger.Ledger
 	log *slog.Logger
 	now func() time.Time
+
+	// open says that, with no roles, everyone is an admin: it listens on
+	// loopback alone, or EveryoneAdmin says so. Run says where it is bound.
+	open atomic.Bool
+	// ledgerID names the ledger, made at random when it is first opened:
+	// the change recipes' branches carry it.
+	ledgerID string
 
 	// onCall is how each on-call schedule was last read.
 	onCall onCallState
@@ -376,6 +390,11 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		// writes a link for each: a few a second, a first run's in a burst.
 		tasksRate: &limiter{rate: 5, burst: 100}, tasksBusy: make(chan struct{}, 1), changes: newChanges(ctx, l)}
 	s.status.runs, s.status.notices, s.status.refused = map[string]int{}, map[string]int{}, map[string]int{}
+	if s.ledgerID, err = ledgerID(ctx, l); err != nil {
+		l.Close()
+		return nil, fmt.Errorf("--ledger: %w", err)
+	}
+	s.open.Store(cfg.EveryoneAdmin || LoopbackOnly(cfg.Listen))
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"
 	}
@@ -391,6 +410,21 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 	}
 	l.TellTo(s.dests())
 	return s, nil
+}
+
+// ledgerID is the ledger's name, twelve hex digits made at random the first
+// time it is asked for, and kept.
+func ledgerID(ctx context.Context, l *ledger.Ledger) (string, error) {
+	id, err := l.Meta(ctx, "ledger-id")
+	if err != nil || id != "" {
+		return id, err
+	}
+	b := make([]byte, 6)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	id = hex.EncodeToString(b)
+	return id, l.SetMeta(ctx, "ledger-id", id)
 }
 
 // requestAuth authenticates a ruler's requests with a cloud's credentials;
@@ -520,6 +554,7 @@ func (s *Server) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("--listen: %w", err)
 	}
+	s.listening(ln.Addr())
 	srv := &http.Server{
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,

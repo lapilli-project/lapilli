@@ -31,7 +31,8 @@ particular interest:
 
 `lapilli serve` does the same every hour, and serves a web UI and API that
 read and write its ledger (one SQLite file). It has no sign-in of its own:
-it listens on localhost unless told otherwise, trusts the headers named by
+it listens on localhost unless told otherwise, takes changes without roles
+only there (or with `--everyone-admin`), trusts the headers named by
 `--user-header` and `--groups-header` for who is asking, gives them the role
 `--editors` and `--admins` do, refuses posts from other sites, and with
 `--read-only` takes no changes. It sends notices to the URLs in
@@ -83,7 +84,8 @@ repository credentials. Of particular interest:
   in a unit it writes whole (a group, an Amazon namespace, an Azure rule
   group), any other rule than as the ruler held it just before; or to make
   a recipe push, or write a file, other than the one the proposal was made
-  against;
+  against, anything but a rule file there, or over a branch already
+  pushed;
 - a way to make it write, turn off or delete a cloud's alarm `--changes-in`
   doesn't name, one tagged as another tool's, one in another account,
   region, subscription, project or compartment than `--alarms` names or

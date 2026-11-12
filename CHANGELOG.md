@@ -2,6 +2,145 @@
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-11-12
+
+A security release, after two reviews of 0.28.0 from an attacker's point
+of view, and a third of the fixes: the change recipes, the chart, the
+release workflow, and what lapilli serve takes. Ledger schema 016 (tasks'
+ids), applied at start.
+
+### Changed (security)
+
+- **Without roles, a server listening beyond loopback takes no changes.**
+  With no `--editors` or `--admins`, everyone was an admin of the UI and the
+  API wherever lapilli serve listened. The chart listens on `:8080` with no
+  roles by default, so any pod in the cluster could write incidents, tasks,
+  quiet windows and the settings (medium). Now, with no roles, everyone is
+  an admin only on a listener on loopback alone (`127.0.0.1`, `::1`,
+  `localhost`, the binary's default), as `--listen` says and the address
+  it is bound to is; beyond it everyone may only look, and the log says so
+  at start. To write: give roles behind a sign-in
+  proxy (`--user-header` with `--editors` or `--admins`), or, to keep what
+  0.28.0 did, `--everyone-admin`, in the chart `serve.everyoneAdmin: true`
+  (off by default). Chart users with no `serve.roles` who wrote through
+  `kubectl port-forward` need one of the two after upgrading.
+- **The change recipes' branches name the ledger.** `lapilli/LEDGER/proposal-ID`,
+  LEDGER twelve hex digits the ledger makes once and the changes API hands
+  out, so two ledgers proposing to one repository never share a branch. A
+  pull request already open is followed as before, by its link. A change
+  still waiting for one goes on the new branch; a `lapilli/proposal-ID` a
+  recipe before 0.28.1 pushed for it is taken when it holds the same
+  change, and otherwise left as it is, which the run says (close its pull
+  request by hand). A 0.28.1 recipe with an older Lapilli, which names no
+  ledger, keeps `lapilli/proposal-ID`.
+- **Release tags are `vX.Y.Z` on main.** Others (`v1.0.0-rc.1`, a tag off
+  main) no longer build. Releases publish one at a time, and `latest`, the
+  image's and GitHub's, is always the highest version released.
+
+### Fixed (security)
+
+- **A Lapilli someone took over could have a recipe push a CI file
+  (high).** `docs/design/changes.md` assumes a stolen Lapilli: it hands the
+  recipes a document and its hash. Any file under `RULES_PATHS` with that
+  hash was written and pushed, but for a list of CI systems' names in one
+  letter case: an executable script (its mode kept), a `Makefile`, a GitLab
+  `include: local:` file, a build's configuration, a case variant of
+  `.gitlab-ci.yml`, or `RULES_PATHS` itself naming one. CI that runs on a
+  branch's push would run it with the repository's secrets before anyone
+  reviewed it. The recipes now write only to a file of rules: mode 100644,
+  named `*.yml`, `*.yaml`, `*.json` or `*.rules`, not what a CI system runs
+  (a longer list, any letter case, `RULES_PATHS` too), one document of it
+  at least a Prometheus rule file, a Grafana provisioning file, a
+  `PrometheusRule` or a `ConfigMap`, and each document read as YAML reads
+  it. And in it they change only the rules: each document as it was, or,
+  rules in both, the same but for a rule file's `groups`, a
+  `PrometheusRule`'s `spec`, or a `ConfigMap`'s entries, each changed one
+  a file of rules alone. Anything else fails, with the reason on the
+  proposal's page. (The review of the fixes found a document indented as
+  a whole, a `ClusterRoleBinding` after a `PrometheusRule`, taken unseen,
+  and a ConfigMap of rules rewritten as `aws-auth`, or a Grafana file
+  given contact points, taken for their shape; and real files refused: a
+  `ServiceMonitor` beside its `PrometheusRule`, a byte order mark, a
+  `ConfigMap` with `immutable`. All fixed before release.)
+- **A reviewed pull request could be changed under its approvals
+  (medium).** The recipes pushed their branch with `--force` and took the
+  pull request open from it: a stolen Lapilli handing an opened change out
+  again as ready, or two ledgers with the same proposal id on one
+  repository, rewrote the branch, keeping its approvals and auto-merge.
+  Now a branch is pushed only where there is none. One holding the same
+  change is a stopped run's, and taken; one holding another fails the
+  change, saying why.
+- **A team's editor could slow judging for everyone (medium).** Quiet
+  windows had no bound, and each was set beside every firing it might
+  excuse inside the ledger's one write transaction: 1,500 of a team's took
+  re-judging 20,000 firings to about 106 s. The ledger now keeps 500
+  windows, the last 50 for editors and admins to make, and a team's
+  editors keep 20 of its windows, wherever they move them. What may
+  excuse a firing is worked out once a span: by rule and team, and, for a
+  window repeating by its schedule, the times it falls due in the span,
+  which each firing is set beside by a search. A day's 10,000 firings
+  recorded beside 500 windows that fall due in it take 0.63 s (0.34 s
+  beside none; 25.9 s before), and judged again beside 500 that don't,
+  58 ms (9.5 s before).
+- **The release job held every write permission while it ran the
+  repository's code (medium),** and restored a Go cache main's CI wrote.
+  `release.yml` is now three jobs: `build`, which may write nothing and
+  restores no cache (`go mod verify` before building); `verify`; and
+  `publish`, which runs none of the repository's code, checks each file's
+  sha256, and alone has the write permissions. The assets, attestations,
+  Sigstore bundles and immutability are as before. A dry run
+  (`gh workflow run release.yml --ref main -f version=vX.Y.Z`) builds and
+  verifies and never publishes. Helm is pinned by version and sha256,
+  BuildKit by digest, and `latest` is tagged only once the release is out,
+  one release at a time, and only to the highest version.
+- **`--prometheus` followed redirects (low).** Whatever answered as the
+  Prometheus could send the query elsewhere, a bearer token to the same
+  host's other ports, and with `--auth aws` the session token to any host.
+  It now follows none, as every other client already did, and gives up on
+  a request after five minutes.
+- **A deleted task's id was given again (low).** The next task, maybe
+  another team's, took over the deleted one's tracker issue: its comments
+  both ways, and its close. Schema 016 makes task ids never repeat, and a
+  proposal made into a deleted task is made into none. Upgrading, new ids
+  start past the highest the ledger still knows was given (its tasks, the
+  changes it keeps noted of tasks, the proposals made into them): a task
+  deleted with none made after it, whose changes `--keep` has dropped
+  since, leaves no trace, and its id can be given once more, its issue
+  taken. The tracker recipes don't yet hold an issue to its task's time
+  (`docs/design/trackers.md`).
+- **The digest's preview skipped the one-heavy-request-at-a-time turn
+  (low),** a regression of 0.25: any viewer could ask for many at once. It
+  now waits its turn, as a report's preview does.
+- **A recipe run pushed as many branches as it was handed (low).** Now
+  `MAX_CHANGES`, 10 by default; the rest wait, and the run says so.
+- **What a server answered reached a recipe's log raw (low),** escape
+  sequences and all. It is now shown as a JSON string.
+- **A token alone as `CLONE`'s user passed (low),** into git's argv and
+  `.git/config`. Any user in an http or https `CLONE` is now refused.
+- **The chart's NetworkPolicy limited only what comes in (low).**
+  `serve.networkPolicy.egress` limits where the pod may connect, the
+  cluster's DNS and what `to` names; off by default.
+- **A cloud's identity reached the rules history's init containers
+  (low),** which run git and `render` on a repository's content. The pod
+  no longer mounts the service account's token anywhere but lapilli's own
+  container (and there only for a cloud's identity), and EKS's and Azure's
+  webhooks pass the init containers over. GKE's metadata server answers
+  every container; the chart's README says what that means.
+- **The chart ran its image by tag (low),** which can be moved. A
+  release's chart now runs its image by digest (`image.digest`), and
+  refuses another tag kept with its own digest.
+- **`serve.trackers.image` took a tag (low),** though the docs asked for a
+  digest. It must be `NAME@sha256:...` now.
+
+### Documented
+
+- `--mcp-compare` also sends the LogQL an agent wrote, for a rule kept in
+  Loki, with Lapilli's token.
+- Grafana's writes are scoped by the token alone: what an Editor's, limited
+  by folder, and an Admin's, needed to turn a rule off, reach.
+- Azure's metric and activity log alerts have no etag to write against:
+  what may be written over between Lapilli's read and its write.
+
 ## [0.28.0] - 2026-11-11
 
 Rules written in LogQL, replayed against Loki (docs/design/loki.md); the UI

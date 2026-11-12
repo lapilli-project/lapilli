@@ -297,7 +297,12 @@ only if the etag you provide matches the resource's current etag value").
 Azure's log search alerts carry an `etag` the specification describes in
 general terms only. CloudWatch and Google have none: as with Mimir, nothing
 stops another write landing between Lapilli's read and its own, a request
-or two apart.
+or two apart. Nor have Azure's metric and activity log alerts: their
+specification (`metricAlert` 2026-01-01) gives the resource no `etag` and
+`PATCH` no `If-Match` (checked again for 0.28.1). Their `PATCH` sends the
+properties changed alone, so another write to other properties in that
+window stands; one to the same property, or to a metric alert's
+`criteria`, written whole, is written over.
 
 ### Amazon CloudWatch
 

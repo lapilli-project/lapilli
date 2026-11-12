@@ -162,7 +162,15 @@ As above, with these settled in the building:
   the issue's creator, Linear's viewer) and, where labels are given by
   name, labelled `lapilli`: anyone who can file an issue can write
   `lapilli-task-ID` in it, and ids come one after another, so an issue
-  filed ahead for the next task would otherwise be taken for its.
+  filed ahead for the next task would otherwise be taken for its. A
+  task's id is never another's again (schema 016, 0.28.1): before, a new
+  task given a deleted one's id took over its issue. A ledger upgraded to
+  016 gives new tasks ids past the highest it still knows was given, from
+  its tasks, the changes it keeps noted of tasks, and the proposals made
+  into them; a task deleted, with no task made after it, whose changes
+  `--keep` has dropped since, leaves no trace: its id can be given once
+  more, and its issue taken. The recipes
+  don't yet hold an issue to the task's time.
 - **Only the recipe's own marker.** The task's text is written into its
   issue as it is, an editor's or an agent's in a proposal, so it may name
   another task's marker, even as the very line the recipe writes. That

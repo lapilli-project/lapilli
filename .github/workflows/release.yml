@@ -1,45 +1,115 @@
 name: release
 
-# Push a tag vX.Y.Z whose section is in CHANGELOG.md. This builds lapilli for
-# macOS and Linux, amd64 and arm64; stops if govulncheck finds a known
-# vulnerability in the code or the binaries; pushes an image holding the Linux binaries
-# to ghcr.io/lapilli-project/lapilli and the Helm chart to
-# oci://ghcr.io/lapilli-project/charts/lapilli; attests the archives,
-# SHA256SUMS, the chart and the image; and publishes a GitHub release with the
-# CHANGELOG section as its notes, and the attestations' Sigstore bundles as
-# lapilli-vX.Y.Z.intoto.jsonl, so they can be checked without GitHub's
-# attestation store (SECURITY.md).
+# Push a tag vX.Y.Z on main whose section is in CHANGELOG.md. Three jobs:
+#
+# - build runs the repository's code, so it can write nothing. It tests,
+#   builds lapilli for macOS and Linux, amd64 and arm64, and stops if
+#   govulncheck finds a known vulnerability in the code or the binaries. It
+#   builds the image holding the Linux binaries as an OCI archive, without
+#   pushing it, and packages the Helm chart with that image's digest. It hands
+#   all of it on as an artifact, with the sha256 of each file.
+# - verify checks what build handed on. It can write nothing either, and
+#   runs none of the repository's code.
+# - publish, on a pushed tag only, runs none of the repository's code. It
+#   checks each sha256 again, pushes the image to
+#   ghcr.io/lapilli-project/lapilli and the chart to
+#   oci://ghcr.io/lapilli-project/charts/lapilli, attests the archives,
+#   SHA256SUMS, the chart and the image, and publishes a GitHub release with
+#   the CHANGELOG section as its notes, and the attestations' Sigstore
+#   bundles as lapilli-vX.Y.Z.intoto.jsonl, so they can be checked without
+#   GitHub's attestation store (SECURITY.md). The image is tagged latest last.
+#
+# A dry run, before tagging: run this workflow on main with the version,
+#
+#   gh workflow run release.yml --ref main -f version=vX.Y.Z
+#
+# build and verify run as for a release; publish doesn't run, so nothing is
+# pushed, attested or released.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The version to build, vX.Y.Z, with its section in CHANGELOG.md. Nothing is published."
+        required: true
+        type: string
 
 permissions:
   contents: read
 
+env:
+  IMAGE: ghcr.io/lapilli-project/lapilli
+  # Helm by version and the sha256 of its download, from
+  # https://get.helm.sh/helm-VERSION-linux-amd64.tar.gz.sha256sum.
+  HELM_VERSION: v4.3.1
+  HELM_SHA256: 0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b
+
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write      # create the release
-      packages: write      # push the image and the chart to ghcr.io
-      id-token: write      # the OIDC token attest-build-provenance signs with
-      attestations: write  # store the provenance on this repository
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      image-digest: ${{ steps.image-digest.outputs.digest }}
+      files: ${{ steps.hand-on.outputs.files }}
     steps:
+      # The tag's name, or in a dry run the version asked for.
+      - name: Version
+        id: version
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="$DISPATCH_VERSION"
+          fi
+          if ! [[ "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::The version must be vX.Y.Z"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+      # A release is built from main: the commit tagged, or in a dry run the
+      # commit run, must be on main. The repository is public, so main is
+      # fetched without credentials.
+      - name: On main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_SHA is not on main"
+            exit 1
+          fi
       # The newest Go, not go.mod's minimum: a binary carries the standard
-      # library it was built with, fixes and all.
+      # library it was built with, fixes and all. No cache: setup-go would
+      # restore the modules and builds that main's CI saved, and a release
+      # starts from nothing another workflow wrote.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: stable
           check-latest: true
-      - run: go vet ./... && go test ./...
-      - name: Build
+          cache: false
+      # The modules, downloaded afresh, are checked against go.sum as they
+      # come, and again as they lie in the module cache.
+      - name: Modules
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
+          go mod download
+          go mod verify
+      - run: go vet ./... && go test ./...
+      - name: Build
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="$VERSION"
           mkdir -p dist
           for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do
             os="${target%/*}"; arch="${target#*/}"
@@ -71,63 +141,296 @@ jobs:
             "$govulncheck" -mode=binary "$b"
           done
       - name: Release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${VERSION#v}"
           awk -v v="$version" '
             /^## \[/ { on = index($0, "[" v "]") > 0; next }
             on' CHANGELOG.md > dist/notes.md
           test -s dist/notes.md || { echo "::error::CHANGELOG.md has no section [$version]"; exit 1; }
+      # BuildKit by its digest, not by the tag setup-buildx-action pulls.
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
+          driver-opts: image=moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
+      # Written as an OCI archive, not pushed: publish pushes the archive as
+      # it is. The provenance BuildKit adds by default (mode=max, a public
+      # repository) is in the archive's index, as it was in a pushed one.
       - name: Image
         id: image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/lapilli-project/lapilli:${{ github.ref_name }}
-            ghcr.io/lapilli-project/lapilli:latest
+          outputs: type=oci,dest=dist/lapilli-image.oci.tar
+          tags: ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
           labels: |
             org.opencontainers.image.source=https://github.com/lapilli-project/lapilli
-            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
             org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.description=Judge alert rules against what actually went wrong
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
+      # The digest of the image index, as the archive's index.json names it
+      # and the index's own bytes hash to. The registry will hold the same
+      # bytes, so the same digest: the chart is given it before it is packaged.
+      - name: Image digest
+        id: image-digest
+        env:
+          BUILT: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          layout="$RUNNER_TEMP/image"
+          mkdir "$layout"
+          tar -xf dist/lapilli-image.oci.tar -C "$layout"
+          jq -e '.manifests | length == 1 and .[0].mediaType == "application/vnd.oci.image.index.v1+json"' \
+            "$layout/index.json" >/dev/null
+          digest="$(jq -r '.manifests[0].digest' "$layout/index.json")"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$(sha256sum < "$layout/blobs/sha256/${digest#sha256:}" | cut -d' ' -f1)" = "${digest#sha256:}"
+          # The digest BuildKit said it wrote.
+          test "$digest" = "$BUILT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Helm
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/helm"
+          mkdir "$dir"
+          curl -fsSLo "$dir/helm.tar.gz" "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  $dir/helm.tar.gz" | sha256sum --strict -c -
+          tar -xzf "$dir/helm.tar.gz" -C "$dir" --strip-components=1 linux-amd64/helm
+          echo "$dir" >> "$GITHUB_PATH"
+      - name: Chart
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DIGEST: ${{ steps.image-digest.outputs.digest }}
+        run: |
+          set -euo pipefail
+          test "$(command -v helm)" = "$RUNNER_TEMP/helm/helm"
+          chart=charts/lapilli
+          # The image Artifact Hub scans for this chart version.
+          sed -i "s|ghcr.io/lapilli-project/lapilli:dev$|ghcr.io/lapilli-project/lapilli:${VERSION}|" "$chart/Chart.yaml"
+          grep -q "ghcr.io/lapilli-project/lapilli:${VERSION}$" "$chart/Chart.yaml"
+          # The image the pods run, by the digest of the one built here:
+          # image.digest in values.yaml, and the chart's own annotation.
+          test "$(grep -c '^  digest: ""$' "$chart/values.yaml")" -eq 1
+          test "$(grep -c '^  lapilli.dev/image-digest: ""$' "$chart/Chart.yaml")" -eq 1
+          sed -i "s|^  digest: \"\"$|  digest: \"${DIGEST}\"|" "$chart/values.yaml"
+          sed -i "s|^  lapilli.dev/image-digest: \"\"$|  lapilli.dev/image-digest: \"${DIGEST}\"|" "$chart/Chart.yaml"
+          test "$(grep -c "^  digest: \"${DIGEST}\"$" "$chart/values.yaml")" -eq 1
+          test "$(grep -c "^  lapilli.dev/image-digest: \"${DIGEST}\"$" "$chart/Chart.yaml")" -eq 1
+          # And nothing else: one line changed in values.yaml, two in
+          # Chart.yaml.
+          test "$(git diff --numstat -- "$chart/values.yaml")" = "$(printf '1\t1\t%s' "$chart/values.yaml")"
+          test "$(git diff --numstat -- "$chart/Chart.yaml")" = "$(printf '2\t2\t%s' "$chart/Chart.yaml")"
+          helm lint "$chart" --set prometheus.url=http://prometheus:9090 \
+            --set 'rules.configMaps={rules}' --set impact=up
+          helm lint "$chart" --set mode=serve --set prometheus.url=http://prometheus:9090 \
+            --set 'rules.configMaps={rules}' --set serve.serviceMonitor.enabled=true --set dashboard.enabled=true
+          helm package "$chart" --destination dist \
+            --version "${VERSION#v}" --app-version "$VERSION"
+          # The packaged chart runs that image, by its digest, in either mode.
+          want="image: \"ghcr.io/lapilli-project/lapilli:${VERSION}@${DIGEST}\""
+          for mode in cronjob serve; do
+            got="$(helm template r "dist/lapilli-${VERSION#v}.tgz" --set mode="$mode" \
+              --set prometheus.url=http://prometheus:9090 --set 'rules.configMaps={rules}' --set impact=up |
+              grep -o 'image: "ghcr\.io/lapilli-project/lapilli[^"]*"')"
+            test "$got" = "$want"
+          done
+      # Everything publish needs, in one directory, and the sha256 of each
+      # file as this job's output: verify and publish check them.
+      - name: Hand on
+        id: hand-on
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir dist/release
+          mv dist/lapilli-*.tar.gz dist/SHA256SUMS dist/notes.md "dist/lapilli-${VERSION#v}.tgz" \
+            dist/lapilli-image.oci.tar dist/release/
+          cd dist/release
+          sha256sum -- *
+          {
+            echo 'files<<EOF'
+            sha256sum -- *
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: release
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 7
+          # The archives, the chart and the image's layers are compressed
+          # already.
+          compression-level: 0
+
+  # What build handed on, checked by a job that can write nothing and runs
+  # none of the repository's code. A dry run ends here.
+  verify:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      DIGEST: ${{ needs.build.outputs.image-digest }}
+      FILES: ${{ needs.build.outputs.files }}
+    steps:
+      # The artifact of this run, fetched with the runner's own token; this
+      # job's GITHUB_TOKEN has no permissions.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: release
+          path: release
+      - name: Files
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          cd release
+          # The files a release has, all of them handed on and no others,
+          want="$(printf '%s\n' "lapilli-${VERSION}-darwin-amd64.tar.gz" "lapilli-${VERSION}-darwin-arm64.tar.gz" \
+            "lapilli-${VERSION}-linux-amd64.tar.gz" "lapilli-${VERSION}-linux-arm64.tar.gz" \
+            "lapilli-${VERSION#v}.tgz" SHA256SUMS notes.md lapilli-image.oci.tar | sort)"
+          test "$(printf '%s\n' "$FILES" | awk '{print $2}' | sort)" = "$want"
+          test "$(find . -mindepth 1 -printf '%P\n' | sort)" = "$want"
+          # each the file build hashed,
+          printf '%s\n' "$FILES" | sha256sum --strict -c -
+          # the four archives as SHA256SUMS has them,
+          test "$(wc -l < SHA256SUMS)" -eq 4
+          sha256sum --strict -c SHA256SUMS
+          # and the release's notes.
+          test -s notes.md
+      - name: Image
+        run: |
+          set -euo pipefail
+          layout="$RUNNER_TEMP/image"
+          mkdir "$layout"
+          tar -xf release/lapilli-image.oci.tar -C "$layout"
+          # One image index, the one build handed on,
+          jq -e --arg d "$DIGEST" \
+            '.manifests | length == 1 and .[0].digest == $d and .[0].mediaType == "application/vnd.oci.image.index.v1+json"' \
+            "$layout/index.json" >/dev/null
+          # every blob what its name says, the index among them,
+          for blob in "$layout"/blobs/sha256/*; do
+            test "$(sha256sum < "$blob" | cut -d' ' -f1)" = "${blob##*/}"
+          done
+          index="$layout/blobs/sha256/${DIGEST#sha256:}"
+          # for linux/amd64 and linux/arm64 (the index's other manifests are
+          # BuildKit's provenance, one for each),
+          jq -e '[.manifests[].platform | select(.os != "unknown") | .os + "/" + .architecture] | sort == ["linux/amd64", "linux/arm64"]' \
+            "$index" >/dev/null
+          # each labelled with this version.
+          jq -r '.manifests[] | select(.platform.os != "unknown") | .digest' "$index" |
+            while read -r manifest; do
+              config="$(jq -r '.config.digest' "$layout/blobs/sha256/${manifest#sha256:}")"
+              jq -e --arg v "$VERSION" '.config.Labels["org.opencontainers.image.version"] == $v' \
+                "$layout/blobs/sha256/${config#sha256:}" >/dev/null
+            done
+      - name: Chart
+        run: |
+          set -euo pipefail
+          chart="release/lapilli-${VERSION#v}.tgz"
+          tar -xzOf "$chart" lapilli/Chart.yaml > "$RUNNER_TEMP/Chart.yaml"
+          tar -xzOf "$chart" lapilli/values.yaml > "$RUNNER_TEMP/values.yaml"
+          # This version's chart,
+          grep -qx "version: ${VERSION#v}" "$RUNNER_TEMP/Chart.yaml"
+          grep -qx "appVersion: ${VERSION}" "$RUNNER_TEMP/Chart.yaml"
+          # running the image build handed on, by its digest: image.digest in
+          # values.yaml (packaged as it is), and the chart's own annotation
+          # (which helm package writes anew, without the quotes).
+          test "$(grep -c "^  digest: \"${DIGEST}\"$" "$RUNNER_TEMP/values.yaml")" -eq 1
+          test "$(grep -cE "^  lapilli\.dev/image-digest: \"?${DIGEST}\"?$" "$RUNNER_TEMP/Chart.yaml")" -eq 1
+
+  publish:
+    # Only a pushed tag publishes: a dry run never starts this job, the only
+    # one that can write.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [build, verify]
+    # One publish at a time, none cancelled: two tags pushed close together
+    # publish one after the other, and the newer is latest whichever comes
+    # last (Newest). A dry run has no publish job, so never waits here.
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # create the release
+      packages: write      # push the image and the chart to ghcr.io
+      id-token: write      # the OIDC token attest-build-provenance signs with
+      attestations: write  # store the provenance on this repository
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      DIGEST: ${{ needs.build.outputs.image-digest }}
+      FILES: ${{ needs.build.outputs.files }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: release
+          path: release
+      # The files verify checked, by their sha256, for the tag this run is for.
+      - name: Files
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/tags/$VERSION"
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          cd release
+          test "$(find . -mindepth 1 -printf '%P\n' | sort)" = "$(printf '%s\n' "$FILES" | awk '{print $2}' | sort)"
+          printf '%s\n' "$FILES" | sha256sum --strict -c -
+      - name: Helm
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/helm"
+          mkdir "$dir"
+          curl -fsSLo "$dir/helm.tar.gz" "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  $dir/helm.tar.gz" | sha256sum --strict -c -
+          tar -xzf "$dir/helm.tar.gz" -C "$dir" --strip-components=1 linux-amd64/helm
+          echo "$dir" >> "$GITHUB_PATH"
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      # The archive build wrote, pushed under the version's tag only, by the
+      # runner's skopeo: --preserve-digests copies the index and all it lists
+      # byte for byte, or fails, and nothing else is tagged. The registry then
+      # gives back the digest build wrote into the chart, or nothing more is
+      # published.
+      - name: Image
+        run: |
+          set -euo pipefail
+          skopeo --version
+          tar -xOf release/lapilli-image.oci.tar index.json |
+            jq -e --arg d "$DIGEST" '.manifests | length == 1 and .[0].digest == $d' >/dev/null
+          # What skopeo may copy from: this archive, checked by its sha256, and
+          # this image, by its digest; nothing else.
+          echo '{"default": [{"type": "reject"}], "transports": {
+            "oci-archive": {"": [{"type": "insecureAcceptAnything"}]},
+            "docker": {"ghcr.io/lapilli-project/lapilli": [{"type": "insecureAcceptAnything"}]}}}' > "$RUNNER_TEMP/policy.json"
+          skopeo --policy "$RUNNER_TEMP/policy.json" copy --all --preserve-digests \
+            --authfile "$HOME/.docker/config.json" \
+            oci-archive:release/lapilli-image.oci.tar "docker://$IMAGE:$VERSION"
+          got="$(skopeo inspect --raw --authfile "$HOME/.docker/config.json" "docker://$IMAGE:$VERSION" | sha256sum | cut -d' ' -f1)"
+          test "sha256:$got" = "$DIGEST"
       - name: Chart
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # The image Artifact Hub scans for this chart version.
-          sed -i "s|ghcr.io/lapilli-project/lapilli:dev$|ghcr.io/lapilli-project/lapilli:${GITHUB_REF_NAME}|" charts/lapilli/Chart.yaml
-          grep -q "ghcr.io/lapilli-project/lapilli:${GITHUB_REF_NAME}$" charts/lapilli/Chart.yaml
-          helm lint charts/lapilli --set prometheus.url=http://prometheus:9090 \
-            --set 'rules.configMaps={rules}' --set impact=up
-          helm lint charts/lapilli --set mode=serve --set prometheus.url=http://prometheus:9090 \
-            --set 'rules.configMaps={rules}' --set serve.serviceMonitor.enabled=true --set dashboard.enabled=true
-          helm package charts/lapilli --destination dist \
-            --version "${GITHUB_REF_NAME#v}" --app-version "$GITHUB_REF_NAME"
+          test "$(command -v helm)" = "$RUNNER_TEMP/helm/helm"
           echo "$GH_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          helm push "dist/lapilli-${GITHUB_REF_NAME#v}.tgz" oci://ghcr.io/lapilli-project/charts
+          helm push "release/lapilli-${VERSION#v}.tgz" oci://ghcr.io/lapilli-project/charts
       - id: attest-files
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
           subject-path: |
-            dist/lapilli-*.tar.gz
-            dist/lapilli-*.tgz
-            dist/SHA256SUMS
+            release/lapilli-*.tar.gz
+            release/lapilli-*.tgz
+            release/SHA256SUMS
       - id: attest-image
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
           subject-name: ghcr.io/lapilli-project/lapilli
-          subject-digest: ${{ steps.image.outputs.digest }}
+          subject-digest: ${{ needs.build.outputs.image-digest }}
           push-to-registry: true
       # Each attestation step writes its Sigstore bundle, one JSON object on
       # one line, to a file of its own under RUNNER_TEMP (bundle-path). The
@@ -140,16 +443,45 @@ jobs:
           IMAGE_BUNDLE: ${{ steps.attest-image.outputs.bundle-path }}
         run: |
           set -euo pipefail
-          out="dist/lapilli-${GITHUB_REF_NAME}.intoto.jsonl"
+          out="release/lapilli-${VERSION}.intoto.jsonl"
           cat "$FILES_BUNDLE" "$IMAGE_BUNDLE" > "$out"
           # Two lines, each a Sigstore bundle, or nothing is published.
           test "$(wc -l < "$out")" -eq 2
           jq -e -s 'length == 2 and all(.[]; (.mediaType | startswith("application/vnd.dev.sigstore.bundle")) and .dsseEnvelope.payloadType == "application/vnd.in-toto+json")' "$out" >/dev/null
       # Seven assets: four archives, the chart, SHA256SUMS and the bundles.
+      # Whether this version is the newest released, by version, not by
+      # when it came: an older tag published after a newer one is neither
+      # GitHub's latest release nor the image's latest tag.
+      - name: Newest
+        id: newest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          highest="$( { gh release list --exclude-drafts --exclude-pre-releases --limit 1000 --json tagName --jq '.[].tagName'
+            echo "$VERSION"; } | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | sort -V | tail -1)"
+          if [ "$highest" = "$VERSION" ]; then newest=true; else newest=false; fi
+          echo "$VERSION; the newest released: $highest"
+          echo "newest=$newest" >> "$GITHUB_OUTPUT"
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NEWEST: ${{ steps.newest.outputs.newest }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" \
-            --notes-file dist/notes.md dist/lapilli-*.tar.gz dist/lapilli-*.tgz dist/SHA256SUMS \
-            "dist/lapilli-${GITHUB_REF_NAME}.intoto.jsonl"
+          set -euo pipefail
+          gh release create "$VERSION" --verify-tag --title "$VERSION" --latest="$NEWEST" \
+            --notes-file release/notes.md release/lapilli-*.tar.gz release/lapilli-*.tgz release/SHA256SUMS \
+            "release/lapilli-${VERSION}.intoto.jsonl"
+      # latest moves only once the release is out, to the same digest, and
+      # only to the newest version.
+      - name: Latest
+        if: steps.newest.outputs.newest == 'true'
+        run: |
+          set -euo pipefail
+          skopeo --policy "$RUNNER_TEMP/policy.json" copy --all --preserve-digests \
+            --authfile "$HOME/.docker/config.json" \
+            "docker://$IMAGE@$DIGEST" "docker://$IMAGE:latest"
+          got="$(skopeo inspect --raw --authfile "$HOME/.docker/config.json" "docker://$IMAGE:latest" | sha256sum | cut -d' ' -f1)"
+          test "sha256:$got" = "$DIGEST"

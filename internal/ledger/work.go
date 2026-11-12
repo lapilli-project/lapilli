@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"regexp/syntax"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -501,14 +502,7 @@ func (w Window) Covers(t time.Time) bool {
 		if w.sch == nil {
 			return false
 		}
-		at := t
-		if !w.Until.IsZero() {
-			u := w.Until.In(loc)
-			if end := time.Date(u.Year(), u.Month(), u.Day()+1, 0, 0, 0, 0, loc).Add(-time.Nanosecond); at.After(end) {
-				at = end
-			}
-		}
-		due := w.sch.Last(at, loc)
+		due := w.sch.Last(w.lastAt(t), loc)
 		if due.IsZero() || due.Before(w.Start) {
 			return false
 		}
@@ -571,10 +565,208 @@ func (w Window) Through(now time.Time) time.Time { return unix(w.span(now)[1]) }
 // maxWindow is the longest a quiet window can last.
 const maxWindow = 31 * 24 * time.Hour
 
+// MaxWindows is how many quiet windows the ledger keeps, the last
+// EditorWindows of them for editors and admins to make; MaxTeamWindows,
+// how many of a team's its editors may make. Each window is looked at for
+// every firing that caught nothing it may excuse, each time stones are
+// given, in the ledger's one write transaction: a team's editors, who may
+// change the least, can't make that slow for everyone.
+const (
+	MaxWindows     = 500
+	EditorWindows  = 50
+	MaxTeamWindows = 20
+)
+
+// windowsLeft refuses a new quiet window past the limits, for a team's
+// editors those of a team's editors.
+func windowsLeft(t *txn, team int64) error {
+	var own, all int
+	if err := t.QueryRowContext(t.ctx, "SELECT count(*) FILTER (WHERE team_id = ?), count(*) FROM windows", team).Scan(&own, &all); err != nil {
+		return err
+	}
+	_, limited := scopeOf(t.ctx)
+	switch {
+	case all >= MaxWindows:
+		return invalid("the ledger keeps %d quiet windows at most: delete those no longer needed", MaxWindows)
+	case limited && own >= MaxTeamWindows:
+		return invalid("a team's editors keep %d of its quiet windows at most; an editor or an admin can keep more", MaxTeamWindows)
+	case limited && all >= MaxWindows-EditorWindows:
+		return invalid("the last %d quiet windows the ledger keeps are for editors and admins to make", EditorWindows)
+	}
+	return nil
+}
+
+// mayCover reports whether the window may cover a time in [lo, hi]: false
+// only when it covers none. Every repeat by a schedule lasts as long, so
+// when the last to start by hi (by the end of Until's day, when that is
+// earlier) ends before lo, or starts before the window does, every other
+// one does too. One schedule lookup a span, not one a firing: a schedule
+// that falls due once a year looks back up to a year each time.
+func (w Window) mayCover(lo, hi time.Time) bool {
+	if !w.scheduled() {
+		return true
+	}
+	loc := w.where()
+	w.resolve()
+	if w.sch == nil {
+		return false
+	}
+	due := w.sch.Last(w.lastAt(hi), loc)
+	return !due.IsZero() && !due.Before(w.Start) && !due.Add(w.End.Sub(w.Start)).Before(lo)
+}
+
+// lastAt is t, or the end of Until's day when that is earlier: a window
+// repeating by its schedule repeats last on Until's day.
+func (w Window) lastAt(t time.Time) time.Time {
+	if w.Until.IsZero() {
+		return t
+	}
+	loc := w.where()
+	u := w.Until.In(loc)
+	if end := time.Date(u.Year(), u.Month(), u.Day()+1, 0, 0, 0, 0, loc).Add(-time.Nanosecond); t.After(end) {
+		return end
+	}
+	return t
+}
+
+// dueMost is how many repeats of a window a span works out at most: past
+// it, each firing asks Covers.
+const dueMost = 20_000
+
+// repeats are the times a window repeating by its schedule falls due whose
+// repeat may cover a time in [from, to], the earliest first, worked out
+// once a span: Covers looks back, for each firing, to the last time the
+// schedule fell due, up to a year for one that falls due once a year.
+// They are the times Covers would find, in order: the last by to, and
+// each one before it, back to the window's start or one ending before
+// from. ok is false past dueMost.
+func (w Window) repeats(from, to time.Time) (due []time.Time, ok bool) {
+	loc := w.where()
+	w.resolve()
+	if w.sch == nil {
+		return nil, true
+	}
+	floor := from.Add(-w.End.Sub(w.Start))
+	for d := w.sch.Last(w.lastAt(to), loc); !d.IsZero() && !d.Before(w.Start) && !d.Before(floor); d = w.sch.Prev(d, loc) {
+		if len(due) == dueMost {
+			return nil, false
+		}
+		due = append(due, d)
+	}
+	slices.Reverse(due)
+	return due, true
+}
+
+// Excusing says whether one of the quiet windows ws excuses a firing, as
+// Excuses does, for the firings of a span, [from, to]. What can is worked
+// out once for the span: for a window repeating by its schedule, the
+// times it falls due whose repeat may cover a time in the span (none: it
+// is passed over), which a firing that starts in the span is set beside
+// by a search; and the windows are sorted, once for each rule and the
+// team that owns its alert, into those whose pattern and team the firing's
+// may be, so each firing is set beside those alone.
+func Excusing(ws []Window, from, to time.Time) func(firing.Firing) bool {
+	q := &excusing{from: from, to: to, by: map[excusingKey][]int{}}
+	for _, w := range ws {
+		if w.TeamID < 0 {
+			continue // a removed team's window excuses nothing
+		}
+		w.resolve()
+		var due []time.Time
+		known, covers := false, true
+		if w.scheduled() {
+			due, known = w.repeats(from, to)
+			covers = len(due) > 0
+			if !known {
+				covers = w.mayCover(from, to)
+			}
+		}
+		q.ws = append(q.ws, w)
+		q.due = append(q.due, due)
+		q.known = append(q.known, known)
+		q.covers = append(q.covers, covers)
+		if w.TeamID > 0 {
+			q.own = w.own
+		}
+	}
+	return q.excuses
+}
+
+type excusingKey struct {
+	rule string
+	team int64
+	// outside is a firing that started outside the span: every window
+	// that may be its is looked at.
+	outside bool
+}
+
+type excusing struct {
+	from, to time.Time
+	ws       []Window
+	covers   []bool // whether each window may cover a time in the span
+	// due are, for a window repeating by its schedule, known, the times
+	// it falls due whose repeat may cover a time in the span, in order.
+	due   [][]time.Time
+	known []bool
+	own   *ownership // nil when no window is a team's
+	by    map[excusingKey][]int
+}
+
+func (q *excusing) excuses(f firing.Firing) bool {
+	if len(q.ws) == 0 {
+		return false
+	}
+	k := excusingKey{rule: f.Rule, outside: f.Start.Before(q.from) || f.Start.After(q.to)}
+	if q.own != nil {
+		k.team = q.own.of(f.Rule, f.Labels)
+	}
+	is, ok := q.by[k]
+	if !ok {
+		for i, w := range q.ws {
+			if (k.outside || q.covers[i]) && (w.TeamID == 0 || w.TeamID == k.team) && (w.re == nil || w.re.MatchString(f.Rule)) {
+				is = append(is, i)
+			}
+		}
+		q.by[k] = is
+	}
+	for _, i := range is {
+		w := q.ws[i]
+		if k.outside || !q.known[i] {
+			if w.Excuses(f) {
+				return true
+			}
+			continue
+		}
+		if w.matches(f) && covered(q.due[i], w, f.Start) {
+			return true
+		}
+	}
+	return false
+}
+
+// covered reports whether t is in the repeat of w that started last by t,
+// of those due, as Covers says. They are those by the end of Until's day
+// already.
+func covered(due []time.Time, w Window, t time.Time) bool {
+	if t.Before(w.Start) {
+		return false
+	}
+	i := sort.Search(len(due), func(i int) bool { return due[i].After(t) }) - 1
+	return i >= 0 && !t.After(due[i].Add(w.End.Sub(w.Start)))
+}
+
 // Excuses reports whether the window excuses a firing that caught
 // nothing: it started in the window, its rule matches, and it has each
 // label the window names, with one of its values.
 func (w Window) Excuses(f firing.Firing) bool {
+	// Last for a repeating window: working out its repeat costs the most.
+	return w.matches(f) && (w.Every == "" || w.Covers(f.Start))
+}
+
+// matches reports whether the window excuses a firing as Excuses does but
+// for when a repeating window falls due: a window's own time, if it
+// doesn't repeat, its pattern, its labels and its team.
+func (w Window) matches(f firing.Firing) bool {
 	if w.Every == "" && (f.Start.Before(w.Start) || f.Start.After(w.End)) {
 		return false
 	}
@@ -604,8 +796,7 @@ func (w Window) Excuses(f firing.Firing) bool {
 	case w.TeamID > 0 && (w.own == nil || w.own.of(f.Rule, f.Labels) != w.TeamID):
 		return false
 	}
-	// Last for a repeating window: working out its repeat costs the most.
-	return w.Every == "" || w.Covers(f.Start)
+	return true
 }
 
 // sameStones reports whether two windows excuse the same firings.
@@ -757,6 +948,9 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 		spans := [][2]int64{w.span(time.Now())}
 		now := time.Now().Unix()
 		if id == 0 {
+			if err := windowsLeft(t, w.TeamID); err != nil {
+				return err
+			}
 			res, err := t.ExecContext(t.ctx, `INSERT INTO windows (title, start_at, end_at, every, repeat_on, until_at, team_id, rules, labels, updated, updated_by)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				w.Title, w.Start.Unix(), w.End.Unix(), w.Every, w.On, nullable(w.Until), w.TeamID, w.Rules, labelsText(w.Labels), now, by)
@@ -782,6 +976,17 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 			}
 			if err := inScope(t, was[0].TeamID); err != nil {
 				return err
+			}
+			// Moved to another of their teams, a team's window counts there:
+			// an editor of two teams can't keep forty in one.
+			if _, limited := scopeOf(t.ctx); limited && w.TeamID != was[0].TeamID {
+				var own int
+				if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM windows WHERE team_id = ?", w.TeamID).Scan(&own); err != nil {
+					return err
+				}
+				if own >= MaxTeamWindows {
+					return invalid("a team's editors keep %d of its quiet windows at most; an editor or an admin can keep more", MaxTeamWindows)
+				}
 			}
 			spans = append(spans, was[0].span(time.Now()))
 			if sameStones(was[0], w) { // a new title, say: no stone changes
@@ -1184,6 +1389,11 @@ func (l *Ledger) DeleteTask(ctx context.Context, id int64, by string) error {
 			return ErrNotFound
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM comments WHERE on_kind = 'task' AND on_key = ?", fmt.Sprint(id)); err != nil {
+			return err
+		}
+		// A proposal made into it is made into none: its id isn't
+		// another's again (schema 016), and no other task is the proposal's.
+		if _, err := t.ExecContext(t.ctx, "UPDATE proposals SET task_id = NULL WHERE task_id = ?", id); err != nil {
 			return err
 		}
 		return change(t, by, fmt.Sprintf("task %d deleted", id), nil, nil)

@@ -604,3 +604,27 @@ func TestReportPreviewTakesTurn(t *testing.T) {
 		t.Errorf("once the turn is given back: %d %s", code, body)
 	}
 }
+
+// The weekly digest's preview counts the week's firings by the hours as a
+// report's does (a regression of 0.25, which made it): it waits for the
+// same one turn, so anyone who can see the reports, a viewer, can't make
+// many at once, each with a query string of its own past the cache.
+func TestDigestPreviewTakesTurn(t *testing.T) {
+	rv := newReceiver(t)
+	s := reportServer(t, rv, func(c *Config) { c.Options.Hours = verdict.DefaultHours(time.UTC) })
+	h := s.Handler()
+	was := busyWait
+	defer func() { busyWait = was }()
+	busyWait = 50 * time.Millisecond
+	s.heavy <- struct{}{} // another heavy request holds the turn
+	if code, body := api(t, h, "GET", "/api/v1/reports/digest/preview?x=1", ""); code != http.StatusServiceUnavailable {
+		t.Errorf("the digest's preview while the turn is held: %d %s", code, body)
+	}
+	if code, body, _ := get(t, h, "/reports/digest?x=2"); code != http.StatusOK || !strings.Contains(body, "busy with another large request") {
+		t.Errorf("its page while the turn is held: %d %s", code, body)
+	}
+	<-s.heavy
+	if code, body := api(t, h, "GET", "/api/v1/reports/digest/preview?x=3", ""); code != http.StatusOK || !strings.Contains(body, `"numbers"`) {
+		t.Errorf("once the turn is given back: %d %s", code, body)
+	}
+}
