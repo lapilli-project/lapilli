@@ -256,7 +256,7 @@ func get(ctx context.Context, c *http.Client, u string, limit int64) ([]byte, er
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: %s", redact(u), resp.Status)
+		return nil, statusError{redact(u), resp.StatusCode}
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
@@ -266,6 +266,16 @@ func get(ctx context.Context, c *http.Client, u string, limit int64) ([]byte, er
 		return nil, fmt.Errorf("%s: more than %d bytes", redact(u), limit)
 	}
 	return b, nil
+}
+
+// statusError is an answer other than 200.
+type statusError struct {
+	url  string
+	code int
+}
+
+func (e statusError) Error() string {
+	return fmt.Sprintf("%s: %d %s", e.url, e.code, http.StatusText(e.code))
 }
 
 // redact is a URL without its query, for an error.

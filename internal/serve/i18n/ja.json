@@ -1039,5 +1039,8 @@
  "the identity provider lists more groups than a session can hold": "ID プロバイダーが示すグループが多すぎて、セッションに収まりません",
  "the sign-in names no one lapilli can take": "このログインは lapilli が受け付けられる人を示していません",
  "the identity provider didn't sign you in (%s)": "ID プロバイダーでログインできませんでした（%s）",
- "no one changes anything here: lapilli serve signs people in, with no roles. Name who may make changes in --editors or --admins": "ここでは誰も変更できません。lapilli serve はログインさせていますが、ロールがありません。変更できる人を --editors か --admins で指定してください"
+ "no one changes anything here: lapilli serve signs people in, with no roles. Name who may make changes in --editors or --admins": "ここでは誰も変更できません。lapilli serve はログインさせていますが、ロールがありません。変更できる人を --editors か --admins で指定してください",
+ "signing in isn't set up right here: ask whoever runs lapilli to look at its log": "ここではログインが正しく設定されていません。lapilli の管理者にログを確認してもらってください",
+ "the identity provider's answer doesn't name you as lapilli needs: ask whoever runs lapilli to look at its log": "ID プロバイダーの応答は、lapilli が必要とする形であなたを示していません。lapilli の管理者にログを確認してもらってください",
+ "you are signed in as %s, whom lapilli doesn't let in: ask its admins to name you": "%s としてログインしていますが、lapilli はこのアカウントを許可していません。管理者に追加を依頼してください"
 }

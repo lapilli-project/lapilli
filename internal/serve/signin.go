@@ -3,7 +3,6 @@ package serve
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,6 +16,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/coreos/go-oidc/v3/oidc"
 
 	"lapilli.dev/internal/signin"
 )
@@ -85,9 +86,11 @@ func (e *expiring) add(key string, until, now int64) bool {
 // milliseconds): every session of theirs made then or before is ended. It
 // is bounded by the people who signed out within a session's life, which
 // only the identity provider makes more of, not by how often they did.
+// The ledger holds it, for every process that shares the ledger.
 type signedOut struct {
 	sync.Mutex
 	at  map[string]int64
+	raw string // as last read from the ledger
 	max int
 }
 
@@ -96,26 +99,22 @@ type signedOut struct {
 func (o *signedOut) add(user string, at, keep int64) {
 	o.Lock()
 	defer o.Unlock()
-	if o.at == nil {
-		o.at = map[string]int64{}
+	o.at = mergeOut(o.at, map[string]int64{user: at}, at, keep, o.max)
+}
+
+// load takes in what the ledger holds, when it changed since last read.
+func (o *signedOut) load(raw string, now, keep int64) {
+	o.Lock()
+	defer o.Unlock()
+	if raw == o.raw {
+		return
 	}
-	for u, t := range o.at {
-		if t+keep < at {
-			delete(o.at, u)
-		}
+	var m map[string]int64
+	if raw != "" && json.Unmarshal([]byte(raw), &m) != nil {
+		return
 	}
-	for len(o.at) >= o.max {
-		oldest, first := "", int64(0)
-		for u, t := range o.at {
-			if oldest == "" || t < first {
-				oldest, first = u, t
-			}
-		}
-		delete(o.at, oldest)
-	}
-	if t, ok := o.at[user]; !ok || at > t {
-		o.at[user] = at
-	}
+	o.raw = raw
+	o.at = mergeOut(o.at, m, now, keep, o.max)
 }
 
 // ended reports whether a session of a person's made at a time is one they
@@ -127,12 +126,38 @@ func (o *signedOut) ended(user string, made int64) bool {
 	return ok && made <= t
 }
 
-// snapshot is the people signed out as JSON, for the ledger.
-func (o *signedOut) snapshot() string {
-	o.Lock()
-	defer o.Unlock()
-	b, _ := json.Marshal(o.at)
-	return string(b)
+// mergeOut is who signed out in a and b, each at the later time, less those
+// older than a session lasts, and, past max, the oldest.
+func mergeOut(a, b map[string]int64, now, keep int64, max int) map[string]int64 {
+	out := make(map[string]int64, len(a)+len(b))
+	for _, m := range []map[string]int64{a, b} {
+		for u, t := range m {
+			if t+keep >= now && t > out[u] {
+				out[u] = t
+			}
+		}
+	}
+	for len(out) > max {
+		oldest, first := "", int64(0)
+		for u, t := range out {
+			if oldest == "" || t < first {
+				oldest, first = u, t
+			}
+		}
+		delete(out, oldest)
+	}
+	return out
+}
+
+// signedOut reports whether a session or a token of a person's, made at a
+// time, is one they signed out of, here or at another process sharing the
+// ledger.
+func (s *Server) signedOut(ctx context.Context, user string, made int64) bool {
+	keep := s.in.cookies.MaxAge.Milliseconds()
+	if raw, err := s.l.Meta(ctx, metaSignedOut); err == nil {
+		s.in.out.load(raw, s.now().UnixMilli(), keep)
+	}
+	return s.in.out.ended(user, made)
 }
 
 // who is who a request comes from, as the sign-in said, and how: by a
@@ -157,17 +182,17 @@ func whoOf(r *http.Request) (who, bool) {
 	return w, ok
 }
 
-// Meta keys of the sign-in's, in the ledger.
-const (
-	metaSessionKey = "session-key"
-	metaSignedOut  = "signed-out"
-)
+// maxSignedOut is how many people signing out are kept at once.
+const maxSignedOut = 10000
+
+// metaSignedOut is who signed out, and when, in the ledger.
+const metaSignedOut = "signed-out"
 
 // newSignIn readies the sign-in: the key cookies are signed with, from
 // --session-key-file or else made once and kept in the ledger; the
 // sessions signed out of; and the provider's or the proxy's verifier.
 func (s *Server) newSignIn(ctx context.Context) error {
-	in := &signIn{out: signedOut{max: 10000}, used: expiring{max: 10000}}
+	in := &signIn{out: signedOut{max: maxSignedOut}, used: expiring{max: 10000}}
 	now := func() time.Time { return s.now() }
 	if p := s.cfg.Proxy; p != nil {
 		p.Client, p.Now = signin.Client(nil), now
@@ -178,7 +203,7 @@ func (s *Server) newSignIn(ctx context.Context) error {
 		in.proxy = px
 	}
 	if o := s.cfg.OIDC; o != nil {
-		key, err := s.sessionKey(ctx)
+		key, err := s.sessionKey()
 		if err != nil {
 			return err
 		}
@@ -195,23 +220,17 @@ func (s *Server) newSignIn(ctx context.Context) error {
 		}
 		o.Now, o.Scopes = now, signin.WithOpenID(o.Scopes)
 		in.oidc = o
-		if raw, err := s.l.Meta(ctx, metaSignedOut); err == nil && raw != "" {
-			var m map[string]int64
-			if json.Unmarshal([]byte(raw), &m) == nil {
-				for user, at := range m {
-					in.out.add(user, at, maxAge.Milliseconds())
-				}
-			}
-		}
 	}
 	s.in = in
 	return nil
 }
 
 // sessionKey is the key session cookies are signed with: --session-key-file's,
-// read at start, or one made at random the first time and kept in the
-// ledger.
-func (s *Server) sessionKey(ctx context.Context) ([]byte, error) {
+// read at start, or else one made at random for this process alone. It is
+// never kept in the ledger: whoever could read the ledger (a backup, a
+// snapshot of its volume) could then sign in as anyone, an approver among
+// them.
+func (s *Server) sessionKey() ([]byte, error) {
 	if f := s.cfg.SessionKey; f != "" {
 		b, err := os.ReadFile(f)
 		if err != nil {
@@ -222,21 +241,12 @@ func (s *Server) sessionKey(ctx context.Context) ([]byte, error) {
 		}
 		return nil, errors.New("--session-key-file: want a key of 32 characters at least")
 	}
-	k, err := s.l.Meta(ctx, metaSessionKey)
-	if err != nil {
-		return nil, fmt.Errorf("--ledger: %w", err)
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return nil, err
 	}
-	if k == "" {
-		b := make([]byte, 32)
-		if _, err := rand.Read(b); err != nil {
-			return nil, err
-		}
-		k = hex.EncodeToString(b)
-		if err := s.l.SetMeta(ctx, metaSessionKey, k); err != nil {
-			return nil, fmt.Errorf("--ledger: %w", err)
-		}
-	}
-	return []byte(k), nil
+	s.log.Info("sessions are signed with a key made for this process: they end when lapilli restarts. --session-key-file keeps them")
+	return []byte(hex.EncodeToString(b)), nil
 }
 
 // namesPeople reports whether requests say who they come from: a sign-in
@@ -248,16 +258,17 @@ func (s *Server) namesPeople() bool { return s.cfg.UserHeader != "" || s.in != n
 // sign-in's own.
 func openPath(path string) bool {
 	switch path {
-	case "/healthz", "/readyz", "/lang":
+	case "/healthz", "/readyz", "/lang", "/.well-known/oauth-protected-resource":
 		return true
 	}
 	return strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/auth/")
 }
 
 // signedIn lets a request on only when the sign-in says who it comes from,
-// and keeps who in its context.
+// and keeps who in its context; then, with a sign-in of lapilli's own or
+// --viewers, only when a role lets them in.
 func (s *Server) signedIn(h http.Handler) http.Handler {
-	if s.in == nil {
+	if s.in == nil && len(s.cfg.Viewers) == 0 {
 		return h
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -265,12 +276,20 @@ func (s *Server) signedIn(h http.Handler) http.Handler {
 			h.ServeHTTP(w, r)
 			return
 		}
-		id, err := s.identify(r)
-		if err != nil {
-			s.notSignedIn(w, r, err)
+		if s.in != nil {
+			id, err := s.identify(r)
+			if err != nil {
+				s.notSignedIn(w, r, err)
+				return
+			}
+			r = r.WithContext(context.WithValue(r.Context(), whoKey{}, id))
+		}
+		if !s.letIn(r) {
+			w.Header().Set("Cache-Control", "no-store")
+			s.oops(w, r, notLetIn{s.user(r)})
 			return
 		}
-		h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), whoKey{}, id)))
+		h.ServeHTTP(w, r)
 	})
 }
 
@@ -280,36 +299,71 @@ func (s *Server) signedIn(h http.Handler) http.Handler {
 var errNoOne = errors.New("the sign-in names no one lapilli can take")
 
 // identify is who a request comes from: the proxy's signed header; or a
-// bearer ID token, else the session cookie.
+// bearer ID token, else the session cookie. A JWT the proxy puts in
+// Authorization (oauth2-proxy's) is a bearer token too: any program that
+// holds one sends it as easily as the proxy, and never approves.
 func (s *Server) identify(r *http.Request) (who, error) {
 	var w who
 	var err error
 	switch {
 	case s.in.proxy != nil:
 		w.by = byProxy
+		if s.in.proxy.Header == "Authorization" {
+			w.by = byBearer
+		}
 		w.Identity, err = s.in.proxy.Identify(r)
+		if err != nil {
+			return who{}, reason(err)
+		}
 	case r.Header.Get("Authorization") != "":
 		w.by = byBearer
 		tok, ok := signin.CutBearer(r.Header.Get("Authorization"))
-		if !ok {
-			return who{}, errors.New("the Authorization header holds no bearer token")
+		switch {
+		case !ok:
+			return who{}, tokenError{"the Authorization header holds no bearer token"}
+		case s.in.oidc.NoBearer:
+			return who{}, tokenError{"bearer tokens aren't taken here: sign in in a browser"}
 		}
-		w.Identity, err = s.in.oidc.Bearer(r.Context(), tok)
+		if w.Identity, err = s.in.oidc.Bearer(r.Context(), tok); err != nil {
+			return who{}, reason(err)
+		}
+		if s.signedOut(r.Context(), w.User, w.IssuedAt.UnixMilli()) {
+			return who{}, tokenError{"the token was issued before its person signed out"}
+		}
 	default:
 		w.by = bySession
 		sess, ok := s.in.cookies.Read(r)
-		if !ok || s.in.out.ended(sess.User, sess.Made) {
+		if !ok || s.signedOut(r.Context(), sess.User, sess.Made) {
 			return who{}, errNoSession
 		}
 		w.User, w.Groups = sess.User, sess.Groups
 	}
-	if err != nil {
-		return who{}, err
-	}
 	if s.signedName(w.User) == "anonymous" {
-		return who{}, errNoOne
+		return who{}, tokenError{"the token names no one lapilli takes"}
 	}
 	return w, nil
+}
+
+// tokenError is a token refused, said in words that hold nothing the token
+// held: they go in WWW-Authenticate's error_description, and in the log.
+type tokenError struct{ desc string }
+
+func (t tokenError) Error() string { return t.desc }
+
+// reason is why a token was refused, in a fixed set of words.
+func reason(err error) error {
+	var expired *oidc.TokenExpiredError
+	switch {
+	case errors.As(err, &expired):
+		return tokenError{"the token has expired"}
+	case errors.Is(err, signin.ErrNoHeader):
+		return err
+	case errors.Is(err, signin.ErrNoName):
+		return tokenError{"the token names no one lapilli takes"}
+	case errors.Is(err, signin.ErrUnreachable), errors.Is(err, signin.ErrMisconfigured):
+		return tokenError{"the identity provider can't be asked now"}
+	}
+	return tokenError{"the token didn't verify"}
 }
 
 // errNoSession is a browser not signed in.
@@ -317,11 +371,15 @@ var errNoSession = errors.New("not signed in")
 
 // notSignedIn answers a request the sign-in doesn't vouch for: a browser
 // asking for a page is sent to sign in, and comes back to it; anything
-// else gets 401.
+// else gets 401, and a token refused says why (RFC 6750), so a client
+// knows to get another.
 func (s *Server) notSignedIn(w http.ResponseWriter, r *http.Request, err error) {
-	if !errors.Is(err, errNoSession) && !errors.Is(err, signin.ErrNoHeader) && s.in.warned.CompareAndSwap(false, true) {
-		// Once: anyone could otherwise fill the log.
-		s.log.Warn("refused a request whose sign-in didn't verify; others are refused without a word", "path", r.URL.Path, "err", err)
+	var bad tokenError
+	refused := errors.As(err, &bad)
+	if refused && s.in.warned.CompareAndSwap(false, true) {
+		// Once, and only the reason: anyone could otherwise fill the log,
+		// and a token is a secret.
+		s.log.Warn("refused a token; others are refused without a word", "reason", bad.desc)
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	page := (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.Header.Get("Authorization") == "" &&
@@ -332,9 +390,17 @@ func (s *Server) notSignedIn(w http.ResponseWriter, r *http.Request, err error) 
 	}
 	msg := "sign in: send a session cookie, or an ID token from the identity provider as a bearer token"
 	if s.in.oidc != nil {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="lapilli"`)
+		challenge := `Bearer realm="lapilli", resource_metadata="` + strings.TrimRight(s.cfg.ExternalURL, "/") + `/.well-known/oauth-protected-resource"`
+		if refused {
+			challenge += `, error="invalid_token", error_description="` + bad.desc + `"`
+			msg = bad.desc
+		}
+		w.Header().Set("WWW-Authenticate", challenge)
 	} else {
 		msg = "no identity the sign-in in front signed (" + s.in.proxy.Header + ")"
+		if refused {
+			msg = bad.desc
+		}
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/mcp" {
 		w.Header().Set("Content-Type", "application/json")
@@ -343,6 +409,20 @@ func (s *Server) notSignedIn(w http.ResponseWriter, r *http.Request, err error) 
 		return
 	}
 	http.Error(w, msg, http.StatusUnauthorized)
+}
+
+// protectedResource describes this server as an OAuth 2.0 protected
+// resource (RFC 9728): the provider to get a token from. The token is an ID
+// token this client was given (docs/design/signin.md says how).
+func (s *Server) protectedResource(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "max-age=3600")
+	json.NewEncoder(w).Encode(map[string]any{
+		"resource":                 strings.TrimRight(s.cfg.ExternalURL, "/"),
+		"authorization_servers":    []string{s.in.oidc.Issuer},
+		"bearer_methods_supported": []string{"header"},
+		"scopes_supported":         s.in.oidc.Scopes,
+	})
 }
 
 // loginURL is where a browser signs in, at --external-url, to come back to
@@ -359,6 +439,9 @@ func (s *Server) signInRoutes(mux *http.ServeMux, page func(string, func(*http.R
 		return
 	}
 	mux.HandleFunc("GET /auth/login", s.login)
+	if !s.in.oidc.NoBearer {
+		mux.HandleFunc("GET /.well-known/oauth-protected-resource", s.protectedResource)
+	}
 	mux.HandleFunc("GET /auth/callback", s.callback)
 	mux.HandleFunc("POST /auth/logout", s.logout)
 	mux.HandleFunc("GET /auth/signed-out", func(w http.ResponseWriter, r *http.Request) {
@@ -374,8 +457,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	st := signin.NewStart()
 	to, err := s.in.oidc.AuthURL(r.Context(), st)
 	if err != nil {
-		s.log.Warn("signing in", "err", err)
-		s.oops(w, r, errSignInDown)
+		s.oops(w, r, s.providerFailed(err))
 		return
 	}
 	if err := s.in.cookies.Begin(w, st, safeBack(r.URL.Query().Get("next"), "/")); err != nil {
@@ -385,12 +467,37 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, to, http.StatusFound)
 }
 
-// The sign-in's refusals, as people read them.
+// discover asks the identity provider for its configuration, and says in
+// the log what is wrong with it, if anything.
+func (s *Server) discover(ctx context.Context) {
+	if err := s.in.oidc.Discover(ctx); err != nil {
+		s.providerFailed(err)
+		return
+	}
+	s.log.Info("signing in with the identity provider", "issuer", s.in.oidc.Issuer)
+}
+
+// providerFailed logs why the identity provider couldn't be used, and says
+// it to people in their words: a setting that is wrong as an ERROR, for
+// whoever runs lapilli, not as an outage.
+func (s *Server) providerFailed(err error) error {
+	if errors.Is(err, signin.ErrMisconfigured) {
+		s.log.Error("signing in: the identity provider's configuration", "issuer", s.in.oidc.Issuer, "err", err)
+		return errSignInBroken
+	}
+	s.log.Warn("signing in", "issuer", s.in.oidc.Issuer, "err", err)
+	return errSignInDown
+}
+
+// The sign-in's refusals, as people read them: what went wrong is in the
+// log, for whoever runs lapilli.
 var (
-	errSignInDown  = errors.New("the identity provider can't be reached: try again in a minute")
-	errBadState    = errors.New("this sign-in didn't start here, was used already, or took too long: sign in again")
-	errSignInFails = errors.New("the identity provider's answer didn't verify: sign in again, or ask whoever runs lapilli to look at its log")
-	errTooManyGrp  = errors.New("the identity provider lists more groups than a session can hold")
+	errSignInBroken = errors.New("signing in isn't set up right here: ask whoever runs lapilli to look at its log")
+	errNoName       = errors.New("the identity provider's answer doesn't name you as lapilli needs: ask whoever runs lapilli to look at its log")
+	errSignInDown   = errors.New("the identity provider can't be reached: try again in a minute")
+	errBadState     = errors.New("this sign-in didn't start here, was used already, or took too long: sign in again")
+	errSignInFails  = errors.New("the identity provider's answer didn't verify: sign in again, or ask whoever runs lapilli to look at its log")
+	errTooManyGrp   = errors.New("the identity provider lists more groups than a session can hold")
 )
 
 // oauthError is the form of an OAuth error code: only that, never the
@@ -404,8 +511,10 @@ var oauthError = regexp.MustCompile(`^[a-z_]{1,40}$`)
 func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	q := r.URL.Query()
-	l, ok := s.in.cookies.Take(w, r)
-	if !ok || q.Get("state") == "" || subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(l.State)) != 1 {
+	// Each sign-in's cookie is named by its state: two tabs signing in at
+	// once each come back to their own.
+	l, ok := s.in.cookies.Take(w, r, q.Get("state"))
+	if !ok {
 		s.oops(w, r, errBadState)
 		return
 	}
@@ -422,13 +531,12 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.in.oidc.Finish(r.Context(), l.Start, q.Get("code"))
 	switch {
-	case errors.Is(err, signin.ErrUnreachable):
-		s.log.Warn("signing in", "err", err)
-		s.oops(w, r, errSignInDown)
+	case errors.Is(err, signin.ErrUnreachable), errors.Is(err, signin.ErrMisconfigured):
+		s.oops(w, r, s.providerFailed(err))
 		return
 	case errors.Is(err, signin.ErrNoName):
-		s.log.Warn("refused a sign-in", "err", err)
-		s.oops(w, r, forbiddenSignIn{err})
+		s.log.Warn("refused a sign-in: the ID token names no one lapilli takes", "err", err)
+		s.oops(w, r, forbiddenSignIn{errNoName})
 		return
 	case err != nil:
 		s.log.Warn("refused a sign-in", "err", err)
@@ -436,8 +544,12 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if id.User = s.signedName(id.User); id.User == "anonymous" {
+		s.log.Warn("refused a sign-in: the name is lapilli's own, or too long, or holds a character that doesn't show")
 		s.oops(w, r, forbiddenSignIn{errNoOne})
 		return
+	}
+	if id.Overage {
+		s.log.Warn("the identity provider sent a link to the groups in place of the groups (Microsoft Entra ID's group overage, past 200): no group is taken. Have it send only the groups the application is given (groupMembershipClaims: ApplicationGroup), or name people", "user", id.User)
 	}
 	if _, err := s.in.cookies.Issue(w, id); errors.Is(err, signin.ErrTooBig) {
 		// Only the groups roles are given by, then.
@@ -462,7 +574,7 @@ func (f forbiddenSignIn) Unwrap() error { return f.error }
 // roleGroup reports whether a group is one roles are given by: in
 // --editors, --admins or --approvers, or given a role in the UI.
 func (s *Server) roleGroup(ctx context.Context, g string) bool {
-	for _, list := range [][]string{s.cfg.Editors, s.cfg.Admins, s.cfg.Approvers} {
+	for _, list := range [][]string{s.cfg.Viewers, s.cfg.Editors, s.cfg.Admins, s.cfg.Approvers} {
 		if slices.Contains(list, g) || slices.Contains(list, "group:"+g) {
 			return true
 		}
@@ -483,8 +595,17 @@ func (s *Server) roleGroup(ctx context.Context, g string) bool {
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if sess, ok := s.in.cookies.Read(r); ok {
-		s.in.out.add(sess.User, s.now().UnixMilli(), s.in.cookies.MaxAge.Milliseconds())
-		if err := s.l.SetMeta(r.Context(), metaSignedOut, s.in.out.snapshot()); err != nil {
+		at, keep := s.now().UnixMilli(), s.in.cookies.MaxAge.Milliseconds()
+		s.in.out.add(sess.User, at, keep)
+		// Merged with what the ledger holds, written by another process
+		// sharing it, too.
+		err := s.l.UpdateMeta(r.Context(), metaSignedOut, func(old string) string {
+			var m map[string]int64
+			json.Unmarshal([]byte(old), &m)
+			b, _ := json.Marshal(mergeOut(m, map[string]int64{sess.User: at}, at, keep, maxSignedOut))
+			return string(b)
+		})
+		if err != nil {
 			s.log.Warn("who signed out can't be kept in the ledger: a copy of their cookie is refused until lapilli restarts", "err", err)
 		}
 		s.log.Info("signed out", "user", sess.User)

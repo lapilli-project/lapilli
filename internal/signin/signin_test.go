@@ -12,9 +12,11 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -327,7 +329,7 @@ func TestLoginCookie(t *testing.T) {
 		r := httptest.NewRequest("GET", "/auth/callback", nil)
 		r.AddCookie(ck)
 		w := httptest.NewRecorder()
-		l, ok := k.Take(w, r)
+		l, ok := k.Take(w, r, st.State)
 		return l, ok, w
 	}
 	l, ok, tw := take()
@@ -511,21 +513,43 @@ func albToken(key *ecdsa.PrivateKey, kid string, header, claims map[string]any) 
 	return in + "." + base64.URLEncoding.EncodeToString(sig)
 }
 
-func TestAWSALB(t *testing.T) {
-	c := &clock{t0}
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	der, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
+// toServer sends every request to a test server, as AWS's key host would
+// be reached: the request's own host and path are kept for the test to see.
+type toServer struct{ srv *httptest.Server }
+
+func (t toServer) RoundTrip(r *http.Request) (*http.Response, error) {
+	r2 := r.Clone(r.Context())
+	r2.Header.Set("X-Asked-Host", r.URL.Host)
+	r2.URL.Scheme, r2.URL.Host = "http", strings.TrimPrefix(t.srv.URL, "http://")
+	return http.DefaultTransport.RoundTrip(r2)
+}
+
+// albServer serves keys as AWS does for eu-west-1, by id; asked is each
+// path asked for, with its host.
+func albServer(t *testing.T, keys map[string]*ecdsa.PrivateKey) (*http.Client, *[]string) {
 	var asked []string
+	var mu sync.Mutex
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		asked = append(asked, r.URL.Path)
-		if r.URL.Path != "/kid-1" {
+		mu.Lock()
+		asked = append(asked, r.Header.Get("X-Asked-Host")+r.URL.Path)
+		mu.Unlock()
+		k, ok := keys[strings.TrimPrefix(r.URL.Path, "/")]
+		if !ok || r.Header.Get("X-Asked-Host") != "public-keys.auth.elb.eu-west-1.amazonaws.com" {
 			http.NotFound(w, r)
 			return
 		}
+		der, _ := x509.MarshalPKIXPublicKey(&k.PublicKey)
 		pem.Encode(w, &pem.Block{Type: "PUBLIC KEY", Bytes: der})
 	}))
-	defer srv.Close()
-	p, err := NewProxy(Proxy{Kind: AWSALB, ALBArn: albArn, Issuer: "https://idp.example.com", KeysURL: srv.URL + "/", Client: Client(nil), Now: c.now,
+	t.Cleanup(srv.Close)
+	return Client(toServer{srv}), &asked
+}
+
+func TestAWSALB(t *testing.T) {
+	c := &clock{t0}
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	client, asked := albServer(t, map[string]*ecdsa.PrivateKey{"kid-1": key})
+	p, err := NewProxy(Proxy{Kind: AWSALB, ALBArn: albArn, Issuer: "https://idp.example.com", Client: client, Now: c.now,
 		Claims: Claims{UserClaim: "email", GroupsClaim: "groups"}})
 	if err != nil {
 		t.Fatal(err)
@@ -543,10 +567,10 @@ func TestAWSALB(t *testing.T) {
 	if id, err := ask(good); err != nil || id.User != "ana@example.com" || id.Groups[0] != "sre" {
 		t.Fatalf("the load balancer's own: %+v %v", id, err)
 	}
-	// The key is fetched once.
+	// The key is fetched once, from the region's own host.
 	ask(good)
-	if len(asked) != 1 {
-		t.Errorf("keys fetched %v", asked)
+	if len(*asked) != 1 || (*asked)[0] != "public-keys.auth.elb.eu-west-1.amazonaws.com/kid-1" {
+		t.Errorf("keys fetched %v", *asked)
 	}
 	other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	parts := strings.Split(good, ".")
@@ -561,41 +585,171 @@ func TestAWSALB(t *testing.T) {
 		"another key":           albToken(other, "kid-1", nil, user),
 		"claims changed":        parts[0] + "." + base64.URLEncoding.EncodeToString(forged) + "." + parts[2],
 		"two parts":             parts[0] + "." + parts[1],
+		"email not verified":    albToken(key, "kid-1", nil, map[string]any{"email": "boss@example.com", "email_verified": false, "exp": t0.Add(time.Minute).Unix()}),
 	} {
 		if id, err := ask(tok); err == nil {
 			t.Errorf("%s: taken as %+v", name, id)
 		}
 	}
-	// A key id that would leave the keys' path is never fetched, though a
-	// fetch is due.
-	c.t = c.t.Add(albRetry)
-	before := len(asked)
-	for _, kid := range []string{"../../evil", "a/b", "x?y=1", "a b", ""} {
+	// A key id that would leave the keys' path is never fetched, though the
+	// budget allows it.
+	before := len(*asked)
+	for _, kid := range []string{"../../evil", "a/b", "x?y=1", "a b", "", "x@evil.example"} {
 		if _, err := ask(albToken(key, kid, nil, user)); err == nil {
 			t.Errorf("kid %q taken", kid)
 		}
 	}
-	if len(asked) != before {
-		t.Errorf("fetched %v for key ids that aren't", asked[before:])
+	if len(*asked) != before {
+		t.Errorf("fetched %v for key ids that aren't", (*asked)[before:])
 	}
-	// Keys made up are fetched at most once every ten seconds.
-	c.t = c.t.Add(albRetry)
-	for i := range 20 {
-		ask(albToken(other, "made-up-"+string(rune('a'+i)), nil, user))
-	}
-	if n := len(asked) - before; n != 1 {
-		t.Errorf("%d fetches for 20 keys made up, want 1", n)
-	}
-	// The ARN names the partition and region the keys are fetched from.
-	for arn, want := range map[string]string{
-		albArn: "https://public-keys.auth.elb.eu-west-1.amazonaws.com/",
-		"arn:aws-cn:elasticloadbalancing:cn-north-1:123456789012:loadbalancer/app/x/0123456789abcdef":        "https://public-keys.auth.elb.cn-north-1.amazonaws.com.cn/",
-		"arn:aws-us-gov:elasticloadbalancing:us-gov-west-1:123456789012:loadbalancer/app/x/0123456789abcdef": "https://s3-us-gov-west-1.amazonaws.com/aws-elb-public-keys-prod-us-gov-west-1/",
+	// The ARN names the partition and region the keys are fetched from;
+	// nothing else does.
+	for _, c := range []struct{ partition, region, want string }{
+		{"aws", "eu-west-1", "https://public-keys.auth.elb.eu-west-1.amazonaws.com/k"},
+		{"aws-cn", "cn-north-1", "https://public-keys.auth.elb.cn-north-1.amazonaws.com.cn/k"},
+		{"aws-us-gov", "us-gov-west-1", "https://s3-us-gov-west-1.amazonaws.com/aws-elb-public-keys-prod-us-gov-west-1/k"},
+		{"aws", "evil.example/x", ""}, {"other", "eu-west-1", ""},
 	} {
-		q, err := NewProxy(Proxy{Kind: AWSALB, ALBArn: arn})
-		if err != nil || q.KeysURL != want {
-			t.Errorf("%s: %q %v", arn, q.KeysURL, err)
+		if got, _ := albKeyURL(c.partition, c.region, "k"); got != c.want {
+			t.Errorf("%s %s: %q", c.partition, c.region, got)
 		}
+	}
+}
+
+// Keys not held come from a budget, a few at once and one each ten seconds
+// after; a key id the load balancer doesn't have is remembered and costs
+// nothing again. A made-up key each ten seconds can't keep the load
+// balancer's own new key from being fetched.
+func TestAWSALBKeyBudget(t *testing.T) {
+	c := &clock{t0}
+	legit, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	client, asked := albServer(t, map[string]*ecdsa.PrivateKey{"kid-legit": legit})
+	p, err := NewProxy(Proxy{Kind: AWSALB, ALBArn: albArn, Client: client, Now: c.now, Claims: Claims{UserClaim: "email"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attacker, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	ask := func(key *ecdsa.PrivateKey, kid string) error {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.Header.Set("X-Amzn-Oidc-Data", albToken(key, kid, map[string]any{"exp": c.t.Add(time.Minute).Unix()},
+			map[string]any{"email": "ana@example.com", "exp": c.t.Add(time.Minute).Unix()}))
+		_, err := p.Identify(r)
+		return err
+	}
+	refused := 0
+	for i := range 60 {
+		ask(attacker, fmt.Sprintf("made-up-%d", i))
+		c.t = c.t.Add(time.Second)
+		if ask(legit, "kid-legit") != nil {
+			refused++
+		}
+		c.t = c.t.Add(9 * time.Second)
+	}
+	if refused != 0 {
+		t.Errorf("%d sign-ins through the load balancer refused while keys were made up", refused)
+	}
+	// One made-up key, sent again and again: fetched once.
+	before := len(*asked)
+	for range 20 {
+		ask(attacker, "made-up-again")
+		c.t = c.t.Add(time.Minute)
+	}
+	if n := len(*asked) - before; n != 1 {
+		t.Errorf("a key id that isn't one fetched %d times", n)
+	}
+	// A burst of made-up keys spends the budget, which fills again.
+	for i := range 20 {
+		ask(attacker, fmt.Sprintf("burst-%d", i))
+	}
+	if n := len(*asked) - before - 1; n != albBurst {
+		t.Errorf("%d fetches in a burst, want %d", n, albBurst)
+	}
+}
+
+// What a sign-in in front says about the email holds for every kind: one
+// it says isn't verified is refused.
+func TestProxyUnverifiedEmail(t *testing.T) {
+	c := &clock{t0}
+	p, err := NewProxy(Proxy{Kind: JWKS, Header: "X-Jwt", JWKS: "https://idp.example.com/keys", Issuer: "x", Audience: "y", Claims: Claims{UserClaim: "email"}, Now: c.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for v, ok := range map[any]bool{false: false, "false": false, true: true} {
+		_, err := p.Claims.Identity(map[string]any{"email": "boss@example.com", "email_verified": v})
+		if (err == nil) != ok {
+			t.Errorf("email_verified %v: %v", v, err)
+		}
+	}
+	if _, err := p.Claims.Identity(map[string]any{"email": "boss@example.com"}); err != nil {
+		t.Errorf("a proxy that doesn't say (IAP): %v", err)
+	}
+}
+
+// Names and groups that show as another's are refused: spaces around them,
+// spacing that isn't the ASCII space, characters that don't show.
+func TestPlainNames(t *testing.T) {
+	for n, want := range map[string]bool{
+		"ana@example.com": true, "Ana Lopez": true, "아나": true,
+		"ana@example.com ": false, " ana@example.com": false, "ana@example.com\u00a0": false, "ana@example.com\u3000": false,
+		"ana\u200b@example.com": false, "ana\u00ad@example.com": false, "ana\u2028": false, "ana\tx": false, "": false, "ana\u202e": false,
+	} {
+		if Plain(n) != want {
+			t.Errorf("%q: %v", n, !want)
+		}
+	}
+	id, err := (Claims{UserClaim: "email", GroupsClaim: "groups"}).Identity(map[string]any{"email": "a@x", "groups": []any{"ops", "ops\u00a0", " ops"}})
+	if err != nil || len(id.Groups) != 1 {
+		t.Errorf("groups: %+v %v", id, err)
+	}
+}
+
+// A token given to another client is refused, even naming this one alone,
+// unless that client is trusted.
+func TestOIDCOtherClient(t *testing.T) {
+	c := &clock{t0}
+	idp, o := newIdP(t, c)
+	ctx := context.Background()
+	idp.Mutate = func(m map[string]any) { m["azp"] = "cli" }
+	tok := idp.IDToken(map[string]any{"email": "ana@example.com", "email_verified": true})
+	if _, err := o.Bearer(ctx, tok); err == nil {
+		t.Error("another client's token taken")
+	}
+	o.TrustedClients = []string{"cli"}
+	if _, err := o.Bearer(ctx, tok); err != nil {
+		t.Errorf("a trusted client's: %v", err)
+	}
+	idp.Mutate = func(m map[string]any) { m["azp"] = "lapilli" }
+	if _, err := o.Bearer(ctx, idp.IDToken(map[string]any{"email": "ana@example.com", "email_verified": true})); err != nil {
+		t.Errorf("this client's own azp: %v", err)
+	}
+}
+
+// An issuer given otherwise than the provider says, or a provider that
+// answers with a client's error, is a setting to put right; a server's
+// error or no answer, an outage.
+func TestOIDCDiscoveryErrors(t *testing.T) {
+	c := &clock{t0}
+	idp, o := newIdP(t, c)
+	ctx := context.Background()
+	o.Issuer = idp.URL + "/"
+	if err := o.Discover(ctx); !errors.Is(err, ErrMisconfigured) {
+		t.Errorf("a trailing slash: %v", err)
+	}
+	for code, want := range map[int]error{404: ErrMisconfigured, 503: ErrUnreachable} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(code) }))
+		o2 := &OIDC{Issuer: srv.URL, ClientID: "x", Client: Client(nil), Now: c.now}
+		if err := o2.Discover(ctx); !errors.Is(err, want) {
+			t.Errorf("%d: %v", code, err)
+		}
+		srv.Close()
+	}
+	o3 := &OIDC{Issuer: "http://127.0.0.1:1", ClientID: "x", Client: Client(nil), Now: c.now}
+	if err := o3.Discover(ctx); !errors.Is(err, ErrUnreachable) {
+		t.Errorf("no answer: %v", err)
+	}
+	// Asked again within ten seconds: the same error, no new request.
+	if err := o3.Discover(ctx); !errors.Is(err, ErrUnreachable) {
+		t.Errorf("again: %v", err)
 	}
 }
 

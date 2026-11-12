@@ -3,6 +3,8 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"slices"
@@ -170,7 +172,8 @@ func (s *Server) editsTeams(r *http.Request) []int64 {
 // listed reports whether the reader is in a list of users and groups.
 // "user:NAME" is a person alone, "group:NAME" a group alone: one who could
 // pick their own name can't take a group's. A name with neither is either,
-// as before. Whoever the proxy didn't name is in none.
+// as before. "*@DOMAIN" is everyone whose name ends in @DOMAIN, in any
+// letter case. Whoever the sign-in didn't name is in none.
 func (s *Server) listed(r *http.Request, list []string) bool {
 	user := s.user(r)
 	if user == "anonymous" {
@@ -184,8 +187,69 @@ func (s *Server) listed(r *http.Request, list []string) bool {
 		if name, ok := strings.CutPrefix(x, "group:"); ok {
 			return slices.Contains(groups, name)
 		}
+		if domain, ok := strings.CutPrefix(x, "*@"); ok {
+			at := strings.LastIndexByte(user, '@')
+			return domain != "" && at > 0 && strings.EqualFold(user[at+1:], domain)
+		}
 		return x == "*" || x == user || slices.Contains(groups, x)
 	})
+}
+
+// letIn reports whether the reader may come in at all: with a sign-in of
+// lapilli's own, or --viewers, only those a role list names (--viewers,
+// --editors, --admins, --approvers) or the UI gave a role. An identity
+// provider signs in whoever it knows, which for some (a public one, a
+// directory with guests) is anyone.
+func (s *Server) letIn(r *http.Request) bool {
+	if s.in == nil && len(s.cfg.Viewers) == 0 {
+		return true
+	}
+	if s.listed(r, s.cfg.Viewers) {
+		return true
+	}
+	// '*' in a list that gives a role is everyone --viewers lets in, not
+	// everyone signed in.
+	for _, list := range [][]string{s.cfg.Editors, s.cfg.Admins, s.cfg.Approvers} {
+		if s.listed(r, slices.DeleteFunc(slices.Clone(list), func(x string) bool { return x == "*" })) {
+			return true
+		}
+	}
+	every, teams := s.granted(r)
+	return every || len(teams) > 0
+}
+
+// restricted reports whether --viewers names who may look, rather than
+// everyone signed in.
+func restricted(viewers []string) bool {
+	return len(viewers) > 0 && !slices.Contains(viewers, "*")
+}
+
+// CheckRoles says what is wrong with the role lists, if anything: with a
+// sign-in of lapilli's own, someone must be let in, and "*" (everyone the
+// identity provider signs in) may give a role to change only when
+// --viewers says who may come in at all.
+func CheckRoles(c Config) error {
+	if c.OIDC == nil && c.Proxy == nil {
+		return nil
+	}
+	if len(c.Viewers)+len(c.Editors)+len(c.Admins)+len(c.Approvers) == 0 {
+		return errors.New("a sign-in of lapilli's own lets in only those a role names: give --viewers (people, group:NAME or *@DOMAIN), --editors or --admins")
+	}
+	if !restricted(c.Viewers) {
+		for flag, list := range map[string][]string{"--editors": c.Editors, "--admins": c.Admins, "--approvers": c.Approvers} {
+			if slices.Contains(list, "*") {
+				return fmt.Errorf("%s '*' gives a role to everyone the identity provider signs in: say who may come in with --viewers (people, group:NAME or *@DOMAIN) first", flag)
+			}
+		}
+	}
+	return nil
+}
+
+// notLetIn is a person signed in whom no role lets in.
+type notLetIn struct{ user string }
+
+func (n notLetIn) Error() string {
+	return fmt.Sprintf("you are signed in as %s, whom lapilli doesn't let in: ask its admins to name you", n.user)
 }
 
 // need is a handler that changes the ledger, for those of a role or above:
@@ -291,7 +355,7 @@ func (s *Server) logWho() {
 	case len(s.cfg.Editors)+len(s.cfg.Admins) > 0:
 		s.log.Info("roles: those --editors and --admins name, as the sign-in names them, change what their role allows; everyone else may only look")
 	case s.in != nil:
-		s.log.Warn("a sign-in and no roles: everyone signed in may only look. To take changes, name who may make them in --editors or --admins (* for everyone signed in)")
+		s.log.Info("a sign-in and only --viewers: those it names may look, and no one changes anything. To take changes, name who may make them in --editors or --admins")
 	case s.cfg.EveryoneAdmin:
 		s.log.Warn("--everyone-admin: everyone who reaches the UI and the API changes anything, as an admin, with no sign-in", "listen", s.cfg.Listen)
 	case s.open.Load():

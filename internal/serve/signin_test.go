@@ -33,11 +33,14 @@ func oidcServer(t *testing.T, change func(*Config)) (*Server, *idptest.IdP) {
 	idp := idptest.New(t, "lapilli", "the-client-secret", func() time.Time { return now })
 	secret := filepath.Join(t.TempDir(), "secret")
 	os.WriteFile(secret, []byte("the-client-secret\n"), 0o600)
+	key := filepath.Join(t.TempDir(), "session-key")
+	os.WriteFile(key, []byte(strings.Repeat("k", 40)+"\n"), 0o600)
 	s, _ := server(t, func(c *Config) {
-		c.ExternalURL = extURL
+		c.ExternalURL, c.SessionKey = extURL, key
 		c.OIDC = &signin.OIDC{Issuer: idp.URL, ClientID: "lapilli", SecretFile: secret, Scopes: []string{"email", "groups"},
 			Claims: signin.Claims{UserClaim: "email", GroupsClaim: "groups", Verified: true}}
 		c.Admins, c.Editors = []string{"group:ops"}, []string{"user:ed@example.com"}
+		c.Viewers = []string{"*@example.com"}
 		if change != nil {
 			change(c)
 		}
@@ -132,8 +135,6 @@ func TestSignInFlow(t *testing.T) {
 		{claimsOf("boss@example.com", "ops", "sre"), "admin"},
 		{claimsOf("ed@example.com"), "editor"},
 		{claimsOf("viewer@example.com", "sre"), "viewer"},
-		// A group named as a user isn't the user's.
-		{claimsOf("ops", "sre"), "viewer"},
 	} {
 		b := newBrowser(t, h)
 		w := b.signIn(idp, "/rules?weeks=4", c.claims)
@@ -338,7 +339,8 @@ func TestSignInNoOpenRedirect(t *testing.T) {
 	for _, c := range w.Result().Cookies() {
 		lr.AddCookie(c)
 	}
-	if l, ok := s.in.cookies.Take(httptest.NewRecorder(), lr); !ok || l.Next != "/" {
+	lu, _ := url.Parse(w.Header().Get("Location"))
+	if l, ok := s.in.cookies.Take(httptest.NewRecorder(), lr, lu.Query().Get("state")); !ok || l.Next != "/" {
 		t.Errorf("the login kept %q", l.Next)
 	}
 	b := newBrowser(t, h)
@@ -539,7 +541,7 @@ func TestProxyJWT(t *testing.T) {
 	aud := "/projects/123456789012/global/backendServices/42"
 	s, _ := server(t, func(c *Config) {
 		c.Proxy = &signin.Proxy{Kind: signin.GoogleIAP, Audience: aud, KeysURL: keys.URL, Claims: signin.Claims{UserClaim: "email"}}
-		c.Admins = []string{"user:boss@example.com"}
+		c.Admins, c.Viewers = []string{"user:boss@example.com"}, []string{"*@example.com"}
 	})
 	h := s.Handler()
 	ask := func(path string, claims map[string]any) *httptest.ResponseRecorder {
@@ -614,7 +616,7 @@ func TestSignInPages(t *testing.T) {
 		}
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Header.Set("Accept-Language", n.Code)
-		for _, err := range []error{errBadState, errSignInDown, errSignInFails, errTooManyGrp, errNoOne, s.forbidden(editor),
+		for _, err := range []error{errBadState, errSignInDown, errSignInBroken, errNoName, errSignInFails, errTooManyGrp, errNoOne, s.forbidden(editor), notLetIn{"x"},
 			forbiddenSignIn{bad("the identity provider didn't sign you in (%s)", "access_denied")}} {
 			s.oops(httptest.NewRecorder(), r, err)
 			if msg := message(n.Code, err); n.Code != "en" && msg == err.Error() {
@@ -642,6 +644,7 @@ func TestSignInProviderDown(t *testing.T) {
 	s, _ := server(t, func(c *Config) {
 		c.ExternalURL = extURL
 		c.OIDC = &signin.OIDC{Issuer: down.URL, ClientID: "lapilli", Claims: signin.Claims{UserClaim: "email", Verified: true}}
+		c.Viewers = []string{"*@example.com"}
 	})
 	h := s.Handler()
 	for range 20 {

@@ -870,7 +870,7 @@ func errCode(err error) (int, bool) {
 		return http.StatusServiceUnavailable, true
 	case errors.Is(err, errNotApprover), errors.Is(err, errNotAForm), errors.Is(err, ledger.ErrOwnProposal):
 		return http.StatusForbidden, true
-	case errors.As(err, new(forbiddenSignIn)):
+	case errors.As(err, new(forbiddenSignIn)), errors.As(err, new(notLetIn)):
 		return http.StatusForbidden, true
 	case errors.Is(err, errBadState):
 		return http.StatusBadRequest, true

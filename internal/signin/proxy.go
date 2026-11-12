@@ -51,8 +51,8 @@ type Proxy struct {
 	Client   *http.Client
 	Now      func() time.Time
 
-	// KeysURL is where IAP's keys are, and the AWS load balancer's public
-	// keys under (by their ids): set by NewProxy, by tests to stand-ins.
+	// KeysURL is where IAP's keys are: set by NewProxy, by tests to a
+	// stand-in. A load balancer's are where its ARN says, alone.
 	KeysURL string
 
 	verifier *oidc.IDTokenVerifier
@@ -118,14 +118,8 @@ func NewProxy(p Proxy) (*Proxy, error) {
 	case AWSALB:
 		p.Header = "X-Amzn-Oidc-Data"
 		m := albARN.FindStringSubmatch(p.ALBArn)
-		if p.KeysURL == "" {
-			p.KeysURL = map[string]string{
-				"aws":        "https://public-keys.auth.elb." + m[2] + ".amazonaws.com/",
-				"aws-cn":     "https://public-keys.auth.elb." + m[2] + ".amazonaws.com.cn/",
-				"aws-us-gov": "https://s3-" + m[2] + ".amazonaws.com/aws-elb-public-keys-prod-" + m[2] + "/",
-			}[m[1]]
-		}
-		p.alb = &albKeys{base: p.KeysURL, client: p.Client, now: p.Now, keys: map[string]*ecdsa.PublicKey{}}
+		p.alb = &albKeys{partition: m[1], region: m[2], client: p.Client, now: p.Now,
+			keys: map[string]*ecdsa.PublicKey{}, failed: map[string]time.Time{}, tokens: albBurst}
 	}
 	p.Header = http.CanonicalHeaderKey(p.Header)
 	return &p, nil
@@ -271,66 +265,135 @@ func (p *Proxy) albClaims(ctx context.Context, raw string) (map[string]any, erro
 	return claims, nil
 }
 
-// albKeys are a load balancer's public keys, by id, each fetched once.
-type albKeys struct {
-	base   string
-	client *http.Client
-	now    func() time.Time
+// albKeyURL is where a load balancer's public key is, by its partition,
+// its region and the key's id, from AWS's fixed hosts alone: nothing a
+// token says can steer it elsewhere. ok is false for what isn't one.
+func albKeyURL(partition, region, kid string) (u string, ok bool) {
+	if !albKid.MatchString(kid) || !albRegion.MatchString(region) {
+		return "", false
+	}
+	switch partition {
+	case "aws":
+		return "https://public-keys.auth.elb." + region + ".amazonaws.com/" + kid, true
+	case "aws-cn":
+		return "https://public-keys.auth.elb." + region + ".amazonaws.com.cn/" + kid, true
+	case "aws-us-gov":
+		return "https://s3-" + region + ".amazonaws.com/aws-elb-public-keys-prod-" + region + "/" + kid, true
+	}
+	return "", false
+}
 
-	mu    sync.Mutex
-	keys  map[string]*ecdsa.PublicKey
-	order []string
-	tried time.Time // when a key not held was last fetched
+// albRegion is an AWS region's name.
+var albRegion = regexp.MustCompile(`^[a-z]{2}(?:-[a-z]+)+-\d$`)
+
+// albKeys are a load balancer's public keys, by id, each fetched once.
+// Keys not held are fetched from a budget of their own, a few at once and
+// one each ten seconds after; a key the load balancer doesn't have is
+// remembered for an hour, and costs nothing again. Someone sending tokens
+// with keys made up, slower than the budget fills, can't keep the load
+// balancer's own new key from being fetched.
+type albKeys struct {
+	partition, region string
+	client            *http.Client
+	now               func() time.Time
+
+	mu     sync.Mutex
+	keys   map[string]*ecdsa.PublicKey
+	order  []string
+	failed map[string]time.Time
+	tokens float64
+	last   time.Time
 }
 
 const (
-	// albRetry is how soon another key not held is fetched: a token naming
-	// a key made up can't make lapilli fetch more often.
-	albRetry = 10 * time.Second
-	// albKept is how many keys are kept.
-	albKept = 64
+	// albBurst keys not held may be fetched at once, and one more each
+	// albEvery.
+	albBurst = 6
+	albEvery = 10 * time.Second
+	// albKept is how many keys are kept, and albFailedKept how many ids
+	// that weren't keys, each for albFailedFor.
+	albKept       = 64
+	albFailedKept = 4096
+	albFailedFor  = time.Hour
 )
 
 // key is the public key a load balancer signed with.
 func (a *albKeys) key(ctx context.Context, kid string) (*ecdsa.PublicKey, error) {
+	u, ok := albKeyURL(a.partition, a.region, kid)
+	if !ok {
+		return nil, errors.New("a key id that isn't one")
+	}
+	now := a.now()
 	a.mu.Lock()
 	if k, ok := a.keys[kid]; ok {
 		a.mu.Unlock()
 		return k, nil
 	}
-	now := a.now()
-	if !a.tried.IsZero() && now.Sub(a.tried) < albRetry {
+	if at, ok := a.failed[kid]; ok && now.Sub(at) < albFailedFor {
 		a.mu.Unlock()
-		return nil, errors.New("a key not held, fetched too lately: try again in a few seconds")
+		return nil, errors.New("a key id the load balancer doesn't have")
 	}
-	// Set before the fetch, which the lock isn't held for: a slow fetch
-	// holds up no request whose key is held.
-	a.tried = now
+	if !a.last.IsZero() {
+		a.tokens = min(albBurst, a.tokens+now.Sub(a.last).Seconds()/albEvery.Seconds())
+	}
+	a.last = now
+	if a.tokens < 1 {
+		a.mu.Unlock()
+		return nil, errors.New("keys not held, fetched too often lately: try again in a few seconds")
+	}
+	a.tokens--
 	a.mu.Unlock()
 	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fetchTimeout)
 	defer cancel()
-	b, err := get(fctx, a.client, a.base+kid, 16<<10)
-	if err != nil {
-		return nil, fmt.Errorf("the load balancer's key: %w", err)
-	}
-	blk, _ := pem.Decode(b)
-	if blk == nil {
-		return nil, errors.New("the load balancer's key isn't PEM")
-	}
-	pub, err := x509.ParsePKIXPublicKey(blk.Bytes)
-	k, ok := pub.(*ecdsa.PublicKey)
-	if err != nil || !ok || k.Curve != elliptic.P256() {
-		return nil, errors.New("the load balancer's key isn't a P-256 key")
-	}
+	k, err := a.fetch(fctx, u)
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if _, ok := a.keys[kid]; ok {
-		return k, nil
+	var status statusError
+	switch {
+	case errors.As(err, &status) && status.code < 500, errors.Is(err, errNotAKey):
+		// Not one of the load balancer's: remembered, so it costs nothing
+		// again. One that couldn't be fetched (a timeout, the host's
+		// error) is tried again.
+		for id, at := range a.failed {
+			if now.Sub(at) >= albFailedFor {
+				delete(a.failed, id)
+			}
+		}
+		if len(a.failed) < albFailedKept {
+			a.failed[kid] = now
+		}
+		return nil, fmt.Errorf("the load balancer's key: %w", err)
+	case err != nil:
+		return nil, fmt.Errorf("the load balancer's key: %w", err)
+	}
+	if held, ok := a.keys[kid]; ok {
+		return held, nil
 	}
 	if len(a.order) == albKept {
 		delete(a.keys, a.order[0])
 		a.order = a.order[1:]
 	}
 	a.keys[kid], a.order = k, append(a.order, kid)
+	return k, nil
+}
+
+// errNotAKey is an answer that isn't a P-256 public key.
+var errNotAKey = errors.New("not a P-256 public key in PEM")
+
+// fetch reads a key.
+func (a *albKeys) fetch(ctx context.Context, u string) (*ecdsa.PublicKey, error) {
+	b, err := get(ctx, a.client, u, 16<<10)
+	if err != nil {
+		return nil, err
+	}
+	blk, _ := pem.Decode(b)
+	if blk == nil {
+		return nil, errNotAKey
+	}
+	pub, err := x509.ParsePKIXPublicKey(blk.Bytes)
+	k, ok := pub.(*ecdsa.PublicKey)
+	if err != nil || !ok || k.Curve != elliptic.P256() {
+		return nil, errNotAKey
+	}
 	return k, nil
 }

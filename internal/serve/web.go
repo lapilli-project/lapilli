@@ -802,7 +802,10 @@ func bad(format string, args ...any) error {
 func message(lang string, err error) string {
 	var b badRequest
 	var inv ledger.ErrInvalid
+	var out notLetIn
 	switch {
+	case errors.As(err, &out):
+		return tr(lang, "you are signed in as %s, whom lapilli doesn't let in: ask its admins to name you", out.user)
 	case errors.As(err, &b) && b.format != "":
 		return tr(lang, b.format, b.args...)
 	case errors.As(err, &inv):

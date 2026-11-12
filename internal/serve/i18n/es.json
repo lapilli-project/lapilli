@@ -1039,5 +1039,8 @@
  "the identity provider lists more groups than a session can hold": "el proveedor de identidad indica más grupos de los que caben en una sesión",
  "the sign-in names no one lapilli can take": "el inicio de sesión no identifica a nadie que lapilli pueda aceptar",
  "the identity provider didn't sign you in (%s)": "el proveedor de identidad no inició tu sesión (%s)",
- "no one changes anything here: lapilli serve signs people in, with no roles. Name who may make changes in --editors or --admins": "aquí nadie puede cambiar nada: lapilli serve inicia sesiones sin roles. Indica quién puede hacer cambios en --editors o --admins"
+ "no one changes anything here: lapilli serve signs people in, with no roles. Name who may make changes in --editors or --admins": "aquí nadie puede cambiar nada: lapilli serve inicia sesiones sin roles. Indica quién puede hacer cambios en --editors o --admins",
+ "signing in isn't set up right here: ask whoever runs lapilli to look at its log": "el inicio de sesión no está bien configurado aquí: pide a quien administra lapilli que revise su registro",
+ "the identity provider's answer doesn't name you as lapilli needs: ask whoever runs lapilli to look at its log": "la respuesta del proveedor de identidad no te identifica como lapilli necesita: pide a quien administra lapilli que revise su registro",
+ "you are signed in as %s, whom lapilli doesn't let in: ask its admins to name you": "has iniciado sesión como %s, pero lapilli no te deja entrar: pide a sus administradores que te añadan"
 }

@@ -161,11 +161,17 @@ The web UI and API:
                       and without it, only a server listening on loopback
                       (127.0.0.1, localhost) takes changes; beyond it, every
                       pod or machine that shares its network could
+  --viewers LIST      who may look, and with a sign-in of lapilli's own who
+                      may come in at all, beside those the other lists name:
+                      people, group:NAME, *@DOMAIN (everyone whose name ends
+                      in @DOMAIN), or * for everyone signed in. With it,
+                      everyone else is refused, 403
   --editors LIST      with this or --admins, only those named may change
                       anything, and the rest may only look: a comma-separated
                       list of people (as --user-header names them) and groups
-                      (as --groups-header lists them), or * for everyone
-                      signed in. Editors write incidents, tasks, comments,
+                      (as --groups-header lists them), *@DOMAIN, or * for
+                      everyone signed in (with a sign-in of lapilli's own,
+                      only once --viewers names who may come in). Editors write incidents, tasks, comments,
                       quiet windows and notes on rules. user:NAME is a
                       person and group:NAME a group, alone: use them where
                       someone could pick a name that is a group's
@@ -182,8 +188,11 @@ The web UI and API:
 
 Signing people in, without a proxy of plain headers (one of these, or
 --user-header; docs/design/signin.md). Every page and API call then needs
-someone signed in, but /healthz, /readyz and /static/; and without roles
-(--editors, --admins) everyone signed in may only look, on loopback too:
+someone signed in, but /healthz, /readyz and /static/, and only those a
+role names come in at all: --viewers, --editors, --admins, --approvers,
+or a role given in the UI. An identity provider signs in whoever it
+knows, which for a public one (Google's for any account, GitLab.com,
+GitHub through Dex, a multi-tenant Entra ID app) is anyone:
   --oidc-issuer URL   sign people in with this OpenID Connect provider, its
                       configuration discovered from the URL (https, or http
                       to this machine or a name inside a cluster): the
@@ -201,6 +210,14 @@ someone signed in, but /healthz, /readyz and /static/; and without roles
   --oidc-scopes LIST  the scopes asked for, comma-separated (default
                       email,profile, and openid always); add groups where
                       the provider lists them only when asked
+  --oidc-hosted-domain LIST
+                      Google Workspace domains people must come from (the
+                      hd claim), comma-separated
+  --oidc-trusted-clients LIST
+                      the provider's other clients whose ID tokens (azp)
+                      are taken as this one's, comma-separated; others
+                      are refused
+  --oidc-bearer=false take no ID token as a bearer token: sessions alone
   --user-claim NAME   the claim that names the person (default email; with
                       --oidc-issuer, email_verified must be true beside it)
   --groups-claim NAME the claim that lists their groups, for --editors,
@@ -211,8 +228,9 @@ someone signed in, but /healthz, /readyz and /static/; and without roles
   --session-key-file FILE
                       a key of 32 characters or more that session cookies
                       are signed with, read at start; without it, one made
-                      once and kept in the ledger. A new key signs everyone
-                      out
+                      for the process, so sessions end when it restarts.
+                      Whoever holds the key can sign in as anyone; a new
+                      one signs everyone out
   --proxy-jwt KIND    take who each request comes from from the JWT a
                       sign-in in front signed, checked against its keys:
                       google-iap (Google Cloud's Identity-Aware Proxy,
@@ -598,8 +616,11 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			cfg.NotifySlack = val == "true"
 		case "--external-url":
 			u, perr := url.Parse(val)
-			if perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			if perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 				return true, fmt.Errorf("--external-url %s: want where people reach the UI, like https://lapilli.example.com", val)
+			}
+			if u.Path != "" && u.Path != "/" {
+				return true, fmt.Errorf("--external-url %s: lapilli is served at the root of its host, as its links are: give no path", val)
 			}
 			cfg.ExternalURL = val
 			externalURLLocal = u.Scheme == "https" || thisMachine(u.Hostname())
@@ -624,6 +645,20 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			oc.SecretFile, ocSet = val, true
 		case "--oidc-scopes":
 			oc.Scopes, ocSet, oidcScopesGiven = list(val), true, true
+		case "--oidc-hosted-domain":
+			for _, d := range list(val) {
+				if !hostedDomain.MatchString(d) {
+					return true, fmt.Errorf("--oidc-hosted-domain %s: want domains, like example.com", d)
+				}
+				oc.HostedDomains = append(oc.HostedDomains, strings.ToLower(d))
+			}
+			ocSet = true
+		case "--oidc-trusted-clients":
+			oc.TrustedClients, ocSet = list(val), true
+		case "--oidc-bearer":
+			oc.NoBearer, ocSet = val != "true", true
+		case "--viewers":
+			cfg.Viewers = list(val)
 		case "--user-claim":
 			if strings.TrimSpace(val) == "" {
 				return true, fmt.Errorf("--user-claim: want a claim, such as email, preferred_username or sub")
@@ -741,6 +776,10 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--everyone-admin is for no roles: with --editors or --admins, they say who may change what")
 	case cfg.EveryoneAdmin && cfg.ReadOnly:
 		err = fmt.Errorf("--everyone-admin lets everyone change anything, and --read-only no one")
+	case (ocSet || pxSet) && serve.CheckRoles(serve.Config{OIDC: &oc, Viewers: cfg.Viewers, Editors: cfg.Editors, Admins: cfg.Admins, Approvers: cfg.Approvers}) != nil:
+		err = serve.CheckRoles(serve.Config{OIDC: &oc, Viewers: cfg.Viewers, Editors: cfg.Editors, Admins: cfg.Admins, Approvers: cfg.Approvers})
+	case len(cfg.Viewers) > 0 && !signedIn:
+		err = fmt.Errorf("--viewers needs a sign-in, --user-header, --oidc-issuer or --proxy-jwt: who is who comes from it")
 	case cfg.GroupsHeader != "" && cfg.UserHeader == "":
 		err = fmt.Errorf("--groups-header needs --user-header: who is who comes from the proxy that signs people in")
 	case (len(cfg.Editors) > 0 || len(cfg.Admins) > 0) && !signedIn:
@@ -970,9 +1009,15 @@ func checkContentOn(f *verdictFlags) bool {
 	return (!f.checkContentSet || f.checkContent) && !f.alerts && (len(f.rules) > 0 || readsAPI(f))
 }
 
+// hostedDomain is a domain, as Google's hd claim has one.
+var hostedDomain = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$`)
+
 // thisMachine reports whether a host is this machine's: localhost, a name
-// under .localhost, or a loopback address. A browser keeps a cookie sent
-// there over http from going anywhere else.
+// under .localhost, or a loopback address, which a browser reaches without
+// the network. A cookie set there over http still goes to every other
+// server on this machine the browser visits, whatever its port (cookies
+// aren't kept to a port): a name of its own under .localhost keeps it from
+// the rest.
 func thisMachine(host string) bool {
 	host = strings.TrimSuffix(strings.ToLower(host), ".")
 	if ip := net.ParseIP(host); ip != nil {

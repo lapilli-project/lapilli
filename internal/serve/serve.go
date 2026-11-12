@@ -139,13 +139,16 @@ type Config struct {
 	// proxy lists the reader's groups in.
 	Editors, Admins []string
 	GroupsHeader    string
+	// Viewers are who may look (users, group:NAME, *@DOMAIN, "*"): with
+	// them, or a sign-in of lapilli's own, no one else comes in at all.
+	Viewers []string
 
 	// A sign-in of lapilli's own (docs/design/signin.md), in place of
 	// UserHeader: OIDC signs people in with an OpenID Connect provider,
 	// sending them back to ExternalURL's /auth/callback; Proxy takes them
 	// from the JWT a sign-in in front signs. Sessions last SessionMaxAge
 	// (12h when 0), in cookies signed with the key in the file SessionKey,
-	// or else one made once and kept in the ledger.
+	// or else one made for the process.
 	OIDC          *signin.OIDC
 	Proxy         *signin.Proxy
 	SessionMaxAge time.Duration
@@ -387,6 +390,9 @@ func (st *status) set(doing string, args ...any) {
 
 // New opens the ledger and readies the server; h is where the history is.
 func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*Server, error) {
+	if err := CheckRoles(cfg); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(cfg.Ledger, 0o750); err != nil {
 		return nil, fmt.Errorf("--ledger: %w", err)
 	}
@@ -579,6 +585,11 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("--listen: %w", err)
 	}
 	s.listening(ln.Addr())
+	if s.in != nil && s.in.oidc != nil {
+		// Asked at once, so a setting that is wrong is in the log at start,
+		// not first found by someone signing in.
+		go s.discover(ctx)
+	}
 	srv := &http.Server{
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,

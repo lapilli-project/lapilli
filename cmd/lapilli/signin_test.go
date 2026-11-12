@@ -42,6 +42,14 @@ func TestServeSignInFlags(t *testing.T) {
 		"JWKS, no header":         {[]string{"--proxy-jwt", "jwks", "--proxy-jwt-jwks", "https://idp.example.com/keys", "--proxy-jwt-issuer", "x", "--proxy-jwt-audience", "y"}, "--proxy-jwt-header"},
 		"JWKS over http":          {[]string{"--proxy-jwt", "jwks", "--proxy-jwt-header", "X-Jwt", "--proxy-jwt-jwks", "http://idp.example.com/keys", "--proxy-jwt-issuer", "x", "--proxy-jwt-audience", "y"}, "--proxy-jwt-jwks"},
 		"roles, no sign-in":       {[]string{"--admins", "ana@example.com"}, "need a sign-in"},
+		"OIDC, no one let in":     {append([]string{}, oidc...), "lets in only those a role names"},
+		"a JWT, no one let in":    {append([]string{}, iap...), "lets in only those a role names"},
+		"'*', no viewers":         {append(append([]string{}, oidc...), "--admins", "*"), "--admins '*'"},
+		"'*', viewers everyone":   {append(append([]string{}, oidc...), "--editors", "*", "--viewers", "*"), "--editors '*'"},
+		"viewers, no sign-in":     {[]string{"--viewers", "*@example.com"}, "--viewers needs a sign-in"},
+		"a hosted domain wrong":   {append(append([]string{}, oidc...), "--viewers", "*@example.com", "--oidc-hosted-domain", "not a domain"), "--oidc-hosted-domain"},
+		"a path in the URL":       {[]string{"--oidc-issuer", "https://idp.example.com", "--oidc-client-id", "x", "--external-url", "https://lapilli.example.com/lapilli", "--viewers", "*@example.com"}, "no path"},
+		"bearer, a value":         {append(append([]string{}, oidc...), "--oidc-bearer=maybe"), "want true or false"},
 		"groups header alone":     {[]string{"--groups-header", "X-Forwarded-Groups"}, "--groups-header needs --user-header"},
 	} {
 		var out, errs strings.Builder
@@ -54,12 +62,13 @@ func TestServeSignInFlags(t *testing.T) {
 	// Given whole, each is taken, with roles and changes: it then fails
 	// only to listen.
 	for name, args := range map[string][]string{
-		"OIDC":                  append(append([]string{}, oidc...), "--oidc-client-secret-file", secret, "--admins", "group:ops", "--changes"),
-		"OIDC on this machine":  {"--oidc-issuer", "http://127.0.0.1:5556/dex", "--oidc-client-id", "x", "--external-url", "http://localhost:8080", "--editors", "*"},
-		"OIDC under .localhost": {"--oidc-issuer", "http://dex.dex.svc.cluster.local:5556/dex", "--oidc-client-id", "x", "--external-url", "http://lapilli.localhost", "--user-claim", "sub", "--groups-claim", ""},
-		"IAP":                   append(append([]string{}, iap...), "--admins", "ana@example.com", "--changes"),
-		"an ALB":                {"--proxy-jwt", "aws-alb", "--proxy-jwt-alb-arn", "arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/lapilli/0123456789abcdef"},
-		"JWKS":                  {"--proxy-jwt", "jwks", "--proxy-jwt-header", "Authorization", "--proxy-jwt-jwks", "https://idp.example.com/keys", "--proxy-jwt-issuer", "https://idp.example.com", "--proxy-jwt-audience", "lapilli"},
+		"OIDC":                   append(append([]string{}, oidc...), "--oidc-client-secret-file", secret, "--admins", "group:ops", "--changes", "--oidc-hosted-domain", "example.com", "--oidc-trusted-clients", "cli", "--oidc-bearer=false"),
+		"OIDC on this machine":   {"--oidc-issuer", "http://127.0.0.1:5556/dex", "--oidc-client-id", "x", "--external-url", "http://localhost:8080/", "--editors", "*", "--viewers", "*@example.com"},
+		"OIDC under .localhost":  {"--oidc-issuer", "http://dex.dex.svc.cluster.local:5556/dex", "--oidc-client-id", "x", "--external-url", "http://lapilli.localhost", "--user-claim", "sub", "--groups-claim", "", "--viewers", "*"},
+		"IAP":                    append(append([]string{}, iap...), "--admins", "ana@example.com", "--changes"),
+		"an ALB":                 {"--proxy-jwt", "aws-alb", "--proxy-jwt-alb-arn", "arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/lapilli/0123456789abcdef", "--viewers", "group:ops"},
+		"JWKS":                   {"--proxy-jwt", "jwks", "--proxy-jwt-header", "Authorization", "--proxy-jwt-jwks", "https://idp.example.com/keys", "--proxy-jwt-issuer", "https://idp.example.com", "--proxy-jwt-audience", "lapilli", "--editors", "ed@example.com"},
+		"viewers behind a proxy": {"--user-header", "X-Forwarded-Email", "--viewers", "*@example.com"},
 	} {
 		var out, errs strings.Builder
 		run(append([]string{"serve", "--prometheus", "http://127.0.0.1:1", "--rules", hook, "--listen", "256.0.0.1:1", "--ledger", t.TempDir()}, args...), &out, &errs)

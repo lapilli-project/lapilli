@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -46,8 +47,12 @@ func (c *Cookies) name(what string) string {
 // SessionName is the session cookie's name.
 func (c *Cookies) SessionName() string { return c.name("session") }
 
-// LoginName is the cookie a sign-in under way is kept in.
-func (c *Cookies) LoginName() string { return c.name("login") }
+// LoginName is the cookie a sign-in under way is kept in, named by its
+// state: two tabs signing in at once each keep their own.
+func (c *Cookies) LoginName(state string) string {
+	sum := sha256.Sum256([]byte(state))
+	return c.name("login-" + base64.RawURLEncoding.EncodeToString(sum[:9]))
+}
 
 // Session is who signed in, until when.
 type Session struct {
@@ -116,24 +121,30 @@ func (c *Cookies) End(w http.ResponseWriter) { c.set(w, c.SessionName(), "", -1)
 
 // Begin keeps a sign-in under way in its cookie.
 func (c *Cookies) Begin(w http.ResponseWriter, st Start, next string) error {
-	v, err := c.seal(c.login, c.LoginName(), Login{Start: st, Next: next, Until: c.Now().Add(loginFor).Unix()})
+	name := c.LoginName(st.State)
+	v, err := c.seal(c.login, name, Login{Start: st, Next: next, Until: c.Now().Add(loginFor).Unix()})
 	if err != nil {
 		return err
 	}
-	c.set(w, c.LoginName(), v, loginFor)
+	c.set(w, name, v, loginFor)
 	return nil
 }
 
-// Take is the sign-in under way the browser came back with, taken away:
-// none when there is none, it isn't signed with this key, or it took too
-// long.
-func (c *Cookies) Take(w http.ResponseWriter, r *http.Request) (Login, bool) {
-	var l Login
-	ok := c.open(r, c.login, c.LoginName(), &l)
-	if _, err := r.Cookie(c.LoginName()); err == nil {
-		c.set(w, c.LoginName(), "", -1)
+// Take is the sign-in under way the browser came back with the state of,
+// taken away: none when there is none, it isn't signed with this key, it
+// holds another state, or it took too long.
+func (c *Cookies) Take(w http.ResponseWriter, r *http.Request, state string) (Login, bool) {
+	if state == "" {
+		return Login{}, false
 	}
-	if !ok || l.Until <= c.Now().Unix() || l.State == "" || l.Nonce == "" || l.Verifier == "" {
+	name := c.LoginName(state)
+	var l Login
+	ok := c.open(r, c.login, name, &l)
+	if _, err := r.Cookie(name); err == nil {
+		c.set(w, name, "", -1)
+	}
+	if !ok || l.Until <= c.Now().Unix() || l.Nonce == "" || l.Verifier == "" ||
+		subtle.ConstantTimeCompare([]byte(l.State), []byte(state)) != 1 {
 		return Login{}, false
 	}
 	return l, true
