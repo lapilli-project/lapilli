@@ -200,7 +200,10 @@ func TestNOCPages(t *testing.T) {
 		t.Error("/rules/Noise: says it re-fired")
 	}
 	_, body, _ = get(t, h, "/")
-	for _, want := range []string{"1 of the last 11 whole weeks had one", "firings; precision 0% without them", "<th scope=\"col\" class=\"n\">During deploys</th>"} {
+	// The weekly table, wider with them, scrolls in a box the keyboard
+	// reaches (axe's scrollable-region-focusable).
+	for _, want := range []string{"1 of the last 11 whole weeks had one", "firings; precision 0% without them", "<th scope=\"col\" class=\"n\">During deploys</th>",
+		`<div class="scroll" tabindex="0" role="region" aria-labelledby="by-week">`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/: no %q", want)
 		}
