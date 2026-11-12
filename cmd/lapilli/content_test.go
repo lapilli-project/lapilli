@@ -30,7 +30,7 @@ const sayingRules = `groups:
         expr: up == 0
         for: 1m
         labels: {severity: pgae}
-        annotations: {summary: "{{ $labels.instance }} down", runbook_url: "runbooks/down.md"}
+        annotations: {summary: "{{ $labels.instance }} down", runbook_url: "ask in #oncall"}
 `
 
 // configured is a history that serves Prometheus's configuration too.
@@ -53,7 +53,7 @@ func TestCheckContent(t *testing.T) {
 	out := stdout.String()
 	for _, want := range []string{"What 3 rules say: 4 problems in 2 rules, 0 guesses apart.", "Not measured", "The range check is off",
 		"Quiet  fact  no runbook link", "line 1: unclosed action",
-		"Typo   fact  a runbook link that isn't an http or https URL  runbooks/down.md"} {
+		"Typo   fact  a runbook that isn't a link: an http or https URL, or a path in a repository  ask in #oncall"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("no %q in:\n%s", want, out)
 		}
@@ -92,7 +92,7 @@ func TestCheckContent(t *testing.T) {
 	if got, want := checks("CheckoutErrors", problems), []string{content.LabelNeverSeen + ":pod", content.NoisyNoFor + ":"}; !slices.Equal(got, want) {
 		t.Errorf("CheckoutErrors: %q, want %q", got, want)
 	}
-	if got, want := checks("Typo", problems), []string{content.RunbookNotURL + ":runbooks/down.md", content.UnknownSeverity + ":pgae"}; !slices.Equal(got, want) {
+	if got, want := checks("Typo", problems), []string{content.RunbookNotURL + ":ask in #oncall", content.UnknownSeverity + ":pgae"}; !slices.Equal(got, want) {
 		t.Errorf("Typo: %q, want %q", got, want)
 	}
 	if got, want := checks("Quiet", guesses), []string{content.ShortRange + ":rate[30s] < 2 × 1m"}; !slices.Equal(got, want) {
@@ -192,5 +192,41 @@ func TestErrorsOf(t *testing.T) {
 	}
 	if got := errorsOf(fs[2:], []rules.Rule{{Name: "Disk"}}); got != nil {
 		t.Errorf("none of those given: %v", got)
+	}
+}
+
+// --runbook-annotations names where a runbook is read from: a rule whose
+// runbook is in its playbook annotation has none when only runbook_url is
+// named, and has one when playbook is.
+func TestRunbookAnnotations(t *testing.T) {
+	now = func() time.Time { return t0 }
+	rulesFile := write(t, "rules.yaml", `groups:
+  - name: g
+    rules:
+      - alert: Down
+        expr: up == 0
+        for: 1m
+        labels: {severity: page}
+        annotations: {summary: down, playbook: "docs/playbooks/down.md#restart"}
+`)
+	for _, c := range []struct {
+		flag string
+		want bool // no runbook
+	}{{"", false}, {"runbook_url", true}, {"runbook_url,playbook", false}} {
+		args := []string{"verdict", "--rules", rulesFile, "--check-content"}
+		if c.flag != "" {
+			args = append(args, "--runbook-annotations", c.flag)
+		}
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 0 {
+			t.Fatalf("%s: exit %d: %s", c.flag, code, stderr.String())
+		}
+		if got := strings.Contains(stdout.String(), "no runbook link"); got != c.want {
+			t.Errorf("--runbook-annotations %q: no runbook link %v, want %v:\n%s", c.flag, got, c.want, stdout.String())
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"verdict", "--rules", rulesFile, "--check-content", "--runbook-annotations", "run book"}, &stdout, &stderr); code == 0 {
+		t.Error("an annotation name with a space taken")
 	}
 }

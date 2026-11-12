@@ -475,7 +475,7 @@ func TestEditAnnotation(t *testing.T) {
 				if a[i].Name == c.e.Name && !c.says(b[i].Says) {
 					t.Errorf("says %+v", b[i].Says)
 				}
-				if a[i].Name != c.e.Name && a[i].Says != b[i].Says {
+				if a[i].Name != c.e.Name && !a[i].Says.Equal(b[i].Says) {
 					t.Errorf("%s says otherwise", a[i].Name)
 				}
 			}

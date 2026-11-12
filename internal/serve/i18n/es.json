@@ -899,7 +899,7 @@
  "Guesses, which may be wrong:": "Suposiciones, que pueden ser erróneas:",
  "no summary or description": "sin summary ni description",
  "no runbook link": "sin enlace al runbook",
- "a runbook link that isn't an http or https URL": "un enlace al runbook que no es una URL http o https",
+ "a runbook that isn't a link: an http or https URL, or a path in a repository": "un runbook que no es un enlace: ni una URL http o https, ni una ruta en un repositorio",
  "a template that doesn't parse": "una plantilla que no se puede analizar",
  "no severity": "sin severidad",
  "a severity not in --severities": "una severidad que no está en --severities",

@@ -87,14 +87,17 @@ groups:
 			t.Errorf("%s: %d rules", name, len(rs))
 			continue
 		}
-		if rs[0].Says != c.want {
+		got := rs[0].Says
+		got.Annotations = nil // TestSaysAnnotations
+		if !got.Equal(c.want) {
 			t.Errorf("%s:\n got %+v\nwant %+v", name, rs[0].Says, c.want)
 		}
 	}
 	// The rules API, as --loaded-rules reads it.
 	rs, err := FromAPI([]byte(`{"status": "success", "data": {"groups": [{"name": "g", "rules": [{"type": "alerting", "name": "Down", "query": "up == 0",
 		"annotations": {"summary": "down", "runbook_url": "https://runbooks.example/down"}}]}]}}`))
-	if err != nil || len(rs) != 1 || rs[0].Says != (Says{Summary: "down", Runbook: "https://runbooks.example/down", Template: TemplatePrometheus}) {
+	if err != nil || len(rs) != 1 || !rs[0].Says.Equal(Says{Summary: "down", Runbook: "https://runbooks.example/down", Template: TemplatePrometheus,
+		Annotations: map[string]string{"runbook_url": "https://runbooks.example/down"}}) {
 		t.Errorf("the rules API: %+v %v", rs, err)
 	}
 }

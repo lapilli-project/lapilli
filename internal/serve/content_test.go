@@ -107,7 +107,7 @@ func TestContentPages(t *testing.T) {
 	h := s.Handler()
 	_, body, _ := get(t, h, "/rules/Errors")
 	for _, want := range []string{`id="says"`, "&lt;script&gt;alert(1)&lt;/script&gt;", "<code>javascript:alert(1)</code>",
-		"a runbook link that isn&#39;t an http or https URL", "a label no firing had: <code>pod</code>", "noisy, with no for"} {
+		"a runbook that isn&#39;t a link: an http or https URL, or a path in a repository", "a label no firing had: <code>pod</code>", "noisy, with no for"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/rules/Errors has no %q", want)
 		}
@@ -157,7 +157,7 @@ func TestContentLine(t *testing.T) {
 		}
 		return l
 	}
-	if got, want := line("en", nil), "What the rules say: 3 problems in 1 rules (a runbook link that isn't an http or https URL ×1, a label no firing had ×1, noisy, with no for ×1); 2 guesses, apart."; got != want {
+	if got, want := line("en", nil), "What the rules say: 3 problems in 1 rules (a runbook that isn't a link: an http or https URL, or a path in a repository ×1, a label no firing had ×1, noisy, with no for ×1); 2 guesses, apart."; got != want {
 		t.Errorf("\n got %q\nwant %q", got, want)
 	}
 	if got := line("en", func(r string) bool { return r == "Quiet" }); got != "What the rules say: no problems; 2 guesses, apart." {

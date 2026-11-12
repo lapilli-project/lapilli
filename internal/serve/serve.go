@@ -70,6 +70,9 @@ type Config struct {
 	Incidents string // the incidents file, read again each run
 	Impact    string
 	ImpactFor time.Duration
+	// RunbookAnnotations are the annotations a rule's runbook is read
+	// from, the first set: nil for content.RunbookAnnotations.
+	RunbookAnnotations []string
 
 	// Options are the judging settings from the command line; the UI can
 	// change Lead, Match, RefireWithin and the noisy thresholds.

@@ -323,7 +323,7 @@ func (s *Server) checkContent(ctx context.Context, rs []rules.Rule, scrape conte
 	}
 	notify, _ := s.notifications()
 	unchecked := map[string]string{}
-	fs := content.Check(named, content.Options{Severities: s.cfg.Severities, Scrape: scrape.Global, Jobs: scrape.Jobs, Notify: notify,
+	fs := content.Check(named, content.Options{Runbooks: s.cfg.RunbookAnnotations, Severities: s.cfg.Severities, Scrape: scrape.Global, Jobs: scrape.Jobs, Notify: notify,
 		// Routing the rules to Grafana's contact points has a budget of its
 		// own, and a time: the check holds what pages and /metrics wait on.
 		NotifyBy:  time.Now().Add(notifyTime),
@@ -433,7 +433,10 @@ type saysView struct {
 	Problems, Guesses []contentFinding
 }
 
-func saysViewOf(says rules.Says, fs []contentFinding) *saysView {
+// saysViewOf is what a rule says, its runbook read from the annotations
+// runbooks names (content.RunbookAnnotations when nil).
+func saysViewOf(says rules.Says, fs []contentFinding, runbooks []string) *saysView {
+	says.Runbook = content.Runbook(says, runbooks)
 	v := &saysView{Says: says, RunbookLink: content.Link(says)}
 	for _, f := range fs {
 		if f.Class == content.Heuristic {

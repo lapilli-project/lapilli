@@ -67,7 +67,13 @@ func TestNoText(t *testing.T) {
 func TestRunbook(t *testing.T) {
 	for link, want := range map[string][]string{
 		"":                                         {NoRunbook},
-		"runbooks/down.md":                         {RunbookNotURL + ":runbooks/down.md"},
+		"runbooks/down.md":                         nil, // a path in the rules' repository
+		"docs/runbooks/disk.md#full":               nil,
+		"/docs/runbooks/#disk-full":                nil,
+		"README.md":                                nil,
+		"check-disk":                               {RunbookNotURL + ":check-disk"}, // a word alone
+		"ask in #oncall":                           {RunbookNotURL + ":ask in #oncall"},
+		"//evil.example/x":                         {RunbookNotURL + "://evil.example/x"},
 		"javascript:alert(1)":                      {RunbookNotURL + ":javascript:alert(1)"},
 		"ftp://runbooks.example/down":              {RunbookNotURL + ":ftp://runbooks.example/down"},
 		"https://":                                 {RunbookNotURL + ":https://"},
@@ -79,6 +85,21 @@ func TestRunbook(t *testing.T) {
 		r := good("Runbook")
 		r.Says.Runbook = link
 		one(t, r, Options{}, want...)
+	}
+	// Read from the annotations named, the first the rule has; a cloud's
+	// alarm, which has none, by the link its source gives.
+	r := good("Annotated")
+	r.Says.Runbook, r.Says.Annotations = "", map[string]string{"playbook": "docs/playbooks/down.md#restart", "dashboard": "https://grafana.example/d/x"}
+	one(t, r, Options{})                                             // playbook is among the defaults
+	one(t, r, Options{Runbooks: []string{"runbook_url"}}, NoRunbook) // not when only runbook_url is named
+	r.Says.Annotations["wiki"] = "not a link"
+	one(t, r, Options{Runbooks: []string{"wiki", "playbook"}}, RunbookNotURL+":not a link")
+	if got := Runbook(r.Says, []string{"dashboard"}); got != "https://grafana.example/d/x" {
+		t.Errorf("Runbook by dashboard: %q", got)
+	}
+	cloud := rules.Says{Runbook: "https://runbooks.example/cpu"}
+	if got := Runbook(cloud, []string{"playbook"}); got != cloud.Runbook {
+		t.Errorf("a cloud's alarm's runbook: %q", got)
 	}
 	g := rules.Rule{Name: "Latency", Labels: map[string]string{"severity": "warning"}, Cloud: "google", Unsupported: "x",
 		Says: rules.Says{Summary: "Latency", Runbook: "${policy.user_label.runbook}", Template: rules.TemplateGoogle}}
@@ -425,7 +446,8 @@ func TestLink(t *testing.T) {
 		"//evil.example/x":                       false,
 		"https://wiki.example/{{ $labels.job }}": false,
 		"https://x.example/${policy.name}":       false,
-		"runbooks/down.md":                       false,
+		"runbooks/down.md":                       false, // a path, shown as one
+		"docs/runbooks/disk.md#full":             false,
 		"":                                       false,
 	} {
 		if got := Link(rules.Says{Runbook: link}); (got != "") != want {

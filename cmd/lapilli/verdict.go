@@ -127,6 +127,13 @@ What the rules say:
   --severities LIST   the severities the team uses, comma-separated: any
                       other is a problem of fact. Without it, one fewer than
                       two rules use is a guess
+  --runbook-annotations LIST
+                      the annotations a rule's runbook is read from, the
+                      first it has, comma-separated (default
+                      runbook_url,runbook,playbook_url,playbook). A runbook
+                      is an http or https URL, or a path in the repository
+                      the rules are kept in, with an anchor or not
+                      (docs/runbooks/disk.md#full)
   --scrape-interval DUR
                       the scrape interval the range check counts with;
                       without it, those Prometheus's /api/v1/status/config
@@ -283,6 +290,7 @@ type verdictFlags struct {
 	checkContent       bool
 	checkContentSet    bool // --check-content given, true or false
 	severities         []string
+	runbooks           []string
 	scrapeInterval     time.Duration
 	alerts             bool
 	firings, incidents string
@@ -335,6 +343,10 @@ type ruleFile struct {
 	path string
 	from time.Time
 }
+
+// annotationName is a name an annotation can have: a label's, as
+// Prometheus and Grafana allow them.
+var annotationName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,127}$`)
 
 func parseVerdictFlags(args []string) (*verdictFlags, error) {
 	return parseFlags(args, nil)
@@ -458,6 +470,18 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			}
 			if len(f.severities) == 0 {
 				return nil, fmt.Errorf("--severities %q: want the severities the team uses, like critical,warning", val)
+			}
+		case "--runbook-annotations":
+			for _, a := range strings.Split(val, ",") {
+				if a = strings.TrimSpace(a); a != "" && !slices.Contains(f.runbooks, a) {
+					if !annotationName.MatchString(a) {
+						return nil, fmt.Errorf("--runbook-annotations %s: %q isn't an annotation's name", val, a)
+					}
+					f.runbooks = append(f.runbooks, a)
+				}
+			}
+			if len(f.runbooks) == 0 {
+				return nil, fmt.Errorf("--runbook-annotations %q: want the annotations a runbook is in, like runbook_url,playbook", val)
 			}
 		case "--scrape-interval":
 			f.scrapeInterval, err = dur(time.Second)

@@ -899,7 +899,7 @@
  "Guesses, which may be wrong:": "推測（誤りの可能性あり）:",
  "no summary or description": "summary・description なし",
  "no runbook link": "ランブックのリンクなし",
- "a runbook link that isn't an http or https URL": "http・https URL ではないランブックのリンク",
+ "a runbook that isn't a link: an http or https URL, or a path in a repository": "リンクではないランブック: http・https URL でもリポジトリ内のパスでもない",
  "a template that doesn't parse": "パースできないテンプレート",
  "no severity": "重大度（severity）なし",
  "a severity not in --severities": "--severities にない重大度",

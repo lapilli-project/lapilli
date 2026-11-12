@@ -165,6 +165,22 @@ type Says struct {
 	// description, nor so a runbook in it: OCI's alarm list has no body.
 	// Neither is known, so neither missing is a fault.
 	TextUnknown bool `json:"text_unknown,omitempty"`
+	// Annotations are, for a rule whose text is in annotations, the others
+	// it has, which a runbook can be read from (content.Runbook): 32 at
+	// most, by name, each cut as the rest. Nil for one whose source has
+	// none, such as a cloud's alarm.
+	Annotations map[string]string `json:"-"`
+}
+
+// maxAnnotations is how many annotations beside summary and description
+// are kept.
+const maxAnnotations = 32
+
+// Equal reports whether two rules say the same, their other annotations
+// too.
+func (s Says) Equal(o Says) bool {
+	return s.Summary == o.Summary && s.Description == o.Description && s.Runbook == o.Runbook && s.Template == o.Template &&
+		s.Severity == o.Severity && s.NoSeverity == o.NoSeverity && s.TextUnknown == o.TextUnknown && maps.Equal(s.Annotations, o.Annotations)
 }
 
 // The languages a rule's text is written in.
@@ -194,7 +210,13 @@ func annotated(v any, template string) Says {
 	if runbook == "" {
 		runbook = a["runbook"]
 	}
-	return Says{Summary: cut(a["summary"]), Description: cut(a["description"]), Runbook: cut(runbook), Template: template}
+	others := map[string]string{}
+	for _, k := range slices.Sorted(maps.Keys(a)) {
+		if k != "summary" && k != "description" && a[k] != "" && len(others) < maxAnnotations {
+			others[k] = cut(a[k])
+		}
+	}
+	return Says{Summary: cut(a["summary"]), Description: cut(a["description"]), Runbook: cut(runbook), Template: template, Annotations: others}
 }
 
 // urlIn is a link written into plain text.

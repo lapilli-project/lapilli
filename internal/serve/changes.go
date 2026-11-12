@@ -762,9 +762,9 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		}
 		was := saysAfter(r.Says, q.Annotation, "", true) // as it would say with it taken out
 		switch now := saysAfter(r.Says, q.Annotation, q.Text, q.Unset); {
-		case q.Unset && now == r.Says && was == r.Says:
+		case q.Unset && now.Equal(r.Says) && was.Equal(r.Says):
 			return 0, bad("it says nothing there to take out")
-		case !q.Unset && now == r.Says:
+		case !q.Unset && now.Equal(r.Says):
 			return 0, bad("it says that already")
 		}
 		want.Says = saysFor(r, q.Annotation, q.Text, q.Unset)
@@ -1004,14 +1004,14 @@ func readsSaying(before, after []byte, r, want rules.Rule) (*rules.Rule, bool) {
 	}
 	var got *rules.Rule
 	for i := range a {
-		if a[i].Key() == r.Key() && a[i].Says == r.Says && got == nil {
+		if a[i].Key() == r.Key() && a[i].Says.Equal(r.Says) && got == nil {
 			if keyBut(a[i]) != keyBut(b[i]) {
 				return nil, false
 			}
 			got = &b[i]
 			continue
 		}
-		if a[i].Key() != b[i].Key() || a[i].Says != b[i].Says {
+		if a[i].Key() != b[i].Key() || !a[i].Says.Equal(b[i].Says) {
 			return nil, false
 		}
 	}

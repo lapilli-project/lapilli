@@ -743,7 +743,7 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	if says, ok := st.says[name]; ok {
-		v.Says = saysViewOf(says, st.findings[name])
+		v.Says = saysViewOf(says, st.findings[name], s.cfg.RunbookAnnotations)
 		v.Says.Unchecked = st.unchecked[name]
 		v.Content = countOf(st.findings[name])
 	}

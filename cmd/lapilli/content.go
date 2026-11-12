@@ -75,7 +75,7 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 		rs = versions[len(versions)-1].Rules
 	}
 	source.TellApart(rs)
-	o := content.Options{Severities: f.severities, Scrape: f.scrapeInterval, Failed: func(rule string, err error) {
+	o := content.Options{Runbooks: f.runbooks, Severities: f.severities, Scrape: f.scrapeInterval, Failed: func(rule string, err error) {
 		fmt.Fprintf(stderr, "lapilli verdict: the content check failed on %s, which has no findings: %v\n", rule, err)
 	}}
 	// With --grafana, what its notification templates show

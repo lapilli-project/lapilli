@@ -899,7 +899,7 @@
  "Guesses, which may be wrong:": "추정 (틀릴 수 있어요):",
  "no summary or description": "summary·description 없음",
  "no runbook link": "런북 링크 없음",
- "a runbook link that isn't an http or https URL": "http·https URL이 아닌 런북 링크",
+ "a runbook that isn't a link: an http or https URL, or a path in a repository": "링크가 아닌 런북: http·https URL도, 저장소 안 경로도 아님",
  "a template that doesn't parse": "파싱되지 않는 템플릿",
  "no severity": "심각도 (severity) 없음",
  "a severity not in --severities": "--severities에 없는 심각도",

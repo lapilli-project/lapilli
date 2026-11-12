@@ -79,8 +79,35 @@ type Finding struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// RunbookAnnotations are the annotations a rule's runbook is read from by
+// default, the first it has: Prometheus's and Grafana's own, and those
+// teams use beside them.
+var RunbookAnnotations = []string{"runbook_url", "runbook", "playbook_url", "playbook"}
+
+// Runbook is the runbook a rule says: the first of the annotations names
+// (RunbookAnnotations when nil) it has, for a rule whose text is in
+// annotations; for one whose isn't, such as a cloud's alarm, the link its
+// source gives.
+func Runbook(s rules.Says, names []string) string {
+	if s.Annotations == nil {
+		return s.Runbook
+	}
+	if names == nil {
+		names = RunbookAnnotations
+	}
+	for _, n := range names {
+		if v := strings.TrimSpace(s.Annotations[n]); v != "" {
+			return s.Annotations[n]
+		}
+	}
+	return ""
+}
+
 // Options are what the checks know besides the rules.
 type Options struct {
+	// Runbooks are the annotations a runbook is read from, the first a
+	// rule has: nil for RunbookAnnotations.
+	Runbooks []string
 	// Severities are the severities the team uses (--severities); others
 	// are a problem of fact. Empty, a rare one is a guess.
 	Severities []string
@@ -180,17 +207,18 @@ func checkOne(r rules.Rule, o Options, sevs map[string]*sevCount, dups []string)
 	if r.Says.Description == "" && (r.Says.Summary == "" || r.Says.Template == "") && !r.Says.TextUnknown {
 		add(NoText, "")
 	}
-	switch ok, known := linkOK(r.Says.Runbook, r.Says.Template); {
-	case r.Says.Runbook == "" && r.Says.TextUnknown:
-	case r.Says.Runbook == "":
+	runbook := Runbook(r.Says, o.Runbooks)
+	switch ok, known := linkOK(runbook, r.Says.Template); {
+	case runbook == "" && r.Says.TextUnknown:
+	case runbook == "":
 		add(NoRunbook, "")
 	case known && !ok:
-		add(RunbookNotURL, r.Says.Runbook)
+		add(RunbookNotURL, runbook)
 	}
 	// The labels named where a missing one would show: not in an if
 	// or with's condition, nor under one whose condition names it.
 	var named []string
-	for _, text := range []string{r.Says.Summary, r.Says.Description, r.Says.Runbook} {
+	for _, text := range []string{r.Says.Summary, r.Says.Description, runbook} {
 		names, err := templateNames(r.Says.Template, text, false)
 		if err != nil {
 			add(TemplateError, err.Error())
@@ -411,8 +439,24 @@ func Unprintable(r rune) bool {
 	return r < ' ' || r >= 0x7f && r < 0xa0 || r >= 0x200e && r <= 0x200f || r >= 0x202a && r <= 0x202e || r >= 0x2066 && r <= 0x2069
 }
 
-// linkOK is whether a runbook link is an http or https URL; known is false
-// when a template decides where it starts, as {{ $externalURL }}/x does.
+// repoPath is a runbook kept beside the rules, as a path in their
+// repository, with an anchor or not: docs/runbooks/disk.md#full. A path is
+// a file's or a directory's (a slash, or a file's extension), so a word
+// alone isn't taken for one.
+var repoPath = regexp.MustCompile(`^/?[\w.~-]+(?:/[\w.~%-]+)*/?(?:#[\w.~%:/-]*)?$`)
+
+// RepoPath reports whether a runbook is a path in a repository.
+func RepoPath(link string) bool {
+	if !repoPath.MatchString(link) || strings.Contains(link, "//") {
+		return false
+	}
+	path, _, anchor := strings.Cut(link, "#")
+	return strings.Contains(path, "/") || anchor || strings.Contains(path[strings.LastIndex(path, "/")+1:], ".")
+}
+
+// linkOK is whether a runbook link is an http or https URL, or a path in a
+// repository; known is false when a template decides where it starts, as
+// {{ $externalURL }}/x does.
 func linkOK(link, lang string) (ok, known bool) {
 	link = strings.TrimSpace(link)
 	if link == "" {
@@ -430,6 +474,9 @@ func linkOK(link, lang string) (ok, known bool) {
 			return false, false
 		}
 		link = act.ReplaceAllString(link, "x")
+	}
+	if RepoPath(link) {
+		return true, true
 	}
 	u, err := url.Parse(link)
 	if err != nil {
@@ -692,7 +739,7 @@ func Link(s rules.Says) string {
 	if goAction.MatchString(s.Runbook) || googleVar.MatchString(s.Runbook) || strings.ContainsAny(s.Runbook, " \t\r\n") {
 		return ""
 	}
-	if ok, known := linkOK(s.Runbook, ""); ok && known {
+	if ok, known := linkOK(s.Runbook, ""); ok && known && !RepoPath(s.Runbook) {
 		return s.Runbook
 	}
 	return ""
