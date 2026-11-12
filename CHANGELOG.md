@@ -2,6 +2,57 @@
 
 ## [Unreleased]
 
+Reading history from an API with a request quota, as a managed Prometheus
+has one. Five `lapilli verdict --compare` runs at once against one were
+answered HTTP 429, and three rules ended "Could not replay": the retries
+gave up within 30 seconds, nothing sent fewer requests when the API pushed
+back, and a run of eight minutes said nothing until its end.
+
+### Added
+
+- **`--max-rate N`**, for `lapilli verdict` and `lapilli serve`: each API
+  the history is read from (`--prometheus`, `--loki`, Grafana's data source
+  proxy) is asked N requests a second at most, evenly spaced; `0.5` for a
+  quota of 30 a minute.
+- **A progress line.** A `lapilli verdict` run past 15 seconds says on
+  stderr, every 30 seconds, the rules replayed of all, the requests to the
+  history, those asked again after a wait and those answered HTTP 429; at
+  its end, how many were answered 429, if any. stdout is unchanged.
+  `--progress=false` keeps it quiet.
+- **`--fail-unreplayed`**: `lapilli verdict` exits 1 when a rule's replay
+  failed. Without it the exit is as before: 0, or 1 when `--timeout` cut the
+  run short.
+- `unreplayed` in `--json`, of a report and of a comparison: each rule that
+  couldn't be replayed, its side in a comparison, why, and `failed`, true
+  when its replay failed for a reason of the run (a query failed, the time
+  ran out) rather than one of the rule's (a CloudWatch metric alarm, a rule
+  paused).
+
+### Changed
+
+- **Asked again after a wait the API says.** An answer of HTTP 429, or 503,
+  with `Retry-After`, in seconds or as an HTTP date, is asked again that
+  long after, plus up to a quarter so that requests told alike don't come
+  back together: a second at least, two minutes at most, as often as it
+  says so. A 429 without it is asked again after 4, 8, 16, 32, 60 and 60
+  seconds, each less up to half, 90 seconds to 3 minutes in all, past the
+  window of a quota by the minute; before, 2, 4, 8 and 16 seconds, 30 in
+  all. A 5xx is asked again as before, each wait less up to half; a 501
+  isn't. A request waits five minutes at most in all, and every wait ends
+  with `--timeout`. An answer too large to send is halved as before.
+- **Fewer at once after a push back.** A 429 or a 503 halves how many
+  requests go to that API at once, for the whole run (or, in `lapilli
+  serve`, from then on), down to one; one more goes for every ten seconds it
+  takes them again. While it said to wait (`Retry-After`), nothing else is
+  asked of it. Rules sharing a query still share one request.
+- The same holds for every API history is read from: Prometheus, Thanos,
+  Mimir, Cortex, VictoriaMetrics, each cloud's managed Prometheus and
+  CloudWatch through `--auth`, Loki, and Grafana's data source proxy; and
+  for the rules, configuration and targets read from the same API.
+- A rule whose replay failed is named, with why, at the top of the text
+  report and of a comparison, as well as at its foot. A failed query says
+  how often it was asked, and over how long.
+
 ## [0.32.0] - 2026-11-13
 
 Pull request backtests in CI, on every code host: what a team had to glue
