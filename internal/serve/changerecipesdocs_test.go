@@ -27,7 +27,12 @@ import (
 // output's lines.
 func libSays(t *testing.T, script string) []string {
 	t.Helper()
-	cmd := exec.Command("sh", "-c", ". "+changeRecipes+"lib.sh\n"+script)
+	// From a file, not sh -c: Linux holds one argument to 128 KiB.
+	f := filepath.Join(t.TempDir(), "says.sh")
+	if err := os.WriteFile(f, []byte(". "+changeRecipes+"lib.sh\n"+script), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", f)
 	cmd.Env = append(os.Environ(), "LAPILLI_URL=http://x", "LAPILLI_TOKEN_FILE="+tokenFile(t, changesToken), "CLONE=x", "RULES_PATHS=alerts")
 	out, err := cmd.Output()
 	if err != nil {
