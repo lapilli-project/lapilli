@@ -188,3 +188,152 @@ func TestWindowsScale(t *testing.T) {
 		t.Errorf("judging 10,000 firings again beside %d quiet windows took %s, over %s", MaxWindows, took, budget)
 	}
 }
+
+// Excusing says what Excuses says across a change of the clocks, in a
+// zone with daylight saving: repeats on a time the clocks skip, or repeat,
+// worked out once a span, are those Covers finds.
+func TestExcusingAsExcusesAcrossDST(t *testing.T) {
+	ctx := context.Background()
+	berlin, err := time.LoadLocation("Europe/Berlin")
+	if err != nil {
+		t.Skip(err)
+	}
+	l := open(t, berlin)
+	at := func(s string) time.Time {
+		x, err := time.ParseInLocation("2006-01-02 15:04", s, berlin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return x
+	}
+	for _, w := range []Window{
+		{Title: "skipped", Start: at("2026-03-01 02:30"), End: at("2026-03-01 03:15"), Every: "cron", On: "30 2 * * *"},
+		{Title: "repeated", Start: at("2026-10-01 02:30"), End: at("2026-10-01 02:50"), Every: "cron", On: "30 2 * * *"},
+		{Title: "sundays", Start: at("2026-03-01 01:00"), End: at("2026-03-01 04:00"), Every: "cron", On: "0 1 * * sun", Until: at("2026-10-25 00:00")},
+		{Title: "last sunday", Start: at("2026-03-29 00:00"), End: at("2026-03-29 06:00"), Every: "month", On: "last sun"},
+		{Title: "hourly", Start: at("2026-03-01 00:00"), End: at("2026-03-01 00:05"), Every: "cron", On: "0 * * * *"},
+		{Title: "yearly", Start: at("2026-03-29 04:00"), End: at("2026-03-29 05:00"), Every: "cron", On: "0 4 29 3 *"},
+	} {
+		if _, err := l.PutWindow(ctx, w, "ana", opts); err != nil {
+			t.Fatal(w.Title, err)
+		}
+	}
+	r := rand.New(rand.NewPCG(9, 10))
+	for _, span := range [][2]time.Time{
+		{at("2026-03-27 00:00"), at("2026-04-01 00:00")},
+		{at("2026-03-29 01:00"), at("2026-03-29 04:00")},
+		{at("2026-10-23 00:00"), at("2026-10-28 00:00")},
+		{at("2026-10-25 02:00"), at("2026-10-25 03:00")},
+	} {
+		from, to := span[0], span[1]
+		ws, err := l.Windows(ctx, from.Add(-maxWindow), to)
+		if err != nil {
+			t.Fatal(err)
+		}
+		excuses := Excusing(ws, from, to)
+		for range 4000 {
+			start := from.Add(time.Duration(r.Int64N(int64(to.Sub(from)+4*time.Hour))) - 2*time.Hour).Truncate(time.Minute)
+			f := firing.Firing{Rule: "Disk", Start: start, End: start.Add(time.Minute)}
+			want := slices.ContainsFunc(ws, func(w Window) bool { return w.Excuses(f) })
+			if got := excuses(f); got != want {
+				t.Fatalf("span %s to %s, a firing at %s: excused %v, Excuses says %v", from, to, f.Start, got, want)
+			}
+		}
+	}
+}
+
+// TestWindowsCoverScale holds to a budget a day's 10,000 firings of a
+// team, recorded and judged in the write that records them, beside quiet
+// windows that do meet the day: each falling due once a year, in the
+// day's last hour, after the firings, so each firing's Covers looked back a
+// year for each window. 500 took 25.9 s; worked out once a span, the
+// repeats a firing is set beside by a search, they take next to nothing.
+func TestWindowsCoverScale(t *testing.T) {
+	if race {
+		t.Skip("the race detector slows SQLite many times over")
+	}
+	budget := map[int]time.Duration{0: 2 * time.Second, MaxTeamWindows: 2 * time.Second, MaxWindows: 3 * time.Second}
+	for _, n := range []struct{ team, all int }{{0, 0}, {MaxTeamWindows, MaxTeamWindows}, {MaxTeamWindows, MaxWindows}} {
+		ctx := context.Background()
+		l := open(t, time.UTC)
+		pay, err := l.PutTeam(ctx, Team{Name: "payments", Rules: "^Pay"}, "ana")
+		if err != nil {
+			t.Fatal(err)
+		}
+		payer := WithTeams(ctx, []int64{pay})
+		end := t0.Add(7*24*time.Hour - time.Hour)
+		on := fmt.Sprintf("%d %d %d %d *", end.Minute(), end.Hour(), end.Day(), int(end.Month()))
+		first := end.AddDate(-1, 0, 0)
+		for i := range n.all {
+			c, team := payer, pay
+			if i >= n.team {
+				c, team = ctx, 0
+			}
+			if _, err := l.PutWindow(c, Window{Title: "yearly", Start: first, End: first.Add(time.Minute), Every: "cron", On: on, TeamID: team, Rules: "^Pay"}, "x", opts); err != nil {
+				t.Fatal(err)
+			}
+		}
+		r := rand.New(rand.NewPCG(1, 2))
+		var fs []firing.Firing
+		for i := range 10_000 {
+			start := t0.Add(6*24*time.Hour + time.Duration(r.Int64N(int64(22*time.Hour)))).Truncate(time.Second)
+			fs = append(fs, firing.Firing{Rule: fmt.Sprintf("Pay%02d", r.IntN(40)),
+				Labels: map[string]string{"service": "checkout", "instance": fmt.Sprint(i)}, Start: start, End: start.Add(3 * time.Minute)})
+		}
+		began := time.Now()
+		record(t, l, t0.Add(6*24*time.Hour), t0.Add(7*24*time.Hour), fs)
+		took := time.Since(began)
+		t.Logf("recording a day's 10,000 firings beside %d windows (%d a team's): %s", n.all, n.team, took.Round(time.Millisecond))
+		if max := time.Duration(float64(budget[n.all]) * slow); took > max {
+			t.Errorf("recording a day's 10,000 firings beside %d windows took %s, over %s", n.all, took, max)
+		}
+	}
+}
+
+// A team's editors can't move windows from one of their teams to another
+// past the second's twenty: an editor of two teams made twenty in the
+// first, moved them, and made twenty more, as many times as they liked.
+func TestTeamWindowsMovedLimited(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	pay, err := l.PutTeam(ctx, Team{Name: "payments", Rules: "^Pay"}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	search, err := l.PutTeam(ctx, Team{Name: "search", Rules: "^Search"}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	both := WithTeams(ctx, []int64{pay, search})
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	w := Window{Title: "new year", Start: start, End: start.Add(time.Hour), Every: "cron", On: "0 0 1 1 *"}
+	var ids []int64
+	for range MaxTeamWindows {
+		w.TeamID = search
+		if _, err := l.PutWindow(both, w, "both", opts); err != nil {
+			t.Fatal(err)
+		}
+		w.TeamID = pay
+		id, err := l.PutWindow(both, w, "both", opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	moved := w
+	moved.ID, moved.TeamID = ids[0], search
+	var inv ErrInvalid
+	if _, err := l.PutWindow(both, moved, "both", opts); !errors.As(err, &inv) || !strings.Contains(err.Error(), "of its quiet windows at most") {
+		t.Errorf("a window moved past a team's %d: %v", MaxTeamWindows, err)
+	}
+	// Within the team, a window changes as it may.
+	moved.TeamID, moved.Title = pay, "renamed"
+	if _, err := l.PutWindow(both, moved, "both", opts); err != nil {
+		t.Errorf("a window kept in its team: %v", err)
+	}
+	// An editor moves it.
+	moved.TeamID = search
+	if _, err := l.PutWindow(ctx, moved, "ed", opts); err != nil {
+		t.Errorf("an editor moving a window: %v", err)
+	}
+}

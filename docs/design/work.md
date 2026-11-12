@@ -62,13 +62,19 @@ seconds at most before it answers, and the worker carries on the rest.
 Each firing that caught nothing is set beside the windows that may excuse
 it each time stones are given, inside the ledger's one write transaction,
 so the windows are bounded (0.28.1): 500 in the ledger, the last 50 of them
-for editors and admins to make, and twenty of a team's for its editors.
-What may excuse a firing is worked out once for the span being judged: a
-window repeating by a schedule that covers nothing in the span is passed
-over, and the rest are sorted, once for each rule and the team that owns
-its alert, into those whose pattern and team it may be. Judging 10,000
-firings again beside 500 windows takes about 60 ms on a laptop, where
-setting each firing beside every window took 9.5 s (`TestWindowsScale`).
+for editors and admins to make, and twenty of a team's for its editors,
+counted where a window is moved to another of their teams too. What may
+excuse a firing is worked out once for the span being judged: for a
+window repeating by a schedule, the times it falls due whose repeat may
+cover a time in the span, which a firing in the span is set beside by a
+search (Covers looked back, for each firing, to the last time the
+schedule fell due, a year for one due once a year); and the windows are
+sorted, once for each rule and the team that owns its alert, into those
+whose pattern and team it may be. On a laptop, a day's 10,000 firings
+recorded beside 500 windows due once a year, in the day, take 0.63 s,
+against 0.34 s beside none (25.9 s before, `TestWindowsCoverScale`);
+judged again beside 500 that cover nothing in the week, 58 ms
+(`TestWindowsScale`).
 
 ## Ownership
 
