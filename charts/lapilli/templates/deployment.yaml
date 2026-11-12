@@ -180,6 +180,9 @@ spec:
             {{- if $s.readOnly }}
             - --read-only
             {{- end }}
+            {{- if $s.everyoneAdmin }}
+            - --everyone-admin
+            {{- end }}
             {{- with $s.roles.editors }}
             - {{ printf "--editors=%s" (join "," .) | quote }}
             {{- end }}

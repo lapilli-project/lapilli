@@ -185,6 +185,13 @@ serve:
   # recorded under it. Set it only when the proxy strips it from callers.
   userHeader: ""
   readOnly: false  # take no changes through the UI or API
+  # Without roles (below), everyone may only look: lapilli serve listens on
+  # the pod's address, which every pod in the cluster can reach. Changes
+  # then need roles, behind a sign-in proxy (userHeader), or this, which
+  # lets everyone who reaches the UI or the API change anything, as an
+  # admin: for a cluster where only people who may already reach it with
+  # kubectl port-forward can, with serve.networkPolicy keeping the rest out.
+  everyoneAdmin: false
   # Who may change what, once the proxy names people: with editors or
   # admins, only those listed may change anything, and the rest may only
   # look. People as userHeader names them, groups as groupsHeader lists them,
@@ -338,8 +345,9 @@ serve:
   # Grafana, applied through its API with grafanaTokenSecret's token, a
   # service account that may write the rules Lapilli may change. Lapilli
   # also proposes, each week. It needs userHeader, roles.editors or
-  # roles.admins (without roles everyone is an admin), and approvers or
-  # roles.admins: the admins approve, unless approvers says who. To stop
+  # roles.admins (without roles, whoever may change anything is an
+  # admin), and approvers or roles.admins: the admins approve, unless
+  # approvers says who. To stop
   # changes at once, an admin pauses them in the UI, or anyone
   # who may make a ConfigMap in the namespace makes FULLNAME-changes-paused,
   # FULLNAME being the release's name followed by -lapilli, unless the

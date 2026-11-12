@@ -472,7 +472,7 @@ func (s *Server) postDrop(w http.ResponseWriter, r *http.Request) {
 	}
 	from := s.droppable(r)
 	if len(from) == 0 {
-		s.oops(w, r, forbidden{editor})
+		s.oops(w, r, s.forbidden(editor))
 		return
 	}
 	ctx := r.Context()
@@ -493,7 +493,7 @@ func (s *Server) postDrop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !slices.Contains(from, p.State) {
-		s.oops(w, r, forbidden{admin})
+		s.oops(w, r, s.forbidden(admin))
 		return
 	}
 	why := strings.TrimSpace(strings.Map(func(c rune) rune {

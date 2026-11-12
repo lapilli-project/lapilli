@@ -100,6 +100,12 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (eq .Values.mode "cronjob") (not .Values.incidents) (not .Values.impact) }}
 {{- fail "give incidents, impact, or both" }}
 {{- end }}
+{{- if and (eq .Values.mode "serve") $s.everyoneAdmin (or $s.roles.editors $s.roles.admins) }}
+{{- fail "serve.everyoneAdmin is for no roles: with serve.roles, they say who may change what" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $s.everyoneAdmin $s.readOnly }}
+{{- fail "serve.everyoneAdmin lets everyone change anything, and serve.readOnly no one" }}
+{{- end }}
 {{- if and (eq .Values.mode "serve") (or $s.roles.editors $s.roles.admins $s.roles.groupsHeader) (not $s.userHeader) }}
 {{- fail "serve.roles needs serve.userHeader: who is who comes from the proxy that signs people in" }}
 {{- end }}
@@ -141,7 +147,7 @@ your own needs from. */ -}}
 {{- fail "serve.changes needs serve.userHeader: a change is approved by a person, and the proxy that signs people in says who" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $c.enabled (not (or $s.roles.editors $s.roles.admins)) }}
-{{- fail "serve.changes needs roles, serve.roles.editors or serve.roles.admins: without them everyone is an admin, who could resume changes paused and approve" }}
+{{- fail "serve.changes needs roles, serve.roles.editors or serve.roles.admins: without them, whoever may change anything is an admin, who could resume changes paused and approve" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $c.enabled (not (or $s.roles.admins $c.approvers)) }}
 {{- fail "serve.changes needs serve.changes.approvers or serve.roles.admins: who approves a change, the admins unless serve.changes.approvers says who" }}
@@ -195,7 +201,7 @@ your own needs from. */ -}}
 {{- fail "serve.changes.azureClientId is for Azure's rule groups (rules.ruler.url), or its alert rules (rules.alarms)" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $s.mcpPropose (not (or $s.roles.editors $s.roles.admins)) }}
-{{- fail "serve.mcpPropose needs serve.roles: without roles everyone is an admin, and anyone who reaches /mcp could propose as anyone" }}
+{{- fail "serve.mcpPropose needs serve.roles: without roles, whoever may change anything is an admin, and anyone who reaches /mcp could propose as anyone" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $s.teamDigests.teams (not $s.teamDigests.secretName) }}
 {{- fail "serve.teamDigests.teams needs serve.teamDigests.secretName" }}

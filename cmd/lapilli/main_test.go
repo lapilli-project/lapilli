@@ -452,6 +452,11 @@ func TestServeFlags(t *testing.T) {
 		{"--lang", "fr"},
 		{"--mcp-compare", "everyone"},
 		{"--mcp-compare", "editors"}, // without roles, everyone's
+		// --everyone-admin is for no roles, and lets everyone write.
+		{"--everyone-admin", "--user-header", "X-Forwarded-Email", "--editors", "ana@example.com"},
+		{"--everyone-admin", "--user-header", "X-Forwarded-Email", "--admins", "ana@example.com"},
+		{"--everyone-admin", "--read-only"},
+		{"--everyone-admin=maybe"},
 	} {
 		var out, errs strings.Builder
 		if code := run(append([]string{"serve", "--prometheus", "http://127.0.0.1:1", "--rules", hook}, args...), &out, &errs); code != 2 {

@@ -288,6 +288,7 @@
  "lapilli: #%d, %s for %s, was merged changed in review: the rule is neither as it was nor as proposed": "lapilli: #%[1]d、%[3]s の %[2]s がレビューで修正されてマージされました。ルールは元とも提案とも異なります",
  "near misses": "ニアミス",
  "near misses of incidents written down since": "その後記録されたインシデントのニアミス",
+ "no one changes anything here: lapilli serve listens beyond this machine with no roles. Give roles behind a sign-in proxy (--user-header with --editors or --admins), or --everyone-admin": "ここでは誰も何も変更できません。lapilli serve がロールなしでこのマシンの外から接続を受けているためです。サインインプロキシの背後でロールを付与する (--user-header と --editors または --admins) か、--everyone-admin を指定してください",
  "notifying": "通知送信",
  "say why it is closed, in 400 characters at most": "クローズする理由を 400 文字以内で書いてください",
  "take it out instead": "代わりに削除",

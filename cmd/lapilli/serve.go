@@ -104,7 +104,8 @@ The ledger:
 The web UI and API:
   --listen ADDR       where to listen (default 127.0.0.1:8080). There is no
                       sign-in: keep it inside, or behind a proxy that signs
-                      people in
+                      people in. Listening beyond this machine (:8080, a
+                      pod's address) with no roles, everyone may only look
   --metrics-listen ADDR
                       also serve /metrics, /healthz and /readyz here, alone,
                       so a NetworkPolicy can let Prometheus reach only them
@@ -151,6 +152,12 @@ The web UI and API:
                       only behind a proxy that sets it and strips it from
                       callers
   --read-only         take no changes through the UI or API
+  --everyone-admin    with no roles (--editors, --admins), let everyone who
+                      reaches the UI and API change anything, as an admin,
+                      though it listens beyond this machine. Without roles,
+                      and without it, only a server listening on loopback
+                      (127.0.0.1, localhost) takes changes; beyond it, every
+                      pod or machine that shares its network could
   --editors LIST      with this or --admins, only those named may change
                       anything, and the rest may only look: a comma-separated
                       list of people (as --user-header names them) and groups
@@ -237,8 +244,8 @@ and proposes; docs/design/changes.md):
                       proposes, after each week's digest: longer fors for
                       noisy rules, thresholds and fors for near misses,
                       retiring spare rules and those that never fired. Needs
-                      --user-header and --admins (without roles everyone is
-                      an admin)
+                      --user-header and --admins (without roles, whoever may
+                      change anything is an admin)
   --approvers LIST    who may approve a change, as --editors lists people
                       and groups (default: the admins). Approving is a form
                       on the proposal's page, in a browser: never the API,
@@ -501,6 +508,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			cfg.UserHeader = val
 		case "--read-only":
 			cfg.ReadOnly = val == "true"
+		case "--everyone-admin":
+			cfg.EveryoneAdmin = val == "true"
 		case "--editors":
 			cfg.Editors = list(val)
 		case "--admins":
@@ -568,6 +577,10 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--alarms-every is how often --alarms is read: give --alarms")
 	case cfg.Keep > 0 && cfg.Keep < cfg.Backfill:
 		err = fmt.Errorf("--keep %s is shorter than --backfill %s", time.Duration(cfg.Keep), time.Duration(cfg.Backfill))
+	case cfg.EveryoneAdmin && (len(cfg.Editors) > 0 || len(cfg.Admins) > 0):
+		err = fmt.Errorf("--everyone-admin is for no roles: with --editors or --admins, they say who may change what")
+	case cfg.EveryoneAdmin && cfg.ReadOnly:
+		err = fmt.Errorf("--everyone-admin lets everyone change anything, and --read-only no one")
 	case (len(cfg.Editors) > 0 || len(cfg.Admins) > 0 || cfg.GroupsHeader != "") && cfg.UserHeader == "":
 		err = fmt.Errorf("--editors, --admins and --groups-header need --user-header: who is who comes from the proxy that signs people in")
 	case cfg.NotifySlack && f.slackFile == "":
@@ -588,7 +601,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	case cfg.Changes && cfg.UserHeader == "":
 		err = fmt.Errorf("--changes needs --user-header: a change is approved by a person, and the proxy that signs people in says who")
 	case cfg.Changes && len(cfg.Editors)+len(cfg.Admins) == 0:
-		err = fmt.Errorf("--changes needs roles, --editors or --admins: without them everyone is an admin, who could resume changes paused and approve")
+		err = fmt.Errorf("--changes needs roles, --editors or --admins: without them, whoever may change anything is an admin, who could resume changes paused and approve")
 	case cfg.Changes && len(cfg.Admins)+len(cfg.Approvers) == 0:
 		err = fmt.Errorf("--changes needs --approvers or --admins: who approves a change, the admins unless --approvers says who")
 	case cfg.Changes && cfg.ReadOnly:
@@ -619,7 +632,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	case cfg.ChangesRulerToken != "" && f.rulerTk != "" && sameFile(cfg.ChangesRulerToken, f.rulerTk):
 		err = fmt.Errorf("--changes-ruler-token-file holds the same token as --ruler-token-file: give the writes a token of their own")
 	case cfg.MCPPropose != "" && len(cfg.Editors)+len(cfg.Admins) == 0:
-		err = fmt.Errorf("--mcp-propose needs --editors or --admins: without roles everyone is an admin, and anyone who reaches /mcp could propose as anyone")
+		err = fmt.Errorf("--mcp-propose needs --editors or --admins: without roles, whoever may change anything is an admin, and anyone who reaches /mcp could propose as anyone")
 	case cfg.NotifyToken != "" && (cfg.IncidentsToken != "" && sameFile(cfg.NotifyToken, cfg.IncidentsToken) ||
 		cfg.FiringsToken != "" && sameFile(cfg.NotifyToken, cfg.FiringsToken)):
 		err = fmt.Errorf("--notify-token-file holds the same token as --incidents-token-file or --firings-token-file: give each its own, since alert managers keep the notifications token in webhook URLs more people can read")
@@ -632,7 +645,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	case cfg.NotifyListen != "" && cfg.ReadOnly:
 		err = fmt.Errorf("--notify-listen takes writes, and --read-only refuses them")
 	case cfg.MCPCompare != "" && len(cfg.Editors)+len(cfg.Admins) == 0:
-		err = fmt.Errorf("--mcp-compare needs --editors or --admins: without roles everyone is an admin, and anyone who reaches /mcp could run PromQL with lapilli's access")
+		err = fmt.Errorf("--mcp-compare needs --editors or --admins: without roles, whoever may change anything is an admin, and anyone who reaches /mcp could run PromQL with lapilli's access")
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "lapilli serve: %v\nRun \"lapilli serve -h\" for the options.\n", err)
@@ -688,9 +701,6 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		if cfg.Changes && !slices.ContainsFunc(cfg.ChangesIn, func(x string) bool { return strings.HasPrefix(x, a.source+":") }) {
 			log.Warn("--changes with --alarms and no --changes-in for it: nothing in it will be changed; its proposals are for a person", "source", a.source)
 		}
-	}
-	if !strings.HasPrefix(cfg.Listen, "127.") && !strings.HasPrefix(cfg.Listen, "localhost:") && !strings.HasPrefix(cfg.Listen, "[::1]") && cfg.UserHeader == "" && !cfg.ReadOnly {
-		log.Warn("listening beyond this machine with no sign-in: anyone who reaches it can write incidents and change settings; put it behind a proxy (--user-header) or use --read-only")
 	}
 	if err := s.Run(ctx); err != nil {
 		fmt.Fprintf(stderr, "lapilli serve: %v\n", err)

@@ -288,6 +288,7 @@
  "lapilli: #%d, %s for %s, was merged changed in review: the rule is neither as it was nor as proposed": "lapilli: #%d, %s para %s, se fusionó con cambios hechos en la revisión: la regla no está ni como estaba ni como se propuso",
  "near misses": "casi detecciones",
  "near misses of incidents written down since": "casi detecciones de los incidentes registrados desde entonces",
+ "no one changes anything here: lapilli serve listens beyond this machine with no roles. Give roles behind a sign-in proxy (--user-header with --editors or --admins), or --everyone-admin": "aquí nadie cambia nada: lapilli serve escucha más allá de esta máquina sin roles. Da roles detrás de un proxy de inicio de sesión (--user-header con --editors o --admins), o --everyone-admin",
  "notifying": "enviando notificaciones",
  "say why it is closed, in 400 characters at most": "di por qué se cierra, en 400 caracteres como máximo",
  "take it out instead": "quitarlo en su lugar",

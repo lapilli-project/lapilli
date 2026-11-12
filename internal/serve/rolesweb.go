@@ -69,7 +69,7 @@ func (s *Server) roleLines(r *http.Request) ([]roleLine, []ledger.Team, error) {
 
 func (s *Server) rolesPage(r *http.Request) (any, error) {
 	if s.role(r) < admin {
-		return nil, forbidden{admin}
+		return nil, forbidden{need: admin}
 	}
 	lines, teams, err := s.roleLines(r)
 	if err != nil {
@@ -111,7 +111,7 @@ func (s *Server) deleteRole(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiRoles(w http.ResponseWriter, r *http.Request) {
 	if s.role(r) < admin {
-		s.oops(w, r, forbidden{admin})
+		s.oops(w, r, forbidden{need: admin})
 		return
 	}
 	lines, _, err := s.roleLines(r)

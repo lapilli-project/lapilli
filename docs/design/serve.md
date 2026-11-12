@@ -418,8 +418,8 @@ Everyone who reaches `/mcp` gets the tools that read: what they give, the
 pages and the API give too, less the files rules were read from.
 `compare` is off unless `--mcp-compare editors` or `admins` turns it on,
 because it runs PromQL the agent wrote with Lapilli's access to Prometheus;
-and the flag is refused without `--editors` or `--admins`, under which
-everyone would be an admin.
+and the flag is refused without `--editors` or `--admins`, without which
+whoever may change anything is an admin.
 That PromQL can learn, a count at a time, whatever that access can read.
 `--read-only` gives no one `compare`.
 
@@ -440,8 +440,14 @@ as instructions.
 
 - **Closed by default.** The binary listens on `127.0.0.1:8080`; the chart's
   Service is a ClusterIP. There is no sign-in of its own: reach it with
-  `kubectl port-forward`, or behind the sign-in proxy you have. Listening
-  beyond localhost without `--user-header` or `--read-only`, it warns.
+  `kubectl port-forward`, or behind the sign-in proxy you have. With no
+  roles, everyone is an admin only on a listener on loopback alone, this
+  machine's users; listening beyond it (the chart's `:8080`, which every
+  pod in the cluster reaches) everyone may only look, unless
+  `--everyone-admin` says otherwise (0.28.1: before, everyone was an admin
+  wherever it listened, and a review found any pod in a cluster could write
+  incidents and settings through the chart). The log says at start which
+  applies.
 - **Who.** With `--user-header`, changes are recorded under the name that
   header carries; otherwise as anonymous. Set it only behind a proxy that
   sets it and strips it from callers.

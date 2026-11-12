@@ -125,6 +125,11 @@ type Config struct {
 	AllowedHosts []string
 	ReadOnly     bool
 	Version      string
+	// EveryoneAdmin lets everyone who reaches the UI and the API change
+	// anything, as an admin, with no roles given and Listen beyond
+	// loopback. Without roles, and without it, only a server listening on
+	// loopback alone takes changes: beyond it, everyone may only look.
+	EveryoneAdmin bool
 
 	// Roles: with Editors or Admins (users or groups, "*" for everyone),
 	// the rest may only look. GroupsHeader names the header a sign-in
@@ -247,6 +252,10 @@ type Server struct {
 	l   *ledger.Ledger
 	log *slog.Logger
 	now func() time.Time
+
+	// open says that, with no roles, everyone is an admin: it listens on
+	// loopback alone, or EveryoneAdmin says so.
+	open bool
 
 	// onCall is how each on-call schedule was last read.
 	onCall onCallState
@@ -376,6 +385,8 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		// writes a link for each: a few a second, a first run's in a burst.
 		tasksRate: &limiter{rate: 5, burst: 100}, tasksBusy: make(chan struct{}, 1), changes: newChanges(ctx, l)}
 	s.status.runs, s.status.notices, s.status.refused = map[string]int{}, map[string]int{}, map[string]int{}
+	s.open = cfg.EveryoneAdmin || LoopbackOnly(cfg.Listen)
+	s.logWho()
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"
 	}

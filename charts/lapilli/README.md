@@ -112,6 +112,13 @@ proxy that signs people in.
 - `serve.roles` limits who may change what. `editors` write; `admins` also
   change the settings and the teams; everyone else may only look. Groups
   come from `groupsHeader`.
+- Without `serve.roles`, everyone may only look: lapilli serve listens on
+  the pod's address, which every pod in the cluster reaches. Give roles
+  behind the proxy, or set `serve.everyoneAdmin` to let everyone who
+  reaches the UI or the API change anything, as an admin; it is off by
+  default, and refused beside `serve.roles` or `serve.readOnly`. Before
+  0.28.1, everyone was an admin without roles, `kubectl port-forward`
+  included: that is now `serve.everyoneAdmin`.
 - `serve.networkPolicy` lets in only the proxy (`from`), and Prometheus
   (`metricsFrom`) only to the metrics port, so the headers can't be forged
   from inside the cluster.
