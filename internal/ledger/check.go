@@ -140,10 +140,14 @@ func (l *Ledger) CheckedTo(ctx context.Context) (time.Time, error) {
 // check has got to to. c is by the name what really fired goes by; rules
 // are the names the ledger judges the rules under, for each. A rule left
 // out of c wasn't checked: its day stays as it was. Nothing a page shows is
-// judged differently.
-func (l *Ledger) PutCheck(ctx context.Context, midnight time.Time, c *verdict.SpanCheck, rules map[string][]string, to time.Time) error {
+// judged differently. seq is AgainFrom's when the check began: with a
+// version of the rules recorded since, nothing is kept (ErrAgain).
+func (l *Ledger) PutCheck(ctx context.Context, midnight time.Time, c *verdict.SpanCheck, rules map[string][]string, to time.Time, seq int64) error {
 	day := l.day(midnight.Unix())
 	return l.write(ctx, func(t *txn) error {
+		if err := l.sameAgain(t, seq); err != nil {
+			return err
+		}
 		put, err := t.PrepareContext(t.ctx, `INSERT INTO checked (rule, day, alert, shared, replayed, real, alike, off_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (rule, day) DO UPDATE SET alert = excluded.alert, shared = excluded.shared,
 				replayed = excluded.replayed, real = excluded.real, alike = excluded.alike, off_ms = excluded.off_ms`)
@@ -202,9 +206,12 @@ func (l *Ledger) PutCheck(ctx context.Context, midnight time.Time, c *verdict.Sp
 }
 
 // SkipCheck notes the check has got to to without keeping anything: a day
-// that couldn't be checked.
-func (l *Ledger) SkipCheck(ctx context.Context, to time.Time) error {
+// that couldn't be checked. seq is as for PutCheck.
+func (l *Ledger) SkipCheck(ctx context.Context, to time.Time, seq int64) error {
 	return l.writeAside(ctx, func(t *txn) error {
+		if err := l.sameAgain(t, seq); err != nil {
+			return err
+		}
 		return setMeta(t.ctx, t, "checked_to", strconv.FormatInt(to.Unix(), 10))
 	})
 }

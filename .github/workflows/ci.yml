@@ -93,6 +93,23 @@ jobs:
           go-version-file: go.mod
       - run: test/e2e/loki.sh
 
+  e2e-rendered:
+    # Rules a chart renders, kept in a real Gitea, replayed against a real
+    # Prometheus and followed; the chart's own rules history containers run
+    # in Docker. Not a required check: it pulls images. helm and yq are the
+    # runner's.
+    name: rendered rules on real servers
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: test/e2e/rendered.sh
+
   vulnerabilities:
     name: govulncheck
     runs-on: ubuntu-latest
@@ -126,7 +143,7 @@ jobs:
       - name: fuzz
         run: |
           set -euo pipefail
-          for t in rules:FuzzParse rules:FuzzFromAPI rules:FuzzScope sse:FuzzParseMath firing:FuzzReadJSONL incident:FuzzIncidents \
+          for t in rules:FuzzParse rules:FuzzPick rules:FuzzFromAPI rules:FuzzScope sse:FuzzParseMath firing:FuzzReadJSONL incident:FuzzIncidents \
             source:FuzzConfigDocs source:FuzzAmazon source:FuzzAzure source:FuzzAlarms; do
             echo "::group::${t}"
             go test -run '^$' -fuzz "^${t#*:}\$" -fuzztime 2m "./internal/${t%%:*}"

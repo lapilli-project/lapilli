@@ -2,6 +2,141 @@
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-11-12
+
+Rules a repository renders, followed (docs/design/history.md). Reviewed
+before release, as an attacker and for correctness; what both found is
+fixed in what is described here. No ledger schema change.
+
+### Added
+
+- **Rules read out of rendered manifests.** `--rules`, `--rules-history`
+  and `--compare` take a chart rendered whole (`helm template`, `kustomize
+  build`, `kubectl get -o yaml`): of its documents, those that hold rules
+  (ConfigMaps of rule files or of Grafana provisioning files,
+  `PrometheusRule`s and the rest Lapilli reads, `List`s of them) are kept,
+  and the others passed over and counted: `verdict` says how many on
+  stderr, `serve` in its log. No `yq` is needed to filter them first.
+- **`--rules-select SEL`,** a label selector as `kubectl -l` takes one
+  (`key=value`, `!=`, `in`, `notin`, `key`, `!key`, `key>N`, `key<N`),
+  keeps of the Kubernetes objects in the rule files those it matches:
+  `grafana_alert=1` for the ConfigMaps Grafana's sidecar loads. A set with
+  an empty value (`a in (x,)`), which kubectl takes, is refused as a slip.
+  Labels are on objects only: a plain rule file has none, and is kept.
+- **What holds rules, read closely.** A kind's own list (`ConfigMapList`,
+  `PrometheusRuleList`) is read as `List` is. A Kubernetes object of a kind
+  rules aren't kept in holds none, whatever else it has (a Secret with a
+  top-level `groups`). A ConfigMap whose rule file doesn't parse is counted
+  and said apart from what holds no rules. A file of rules is read 16 MiB
+  at most.
+- **Rendering each commit reliably.** `recipes/versions/git.sh` takes
+  `RENDER_PREPARE`, run in each commit's files before `RENDER`, for what a
+  commit lacks, such as a chart's dependencies that older commits don't
+  vendor (`helm dependency build`, at the versions `Chart.lock` pins, or
+  the archives as the newest commit vendors them, from `REPO`). It runs as
+  `RENDER` does: without the token, with a `HOME` of its own, kept from
+  commit to commit. `UNRENDERED=skip` passes over a commit that can't be
+  rendered (`RENDER_PREPARE` or `RENDER` fails, or `RENDER` writes
+  nothing) or read (below), saying which and why; by default it still
+  stops, now saying which commit and that `skip` exists. Kustomize is
+  documented. `MAX_TREE_FILES` (20000) and `MAX_TREE_BYTES` (256 MiB)
+  bound what a commit is read with, by `git ls-tree` before anything is
+  written.
+- **Following the branch.** Each version `git.sh` writes holds `.commit`,
+  its commit; `AFTER=COMMIT` writes only the commits after it.
+  `recipes/versions/follow.sh` keeps a history up to date: at each look,
+  the commits since the newest version's, added beside it, and with
+  `KEEP`, the versions older than that taken away but the one in effect
+  then. It never stops on a commit (`FOLLOWING`): one that can't be
+  rendered or read is passed over, one dated after now is named now, of
+  more than `MAX` new commits the newest are written, and `.head` keeps a
+  commit passed over from being rendered again. A commit is named no
+  earlier than when the clone's branch first held it, by the branch's
+  reflog, less `LATE` (`EVERY` and a minute): one dated back takes effect
+  when it was fetched. `lapilli serve` given `--rules-history` without
+  `--rules` follows the directory: its newest version that reads is the
+  rules in effect, and each version added later is recorded from its
+  time, with what is read beside the rules (`--alarms`, `--loki-rules`),
+  the hours since then replayed again by the next run (no further back
+  than `--backfill`) and their days checked again. A version that can't
+  be read is passed over, once, saying so; following never stops on it.
+  `--changes` is refused when the rules are a followed history alone.
+- **In the chart,** `serve.rulesHistory` takes `renderPrepare`,
+  `unrendered` (`skip` by default), `select`, `max`, `every`,
+  `maxTreeFiles`, `maxTreeBytes` and `sizeLimits`. With `render`, the
+  versions are written in `renderImage`, an image with git, helm and
+  kustomize, pinned by digest: Argo CD v3.5.6's by default (about 210 MB
+  to pull); the README says how to give a smaller one. With no
+  `rules.configMaps` the repository is the rules, followed:
+  `rules-history-fetch` fetches the branch every `every` seconds (300)
+  with the token, and `rules-history-follow`, without it, adds the new
+  commits' versions, keeping the backfill and a day. When the start
+  writes no version, serve starts all the same, and takes the history once
+  it is fetched and written.
+- `test/e2e/rendered.sh`, in CI: a real Gitea holding a chart of Grafana
+  rules whose subchart comes from Gitea's Helm registry and isn't vendored
+  at the first commit; the chart's own rules history containers, as `helm
+  template` writes them, run in Docker; each version read for exactly its
+  rule documents; `verdict --rules-history` and `serve`, following, against
+  a real Prometheus with three days of a series, each day replayed with
+  that day's rules; and a commit dated hours back, fetched, taking effect
+  when it was fetched. `FuzzPick` joins the weekly fuzzing, and checks
+  that nothing but documents of rules is kept.
+
+### Changed
+
+- `lapilli serve` keeps of each version in `--rules-history` only its
+  documents of rules: a chart's Secrets and Deployments never reach the
+  ledger.
+- `lapilli serve --rules-history DIR` without `--rules` was refused; it now
+  follows the directory.
+- A version in `--rules-history` that can't be read no longer stops a
+  first start: it is passed over, saying so, and the version before it
+  stays in effect.
+
+### Fixed
+
+- **A ledger whose directory's name holds `#` or `?` opened another file**
+  (main since 0.6.0): the path was cut there, so two ledgers named alike
+  before it were one. The path is escaped; `%` and spaces read as they
+  are too.
+- **Following, found in review:** a version recorded while a run, or a
+  check, begun before it was under way was lost (each note now bumps a
+  sequence, and a run or a check forgets only what it saw); a good version
+  found with a bad one after it in one look wasn't replayed again; sending
+  the check back left what it kept of those days (a miss kept twice, a
+  rule the version dropped keeping its checks); and beside `--alarms` or
+  `--loki-rules`, every later commit took effect when seen.
+
+### Security
+
+- **In the chart, the clone is read-only where `render` runs.** It moved to
+  a volume of its own (`rules-history-repo`) that only the containers
+  holding the token write (`rules-history-clone`, and following,
+  `rules-history-fetch`): `rules-history` and `rules-history-follow` mount
+  it read-only, so nothing `render` runs can change the configuration or
+  hooks the next fetch runs with. EKS's and Azure's webhooks pass the new
+  containers over too, and the service account's token is mounted in none
+  of them.
+- **A commit is read as it is.** git runs with none of the image's or the
+  user's configuration (the render image turns Git LFS on, its filter
+  required, its server the commit's `.lfsconfig`), and from an empty work
+  tree and index, so a commit's `.gitattributes` don't leave a rule file
+  out (`export-ignore`), rewrite one (`export-subst`) or run a filter.
+  With `RENDER`, a symbolic link anywhere in the commit, or one
+  `RENDER_PREPARE` leaves, can't be rendered: a `file://` dependency's
+  link outside `PATHS` carried what it led to (the container's
+  environment) into a selected rule's annotation, and the ledger.
+- **A commit's date can't rewrite the ledger.** Following, a version's
+  time is bounded below by when it was fetched (above): a commit dated
+  back had every hour since its date, up to `--backfill`, replayed and
+  judged with rules not in effect then.
+- **Bounded disk and memory.** What a commit is read with is bounded
+  (`MAX_TREE_FILES`, `MAX_TREE_BYTES`): one blob named many times in a tree
+  was gigabytes written out. The chart's volumes have size limits, its
+  history containers ephemeral-storage requests and limits, and a
+  followed directory keeps the backfill and a day.
+
 ## [0.28.1] - 2026-11-12
 
 A security release, after two reviews of 0.28.0 from an attacker's point

@@ -68,7 +68,7 @@ spec:
 {{- fail "serve.networkPolicy.egress.to: name where lapilli serve may connect, as NetworkPolicy egress rules: its Prometheus, the rules' API, Slack and the webhooks, a cloud's APIs. Empty, it could reach nothing but DNS" }}
 {{- end }}
 ---
-# Where lapilli serve, and its rules history's init containers, may
+# Where lapilli serve, and its rules history's containers, may
 # connect: the cluster's DNS, and those named in egress.to. Nothing else,
 # a cloud's metadata server (169.254.169.254) and the Kubernetes API among
 # them, unless named.

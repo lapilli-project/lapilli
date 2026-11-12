@@ -4,11 +4,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/rules"
 )
 
 // historyDir writes versions of the rules, each with its "for", into a
@@ -117,37 +119,58 @@ func TestRulesHistory(t *testing.T) {
 	}
 }
 
-// A history that can't be read stops the start, and says where.
+// A directory that isn't a history stops a start that doesn't follow it,
+// and says where. A version in it that can't be read (rules that don't
+// parse, none at all) is passed over, saying so, and the one before it
+// stays in effect: one bad commit doesn't stop the start, nor a pod
+// restarted keep stopping on it. Followed, not even a directory that
+// isn't a history stops it: the watcher says so until it is put right.
 func TestRulesHistoryRefused(t *testing.T) {
 	ctx := context.Background()
+	bad := historyDir(t, map[string]string{"last-week": "2m"})
+	s, _ := server(t, func(cfg *Config) { cfg.RulesHistory = bad })
+	if err := s.history(ctx); err == nil || !strings.Contains(err.Error(), "named by when it took effect") || !strings.Contains(err.Error(), "last-week") {
+		t.Errorf("a name that isn't a time: %v", err)
+	}
+	f, _ := server(t, func(cfg *Config) { cfg.RulesPath, cfg.RulesHistory = "", bad })
+	if err := f.history(ctx); err != nil {
+		t.Errorf("followed, a name that isn't a time: %v", err)
+	}
+
+	before, broken, after := now.Add(-100*time.Hour), now.Add(-60*time.Hour), now.Add(-10*time.Hour)
 	for _, c := range []struct {
 		name  string
-		dir   func() string
-		says  string
-		named string
+		write func(dir string)
+		want  []time.Time // the versions kept, from before the ledger (zero) on
 	}{
-		{"a name that isn't a time", func() string {
-			return historyDir(t, map[string]string{"last-week": "2m"})
-		}, "named by when it took effect", "last-week"},
-		{"rules that don't read, after some that do", func() string {
-			dir := historyDir(t, map[string]string{now.Add(-100 * time.Hour).Format(time.RFC3339): "2m", now.Add(-10 * time.Hour).Format(time.RFC3339): "2m"})
-			os.WriteFile(filepath.Join(dir, now.Add(-10*time.Hour).Format(time.RFC3339), "shop.yaml"), []byte("groups: [ {"), 0o644)
-			return dir
-		}, "", now.Add(-10 * time.Hour).Format(time.RFC3339)},
-		{"a version with no rules", func() string {
-			dir := t.TempDir()
-			os.MkdirAll(filepath.Join(dir, "20261030T080000Z"), 0o755)
-			return dir
-		}, "", "20261030T080000Z"},
+		{"rules that don't parse, between two that do", func(dir string) {
+			os.WriteFile(filepath.Join(dir, broken.Format(time.RFC3339), "shop.yaml"), []byte("groups: [ {"), 0o644)
+		}, []time.Time{{}, after}},
+		{"a version with no rules, between two", func(dir string) {
+			os.Remove(filepath.Join(dir, broken.Format(time.RFC3339), "shop.yaml"))
+		}, []time.Time{{}, after}},
+		{"the one in effect when the backfill starts", func(dir string) {
+			os.RemoveAll(filepath.Join(dir, broken.Format(time.RFC3339)))
+			os.WriteFile(filepath.Join(dir, before.Format(time.RFC3339), "shop.yaml"), []byte("groups: [ {"), 0o644)
+			v := filepath.Join(dir, now.Add(-120*time.Hour).Format(time.RFC3339))
+			os.MkdirAll(v, 0o755)
+			os.WriteFile(filepath.Join(v, "shop.yaml"), []byte(strings.Replace(ruleFile, "for: 2m", "for: 3m", 1)), 0o644)
+		}, []time.Time{{}, after}},
 	} {
-		dir := c.dir()
+		dir := historyDir(t, map[string]string{before.Format(time.RFC3339): "2m", broken.Format(time.RFC3339): "30m", after.Format(time.RFC3339): "15m"})
+		c.write(dir)
 		s, _ := server(t, func(cfg *Config) { cfg.RulesHistory = dir })
-		err := s.history(ctx)
-		if err == nil || !strings.Contains(err.Error(), c.says) || !strings.Contains(err.Error(), c.named) || !strings.Contains(err.Error(), "--rules-history") {
+		if err := s.history(ctx); err != nil {
 			t.Errorf("%s: %v", c.name, err)
+			continue
 		}
-		if vs, _ := s.l.Versions(ctx, time.Unix(0, 0), now, false); len(vs) != 0 {
-			t.Errorf("%s: kept %d versions", c.name, len(vs))
+		vs, _ := s.l.Versions(ctx, time.Unix(0, 0), now, false)
+		var got []time.Time
+		for _, v := range vs {
+			got = append(got, v.Since)
+		}
+		if !slices.EqualFunc(got, c.want, func(a, b time.Time) bool { return a.Equal(b) }) {
+			t.Errorf("%s: versions from %v, want %v", c.name, got, c.want)
 		}
 	}
 }
@@ -181,5 +204,99 @@ func TestRulesHistoryPassedOver(t *testing.T) {
 	s.cfg.RulesHistory = filepath.Join(dir, "gone")
 	if err := s.history(ctx); err != nil {
 		t.Errorf("a later start with no directory: %v", err)
+	}
+}
+
+// renderedVersion is a chart as helm template writes it, its rule as of
+// "for": the rule in a ConfigMap labelled for Grafana's sidecar, another
+// in one that isn't, and a Secret.
+func renderedVersion(forDur string) string {
+	indented := "    " + strings.ReplaceAll(strings.Replace(ruleFile, "for: 2m", "for: "+forDur, 1), "\n", "\n    ")
+	return `---
+# Source: monitoring/templates/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata: {name: shop}
+stringData: {password: hunter2}
+---
+# Source: monitoring/templates/alerts.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shop-alerts
+  labels: {grafana_alert: "1"}
+data:
+  shop.yaml: |
+` + indented + `
+---
+# Source: monitoring/templates/other.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: other-alerts}
+data:
+  other.yaml: |
+    groups: [{name: other, rules: [{alert: Other, expr: errors > 1}]}]
+`
+}
+
+// Versions rendered from a chart are read for their rules alone, those
+// --rules-select keeps: the ledger keeps neither the Secret nor the rules
+// it left out, and judges each day with that day's.
+func TestRulesHistoryRendered(t *testing.T) {
+	ctx := context.Background()
+	tuned := now.Add(-40 * time.Hour)
+	hist := t.TempDir()
+	for at, forDur := range map[time.Time]string{now.Add(-90 * time.Hour): "2m", tuned: "15m"} {
+		v := filepath.Join(hist, at.Format("20060102T150405Z"))
+		os.MkdirAll(v, 0o755)
+		if err := os.WriteFile(filepath.Join(v, "rules.yaml"), []byte(renderedVersion(forDur)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sel, err := rules.ParseSelector("grafana_alert=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, rulesDir := server(t, func(c *Config) { c.RulesHistory, c.RulesSelect = hist, sel })
+	os.WriteFile(filepath.Join(rulesDir, "shop.yaml"), []byte(renderedVersion("15m")), 0o644)
+	if err := s.history(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	vs, err := s.l.Versions(ctx, time.Unix(0, 0), now, true)
+	if err != nil || len(vs) != 2 || !vs[1].Since.Equal(tuned) {
+		t.Fatalf("versions %+v %v", vs, err)
+	}
+	for _, v := range vs {
+		for _, d := range v.Docs {
+			if strings.Contains(string(d.Data), "hunter2") || strings.Contains(string(d.Data), "Other") {
+				t.Errorf("version %d kept what was passed over:\n%s", v.ID, d.Data)
+			}
+		}
+		if rs, err := rules.FromDocs(v.Docs); err != nil || len(rs) != 1 || rs[0].Name != "Errors" {
+			t.Errorf("version %d reads as %+v %v", v.ID, rs, err)
+		}
+	}
+	s.jobs(ctx, true)
+	if fs := searchFirings(t, s); len(fs) != 10 {
+		t.Errorf("%d firings of the search alert, want the 10 before the change", len(fs))
+	}
+
+	// Without a selector, every rule, and still not the Secret.
+	s2, rulesDir2 := server(t, func(c *Config) { c.RulesHistory = hist })
+	os.WriteFile(filepath.Join(rulesDir2, "shop.yaml"), []byte(renderedVersion("15m")), 0o644)
+	if err := s2.history(ctx); err != nil {
+		t.Fatal(err)
+	}
+	vs, err = s2.l.Versions(ctx, time.Unix(0, 0), now, true)
+	if err != nil || len(vs) != 2 {
+		t.Fatalf("versions %+v %v", vs, err)
+	}
+	for _, v := range vs {
+		if rs, err := rules.FromDocs(v.Docs); err != nil || len(rs) != 2 || strings.Contains(string(v.Docs[0].Data), "hunter2") {
+			t.Errorf("version %d: %+v %v\n%s", v.ID, rs, err, v.Docs[0].Data)
+		}
 	}
 }

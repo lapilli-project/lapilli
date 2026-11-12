@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -548,5 +549,42 @@ func TestMissed(t *testing.T) {
 	}
 	if m, _ := l.Missed(ctx); len(m) != 0 {
 		t.Errorf("still missed: %v", m)
+	}
+}
+
+// A ledger's path is its own whatever its directory is named: a # or a ?
+// in it used to end the path there, so two ledgers named alike before it
+// were one file, and a % or a space was read as something else.
+func TestOpenPathNamed(t *testing.T) {
+	ctx := context.Background()
+	for _, name := range []string{"a#1", "a#2", "b?x=1", "c%20d", "e f", "g%"} {
+		dir := filepath.Join(t.TempDir(), name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "ledger.db")
+		l, err := Open(ctx, path, time.UTC)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if err := l.SetMeta(ctx, "name", name); err != nil {
+			t.Fatal(err)
+		}
+		l.Close()
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("%s: no ledger where it was asked for: %v", name, err)
+		}
+		entries, _ := os.ReadDir(filepath.Dir(dir))
+		if len(entries) != 1 {
+			t.Errorf("%s: %d files beside its directory, want none", name, len(entries)-1)
+		}
+		l, err = Open(ctx, path, time.UTC)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := l.Meta(ctx, "name"); got != name {
+			t.Errorf("%s: opened again, it holds %q", name, got)
+		}
+		l.Close()
 	}
 }

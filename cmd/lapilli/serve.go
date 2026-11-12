@@ -37,12 +37,21 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
   --on-call FILE      as for lapilli verdict, each feed read again every so
                       often (every: in the file), its turns kept in the
                       ledger past what the feed holds
+  --rules-select SEL  as for lapilli verdict, for --rules and --rules-history:
+                      what it and the documents that hold no rules leave
+                      out of a file isn't kept in the ledger with it
   --rules-history DIR earlier versions of those rules, one directory each,
                       named by when it took effect (2026-10-14T16:40:31Z or
                       20261014T164031Z), so a first start's backfill replays
                       each day with that day's rules; a ledger with versions
                       of its own passes them over. recipes/versions/git.sh
-                      writes one from git
+                      writes one from git. Of each version, only its
+                      documents of rules are kept in the ledger.
+                      Without --rules, it is the rules, followed: its
+                      newest version is in effect, read again every
+                      --watch, and each version added to it later, as
+                      recipes/versions/follow.sh adds them, is recorded
+                      from its own time, the hours since replayed again
   --loki-rules PATH   one file or directory of Loki ruler rules, read again
                       every --watch, beside the rest
   --incidents FILE    read again each run; optional, as incidents can be
@@ -609,6 +618,10 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--changes needs --approvers or --admins: who approves a change, the admins unless --approvers says who")
 	case cfg.Changes && cfg.ReadOnly:
 		err = fmt.Errorf("--changes carries out changes, and --read-only refuses them")
+	case cfg.Changes && f.rulesHistory != "" && len(f.rules) == 0 && len(f.alarms) == 0:
+		// Followed, the rules are versions a recipe wrote, a chart's
+		// rendering often: there is no file of rules to change.
+		err = fmt.Errorf("--changes writes a change to where the rules are kept: followed alone, --rules-history is versions a recipe wrote, often rendered from a chart, with no file to write to. Give --rules, or leave --changes out")
 	case !cfg.Changes && (len(cfg.Approvers) > 0 || cfg.Approvals > 0 || cfg.ChangesToken != "" || cfg.ChangesGrafanaToken != "" ||
 		cfg.ChangesPaused != "" || cfg.ChangesLimits != (serve.Limits{}) || len(cfg.ChangesIn) > 0 || len(cfg.ChangesManaged) > 0 ||
 		cfg.ChangesRulerToken != "" || cfg.ChangesAWSRole != "" || cfg.ChangesAzureClientID != "" ||
@@ -661,7 +674,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	if len(f.rules) == 1 {
 		cfg.RulesPath = f.rules[0].path
 	}
-	cfg.RulesHistory = f.rulesHistory
+	cfg.RulesHistory, cfg.RulesSelect = f.rulesHistory, f.rulesSelect
 	cfg.Loaded, cfg.Grafana, cfg.GrafanaToken, cfg.Alerts = f.loadedRules, f.grafana, f.grafanaTk, f.alerts
 	cfg.Loki, cfg.LokiToken, cfg.LokiTenant, cfg.LokiLoaded = f.loki, f.lokiTk, f.lokiTenant, f.lokiLoaded
 	if len(f.lokiRules) == 1 {

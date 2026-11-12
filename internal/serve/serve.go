@@ -38,7 +38,10 @@ type Config struct {
 	RulesPath string
 	// RulesHistory is a directory of earlier versions of the rules at
 	// RulesPath, added to a ledger that has none (docs/design/history.md).
-	RulesHistory          string
+	RulesHistory string
+	// RulesSelect keeps, of the Kubernetes objects in the files RulesPath
+	// and RulesHistory hold, those whose labels it matches.
+	RulesSelect           rules.Selector
 	Loaded                bool
 	Grafana, GrafanaToken string
 	// Loki is a Loki whose ruler's rules are replayed, beside the rest,
@@ -338,6 +341,8 @@ type Server struct {
 		m     map[rules.Place]time.Duration
 		notes string
 	}
+	// picked is what reading the rule files last passed over, as said.
+	picked atomic.Value
 }
 
 // status is what the worker is doing, for the UI: a text to be shown in
