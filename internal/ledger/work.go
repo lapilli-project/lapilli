@@ -1186,6 +1186,11 @@ func (l *Ledger) DeleteTask(ctx context.Context, id int64, by string) error {
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM comments WHERE on_kind = 'task' AND on_key = ?", fmt.Sprint(id)); err != nil {
 			return err
 		}
+		// A proposal made into it is made into none: its id isn't
+		// another's again (schema 016), and no other task is the proposal's.
+		if _, err := t.ExecContext(t.ctx, "UPDATE proposals SET task_id = NULL WHERE task_id = ?", id); err != nil {
+			return err
+		}
 		return change(t, by, fmt.Sprintf("task %d deleted", id), nil, nil)
 	})
 }
