@@ -2,15 +2,13 @@
 
 ## [Unreleased]
 
-### 0.31.0
+## [0.29.0] - 2026-11-12
 
-Rules a repository renders, followed (docs/design/history.md). It merges
-after 0.29.0 and 0.30.0, should those still be unreleased: their sections
-go above it. Reviewed before release, as an attacker and for
-correctness; what both found is fixed in what is described here. No
-ledger schema change.
+Rules a repository renders, followed (docs/design/history.md). Reviewed
+before release, as an attacker and for correctness; what both found is
+fixed in what is described here. No ledger schema change.
 
-#### Added
+### Added
 
 - **Rules read out of rendered manifests.** `--rules`, `--rules-history`
   and `--compare` take a chart rendered whole (`helm template`, `kustomize
@@ -85,7 +83,7 @@ ledger schema change.
   when it was fetched. `FuzzPick` joins the weekly fuzzing, and checks
   that nothing but documents of rules is kept.
 
-#### Changed
+### Changed
 
 - `lapilli serve` keeps of each version in `--rules-history` only its
   documents of rules: a chart's Secrets and Deployments never reach the
@@ -96,7 +94,7 @@ ledger schema change.
   first start: it is passed over, saying so, and the version before it
   stays in effect.
 
-#### Fixed
+### Fixed
 
 - **A ledger whose directory's name holds `#` or `?` opened another file**
   (main since 0.6.0): the path was cut there, so two ledgers named alike
@@ -110,7 +108,7 @@ ledger schema change.
   rule the version dropped keeping its checks); and beside `--alarms` or
   `--loki-rules`, every later commit took effect when seen.
 
-#### Security
+### Security
 
 - **In the chart, the clone is read-only where `render` runs.** It moved to
   a volume of its own (`rules-history-repo`) that only the containers

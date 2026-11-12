@@ -127,7 +127,7 @@ Where the building differs, or says more:
   at all, not to one with versions from after them: a ledger that has
   begun keeps its own, whole.
 - Every version is read before any is kept. One that can't be read was
-  first meant to stop the start with the ledger as it was; since 0.31.0 it
+  first meant to stop the start with the ledger as it was; since 0.29.0 it
   is passed over, saying so, and the one before it stays in effect (see
   below). A version from after now, a commit dated ahead of the clock, is
   passed over with a warning; an empty directory, as when git couldn't be
@@ -160,7 +160,7 @@ Where the building differs, or says more:
   `files/versions-git.sh`, and a test keeps it the same as
   `recipes/versions/git.sh`.
 
-## Rules a repository renders, followed (0.31.0)
+## Rules a repository renders, followed (0.29.0)
 
 Measured on a real setup: the rules lived in a Helm chart, as Grafana's
 provisioning files in several ConfigMaps labelled for its sidecar, beside
