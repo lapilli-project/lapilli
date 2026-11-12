@@ -1430,8 +1430,10 @@ UI's port does: every request carries its own proof.
 Annotations aren't kept. Who was on call, and whether they acknowledged, is
 for PagerDuty, incident.io or Grafana IRM. Each path is tested against its
 source's documented payloads, a cloud's own alarms' among them, with
-stand-ins for SNS and for OCI's confirmation; none yet against a real
-account.
+stand-ins for SNS and for OCI's confirmation; none yet against a cloud's
+real account. Grafana's runs against a real Grafana 13.3.1 in CI
+(`test/e2e/service.sh`): its alert rule's notifications, signed, each kept
+and tied to the firing Lapilli replayed.
 
 ## Changing rules
 
