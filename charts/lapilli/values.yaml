@@ -189,8 +189,11 @@ serve:
   # Changes are recorded under the name it gives.
   userHeader: ""
   # lapilli's own sign-in (docs/design/signin.md). With it, every page and
-  # API call but the health checks needs someone signed in, and without
-  # roles everyone signed in may only look.
+  # API call but the health checks needs someone signed in, and only those
+  # roles name come in (roles.viewers, editors, admins): an identity
+  # provider signs in whoever it knows, which for a public one (Google's
+  # for any account, GitLab.com, GitHub through Dex, a multi-tenant Entra
+  # ID app) is anyone.
   signIn:
     # OpenID Connect: any provider (Google, Microsoft Entra ID, Okta,
     # Keycloak, Dex, AWS Cognito, OCI IAM identity domains, GitLab...).
@@ -206,6 +209,9 @@ serve:
         name: ""
         key: client-secret
       scopes: []      # email and profile when empty, openid always; add groups where the provider asks for it
+      hostedDomains: []    # Google Workspace domains people must come from (the hd claim)
+      trustedClients: []   # the provider's other clients whose ID tokens are taken as this one's
+      bearer: true         # take ID tokens as bearer tokens (API clients, agents)
     # The signed header of a sign-in in front: google-iap (Google Cloud's
     # Identity-Aware Proxy: audience is the backend service's,
     # /projects/NUMBER/global/backendServices/ID), aws-alb (an Application
@@ -225,11 +231,16 @@ serve:
     userClaim: email
     groupsClaim: groups
     sessionMaxAge: ""  # 12h when empty
-    # A Secret holding a key of 32 characters or more that sessions are
-    # signed with; without it, one is made once and kept in the ledger.
+    # The key sessions are signed with, 32 characters or more: whoever
+    # holds it can sign in as anyone. A Secret of your own (name), or one
+    # the chart makes (FULLNAME-session-key, kept across upgrades and when
+    # the release is uninstalled). A GitOps tool that renders the chart
+    # without the cluster (Argo CD, Flux) would make a new key each render,
+    # signing everyone out: give it a Secret of your own.
     sessionKeySecret:
       name: ""
       key: session-key
+      create: true
   readOnly: false  # take no changes through the UI or API
   # Without roles (below), everyone may only look: lapilli serve listens on
   # the pod's address, which every pod in the cluster can reach. Changes
@@ -247,6 +258,9 @@ serve:
   # team or of one, kept in the ledger; never an admin's or an approver's
   # (docs/design/serveops.md).
   roles:
+    # Who may look, and with serve.signIn who may come in at all: people,
+    # group:NAME, *@DOMAIN, or "*" for everyone the sign-in signs in.
+    viewers: []
     editors: []
     admins: []
     groupsHeader: ""   # the header the proxy lists groups in, such as X-Forwarded-Groups
@@ -376,12 +390,16 @@ serve:
   # proxy or ingress passes on, if it is another. ingress's hosts and
   # httpRoute's hostnames are added. Others get 421, against DNS rebinding.
   allowedHosts: []
-  # The Service the UI is reached through. A ClusterIP by default; a
-  # LoadBalancer or NodePort serves the UI's port alone, and the others
-  # (metrics, incidents, notifications) go on FULLNAME-internal, a
-  # ClusterIP. The README has each cloud's load balancer annotations.
+  # The UI outside the cluster on a Service of its own, FULLNAME-ui, a
+  # LoadBalancer or a NodePort, the UI's port alone; FULLNAME stays a
+  # ClusterIP with every port, as jobs and Prometheus reach it. The README
+  # has each cloud's load balancer annotations. A load balancer of TCP
+  # (GKE's and AKS's) doesn't end TLS: with signIn.oidc, end it at an
+  # Ingress or a Gateway, or at a load balancer that does (an AWS NLB's or
+  # an OCI load balancer's TLS listener).
   service:
-    type: ClusterIP   # ClusterIP, LoadBalancer or NodePort
+    type: ClusterIP   # ClusterIP (no FULLNAME-ui), LoadBalancer or NodePort
+    port: 80          # FULLNAME-ui's port
     annotations: {}
     loadBalancerClass: ""
     loadBalancerSourceRanges: []   # the addresses let through the cloud's load balancer
@@ -389,15 +407,24 @@ serve:
     # the NetworkPolicy see them; Cluster when empty.
     externalTrafficPolicy: ""
     nodePort: null
+    # userHeader trusts a plain header, which no proxy can set or strip in
+    # front of a load balancer of TCP: refused with a LoadBalancer or a
+    # NodePort, unless loadBalancerSourceRanges names the proxy's addresses
+    # alone and this says so.
+    sourceRangesAreTheProxy: false
   # An Ingress for the UI (networking.k8s.io/v1).
   ingress:
     enabled: false
     className: ""
     annotations: {}
     hosts: []         # such as lapilli.example.com
-    path: /
+    path: /           # lapilli is served at the root of its host
     pathType: Prefix
     tls: []           # - {secretName: lapilli-tls, hosts: [lapilli.example.com]}
+    # People reach it over https, for externalURL: TLS ended here (tls) or
+    # at the load balancer in front (an ALB's certificate, a managed
+    # certificate). false only for a host on this machine (NAME.localhost).
+    https: true
   # A Gateway API HTTPRoute for the UI (gateway.networking.k8s.io/v1).
   httpRoute:
     enabled: false
@@ -409,9 +436,10 @@ serve:
   # Ingress or an HTTPRoute) with no sign-in lets anyone who reaches it
   # read the ledger: refused, unless this says that is meant.
   exposeWithoutSignIn: false
-  # The readiness probe's path: /readyz is ready once the first run is
-  # done, which on a first start replays backfill, and can take a while;
-  # /healthz is ready at once. The liveness probe is /healthz.
+  # The readiness probe's path: /readyz is ready once the ledger has a run
+  # recorded, at once after a restart, after the backfill's first day on a
+  # first install; /healthz is ready at once. The liveness probe is
+  # /healthz.
   readinessPath: /readyz
   # Agents reach /mcp and read what the pages show. Who an agent must act
   # for to replay a change to the rules it proposes: editors or admins. Off

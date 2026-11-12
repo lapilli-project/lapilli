@@ -1,3 +1,4 @@
+{{- include "lapilli.defaults" . }}
 {{- if eq .Values.mode "serve" }}
 lapilli serve is replaying the last {{ .Values.serve.backfill }} into its ledger; the UI fills in when that is done.
 {{- $s := .Values.serve }}
@@ -11,8 +12,8 @@ lapilli serve is replaying the last {{ .Values.serve.backfill }} into its ledger
 {{- end }}
 {{- if eq $s.service.type "LoadBalancer" }}
 
-The Service is a LoadBalancer: its address is in
-  kubectl -n {{ .Release.Namespace }} get service {{ include "lapilli.fullname" . }}
+The UI's LoadBalancer's address is in
+  kubectl -n {{ .Release.Namespace }} get service {{ include "lapilli.fullname" . }}-ui
 {{- end }}
 {{- if $s.signIn.oidc.issuer }}
 
@@ -34,11 +35,11 @@ It signs no one in: keep the Service inside the cluster, or sign people in
 {{- if $s.readOnly }}
 It is read-only (serve.readOnly): no one changes anything through the UI or the API.
 {{- else if or $s.roles.editors $s.roles.admins }}
-Those serve.roles names, as the sign-in names them, change what their role allows; everyone else may only look.
+Those serve.roles names, as the sign-in names them, change what their role allows; {{ if or $s.signIn.oidc.issuer $s.signIn.proxyJWT.kind $s.roles.viewers }}those it doesn't name don't come in{{ else }}everyone else may only look{{ end }}.
 {{- else if $s.everyoneAdmin }}
 With serve.everyoneAdmin, everyone who reaches the UI or the API changes anything, as an admin.
 {{- else if or $s.signIn.oidc.issuer $s.signIn.proxyJWT.kind }}
-With no serve.roles, everyone signed in may only look: name who may change what in serve.roles.
+Those serve.roles.viewers names may look; no one changes anything until serve.roles names editors or admins.
 {{- else }}
 With no serve.roles, everyone may only look: give roles behind a sign-in
 (serve.signIn or serve.userHeader, and serve.roles), or set serve.everyoneAdmin.

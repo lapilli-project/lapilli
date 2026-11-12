@@ -1,3 +1,4 @@
+{{- include "lapilli.defaults" . }}
 {{- if eq .Values.mode "serve" }}
 {{- $s := .Values.serve }}
 apiVersion: apps/v1
@@ -191,6 +192,9 @@ spec:
             {{- with $s.roles.admins }}
             - {{ printf "--admins=%s" (join "," .) | quote }}
             {{- end }}
+            {{- with $s.roles.viewers }}
+            - {{ printf "--viewers=%s" (join "," .) | quote }}
+            {{- end }}
             {{- with $s.roles.groupsHeader }}
             - {{ printf "--groups-header=%s" . | quote }}
             {{- end }}
@@ -257,11 +261,20 @@ spec:
             {{- with .oidc.scopes }}
             - {{ printf "--oidc-scopes=%s" (join "," .) | quote }}
             {{- end }}
+            {{- with .oidc.hostedDomains }}
+            - {{ printf "--oidc-hosted-domain=%s" (join "," .) | quote }}
+            {{- end }}
+            {{- with .oidc.trustedClients }}
+            - {{ printf "--oidc-trusted-clients=%s" (join "," .) | quote }}
+            {{- end }}
+            {{- if eq (toString .oidc.bearer) "false" }}
+            - --oidc-bearer=false
+            {{- end }}
             {{- with .sessionMaxAge }}
             - {{ printf "--session-max-age=%s" . | quote }}
             {{- end }}
-            {{- if .sessionKeySecret.name }}
-            - {{ printf "--session-key-file=/var/run/lapilli/session-key/%s" .sessionKeySecret.key | quote }}
+            {{- if or .sessionKeySecret.name .sessionKeySecret.create }}
+            - {{ printf "--session-key-file=/var/run/lapilli/session-key/%s" (ternary .sessionKeySecret.key "session-key" (not (empty .sessionKeySecret.name))) | quote }}
             {{- end }}
             {{- end }}
             {{- with .proxyJWT }}
@@ -379,7 +392,7 @@ spec:
               mountPath: /var/run/lapilli/oidc
               readOnly: true
             {{- end }}
-            {{- if and $s.signIn.oidc.issuer $s.signIn.sessionKeySecret.name }}
+            {{- if and $s.signIn.oidc.issuer (or $s.signIn.sessionKeySecret.name $s.signIn.sessionKeySecret.create) }}
             - name: session-key
               mountPath: /var/run/lapilli/session-key
               readOnly: true
@@ -481,10 +494,10 @@ spec:
           secret:
             secretName: {{ $s.signIn.oidc.clientSecret.name }}
         {{- end }}
-        {{- if and $s.signIn.oidc.issuer $s.signIn.sessionKeySecret.name }}
+        {{- if and $s.signIn.oidc.issuer (or $s.signIn.sessionKeySecret.name $s.signIn.sessionKeySecret.create) }}
         - name: session-key
           secret:
-            secretName: {{ $s.signIn.sessionKeySecret.name }}
+            secretName: {{ $s.signIn.sessionKeySecret.name | default (printf "%s-session-key" (include "lapilli.fullname" .)) }}
         {{- end }}
         {{- if $s.teamDigests.secretName }}
         - name: team-digests

@@ -1,3 +1,4 @@
+{{- include "lapilli.defaults" . }}
 {{- $s := .Values.serve }}
 {{- if and (eq .Values.mode "serve") $s.httpRoute.enabled }}
 {{- $r := $s.httpRoute }}

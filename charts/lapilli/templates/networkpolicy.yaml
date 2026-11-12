@@ -1,3 +1,4 @@
+{{- include "lapilli.defaults" . }}
 {{- if and (eq .Values.mode "serve") .Values.serve.networkPolicy.enabled }}
 {{- if not .Values.serve.networkPolicy.from }}
 {{- fail "serve.networkPolicy.from: name who may reach lapilli serve's UI: the sign-in proxy, the ingress controller's or the Gateway's pods, or a load balancer's addresses (ipBlock); empty would be everyone. Prometheus goes in metricsFrom, to the metrics port alone" }}

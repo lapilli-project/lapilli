@@ -1,3 +1,4 @@
+{{- include "lapilli.defaults" . }}
 {{- /* Tasks kept in step with a tracker: recipes/trackers, run every few
 minutes, with the tasks token on the incidents port. */ -}}
 {{- $s := .Values.serve }}
@@ -71,7 +72,7 @@ spec:
               command: [sh, {{ printf "/recipes/%s.sh" $t.tracker | quote }}]
               env:
                 - name: LAPILLI_URL
-                  value: {{ printf "http://%s:%d" (include "lapilli.internalName" .) (int $s.incidentsAPI.port) | quote }}
+                  value: {{ printf "http://%s:%d" (include "lapilli.fullname" .) (int $s.incidentsAPI.port) | quote }}
                 - name: LAPILLI_TOKEN_FILE
                   value: {{ printf "/var/run/lapilli/tasks-token/%s" $t.tokenSecret.key | quote }}
                 - name: {{ printf "%s_TOKEN_FILE" $prefix }}

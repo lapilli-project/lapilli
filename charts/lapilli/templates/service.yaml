@@ -1,12 +1,34 @@
+{{- include "lapilli.defaults" . }}
 {{- if eq .Values.mode "serve" }}
 {{- $s := .Values.serve }}
 {{- $svc := $s.service }}
 {{- $type := $svc.type | default "ClusterIP" }}
-{{- $outside := ne $type "ClusterIP" }}
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "lapilli.fullname" . }}
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+spec:
+  # Inside the cluster: every port, as jobs, alert managers and Prometheus
+  # reach them. The UI outside it is FULLNAME-ui's (serve.service.type).
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    {{- include "lapilli.selector" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $s.port }}
+      targetPort: http
+    {{- include "lapilli.innerPorts" . | nindent 4 }}
+{{- if ne $type "ClusterIP" }}
+---
+# The UI outside the cluster, alone: a load balancer's or a node's port.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lapilli.fullname" . }}-ui
   labels:
     {{- include "lapilli.labels" . | nindent 4 }}
   {{- with $svc.annotations }}
@@ -14,8 +36,6 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  # Inside the cluster unless serve.service.type says otherwise: then the
-  # UI's port alone, which signs people in, and the rest on -internal.
   type: {{ $type }}
   {{- if eq $type "LoadBalancer" }}
   {{- with $svc.loadBalancerClass }}
@@ -26,8 +46,8 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   {{- end }}
-  {{- if and $outside $svc.externalTrafficPolicy }}
-  externalTrafficPolicy: {{ $svc.externalTrafficPolicy }}
+  {{- with $svc.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ . }}
   {{- end }}
   selector:
     app.kubernetes.io/name: {{ .Chart.Name }}
@@ -35,32 +55,11 @@ spec:
     {{- include "lapilli.selector" . | nindent 4 }}
   ports:
     - name: http
-      port: {{ .Values.serve.port }}
+      port: {{ $svc.port | default 80 }}
       targetPort: http
-      {{- if and $outside $svc.nodePort }}
-      nodePort: {{ $svc.nodePort }}
+      {{- with $svc.nodePort }}
+      nodePort: {{ . }}
       {{- end }}
-    {{- if not $outside }}
-    {{- include "lapilli.innerPorts" . | nindent 4 }}
-    {{- end }}
-{{- if $outside }}
----
-# The ports beside the UI's, inside the cluster: metrics, and those that
-# take what jobs and alert managers send with a token.
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ include "lapilli.fullname" . }}-internal
-  labels:
-    {{- include "lapilli.labels" . | nindent 4 }}
-spec:
-  type: ClusterIP
-  selector:
-    app.kubernetes.io/name: {{ .Chart.Name }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
-    {{- include "lapilli.selector" . | nindent 4 }}
-  ports:
-    {{- include "lapilli.innerPorts" . | nindent 4 }}
 {{- end }}
 ---
 {{- if and .Values.serve.ledger.persistence (not .Values.serve.ledger.existingClaim) }}
