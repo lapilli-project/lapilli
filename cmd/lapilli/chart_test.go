@@ -439,3 +439,95 @@ func chartValues(t *testing.T) (v struct{ image, renderImage string }) {
 	}
 	return struct{ image, renderImage string }{values.Serve.RulesHistory.Image, values.Serve.RulesHistory.RenderImage}
 }
+
+// The rules history's storage is bounded, and by default it never stops on
+// a commit: its volumes have size limits, its containers ephemeral-storage
+// requests and limits, a commit too large to read or that can't be
+// rendered is passed over (unrendered: skip), and following, the versions
+// from before the backfill and a day go. --changes has nothing to write to
+// when the rules are a followed history alone.
+func TestChartRulesHistoryBounded(t *testing.T) {
+	base := []string{"--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090", "--set", "serve.backfill=10d",
+		"--set", "serve.rulesHistory.repository=https://git.example.com/ops/platform.git", "--set", "serve.rulesHistory.paths=charts/monitoring/",
+		"--set", "serve.rulesHistory.render=helm template m charts/monitoring"}
+	out, err := helmTemplate(t, base...)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	var d struct {
+		Spec struct {
+			Template struct {
+				Spec struct {
+					Volumes []struct {
+						Name     string
+						EmptyDir *struct {
+							SizeLimit string `yaml:"sizeLimit"`
+						} `yaml:"emptyDir"`
+					}
+					InitContainers []historyLimited `yaml:"initContainers"`
+					Containers     []historyLimited
+				}
+			}
+		}
+	}
+	for _, doc := range strings.Split(out, "\n---\n") {
+		if strings.Contains(doc, "kind: Deployment") {
+			if err := yaml.Unmarshal([]byte(doc), &d); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	spec := d.Spec.Template.Spec
+	sizes := map[string]string{}
+	for _, v := range spec.Volumes {
+		if v.EmptyDir != nil {
+			sizes[v.Name] = v.EmptyDir.SizeLimit
+		}
+	}
+	if sizes["rules-history"] != "1Gi" || sizes["rules-history-repo"] != "2Gi" || sizes["rules-history-work"] != "1Gi" {
+		t.Errorf("size limits %v", sizes)
+	}
+	seen := 0
+	for _, c := range append(spec.InitContainers, spec.Containers...) {
+		if !strings.HasPrefix(c.Name, "rules-history") {
+			continue
+		}
+		seen++
+		if c.Resources.Requests["ephemeral-storage"] == "" || c.Resources.Limits["ephemeral-storage"] == "" {
+			t.Errorf("%s: resources %+v", c.Name, c.Resources)
+		}
+		env := map[string]string{}
+		for _, e := range c.Env {
+			env[e.Name] = e.Value
+		}
+		if c.Name == "rules-history" || c.Name == "rules-history-follow" {
+			if env["UNRENDERED"] != "skip" || env["MAX_TREE_FILES"] != "20000" || env["MAX_TREE_BYTES"] != "268435456" {
+				t.Errorf("%s: env %v", c.Name, env)
+			}
+		}
+		if c.Name == "rules-history-follow" && !strings.Contains(c.Args[0], `*d) keep=$(( ${BACKFILL%d} * 86400 + 86400 ))`) {
+			t.Errorf("follow: no KEEP from the backfill:\n%s", c.Args[0])
+		}
+	}
+	if seen != 4 {
+		t.Errorf("%d rules history containers", seen)
+	}
+	// Left out of the values, as an older values file would: skip still.
+	if out, err := helmTemplate(t, append(base, "--set", "serve.rulesHistory.unrendered=null")...); err != nil || !strings.Contains(out, "- name: UNRENDERED\n              value: \"skip\"") {
+		t.Errorf("unrendered left out: %v", err)
+	}
+	if out, err := helmTemplate(t, append(base, "--set", "serve.changes.enabled=true", "--set", "serve.userHeader=X-Forwarded-Email",
+		"--set", "serve.roles.admins={ana@example.com}", "--set", "serve.networkPolicy.othersKeptOut=true")...); err == nil ||
+		!strings.Contains(out, "serve.changes writes a change to where the rules are kept") {
+		t.Errorf("changes, following: %v\n%s", err, out)
+	}
+}
+
+type historyLimited struct {
+	Name      string
+	Args      []string
+	Env       []struct{ Name, Value string }
+	Resources struct {
+		Requests, Limits map[string]string
+	}
+}

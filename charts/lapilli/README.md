@@ -95,22 +95,48 @@ this can stay on. With no `rules.configMaps`, the repository is the rules,
 followed: two containers beside lapilli fetch the branch every `every`
 seconds (300) and add the versions of its new commits
 (`recipes/versions/follow.sh`); `serve` records each from its commit's
-time, and replays the hours since then again.
+time, and replays the hours since then again. A commit is named no earlier
+than when it was fetched, less `every` and a minute, by the clone's reflog,
+which the fetch writes and the containers running `render` can't: a commit
+dated back, by its committer's clock or because it waited in a branch,
+takes effect when it reached the branch, not days before. Following never
+stops on a commit: one that can't be rendered is passed over, one dated
+after now is named now, and of more than `max` new commits the newest are
+written. The versions from before the backfill and a day are taken away,
+but the one in effect then. `serve.changes` is refused when the rules are a
+followed history alone: there is no file of rules to write a change to.
 
 For rules rendered from a chart, `render` is a command that writes them from
 a commit's files: `helm template monitoring charts/monitoring`, or
 `kustomize build overlays/prod`. Of what it writes, only the documents of
 rules are kept (ConfigMaps of rule files or of Grafana provisioning files,
 `PrometheusRule`s), and `select`, a label selector, keeps the labelled ones:
-`grafana_alert=1` for the ConfigMaps Grafana's sidecar loads. No `yq` is
-needed. `renderPrepare` runs before it in each commit's files, for what a
-commit lacks, such as dependencies older commits don't vendor (`helm repo
-add ... && helm dependency build charts/monitoring`); `unrendered: skip`
-passes over a commit that can't be rendered, saying which and why, where
-`fail` (the default) writes no history. With `render`, the versions are
-written in `renderImage`, which has git, helm and kustomize: Argo CD's
-v3.5.6, pinned by digest, so a chart renders as Argo CD v3.5.6 renders it;
-give one with the versions that deploy yours.
+`grafana_alert=1` for the ConfigMaps Grafana's sidecar loads. Labels are on
+Kubernetes objects only: a plain rule file has none, and `select` passes it
+through. No `yq` is needed. `renderPrepare` runs before it in each commit's
+files, for what a commit lacks, such as dependencies older commits don't
+vendor (`helm repo add ... && helm dependency build charts/monitoring`).
+`unrendered: skip`, the chart's default, passes over a commit that can't be
+rendered or read, saying which and why, the version before staying in
+effect; `fail` writes no history on a start (the recipe's own default).
+
+With `render`, the versions are written in `renderImage`, which has git,
+helm and kustomize: Argo CD's v3.5.6, pinned by digest, so a chart renders
+as Argo CD v3.5.6 renders it. It is large, about 210 MB to pull and 870 MB
+unpacked. To use a smaller one, or one with the helm and kustomize that
+deploy your chart, set `renderImage` to an image with sh, git and what
+`render` and `renderPrepare` run, by digest:
+`renderImage: registry.example.com/tools/helm-git:1.2.3@sha256:...`.
+
+A commit is read as it is: git runs with none of the image's configuration
+(the Argo CD image turns Git LFS on), the commit's `.gitattributes` don't
+leave a file out or rewrite one, and with `render` a commit holding a
+symbolic link anywhere is passed over. A commit with more than
+`maxTreeFiles` (20000) files or `maxTreeBytes` (256 MiB), as git counts
+them before anything is written, is passed over too. The volumes have size
+limits (`sizeLimits`: the clone 2Gi, what a commit is read into 1Gi, the
+versions 1Gi) and the containers ephemeral-storage requests and limits
+(`resources`).
 
 `tokenSecret` names a Secret holding a token for an https repository that
 needs one; only the containers that clone and fetch have it, and it goes to
@@ -120,8 +146,10 @@ read-only, so nothing they run can change what the next fetch runs with.
 The images are pinned by digest; every container runs as the pod does,
 with a read-only root. When the repository can't be cloned, or the history
 written, the directory is left empty and the log says so, rather than hold
-the pod up: `serve` then starts with today's rules, or, following, with
-none until the branch is fetched. With `serve.networkPolicy.egress`, name
+the pod up: `serve` starts all the same, with today's rules; following,
+with none, and the fetch clones the repository, the follow writes the
+history, and `serve` takes it, its backfill replaying each day with that
+day's rules, once they can. With `serve.networkPolicy.egress`, name
 the repository's host in `to`, and the chart repositories `renderPrepare`
 fetches from.
 

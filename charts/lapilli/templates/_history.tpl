@@ -71,8 +71,9 @@ fetch() {
 if [ "$EVERY" -eq 0 ]; then
   # A history that can't be fetched leaves nothing: serve
   # starts with today's rules, and the pod isn't held up by git.
+  # Following, the next fetch clones it, and serve takes it then.
   rm -rf /repo/clone /repo/cloned
-  fetch || echo "couldn't clone the repository: serve starts without the history" >&2
+  fetch || echo "couldn't clone the repository: serve starts without the history; following, it is cloned again at the next fetch" >&2
   rm -rf "$HOME"
   exit 0
 fi
@@ -94,9 +95,13 @@ done
 - name: RENDER_PREPARE
   value: {{ $h.renderPrepare | quote }}
 - name: UNRENDERED
-  value: {{ $h.unrendered | default "fail" | quote }}
+  value: {{ $h.unrendered | default "skip" | quote }}
 - name: MAX
   value: {{ $h.max | default 500 | int | quote }}
+- name: MAX_TREE_FILES
+  value: {{ $h.maxTreeFiles | default 20000 | int | quote }}
+- name: MAX_TREE_BYTES
+  value: {{ $h.maxTreeBytes | default 268435456 | int64 | quote }}
 - name: BACKFILL
   value: {{ .Values.serve.backfill | quote }}
 - name: HOME
@@ -185,7 +190,7 @@ done
         exit 0
       fi
       if ! REPO=/repo/clone SINCE=$since OUT="$out.new" sh /scripts/git.sh; then
-        echo "couldn't write the history: serve starts without it" >&2
+        echo "couldn't write the history: serve starts without it; following, it is written again at the next look" >&2
         rm -rf "$out.new"
         exit 0
       fi
@@ -236,7 +241,14 @@ another adds the versions of its new commits, without it. */}}
       set -eu
       {{- include "lapilli.historySince" . | nindent 6 }}
       mkdir -p "$TMPDIR" "$HOME"
-      exec env REPO=/repo/clone SINCE="$since" HISTORY=/var/lib/lapilli-history/versions GIT_SH=/scripts/git.sh sh /scripts/follow.sh
+      # The versions from before the backfill and a day go, but the one
+      # in effect then.
+      case $BACKFILL in
+        *d) keep=$(( ${BACKFILL%d} * 86400 + 86400 )) ;;
+        *h) keep=$(( ${BACKFILL%h} * 3600 + 86400 )) ;;
+        *) keep=0 ;;
+      esac
+      exec env REPO=/repo/clone SINCE="$since" KEEP="$keep" HISTORY=/var/lib/lapilli-history/versions GIT_SH=/scripts/git.sh sh /scripts/follow.sh
   env:
     {{- include "lapilli.historyEnv" . | nindent 4 }}
     - name: EVERY
@@ -252,12 +264,16 @@ another adds the versions of its new commits, without it. */}}
 {{- end -}}
 
 {{- define "lapilli.historyVolumes" -}}
+{{- $l := .Values.serve.rulesHistory.sizeLimits }}
 - name: rules-history
-  emptyDir: {}
+  emptyDir:
+    sizeLimit: {{ $l.history | default "1Gi" }}
 - name: rules-history-repo
-  emptyDir: {}
+  emptyDir:
+    sizeLimit: {{ $l.repo | default "2Gi" }}
 - name: rules-history-work
-  emptyDir: {}
+  emptyDir:
+    sizeLimit: {{ $l.work | default "1Gi" }}
 - name: rules-history-script
   configMap:
     name: {{ include "lapilli.fullname" . }}-rules-history
@@ -283,6 +299,9 @@ another adds the versions of its new commits, without it. */}}
 {{- end }}
 {{- if lt (int ($h.every | default 300)) 30 }}
 {{- fail "serve.rulesHistory.every: seconds between fetches, 30 at least" }}
+{{- end }}
+{{- if and (include "lapilli.historyFollows" .) .Values.serve.changes.enabled (not .Values.rules.alarms) }}
+{{- fail "serve.changes writes a change to where the rules are kept: followed alone, serve.rulesHistory is versions a recipe wrote, often rendered from a chart, with no file to write to. Give rules.configMaps, or leave serve.changes off" }}
 {{- end }}
 {{- if and $h.renderPrepare (not $h.render) }}
 {{- fail "serve.rulesHistory.renderPrepare prepares each commit's files for render: give render too" }}

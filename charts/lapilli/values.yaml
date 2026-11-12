@@ -182,9 +182,20 @@ serve:
     # helm repo add grafana https://grafana.github.io/helm-charts >&2 && helm dependency build charts/monitoring
     # (the chart repositories must then be reachable: see networkPolicy.egress).
     renderPrepare: ""
-    # A commit that can't be rendered: fail writes no history and says
-    # which; skip passes it over, saying which and why.
-    unrendered: fail
+    # A commit that can't be rendered: skip passes it over, saying which
+    # and why, and the version before stays in effect; fail writes no
+    # history at all on a start. Following, one is always passed over.
+    unrendered: skip
+    # The most files, and bytes, a commit is read with (with render, all
+    # its files; without, those paths names): a commit more is passed over.
+    maxTreeFiles: 20000
+    maxTreeBytes: 268435456   # 256 MiB
+    # The volumes' sizes: the clone, what a commit is read into, and the
+    # versions.
+    sizeLimits:
+      repo: 2Gi
+      work: 1Gi
+      history: 1Gi
     # Of the objects render writes, keep those whose labels this selector
     # matches, as --rules-select takes it: grafana_alert=1 keeps the
     # ConfigMaps labelled for Grafana's sidecar.
@@ -201,9 +212,17 @@ serve:
     image: alpine/git:v2.52.0@sha256:4a0e72d49596a1f5d3701aeedafdadc5c0da4062be4657c7bdc4017387f591cc
     # An image with git, helm and kustomize, pinned by digest, which writes
     # the versions with render: Argo CD's, so a chart renders as Argo CD
-    # v3.5.6 renders it. Give one with the versions that deploy the chart.
+    # v3.5.6 renders it (about 210 MB to pull, 870 MB unpacked). Give one
+    # with the versions that deploy the chart, or a smaller one with git,
+    # sh and what render runs: NAME@sha256:...
     renderImage: quay.io/argoproj/argocd:v3.5.6@sha256:8e5cc5bb008df8a09dba439462e58c94c55b7735888d3ebde0c25fc05e4e5335
-    resources: {}    # of each of its containers
+    # Of each of its containers. Their root is read-only, so their own
+    # storage is their logs.
+    resources:
+      requests:
+        ephemeral-storage: 16Mi
+      limits:
+        ephemeral-storage: 256Mi
   # The UI has no sign-in of its own, and the Service is a ClusterIP: reach
   # it with kubectl port-forward, or put it behind a proxy that signs people
   # in (oauth2-proxy, an ingress's or a cloud's) and name the header that
