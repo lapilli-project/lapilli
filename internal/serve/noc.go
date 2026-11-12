@@ -172,6 +172,12 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 	if err != nil {
 		return nil, err
 	}
+	// Each week's own, read once for every team's row.
+	weekOf := map[int64][]ledger.Incident{}
+	for _, in := range incs {
+		w := ledger.Week(s.l.Day(in.Start))
+		weekOf[w] = append(weekOf[w], in)
+	}
 	for _, w := range t.weeks {
 		from, to := s.l.Midnight(w), s.l.Midnight(w+7)
 		refired, err := s.l.MostRefired(ctx, from, to, -1, nil)
@@ -238,8 +244,8 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 				}
 			}
 			var leads, impactLeads []time.Duration
-			for _, in := range incs {
-				if in.Start.Before(from) || !in.Start.Before(to) || (team != nil && !own.ownsIncident(*team, in)) {
+			for _, in := range weekOf[w] {
+				if team != nil && !own.ownsIncident(*team, in) {
 					continue
 				}
 				sum, ls := &row.Incidents, &leads
