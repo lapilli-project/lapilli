@@ -16,7 +16,7 @@ to where the rule is kept ([below](#changing-rules)).
 ```
 $ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \
     --incidents incidents.yaml --impact 'sum(rate(http_5xx[5m])) / sum(rate(http_total[5m])) > 0.01'
-Lapilli  2026-10-26 00:00 → 2026-11-02 00:00 Asia/Seoul
+Lapilli  2026-10-26 00:00 → 2026-11-02 00:00 Asia/Seoul (+09:00)
 148 firings, 3 incidents written down, 1 more found by --impact
 
 RULE                SEVERITY  FIRED  ○ CAUGHT  ● NOTHING  PRECISION  REFIRED
@@ -577,7 +577,7 @@ series that say what really fired, instead of judging. It needs no incidents.
 
 ```
 $ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 --check-replay
-Replay beside ALERTS{alertstate="firing"}  2026-10-26 00:00 → 2026-11-02 00:00 Asia/Seoul
+Replay beside ALERTS{alertstate="firing"}  2026-10-26 00:00 → 2026-11-02 00:00 Asia/Seoul (+09:00)
 139 firings alike, 2 only in the replay, 7 only in what really fired: 94% alike.
 21 rules fired alike, 2 differ, 38 fired neither way.
 
@@ -748,7 +748,7 @@ rules' catches.
 ```
 $ lapilli verdict --rules proposed/ --compare alert-rules.yaml --prometheus http://prometheus:9090 \
     --incidents incidents.yaml
-Lapilli  2026-10-26 00:00 → 2026-11-02 00:00 Asia/Seoul
+Lapilli  2026-10-26 00:00 → 2026-11-02 00:00 Asia/Seoul (+09:00)
 Rules compared: 1 changed, 1 added, 0 taken away, 42 the same
 Firings 148 → 42
 By severity: critical 125 → 16, warning 23 → 26
@@ -764,8 +764,22 @@ INC-43 Batch stuck  2026-10-31 02:40
   after   DiskFillingUp +4m
 ```
 
-In CI, check out the rules as they are beside the rules proposed and post
-the report on the pull request. With GitHub Actions:
+Without `--incidents` or `--impact`, `--compare` still runs: the firings
+are counted, not judged, and the report leaves out what only incidents
+could say (caught, nothing, precision, the incidents caught differently),
+keeping how often each rule fires and re-fires. Rules left alone are
+replayed too, once, so an incident one of them catches is caught on both
+sides: a longer `--since` judges against more incidents, and takes longer.
+In CI, run it on each pull request that changes the rules (below).
+
+## Pull request backtests in CI
+
+On a pull request that changes alert rules, the backtest can comment its
+report on the pull request, and edit that comment on each push: what fired
+before the change and what fires after, rule by rule, over the period you
+name. [recipes/backtest](recipes/backtest) has a script for each code host,
+GitHub, GitLab, Bitbucket, Azure DevOps and Gitea (or Forgejo), one
+library under them; and, for GitHub Actions, an action:
 
 ```yaml
 on:
@@ -775,44 +789,112 @@ permissions:
   contents: read
   pull-requests: write
 jobs:
-  verdict:
+  backtest:
+    if: github.event.pull_request.head.repo.full_name == github.repository # never a fork's
     runs-on: ubuntu-latest # one that can reach your Prometheus
     steps:
       - uses: actions/checkout@v4
-        with: {fetch-depth: 2}
-      # The merge's first parent: the rules as they are, if any.
-      - run: git worktree add base HEAD^1 && mkdir -p base/alerts
-      - uses: actions/setup-go@v5
-        with: {go-version: stable}
-      - run: go install lapilli.dev/cmd/lapilli@v0.4.0
-      - run: |
-          lapilli verdict --rules alerts --compare base/alerts --since 14d \
-            --prometheus "$PROMETHEUS" --incidents incidents.yaml > verdict.txt
-        env:
-          PROMETHEUS: ${{ vars.PROMETHEUS_URL }}
-      - if: ${{ !cancelled() }}
-        run: |
-          { echo '```'; cat verdict.txt; echo '```'; } > comment.md
-          gh pr comment "$PR" --body-file comment.md --edit-last --create-if-none
-        env:
-          PR: ${{ github.event.pull_request.number }}
-          GH_TOKEN: ${{ github.token }}
+        with: {fetch-depth: 2, persist-credentials: false}
+      - uses: lapilli-project/lapilli/recipes/backtest@v0.32.0
+        with:
+          version: v0.32.0
+          paths: alerts
+          prometheus-url: ${{ vars.PROMETHEUS_URL }}
+          since: 14d
 ```
 
-Rules left alone are replayed too, once, so an incident one of them catches is
-caught on both sides: a longer `--since` judges against more incidents, and
-takes longer. For a
-cloud's managed Prometheus, sign in first with the cloud's own step
-(`aws-actions/configure-aws-credentials`, `azure/login` or
-`google-github-actions/auth`, through OpenID Connect with `id-token: write`)
-and add `--auth`. Any CI does the same: check out both, run, post the text.
+Each installs a pinned release, checked against its `SHA256SUMS`; reads the
+rules of the pull request and of the commit it goes into, as files
+(`paths`) or as a command renders them in each (`render: helm template
+monitoring charts/monitoring`); runs `lapilli verdict --compare
+--changed-only --markdown`; and posts one comment, found again by a hidden
+first line. When nothing that decides when a rule fires changed and there
+is no comment yet, it posts none. When something fails, the comment says
+what, and the job succeeds unless it is asked to fail. The recipes' README
+has each CI's job, and what to keep from pull requests from forks: their
+rules become queries sent with your credentials, and a render command runs
+what they hold.
 
-The rules in a pull request become queries to your Prometheus, sent with the
-job's credentials, and their stones show in the comment; and a pull request
-can change the workflow it runs. Run this where only people who may query
-your Prometheus open pull requests: a private repository, or one that needs
-approval before running workflows from outside contributors, above all on a
-runner inside your network.
+`--markdown` writes the report for a pull request or a merge request, at
+most 64,000 bytes, under the 65,536 characters GitHub takes, cut short
+with a note when longer:
+
+```
+[//]: # (lapilli-compare {"nothing_changed":false,"changed":1,"added":1,"removed":0,"same":42,"alike":0,"unreplayed":0,"firings_before":148,"firings_after":42,"incidents_given":true,"incidents":3,"incidents_changed":1})
+### Lapilli backtest, 2026-10-26 00:00 → 2026-11-02 00:00 Asia/Seoul (+09:00)
+
+Rules compared: **1 changed, 1 added, 0 taken away**, 42 the same.
+
+| | Before | After |
+|---|--:|--:|
+| Firings | 148 | 42 |
+| Severity `critical` | 125 | 16 |
+| Severity `warning` | 23 | 26 |
+| Incidents with no alert, of 3 | 1 | 0 |
+
+#### Rules that differ
+
+| Rule | Severity | Fired | ○ Caught | ● Nothing | Precision | Refired |
+| --- | --- | --: | --: | --: | --: | --: |
+| `ExportJob5xx` | `critical` | 118 → 9 | 0 → 0 | 118 → 9 | 0% → 0% | 41 → 2 |
+| `DiskFillingUp` | – → `warning` | – → 3 | – → 1 | – → 2 | – → 33% | – → 0 |
+
+#### Incidents caught differently
+
+| Incident | Start | Before | After |
+| --- | --- | --- | --- |
+| `INC-43` `Batch stuck` | 2026-10-31 02:40 | ✗ nothing fired | `DiskFillingUp` +4m |
+```
+
+The rules that couldn't be replayed are listed under the table, with why;
+those that differ but fire as they did are folded in `<details>`. Rule
+names, labels, incidents and the reasons a rule couldn't be replayed come
+from whoever wrote the rules, and a pull request's author may be anyone:
+each is written as a code span, in which no host reads Markdown, HTML, a
+mention (`@user`, `@org/team`), a reference (`#123`) or a link, a `|`
+escaped so it can't end a table's cell, a backtick in it making the span's
+fence longer, and control and format characters (bidirectional overrides,
+zero-width spaces), line separators and spaces other than the space shown
+as `\u{...}`. Where the history and the rules are read from (the
+`--prometheus`, `--loki`, `--grafana` and `--ruler` URLs, their hosts, a
+`--gcp-project`) is taken out of those reasons, as a failed query names
+it.
+
+What a tool reads is stable:
+
+- The first line of `--markdown` is a link reference definition, which no
+  host shows, holding the summary as JSON; `--json` gives the same object
+  as `"summary"`, beside the rest of the report, whose fields are as they
+  were. Every field is always there:
+
+  | Field | |
+  |---|---|
+  | `nothing_changed` | nothing that decides when a rule fires differs: nothing was replayed |
+  | `changed`, `added`, `removed`, `same` | rules in both that differ, only in `--rules`, only in `--compare`, alike in both |
+  | `alike` | rules that differ but, replayed on both sides, fire as often and catch as much as they did |
+  | `unreplayed` | rules that differ that couldn't be replayed, on one side or both |
+  | `firings_before`, `firings_after` | firings on each side; of the rules that differ alone with `--changed-only` |
+  | `incidents_given` | judged against `--incidents` or `--impact`; when false, nothing was judged: no firing caught anything, and `incidents` is 0 |
+  | `incidents`, `incidents_changed` | incidents in the period, and those caught differently |
+
+- When nothing changed, `--markdown` writes that line and exactly:
+
+  ```
+  ### Lapilli backtest: nothing changed
+
+  Nothing that decides when the 42 rules fire has changed: nothing to replay.
+  ```
+
+- The exit status is `lapilli verdict`'s, as it was: 0 when the report is
+  written, whether or not anything changed; 1 when it failed, or a rule's
+  replay didn't finish within `--timeout` (the report is still written); 2
+  when the flags are wrong. Nothing changing has no exit status of its
+  own: a CI step takes anything but 0 as a failure, and a pull request that
+  changes no rule isn't one. Read `nothing_changed`.
+
+The header names the time zone of its times with its offset, `Asia/Seoul
+(+09:00)` or `UTC`: `--tz` gives one by its IANA name, and without it, the
+machine's own is named as `TZ` or `/etc/localtime` says.
 
 ## Incidents kept elsewhere
 
@@ -1726,6 +1808,10 @@ approve in the UI. No tool approves or applies one.
   Cortex's group says which tool keeps it, and no ruler has a condition on a
   write: a write landing between Lapilli's read and its own is found when
   the change is read back, and fails.
+- Pull request backtests are checked end to end against a real Gitea; the
+  recipes for GitHub, GitLab, Bitbucket and Azure DevOps against stand-ins
+  for their APIs, as they document them. A backtest is a comment, not a
+  check that can stop a merge.
 - A pull request is opened only for a file in the repository that is the
   document Lapilli read. A rule file mounted from a ConfigMap whose manifest
   is what git holds, rules rendered from a chart, and rules read back from a

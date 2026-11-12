@@ -87,8 +87,12 @@ impact-1  CheckoutLatency  reached 0.86  > 0.9 → 0.85   +6m         0 → 2  0
 
 `--compare` replays the rules in place beside those proposed, over the same
 period, and shows each rule's stones and each incident's catches before →
-after. Run it in CI on a pull request that touches the rules. The report also
-comes as JSON and as Prometheus metrics, and goes to Slack and a Pushgateway.
+after; without incidents, how often each fires. Run it in CI on a pull
+request that touches the rules: a script for GitHub, GitLab, Bitbucket, Azure
+DevOps and Gitea, and an action for GitHub Actions, comment the report on
+the pull request as Markdown, and keep that one comment up to date. The
+report also comes as JSON and as Prometheus metrics, and goes to Slack and a
+Pushgateway.
 
 `--check-replay` sets a replay beside what really fired, rule by rule, so you
 can check the replay on your own rules before you believe a verdict.

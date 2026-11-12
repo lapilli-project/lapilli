@@ -144,6 +144,24 @@ there, report what differs, and keep a check that does it. It also needs
 finding out which of these keep a series of what really fired: `ALERTS` is
 documented for Amazon Managed Service for Prometheus, and not for the others.
 
+## Pull request backtests
+
+`internal/verdict` (`--markdown`), `recipes/backtest`
+
+A pull request that changes alert rules gets its backtest as a comment, on
+GitHub, GitLab, Bitbucket, Azure DevOps and Gitea alike, and through an
+action on GitHub. The Markdown is checked by its structure in the tests,
+and as Gitea renders it against a real Gitea in CI; GitHub's rendering was
+checked by hand. Still to do:
+
+- The recipes checked against real GitHub, GitLab, Bitbucket and Azure
+  DevOps accounts, and how each renders the comment. Today each is tested
+  against its API's documented answers, with a server standing in; Gitea
+  against a real one.
+- A check of the pull request's own (a GitHub check run, a commit status
+  on the others) beside the comment, for a team that wants a backtest that
+  went badly to stop a merge.
+
 ## Incidents in
 
 `internal/incident`, `internal/serve` (`POST /api/v1/incidents`)

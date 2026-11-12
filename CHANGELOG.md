@@ -2,6 +2,65 @@
 
 ## [Unreleased]
 
+Pull request backtests in CI, on every code host: what a team had to glue
+around `lapilli verdict --compare` to comment its report on a pull request
+that changes alert rules, built in. No ledger schema change; the exit
+statuses, and every field `--json` gave, are as they were.
+
+### Added
+
+- **Pull request backtests in CI** ([recipes/backtest](recipes/backtest)):
+  a script for each code host, GitHub, GitLab, Bitbucket, Azure DevOps and
+  Gitea (or Forgejo), one POSIX sh library under them, and for GitHub
+  Actions an action (`uses: lapilli-project/lapilli/recipes/backtest@TAG`).
+  Each installs a pinned release, its archive checked against the
+  release's `SHA256SUMS` (and `LAPILLI_SHA256`, pinned) before it is
+  unpacked; reads the rules of the pull request's commit and of the commit
+  it goes into from git, as files (`PATHS`) or as a command renders them in
+  each (`RENDER`, `RENDER_PREPARE`: a Helm chart, a Kustomize overlay);
+  runs `lapilli verdict --compare --changed-only --markdown`; and posts one
+  comment, found again by a hidden first line and the token's own account,
+  and edited on later runs. Nothing changed and no comment yet: none
+  posted. What fails is said in the comment, and the job succeeds unless
+  `FAIL_ON_ERROR=true`. Tested against a stand-in for each host's API, and
+  end to end against a real Gitea and Prometheus (`test/e2e/backtest.sh`,
+  in CI): a comment posted, edited after a push, none on a pull request
+  that changes no rule, and a rule named to mention, reference and break
+  the table rendered by Gitea itself as text.
+- **`lapilli verdict --compare --markdown`**: the report as Markdown to
+  post on a pull request or a merge request: a heading with the period and
+  its time zone, the totals, the rules that differ as a table, those that
+  couldn't be replayed, those that fire as they did folded in `<details>`,
+  the incidents caught differently; at most 64,000 bytes, cut short with a
+  note. Rule names, labels, incidents and reasons are written as code
+  spans, so none can format, link, mention (`@user`, `@org/team`),
+  reference (`#123`), break a table or hide what follows; the URLs and the
+  project the history is read from are taken out of the reasons. When
+  nothing changed, a short form that doesn't change.
+- **A summary for tools.** `--json` with `--compare` adds `"summary"`:
+  `nothing_changed`, `changed`, `added`, `removed`, `same`, `alike`,
+  `unreplayed`, `firings_before`, `firings_after`, `incidents_given`,
+  `incidents` and `incidents_changed`, each always there; `--markdown`
+  holds the same on its first line. "No incidents given" is
+  `incidents_given: false`, not zero caught. Nothing changing has no exit
+  status of its own (the README says why).
+
+### Changed
+
+- **`--compare` runs without incidents.** Without `--incidents` or
+  `--impact` the firings are counted, not judged: the report leaves out the
+  caught, nothing and precision columns and what it would say of incidents,
+  and keeps fired and re-fired. A replay without `--compare` still asks for
+  them.
+- A report's header names its time zone with its offset, `Asia/Seoul
+  (+09:00)`, `Europe/Berlin (+02:00 → +01:00)` across a change of the
+  clocks, or `UTC`, never Go's bare `Local`: the machine's own zone is named
+  as `TZ` or `/etc/localtime` says. `--tz` takes an IANA name, as it did.
+  lapilli serve's digest header too.
+- With `--compare`, what reading the rule files passed over is said for
+  each set apart: "the rule files --rules read held ..." and "the rule
+  files --compare read held ...", not the same line twice.
+
 ## [0.31.2] - 2026-11-13
 
 SQLite 3.54.1, held back since 0.20.1, and a week of firings written
