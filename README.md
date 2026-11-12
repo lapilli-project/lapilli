@@ -355,6 +355,30 @@ directory once the ledger has versions of its own. A version is files: one
 holding a link to outside it is refused. With `verdict`, `--rules` beside
 `--rules-history` are the rules as they are now, the newest version.
 
+Rules rendered from a chart are read out of the whole rendering: of what
+`helm template` or `kustomize build` writes, only the documents of rules are
+kept (ConfigMaps of rule files or Grafana provisioning files,
+`PrometheusRule`s), and the rest, Deployments and Secrets, passed over and
+counted. `--rules-select`, a label selector as `kubectl -l` takes one, keeps
+only the labelled objects, such as the ConfigMaps Grafana's sidecar loads:
+
+```sh
+REPO=~/src/platform PATHS=charts/monitoring/ SINCE=2026-10-01 OUT=history \
+  RENDER='helm template monitoring charts/monitoring' \
+  RENDER_PREPARE='helm repo add grafana https://grafana.github.io/helm-charts >&2 && helm dependency build charts/monitoring' \
+  recipes/versions/git.sh
+lapilli verdict --rules-history history --rules-select grafana_alert=1 --prometheus http://prometheus:9090 --since 30d --incidents incidents.yaml
+```
+
+`RENDER_PREPARE` gives each commit what it lacks, such as dependencies older
+commits don't vendor; `UNRENDERED=skip` passes over a commit that still
+can't be rendered, saying which and why. `lapilli serve` given
+`--rules-history` without `--rules` follows the directory: its newest version
+is the rules in effect, and each version `recipes/versions/follow.sh` adds
+for a new commit is recorded from the commit's time, the hours since then
+replayed again. The chart does this with `serve.rulesHistory` and no
+`rules.configMaps`, fetching the branch every five minutes.
+
 ## Use
 
 ```sh

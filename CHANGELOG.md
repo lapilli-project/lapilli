@@ -2,6 +2,80 @@
 
 ## [Unreleased]
 
+### 0.31.0
+
+Rules a repository renders, followed (docs/design/history.md). It merges
+after 0.29.0 and 0.30.0, should those still be unreleased: their sections
+go above it. No ledger schema change.
+
+#### Added
+
+- **Rules read out of rendered manifests.** `--rules`, `--rules-history`
+  and `--compare` take a chart rendered whole (`helm template`, `kustomize
+  build`, `kubectl get -o yaml`): of its documents, those that hold rules
+  (ConfigMaps of rule files or of Grafana provisioning files,
+  `PrometheusRule`s and the rest Lapilli reads, `List`s of them) are kept,
+  and the others passed over and counted: `verdict` says how many on
+  stderr, `serve` in its log. No `yq` is needed to filter them first.
+- **`--rules-select SEL`,** a label selector as `kubectl -l` takes one
+  (`key=value`, `!=`, `in`, `notin`, `key`, `!key`), keeps of the
+  Kubernetes objects in the rule files those it matches: `grafana_alert=1`
+  for the ConfigMaps Grafana's sidecar loads. A rule file that isn't an
+  object has no labels, and is kept.
+- **Rendering each commit reliably.** `recipes/versions/git.sh` takes
+  `RENDER_PREPARE`, run in each commit's files before `RENDER`, for what a
+  commit lacks, such as a chart's dependencies that older commits don't
+  vendor (`helm dependency build`, at the versions `Chart.lock` pins, or
+  the archives as the newest commit vendors them, from `REPO`). It runs as
+  `RENDER` does: without the token, with a `HOME` of its own, kept from
+  commit to commit. `UNRENDERED=skip` passes over a commit that can't be
+  rendered (`RENDER_PREPARE` or `RENDER` fails, or `RENDER` writes
+  nothing), saying which and why; by default it still stops, now saying
+  which commit and that `skip` exists. Kustomize is documented.
+- **Following the branch.** Each version `git.sh` writes holds `.commit`,
+  its commit; `AFTER=COMMIT` writes only the commits after it.
+  `recipes/versions/follow.sh` keeps a history up to date: at each look,
+  the commits since the newest version's, added beside it. `lapilli serve`
+  given `--rules-history` without `--rules` follows the directory: its
+  newest version is the rules in effect, and each version added later is
+  recorded from its commit's time, the hours since then replayed again by
+  the next run (no further back than `--backfill`) and their days checked
+  again.
+- **In the chart,** `serve.rulesHistory` takes `renderPrepare`,
+  `unrendered`, `select`, `max` and `every`. With `render`, the versions
+  are written in `renderImage`, an image with git, helm and kustomize,
+  pinned by digest: Argo CD v3.5.6's by default. With no `rules.configMaps`
+  the repository is the rules, followed: `rules-history-fetch` fetches the
+  branch every `every` seconds (300) with the token, and
+  `rules-history-follow`, without it, adds the new commits' versions.
+- `test/e2e/rendered.sh`, in CI: a real Gitea holding a chart of Grafana
+  rules whose subchart comes from Gitea's Helm registry and isn't vendored
+  at the first commit; the chart's own rules history containers, as `helm
+  template` writes them, run in Docker; each version read for exactly its
+  rule documents; `verdict --rules-history` and `serve`, following, against
+  a real Prometheus with three days of a series, each day replayed with
+  that day's rules, and a commit dated hours back fetched and replayed
+  from its time. `FuzzPick` joins the weekly fuzzing.
+
+#### Changed
+
+- `lapilli serve` keeps of each version in `--rules-history` only its
+  documents of rules: a chart's Secrets and Deployments never reach the
+  ledger.
+- `lapilli serve --rules-history DIR` without `--rules` was refused; it now
+  follows the directory.
+
+#### Security
+
+- **In the chart, the clone is read-only where `render` runs.** It moved to
+  a volume of its own (`rules-history-repo`) that only the containers
+  holding the token write (`rules-history-clone`, and following,
+  `rules-history-fetch`): `rules-history` and `rules-history-follow` mount
+  it read-only, so nothing `render` runs can change the configuration or
+  hooks the next fetch runs with. EKS's and Azure's webhooks pass the new
+  containers over too, and the service account's token is mounted in none
+  of them.
+
 ## [0.28.1] - 2026-11-12
 
 A security release, after two reviews of 0.28.0 from an attacker's point
