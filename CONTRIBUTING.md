@@ -16,6 +16,7 @@ gofmt -l . && go vet ./...
 test/e2e/run.sh          # the Helm chart on a kind cluster; needs Docker, kubectl, helm
 test/e2e/changes.sh      # changes to rules on a real Prometheus, Gitea and Grafana; needs Docker, jq
 test/e2e/loki.sh         # rules in LogQL replayed against a real Loki and Grafana; needs Docker, jq
+test/e2e/rendered.sh     # rules a chart renders, from a real Gitea, replayed and followed; needs Docker, jq, helm, yq
 test/a11y/axe.sh         # axe-core (WCAG 2.2 AA) over every page, in a headless Chromium; needs Docker
 ```
 
