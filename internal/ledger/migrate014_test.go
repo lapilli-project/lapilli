@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -37,7 +38,7 @@ func TestMigrate014(t *testing.T) {
 	}
 	before := excused(t, l, base, base.AddDate(0, 0, 14), time.UTC)
 	// Back to 013: what 014 made, and what came after it.
-	for _, q := range append(append(undo016, undo015...), "DROP TABLE grants", "ALTER TABLE windows DROP COLUMN team_id", "ALTER TABLE windows DROP COLUMN repeat_on", "PRAGMA user_version = 13") {
+	for _, q := range append(append(append(slices.Clone(undo017), undo016...), undo015...), "DROP TABLE grants", "ALTER TABLE windows DROP COLUMN team_id", "ALTER TABLE windows DROP COLUMN repeat_on", "PRAGMA user_version = 13") {
 		if _, err := l.w.ExecContext(ctx, q); err != nil {
 			t.Fatal(q, err)
 		}

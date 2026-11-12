@@ -47,6 +47,9 @@ type Tally struct {
 	White   int
 	Refired int
 	Excused int
+	// Deploy are the firings judged that came during a deploy, and
+	// DeployWhite those of them that caught something.
+	Deploy, DeployWhite int
 }
 
 // Black is how many firings caught nothing.
@@ -54,13 +57,13 @@ func (t Tally) Black() int { return t.Firings - t.White }
 
 // Days are each rule's stones by day, from day to day.
 func (l *Ledger) Days(ctx context.Context, from, to int64) ([]Tally, error) {
-	return l.tallies(ctx, "SELECT day, rule_id, firings, white, refired, excused FROM days WHERE day >= ? AND day <= ? ORDER BY day, rule_id", from, to)
+	return l.tallies(ctx, "SELECT day, rule_id, firings, white, refired, excused, deploy, deploy_white FROM days WHERE day >= ? AND day <= ? ORDER BY day, rule_id", from, to)
 }
 
 // Weeks are each rule's stones by week, from the week starting on one
 // Monday to that starting on another.
 func (l *Ledger) Weeks(ctx context.Context, from, to int64) ([]Tally, error) {
-	return l.tallies(ctx, "SELECT week, rule_id, firings, white, refired, excused FROM weeks WHERE week >= ? AND week <= ? ORDER BY week, rule_id", from, to)
+	return l.tallies(ctx, "SELECT week, rule_id, firings, white, refired, excused, deploy, deploy_white FROM weeks WHERE week >= ? AND week <= ? ORDER BY week, rule_id", from, to)
 }
 
 func (l *Ledger) tallies(ctx context.Context, q string, from, to int64) ([]Tally, error) {
@@ -72,7 +75,7 @@ func (l *Ledger) tallies(ctx context.Context, q string, from, to int64) ([]Tally
 	var out []Tally
 	for rows.Next() {
 		var t Tally
-		if err := rows.Scan(&t.At, &t.Rule, &t.Firings, &t.White, &t.Refired, &t.Excused); err != nil {
+		if err := rows.Scan(&t.At, &t.Rule, &t.Firings, &t.White, &t.Refired, &t.Excused, &t.Deploy, &t.DeployWhite); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -180,6 +183,8 @@ type Firing struct {
 	White, Refired bool
 	// Excused is a firing a quiet window excused: neither white nor black.
 	Excused bool
+	// Deploy is a firing that came during a deploy of what it is about.
+	Deploy bool
 }
 
 // FiringQuery picks firings: those that started in [From, To), of one rule
@@ -190,13 +195,15 @@ type FiringQuery struct {
 	Rule     string
 	Black    bool
 	Excused  bool // only those a quiet window excused
+	Refired  bool // only those that re-fired
+	Deploy   bool // only those that came during a deploy
 	Before   int64
 	Limit    int
 }
 
 // Firings are the firings a query picks.
 func (l *Ledger) Firings(ctx context.Context, q FiringQuery) ([]Firing, error) {
-	sq := `SELECT f.id, r.name, s.id, s.labels, f.start_at, f.end_at, f.white, f.refired, f.excused
+	sq := `SELECT f.id, r.name, s.id, s.labels, f.start_at, f.end_at, f.white, f.refired, f.excused, f.deploy
 		FROM firings f JOIN series s ON s.id = f.series_id JOIN rules r ON r.id = f.rule_id
 		WHERE f.start_at >= ? AND f.start_at < ?`
 	args := []any{q.From.Unix(), q.To.Unix()}
@@ -209,6 +216,12 @@ func (l *Ledger) Firings(ctx context.Context, q FiringQuery) ([]Firing, error) {
 	}
 	if q.Excused {
 		sq += " AND f.excused = 1"
+	}
+	if q.Refired {
+		sq += " AND f.refired = 1 AND f.excused = 0"
+	}
+	if q.Deploy {
+		sq += " AND f.deploy = 1"
 	}
 	if q.Before > 0 {
 		sq += " AND (f.start_at, f.id) < (SELECT start_at, id FROM firings WHERE id = ?)"
@@ -230,7 +243,7 @@ func (l *Ledger) Firings(ctx context.Context, q FiringQuery) ([]Firing, error) {
 		var sid, start int64
 		var end sql.NullInt64
 		var labels string
-		if err := rows.Scan(&f.ID, &f.Rule, &sid, &labels, &start, &end, &f.White, &f.Refired, &f.Excused); err != nil {
+		if err := rows.Scan(&f.ID, &f.Rule, &sid, &labels, &start, &end, &f.White, &f.Refired, &f.Excused, &f.Deploy); err != nil {
 			return nil, err
 		}
 		if f.Labels, err = l.labels(sid, labels); err != nil {
@@ -248,9 +261,9 @@ func (l *Ledger) FiringByID(ctx context.Context, id int64) (Firing, error) {
 	var sid, start int64
 	var end sql.NullInt64
 	var labels string
-	err := l.r.QueryRowContext(ctx, `SELECT f.id, r.name, s.id, s.labels, f.start_at, f.end_at, f.white, f.refired, f.excused
+	err := l.r.QueryRowContext(ctx, `SELECT f.id, r.name, s.id, s.labels, f.start_at, f.end_at, f.white, f.refired, f.excused, f.deploy
 		FROM firings f JOIN series s ON s.id = f.series_id JOIN rules r ON r.id = f.rule_id WHERE f.id = ?`, id).
-		Scan(&f.ID, &f.Rule, &sid, &labels, &start, &end, &f.White, &f.Refired, &f.Excused)
+		Scan(&f.ID, &f.Rule, &sid, &labels, &start, &end, &f.White, &f.Refired, &f.Excused, &f.Deploy)
 	if err == sql.ErrNoRows {
 		return f, ErrNotFound
 	}
@@ -323,13 +336,13 @@ func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Optio
 		q    string
 		a, b int64
 	}
-	byFirings := `SELECT rule_id, count(*) - sum(excused), sum(white), sum(refired * (1 - excused)), sum(excused) FROM firings
+	byFirings := `SELECT rule_id, count(*) - sum(excused), sum(white), sum(refired * (1 - excused)), sum(excused), sum(deploy), sum(deploy * white) FROM firings
 		WHERE start_at >= ? AND start_at < ? GROUP BY rule_id`
 	parts := []part{{byFirings, from.Unix(), to.Unix()}}
 	if d1 < d2 {
 		parts = []part{
 			{byFirings, from.Unix(), l.midnight(d1)},
-			{"SELECT rule_id, sum(firings), sum(white), sum(refired), sum(excused) FROM days WHERE day >= ? AND day < ? GROUP BY rule_id", d1, d2},
+			{"SELECT rule_id, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white) FROM days WHERE day >= ? AND day < ? GROUP BY rule_id", d1, d2},
 			{byFirings, l.midnight(d2), to.Unix()},
 		}
 	}
@@ -343,8 +356,8 @@ func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Optio
 		}
 		for rows.Next() {
 			var id int64
-			var n, white, again, excused int
-			if err := rows.Scan(&id, &n, &white, &again, &excused); err != nil {
+			var n, white, again, excused, deploy, deployWhite int
+			if err := rows.Scan(&id, &n, &white, &again, &excused, &deploy, &deployWhite); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -354,6 +367,8 @@ func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Optio
 			rr.Black += n - white
 			rr.Refired += again
 			rr.Excused += excused
+			rr.DuringDeploys += deploy
+			rr.DeploysCaught += deployWhite
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {

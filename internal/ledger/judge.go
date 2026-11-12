@@ -243,23 +243,28 @@ func (l *Ledger) cover(t *txn, lo, hi int64, o verdict.Options) (int64, int64, e
 
 // stones gives each firing that started in [lo, hi] its stones: white when
 // it catches an incident, refired when it came soon after the same alert
-// last resolved.
+// last resolved; and marks those that came during a deploy.
 func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options) error {
 	quiet, err := l.windowsMeeting(t.ctx, t, lo, hi)
 	if err != nil {
 		return err
 	}
 	excuses := Excusing(quiet, unix(lo), unix(hi))
-	rows, err := t.QueryContext(t.ctx, `SELECT f.id, f.series_id, r.name, f.start_at, f.end_at, f.white, f.refired, f.excused, s.labels
+	deployed, err := l.deploysMeeting(t.ctx, t, lo, hi, o.DeployAfter)
+	if err != nil {
+		return err
+	}
+	deploying := during(deployed, o.DeployAfter)
+	rows, err := t.QueryContext(t.ctx, `SELECT f.id, f.series_id, r.name, f.start_at, f.end_at, f.white, f.refired, f.excused, f.deploy, s.labels
 		FROM firings f JOIN series s ON s.id = f.series_id JOIN rules r ON r.id = f.rule_id
 		WHERE f.start_at >= ? AND f.start_at <= ? ORDER BY f.series_id, f.start_at, f.id`, lo, hi)
 	if err != nil {
 		return err
 	}
 	type row struct {
-		id, series            int64
-		f                     firing.Firing
-		white, again, excused bool
+		id, series                    int64
+		f                             firing.Firing
+		white, again, excused, deploy bool
 	}
 	var fs []row
 	for rows.Next() {
@@ -267,7 +272,7 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		var start int64
 		var end sql.NullInt64
 		var text string
-		if err := rows.Scan(&r.id, &r.series, &r.f.Rule, &start, &end, &r.white, &r.again, &r.excused, &text); err != nil {
+		if err := rows.Scan(&r.id, &r.series, &r.f.Rule, &start, &end, &r.white, &r.again, &r.excused, &r.deploy, &text); err != nil {
 			rows.Close()
 			return err
 		}
@@ -287,7 +292,7 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		return err
 	}
 	defer prev.Close()
-	up, err := t.PrepareContext(t.ctx, "UPDATE firings SET white = ?, refired = ?, excused = ? WHERE id = ?")
+	up, err := t.PrepareContext(t.ctx, "UPDATE firings SET white = ?, refired = ?, excused = ?, deploy = ? WHERE id = ?")
 	if err != nil {
 		return err
 	}
@@ -305,11 +310,13 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		again := verdict.Refired(last, r.f.Start, o)
 		// A firing that caught something counts, quiet window or not.
 		excused := !white && excuses(r.f)
+		// During a deploy is a mark beside the stones, of what is judged.
+		deploy := !excused && deploying(r.f)
 		last = r.f.End
-		if white == r.white && again == r.again && excused == r.excused {
+		if white == r.white && again == r.again && excused == r.excused && deploy == r.deploy {
 			continue
 		}
-		if _, err := up.ExecContext(t.ctx, white, again, excused, r.id); err != nil {
+		if _, err := up.ExecContext(t.ctx, white, again, excused, deploy, r.id); err != nil {
 			return err
 		}
 	}
@@ -392,8 +399,8 @@ func (l *Ledger) tally(t *txn, lo, hi int64) error {
 		return err
 	}
 	// An excused firing is counted apart: neither white nor black.
-	if _, err := t.ExecContext(t.ctx, `INSERT INTO days (day, rule_id, firings, white, refired, excused)
-		SELECT day, rule_id, count(*) - sum(excused), sum(white), sum(refired * (1 - excused)), sum(excused) FROM firings
+	if _, err := t.ExecContext(t.ctx, `INSERT INTO days (day, rule_id, firings, white, refired, excused, deploy, deploy_white)
+		SELECT day, rule_id, count(*) - sum(excused), sum(white), sum(refired * (1 - excused)), sum(excused), sum(deploy), sum(deploy * white) FROM firings
 		WHERE start_at >= ? AND start_at < ? GROUP BY day, rule_id`, l.midnight(d1), l.midnight(d2+1)); err != nil {
 		return err
 	}
@@ -408,8 +415,8 @@ func (l *Ledger) tally(t *txn, lo, hi int64) error {
 	if _, err := t.ExecContext(t.ctx, "DELETE FROM weeks WHERE week >= ? AND week <= ?", w1, w2); err != nil {
 		return err
 	}
-	_, err := t.ExecContext(t.ctx, `INSERT INTO weeks (week, rule_id, firings, white, refired, excused)
-		SELECT day - (day + 3) % 7, rule_id, sum(firings), sum(white), sum(refired), sum(excused) FROM days
+	_, err := t.ExecContext(t.ctx, `INSERT INTO weeks (week, rule_id, firings, white, refired, excused, deploy, deploy_white)
+		SELECT day - (day + 3) % 7, rule_id, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white) FROM days
 		WHERE day >= ? AND day <= ? GROUP BY 1, 2`, w1, w2+6)
 	return err
 }
