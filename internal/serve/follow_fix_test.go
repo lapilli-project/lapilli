@@ -259,7 +259,9 @@ func TestFollowBesideLoki(t *testing.T) {
 	hist := t.TempDir()
 	v := func(forDur string) string { return strings.Replace(ruleFile, "for: 2m", "for: "+forDur, 1) }
 	writeVersion(t, hist, now.Add(-90*time.Hour), v("2m"))
-	s, _ := server(t, func(c *Config) { c.RulesPath, c.RulesHistory, c.Loki, c.LokiRules = "", hist, "http://loki:3100", lokiDir })
+	s, _ := server(t, func(c *Config) {
+		c.RulesPath, c.RulesHistory, c.Loki, c.LokiRules = "", hist, "http://loki:3100", lokiDir
+	})
 	if err := s.start(ctx); err != nil {
 		t.Fatal(err)
 	}
