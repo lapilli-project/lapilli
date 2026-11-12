@@ -59,6 +59,11 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       with those firings and without (docs/design/noc.md)
   --deploy-after DUR  how long after a deploy a firing still counts as during
                       it (default 10m; a day at most)
+  --runbook-base URL  an https URL a runbook that is a path in the rules'
+                      repository (docs/runbooks/disk.md#full) is a link
+                      under, such as
+                      https://git.example.com/org/monitoring/blob/main/:
+                      the rule's page links to it
   --lead, --match, --refire, --noisy-firings, --noisy-precision
                       the defaults; the UI can change them
 
@@ -498,6 +503,10 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			cfg.SourceQuiet, err = dur(time.Hour)
 		case "--deploys":
 			cfg.Deploys = val
+		case "--runbook-base":
+			if err = serve.CheckRunbookBase(val); err == nil {
+				cfg.RunbookBase = val
+			}
 		case "--deploy-after":
 			deployAfter, err = dur(0)
 			if err == nil && deployAfter > ledger.MaxDeployAfter {

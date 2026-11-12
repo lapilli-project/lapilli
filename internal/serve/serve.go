@@ -75,8 +75,11 @@ type Config struct {
 	// long after one a firing still came during it.
 	Deploys string
 	// RunbookAnnotations are the annotations a rule's runbook is read
-	// from, the first set: nil for content.RunbookAnnotations.
+	// from, the first set: nil for content.RunbookAnnotations. RunbookBase
+	// is an https URL a runbook that is a path in the rules' repository is
+	// a link under (content.RepoLink).
 	RunbookAnnotations []string
+	RunbookBase        string
 
 	// Options are the judging settings from the command line; the UI can
 	// change Lead, Match, RefireWithin and the noisy thresholds.

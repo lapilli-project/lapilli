@@ -18,6 +18,7 @@ import (
 	"text/template"
 	"text/template/parse"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"lapilli.dev/internal/rules"
@@ -99,6 +100,11 @@ func Runbook(s rules.Says, names []string) string {
 		if v := strings.TrimSpace(s.Annotations[n]); v != "" {
 			return s.Annotations[n]
 		}
+	}
+	// Past the annotations kept, a runbook named may have been cut: the
+	// source's own, runbook_url or runbook, which is always read.
+	if s.AnnotationsCut {
+		return s.Runbook
 	}
 	return ""
 }
@@ -440,18 +446,81 @@ func Unprintable(r rune) bool {
 }
 
 // repoPath is a runbook kept beside the rules, as a path in their
-// repository, with an anchor or not: docs/runbooks/disk.md#full. A path is
-// a file's or a directory's (a slash, or a file's extension), so a word
-// alone isn't taken for one.
+// repository, with an anchor or not: docs/runbooks/disk.md#full.
 var repoPath = regexp.MustCompile(`^/?[\w.~-]+(?:/[\w.~%-]+)*/?(?:#[\w.~%:/-]*)?$`)
 
-// RepoPath reports whether a runbook is a path in a repository.
+// fileName is a file's name with its extension: runbook.md.
+var fileName = regexp.MustCompile(`^[\w~-][\w.~-]*\.[A-Za-z0-9]+$`)
+
+// placeholders are what teams write where a runbook would go, which no
+// path is, in any letter case, a full stop after them or not.
+var placeholders = []string{"n/a", "na", "n.a", "none", "null", "nil", "tbd", "tba", "todo", "fixme", "wip", "later", "unknown", "xxx", "-", "?"}
+
+// RepoPath reports whether a runbook is a path in a repository: a file's
+// name with its extension, or names joined by a slash, at least one of
+// them with a letter or a digit, before any anchor; no "..", and nothing
+// teams write in a runbook's place (N/A, TODO, ...).
 func RepoPath(link string) bool {
 	if !repoPath.MatchString(link) || strings.Contains(link, "//") {
 		return false
 	}
-	path, _, anchor := strings.Cut(link, "#")
-	return strings.Contains(path, "/") || anchor || strings.Contains(path[strings.LastIndex(path, "/")+1:], ".")
+	path, _, _ := strings.Cut(link, "#")
+	if slices.Contains(placeholders, strings.ToLower(strings.TrimRight(path, "."))) {
+		return false
+	}
+	var names []string
+	for _, n := range strings.Split(path, "/") {
+		switch {
+		case n == "..":
+			return false
+		case n != "":
+			names = append(names, n)
+		}
+	}
+	alnum := slices.ContainsFunc(names, func(n string) bool {
+		return strings.ContainsFunc(n, func(r rune) bool { return r < 128 && (unicode.IsLetter(r) || unicode.IsDigit(r)) })
+	})
+	if !alnum {
+		return false
+	}
+	// Names joined by a slash, a directory's (docs/), or a file's name.
+	return len(names) > 1 || strings.Contains(path, "/") || fileName.MatchString(names[0])
+}
+
+// CheckBase refuses a base for runbooks in the rules' repository
+// (--runbook-base) that isn't an https URL with a host, or that has a
+// user name, a query or an anchor.
+func CheckBase(base string) error {
+	u, err := url.Parse(base)
+	switch {
+	case err != nil, u.Scheme != "https", u.Host == "", u.Opaque != "":
+		return fmt.Errorf("--runbook-base %q: want an https URL, such as https://git.example.com/org/monitoring/blob/main/", base)
+	case u.User != nil:
+		return fmt.Errorf("--runbook-base %q: a user name in a link makes it look like one site's and go to another's", base)
+	case u.RawQuery != "" || u.Fragment != "":
+		return fmt.Errorf("--runbook-base %q: no query or anchor: a runbook's path and anchor go after it", base)
+	}
+	return nil
+}
+
+// RepoLink is a runbook that is a path in the rules' repository as a link
+// under base (CheckBase's), on base's host; "" when it isn't one, or base
+// is "".
+func RepoLink(base, runbook string) string {
+	if base == "" || !RepoPath(runbook) {
+		return ""
+	}
+	b, err := url.Parse(strings.TrimSuffix(base, "/") + "/")
+	if err != nil || CheckBase(base) != nil {
+		return ""
+	}
+	path, anchor, _ := strings.Cut(strings.TrimLeft(runbook, "/"), "#")
+	u := b.JoinPath(path)
+	u.Fragment = anchor
+	if u.Scheme != "https" || u.Host != b.Host || u.User != nil {
+		return ""
+	}
+	return u.String()
 }
 
 // linkOK is whether a runbook link is an http or https URL, or a path in a
@@ -482,7 +551,9 @@ func linkOK(link, lang string) (ok, known bool) {
 	if err != nil {
 		return false, true
 	}
-	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != "", true
+	// A user name makes a link look like one site's and go to another's:
+	// https://wiki.example.com@evil.example/ is evil.example's.
+	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && u.User == nil, true
 }
 
 var (

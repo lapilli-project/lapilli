@@ -420,6 +420,10 @@ func countOf(fs []contentFinding) contentCount {
 	return c
 }
 
+// CheckRunbookBase refuses a --runbook-base that isn't an https URL, or has
+// a user name, a query or an anchor.
+func CheckRunbookBase(base string) error { return content.CheckBase(base) }
+
 // saysView is what a rule says, as its page shows it.
 type saysView struct {
 	// Unchecked is why its notification templates weren't checked, in
@@ -434,10 +438,14 @@ type saysView struct {
 }
 
 // saysViewOf is what a rule says, its runbook read from the annotations
-// runbooks names (content.RunbookAnnotations when nil).
-func saysViewOf(says rules.Says, fs []contentFinding, runbooks []string) *saysView {
+// runbooks names (content.RunbookAnnotations when nil), and a path in the
+// rules' repository a link under base, when given.
+func saysViewOf(says rules.Says, fs []contentFinding, runbooks []string, base string) *saysView {
 	says.Runbook = content.Runbook(says, runbooks)
 	v := &saysView{Says: says, RunbookLink: content.Link(says)}
+	if v.RunbookLink == "" {
+		v.RunbookLink = content.RepoLink(base, says.Runbook)
+	}
 	for _, f := range fs {
 		if f.Class == content.Heuristic {
 			v.Guesses = append(v.Guesses, f)
