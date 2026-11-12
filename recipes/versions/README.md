@@ -20,9 +20,10 @@ that isn't a time is refused.
 - **`lapilli serve`** reads it beside `--rules` on a start whose ledger has
   no version yet, so its first backfill replays each day with that day's
   rules. A ledger with versions of its own keeps them and passes the
-  directory over, so the flag can stay. A version that can't be read stops
-  the start, with the ledger as it was; one from after now is passed over,
-  and an empty directory starts with today's rules.
+  directory over, so the flag can stay. A version that can't be read is
+  passed over, saying so, and the one before it stays in effect; one from
+  after now is passed over, and an empty directory starts with today's
+  rules.
 
 ## From git
 
@@ -40,9 +41,12 @@ REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history ./git.sh
 | `OUT` | the directory to write: new, or empty |
 | `RENDER` | optional: a command run in each commit's files that writes the rules on its stdout |
 | `RENDER_PREPARE` | optional: a command run in each commit's files before `RENDER`, for what a commit lacks, such as a chart's dependencies |
-| `UNRENDERED` | `fail` (the default) or `skip`: what to do with a commit that can't be rendered |
+| `UNRENDERED` | `fail` (the default) or `skip`: what to do with a commit that can't be rendered, or read |
 | `MAX` | the most versions written (default 500): commits, or with `DEPLOYS` the deploys that changed the rules |
+| `MAX_TREE_FILES`, `MAX_TREE_BYTES` | the most files (20000) and bytes (256 MiB) a commit is read with: with `RENDER` all of its files, without those `PATHS` names |
 | `AFTER` | optional, as `follow.sh` gives it: only the commits after this one, named after `SINCE` |
+| `LATE` | with `AFTER`, seconds (360): a commit is named no earlier than when the clone's branch first held it, less this |
+| `FOLLOWING` | `1`, as `follow.sh` gives it: never stop on a commit (below) |
 
 - **Which versions.** The rules as they stood at `SINCE`, from the last
   commit that changed `PATHS` before it, then each commit on the branch that
@@ -58,7 +62,18 @@ REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history ./git.sh
   files, and what it writes becomes the version's `rules.yaml`. It runs
   without `TOKEN_FILE` and with a `HOME` of its own. See below.
 - **Links.** A version is files: a commit with a symbolic link among
-  `PATHS`, or in the files `RENDER` reads, is refused.
+  `PATHS`, or with `RENDER` anywhere in it (or left by `RENDER_PREPARE`),
+  can't be read: a link could lead to any file the recipe can read, and
+  `RENDER` read it into what it writes.
+- **As the commit is.** git runs with no configuration but the clone's
+  (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL=/dev/null`,
+  `GIT_ATTR_NOSYSTEM`): an image's own, such as one turning Git LFS on, isn't
+  taken. A commit is read from an empty work tree and index, with their
+  attributes, so its own `.gitattributes` don't leave a file out
+  (`export-ignore`), rewrite one (`export-subst`) or run a filter on it. A
+  commit with more than `MAX_TREE_FILES` files or `MAX_TREE_BYTES` bytes, as
+  `git ls-tree` counts them before anything is written, or one git can't
+  read, can't be read.
 - **A shallow clone** has no history; it says so and writes only the rules as
   they are. Clone the branch whole, or with `--shallow-since` before `SINCE`.
 - It needs `sh` and `git`, reads the clone and changes nothing in it, and
@@ -107,13 +122,14 @@ No `yq` is needed to filter the rendering first. Kustomize is the same:
   beforehand. With a NetworkPolicy, the chart repositories must be reachable
   from where it runs.
 - **A commit that can't be rendered** (`RENDER_PREPARE` or `RENDER` fails,
-  or `RENDER` writes nothing) stops the recipe by default, saying which
-  commit, and nothing is written. `UNRENDERED=skip` passes it over instead,
-  saying which and why, and counting them at the end: the version before
-  stays in effect until the next commit that renders.
+  or `RENDER` writes nothing), or read (above), stops the recipe by
+  default, saying which commit, and nothing is written. `UNRENDERED=skip`
+  passes it over instead, saying which and why, and counting them at the
+  end: the version before stays in effect until the next commit that
+  renders.
 - **The same security** holds: `RENDER_PREPARE` runs as `RENDER` does,
   without `TOKEN_FILE` and with a `HOME` of its own; a commit with a
-  symbolic link among `PATHS` is refused before either runs.
+  symbolic link is refused before either runs.
 
 ## Following the branch
 
@@ -126,6 +142,26 @@ history with no version yet is written whole from `SINCE`. A branch
 force-pushed since goes on from where the two parted. It fetches nothing:
 fetching needs the repository's credentials, which `RENDER` mustn't see, so
 fetch apart from it.
+
+- **It never stops on a commit.** `git.sh` runs following (`FOLLOWING=1`):
+  a commit that can't be rendered or read is passed over, saying why,
+  whatever `UNRENDERED` says; one dated after now is named now; of more than
+  `MAX` new commits, the newest `MAX` are written. `HISTORY/.head` is the
+  commit the last look got to, so one passed over isn't rendered again.
+- **When a commit took effect.** A commit's date is its committer's clock,
+  and a commit can wait in a branch for days before it is merged
+  (fast-forward, rebase): named by its date, it would take effect, and
+  have the hours since judged again, from days before it reached the
+  branch. So a commit is named no earlier than when the clone's branch
+  first held it, by the branch's reflog, less `LATE` (`EVERY` and a minute):
+  a fetch every `EVERY` seconds saw it at most that long after it was
+  pushed. The reflog is written by the fetch, in the clone, which the
+  side running `RENDER` reads only. A commit dated within that keeps its
+  own time; one already in the clone when it was made (the history
+  `git.sh` wrote first) is named by its date, as before.
+- **It keeps what is needed.** With `KEEP` seconds, the versions older than
+  that go after each look, but the newest of them, in effect then; the
+  chart keeps the backfill and a day.
 
 ```sh
 while :; do git -C ~/src/monitoring pull -q --ff-only; sleep 300; done &

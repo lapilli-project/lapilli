@@ -14,9 +14,9 @@
 # up for half an hour 60, 36 and 12 hours ago. The rules' threshold is
 # raised 48 hours ago and lowered again 24 hours ago, so the rules of each
 # day fire 60 and 12 hours ago, and today's would fire all three times.
-# Then a commit dated 14 hours ago raises it again: serve, following,
-# records it from then and replays the hours since, and the firing 12 hours
-# ago goes.
+# Then a commit dated 14 hours ago raises it again: fetched now, it is
+# named when it was fetched, not 14 hours back, so the firing 12 hours ago
+# stands; serve, following, records it from then.
 #
 # Needs Docker, Go, git, curl, jq, helm and yq. Leaves everything up when
 # KEEP is set.
@@ -345,18 +345,26 @@ check "serve: only the rules --rules-select keeps" "$(report | jq -r '[.rules[].
   '^E2E checkout errors,E2E search errors$'
 
 # A commit dated 14 hours ago raises the threshold again: fetched, its
-# version added, recorded from then, and the hours since replayed.
+# version is added, named when the fetch first held it (less every and a
+# minute), not 14 hours back, so the firing 12 hours ago stands. serve
+# records it from then.
 values 50 3
 commit $((now - 14 * h)) "threshold 50 again"
+pushed=$(date -u +%s)
 git -C "$src" push -q "http://ops:$token@${gt#http://}/ops/platform.git" main
 c5=$(git -C "$src" rev-parse HEAD)
 until_true 150 sh -c "grep -rqx '$c5' '$work/history/versions' --include=.commit"
-check "follow: the new commit's version added" "$(cat "$(find "$work/history/versions" -name .commit | sort | tail -1)")" "^$c5$"
+newest=$(find "$work/history/versions" -name .commit | sort | tail -1)
+check "follow: the new commit's version added" "$(cat "$newest")" "^$c5$"
+named=$(basename "$(dirname "$newest")")
+named=$(date -u -d "$(sed -E 's/^(....)(..)(..)T(..)(..)(..)Z$/\1-\2-\3T\4:\5:\6Z/' <<<"$named")" +%s 2>/dev/null ||
+  date -u -j -f %Y%m%dT%H%M%SZ "$named" +%s)
+check "follow: named when it was fetched, not by its date" "$(( named >= pushed - 120 && named <= $(date -u +%s) ))" '^1$'
+check "follow: said why" "$(docker logs "$p-follow" 2>&1)" 'before the branch held it .*: it is named when it was fetched'
 until_true 120 grep -q 'rules changed: a new version, from the history' "$work/serve.log"
-until_true 150 sh -c "curl -sf 'http://127.0.0.1:$port/api/v1/report?from=$(at $((now - 70 * h)))&to=$(at $((now + h)))' |
-  jq -e '.rules[] | select(.rule == \"E2E checkout errors\") | .firings == 1'"
-check "serve: the hours since replayed with it, one firing" "$(report | firings)" '^1$'
-check "serve: said so" "$(cat "$work/serve.log")" 'replaying again from when a version of the rules recorded since took effect'
+# The next run, a minute on, replays from it if it had got past it.
+sleep 70
+check "serve: the firing 12 hours ago stands, two firings" "$(report | firings)" '^2$'
 check "the token-less fetch and follow ran without errors" "$(docker logs "$p-follow" 2>&1 | tail -5)" 'versions added|^$'
 
 if [ "$fail" -ne 0 ]; then

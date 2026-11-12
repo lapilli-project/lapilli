@@ -126,9 +126,10 @@ Where the building differs, or says more:
 - `serve` adds the directory's versions only to a ledger with no version
   at all, not to one with versions from after them: a ledger that has
   begun keeps its own, whole.
-- Every version is read before any is kept, so one that can't be read stops
-  the start with the ledger as it was, and the next start reads them all
-  again. A version from after now, a commit dated ahead of the clock, is
+- Every version is read before any is kept. One that can't be read was
+  first meant to stop the start with the ledger as it was; since 0.31.0 it
+  is passed over, saying so, and the one before it stays in effect (see
+  below). A version from after now, a commit dated ahead of the clock, is
   passed over with a warning; an empty directory, as when git couldn't be
   reached, starts with today's rules. A ledger with versions of its own
   doesn't read the directory at all, so it can't hold a restart up.
@@ -208,6 +209,65 @@ deployed ConfigMaps changed, if lapilli could mount them at all.
   as Argo CD renders it.
 
 Not done: a webhook from the git host, for a commit seen at once rather
-than within a fetch's interval (`every`, 300 s by default); and versions
-pruned from a followed directory, which grows by a version per commit
-that changes `PATHS`.
+than within a fetch's interval (`every`, 300 s by default). When the
+extras beside a followed history (alarms, Loki) change, the version
+recorded for them from now holds the history's rules as they were; a
+commit dated before it, fetched after, is in effect only until then, and
+the next look records it again from now.
+
+### Reviewed before release
+
+Two reviews of the above, one as an attacker and one for correctness,
+found these, all fixed before release:
+
+- **Following stopped for good on one commit.** A version serve couldn't
+  read (a rendering with no rules, ConfigMaps that lost the selected
+  label, a file that doesn't parse) failed every look after it, and
+  follow.sh stopped on a commit that couldn't be rendered, one dated
+  after now, or more than `MAX` new commits. Now serve passes such a
+  version over, once, saying so, the one before it staying in effect, at
+  a first start as when following; the recipes pass a commit over, name
+  one from the future now, and write the newest `MAX`. The chart's
+  `unrendered` is `skip`.
+- **A commit dated back rewrote the ledger.** A commit's date is what its
+  committer's clock said, or when it was written in a branch that waited
+  days to be merged. Named by it, a version took effect from days back,
+  and serve replayed every hour since, up to `--backfill`, judging those
+  hours with rules that weren't in effect then, for each such commit. A
+  version's time is now bounded below by when the clone's branch first
+  held its commit, by the branch's reflog, less the time between fetches
+  and a minute. The bound holds against the repository's content: the
+  reflog is written by the fetch, in a volume the side that renders reads
+  only. It doesn't hold against the git host (one serving a commit late
+  delays it, as any fetch would), and a commit already in the clone when
+  it was made (the history written at the start) is named by its date.
+  An honest commit, pushed and fetched within the bound, keeps its time.
+- **A version recorded during a run was lost.** The watcher records a
+  version while the worker's run, begun before it, replays its hours with
+  the rules before. Each version now notes its time to replay again
+  whatever the cursor, and each note bumps a sequence: a run forgets the
+  note only if nothing was noted since it began, and a check keeps what it
+  found only then. A good version followed by a bad one in one look is
+  noted too, before it is kept.
+- **Checks kept stale rows.** Sending the check back now takes away what
+  it kept from that day on, in the same write.
+- **Following beside alarms or Loki** read each version without them, so
+  the next look recorded the same rules with them from now, and every
+  later commit took effect when seen. Versions are now read with them,
+  and following goes on from the last version followed.
+- **What a commit holds, and what reading it costs.** git.sh read a
+  commit through the render image's git configuration (Git LFS, required,
+  its server the commit's choice) and the commit's own `.gitattributes`
+  (`export-ignore`, `export-subst`); with `RENDER`, a link outside `PATHS`
+  carried what it led to into a rendered rule; one blob named many times
+  in a tree was gigabytes written out, and nothing bounded the volumes,
+  the versions kept or a file of rules read. Now git runs with the
+  clone's configuration alone, from an empty work tree and index; a link
+  anywhere in a rendered commit, or a tree over `MAX_TREE_FILES` or
+  `MAX_TREE_BYTES` by `git ls-tree`, is passed over; the chart's volumes
+  have size limits and its containers ephemeral-storage limits; follow.sh
+  takes away versions older than the backfill and a day; and a file of
+  rules is read 16 MiB at most.
+- **The picker** read a Secret with a top-level `groups` as rules (and
+  kept it whole under a selector), didn't read a `ConfigMapList`, and
+  counted a ConfigMap whose rule file doesn't parse as holding no rules.

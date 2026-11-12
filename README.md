@@ -348,9 +348,10 @@ its own keeps them and passes the directory over, so the flag can stay. In
 the chart, `serve.rulesHistory` clones the repository the rules are kept in
 and runs the recipe in an init container on each start; when git can't be
 reached, it leaves the directory empty rather than hold the pod up, and
-`serve` starts with today's rules. A version that can't be read stops the
-start, with the ledger as it was, and says which; a version from after now,
-a commit dated ahead of the clock, is passed over, and so is the whole
+`serve` starts with today's rules. A version that can't be read (no rules,
+none `--rules-select` keeps, a file that doesn't parse) is passed over,
+saying which, and the one before it stays in effect; a version from after
+now, a commit dated ahead of the clock, is passed over, and so is the whole
 directory once the ledger has versions of its own. A version is files: one
 holding a link to outside it is refused. With `verdict`, `--rules` beside
 `--rules-history` are the rules as they are now, the newest version.
