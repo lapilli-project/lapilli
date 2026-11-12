@@ -236,8 +236,6 @@ func (p *Proxy) albClaims(ctx context.Context, raw string) (map[string]any, erro
 		return nil, fmt.Errorf("from the identity provider %q, not %q", h.Iss, p.Issuer)
 	case h.Exp == 0 || h.Exp <= now:
 		return nil, errors.New("expired")
-	case !albKid.MatchString(h.Kid):
-		return nil, errors.New("a key id that isn't one")
 	}
 	sig, err := segment(parts[2])
 	if err != nil || len(sig) != 64 {
