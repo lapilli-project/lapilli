@@ -618,6 +618,10 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--changes needs --approvers or --admins: who approves a change, the admins unless --approvers says who")
 	case cfg.Changes && cfg.ReadOnly:
 		err = fmt.Errorf("--changes carries out changes, and --read-only refuses them")
+	case cfg.Changes && f.rulesHistory != "" && len(f.rules) == 0 && len(f.alarms) == 0:
+		// Followed, the rules are versions a recipe wrote, a chart's
+		// rendering often: there is no file of rules to change.
+		err = fmt.Errorf("--changes writes a change to where the rules are kept: followed alone, --rules-history is versions a recipe wrote, often rendered from a chart, with no file to write to. Give --rules, or leave --changes out")
 	case !cfg.Changes && (len(cfg.Approvers) > 0 || cfg.Approvals > 0 || cfg.ChangesToken != "" || cfg.ChangesGrafanaToken != "" ||
 		cfg.ChangesPaused != "" || cfg.ChangesLimits != (serve.Limits{}) || len(cfg.ChangesIn) > 0 || len(cfg.ChangesManaged) > 0 ||
 		cfg.ChangesRulerToken != "" || cfg.ChangesAWSRole != "" || cfg.ChangesAzureClientID != "" ||

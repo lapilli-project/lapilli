@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -118,37 +119,58 @@ func TestRulesHistory(t *testing.T) {
 	}
 }
 
-// A history that can't be read stops the start, and says where.
+// A directory that isn't a history stops a start that doesn't follow it,
+// and says where. A version in it that can't be read (rules that don't
+// parse, none at all) is passed over, saying so, and the one before it
+// stays in effect: one bad commit doesn't stop the start, nor a pod
+// restarted keep stopping on it. Followed, not even a directory that
+// isn't a history stops it: the watcher says so until it is put right.
 func TestRulesHistoryRefused(t *testing.T) {
 	ctx := context.Background()
+	bad := historyDir(t, map[string]string{"last-week": "2m"})
+	s, _ := server(t, func(cfg *Config) { cfg.RulesHistory = bad })
+	if err := s.history(ctx); err == nil || !strings.Contains(err.Error(), "named by when it took effect") || !strings.Contains(err.Error(), "last-week") {
+		t.Errorf("a name that isn't a time: %v", err)
+	}
+	f, _ := server(t, func(cfg *Config) { cfg.RulesPath, cfg.RulesHistory = "", bad })
+	if err := f.history(ctx); err != nil {
+		t.Errorf("followed, a name that isn't a time: %v", err)
+	}
+
+	before, broken, after := now.Add(-100*time.Hour), now.Add(-60*time.Hour), now.Add(-10*time.Hour)
 	for _, c := range []struct {
 		name  string
-		dir   func() string
-		says  string
-		named string
+		write func(dir string)
+		want  []time.Time // the versions kept, from before the ledger (zero) on
 	}{
-		{"a name that isn't a time", func() string {
-			return historyDir(t, map[string]string{"last-week": "2m"})
-		}, "named by when it took effect", "last-week"},
-		{"rules that don't read, after some that do", func() string {
-			dir := historyDir(t, map[string]string{now.Add(-100 * time.Hour).Format(time.RFC3339): "2m", now.Add(-10 * time.Hour).Format(time.RFC3339): "2m"})
-			os.WriteFile(filepath.Join(dir, now.Add(-10*time.Hour).Format(time.RFC3339), "shop.yaml"), []byte("groups: [ {"), 0o644)
-			return dir
-		}, "", now.Add(-10 * time.Hour).Format(time.RFC3339)},
-		{"a version with no rules", func() string {
-			dir := t.TempDir()
-			os.MkdirAll(filepath.Join(dir, "20261030T080000Z"), 0o755)
-			return dir
-		}, "", "20261030T080000Z"},
+		{"rules that don't parse, between two that do", func(dir string) {
+			os.WriteFile(filepath.Join(dir, broken.Format(time.RFC3339), "shop.yaml"), []byte("groups: [ {"), 0o644)
+		}, []time.Time{{}, after}},
+		{"a version with no rules, between two", func(dir string) {
+			os.Remove(filepath.Join(dir, broken.Format(time.RFC3339), "shop.yaml"))
+		}, []time.Time{{}, after}},
+		{"the one in effect when the backfill starts", func(dir string) {
+			os.RemoveAll(filepath.Join(dir, broken.Format(time.RFC3339)))
+			os.WriteFile(filepath.Join(dir, before.Format(time.RFC3339), "shop.yaml"), []byte("groups: [ {"), 0o644)
+			v := filepath.Join(dir, now.Add(-120*time.Hour).Format(time.RFC3339))
+			os.MkdirAll(v, 0o755)
+			os.WriteFile(filepath.Join(v, "shop.yaml"), []byte(strings.Replace(ruleFile, "for: 2m", "for: 3m", 1)), 0o644)
+		}, []time.Time{{}, after}},
 	} {
-		dir := c.dir()
+		dir := historyDir(t, map[string]string{before.Format(time.RFC3339): "2m", broken.Format(time.RFC3339): "30m", after.Format(time.RFC3339): "15m"})
+		c.write(dir)
 		s, _ := server(t, func(cfg *Config) { cfg.RulesHistory = dir })
-		err := s.history(ctx)
-		if err == nil || !strings.Contains(err.Error(), c.says) || !strings.Contains(err.Error(), c.named) || !strings.Contains(err.Error(), "--rules-history") {
+		if err := s.history(ctx); err != nil {
 			t.Errorf("%s: %v", c.name, err)
+			continue
 		}
-		if vs, _ := s.l.Versions(ctx, time.Unix(0, 0), now, false); len(vs) != 0 {
-			t.Errorf("%s: kept %d versions", c.name, len(vs))
+		vs, _ := s.l.Versions(ctx, time.Unix(0, 0), now, false)
+		var got []time.Time
+		for _, v := range vs {
+			got = append(got, v.Since)
+		}
+		if !slices.EqualFunc(got, c.want, func(a, b time.Time) bool { return a.Equal(b) }) {
+			t.Errorf("%s: versions from %v, want %v", c.name, got, c.want)
 		}
 	}
 }

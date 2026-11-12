@@ -210,3 +210,15 @@ func TestRulesSelect(t *testing.T) {
 		}
 	}
 }
+
+// --changes writes a change to where the rules are kept: a followed
+// history alone has no file to write to, and is refused at start.
+func TestChangesFollowedRefused(t *testing.T) {
+	hist := historyOf(t, map[string]string{"2026-10-01T10:00:00Z": "2m"})
+	var errs strings.Builder
+	args := []string{"serve", "--rules-history", hist, "--prometheus", "http://x", "--changes", "--user-header", "X-Forwarded-Email", "--admins", "ana@example.com",
+		"--ledger", t.TempDir(), "--listen", "127.0.0.1:0"}
+	if code := run(args, io.Discard, &errs); code != 2 || !strings.Contains(errs.String(), "followed alone, --rules-history is versions a recipe wrote") {
+		t.Errorf("exit %d:\n%s", code, errs.String())
+	}
+}

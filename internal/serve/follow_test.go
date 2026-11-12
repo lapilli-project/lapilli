@@ -71,7 +71,7 @@ func TestFollow(t *testing.T) {
 	if len(vs) != 3 || !vs[2].Since.Equal(lowered) {
 		t.Fatalf("versions %+v", vs)
 	}
-	if again, err := s.l.AgainFrom(ctx); err != nil || !again.Equal(lowered) {
+	if again, _, err := s.l.AgainFrom(ctx); err != nil || !again.Equal(lowered) {
 		t.Errorf("again from %v %v, want %v", again, err, lowered)
 	}
 	if latest, _, _ := s.l.Latest(ctx); latest.ID != vs[2].ID {
@@ -81,7 +81,7 @@ func TestFollow(t *testing.T) {
 	if fs := searchFirings(t, s); len(fs) != 15 {
 		t.Errorf("%d firings of the search alert, want 15: the five since %s replayed again", len(fs), lowered)
 	}
-	if again, _ := s.l.AgainFrom(ctx); !again.IsZero() {
+	if again, _, _ := s.l.AgainFrom(ctx); !again.IsZero() {
 		t.Errorf("still to replay again from %v", again)
 	}
 
@@ -137,7 +137,7 @@ func TestFollowBounds(t *testing.T) {
 	if err := s.look(ctx, new(string)); err != nil {
 		t.Fatal(err)
 	}
-	if again, err := s.l.AgainFrom(ctx); err != nil || !again.Equal(now.Add(-s.cfg.Backfill)) {
+	if again, _, err := s.l.AgainFrom(ctx); err != nil || !again.Equal(now.Add(-s.cfg.Backfill)) {
 		t.Errorf("again from %v %v, want --backfill's start", again, err)
 	}
 }

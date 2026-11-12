@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -73,6 +74,12 @@ func (s *Server) checkReplay(ctx context.Context) error {
 	if err != nil || cursor.IsZero() {
 		return err
 	}
+	// A version of the rules recorded while it checks (a followed history)
+	// sends the check back; what it found meanwhile isn't kept.
+	_, seq, err := s.l.AgainFrom(ctx)
+	if err != nil {
+		return err
+	}
 	done, err := s.l.CheckedTo(ctx)
 	if err != nil {
 		return err
@@ -108,7 +115,9 @@ func (s *Server) checkReplay(ctx context.Context) error {
 			}
 			return err
 		}
-		if err := s.checkDay(ctx, known, names, a, b, w); err != nil {
+		if err := s.checkDay(ctx, known, names, a, b, w, seq); errors.Is(err, ledger.ErrAgain) {
+			return nil // the next round checks again from where it was sent back
+		} else if err != nil {
 			return err
 		}
 		day++
@@ -172,9 +181,9 @@ func (s *Server) checkSeries(known []rules.Rule) []string {
 }
 
 // checkDay sets the day [a, b) beside what really fired, and keeps it.
-func (s *Server) checkDay(ctx context.Context, known []rules.Rule, names map[string][]string, a, b time.Time, w time.Duration) error {
+func (s *Server) checkDay(ctx context.Context, known []rules.Rule, names map[string][]string, a, b time.Time, w time.Duration, seq int64) error {
 	if len(known) == 0 {
-		return s.l.SkipCheck(ctx, b)
+		return s.l.SkipCheck(ctx, b, seq)
 	}
 	s.status.set("setting the replay beside what really fired, %s", a.In(s.cfg.Loc).Format("2006-01-02"))
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
@@ -303,7 +312,7 @@ func (s *Server) checkDay(ctx context.Context, known []rules.Rule, names map[str
 		}
 	}
 	c.Elsewhere = keep
-	if err := s.l.PutCheck(context.WithoutCancel(ctx), a, c, names, b); err != nil {
+	if err := s.l.PutCheck(context.WithoutCancel(ctx), a, c, names, b, seq); err != nil {
 		return err
 	}
 	// Told only for a day just checked: a first start's weeks of backfill
