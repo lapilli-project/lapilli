@@ -1,13 +1,34 @@
 {{- if eq .Values.mode "serve" }}
+{{- $s := .Values.serve }}
+{{- $svc := $s.service }}
+{{- $type := $svc.type | default "ClusterIP" }}
+{{- $outside := ne $type "ClusterIP" }}
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "lapilli.fullname" . }}
   labels:
     {{- include "lapilli.labels" . | nindent 4 }}
+  {{- with $svc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
-  # Inside the cluster only: lapilli serve has no sign-in of its own.
-  type: ClusterIP
+  # Inside the cluster unless serve.service.type says otherwise: then the
+  # UI's port alone, which signs people in, and the rest on -internal.
+  type: {{ $type }}
+  {{- if eq $type "LoadBalancer" }}
+  {{- with $svc.loadBalancerClass }}
+  loadBalancerClass: {{ . | quote }}
+  {{- end }}
+  {{- with $svc.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  {{- if and $outside $svc.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ $svc.externalTrafficPolicy }}
+  {{- end }}
   selector:
     app.kubernetes.io/name: {{ .Chart.Name }}
     app.kubernetes.io/instance: {{ .Release.Name }}
@@ -16,24 +37,31 @@ spec:
     - name: http
       port: {{ .Values.serve.port }}
       targetPort: http
-    # /metrics and the health checks, alone: what Prometheus needs.
-    - name: metrics
-      port: {{ .Values.serve.metricsPort }}
-      targetPort: metrics
-    {{- if include "lapilli.incidentsPort" . }}
-    # Incidents, firings, tasks and changes, each with a token, alone: what
-    # jobs copying them, keeping tasks in step with a tracker, and the change
-    # recipes need.
-    - name: incidents
-      port: {{ .Values.serve.incidentsAPI.port }}
-      targetPort: incidents
+      {{- if and $outside $svc.nodePort }}
+      nodePort: {{ $svc.nodePort }}
+      {{- end }}
+    {{- if not $outside }}
+    {{- include "lapilli.innerPorts" . | nindent 4 }}
     {{- end }}
-    {{- if (or .Values.serve.notificationsAPI.tokenSecret.name .Values.serve.notificationsAPI.grafanaSecret.name .Values.serve.notificationsAPI.snsTopics) }}
-    # Notifications as alert managers sent them, alone.
-    - name: notifications
-      port: {{ .Values.serve.notificationsAPI.port }}
-      targetPort: notifications
-    {{- end }}
+{{- if $outside }}
+---
+# The ports beside the UI's, inside the cluster: metrics, and those that
+# take what jobs and alert managers send with a token.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lapilli.fullname" . }}-internal
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    {{- include "lapilli.selector" . | nindent 4 }}
+  ports:
+    {{- include "lapilli.innerPorts" . | nindent 4 }}
+{{- end }}
 ---
 {{- if and .Values.serve.ledger.persistence (not .Values.serve.ledger.existingClaim) }}
 apiVersion: v1

@@ -106,8 +106,44 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (eq .Values.mode "serve") $s.everyoneAdmin $s.readOnly }}
 {{- fail "serve.everyoneAdmin lets everyone change anything, and serve.readOnly no one" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") (or $s.roles.editors $s.roles.admins $s.roles.groupsHeader) (not $s.userHeader) }}
-{{- fail "serve.roles needs serve.userHeader: who is who comes from the proxy that signs people in" }}
+{{- $in := $s.signIn }}
+{{- $signIns := 0 }}
+{{- if $s.userHeader }}{{ $signIns = add1 $signIns }}{{ end }}
+{{- if $in.oidc.issuer }}{{ $signIns = add1 $signIns }}{{ end }}
+{{- if $in.proxyJWT.kind }}{{ $signIns = add1 $signIns }}{{ end }}
+{{- if and (eq .Values.mode "serve") (gt (int $signIns) 1) }}
+{{- fail "serve.userHeader, serve.signIn.oidc and serve.signIn.proxyJWT are three ways to say who people are: give one" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $in.oidc.issuer (not $in.oidc.clientId) }}
+{{- fail "serve.signIn.oidc.clientId: the client lapilli is registered as with the provider" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $in.oidc.issuer (not (include "lapilli.externalURL" .)) }}
+{{- fail "serve.signIn.oidc needs serve.externalURL, or an ingress host or httpRoute hostname to work it out from: the provider sends people back to its /auth/callback" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") (or $in.sessionMaxAge $in.sessionKeySecret.name) (not $in.oidc.issuer) }}
+{{- fail "serve.signIn.sessionMaxAge and sessionKeySecret are serve.signIn.oidc's sessions" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $in.proxyJWT.kind (not (has $in.proxyJWT.kind (list "google-iap" "aws-alb" "jwks"))) }}
+{{- fail "serve.signIn.proxyJWT.kind: google-iap, aws-alb or jwks" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") (or $in.oidc.issuer $in.proxyJWT.kind) $s.everyoneAdmin }}
+{{- fail "serve.everyoneAdmin is for no sign-in: to let everyone signed in change anything, give serve.roles.admins: ['*']" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $s.roles.groupsHeader (not $s.userHeader) }}
+{{- fail "serve.roles.groupsHeader is serve.userHeader's: with serve.signIn, the groups are in serve.signIn.groupsClaim" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") (or $s.roles.editors $s.roles.admins) (eq (int $signIns) 0) }}
+{{- fail "serve.roles needs a sign-in, serve.signIn or serve.userHeader: who is who comes from it" }}
+{{- end }}
+{{- $svc := $s.service }}
+{{- if and (eq .Values.mode "serve") (not (has ($svc.type | default "ClusterIP") (list "ClusterIP" "LoadBalancer" "NodePort"))) }}
+{{- fail "serve.service.type: ClusterIP, LoadBalancer or NodePort" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $s.httpRoute.enabled (not $s.httpRoute.parentRefs) }}
+{{- fail "serve.httpRoute.parentRefs: the Gateway the route attaches to" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") (include "lapilli.exposed" .) (eq (int $signIns) 0) (not $s.exposeWithoutSignIn) }}
+{{- fail "serve.service, serve.ingress or serve.httpRoute serve the UI outside the cluster, where anyone who reaches it reads the ledger: sign people in (serve.signIn.oidc, serve.signIn.proxyJWT, or serve.userHeader behind a proxy that signs them in), or say it is meant with serve.exposeWithoutSignIn" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $s.userHeader (not $s.networkPolicy.enabled) (not $s.networkPolicy.othersKeptOut) }}
 {{- fail "serve.userHeader trusts a header any pod in the cluster could set: enable serve.networkPolicy, with a network plugin that enforces it, so only the sign-in proxy reaches lapilli; or, if something else keeps the rest out (a service mesh's policy), say so with serve.networkPolicy.othersKeptOut" }}
@@ -143,8 +179,8 @@ your own needs from. */ -}}
 {{- fail "serve.firings.tokenSecret is serve.incidentsAPI.tokenSecret: give each its own token, so a job that may copy one can't write the other" }}
 {{- end }}
 {{- $c := $s.changes }}
-{{- if and (eq .Values.mode "serve") $c.enabled (not $s.userHeader) }}
-{{- fail "serve.changes needs serve.userHeader: a change is approved by a person, and the proxy that signs people in says who" }}
+{{- if and (eq .Values.mode "serve") $c.enabled (eq (int $signIns) 0) }}
+{{- fail "serve.changes needs a sign-in, serve.signIn or serve.userHeader: a change is approved by a person, and the sign-in says who" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $c.enabled (not (or $s.roles.editors $s.roles.admins)) }}
 {{- fail "serve.changes needs roles, serve.roles.editors or serve.roles.admins: without them, whoever may change anything is an admin, who could resume changes paused and approve" }}
@@ -421,6 +457,82 @@ the rules and the incidents are, and how to judge. */}}
 {{- end -}}
 
 {{/* The pod's securityContext, the container's, and where it runs. */}}
+{{/* Where people reach the UI: serve.externalURL, or worked out from the
+ingress's first host (https when its tls names it, or names no hosts) or the
+HTTPRoute's first hostname. Hosts with a wildcard name no one place. */}}
+{{- define "lapilli.externalURL" -}}
+{{- $s := .Values.serve -}}
+{{- $ihosts := list -}}
+{{- if $s.ingress.enabled }}{{ range $s.ingress.hosts }}{{ if not (contains "*" (toString .)) }}{{ $ihosts = append $ihosts (toString .) }}{{ end }}{{ end }}{{ end -}}
+{{- $rhosts := list -}}
+{{- if $s.httpRoute.enabled }}{{ range $s.httpRoute.hostnames }}{{ if not (contains "*" (toString .)) }}{{ $rhosts = append $rhosts (toString .) }}{{ end }}{{ end }}{{ end -}}
+{{- if $s.externalURL -}}
+{{- $s.externalURL -}}
+{{- else if $ihosts -}}
+{{- $h := first $ihosts -}}
+{{- $tls := false -}}
+{{- range $s.ingress.tls }}{{ if or (not .hosts) (has $h .hosts) }}{{ $tls = true }}{{ end }}{{ end -}}
+{{- printf "%s://%s" (ternary "https" "http" $tls) $h -}}
+{{- else if $rhosts -}}
+{{- printf "%s://%s" (ternary "https" "http" (ne $s.httpRoute.https false)) (first $rhosts) -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The host names lapilli answers to besides those it always does:
+serve.allowedHosts, the ingress's hosts and the HTTPRoute's hostnames,
+comma-separated. */}}
+{{- define "lapilli.allowedHosts" -}}
+{{- $s := .Values.serve -}}
+{{- $h := list -}}
+{{- range $s.allowedHosts }}{{ $h = append $h (toString .) }}{{ end -}}
+{{- if $s.ingress.enabled }}{{ range $s.ingress.hosts }}{{ if not (contains "*" (toString .)) }}{{ $h = append $h (toString .) }}{{ end }}{{ end }}{{ end -}}
+{{- if $s.httpRoute.enabled }}{{ range $s.httpRoute.hostnames }}{{ if not (contains "*" (toString .)) }}{{ $h = append $h (toString .) }}{{ end }}{{ end }}{{ end -}}
+{{- join "," (uniq $h) -}}
+{{- end -}}
+
+{{/* Whether the UI is served outside the cluster: a LoadBalancer or
+NodePort, an Ingress, or an HTTPRoute. */}}
+{{- define "lapilli.exposed" -}}
+{{- $s := .Values.serve -}}
+{{- if or (ne ($s.service.type | default "ClusterIP") "ClusterIP") $s.ingress.enabled $s.httpRoute.enabled -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/* The Service the ports beside the UI's are on: the release's own, or,
+when that is a LoadBalancer or NodePort serving the UI alone,
+FULLNAME-internal. */}}
+{{- define "lapilli.internalName" -}}
+{{- if ne (.Values.serve.service.type | default "ClusterIP") "ClusterIP" -}}
+{{- include "lapilli.fullname" . }}-internal
+{{- else -}}
+{{- include "lapilli.fullname" . }}
+{{- end -}}
+{{- end -}}
+
+{{/* The ports of serve's Service beside the UI's. */}}
+{{- define "lapilli.innerPorts" -}}
+# /metrics and the health checks, alone: what Prometheus needs.
+- name: metrics
+  port: {{ .Values.serve.metricsPort }}
+  targetPort: metrics
+{{- if include "lapilli.incidentsPort" . }}
+# Incidents, firings, tasks and changes, each with a token, alone: what
+# jobs copying them, keeping tasks in step with a tracker, and the change
+# recipes need.
+- name: incidents
+  port: {{ .Values.serve.incidentsAPI.port }}
+  targetPort: incidents
+{{- end }}
+{{- $n := .Values.serve.notificationsAPI }}
+{{- if or $n.tokenSecret.name $n.grafanaSecret.name $n.snsTopics }}
+# Notifications as alert managers sent them, alone.
+- name: notifications
+  port: {{ $n.port }}
+  targetPort: notifications
+{{- end }}
+{{- end -}}
+
 {{- define "lapilli.podSecurity" -}}
 runAsNonRoot: true
 runAsUser: 65532
