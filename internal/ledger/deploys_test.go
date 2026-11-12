@@ -281,3 +281,19 @@ func TestRefired(t *testing.T) {
 		t.Errorf("before: %+v %v", none, err)
 	}
 }
+
+// Deploys a few hours apart are judged as one span, a week at a time; a
+// day apart, each on its own.
+func TestNear(t *testing.T) {
+	h := int64(3600)
+	got := near([][2]int64{{30 * h, 31 * h}, {0, h}, {4 * h, 5 * h}, {9 * h, 10 * h}, {60 * h, 61 * h}})
+	want := [][2]int64{{0, 10 * h}, {30 * h, 31 * h}, {60 * h, 61 * h}}
+	if len(got) != len(want) {
+		t.Fatalf("%v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("%v, want %v", got, want)
+		}
+	}
+}

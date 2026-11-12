@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -185,14 +186,29 @@ func (l *Ledger) SyncDeploys(ctx context.Context, ds []Deploy, o verdict.Options
 			return err
 		}
 		changed = len(spans) > 0
-		slices.SortFunc(spans, func(a, b [2]int64) int { return int(a[0] - b[0]) })
-		return pend(t, spans)
+		return pend(t, near(spans))
 	})
 	if err != nil || !changed {
 		return changed, err
 	}
 	l.judgeSoon(ctx, o)
 	return true, nil
+}
+
+// near puts spans in order and makes those less than six hours apart one:
+// judging a span counts its days again, so a deploy every few hours is
+// judged a week at a time rather than each on its own.
+func near(spans [][2]int64) [][2]int64 {
+	slices.SortFunc(spans, func(a, b [2]int64) int { return cmp.Compare(a[0], b[0]) })
+	var out [][2]int64
+	for _, s := range spans {
+		if n := len(out); n > 0 && s[0] < out[n-1][1]+6*3600 {
+			out[n-1][1] = max(out[n-1][1], s[1])
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // deployRow is a deploy as kept, and its row.
