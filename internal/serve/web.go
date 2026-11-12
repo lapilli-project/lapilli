@@ -190,9 +190,19 @@ func (s *Server) busy(ctx context.Context) (func(), error) {
 // reach them, and no more.
 func (s *Server) checks(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
+	// Ready once the ledger has a run recorded: at once after a restart,
+	// so a Prometheus that is slow, or down, doesn't keep the UI (and the
+	// sign-in's callback) away from a load balancer for a run's timeout; on
+	// a first start, after the backfill's first day. What is being worked
+	// out is on the pages.
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		if !s.ready.Load() {
-			http.Error(w, "the first run hasn't finished", http.StatusServiceUnavailable)
+			if c, err := s.l.Cursor(r.Context()); err == nil && !c.IsZero() {
+				s.ready.Store(true)
+			}
+		}
+		if !s.ready.Load() {
+			http.Error(w, "no run is recorded yet", http.StatusServiceUnavailable)
 			return
 		}
 		io.WriteString(w, "ok\n")

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/signin/idptest"
 )
@@ -348,5 +349,23 @@ func TestSessionKeyNotInLedger(t *testing.T) {
 	b.h = s2.Handler()
 	if w := b.do("GET", "/api/v1/me", nil); w.Code != http.StatusUnauthorized {
 		t.Errorf("a session across a restart, without a key file: %d", w.Code)
+	}
+}
+
+// /readyz is ready once the ledger has a run recorded, not only once this
+// process finished one: after a restart a Prometheus that hangs doesn't
+// keep the UI out of a load balancer.
+func TestReadyOnceARunIsRecorded(t *testing.T) {
+	s, _ := server(t, nil)
+	h := s.MetricsHandler()
+	if code, _, _ := get(t, h, "/readyz"); code != http.StatusServiceUnavailable {
+		t.Errorf("a new ledger: %d", code)
+	}
+	if err := s.l.Record(context.Background(), ledger.Found{From: now.Add(-time.Hour), To: now,
+		Run: ledger.Run{Kind: "hourly", Started: now, Finished: now}}, s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, _ := get(t, h, "/readyz"); code != 200 {
+		t.Errorf("a run recorded, this process's first not yet done: %d", code)
 	}
 }
