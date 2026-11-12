@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/verdict"
@@ -133,6 +134,42 @@ func TestWork(t *testing.T) {
 	for _, p := range []string{"/tasks", "/tasks?status=all", "/tasks/1", "/windows", "/teams"} {
 		if code, body, _ := get(t, h, p); code != 200 {
 			t.Errorf("%s: %d\n%s", p, code, body)
+		}
+	}
+}
+
+// A team or a comment written through the API is answered as it was
+// kept, as the API reads it back: they were answered as they were sent,
+// a team's name untrimmed, with no time and no author (updated
+// 0001-01-01), where a quiet window or a task was answered as kept.
+func TestWrittenAsKept(t *testing.T) {
+	s, _ := server(t, func(c *Config) { c.UserHeader = "X-Forwarded-Email" })
+	raw := ""
+	if err := s.look(context.Background(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(context.Background(), true)
+	h := s.Handler()
+	for _, c := range []struct{ path, body string }{
+		{"/api/v1/teams", `{"name": " shop ", "rules": "^Shop"}`},
+		{"/api/v1/comments", `{"on": "rule", "key": "Errors", "body": "pages on every deploy"}`},
+	} {
+		code, written := api(t, h, "POST", c.path, c.body)
+		if code != http.StatusCreated {
+			t.Fatalf("%s: %d %s", c.path, code, written)
+		}
+		var w struct {
+			ID      int64     `json:"id"`
+			Name    string    `json:"name"`
+			By      string    `json:"by"`
+			Updated time.Time `json:"updated"`
+		}
+		if err := json.Unmarshal([]byte(written), &w); err != nil {
+			t.Fatal(err)
+		}
+		_, read := api(t, h, "GET", c.path+"/"+itoa(w.ID), "")
+		if written != read || w.By != "bo@example.com" || w.Updated.IsZero() || strings.Contains(c.path, "teams") && w.Name != "shop" {
+			t.Errorf("%s: answered\n%s\nread back\n%s", c.path, written, read)
 		}
 	}
 }

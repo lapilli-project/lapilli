@@ -80,6 +80,36 @@ jobs:
           go-version-file: go.mod
       - run: test/e2e/serve-lb.sh
 
+  e2e-service:
+    # The whole service on kind, as an operations team runs it: a shop
+    # whose errors the test turns on and off, Prometheus, Grafana's alert
+    # rule sending its notifications to Lapilli, the chart's dashboard in
+    # Grafana, Lapilli served at a LoadBalancer with people signed in
+    # through Dex; then a scenario of user impact, a re-fire and a firing
+    # during a deploy, checked through the load balancer, Grafana's API and
+    # a headless Chromium, whose screenshots are kept. Not a required
+    # check: it pulls images and starts a cluster.
+    name: the whole service on kind
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: test/e2e/service.sh
+        env:
+          SHOTS: ${{ runner.temp }}/screenshots
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        if: always()
+        with:
+          name: service-screenshots
+          path: ${{ runner.temp }}/screenshots
+          if-no-files-found: ignore
+          retention-days: 14
+
   e2e-signin:
     # lapilli serve's own sign-in against a real Dex in Docker: the
     # authorization code flow, roles from Dex's groups, bearer tokens, a

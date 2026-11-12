@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -91,10 +92,28 @@ var ErrNewer = errors.New("the ledger was written by a newer lapilli")
 // Open opens the ledger at path, making it if it isn't there, in the time
 // zone its days and weeks are counted in. Opened in another zone than
 // before, it counts them again.
+// fileURI is an absolute path as a file URI, escaped. A path that doesn't
+// start with a slash (C:\ledger on Windows) gets one, so its drive isn't
+// read as the URI's host.
+func fileURI(abs string) url.URL {
+	p := filepath.ToSlash(abs)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return url.URL{Scheme: "file", Path: p}
+}
+
 func Open(ctx context.Context, path string, loc *time.Location) (*Ledger, error) {
 	// A URI, with the path escaped: a # or a ? in a directory's name would
-	// otherwise end the path there, and open another ledger.
-	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
+	// otherwise end the path there, and open another ledger. The path is
+	// made absolute first: a relative one (--ledger's default,
+	// lapilli-ledger) would be written file://lapilli-ledger/..., its first
+	// directory read as the URI's host, which SQLite refuses.
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	u := fileURI(abs)
 	pragmas := "_pragma=busy_timeout(10000)&_pragma=temp_store(MEMORY)&_pragma=foreign_keys(1)"
 	w, err := sql.Open("sqlite", u.String()+"?"+pragmas+
 		"&_pragma=auto_vacuum(INCREMENTAL)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_txlock=immediate")

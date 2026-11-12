@@ -552,6 +552,29 @@ func TestMissed(t *testing.T) {
 	}
 }
 
+// A relative path, as --ledger's default (lapilli-ledger) is, opens a
+// ledger there: written as a URI, its first directory was read as the host
+// (file://lapilli-ledger/ledger.db), and SQLite refused it, so lapilli serve
+// didn't start without an absolute --ledger.
+func TestOpenRelative(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	t.Chdir(dir)
+	for _, path := range []string{filepath.Join("lapilli-ledger", "ledger.db"), "ledger.db", filepath.Join(".", "a#1", "ledger.db")} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		l, err := Open(ctx, path, time.UTC)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		l.Close()
+		if _, err := os.Stat(filepath.Join(dir, path)); err != nil {
+			t.Errorf("%s: no ledger where it was asked for: %v", path, err)
+		}
+	}
+}
+
 // A ledger's path is its own whatever its directory is named: a # or a ?
 // in it used to end the path there, so two ledgers named alike before it
 // were one file, and a % or a space was read as something else.
@@ -586,5 +609,20 @@ func TestOpenPathNamed(t *testing.T) {
 			t.Errorf("%s: opened again, it holds %q", name, got)
 		}
 		l.Close()
+	}
+}
+
+// A path is written as a file URI with its drive, on Windows, in the path,
+// not as the URI's host, and what would end the path escaped.
+func TestFileURI(t *testing.T) {
+	for in, want := range map[string]string{
+		"/var/lib/lapilli/ledger": "file:///var/lib/lapilli/ledger",
+		"/a b/#c?d%e":             "file:///a%20b/%23c%3Fd%25e",
+		"C:/ledgers/lapilli":      "file:///C:/ledgers/lapilli",
+	} {
+		u := fileURI(in)
+		if got := u.String(); got != want {
+			t.Errorf("%s: %s, want %s", in, got, want)
+		}
 	}
 }

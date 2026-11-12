@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -603,18 +604,26 @@ func (s *Server) apiTeams(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiTeam(w http.ResponseWriter, r *http.Request) {
-	ts, err := s.l.Teams(r.Context())
+	t, err := s.teamByID(r.Context(), pathID(r))
 	if err != nil {
 		s.oops(w, r, err)
 		return
 	}
+	writeJSON(w, t)
+}
+
+// teamByID is the team with this ID, as the ledger keeps it.
+func (s *Server) teamByID(ctx context.Context, id int64) (ledger.Team, error) {
+	ts, err := s.l.Teams(ctx)
+	if err != nil {
+		return ledger.Team{}, err
+	}
 	for _, t := range ts {
-		if t.ID == pathID(r) {
-			writeJSON(w, t)
-			return
+		if t.ID == id {
+			return t, nil
 		}
 	}
-	s.oops(w, r, ledger.ErrNotFound)
+	return ledger.Team{}, ledger.ErrNotFound
 }
 
 func (s *Server) apiWindow(w http.ResponseWriter, r *http.Request) {
@@ -659,7 +668,12 @@ func (s *Server) apiPutTeam(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	t.ID = id
+	// The team as kept, as a quiet window's or a task's write answers:
+	// its name trimmed, when and by whom.
+	if t, err = s.teamByID(r.Context(), id); err != nil {
+		s.oops(w, r, err)
+		return
+	}
 	answer(w, r, fmt.Sprintf("/api/v1/teams/%d", id), t)
 }
 
@@ -854,7 +868,11 @@ func (s *Server) apiPutComment(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	c.ID = id
+	// The comment as kept: when, and by whom.
+	if c, err = s.l.CommentByID(r.Context(), id); err != nil {
+		s.oops(w, r, err)
+		return
+	}
 	answer(w, r, fmt.Sprintf("/api/v1/comments/%d", id), c)
 }
 
