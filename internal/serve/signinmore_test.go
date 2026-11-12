@@ -176,9 +176,12 @@ func TestBearerRefusals(t *testing.T) {
 	s.log = slog.New(slog.NewTextHandler(&logs, nil))
 	s.in.warned.Store(false)
 	idp.Mutate = func(c map[string]any) { c["aud"] = "another-client"; c["email"] = "secret-marker@example.com" }
-	call("/api/v1/me", idp.IDToken(claimsOf("x")))
+	refused := idp.IDToken(claimsOf("x"))
+	call("/api/v1/me", refused)
 	idp.Mutate = nil
-	if !strings.Contains(logs.String(), "didn't verify") || strings.Contains(logs.String(), "secret-marker") || strings.Contains(logs.String(), "another-client") {
+	sig := refused[strings.LastIndexByte(refused, '.')+1:]
+	if !strings.Contains(logs.String(), "didn't verify") || strings.Contains(logs.String(), "secret-marker") || strings.Contains(logs.String(), "another-client") ||
+		strings.Contains(logs.String(), sig) {
 		t.Errorf("the log: %s", logs.String())
 	}
 	off, idp3 := oidcServer(t, func(c *Config) { c.OIDC.NoBearer = true })

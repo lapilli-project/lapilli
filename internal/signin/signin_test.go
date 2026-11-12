@@ -97,10 +97,11 @@ func TestOIDCRefusals(t *testing.T) {
 		"no azp, two audiences": func(c map[string]any) {
 			c["aud"] = []any{"lapilli", "other"}
 		},
-		"email not verified": func(c map[string]any) { c["email_verified"] = false },
-		"email unsaid":       func(c map[string]any) { delete(c, "email_verified") },
-		"no email":           func(c map[string]any) { delete(c, "email") },
-		"email not a string": func(c map[string]any) { c["email"] = []any{"ana@example.com"} },
+		"email not verified":    func(c map[string]any) { c["email_verified"] = false },
+		"email unsaid":          func(c map[string]any) { delete(c, "email_verified") },
+		"no email":              func(c map[string]any) { delete(c, "email") },
+		"email not a string":    func(c map[string]any) { c["email"] = []any{"ana@example.com"} },
+		"no time it was issued": func(c map[string]any) { delete(c, "iat") },
 	} {
 		claims := map[string]any{}
 		for k, v := range good {
@@ -697,9 +698,17 @@ func TestPlainNames(t *testing.T) {
 			t.Errorf("%q: %v", n, !want)
 		}
 	}
-	id, err := (Claims{UserClaim: "email", GroupsClaim: "groups"}).Identity(map[string]any{"email": "a@x", "groups": []any{"ops", "ops\u00a0", " ops"}})
+	id, err := (Claims{UserClaim: "email", GroupsClaim: "groups"}).Identity(map[string]any{"email": "a@x", "groups": []any{"ops", "ops\u00a0", " ops", "o\u00a0ps"}})
 	if err != nil || len(id.Groups) != 1 {
 		t.Errorf("groups: %+v %v", id, err)
+	}
+	if !Plain("Ana Lopez") || Plain("Ana\u00a0Lopez") || Plain("Ana\u3000Lopez") || Plain("Ana\u2009Lopez") {
+		t.Error("spacing inside a name")
+	}
+	for _, n := range []string{"ana@example.com\u00a0", "ana\u00a0@example.com", "ana@example.com\u200b"} {
+		if id, err := (Claims{UserClaim: "email"}).Identity(map[string]any{"email": n}); err == nil {
+			t.Errorf("%q taken as %+v", n, id)
+		}
 	}
 }
 
