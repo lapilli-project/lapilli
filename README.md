@@ -663,8 +663,8 @@ listed, not replayed). A rule's runbook is the first of
 alerts) isn't faulted for having none. Templates are parsed, never run, with
 Prometheus's and Grafana's functions stubbed; a function this version
 doesn't know is taken as one a newer Prometheus has. Links are checked to be
-http or https URLs, or paths in the rules' repository
-(`docs/runbooks/disk.md#full`), never visited. The range check counts with
+http or https URLs without a user name, or paths in the rules' repository
+(`docs/runbooks/disk.md#full`; not `N/A` or `TODO`), never visited. The range check counts with
 `--scrape-interval`, or else with those `/api/v1/status/config` gives, when
 it is served: a range over a selector that names its job
 (`rate(x{job="batch"}[3m])`, or `job=~` the longest of the jobs it can be)
@@ -937,8 +937,9 @@ What an operations team measures its alerts by is there too, week by week
 and team by team (docs/design/noc.md): the share of critical firings that
 caught something; firings that re-fired, the alert that did most, and the
 whole weeks with one; firings during deploys of what they are about
-(`--deploys`, from what `recipes/versions/argocd.sh` and `flux.sh` write),
-shown apart, with precision both ways; incidents and impact windows caught,
+(`--deploys`, from what `recipes/versions/argocd.sh` and `flux.sh` write:
+a firing agreeing with a deploy on every label both have), shown apart,
+with precision both ways; incidents and impact windows caught,
 caught only by noisy rules or missed, and the lead of the first alert. The
 rules, a rule's page, the incidents and the overview show them, the digest
 and reports tell them, and `/api/v1/summary` gives them, in a shape that

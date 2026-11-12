@@ -10,61 +10,81 @@ lands: this one goes above it.
 What an operations team asks of its alerts (docs/design/noc.md): re-fires,
 firings during deploys, user impact read as incidents, week by week and team
 by team, in the UI, the digest, `/metrics`, a new summary API and the
-chart's Grafana dashboard. **Ledger schema 017**, after 0.28's 016: a table
-of deploys, a mark on each firing that came during one, counted by day and
-week, and an index of re-fired firings. No change to how a firing is
-judged.
+chart's Grafana dashboard. **Ledger schema 017**, after 0.28's 016: tables
+of deploys and of their label sets (each kept once), a mark on each firing
+that came during one, counted by day and week, and an index of re-fired
+firings. No change to how a firing is judged. Reviewed before release as an
+attacker would and for correctness; what both found is fixed in what is
+described here (docs/design/noc.md, "Settled in review").
 
 #### Added
 
 - **Re-fires, read as a goal.** `/rules` says the share of each rule's
-  firings that re-fired and in how many weeks shown one did, and can be put
-  in order of re-fires (`?sort=refired`); a rule's page has its re-fires
-  week by week and the alerts (label sets) that re-fired most; the overview
-  a tile and a column; the digest and a report's new `refired` section, how
-  many re-fired, of how many rules, the alert that did most, and how many of
-  the last twelve whole weeks had one. `/metrics` adds
-  `lapilli_rule_refired_weeks`, `lapilli_refired_weeks` (everyone's and each
-  team's) and `lapilli_weeks_counted`.
+  firings that re-fired and in how many of the whole weeks shown one did,
+  and can be put in order of re-fires (`?sort=refired`); a rule's page has
+  its re-fires week by week and the alerts (label sets) that re-fired most;
+  the overview a tile and a column; the digest and a report's new `refired`
+  section, how many re-fired, of how many rules, the alert that did most,
+  and how many of the last twelve whole weeks had one. "Whole weeks" is one
+  thing everywhere: neither the week under way nor the one the ledger's
+  first firing fell in, with how many were counted beside it. `/metrics`
+  adds `lapilli_rule_refired_weeks`, `lapilli_refired_weeks` (everyone's and
+  each team's) and `lapilli_weeks_counted`.
 - **Firings during deploys.** `--deploys FILE` (the chart's `serve.deploys`)
   names what was deployed and when, as the histories
-  `recipes/versions/argocd.sh` and `flux.sh` write, each labelled with the
-  service or namespace it deployed, or written down with a start and an end;
-  read again each run. A firing that starts during one, or within
-  `--deploy-after` (10m) of its end, and has the value of a label it names,
-  is marked: judged as ever, shown apart, and precision read with those
-  firings and without, on `/rules` (a column and `?sort=deploys`), a rule's
-  page, the overview, the digest, a report's `deploys` section, `/metrics`
-  (`lapilli_rule_firings_during_deploys`,
+  `recipes/versions/argocd.sh` and `flux.sh` write (regular files beside it
+  or below it), each labelled with the service or namespace it deployed, or
+  written down with a start and an end; read again each run, and kept again
+  only when it or a history changed (sha256). A firing that starts during
+  one, from `--deploy-before` (0) before its start to `--deploy-after` (10m)
+  after its end, and agrees with it on every label both have, one at least
+  (a namespace's own alert during a service's deploy in it, not another
+  service's), is marked: judged as ever, shown apart, and precision read
+  with those firings and without, on `/rules` (a column and
+  `?sort=deploys`), a rule's page, the overview, the digest, a report's
+  `deploys` section, `/metrics` (`lapilli_rule_firings_during_deploys`,
   `lapilli_rule_caught_during_deploys`,
-  `lapilli_serve_deploys_last_timestamp_seconds`) and the summary.
+  `lapilli_serve_deploys_last_timestamp_seconds`,
+  `lapilli_serve_deploys_read_timestamp_seconds`) and the summary. Bounded:
+  50,000 deploys, 8 MB of labels in all, none starting more than an hour
+  after the file is read. Without `--deploys`, a ledger that keeps deploys
+  says so on the status (a file of `deploys: []` takes them away).
 - **Impact windows read as incidents.** `/incidents` picks written incidents
   or windows `--impact` found (`?source=`) and a team's (`?team=`), says how
   many were caught, caught only by noisy rules or missed and the median
   lead, and gives each its lead and, for one not caught, the rule that nearly
   caught it. `/metrics` has `lapilli_incident_state` and
-  `lapilli_incident_lead_seconds`, an incident a series, once for each team
-  that owns it.
+  `lapilli_incident_lead_seconds`, an incident a series (the latest 500), and
+  `lapilli_incident_team`, which teams own each (500 series at most). An
+  incident's state is judged by the rules' stones in its week everywhere,
+  `/metrics` and so the dashboard included.
 - **`GET /api/v1/summary`**, and MCP's `summary` tool: for each week and for
   everyone or each team, critical firings and the share that caught
   something (`?critical=`), by severity, re-fires and the alert that
   re-fired most, off hours and asleep, during deploys and precision without
   them, incidents and impact windows caught and missed, and the median lead.
-  `schema: 1`: fields are added to it, never changed.
+  `schema: 1`: fields are added to it, never changed. Bounded: 53 weeks, each
+  team once, 32 critical severities; one of every team, or of more than 53
+  rows, takes the one heavy turn, through the API and MCP alike.
 - **The chart's Grafana dashboard rebuilt** around that evaluation, with
-  variables for the team, severities and the severities counted as critical,
-  and the sources' health: how long since firings were copied in, a
-  notification came, the deploys file's latest deploy, the ledger's runs,
-  the sources gone quiet, failed runs. `test/e2e/dashboard.sh` asks every
-  query of a real Grafana 13.3.1 over a real Prometheus 3.5.0 scraping a
-  real lapilli serve. `/metrics` adds
+  variables for the team, severities and the severities counted as critical
+  (several at once, a rule whose versions' severities differ included), and
+  the sources' health: how long since firings were copied in, a
+  notification came, the deploys file was read, the ledger's runs, the
+  sources gone quiet, failed runs. `test/e2e/dashboard.sh` asks every query
+  of a real Grafana 13.3.1 over a real Prometheus 3.5.0 scraping a real
+  lapilli serve, in CI too. `/metrics` adds
   `lapilli_serve_notifications_last_timestamp_seconds` and
-  `lapilli_serve_source_quiet_seconds`.
+  `lapilli_serve_source_quiet_seconds`. The chart's ServiceMonitor honours
+  lapilli's labels and takes `serve.serviceMonitor.sampleLimit`.
 - **Runbooks where teams keep them.** `--runbook-annotations` (the chart's
   `serve.checkContent.runbookAnnotations`) names the annotations a runbook is
   read from, the first a rule has: `runbook_url`, `runbook`, `playbook_url`
-  and `playbook` by default. A path in the rules' repository, with an anchor
-  or not (`docs/runbooks/disk.md#full`), is a runbook, shown as a path.
+  and `playbook` by default, kept first past 32 annotations. A path in the
+  rules' repository, with an anchor or not (`docs/runbooks/disk.md#full`),
+  is a runbook, shown as a path, or a link under `--runbook-base URL` (the
+  chart's `serve.checkContent.runbookBase`); what teams write in a runbook's
+  place (`N/A`, `TODO.`, `...`) isn't one.
 
 #### Changed
 
@@ -72,7 +92,11 @@ judged.
   carry `team` when a team owns the rule. A query summing by `rule` and
   `severity` reads as before; a rule's series changes when its team does.
 - The content check's `runbook_not_url` says "a runbook that isn't a link: an
-  http or https URL, or a path in a repository"; a path is no longer one.
+  http or https URL, or a path in a repository"; a path is no longer one. A
+  link with a user name (`https://wiki.example.com@evil.example/`) is one,
+  and is never shown as a link.
+- Before its first run, `/metrics` gives no `lapilli_last_run_timestamp_seconds`
+  or `lapilli_serve_cursor_timestamp_seconds` (they were 0, or the year 1).
 
 ## [0.28.1] - 2026-11-12
 
