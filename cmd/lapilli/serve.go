@@ -47,6 +47,18 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       every --watch, beside the rest
   --incidents FILE    read again each run; optional, as incidents can be
                       written down in the UI
+  --deploys FILE      when services and namespaces were deployed, read again
+                      each run: a list of deploys, each the labels that say
+                      what was deployed (service, namespace) and either a
+                      history recipes/versions/argocd.sh or flux.sh wrote
+                      (REVISION TIME a line) or a start and an end. A
+                      firing that starts during one, or within
+                      --deploy-after of its end, and has the value of a
+                      label it names, is marked as during a deploy: judged
+                      as ever, and shown apart, so precision can be read
+                      with those firings and without (docs/design/noc.md)
+  --deploy-after DUR  how long after a deploy a firing still counts as during
+                      it (default 10m; a day at most)
   --lead, --match, --refire, --noisy-firings, --noisy-precision
                       the defaults; the UI can change them
 
@@ -339,8 +351,11 @@ Pages: / (overview), /rules, /incidents, /firings, /settings, /runs, /teams,
 /windows, /tasks, /proposals, /outcomes. API: /api/v1/report?from=&to=,
 /api/v1/incidents, /api/v1/rules, /api/v1/runs, /api/v1/settings,
 /api/v1/teams, /api/v1/notes, /api/v1/windows, /api/v1/tasks,
-/api/v1/comments, /api/v1/proposals, /api/v1/me, /api/v1/outcomes. MCP:
-/mcp. Also /metrics, /healthz, /readyz.
+/api/v1/comments, /api/v1/proposals, /api/v1/me, /api/v1/outcomes,
+/api/v1/summary?from=&to=&team= (each week, for everyone and each team:
+critical firings and the share that caught something, re-fires, off hours,
+during deploys, incidents and impact windows caught and missed, the median
+lead; docs/design/noc.md). MCP: /mcp. Also /metrics, /healthz, /readyz.
 `
 
 func runServe(args []string, stdout, stderr io.Writer) int {
@@ -356,6 +371,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		Digest: serve.Weekly{Day: time.Monday, Hour: 9}, Version: buildVersion(),
 	}
 	timeoutSet := false
+	deployAfter := 10 * time.Minute
 	takes := func(name, val string) (bool, error) {
 		dur := func(min time.Duration) (time.Duration, error) {
 			d, err := serve.ParseDuration(val)
@@ -480,6 +496,13 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			}
 		case "--source-quiet":
 			cfg.SourceQuiet, err = dur(time.Hour)
+		case "--deploys":
+			cfg.Deploys = val
+		case "--deploy-after":
+			deployAfter, err = dur(0)
+			if err == nil && deployAfter > ledger.MaxDeployAfter {
+				err = fmt.Errorf("--deploy-after %s: a day at most", val)
+			}
 		case "--check-differs":
 			n, ratio, ok := strings.Cut(val, "/")
 			var d serve.Differs
@@ -673,7 +696,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	}
 	cfg.RuleRE, cfg.Incidents, cfg.Impact, cfg.ImpactFor = f.ruleRE, f.incidents, f.impact, f.impactFor
 	cfg.Options, cfg.Step, cfg.Loc, cfg.Slack = f.opts, f.step, f.loc, f.slackFile
-	cfg.RunbookAnnotations = f.runbooks
+	cfg.Options.DeployAfter, cfg.RunbookAnnotations = deployAfter, f.runbooks
 	cfg.Late = f.late
 	cfg.OnCall = f.onCall
 	cfg.Timeout, cfg.Parallel = f.timeout, f.parallel

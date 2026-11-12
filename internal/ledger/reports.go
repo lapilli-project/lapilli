@@ -29,7 +29,7 @@ const (
 // ReportSections are what a report can hold, in the order it holds them;
 // DefaultSections, what one holds when none are picked.
 var (
-	ReportSections  = []string{"summary", "noise", "missed", "woken", "notifications", "replay", "sources", "tasks", "content", "suggestions"}
+	ReportSections  = []string{"summary", "noise", "missed", "woken", "refired", "deploys", "notifications", "replay", "sources", "tasks", "content", "suggestions"}
 	DefaultSections = []string{"summary", "noise", "missed", "woken"}
 )
 

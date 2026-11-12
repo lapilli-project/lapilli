@@ -70,6 +70,10 @@ type Config struct {
 	Incidents string // the incidents file, read again each run
 	Impact    string
 	ImpactFor time.Duration
+	// Deploys is the deploys file, read again each run, which owns the
+	// ledger's deploys (docs/design/noc.md); Options.DeployAfter is how
+	// long after one a firing still came during it.
+	Deploys string
 	// RunbookAnnotations are the annotations a rule's runbook is read
 	// from, the first set: nil for content.RunbookAnnotations.
 	RunbookAnnotations []string

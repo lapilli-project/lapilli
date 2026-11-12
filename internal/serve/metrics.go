@@ -39,17 +39,27 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			s.oops(w, r, err)
 			return
 		}
+		// Each rule's team, a label of its series, so a dashboard can
+		// show one team's.
+		own, err := s.owners(ctx)
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
 		sum := map[int64]*verdict.RuleResult{}
 		for _, d := range days {
 			rr := sum[d.Rule]
 			if rr == nil {
-				rr = &verdict.RuleResult{Rule: table[d.Rule].Name, Severity: table[d.Rule].Severity}
+				name := table[d.Rule].Name
+				rr = &verdict.RuleResult{Rule: name, Severity: table[d.Rule].Severity, Team: own.teamOf(name)}
 				sum[d.Rule] = rr
 			}
 			rr.Firings += d.Firings
 			rr.White += d.White
 			rr.Black += d.Black()
 			rr.Refired += d.Refired
+			rr.DuringDeploys += d.Deploy
+			rr.DeploysCaught += d.DeployWhite
 		}
 		rep := &verdict.Report{}
 		noisyRule := map[string]bool{}
@@ -59,11 +69,6 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			rep.Rules = append(rep.Rules, *rr)
 		}
 		// Each rule's by its team's hours, or the server's.
-		own, err := s.owners(ctx)
-		if err != nil {
-			s.oops(w, r, err)
-			return
-		}
 		if sc := own.schedules(o.Hours); !sc.none() {
 			if err := s.l.CountHours(ctx, rep.Rules, s.l.Midnight(today-6), s.l.Midnight(today+1), sc.of); err != nil {
 				s.oops(w, r, err)
@@ -96,6 +101,10 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		}
 		var b bytes.Buffer
 		if err := verdict.Prometheus(&b, rep, last); err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		if err := s.nocMetrics(ctx, &b, rep, own, today); err != nil {
 			s.oops(w, r, err)
 			return
 		}
@@ -148,6 +157,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			for _, src := range srcs {
 				fmt.Fprintf(&b, "lapilli_serve_source_firings{source=%q} %d\n", src.Name, src.Firings)
 			}
+			fmt.Fprintf(&b, "# HELP lapilli_serve_source_quiet_seconds How long a source may go without firings copied in before it is told of (--source-quiet).\n# TYPE lapilli_serve_source_quiet_seconds gauge\nlapilli_serve_source_quiet_seconds %g\n", s.quietAfter().Seconds())
 		}
 		// Notifications as they were sent, once there are any.
 		if p, err := s.notified(ctx); err != nil {

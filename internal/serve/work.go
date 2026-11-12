@@ -89,6 +89,17 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 			s.status.Unlock()
 		}
 	}
+	if s.cfg.Deploys != "" {
+		if err := s.syncDeploys(ctx, o); err != nil {
+			s.fail("deploys", err)
+		} else {
+			s.status.Lock()
+			if s.status.errWhat == "deploys" {
+				s.status.err, s.status.errWhat = "", ""
+			}
+			s.status.Unlock()
+		}
+	}
 	// With no rules to replay, there is nothing to run for but --impact:
 	// what is copied in is judged as it comes.
 	if run && s.running() {
@@ -228,8 +239,9 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		s.count(kind, "ok")
 		s.status.Lock()
 		s.status.took = s.now().Sub(began)
-		// What is wrong with the incidents file is for reading it to clear.
-		if s.status.errWhat != "incidents" {
+		// What is wrong with the incidents or deploys file is for reading
+		// it to clear.
+		if s.status.errWhat != "incidents" && s.status.errWhat != "deploys" {
 			s.status.err, s.status.errWhat = "", ""
 		}
 		s.status.Unlock()
@@ -1537,6 +1549,11 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	if err != nil {
 		return "", err
 	}
+	// Re-fires and firings during deploys (docs/design/noc.md).
+	rf, err := s.refiresOf(ctx, rep, from, to)
+	if err != nil {
+		return "", err
+	}
 	line := ""
 	if len(spare) > 0 {
 		names := make([]string, 0, len(spare))
@@ -1553,7 +1570,7 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	head, rest, _ := strings.Cut(report.String(), "\n\n")
 	var b strings.Builder
 	b.WriteString(head + "\n")
-	for _, x := range []string{line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
+	for _, x := range []string{rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
 		if x != "" {
 			b.WriteString("\n" + x + "\n")
 		}

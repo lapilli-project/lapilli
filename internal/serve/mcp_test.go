@@ -93,10 +93,10 @@ func TestMCP(t *testing.T) {
 		slices.Sort(names)
 		return names
 	}
-	if got := strings.Join(tools(look), " "); got != "firings incidents outcomes overview rule rules" {
+	if got := strings.Join(tools(look), " "); got != "firings incidents outcomes overview rule rules summary" {
 		t.Errorf("a viewer's tools: %s", got)
 	}
-	if got := strings.Join(tools(edit), " "); got != "compare firings incidents outcomes overview rule rules" {
+	if got := strings.Join(tools(edit), " "); got != "compare firings incidents outcomes overview rule rules summary" {
 		t.Errorf("an editor's tools: %s", got)
 	}
 	if ir := edit.InitializeResult(); ir.ServerInfo.Name != "lapilli" || !strings.Contains(ir.Instructions, "white when it caught an incident") {
@@ -213,7 +213,7 @@ groups:
 	off, _ := server(t, func(c *Config) { c.UserHeader = "X-Forwarded-Email"; c.Editors = []string{"ed@example.com"} })
 	ts2 := httptest.NewServer(off.Handler())
 	defer ts2.Close()
-	if got := strings.Join(tools(connect(t, ts2.URL, "ed@example.com")), " "); got != "firings incidents outcomes overview rule rules" {
+	if got := strings.Join(tools(connect(t, ts2.URL, "ed@example.com")), " "); got != "firings incidents outcomes overview rule rules summary" {
 		t.Errorf("without --mcp-compare, an editor's tools: %s", got)
 	}
 

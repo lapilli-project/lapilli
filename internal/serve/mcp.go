@@ -136,6 +136,9 @@ func (s *Server) mcpServer(edit, propose bool) *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{Name: "outcomes", Title: "What Lapilli came to", Annotations: reads,
 		Description: `What Lapilli itself came to. Each reviewed change to the rules beside what came of it: firings predicted, firings measured before and after, fewer firings since, and whether it came out as predicted. The weeks before lapilli serve began beside the latest. Whether incidents are still being written down, and whether people use it. Use it after a change is merged to check it did what was predicted.`},
 		guarded(s.toolOutcomes))
+	mcp.AddTool(srv, &mcp.Tool{Name: "summary", Title: "Week by week, for an operations team", Annotations: reads,
+		Description: `What an operations team measures its alerts by, a row for each week (from Monday, in lapilli serve's time zone) and for everyone or a team: firings and precision; critical firings and the share that caught something; by severity; firings that re-fired (started within --refire of the same alert's last resolving), the rules they were of and the alert that re-fired most; firings off hours and while people slept, and those of them that caught nothing; firings during deploys, those of them that caught something, and precision without them; incidents written down and impact windows found by --impact, caught, caught only by noisy rules, or missed, and the median lead of the first alert of a rule that isn't noisy (positive: before the incident's start). The same as GET /api/v1/summary, whose schema it keeps.`},
+		guarded(s.toolSummary))
 	if edit {
 		mcp.AddTool(srv, &mcp.Tool{Name: "compare", Title: "Replay a proposed change to the rules", Annotations: reads,
 			Description: `Replay a change to the rules before anyone makes it. Give the changed or new rules as a Prometheus rule file (groups, each with a name and rules; 20 rules at most), and the names of rules to take away. A rule given takes the place of the rule in effect with its name and group; where several share both, as rules shows them told apart, "Name [label=value]", the labels given pick one. Any other rule given is added. Copy each expression from rule's definition rather than from a file: it is the expression as replayed, with any scope the rule's source adds. Only the rules that differ are replayed, as they are and as proposed, against the metrics' history over the days before now, and both are judged against the incidents in the ledger. It returns each changed rule's firings, stones and precision before and after, and the incidents caught differently, sooner or later. Nothing is changed. It answers within half a minute, and one comparison runs at a time.`},
@@ -807,6 +810,24 @@ func (s *Server) toolFirings(ctx context.Context, _ *mcp.CallToolRequest, in fir
 
 func (s *Server) toolOutcomes(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, *outcomes, error) {
 	out, err := s.outcomes(ctx)
+	return nil, out, err
+}
+
+type summaryIn struct {
+	From     string `json:"from,omitempty" jsonschema:"a day, such as 2026-11-02: the first week is the one it falls in; four weeks before this one when not given"`
+	To       string `json:"to,omitempty" jsonschema:"a day: the last week is the one it falls in; this week when not given"`
+	Team     string `json:"team,omitempty" jsonschema:"a team's name, or * for everyone and every team; everyone's when not given"`
+	Critical string `json:"critical,omitempty" jsonschema:"the severities counted as critical, comma-separated: critical when not given"`
+}
+
+func (s *Server) toolSummary(ctx context.Context, _ *mcp.CallToolRequest, in summaryIn) (*mcp.CallToolResult, *summary, error) {
+	q := url.Values{}
+	for k, v := range map[string]string{"from": in.From, "to": in.To, "team": in.Team, "critical": in.Critical} {
+		if v != "" {
+			q.Set(k, v)
+		}
+	}
+	out, err := s.summaryFor(ctx, q)
 	return nil, out, err
 }
 

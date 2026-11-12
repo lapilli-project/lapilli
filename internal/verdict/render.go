@@ -447,10 +447,14 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 		if rr.Unsupported != "" {
 			continue
 		}
-		l := fmt.Sprintf(`{rule="%s"}`, escape(rr.Rule))
+		l := fmt.Sprintf(`{rule="%s"`, escape(rr.Rule))
 		if rr.Severity != "" {
-			l = fmt.Sprintf(`{rule="%s",severity="%s"}`, escape(rr.Rule), escape(rr.Severity))
+			l += fmt.Sprintf(`,severity="%s"`, escape(rr.Severity))
 		}
+		if rr.Team != "" {
+			l += fmt.Sprintf(`,team="%s"`, escape(rr.Team))
+		}
+		l += "}"
 		fired = append(fired, fmt.Sprintf("lapilli_rule_firings%s %d", l, rr.Firings))
 		caught = append(caught, fmt.Sprintf("lapilli_rule_caught%s %d", l, rr.White))
 		nothing = append(nothing, fmt.Sprintf("lapilli_rule_nothing%s %d", l, rr.Black))

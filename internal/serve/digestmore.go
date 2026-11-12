@@ -218,6 +218,11 @@ func (s *Server) aboutMore(ctx context.Context, about map[string]any, rep *verdi
 	if sent != nil {
 		about["notifications"] = sent
 	}
+	rf, err := s.refiresOf(ctx, rep, from, to)
+	if err != nil {
+		return err
+	}
+	about["refired"] = rf
 	return nil
 }
 

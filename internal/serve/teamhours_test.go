@@ -79,9 +79,9 @@ func TestTeamHours(t *testing.T) {
 		!strings.Contains(body, `"team": "search"`) || !strings.Contains(body, `"zone": "Asia/Tokyo"`) {
 		t.Errorf("report: %d %s", code, body)
 	}
-	if _, body, _ := get(t, s.MetricsHandler(), "/metrics"); !strings.Contains(body, `lapilli_rule_nothing_by_hours{rule="Errors",severity="page",hours="asleep"} 10`) ||
+	if _, body, _ := get(t, s.MetricsHandler(), "/metrics"); !strings.Contains(body, `lapilli_rule_nothing_by_hours{rule="Errors",severity="page",team="search",hours="asleep"} 10`) ||
 		!strings.Contains(body, `lapilli_rule_nothing_by_hours{rule="Slow",severity="ticket",hours="asleep"} 8`) ||
-		!strings.Contains(body, `lapilli_rule_nothing_by_hours{rule="Errors",severity="page",hours="at_work"} 7`) {
+		!strings.Contains(body, `lapilli_rule_nothing_by_hours{rule="Errors",severity="page",team="search",hours="at_work"} 7`) {
 		t.Errorf("metrics: %s", body)
 	}
 

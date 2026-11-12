@@ -139,6 +139,23 @@ type ruleLine struct {
 	Content contentCount
 	// Proposed says a change to it is proposed and not yet finished with.
 	Proposed bool
+	// RefiredShare is the share of its firings that re-fired, and
+	// RefiredWeeks how many of the weeks shown had one (docs/design/noc.md).
+	RefiredShare string
+	RefiredWeeks int
+	// Deploys are its firings that came during a deploy, DeploysCaught
+	// those of them that caught something, and Without its precision
+	// leaving them out.
+	Deploys, DeploysCaught int
+	Without                string
+}
+
+// pct is a share as a page shows it: "–" for none.
+func pct(n, of int) string {
+	if of == 0 {
+		return "–"
+	}
+	return fmt.Sprintf("%.0f%%", 100*float64(n)/float64(of))
 }
 
 // hoursCache keeps when each rule's firings came, week by week and by each
@@ -386,6 +403,11 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 			l.White += x.White
 			l.Refired += x.Refired
 			l.Excused += x.Excused
+			l.Deploys += x.Deploy
+			l.DeploysCaught += x.DeployWhite
+			if x.Refired > 0 {
+				l.RefiredWeeks++
+			}
 		}
 	}
 	credit, err := s.credit(ctx, t, n)
@@ -410,10 +432,9 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 		l.Incidents, l.First, l.Alone, l.Spare, l.SomeRules = c.Incidents, c.First, c.Alone, c.Spare, t.o.SomeRules
 		l.Black = l.Firings - l.White
 		l.Noisy = noisy(l.Firings, l.White, t.o)
-		l.Precision = "–"
-		if l.Firings > 0 {
-			l.Precision = fmt.Sprintf("%.0f%%", 100*float64(l.White)/float64(l.Firings))
-		}
+		l.Precision = pct(l.White, l.Firings)
+		l.RefiredShare = pct(l.Refired, l.Firings)
+		l.Without = pct(l.White-l.DeploysCaught, l.Firings-l.Deploys)
 		// Weeks running it has been noisy, up to the last whole week.
 		for i := len(t.weeks) - 2; i >= 0 && t.noisy(t.weeks[i], id); i-- {
 			l.Streak++
@@ -515,6 +536,29 @@ type rulesView struct {
 	// Facts are how many problems of fact what each rule says has, for the
 	// rules that never fired as for the rest.
 	Facts map[string]int
+	// Sort is what the rules are in order of: "" for the noisiest first,
+	// refired or deploys; Sorts, those offered.
+	Sort  string
+	Sorts []string
+	// Deploys says the ledger keeps deploys: the firings during them have
+	// a column.
+	Deploys bool
+}
+
+// sortRules puts the rules in order of what by: refired, the most re-fired
+// first; deploys, the most firings during deploys first; or else the
+// noisiest first, as ruleLines has them.
+func sortRules(lines []ruleLine, by string) {
+	key := func(l ruleLine) int { return 0 }
+	switch by {
+	case "refired":
+		key = func(l ruleLine) int { return l.Refired }
+	case "deploys":
+		key = func(l ruleLine) int { return l.Deploys }
+	default:
+		return
+	}
+	sort.SliceStable(lines, func(a, b int) bool { return key(lines[a]) > key(lines[b]) })
 }
 
 func (s *Server) rulesPage(r *http.Request) (any, error) {
@@ -571,7 +615,19 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 	for i := range lines {
 		lines[i].Content = countOf(cf[lines[i].Name])
 	}
-	return rulesView{n, f, lines, silent, facts}, nil
+	deploys, err := s.l.HasDeploys(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	v := rulesView{Weeks: n, Team: f, Lines: lines, Silent: silent, Facts: facts, Deploys: deploys, Sorts: []string{"", "refired"}}
+	if deploys {
+		v.Sorts = append(v.Sorts, "deploys")
+	}
+	if by := r.URL.Query().Get("sort"); slices.Contains(v.Sorts, by) {
+		v.Sort = by
+	}
+	sortRules(v.Lines, v.Sort)
+	return v, nil
 }
 
 // annotate gives rule lines their teams and what is to become of them.
@@ -645,6 +701,22 @@ type ruleView struct {
 	// Tie is, for a cloud's alarm read with --alarms and not replayed, the
 	// history tied to it, or why none is.
 	Tie *tieView
+	// Refires are its firings that re-fired, week by week, and its alerts
+	// that re-fired most; nil when it hasn't fired.
+	Refires *refiresView
+}
+
+// refiresView is a rule's re-fires over the twelve weeks shown.
+type refiresView struct {
+	Within string
+	Weeks  []refireWeek // the latest first
+	Worst  []ledger.Refired
+}
+
+type refireWeek struct {
+	Week             string
+	Firings, Refired int
+	Shared           string
 }
 
 // tieView is an alarm's history as its page says it.
@@ -725,6 +797,19 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	}
 	if !v.Known {
 		return nil, ledger.ErrNotFound
+	}
+	if id := t.id(name); id != 0 && v.Firings > 0 {
+		v.Refires = &refiresView{Within: verdict.Duration(t.o.RefireWithin)}
+		for i := len(t.weeks) - 1; i >= 0; i-- {
+			x := t.by[t.weeks[i]][id]
+			v.Refires.Weeks = append(v.Refires.Weeks, refireWeek{Week: s.l.Midnight(t.weeks[i]).In(s.cfg.Loc).Format("2006-01-02"),
+				Firings: x.Firings, Refired: x.Refired, Shared: pct(x.Refired, x.Firings)})
+		}
+		if v.Refired > 0 {
+			if v.Refires.Worst, err = s.l.RefiredOf(ctx, name, s.l.Midnight(t.weeks[0]), s.now().Add(time.Hour), 5); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if len(s.alarms) > 0 {
 		ties, err := s.l.Ties(ctx)
@@ -836,6 +921,13 @@ type incidentLine struct {
 	Status string
 	First  string
 	Mine   bool // written in the UI, so it can be changed there
+	// Lead is, for one caught, how long before its start the first alert
+	// of a rule that isn't noisy came, or after; Nearly, for one that
+	// wasn't, the rule that nearly caught it, and NearlyMore how many more
+	// did.
+	Lead       string
+	Nearly     string
+	NearlyMore int
 }
 
 // impactTitle is the title an impact window is found with.
@@ -873,12 +965,35 @@ type incidentsView struct {
 	Lines []incidentLine
 	Match string
 	Now   time.Time
+	// Team and Source are what the incidents are picked by: a team's (one
+	// of its rules caught it, or it has a value of a label the team owns
+	// by), and written down or found by --impact.
+	Team   teamFilter
+	Source string
+	// Judged are those judged against, as Lines picks them: how many each
+	// way, and the median lead.
+	Judged summaryIncidents
+	Lead   string
+}
+
+// leadText says how long before an incident's start its first alert came,
+// or after.
+func leadText(l string, d time.Duration) string {
+	if d > 0 {
+		return tr(l, "%s before", strings.TrimPrefix(verdict.Delay(d), "+"))
+	}
+	if d < 0 {
+		return tr(l, "%s after", strings.TrimPrefix(verdict.Delay(-d), "+"))
+	}
+	return tr(l, "at its start")
 }
 
 func (s *Server) incidentsPage(r *http.Request) (any, error) {
 	ctx := r.Context()
+	l := lang(r)
+	q := r.URL.Query()
 	n := 4
-	if r.URL.Query().Get("weeks") == "12" {
+	if q.Get("weeks") == "12" {
 		n = 12
 	}
 	t, err := s.tallies(ctx, weeks)
@@ -889,9 +1004,57 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	own, err := s.owners(ctx)
+	if err != nil {
+		return nil, err
+	}
+	near, err := s.nearMisses(ctx)
+	if err != nil {
+		return nil, err
+	}
 	v := incidentsView{Weeks: n, Match: strings.Join(t.o.Match, ", "), Now: s.now()}
+	var team *ledger.Team
+	v.Team, team = s.teamFilter(own, q.Get("team"))
+	if src := q.Get("source"); src == "impact" || src == "written" {
+		v.Source = src
+	}
+	var leads []time.Duration
 	for _, in := range incs {
-		v.Lines = append(v.Lines, s.incidentLine(lang(r), in, t.state(in, ledger.Week(s.l.Day(in.Start)))))
+		if team != nil && !own.ownsIncident(*team, in) {
+			continue
+		}
+		if (v.Source == "impact") != (in.Origin == "impact") && v.Source != "" {
+			continue
+		}
+		w := ledger.Week(s.l.Day(in.Start))
+		line := s.incidentLine(l, in, t.state(in, w))
+		if in.Counts {
+			v.Judged.Total++
+			switch line.Status {
+			case "caught":
+				v.Judged.Caught++
+				for _, c := range in.CaughtBy {
+					if !t.noisy(w, t.id(c.Rule)) {
+						line.Lead = leadText(l, -c.Delay)
+						leads = append(leads, -c.Delay)
+						break
+					}
+				}
+			case "noisy":
+				v.Judged.NoisyOnly++
+			default:
+				v.Judged.Missed++
+			}
+			if line.Status != "caught" {
+				if nms := near[in.ID]; len(nms) > 0 {
+					line.Nearly, line.NearlyMore = nms[0].Rule, len(nms)-1
+				}
+			}
+		}
+		v.Lines = append(v.Lines, line)
+	}
+	if m := medianSeconds(leads); m != nil {
+		v.Lead = leadText(l, time.Duration(*m)*time.Second)
 	}
 	slices.Reverse(v.Lines)
 	return v, nil

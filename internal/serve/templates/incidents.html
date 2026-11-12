@@ -1,15 +1,19 @@
 {{define "incidents"}}{{$title := t "Incidents"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
 <h1>{{$title}}</h1>
-<p class="lede">{{t "What went wrong in the last %d weeks, and what caught it." .Weeks}} <span class="tabs"><a href="/incidents"{{if eq .Weeks 4}} aria-current="page"{{end}}>{{t "4 weeks"}}</a> <a href="/incidents?weeks=12"{{if eq .Weeks 12}} aria-current="page"{{end}}>{{t "12 weeks"}}</a></span></p>
+<p class="lede">{{t "What went wrong in the last %d weeks, and what caught it." .Weeks}} <span class="tabs"><a href="/incidents?team={{.Team.Name}}&amp;source={{.Source}}"{{if eq .Weeks 4}} aria-current="page"{{end}}>{{t "4 weeks"}}</a> <a href="/incidents?weeks=12&amp;team={{.Team.Name}}&amp;source={{.Source}}"{{if eq .Weeks 12}} aria-current="page"{{end}}>{{t "12 weeks"}}</a></span></p>
+<p class="tabs">{{t "Of"}}: <a href="/incidents?weeks={{.Weeks}}&amp;team={{.Team.Name}}"{{if not .Source}} aria-current="page"{{end}}>{{t "all"}}</a> <a href="/incidents?weeks={{.Weeks}}&amp;team={{.Team.Name}}&amp;source=written"{{if eq .Source "written"}} aria-current="page"{{end}}>{{t "written down"}}</a> <a href="/incidents?weeks={{.Weeks}}&amp;team={{.Team.Name}}&amp;source=impact"{{if eq .Source "impact"}} aria-current="page"{{end}}>{{t "user impact (--impact)"}}</a></p>
+{{if .Team.Teams}}<p class="tabs">{{t "Team"}}: <a href="/incidents?weeks={{.Weeks}}&amp;source={{.Source}}"{{if not .Team.Name}} aria-current="page"{{end}}>{{t "all"}}</a>{{range .Team.Teams}} <a href="/incidents?weeks={{$.View.Weeks}}&amp;source={{$.View.Source}}&amp;team={{.}}"{{if eq . $.View.Team.Name}} aria-current="page"{{end}}>{{.}}</a>{{end}}</p>{{end}}
+{{with .Judged}}{{if .Total}}<p>{{t "Of the %d judged against: %d caught, %d caught only by noisy rules, %d missed." .Total .Caught .NoisyOnly .Missed}}{{with $.View.Lead}} {{t "The first alert of a rule that isn't noisy came, at the median, %s." .}}{{end}}</p>{{end}}{{end}}
 <div class="scroll"><table>
-<thead><tr><th scope="col">{{t "Incident"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "From"}}</th><th scope="col">{{t "Caught"}}</th></tr></thead>
+<thead><tr><th scope="col">{{t "Incident"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "From"}}</th><th scope="col">{{t "Caught"}}</th><th scope="col">{{t "Lead"}}</th></tr></thead>
 <tbody>{{range .Lines}}
 <tr class="{{.Status}}">
   <td><a href="/incidents/{{path .ID}}">{{.ID}}</a>{{if .Title}} {{.Title}}{{end}}</td>
   <td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td>
   <td>{{if eq .Origin "file"}}{{t "incidents file"}}{{else if eq .Origin "ui"}}{{t "written here"}}{{else if eq .Origin "copy"}}{{t "copied in"}}{{else}}{{t "found by --impact"}}{{end}}</td>
-  <td>{{if eq .Status "caught"}}○ {{.First}}{{else if eq .Status "noisy"}}◐ {{.First}}, {{t "noisy"}}{{else if eq .Status "missed"}}{{t "✗ nothing fired"}}{{else if eq .Status "covered"}}{{t "covered by one written down"}}{{else}}{{t .Status}}{{end}}</td>
-</tr>{{else}}<tr><td colspan="5" class="quiet">{{t "None."}}</td></tr>{{end}}</tbody>
+  <td>{{if eq .Status "caught"}}○ {{.First}}{{else if eq .Status "noisy"}}◐ {{.First}}, {{t "noisy"}}{{else if eq .Status "missed"}}{{t "✗ nothing fired"}}{{else if eq .Status "covered"}}{{t "covered by one written down"}}{{else}}{{t .Status}}{{end}}{{with .Nearly}}<br><span class="quiet">{{t "nearly caught by %s" .}}</span>{{end}}{{if .NearlyMore}} <span class="quiet">{{t "and %d more" .NearlyMore}}</span>{{end}}</td>
+  <td>{{or .Lead "–"}}</td>
+</tr>{{else}}<tr><td colspan="6" class="quiet">{{t "None."}}</td></tr>{{end}}</tbody>
 </table></div>
 
 {{if not $ro}}

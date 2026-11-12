@@ -68,7 +68,8 @@ func TestCatalogs(t *testing.T) {
 var pagePaths = []string{"/", "/rules", "/rules?weeks=1", "/rules/Errors", "/incidents", "/incidents/INC-1", "/incidents/impact-20261103T0600Z",
 	"/firings?day=2026-11-02", "/settings", "/settings?try=1&lead=1h", "/runs", "/incidents/none",
 	"/teams", "/teams?edit=1", "/windows", "/windows/1", "/tasks", "/tasks?status=all", "/tasks/1", "/?team=payments", "/rules?team=payments", "/outcomes",
-	"/reports", "/reports?edit=1", "/reports/1", "/reports/2", "/reports?edit=digest", "/reports/digest", "/roles", "/windows/2", "/windows/3"}
+	"/reports", "/reports?edit=1", "/reports/1", "/reports/2", "/reports?edit=digest", "/reports/digest", "/roles", "/windows/2", "/windows/3",
+	"/rules?sort=refired", "/rules?sort=deploys&weeks=12", "/incidents?source=impact&team=payments", "/incidents?source=written"}
 
 // pagesServer is a server with something on every page: a team, a note,
 // quiet windows, a task, roles, reports, comments, and a run that failed.
@@ -145,6 +146,11 @@ func pagesServer(t *testing.T) *Server {
 	}
 	// A comment copied in from the task's issue.
 	if _, err := s.l.CopyComment(ctx, 1, "seen in the tracker", "sam", "c-1", now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	// A deploy of search while Errors fired for it (docs/design/noc.md).
+	o.DeployAfter = 10 * time.Minute
+	if _, err := s.l.SyncDeploys(ctx, []ledger.Deploy{{Start: now.Add(-50 * time.Hour), Labels: map[string]string{"service": "search"}, Revision: "4f2a9c1"}}, o); err != nil {
 		t.Fatal(err)
 	}
 	read := s.onCallRead("primary")

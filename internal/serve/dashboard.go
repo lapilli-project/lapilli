@@ -27,7 +27,13 @@ type weekView struct {
 	Asleep                               int             // firings that caught nothing while people slept; notifications for them, once there are any
 	Uncounted                            bool            // Asleep isn't counted: a week before the first notification
 	Changed, Current                     bool
+	// Refired are its firings that re-fired; Deploys those that came
+	// during a deploy, DeploysCaught those of them that caught something.
+	Refired, Deploys, DeploysCaught int
 }
+
+// Without is the week's precision leaving out the firings during deploys.
+func (w weekView) Without() string { return pct(w.White-w.DeploysCaught, w.Firings-w.Deploys) }
 
 func (w weekView) precision() (float64, bool) {
 	if w.Firings == 0 {
@@ -166,6 +172,8 @@ type dashboard struct {
 	Outcomes    []outcomeLine
 	OutcomesAll bool // a team is picked, and the outcomes are everyone's
 	ReadOnly    bool
+	// Deploys says the ledger keeps deploys.
+	Deploys bool
 }
 
 // outcomeLine is a line of the outcomes card, Bad when it asks for a look.
@@ -228,6 +236,9 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			wv.Firings += x.Firings
 			wv.White += x.White
 			wv.Excused += x.Excused
+			wv.Refired += x.Refired
+			wv.Deploys += x.Deploy
+			wv.DeploysCaught += x.DeployWhite
 			if t.noisy(w, id) {
 				wv.Noisy++
 			}
@@ -302,7 +313,10 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	} else if ok && asleep != "" {
 		asleep = tr(l, "notifications for firings that caught nothing, while people slept, since %s", first.In(s.cfg.Loc).Format("2006-01-02"))
 	}
-	v.Tiles = s.tiles(l, ws, last, before, asleep)
+	if v.Deploys, err = s.l.HasDeploys(ctx); err != nil {
+		return nil, err
+	}
+	v.Tiles = s.tiles(l, ws, last, before, asleep, v.Deploys)
 	if s.checking() {
 		// Only a week checked to its end: one checked in part says less than
 		// it seems to.
@@ -406,7 +420,7 @@ func outcomeLines(l string, out *outcomes) []outcomeLine {
 }
 
 // tiles are the headline numbers.
-func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep string) []tile {
+func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep string, deploys bool) []tile {
 	var out []tile
 	add := func(label string, val func(*weekView) (float64, bool), show func(float64) string, delta func(a, b float64) string, better int, of string) {
 		x := tile{Label: tr(l, label), Value: "–", Of: of}
@@ -466,6 +480,20 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep 
 	if asleep != "" {
 		add("Woken for nothing", func(w *weekView) (float64, bool) { return float64(w.Asleep), !w.Uncounted }, count,
 			func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, asleep)
+	}
+	// Re-fires: how many, and in how many of the whole weeks shown, for a
+	// team that keeps to none a week.
+	with := 0
+	for _, w := range ws[:len(ws)-1] {
+		if w.Refired > 0 {
+			with++
+		}
+	}
+	add("Refired", func(w *weekView) (float64, bool) { return float64(w.Refired), true }, count,
+		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, tr(l, "%d of the last %d whole weeks had one", with, len(ws)-1))
+	if deploys {
+		add("During deploys", func(w *weekView) (float64, bool) { return float64(w.Deploys), true }, count,
+			func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, 0, tr(l, "firings; precision %s without them", last.Without()))
 	}
 	return out
 }

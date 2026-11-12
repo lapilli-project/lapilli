@@ -312,6 +312,16 @@ func (s *Server) buildReport(ctx context.Context, r ledger.Scheduled, team *ledg
 			line, nums, err = s.missedSection(ctx, rep, from, to, loc)
 		case "woken":
 			line, nums, err = s.wokenSection(ctx, rep, from, to, o, in)
+		case "refired", "deploys":
+			var rf *refires
+			if rf, err = s.refiresOf(ctx, rep, from, to); err == nil {
+				nums = rf
+				if line = rf.refireLine(l); sec == "deploys" {
+					if line = rf.deployLine(l); line == "" {
+						line = tr(l, "No deploys are kept: --deploys names where they are read from.")
+					}
+				}
+			}
 		case "notifications":
 			var sent *sentLine
 			if sent, err = s.sent(ctx, rep, from, to); err == nil {

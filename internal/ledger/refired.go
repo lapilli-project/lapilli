@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
@@ -67,4 +68,31 @@ func (l *Ledger) refired(ctx context.Context, q string, args ...any) ([]Refired,
 		out = append(out, x)
 	}
 	return out, rows.Err()
+}
+
+// LastNotified is when the latest notification kept came, by the source it
+// came from (alertmanager, grafana, sns and the rest).
+func (l *Ledger) LastNotified(ctx context.Context) (map[string]time.Time, error) {
+	rows, err := l.r.QueryContext(ctx, "SELECT source, max(at) FROM notifications GROUP BY source")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var src string
+		var at int64
+		if err := rows.Scan(&src, &at); err != nil {
+			return nil, err
+		}
+		out[src] = unix(at)
+	}
+	return out, rows.Err()
+}
+
+// LastDeploy is when the latest deploy kept started; zero for none.
+func (l *Ledger) LastDeploy(ctx context.Context) (time.Time, error) {
+	var at sql.NullInt64
+	err := l.r.QueryRowContext(ctx, "SELECT max(start_at) FROM deploys").Scan(&at)
+	return fromNull(at), err
 }
