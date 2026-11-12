@@ -581,3 +581,30 @@ func TestLabelTeamCantTakeANamedRule(t *testing.T) {
 		t.Errorf("alpha's editor comments on Errors: %d %s", code, out)
 	}
 }
+
+// A team's editor, the least a writer can be, keeps twenty of the team's
+// quiet windows at most. Each is looked at for the team's firings that
+// caught nothing, every time stones are given, inside the ledger's one
+// write transaction: 1,500 of them took judging 21 firings from 0.5 ms to
+// 111 ms.
+func TestTeamEditorWindowsLimited(t *testing.T) {
+	s, pay, _ := rolesServer(t, nil)
+	ctx := context.Background()
+	if _, err := s.l.PutGrant(ctx, ledger.Grant{Who: "user:payer@example.com", TeamID: pay}, "boss"); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	body := fmt.Sprintf(`{"title":"w","start":"2026-01-01T00:00:00Z","end":"2026-01-01T01:00:00Z","every":"cron","on":"0 0 1 1 *","team_id":%d}`, pay)
+	for i := range ledger.MaxTeamWindows {
+		if code, out := callAs(t, h, http.MethodPost, "/api/v1/windows", "payer@example.com", "", body, "same-origin"); code != http.StatusCreated {
+			t.Fatalf("window %d: %d %s", i, code, out)
+		}
+	}
+	if code, out := callAs(t, h, http.MethodPost, "/api/v1/windows", "payer@example.com", "", body, "same-origin"); code != http.StatusBadRequest ||
+		!strings.Contains(out, "keep 20 of its quiet windows at most") {
+		t.Errorf("a team's editor past %d windows: %d %s", ledger.MaxTeamWindows, code, out)
+	}
+	if code, out := callAs(t, h, http.MethodPost, "/api/v1/windows", "ed@example.com", "", body, "same-origin"); code != http.StatusCreated {
+		t.Errorf("an editor, past the team's own: %d %s", code, out)
+	}
+}

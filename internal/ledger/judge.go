@@ -249,6 +249,7 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 	if err != nil {
 		return err
 	}
+	excuses := Excusing(quiet, unix(lo), unix(hi))
 	rows, err := t.QueryContext(t.ctx, `SELECT f.id, f.series_id, r.name, f.start_at, f.end_at, f.white, f.refired, f.excused, s.labels
 		FROM firings f JOIN series s ON s.id = f.series_id JOIN rules r ON r.id = f.rule_id
 		WHERE f.start_at >= ? AND f.start_at <= ? ORDER BY f.series_id, f.start_at, f.id`, lo, hi)
@@ -303,7 +304,7 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		white := slices.ContainsFunc(incs, func(in counted) bool { return verdict.Catches(r.f, in.Incident, o) })
 		again := verdict.Refired(last, r.f.Start, o)
 		// A firing that caught something counts, quiet window or not.
-		excused := !white && slices.ContainsFunc(quiet, func(w Window) bool { return w.Excuses(r.f) })
+		excused := !white && excuses(r.f)
 		last = r.f.End
 		if white == r.white && again == r.again && excused == r.excused {
 			continue

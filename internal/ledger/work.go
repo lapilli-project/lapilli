@@ -571,6 +571,121 @@ func (w Window) Through(now time.Time) time.Time { return unix(w.span(now)[1]) }
 // maxWindow is the longest a quiet window can last.
 const maxWindow = 31 * 24 * time.Hour
 
+// MaxWindows is how many quiet windows the ledger keeps, the last
+// EditorWindows of them for editors and admins to make; MaxTeamWindows,
+// how many of a team's its editors may make. Each window is looked at for
+// every firing that caught nothing it may excuse, each time stones are
+// given, in the ledger's one write transaction: a team's editors, who may
+// change the least, can't make that slow for everyone.
+const (
+	MaxWindows     = 500
+	EditorWindows  = 50
+	MaxTeamWindows = 20
+)
+
+// windowsLeft refuses a new quiet window past the limits, for a team's
+// editors those of a team's editors.
+func windowsLeft(t *txn, team int64) error {
+	var own, all int
+	if err := t.QueryRowContext(t.ctx, "SELECT count(*) FILTER (WHERE team_id = ?), count(*) FROM windows", team).Scan(&own, &all); err != nil {
+		return err
+	}
+	_, limited := scopeOf(t.ctx)
+	switch {
+	case all >= MaxWindows:
+		return invalid("the ledger keeps %d quiet windows at most: delete those no longer needed", MaxWindows)
+	case limited && own >= MaxTeamWindows:
+		return invalid("a team's editors keep %d of its quiet windows at most; an editor or an admin can keep more", MaxTeamWindows)
+	case limited && all >= MaxWindows-EditorWindows:
+		return invalid("the last %d quiet windows the ledger keeps are for editors and admins to make", EditorWindows)
+	}
+	return nil
+}
+
+// mayCover reports whether the window may cover a time in [lo, hi]: false
+// only when it covers none. Every repeat by a schedule lasts as long, so
+// when the last to start by hi (by the end of Until's day, when that is
+// earlier) ends before lo, or starts before the window does, every other
+// one does too. One schedule lookup a span, not one a firing: a schedule
+// that falls due once a year looks back up to a year each time.
+func (w Window) mayCover(lo, hi time.Time) bool {
+	if !w.scheduled() {
+		return true
+	}
+	loc := w.where()
+	w.resolve()
+	if w.sch == nil {
+		return false
+	}
+	at := hi
+	if !w.Until.IsZero() {
+		u := w.Until.In(loc)
+		if end := time.Date(u.Year(), u.Month(), u.Day()+1, 0, 0, 0, 0, loc).Add(-time.Nanosecond); at.After(end) {
+			at = end
+		}
+	}
+	due := w.sch.Last(at, loc)
+	return !due.IsZero() && !due.Before(w.Start) && !due.Add(w.End.Sub(w.Start)).Before(lo)
+}
+
+// Excusing says whether one of the quiet windows ws excuses a firing, as
+// Excuses does, for the firings of a span, [from, to]. What can is worked
+// out once for the span: a window repeating by its schedule that covers
+// nothing in it is passed over for the firings that start there, and the
+// windows are sorted, once for each rule and the team that owns its alert,
+// into those whose pattern and team the firing's may be, so each firing is
+// set beside those alone rather than beside every window.
+func Excusing(ws []Window, from, to time.Time) func(firing.Firing) bool {
+	q := &excusing{from: from, to: to, by: map[excusingKey][]Window{}}
+	for _, w := range ws {
+		if w.TeamID < 0 {
+			continue // a removed team's window excuses nothing
+		}
+		q.ws = append(q.ws, w)
+		q.covers = append(q.covers, w.mayCover(from, to))
+		if w.TeamID > 0 {
+			q.own = w.own
+		}
+	}
+	return q.excuses
+}
+
+type excusingKey struct {
+	rule string
+	team int64
+	// outside is a firing that started outside the span: every window
+	// that may be its is looked at.
+	outside bool
+}
+
+type excusing struct {
+	from, to time.Time
+	ws       []Window
+	covers   []bool     // whether each window may cover a time in the span
+	own      *ownership // nil when no window is a team's
+	by       map[excusingKey][]Window
+}
+
+func (q *excusing) excuses(f firing.Firing) bool {
+	if len(q.ws) == 0 {
+		return false
+	}
+	k := excusingKey{rule: f.Rule, outside: f.Start.Before(q.from) || f.Start.After(q.to)}
+	if q.own != nil {
+		k.team = q.own.of(f.Rule, f.Labels)
+	}
+	ws, ok := q.by[k]
+	if !ok {
+		for i, w := range q.ws {
+			if (k.outside || q.covers[i]) && (w.TeamID == 0 || w.TeamID == k.team) && (w.re == nil || w.re.MatchString(f.Rule)) {
+				ws = append(ws, w)
+			}
+		}
+		q.by[k] = ws
+	}
+	return slices.ContainsFunc(ws, func(w Window) bool { return w.Excuses(f) })
+}
+
 // Excuses reports whether the window excuses a firing that caught
 // nothing: it started in the window, its rule matches, and it has each
 // label the window names, with one of its values.
@@ -757,6 +872,9 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 		spans := [][2]int64{w.span(time.Now())}
 		now := time.Now().Unix()
 		if id == 0 {
+			if err := windowsLeft(t, w.TeamID); err != nil {
+				return err
+			}
 			res, err := t.ExecContext(t.ctx, `INSERT INTO windows (title, start_at, end_at, every, repeat_on, until_at, team_id, rules, labels, updated, updated_by)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				w.Title, w.Start.Unix(), w.End.Unix(), w.Every, w.On, nullable(w.Until), w.TeamID, w.Rules, labelsText(w.Labels), now, by)

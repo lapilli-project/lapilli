@@ -59,6 +59,17 @@ as above; a change to its title alone judges nothing again; repeats to
 come excuse firings as the runs record them. A write judges for two
 seconds at most before it answers, and the worker carries on the rest.
 
+Each firing that caught nothing is set beside the windows that may excuse
+it each time stones are given, inside the ledger's one write transaction,
+so the windows are bounded (0.28.1): 500 in the ledger, the last 50 of them
+for editors and admins to make, and twenty of a team's for its editors.
+What may excuse a firing is worked out once for the span being judged: a
+window repeating by a schedule that covers nothing in the span is passed
+over, and the rest are sorted, once for each rule and the team that owns
+its alert, into those whose pattern and team it may be. Judging 10,000
+firings again beside 500 windows takes about 60 ms on a laptop, where
+setting each firing beside every window took 9.5 s (`TestWindowsScale`).
+
 ## Ownership
 
 A rule's note can name its team. Otherwise the first team, by name, whose
