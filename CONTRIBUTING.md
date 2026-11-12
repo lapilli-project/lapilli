@@ -16,6 +16,8 @@ gofmt -l . && go vet ./...
 test/e2e/run.sh          # the Helm chart on a kind cluster; needs Docker, kubectl, helm
 test/e2e/changes.sh      # changes to rules on a real Prometheus, Gitea and Grafana; needs Docker, jq
 test/e2e/loki.sh         # rules in LogQL replayed against a real Loki and Grafana; needs Docker, jq
+test/e2e/signin.sh       # lapilli's own sign-in against a real Dex; needs Docker, curl
+test/e2e/serve-lb.sh     # the chart at a URL on kind: a LoadBalancer, Gateway API, an Ingress, Dex; Linux
 test/a11y/axe.sh         # axe-core (WCAG 2.2 AA) over every page, in a headless Chromium; needs Docker
 ```
 
@@ -43,7 +45,8 @@ tests, so a change that slows a run or a page fails.
   one read a body before its token (GHSA-ggwv-m6g7-jchx).
 - **CI runs:**
   - the tests on Linux, macOS and the latest Go
-  - the chart end to end on kind
+  - the chart end to end on kind, and served at a URL there
+  - the sign-in against a real identity provider
   - govulncheck
   - CodeQL
 
@@ -79,6 +82,10 @@ tests, so a change that slows a run or a page fails.
   (docs/design/content.md). `internal/schedule` reads the presets and cron
   expressions reports are scheduled by.
 - `internal/verdict` gives each firing its stone and writes the reports.
+- `internal/signin` says who a request comes from when serve signs people
+  in itself: OpenID Connect, the signed headers of a sign-in in front, and
+  sessions in signed cookies (docs/design/signin.md). `idptest` is a
+  provider for tests.
 - `internal/report` sends to Slack, a Pushgateway and webhooks. Their URLs are
   secrets: they are read from files and never shown.
 - `internal/ledger` is lapilli serve's SQLite ledger:
@@ -93,7 +100,7 @@ tests, so a change that slows a run or a page fails.
   - the hourly runs
   - the web UI: templates and CSS embedded, no scripts
   - the API and `/metrics`
-  - roles from the sign-in proxy's headers
+  - roles from the sign-in: its own (`signin.go`), or a proxy's headers
   - the notifier
 
   Design notes: [docs/design/serve.md](docs/design/serve.md) and
