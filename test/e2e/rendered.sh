@@ -40,7 +40,12 @@ cleanup() {
   docker rm -fv "$p-gitea" "$p-prom" "$p-fetch" "$p-follow" >/dev/null 2>&1 || true
   docker volume rm "$p-repo" "$p-work" "$p-prom" >/dev/null 2>&1 || true
   docker network rm "$p" >/dev/null 2>&1 || true
-  rm -rf "$work"
+  # The chart's containers wrote some of it as 65532, which the runner's own
+  # user can't remove on Linux: removed from a container, as root.
+  if [ -n "${git_image:-}" ]; then
+    docker run --rm --user 0 -v "$work:/w" --entrypoint sh "$git_image" -c 'rm -rf /w/* /w/.[!.]*' >/dev/null 2>&1 || true
+  fi
+  rm -rf "$work" 2>/dev/null || true
 }
 trap cleanup EXIT
 trap 'echo "stopped at line $LINENO: $BASH_COMMAND" >&2' ERR
