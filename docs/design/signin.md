@@ -1,12 +1,12 @@
 # Signing in: lapilli serve at a URL people open
 
-Status: built, for v0.29.0, after two reviews (an attacker's and a
+Status: built, for v0.30.0, after two reviews (an attacker's and a
 correctness one). How lapilli serve says who is asking without a proxy of
 plain headers in front, and why it is built this way.
 
 ## Why
 
-Until 0.29.0 lapilli serve had no sign-in of its own. Roles needed
+Until 0.30.0 lapilli serve had no sign-in of its own. Roles needed
 `--user-header` from a proxy that signs people in, and a NetworkPolicy
 that keeps everyone but that proxy from setting the header. A team that
 wanted a URL to open had to add oauth2-proxy, or an ingress's sign-in,
@@ -60,7 +60,7 @@ a way to sign out. A sign-in with no role list is refused at start.
   an account is in, and asks Google to offer only that domain's accounts.
 - `--viewers` with `--user-header` lets only those it names in, too.
 
-There is no anonymous viewing with a sign-in of lapilli's own, in 0.29.0:
+There is no anonymous viewing with a sign-in of lapilli's own, in 0.30.0:
 the ledger's rule names, incidents and comments are a company's.
 
 ## OpenID Connect
@@ -280,7 +280,7 @@ keeps the 0.28.1 rule.
 ## Readiness
 
 `/readyz` is ready once the ledger has a run recorded: at once after a
-restart, after the backfill's first day on a first install. Before 0.29.0
+restart, after the backfill's first day on a first install. Before 0.30.0
 it waited for this process's first round of jobs, which a slow Prometheus
 stretches to `--timeout`, keeping the UI, and the sign-in's callback, out
 of the load balancer.

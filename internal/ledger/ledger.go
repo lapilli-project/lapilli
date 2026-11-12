@@ -19,6 +19,7 @@ import (
 	"io"
 	"io/fs"
 	"net/url"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"sync"
@@ -91,7 +92,9 @@ var ErrNewer = errors.New("the ledger was written by a newer lapilli")
 // zone its days and weeks are counted in. Opened in another zone than
 // before, it counts them again.
 func Open(ctx context.Context, path string, loc *time.Location) (*Ledger, error) {
-	u := url.URL{Scheme: "file", Opaque: path}
+	// A URI, with the path escaped: a # or a ? in a directory's name would
+	// otherwise end the path there, and open another ledger.
+	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
 	pragmas := "_pragma=busy_timeout(10000)&_pragma=temp_store(MEMORY)&_pragma=foreign_keys(1)"
 	w, err := sql.Open("sqlite", u.String()+"?"+pragmas+
 		"&_pragma=auto_vacuum(INCREMENTAL)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_txlock=immediate")

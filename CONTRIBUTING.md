@@ -18,6 +18,7 @@ test/e2e/changes.sh      # changes to rules on a real Prometheus, Gitea and Graf
 test/e2e/loki.sh         # rules in LogQL replayed against a real Loki and Grafana; needs Docker, jq
 test/e2e/signin.sh       # lapilli's own sign-in against a real Dex; needs Docker, curl
 test/e2e/serve-lb.sh     # the chart at a URL on kind: a LoadBalancer, Gateway API, an Ingress, Dex; Linux
+test/e2e/rendered.sh     # rules a chart renders, from a real Gitea, replayed and followed; needs Docker, jq, helm, yq
 test/a11y/axe.sh         # axe-core (WCAG 2.2 AA) over every page, in a headless Chromium; needs Docker
 ```
 

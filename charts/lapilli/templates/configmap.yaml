@@ -18,7 +18,9 @@ metadata:
   labels:
     {{- include "lapilli.labels" . | nindent 4 }}
 data:
-  # recipes/versions/git.sh, as the init container runs it.
+  # recipes/versions/git.sh and follow.sh, as the containers run them.
   git.sh: |
     {{- .Files.Get "files/versions-git.sh" | trimSuffix "\n" | nindent 4 }}
+  follow.sh: |
+    {{- .Files.Get "files/versions-follow.sh" | trimSuffix "\n" | nindent 4 }}
 {{- end }}

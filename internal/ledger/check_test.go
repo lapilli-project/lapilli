@@ -24,7 +24,7 @@ func TestPutCheck(t *testing.T) {
 	c := &verdict.SpanCheck{Rules: map[string]*verdict.SpanRule{"A": {Replayed: 10, Real: 12, Alike: 9, OffSum: 9 * time.Minute, Misses: misses}},
 		Elsewhere: map[string]int{"Watchdog": 3}}
 	for range 2 {
-		if err := l.PutCheck(ctx, day, c, nil, day.Add(24*time.Hour)); err != nil {
+		if err := l.PutCheck(ctx, day, c, nil, day.Add(24*time.Hour), 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -116,7 +116,7 @@ func TestCheckShared(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
 	c := &verdict.SpanCheck{Rules: map[string]*verdict.SpanRule{"Errors": {Replayed: 4, Real: 3, Alike: 3}, "Disk": {Replayed: 1, Real: 1, Alike: 1}}}
-	if err := l.PutCheck(ctx, t0, c, map[string][]string{"Errors": {"Errors [a]", "Errors [b]"}, "Disk": {"Disk"}}, t0.Add(24*time.Hour)); err != nil {
+	if err := l.PutCheck(ctx, t0, c, map[string][]string{"Errors": {"Errors [a]", "Errors [b]"}, "Disk": {"Disk"}}, t0.Add(24*time.Hour), 0); err != nil {
 		t.Fatal(err)
 	}
 	cs, err := l.Checks(ctx, t0, t0.Add(24*time.Hour))
@@ -138,7 +138,7 @@ func TestCheckShared(t *testing.T) {
 	// each once.
 	next := t0.Add(24 * time.Hour)
 	c = &verdict.SpanCheck{Rules: map[string]*verdict.SpanRule{"Errors": {Replayed: 7, Real: 7, Alike: 7}}}
-	if err := l.PutCheck(ctx, next, c, map[string][]string{"Errors": {"Errors [b]"}}, next.Add(24*time.Hour)); err != nil {
+	if err := l.PutCheck(ctx, next, c, map[string][]string{"Errors": {"Errors [b]"}}, next.Add(24*time.Hour), 0); err != nil {
 		t.Fatal(err)
 	}
 	if all, err := l.CheckTotal(ctx, t0, next.Add(24*time.Hour), func(name string) bool { return name != "Disk" }); err != nil || all.Replayed != 11 {

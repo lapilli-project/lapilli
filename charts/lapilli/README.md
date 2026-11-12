@@ -84,30 +84,82 @@ subscriptions. Lapilli then counts each rule's notifications, repeats and
 pages while people slept beside its firings, a cloud's own alarms' among
 them.
 
-`serve.rulesHistory` gives a first start the rules as they were before it,
-from the git repository the rules in `rules.configMaps` are kept in, so its
-backfill replays each day with that day's rules. One init container clones
-the branch (`repository`, `branch`), with every object, and a second runs
-`recipes/versions/git.sh` for `paths` since `since` (by default the backfill
-and a day more), into a volume `serve` reads with `--rules-history`.
-`render` is a command that writes the rules from a commit's files, for rules
-rendered from a chart (the image then needs what it runs). `tokenSecret`
-names a Secret holding a token for an https repository that needs one; only
-the first container has it, and it goes to the repository's host alone, so
-`render` never sees it. The image is `alpine/git`, pinned by digest; both
-run as the pod does, with a read-only root. When the repository can't be
-cloned, or the history written, the directory is left empty and the log
-says so, rather than hold the pod up: `serve` then starts with today's
-rules. A ledger with versions of its
-own keeps them and doesn't read the directory, so this can stay on.
+`serve.rulesHistory` reads the rules' versions from the git repository they
+are kept in, so a first start's backfill replays each day with that day's
+rules. One init container clones the branch (`repository`, `branch`), with
+every object, and a second runs `recipes/versions/git.sh` for `paths` since
+`since` (by default the backfill and a day more; `max` versions at most),
+into a volume `serve` reads with `--rules-history`. With `rules.configMaps`,
+they are its history, and a ledger with versions of its own keeps them, so
+this can stay on. With no `rules.configMaps`, the repository is the rules,
+followed: two containers beside lapilli fetch the branch every `every`
+seconds (300) and add the versions of its new commits
+(`recipes/versions/follow.sh`); `serve` records each from its commit's
+time, and replays the hours since then again. A commit is named no earlier
+than when it was fetched, less `every` and a minute, by the clone's reflog,
+which the fetch writes and the containers running `render` can't: a commit
+dated back, by its committer's clock or because it waited in a branch,
+takes effect when it reached the branch, not days before. Following never
+stops on a commit: one that can't be rendered is passed over, one dated
+after now is named now, and of more than `max` new commits the newest are
+written. The versions from before the backfill and a day are taken away,
+but the one in effect then. `serve.changes` is refused when the rules are a
+followed history alone: there is no file of rules to write a change to.
 
-The init containers run git, and `render`, on what the repository holds, so
-a cloud's identity is kept from them. The service account's token is never
-mounted in them: the pod doesn't mount it (`automountServiceAccountToken:
+For rules rendered from a chart, `render` is a command that writes them from
+a commit's files: `helm template monitoring charts/monitoring`, or
+`kustomize build overlays/prod`. Of what it writes, only the documents of
+rules are kept (ConfigMaps of rule files or of Grafana provisioning files,
+`PrometheusRule`s), and `select`, a label selector, keeps the labelled ones:
+`grafana_alert=1` for the ConfigMaps Grafana's sidecar loads. Labels are on
+Kubernetes objects only: a plain rule file has none, and `select` passes it
+through. No `yq` is needed. `renderPrepare` runs before it in each commit's
+files, for what a commit lacks, such as dependencies older commits don't
+vendor (`helm repo add ... && helm dependency build charts/monitoring`).
+`unrendered: skip`, the chart's default, passes over a commit that can't be
+rendered or read, saying which and why, the version before staying in
+effect; `fail` writes no history on a start (the recipe's own default).
+
+With `render`, the versions are written in `renderImage`, which has git,
+helm and kustomize: Argo CD's v3.5.6, pinned by digest, so a chart renders
+as Argo CD v3.5.6 renders it. It is large, about 210 MB to pull and 870 MB
+unpacked. To use a smaller one, or one with the helm and kustomize that
+deploy your chart, set `renderImage` to an image with sh, git and what
+`render` and `renderPrepare` run, by digest:
+`renderImage: registry.example.com/tools/helm-git:1.2.3@sha256:...`.
+
+A commit is read as it is: git runs with none of the image's configuration
+(the Argo CD image turns Git LFS on), the commit's `.gitattributes` don't
+leave a file out or rewrite one, and with `render` a commit holding a
+symbolic link anywhere is passed over. A commit with more than
+`maxTreeFiles` (20000) files or `maxTreeBytes` (256 MiB), as git counts
+them before anything is written, is passed over too. The volumes have size
+limits (`sizeLimits`: the clone 2Gi, what a commit is read into 1Gi, the
+versions 1Gi) and the containers ephemeral-storage requests and limits
+(`resources`).
+
+`tokenSecret` names a Secret holding a token for an https repository that
+needs one; only the containers that clone and fetch have it, and it goes to
+the repository's host alone, so `render` never sees it. The clone is in a
+volume of its own that only they write: those that run `render` have it
+read-only, so nothing they run can change what the next fetch runs with.
+The images are pinned by digest; every container runs as the pod does,
+with a read-only root. When the repository can't be cloned, or the history
+written, the directory is left empty and the log says so, rather than hold
+the pod up: `serve` starts all the same, with today's rules; following,
+with none, and the fetch clones the repository, the follow writes the
+history, and `serve` takes it, its backfill replaying each day with that
+day's rules, once they can. With `serve.networkPolicy.egress`, name
+the repository's host in `to`, and the chart repositories `renderPrepare`
+fetches from.
+
+The rules history's containers run git, and `render`, on what the
+repository holds, so a cloud's identity is kept from them. The service
+account's token is never mounted in them: the pod doesn't mount it (`automountServiceAccountToken:
 false`), and lapilli's own container has it, where Kubernetes would put it,
 only with `prometheus.auth`, `gcpProject` or OCI's alarms, for a workload
 identity that reads it (OKE's). EKS's webhook (IRSA and Pod Identity) and
-Azure Workload Identity's are told to pass the init containers over
+Azure Workload Identity's are told to pass those containers over
 (`eks.amazonaws.com/skip-containers`, `azure.workload.identity/skip-containers`,
 added to `podAnnotations`). GKE's Workload Identity answers every container
 in the pod from its metadata server, and no Kubernetes setting keeps one

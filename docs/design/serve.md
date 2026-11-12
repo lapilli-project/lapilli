@@ -443,7 +443,7 @@ as instructions.
 
 - **Closed by default.** The binary listens on `127.0.0.1:8080`; the chart's
   Service is a ClusterIP. Reach it with `kubectl port-forward`, behind the
-  sign-in proxy you have, or with a sign-in of its own (since 0.29.0,
+  sign-in proxy you have, or with a sign-in of its own (since 0.30.0,
   [signin.md](signin.md)), which makes no one an admin for loopback. With no
   roles, everyone is an admin only on a listener on loopback alone, this
   machine's users, as `--listen` says and the address it is bound to is
