@@ -611,3 +611,18 @@ func TestOpenPathNamed(t *testing.T) {
 		l.Close()
 	}
 }
+
+// A path is written as a file URI with its drive, on Windows, in the path,
+// not as the URI's host, and what would end the path escaped.
+func TestFileURI(t *testing.T) {
+	for in, want := range map[string]string{
+		"/var/lib/lapilli/ledger": "file:///var/lib/lapilli/ledger",
+		"/a b/#c?d%e":             "file:///a%20b/%23c%3Fd%25e",
+		"C:/ledgers/lapilli":      "file:///C:/ledgers/lapilli",
+	} {
+		u := fileURI(in)
+		if got := u.String(); got != want {
+			t.Errorf("%s: %s, want %s", in, got, want)
+		}
+	}
+}

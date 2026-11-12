@@ -2,13 +2,20 @@
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-11-12
+
+Two fixes the new end-to-end run found (`test/e2e/service.sh`: the whole
+service on kind, with Prometheus, Grafana sending its notifications to
+lapilli, Dex and a load balancer, and a browser). No ledger schema change.
+
 ### Fixed
 
 - **`lapilli serve` didn't start with a relative `--ledger`** (since
   0.29.0), its default `lapilli-ledger` and the README's first example
   among them: written as a URI, the path's first directory was read as a
   host, and SQLite refused it (`invalid uri authority`). The path is made
-  absolute first. The chart, which gives an absolute one, wasn't affected.
+  absolute first, and a Windows path keeps its drive in the path. The
+  chart, which gives an absolute one, wasn't affected.
 - A team or a comment written through the API was answered as it was
   sent, not as it was kept: no author, a time of 0001-01-01, a team's name
   untrimmed. It is answered as `GET` reads it back, as a quiet window, a
