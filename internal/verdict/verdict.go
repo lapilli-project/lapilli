@@ -33,9 +33,11 @@ type Options struct {
 	RefireWithin time.Duration
 	// UnknownLen is how long an incident with no end is taken to last.
 	UnknownLen time.Duration
-	// DeployAfter is how long after a deploy ends a firing still counts as
-	// during it (lapilli serve's --deploy-after): marked, not judged apart.
-	DeployAfter time.Duration
+	// DeployBefore and DeployAfter are how long before a deploy's start,
+	// and after its end, a firing still counts as during it (lapilli
+	// serve's --deploy-before and --deploy-after): marked, not judged
+	// apart.
+	DeployBefore, DeployAfter time.Duration
 	// A rule is noisy when it fired at least NoisyFirings times and under
 	// NoisyPrecision of those firings caught anything: it fires whatever
 	// happens. Zero means the defaults.

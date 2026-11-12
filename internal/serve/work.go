@@ -99,6 +99,15 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 			}
 			s.status.Unlock()
 		}
+	} else if kept, err := s.l.HasDeploys(ctx); err == nil && kept {
+		// Kept from when --deploys was given: they stay as they were
+		// marked, and the status says so until they are taken away.
+		if s.deploysUnread.CompareAndSwap(false, true) {
+			s.log.Warn(errDeploysUnread.Error())
+		}
+		s.status.Lock()
+		s.status.errWhat, s.status.err = "deploys", errDeploysUnread.Error()
+		s.status.Unlock()
 	}
 	// With no rules to replay, there is nothing to run for but --impact:
 	// what is copied in is judged as it comes.
@@ -150,6 +159,9 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		s.fail("pruning", err)
 	}
 }
+
+// errDeploysUnread is a ledger keeping deploys with no --deploys to read.
+var errDeploysUnread = errors.New("the ledger keeps deploys, but --deploys isn't given: their firings stay marked as they were. To take them away, give --deploys a file holding deploys: [] once")
 
 func (s *Server) fail(what string, err error) {
 	if errors.Is(err, context.Canceled) {

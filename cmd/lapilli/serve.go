@@ -51,14 +51,19 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       each run: a list of deploys, each the labels that say
                       what was deployed (service, namespace) and either a
                       history recipes/versions/argocd.sh or flux.sh wrote
-                      (REVISION TIME a line) or a start and an end. A
-                      firing that starts during one, or within
-                      --deploy-after of its end, and has the value of a
-                      label it names, is marked as during a deploy: judged
-                      as ever, and shown apart, so precision can be read
-                      with those firings and without (docs/design/noc.md)
-  --deploy-after DUR  how long after a deploy a firing still counts as during
-                      it (default 10m; a day at most)
+                      (REVISION TIME a line, beside the deploys file or
+                      below it) or a start and an end. A firing that starts
+                      during one, from --deploy-before before its start to
+                      --deploy-after after its end, and agrees with it on
+                      every label both have, one at least, is marked as
+                      during a deploy: judged as ever, and shown apart, so
+                      precision can be read with those firings and without
+                      (docs/design/noc.md). Read again only when it or a
+                      history changed
+  --deploy-before DUR, --deploy-after DUR
+                      how long before a deploy's start, and after its end, a
+                      firing still counts as during it (default 0 and 10m;
+                      a day at most each)
   --runbook-base URL  an https URL a runbook that is a path in the rules'
                       repository (docs/runbooks/disk.md#full) is a link
                       under, such as
@@ -376,7 +381,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		Digest: serve.Weekly{Day: time.Monday, Hour: 9}, Version: buildVersion(),
 	}
 	timeoutSet := false
-	deployAfter := 10 * time.Minute
+	deployAfter, deployBefore, deployTimes := 10*time.Minute, time.Duration(0), false
 	takes := func(name, val string) (bool, error) {
 		dur := func(min time.Duration) (time.Duration, error) {
 			d, err := serve.ParseDuration(val)
@@ -503,14 +508,21 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			cfg.SourceQuiet, err = dur(time.Hour)
 		case "--deploys":
 			cfg.Deploys = val
+		case "--deploy-after", "--deploy-before":
+			d, derr := dur(0)
+			switch {
+			case derr != nil:
+				err = derr
+			case d > ledger.MaxDeployAfter:
+				err = fmt.Errorf("%s %s: a day at most", name, val)
+			case name == "--deploy-after":
+				deployAfter, deployTimes = d, true
+			default:
+				deployBefore, deployTimes = d, true
+			}
 		case "--runbook-base":
 			if err = serve.CheckRunbookBase(val); err == nil {
 				cfg.RunbookBase = val
-			}
-		case "--deploy-after":
-			deployAfter, err = dur(0)
-			if err == nil && deployAfter > ledger.MaxDeployAfter {
-				err = fmt.Errorf("--deploy-after %s: a day at most", val)
 			}
 		case "--check-differs":
 			n, ratio, ok := strings.Cut(val, "/")
@@ -679,6 +691,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--notify-token-file, --notify-grafana-secret-file and --notify-sns need --notify-listen")
 	case cfg.NotifyListen != "" && cfg.ReadOnly:
 		err = fmt.Errorf("--notify-listen takes writes, and --read-only refuses them")
+	case deployTimes && cfg.Deploys == "":
+		err = fmt.Errorf("--deploy-before and --deploy-after go with --deploys, the file deploys are read from")
 	case cfg.MCPCompare != "" && len(cfg.Editors)+len(cfg.Admins) == 0:
 		err = fmt.Errorf("--mcp-compare needs --editors or --admins: without roles, whoever may change anything is an admin, and anyone who reaches /mcp could run PromQL with lapilli's access")
 	}
@@ -705,7 +719,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	}
 	cfg.RuleRE, cfg.Incidents, cfg.Impact, cfg.ImpactFor = f.ruleRE, f.incidents, f.impact, f.impactFor
 	cfg.Options, cfg.Step, cfg.Loc, cfg.Slack = f.opts, f.step, f.loc, f.slackFile
-	cfg.Options.DeployAfter, cfg.RunbookAnnotations = deployAfter, f.runbooks
+	cfg.Options.DeployBefore, cfg.Options.DeployAfter, cfg.RunbookAnnotations = deployBefore, deployAfter, f.runbooks
 	cfg.Late = f.late
 	cfg.OnCall = f.onCall
 	cfg.Timeout, cfg.Parallel = f.timeout, f.parallel

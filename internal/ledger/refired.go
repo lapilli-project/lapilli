@@ -90,9 +90,10 @@ func (l *Ledger) LastNotified(ctx context.Context) (map[string]time.Time, error)
 	return out, rows.Err()
 }
 
-// LastDeploy is when the latest deploy kept started; zero for none.
-func (l *Ledger) LastDeploy(ctx context.Context) (time.Time, error) {
+// LastDeploy is when the latest deploy kept that started by now started;
+// zero for none.
+func (l *Ledger) LastDeploy(ctx context.Context, now time.Time) (time.Time, error) {
 	var at sql.NullInt64
-	err := l.r.QueryRowContext(ctx, "SELECT max(start_at) FROM deploys").Scan(&at)
+	err := l.r.QueryRowContext(ctx, "SELECT max(start_at) FROM deploys WHERE start_at <= ?", now.Unix()).Scan(&at)
 	return fromNull(at), err
 }

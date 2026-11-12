@@ -250,11 +250,11 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		return err
 	}
 	excuses := Excusing(quiet, unix(lo), unix(hi))
-	deployed, err := l.deploysMeeting(t.ctx, t, lo, hi, o.DeployAfter)
+	deployed, err := l.deploysMeeting(t.ctx, t, lo, hi, o.DeployBefore, o.DeployAfter)
 	if err != nil {
 		return err
 	}
-	deploying := during(deployed, o.DeployAfter)
+	deploying := during(deployed, o.DeployBefore, o.DeployAfter)
 	rows, err := t.QueryContext(t.ctx, `SELECT f.id, f.series_id, r.name, f.start_at, f.end_at, f.white, f.refired, f.excused, f.deploy, s.labels
 		FROM firings f JOIN series s ON s.id = f.series_id JOIN rules r ON r.id = f.rule_id
 		WHERE f.start_at >= ? AND f.start_at <= ? ORDER BY f.series_id, f.start_at, f.id`, lo, hi)

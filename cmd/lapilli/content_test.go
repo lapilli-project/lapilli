@@ -230,3 +230,25 @@ func TestRunbookAnnotations(t *testing.T) {
 		t.Error("an annotation name with a space taken")
 	}
 }
+
+// --deploy-before and --deploy-after go with --deploys; each is a day at
+// most. --runbook-base is an https URL with no user name.
+func TestServeDeployAndRunbookFlags(t *testing.T) {
+	deploys := write(t, "deploys.yaml", "deploys: []\n")
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--deploy-after", "5m"}, "go with --deploys"},
+		{[]string{"--deploy-before", "5m"}, "go with --deploys"},
+		{[]string{"--deploys", deploys, "--deploy-before", "25h"}, "a day at most"},
+		{[]string{"--runbook-base", "http://git.example.com/"}, "https"},
+		{[]string{"--runbook-base", "https://u@git.example.com/"}, "user name"},
+	} {
+		var out, errs bytes.Buffer
+		args := append([]string{"serve", "--prometheus", "http://127.0.0.1:1", "--rules", deploys}, c.args...)
+		if code := run(args, &out, &errs); code != 2 || !strings.Contains(errs.String(), c.want) {
+			t.Errorf("%v: exit %d, %s", c.args, code, errs.String())
+		}
+	}
+}

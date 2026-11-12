@@ -128,7 +128,7 @@ func TestLoadDeploys(t *testing.T) {
 		return p
 	}
 	write("checkout.txt", "4f2a9c1 2026-11-01T10:00:00Z\nb7e2d40 2026-11-02T11:30:00Z\n")
-	ds, err := LoadDeploys(write("deploys.yaml", `deploys:
+	ds, _, err := LoadDeploys(write("deploys.yaml", `deploys:
   - labels: {service: checkout, namespace: shop}
     history: checkout.txt
   - labels: {namespace: payments}
@@ -152,12 +152,32 @@ func TestLoadDeploys(t *testing.T) {
 		"a label not a string": "deploys:\n  - {labels: {service: [a, b]}, start: 2026-11-02T09:00:00Z}\n",
 	} {
 		write("bad.txt", "4f2a9c1 2026-11-01T10:00:00Z\nrm -rf / 2026-11-01T10:00:00Z\n")
-		if _, err := LoadDeploys(write("d.yaml", text)); err == nil {
+		if _, _, err := LoadDeploys(write("d.yaml", text)); err == nil {
 			t.Errorf("%s: taken", name)
 		}
 	}
+	// A history is a regular file beside the deploys file or below it, by
+	// a relative path: never an absolute one, one climbing out, or a link
+	// out; what is refused says the name given, not where it led.
+	os.Mkdir(filepath.Join(dir, "sub"), 0o755)
+	write("sub/h.txt", "4f2a9c1 2026-11-01T10:00:00Z\n")
+	if ds, _, err := LoadDeploys(write("d.yaml", "deploys:\n  - {labels: {service: a}, history: sub/h.txt}\n")); err != nil || len(ds) != 1 {
+		t.Errorf("a history below: %+v %v", ds, err)
+	}
+	outside := t.TempDir()
+	os.WriteFile(filepath.Join(outside, "secret"), []byte("4f2a9c1 2026-11-01T10:00:00Z\n"), 0o644)
+	os.Symlink(filepath.Join(outside, "secret"), filepath.Join(dir, "link.txt"))
+	os.Mkdir(filepath.Join(dir, "adir"), 0o755)
+	for _, h := range []string{filepath.Join(outside, "secret"), "../" + filepath.Base(outside) + "/secret", "sub/../../x", "link.txt", "adir"} {
+		_, _, err := LoadDeploys(write("d.yaml", "deploys:\n  - {labels: {service: a}, history: \""+h+"\"}\n"))
+		if err == nil {
+			t.Errorf("history %s taken", h)
+		} else if strings.Contains(err.Error(), outside) && !strings.HasPrefix(h, "/") {
+			t.Errorf("history %s: the error says where it led: %v", h, err)
+		}
+	}
 	// Empty, it is no deploys: the file owns them.
-	if ds, err := LoadDeploys(write("d.yaml", "deploys: []\n")); err != nil || len(ds) != 0 {
+	if ds, _, err := LoadDeploys(write("d.yaml", "deploys: []\n")); err != nil || len(ds) != 0 {
 		t.Errorf("an empty list: %+v %v", ds, err)
 	}
 }
@@ -453,5 +473,24 @@ func TestDashboardMetrics(t *testing.T) {
 	}
 	if d.UID != "lapilli" || queries < 20 {
 		t.Errorf("uid %q, %d queries", d.UID, queries)
+	}
+}
+
+// Without --deploys, a ledger that keeps deploys says so on the status,
+// with how to take them away; given a file again, the status clears.
+func TestDeploysUnread(t *testing.T) {
+	s := nocServer(t)
+	ctx := context.Background()
+	file := s.cfg.Deploys
+	s.cfg.Deploys = ""
+	s.jobs(ctx, false)
+	_, body, _ := get(t, s.Handler(), "/runs")
+	if !strings.Contains(body, "--deploys isn&#39;t given") || !strings.Contains(body, "deploys: []") {
+		t.Errorf("/runs without --deploys: %s", regexp.MustCompile(`(?s)class="(?:bad|status)[^>]*>.{0,300}`).FindString(body))
+	}
+	s.cfg.Deploys = file
+	s.jobs(ctx, false)
+	if _, body, _ = get(t, s.Handler(), "/runs"); strings.Contains(body, "--deploys isn&#39;t given") {
+		t.Error("the status kept saying so with --deploys given")
 	}
 }

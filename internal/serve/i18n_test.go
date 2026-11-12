@@ -150,7 +150,7 @@ func pagesServer(t *testing.T) *Server {
 	}
 	// A deploy of search while Errors fired for it (docs/design/noc.md).
 	o.DeployAfter = 10 * time.Minute
-	if _, err := s.l.SyncDeploys(ctx, []ledger.Deploy{{Start: now.Add(-50 * time.Hour), Labels: map[string]string{"service": "search"}, Revision: "4f2a9c1"}}, o); err != nil {
+	if _, err := s.l.SyncDeploys(ctx, []ledger.Deploy{{Start: now.Add(-50 * time.Hour), Labels: map[string]string{"service": "search"}, Revision: "4f2a9c1"}}, o, ledger.DeploysRead{}); err != nil {
 		t.Fatal(err)
 	}
 	read := s.onCallRead("primary")

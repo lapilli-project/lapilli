@@ -91,12 +91,12 @@ func (s *Server) nocMetrics(ctx context.Context, b *bytes.Buffer, rep *verdict.R
 		for _, rr := range rep.Rules {
 			fmt.Fprintf(b, "lapilli_rule_caught_during_deploys{%s} %d\n", ruleSeries(rr), rr.DeploysCaught)
 		}
-		last, err := s.l.LastDeploy(ctx)
-		if err != nil {
+		if last, err := s.l.LastDeploy(ctx, s.now()); err != nil {
 			return err
+		} else if !last.IsZero() {
+			family("lapilli_serve_deploys_last_timestamp_seconds", "When the latest deploy the deploys file holds that has started started, in Unix seconds.")
+			fmt.Fprintf(b, "lapilli_serve_deploys_last_timestamp_seconds %d\n", last.Unix())
 		}
-		family("lapilli_serve_deploys_last_timestamp_seconds", "When the latest deploy the deploys file holds started, in Unix seconds.")
-		fmt.Fprintf(b, "lapilli_serve_deploys_last_timestamp_seconds %d\n", unixOr0(last))
 	}
 
 	// The weeks with a re-fire, of the twelve whole weeks before this one.

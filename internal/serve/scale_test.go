@@ -89,7 +89,7 @@ func TestPagesScale(t *testing.T) {
 	}
 	o.DeployAfter = 10 * time.Minute
 	began = time.Now()
-	if _, err := s.l.SyncDeploys(ctx, deploys, o); err != nil {
+	if _, err := s.l.SyncDeploys(ctx, deploys, o, ledger.DeploysRead{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.l.JudgePending(ctx, o); err != nil {

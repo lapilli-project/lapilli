@@ -16,6 +16,7 @@ import (
 var undo017 = []string{
 	"DROP INDEX firings_refired",
 	"DROP TABLE deploys",
+	"DROP TABLE deploy_labels",
 	"ALTER TABLE firings DROP COLUMN deploy",
 	"ALTER TABLE days DROP COLUMN deploy",
 	"ALTER TABLE days DROP COLUMN deploy_white",
@@ -97,7 +98,7 @@ func TestMigrate017(t *testing.T) {
 	}
 	// Deploys read mark its firings: the checkout deploy at 10:20 reaches
 	// the firing at 10:30, ten minutes after.
-	if _, err := l.SyncDeploys(ctx, []Deploy{{Start: day.Add(10*time.Hour + 20*time.Minute), Labels: map[string]string{"namespace": "shop"}}}, o); err != nil {
+	if _, err := l.SyncDeploys(ctx, []Deploy{{Start: day.Add(10*time.Hour + 20*time.Minute), Labels: map[string]string{"namespace": "shop"}}}, o, DeploysRead{}); err != nil {
 		t.Fatal(err)
 	}
 	rep, err = l.Report(ctx, day, day.Add(24*time.Hour), o, false)

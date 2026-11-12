@@ -309,6 +309,12 @@ type Server struct {
 	// passedOver is how many ids the incidents file has that the ledger
 	// holds from people, as the last read of it found.
 	passedOver atomic.Int64
+	// deploysRead is when the deploys file was last read, and kept, in
+	// Unix seconds; 0 before it was.
+	deploysRead atomic.Int64
+	// deploysUnread is set once a ledger keeping deploys with no
+	// --deploys to read was logged.
+	deploysUnread atomic.Bool
 	// slackTried is when the worker last tried to post the digest.
 	slackTried time.Time
 	status     status
