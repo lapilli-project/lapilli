@@ -67,6 +67,12 @@ spec:
             {{- with $s.checkContent.scrapeInterval }}
             - {{ printf "--scrape-interval=%s" . | quote }}
             {{- end }}
+            {{- with $s.checkContent.runbookAnnotations }}
+            - {{ printf "--runbook-annotations=%s" (join "," .) | quote }}
+            {{- end }}
+            {{- with $s.checkContent.runbookBase }}
+            - {{ printf "--runbook-base=%s" . | quote }}
+            {{- end }}
             {{- end }}
             - {{ printf "--timeout=%dm" (int .Values.timeoutMinutes) | quote }}
             {{- with $s.userHeader }}
@@ -119,6 +125,15 @@ spec:
             {{- end }}
             {{- if $s.onCall.configMap.name }}
             - {{ printf "--on-call=/etc/lapilli/on-call/%s" $s.onCall.configMap.key | quote }}
+            {{- end }}
+            {{- if ($s.deploys).configMap.name }}
+            - {{ printf "--deploys=/etc/lapilli/deploys/%s" $s.deploys.configMap.key | quote }}
+            {{- with $s.deploys.before }}
+            - {{ printf "--deploy-before=%s" . | quote }}
+            {{- end }}
+            {{- with $s.deploys.after }}
+            - {{ printf "--deploy-after=%s" . | quote }}
+            {{- end }}
             {{- end }}
             {{- if $s.trackers.tokenSecret.name }}
             - {{ printf "--tasks-token-file=/var/run/lapilli/tasks-token/%s" $s.trackers.tokenSecret.key | quote }}
@@ -327,6 +342,11 @@ spec:
               mountPath: /etc/lapilli/on-call
               readOnly: true
             {{- end }}
+            {{- if ($s.deploys).configMap.name }}
+            - name: deploys
+              mountPath: /etc/lapilli/deploys
+              readOnly: true
+            {{- end }}
             {{- if $s.onCall.secret }}
             - name: on-call-secrets
               mountPath: /var/run/lapilli/on-call
@@ -434,6 +454,11 @@ spec:
         - name: on-call
           configMap:
             name: {{ $s.onCall.configMap.name }}
+        {{- end }}
+        {{- if ($s.deploys).configMap.name }}
+        - name: deploys
+          configMap:
+            name: {{ $s.deploys.configMap.name }}
         {{- end }}
         {{- if $s.onCall.secret }}
         - name: on-call-secrets

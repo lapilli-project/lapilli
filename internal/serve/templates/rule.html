@@ -12,9 +12,21 @@
 {{if .Notified}}<p>{{if .Notifications}}{{t "Over twelve weeks, %d notifications were sent for it: %d of them repeats, %d while people slept and %d more off hours; %d were for firings that caught nothing, and %d tell of no firing Lapilli has." .Notifications .Repeats .NotifiedAsleep .NotifiedOffHours .ForNothing .Untied}}{{with .RepeatsForNothing}} {{t "Of the repeats, %d were for firings that caught nothing: what repeat_interval cost." .}}{{end}} {{t "By receiver: %s." .Receivers}}{{else}}{{t "No notification was sent for it over twelve weeks."}}{{end}}
 <span class="quiet">{{t "Notifications are counted from %s, when the first told of it." (day $loc .NotifiedSince)}}</span></p>{{end}}
 {{template "spark" .Spark}}
+{{if .Deploys}}<p>{{t "Of its firings over twelve weeks, %d came during a deploy of what they are about, %d of them catching something: precision %s with them, %s without." .Deploys .DeploysCaught .Precision .Without}}</p>{{end}}
 {{with .Suggestion}}<p class="hint">{{.}}</p>{{end}}
 {{if and .Incidents (not .SomeRules)}}<p>{{t "It caught %d incidents: %d before any other rule, %d that no other rule caught (a noisy rule's catch doesn't count beside another's)." .Incidents .First .Alone}}</p>{{end}}
 {{if .Spare}}<p class="hint">{{t "Another rule caught every one of them as soon, at the same severity or above: taken away, none would have been missed or caught later."}}</p>{{end}}
+
+{{with .Refires}}<section class="card" id="refired">
+<h2 id="refired-h">{{t "Refired"}}</h2>
+<p>{{t "A firing re-fired when it started within %s of the same alert last resolving." .Within}} {{if $.View.Refired}}{{t "Over twelve weeks, %d of its %d firings re-fired (%s)." $.View.Refired $.View.Firings $.View.RefiredShare}}{{else}}{{t "None of its firings re-fired in twelve weeks."}}{{end}}{{with $.View.RefiredOf}} {{t "%d of the last %d whole weeks had one." $.View.RefiredWeeks .}}{{end}}</p>
+{{if $.View.Refired}}<div class="scroll" tabindex="0" role="region" aria-labelledby="refired-h"><table>
+<thead><tr><th scope="col">{{t "Week"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "Refired"}}</th><th scope="col" class="n">{{t "Share"}}</th></tr></thead>
+<tbody>{{range .Weeks}}<tr><th scope="row">{{.Week}}</th><td class="n">{{.Firings}}</td><td class="n">{{.Refired}}</td><td class="n">{{.Shared}}</td></tr>{{end}}</tbody>
+</table></div>
+{{with .Worst}}<h3>{{t "Its alerts that re-fired most"}}</h3>
+<ul class="plain">{{range .}}<li>{{range $k, $v := .Labels}}<code>{{$k}}={{$v}}</code> {{end}}{{t "%d times" .Refired}}</li>{{end}}</ul>{{end}}{{end}}
+</section>{{end}}
 
 {{with .Says}}<section class="card says" id="says">
 <h2>{{t "What it says"}}</h2>

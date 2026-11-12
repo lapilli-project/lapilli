@@ -156,6 +156,13 @@ serve:
     enabled: true
     severities: []      # the severities the team uses; any other is a problem
     scrapeInterval: ""  # for the range check; Prometheus's own, each job's, unless given
+    # The annotations a rule's runbook is read from, the first it has:
+    # runbook_url, runbook, playbook_url and playbook when empty. A path in
+    # the rules' repository, with an anchor or not, is a runbook too, and
+    # a link under runbookBase when it is given: an https URL such as
+    # https://git.example.com/org/monitoring/blob/main/.
+    runbookAnnotations: []
+    runbookBase: ""
   # Versions of the rules, read from the git repository they are kept in
   # (docs/design/history.md). An init container clones the branch and runs
   # recipes/versions/git.sh on each start, so a first start's backfill
@@ -395,6 +402,20 @@ serve:
     # required with tracker.
     image: ""
     resources: {}
+  # When services and namespaces were deployed (docs/design/noc.md): a
+  # ConfigMap holding --deploys's file under key, and beside it the
+  # histories it names (what recipes/versions/argocd.sh or flux.sh write),
+  # mounted at /etc/lapilli/deploys/ and read again each run (only when it
+  # changed). A firing that starts during a deploy of what it is about
+  # (it agrees on every label both have, one at least), from before its
+  # start to after its end, is shown apart, and judged as ever. Off when
+  # the ConfigMap isn't named.
+  deploys:
+    configMap:
+      name: ""
+      key: deploys.yaml
+    before: ""  # 0 when empty; a day at most
+    after: ""   # 10m when empty; a day at most
   # On-call schedules read from the iCalendar feeds on-call tools export
   # (see the README's "Shifts from on-call schedules"): --on-call's file, the
   # key of a ConfigMap, and a Secret holding the feeds' URLs and tokens,
@@ -625,10 +646,14 @@ serve:
     size: 2Gi
     storageClass: ""   # the cluster's default when empty
     existingClaim: ""
-  # A Prometheus Operator ServiceMonitor for /metrics.
+  # A Prometheus Operator ServiceMonitor for /metrics. Its labels are
+  # honoured (a rule's team stays team, not exported_team), and a scrape
+  # of more than sampleLimit series is refused, which /metrics, bounded
+  # by the rules and 500 incidents, stays under.
   serviceMonitor:
     enabled: false
     interval: 1m
+    sampleLimit: 50000
     labels: {}
 
 # A ConfigMap holding a Grafana dashboard of lapilli's metrics (from serve's

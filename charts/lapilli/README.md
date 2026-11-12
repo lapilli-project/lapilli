@@ -573,9 +573,31 @@ as it does the chart's `lapilli.dev/image-digest` annotation. With
 empty it: the chart refuses another tag with its own digest, which would
 run its own image under another version's name.
 
-`serve.serviceMonitor.enabled` makes a ServiceMonitor, and
+`serve.deploys` names a ConfigMap holding the file `--deploys` reads, and
+beside it the histories it names, what `recipes/versions/argocd.sh` or
+`flux.sh` write for an Application, a Kustomization or a HelmRelease: each
+deploy of the service or namespace its labels say. A firing that came during
+one (agreeing with it on every label both have), from `before` (0) before
+its start to `after` (10m) after its end, is marked, judged as ever, and
+shown apart: a column and an order on the rules, a tile on the overview,
+the digest, `/metrics` and `/api/v1/summary`, with precision both ways.
+`serve.checkContent.runbookAnnotations` names the annotations a runbook is
+read from, the first a rule has; `serve.checkContent.runbookBase`, an https
+URL a runbook that is a path in the rules' repository is a link under.
+
+`serve.serviceMonitor.enabled` makes a ServiceMonitor, which honours
+lapilli's labels (`honorLabels`: a rule's `team` stays `team`, not
+`exported_team` beside a target label of that name) and refuses a scrape of
+more than `serve.serviceMonitor.sampleLimit` (50,000) series; and
 `dashboard.enabled` a ConfigMap holding a Grafana dashboard for Grafana's
-sidecar.
+sidecar, of what an operations team measures its alerts by: critical
+firings that caught something, precision, re-fires and the whole weeks
+with one, firings during deploys and precision without them, what caught
+nothing by when it came, impact windows and incidents caught, caught only
+by noisy rules or missed, and the lead of their first alert, each rule's
+scorecard, and how long since each source last brought something. Its
+variables pick a team, severities, and the severities counted as critical.
+`test/e2e/dashboard.sh` asks each of its queries of a real Grafana.
 
 Webhook URLs and tokens are read from Secrets and never shown.
 See [values.yaml](https://github.com/lapilli-project/lapilli/blob/main/charts/lapilli/values.yaml)

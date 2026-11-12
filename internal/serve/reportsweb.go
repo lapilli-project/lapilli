@@ -83,7 +83,7 @@ type reportLine struct {
 }
 
 // digestSections are what the weekly digest holds.
-var digestSections = []string{"summary", "noise", "missed", "woken", "notifications", "replay", "sources", "tasks", "suggestions"}
+var digestSections = []string{"summary", "noise", "missed", "woken", "refired", "deploys", "notifications", "replay", "sources", "tasks", "suggestions"}
 
 // reportLines are the reports kept, and first, when it sends anywhere, the
 // weekly digest the flags define.

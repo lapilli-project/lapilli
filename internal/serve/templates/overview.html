@@ -96,13 +96,13 @@
 </section>
 {{end}}
 
-<h2>{{t "By week"}}</h2>
-<div class="scroll"><table>
-<thead><tr><th scope="col">{{t "Week of"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th><th scope="col" class="n">{{t "Precision"}}</th><th scope="col" class="n">{{t "Noisy rules"}}</th><th scope="col" class="n">{{t "Incidents"}}</th><th scope="col" class="n">{{t "✓ Caught"}}</th><th scope="col" class="n">{{t "◐ Noisy only"}}</th><th scope="col" class="n">{{t "✗ Missed"}}</th></tr></thead>
+<h2 id="by-week">{{t "By week"}}</h2>
+<div class="scroll" tabindex="0" role="region" aria-labelledby="by-week"><table>
+<thead><tr><th scope="col">{{t "Week of"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th><th scope="col" class="n">{{t "Precision"}}</th><th scope="col" class="n">{{t "Noisy rules"}}</th><th scope="col" class="n">{{t "Refired"}}</th>{{if .Deploys}}<th scope="col" class="n">{{t "During deploys"}}</th>{{end}}<th scope="col" class="n">{{t "Incidents"}}</th><th scope="col" class="n">{{t "✓ Caught"}}</th><th scope="col" class="n">{{t "◐ Noisy only"}}</th><th scope="col" class="n">{{t "✗ Missed"}}</th></tr></thead>
 <tbody>{{range .Weeks}}
 <tr{{if .Current}} class="current"{{end}}>
   <td class="t">{{day $loc .Start}}{{if .Current}} {{t "(so far)"}}{{end}}{{if .Changed}} <span class="tag" title="{{t "the rules changed this week"}}">{{t "rules changed"}}</span>{{end}}</td>
-  <td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Precision}}</td><td class="n">{{.Noisy}}</td>
+  <td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Precision}}</td><td class="n">{{.Noisy}}</td><td class="n">{{.Refired}}</td>{{if $.View.Deploys}}<td class="n">{{.Deploys}}</td>{{end}}
   <td class="n">{{.Incidents}}</td><td class="n">{{.Caught}}</td><td class="n">{{.NoisyOnly}}</td><td class="n{{if .Missed}} bad{{end}}">{{.Missed}}</td>
 </tr>{{end}}</tbody>
 </table></div>

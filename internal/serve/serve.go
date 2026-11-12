@@ -74,6 +74,16 @@ type Config struct {
 	Incidents string // the incidents file, read again each run
 	Impact    string
 	ImpactFor time.Duration
+	// Deploys is the deploys file, read again each run, which owns the
+	// ledger's deploys (docs/design/noc.md); Options.DeployAfter is how
+	// long after one a firing still came during it.
+	Deploys string
+	// RunbookAnnotations are the annotations a rule's runbook is read
+	// from, the first set: nil for content.RunbookAnnotations. RunbookBase
+	// is an https URL a runbook that is a path in the rules' repository is
+	// a link under (content.RepoLink).
+	RunbookAnnotations []string
+	RunbookBase        string
 
 	// Options are the judging settings from the command line; the UI can
 	// change Lead, Match, RefireWithin and the noisy thresholds.
@@ -319,6 +329,12 @@ type Server struct {
 	// passedOver is how many ids the incidents file has that the ledger
 	// holds from people, as the last read of it found.
 	passedOver atomic.Int64
+	// deploysRead is when the deploys file was last read, and kept, in
+	// Unix seconds; 0 before it was.
+	deploysRead atomic.Int64
+	// deploysUnread is set once a ledger keeping deploys with no
+	// --deploys to read was logged.
+	deploysUnread atomic.Bool
 	// slackTried is when the worker last tried to post the digest.
 	slackTried time.Time
 	status     status

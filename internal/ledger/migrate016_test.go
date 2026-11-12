@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -87,7 +88,7 @@ func TestMigrate016(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v := schemaVersion(t); v != 16 {
+	if v := schemaVersion(t); v < 16 {
 		t.Fatalf("schema files: %d", v)
 	}
 	var ids []int64
@@ -105,7 +106,7 @@ func TestMigrate016(t *testing.T) {
 	if err := l.SetProposalTask(ctx, pid, ids[2]); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range append(undo016, "PRAGMA user_version = 15") {
+	for _, q := range append(append(slices.Clone(undo017), undo016...), "PRAGMA user_version = 15") {
 		if _, err := l.w.ExecContext(ctx, q); err != nil {
 			t.Fatal(q, err)
 		}
@@ -126,8 +127,8 @@ func TestMigrate016(t *testing.T) {
 	defer l2.Close()
 	var v int
 	l2.w.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v)
-	if v != 16 {
-		t.Errorf("migrated to %d", v)
+	if want := schemaVersion(t); v != want {
+		t.Errorf("migrated to %d, want %d", v, want)
 	}
 	ts, err := l2.Tasks(ctx, TaskQuery{})
 	if err != nil || len(ts) != 2 || ts[0].ID+ts[1].ID != ids[0]+ids[1] || ts[0].Assignee != "ana" {

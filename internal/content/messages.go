@@ -5,7 +5,7 @@ package content
 var messages = map[string]string{
 	NoText:          "no summary or description",
 	NoRunbook:       "no runbook link",
-	RunbookNotURL:   "a runbook link that isn't an http or https URL",
+	RunbookNotURL:   "a runbook that isn't a link: an http or https URL, or a path in a repository",
 	TemplateError:   "a template that doesn't parse",
 	NoSeverity:      "no severity",
 	UnknownSeverity: "a severity not in --severities",

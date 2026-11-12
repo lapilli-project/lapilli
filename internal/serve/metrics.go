@@ -39,31 +39,34 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			s.oops(w, r, err)
 			return
 		}
+		// Each rule's team, a label of its series, so a dashboard can
+		// show one team's.
+		own, err := s.owners(ctx)
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
 		sum := map[int64]*verdict.RuleResult{}
 		for _, d := range days {
 			rr := sum[d.Rule]
 			if rr == nil {
-				rr = &verdict.RuleResult{Rule: table[d.Rule].Name, Severity: table[d.Rule].Severity}
+				name := table[d.Rule].Name
+				rr = &verdict.RuleResult{Rule: name, Severity: table[d.Rule].Severity, Team: own.teamOf(name)}
 				sum[d.Rule] = rr
 			}
 			rr.Firings += d.Firings
 			rr.White += d.White
 			rr.Black += d.Black()
 			rr.Refired += d.Refired
+			rr.DuringDeploys += d.Deploy
+			rr.DeploysCaught += d.DeployWhite
 		}
 		rep := &verdict.Report{}
-		noisyRule := map[string]bool{}
 		for _, rr := range sum {
 			rr.Noisy = noisy(rr.Firings, rr.White, o)
-			noisyRule[rr.Rule] = rr.Noisy
 			rep.Rules = append(rep.Rules, *rr)
 		}
 		// Each rule's by its team's hours, or the server's.
-		own, err := s.owners(ctx)
-		if err != nil {
-			s.oops(w, r, err)
-			return
-		}
 		if sc := own.schedules(o.Hours); !sc.none() {
 			if err := s.l.CountHours(ctx, rep.Rules, s.l.Midnight(today-6), s.l.Midnight(today+1), sc.of); err != nil {
 				s.oops(w, r, err)
@@ -77,10 +80,19 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			s.oops(w, r, err)
 			return
 		}
+		// A catch by a rule noisy in the incident's week, as /incidents,
+		// the overview and the summary judge it: not by the seven days to
+		// now, so an incident is in the same state everywhere.
+		t, err := s.tallies(ctx, weeks)
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
 		for _, in := range incs {
 			ir := verdict.IncidentResult{Incident: in.Incident, CaughtBy: slices.Clone(in.CaughtBy)}
+			week := ledger.Week(s.l.Day(in.Start))
 			for i := range ir.CaughtBy {
-				ir.CaughtBy[i].Noisy = noisyRule[ir.CaughtBy[i].Rule]
+				ir.CaughtBy[i].Noisy = t.noisy(week, t.id(ir.CaughtBy[i].Rule))
 			}
 			rep.Incidents = append(rep.Incidents, ir)
 		}
@@ -99,12 +111,18 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			s.oops(w, r, err)
 			return
 		}
+		if err := s.nocMetrics(ctx, &b, rep, own, today); err != nil {
+			s.oops(w, r, err)
+			return
+		}
 		cursor, err := s.l.Cursor(ctx)
 		if err != nil {
 			s.oops(w, r, err)
 			return
 		}
-		fmt.Fprintf(&b, "# HELP lapilli_serve_cursor_timestamp_seconds How far the ledger has firings up to, in Unix seconds.\n# TYPE lapilli_serve_cursor_timestamp_seconds gauge\nlapilli_serve_cursor_timestamp_seconds %d\n", unixOr0(cursor))
+		if !cursor.IsZero() {
+			fmt.Fprintf(&b, "# HELP lapilli_serve_cursor_timestamp_seconds How far the ledger has firings up to, in Unix seconds.\n# TYPE lapilli_serve_cursor_timestamp_seconds gauge\nlapilli_serve_cursor_timestamp_seconds %d\n", cursor.Unix())
+		}
 		s.status.Lock()
 		took := s.status.took
 		runs := map[string]int{}
@@ -148,6 +166,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			for _, src := range srcs {
 				fmt.Fprintf(&b, "lapilli_serve_source_firings{source=%q} %d\n", src.Name, src.Firings)
 			}
+			fmt.Fprintf(&b, "# HELP lapilli_serve_source_quiet_seconds How long a source may go without firings copied in before it is told of (--source-quiet).\n# TYPE lapilli_serve_source_quiet_seconds gauge\nlapilli_serve_source_quiet_seconds %g\n", s.quietAfter().Seconds())
 		}
 		// Notifications as they were sent, once there are any.
 		if p, err := s.notified(ctx); err != nil {
@@ -250,6 +269,13 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", c.ctype)
 	w.Write(c.body)
+	// When the deploys file was last read and kept: what a dashboard says
+	// a job that writes it stopped by. Not a page's: it changes each run.
+	if s.cfg.Deploys != "" {
+		if at := s.deploysRead.Load(); at > 0 {
+			fmt.Fprintf(w, "# HELP lapilli_serve_deploys_read_timestamp_seconds When the deploys file (--deploys) was last read, and what it held kept, in Unix seconds.\n# TYPE lapilli_serve_deploys_read_timestamp_seconds gauge\nlapilli_serve_deploys_read_timestamp_seconds %d\n", at)
+		}
+	}
 	// Read with the file each run, not kept with the ledger's pages.
 	if s.cfg.Incidents != "" {
 		fmt.Fprintf(w, "# HELP lapilli_serve_incidents_passed_over Incidents in the incidents file whose ids the ledger holds from people, and so not read from it.\n# TYPE lapilli_serve_incidents_passed_over gauge\nlapilli_serve_incidents_passed_over %d\n", s.passedOver.Load())

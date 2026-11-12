@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -68,7 +69,7 @@ func TestMigrate015(t *testing.T) {
 	if _, err := l.PutComment(ctx, Comment{On: "task", Key: "1", Body: "Raised it."}, "ana"); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range append(append(undo016, undo015...), "PRAGMA user_version = 14") {
+	for _, q := range append(append(append(slices.Clone(undo017), undo016...), undo015...), "PRAGMA user_version = 14") {
 		if _, err := l.w.ExecContext(ctx, q); err != nil {
 			t.Fatal(q, err)
 		}

@@ -66,19 +66,57 @@ func TestNoText(t *testing.T) {
 
 func TestRunbook(t *testing.T) {
 	for link, want := range map[string][]string{
-		"":                                         {NoRunbook},
-		"runbooks/down.md":                         {RunbookNotURL + ":runbooks/down.md"},
-		"javascript:alert(1)":                      {RunbookNotURL + ":javascript:alert(1)"},
-		"ftp://runbooks.example/down":              {RunbookNotURL + ":ftp://runbooks.example/down"},
-		"https://":                                 {RunbookNotURL + ":https://"},
-		"http://runbooks.example/down":             nil,
-		"https://wiki.example/{{ $labels.job }}":   nil,
-		"{{ $externalURL }}/runbooks/down":         nil, // a template decides: unknown
+		"":                           {NoRunbook},
+		"runbooks/down.md":           nil, // a path in the rules' repository
+		"docs/runbooks/disk.md#full": nil,
+		"/docs/runbooks/#disk-full":  nil,
+		"README.md":                  nil,
+		"check-disk":                 {RunbookNotURL + ":check-disk"}, // a word alone
+		"https://wiki.example.com@evil.example/x": {RunbookNotURL + ":https://wiki.example.com@evil.example/x"}, // a user name
+		"N/A":                                    {RunbookNotURL + ":N/A"}, // what teams write in a runbook's place
+		"n/a":                                    {RunbookNotURL + ":n/a"},
+		"...":                                    {RunbookNotURL + ":..."},
+		"TBD#":                                   {RunbookNotURL + ":TBD#"},
+		"todo#later":                             {RunbookNotURL + ":todo#later"},
+		"none.":                                  {RunbookNotURL + ":none."},
+		"TODO.":                                  {RunbookNotURL + ":TODO."},
+		"-/-":                                    {RunbookNotURL + ":-/-"},
+		"docs/../../x.md":                        {RunbookNotURL + ":docs/../../x.md"},
+		"docs/runbooks/":                         nil,
+		"ask in #oncall":                         {RunbookNotURL + ":ask in #oncall"},
+		"//evil.example/x":                       {RunbookNotURL + "://evil.example/x"},
+		"javascript:alert(1)":                    {RunbookNotURL + ":javascript:alert(1)"},
+		"ftp://runbooks.example/down":            {RunbookNotURL + ":ftp://runbooks.example/down"},
+		"https://":                               {RunbookNotURL + ":https://"},
+		"http://runbooks.example/down":           nil,
+		"https://wiki.example/{{ $labels.job }}": nil,
+		"{{ $externalURL }}/runbooks/down":       nil, // a template decides: unknown
 		"https://wiki.example/x?a={{ $value }}&b=": nil,
 	} {
 		r := good("Runbook")
 		r.Says.Runbook = link
 		one(t, r, Options{}, want...)
+	}
+	// Read from the annotations named, the first the rule has; a cloud's
+	// alarm, which has none, by the link its source gives.
+	r := good("Annotated")
+	r.Says.Runbook, r.Says.Annotations = "", map[string]string{"playbook": "docs/playbooks/down.md#restart", "dashboard": "https://grafana.example/d/x"}
+	one(t, r, Options{})                                             // playbook is among the defaults
+	one(t, r, Options{Runbooks: []string{"runbook_url"}}, NoRunbook) // not when only runbook_url is named
+	r.Says.Annotations["wiki"] = "not a link"
+	one(t, r, Options{Runbooks: []string{"wiki", "playbook"}}, RunbookNotURL+":not a link")
+	if got := Runbook(r.Says, []string{"dashboard"}); got != "https://grafana.example/d/x" {
+		t.Errorf("Runbook by dashboard: %q", got)
+	}
+	// Past the 32 annotations kept, a runbook named may have been cut: the
+	// source's own (runbook_url or runbook, always read) stands for it.
+	cut := rules.Says{Runbook: "https://runbooks.example/a", Annotations: map[string]string{"a00": "v"}, AnnotationsCut: true}
+	if got := Runbook(cut, []string{"wiki"}); got != cut.Runbook {
+		t.Errorf("past the cap: %q", got)
+	}
+	cloud := rules.Says{Runbook: "https://runbooks.example/cpu"}
+	if got := Runbook(cloud, []string{"playbook"}); got != cloud.Runbook {
+		t.Errorf("a cloud's alarm's runbook: %q", got)
 	}
 	g := rules.Rule{Name: "Latency", Labels: map[string]string{"severity": "warning"}, Cloud: "google", Unsupported: "x",
 		Says: rules.Says{Summary: "Latency", Runbook: "${policy.user_label.runbook}", Template: rules.TemplateGoogle}}
@@ -419,14 +457,17 @@ func TestMessages(t *testing.T) {
 // A runbook is shown as a link only when it is one to follow as it is.
 func TestLink(t *testing.T) {
 	for link, want := range map[string]bool{
-		"https://runbooks.example/down":          true,
-		"http://runbooks.example/down":           true,
-		"javascript:alert(1)":                    false,
-		"//evil.example/x":                       false,
-		"https://wiki.example/{{ $labels.job }}": false,
-		"https://x.example/${policy.name}":       false,
-		"runbooks/down.md":                       false,
-		"":                                       false,
+		"https://runbooks.example/down":           true,
+		"http://runbooks.example/down":            true,
+		"javascript:alert(1)":                     false,
+		"//evil.example/x":                        false,
+		"https://wiki.example/{{ $labels.job }}":  false,
+		"https://x.example/${policy.name}":        false,
+		"https://wiki.example.com@evil.example/x": false, // a user name
+		"https://u:p@runbooks.example/down":       false,
+		"runbooks/down.md":                        false, // a path, shown as one
+		"docs/runbooks/disk.md#full":              false,
+		"":                                        false,
 	} {
 		if got := Link(rules.Says{Runbook: link}); (got != "") != want {
 			t.Errorf("%q: %q", link, got)
@@ -491,5 +532,73 @@ func TestTemplateStrict(t *testing.T) {
 		if _, err := Template(c.lang, c.text); err != nil {
 			t.Errorf("read as a rule's: %s %q: %v", c.lang, c.text, err)
 		}
+	}
+}
+
+// A runbook that is a path in the rules' repository is a link under
+// --runbook-base, on its host alone; the base is an https URL with no user
+// name, query or anchor.
+func TestRepoLink(t *testing.T) {
+	base := "https://git.example.com/org/monitoring/blob/main"
+	for runbook, want := range map[string]string{
+		"docs/runbooks/disk.md#full": "https://git.example.com/org/monitoring/blob/main/docs/runbooks/disk.md#full",
+		"/docs/runbooks/disk.md":     "https://git.example.com/org/monitoring/blob/main/docs/runbooks/disk.md",
+		"README.md":                  "https://git.example.com/org/monitoring/blob/main/README.md",
+		"N/A":                        "",
+		"docs/../../x.md":            "",
+		"https://runbooks.example/x": "",
+		"//evil.example/x":           "",
+	} {
+		if got := RepoLink(base, runbook); got != want {
+			t.Errorf("%q: %q, want %q", runbook, got, want)
+		}
+	}
+	if got := RepoLink("", "README.md"); got != "" {
+		t.Errorf("no base: %q", got)
+	}
+	for _, bad := range []string{"http://git.example.com/", "https://u@git.example.com/", "https://git.example.com/?x=1", "https://git.example.com/#a", "git.example.com", "https:///x"} {
+		if CheckBase(bad) == nil {
+			t.Errorf("--runbook-base %q taken", bad)
+		}
+	}
+	if err := CheckBase(base); err != nil {
+		t.Error(err)
+	}
+}
+
+// A rule with more than 32 other annotations keeps its runbook: the
+// runbook annotations are kept first, and one named past the cap falls back
+// to runbook_url.
+func TestRunbookPastCap(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("groups:\n- name: g\n  rules:\n  - alert: A\n    expr: up == 0\n    labels: {severity: page}\n    annotations:\n      summary: x\n      description: y\n      runbook_url: https://runbooks.example/a\n      zz_wiki: https://wiki.example/a\n")
+	for i := 0; i < 40; i++ {
+		fmt.Fprintf(&b, "      a%02d: v\n", i)
+	}
+	rs, err := rules.Parse([]byte(b.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Runbook(rs[0].Says, nil); got != "https://runbooks.example/a" {
+		t.Errorf("runbook_url past the cap: %q", got)
+	}
+	if got := checks(Check(rs, Options{}), 0); len(got) != 0 {
+		t.Errorf("findings: %v", got)
+	}
+	if !rs[0].Says.AnnotationsCut || rs[0].Says.Annotations["runbook_url"] == "" {
+		t.Errorf("runbook_url not kept first past the cap: cut %v", rs[0].Says.AnnotationsCut)
+	}
+	// playbook, a default name, is kept first too: there is no fallback
+	// for it, runbook_url and runbook being empty.
+	pb := strings.Replace(b.String(), "runbook_url: https://runbooks.example/a", "playbook: docs/playbooks/a.md#restart", 1)
+	rs2, err := rules.Parse([]byte(pb))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Runbook(rs2[0].Says, nil); got != "docs/playbooks/a.md#restart" {
+		t.Errorf("playbook past the cap: %q", got)
+	}
+	if got := Runbook(rs[0].Says, []string{"zz_wiki"}); got != "https://runbooks.example/a" {
+		t.Errorf("a name cut, falling back: %q", got)
 	}
 }

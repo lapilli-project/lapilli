@@ -33,6 +33,11 @@ type Options struct {
 	RefireWithin time.Duration
 	// UnknownLen is how long an incident with no end is taken to last.
 	UnknownLen time.Duration
+	// DeployBefore and DeployAfter are how long before a deploy's start,
+	// and after its end, a firing still counts as during it (lapilli
+	// serve's --deploy-before and --deploy-after): marked, not judged
+	// apart.
+	DeployBefore, DeployAfter time.Duration
 	// A rule is noisy when it fired at least NoisyFirings times and under
 	// NoisyPrecision of those firings caught anything: it fires whatever
 	// happens. Zero means the defaults.
@@ -115,6 +120,13 @@ type RuleResult struct {
 	OffHoursBlack int `json:"off_hours_black"`
 	Asleep        int `json:"asleep"`
 	AsleepBlack   int `json:"asleep_black"`
+	// Team is, in lapilli serve, the team that owns the rule.
+	Team string `json:"team,omitempty"`
+	// DuringDeploys are, in lapilli serve, the firings that came during a
+	// deploy of what they are about, and DeploysCaught those of them that
+	// caught something: in Firings and White, and shown apart.
+	DuringDeploys int `json:"during_deploys,omitempty"`
+	DeploysCaught int `json:"during_deploys_caught,omitempty"`
 }
 
 // Precision is the share of firings that caught something; ok is false

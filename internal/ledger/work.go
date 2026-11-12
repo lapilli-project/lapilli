@@ -1087,7 +1087,9 @@ func pend(t *txn, spans [][2]int64) error {
 	return setMeta(t.ctx, t, "pending", string(b))
 }
 
-// JudgePending gives stones again over the spans pended, a week at a time.
+// JudgePending gives stones again over the spans pended, a week's worth at
+// a time: one long span a week at a time, or many short ones, up to
+// pendingPerWrite, in one write, the list left written back once.
 func (l *Ledger) JudgePending(ctx context.Context, o verdict.Options) error {
 	const week = 7 * 86400
 	for {
@@ -1106,15 +1108,19 @@ func (l *Ledger) JudgePending(ctx context.Context, o verdict.Options) error {
 				done = true
 				return nil
 			}
-			s := spans[0]
-			hi := min(s[1], s[0]+week-1)
-			if err := l.judge(t, s[0], hi, o); err != nil {
-				return err
-			}
-			if hi >= s[1] {
-				spans = spans[1:]
-			} else {
-				spans[0][0] = hi + 1
+			judged := int64(0)
+			for n := 0; len(spans) > 0 && judged < week && n < pendingPerWrite; n++ {
+				s := spans[0]
+				hi := min(s[1], s[0]+week-1-judged)
+				if err := l.judge(t, s[0], hi, o); err != nil {
+					return err
+				}
+				judged += hi - s[0] + 1
+				if hi >= s[1] {
+					spans = spans[1:]
+				} else {
+					spans[0][0] = hi + 1
+				}
 			}
 			b, err := json.Marshal(spans)
 			if err != nil {
@@ -1127,6 +1133,10 @@ func (l *Ledger) JudgePending(ctx context.Context, o verdict.Options) error {
 		}
 	}
 }
+
+// pendingPerWrite is how many spans JudgePending judges in one write at
+// most.
+const pendingPerWrite = 256
 
 // Task is a follow-up: something someone is to do about a rule or an
 // incident.

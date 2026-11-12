@@ -18,6 +18,7 @@ import (
 	"text/template"
 	"text/template/parse"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"lapilli.dev/internal/rules"
@@ -79,8 +80,40 @@ type Finding struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// RunbookAnnotations are the annotations a rule's runbook is read from by
+// default, the first it has: Prometheus's and Grafana's own, and those
+// teams use beside them.
+var RunbookAnnotations = []string{"runbook_url", "runbook", "playbook_url", "playbook"}
+
+// Runbook is the runbook a rule says: the first of the annotations names
+// (RunbookAnnotations when nil) it has, for a rule whose text is in
+// annotations; for one whose isn't, such as a cloud's alarm, the link its
+// source gives.
+func Runbook(s rules.Says, names []string) string {
+	if s.Annotations == nil {
+		return s.Runbook
+	}
+	if names == nil {
+		names = RunbookAnnotations
+	}
+	for _, n := range names {
+		if v := strings.TrimSpace(s.Annotations[n]); v != "" {
+			return s.Annotations[n]
+		}
+	}
+	// Past the annotations kept, a runbook named may have been cut: the
+	// source's own, runbook_url or runbook, which is always read.
+	if s.AnnotationsCut {
+		return s.Runbook
+	}
+	return ""
+}
+
 // Options are what the checks know besides the rules.
 type Options struct {
+	// Runbooks are the annotations a runbook is read from, the first a
+	// rule has: nil for RunbookAnnotations.
+	Runbooks []string
 	// Severities are the severities the team uses (--severities); others
 	// are a problem of fact. Empty, a rare one is a guess.
 	Severities []string
@@ -180,17 +213,18 @@ func checkOne(r rules.Rule, o Options, sevs map[string]*sevCount, dups []string)
 	if r.Says.Description == "" && (r.Says.Summary == "" || r.Says.Template == "") && !r.Says.TextUnknown {
 		add(NoText, "")
 	}
-	switch ok, known := linkOK(r.Says.Runbook, r.Says.Template); {
-	case r.Says.Runbook == "" && r.Says.TextUnknown:
-	case r.Says.Runbook == "":
+	runbook := Runbook(r.Says, o.Runbooks)
+	switch ok, known := linkOK(runbook, r.Says.Template); {
+	case runbook == "" && r.Says.TextUnknown:
+	case runbook == "":
 		add(NoRunbook, "")
 	case known && !ok:
-		add(RunbookNotURL, r.Says.Runbook)
+		add(RunbookNotURL, runbook)
 	}
 	// The labels named where a missing one would show: not in an if
 	// or with's condition, nor under one whose condition names it.
 	var named []string
-	for _, text := range []string{r.Says.Summary, r.Says.Description, r.Says.Runbook} {
+	for _, text := range []string{r.Says.Summary, r.Says.Description, runbook} {
 		names, err := templateNames(r.Says.Template, text, false)
 		if err != nil {
 			add(TemplateError, err.Error())
@@ -411,8 +445,87 @@ func Unprintable(r rune) bool {
 	return r < ' ' || r >= 0x7f && r < 0xa0 || r >= 0x200e && r <= 0x200f || r >= 0x202a && r <= 0x202e || r >= 0x2066 && r <= 0x2069
 }
 
-// linkOK is whether a runbook link is an http or https URL; known is false
-// when a template decides where it starts, as {{ $externalURL }}/x does.
+// repoPath is a runbook kept beside the rules, as a path in their
+// repository, with an anchor or not: docs/runbooks/disk.md#full.
+var repoPath = regexp.MustCompile(`^/?[\w.~-]+(?:/[\w.~%-]+)*/?(?:#[\w.~%:/-]*)?$`)
+
+// fileName is a file's name with its extension: runbook.md.
+var fileName = regexp.MustCompile(`^[\w~-][\w.~-]*\.[A-Za-z0-9]+$`)
+
+// placeholders are what teams write where a runbook would go, which no
+// path is, in any letter case, a full stop after them or not.
+var placeholders = []string{"n/a", "na", "n.a", "none", "null", "nil", "tbd", "tba", "todo", "fixme", "wip", "later", "unknown", "xxx", "-", "?"}
+
+// RepoPath reports whether a runbook is a path in a repository: a file's
+// name with its extension, or names joined by a slash, at least one of
+// them with a letter or a digit, before any anchor; no "..", and nothing
+// teams write in a runbook's place (N/A, TODO, ...).
+func RepoPath(link string) bool {
+	if !repoPath.MatchString(link) || strings.Contains(link, "//") {
+		return false
+	}
+	path, _, _ := strings.Cut(link, "#")
+	if slices.Contains(placeholders, strings.ToLower(strings.TrimRight(path, "."))) {
+		return false
+	}
+	var names []string
+	for _, n := range strings.Split(path, "/") {
+		switch {
+		case n == "..":
+			return false
+		case n != "":
+			names = append(names, n)
+		}
+	}
+	alnum := slices.ContainsFunc(names, func(n string) bool {
+		return strings.ContainsFunc(n, func(r rune) bool { return r < 128 && (unicode.IsLetter(r) || unicode.IsDigit(r)) })
+	})
+	if !alnum {
+		return false
+	}
+	// Names joined by a slash, a directory's (docs/), or a file's name.
+	return len(names) > 1 || strings.Contains(path, "/") || fileName.MatchString(names[0])
+}
+
+// CheckBase refuses a base for runbooks in the rules' repository
+// (--runbook-base) that isn't an https URL with a host, or that has a
+// user name, a query or an anchor.
+func CheckBase(base string) error {
+	u, err := url.Parse(base)
+	switch {
+	case err != nil, u.Scheme != "https", u.Host == "", u.Opaque != "":
+		return fmt.Errorf("--runbook-base %q: want an https URL, such as https://git.example.com/org/monitoring/blob/main/", base)
+	case u.User != nil:
+		return fmt.Errorf("--runbook-base %q: a user name in a link makes it look like one site's and go to another's", base)
+	case u.RawQuery != "" || u.Fragment != "":
+		return fmt.Errorf("--runbook-base %q: no query or anchor: a runbook's path and anchor go after it", base)
+	}
+	return nil
+}
+
+// RepoLink is a runbook that is a path in the rules' repository as a link
+// under base (CheckBase's), on base's host; "" when it isn't one, or base
+// is "".
+func RepoLink(base, runbook string) string {
+	if base == "" || !RepoPath(runbook) {
+		return ""
+	}
+	b, err := url.Parse(strings.TrimSuffix(base, "/") + "/")
+	if err != nil || CheckBase(base) != nil {
+		return ""
+	}
+	path, anchor, _ := strings.Cut(strings.TrimLeft(runbook, "/"), "#")
+	u := b.JoinPath(path)
+	u.Fragment = anchor
+	if u.Scheme != "https" || u.Host != b.Host || u.User != nil {
+		return ""
+	}
+	return u.String()
+}
+
+// linkOK is whether a runbook link is an http or https URL, or a path in a
+// repository; known is false when a template decides where it starts, as
+// {{ $externalURL }}/x does.
 func linkOK(link, lang string) (ok, known bool) {
 	link = strings.TrimSpace(link)
 	if link == "" {
@@ -431,11 +544,16 @@ func linkOK(link, lang string) (ok, known bool) {
 		}
 		link = act.ReplaceAllString(link, "x")
 	}
+	if RepoPath(link) {
+		return true, true
+	}
 	u, err := url.Parse(link)
 	if err != nil {
 		return false, true
 	}
-	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != "", true
+	// A user name makes a link look like one site's and go to another's:
+	// https://wiki.example.com@evil.example/ is evil.example's.
+	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && u.User == nil, true
 }
 
 var (
@@ -692,7 +810,7 @@ func Link(s rules.Says) string {
 	if goAction.MatchString(s.Runbook) || googleVar.MatchString(s.Runbook) || strings.ContainsAny(s.Runbook, " \t\r\n") {
 		return ""
 	}
-	if ok, known := linkOK(s.Runbook, ""); ok && known {
+	if ok, known := linkOK(s.Runbook, ""); ok && known && !RepoPath(s.Runbook) {
 		return s.Runbook
 	}
 	return ""

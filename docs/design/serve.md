@@ -76,7 +76,8 @@ transaction to replace a period's firings in).
 |---|---|
 | `versions`, `docs` | a version of the rules, from when it was seen, with the documents it was read from (each kept once, gzipped) and the name each rule is judged under |
 | `rules`, `series` | a rule; an alert, that is a rule and a label set |
-| `firings` | an alert from start to end, and its stones: `white`, `refired` |
+| `firings` | an alert from start to end, and its stones: `white`, `refired`; and whether it came during a deploy (`deploy`, [noc.md](noc.md)) |
+| `deploys` | when a service or namespace was deployed, as `--deploys` reads it |
 | `incidents` | from the incidents file, the UI, or `--impact`; for an impact window, whether it was confirmed or dismissed, and whether it counts |
 | `catches` | each rule's first firing that caught an incident |
 | `days`, `weeks` | each rule's stones by the day and the week its firings started |
@@ -376,7 +377,8 @@ a language is one JSON file of translations.
 - `/api/v1/report?from=&to=`: `lapilli verdict --json`'s report for a period
   (up to 31 days with every firing, a year without: `firings=false`).
   `/api/v1/incidents` (GET, POST, PUT, DELETE), `/api/v1/rules`, `/runs`,
-  `/settings`, `/outcomes`.
+  `/settings`, `/outcomes`, `/summary` (each week and team, for dashboards
+  and other tools: [noc.md](noc.md)).
 - `/metrics`: `--metrics` over the last seven days, and `serve`'s own (the
   cursor, how long the last run took, runs by kind and result; the firings
   the reviewed changes avoided, the changes by how they came out, when the

@@ -81,6 +81,25 @@ func TestPagesScale(t *testing.T) {
 	if budget := time.Duration(float64(2*time.Second) * max(1, k) * slow); took > budget {
 		t.Errorf("a quiet window took %s, over %s", took, budget)
 	}
+	// A deploy of each service every few hours, read from the deploys
+	// file all at once, the firings they meet marked (docs/design/noc.md).
+	var deploys []ledger.Deploy
+	for at := start; at.Before(now); at = at.Add(time.Duration(1+r.IntN(6)) * time.Hour) {
+		deploys = append(deploys, ledger.Deploy{Start: at, End: at.Add(5 * time.Minute), Labels: map[string]string{"service": services[r.IntN(len(services))]}})
+	}
+	o.DeployAfter = 10 * time.Minute
+	began = time.Now()
+	if _, err := s.l.SyncDeploys(ctx, deploys, o, ledger.DeploysRead{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.JudgePending(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	took = time.Since(began)
+	t.Logf("%-32s %s", fmt.Sprintf("%d deploys, marked", len(deploys)), took.Round(time.Microsecond))
+	if budget := time.Duration(float64(5*time.Second) * max(1, k) * slow); took > budget {
+		t.Errorf("deploys took %s, over %s", took, budget)
+	}
 	// Windows every month, by cron, and a team's, each judged again over the
 	// twelve weeks, to the end (docs/design/serveops.md).
 	labelled, err := s.l.PutTeam(ctx, ledger.Team{Name: "billing", Labels: incident.Labels{"service": {"billing"}}}, "ana")
@@ -223,7 +242,8 @@ func TestPagesScale(t *testing.T) {
 	h := s.Handler()
 	for _, path := range []string{"/", "/?team=team3", "/rules", "/rules?weeks=12", "/rules?team=team3", "/rules/Rule007", "/incidents", "/incidents?weeks=12",
 		"/firings?day=2026-11-02", "/tasks", "/tasks?status=all", "/tasks/7", "/windows", "/windows/3", "/teams",
-		"/outcomes", "/api/v1/outcomes", "/metrics", "/api/v1/report?firings=false", "/api/v1/report", "/roles", "/reports", "/reports/digest"} {
+		"/outcomes", "/api/v1/outcomes", "/metrics", "/api/v1/report?firings=false", "/api/v1/report", "/roles", "/reports", "/reports/digest",
+		"/rules?sort=refired", "/incidents?team=team3&source=written", "/api/v1/summary?team=*", "/api/v1/summary?from=2025-11-10&team=*"} {
 		s.cache.Lock()
 		s.cache.gen = "" // worked out afresh
 		s.cache.Unlock()

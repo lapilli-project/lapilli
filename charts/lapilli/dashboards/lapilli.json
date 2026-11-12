@@ -7,7 +7,7 @@
   ],
   "timezone": "",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "graphTooltip": 1,
   "time": {
@@ -15,7 +15,7 @@
     "to": "now"
   },
   "refresh": "1h",
-  "description": "Which alerts are worth their page: lapilli's stones, from lapilli serve's /metrics or the CronJob's Pushgateway.",
+  "description": "Which alerts are worth their page, as an operations team measures them: what caught something, re-fired, came off hours or during deploys, and how soon incidents and user impact were caught. From lapilli serve's /metrics (docs/design/noc.md).",
   "links": [
     {
       "title": "lapilli.dev",
@@ -25,6 +25,9 @@
       "targetBlank": true
     }
   ],
+  "annotations": {
+    "list": []
+  },
   "templating": {
     "list": [
       {
@@ -45,27 +48,145 @@
         },
         "query": {
           "query": "label_values(lapilli_rule_firings, instance)",
-          "refId": "I"
+          "refId": "INSTANCE"
         },
         "definition": "label_values(lapilli_rule_firings, instance)",
         "includeAll": true,
         "multi": true,
         "allValue": ".*",
-        "current": {},
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
         "refresh": 2,
         "sort": 1,
+        "hide": 0
+      },
+      {
+        "name": "team",
+        "label": "Team",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(lapilli_rule_firings, team)",
+          "refId": "TEAM"
+        },
+        "definition": "label_values(lapilli_rule_firings, team)",
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "refresh": 2,
+        "sort": 1,
+        "hide": 0
+      },
+      {
+        "name": "severity",
+        "label": "Severity",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(lapilli_rule_firings, severity)",
+          "refId": "SEVERITY"
+        },
+        "definition": "label_values(lapilli_rule_firings, severity)",
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "refresh": 2,
+        "sort": 1,
+        "hide": 0
+      },
+      {
+        "name": "critical",
+        "label": "Critical severities",
+        "type": "custom",
+        "query": "critical,page,error,P1,sev1",
+        "multi": true,
+        "includeAll": false,
+        "current": {
+          "text": [
+            "critical"
+          ],
+          "value": [
+            "critical"
+          ]
+        },
+        "options": [
+          {
+            "text": "critical",
+            "value": "critical",
+            "selected": true
+          },
+          {
+            "text": "page",
+            "value": "page",
+            "selected": false
+          },
+          {
+            "text": "error",
+            "value": "error",
+            "selected": false
+          },
+          {
+            "text": "P1",
+            "value": "P1",
+            "selected": false
+          },
+          {
+            "text": "sev1",
+            "value": "sev1",
+            "selected": false
+          }
+        ],
+        "description": "The severities counted as critical: pick one or several; edit the variable for others.",
         "hide": 0
       }
     ]
   },
-  "annotations": {
-    "list": []
-  },
   "panels": [
     {
+      "type": "row",
+      "title": "The last seven days",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": []
+    },
+    {
       "type": "stat",
-      "title": "Firings, last 7 days",
-      "description": "Times the rules fired in the seven days to the last run.",
+      "title": "Critical firings that caught something",
+      "description": "Of the firings of rules whose severity is one of $critical (or, for a rule whose versions differ, one of them is), the share that caught an incident: what needed someone. A goal such as 80% reads here.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -74,7 +195,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 0
+        "y": 1
       },
       "targets": [
         {
@@ -82,7 +203,139 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(lapilli_rule_firings{instance=~\"$instance\"})",
+          "expr": "sum(lapilli_rule_caught{instance=~\"$instance\",team=~\"$team\",severity=~\"(.+/)?($critical)(/.+)?\"}) / sum(lapilli_rule_firings{instance=~\"$instance\",team=~\"$team\",severity=~\"(.+/)?($critical)(/.+)?\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
+                "color": "green",
+                "value": 0.8
+              }
+            ]
+          },
+          "noValue": "–"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "id": 2
+    },
+    {
+      "type": "stat",
+      "title": "Precision",
+      "description": "Of all the firings, of the severities picked, the share that caught an incident (white stones).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(lapilli_rule_caught{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"}) / sum(lapilli_rule_firings{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
+                "color": "green",
+                "value": 0.8
+              }
+            ]
+          },
+          "noValue": "–"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "id": 3
+    },
+    {
+      "type": "stat",
+      "title": "Firings",
+      "description": "Times the rules fired, judged: quiet windows' excused firings aside.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(lapilli_rule_firings{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"})",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -100,7 +353,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "noValue": "–"
         },
         "overrides": []
       },
@@ -114,23 +368,24 @@
         },
         "colorMode": "value",
         "graphMode": "none",
-        "textMode": "auto"
+        "textMode": "auto",
+        "justifyMode": "auto"
       },
-      "id": 1
+      "id": 4
     },
     {
       "type": "stat",
-      "title": "Precision",
-      "description": "The share of firings that caught an incident (white stones).",
+      "title": "Re-fired",
+      "description": "Firings that started within --refire (1h by default) of the same alert last resolving: flapping.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 6,
-        "y": 0
+        "w": 4,
+        "x": 16,
+        "y": 1
       },
       "targets": [
         {
@@ -138,63 +393,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(lapilli_rule_caught{instance=~\"$instance\"}) / sum(lapilli_rule_firings{instance=~\"$instance\"})",
-          "legendFormat": "",
-          "refId": "A",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "text",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "none",
-        "textMode": "auto"
-      },
-      "id": 2
-    },
-    {
-      "type": "stat",
-      "title": "Incidents missed",
-      "description": "Incidents in the seven days no rule caught.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 12,
-        "y": 0
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(lapilli_incidents{instance=~\"$instance\",state=\"missed\"})",
+          "expr": "sum(lapilli_rule_refired{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"})",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -216,7 +415,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "noValue": "–"
         },
         "overrides": []
       },
@@ -230,14 +430,88 @@
         },
         "colorMode": "value",
         "graphMode": "none",
-        "textMode": "auto"
+        "textMode": "auto",
+        "justifyMode": "auto"
       },
-      "id": 3
+      "id": 5
     },
     {
       "type": "stat",
-      "title": "Since the last run",
-      "description": "lapilli serve runs every hour; the CronJob once a week.",
+      "title": "Weeks with a re-fire",
+      "description": "Of the whole weeks before this one, up to twelve, that the ledger has all of (the second number), how many had a firing that re-fired: a goal of none a week reads 0. Everyone's with every team picked; with one team, its own; with several, the most any of them had, not their weeks together.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max(lapilli_refired_weeks{instance=~\"$instance\",team=~\"$team\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max(lapilli_weeks_counted{instance=~\"$instance\"})",
+          "legendFormat": "of whole weeks",
+          "refId": "B",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "–"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "id": 6
+    },
+    {
+      "type": "stat",
+      "title": "During deploys",
+      "description": "Firings that started during a deploy of what they are about (--deploys), or within --deploy-after of its end: judged as ever, shown apart.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -245,8 +519,1096 @@
       "gridPos": {
         "h": 4,
         "w": 6,
-        "x": 18,
-        "y": 0
+        "x": 0,
+        "y": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(lapilli_rule_firings_during_deploys{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "–"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "id": 7
+    },
+    {
+      "type": "stat",
+      "title": "Precision without deploys",
+      "description": "Precision leaving out the firings during deploys.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(sum(lapilli_rule_caught{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"}) - sum(lapilli_rule_caught_during_deploys{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"})) / (sum(lapilli_rule_firings{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"}) - sum(lapilli_rule_firings_during_deploys{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"}))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
+                "color": "green",
+                "value": 0.8
+              }
+            ]
+          },
+          "noValue": "–"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "id": 8
+    },
+    {
+      "type": "bargauge",
+      "title": "Caught nothing, by when",
+      "description": "Firings that caught nothing, by when they came: while people slept, off hours, at work, by each rule's team's hours or lapilli serve's.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (hours) (lapilli_rule_nothing_by_hours{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"})",
+          "legendFormat": "{{hours}}",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "showUnfilled": true
+      },
+      "id": 9
+    },
+    {
+      "type": "row",
+      "title": "Incidents and user impact, the last seven days",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "id": 10,
+      "panels": []
+    },
+    {
+      "type": "bargauge",
+      "title": "Impact windows, by what caught them",
+      "description": "Each window --impact found of the team picked (one of its rules caught it, or it has a value of a label the team owns by): caught, caught only by noisy rules, or missed. Each counted once, whichever teams own it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count by (state) (lapilli_incident_state{instance=~\"$instance\",source=\"impact\"} * on (instance, incident) group_left () max by (instance, incident) (lapilli_incident_team{instance=~\"$instance\",team=~\"$team\"}))",
+          "legendFormat": "{{state}}",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "missed"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "caught"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "showUnfilled": true
+      },
+      "id": 11
+    },
+    {
+      "type": "stat",
+      "title": "Lead, impact windows",
+      "description": "How long before the start the first alert of a rule that isn't noisy came, the median of those caught: negative when it came after. A goal such as -5m (within five minutes) reads here.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 8,
+        "y": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "quantile(0.5, lapilli_incident_lead_seconds{instance=~\"$instance\",source=\"impact\"} * on (instance, incident) group_left () max by (instance, incident) (lapilli_incident_team{instance=~\"$instance\",team=~\"$team\"}))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": -300
+              },
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "noValue": "–"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "id": 12
+    },
+    {
+      "type": "bargauge",
+      "title": "Incidents written down, by what caught them",
+      "description": "Each incident written down of the team picked (one of its rules caught it, or it has a value of a label the team owns by): caught, caught only by noisy rules, or missed. Each counted once, whichever teams own it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 12,
+        "y": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count by (state) (lapilli_incident_state{instance=~\"$instance\",source=\"written\"} * on (instance, incident) group_left () max by (instance, incident) (lapilli_incident_team{instance=~\"$instance\",team=~\"$team\"}))",
+          "legendFormat": "{{state}}",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "missed"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "caught"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "showUnfilled": true
+      },
+      "id": 13
+    },
+    {
+      "type": "stat",
+      "title": "Lead, incidents written down",
+      "description": "How long before the start the first alert of a rule that isn't noisy came, the median of those caught: negative when it came after. A goal such as -5m (within five minutes) reads here.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 20,
+        "y": 10
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "quantile(0.5, lapilli_incident_lead_seconds{instance=~\"$instance\",source=\"written\"} * on (instance, incident) group_left () max by (instance, incident) (lapilli_incident_team{instance=~\"$instance\",team=~\"$team\"}))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": -300
+              },
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "noValue": "–"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "id": 14
+    },
+    {
+      "type": "table",
+      "title": "Each incident, the last seven days",
+      "description": "Each incident and impact window of the team picked: how it was caught, and the lead of its first alert of a rule that isn't noisy.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (incident, source, state) (lapilli_incident_state{instance=~\"$instance\"} * on (instance, incident) group_left () max by (instance, incident) (lapilli_incident_team{instance=~\"$instance\",team=~\"$team\"}))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (incident, source) (lapilli_incident_lead_seconds{instance=~\"$instance\"} * on (instance, incident) group_left () max by (instance, incident) (lapilli_incident_team{instance=~\"$instance\",team=~\"$team\"}))",
+          "legendFormat": "",
+          "refId": "B",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Lead"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      },
+      "id": 15,
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value #A": true
+            },
+            "renameByName": {
+              "incident": "Incident",
+              "source": "From",
+              "state": "Caught",
+              "Value #B": "Lead"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Seven days at a time",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "id": 16,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Stones",
+      "description": "Firings that caught something (white) and caught nothing (black), seven days to each scrape.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(lapilli_rule_caught{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"})",
+          "legendFormat": "○ caught",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(lapilli_rule_nothing{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"})",
+          "legendFormat": "● nothing",
+          "refId": "B",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "id": 17
+    },
+    {
+      "type": "timeseries",
+      "title": "Re-fired and during deploys",
+      "description": "Firings that re-fired, and those during deploys, seven days to each scrape.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(lapilli_rule_refired{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"})",
+          "legendFormat": "re-fired",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(lapilli_rule_firings_during_deploys{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"})",
+          "legendFormat": "during deploys",
+          "refId": "B",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "id": 18
+    },
+    {
+      "type": "row",
+      "title": "The rules, the last seven days",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 19,
+      "panels": []
+    },
+    {
+      "type": "table",
+      "title": "Scorecard",
+      "description": "Each rule over the seven days to the last run, the most black stones first. Weeks re-fired are of the twelve whole weeks before this one.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (rule, severity, team) (lapilli_rule_firings{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (rule, severity, team) (lapilli_rule_caught{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"})",
+          "legendFormat": "",
+          "refId": "B",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (rule, severity, team) (lapilli_rule_nothing{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"})",
+          "legendFormat": "",
+          "refId": "C",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (rule, severity, team) (lapilli_rule_refired{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"})",
+          "legendFormat": "",
+          "refId": "D",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (rule, severity, team) (lapilli_rule_refired_weeks{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"})",
+          "legendFormat": "",
+          "refId": "E",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (rule, severity, team) (lapilli_rule_firings_during_deploys{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\"})",
+          "legendFormat": "",
+          "refId": "F",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (rule, severity, team) (lapilli_rule_nothing_by_hours{instance=~\"$instance\",team=~\"$team\",severity=~\"$severity\",hours=\"asleep\"})",
+          "legendFormat": "",
+          "refId": "G",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "id": 20,
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "Fired",
+              "Value #B": "○ Caught",
+              "Value #C": "● Nothing",
+              "Value #D": "Re-fired",
+              "Value #E": "Weeks re-fired",
+              "Value #F": "During deploys",
+              "Value #G": "● Asleep",
+              "rule": "Rule",
+              "severity": "Severity",
+              "team": "Team"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "● Nothing",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Sources",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 45
+      },
+      "id": 21,
+      "panels": []
+    },
+    {
+      "type": "table",
+      "title": "Since each source last brought something",
+      "description": "How long since firings were last copied in from each source, a notification last came from each alert manager or cloud, the deploys file was last read, and the ledger's runs last reached.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 46
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "label_replace(time() - max by (source) (lapilli_serve_source_last_timestamp_seconds{instance=~\"$instance\"}), \"kind\", \"firings copied in\", \"\", \"\") or label_replace(time() - max by (source) (lapilli_serve_notifications_last_timestamp_seconds{instance=~\"$instance\"}), \"kind\", \"notifications\", \"\", \"\") or label_replace(label_replace(time() - max(lapilli_serve_deploys_read_timestamp_seconds{instance=~\"$instance\"}), \"kind\", \"deploys file read\", \"\", \"\"), \"source\", \"deploys\", \"\", \"\") or label_replace(label_replace(time() - max(lapilli_serve_cursor_timestamp_seconds{instance=~\"$instance\"}), \"kind\", \"runs\", \"\", \"\"), \"source\", \"ledger\", \"\", \"\")",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Since"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true
+      },
+      "id": 22,
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "source": "Source",
+              "kind": "What",
+              "Value": "Since"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "Since",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Sources gone quiet",
+      "description": "Sources nothing has been copied in from for longer than --source-quiet (26h by default): the job copying them may have stopped.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 46
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count((time() - lapilli_serve_source_last_timestamp_seconds{instance=~\"$instance\"}) > on (instance) group_left () lapilli_serve_source_quiet_seconds{instance=~\"$instance\"}) or vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "–"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "id": 23
+    },
+    {
+      "type": "stat",
+      "title": "Runs failed, the last day",
+      "description": "Runs of lapilli serve that failed in the last day.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 46
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(increase(lapilli_serve_runs_total{instance=~\"$instance\",result=\"failed\"}[1d])) or vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "noValue": "–",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "id": 24
+    },
+    {
+      "type": "stat",
+      "title": "Since the last run",
+      "description": "How long since lapilli last ran; none before its first run.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 50
       },
       "targets": [
         {
@@ -268,15 +1630,12 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "text",
                 "value": null
-              },
-              {
-                "color": "orange",
-                "value": 7200
               }
             ]
-          }
+          },
+          "noValue": "no run yet"
         },
         "overrides": []
       },
@@ -290,261 +1649,10 @@
         },
         "colorMode": "value",
         "graphMode": "none",
-        "textMode": "auto"
+        "textMode": "auto",
+        "justifyMode": "auto"
       },
-      "id": 4
-    },
-    {
-      "type": "timeseries",
-      "title": "Stones, seven days at a time",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "White: firings that caught an incident. Black: firings with nothing wrong. Each point counts the seven days before it.",
-      "gridPos": {
-        "h": 9,
-        "w": 12,
-        "x": 0,
-        "y": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(lapilli_rule_caught{instance=~\"$instance\"})",
-          "legendFormat": "○ caught",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(lapilli_rule_nothing{instance=~\"$instance\"})",
-          "legendFormat": "● nothing",
-          "refId": "B"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 10
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "id": 5
-    },
-    {
-      "type": "timeseries",
-      "title": "Incidents, seven days at a time",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "Caught: by a rule that isn't noisy. Noisy only: only by rules that fire whatever happens. Missed: by none.",
-      "gridPos": {
-        "h": 9,
-        "w": 12,
-        "x": 12,
-        "y": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (state) (lapilli_incidents{instance=~\"$instance\"})",
-          "legendFormat": "{{state}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 10
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "id": 6
-    },
-    {
-      "type": "table",
-      "title": "Rules, last 7 days, the noisiest first",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 11,
-        "w": 24,
-        "x": 0,
-        "y": 13
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (rule, severity) (lapilli_rule_firings{instance=~\"$instance\"})",
-          "legendFormat": "",
-          "refId": "A",
-          "instant": true,
-          "range": false,
-          "format": "table"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (rule, severity) (lapilli_rule_caught{instance=~\"$instance\"})",
-          "legendFormat": "",
-          "refId": "B",
-          "instant": true,
-          "range": false,
-          "format": "table"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (rule, severity) (lapilli_rule_nothing{instance=~\"$instance\"})",
-          "legendFormat": "",
-          "refId": "C",
-          "instant": true,
-          "range": false,
-          "format": "table"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (rule, severity) (lapilli_rule_refired{instance=~\"$instance\"})",
-          "legendFormat": "",
-          "refId": "D",
-          "instant": true,
-          "range": false,
-          "format": "table"
-        }
-      ],
-      "transformations": [
-        {
-          "id": "merge",
-          "options": {}
-        },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true
-            },
-            "renameByName": {
-              "Value #A": "Fired",
-              "Value #B": "○ Caught",
-              "Value #C": "● Nothing",
-              "Value #D": "Refired",
-              "rule": "Rule",
-              "severity": "Severity"
-            }
-          }
-        },
-        {
-          "id": "sortBy",
-          "options": {
-            "sort": [
-              {
-                "field": "● Nothing",
-                "desc": true
-              }
-            ]
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "options": {
-        "showHeader": true
-      },
-      "id": 7
-    },
-    {
-      "type": "timeseries",
-      "title": "Detection delay",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "From each incident's start to the first alert from a rule that isn't noisy; negative when the alert came first.",
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 24
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "lapilli_incident_detection_delay_seconds{instance=~\"$instance\"}",
-          "legendFormat": "{{incident}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": {
-            "drawStyle": "points",
-            "pointSize": 6
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "right"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "id": 8
+      "id": 25
     }
   ]
 }
