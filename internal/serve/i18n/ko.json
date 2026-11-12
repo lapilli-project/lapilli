@@ -1083,7 +1083,5 @@
  "there are %d teams: name each once": "팀은 %d개예요. 각 팀을 한 번씩만 주세요",
  "a deploy starts by an hour after the deploys file is read: %s is later": "배포는 배포 파일을 읽은 뒤 한 시간 안에 시작해야 해요. %s 는 그보다 늦어요",
  "the deploys' labels are %d MB in all at most, counted for each deploy": "배포의 레이블은 배포마다 세어 모두 합쳐 %dMB까지예요",
- "--deploy-before and --deploy-after are a day at most": "--deploy-before 와 --deploy-after 는 하루까지예요",
- "Over twelve weeks, %d of its %d firings re-fired (%s), in %d of the twelve weeks.": "12주 동안 발화 %[2]d번 중 %[1]d번이 재발화였어요(%[3]s). 12주 중 %[4]d주에 있었어요.",
- "%s of firings, %d of %d weeks": "발화의 %s, %d/%d주"
+ "--deploy-before and --deploy-after are a day at most": "--deploy-before 와 --deploy-after 는 하루까지예요"
 }

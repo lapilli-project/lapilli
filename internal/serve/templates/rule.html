@@ -18,9 +18,9 @@
 {{if .Spare}}<p class="hint">{{t "Another rule caught every one of them as soon, at the same severity or above: taken away, none would have been missed or caught later."}}</p>{{end}}
 
 {{with .Refires}}<section class="card" id="refired">
-<h2>{{t "Refired"}}</h2>
-<p>{{t "A firing re-fired when it started within %s of the same alert last resolving." .Within}} {{if $.View.Refired}}{{t "Over twelve weeks, %d of its %d firings re-fired (%s), in %d of the twelve weeks." $.View.Refired $.View.Firings $.View.RefiredShare $.View.RefiredWeeks}}{{else}}{{t "None of its firings re-fired in twelve weeks."}}{{end}}</p>
-{{if $.View.Refired}}<div class="scroll"><table>
+<h2 id="refired-h">{{t "Refired"}}</h2>
+<p>{{t "A firing re-fired when it started within %s of the same alert last resolving." .Within}} {{if $.View.Refired}}{{t "Over twelve weeks, %d of its %d firings re-fired (%s)." $.View.Refired $.View.Firings $.View.RefiredShare}}{{else}}{{t "None of its firings re-fired in twelve weeks."}}{{end}}{{with $.View.RefiredOf}} {{t "%d of the last %d whole weeks had one." $.View.RefiredWeeks .}}{{end}}</p>
+{{if $.View.Refired}}<div class="scroll" tabindex="0" role="region" aria-labelledby="refired-h"><table>
 <thead><tr><th scope="col">{{t "Week"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "Refired"}}</th><th scope="col" class="n">{{t "Share"}}</th></tr></thead>
 <tbody>{{range .Weeks}}<tr><th scope="row">{{.Week}}</th><td class="n">{{.Firings}}</td><td class="n">{{.Refired}}</td><td class="n">{{.Shared}}</td></tr>{{end}}</tbody>
 </table></div>

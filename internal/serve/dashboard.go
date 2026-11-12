@@ -316,7 +316,9 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	if v.Deploys, err = s.l.HasDeploys(ctx); err != nil {
 		return nil, err
 	}
-	v.Tiles = s.tiles(l, ws, last, before, asleep, v.Deploys)
+	v.Tiles = s.tiles(l, ws, last, before, asleep, v.Deploys, func() (int, int) {
+		return t.refireWeeks(t.weeks, func(int64) bool { return true }) // the team's, when one is picked
+	})
 	if s.checking() {
 		// Only a week checked to its end: one checked in part says less than
 		// it seems to.
@@ -420,7 +422,7 @@ func outcomeLines(l string, out *outcomes) []outcomeLine {
 }
 
 // tiles are the headline numbers.
-func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep string, deploys bool) []tile {
+func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep string, deploys bool, refired func() (int, int)) []tile {
 	var out []tile
 	add := func(label string, val func(*weekView) (float64, bool), show func(float64) string, delta func(a, b float64) string, better int, of string) {
 		x := tile{Label: tr(l, label), Value: "–", Of: of}
@@ -483,14 +485,12 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep 
 	}
 	// Re-fires: how many, and in how many of the whole weeks shown, for a
 	// team that keeps to none a week.
-	with := 0
-	for _, w := range ws[:len(ws)-1] {
-		if w.Refired > 0 {
-			with++
-		}
+	weeksOf := ""
+	if with, of := refired(); of > 0 {
+		weeksOf = tr(l, "%d of the last %d whole weeks had one", with, of)
 	}
 	add("Refired", func(w *weekView) (float64, bool) { return float64(w.Refired), true }, count,
-		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, tr(l, "%d of the last %d whole weeks had one", with, len(ws)-1))
+		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, weeksOf)
 	if deploys {
 		add("During deploys", func(w *weekView) (float64, bool) { return float64(w.Deploys), true }, count,
 			func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, 0, tr(l, "firings; precision %s without them", last.Without()))

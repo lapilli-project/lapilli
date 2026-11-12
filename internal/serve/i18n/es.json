@@ -1083,7 +1083,5 @@
  "there are %d teams: name each once": "hay %d equipos: nombra cada uno una vez",
  "a deploy starts by an hour after the deploys file is read: %s is later": "un despliegue empieza como tarde una hora después de leer el archivo de despliegues: %s es posterior",
  "the deploys' labels are %d MB in all at most, counted for each deploy": "las etiquetas de los despliegues ocupan %d MB en total como mucho, contadas en cada despliegue",
- "--deploy-before and --deploy-after are a day at most": "--deploy-before y --deploy-after son un día como mucho",
- "Over twelve weeks, %d of its %d firings re-fired (%s), in %d of the twelve weeks.": "En doce semanas, %d de sus %d disparos fueron redisparos (%s), en %d de las doce semanas.",
- "%s of firings, %d of %d weeks": "%s de los disparos, %d de %d semanas"
+ "--deploy-before and --deploy-after are a day at most": "--deploy-before y --deploy-after son un día como mucho"
 }

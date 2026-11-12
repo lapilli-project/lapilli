@@ -125,13 +125,46 @@
       {
         "name": "critical",
         "label": "Critical severities",
-        "type": "textbox",
-        "query": "critical",
+        "type": "custom",
+        "query": "critical,page,error,P1,sev1",
+        "multi": true,
+        "includeAll": false,
         "current": {
-          "text": "critical",
-          "value": "critical"
+          "text": [
+            "critical"
+          ],
+          "value": [
+            "critical"
+          ]
         },
-        "description": "A regular expression of the severities counted as critical, such as critical|page.",
+        "options": [
+          {
+            "text": "critical",
+            "value": "critical",
+            "selected": true
+          },
+          {
+            "text": "page",
+            "value": "page",
+            "selected": false
+          },
+          {
+            "text": "error",
+            "value": "error",
+            "selected": false
+          },
+          {
+            "text": "P1",
+            "value": "P1",
+            "selected": false
+          },
+          {
+            "text": "sev1",
+            "value": "sev1",
+            "selected": false
+          }
+        ],
+        "description": "The severities counted as critical: pick one or several; edit the variable for others.",
         "hide": 0
       }
     ]
@@ -153,7 +186,7 @@
     {
       "type": "stat",
       "title": "Critical firings that caught something",
-      "description": "Of the firings of rules whose severity is in $critical, the share that caught an incident: what needed someone. A goal such as 80% reads here.",
+      "description": "Of the firings of rules whose severity is one of $critical (or, for a rule whose versions differ, one of them is), the share that caught an incident: what needed someone. A goal such as 80% reads here.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -170,7 +203,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(lapilli_rule_caught{instance=~\"$instance\",team=~\"$team\",severity=~\"$critical\"}) / sum(lapilli_rule_firings{instance=~\"$instance\",team=~\"$team\",severity=~\"$critical\"})",
+          "expr": "sum(lapilli_rule_caught{instance=~\"$instance\",team=~\"$team\",severity=~\"(.+/)?($critical)(/.+)?\"}) / sum(lapilli_rule_firings{instance=~\"$instance\",team=~\"$team\",severity=~\"(.+/)?($critical)(/.+)?\"})",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -196,7 +229,8 @@
                 "value": 0.8
               }
             ]
-          }
+          },
+          "noValue": "–"
         },
         "overrides": []
       },
@@ -261,7 +295,8 @@
                 "value": 0.8
               }
             ]
-          }
+          },
+          "noValue": "–"
         },
         "overrides": []
       },
@@ -318,7 +353,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "noValue": "–"
         },
         "overrides": []
       },
@@ -379,7 +415,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "noValue": "–"
         },
         "overrides": []
       },
@@ -401,7 +438,7 @@
     {
       "type": "stat",
       "title": "Weeks with a re-fire",
-      "description": "Of the whole weeks before this one, up to twelve, how many had a firing that re-fired: a goal of none a week reads 0. Of the team picked, or everyone's.",
+      "description": "Of the whole weeks before this one, up to twelve, that the ledger has all of (the second number), how many had a firing that re-fired: a goal of none a week reads 0. Everyone's with every team picked; with one team, its own; with several, the most any of them had, not their weeks together.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -423,6 +460,17 @@
           "refId": "A",
           "instant": true,
           "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max(lapilli_weeks_counted{instance=~\"$instance\"})",
+          "legendFormat": "of whole weeks",
+          "refId": "B",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -440,7 +488,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "noValue": "–"
         },
         "overrides": []
       },
@@ -497,7 +546,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "noValue": "–"
         },
         "overrides": []
       },
@@ -562,7 +612,8 @@
                 "value": 0.8
               }
             ]
-          }
+          },
+          "noValue": "–"
         },
         "overrides": []
       },
@@ -670,7 +721,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "count by (state) (max by (incident, state) (lapilli_incident_state{instance=~\"$instance\",team=~\"$team\",source=\"impact\"}))",
+          "expr": "count by (state) (lapilli_incident_state{instance=~\"$instance\",source=\"impact\"} * on (instance, incident) group_left () max by (instance, incident) (lapilli_incident_team{instance=~\"$instance\",team=~\"$team\"}))",
           "legendFormat": "{{state}}",
           "refId": "A",
           "instant": true,
@@ -757,7 +808,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "quantile(0.5, max by (incident) (lapilli_incident_lead_seconds{instance=~\"$instance\",team=~\"$team\",source=\"impact\"}))",
+          "expr": "quantile(0.5, lapilli_incident_lead_seconds{instance=~\"$instance\",source=\"impact\"} * on (instance, incident) group_left () max by (instance, incident) (lapilli_incident_team{instance=~\"$instance\",team=~\"$team\"}))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -783,7 +834,8 @@
                 "value": 0
               }
             ]
-          }
+          },
+          "noValue": "–"
         },
         "overrides": []
       },
@@ -822,7 +874,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "count by (state) (max by (incident, state) (lapilli_incident_state{instance=~\"$instance\",team=~\"$team\",source=\"written\"}))",
+          "expr": "count by (state) (lapilli_incident_state{instance=~\"$instance\",source=\"written\"} * on (instance, incident) group_left () max by (instance, incident) (lapilli_incident_team{instance=~\"$instance\",team=~\"$team\"}))",
           "legendFormat": "{{state}}",
           "refId": "A",
           "instant": true,
@@ -909,7 +961,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "quantile(0.5, max by (incident) (lapilli_incident_lead_seconds{instance=~\"$instance\",team=~\"$team\",source=\"written\"}))",
+          "expr": "quantile(0.5, lapilli_incident_lead_seconds{instance=~\"$instance\",source=\"written\"} * on (instance, incident) group_left () max by (instance, incident) (lapilli_incident_team{instance=~\"$instance\",team=~\"$team\"}))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -935,7 +987,8 @@
                 "value": 0
               }
             ]
-          }
+          },
+          "noValue": "–"
         },
         "overrides": []
       },
@@ -974,7 +1027,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max by (incident, source, state) (lapilli_incident_state{instance=~\"$instance\",team=~\"$team\"})",
+          "expr": "max by (incident, source, state) (lapilli_incident_state{instance=~\"$instance\"} * on (instance, incident) group_left () max by (instance, incident) (lapilli_incident_team{instance=~\"$instance\",team=~\"$team\"}))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -986,7 +1039,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max by (incident, source) (lapilli_incident_lead_seconds{instance=~\"$instance\",team=~\"$team\"})",
+          "expr": "max by (incident, source) (lapilli_incident_lead_seconds{instance=~\"$instance\"} * on (instance, incident) group_left () max by (instance, incident) (lapilli_incident_team{instance=~\"$instance\",team=~\"$team\"}))",
           "legendFormat": "",
           "refId": "B",
           "instant": true,
@@ -1343,7 +1396,7 @@
     {
       "type": "table",
       "title": "Since each source last brought something",
-      "description": "How long since firings were last copied in from each source, a notification last came from each alert manager or cloud, the latest deploy the deploys file holds started, and the ledger's runs last reached.",
+      "description": "How long since firings were last copied in from each source, a notification last came from each alert manager or cloud, the deploys file was last read, and the ledger's runs last reached.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1360,7 +1413,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "label_replace(time() - max by (source) (lapilli_serve_source_last_timestamp_seconds{instance=~\"$instance\"}), \"kind\", \"firings copied in\", \"\", \"\") or label_replace(time() - max by (source) (lapilli_serve_notifications_last_timestamp_seconds{instance=~\"$instance\"}), \"kind\", \"notifications\", \"\", \"\") or label_replace(label_replace(time() - max(lapilli_serve_deploys_last_timestamp_seconds{instance=~\"$instance\"}), \"kind\", \"deploys\", \"\", \"\"), \"source\", \"deploys file\", \"\", \"\") or label_replace(label_replace(time() - max(lapilli_serve_cursor_timestamp_seconds{instance=~\"$instance\"}), \"kind\", \"runs\", \"\", \"\"), \"source\", \"ledger\", \"\", \"\")",
+          "expr": "label_replace(time() - max by (source) (lapilli_serve_source_last_timestamp_seconds{instance=~\"$instance\"}), \"kind\", \"firings copied in\", \"\", \"\") or label_replace(time() - max by (source) (lapilli_serve_notifications_last_timestamp_seconds{instance=~\"$instance\"}), \"kind\", \"notifications\", \"\", \"\") or label_replace(label_replace(time() - max(lapilli_serve_deploys_read_timestamp_seconds{instance=~\"$instance\"}), \"kind\", \"deploys file read\", \"\", \"\"), \"source\", \"deploys\", \"\", \"\") or label_replace(label_replace(time() - max(lapilli_serve_cursor_timestamp_seconds{instance=~\"$instance\"}), \"kind\", \"runs\", \"\", \"\"), \"source\", \"ledger\", \"\", \"\")",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -1460,7 +1513,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "noValue": "–"
         },
         "overrides": []
       },
@@ -1522,6 +1576,7 @@
               }
             ]
           },
+          "noValue": "–",
           "decimals": 0
         },
         "overrides": []
@@ -1544,7 +1599,7 @@
     {
       "type": "stat",
       "title": "Since the last run",
-      "description": "How long since lapilli last ran.",
+      "description": "How long since lapilli last ran; none before its first run.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1579,7 +1634,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "noValue": "no run yet"
         },
         "overrides": []
       },

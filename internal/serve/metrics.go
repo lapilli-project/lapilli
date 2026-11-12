@@ -62,10 +62,8 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			rr.DeploysCaught += d.DeployWhite
 		}
 		rep := &verdict.Report{}
-		noisyRule := map[string]bool{}
 		for _, rr := range sum {
 			rr.Noisy = noisy(rr.Firings, rr.White, o)
-			noisyRule[rr.Rule] = rr.Noisy
 			rep.Rules = append(rep.Rules, *rr)
 		}
 		// Each rule's by its team's hours, or the server's.
@@ -82,10 +80,19 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			s.oops(w, r, err)
 			return
 		}
+		// A catch by a rule noisy in the incident's week, as /incidents,
+		// the overview and the summary judge it: not by the seven days to
+		// now, so an incident is in the same state everywhere.
+		t, err := s.tallies(ctx, weeks)
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
 		for _, in := range incs {
 			ir := verdict.IncidentResult{Incident: in.Incident, CaughtBy: slices.Clone(in.CaughtBy)}
+			week := ledger.Week(s.l.Day(in.Start))
 			for i := range ir.CaughtBy {
-				ir.CaughtBy[i].Noisy = noisyRule[ir.CaughtBy[i].Rule]
+				ir.CaughtBy[i].Noisy = t.noisy(week, t.id(ir.CaughtBy[i].Rule))
 			}
 			rep.Incidents = append(rep.Incidents, ir)
 		}
@@ -113,7 +120,9 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			s.oops(w, r, err)
 			return
 		}
-		fmt.Fprintf(&b, "# HELP lapilli_serve_cursor_timestamp_seconds How far the ledger has firings up to, in Unix seconds.\n# TYPE lapilli_serve_cursor_timestamp_seconds gauge\nlapilli_serve_cursor_timestamp_seconds %d\n", unixOr0(cursor))
+		if !cursor.IsZero() {
+			fmt.Fprintf(&b, "# HELP lapilli_serve_cursor_timestamp_seconds How far the ledger has firings up to, in Unix seconds.\n# TYPE lapilli_serve_cursor_timestamp_seconds gauge\nlapilli_serve_cursor_timestamp_seconds %d\n", cursor.Unix())
+		}
 		s.status.Lock()
 		took := s.status.took
 		runs := map[string]int{}

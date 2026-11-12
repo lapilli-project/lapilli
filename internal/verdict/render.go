@@ -511,7 +511,11 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 	}
 	family("lapilli_incidents", "Incidents in the period: caught, caught only by noisy rules, or missed.", incs)
 	family("lapilli_incident_detection_delay_seconds", "From an incident's start to the first alert from a rule that isn't noisy; negative when the alert came first.", delays)
-	family("lapilli_last_run_timestamp_seconds", "When lapilli last ran, in Unix seconds.", []string{fmt.Sprintf("lapilli_last_run_timestamp_seconds %d", now.Unix())})
+	// Not run yet, it has no time to give: a dashboard shows none, not
+	// the year 1.
+	if !now.IsZero() {
+		family("lapilli_last_run_timestamp_seconds", "When lapilli last ran, in Unix seconds.", []string{fmt.Sprintf("lapilli_last_run_timestamp_seconds %d", now.Unix())})
+	}
 	_, err := io.WriteString(w, b.String())
 	return err
 }

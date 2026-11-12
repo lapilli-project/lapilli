@@ -1083,7 +1083,5 @@
  "there are %d teams: name each once": "チームは %d 個です。それぞれ一度だけ指定してください",
  "a deploy starts by an hour after the deploys file is read: %s is later": "デプロイはデプロイファイルを読んでから 1 時間以内に始まります。%s はそれより後です",
  "the deploys' labels are %d MB in all at most, counted for each deploy": "デプロイのラベルはデプロイごとに数えて合計 %d MB までです",
- "--deploy-before and --deploy-after are a day at most": "--deploy-before と --deploy-after は 1 日までです",
- "Over twelve weeks, %d of its %d firings re-fired (%s), in %d of the twelve weeks.": "12 週間で発火 %[2]d 回のうち %[1]d 回が再発火でした(%[3]s)。12 週のうち %[4]d 週にありました。",
- "%s of firings, %d of %d weeks": "発火の %s、%d/%d 週"
+ "--deploy-before and --deploy-after are a day at most": "--deploy-before と --deploy-after は 1 日までです"
 }

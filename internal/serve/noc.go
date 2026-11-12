@@ -23,6 +23,10 @@ import (
 // added without changing it; one changed or taken away changes it.
 const SummarySchema = 1
 
+// summaryRowSeen, when set, is told of each row as it is worked out: for
+// tests of a request given up halfway.
+var summaryRowSeen func()
+
 // summaryMaxWeeks is how many weeks /api/v1/summary gives at most.
 const summaryMaxWeeks = 53
 
@@ -41,11 +45,12 @@ type summary struct {
 }
 
 type summarySettings struct {
-	Lead        string          `json:"lead"`
-	Refire      string          `json:"refire"`
-	DeployAfter string          `json:"deploy_after"`
-	Match       []string        `json:"match"`
-	NoisyAt     verdict.NoisyAt `json:"noisy_at"`
+	Lead         string          `json:"lead"`
+	Refire       string          `json:"refire"`
+	DeployBefore string          `json:"deploy_before"`
+	DeployAfter  string          `json:"deploy_after"`
+	Match        []string        `json:"match"`
+	NoisyAt      verdict.NoisyAt `json:"noisy_at"`
 	// Critical are the severities counted as critical.
 	Critical []string `json:"critical"`
 	// Hours says off hours and asleep are counted; Deploys, that the
@@ -146,7 +151,8 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 		match = []string{}
 	}
 	out := &summary{Schema: SummarySchema, From: s.l.Midnight(w1), To: s.l.Midnight(w2 + 7), Zone: s.cfg.Loc.String(), LedgerTo: cursor,
-		Settings: summarySettings{Lead: verdict.Duration(o.Lead), Refire: verdict.Duration(o.RefireWithin), DeployAfter: verdict.Duration(o.DeployAfter),
+		Settings: summarySettings{Lead: verdict.Duration(o.Lead), Refire: verdict.Duration(o.RefireWithin),
+			DeployBefore: verdict.Duration(o.DeployBefore), DeployAfter: verdict.Duration(o.DeployAfter),
 			Match: match, NoisyAt: at, Critical: critical, Deploys: deploys}, Rows: []summaryRow{}}
 	t := &tallies{by: map[int64]map[int64]ledger.Tally{}, o: o}
 	for w := w1; w <= w2; w += 7 {
@@ -185,6 +191,12 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 			return nil, err
 		}
 		for _, team := range who {
+			if summaryRowSeen != nil {
+				summaryRowSeen()
+			}
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			mine := func(rule string) bool { return team == nil || own.rule[rule] == team.ID }
 			row := summaryRow{From: from, To: to, Partial: cursor.Before(to), BySeverity: map[string]summaryCount{}}
 			if team != nil {
@@ -289,27 +301,67 @@ func medianSeconds(ds []time.Duration) *int64 {
 // apiSummary is GET /api/v1/summary?from=&to=&team=&critical=: from and to
 // a day each (2026-11-02), or an RFC 3339 time, the weeks they fall in and
 // those between, the last four whole weeks and this one when not given, 53
-// at most; team, repeatable, a team's name, or * for everyone and every
-// team, everyone's when not given; critical, the severities counted as
-// critical, comma-separated (default critical).
+// at most; team, repeatable, a team's name, or * alone for everyone and
+// every team, everyone's when not given; critical, the severities counted
+// as critical, comma-separated (default critical), 32 at most. A summary of
+// more than 53 rows, or of every team, is heavy: it takes the one turn
+// there is for such a request, held until the answer is written.
 func (s *Server) apiSummary(w http.ResponseWriter, r *http.Request) {
-	sum, err := s.summaryFor(r.Context(), r.URL.Query())
+	ask, err := s.summaryAsk(r.Context(), r.URL.Query())
 	if err != nil {
 		s.oops(w, r, err)
 		return
 	}
-	writeJSON(w, sum)
+	if ask.heavy() {
+		done, err := s.busy(r.Context())
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		defer done()
+		http.NewResponseController(w).SetWriteDeadline(time.Now().Add(busyWait))
+	}
+	s.cached(func(w http.ResponseWriter, r *http.Request) {
+		sum, err := s.summaryOf(r.Context(), ask.w1, ask.w2, ask.who, ask.critical)
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		writeJSON(w, sum)
+	})(w, r)
 }
 
-// summaryFor is the summary a query asks for, as apiSummary reads it.
-func (s *Server) summaryFor(ctx context.Context, q url.Values) (*summary, error) {
+// summaryAsked is what a summary is asked for: its weeks, for whom, and
+// what counts as critical.
+type summaryAsked struct {
+	w1, w2   int64
+	who      []*ledger.Team
+	critical []string
+	every    bool // team=*
+}
+
+// heavy reports whether a summary takes the heavy turn: every team's, or
+// more rows than a year's of one.
+func (a summaryAsked) heavy() bool {
+	return a.every || ((a.w2-a.w1)/7+1)*int64(len(a.who)) > summaryMaxWeeks
+}
+
+// Bounds on what a summary is asked for.
+const (
+	summaryMaxCritical    = 32
+	summaryMaxSeverityLen = 64
+)
+
+// summaryAsk reads what a summary is asked for, as apiSummary and MCP's
+// summary take it, and refuses what is past its bounds.
+func (s *Server) summaryAsk(ctx context.Context, q url.Values) (summaryAsked, error) {
 	today := s.l.Day(s.now())
-	w2 := ledger.Week(today)
-	w1 := w2 - 4*7
+	a := summaryAsked{w2: ledger.Week(today), critical: []string{"critical"}}
+	a.w1 = a.w2 - 4*7
 	for _, x := range []struct {
 		name string
 		to   *int64
-	}{{"from", &w1}, {"to", &w2}} {
+	}{{"from", &a.w1}, {"to", &a.w2}} {
 		v := q.Get(x.name)
 		if v == "" {
 			continue
@@ -317,55 +369,81 @@ func (s *Server) summaryFor(ctx context.Context, q url.Values) (*summary, error)
 		t, err := time.ParseInLocation("2006-01-02", v, s.cfg.Loc)
 		if err != nil {
 			if t, err = time.Parse(time.RFC3339, v); err != nil {
-				return nil, bad("%s %q: want a day like 2026-11-02, or an RFC 3339 time", x.name, v)
+				return a, bad("%s %q: want a day like 2026-11-02, or an RFC 3339 time", x.name, v)
 			}
 		}
 		*x.to = ledger.Week(s.l.Day(t))
 	}
 	switch {
-	case w2 < w1:
-		return nil, bad("to is before from")
-	case (w2-w1)/7+1 > summaryMaxWeeks:
-		return nil, bad("a summary is of %d weeks at most", summaryMaxWeeks)
+	case a.w2 < a.w1:
+		return a, bad("to is before from")
+	case (a.w2-a.w1)/7+1 > summaryMaxWeeks:
+		return a, bad("a summary is of %d weeks at most", summaryMaxWeeks)
 	}
-	critical := []string{"critical"}
 	if v := q.Get("critical"); v != "" {
-		critical = commaList(v)
+		a.critical = nil
+		for _, c := range strings.Split(v, ",") {
+			if c = strings.TrimSpace(c); c != "" && !slices.Contains(a.critical, c) {
+				if len(c) > summaryMaxSeverityLen || len(a.critical) == summaryMaxCritical {
+					return a, bad("critical is %d severities at most, each %d bytes at most", summaryMaxCritical, summaryMaxSeverityLen)
+				}
+				a.critical = append(a.critical, c)
+			}
+		}
 	}
 	own, err := s.owners(ctx)
 	if err != nil {
-		return nil, err
+		return a, err
 	}
-	who := []*ledger.Team{nil}
-	if names := q["team"]; len(names) > 0 {
-		who = nil
-		for _, name := range names {
-			if name == "*" {
-				who = []*ledger.Team{nil}
-				for i := range own.teams {
-					who = append(who, &own.teams[i])
-				}
-				break
-			}
-			t, ok := own.team(name)
-			if !ok {
-				return nil, bad("there is no team called %q", name)
-			}
-			who = append(who, &t)
+	a.who = []*ledger.Team{nil}
+	names := q["team"]
+	if len(names) == 0 {
+		return a, nil
+	}
+	if slices.Contains(names, "*") {
+		if len(names) > 1 {
+			return a, bad("team=* is everyone and every team: give it alone")
 		}
+		a.every = true
+		for i := range own.teams {
+			a.who = append(a.who, &own.teams[i])
+		}
+		return a, nil
 	}
-	return s.summaryOf(ctx, w1, w2, who, critical)
+	if len(names) > len(own.teams) {
+		return a, bad("there are %d teams: name each once", len(own.teams))
+	}
+	a.who = nil
+	seen := map[string]bool{}
+	for _, name := range names {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		t, ok := own.team(name)
+		if !ok {
+			return a, bad("there is no team called %q", name)
+		}
+		a.who = append(a.who, &t)
+	}
+	return a, nil
 }
 
-// commaList splits a comma-separated list, leaving out empty items.
-func commaList(v string) []string {
-	var out []string
-	for _, x := range strings.Split(v, ",") {
-		if x = strings.TrimSpace(x); x != "" {
-			out = append(out, x)
-		}
+// summaryFor is the summary a query asks for, through MCP: in the heavy
+// turn when it is heavy, as apiSummary's.
+func (s *Server) summaryFor(ctx context.Context, q url.Values) (*summary, error) {
+	a, err := s.summaryAsk(ctx, q)
+	if err != nil {
+		return nil, err
 	}
-	return out
+	if a.heavy() {
+		done, err := s.busy(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer done()
+	}
+	return s.summaryOf(ctx, a.w1, a.w2, a.who, a.critical)
 }
 
 // refires are a span's re-fires and firings during deploys, as the digest
@@ -378,7 +456,7 @@ type refires struct {
 	// Worst is the alert that re-fired most in the span.
 	Worst *ledger.Refired `json:"worst"`
 	// Weeks are how many of the Of whole weeks before this one, of the
-	// twelve the ledger has, had a re-fire.
+	// twelve, the ledger has all of, had a re-fire (tallies.whole).
 	Weeks int `json:"weeks"`
 	Of    int `json:"of"`
 	// During deploys: firings, those of them that caught something, and
@@ -422,22 +500,7 @@ func (s *Server) refiresOf(ctx context.Context, rep *verdict.Report, from, to ti
 	if err != nil {
 		return nil, err
 	}
-	first, _, err := s.l.Bounds(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, w := range t.weeks[:len(t.weeks)-1] {
-		if first.IsZero() || !s.l.Midnight(w+7).After(first) {
-			continue
-		}
-		x.Of++
-		for id, tl := range t.by[w] {
-			if tl.Refired > 0 && in[t.rules[id].Name] {
-				x.Weeks++
-				break
-			}
-		}
-	}
+	x.Weeks, x.Of = t.refireWeeks(t.weeks, func(id int64) bool { return in[t.rules[id].Name] })
 	if x.deploysKept, err = s.l.HasDeploys(ctx); err != nil {
 		return nil, err
 	}

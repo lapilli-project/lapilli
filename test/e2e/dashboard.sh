@@ -2,9 +2,10 @@
 # The chart's Grafana dashboard (charts/lapilli/dashboards/lapilli.json)
 # against a real Grafana and Prometheus, the Prometheus scraping a real
 # lapilli serve (docs/design/noc.md). lapilli serve replays three rules
-# written on time alone (no metrics needed) over ten days: one flapping
-# every twenty minutes, one firing five minutes before users are hurt each
-# day, one firing every two hours for nothing; --impact finds a window of
+# written on time alone (no metrics needed) over seventeen days, so a whole
+# week is among them: one flapping every twenty minutes, one firing five
+# minutes before users are hurt each day, one firing every two hours for
+# nothing; --impact finds a window of
 # user impact each day; two incidents are written down, one caught, one
 # missed; a deploy each day of what the flapping rule is about; a team owns
 # two of the rules; firings are copied in from a source, and a notification
@@ -114,7 +115,7 @@ gu="http://$(docker port "$p-grafana" 3000/tcp | head -1)"
 until_true 60 curl -fsS "$pu/-/ready"
 
 "$work/lapilli" serve --prometheus "$pu" --rules "$work/rules.yaml" --impact "$impact" --impact-for 5m --match service \
-  --incidents "$work/incidents.yaml" --deploys "$work/deploys/deploys.yaml" --ledger "$work/ledger" --tz UTC --backfill 10d \
+  --incidents "$work/incidents.yaml" --deploys "$work/deploys/deploys.yaml" --ledger "$work/ledger" --tz UTC --backfill 17d \
   --listen "127.0.0.1:$up" --metrics-listen "$mhost:$mp" --allowed-hosts host.docker.internal \
   --incidents-listen "127.0.0.1:$ip" --firings-token-file "$work/firings-token" \
   --notify-listen "127.0.0.1:$np" --notify-token-file "$work/notify-token" >"$work/serve.log" 2>&1 &

@@ -382,13 +382,18 @@ run its own image under another version's name.
 beside it the histories it names, what `recipes/versions/argocd.sh` or
 `flux.sh` write for an Application, a Kustomization or a HelmRelease: each
 deploy of the service or namespace its labels say. A firing that came during
-one, or within `after` (10m) of its end, is marked, judged as ever, and
+one (agreeing with it on every label both have), from `before` (0) before
+its start to `after` (10m) after its end, is marked, judged as ever, and
 shown apart: a column and an order on the rules, a tile on the overview,
 the digest, `/metrics` and `/api/v1/summary`, with precision both ways.
 `serve.checkContent.runbookAnnotations` names the annotations a runbook is
-read from, the first a rule has.
+read from, the first a rule has; `serve.checkContent.runbookBase`, an https
+URL a runbook that is a path in the rules' repository is a link under.
 
-`serve.serviceMonitor.enabled` makes a ServiceMonitor, and
+`serve.serviceMonitor.enabled` makes a ServiceMonitor, which honours
+lapilli's labels (`honorLabels`: a rule's `team` stays `team`, not
+`exported_team` beside a target label of that name) and refuses a scrape of
+more than `serve.serviceMonitor.sampleLimit` (50,000) series; and
 `dashboard.enabled` a ConfigMap holding a Grafana dashboard for Grafana's
 sidecar, of what an operations team measures its alerts by: critical
 firings that caught something, precision, re-fires and the whole weeks

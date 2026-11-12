@@ -70,9 +70,13 @@ spec:
     matchLabels:
       app.kubernetes.io/name: {{ .Chart.Name }}
       app.kubernetes.io/instance: {{ .Release.Name }}
+  sampleLimit: {{ int .Values.serve.serviceMonitor.sampleLimit }}
   endpoints:
     - port: metrics
       path: /metrics
       interval: {{ .Values.serve.serviceMonitor.interval }}
+      # The rules' team label is lapilli's own: kept, not renamed to
+      # exported_team beside a target label of the same name.
+      honorLabels: true
 {{- end }}
 {{- end }}

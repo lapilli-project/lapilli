@@ -177,6 +177,9 @@ spec:
             {{- with $s.checkContent.runbookAnnotations }}
             - {{ printf "--runbook-annotations=%s" (join "," .) | quote }}
             {{- end }}
+            {{- with $s.checkContent.runbookBase }}
+            - {{ printf "--runbook-base=%s" . | quote }}
+            {{- end }}
             {{- end }}
             - {{ printf "--timeout=%dm" (int .Values.timeoutMinutes) | quote }}
             {{- with $s.userHeader }}
@@ -229,6 +232,9 @@ spec:
             {{- end }}
             {{- if ($s.deploys).configMap.name }}
             - {{ printf "--deploys=/etc/lapilli/deploys/%s" $s.deploys.configMap.key | quote }}
+            {{- with $s.deploys.before }}
+            - {{ printf "--deploy-before=%s" . | quote }}
+            {{- end }}
             {{- with $s.deploys.after }}
             - {{ printf "--deploy-after=%s" . | quote }}
             {{- end }}

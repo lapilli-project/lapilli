@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/firing"
+	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/verdict"
@@ -25,7 +27,7 @@ var nocBase = now.Add(-40 * time.Hour)
 // nocHistory answers "flap > 0" with a search alert firing ten minutes in
 // each half hour for four hours, re-firing seven times; "noise > 0" with a
 // cart alert firing five minutes every two hours, from a day before, never
-// re-firing; and "impact" with users hurt from 65 minutes after nocBase,
+// re-firing, and once two weeks before; and "impact" with users hurt from 65 minutes after nocBase,
 // for ten minutes, on search.
 type nocHistory struct{}
 
@@ -51,6 +53,10 @@ func (nocHistory) QueryRange(ctx context.Context, expr string, start, end time.T
 			at := nocBase.Add(-20*time.Hour + time.Duration(k)*2*time.Hour)
 			out = append(out, run(map[string]string{"service": "cart"}, at, at.Add(5*time.Minute)))
 		}
+		// And once two weeks before: the ledger's first firing, in a week
+		// it has part of.
+		at := nocBase.Add(-14 * 24 * time.Hour)
+		out = append(out, run(map[string]string{"service": "cart"}, at, at.Add(5*time.Minute)))
 	case "impact":
 		out = append(out, run(map[string]string{"service": "search"}, nocBase.Add(65*time.Minute), nocBase.Add(75*time.Minute)))
 	}
@@ -90,6 +96,7 @@ func nocServer(t *testing.T) *Server {
 		c.Deploys = deploys
 		c.Options.DeployAfter = 10 * time.Minute
 		c.Options.Hours = verdict.DefaultHours(time.UTC)
+		c.Backfill = 20 * 24 * time.Hour
 	})
 	os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte(nocRules), 0o644)
 	s.h = nocHistory{}
@@ -193,7 +200,7 @@ func TestNOCPages(t *testing.T) {
 	if flap < 0 || noise < 0 || noise > flap {
 		t.Errorf("/rules: the noisiest first, Noise before Flap: %d %d", noise, flap)
 	}
-	for _, want := range []string{"During deploys", "88% of firings, 1 of 4 weeks", "precision 0% without them", `aria-current="page">caught nothing, the most first`} {
+	for _, want := range []string{"During deploys", "88% of firings, 1 of 2 whole weeks", "precision 0% without them", `aria-current="page">caught nothing, the most first`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/rules: no %q", want)
 		}
@@ -208,7 +215,7 @@ func TestNOCPages(t *testing.T) {
 		t.Error("/rules?sort=deploys: Flap first")
 	}
 	_, body, _ = get(t, h, "/rules/Flap")
-	for _, want := range []string{`id="refired"`, "Over twelve weeks, 7 of its 8 firings re-fired (88%), in 1 of the twelve weeks.",
+	for _, want := range []string{`id="refired"`, "Over twelve weeks, 7 of its 8 firings re-fired (88%). 1 of the last 2 whole weeks had one.",
 		"Its alerts that re-fired most", "<code>service=search</code> <code>severity=critical</code> 7 times",
 		"Of its firings over twelve weeks, 1 came during a deploy of what they are about, 1 of them catching something: precision 12% with them, 0% without."} {
 		if !strings.Contains(body, want) {
@@ -222,7 +229,7 @@ func TestNOCPages(t *testing.T) {
 	_, body, _ = get(t, h, "/")
 	// The weekly table, wider with them, scrolls in a box the keyboard
 	// reaches (axe's scrollable-region-focusable).
-	for _, want := range []string{"1 of the last 11 whole weeks had one", "firings; precision 0% without them", "<th scope=\"col\" class=\"n\">During deploys</th>",
+	for _, want := range []string{"1 of the last 2 whole weeks had one", "firings; precision 0% without them", "<th scope=\"col\" class=\"n\">During deploys</th>",
 		`<div class="scroll" tabindex="0" role="region" aria-labelledby="by-week">`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/: no %q", want)
@@ -342,21 +349,23 @@ func TestNOCMetrics(t *testing.T) {
 		`lapilli_rule_firings_during_deploys{rule="Flap",severity="critical",team="search"} 1`,
 		`lapilli_rule_caught_during_deploys{rule="Flap",severity="critical",team="search"} 1`,
 		`lapilli_rule_firings_during_deploys{rule="Noise",severity="warning"} 0`,
-		"lapilli_weeks_counted 1\n",
+		"lapilli_weeks_counted 2\n",
 		"lapilli_refired_weeks 1\n",
 		`lapilli_refired_weeks{team="search"} 1`,
 		`lapilli_rule_refired_weeks{rule="Flap",severity="critical",team="search"} 1`,
 		`lapilli_incident_state{incident="INC-1",source="written",state="missed"} 1`,
 		`lapilli_incident_lead_seconds{incident="impact-`,
-		`source="impact",team="search"} 300`,
+		`lapilli_incident_team{incident="INC-1"} 1`,
 		"lapilli_serve_deploys_last_timestamp_seconds " + strconv.FormatInt(nocBase.Add(55*time.Minute).Unix(), 10),
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/metrics: no %q", want)
 		}
 	}
-	if !regexp.MustCompile(`lapilli_incident_state\{incident="impact-[0-9TZ]+",source="impact",team="search",state="caught"\} 1`).MatchString(body) {
-		t.Error("/metrics: the impact window, caught, the search team's")
+	if !regexp.MustCompile(`lapilli_incident_state\{incident="impact-[0-9TZ]+",source="impact",state="caught"\} 1`).MatchString(body) ||
+		!regexp.MustCompile(`lapilli_incident_team\{incident="impact-[0-9TZ]+",team="search"\} 1`).MatchString(body) ||
+		!regexp.MustCompile(`lapilli_incident_lead_seconds\{incident="impact-[0-9TZ]+",source="impact"\} 300`).MatchString(body) {
+		t.Error("/metrics: the impact window, caught 5m before, the search team's")
 	}
 	if strings.Contains(body, "lapilli_rule_refired_weeks{rule=\"Noise\"") {
 		t.Error("/metrics: a rule that never re-fired has weeks with a re-fire")
@@ -378,7 +387,7 @@ func TestNOCDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Re-fired: 7 of ", "The most, Flap {service=search, severity=critical}: 7 times.", "Weeks with a re-fire, of the last 1 whole weeks: 1.",
+	for _, want := range []string{"Re-fired: 7 of ", "The most, Flap {service=search, severity=critical}: 7 times.", "Weeks with a re-fire, of the last 2 whole weeks: 1.",
 		"During deploys: 1 firings, 1 of them catching something;"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("digest: no %q in\n%s", want, text)
@@ -474,6 +483,226 @@ func TestDashboardMetrics(t *testing.T) {
 	if d.UID != "lapilli" || queries < 20 {
 		t.Errorf("uid %q, %d queries", d.UID, queries)
 	}
+	// Severities: critical, several at once, matching a rule whose versions'
+	// differ; incidents joined to their teams, each counted once.
+	text := string(b)
+	for _, want := range []string{`severity=~\"(.+/)?($critical)(/.+)?\"`, `"name": "critical"`, `"type": "custom"`, `"multi": true`,
+		`* on (instance, incident) group_left () max by (instance, incident) (lapilli_incident_team{`, `"noValue": "no run yet"`,
+		`lapilli_serve_deploys_read_timestamp_seconds`, `max(lapilli_weeks_counted{`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the dashboard hasn't %s", want)
+		}
+	}
+	for _, gone := range []string{`"type": "textbox"`, `lapilli_incident_state{instance=~\"$instance\",team=~`} {
+		if strings.Contains(text, gone) {
+			t.Errorf("the dashboard still has %s", gone)
+		}
+	}
+}
+
+// What a summary is asked for is bounded: each team once, no more than
+// there are, * alone; 32 critical severities of 64 bytes at most. One of
+// every team, or of more than 53 rows, takes the heavy turn, through the API
+// and MCP alike; and a summary given up halfway stops at the next row.
+func TestSummaryBounded(t *testing.T) {
+	s := nocServer(t)
+	ctx := context.Background()
+	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "cart", Rules: "^Noise$"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	sevs := func(n int) string {
+		var out []string
+		for i := range n {
+			out = append(out, fmt.Sprintf("s%d", i))
+		}
+		return strings.Join(out, ",")
+	}
+	for q, want := range map[string]int{
+		"team=search&team=search":               200, // the same team twice: once
+		"team=search&team=cart&team=search":     400, // more than there are
+		"team=*&team=search":                    400,
+		"critical=" + sevs(33):                  400,
+		"critical=" + strings.Repeat("c", 65):   400,
+		"critical=" + sevs(32):                  200,
+		"critical=critical,critical,critical":   200,
+		"team=search&team=cart&from=2026-10-26": 200,
+	} {
+		code, body, _ := get(t, h, "/api/v1/summary?"+q)
+		if code != want {
+			t.Errorf("%.60s: %d, want %d: %.200s", q, code, want, body)
+		}
+	}
+	_, body, _ := get(t, h, "/api/v1/summary?team=search&team=search&from=2026-10-26&to=2026-10-26")
+	var sum summary
+	if err := json.Unmarshal([]byte(body), &sum); err != nil || len(sum.Rows) != 1 {
+		t.Errorf("the same team twice: %d rows, %v", len(sum.Rows), err)
+	}
+	// The heavy turn taken by another request: every team's waits for it,
+	// then is refused; a light one isn't held up.
+	defer func(was time.Duration) { busyWait = was }(busyWait)
+	busyWait = 50 * time.Millisecond
+	s.heavy <- struct{}{}
+	for q, want := range map[string]int{"team=*": 503, "from=2025-11-03&to=2026-11-02&team=search&team=cart": 503, "team=search": 200} {
+		if code, _, _ := get(t, h, "/api/v1/summary?"+q); code != want {
+			t.Errorf("with the heavy turn taken, %s: %d, want %d", q, code, want)
+		}
+	}
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+	cs := connect(t, ts.URL, "viewer@example.com")
+	var out summary
+	if failed, text := call(t, cs, "summary", map[string]any{"team": "*"}, &out); !failed || !strings.Contains(text, "busy") {
+		t.Errorf("MCP summary of every team, with the heavy turn taken: %v %s", failed, text)
+	}
+	if failed, text := call(t, cs, "summary", map[string]any{"critical": sevs(40)}, &out); !failed || !strings.Contains(text, "32 severities") {
+		t.Errorf("MCP summary, 40 critical severities: %v %s", failed, text)
+	}
+	<-s.heavy
+	if code, _, _ := get(t, h, "/api/v1/summary?team=*"); code != 200 {
+		t.Errorf("the turn given back: %d", code)
+	}
+	// Given up after the first row, the rest aren't worked out.
+	cctx, cancel := context.WithCancel(ctx)
+	defer func() { summaryRowSeen = nil }()
+	rows := 0
+	summaryRowSeen = func() { rows++; cancel() }
+	w := ledger.Week(s.l.Day(now))
+	own, _ := s.owners(ctx)
+	who := []*ledger.Team{nil, &own.teams[0], &own.teams[1]}
+	if _, err := s.summaryOf(cctx, w, w, who, []string{"critical"}); err == nil || rows != 1 {
+		t.Errorf("given up: %d rows worked out, %v", rows, err)
+	}
+}
+
+// shiftHistory answers "flaky > 0" with an api alert firing six times on a
+// Sunday and six on the Monday after, three hours apart, the Monday 10:05
+// one catching INC-API: noisy over the seven days to now, not in the
+// incident's week.
+type shiftHistory struct{}
+
+func (shiftHistory) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	var out []prom.Series
+	add := func(at time.Time) {
+		s := prom.Series{Labels: map[string]string{"service": "api"}}
+		for t := at; t.Before(at.Add(10 * time.Minute)); t = t.Add(step) {
+			if !t.Before(start) && !t.After(end) {
+				s.Samples = append(s.Samples, prom.Sample{T: t, V: 1})
+			}
+		}
+		if len(s.Samples) > 0 {
+			out = append(out, s)
+		}
+	}
+	if expr == "flaky > 0" {
+		sun, mon := time.Date(2026, 11, 1, 0, 5, 0, 0, time.UTC), time.Date(2026, 11, 2, 1, 5, 0, 0, time.UTC)
+		for k := 0; k < 6; k++ {
+			add(sun.Add(time.Duration(k) * 3 * time.Hour))
+			add(mon.Add(time.Duration(k) * 3 * time.Hour))
+		}
+	}
+	return out, nil
+}
+
+// An incident is in the same state on /incidents, in the summary and in
+// /metrics: its catches judged noisy or not by the rule's stones in the
+// incident's week, not over the seven days to now.
+func TestIncidentStateEverywhere(t *testing.T) {
+	ctx := context.Background()
+	s, rules := server(t, nil)
+	os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte("groups:\n  - name: shop\n    rules:\n      - alert: Flaky\n        expr: flaky > 0\n        labels: {severity: critical}\n"), 0o644)
+	os.WriteFile(s.cfg.Incidents, []byte("incidents:\n  - {id: INC-API, title: API down, start: 2026-11-02T10:00:00Z, end: 2026-11-02T10:30:00Z, labels: {service: api}}\n"), 0o644)
+	s.h = shiftHistory{}
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	h := s.Handler()
+	_, body, _ := get(t, h, "/incidents")
+	if !strings.Contains(body, "Of the 1 judged against: 1 caught,") {
+		t.Fatalf("/incidents: %s", regexp.MustCompile(`Of the \d+ judged against:[^<]*`).FindString(body))
+	}
+	_, body, _ = get(t, h, "/metrics")
+	for _, want := range []string{`lapilli_incident_state{incident="INC-API",source="written",state="caught"} 1`,
+		`lapilli_incidents{state="caught",source="written"} 1`, `lapilli_incident_lead_seconds{incident="INC-API",source="written"} -300`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/metrics: no %s", want)
+		}
+	}
+	// Over the seven days to now the rule is noisy: 12 firings, one white.
+	if !strings.Contains(body, `lapilli_rule_firings{rule="Flaky",severity="critical"} 12`) {
+		t.Error("/metrics: Flaky fired 12 times")
+	}
+}
+
+// Incidents each forty teams own, written by an editor or the incidents
+// token: /metrics gives each a series, and which teams own them in no more
+// than 500 series, not one series for each incident and team.
+func TestIncidentSeriesBounded(t *testing.T) {
+	ctx := context.Background()
+	s, _ := server(t, nil)
+	var vals []string
+	for i := 0; i < 40; i++ {
+		v := fmt.Sprintf("s%d", i)
+		vals = append(vals, v)
+		if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "team" + v, Labels: map[string][]string{"service": {v}}}, "ana"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 600; i++ {
+		at := now.Add(-time.Duration(i) * 10 * time.Minute)
+		in := incident.Incident{ID: fmt.Sprintf("X-%04d", i), Title: "x", Start: at, End: at.Add(5 * time.Minute), Labels: incident.Labels{"service": vals}}
+		if _, err := s.l.Put(ctx, in, "eve", s.cfg.Options); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, body, _ := get(t, s.MetricsHandler(), "/metrics")
+	states, teams := strings.Count(body, "\nlapilli_incident_state{"), strings.Count(body, "\nlapilli_incident_team{")
+	if states != 500 || teams != 500 {
+		t.Errorf("%d incident series and %d of their teams, want 500 each", states, teams)
+	}
+	// The latest kept.
+	if !strings.Contains(body, `lapilli_incident_team{incident="X-0000",team="teams0"} 1`) {
+		t.Error("the latest incident's teams left out")
+	}
+}
+
+// Before the first run, /metrics gives no time for it, nor for how far the
+// ledger has firings: a dashboard shows none, not the year 1.
+func TestNoRunNoTime(t *testing.T) {
+	s, _ := server(t, nil)
+	_, body, _ := get(t, s.Handler(), "/metrics")
+	for _, name := range []string{"lapilli_last_run_timestamp_seconds", "lapilli_serve_cursor_timestamp_seconds"} {
+		if strings.Contains(body, "\n"+name+" ") {
+			t.Errorf("before the first run: %s", regexp.MustCompile(name+` .*`).FindString(body))
+		}
+	}
+}
+
+// What this batch shows renders on the pages the language and the
+// accessibility tests check (pagesServer, a11yServer): the re-fires, the
+// firings during deploys, near misses on the incidents; and the tables
+// that scroll sideways do so in a box the keyboard reaches.
+func TestNOCRendered(t *testing.T) {
+	s, paths := a11yServer(t)
+	h := s.Handler()
+	seen := map[string]bool{}
+	for _, p := range paths {
+		_, body, _ := get(t, h, p)
+		for _, want := range []string{`id="refired"`, ">During deploys<", "came during a deploy", "nearly caught by", "re-fired, the most first",
+			`<div class="scroll" tabindex="0" role="region" aria-labelledby="refired-h">`, `<div class="scroll" tabindex="0" role="region" aria-labelledby="by-week">`} {
+			if strings.Contains(body, want) {
+				seen[want] = true
+			}
+		}
+	}
+	for _, want := range []string{`id="refired"`, ">During deploys<", "came during a deploy", "nearly caught by", "re-fired, the most first",
+		`<div class="scroll" tabindex="0" role="region" aria-labelledby="refired-h">`, `<div class="scroll" tabindex="0" role="region" aria-labelledby="by-week">`} {
+		if !seen[want] {
+			t.Errorf("%s isn't on any page the accessibility tests check", want)
+		}
+	}
 }
 
 // Without --deploys, a ledger that keeps deploys says so on the status,
@@ -492,5 +721,40 @@ func TestDeploysUnread(t *testing.T) {
 	s.jobs(ctx, false)
 	if _, body, _ = get(t, s.Handler(), "/runs"); strings.Contains(body, "--deploys isn&#39;t given") {
 		t.Error("the status kept saying so with --deploys given")
+	}
+}
+
+// A runbook that is a path in the rules' repository is a link on the rule's
+// page under --runbook-base, and a path without it.
+func TestRunbookBase(t *testing.T) {
+	ctx := context.Background()
+	for base, want := range map[string]string{
+		"": "<code>docs/runbooks/errors.md#high</code>",
+		"https://git.example.com/org/monitoring/blob/main/": `<a href="https://git.example.com/org/monitoring/blob/main/docs/runbooks/errors.md#high" rel="noopener noreferrer">docs/runbooks/errors.md#high</a>`,
+	} {
+		s, rules := server(t, func(c *Config) { c.CheckContent, c.RunbookBase = true, base })
+		os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte(ruleFile+"        annotations: {summary: errors, runbook_url: \"docs/runbooks/errors.md#high\"}\n"), 0o644)
+		raw := ""
+		if err := s.look(ctx, &raw); err != nil {
+			t.Fatal(err)
+		}
+		s.jobs(ctx, true)
+		if _, body, _ := get(t, s.Handler(), "/rules/Errors"); !strings.Contains(body, want) {
+			t.Errorf("--runbook-base %q: no %s", base, want)
+		}
+	}
+}
+
+// The chart's ServiceMonitor keeps lapilli's labels (a rule's team stays
+// team, not exported_team) and bounds a scrape.
+func TestChartServiceMonitor(t *testing.T) {
+	b, err := os.ReadFile("../../charts/lapilli/templates/service.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"honorLabels: true", "sampleLimit: {{ int .Values.serve.serviceMonitor.sampleLimit }}"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("the ServiceMonitor hasn't %s", want)
+		}
 	}
 }

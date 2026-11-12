@@ -10,8 +10,10 @@ import (
 	"strconv"
 	"time"
 
+	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/oncall"
+	"lapilli.dev/internal/verdict"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -69,7 +71,7 @@ var pagePaths = []string{"/", "/rules", "/rules?weeks=1", "/rules/Errors", "/inc
 	"/firings?day=2026-11-02", "/settings", "/settings?try=1&lead=1h", "/runs", "/incidents/none",
 	"/teams", "/teams?edit=1", "/windows", "/windows/1", "/tasks", "/tasks?status=all", "/tasks/1", "/?team=payments", "/rules?team=payments", "/outcomes",
 	"/reports", "/reports?edit=1", "/reports/1", "/reports/2", "/reports?edit=digest", "/reports/digest", "/roles", "/windows/2", "/windows/3",
-	"/rules?sort=refired", "/rules?sort=deploys&weeks=12", "/incidents?source=impact&team=payments", "/incidents?source=written"}
+	"/rules?sort=refired", "/rules?sort=deploys&weeks=12", "/incidents?source=impact&team=payments", "/incidents?source=written", "/rules/Flapping"}
 
 // pagesServer is a server with something on every page: a team, a note,
 // quiet windows, a task, roles, reports, comments, and a run that failed.
@@ -148,9 +150,28 @@ func pagesServer(t *testing.T) *Server {
 	if _, err := s.l.CopyComment(ctx, 1, "seen in the tracker", "sam", "c-1", now.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	// A deploy of search while Errors fired for it (docs/design/noc.md).
+	// An alert re-firing, copied in, and a deploy of what it is about
+	// while it fired (docs/design/noc.md).
+	day := s.l.Midnight(s.l.Day(now) - 1)
+	var flaps []firing.Firing
+	for k := 0; k < 4; k++ {
+		at := day.Add(10*time.Hour + time.Duration(k)*20*time.Minute)
+		flaps = append(flaps, firing.Firing{Rule: "Flapping", Labels: map[string]string{"service": "search"}, Start: at, End: at.Add(5 * time.Minute)})
+	}
+	if _, err := s.l.PutFirings(ctx, "test-src", day, day.Add(24*time.Hour), flaps, "firings-token", o); err != nil {
+		t.Fatal(err)
+	}
 	o.DeployAfter = 10 * time.Minute
-	if _, err := s.l.SyncDeploys(ctx, []ledger.Deploy{{Start: now.Add(-50 * time.Hour), Labels: map[string]string{"service": "search"}, Revision: "4f2a9c1"}}, o, ledger.DeploysRead{}); err != nil {
+	if _, err := s.l.SyncDeploys(ctx, []ledger.Deploy{{Start: day.Add(10 * time.Hour), Labels: map[string]string{"service": "search"}, Revision: "4f2a9c1"}}, o, ledger.DeploysRead{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.JudgePending(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	// A rule that nearly caught the impact window nothing caught.
+	week := s.l.Midnight(ledger.Week(s.l.Day(now)))
+	if err := s.l.ReplaceResult(ctx, "near_misses", now, week, week.Add(7*24*time.Hour),
+		[]verdict.NearMiss{{Incident: "impact-20261103T0600Z", Rule: "Errors", Held: time.Minute, For: 2 * time.Minute, NewFor: time.Minute}}); err != nil {
 		t.Fatal(err)
 	}
 	read := s.onCallRead("primary")

@@ -23,7 +23,7 @@ func (s *Server) quietAfter() time.Duration {
 }
 
 // maxIncidentSeries is how many incidents, the latest, /metrics gives a
-// series each.
+// series each, and how many series say which teams own them.
 const maxIncidentSeries = 500
 
 // ruleSeries are a rule's labels in /metrics: its name, severity and team.
@@ -36,37 +36,6 @@ func ruleSeries(rr verdict.RuleResult) string {
 		l += fmt.Sprintf(`,team="%s"`, labelValue(rr.Team))
 	}
 	return l
-}
-
-// refiredWeeks are, of the whole weeks t has but its last, how many had a
-// firing that re-fired: each rule's, by id, each team's, by id, and
-// everyone's; and how many of those weeks the ledger has firings for.
-func refiredWeeks(t *tallies, own *owners, first time.Time, monday func(int64) time.Time) (rules, teams map[int64]int, everyone, counted int) {
-	rules, teams = map[int64]int{}, map[int64]int{}
-	for _, w := range t.weeks[:len(t.weeks)-1] {
-		if first.IsZero() || !monday(w+7).After(first) {
-			continue // before the ledger's first firing
-		}
-		counted++
-		any, team := false, map[int64]bool{}
-		for id, x := range t.by[w] {
-			if x.Refired == 0 {
-				continue
-			}
-			rules[id]++
-			any = true
-			if tid := own.rule[t.rules[id].Name]; tid != 0 {
-				team[tid] = true
-			}
-		}
-		if any {
-			everyone++
-		}
-		for tid := range team {
-			teams[tid]++
-		}
-	}
-	return rules, teams, everyone, counted
 }
 
 // nocMetrics are what an operations team asks of its alerts
@@ -99,40 +68,42 @@ func (s *Server) nocMetrics(ctx context.Context, b *bytes.Buffer, rep *verdict.R
 		}
 	}
 
-	// The weeks with a re-fire, of the twelve whole weeks before this one.
+	// The weeks with a re-fire, of the twelve whole weeks before this one
+	// (tallies.whole).
 	t, err := s.tallies(ctx, weeks+1)
 	if err != nil {
 		return err
 	}
-	first, _, err := s.l.Bounds(ctx)
-	if err != nil {
-		return err
-	}
-	byRule, byTeam, everyone, counted := refiredWeeks(t, own, first, s.l.Midnight)
-	family("lapilli_weeks_counted", "Whole weeks, of the twelve before this one, the ledger has firings for: what lapilli_refired_weeks and lapilli_rule_refired_weeks count of.")
+	everyone, counted := t.refireWeeks(t.weeks, func(int64) bool { return true })
+	family("lapilli_weeks_counted", "Whole weeks, of the twelve before this one, the ledger has all of (not the one its first firing fell in): what lapilli_refired_weeks and lapilli_rule_refired_weeks count of.")
 	fmt.Fprintf(b, "lapilli_weeks_counted %d\n", counted)
-	family("lapilli_refired_weeks", "Whole weeks, of the twelve before this one, in which a firing re-fired: everyone's without a team label, and each team's rules'.")
+	family("lapilli_refired_weeks", "Whole weeks, of lapilli_weeks_counted, in which a firing re-fired: everyone's without a team label, and each team's rules'.")
 	fmt.Fprintf(b, "lapilli_refired_weeks %d\n", everyone)
 	for _, tm := range own.teams {
-		fmt.Fprintf(b, "lapilli_refired_weeks{team=\"%s\"} %d\n", labelValue(tm.Name), byTeam[tm.ID])
+		n, _ := t.refireWeeks(t.weeks, func(id int64) bool { return own.rule[t.rules[id].Name] == tm.ID })
+		fmt.Fprintf(b, "lapilli_refired_weeks{team=\"%s\"} %d\n", labelValue(tm.Name), n)
 	}
-	family("lapilli_rule_refired_weeks", "Whole weeks, of the twelve before this one, in which a firing of the rule re-fired.")
-	ids := slices.Collect(maps.Keys(byRule))
+	family("lapilli_rule_refired_weeks", "Whole weeks, of lapilli_weeks_counted, in which a firing of the rule re-fired.")
+	ids := slices.Collect(maps.Keys(t.rules))
 	slices.SortFunc(ids, func(a, b int64) int { return strings.Compare(t.rules[a].Name, t.rules[b].Name) })
 	for _, id := range ids {
-		r := t.rules[id]
-		fmt.Fprintf(b, "lapilli_rule_refired_weeks{%s} %d\n", ruleSeries(verdict.RuleResult{Rule: r.Name, Severity: r.Severity, Team: own.teamOf(r.Name)}), byRule[id])
+		if n, _ := t.refireWeeks(t.weeks, func(rid int64) bool { return rid == id }); n > 0 {
+			r := t.rules[id]
+			fmt.Fprintf(b, "lapilli_rule_refired_weeks{%s} %d\n", ruleSeries(verdict.RuleResult{Rule: r.Name, Severity: r.Severity, Team: own.teamOf(r.Name)}), n)
+		}
 	}
 
-	// Each incident of the last seven days, once for each team that owns
-	// it: a dashboard counts them by incident, so one two teams own is
-	// counted once for both.
+	// Each incident of the last seven days, a series each; which teams own
+	// it, in a series of its own for each: a dashboard picks a team's by
+	// joining on incident, and counts one two teams own once. Both are
+	// bounded, the latest incidents kept.
 	incs := rep.Incidents
 	if len(incs) > maxIncidentSeries {
 		incs = incs[len(incs)-maxIncidentSeries:]
 	}
-	var states, leads []string
-	for _, in := range incs {
+	var states, leads, teams []string
+	for i := len(incs) - 1; i >= 0; i-- { // the latest first, so the bound keeps them
+		in := incs[i]
 		src := "written"
 		if in.Candidate {
 			src = "impact"
@@ -144,30 +115,35 @@ func (s *Server) nocMetrics(ctx context.Context, b *bytes.Buffer, rep *verdict.R
 		case in.OnlyNoisy():
 			state = "noisy_only"
 		}
-		var owners []string
+		l := fmt.Sprintf(`incident="%s",source="%s"`, labelValue(in.ID), src)
+		states = append(states, fmt.Sprintf(`lapilli_incident_state{%s,state="%s"} 1`, l, state))
+		if c, caught := in.First(); caught {
+			leads = append(leads, fmt.Sprintf("lapilli_incident_lead_seconds{%s} %g", l, -c.Delay.Seconds()))
+		}
+		owned := false
 		for _, tm := range own.teams {
+			if len(teams) == maxIncidentSeries {
+				break
+			}
 			if own.ownsIncident(tm, ledger.Incident{Incident: in.Incident, CaughtBy: in.CaughtBy}) {
-				owners = append(owners, fmt.Sprintf(`,team="%s"`, labelValue(tm.Name)))
+				teams = append(teams, fmt.Sprintf(`lapilli_incident_team{incident="%s",team="%s"} 1`, labelValue(in.ID), labelValue(tm.Name)))
+				owned = true
 			}
 		}
-		if len(owners) == 0 {
-			owners = []string{""}
-		}
-		c, caught := in.First()
-		for _, tl := range owners {
-			l := fmt.Sprintf(`incident="%s",source="%s"%s`, labelValue(in.ID), src, tl)
-			states = append(states, fmt.Sprintf(`lapilli_incident_state{%s,state="%s"} 1`, l, state))
-			if caught {
-				leads = append(leads, fmt.Sprintf("lapilli_incident_lead_seconds{%s} %g", l, -c.Delay.Seconds()))
-			}
+		if !owned && len(teams) < maxIncidentSeries {
+			teams = append(teams, fmt.Sprintf(`lapilli_incident_team{incident="%s"} 1`, labelValue(in.ID)))
 		}
 	}
-	family("lapilli_incident_state", "Each incident of the last seven days, written down or an impact window found by --impact, as caught, caught only by noisy rules, or missed: 1, once for each team that owns it (none, without a team label).")
+	family("lapilli_incident_state", "Each incident of the last seven days, written down or an impact window found by --impact, as caught, caught only by noisy rules, or missed, by the rules' stones in its week: 1. The latest 500 at most.")
 	for _, x := range states {
 		b.WriteString(x + "\n")
 	}
-	family("lapilli_incident_lead_seconds", "How long before each caught incident's start the first alert from a rule that isn't noisy came, once for each team that owns it: negative when it came after.")
+	family("lapilli_incident_lead_seconds", "How long before each caught incident's start the first alert from a rule that isn't noisy came: negative when it came after.")
 	for _, x := range leads {
+		b.WriteString(x + "\n")
+	}
+	family("lapilli_incident_team", "Each team that owns an incident of lapilli_incident_state (one of its rules caught it, or it has a value of a label the team owns by): 1, without a team label for an incident no team owns. 500 series at most, the latest incidents first.")
+	for _, x := range teams {
 		b.WriteString(x + "\n")
 	}
 

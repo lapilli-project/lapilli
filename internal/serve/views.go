@@ -45,6 +45,39 @@ type tallies struct {
 	rules    map[int64]ledger.RuleRow
 	names    map[string]int64 // rule ids by name, made when first needed
 	o        verdict.Options
+	// firstWeek is the Monday of the week the ledger's first firing fell
+	// in; ok false with no firing.
+	firstWeek int64
+	firstOK   bool
+}
+
+// whole are, of the weeks ws, those the ledger has whole: not the week
+// under way, the last t has, nor the one its first firing fell in, which
+// it holds only part of. What "weeks with a re-fire" are counted of,
+// everywhere (docs/design/noc.md).
+func (t *tallies) whole(ws []int64) []int64 {
+	var out []int64
+	for _, w := range ws {
+		if t.firstOK && w > t.firstWeek && w < t.weeks[len(t.weeks)-1] {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// refireWeeks are, of the whole weeks among ws, how many had a firing of
+// the rules in that re-fired, of how many.
+func (t *tallies) refireWeeks(ws []int64, in func(id int64) bool) (with, of int) {
+	for _, w := range t.whole(ws) {
+		of++
+		for id, x := range t.by[w] {
+			if x.Refired > 0 && in(id) {
+				with++
+				break
+			}
+		}
+	}
+	return with, of
 }
 
 func (s *Server) tallies(ctx context.Context, n int) (*tallies, error) {
@@ -68,6 +101,13 @@ func (s *Server) tallies(ctx context.Context, n int) (*tallies, error) {
 	}
 	if t.rules, err = s.l.RuleTable(ctx); err != nil {
 		return nil, err
+	}
+	first, _, err := s.l.Bounds(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !first.IsZero() {
+		t.firstWeek, t.firstOK = ledger.Week(s.l.Day(first)), true
 	}
 	return t, nil
 }
@@ -140,9 +180,10 @@ type ruleLine struct {
 	// Proposed says a change to it is proposed and not yet finished with.
 	Proposed bool
 	// RefiredShare is the share of its firings that re-fired, and
-	// RefiredWeeks how many of the weeks shown had one (docs/design/noc.md).
-	RefiredShare string
-	RefiredWeeks int
+	// RefiredWeeks how many of the whole weeks among those shown, RefiredOf,
+	// had one (tallies.whole).
+	RefiredShare            string
+	RefiredWeeks, RefiredOf int
 	// Deploys are its firings that came during a deploy, DeploysCaught
 	// those of them that caught something, and Without its precision
 	// leaving them out.
@@ -405,9 +446,6 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 			l.Excused += x.Excused
 			l.Deploys += x.Deploy
 			l.DeploysCaught += x.DeployWhite
-			if x.Refired > 0 {
-				l.RefiredWeeks++
-			}
 		}
 	}
 	credit, err := s.credit(ctx, t, n)
@@ -434,6 +472,7 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 		l.Noisy = noisy(l.Firings, l.White, t.o)
 		l.Precision = pct(l.White, l.Firings)
 		l.RefiredShare = pct(l.Refired, l.Firings)
+		l.RefiredWeeks, l.RefiredOf = t.refireWeeks(recent, func(rid int64) bool { return rid == id })
 		l.Without = pct(l.White-l.DeploysCaught, l.Firings-l.Deploys)
 		// Weeks running it has been noisy, up to the last whole week.
 		for i := len(t.weeks) - 2; i >= 0 && t.noisy(t.weeks[i], id); i-- {
