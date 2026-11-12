@@ -216,6 +216,17 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 	if cursor.IsZero() {
 		cursor, settle = now.Add(-s.cfg.Backfill), 0
 	}
+	// A version of the rules recorded since the hours it was in effect were
+	// replayed: replayed again from there.
+	again, seq, err := s.l.AgainFrom(ctx)
+	if err != nil {
+		s.fail("the ledger", err)
+		return
+	}
+	if !again.IsZero() && again.Before(cursor) {
+		s.log.Info("replaying again from when a version of the rules recorded since took effect", "from", again)
+		cursor = again
+	}
 	piece := 24 * time.Hour
 	for cursor.Before(now) && ctx.Err() == nil {
 		from := cursor.Add(-settle).Truncate(s.cfg.Step)
@@ -258,6 +269,14 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		}
 		s.status.Unlock()
 		s.log.Info("run", "kind", kind, "from", from, "to", to, "firings", len(found.Firings), "failed", len(found.Run.Failed), "took", s.now().Sub(began).Round(time.Millisecond))
+		if !again.IsZero() {
+			// Unless a version was recorded since the run began: the next
+			// run replays from there.
+			if err := s.l.AgainDone(ctx, seq); err != nil {
+				s.fail("the ledger", err)
+			}
+			again = time.Time{}
+		}
 		cursor, settle = to, s.cfg.Settle
 		if !unfinished && piece < 24*time.Hour {
 			piece *= 2
@@ -628,6 +647,13 @@ func identity(r rules.Rule) string {
 func (s *Server) look(ctx context.Context, raw *string) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
+	// Following a history, the versions added to it are recorded from their
+	// own times first: the rules read now are the newest's.
+	if s.following() {
+		if err := s.follow(ctx); err != nil {
+			return err
+		}
+	}
 	rs, docs, err := s.readRules(ctx)
 	if err != nil {
 		return err
@@ -730,7 +756,10 @@ func (s *Server) version(ctx context.Context, rs []rules.Rule, docs []rules.Doc,
 // version yet, before its first run: the one in effect when the backfill
 // starts, from before the ledger began, and each later one from its time.
 // A ledger with versions of its own keeps them; the directory's are passed
-// over, and the log says so.
+// over, and the log says so. A version that can't be read (no rules, none
+// --rules-select keeps, a file that doesn't parse) is passed over, saying
+// so, and the one before it stays in effect: one bad commit doesn't hold
+// the start up, and a pod restarted doesn't loop on it.
 func (s *Server) history(ctx context.Context) error {
 	if s.cfg.RulesHistory == "" {
 		return nil
@@ -740,6 +769,8 @@ func (s *Server) history(ctx context.Context) error {
 	// reached starts as it would without.
 	if _, ok, err := s.l.Latest(ctx); err != nil {
 		return err
+	} else if ok && s.following() {
+		return nil // what was added since, the watcher records
 	} else if ok {
 		s.log.Info("--rules-history: the ledger has versions of the rules of its own, which it keeps; the directory is passed over",
 			"dir", s.cfg.RulesHistory)
@@ -749,6 +780,11 @@ func (s *Server) history(ctx context.Context) error {
 	if errors.Is(err, rules.ErrNoVersions) {
 		s.log.Warn("--rules-history: the directory holds no versions, as when they couldn't be fetched: the backfill replays today's rules",
 			"dir", s.cfg.RulesHistory)
+		return nil
+	}
+	if err != nil && s.following() {
+		// Read again every --watch, which says so until it is put right.
+		s.log.Error("--rules-history", "err", err)
 		return nil
 	}
 	if err != nil {
@@ -771,49 +807,71 @@ func (s *Server) history(ctx context.Context) error {
 			first = i
 		}
 	}
-	if hs[first].At.After(start) {
+	xrs, xdocs := s.extrasNow(ctx)
+	// Every version read before any is kept, so a start cut short leaves
+	// the ledger as it was. The one in effect when the backfill starts is
+	// the latest that reads at or before then.
+	var reads []historyVersion
+	var picked rules.Picked
+	for i := first; i >= 0 && len(reads) == 0; i-- {
+		if v, ok := s.readVersion(hs[i], xrs, xdocs, &picked); ok {
+			reads = append(reads, v)
+		}
+	}
+	for _, h := range hs[first+1:] {
+		if v, ok := s.readVersion(h, xrs, xdocs, &picked); ok {
+			reads = append(reads, v)
+		}
+	}
+	if len(reads) == 0 {
+		s.log.Warn("--rules-history: no version reads: the backfill replays today's rules", "dir", s.cfg.RulesHistory)
+		return nil
+	}
+	if reads[0].at.After(start) {
 		s.log.Warn("--rules-history: no version is from before the backfill starts; the earliest is taken as the rules from before then",
-			"backfill", start, "earliest", hs[first].At)
+			"backfill", start, "earliest", reads[0].at)
 	}
-	// Every version read before any is kept: one that can't be read stops
-	// the start with the ledger as it was, so the next start reads them all
-	// again rather than pass over a ledger half written.
-	type read struct {
-		rs   []rules.Rule
-		docs []rules.Doc
-	}
-	var reads []read
-	for _, h := range hs[first:] {
-		rs, docs, err := rules.Read(h.Path)
-		if err == nil && len(s.matching(rs)) == 0 {
-			err = errors.New("no alert rules to replay")
-		}
+	added := 0
+	for _, v := range reads {
+		id, _, err := s.version(ctx, v.rules, v.docs, v.at)
 		if err != nil {
-			return fmt.Errorf("--rules-history: %s: %w", h.Path, err)
-		}
-		reads = append(reads, read{rs, docs})
-	}
-	added, last := 0, ""
-	for i, h := range hs[first:] {
-		id, _, err := s.version(ctx, reads[i].rs, reads[i].docs, h.At)
-		if err != nil {
-			return fmt.Errorf("--rules-history: %s: %w", h.Path, err)
+			return fmt.Errorf("--rules-history: %s: %w", v.path, err)
 		}
 		if id != 0 {
 			added++
 		}
-		last = h.Path
+	}
+	// Followed from the newest, read or not: one that doesn't read isn't
+	// read again each --watch.
+	if err := s.l.SetMeta(ctx, "followed", strconv.FormatInt(hs[len(hs)-1].At.Unix(), 10)); err != nil {
+		return err
 	}
 	s.log.Info("--rules-history: versions of the rules from before the ledger began", "dir", s.cfg.RulesHistory, "versions", added)
+	if said := picked.String(); said != "" {
+		s.log.Info("--rules-history: the versions held "+said+": passed over", "versions", len(hs[first:]))
+	}
 	// The rules read now should be the newest version's; if they aren't, they
 	// are taken as changed now, and the directory may be stale.
 	if rs, _, err := s.readRules(ctx); err == nil {
 		if latest, ok, err := s.l.Latest(ctx); err == nil && ok && latest.Digest != digestOf(s.matching(rs)) {
 			s.log.Warn("--rules-history: the rules read now differ from the newest version in the directory; they are taken as changed now",
-				"newest", last)
+				"newest", reads[len(reads)-1].path)
 		}
 	}
 	return nil
+}
+
+// sayPicked logs what reading the rule files passed over, when it isn't
+// what was said last: they are read every --watch.
+func (s *Server) sayPicked(what string, p rules.Picked) {
+	said := p.String()
+	if was, _ := s.picked.Load().(string); said == was {
+		return
+	}
+	s.picked.Store(said)
+	if said != "" {
+		s.log.Info(what + ": the rule files hold " + said + ": passed over")
+	}
 }
 
 // matching are the rules --rule-re keeps.
@@ -865,14 +923,30 @@ func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, erro
 		}
 	case s.ruler != nil:
 		rs, docs, err = s.ruler.Read(ctx)
+	case s.following():
+		rs, docs, err = s.newest()
 	case s.cfg.RulesPath != "":
-		rs, docs, err = rules.Read(s.cfg.RulesPath)
+		var picked rules.Picked
+		rs, docs, picked, err = rules.ReadPicked(s.cfg.RulesPath, rules.Picking{Select: s.cfg.RulesSelect})
+		s.sayPicked("--rules", picked)
 	}
 	if err != nil {
 		return nil, nil, err
 	}
-	// A cloud's own alarms, beside the rules: a read that fails anywhere
-	// fails whole, so the version stays as it was.
+	r, d, err := s.extras(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return append(rs, r...), append(docs, d...), nil
+}
+
+// extras are the rules read beside the rules: a cloud's own alarms, and a
+// Loki ruler's. A read that fails anywhere fails whole, so the version
+// stays as it was.
+func (s *Server) extras(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
+	agent := "lapilli/" + s.cfg.Version
+	var rs []rules.Rule
+	var docs []rules.Doc
 	for _, a := range s.alarms {
 		d, err := a.Docs(ctx, s.alarmsEvery())
 		if err != nil {

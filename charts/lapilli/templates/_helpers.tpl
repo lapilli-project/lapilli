@@ -1,3 +1,29 @@
+{{/* The values added since 0.28.1, filled in where they are missing, as
+they are after an upgrade with --reuse-values (which keeps the old release's
+values, not the new chart's): every template reads them through this. */}}
+{{- define "lapilli.defaults" -}}
+{{- $s := .Values.serve -}}
+{{- include "lapilli.fill" (dict "in" $s "key" "service" "with" (dict "type" "ClusterIP" "port" 80 "annotations" (dict) "loadBalancerClass" "" "loadBalancerSourceRanges" (list) "externalTrafficPolicy" "" "nodePort" nil "sourceRangesAreTheProxy" false)) -}}
+{{- include "lapilli.fill" (dict "in" $s "key" "ingress" "with" (dict "enabled" false "className" "" "annotations" (dict) "hosts" (list) "path" "/" "pathType" "Prefix" "tls" (list) "https" true "serviceAnnotations" (dict))) -}}
+{{- include "lapilli.fill" (dict "in" $s "key" "httpRoute" "with" (dict "enabled" false "annotations" (dict) "parentRefs" (list) "hostnames" (list) "https" true)) -}}
+{{- include "lapilli.fill" (dict "in" $s "key" "signIn" "with" (dict "userClaim" "email" "groupsClaim" "groups" "sessionMaxAge" "")) -}}
+{{- include "lapilli.fill" (dict "in" $s.signIn "key" "oidc" "with" (dict "issuer" "" "clientId" "" "scopes" (list) "hostedDomains" (list) "trustedClients" (list) "bearer" true)) -}}
+{{- include "lapilli.fill" (dict "in" $s.signIn.oidc "key" "clientSecret" "with" (dict "name" "" "key" "client-secret")) -}}
+{{- include "lapilli.fill" (dict "in" $s.signIn "key" "proxyJWT" "with" (dict "kind" "" "audience" "" "albArn" "" "issuer" "" "jwks" "" "header" "")) -}}
+{{- include "lapilli.fill" (dict "in" $s.signIn "key" "sessionKeySecret" "with" (dict "name" "" "key" "session-key" "create" true)) -}}
+{{- include "lapilli.fill" (dict "in" $s "key" "roles" "with" (dict "viewers" (list) "editors" (list) "admins" (list) "groupsHeader" "")) -}}
+{{- if not (hasKey $s "exposeWithoutSignIn") }}{{ $_ := set $s "exposeWithoutSignIn" false }}{{ end -}}
+{{- if not (hasKey $s "readinessPath") }}{{ $_ := set $s "readinessPath" "/readyz" }}{{ end -}}
+{{- end -}}
+
+{{/* fill sets in[key] to the dict it holds, or a new one, with each key of
+with it doesn't have. */}}
+{{- define "lapilli.fill" -}}
+{{- $m := index .in .key | default dict -}}
+{{- range $k, $v := .with }}{{ if not (hasKey $m $k) }}{{ $_ := set $m $k $v }}{{ end }}{{ end -}}
+{{- $_ := set .in .key $m -}}
+{{- end -}}
+
 {{- define "lapilli.fullname" -}}
 {{- if contains .Chart.Name .Release.Name -}}
 {{- .Release.Name | trunc 52 | trimSuffix "-" -}}
@@ -53,6 +79,8 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if $r.loaded }}{{ $from = add1 $from }}{{ end }}
 {{- if $r.grafana.url }}{{ $from = add1 $from }}{{ end }}
 {{- if $r.ruler.url }}{{ $from = add1 $from }}{{ end }}
+{{- /* Followed, the rules history is the rules. */}}
+{{- if include "lapilli.historyFollows" . }}{{ $from = add1 $from }}{{ end }}
 {{- /* A Loki ruler's rules, given through extraArgs (--loki URL
      --loki-loaded-rules), go beside the rest, or alone, as rules.alarms do. */}}
 {{- $loki := false }}
@@ -60,7 +88,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if or (hasPrefix "--loki-loaded-rules" (toString .)) (hasPrefix "--loki-rules" (toString .)) }}{{ $loki = true }}{{ end }}
 {{- end }}
 {{- if or (gt (int $from) 1) (and (eq (int $from) 0) (not $copied) (not $r.alarms) (not $loki)) }}
-{{- fail "rules: give one of rules.configMaps, rules.loaded, rules.grafana.url and rules.ruler.url, or rules.alarms, or a Loki's rules through extraArgs" }}
+{{- fail "rules: give one of rules.configMaps, rules.loaded, rules.grafana.url, rules.ruler.url and serve.rulesHistory (with no rules.configMaps, the rules are the repository's, followed), or rules.alarms, or a Loki's rules through extraArgs" }}
 {{- end }}
 {{- $sources := dict }}
 {{- range $r.alarms }}
@@ -94,9 +122,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (eq .Values.mode "serve") (gt (len $r.configMaps) 1) }}
 {{- fail "rules.configMaps: serve reads one; put the rules in one ConfigMap" }}
 {{- end }}
-{{- if and $s.rulesHistory.repository (or (ne .Values.mode "serve") (not $r.configMaps)) }}
-{{- fail "serve.rulesHistory is the history of the rules in rules.configMaps, for mode: serve" }}
-{{- end }}
+{{- include "lapilli.historyChecks" . }}
 {{- if and (eq .Values.mode "cronjob") (not .Values.incidents) (not .Values.impact) }}
 {{- fail "give incidents, impact, or both" }}
 {{- end }}
@@ -106,8 +132,68 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (eq .Values.mode "serve") $s.everyoneAdmin $s.readOnly }}
 {{- fail "serve.everyoneAdmin lets everyone change anything, and serve.readOnly no one" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") (or $s.roles.editors $s.roles.admins $s.roles.groupsHeader) (not $s.userHeader) }}
-{{- fail "serve.roles needs serve.userHeader: who is who comes from the proxy that signs people in" }}
+{{- $in := $s.signIn }}
+{{- $signIns := 0 }}
+{{- if $s.userHeader }}{{ $signIns = add1 $signIns }}{{ end }}
+{{- if $in.oidc.issuer }}{{ $signIns = add1 $signIns }}{{ end }}
+{{- if $in.proxyJWT.kind }}{{ $signIns = add1 $signIns }}{{ end }}
+{{- if and (eq .Values.mode "serve") (gt (int $signIns) 1) }}
+{{- fail "serve.userHeader, serve.signIn.oidc and serve.signIn.proxyJWT are three ways to say who people are: give one" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $in.oidc.issuer (not $in.oidc.clientId) }}
+{{- fail "serve.signIn.oidc.clientId: the client lapilli is registered as with the provider" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $in.oidc.issuer (not (include "lapilli.externalURL" .)) }}
+{{- fail "serve.signIn.oidc needs serve.externalURL, or an ingress host or httpRoute hostname to work it out from: the provider sends people back to its /auth/callback" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") (or $in.sessionMaxAge $in.sessionKeySecret.name) (not $in.oidc.issuer) }}
+{{- fail "serve.signIn.sessionMaxAge and sessionKeySecret are serve.signIn.oidc's sessions" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $in.proxyJWT.kind (not (has $in.proxyJWT.kind (list "google-iap" "aws-alb" "jwks"))) }}
+{{- fail "serve.signIn.proxyJWT.kind: google-iap, aws-alb or jwks" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") (or $in.oidc.issuer $in.proxyJWT.kind) $s.everyoneAdmin }}
+{{- fail "serve.everyoneAdmin is for no sign-in: to let everyone signed in change anything, give serve.roles.admins: ['*']" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $s.roles.groupsHeader (not $s.userHeader) }}
+{{- fail "serve.roles.groupsHeader is serve.userHeader's: with serve.signIn, the groups are in serve.signIn.groupsClaim" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") (or $s.roles.editors $s.roles.admins $s.roles.viewers) (eq (int $signIns) 0) }}
+{{- fail "serve.roles needs a sign-in, serve.signIn or serve.userHeader: who is who comes from it" }}
+{{- end }}
+{{- $own := or $in.oidc.issuer $in.proxyJWT.kind }}
+{{- if and (eq .Values.mode "serve") $own (not (or $s.roles.viewers $s.roles.editors $s.roles.admins)) }}
+{{- fail "serve.signIn lets in only those a role names: give serve.roles.viewers (people, group:NAME or *@DOMAIN), editors or admins. An identity provider signs in whoever it knows, which for a public one is anyone" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $own (or (not $s.roles.viewers) (has "*" $s.roles.viewers)) (or (has "*" $s.roles.editors) (has "*" $s.roles.admins) (has "*" ($s.changes.approvers | default list))) }}
+{{- fail "serve.roles '*' gives a role to everyone the identity provider signs in: say who may come in with serve.roles.viewers (people, group:NAME or *@DOMAIN) first" }}
+{{- end }}
+{{- $ext := include "lapilli.externalURL" . }}
+{{- if $ext }}
+{{- $u := urlParse $ext }}
+{{- if and (ne (toString $u.path) "") (ne (toString $u.path) "/") }}
+{{- fail "serve.externalURL: lapilli is served at the root of its host, as its links are: give no path" }}
+{{- end }}
+{{- $h := regexReplaceAll ":[0-9]+$" (toString $u.host) "" }}
+{{- if and (eq .Values.mode "serve") $in.oidc.issuer (eq $u.scheme "http") (not (regexMatch "^(localhost|.*\\.localhost|127(\\.[0-9]+){3}|\\[::1\\])$" $h)) }}
+{{- fail (printf "serve.signIn.oidc: people reach lapilli at %s, over http: the session cookie would cross the network in the clear. Serve it over https (serve.ingress.https, serve.httpRoute.https, or serve.externalURL)" $ext) }}
+{{- end }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $s.ingress.enabled (ne (toString $s.ingress.path) "/") }}
+{{- fail "serve.ingress.path: lapilli is served at the root of its host, as its links are: /" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $s.userHeader (ne $s.service.type "ClusterIP") (not (and (eq $s.service.type "LoadBalancer") $s.service.loadBalancerSourceRanges $s.service.sourceRangesAreTheProxy)) }}
+{{- fail "serve.userHeader trusts a plain header, which nothing can set or strip in front of a LoadBalancer or a NodePort of TCP: anyone who reaches it names themselves anyone. Put the proxy in front (an Ingress, a Gateway), use serve.signIn, or, for a LoadBalancer only the proxy reaches, name its addresses in serve.service.loadBalancerSourceRanges and set serve.service.sourceRangesAreTheProxy" }}
+{{- end }}
+{{- $svc := $s.service }}
+{{- if and (eq .Values.mode "serve") (not (has ($svc.type | default "ClusterIP") (list "ClusterIP" "LoadBalancer" "NodePort"))) }}
+{{- fail "serve.service.type: ClusterIP, LoadBalancer or NodePort" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $s.httpRoute.enabled (not $s.httpRoute.parentRefs) }}
+{{- fail "serve.httpRoute.parentRefs: the Gateway the route attaches to" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") (include "lapilli.exposed" .) (eq (int $signIns) 0) (not $s.exposeWithoutSignIn) }}
+{{- fail "serve.service, serve.ingress or serve.httpRoute serve the UI outside the cluster, where anyone who reaches it reads the ledger: sign people in (serve.signIn.oidc, serve.signIn.proxyJWT, or serve.userHeader behind a proxy that signs them in), or say it is meant with serve.exposeWithoutSignIn" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $s.userHeader (not $s.networkPolicy.enabled) (not $s.networkPolicy.othersKeptOut) }}
 {{- fail "serve.userHeader trusts a header any pod in the cluster could set: enable serve.networkPolicy, with a network plugin that enforces it, so only the sign-in proxy reaches lapilli; or, if something else keeps the rest out (a service mesh's policy), say so with serve.networkPolicy.othersKeptOut" }}
@@ -143,8 +229,8 @@ your own needs from. */ -}}
 {{- fail "serve.firings.tokenSecret is serve.incidentsAPI.tokenSecret: give each its own token, so a job that may copy one can't write the other" }}
 {{- end }}
 {{- $c := $s.changes }}
-{{- if and (eq .Values.mode "serve") $c.enabled (not $s.userHeader) }}
-{{- fail "serve.changes needs serve.userHeader: a change is approved by a person, and the proxy that signs people in says who" }}
+{{- if and (eq .Values.mode "serve") $c.enabled (eq (int $signIns) 0) }}
+{{- fail "serve.changes needs a sign-in, serve.signIn or serve.userHeader: a change is approved by a person, and the sign-in says who" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $c.enabled (not (or $s.roles.editors $s.roles.admins)) }}
 {{- fail "serve.changes needs roles, serve.roles.editors or serve.roles.admins: without them, whoever may change anything is an admin, who could resume changes paused and approve" }}
@@ -421,6 +507,68 @@ the rules and the incidents are, and how to judge. */}}
 {{- end -}}
 
 {{/* The pod's securityContext, the container's, and where it runs. */}}
+{{/* Where people reach the UI: serve.externalURL, or worked out from the
+ingress's first host or the HTTPRoute's first hostname, https unless their
+https says false. Hosts with a wildcard name no one place. */}}
+{{- define "lapilli.externalURL" -}}
+{{- $s := .Values.serve -}}
+{{- $ihosts := list -}}
+{{- if $s.ingress.enabled }}{{ range $s.ingress.hosts }}{{ if not (contains "*" (toString .)) }}{{ $ihosts = append $ihosts (toString .) }}{{ end }}{{ end }}{{ end -}}
+{{- $rhosts := list -}}
+{{- if $s.httpRoute.enabled }}{{ range $s.httpRoute.hostnames }}{{ if not (contains "*" (toString .)) }}{{ $rhosts = append $rhosts (toString .) }}{{ end }}{{ end }}{{ end -}}
+{{- if $s.externalURL -}}
+{{- $s.externalURL -}}
+{{- else if $ihosts -}}
+{{- printf "%s://%s" (ternary "https" "http" (ne (toString $s.ingress.https) "false")) (first $ihosts) -}}
+{{- else if $rhosts -}}
+{{- printf "%s://%s" (ternary "https" "http" (ne (toString $s.httpRoute.https) "false")) (first $rhosts) -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The host names lapilli answers to besides those it always does:
+serve.allowedHosts, the ingress's hosts and the HTTPRoute's hostnames,
+comma-separated. */}}
+{{- define "lapilli.allowedHosts" -}}
+{{- $s := .Values.serve -}}
+{{- $h := list -}}
+{{- range $s.allowedHosts }}{{ $h = append $h (toString .) }}{{ end -}}
+{{- if $s.ingress.enabled }}{{ range $s.ingress.hosts }}{{ if not (contains "*" (toString .)) }}{{ $h = append $h (toString .) }}{{ end }}{{ end }}{{ end -}}
+{{- if $s.httpRoute.enabled }}{{ range $s.httpRoute.hostnames }}{{ if not (contains "*" (toString .)) }}{{ $h = append $h (toString .) }}{{ end }}{{ end }}{{ end -}}
+{{- join "," (uniq $h) -}}
+{{- end -}}
+
+{{/* Whether the UI is served outside the cluster: a LoadBalancer or
+NodePort, an Ingress, or an HTTPRoute. */}}
+{{- define "lapilli.exposed" -}}
+{{- $s := .Values.serve -}}
+{{- if or (ne ($s.service.type | default "ClusterIP") "ClusterIP") $s.ingress.enabled $s.httpRoute.enabled -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/* The ports of serve's Service beside the UI's. */}}
+{{- define "lapilli.innerPorts" -}}
+# /metrics and the health checks, alone: what Prometheus needs.
+- name: metrics
+  port: {{ .Values.serve.metricsPort }}
+  targetPort: metrics
+{{- if include "lapilli.incidentsPort" . }}
+# Incidents, firings, tasks and changes, each with a token, alone: what
+# jobs copying them, keeping tasks in step with a tracker, and the change
+# recipes need.
+- name: incidents
+  port: {{ .Values.serve.incidentsAPI.port }}
+  targetPort: incidents
+{{- end }}
+{{- $n := .Values.serve.notificationsAPI }}
+{{- if or $n.tokenSecret.name $n.grafanaSecret.name $n.snsTopics }}
+# Notifications as alert managers sent them, alone.
+- name: notifications
+  port: {{ $n.port }}
+  targetPort: notifications
+{{- end }}
+{{- end -}}
+
 {{- define "lapilli.podSecurity" -}}
 runAsNonRoot: true
 runAsUser: 65532
@@ -461,11 +609,11 @@ labels:
   {{- end }}
 {{- $a := deepCopy (.Values.podAnnotations | default dict) }}
 {{- if and (eq .Values.mode "serve") .Values.serve.rulesHistory.repository }}
-{{- /* The rules history's init containers run git, and RENDER, on what a
+{{- /* The rules history's containers run git, and RENDER, on what a
 repository holds: EKS's webhook (IRSA, Pod Identity) and Azure's give them
 no cloud identity. GKE's metadata server answers every container alike. */ -}}
 {{- range $k, $sep := dict "eks.amazonaws.com/skip-containers" "," "azure.workload.identity/skip-containers" ";" }}
-{{- $skip := printf "rules-history-clone%srules-history" $sep }}
+{{- $skip := include "lapilli.historyContainers" $ | splitList " " | join $sep }}
 {{- with index $a $k }}{{ $skip = printf "%s%s%s" (toString .) $sep $skip }}{{ end }}
 {{- $_ := set $a $k $skip }}
 {{- end }}

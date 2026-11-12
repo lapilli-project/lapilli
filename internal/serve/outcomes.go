@@ -556,7 +556,7 @@ func (s *Server) inUse(ctx context.Context, out *outcomes) error {
 	if err != nil {
 		return err
 	}
-	named := s.cfg.UserHeader != ""
+	named := s.namesPeople()
 	u.ByKind = map[string]int{}
 	people, byWeek := map[string]bool{}, make([]map[string]bool, weeks)
 	for i := range weeks {

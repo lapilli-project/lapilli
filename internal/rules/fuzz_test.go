@@ -112,3 +112,59 @@ func FuzzScope(f *testing.F) {
 		Scope(expr, map[string]string{k: v})
 	})
 }
+
+// A rendered chart's stream comes from a repository: picking its rules out
+// of it answers or refuses, and what it keeps holds the same rules.
+func FuzzPick(f *testing.F) {
+	f.Add([]byte(rendered), "grafana_alert=1")
+	f.Add([]byte("%YAML 1.1\n---\nkind: Service\nmetadata: {name: s}\n...\ngroups: [{name: g, rules: [{alert: A, expr: up}]}]\n"), "")
+	f.Add([]byte("kind: List\nitems: [{kind: Service, metadata: {}}, {groups: [{name: g, rules: [{alert: A, expr: up}]}]}]\n"), "a in (b)")
+	f.Add([]byte("apiVersion: v1\nkind: Secret\nmetadata: {name: s, labels: {a: \"1\"}}\ngroups: [{name: g, rules: [{alert: A, expr: up}]}]\n"), "a>0")
+	f.Add([]byte("kind: ConfigMapList\nitems: [{kind: ConfigMap, metadata: {name: x}, data: {a: \"groups: [{name: g, rules: [{alert: A, expr: up, for: 1x}]}]\"}}]\n"), "")
+	f.Fuzz(func(t *testing.T, b []byte, s string) {
+		sel, err := ParseSelector(s)
+		if err != nil {
+			return
+		}
+		kept, picked, err := Pick(b, sel)
+		if err != nil || picked.Other < 0 || picked.Unselected < 0 || picked.Broken < 0 {
+			return
+		}
+		// What is kept is documents of rules alone, those selected: no
+		// other object (a Secret) is left in it.
+		docs, err := decodeAll(kept)
+		if err != nil {
+			t.Fatalf("kept doesn't read: %v\n%q", err, kept)
+		}
+		var items []any
+		for _, d := range docs {
+			if l, ok := d.([]any); ok {
+				items = append(items, l...)
+			} else if d != nil {
+				items = append(items, d)
+			}
+		}
+		for len(items) > 0 {
+			m, _ := items[0].(map[string]any)
+			items = items[1:]
+			if m != nil && isList(m) {
+				items = append(items, list(m["items"])...)
+				continue
+			}
+			if _, ok, _ := parseDoc(m); !ok {
+				t.Fatalf("kept a document that holds no rules: %v\n%q\n%q", m, b, kept)
+			}
+			if !sel.Empty() && isObject(m) && !sel.Matches(objectLabels(m)) {
+				t.Fatalf("kept an object the selector doesn't match: %v", m)
+			}
+		}
+		all, err := Parse(b)
+		if err != nil || !sel.Empty() {
+			return
+		}
+		got, err := Parse(kept)
+		if len(all) > 0 && (err != nil || len(got) != len(all)) {
+			t.Fatalf("kept %d rules of %d: %v\n%q\n%q", len(got), len(all), err, b, kept)
+		}
+	})
+}

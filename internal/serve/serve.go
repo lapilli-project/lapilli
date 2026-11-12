@@ -27,6 +27,7 @@ import (
 	"lapilli.dev/internal/oncall"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/source"
 	"lapilli.dev/internal/verdict"
 )
@@ -38,7 +39,10 @@ type Config struct {
 	RulesPath string
 	// RulesHistory is a directory of earlier versions of the rules at
 	// RulesPath, added to a ledger that has none (docs/design/history.md).
-	RulesHistory          string
+	RulesHistory string
+	// RulesSelect keeps, of the Kubernetes objects in the files RulesPath
+	// and RulesHistory hold, those whose labels it matches.
+	RulesSelect           rules.Selector
 	Loaded                bool
 	Grafana, GrafanaToken string
 	// Loki is a Loki whose ruler's rules are replayed, beside the rest,
@@ -148,6 +152,20 @@ type Config struct {
 	// proxy lists the reader's groups in.
 	Editors, Admins []string
 	GroupsHeader    string
+	// Viewers are who may look (users, group:NAME, *@DOMAIN, "*"): with
+	// them, or a sign-in of lapilli's own, no one else comes in at all.
+	Viewers []string
+
+	// A sign-in of lapilli's own (docs/design/signin.md), in place of
+	// UserHeader: OIDC signs people in with an OpenID Connect provider,
+	// sending them back to ExternalURL's /auth/callback; Proxy takes them
+	// from the JWT a sign-in in front signs. Sessions last SessionMaxAge
+	// (12h when 0), in cookies signed with the key in the file SessionKey,
+	// or else one made for the process.
+	OIDC          *signin.OIDC
+	Proxy         *signin.Proxy
+	SessionMaxAge time.Duration
+	SessionKey    string
 
 	// What happens (tasks, incidents, quiet windows, comments) is told to
 	// the webhook whose URL is in NotifyWebhook, as JSON, and with
@@ -268,6 +286,8 @@ type Server struct {
 	// open says that, with no roles, everyone is an admin: it listens on
 	// loopback alone, or EveryoneAdmin says so. Run says where it is bound.
 	open atomic.Bool
+	// in is the sign-in of lapilli's own, nil without one.
+	in *signIn
 	// ledgerID names the ledger, made at random when it is first opened:
 	// the change recipes' branches carry it.
 	ledgerID string
@@ -354,6 +374,8 @@ type Server struct {
 		m     map[rules.Place]time.Duration
 		notes string
 	}
+	// picked is what reading the rule files last passed over, as said.
+	picked atomic.Value
 }
 
 // status is what the worker is doing, for the UI: a text to be shown in
@@ -389,6 +411,9 @@ func (st *status) set(doing string, args ...any) {
 
 // New opens the ledger and readies the server; h is where the history is.
 func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*Server, error) {
+	if err := CheckRoles(cfg); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(cfg.Ledger, 0o750); err != nil {
 		return nil, fmt.Errorf("--ledger: %w", err)
 	}
@@ -411,6 +436,16 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		return nil, fmt.Errorf("--ledger: %w", err)
 	}
 	s.open.Store(cfg.EveryoneAdmin || LoopbackOnly(cfg.Listen))
+	if cfg.OIDC != nil || cfg.Proxy != nil {
+		if err := s.newSignIn(ctx); err != nil {
+			l.Close()
+			return nil, err
+		}
+		// Signed in, people come from elsewhere, often through a proxy on
+		// this machine: loopback says nothing of who they are, and no one
+		// is an admin for it. Roles come from the lists alone.
+		s.open.Store(false)
+	}
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"
 	}
@@ -571,6 +606,11 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("--listen: %w", err)
 	}
 	s.listening(ln.Addr())
+	if s.in != nil && s.in.oidc != nil {
+		// Asked at once, so a setting that is wrong is in the log at start,
+		// not first found by someone signing in.
+		go s.discover(ctx)
+	}
 	srv := &http.Server{
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,

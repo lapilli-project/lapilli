@@ -1,9 +1,11 @@
+{{- include "lapilli.defaults" . }}
 {{- if and (eq .Values.mode "serve") .Values.serve.networkPolicy.enabled }}
 {{- if not .Values.serve.networkPolicy.from }}
-{{- fail "serve.networkPolicy.from: name who may reach lapilli serve, the sign-in proxy; empty would be everyone. Prometheus goes in metricsFrom, to the metrics port alone" }}
+{{- fail "serve.networkPolicy.from: name who may reach lapilli serve's UI: the sign-in proxy, the ingress controller's or the Gateway's pods, or a load balancer's addresses (ipBlock); empty would be everyone. Prometheus goes in metricsFrom, to the metrics port alone" }}
 {{- end }}
-# Only those named may reach lapilli serve: the headers it takes people's
-# names and groups from are then only the sign-in proxy's. Prometheus, in
+# Only those named may reach lapilli serve's UI: the sign-in proxy, whose
+# headers then alone name people, or the ingress controller, the Gateway
+# or the load balancer in front of a sign-in of lapilli's own. Prometheus, in
 # metricsFrom, reaches /metrics and the health checks, and nothing else; a job
 # in incidentsAPI.from (and the chart's trackers job) reaches the port that
 # takes incidents, firings and tasks, and nothing else;
@@ -68,7 +70,7 @@ spec:
 {{- fail "serve.networkPolicy.egress.to: name where lapilli serve may connect, as NetworkPolicy egress rules: its Prometheus, the rules' API, Slack and the webhooks, a cloud's APIs. Empty, it could reach nothing but DNS" }}
 {{- end }}
 ---
-# Where lapilli serve, and its rules history's init containers, may
+# Where lapilli serve, and its rules history's containers, may
 # connect: the cluster's DNS, and those named in egress.to. Nothing else,
 # a cloud's metadata server (169.254.169.254) and the Kubernetes API among
 # them, unless named.

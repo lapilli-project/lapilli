@@ -9,6 +9,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.33.11
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.11
 	github.com/aws/aws-sdk-go-v2/service/sts v1.51.5
+	github.com/coreos/go-oidc/v3 v3.21.0
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/oracle/oci-go-sdk/v65 v65.105.0
 	go.yaml.in/yaml/v3 v3.0.6

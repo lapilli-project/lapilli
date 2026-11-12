@@ -1,3 +1,4 @@
+{{- include "lapilli.defaults" . }}
 {{- include "lapilli.checks" . }}
 {{- if eq .Values.mode "cronjob" }}
 apiVersion: batch/v1

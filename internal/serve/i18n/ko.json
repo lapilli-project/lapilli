@@ -1083,5 +1083,19 @@
  "there are %d teams: name each once": "팀은 %d개예요. 각 팀을 한 번씩만 주세요",
  "a deploy starts by an hour after the deploys file is read: %s is later": "배포는 배포 파일을 읽은 뒤 한 시간 안에 시작해야 해요. %s 는 그보다 늦어요",
  "the deploys' labels are %d MB in all at most, counted for each deploy": "배포의 레이블은 배포마다 세어 모두 합쳐 %dMB까지예요",
- "--deploy-before and --deploy-after are a day at most": "--deploy-before 와 --deploy-after 는 하루까지예요"
+ "--deploy-before and --deploy-after are a day at most": "--deploy-before 와 --deploy-after 는 하루까지예요",
+ "Sign out": "로그아웃",
+ "Signed out": "로그아웃했어요",
+ "You have signed out of Lapilli. The identity provider may still have you signed in: on a computer others use, sign out there too.": "Lapilli 에서 로그아웃했어요. ID 제공자에는 아직 로그인되어 있을 수 있어요. 여러 사람이 쓰는 컴퓨터라면 그쪽에서도 로그아웃해 주세요.",
+ "Sign in again": "다시 로그인",
+ "this sign-in didn't start here, was used already, or took too long: sign in again": "이 로그인은 여기서 시작되지 않았거나, 이미 쓰였거나, 너무 오래 걸렸어요. 다시 로그인해 주세요",
+ "the identity provider can't be reached: try again in a minute": "ID 제공자에 연결할 수 없어요. 1분 뒤에 다시 시도해 주세요",
+ "the identity provider's answer didn't verify: sign in again, or ask whoever runs lapilli to look at its log": "ID 제공자의 응답을 검증하지 못했어요. 다시 로그인하거나 lapilli 운영자에게 로그를 확인해 달라고 해 주세요",
+ "the identity provider lists more groups than a session can hold": "ID 제공자가 알려 준 그룹이 너무 많아 세션에 담을 수 없어요",
+ "the sign-in names no one lapilli can take": "이 로그인은 lapilli 가 받아들일 수 있는 사람을 가리키지 않아요",
+ "the identity provider didn't sign you in (%s)": "ID 제공자에서 로그인하지 못했어요 (%s)",
+ "no one changes anything here: lapilli serve signs people in, with no roles. Name who may make changes in --editors or --admins": "여기서는 아무도 바꿀 수 없어요. lapilli serve 가 로그인은 받지만 역할이 없어요. 바꿀 수 있는 사람을 --editors 나 --admins 에 적어 주세요",
+ "signing in isn't set up right here: ask whoever runs lapilli to look at its log": "여기서는 로그인 설정이 잘못되어 있어요. lapilli 운영자에게 로그를 확인해 달라고 해 주세요",
+ "the identity provider's answer doesn't name you as lapilli needs: ask whoever runs lapilli to look at its log": "ID 제공자의 응답이 lapilli 가 필요한 방식으로 사용자를 알려 주지 않았어요. lapilli 운영자에게 로그를 확인해 달라고 해 주세요",
+ "you are signed in as %s, whom lapilli doesn't let in: ask its admins to name you": "%s(으)로 로그인했지만 lapilli 가 들여보내지 않는 사용자예요. 관리자에게 추가해 달라고 해 주세요"
 }

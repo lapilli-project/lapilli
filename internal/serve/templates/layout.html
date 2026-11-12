@@ -23,7 +23,8 @@
 
 {{define "bottom"}}
 </main>
-<footer>lapilli {{.Status.Version}} · {{t "times in %s" .Status.Zone}}{{with .Status.User}} · {{t "you are %s, %s" (who .) (t $.Status.Role)}}{{else}}{{if .Status.ReadOnly}} · {{t "read-only"}}{{end}}{{end}}</footer>
+<footer>lapilli {{.Status.Version}} · {{t "times in %s" .Status.Zone}}{{with .Status.User}} · {{t "you are %s, %s" (who .) (t $.Status.Role)}}{{else}}{{if .Status.ReadOnly}} · {{t "read-only"}}{{end}}{{end}}{{if .Status.SignOut}}
+<form class="signout" method="post" action="/auth/logout"><button type="submit">{{t "Sign out"}}</button></form>{{end}}</footer>
 </body>
 </html>
 {{end}}
@@ -32,6 +33,12 @@
 <h1>{{.View.Code}}</h1>
 <p>{{.View.Err}}</p>
 <p><a href="/">{{t "Back to the overview"}}</a></p>
+{{template "bottom" .}}{{end}}
+
+{{define "signedout"}}{{template "top" (titled . (t "Signed out"))}}
+<h1>{{t "Signed out"}}</h1>
+<p>{{t "You have signed out of Lapilli. The identity provider may still have you signed in: on a computer others use, sign out there too."}}</p>
+<p><a href="/auth/login">{{t "Sign in again"}}</a></p>
 {{template "bottom" .}}{{end}}
 
 {{define "spark"}}<svg class="spark" width="72" height="18" viewBox="0 0 72 18" role="img" aria-label="{{t "Stones by week: %s" (sparkText .)}}">{{range .}}<g><title>{{.Title}}</title><rect class="w" x="{{.X}}" y="{{.WhiteY}}" width="5" height="{{.WhiteH}}"/><rect class="b" x="{{.X}}" y="{{.BlackY}}" width="5" height="{{.BlackH}}"/></g>{{end}}</svg>{{end}}

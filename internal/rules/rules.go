@@ -14,11 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"maps"
 	"math"
-	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -424,81 +421,10 @@ func FromDocs(docs []Doc) ([]Rule, error) {
 	return out, nil
 }
 
-// Read is Load, and the documents the rules came from.
+// Read is Load, and the documents the rules came from, each as it is.
 func Read(path string) ([]Rule, []Doc, error) {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	if !fi.IsDir() {
-		rs, d, err := load(path)
-		if err != nil {
-			return nil, nil, err
-		}
-		return rs, []Doc{d}, nil
-	}
-	// The directory may be a link to one: a trailing / walks where it leads.
-	walk := path
-	if l, err := os.Lstat(path); err == nil && l.Mode()&os.ModeSymlink != 0 {
-		walk = path + string(filepath.Separator)
-	}
-	root := filepath.Clean(path)
-	var out []Rule
-	var docs []Doc
-	err = filepath.WalkDir(walk, func(p string, e fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		// A mounted ConfigMap holds its keys as links into ..data.
-		if filepath.Clean(p) != root && strings.HasPrefix(e.Name(), ".") {
-			if e.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if e.IsDir() {
-			return nil
-		}
-		if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() {
-			return nil
-		}
-		rs, d, err := load(p)
-		switch {
-		case errors.Is(err, errNoRules):
-			return nil
-		case err != nil && filepath.Dir(p) != root:
-			// Below the top, files that aren't YAML, such as a Helm
-			// chart's templates, are passed over.
-			return nil
-		case err != nil:
-			return err
-		}
-		out = append(out, rs...)
-		docs = append(docs, d)
-		return nil
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(out) == 0 {
-		return nil, nil, fmt.Errorf("%s: %w", path, ErrNoneInDir)
-	}
-	return out, docs, nil
-}
-
-func load(path string) ([]Rule, Doc, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, Doc{}, err
-	}
-	rs, err := Parse(b)
-	if err != nil {
-		return nil, Doc{}, fmt.Errorf("%s: %w", path, err)
-	}
-	for i := range rs {
-		rs[i].Source = path
-	}
-	return rs, Doc{Source: path, Data: b}, nil
+	rs, docs, _, err := ReadPicked(path, Picking{})
+	return rs, docs, err
 }
 
 // Parse reads every alert rule in a document, which may hold several YAML
@@ -541,6 +467,24 @@ func parseDoc(doc map[string]any) ([]Rule, bool, error) {
 	switch {
 	case doc == nil:
 		return nil, false, nil
+	case isList(doc):
+		// kubectl get -o yaml, or the API's own ConfigMapList.
+		var out []Rule
+		found := false
+		for _, it := range list(doc["items"]) {
+			m, _ := it.(map[string]any)
+			rs, ok, err := parseDoc(m)
+			if err != nil {
+				return nil, true, err
+			}
+			found = found || ok
+			out = append(out, rs...)
+		}
+		return out, found, nil
+	case isObject(doc) && !ruleKinds[str(doc["kind"])]:
+		// A Kubernetes object of any other kind holds no rules, whatever
+		// else it has: a Secret with a top-level groups is a Secret.
+		return nil, false, nil
 	case doc["kind"] == "ConfigMap":
 		var out []Rule
 		found := false
@@ -552,20 +496,6 @@ func parseDoc(doc map[string]any) ([]Rule, bool, error) {
 				continue // not every key holds rules
 			}
 			found = true
-			out = append(out, rs...)
-		}
-		return out, found, nil
-	case doc["kind"] == "List":
-		// kubectl get ... -o yaml
-		var out []Rule
-		found := false
-		for _, it := range list(doc["items"]) {
-			m, _ := it.(map[string]any)
-			rs, ok, err := parseDoc(m)
-			if err != nil {
-				return nil, true, err
-			}
-			found = found || ok
 			out = append(out, rs...)
 		}
 		return out, found, nil

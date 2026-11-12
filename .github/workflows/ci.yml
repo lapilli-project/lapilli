@@ -62,6 +62,41 @@ jobs:
           go-version-file: go.mod
       - run: test/e2e/run.sh
 
+  e2e-serve-lb:
+    # The chart served at a URL, as a team serves it: on kind, behind a
+    # LoadBalancer, Gateway API and an Ingress (cloud-provider-kind), with
+    # people signed in by lapilli against a Dex in the cluster, and the
+    # NetworkPolicy letting in what is in front. Not a required check: it
+    # pulls images and starts a cluster.
+    name: serve at a URL on kind
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: test/e2e/serve-lb.sh
+
+  e2e-signin:
+    # lapilli serve's own sign-in against a real Dex in Docker: the
+    # authorization code flow, roles from Dex's groups, bearer tokens, a
+    # replayed callback, signing out. Not a required check: it pulls an
+    # image.
+    name: sign-in against Dex
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: test/e2e/signin.sh
+
   e2e-changes:
     # Changes to rules carried out against a real Prometheus, Gitea and
     # Grafana in Docker. Not a required check: it pulls images.
@@ -92,6 +127,23 @@ jobs:
         with:
           go-version-file: go.mod
       - run: test/e2e/loki.sh
+
+  e2e-rendered:
+    # Rules a chart renders, kept in a real Gitea, replayed against a real
+    # Prometheus and followed; the chart's own rules history containers run
+    # in Docker. Not a required check: it pulls images. helm and yq are the
+    # runner's.
+    name: rendered rules on real servers
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: test/e2e/rendered.sh
 
   e2e-dashboard:
     # The chart's Grafana dashboard against a real Grafana and Prometheus
@@ -142,7 +194,7 @@ jobs:
       - name: fuzz
         run: |
           set -euo pipefail
-          for t in rules:FuzzParse rules:FuzzFromAPI rules:FuzzScope sse:FuzzParseMath firing:FuzzReadJSONL incident:FuzzIncidents \
+          for t in rules:FuzzParse rules:FuzzPick rules:FuzzFromAPI rules:FuzzScope sse:FuzzParseMath firing:FuzzReadJSONL incident:FuzzIncidents \
             source:FuzzConfigDocs source:FuzzAmazon source:FuzzAzure source:FuzzAlarms; do
             echo "::group::${t}"
             go test -run '^$' -fuzz "^${t#*:}\$" -fuzztime 2m "./internal/${t%%:*}"

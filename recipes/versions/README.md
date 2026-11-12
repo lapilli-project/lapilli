@@ -20,9 +20,10 @@ that isn't a time is refused.
 - **`lapilli serve`** reads it beside `--rules` on a start whose ledger has
   no version yet, so its first backfill replays each day with that day's
   rules. A ledger with versions of its own keeps them and passes the
-  directory over, so the flag can stay. A version that can't be read stops
-  the start, with the ledger as it was; one from after now is passed over,
-  and an empty directory starts with today's rules.
+  directory over, so the flag can stay. A version that can't be read is
+  passed over, saying so, and the one before it stays in effect; one from
+  after now is passed over, and an empty directory starts with today's
+  rules.
 
 ## From git
 
@@ -39,7 +40,13 @@ REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history ./git.sh
 | `SINCE` | from when, a date (the start of that day, in UTC) or an RFC 3339 time |
 | `OUT` | the directory to write: new, or empty |
 | `RENDER` | optional: a command run in each commit's files that writes the rules on its stdout |
+| `RENDER_PREPARE` | optional: a command run in each commit's files before `RENDER`, for what a commit lacks, such as a chart's dependencies |
+| `UNRENDERED` | `fail` (the default) or `skip`: what to do with a commit that can't be rendered, or read |
 | `MAX` | the most versions written (default 500): commits, or with `DEPLOYS` the deploys that changed the rules |
+| `MAX_TREE_FILES`, `MAX_TREE_BYTES` | the most files (20000) and bytes (256 MiB) a commit is read with: with `RENDER` all of its files, without those `PATHS` names |
+| `AFTER` | optional, as `follow.sh` gives it: only the commits after this one, named after `SINCE` |
+| `LATE` | with `AFTER`, seconds (360): a commit is named no earlier than when the clone's branch first held it, less this |
+| `FOLLOWING` | `1`, as `follow.sh` gives it: never stop on a commit (below) |
 
 - **Which versions.** The rules as they stood at `SINCE`, from the last
   commit that changed `PATHS` before it, then each commit on the branch that
@@ -52,16 +59,119 @@ REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history ./git.sh
   isn't when a change was in effect: if it reached Prometheus or Grafana
   later, rename the directory to that time.
 - **Rules rendered from a chart.** `RENDER` runs in a copy of each commit's
-  files, and what it writes becomes the version's `rules.yaml`:
-  `RENDER='helm template monitoring charts/monitoring'`, or a `kustomize
-  build`. It runs without `TOKEN_FILE` and with a `HOME` of its own.
+  files, and what it writes becomes the version's `rules.yaml`. It runs
+  without `TOKEN_FILE` and with a `HOME` of its own. See below.
 - **Links.** A version is files: a commit with a symbolic link among
-  `PATHS`, or in the files `RENDER` reads, is refused.
+  `PATHS`, or with `RENDER` anywhere in it (or left by `RENDER_PREPARE`),
+  can't be read: a link could lead to any file the recipe can read, and
+  `RENDER` read it into what it writes.
+- **As the commit is.** git runs with no configuration but the clone's
+  (`GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL=/dev/null`,
+  `GIT_ATTR_NOSYSTEM`): an image's own, such as one turning Git LFS on, isn't
+  taken. A commit is read from an empty work tree and index, with their
+  attributes, so its own `.gitattributes` don't leave a file out
+  (`export-ignore`), rewrite one (`export-subst`) or run a filter on it. A
+  commit with more than `MAX_TREE_FILES` files or `MAX_TREE_BYTES` bytes, as
+  `git ls-tree` counts them before anything is written, or one git can't
+  read, can't be read.
 - **A shallow clone** has no history; it says so and writes only the rules as
   they are. Clone the branch whole, or with `--shallow-since` before `SINCE`.
 - It needs `sh` and `git`, reads the clone and changes nothing in it, and
   writes `OUT` only once every version is written: what fails leaves it as it
   was. More than `MAX` versions is refused: give a later `SINCE`.
+- Each version holds `.commit`, the full name of its commit, which lapilli
+  passes over (as every name starting with a dot) and `follow.sh` goes on
+  from.
+
+## Rules rendered from a chart
+
+Alert rules are often kept in a chart: Grafana's as provisioning ConfigMaps
+labelled for its sidecar, Prometheus's as `PrometheusRule`s, among the
+chart's Deployments and Services. `RENDER` writes each commit's whole
+manifest; lapilli keeps of it only the documents of rules (ConfigMaps of
+rule files or provisioning files, `PrometheusRule`s, `List`s of them) and
+passes the rest over, saying how many. `--rules-select`, a label selector
+as `kubectl -l` takes one, keeps only the labelled ones, for `verdict` and
+`serve` alike:
+
+```sh
+REPO=~/src/platform PATHS=charts/monitoring/ SINCE=2026-10-01 OUT=history \
+  RENDER='helm template monitoring charts/monitoring' ./git.sh
+lapilli verdict --rules-history history --rules-select grafana_alert=1 ...
+```
+
+No `yq` is needed to filter the rendering first. Kustomize is the same:
+`RENDER='kustomize build overlays/prod'` (or `kubectl kustomize`), with
+`--enable-helm` for the charts an overlay inflates.
+
+- **Dependencies older commits don't vendor.** A chart whose `charts/`
+  holds its dependencies today may not have at older commits, and `helm
+  template` fails there. `RENDER_PREPARE` runs before `RENDER` in each
+  commit's files, its output shown and never taken as rules:
+
+  ```sh
+  # from the chart repositories, at the versions Chart.lock pins
+  RENDER_PREPARE='helm repo add grafana https://grafana.github.io/helm-charts >&2 && helm dependency build charts/monitoring'
+  # or as the newest commit vendors them, from the clone, offline
+  RENDER_PREPARE='[ -d charts/monitoring/charts ] || git -C "$REPO" archive HEAD charts/monitoring/charts | tar -x'
+  ```
+
+  `HOME` is kept from one commit to the next, so the repositories' indexes
+  Helm keeps there are fetched once a run; `HELM_REPOSITORY_CACHE` and
+  `HELM_REPOSITORY_CONFIG`, set, are passed through, for a cache made
+  beforehand. With a NetworkPolicy, the chart repositories must be reachable
+  from where it runs.
+- **A commit that can't be rendered** (`RENDER_PREPARE` or `RENDER` fails,
+  or `RENDER` writes nothing), or read (above), stops the recipe by
+  default, saying which commit, and nothing is written. `UNRENDERED=skip`
+  passes it over instead, saying which and why, and counting them at the
+  end: the version before stays in effect until the next commit that
+  renders.
+- **The same security** holds: `RENDER_PREPARE` runs as `RENDER` does,
+  without `TOKEN_FILE` and with a `HOME` of its own; a commit with a
+  symbolic link is refused before either runs.
+
+## Following the branch
+
+`git.sh` writes the versions once. `follow.sh` keeps them up to date: at
+each look (every `EVERY` seconds, 300 by default; `0` looks once), it
+writes the commits on the branch since the newest version's
+(`AFTER=` its `.commit`) and adds them beside it, each named after it,
+renamed in from a hidden directory so nothing is read half written. A
+history with no version yet is written whole from `SINCE`. A branch
+force-pushed since goes on from where the two parted. It fetches nothing:
+fetching needs the repository's credentials, which `RENDER` mustn't see, so
+fetch apart from it.
+
+- **It never stops on a commit.** `git.sh` runs following (`FOLLOWING=1`):
+  a commit that can't be rendered or read is passed over, saying why,
+  whatever `UNRENDERED` says; one dated after now is named now; of more than
+  `MAX` new commits, the newest `MAX` are written. `HISTORY/.head` is the
+  commit the last look got to, so one passed over isn't rendered again.
+- **When a commit took effect.** A commit's date is its committer's clock,
+  and a commit can wait in a branch for days before it is merged
+  (fast-forward, rebase): named by its date, it would take effect, and
+  have the hours since judged again, from days before it reached the
+  branch. So a commit is named no earlier than when the clone's branch
+  first held it, by the branch's reflog, less `LATE` (`EVERY` and a minute):
+  a fetch every `EVERY` seconds saw it at most that long after it was
+  pushed. The reflog is written by the fetch, in the clone, which the
+  side running `RENDER` reads only. A commit dated within that keeps its
+  own time; one already in the clone when it was made (the history
+  `git.sh` wrote first) is named by its date, as before.
+- **It keeps what is needed.** With `KEEP` seconds, the versions older than
+  that go after each look, but the newest of them, in effect then; the
+  chart keeps the backfill and a day.
+
+```sh
+while :; do git -C ~/src/monitoring pull -q --ff-only; sleep 300; done &
+REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 HISTORY=history ./follow.sh &
+lapilli serve --rules-history history ...
+```
+
+`lapilli serve` given `--rules-history` without `--rules` follows the
+directory: its newest version is the rules in effect, and each version
+added later is recorded from its own time, the hours since replayed again.
 
 ## When a version was deployed
 
@@ -100,4 +210,5 @@ REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history DEPLOYS=deploys
   anything else in the file is refused, and nothing is written.
 
 In Kubernetes, the chart's `serve.rulesHistory` runs `git.sh` in an init
-container on each start, without `DEPLOYS`.
+container on each start, without `DEPLOYS`; with no `rules.configMaps`, it
+follows the branch too, `follow.sh` beside lapilli.

@@ -1,3 +1,4 @@
+{{- include "lapilli.defaults" . }}
 {{- /* Tasks kept in step with a tracker: recipes/trackers, run every few
 minutes, with the tasks token on the incidents port. */ -}}
 {{- $s := .Values.serve }}

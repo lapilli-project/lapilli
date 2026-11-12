@@ -2,22 +2,19 @@
 
 ## [Unreleased]
 
-### 0.30.0
-
-To merge after 0.29.0's section, if both are still unreleased when this
-lands: this one goes above it.
+## [0.31.0] - 2026-11-12
 
 What an operations team asks of its alerts (docs/design/noc.md): re-fires,
 firings during deploys, user impact read as incidents, week by week and team
 by team, in the UI, the digest, `/metrics`, a new summary API and the
-chart's Grafana dashboard. **Ledger schema 017**, after 0.28's 016: tables
+chart's Grafana dashboard. **Ledger schema 017**, after 0.28.1's 016: tables
 of deploys and of their label sets (each kept once), a mark on each firing
 that came during one, counted by day and week, and an index of re-fired
 firings. No change to how a firing is judged. Reviewed before release as an
 attacker would and for correctness; what both found is fixed in what is
 described here (docs/design/noc.md, "Settled in review").
 
-#### Added
+### Added
 
 - **Re-fires, read as a goal.** `/rules` says the share of each rule's
   firings that re-fired and in how many of the whole weeks shown one did,
@@ -86,7 +83,7 @@ described here (docs/design/noc.md, "Settled in review").
   chart's `serve.checkContent.runbookBase`); what teams write in a runbook's
   place (`N/A`, `TODO.`, `...`) isn't one.
 
-#### Changed
+### Changed
 
 - The rule metrics (`lapilli_rule_firings` and the rest, from lapilli serve)
   carry `team` when a team owns the rule. A query summing by `rule` and
@@ -97,6 +94,232 @@ described here (docs/design/noc.md, "Settled in review").
   and is never shown as a link.
 - Before its first run, `/metrics` gives no `lapilli_last_run_timestamp_seconds`
   or `lapilli_serve_cursor_timestamp_seconds` (they were 0, or the year 1).
+
+## [0.30.0] - 2026-11-12
+
+lapilli serve served the way Grafana and Argo CD are, at a URL people
+open, behind a load balancer, an ingress or a Gateway, signing them in
+itself ([docs/design/signin.md](docs/design/signin.md)). Reviewed from an
+attacker's point of view and for correctness before release. No ledger
+schema change.
+
+### Added
+
+- **A sign-in of its own, with OpenID Connect.** `--oidc-issuer`,
+  `--oidc-client-id` and `--oidc-client-secret-file` sign people in with any
+  provider (Google, Microsoft Entra ID, Okta, Keycloak, Dex, AWS Cognito, an
+  OCI IAM identity domain, GitLab...): the authorization code flow with
+  PKCE, state and nonce; the ID token's signature, issuer, audience, `azp`
+  (`--oidc-trusted-clients`), expiry and nonce checked, Google's `hd` with
+  `--oidc-hosted-domain`, and `email_verified` asked of an `email` name. A
+  browser keeps a session in a signed cookie (`__Host-`, HttpOnly, Secure,
+  SameSite=Lax; `--session-max-age`, 12h; signed with
+  `--session-key-file`, or a key made for the process: never kept in the
+  ledger). `POST /auth/logout` ends every session of that person made
+  until then, in every browser, and every token issued before, kept in the
+  ledger. An API client or an agent sends an ID token the provider gave the
+  client as a bearer token (`--oidc-bearer=false` takes none); it never
+  approves a change, and a refused one gets `error="invalid_token"` with
+  the reason. `/.well-known/oauth-protected-resource` (RFC 9728) names the
+  provider. `--user-claim` (`email`) and `--groups-claim` (`groups`) give the
+  roles.
+- **Only those a role names come in.** An identity provider signs in
+  whoever it knows, which for a public one (Google's for any account,
+  GitLab.com, GitHub through Dex, a multi-tenant Entra ID app) is anyone.
+  With a sign-in of lapilli's own, every page and API call but the health
+  checks needs someone signed in whom `--viewers`, `--editors`, `--admins`,
+  `--approvers` or a role given in the UI names; everyone else gets 403.
+  Lists take people, `group:NAME` and `*@DOMAIN`; `'*'` gives a role only
+  once `--viewers` says who comes in. `--viewers` works with
+  `--user-header` too. There is no anonymous viewing with a sign-in.
+- **A sign-in in front, by the header it signs.** `--proxy-jwt google-iap`
+  (Google Cloud's Identity-Aware Proxy), `aws-alb` (an Application Load
+  Balancer's sign-in) or `jwks` (oauth2-proxy, an Azure App Service's
+  sign-in, an access proxy) takes who each request comes from from the JWT
+  that sign-in puts in a header, checked against its keys on every
+  request, in place of a plain header only a NetworkPolicy keeps others
+  from setting. Keys are fetched only from the URLs given, or the hosts a
+  load balancer's ARN names, a key not held at most once a minute, a load
+  balancer's from a budget of its own, and a key id it doesn't have
+  remembered.
+- **The chart serves the UI at a URL.** `serve.service.type` puts the UI
+  alone on `FULLNAME-ui`, a LoadBalancer or a NodePort (`port`,
+  `annotations`, `loadBalancerClass`, `loadBalancerSourceRanges`,
+  `externalTrafficPolicy`, `nodePort`); `FULLNAME` stays a ClusterIP with
+  every port. `serve.ingress` (networking.k8s.io/v1) and `serve.httpRoute`
+  (Gateway API), whose hosts become `--external-url` (https unless their
+  `https` says not) and `--allowed-hosts`. `serve.signIn` gives the
+  sign-in's flags and mounts its Secrets, and makes the session key's
+  Secret and keeps it. `serve.roles.viewers`. The chart's README has each
+  cloud's load balancer, GKE, EKS, AKS and OKE alike.
+- `test/e2e/signin.sh`, against a real Dex in Docker, and
+  `test/e2e/serve-lb.sh`, the chart on kind behind a LoadBalancer, a
+  Gateway and an Ingress (cloud-provider-kind) with Dex in the cluster and
+  the NetworkPolicy on: both in CI.
+
+### Changed
+
+- **`/readyz` is ready once the ledger has a run recorded**: at once after
+  a restart, after the backfill's first day on a first install. Before, it
+  waited for the process's first round of jobs, up to `--timeout` (the
+  chart's 50 minutes) with a slow Prometheus. The chart's readiness probe
+  is now `/readyz` (it was `/healthz`), so `helm install --wait`, `helm
+  upgrade --wait` and Argo CD's health wait for that on a first install;
+  `serve.readinessPath: /healthz` is ready at once, as before. The
+  liveness probe stays `/healthz`.
+- With `--oidc-issuer` or `--proxy-jwt`, loopback makes no one an admin,
+  and `--everyone-admin` is refused. `--user-header` keeps the 0.28.1
+  rule.
+- A name from a header or a claim with spaces around it, or spacing other
+  than the ASCII space (U+00A0, U+3000), is no one's, as one with a
+  character that doesn't show already was.
+- The chart refuses to serve the UI outside the cluster (a LoadBalancer or
+  NodePort, an Ingress, an HTTPRoute) with no sign-in, unless
+  `serve.exposeWithoutSignIn`; `serve.userHeader` on a LoadBalancer or a
+  NodePort, unless `loadBalancerSourceRanges` names the proxy's addresses
+  and `serve.service.sourceRangesAreTheProxy` says so; and, with
+  `serve.signIn.oidc`, an http URL but to this machine. `serve.roles` and
+  `serve.changes` take `serve.signIn` as they take `serve.userHeader`.
+  `--external-url` and `serve.ingress.path` take no path but `/`.
+- Upgrading the chart with `--reuse-values` from 0.28.1 works: the values
+  added since are filled in where missing.
+- New dependencies: `github.com/coreos/go-oidc/v3` v3.21.0 and
+  `github.com/go-jose/go-jose/v4` v4.1.6, both Apache-2.0.
+
+## [0.29.0] - 2026-11-12
+
+Rules a repository renders, followed (docs/design/history.md). Reviewed
+before release, as an attacker and for correctness; what both found is
+fixed in what is described here. No ledger schema change.
+
+### Added
+
+- **Rules read out of rendered manifests.** `--rules`, `--rules-history`
+  and `--compare` take a chart rendered whole (`helm template`, `kustomize
+  build`, `kubectl get -o yaml`): of its documents, those that hold rules
+  (ConfigMaps of rule files or of Grafana provisioning files,
+  `PrometheusRule`s and the rest Lapilli reads, `List`s of them) are kept,
+  and the others passed over and counted: `verdict` says how many on
+  stderr, `serve` in its log. No `yq` is needed to filter them first.
+- **`--rules-select SEL`,** a label selector as `kubectl -l` takes one
+  (`key=value`, `!=`, `in`, `notin`, `key`, `!key`, `key>N`, `key<N`),
+  keeps of the Kubernetes objects in the rule files those it matches:
+  `grafana_alert=1` for the ConfigMaps Grafana's sidecar loads. A set with
+  an empty value (`a in (x,)`), which kubectl takes, is refused as a slip.
+  Labels are on objects only: a plain rule file has none, and is kept.
+- **What holds rules, read closely.** A kind's own list (`ConfigMapList`,
+  `PrometheusRuleList`) is read as `List` is. A Kubernetes object of a kind
+  rules aren't kept in holds none, whatever else it has (a Secret with a
+  top-level `groups`). A ConfigMap whose rule file doesn't parse is counted
+  and said apart from what holds no rules. A file of rules is read 16 MiB
+  at most.
+- **Rendering each commit reliably.** `recipes/versions/git.sh` takes
+  `RENDER_PREPARE`, run in each commit's files before `RENDER`, for what a
+  commit lacks, such as a chart's dependencies that older commits don't
+  vendor (`helm dependency build`, at the versions `Chart.lock` pins, or
+  the archives as the newest commit vendors them, from `REPO`). It runs as
+  `RENDER` does: without the token, with a `HOME` of its own, kept from
+  commit to commit. `UNRENDERED=skip` passes over a commit that can't be
+  rendered (`RENDER_PREPARE` or `RENDER` fails, or `RENDER` writes
+  nothing) or read (below), saying which and why; by default it still
+  stops, now saying which commit and that `skip` exists. Kustomize is
+  documented. `MAX_TREE_FILES` (20000) and `MAX_TREE_BYTES` (256 MiB)
+  bound what a commit is read with, by `git ls-tree` before anything is
+  written.
+- **Following the branch.** Each version `git.sh` writes holds `.commit`,
+  its commit; `AFTER=COMMIT` writes only the commits after it.
+  `recipes/versions/follow.sh` keeps a history up to date: at each look,
+  the commits since the newest version's, added beside it, and with
+  `KEEP`, the versions older than that taken away but the one in effect
+  then. It never stops on a commit (`FOLLOWING`): one that can't be
+  rendered or read is passed over, one dated after now is named now, of
+  more than `MAX` new commits the newest are written, and `.head` keeps a
+  commit passed over from being rendered again. A commit is named no
+  earlier than when the clone's branch first held it, by the branch's
+  reflog, less `LATE` (`EVERY` and a minute): one dated back takes effect
+  when it was fetched. `lapilli serve` given `--rules-history` without
+  `--rules` follows the directory: its newest version that reads is the
+  rules in effect, and each version added later is recorded from its
+  time, with what is read beside the rules (`--alarms`, `--loki-rules`),
+  the hours since then replayed again by the next run (no further back
+  than `--backfill`) and their days checked again. A version that can't
+  be read is passed over, once, saying so; following never stops on it.
+  `--changes` is refused when the rules are a followed history alone.
+- **In the chart,** `serve.rulesHistory` takes `renderPrepare`,
+  `unrendered` (`skip` by default), `select`, `max`, `every`,
+  `maxTreeFiles`, `maxTreeBytes` and `sizeLimits`. With `render`, the
+  versions are written in `renderImage`, an image with git, helm and
+  kustomize, pinned by digest: Argo CD v3.5.6's by default (about 210 MB
+  to pull); the README says how to give a smaller one. With no
+  `rules.configMaps` the repository is the rules, followed:
+  `rules-history-fetch` fetches the branch every `every` seconds (300)
+  with the token, and `rules-history-follow`, without it, adds the new
+  commits' versions, keeping the backfill and a day. When the start
+  writes no version, serve starts all the same, and takes the history once
+  it is fetched and written.
+- `test/e2e/rendered.sh`, in CI: a real Gitea holding a chart of Grafana
+  rules whose subchart comes from Gitea's Helm registry and isn't vendored
+  at the first commit; the chart's own rules history containers, as `helm
+  template` writes them, run in Docker; each version read for exactly its
+  rule documents; `verdict --rules-history` and `serve`, following, against
+  a real Prometheus with three days of a series, each day replayed with
+  that day's rules; and a commit dated hours back, fetched, taking effect
+  when it was fetched. `FuzzPick` joins the weekly fuzzing, and checks
+  that nothing but documents of rules is kept.
+
+### Changed
+
+- `lapilli serve` keeps of each version in `--rules-history` only its
+  documents of rules: a chart's Secrets and Deployments never reach the
+  ledger.
+- `lapilli serve --rules-history DIR` without `--rules` was refused; it now
+  follows the directory.
+- A version in `--rules-history` that can't be read no longer stops a
+  first start: it is passed over, saying so, and the version before it
+  stays in effect.
+
+### Fixed
+
+- **A ledger whose directory's name holds `#` or `?` opened another file**
+  (main since 0.6.0): the path was cut there, so two ledgers named alike
+  before it were one. The path is escaped; `%` and spaces read as they
+  are too.
+- **Following, found in review:** a version recorded while a run, or a
+  check, begun before it was under way was lost (each note now bumps a
+  sequence, and a run or a check forgets only what it saw); a good version
+  found with a bad one after it in one look wasn't replayed again; sending
+  the check back left what it kept of those days (a miss kept twice, a
+  rule the version dropped keeping its checks); and beside `--alarms` or
+  `--loki-rules`, every later commit took effect when seen.
+
+### Security
+
+- **In the chart, the clone is read-only where `render` runs.** It moved to
+  a volume of its own (`rules-history-repo`) that only the containers
+  holding the token write (`rules-history-clone`, and following,
+  `rules-history-fetch`): `rules-history` and `rules-history-follow` mount
+  it read-only, so nothing `render` runs can change the configuration or
+  hooks the next fetch runs with. EKS's and Azure's webhooks pass the new
+  containers over too, and the service account's token is mounted in none
+  of them.
+- **A commit is read as it is.** git runs with none of the image's or the
+  user's configuration (the render image turns Git LFS on, its filter
+  required, its server the commit's `.lfsconfig`), and from an empty work
+  tree and index, so a commit's `.gitattributes` don't leave a rule file
+  out (`export-ignore`), rewrite one (`export-subst`) or run a filter.
+  With `RENDER`, a symbolic link anywhere in the commit, or one
+  `RENDER_PREPARE` leaves, can't be rendered: a `file://` dependency's
+  link outside `PATHS` carried what it led to (the container's
+  environment) into a selected rule's annotation, and the ledger.
+- **A commit's date can't rewrite the ledger.** Following, a version's
+  time is bounded below by when it was fetched (above): a commit dated
+  back had every hour since its date, up to `--backfill`, replayed and
+  judged with rules not in effect then.
+- **Bounded disk and memory.** What a commit is read with is bounded
+  (`MAX_TREE_FILES`, `MAX_TREE_BYTES`): one blob named many times in a tree
+  was gigabytes written out. The chart's volumes have size limits, its
+  history containers ephemeral-storage requests and limits, and a
+  followed directory keeps the backfill and a day.
 
 ## [0.28.1] - 2026-11-12
 

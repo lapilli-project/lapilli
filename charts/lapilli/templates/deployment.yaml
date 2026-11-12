@@ -1,3 +1,4 @@
+{{- include "lapilli.defaults" . }}
 {{- if eq .Values.mode "serve" }}
 {{- $s := .Values.serve }}
 apiVersion: apps/v1
@@ -27,116 +28,8 @@ spec:
       securityContext:
         {{- include "lapilli.podSecurity" . | nindent 8 }}
       {{- if $s.rulesHistory.repository }}
-      {{- $h := $s.rulesHistory }}
       initContainers:
-        # Earlier versions of the rules, from git, for --rules-history: the
-        # clone with the token, then the versions written without it, so a
-        # chart's RENDER commands never see it.
-        - name: rules-history-clone
-          image: {{ $h.image | quote }}
-          imagePullPolicy: IfNotPresent
-          command: [sh, -c]
-          args:
-            - |
-              set -eu
-              rm -rf /work/repo /work/cloned /work/clone-home
-              mkdir -p /work/clone-home
-              if [ -n "${TOKEN_FILE:-}" ]; then
-                # The token goes to the repository's host alone, whatever
-                # else asks: a redirect, a submodule.
-                host=$(printf '%s' "$REPOSITORY" | sed -n 's#^https://\([^/@]*\)/.*#\1#p')
-                if [ -n "$host" ]; then
-                  # shellcheck disable=SC2016 # git runs the helper, which reads the file
-                  git config --global "credential.https://$host.helper" '!f() { echo username=x-access-token; printf "password=%s\n" "$(cat "$TOKEN_FILE")"; }; f'
-                else
-                  echo "serve.rulesHistory.tokenSecret: the repository isn't https://HOST/..., so the token isn't given" >&2
-                fi
-              fi
-              # Every object now, so nothing is fetched later, without the
-              # token. A history that can't be fetched leaves nothing: serve
-              # starts with today's rules, and the pod isn't held up by git.
-              set -- clone --quiet --no-checkout --single-branch
-              [ -z "$BRANCH" ] || set -- "$@" --branch "$BRANCH"
-              if git "$@" -- "$REPOSITORY" /work/repo; then
-                touch /work/cloned
-              else
-                echo "couldn't clone the repository: serve starts without the history" >&2
-              fi
-              rm -rf /work/clone-home
-          env:
-            - name: REPOSITORY
-              value: {{ $h.repository | quote }}
-            - name: BRANCH
-              value: {{ $h.branch | quote }}
-            - name: HOME
-              value: /work/clone-home
-            {{- if $h.tokenSecret.name }}
-            - name: TOKEN_FILE
-              value: {{ printf "/var/run/lapilli/git/%s" $h.tokenSecret.key | quote }}
-            {{- end }}
-          securityContext:
-            {{- include "lapilli.containerSecurity" . | nindent 12 }}
-          volumeMounts:
-            - name: rules-history-work
-              mountPath: /work
-            {{- if $h.tokenSecret.name }}
-            - name: rules-history-token
-              mountPath: /var/run/lapilli/git
-              readOnly: true
-            {{- end }}
-        - name: rules-history
-          image: {{ $h.image | quote }}
-          imagePullPolicy: IfNotPresent
-          command: [sh, -c]
-          args:
-            - |
-              set -eu
-              since=${SINCE:-}
-              if [ -z "$since" ]; then
-                case $BACKFILL in
-                  *d) s=$(( ${BACKFILL%d} * 86400 )) ;;
-                  *h) s=$(( ${BACKFILL%h} * 3600 )) ;;
-                  *) echo "serve.rulesHistory.since: give it, as serve.backfill $BACKFILL isn't in days or hours" >&2; exit 1 ;;
-                esac
-                since=$(date -u -d "@$(( $(date +%s) - s - 86400 ))" +%Y-%m-%dT%H:%M:%SZ)
-              fi
-              mkdir -p "$TMPDIR" "$HOME"
-              out=/var/lib/lapilli-history/versions
-              # What a start cut short left, too.
-              rm -rf "$out" "$out.new"
-              mkdir -p "$out"
-              if [ ! -e /work/cloned ]; then
-                exit 0
-              fi
-              if ! REPO=/work/repo SINCE=$since OUT="$out.new" sh /scripts/git.sh; then
-                echo "couldn't write the history: serve starts without it" >&2
-                rm -rf "$out.new"
-                exit 0
-              fi
-              rmdir "$out" && mv "$out.new" "$out"
-          env:
-            - name: PATHS
-              value: {{ required "serve.rulesHistory.paths: the rule files or directories in the repository" $h.paths | quote }}
-            - name: SINCE
-              value: {{ $h.since | quote }}
-            - name: RENDER
-              value: {{ $h.render | quote }}
-            - name: BACKFILL
-              value: {{ $s.backfill | quote }}
-            - name: HOME
-              value: /work/home
-            - name: TMPDIR
-              value: /work/tmp
-          securityContext:
-            {{- include "lapilli.containerSecurity" . | nindent 12 }}
-          volumeMounts:
-            - name: rules-history
-              mountPath: /var/lib/lapilli-history
-            - name: rules-history-work
-              mountPath: /work
-            - name: rules-history-script
-              mountPath: /scripts
-              readOnly: true
+        {{- include "lapilli.historyInit" . | nindent 8 }}
       {{- end }}
       containers:
         - name: lapilli
@@ -197,6 +90,9 @@ spec:
             {{- with $s.roles.admins }}
             - {{ printf "--admins=%s" (join "," .) | quote }}
             {{- end }}
+            {{- with $s.roles.viewers }}
+            - {{ printf "--viewers=%s" (join "," .) | quote }}
+            {{- end }}
             {{- with $s.roles.groupsHeader }}
             - {{ printf "--groups-header=%s" . | quote }}
             {{- end }}
@@ -256,11 +152,52 @@ spec:
             - {{ printf "--notify-sns=%s" (join "," .) | quote }}
             {{- end }}
             {{- end }}
-            {{- with $s.externalURL }}
+            {{- with include "lapilli.externalURL" . }}
             - {{ printf "--external-url=%s" . | quote }}
             {{- end }}
-            {{- with $s.allowedHosts }}
-            - {{ printf "--allowed-hosts=%s" (join "," .) | quote }}
+            {{- with include "lapilli.allowedHosts" . }}
+            - {{ printf "--allowed-hosts=%s" . | quote }}
+            {{- end }}
+            {{- with $s.signIn }}
+            {{- if .oidc.issuer }}
+            - {{ printf "--oidc-issuer=%s" .oidc.issuer | quote }}
+            - {{ printf "--oidc-client-id=%s" .oidc.clientId | quote }}
+            {{- if .oidc.clientSecret.name }}
+            - {{ printf "--oidc-client-secret-file=/var/run/lapilli/oidc/%s" .oidc.clientSecret.key | quote }}
+            {{- end }}
+            {{- with .oidc.scopes }}
+            - {{ printf "--oidc-scopes=%s" (join "," .) | quote }}
+            {{- end }}
+            {{- with .oidc.hostedDomains }}
+            - {{ printf "--oidc-hosted-domain=%s" (join "," .) | quote }}
+            {{- end }}
+            {{- with .oidc.trustedClients }}
+            - {{ printf "--oidc-trusted-clients=%s" (join "," .) | quote }}
+            {{- end }}
+            {{- if eq (toString .oidc.bearer) "false" }}
+            - --oidc-bearer=false
+            {{- end }}
+            {{- with .sessionMaxAge }}
+            - {{ printf "--session-max-age=%s" . | quote }}
+            {{- end }}
+            {{- if or .sessionKeySecret.name .sessionKeySecret.create }}
+            - {{ printf "--session-key-file=/var/run/lapilli/session-key/%s" (ternary .sessionKeySecret.key "session-key" (not (empty .sessionKeySecret.name))) | quote }}
+            {{- end }}
+            {{- end }}
+            {{- with .proxyJWT }}
+            {{- if .kind }}
+            - {{ printf "--proxy-jwt=%s" .kind | quote }}
+            {{- range $flag, $v := dict "audience" .audience "alb-arn" .albArn "issuer" .issuer "jwks" .jwks "header" .header }}
+            {{- with $v }}
+            - {{ printf "--proxy-jwt-%s=%s" $flag . | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- if or .oidc.issuer .proxyJWT.kind }}
+            - {{ printf "--user-claim=%s" (.userClaim | default "email") | quote }}
+            - {{ printf "--groups-claim=%s" (.groupsClaim | default "") | quote }}
+            {{- end }}
             {{- end }}
             {{- with $s.mcpCompare }}
             - {{ printf "--mcp-compare=%s" . | quote }}
@@ -310,6 +247,9 @@ spec:
             {{- end }}
             {{- if $s.rulesHistory.repository }}
             - --rules-history=/var/lib/lapilli-history/versions
+            {{- with $s.rulesHistory.select }}
+            - {{ printf "--rules-select=%s" . | quote }}
+            {{- end }}
             {{- end }}
             {{- include "lapilli.args" . | trim | nindent 12 }}
             {{- range .Values.extraArgs }}
@@ -333,8 +273,10 @@ spec:
               valueFrom:
                 resourceFieldRef:
                   resource: limits.memory
+          # Ready once the first run is done (serve.readinessPath), so a
+          # load balancer sends people to a UI with something in it.
           readinessProbe:
-            httpGet: {path: /healthz, port: metrics}
+            httpGet: {path: {{ $s.readinessPath | default "/readyz" }}, port: metrics}
             periodSeconds: 10
           livenessProbe:
             httpGet: {path: /healthz, port: metrics}
@@ -353,6 +295,16 @@ spec:
             {{- if $s.notify.webhookSecret.name }}
             - name: notify
               mountPath: /var/run/lapilli/notify
+              readOnly: true
+            {{- end }}
+            {{- if and $s.signIn.oidc.issuer $s.signIn.oidc.clientSecret.name }}
+            - name: oidc
+              mountPath: /var/run/lapilli/oidc
+              readOnly: true
+            {{- end }}
+            {{- if and $s.signIn.oidc.issuer (or $s.signIn.sessionKeySecret.name $s.signIn.sessionKeySecret.create) }}
+            - name: session-key
+              mountPath: /var/run/lapilli/session-key
               readOnly: true
             {{- end }}
             {{- if $s.teamDigests.secretName }}
@@ -435,6 +387,9 @@ spec:
               mountPath: /var/lib/lapilli-history
               readOnly: true
             {{- end }}
+        {{- if include "lapilli.historyFollows" . }}
+        {{- include "lapilli.historySidecars" . | nindent 8 }}
+        {{- end }}
       volumes:
         - name: ledger
           {{- if $s.ledger.existingClaim }}
@@ -451,6 +406,16 @@ spec:
         - name: notify
           secret:
             secretName: {{ $s.notify.webhookSecret.name }}
+        {{- end }}
+        {{- if and $s.signIn.oidc.issuer $s.signIn.oidc.clientSecret.name }}
+        - name: oidc
+          secret:
+            secretName: {{ $s.signIn.oidc.clientSecret.name }}
+        {{- end }}
+        {{- if and $s.signIn.oidc.issuer (or $s.signIn.sessionKeySecret.name $s.signIn.sessionKeySecret.create) }}
+        - name: session-key
+          secret:
+            secretName: {{ $s.signIn.sessionKeySecret.name | default (printf "%s-session-key" (include "lapilli.fullname" .)) }}
         {{- end }}
         {{- if $s.teamDigests.secretName }}
         - name: team-digests
@@ -544,18 +509,7 @@ spec:
             secretName: {{ $s.notificationsAPI.grafanaSecret.name }}
         {{- end }}
         {{- if $s.rulesHistory.repository }}
-        - name: rules-history
-          emptyDir: {}
-        - name: rules-history-work
-          emptyDir: {}
-        - name: rules-history-script
-          configMap:
-            name: {{ include "lapilli.fullname" . }}-rules-history
-        {{- if $s.rulesHistory.tokenSecret.name }}
-        - name: rules-history-token
-          secret:
-            secretName: {{ $s.rulesHistory.tokenSecret.name }}
-        {{- end }}
+        {{- include "lapilli.historyVolumes" . | nindent 8 }}
         {{- end }}
       {{- include "lapilli.placement" . | nindent 6 }}
 {{- end }}

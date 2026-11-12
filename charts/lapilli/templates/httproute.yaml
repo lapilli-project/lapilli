@@ -1,0 +1,32 @@
+{{- include "lapilli.defaults" . }}
+{{- $s := .Values.serve }}
+{{- if and (eq .Values.mode "serve") $s.httpRoute.enabled }}
+{{- $r := $s.httpRoute }}
+# The UI through a Gateway (Gateway API). With serve.networkPolicy, from
+# must let the Gateway's pods in.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "lapilli.fullname" . }}
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+  {{- with $r.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml $r.parentRefs | nindent 4 }}
+  {{- with $r.hostnames }}
+  hostnames:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "lapilli.fullname" . }}
+          port: {{ $s.port }}
+{{- end }}

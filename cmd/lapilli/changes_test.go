@@ -20,12 +20,12 @@ func TestServeChangesFlags(t *testing.T) {
 		args []string
 		want string
 	}{
-		"no sign-in":            {[]string{"--changes"}, "--changes needs --user-header"},
+		"no sign-in":            {[]string{"--changes"}, "--changes needs a sign-in"},
 		"no roles":              {[]string{"--changes", "--user-header", "X-Forwarded-Email"}, "--changes needs roles, --editors or --admins"},
 		"approvers, no roles":   {[]string{"--changes", "--user-header", "X-Forwarded-Email", "--approvers", "ana@example.com", "--mcp-compare", "editors"}, "--changes needs roles"},                                        // refused later if let through: never served
 		"no one to approve":     {[]string{"--changes", "--user-header", "X-Forwarded-Email", "--editors", "bo@example.com", "--listen", "256.0.0.1:1", "--ledger", t.TempDir()}, "--changes needs --approvers or --admins"}, // fails to listen if let through
 		"turned off":            {[]string{"--changes=false", "--approvers", "ana@example.com"}, "go with --changes"},
-		"turned on":             {[]string{"--changes=true"}, "--changes needs --user-header"},
+		"turned on":             {[]string{"--changes=true"}, "--changes needs a sign-in"},
 		"neither":               {[]string{"--changes=maybe"}, "--changes=maybe: want true or false"},
 		"read-only":             {append([]string{"--changes", "--read-only"}, signed...), "--read-only refuses them"},
 		"three approvals":       {append([]string{"--changes", "--approvals", "3"}, signed...), "--approvals 3"},

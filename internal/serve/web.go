@@ -30,6 +30,7 @@ import (
 
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -77,6 +78,7 @@ func (s *Server) Handler() http.Handler {
 	s.reportRoutes(mux, page)
 	s.rolesRoutes(mux, page)
 	s.changesRoutes(mux, page)
+	s.signInRoutes(mux, page)
 
 	mux.HandleFunc("POST /incidents", s.write(s.postIncident))
 	mux.HandleFunc("POST /incidents/{id}/delete", s.write(s.deleteIncident))
@@ -99,7 +101,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/mcp", s.mcpHandler())
 
 	cop := http.NewCrossOriginProtection()
-	return s.hosts(headers(gzipped(cop.Handler(mux))))
+	return s.hosts(headers(s.signedIn(gzipped(cop.Handler(mux)))))
 }
 
 // hosts answers only requests to a host name this server answers to. A
@@ -190,9 +192,19 @@ func (s *Server) busy(ctx context.Context) (func(), error) {
 // reach them, and no more.
 func (s *Server) checks(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
+	// Ready once the ledger has a run recorded: at once after a restart,
+	// so a Prometheus that is slow, or down, doesn't keep the UI (and the
+	// sign-in's callback) away from a load balancer for a run's timeout; on
+	// a first start, after the backfill's first day. What is being worked
+	// out is on the pages.
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		if !s.ready.Load() {
-			http.Error(w, "the first run hasn't finished", http.StatusServiceUnavailable)
+			if c, err := s.l.Cursor(r.Context()); err == nil && !c.IsZero() {
+				s.ready.Store(true)
+			}
+		}
+		if !s.ready.Load() {
+			http.Error(w, "no run is recorded yet", http.StatusServiceUnavailable)
 			return
 		}
 		io.WriteString(w, "ok\n")
@@ -531,7 +543,7 @@ func (s *Server) cached(h http.HandlerFunc) http.HandlerFunc {
 		// A page is in the reader's language, and shows who reads it what
 		// they can change: it is kept by both.
 		key := lang(r) + " " + r.URL.RequestURI()
-		if s.cfg.UserHeader != "" {
+		if s.namesPeople() {
 			key = s.user(r) + "\x00" + strings.Join(s.groups(r), ",") + "\x00" + key
 		}
 		etag := `"` + tag + "-" + strconv.FormatUint(hash(key), 16) + `"`
@@ -543,6 +555,13 @@ func (s *Server) cached(h http.HandlerFunc) http.HandlerFunc {
 		}
 		if s.cfg.GroupsHeader != "" {
 			w.Header().Add("Vary", s.cfg.GroupsHeader)
+		}
+		switch {
+		case s.in == nil:
+		case s.in.proxy != nil:
+			w.Header().Add("Vary", s.in.proxy.Header)
+		default:
+			w.Header().Add("Vary", "Authorization")
 		}
 		if r.Header.Get("If-None-Match") == etag {
 			w.WriteHeader(http.StatusNotModified)
@@ -601,22 +620,34 @@ func hash(s string) uint64 {
 	return h.Sum64()
 }
 
-// user is who a request comes from: the header a sign-in proxy sets, when
-// told to trust one.
+// user is who a request comes from: who the sign-in of lapilli's own said,
+// or the header a sign-in proxy sets, when told to trust one.
 func (s *Server) user(r *http.Request) string {
 	if by, ok := r.Context().Value(actingAs{}).(string); ok {
 		return by
+	}
+	if s.in != nil {
+		if w, ok := whoOf(r); ok {
+			return s.signedName(w.User)
+		}
+		return "anonymous"
 	}
 	// Named twice, the header may be the caller's as well as the proxy's.
 	if s.cfg.UserHeader == "" || len(r.Header.Values(s.cfg.UserHeader)) != 1 {
 		return "anonymous"
 	}
+	return s.signedName(r.Header.Get(s.cfg.UserHeader))
+}
+
+// signedName is a name a sign-in gave, as changes are recorded under it, or
+// "anonymous" for one lapilli doesn't take.
+func (s *Server) signedName(u string) string {
 	// A name with a character that doesn't show (a zero-width space, a
-	// soft hyphen, a control character: ledger.Hidden), or too long to keep
-	// whole, is no one's: taken out, or cut, it could become another's, an
-	// admin's.
-	u := r.Header.Get(s.cfg.UserHeader)
-	if len(u) > ledger.MaxName || ledger.Hidden(u) {
+	// soft hyphen, a control character: ledger.Hidden), spaces around it or
+	// spacing that isn't the ASCII space (U+00A0, U+3000: signin.Plain), or
+	// too long to keep whole, is no one's: taken out, or cut, or read, it
+	// could become another's, an admin's.
+	if len(u) > ledger.MaxName || ledger.Hidden(u) || !signin.Plain(u) {
 		return "anonymous"
 	}
 	// Nor take the names changes made with a token are noted under, or
@@ -664,8 +695,11 @@ func (s *Server) page(r *http.Request, name string, v any) page {
 	p.Status.Admin = role == admin
 	p.Status.Teams = s.editsTeams(r)
 	p.Status.RolesKept = role == admin && s.rolesKept()
-	if s.cfg.UserHeader != "" {
+	if s.namesPeople() {
 		p.Status.User, p.Status.Role = s.user(r), role.String()
+	}
+	if w, ok := whoOf(r); ok && w.by == bySession {
+		p.Status.SignOut = true
 	}
 	for _, n := range names {
 		p.Langs = append(p.Langs, langLink{n.Code, n.Name, "/lang?to=" + n.Code + "&back=" + url.QueryEscape(r.URL.RequestURI()), n.Code == l})
@@ -699,6 +733,8 @@ type statusView struct {
 	Zone       string
 	// Changes to the rules: on (--changes), and paused.
 	ChangesOn, ChangesPaused bool
+	// SignOut offers to sign out: the reader is signed in with a session.
+	SignOut bool
 }
 
 func (s *Server) statusView(l string) statusView {
@@ -741,10 +777,14 @@ func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
 	if code == http.StatusInternalServerError {
 		s.log.Error("serving", "path", r.URL.Path, "err", err)
 	}
+	text := func(lang string) string { return message(lang, err) }
+	if errors.As(err, new(notLetIn)) {
+		text = func(lang string) string { return tr(lang, notLetInText, s.user(r)) }
+	}
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		json.NewEncoder(w).Encode(map[string]string{"error": text("en")})
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -757,7 +797,7 @@ func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
 	p.View = struct {
 		Code int
 		Err  string
-	}{code, message(p.Lang, err)}
+	}{code, text(p.Lang)}
 	pagesIn[p.Lang].ExecuteTemplate(&b, "error", p)
 	w.Write(b.Bytes())
 }

@@ -19,6 +19,7 @@ import (
 	"io"
 	"io/fs"
 	"net/url"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"sync"
@@ -91,7 +92,9 @@ var ErrNewer = errors.New("the ledger was written by a newer lapilli")
 // zone its days and weeks are counted in. Opened in another zone than
 // before, it counts them again.
 func Open(ctx context.Context, path string, loc *time.Location) (*Ledger, error) {
-	u := url.URL{Scheme: "file", Opaque: path}
+	// A URI, with the path escaped: a # or a ? in a directory's name would
+	// otherwise end the path there, and open another ledger.
+	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
 	pragmas := "_pragma=busy_timeout(10000)&_pragma=temp_store(MEMORY)&_pragma=foreign_keys(1)"
 	w, err := sql.Open("sqlite", u.String()+"?"+pragmas+
 		"&_pragma=auto_vacuum(INCREMENTAL)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_txlock=immediate")
@@ -388,6 +391,20 @@ func (l *Ledger) Meta(ctx context.Context, key string) (string, error) {
 // SetMeta keeps a value for lapilli serve.
 func (l *Ledger) SetMeta(ctx context.Context, key, value string) error {
 	return l.write(ctx, func(tx *txn) error { return setMeta(ctx, tx, "x."+key, value) })
+}
+
+// UpdateMeta changes a value kept for lapilli serve in one transaction: f
+// is given the value the ledger holds, so two processes sharing a ledger
+// merge what they keep rather than write over each other. It changes
+// nothing a page shows.
+func (l *Ledger) UpdateMeta(ctx context.Context, key string, f func(old string) string) error {
+	return l.writeAside(ctx, func(tx *txn) error {
+		old, err := l.meta(ctx, tx, "x."+key)
+		if err != nil {
+			return err
+		}
+		return setMeta(ctx, tx, "x."+key, f(old))
+	})
 }
 
 // SetSwitch keeps a switch a person turned for lapilli serve, and notes in

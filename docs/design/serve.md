@@ -444,8 +444,9 @@ as instructions.
 ## Security
 
 - **Closed by default.** The binary listens on `127.0.0.1:8080`; the chart's
-  Service is a ClusterIP. There is no sign-in of its own: reach it with
-  `kubectl port-forward`, or behind the sign-in proxy you have. With no
+  Service is a ClusterIP. Reach it with `kubectl port-forward`, behind the
+  sign-in proxy you have, or with a sign-in of its own (since 0.30.0,
+  [signin.md](signin.md)), which makes no one an admin for loopback. With no
   roles, everyone is an admin only on a listener on loopback alone, this
   machine's users, as `--listen` says and the address it is bound to is
   (`localhost` is what `/etc/hosts` says); listening beyond it (the chart's `:8080`, which every
@@ -574,7 +575,7 @@ tasks, comments) is in [work.md](work.md).
 
 ## Not in this
 
-A sign-in of its own; more than one replica; Postgres; several Prometheus
+More than one replica; Postgres; several Prometheus
 servers in one ledger; firings from Alertmanager's webhook; a cloud's own
 alarms; editing rules. Each is a piece someone can take on. Alertmanager's webhook, beside the replay, would also show
 where a replay differs from what really fired.
