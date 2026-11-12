@@ -135,6 +135,16 @@ func (s *Server) digestPreview(ctx context.Context) (*built, error) {
 	due := in.When.Last(s.now(), s.cfg.Loc)
 	week := ledger.Week(s.l.Day(due))
 	from, to := s.l.Midnight(week-7), s.l.Midnight(week)
+	// The week's firings are read again to count them by the hours they
+	// came in: one such preview at a time, as a report's preview and
+	// /api/v1/report?firings=false take their turn.
+	if s.countsHours(ctx) {
+		done, err := s.busy(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer done()
+	}
 	rep, err := s.digestReport(ctx, from, to, o)
 	if err != nil {
 		return nil, err
