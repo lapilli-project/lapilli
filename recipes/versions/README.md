@@ -39,7 +39,10 @@ REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history ./git.sh
 | `SINCE` | from when, a date (the start of that day, in UTC) or an RFC 3339 time |
 | `OUT` | the directory to write: new, or empty |
 | `RENDER` | optional: a command run in each commit's files that writes the rules on its stdout |
+| `RENDER_PREPARE` | optional: a command run in each commit's files before `RENDER`, for what a commit lacks, such as a chart's dependencies |
+| `UNRENDERED` | `fail` (the default) or `skip`: what to do with a commit that can't be rendered |
 | `MAX` | the most versions written (default 500): commits, or with `DEPLOYS` the deploys that changed the rules |
+| `AFTER` | optional, as `follow.sh` gives it: only the commits after this one, named after `SINCE` |
 
 - **Which versions.** The rules as they stood at `SINCE`, from the last
   commit that changed `PATHS` before it, then each commit on the branch that
@@ -52,9 +55,8 @@ REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history ./git.sh
   isn't when a change was in effect: if it reached Prometheus or Grafana
   later, rename the directory to that time.
 - **Rules rendered from a chart.** `RENDER` runs in a copy of each commit's
-  files, and what it writes becomes the version's `rules.yaml`:
-  `RENDER='helm template monitoring charts/monitoring'`, or a `kustomize
-  build`. It runs without `TOKEN_FILE` and with a `HOME` of its own.
+  files, and what it writes becomes the version's `rules.yaml`. It runs
+  without `TOKEN_FILE` and with a `HOME` of its own. See below.
 - **Links.** A version is files: a commit with a symbolic link among
   `PATHS`, or in the files `RENDER` reads, is refused.
 - **A shallow clone** has no history; it says so and writes only the rules as
@@ -62,6 +64,78 @@ REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history ./git.sh
 - It needs `sh` and `git`, reads the clone and changes nothing in it, and
   writes `OUT` only once every version is written: what fails leaves it as it
   was. More than `MAX` versions is refused: give a later `SINCE`.
+- Each version holds `.commit`, the full name of its commit, which lapilli
+  passes over (as every name starting with a dot) and `follow.sh` goes on
+  from.
+
+## Rules rendered from a chart
+
+Alert rules are often kept in a chart: Grafana's as provisioning ConfigMaps
+labelled for its sidecar, Prometheus's as `PrometheusRule`s, among the
+chart's Deployments and Services. `RENDER` writes each commit's whole
+manifest; lapilli keeps of it only the documents of rules (ConfigMaps of
+rule files or provisioning files, `PrometheusRule`s, `List`s of them) and
+passes the rest over, saying how many. `--rules-select`, a label selector
+as `kubectl -l` takes one, keeps only the labelled ones, for `verdict` and
+`serve` alike:
+
+```sh
+REPO=~/src/platform PATHS=charts/monitoring/ SINCE=2026-10-01 OUT=history \
+  RENDER='helm template monitoring charts/monitoring' ./git.sh
+lapilli verdict --rules-history history --rules-select grafana_alert=1 ...
+```
+
+No `yq` is needed to filter the rendering first. Kustomize is the same:
+`RENDER='kustomize build overlays/prod'` (or `kubectl kustomize`), with
+`--enable-helm` for the charts an overlay inflates.
+
+- **Dependencies older commits don't vendor.** A chart whose `charts/`
+  holds its dependencies today may not have at older commits, and `helm
+  template` fails there. `RENDER_PREPARE` runs before `RENDER` in each
+  commit's files, its output shown and never taken as rules:
+
+  ```sh
+  # from the chart repositories, at the versions Chart.lock pins
+  RENDER_PREPARE='helm repo add grafana https://grafana.github.io/helm-charts >&2 && helm dependency build charts/monitoring'
+  # or as the newest commit vendors them, from the clone, offline
+  RENDER_PREPARE='[ -d charts/monitoring/charts ] || git -C "$REPO" archive HEAD charts/monitoring/charts | tar -x'
+  ```
+
+  `HOME` is kept from one commit to the next, so the repositories' indexes
+  Helm keeps there are fetched once a run; `HELM_REPOSITORY_CACHE` and
+  `HELM_REPOSITORY_CONFIG`, set, are passed through, for a cache made
+  beforehand. With a NetworkPolicy, the chart repositories must be reachable
+  from where it runs.
+- **A commit that can't be rendered** (`RENDER_PREPARE` or `RENDER` fails,
+  or `RENDER` writes nothing) stops the recipe by default, saying which
+  commit, and nothing is written. `UNRENDERED=skip` passes it over instead,
+  saying which and why, and counting them at the end: the version before
+  stays in effect until the next commit that renders.
+- **The same security** holds: `RENDER_PREPARE` runs as `RENDER` does,
+  without `TOKEN_FILE` and with a `HOME` of its own; a commit with a
+  symbolic link among `PATHS` is refused before either runs.
+
+## Following the branch
+
+`git.sh` writes the versions once. `follow.sh` keeps them up to date: at
+each look (every `EVERY` seconds, 300 by default; `0` looks once), it
+writes the commits on the branch since the newest version's
+(`AFTER=` its `.commit`) and adds them beside it, each named after it,
+renamed in from a hidden directory so nothing is read half written. A
+history with no version yet is written whole from `SINCE`. A branch
+force-pushed since goes on from where the two parted. It fetches nothing:
+fetching needs the repository's credentials, which `RENDER` mustn't see, so
+fetch apart from it.
+
+```sh
+while :; do git -C ~/src/monitoring pull -q --ff-only; sleep 300; done &
+REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 HISTORY=history ./follow.sh &
+lapilli serve --rules-history history ...
+```
+
+`lapilli serve` given `--rules-history` without `--rules` follows the
+directory: its newest version is the rules in effect, and each version
+added later is recorded from its own time, the hours since replayed again.
 
 ## When a version was deployed
 
@@ -100,4 +174,5 @@ REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 OUT=history DEPLOYS=deploys
   anything else in the file is refused, and nothing is written.
 
 In Kubernetes, the chart's `serve.rulesHistory` runs `git.sh` in an init
-container on each start, without `DEPLOYS`.
+container on each start, without `DEPLOYS`; with no `rules.configMaps`, it
+follows the branch too, `follow.sh` beside lapilli.

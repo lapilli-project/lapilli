@@ -13,24 +13,49 @@
 #   OUT     the directory to write, which must not exist yet or be empty
 #   RENDER  optional: a command that writes the rules on its stdout, run in
 #           each commit's files, for rules rendered from a chart:
-#           RENDER='helm template monitoring charts/monitoring'
+#           RENDER='helm template monitoring charts/monitoring', or from a
+#           Kustomize overlay: RENDER='kustomize build overlays/prod'. What
+#           else it writes (Deployments, Services) lapilli passes over, and
+#           --rules-select keeps only labelled rules
+#   RENDER_PREPARE
+#           optional: a command run in each commit's files before RENDER,
+#           for what a commit lacks, such as a chart's dependencies that
+#           older commits don't vendor: 'helm dependency build
+#           charts/monitoring' (with 'helm repo add' first for a chart
+#           repository; Chart.lock pins the versions). Its output is shown,
+#           not taken as rules. Both run with REPO the clone's full path
+#   UNRENDERED
+#           what to do with a commit that can't be rendered: RENDER_PREPARE
+#           or RENDER fails, or RENDER writes nothing. fail (the default)
+#           writes nothing and says which; skip passes it over, saying
+#           which and why, and the version before stays in effect until the
+#           next commit that renders
 #   MAX     the most versions written (default 500): commits, or with
 #           DEPLOYS the deploys that changed the rules
 #   DEPLOYS optional: a file of the revisions deployed and when, "REVISION
 #           TIME" a line, as argocd.sh and flux.sh write it. The versions
 #           are then the rules each deploy put in place, named by when: when
 #           they reached Prometheus, not when they were committed
+#   AFTER   optional, as follow.sh gives it: a commit; only the commits on
+#           the branch after it are written, each named after SINCE, the
+#           time of the version it wrote. With none, it says so, writes
+#           nothing and succeeds. If the branch was rewritten since, from
+#           where the two parted
+#
+# Each version holds .commit, the full name of the commit it is (lapilli
+# passes names starting with a dot over), for follow.sh to go on from.
 #
 # A version is named by its commit's time, in UTC: for a merge, the merge's,
 # as only the commits on the branch are taken (git log --first-parent). A
 # commit's time is what its committer's clock said, so each version is
 # named at least a second after the one before it: one dated back can't
 # reorder them. A version holding a symbolic link is refused: a link could
-# lead to any file this can read. RENDER runs without TOKEN_FILE and with a
-# HOME of its own, so a chart's commands can't reach a token the clone was
-# made with. It reads the clone and changes nothing in it. Nothing is
-# written to OUT until every version has been: what fails leaves OUT as it
-# was.
+# lead to any file this can read. RENDER and RENDER_PREPARE run without
+# TOKEN_FILE and with a HOME of their own, kept from one commit to the next
+# (what Helm caches there is fetched once), so a chart's commands can't
+# reach a token the clone was made with. It reads the clone and changes
+# nothing in it. Nothing is written to OUT until every version has been:
+# what fails leaves OUT as it was.
 #
 # With DEPLOYS, the deploys are walked in time, from the last at or before
 # SINCE (the rules in effect then) on: each that changed the rules from
@@ -55,6 +80,15 @@ repo=${REPO:-.}
 : "${OUT:?the directory to write}"
 max=${MAX:-500}
 case $max in *[!0-9]* | '' | 0) say "MAX $max: want a number of commits"; exit 1 ;; esac
+unrendered=${UNRENDERED:-fail}
+case $unrendered in
+  fail | skip) ;;
+  *) say "UNRENDERED $unrendered: want fail or skip"; exit 1 ;;
+esac
+if [ -n "${RENDER_PREPARE:-}" ] && [ -z "${RENDER:-}" ]; then
+  say "RENDER_PREPARE prepares each commit's files for RENDER: give RENDER too"
+  exit 1
+fi
 # grep reads lines: a second line could carry anything past it.
 c=$SINCE
 case $SINCE in *[!0-9TZ:+-]* | '') c=x ;; esac
@@ -82,6 +116,32 @@ if [ "$(git -C "$repo" rev-parse --is-inside-work-tree 2>/dev/null)" != true ]; 
   say "REPO $repo isn't a git clone"
   exit 1
 fi
+after=
+if [ -n "${AFTER:-}" ]; then
+  if [ -n "${DEPLOYS:-}" ]; then
+    say "AFTER goes on from a commit, and DEPLOYS names versions by deploys: give one"
+    exit 1
+  fi
+  # Checked before git sees it: a commit's name, not an option or a ref.
+  case $AFTER in *[!0-9a-f]* | '') c= ;; *) c=$AFTER ;; esac
+  if [ "${#c}" -lt 7 ] || [ "${#c}" -gt 64 ] || ! after=$(git -C "$repo" rev-parse --verify -q "$c^{commit}"); then
+    say "AFTER $AFTER isn't a commit in the clone"
+    exit 1
+  fi
+  if [ "$(git -C "$repo" rev-parse --is-shallow-repository)" = true ]; then
+    say "REPO $repo is a shallow clone, with no history to go on from AFTER: clone it whole"
+    exit 1
+  fi
+  # A branch rewritten since: AFTER..HEAD is the commits since where the
+  # two parted.
+  if ! git -C "$repo" merge-base --is-ancestor "$after" HEAD; then
+    if ! base=$(git -C "$repo" merge-base "$after" HEAD); then
+      say "AFTER $AFTER shares no history with the branch"
+      exit 1
+    fi
+    say "AFTER $AFTER isn't on the branch any more (it was rewritten): the commits since where they parted, $base, are written"
+  fi
+fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 trap 'exit 1' INT TERM HUP
@@ -91,12 +151,31 @@ mkdir "$tmp/out" "$tmp/home"
 basic() { date -u -d "@$1" +%Y%m%dT%H%M%SZ 2>/dev/null || date -u -r "$1" +%Y%m%dT%H%M%SZ; }
 prev=
 now=$(date -u +%s)
+skipped=0
 # links DIR COMMIT: refuse a version with a symbolic link in it.
 links() {
   if [ -n "$(find "$1" -type l | head -n 1)" ]; then
     say "$2 holds a symbolic link among PATHS: a version is files, not links to elsewhere"
     exit 1
   fi
+}
+# run COMMAND: RENDER or RENDER_PREPARE, in the commit's files, without the
+# token and with a HOME of its own; REPO is the clone, wherever this runs.
+clone=$(cd "$repo" && pwd)
+run() {
+  (cd "$tmp/tree" && env -u TOKEN_FILE HOME="$tmp/home" GIT_CONFIG_GLOBAL=/dev/null REPO="$clone" sh -c "$1")
+}
+# unrendered COMMIT NAME WHY: a commit that can't be rendered, passed over
+# with UNRENDERED=skip, or else the end.
+unrendered() {
+  rm -rf "${tmp:?}/out/$2"
+  if [ "$unrendered" = skip ]; then
+    skipped=$((skipped + 1))
+    say "$1 ($2) can't be rendered: $3. Passed over (UNRENDERED=skip): the version before stays in effect until the next"
+    return
+  fi
+  say "$1 ($2) can't be rendered: $3. Nothing is written; UNRENDERED=skip passes such a commit over"
+  exit 1
 }
 # write COMMIT [SECONDS]: the files PATHS name as COMMIT left them, or what
 # RENDER writes from them, into a directory named by its time: SECONDS, when
@@ -126,9 +205,15 @@ write() {
     for p in $PATHS; do
       [ ! -e "$tmp/tree/${p%/}" ] || links "$tmp/tree/${p%/}" "$1"
     done
-    if ! (cd "$tmp/tree" && env -u TOKEN_FILE HOME="$tmp/home" GIT_CONFIG_GLOBAL=/dev/null sh -c "$RENDER") >"$dir/rules.yaml"; then
-      say "RENDER failed at $1"
-      exit 1
+    # What prepares the files shows its output; only RENDER's is rules.
+    if [ -n "${RENDER_PREPARE:-}" ] && ! run "$RENDER_PREPARE" >&2; then
+      unrendered "$1" "$name" "RENDER_PREPARE failed"
+    elif ! run "$RENDER" >"$dir/rules.yaml"; then
+      unrendered "$1" "$name" "RENDER failed"
+    elif [ ! -s "$dir/rules.yaml" ]; then
+      unrendered "$1" "$name" "RENDER wrote nothing"
+    else
+      git -C "$repo" rev-parse --verify "$1^{commit}" >"$dir/.commit"
     fi
     return
   fi
@@ -147,6 +232,7 @@ write() {
   # shellcheck disable=SC2086 # $there is the paths, one word each
   git -C "$repo" archive --format=tar "$1" -- $there | tar -x -C "$dir"
   links "$dir" "$1"
+  git -C "$repo" rev-parse --verify "$1^{commit}" >"$dir/.commit"
 }
 # The deploys, as SECONDS COMMIT, the earliest first: each line checked
 # before git sees it, so a revision can't be an option or a path and a time
@@ -217,7 +303,21 @@ rules() {
     git -C "$repo" rev-parse --verify -q "$1:${p%/}" 2>/dev/null || echo -
   done | tr '\n' ' '
 }
-if [ "$(git -C "$repo" rev-parse --is-shallow-repository)" = true ]; then
+if [ -n "$after" ]; then
+  # shellcheck disable=SC2086 # PATHS are the paths, one word each
+  git -C "$repo" log --first-parent --reverse --format=%H "$after..HEAD" -- $PATHS >"$tmp/commits"
+  n=$(($(wc -l <"$tmp/commits")))
+  if [ "$n" -gt "$max" ]; then
+    say "$n commits changed PATHS since $AFTER, more than MAX ($max): write the history afresh, from a later SINCE"
+    exit 1
+  fi
+  # Each named after the version AFTER is, at SINCE.
+  prev=$(git -C "$repo" rev-parse --since="$SINCE")
+  prev=${prev#--max-age=}
+  while read -r commit; do
+    write "$commit"
+  done <"$tmp/commits"
+elif [ "$(git -C "$repo" rev-parse --is-shallow-repository)" = true ]; then
   say "REPO $repo is a shallow clone, with no history: only the rules as they are now are written. Clone it whole, or with --shallow-since"
   write HEAD
 elif [ -s "$tmp/deploys" ]; then
@@ -274,6 +374,15 @@ else
   done <"$tmp/commits"
 fi
 written=$(($(find "$tmp/out" -mindepth 1 -maxdepth 1 | wc -l)))
+case $skipped in
+  0) ;;
+  1) say "1 commit that couldn't be rendered was passed over" ;;
+  *) say "$skipped commits that couldn't be rendered were passed over" ;;
+esac
+if [ "$written" -eq 0 ] && [ -n "$after" ]; then
+  say "nothing new on the branch since $AFTER: nothing written"
+  exit 0
+fi
 if [ "$written" -eq 0 ]; then
   say "no version of PATHS since $SINCE: nothing written"
   exit 1

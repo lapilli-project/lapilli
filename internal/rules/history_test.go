@@ -116,11 +116,18 @@ func recipeRepo(t *testing.T) string {
 // runRecipe runs recipes/versions/git.sh with env, and gives what it said.
 func runRecipe(t *testing.T, env ...string) (string, error) {
 	t.Helper()
+	return runRecipeIn(t, "", env...)
+}
+
+// runRecipeIn runs it in dir.
+func runRecipeIn(t *testing.T, dir string, env ...string) (string, error) {
+	t.Helper()
 	script, err := filepath.Abs("../../recipes/versions/git.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command("sh", script)
+	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), append([]string{"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1"}, env...)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
