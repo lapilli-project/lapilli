@@ -549,7 +549,7 @@ type rulesView struct {
 // first; deploys, the most firings during deploys first; or else the
 // noisiest first, as ruleLines has them.
 func sortRules(lines []ruleLine, by string) {
-	key := func(l ruleLine) int { return 0 }
+	var key func(ruleLine) int
 	switch by {
 	case "refired":
 		key = func(l ruleLine) int { return l.Refired }
