@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`lapilli serve` didn't start with a relative `--ledger`** (since
+  0.29.0), its default `lapilli-ledger` and the README's first example
+  among them: written as a URI, the path's first directory was read as a
+  host, and SQLite refused it (`invalid uri authority`). The path is made
+  absolute first. The chart, which gives an absolute one, wasn't affected.
+
 ## [0.31.0] - 2026-11-12
 
 What an operations team asks of its alerts (docs/design/noc.md): re-fires,

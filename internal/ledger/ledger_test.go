@@ -552,6 +552,29 @@ func TestMissed(t *testing.T) {
 	}
 }
 
+// A relative path, as --ledger's default (lapilli-ledger) is, opens a
+// ledger there: written as a URI, its first directory was read as the host
+// (file://lapilli-ledger/ledger.db), and SQLite refused it, so lapilli serve
+// didn't start without an absolute --ledger.
+func TestOpenRelative(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	t.Chdir(dir)
+	for _, path := range []string{filepath.Join("lapilli-ledger", "ledger.db"), "ledger.db", filepath.Join(".", "a#1", "ledger.db")} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		l, err := Open(ctx, path, time.UTC)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		l.Close()
+		if _, err := os.Stat(filepath.Join(dir, path)); err != nil {
+			t.Errorf("%s: no ledger where it was asked for: %v", path, err)
+		}
+	}
+}
+
 // A ledger's path is its own whatever its directory is named: a # or a ?
 // in it used to end the path there, so two ledgers named alike before it
 // were one file, and a % or a space was read as something else.
