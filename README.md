@@ -1053,14 +1053,30 @@ text has none, so a new language can't be left half done. The Spanish and
 Japanese were written with a machine's help, in the plain words SREs use, and
 want a native speaker's review: corrections are welcome as pull requests.
 
-It listens on `127.0.0.1:8080` and has no sign-in of its own: keep it inside,
-or put it behind the proxy that signs people in for you, and name the header
-that proxy sets with `--user-header` so changes are recorded under it.
-`--read-only` takes no changes. With `--editors` and `--admins`, people or
-groups (`--groups-header`), only editors may write and only admins may
-change the settings and the teams; the rest may only look. Write
-`user:NAME` or `group:NAME` where someone could pick a name that is a
-group's.
+It listens on `127.0.0.1:8080`. To serve it at a URL people open, sign them
+in, one way of three ([docs/design/signin.md](docs/design/signin.md)):
+
+- `--oidc-issuer`, `--oidc-client-id` and `--oidc-client-secret-file`:
+  lapilli signs people in itself with any OpenID Connect provider, as
+  Grafana and Argo CD do, and keeps a session in a signed cookie;
+  `POST /auth/logout` ends it. Register `--external-url`'s `/auth/callback`
+  as the client's redirect URI. An API client or an agent sends an ID token
+  the provider gave this client as a bearer token.
+- `--proxy-jwt google-iap`, `aws-alb` or `jwks`: the JWT a sign-in in front
+  signs (Google Cloud's Identity-Aware Proxy, an AWS Application Load
+  Balancer's sign-in, oauth2-proxy and the rest), checked against its keys
+  on every request.
+- `--user-header`: the plain header a proxy that signs people in sets, so
+  changes are recorded under it; the proxy must then be the only way in.
+
+With the first two, every page and API call but the health checks needs
+someone signed in, and `--user-claim` (`email`) and `--groups-claim`
+(`groups`) name the person and their groups. `--read-only` takes no
+changes. With `--editors` and `--admins`, people or groups
+(`--groups-header`, `--groups-claim`), only editors may write and only
+admins may change the settings and the teams; the rest may only look.
+`*` is everyone signed in. Write `user:NAME` or `group:NAME` where someone
+could pick a name that is a group's.
 
 With no roles, who may change what depends on where it listens. On
 loopback alone (`127.0.0.1`, `localhost`, the default), everyone who
@@ -1069,7 +1085,9 @@ as the chart listens, a pod's address), everyone may only look, since every
 pod or machine that shares its network can reach it; give roles behind the
 proxy, or `--everyone-admin` to let everyone change anything anyway. The
 log says at start which applies. (Before 0.28.1, everyone was an admin
-wherever it listened.)
+wherever it listened.) With `--oidc-issuer` or `--proxy-jwt`, loopback
+makes no one an admin: everyone signed in may only look until roles say
+otherwise, and `--everyone-admin` is refused.
 
 With `--admins`, admins can also give roles on the Roles page (from the
 Teams page) or with `/api/v1/roles`, kept in the ledger: an editor's, of
@@ -1081,10 +1099,14 @@ admin or an approver, and can't take away a role the flags give: those stay
 `--admins`, `--editors` and `--approvers`. Only admins see who holds a
 role. A team removed takes its editors with it.
 
-The proxy must be the only way in. The chart's `serve.networkPolicy` lets in
-only the proxy, and Prometheus only to `/metrics` on a port of its own
-(`--metrics-listen`). With `serve.userHeader`, the chart refuses to go
-without it.
+With `--user-header`, the proxy must be the only way in. The chart's
+`serve.networkPolicy` lets in only the proxy (or the ingress controller,
+the Gateway, the load balancer in front), and Prometheus only to
+`/metrics` on a port of its own (`--metrics-listen`). With
+`serve.userHeader`, the chart refuses to go without it. The chart serves
+the UI at a URL with `serve.service` (a LoadBalancer or NodePort),
+`serve.ingress` or `serve.httpRoute` (Gateway API), and `serve.signIn`;
+its README has each cloud's load balancer.
 
 Posts from other sites are refused, and the pages run no scripts. Only host
 names it is reached by are answered, so a page elsewhere can't point a name
@@ -1557,7 +1579,8 @@ nothing. With `--mcp-propose editors` (or `admins`), an eighth tool,
 marked as an agent's, for someone other than the person it acts for to
 approve in the UI. No tool approves or applies one.
 
-- **Access.** Agents come through the same sign-in proxy as the pages, and
+- **Access.** Agents come through the same sign-in as the pages (with
+  `--oidc-issuer`, an ID token as a bearer token), and
   everyone gets the tools that read. `compare` runs PromQL the agent wrote
   with Lapilli's access to Prometheus, and, for a rule kept in Loki, LogQL
   the agent wrote, sent to the Loki (or through Grafana's data source
@@ -1611,9 +1634,10 @@ approve in the UI. No tool approves or applies one.
   are marked "replayed in part" until `--late` covers them.
 - Rules alike in name, group and labels are counted together, and so are
   firings read with `--alerts` or `--firings`, which carry no group.
-- `lapilli serve` runs as one replica with one ledger file, and has no
-  sign-in of its own: who is who comes from the proxy that signs people in,
-  and roles from the flags and the ones admins give. A version of the rules is in effect from when it saw
+- `lapilli serve` runs as one replica with one ledger file. Who is who comes
+  from its sign-in (an OpenID Connect provider, or a sign-in in front), and
+  roles from the flags and the ones admins give; it doesn't sign people out
+  at the provider, or refresh a session past `--session-max-age`. A version of the rules is in effect from when it saw
   it, up to `--watch` (1m) later, and for a mounted ConfigMap a minute or so
   more; the rules before its first start are taken to be those it found
   then, unless `--rules-history` says how they were. It gives a firing its

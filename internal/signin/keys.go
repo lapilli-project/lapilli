@@ -144,22 +144,30 @@ func held(keys []jose.JSONWebKey, kid string) bool {
 	return kid == "" || slices.ContainsFunc(keys, func(k jose.JSONWebKey) bool { return k.KeyID == kid })
 }
 
-// keysFor are the keys to try for a token naming kid: those held, fetched
-// again first when kid isn't among them, or they are old, and the last
-// fetch wasn't too lately.
+// keysFor are the keys to try for a token naming kid: those held, and,
+// when kid isn't among them and the last fetch wasn't too lately, those
+// fetched again first. Keys held but old are fetched again in the
+// background: a request whose key is held never waits for a fetch.
 func (k *Keys) keysFor(ctx context.Context, kid string) ([]jose.JSONWebKey, error) {
 	now := k.now()
 	k.mu.Lock()
 	keys, at, tried := k.keys, k.at, k.tried
 	k.mu.Unlock()
-	if held(keys, kid) && now.Sub(at) < keysMaxAge {
-		return keys, nil
-	}
 	retry := keysRetry
 	if len(keys) == 0 {
 		retry = keysFirstRetry
 	}
-	if !tried.IsZero() && now.Sub(tried) < retry {
+	due := tried.IsZero() || now.Sub(tried) >= retry
+	if held(keys, kid) {
+		if now.Sub(at) >= keysMaxAge && due && k.fetching.TryLock() {
+			go func() {
+				defer k.fetching.Unlock()
+				k.refetch(ctx, tried)
+			}()
+		}
+		return keys, nil
+	}
+	if !due {
 		if len(keys) == 0 {
 			return nil, errors.New("the identity provider's keys couldn't be fetched: try again in a minute")
 		}
@@ -167,13 +175,22 @@ func (k *Keys) keysFor(ctx context.Context, kid string) ([]jose.JSONWebKey, erro
 	}
 	k.fetching.Lock()
 	defer k.fetching.Unlock()
+	return k.refetch(ctx, tried)
+}
+
+// refetch fetches the keys again, with the fetch held, unless another did
+// since tried; it gives the keys held after, and an error only when there
+// are none.
+func (k *Keys) refetch(ctx context.Context, tried time.Time) ([]jose.JSONWebKey, error) {
 	k.mu.Lock()
 	if k.tried != tried { // fetched meanwhile, by another request
-		keys = k.keys
+		keys := k.keys
 		k.mu.Unlock()
 		return keys, nil
 	}
+	now := k.now()
 	k.tried = now
+	held := k.keys
 	k.mu.Unlock()
 	// Not the request's context: a client that goes away doesn't cut short
 	// a fetch others wait for.
@@ -181,8 +198,8 @@ func (k *Keys) keysFor(ctx context.Context, kid string) ([]jose.JSONWebKey, erro
 	defer cancel()
 	fresh, err := k.fetch(fctx)
 	if err != nil {
-		if len(keys) > 0 {
-			return keys, nil // keep using those held
+		if len(held) > 0 {
+			return held, nil // keep using those held
 		}
 		return nil, fmt.Errorf("the identity provider's keys: %w", err)
 	}

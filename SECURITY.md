@@ -30,12 +30,15 @@ particular interest:
 - a rule or answer that makes it use memory or time far out of proportion.
 
 `lapilli serve` does the same every hour, and serves a web UI and API that
-read and write its ledger (one SQLite file). It has no sign-in of its own:
-it listens on localhost unless told otherwise, takes changes without roles
-only there (or with `--everyone-admin`), trusts the headers named by
-`--user-header` and `--groups-header` for who is asking, gives them the role
-`--editors` and `--admins` do, refuses posts from other sites, and with
-`--read-only` takes no changes. It sends notices to the URLs in
+read and write its ledger (one SQLite file). It listens on localhost unless
+told otherwise, takes changes without roles only there (or with
+`--everyone-admin`), and learns who is asking one way of three: the headers
+named by `--user-header` and `--groups-header`, which it trusts; an OpenID
+Connect provider it signs people in with (`--oidc-issuer`), keeping a
+session in a cookie it signs, and taking the provider's ID tokens as bearer
+tokens; or the JWT a sign-in in front signs (`--proxy-jwt`), checked against
+that sign-in's keys. It gives them the role `--editors` and `--admins` do,
+refuses posts from other sites, and with `--read-only` takes no changes. It sends notices to the URLs in
 `--notify-webhook-file` and `--slack-webhook-file`, and follows no
 redirects. Of particular interest besides the above:
 
@@ -51,6 +54,15 @@ redirects. Of particular interest besides the above:
   link run script, or to make a form go back to another site;
 - a way to change what a role doesn't allow, or to get a role without the
   proxy's headers (including as whoever it didn't name);
+- with `--oidc-issuer` or `--proxy-jwt`: a way to be taken for someone the
+  provider or the sign-in in front didn't sign in (a token for another
+  client or audience, expired, unsigned, signed with a secret, a key made
+  up, a nonce or state not the sign-in's, a callback replayed, a cookie
+  changed or kept after signing out), to make lapilli fetch keys from
+  anywhere but the URLs it was given, or often, to send a browser to
+  another site after signing in, to sign someone in as another (login
+  CSRF) or out from another site, or to approve a change with a bearer
+  token;
 - a way to make a notice show a webhook's URL, notify everyone in Slack
   (`<!channel>`), or go somewhere other than the URL in its file.
 

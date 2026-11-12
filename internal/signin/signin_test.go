@@ -576,3 +576,27 @@ func TestAWSALB(t *testing.T) {
 		}
 	}
 }
+
+// Keys held for six hours are fetched again, in the background: the
+// request whose key is held doesn't wait, and a key the provider took away
+// stops being taken.
+func TestKeysRefreshedInBackground(t *testing.T) {
+	c := &clock{t0}
+	idp, o := newIdP(t, c)
+	ctx := context.Background()
+	good := map[string]any{"email": "ana@example.com", "email_verified": true}
+	if _, err := o.Bearer(ctx, idp.IDToken(good)); err != nil {
+		t.Fatal(err)
+	}
+	c.t = t0.Add(keysMaxAge)
+	if _, err := o.Bearer(ctx, idp.IDToken(good)); err != nil {
+		t.Fatalf("a key held, old: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for idp.KeyFetches.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := idp.KeyFetches.Load(); n != 2 {
+		t.Errorf("%d fetches after six hours, want 2", n)
+	}
+}

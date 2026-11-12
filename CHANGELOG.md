@@ -2,6 +2,67 @@
 
 ## [Unreleased]
 
+For 0.29.0: lapilli serve served the way Grafana and Argo CD are, at a URL
+people open, behind a load balancer, an ingress or a Gateway, signing them
+in itself ([docs/design/signin.md](docs/design/signin.md)). No ledger
+schema change.
+
+### Added
+
+- **A sign-in of its own, with OpenID Connect.** `--oidc-issuer`,
+  `--oidc-client-id` and `--oidc-client-secret-file` sign people in with any
+  provider (Google, Microsoft Entra ID, Okta, Keycloak, Dex, AWS Cognito, an
+  OCI IAM identity domain, GitLab...): the authorization code flow with
+  PKCE, state and nonce, the ID token's signature, issuer, audience, `azp`,
+  expiry and nonce checked, and `email_verified` asked of an `email` name. A
+  browser keeps a session in a signed cookie (`__Host-`, HttpOnly, Secure,
+  SameSite=Lax; `--session-max-age`, 12h; `--session-key-file`, or a key
+  kept in the ledger); `POST /auth/logout` ends it for good, the ended
+  sessions kept in the ledger. An API client or an agent sends an ID token
+  the provider gave the client as a bearer token; it never approves a
+  change. `--user-claim` (`email`) and `--groups-claim` (`groups`) give the
+  roles `--editors`, `--admins` and `--approvers` name. Every page and API
+  call but the health checks then needs someone signed in.
+- **A sign-in in front, by the header it signs.** `--proxy-jwt google-iap`
+  (Google Cloud's Identity-Aware Proxy), `aws-alb` (an Application Load
+  Balancer's sign-in) or `jwks` (oauth2-proxy, an Azure App Service's
+  sign-in, an access proxy) takes who each request comes from from the JWT
+  that sign-in puts in a header, checked against its keys on every request,
+  in place of a plain header only a NetworkPolicy keeps others from
+  setting. Keys are fetched only from the URLs given, a key not held at most
+  once a minute (a load balancer's, ten seconds).
+- **The chart serves the UI at a URL.** `serve.service.type` (ClusterIP,
+  LoadBalancer, NodePort) with `annotations`, `loadBalancerClass`,
+  `loadBalancerSourceRanges`, `externalTrafficPolicy` and `nodePort`; a
+  LoadBalancer or NodePort serves the UI's port alone, and the metrics and
+  token ports go on `FULLNAME-internal`. `serve.ingress` (networking.k8s.io/v1)
+  and `serve.httpRoute` (Gateway API), whose hosts become `--external-url`
+  and `--allowed-hosts` when they aren't given. `serve.signIn` gives the
+  sign-in's flags and mounts its Secrets. The chart's README has each
+  cloud's load balancer, GKE, EKS, AKS and OKE alike.
+- `test/e2e/signin.sh`, against a real Dex in Docker, and
+  `test/e2e/serve-lb.sh`, the chart on kind behind a LoadBalancer, a
+  Gateway and an Ingress (cloud-provider-kind) with Dex in the cluster and
+  the NetworkPolicy on: both in CI.
+
+### Changed
+
+- With `--oidc-issuer` or `--proxy-jwt` and no roles, everyone signed in may
+  only look, on loopback too: a sign-in means people come from elsewhere,
+  often through a proxy on the same machine. `--everyone-admin` is refused
+  beside a sign-in; `--admins '*'` is everyone signed in. `--user-header`
+  keeps the 0.28.1 rule.
+- The chart's readiness probe is `/readyz`, ready once the first run is
+  done, so a load balancer sends people to a UI with something in it;
+  `serve.readinessPath: /healthz` is ready at once, as before. The liveness
+  probe stays `/healthz`.
+- The chart refuses to serve the UI outside the cluster (a LoadBalancer or
+  NodePort, an Ingress, an HTTPRoute) with no sign-in, unless
+  `serve.exposeWithoutSignIn`, and `serve.roles` and `serve.changes` take
+  `serve.signIn` as they take `serve.userHeader`.
+- New dependencies: `github.com/coreos/go-oidc/v3` v3.21.0 and
+  `github.com/go-jose/go-jose/v4` v4.1.6, both Apache-2.0.
+
 ## [0.28.1] - 2026-11-12
 
 A security release, after two reviews of 0.28.0 from an attacker's point
