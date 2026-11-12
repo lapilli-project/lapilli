@@ -110,6 +110,20 @@ func TestCompareUnreplayed(t *testing.T) {
 	if strings.Contains(out, "Paused  ") {
 		t.Errorf("Paused replayed on neither side, so it should have no row:\n%s", out)
 	}
+
+	// Not replayed on either side, for the same reason: it differs, and
+	// isn't said to fire as it did.
+	same := Judge([]rules.Rule{{Name: "Down", Unsupported: "query failed: connection refused"}}, nil, incs, opts())
+	c := Compare(same, same, []string{"Down"}, 0)
+	c.Summarize(true)
+	b.Reset()
+	if err := CompareText(&b, c, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if out := b.String(); strings.Contains(out, "keep the same stones") || !strings.Contains(out, "Down (before): query failed") ||
+		c.Summary.Alike != 0 || c.Summary.Unreplayed != 1 {
+		t.Errorf("summary %+v:\n%s", c.Summary, out)
+	}
 }
 
 func TestTableWidth(t *testing.T) {

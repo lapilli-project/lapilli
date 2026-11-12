@@ -48,8 +48,8 @@ type Summary struct {
 	Added   int `json:"added"`
 	Removed int `json:"removed"`
 	Same    int `json:"same"`
-	// Alike are the rules that differ but fire as they did: as often,
-	// catching as much.
+	// Alike are the rules that differ but fire as they did, replayed on
+	// both sides: as often, catching as much.
 	Alike int `json:"alike"`
 	// Unreplayed are the rules that differ that couldn't be replayed, on
 	// one side or both.
@@ -112,7 +112,9 @@ func (c *Comparison) parts() compareParts {
 			p.broken = append(p.broken, rc)
 		}
 		switch {
-		case rc.Alike():
+		case rc.Alike() && !unreplayed(rc.Before) && !unreplayed(rc.After):
+			// Replayed alike on both sides: a rule replayed on neither
+			// can't be said to fire as it did.
 			p.alike = append(p.alike, rc)
 		case (rc.Before == nil || unreplayed(rc.Before)) && (rc.After == nil || unreplayed(rc.After)):
 			// nothing replayed on either side: only the reason to show
