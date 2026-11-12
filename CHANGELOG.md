@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-11-12
+
 A security release, after two reviews of 0.28.0 from an attacker's point
 of view, and a third of the fixes: the change recipes, the chart, the
 release workflow, and what lapilli serve takes. Ledger schema 016 (tasks'
