@@ -12,25 +12,39 @@
 #           version in it yet, git.sh writes it whole, from SINCE
 #   SINCE   from when, for a HISTORY with no version yet, as git.sh takes it
 #   EVERY   seconds between looks (default 300); 0 looks once, and fails
-#           when the look does
-#   REPO, PATHS, RENDER, RENDER_PREPARE, UNRENDERED, MAX
-#           as git.sh takes them
+#           when the look does. It is the fetch's too, as the chart has it:
+#           a commit is named no earlier than when it was fetched, less
+#           EVERY and a minute (git.sh's LATE)
+#   KEEP    seconds (default 0, all): versions older than this are taken
+#           away after each look, but the newest of them, in effect then.
+#           The chart gives serve.backfill and a day
+#   REPO, PATHS, RENDER, RENDER_PREPARE, MAX, MAX_TREE_FILES, MAX_TREE_BYTES
+#           as git.sh takes them. git.sh runs following (FOLLOWING=1): a
+#           commit that can't be rendered is passed over, saying why, one
+#           dated after now is named now, and of more than MAX new commits
+#           the newest MAX are written, so one commit never stops it
 #   GIT_SH  git.sh (default: the one beside this)
 #
 # A version is added by renaming it into HISTORY from a directory in it
 # whose name starts with a dot, which lapilli passes over, so lapilli never
-# reads one half written. A look that fails says why and leaves HISTORY as
-# it was; the next tries again, but a branch that hasn't moved since a look
-# that went through isn't looked at again.
+# reads one half written. HISTORY/.head is the commit the last look got to,
+# so a commit passed over isn't rendered again at each look. A look that
+# fails says why and leaves HISTORY as it was; the next tries again, but a
+# branch that hasn't moved since a look that went through isn't looked at
+# again.
 #
 #   while :; do git -C ~/src/monitoring pull -q --ff-only; sleep 300; done &
 #   REPO=~/src/monitoring PATHS=alerts/ SINCE=2026-10-01 HISTORY=/var/lib/lapilli/history ./follow.sh
 #   lapilli serve --rules-history /var/lib/lapilli/history ...
 set -eu
 say() { printf 'follow.sh: %s\n' "$*" >&2; }
+# git as the clone has it, nothing more.
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_ATTR_NOSYSTEM=1
 : "${HISTORY:?the history to keep, which lapilli serve reads}"
 every=${EVERY:-300}
-case $every in *[!0-9]* | '') say "EVERY $every: want seconds"; exit 1 ;; esac
+keep=${KEEP:-0}
+case $every$keep in *[!0-9]* | '') say "EVERY $every, KEEP $keep: want seconds"; exit 1 ;; esac
+export FOLLOWING=1 LATE="${LATE:-$((every + 60))}"
 git_sh=${GIT_SH:-$(dirname "$0")/git.sh}
 repo=${REPO:-.}
 mkdir -p "$HISTORY"
@@ -70,6 +84,12 @@ look() {
       rm -rf "$out"
       return 1
     fi
+    # From where the last look got to, when that is still on the branch:
+    # commits passed over then aren't rendered again.
+    if h=$(cat "$HISTORY/.head" 2>/dev/null) && git -C "$repo" merge-base --is-ancestor "$after" "$h" 2>/dev/null &&
+      git -C "$repo" merge-base --is-ancestor "$h" HEAD 2>/dev/null; then
+      after=$h
+    fi
     since=$(printf '%s' "$newest" | sed -E 's/^(....)(..)(..)T(..)(..)(..)Z$/\1-\2-\3T\4:\5:\6Z/')
     if ! AFTER=$after SINCE=$since OUT=$out/v sh "$git_sh"; then
       rm -rf "$out"
@@ -86,7 +106,28 @@ look() {
   done
   rm -rf "$out"
   [ "$added" -eq 0 ] || say "$added versions added to $HISTORY, the newest $last"
+  printf '%s\n' "$head" >"$HISTORY/.head.new" && mv "$HISTORY/.head.new" "$HISTORY/.head"
   looked=$head
+  prune
+}
+
+# prune: the versions from before KEEP seconds ago go, but the newest of
+# them, the one in effect then.
+prune() {
+  [ "$keep" -gt 0 ] || return 0
+  edge=$(date -u -d "@$(($(date -u +%s) - keep))" +%Y%m%dT%H%M%SZ 2>/dev/null || date -u -r "$(($(date -u +%s) - keep))" +%Y%m%dT%H%M%SZ)
+  old=
+  for v in "$HISTORY"/*; do
+    case ${v##*/} in
+      [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z) ;;
+      *) continue ;;
+    esac
+    # Names in the basic form, as numbers, are in their times' order.
+    n=${v##*/}
+    [ "$(printf '%s' "$n" | tr -d TZ)" -lt "$(printf '%s' "$edge" | tr -d TZ)" ] || break
+    [ -z "$old" ] || rm -rf "$old"
+    old=$v
+  done
 }
 
 while :; do

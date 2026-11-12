@@ -66,7 +66,7 @@ func TestVersionsRecipeRendered(t *testing.T) {
 	}
 
 	said, err = runRecipeIn(t, filepath.Dir(repo), append(base, "OUT="+out, "UNRENDERED=skip")...)
-	if err != nil || !strings.Contains(said, "(20261001T100000Z) can't be rendered: RENDER failed. Passed over (UNRENDERED=skip)") ||
+	if err != nil || !strings.Contains(said, "(20261001T100000Z) can't be rendered: RENDER failed. Passed over: the version before stays in effect") ||
 		!strings.Contains(said, "1 commit that couldn't be rendered was passed over") {
 		t.Fatalf("skip: %v: %s", err, said)
 	}
@@ -279,24 +279,33 @@ func TestFollowRecipe(t *testing.T) {
 		!hs[4].At.Equal(time.Date(2026, 10, 26, 9, 0, 0, 0, time.UTC)) || forOf(t, hs[4].Path) != 45*time.Minute {
 		t.Fatalf("%v %v", hs, err)
 	}
-	if left, _ := filepath.Glob(filepath.Join(hist, ".*")); len(left) != 0 {
+	if left, _ := filepath.Glob(filepath.Join(hist, ".follow*")); len(left) != 0 {
 		t.Errorf("left %v", left)
 	}
 	if said, err := runFollow(t, time.Minute, base...); err != nil || strings.Contains(said, "added") {
 		t.Errorf("nothing new: %v: %s", err, said)
 	}
 
-	// A look that fails leaves the history as it was.
+	// A commit that can't be rendered is passed over, saying why: following
+	// doesn't stop on it, and the next look doesn't render it again.
 	os.WriteFile(filepath.Join(repo, "alerts", "a.yaml"), []byte(rulesFor("55m")), 0o644)
 	git(t, repo, "2026-10-27T00:00:00Z", "commit", "-qam", "five")
-	if said, err := runFollow(t, time.Minute, append(base, "RENDER=exit 3")...); err == nil || !strings.Contains(said, "can't be rendered") {
-		t.Errorf("a failed look: %v: %s", err, said)
+	tries := filepath.Join(t.TempDir(), "tries")
+	failing := "RENDER=echo x >>" + tries + "; exit 3"
+	if said, err := runFollow(t, time.Minute, append(base, failing)...); err != nil || !strings.Contains(said, "can't be rendered: RENDER failed. Passed over") {
+		t.Errorf("a commit that can't be rendered: %v: %s", err, said)
 	}
 	if again, _ := History(hist); len(again) != 5 {
-		t.Errorf("a failed look left %d versions", len(again))
+		t.Errorf("a commit that can't be rendered left %d versions", len(again))
 	}
-	if left, _ := filepath.Glob(filepath.Join(hist, ".*")); len(left) != 0 {
-		t.Errorf("a failed look left %v", left)
+	if left, _ := filepath.Glob(filepath.Join(hist, ".follow*")); len(left) != 0 {
+		t.Errorf("a commit that can't be rendered left %v", left)
+	}
+	if said, err := runFollow(t, time.Minute, append(base, failing)...); err != nil {
+		t.Errorf("the next look: %v: %s", err, said)
+	}
+	if b, _ := os.ReadFile(tries); strings.Count(string(b), "x") != 1 {
+		t.Errorf("rendered %d times, want once", strings.Count(string(b), "x"))
 	}
 	// A newest version that names no commit: written otherwise.
 	os.Remove(filepath.Join(hs[4].Path, ".commit"))

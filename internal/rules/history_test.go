@@ -359,8 +359,9 @@ func TestHistoryLinks(t *testing.T) {
 }
 
 // A commit dated after now stops the recipe, rather than naming every later
-// version after it; with RENDER, a link outside PATHS is the repository's
-// own business.
+// version after it. With RENDER, a link anywhere in the commit is refused:
+// RENDER reads what it likes of it, and what a link leads to could end up
+// in what it writes; without, a link outside PATHS is never read.
 func TestVersionsRecipeFutureAndOtherLinks(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
@@ -379,8 +380,12 @@ func TestVersionsRecipeFutureAndOtherLinks(t *testing.T) {
 	git(t, repo, "2026-10-27T00:00:00Z", "add", "-A")
 	git(t, repo, "2026-10-27T00:00:00Z", "commit", "-qm", "a link elsewhere")
 	rendered := filepath.Join(t.TempDir(), "rendered")
-	if said, err := runRecipe(t, "REPO="+repo, "PATHS=alerts/", "SINCE=2026-10-10", "OUT="+rendered, "RENDER=cat alerts/a.yaml"); err != nil {
-		t.Errorf("a link outside PATHS refused RENDER: %v: %s", err, said)
+	if said, err := runRecipe(t, "REPO="+repo, "PATHS=alerts/", "SINCE=2026-10-10", "OUT="+rendered, "RENDER=cat alerts/a.yaml"); err == nil ||
+		!strings.Contains(said, "can't be rendered: it holds a symbolic link, CLAUDE.md") {
+		t.Errorf("a link outside PATHS, with RENDER: %v: %s", err, said)
+	}
+	if said, err := runRecipe(t, "REPO="+repo, "PATHS=alerts/", "SINCE=2026-10-10", "OUT="+filepath.Join(t.TempDir(), "plain")); err != nil {
+		t.Errorf("a link outside PATHS, without RENDER: %v: %s", err, said)
 	}
 	if err := os.WriteFile(filepath.Join(repo, "alerts", "a.yaml"), []byte(rulesFor("50m")), 0o644); err != nil {
 		t.Fatal(err)

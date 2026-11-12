@@ -25,13 +25,20 @@
 #           repository; Chart.lock pins the versions). Its output is shown,
 #           not taken as rules. Both run with REPO the clone's full path
 #   UNRENDERED
-#           what to do with a commit that can't be rendered: RENDER_PREPARE
-#           or RENDER fails, or RENDER writes nothing. fail (the default)
-#           writes nothing and says which; skip passes it over, saying
-#           which and why, and the version before stays in effect until the
-#           next commit that renders
+#           what to do with a commit that can't be rendered, or read: git
+#           can't read it, RENDER_PREPARE or RENDER fails, RENDER writes
+#           nothing, it holds a symbolic link, or its files are more than
+#           MAX_TREE_FILES or MAX_TREE_BYTES. fail (the default) writes
+#           nothing and says which; skip passes it over, saying which and
+#           why, and the version before stays in effect until the next
+#           commit that renders
 #   MAX     the most versions written (default 500): commits, or with
 #           DEPLOYS the deploys that changed the rules
+#   MAX_TREE_FILES, MAX_TREE_BYTES
+#           the most files, and bytes, a commit is read with (default 20000
+#           and 268435456, 256 MiB): with RENDER, all of the commit's
+#           files; without, those PATHS names. What git keeps once can be
+#           named many times in a tree, and be far more once written out
 #   DEPLOYS optional: a file of the revisions deployed and when, "REVISION
 #           TIME" a line, as argocd.sh and flux.sh write it. The versions
 #           are then the rules each deploy put in place, named by when: when
@@ -41,6 +48,16 @@
 #           time of the version it wrote. With none, it says so, writes
 #           nothing and succeeds. If the branch was rewritten since, from
 #           where the two parted
+#   LATE    with AFTER, seconds (default 360): a commit is named no earlier
+#           than when the clone's branch first held it, by the branch's
+#           reflog, less LATE, the time between fetches and a margin. A
+#           commit dated back, by its committer's clock or because it waited
+#           in a branch, takes effect when it was fetched, not days before
+#   FOLLOWING
+#           1, as follow.sh gives it (and AFTER implies): never stop on a
+#           commit. One that can't be rendered is passed over, saying why,
+#           whatever UNRENDERED says; one dated after now is named now; and
+#           of more than MAX, the newest MAX are written
 #
 # Each version holds .commit, the full name of the commit it is (lapilli
 # passes names starting with a dot over), for follow.sh to go on from.
@@ -49,13 +66,18 @@
 # as only the commits on the branch are taken (git log --first-parent). A
 # commit's time is what its committer's clock said, so each version is
 # named at least a second after the one before it: one dated back can't
-# reorder them. A version holding a symbolic link is refused: a link could
-# lead to any file this can read. RENDER and RENDER_PREPARE run without
-# TOKEN_FILE and with a HOME of their own, kept from one commit to the next
-# (what Helm caches there is fetched once), so a chart's commands can't
-# reach a token the clone was made with. It reads the clone and changes
-# nothing in it. Nothing is written to OUT until every version has been:
-# what fails leaves OUT as it was.
+# reorder them. A commit with a symbolic link among the files read (with
+# RENDER, anywhere in it, and again after RENDER_PREPARE) can't be read: a
+# link could lead to any file this can read. A commit is read as it is:
+# git runs with no configuration but the clone's (GIT_CONFIG_NOSYSTEM,
+# GIT_CONFIG_GLOBAL=/dev/null: an image's own, such as one turning Git LFS
+# on, isn't taken), and the commit's .gitattributes don't change what is
+# read (export-ignore, export-subst, filters). RENDER and RENDER_PREPARE
+# run without TOKEN_FILE and with a HOME of their own, kept from one
+# commit to the next (what Helm caches there is fetched once), so a
+# chart's commands can't reach a token the clone was made with. It reads
+# the clone and changes nothing in it. Nothing is written to OUT until
+# every version has been: what fails leaves OUT as it was.
 #
 # With DEPLOYS, the deploys are walked in time, from the last at or before
 # SINCE (the rules in effect then) on: each that changed the rules from
@@ -74,6 +96,8 @@
 #   lapilli serve --rules ~/src/monitoring/alerts --rules-history /tmp/history ...
 set -eu
 say() { printf 'git.sh: %s\n' "$*" >&2; }
+# git as the clone has it, nothing more.
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_ATTR_NOSYSTEM=1
 repo=${REPO:-.}
 : "${PATHS:?the rule files or directories, such as alerts/}"
 : "${SINCE:?from when, such as 2026-10-06}"
@@ -85,6 +109,14 @@ case $unrendered in
   fail | skip) ;;
   *) say "UNRENDERED $unrendered: want fail or skip"; exit 1 ;;
 esac
+following=
+[ -z "${FOLLOWING:-}" ] && [ -z "${AFTER:-}" ] || following=1
+late=${LATE:-360}
+tree_files=${MAX_TREE_FILES:-20000}
+tree_bytes=${MAX_TREE_BYTES:-268435456}
+for n in "LATE $late" "MAX_TREE_FILES $tree_files" "MAX_TREE_BYTES $tree_bytes"; do
+  case ${n#* } in *[!0-9]* | '') say "$n: want a number"; exit 1 ;; esac
+done
 if [ -n "${RENDER_PREPARE:-}" ] && [ -z "${RENDER:-}" ]; then
   say "RENDER_PREPARE prepares each commit's files for RENDER: give RENDER too"
   exit 1
@@ -145,19 +177,53 @@ fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 trap 'exit 1' INT TERM HUP
-mkdir "$tmp/out" "$tmp/home"
+mkdir "$tmp/out" "$tmp/home" "$tmp/empty"
+# fetched: each commit the clone's branch came to hold after the oldest of
+# its last 200 reflog entries (the clone, or the oldest kept), and when it
+# first did: what fetching wrote, which RENDER, without write access to the
+# clone, can't. Read only with AFTER, following.
+: >"$tmp/fetched"
+if [ -n "$after" ] && ref=$(git -C "$repo" symbolic-ref -q HEAD); then
+  git -C "$repo" log -g -n 200 --date=unix --format='%H %gd' "$ref" 2>/dev/null |
+    sed -n 's/^\([0-9a-f]*\) .*@{\([0-9]*\)}$/\1 \2/p' | awk '{ l[NR] = $0 } END { for (i = NR; i > 0; i--) print l[i] }' >"$tmp/reflog"
+  was=
+  while read -r sha at; do
+    if [ -n "$was" ]; then
+      git -C "$repo" rev-list --first-parent "$was..$sha" 2>/dev/null | while read -r c; do
+        grep -q "^$c " "$tmp/fetched" || printf '%s %s\n' "$c" "$at" >>"$tmp/fetched"
+      done
+    fi
+    was=$sha
+  done <"$tmp/reflog"
+fi
 # basic SECONDS: a time in UTC, in the basic form; date's flags for it
 # differ between GNU and BusyBox (-d) and BSD (-r).
 basic() { date -u -d "@$1" +%Y%m%dT%H%M%SZ 2>/dev/null || date -u -r "$1" +%Y%m%dT%H%M%SZ; }
 prev=
 now=$(date -u +%s)
 skipped=0
-# links DIR COMMIT: refuse a version with a symbolic link in it.
-links() {
-  if [ -n "$(find "$1" -type l | head -n 1)" ]; then
-    say "$2 holds a symbolic link among PATHS: a version is files, not links to elsewhere"
-    exit 1
-  fi
+# link DIR: the first symbolic link in DIR, if any.
+link() { find "$1" -type l | head -n 1; }
+# archive COMMIT DIR [PATH...]: the files of COMMIT (those PATHS name) into
+# DIR, as the commit has them: with the attributes of an empty work tree
+# and an empty index, run from it, so the commit's own .gitattributes (or
+# a checkout's) don't leave a file out (export-ignore), rewrite one
+# (export-subst) or run a filter on it.
+gitdir=$(git -C "$repo" rev-parse --absolute-git-dir)
+archive() {
+  c=$1 d=$2
+  shift 2
+  (cd "$tmp/empty" && GIT_INDEX_FILE=$tmp/index git --git-dir="$gitdir" --work-tree=. archive --worktree-attributes --format=tar -o "$tmp/c.tar" "$c" -- "$@") &&
+    tar -x -f "$tmp/c.tar" -C "$d"
+}
+# toobig COMMIT [PATH...]: why the files are too many or too large to read,
+# by what git says of them, before any is written.
+toobig() {
+  c=$1
+  shift
+  git -C "$repo" ls-tree -r -l "$c" -- "$@" | awk -v files="$tree_files" -v bytes="$tree_bytes" '
+    { n++; if ($4 != "-") s += $4 }
+    END { if (n > files || s > bytes) printf "%d files of %d bytes, more than MAX_TREE_FILES (%d) or MAX_TREE_BYTES (%d)", n, s, files, bytes }'
 }
 # run COMMAND: RENDER or RENDER_PREPARE, in the commit's files, without the
 # token and with a HOME of its own; REPO is the clone, wherever this runs.
@@ -165,16 +231,18 @@ clone=$(cd "$repo" && pwd)
 run() {
   (cd "$tmp/tree" && env -u TOKEN_FILE HOME="$tmp/home" GIT_CONFIG_GLOBAL=/dev/null REPO="$clone" sh -c "$1")
 }
-# unrendered COMMIT NAME WHY: a commit that can't be rendered, passed over
-# with UNRENDERED=skip, or else the end.
+# unrendered COMMIT NAME WHY: a commit that can't be rendered (or read),
+# passed over with UNRENDERED=skip or following, or else the end.
+what='read'
+[ -z "${RENDER:-}" ] || what=rendered
 unrendered() {
   rm -rf "${tmp:?}/out/$2"
-  if [ "$unrendered" = skip ]; then
+  if [ "$unrendered" = skip ] || [ -n "$following" ]; then
     skipped=$((skipped + 1))
-    say "$1 ($2) can't be rendered: $3. Passed over (UNRENDERED=skip): the version before stays in effect until the next"
+    say "$1 ($2) can't be $what: $3. Passed over: the version before stays in effect until the next"
     return
   fi
-  say "$1 ($2) can't be rendered: $3. Nothing is written; UNRENDERED=skip passes such a commit over"
+  say "$1 ($2) can't be $what: $3. Nothing is written; UNRENDERED=skip passes such a commit over"
   exit 1
 }
 # write COMMIT [SECONDS]: the files PATHS name as COMMIT left them, or what
@@ -186,9 +254,19 @@ write() {
   t=${2:-$(git -C "$repo" log -1 --format=%ct "$1")}
   # A committer's clock can be wrong: a commit dated after now would name
   # every later version after it too, and lapilli passes those over.
-  if [ "$t" -gt "$now" ]; then
+  if [ "$t" -gt "$now" ] && [ -n "$following" ]; then
+    say "$1 is dated after now ($(basic "$t")): a committer's clock was wrong; it is named now"
+    t=$now
+  elif [ "$t" -gt "$now" ]; then
     say "$1 is dated after now ($(basic "$t")): a committer's clock was wrong; nothing is written"
     exit 1
+  fi
+  # Not before the clone's branch first held it, less LATE: a commit dated
+  # back takes effect when it was fetched.
+  f=$(awk -v c="$1" -v now="$now" '$1 == c { print ($2 < now ? $2 : now); exit }' "$tmp/fetched")
+  if [ -n "$f" ] && [ "$t" -lt $((f - late)) ]; then
+    say "$1 is dated $(basic "$t"), before the branch held it ($(basic "$f")): it is named when it was fetched"
+    t=$((f - late))
   fi
   if [ -n "$prev" ] && [ "$t" -le "$prev" ]; then
     t=$((prev + 1))
@@ -200,14 +278,19 @@ write() {
   if [ -n "${RENDER:-}" ]; then
     rm -rf "$tmp/tree"
     mkdir "$tmp/tree"
-    git -C "$repo" archive --format=tar "$1" | tar -x -C "$tmp/tree"
-    # Links among PATHS only: elsewhere in the repository they are its own.
-    for p in $PATHS; do
-      [ ! -e "$tmp/tree/${p%/}" ] || links "$tmp/tree/${p%/}" "$1"
-    done
+    # RENDER reads what it likes of the commit: a link anywhere in it could
+    # lead to any file this can read, and end up in what it writes.
+    if big=$(toobig "$1") && [ -n "$big" ]; then
+      unrendered "$1" "$name" "its files are $big"
+    elif ! archive "$1" "$tmp/tree"; then
+      unrendered "$1" "$name" "git couldn't read it"
+    elif l=$(link "$tmp/tree") && [ -n "$l" ]; then
+      unrendered "$1" "$name" "it holds a symbolic link, ${l#"$tmp/tree/"}"
     # What prepares the files shows its output; only RENDER's is rules.
-    if [ -n "${RENDER_PREPARE:-}" ] && ! run "$RENDER_PREPARE" >&2; then
+    elif [ -n "${RENDER_PREPARE:-}" ] && ! run "$RENDER_PREPARE" >&2; then
       unrendered "$1" "$name" "RENDER_PREPARE failed"
+    elif l=$(link "$tmp/tree") && [ -n "$l" ]; then
+      unrendered "$1" "$name" "RENDER_PREPARE left a symbolic link, ${l#"$tmp/tree/"}"
     elif ! run "$RENDER" >"$dir/rules.yaml"; then
       unrendered "$1" "$name" "RENDER failed"
     elif [ ! -s "$dir/rules.yaml" ]; then
@@ -230,9 +313,15 @@ write() {
     return
   fi
   # shellcheck disable=SC2086 # $there is the paths, one word each
-  git -C "$repo" archive --format=tar "$1" -- $there | tar -x -C "$dir"
-  links "$dir" "$1"
-  git -C "$repo" rev-parse --verify "$1^{commit}" >"$dir/.commit"
+  if big=$(toobig "$1" $there) && [ -n "$big" ]; then
+    unrendered "$1" "$name" "the files PATHS names are $big"
+  elif ! archive "$1" "$dir" $there; then
+    unrendered "$1" "$name" "git couldn't read it"
+  elif l=$(link "$dir") && [ -n "$l" ]; then
+    unrendered "$1" "$name" "it holds a symbolic link among PATHS, ${l#"$dir/"}: a version is files, not links to elsewhere"
+  else
+    git -C "$repo" rev-parse --verify "$1^{commit}" >"$dir/.commit"
+  fi
 }
 # The deploys, as SECONDS COMMIT, the earliest first: each line checked
 # before git sees it, so a revision can't be an option or a path and a time
@@ -308,8 +397,8 @@ if [ -n "$after" ]; then
   git -C "$repo" log --first-parent --reverse --format=%H "$after..HEAD" -- $PATHS >"$tmp/commits"
   n=$(($(wc -l <"$tmp/commits")))
   if [ "$n" -gt "$max" ]; then
-    say "$n commits changed PATHS since $AFTER, more than MAX ($max): write the history afresh, from a later SINCE"
-    exit 1
+    say "$n commits changed PATHS since $AFTER, more than MAX ($max): the newest $max are written"
+    tail -n "$max" "$tmp/commits" >"$tmp/newest" && mv "$tmp/newest" "$tmp/commits"
   fi
   # Each named after the version AFTER is, at SINCE.
   prev=$(git -C "$repo" rev-parse --since="$SINCE")
@@ -364,7 +453,11 @@ else
   # shellcheck disable=SC2086
   git -C "$repo" log --first-parent --reverse --format=%H --since="$SINCE" HEAD -- $PATHS >"$tmp/commits"
   n=$(($(wc -l <"$tmp/commits")))
-  if [ "$n" -gt "$max" ]; then
+  if [ "$n" -gt "$max" ] && [ -n "$following" ]; then
+    say "$n commits changed PATHS since $SINCE, more than MAX ($max): the newest $max are written"
+    tail -n "$max" "$tmp/commits" >"$tmp/newest" && mv "$tmp/newest" "$tmp/commits"
+    before=
+  elif [ "$n" -gt "$max" ]; then
     say "$n commits changed PATHS since $SINCE, more than MAX ($max): give a later SINCE"
     exit 1
   fi
@@ -376,8 +469,8 @@ fi
 written=$(($(find "$tmp/out" -mindepth 1 -maxdepth 1 | wc -l)))
 case $skipped in
   0) ;;
-  1) say "1 commit that couldn't be rendered was passed over" ;;
-  *) say "$skipped commits that couldn't be rendered were passed over" ;;
+  1) say "1 commit that couldn't be $what was passed over" ;;
+  *) say "$skipped commits that couldn't be $what were passed over" ;;
 esac
 if [ "$written" -eq 0 ] && [ -n "$after" ]; then
   say "nothing new on the branch since $AFTER: nothing written"
