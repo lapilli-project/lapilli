@@ -641,7 +641,7 @@ TargetGone    absent() with no for: a restart pages                     a series
 
 | Check | Kind |
 |---|---|
-| No summary or description; no runbook link, or one that isn't an http or https URL | fact |
+| No summary or description; no runbook, or one that isn't a link: an http or https URL, or a path in a repository | fact |
 | A template that doesn't parse, in its source's own language | fact |
 | No severity; one not in `--severities` | fact |
 | The same expression, `for` and labels as another rule | fact |
@@ -657,12 +657,14 @@ annotations, as the managed services that run its rules keep them,
 Grafana's, CloudWatch's `AlarmDescription`, a Google Cloud policy's
 documentation, Azure Monitor's alert rules and OCI's alarms (`az monitor
 metrics alert list`, `oci monitoring alarm list`, now read as rules too:
-listed, not replayed). A cloud alarm's runbook is the first link in its
-description; a source with no severity (CloudWatch, Azure's activity log
+listed, not replayed). A rule's runbook is the first of
+`--runbook-annotations` it has (`runbook_url`, `runbook`, `playbook_url`,
+`playbook`); a cloud alarm's, the first link in its description; a source with no severity (CloudWatch, Azure's activity log
 alerts) isn't faulted for having none. Templates are parsed, never run, with
 Prometheus's and Grafana's functions stubbed; a function this version
 doesn't know is taken as one a newer Prometheus has. Links are checked to be
-http or https URLs, never visited. The range check counts with
+http or https URLs, or paths in the rules' repository
+(`docs/runbooks/disk.md#full`), never visited. The range check counts with
 `--scrape-interval`, or else with those `/api/v1/status/config` gives, when
 it is served: a range over a selector that names its job
 (`rate(x{job="batch"}[3m])`, or `job=~` the longest of the jobs it can be)
@@ -930,6 +932,17 @@ report for any period (`/api/v1/report?from=&to=`) and takes incidents
 (`/api/v1/incidents`); `/metrics` gives `--metrics` over the last seven days,
 so Prometheus scrapes it instead of a Pushgateway, and the chart has a
 Grafana dashboard of them.
+
+What an operations team measures its alerts by is there too, week by week
+and team by team (docs/design/noc.md): the share of critical firings that
+caught something; firings that re-fired, the alert that did most, and the
+whole weeks with one; firings during deploys of what they are about
+(`--deploys`, from what `recipes/versions/argocd.sh` and `flux.sh` write),
+shown apart, with precision both ways; incidents and impact windows caught,
+caught only by noisy rules or missed, and the lead of the first alert. The
+rules, a rule's page, the incidents and the overview show them, the digest
+and reports tell them, and `/api/v1/summary` gives them, in a shape that
+keeps its schema, to dashboards and other tools.
 
 The ledger is one SQLite file (`--ledger DIR`). It keeps each firing's stones
 and each rule's by day and by week, so reading twelve weeks costs what

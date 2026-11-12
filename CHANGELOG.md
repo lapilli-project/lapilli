@@ -2,6 +2,78 @@
 
 ## [Unreleased]
 
+### 0.30.0
+
+To merge after 0.29.0's section, if both are still unreleased when this
+lands: this one goes above it.
+
+What an operations team asks of its alerts (docs/design/noc.md): re-fires,
+firings during deploys, user impact read as incidents, week by week and team
+by team, in the UI, the digest, `/metrics`, a new summary API and the
+chart's Grafana dashboard. **Ledger schema 017**, after 0.28's 016: a table
+of deploys, a mark on each firing that came during one, counted by day and
+week, and an index of re-fired firings. No change to how a firing is
+judged.
+
+#### Added
+
+- **Re-fires, read as a goal.** `/rules` says the share of each rule's
+  firings that re-fired and in how many weeks shown one did, and can be put
+  in order of re-fires (`?sort=refired`); a rule's page has its re-fires
+  week by week and the alerts (label sets) that re-fired most; the overview
+  a tile and a column; the digest and a report's new `refired` section, how
+  many re-fired, of how many rules, the alert that did most, and how many of
+  the last twelve whole weeks had one. `/metrics` adds
+  `lapilli_rule_refired_weeks`, `lapilli_refired_weeks` (everyone's and each
+  team's) and `lapilli_weeks_counted`.
+- **Firings during deploys.** `--deploys FILE` (the chart's `serve.deploys`)
+  names what was deployed and when, as the histories
+  `recipes/versions/argocd.sh` and `flux.sh` write, each labelled with the
+  service or namespace it deployed, or written down with a start and an end;
+  read again each run. A firing that starts during one, or within
+  `--deploy-after` (10m) of its end, and has the value of a label it names,
+  is marked: judged as ever, shown apart, and precision read with those
+  firings and without, on `/rules` (a column and `?sort=deploys`), a rule's
+  page, the overview, the digest, a report's `deploys` section, `/metrics`
+  (`lapilli_rule_firings_during_deploys`,
+  `lapilli_rule_caught_during_deploys`,
+  `lapilli_serve_deploys_last_timestamp_seconds`) and the summary.
+- **Impact windows read as incidents.** `/incidents` picks written incidents
+  or windows `--impact` found (`?source=`) and a team's (`?team=`), says how
+  many were caught, caught only by noisy rules or missed and the median
+  lead, and gives each its lead and, for one not caught, the rule that nearly
+  caught it. `/metrics` has `lapilli_incident_state` and
+  `lapilli_incident_lead_seconds`, an incident a series, once for each team
+  that owns it.
+- **`GET /api/v1/summary`**, and MCP's `summary` tool: for each week and for
+  everyone or each team, critical firings and the share that caught
+  something (`?critical=`), by severity, re-fires and the alert that
+  re-fired most, off hours and asleep, during deploys and precision without
+  them, incidents and impact windows caught and missed, and the median lead.
+  `schema: 1`: fields are added to it, never changed.
+- **The chart's Grafana dashboard rebuilt** around that evaluation, with
+  variables for the team, severities and the severities counted as critical,
+  and the sources' health: how long since firings were copied in, a
+  notification came, the deploys file's latest deploy, the ledger's runs,
+  the sources gone quiet, failed runs. `test/e2e/dashboard.sh` asks every
+  query of a real Grafana 13.3.1 over a real Prometheus 3.5.0 scraping a
+  real lapilli serve. `/metrics` adds
+  `lapilli_serve_notifications_last_timestamp_seconds` and
+  `lapilli_serve_source_quiet_seconds`.
+- **Runbooks where teams keep them.** `--runbook-annotations` (the chart's
+  `serve.checkContent.runbookAnnotations`) names the annotations a runbook is
+  read from, the first a rule has: `runbook_url`, `runbook`, `playbook_url`
+  and `playbook` by default. A path in the rules' repository, with an anchor
+  or not (`docs/runbooks/disk.md#full`), is a runbook, shown as a path.
+
+#### Changed
+
+- The rule metrics (`lapilli_rule_firings` and the rest, from lapilli serve)
+  carry `team` when a team owns the rule. A query summing by `rule` and
+  `severity` reads as before; a rule's series changes when its team does.
+- The content check's `runbook_not_url` says "a runbook that isn't a link: an
+  http or https URL, or a path in a repository"; a path is no longer one.
+
 ## [0.28.1] - 2026-11-12
 
 A security release, after two reviews of 0.28.0 from an attacker's point
