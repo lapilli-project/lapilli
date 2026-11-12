@@ -376,3 +376,79 @@ func TestNOCDigest(t *testing.T) {
 		t.Errorf("a report's sections:\n%s", b.Text)
 	}
 }
+
+// The chart's dashboard reads only what /metrics gives, by the names it
+// gives them, and only the variables it defines; each panel and query has
+// an id of its own. test/e2e/dashboard.sh asks a real Grafana each query.
+func TestDashboardMetrics(t *testing.T) {
+	b, err := os.ReadFile("../../charts/lapilli/dashboards/lapilli.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d struct {
+		UID        string `json:"uid"`
+		Templating struct {
+			List []struct{ Name string } `json:"list"`
+		} `json:"templating"`
+		Panels []struct {
+			ID         int    `json:"id"`
+			Type       string `json:"type"`
+			Title      string `json:"title"`
+			Datasource struct{ UID string }
+			Targets    []struct {
+				Expr  string `json:"expr"`
+				RefID string `json:"refId"`
+			} `json:"targets"`
+		} `json:"panels"`
+	}
+	if err := json.Unmarshal(b, &d); err != nil {
+		t.Fatal(err)
+	}
+	vars := map[string]bool{}
+	for _, v := range d.Templating.List {
+		vars[v.Name] = true
+	}
+	for _, v := range []string{"datasource", "instance", "team", "severity", "critical"} {
+		if !vars[v] {
+			t.Errorf("no variable %s", v)
+		}
+	}
+	_, metrics, _ := get(t, nocServer(t).Handler(), "/metrics")
+	ids := map[int]bool{}
+	name := regexp.MustCompile(`\blapilli_[a-z_]+\b`)
+	variable := regexp.MustCompile(`\$\{?(\w+)`)
+	queries := 0
+	for _, p := range d.Panels {
+		if ids[p.ID] {
+			t.Errorf("%s: id %d twice", p.Title, p.ID)
+		}
+		ids[p.ID] = true
+		if p.Type == "row" {
+			continue
+		}
+		if p.Datasource.UID != "${datasource}" || len(p.Targets) == 0 {
+			t.Errorf("%s: data source %q, %d queries", p.Title, p.Datasource.UID, len(p.Targets))
+		}
+		refs := map[string]bool{}
+		for _, q := range p.Targets {
+			queries++
+			if refs[q.RefID] {
+				t.Errorf("%s: refId %s twice", p.Title, q.RefID)
+			}
+			refs[q.RefID] = true
+			for _, m := range name.FindAllString(q.Expr, -1) {
+				if !strings.Contains(metrics, "# TYPE "+m+" ") {
+					t.Errorf("%s: %s isn't in /metrics", p.Title, m)
+				}
+			}
+			for _, m := range variable.FindAllStringSubmatch(q.Expr, -1) {
+				if !vars[m[1]] {
+					t.Errorf("%s: $%s isn't a variable", p.Title, m[1])
+				}
+			}
+		}
+	}
+	if d.UID != "lapilli" || queries < 20 {
+		t.Errorf("uid %q, %d queries", d.UID, queries)
+	}
+}

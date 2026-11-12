@@ -156,6 +156,10 @@ serve:
     enabled: true
     severities: []      # the severities the team uses; any other is a problem
     scrapeInterval: ""  # for the range check; Prometheus's own, each job's, unless given
+    # The annotations a rule's runbook is read from, the first it has:
+    # runbook_url, runbook, playbook_url and playbook when empty. A path in
+    # the rules' repository, with an anchor or not, is a link too.
+    runbookAnnotations: []
   # Earlier versions of the rules in rules.configMaps, read from the git
   # repository they are kept in, so a first start's backfill replays each
   # day with that day's rules (docs/design/history.md). An init container
@@ -290,6 +294,18 @@ serve:
     # required with tracker.
     image: ""
     resources: {}
+  # When services and namespaces were deployed (docs/design/noc.md): a
+  # ConfigMap holding --deploys's file under key, and beside it the
+  # histories it names (what recipes/versions/argocd.sh or flux.sh write),
+  # mounted at /etc/lapilli/deploys/ and read again each run. A firing that
+  # starts during a deploy of what it is about (a label the deploy names),
+  # or within after of its end, is shown apart, and judged as ever. Off
+  # when the ConfigMap isn't named.
+  deploys:
+    configMap:
+      name: ""
+      key: deploys.yaml
+    after: ""   # 10m when empty; a day at most
   # On-call schedules read from the iCalendar feeds on-call tools export
   # (see the README's "Shifts from on-call schedules"): --on-call's file, the
   # key of a ConfigMap, and a Secret holding the feeds' URLs and tokens,

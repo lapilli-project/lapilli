@@ -378,9 +378,26 @@ as it does the chart's `lapilli.dev/image-digest` annotation. With
 empty it: the chart refuses another tag with its own digest, which would
 run its own image under another version's name.
 
+`serve.deploys` names a ConfigMap holding the file `--deploys` reads, and
+beside it the histories it names, what `recipes/versions/argocd.sh` or
+`flux.sh` write for an Application, a Kustomization or a HelmRelease: each
+deploy of the service or namespace its labels say. A firing that came during
+one, or within `after` (10m) of its end, is marked, judged as ever, and
+shown apart: a column and an order on the rules, a tile on the overview,
+the digest, `/metrics` and `/api/v1/summary`, with precision both ways.
+`serve.checkContent.runbookAnnotations` names the annotations a runbook is
+read from, the first a rule has.
+
 `serve.serviceMonitor.enabled` makes a ServiceMonitor, and
 `dashboard.enabled` a ConfigMap holding a Grafana dashboard for Grafana's
-sidecar.
+sidecar, of what an operations team measures its alerts by: critical
+firings that caught something, precision, re-fires and the whole weeks
+with one, firings during deploys and precision without them, what caught
+nothing by when it came, impact windows and incidents caught, caught only
+by noisy rules or missed, and the lead of their first alert, each rule's
+scorecard, and how long since each source last brought something. Its
+variables pick a team, severities, and the severities counted as critical.
+`test/e2e/dashboard.sh` asks each of its queries of a real Grafana.
 
 Webhook URLs and tokens are read from Secrets and never shown.
 See [values.yaml](https://github.com/lapilli-project/lapilli/blob/main/charts/lapilli/values.yaml)
