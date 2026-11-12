@@ -325,8 +325,11 @@ Agents, over MCP at /mcp:
                       who an agent must act for to replay a change to the
                       rules it proposes (the compare tool). Off by default:
                       it runs PromQL the agent writes, with lapilli's access
-                      to Prometheus. It needs roles (--editors or
-                      --admins). The tools that read are everyone's
+                      to Prometheus, and, for a rule kept in Loki (--loki),
+                      LogQL the agent writes, sent to Loki, or through
+                      Grafana's data source proxy, with lapilli's token. It
+                      needs roles (--editors or --admins). The tools that
+                      read are everyone's
   --mcp-propose editors|admins
                       who an agent must act for to propose a change to a
                       rule (the propose tool), kept as an agent's for a

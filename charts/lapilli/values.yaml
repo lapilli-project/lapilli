@@ -331,7 +331,8 @@ serve:
   # Agents reach /mcp and read what the pages show. Who an agent must act
   # for to replay a change to the rules it proposes: editors or admins. Off
   # when empty: it runs PromQL the agent writes, with lapilli's access to
-  # Prometheus. It needs roles.editors or roles.admins.
+  # Prometheus, and for a Loki's rules LogQL, with its access to Loki. It
+  # needs roles.editors or roles.admins.
   mcpCompare: ""
   # Who an agent must act for to propose a change to a rule over MCP, kept
   # as an agent's for a person to approve: editors or admins. Off when

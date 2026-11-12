@@ -1559,8 +1559,10 @@ approve in the UI. No tool approves or applies one.
 
 - **Access.** Agents come through the same sign-in proxy as the pages, and
   everyone gets the tools that read. `compare` runs PromQL the agent wrote
-  with Lapilli's access to Prometheus, so only those `--mcp-compare` names
-  get it, and one comparison runs at a time.
+  with Lapilli's access to Prometheus, and, for a rule kept in Loki, LogQL
+  the agent wrote, sent to the Loki (or through Grafana's data source
+  proxy) with Lapilli's token, so only those `--mcp-compare` names get it,
+  and one comparison runs at a time.
 - **Browsers.** Requests from web pages are refused: a browser sends an
   `Origin`, an agent doesn't. The one exception is a request from
   `--external-url`.

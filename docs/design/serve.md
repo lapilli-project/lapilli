@@ -420,7 +420,10 @@ pages and the API give too, less the files rules were read from.
 because it runs PromQL the agent wrote with Lapilli's access to Prometheus;
 and the flag is refused without `--editors` or `--admins`, without which
 whoever may change anything is an admin.
-That PromQL can learn, a count at a time, whatever that access can read.
+That PromQL can learn, a count at a time, whatever that access can read;
+so can the LogQL `compare` sends to Loki for a rule kept there (since
+0.28.0), with Lapilli's token, to the Loki or through Grafana's data source
+proxy.
 `--read-only` gives no one `compare`.
 
 A tool's panic is turned into its error, as `net/http` does a page's.

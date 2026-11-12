@@ -162,7 +162,8 @@ incidents written down, quiet windows kept, and comments. Links point under
 Agents reach `/mcp` (MCP) and read what the pages show. `serve.mcpCompare`
 (`editors` or `admins`) lets their agents replay a change to the rules they
 propose. It is off by default, since it runs PromQL the agent writes, with
-lapilli's access to Prometheus, and it needs `serve.roles`.
+lapilli's access to Prometheus, and for a Loki's rules LogQL, with lapilli's
+access to Loki, and it needs `serve.roles`.
 `serve.mcpPropose` lets their agents propose a change to a rule, for a
 person to approve; an agent never approves or applies one.
 

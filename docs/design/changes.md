@@ -263,7 +263,14 @@ alerts, so this is limited:
     named, nothing else. An Editor's changes a `for` or what a rule says;
     turning a rule off takes an Admin's: Grafana 13 answers a pause from
     an Editor as taken and leaves the rule running, which Lapilli finds
-    when it reads the rule back, and says.
+    when it reads the rule back, and says. Lapilli has no folder scope of
+    its own, as `--changes-in` is a ruler's (0.28.1's review): the token
+    is the scope. An Editor's token limited by folder permissions keeps a
+    stolen Lapilli to those folders' rules, but can't turn a rule off; an
+    Admin's turns rules off and reaches the whole organisation, folders,
+    data sources and users included. Give the Admin's only where turning
+    rules off is wanted, and otherwise an Editor's on the folders Lapilli
+    may change.
   - AWS: `aps:PutRuleGroupsNamespace` on the namespaces named;
     `cloudwatch:PutMetricAlarm`, `DeleteAlarms` and `DisableAlarmActions` on
     alarms with a name prefix the operator chooses, in the alarms' own
