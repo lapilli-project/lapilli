@@ -40,7 +40,7 @@ cleanup() {
     kubectl -n "$ns" describe pods -l app.kubernetes.io/name=lapilli || true
     kubectl -n "$ns" logs -l app.kubernetes.io/name=lapilli --tail=200 || true
     kubectl -n dex logs deploy/dex --tail=50 || true
-    tail -n 100 "$work/cpk.log" || true
+    grep -iE 'gateway|error|fail' "$work/cpk.log" | grep -v 'xDS stream' | tail -n 200 || true
     echo "::endgroup::"
   fi
   [ -z "$cpk" ] || kill "$cpk" 2>/dev/null || true
@@ -110,6 +110,7 @@ data:
       - {email: boss@example.com, hash: "$hash", username: boss, userID: "1", groups: [ops]}
       - {email: ed@example.com, hash: "$hash", username: ed, userID: "2"}
       - {email: viewer@example.com, hash: "$hash", username: viewer, userID: "3"}
+      - {email: stranger@example.com, hash: "$hash", username: stranger, userID: "4"}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -138,7 +139,7 @@ spec:
 EOF
 
 # A Gateway of cloud-provider-kind's class, which it makes.
-until_set 180 kubectl get gatewayclass cloud-provider-kind -o name >/dev/null
+until_set 480 kubectl get gatewayclass cloud-provider-kind -o name >/dev/null
 kubectl -n "$ns" apply -f - <<'EOF'
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
@@ -164,12 +165,17 @@ values=(
   --set "serve.signIn.oidc.issuer=$issuer" --set serve.signIn.oidc.clientId=lapilli
   --set serve.signIn.oidc.clientSecret.name=lapilli-oidc --set 'serve.signIn.oidc.scopes={email,profile,groups}'
   --set 'serve.roles.admins={group:ops}' --set 'serve.roles.editors={user:ed@example.com}'
+  --set 'serve.roles.viewers={viewer@example.com}'
 )
 helm upgrade --install lapilli charts/lapilli -n "$ns" --wait --timeout 5m "${values[@]}"
 
-lb=$(until_set 180 kubectl -n "$ns" get service lapilli -o 'jsonpath={.status.loadBalancer.ingress[0].ip}')
-dexip=$(until_set 180 kubectl -n dex get service dex -o 'jsonpath={.status.loadBalancer.ingress[0].ip}')
-gw=$(until_set 180 kubectl -n "$ns" get gateway web -o 'jsonpath={.status.addresses[0].value}')
+# cloud-provider-kind can take minutes to program a Gateway on a runner.
+kubectl -n "$ns" wait --for=condition=Programmed gateway/web --timeout=8m
+until_set 480 kubectl -n "$ns" get gateway kind-ingress-gateway -o name >/dev/null
+kubectl -n "$ns" wait --for=condition=Programmed gateway/kind-ingress-gateway --timeout=8m
+lb=$(until_set 480 kubectl -n "$ns" get service lapilli-ui -o 'jsonpath={.status.loadBalancer.ingress[0].ip}')
+dexip=$(until_set 480 kubectl -n dex get service dex -o 'jsonpath={.status.loadBalancer.ingress[0].ip}')
+gw=$(until_set 480 kubectl -n "$ns" get gateway web -o 'jsonpath={.status.addresses[0].value}')
 # The Ingress's address, as its status says, or as the Gateway
 # cloud-provider-kind makes for the namespace's Ingresses does.
 ingress_ip() {
@@ -178,26 +184,27 @@ ingress_ip() {
   [ -n "$ip" ] || ip=$(kubectl -n "$ns" get gateway kind-ingress-gateway -o 'jsonpath={.status.addresses[0].value}')
   printf '%s' "$ip"
 }
-ing=$(until_set 180 ingress_ip)
+ing=$(until_set 480 ingress_ip)
 echo "load balancer $lb, Gateway $gw, Ingress $ing, Dex $dexip"
 # The browser reaches each name at the address in front of it.
 CURL_EXTRA=(--connect-to "$host:80:$gw:80" --connect-to "$ihost:80:$ing:80" --connect-to "dex.dex.svc.cluster.local:5556:$dexip:5556")
 base=http://$host
 code() { browse "$work/none" -o /dev/null -w '%{http_code} %{redirect_url}' "$@"; }
-for _ in $(seq 60); do
-  [ "$(code "$base/healthz")" = "200 " ] && [ "$(code "http://$ihost/healthz")" = "200 " ] && break
+for _ in $(seq 100); do
+  [ "$(code "$base/healthz")" = "200 " ] && [ "$(code "http://$ihost/healthz")" = "200 " ] && [ "$(code "http://$lb/healthz")" = "200 " ] && break
   sleep 3
 done
 
 # The UI through each: the load balancer's address, the Ingress's host and
 # the Gateway's; a page sends the browser to sign in at --external-url.
-check "the load balancer: the health check" "$(code "http://$lb:8080/healthz")" '^200 $'
-check "the load balancer: a page sends the browser to sign in" "$(code "http://$lb:8080/rules")" "^303 $base/auth/login\?next=%2Frules$"
+check "the load balancer: the health check" "$(code "http://$lb/healthz")" '^200 $'
+check "the load balancer: a page sends the browser to sign in" "$(code "http://$lb/rules")" "^303 $base/auth/login\?next=%2Frules$"
 check "the load balancer: the metrics port isn't on it" "$(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://$lb:9091/metrics" || true)" '^000$'
+check "the release's own Service stays inside, every port on it" "$(kubectl -n "$ns" get service lapilli -o 'jsonpath={.spec.type} {.spec.ports[*].name}')" '^ClusterIP http metrics$'
 check "the Ingress: a page sends the browser to sign in" "$(code "http://$ihost/rules")" "^303 $base/auth/login\?next=%2Frules$"
 check "the Gateway: a page sends the browser to sign in" "$(code "$base/rules")" "^303 $base/auth/login\?next=%2Frules$"
 check "the Gateway: the API, not signed in" "$(code "$base/api/v1/me")" '^401 $'
-check "another host name is refused" "$(browse "$work/none" -o /dev/null -w '%{http_code}' -H 'Host: evil.example.com' "http://$lb:8080/rules")" '^421$'
+check "another host name is refused" "$(browse "$work/none" -o /dev/null -w '%{http_code}' -H 'Host: evil.example.com' "http://$lb/rules")" '^421$'
 
 # Signed in through Dex, by the Gateway.
 check "boss signs in, and comes back to the page" "$(signin "$work/boss" "$base" boss@example.com password)" "^200 $base/rules$"
@@ -208,13 +215,15 @@ written=$(browse "$work/ed" -X POST -H 'Content-Type: application/json' \
   -d '{"title": "written through the Gateway", "start": "2026-11-02T06:00:00Z"}' "$base/api/v1/incidents")
 check "ed writes an incident" "$written" '"by": ?"ed@example.com"'
 signin "$work/viewer" "$base" viewer@example.com password >/dev/null || fail=1
+signin "$work/stranger" "$base" stranger@example.com password >/dev/null || fail=1
+check "a stranger the provider signs in doesn't come in" "$(browse "$work/stranger" -o /dev/null -w '%{http_code}' "$base/api/v1/incidents")" '^403$'
 check "viewer may only look" "$(browse "$work/viewer" -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
   -d '{"title": "x", "start": "2026-11-02T06:00:00Z"}' "$base/api/v1/incidents")" '^403$'
 token=$(browse "$work/none" -u lapilli:lapilli-e2e-client-secret --data-urlencode grant_type=password \
   --data-urlencode username=ed@example.com --data-urlencode password=password --data-urlencode 'scope=openid email groups' \
   "$issuer/token" | sed -n 's/.*"id_token":"\([^"]*\)".*/\1/p')
 check "an ID token as a bearer token, through the load balancer" \
-  "$(curl -s -H "Authorization: Bearer $token" "http://$lb:8080/api/v1/me")" '"role":"editor"'
+  "$(curl -s -H "Authorization: Bearer $token" "http://$lb/api/v1/me")" '"role":"editor"'
 cp "$work/boss" "$work/boss-copy"
 check "signing out" "$(browse "$work/boss" -o /dev/null -w '%{http_code} %{redirect_url}' -X POST "$base/auth/logout")" "^303 $base/auth/signed-out$"
 check "a copy of the cookie after signing out" "$(browse "$work/boss-copy" -o /dev/null -w '%{http_code}' "$base/api/v1/me")" '^401$'
@@ -242,6 +251,6 @@ if [ -n "$kept" ]; then echo "ok: a pod in the cluster is kept out"; else
 fi
 check "with the NetworkPolicy, the Gateway is let in" "$(browse "$work/ed" "$base/api/v1/me")" '"role":"editor"'
 check "and the Ingress" "$(code "http://$ihost/healthz")" '^200 $'
-check "and the load balancer" "$(code "http://$lb:8080/healthz")" '^200 $'
+check "and the load balancer" "$(code "http://$lb/healthz")" '^200 $'
 check "and the pod is ready, its probes let in" "$(kubectl -n "$ns" get pods -l app.kubernetes.io/name=lapilli -o 'jsonpath={.items[0].status.conditions[?(@.type=="Ready")].status}')" '^True$'
 exit $fail

@@ -61,19 +61,21 @@ staticPasswords:
   - {email: boss@example.com, hash: "$hash", username: boss, userID: "1", groups: [ops]}
   - {email: ed@example.com, hash: "$hash", username: ed, userID: "2"}
   - {email: viewer@example.com, hash: "$hash", username: viewer, userID: "3"}
+  - {email: stranger@example.com, hash: "$hash", username: stranger, userID: "4"}
 EOF
 chmod 644 "$work/dex.yaml"
 docker run -d --name "$p-dex" -p "127.0.0.1:$dexport:5556" -v "$work/dex.yaml:/etc/dex/config.yaml:ro" "$dex" dex serve /etc/dex/config.yaml >/dev/null
 for _ in $(seq 60); do curl -fs "$issuer/.well-known/openid-configuration" >/dev/null && break; sleep 1; done
 
 printf 'lapilli-e2e-client-secret\n' >"$work/secret"
+head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$work/session-key"
 printf 'firings-token-0123456789\n' >"$work/firings"
 serve() {
   "$work/lapilli" serve --ledger "$work/ledger" --listen "127.0.0.1:$port" \
     --incidents-listen "127.0.0.1:$((port + 1))" --firings-token-file "$work/firings" \
     --oidc-issuer "$issuer" --oidc-client-id lapilli --oidc-client-secret-file "$work/secret" \
-    --oidc-scopes email,profile,groups --external-url "$base" \
-    --admins group:ops --editors user:ed@example.com >>"$work/serve.log" 2>&1 &
+    --oidc-scopes email,profile,groups --external-url "$base" --session-key-file "$work/session-key" \
+    --admins group:ops --editors user:ed@example.com --viewers 'viewer@example.com' >>"$work/serve.log" 2>&1 &
   serving=$!
   for _ in $(seq 60); do
     # This one's, not another listening there.
@@ -114,6 +116,10 @@ check "viewer is a viewer" "$(browse "$work/viewer" "$base/api/v1/me")" '"role":
 check "viewer may not write" "$(browse "$work/viewer" -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
   -d '{"title": "x", "start": "2026-11-02T06:00:00Z"}' "$base/api/v1/incidents")" '^403$'
 
+# Someone the provider signs in, whom no role names, doesn't come in.
+signin "$work/stranger" "$base" stranger@example.com password >/dev/null || fail=1
+check "a stranger signed in by the provider is refused" "$(browse "$work/stranger" -o /dev/null -w '%{http_code}' "$base/api/v1/incidents")" '^403$'
+
 # A callback replayed, cookie and all, is refused.
 back=$(callback_url "$work/replay" "$base" ed@example.com password) || fail=1
 cp "$work/replay" "$work/replay-copy"
@@ -133,9 +139,22 @@ check "an ID token as a bearer token" "$(curl -s -H "Authorization: Bearer $toke
 mcp=$(curl -s -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"e2e","version":"1"}}}' "$base/mcp")
 check "an agent over MCP, with it" "$mcp" '"serverInfo"'
-check "a token with a byte changed" "$(code -H "Authorization: Bearer ${token%?}x" "$base/api/v1/me")" '^401$'
+# A character in the middle of the claims changed: the last one carries
+# bits a decoder ignores, so changing it may leave the same signature.
+claims=${token#*.}
+claims=${claims%%.*}
+mid=$((${#claims} / 2))
+case ${claims:$mid:1} in A) swap=B ;; *) swap=A ;; esac
+tampered=${token%%.*}.${claims:0:$mid}$swap${claims:$((mid + 1))}.${token##*.}
+check "a token with a character of its claims changed" "$(code -H "Authorization: Bearer $tampered" "$base/api/v1/me")" '^401$'
 
-# boss signs out: the session ends, and a copy of its cookie with it.
+# boss signs out: the session ends, a copy of its cookie with it, and a
+# token issued before.
+boss_token=$(curl -s -u lapilli:lapilli-e2e-client-secret \
+  --data-urlencode grant_type=password --data-urlencode username=boss@example.com --data-urlencode password=password \
+  --data-urlencode 'scope=openid email groups' "$issuer/token" | sed -n 's/.*"id_token":"\([^"]*\)".*/\1/p')
+check "boss's token, before signing out" "$(code -H "Authorization: Bearer $boss_token" "$base/api/v1/me")" '^200$'
+sleep 1
 cp "$work/boss" "$work/boss-copy"
 check "signing out from another site is refused" \
   "$(browse "$work/boss" -o /dev/null -w '%{http_code}' -X POST -H 'Sec-Fetch-Site: cross-site' "$base/auth/logout")" '^403$'
@@ -149,6 +168,7 @@ kill "$serving"
 wait "$serving" 2>/dev/null || true
 serve
 check "after a restart, the copy is still refused" "$(browse "$work/boss-copy" -o /dev/null -w '%{http_code}' "$base/api/v1/me")" '^401$'
-check "and ed is still signed in" "$(browse "$work/ed" "$base/api/v1/me")" '"user":"ed@example.com"'
+check "and ed is still signed in, the key in its file" "$(browse "$work/ed" "$base/api/v1/me")" '"user":"ed@example.com"'
+check "a token from before boss signed out is refused" "$(code -H "Authorization: Bearer $boss_token" "$base/api/v1/me")" '^401$'
 if grep -q lapilli-e2e-client-secret "$work/serve.log"; then echo "FAILED: the client secret is in the log"; fail=1; fi
 exit $fail
