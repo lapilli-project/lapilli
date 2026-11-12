@@ -40,7 +40,7 @@ find_pr() {
   b=$(printf '%s' "$1" | jq -sRr @uri)
   t=$(printf '%s' "$BASE" | jq -sRr @uri)
   code=$(host GET "$api/projects/$project/merge_requests?state=opened&source_branch=$b&target_branch=$t")
-  case $code in 2??) ;; *) say "GitLab didn't list merge requests ($code): $(head -c 300 "$out")"; return 1 ;; esac
+  case $code in 2??) ;; *) say "GitLab didn't list merge requests ($code): $(shown "$out")"; return 1 ;; esac
   jq -r --arg b "$1" --arg base "$BASE" --arg me "$me" '[.[] | select(.source_branch == $b and .target_branch == $base
     and .source_project_id != null and .source_project_id == .target_project_id
     and ($me == "" or (.author.id // "" | tostring) == $me))][0].web_url // ""' "$out"
@@ -49,7 +49,7 @@ find_pr() {
 create_pr() {
   jq --arg head "$1" --arg base "$BASE" '{title, description: .body, source_branch: $head, target_branch: $base, remove_source_branch: true}' "$2" >"$tmp/body"
   code=$(host POST "$api/projects/$project/merge_requests" "$tmp/body")
-  case $code in 2??) ;; *) say "GitLab didn't open a merge request ($code): $(head -c 300 "$out")"; return 1 ;; esac
+  case $code in 2??) ;; *) say "GitLab didn't open a merge request ($code): $(shown "$out")"; return 1 ;; esac
   jq -r '.web_url // ""' "$out"
 }
 

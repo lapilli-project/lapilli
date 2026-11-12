@@ -48,7 +48,7 @@ find_pr() {
   ref=$(printf 'refs/heads/%s' "$1" | jq -sRr @uri)
   into=$(printf 'refs/heads/%s' "$BASE" | jq -sRr @uri)
   code=$(host GET "$base_api/pullrequests?searchCriteria.sourceRefName=$ref&searchCriteria.targetRefName=$into&searchCriteria.status=active&api-version=7.1")
-  case $code in 2??) ;; *) say "Azure DevOps didn't list pull requests ($code): $(head -c 300 "$out")"; return 1 ;; esac
+  case $code in 2??) ;; *) say "Azure DevOps didn't list pull requests ($code): $(shown "$out")"; return 1 ;; esac
   n=$(jq -r --arg src "refs/heads/$1" --arg into "refs/heads/$BASE" --arg me "$me" '[.value[] | select(.sourceRefName == $src
     and .targetRefName == $into and .forkSource == null and ($me == "" or .createdBy.id == $me))][0].pullRequestId // ""' "$out")
   case $n in '') ;; *[!0-9]*) say "Azure DevOps gave a pull request with no number"; return 1 ;; *) page "$n" ;; esac
@@ -58,7 +58,7 @@ create_pr() {
   # Azure takes a description of 4,000 characters at most.
   jq --arg head "refs/heads/$1" --arg base "refs/heads/$BASE" '{title, description: .body[0:3900], sourceRefName: $head, targetRefName: $base}' "$2" >"$tmp/body"
   code=$(host POST "$base_api/pullrequests?api-version=7.1" "$tmp/body")
-  case $code in 2??) ;; *) say "Azure DevOps didn't open a pull request ($code): $(head -c 300 "$out")"; return 1 ;; esac
+  case $code in 2??) ;; *) say "Azure DevOps didn't open a pull request ($code): $(shown "$out")"; return 1 ;; esac
   n=$(jq -r '.pullRequestId // ""' "$out")
   case $n in '' | *[!0-9]*) say "Azure DevOps gave a pull request with no number"; return 1 ;; esac
   page "$n"

@@ -5,6 +5,8 @@ package serve
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -256,6 +258,9 @@ type Server struct {
 	// open says that, with no roles, everyone is an admin: it listens on
 	// loopback alone, or EveryoneAdmin says so.
 	open bool
+	// ledgerID names the ledger, made at random when it is first opened:
+	// the change recipes' branches carry it.
+	ledgerID string
 
 	// onCall is how each on-call schedule was last read.
 	onCall onCallState
@@ -385,6 +390,10 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		// writes a link for each: a few a second, a first run's in a burst.
 		tasksRate: &limiter{rate: 5, burst: 100}, tasksBusy: make(chan struct{}, 1), changes: newChanges(ctx, l)}
 	s.status.runs, s.status.notices, s.status.refused = map[string]int{}, map[string]int{}, map[string]int{}
+	if s.ledgerID, err = ledgerID(ctx, l); err != nil {
+		l.Close()
+		return nil, fmt.Errorf("--ledger: %w", err)
+	}
 	s.open = cfg.EveryoneAdmin || LoopbackOnly(cfg.Listen)
 	s.logWho()
 	if !known(s.cfg.Lang) {
@@ -402,6 +411,21 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 	}
 	l.TellTo(s.dests())
 	return s, nil
+}
+
+// ledgerID is the ledger's name, twelve hex digits made at random the first
+// time it is asked for, and kept.
+func ledgerID(ctx context.Context, l *ledger.Ledger) (string, error) {
+	id, err := l.Meta(ctx, "ledger-id")
+	if err != nil || id != "" {
+		return id, err
+	}
+	b := make([]byte, 6)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	id = hex.EncodeToString(b)
+	return id, l.SetMeta(ctx, "ledger-id", id)
 }
 
 // requestAuth authenticates a ruler's requests with a cloud's credentials;

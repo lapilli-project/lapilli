@@ -213,7 +213,8 @@ func TestChangeByPullRequest(t *testing.T) {
 	code, body := recipe(t, port, http.MethodGet, "/api/v1/changes", changesToken, nil)
 	var got struct{ Changes []handedOut }
 	if json.Unmarshal([]byte(body), &got); code != 200 || len(got.Changes) != 1 || got.Changes[0].Document != p.Document ||
-		got.Changes[0].DocHash != p.DocHash || got.Changes[0].Branch != "lapilli/proposal-"+itoa(id) || !strings.Contains(got.Changes[0].Body, "Backtest") {
+		got.Changes[0].DocHash != p.DocHash || got.Changes[0].Ledger != s.ledgerID ||
+		got.Changes[0].Branch != "lapilli/"+s.ledgerID+"/proposal-"+itoa(id) || !strings.Contains(got.Changes[0].Body, "Backtest") {
 		t.Fatalf("handed out: %d %s", code, body)
 	}
 	if code, body := recipe(t, port, http.MethodPatch, "/api/v1/changes/"+itoa(id), changesToken, map[string]string{"state": "opened", "link": "https://git.example/shop/pull/7"}); code != 200 {

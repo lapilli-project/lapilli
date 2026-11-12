@@ -248,7 +248,14 @@ alerts, so this is limited:
   `RULES_PATHS`, and never one a CI system runs (`.github/`,
   `.gitlab-ci.yml`, `azure-pipelines.yml` and the like), wherever it is. A
   workflow pushed on Lapilli's branch would run with the repository's
-  secrets before anyone reviewed it.
+  secrets before anyone reviewed it. Since 0.28.1, after a review found a
+  script, a Makefile, a GitLab `include: local:` file or a build's
+  configuration under `RULES_PATHS` written and pushed, executable still:
+  only a rule file, as git keeps it (mode 100644, `*.yml`, `*.yaml`,
+  `*.json` or `*.rules`) and by what it holds (the keys at its top a rule
+  file's alone), the change Lapilli wrote too; never pushed over a branch
+  there already, which a reviewed pull request may be from; at most
+  `MAX_CHANGES` branches a run (10).
 - **API: one credential a target, scoped.** Each in its own file
   (`--changes-grafana-token-file`, `--changes-aws-role`, and so on), given
   only what changing rules needs:

@@ -312,12 +312,12 @@ func TestChangeRecipes(t *testing.T) {
 				t.Fatalf("pull requests opened: %v", host.opened)
 			}
 			pr, _ := json.Marshal(host.opened[0])
-			for _, want := range []string{"lapilli/proposal-", "Lapilli: a new for, Errors", "Backtest from"} {
+			for _, want := range []string{"lapilli/" + s.ledgerID + "/proposal-" + itoa(id), "Lapilli: a new for, Errors", "Backtest from"} {
 				if !strings.Contains(string(pr), want) {
 					t.Errorf("the pull request has no %q: %s", want, pr)
 				}
 			}
-			if got := gitIn(t, env, bare, "show", "lapilli/proposal-"+itoa(id)+":alerts/shop.yaml"); got != p.Document {
+			if got := gitIn(t, env, bare, "show", "lapilli/"+s.ledgerID+"/proposal-"+itoa(id)+":alerts/shop.yaml"); got != p.Document {
 				t.Errorf("the branch's file:\n%s\nwant:\n%s", got, p.Document)
 			}
 			if got := gitIn(t, env, bare, "show", "main:alerts/shop.yaml"); got != ruleFile {
@@ -403,7 +403,7 @@ func TestChangeRecipeTakesOnlyItsOwn(t *testing.T) {
 				hs := httptest.NewServer(host)
 				defer hs.Close()
 				host.url = hs.URL
-				branch := "lapilli/proposal-" + itoa(id)
+				branch := "lapilli/" + s.ledgerID + "/proposal-" + itoa(id)
 				host.listed = []any{prListed(c.kind, hs.URL, 99, branch, "fork"), prListed(c.kind, hs.URL, 98, branch, "another base"),
 					prListed(c.kind, hs.URL, 97, branch, "someone else")}
 				want := c.link(hs.URL)
@@ -461,7 +461,7 @@ func TestChangeRecipeOpenAlready(t *testing.T) {
 				hs := httptest.NewServer(host)
 				defer hs.Close()
 				host.url = hs.URL
-				branch := "lapilli/proposal-" + itoa(id)
+				branch := "lapilli/" + s.ledgerID + "/proposal-" + itoa(id)
 				// Its own, from the run that stopped; or someone else's.
 				n, which := 8, "its own"
 				if !anonymous {
@@ -506,8 +506,8 @@ func TestChangeRecipeOnlyRulesPaths(t *testing.T) {
 		{"a workflow", "alerts", workflow, "under RULES_PATHS"},
 		{"a script", "alerts", script, "under RULES_PATHS"},
 		{"a workflow under RULES_PATHS", ". .github alerts", workflow, "RULES_PATHS .:"},
-		{"a workflow where it is named", ".github alerts", workflow, "under RULES_PATHS"},
-		{"GitLab's CI under RULES_PATHS", "alerts", workflow + "# here too\n", "under RULES_PATHS"},
+		{"a workflow where it is named", ".github alerts", workflow, "RULES_PATHS .github: it is what a CI system runs"},
+		{"GitLab's CI under RULES_PATHS", "alerts", workflow + "# here too\n", "is not one a change is written to"},
 		{"a path out of the repository", "../elsewhere", ruleFile, "RULES_PATHS ../elsewhere:"},
 		{"an absolute path", "/etc", ruleFile, "RULES_PATHS /etc:"},
 		{"none", " ", ruleFile, "RULES_PATHS: want"},

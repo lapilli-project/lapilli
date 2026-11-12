@@ -27,13 +27,15 @@ Each also needs:
   credentials in it is refused, as `ps` would show them.
 - `RULES_PATHS`, where in the repository the rules are: directories or
   files, space-separated (`alerts`, `rules/shop.yaml`). A change is written
-  only to a file under one of them, and never to one a CI system runs
-  (`.github/`, `.gitlab-ci.yml`, `azure-pipelines.yml`, `Jenkinsfile` and
-  the like), wherever it is. What Lapilli sends isn't trusted to name the
-  file: a Lapilli someone took over could otherwise push a workflow, which
-  a push runs with the repository's secrets before anyone reviews it.
+  only to a rule file under one of them (below), and `RULES_PATHS` can't
+  name what a CI system runs. What Lapilli sends isn't trusted to name the
+  file, or to be rules: a Lapilli someone took over could otherwise push a
+  workflow, a script or a build's configuration, which a push runs with
+  the repository's secrets before anyone reviews it.
 - `BASE`, the branch pull requests go into (default `main`); `GIT_NAME` and
   `GIT_EMAIL` for the commits (default `Lapilli`, `lapilli@localhost`).
+- `MAX_CHANGES`, the most branches a run pushes (default 10): the changes
+  past it wait for the next run, which the run says.
 
 They need `sh`, `git`, `curl` and `jq`, and run every few minutes:
 
@@ -53,12 +55,33 @@ What each run does:
    it from then.
 2. Finds the file the change was made against: the tracked file under
    `RULES_PATHS` whose sha256 is the hash of the document Lapilli read.
-   Links are passed over.
+   Links are passed over. It must be a rule file, and so must the change
+   Lapilli wrote, or nothing is written and Lapilli is told why:
+   - a regular file, mode 100644 (never one that runs), named `*.yml`,
+     `*.yaml`, `*.json` or `*.rules`;
+   - not what a CI system or a tool a push sets off runs (`.github/`,
+     `.gitlab-ci.yml`, `azure-pipelines.yml`, `Jenkinsfile`,
+     `cloudbuild.yaml`, `buildspec.yml`, `.tekton/`, `Makefile` and the
+     like), in any letter case, wherever it is;
+   - holding, by the keys at the top of each document, a Prometheus rule
+     file (`groups`, a list, and a ruler's `namespace`), a Grafana alerting
+     provisioning file, a `PrometheusRule` (or Google Cloud's `Rules`), or a
+     `ConfigMap`: what Lapilli edits, and no key a CI system's file needs.
+     YAML that can be read in more than one way (a quoted, flow, merged,
+     anchored or tagged key at the top, a directive, a key twice, a tab
+     leading a line, a line break other than LF and CRLF) is refused.
 3. Writes the change Lapilli wrote into it, commits it on a branch of
-   Lapilli's own, `lapilli/proposal-ID` (pushed again, with `--force`, if a
-   run stopped half way), and opens a pull request with the evidence as its
-   description, or finds the one it opened already: from the repository
-   itself, never a fork, into `BASE`, opened by the account the token is.
+   Lapilli's own, `lapilli/LEDGER/proposal-ID`, LEDGER the ledger's name
+   (`lapilli/proposal-ID` from a Lapilli before 0.28.1, which gives none),
+   and opens a pull request with the evidence as its description, or finds
+   the one it opened already: from the repository itself, never a fork,
+   into `BASE`, opened by the account the token is. A branch is pushed
+   only where there is none, never over one, which a pull request people
+   reviewed, approved or set to merge may be from: one holding this very
+   change is a run's that stopped, and its pull request is found or
+   opened; one holding another change is left as it is, and Lapilli is
+   told the change failed, and why. A `lapilli/proposal-ID` a recipe before
+   0.28.1 pushed is taken when it holds this change.
    A pull request from a fork with the same branch name, into another
    branch, or opened by someone else is never taken as Lapilli's. When the
    host can't say who the token is, none is: the run opens its own. When
@@ -79,7 +102,10 @@ is in git: the file Lapilli read isn't a file in the repository.
 ## Safety
 
 - Tokens are read from files and given to `curl` on stdin, never on a
-  command line.
+  command line. An http or https `CLONE` with a user in it is refused, a
+  token alone as the user (`https://TOKEN@host/...`) too.
+- What Lapilli or the host answers is shown as JSON, so no escape sequence
+  reaches a terminal or a CI log.
 - Nothing a host or Lapilli gives is followed: a pull request is asked
   about by its number, checked to be one, at the API given; `curl` follows
   no redirects and speaks only HTTP and HTTPS.
