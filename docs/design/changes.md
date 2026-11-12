@@ -251,11 +251,14 @@ alerts, so this is limited:
   secrets before anyone reviewed it. Since 0.28.1, after a review found a
   script, a Makefile, a GitLab `include: local:` file or a build's
   configuration under `RULES_PATHS` written and pushed, executable still:
-  only a rule file, as git keeps it (mode 100644, `*.yml`, `*.yaml`,
-  `*.json` or `*.rules`) and by what it holds (the keys at its top a rule
-  file's alone), the change Lapilli wrote too; never pushed over a branch
-  there already, which a reviewed pull request may be from; at most
-  `MAX_CHANGES` branches a run (10).
+  only a file of rules, as git keeps it (mode 100644, `*.yml`, `*.yaml`,
+  `*.json` or `*.rules`) and by what it holds, each document read as YAML
+  reads it; in it, only the rules, each other document and line as it was
+  (a second review found a ClusterRoleBinding indented after a
+  PrometheusRule, a ConfigMap of rules rewritten as `aws-auth`, and a
+  Grafana file's contact points re-pointed, each taken for rules by their
+  shape); never pushed over a branch there already, which a reviewed pull
+  request may be from; at most `MAX_CHANGES` branches a run (10).
 - **API: one credential a target, scoped.** Each in its own file
   (`--changes-grafana-token-file`, `--changes-aws-role`, and so on), given
   only what changing rules needs:

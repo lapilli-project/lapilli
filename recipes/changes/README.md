@@ -55,21 +55,34 @@ What each run does:
    it from then.
 2. Finds the file the change was made against: the tracked file under
    `RULES_PATHS` whose sha256 is the hash of the document Lapilli read.
-   Links are passed over. It must be a rule file, and so must the change
-   Lapilli wrote, or nothing is written and Lapilli is told why:
+   Links are passed over. It must be a file of alert rules, and the change
+   Lapilli wrote may change only its rules, or nothing is written and
+   Lapilli is told why:
    - a regular file, mode 100644 (never one that runs), named `*.yml`,
      `*.yaml`, `*.json` or `*.rules`;
    - not what a CI system or a tool a push sets off runs (`.github/`,
      `.gitlab-ci.yml`, `azure-pipelines.yml`, `Jenkinsfile`,
      `cloudbuild.yaml`, `buildspec.yml`, `.tekton/`, `Makefile` and the
      like), in any letter case, wherever it is;
-   - holding, by the keys at the top of each document, a Prometheus rule
-     file (`groups`, a list, and a ruler's `namespace`), a Grafana alerting
-     provisioning file, a `PrometheusRule` (or Google Cloud's `Rules`), or a
-     `ConfigMap`: what Lapilli edits, and no key a CI system's file needs.
-     YAML that can be read in more than one way (a quoted, flow, merged,
-     anchored or tagged key at the top, a directive, a key twice, a tab
-     leading a line, a line break other than LF and CRLF) is refused.
+   - one document of it at least alert rules, by the keys at its top: a
+     Prometheus rule file (`groups`, a list, and a ruler's `namespace`), a
+     Grafana alerting provisioning file, a `PrometheusRule` (or Google
+     Cloud's `Rules`), or a `ConfigMap`; its other documents (a
+     `ServiceMonitor`, a `Deployment`) may be anything;
+   - each of its documents read here as YAML reads it: a document indented
+     as a whole, a key at the top quoted, in braces, merged, anchored,
+     tagged or twice, a value at the top quoted or in brackets over more
+     than one line, a directive, a marker followed by more than a comment,
+     a tab leading a line, a line break other than LF and CRLF: refused;
+   - the change, document by document, as many as there were, each as it
+     was, or, alert rules in both, the same but for its rules: a rule
+     file's `groups`, a `PrometheusRule`'s `spec`, or a `ConfigMap`'s
+     entries, each changed one written as a literal block (`|`) and a
+     file of alert rules alone, before and after. What a document is (its
+     kind, `apiVersion`, name and namespace), its other keys and what they
+     hold (a Grafana file's contact points and policies), and a
+     `ConfigMap`'s other entries never change. A byte order mark at the
+     start is passed over.
 3. Writes the change Lapilli wrote into it, commits it on a branch of
    Lapilli's own, `lapilli/LEDGER/proposal-ID`, LEDGER the ledger's name
    (`lapilli/proposal-ID` from a Lapilli before 0.28.1, which gives none),
