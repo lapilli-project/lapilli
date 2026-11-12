@@ -1,21 +1,48 @@
+{{- include "lapilli.defaults" . }}
 {{- if eq .Values.mode "serve" }}
 lapilli serve is replaying the last {{ .Values.serve.backfill }} into its ledger; the UI fills in when that is done.
+{{- $s := .Values.serve }}
+{{- with include "lapilli.externalURL" . }}
+
+  open {{ . }}
+{{- else }}
 
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "lapilli.fullname" . }} {{ .Values.serve.port }}
   open http://localhost:{{ .Values.serve.port }}
+{{- end }}
+{{- if eq $s.service.type "LoadBalancer" }}
 
-It has no sign-in of its own: keep the Service inside the cluster, or put it
-behind a proxy that signs people in and set serve.userHeader.
-{{- $s := .Values.serve }}
+The UI's LoadBalancer's address is in
+  kubectl -n {{ .Release.Namespace }} get service {{ include "lapilli.fullname" . }}-ui
+{{- end }}
+{{- if $s.signIn.oidc.issuer }}
+
+People sign in with {{ $s.signIn.oidc.issuer }}; register {{ include "lapilli.externalURL" . | trimSuffix "/" }}/auth/callback as the client's redirect URI.
+{{- if $s.networkPolicy.egress.enabled }}
+serve.networkPolicy.egress must let lapilli reach the provider (its configuration, keys and token endpoint).
+{{- end }}
+{{- else if $s.signIn.proxyJWT.kind }}
+
+Who people are comes from the header {{ $s.signIn.proxyJWT.kind }} signs; a request without it gets 401.
+{{- else if $s.userHeader }}
+
+Who people are comes from the proxy's {{ $s.userHeader }} header.
+{{- else }}
+
+It signs no one in: keep the Service inside the cluster, or sign people in
+(serve.signIn.oidc, serve.signIn.proxyJWT, or serve.userHeader behind a proxy).
+{{- end }}
 {{- if $s.readOnly }}
 It is read-only (serve.readOnly): no one changes anything through the UI or the API.
 {{- else if or $s.roles.editors $s.roles.admins }}
-Those serve.roles names, as the proxy names them, change what their role allows; everyone else may only look.
+Those serve.roles names, as the sign-in names them, change what their role allows; {{ if or $s.signIn.oidc.issuer $s.signIn.proxyJWT.kind $s.roles.viewers }}those it doesn't name don't come in{{ else }}everyone else may only look{{ end }}.
 {{- else if $s.everyoneAdmin }}
 With serve.everyoneAdmin, everyone who reaches the UI or the API changes anything, as an admin.
+{{- else if or $s.signIn.oidc.issuer $s.signIn.proxyJWT.kind }}
+Those serve.roles.viewers names may look; no one changes anything until serve.roles names editors or admins.
 {{- else }}
 With no serve.roles, everyone may only look: give roles behind a sign-in
-proxy (serve.userHeader, serve.roles), or set serve.everyoneAdmin.
+(serve.signIn or serve.userHeader, and serve.roles), or set serve.everyoneAdmin.
 {{- end }}
 Prometheus can scrape /metrics{{ if not .Values.serve.serviceMonitor.enabled }} (serve.serviceMonitor.enabled makes a ServiceMonitor){{ end }}.
 {{- if .Values.serve.changes.enabled }}

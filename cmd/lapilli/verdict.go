@@ -403,7 +403,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.lokiLoaded = true
 			continue
 		}
-		if serve != nil && (name == "--read-only" || name == "--notify-slack" || name == "--changes" || name == "--everyone-admin") {
+		if serve != nil && (name == "--read-only" || name == "--notify-slack" || name == "--changes" || name == "--everyone-admin" || name == "--oidc-bearer") {
 			// On by itself; =false turns it off, as --check-content=false does.
 			on := true
 			if hasVal {

@@ -76,6 +76,7 @@ nav.pages { display: flex; flex-wrap: wrap; gap: .15rem .2rem; font-size: 1rem; 
 .pages a[aria-current] { color: var(--ink); font-weight: 600; background: var(--accent-wash); }
 main { max-width: 1132px; margin: 0 auto; padding: 1.8rem 16px 2rem; }
 footer { max-width: 1132px; margin: 0 auto; padding: 1rem 16px 2rem; font-size: .9rem; color: var(--dim); border-top: 1px solid var(--line); }
+footer form.signout { display: inline; margin-left: .75rem; }
 a { color: var(--accent); text-underline-offset: 3px; text-decoration-color: var(--line-ui); }
 a:hover { text-decoration-color: currentColor; }
 h1 { font: 500 2.25rem/1.2 var(--sans); margin: 0 0 .6rem; letter-spacing: -.01em; overflow-wrap: anywhere; }

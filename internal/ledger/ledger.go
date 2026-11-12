@@ -393,6 +393,20 @@ func (l *Ledger) SetMeta(ctx context.Context, key, value string) error {
 	return l.write(ctx, func(tx *txn) error { return setMeta(ctx, tx, "x."+key, value) })
 }
 
+// UpdateMeta changes a value kept for lapilli serve in one transaction: f
+// is given the value the ledger holds, so two processes sharing a ledger
+// merge what they keep rather than write over each other. It changes
+// nothing a page shows.
+func (l *Ledger) UpdateMeta(ctx context.Context, key string, f func(old string) string) error {
+	return l.writeAside(ctx, func(tx *txn) error {
+		old, err := l.meta(ctx, tx, "x."+key)
+		if err != nil {
+			return err
+		}
+		return setMeta(ctx, tx, "x."+key, f(old))
+	})
+}
+
 // SetSwitch keeps a switch a person turned for lapilli serve, and notes in
 // the changes who turned it which way: what says so.
 func (l *Ledger) SetSwitch(ctx context.Context, key string, on bool, by, what string) error {

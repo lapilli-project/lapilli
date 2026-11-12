@@ -1,0 +1,40 @@
+{{- include "lapilli.defaults" . }}
+{{- $s := .Values.serve }}
+{{- if and (eq .Values.mode "serve") $s.ingress.enabled }}
+{{- $i := $s.ingress }}
+# The UI through an ingress controller. With serve.networkPolicy, from must
+# let the controller's pods in.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "lapilli.fullname" . }}
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+  {{- with $i.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $i.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- with $i.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range ($i.hosts | default (list "")) }}
+    - http:
+        paths:
+          - path: {{ $i.path | default "/" }}
+            pathType: {{ $i.pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ include "lapilli.fullname" $ }}
+                port:
+                  name: http
+      {{- with . }}
+      host: {{ . | quote }}
+      {{- end }}
+    {{- end }}
+{{- end }}

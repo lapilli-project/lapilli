@@ -223,12 +223,69 @@ serve:
         ephemeral-storage: 16Mi
       limits:
         ephemeral-storage: 256Mi
-  # The UI has no sign-in of its own, and the Service is a ClusterIP: reach
-  # it with kubectl port-forward, or put it behind a proxy that signs people
-  # in (oauth2-proxy, an ingress's or a cloud's) and name the header that
-  # proxy puts the person in, such as X-Forwarded-Email, so changes are
-  # recorded under it. Set it only when the proxy strips it from callers.
+  # Who people are. By default no one signs in, and the Service is a
+  # ClusterIP: reach it with kubectl port-forward. To serve it at a URL
+  # people open (service, ingress or httpRoute below), sign them in, one
+  # way of three: signIn.oidc, lapilli's own sign-in, as Grafana and Argo
+  # CD have; signIn.proxyJWT, the signed header of a sign-in in front (a
+  # cloud's identity-aware proxy, a load balancer's sign-in, oauth2-proxy);
+  # or userHeader, the plain header a proxy that signs people in (and
+  # strips it from callers) puts the person in, such as X-Forwarded-Email.
+  # Changes are recorded under the name it gives.
   userHeader: ""
+  # lapilli's own sign-in (docs/design/signin.md). With it, every page and
+  # API call but the health checks needs someone signed in, and only those
+  # roles name come in (roles.viewers, editors, admins): an identity
+  # provider signs in whoever it knows, which for a public one (Google's
+  # for any account, GitLab.com, GitHub through Dex, a multi-tenant Entra
+  # ID app) is anyone.
+  signIn:
+    # OpenID Connect: any provider (Google, Microsoft Entra ID, Okta,
+    # Keycloak, Dex, AWS Cognito, OCI IAM identity domains, GitLab...).
+    # Register lapilli as a client whose redirect URI is externalURL's
+    # /auth/callback (externalURL is worked out from ingress or httpRoute
+    # when not given). An API client or an agent sends an ID token the
+    # provider gave this client as a bearer token.
+    oidc:
+      issuer: ""      # https://accounts.google.com, https://login.microsoftonline.com/TENANT/v2.0, ...
+      clientId: ""
+      # A Secret holding the client's secret; none for a public client.
+      clientSecret:
+        name: ""
+        key: client-secret
+      scopes: []      # email and profile when empty, openid always; add groups where the provider asks for it
+      hostedDomains: []    # Google Workspace domains people must come from (the hd claim)
+      trustedClients: []   # the provider's other clients whose ID tokens are taken as this one's
+      bearer: true         # take ID tokens as bearer tokens (API clients, agents)
+    # The signed header of a sign-in in front: google-iap (Google Cloud's
+    # Identity-Aware Proxy: audience is the backend service's,
+    # /projects/NUMBER/global/backendServices/ID), aws-alb (an Application
+    # Load Balancer's sign-in: albArn is the load balancer's), or jwks (any
+    # other: header, jwks, issuer and audience).
+    proxyJWT:
+      kind: ""
+      audience: ""
+      albArn: ""
+      issuer: ""
+      jwks: ""
+      header: ""
+    # The claims naming the person and listing their groups, for roles.
+    # With oidc, email needs email_verified; take preferred_username or sub
+    # where the provider doesn't send it (Entra ID). Empty groupsClaim for
+    # none.
+    userClaim: email
+    groupsClaim: groups
+    sessionMaxAge: ""  # 12h when empty
+    # The key sessions are signed with, 32 characters or more: whoever
+    # holds it can sign in as anyone. A Secret of your own (name), or one
+    # the chart makes (FULLNAME-session-key, kept across upgrades and when
+    # the release is uninstalled). A GitOps tool that renders the chart
+    # without the cluster (Argo CD, Flux) would make a new key each render,
+    # signing everyone out: give it a Secret of your own.
+    sessionKeySecret:
+      name: ""
+      key: session-key
+      create: true
   readOnly: false  # take no changes through the UI or API
   # Without roles (below), everyone may only look: lapilli serve listens on
   # the pod's address, which every pod in the cluster can reach. Changes
@@ -246,6 +303,9 @@ serve:
   # team or of one, kept in the ledger; never an admin's or an approver's
   # (docs/design/serveops.md).
   roles:
+    # Who may look, and with serve.signIn who may come in at all: people,
+    # group:NAME, *@DOMAIN, or "*" for everyone the sign-in signs in.
+    viewers: []
     editors: []
     admins: []
     groupsHeader: ""   # the header the proxy lists groups in, such as X-Forwarded-Groups
@@ -366,13 +426,69 @@ serve:
     port: 8083
     from: []
   # Where people reach the UI, such as https://lapilli.example.com; what is
-  # told links to it.
+  # told links to it, and signIn.oidc sends people back to. Worked out from
+  # ingress's first host (https when its tls names it) or httpRoute's first
+  # hostname when empty.
   externalURL: ""
   # Host names lapilli answers to besides addresses, localhost, names under
   # .svc, .cluster.local or .internal, and externalURL's: the name your
-  # proxy or ingress passes on, if it is another. Others get 421, against
-  # DNS rebinding.
+  # proxy or ingress passes on, if it is another. ingress's hosts and
+  # httpRoute's hostnames are added. Others get 421, against DNS rebinding.
   allowedHosts: []
+  # The UI outside the cluster on a Service of its own, FULLNAME-ui, a
+  # LoadBalancer or a NodePort, the UI's port alone; FULLNAME stays a
+  # ClusterIP with every port, as jobs and Prometheus reach it. The README
+  # has each cloud's load balancer annotations. A load balancer of TCP
+  # (GKE's and AKS's) doesn't end TLS: with signIn.oidc, end it at an
+  # Ingress or a Gateway, or at a load balancer that does (an AWS NLB's or
+  # an OCI load balancer's TLS listener).
+  service:
+    type: ClusterIP   # ClusterIP (no FULLNAME-ui), LoadBalancer or NodePort
+    port: 80          # FULLNAME-ui's port
+    annotations: {}
+    loadBalancerClass: ""
+    loadBalancerSourceRanges: []   # the addresses let through the cloud's load balancer
+    # Local keeps the clients' addresses, so loadBalancerSourceRanges and
+    # the NetworkPolicy see them; Cluster when empty.
+    externalTrafficPolicy: ""
+    nodePort: null
+    # userHeader trusts a plain header, which no proxy can set or strip in
+    # front of a load balancer of TCP: refused with a LoadBalancer or a
+    # NodePort, unless loadBalancerSourceRanges names the proxy's addresses
+    # alone and this says so.
+    sourceRangesAreTheProxy: false
+  # An Ingress for the UI (networking.k8s.io/v1).
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts: []         # such as lapilli.example.com
+    path: /           # lapilli is served at the root of its host
+    pathType: Prefix
+    tls: []           # - {secretName: lapilli-tls, hosts: [lapilli.example.com]}
+    # Annotations for FULLNAME, the Service the Ingress and the HTTPRoute
+    # send to, such as GKE's cloud.google.com/backend-config.
+    serviceAnnotations: {}
+    # People reach it over https, for externalURL: TLS ended here (tls) or
+    # at the load balancer in front (an ALB's certificate, a managed
+    # certificate). false only for a host on this machine (NAME.localhost).
+    https: true
+  # A Gateway API HTTPRoute for the UI (gateway.networking.k8s.io/v1).
+  httpRoute:
+    enabled: false
+    annotations: {}
+    parentRefs: []    # - {name: gateway, namespace: gateway-system, sectionName: https}
+    hostnames: []
+    https: true       # the Gateway's listener serves https, for externalURL
+  # Serving the UI outside the cluster (a LoadBalancer or NodePort, an
+  # Ingress or an HTTPRoute) with no sign-in lets anyone who reaches it
+  # read the ledger: refused, unless this says that is meant.
+  exposeWithoutSignIn: false
+  # The readiness probe's path: /readyz is ready once the ledger has a run
+  # recorded, at once after a restart, after the backfill's first day on a
+  # first install; /healthz is ready at once. The liveness probe is
+  # /healthz.
+  readinessPath: /readyz
   # Agents reach /mcp and read what the pages show. Who an agent must act
   # for to replay a change to the rules it proposes: editors or admins. Off
   # when empty: it runs PromQL the agent writes, with lapilli's access to
@@ -466,6 +582,10 @@ serve:
   #     - podSelector: {matchLabels: {app.kubernetes.io/name: oauth2-proxy}}
   #   metricsFrom:
   #     - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+  # Behind an ingress controller or a Gateway, from names its pods'
+  # namespace; behind a LoadBalancer, the load balancer's addresses and
+  # health checks as ipBlocks (with service.externalTrafficPolicy Local,
+  # the clients' own). The README has each cloud's.
   # It needs a network plugin that enforces NetworkPolicies. userHeader is
   # refused without it, unless something else keeps the rest out (a service
   # mesh's policy) and othersKeptOut says so.
