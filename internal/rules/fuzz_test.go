@@ -112,3 +112,29 @@ func FuzzScope(f *testing.F) {
 		Scope(expr, map[string]string{k: v})
 	})
 }
+
+// A rendered chart's stream comes from a repository: picking its rules out
+// of it answers or refuses, and what it keeps holds the same rules.
+func FuzzPick(f *testing.F) {
+	f.Add([]byte(rendered), "grafana_alert=1")
+	f.Add([]byte("%YAML 1.1\n---\nkind: Service\nmetadata: {name: s}\n...\ngroups: [{name: g, rules: [{alert: A, expr: up}]}]\n"), "")
+	f.Add([]byte("kind: List\nitems: [{kind: Service, metadata: {}}, {groups: [{name: g, rules: [{alert: A, expr: up}]}]}]\n"), "a in (b)")
+	f.Fuzz(func(t *testing.T, b []byte, s string) {
+		sel, err := ParseSelector(s)
+		if err != nil {
+			return
+		}
+		kept, picked, err := Pick(b, sel)
+		if err != nil || picked.Other < 0 || picked.Unselected < 0 {
+			return
+		}
+		all, err := Parse(b)
+		if err != nil || !sel.Empty() {
+			return
+		}
+		got, err := Parse(kept)
+		if len(all) > 0 && (err != nil || len(got) != len(all)) {
+			t.Fatalf("kept %d rules of %d: %v\n%q\n%q", len(got), len(all), err, b, kept)
+		}
+	})
+}

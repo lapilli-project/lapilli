@@ -126,7 +126,7 @@ jobs:
       - name: fuzz
         run: |
           set -euo pipefail
-          for t in rules:FuzzParse rules:FuzzFromAPI rules:FuzzScope sse:FuzzParseMath firing:FuzzReadJSONL incident:FuzzIncidents \
+          for t in rules:FuzzParse rules:FuzzPick rules:FuzzFromAPI rules:FuzzScope sse:FuzzParseMath firing:FuzzReadJSONL incident:FuzzIncidents \
             source:FuzzConfigDocs source:FuzzAmazon source:FuzzAzure source:FuzzAlarms; do
             echo "::group::${t}"
             go test -run '^$' -fuzz "^${t#*:}\$" -fuzztime 2m "./internal/${t%%:*}"
