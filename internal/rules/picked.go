@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -23,8 +25,10 @@ import (
 // Selector is a Kubernetes label selector, as kubectl -l takes one:
 // requirements separated by commas, all of which must hold, each
 // key=value (or ==), key!=value, key in (a,b), key notin (a,b), key (it
-// has the label) or !key (it hasn't). The zero Selector matches
-// everything.
+// has the label), !key (it hasn't), or key>N and key<N (its value a whole
+// number greater or less than N). The zero Selector matches everything. A
+// set with an empty value in it, a in (x,), is refused, though kubectl
+// takes it: written so, it is a slip.
 type Selector struct {
 	text string
 	reqs []requirement
@@ -32,16 +36,17 @@ type Selector struct {
 
 type requirement struct {
 	key string
-	// op is =, !=, in, notin, exists or !.
+	// op is =, !=, in, notin, exists, !, gt or lt.
 	op     string
 	values []string
 }
 
 var (
-	labelName  = regexp.MustCompile(`^[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$`)
-	labelValue = regexp.MustCompile(`^([A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?)?$`)
-	dnsPrefix  = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
-	setReq     = regexp.MustCompile(`^(\S+)\s+(in|notin)\s*\((.*)\)$`)
+	labelName   = regexp.MustCompile(`^[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$`)
+	labelValue  = regexp.MustCompile(`^([A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?)?$`)
+	dnsPrefix   = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
+	setReq      = regexp.MustCompile(`^(\S+)\s+(in|notin)\s*\((.*)\)$`)
+	wholeNumber = regexp.MustCompile(`^[0-9]{1,18}$`)
 )
 
 // ParseSelector reads a label selector; an empty one matches everything.
@@ -97,7 +102,16 @@ func parseRequirement(p string) (requirement, error) {
 		m := setReq.FindStringSubmatch(p)
 		r = requirement{key: m[1], op: m[2]}
 		for _, v := range strings.Split(m[3], ",") {
-			r.values = append(r.values, strings.TrimSpace(v))
+			if v = strings.TrimSpace(v); v == "" {
+				return r, fmt.Errorf("%q: an empty value in a set: write %s %s (x,y)", p, m[1], m[2])
+			}
+			r.values = append(r.values, v)
+		}
+	case strings.ContainsAny(p, "<>"):
+		i := strings.IndexAny(p, "<>")
+		r = requirement{key: strings.TrimSpace(p[:i]), op: map[byte]string{'>': "gt", '<': "lt"}[p[i]], values: []string{strings.TrimSpace(p[i+1:])}}
+		if !wholeNumber.MatchString(r.values[0]) {
+			return r, fmt.Errorf("%q: > and < take a whole number", p)
 		}
 	case strings.Contains(p, "!="):
 		k, v, _ := strings.Cut(p, "!=")
@@ -156,6 +170,10 @@ func (s Selector) Matches(labels map[string]string) bool {
 			ok = has
 		case "!":
 			ok = !has
+		case "gt", "lt":
+			n, err := strconv.ParseInt(v, 10, 64)
+			want, _ := strconv.ParseInt(r.values[0], 10, 64)
+			ok = err == nil && (r.op == "gt" && n > want || r.op == "lt" && n < want) // no label: no number
 		}
 		if !ok {
 			return false
@@ -172,12 +190,16 @@ type Picked struct {
 	// Unselected are documents of rules whose labels the selector didn't
 	// match.
 	Unselected int
+	// Broken are ConfigMaps holding a rule file that doesn't read: kept
+	// if they hold others that do, and said.
+	Broken int
 }
 
 // Add counts what another read passed over too.
 func (p *Picked) Add(q Picked) {
 	p.Other += q.Other
 	p.Unselected += q.Unselected
+	p.Broken += q.Broken
 }
 
 // String says what was passed over, "" for nothing.
@@ -196,6 +218,13 @@ func (p Picked) String() string {
 		says = append(says, "1 document of rules the selector doesn't match")
 	default:
 		says = append(says, fmt.Sprintf("%d documents of rules the selector doesn't match", p.Unselected))
+	}
+	switch p.Broken {
+	case 0:
+	case 1:
+		says = append(says, "1 ConfigMap with a rule file that doesn't read")
+	default:
+		says = append(says, fmt.Sprintf("%d ConfigMaps with a rule file that doesn't read", p.Broken))
 	}
 	return strings.Join(says, ", and ")
 }
@@ -287,7 +316,7 @@ func ReadPicked(path string, p Picking) ([]Rule, []Doc, Picked, error) {
 // loadPicked reads one file as ReadPicked does, adding what it passed over
 // to picked.
 func loadPicked(path string, p Picking, picked *Picked) ([]Rule, Doc, error) {
-	b, err := os.ReadFile(path)
+	b, err := readFile(path)
 	if err != nil {
 		return nil, Doc{}, err
 	}
@@ -310,6 +339,25 @@ func loadPicked(path string, p Picking, picked *Picked) ([]Rule, Doc, error) {
 		rs[i].Source = path
 	}
 	return rs, Doc{Source: path, Data: b}, nil
+}
+
+// MaxFile is the most a file of rules is read of: more is refused. A chart
+// rendered whole is far less; a file more is likely not rules, or made to
+// take a reader's memory.
+const MaxFile = 16 << 20
+
+// readFile reads a file of rules, MaxFile at most.
+func readFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, MaxFile+1))
+	if err == nil && len(b) > MaxFile {
+		err = fmt.Errorf("%s: more than %d MiB: a file of rules is less", path, MaxFile>>20)
+	}
+	return b, err
 }
 
 // Pick keeps of a stream of documents those that hold rules and, of the
@@ -410,7 +458,7 @@ func pickItem(doc any, sel Selector) (keep bool, kept any, changed bool, picked 
 		picked.Other++
 		return false, nil, false, picked
 	}
-	if m["kind"] == "List" {
+	if isList(m) {
 		// kubectl get -o yaml: its items, as Parse reads them.
 		var items []any
 		for _, it := range list(m["items"]) {
@@ -435,7 +483,12 @@ func pickItem(doc any, sel Selector) (keep bool, kept any, changed bool, picked 
 		return true, c, true, picked
 	}
 	_, ok, _ := parseDoc(m)
+	if brokenRuleFile(m) {
+		picked.Broken++
+	}
 	switch {
+	case !ok && picked.Broken > 0:
+		return false, nil, false, picked
 	case !ok:
 		picked.Other++
 		return false, nil, false, picked
@@ -444,6 +497,39 @@ func pickItem(doc any, sel Selector) (keep bool, kept any, changed bool, picked 
 		return false, nil, false, picked
 	}
 	return true, m, false, picked
+}
+
+// ruleKinds are the kinds of Kubernetes objects rules are read from; a
+// List of any kind (ConfigMapList, PrometheusRuleList) is read for its
+// items.
+var ruleKinds = map[string]bool{"ConfigMap": true, "PrometheusRule": true, "Rules": true, "ClusterRules": true, "GlobalRules": true}
+
+// isList reports whether a document is a list of objects: kind List, or
+// a kind's own list, as the API writes it.
+func isList(m map[string]any) bool {
+	kind := str(m["kind"])
+	_, items := m["items"].([]any)
+	return kind == "List" || strings.HasSuffix(kind, "List") && items
+}
+
+// brokenRuleFile reports whether a ConfigMap holds a rule file that
+// doesn't read: a value that is YAML, in the shape of rules, that Parse
+// refuses. A value that isn't YAML at all, a configuration file, isn't.
+func brokenRuleFile(m map[string]any) bool {
+	if m["kind"] != "ConfigMap" {
+		return false
+	}
+	data, _ := m["data"].(map[string]any)
+	for _, v := range data {
+		s, _ := v.(string)
+		if _, err := decodeAll([]byte(s)); err != nil {
+			continue
+		}
+		if _, err := Parse([]byte(s)); err != nil && !errors.Is(err, errNoRules) {
+			return true
+		}
+	}
+	return false
 }
 
 // isObject reports whether a document is a Kubernetes object, which has

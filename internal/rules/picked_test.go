@@ -337,3 +337,139 @@ func TestParseSelector(t *testing.T) {
 		t.Error("the empty selector, or String")
 	}
 }
+
+const labelledCM = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: a
+  labels: {grafana_alert: "1"}
+data:
+  a.yaml: |
+    groups: [{name: g, rules: [{alert: A, expr: up == 0, for: 1m}]}]
+`
+
+// A kind's own list, as the API writes it (ConfigMapList,
+// PrometheusRuleList), is read as kubectl's List is; so are streams with
+// CRLF line ends or a byte order mark, and a List in JSON some of whose
+// items are left out.
+func TestPickListKinds(t *testing.T) {
+	indent := func(s string) string {
+		return "- " + strings.ReplaceAll(strings.TrimSuffix(s, "\n"), "\n", "\n  ") + "\n"
+	}
+	for name, c := range map[string]struct {
+		in, sel string
+		rules   []string
+	}{
+		"ConfigMapList":                    {"apiVersion: v1\nkind: ConfigMapList\nmetadata: {resourceVersion: \"1\"}\nitems:\n" + indent(labelledCM), "", []string{"A"}},
+		"PrometheusRuleList":               {"apiVersion: monitoring.coreos.com/v1\nkind: PrometheusRuleList\nitems:\n- apiVersion: monitoring.coreos.com/v1\n  kind: PrometheusRule\n  metadata: {name: p}\n  spec: {groups: [{name: g, rules: [{alert: P, expr: up == 0}]}]}\n", "", []string{"P"}},
+		"CRLF":                             {strings.ReplaceAll("---\n# Source: x\n"+labelledCM+"---\napiVersion: v1\nkind: Service\nmetadata: {name: s}\n", "\n", "\r\n"), "grafana_alert=1", []string{"A"}},
+		"a byte order mark":                {"\xef\xbb\xbf" + labelledCM + "---\napiVersion: v1\nkind: Service\nmetadata: {name: s}\n", "grafana_alert=1", []string{"A"}},
+		"a List in JSON, an item left out": {`{"apiVersion":"v1","kind":"List","items":[{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"a","labels":{"grafana_alert":"1"}},"data":{"a.yaml":"groups: [{name: g, rules: [{alert: A, expr: up == 0}]}]"}},{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"b"},"data":{"b.yaml":"groups: [{name: h, rules: [{alert: B, expr: up == 0}]}]"}}]}`, "grafana_alert=1", []string{"A"}},
+	} {
+		sel, _ := ParseSelector(c.sel)
+		kept, _, err := Pick([]byte(c.in), sel)
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		rs, err := Parse(kept)
+		if err != nil || !slices.Equal(names(rs), c.rules) {
+			t.Errorf("%s: %v %v\n%s", name, names(rs), err, kept)
+		}
+	}
+}
+
+// A Kubernetes object of a kind rules aren't kept in holds none, whatever
+// else it has: a Secret with a top-level groups (the API server drops the
+// field and keeps the Secret) isn't kept, selected or not, nor read as
+// rules from a file given whole.
+func TestPickOtherKinds(t *testing.T) {
+	in := "apiVersion: v1\nkind: Secret\nmetadata: {name: s, labels: {grafana_alert: \"1\"}}\nstringData: {password: hunter2}\ngroups: [{name: g, rules: [{alert: S, expr: up == 0}]}]\n---\n" + labelledCM
+	for _, s := range []string{"", "grafana_alert=1"} {
+		sel, _ := ParseSelector(s)
+		kept, picked, err := Pick([]byte(in), sel)
+		if err != nil || bytes.Contains(kept, []byte("hunter2")) || picked.Other != 1 {
+			t.Errorf("selector %q: %+v %v\n%s", s, picked, err, kept)
+		}
+	}
+	if rs, err := Parse([]byte(in)); err != nil || !slices.Equal(names(rs), []string{"A"}) {
+		t.Errorf("read whole: %v %v", names(rs), err)
+	}
+}
+
+// A ConfigMap whose rule file doesn't read is said apart from what holds
+// no rules: dropped when it holds nothing else that reads, kept when it
+// does.
+func TestPickBroken(t *testing.T) {
+	broken := strings.Replace(labelledCM, "for: 1m", "for: 1x", 1)
+	_, picked, err := Pick([]byte(broken+"---\napiVersion: v1\nkind: Service\nmetadata: {name: s}\n"), Selector{})
+	if err != nil || picked != (Picked{Other: 1, Broken: 1}) ||
+		picked.String() != "1 document that holds no rules, and 1 ConfigMap with a rule file that doesn't read" {
+		t.Errorf("%+v %q %v", picked, picked, err)
+	}
+	both := strings.Replace(labelledCM, "\ndata:\n", "\ndata:\n  b.yaml: |\n    groups: [{name: h, rules: [{alert: B, expr: up == 0, for: 2x}]}]\n", 1)
+	kept, picked, err := Pick([]byte(both), Selector{})
+	if rs, _ := Parse(kept); err != nil || picked != (Picked{Broken: 1}) || !slices.Equal(names(rs), []string{"A"}) {
+		t.Errorf("one of two broken: %+v %v %v", picked, names(rs), err)
+	}
+	// What isn't YAML, or isn't rules, isn't broken rules.
+	other := strings.Replace(labelledCM, "\ndata:\n", "\ndata:\n  nginx.conf: |\n    server { listen: [80; }\n  dash.json: '{\"panels\": []}'\n", 1)
+	if _, picked, err := Pick([]byte(other), Selector{}); err != nil || picked.Broken != 0 {
+		t.Errorf("other keys: %+v %v", picked, err)
+	}
+}
+
+// A file of rules is read MaxFile at most: more is refused, saying so.
+func TestReadPickedTooBig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rules.yaml")
+	body := []byte(labelledCM + "# " + strings.Repeat("x", MaxFile-len(labelledCM)-3) + "\n")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := ReadPicked(path, Picking{}); err != nil {
+		t.Errorf("MaxFile: %v", err)
+	}
+	if err := os.WriteFile(path, append(body, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := ReadPicked(path, Picking{}); err == nil || !strings.Contains(err.Error(), "more than 16 MiB") {
+		t.Errorf("a byte more: %v", err)
+	}
+}
+
+// Selectors kubectl takes, read alike: > and < on whole numbers; and an
+// empty value in a set refused, though kubectl takes some.
+func TestParseSelectorParity(t *testing.T) {
+	for _, s := range []string{"a in (x,)", "a in (x,,)", "a in ()", "a in (,x)", "a in (x,,y)", "a notin (x,)", "a>x", "a>1.5", "a>-1", "a>", "a<", ">1"} {
+		if _, err := ParseSelector(s); err == nil {
+			t.Errorf("%q was taken", s)
+		}
+	}
+	for _, c := range []struct {
+		sel    string
+		labels map[string]string
+		want   bool
+	}{
+		{"a>1", map[string]string{"a": "2"}, true},
+		{"a>1", map[string]string{"a": "10"}, true},
+		{"a>1", map[string]string{"a": "1"}, false},
+		{"a>1", map[string]string{"a": "x"}, false},
+		{"a>1", map[string]string{}, false},
+		{"a > 1", map[string]string{"a": "2"}, true},
+		{"a<1", map[string]string{"a": "0"}, true},
+		{"a<1", map[string]string{"a": "1"}, false},
+		{"a<01", map[string]string{"a": "0"}, true},
+		{"a<1", map[string]string{}, false},
+		{"a<1,b", map[string]string{"a": "0"}, false},
+	} {
+		sel, err := ParseSelector(c.sel)
+		if err != nil {
+			t.Errorf("%q: %v", c.sel, err)
+			continue
+		}
+		if got := sel.Matches(c.labels); got != c.want {
+			t.Errorf("%q on %v: %v, want %v", c.sel, c.labels, got, c.want)
+		}
+	}
+}

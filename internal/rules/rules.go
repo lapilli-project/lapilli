@@ -433,6 +433,24 @@ func parseDoc(doc map[string]any) ([]Rule, bool, error) {
 	switch {
 	case doc == nil:
 		return nil, false, nil
+	case isList(doc):
+		// kubectl get -o yaml, or the API's own ConfigMapList.
+		var out []Rule
+		found := false
+		for _, it := range list(doc["items"]) {
+			m, _ := it.(map[string]any)
+			rs, ok, err := parseDoc(m)
+			if err != nil {
+				return nil, true, err
+			}
+			found = found || ok
+			out = append(out, rs...)
+		}
+		return out, found, nil
+	case isObject(doc) && !ruleKinds[str(doc["kind"])]:
+		// A Kubernetes object of any other kind holds no rules, whatever
+		// else it has: a Secret with a top-level groups is a Secret.
+		return nil, false, nil
 	case doc["kind"] == "ConfigMap":
 		var out []Rule
 		found := false
@@ -444,20 +462,6 @@ func parseDoc(doc map[string]any) ([]Rule, bool, error) {
 				continue // not every key holds rules
 			}
 			found = true
-			out = append(out, rs...)
-		}
-		return out, found, nil
-	case doc["kind"] == "List":
-		// kubectl get ... -o yaml
-		var out []Rule
-		found := false
-		for _, it := range list(doc["items"]) {
-			m, _ := it.(map[string]any)
-			rs, ok, err := parseDoc(m)
-			if err != nil {
-				return nil, true, err
-			}
-			found = found || ok
 			out = append(out, rs...)
 		}
 		return out, found, nil
