@@ -78,6 +78,9 @@ func TestPagesScale(t *testing.T) {
 	}
 	took := time.Since(began) / 20
 	t.Logf("%-32s %s", "a quiet window, judged again", took.Round(time.Microsecond))
+	if budget := time.Duration(float64(2*time.Second) * max(1, k) * slow); took > budget {
+		t.Errorf("a quiet window took %s, over %s", took, budget)
+	}
 	// A deploy of each service every few hours, read from the deploys
 	// file all at once, the firings they meet marked (docs/design/noc.md).
 	var deploys []ledger.Deploy
@@ -96,9 +99,6 @@ func TestPagesScale(t *testing.T) {
 	t.Logf("%-32s %s", fmt.Sprintf("%d deploys, marked", len(deploys)), took.Round(time.Microsecond))
 	if budget := time.Duration(float64(5*time.Second) * max(1, k) * slow); took > budget {
 		t.Errorf("deploys took %s, over %s", took, budget)
-	}
-	if budget := time.Duration(float64(2*time.Second) * max(1, k) * slow); took > budget {
-		t.Errorf("a quiet window took %s, over %s", took, budget)
 	}
 	// Windows every month, by cron, and a team's, each judged again over the
 	// twelve weeks, to the end (docs/design/serveops.md).
