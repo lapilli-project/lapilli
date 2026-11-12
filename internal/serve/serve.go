@@ -27,6 +27,7 @@ import (
 	"lapilli.dev/internal/oncall"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/source"
 	"lapilli.dev/internal/verdict"
 )
@@ -138,6 +139,17 @@ type Config struct {
 	// proxy lists the reader's groups in.
 	Editors, Admins []string
 	GroupsHeader    string
+
+	// A sign-in of lapilli's own (docs/design/signin.md), in place of
+	// UserHeader: OIDC signs people in with an OpenID Connect provider,
+	// sending them back to ExternalURL's /auth/callback; Proxy takes them
+	// from the JWT a sign-in in front signs. Sessions last SessionMaxAge
+	// (12h when 0), in cookies signed with the key in the file SessionKey,
+	// or else one made once and kept in the ledger.
+	OIDC          *signin.OIDC
+	Proxy         *signin.Proxy
+	SessionMaxAge time.Duration
+	SessionKey    string
 
 	// What happens (tasks, incidents, quiet windows, comments) is told to
 	// the webhook whose URL is in NotifyWebhook, as JSON, and with
@@ -258,6 +270,8 @@ type Server struct {
 	// open says that, with no roles, everyone is an admin: it listens on
 	// loopback alone, or EveryoneAdmin says so. Run says where it is bound.
 	open atomic.Bool
+	// in is the sign-in of lapilli's own, nil without one.
+	in *signIn
 	// ledgerID names the ledger, made at random when it is first opened:
 	// the change recipes' branches carry it.
 	ledgerID string
@@ -395,6 +409,16 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		return nil, fmt.Errorf("--ledger: %w", err)
 	}
 	s.open.Store(cfg.EveryoneAdmin || LoopbackOnly(cfg.Listen))
+	if cfg.OIDC != nil || cfg.Proxy != nil {
+		if err := s.newSignIn(ctx); err != nil {
+			l.Close()
+			return nil, err
+		}
+		// Signed in, people come from elsewhere, often through a proxy on
+		// this machine: loopback says nothing of who they are, and no one
+		// is an admin for it. Roles come from the lists alone.
+		s.open.Store(false)
+	}
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"
 	}

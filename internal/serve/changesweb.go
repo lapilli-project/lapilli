@@ -65,6 +65,12 @@ func (s *Server) person(h http.HandlerFunc) http.HandlerFunc {
 			s.oops(w, r, errNotAForm)
 			return
 		}
+		// Signed in by lapilli, a browser has a session: a bearer token is
+		// an API client's or an agent's, whatever headers it sends.
+		if id, ok := whoOf(r); ok && id.by == byBearer {
+			s.oops(w, r, errNotAForm)
+			return
+		}
 		if !s.approver(r) {
 			s.oops(w, r, errNotApprover)
 			return

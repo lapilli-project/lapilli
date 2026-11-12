@@ -1028,5 +1028,16 @@
  "%s, eleven weeks: %s": "%s, once semanas: %s",
  "Stones by week: %s": "Piedras por semana: %s",
  "Your comment": "Tu comentario",
- "it is a Loki ruler's rule, which Lapilli doesn't write: a person changes it, in Loki or where its rule files are kept": "es una regla del ruler de Loki, que Lapilli no escribe: la cambia una persona, en Loki o donde se guardan sus archivos de reglas"
+ "it is a Loki ruler's rule, which Lapilli doesn't write: a person changes it, in Loki or where its rule files are kept": "es una regla del ruler de Loki, que Lapilli no escribe: la cambia una persona, en Loki o donde se guardan sus archivos de reglas",
+ "Sign out": "Cerrar sesión",
+ "Signed out": "Sesión cerrada",
+ "You have signed out of Lapilli. The identity provider may still have you signed in: on a computer others use, sign out there too.": "Has cerrado la sesión de Lapilli. Puede que el proveedor de identidad siga con tu sesión abierta: en un equipo compartido, ciérrala también allí.",
+ "Sign in again": "Volver a iniciar sesión",
+ "this sign-in didn't start here, was used already, or took too long: sign in again": "este inicio de sesión no empezó aquí, ya se usó o tardó demasiado: vuelve a iniciar sesión",
+ "the identity provider can't be reached: try again in a minute": "no se puede contactar con el proveedor de identidad: inténtalo de nuevo en un minuto",
+ "the identity provider's answer didn't verify: sign in again, or ask whoever runs lapilli to look at its log": "la respuesta del proveedor de identidad no se pudo verificar: vuelve a iniciar sesión o pide a quien administra lapilli que revise su registro",
+ "the identity provider lists more groups than a session can hold": "el proveedor de identidad indica más grupos de los que caben en una sesión",
+ "the sign-in names no one lapilli can take": "el inicio de sesión no identifica a nadie que lapilli pueda aceptar",
+ "the identity provider didn't sign you in (%s)": "el proveedor de identidad no inició tu sesión (%s)",
+ "no one changes anything here: lapilli serve signs people in, with no roles. Name who may make changes in --editors or --admins": "aquí nadie puede cambiar nada: lapilli serve inicia sesiones sin roles. Indica quién puede hacer cambios en --editors o --admins"
 }

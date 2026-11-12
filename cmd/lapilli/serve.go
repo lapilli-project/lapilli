@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"os/signal"
@@ -17,6 +18,7 @@ import (
 
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/serve"
+	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/source"
 )
 
@@ -102,10 +104,11 @@ The ledger:
                       aren't served, at Grafana's own resolution (1s)
 
 The web UI and API:
-  --listen ADDR       where to listen (default 127.0.0.1:8080). There is no
-                      sign-in: keep it inside, or behind a proxy that signs
-                      people in. Listening beyond this machine (:8080, a
-                      pod's address) with no roles, everyone may only look
+  --listen ADDR       where to listen (default 127.0.0.1:8080). Without a
+                      sign-in (below), keep it inside, or behind a proxy
+                      that signs people in. Listening beyond this machine
+                      (:8080, a pod's address) with no roles, everyone may
+                      only look
   --metrics-listen ADDR
                       also serve /metrics, /healthz and /readyz here, alone,
                       so a NetworkPolicy can let Prometheus reach only them
@@ -176,6 +179,62 @@ The web UI and API:
                       separated by commas, such as X-Forwarded-Groups. With
                       roles, nothing but the proxy should reach lapilli
                       serve, and it should strip both headers from callers
+
+Signing people in, without a proxy of plain headers (one of these, or
+--user-header; docs/design/signin.md). Every page and API call then needs
+someone signed in, but /healthz, /readyz and /static/; and without roles
+(--editors, --admins) everyone signed in may only look, on loopback too:
+  --oidc-issuer URL   sign people in with this OpenID Connect provider, its
+                      configuration discovered from the URL (https, or http
+                      to this machine or a name inside a cluster): the
+                      authorization code flow, with PKCE, state and nonce.
+                      A browser is sent to sign in, and keeps a session in a
+                      signed cookie; an API client or an agent sends an ID
+                      token the provider gave this client as a bearer
+                      token. Needs --external-url (https, or http to this
+                      machine), whose /auth/callback the provider sends
+                      people back to
+  --oidc-client-id ID the client lapilli is registered as
+  --oidc-client-secret-file FILE
+                      the file holding the client's secret, read for each
+                      sign-in; without it, a public client (PKCE alone)
+  --oidc-scopes LIST  the scopes asked for, comma-separated (default
+                      email,profile, and openid always); add groups where
+                      the provider lists them only when asked
+  --user-claim NAME   the claim that names the person (default email; with
+                      --oidc-issuer, email_verified must be true beside it)
+  --groups-claim NAME the claim that lists their groups, for --editors,
+                      --admins and --approvers (default groups; empty for
+                      none)
+  --session-max-age DUR
+                      how long a session lasts (default 12h; 5m to 30d)
+  --session-key-file FILE
+                      a key of 32 characters or more that session cookies
+                      are signed with, read at start; without it, one made
+                      once and kept in the ledger. A new key signs everyone
+                      out
+  --proxy-jwt KIND    take who each request comes from from the JWT a
+                      sign-in in front signed, checked against its keys:
+                      google-iap (Google Cloud's Identity-Aware Proxy,
+                      x-goog-iap-jwt-assertion), aws-alb (an AWS Application
+                      Load Balancer's sign-in, x-amzn-oidc-data), or jwks
+                      (any other: oauth2-proxy, an Azure App Service's
+                      sign-in, an access proxy). A request without it, or
+                      with one that doesn't verify, gets 401
+  --proxy-jwt-audience AUD
+                      google-iap: the backend service's,
+                      /projects/NUMBER/global/backendServices/ID; jwks: the
+                      aud the JWTs carry
+  --proxy-jwt-alb-arn ARN
+                      aws-alb: the load balancer whose signature is taken
+  --proxy-jwt-issuer URL
+                      jwks: the iss the JWTs carry; aws-alb: the identity
+                      provider's, to check it too
+  --proxy-jwt-jwks URL
+                      jwks: where the keys are
+  --proxy-jwt-header NAME
+                      jwks: the header the JWT is in; Authorization takes it
+                      as a bearer token
 
 Telling of what happens (tasks made, assigned, done or overdue; incidents
 written down; quiet windows kept; comments):
@@ -356,6 +415,17 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		Digest: serve.Weekly{Day: time.Monday, Hour: 9}, Version: buildVersion(),
 	}
 	timeoutSet := false
+	// The sign-in of lapilli's own, read from the flags that give it.
+	var (
+		oc               signin.OIDC
+		px               signin.Proxy
+		ocSet, pxSet     bool
+		claims           = signin.Claims{UserClaim: "email", GroupsClaim: "groups"}
+		claimsSet        bool
+		sessionSet       bool
+		oidcScopesGiven  bool
+		externalURLLocal bool
+	)
 	takes := func(name, val string) (bool, error) {
 		dur := func(min time.Duration) (time.Duration, error) {
 			d, err := serve.ParseDuration(val)
@@ -527,10 +597,70 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		case "--notify-slack":
 			cfg.NotifySlack = val == "true"
 		case "--external-url":
-			if u, perr := url.Parse(val); perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			u, perr := url.Parse(val)
+			if perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 				return true, fmt.Errorf("--external-url %s: want where people reach the UI, like https://lapilli.example.com", val)
 			}
 			cfg.ExternalURL = val
+			externalURLLocal = u.Scheme == "https" || thisMachine(u.Hostname())
+		case "--oidc-issuer":
+			if !signin.SafeURL(val) {
+				return true, fmt.Errorf("--oidc-issuer %s: want the provider's https URL, as its ID tokens' iss has it (http only to this machine or a name inside a cluster)", val)
+			}
+			oc.Issuer, ocSet = val, true
+		case "--oidc-client-id":
+			if strings.TrimSpace(val) == "" {
+				return true, fmt.Errorf("--oidc-client-id: want the client lapilli is registered as")
+			}
+			oc.ClientID, ocSet = val, true
+		case "--oidc-client-secret-file":
+			b, err := os.ReadFile(val)
+			if err != nil {
+				return true, fmt.Errorf("--oidc-client-secret-file: %v", err)
+			}
+			if strings.TrimSpace(string(b)) == "" {
+				return true, fmt.Errorf("--oidc-client-secret-file: the file is empty")
+			}
+			oc.SecretFile, ocSet = val, true
+		case "--oidc-scopes":
+			oc.Scopes, ocSet, oidcScopesGiven = list(val), true, true
+		case "--user-claim":
+			if strings.TrimSpace(val) == "" {
+				return true, fmt.Errorf("--user-claim: want a claim, such as email, preferred_username or sub")
+			}
+			claims.UserClaim, claimsSet = val, true
+		case "--groups-claim":
+			claims.GroupsClaim, claimsSet = strings.TrimSpace(val), true
+		case "--session-max-age":
+			d, derr := dur(5 * time.Minute)
+			if derr != nil || d > 30*24*time.Hour {
+				return true, fmt.Errorf("--session-max-age %s: want a duration from 5m to 30d", val)
+			}
+			cfg.SessionMaxAge, sessionSet = d, true
+		case "--session-key-file":
+			b, err := os.ReadFile(val)
+			if err != nil {
+				return true, fmt.Errorf("--session-key-file: %v", err)
+			}
+			if len(strings.TrimSpace(string(b))) < 32 {
+				return true, fmt.Errorf("--session-key-file: want a key of 32 characters at least")
+			}
+			cfg.SessionKey, sessionSet = val, true
+		case "--proxy-jwt":
+			if !slices.Contains(signin.ProxyKinds, val) {
+				return true, fmt.Errorf("--proxy-jwt %s: want %s", val, strings.Join(signin.ProxyKinds, ", "))
+			}
+			px.Kind, pxSet = val, true
+		case "--proxy-jwt-audience":
+			px.Audience, pxSet = val, true
+		case "--proxy-jwt-alb-arn":
+			px.ALBArn, pxSet = val, true
+		case "--proxy-jwt-issuer":
+			px.Issuer, pxSet = val, true
+		case "--proxy-jwt-jwks":
+			px.JWKS, pxSet = val, true
+		case "--proxy-jwt-header":
+			px.Header, pxSet = val, true
 		case "--lang":
 			if !slices.Contains(serve.Langs(), val) {
 				return true, fmt.Errorf("--lang %s: want one of %s", val, strings.Join(serve.Langs(), ", "))
@@ -574,8 +704,35 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		return true, err
 	}
 	f, err := parseFlags(args, takes)
+	signIns := 0
+	for _, on := range []bool{cfg.UserHeader != "", ocSet, pxSet} {
+		if on {
+			signIns++
+		}
+	}
+	signedIn := signIns > 0
 	switch {
 	case err != nil:
+	case signIns > 1:
+		err = fmt.Errorf("--user-header, --oidc-issuer and --proxy-jwt are three ways to say who people are: give one")
+	case ocSet && (oc.Issuer == "" || oc.ClientID == ""):
+		err = fmt.Errorf("--oidc-issuer and --oidc-client-id go together: the provider, and the client lapilli is registered as with it")
+	case ocSet && cfg.ExternalURL == "":
+		err = fmt.Errorf("--oidc-issuer needs --external-url: the provider sends people back to its /auth/callback")
+	case ocSet && !externalURLLocal:
+		err = fmt.Errorf("--external-url %s: with --oidc-issuer, want https, or http to this machine (localhost): the session cookie would otherwise go in the clear", cfg.ExternalURL)
+	case pxSet && px.Kind == "":
+		err = fmt.Errorf("--proxy-jwt-* go with --proxy-jwt: which sign-in in front signs the header")
+	case pxSet && signin.CheckProxy(px) != nil:
+		err = signin.CheckProxy(px)
+	case claimsSet && !ocSet && !pxSet:
+		err = fmt.Errorf("--user-claim and --groups-claim read the tokens of --oidc-issuer or --proxy-jwt")
+	case sessionSet && !ocSet:
+		err = fmt.Errorf("--session-max-age and --session-key-file are for --oidc-issuer's sessions")
+	case cfg.GroupsHeader != "" && (ocSet || pxSet):
+		err = fmt.Errorf("--groups-header is --user-header's: with --oidc-issuer or --proxy-jwt, the groups are in --groups-claim")
+	case cfg.EveryoneAdmin && (ocSet || pxSet):
+		err = fmt.Errorf("--everyone-admin is for no sign-in: to let everyone signed in change anything, give --admins '*'")
 	case cfg.AlarmsEvery > 0 && len(f.alarms) == 0:
 		err = fmt.Errorf("--alarms-every is how often --alarms is read: give --alarms")
 	case cfg.Keep > 0 && cfg.Keep < cfg.Backfill:
@@ -584,8 +741,10 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--everyone-admin is for no roles: with --editors or --admins, they say who may change what")
 	case cfg.EveryoneAdmin && cfg.ReadOnly:
 		err = fmt.Errorf("--everyone-admin lets everyone change anything, and --read-only no one")
-	case (len(cfg.Editors) > 0 || len(cfg.Admins) > 0 || cfg.GroupsHeader != "") && cfg.UserHeader == "":
-		err = fmt.Errorf("--editors, --admins and --groups-header need --user-header: who is who comes from the proxy that signs people in")
+	case cfg.GroupsHeader != "" && cfg.UserHeader == "":
+		err = fmt.Errorf("--groups-header needs --user-header: who is who comes from the proxy that signs people in")
+	case (len(cfg.Editors) > 0 || len(cfg.Admins) > 0) && !signedIn:
+		err = fmt.Errorf("--editors and --admins need a sign-in, --user-header, --oidc-issuer or --proxy-jwt: who is who comes from it")
 	case cfg.NotifySlack && f.slackFile == "":
 		err = fmt.Errorf("--notify-slack needs --slack-webhook-file")
 	case cfg.IncidentsListen != "" && cfg.IncidentsToken == "" && cfg.FiringsToken == "" && cfg.TasksToken == "" && cfg.ChangesToken == "":
@@ -601,8 +760,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	case cfg.ChangesToken != "" && (cfg.IncidentsToken != "" && sameFile(cfg.ChangesToken, cfg.IncidentsToken) ||
 		cfg.FiringsToken != "" && sameFile(cfg.ChangesToken, cfg.FiringsToken) || cfg.NotifyToken != "" && sameFile(cfg.ChangesToken, cfg.NotifyToken)):
 		err = fmt.Errorf("--changes-token-file holds the same token as another token file: give each its own")
-	case cfg.Changes && cfg.UserHeader == "":
-		err = fmt.Errorf("--changes needs --user-header: a change is approved by a person, and the proxy that signs people in says who")
+	case cfg.Changes && !signedIn:
+		err = fmt.Errorf("--changes needs a sign-in, --user-header, --oidc-issuer or --proxy-jwt: a change is approved by a person, and the sign-in says who")
 	case cfg.Changes && len(cfg.Editors)+len(cfg.Admins) == 0:
 		err = fmt.Errorf("--changes needs roles, --editors or --admins: without them, whoever may change anything is an admin, who could resume changes paused and approve")
 	case cfg.Changes && len(cfg.Admins)+len(cfg.Approvers) == 0:
@@ -678,6 +837,18 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	cfg.Timeout, cfg.Parallel = f.timeout, f.parallel
 	cfg.CheckReplay, cfg.CheckSeries = checkReplayOn(f), f.checkSeries
 	cfg.CheckContent, cfg.Severities, cfg.ScrapeInterval = checkContentOn(f), f.severities, f.scrapeInterval
+	if ocSet {
+		if !oidcScopesGiven {
+			oc.Scopes = []string{"email", "profile"}
+		}
+		oc.Claims = claims
+		oc.Claims.Verified = true
+		cfg.OIDC = &oc
+	}
+	if pxSet {
+		px.Claims = claims
+		cfg.Proxy = &px
+	}
 
 	log := slog.New(slog.NewTextHandler(stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -797,4 +968,15 @@ func checkReplayOn(f *verdictFlags) bool { return !f.checkReplaySet || f.checkRe
 // --check-content=false, with rules to read.
 func checkContentOn(f *verdictFlags) bool {
 	return (!f.checkContentSet || f.checkContent) && !f.alerts && (len(f.rules) > 0 || readsAPI(f))
+}
+
+// thisMachine reports whether a host is this machine's: localhost, a name
+// under .localhost, or a loopback address. A browser keeps a cookie sent
+// there over http from going anywhere else.
+func thisMachine(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return host == "localhost" || strings.HasSuffix(host, ".localhost")
 }

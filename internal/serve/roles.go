@@ -15,10 +15,12 @@ import (
 
 // Roles: who may change what. Without --editors or --admins, everyone may
 // change everything when lapilli serve listens on loopback alone, or with
-// --everyone-admin; listening beyond it, everyone may only look. With
-// either, whoever the sign-in proxy names (--user-header), or a group it
-// names them in (--groups-header), gets the role the lists give them, and
-// everyone else may only look.
+// --everyone-admin; listening beyond it, or with a sign-in of its own
+// (--oidc-issuer, --proxy-jwt), everyone may only look. With either list,
+// whoever the sign-in names (--user-header, a session, a bearer token, a
+// proxy's signed header), or a group it names them in (--groups-header,
+// --groups-claim), gets the role the lists give them, and everyone else
+// may only look.
 //
 //	viewer  looks
 //	editor  writes incidents, tasks, comments, quiet windows, notes on rules;
@@ -47,6 +49,12 @@ func (r role) String() string { return [...]string{"viewer", "editor", "admin"}[
 // by commas: a group's name can have spaces in it, and "Platform Admins"
 // isn't "Admins".
 func (s *Server) groups(r *http.Request) []string {
+	if s.in != nil {
+		if w, ok := whoOf(r); ok {
+			return w.Groups
+		}
+		return nil
+	}
 	if s.cfg.GroupsHeader == "" || len(r.Header.Values(s.cfg.GroupsHeader)) != 1 {
 		return nil
 	}
@@ -92,7 +100,7 @@ func (s *Server) role(r *http.Request) role {
 // rolesKept reports whether admins can give roles in the UI: roles are on,
 // with someone to give them (--admins), and the proxy names who is who.
 func (s *Server) rolesKept() bool {
-	return !s.cfg.ReadOnly && len(s.cfg.Admins) > 0 && s.cfg.UserHeader != ""
+	return !s.cfg.ReadOnly && len(s.cfg.Admins) > 0 && s.namesPeople()
 }
 
 // grantsCache keeps the roles the ledger gives until it changes.
@@ -228,12 +236,14 @@ func scoped(r *http.Request) ([]int64, bool) { return ledger.TeamsOf(r.Context()
 // one may make, as there are no roles and the server listens beyond
 // loopback.
 type forbidden struct {
-	need   role
-	closed bool
+	need             role
+	closed, signedIn bool
 }
 
 func (f forbidden) Error() string {
 	switch {
+	case f.closed && f.signedIn:
+		return "no one changes anything here: lapilli serve signs people in, with no roles. Name who may make changes in --editors or --admins"
 	case f.closed:
 		return "no one changes anything here: lapilli serve listens beyond this machine with no roles. Give roles behind a sign-in proxy (--user-header with --editors or --admins), or --everyone-admin"
 	case f.need == admin:
@@ -244,7 +254,7 @@ func (f forbidden) Error() string {
 
 // forbidden is the refusal of a change that needs a role the reader hasn't.
 func (s *Server) forbidden(at role) forbidden {
-	return forbidden{need: at, closed: !s.cfg.ReadOnly && len(s.cfg.Editors)+len(s.cfg.Admins) == 0 && !s.open.Load()}
+	return forbidden{need: at, closed: !s.cfg.ReadOnly && len(s.cfg.Editors)+len(s.cfg.Admins) == 0 && !s.open.Load(), signedIn: s.in != nil}
 }
 
 // LoopbackOnly reports whether an address to listen on is this machine's
@@ -266,9 +276,9 @@ func LoopbackOnly(addr string) bool {
 // it was bound to is loopback: localhost is what the resolver says, and
 // /etc/hosts can make it another. It then says who may change what.
 func (s *Server) listening(a net.Addr) {
-	if !s.cfg.EveryoneAdmin {
+	if !s.cfg.EveryoneAdmin || s.in != nil {
 		tcp, ok := a.(*net.TCPAddr)
-		s.open.Store(s.open.Load() && ok && tcp.IP.IsLoopback())
+		s.open.Store(s.open.Load() && ok && tcp.IP.IsLoopback() && s.in == nil)
 	}
 	s.logWho()
 }
@@ -279,7 +289,9 @@ func (s *Server) logWho() {
 	case s.cfg.ReadOnly:
 		s.log.Info("--read-only: no one changes anything through the UI or the API")
 	case len(s.cfg.Editors)+len(s.cfg.Admins) > 0:
-		s.log.Info("roles: those --editors and --admins name, as the sign-in proxy names them, change what their role allows; everyone else may only look")
+		s.log.Info("roles: those --editors and --admins name, as the sign-in names them, change what their role allows; everyone else may only look")
+	case s.in != nil:
+		s.log.Warn("a sign-in and no roles: everyone signed in may only look. To take changes, name who may make them in --editors or --admins (* for everyone signed in)")
 	case s.cfg.EveryoneAdmin:
 		s.log.Warn("--everyone-admin: everyone who reaches the UI and the API changes anything, as an admin, with no sign-in", "listen", s.cfg.Listen)
 	case s.open.Load():
