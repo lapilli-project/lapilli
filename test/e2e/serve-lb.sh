@@ -226,13 +226,22 @@ subnet=$(docker network inspect kind -f '{{range .IPAM.Config}}{{.Subnet}} {{end
 helm upgrade lapilli charts/lapilli -n "$ns" --wait --timeout 5m "${values[@]}" \
   --set serve.networkPolicy.enabled=true --set "serve.networkPolicy.from[0].ipBlock.cidr=$subnet" \
   --set "serve.networkPolicy.metricsFrom[0].ipBlock.cidr=$subnet"
-sleep 5
-check "with the NetworkPolicy, the Gateway is let in" "$(browse "$work/ed" "$base/api/v1/me")" '"role":"editor"'
-check "and the load balancer" "$(code "http://$lb:8080/healthz")" '^200 $'
-if kubectl -n "$ns" exec deploy/pushgateway -- wget -q -T 5 -O- http://lapilli:8080/healthz >/dev/null 2>&1; then
+# A policy takes a moment to be enforced: a pod in the cluster is kept out
+# within a minute, and what is in front is let in all along.
+kept=
+for _ in $(seq 12); do
+  if ! kubectl -n "$ns" exec deploy/pushgateway -- wget -q -T 5 -O- http://lapilli:8080/healthz >/dev/null 2>&1; then
+    kept=1
+    break
+  fi
+  sleep 5
+done
+if [ -n "$kept" ]; then echo "ok: a pod in the cluster is kept out"; else
   echo "FAILED: a pod in the cluster reached the UI's port past the NetworkPolicy"
   fail=1
-else
-  echo "ok: a pod in the cluster is kept out"
 fi
+check "with the NetworkPolicy, the Gateway is let in" "$(browse "$work/ed" "$base/api/v1/me")" '"role":"editor"'
+check "and the Ingress" "$(code "http://$ihost/healthz")" '^200 $'
+check "and the load balancer" "$(code "http://$lb:8080/healthz")" '^200 $'
+check "and the pod is ready, its probes let in" "$(kubectl -n "$ns" get pods -l app.kubernetes.io/name=lapilli -o 'jsonpath={.items[0].status.conditions[?(@.type=="Ready")].status}')" '^True$'
 exit $fail

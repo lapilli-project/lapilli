@@ -88,8 +88,8 @@ https, or http to this machine or to a name inside a cluster (no dots,
 ### Sessions
 
 The session is a cookie, signed with HMAC-SHA256: the session's id
-(16 random bytes), the name, the groups, when it was made and when it
-expires (`--session-max-age`, 12h). Keys for the session cookie and the
+(16 random bytes), the name, the groups, when it was made (in seconds and
+milliseconds) and when it expires (`--session-max-age`, 12h). Keys for the session cookie and the
 sign-in's cookie are derived apart from the one key, and the MAC covers
 the cookie's name, so one can't stand for the other. A cookie made when
 sessions lasted longer is refused once older than they last now.
@@ -105,12 +105,17 @@ sessions lasted longer is refused once older than they last now.
   under `.localhost`, a loopback address): a session would otherwise cross
   the network in the clear.
 - **Signing out.** `POST /auth/logout`, from a form on every page, takes
-  the cookie away and keeps the session's id as ended until it would have
-  expired, in memory and in the ledger's `meta`, so a copy of the cookie is
-  refused after a restart too. It is a POST checked by the cross-origin
-  protection every write has, and the cookie is SameSite=Lax: a page
-  elsewhere can't sign people out. The provider's own session is left as
-  it is (`/auth/signed-out` says so): signing out there is the provider's.
+  the cookie away and ends every session of that person made until then,
+  in this browser and any other, a copy of the cookie among them: who
+  signed out and when (in milliseconds) is kept until a session made then
+  would have expired, in memory and in the ledger's `meta`, so a restart
+  doesn't bring one back. Keeping the people rather than each session's id
+  bounds it by the people the provider signs in, not by how often someone
+  signs in and out: 10,000 of them at a time, the oldest dropped first. It
+  is a POST checked by the cross-origin protection every write has, and the
+  cookie is SameSite=Lax: a page elsewhere can't sign people out. The
+  provider's own session is left as it is (`/auth/signed-out` says so):
+  signing out there is the provider's.
 - **Why a cookie, not a table.** One replica, one SQLite writer: a table of
   sessions would be written on every sign-in, and would need a schema
   change. A signed cookie needs nothing kept but the ended ids.

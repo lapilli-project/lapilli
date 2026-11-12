@@ -17,8 +17,8 @@ schema change.
   expiry and nonce checked, and `email_verified` asked of an `email` name. A
   browser keeps a session in a signed cookie (`__Host-`, HttpOnly, Secure,
   SameSite=Lax; `--session-max-age`, 12h; `--session-key-file`, or a key
-  kept in the ledger); `POST /auth/logout` ends it for good, the ended
-  sessions kept in the ledger. An API client or an agent sends an ID token
+  kept in the ledger); `POST /auth/logout` ends every session of that person
+  made until then, in every browser, for good, kept in the ledger. An API client or an agent sends an ID token
   the provider gave the client as a bearer token; it never approves a
   change. `--user-claim` (`email`) and `--groups-claim` (`groups`) give the
   roles `--editors`, `--admins` and `--approvers` name. Every page and API

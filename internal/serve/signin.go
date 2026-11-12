@@ -33,9 +33,10 @@ type signIn struct {
 	oidc    *signin.OIDC
 	proxy   *signin.Proxy
 	cookies *signin.Cookies
-	// ended are the sessions signed out of, by id, until they would have
-	// expired; kept in the ledger, so a restart doesn't bring one back.
-	ended expiring
+	// out are the people who signed out, and when: their sessions made
+	// before are ended. Kept in the ledger, so a restart doesn't bring one
+	// back.
+	out signedOut
 	// used are the sign-ins come back from, by state, until they would
 	// have expired: a callback can't be replayed.
 	used expiring
@@ -80,18 +81,57 @@ func (e *expiring) add(key string, until, now int64) bool {
 	return true
 }
 
-func (e *expiring) has(key string, now int64) bool {
-	e.Lock()
-	defer e.Unlock()
-	u, ok := e.m[key]
-	return ok && u > now
+// signedOut are the people who signed out, each with when (Unix
+// milliseconds): every session of theirs made then or before is ended. It
+// is bounded by the people who signed out within a session's life, which
+// only the identity provider makes more of, not by how often they did.
+type signedOut struct {
+	sync.Mutex
+	at  map[string]int64
+	max int
 }
 
-// snapshot is the set as JSON, for the ledger.
-func (e *expiring) snapshot() string {
-	e.Lock()
-	defer e.Unlock()
-	b, _ := json.Marshal(e.m)
+// add notes a person signed out at a time; entries older than a session
+// lasts are dropped, and, when full, the oldest.
+func (o *signedOut) add(user string, at, keep int64) {
+	o.Lock()
+	defer o.Unlock()
+	if o.at == nil {
+		o.at = map[string]int64{}
+	}
+	for u, t := range o.at {
+		if t+keep < at {
+			delete(o.at, u)
+		}
+	}
+	for len(o.at) >= o.max {
+		oldest, first := "", int64(0)
+		for u, t := range o.at {
+			if oldest == "" || t < first {
+				oldest, first = u, t
+			}
+		}
+		delete(o.at, oldest)
+	}
+	if t, ok := o.at[user]; !ok || at > t {
+		o.at[user] = at
+	}
+}
+
+// ended reports whether a session of a person's made at a time is one they
+// signed out of.
+func (o *signedOut) ended(user string, made int64) bool {
+	o.Lock()
+	defer o.Unlock()
+	t, ok := o.at[user]
+	return ok && made <= t
+}
+
+// snapshot is the people signed out as JSON, for the ledger.
+func (o *signedOut) snapshot() string {
+	o.Lock()
+	defer o.Unlock()
+	b, _ := json.Marshal(o.at)
 	return string(b)
 }
 
@@ -120,14 +160,14 @@ func whoOf(r *http.Request) (who, bool) {
 // Meta keys of the sign-in's, in the ledger.
 const (
 	metaSessionKey = "session-key"
-	metaEnded      = "sessions-ended"
+	metaSignedOut  = "signed-out"
 )
 
 // newSignIn readies the sign-in: the key cookies are signed with, from
 // --session-key-file or else made once and kept in the ledger; the
 // sessions signed out of; and the provider's or the proxy's verifier.
 func (s *Server) newSignIn(ctx context.Context) error {
-	in := &signIn{ended: expiring{max: 10000}, used: expiring{max: 10000}}
+	in := &signIn{out: signedOut{max: 10000}, used: expiring{max: 10000}}
 	now := func() time.Time { return s.now() }
 	if p := s.cfg.Proxy; p != nil {
 		p.Client, p.Now = signin.Client(nil), now
@@ -155,11 +195,11 @@ func (s *Server) newSignIn(ctx context.Context) error {
 		}
 		o.Now, o.Scopes = now, signin.WithOpenID(o.Scopes)
 		in.oidc = o
-		if raw, err := s.l.Meta(ctx, metaEnded); err == nil && raw != "" {
+		if raw, err := s.l.Meta(ctx, metaSignedOut); err == nil && raw != "" {
 			var m map[string]int64
 			if json.Unmarshal([]byte(raw), &m) == nil {
-				for id, until := range m {
-					in.ended.add(id, until, s.now().Unix())
+				for user, at := range m {
+					in.out.add(user, at, maxAge.Milliseconds())
 				}
 			}
 		}
@@ -258,7 +298,7 @@ func (s *Server) identify(r *http.Request) (who, error) {
 	default:
 		w.by = bySession
 		sess, ok := s.in.cookies.Read(r)
-		if !ok || s.in.ended.has(sess.ID, s.now().Unix()) {
+		if !ok || s.in.out.ended(sess.User, sess.Made) {
 			return who{}, errNoSession
 		}
 		w.User, w.Groups = sess.User, sess.Groups
@@ -435,17 +475,17 @@ func (s *Server) roleGroup(ctx context.Context, g string) bool {
 	return false
 }
 
-// logout ends the session: its cookie is taken away, and its id kept as
-// ended until it would have expired, so a copy of the cookie is refused
-// too. It is a POST from this site alone (the cross-origin check): a page
-// elsewhere can't sign people out.
+// logout signs the person out: the cookie is taken away, and every
+// session of theirs made until now is ended, this one and any copy of its
+// cookie, in another browser too, until it would have expired. It is a POST
+// from this site alone (the cross-origin check): a page elsewhere can't
+// sign people out.
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if sess, ok := s.in.cookies.Read(r); ok {
-		if s.in.ended.add(sess.ID, sess.Until, s.now().Unix()) {
-			if err := s.l.SetMeta(r.Context(), metaEnded, s.in.ended.snapshot()); err != nil {
-				s.log.Warn("the sessions signed out of can't be kept in the ledger: a copy of this one's cookie is refused until lapilli restarts", "err", err)
-			}
+		s.in.out.add(sess.User, s.now().UnixMilli(), s.in.cookies.MaxAge.Milliseconds())
+		if err := s.l.SetMeta(r.Context(), metaSignedOut, s.in.out.snapshot()); err != nil {
+			s.log.Warn("who signed out can't be kept in the ledger: a copy of their cookie is refused until lapilli restarts", "err", err)
 		}
 		s.log.Info("signed out", "user", sess.User)
 	}

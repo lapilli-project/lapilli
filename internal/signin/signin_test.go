@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -188,8 +189,22 @@ func TestKeysPublicOnly(t *testing.T) {
 	if _, err := k.VerifySignature(context.Background(), tok); err == nil {
 		t.Error("an HMAC key taken")
 	}
-	// Redirects aren't followed, and a body too big isn't read.
-	moved := httptest.NewServer(http.RedirectHandler(srv.URL, http.StatusFound))
+	if keys, err := k.fetch(context.Background()); err == nil {
+		t.Errorf("an HMAC key fetched: %v", keys)
+	}
+	// A public key for encryption, not signatures.
+	rsaKey := mustRSA(t).(*rsa.PrivateKey)
+	enc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &rsaKey.PublicKey, KeyID: "e", Algorithm: "RSA-OAEP", Use: "enc"}}})
+	}))
+	defer enc.Close()
+	if keys, err := NewKeys(enc.URL, Client(nil), nil, time.Now).fetch(context.Background()); err == nil {
+		t.Errorf("a key for encryption fetched: %v", keys)
+	}
+	// Redirects aren't followed, to keys that would verify or any, and a
+	// body too big isn't read.
+	idp := idptest.New(t, "x", "", time.Now)
+	moved := httptest.NewServer(http.RedirectHandler(idp.URL+"/keys", http.StatusFound))
 	defer moved.Close()
 	if _, err := NewKeys(moved.URL, Client(nil), nil, time.Now).fetch(context.Background()); err == nil {
 		t.Error("a redirect followed")
@@ -275,6 +290,11 @@ func TestSessionCookie(t *testing.T) {
 	if _, ok := read(set.Value); ok {
 		t.Error("expired")
 	}
+	k.MaxAge = 2 * time.Hour
+	if _, ok := read(set.Value); ok {
+		t.Error("expired, though sessions last longer now")
+	}
+	k.MaxAge = time.Hour
 	c.t = t0.Add(30 * time.Minute)
 	k.MaxAge = 20 * time.Minute
 	if _, ok := read(set.Value); ok {
@@ -546,7 +566,9 @@ func TestAWSALB(t *testing.T) {
 			t.Errorf("%s: taken as %+v", name, id)
 		}
 	}
-	// A key id that would leave the keys' path is never fetched.
+	// A key id that would leave the keys' path is never fetched, though a
+	// fetch is due.
+	c.t = c.t.Add(albRetry)
 	before := len(asked)
 	for _, kid := range []string{"../../evil", "a/b", "x?y=1", "a b", ""} {
 		if _, err := ask(albToken(key, kid, nil, user)); err == nil {

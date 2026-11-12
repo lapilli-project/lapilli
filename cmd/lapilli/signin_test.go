@@ -45,7 +45,9 @@ func TestServeSignInFlags(t *testing.T) {
 		"groups header alone":     {[]string{"--groups-header", "X-Forwarded-Groups"}, "--groups-header needs --user-header"},
 	} {
 		var out, errs strings.Builder
-		if code := run(append([]string{"serve", "--prometheus", "http://127.0.0.1:1", "--rules", hook}, c.args...), &out, &errs); code != 2 || !strings.Contains(errs.String(), c.want) {
+		// Let through, it would fail to listen, not serve.
+		args := append([]string{"serve", "--prometheus", "http://127.0.0.1:1", "--rules", hook, "--listen", "256.0.0.1:1", "--ledger", t.TempDir()}, c.args...)
+		if code := run(args, &out, &errs); code != 2 || !strings.Contains(errs.String(), c.want) {
 			t.Errorf("%s: %d, want 2 and %q\n%s", name, code, c.want, errs.String())
 		}
 	}
@@ -60,7 +62,7 @@ func TestServeSignInFlags(t *testing.T) {
 		"JWKS":                  {"--proxy-jwt", "jwks", "--proxy-jwt-header", "Authorization", "--proxy-jwt-jwks", "https://idp.example.com/keys", "--proxy-jwt-issuer", "https://idp.example.com", "--proxy-jwt-audience", "lapilli"},
 	} {
 		var out, errs strings.Builder
-		run(append(append([]string{"serve", "--prometheus", "http://127.0.0.1:1", "--rules", hook, "--listen", "256.0.0.1:1", "--ledger", t.TempDir()}, args...)), &out, &errs)
+		run(append([]string{"serve", "--prometheus", "http://127.0.0.1:1", "--rules", hook, "--listen", "256.0.0.1:1", "--ledger", t.TempDir()}, args...), &out, &errs)
 		if !strings.Contains(errs.String(), "--listen") {
 			t.Errorf("%s: %s", name, errs.String())
 		}

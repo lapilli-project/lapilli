@@ -56,6 +56,9 @@ type Session struct {
 	Groups []string `json:"g,omitempty"`
 	At     int64    `json:"iat"`
 	Until  int64    `json:"exp"`
+	// Made is when, in Unix milliseconds: a session made before its person
+	// signed out is ended, one made after isn't.
+	Made int64 `json:"t"`
 }
 
 // Login is a sign-in under way: its secrets, the page to go back to, and
@@ -79,7 +82,7 @@ var ErrTooBig = errors.New("the session is too big for a cookie")
 // Issue gives the browser a session for id, and says it.
 func (c *Cookies) Issue(w http.ResponseWriter, id Identity) (Session, error) {
 	now := c.Now()
-	s := Session{ID: random(16), User: id.User, Groups: id.Groups, At: now.Unix(), Until: now.Add(c.MaxAge).Unix()}
+	s := Session{ID: random(16), User: id.User, Groups: id.Groups, At: now.Unix(), Until: now.Add(c.MaxAge).Unix(), Made: now.UnixMilli()}
 	v, err := c.seal(c.session, c.SessionName(), s)
 	if err != nil {
 		return Session{}, err

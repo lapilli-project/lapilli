@@ -218,7 +218,17 @@ func TestNotSignedIn(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("/mcp: %d", w.Code)
 	}
-	// The plain header of a sign-in proxy means nothing here.
+	// The plain header of a sign-in proxy means nothing here, on the pages
+	// anyone may see too, even were it set beside the sign-in.
+	s.cfg.UserHeader = "X-Forwarded-Email"
+	r0 := httptest.NewRequest("GET", "/auth/signed-out", nil)
+	r0.Header.Set("X-Forwarded-Email", "boss@example.com")
+	w0 := httptest.NewRecorder()
+	h.ServeHTTP(w0, r0)
+	if strings.Contains(w0.Body.String(), "boss@example.com") {
+		t.Error("the header named the reader of a page anyone may see")
+	}
+	s.cfg.UserHeader = ""
 	r = httptest.NewRequest("GET", "/api/v1/me", nil)
 	r.Header.Set("X-Forwarded-Email", "boss@example.com")
 	w = httptest.NewRecorder()
@@ -321,9 +331,33 @@ func TestSignInNoOpenRedirect(t *testing.T) {
 			t.Errorf("next %q: %d %q", next, w.Code, loc)
 		}
 	}
+	// Each step checks it: the login keeps a page of this server's, and the
+	// callback goes only to one, whatever the cookie says.
+	w := newBrowser(t, h).do("GET", "/auth/login?next="+url.QueryEscape("//evil.example.com/x"), nil)
+	lr := httptest.NewRequest("GET", "/auth/callback", nil)
+	for _, c := range w.Result().Cookies() {
+		lr.AddCookie(c)
+	}
+	if l, ok := s.in.cookies.Take(httptest.NewRecorder(), lr); !ok || l.Next != "/" {
+		t.Errorf("the login kept %q", l.Next)
+	}
+	b := newBrowser(t, h)
+	st := signin.NewStart()
+	lw := httptest.NewRecorder()
+	s.in.cookies.Begin(lw, st, "//evil.example.com/x")
+	for _, c := range lw.Result().Cookies() {
+		b.cookies[c.Name] = &http.Cookie{Name: c.Name, Value: c.Value}
+	}
+	auth, err := s.in.oidc.AuthURL(context.Background(), st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := b.do("GET", idp.Authorize(t, auth, claimsOf("ed@example.com")), nil); w.Header().Get("Location") != "/" {
+		t.Errorf("the callback went to %q", w.Header().Get("Location"))
+	}
 	// Nor is a page not signed in sent anywhere but --external-url.
 	r := httptest.NewRequest("GET", "//evil.example.com/x", nil)
-	w := httptest.NewRecorder()
+	w = httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if loc := w.Header().Get("Location"); w.Code == http.StatusSeeOther && !strings.HasPrefix(loc, extURL+"/") {
 		t.Errorf("sent to %q", loc)
@@ -331,13 +365,20 @@ func TestSignInNoOpenRedirect(t *testing.T) {
 }
 
 // Signing out takes the session away, for good: a copy of its cookie is
-// refused, after a restart too. A page elsewhere can't sign people out.
+// refused, and the person's sessions in other browsers end too, after a
+// restart as well; another person's go on, and so does a session made
+// after. A page elsewhere can't sign people out.
 func TestSignOut(t *testing.T) {
 	s, idp := oidcServer(t, nil)
 	h := s.Handler()
+	// Signed in a minute before signing out, in two browsers.
+	s.now = func() time.Time { return now.Add(-time.Minute) }
 	b := newBrowser(t, h)
 	b.signIn(idp, "/", claimsOf("ed@example.com"))
 	copied := *b.cookies["__Host-lapilli-session"]
+	laptop := newBrowser(t, h)
+	laptop.signIn(idp, "/", claimsOf("ed@example.com"))
+	s.now = func() time.Time { return now }
 	// From another site: refused, and still signed in.
 	for _, site := range []string{"cross-site", "same-site"} {
 		if w := b.do("POST", "/auth/logout", map[string]string{"Sec-Fetch-Site": site}); w.Code != http.StatusForbidden {
@@ -368,6 +409,17 @@ func TestSignOut(t *testing.T) {
 	if w := again.do("GET", "/api/v1/me", nil); w.Code != http.StatusUnauthorized {
 		t.Errorf("a copy of the cookie after signing out: %d", w.Code)
 	}
+	if w := laptop.do("GET", "/api/v1/me", nil); w.Code != http.StatusUnauthorized {
+		t.Errorf("the same person in another browser: %d", w.Code)
+	}
+	// Signed in again a moment later: a session made after goes on.
+	s.now = func() time.Time { return now.Add(time.Second) }
+	fresh := newBrowser(t, h)
+	fresh.signIn(idp, "/", claimsOf("ed@example.com"))
+	if w := fresh.do("GET", "/api/v1/me", nil); w.Code != 200 {
+		t.Errorf("signed in again: %d", w.Code)
+	}
+	s.now = func() time.Time { return now }
 	// A session not ended, from before the restart.
 	b2 := newBrowser(t, h)
 	b2.signIn(idp, "/", claimsOf("boss@example.com", "ops"))
@@ -396,7 +448,15 @@ func TestSignOut(t *testing.T) {
 // loopback too, which a proxy on the same machine makes anyone's.
 func TestSignInNoRoles(t *testing.T) {
 	s, idp := oidcServer(t, func(c *Config) { c.Admins, c.Editors, c.Listen = nil, nil, "127.0.0.1:0" })
+	if s.open.Load() {
+		t.Error("open, with a sign-in, before listening")
+	}
+	// Bound to loopback, it stays closed.
+	s.open.Store(true)
 	s.listening(&netTCP127)
+	if s.open.Load() {
+		t.Error("open, with a sign-in, listening on loopback")
+	}
 	h := s.Handler()
 	b := newBrowser(t, h)
 	b.signIn(idp, "/", claimsOf("boss@example.com", "ops"))
