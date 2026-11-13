@@ -79,6 +79,19 @@ lapilli serve --ledger-url-file /var/run/lapilli/ledger/url ...
   ledger: a timeout short enough to matter would fail it, and the next
   hour's run would fail it again. A string can still set them (`options=-c
   lock_timeout=10s`), as can the role or the database.
+- **A server that stops answering** holds nothing up for long. Behind a
+  proxy that keeps the connection while what is past it is gone (an auth
+  proxy, a pooler, a load balancer), or on a server that stopped, TCP is
+  well and a statement would wait forever; on a firewall or a NAT that
+  drops what is sent, as long as TCP retries, some 15 minutes on Linux,
+  holding up every write. Keepalives see neither. So the ledger's own
+  deadlines: a connection is made, its lock taken, within 30 s (on top of
+  the string's `connect_timeout`); one taken from a pool after a second
+  answers pgx's ping within 10 s, or is given up and another made; a
+  write's transaction, BEGIN to COMMIT, takes 5 minutes at most, some
+  hundred times the largest serve makes (a copy, which writes a whole
+  ledger in one, has none). CI hung so once, ten minutes, behind the test's
+  own proxy (`TestPostgresSilentConnection` holds it to these now).
 - **Postgres 15 or later**: the oldest major the PostgreSQL project still
   supports (14's last release was in November 2026). CI runs the ledger's,
   serve's and the command's tests on 15 and 18. Nothing newer than 15 is
@@ -148,13 +161,17 @@ in `FROM` without a name (which Postgres refuses before 16), and
   in Postgres, none in SQLite. Nothing reads meaning into an id's value.
 - **A NUL, or bytes that aren't UTF-8,** in a text: Postgres refuses both,
   SQLite keeps them. In Postgres each is kept as U+FFFD, which is how
-  `encoding/json` writes bytes that aren't UTF-8 anyway; in JSON (a label
-  set, a change), the escape `\u0000`, which `jsonb` refuses, is written
-  U+FFFD too (`pgText`), wherever it is written from: a run's labels, a
-  source's, a notification's, a copy. A label holding a NUL, which every
-  intake takes, is the same alert the next time it comes, as in SQLite;
-  two label sets that differ only by a NUL and a U+FFFD are one alert in
-  Postgres, two in SQLite.
+  `encoding/json` writes bytes that aren't UTF-8 anyway. In a text
+  Postgres reads as `jsonb` (a label set of `series` and `notified`, a
+  change's before and after, a version's names; a list given as a
+  parameter, `CAST(? AS jsonb)`), the escape `\u0000`, which `jsonb`
+  refuses, is written U+FFFD too (`pgJSON`), wherever it is written from:
+  a run's labels, a source's, a notification's, a copy. Any other text
+  keeps it as written, as SQLite does: a task's body that is a JSON line,
+  an incident's labels, which are then the same the next time they come.
+  A label holding a NUL, which every intake takes, is the same alert the
+  next time it comes, as in SQLite; two label sets that differ only by a
+  NUL and a U+FFFD are one alert in Postgres, two in SQLite.
 - **How big a key can be.** A Postgres btree holds some 2,700 bytes of a
   key; SQLite's hold any length, and a rule's name, a group key (1,000
   characters, up to 4,000 bytes), a severity, an alarm's id in a label
@@ -186,8 +203,12 @@ in `FROM` without a name (which Postgres refuses before 16), and
   source's copy writes, their stones, the alerts new to the ledger, each
   alert's last firing before a span. The scale tests' budgets hold on both
   (the times are under "As built"). Across a network each round trip
-  costs more: what still goes a row or a span at a time is a notification
-  kept, a page's firings read a span at a time, a recorded rule found. A
+  costs more: what still goes a row at a time is a notification kept and
+  a recorded rule found. A page's firings, read a span about each alert at
+  a time in SQLite, are read 2,000 spans a statement in Postgres, each
+  searched for by `firings_rule` (`LATERAL`), their series' labels after by
+  id: twelve weeks of 20,000 notifications took 6.6 s on CI's Postgres 15,
+  some 13,000 round trips, and take some 15 statements now. A
   week of teams' pages reads each rule's firings by `firings_rule`
   (`LATERAL`): Postgres, its statistics taken early in a backfill, rated
   reading the whole week by `firings_start` cheaper, and took 3.4 s on CI's
@@ -244,7 +265,9 @@ database each have one).
   process's own sessions, which it can for minutes after a network fault,
   that session is ended (`pg_terminate_backend`, its own role's) and the
   lock taken. A session is this process's own from when the writer makes
-  it, before it asks for the lock: the answer can be lost on its way. Each
+  it, before it asks for the lock (the answer can be lost on its way), until
+  the lock is held again; it is its pid and when it began, as a pid is
+  given again, maybe to another process's session that took the ledger. Each
   process that takes the lock counts one more in `schema_version.writers`;
   a connection made again that finds another count finds that another
   process took the ledger in between, and wrote: this one writes nothing
@@ -252,11 +275,14 @@ database each have one).
   in the ledger now. One that finds its own count reads its caches again,
   in case a failover lost what it last wrote.
 - **What goes out of the process** is sent only while it holds the lock:
-  a notice of the outbox, which readers, holding no lock, find due, is
-  sent after the writer's session says it still holds it (`Ledger.Hold`),
-  each one, so a process that lost the ledger sends none of what the next
-  will. A rule's or an alarm's change is written through the writer before
-  it is applied.
+  a notice of the outbox, which readers, holding no lock, find due, and the
+  week's digest are sent after the writer's session says it still holds it
+  (`Ledger.Hold`), each one, so a process that lost the ledger sends none
+  of what the next will. A rule's or an alarm's change is written through
+  the writer before it is applied (`Move`); a subscription is confirmed as
+  an incoming request asks, which twice does no harm.
+  `TestSendersHoldTheLedger` reads serve's code for every way out of the
+  process, and fails on one it doesn't know.
 - `signin.md`'s guarantees hold: who signed out is merged into `meta` in
   one transaction and read on each request; with one process, there is no
   other to sign out at.
