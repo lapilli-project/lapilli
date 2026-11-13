@@ -96,9 +96,10 @@ type pgWriter struct {
 	// have one.
 	key int32
 	// pid is the session that holds the lock for this process, once one
-	// does; own, every session that took it for this process: should one
-	// still hold it after its connection dropped, which the server can take
-	// minutes to notice, it is this process's own.
+	// does; own, every session the writer made, before it asked for the
+	// lock (the answer can be lost on its way): should one hold it after
+	// its connection dropped, which the server can take minutes to notice,
+	// it is this process's own.
 	pid uint32
 	own map[uint32]bool
 	// writers is schema_version.writers once this process took the lock:
@@ -189,15 +190,14 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 		h.Write([]byte(schema))
 		w.key = int32(h.Sum32()&0x7fffffff) | 1
 	}
+	// This process's own from now, should the lock be taken and the answer
+	// not reach it.
+	w.own[c.PgConn().PID()] = true
 	took, err := w.try(ctx, c)
 	if err != nil {
 		return err
 	}
-	if took {
-		// This process's own from now, should what follows not reach it.
-		w.own[c.PgConn().PID()] = true
-	}
-	if !took && len(w.own) > 0 {
+	if !took {
 		// One of this process's own sessions, from before a connection
 		// dropped (maybe while it was made), may hold it still, which the
 		// server can keep for minutes: it is ended, and the lock taken
@@ -206,9 +206,6 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 			c.Exec(ctx, "SELECT pg_terminate_backend($1, 5000)", h.PID)
 			if took, err = w.try(ctx, c); err != nil {
 				return err
-			}
-			if took {
-				w.own[c.PgConn().PID()] = true
 			}
 		}
 	}

@@ -699,7 +699,7 @@ func TestPostgresOwnSessionEnded(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	l.pg.mu.Lock()
-	l.pg.pid = stale.PgConn().PID()
+	l.pg.own[stale.PgConn().PID()] = true
 	l.pg.mu.Unlock()
 	var err2 error
 	for range 2 {
