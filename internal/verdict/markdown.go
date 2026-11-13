@@ -120,17 +120,31 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 		}
 		parts = append(parts, rules)
 	}
+	if len(c.Recording) > 0 {
+		recs := mdPart{head: fmt.Sprintf("#### Recording rules that differ\n\n%s\n\n", RecordingNote), foot: "\n", noun: "recording rules that differ"}
+		for _, r := range c.Recording {
+			recs.rows = append(recs.rows, fmt.Sprintf("- %s in %s: %s\n", md(r.Record, 200, false), md(r.Group, 100, false), r.Change))
+		}
+		parts = append(parts, recs)
+	}
+	if n := p.limited(); n > 0 {
+		text(fmt.Sprintf("%d of the rules that differ are in a group with a limit, which the replay doesn't hold them to: past it, Prometheus drops all of a rule's alerts.\n\n", n))
+	}
 	if len(p.broken) > 0 {
+		// A row a rule, its reasons on each side in it: a note that leaves
+		// rows out counts rules.
 		broken := mdPart{head: fmt.Sprintf("#### Could not replay %d rules\n\n", len(p.broken)), foot: "\n", noun: "rules that couldn't be replayed"}
 		for _, rc := range p.broken {
+			var why []string
 			for _, side := range []struct {
 				name string
 				r    *RuleResult
 			}{{"before", rc.Before}, {"after", rc.After}} {
 				if side.r != nil && side.r.Unsupported != "" {
-					broken.rows = append(broken.rows, fmt.Sprintf("- %s, %s: %s\n", md(rc.Rule, 200, false), side.name, md(side.r.Unsupported, 300, false)))
+					why = append(why, side.name+": "+md(side.r.Unsupported, 300, false))
 				}
 			}
+			broken.rows = append(broken.rows, fmt.Sprintf("- %s, %s\n", md(rc.Rule, 200, false), strings.Join(why, "; ")))
 		}
 		parts = append(parts, broken)
 	}
@@ -184,7 +198,22 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 			text("Rules left alone weren't replayed (`--changed-only`): incidents show the changed rules' catches alone.\n")
 		}
 	}
+	if said := passedOver(c.PassedOver); said != "" {
+		text("\nPassed over, reading the rules: " + said + ".\n")
+	}
 	return writeParts(w, parts, MarkdownLimit)
+}
+
+// passedOver says what reading each set's files passed over, as
+// Comparison.PassedOver holds it: Lapilli's own words and counts.
+func passedOver(by map[string]string) string {
+	var said []string
+	for _, side := range []struct{ key, name string }{{"rules", "the rules proposed (--rules)"}, {"compare", "the rules in place (--compare)"}} {
+		if s := by[side.key]; s != "" {
+			said = append(said, side.name+" held "+s)
+		}
+	}
+	return strings.Join(said, "; ")
 }
 
 // mdPart is a part of a comment: a head, rows, and a foot written after
@@ -265,6 +294,18 @@ func mdRow(cells []string) string { return "| " + strings.Join(cells, " | ") + "
 // GitHub's tables take it (\|), which every host's tables read as a | in
 // the cell, not the cell's end.
 func md(s string, most int, table bool) string {
+	// Cut before anything is made of it: a name of megabytes is read no
+	// further than it is shown.
+	cut := false
+	if i, n := 0, 0; utf8.RuneCountInString(s) > most {
+		for i = range s {
+			if n == most {
+				break
+			}
+			n++
+		}
+		s, cut = s[:i], true
+	}
 	var b strings.Builder
 	for _, r := range s {
 		if unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp) || unicode.Is(unicode.Zs, r) && r != ' ' ||
@@ -275,8 +316,12 @@ func md(s string, most int, table bool) string {
 		b.WriteRune(r)
 	}
 	s = b.String()
-	if utf8.RuneCountInString(s) > most {
-		s = string([]rune(s)[:most]) + "…"
+	if r := []rune(s); len(r) > most {
+		// What doesn't show, shown as \u{...}, is longer.
+		s, cut = string(r[:most]), true
+	}
+	if cut {
+		s += "…"
 	}
 	if s == "" {
 		return "–"

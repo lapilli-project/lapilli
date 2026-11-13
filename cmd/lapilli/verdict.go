@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"lapilli.dev/internal/cloud"
 	"lapilli.dev/internal/content"
@@ -288,10 +291,14 @@ lapilli only reads history and files. It sends the report nowhere but to
 `
 
 type verdictFlags struct {
-	rules              []ruleFile
-	rulesHistory       string
-	rulesSelect        rules.Selector
-	picked             rules.Picked // what reading the rule files passed over
+	rules        []ruleFile
+	rulesHistory string
+	rulesSelect  rules.Selector
+	picked       rules.Picked // what reading the rule files passed over
+	// recorded are, with --compare, the recording rules the files read
+	// held; passedOver what each set's files passed over, as said.
+	recorded           []rules.Recording
+	passedOver         map[string]string
 	loadedRules        bool
 	grafana, grafanaTk string
 
@@ -860,6 +867,8 @@ func validContent(f *verdictFlags, sources int) error {
 		return errors.New("--check-content doesn't go with --check-replay")
 	case len(f.compare) > 0 || f.changedOnly:
 		return errors.New("--check-content checks the rules given: leave out --compare")
+	case f.markdown:
+		return errors.New("--markdown writes --compare's report, for a pull request: it doesn't go with --check-content")
 	case f.metrics || f.push != "" || f.slackFile != "":
 		return errors.New("--check-content is for you to read, or --json: it doesn't go with --metrics, --push or --slack-webhook-file")
 	case f.grafanaTk != "" && f.grafana == "":
@@ -957,13 +966,16 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			return 0
 		}
 	}
+	// What an error says can hold what a rule file or a flag does, a line
+	// break among it: shown as \u{...}, never a line of its own, which a
+	// CI system could read as a command.
 	f, err := parseVerdictFlags(args)
 	if err != nil {
-		fmt.Fprintf(stderr, "lapilli verdict: %v\nRun \"lapilli verdict -h\" for the options.\n", err)
+		fmt.Fprintf(stderr, "lapilli verdict: %s\nRun \"lapilli verdict -h\" for the options.\n", verdict.Clean(err.Error()))
 		return 2
 	}
 	fail := func(err error) int {
-		fmt.Fprintf(stderr, "lapilli verdict: %v\n", err)
+		fmt.Fprintf(stderr, "lapilli verdict: %s\n", verdict.Clean(err.Error()))
 		return 1
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -981,8 +993,10 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
+	var recordedIs []rules.Recording
 	if len(f.compare) > 0 {
 		f.sayPicked(stderr, "--rules")
+		recordedIs, f.recorded = f.recorded, nil
 	} else {
 		f.sayPicked(stderr, "")
 	}
@@ -1036,9 +1050,10 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			is = versions[0].Rules
 		}
 		same, before, after = source.Split(was, is)
-		if len(before)+len(after) == 0 {
+		recs := recordingChanges(f.recorded, recordedIs)
+		if len(before)+len(after) == 0 && len(recs) == 0 {
 			c := &verdict.Comparison{From: f.opts.From, To: f.opts.To, Same: len(same), ChangedOnly: f.changedOnly,
-				Rules: []verdict.RuleChange{}, Incidents: []verdict.IncidentChange{}}
+				Rules: []verdict.RuleChange{}, Incidents: []verdict.IncidentChange{}, PassedOver: f.passedOver}
 			c.Summarize(f.incidents != "" || f.impact != "")
 			switch {
 			case f.json:
@@ -1108,6 +1123,8 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			verdict.Judge(slices.Concat(ran[0], ran[2]), slices.Concat(fired[0], fired[2]), incs, o),
 			changed, len(was)-len(before))
 		cmp.ChangedOnly = f.changedOnly
+		cmp.Recording = recordingChanges(f.recorded, recordedIs)
+		cmp.PassedOver = f.passedOver
 		cmp.Summarize(f.incidents != "" || f.impact != "")
 	case len(versions) > 0:
 		known, fs = replay.Run(ctx, h, versions, f.opts.From, f.opts.To, f.step, f.parallel)
@@ -1185,7 +1202,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	case f.json && cmp != nil:
 		err = verdict.JSON(stdout, cmp)
 	case f.markdown:
-		f.hideWhere(cmp)
+		f.forComment(cmp, stderr)
 		err = verdict.CompareMarkdown(stdout, cmp, f.loc)
 	case f.json:
 		err = verdict.JSON(stdout, rep)
@@ -1239,37 +1256,102 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// hideWhere takes out of the reasons rules couldn't be replayed, as
-// --markdown writes them for a pull request, where the history and the
-// rules are read from: the URLs given, their hosts, and a Google Cloud
-// project, which a failed query names. A comment on a pull request is read
-// by more people than the job's log.
-func (f *verdictFlags) hideWhere(c *verdict.Comparison) {
-	var hide []string
+// forComment readies the reasons rules couldn't be replayed for
+// --markdown, a comment on a pull request, which more people read than the
+// job's log. A query that failed for any reason but the server judging it
+// (HTTP 400 or 422: a parse error, a bad expression), which is to say for
+// want of reaching the history (a connection, a credential, the server
+// failing), says only that, its whole reason going to the job's log. The
+// rest has where the history is taken out of it: the URLs given, the user
+// names in them and their hosts, each as a whole word, any IP address with
+// its port, the tenants, and a Google Cloud project.
+func (f *verdictFlags) forComment(c *verdict.Comparison, stderr io.Writer) {
+	type hid struct{ val, as string }
+	var hide []hid
 	for _, w := range []struct{ flag, val string }{{"--prometheus", f.promURL}, {"--loki", f.loki}, {"--grafana", f.grafana},
-		{"--ruler", f.ruler}, {"--gcp-project", f.gcpProj}} {
+		{"--ruler", f.ruler}, {"--gcp-project", f.gcpProj}, {"--ruler-tenant", f.rulerTenant}, {"--loki-tenant", f.lokiTenant}} {
 		if w.val == "" {
 			continue
 		}
-		hide = append(hide, w.val, "["+w.flag+"]")
-		// A host as short as "p" is in too many words to take out.
-		if u, err := url.Parse(w.val); err == nil && len(u.Hostname()) >= 4 {
-			hide = append(hide, u.Host, "["+w.flag+"]", u.Hostname(), "["+w.flag+"]")
+		hide = append(hide, hid{w.val, "[" + w.flag + "]"})
+		if u, err := url.Parse(w.val); err == nil && u.Host != "" {
+			hide = append(hide, hid{u.Host, "[" + w.flag + "]"}, hid{u.Hostname(), "[" + w.flag + "]"})
+			if u.User != nil && u.User.Username() != "" {
+				hide = append(hide, hid{u.User.Username(), "[user]"})
+			}
 		}
 	}
-	if len(hide) == 0 {
-		return
+	slices.SortStableFunc(hide, func(a, b hid) int { return len(b.val) - len(a.val) })
+	scrub := func(s string) string {
+		s = userinfo.ReplaceAllString(s, "$1")
+		for _, h := range hide {
+			s = replaceWord(s, h.val, h.as)
+		}
+		return address.ReplaceAllString(s, "[address]")
 	}
-	r := strings.NewReplacer(hide...)
 	for _, rep := range []*verdict.Report{c.Before, c.After} {
 		if rep == nil {
 			continue
 		}
+		side := "after"
+		if rep == c.Before {
+			side = "before"
+		}
 		for i := range rep.Rules {
-			if rep.Rules[i].Unsupported != replay.Unfinished {
-				rep.Rules[i].Unsupported = r.Replace(rep.Rules[i].Unsupported)
+			r := &rep.Rules[i]
+			switch {
+			case r.Unsupported == "" || r.Unsupported == replay.Unfinished:
+			case strings.HasPrefix(r.Unsupported, "query failed: ") && !judged.MatchString(r.Unsupported):
+				fmt.Fprintf(stderr, "lapilli verdict: %s (%s) couldn't be replayed: %s\n", verdict.Clean(r.Rule), side, verdict.Clean(r.Unsupported))
+				r.Unsupported = UnreadHistory
+			default:
+				r.Unsupported = scrub(r.Unsupported)
 			}
 		}
+	}
+}
+
+// UnreadHistory is, in --markdown, why a rule whose query the history
+// didn't answer couldn't be replayed.
+const UnreadHistory = "query failed: the history couldn't be read; the job's log says why"
+
+var (
+	// judged is a query the server read and refused: what it says is of
+	// the query, the pull request's.
+	judged = regexp.MustCompile(`^query failed: HTTP (400|422): `)
+	// userinfo is a URL's user and password.
+	userinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s"']*@`)
+	// address is an IP address, with its port if it has one.
+	address = regexp.MustCompile(`\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*\](:[0-9]+)?|\b([0-9]{1,3}\.){3}[0-9]{1,3}(:[0-9]+)?\b`)
+)
+
+// replaceWord replaces in s each old that is a whole word, neither
+// letters, digits, dots, dashes nor underscores either side of it, with
+// with: a host "prom" isn't taken out of "prometheus".
+func replaceWord(s, old, with string) string {
+	if old == "" {
+		return s
+	}
+	word := func(r rune) bool {
+		return r == '.' || r == '-' || r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+	}
+	var b strings.Builder
+	for {
+		i := strings.Index(s, old)
+		if i < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		before, _ := utf8.DecodeLastRuneInString(s[:i])
+		after, _ := utf8.DecodeRuneInString(s[i+len(old):])
+		whole := (i == 0 || !word(before)) && (i+len(old) == len(s) || !word(after))
+		b.WriteString(s[:i])
+		if whole {
+			b.WriteString(with)
+		} else {
+			b.WriteString(old)
+		}
+		s = s[i+len(old):]
 	}
 }
 
@@ -1498,10 +1580,52 @@ func (f *verdictFlags) sayPicked(stderr io.Writer, side string) {
 		files := "the rule files read"
 		if side != "" {
 			files = "the rule files " + side + " read"
+			if f.passedOver == nil {
+				f.passedOver = map[string]string{}
+			}
+			f.passedOver[strings.TrimPrefix(side, "--")] = said
 		}
 		fmt.Fprintf(stderr, "lapilli verdict: %s held %s: passed over\n", files, said)
 	}
 	f.picked = rules.Picked{}
+}
+
+// recordingChanges are the recording rules that differ between was, those
+// in place, and is, those proposed: by what each records and its group,
+// changed when both have it otherwise, added or removed when one hasn't.
+func recordingChanges(was, is []rules.Recording) []verdict.RecordingChange {
+	type id struct{ record, group string }
+	keys := func(rs []rules.Recording) map[id][]string {
+		m := map[id][]string{}
+		for _, r := range rs {
+			k := id{r.Record, r.Group}
+			m[k] = append(m[k], r.Key())
+		}
+		for k := range m {
+			slices.Sort(m[k])
+		}
+		return m
+	}
+	before, after := keys(was), keys(is)
+	var out []verdict.RecordingChange
+	for k, b := range before {
+		a, ok := after[k]
+		switch {
+		case !ok:
+			out = append(out, verdict.RecordingChange{Record: k.record, Group: k.group, Change: "removed"})
+		case !slices.Equal(a, b):
+			out = append(out, verdict.RecordingChange{Record: k.record, Group: k.group, Change: "changed"})
+		}
+	}
+	for k := range after {
+		if _, ok := before[k]; !ok {
+			out = append(out, verdict.RecordingChange{Record: k.record, Group: k.group, Change: "added"})
+		}
+	}
+	slices.SortFunc(out, func(a, b verdict.RecordingChange) int {
+		return cmp.Or(strings.Compare(a.Record, b.Record), strings.Compare(a.Group, b.Group))
+	})
+	return out
 }
 
 // loadVersions reads the --rules files, one version of the rules for each
@@ -1551,7 +1675,12 @@ func loadVersions(f *verdictFlags) ([]replay.Version, error) {
 // keeps, whose names match --rule, or all of them; what it passed over is
 // added to f.picked.
 func loadRules(f *verdictFlags, path string) ([]rules.Rule, error) {
-	rs, _, picked, err := rules.ReadPicked(path, rules.Picking{Select: f.rulesSelect})
+	pick := rules.Picking{Select: f.rulesSelect}
+	if len(f.compare) > 0 {
+		// Set beside each other, what each set records is compared too.
+		pick.Recordings = &f.recorded
+	}
+	rs, _, picked, err := rules.ReadPicked(path, pick)
 	f.picked.Add(picked)
 	if errors.Is(err, rules.ErrNoneSelected) {
 		err = fmt.Errorf("--rules-select %w", err)

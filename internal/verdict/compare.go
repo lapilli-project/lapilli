@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/rules"
 )
 
 // Comparison is the verdict on one period from two sets of rules: those in
@@ -28,9 +29,26 @@ type Comparison struct {
 	Incidents []IncidentChange `json:"incidents"`
 	Before    *Report          `json:"before"`
 	After     *Report          `json:"after"`
+	// Recording are the recording rules that differ. A replay reads what
+	// a recording rule recorded, from the history: the alerts that read
+	// one are replayed against what it recorded, not what the change
+	// would record.
+	Recording []RecordingChange `json:"recording,omitempty"`
+	// PassedOver says what reading each set's files passed over: a
+	// rendered chart's Deployments, documents a selector didn't keep. By
+	// "rules" and "compare", the flags that named them.
+	PassedOver map[string]string `json:"passed_over,omitempty"`
 	// Summary is the comparison in numbers, for a tool to read. lapilli
 	// verdict --compare gives it; lapilli serve keeps none.
 	Summary *Summary `json:"summary,omitempty"`
+}
+
+// RecordingChange is a recording rule that differs between the two sets:
+// by what it records and its group, "changed", "added" or "removed".
+type RecordingChange struct {
+	Record string `json:"record"`
+	Group  string `json:"group"`
+	Change string `json:"change"`
 }
 
 // Summary is a comparison in numbers, for a tool to read: lapilli verdict
@@ -39,7 +57,8 @@ type Comparison struct {
 // (README, "Pull request backtests in CI").
 type Summary struct {
 	// NothingChanged says nothing that decides when a rule fires differs
-	// between the two sets of rules: nothing was replayed.
+	// between the two sets of rules, a recording rule included: nothing
+	// was replayed.
 	NothingChanged bool `json:"nothing_changed"`
 	// Changed, Added and Removed are the rules that differ: in both sets,
 	// only in the rules proposed (--rules), only in those in place
@@ -54,6 +73,9 @@ type Summary struct {
 	// Unreplayed are the rules that differ that couldn't be replayed, on
 	// one side or both.
 	Unreplayed int `json:"unreplayed"`
+	// RecordingChanged are the recording rules that differ (Recording):
+	// what the alerts that read them see changes, which no replay shows.
+	RecordingChanged int `json:"recording_changed"`
 	// FiringsBefore and FiringsAfter are the firings on each side: of the
 	// rules that differ alone, with --changed-only.
 	FiringsBefore int `json:"firings_before"`
@@ -73,8 +95,8 @@ type Summary struct {
 func (c *Comparison) Summarize(incidents bool) {
 	p := c.parts()
 	s := &Summary{Changed: p.changed, Added: p.added, Removed: p.gone, Same: c.Same, Alike: len(p.alike),
-		Unreplayed: len(p.broken), IncidentsGiven: incidents, IncidentsChanged: len(c.Incidents)}
-	s.NothingChanged = s.Changed+s.Added+s.Removed == 0
+		Unreplayed: len(p.broken), RecordingChanged: len(c.Recording), IncidentsGiven: incidents, IncidentsChanged: len(c.Incidents)}
+	s.NothingChanged = s.Changed+s.Added+s.Removed+s.RecordingChanged == 0
 	if c.Before != nil {
 		s.FiringsBefore, s.Incidents = len(c.Before.Firings), len(c.Before.Incidents)
 	}
@@ -88,17 +110,36 @@ func (c *Comparison) Summarize(incidents bool) {
 // the summary says none were given.
 func (c *Comparison) judged() bool { return c.Summary == nil || c.Summary.IncidentsGiven }
 
+// RecordingNote says what a comparison can't of a recording rule that
+// differs.
+const RecordingNote = "The alerts that read them are replayed against what was recorded, not what the change would record."
+
+// limited is how many of the rules that differ are in a group with a
+// limit, on either side.
+func (p compareParts) limited() int {
+	n := 0
+	has := func(r *RuleResult) bool { return r != nil && slices.Contains(r.Unseen, rules.UnseenLimit) }
+	for _, rc := range p.all {
+		if has(rc.Before) || has(rc.After) {
+			n++
+		}
+	}
+	return n
+}
+
 // compareParts is a comparison's rules that differ, sorted for showing.
 type compareParts struct {
 	changed, added, gone int
 	// alike fire as they did; broken couldn't be replayed on one side or
 	// both; shown are the rest, and those replayed on one side of broken.
-	alike, broken, shown []RuleChange
+	// all are every one.
+	alike, broken, shown, all []RuleChange
 }
 
 func (c *Comparison) parts() compareParts {
 	var p compareParts
 	unreplayed := func(r *RuleResult) bool { return r != nil && r.Unsupported != "" }
+	p.all = c.Rules
 	for _, rc := range c.Rules {
 		switch {
 		case rc.Before == nil:
@@ -205,6 +246,19 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 	judged := c.judged()
 	fmt.Fprintf(w, "Lapilli  %s → %s %s\n", c.From.In(loc).Format(stamp), c.To.In(loc).Format(stamp), Zone(loc, c.From, c.To))
 	fmt.Fprintf(w, "Rules compared: %d changed, %d added, %d taken away, %d the same\n", p.changed, p.added, p.gone, c.Same)
+	if len(c.Recording) > 0 {
+		var names []string
+		for _, r := range c.Recording[:min(len(c.Recording), 10)] {
+			names = append(names, Clean(r.Record)+" ("+r.Change+")")
+		}
+		if len(c.Recording) > 10 {
+			names = append(names, fmt.Sprintf("and %d more", len(c.Recording)-10))
+		}
+		fmt.Fprintf(w, "Recording rules that differ: %s.\n%s\n", strings.Join(names, ", "), RecordingNote)
+	}
+	if n := p.limited(); n > 0 {
+		fmt.Fprintf(w, "%d of the rules that differ are in a group with a limit, which the replay doesn't hold them to: past it, Prometheus drops all of a rule's alerts.\n", n)
+	}
 	if c.ChangedOnly {
 		fmt.Fprintf(w, "Firings of the changed rules %d → %d\n", len(c.Before.Firings), len(c.After.Firings))
 	} else {

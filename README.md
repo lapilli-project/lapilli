@@ -795,9 +795,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 2, persist-credentials: false}
-      - uses: lapilli-project/lapilli/recipes/backtest@v0.32.0
+      # Pinned by the commit of the release's tag, which a tag moved can't change.
+      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-v0.32.0-TAG # v0.32.0
         with:
           version: v0.32.0
+          sha256: SHA256-OF-lapilli-v0.32.0-linux-amd64.tar.gz # as its SHA256SUMS says
           paths: alerts
           prometheus-url: ${{ vars.PROMETHEUS_URL }}
           since: 14d
@@ -806,10 +808,11 @@ jobs:
 Each installs a pinned release, checked against its `SHA256SUMS`; reads the
 rules of the pull request and of the commit it goes into, as files
 (`paths`) or as a command renders them in each (`render: helm template
-monitoring charts/monitoring`); runs `lapilli verdict --compare
---changed-only --markdown`; and posts one comment, found again by a hidden
-first line. When nothing that decides when a rule fires changed and there
-is no comment yet, it posts none. When something fails, the comment says
+monitoring charts/monitoring`), and the incidents from the commit it goes
+into, never the pull request's (`incidents`); runs `lapilli verdict
+--compare --changed-only --markdown`; and posts one comment, found again by
+a hidden first line. When nothing that decides when a rule fires changed
+and there is no comment yet, it posts none. When something fails, the comment says
 what, and the job succeeds unless it is asked to fail. The recipes' README
 has each CI's job, and what to keep from pull requests from forks: their
 rules become queries sent with your credentials, and a render command runs
@@ -847,7 +850,15 @@ Rules compared: **1 changed, 1 added, 0 taken away**, 42 the same.
 ```
 
 The rules that couldn't be replayed are listed under the table, with why;
-those that differ but fire as they did are folded in `<details>`. Rule
+those that differ but fire as they did are folded in `<details>`.
+
+A recording rule that differs is a change too, listed apart: a replay reads
+what a recording rule recorded, from the history, so the alerts that read
+one are replayed against what it recorded, not what the change would
+record, which the report says. A group's `limit` and `labels` are part of
+each of its rules (Prometheus adds the group's labels to its rules'); a
+limit isn't replayed: past it, Prometheus drops all of a rule's alerts,
+which the report says too. Rule
 names, labels, incidents and the reasons a rule couldn't be replayed come
 from whoever wrote the rules, and a pull request's author may be anyone:
 each is written as a code span, in which no host reads Markdown, HTML, a
@@ -855,10 +866,14 @@ mention (`@user`, `@org/team`), a reference (`#123`) or a link, a `|`
 escaped so it can't end a table's cell, a backtick in it making the span's
 fence longer, and control and format characters (bidirectional overrides,
 zero-width spaces), line separators and spaces other than the space shown
-as `\u{...}`. Where the history and the rules are read from (the
-`--prometheus`, `--loki`, `--grafana` and `--ruler` URLs, their hosts, a
-`--gcp-project`) is taken out of those reasons, as a failed query names
-it.
+as `\u{...}`. A query that failed for want of reaching the history (a
+connection, a credential, the server failing: anything but the server
+refusing the query itself, HTTP 400 or 422) says only that in the
+Markdown, its whole reason going to stderr, the job's log; what is left
+has where the history and the rules are read from taken out: the
+`--prometheus`, `--loki`, `--grafana` and `--ruler` URLs, the user names
+in them and their hosts, each as a whole word, any IP address and port,
+the tenants and a `--gcp-project`.
 
 What a tool reads is stable:
 
@@ -869,10 +884,11 @@ What a tool reads is stable:
 
   | Field | |
   |---|---|
-  | `nothing_changed` | nothing that decides when a rule fires differs: nothing was replayed |
+  | `nothing_changed` | nothing that decides when a rule fires differs, a recording rule included: nothing was replayed |
   | `changed`, `added`, `removed`, `same` | rules in both that differ, only in `--rules`, only in `--compare`, alike in both |
   | `alike` | rules that differ but, replayed on both sides, fire as often and catch as much as they did |
   | `unreplayed` | rules that differ that couldn't be replayed, on one side or both |
+  | `recording_changed` | recording rules that differ, listed as `"recording"`: what the alerts that read them see, which no replay shows |
   | `firings_before`, `firings_after` | firings on each side; of the rules that differ alone with `--changed-only` |
   | `incidents_given` | judged against `--incidents` or `--impact`; when false, nothing was judged: no firing caught anything, and `incidents` is 0 |
   | `incidents`, `incidents_changed` | incidents in the period, and those caught differently |
@@ -892,9 +908,12 @@ What a tool reads is stable:
   own: a CI step takes anything but 0 as a failure, and a pull request that
   changes no rule isn't one. Read `nothing_changed`.
 
-The header names the time zone of its times with its offset, `Asia/Seoul
-(+09:00)` or `UTC`: `--tz` gives one by its IANA name, and without it, the
-machine's own is named as `TZ` or `/etc/localtime` says.
+The header names the time zone of its times with each offset it took in
+the period, `Asia/Seoul (+09:00)`, `Europe/Berlin (+01:00 → +02:00)`, or
+`UTC` by any of its names: `--tz` gives one by its IANA name, and without
+it, the machine's own is named as `TZ` or `/etc/localtime` says, through
+every link. A zone file copied rather than linked has no name: its
+abbreviations are said, `CEST (+02:00) → CET (+01:00)`.
 
 ## Incidents kept elsewhere
 

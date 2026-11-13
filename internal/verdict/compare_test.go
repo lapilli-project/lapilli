@@ -182,3 +182,18 @@ func TestNoisyAt(t *testing.T) {
 		t.Errorf("defaults: %+v %+v", r.Rules[0], r.NoisyAt)
 	}
 }
+
+// Without incidents, a changed rule that fires as often as it did is said
+// to: there are no stones to keep.
+func TestCompareTextAlikeUnjudged(t *testing.T) {
+	r := Judge([]rules.Rule{{Name: "A", Expr: "x"}}, []firing.Firing{{Rule: "A", Start: m(1), End: m(2)}}, nil, opts())
+	c := Compare(r, r, []string{"A"}, 0)
+	c.Summarize(false)
+	var b bytes.Buffer
+	if err := CompareText(&b, c, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "1 changed rules fire as they did:\n  A\n") || strings.Contains(b.String(), "stones") {
+		t.Errorf("text:\n%s", b.String())
+	}
+}

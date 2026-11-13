@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -122,7 +123,7 @@ func TestCompareMarkdown(t *testing.T) {
 	if err := CompareMarkdown(&b, none, time.UTC); err != nil {
 		t.Fatal(err)
 	}
-	want := SummaryLine + `{"nothing_changed":true,"changed":0,"added":0,"removed":0,"same":42,"alike":0,"unreplayed":0,` +
+	want := SummaryLine + `{"nothing_changed":true,"changed":0,"added":0,"removed":0,"same":42,"alike":0,"unreplayed":0,"recording_changed":0,` +
 		`"firings_before":0,"firings_after":0,"incidents_given":false,"incidents":0,"incidents_changed":0})` + "\n" +
 		NothingChangedHeading + "\n\nNothing that decides when the 42 rules fire has changed: nothing to replay.\n"
 	if b.String() != want {
@@ -288,4 +289,161 @@ func outsideCode(line string) string {
 		i = closed
 	}
 	return b.String()
+}
+
+// Anything that differs is a change: a rule only added, only taken away, or
+// a recording rule alone.
+func TestSummaryNothingChanged(t *testing.T) {
+	one := Judge([]rules.Rule{{Name: "A", Expr: "x"}}, nil, nil, opts())
+	none := Judge(nil, nil, nil, opts())
+	for name, c := range map[string]*Comparison{
+		"added":     Compare(none, one, []string{"A"}, 0),
+		"removed":   Compare(one, none, []string{"A"}, 0),
+		"recording": {Before: none, After: none, Recording: []RecordingChange{{Record: "shop:errors", Group: "shop", Change: "changed"}}},
+	} {
+		c.Summarize(false)
+		if c.Summary.NothingChanged {
+			t.Errorf("%s: nothing changed, says %+v", name, c.Summary)
+		}
+	}
+	c := &Comparison{Before: none, After: none}
+	c.Summarize(false)
+	if !c.Summary.NothingChanged {
+		t.Errorf("nothing differs: %+v", c.Summary)
+	}
+}
+
+// A recording rule that differs is listed, in the text and the Markdown,
+// with what a replay can't say of it; a rule in a group with a limit too.
+func TestCompareRecordingAndLimit(t *testing.T) {
+	limited := rules.Rule{Name: "Errors", Expr: "x", Limit: 1}
+	before := Judge([]rules.Rule{{Name: "Errors", Expr: "x"}}, nil, nil, opts())
+	after := Judge([]rules.Rule{limited}, nil, nil, opts())
+	c := Compare(before, after, []string{"Errors"}, 0)
+	c.Recording = []RecordingChange{{Record: "shop:errors", Group: "shop", Change: "changed"}, {Record: "@octocat", Group: "#1", Change: "added"}}
+	c.Summarize(false)
+	if c.Summary.RecordingChanged != 2 || c.Summary.NothingChanged {
+		t.Errorf("summary %+v", c.Summary)
+	}
+	var b bytes.Buffer
+	if err := CompareText(&b, c, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Recording rules that differ: shop:errors (changed), @octocat (added).\n" + RecordingNote + "\n",
+		"1 of the rules that differ are in a group with a limit, which the replay doesn't hold them to"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("text lacks %q:\n%s", want, b.String())
+		}
+	}
+	b.Reset()
+	if err := CompareMarkdown(&b, c, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"#### Recording rules that differ\n\n" + RecordingNote + "\n\n- `shop:errors` in `shop`: changed\n- `@octocat` in `#1`: added\n",
+		"1 of the rules that differ are in a group with a limit"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("markdown lacks %q:\n%s", want, b.String())
+		}
+	}
+	checkMarkdown(t, b.String(), []string{"@octocat"})
+}
+
+// With --changed-only, incidents show the changed rules' catches alone: no
+// count of incidents with no alert, which would count those alone, and a
+// note that says so; and when every incident is caught as it was, that.
+func TestCompareMarkdownChangedOnly(t *testing.T) {
+	c := comparison(t)
+	c.ChangedOnly = true
+	c.Summarize(true)
+	var b bytes.Buffer
+	if err := CompareMarkdown(&b, c, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if strings.Contains(out, "Incidents with no alert") || !strings.Contains(out, "Rules left alone weren't replayed (`--changed-only`): incidents show the changed rules' catches alone.\n") ||
+		!strings.Contains(out, "| Firings of the changed rules | 4 | 2 |") {
+		t.Errorf("changed only:\n%s", out)
+	}
+	alike := comparison(t)
+	alike.Incidents = nil
+	alike.Summarize(true)
+	b.Reset()
+	if err := CompareMarkdown(&b, alike, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "\nEvery incident is caught as it was.\n") {
+		t.Errorf("incidents caught alike:\n%s", b.String())
+	}
+}
+
+// A part goes in whole, its foot with it, within the limit, however long
+// its foot.
+func TestWritePartsFoot(t *testing.T) {
+	foot := "\n" + strings.Repeat("f", 600) + "\n"
+	var rows []string
+	for range 20 {
+		rows = append(rows, strings.Repeat("r", 99)+"\n")
+	}
+	var b bytes.Buffer
+	if err := writeParts(&b, []mdPart{{head: "head\n", rows: rows, foot: foot, noun: "rows"}}, 2000); err != nil {
+		t.Fatal(err)
+	}
+	if out := b.String(); len(out) > 2000 || !strings.Contains(out, foot) || !strings.Contains(out, "rows not shown") {
+		t.Errorf("%d bytes:\n%s", len(out), out)
+	}
+}
+
+// md shows what doesn't show, cuts a long name with a mark that it was,
+// and reads no more of a name than it shows.
+func TestMd(t *testing.T) {
+	for in, want := range map[string]string{
+		"no\u00a0break":            "`no\\u{a0}break`",
+		"filler\u3164":             "`filler\\u{3164}`",
+		"hangul\u1160x":            "`hangul\\u{1160}x`",
+		"wide\u3000space":          "`wide\\u{3000}space`",
+		strings.Repeat("x", 250):   "`" + strings.Repeat("x", 200) + "…`",
+		strings.Repeat("\x01", 50): "`" + strings.Repeat("\\u{1}", 50)[:200] + "…`",
+	} {
+		if got := md(in, 200, false); got != want {
+			t.Errorf("md(%q) = %q, want %q", in, got, want)
+		}
+	}
+	name := strings.Repeat("\x01", 16<<20)
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	md(name, 200, true)
+	runtime.ReadMemStats(&after)
+	if got := after.TotalAlloc - before.TotalAlloc; got > 1<<20 {
+		t.Errorf("md allocated %d KiB for a name of 16 MiB, cut to 200 characters", got>>10)
+	}
+}
+
+// The note that rows were left out counts rules: a rule that couldn't be
+// replayed on either side is one.
+func TestCutNoteCountsRules(t *testing.T) {
+	var rs []rules.Rule
+	var names []string
+	for i := range 1000 {
+		name := fmt.Sprintf("Broken%04d%s", i, strings.Repeat("x", 100))
+		rs = append(rs, rules.Rule{Name: name, Unsupported: "query failed: " + strings.Repeat("y", 100)})
+		names = append(names, name)
+	}
+	c := Compare(Judge(rs, nil, nil, opts()), Judge(rs, nil, nil, opts()), names, 0)
+	c.Summarize(false)
+	var b bytes.Buffer
+	if err := CompareMarkdown(&b, c, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	shown := map[string]bool{}
+	for _, m := range regexp.MustCompile("- `(Broken\\d{4})").FindAllStringSubmatch(out, -1) {
+		shown[m[1]] = true
+	}
+	if want := fmt.Sprintf("%d rules that couldn't be replayed not shown", 1000-len(shown)); !strings.Contains(out, want) || len(shown) == 0 {
+		t.Errorf("%d shown; the note should say %q:\n%s", len(shown), want, out[strings.LastIndex(out, "**Cut short**"):])
+	}
+	if !strings.Contains(out, "#### Could not replay 1000 rules") {
+		t.Error("the heading counts rules")
+	}
 }

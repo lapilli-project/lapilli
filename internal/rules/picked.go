@@ -242,6 +242,10 @@ type Picking struct {
 	// is, unless the selector left something out of it: reading the
 	// documents again with FromDocs must leave out what it did.
 	Trim bool
+	// Recordings, when not nil, gets the recording rules of the documents
+	// kept, in Prometheus's form wherever they are, each with the file it
+	// came from: what a comparison of two sets of rules says apart.
+	Recordings *[]Recording
 }
 
 // ErrNoneSelected is a read whose documents of rules the selector matched
@@ -328,7 +332,19 @@ func loadPicked(path string, p Picking, picked *Picked) ([]Rule, Doc, error) {
 	if q.Unselected > 0 || p.Trim && q.Other > 0 {
 		b = kept
 	}
-	rs, err := Parse(b)
+	had := 0
+	if p.Recordings != nil {
+		had = len(*p.Recordings)
+	}
+	rs, err := parse(b, p.Recordings)
+	if p.Recordings != nil {
+		if err != nil {
+			*p.Recordings = (*p.Recordings)[:had]
+		}
+		for i := had; i < len(*p.Recordings); i++ {
+			(*p.Recordings)[i].Source = path
+		}
+	}
 	switch {
 	case errors.Is(err, errNoRules) && q.Unselected > 0:
 		return nil, Doc{}, fmt.Errorf("%s: %w (%s): %d documents of rules have other labels", path, ErrNoneSelected, p.Select, q.Unselected)
