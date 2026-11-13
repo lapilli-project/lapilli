@@ -1160,5 +1160,6 @@
  "%d rules didn't fire in the last week": "최근 1주 동안 울리지 않은 규칙 %d개",
  "%d rules didn't fire in the last %d weeks": "최근 %[2]d주 동안 울리지 않은 규칙 %[1]d개",
  "The search is too long: 500 characters at most.": "검색어가 너무 길어요: 500자까지 쓸 수 있어요.",
- "Left out: more than 20 words: %s.": "20단어를 넘어 빼고 찾았어요: %s."
+ "Left out: more than 20 words: %s.": "20단어를 넘어 빼고 찾았어요: %s.",
+ "this address asks too much: a page's query is 4096 bytes at most": "주소가 너무 길어요: 페이지 주소의 쿼리는 4096바이트까지예요"
 }

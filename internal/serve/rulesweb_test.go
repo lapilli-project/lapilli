@@ -491,3 +491,29 @@ func TestSeveritySpelled(t *testing.T) {
 		t.Error("a severity from the URL isn't shown as a name is")
 	}
 }
+
+// TestLongQueryRefused: a page asked with a query past 4096 bytes is
+// refused, 414, with a page of its own size, in the reader's language;
+// one of 4096 is a page.
+func TestLongQueryRefused(t *testing.T) {
+	s := facetServer(t)
+	h := s.Handler()
+	for _, path := range []string{"/", "/rules", "/rules/R01", "/search", "/tasks", "/incidents"} {
+		q := "q=" + strings.Repeat("a", maxQuery-2)
+		if code, _, _ := get(t, h, path+"?"+q); code == http.StatusRequestURITooLong {
+			t.Errorf("%s, a query of 4096 bytes: %d", path, code)
+		}
+		code, body, _ := get(t, h, path+"?"+q+"a")
+		if code != http.StatusRequestURITooLong || len(body) > 8000 || strings.Contains(body, "aaaaaaaa") || strings.Contains(body, `class="count"`) ||
+			!strings.Contains(body, "this address asks too much: a page&#39;s query is 4096 bytes at most") {
+			t.Errorf("%s, a query of 4097 bytes: %d, %d bytes", path, code, len(body))
+		}
+	}
+	r := httptest.NewRequest(http.MethodGet, "/rules?q="+strings.Repeat("group:a+", 7900), nil)
+	r.Header.Set("Accept-Language", "ko")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusRequestURITooLong || !strings.Contains(w.Body.String(), "주소가 너무 길어요") {
+		t.Errorf("63 KB of group:a, in Korean: %d", w.Code)
+	}
+}

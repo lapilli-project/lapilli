@@ -54,7 +54,7 @@ func (s *Server) Handler() http.Handler {
 	s.checks(mux)
 
 	page := func(name string, view func(*http.Request) (any, error)) http.HandlerFunc {
-		return s.cached(func(w http.ResponseWriter, r *http.Request) {
+		h := s.cached(func(w http.ResponseWriter, r *http.Request) {
 			// The page context, read once; the view reads the reader's own
 			// team as team= when it was taken for them.
 			r, vr := s.withContext(r, name)
@@ -70,6 +70,15 @@ func (s *Server) Handler() http.Handler {
 			}
 			s.render(w, r, name, v)
 		})
+		return func(w http.ResponseWriter, r *http.Request) {
+			// A query past maxQuery is refused before anything is read
+			// for it.
+			if len(r.URL.RawQuery) > maxQuery {
+				s.oops(w, r, errLongQuery)
+				return
+			}
+			h(w, r)
+		}
 	}
 	mux.HandleFunc("GET /{$}", page("overview", s.overview))
 	mux.HandleFunc("GET /rules", page("rules", s.rulesList))
@@ -705,6 +714,9 @@ func (p page) Link(target string, kv ...any) string { return p.Ctx.Link(target, 
 func (p page) Rule(name string) string   { return p.Ctx.Rule(name) }
 func (p page) Incident(id string) string { return p.Ctx.Incident(id) }
 
+// errLongQuery is a page asked with a query past maxQuery bytes.
+var errLongQuery = errors.New("this address asks too much: a page's query is 4096 bytes at most")
+
 // redirect is a view's answer that the page is elsewhere: always a path on
 // this server, built from fixed paths and escaped values.
 type redirect struct{ to string }
@@ -743,8 +755,12 @@ func (s *Server) page(r *http.Request, name string, v any) page {
 	}
 	p.Here, p.HereName = navPage(name)
 	p.Nav, p.Crumb, p.Bar = s.nav(r.Context(), p), crumbsOf[name], barOf(name, r, p.Ctx)
+	back := r.URL.RequestURI()
+	if len(r.URL.RawQuery) > maxQuery {
+		back = r.URL.EscapedPath()
+	}
 	for _, n := range names {
-		p.Langs = append(p.Langs, langLink{n.Code, n.Name, "/lang?to=" + n.Code + "&back=" + url.QueryEscape(r.URL.RequestURI()), n.Code == l})
+		p.Langs = append(p.Langs, langLink{n.Code, n.Name, "/lang?to=" + n.Code + "&back=" + url.QueryEscape(back), n.Code == l})
 	}
 	return p
 }
