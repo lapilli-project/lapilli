@@ -17,7 +17,9 @@ import (
 	"io/fs"
 	"net"
 	"net/url"
+	"os"
 	"path"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -543,16 +545,70 @@ func secretsOf(raw string, cfg *pgx.ConnConfig) []string {
 }
 
 // pgConfig reads a connection string as pgx does, its environment
-// variables and files among it, and names the connections lapilli.
-func pgConfig(raw string) (*pgx.ConnConfig, error) {
-	cfg, err := pgx.ParseConfig(strings.TrimSpace(raw))
+// variables and files among it, and names the connections lapilli. A
+// string that says nothing of sslmode, to a server not on this machine,
+// asks for verify-full: pgx's own default, prefer, lets anything in the path
+// decline TLS and be sent the password, in clear. It gives what to warn of.
+func pgConfig(raw string) (*pgx.ConnConfig, string, error) {
+	raw = strings.TrimSpace(raw)
+	cfg, err := pgx.ParseConfig(raw)
 	if err != nil {
-		return nil, ErrBadURL
+		return nil, "", ErrBadURL
+	}
+	mode, given := sslmodeOf(raw)
+	if !given && !onThisMachine(cfg) {
+		with := raw + " sslmode=verify-full"
+		if u, err := url.Parse(raw); err == nil && (u.Scheme == "postgres" || u.Scheme == "postgresql") {
+			q := u.Query()
+			q.Set("sslmode", "verify-full")
+			u.RawQuery = q.Encode()
+			with = u.String()
+		}
+		if cfg, err = pgx.ParseConfig(with); err != nil {
+			return nil, "", ErrBadURL
+		}
+		mode = "verify-full"
+	}
+	warn := ""
+	if mode != "verify-full" && mode != "verify-ca" && !onThisMachine(cfg) {
+		warn = "the ledger's connection doesn't check the Postgres server's certificate (sslmode=" + mode + "): anything in the path can read it, " +
+			"and with prefer, allow or disable take the password: ask for sslmode=verify-full"
 	}
 	if _, ok := cfg.RuntimeParams["application_name"]; !ok {
 		cfg.RuntimeParams["application_name"] = "lapilli"
 	}
-	return cfg, nil
+	return cfg, warn, nil
+}
+
+// sslmodeOf is the sslmode a connection string or PGSSLMODE gives, and
+// whether either does.
+func sslmodeOf(raw string) (string, bool) {
+	if u, err := url.Parse(raw); err == nil && (u.Scheme == "postgres" || u.Scheme == "postgresql") {
+		if q := u.Query(); q.Has("sslmode") {
+			return q.Get("sslmode"), true
+		}
+	} else if m := regexp.MustCompile(`(?:^|\s)sslmode\s*=\s*'?([a-z-]*)`).FindStringSubmatch(raw); m != nil {
+		return m[1], true
+	}
+	if v := os.Getenv("PGSSLMODE"); v != "" {
+		return v, true
+	}
+	return "prefer", false
+}
+
+// onThisMachine says every host a configuration may connect to is this
+// machine's: a Unix socket, localhost, or a loopback address.
+var onThisMachine = func(cfg *pgx.ConnConfig) bool {
+	hosts := []string{cfg.Host}
+	for _, f := range cfg.Fallbacks {
+		hosts = append(hosts, f.Host)
+	}
+	for _, h := range hosts {
+		if ip := net.ParseIP(h); !strings.HasPrefix(h, "/") && h != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return false
+		}
+	}
+	return true
 }
 
 // OpenPostgres opens the ledger in the Postgres database a connection
@@ -561,7 +617,7 @@ func pgConfig(raw string) (*pgx.ConnConfig, error) {
 // the ledger's lock, and refuses a ledger another process holds
 // (*LockedError). No error it gives holds the connection string.
 func OpenPostgres(ctx context.Context, conn string, loc *time.Location) (*Ledger, error) {
-	cfg, err := pgConfig(conn)
+	cfg, warn, err := pgConfig(conn)
 	if err != nil {
 		return nil, err
 	}
@@ -593,6 +649,9 @@ func OpenPostgres(ctx context.Context, conn string, loc *time.Location) (*Ledger
 	r.SetMaxOpenConns(4)
 	r.SetMaxIdleConns(4)
 	l := &Ledger{w: w, r: r, loc: loc, pg: pw, d: postgres}
+	if warn != "" {
+		l.warnings = append(l.warnings, warn)
+	}
 	l.ids.rules = map[string]int64{}
 	l.ids.series = map[seriesKey]int64{}
 	l.ids.labels = map[int64]labelsOf{}
@@ -656,6 +715,10 @@ func (l *Ledger) Lost() <-chan struct{} {
 	}
 	return l.pg.lost
 }
+
+// Warnings are what serve says at start of how the ledger is reached: a
+// connection that doesn't check the server's certificate.
+func (l *Ledger) Warnings() []string { return l.warnings }
 
 // Postgres says whether the ledger is in Postgres.
 func (l *Ledger) Postgres() bool { return l.pg != nil }

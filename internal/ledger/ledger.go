@@ -42,6 +42,8 @@ type Ledger struct {
 	// lock.
 	d  dialect
 	pg *pgWriter
+	// warnings are what to say of how the ledger is reached.
+	warnings []string
 	// mu is held by every write, start to commit.
 	mu sync.Mutex
 	// gen counts writes, for whoever caches what it reads.

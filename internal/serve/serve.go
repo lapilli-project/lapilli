@@ -424,7 +424,7 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 	if err := CheckRoles(cfg); err != nil {
 		return nil, err
 	}
-	l, err := openLedger(ctx, cfg)
+	l, err := openLedger(ctx, cfg, log)
 	if err != nil {
 		return nil, err
 	}
@@ -472,7 +472,7 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 
 // openLedger opens the ledger: in Postgres, with --ledger-url-file, else
 // the SQLite file in --ledger.
-func openLedger(ctx context.Context, cfg Config) (*ledger.Ledger, error) {
+func openLedger(ctx context.Context, cfg Config, log *slog.Logger) (*ledger.Ledger, error) {
 	if cfg.LedgerURLFile != "" {
 		b, err := os.ReadFile(cfg.LedgerURLFile)
 		if err != nil {
@@ -481,6 +481,9 @@ func openLedger(ctx context.Context, cfg Config) (*ledger.Ledger, error) {
 		l, err := ledger.OpenPostgres(ctx, string(b), cfg.Loc)
 		if err != nil {
 			return nil, fmt.Errorf("--ledger-url-file: %w", err)
+		}
+		for _, w := range l.Warnings() {
+			log.Warn(w)
 		}
 		return l, nil
 	}
