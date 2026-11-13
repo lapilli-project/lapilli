@@ -4,46 +4,66 @@
 
 Pull request backtests in CI, on every code host: what a team had to glue
 around `lapilli verdict --compare` to comment its report on a pull request
-that changes alert rules, built in. No ledger schema change; the exit
-statuses, and every field `--json` gave, are as they were.
+that changes alert rules, built in. Reviewed as an attacker would and for
+correctness before release; what both found is fixed in what is described
+here. No ledger schema change; the exit statuses, and every field `--json`
+gave, are as they were.
 
 ### Added
 
 - **Pull request backtests in CI** ([recipes/backtest](recipes/backtest)):
   a script for each code host, GitHub, GitLab, Bitbucket, Azure DevOps and
   Gitea (or Forgejo), one POSIX sh library under them, and for GitHub
-  Actions an action (`uses: lapilli-project/lapilli/recipes/backtest@TAG`).
+  Actions an action (`uses: lapilli-project/lapilli/recipes/backtest@...`).
   Each installs a pinned release, its archive checked against the
-  release's `SHA256SUMS` (and `LAPILLI_SHA256`, pinned) before it is
-  unpacked; reads the rules of the pull request's commit and of the commit
-  it goes into from git, as files (`PATHS`) or as a command renders them in
-  each (`RENDER`, `RENDER_PREPARE`: a Helm chart, a Kustomize overlay);
-  runs `lapilli verdict --compare --changed-only --markdown`; and posts one
-  comment, found again by a hidden first line and the token's own account,
-  and edited on later runs. Nothing changed and no comment yet: none
-  posted. What fails is said in the comment, and the job succeeds unless
-  `FAIL_ON_ERROR=true`. Tested against a stand-in for each host's API, and
-  end to end against a real Gitea and Prometheus (`test/e2e/backtest.sh`,
-  in CI): a comment posted, edited after a push, none on a pull request
-  that changes no rule, and a rule named to mention, reference and break
-  the table rendered by Gitea itself as text.
+  release's `SHA256SUMS` (and `LAPILLI_SHA256`, which a mirror needs)
+  before it is unpacked; reads the rules of the commit the pull request
+  goes into and of its own from git, as files (`PATHS`) or as a command
+  renders them in each (`RENDER`, `RENDER_PREPARE`: a Helm chart, a
+  Kustomize overlay), the base's first, each with a `HOME` of its own and
+  without the variables CIs keep tokens in; reads the incidents from the
+  commit the pull request goes into (`INCIDENTS`), never the pull
+  request's, and refuses a file an argument names in the checkout; runs
+  `lapilli verdict --compare --changed-only --markdown`; and posts one
+  comment, found again by a hidden first line and the token's own account
+  (on Bitbucket, `BITBUCKET_USER_UUID`), and edited on later runs. Nothing
+  changed and no comment yet: none posted. What fails is said in the
+  comment, in a fenced block, nothing of the pull request's outside it, and
+  the job succeeds unless `FAIL_ON_ERROR=true`, which a rule that couldn't
+  be replayed fails too. What it copies to the job's log is each line after
+  a `| `, so none of it is a CI's command. Tested against a stand-in for
+  each host's API, and end to end against a real Gitea and Prometheus
+  (`test/e2e/backtest.sh`, in CI): a comment posted, edited after a push,
+  none on a pull request that changes no rule, a rule named to mention,
+  reference and break the table rendered by Gitea itself as text, and a
+  link whose path mentions a user refused without notifying anyone.
 - **`lapilli verdict --compare --markdown`**: the report as Markdown to
   post on a pull request or a merge request: a heading with the period and
-  its time zone, the totals, the rules that differ as a table, those that
-  couldn't be replayed, those that fire as they did folded in `<details>`,
-  the incidents caught differently; at most 64,000 bytes, cut short with a
-  note. Rule names, labels, incidents and reasons are written as code
-  spans, so none can format, link, mention (`@user`, `@org/team`),
-  reference (`#123`), break a table or hide what follows; the URLs and the
-  project the history is read from are taken out of the reasons. When
-  nothing changed, a short form that doesn't change.
+  its time zone, the totals, the rules that differ as a table, the
+  recording rules that differ, those that couldn't be replayed (a line a
+  rule), those that fire as they did folded in `<details>`, the incidents
+  caught differently, what reading the files passed over; at most 64,000
+  bytes, cut short with a note that counts rules. Rule names, labels,
+  incidents and reasons are written as code spans, so none can format,
+  link, mention (`@user`, `@org/team`), reference (`#123`), break a table
+  or hide what follows; a name is cut before anything is made of it. A
+  query that failed for want of reaching the history says only that, its
+  reason going to stderr; from the rest, the URLs, user names, hosts (each
+  as a whole word), IP addresses, tenants and project the history is read
+  with are taken out. When nothing changed, a short form that doesn't
+  change. It doesn't go with `--check-content`.
 - **A summary for tools.** `--json` with `--compare` adds `"summary"`:
   `nothing_changed`, `changed`, `added`, `removed`, `same`, `alike`,
-  `unreplayed`, `firings_before`, `firings_after`, `incidents_given`,
-  `incidents` and `incidents_changed`, each always there; `--markdown`
-  holds the same on its first line. "No incidents given" is
-  `incidents_given: false`, not zero caught. Nothing changing has no exit
-  status of its own (the README says why).
+  `unreplayed`, `recording_changed`, `firings_before`, `firings_after`,
+  `incidents_given`, `incidents` and `incidents_changed`, each always
+  there; `--markdown` holds the same on its first line. "No incidents
+  given" is `incidents_given: false`, not zero caught. Nothing changing has
+  no exit status of its own (the README says why).
+- **Recording rules in a comparison.** `--compare` reads the recording rules
+  beside the alert rules, and one that differs (`"recording"` in `--json`)
+  is a change: `nothing_changed` is false. A replay reads what a recording
+  rule recorded, from the history, so the report says the alerts that read
+  one are replayed against that, not what the change would record.
 
 ### Changed
 
@@ -52,14 +72,27 @@ statuses, and every field `--json` gave, are as they were.
   caught, nothing and precision columns and what it would say of incidents,
   and keeps fired and re-fired. A replay without `--compare` still asks for
   them.
-- A report's header names its time zone with its offset, `Asia/Seoul
-  (+09:00)`, `Europe/Berlin (+02:00 → +01:00)` across a change of the
-  clocks, or `UTC`, never Go's bare `Local`: the machine's own zone is named
-  as `TZ` or `/etc/localtime` says. `--tz` takes an IANA name, as it did.
-  lapilli serve's digest header too.
+- **A Prometheus group's `labels` and `limit` are each of its rules'.** Its
+  labels are added to its rules', which override them, as Prometheus 3
+  does; its limit is part of what decides when a rule fires, so a change to
+  either is a change to its rules. A limit isn't replayed (past it,
+  Prometheus drops all of a rule's alerts): a rule under one is marked
+  replayed in part. In lapilli serve, a rule in a group with either is a
+  new version of it once, on upgrade.
+- A report's header names its time zone with each offset the period took,
+  `Asia/Seoul (+09:00)`, `Europe/Berlin (+01:00 → +02:00 → +01:00)`, or
+  `UTC` by any of its names (`Etc/UTC`, `Etc/Zulu`), never Go's bare
+  `Local`: the machine's own zone is named as `TZ` or `/etc/localtime`
+  says, through every link; a zone file copied, by its abbreviations. `--tz`
+  takes an IANA name, as it did. lapilli serve's digest header too.
 - With `--compare`, what reading the rule files passed over is said for
   each set apart: "the rule files --rules read held ..." and "the rule
   files --compare read held ...", not the same line twice.
+- `lapilli verdict`'s errors show a line break, or any control character,
+  in what a rule file or a flag holds as `\u{...}`, and the names of rules,
+  groups, alarms and namespaces quoted: no line of an error is one of its
+  own, which a CI could read as a command.
+- A file of incidents is read no further than 64 MiB.
 
 ## [0.31.2] - 2026-11-13
 

@@ -29,7 +29,7 @@ GITHUB_REPO=${GITHUB_REPO:-${GITHUB_REPOSITORY:-}}
 api=${GITHUB_API:-${GITHUB_API_URL:-https://api.github.com}}
 case $GITHUB_REPO in */*/* | *[!A-Za-z0-9._/-]* | /* | */) echo "github.sh: GITHUB_REPO $GITHUB_REPO: want OWNER/REPO" >&2; exit 1 ;; esac
 case $GITHUB_REPO in */*) ;; *) echo "github.sh: GITHUB_REPO $GITHUB_REPO: want OWNER/REPO" >&2; exit 1 ;; esac
-case $api in http://* | https://*) ;; *) echo "github.sh: GITHUB_API $api: want an http or https URL" >&2; exit 1 ;; esac
+host_api=$api
 if [ -z "${PR:-}" ] && [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "$GITHUB_EVENT_PATH" ]; then
   PR=$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH")
 fi

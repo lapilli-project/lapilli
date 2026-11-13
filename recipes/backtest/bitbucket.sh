@@ -5,6 +5,11 @@
 #
 #   BITBUCKET_TOKEN_FILE  a file holding a repository access token with the
 #                         pull requests write scope
+#   BITBUCKET_USER_UUID   the account the token comments as, {...}: a
+#                         repository access token can't ask (GET /user needs
+#                         the account scope, which it can't have). The first
+#                         comment it posts says it in the job's log; without
+#                         it, each run posts a comment of its own
 #   BITBUCKET_REPO        such as example/monitoring: WORKSPACE/REPO
 #                         (default: Bitbucket Pipelines'
 #                         BITBUCKET_REPO_FULL_NAME)
@@ -28,21 +33,40 @@ if [ -z "${TARGET:-}" ]; then
 fi
 case $BITBUCKET_REPO in */*/* | *[!A-Za-z0-9._/-]* | /* | */) echo "bitbucket.sh: BITBUCKET_REPO $BITBUCKET_REPO: want WORKSPACE/REPO" >&2; exit 1 ;; esac
 case $BITBUCKET_REPO in */*) ;; *) echo "bitbucket.sh: BITBUCKET_REPO $BITBUCKET_REPO: want WORKSPACE/REPO" >&2; exit 1 ;; esac
-case $api in http://* | https://*) ;; *) echo "bitbucket.sh: BITBUCKET_API $api: want an http or https URL" >&2; exit 1 ;; esac
+case ${BITBUCKET_USER_UUID:-} in
+  '') ;;
+  \{*[!0-9a-fA-F-]*\} | \{\}) echo "bitbucket.sh: BITBUCKET_USER_UUID $BITBUCKET_USER_UUID: want {UUID}" >&2; exit 1 ;;
+  \{*\}) ;;
+  *) echo "bitbucket.sh: BITBUCKET_USER_UUID $BITBUCKET_USER_UUID: want {UUID}" >&2; exit 1 ;;
+esac
+host_api=$api
 
 host_auth() {
   printf 'Authorization: Bearer %s\nAccept: application/json\n' "$(cat "$BITBUCKET_TOKEN_FILE")"
 }
 
-# host_me writes the account the token is.
+# host_me writes the account the token is: BITBUCKET_USER_UUID, or as GET
+# /user says, for a token that may ask.
 host_me() {
+  if [ -n "${BITBUCKET_USER_UUID:-}" ]; then
+    printf '%s' "$BITBUCKET_USER_UUID"
+    return
+  fi
   code=$(host GET "$api/user")
   case $code in 2??) ;; *) return 1 ;; esac
   jq -r '.uuid // ""' "$out"
 }
 
-# A pull request's comments, a hundred a page, by page number: a "next"
-# link the host gives is never followed. Deleted ones passed over.
+# for_bitbucket FILE: the comment, with Bitbucket's Markdown, which shows
+# HTML as text: a <details> Lapilli writes, alone on its lines, its summary
+# in bold.
+for_bitbucket() {
+  sed -e 's|^<details><summary>\(.*\)</summary>$|**\1**|' -e '/^<\/details>$/d' "$1" | jq -Rs '{content: {raw: .}}' >"$tmp/body"
+}
+
+# A pull request's comments, a hundred a page, by page number, while
+# Bitbucket says there is a next: the link it gives is never followed.
+# Deleted ones passed over.
 find_comment() {
   n=1
   while [ "$n" -le 50 ]; do
@@ -55,19 +79,25 @@ find_comment() {
       printf '%s' "$id"
       return 0
     fi
-    [ "$(jq '.values | length' "$out")" -ge 100 ] || return 0
+    [ -n "$(jq -r '.next // empty' "$out")" ] || return 0
     n=$((n + 1))
   done
 }
 
 post_comment() {
-  jq -Rs '{content: {raw: .}}' "$1" >"$tmp/body"
+  for_bitbucket "$1"
   code=$(host POST "$api/repositories/$BITBUCKET_REPO/pullrequests/$PR/comments" "$tmp/body")
   case $code in 2??) ;; *) say "Bitbucket didn't take the comment ($code): $(shown "$out")"; return 1 ;; esac
+  if [ -z "${BITBUCKET_USER_UUID:-}" ]; then
+    uuid=$(jq -r '.user.uuid // ""' "$out")
+    case $uuid in
+      \{*\}) say "posted as $uuid: set BITBUCKET_USER_UUID to it, and later runs edit this comment rather than post another" ;;
+    esac
+  fi
 }
 
 edit_comment() {
-  jq -Rs '{content: {raw: .}}' "$2" >"$tmp/body"
+  for_bitbucket "$2"
   code=$(host PUT "$api/repositories/$BITBUCKET_REPO/pullrequests/$PR/comments/$1" "$tmp/body")
   case $code in 2??) ;; *) say "Bitbucket didn't take the comment ($code): $(shown "$out")"; return 1 ;; esac
 }

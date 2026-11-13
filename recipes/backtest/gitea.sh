@@ -35,7 +35,7 @@ fi
 [ -r "$GITEA_TOKEN_FILE" ] || { echo "gitea.sh: GITEA_TOKEN_FILE $GITEA_TOKEN_FILE can't be read" >&2; exit 1; }
 case $GITEA_REPO in */*/* | *[!A-Za-z0-9._/-]* | /* | */) echo "gitea.sh: GITEA_REPO $GITEA_REPO: want OWNER/REPO" >&2; exit 1 ;; esac
 case $GITEA_REPO in */*) ;; *) echo "gitea.sh: GITEA_REPO $GITEA_REPO: want OWNER/REPO" >&2; exit 1 ;; esac
-case $GITEA_API in http://* | https://*) ;; *) echo "gitea.sh: GITEA_API $GITEA_API: want an http or https URL" >&2; exit 1 ;; esac
+host_api=$GITEA_API
 
 host_auth() {
   printf 'Authorization: token %s\nAccept: application/json\n' "$(cat "$GITEA_TOKEN_FILE")"
@@ -48,22 +48,15 @@ host_me() {
   jq -r '.login // ""' "$out"
 }
 
-# A pull request's comments are its issue's, fifty a page.
+# A pull request's comments are its issue's, all of them in one answer:
+# Gitea takes no page for them (since and before only).
 find_comment() {
-  n=1
-  while [ "$n" -le 100 ]; do
-    code=$(host GET "$GITEA_API/repos/$GITEA_REPO/issues/$PR/comments?limit=50&page=$n")
-    case $code in 2??) ;; *) say "Gitea didn't list the pull request's comments ($code): $(shown "$out")"; return 1 ;; esac
-    id=$(jq -r --arg me "$1" --arg m "$marker" '[.[] | select((.user.login // "" | ascii_downcase) == ($me | ascii_downcase)
-      and ((.body // "") | split("\n")[0] | rtrimstr("\r")) == $m)][0].id // ""' "$out")
-    case $id in *[!0-9]*) say "Gitea gave a comment with no number"; return 1 ;; esac
-    if [ -n "$id" ]; then
-      printf '%s' "$id"
-      return 0
-    fi
-    [ "$(jq 'length' "$out")" -ge 50 ] || return 0
-    n=$((n + 1))
-  done
+  code=$(host GET "$GITEA_API/repos/$GITEA_REPO/issues/$PR/comments")
+  case $code in 2??) ;; *) say "Gitea didn't list the pull request's comments ($code): $(shown "$out")"; return 1 ;; esac
+  id=$(jq -r --arg me "$1" --arg m "$marker" '[.[] | select((.user.login // "" | ascii_downcase) == ($me | ascii_downcase)
+    and ((.body // "") | split("\n")[0] | rtrimstr("\r")) == $m)][0].id // ""' "$out")
+  case $id in *[!0-9]*) say "Gitea gave a comment with no number"; return 1 ;; esac
+  printf '%s' "$id"
 }
 
 post_comment() {

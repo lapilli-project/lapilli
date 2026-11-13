@@ -18,10 +18,13 @@
 #       steps:
 #         - uses: actions/checkout@v4
 #           with: {fetch-depth: 2, persist-credentials: false}
-#         - uses: lapilli-project/lapilli/recipes/backtest@v0.32.0
+#         # Pinned by the commit of the release's tag.
+#         - uses: lapilli-project/lapilli/recipes/backtest@COMMIT # v0.32.0
 #           with:
 #             version: v0.32.0
+#             sha256: SHA256 # of lapilli-v0.32.0-linux-amd64.tar.gz
 #             paths: alerts
+#             incidents: incidents.yaml
 #             prometheus-url: ${{ vars.PROMETHEUS_URL }}
 #             since: 14d
 name: Lapilli alert rules backtest
@@ -35,7 +38,7 @@ inputs:
     description: The Lapilli release to install, such as v0.32.0, checked against its SHA256SUMS. The tag this action is used at.
     required: true
   sha256:
-    description: The sha256 of the release's archive for the runner (lapilli-VERSION-linux-amd64.tar.gz), pinned. SHA256SUMS is checked either way.
+    description: The sha256 of the release's archive for the runner (lapilli-VERSION-linux-amd64.tar.gz), pinned, which a release replaced can't match. SHA256SUMS is checked either way.
     default: ""
   paths:
     description: Where the rules are, files or directories in the repository, space-separated. Or render.
@@ -45,6 +48,9 @@ inputs:
     default: ""
   render-prepare:
     description: A command run in each commit's files before render, such as "helm dependency build charts/monitoring".
+    default: ""
+  incidents:
+    description: A file of incidents in the repository, read from the commit the pull request goes into, never the pull request's own.
     default: ""
   prometheus-url:
     description: The Prometheus-compatible API the history is read from (--prometheus).
@@ -62,7 +68,7 @@ inputs:
     description: How far back to replay (--since), such as 14d.
     default: 7d
   args:
-    description: More of lapilli verdict's flags, split at spaces, such as "--incidents incidents.yaml --rules-select grafana_alert=1 --tz Asia/Seoul".
+    description: More of lapilli verdict's flags, split at spaces, such as "--rules-select grafana_alert=1 --tz Asia/Seoul". A file they name in the checkout is refused, as the pull request's.
     default: ""
   target:
     description: The commit the pull request goes into, as the checkout has it. HEAD^1 is the merge commit's first parent.
@@ -91,6 +97,7 @@ runs:
         PATHS: ${{ inputs.paths }}
         RENDER: ${{ inputs.render }}
         RENDER_PREPARE: ${{ inputs.render-prepare }}
+        INCIDENTS: ${{ inputs.incidents }}
         LAPILLI_PROMETHEUS: ${{ inputs.prometheus-url }}
         LAPILLI_AUTH: ${{ inputs.auth }}
         LAPILLI_GCP_PROJECT: ${{ inputs.gcp-project }}

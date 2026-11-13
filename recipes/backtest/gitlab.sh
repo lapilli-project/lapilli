@@ -7,7 +7,9 @@
 #                      request (a project access token, scope api, role
 #                      Reporter)
 #   GITLAB_PROJECT     the project's id, or its path: example/monitoring
-#                      (default: GitLab CI's CI_PROJECT_ID)
+#                      (default: GitLab CI's CI_MERGE_REQUEST_PROJECT_ID,
+#                      the project the merge request is in, which for a
+#                      fork's isn't CI_PROJECT_ID)
 #   GITLAB_API         default GitLab CI's CI_API_V4_URL, or
 #                      https://gitlab.com/api/v4
 #   PR                 the merge request's iid (default: GitLab CI's
@@ -20,7 +22,7 @@ recipe=gitlab.sh
 here=$(dirname "$0")
 : "${GITLAB_TOKEN_FILE:?a file holding a token that may comment on the merge request}"
 [ -r "$GITLAB_TOKEN_FILE" ] || { echo "gitlab.sh: GITLAB_TOKEN_FILE $GITLAB_TOKEN_FILE can't be read" >&2; exit 1; }
-GITLAB_PROJECT=${GITLAB_PROJECT:-${CI_PROJECT_ID:-}}
+GITLAB_PROJECT=${GITLAB_PROJECT:-${CI_MERGE_REQUEST_PROJECT_ID:-${CI_PROJECT_ID:-}}}
 : "${GITLAB_PROJECT:?the project id or path, such as example/monitoring}"
 api=${GITLAB_API:-${CI_API_V4_URL:-https://gitlab.com/api/v4}}
 PR=${PR:-${CI_MERGE_REQUEST_IID:-}}
@@ -28,7 +30,7 @@ if [ -z "${TARGET:-}" ] && [ -z "${TARGET_BRANCH:-}" ]; then
   TARGET=${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}}
 fi
 case $GITLAB_PROJECT in *[!A-Za-z0-9._/-]* | /* | */) echo "gitlab.sh: GITLAB_PROJECT $GITLAB_PROJECT: want an id or a path" >&2; exit 1 ;; esac
-case $api in http://* | https://*) ;; *) echo "gitlab.sh: GITLAB_API $api: want an http or https URL" >&2; exit 1 ;; esac
+host_api=$api
 project=$(printf '%s' "$GITLAB_PROJECT" | jq -sRr @uri)
 
 host_auth() {

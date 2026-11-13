@@ -15,7 +15,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -107,6 +109,9 @@ type prRepo struct {
 	t   *testing.T
 	dir string
 	env []string
+	// home is the HOME the repository's git, and a recipe, run with: the
+	// test's own, never the machine's.
+	home string
 }
 
 func newPRRepo(t *testing.T, base map[string]string) *prRepo {
@@ -114,7 +119,7 @@ func newPRRepo(t *testing.T, base map[string]string) *prRepo {
 	home := t.TempDir()
 	empty := filepath.Join(home, "gitconfig")
 	os.WriteFile(empty, nil, 0o600)
-	r := &prRepo{t: t, dir: t.TempDir(), env: append(os.Environ(), "HOME="+home, "GIT_CONFIG_GLOBAL="+empty, "GIT_CONFIG_NOSYSTEM=1",
+	r := &prRepo{t: t, dir: t.TempDir(), home: home, env: append(os.Environ(), "HOME="+home, "GIT_CONFIG_GLOBAL="+empty, "GIT_CONFIG_NOSYSTEM=1",
 		"GIT_TERMINAL_PROMPT=0", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")}
 	r.git("init", "--quiet", "--initial-branch=main")
 	r.write(base)
@@ -162,11 +167,14 @@ func (r *prRepo) pullRequest(files map[string]string) {
 	r.git("merge", "--quiet", "--no-ff", "--no-edit", "pr")
 }
 
-// hostComment is a comment a stand-in host keeps.
+// hostComment is a comment a stand-in host keeps: one deleted (Bitbucket's,
+// Azure DevOps' thread), or GitLab's own (a system note), never the
+// recipe's.
 type hostComment struct {
-	ID, Thread int
-	Author     string
-	Body       string
+	ID, Thread      int
+	Author          string
+	Body            string
+	Deleted, System bool
 }
 
 // commentHost is a stand-in for one host's API of pull request comments.
@@ -180,8 +188,13 @@ type commentHost struct {
 	next     int
 	posts    int
 	edits    int
-	// anonymous says the token can't say whose it is.
+	// anonymous says the token can't say whose it is, as no repository
+	// access token on Bitbucket can.
 	anonymous bool
+	// failPost refuses a new comment.
+	failPost bool
+	// closed says Azure DevOps' last thread was posted closed.
+	closed bool
 }
 
 // The account the stand-ins' token is, as each host names it.
@@ -233,26 +246,32 @@ func (h *commentHost) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		me, list, one = "/org/_apis/connectionData", "/org/my%20project/_apis/git/repositories/rules/pullRequests/7/threads",
 			"/org/my%20project/_apis/git/repositories/rules/pullRequests/7/threads/"
 	}
-	// A page of what is listed, as the host pages it.
-	page := func() []hostComment {
+	// A page of what is listed, as the host pages it, and whether there
+	// is another. Gitea 28 takes no page for an issue's comments, and gives
+	// them all; Azure DevOps all of a pull request's threads.
+	page := func() ([]hostComment, bool) {
 		size, n := len(h.comments), 1
 		switch h.kind {
 		case "github", "gitlab":
 			size, _ = strconv.Atoi(r.URL.Query().Get("per_page"))
-		case "gitea":
-			size, _ = strconv.Atoi(r.URL.Query().Get("limit"))
 		case "bitbucket":
 			size, _ = strconv.Atoi(r.URL.Query().Get("pagelen"))
 		}
-		if h.kind != "azure" {
+		if h.kind != "azure" && h.kind != "gitea" {
 			n, _ = strconv.Atoi(r.URL.Query().Get("page"))
 		}
+		if h.kind == "gitea" && (r.URL.Query().Has("page") || r.URL.Query().Has("limit")) {
+			h.t.Errorf("gitea: paged, which Gitea ignores: %s", r.URL)
+		}
 		if size < 1 || n < 1 {
+			if len(h.comments) == 0 {
+				return nil, false
+			}
 			h.t.Errorf("%s: listed without paging: %s", h.kind, r.URL)
-			return nil
+			return nil, false
 		}
 		from, to := min((n-1)*size, len(h.comments)), min(n*size, len(h.comments))
-		return h.comments[from:to]
+		return h.comments[from:to], to < len(h.comments)
 	}
 	shape := func(c hostComment) any {
 		switch h.kind {
@@ -260,11 +279,12 @@ func (h *commentHost) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return map[string]any{"id": c.ID, "body": c.Body, "user": map[string]any{"login": c.Author}}
 		case "gitlab":
 			id, _ := strconv.Atoi(c.Author)
-			return map[string]any{"id": c.ID, "body": c.Body, "author": map[string]any{"id": id}, "system": false}
+			return map[string]any{"id": c.ID, "body": c.Body, "author": map[string]any{"id": id}, "system": c.System}
 		case "bitbucket":
-			return map[string]any{"id": c.ID, "content": map[string]any{"raw": c.Body}, "user": map[string]any{"uuid": c.Author}}
+			return map[string]any{"id": c.ID, "content": map[string]any{"raw": c.Body}, "user": map[string]any{"uuid": c.Author}, "deleted": c.Deleted}
 		}
-		return map[string]any{"id": c.Thread, "comments": []any{map[string]any{"id": 1, "content": c.Body, "author": map[string]any{"id": c.Author}}}}
+		return map[string]any{"id": c.Thread, "isDeleted": c.Deleted,
+			"comments": []any{map[string]any{"id": 1, "content": c.Body, "author": map[string]any{"id": c.Author}}}}
 	}
 	body := func() string {
 		var in map[string]any
@@ -291,7 +311,7 @@ func (h *commentHost) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.Method == http.MethodGet && path == me:
-		if h.anonymous {
+		if h.anonymous || h.kind == "bitbucket" {
 			http.Error(w, "Resource not accessible by integration", http.StatusForbidden)
 			return
 		}
@@ -307,7 +327,8 @@ func (h *commentHost) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case r.Method == http.MethodGet && path == list:
 		var shown []any
-		for _, c := range page() {
+		these, more := page()
+		for _, c := range these {
 			shown = append(shown, shape(c))
 		}
 		if shown == nil {
@@ -315,16 +336,30 @@ func (h *commentHost) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		switch h.kind {
 		case "bitbucket":
-			reply(map[string]any{"values": shown})
+			v := map[string]any{"values": shown}
+			if more {
+				// Followed, it would lead elsewhere: the recipe asks by page.
+				v["next"] = "https://elsewhere.example/next"
+			}
+			reply(v)
 		case "azure":
 			reply(map[string]any{"value": shown})
 		default:
 			reply(shown)
 		}
+	case r.Method == http.MethodPost && path == list && h.failPost:
+		http.Error(w, "nope", http.StatusInternalServerError)
 	case r.Method == http.MethodPost && path == list:
 		h.posts++
+		if h.kind == "azure" {
+			var in map[string]any
+			b, _ := io.ReadAll(r.Body)
+			json.Unmarshal(b, &in)
+			h.closed = in["status"] == "closed"
+			r.Body = io.NopCloser(strings.NewReader(string(b)))
+		}
 		id := h.add(hostMe[h.kind], body())
-		reply(map[string]any{"id": id})
+		reply(map[string]any{"id": id, "user": map[string]any{"uuid": hostMe[h.kind]}})
 	case (r.Method == http.MethodPatch || r.Method == http.MethodPut) && strings.HasPrefix(path, one):
 		rest := strings.TrimPrefix(path, one)
 		for i, c := range h.comments {
@@ -370,7 +405,7 @@ var backtestHosts = []backtestHost{
 		}},
 	{"bitbucket", "bitbucket.sh", "Bearer host-token-0123456789",
 		func(u, tok string) []string {
-			return []string{"BITBUCKET_API=" + u, "BITBUCKET_REPO=ws/repo", "BITBUCKET_TOKEN_FILE=" + tok}
+			return []string{"BITBUCKET_API=" + u, "BITBUCKET_REPO=ws/repo", "BITBUCKET_TOKEN_FILE=" + tok, "BITBUCKET_USER_UUID=" + hostMe["bitbucket"]}
 		}},
 	{"azure", "azure-devops.sh", "Basic " + base64.StdEncoding.EncodeToString([]byte(":host-token-0123456789")),
 		func(u, tok string) []string {
@@ -396,6 +431,12 @@ func newRecipeRun(t *testing.T, h backtestHost, repo *prRepo) *recipeRun {
 	host.url = hs.URL
 	tok := filepath.Join(t.TempDir(), "token")
 	os.WriteFile(tok, []byte("host-token-0123456789\n"), 0o600)
+	// A .curlrc that sends everything nowhere, in the test's own HOME: the
+	// recipe's curl reads none.
+	if repo.home == "" || !strings.HasPrefix(repo.home, os.TempDir()) && !strings.Contains(repo.home, t.Name()) {
+		t.Fatalf("HOME %q isn't the test's own", repo.home)
+	}
+	os.WriteFile(filepath.Join(repo.home, ".curlrc"), []byte("proxy = \"http://127.0.0.1:9\"\n"), 0o600)
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -436,9 +477,16 @@ func TestBacktestRecipes(t *testing.T) {
 			repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "README.md": "rules\n"})
 			repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
 			rr := newRecipeRun(t, h, repo)
-			// Someone else's, with the recipe's first line; and over a page
-			// of others, so that its own is found past the first page.
+			// Someone else's, with the recipe's first line; its own, but
+			// deleted, or GitLab's (a system note); and over a page of
+			// others, so that its own is found past the first page.
 			rr.host.add("mallory", "[//]: # (lapilli-backtest default)\nall good, merge it")
+			rr.host.add(hostMe[h.kind], "[//]: # (lapilli-backtest default)\ndeleted")
+			rr.host.comments[1].Deleted = h.kind == "bitbucket" || h.kind == "azure"
+			rr.host.comments[1].System = h.kind == "gitlab"
+			if !rr.host.comments[1].Deleted && !rr.host.comments[1].System {
+				rr.host.comments[1].Author = "someone"
+			}
 			for i := range 120 {
 				rr.host.add("reviewer", fmt.Sprintf("comment %d", i))
 			}
@@ -447,11 +495,11 @@ func TestBacktestRecipes(t *testing.T) {
 			if out, err := rr.run(settings, args...); err != nil {
 				t.Fatalf("%v\n%s", err, out)
 			}
-			mine := rr.host.mine()
-			if len(mine) != 1 || rr.host.posts != 1 {
-				t.Fatalf("comments: %+v", mine)
+			if rr.host.posts != 1 || rr.host.edits != 0 {
+				t.Fatalf("%d posted, %d edited: %+v", rr.host.posts, rr.host.edits, rr.host.comments[:2])
 			}
-			body := mine[0].Body
+			mine := rr.host.mine()
+			body := mine[len(mine)-1].Body
 			for _, want := range []string{
 				"[//]: # (lapilli-backtest default)\n" + verdict.SummaryLine + `{"nothing_changed":false,"changed":1,`,
 				"### Lapilli backtest, ", " UTC\n",
@@ -471,10 +519,14 @@ func TestBacktestRecipes(t *testing.T) {
 			if out, err := rr.run(settings, args...); err != nil {
 				t.Fatalf("%v\n%s", err, out)
 			}
-			// Fired once, and still does: it fires as it did.
+			// Fired once, and still does: it fires as it did. Bitbucket
+			// shows HTML as text: its summary in bold.
+			folded := "<details><summary>1 changed rules fire as they did</summary>\n\n- `CheckoutErrors`\n\n</details>\n"
+			if h.kind == "bitbucket" {
+				folded = "**1 changed rules fire as they did**\n\n- `CheckoutErrors`\n\n\n"
+			}
 			mine = rr.host.mine()
-			if len(mine) != 1 || rr.host.posts != 1 || rr.host.edits != 1 ||
-				!strings.Contains(mine[0].Body, "<details><summary>1 changed rules fire as they did</summary>\n\n- `CheckoutErrors`\n") {
+			if rr.host.posts != 1 || rr.host.edits != 1 || !strings.Contains(mine[len(mine)-1].Body, folded) {
 				t.Errorf("after a second run: %d posts, %d edits, %+v", rr.host.posts, rr.host.edits, mine)
 			}
 			if rr.host.comments[0].Body != "[//]: # (lapilli-backtest default)\nall good, merge it" {
@@ -485,7 +537,7 @@ func TestBacktestRecipes(t *testing.T) {
 			if out, err := rr.run([]string{"PATHS=alerts", "KEY=staging"}, args...); err != nil {
 				t.Fatalf("%v\n%s", err, out)
 			}
-			if mine = rr.host.mine(); len(mine) != 2 || !strings.HasPrefix(mine[1].Body, "[//]: # (lapilli-backtest staging)\n") {
+			if mine = rr.host.mine(); rr.host.posts != 2 || !strings.HasPrefix(mine[len(mine)-1].Body, "[//]: # (lapilli-backtest staging)\n") {
 				t.Errorf("KEY=staging: %+v", mine)
 			}
 		})
@@ -543,6 +595,38 @@ func TestBacktestRecipeRender(t *testing.T) {
 	}
 }
 
+// body is the comment the recipe posted last.
+func (rr *recipeRun) body() string {
+	rr.t.Helper()
+	mine := rr.host.mine()
+	if len(mine) == 0 {
+		rr.t.Fatalf("no comment")
+	}
+	return mine[len(mine)-1].Body
+}
+
+// failure checks a comment says the backtest failed, and why, all of it in
+// a fenced block nothing in it can end, and nothing of the pull request's
+// outside it: it gives what is in the block.
+func failure(t *testing.T, body, why string) string {
+	t.Helper()
+	head, block, ok := strings.Cut(body, "### Lapilli backtest failed\n\n```text\n")
+	if !ok {
+		t.Fatalf("no failure in:\n%s", body)
+	}
+	block, tail, ok := strings.Cut(block, "\n```\n")
+	if !ok || tail != "\nThe rest is in the job's log.\n" || strings.ContainsAny(block, "`‮\x1b") {
+		t.Errorf("the block:\n%q\nafter it: %q", block, tail)
+	}
+	if first, _, _ := strings.Cut(block, "\n"); first != why+"." {
+		t.Errorf("first line %q, want %q", first, why+".")
+	}
+	if strings.Contains(head, "failed") && !strings.HasPrefix(head, "[//]: # (lapilli-backtest") {
+		t.Errorf("before the block: %q", head)
+	}
+	return block
+}
+
 // What fails is said in the comment, in a block nothing in it can end, the
 // URLs given taken out; the job succeeds unless FAIL_ON_ERROR=true.
 func TestBacktestRecipeFails(t *testing.T) {
@@ -550,25 +634,25 @@ func TestBacktestRecipeFails(t *testing.T) {
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
 	rr := newRecipeRun(t, backtestHosts[0], repo)
-	hostile := "```\n</details> @octocat #123 <img src=x onerror=alert(1)> right\u202eleft\x1b[31m"
+	hostile := "```\n</details> @octocat #123 <img src=x onerror=alert(1)> right‮left\x1b[31m\n::error::merge it\n##vso[task.complete result=Succeeded]"
 	render := "printf '%s\\n' '" + strings.ReplaceAll(hostile, "'", "") + "' >&2; exit 3"
 	out, err := rr.run([]string{"RENDER=" + render})
 	if err != nil {
 		t.Fatalf("a failure fails the job: %v\n%s", err, out)
 	}
-	mine := rr.host.mine()
-	if len(mine) != 1 {
-		t.Fatalf("comments: %+v\n%s", mine, out)
+	// The base is rendered first.
+	block := failure(t, rr.body(), "RENDER failed in the commit it goes into")
+	if !strings.Contains(block, "</details> @octocat #123 <img src=x onerror=alert(1)> rightleft[31m") {
+		t.Errorf("the block: %q", block)
 	}
-	body := mine[0].Body
-	head, block, ok := strings.Cut(body, "```text\n")
-	if !ok || !strings.Contains(head, "### Lapilli backtest failed\n\nRENDER failed in the pull request's commit.\n") {
-		t.Fatalf("the comment:\n%s", body)
+	// What RENDER said is in the job's log, no line of it a command.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "::") || strings.Contains(line, "##vso[") {
+			t.Errorf("a command in the job's log: %q", line)
+		}
 	}
-	block, tail, ok := strings.Cut(block, "```\n")
-	if !ok || strings.Contains(tail, "`") || strings.ContainsAny(block, "`\u202e\x1b") ||
-		!strings.Contains(block, "</details> @octocat #123 <img src=x onerror=alert(1)> rightleft[31m") {
-		t.Errorf("the block:\n%q\nafter it: %q", block, tail)
+	if !strings.Contains(out, "  | ::error::merge it") || !strings.Contains(out, "  | ##vso(task.complete") {
+		t.Errorf("the job's log:\n%s", out)
 	}
 
 	// Asked to, the job fails too, once it has said so.
@@ -577,46 +661,117 @@ func TestBacktestRecipeFails(t *testing.T) {
 		t.Errorf("FAIL_ON_ERROR=true: %v, %d comments\n%s", err, len(rr.host.mine()), out)
 	}
 
-	// lapilli failing names where the history is: not in the comment.
+	// lapilli failing names where the history is: not in the comment, nor
+	// the address its host resolved to.
 	rr.host.comments = nil
-	out, err = rr.run([]string{"PATHS=alerts"}, "--prometheus", "http://127.0.0.1:1/prometheus", "--impact", "up == 0", "--timeout", "5s")
+	out, err = rr.run([]string{"PATHS=alerts"}, "--prometheus", "http://ci-reader:pw@localhost:1/prometheus", "--impact", "up == 0", "--timeout", "5s")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if mine = rr.host.mine(); len(mine) != 1 || !strings.Contains(mine[0].Body, "the backtest failed, or didn't finish (lapilli exited 1)") ||
-		strings.Contains(mine[0].Body, "127.0.0.1") || !strings.Contains(mine[0].Body, "[hidden]") || !strings.Contains(out, "127.0.0.1:1") {
-		t.Errorf("comments: %+v\n%s", mine, out)
+	block = failure(t, rr.body(), "the backtest failed, or didn't finish (lapilli exited 1)")
+	if m := regexp.MustCompile(`127\.0\.0\.1|\[::1\]|ci-reader|localhost`).FindString(block); m != "" || !strings.Contains(block, "[hidden]") ||
+		!strings.Contains(block, "[address]") || !strings.Contains(out, "localhost:1") {
+		t.Errorf("the block says %q: %q\n%s", m, block, out)
+	}
+	// A URL's user and password, and addresses, wherever they come from.
+	rr.host.comments = nil
+	userinfo := filepath.Join(t.TempDir(), "lapilli")
+	os.WriteFile(userinfo, []byte("#!/bin/sh\necho 'lapilli verdict: Get \"https://other-user:s3cret@elsewhere.example/x\": dial tcp 10.1.2.3:9090: lookup on 10.0.0.2:53' >&2\nexit 1\n"), 0o755)
+	rr.run([]string{"PATHS=alerts", "LAPILLI=" + userinfo}, "--prometheus", "http://127.0.0.1:1")
+	if block := failure(t, rr.body(), "the backtest failed, or didn't finish (lapilli exited 1)"); strings.Contains(block, "other-user") ||
+		strings.Contains(block, "10.") || !strings.Contains(block, `"https://elsewhere.example/x": dial tcp [address]: lookup on [address]`) {
+		t.Errorf("the block: %q", block)
 	}
 
 	// A lapilli from before --markdown says so.
 	rr.host.comments = nil
 	old := filepath.Join(t.TempDir(), "lapilli")
 	os.WriteFile(old, []byte("#!/bin/sh\necho 'lapilli verdict: --markdown needs a value' >&2\nexit 2\n"), 0o755)
-	if out, err := rr.run([]string{"PATHS=alerts", "LAPILLI=" + old}, "--prometheus", "http://127.0.0.1:1"); err != nil ||
-		len(rr.host.mine()) != 1 || !strings.Contains(rr.host.mine()[0].Body, "the lapilli LAPILLI names has no --markdown: give a later release") {
-		t.Errorf("an old lapilli: %v %+v\n%s", err, rr.host.mine(), out)
+	if out, err := rr.run([]string{"PATHS=alerts", "LAPILLI=" + old}, "--prometheus", "http://127.0.0.1:1"); err != nil {
+		t.Errorf("an old lapilli: %v\n%s", err, out)
+	}
+	failure(t, rr.body(), "the lapilli LAPILLI names has no --markdown: give a later release")
+
+	// A report from a run that failed is no reason to say nothing: one that
+	// says nothing changed, then exits 1, is posted, failure and all.
+	rr.host.comments = nil
+	lying := filepath.Join(t.TempDir(), "lapilli")
+	os.WriteFile(lying, []byte("#!/bin/sh\nprintf '%s\\n' '"+verdict.SummaryLine+`{"nothing_changed":true,"unreplayed":0}`+")' '"+verdict.NothingChangedHeading+"'\nexit 1\n"), 0o755)
+	if out, err := rr.run([]string{"PATHS=alerts", "LAPILLI=" + lying}, "--prometheus", "http://127.0.0.1:1"); err != nil || len(rr.host.mine()) != 1 {
+		t.Errorf("a report of a run that failed: %v %+v\n%s", err, rr.host.mine(), out)
 	}
 
-	// A link where the rules are read is never followed.
+	// The comment can't be posted: the job fails only when asked to.
+	rr.host.comments, rr.host.failPost = nil, true
+	if out, err := rr.run([]string{"RENDER=" + render}); err != nil || !strings.Contains(out, "the comment couldn't be posted") {
+		t.Errorf("not posted: %v\n%s", err, out)
+	}
+	if out, err := rr.run([]string{"RENDER=" + render, "FAIL_ON_ERROR=true"}); err == nil {
+		t.Errorf("not posted, FAIL_ON_ERROR=true: the job succeeded\n%s", out)
+	}
+	rr.host.failPost = false
+
+	// Asked to fail when it does, a backtest of rules that couldn't be
+	// replayed, with the history out of reach, fails.
 	rr.host.comments = nil
-	repo.pullRequest(map[string]string{"alerts/shop.yaml": ""})
-	os.MkdirAll(filepath.Join(repo.dir, "alerts"), 0o755)
-	if err := os.Symlink("/etc/hosts", filepath.Join(repo.dir, "alerts", "shop.yaml")); err != nil {
+	out, err = rr.run([]string{"PATHS=alerts", "FAIL_ON_ERROR=true"}, "--prometheus", "http://127.0.0.1:1")
+	if err == nil {
+		t.Errorf("FAIL_ON_ERROR=true, nothing replayed, and the job succeeded:\n%s", out)
+	}
+	if body := rr.body(); !strings.Contains(body, "| Firings of the changed rules |") {
+		t.Errorf("the report goes with the failure:\n%s", body)
+	}
+	failure(t, rr.body(), "1 of the rules that differ couldn't be replayed (FAIL_ON_ERROR=true)")
+	if out, err := rr.run([]string{"PATHS=alerts"}, "--prometheus", "http://127.0.0.1:1"); err != nil || strings.Contains(rr.body(), "### Lapilli backtest failed") {
+		t.Errorf("not asked to fail: %v\n%s\n%s", err, rr.body(), out)
+	}
+
+	// A link where the rules are read is never followed, and its name,
+	// the pull request's, is only in the job's log.
+	rr.host.comments = nil
+	dir := filepath.Join(repo.dir, "alerts", "x @octocat @example-org", "team example-org", "repo#1 #2")
+	os.MkdirAll(dir, 0o755)
+	if err := os.Symlink("/etc/hosts", filepath.Join(dir, `www.evil.example <img src="https:\evil.example\q.png"> **ALL CLEAR**`)); err != nil {
 		t.Fatal(err)
 	}
 	repo.git("add", "-A")
 	repo.git("commit", "--quiet", "--amend", "--no-edit")
-	if out, err := rr.run([]string{"PATHS=alerts"}, "--prometheus", "http://127.0.0.1:1"); err != nil ||
-		len(rr.host.mine()) != 1 || !strings.Contains(rr.host.mine()[0].Body, "holds a symbolic link, alerts/shop.yaml") {
-		t.Errorf("a link: %v %+v\n%s", err, rr.host.mine(), out)
+	out, err = rr.run([]string{"PATHS=alerts"}, "--prometheus", "http://127.0.0.1:1")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
 	}
+	body := rr.body()
+	failure(t, body, "the pull request's commit holds a symbolic link, which could lead to any file the job can read: not read (the job's log says where)")
+	for _, bad := range []string{"octocat", "example-org", "#2", "www.", "<img", "ALL CLEAR"} {
+		if strings.Contains(body, bad) {
+			t.Errorf("the link's name in the comment: %s\n%s", bad, body)
+		}
+	}
+	if !strings.Contains(out, "a symbolic link in the pull request's commit: alerts/x @octocat") {
+		t.Errorf("the job's log doesn't say where:\n%s", out)
+	}
+	os.RemoveAll(filepath.Join(repo.dir, "alerts", "x @octocat @example-org"))
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "--amend", "--no-edit")
+
+	// RENDER_PREPARE leaving a link, and a commit too big to read.
+	rr.host.comments = nil
+	rr.run([]string{"RENDER=cat alerts/shop.yaml", "RENDER_PREPARE=ln -s /etc/hosts alerts/hosts.yaml"})
+	failure(t, rr.body(), "RENDER_PREPARE left a symbolic link in the commit it goes into: not read (the job's log says where)")
+	rr.host.comments = nil
+	rr.run([]string{"PATHS=alerts", "MAX_TREE_FILES=0"}, "--prometheus", "http://127.0.0.1:1")
+	failure(t, rr.body(), fmt.Sprintf("the commit it goes into is too big to read: 1 files of %d bytes, more than MAX_TREE_FILES (0) or MAX_TREE_BYTES (268435456)",
+		len(shopRules("5m"))))
 }
 
 // Settings that are wrong fail the job at once, before anything runs.
 func TestBacktestRecipeSettings(t *testing.T) {
 	needRecipeTools(t)
-	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": "incidents: []\n"})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
 	rr := newRecipeRun(t, backtestHosts[0], repo)
+	pin := "LAPILLI_SHA256=" + strings.Repeat("a", 64)
+	inClone := filepath.Join(repo.dir, "incidents.yaml")
 	for _, c := range []struct {
 		settings []string
 		args     []string
@@ -636,10 +791,28 @@ func TestBacktestRecipeSettings(t *testing.T) {
 		{[]string{"PATHS=alerts"}, []string{"--compare", "x"}, "the recipe gives lapilli the rules"},
 		{[]string{"PATHS=alerts", "LAPILLI=", "LAPILLI_VERSION=latest"}, nil, "want the Lapilli release to install"},
 		{[]string{"PATHS=alerts", "LAPILLI=", "LAPILLI_VERSION=v1.2.3", "LAPILLI_SHA256=abc"}, nil, "64 hex digits"},
-		// Over plain http, an archive and its SHA256SUMS could both be anyone's.
-		{[]string{"PATHS=alerts", "LAPILLI=", "LAPILLI_VERSION=v1.2.3", "LAPILLI_RELEASES=http://mirror.example/releases"}, nil, "want an https URL"},
 		{[]string{"PATHS=alerts", "GITHUB_REPO=o/r/x"}, nil, "want OWNER/REPO"},
+		// Over plain http, or anywhere but here with a user in it, an
+		// archive and its SHA256SUMS could both be anyone's.
+		{[]string{"PATHS=alerts", "LAPILLI=", "LAPILLI_VERSION=v1.2.3", pin, "LAPILLI_RELEASES=http://mirror.example/releases"}, nil, "want an https URL"},
+		{[]string{"PATHS=alerts", "LAPILLI=", "LAPILLI_VERSION=v1.2.3", pin, "LAPILLI_RELEASES=http://localhost:@mirror.invalid/releases"}, nil, "want an https URL"},
+		{[]string{"PATHS=alerts", "LAPILLI=", "LAPILLI_VERSION=v1.2.3", pin, "LAPILLI_RELEASES=http://127.0.0.1:x@mirror.invalid/releases"}, nil, "want an https URL"},
+		{[]string{"PATHS=alerts", "LAPILLI=", "LAPILLI_VERSION=v1.2.3", pin, "LAPILLI_RELEASES=http://localhost.mirror.invalid/releases"}, nil, "want an https URL"},
+		{[]string{"PATHS=alerts", "LAPILLI=", "LAPILLI_VERSION=v1.2.3", "LAPILLI_RELEASES=https://mirror.example/releases"}, nil, "give it"},
+		// A token goes to the host in the clear only on this machine.
+		{[]string{"PATHS=alerts", "GITHUB_API=http://github.example/api/v3"}, nil, "want an https URL"},
+		// A file of the checkout's is the pull request's.
+		{[]string{"PATHS=alerts"}, []string{"--incidents", "incidents.yaml"}, "a file in the checkout is the pull request's"},
+		{[]string{"PATHS=alerts"}, []string{"--incidents=" + inClone}, "a file in the checkout is the pull request's"},
+		{[]string{"PATHS=alerts"}, []string{"--bearer-token-file", "./alerts/../incidents.yaml"}, "a file in the checkout is the pull request's"},
+		{[]string{"PATHS=alerts", "INCIDENTS=/etc/passwd"}, nil, "want a file in the repository"},
+		// PATHS that neither commit has would say nothing changed.
+		{[]string{"PATHS=alert"}, []string{"--prometheus", "http://127.0.0.1:1"}, "none of PATHS is in either commit"},
+		{[]string{"PATHS=alerts", "BITBUCKET_USER_UUID=x"}, nil, ""},
 	} {
+		if len(c.settings) > 0 && c.settings[len(c.settings)-1] == "BITBUCKET_USER_UUID=x" {
+			continue
+		}
 		out, err := rr.run(c.settings, c.args...)
 		if err == nil || !strings.Contains(out, c.want) {
 			t.Errorf("%v %v: %v, want it to fail saying %q\n%s", c.settings, c.args, err, c.want, out)
@@ -648,10 +821,17 @@ func TestBacktestRecipeSettings(t *testing.T) {
 	if len(rr.host.comments) != 0 {
 		t.Errorf("commented: %+v", rr.host.comments)
 	}
+	bb := newRecipeRun(t, backtestHosts[3], repo)
+	for _, uuid := range []string{"x", "{}", "{not-hex!}"} {
+		if out, err := bb.run([]string{"PATHS=alerts", "BITBUCKET_USER_UUID=" + uuid}); err == nil || !strings.Contains(out, "want {UUID}") {
+			t.Errorf("BITBUCKET_USER_UUID=%s: %v\n%s", uuid, err, out)
+		}
+	}
 }
 
 // A release is installed only as its SHA256SUMS, and LAPILLI_SHA256 when
-// given, say: an archive that isn't is never unpacked or run.
+// given, say: an archive that isn't is never unpacked or run, nor one
+// redirected to plain http.
 func TestBacktestRecipeInstall(t *testing.T) {
 	needRecipeTools(t)
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
@@ -675,8 +855,13 @@ func TestBacktestRecipeInstall(t *testing.T) {
 	gz.Close()
 	sum := sha256.Sum256([]byte(archive.String()))
 	good := hex.EncodeToString(sum[:])
-	sums := good + "  " + name + ".tar.gz\n"
+	goodSums := good + "  " + name + ".tar.gz\n"
 	var mu sync.Mutex
+	sums := goodSums
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, archive.String())
+	}))
+	defer plain.Close()
 	releases := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		s := sums
@@ -686,6 +871,11 @@ func TestBacktestRecipeInstall(t *testing.T) {
 			io.WriteString(w, archive.String())
 		case "/v9.9.9/SHA256SUMS":
 			io.WriteString(w, s)
+		case "/v9.9.7/SHA256SUMS":
+			io.WriteString(w, strings.ReplaceAll(s, "v9.9.9", "v9.9.7"))
+		case "/v9.9.7/" + strings.Replace(name, "v9.9.9", "v9.9.7", 1) + ".tar.gz":
+			// Elsewhere, over plain http.
+			http.Redirect(w, r, plain.URL+"/archive.tar.gz", http.StatusFound)
 		default:
 			http.NotFound(w, r)
 		}
@@ -694,7 +884,7 @@ func TestBacktestRecipeInstall(t *testing.T) {
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
 	rr := newRecipeRun(t, backtestHosts[0], repo)
-	install := []string{"PATHS=alerts", "LAPILLI=", "LAPILLI_VERSION=v9.9.9", "LAPILLI_RELEASES=" + releases.URL}
+	install := []string{"PATHS=alerts", "LAPILLI=", "LAPILLI_VERSION=v9.9.9", "LAPILLI_RELEASES=" + releases.URL, "LAPILLI_SHA256=" + good}
 	out, err := rr.run(install, "--prometheus", prom.URL)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -704,15 +894,17 @@ func TestBacktestRecipeInstall(t *testing.T) {
 		t.Fatalf("installed: %v %+v\n%s", err, rr.host.mine(), out)
 	}
 
+	zeros := strings.Repeat("0", 64)
 	for _, c := range []struct {
 		name, sums string
 		settings   []string
 		want       string
 	}{
-		{"another file", strings.Repeat("0", 64) + "  " + name + ".tar.gz\n", nil, "isn't the file SHA256SUMS names"},
-		{"no sum", strings.Repeat("0", 64) + "  lapilli-v9.9.9-plan9-mips.tar.gz\n", nil, "has no sum for " + name + ".tar.gz"},
-		{"pinned otherwise", sums, []string{"LAPILLI_SHA256=" + strings.Repeat("a", 64)}, "LAPILLI_SHA256 isn't the sum"},
-		{"no such release", sums, []string{"LAPILLI_VERSION=v9.9.8"}, "couldn't be downloaded"},
+		{"another file", zeros + "  " + name + ".tar.gz\n", []string{"LAPILLI_SHA256=" + zeros}, name + ".tar.gz isn't the file SHA256SUMS names"},
+		{"no sum", zeros + "  lapilli-v9.9.9-plan9-mips.tar.gz\n", nil, "Lapilli v9.9.9's SHA256SUMS has no sum for " + name + ".tar.gz"},
+		{"pinned otherwise", goodSums, []string{"LAPILLI_SHA256=" + strings.Repeat("a", 64)}, "LAPILLI_SHA256 isn't the sum"},
+		{"no such release", goodSums, []string{"LAPILLI_VERSION=v9.9.8"}, "Lapilli v9.9.8's " + strings.Replace(name, "v9.9.9", "v9.9.8", 1) + ".tar.gz couldn't be downloaded"},
+		{"redirected to plain http", goodSums, []string{"LAPILLI_VERSION=v9.9.7"}, "Lapilli v9.9.7's " + strings.Replace(name, "v9.9.9", "v9.9.7", 1) + ".tar.gz couldn't be downloaded"},
 	} {
 		os.Remove(ran)
 		rr.host.comments = nil
@@ -729,9 +921,6 @@ func TestBacktestRecipeInstall(t *testing.T) {
 		if mine := rr.host.mine(); len(mine) != 1 || !strings.Contains(mine[0].Body, c.want) {
 			t.Errorf("%s: %+v\n%s", c.name, mine, out)
 		}
-		mu.Lock()
-		sums = good + "  " + name + ".tar.gz\n"
-		mu.Unlock()
 	}
 }
 
@@ -864,5 +1053,194 @@ func TestSummaryDocumented(t *testing.T) {
 	}
 	if !strings.Contains(section, verdict.SummaryLine) {
 		t.Error("the README doesn't show the summary line")
+	}
+}
+
+// A pull request that changes only what an alert reads (a recording rule),
+// or caps a group (limit), changes when alerts fire: it gets its comment.
+func TestBacktestRecipeRecordingAndLimit(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	base := `groups:
+  - name: shop
+    rules:
+      - record: shop:errors
+        expr: errors
+      - alert: CheckoutErrors
+        expr: shop:errors > 5
+        for: 5m
+        labels: {severity: page}
+`
+	for name, head := range map[string]string{
+		"recording rule zeroed": strings.Replace(base, "expr: errors\n", "expr: errors * 0\n", 1),
+		"group limit":           strings.Replace(base, "  - name: shop\n", "  - name: shop\n    limit: 1\n", 1),
+	} {
+		repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": base})
+		repo.pullRequest(map[string]string{"alerts/shop.yaml": head})
+		rr := newRecipeRun(t, backtestHosts[0], repo)
+		out, err := rr.run([]string{"PATHS=alerts"}, "--prometheus", prom.URL)
+		if err != nil || len(rr.host.mine()) != 1 || !strings.Contains(rr.body(), "#### Recording rules that differ") {
+			t.Errorf("%s: %v %+v\n%s", name, err, rr.host.mine(), out)
+		}
+	}
+}
+
+// Where the history is stays out of the comment: the user in its URL, the
+// address its host resolved to, its port.
+func TestBacktestRecipeHidesWhere(t *testing.T) {
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	out, err := rr.run([]string{"PATHS=alerts"}, "--prometheus", "http://ci-reader:pw@localhost:1/prometheus", "--timeout", "5s")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	body := rr.body()
+	if m := regexp.MustCompile(`dial tcp|127\.0\.0\.1|\[::1\]|ci-reader|localhost`).FindAllString(body, -1); len(m) > 0 || !strings.Contains(body, UnreadHistory) {
+		t.Errorf("the comment says where the history is: %q\n%s", m, body)
+	}
+	if !strings.Contains(out, "couldn't be replayed: query failed: Post") {
+		t.Errorf("the job's log doesn't say why:\n%s", out)
+	}
+}
+
+// The incidents a pull request is judged by are those of the commit it
+// goes into: one that takes out the incident its change misses is judged
+// by it still.
+func TestBacktestRecipeIncidents(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	now := time.Now()
+	incidents := fmt.Sprintf("incidents:\n  - id: INC-7\n    title: Checkout down\n    start: %s\n    end: %s\n",
+		now.Add(-3*time.Hour).Format(time.RFC3339), now.Add(-2*time.Hour).Format(time.RFC3339))
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": incidents})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h"), "incidents.yaml": "incidents: []\n"})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	out, err := rr.run([]string{"PATHS=alerts", "INCIDENTS=incidents.yaml"}, "--prometheus", prom.URL, "--tz", "UTC")
+	if err != nil || !strings.Contains(rr.body(), "| `INC-7` `Checkout down` |") {
+		t.Errorf("%v\n%s\n%s", err, rr.body(), out)
+	}
+	// Not a file there, or a link: said.
+	rr.host.comments = nil
+	repo.git("checkout", "--quiet", "main")
+	os.Remove(filepath.Join(repo.dir, "incidents.yaml"))
+	os.Symlink("/dev/zero", filepath.Join(repo.dir, "incidents.yaml"))
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "a link")
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	rr.run([]string{"PATHS=alerts", "INCIDENTS=incidents.yaml"}, "--prometheus", prom.URL)
+	failure(t, rr.body(), "INCIDENTS incidents.yaml isn't a file in the commit the pull request goes into")
+}
+
+// RENDER runs in each commit's files, the base's first, each with a HOME
+// of its own, and without the variables CIs keep tokens in.
+func TestBacktestRecipeRenderAlone(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	repo := newPRRepo(t, map[string]string{"chart/out.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"chart/out.yaml": shopRules("2h")})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	homes := filepath.Join(t.TempDir(), "homes")
+	render := `printf '%s %s\n' "$(basename "$HOME")" "${CI_JOB_TOKEN:-}${GITHUB_TOKEN_FILE:-}${SYSTEM_ACCESSTOKEN:-}${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" >>` +
+		homes + `; [ "$HOME" != "$JOB_HOME" ] && cat chart/out.yaml`
+	out, err := rr.run([]string{"RENDER=" + render, "JOB_HOME=" + rr.home(), "CI_JOB_TOKEN=job", "SYSTEM_ACCESSTOKEN=azure", "ACTIONS_ID_TOKEN_REQUEST_TOKEN=oidc"},
+		"--prometheus", prom.URL)
+	if err != nil || strings.Contains(rr.body(), "failed") {
+		t.Fatalf("%v\n%s\n%s", err, rr.body(), out)
+	}
+	if b, _ := os.ReadFile(homes); string(b) != "base-home \nhead-home \n" {
+		t.Errorf("RENDER ran with: %q", b)
+	}
+	// A chart the pull request adds renders nothing on the base, as RENDER
+	// says it should: no rules there.
+	added := newPRRepo(t, map[string]string{"README.md": "x\n"})
+	added.pullRequest(map[string]string{"chart/out.yaml": shopRules("5m")})
+	rr = newRecipeRun(t, backtestHosts[0], added)
+	out, err = rr.run([]string{"RENDER=[ ! -f chart/out.yaml ] || cat chart/out.yaml"}, "--prometheus", prom.URL)
+	if err != nil || strings.Contains(rr.body(), "### Lapilli backtest failed") || !strings.Contains(rr.body(), "**0 changed, 2 added, 0 taken away**") {
+		t.Errorf("a chart added: %v\n%s\n%s", err, rr.body(), out)
+	}
+}
+
+// home is the HOME the recipe runs with: the test's own.
+func (rr *recipeRun) home() string { return rr.repo.home }
+
+// Rules a pull request asks git to leave out of an archive are read all
+// the same: the commit's own .gitattributes don't count.
+func TestBacktestRecipeGitattributes(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h"), ".gitattributes": "alerts/** export-ignore\n"})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	out, err := rr.run([]string{"PATHS=alerts"}, "--prometheus", prom.URL)
+	if err != nil || !strings.Contains(rr.body(), "| `CheckoutErrors` | `page` | 1 → 0") {
+		t.Errorf("%v\n%s\n%s", err, rr.body(), out)
+	}
+}
+
+// Each host's own ways: a GitHub login in any letter case; Bitbucket's
+// repository access token, which can't say who it is; GitLab's project
+// from the merge request's; Azure DevOps' target branch fetched, and its
+// thread closed.
+func TestBacktestRecipeHosts(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	args := []string{"--prometheus", prom.URL}
+
+	gh := newRecipeRun(t, backtestHosts[0], repo)
+	gh.host.add("lapilli-bot", "[//]: # (lapilli-backtest default)\nold")
+	if out, err := gh.run([]string{"PATHS=alerts", "GITHUB_LOGIN=Lapilli-Bot"}, args...); err != nil || gh.host.edits != 1 || gh.host.posts != 0 {
+		t.Errorf("github, a login's case: %v, %d edits, %d posts\n%s", err, gh.host.edits, gh.host.posts, out)
+	}
+
+	bb := newRecipeRun(t, backtestHosts[3], repo)
+	bb.env = slices.DeleteFunc(bb.env, func(e string) bool { return strings.HasPrefix(e, "BITBUCKET_USER_UUID=") })
+	out, err := bb.run([]string{"PATHS=alerts"}, args...)
+	if err != nil || bb.host.posts != 1 || !strings.Contains(out, "posted as "+hostMe["bitbucket"]+": set BITBUCKET_USER_UUID to it") {
+		t.Errorf("bitbucket, no account: %v, %d posts\n%s", err, bb.host.posts, out)
+	}
+
+	gl := newRecipeRun(t, backtestHosts[2], repo)
+	gl.env = slices.DeleteFunc(gl.env, func(e string) bool { return strings.HasPrefix(e, "GITLAB_PROJECT=") })
+	if out, err := gl.run([]string{"PATHS=alerts", "CI_MERGE_REQUEST_PROJECT_ID=o/r", "CI_PROJECT_ID=fork/r"}, args...); err != nil || gl.host.posts != 1 {
+		t.Errorf("gitlab, a fork's pipeline: %v, %d posts\n%s", err, gl.host.posts, out)
+	}
+
+	// Azure Pipelines: the pull request's own commit checked out, its
+	// second, the branch it goes into fetched from origin: not HEAD^1,
+	// which is the pull request's first.
+	repo.git("remote", "add", "origin", repo.dir)
+	repo.git("checkout", "--quiet", "pr")
+	repo.write(map[string]string{"README.md": "more\n"})
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "-m", "more")
+	repo.git("checkout", "--quiet", "--detach", "pr")
+	az := newRecipeRun(t, backtestHosts[4], repo)
+	out, err = az.run([]string{"PATHS=alerts", "SYSTEM_PULLREQUEST_TARGETBRANCH=refs/heads/main"}, args...)
+	if err != nil || az.host.posts != 1 || !strings.Contains(az.body(), "| `CheckoutErrors` | `page` | 1 → 0") || !az.host.closed {
+		t.Errorf("azure: %v, %d posts, closed %v\n%s\n%s", err, az.host.posts, az.host.closed, az.body(), out)
+	}
+}
+
+// A comment holds a report as long as Lapilli writes one and what went
+// wrong, under the 65,536 characters GitHub takes.
+func TestBacktestRecipeLongComment(t *testing.T) {
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	long := filepath.Join(t.TempDir(), "lapilli")
+	os.WriteFile(long, []byte("#!/bin/sh\nprintf '%s\\n' '"+verdict.SummaryLine+`{"nothing_changed":false,"unreplayed":0}`+")'\n"+
+		"head -c 63800 /dev/zero | tr '\\000' x\nprintf '\\n'\n"+
+		"i=0; while [ $i -lt 200 ]; do echo 'lapilli verdict: localhost localhost localhost localhost localhost localhost'; i=$((i+1)); done >&2\nexit 1\n"), 0o755)
+	if out, err := rr.run([]string{"PATHS=alerts", "LAPILLI=" + long}, "--prometheus", "http://localhost:1"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if body := rr.body(); len(body) > 65000 || !strings.Contains(body, "### Lapilli backtest failed") {
+		t.Errorf("%d bytes", len(body))
 	}
 }

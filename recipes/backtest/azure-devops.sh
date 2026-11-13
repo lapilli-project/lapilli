@@ -16,9 +16,15 @@
 #                            BUILD_REPOSITORY_NAME)
 #   PR                       the pull request's id (default:
 #                            SYSTEM_PULLREQUEST_PULLREQUESTID)
+#   TARGET_BRANCH            default, without TARGET, the branch it goes
+#                            into (SYSTEM_PULLREQUEST_TARGETBRANCH), fetched:
+#                            the order of a merge commit's parents isn't
+#                            documented
 #
-# The comment is a thread of its own with no status, which the policy that
-# comments be resolved doesn't wait for.
+# The comment is a thread of its own, closed: resolved, which the policy
+# that comments be resolved doesn't wait for. The token's identity
+# (connectionData's authenticatedUser) and a comment's author are told
+# apart by their id, as Azure DevOps documents both.
 recipe=azure-devops.sh
 here=$(dirname "$0")
 : "${AZURE_DEVOPS_TOKEN_FILE:?a file holding a token that may comment on the pull request}"
@@ -27,11 +33,14 @@ AZURE_DEVOPS_ORG_URL=${AZURE_DEVOPS_ORG_URL:-${SYSTEM_COLLECTIONURI:-}}
 AZURE_DEVOPS_PROJECT=${AZURE_DEVOPS_PROJECT:-${SYSTEM_TEAMPROJECT:-}}
 AZURE_DEVOPS_REPO=${AZURE_DEVOPS_REPO:-${BUILD_REPOSITORY_NAME:-}}
 PR=${PR:-${SYSTEM_PULLREQUEST_PULLREQUESTID:-}}
+if [ -z "${TARGET:-}" ] && [ -n "${SYSTEM_PULLREQUEST_TARGETBRANCH:-}" ]; then
+  TARGET_BRANCH=${TARGET_BRANCH:-${SYSTEM_PULLREQUEST_TARGETBRANCH#refs/heads/}}
+fi
 : "${AZURE_DEVOPS_ORG_URL:?such as https://dev.azure.com/example}"
 : "${AZURE_DEVOPS_PROJECT:?the project}"
 : "${AZURE_DEVOPS_REPO:?the repository}"
-case $AZURE_DEVOPS_ORG_URL in http://* | https://*) ;; *) echo "azure-devops.sh: AZURE_DEVOPS_ORG_URL $AZURE_DEVOPS_ORG_URL: want an http or https URL" >&2; exit 1 ;; esac
 org=${AZURE_DEVOPS_ORG_URL%/}
+host_api=$org
 project=$(printf '%s' "$AZURE_DEVOPS_PROJECT" | jq -sRr @uri)
 repo_name=$(printf '%s' "$AZURE_DEVOPS_REPO" | jq -sRr @uri)
 threads=$org/$project/_apis/git/repositories/$repo_name/pullRequests
@@ -64,7 +73,7 @@ find_comment() {
 }
 
 post_comment() {
-  jq -Rs '{comments: [{parentCommentId: 0, content: ., commentType: 1}]}' "$1" >"$tmp/body"
+  jq -Rs '{comments: [{parentCommentId: 0, content: ., commentType: 1}], status: "closed"}' "$1" >"$tmp/body"
   code=$(host POST "$threads/$PR/threads?api-version=7.1" "$tmp/body")
   case $code in 2??) ;; *) say "Azure DevOps didn't take the comment ($code): $(shown "$out")"; return 1 ;; esac
 }

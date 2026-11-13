@@ -7,7 +7,9 @@
 # it edits that comment; it posts nothing on a pull request that changes no
 # rule. A rule a pull request names to mention, reference and break things
 # is rendered by Gitea itself: no mention, no link, no HTML, the table
-# whole.
+# whole. A symbolic link whose path mentions a user and references an issue
+# is refused, its path only in the job's log: the user is notified of
+# nothing, and the issue isn't referenced.
 #
 # Needs Docker, Go, git, curl and jq. Leaves everything up when KEEP is set.
 set -euo pipefail
@@ -65,7 +67,7 @@ started=$(date +%s)
 
 # The repository is a reviewer's; a bot comments on its pull requests, and
 # its token (write:issue, read:user) is the recipe's.
-for u in reviewer lapilli-bot; do
+for u in reviewer lapilli-bot victim; do
   docker exec "$p-gitea" gitea admin user create --username "$u" --password "e2e-$u-pass-123" \
     --email "$u@example.com" --must-change-password=false >/dev/null
 done
@@ -73,10 +75,14 @@ docker exec "$p-gitea" gitea admin user generate-access-token --username reviewe
   --scopes write:repository,write:issue,write:user --raw | tail -1 >"$work/secrets/rev"
 docker exec "$p-gitea" gitea admin user generate-access-token --username lapilli-bot --token-name b \
   --scopes write:issue,read:repository,read:user --raw | tail -1 >"$work/secrets/bot"
+docker exec "$p-gitea" gitea admin user generate-access-token --username victim --token-name v \
+  --scopes read:notification,read:user --raw | tail -1 >"$work/secrets/victim"
 rev=$(cat "$work/secrets/rev")
 gapi() { curl -sf -H "Authorization: token $rev" -H 'Content-Type: application/json' "$@"; }
 gapi -X POST "$gt/api/v1/user/repos" -d '{"name":"monitoring","default_branch":"main","private":true}' >/dev/null
 gapi -X PUT "$gt/api/v1/repos/reviewer/monitoring/collaborators/lapilli-bot" -d '{"permission":"read"}' >/dev/null
+gapi -X PUT "$gt/api/v1/repos/reviewer/monitoring/collaborators/victim" -d '{"permission":"read"}' >/dev/null
+gapi -X POST "$gt/api/v1/repos/reviewer/monitoring/issues" -d '{"title":"An issue a path could reference"}' >/dev/null
 
 rules() { # for, and more rules
   cat <<EOF
@@ -116,6 +122,7 @@ pr() {
 # and runs the recipe there; the history is the last few minutes.
 backtest() {
   rm -rf "$work/ci"
+  # Each line the job's log has of RENDER and lapilli is after a "| ".
   git clone -q "$authed" "$work/ci"
   git -C "$work/ci" fetch -q origin "refs/pull/$1/head"
   git -C "$work/ci" checkout -q --detach FETCH_HEAD
@@ -186,6 +193,34 @@ check "nothing hidden" "$(grep -c '<!--' <<<"$html" || true)" '^0$'
 check "the rule's name, whole, in code" "$html" '<code>@reviewer #1 reviewer/monitoring#1 &lt;b&gt;bold&lt;/b&gt; \[link\]\(https://evil.example\) \| cell `tick` &lt;!-- hide</code>'
 cells=$(tr -d '\n' <<<"$html" | sed 's/<tr>/\n<tr>/g' | grep '^<tr>' | while read -r row; do grep -o '<t[dh][ >]' <<<"$row" | wc -l | tr -d ' '; done | sort -u | tr '\n' ' ')
 check "every row of each table whole" "$cells" '^3 4 $'
+
+# A symbolic link whose path mentions and references, refused.
+git -C "$work/seed" checkout -q main
+git -C "$work/seed" checkout -q -b link
+d="$work/seed/alerts/x @victim #1 reviewer/monitoring#1/www.evil.example <b>bold</b>"
+mkdir -p "$d"
+ln -s /etc/hosts "$d/**ALL CLEAR - merge it**"
+rules 30s "" >"$work/seed/alerts/shop.yaml"
+git -C "$work/seed" add -A
+git -C "$work/seed" commit -qm "A link"
+n=$(pr link "A link")
+backtest "$n" 2>"$work/run5.log" || { cat "$work/run5.log"; exit 1; }
+body=$(comments "$n" | jq -r '.[0].body')
+html=$(jq -n --arg t "$body" '{Text: $t, Mode: "comment", Context: "reviewer/monitoring"}' | gapi -X POST "$gt/api/v1/markdown" -d @-)
+check "the link refused" "$body" 'holds a symbolic link, which could lead to any file the job can read: not read'
+check "its path only in the job's log" "$(grep -c 'victim\|ALL CLEAR\|www.evil' <<<"$body" || true)" '^0$'
+check "where, in the job's log" "$(cat "$work/run5.log")" 'a symbolic link in the pull request.s commit: alerts/x @victim'
+check "no mention, no reference, no link" "$(grep -oE '<a [^>]*>' <<<"$html" | tr '\n' ' ' || true)" '^$'
+sleep 3
+notified() { curl -sf -H "Authorization: token $(cat "$work/secrets/victim")" "$gt/api/v1/notifications?all=true" | jq -r length; }
+referenced() { gapi "$gt/api/v1/repos/reviewer/monitoring/issues/1/timeline" | jq -r '[(. // [])[] | select(.ref_issue != null or .ref_comment != null)] | length'; }
+check "the user notified of nothing" "$(notified)" '^0$'
+check "the issue referenced by nothing" "$(referenced)" '^0$'
+# The same words written by a person do both: the checks above can fail.
+gapi -X POST "$gt/api/v1/repos/reviewer/monitoring/issues/$n/comments" -d '{"body":"@victim look at #1"}' >/dev/null
+sleep 3
+check "a person's mention notifies" "$(notified)" '^[1-9]'
+check "a person's reference references" "$(referenced)" '^[1-9]'
 
 if [ "$fail" != 0 ]; then
   echo "--- the last comment, rendered"
