@@ -2,6 +2,64 @@
 
 ## [Unreleased]
 
+The web UI's frame, and the rules list, redone: a sidebar in four groups,
+breadcrumbs, the team and the period carried on every link, a search on
+every page, a page's main action in its header, and on the rules list
+badges, filters, a search box and chips (docs/design/ui.md). Still no
+script, in four languages, against WCAG 2.2 AA. Every URL means what it
+did; the API, MCP and the ledger are as they were.
+
+### Added
+
+- **A sidebar** of the pages in four groups: See (overview, rules,
+  incidents, firings), Fix (tasks, proposals, quiet windows), Report
+  (reports, outcomes) and Manage (teams, roles, settings, runs), with the
+  open tasks and the proposals to approve beside theirs, and Roles for
+  admins. On a narrow screen, or zoomed in, it is a menu that names the
+  page the reader is on. Every page has a breadcrumb: group, page, item.
+- **The team and the period on every link.** Picked in a bar at the top
+  of the pages that show them (`team=` on the overview, the rules, the
+  incidents and the tasks; `weeks=` 1, 4 or 12 on the rules and the
+  incidents, which now take one week too), and carried by every link
+  between pages. With no `team=`, a reader who edits one team, and only
+  one, sees that team's, and the bar says it is theirs; `team=` alone is
+  all teams.
+- **Search**, `/search?q=`, in every page's bar: rules by name, incidents
+  by id or title, teams by name, fifty of each at most. One found is
+  opened; a search with a rules filter is the rules page with it; nothing
+  found says so.
+- **The rules list's badges**, on three axes and what is under way:
+  ● Noisy (with its weeks running), ○ OK, – Silent, ⧉ Spare; ≠ Differs,
+  ◌ Not replayed, ⇣ Recorded only; keep, tune, retire; ✎ Proposed,
+  ⚠ n to check. Each a sign and its name.
+- **Filters on the rules list** by performance, severity, trust,
+  disposition and progress (`perf=`, `severity=`, `trust=`, `status=`,
+  `has=`), each value counted as picking it would show, and a search box
+  that takes words of a rule's name and `team:`, `severity:`, `is:`,
+  `status:`, `has:`, `label:KEY=VALUE` and `group:`. Those a facet has
+  become its parameters, by a redirect; what the box doesn't understand is
+  named and left out. Each filter in effect is a chip that takes it away;
+  "Clear filters" keeps the team, the weeks and the order; the header says
+  "14 of 63 rules".
+- **A page's main action in its header**: "Write one down", "Add a task",
+  "Add a quiet window", "Add a team", "Add a report". To a reader who may
+  not, the button shows disabled, with why: read-only, no one signed in,
+  editors only, admins only, nowhere to send a report.
+- Empty states of three kinds, alike on every page: nothing judged yet,
+  nothing matching (with the ways out), nothing to do.
+
+### Changed
+
+- The rules list's Rule column has badges for the sentences it had under
+  a rule's name; the note's status is a badge, and the Noisy column is
+  gone. The suggestion stays, as one line.
+- The rules that didn't fire in the weeks shown, listed below the rules
+  list, include those that fired in the twelve weeks kept but not in the
+  weeks shown, which weren't on the page at all.
+- The rules list, and `/api/v1/rules`, work out each rule's weeks with a
+  re-fire for that rule alone: over two thousand rules and twelve weeks,
+  330 ms became 60 ms.
+
 ## [0.34.1] - 2026-11-14
 
 A security release, after two reviews of 0.33.0 (whose code 0.34.0

@@ -1176,6 +1176,18 @@ report for any period (`/api/v1/report?from=&to=`) and takes incidents
 so Prometheus scrapes it instead of a Pushgateway, and the chart has a
 Grafana dashboard of them.
 
+The pages are in a sidebar of four groups (See, Fix, Report, Manage), a
+menu on a narrow screen, each with a breadcrumb and a bar to pick the team
+and the period, which every link carries; a reader who edits one team sees
+it first. The bar's search finds rules, incidents and teams, and opens the
+one it finds. The rules list gives each rule a badge on three axes (Noisy,
+OK, Silent, Spare; Differs, Not replayed, Recorded only; keep, tune,
+retire), filters by each, counted, and a search box that takes words of a
+name and `is:noisy`, `severity:critical`, `status:tune`, `has:proposal`,
+`label:team=pay`, `group:shop` and `team:pay`; each filter in effect is a
+chip that takes it away, and the URL keeps them all
+([docs/design/ui.md](docs/design/ui.md)).
+
 What an operations team measures its alerts by is there too, week by week
 and team by team (docs/design/noc.md): the share of critical firings that
 caught something; firings that re-fired, the alert that did most, and the
