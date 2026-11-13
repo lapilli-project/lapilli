@@ -1405,8 +1405,11 @@ lapilli serve --ledger-url-file ledger-url --rules rules/ --prometheus http://pr
 
 The connection string is read from the file, as pgx reads one, and said
 nowhere: not in a flag, a log, an error, a page, `/metrics` or an answer to
-an agent. Ask for `sslmode=verify-full` across a network; pgx's default,
-`prefer`, checks no certificate. Every page, report and answer is what the
+an agent. A string that says nothing of `sslmode`, to another machine, asks
+for `verify-full`, where pgx's default, `prefer`, checks no certificate; one
+that names an `sslmode` is taken at its word, and serve warns at start when it
+checks none. Give the database to the ledger's role alone (`REVOKE CONNECT
+... FROM PUBLIC`). Every page, report and answer is what the
 SQLite ledger gives from the same writes, and the tests run on both. It is
 still one replica: one process writes a ledger at a time, and a second
 `serve` on the same database is refused, saying which session holds the

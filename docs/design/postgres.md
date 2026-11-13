@@ -35,16 +35,43 @@ lapilli serve --ledger-url-file /var/run/lapilli/ledger/url ...
   environment variables and `~/.pgpass` among it, and the schema the ledger
   is in from `search_path`. The connections are named `lapilli` unless
   `application_name` says otherwise.
-- **TLS.** pgx's default, `sslmode=prefer`, encrypts when the server offers
-  TLS but checks no certificate, and falls back to none: across a network,
-  ask for `sslmode=verify-full`, with `sslrootcert=FILE` for a CA of your
-  own. `disable` is for a server on the same machine. lapilli changes none
-  of pgx's defaults: a string means what it means to `psql`.
+- **TLS.** pgx's default, `sslmode=prefer`, encrypts when the server
+  offers TLS but checks no certificate, and falls back to none: anything
+  in the path can decline TLS and be sent the password in clear (a fake
+  server in `TestPostgresTLSPasswordKept` asks, and gets none). **Builder's
+  decision: a string that says nothing of `sslmode`, nor `PGSSLMODE`, to a
+  server not on this machine, asks for `verify-full`.** The server's
+  certificate is checked against the system's CAs, or `sslrootcert=FILE`'s.
+  A string that names an `sslmode` is taken at its word, and `serve` warns
+  at start when it checks no certificate across a network (`require`,
+  `prefer`, `allow`, `disable`). On this machine (a Unix socket,
+  `localhost`, a loopback address), pgx's `prefer`, as `psql` would. Asking
+  for `require_auth=scram-sha-256` instead would keep the password but let
+  anything in the path read the ledger; refusing a string without
+  `sslmode` would break every string that works with `psql` today.
 - **A database, or a schema, of its own.** The ledger makes its tables in
   the first schema of `search_path` (`public`) when it finds no
   `schema_version` there; a schema that holds tables a ledger has but no
   `schema_version` is refused, not written over. The role needs to create
-  tables there (on 15 and later, `public` no longer lets everyone).
+  tables there (on 15 and later, `public` no longer lets everyone). Each
+  connection's `search_path` is then that schema alone, so a statement
+  reads no table of the same name further along it. A ledger found
+  further along the path than its first schema is refused, saying to name
+  its schema first: the lock is the first schema's, and would let a second
+  process write the ledger another holds.
+- **Who can connect.** The lock is an advisory lock, which any role that
+  can connect to the database can take: one that does keeps `serve` from
+  starting, refused "in use by another process", which names the role
+  that holds it. Give the database to the ledger's role alone: `REVOKE
+  CONNECT ON DATABASE lapilli FROM PUBLIC; GRANT CONNECT ON DATABASE
+  lapilli TO lapilli;`.
+- **Timeouts.** **Builder's decision: lapilli sets no `statement_timeout`
+  or `lock_timeout`.** A page's statements end with its
+  request, which pgx cancels on the server; the writer's are the ledger's
+  own, and a backfill's write of a day's firings takes seconds on a busy
+  ledger: a timeout short enough to matter would fail it, and the next
+  hour's run would fail it again. A string can still set them (`options=-c
+  lock_timeout=10s`), as can the role or the database.
 - **Postgres 15 or later**: the oldest major the PostgreSQL project still
   supports (14's last release was in November 2026). CI runs the ledger's,
   serve's and the command's tests on 15 and 18. Nothing newer than 15 is
@@ -62,10 +89,13 @@ same writes. The ledger's and serve's tests run on both: with
 there, and CI runs them so on Postgres 15 and 18
 (`.github/workflows/ci.yml`, `postgres`), beside `test/e2e/postgres.sh`.
 
-- **The tables.** Every table, column, default, key and index SQLite's
-  migrations make, with the same names, made at once by
+- **The tables.** Every table, column, default, key, foreign key (and what
+  a delete does to it), CHECK and index SQLite's migrations make, with the
+  same names, expressions and WHEREs, made at once by
   `schema/postgres/017.sql`: a Postgres ledger starts at schema 17.
-  `TestPostgresSchemaSame` sets the two side by side.
+  `TestPostgresSchemaSame` sets the two side by side; where they differ
+  on purpose (keys longer than a btree holds, below), its `byDesign` says
+  both.
 - **The statements.** They are SQLite's, parameters and all (`?`, `?NNN`).
   A connection of pgx's numbers them for Postgres as SQLite numbers them,
   keeps a bool as 1 or 0, and leaves out arguments past a statement's last
@@ -76,10 +106,14 @@ there, and CI runs them so on Postgres 15 and 18
   `PRAGMA`: about forty places, of some 340 statements.
 - **Comparing and sorting text.** Every text column is `COLLATE "C"`:
   compared and sorted byte by byte, as SQLite's are, whatever the
-  database's own collation; `lower()` and `upper()` change ASCII letters
-  alone, as SQLite's do, and `ILIKE` stands for SQLite's `LIKE` (which
-  ignores the case of ASCII letters) in the one place a `LIKE` is kept, a
-  grant's check. The text a JSON function gives is made `COLLATE "C"` too.
+  database's own collation; `lower()` and `upper()` of a column change
+  ASCII letters alone, as SQLite's do, and `ILIKE` stands for SQLite's
+  `LIKE` (which ignores the case of ASCII letters) in the one place a
+  `LIKE` is kept, a grant's check. The text a JSON function gives is made
+  `COLLATE "C"` too. A parameter has no collation of its own, and
+  `lower(?)` would fold it as the database's does (an `É` too): what is
+  compared with a column folded is folded by lapilli, in ASCII
+  (`ASCIILower`), as an Azure alarm's id is.
 - **Numbers.** Every integer is a `BIGINT`, 64 bits as SQLite's are; a sum
   Postgres gives as `numeric` is read into the same Go integer.
 - **The schema version**, kept in `schema_version` rather than `PRAGMA
@@ -107,17 +141,38 @@ in `FROM` without a name (which Postgres refuses before 16), and
   in Postgres, none in SQLite. Nothing reads meaning into an id's value.
 - **A NUL, or bytes that aren't UTF-8,** in a text: Postgres refuses both,
   SQLite keeps them. In Postgres each is kept as U+FFFD, which is how
-  `encoding/json` writes bytes that aren't UTF-8 anyway. Nothing lapilli
-  writes holds either; a title or a body someone sends can.
-- **How big a key can be.** A Postgres index holds a value of some 2,700
-  bytes at most, compressed. A label set has no such bound: `series` and
-  `deploy_labels` are kept unique by the md5 of their labels beside the
-  text (`series_labels`), and found through it. A name used as a key (a
-  rule's, an incident's id, a group key's 1,000 characters at most) over
-  that is refused; none comes near.
+  `encoding/json` writes bytes that aren't UTF-8 anyway; in JSON (a label
+  set, a change), the escape `\u0000`, which `jsonb` refuses, is written
+  U+FFFD too (`pgText`), wherever it is written from: a run's labels, a
+  source's, a notification's, a copy. A label holding a NUL, which every
+  intake takes, is the same alert the next time it comes, as in SQLite;
+  two label sets that differ only by a NUL and a U+FFFD are one alert in
+  Postgres, two in SQLite.
+- **How big a key can be.** A Postgres btree holds some 2,700 bytes of a
+  key; SQLite's hold any length, and a rule's name, a group key (1,000
+  characters, up to 4,000 bytes), a severity, an alarm's id in a label
+  (4 KB) or an incident's id in a file can be longer. What must be unique
+  is kept unique by its md5 and found through a hash index, which holds
+  any length (`rules.name`, `notes.rule`, `incidents.key`, a check's rule,
+  a recorded rule's name and severity, a label set); an index on such a
+  text alone is a hash index (`tasks_rule`, `comments_on`,
+  `check_misses_rule`, `proposals_rule`); one with it among other keys
+  holds its md5 (`notifications_group`), or, where it is searched by a
+  range too, its first 500 characters (`series_alarm`, `notified_alarm`),
+  and its statements ask for that as well. Every other text in a btree is
+  bounded well below where it is taken in (017.sql lists them).
+  `TestLongKeys` writes each, on both.
 - **Space.** SQLite gives deleted pages back a few at a time after a prune
   (`PRAGMA incremental_vacuum`); Postgres's autovacuum keeps the space for
-  the rows that come, and `VACUUM FULL` is the operator's.
+  the rows that come. `VACUUM FULL` rewrites a table under an exclusive
+  lock: every read and write of it waits, `serve`'s too, for as long as it
+  takes. Run it with `serve` stopped, or not at all.
+- **Ties in order.** A page that breaks a tie by an alert's id has the
+  same alerts first in both: a run's new alerts are made in the order
+  SQLite makes them (`TestSeriesMadeInSQLitesOrder`). A notification's
+  alerts are read back in the order they were kept, in either; neither
+  database is asked for that order, which Postgres keeps only while
+  `notified` is written to its end (a `VACUUM FULL` can change it).
 - **Speed.** A statement waits a round trip to the server, which SQLite
   doesn't, so the writes that touch many rows send many a statement in
   Postgres (`batch.go`: a thousand rows each): the firings a run or a
@@ -125,7 +180,12 @@ in `FROM` without a name (which Postgres refuses before 16), and
   alert's last firing before a span. The scale tests' budgets hold on both
   (the times are under "As built"). Across a network each round trip
   costs more: what still goes a row or a span at a time is a notification
-  kept, a page's firings read a span at a time, a recorded rule found.
+  kept, a page's firings read a span at a time, a recorded rule found. A
+  week of teams' pages reads each rule's firings by `firings_rule`
+  (`LATERAL`): Postgres, its statistics taken early in a backfill, rated
+  reading the whole week by `firings_start` cheaper, and took 3.4 s on CI's
+  Postgres 18, 1.5 s on two CPUs, for what SQLite reads in 0.15 s; it is
+  0.15 s in both now.
 - **The binary** is some 3.9 MB larger for pgx (27.1 MB to 31.0 MB,
   stripped), whether a ledger is in Postgres or not.
 - **What the database is told.** The writer's session asks the server to
@@ -173,15 +233,23 @@ database each have one).
   the connections close, so the next pod doesn't wait for the server to
   notice.
 - **A dropped connection** is made again by `database/sql`; the new session
-  takes the lock again. Should the server still hold it for this process's
-  old session, which it can for minutes after a network fault, that session
-  is ended (`pg_terminate_backend`, its own role's) and the lock taken. Each
+  takes the lock again. Should the server still hold it for one of this
+  process's own sessions, which it can for minutes after a network fault,
+  that session is ended (`pg_terminate_backend`, its own role's) and the
+  lock taken. A session is this process's own from when the writer makes
+  it, before it asks for the lock: the answer can be lost on its way. Each
   process that takes the lock counts one more in `schema_version.writers`;
   a connection made again that finds another count finds that another
   process took the ledger in between, and wrote: this one writes nothing
   more (`ErrLockLost`), and `serve` stops, to be started again on what is
   in the ledger now. One that finds its own count reads its caches again,
   in case a failover lost what it last wrote.
+- **What goes out of the process** is sent only while it holds the lock:
+  a notice of the outbox, which readers, holding no lock, find due, is
+  sent after the writer's session says it still holds it (`Ledger.Hold`),
+  each one, so a process that lost the ledger sends none of what the next
+  will. A rule's or an alarm's change is written through the writer before
+  it is applied.
 - `signin.md`'s guarantees hold: who signed out is merged into `meta` in
   one transaction and read on each request; with one process, there is no
   other to sign out at.
@@ -225,8 +293,12 @@ copy reads it is left out.
   id, which a tracker's issue may still name, isn't given again. A copy
   that fails leaves the ledger empty.
 - **Read back**: every table, row count and SHA-256 of its rows read in the
-  order of their keys, each value with its kind, from both ledgers. A copy
-  that differs fails.
+  order of their keys, each value with its kind, from both ledgers, before
+  the copy commits. A copy that differs fails, and leaves the ledger empty.
+- **As of one moment**: the ledger copied from is read in one transaction,
+  its ids given, its rows and their read back alike: a SQLite ledger a
+  serve left running writes has its later writes left out, and the copy
+  gives next the ids they took.
 - The ledger copied from is brought to this lapilli's schema first, as
   `serve` would, and keeps the zone it was counted in.
 
@@ -238,22 +310,27 @@ the images CI pins), each figure one run's:
 
 | | SQLite | Postgres 15 | Postgres 18 |
 |---|---|---|---|
-| a backfill, 201,600 firings, a day a write | 7.4 s | 9.5 s | 9.1 s |
-| an hourly run | 12 ms | 86 ms | 57 ms |
-| writing an incident | 8 ms | 29 ms | 10 ms |
-| twelve weeks by rule | 3 ms | 25 ms | 23 ms |
-| a week's report, without firings | 7 ms | 4 ms | 3 ms |
-| judging everything again | 2.4 s | 2.0 s | 1.6 s |
-| a source's week of 100,000 firings copied in | 2.1 s | 2.7 s | 3.2 s |
-| the same again, unchanged | 0.35 s | 0.28 s | 0.44 s |
-| a day's 10,000 firings beside 500 quiet windows | 0.43 s | 0.41 s | 0.39 s |
-| 20,000 notifications kept, one a write | 2.4 s | 17.4 s | 12.2 s |
-| their pages over twelve weeks | 0.36 s | 1.8 s | 1.6 s |
-| the pages' scale test, whole (`TestPagesScale`) | 11.2 s | 16.0 s | 15.1 s |
+| a backfill, 201,600 firings, a day a write | 8.2 s | 7.2 s | 7.5 s |
+| an hourly run | 13 ms | 18 ms | 14 ms |
+| writing an incident | 8 ms | 29 ms | 26 ms |
+| twelve weeks by rule | 3 ms | 26 ms | 22 ms |
+| a week's report, without firings | 2 ms | 7 ms | 4 ms |
+| judging everything again | 2.5 s | 1.8 s | 1.8 s |
+| a source's week of 100,000 firings copied in | 2.2 s | 3.1 s | 3.1 s |
+| the same again, unchanged | 0.36 s | 0.47 s | 0.39 s |
+| a day's 10,000 firings beside 500 quiet windows | 0.44 s | 0.45 s | 0.42 s |
+| 20,000 notifications kept, a thousand a write | 1.1 s | 10.5 s | 8.8 s |
+| their pages over twelve weeks | 0.37 s | 2.0 s | 1.6 s |
+| fifty teams' hours of a week, afresh | 0.16 s | 0.22 s | 0.20 s |
+| the pages' scale test, whole (`TestPagesScale`) | 12.3 s | 18.7 s | 19.2 s |
 
-Every budget holds on all three. A notification is a write of its own,
-as an alert manager sends it, and its pages are read a span of firings at
-a time: those are where Postgres's round trips show. From macOS to the
+Every budget holds on all three, on two CPUs (`--cpus=2`, as a GitHub
+runner has). A notification an alert manager sends is a write of its own:
+20,000 so took 2.4 s, 17.4 s and 12.2 s; the scale test keeps them a
+thousand a write, as a source's are copied in, since what it holds to a
+budget (3 s, 6 s on CI) is reading them. Their pages are read a span of
+firings at a time: that, and a notification kept, are where Postgres's
+round trips show. From macOS to the
 same server in Docker Desktop, a round trip of 420 µs rather than some 60,
 a source's week of 100,000 firings takes 4.1 s and a day's 10,000 0.34 s;
 before the writes were sent many rows a statement, 11 s and 8.9 s.
@@ -264,4 +341,11 @@ ledgers earlier lapillis wrote, which are SQLite files, on SQLite alone). Each g
 (the connection string kept out of errors, the lock and what it holds,
 the copy's refusals and its reading back, the migrations in pairs, the
 schema compared, each choice of the dialect, the chart's): 53, each failing
-a test.
+a test. So was each fix of the reviews (a NUL in JSON, the `search_path`,
+sending only while the lock is held, `sslmode`'s default, each key longer
+than a btree holds and each statement that searches one, the ASCII fold,
+the holder's role, a timeout said, this process's own sessions, the copy's
+read back, a run's alerts in SQLite's order, the schema's foreign keys,
+CHECKs, expressions and WHEREs): 41, each failing a test. Without the
+hours read rule by rule, `TestPagesScale` failed each of four runs, two
+on each major, on two CPUs; with it, it passed each of eight.
