@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Added
+
+- **The ledger in Postgres** ([docs/design/postgres.md](docs/design/postgres.md)):
+  `lapilli serve --ledger-url-file FILE` keeps the ledger in the Postgres
+  database (15 or later) a connection string names, read from a file and
+  said nowhere, in no flag, log, error, page, `/metrics` or MCP answer;
+  TLS as pgx reads it from the string (ask for `sslmode=verify-full`).
+  The same tables and statements as SQLite's, every text compared byte by
+  byte, so every page and answer is what SQLite gives; the ledger's and
+  serve's tests run on both, on Postgres 15 and 18 in CI. Still one
+  replica: the process that writes holds an advisory lock on the ledger,
+  a second is refused, saying which session holds it, and one whose
+  connection dropped takes it again, or stops if another process wrote in
+  between. SQLite stays the default, its files as they were: upgrading
+  changes nothing there.
+- **`lapilli ledger copy`**: a ledger copied into an empty one, a SQLite
+  ledger into Postgres or one back, in one transaction, ids kept and no
+  deleted id given again, then both read back table by table and checked.
+  A ledger that isn't empty is refused.
+- **The chart**: `serve.ledger.postgres.secret` names the Secret holding
+  the connection string, mounted whole so it can hold the server's CA; no
+  PersistentVolumeClaim is made, and with the egress NetworkPolicy,
+  `serve.ledger.postgres.to` says where the database is.
+
 ## [0.33.0] - 2026-11-13
 
 Reading history from an API with a request quota, as a managed Prometheus

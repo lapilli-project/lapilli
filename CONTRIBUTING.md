@@ -17,6 +17,7 @@ test/e2e/run.sh          # the Helm chart on a kind cluster; needs Docker, kubec
 test/e2e/changes.sh      # changes to rules on a real Prometheus, Gitea and Grafana; needs Docker, jq
 test/e2e/loki.sh         # rules in LogQL replayed against a real Loki and Grafana; needs Docker, jq
 test/e2e/signin.sh       # lapilli's own sign-in against a real Dex; needs Docker, curl
+test/e2e/postgres.sh     # serve on a real Postgres: a restart, a second serve refused, a copy; needs Docker, curl, jq
 test/e2e/serve-lb.sh     # the chart at a URL on kind: a LoadBalancer, Gateway API, an Ingress, Dex; Linux
 test/e2e/rendered.sh     # rules a chart renders, from a real Gitea, replayed and followed; needs Docker, jq, helm, yq
 test/e2e/dashboard.sh    # the chart's Grafana dashboard on a real Grafana and Prometheus; needs Docker, jq, python3
@@ -24,6 +25,20 @@ test/e2e/service.sh      # the whole service on kind: Grafana's alerts, Lapilli 
 test/e2e/ratelimit.sh    # runs at once against a real Prometheus behind nginx's rate limit (429); needs Docker
 test/a11y/axe.sh         # axe-core (WCAG 2.2 AA) over every page, in a headless Chromium; needs Docker
 ```
+
+With `LAPILLI_TEST_POSTGRES` naming a Postgres server (15 or later), the
+ledger's, serve's and the command's tests keep their ledgers there, each in
+a schema of its own, which the test drops:
+
+```sh
+docker run -d --name lapilli-pg -e POSTGRES_PASSWORD=pw -p 127.0.0.1:55432:5432 postgres:18
+LAPILLI_TEST_POSTGRES='postgres://postgres:pw@127.0.0.1:55432/postgres?sslmode=disable' \
+  go test ./internal/ledger ./internal/serve ./cmd/lapilli
+```
+
+A statement that Postgres takes otherwise than SQLite is given for both
+(`internal/ledger/dialect.go`); `TestDialectSeam` says where one isn't. A
+migration comes in a pair: `schema/NNN.sql` and `schema/postgres/NNN.sql`.
 
 `go test ./internal/ledger ./internal/serve -run Scale -v` times the ledger
 and the pages over a busy ledger: two million firings in the ledger, 200,000
@@ -94,14 +109,16 @@ tests, so a change that slows a run or a page fails.
   provider for tests.
 - `internal/report` sends to Slack, a Pushgateway and webhooks. Their URLs are
   secrets: they are read from files and never shown.
-- `internal/ledger` is lapilli serve's SQLite ledger:
+- `internal/ledger` is lapilli serve's ledger, in SQLite or Postgres
+  (`dialect.go`, `postgres.go`):
   - what runs found, the stones, and the tallies by day and week
   - teams, notes, quiet windows, tasks and comments
   - scheduled reports, and proposals to change rules with their approvals
   - the outbox of notices, written in the same transaction as what they tell
     of
 
-  Numbered migrations are in `schema/`.
+  Numbered migrations are in `schema/`, and Postgres's in
+  `schema/postgres/`.
 - `internal/serve` runs lapilli serve:
   - the hourly runs
   - the web UI: templates and CSS embedded, no scripts

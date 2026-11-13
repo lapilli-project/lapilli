@@ -224,8 +224,18 @@ is built in and none is favoured.
   by people who use a screen reader day to day, and the heatmap's long
   rule names, cut short.
 
+- The ledger in Postgres (built, [docs/design/postgres.md](docs/design/postgres.md)):
+  `--ledger-url-file`, the same tables and statements as SQLite's, one
+  writer held by an advisory lock, and `lapilli ledger copy`. Still to do:
+  more than one replica, which needs a leader for the runs, the outbox and
+  the jobs, the caches told of other replicas' writes, and notices claimed
+  one at a time (the design says what each takes); fewer round trips to
+  the database where a page or a write still asks a row at a time; and
+  checking managed services (RDS, Cloud SQL, Azure Database) for real.
+
 The performance budgets are part of the tests (`TestScale`,
-`TestPagesScale`), so a change that slows the ledger fails CI.
+`TestPagesScale`), so a change that slows the ledger fails CI; on Postgres
+too, in CI's job for it.
 
 ## Packaging and trust
 
