@@ -46,7 +46,7 @@
 
 <h2>{{t "Tasks"}}</h2>
 {{template "tasklist" (on $ .Tasks)}}
-{{if not $ro}}<p><a href="{{$.Link "/tasks" "incident" .ID "kind" "write" "title" (t "A rule for %s" .ID)}}">{{t "Add a task about this incident"}}</a></p>{{end}}
+{{if not $ro}}<p><a href="{{$.Link "/tasks" "incident" .ID "kind" "write" "title" (t "A rule for %s" .ID) "team" ""}}">{{t "Add a task about this incident"}}</a></p>{{end}}
 
 {{template "comments" .Comments}}
 

@@ -67,7 +67,7 @@
 
 <h2>{{t "Tasks"}}</h2>
 {{template "tasklist" (on $ .Tasks)}}
-{{if edits $.Status .TeamID}}<p><a href="{{$.Link "/tasks" "rule" .Name "kind" "tune" "title" (t "Tune %s" .Name)}}">{{t "Add a task about this rule"}}</a></p>{{end}}
+{{if edits $.Status .TeamID}}<p><a href="{{$.Link "/tasks" "rule" .Name "kind" "tune" "title" (t "Tune %s" .Name) "team" .Team}}">{{t "Add a task about this rule"}}</a></p>{{end}}
 
 {{template "ruleproposals" $}}
 

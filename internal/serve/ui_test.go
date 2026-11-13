@@ -87,7 +87,8 @@ func TestContextCarried(t *testing.T) {
 			switch team, ok := l.Query()["team"]; {
 			case !ok:
 				t.Errorf("%s: %q (%q) doesn't carry the team", p, href, text)
-			case team[0] != "payments" && !(team[0] == "" && (text == "all" || strings.HasPrefix(text, "Remove filter: Team:") || text == "The same filters, in all teams")):
+			case team[0] != "payments" && !(team[0] == "" && (text == "all" || strings.HasPrefix(text, "Remove filter: Team:") || text == "The same filters, in all teams" ||
+				text == "Add a task about this rule" || text == "Add a task about this incident")):
 				t.Errorf("%s: %q (%q) carries another team", p, href, text)
 			}
 			switch weeks := l.Query().Get("weeks"); {
@@ -113,6 +114,40 @@ func toPage(href string) bool {
 		}
 	}
 	return true
+}
+
+// TestTaskAboutItsOwner: the task a rule's page adds is its owning team's,
+// or no team's, whatever team the page is looked at for; an incident's is
+// no team's.
+func TestTaskAboutItsOwner(t *testing.T) {
+	s := pagesServer(t)
+	h := s.Handler()
+	link := regexp.MustCompile(`<a href="([^"]*)">Add a task about this (?:rule|incident)</a>`)
+	for path, want := range map[string]string{
+		"/rules/Errors?team=":            "payments",
+		"/rules/Errors?team=payments":    "payments",
+		"/rules/Flapping?team=payments":  "",
+		"/incidents/INC-1?team=payments": "",
+	} {
+		_, body, _ := get(t, h, path)
+		m := link.FindStringSubmatch(body)
+		if m == nil {
+			t.Fatalf("%s: no link to add a task", path)
+		}
+		u, _ := url.Parse(html.UnescapeString(m[1]))
+		if team, ok := u.Query()["team"]; !ok || team[0] != want {
+			t.Errorf("%s: %s, want team=%s", path, m[1], want)
+		}
+		// The form it opens has that team picked, or none.
+		_, form, _ := get(t, h, u.String())
+		got := ""
+		if m := regexp.MustCompile(`<option value="[0-9]+" selected>([^<]*)</option>`).FindStringSubmatch(form[strings.Index(form, `id="add"`):]); m != nil {
+			got = m[1]
+		}
+		if got != want {
+			t.Errorf("%s: the form picks %q, want %q", path, got, want)
+		}
+	}
 }
 
 // TestErrorPagesBare: a page that refuses, or finds nothing, or says one
