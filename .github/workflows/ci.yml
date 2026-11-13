@@ -47,6 +47,65 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
 
+  postgres:
+    # The ledger's, serve's and the command's tests with the ledger in
+    # Postgres (docs/design/postgres.md): each test's in a schema of its
+    # own. The oldest major the PostgreSQL project still supports, and the
+    # latest; the images' own collation is en_US.utf8, not C, which the
+    # ledger's columns must not depend on. Not a required check: it pulls
+    # an image.
+    name: tests on Postgres ${{ matrix.major }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - major: "15"
+            image: postgres:15.19@sha256:1aac5b49cefd627f02816141ca4ad012d6cc19460dfe02a9b5168a105be3fc53
+          - major: "18"
+            image: postgres:18.6@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42
+    services:
+      postgres:
+        image: ${{ matrix.image }}
+        env:
+          POSTGRES_PASSWORD: lapilli-ci
+          POSTGRES_DB: lapilli
+        ports:
+          - 5432:5432
+        # Over TCP: the image's first server, which sets it up, listens on
+        # its socket alone, and stops.
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d lapilli"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      LAPILLI_TEST_POSTGRES: postgres://postgres:lapilli-ci@127.0.0.1:5432/lapilli?sslmode=disable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go test ./internal/ledger ./internal/serve ./cmd/lapilli
+
+  e2e-postgres:
+    # lapilli serve on a real Postgres in Docker: firings kept across a
+    # restart and a dropped connection, a second serve refused, a SQLite
+    # ledger copied in and read back. Not a required check: it pulls an
+    # image.
+    name: the ledger in a real Postgres
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: test/e2e/postgres.sh
+
   e2e:
     # The chart's CronJob on a kind cluster, against a real Prometheus. Not a
     # required check: it pulls images and starts a cluster.
