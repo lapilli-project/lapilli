@@ -17,6 +17,7 @@ import (
 
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/verdict"
 )
 
 // facetServer is a server with rules of every kind the facets tell apart:
@@ -515,5 +516,38 @@ func TestLongQueryRefused(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusRequestURITooLong || !strings.Contains(w.Body.String(), "주소가 너무 길어요") {
 		t.Errorf("63 KB of group:a, in Korean: %d", w.Code)
+	}
+}
+
+// TestQuietDiffers: a rule replayed to nothing that really fired differs,
+// though it didn't fire in the weeks shown: its badge, its count, and its
+// row when Silent is picked.
+func TestQuietDiffers(t *testing.T) {
+	ctx := context.Background()
+	s := facetServer(t)
+	s.cfg.CheckReplay = true
+	_, seq, err := s.l.AgainFrom(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	day := s.l.Midnight(s.l.Day(now) - 2)
+	if err := s.l.PutCheck(ctx, day, &verdict.SpanCheck{Rules: map[string]*verdict.SpanRule{"R18": {Real: 10}}}, nil, day.Add(24*time.Hour), seq); err != nil {
+		t.Fatal(err)
+	}
+	v := rulesFor(t, s, "")
+	if i := slices.IndexFunc(v.Quiet, func(r ruleRow) bool { return r.Name == "R18" }); i < 0 || !slices.Equal(v.Quiet[i].Trust, []string{"differs"}) {
+		t.Errorf("R18, replayed to nothing, fired ten times: quiet %q", rowNames(v.Quiet))
+	}
+	if v := rulesFor(t, s, "perf=silent&trust=differs"); !slices.Equal(rowNames(v.Rows), []string{"R18"}) {
+		t.Errorf("perf=silent&trust=differs: %q", rowNames(v.Rows))
+	}
+	v = rulesFor(t, s, "perf=silent")
+	for _, o := range v.Facets[2].Options {
+		if o.Value == "differs" && o.Count != 1 {
+			t.Errorf("perf=silent: differs counts %d", o.Count)
+		}
+	}
+	if _, body, _ := get(t, s.Handler(), "/rules/R18"); !strings.Contains(body, "Over the last week its replay differed from how it really fired: 0 of 10 firings alike.") {
+		t.Error("/rules/R18 doesn't say its replay differed")
 	}
 }

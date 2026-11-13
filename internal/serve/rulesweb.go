@@ -510,7 +510,9 @@ func (s *Server) row(l ruleLine, d rulesData, meta map[string]ruleMeta) ruleRow 
 }
 
 // quietLine is the line of a rule that didn't fire in the weeks shown: its
-// numbers none, its twelve weeks drawn as they were.
+// numbers none, its twelve weeks drawn as they were, and whether its
+// replay differed from what really fired over the last week, as a rule
+// replayed to nothing that really fired did.
 func (s *Server) quietLine(name string, d rulesData, meta map[string]ruleMeta) ruleLine {
 	t := d.t
 	l := ruleLine{Name: name, Precision: "–", RefiredShare: "–", Without: "–", SomeRules: t.o.SomeRules}
@@ -532,6 +534,7 @@ func (s *Server) quietLine(name string, d rulesData, meta map[string]ruleMeta) r
 	l.Severity, l.Group = cmpOr(l.Severity, meta[name].labels["severity"]), cmpOr(l.Group, meta[name].group)
 	l.Team, l.Status = d.own.teamOf(name), d.own.notes[name].Status
 	l.Proposed = d.proposed[name]
+	l.Differs = d.checks[name].Differs(d.differs.N, d.differs.Ratio)
 	return l
 }
 

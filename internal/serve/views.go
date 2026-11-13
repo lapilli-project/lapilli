@@ -609,12 +609,15 @@ func sortRules(lines []ruleLine, by string) {
 
 // rulesData is the rules page's view, as the API gives it, and what the
 // list works the rest out from: the tallies, kept to the team's, the
-// owners, and the rules a change is proposed to.
+// owners, the rules a change is proposed to, and the last week's checks
+// of the replay, with when one differs.
 type rulesData struct {
 	rulesView
 	t        *tallies
 	own      *owners
 	proposed map[string]bool
+	checks   map[string]ledger.Check
+	differs  Differs
 }
 
 func (s *Server) rulesPage(r *http.Request) (any, error) {
@@ -691,7 +694,7 @@ func (s *Server) rulesOf(r *http.Request) (rulesData, error) {
 		v.Sort = by
 	}
 	sortRules(v.Lines, v.Sort)
-	return rulesData{v, t, o, proposed}, nil
+	return rulesData{v, t, o, proposed, cw, d}, nil
 }
 
 // annotate gives rule lines their teams and what is to become of them.
