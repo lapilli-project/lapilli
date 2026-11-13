@@ -156,7 +156,7 @@ func describe(ctx context.Context, l *Ledger) (map[string]string, error) {
 
 var (
 	sqliteJSON = regexp.MustCompile(`json_extract\(([a-z_.]+),'\$\.([a-z_]+)'\)`)
-	pgJSON     = regexp.MustCompile(`\(*([a-z_.]+)\)*->>'([a-z_]+)'`)
+	pgJSONKey  = regexp.MustCompile(`\(*([a-z_.]+)\)*->>'([a-z_]+)'`)
 	pgCast     = regexp.MustCompile(`::[a-z]+`)
 	stoodFor   = []*regexp.Regexp{regexp.MustCompile(`^md5\((.*)\)$`), regexp.MustCompile(`^"left"\((.*), 500\)$`)}
 )
@@ -170,7 +170,7 @@ func normal(s string) string {
 	s = strings.Join(strings.Fields(s), "")
 	s = strings.ReplaceAll(s, `collate"c"`, "")
 	s = sqliteJSON.ReplaceAllString(s, "$1.$2")
-	s = pgJSON.ReplaceAllString(s, "$1.$2")
+	s = pgJSONKey.ReplaceAllString(s, "$1.$2")
 	return strings.NewReplacer("<>", "!=", "~~*", "like", "(", "", ")", "").Replace(s)
 }
 

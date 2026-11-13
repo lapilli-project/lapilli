@@ -19,12 +19,13 @@ const (
 	postgres
 )
 
-// kept is a text as the ledger's database keeps it: in Postgres, its NULs
-// U+FFFD (pgText). What is told apart by its text, a label set above all,
-// is told apart by this, so that what is asked for is what is kept.
+// kept is a label set's JSON, or another text Postgres reads as jsonb, as
+// the ledger's database keeps it: in Postgres, its NULs U+FFFD (pgJSON).
+// What is told apart by its text, a label set above all, is told apart by
+// this, so that what is asked for is what is kept.
 func (d dialect) kept(s string) string {
 	if d == postgres {
-		return pgText(s)
+		return pgJSON(s)
 	}
 	return s
 }

@@ -194,6 +194,9 @@ func copyTable(ctx context.Context, src *sql.Tx, t *txn, table string, cols []co
 					v = string(b)
 				}
 			}
+			if s, ok := v.(string); ok && jsonCols[table+"."+cols[i].name] {
+				v = t.d.kept(s)
+			}
 			row[i] = v
 		}
 		if copying != nil {
@@ -330,12 +333,15 @@ func checksum(ctx context.Context, q rowsQuerier, table string, cols []column) (
 			return "", 0, err
 		}
 		for i, v := range vals {
-			// A text, compared as Postgres keeps it (pgText).
+			// A text, compared as Postgres keeps it (pgText; pgJSON, one
+			// it reads as jsonb).
 			if b, ok := v.([]byte); ok && !binaryColumn(cols[i]) {
 				v = string(b)
 			}
 			if s, ok := v.(string); ok {
-				v = pgText(s)
+				if v = pgText(s); jsonCols[table+"."+cols[i].name] {
+					v = pgJSON(s)
+				}
 			}
 			switch v := v.(type) {
 			case nil:

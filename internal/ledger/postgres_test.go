@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"lapilli.dev/internal/firing"
+	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger/ledgertest"
 )
 
@@ -811,7 +812,8 @@ func TestNULInLabels(t *testing.T) {
 	}
 }
 
-// A JSON text's NULs, and only those, are written U+FFFD.
+// A JSON text Postgres reads as jsonb has its NULs, and only those,
+// written U+FFFD (pgJSON); any other text keeps them as written (pgText).
 func TestJSONNUL(t *testing.T) {
 	for in, want := range map[string]string{
 		`{"a":"x\u0000y"}`:           "{\"a\":\"x�y\"}",
@@ -821,11 +823,58 @@ func TestJSONNUL(t *testing.T) {
 		`["\\\u0000"]`:               "[\"\\\\�\"]",
 		`{"a":"\u00001"}`:            "{\"a\":\"�1\"}",
 	} {
-		if got := pgText(in); got != want {
+		if got := pgJSON(in); got != want {
 			t.Errorf("%s: %s, want %s", in, got, want)
 		}
+		if got := pgText(in); got != in {
+			t.Errorf("%s, not read as jsonb: %s", in, got)
+		}
 	}
-	if got := pgText(`not json \u0000`); got != `not json \u0000` {
+	if got := pgJSON(`not json \u0000`); got != `not json \u0000` {
 		t.Errorf("a text that isn't JSON: %s", got)
+	}
+	// A parameter read as jsonb, and that one alone.
+	args := []driver.NamedValue{{Ordinal: 1, Value: `["a\u0000"]`}, {Ordinal: 2, Value: `["a\u0000"]`}}
+	jsonParams("SELECT value FROM jsonb_array_elements_text(CAST($1 AS jsonb)) WHERE $2 != ''", args)
+	if args[0].Value != "[\"a\uFFFD\"]" || args[1].Value != `["a\u0000"]` {
+		t.Errorf("parameters: %q, %q", args[0].Value, args[1].Value)
+	}
+}
+
+// An incident with a NUL in a label or its title, written again as it is,
+// is the same incident in either database: SyncFile finds nothing changed,
+// a copier's Put writes nothing, the second time. A text that is a JSON
+// document, a task's body pasted from a log, is kept as written, its
+// \u0000 too: only what Postgres reads as jsonb is written otherwise.
+func TestNULSameAgain(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	in := incident.Incident{ID: "INC-9", Title: "Checkout\x00 down", Start: t0.Add(2 * time.Hour), End: t0.Add(3 * time.Hour),
+		Labels: incident.Labels{"service": {"checkout\x00"}}}
+	for i := range 3 {
+		changed, err := l.SyncFile(ctx, []incident.Incident{in}, opts)
+		if err != nil || changed != (i == 0) {
+			t.Errorf("SyncFile %d: changed %v, %v", i+1, changed, err)
+		}
+	}
+	c := incident.Incident{ID: "CP-1", Title: "Copied\x00", Start: t0.Add(5 * time.Hour), End: t0.Add(6 * time.Hour),
+		Labels: incident.Labels{"service": {"pay\x00"}}}
+	var gens []int64
+	for i := range 3 {
+		if _, err := l.Put(ctx, c, Copier, opts); err != nil {
+			t.Fatalf("Put %d: %v", i+1, err)
+		}
+		gens = append(gens, l.Gen())
+	}
+	if gens[1] != gens[0] || gens[2] != gens[0] {
+		t.Errorf("a copier's Put of the same incident wrote again: generations %v", gens)
+	}
+	body := `{"msg":"read \u0000 at offset 3"}`
+	id, err := l.PutTask(ctx, Task{Title: "a log", Body: body}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := l.TaskByID(ctx, id); err != nil || got.Body != body {
+		t.Errorf("a task's body as written: %q %v", got.Body, err)
 	}
 }

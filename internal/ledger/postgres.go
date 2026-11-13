@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/url"
 	"path"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -389,19 +390,57 @@ func (c *pgConn) CheckNamedValue(v *driver.NamedValue) error {
 
 // pgText is a text as Postgres keeps it: Postgres refuses a NUL and bytes
 // that aren't UTF-8, which SQLite keeps, and each is kept as U+FFFD, as
-// encoding/json writes bytes that aren't UTF-8 anyway. So is a NUL a JSON
-// text holds, written \u0000, which jsonb (series_alarm, a list given as a
-// parameter, a change's status) refuses: a label set, a list of names, a
-// change. Nothing lapilli makes holds a NUL; what people and alert managers
-// send can.
+// encoding/json writes bytes that aren't UTF-8 anyway. Nothing lapilli
+// makes holds a NUL; what people and alert managers send can.
 func pgText(s string) string {
 	if !utf8.ValidString(s) || strings.IndexByte(s, 0) >= 0 {
 		s = strings.ToValidUTF8(strings.ReplaceAll(s, "\x00", "\uFFFD"), "\uFFFD")
 	}
+	return s
+}
+
+// pgJSON is a JSON text as Postgres can read it as jsonb: pgText, and each
+// NUL it holds, written \u0000, which jsonb refuses, written U+FFFD. It is
+// what the ledger keeps of a text Postgres reads as jsonb (jsonCols), and
+// what is given for a parameter it reads so (CAST(? AS jsonb)); any other
+// text is kept as written, a JSON one too, as SQLite keeps it.
+func pgJSON(s string) string {
+	s = pgText(s)
 	if strings.Contains(s, `\u0000`) && json.Valid([]byte(s)) {
 		s = jsonNUL(s)
 	}
 	return s
+}
+
+// jsonCols are the columns Postgres reads as jsonb, in an index (the
+// alarm's id) or a statement: their texts are kept as pgJSON.
+var jsonCols = map[string]bool{"series.labels": true, "notified.labels": true, "changes.before": true, "changes.after": true,
+	"versions.docs": true, "versions.names": true}
+
+// asJSONB are the parameters a statement reads as jsonb, CAST($N AS jsonb),
+// by statement.
+var asJSONB sync.Map
+
+var castJSONB = regexp.MustCompile(`CAST\(\$(\d+) AS jsonb\)`)
+
+// jsonParams gives the parameters a statement reads as jsonb as pgJSON.
+func jsonParams(q string, args []driver.NamedValue) {
+	v, ok := asJSONB.Load(q)
+	if !ok {
+		var ns []int
+		for _, m := range castJSONB.FindAllStringSubmatch(q, -1) {
+			n, _ := strconv.Atoi(m[1])
+			ns = append(ns, n)
+		}
+		v, _ = asJSONB.LoadOrStore(q, ns)
+	}
+	for _, n := range v.([]int) {
+		if n >= 1 && n <= len(args) {
+			if s, ok := args[n-1].Value.(string); ok {
+				args[n-1].Value = jsonNUL(s)
+			}
+		}
+	}
 }
 
 // jsonNUL is a JSON text with each NUL it holds, written \u0000, written
@@ -454,12 +493,14 @@ func (c *pgConn) ExecContext(ctx context.Context, q string, args []driver.NamedV
 		return c.Conn.ExecContext(ctx, q, args)
 	}
 	q, args = bind(q, args)
+	jsonParams(q, args)
 	return c.Conn.ExecContext(ctx, q, args)
 }
 
 func (c *pgConn) QueryContext(ctx context.Context, q string, args []driver.NamedValue) (driver.Rows, error) {
 	sent.Add(1)
 	q, args = bind(q, args)
+	jsonParams(q, args)
 	return c.Conn.QueryContext(ctx, q, args)
 }
 

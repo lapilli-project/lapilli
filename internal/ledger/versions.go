@@ -80,7 +80,7 @@ func (l *Ledger) AddVersion(ctx context.Context, v Version) (int64, error) {
 		}
 		t.versioned = nil
 		return t.QueryRowContext(t.ctx, "INSERT INTO versions (since, digest, docs, names) VALUES (?, ?, ?, ?) RETURNING id",
-			unixOr0(v.Since), v.Digest, string(docs), string(names)).Scan(&id)
+			unixOr0(v.Since), v.Digest, t.d.kept(string(docs)), t.d.kept(string(names))).Scan(&id)
 	})
 	return id, err
 }

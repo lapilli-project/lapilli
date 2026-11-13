@@ -353,7 +353,7 @@ func (l *Ledger) notifyOne(t *txn, n *Notification) (bool, error) {
 		if !a.Start.IsZero() {
 			start = a.Start.Unix()
 		}
-		if _, err := st.ExecContext(t.ctx, id, a.Rule, string(b), start, !a.Resolved); err != nil {
+		if _, err := st.ExecContext(t.ctx, id, a.Rule, t.d.kept(string(b)), start, !a.Resolved); err != nil {
 			return false, err
 		}
 	}
