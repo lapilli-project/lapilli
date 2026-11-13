@@ -414,7 +414,7 @@ func TestTeamWindowQuietsOnlyItsRules(t *testing.T) {
 		t.Error("payments' window excused none of its own rule's firings")
 	}
 	_, page := asPage(t, h, "/windows/"+itoa(id(t, body)), "viewer@example.com")
-	if !strings.Contains(page, `<td><a href="/rules/Errors">Errors</a></td><td>payments</td>`) {
+	if !strings.Contains(page, `<td><a href="/rules/Errors"><bdi>Errors</bdi></a></td><td>payments</td>`) {
 		t.Errorf("the window's page names no team for what it excused:\n%s", page)
 	}
 }

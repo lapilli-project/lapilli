@@ -1,6 +1,6 @@
 {{define "rule"}}{{template "top" (titled . .View.Name)}}{{$loc := .Loc}}{{with .View}}
-<h1>{{.Name}}</h1>
-<p class="lede">{{with .Group}}{{t "Group %s." .}} {{end}}{{with .Severity}}{{t "Severity %s." .}} {{end}}{{t "Over twelve weeks: fired %d times, %d caught something, %d nothing; precision %s, refired %d." .Firings .White .Black .Precision .Refired}}
+<h1><bdi>{{.Name}}</bdi></h1>
+<p class="lede">{{with .Group}}{{tbdi "Group %s." .}} {{end}}{{with .Severity}}{{t "Severity %s." .}} {{end}}{{t "Over twelve weeks: fired %d times, %d caught something, %d nothing; precision %s, refired %d." .Firings .White .Black .Precision .Refired}}
 {{if .Noisy}}<strong>{{if .Streak}}{{t "Noisy, %d weeks running." .Streak}}{{else}}{{t "Noisy."}}{{end}}</strong>{{end}}
 {{with .Unsupported}}<br>{{t "Not replayed: %s" .}}{{end}}
 {{range .Unseen}}<br>{{.}}{{end}}
@@ -75,7 +75,7 @@
 <h2>{{t "Changes reviewed"}}</h2>
 {{range .Reviews}}
 <p class="quiet">{{t "Replayed over the week before %s, as it was and as it is:" (at $loc .At)}}</p>
-<ul class="plain">{{range .Rules}}<li>{{.Rule}}: {{t "fired %d → %d, caught %d → %d, precision %s → %s" (fired .Before) (fired .After) (caught .Before) (caught .After) (pct .Before) (pct .After)}}</li>{{end}}</ul>
+<ul class="plain">{{range .Rules}}<li><bdi>{{.Rule}}</bdi>: {{t "fired %d → %d, caught %d → %d, precision %s → %s" (fired .Before) (fired .After) (caught .Before) (caught .After) (pct .Before) (pct .After)}}</li>{{end}}</ul>
 {{if .Incs}}<ul class="plain">{{range .Incs}}<li>{{.ID}} {{.Title}}: {{catches .Before}} → {{catches .After}}</li>{{end}}</ul>{{end}}
 {{end}}
 {{end}}
@@ -86,7 +86,7 @@
 <thead><tr><th scope="col">{{t "From"}}</th><th scope="col">{{t "Expression"}}</th><th scope="col">{{t "For"}}</th><th scope="col">{{t "Labels"}}</th></tr></thead>
 <tbody>{{range .Changes}}
 <tr><td class="t">{{if .Since.IsZero}}{{t "before the ledger began"}}{{else}}{{at $loc .Since}}{{end}}</td>
-{{if .Gone}}<td colspan="3">{{t "taken away"}}</td>{{else}}<td><pre>{{.Expr}}</pre></td><td>{{.For}}{{with .Keep}}, {{t "kept %s" .}}{{end}}</td><td>{{.Labels}}</td>{{end}}</tr>{{end}}</tbody>
+{{if .Gone}}<td colspan="3">{{t "taken away"}}</td>{{else}}<td><pre>{{shown .Expr}}</pre></td><td>{{.For}}{{with .Keep}}, {{t "kept %s" .}}{{end}}</td><td>{{.Labels}}</td>{{end}}</tr>{{end}}</tbody>
 </table></div>
 {{end}}
 

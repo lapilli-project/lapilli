@@ -45,6 +45,9 @@ type Prometheus struct {
 	// MaxRate, when set, is how many requests a second it is asked at most
 	// (--max-rate).
 	MaxRate float64
+	// MaxSamples, when set, is the most samples the answers to one range
+	// may hold in all (--max-samples; prom.DefaultMaxSamples).
+	MaxSamples int
 }
 
 // History is a client for the API.
@@ -54,7 +57,7 @@ func (p Prometheus) History(ctx context.Context, agent string) (*prom.Client, er
 		base = "https://monitoring.googleapis.com/v1/projects/" + url.PathEscape(p.GCPProject) + "/location/global/prometheus"
 		auth = "google"
 	}
-	opts := []prom.Option{prom.WithLimiter(prom.NewLimiter(p.MaxRate))}
+	opts := []prom.Option{prom.WithLimiter(prom.NewLimiter(p.MaxRate)), prom.WithMaxSamples(p.MaxSamples)}
 	if auth != "" {
 		o, err := cloud.Auth(ctx, auth, base, p.AWSRegion)
 		if err != nil {
@@ -95,9 +98,27 @@ func Loaded(ctx context.Context, h replay.History) ([]rules.Rule, rules.Doc, err
 	return rs, rules.Doc{Source: "api", API: true, Data: b}, nil
 }
 
-// client doesn't follow redirects, so a token goes nowhere it wasn't sent.
+// client doesn't follow redirects, so a token goes nowhere it wasn't sent,
+// and gives up on a Grafana that doesn't answer: its headers within
+// grafanaHeaders, the whole within grafanaTimeout, whatever the context.
 var client = &http.Client{
+	Timeout:       grafanaTimeout,
+	Transport:     withHeaderTimeout(grafanaHeaders),
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
+// How long a Grafana is waited for.
+const (
+	grafanaTimeout = time.Minute
+	grafanaHeaders = 30 * time.Second
+)
+
+// withHeaderTimeout is Go's default transport, waiting for an answer's
+// headers d at most.
+func withHeaderTimeout(d time.Duration) *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = d
+	return t
 }
 
 // Grafana asks a Grafana for its alert rules in the provisioning format
@@ -125,21 +146,25 @@ func Grafana(ctx context.Context, base, tokenFile, agent string, warn io.Writer)
 		return nil, rules.Doc{}, fmt.Errorf("--grafana: %w", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, ListLimit+1))
 	if err != nil {
 		return nil, rules.Doc{}, fmt.Errorf("--grafana: %w", err)
+	}
+	if len(body) > ListLimit {
+		return nil, rules.Doc{}, fmt.Errorf("--grafana: the export of its alert rules is over %d MB: not read", ListLimit>>20)
 	}
 	if resp.StatusCode/100 != 2 {
-		msg := strings.TrimSpace(string(body))
-		if len(msg) > 200 {
-			msg = msg[:200]
-		}
-		return nil, rules.Doc{}, fmt.Errorf("--grafana: HTTP %d: %s", resp.StatusCode, verdict.Clean(msg))
+		return nil, rules.Doc{}, fmt.Errorf("--grafana: HTTP %d: %s", resp.StatusCode, answered([]byte(prom.Redact(string(body), req)), 200))
 	}
 	doc := rules.Doc{Source: base, Data: body}
-	rs, err := rules.FromDocs([]rules.Doc{doc})
+	// Grafana writes its export holding no YAML alias; one that does is
+	// hostile, its aliases expanding a few KB into GBs.
+	rs, err := rules.FromDocsContext(rules.NoAliases(ctx), []rules.Doc{doc})
 	if err != nil {
 		return nil, rules.Doc{}, fmt.Errorf("--grafana: %w", err)
+	}
+	if len(rs) > MaxRules {
+		return nil, rules.Doc{}, fmt.Errorf("--grafana: the export holds more than %d rules (%d): not read", MaxRules, len(rs))
 	}
 	return rs, doc, nil
 }
@@ -250,11 +275,7 @@ func GrafanaNotifications(ctx context.Context, base, tokenFile, agent string) (t
 			return nil, fmt.Errorf("%s: more than 8 MB", path)
 		}
 		if resp.StatusCode/100 != 2 {
-			msg := strings.TrimSpace(string(body))
-			if len(msg) > 200 {
-				msg = msg[:200]
-			}
-			return nil, fmt.Errorf("%s: HTTP %d: %s", path, resp.StatusCode, verdict.Clean(msg))
+			return nil, fmt.Errorf("%s: HTTP %d: %s", path, resp.StatusCode, answered([]byte(prom.Redact(string(body), req)), 200))
 		}
 		return body, nil
 	}

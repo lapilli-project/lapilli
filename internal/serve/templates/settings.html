@@ -22,7 +22,7 @@
 {{if .Same}}<p>{{t "Nothing would change."}}</p>{{end}}
 {{if .Rules}}<div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught now"}}</th><th scope="col" class="n">{{t "○ Would catch"}}</th><th scope="col">{{t "Precision"}}</th></tr></thead>
-<tbody>{{range .Rules}}<tr><td>{{.Rule}}</td><td class="n">{{fired .Before}}</td><td class="n">{{caught .Before}}</td><td class="n">{{caught .After}}</td><td>{{pct .Before}} → {{pct .After}}</td></tr>{{end}}</tbody>
+<tbody>{{range .Rules}}<tr><td><bdi>{{.Rule}}</bdi></td><td class="n">{{fired .Before}}</td><td class="n">{{caught .Before}}</td><td class="n">{{caught .After}}</td><td>{{pct .Before}} → {{pct .After}}</td></tr>{{end}}</tbody>
 </table></div>{{end}}
 {{if .Incs}}<ul class="plain">{{range .Incs}}<li>{{.ID}} {{.Title}}: {{t .Was}} → {{t .Would}}</li>{{end}}</ul>{{end}}
 {{end}}

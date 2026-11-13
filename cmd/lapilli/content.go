@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"lapilli.dev/internal/content"
 	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/source"
@@ -57,7 +59,7 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 		if h, err = newHistory(ctx, f); err != nil {
 			return fail(err)
 		}
-		f.askScrapes(ctx, h, versions)
+		f.askScrapes(ctx, h, stderr, versions)
 	}
 	if h != nil || f.loki != "" {
 		h = f.withLogs(h, stderr)
@@ -240,7 +242,11 @@ func printable(s string) string {
 // where it serves them; and replays the rules read so far with it: the
 // reduces Grafana's rules ask the server to work out are asked at the
 // interval of the series they read (rules.Replaying.ScrapeOf).
-func (f *verdictFlags) askScrapes(ctx context.Context, h history, versions []replay.Version, more ...[]rules.Rule) {
+//
+// A configuration, or targets, too large to read is said on stderr: the
+// range check and the intervals are off then, which --scrape-interval
+// mends.
+func (f *verdictFlags) askScrapes(ctx context.Context, h history, stderr io.Writer, versions []replay.Version, more ...[]rules.Rule) {
 	if f.scrapeInterval > 0 || h == nil {
 		return
 	}
@@ -251,6 +257,9 @@ func (f *verdictFlags) askScrapes(ctx context.Context, h history, versions []rep
 		return
 	}
 	cfg, err := sc.StatusConfig(ctx)
+	if errors.Is(err, prom.ErrTooLarge) && stderr != nil {
+		fmt.Fprintf(stderr, "lapilli verdict: Prometheus's configuration is larger than is read of it (%v): the range check is off; give --scrape-interval\n", err)
+	}
 	if err != nil {
 		return
 	}
@@ -263,6 +272,8 @@ func (f *verdictFlags) askScrapes(ctx context.Context, h history, versions []rep
 	}); ok {
 		if b, err := ta.Targets(ctx); err == nil {
 			scrapes.Targets(b)
+		} else if errors.Is(err, prom.ErrTooLarge) && stderr != nil {
+			fmt.Fprintf(stderr, "lapilli verdict: Prometheus's active targets are more than is read of them (%v): a job is known by its name\n", err)
 		}
 	}
 	f.scrapes = &scrapes

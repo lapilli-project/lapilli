@@ -13,7 +13,7 @@
 <thead><tr><th scope="col">{{t "Stone"}}</th><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col" class="n">{{t "Notified"}}</th><th scope="col">{{t "Labels"}}</th><td></td></tr></thead>
 <tbody>{{range .Lines}}
 <tr><td>{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else}}●{{end}}{{if .Refired}} {{t "refired"}}{{end}}</td>
-<td><a href="/rules/{{path .Rule}}">{{.Rule}}</a></td>
+<td><a href="/rules/{{path .Rule}}"><bdi>{{.Rule}}</bdi></a></td>
 <td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td>
 <td class="n">{{template "notified" .}}</td><td class="labels">{{.Labels}}</td>
 <td>{{if and (not .White) (not $ro)}}<form method="post" action="/firings/{{.ID}}/real"><button class="quiet-button">{{t "This was real"}}</button></form>{{end}}</td></tr>

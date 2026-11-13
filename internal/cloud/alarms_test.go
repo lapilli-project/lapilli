@@ -89,3 +89,28 @@ func TestOCIConfigSigns(t *testing.T) {
 		t.Error("a config file that isn't there")
 	}
 }
+
+// IAM Credentials' refusal is shown on pages and in the log: what acts on a
+// terminal taken out, and the pod's token, if echoed, too.
+func TestGoogleImpersonatedRefusal(t *testing.T) {
+	iam := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		io.WriteString(w, "denied \x1b]52;c;eA==\x07 for "+strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	}))
+	defer iam.Close()
+	wasIAM, wasSource := IAMCredentials, googleSource
+	t.Cleanup(func() { IAMCredentials, googleSource = wasIAM, wasSource })
+	IAMCredentials = iam.URL
+	googleSource = func(_ context.Context, scope string) (oauth2.TokenSource, error) {
+		return oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "ya29.pod-token-0123456789abcdef"}), nil
+	}
+	sign, err := Request(context.Background(), "google", "https://monitoring.googleapis.com/v3/projects/p/alertPolicies", "lapilli-writes@p.iam.gserviceaccount.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodPatch, "https://monitoring.googleapis.com/v3/projects/p/alertPolicies/1", nil)
+	err = sign(r)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 403: denied") || strings.ContainsAny(err.Error(), "\x1b\x07") || strings.Contains(err.Error(), "pod-token") {
+		t.Errorf("IAM Credentials' refusal: %q", err)
+	}
+}

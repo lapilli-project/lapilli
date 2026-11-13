@@ -500,11 +500,47 @@ as instructions.
   a message of their own.
 - **Links.** Task and runbook links can't carry a user name, which makes a
   link look like one site's and go to another.
-- **Parsers.** Rule files, rule APIs, Grafana expressions, and incident and
-  firing files are fuzzed in CI each week.
+- **Parsers.** Rule files, rule APIs, Grafana expressions, incident and
+  firing files, range answers, on-call feeds and what a sign-in is sent
+  are fuzzed in CI each week.
+- **What a history API answers** is read as it comes, and only what was
+  asked kept: a sample outside the range asked dropped, a series of more
+  samples than the range's steps unreadable, an answer of more than 50,000
+  series, 5,000,000 samples or 256 MiB too big (a shorter range is asked, as
+  when the API says so), one of more than 128 MiB of labels (as counted,
+  some 100 bytes a label beyond its text: 50,000 series of 2.7 KB)
+  unreadable, as a shorter range holds the same series, and a series taking
+  more of the stream than its steps could need unreadable. The answers to
+  one range (its days, and the halves of one the API finds too large) hold
+  100,000 series, 256 MiB of labels and `--max-samples` samples in all at
+  most (10,000,000 by default, some 600 MB at the peak, 64 bytes a sample;
+  the chart's `maxSamples`); past one the range isn't read, and the error
+  names the bound and how to read it all the same: a longer `--step`, a
+  shorter range, a larger `--max-samples`. A hostile API's few KB on the
+  wire, gzipped, were hundreds of MB of heap before 0.34.1.
+- **A replayed alert's labels** are kept as every other alert's (recorded
+  firings, notifications, incidents): 4 KB in all, as JSON; a name of 128
+  bytes and a value of 256 at most, cut past them, with a hash of what was
+  cut (`…` and twelve hex digits), what turns the text around (a
+  direction override) as U+FFFD, with a hash too, and a set still past
+  4 KB with its longest labels folded into one, `__lapilli_cut__`, their
+  hash (an API's own label of that name is folded into it too): alerts
+  apart stay apart, but for two values cut alike whose hashes' first 48
+  bits are the same (`verdict.KeptLabels`).
+  The replay check takes what really fired as it would be kept. A rule's
+  replay in one run is kept with 20,000 alerts at most, told apart by
+  their labels, each name and value counted after its length under a
+  seed made as the process starts; past that, the rule is left as it was,
+  as one whose query failed, and says why. The cache of ids and labels
+  holds 32 MB at most.
 - **Pages** send a Content-Security-Policy that allows no scripts and no
   framing; rule names, labels and incident text are escaped as the
-  untrusted text they are. Secrets are read from files and never shown.
+  untrusted text they are. A rule's name, group, labels, its group's
+  labels and what it says are read with what turns the text around them
+  (a control character, a direction mark, embedding, override or isolate)
+  as U+FFFD, as a tracker's comment is taken; its expression, whose query
+  is its own, is shown so; names are set apart in `<bdi>`, those in a
+  sentence too. Secrets are read from files and never shown.
 - **Outbound** is what it was: queries for history and rules (a cloud's own
   alarms among them, with `--alarms`, each to its cloud's API host), and the
   digest and notices to Slack and a webhook, without following redirects;

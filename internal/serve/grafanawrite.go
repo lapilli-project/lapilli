@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
@@ -71,16 +72,21 @@ func (s *Server) grafanaCall(ctx context.Context, method, path string, body []by
 	if resp.StatusCode/100 == 3 {
 		return resp.StatusCode, nil, fmt.Errorf("Grafana answered %s %s with a redirect, which isn't followed", method, path)
 	}
+	if resp.StatusCode/100 != 2 {
+		// Said in a change's reason, in the log and in Slack: without the
+		// token, which Grafana, or a proxy before it, may echo.
+		out = []byte(prom.Redact(string(out), req))
+	}
 	return resp.StatusCode, out, nil
 }
 
 // grafanaFailed is an answer from Grafana that isn't what was asked for.
 func grafanaFailed(code int, body []byte) error {
-	msg := strings.TrimSpace(string(body))
+	msg := prom.ServerText(strings.TrimSpace(string(body)), nil)
 	if len(msg) > 200 {
-		msg = msg[:200]
+		msg = strings.ToValidUTF8(msg[:200], "")
 	}
-	return fmt.Errorf("Grafana: HTTP %d: %s", code, verdict.Clean(msg))
+	return fmt.Errorf("Grafana: HTTP %d: %s", code, msg)
 }
 
 // grafanaRule reads a rule from Grafana: as its API gives it, and as its

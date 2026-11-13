@@ -25,7 +25,7 @@
 <thead><tr><th scope="col">{{t "Task"}}</th><th scope="col">{{t "Kind"}}</th><th scope="col">{{t "About"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Assignee"}}</th><th scope="col">{{t "Due"}}</th><th scope="col">{{t "Status"}}</th></tr></thead>
 <tbody>{{range .}}<tr class="task-{{.Status}}">
   <td><a href="/tasks/{{.ID}}">#{{.ID}} {{.Title}}</a>{{with .Link}} <a href="{{.}}" rel="noopener noreferrer" class="sign" title="{{t "Issue in a tracker"}}" aria-label="{{t "Issue in a tracker"}}">↗</a>{{end}}</td><td>{{t .Kind}}</td>
-  <td>{{with .Rule}}<a href="/rules/{{path .}}">{{.}}</a>{{end}}{{if and .Rule .Incident}}, {{end}}{{with .Incident}}<a href="/incidents/{{path .}}">{{.}}</a>{{end}}</td>
+  <td>{{with .Rule}}<a href="/rules/{{path .}}"><bdi>{{.}}</bdi></a>{{end}}{{if and .Rule .Incident}}, {{end}}{{with .Incident}}<a href="/incidents/{{path .}}"><bdi>{{.}}</bdi></a>{{end}}</td>
   <td>{{or .Team "–"}}</td><td>{{or .Assignee "–"}}</td>
   <td class="t{{if .Overdue}} bad{{end}}">{{or .DueText "–"}}</td><td><span class="pill {{.Status}}">{{t .Status}}</span></td>
 </tr>{{end}}</tbody></table></div>
@@ -122,7 +122,7 @@
 <h2>{{t "Firings it excused"}}</h2>
 {{if .Excused}}<div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "Labels"}}</th></tr></thead>
-<tbody>{{range .Excused}}<tr><td><a href="/rules/{{path .Rule}}">{{.Rule}}</a></td><td>{{or .Team "–"}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
+<tbody>{{range .Excused}}<tr><td><a href="/rules/{{path .Rule}}"><bdi>{{.Rule}}</bdi></a></td><td>{{or .Team "–"}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
 </table></div>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 {{if not $ro}}
 <h2>{{t "Change it"}}</h2>
@@ -173,7 +173,7 @@
 
 {{define "task"}}{{$title := print "#" .View.ID " " .View.Title}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := not (edits .Status .View.TeamID)}}{{with .View}}
 <h1>{{$title}}</h1>
-<p class="lede"><span class="pill {{.Status}}">{{t .Status}}</span> {{t .Kind}}{{with .Rule}} · <a href="/rules/{{path .}}">{{.}}</a>{{end}}{{with .Incident}} · <a href="/incidents/{{path .}}">{{.}}</a>{{end}}{{with .Team}} · {{.}}{{end}}{{with .Assignee}} · {{.}}{{end}}{{with .DueText}} · <span{{if $.View.Overdue}} class="bad"{{end}}>{{t "due %s" .}}</span>{{end}}<br>
+<p class="lede"><span class="pill {{.Status}}">{{t .Status}}</span> {{t .Kind}}{{with .Rule}} · <a href="/rules/{{path .}}"><bdi>{{.}}</bdi></a>{{end}}{{with .Incident}} · <a href="/incidents/{{path .}}"><bdi>{{.}}</bdi></a>{{end}}{{with .Team}} · {{.}}{{end}}{{with .Assignee}} · {{.}}{{end}}{{with .DueText}} · <span{{if $.View.Overdue}} class="bad"{{end}}>{{t "due %s" .}}</span>{{end}}<br>
 <span class="quiet">{{t "Made by %s, %s; changed by %s, %s." (who .CreatedBy) (at $loc .Created) (who .By) (at $loc .Updated)}}</span></p>
 {{with .Link}}<p><a href="{{.}}" rel="noopener noreferrer">{{t "Issue in a tracker"}} <span aria-hidden="true">↗</span></a></p>{{end}}
 {{with .Proposal}}<p><a href="/proposals/{{.ID}}">{{t "Proposal #%d" .ID}}</a> {{template "proposalstate" .State}}{{with .Link}} · <a href="{{.}}" rel="noopener noreferrer">{{t "Pull request"}} <span aria-hidden="true">↗</span></a>{{end}}</p>{{end}}

@@ -38,6 +38,10 @@ const (
 	maxFeedSteps = 2_000_000
 )
 
+// maxZones is how many zones a feed's TZIDs may name, each loaded once:
+// more than IANA has. Replaced in tests.
+var maxZones = 1024
+
 // The span repeats are expanded over, around now.
 const (
 	Back  = 400 * 24 * time.Hour
@@ -121,7 +125,15 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 	var events []*event
 	var cur *event
 	depth := 0 // within the event: a VALARM in it is passed over
+	// The zones TZIDs name, each loaded once: time.LoadLocation reads the
+	// zone's file each time.
+	zones := map[string]*time.Location{}
+	readStamp := func(params map[string]string, v string) (stamp, error) { return parseStamp(params, v, s.Loc, zones) }
+	lines := 0
 	for line := range bytes.SplitSeq(data, []byte("\n")) {
+		if lines++; lines%1024 == 0 && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if len(line) > maxLine {
 			return nil, fmt.Errorf("a line of the feed is over %d KB", maxLine>>10)
 		}
@@ -164,9 +176,9 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 		case "STATUS":
 			cur.status = strings.ToUpper(value)
 		case "DTSTART":
-			cur.start, err = parseStamp(params, value, s.Loc)
+			cur.start, err = readStamp(params, value)
 		case "DTEND":
-			cur.end, err = parseStamp(params, value, s.Loc)
+			cur.end, err = readStamp(params, value)
 		case "DURATION":
 			cur.duration = value
 		case "RRULE":
@@ -177,7 +189,7 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 					err = fmt.Errorf("more than %d dates left out of a repeat", maxExdates)
 					break
 				}
-				x, e := parseStamp(params, v, s.Loc)
+				x, e := readStamp(params, v)
 				if e != nil {
 					err = e
 					break
@@ -186,7 +198,7 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 			}
 		case "RECURRENCE-ID":
 			var x stamp
-			x, err = parseStamp(params, value, s.Loc)
+			x, err = readStamp(params, value)
 			cur.recurrence = &x
 		case "ATTENDEE":
 			v := value
@@ -204,11 +216,15 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 	}
 	f.Events = len(events)
 	// RECURRENCE-ID: an occurrence of a repeat replaced by an event of its
-	// own, by the repeat's UID.
-	replaced := map[string][]time.Time{}
+	// own, by the repeat's UID, and the instant it starts: looked up, not
+	// searched for each occurrence.
+	replaced := map[string]map[int64]bool{}
 	for _, e := range events {
 		if e.recurrence != nil && e.recurrence.set && e.uid != "" {
-			replaced[e.uid] = append(replaced[e.uid], e.recurrence.t)
+			if replaced[e.uid] == nil {
+				replaced[e.uid] = map[int64]bool{}
+			}
+			replaced[e.uid][e.recurrence.t.UnixNano()] = true
 		}
 	}
 	from, to := now.Add(-Back), now.Add(Ahead)
@@ -276,8 +292,11 @@ func Parse(ctx context.Context, data []byte, s *Schedule, c *Config, now time.Ti
 			}
 		}
 		speaks()
-		for _, st := range starts {
-			if slices.ContainsFunc(replaced[e.uid], st.Equal) && e.recurrence == nil {
+		for i, st := range starts {
+			if i%4096 == 4095 && ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if replaced[e.uid][st.UnixNano()] && e.recurrence == nil {
 				continue
 			}
 			end := length(st)
@@ -469,8 +488,9 @@ func unescape(s string) string {
 
 // parseStamp reads a date or a time: in UTC (Z), in the zone TZID names
 // (an IANA name only: a feed's own VTIMEZONE isn't read), or floating, in
-// loc.
-func parseStamp(params map[string]string, v string, loc *time.Location) (stamp, error) {
+// loc. zones, when not nil, keeps the zones loaded, nil for one that
+// isn't one.
+func parseStamp(params map[string]string, v string, loc *time.Location, zones map[string]*time.Location) (stamp, error) {
 	v = strings.TrimSpace(v)
 	if params["VALUE"] == "DATE" || len(v) == 8 {
 		t, err := time.ParseInLocation("20060102", v, loc)
@@ -487,8 +507,22 @@ func parseStamp(params map[string]string, v string, loc *time.Location) (stamp, 
 		return stamp{t: t, set: true}, sane(t)
 	}
 	if tz := params["TZID"]; tz != "" {
-		l, err := LoadZone(strings.TrimPrefix(tz, "/"))
-		if err != nil {
+		l, seen := zones[tz]
+		if !seen {
+			// A zone not kept once the feed has named maxZones is
+			// refused, not loaded again for each date it is named in.
+			if zones != nil && len(zones) >= maxZones {
+				return stamp{}, fmt.Errorf("the feed names more than %d time zones", maxZones)
+			}
+			var err error
+			if l, err = LoadZone(strings.TrimPrefix(tz, "/")); err != nil {
+				l = nil
+			}
+			if zones != nil {
+				zones[tz] = l
+			}
+		}
+		if l == nil {
 			return stamp{}, fmt.Errorf("a zone that isn't an IANA name, %q: its own VTIMEZONE isn't read", clip(tz))
 		}
 		loc = l
@@ -575,7 +609,8 @@ func expand(ctx context.Context, e *event, from, to time.Time, most int, steps *
 		return nil, fmt.Errorf("a repeat FREQ=%s, which this doesn't expand: only DAILY and WEEKLY", clip(freq))
 	}
 	var until time.Time
-	var byday []time.Weekday
+	var byday [7]bool // the days a weekly repeat is on: looked up each step
+	bydays := false
 	for part := range strings.SplitSeq(e.rrule, ";") {
 		k, v, _ := strings.Cut(part, "=")
 		switch strings.ToUpper(k) {
@@ -593,7 +628,7 @@ func expand(ctx context.Context, e *event, from, to time.Time, most int, steps *
 			}
 			count = n
 		case "UNTIL":
-			st, err := parseStamp(nil, v, e.start.t.Location())
+			st, err := parseStamp(nil, v, e.start.t.Location(), nil)
 			if err != nil {
 				return nil, err
 			}
@@ -607,7 +642,7 @@ func expand(ctx context.Context, e *event, from, to time.Time, most int, steps *
 				if i < 0 {
 					return nil, fmt.Errorf("a repeat by day %q, which this doesn't expand", clip(d))
 				}
-				byday = append(byday, time.Weekday(i))
+				byday[i], bydays = true, true
 			}
 		case "WKST":
 			i := slices.Index([]string{"SU", "MO", "TU", "WE", "TH", "FR", "SA"}, strings.ToUpper(v))
@@ -619,7 +654,7 @@ func expand(ctx context.Context, e *event, from, to time.Time, most int, steps *
 			return nil, fmt.Errorf("a repeat by %s, which this doesn't expand", clip(k))
 		}
 	}
-	if freq == "DAILY" && len(byday) > 0 {
+	if freq == "DAILY" && bydays {
 		return nil, errors.New("a daily repeat by day, which this doesn't expand")
 	}
 	// Dates left out, looked up rather than searched each step.
@@ -682,7 +717,7 @@ func expand(ctx context.Context, e *event, from, to time.Time, most int, steps *
 		switch {
 		case freq == "DAILY":
 			more = take(start.AddDate(0, 0, step*interval))
-		case len(byday) == 0:
+		case !bydays:
 			more = take(start.AddDate(0, 0, 7*step*interval))
 		default:
 			// WEEKLY by day: the week of the start, as WKST begins weeks,
@@ -692,7 +727,7 @@ func expand(ctx context.Context, e *event, from, to time.Time, most int, steps *
 			begin := week.AddDate(0, 0, -((int(week.Weekday()) - int(wkst) + 7) % 7))
 			for i := range 7 {
 				d := begin.AddDate(0, 0, i)
-				if !slices.Contains(byday, d.Weekday()) || d.Before(start) {
+				if !byday[d.Weekday()] || d.Before(start) {
 					continue
 				}
 				if more = take(d); !more {

@@ -2,6 +2,7 @@ package rules
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -256,14 +257,18 @@ var ErrNoneSelected = errors.New("no document of rules has the labels asked for"
 // documents of rules, and with a selector, only the labelled ones; the
 // documents given back hold only what was kept, when Picking.Trim says so
 // or the selector left something out. picked says what was passed over.
+//
+// What aliases expand to is counted for every file read, as of one input
+// (OneInput): a directory of many files mustn't each have yaml.v3's bound.
 func ReadPicked(path string, p Picking) ([]Rule, []Doc, Picked, error) {
 	var picked Picked
+	in := reading{pick: OneInput(context.Background()), parse: OneInput(context.Background())}
 	fi, err := os.Stat(path)
 	if err != nil {
 		return nil, nil, picked, err
 	}
 	if !fi.IsDir() {
-		rs, d, err := loadPicked(path, p, &picked)
+		rs, d, err := in.load(path, p, &picked)
 		if err != nil {
 			return nil, nil, picked, err
 		}
@@ -292,7 +297,7 @@ func ReadPicked(path string, p Picking) ([]Rule, []Doc, Picked, error) {
 		if st, err := os.Stat(f); err != nil || !st.Mode().IsRegular() {
 			return nil
 		}
-		rs, d, err := loadPicked(f, p, &picked)
+		rs, d, err := in.load(f, p, &picked)
 		switch {
 		case errors.Is(err, errNoRules), errors.Is(err, ErrNoneSelected):
 			return nil
@@ -317,14 +322,18 @@ func ReadPicked(path string, p Picking) ([]Rule, []Doc, Picked, error) {
 	return out, docs, picked, nil
 }
 
-// loadPicked reads one file as ReadPicked does, adding what it passed over
-// to picked.
-func loadPicked(path string, p Picking, picked *Picked) ([]Rule, Doc, error) {
+// reading is what ReadPicked's files are picked and parsed under, each
+// counting what aliases expand to for them all.
+type reading struct{ pick, parse context.Context }
+
+// load reads one file as ReadPicked does, adding what it passed over to
+// picked.
+func (in reading) load(path string, p Picking, picked *Picked) ([]Rule, Doc, error) {
 	b, err := readFile(path)
 	if err != nil {
 		return nil, Doc{}, err
 	}
-	kept, q, err := Pick(b, p.Select)
+	kept, q, err := pick(in.pick, b, p.Select)
 	if err != nil {
 		return nil, Doc{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -336,7 +345,7 @@ func loadPicked(path string, p Picking, picked *Picked) ([]Rule, Doc, error) {
 	if p.Recordings != nil {
 		had = len(*p.Recordings)
 	}
-	rs, err := parse(b, p.Recordings)
+	rs, err := parseContext(in.parse, b, p.Recordings)
 	if p.Recordings != nil {
 		if err != nil {
 			*p.Recordings = (*p.Recordings)[:had]
@@ -383,12 +392,20 @@ func readFile(path string) ([]byte, error) {
 // what it passed over. A stream that isn't YAML is refused as Parse refuses
 // it; a document of rules that can't be read is refused only when kept.
 func Pick(b []byte, sel Selector) ([]byte, Picked, error) {
+	return pick(context.Background(), b, sel)
+}
+
+// pick is Pick, what aliases expand to counted for the whole stream, its
+// pieces and the rule files its ConfigMaps hold, as of the input ctx says
+// (OneInput).
+func pick(ctx context.Context, b []byte, sel Selector) ([]byte, Picked, error) {
+	ctx = OneInput(ctx)
 	var picked Picked
 	pieces := split(b)
 	var out [][]byte
 	whole := true // each piece one document, read alone
 	for _, piece := range pieces {
-		docs, err := decodeAll(piece)
+		docs, err := DecodeYAML(ctx, piece)
 		if err != nil || len(docs) > 1 {
 			whole = false
 			break
@@ -396,7 +413,7 @@ func Pick(b []byte, sel Selector) ([]byte, Picked, error) {
 		if len(docs) == 0 || docs[0] == nil {
 			continue // only comments, as helm template writes for an empty template
 		}
-		keep, rewritten, q := pickDoc(docs[0], sel)
+		keep, rewritten, q := pickDoc(ctx, docs[0], sel)
 		picked.Add(q)
 		switch {
 		case !keep:
@@ -410,7 +427,7 @@ func Pick(b []byte, sel Selector) ([]byte, Picked, error) {
 		// Not cut where YAML cuts it: the documents decoded from the whole,
 		// and those kept written afresh.
 		picked, out = Picked{}, nil
-		docs, err := decodeAll(b)
+		docs, err := DecodeYAML(ctx, b)
 		if err != nil {
 			return nil, picked, err
 		}
@@ -418,7 +435,7 @@ func Pick(b []byte, sel Selector) ([]byte, Picked, error) {
 			if d == nil {
 				continue
 			}
-			keep, rewritten, q := pickDoc(d, sel)
+			keep, rewritten, q := pickDoc(ctx, d, sel)
 			picked.Add(q)
 			if !keep {
 				continue
@@ -437,10 +454,10 @@ func Pick(b []byte, sel Selector) ([]byte, Picked, error) {
 // pickDoc says whether to keep a document: one that holds rules and is
 // selected, or a List, or a list of documents, some of whose items are;
 // for such a list missing items, the list written afresh with those kept.
-func pickDoc(doc any, sel Selector) (keep bool, rewritten []byte, picked Picked) {
+func pickDoc(ctx context.Context, doc any, sel Selector) (keep bool, rewritten []byte, picked Picked) {
 	l, ok := doc.([]any)
 	if !ok {
-		keep, kept, changed, picked := pickItem(doc, sel)
+		keep, kept, changed, picked := pickItem(ctx, doc, sel)
 		if keep && changed {
 			rewritten, _ = yaml.Marshal(kept)
 		}
@@ -450,7 +467,7 @@ func pickDoc(doc any, sel Selector) (keep bool, rewritten []byte, picked Picked)
 	var kept []any
 	changed := false
 	for _, it := range l {
-		k, v, c, q := pickItem(it, sel)
+		k, v, c, q := pickItem(ctx, it, sel)
 		picked.Add(q)
 		if k {
 			kept = append(kept, v)
@@ -468,7 +485,7 @@ func pickDoc(doc any, sel Selector) (keep bool, rewritten []byte, picked Picked)
 
 // pickItem says whether to keep a document, and what of it: a List with
 // only the items kept, which changed says it is.
-func pickItem(doc any, sel Selector) (keep bool, kept any, changed bool, picked Picked) {
+func pickItem(ctx context.Context, doc any, sel Selector) (keep bool, kept any, changed bool, picked Picked) {
 	m, _ := doc.(map[string]any)
 	if m == nil {
 		picked.Other++
@@ -478,7 +495,7 @@ func pickItem(doc any, sel Selector) (keep bool, kept any, changed bool, picked 
 		// kubectl get -o yaml: its items, as Parse reads them.
 		var items []any
 		for _, it := range list(m["items"]) {
-			k, v, c, q := pickItem(it, sel)
+			k, v, c, q := pickItem(ctx, it, sel)
 			picked.Add(q)
 			if k {
 				items = append(items, v)
@@ -498,8 +515,8 @@ func pickItem(doc any, sel Selector) (keep bool, kept any, changed bool, picked 
 		c["items"] = items
 		return true, c, true, picked
 	}
-	_, ok, _ := parseDoc(m)
-	if brokenRuleFile(m) {
+	_, ok, _ := parseDocRec(ctx, m, nil)
+	if brokenRuleFile(ctx, m) {
 		picked.Broken++
 	}
 	switch {
@@ -531,17 +548,17 @@ func isList(m map[string]any) bool {
 // brokenRuleFile reports whether a ConfigMap holds a rule file that
 // doesn't read: a value that is YAML, in the shape of rules, that Parse
 // refuses. A value that isn't YAML at all, a configuration file, isn't.
-func brokenRuleFile(m map[string]any) bool {
+func brokenRuleFile(ctx context.Context, m map[string]any) bool {
 	if m["kind"] != "ConfigMap" {
 		return false
 	}
 	data, _ := m["data"].(map[string]any)
 	for _, v := range data {
 		s, _ := v.(string)
-		if _, err := decodeAll([]byte(s)); err != nil {
+		if _, err := DecodeYAML(ctx, []byte(s)); err != nil {
 			continue
 		}
-		if _, err := Parse([]byte(s)); err != nil && !errors.Is(err, errNoRules) {
+		if _, err := parseContext(ctx, []byte(s), nil); err != nil && !errors.Is(err, errNoRules) {
 			return true
 		}
 	}

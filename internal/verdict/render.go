@@ -521,9 +521,32 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 	return err
 }
 
+// escape is a label's value as Prometheus's text format writes it, a
+// control character (an escape sequence) and a direction mark, embedding,
+// override or isolate (what rules.Shown takes out) said as Clean says it:
+// a name comes from whoever writes rules, or from an API. Any other format
+// character is as it is: the joiners names in Persian, Indic scripts or
+// emoji are written with, which ALERTS has as they are.
 func escape(s string) string {
-	return strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(s)
+	if strings.IndexFunc(s, func(r rune) bool { return unicode.IsControl(r) || rules.Turns(r) }) < 0 {
+		return labelEscaper.Replace(s)
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsControl(r) || rules.Turns(r) {
+			fmt.Fprintf(&b, "\\u{%x}", r)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return labelEscaper.Replace(b.String())
 }
+
+var labelEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
+
+// LabelValue is a label's value as Prometheus's text format writes it, for
+// /metrics and --metrics alike (escape).
+func LabelValue(s string) string { return escape(s) }
 
 // UnseenText says, for a person, what Unseen's code means a replay can't
 // see.

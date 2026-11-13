@@ -590,3 +590,17 @@ func TestChartPostgres(t *testing.T) {
 		t.Errorf("beside existingClaim: %v\n%s", err, out)
 	}
 }
+
+// maxSamples is --max-samples, in both modes; none when 0, the default.
+func TestChartMaxSamples(t *testing.T) {
+	for _, mode := range [][]string{serveValues, {"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={rules}", "--set", "impact=up == 0"}} {
+		out, err := helmTemplate(t, mode...)
+		if err != nil || strings.Contains(out, "--max-samples") {
+			t.Errorf("by default: %v\n%s", err, out)
+		}
+		out, err = helmTemplate(t, append(mode, "--set", "maxSamples=40000000")...)
+		if err != nil || !strings.Contains(out, `- "--max-samples=40000000"`) {
+			t.Errorf("maxSamples: %v\n%s", err, out)
+		}
+	}
+}

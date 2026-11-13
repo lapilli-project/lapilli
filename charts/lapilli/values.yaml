@@ -701,6 +701,12 @@ serviceAccount:
 # the job is stopped ten minutes after. In serve mode, a run that doesn't
 # finish in time is retried over less at once.
 timeoutMinutes: 50
+# The most samples the answers to one rule's query over the period may hold
+# in all (--max-samples), past which the rule isn't replayed: 10,000,000
+# when 0, some 600 MB at the peak, 64 bytes a sample. 28 days at a minute
+# is 40,320 samples a series firing all through it; with --parallel rules
+# at once, give resources.limits.memory room for as many.
+maxSamples: 0
 resources:
   requests:
     cpu: 100m

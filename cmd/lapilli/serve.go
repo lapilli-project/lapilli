@@ -262,7 +262,9 @@ GitHub through Dex, a multi-tenant Entra ID app) is anyone:
                       --admins and --approvers (default groups; empty for
                       none)
   --session-max-age DUR
-                      how long a session lasts (default 12h; 5m to 30d)
+                      how long a session lasts, and the oldest a bearer
+                      token is taken at, from its iat, whatever its own exp
+                      (default 12h; 5m to 30d)
   --session-key-file FILE
                       a key of 32 characters or more that session cookies
                       are signed with, read at start; without it, one made

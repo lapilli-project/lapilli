@@ -41,6 +41,9 @@ type Client struct {
 	loki bool
 	// limit shares the API out among the requests of a run.
 	limit *Limiter
+	// maxSamples is the most samples the answers to one range may hold in
+	// all (WithMaxSamples, --max-samples).
+	maxSamples int
 }
 
 // Option configures a Client.
@@ -76,6 +79,29 @@ func WithLimiter(l *Limiter) Option {
 	return func(c *Client) { c.limit = l }
 }
 
+// DefaultMaxSamples is how many samples the answers to one range (a
+// rule's query over the period) may hold in all, unless WithMaxSamples
+// says otherwise: a week at a minute of 1,000 series firing all through
+// it, 28 days of 250. Replaced in tests.
+var DefaultMaxSamples = 10000000
+
+// SampleBytes is what a sample read takes at the peak, near enough, as
+// measured over 28 days and 7 at a minute: 62 bytes, 37 as kept after
+// (32 of the sample, the rest its series' list grown to hold it), the
+// collector's leftovers besides. DefaultMaxSamples is some 600 MB so.
+const SampleBytes = 64
+
+// WithMaxSamples holds the answers to one range to n samples in all, past
+// which it isn't read (--max-samples); n of 0 or less leaves
+// DefaultMaxSamples.
+func WithMaxSamples(n int) Option {
+	return func(c *Client) {
+		if n > 0 {
+			c.maxSamples = n
+		}
+	}
+}
+
 // Loki says the API is Loki's: a range query is asked of
 // /loki/api/v1/query_range, by GET, as Grafana's data source proxy allows
 // for Loki; its errors are plain text; and a log query, which answers log
@@ -101,7 +127,7 @@ var client = &http.Client{
 // New returns a client for the API under base, such as
 // http://prometheus:9090.
 func New(base, userAgent string, opts ...Option) *Client {
-	c := &Client{base: strings.TrimRight(base, "/"), http: client, agent: userAgent}
+	c := &Client{base: strings.TrimRight(base, "/"), http: client, agent: userAgent, maxSamples: DefaultMaxSamples}
 	for _, o := range opts {
 		o(c)
 	}
@@ -135,6 +161,7 @@ func (c *Client) QueryRange(ctx context.Context, expr string, start, end time.Ti
 		return nil, errors.New("step must be positive")
 	}
 	byKey := map[string]*Series{}
+	t := &tally{keys: map[string]bool{}, maxSamples: c.maxSamples}
 	chunk := step * maxPoints
 	if c.loki {
 		// Asked at a finer step (lokiStep), a request stays within Loki's
@@ -148,7 +175,7 @@ func (c *Client) QueryRange(ctx context.Context, expr string, start, end time.Ti
 		if to.After(end) {
 			to = end
 		}
-		part, err := c.fetch(ctx, expr, from, to, step)
+		part, err := c.fetch(ctx, expr, from, to, step, t)
 		if err != nil {
 			return nil, err
 		}
@@ -229,6 +256,44 @@ func serverText(msg string, req *http.Request) string {
 		return c
 	}, msg)
 	return redact(msg, sent(req))
+}
+
+// ServerText is a server's text as an error says it, for the errors of
+// what isn't a Prometheus-compatible API (a ruler, a Grafana, a cloud):
+// without control and format characters, what req carried to sign in, or
+// any bearer token. req may be nil.
+func ServerText(msg string, req *http.Request) string { return serverText(msg, req) }
+
+// Redact is a server's text without what req carried to sign in, or any
+// bearer token, and otherwise as it was: for an answer whose text is shown
+// when it is an error, and may still be read.
+func Redact(msg string, req *http.Request) string { return redact(msg, sent(req)) }
+
+// quotedText is a server's text as an error quotes it (%q, which shows
+// what doesn't show): without what req carried to sign in, or any bearer
+// token; and, when one of those is hidden in two by a character that
+// doesn't show, as serverText gives it, without those characters.
+func quotedText(raw string, req *http.Request) string {
+	kept, cleaned := redact(raw, sent(req)), serverText(raw, req)
+	if strings.Count(cleaned, "[redacted]") > strings.Count(kept, "[redacted]") {
+		return cleaned
+	}
+	return kept
+}
+
+// cutEnd is s, cut short of what followed it, without the start of one of
+// secrets at its end: cut, a secret longer than what is kept is whole
+// nowhere in it, and redact wouldn't find it; taken out, as it would be.
+func cutEnd(s string, secrets []string) string {
+	for _, x := range secrets {
+		for k := min(len(x)-1, len(s)); k >= 4; k-- {
+			if strings.HasSuffix(s, x[:k]) {
+				s = s[:len(s)-k] + "[redacted]"
+				break
+			}
+		}
+	}
+	return s
 }
 
 // clip is s cut to n bytes at most, "…" included, at the start of a rune,
@@ -347,7 +412,12 @@ func (e *credsError) Unwrap() error { return e.err }
 
 // unreadable is an answer of the API's, to a query, that isn't one lapilli
 // can read: not a matrix, or a sample not a time and a number.
-type unreadable struct{ msg string }
+type unreadable struct {
+	msg string
+	// sample is a sample that isn't a time and a number, as the answer
+	// wrote it, when that is what can't be read.
+	sample [2]string
+}
 
 func (e *unreadable) Error() string { return e.msg }
 
@@ -543,25 +613,69 @@ func retried[T any](ctx context.Context, ask func(context.Context) (T, error)) (
 
 // fetch asks for one range, asking again when the API is briefly
 // unavailable or asked too much (retried), and halving the range when the
-// answer is too large.
-func (c *Client) fetch(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]Series, error) {
+// answer is too large; each answer counted in t, with those to the rest of
+// the range.
+func (c *Client) fetch(ctx context.Context, expr string, start, end time.Time, step time.Duration, t *tally) ([]Series, error) {
 	got, err := retried(ctx, func(ctx context.Context) ([]Series, error) { return c.queryRange(ctx, expr, start, end, step) })
 	var ae *APIError
 	if errors.As(err, &ae) && ae.tooBig() && end.Sub(start) >= step {
 		// Halved on the range's own grid: a range placed off the step's, as
 		// a group placed within its interval is, stays on it.
 		mid := start.Add(end.Sub(start) / 2 / step * step)
-		a, err := c.fetch(ctx, expr, start, mid, step)
+		a, err := c.fetch(ctx, expr, start, mid, step, t)
 		if err != nil {
 			return nil, err
 		}
-		b, err := c.fetch(ctx, expr, mid.Add(step), end, step)
+		b, err := c.fetch(ctx, expr, mid.Add(step), end, step, t)
 		if err != nil {
 			return nil, err
 		}
 		return join(a, b), nil
 	}
-	return got, err
+	if err == nil {
+		err = t.add(got)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return got, nil
+}
+
+// tally is what the answers to one range have held so far: its series,
+// told apart by their labels, their samples and what their labels take;
+// maxSamples the most samples they may hold (the Client's).
+type tally struct {
+	keys                    map[string]bool
+	series, samples, labels int
+	maxSamples              int
+}
+
+// add counts an answer's series with the rest, and says when they come to
+// more than one range is read with (maxRange*, maxSamples): not an answer
+// too large, as each is within its bounds, but too much for a shorter one
+// to mend; said with the bound, and how to read the range all the same.
+func (t *tally) add(part []Series) error {
+	for _, s := range part {
+		if k := key(s.Labels); !t.keys[k] {
+			t.keys[k] = true
+			t.series++
+			t.labels += labelCost(s.Labels)
+		}
+		t.samples += len(s.Samples)
+	}
+	var msg string
+	switch {
+	case t.series > maxRangeSeries:
+		msg = fmt.Sprintf("the answers to the range hold more than %d series in all, the most a range is read with: read it over a shorter range (--since)", maxRangeSeries)
+	case t.samples > t.maxSamples:
+		msg = fmt.Sprintf("the answers to the range hold more than %d samples in all (--max-samples): read it at a longer --step, over a shorter range (--since), or with a larger --max-samples, each 1000000 more taking some %d MB more at the peak",
+			t.maxSamples, SampleBytes)
+	case t.labels > maxRangeLabels:
+		msg = fmt.Sprintf("the answers to the range hold more than %d MiB of labels in all, the most a range is read with: read it over a shorter range (--since)", maxRangeLabels>>20)
+	default:
+		return nil
+	}
+	return &unreadable{msg: msg}
 }
 
 // asked is what an error says, at its end, of how often its request was
@@ -690,43 +804,53 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 	if err != nil {
 		return nil, err
 	}
-	body, resp, err := c.do(ctx, req, true)
+	// Read as it comes, keeping only what was asked: a sample out of the
+	// range, or more than its steps, a series past maxAnswerSeries.
+	var a *answer
+	var bad error
+	h := &head{}
+	resp, err := c.send(ctx, req, true, func(body io.Reader) error {
+		h.r = io.LimitReader(body, maxBody+1)
+		a, bad = readAnswer(h, start, end, ask)
+		if bad != nil && !errors.Is(bad, errNotJSON) {
+			return bad // the body's own: a connection dropped
+		}
+		// What is left of a whole answer, for the connection to be kept;
+		// one passed over in part is closed.
+		io.CopyN(io.Discard, h, 64<<10)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
 	failed := func(msg string) error { return apiError(req, resp, msg) }
-	var r struct {
-		Status   string   `json:"status"`
-		Error    string   `json:"error"`
-		Warnings []string `json:"warnings"`
-		Data     struct {
-			ResultType string `json:"resultType"`
-			Result     []struct {
-				Metric map[string]string    `json:"metric"`
-				Values [][2]json.RawMessage `json:"values"`
-			} `json:"result"`
-		} `json:"data"`
-	}
 	what := "a Prometheus"
 	if c.loki {
 		what = "a Loki"
 	}
-	notAPI := func() error {
-		return pageError(req, resp, "not "+what+" API response: "+clip(serverText(strings.TrimSpace(string(body)), req), 200))
+	said := func() string {
+		text := h.buf.String()
+		if h.n > int64(len(text)) {
+			text = cutEnd(text, sent(req))
+		}
+		return clip(serverText(strings.TrimSpace(text), req), 200)
 	}
-	if err := json.Unmarshal(body, &r); err != nil {
-		msg := clip(serverText(strings.TrimSpace(string(body)), req), 200)
-		if c.loki && resp.StatusCode/100 != 2 && lokiText(resp, msg) {
+	notAPI := func() error { return pageError(req, resp, "not "+what+" API response: "+said()) }
+	if h.n > maxBody {
+		return nil, &APIError{Status: resp.StatusCode, Msg: fmt.Sprintf("the answer is over %d MiB", maxBody>>20), big: true}
+	}
+	if bad != nil {
+		if msg := said(); c.loki && resp.StatusCode/100 != 2 && lokiText(resp, msg) {
 			// Loki says what went wrong in plain text; a page, from a
 			// proxy before it, isn't Loki's.
 			return nil, failed(msg)
 		}
 		return nil, notAPI()
 	}
-	switch r.Status {
+	switch a.status {
 	case "success":
 	case "error":
-		return nil, failed(r.Error)
+		return nil, failed(a.errMsg)
 	default:
 		// JSON, but not the API's: a gateway's, or a sign-in's.
 		return nil, notAPI()
@@ -734,36 +858,37 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 	// An API that caps the series in an answer may say so only in a warning
 	// (CloudWatch: "result truncated to the maximum of 500 series"). A replay
 	// of what is left would be wrong without saying so.
-	for _, w := range r.Warnings {
+	for _, w := range a.warnings {
 		if strings.Contains(strings.ToLower(w), "truncated") {
 			return nil, failed("the answer left series out: " + w)
 		}
 	}
-	if c.loki && r.Data.ResultType == "streams" {
+	if c.loki && a.resultType == "streams" {
 		return nil, &APIError{Status: http.StatusBadRequest, Msg: "a log query, which returns log lines, not numbers: only a metric query, such as count_over_time, is replayed"}
 	}
-	if r.Data.ResultType != "matrix" {
-		return nil, &unreadable{fmt.Sprintf("want a matrix, got %q", clip(r.Data.ResultType, 64))}
+	if a.resultType != "matrix" {
+		// The server's words, as every other error has them: without the
+		// token, which a server may echo, in what is quoted.
+		return nil, &unreadable{msg: fmt.Sprintf("want a matrix, got %q", clip(serverText(a.resultType, req), 64))}
 	}
-	out := make([]Series, 0, len(r.Data.Result))
-	for _, res := range r.Data.Result {
-		s := Series{Labels: res.Metric, Samples: make([]Sample, 0, len(res.Values))}
-		for _, v := range res.Values {
-			// [1730419200.5, "42"]: a number, then the value as a string.
-			ts, err1 := ParseTime(string(v[0]))
-			f, err2 := strconv.ParseFloat(strings.Trim(string(v[1]), `"`), 64)
-			if err1 != nil || err2 != nil {
-				// Quoted: the text is the server's.
-				return nil, &unreadable{fmt.Sprintf("unreadable sample [%q, %q]", clip(string(v[0]), 64), clip(string(v[1]), 64))}
-			}
-			s.Samples = append(s.Samples, Sample{T: ts, V: f})
+	var u *unreadable
+	if errors.As(a.bad, &u) {
+		if u.sample != [2]string{} {
+			// The server's words, what the request carried taken out of
+			// each before it is cut: cut first, a long token's start
+			// would stay.
+			return nil, &unreadable{msg: fmt.Sprintf("unreadable sample [%q, %q]", clip(quotedText(u.sample[0], req), 64), clip(quotedText(u.sample[1], req), 64))}
 		}
-		out = append(out, s)
+		return nil, &unreadable{msg: clip(serverText(u.msg, req), 200)}
+	}
+	if a.big != "" {
+		// As an API that says so: a shorter range is asked.
+		return nil, &APIError{Status: resp.StatusCode, Msg: a.big, big: true}
 	}
 	if c.loki {
-		return lokiOnly(out, start, end, step), nil
+		return lokiOnly(a.series, start, end, step), nil
 	}
-	return out, nil
+	return a.series, nil
 }
 
 // ParseTime reads a time as the APIs write one, seconds since the epoch
@@ -803,12 +928,40 @@ func ParseTime(s string) (time.Time, error) {
 }
 
 // do sends a request with the client's credentials, in its turn by the
-// client's Limiter, and reads the answer. heed says whether the Limiter
-// heeds the answer: it doesn't of a read lapilli does without when it
-// fails (bestEffort).
-func (c *Client) do(ctx context.Context, req *http.Request, heed bool) ([]byte, *http.Response, error) {
+// client's Limiter, and reads the answer, limit bytes at most (more is
+// errTooLarge). heed says whether the Limiter heeds the answer: it doesn't
+// of a read lapilli does without when it fails (bestEffort).
+func (c *Client) do(ctx context.Context, req *http.Request, heed bool, limit int64) ([]byte, *http.Response, error) {
+	var body []byte
+	resp, err := c.send(ctx, req, heed, func(r io.Reader) error {
+		var err error
+		body, err = io.ReadAll(io.LimitReader(r, limit+1))
+		if err == nil && int64(len(body)) > limit {
+			body, err = nil, errTooLarge{limit}
+		}
+		return err
+	})
+	return body, resp, err
+}
+
+// ErrTooLarge is in the error of an answer longer than lapilli reads of
+// it, refused before it is parsed.
+var ErrTooLarge = errors.New("an answer longer than is read of it")
+
+// errTooLarge is an answer longer than lapilli reads of it.
+type errTooLarge struct{ limit int64 }
+
+func (e errTooLarge) Is(target error) bool { return target == ErrTooLarge }
+
+func (e errTooLarge) Error() string {
+	return fmt.Sprintf("the answer is over %d MiB, more than is read of it", e.limit>>20)
+}
+
+// send is do, the answer's body given to read, while the request holds its
+// turn: what read fails with is the request's error.
+func (c *Client) send(ctx context.Context, req *http.Request, heed bool, read func(io.Reader) error) (*http.Response, error) {
 	if err := c.limit.take(ctx); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	status, wait := 0, time.Duration(0)
 	defer func() {
@@ -824,13 +977,13 @@ func (c *Client) do(ctx context.Context, req *http.Request, heed bool) ([]byte, 
 	if c.token != nil {
 		t, err := c.token(ctx)
 		if err != nil {
-			return nil, nil, &credsError{err}
+			return nil, &credsError{err}
 		}
 		req.Header.Set("Authorization", "Bearer "+t)
 	}
 	if c.sign != nil {
 		if err := c.sign(req); err != nil {
-			return nil, nil, &credsError{err}
+			return nil, &credsError{err}
 		}
 	}
 	n := countsOf(ctx)
@@ -844,7 +997,7 @@ func (c *Client) do(ctx context.Context, req *http.Request, heed bool) ([]byte, 
 			// 503, asked again (retried) and pushing back.
 			status = http.StatusServiceUnavailable
 		}
-		return nil, nil, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	status = resp.StatusCode
@@ -858,26 +1011,26 @@ func (c *Client) do(ctx context.Context, req *http.Request, heed bool) ([]byte, 
 		// asked fewer at once after it.
 		n.TooMany.Add(1)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 256<<20))
+	err = read(resp.Body)
 	if err != nil && dropped(err) {
 		status = http.StatusServiceUnavailable
 	}
-	return body, resp, err
+	return resp, err
 }
 
 // get asks for path, asking again as retried does, and gives the answer,
 // or an APIError for a status that isn't 2xx.
 func (c *Client) get(ctx context.Context, path string) ([]byte, error) {
-	return retried(ctx, func(ctx context.Context) ([]byte, error) { return c.getOnce(ctx, path, true) })
+	return retried(ctx, func(ctx context.Context) ([]byte, error) { return c.getOnce(ctx, path, true, maxBody) })
 }
 
-// getOnce asks for path once.
-func (c *Client) getOnce(ctx context.Context, path string, heed bool) ([]byte, error) {
+// getOnce asks for path once, reading limit bytes of the answer at most.
+func (c *Client) getOnce(ctx context.Context, path string, heed bool, limit int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
 	if err != nil {
 		return nil, err
 	}
-	body, resp, err := c.do(ctx, req, heed)
+	body, resp, err := c.do(ctx, req, heed, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -896,11 +1049,23 @@ var bestEffortTime = 30 * time.Second
 // lapilli does without when it fails, so a failure shouldn't cost the run
 // a wait, and an answer to a request asked alone shouldn't halve how many
 // go at once after it.
-func (c *Client) bestEffort(ctx context.Context, path string) ([]byte, error) {
+//
+// What it reads is limit bytes at most: an answer longer is refused before
+// it is parsed, as what is read of it is parsed whole.
+func (c *Client) bestEffort(ctx context.Context, path string, limit int64) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.WithValue(ctx, noPauseKey{}, true), bestEffortTime)
 	defer cancel()
-	return c.getOnce(ctx, path, false)
+	return c.getOnce(ctx, path, false, limit)
 }
+
+// What a read lapilli does without reads at most: a Prometheus's
+// configuration, parsed whole as YAML at some 90 times its size, and its
+// active targets, as JSON. A large configuration, of hundreds of jobs, is
+// a few hundred KB.
+const (
+	maxConfig  = 2 << 20
+	maxTargets = 32 << 20
+)
 
 // Rules asks for the alert rules the API has loaded, as GET /api/v1/rules
 // answers; for a Loki, its ruler's /prometheus/api/v1/rules, which answers
@@ -914,7 +1079,7 @@ func (c *Client) Rules(ctx context.Context) ([]byte, error) {
 // Limiter heeding the answer. lapilli serve reads a Loki's ruler so each
 // minute, between its queries.
 func (c *Client) RulesOnce(ctx context.Context) ([]byte, error) {
-	return c.bestEffort(ctx, c.rulesPath())
+	return c.bestEffort(ctx, c.rulesPath(), maxBody)
 }
 
 func (c *Client) rulesPath() string {
@@ -928,7 +1093,7 @@ func (c *Client) rulesPath() string {
 // /api/v1/status/config answers it: YAML. Most managed services don't
 // serve it, and it is asked once (bestEffort).
 func (c *Client) StatusConfig(ctx context.Context) (string, error) {
-	body, err := c.bestEffort(ctx, "/api/v1/status/config")
+	body, err := c.bestEffort(ctx, "/api/v1/status/config", maxConfig)
 	if err != nil {
 		return "", err
 	}
@@ -948,7 +1113,7 @@ func (c *Client) StatusConfig(ctx context.Context) (string, error) {
 // /api/v1/targets?state=active answers: JSON. Most managed services don't
 // serve it, and it is asked once (bestEffort).
 func (c *Client) Targets(ctx context.Context) ([]byte, error) {
-	return c.bestEffort(ctx, "/api/v1/targets?state=active")
+	return c.bestEffort(ctx, "/api/v1/targets?state=active", maxTargets)
 }
 
 // key is a label set as one comparable string.

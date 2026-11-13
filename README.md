@@ -409,9 +409,13 @@ A replay asks for each query a day at a time, once for every rule that needs
 it, and runs `--parallel` (8) rules at once against each API it reads:
 `--prometheus`, `--loki`, each of Grafana's data sources; a Grafana is asked
 `--parallel` requests at once at most for all its data sources, as it answers
-for them all. A server reached by two names, as `--loki` and as a Grafana data
-source, or as `--prometheus` and `--loki`, is asked as two. An API that turns
-a request away for now is asked again after a wait:
+for them all, shared fairly: a data source that holds places doesn't take the
+last one while another holds none that asked within ten seconds, and a place
+given back goes to the one waiting that holds fewest, so a slow data source
+can't keep the others waiting on its answers. A server reached by two names,
+as `--loki` and as a Grafana data source, or as `--prometheus` and `--loki`,
+is asked as two. An API that turns a request away for now is asked again
+after a wait:
 
 - after HTTP 5xx (not 501), or a connection it dropped or reset, 2, 4, 8
   and 16 seconds;
@@ -445,11 +449,16 @@ requests a second at most, evenly spaced, for a quota known beforehand:
 Runs at once that share a quota should each take their part of it. This is
 the same for `--prometheus` and every cloud's `--auth`, for `--loki`, its
 ruler included, and Grafana's data source proxy, and for `lapilli serve`,
-which takes `--max-rate` too. What lapilli does without, the configuration
+which takes `--max-rate` too. `--max-samples N` (default 10,000,000) is the
+most samples the answers to one rule's query over the period may hold in all,
+some 64 bytes each at the peak: past it the rule isn't replayed, and the
+reason says to read it at a longer `--step`, over a shorter `--since`, or with
+a larger `--max-samples`. What lapilli does without, the configuration
 and the targets Prometheus is asked for, and where a Loki's ruler runs its
 groups as `lapilli serve` reads it each minute, is asked once, within 30
 seconds, not while the API said to wait, and its answers don't change how
-the rest is asked; `lapilli serve` keeps where the groups run as last read
+the rest is asked (the configuration 2 MiB at most, the targets 32, as
+each is parsed whole); `lapilli serve` keeps where the groups run as last read
 when it can't be read.
 
 A run that takes longer than 15 seconds says on stderr, every 30 seconds,

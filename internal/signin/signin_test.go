@@ -788,3 +788,60 @@ func TestKeysRefreshedInBackground(t *testing.T) {
 		t.Errorf("%d fetches after six hours, want 2", n)
 	}
 }
+
+// Before a sign-in begins, those under way the browser holds are taken
+// away but the newest: a cookie that doesn't verify, or expired, and past
+// keep-1 the oldest. The session's cookie is left.
+func TestLoginCookiesPrune(t *testing.T) {
+	c := &clock{t0}
+	k := cookies(t, false, c)
+	r := httptest.NewRequest("GET", "/auth/login", nil)
+	var names []string
+	for i := range 6 {
+		c.t = t0.Add(time.Duration(i) * time.Minute)
+		w := httptest.NewRecorder()
+		k.Begin(w, NewStart(), "/")
+		ck := w.Result().Cookies()[0]
+		r.AddCookie(ck)
+		names = append(names, ck.Name)
+	}
+	r.AddCookie(&http.Cookie{Name: k.LoginName("made-up"), Value: "e30.AAAA"})
+	sw := httptest.NewRecorder()
+	k.Issue(sw, Identity{User: "ana@example.com"})
+	r.AddCookie(sw.Result().Cookies()[0])
+	c.t = t0.Add(11 * time.Minute) // the first is past its ten minutes
+	w := httptest.NewRecorder()
+	k.Prune(w, r, 4)
+	gone := map[string]bool{}
+	for _, ck := range w.Result().Cookies() {
+		if ck.MaxAge >= 0 {
+			t.Errorf("set, not taken away: %v", ck)
+		}
+		gone[ck.Name] = true
+	}
+	want := map[string]bool{names[0]: true, names[1]: true, names[2]: true, k.LoginName("made-up"): true}
+	if len(gone) != len(want) {
+		t.Errorf("taken away %v, want %v", gone, want)
+	}
+	for n := range want {
+		if !gone[n] {
+			t.Errorf("%s left", n)
+		}
+	}
+	if gone[k.SessionName()] {
+		t.Error("the session's cookie taken away")
+	}
+}
+
+// --oidc-hosted-domain compares hd as DNS does, by ASCII letters alone.
+func TestHostedDomainASCII(t *testing.T) {
+	c := &clock{t0}
+	idp, o := newIdP(t, c)
+	o.HostedDomains = []string{"kiosk.example"}
+	for hd, ok := range map[string]bool{"kiosk.example": true, "KIOSK.Example": true, "Kiosk.example": false, "kioſk.example": false} {
+		_, err := o.Bearer(context.Background(), idp.IDToken(map[string]any{"email": "ana@example.com", "email_verified": true, "hd": hd}))
+		if (err == nil) != ok {
+			t.Errorf("hd %q: %v", hd, err)
+		}
+	}
+}

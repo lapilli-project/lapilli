@@ -206,10 +206,29 @@ func matchFirings(ctx context.Context, rc RuleCheck, replayed, real []firing.Fir
 }
 
 // labelsAgree reports whether a replayed firing's labels agree with those of
-// one that really happened, on what both have.
+// one that really happened, on what both have. A replayed firing lapilli
+// serve's ledger kept may have its labels kept cut (KeptLabels): a label
+// of what really happened is taken as it would be kept, too, and those
+// folded into CutLabel aren't compared.
 func labelsAgree(replayed, real map[string]string) bool {
+	var kept map[string]string // real's names as they would be kept
 	for k, v := range replayed {
-		if w, ok := real[k]; ok && v != w && !strings.Contains(v, "{{") {
+		if k == CutLabel || strings.Contains(v, "{{") {
+			continue
+		}
+		w, ok := real[k]
+		if !ok {
+			if kept == nil {
+				kept = make(map[string]string, len(real))
+				for rk, rv := range real {
+					kept[KeptName(rk)] = rv
+				}
+			}
+			if w, ok = kept[k]; !ok {
+				continue
+			}
+		}
+		if v != w && v != KeptValue(w) {
 			return false
 		}
 	}

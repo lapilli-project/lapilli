@@ -315,3 +315,39 @@ func TestOnCallHeld(t *testing.T) {
 		t.Errorf("a long name: err %q, turns %v", st.Err, got)
 	}
 }
+
+// Each feed is read with a deadline of its own (feedTime): a feed is
+// outside input, and serve's own context has none.
+func TestOnCallFeedDeadline(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	feedFile := filepath.Join(dir, "payments.ics")
+	os.WriteFile(feedFile, []byte(onCallFeed), 0o600)
+	cfgFile := filepath.Join(dir, "on-call.yaml")
+	os.WriteFile(cfgFile, []byte("schedules:\n  - {name: payments, file: "+feedFile+"}\n"+
+		"people:\n  - {name: Jane Doe, also: [jane@example.com], tz: Asia/Seoul}\n"), 0o600)
+	oc, err := oncall.Load(cfgFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _ := server(t, func(c *Config) { c.OnCall = oc })
+	was := feedTime
+	t.Cleanup(func() { feedTime = was })
+	feedTime = time.Nanosecond
+	s.readFeeds(ctx)
+	st := s.onCallRead("payments")
+	s.onCall.mu.Lock()
+	got := st.Err
+	s.onCall.mu.Unlock()
+	if !strings.Contains(got, "deadline") {
+		t.Errorf("a feed past its time: %q", got)
+	}
+	feedTime = was
+	s.readFeeds(ctx)
+	s.onCall.mu.Lock()
+	got = st.Err
+	s.onCall.mu.Unlock()
+	if got != "" {
+		t.Errorf("a feed in time: %q", got)
+	}
+}

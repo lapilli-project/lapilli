@@ -1,12 +1,14 @@
 package serve
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -84,51 +86,72 @@ func (e *expiring) add(key string, until, now int64) bool {
 
 // signedOut are the people who signed out, each with when (Unix
 // milliseconds): every session of theirs made then or before is ended. It
-// is bounded by the people who signed out within a session's life, which
-// only the identity provider makes more of, not by how often they did.
-// The ledger holds it, for every process that shares the ledger.
+// is bounded by the people who signed out within a session's life, of
+// those a role lets in, which only the identity provider and the roles make
+// more of, not by how often they did. The ledger holds it, for every
+// process that shares the ledger.
 type signedOut struct {
 	sync.Mutex
-	at  map[string]int64
-	raw string // as last read from the ledger
-	max int
+	at map[string]int64
+	// count is the ledger's count of changes to the record as last read
+	// (MetaCount); -1 before the first read.
+	count int64
+	max   int
 }
 
+// everyone is the record's entry for every person: a session or a token of
+// anyone's made then or before is ended. It is raised when the record is
+// full, to when the person let go of signed out, rather than forgetting
+// them: a copy of their cookie is refused still, with every other made
+// before it. No one is named "" (signedName).
+const everyone = ""
+
 // add notes a person signed out at a time; entries older than a session
-// lasts are dropped, and, when full, the oldest.
+// lasts are dropped, and, when full, the oldest, raising everyone's.
 func (o *signedOut) add(user string, at, keep int64) {
 	o.Lock()
 	defer o.Unlock()
 	o.at = mergeOut(o.at, map[string]int64{user: at}, at, keep, o.max)
 }
 
-// load takes in what the ledger holds, when it changed since last read.
-func (o *signedOut) load(raw string, now, keep int64) {
+// stale reports whether the ledger's record changed since last read, by its
+// count of changes: reading the count is a small read, the record, of up to
+// max people, isn't.
+func (o *signedOut) stale(count int64) bool {
 	o.Lock()
 	defer o.Unlock()
-	if raw == o.raw {
-		return
-	}
+	return count != o.count
+}
+
+// load takes in what the ledger holds, as of its count of changes.
+func (o *signedOut) load(raw string, count, now, keep int64) {
+	o.Lock()
+	defer o.Unlock()
 	var m map[string]int64
 	if raw != "" && json.Unmarshal([]byte(raw), &m) != nil {
 		return
 	}
-	o.raw = raw
+	o.count = count
 	o.at = mergeOut(o.at, m, now, keep, o.max)
 }
 
 // ended reports whether a session of a person's made at a time is one they
-// signed out of.
+// signed out of, or one made before everyone's.
 func (o *signedOut) ended(user string, made int64) bool {
 	o.Lock()
 	defer o.Unlock()
+	if t, ok := o.at[everyone]; ok && made <= t {
+		return true
+	}
 	t, ok := o.at[user]
 	return ok && made <= t
 }
 
 // mergeOut is who signed out in a and b, each at the later time, less those
-// older than a session lasts, and, past max, the oldest.
-func mergeOut(a, b map[string]int64, now, keep int64, max int) map[string]int64 {
+// older than a session lasts; past max people, the oldest are let go of,
+// and everyone's raised to the last of them: failing closed, as a session
+// or a token of theirs from before is still refused.
+func mergeOut(a, b map[string]int64, now, keep int64, most int) map[string]int64 {
 	out := make(map[string]int64, len(a)+len(b))
 	for _, m := range []map[string]int64{a, b} {
 		for u, t := range m {
@@ -137,25 +160,34 @@ func mergeOut(a, b map[string]int64, now, keep int64, max int) map[string]int64 
 			}
 		}
 	}
-	for len(out) > max {
-		oldest, first := "", int64(0)
-		for u, t := range out {
-			if oldest == "" || t < first {
-				oldest, first = u, t
-			}
+	floor, raised := out[everyone]
+	delete(out, everyone)
+	if len(out) > most {
+		people := slices.Collect(maps.Keys(out))
+		slices.SortFunc(people, func(x, y string) int { return cmp.Or(cmp.Compare(out[x], out[y]), strings.Compare(x, y)) })
+		for _, u := range people[:len(out)-most] {
+			floor, raised = max(floor, out[u]), true
+			delete(out, u)
 		}
-		delete(out, oldest)
+	}
+	if raised {
+		// Anyone signed out at everyone's time or before is in it.
+		maps.DeleteFunc(out, func(_ string, t int64) bool { return t <= floor })
+		out[everyone] = floor
 	}
 	return out
 }
 
 // signedOut reports whether a session or a token of a person's, made at a
 // time, is one they signed out of, here or at another process sharing the
-// ledger.
+// ledger. The record is read again only when the ledger counts a change to
+// it.
 func (s *Server) signedOut(ctx context.Context, user string, made int64) bool {
 	keep := s.in.cookies.MaxAge.Milliseconds()
-	if raw, err := s.l.Meta(ctx, metaSignedOut); err == nil {
-		s.in.out.load(raw, s.now().UnixMilli(), keep)
+	if n, err := s.l.MetaCount(ctx, metaSignedOut); err == nil && s.in.out.stale(n) {
+		if raw, err := s.l.Meta(ctx, metaSignedOut); err == nil {
+			s.in.out.load(raw, n, s.now().UnixMilli(), keep)
+		}
 	}
 	return s.in.out.ended(user, made)
 }
@@ -192,7 +224,7 @@ const metaSignedOut = "signed-out"
 // --session-key-file or else made once and kept in the ledger; the
 // sessions signed out of; and the provider's or the proxy's verifier.
 func (s *Server) newSignIn(ctx context.Context) error {
-	in := &signIn{out: signedOut{max: maxSignedOut}, used: expiring{max: 10000}}
+	in := &signIn{out: signedOut{max: maxSignedOut, count: -1}, used: expiring{max: 10000}}
 	now := func() time.Time { return s.now() }
 	if p := s.cfg.Proxy; p != nil {
 		p.Client, p.Now = signin.Client(nil), now
@@ -327,6 +359,12 @@ func (s *Server) identify(r *http.Request) (who, error) {
 		if w.Identity, err = s.in.oidc.Bearer(r.Context(), tok); err != nil {
 			return who{}, reason(err)
 		}
+		// Taken as long as a session made then would be, at most, whatever
+		// its own exp says: who signed out is kept that long, and a token
+		// from before must not outlast the record of it.
+		if s.now().Sub(w.IssuedAt) >= s.in.cookies.MaxAge {
+			return who{}, tokenError{"the token was issued longer ago than a session lasts here (--session-max-age)"}
+		}
 		if s.signedOut(r.Context(), w.User, w.IssuedAt.UnixMilli()) {
 			return who{}, tokenError{"the token was issued before its person signed out"}
 		}
@@ -460,6 +498,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, s.providerFailed(err))
 		return
 	}
+	// The sign-ins under way the browser holds already, but the newest few,
+	// are taken away: a page elsewhere can send a browser here again and
+	// again, and each would leave a cookie for ten minutes, until the
+	// browser, full, drops the session's.
+	s.in.cookies.Prune(w, r, keepLogins)
 	if err := s.in.cookies.Begin(w, st, safeBack(r.URL.Query().Get("next"), "/")); err != nil {
 		s.oops(w, r, err)
 		return
@@ -587,29 +630,47 @@ func (s *Server) roleGroup(ctx context.Context, g string) bool {
 	return false
 }
 
+// keepLogins is how many sign-ins under way a browser keeps, the one begun
+// included: tabs signing in at once.
+const keepLogins = 4
+
 // logout signs the person out: the cookie is taken away, and every
 // session of theirs made until now is ended, this one and any copy of its
 // cookie, in another browser too, until it would have expired. It is a POST
 // from this site alone (the cross-origin check): a page elsewhere can't
 // sign people out.
+//
+// Who signed out is written in the ledger, with --read-only too: signing
+// out must work. Only for a session not ended already, and of someone a
+// role lets in: anyone the provider signs in has a cookie that reaches this
+// page, and the record is bounded by people, so one cookie signing out
+// again and again, or strangers signing out by the thousand, write nothing.
+// A stranger's cookie, kept, lets no one in anywhere.
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if sess, ok := s.in.cookies.Read(r); ok {
-		at, keep := s.now().UnixMilli(), s.in.cookies.MaxAge.Milliseconds()
-		s.in.out.add(sess.User, at, keep)
-		// Merged with what the ledger holds, written by another process
-		// sharing it, too.
-		err := s.l.UpdateMeta(r.Context(), metaSignedOut, func(old string) string {
-			var m map[string]int64
-			json.Unmarshal([]byte(old), &m)
-			b, _ := json.Marshal(mergeOut(m, map[string]int64{sess.User: at}, at, keep, maxSignedOut))
-			return string(b)
-		})
-		if err != nil {
-			s.log.Warn("who signed out can't be kept in the ledger: a copy of their cookie is refused until lapilli restarts", "err", err)
+	if sess, ok := s.in.cookies.Read(r); ok && !s.signedOut(r.Context(), sess.User, sess.Made) {
+		as := r.WithContext(context.WithValue(r.Context(), whoKey{}, who{Identity: signin.Identity{User: sess.User, Groups: sess.Groups}, by: bySession}))
+		if s.signedName(sess.User) != "anonymous" && s.letIn(as) {
+			s.keepSignOut(r.Context(), sess.User)
 		}
 		s.log.Info("signed out", "user", sess.User)
 	}
 	s.in.cookies.End(w)
 	http.Redirect(w, r, "/auth/signed-out", http.StatusSeeOther)
+}
+
+// keepSignOut notes that a person signed out now, here and in the ledger,
+// merged with what it holds, written by another process sharing it, too.
+func (s *Server) keepSignOut(ctx context.Context, user string) {
+	at, keep := s.now().UnixMilli(), s.in.cookies.MaxAge.Milliseconds()
+	s.in.out.add(user, at, keep)
+	err := s.l.UpdateMetaCounted(ctx, metaSignedOut, func(old string) (string, bool) {
+		var m map[string]int64
+		json.Unmarshal([]byte(old), &m)
+		b, _ := json.Marshal(mergeOut(m, map[string]int64{user: at}, at, keep, s.in.out.max))
+		return string(b), string(b) != old
+	})
+	if err != nil {
+		s.log.Warn("who signed out can't be kept in the ledger: a copy of their cookie is refused until lapilli restarts", "err", err)
+	}
 }

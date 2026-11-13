@@ -65,7 +65,8 @@ func init() {
 		lang := n.Code
 		t := template.Must(pages.Clone())
 		pagesIn[lang] = t.Funcs(template.FuncMap{
-			"t": func(msg string, args ...any) string { return tr(lang, msg, args...) },
+			"t":    func(msg string, args ...any) string { return tr(lang, msg, args...) },
+			"tbdi": func(msg string, args ...any) template.HTML { return trBDI(lang, msg, args...) },
 			// who is who did something; "anonymous" in the reader's
 			// language when no sign-in proxy said.
 			"who": func(by string) string {
@@ -100,6 +101,19 @@ func tr(lang, msg string, args ...any) string {
 		return msg
 	}
 	return fmt.Sprintf(msg, args...)
+}
+
+// trBDI is tr with each argument set apart in <bdi>, as a name within a
+// sentence is: one written right to left, or holding what turns text
+// around, doesn't turn the sentence around it. The text is escaped, the
+// translation's and each argument's.
+func trBDI(lang, msg string, args ...any) template.HTML {
+	set := make([]any, len(args))
+	for i, a := range args {
+		set[i] = template.HTML("<bdi>" + template.HTMLEscapeString(fmt.Sprint(a)) + "</bdi>")
+	}
+	// tr without arguments is the translation as it is, its verbs too.
+	return template.HTML(fmt.Sprintf(template.HTMLEscapeString(tr(lang, msg)), set...))
 }
 
 // lang is the language to answer a request in: the one chosen on the page,

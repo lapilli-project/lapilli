@@ -119,6 +119,11 @@ func (s *Server) readOnCall(ctx context.Context) {
 	}
 }
 
+// feedTime is how long one feed may take to read and parse: a feed is
+// outside input, read one schedule after another, and one that holds a CPU
+// mustn't hold the rest. Replaced in tests.
+var feedTime = time.Minute
+
 // readFeeds reads each schedule's feed once, one at a time, and keeps its
 // turns: a feed that fails changes nothing kept.
 func (s *Server) readFeeds(ctx context.Context) {
@@ -127,7 +132,9 @@ func (s *Server) readFeeds(ctx context.Context) {
 			return
 		}
 		now := s.now()
-		f, err := s.cfg.OnCall.Fetch(ctx, sc, s.cfg.OnCallClient, "lapilli/"+s.cfg.Version, now)
+		fctx, cancel := context.WithTimeout(ctx, feedTime)
+		f, err := s.cfg.OnCall.Fetch(fctx, sc, s.cfg.OnCallClient, "lapilli/"+s.cfg.Version, now)
+		cancel()
 		changed := false
 		if err == nil {
 			// The turns kept of an event passed over stay as they were.

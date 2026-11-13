@@ -286,6 +286,13 @@ Output:
                       HTTP 429 is asked fewer at once, and the request asked
                       again after the wait it says (Retry-After), or after
                       waits of up to three minutes in all
+  --max-samples N     read the answers to one range, a rule's query over the
+                      period, to N samples in all at most (default 10000000,
+                      some 600 MB at the peak, 64 bytes a sample): past it,
+                      the rule isn't replayed, as one whose query failed. A
+                      week at a minute holds 10,080 samples a series firing
+                      all through it, 28 days 40,320: a longer --step, or a
+                      shorter --since, holds fewer
   --progress=false    don't say on stderr how a run is going: past 15s, every
                       30s, the rules replayed, the requests, those asked
                       again and those answered HTTP 429. A run the history
@@ -383,10 +390,12 @@ type verdictFlags struct {
 	lokiLoaded               bool
 	places                   map[rules.Place]time.Duration
 
-	// maxRate is --max-rate, 0 for none; noProgress --progress=false, and
+	// maxRate is --max-rate, 0 for none; maxSamples --max-samples, 0 for
+	// prom.DefaultMaxSamples; noProgress --progress=false, and
 	// progressSet whether --progress was given; failUnreplayed
 	// --fail-unreplayed.
 	maxRate                 float64
+	maxSamples              int
 	noProgress, progressSet bool
 	failUnreplayed          bool
 	// lokiLimit is the Limiter every client of --loki shares, made once
@@ -717,6 +726,11 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			if err != nil || !(f.maxRate >= prom.MinRate) || f.maxRate > 10000 {
 				return nil, fmt.Errorf("--max-rate %s: want requests a second, from %g, like 5 or 0.5", val, prom.MinRate)
 			}
+		case "--max-samples":
+			f.maxSamples, err = strconv.Atoi(val)
+			if err != nil || f.maxSamples < 1000 || f.maxSamples > 1000000000 {
+				return nil, fmt.Errorf("--max-samples %s: want a number of samples from 1000 to 1000000000, like 40000000", val)
+			}
 		default:
 			return nil, fmt.Errorf("unknown flag %s", a)
 		}
@@ -1006,7 +1020,7 @@ var newHistory = func(ctx context.Context, f *verdictFlags) (history, error) {
 
 func (f *verdictFlags) prometheus() source.Prometheus {
 	return source.Prometheus{URL: f.promURL, GCPProject: f.gcpProj, Auth: f.auth, AWSRegion: f.awsRegion, TokenFile: f.tokenFile, Tenant: f.rulerTenant,
-		MaxRate: f.maxRate}
+		MaxRate: f.maxRate, MaxSamples: f.maxSamples}
 }
 
 var now = time.Now
@@ -1131,7 +1145,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			if h, err = newHistory(ctx, f); err != nil {
 				return fail(err)
 			}
-			f.askScrapes(ctx, h, versions, was, same, before, after)
+			f.askScrapes(ctx, h, stderr, versions, was, same, before, after)
 		}
 		h = f.withLogs(h, stderr)
 	}
@@ -1446,7 +1460,7 @@ var newLoki = func(f *verdictFlags) history {
 // --grafana's data source proxy, asked by limit, its own; replaced in
 // tests.
 var newGrafanaLoki = func(f *verdictFlags, uid string, limit *prom.Limiter) history {
-	return source.GrafanaLoki(f.grafana, f.grafanaTk, "lapilli/"+buildVersion(), uid, limit)
+	return source.GrafanaLoki(f.grafana, f.grafanaTk, "lapilli/"+buildVersion(), uid, limit, prom.WithMaxSamples(f.maxSamples))
 }
 
 // lokiSource is --loki, its every client sharing one Limiter: its
@@ -1456,7 +1470,7 @@ func (f *verdictFlags) lokiSource() source.Loki {
 	if f.lokiLimit == nil {
 		f.lokiLimit = prom.NewLimiter(f.maxRate)
 	}
-	return source.Loki{URL: f.loki, TokenFile: f.lokiTk, Tenant: f.lokiTenant, MaxRate: f.maxRate, Limit: f.lokiLimit}
+	return source.Loki{URL: f.loki, TokenFile: f.lokiTk, Tenant: f.lokiTenant, MaxRate: f.maxRate, MaxSamples: f.maxSamples, Limit: f.lokiLimit}
 }
 
 // withLogs is h with the Lokis rules written in LogQL are replayed

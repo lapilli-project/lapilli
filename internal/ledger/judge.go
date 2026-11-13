@@ -38,7 +38,7 @@ func (l *Ledger) ruleID(t *txn, name string) (int64, error) {
 }
 
 // seriesID is the id of a rule's alert with those labels, made if there is
-// none.
+// none: the labels as kept (keptLabels).
 func (l *Ledger) seriesID(t *txn, rule int64, labels map[string]string) (int64, error) {
 	k, err := keyOf(t.d, rule, labels)
 	if err != nil {
@@ -139,7 +139,7 @@ func keyOf(d dialect, rule int64, labels map[string]string) (seriesKey, error) {
 	if labels == nil {
 		labels = map[string]string{}
 	}
-	b, err := json.Marshal(labels)
+	b, err := json.Marshal(keptLabels(labels)) // keys sorted: one text for one label set
 	return seriesKey{rule, d.kept(string(b))}, err
 }
 
@@ -208,10 +208,20 @@ func (l *Ledger) labels(id int64, text string) (map[string]string, error) {
 		return nil, err
 	}
 	l.ids.Lock()
+	if was, ok := l.ids.labels[id]; ok {
+		l.ids.labelsBytes -= labelsCost(was.text)
+	}
 	l.ids.labels[id] = labelsOf{text, m}
+	l.ids.labelsBytes += labelsCost(text)
+	l.trimCached()
 	l.ids.Unlock()
 	return m, nil
 }
+
+// keptLabels are a replayed alert's labels as the ledger keeps them
+// (verdict.KeptLabels): 4 KB in all, a name of 128 bytes and a value of
+// 256, as the alerts it is sent; cut past them, with a hash.
+func keptLabels(m map[string]string) map[string]string { return verdict.KeptLabels(m) }
 
 // counted is an incident judged against, as the ledger keeps it.
 type counted struct {

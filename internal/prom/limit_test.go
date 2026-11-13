@@ -14,6 +14,9 @@ import (
 func (l *Limiter) state() (limit, inFlight, queued int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.fair != nil {
+		return l.limit, l.inFlight, len(l.fair.waiting)
+	}
 	return l.limit, l.inFlight, len(l.queue)
 }
 
@@ -400,22 +403,32 @@ func TestLimiterNeverPastLimit(t *testing.T) {
 
 // TestCapShared: Limiters within one cap, as a Grafana's data sources are,
 // have no more in flight together than it lets in, each its own pauses and
-// halving kept, and every place given back.
+// halving kept, and every place given back. One holding places doesn't
+// take the last while another holds none: it is kept for that one.
 func TestCapShared(t *testing.T) {
 	most := NewCap(3)
 	a, b := NewLimiter(0).Within(most), NewLimiter(0).Within(most)
-	for range 3 {
+	for range 2 {
 		if err := a.take(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	if err := b.take(ctx); !errors.Is(err, context.DeadlineExceeded) {
+	short := func() context.Context {
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		t.Cleanup(cancel)
+		return ctx
+	}
+	if err := a.take(short()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a took the last place, kept for b: %v", err)
+	}
+	if err := b.take(context.Background()); err != nil {
+		t.Fatalf("b, in the place kept for it: %v", err)
+	}
+	if err := b.take(short()); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("b let in past the cap: %v", err)
 	}
-	if _, in, _ := b.state(); in != 0 {
-		t.Fatalf("b holds %d places, given up", in)
+	if _, in, queued := b.state(); in != 1 || queued != 0 {
+		t.Fatalf("b holds %d places, %d queued, given up", in, queued)
 	}
 	// a is pushed back: its limit halves, b's and the cap's don't.
 	a.done(429, time.Hour)
@@ -425,7 +438,8 @@ func TestCapShared(t *testing.T) {
 	if limit, _, _ := b.state(); limit != 64 {
 		t.Errorf("b's limit %d after a's push back", limit)
 	}
-	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	// Each holding one, the last place is anyone's.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := b.take(ctx); err != nil {
 		t.Fatalf("b, in the place a gave back: %v", err)
@@ -434,10 +448,69 @@ func TestCapShared(t *testing.T) {
 		t.Errorf("%d in the cap, want 3", in)
 	}
 	a.done(200, 0)
-	a.done(200, 0)
 	b.done(200, 0)
-	if _, in, _ := most.state(); in != 0 {
-		t.Errorf("%d left in the cap", in)
+	b.done(200, 0)
+	if _, in, queued := most.state(); in != 0 || queued != 0 {
+		t.Errorf("%d left in the cap, %d waiting", in, queued)
+	}
+}
+
+// TestCapFair: a data source holding its places as long as it likes (a
+// slow one) doesn't keep another out: the last place is the other's, and a
+// place given back goes to whichever waits holding fewest.
+func TestCapFair(t *testing.T) {
+	most := NewCap(4)
+	slow, fast, third := NewLimiter(0).Within(most), NewLimiter(0).Within(most), NewLimiter(0).Within(most)
+	ctx := context.Background()
+	for range 3 {
+		if err := slow.take(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// slow asks for more, and waits: the last place is kept.
+	got := make(chan error, 2)
+	go func() { got <- slow.take(ctx) }()
+	for wait := time.Now().Add(5 * time.Second); time.Now().Before(wait); time.Sleep(time.Millisecond) {
+		if _, _, queued := most.state(); queued == 1 {
+			break
+		}
+	}
+	short, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if err := fast.take(short); err != nil {
+		t.Fatalf("fast, beside a slow data source holding three of four: %v", err)
+	}
+	// third waits beside slow; slow gives one back: third has it, holding
+	// none.
+	go func() { got <- third.take(ctx) }()
+	for wait := time.Now().Add(5 * time.Second); time.Now().Before(wait); time.Sleep(time.Millisecond) {
+		if _, _, queued := most.state(); queued == 2 {
+			break
+		}
+	}
+	slow.done(200, 0)
+	if err := <-got; err != nil {
+		t.Fatal(err)
+	}
+	if _, in, queued := third.state(); in != 1 || queued != 0 {
+		t.Errorf("third holds %d, %d waiting: the place went to slow", in, queued)
+	}
+	// fast, done, holds none again: the last place is kept for it, not
+	// given to slow, waiting holding two; two free, slow has one.
+	fast.done(200, 0)
+	time.Sleep(20 * time.Millisecond)
+	if _, in, queued := most.state(); in != 3 || queued != 1 {
+		t.Errorf("fast done: %d in the cap, %d waiting, want 3 and slow", in, queued)
+	}
+	third.done(200, 0)
+	if err := <-got; err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		slow.done(200, 0)
+	}
+	if _, in, queued := most.state(); in != 0 || queued != 0 {
+		t.Errorf("%d left in the cap, %d waiting", in, queued)
 	}
 }
 
@@ -529,4 +602,158 @@ func TestPeakLately(t *testing.T) {
 	for range 3 {
 		l.done(200, 0)
 	}
+}
+
+// fakeCap is a cap of n whose clock the test moves.
+func fakeCap(n int) (*Limiter, func(time.Duration)) {
+	var mu sync.Mutex
+	at := time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC)
+	most := NewCap(n)
+	most.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return at }
+	return most, func(d time.Duration) { mu.Lock(); at = at.Add(d); mu.Unlock() }
+}
+
+// waitQueued waits till n are waiting for a cap's places.
+func waitQueued(t *testing.T, most *Limiter, n int) {
+	t.Helper()
+	for wait := time.Now().Add(5 * time.Second); time.Now().Before(wait); time.Sleep(time.Millisecond) {
+		if _, _, q := most.state(); q == n {
+			return
+		}
+	}
+	t.Fatalf("%d not waiting", n)
+}
+
+// TestCapReservedForTheLatelyAsked: the last place is kept for a data
+// source that asked, or came to be, within reserveFor; one asked once and
+// then no more keeps nothing back after it.
+func TestCapReservedForTheLatelyAsked(t *testing.T) {
+	most, move := fakeCap(2)
+	busy, idle := NewLimiter(0).Within(most), NewLimiter(0).Within(most)
+	ctx := context.Background()
+	if err := idle.take(ctx); err != nil {
+		t.Fatal(err)
+	}
+	idle.done(200, 0)
+	if err := busy.take(ctx); err != nil {
+		t.Fatal(err)
+	}
+	short, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancel()
+	if err := busy.take(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("the last place, kept for one that asked a moment ago, taken: %v", err)
+	}
+	move(reserveFor)
+	later, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := busy.take(later); err != nil {
+		t.Fatalf("the last place, kept for one idle since: %v", err)
+	}
+	busy.done(200, 0)
+	busy.done(200, 0)
+}
+
+// TestCapFewestFirst: a place given back goes to the one waiting that
+// holds fewest, not the first come.
+func TestCapFewestFirst(t *testing.T) {
+	most, move := fakeCap(4)
+	a, b, c := NewLimiter(0).Within(most), NewLimiter(0).Within(most), NewLimiter(0).Within(most)
+	ctx := context.Background()
+	for _, l := range []*Limiter{a, b, c, a} {
+		if err := l.take(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	move(reserveFor) // c, giving back, keeps nothing back
+	got := make(chan string, 2)
+	go func() { a.take(ctx); got <- "a" }()
+	waitQueued(t, most, 1)
+	go func() { b.take(ctx); got <- "b" }()
+	waitQueued(t, most, 2)
+	c.done(200, 0)
+	if first := <-got; first != "b" {
+		t.Errorf("the place went to %s, holding two, before b, holding one", first)
+	}
+	a.done(200, 0) // one of a's: a, waiting, has it
+	if second := <-got; second != "a" {
+		t.Errorf("then %s", second)
+	}
+	for _, l := range []*Limiter{a, a, b, b} {
+		l.done(200, 0)
+	}
+	if _, in, q := most.state(); in != 0 || q != 0 {
+		t.Errorf("%d in the cap, %d waiting", in, q)
+	}
+}
+
+// TestCapGivenBackAfterGivingUp: a request let in just as its context
+// ends gives its place back.
+func TestCapGivenBackAfterGivingUp(t *testing.T) {
+	most := NewCap(1)
+	a, b := NewLimiter(0).Within(most), NewLimiter(0).Within(most)
+	if err := a.take(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	got := make(chan error, 1)
+	go func() { got <- b.take(ctx) }()
+	waitQueued(t, most, 1)
+	// b gives up, and before it looks, is let in: a's place, given back
+	// under the cap's lock that b waits for.
+	most.mu.Lock()
+	cancel()
+	time.Sleep(20 * time.Millisecond) // b has seen its context end
+	most.inFlight--
+	most.fair.held[a]--
+	most.share()
+	most.mu.Unlock()
+	a.release(0, 0)
+	if err := <-got; !errors.Is(err, context.Canceled) {
+		t.Fatalf("b: %v", err)
+	}
+	if _, in, q := most.state(); in != 0 || q != 0 {
+		t.Errorf("b gave up let in: %d in the cap, %d waiting", in, q)
+	}
+}
+
+// TestCapWokenAsReserveEnds: one waiting while the last place is kept for
+// a data source that asked lately has it when that ends, though no place
+// is given back meanwhile, as a slow data source's requests hold theirs.
+func TestCapWokenAsReserveEnds(t *testing.T) {
+	most, move := fakeCap(2)
+	var wake func()
+	var after time.Duration
+	was := afterFunc
+	afterFunc = func(d time.Duration, f func()) { after, wake = d, f }
+	t.Cleanup(func() { afterFunc = was })
+	busy, idle := NewLimiter(0).Within(most), NewLimiter(0).Within(most)
+	ctx := context.Background()
+	if err := idle.take(ctx); err != nil {
+		t.Fatal(err)
+	}
+	idle.done(200, 0)
+	if err := busy.take(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan error, 1)
+	go func() { got <- busy.take(ctx) }()
+	waitQueued(t, most, 1)
+	most.mu.Lock()
+	w, d := wake, after
+	most.mu.Unlock()
+	if w == nil || d <= 0 || d > reserveFor {
+		t.Fatalf("no wake when the place kept is let go of: in %v", d)
+	}
+	move(reserveFor)
+	w()
+	select {
+	case err := <-got:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("not let in when the place kept was let go of")
+	}
+	busy.done(200, 0)
+	busy.done(200, 0)
 }

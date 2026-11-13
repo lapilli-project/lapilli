@@ -1,6 +1,7 @@
 package signin
 
 import (
+	"cmp"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -9,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
@@ -130,6 +132,38 @@ func (c *Cookies) Begin(w http.ResponseWriter, st Start, next string) error {
 	return nil
 }
 
+// Prune takes away the sign-ins under way a request carries, but the
+// newest keep-1 that verify and haven't expired, before one more is begun:
+// each GET /auth/login leaves a cookie, and a page elsewhere can send a
+// browser there again and again. A browser keeps some 180 cookies a site,
+// and past that drops the least recently used, the session's among them.
+func (c *Cookies) Prune(w http.ResponseWriter, r *http.Request, keep int) {
+	prefix := c.name("login-")
+	type held struct {
+		name  string
+		until int64
+	}
+	var good []held
+	seen := map[string]bool{}
+	now := c.Now().Unix()
+	for _, ck := range r.Cookies() {
+		if !strings.HasPrefix(ck.Name, prefix) || seen[ck.Name] {
+			continue
+		}
+		seen[ck.Name] = true
+		var l Login
+		if c.openValue(c.login, ck.Name, ck.Value, &l) && l.Until > now {
+			good = append(good, held{ck.Name, l.Until})
+			continue
+		}
+		c.set(w, ck.Name, "", -1)
+	}
+	slices.SortFunc(good, func(a, b held) int { return cmp.Compare(b.until, a.until) })
+	for _, h := range good[min(len(good), max(keep-1, 0)):] {
+		c.set(w, h.name, "", -1)
+	}
+}
+
 // Take is the sign-in under way the browser came back with the state of,
 // taken away: none when there is none, it isn't signed with this key, it
 // holds another state, or it took too long.
@@ -175,10 +209,16 @@ func (c *Cookies) seal(key []byte, name string, v any) (string, error) {
 // there and signed so.
 func (c *Cookies) open(r *http.Request, key []byte, name string, v any) bool {
 	ck, err := r.Cookie(name)
-	if err != nil || len(ck.Value) > maxCookie {
+	return err == nil && c.openValue(key, name, ck.Value, v)
+}
+
+// openValue reads a cookie's value, sealed with key for the cookie named
+// name, into v.
+func (c *Cookies) openValue(key []byte, name, value string, v any) bool {
+	if len(value) > maxCookie {
 		return false
 	}
-	body, sig, ok := strings.Cut(ck.Value, ".")
+	body, sig, ok := strings.Cut(value, ".")
 	if !ok {
 		return false
 	}

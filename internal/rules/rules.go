@@ -8,6 +8,8 @@
 package rules
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -206,12 +208,13 @@ const (
 // whoever writes the rules, and is shown on pages and to agents.
 const maxSays = 4 << 10
 
-// cut keeps the first maxSays bytes of a text, as valid UTF-8.
+// cut keeps the first maxSays bytes of a text, as valid UTF-8, as it shows
+// (Shown).
 func cut(s string) string {
 	if len(s) <= maxSays {
-		return s
+		return Shown(s)
 	}
-	return strings.ToValidUTF8(s[:maxSays], "")
+	return Shown(strings.ToValidUTF8(s[:maxSays], ""))
 }
 
 // annotated reads what a rule says from its annotations, as Prometheus,
@@ -457,15 +460,24 @@ type Doc struct {
 
 // FromDocs reads the rules in documents kept from Read, FromAPI or a
 // Grafana's export, each rule's Source being its document's.
-func FromDocs(docs []Doc) ([]Rule, error) {
+func FromDocs(docs []Doc) ([]Rule, error) { return FromDocsContext(context.Background(), docs) }
+
+// FromDocsContext is FromDocs, given up when ctx ends: between documents,
+// and between the YAML documents of one. What aliases expand to is counted
+// for the documents together, as of one input (OneInput).
+func FromDocsContext(ctx context.Context, docs []Doc) ([]Rule, error) {
+	ctx = OneInput(ctx)
 	var out []Rule
 	for _, d := range docs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		var rs []Rule
 		var err error
 		if d.API {
 			rs, err = FromAPI(d.Data)
 		} else {
-			rs, err = Parse(d.Data)
+			rs, err = parseContext(ctx, d.Data, nil)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", d.Source, err)
@@ -501,15 +513,36 @@ func Parse(b []byte) ([]Rule, error) { return parse(b, nil) }
 // parse is Parse, adding the recording rules it reads to rec, when not
 // nil.
 func parse(b []byte, rec *[]Recording) ([]Rule, error) {
-	dec := yaml.NewDecoder(strings.NewReader(string(b)))
+	return parseContext(context.Background(), b, rec)
+}
+
+// parseContext is parse, given up when ctx ends, between YAML documents.
+// Each is decoded to its nodes, then to Go values (YAMLValue): yaml.v3
+// decoding a mapping straight to Go values takes time that grows with the
+// square of its keys. What aliases expand to is counted for them all, and
+// the rule files a ConfigMap or an Amazon namespace holds, as of one input
+// (OneInput).
+func parseContext(ctx context.Context, b []byte, rec *[]Recording) ([]Rule, error) {
+	if err := Nodes(b); err != nil {
+		return nil, err
+	}
+	ctx = OneInput(ctx)
+	dec := yaml.NewDecoder(bytes.NewReader(b))
 	var out []Rule
 	found := false
 	for {
-		var doc any
-		err := dec.Decode(&doc)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var node yaml.Node
+		err := dec.Decode(&node)
 		if errors.Is(err, io.EOF) {
 			break
 		}
+		if err != nil {
+			return nil, err
+		}
+		doc, err := YAMLValueContext(ctx, &node)
 		if err != nil {
 			return nil, err
 		}
@@ -520,7 +553,7 @@ func parse(b []byte, rec *[]Recording) ([]Rule, error) {
 		}
 		for _, d := range docs {
 			m, _ := d.(map[string]any)
-			rs, ok, err := parseDocRec(m, rec)
+			rs, ok, err := parseDocRec(ctx, m, rec)
 			if err != nil {
 				return nil, err
 			}
@@ -531,14 +564,16 @@ func parse(b []byte, rec *[]Recording) ([]Rule, error) {
 	if !found {
 		return nil, errNoRules
 	}
-	return out, nil
+	return shownRules(out), nil
 }
 
-func parseDoc(doc map[string]any) ([]Rule, bool, error) { return parseDocRec(doc, nil) }
+func parseDoc(doc map[string]any) ([]Rule, bool, error) {
+	return parseDocRec(context.Background(), doc, nil)
+}
 
 // parseDocRec is parseDoc, adding the recording rules it reads to rec, when
 // not nil: those of Prometheus's form, wherever they are.
-func parseDocRec(doc map[string]any, rec *[]Recording) ([]Rule, bool, error) {
+func parseDocRec(ctx context.Context, doc map[string]any, rec *[]Recording) ([]Rule, bool, error) {
 	switch {
 	case doc == nil:
 		return nil, false, nil
@@ -548,7 +583,7 @@ func parseDocRec(doc map[string]any, rec *[]Recording) ([]Rule, bool, error) {
 		found := false
 		for _, it := range list(doc["items"]) {
 			m, _ := it.(map[string]any)
-			rs, ok, err := parseDocRec(m, rec)
+			rs, ok, err := parseDocRec(ctx, m, rec)
 			if err != nil {
 				return nil, true, err
 			}
@@ -567,7 +602,7 @@ func parseDocRec(doc map[string]any, rec *[]Recording) ([]Rule, bool, error) {
 		for _, k := range sortedKeys(data) {
 			s, _ := data[k].(string)
 			var more []Recording
-			rs, err := parse([]byte(s), &more)
+			rs, err := parseContext(ctx, []byte(s), &more)
 			if err != nil {
 				continue // not every key holds rules
 			}
@@ -651,7 +686,7 @@ func parseDocRec(doc map[string]any, rec *[]Recording) ([]Rule, bool, error) {
 		if err != nil {
 			return nil, true, fmt.Errorf("rule groups namespace %q: %w", str(ns["name"]), err)
 		}
-		rs, err := parse(b, rec)
+		rs, err := parseContext(ctx, b, rec)
 		if err != nil {
 			return nil, true, fmt.Errorf("rule groups namespace %q: %w", str(ns["name"]), err)
 		}
@@ -1291,7 +1326,7 @@ func FromAPI(b []byte) ([]Rule, error) {
 				Says: annotated(a, TemplatePrometheus)})
 		}
 	}
-	return out, nil
+	return shownRules(out), nil
 }
 
 func hasGrafanaRules(doc map[string]any) bool {

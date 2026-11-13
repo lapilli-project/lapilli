@@ -253,7 +253,12 @@ write what it says.
 - **What it says.** A body that doesn't start with `BEGIN:VCALENDAR` (an
   HTML sign-in page, Grafana's JSON error with `text/calendar`) is
   refused. A line is 64 KB at most unfolded, a feed 20,000 events, and
-  repeats expand to 50,000 turns at most; a schedule keeps 50,000 turns,
+  repeats expand to 50,000 turns at most, a feed read and parsed within a
+  minute (each schedule in turn, so one feed can't hold the rest). An
+  occurrence replaced (`RECURRENCE-ID`), a repeat's days (`BYDAY`) and a
+  zone (`TZID`, loaded once a feed, 1,024 zones a feed at most) are looked
+  up, not searched: a feed of overrides or of zoned dates held a CPU for
+  minutes before 0.34.1; a schedule keeps 50,000 turns,
   so a feed's are kept whole. Names are kept as text that shows, 200
   bytes at most (a longer one cut to fit), and are escaped where they are
   shown; nothing in a feed is run or followed. An event passed over
