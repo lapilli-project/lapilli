@@ -353,6 +353,13 @@ func (l *Ledger) write(ctx context.Context, f func(*txn) error) error {
 func (l *Ledger) writeAside(ctx context.Context, f func(*txn) error) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.pg != nil && !unbounded(ctx) {
+		// No write waits on a server that stopped answering longer than
+		// writeWithin, holding up every other.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, writeWithin)
+		defer cancel()
+	}
 	tx, err := l.w.BeginTx(ctx, nil)
 	if err != nil {
 		return err

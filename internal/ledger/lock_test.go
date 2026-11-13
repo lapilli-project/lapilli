@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -96,12 +97,38 @@ func TestPostgresSearchPath(t *testing.T) {
 
 // partition is a TCP proxy to a server. cut cuts every connection open
 // now: what either side sends is lost, and neither side is told, as when a
-// network fails. Connections made after go through.
+// network fails past a proxy that keeps the connection up. Connections made
+// after go through. With onLock set, the next connection to ask for the
+// writer's lock is cut as the answer comes back, the server having run the
+// question (its CommandComplete): the server gives the lock, and its
+// answer is lost (cutLock says it was).
 type partition struct {
-	ln   net.Listener
-	mu   sync.Mutex
-	dead []*atomic.Bool
-	kept []net.Conn
+	ln      net.Listener
+	mu      sync.Mutex
+	dead    []*atomic.Bool
+	kept    []net.Conn
+	onLock  atomic.Bool
+	cutLock atomic.Bool
+}
+
+// newPartition starts a partition before the server a test's URL names,
+// and gives the URL through it, without TLS so that it can be read.
+func newPartition(t *testing.T, u string) (*partition, string) {
+	t.Helper()
+	pu, _ := url.Parse(u)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &partition{ln: ln}
+	go p.run(pu.Host)
+	t.Cleanup(p.close)
+	via := *pu
+	via.Host = ln.Addr().String()
+	q := via.Query()
+	q.Set("sslmode", "disable")
+	via.RawQuery = q.Encode()
+	return p, via.String()
 }
 
 func (p *partition) run(up string) {
@@ -115,16 +142,36 @@ func (p *partition) run(up string) {
 			c.Close()
 			continue
 		}
-		dead := &atomic.Bool{}
+		dead, asked := &atomic.Bool{}, &atomic.Bool{}
 		p.mu.Lock()
 		p.dead = append(p.dead, dead)
 		p.kept = append(p.kept, s, c)
 		p.mu.Unlock()
-		pipe := func(dst, src net.Conn) {
+		// What a statement that read one row answers: CommandComplete,
+		// "SELECT 1".
+		done := []byte("C\x00\x00\x00\x0dSELECT 1\x00")
+		pipe := func(dst, src net.Conn, toServer bool) {
 			b := make([]byte, 64<<10)
+			var tail []byte
 			for {
 				n, err := src.Read(b)
 				if n > 0 && !dead.Load() {
+					// What this read ends, maybe begun in the last.
+					seen := append(tail, b[:n]...)
+					has := func(x []byte) bool {
+						i := bytes.LastIndex(seen, x)
+						return i >= 0 && i+len(x) > len(tail)
+					}
+					tail = append([]byte(nil), seen[max(0, len(seen)-32):]...)
+					switch {
+					case !p.onLock.Load():
+					case toServer && has([]byte("pg_try_advisory_lock")):
+						asked.Store(true)
+					case !toServer && asked.Load() && has(done) && p.onLock.CompareAndSwap(true, false):
+						dead.Store(true)
+						p.cutLock.Store(true)
+						continue
+					}
 					if _, werr := dst.Write(b[:n]); werr != nil {
 						return
 					}
@@ -137,8 +184,8 @@ func (p *partition) run(up string) {
 				}
 			}
 		}
-		go pipe(s, c)
-		go pipe(c, s)
+		go pipe(s, c, true)
+		go pipe(c, s, false)
 	}
 }
 
@@ -159,27 +206,37 @@ func (p *partition) close() {
 	}
 }
 
-// A connection made again takes the lock, and the network fails before it
-// is ready: the session it made holds the lock on the server still. The
-// next connection finds this process's own session holding it, ends it,
-// and goes on, as no other process ran.
+// quick shortens the ledger's deadlines on its server for a test.
+func quick(t *testing.T) {
+	c, a, w := connectWithin, aliveWithin, writeWithin
+	connectWithin, aliveWithin, writeWithin = 2*time.Second, time.Second, 3*time.Second
+	t.Cleanup(func() { connectWithin, aliveWithin, writeWithin = c, a, w })
+}
+
+// lockHolder is the session that holds a ledger's lock, 0 for none, as
+// another connection sees it.
+func lockHolder(ctx context.Context, c *pgx.Conn, l *Ledger) int64 {
+	var pid int64
+	c.QueryRow(ctx, `SELECT coalesce(max(pid), 0) FROM pg_locks WHERE locktype = 'advisory' AND granted AND objsubid = 2
+		AND classid::bigint = $1 AND objid::bigint = $2`, int64(lockClass), int64(l.pg.key)).Scan(&pid)
+	return pid
+}
+
+// A connection made again asks for the lock, the server gives it, and the
+// network fails before the answer comes back: the session holds the lock
+// on the server still, and the process never heard. The connection gives
+// up within connectWithin; the next finds the process's own session
+// holding the lock, ends it, and goes on, as no other process ran.
 func TestPostgresOwnSessionFromAReconnect(t *testing.T) {
 	u := ledgertest.URL(t)
 	if u == "" {
 		t.Skip("no " + ledgertest.Env)
 	}
-	ctx := context.Background()
-	pu, _ := url.Parse(u)
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := &partition{ln: ln}
-	go p.run(pu.Host)
-	defer p.close()
-	via := *pu
-	via.Host = ln.Addr().String()
-	l, err := OpenPostgres(ctx, via.String(), time.UTC)
+	quick(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	p, via := newPartition(t, u)
+	l, err := OpenPostgres(ctx, via, time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,32 +246,28 @@ func TestPostgresOwnSessionFromAReconnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer direct.Close(ctx)
-	holder := func() int64 {
-		var pid int64
-		direct.QueryRow(ctx, `SELECT coalesce(max(pid), 0) FROM pg_locks WHERE locktype = 'advisory' AND granted AND objsubid = 2
-			AND classid::bigint = $1 AND objid::bigint = $2`, int64(lockClass), int64(l.pg.key)).Scan(&pid)
-		return pid
-	}
 	first := int64(l.pg.pid)
-	direct.Exec(ctx, "SELECT pg_terminate_backend($1, 5000)", first)
-	l.SetMeta(ctx, "w", "1") // finds the session gone
-	done := make(chan error, 1)
-	c, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	go func() { done <- l.SetMeta(c, "x", "1") }()
-	mine := int64(0)
-	for range 3000 {
-		if h := holder(); h != 0 && h != first {
-			mine = h
-			p.cut()
-			break
+	p.onLock.Store(true)
+	if _, err := direct.Exec(ctx, "SELECT pg_terminate_backend($1, 5000)", first); err != nil {
+		t.Fatal(err)
+	}
+	// A write or two: one finds the session gone, the next connects again.
+	for i := 0; !p.cutLock.Load(); i++ {
+		if i == 3 {
+			t.Fatal("the writer never connected again")
 		}
-		time.Sleep(time.Millisecond)
+		began := time.Now()
+		if err := l.SetMeta(ctx, "w", "1"); err == nil && p.cutLock.Load() {
+			t.Fatal("a write went through a connection whose lock's answer was lost")
+		}
+		if took := time.Since(began); took > writeWithin+connectWithin {
+			t.Fatalf("a write waited %v", took)
+		}
 	}
-	if mine == 0 {
-		t.Fatal("the connection made again never took the lock")
+	mine := lockHolder(ctx, direct, l)
+	if mine == 0 || mine == first {
+		t.Fatalf("the lock is held by %d: the session the answer was lost from didn't take it", mine)
 	}
-	<-done
 	var err2 error
 	for range 3 {
 		if err2 = l.SetMeta(ctx, "y", "1"); err2 == nil {
@@ -229,8 +282,74 @@ func TestPostgresOwnSessionFromAReconnect(t *testing.T) {
 	if err2 != nil {
 		t.Fatalf("after its own session from the reconnect was ended: %v", err2)
 	}
-	if h := holder(); h == mine || h == 0 {
+	if h := lockHolder(ctx, direct, l); h == mine || h == 0 {
 		t.Errorf("the lock is held by %d, the reconnect's session was %d", h, mine)
+	}
+}
+
+// A connection that a proxy keeps open while nothing gets through (what is
+// past it gone, or a server that stopped answering) holds nothing up for
+// long: a write's statement gives up within writeWithin, a connection taken
+// from the pool after a second within aliveWithin, and another is made, the
+// writer's lock taken again from the session the server still keeps. TCP
+// would hold either for as long as it holds the connection.
+func TestPostgresSilentConnection(t *testing.T) {
+	u := ledgertest.URL(t)
+	if u == "" {
+		t.Skip("no " + ledgertest.Env)
+	}
+	quick(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	p, via := newPartition(t, u)
+	l, err := OpenPostgres(ctx, via, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	if _, err := l.Notes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// A write whose second statement gets no answer.
+	wctx, wcancel := context.WithTimeout(ctx, 15*time.Second)
+	defer wcancel()
+	began := time.Now()
+	err = l.write(wctx, func(tx *txn) error {
+		if _, err := tx.ExecContext(tx.ctx, "SELECT 1"); err != nil {
+			return err
+		}
+		p.cut()
+		_, err := tx.ExecContext(tx.ctx, "SELECT 2")
+		return err
+	})
+	if took := time.Since(began); err == nil || took > writeWithin+2*time.Second {
+		t.Errorf("a write without an answer: %v after %v, want an error within %v", err, took, writeWithin)
+	}
+	// The next connects again, and goes on.
+	began = time.Now()
+	var err2 error
+	for range 3 {
+		if err2 = l.SetMeta(wctx, "y", "1"); err2 == nil {
+			break
+		}
+	}
+	if err2 != nil || l.pg.isLost() {
+		t.Fatalf("after a silent connection: %v (lost: %v)", err2, l.pg.isLost())
+	}
+	if took := time.Since(began); took > writeWithin+connectWithin+2*time.Second {
+		t.Errorf("connected again in %v", took)
+	}
+	// A reader's connection, silent since the cut, taken again after a
+	// second: given up within aliveWithin, and the read made on another.
+	time.Sleep(aliveWithin + 200*time.Millisecond)
+	rctx, rcancel := context.WithTimeout(ctx, 15*time.Second)
+	defer rcancel()
+	began = time.Now()
+	if _, err := l.Notes(rctx); err != nil {
+		t.Errorf("a read after its connection went silent: %v", err)
+	}
+	if took := time.Since(began); took > aliveWithin+connectWithin+2*time.Second {
+		t.Errorf("a read after its connection went silent took %v, want within %v", took, aliveWithin)
 	}
 }
 

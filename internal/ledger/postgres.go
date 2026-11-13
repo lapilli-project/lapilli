@@ -296,18 +296,57 @@ func (w *pgWriter) holder(ctx context.Context, c *pgx.Conn) (*LockedError, error
 	return &h, err
 }
 
+// How long the ledger waits on its Postgres server, at most. A server can
+// stop answering and the connection stay up: behind a proxy that keeps it
+// open (an auth proxy, a pooler, a load balancer) while what is past it is
+// gone, or a server stopped; a firewall or a NAT that drops what it sends
+// holds a statement for as long as TCP retries, some 15 minutes on Linux.
+// Neither keepalives nor the server's tcp_keepalives_* see it: TCP is
+// well, or data waits for an answer. So the ledger's own deadlines:
+var (
+	// connectWithin: a connection made, the writer's lock taken on it,
+	// on top of what the string's connect_timeout gives pgx.
+	connectWithin = 30 * time.Second
+	// aliveWithin: a connection taken from a pool again after a second
+	// or more answers pgx's ping, or another is made.
+	aliveWithin = 10 * time.Second
+	// writeWithin: a write's transaction, from its BEGIN to its COMMIT,
+	// once it holds the writer. The largest serve makes, a source's week of
+	// 100,000 firings, takes some 3 s; a copy and a migration have none.
+	writeWithin = 5 * time.Minute
+)
+
+type unboundedKey struct{}
+
+// withoutBound marks a context whose write has no deadline of the ledger's
+// own (writeWithin): a copy's, which writes a whole ledger in one
+// transaction, an operator watching it.
+func withoutBound(ctx context.Context) context.Context {
+	return context.WithValue(ctx, unboundedKey{}, true)
+}
+
+func unbounded(ctx context.Context) bool { return ctx.Value(unboundedKey{}) != nil }
+
 // pgConnector is pgx's, with each statement's parameters written as
 // Postgres takes them, and what fails to connect said without the
-// connection string.
+// connection string. A connection is made within connectWithin, on top of
+// the string's connect_timeout, whatever the caller's context.
 type pgConnector struct {
 	inner   driver.Connector
 	secrets []string
+	within  time.Duration
 }
 
 func (c pgConnector) Connect(ctx context.Context) (driver.Conn, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.within)
+	defer cancel()
 	conn, err := c.inner.Connect(ctx)
 	if err != nil {
-		return nil, connectError(err, c.secrets, err)
+		cause := err
+		if ctx.Err() != nil {
+			cause = context.Cause(ctx)
+		}
+		return nil, connectError(err, c.secrets, cause)
 	}
 	return &pgConn{conn.(*stdlib.Conn)}, nil
 }
@@ -317,6 +356,16 @@ func (c pgConnector) Driver() driver.Driver { return c.inner.Driver() }
 // pgConn is a connection of pgx's whose statements are written as SQLite
 // takes them: their parameters, ? and ?NNN, become $N.
 type pgConn struct{ *stdlib.Conn }
+
+// ResetSession is pgx's, which pings a connection taken from the pool after
+// a second or more, within aliveWithin: one that doesn't answer is given
+// up (driver.ErrBadConn), and database/sql makes another, rather than
+// wait as long as the caller would.
+func (c *pgConn) ResetSession(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, aliveWithin)
+	defer cancel()
+	return c.Conn.ResetSession(ctx)
+}
 
 // CheckNamedValue keeps a bool as 1 or 0, as SQLite keeps it: the
 // ledger's flags are integers in both. A text is kept as Postgres can keep
@@ -621,7 +670,7 @@ func OpenPostgres(ctx context.Context, conn string, loc *time.Location) (*Ledger
 	secrets := secretsOf(conn, cfg)
 	pw := &pgWriter{lost: make(chan struct{}), own: map[uint32]bool{}}
 	writer := stdlib.GetConnector(*cfg, stdlib.OptionAfterConnect(pw.connected), stdlib.OptionBeforeConnect(pw.connecting))
-	w := sql.OpenDB(pgConnector{writer, secrets})
+	w := sql.OpenDB(pgConnector{writer, secrets, cfg.ConnectTimeout + connectWithin})
 	// One connection writes, as for SQLite: writes take turns, and the
 	// lock is that connection's session's.
 	w.SetMaxOpenConns(1)
@@ -642,7 +691,7 @@ func OpenPostgres(ctx context.Context, conn string, loc *time.Location) (*Ledger
 		}
 		return nil
 	}))
-	r := sql.OpenDB(pgConnector{reader, secrets})
+	r := sql.OpenDB(pgConnector{reader, secrets, cfg.ConnectTimeout + connectWithin})
 	r.SetMaxOpenConns(4)
 	r.SetMaxIdleConns(4)
 	l := &Ledger{w: w, r: r, loc: loc, pg: pw, d: postgres}
@@ -692,6 +741,8 @@ func (l *Ledger) Hold(ctx context.Context) error {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, writeWithin)
+	defer cancel()
 	var held bool
 	if err := l.w.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted AND pid = pg_backend_pid()
 		AND objsubid = 2 AND classid::bigint = ? AND objid::bigint = ?)`, int64(lockClass), int64(l.pg.key)).Scan(&held); err != nil {

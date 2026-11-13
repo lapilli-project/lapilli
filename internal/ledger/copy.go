@@ -90,7 +90,7 @@ func Copy(ctx context.Context, from, to *Ledger, progress func(table string, row
 	if err != nil {
 		return rep, err
 	}
-	err = to.writeAside(ctx, func(t *txn) error {
+	err = to.writeAside(withoutBound(ctx), func(t *txn) error {
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM meta"); err != nil {
 			return err
 		}
