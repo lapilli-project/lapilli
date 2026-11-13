@@ -90,6 +90,9 @@ func Copy(ctx context.Context, from, to *Ledger, progress func(table string, row
 	if err != nil {
 		return rep, err
 	}
+	if copyMoment != nil {
+		copyMoment()
+	}
 	err = to.writeAside(withoutBound(ctx), func(t *txn) error {
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM meta"); err != nil {
 			return err
@@ -216,8 +219,13 @@ func copyTable(ctx context.Context, src *sql.Tx, t *txn, table string, cols []co
 }
 
 // copying, when set, is given each row as it is copied, and may change it:
-// for tests of what reading back finds.
-var copying func(table string, row []any)
+// for tests of what reading back finds. copyMoment, when set, is called once
+// the ids given are read, before the rows: for tests of what is read as of
+// one moment.
+var (
+	copying    func(table string, row []any)
+	copyMoment func()
+)
 
 // orderOf is an ORDER BY a table's rows read back the same in either
 // database by: its key, or, for a table with none, every column. NULLs

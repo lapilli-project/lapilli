@@ -133,3 +133,35 @@ func TestLongKeys(t *testing.T) {
 		t.Errorf("incidents: %v %v", ins, err)
 	}
 }
+
+// Two alarms' ids alike in their first 500 characters, which Postgres's
+// alarm indexes hold of an id, are two alarms in either database: one is
+// firing and the other not, and each is found by its own id alone, asked
+// for alone (FiringAlarm) or in a list (alarmIDs).
+func TestAlarmIDsAlikeAtFirst(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	common := strings.Repeat("x", 600)
+	on, off := "arn:"+common+"-on", "arn:"+common+"-off"
+	if _, err := l.PutFirings(ctx, "cw", t0, t0.Add(24*time.Hour), []firing.Firing{
+		{Rule: "a", Labels: map[string]string{AlarmID: on}, Start: t0.Add(time.Hour)},
+		{Rule: "b", Labels: map[string]string{AlarmID: off}, Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour)},
+	}, FiringsCopier, opts); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]bool{on: true, off: false, "arn:" + common: false} {
+		if got, err := l.FiringAlarm(ctx, "cw", id, false); err != nil || got != want {
+			t.Errorf("FiringAlarm(...%s): %v %v, want %v", id[len(id)-6:], got, err, want)
+		}
+	}
+	r, err := l.recordedNames(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.alarmIDs(ctx, []string{on}); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.alarms) != 1 || r.alarms[[2]string{"cw", on}] != "a" {
+		t.Errorf("the alarms of the id asked for: %v", r.alarms)
+	}
+}

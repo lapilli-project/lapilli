@@ -343,3 +343,30 @@ func TestCopyWrittenMeanwhile(t *testing.T) {
 		t.Errorf("the copy's next task: %d %v, want %d", id, err, meanwhile)
 	}
 }
+
+// The ids given and the rows are read as of one moment: a task made after
+// the ids given were read, before the rows are, is in neither, and the copy
+// gives next the id it took, none twice.
+func TestCopyIdsAsOfTheRows(t *testing.T) {
+	ctx := context.Background()
+	src, err := Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	fill(t, src)
+	dst := open(t, time.UTC)
+	var meanwhile int64
+	copyMoment = func() {
+		if meanwhile, err = src.PutTask(ctx, Task{Title: "Meanwhile"}, "ana"); err != nil {
+			t.Errorf("a write meanwhile: %v", err)
+		}
+	}
+	defer func() { copyMoment = nil }()
+	if _, err := Copy(ctx, src, dst, nil); err != nil {
+		t.Fatalf("copied: %v", err)
+	}
+	if id, err := dst.PutTask(ctx, Task{Title: "next"}, "ana"); err != nil || id != meanwhile {
+		t.Errorf("the copy's next task: %d %v, want %d", id, err, meanwhile)
+	}
+}

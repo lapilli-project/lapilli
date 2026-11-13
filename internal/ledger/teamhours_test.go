@@ -198,3 +198,44 @@ func TestByHoursShortShifts(t *testing.T) {
 		t.Errorf("%+v, want %+v", got, want)
 	}
 }
+
+// A rule's firings are counted by the hours they came in, excused ones
+// aside, read by their rule's own (ByHoursOf) as by every rule's.
+func TestHoursOfExcused(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	// 03:00 UTC on the Monday, asleep in UTC; a quiet window over the first.
+	at := t0.Add(3 * time.Hour)
+	if _, err := l.PutWindow(ctx, Window{Title: "upgrade", Start: at.Add(-time.Minute), End: at.Add(10 * time.Minute)}, "ana", opts); err != nil {
+		t.Fatal(err)
+	}
+	svc := map[string]string{"service": "search"}
+	record(t, l, t0, t0.Add(6*time.Hour), []firing.Firing{
+		{Rule: "Night", Labels: svc, Start: at.Add(time.Minute), End: at.Add(2 * time.Minute)},
+		{Rule: "Night", Labels: svc, Start: at.Add(30 * time.Minute), End: at.Add(31 * time.Minute)},
+	})
+	var id int64
+	if err := l.r.QueryRowContext(ctx, "SELECT id FROM rules WHERE name = 'Night'").Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	h := verdict.DefaultHours(time.UTC)
+	if err := h.ParseSleep("23:00-07:00"); err != nil {
+		t.Fatal(err)
+	}
+	day := l.day(t0.Unix())
+	of, err := l.ByHoursOf(ctx, day, day+7, h, []int64{id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, err := l.ByHours(ctx, day, day+7, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	week := Week(day)
+	if got := of[week][id]; got.Asleep != 1 {
+		t.Errorf("by its own: %+v, want the one not excused", got)
+	}
+	if got := all[week][id]; got.Asleep != 1 {
+		t.Errorf("by every rule's: %+v, want the one not excused", got)
+	}
+}
