@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -814,6 +815,7 @@ func (t *tier) load(alerts []Alert) error {
 			starts[a.Rule] = append(starts[a.Rule], a.Start.Unix())
 		}
 	}
+	spansOf := map[string][][2]int64{}
 	for rule, ss := range starts {
 		slices.Sort(ss)
 		w := int64(t.within(rule) / time.Second)
@@ -825,6 +827,12 @@ func (t *tier) load(alerts []Alert) error {
 				spans = append(spans, [2]int64{s - w, s + w})
 			}
 		}
+		spansOf[rule] = spans
+	}
+	if t.l.d == postgres {
+		return t.loadSpans(spansOf)
+	}
+	for rule, spans := range spansOf {
 		ids, _ := json.Marshal(t.ids[rule])
 		for _, sp := range spans {
 			rows, err := t.l.r.QueryContext(t.ctx, `SELECT f.id, f.start_at, f.white, f.excused, s.id, s.labels FROM firings f
@@ -854,6 +862,104 @@ func (t *tier) load(alerts []Alert) error {
 		}
 	}
 	return nil
+}
+
+// spansAtOnce is how many spans of firings Postgres is asked for in one
+// statement.
+const spansAtOnce = 2000
+
+// loadSpans is load's reading in Postgres: a span a statement is a round
+// trip each, some 13,000 for twelve weeks of 20,000 notifications, 6.6 s on
+// CI. The spans are given as JSON, spansAtOnce a statement, and each is
+// searched for apart (LATERAL, OFFSET 0), by firings_rule, as hours are;
+// read in the order of the spans, each in the order of its firings'
+// starts, as SQLite's a span at a time. Their series' labels are read
+// after, by id, in a statement of their own: joined in the span's search,
+// Postgres, which takes a list given as JSON for a hundred rows, reads a
+// small series table whole for each span.
+func (t *tier) loadSpans(spansOf map[string][][2]int64) error {
+	type ask struct {
+		I    int   `json:"i"`
+		Rule int64 `json:"rule"`
+		Lo   int64 `json:"lo"`
+		Hi   int64 `json:"hi"`
+	}
+	var names []string // by span
+	var part []ask
+	read := func() error {
+		if len(part) == 0 {
+			return nil
+		}
+		b, err := json.Marshal(part)
+		if err != nil {
+			return err
+		}
+		part = part[:0]
+		rows, err := t.l.r.QueryContext(t.ctx, `SELECT sp.i, f.id, f.start_at, f.white, f.excused, f.series_id
+			FROM jsonb_to_recordset(CAST(? AS jsonb)) AS sp (i BIGINT, rule BIGINT, lo BIGINT, hi BIGINT),
+				LATERAL (SELECT id, start_at, white, excused, series_id FROM firings
+					WHERE rule_id = sp.rule AND start_at >= sp.lo AND start_at <= sp.hi OFFSET 0) AS f
+			ORDER BY sp.i, f.start_at, f.id`, string(b))
+		if err != nil {
+			return err
+		}
+		type found struct {
+			i      int
+			f      tied
+			series int64
+		}
+		var got []found
+		series := map[int64]map[string]string{}
+		for rows.Next() {
+			var x found
+			if err := rows.Scan(&x.i, &x.f.id, &x.f.start, &x.f.white, &x.f.excused, &x.series); err != nil {
+				rows.Close()
+				return err
+			}
+			got = append(got, x)
+			series[x.series] = nil
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		ids, err := json.Marshal(slices.Sorted(maps.Keys(series)))
+		if err != nil {
+			return err
+		}
+		if err := t.l.eachRow(t.ctx, func(row scanner) error {
+			var id int64
+			var text string
+			if err := row.Scan(&id, &text); err != nil {
+				return err
+			}
+			m, err := t.l.labels(id, text)
+			series[id] = m
+			return err
+		}, `SELECT id, labels FROM series WHERE id IN (`+t.l.d.ints("?")+`)`, string(ids)); err != nil {
+			return err
+		}
+		for _, x := range got {
+			x.f.labels = series[x.series]
+			t.near[names[x.i]] = append(t.near[names[x.i]], x.f)
+		}
+		return nil
+	}
+	for _, rule := range slices.Sorted(maps.Keys(spansOf)) {
+		for _, sp := range spansOf[rule] {
+			i := len(names)
+			names = append(names, rule)
+			for _, id := range t.ids[rule] {
+				part = append(part, ask{i, id, sp[0], sp[1]})
+			}
+			if i%spansAtOnce == spansAtOnce-1 {
+				if err := read(); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return read()
 }
 
 // tie is the firing an alert tells of: its rule's firing whose labels are

@@ -323,11 +323,17 @@ func TestNotificationsScale(t *testing.T) {
 	}
 	t.Logf("20,000 notifications kept in %v", time.Since(began))
 	began = time.Now()
+	was := sent.Load()
 	ps, err := l.Pages(ctx, start, t0, twoMinutes)
 	if err != nil {
 		t.Fatal(err)
 	}
 	took := time.Since(began)
+	// In Postgres, a round trip each is what a slower runner pays for:
+	// some 13,000 spans of firings are read a few thousand a statement.
+	if n := sent.Load() - was; l.d == postgres && n > 50 {
+		t.Errorf("twelve weeks of notifications read in %d statements, want 50 at most", n)
+	}
 	untied := 0
 	for _, p := range ps {
 		if p.Stone == PageUntied {

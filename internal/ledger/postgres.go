@@ -439,7 +439,12 @@ func (c *pgConn) PrepareContext(ctx context.Context, q string) (driver.Stmt, err
 	return c.Conn.PrepareContext(ctx, q)
 }
 
+// sent counts the statements the connections send: for tests of how many
+// round trips a read takes.
+var sent atomic.Int64
+
 func (c *pgConn) ExecContext(ctx context.Context, q string, args []driver.NamedValue) (driver.Result, error) {
+	sent.Add(1)
 	if len(args) == 0 {
 		// A migration, several statements in one: sent as it is.
 		return c.Conn.ExecContext(ctx, q, args)
@@ -449,6 +454,7 @@ func (c *pgConn) ExecContext(ctx context.Context, q string, args []driver.NamedV
 }
 
 func (c *pgConn) QueryContext(ctx context.Context, q string, args []driver.NamedValue) (driver.Rows, error) {
+	sent.Add(1)
 	q, args = bind(q, args)
 	return c.Conn.QueryContext(ctx, q, args)
 }
