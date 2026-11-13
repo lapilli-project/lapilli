@@ -274,4 +274,15 @@ func TestPostgresHold(t *testing.T) {
 	if err := b.Hold(ctx); err != nil {
 		t.Errorf("the one that took it: %v", err)
 	}
+	// A session that lives on without the lock (let go, here by hand)
+	// doesn't hold it either.
+	b.mu.Lock()
+	_, err = b.w.ExecContext(ctx, "SELECT pg_advisory_unlock(?, ?)", int32(lockClass), b.pg.key)
+	b.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Hold(ctx); !errors.Is(err, ErrLockLost) {
+		t.Errorf("a session that let the lock go: %v", err)
+	}
 }
