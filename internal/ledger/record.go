@@ -196,7 +196,7 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 			return err
 		}
 		for id, at := range ended {
-			if _, err := t.ExecContext(t.ctx, "UPDATE firings SET end_at = max(start_at, ?) WHERE id = ?", at, id); err != nil {
+			if _, err := t.ExecContext(t.ctx, "UPDATE firings SET end_at = "+t.d.greatest("start_at", "?")+" WHERE id = ?", at, id); err != nil {
 				return err
 			}
 		}
@@ -211,7 +211,8 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 		slices.Sort(keep)
 		keepJSON, _ := json.Marshal(keep)
 		if _, err := t.ExecContext(t.ctx, `DELETE FROM firings WHERE start_at >= ? AND start_at <= ?
-			AND rule_id NOT IN (SELECT r.id FROM rules r, json_each(?) k WHERE r.name = k.value)
+			AND rule_id NOT IN (`+t.d.pick("SELECT r.id FROM rules r, json_each(?) k WHERE r.name = k.value",
+			"SELECT id FROM rules WHERE name IN ("+t.d.texts("?")+")")+`)
 			AND rule_id NOT IN (SELECT id FROM rules WHERE source != '')`, f.From.Unix(), to, string(keepJSON)); err != nil {
 			return err
 		}
@@ -225,22 +226,32 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 			}
 		}
 		n := 0
+		ins, err := t.inserting("firings", []string{"series_id", "rule_id", "start_at", "end_at", "day"}, []string{"BIGINT", "BIGINT", "BIGINT", "BIGINT", "BIGINT"})
+		if err != nil {
+			return err
+		}
 		for _, x := range f.Firings {
 			if x.Start.Before(f.from(x.Rule)) || x.Start.After(f.To) || f.Keep[x.Rule] {
 				continue
 			}
 			rule, err := l.ruleID(t, x.Rule)
 			if err != nil {
+				ins.close()
 				return err
 			}
 			sid, err := l.seriesID(t, rule, x.Labels)
 			if err != nil {
+				ins.close()
 				return err
 			}
-			if _, err := l.insert(t, rule, sid, x); err != nil {
+			if err := ins.add(sid, rule, x.Start.Unix(), nullable(x.End), l.day(x.Start.Unix())); err != nil {
+				ins.close()
 				return err
 			}
 			n++
+		}
+		if err := ins.close(); err != nil {
+			return err
 		}
 
 		if f.ImpactOn {

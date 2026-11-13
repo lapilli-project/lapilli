@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/ledger/ledgertest"
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
@@ -137,7 +138,7 @@ func followServer(t *testing.T, h replay.History, hist string) *Server {
 	cfg := Config{
 		RulesHistory: hist, Impact: "impact", ImpactFor: 5 * time.Minute,
 		Options: verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour, Match: []string{"service"}},
-		Step:    time.Minute, Loc: time.UTC, Ledger: filepath.Join(dir, "ledger"),
+		Step:    time.Minute, Loc: time.UTC, Ledger: filepath.Join(dir, "ledger"), LedgerURLFile: ledgertest.File(t),
 		Every: time.Hour, Settle: time.Hour, Backfill: 3 * 24 * time.Hour, Watch: time.Minute,
 		Digest: Weekly{time.Monday, 9, 0}, Timeout: time.Minute, Parallel: 4, Listen: "127.0.0.1:0", Version: "test",
 		AllowedHosts: []string{"example.com"},

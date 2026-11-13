@@ -218,24 +218,24 @@ func (l *Ledger) PutScheduled(ctx context.Context, r Scheduled, by string, at ti
 			if n >= MaxScheduled {
 				return invalid("the ledger keeps %d reports at most", MaxScheduled)
 			}
-			res, err = t.ExecContext(t.ctx, `INSERT INTO reports (name, team_id, schedule, span, zone, sections, dests, enabled, created, created_by, updated, updated_by)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				r.Name, r.TeamID, r.Schedule, int64(span/time.Second), r.Zone, string(sections), string(dests), r.Enabled, now, by, now, by)
+			err = t.QueryRowContext(t.ctx, `INSERT INTO reports (name, team_id, schedule, span, zone, sections, dests, enabled, created, created_by, updated, updated_by)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+				r.Name, r.TeamID, r.Schedule, int64(span/time.Second), r.Zone, string(sections), string(dests), r.Enabled, now, by, now, by).Scan(&id)
 		} else {
 			res, err = t.ExecContext(t.ctx, `UPDATE reports SET name = ?, team_id = ?, schedule = ?, span = ?, zone = ?, sections = ?, dests = ?, enabled = ?,
 				updated = ?, updated_by = ? WHERE id = ?`,
 				r.Name, r.TeamID, r.Schedule, int64(span/time.Second), r.Zone, string(sections), string(dests), r.Enabled, now, by, id)
 		}
 		if err != nil {
-			if strings.Contains(err.Error(), "UNIQUE") {
+			if unique(err) {
 				return invalid("there is a report called %s already", r.Name)
 			}
 			return err
 		}
-		if id == 0 {
-			id, _ = res.LastInsertId()
-		} else if n, _ := res.RowsAffected(); n == 0 {
-			return ErrNotFound
+		if res != nil {
+			if n, _ := res.RowsAffected(); n == 0 {
+				return ErrNotFound
+			}
 		}
 		return change(t, by, "report "+r.Name+" kept", nil, r)
 	})

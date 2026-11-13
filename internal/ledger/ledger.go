@@ -1,5 +1,5 @@
 // Package ledger keeps what lapilli serve finds: firings, incidents and
-// versions of the rules, in SQLite.
+// versions of the rules, in SQLite, or in Postgres (postgres.go).
 //
 // It keeps each firing's stones, given against every incident it has, and
 // each rule's stones by day and by week, so that reading twelve weeks costs
@@ -38,6 +38,10 @@ var schema embed.FS
 type Ledger struct {
 	w, r *sql.DB
 	loc  *time.Location
+	// d is the database's dialect; pg, for a Postgres ledger, its writer's
+	// lock.
+	d  dialect
+	pg *pgWriter
 	// mu is held by every write, start to commit.
 	mu sync.Mutex
 	// gen counts writes, for whoever caches what it reads.
@@ -89,9 +93,6 @@ type seriesKey struct {
 // touch.
 var ErrNewer = errors.New("the ledger was written by a newer lapilli")
 
-// Open opens the ledger at path, making it if it isn't there, in the time
-// zone its days and weeks are counted in. Opened in another zone than
-// before, it counts them again.
 // fileURI is an absolute path as a file URI, escaped. A path that doesn't
 // start with a slash (C:\ledger on Windows) gets one, so its drive isn't
 // read as the URI's host.
@@ -103,6 +104,9 @@ func fileURI(abs string) url.URL {
 	return url.URL{Scheme: "file", Path: p}
 }
 
+// Open opens the ledger at path, making it if it isn't there, in the time
+// zone its days and weeks are counted in. Opened in another zone than
+// before, it counts them again; with none (nil), it keeps the one it has.
 func Open(ctx context.Context, path string, loc *time.Location) (*Ledger, error) {
 	// A URI, with the path escaped: a # or a ? in a directory's name would
 	// otherwise end the path there, and open another ledger. The path is
@@ -130,7 +134,7 @@ func Open(ctx context.Context, path string, loc *time.Location) (*Ledger, error)
 		return nil, err
 	}
 	r.SetMaxOpenConns(4)
-	l := &Ledger{w: w, r: r, loc: loc}
+	l := &Ledger{w: w, r: r, loc: loc, d: sqlite}
 	l.ids.rules = map[string]int64{}
 	l.ids.series = map[seriesKey]int64{}
 	l.ids.labels = map[int64]labelsOf{}
@@ -145,8 +149,13 @@ func Open(ctx context.Context, path string, loc *time.Location) (*Ledger, error)
 	return l, nil
 }
 
-// Close closes the ledger.
+// Close closes the ledger. A Postgres ledger's lock is let go first, so
+// the next process takes it at once, not once the server has seen this
+// one's sessions end.
 func (l *Ledger) Close() error {
+	if l.pg != nil {
+		l.pg.release(l.w)
+	}
 	return errors.Join(l.r.Close(), l.w.Close())
 }
 
@@ -221,8 +230,20 @@ func (l *Ledger) migrate(ctx context.Context) error {
 // another time zone.
 func (l *Ledger) zone(ctx context.Context) error {
 	was, err := l.meta(ctx, l.w, "zone")
-	if err != nil || was == l.loc.String() {
+	if err != nil {
 		return err
+	}
+	if l.loc == nil {
+		// Opened as it is (Copy): in the zone it was last counted in, UTC
+		// for a new one.
+		l.loc = time.UTC
+		if was != "" {
+			l.loc, err = time.LoadLocation(was)
+			return err
+		}
+	}
+	if was == l.loc.String() {
+		return nil
 	}
 	return l.write(ctx, func(tx *txn) error {
 		rows, err := tx.QueryContext(ctx, "SELECT id, start_at FROM firings")
@@ -274,6 +295,7 @@ func (l *Ledger) zone(ctx context.Context) error {
 type txn struct {
 	*sql.Tx
 	ctx    context.Context
+	d      dialect
 	rules  map[string]int64
 	series map[seriesKey]int64
 	// gone are names a rule was known by that it no longer is: named
@@ -295,7 +317,7 @@ func (t *txn) versionNames() (map[string]bool, error) {
 	if t.versioned != nil {
 		return t.versioned, nil
 	}
-	rows, err := t.QueryContext(t.ctx, "SELECT DISTINCT n.value FROM versions v, json_each(v.names) n")
+	rows, err := t.QueryContext(t.ctx, "SELECT DISTINCT n.value FROM versions v, "+t.d.elems("v.names", "n"))
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +355,13 @@ func (l *Ledger) writeAside(ctx context.Context, f func(*txn) error) error {
 	if err != nil {
 		return err
 	}
-	t := &txn{Tx: tx, ctx: ctx, rules: map[string]int64{}, series: map[seriesKey]int64{}}
+	if l.pg != nil && l.pg.again.Swap(false) {
+		// The writer connected again: what is cached of the ledger is read
+		// again, should the server have lost what it last wrote (a
+		// failover).
+		l.forget()
+	}
+	t := &txn{Tx: tx, ctx: ctx, rules: map[string]int64{}, series: map[seriesKey]int64{}, d: l.d}
 	if err := f(t); err != nil {
 		tx.Rollback()
 		return err
@@ -371,6 +399,21 @@ func (l *Ledger) writeAside(ctx context.Context, f func(*txn) error) error {
 	}
 	l.ids.Unlock()
 	return nil
+}
+
+// forget drops what is cached of the ledger, ids and labels, and takes
+// every week's firings for changed: all is read again. Called under mu.
+func (l *Ledger) forget() {
+	l.ids.Lock()
+	clear(l.ids.rules)
+	clear(l.ids.series)
+	clear(l.ids.labels)
+	l.ids.Unlock()
+	l.changed.Lock()
+	l.changed.all = l.gen.Load() + 1
+	l.changed.Unlock()
+	l.recorded.Add(1)
+	l.gen.Add(1)
 }
 
 type querier interface {

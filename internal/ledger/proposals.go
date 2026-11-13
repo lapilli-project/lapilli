@@ -577,8 +577,8 @@ func (l *Ledger) FiringAlarm(ctx context.Context, source, id string, fold bool) 
 	if source == "" || id == "" {
 		return false, nil
 	}
-	v := "json_extract(s.labels, '$." + AlarmID + "')"
-	is := alarmIs(v, "?2", "?3")
+	v := l.d.text("s.labels", AlarmID)
+	is := alarmIs(l.d, v, "?2", "?3")
 	if fold {
 		is = "lower(" + v + ") = lower(?2)"
 	}

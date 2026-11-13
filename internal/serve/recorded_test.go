@@ -18,6 +18,7 @@ import (
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/ledger/ledgertest"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -289,7 +290,7 @@ func TestServeWithoutRules(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{
 		Options: verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour, Match: []string{"service"}},
-		Step:    time.Minute, Loc: time.UTC, Ledger: filepath.Join(dir, "ledger"),
+		Step:    time.Minute, Loc: time.UTC, Ledger: filepath.Join(dir, "ledger"), LedgerURLFile: ledgertest.File(t),
 		Every: time.Hour, Settle: time.Hour, Backfill: 3 * 24 * time.Hour, Watch: time.Minute,
 		Digest: Weekly{time.Monday, 9, 0}, Timeout: time.Minute, Parallel: 4, Listen: "127.0.0.1:0", Version: "test",
 		AllowedHosts: []string{"example.com"}, IncidentsListen: "127.0.0.1:0", FiringsToken: tokenFile(t, "a-firings-token-long-enough"),
@@ -516,7 +517,7 @@ func TestDigestWaitsForSources(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{
 		Options: verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour},
-		Step:    time.Minute, Loc: time.UTC, Ledger: filepath.Join(dir, "ledger"), Every: time.Hour, Watch: time.Minute,
+		Step:    time.Minute, Loc: time.UTC, Ledger: filepath.Join(dir, "ledger"), LedgerURLFile: ledgertest.File(t), Every: time.Hour, Watch: time.Minute,
 		Digest: Weekly{time.Monday, 0, 5}, Timeout: time.Minute, Parallel: 4, Listen: "127.0.0.1:0", Version: "test",
 		IncidentsListen: "127.0.0.1:0", FiringsToken: tokenFile(t, "a-firings-token-long-enough"),
 	}

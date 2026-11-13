@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"lapilli.dev/internal/ledger/ledgertest"
 )
 
 // What the change recipes write, push and say, against a Lapilli someone
@@ -408,6 +410,10 @@ func TestLedgerIDKept(t *testing.T) {
 	s, _ := server(t, nil)
 	if len(s.ledgerID) != 12 || strings.Trim(s.ledgerID, "0123456789abcdef") != "" {
 		t.Fatalf("ledger id %q", s.ledgerID)
+	}
+	if ledgertest.On() {
+		// One process at a time on a Postgres ledger: a restart.
+		s.Close()
 	}
 	again, err := New(t.Context(), s.cfg, &history{}, s.log)
 	if err != nil {

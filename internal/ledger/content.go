@@ -11,7 +11,7 @@ import (
 // still. They are what a rule's templates can name (docs/design/content.md).
 // A rule that fired nothing since is left out.
 func (l *Ledger) LabelNames(ctx context.Context, from time.Time) (map[string]map[string]bool, error) {
-	rows, err := l.r.QueryContext(ctx, `SELECT r.name, j.key FROM rules r JOIN series s ON s.rule_id = r.id LEFT JOIN json_each(s.labels) j
+	rows, err := l.r.QueryContext(ctx, `SELECT r.name, j.key FROM rules r JOIN series s ON s.rule_id = r.id `+l.d.leftKeys("s.labels", "j")+`
 		WHERE r.source = '' AND (EXISTS (SELECT 1 FROM firings f WHERE f.series_id = s.id AND f.start_at >= ?)
 			OR EXISTS (SELECT 1 FROM firings f WHERE f.series_id = s.id AND f.end_at IS NULL))
 		GROUP BY r.name, j.key`, from.Unix())

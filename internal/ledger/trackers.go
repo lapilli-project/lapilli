@@ -58,7 +58,7 @@ func (l *Ledger) TrackerTasks(ctx context.Context, q TrackerQuery) ([]TrackerTas
 	}
 	if len(q.Status) > 0 {
 		b, _ := json.Marshal(q.Status)
-		sq += " AND status IN (SELECT value FROM json_each(?))"
+		sq += " AND status IN (" + l.d.texts("?") + ")"
 		args = append(args, string(b))
 	}
 	if !q.UpdatedAfter.IsZero() {
@@ -94,20 +94,27 @@ func (l *Ledger) TrackerTasks(ctx context.Context, q TrackerQuery) ([]TrackerTas
 		return nil, err
 	}
 	rows.Close()
-	return out, statusSet(ctx, tx, out)
+	return out, statusSet(ctx, l.d, tx, out)
 }
 
 // statusSetQuery is the changes noted for the tasks named (what: task N
 // made, task N changed), the latest first, with the status each left.
-const statusSetQuery = `SELECT what, by, at, CASE WHEN json_valid(after) THEN coalesce(json_extract(after, '$.status'), '') ELSE '' END
-	FROM changes WHERE what IN (SELECT value FROM json_each(?)) ORDER BY id DESC`
+// What a change was left as is ” or the JSON change() wrote: in Postgres,
+// which can't say whether a text is JSON before 16, an object is read as
+// one.
+func statusSetQuery(d dialect) string {
+	return d.pick(`SELECT what, by, at, CASE WHEN json_valid(after) THEN coalesce(json_extract(after, '$.status'), '') ELSE '' END
+	FROM changes WHERE what IN (SELECT value FROM json_each(?)) ORDER BY id DESC`,
+		`SELECT what, by, at, CASE WHEN left(after, 1) = '{' THEN coalesce(after::jsonb ->> 'status', '') ELSE '' END
+	FROM changes WHERE what IN (`+d.texts("?")+`) ORDER BY id DESC`)
+}
 
 // statusSet fills in who set each task's status, and when: the change that
 // moved it to the status it has. Changes since that left the status as it
 // was (a title, an assignee, a link) don't count. When the change that
 // moved it was pruned, neither is known, and neither is given: a later
 // edit at that status isn't taken for the move.
-func statusSet(ctx context.Context, tx *sql.Tx, ts []TrackerTask) error {
+func statusSet(ctx context.Context, d dialect, tx *sql.Tx, ts []TrackerTask) error {
 	if len(ts) == 0 {
 		return nil
 	}
@@ -120,7 +127,7 @@ func statusSet(ctx context.Context, tx *sql.Tx, ts []TrackerTask) error {
 		}
 	}
 	b, _ := json.Marshal(whats)
-	rows, err := tx.QueryContext(ctx, statusSetQuery, string(b))
+	rows, err := tx.QueryContext(ctx, statusSetQuery(d), string(b))
 	if err != nil {
 		return err
 	}
@@ -255,8 +262,9 @@ func (l *Ledger) CopyComment(ctx context.Context, task int64, body, author, ref 
 		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM comments WHERE on_kind = 'task' AND on_key = ? AND origin = ?", key, OriginTracker).Scan(&n); err != nil {
 			return err
 		}
-		res, err := t.ExecContext(t.ctx, `INSERT OR IGNORE INTO comments (on_kind, on_key, body, created, created_by, updated, origin, ref, author)
-			SELECT 'task', ?, ?, ?, ?, ?, ?, ?, ? WHERE ? < ?`, key, body, at.Unix(), TaskTracker, at.Unix(), OriginTracker, ref, author, n, MaxCopied)
+		res, err := t.ExecContext(t.ctx, t.d.pick(`INSERT OR IGNORE INTO comments (on_kind, on_key, body, created, created_by, updated, origin, ref, author)
+			SELECT 'task', ?, ?, ?, ?, ?, ?, ?, ? WHERE ? < ?`, `INSERT INTO comments (on_kind, on_key, body, created, created_by, updated, origin, ref, author)
+			SELECT 'task', ?, ?, ?, ?, ?, ?, ?, ? WHERE CAST(? AS BIGINT) < CAST(? AS BIGINT) ON CONFLICT DO NOTHING`), key, body, at.Unix(), TaskTracker, at.Unix(), OriginTracker, ref, author, n, MaxCopied)
 		if err != nil {
 			return err
 		}

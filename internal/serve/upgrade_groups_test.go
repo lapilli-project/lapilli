@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/ledger/ledgertest"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -57,6 +58,7 @@ const groupsNow = `groups:
 // its rules where they were then, as they were left.
 func upgraded(t *testing.T) (*Server, string) {
 	t.Helper()
+	ledgertest.SQLiteOnly(t, "a ledger an earlier lapilli wrote")
 	s, dir := server(t, func(c *Config) {
 		c.UserHeader = "X-Forwarded-Email"
 		c.Editors = []string{"*"}

@@ -147,7 +147,7 @@ func (l *Ledger) incidents(ctx context.Context, q string, args ...any) ([]Incide
 	}
 	idsJSON, _ := json.Marshal(ids)
 	rows, err = l.r.QueryContext(ctx, `SELECT c.incident_id, r.name, c.delay FROM catches c JOIN rules r ON r.id = c.rule_id
-		WHERE c.incident_id IN (SELECT value FROM json_each(?))`, string(idsJSON))
+		WHERE c.incident_id IN (`+l.d.ints("?")+`)`, string(idsJSON))
 	if err != nil {
 		return nil, err
 	}

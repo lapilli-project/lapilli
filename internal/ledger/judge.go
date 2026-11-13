@@ -7,6 +7,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"lapilli.dev/internal/firing"
@@ -56,7 +57,9 @@ func (l *Ledger) seriesID(t *txn, rule int64, labels map[string]string) (int64, 
 	if ok {
 		return id, nil
 	}
-	err = t.QueryRowContext(t.ctx, "SELECT id FROM series WHERE rule_id = ? AND labels = ?", rule, k.labels).Scan(&id)
+	// In Postgres, through series_labels, which holds the labels' md5.
+	err = t.QueryRowContext(t.ctx, t.d.pick("SELECT id FROM series WHERE rule_id = ? AND labels = ?",
+		"SELECT id FROM series WHERE rule_id = ?1 AND md5(labels) = md5(?2) AND labels = ?2"), rule, k.labels).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = t.QueryRowContext(t.ctx, "INSERT INTO series (rule_id, labels) VALUES (?, ?) RETURNING id", rule, k.labels).Scan(&id)
 	}
@@ -65,6 +68,58 @@ func (l *Ledger) seriesID(t *txn, rule int64, labels map[string]string) (int64, 
 	}
 	t.series[k] = id
 	return id, nil
+}
+
+// makeSeries makes alerts new to the ledger, in turn, and gives their ids:
+// in Postgres, many a statement.
+func (l *Ledger) makeSeries(t *txn, ks []seriesKey) ([]int64, error) {
+	ids := make([]int64, 0, len(ks))
+	if t.d != postgres {
+		st, err := t.PrepareContext(t.ctx, "INSERT INTO series (rule_id, labels) VALUES (?, ?) RETURNING id")
+		if err != nil {
+			return nil, err
+		}
+		defer st.Close()
+		for _, k := range ks {
+			var id int64
+			if err := st.QueryRowContext(t.ctx, k.rule, k.labels).Scan(&id); err != nil {
+				return nil, err
+			}
+			ids = append(ids, id)
+		}
+		return ids, nil
+	}
+	for len(ks) > 0 {
+		part := ks[:min(len(ks), pgRows)]
+		ks = ks[len(part):]
+		args := make([]any, 0, 2*len(part))
+		for _, k := range part {
+			args = append(args, k.rule, k.labels)
+		}
+		rows, err := t.QueryContext(t.ctx, "INSERT INTO series (rule_id, labels) VALUES "+
+			strings.TrimSuffix(strings.Repeat("(CAST(? AS BIGINT), CAST(? AS TEXT)), ", len(part)), ", ")+" RETURNING id, rule_id, labels", args...)
+		if err != nil {
+			return nil, err
+		}
+		got := map[seriesKey]int64{}
+		for rows.Next() {
+			var id int64
+			var k seriesKey
+			if err := rows.Scan(&id, &k.rule, &k.labels); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			got[k] = id
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		for _, k := range part {
+			ids = append(ids, got[k])
+		}
+	}
+	return ids, nil
 }
 
 // labels are a series' labels, read once and kept: a series never changes.
@@ -292,16 +347,32 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		return err
 	}
 	defer prev.Close()
-	up, err := t.PrepareContext(t.ctx, "UPDATE firings SET white = ?, refired = ?, excused = ?, deploy = ? WHERE id = ?")
+	// In Postgres, when each series' firing before lo resolved, asked for
+	// all the series at once, rather than a round trip each.
+	var ends map[int64]sql.NullInt64
+	if t.d == postgres {
+		var ids []int64
+		for i, r := range fs {
+			if i == 0 || r.series != fs[i-1].series {
+				ids = append(ids, r.series)
+			}
+		}
+		if ends, err = l.endsBefore(t, ids, lo); err != nil {
+			return err
+		}
+	}
+	up, err := t.updating("firings", []string{"white", "refired", "excused", "deploy"})
 	if err != nil {
 		return err
 	}
-	defer up.Close()
+	defer up.close()
 	var last time.Time // when the series' previous firing resolved
 	for i, r := range fs {
 		if i == 0 || r.series != fs[i-1].series {
 			var end sql.NullInt64
-			if err := prev.QueryRowContext(t.ctx, r.series, lo).Scan(&end); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			if ends != nil {
+				end = ends[r.series]
+			} else if err := prev.QueryRowContext(t.ctx, r.series, lo).Scan(&end); err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}
 			last = fromNull(end)
@@ -316,11 +387,45 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		if white == r.white && again == r.again && excused == r.excused && deploy == r.deploy {
 			continue
 		}
-		if _, err := up.ExecContext(t.ctx, white, again, excused, deploy, r.id); err != nil {
+		if err := up.add(white, again, excused, deploy, r.id); err != nil {
 			return err
 		}
 	}
-	return nil
+	return up.close()
+}
+
+// endsBefore is, for each series, when its last firing to start before a
+// time resolved: of those that started at once, the last written, as
+// SQLite's index gives it.
+func (l *Ledger) endsBefore(t *txn, ids []int64, before int64) (map[int64]sql.NullInt64, error) {
+	out := map[int64]sql.NullInt64{}
+	for len(ids) > 0 {
+		part := ids[:min(len(ids), pgRows)]
+		ids = ids[len(part):]
+		b, err := json.Marshal(part)
+		if err != nil {
+			return nil, err
+		}
+		rows, err := t.QueryContext(t.ctx, `SELECT s.id, (SELECT f.end_at FROM firings f WHERE f.series_id = s.id AND f.start_at < ?
+			ORDER BY f.start_at DESC, f.id DESC LIMIT 1) FROM (`+t.d.ints("?")+`) AS s (id)`, before, string(b))
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id int64
+			var end sql.NullInt64
+			if err := rows.Scan(&id, &end); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out[id] = end
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // catches works out again which rules caught each incident whose window

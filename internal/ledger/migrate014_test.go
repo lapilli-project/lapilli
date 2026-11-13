@@ -8,12 +8,14 @@ import (
 	"time"
 
 	"lapilli.dev/internal/firing"
+	"lapilli.dev/internal/ledger/ledgertest"
 )
 
 // A ledger at schema 13 with a team, a note, a daily window and
 // firings, opened by this build, migrates to 014 and on, and judges the
 // same.
 func TestMigrate014(t *testing.T) {
+	ledgertest.SQLiteOnly(t, "a ledger an earlier lapilli wrote")
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "l.db")
 	l, err := Open(ctx, path, time.UTC)

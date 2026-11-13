@@ -564,7 +564,7 @@ func (l *Ledger) NotifiedSince(ctx context.Context) (map[string]time.Time, error
 		}
 		es = append(es, e)
 		return nil
-	}, `SELECT d.rule, json_extract(d.labels, '$.severity'), json_extract(d.labels, '$.alarm_id'), n.source, n.copied, min(d.start_at)
+	}, `SELECT d.rule, `+l.d.text("d.labels", "severity")+`, `+l.d.text("d.labels", AlarmID)+`, n.source, n.copied, min(d.start_at)
 		FROM notified d JOIN notifications n ON n.id = d.notification_id WHERE d.start_at > 0 GROUP BY d.rule, 2, 3, n.source, n.copied`)
 	if err != nil {
 		return nil, err
@@ -652,6 +652,7 @@ func (r *recordedNames) alarmIDs(ctx context.Context, ids []string) error {
 			keys = append(keys, k)
 		}
 	}
+	v := r.l.d.text("s.labels", AlarmID)
 	for len(ids) > 0 {
 		part := ids[:min(len(ids), 500)]
 		ids = ids[len(part):]
@@ -659,8 +660,8 @@ func (r *recordedNames) alarmIDs(ctx context.Context, ids []string) error {
 		if err != nil {
 			return err
 		}
-		if err := r.l.eachRow(ctx, keep, `SELECT DISTINCT r.source, json_extract(s.labels, '$.alarm_id'), r.sent FROM series s JOIN rules r ON r.id = s.rule_id
-			WHERE json_extract(s.labels, '$.alarm_id') IS NOT NULL AND json_extract(s.labels, '$.alarm_id') IN (SELECT value FROM json_each(?))
+		if err := r.l.eachRow(ctx, keep, `SELECT DISTINCT r.source, `+v+`, r.sent FROM series s JOIN rules r ON r.id = s.rule_id
+			WHERE `+v+` IS NOT NULL AND `+v+` IN (`+r.l.d.texts("?")+`)
 			AND r.source != ''`, string(b)); err != nil {
 			return err
 		}
@@ -673,9 +674,9 @@ func (r *recordedNames) alarmIDs(ctx context.Context, ids []string) error {
 		if err != nil {
 			return err
 		}
-		if err := r.l.eachRow(ctx, keep, `SELECT DISTINCT r.source, json_extract(s.labels, '$.alarm_id'), r.sent FROM series s JOIN rules r ON r.id = s.rule_id
-			WHERE json_extract(s.labels, '$.alarm_id') >= 'projects/' AND json_extract(s.labels, '$.alarm_id') < 'projects0'
-			AND substr(json_extract(s.labels, '$.alarm_id'), instr(json_extract(s.labels, '$.alarm_id'), '/alertPolicies/') + 1) IN (SELECT value FROM json_each(?))
+		if err := r.l.eachRow(ctx, keep, `SELECT DISTINCT r.source, `+v+`, r.sent FROM series s JOIN rules r ON r.id = s.rule_id
+			WHERE `+v+` >= 'projects/' AND `+v+` < 'projects0'
+			AND substr(`+v+`, `+r.l.d.strpos(v, "'/alertPolicies/'")+` + 1) IN (`+r.l.d.texts("?")+`)
 			AND r.source != ''`, string(b)); err != nil {
 			return err
 		}
@@ -802,7 +803,7 @@ func (t *tier) load(alerts []Alert) error {
 		ids, _ := json.Marshal(t.ids[rule])
 		for _, sp := range spans {
 			rows, err := t.l.r.QueryContext(t.ctx, `SELECT f.id, f.start_at, f.white, f.excused, s.id, s.labels FROM firings f
-				JOIN series s ON s.id = f.series_id WHERE f.rule_id IN (SELECT value FROM json_each(?)) AND f.start_at >= ? AND f.start_at <= ?
+				JOIN series s ON s.id = f.series_id WHERE f.rule_id IN (`+t.l.d.ints("?")+`) AND f.start_at >= ? AND f.start_at <= ?
 				ORDER BY f.start_at, f.id`, string(ids), sp[0], sp[1])
 			if err != nil {
 				return err
@@ -1071,9 +1072,9 @@ func (l *Ledger) NotifiedOf(ctx context.Context, fs []Firing, within Within) (ma
 					}
 				}
 				if err := scan(`SELECT d.notification_id, d.rule, d.labels, d.start_at, d.firing, n.copied FROM notified d
-					JOIN notifications n ON n.id = d.notification_id WHERE json_extract(d.labels, '$.alarm_id') IS NOT NULL
-					AND `+alarmIs("json_extract(d.labels, '$.alarm_id')", "?1", "?5")+` AND d.start_at >= ?2 AND d.start_at <= ?3
-					AND d.rule NOT IN (SELECT value FROM json_each(?4))`,
+					JOIN notifications n ON n.id = d.notification_id WHERE `+l.d.text("d.labels", AlarmID)+` IS NOT NULL
+					AND `+alarmIs(l.d, l.d.text("d.labels", AlarmID), "?1", "?5")+` AND d.start_at >= ?2 AND d.start_at <= ?3
+					AND d.rule NOT IN (`+l.d.texts("?4")+`)`,
 					id, f.Start.Unix()-w, f.Start.Unix()+w, jsonList(names), AlarmKey(id)); err != nil {
 					return nil, err
 				}
@@ -1128,7 +1129,7 @@ func Receivers(by map[string]int) string {
 	return strings.Join(parts, ", ")
 }
 
-// jsonList is a list as JSON, for json_each.
+// jsonList is a list as JSON, for texts and ints (dialect.go).
 func jsonList(xs []string) string {
 	b, _ := json.Marshal(xs)
 	return string(b)

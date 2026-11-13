@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"lapilli.dev/internal/ledger/ledgertest"
 )
 
 // undo017 takes back what 017 made, for the tests of the migrations
@@ -30,6 +32,7 @@ var undo017 = []string{
 // stones and tallies as they were, no firing during a deploy; then deploys
 // read mark its firings, and its re-fired alert is found by its index.
 func TestMigrate017(t *testing.T) {
+	ledgertest.SQLiteOnly(t, "a ledger an earlier lapilli wrote")
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "ledger.db")
 	in, err := os.Open("testdata/v0.28.1.db.gz")

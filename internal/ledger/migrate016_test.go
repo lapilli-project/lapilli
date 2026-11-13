@@ -7,6 +7,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"lapilli.dev/internal/ledger/ledgertest"
 )
 
 // undo016 takes back what 016 made: tasks as 003 and 004 made them, their
@@ -82,6 +84,7 @@ func TestTaskIDNeverAgain(t *testing.T) {
 // kept; the next id past the deleted one's, which the changes noted; the
 // proposal made into none.
 func TestMigrate016(t *testing.T) {
+	ledgertest.SQLiteOnly(t, "a ledger an earlier lapilli wrote")
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "l.db")
 	l, err := Open(ctx, path, time.UTC)
