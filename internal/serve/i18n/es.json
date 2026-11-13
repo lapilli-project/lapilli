@@ -1118,5 +1118,13 @@
  "Read-only: no one is signed in": "Solo lectura: nadie ha iniciado sesión",
  "Nowhere to send a report yet": "Aún no hay adónde enviar un informe",
  "Nothing to look at now.": "Nada que mirar ahora.",
- "What went wrong in the last week, and what caught it.": "Qué salió mal en la última semana, y qué lo detectó."
+ "What went wrong in the last week, and what caught it.": "Qué salió mal en la última semana, y qué lo detectó.",
+ "Rules by name, incidents by id or title, and teams by name. A filter such as is:noisy or severity:critical searches the rules, on the rules page.": "Reglas por nombre, incidentes por id o título y equipos por nombre. Un filtro como is:noisy o severity:critical busca en las reglas, en la página de reglas.",
+ "%d found for “%s”.": "%d resultados para “%s”.",
+ "Nothing found.": "No se encontró nada.",
+ "No rule, incident or team has that in its name. Try fewer letters, or search the rules with a filter, such as is:noisy.": "Ninguna regla, incidente ni equipo lo tiene en su nombre. Prueba con menos letras, o busca en las reglas con un filtro, como is:noisy.",
+ "All rules": "Todas las reglas",
+ "All incidents": "Todos los incidentes",
+ "All %d on the rules page": "Las %d en la página de reglas",
+ "The latest %d of %d.": "Los %d más recientes de %d."
 }

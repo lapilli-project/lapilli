@@ -1,0 +1,15 @@
+{{define "search"}}{{$title := t "Search"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
+<h1>{{$title}}</h1>
+{{if not .Q}}<p class="lede">{{t "Rules by name, incidents by id or title, and teams by name. A filter such as is:noisy or severity:critical searches the rules, on the rules page."}}</p>
+{{else if .Empty}}{{template "empty" .Empty}}
+{{else}}<p class="lede">{{t "%d found for “%s”." .Total .Q}}</p>
+{{if .Rules}}<h2>{{t "Rules"}} <span class="quiet">{{.RulesTotal}}</span></h2>
+<ul class="plain">{{range .Rules}}<li><a href="{{$.Rule .}}">{{.}}</a></li>{{end}}</ul>
+{{with .More}}<p><a href="{{.}}">{{t "All %d on the rules page" $.View.RulesTotal}}</a></p>{{end}}{{end}}
+{{if .Incidents}}<h2>{{t "Incidents"}} <span class="quiet">{{.IncidentsTotal}}</span></h2>
+<ul class="plain">{{range .Incidents}}<li><a href="{{$.Incident .ID}}">{{.ID}}</a> {{.Title}} <span class="quiet">{{at $loc .Start}}</span></li>{{end}}</ul>
+{{if gt .IncidentsTotal (len .Incidents)}}<p class="quiet">{{t "The latest %d of %d." (len .Incidents) .IncidentsTotal}}</p>{{end}}{{end}}
+{{if .Teams}}<h2>{{t "Teams"}} <span class="quiet">{{.TeamsTotal}}</span></h2>
+<ul class="plain">{{range .Teams}}<li><a href="{{$.Link "/" "team" .}}">{{.}}</a></li>{{end}}</ul>{{end}}
+{{end}}
+{{end}}{{template "bottom" .}}{{end}}

@@ -1118,5 +1118,13 @@
  "Read-only: no one is signed in": "読み取り専用: サインインしていません",
  "Nowhere to send a report yet": "レポートの送り先がまだありません",
  "Nothing to look at now.": "今見るべきものはありません。",
- "What went wrong in the last week, and what caught it.": "直近 1 週間に何が起きて、何が検知したかです。"
+ "What went wrong in the last week, and what caught it.": "直近 1 週間に何が起きて、何が検知したかです。",
+ "Rules by name, incidents by id or title, and teams by name. A filter such as is:noisy or severity:critical searches the rules, on the rules page.": "ルールは名前で、インシデントは ID かタイトルで、チームは名前で検索します。is:noisy や severity:critical のようなフィルターを入れると、ルール画面でルールを検索します。",
+ "%d found for “%s”.": "“%[2]s” の検索結果は %[1]d 件です。",
+ "Nothing found.": "見つかりませんでした。",
+ "No rule, incident or team has that in its name. Try fewer letters, or search the rules with a filter, such as is:noisy.": "名前にそれを含むルール、インシデント、チームはありません。文字を減らすか、is:noisy のようなフィルターでルールを検索してください。",
+ "All rules": "すべてのルール",
+ "All incidents": "すべてのインシデント",
+ "All %d on the rules page": "ルール画面で %d 件すべてを見る",
+ "The latest %d of %d.": "%[2]d 件中、最新の %[1]d 件です。"
 }

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -262,5 +263,54 @@ func TestSidebar(t *testing.T) {
 		if got := strings.Contains(body, `href="/roles"`); got != roles {
 			t.Errorf("%q: Roles in the sidebar %v, want %v", who, got, roles)
 		}
+	}
+}
+
+// Every text a template gives t, mainAction or emptyOf as it is written,
+// and every text of the sidebar, the breadcrumbs and the actions' reasons,
+// has a translation: some are shown only in states the pages rendered in
+// TestPagesInEachLanguage aren't in.
+func TestFrameTextsTranslated(t *testing.T) {
+	texts := map[string]bool{}
+	tpls, err := files.ReadDir("templates")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lit := regexp.MustCompile(`(?:\bt|mainAction \$|emptyOf "\w+") "((?:[^"\\]|\\.)+)"`)
+	for _, f := range tpls {
+		b, err := files.ReadFile("templates/" + f.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range lit.FindAllStringSubmatch(string(b), -1) {
+			texts[m[1]] = true
+		}
+		for _, m := range regexp.MustCompile(`emptyOf "\w+" "(?:[^"]*)" "((?:[^"\\]|\\.)+)"`).FindAllStringSubmatch(string(b), -1) {
+			texts[m[1]] = true
+		}
+	}
+	for _, g := range navLayout {
+		texts[g.name] = true
+		for _, it := range g.items {
+			texts[it.name] = true
+		}
+	}
+	for _, c := range crumbsOf {
+		texts[c.Group], texts[c.Name] = true, true
+	}
+	for _, x := range []string{"Admins only", "Editors only", "%d open", "%d to approve", "Nowhere to send a report yet",
+		"Read-only: lapilli serve was started with --read-only", "Read-only: no one is given a role here", "Read-only: no one is signed in"} {
+		texts[x] = true
+	}
+	delete(texts, "")
+	for x := range texts {
+		for lang, c := range catalogs {
+			if _, ok := c[x]; !ok {
+				t.Errorf("%s has no translation for %q", lang, x)
+			}
+		}
+	}
+	if len(texts) < 300 {
+		t.Errorf("only %d texts found", len(texts))
 	}
 }

@@ -1,0 +1,110 @@
+package serve
+
+import (
+	"math/rand/v2"
+	"net/http"
+	"net/url"
+	"strings"
+	"testing"
+)
+
+func TestTokens(t *testing.T) {
+	got := tokens(`  err is:noisy "job:rate5m x" Label:team=pay severity: foo:bar group:shop 10:30 is:loud has:facts`)
+	want := []qword{{Value: "err"}, {Key: "is", Value: "noisy"}, {Value: "job:rate5m x", Quoted: true}, {Key: "label", Value: "team=pay"},
+		{Key: "severity", Bad: "value"}, {Key: "foo", Value: "bar", Bad: "key"}, {Key: "group", Value: "shop"}, {Value: "10:30"},
+		{Key: "is", Value: "loud", Bad: "value"}, {Key: "has", Value: "facts"}}
+	if len(got) != len(want) {
+		t.Fatalf("%d tokens, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("token %d: %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestCanonical(t *testing.T) {
+	teams := []string{"payments", "search"}
+	for _, c := range []struct {
+		q, want string
+		changed bool
+	}{
+		{"q=err", "q=err", false},
+		{"q=label:a=b+group:shop", "q=label%3Aa%3Db+group%3Ashop", false},
+		{"q=err+is:noisy+severity:critical+team:payments", "perf=noisy&q=err&severity=critical&team=payments", true},
+		{"q=is:differs+is:proposed+status:Tune+has:facts&perf=ok", "has=proposal&has=facts&perf=ok&status=tune&trust=differs", true},
+		// What it doesn't understand stays, to say so; a team no one has
+		// is one.
+		{"q=is:loud+team:nope+severity:page&team=search", "q=is%3Aloud+team%3Anope&severity=page&team=search", true},
+		{"q=severity:page&severity=page", "severity=page", true},
+	} {
+		in, _ := url.ParseQuery(c.q)
+		out, changed := canonical(in, teams)
+		if out.Encode() != c.want || changed != c.changed {
+			t.Errorf("%s: %s (%v), want %s (%v)", c.q, out.Encode(), changed, c.want, c.changed)
+		}
+		// Once canonical, it stays.
+		if again, changed := canonical(out, teams); changed || again.Encode() != out.Encode() {
+			t.Errorf("%s: canonical twice: %s", c.q, again.Encode())
+		}
+	}
+}
+
+// TestSearch: one found is opened, in the same context; more are listed by
+// kind; a filter searches the rules; nothing found says so. Every redirect
+// stays on this server.
+func TestSearch(t *testing.T) {
+	s := pagesServer(t)
+	h := s.Handler()
+	for _, c := range []struct{ q, to string }{
+		{"q=Limited", "/rules/Limited"},
+		{"q=limited&team=payments&weeks=4", "/rules/Limited?team=payments&weeks=4"},
+		{"q=INC-1", "/incidents/INC-1"},
+		{"q=paym&weeks=12", "/?team=payments&weeks=12"},
+		{"q=is:noisy+err&team=payments", "/rules?perf=noisy&q=err&team=payments"},
+		{"q=label:service%3Dsearch", "/rules?q=label%3Aservice%3Dsearch"},
+		{"q=group:shop+is:loud", "/rules?q=group%3Ashop+is%3Aloud"},
+		{"q=team:payments", "/rules?team=payments"},
+	} {
+		code, _, hd := get(t, h, "/search?"+c.q)
+		if code != http.StatusSeeOther || hd.Get("Location") != c.to {
+			t.Errorf("/search?%s: %d to %q, want %q", c.q, code, hd.Get("Location"), c.to)
+		}
+	}
+	_, body, _ := get(t, h, "/search?q=i")
+	for _, want := range []string{"<h2>Rules", "<h2>Incidents", `href="/rules/Limited"`, `href="/incidents/INC-1"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/search?q=i: no %s", want)
+		}
+	}
+	if strings.Index(body, `href="/rules/Limited"`) > strings.Index(body, `href="/incidents/INC-1"`) {
+		t.Error("/search?q=i: the incidents before the rules")
+	}
+	if _, body, _ := get(t, h, "/search?q=nothing-is-called-this"); !strings.Contains(body, `class="empty empty-notfound"`) || !strings.Contains(body, "Nothing found.") {
+		t.Error("/search for nothing: no empty state")
+	}
+	if _, body, _ := get(t, h, "/search"); !strings.Contains(body, "is:noisy") {
+		t.Error("/search: no help")
+	}
+
+	// Whatever is searched for, a redirect goes to a page here.
+	r := rand.New(rand.NewPCG(1, 2))
+	parts := []string{"//evil.example", `\\evil.example`, "https://evil.example/", "team:", "team://x", "is:", "label:", "@", "%2F%2F", " ", "Limited",
+		"INC-1", "paym", "/..", "\r\n", "group:../", `"`, "is:noisy", "severity:/x"}
+	for i := 0; i < 400; i++ {
+		var q strings.Builder
+		for j := r.IntN(4); j >= 0; j-- {
+			q.WriteString(parts[r.IntN(len(parts))])
+		}
+		code, _, hd := get(t, h, "/search?q="+url.QueryEscape(q.String())+"&team="+url.QueryEscape(parts[r.IntN(len(parts))]))
+		if code == http.StatusSeeOther {
+			loc := hd.Get("Location")
+			u, err := url.Parse(loc)
+			if err != nil || u.Host != "" || u.Scheme != "" || !strings.HasPrefix(loc, "/") || strings.HasPrefix(loc, "//") || strings.HasPrefix(loc, `/\`) {
+				t.Errorf("%q: off to %q", q.String(), loc)
+			}
+		} else if code != http.StatusOK {
+			t.Errorf("%q: %d", q.String(), code)
+		}
+	}
+}

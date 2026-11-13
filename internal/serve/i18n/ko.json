@@ -1118,5 +1118,13 @@
  "Read-only: no one is signed in": "읽기 전용: 로그인하지 않았어요",
  "Nowhere to send a report yet": "아직 리포트를 보낼 곳이 없어요",
  "Nothing to look at now.": "지금 볼 것이 없어요.",
- "What went wrong in the last week, and what caught it.": "최근 1주 동안 무엇이 잘못됐고, 무엇이 잡았는지예요."
+ "What went wrong in the last week, and what caught it.": "최근 1주 동안 무엇이 잘못됐고, 무엇이 잡았는지예요.",
+ "Rules by name, incidents by id or title, and teams by name. A filter such as is:noisy or severity:critical searches the rules, on the rules page.": "규칙은 이름으로, 인시던트는 ID 나 제목으로, 팀은 이름으로 찾아요. is:noisy, severity:critical 같은 필터를 넣으면 규칙 화면에서 규칙을 찾아요.",
+ "%d found for “%s”.": "“%[2]s” 검색 결과 %[1]d건이에요.",
+ "Nothing found.": "찾은 것이 없어요.",
+ "No rule, incident or team has that in its name. Try fewer letters, or search the rules with a filter, such as is:noisy.": "이름에 그 글자가 들어간 규칙, 인시던트, 팀이 없어요. 글자를 줄이거나, is:noisy 같은 필터로 규칙을 찾아 보세요.",
+ "All rules": "모든 규칙",
+ "All incidents": "모든 인시던트",
+ "All %d on the rules page": "규칙 화면에서 %d개 모두 보기",
+ "The latest %d of %d.": "%[2]d건 중 최근 %[1]d건이에요."
 }

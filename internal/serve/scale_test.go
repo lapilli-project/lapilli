@@ -262,7 +262,7 @@ func TestPagesScale(t *testing.T) {
 	for _, path := range []string{"/", "/?team=team3", "/rules", "/rules?weeks=12", "/rules?team=team3", "/rules/Rule007", "/incidents", "/incidents?weeks=12",
 		"/firings?day=2026-11-02", "/tasks", "/tasks?status=all", "/tasks/7", "/windows", "/windows/3", "/teams",
 		"/outcomes", "/api/v1/outcomes", "/metrics", "/api/v1/report?firings=false", "/api/v1/report", "/roles", "/reports", "/reports/digest",
-		"/rules?sort=refired", "/incidents?team=team3&source=written", "/api/v1/summary?team=*", "/api/v1/summary?from=2025-11-10&team=*"} {
+		"/rules?sort=refired", "/incidents?team=team3&source=written", "/search?q=rule0", "/api/v1/summary?team=*", "/api/v1/summary?from=2025-11-10&team=*"} {
 		s.cache.Lock()
 		s.cache.gen = "" // worked out afresh
 		s.cache.Unlock()
