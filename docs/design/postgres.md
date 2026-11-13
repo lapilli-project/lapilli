@@ -1,6 +1,6 @@
 # The ledger in Postgres
 
-Status: built, for the next release. `lapilli serve` keeps its ledger in
+Status: built, for v0.34.0. `lapilli serve` keeps its ledger in
 SQLite by default, as it always has; `--ledger-url-file FILE` keeps it in a
 Postgres database instead. Still one replica: what more than one would take
 is at the end. The companion to [serve.md](serve.md) (the ledger) and
@@ -353,12 +353,14 @@ the images CI pins), each figure one run's:
 | the same again, unchanged | 0.36 s | 0.47 s | 0.39 s |
 | a day's 10,000 firings beside 500 quiet windows | 0.44 s | 0.45 s | 0.42 s |
 | 20,000 notifications kept, a thousand a write | 1.1 s | 10.5 s | 8.8 s |
-| their pages over twelve weeks | 0.37 s | 2.0 s | 1.6 s |
+| their pages over twelve weeks, a span a statement (since read 2,000 a statement in Postgres) | 0.37 s | 2.0 s | 1.6 s |
 | fifty teams' hours of a week, afresh | 0.16 s | 0.22 s | 0.20 s |
 | the pages' scale test, whole (`TestPagesScale`) | 12.3 s | 18.7 s | 19.2 s |
 
 Every budget holds on all three, on two CPUs (`--cpus=2`, as a GitHub
-runner has). A notification an alert manager sends is a write of its own:
+runner has). Read 2,000 spans a statement, those pages took 83 to 100 ms on
+Postgres 17 on the laptop itself, against 278 to 284 ms in SQLite there, and CI's
+Postgres 15 and 18 hold their budget. A notification an alert manager sends is a write of its own:
 20,000 so took 2.4 s, 17.4 s and 12.2 s; the scale test keeps them a
 thousand a write, as a source's are copied in, since what it holds to a
 budget (3 s, 6 s on CI) is reading them. Their pages are read a span of

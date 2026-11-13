@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-11-14
+
+The ledger where a team keeps the rest of what matters: in a Postgres
+database, with its backups, failover and SQL, beside SQLite, which stays
+the default. Still one replica; what more would take is in the design
+note. Reviewed three times, as an attacker would, for correctness and
+concurrency, and the fixes once more; what each found is fixed in what is
+described here, as are two things CI's Postgres runs found (a server that
+stops answering, which nothing waited on for long enough, and a page's
+round trips). No change to a SQLite ledger's schema or files.
+
 ### Added
 
 - **The ledger in Postgres** ([docs/design/postgres.md](docs/design/postgres.md)):
