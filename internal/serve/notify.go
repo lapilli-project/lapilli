@@ -79,6 +79,11 @@ func (s *Server) sendDue(ctx context.Context, dest string, now time.Time) error 
 		return err
 	}
 	for _, n := range due {
+		// Read through a reader: sent only while this process still holds
+		// the ledger, or a process that took it over sends it too.
+		if err := s.l.Hold(ctx); err != nil {
+			return err
+		}
 		sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		err := s.send(sctx, n)
 		cancel()

@@ -94,9 +94,11 @@ type pgWriter struct {
 	// have one.
 	key int32
 	// pid is the session that holds the lock for this process, once one
-	// does: should it still hold it after its connection dropped, which
-	// the server can take minutes to notice, it is this process's own.
+	// does; own, every session that took it for this process: should one
+	// still hold it after its connection dropped, which the server can take
+	// minutes to notice, it is this process's own.
 	pid uint32
+	own map[uint32]bool
 	// writers is schema_version.writers once this process took the lock:
 	// each process that takes it counts one more. Another connection that
 	// finds another count finds the ledger written by someone else since.
@@ -176,29 +178,35 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 	for _, s := range []string{"SET tcp_keepalives_idle = 30", "SET tcp_keepalives_interval = 10", "SET tcp_keepalives_count = 3"} {
 		c.Exec(ctx, s)
 	}
+	schema, err := pinSchema(ctx, c)
+	if err != nil {
+		return err
+	}
 	if w.key == 0 {
-		var schema *string
-		if err := c.QueryRow(ctx, "SELECT current_schema()").Scan(&schema); err != nil {
-			return err
-		}
-		if schema == nil {
-			return fmt.Errorf("%w: no schema on the search_path exists to keep the ledger in", ErrConnect)
-		}
 		h := fnv.New32a()
-		h.Write([]byte(*schema))
+		h.Write([]byte(schema))
 		w.key = int32(h.Sum32()&0x7fffffff) | 1
 	}
 	took, err := w.try(ctx, c)
 	if err != nil {
 		return err
 	}
-	if !took && w.pid != 0 {
-		// This process's own session, from before its connection dropped,
-		// may hold it still: it is ended, and the lock taken again.
-		if h, err := w.holder(ctx, c); err == nil && h != nil && h.PID == int64(w.pid) {
-			c.Exec(ctx, "SELECT pg_terminate_backend($1, 5000)", int64(w.pid))
+	if took {
+		// This process's own from now, should what follows not reach it.
+		w.own[c.PgConn().PID()] = true
+	}
+	if !took && len(w.own) > 0 {
+		// One of this process's own sessions, from before a connection
+		// dropped (maybe while it was made), may hold it still, which the
+		// server can keep for minutes: it is ended, and the lock taken
+		// again. Its client is gone: it writes nothing more.
+		if h, err := w.holder(ctx, c); err == nil && h != nil && w.own[uint32(h.PID)] {
+			c.Exec(ctx, "SELECT pg_terminate_backend($1, 5000)", h.PID)
 			if took, err = w.try(ctx, c); err != nil {
 				return err
+			}
+			if took {
+				w.own[c.PgConn().PID()] = true
 			}
 		}
 	}
@@ -219,11 +227,11 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 	if w.writers != 0 {
 		var n int64
 		if err := c.QueryRow(ctx, "SELECT writers FROM schema_version").Scan(&n); err != nil {
-			c.Exec(ctx, "SELECT pg_advisory_unlock($1, $2)", int32(lockClass), w.key)
+			w.unlock(c)
 			return err
 		}
 		if n != w.writers {
-			c.Exec(ctx, "SELECT pg_advisory_unlock($1, $2)", int32(lockClass), w.key)
+			w.unlock(c)
 			w.lose()
 			return ErrLockLost
 		}
@@ -231,6 +239,37 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 	}
 	w.pid = c.PgConn().PID()
 	return nil
+}
+
+// unlock lets the lock go on a session that took it, with a context of its
+// own: the connection's may be what ran out.
+func (w *pgWriter) unlock(c *pgx.Conn) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c.Exec(ctx, "SELECT pg_advisory_unlock($1, $2)", int32(lockClass), w.key)
+}
+
+// pinSchema readies a connection's statements for the ledger's schema
+// alone: the first schema of its search_path (current_schema()), where the
+// ledger is made if there is none. A ledger further along the path is
+// refused: the lock is the first schema's, and would let a second writer
+// at the tables found further on.
+func pinSchema(ctx context.Context, c *pgx.Conn) (string, error) {
+	var schema, held *string
+	if err := c.QueryRow(ctx, `SELECT current_schema(), (SELECT n.nspname FROM pg_class t JOIN pg_namespace n ON n.oid = t.relnamespace
+		WHERE t.oid = to_regclass('schema_version'))`).Scan(&schema, &held); err != nil {
+		return "", err
+	}
+	if schema == nil {
+		return "", fmt.Errorf("%w: no schema on the search_path exists to keep the ledger in", ErrConnect)
+	}
+	if held != nil && *held != *schema {
+		return "", fmt.Errorf("%w: the search_path finds the ledger in schema %q, not in its first, %q: name %q first", ErrConnect, *held, *schema, *held)
+	}
+	if _, err := c.Exec(ctx, "SELECT set_config('search_path', quote_ident($1), false)", *schema); err != nil {
+		return "", err
+	}
+	return *schema, nil
 }
 
 func (w *pgWriter) try(ctx context.Context, c *pgx.Conn) (bool, error) {
@@ -527,7 +566,7 @@ func OpenPostgres(ctx context.Context, conn string, loc *time.Location) (*Ledger
 		return nil, err
 	}
 	secrets := secretsOf(conn, cfg)
-	pw := &pgWriter{lost: make(chan struct{})}
+	pw := &pgWriter{lost: make(chan struct{}), own: map[uint32]bool{}}
 	writer := stdlib.GetConnector(*cfg, stdlib.OptionAfterConnect(pw.connected), stdlib.OptionBeforeConnect(pw.connecting))
 	w := sql.OpenDB(pgConnector{writer, secrets})
 	// One connection writes, as for SQLite: writes take turns, and the
@@ -537,6 +576,10 @@ func OpenPostgres(ctx context.Context, conn string, loc *time.Location) (*Ledger
 	w.SetConnMaxIdleTime(0)
 	w.SetConnMaxLifetime(0)
 	reader := stdlib.GetConnector(*cfg, stdlib.OptionAfterConnect(func(ctx context.Context, c *pgx.Conn) error {
+		// The ledger's schema alone, as the writer's.
+		if _, err := pinSchema(ctx, c); err != nil {
+			return err
+		}
 		// A transaction of reads sees the ledger as of one moment, as
 		// SQLite's do, and writes nothing.
 		for _, s := range []string{"SET default_transaction_read_only = on", "SET default_transaction_isolation = 'repeatable read'"} {
@@ -576,6 +619,33 @@ func OpenPostgres(ctx context.Context, conn string, loc *time.Location) (*Ledger
 		return nil, err
 	}
 	return l, nil
+}
+
+// Hold says this process still holds the ledger, before it does what
+// leaves the process on the ledger's word, such as sending a notice a reader
+// found due: in Postgres, that the writer's session holds the lock,
+// connecting again (and taking it again, or finding it lost) if the session
+// went. A notice sent by a process whose lock went, while another took the
+// ledger, would be sent twice. SQLite's, always.
+func (l *Ledger) Hold(ctx context.Context) error {
+	if l.pg == nil {
+		return nil
+	}
+	if l.pg.isLost() {
+		return ErrLockLost
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var held bool
+	if err := l.w.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted AND pid = pg_backend_pid()
+		AND objsubid = 2 AND classid::bigint = ? AND objid::bigint = ?)`, int64(lockClass), int64(l.pg.key)).Scan(&held); err != nil {
+		return err
+	}
+	if !held {
+		l.pg.lose()
+		return ErrLockLost
+	}
+	return nil
 }
 
 // Lost is closed when the ledger's lock is lost for good (ErrLockLost):

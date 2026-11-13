@@ -5,11 +5,14 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -177,5 +180,45 @@ func TestRunStopsWhenTheLockIsLost(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("serve went on")
+	}
+}
+
+// A notice found due is sent only while this process holds the ledger:
+// one whose writer's session went, while another process took the ledger
+// and will send it, sends nothing.
+func TestSendDueHoldsTheLedger(t *testing.T) {
+	if !ledgertest.On() {
+		t.Skip("the ledgers are SQLite's")
+	}
+	var sent atomic.Int64
+	recv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { sent.Add(1) }))
+	defer recv.Close()
+	hook := filepath.Join(t.TempDir(), "hook")
+	os.WriteFile(hook, []byte(recv.URL+"/hook"), 0o600)
+	s, _ := server(t, func(c *Config) {
+		c.UserHeader, c.NotifyWebhook = "X-Forwarded-Email", hook
+		c.LedgerURLFile = ledgertest.DatabaseFile(t)
+	})
+	ctx := context.Background()
+	if code, body := api(t, s.Handler(), "POST", "/api/v1/tasks", `{"title": "tune Errors", "rule": "Errors"}`); code != http.StatusCreated {
+		t.Fatalf("task: %d %s", code, body)
+	}
+	db := ledgerDB(t, s)
+	defer db.Close()
+	const here = "locktype = 'advisory' AND granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
+	if _, err := db.ExecContext(ctx, "SELECT pg_terminate_backend(pid, 5000) FROM pg_locks WHERE "+here); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(s.cfg.LedgerURLFile)
+	other, err := ledger.OpenPostgres(ctx, strings.TrimSpace(string(b)), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	for range 2 {
+		s.sendDue(ctx, "webhook", time.Now().Add(time.Minute))
+	}
+	if n := sent.Load(); n != 0 {
+		t.Errorf("a process whose lock another took sent %d notices", n)
 	}
 }
