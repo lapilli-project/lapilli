@@ -64,17 +64,25 @@ func scansAll(l *Ledger, plan, table string) bool {
 }
 
 // An alarm's id is found through series_alarm and notified_alarm, in
-// either database: the dialect's text is the expression they are made on.
+// either database, by the conditions the ledger asks: alarmIs, and those of
+// alarmIDs.
 func TestAlarmIDIndexed(t *testing.T) {
 	l := open(t, time.UTC)
-	for q, index := range map[string]string{
-		"SELECT s.id FROM series s WHERE " + l.d.text("s.labels", AlarmID) + " = ?":                                                                    "series_alarm",
-		"SELECT d.rule FROM notified d WHERE " + l.d.text("d.labels", AlarmID) + " = ? AND d.start_at >= ?":                                            "notified_alarm",
-		"SELECT s.id FROM series s WHERE " + l.d.text("s.labels", AlarmID) + " >= 'projects/' AND " + l.d.text("s.labels", AlarmID) + " < 'projects0'": "series_alarm",
+	s, d := l.d.text("s.labels", AlarmID), l.d.text("d.labels", AlarmID)
+	for _, c := range []struct {
+		q, index string
+		args     []any
+	}{
+		{"SELECT s.id FROM series s WHERE " + alarmIs(l.d, s, "?1", "?1"), "series_alarm", []any{"ocid1.alarm.oc1..a"}},
+		{"SELECT s.id FROM series s WHERE " + alarmIs(l.d, s, "?1", "?2"), "series_alarm", []any{"projects/p/alertPolicies/9", "alertPolicies/9"}},
+		{"SELECT d.rule FROM notified d WHERE " + alarmIs(l.d, d, "?1", "?1") + " AND d.start_at >= ?2", "notified_alarm", []any{"ocid1.alarm.oc1..a", 0}},
+		{"SELECT s.id FROM series s WHERE " + l.d.alarmPrefix(s) + " >= 'projects/' AND " + l.d.alarmPrefix(s) + " < 'projects0'", "series_alarm", nil},
+		{"SELECT s.id FROM series s WHERE " + s + " IS NOT NULL AND " + alarmIn(l.d, s), "series_alarm", []any{`["ocid1.alarm.oc1..a", "b"]`}},
 	} {
+		q, index := c.q, c.index
 		// In Postgres, searched by the index (Index Cond), not read whole
 		// through it, which a partial index can be.
-		p := plan(t, l, q, "ocid1.alarm.oc1..a", 0)
+		p := plan(t, l, q, c.args...)
 		searched := l.d != postgres
 		for _, step := range strings.Split(p, "; ") {
 			searched = searched || strings.HasPrefix(step, "Index Cond: ") && strings.Contains(step, "'alarm_id'")

@@ -379,7 +379,7 @@ func (l *Ledger) PutNote(ctx context.Context, n Note, by string) error {
 			}
 		}
 		if _, err := t.ExecContext(t.ctx, `INSERT INTO notes (rule, team_id, status, runbook, note, updated, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT (rule) DO UPDATE SET team_id = excluded.team_id, status = excluded.status, runbook = excluded.runbook,
+			ON CONFLICT `+t.d.pick("(rule)", "(md5(rule))")+` DO UPDATE SET team_id = excluded.team_id, status = excluded.status, runbook = excluded.runbook,
 				note = excluded.note, updated = excluded.updated, updated_by = excluded.updated_by`,
 			n.Rule, team, n.Status, n.Runbook, n.Note, time.Now().Unix(), by); err != nil {
 			return err

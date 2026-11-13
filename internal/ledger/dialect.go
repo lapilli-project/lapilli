@@ -39,14 +39,27 @@ func (d dialect) pick(sqlite, pg string) string {
 }
 
 // text is the text a JSON object holds under a key, compared byte by byte
-// as SQLite compares it; NULL where it holds none. In Postgres it is the
+// as SQLite compares it; NULL where it holds none. In SQLite it is the
 // expression the indexes on alarm ids (series_alarm, notified_alarm) are
-// made on, when expr is labels.
+// made on, when expr is labels; in Postgres, alarmPrefix of it is.
 func (d dialect) text(expr, key string) string {
 	if d == postgres {
 		return "((" + expr + "::jsonb ->> '" + key + "') COLLATE \"C\")"
 	}
 	return "json_extract(" + expr + ", '$." + key + "')"
+}
+
+// alarmPrefix is what series_alarm and notified_alarm hold of an alarm's
+// id, v: in Postgres its first 500 characters, as a btree holds some 2,700
+// bytes at most and an alert's labels are 4 KB; in SQLite, v. Equal ids
+// have equal prefixes, and an id from 'projects/' to 'projects0' a prefix
+// there too: a condition on the prefix finds through the index the rows
+// one on the id keeps.
+func (d dialect) alarmPrefix(v string) string {
+	if d == postgres {
+		return "left(" + v + ", 500)"
+	}
+	return v
 }
 
 // texts are the texts a JSON list holds, given as a parameter, for IN:

@@ -362,10 +362,25 @@ func (l *Ledger) notifyOne(t *txn, n *Notification) (bool, error) {
 // qStarts reads the starts of the alerts a group's last notifications told
 // of: through notifications_group, then notified_of, never every alert of
 // a rule.
-const qStarts = `SELECT d.labels, d.start_at FROM notified d WHERE d.notification_id IN
-	(SELECT id FROM notifications WHERE source = ? AND receiver = ? AND grp = ? AND at <= ? AND shape = ?
-		ORDER BY at DESC, id DESC LIMIT ?)
+// groupIs is an SQL condition on a notification's group key being the
+// one given as p, through notifications_group: in Postgres the index holds
+// the key's md5, as a key of 1,000 characters can be longer than a btree
+// holds.
+func groupIs(d dialect, p string) string {
+	return d.pick("grp = "+p, "md5(grp) = md5("+p+") AND grp = "+p)
+}
+
+func qStarts(d dialect) string {
+	return `SELECT d.labels, d.start_at FROM notified d WHERE d.notification_id IN
+	(SELECT id FROM notifications WHERE source = ?1 AND receiver = ?2 AND ` + groupIs(d, "?3") + ` AND at <= ?4 AND shape = ?5
+		ORDER BY at DESC, id DESC LIMIT ?6)
 	AND d.start_at > 0 ORDER BY d.notification_id DESC`
+}
+
+func qLastOfGroup(d dialect) string {
+	return `SELECT id, resolved FROM notifications WHERE source = ?1 AND receiver = ?2 AND ` + groupIs(d, "?3") + ` AND at <= ?4
+		ORDER BY at DESC, id DESC LIMIT 1`
+}
 
 // startsFrom is how many of a group's last notifications an alert whose
 // message didn't say its start looks for it in: however long ago they came,
@@ -384,7 +399,7 @@ func (l *Ledger) fill(t *txn, n *Notification) error {
 		return nil
 	}
 	at := n.At.Unix()
-	rows, err := t.QueryContext(t.ctx, qStarts, n.Source, n.Receiver, n.Group, at, n.Shape, startsFrom)
+	rows, err := t.QueryContext(t.ctx, qStarts(t.d), n.Source, n.Receiver, n.Group, at, n.Shape, startsFrom)
 	if err != nil {
 		return err
 	}
@@ -437,8 +452,7 @@ func (l *Ledger) reason(t *txn, n Notification) (string, error) {
 	}
 	var prev int64
 	var resolved bool
-	err := t.QueryRowContext(t.ctx, `SELECT id, resolved FROM notifications WHERE source = ? AND receiver = ? AND grp = ? AND at <= ?
-		ORDER BY at DESC, id DESC LIMIT 1`, n.Source, n.Receiver, n.Group, n.At.Unix()).Scan(&prev, &resolved)
+	err := t.QueryRowContext(t.ctx, qLastOfGroup(t.d), n.Source, n.Receiver, n.Group, n.At.Unix()).Scan(&prev, &resolved)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && resolved {
 		return ReasonFirst, nil
 	}
@@ -653,6 +667,7 @@ func (r *recordedNames) alarmIDs(ctx context.Context, ids []string) error {
 		}
 	}
 	v := r.l.d.text("s.labels", AlarmID)
+	p := r.l.d.alarmPrefix(v)
 	for len(ids) > 0 {
 		part := ids[:min(len(ids), 500)]
 		ids = ids[len(part):]
@@ -661,7 +676,7 @@ func (r *recordedNames) alarmIDs(ctx context.Context, ids []string) error {
 			return err
 		}
 		if err := r.l.eachRow(ctx, keep, `SELECT DISTINCT r.source, `+v+`, r.sent FROM series s JOIN rules r ON r.id = s.rule_id
-			WHERE `+v+` IS NOT NULL AND `+v+` IN (`+r.l.d.texts("?")+`)
+			WHERE `+v+` IS NOT NULL AND `+alarmIn(r.l.d, v)+`
 			AND r.source != ''`, string(b)); err != nil {
 			return err
 		}
@@ -675,13 +690,23 @@ func (r *recordedNames) alarmIDs(ctx context.Context, ids []string) error {
 			return err
 		}
 		if err := r.l.eachRow(ctx, keep, `SELECT DISTINCT r.source, `+v+`, r.sent FROM series s JOIN rules r ON r.id = s.rule_id
-			WHERE `+v+` >= 'projects/' AND `+v+` < 'projects0'
+			WHERE `+p+` >= 'projects/' AND `+p+` < 'projects0'
 			AND substr(`+v+`, `+r.l.d.strpos(v, "'/alertPolicies/'")+` + 1) IN (`+r.l.d.texts("?")+`)
 			AND r.source != ''`, string(b)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// alarmIn is an SQL condition on an alarm_id, v, being one of the IDs of
+// a JSON list given as ?1: through series_alarm, which holds a prefix of
+// each in Postgres (alarmPrefix), searched for the list's as an array.
+func alarmIn(d dialect, v string) string {
+	if d == postgres {
+		return d.alarmPrefix(v) + ` = ANY (ARRAY(SELECT left(id, 500) FROM (` + d.texts("?1") + `) AS ids (id))) AND ` + v + ` IN (` + d.texts("?1") + `)`
+	}
+	return v + ` IN (` + d.texts("?") + `)`
 }
 
 // of is the rule an alert is of: copied in from the source named, the rule

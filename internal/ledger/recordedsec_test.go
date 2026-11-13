@@ -161,7 +161,7 @@ func TestRecordedFurthest(t *testing.T) {
 // a write's cost grow with the square of them.
 func TestRecordedQueriesUseTheIndex(t *testing.T) {
 	l := open(t, time.UTC)
-	for _, q := range []string{qRecordedRule, qRecordedTwin} {
+	for _, q := range []string{qRecordedRule(l.d), qRecordedTwin(l.d)} {
 		if p := plan(t, l, q, "cw", "A", ""); !strings.Contains(p, "rules_recorded") {
 			t.Errorf("%s\nplan: %s", q, p)
 		}

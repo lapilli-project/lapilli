@@ -59,10 +59,17 @@ var (
 // Queries that must use rules_recorded, the index of recorded rules: its
 // rows are those with a source, so each also asks for a source that isn't
 // empty, for SQLite to see it may.
-const (
-	qRecordedRule = "SELECT id FROM rules WHERE source = ? AND source != '' AND sent = ? AND severity = ?"
-	qRecordedTwin = "SELECT EXISTS (SELECT 1 FROM rules WHERE source = ? AND source != '' AND sent = ? AND severity != ?)"
-)
+// In Postgres, rules_recorded holds the md5s of sent and severity, which
+// can be longer than a btree holds (017.sql), and is found by them.
+func qRecordedRule(d dialect) string {
+	return d.pick("SELECT id FROM rules WHERE source = ? AND source != '' AND sent = ? AND severity = ?",
+		"SELECT id FROM rules WHERE source = ?1 AND source != '' AND md5(sent) = md5(?2) AND md5(severity) = md5(?3) AND sent = ?2 AND severity = ?3")
+}
+
+func qRecordedTwin(d dialect) string {
+	return d.pick("SELECT EXISTS (SELECT 1 FROM rules WHERE source = ? AND source != '' AND sent = ? AND severity != ?)",
+		"SELECT EXISTS (SELECT 1 FROM rules WHERE source = ?1 AND source != '' AND md5(sent) = md5(?2) AND sent = ?2 AND severity != ?3)")
+}
 
 var sourceRE = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$`)
 
@@ -519,7 +526,7 @@ func checkRecorded(source string, from, to time.Time, fs []firing.Firing, now ti
 // it when no other rule has that name; otherwise it is told apart,
 // "checkout-5xx [cloudwatch-prod]".
 func (l *Ledger) recordedRule(t *txn, source string, k recordedKey, room func() error) (id int64, made bool, err error) {
-	err = t.QueryRowContext(t.ctx, qRecordedRule, source, k.sent, k.severity).Scan(&id)
+	err = t.QueryRowContext(t.ctx, qRecordedRule(t.d), source, k.sent, k.severity).Scan(&id)
 	if err == nil || !errors.Is(err, sql.ErrNoRows) {
 		return id, false, err
 	}
@@ -546,7 +553,7 @@ func (l *Ledger) recordedRule(t *txn, source string, k recordedKey, room func() 
 // doesn't take its name, to carry the note off when the rule comes.
 func (l *Ledger) freeName(t *txn, source string, k recordedKey, claimed map[string]bool) (string, error) {
 	var twin bool
-	if err := t.QueryRowContext(t.ctx, qRecordedTwin, source, k.sent, k.severity).Scan(&twin); err != nil {
+	if err := t.QueryRowContext(t.ctx, qRecordedTwin(t.d), source, k.sent, k.severity).Scan(&twin); err != nil {
 		return "", err
 	}
 	versioned, err := t.versionNames()

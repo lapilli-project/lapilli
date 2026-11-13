@@ -36,7 +36,11 @@ func AlarmKey(id string) string { return verdict.AlarmKey(id) }
 // its project named either way: through series_alarm and notified_alarm,
 // the policy's names a range of them.
 func alarmIs(d dialect, v, id, key string) string {
-	return "(" + v + " = " + id + " OR (" + key + " != " + id + " AND " + v + " >= 'projects/' AND " + v + " < 'projects0' AND substr(" + v +
+	p, is := d.alarmPrefix(v), v+" = "+id
+	if d == postgres {
+		is = p + " = " + d.alarmPrefix(id) + " AND " + is
+	}
+	return "((" + is + ") OR (" + key + " != " + id + " AND " + p + " >= 'projects/' AND " + p + " < 'projects0' AND substr(" + v +
 		", " + d.strpos(v, "'/alertPolicies/'") + " + 1) = " + key + "))"
 }
 

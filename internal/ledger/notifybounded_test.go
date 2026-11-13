@@ -47,7 +47,10 @@ func TestNotifyStartsBounded(t *testing.T) {
 		t.Errorf("a notification of %d alerts with no start took %s", MaxAlerts, took)
 	}
 	// The plan: the group's index, then the notification's alerts.
-	if p := plan(t, l, qStarts, "sns", "r", "g-0", 1, "", 50); !strings.Contains(p, "notifications_group") || !strings.Contains(p, "notified_of") || strings.Contains(p, "notified_rule") {
+	if p := plan(t, l, qStarts(l.d), "sns", "r", "g-0", 1, "", 50); !strings.Contains(p, "notifications_group") || !strings.Contains(p, "notified_of") || strings.Contains(p, "notified_rule") {
+		t.Errorf("plan: %s", p)
+	}
+	if p := plan(t, l, qLastOfGroup(l.d), "sns", "r", "g-0", 1); !strings.Contains(p, "notifications_group") {
 		t.Errorf("plan: %s", p)
 	}
 }

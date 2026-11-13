@@ -441,7 +441,7 @@ func (l *Ledger) impact(t *txn, f Found) (int64, error) {
 		}
 		key := "impact-" + in.Start.UTC().Format("20060102T1504Z")
 		if _, err := t.ExecContext(t.ctx, `INSERT INTO incidents (key, origin, state, counts, title, start_at, end_at, labels, updated, updated_by)
-			VALUES (?, 'impact', ?, 0, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO NOTHING`,
+			VALUES (?, 'impact', ?, 0, ?, ?, ?, ?, ?, ?) ON CONFLICT `+t.d.pick("(key)", "(md5(key))")+` DO NOTHING`,
 			key, state, in.Title, in.Start.Unix(), in.End.Unix(), string(labels), updated, by); err != nil {
 			return 0, err
 		}

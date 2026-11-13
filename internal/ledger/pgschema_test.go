@@ -15,8 +15,19 @@ import (
 )
 
 // byDesign is where a Postgres ledger's schema differs from SQLite's on
-// purpose, as describe says each, "" for none.
-var byDesign = map[string][2]string{}
+// purpose, as describe says each, "" for none: a btree holds some 2,700
+// bytes of a key, so what can be longer is found through a hash index,
+// which holds any length, and kept unique by its md5 (017.sql).
+var byDesign = map[string][2]string{
+	"index rules_name_eq":     {"", "rules(name) unique=false using=hash"},
+	"index notes_rule_eq":     {"", "notes(rule) unique=false using=hash"},
+	"index incidents_key_eq":  {"", "incidents(key) unique=false using=hash"},
+	"index changes_what":      {"changes(what, id) unique=false using=btree", "changes(what) unique=false using=hash"},
+	"index tasks_rule":        {"tasks(rule) unique=false using=btree", "tasks(rule) unique=false using=hash"},
+	"index comments_on":       {"comments(on_kind, on_key, created) unique=false using=btree", "comments(on_key) unique=false using=hash"},
+	"index check_misses_rule": {"check_misses(rule, start_at) unique=false using=btree", "check_misses(rule) unique=false using=hash"},
+	"index proposals_rule":    {"proposals(rule, state) unique=false using=btree", "proposals(rule) unique=false using=hash"},
+}
 
 // A ledger in Postgres has SQLite's tables, columns and indexes: the same
 // names, kinds (integer, text, bytes), NOT NULLs, defaults, keys, foreign

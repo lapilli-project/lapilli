@@ -175,7 +175,7 @@ func put(t *txn, in incident.Incident, origin, by string, now int64) error {
 	}
 	_, err = t.ExecContext(t.ctx, `INSERT INTO incidents (key, origin, counts, title, start_at, end_at, labels, updated, updated_by)
 		VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (key) DO UPDATE SET title = excluded.title, start_at = excluded.start_at, end_at = excluded.end_at,
+		ON CONFLICT `+t.d.pick("(key)", "(md5(key))")+` DO UPDATE SET title = excluded.title, start_at = excluded.start_at, end_at = excluded.end_at,
 			labels = excluded.labels, updated = excluded.updated, updated_by = excluded.updated_by`,
 		in.ID, origin, in.Title, in.Start.Unix(), nullable(in.End), string(labels), now, by)
 	return err

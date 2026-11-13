@@ -101,12 +101,13 @@ func (l *Ledger) TrackerTasks(ctx context.Context, q TrackerQuery) ([]TrackerTas
 // made, task N changed), the latest first, with the status each left.
 // What a change was left as is ” or the JSON change() wrote: in Postgres,
 // which can't say whether a text is JSON before 16, an object is read as
-// one.
+// one. There, changes_what is a hash index, as what can be longer than a
+// btree holds (an incident's id in it), searched for an array's texts.
 func statusSetQuery(d dialect) string {
 	return d.pick(`SELECT what, by, at, CASE WHEN json_valid(after) THEN coalesce(json_extract(after, '$.status'), '') ELSE '' END
 	FROM changes WHERE what IN (SELECT value FROM json_each(?)) ORDER BY id DESC`,
 		`SELECT what, by, at, CASE WHEN left(after, 1) = '{' THEN coalesce(after::jsonb ->> 'status', '') ELSE '' END
-	FROM changes WHERE what IN (`+d.texts("?")+`) ORDER BY id DESC`)
+	FROM changes WHERE what = ANY (ARRAY(`+d.texts("?")+`)) ORDER BY id DESC`)
 }
 
 // statusSet fills in who set each task's status, and when: the change that

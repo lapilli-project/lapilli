@@ -149,7 +149,7 @@ func (l *Ledger) PutCheck(ctx context.Context, midnight time.Time, c *verdict.Sp
 			return err
 		}
 		put, err := t.PrepareContext(t.ctx, `INSERT INTO checked (rule, day, alert, shared, replayed, real, alike, off_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT (rule, day) DO UPDATE SET alert = excluded.alert, shared = excluded.shared,
+			ON CONFLICT `+t.d.pick("(rule, day)", "(md5(rule), day)")+` DO UPDATE SET alert = excluded.alert, shared = excluded.shared,
 				replayed = excluded.replayed, real = excluded.real, alike = excluded.alike, off_ms = excluded.off_ms`)
 		if err != nil {
 			return err
