@@ -764,6 +764,15 @@ func TestNULInLabels(t *testing.T) {
 	if _, err := l.Notify(ctx, n2); err != nil {
 		t.Errorf("a notification with a NUL in a label: %v", err)
 	}
+	// The next, which doesn't say the alert's start, finds it in the last.
+	again := Notification{At: at.Add(5 * time.Minute), Source: n2.Source, Receiver: n2.Receiver, Group: n2.Group,
+		Alerts: []Alert{{Rule: "HighErrors", Labels: nul, Resolved: true}}}
+	if _, err := l.Notify(ctx, again); err != nil {
+		t.Errorf("the alert with a NUL resolved: %v", err)
+	}
+	if ns, err := l.Notifications(ctx, again.At, again.At.Add(time.Second)); err != nil || len(ns) != 1 || !ns[0].Alerts[0].Start.Equal(t0.Add(10*time.Minute)) {
+		t.Errorf("the start of the alert with a NUL, resolved: %+v %v", ns, err)
+	}
 	if _, err := l.Pages(ctx, t0, t0.Add(24*time.Hour), func(string) time.Duration { return time.Hour }); err != nil {
 		t.Errorf("its pages: %v", err)
 	}
