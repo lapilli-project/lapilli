@@ -226,11 +226,11 @@ func TestRulesFilters(t *testing.T) {
 	// the team, the weeks and the order.
 	_, body, _ = get(t, h, "/rules?perf=noisy&severity=critical&q=r0+label:tier=t1&team=payments&weeks=12&sort=refired")
 	for _, want := range []string{
-		`<a class="chip" href="/rules?perf=noisy&amp;q=r0&#43;label%3Atier%3Dt1&amp;severity=critical&amp;sort=refired&amp;team=&amp;weeks=12"><span class="vh">Remove filter: </span>Team: payments`,
+		`<a class="chip" href="/rules?perf=noisy&amp;q=r0&#43;label%3Atier%3Dt1&amp;severity=critical&amp;sort=refired&amp;team=&amp;weeks=12"><span class="vh">Remove filter: </span>Team: <bdi>payments</bdi>`,
 		`<a class="chip" href="/rules?q=r0&#43;label%3Atier%3Dt1&amp;severity=critical&amp;sort=refired&amp;team=payments&amp;weeks=12"><span class="vh">Remove filter: </span>Performance: Noisy`,
-		`<a class="chip" href="/rules?perf=noisy&amp;q=r0&#43;label%3Atier%3Dt1&amp;sort=refired&amp;team=payments&amp;weeks=12"><span class="vh">Remove filter: </span>Severity: critical`,
-		`<a class="chip" href="/rules?perf=noisy&amp;q=label%3Atier%3Dt1&amp;severity=critical&amp;sort=refired&amp;team=payments&amp;weeks=12"><span class="vh">Remove filter: </span>Name has: r0`,
-		`<a class="chip" href="/rules?perf=noisy&amp;q=r0&amp;severity=critical&amp;sort=refired&amp;team=payments&amp;weeks=12"><span class="vh">Remove filter: </span>Label: tier=t1`,
+		`<a class="chip" href="/rules?perf=noisy&amp;q=r0&#43;label%3Atier%3Dt1&amp;sort=refired&amp;team=payments&amp;weeks=12"><span class="vh">Remove filter: </span>Severity: <bdi>critical</bdi>`,
+		`<a class="chip" href="/rules?perf=noisy&amp;q=label%3Atier%3Dt1&amp;severity=critical&amp;sort=refired&amp;team=payments&amp;weeks=12"><span class="vh">Remove filter: </span>Name has: <bdi>r0</bdi>`,
+		`<a class="chip" href="/rules?perf=noisy&amp;q=r0&amp;severity=critical&amp;sort=refired&amp;team=payments&amp;weeks=12"><span class="vh">Remove filter: </span>Label: <bdi>tier=t1</bdi>`,
 		`<a href="/rules?sort=refired&amp;team=payments&amp;weeks=12">Clear filters</a>`,
 		`<details class="facets-menu" open>`,
 	} {

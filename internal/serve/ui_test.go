@@ -254,7 +254,7 @@ func TestSidebar(t *testing.T) {
 		if !slices.Equal(groups, []string{"See", "Fix", "Report", "Manage"}) {
 			t.Errorf("%q: groups %q", who, groups)
 		}
-		if !slices.Equal(crumbs, []string{"See", "Rules", "Errors"}) || !strings.Contains(body, `<span aria-current="page">Errors</span>`) {
+		if !slices.Equal(crumbs, []string{"See", "Rules", "Errors"}) || !strings.Contains(body, `<span aria-current="page"><bdi>Errors</bdi></span>`) {
 			t.Errorf("%q: breadcrumb %q", who, crumbs)
 		}
 		if !slices.Equal(current, []string{"Rules true"}) {
