@@ -77,7 +77,13 @@ func TestVersionsRecipeRendered(t *testing.T) {
 	token := filepath.Join(t.TempDir(), "token")
 	os.WriteFile(token, []byte("s3cret"), 0o600)
 	prepared := filepath.Join(t.TempDir(), "prepared")
-	said, err = runRecipeIn(t, filepath.Dir(repo), append(base, "OUT="+prepared, "TOKEN_FILE="+token,
+	home := t.TempDir()
+	defer func() {
+		if _, err := os.Stat(filepath.Join(home, "seen")); err == nil {
+			t.Error("RENDER_PREPARE ran with the job's HOME, not one of its own")
+		}
+	}()
+	said, err = runRecipeIn(t, filepath.Dir(repo), append(base, "OUT="+prepared, "TOKEN_FILE="+token, "HOME="+home,
 		`RENDER_PREPARE=test -z "${TOKEN_FILE:-}" && echo seen >>"$HOME/seen" && echo preparing && { [ -f chart/dep.yaml ] || git -C "$REPO" show HEAD:chart/dep.yaml >chart/dep.yaml; }`)...)
 	if err != nil || !strings.Contains(said, "preparing") {
 		t.Fatalf("RENDER_PREPARE: %v: %s", err, said)

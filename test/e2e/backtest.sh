@@ -9,7 +9,9 @@
 # is rendered by Gitea itself: no mention, no link, no HTML, the table
 # whole. A symbolic link whose path mentions a user and references an issue
 # is refused, its path only in the job's log: the user is notified of
-# nothing, and the issue isn't referenced.
+# nothing, and the issue isn't referenced. The checkout is as a CI leaves
+# it, without credentials: the branch a pull request goes into is the
+# clone's own, never fetched.
 #
 # Needs Docker, Go, git, curl and jq. Leaves everything up when KEEP is set.
 set -euo pipefail
@@ -48,7 +50,8 @@ until_true() { # seconds, command...: run it until it succeeds
 
 go build -o "$work/lapilli" ./cmd/lapilli
 mkdir -p "$work/secrets" "$work/prom"
-export GIT_CONFIG_GLOBAL=$work/gitconfig GIT_CONFIG_NOSYSTEM=1
+# A fetch that needs credentials fails, rather than asks for them.
+export GIT_CONFIG_GLOBAL=$work/gitconfig GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0
 printf '[user]\n\tname = Reviewer\n\temail = rev@example.com\n[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n' >"$GIT_CONFIG_GLOBAL"
 
 docker network create "$p" >/dev/null
@@ -126,6 +129,10 @@ backtest() {
   git clone -q "$authed" "$work/ci"
   git -C "$work/ci" fetch -q origin "refs/pull/$1/head"
   git -C "$work/ci" checkout -q --detach FETCH_HEAD
+  # As actions/checkout leaves a clone with fetch-depth: 0 and
+  # persist-credentials: false: every branch fetched, and an origin
+  # without the credentials a fetch of this private repository needs.
+  git -C "$work/ci" remote set-url origin "$gt/reviewer/monitoring.git"
   (cd "$work/ci" && PR=$1 GITEA_API=$gt/api/v1 GITEA_REPO=reviewer/monitoring GITEA_TOKEN_FILE=$work/secrets/bot \
     LAPILLI=$work/lapilli PATHS=alerts TARGET_BRANCH=main \
     sh "$repo/recipes/backtest/gitea.sh" --prometheus "$pu" --since "$(($(date +%s) - started + 5))s" --step 5s --tz UTC)

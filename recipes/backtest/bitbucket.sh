@@ -19,7 +19,7 @@
 #   TARGET_BRANCH         default, without TARGET, the pull request's
 #                         destination (BITBUCKET_PR_DESTINATION_BRANCH),
 #                         fetched: Bitbucket Pipelines clones the pull
-#                         request's branch alone
+#                         request's branch alone, and lets the step fetch
 recipe=bitbucket.sh
 here=$(dirname "$0")
 : "${BITBUCKET_TOKEN_FILE:?a file holding a repository access token}"

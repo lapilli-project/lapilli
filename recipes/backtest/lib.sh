@@ -53,9 +53,11 @@
 #                    GitHub checks a pull request out); the rules compared
 #                    against are those of the commit HEAD and TARGET share
 #                    last (git merge-base)
-#   TARGET_BRANCH    instead, a branch to fetch from origin, for a CI that
+#   TARGET_BRANCH    instead, a branch: origin/BRANCH as the checkout
+#                    fetched it, or else fetched from origin, for a CI that
 #                    clones the pull request's branch alone
-#   REPO             the clone (default: the directory this runs in)
+#   REPO             the clone, or a directory of it (default: the
+#                    directory this runs in)
 #   KEY              tells apart the comments of several jobs on one pull
 #                    request: letters, digits, dots, dashes and underscores
 #                    (default: default)
@@ -80,7 +82,10 @@
 # (which could end the block), no control or format character (which could
 # hide or reorder what is shown), and where the history is (the URLs, user
 # names, hosts, tenants and project in the arguments, any IP address) taken
-# out. What is copied to the job's log is each line after a "| ", and
+# out before they are cut; of what lapilli said, nothing about why a rule
+# couldn't be replayed, nor what a server or the network answered, which
+# the job's log alone has. What is copied to the job's log is each line
+# after a "| ", and
 # Azure's ##vso[ made inert, so none of it is a CI's command. A commit
 # holding a symbolic link where the rules are read, or anywhere with RENDER,
 # isn't read: a link could lead to any file the job can read. The host's
@@ -88,7 +93,8 @@
 # line. RENDER and RENDER_PREPARE run what the pull request holds, with the
 # job's rights: they run without the variables CIs keep tokens in, and with a
 # HOME of their own for each commit, the base first, but can read whatever
-# the job can, the token's file included. Run this only for pull requests
+# the job can, the token's file included, and on Linux the environment the
+# job's processes started with (/proc/PID/environ). Run this only for pull requests
 # from people trusted with what the job can reach (the README says how,
 # host by host).
 
@@ -214,9 +220,18 @@ if [ -z "${LAPILLI:-}" ]; then
     fi
   fi
 fi
-# The clone, and where this runs: a file an argument names in the clone is
-# the pull request's, which is judged by it.
-clone=$(cd "$repo" 2>/dev/null && pwd -P) || { say "REPO $repo isn't a directory"; exit 1; }
+for tool in git curl jq tar; do
+  command -v "$tool" >/dev/null 2>&1 || { say "$tool isn't installed: the recipe needs sh, git, curl, jq and tar"; exit 1; }
+done
+# The clone, all of it, whichever of its directories REPO is, and where
+# this runs: a file an argument names in the clone is the pull request's,
+# which is judged by it.
+[ -d "$repo" ] || { say "REPO $repo isn't a directory"; exit 1; }
+if top=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null) && [ -n "$top" ]; then
+  clone=$(cd "$top" && pwd -P)
+else
+  clone=$(cd "$repo" && pwd -P)
+fi
 here_now=$(pwd -P)
 # in_clone PATH: whether PATH, as lapilli opens it from here, is in the
 # clone.
@@ -253,9 +268,6 @@ while [ "$n" -gt 0 ]; do
   esac
   set -- "$@" "$a"
 done
-for tool in git curl jq tar; do
-  command -v "$tool" >/dev/null 2>&1 || { say "$tool isn't installed: the recipe needs sh, git, curl, jq and tar"; exit 1; }
-done
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -264,15 +276,35 @@ out=$tmp/out
 mkdir "$tmp/empty"
 : >"$tmp/problem.log"
 
-# host METHOD URL [FILE]: asks the host's API, the answer in $out; writes
-# the HTTP status. curl reads no .curlrc (-q), follows no redirect, and
-# speaks only HTTP and HTTPS.
+# capped MOST FILE: stdin into FILE, MOST bytes of it at most; it fails
+# when there was more. Before curl 8.4.0 (Ubuntu 22.04 has 7.81),
+# --max-filesize caps only an answer that says its length first: what curl
+# writes is capped so, whatever its version. A command whose stdin it is
+# writes $tmp/failed when it fails: { CMD || : >"$tmp/failed"; } | capped.
+capped() { head -c "$(($1 + 1))" >"$2" && [ "$(wc -c <"$2")" -le "$1" ]; }
+
+# host METHOD URL [FILE]: asks the host's API, the answer in $out, 16 MiB
+# at most; writes the HTTP status, or "failed". curl reads no .curlrc (-q),
+# follows no redirect, and speaks only HTTP and HTTPS.
 host() {
+  rm -f "$tmp/failed"
+  if { ask_host "$@" || : >"$tmp/failed"; } | capped 16777216 "$out" && [ ! -e "$tmp/failed" ]; then
+    code=$(sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$tmp/headers" | tail -n 1)
+    echo "${code:-failed}"
+  else
+    echo failed
+  fi
+}
+
+# ask_host METHOD URL [FILE]: the answer on stdout, its headers in
+# $tmp/headers.
+ask_host() {
+  : >"$tmp/headers"
   if [ $# -ge 3 ]; then
     host_auth | curl -q -sS --max-time 30 --max-filesize 16777216 --proto '=http,https' -X "$1" -H @- -H 'Content-Type: application/json' \
-      --data-binary "@$3" -o "$out" -w '%{http_code}' "$2" || echo failed
+      --data-binary "@$3" -D "$tmp/headers" -o - "$2"
   else
-    host_auth | curl -q -sS --max-time 30 --max-filesize 16777216 --proto '=http,https' -X "$1" -H @- -o "$out" -w '%{http_code}' "$2" || echo failed
+    host_auth | curl -q -sS --max-time 30 --max-filesize 16777216 --proto '=http,https' -X "$1" -H @- -D "$tmp/headers" -o - "$2"
   fi
 }
 
@@ -323,8 +355,10 @@ fetch_lapilli() {
   mkdir "$tmp/release"
   for f in "$name.tar.gz 268435456" "SHA256SUMS 65536"; do
     # A release's files are redirected to where they are kept: https only.
-    if ! curl -q -fsSL --max-time 300 --max-filesize "${f#* }" --proto '=http,https' --proto-redir '=https' -o "$tmp/release/${f% *}" \
-      "${from%/}/$LAPILLI_VERSION/${f% *}" 2>"$tmp/curl.log"; then
+    rm -f "$tmp/failed"
+    if ! { curl -q -fsSL --max-time 300 --max-filesize "${f#* }" --proto '=http,https' --proto-redir '=https' -o - \
+      "${from%/}/$LAPILLI_VERSION/${f% *}" 2>"$tmp/curl.log" || : >"$tmp/failed"; } | capped "${f#* }" "$tmp/release/${f% *}" ||
+      [ -e "$tmp/failed" ]; then
       trouble "Lapilli $LAPILLI_VERSION's ${f% *} couldn't be downloaded" "$tmp/curl.log"
       return 1
     fi
@@ -362,11 +396,16 @@ commits() {
     return 1
   fi
   if [ -n "${TARGET_BRANCH:-}" ]; then
-    if ! git -C "$repo" fetch --quiet --no-tags origin "refs/heads/$TARGET_BRANCH" 2>"$tmp/git.log"; then
-      trouble "the branch $TARGET_BRANCH couldn't be fetched from origin" "$tmp/git.log"
+    # As the checkout fetched it, when it did (a full clone fetches every
+    # branch): a fetch needs the credentials a checkout may have dropped.
+    if git -C "$repo" rev-parse --verify -q "refs/remotes/origin/$TARGET_BRANCH^{commit}" >/dev/null; then
+      TARGET=refs/remotes/origin/$TARGET_BRANCH
+    elif git -C "$repo" fetch --quiet --no-tags origin "refs/heads/$TARGET_BRANCH" 2>"$tmp/git.log"; then
+      TARGET=FETCH_HEAD
+    else
+      trouble "the branch $TARGET_BRANCH isn't in the clone, and couldn't be fetched from origin: check out every branch, or let the job fetch (the recipes' README says how, CI by CI)" "$tmp/git.log"
       return 1
     fi
-    TARGET=FETCH_HEAD
   fi
   if ! head=$(git -C "$repo" rev-parse --verify -q "HEAD^{commit}"); then
     trouble "the clone has no commit checked out"
@@ -382,21 +421,19 @@ commits() {
   fi
   say "the rules of $head, beside those of $base"
   if [ -z "${RENDER:-}" ]; then
-    # A path neither commit has is a mistake in PATHS: both sides would
-    # have no rules, nothing would change, and nothing would be said.
-    found=0
+    # A path neither commit has is a mistake in PATHS: its rules, if it
+    # has any, would never be compared, and nothing would say so.
+    missing=
     set -f
     for p in $PATHS; do
       p=${p%/}
-      if git -C "$repo" cat-file -e "$head:$p" 2>/dev/null || git -C "$repo" cat-file -e "$base:$p" 2>/dev/null; then
-        found=$((found + 1))
-      else
-        say "PATHS: $p is in neither commit"
+      if ! git -C "$repo" cat-file -e "$head:$p" 2>/dev/null && ! git -C "$repo" cat-file -e "$base:$p" 2>/dev/null; then
+        missing="$missing $p"
       fi
     done
     set +f
-    if [ "$found" = 0 ]; then
-      say "none of PATHS is in either commit: say where the rules are"
+    if [ -n "$missing" ]; then
+      say "PATHS:$missing: in neither commit: say where the rules are"
       exit 1
     fi
   fi
@@ -473,8 +510,8 @@ in_tree() {
   (cd "$tmp/$1" && env -u GITHUB_TOKEN_FILE -u GITLAB_TOKEN_FILE -u BITBUCKET_TOKEN_FILE -u AZURE_DEVOPS_TOKEN_FILE \
     -u GITEA_TOKEN_FILE -u LAPILLI_INPUT_TOKEN -u GITHUB_TOKEN -u GH_TOKEN -u GITEA_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
     -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_RUNTIME_TOKEN -u CI_JOB_TOKEN -u CI_JOB_JWT -u CI_JOB_JWT_V1 -u CI_JOB_JWT_V2 \
-    -u CI_REGISTRY_PASSWORD -u CI_DEPLOY_PASSWORD -u SYSTEM_ACCESSTOKEN -u BITBUCKET_STEP_OIDC_TOKEN \
-    HOME="$tmp/$1-home" REPO="$clone" sh -c "$2")
+    -u CI_REGISTRY_PASSWORD -u CI_DEPLOY_PASSWORD -u CI_REPOSITORY_URL -u CI_DEPENDENCY_PROXY_PASSWORD -u CI_BUILD_TOKEN \
+    -u SYSTEM_ACCESSTOKEN -u BITBUCKET_STEP_OIDC_TOKEN HOME="$tmp/$1-home" REPO="$clone" sh -c "$2")
 }
 
 # render SIDE WHAT: RENDER_PREPARE, then RENDER, in $tmp/SIDE, what RENDER
@@ -540,25 +577,28 @@ hidden() {
   done | awk 'length($0) >= 2 { print length($0), $0 }' | sort -rn | cut -d ' ' -f 2-
 }
 
-# fenced WHAT LOG BYTES: WHAT, then LOG's last lines, BYTES of them at most,
-# as a fenced block: what hidden wrote taken out (each a whole word), and
-# URLs' user names and IP addresses, with no backtick, which could end the
-# block, and no control or format character, line or paragraph separator,
-# which could hide or reorder what is shown. Inside one, no host reads
-# Markdown, HTML, a mention or a link.
+# fenced WHAT LOG CHARS: WHAT, then LOG's last lines, CHARS characters of
+# them at most, as a fenced block: what hidden wrote taken out (each a
+# whole word), and URLs' user names and IP addresses, with no backtick,
+# which could end the block, and no control or format character, line or
+# paragraph separator, which could hide or reorder what is shown. Taken out
+# first and cut after, so nothing is cut in two before it is found. Inside
+# a fence, no host reads Markdown, HTML, a mention or a link.
 fenced() {
   printf '```text\n'
   {
-    printf '%s.\n' "$1"
-    [ ! -s "$2" ] || tail -n 40 "$2" | tail -c "$3"
-  } | jq -Rr --rawfile hide "$tmp/hidden" '
+    [ ! -s "$2" ] || tail -n 40 "$2" | tail -c 1048576
+  } | jq -Rrs --arg what "$1" --argjson most "$3" --rawfile hide "$tmp/hidden" '
     def esc: gsub("(?<c>[\\\\^$.|?*+()\\[\\]{}/-])"; "\\\(.c)");
-    reduce ($hide | split("\n")[] | select(length > 0)) as $h (.;
-      gsub("(?<![A-Za-z0-9._-])" + ($h | esc) + "(?![A-Za-z0-9_-])"; "[hidden]"))
-    | gsub("(?<s>[A-Za-z][A-Za-z0-9+.-]*://)[^/@\\s\"]*@"; "\(.s)")
-    | gsub("\\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*\\](:[0-9]+)?"; "[address]")
-    | gsub("\\b([0-9]{1,3}\\.){3}[0-9]{1,3}(:[0-9]+)?\\b"; "[address]")
-    | gsub("\t"; " ") | gsub("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]"; "") | gsub("`"; "'"'"'")' | head -c "$(($3 + 1000))"
+    def clean:
+      reduce ($hide | split("\n")[] | select(length > 0)) as $h (.;
+        gsub("(?<![A-Za-z0-9._-])" + ($h | esc) + "(?![A-Za-z0-9_-]|\\.[A-Za-z0-9_-])"; "[hidden]"))
+      | gsub("(?<s>[A-Za-z][A-Za-z0-9+.-]*://)[^/@\\s\"]*@"; "\(.s)")
+      | gsub("\\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*\\](:[0-9]+)?"; "[address]")
+      | gsub("\\b([0-9]{1,3}\\.){3}[0-9]{1,3}(:[0-9]+)?\\b"; "[address]")
+      | gsub("\t"; " ") | gsub("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]"; "") | gsub("`"; "'"'"'");
+    ($what + "." | clean),
+    if $most > 0 and length > 0 then split("\n") | map(clean) | join("\n") | .[-$most:] else empty end'
   printf '\n```\n'
 }
 
@@ -588,28 +628,34 @@ backtest() {
   verdict=0
   "$bin" verdict "$@" --changed-only --markdown >"$tmp/report.md" 2>"$tmp/lapilli.log" || verdict=$?
   logged "$tmp/lapilli.log"
+  # What of it the comment may show: not why a rule couldn't be replayed,
+  # which --markdown keeps to the job's log, nor what a server or the
+  # network said, which says where the history is and who reads it (an
+  # account, a gateway).
+  grep -E -v "couldn't be replayed: |query failed: |HTTP [0-9]{3}: |dial (tcp|udp)|x509: |tls: " "$tmp/lapilli.log" >"$tmp/lapilli.said" || :
   case $verdict in
     0) ;;
-    1) trouble "the backtest failed, or didn't finish (lapilli exited 1)" "$tmp/lapilli.log" ;;
+    1) trouble "the backtest failed, or didn't finish (lapilli exited 1)" "$tmp/lapilli.said" ;;
     2)
       if grep -q -e '--markdown needs a value' -e 'unknown flag --markdown' "$tmp/lapilli.log" && [ -n "${LAPILLI:-}" ]; then
-        trouble "the lapilli LAPILLI names has no --markdown: give a later release" "$tmp/lapilli.log"
+        trouble "the lapilli LAPILLI names has no --markdown: give a later release" "$tmp/lapilli.said"
       elif grep -q -e '--markdown needs a value' -e 'unknown flag --markdown' "$tmp/lapilli.log"; then
-        trouble "Lapilli $LAPILLI_VERSION has no --markdown: give LAPILLI_VERSION a later release" "$tmp/lapilli.log"
+        trouble "Lapilli $LAPILLI_VERSION has no --markdown: give LAPILLI_VERSION a later release" "$tmp/lapilli.said"
       else
-        trouble "lapilli refused its arguments (it exited 2)" "$tmp/lapilli.log"
+        trouble "lapilli refused its arguments (it exited 2)" "$tmp/lapilli.said"
       fi
       ;;
-    *) trouble "lapilli didn't run (exit status $verdict)" "$tmp/lapilli.log" ;;
+    *) trouble "lapilli didn't run (exit status $verdict)" "$tmp/lapilli.said" ;;
   esac
   # Asked to fail when it does, a backtest of rules that couldn't be
   # replayed (the history out of reach, say) is one that failed.
   if [ "$verdict" = 0 ] && [ -n "$strict" ]; then
     n=$(summary unreplayed)
     case $n in
-      '' | *[!0-9]*) trouble "the report has no summary line" "$tmp/lapilli.log" ;;
+      '' | *[!0-9]*) trouble "the report has no summary line" "$tmp/lapilli.said" ;;
       0) ;;
-      *) trouble "$n of the rules that differ couldn't be replayed (FAIL_ON_ERROR=true)" "$tmp/lapilli.log" ;;
+      # Which, the report lists; why, the job's log says.
+      *) trouble "$n of the rules that differ couldn't be replayed (FAIL_ON_ERROR=true)" ;;
     esac
   fi
 }

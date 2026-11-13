@@ -17,9 +17,11 @@
 #   PR                       the pull request's id (default:
 #                            SYSTEM_PULLREQUEST_PULLREQUESTID)
 #   TARGET_BRANCH            default, without TARGET, the branch it goes
-#                            into (SYSTEM_PULLREQUEST_TARGETBRANCH), fetched:
-#                            the order of a merge commit's parents isn't
-#                            documented
+#                            into (SYSTEM_PULLREQUEST_TARGETBRANCH), as the
+#                            checkout fetched it: the order of a merge
+#                            commit's parents isn't documented. Fetched only
+#                            when the checkout didn't, which needs
+#                            persistCredentials: true
 #
 # The comment is a thread of its own, closed: resolved, which the policy
 # that comments be resolved doesn't wait for. The token's identity

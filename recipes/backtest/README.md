@@ -32,8 +32,8 @@ only: the token goes with each request. Each also needs:
   command that writes them on its stdout, run in each commit's files
   (below). A file named in `PATHS` works too, but renamed in a pull
   request it is a file one commit hasn't: its rules read as taken away on
-  one side and added on the other. A path neither commit has fails the job
-  at once: nothing would ever be said.
+  one side and added on the other. A path neither commit has, any of them,
+  fails the job at once: its rules would never be compared.
 - The arguments: `lapilli verdict`'s flags for where the history is and
   over what period, as `lapilli verdict` takes them: `--prometheus URL` (or
   `--gcp-project`, `--auth`, `--bearer-token-file`), `--since 14d`, and any
@@ -41,7 +41,8 @@ only: the token goes with each request. Each also needs:
   The recipe gives `--rules`, `--compare`, `--changed-only` and
   `--markdown` itself. A file an argument names in the checkout
   (`--incidents`, `--on-call`, a token's file) is refused: it is the pull
-  request's, which could take out the incident its change misses.
+  request's, which could take out the incident its change misses: in any
+  directory of the clone, whichever of them `REPO` is or the job runs from.
 
 And, as wanted:
 
@@ -52,7 +53,9 @@ And, as wanted:
   ([recipes/incidents](../incidents)).
 - `TARGET`, the commit the pull request goes into (default `HEAD^1`, the
   merge commit's first parent, as GitHub checks a pull request out); or
-  `TARGET_BRANCH`, a branch to fetch from `origin`. The rules compared
+  `TARGET_BRANCH`, a branch: the clone's `origin/BRANCH` when the checkout
+  fetched it (a full clone fetches every branch), or else fetched from
+  `origin`, which needs the checkout's credentials kept. The rules compared
   against are those of the commit `HEAD` and the target share last (`git
   merge-base`): what the pull request itself changes, whether the checkout
   is a merge or the pull request's own commit. Each script defaults it from
@@ -186,7 +189,8 @@ pipelines:
 ```
 
 Bitbucket Pipelines clones the pull request's branch alone: the script
-fetches the destination (`BITBUCKET_PR_DESTINATION_BRANCH`) itself. A
+fetches the destination (`BITBUCKET_PR_DESTINATION_BRANCH`) itself, as
+Bitbucket's clone lets a step fetch. A
 repository access token can't say whose it is (`GET /user` needs the
 account scope, which it can't have): the first run posts a comment and
 says, in the job's log, the account it posted as; set
@@ -215,9 +219,14 @@ steps:
       PROMETHEUS_URL: $(PROMETHEUS_URL)
 ```
 
-The script fetches the branch the pull request goes into
+The script compares against the branch the pull request goes into
 (`SYSTEM_PULLREQUEST_TARGETBRANCH`), as the order of the merge commit's
-parents isn't documented. The comment is a thread of its own, posted
+parents isn't documented: `origin/BRANCH`, which the checkout fetches with
+every other branch. The checkout drops its credentials when it is done
+(`persistCredentials` is false unless set), so the script fetches nothing
+itself; a checkout that leaves the branch out (a `fetchFilter`, a sparse
+or shallow fetch) needs `persistCredentials: true` for the script to fetch
+it. The comment is a thread of its own, posted
 closed: resolved, so the policy that comments be resolved doesn't wait for
 it. The token's identity (`connectionData`) and a comment's author are
 told apart by their id, as Azure DevOps documents both; this hasn't been
@@ -246,8 +255,10 @@ jobs:
           PROMETHEUS_URL: ${{ vars.PROMETHEUS_URL }}
 ```
 
-Actions checks out the pull request's own commit there: the script fetches
-the branch it goes into (`GITHUB_BASE_REF`), and compares from where they
+Actions checks out the pull request's own commit there: the script takes
+the branch it goes into (`GITHUB_BASE_REF`) as `fetch-depth: 0` fetched
+it, `origin/BRANCH`, without the credentials `persist-credentials: false`
+keeps from the job, and compares from where they
 parted.
 
 ## Rules rendered from a chart
@@ -281,12 +292,17 @@ templates, a Kustomize plugin) with the job's rights. Each commit's run has
 a `HOME` of its own, the base's first, and runs without the variables CIs
 keep tokens in (`GITHUB_TOKEN_FILE` and the other scripts' token files,
 `GITHUB_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, `CI_JOB_TOKEN`,
-`SYSTEM_ACCESSTOKEN`, `BITBUCKET_STEP_OIDC_TOKEN` and the like), so a
-chart doesn't take one by chance. That isn't a wall: what runs can read
-any file the job can, the token's file among them, and change what the job
-does next. Helm's `template` runs no code of the chart's; a Kustomize
-plugin, or a `RENDER` that runs the repository's scripts, does. That is
-one reason forks are kept out.
+`CI_REPOSITORY_URL`, `CI_DEPENDENCY_PROXY_PASSWORD`, `SYSTEM_ACCESSTOKEN`,
+`BITBUCKET_STEP_OIDC_TOKEN` and the like), so a chart doesn't take one by
+chance. That isn't a wall. What runs is the job's own user: it can read
+any file the job can, the token's file among them; on Linux, the
+environment every process of the job started with, the recipe's and the
+CI's runner's included, under `/proc/PID/environ`, whatever was unset
+since; a variable a CI names as you choose (GitLab's `id_tokens`, a
+secret you export) that the list above can't know; and it can change what
+the job does next. Helm's `template` runs no code of the chart's; a
+Kustomize plugin, or a `RENDER` that runs the repository's scripts, does.
+That is one reason forks are kept out.
 
 ## The comment
 
@@ -348,16 +364,21 @@ runner inside your network:
   everyone who can read the pull request. Lapilli writes rule names,
   labels and the reasons a rule couldn't be replayed as code spans, which
   no host reads as Markdown, HTML, a mention, a reference or a link. A
-  query that failed for want of reaching the history says only that in the
+  query that failed for want of reaching the history (anything but the
+  API itself refusing the query, not a proxy's page) says only that in the
   comment, its reason going to the job's log; from the rest, Lapilli takes
   out where the history is: the `--prometheus`, `--loki`, `--grafana` and
   `--ruler` URLs, the user names in them and their hosts, each as a whole
   word, any IP address and port, the tenants and a `--gcp-project`. What
   went wrong, and what `RENDER` or `lapilli` said of it, goes in a fenced
-  block, nothing of it outside: its last lines only, with no backtick
-  (which could end the block), no control or format character (which could
-  hide or reorder what is shown), and the same taken out. The path of a
-  link refused is said only in the job's log.
+  block, nothing of it outside: its last lines only, the same taken out
+  before they are cut, with no backtick (which could end the block) and no
+  control or format character (which could hide or reorder what is
+  shown). Of what `lapilli` said, no line about why a rule couldn't be
+  replayed, nor one with what a server or the network answered (`query
+  failed`, `HTTP 403: ...`, `dial tcp`, a TLS error): those are in the
+  job's log alone, as the rules that couldn't be replayed are in the
+  report. The path of a link refused is said only in the job's log.
 - What the recipe copies to the job's log is each line after a `| `,
   control characters taken out and Azure's `##vso[` made inert: GitHub's
   and Gitea's `::` commands are read only at a line's start, so none of it
@@ -365,7 +386,10 @@ runner inside your network:
 - The token is read from a file and given to `curl` on stdin, never on a
   command line, which `ps` shows. `curl` reads no `.curlrc`, speaks only
   HTTP and HTTPS, follows no redirect from a host's API, and a release's
-  download only to HTTPS, with a cap on its size.
+  download only to HTTPS. What it downloads is capped (16 MiB from a host,
+  256 MiB for a release) as it streams, not only by `--max-filesize`,
+  which before curl 8.4.0 (Ubuntu 22.04 has 7.81) caps only an answer that
+  says its length first.
 - Only a comment the token's own account posted, whose first line is the
   recipe's, is edited: a comment someone else posted with that line is
   left alone, and a deleted one, or GitLab's own note. When the host can't

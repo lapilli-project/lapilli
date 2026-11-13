@@ -13,8 +13,10 @@
 #   PR                the pull request's number (default, in Actions: the
 #                     event's)
 #   TARGET_BRANCH     default, in Actions without TARGET, the branch the
-#                     pull request goes into (GITHUB_BASE_REF), fetched:
-#                     Actions checks out the pull request's own commit
+#                     pull request goes into (GITHUB_BASE_REF), as
+#                     fetch-depth: 0 fetched it: Actions checks out the
+#                     pull request's own commit. Fetched only when the
+#                     checkout didn't, which needs its credentials kept
 recipe=gitea.sh
 here=$(dirname "$0")
 if [ "${GITEA_ACTIONS:-}" = true ] || [ "${FORGEJO_ACTIONS:-}" = true ]; then

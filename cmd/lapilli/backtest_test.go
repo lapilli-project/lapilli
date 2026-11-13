@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -219,6 +220,12 @@ type commentHost struct {
 	failPost bool
 	// closed says Azure DevOps' last thread was posted closed.
 	closed bool
+	// huge answers a listing with 64 MiB, its length unsaid, as long as
+	// it is read; sent is how much of it was.
+	huge bool
+	sent atomic.Int64
+	// cut answers a listing with the start of it, then hangs up.
+	cut bool
 }
 
 // The account the stand-ins' token is, as each host names it.
@@ -349,6 +356,17 @@ func (h *commentHost) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case "azure":
 			reply(map[string]any{"authenticatedUser": map[string]any{"id": hostMe[h.kind]}})
 		}
+	case r.Method == http.MethodGet && path == list && h.cut:
+		w.Header().Set("Content-Length", "1000")
+		w.WriteHeader(http.StatusOK)
+		io.WriteString(w, `[{"id": 1, "bo`)
+		w.(http.Flusher).Flush()
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err == nil {
+			conn.Close()
+		}
+	case r.Method == http.MethodGet && path == list && h.huge:
+		streamed(w, 64<<20, &h.sent)
 	case r.Method == http.MethodGet && path == list:
 		var shown []any
 		these, more := page()
@@ -445,6 +463,8 @@ type recipeRun struct {
 	host *commentHost
 	repo *prRepo
 	env  []string
+	// cwd is where it runs, when not the repository's top.
+	cwd string
 }
 
 func newRecipeRun(t *testing.T, h backtestHost, repo *prRepo) *recipeRun {
@@ -485,6 +505,9 @@ func (rr *recipeRun) run(settings []string, args ...string) (string, error) {
 	}
 	cmd := exec.Command(shell, append([]string{script}, args...)...)
 	cmd.Dir = rr.repo.dir
+	if rr.cwd != "" {
+		cmd.Dir = rr.cwd
+	}
 	cmd.Env = append(append([]string{}, rr.env...), settings...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
@@ -685,25 +708,26 @@ func TestBacktestRecipeFails(t *testing.T) {
 		t.Errorf("FAIL_ON_ERROR=true: %v, %d comments\n%s", err, len(rr.host.mine()), out)
 	}
 
-	// lapilli failing names where the history is: not in the comment, nor
-	// the address its host resolved to.
+	// lapilli failing for want of the history: what a server or the
+	// network said is in the job's log, not the comment, which says
+	// where the history is.
 	rr.host.comments = nil
 	out, err = rr.run([]string{"PATHS=alerts"}, "--prometheus", "http://ci-reader:pw@localhost:1/prometheus", "--impact", "up == 0", "--timeout", "5s")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	block = failure(t, rr.body(), "the backtest failed, or didn't finish (lapilli exited 1)")
-	if m := regexp.MustCompile(`127\.0\.0\.1|\[::1\]|ci-reader|localhost`).FindString(block); m != "" || !strings.Contains(block, "[hidden]") ||
-		!strings.Contains(block, "[address]") || !strings.Contains(out, "localhost:1") {
+	if m := regexp.MustCompile(`127\.0\.0\.1|\[::1\]|ci-reader|localhost|query failed|dial tcp`).FindString(block); m != "" || !strings.Contains(out, "localhost:1") {
 		t.Errorf("the block says %q: %q\n%s", m, block, out)
 	}
-	// A URL's user and password, and addresses, wherever they come from.
+	// Of what lapilli said, the rest goes in, where the history is taken
+	// out: the URLs given, a URL's user and password, any address.
 	rr.host.comments = nil
 	userinfo := filepath.Join(t.TempDir(), "lapilli")
-	os.WriteFile(userinfo, []byte("#!/bin/sh\necho 'lapilli verdict: Get \"https://other-user:s3cret@elsewhere.example/x\": dial tcp 10.1.2.3:9090: lookup on 10.0.0.2:53' >&2\nexit 1\n"), 0o755)
-	rr.run([]string{"PATHS=alerts", "LAPILLI=" + userinfo}, "--prometheus", "http://127.0.0.1:1")
-	if block := failure(t, rr.body(), "the backtest failed, or didn't finish (lapilli exited 1)"); strings.Contains(block, "other-user") ||
-		strings.Contains(block, "10.") || !strings.Contains(block, `"https://elsewhere.example/x": dial tcp [address]: lookup on [address]`) {
+	os.WriteFile(userinfo, []byte("#!/bin/sh\necho 'lapilli verdict: --on-call: schedule Ops at https://other-user:s3cret@elsewhere.example/x (10.1.2.3:9090, [fd00::1]:443) read from prom.corp.example.' >&2\nexit 1\n"), 0o755)
+	rr.run([]string{"PATHS=alerts", "LAPILLI=" + userinfo}, "--prometheus", "http://prom.corp.example:9090")
+	if block := failure(t, rr.body(), "the backtest failed, or didn't finish (lapilli exited 1)"); strings.Contains(block, "other-user") || strings.Contains(block, "corp") ||
+		strings.Contains(block, "10.") || !strings.Contains(block, `https://elsewhere.example/x ([address], [address]) read from [hidden].`) {
 		t.Errorf("the block: %q", block)
 	}
 
@@ -831,7 +855,10 @@ func TestBacktestRecipeSettings(t *testing.T) {
 		{[]string{"PATHS=alerts"}, []string{"--bearer-token-file", "./alerts/../incidents.yaml"}, "a file in the checkout is the pull request's"},
 		{[]string{"PATHS=alerts", "INCIDENTS=/etc/passwd"}, nil, "want a file in the repository"},
 		// PATHS that neither commit has would say nothing changed.
-		{[]string{"PATHS=alert"}, []string{"--prometheus", "http://127.0.0.1:1"}, "none of PATHS is in either commit"},
+		{[]string{"PATHS=alert"}, []string{"--prometheus", "http://127.0.0.1:1"}, "PATHS: alert: in neither commit"},
+		// One of them, beside one that is there: its rules would never be
+		// compared.
+		{[]string{"PATHS=alerts mroe"}, []string{"--prometheus", "http://127.0.0.1:1"}, "PATHS: mroe: in neither commit"},
 		{[]string{"PATHS=alerts", "BITBUCKET_USER_UUID=x"}, nil, ""},
 	} {
 		if len(c.settings) > 0 && c.settings[len(c.settings)-1] == "BITBUCKET_USER_UUID=x" {
@@ -1166,9 +1193,10 @@ func TestBacktestRecipeRenderAlone(t *testing.T) {
 	repo.pullRequest(map[string]string{"chart/out.yaml": shopRules("2h")})
 	rr := newRecipeRun(t, backtestHosts[0], repo)
 	homes := filepath.Join(t.TempDir(), "homes")
-	render := `printf '%s %s\n' "$(basename "$HOME")" "${CI_JOB_TOKEN:-}${GITHUB_TOKEN_FILE:-}${SYSTEM_ACCESSTOKEN:-}${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" >>` +
+	render := `printf '%s %s\n' "$(basename "$HOME")" "${CI_JOB_TOKEN:-}${GITHUB_TOKEN_FILE:-}${SYSTEM_ACCESSTOKEN:-}${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}${CI_REPOSITORY_URL:-}${CI_DEPENDENCY_PROXY_PASSWORD:-}" >>` +
 		homes + `; [ "$HOME" != "$JOB_HOME" ] && cat chart/out.yaml`
-	out, err := rr.run([]string{"RENDER=" + render, "JOB_HOME=" + rr.home(), "CI_JOB_TOKEN=job", "SYSTEM_ACCESSTOKEN=azure", "ACTIONS_ID_TOKEN_REQUEST_TOKEN=oidc"},
+	out, err := rr.run([]string{"RENDER=" + render, "JOB_HOME=" + rr.home(), "CI_JOB_TOKEN=job", "SYSTEM_ACCESSTOKEN=azure", "ACTIONS_ID_TOKEN_REQUEST_TOKEN=oidc",
+		"CI_REPOSITORY_URL=https://gitlab-ci-token:job@gitlab.example/o/r.git", "CI_DEPENDENCY_PROXY_PASSWORD=job"},
 		"--prometheus", prom.URL)
 	if err != nil || strings.Contains(rr.body(), "failed") {
 		t.Fatalf("%v\n%s\n%s", err, rr.body(), out)
@@ -1266,5 +1294,226 @@ func TestBacktestRecipeLongComment(t *testing.T) {
 	}
 	if body := rr.body(); len(body) > 65000 || !strings.Contains(body, "### Lapilli backtest failed") {
 		t.Errorf("%d bytes", len(body))
+	}
+}
+
+// A history that refuses the job, with a reason that says who the job is
+// and where it reads from: the reason is in the job's log, never the
+// comment, whether the job is asked to fail or lapilli doesn't finish.
+func TestBacktestRecipeRefusedReason(t *testing.T) {
+	needRecipeTools(t)
+	reason := `{"status":"error","errorType":"forbidden","error":"User: arn:aws:sts::123456789012:assumed-role/ci-metrics-reader/i-0abc is not authorized; via internal-gw.corp.example.net"}`
+	prom := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		io.WriteString(w, reason)
+	}))
+	defer prom.Close()
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	leaks := regexp.MustCompile(`123456789012|ci-metrics-reader|internal-gw|corp\.example`)
+	out, err := rr.run([]string{"PATHS=alerts", "FAIL_ON_ERROR=true"}, "--prometheus", prom.URL)
+	if err == nil {
+		t.Errorf("FAIL_ON_ERROR=true, nothing replayed: the job succeeded")
+	}
+	block := failure(t, rr.body(), "1 of the rules that differ couldn't be replayed (FAIL_ON_ERROR=true)")
+	if m := leaks.FindString(rr.body()); m != "" || strings.TrimSpace(block) != "1 of the rules that differ couldn't be replayed (FAIL_ON_ERROR=true)." {
+		t.Errorf("the comment says %q:\n%s", m, rr.body())
+	}
+	if !strings.Contains(out, "123456789012") {
+		t.Errorf("the job's log doesn't say why:\n%s", out)
+	}
+	// lapilli exits 1 having said why rules couldn't be replayed: the
+	// same.
+	rr.host.comments = nil
+	failing := filepath.Join(t.TempDir(), "lapilli")
+	os.WriteFile(failing, []byte("#!/bin/sh\necho 'lapilli verdict: CheckoutErrors (after) couldn'\"'\"'t be replayed: query failed: HTTP 403: User: arn:aws:sts::123456789012:assumed-role/ci-metrics-reader' >&2\n"+
+		"echo 'lapilli verdict: the replay did not finish within --timeout' >&2\nexit 1\n"), 0o755)
+	rr.run([]string{"PATHS=alerts", "LAPILLI=" + failing}, "--prometheus", prom.URL)
+	block = failure(t, rr.body(), "the backtest failed, or didn't finish (lapilli exited 1)")
+	if m := leaks.FindString(block); m != "" || !strings.Contains(block, "the replay did not finish within --timeout") {
+		t.Errorf("the block says %q: %q", m, block)
+	}
+}
+
+// The branch a pull request goes into is taken from the clone when the
+// checkout fetched it, as a full clone does: a fetch needs credentials the
+// checkout may have dropped. When the clone hasn't it, it is fetched.
+func TestBacktestRecipeTargetInClone(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	// The pull request's own commit checked out; origin unreachable, as
+	// without the checkout's credentials; its main as the checkout left it.
+	repo.git("checkout", "--quiet", "--detach", "pr")
+	repo.git("remote", "add", "origin", filepath.Join(t.TempDir(), "gone.git"))
+	repo.git("update-ref", "refs/remotes/origin/main", "main")
+	rr := newRecipeRun(t, backtestHosts[1], repo)
+	out, err := rr.run([]string{"PATHS=alerts", "TARGET_BRANCH=main"}, "--prometheus", prom.URL)
+	if err != nil || strings.Contains(rr.body(), "### Lapilli backtest failed") || !strings.Contains(rr.body(), "| `CheckoutErrors` | `page` | 1 → 0") {
+		t.Errorf("%v\n%s\n%s", err, rr.body(), out)
+	}
+	// Not in the clone, and origin out of reach: said.
+	rr.host.comments = nil
+	repo.git("update-ref", "-d", "refs/remotes/origin/main")
+	rr.run([]string{"PATHS=alerts", "TARGET_BRANCH=main"}, "--prometheus", prom.URL)
+	failure(t, rr.body(), "the branch main isn't in the clone, and couldn't be fetched from origin: check out every branch, or let the job fetch (the recipes' README says how, CI by CI)")
+}
+
+// A file in the checkout is the pull request's, whichever of its
+// directories REPO is, or the job runs from.
+func TestBacktestRecipeCheckoutFromBelow(t *testing.T) {
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"monitoring/alerts/shop.yaml": shopRules("5m"), "incidents.yaml": "incidents: []\n"})
+	repo.pullRequest(map[string]string{"monitoring/alerts/shop.yaml": shopRules("2h")})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	for name, c := range map[string]struct {
+		cwd      string
+		settings []string
+		file     string
+	}{
+		"REPO a directory of it":  {"", []string{"PATHS=monitoring/alerts", "REPO=monitoring"}, "incidents.yaml"},
+		"run from a directory":    {filepath.Join(repo.dir, "monitoring"), []string{"PATHS=monitoring/alerts"}, "../incidents.yaml"},
+		"its path from elsewhere": {"", []string{"PATHS=monitoring/alerts", "REPO=monitoring"}, filepath.Join(repo.dir, "incidents.yaml")},
+	} {
+		rr.cwd = c.cwd
+		out, err := rr.run(c.settings, "--prometheus", "http://127.0.0.1:1", "--incidents", c.file)
+		if err == nil || !strings.Contains(out, "a file in the checkout is the pull request's") {
+			t.Errorf("%s: %v\n%s", name, err, out)
+		}
+	}
+	if len(rr.host.comments) != 0 {
+		t.Errorf("commented: %+v", rr.host.comments)
+	}
+}
+
+// What is said in the comment is taken out first, then cut to its last
+// characters: a host the cut would split is hidden whole.
+func TestBacktestRecipeScrubThenCut(t *testing.T) {
+	needRecipeTools(t)
+	host := "prometheus.internal.example.com"
+	// One line whose last 4,000 bytes start ten bytes into the host.
+	head := "error reading " + host
+	tail := " " + strings.Repeat("z", 4000-(len(host)-10)-2) + "\n"
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "render.log": head + tail})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	if out, err := rr.run([]string{"RENDER=cat render.log >&2; exit 1"}, "--prometheus", "http://"+host+":9090"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	block := failure(t, rr.body(), "RENDER failed in the commit it goes into")
+	if strings.Contains(block, "example") || strings.Contains(block, "internal") || !strings.Contains(block, "zzzz") {
+		t.Errorf("part of the host: %q", block[:min(len(block), 200)])
+	}
+	if n := len([]rune(strings.TrimSuffix(strings.SplitN(block, "\n", 2)[1], "\n"))); n > 4000 {
+		t.Errorf("%d characters of the log, more than 4,000", n)
+	}
+}
+
+// INCIDENTS is read up to 8 MiB.
+func TestBacktestRecipeIncidentsCap(t *testing.T) {
+	needRecipeTools(t)
+	big := "incidents: []\n#" + strings.Repeat("x", 8<<20) + "\n"
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "incidents.yaml": big})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	rr.run([]string{"PATHS=alerts", "INCIDENTS=incidents.yaml"}, "--prometheus", "http://127.0.0.1:1")
+	failure(t, rr.body(), "INCIDENTS incidents.yaml is more than 8 MiB")
+}
+
+// What the recipe says in the job's log of the pull request's, a link's
+// path, is no CI's command: Azure's ##vso[ is read anywhere in a line.
+func TestBacktestRecipeSaysNoCommand(t *testing.T) {
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	os.Symlink("/etc/hosts", filepath.Join(repo.dir, "alerts", "##vso[task.setvariable variable=OK]yes"))
+	repo.git("add", "-A")
+	repo.git("commit", "--quiet", "--amend", "--no-edit")
+	rr := newRecipeRun(t, backtestHosts[4], repo)
+	out, _ := rr.run([]string{"PATHS=alerts"}, "--prometheus", "http://127.0.0.1:1")
+	if strings.Contains(out, "##vso[") || !strings.Contains(out, "a symbolic link in the pull request's commit: alerts/##vso(task.setvariable") {
+		t.Errorf("the job's log:\n%s", out)
+	}
+}
+
+// streamed writes up to n bytes, their length unsaid, for as long as they
+// are read, adding to sent as it goes.
+func streamed(w http.ResponseWriter, n int64, sent *atomic.Int64) {
+	chunk := []byte(strings.Repeat(" ", 64<<10))
+	for done := int64(0); done < n; done += int64(len(chunk)) {
+		if _, err := w.Write(chunk); err != nil {
+			return
+		}
+		w.(http.Flusher).Flush()
+		sent.Add(int64(len(chunk)))
+	}
+}
+
+// curl before 8.4.0 caps only an answer that says its length: one that
+// doesn't is cut at the cap all the same, the host's and a release's, and
+// read no further than it.
+func TestBacktestRecipeCapsAnswers(t *testing.T) {
+	needRecipeTools(t)
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("releases are for Linux and macOS")
+	}
+	// A curl that ignores --max-filesize, as an old one does here.
+	real, err := exec.LookPath("curl")
+	if err != nil {
+		t.Skip("no curl")
+	}
+	shim := t.TempDir()
+	os.WriteFile(filepath.Join(shim, "curl"), []byte(`#!/bin/sh
+n=$#
+while [ "$n" -gt 0 ]; do
+  a=$1; shift; n=$((n - 1))
+  if [ "$a" = --max-filesize ]; then shift; n=$((n - 1)); continue; fi
+  set -- "$@" "$a"
+done
+exec '`+real+`' "$@"
+`), 0o755)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	for i, e := range rr.env {
+		if strings.HasPrefix(e, "PATH=") {
+			rr.env[i] = "PATH=" + shim + string(os.PathListSeparator) + strings.TrimPrefix(e, "PATH=")
+		}
+	}
+	rr.host.huge = true
+	out, _ := rr.run([]string{"PATHS=alerts"}, "--prometheus", "http://127.0.0.1:1")
+	if !strings.Contains(out, "didn't list the pull request's comments (failed)") {
+		t.Errorf("a listing of more than 16 MiB:\n%s", out)
+	}
+	// What the sockets and pipes between hold aside, read no further.
+	if sent := rr.host.sent.Load(); sent > 40<<20 {
+		t.Errorf("%d MiB of a listing read, past 16 MiB", sent>>20)
+	}
+	rr.host.huge = false
+	// An answer cut short is no answer, whatever its status said.
+	rr.host.cut = true
+	out, _ = rr.run([]string{"PATHS=alerts"}, "--prometheus", "http://127.0.0.1:1")
+	if !strings.Contains(out, "didn't list the pull request's comments (failed)") {
+		t.Errorf("a listing cut short:\n%s", out)
+	}
+	rr.host.cut = false
+	var sums atomic.Int64
+	releases := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/SHA256SUMS") {
+			streamed(w, 64<<20, &sums)
+			return
+		}
+		io.WriteString(w, "an archive") // its sum, never reached
+	}))
+	defer releases.Close()
+	rr.run([]string{"PATHS=alerts", "LAPILLI=", "LAPILLI_VERSION=v9.9.9", "LAPILLI_RELEASES=" + releases.URL, "LAPILLI_SHA256=" + strings.Repeat("a", 64)},
+		"--prometheus", "http://127.0.0.1:1")
+	if body := rr.body(); !strings.Contains(body, "couldn't be downloaded") {
+		t.Errorf("a SHA256SUMS of more than 64 KiB:\n%s", body)
+	}
+	if sent := sums.Load(); sent > 32<<20 {
+		t.Errorf("%d MiB of a SHA256SUMS read, past 64 KiB", sent>>20)
 	}
 }

@@ -25,20 +25,26 @@ gave, are as they were.
   Kustomize overlay), the base's first, each with a `HOME` of its own and
   without the variables CIs keep tokens in; reads the incidents from the
   commit the pull request goes into (`INCIDENTS`), never the pull
-  request's, and refuses a file an argument names in the checkout; runs
+  request's, and refuses a file an argument names anywhere in the
+  checkout; takes the branch a pull request goes into from the clone when
+  the checkout fetched it, so a checkout without credentials does; runs
   `lapilli verdict --compare --changed-only --markdown`; and posts one
   comment, found again by a hidden first line and the token's own account
   (on Bitbucket, `BITBUCKET_USER_UUID`), and edited on later runs. Nothing
   changed and no comment yet: none posted. What fails is said in the
-  comment, in a fenced block, nothing of the pull request's outside it, and
-  the job succeeds unless `FAIL_ON_ERROR=true`, which a rule that couldn't
-  be replayed fails too. What it copies to the job's log is each line after
-  a `| `, so none of it is a CI's command. Tested against a stand-in for
-  each host's API, and end to end against a real Gitea and Prometheus
-  (`test/e2e/backtest.sh`, in CI): a comment posted, edited after a push,
-  none on a pull request that changes no rule, a rule named to mention,
-  reference and break the table rendered by Gitea itself as text, and a
-  link whose path mentions a user refused without notifying anyone.
+  comment, in a fenced block, nothing of the pull request's outside it,
+  taken out where the history is before it is cut, never why a rule
+  couldn't be replayed or what a server or the network said; the job
+  succeeds unless `FAIL_ON_ERROR=true`, which a rule that couldn't be
+  replayed fails too. A `PATHS` neither commit has fails the job. What it
+  copies to the job's log is each line after a `| `, so none of it is a
+  CI's command. Answers are capped whatever curl's version. Tested against
+  a stand-in for each host's API, and end to end against a real Gitea and
+  Prometheus (`test/e2e/backtest.sh`, in CI): a comment posted, edited
+  after a push, none on a pull request that changes no rule, a rule named
+  to mention, reference and break the table rendered by Gitea itself as
+  text, a link whose path mentions a user refused without notifying
+  anyone, from a checkout without credentials.
 - **`lapilli verdict --compare --markdown`**: the report as Markdown to
   post on a pull request or a merge request: a heading with the period and
   its time zone, the totals, the rules that differ as a table, the
@@ -49,10 +55,11 @@ gave, are as they were.
   incidents and reasons are written as code spans, so none can format,
   link, mention (`@user`, `@org/team`), reference (`#123`), break a table
   or hide what follows; a name is cut before anything is made of it. A
-  query that failed for want of reaching the history says only that, its
-  reason going to stderr; from the rest, the URLs, user names, hosts (each
-  as a whole word), IP addresses, tenants and project the history is read
-  with are taken out. When nothing changed, a short form that doesn't
+  query that failed for want of reaching the history (anything but the API
+  itself refusing it, 400 or 422 in its own words, not a proxy's page) says
+  only that, its reason going to stderr; from the rest, the URLs, user
+  names, hosts (each as a whole word, a full stop after it too), IP
+  addresses, tenants and project the history is read with are taken out. When nothing changed, a short form that doesn't
   change. It doesn't go with `--check-content`.
 - **A summary for tools.** `--json` with `--compare` adds `"summary"`:
   `nothing_changed`, `changed`, `added`, `removed`, `same`, `alike`,
@@ -62,10 +69,12 @@ gave, are as they were.
   given" is `incidents_given: false`, not zero caught. Nothing changing has
   no exit status of its own (the README says why).
 - **Recording rules in a comparison.** `--compare` reads the recording rules
-  beside the alert rules, and one that differs (`"recording"` in `--json`)
-  is a change: `nothing_changed` is false. A replay reads what a recording
-  rule recorded, from the history, so the report says the alerts that read
-  one are replayed against that, not what the change would record.
+  beside the alert rules, wherever Prometheus's groups are, in Azure rule
+  groups and in Grafana provisioning files, and one that differs
+  (`"recording"` in `--json`) is a change: `nothing_changed` is false. A
+  replay reads what a recording rule recorded, from the history, so the
+  report says the alerts that read one are replayed against that, not what
+  the change would record.
 
 ### Changed
 
@@ -74,13 +83,19 @@ gave, are as they were.
   caught, nothing and precision columns and what it would say of incidents,
   and keeps fired and re-fired. A replay without `--compare` still asks for
   them.
-- **A Prometheus group's `labels` and `limit` are each of its rules'.** Its
-  labels are added to its rules', which override them, as Prometheus 3
-  does; its limit is part of what decides when a rule fires, so a change to
-  either is a change to its rules. A limit isn't replayed (past it,
-  Prometheus drops all of a rule's alerts): a rule under one is marked
-  replayed in part. In lapilli serve, a rule in a group with either is a
-  new version of it once, on upgrade.
+- **A Prometheus group's `labels` and `limit` are each of its rules'.** The
+  alerts a replay gives carry its labels under the rule's own, as
+  Prometheus 3 does, and a change to either is a change to its rules, in a
+  comparison and as a new version in lapilli serve. A limit isn't replayed
+  (past it, Prometheus drops all of a rule's alerts): a rule under one is
+  marked replayed in part. A rule's name, and in lapilli serve its
+  versions, history and proposals, are as they were: an upgrade makes no
+  new version, and a change proposed before it goes on (tested on a ledger
+  v0.31.2 wrote). The rules API's group `limit` is read too.
+- **A Grafana recording rule is no alert rule.** One with `record`, in a
+  provisioning file, was read as an alert rule; it is now a recording rule,
+  compared as one. lapilli serve, reading a Grafana with recording rules,
+  stops listing them among its alert rules: one new version, on upgrade.
 - A report's header names its time zone with each offset the period took,
   `Asia/Seoul (+09:00)`, `Europe/Berlin (+01:00 → +02:00 → +01:00)`, or
   `UTC` by any of its names (`Etc/UTC`, `Etc/Zulu`), never Go's bare
