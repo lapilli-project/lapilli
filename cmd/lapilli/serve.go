@@ -920,7 +920,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	}
 	cfg.RulesHistory, cfg.RulesSelect = f.rulesHistory, f.rulesSelect
 	cfg.Loaded, cfg.Grafana, cfg.GrafanaToken, cfg.Alerts = f.loadedRules, f.grafana, f.grafanaTk, f.alerts
-	cfg.Loki, cfg.LokiToken, cfg.LokiTenant, cfg.LokiLoaded = f.loki, f.lokiTk, f.lokiTenant, f.lokiLoaded
+	f.lokiInto(&cfg)
 	if len(f.lokiRules) == 1 {
 		cfg.LokiRules = f.lokiRules[0]
 	}
@@ -980,6 +980,15 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// lokiInto gives cfg --loki, and the Limiter its queries are asked by,
+// which lapilli serve reads its ruler by each minute too.
+func (f *verdictFlags) lokiInto(cfg *serve.Config) {
+	cfg.Loki, cfg.LokiToken, cfg.LokiTenant, cfg.LokiLoaded = f.loki, f.lokiTk, f.lokiTenant, f.lokiLoaded
+	if f.loki != "" {
+		cfg.LokiLimit = f.lokiSource().Limit
+	}
 }
 
 // sameFile reports whether two paths name one file, or files holding the

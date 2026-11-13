@@ -19,10 +19,10 @@
 #         - uses: actions/checkout@v4
 #           with: {fetch-depth: 2, persist-credentials: false}
 #         # Pinned by the commit of the release's tag.
-#         - uses: lapilli-project/lapilli/recipes/backtest@COMMIT # v0.32.0
+#         - uses: lapilli-project/lapilli/recipes/backtest@COMMIT # v0.33.0
 #           with:
-#             version: v0.32.0
-#             sha256: SHA256 # of lapilli-v0.32.0-linux-amd64.tar.gz
+#             version: v0.33.0
+#             sha256: SHA256 # of lapilli-v0.33.0-linux-amd64.tar.gz
 #             paths: alerts
 #             incidents: incidents.yaml
 #             prometheus-url: ${{ vars.PROMETHEUS_URL }}
@@ -35,7 +35,7 @@ branding:
   color: gray-dark
 inputs:
   version:
-    description: The Lapilli release to install, such as v0.32.0, checked against its SHA256SUMS. The tag this action is used at.
+    description: The Lapilli release to install, such as v0.33.0, checked against its SHA256SUMS. The tag this action is used at.
     required: true
   sha256:
     description: The sha256 of the release's archive for the runner (lapilli-VERSION-linux-amd64.tar.gz), pinned, which a release replaced can't match. SHA256SUMS is checked either way.
@@ -77,7 +77,7 @@ inputs:
     description: Tells apart the comments of several jobs on one pull request.
     default: default
   fail-on-error:
-    description: true fails the step when the backtest does, once the comment says so.
+    description: true fails the step when the backtest does, or a rule that differs couldn't be replayed, whatever why, once the comment says so.
     default: "false"
   token:
     description: A token that may comment on the pull request.

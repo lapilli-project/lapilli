@@ -14,6 +14,7 @@
 # clone's own, never fetched.
 #
 # Needs Docker, Go, git, curl and jq. Leaves everything up when KEEP is set.
+# shellcheck disable=SC2016 # backticks and $ of Markdown and regular expressions, not the shell's
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 repo=$PWD

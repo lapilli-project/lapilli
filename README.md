@@ -406,7 +406,94 @@ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 --i
 `lapilli_incident_detection_delay_seconds`.
 
 A replay asks for each query a day at a time, once for every rule that needs
-it, and runs `--parallel` (8) rules at once; lower it if the API pushes back.
+it, and runs `--parallel` (8) rules at once against each API it reads:
+`--prometheus`, `--loki`, each of Grafana's data sources; a Grafana is asked
+`--parallel` requests at once at most for all its data sources, as it answers
+for them all. A server reached by two names, as `--loki` and as a Grafana data
+source, or as `--prometheus` and `--loki`, is asked as two. An API that turns
+a request away for now is asked again after a wait:
+
+- after HTTP 5xx (not 501), or a connection it dropped or reset, 2, 4, 8
+  and 16 seconds;
+- after HTTP 429 (too many requests), or a 503, that says how long
+  (`Retry-After`, in seconds or as a date), that long, between a second and
+  two minutes, plus up to a quarter, as often as it says so;
+- after a 429 that doesn't, 4, 8, 16, 32, 60 and 60 seconds, a minute and a
+  half to three minutes in all, past the window of a quota by the minute.
+
+429s and 5xx are counted apart. Each wait is less up to half, or more up to
+a quarter, so that requests turned away together don't come back together.
+A request is asked again for five minutes at most from when it was first
+pushed back, by an answer or by a wait for its turn the API asked for: the
+API's answers and the waits for a turn count, and a request whose turn
+doesn't come by then is given up; one already asked is waited for. A wait
+that would end past `--timeout`, the API's or a turn by `--max-rate`, isn't
+waited for: the rule is left unfinished then, as the deadline would leave
+it, and the run exits 1 saying to raise `--timeout`.
+
+A 429, a 503 or a connection dropped also halves how many requests may go
+to that API at once: half of those in flight lately, or of the limit, if
+fewer, from 64, for the whole run, down to one, once a second at most; eight
+at once, as `--parallel 8` has, are four after one push back. One more may
+go for every ten seconds without a push back, asked or not, so `lapilli
+serve`, back an hour later, asks as many at once as before. While an API said
+to wait, nothing else is asked of it: a request waiting for its turn looks
+again when it wakes. Behind one Grafana, each data source backs off of its
+own, as Grafana passes on what each answers. `--max-rate N` asks each API N
+requests a second at most, evenly spaced, for a quota known beforehand:
+`--max-rate 0.5` for one of 30 a minute; a Grafana's data sources share it.
+Runs at once that share a quota should each take their part of it. This is
+the same for `--prometheus` and every cloud's `--auth`, for `--loki`, its
+ruler included, and Grafana's data source proxy, and for `lapilli serve`,
+which takes `--max-rate` too. What lapilli does without, the configuration
+and the targets Prometheus is asked for, and where a Loki's ruler runs its
+groups as `lapilli serve` reads it each minute, is asked once, within 30
+seconds, not while the API said to wait, and its answers don't change how
+the rest is asked; `lapilli serve` keeps where the groups run as last read
+when it can't be read.
+
+A run that takes longer than 15 seconds says on stderr, every 30 seconds,
+how it is going; `--progress=false` keeps it quiet. A run the history
+answered HTTP 429 says so at its end either way. stdout has the report
+alone; the [backtest recipes](recipes/backtest) copy stderr to the job's log
+as it comes, and none of the progress to the comment. A comparison counts
+replays: a rule changed is replayed before and after.
+
+```
+lapilli verdict: after 2m30s, 23 of 61 rules replayed, 412 requests to the history, 37 asked again after a wait, 35 answered HTTP 429
+```
+
+A query fails one of two ways, and its rule's reason says which:
+
+- `query failed: the history couldn't be read: ...`, a failure of the run:
+  the history wasn't reached (a connection, a name, TLS), didn't let lapilli
+  in (HTTP 401, 403, 407, credentials that couldn't be had), wasn't where it
+  was said to be (404, a redirect to sign in, a page or JSON that isn't the
+  API's, from a proxy or a gateway), or turned the query away to the end
+  (408, 429, 5xx). Another run, or this one with its access mended, may
+  replay the rule.
+- `query failed: ...` otherwise, the history's answer to the query as
+  written, which every run gets: refused in the API's own words (HTTP 400
+  or 422: a parse error, an execution error), too large however short the
+  range asked, not done (501), or an answer that can't be read.
+
+A rule whose replay failed for the run (the history unread, or the time run
+out) is named with why at the top of the report, as the rest of it leaves
+the rule out, ten at most, and at its foot with the rules that can't be
+replayed at all (a CloudWatch metric alarm, a rule paused, a query the API
+refused as written). `--json` lists both in `unreplayed`, each with `failed`
+true when its replay failed for the run and another run may replay it; in a
+comparison, each with its side, `before` or `after`, but a rule alike in
+both, replayed once for both, which has none. The exit stays 0, since what
+was replayed holds; `--fail-unreplayed` exits 1 instead, for a check that a
+run that couldn't read the history shouldn't pass. It doesn't count a query
+refused as written, which fails every run until the rule changes, nor a
+Grafana rule replayed whose query outside its condition failed, which the
+report notes below its table. A run cut short by `--timeout` exits 1 either
+way. The API's text in a reason is cut to 300 bytes, without what doesn't
+show, and without the token, the signature or the password lapilli sent,
+should the API echo it back; `lapilli serve` keeps a reason without how often
+its request was asked.
 
 `--prometheus URL` takes any Prometheus-compatible API: Prometheus, Thanos,
 Mimir, VictoriaMetrics, or a cloud's managed Prometheus. `--bearer-token-file`
@@ -796,10 +883,10 @@ jobs:
       - uses: actions/checkout@v4
         with: {fetch-depth: 2, persist-credentials: false}
       # Pinned by the commit of the release's tag, which a tag moved can't change.
-      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-v0.32.0-TAG # v0.32.0
+      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-v0.33.0-TAG # v0.33.0
         with:
-          version: v0.32.0
-          sha256: SHA256-OF-lapilli-v0.32.0-linux-amd64.tar.gz # as its SHA256SUMS says
+          version: v0.33.0
+          sha256: SHA256-OF-lapilli-v0.33.0-linux-amd64.tar.gz # as its SHA256SUMS says
           paths: alerts
           prometheus-url: ${{ vars.PROMETHEUS_URL }}
           since: 14d
@@ -849,8 +936,10 @@ Rules compared: **1 changed, 1 added, 0 taken away**, 42 the same.
 | `INC-43` `Batch stuck` | 2026-10-31 02:40 | ✗ nothing fired | `DiskFillingUp` +4m |
 ```
 
-The rules that couldn't be replayed are listed under the table, with why;
-those that differ but fire as they did are folded in `<details>`.
+When rules that differ couldn't be replayed, a line under the totals says
+how many, as `unreplayed` counts them, since the numbers leave them out;
+they are listed, with why, under the table. Those that differ but fire as
+they did are folded in `<details>`.
 
 A recording rule that differs is a change too, listed apart: a replay reads
 what a recording rule recorded, from the history, so the alerts that read
@@ -884,12 +973,11 @@ mention (`@user`, `@org/team`), a reference (`#123`) or a link, a `|`
 escaped so it can't end a table's cell, a backtick in it making the span's
 fence longer, and control and format characters (bidirectional overrides,
 zero-width spaces), line separators and spaces other than the space shown
-as `\u{...}`. A query that failed for want of reaching the history (a
-connection, a credential, the server failing: anything but the API itself
-refusing the query, HTTP 400 or 422 in its own words, not a proxy's page)
-says only that in the Markdown, its whole reason going to stderr, the
-job's log; what is left
-has where the history and the rules are read from taken out: the
+as `\u{...}`. A query that failed as the history couldn't be read (as
+`--fail-unreplayed` counts it: anything but the history's answer to the
+query as written) says only that in the Markdown, its whole reason going to
+stderr, the job's log; what is left, the history's own words on a query it
+refused, has where the history and the rules are read from taken out: the
 `--prometheus`, `--loki`, `--grafana` and `--ruler` URLs, the user names
 in them and their hosts, each as a whole word, any IP address and port,
 the tenants and a `--gcp-project`.
@@ -906,7 +994,7 @@ What a tool reads is stable:
   | `nothing_changed` | nothing that decides when a rule fires differs, a recording rule included: nothing was replayed |
   | `changed`, `added`, `removed`, `same` | rules in both that differ, only in `--rules`, only in `--compare`, alike in both |
   | `alike` | rules that differ but, replayed on both sides, fire as often and catch as much as they did |
-  | `unreplayed` | rules that differ that couldn't be replayed, on one side or both |
+  | `unreplayed` | rules that differ that couldn't be replayed, on one side or both, for any reason: those of `--json`'s `"unreplayed"` list with a side, each counted once |
   | `recording_changed` | recording rules that differ, listed as `"recording"`: what the alerts that read them see, which no replay shows |
   | `firings_before`, `firings_after` | firings on each side; of the rules that differ alone with `--changed-only` |
   | `incidents_given` | judged against `--incidents` or `--impact`; when false, nothing was judged: no firing caught anything, and `incidents` is 0 |
@@ -922,7 +1010,8 @@ What a tool reads is stable:
 
 - The exit status is `lapilli verdict`'s, as it was: 0 when the report is
   written, whether or not anything changed; 1 when it failed, or a rule's
-  replay didn't finish within `--timeout` (the report is still written); 2
+  replay didn't finish within `--timeout` (the report is still written),
+  or, with `--fail-unreplayed`, the history couldn't be read for one; 2
   when the flags are wrong. Nothing changing has no exit status of its
   own: a CI step takes anything but 0 as a failure, and a pull request that
   changes no rule isn't one. Read `nothing_changed`.

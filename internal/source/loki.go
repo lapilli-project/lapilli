@@ -26,17 +26,33 @@ type Loki struct {
 	TokenFile string
 	// Tenant, when set, is sent as X-Scope-OrgID.
 	Tenant string
+	// MaxRate, when set, is how many requests a second it is asked at most
+	// (--max-rate).
+	MaxRate float64
+	// Limit, when set, is the Limiter every client of the Loki shares, its
+	// queries' and its ruler's: one is made of MaxRate otherwise.
+	Limit *prom.Limiter
 }
 
 // noRedirects is a client that follows no redirect, so a token goes
-// nowhere it wasn't sent.
+// nowhere it wasn't sent; and that gives up on a request after five
+// minutes, as prom's does.
 var noRedirects = &http.Client{
+	Timeout:       5 * time.Minute,
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
+// limiter is the Limiter of the Loki's clients.
+func (l Loki) limiter() *prom.Limiter {
+	if l.Limit != nil {
+		return l.Limit
+	}
+	return prom.NewLimiter(l.MaxRate)
 }
 
 // History is a client for the Loki's query API.
 func (l Loki) History(agent string) *prom.Client {
-	opts := []prom.Option{prom.Loki(), prom.WithHTTPClient(noRedirects)}
+	opts := []prom.Option{prom.Loki(), prom.WithHTTPClient(noRedirects), prom.WithLimiter(l.limiter())}
 	if l.Tenant != "" {
 		opts = append(opts, prom.WithHeader("X-Scope-OrgID", l.Tenant))
 	}
@@ -58,9 +74,15 @@ func tokenFrom(file string) func(context.Context) (string, error) {
 // GrafanaLoki is a client for a Grafana's Loki data source, through
 // Grafana's data source proxy: the Loki, the tenant and the credentials
 // Grafana asks when it evaluates a rule, with the token that reads the
-// rules. Grafana takes only GET there, which is how Loki is asked.
-func GrafanaLoki(base, tokenFile, agent, uid string) *prom.Client {
+// rules. Grafana takes only GET there, which is how Loki is asked. limit,
+// when not nil, is the data source's own Limiter: Grafana passes on what
+// each data source answers, Retry-After included, so each pushes back of
+// its own; the data sources of a Grafana share a Pace (--max-rate).
+func GrafanaLoki(base, tokenFile, agent, uid string, limit *prom.Limiter) *prom.Client {
 	opts := []prom.Option{prom.Loki(), prom.WithHTTPClient(noRedirects)}
+	if limit != nil {
+		opts = append(opts, prom.WithLimiter(limit))
+	}
 	if tokenFile != "" {
 		opts = append(opts, prom.WithToken(tokenFrom(tokenFile)))
 	}
@@ -150,11 +172,26 @@ func LokiFiles(path string) (rs []rules.Rule, docs []rules.Doc, notes []string, 
 // group, from its Prometheus-shaped API (/prometheus/api/v1/rules), which
 // doesn't say those but says when each group last ran.
 func LokiLoaded(ctx context.Context, l Loki, agent string, warn func(string)) ([]rules.Rule, []rules.Doc, map[rules.Place]time.Duration, error) {
+	rs, docs, err := LokiRules(ctx, l, agent, warn)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	places, err := LokiPlaces(ctx, l, agent)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	Placed(rs, places)
+	return rs, docs, places, nil
+}
+
+// LokiRules reads the rules a Loki's ruler holds, as LokiLoaded does, but
+// not where it runs each group.
+func LokiRules(ctx context.Context, l Loki, agent string, warn func(string)) ([]rules.Rule, []rules.Doc, error) {
 	r := &Ruler{URL: strings.TrimRight(l.URL, "/") + "/loki/api/v1/rules", Kind: RulerConfig, Tenant: l.Tenant, Agent: agent,
 		Reads: Creds{TokenFile: l.TokenFile}, Warn: warn, Flag: "--loki-loaded-rules"}
 	rs, docs, err := r.Read(ctx)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	// Read again as a Loki's, as the ledger reads them again: what the API
 	// gives is as Loki holds it.
@@ -162,24 +199,38 @@ func LokiLoaded(ctx context.Context, l Loki, agent string, warn func(string)) ([
 		docs[i].Logs = rules.LokiRuler
 	}
 	if rs, err = rules.FromDocs(docs); err != nil {
-		return nil, nil, nil, fmt.Errorf("--loki-loaded-rules: %w", err)
+		return nil, nil, fmt.Errorf("--loki-loaded-rules: %w", err)
 	}
-	places, err := LokiPlaces(ctx, l, agent)
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	return rs, docs, nil
+}
+
+// Placed sets each rule's Phase, where in its interval its group is run,
+// from places.
+func Placed(rs []rules.Rule, places map[rules.Place]time.Duration) {
 	for i := range rs {
 		if d, ok := places[rules.Place{Namespace: rs[i].Namespace, Group: rs[i].Group}]; ok {
 			rs[i].Phase = d
 		}
 	}
-	return rs, docs, places, nil
 }
 
 // LokiPlaces asks a Loki's ruler where it runs each group within its
-// interval.
+// interval: by l.Limit, as its queries are asked, and asked again as they
+// are.
 func LokiPlaces(ctx context.Context, l Loki, agent string) (map[rules.Place]time.Duration, error) {
-	b, err := l.History(agent).Rules(ctx)
+	return lokiPlaces(l.History(agent).Rules(ctx))
+}
+
+// LokiPlacesOnce asks it as a read lapilli can do without: once, within
+// 30 seconds, not while the Loki said to wait, and without its answer
+// changing how the Loki is asked (prom's RulesOnce). lapilli serve reads
+// them so each minute, between its replays' queries, and keeps those it
+// read before when it can't.
+func LokiPlacesOnce(ctx context.Context, l Loki, agent string) (map[rules.Place]time.Duration, error) {
+	return lokiPlaces(l.History(agent).RulesOnce(ctx))
+}
+
+func lokiPlaces(b []byte, err error) (map[rules.Place]time.Duration, error) {
 	if err != nil {
 		return nil, fmt.Errorf("--loki-loaded-rules: %w", err)
 	}

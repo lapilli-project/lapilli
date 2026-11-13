@@ -156,7 +156,7 @@ func TestLogsFor(t *testing.T) {
 	made := map[string]int{}
 	l := &Logs{Loki: loki, Grafana: func(uid string) replay.History {
 		made[uid]++
-		return GrafanaLoki("http://grafana:3000", "", "test", uid)
+		return GrafanaLoki("http://grafana:3000", "", "test", uid, nil)
 	}}
 	grafanaRule := rules.Rule{Logs: "lk", Graph: &rules.Graph{}}
 	a, _ := l.For(grafanaRule)

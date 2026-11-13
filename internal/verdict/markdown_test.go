@@ -65,7 +65,8 @@ func TestCompareMarkdown(t *testing.T) {
 	}
 	for _, want := range []string{
 		"### Lapilli backtest, 2026-10-26 09:00 → 2026-11-02 09:00 Asia/Seoul (+09:00)\n",
-		"Rules compared: **2 changed, 1 added, 1 taken away**, 40 the same.",
+		"Rules compared: **2 changed, 1 added, 1 taken away**, 40 the same.\n\n" +
+			"**1 of the rules that differ couldn't be replayed**, and are left out of what follows: the list below says why.\n\n| |",
 		"| | Before | After |\n|---|--:|--:|\n| Firings | 4 | 2 |\n| no severity | 0 | 1 |\n| Severity `page` | 1 | 1 |\n" +
 			"| Severity `ticket` | 3 | 0 |\n| Incidents with no alert, of 2 | 1 | 0 |\n",
 		"#### Rules that differ\n\n| Rule | Severity | Fired | ○ Caught | ● Nothing | Precision | Refired |\n| --- | --- | --: | --: | --: | --: | --: |\n",

@@ -42,6 +42,9 @@ type Prometheus struct {
 	// Tenant, when set, is sent as X-Scope-OrgID: a Mimir's or a Cortex's
 	// tenant, for one with tenants and no gateway to set it.
 	Tenant string
+	// MaxRate, when set, is how many requests a second it is asked at most
+	// (--max-rate).
+	MaxRate float64
 }
 
 // History is a client for the API.
@@ -51,7 +54,7 @@ func (p Prometheus) History(ctx context.Context, agent string) (*prom.Client, er
 		base = "https://monitoring.googleapis.com/v1/projects/" + url.PathEscape(p.GCPProject) + "/location/global/prometheus"
 		auth = "google"
 	}
-	var opts []prom.Option
+	opts := []prom.Option{prom.WithLimiter(prom.NewLimiter(p.MaxRate))}
 	if auth != "" {
 		o, err := cloud.Auth(ctx, auth, base, p.AWSRegion)
 		if err != nil {

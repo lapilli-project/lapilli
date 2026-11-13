@@ -208,6 +208,22 @@ jobs:
           go-version-file: go.mod
       - run: test/e2e/dashboard.sh
 
+  e2e-ratelimit:
+    # Runs at once against a real Prometheus behind nginx's rate limit,
+    # answered HTTP 429: every rule replayed, and --max-rate kept under it.
+    # Not a required check: it pulls images.
+    name: rate limit on real servers
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: test/e2e/ratelimit.sh
+
   vulnerabilities:
     name: govulncheck
     runs-on: ubuntu-latest

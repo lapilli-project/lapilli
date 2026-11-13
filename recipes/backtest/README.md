@@ -19,7 +19,7 @@ CI's own variables; outside it, set them (each script's header lists
 them). An API is asked over https, or plain http to the machine itself
 only: the token goes with each request. Each also needs:
 
-- `LAPILLI_VERSION`, the Lapilli release to install, such as `v0.32.0` (one
+- `LAPILLI_VERSION`, the Lapilli release to install, such as `v0.33.0` (one
   with `--markdown`). The archive for the machine is downloaded from the
   release and checked against the release's `SHA256SUMS` before it is
   unpacked; `LAPILLI_SHA256` pins its sum too, which a release replaced
@@ -117,10 +117,10 @@ jobs:
       - uses: actions/checkout@v4
         with: {fetch-depth: 2, persist-credentials: false}
       # The commit the release's tag names, which no tag moved changes.
-      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-v0.32.0-TAG # v0.32.0
+      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-v0.33.0-TAG # v0.33.0
         with:
-          version: v0.32.0
-          sha256: SHA256-OF-lapilli-v0.32.0-linux-amd64.tar.gz # as its SHA256SUMS says
+          version: v0.33.0
+          sha256: SHA256-OF-lapilli-v0.33.0-linux-amd64.tar.gz # as its SHA256SUMS says
           paths: alerts
           incidents: incidents.yaml
           prometheus-url: ${{ vars.PROMETHEUS_URL }}
@@ -150,7 +150,7 @@ backtest-rules:
       changes: [alerts/**/*]
   variables:
     GIT_DEPTH: 0
-    LAPILLI_VERSION: v0.32.0
+    LAPILLI_VERSION: v0.33.0
     PATHS: alerts
     INCIDENTS: incidents.yaml
     # A CI/CD variable of type File holding a project access token (role
@@ -185,7 +185,7 @@ pipelines:
             - export BITBUCKET_TOKEN_FILE=$(mktemp)
             - printf '%s' "$BACKTEST_TOKEN" > "$BITBUCKET_TOKEN_FILE"
             - export BITBUCKET_USER_UUID='{...}' # the token's account, as its first comment's run says
-            - LAPILLI_VERSION=v0.32.0 PATHS=alerts INCIDENTS=incidents.yaml sh ci/backtest/bitbucket.sh --prometheus "$PROMETHEUS_URL" --since 14d
+            - LAPILLI_VERSION=v0.33.0 PATHS=alerts INCIDENTS=incidents.yaml sh ci/backtest/bitbucket.sh --prometheus "$PROMETHEUS_URL" --since 14d
 ```
 
 Bitbucket Pipelines clones the pull request's branch alone: the script
@@ -211,7 +211,7 @@ steps:
   - script: |
       AZURE_DEVOPS_TOKEN_FILE=$(mktemp)
       printf '%s' "$SYSTEM_ACCESSTOKEN" > "$AZURE_DEVOPS_TOKEN_FILE"
-      AZURE_DEVOPS_TOKEN_FILE=$AZURE_DEVOPS_TOKEN_FILE LAPILLI_VERSION=v0.32.0 PATHS=alerts INCIDENTS=incidents.yaml \
+      AZURE_DEVOPS_TOKEN_FILE=$AZURE_DEVOPS_TOKEN_FILE LAPILLI_VERSION=v0.33.0 PATHS=alerts INCIDENTS=incidents.yaml \
         sh ci/backtest/azure-devops.sh --prometheus "$PROMETHEUS_URL" --since 14d
       rm -f "$AZURE_DEVOPS_TOKEN_FILE"
     env:
@@ -247,7 +247,7 @@ jobs:
       - run: |
           GITEA_TOKEN_FILE=$(mktemp)
           printf '%s' "$BACKTEST_TOKEN" > "$GITEA_TOKEN_FILE"
-          GITEA_TOKEN_FILE=$GITEA_TOKEN_FILE LAPILLI_VERSION=v0.32.0 PATHS=alerts INCIDENTS=incidents.yaml \
+          GITEA_TOKEN_FILE=$GITEA_TOKEN_FILE LAPILLI_VERSION=v0.33.0 PATHS=alerts INCIDENTS=incidents.yaml \
             sh ci/backtest/gitea.sh --prometheus "$PROMETHEUS_URL" --since 14d
         env:
           # A bot's token: write:issue, read:repository, read:user.
@@ -271,9 +271,9 @@ with the same values files and flags, so that only the pull request
 differs:
 
 ```yaml
-      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-v0.32.0-TAG # v0.32.0
+      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-v0.33.0-TAG # v0.33.0
         with:
-          version: v0.32.0
+          version: v0.33.0
           render: helm template monitoring charts/monitoring -f charts/monitoring/values-prod.yaml
           render-prepare: helm dependency build charts/monitoring >&2
           prometheus-url: ${{ vars.PROMETHEUS_URL }}
@@ -308,10 +308,11 @@ That is one reason forks are kept out.
 
 Lapilli writes it (`lapilli verdict --compare --markdown`, see the
 [README](../../README.md#pull-request-backtests-in-ci)): the period and its
-time zone, the totals before and after, the rules that differ as a table,
-the recording rules that differ, those that couldn't be replayed, those
-that differ but fire as they did folded away, and with incidents, those
-caught differently. It is cut short at 64,000 characters, saying so. When
+time zone, how many of the rules that differ couldn't be replayed, if any,
+the totals before and after, the rules that differ as a table, the
+recording rules that differ, those that couldn't be replayed, with why,
+those that differ but fire as they did folded away, and with incidents,
+those caught differently. It is cut short at 64,000 characters, saying so. When
 nothing that decides when a rule fires changed, it is a heading and one
 line.
 
@@ -320,11 +321,22 @@ backtest), the comment says what, in a fenced block with the last lines of
 what was said about it, and the job succeeds: a backtest that can't run
 shouldn't hold a pull request up, unless you ask it to. With
 `FAIL_ON_ERROR=true` the job fails too, once the comment says why: also
-when a rule that differs couldn't be replayed (the history out of reach,
-say), and when the comment can't be posted. A setting that is wrong (no
+when a rule that differs couldn't be replayed, and when the comment can't
+be posted. A rule that differs couldn't be replayed, for this, whatever
+why, as the summary's `unreplayed` counts them: the history out of reach
+(not let in, turned away, `--timeout` too short), or the query refused as
+written, which is the pull request's to mend. `lapilli verdict`'s own
+`--fail-unreplayed`, which fails only on the first, for a scheduled run of
+every rule where a rule refused as written would fail each run alike, isn't
+taken: the recipe decides when the job fails. A setting that is wrong (no
 `PATHS`, a `PATHS` neither commit has, a `TARGET` that isn't a ref, a flag
-the recipe gives, a file in the checkout) fails the job at once, whatever
-it says.
+the recipe gives or decides, a file in the checkout) fails the job at once,
+whatever it says.
+
+`lapilli verdict`'s stderr is copied to the job's log as it is written, so
+a long backtest, against a Prometheus with a request quota, say, shows how
+it is going every 30 seconds rather than looking hung; none of those lines
+goes in the comment.
 
 ## Pull requests from forks
 
@@ -364,9 +376,10 @@ runner inside your network:
   everyone who can read the pull request. Lapilli writes rule names,
   labels and the reasons a rule couldn't be replayed as code spans, which
   no host reads as Markdown, HTML, a mention, a reference or a link. A
-  query that failed for want of reaching the history (anything but the
-  API itself refusing the query, not a proxy's page) says only that in the
-  comment, its reason going to the job's log; from the rest, Lapilli takes
+  query that failed as the history couldn't be read (anything but the
+  history's own answer to the query as written: not a proxy's page, nor a
+  gateway's) says only that in the comment, its reason going to the job's
+  log; from the rest, Lapilli takes
   out where the history is: the `--prometheus`, `--loki`, `--grafana` and
   `--ruler` URLs, the user names in them and their hosts, each as a whole
   word, any IP address and port, the tenants and a `--gcp-project`. What
@@ -376,9 +389,9 @@ runner inside your network:
   control or format character (which could hide or reorder what is
   shown). Of what `lapilli` said, no line about why a rule couldn't be
   replayed, nor one with what a server or the network answered (`query
-  failed`, `HTTP 403: ...`, `dial tcp`, a TLS error): those are in the
-  job's log alone, as the rules that couldn't be replayed are in the
-  report. The path of a link refused is said only in the job's log.
+  failed: `, which begins every reason a query gives, `HTTP 403: ...`,
+  `dial tcp`, a TLS error), nor a progress line: those are in the job's log
+  alone, as the rules that couldn't be replayed are in the report. The path of a link refused is said only in the job's log.
 - What the recipe copies to the job's log is each line after a `| `,
   control characters taken out and Azure's `##vso[` made inert: GitHub's
   and Gitea's `::` commands are read only at a line's start, so none of it

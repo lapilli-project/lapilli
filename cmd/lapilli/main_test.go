@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -38,7 +40,10 @@ func (fakeHistory) QueryRange(ctx context.Context, expr string, start, end time.
 	}
 	switch {
 	case strings.Contains(expr, "broken"):
-		return nil, errors.New("bad_data: parse error")
+		return nil, &prom.APIError{Status: http.StatusBadRequest, Msg: "bad_data: parse error"}
+	case strings.Contains(expr, "turned"):
+		// Turned away to the end, as by a quota.
+		return nil, fmt.Errorf("%w (asked 7 times over 3m2s)", &prom.APIError{Status: http.StatusTooManyRequests, Msg: "slow down"})
 	case expr == "errors > 5":
 		return run(3*time.Hour, 2*time.Hour), nil
 	case expr == "slow":
@@ -208,7 +213,7 @@ func TestRun(t *testing.T) {
 		{args: "verdict --rules " + cloudWatch + " --prometheus http://p --incidents " + incidents,
 			code: 0, stdout: "cpu-high: a CloudWatch metric alarm isn't PromQL"},
 		{args: "verdict --rules " + rulesFile + " --prometheus http://p --incidents " + incidents,
-			code: 0, stdout: "Typo: query failed: bad_data: parse error"},
+			code: 0, stdout: "Typo: query failed: HTTP 400: bad_data: parse error"},
 		{args: "verdict --rules " + rulesFile + " --prometheus http://p --incidents " + incidents + " --impact impact",
 			code: 0, stdout: "✗ 1 of 2 incidents had no alert."},
 		{args: "verdict --rules " + rulesFile + " --rule ^Quiet$ --prometheus http://p --incidents " + incidents,
@@ -693,20 +698,23 @@ func TestServeCheckReplayOn(t *testing.T) {
 }
 
 // What --markdown writes for a pull request doesn't say where the history
-// is: a query the history didn't answer says only that, the reason going to
-// the job's log; what the server said of a query keeps its words, but not
-// the URLs, user names, hosts (whole words only: a host "prom" isn't taken
-// out of "prometheus"), addresses, tenants or project given.
+// is: a query the history didn't answer (rules.HistoryUnread, as
+// --fail-unreplayed counts it) says only that, the reason going to the
+// job's log; what the server said of a query it refused keeps its words,
+// but not the URLs, user names, hosts (whole words only: a host "prom"
+// isn't taken out of "prometheus"), addresses, tenants or project given.
 func TestForComment(t *testing.T) {
 	f := &verdictFlags{promURL: "https://ci-reader:pw@prom.internal.example:9090/prom", gcpProj: "shop-prod-123456", loki: "http://prom:3100",
 		rulerTenant: "team-a7"}
-	unreached := `query failed: Post "https://ci-reader:pw@prom.internal.example:9090/prom/api/v1/query_range": dial tcp 10.1.2.3:9090: connect: connection refused`
+	unreached := rules.HistoryUnread + `Post "https://ci-reader:pw@prom.internal.example:9090/prom/api/v1/query_range": dial tcp 10.1.2.3:9090: connect: connection refused`
 	judgedReason := "query failed: HTTP 400: bad_data: parse error near prometheus, from prom.internal.example (10.0.0.5:9090, [fd00::1]:443) for ci-reader, team-a7"
-	proxy := "query failed: HTTP 400: not a Prometheus API response: <html><address>Apache/2.4.58 Server at prometheus-0.monitoring.corp.example Port 9090</address></html>"
+	proxy := rules.HistoryUnread + "HTTP 400: not a Prometheus API response: <html><address>Apache/2.4.58 Server at prometheus-0.monitoring.corp.example Port 9090</address></html>"
 	before := &verdict.Report{Rules: []verdict.RuleResult{{Rule: "A", Unsupported: unreached}, {Rule: "B", Unsupported: "projects/shop-prod-123456 denied, prom failed"},
-		{Rule: "C", Unsupported: judgedReason}, {Rule: "D", Unsupported: "query failed: HTTP 503: upstream prom-0.prom:9090 overloaded"},
+		{Rule: "C", Unsupported: judgedReason}, {Rule: "D", Unsupported: rules.HistoryUnread + "HTTP 503: upstream prom-0.prom:9090 overloaded"},
 		{Rule: "E", Unsupported: proxy}, {Rule: "F", Unsupported: "query failed: HTTP 422: bad_data: unknown function near prom."},
-		{Rule: "G", Unsupported: "query failed: HTTP 400: not a Loki API response: <html>Bad Request</html>"}}}
+		{Rule: "G", Unsupported: rules.HistoryUnread + "HTTP 400: not a Loki API response: <html>Bad Request</html>"},
+		{Rule: "H", Unsupported: rules.HistoryUnread + "HTTP 401: token expired for ci-reader at prom.internal.example"},
+		{Rule: "I", Unsupported: "query failed: HTTP 501: not implemented at prom.internal.example"}}}
 	after := &verdict.Report{Rules: []verdict.RuleResult{{Rule: "A", Unsupported: replay.Unfinished}}}
 	var log strings.Builder
 	f.forComment(&verdict.Comparison{Before: before, After: after}, &log)
@@ -720,6 +728,9 @@ func TestForComment(t *testing.T) {
 		// A host at a sentence's end.
 		"query failed: HTTP 422: bad_data: unknown function near [--loki].",
 		UnreadHistory,
+		UnreadHistory,
+		// Refused as written: its words, without where.
+		"query failed: HTTP 501: not implemented at [--prometheus]",
 	} {
 		if got := before.Rules[i].Unsupported; got != want {
 			t.Errorf("%s: %q, want %q", before.Rules[i].Rule, got, want)
@@ -815,7 +826,7 @@ func TestComparePullRequest(t *testing.T) {
 			t.Errorf("the Markdown says %s:\n%s", hidden, out)
 		}
 	}
-	if !strings.Contains(errs, "lapilli verdict: New (after) couldn't be replayed: query failed: Post") || !strings.Contains(errs, "10.9.8.7") {
+	if !strings.Contains(errs, "lapilli verdict: New (after) couldn't be replayed: "+rules.HistoryUnread+"Post") || !strings.Contains(errs, "10.9.8.7") {
 		t.Errorf("the job's log doesn't say why:\n%s", errs)
 	}
 

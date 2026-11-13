@@ -182,6 +182,13 @@ func TestMCP(t *testing.T) {
 		cmp.Rules[0].Rule != "MoreErrors" || cmp.Rules[0].Before != nil || cmp.Rules[0].After == nil || cmp.Note != "" {
 		t.Errorf("adding a rule: %s %+v", text, cmp)
 	}
+	// One whose wait would end past the time compare has isn't finished,
+	// as one the time ran out on, and the note says so.
+	waiting := strings.Replace(strings.Replace(longer, "alert: Errors", "alert: Waiting", 1), "errors > 5", "waiting", 1)
+	if failed, text, cmp := compare(map[string]any{"rules": waiting}); failed || !slices.Contains(cmp.Unfinished, "Waiting") ||
+		!strings.Contains(cmp.Note, "didn't finish replaying") {
+		t.Errorf("a wait past the deadline: %s %+v", text, cmp)
+	}
 	// What can't be compared, or would cost too much, is refused: among
 	// them a Grafana expression that refers back to itself, which once
 	// recursed until the stack ran out.

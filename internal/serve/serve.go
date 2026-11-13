@@ -25,6 +25,7 @@ import (
 	"lapilli.dev/internal/cloud"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/oncall"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/signin"
@@ -51,6 +52,9 @@ type Config struct {
 	// again every minute; LokiLoaded reads them from its ruler's API.
 	Loki, LokiToken, LokiTenant, LokiRules string
 	LokiLoaded                             bool
+	// LokiLimit is the Limiter the Loki's queries are asked by, which its
+	// ruler is read by each minute too (--max-rate, and its push back).
+	LokiLimit *prom.Limiter
 	// Ruler is a managed Prometheus ruler the rules are read from, and
 	// changed through (docs/design/rulers.md): its URL, the file holding a
 	// token that reads it (Mimir, Cortex), and its tenant, sent as
@@ -367,12 +371,14 @@ type Server struct {
 		uids  []string
 		at    time.Time
 	}
-	// places are where --loki's ruler runs each of its groups, as read
-	// with its rules; notes, what was last said of its rule files.
+	// places are where --loki's ruler runs each of its groups, as last
+	// read with its rules, failing whether the last read of them failed;
+	// notes, what was last said of its rule files.
 	places struct {
 		sync.Mutex
-		m     map[rules.Place]time.Duration
-		notes string
+		m       map[rules.Place]time.Duration
+		failing bool
+		notes   string
 	}
 	// picked is what reading the rule files last passed over, as said.
 	picked atomic.Value

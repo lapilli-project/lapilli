@@ -28,7 +28,7 @@ type History interface {
 }
 
 // Unfinished marks a rule whose replay the deadline cut short.
-const Unfinished = "not finished before the timeout"
+const Unfinished = rules.Unfinished
 
 // Logs gives the history a rule written in LogQL is replayed against: the
 // Loki its Logs names (docs/design/loki.md).
@@ -95,7 +95,8 @@ type Version struct {
 // fingerprint holds (rules.Rule.Fingerprint): not its annotations.
 //
 // Rules that need the same query over the same day share one request; up to
-// parallel rules are replayed at once.
+// parallel rules are replayed at once against each history: the
+// Prometheus, each Loki, each Grafana data source.
 func Run(ctx context.Context, h History, versions []Version, from, to time.Time, step time.Duration, parallel int) ([]rules.Rule, []firing.Firing) {
 	ran, fs := RunEach(ctx, h, [][]Version{versions}, from, to, step, parallel)
 	return ran[0], fs[0]
@@ -119,7 +120,8 @@ func RunEach(ctx context.Context, h History, sets [][]Version, from, to time.Tim
 	askers := make([]*asker, len(runs))
 	order := make([]int, len(runs))
 	asks := make([]string, len(runs))
-	weight := map[string]int{} // requests, by the queries a rule asks for
+	srcs := make([]int, len(runs)) // the history each is replayed against
+	weight := map[string]int{}     // requests, by the queries a rule asks for
 	for i, run := range runs {
 		ran[i] = run[len(run)-1].Rule
 		order[i] = i
@@ -143,6 +145,7 @@ func RunEach(ctx context.Context, h History, sets [][]Version, from, to time.Tim
 			}
 			src = sh.srcOf(name, target)
 		}
+		srcs[i] = src
 		var reqs []request
 		exprs := map[string]bool{}
 		for j, st := range run {
@@ -168,17 +171,31 @@ func RunEach(ctx context.Context, h History, sets [][]Version, from, to time.Tim
 		}
 		return strings.Compare(asks[a], asks[b])
 	})
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, max(parallel, 1))
+	p := progressOf(ctx)
+	p.add(len(runs))
+	// Each history has parallel rules replayed at once of its own: one
+	// that pushes back holds its rules waiting, as it says to, and those
+	// waiting shouldn't keep the rules of another from theirs.
+	bySrc := map[int][]int{}
 	for _, i := range order {
-		sem <- struct{}{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			defer func() { <-sem }()
-			results[i], ran[i].Unsupported, ran[i].Failed = replayRun(ctx, askers[i], runs[i], to, step)
-			askers[i].done()
-		}()
+		bySrc[srcs[i]] = append(bySrc[srcs[i]], i)
+	}
+	var wg sync.WaitGroup
+	for _, these := range bySrc {
+		sem := make(chan struct{}, max(parallel, 1))
+		wg.Go(func() {
+			var each sync.WaitGroup
+			for _, i := range these {
+				sem <- struct{}{}
+				each.Go(func() {
+					defer func() { <-sem }()
+					results[i], ran[i].Unsupported, ran[i].Failed = replayRun(ctx, askers[i], runs[i], to, step)
+					askers[i].done()
+					p.ran()
+				})
+			}
+			each.Wait()
+		})
 	}
 	wg.Wait()
 	// A rule paused for part of the period was replayed for the rest; it
@@ -401,10 +418,12 @@ func replayRun(ctx context.Context, h History, run []stint, to time.Time, step t
 		lo, hi := st.span(step)
 		series, err := condition(ctx, h, st.Rule, lo, hi, step, false, st.warm(j))
 		switch {
-		case err != nil && ctx.Err() != nil:
+		case err != nil && (ctx.Err() != nil || errors.Is(err, prom.ErrPastDeadline)):
 			return nil, Unfinished, nil
+		case err != nil && prom.Refused(err):
+			return nil, rules.QueryFailed + err.Error(), nil
 		case err != nil:
-			return nil, "query failed: " + err.Error(), nil
+			return nil, rules.HistoryUnread + err.Error(), nil
 		}
 		for _, s := range series {
 			l := maps.Clone(s.Labels)

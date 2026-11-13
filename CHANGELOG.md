@@ -2,6 +2,133 @@
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-11-13
+
+Reading history from an API with a request quota, as a managed Prometheus
+has one. Five `lapilli verdict --compare` runs at once against one were
+answered HTTP 429, and three rules ended "Could not replay": the retries
+gave up within 30 seconds, nothing sent fewer requests when the API pushed
+back, and a run of eight minutes said nothing until its end. Fitted to
+0.32.0's pull request backtests: one line between a history that couldn't
+be read and a query it refused, drawn alike for `--fail-unreplayed` and for
+the comment. Reviewed three times, as an attacker would and for correctness
+and concurrency; what each found is fixed in what is described here. No
+ledger schema change; the exit statuses, and every field `--json` gave, are
+as they were, `--fail-unreplayed` aside.
+
+### Added
+
+- **`--max-rate N`**, for `lapilli verdict` and `lapilli serve`: each API
+  the history is read from (`--prometheus`, `--loki`, its ruler included,
+  and a Grafana's data sources together) is asked N requests a second at
+  most, evenly spaced; `0.5` for a quota of 30 a minute. N is 0.001 at
+  least.
+- **A progress line.** A `lapilli verdict` run past 15 seconds says on
+  stderr, every 30 seconds, the rules replayed of all (in a comparison, the
+  replays before and after), the requests to the history, those asked again
+  after a wait and those answered HTTP 429. `--progress=false` keeps it
+  quiet. A run the history answered HTTP 429 says so at its end either way.
+  stdout is unchanged. The backtest recipes copy stderr to the job's log as
+  it is written, so a long backtest no longer looks hung; none of the
+  progress reaches the comment.
+- **`--fail-unreplayed`**: `lapilli verdict` exits 1 when a rule's replay
+  failed as the history couldn't be read: not reached, not let in (HTTP
+  401, 403, 407, credentials that couldn't be had), not found (404, a
+  redirect to sign in, a proxy's or a gateway's page), or turned away to the
+  end (408, 429, 5xx). Not for a query the history refused as written, nor
+  for a Grafana rule replayed whose query outside its condition failed,
+  which the report notes as before. Without it the exit is as before: 0, or
+  1 when `--timeout` cut the run short. The backtest recipes refuse it:
+  `FAIL_ON_ERROR=true` fails the job on every rule that differs that
+  couldn't be replayed, whatever why, as before.
+- `unreplayed` in `--json`, of a report and of a comparison: each rule that
+  couldn't be replayed, its side in a comparison (none for a rule alike in
+  both, replayed once for both), why, and `failed`, true when its replay
+  failed for the run (the history unread, the time run out) and another run
+  may replay it; false for a rule no run replays (a CloudWatch metric alarm,
+  a rule paused, a query refused as written). In a comparison, the rules of
+  it with a side are those `summary.unreplayed` counts, each once.
+- `--compare --markdown` says, under its first line of counts, how many of
+  the rules that differ couldn't be replayed, as `summary.unreplayed` does,
+  since what follows leaves them out; the list under the tables says why, as
+  before.
+
+### Changed
+
+- **Two kinds of failed query**, which a rule's reason says.
+  `query failed: the history couldn't be read: ...` is a failure of the
+  run, as above: `--fail-unreplayed` counts it, the text report names it at
+  its top, and `--markdown` says only that, its whole reason going to
+  stderr. `query failed: ...` otherwise is the history's answer to the query
+  as written, which every run gets: refused in the API's own words (HTTP
+  400 or 422), too large however short the range, not done (501), or an
+  answer that can't be read. Both begin `query failed: ` as before, so what
+  reads reasons by that, as the recipes' filter of the job's log does,
+  reads them alike. JSON of another shape than the API's, such as a
+  gateway's `{"message": ...}`, is said as `not a Prometheus API response`,
+  as a page is.
+- **Asked again after a wait the API says.** An answer of HTTP 429, or 503,
+  with `Retry-After`, in seconds or as an HTTP date, is asked again that
+  long after, a second at least and two minutes at most, plus up to a
+  quarter so that requests told alike don't come back together, as often as
+  it says so. A 429 without it is asked again after 4, 8, 16, 32, 60 and 60
+  seconds, each less up to half, 90 seconds to 3 minutes in all, past the
+  window of a quota by the minute; before, 2, 4, 8 and 16 seconds, 30 in
+  all. A 5xx, or a connection the API dropped or reset before it answered,
+  is asked again as a 5xx was, each wait less up to half; a 501 isn't. 429s
+  and 5xx are counted apart. An answer too large to send is halved as
+  before, however long the API's text that says so.
+- **Five minutes at most, and within `--timeout`.** A request is asked again
+  for five minutes at most from when it was first pushed back, by an answer
+  or by a wait for its turn the API asked for; the API's answers and the
+  waits for a turn count. A request whose turn doesn't come by then is given
+  up with the last answer; one already asked is waited for. A wait that
+  would end past `--timeout`, the API's or a turn by `--max-rate`, isn't
+  waited for: the rule is left unfinished at once, as the deadline would
+  leave it, and the run exits 1 saying to raise `--timeout`; `lapilli
+  serve`'s MCP compare says so too.
+- **Fewer at once after a push back.** A 429, a 503 or a connection dropped
+  halves how many requests may go to that API at once: half of those in
+  flight lately, or of the limit, if fewer, from 64, once a second at most,
+  for the whole run (or, in `lapilli serve`, from then on), down to one;
+  eight at once are four after one push back. One more may go for every
+  ten seconds without a push back, asked or not. While it said to wait
+  (`Retry-After`), nothing else is asked of it, a request already waiting
+  for its turn included. Rules sharing a query still share one request.
+- **`--parallel` is of each API.** Up to N rules are replayed at once against
+  each: `--prometheus`, `--loki`, each of Grafana's data sources. Rules held
+  by one API that pushes back no longer hold those of another. A Grafana is
+  asked N requests at once at most for all its data sources, as one
+  Grafana answers them all.
+- Behind one Grafana, each data source backs off of its own, as Grafana's
+  data source proxy passes on what each answers, `Retry-After` included;
+  they share `--max-rate`.
+- The same holds for every API history is read from: Prometheus, Thanos,
+  Mimir, Cortex, VictoriaMetrics, each cloud's managed Prometheus and
+  CloudWatch through `--auth`, Loki, and Grafana's data source proxy; and
+  for the rules read from the same API (`--loaded-rules`, where a Loki's
+  ruler runs its groups). What lapilli does without, the configuration and
+  the targets Prometheus is asked for, and where a Loki's ruler runs its
+  groups as `lapilli serve` reads it each minute, is asked once, within 30
+  seconds, not while the API said to wait, and its answers don't change how
+  the rest is asked, nor count as answers of HTTP 429 at a run's end.
+  `lapilli serve` keeps where the groups run as last read when it can't be
+  read, so a Loki pushing back no longer stops the rules being read. A
+  request to a Loki, or to a Grafana's data source, is given up after five
+  minutes, as one to a Prometheus was.
+- A rule whose replay failed for the run is named, with why, at the top of
+  the text report and of a comparison, ten rules at most, as well as at its
+  foot. A failed query says how often it was asked, and over how long.
+  `lapilli serve` keeps the reason in its ledger without that, and its
+  weekly digest, whose numbers keep what a rule fired before its replay
+  failed, names no rule at its top.
+- The API's text in an error is cut to 300 bytes, and in a top line to 400,
+  each with its "…"; what doesn't show (control and format characters) is
+  taken out first, then the token, the signature or the URL's password
+  lapilli sent, and any bearer token, should the API echo them back, split
+  or not; "bearer" before a word, as in "missing bearer token", is left. A
+  sample the API writes unreadably is quoted in the error.
+
 ## [0.32.0] - 2026-11-13
 
 Pull request backtests in CI, on every code host: what a team had to glue
