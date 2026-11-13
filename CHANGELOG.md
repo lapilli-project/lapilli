@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-11-13
+
 Pull request backtests in CI, on every code host: what a team had to glue
 around `lapilli verdict --compare` to comment its report on a pull request
 that changes alert rules, built in. Reviewed as an attacker would and for
