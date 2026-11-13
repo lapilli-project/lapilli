@@ -472,7 +472,14 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 		l.Noisy = noisy(l.Firings, l.White, t.o)
 		l.Precision = pct(l.White, l.Firings)
 		l.RefiredShare = pct(l.Refired, l.Firings)
-		l.RefiredWeeks, l.RefiredOf = t.refireWeeks(recent, func(rid int64) bool { return rid == id })
+		// refireWeeks for this rule alone, a week at a time rather than
+		// every rule's each week: two thousand rules cost what forty do.
+		for _, w := range t.whole(recent) {
+			l.RefiredOf++
+			if t.by[w][id].Refired > 0 {
+				l.RefiredWeeks++
+			}
+		}
 		l.Without = pct(l.White-l.DeploysCaught, l.Firings-l.Deploys)
 		// Weeks running it has been noisy, up to the last whole week.
 		for i := len(t.weeks) - 2; i >= 0 && t.noisy(t.weeks[i], id); i-- {
@@ -600,7 +607,25 @@ func sortRules(lines []ruleLine, by string) {
 	sort.SliceStable(lines, func(a, b int) bool { return key(lines[a]) > key(lines[b]) })
 }
 
+// rulesData is the rules page's view, as the API gives it, and what the
+// list works the rest out from: the tallies, kept to the team's, the
+// owners, and the rules a change is proposed to.
+type rulesData struct {
+	rulesView
+	t        *tallies
+	own      *owners
+	proposed map[string]bool
+}
+
 func (s *Server) rulesPage(r *http.Request) (any, error) {
+	d, err := s.rulesOf(r)
+	if err != nil {
+		return nil, err
+	}
+	return d.rulesView, nil
+}
+
+func (s *Server) rulesOf(r *http.Request) (rulesData, error) {
 	n := 4
 	switch r.URL.Query().Get("weeks") {
 	case "1":
@@ -610,11 +635,11 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 	}
 	t, err := s.tallies(r.Context(), weeks)
 	if err != nil {
-		return nil, err
+		return rulesData{}, err
 	}
 	o, err := s.owners(r.Context())
 	if err != nil {
-		return nil, err
+		return rulesData{}, err
 	}
 	f, team := s.teamFilter(o, r.URL.Query().Get("team"))
 	if team != nil {
@@ -622,7 +647,7 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 	}
 	lines, silent, err := s.ruleLines(r.Context(), lang(r), t, n)
 	if err != nil {
-		return nil, err
+		return rulesData{}, err
 	}
 	if team != nil {
 		silent = slices.DeleteFunc(silent, func(name string) bool { return o.rule[name] != team.ID })
@@ -630,12 +655,12 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 	s.annotate(o, lines)
 	cw, err := s.checksLastWeek(r.Context())
 	if err != nil {
-		return nil, err
+		return rulesData{}, err
 	}
 	d := s.differs()
 	proposed, err := s.proposedRules(r.Context())
 	if err != nil {
-		return nil, err
+		return rulesData{}, err
 	}
 	for i := range lines {
 		lines[i].Differs = cw[lines[i].Name].Differs(d.N, d.Ratio)
@@ -643,7 +668,7 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 	}
 	cf, err := s.contentFindings(r.Context())
 	if err != nil {
-		return nil, err
+		return rulesData{}, err
 	}
 	facts := map[string]int{}
 	for name, fs := range cf {
@@ -656,7 +681,7 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 	}
 	deploys, err := s.l.HasDeploys(r.Context())
 	if err != nil {
-		return nil, err
+		return rulesData{}, err
 	}
 	v := rulesView{Weeks: n, Team: f, Lines: lines, Silent: silent, Facts: facts, Deploys: deploys, Sorts: []string{"", "refired"}}
 	if deploys {
@@ -666,7 +691,7 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 		v.Sort = by
 	}
 	sortRules(v.Lines, v.Sort)
-	return v, nil
+	return rulesData{v, t, o, proposed}, nil
 }
 
 // annotate gives rule lines their teams and what is to become of them.

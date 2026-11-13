@@ -192,7 +192,7 @@ func TestChangeByPullRequest(t *testing.T) {
 	if _, body, _ := ui(t, h, http.MethodGet, "/rules/Errors", bo, "", nil); !strings.Contains(body, `href="/proposals/`+itoa(id)+`"`) {
 		t.Errorf("the rule's page doesn't show it")
 	}
-	if _, body, _ := ui(t, h, http.MethodGet, "/rules", bo, "", nil); !strings.Contains(body, "a change is proposed") {
+	if _, body, _ := ui(t, h, http.MethodGet, "/rules", bo, "", nil); !strings.Contains(body, `href="/rules/Errors#proposals"><span aria-hidden="true">✎</span> Proposed</a>`) {
 		t.Errorf("the rules list doesn't mark it")
 	}
 	// Nothing is handed out before it is approved.

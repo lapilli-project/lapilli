@@ -72,7 +72,7 @@ func (s *Server) Handler() http.Handler {
 		})
 	}
 	mux.HandleFunc("GET /{$}", page("overview", s.overview))
-	mux.HandleFunc("GET /rules", page("rules", s.rulesPage))
+	mux.HandleFunc("GET /rules", page("rules", s.rulesList))
 	mux.HandleFunc("GET /rules/{name...}", page("rule", s.rulePage))
 	mux.HandleFunc("GET /incidents", page("incidents", s.incidentsPage))
 	mux.HandleFunc("GET /incidents/{id...}", page("incident", s.incidentPage))

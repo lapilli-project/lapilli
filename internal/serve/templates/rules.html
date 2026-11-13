@@ -1,24 +1,53 @@
 {{define "rules"}}{{$title := t "Rules"}}{{template "top" (titled . $title)}}{{with .View}}
-<h1>{{$title}}</h1>
-<p class="lede">{{if eq .Weeks 1}}{{t "Each rule's stones over the last week, the noisiest first."}}{{else}}{{t "Each rule's stones over the last %d weeks, the noisiest first." .Weeks}}{{end}}
-<span class="tabs"><a href="{{$.Link "/rules" "weeks" 1 "sort" .Sort}}"{{if eq .Weeks 1}} aria-current="page"{{end}}>{{t "1 week"}}</a> <a href="{{$.Link "/rules" "weeks" 4 "sort" .Sort}}"{{if eq .Weeks 4}} aria-current="page"{{end}}>{{t "4 weeks"}}</a> <a href="{{$.Link "/rules" "weeks" 12 "sort" .Sort}}"{{if eq .Weeks 12}} aria-current="page"{{end}}>{{t "12 weeks"}}</a></span></p>
-{{if .Team.Teams}}<p class="tabs">{{t "Team"}}: <a href="{{$.Link "/rules" "weeks" .Weeks "sort" .Sort "team" ""}}"{{if not .Team.Name}} aria-current="page"{{end}}>{{t "all"}}</a>{{range .Team.Teams}} <a href="{{$.Link "/rules" "weeks" $.View.Weeks "sort" $.View.Sort "team" .}}"{{if eq . $.View.Team.Name}} aria-current="page"{{end}}>{{.}}</a>{{end}}</p>{{end}}
+<div class="head"><h1>{{$title}}</h1><p class="of">{{t "%d of %d rules" .Shown .Total}}</p></div>
+<p class="lede">{{if eq .Weeks 1}}{{t "Each rule's stones over the last week, the noisiest first."}}{{else}}{{t "Each rule's stones over the last %d weeks, the noisiest first." .Weeks}}{{end}}</p>
+{{if and .Empty (eq .Empty.Kind "first")}}{{template "empty" .Empty}}{{else}}
+<div class="rules-body">
+<aside class="facets-side" aria-label="{{t "Filters"}}">{{template "facets" (on $ "side")}}</aside>
+<div class="rules-main">
+<details class="facets-menu"{{if .Active}} open{{end}}><summary>{{t "Filters"}}{{if .Active}} <span class="quiet">({{len .Chips}})</span>{{end}}</summary>{{template "facets" (on $ "menu")}}</details>
+{{with .Bad}}<p class="bad">{{t "Left out, as it isn't understood: %s." (join . ", ")}} {{t "The search takes words of a rule's name, and team:, severity:, is:, status:, has:, label:key=value and group:. is: takes noisy, ok, silent, spare, differs, unreplayed, recorded, proposed or facts; status: keep, tune, retire or none; has: proposal or facts."}}</p>{{end}}
+{{with .Chips}}<ul class="chips" aria-label="{{t "Filters in effect"}}">{{range .}}<li><a class="chip" href="{{.Href}}"><span class="vh">{{t "Remove filter:"}} </span>{{t .Group}}: {{if .Raw}}{{.Value}}{{else}}{{t .Value}}{{end}} <span aria-hidden="true">✕</span></a></li>{{end}}</ul>{{end}}
 <p class="tabs">{{t "In order of"}}:{{range .Sorts}} <a href="{{$.Link "/rules" "weeks" $.View.Weeks "sort" .}}"{{if eq . $.View.Sort}} aria-current="page"{{end}}>{{if eq . "refired"}}{{t "re-fired, the most first"}}{{else if eq . "deploys"}}{{t "during deploys, the most first"}}{{else}}{{t "caught nothing, the most first"}}{{end}}</a>{{end}}</p>
-<div class="scroll"><table>
-<thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Severity"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th><th scope="col" class="n">{{t "Precision"}}</th><th scope="col" class="n">{{t "Refired"}}</th>{{if .Deploys}}<th scope="col" class="n">{{t "During deploys"}}</th>{{end}}<th scope="col" class="n">{{t "Incidents"}}</th><th scope="col">{{t "12 weeks"}}</th><th scope="col">{{t "Noisy"}}</th></tr></thead>
-<tbody>{{range .Lines}}
+{{if .Rows}}<div class="scroll"><table>
+<thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Severity"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th><th scope="col" class="n">{{t "Precision"}}</th><th scope="col" class="n">{{t "Refired"}}</th>{{if .Deploys}}<th scope="col" class="n">{{t "During deploys"}}</th>{{end}}<th scope="col" class="n">{{t "Incidents"}}</th><th scope="col">{{t "12 weeks"}}</th></tr></thead>
+<tbody>{{range .Rows}}
 <tr{{if .Noisy}} class="noisy"{{end}}>
-  <td><a href="{{$.Rule .Name}}"><bdi>{{.Name}}</bdi></a>{{with .Source}}<br><span class="quiet">{{t "recorded in %s" .}}</span>{{end}}{{with .Unsupported}}<br><span class="quiet">{{t "not replayed: %s" .}}</span>{{end}}{{with .Suggestion}}<br><span class="hint">{{.}}</span>{{end}}{{if .Spare}}<br><span class="hint">{{t "another rule caught every incident it caught, as soon"}}</span>{{end}}{{if .Differs}}<br><span class="hint">{{t "replayed differently from how it really fired"}}</span>{{end}}{{if .Content.Facts}}<br><a class="hint" href="{{$.Link (print "/rules/" (path .Name) "#says")}}">{{t "what it says: %d problems of fact" .Content.Facts}}</a>{{end}}{{if .Proposed}}<br><a class="hint" href="{{$.Link (print "/rules/" (path .Name) "#proposals")}}">{{t "a change is proposed"}}</a>{{end}}</td>
-  <td>{{or .Team "–"}}{{with .Status}}<br><span class="pill {{.}}">{{t .}}</span>{{end}}</td>
+  <td class="rule"><a href="{{$.Rule .Name}}"><bdi>{{.Name}}</bdi></a> {{template "badges" (on $ .)}}{{with .Suggestion}}<br><span class="hint">{{.}}</span>{{end}}</td>
+  <td>{{or .Team "–"}}</td>
   <td>{{or .Severity "–"}}</td>
   <td class="n">{{.Firings}}{{if .Notifications}}<br><span class="quiet">{{t "%d notifications, %d repeats" .Notifications .Repeats}}</span>{{end}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}{{if or .AsleepBlack .OffHoursBlack}}<br><span class="quiet">{{t "%d asleep, %d off hours" .AsleepBlack .OffHoursBlack}}</span>{{end}}</td><td class="n">{{.Precision}}</td><td class="n">{{.Refired}}{{if .Refired}}<br><span class="quiet">{{if .RefiredOf}}{{t "%s of firings, %d of %d whole weeks" .RefiredShare .RefiredWeeks .RefiredOf}}{{else}}{{t "%s of firings" .RefiredShare}}{{end}}</span>{{end}}{{if .Excused}}<br><span class="quiet">{{t "%d excused" .Excused}}</span>{{end}}</td>{{if $.View.Deploys}}<td class="n">{{.Deploys}}{{if .Deploys}}<br><span class="quiet">{{t "precision %s without them" .Without}}</span>{{end}}</td>{{end}}
   <td class="n">{{.Incidents}}{{if and .Incidents (not .SomeRules)}}<br><span class="quiet">{{t "first %d, alone %d" .First .Alone}}</span>{{end}}</td>
   <td>{{template "spark" .Spark}}</td>
-  <td>{{if .Noisy}}{{if .Streak}}{{t "noisy, %d wk" .Streak}}{{else}}{{t "noisy"}}{{end}}{{end}}</td>
 </tr>{{end}}</tbody>
-</table></div>
-{{if .Silent}}
-<details><summary>{{t "%d rules never fired in the last twelve weeks" (len .Silent)}}</summary>
-<p class="quiet">{{range $i, $n := .Silent}}{{if $i}}, {{end}}<a href="{{$.Rule $n}}"><bdi>{{$n}}</bdi></a>{{with index $.View.Facts $n}} <a class="hint" href="{{$.Link (print "/rules/" (path $n) "#says")}}">({{t "what it says: %d problems of fact" .}})</a>{{end}}{{end}}</p></details>
+</table></div>{{end}}
+{{with .Empty}}{{template "empty" .}}{{end}}
+{{if .Quiet}}
+<details><summary>{{if .QuietOlder}}{{if eq .Weeks 1}}{{t "%d rules didn't fire in the last week" (len .Quiet)}}{{else}}{{t "%d rules didn't fire in the last %d weeks" (len .Quiet) .Weeks}}{{end}}{{else}}{{t "%d rules never fired in the last twelve weeks" (len .Quiet)}}{{end}}</summary>
+<p class="quiet">{{range $i, $r := .Quiet}}{{if $i}}, {{end}}<a href="{{$.Rule $r.Name}}"><bdi>{{$r.Name}}</bdi></a>{{with $r.Facts}} <a class="hint" href="{{$.Link (print "/rules/" (path $r.Name) "#says")}}">({{t "what it says: %d problems of fact" .}})</a>{{end}}{{end}}</p></details>
+{{end}}
+</div>
+</div>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
+
+{{/* The facets, the search box and the context, as one form: drawn twice,
+as the panel beside the rules on a wide screen and in a details above them
+on a narrow one, and shown one at a time. */}}
+{{define "facets"}}{{$v := .P.View}}<form method="get" action="/rules" class="facets">{{range $v.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+<label>{{t "Search the rules"}} <input type="search" name="q" value="{{$v.Q}}" maxlength="500" placeholder="is:noisy severity:critical"></label>
+<p class="row"><button>{{t "Apply"}}</button></p>
+<p class="quiet keys"><code>team:</code> <code>severity:</code> <code>is:</code> <code>status:</code> <code>has:</code> <code>label:k=v</code> <code>group:</code></p>
+{{range $v.Facets}}{{$f := .}}<fieldset><legend>{{t .Name}}</legend>{{range .Options}}
+  <label class="opt{{if not .Count}} zero{{end}}"><input type="checkbox" name="{{$f.Param}}" value="{{.Value}}"{{if .Checked}} checked{{end}}> <span>{{if .Raw}}{{.Label}}{{else}}{{t .Label}}{{end}}</span> <span class="n">{{.Count}}</span></label>{{end}}</fieldset>{{end}}
+<p class="row"><button>{{t "Apply"}}</button> <a href="{{$v.Clear}}">{{t "Clear filters"}}</a></p>
+</form>{{end}}
+
+{{/* A rule's badges: how it did, what its backtest can't be trusted for,
+what people mean to do with it, and what is under way. Each has a sign and
+its name; the sign is for the eye alone. */}}
+{{define "badges"}}{{$r := .V}}<span class="badges"><span class="badge perf-{{$r.Perf}}">{{if eq $r.Perf "noisy"}}<span aria-hidden="true">●</span> {{if $r.Streak}}{{t "Noisy, %d wk" $r.Streak}}{{else}}{{t "Noisy"}}{{end}}{{else if eq $r.Perf "silent"}}<span aria-hidden="true">–</span> {{t "Silent"}}{{else if eq $r.Perf "spare"}}<span aria-hidden="true">⧉</span> {{t "Spare"}}{{else}}<span aria-hidden="true">○</span> {{t "OK"}}{{end}}</span>
+{{- range $r.Trust}} <span class="badge trust"{{if eq . "recorded"}} title="{{t "recorded in %s" $r.Source}}"{{else if eq . "unreplayed"}} title="{{t "not replayed: %s" $r.Unsupported}}"{{end}}>{{if eq . "differs"}}<span aria-hidden="true">≠</span> {{t "Differs"}}{{else if eq . "unreplayed"}}<span aria-hidden="true">◌</span> {{t "Not replayed"}}{{else}}<span aria-hidden="true">⇣</span> {{t "Recorded only"}}{{end}}</span>{{end}}
+{{- with $r.Status}} <span class="badge pill {{.}}"><span aria-hidden="true">{{if eq . "keep"}}✓{{else if eq . "tune"}}±{{else}}⊘{{end}}</span> {{t .}}</span>{{end}}
+{{- if $r.Proposed}} <a class="badge prog" href="{{$.P.Link (print "/rules/" (path $r.Name) "#proposals")}}"><span aria-hidden="true">✎</span> {{t "Proposed"}}</a>{{end}}
+{{- with $r.Facts}} <a class="badge check" href="{{$.P.Link (print "/rules/" (path $r.Name) "#says")}}"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "%d to check" .}}</a>{{end}}</span>{{end}}

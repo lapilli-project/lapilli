@@ -81,7 +81,7 @@ func TestContextCarried(t *testing.T) {
 			switch team, ok := l.Query()["team"]; {
 			case !ok:
 				t.Errorf("%s: %q (%q) doesn't carry the team", p, href, text)
-			case team[0] != "payments" && !(team[0] == "" && text == "all"):
+			case team[0] != "payments" && !(team[0] == "" && (text == "all" || strings.HasPrefix(text, "Remove filter: Team:") || text == "The same filters, in all teams")):
 				t.Errorf("%s: %q (%q) carries another team", p, href, text)
 			}
 			switch weeks := l.Query().Get("weeks"); {
