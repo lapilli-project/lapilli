@@ -237,9 +237,24 @@ var hostMe = map[string]string{"github": "lapilli-bot", "gitea": "lapilli-bot", 
 
 // add keeps a comment as if posted, by author.
 func (h *commentHost) add(author, body string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.put(author, body)
+}
+
+// put is add, h.mu held.
+func (h *commentHost) put(author, body string) int {
 	h.next++
 	h.comments = append(h.comments, hostComment{ID: h.next, Thread: 1000 + h.next, Author: author, Body: body})
 	return h.next
+}
+
+// set changes h as change says, h.mu held: between runs, as the host's
+// handler reads it, the run before's connections maybe still open.
+func (h *commentHost) set(change func(*commentHost)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	change(h)
 }
 
 // mine are the comments the token's account posted.
@@ -403,7 +418,7 @@ func (h *commentHost) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.closed = in["status"] == "closed"
 			r.Body = io.NopCloser(strings.NewReader(string(b)))
 		}
-		id := h.add(hostMe[h.kind], body())
+		id := h.put(hostMe[h.kind], body())
 		reply(map[string]any{"id": id, "user": map[string]any{"uuid": hostMe[h.kind]}})
 	case (r.Method == http.MethodPatch || r.Method == http.MethodPut) && strings.HasPrefix(path, one):
 		rest := strings.TrimPrefix(path, one)
@@ -512,7 +527,12 @@ func (rr *recipeRun) run(settings []string, args ...string) (string, error) {
 		cmd.Dir = rr.cwd
 	}
 	cmd.Env = append(append([]string{}, rr.env...), settings...)
+	// The host's handlers and the test share it, with the recipe's
+	// requests between them, which the race detector doesn't see: its lock,
+	// taken before and after the run, orders what each does to it.
+	rr.host.set(func(*commentHost) {})
 	out, err := cmd.CombinedOutput()
+	rr.host.set(func(*commentHost) {})
 	return string(out), err
 }
 
@@ -706,7 +726,7 @@ func TestBacktestRecipeFails(t *testing.T) {
 	}
 
 	// Asked to, the job fails too, once it has said so.
-	rr.host.comments = nil
+	rr.host.set(func(h *commentHost) { h.comments = nil })
 	if out, err := rr.run([]string{"RENDER=" + render, "FAIL_ON_ERROR=true"}); err == nil || len(rr.host.mine()) != 1 {
 		t.Errorf("FAIL_ON_ERROR=true: %v, %d comments\n%s", err, len(rr.host.mine()), out)
 	}
@@ -714,7 +734,7 @@ func TestBacktestRecipeFails(t *testing.T) {
 	// lapilli failing for want of the history: what a server or the
 	// network said is in the job's log, not the comment, which says
 	// where the history is.
-	rr.host.comments = nil
+	rr.host.set(func(h *commentHost) { h.comments = nil })
 	out, err = rr.run([]string{"PATHS=alerts"}, "--prometheus", "http://ci-reader:pw@localhost:1/prometheus", "--impact", "up == 0", "--timeout", "5s")
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -725,7 +745,7 @@ func TestBacktestRecipeFails(t *testing.T) {
 	}
 	// Of what lapilli said, the rest goes in, where the history is taken
 	// out: the URLs given, a URL's user and password, any address.
-	rr.host.comments = nil
+	rr.host.set(func(h *commentHost) { h.comments = nil })
 	userinfo := filepath.Join(t.TempDir(), "lapilli")
 	os.WriteFile(userinfo, []byte("#!/bin/sh\necho 'lapilli verdict: --on-call: schedule Ops at https://other-user:s3cret@elsewhere.example/x (10.1.2.3:9090, [fd00::1]:443) read from prom.corp.example.' >&2\nexit 1\n"), 0o755)
 	rr.run([]string{"PATHS=alerts", "LAPILLI=" + userinfo}, "--prometheus", "http://prom.corp.example:9090")
@@ -735,7 +755,7 @@ func TestBacktestRecipeFails(t *testing.T) {
 	}
 
 	// A lapilli from before --markdown says so.
-	rr.host.comments = nil
+	rr.host.set(func(h *commentHost) { h.comments = nil })
 	old := filepath.Join(t.TempDir(), "lapilli")
 	os.WriteFile(old, []byte("#!/bin/sh\necho 'lapilli verdict: --markdown needs a value' >&2\nexit 2\n"), 0o755)
 	if out, err := rr.run([]string{"PATHS=alerts", "LAPILLI=" + old}, "--prometheus", "http://127.0.0.1:1"); err != nil {
@@ -745,7 +765,7 @@ func TestBacktestRecipeFails(t *testing.T) {
 
 	// A report from a run that failed is no reason to say nothing: one that
 	// says nothing changed, then exits 1, is posted, failure and all.
-	rr.host.comments = nil
+	rr.host.set(func(h *commentHost) { h.comments = nil })
 	lying := filepath.Join(t.TempDir(), "lapilli")
 	os.WriteFile(lying, []byte("#!/bin/sh\nprintf '%s\\n' '"+verdict.SummaryLine+`{"nothing_changed":true,"unreplayed":0}`+")' '"+verdict.NothingChangedHeading+"'\nexit 1\n"), 0o755)
 	if out, err := rr.run([]string{"PATHS=alerts", "LAPILLI=" + lying}, "--prometheus", "http://127.0.0.1:1"); err != nil || len(rr.host.mine()) != 1 {
@@ -753,18 +773,18 @@ func TestBacktestRecipeFails(t *testing.T) {
 	}
 
 	// The comment can't be posted: the job fails only when asked to.
-	rr.host.comments, rr.host.failPost = nil, true
+	rr.host.set(func(h *commentHost) { h.comments, h.failPost = nil, true })
 	if out, err := rr.run([]string{"RENDER=" + render}); err != nil || !strings.Contains(out, "the comment couldn't be posted") {
 		t.Errorf("not posted: %v\n%s", err, out)
 	}
 	if out, err := rr.run([]string{"RENDER=" + render, "FAIL_ON_ERROR=true"}); err == nil {
 		t.Errorf("not posted, FAIL_ON_ERROR=true: the job succeeded\n%s", out)
 	}
-	rr.host.failPost = false
+	rr.host.set(func(h *commentHost) { h.failPost = false })
 
 	// Asked to fail when it does, a backtest of rules that couldn't be
 	// replayed, with the history out of reach, fails.
-	rr.host.comments = nil
+	rr.host.set(func(h *commentHost) { h.comments = nil })
 	out, err = rr.run([]string{"PATHS=alerts", "FAIL_ON_ERROR=true"}, "--prometheus", "http://127.0.0.1:1")
 	if err == nil {
 		t.Errorf("FAIL_ON_ERROR=true, nothing replayed, and the job succeeded:\n%s", out)
@@ -779,7 +799,7 @@ func TestBacktestRecipeFails(t *testing.T) {
 
 	// A link where the rules are read is never followed, and its name,
 	// the pull request's, is only in the job's log.
-	rr.host.comments = nil
+	rr.host.set(func(h *commentHost) { h.comments = nil })
 	dir := filepath.Join(repo.dir, "alerts", "x @octocat @example-org", "team example-org", "repo#1 #2")
 	os.MkdirAll(dir, 0o755)
 	if err := os.Symlink("/etc/hosts", filepath.Join(dir, `www.evil.example <img src="https:\evil.example\q.png"> **ALL CLEAR**`)); err != nil {
@@ -806,10 +826,10 @@ func TestBacktestRecipeFails(t *testing.T) {
 	repo.git("commit", "--quiet", "--amend", "--no-edit")
 
 	// RENDER_PREPARE leaving a link, and a commit too big to read.
-	rr.host.comments = nil
+	rr.host.set(func(h *commentHost) { h.comments = nil })
 	rr.run([]string{"RENDER=cat alerts/shop.yaml", "RENDER_PREPARE=ln -s /etc/hosts alerts/hosts.yaml"})
 	failure(t, rr.body(), "RENDER_PREPARE left a symbolic link in the commit it goes into: not read (the job's log says where)")
-	rr.host.comments = nil
+	rr.host.set(func(h *commentHost) { h.comments = nil })
 	rr.run([]string{"PATHS=alerts", "MAX_TREE_FILES=0"}, "--prometheus", "http://127.0.0.1:1")
 	failure(t, rr.body(), fmt.Sprintf("the commit it goes into is too big to read: 1 files of %d bytes, more than MAX_TREE_FILES (0) or MAX_TREE_BYTES (268435456)",
 		len(shopRules("5m"))))
@@ -965,7 +985,7 @@ func TestBacktestRecipeInstall(t *testing.T) {
 		{"redirected to plain http", goodSums, []string{"LAPILLI_VERSION=v9.9.7"}, "Lapilli v9.9.7's " + strings.Replace(name, "v9.9.9", "v9.9.7", 1) + ".tar.gz couldn't be downloaded"},
 	} {
 		os.Remove(ran)
-		rr.host.comments = nil
+		rr.host.set(func(h *commentHost) { h.comments = nil })
 		mu.Lock()
 		sums = c.sums
 		mu.Unlock()
@@ -1053,7 +1073,9 @@ func TestBacktestAction(t *testing.T) {
 		cmd := exec.Command("sh", "-c", step.Run)
 		cmd.Dir = repo.dir
 		cmd.Env = append(append([]string{}, repo.env...), env...)
+		rr.host.set(func(*commentHost) {}) // as rr.run orders them
 		out, err := cmd.CombinedOutput()
+		rr.host.set(func(*commentHost) {})
 		if err != nil {
 			t.Fatalf("%v\n%s", err, out)
 		}
@@ -1180,7 +1202,7 @@ func TestBacktestRecipeIncidents(t *testing.T) {
 		t.Errorf("%v\n%s\n%s", err, rr.body(), out)
 	}
 	// Not a file there, or a link: said.
-	rr.host.comments = nil
+	rr.host.set(func(h *commentHost) { h.comments = nil })
 	repo.git("checkout", "--quiet", "main")
 	os.Remove(filepath.Join(repo.dir, "incidents.yaml"))
 	os.Symlink("/dev/zero", filepath.Join(repo.dir, "incidents.yaml"))
@@ -1332,7 +1354,7 @@ func TestBacktestRecipeRefusedReason(t *testing.T) {
 	}
 	// lapilli exits 1 having said why rules couldn't be replayed: the
 	// same.
-	rr.host.comments = nil
+	rr.host.set(func(h *commentHost) { h.comments = nil })
 	failing := filepath.Join(t.TempDir(), "lapilli")
 	os.WriteFile(failing, []byte("#!/bin/sh\necho 'lapilli verdict: CheckoutErrors (after) couldn'\"'\"'t be replayed: query failed: HTTP 403: User: arn:aws:sts::123456789012:assumed-role/ci-metrics-reader' >&2\n"+
 		"echo 'lapilli verdict: the replay did not finish within --timeout' >&2\nexit 1\n"), 0o755)
@@ -1408,7 +1430,7 @@ func TestBacktestRecipeTargetInClone(t *testing.T) {
 		t.Errorf("%v\n%s\n%s", err, rr.body(), out)
 	}
 	// Not in the clone, and origin out of reach: said.
-	rr.host.comments = nil
+	rr.host.set(func(h *commentHost) { h.comments = nil })
 	repo.git("update-ref", "-d", "refs/remotes/origin/main")
 	rr.run([]string{"PATHS=alerts", "TARGET_BRANCH=main"}, "--prometheus", prom.URL)
 	failure(t, rr.body(), "the branch main isn't in the clone, and couldn't be fetched from origin: check out every branch, or let the job fetch (the recipes' README says how, CI by CI)")
@@ -1535,7 +1557,7 @@ exec '`+real+`' "$@"
 			rr.env[i] = "PATH=" + shim + string(os.PathListSeparator) + strings.TrimPrefix(e, "PATH=")
 		}
 	}
-	rr.host.huge = true
+	rr.host.set(func(h *commentHost) { h.huge = true })
 	out, _ := rr.run([]string{"PATHS=alerts"}, "--prometheus", "http://127.0.0.1:1")
 	if !strings.Contains(out, "didn't list the pull request's comments (failed)") {
 		t.Errorf("a listing of more than 16 MiB:\n%s", out)
@@ -1544,14 +1566,14 @@ exec '`+real+`' "$@"
 	if sent := rr.host.sent.Load(); sent > 40<<20 {
 		t.Errorf("%d MiB of a listing read, past 16 MiB", sent>>20)
 	}
-	rr.host.huge = false
+	rr.host.set(func(h *commentHost) { h.huge = false })
 	// An answer cut short is no answer, whatever its status said.
-	rr.host.cut = true
+	rr.host.set(func(h *commentHost) { h.cut = true })
 	out, _ = rr.run([]string{"PATHS=alerts"}, "--prometheus", "http://127.0.0.1:1")
 	if !strings.Contains(out, "didn't list the pull request's comments (failed)") {
 		t.Errorf("a listing cut short:\n%s", out)
 	}
-	rr.host.cut = false
+	rr.host.set(func(h *commentHost) { h.cut = false })
 	var sums atomic.Int64
 	releases := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/SHA256SUMS") {
