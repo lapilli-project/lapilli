@@ -556,7 +556,7 @@ func (l *Ledger) UpdateMetaCounted(ctx context.Context, key string, f func(old s
 		if err := setMeta(ctx, tx, "x."+key, v); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO meta (key, value) VALUES (?, '1') ON CONFLICT (key) DO UPDATE SET value = CAST(value AS INTEGER) + 1", "n."+key)
+		_, err = tx.ExecContext(ctx, "INSERT INTO meta (key, value) VALUES (?, '1') ON CONFLICT (key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT)", "n."+key)
 		return err
 	})
 }

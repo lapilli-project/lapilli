@@ -63,22 +63,8 @@ func TestBearerTokenOlderThanASession(t *testing.T) {
 		t.Fatalf("right after signing out, the token from before: %d, want 401", w.Code)
 	}
 
-	// 12h and a minute later, still within the token's own 24h: lapilli
-	// starts again (an upgrade), on the same ledger, and reads the record,
-	// pruned.
 	later := now.Add(12*time.Hour + time.Minute)
-	cfg := s.cfg
-	cfg.OIDC = &signin.OIDC{Issuer: idp.URL, ClientID: "lapilli", SecretFile: s.cfg.OIDC.SecretFile, Claims: s.cfg.OIDC.Claims}
-	s2, err := New(context.Background(), cfg, &history{}, s.log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s2.Close()
-	s2.now = func() time.Time { return later }
-	if w := call(s2.Handler(), stolen); w.Code != http.StatusUnauthorized || !strings.Contains(w.Header().Get("WWW-Authenticate"), "--session-max-age") {
-		t.Errorf("after a restart %v after signing out, a bearer token issued before: %d %q, want 401 for its age", later.Sub(now), w.Code, w.Header().Get("WWW-Authenticate"))
-	}
-	// Or, in the process that never restarted, once anyone else signs out:
+	// In the process still running, once anyone else signs out:
 	// the record is merged, and boss's part pruned.
 	s.now = func() time.Time { return later }
 	idp.Now = func() time.Time { return later }
@@ -96,6 +82,21 @@ func TestBearerTokenOlderThanASession(t *testing.T) {
 	// A token issued since is taken.
 	if w := call(h, idp.IDToken(claimsOf("boss@example.com", "ops"))); w.Code != http.StatusOK {
 		t.Errorf("a token issued now: %d", w.Code)
+	}
+	// 12h and a minute later, still within the token's own 24h: lapilli
+	// starts again (an upgrade), on the same ledger, and reads the record,
+	// pruned.
+	cfg := s.cfg
+	cfg.OIDC = &signin.OIDC{Issuer: idp.URL, ClientID: "lapilli", SecretFile: s.cfg.OIDC.SecretFile, Claims: s.cfg.OIDC.Claims}
+	s.Close() // one process writes a ledger at a time (Postgres)
+	s2, err := New(context.Background(), cfg, &history{}, s.log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	s2.now = func() time.Time { return later }
+	if w := call(s2.Handler(), stolen); w.Code != http.StatusUnauthorized || !strings.Contains(w.Header().Get("WWW-Authenticate"), "--session-max-age") {
+		t.Errorf("after a restart %v after signing out, a bearer token issued before: %d %q, want 401 for its age", later.Sub(now), w.Code, w.Header().Get("WWW-Authenticate"))
 	}
 
 	// The same, sooner, with a shorter --session-max-age: 5m, the least
@@ -258,21 +259,6 @@ func TestSignOutRecordFull(t *testing.T) {
 	if w := thief.do("GET", "/api/v1/me", nil); w.Code != http.StatusUnauthorized {
 		t.Errorf("the record full, boss let go of: a copy of boss's cookie from before signing out is taken again: %d", w.Code)
 	}
-	// Another process, on the same ledger, reads it so too.
-	cfg := s.cfg
-	cfg.OIDC = &signin.OIDC{Issuer: idp.URL, ClientID: "lapilli", SecretFile: s.cfg.OIDC.SecretFile, Claims: s.cfg.OIDC.Claims}
-	s2, err := New(context.Background(), cfg, &history{}, s.log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s2.Close()
-	s2.now = s.now
-	if w := newBrowser(t, s2.Handler()); true {
-		w.cookies[copied.Name] = &copied
-		if got := w.do("GET", "/api/v1/me", nil); got.Code != http.StatusUnauthorized {
-			t.Errorf("at another process: a copy of boss's cookie: %d", got.Code)
-		}
-	}
 	// ed, signed in before boss signed out, is signed out with everyone of
 	// then; ed signing in again goes on.
 	if w := ed.do("GET", "/api/v1/me", nil); w.Code != http.StatusUnauthorized {
@@ -282,6 +268,22 @@ func TestSignOutRecordFull(t *testing.T) {
 	fresh.signIn(idp, "/", claimsOf("ed@example.com"))
 	if w := fresh.do("GET", "/api/v1/me", nil); w.Code != http.StatusOK {
 		t.Errorf("signed in again after: %d", w.Code)
+	}
+	// Started again on the same ledger, it reads it so too.
+	cfg := s.cfg
+	cfg.OIDC = &signin.OIDC{Issuer: idp.URL, ClientID: "lapilli", SecretFile: s.cfg.OIDC.SecretFile, Claims: s.cfg.OIDC.Claims}
+	s.Close() // one process writes a ledger at a time (Postgres)
+	s2, err := New(context.Background(), cfg, &history{}, s.log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	s2.now = s.now
+	if w := newBrowser(t, s2.Handler()); true {
+		w.cookies[copied.Name] = &copied
+		if got := w.do("GET", "/api/v1/me", nil); got.Code != http.StatusUnauthorized {
+			t.Errorf("started again: a copy of boss's cookie: %d", got.Code)
+		}
 	}
 }
 

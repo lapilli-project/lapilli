@@ -106,31 +106,29 @@ func keptText(s string, n int) string {
 	return shown[:keep] + tail
 }
 
+// asciiJSON is how long encoding/json writes each ASCII byte, as this
+// Go's does: measured once, as versions differ in what they escape.
+var asciiJSON = func() (n [utf8.RuneSelf]int) {
+	for c := range n {
+		b, _ := json.Marshal(string(rune(c)))
+		n[c] = len(b) - 2
+	}
+	return n
+}()
+
 // jsonLen is how long s is as encoding/json writes it, quoted, its HTML
-// escaped: counted, not written.
+// escaped: an ASCII text counted, not written. Past ASCII it is written,
+// once: how a byte that isn't UTF-8 is written, or U+2028, differs from
+// one Go to the next (go1.27 writes U+FFFD as it is, before it "\ufffd").
 func jsonLen(s string) int {
 	n := 2
-	for i := 0; i < len(s); {
-		if c := s[i]; c < utf8.RuneSelf {
-			switch {
-			case c == '"' || c == '\\' || c == '\b' || c == '\f' || c == '\n' || c == '\r' || c == '\t':
-				n += 2
-			case c < 0x20 || c == '<' || c == '>' || c == '&':
-				n += 6
-			default:
-				n++
-			}
-			i++
-			continue
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= utf8.RuneSelf {
+			b, _ := json.Marshal(s)
+			return len(b)
 		}
-		r, size := utf8.DecodeRuneInString(s[i:])
-		switch {
-		case r == utf8.RuneError && size == 1, r == ' ', r == ' ':
-			n += 6
-		default:
-			n += size
-		}
-		i += size
+		n += asciiJSON[c]
 	}
 	return n
 }
