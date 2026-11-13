@@ -4,6 +4,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -106,5 +107,25 @@ func TestSearch(t *testing.T) {
 		} else if code != http.StatusOK {
 			t.Errorf("%q: %d", q.String(), code)
 		}
+	}
+}
+
+// TestQueryTurnsNothingAround: what a search box was given comes back on
+// the rules page set apart, with what turns text around read as U+FFFD,
+// as names are: a link someone sends can't turn the page's text around.
+func TestQueryTurnsNothingAround(t *testing.T) {
+	s := pagesServer(t)
+	h := s.Handler()
+	q := "\u202eevil label:a=\u2067b foo:\u202ec"
+	_, body, _ := get(t, h, "/rules?q="+url.QueryEscape(q))
+	for _, want := range []string{"<bdi>\uFFFDevil</bdi>", "<bdi>a=\uFFFDb</bdi>", "foo:\uFFFDc"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rules page: no %q", want)
+		}
+	}
+	// Only the forms keep what they were given, as typed, to send it again.
+	outside := regexp.MustCompile(`value="[^"]*"`).ReplaceAllString(body, "")
+	if strings.ContainsAny(outside, "\u202e\u2067") {
+		t.Error("rules page: a direction override outside a form's value")
 	}
 }
