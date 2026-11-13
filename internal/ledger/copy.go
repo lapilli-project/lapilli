@@ -35,10 +35,11 @@ var ErrNotEmpty = errors.New("the ledger to copy into isn't empty: copy into a n
 // was opened in and nothing else. Both are at this lapilli's schema
 // (opening one brings it there). It writes in one transaction, so a copy
 // that fails leaves the other ledger empty; ids are kept, and the next a
-// table gives comes after the highest any of its rows ever had. It then
-// reads both back, table by table, and refuses what differs. The ledger
-// copied from is read as of one moment: one written meanwhile, by a serve
-// left running, has its later writes left out.
+// table gives comes after the highest any of its rows ever had. Before it
+// commits, it reads both back, table by table, and refuses what differs,
+// leaving the other ledger empty. The ledger copied from is read as of one
+// moment, its ids given, rows and their read back alike: one written
+// meanwhile, by a serve left running, has its later writes left out.
 func Copy(ctx context.Context, from, to *Ledger, progress func(table string, rows int64)) (CopyReport, error) {
 	var rep CopyReport
 	names, err := from.tables(ctx)
@@ -75,17 +76,20 @@ func Copy(ctx context.Context, from, to *Ledger, progress func(table string, row
 	if err != nil {
 		return rep, err
 	}
-	// The ids given, past those kept: SQLite's AUTOINCREMENT, Postgres's
-	// identity columns.
-	given, err := from.idsGiven(ctx, names, cols)
-	if err != nil {
-		return rep, err
-	}
+	// One transaction reads the ledger copied from as of one moment (a
+	// reader's is REPEATABLE READ in Postgres; SQLite's, from its first
+	// read): the ids given, the rows, and the read back.
 	src, err := from.r.BeginTx(ctx, nil)
 	if err != nil {
 		return rep, err
 	}
 	defer src.Rollback()
+	// The ids given, past those kept: SQLite's AUTOINCREMENT, Postgres's
+	// identity columns.
+	given, err := from.idsGiven(ctx, src, names, cols)
+	if err != nil {
+		return rep, err
+	}
 	err = to.writeAside(ctx, func(t *txn) error {
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM meta"); err != nil {
 			return err
@@ -99,27 +103,36 @@ func Copy(ctx context.Context, from, to *Ledger, progress func(table string, row
 				progress(n, k)
 			}
 		}
-		return t.setGiven(given, cols)
+		if err := t.setGiven(given, cols); err != nil {
+			return err
+		}
+		for _, n := range names {
+			a, k, err := checksum(ctx, src, n, cols[n])
+			if err != nil {
+				return err
+			}
+			b, k2, err := checksum(ctx, t, n, cols[n])
+			if err != nil {
+				return err
+			}
+			if a != b || k != k2 {
+				return fmt.Errorf("%s: read back, the copy differs (%d rows, %d copied)", n, k, k2)
+			}
+			rep.Tables = append(rep.Tables, CopiedTable{n, k, a})
+		}
+		return nil
 	})
 	if err != nil {
-		return rep, err
-	}
-	src.Rollback()
-	for _, n := range names {
-		a, k, err := checksum(ctx, from, n, cols[n])
-		if err != nil {
-			return rep, err
-		}
-		b, k2, err := checksum(ctx, to, n, cols[n])
-		if err != nil {
-			return rep, err
-		}
-		if a != b || k != k2 {
-			return rep, fmt.Errorf("%s: read back, the copy differs (%d rows, %d copied)", n, k, k2)
-		}
-		rep.Tables = append(rep.Tables, CopiedTable{n, k, a})
+		return CopyReport{}, err
 	}
 	return rep, nil
+}
+
+// rowsQuerier is what a table is read through: a ledger's readers, or a
+// transaction.
+type rowsQuerier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 // empty refuses a ledger that holds more than opening it wrote.
@@ -228,22 +241,24 @@ func orderOf(cols []column) string {
 // has given, its rows' and those deleted since, as far as the database
 // keeps them: SQLite keeps those of AUTOINCREMENT's tables (tasks and
 // comments), Postgres every identity's.
-func (l *Ledger) idsGiven(ctx context.Context, names []string, cols map[string][]column) (map[string]int64, error) {
+func (l *Ledger) idsGiven(ctx context.Context, q rowsQuerier, names []string, cols map[string][]column) (map[string]int64, error) {
 	out := map[string]int64{}
 	for _, n := range names {
 		if !slices.ContainsFunc(cols[n], func(c column) bool { return c.name == "id" && c.pk }) {
 			continue
 		}
 		var high sql.NullInt64
-		if err := l.r.QueryRowContext(ctx, "SELECT max(id) FROM "+n).Scan(&high); err != nil {
+		if err := q.QueryRowContext(ctx, "SELECT max(id) FROM "+n).Scan(&high); err != nil {
 			return nil, err
 		}
 		out[n] = high.Int64
 		var seq sql.NullInt64
-		q := l.d.pick("SELECT seq FROM sqlite_sequence WHERE name = ?",
+		// Postgres's sequences are read as they are now, past the moment
+		// the rest is read as of: a next id later than it needs be.
+		s := l.d.pick("SELECT seq FROM sqlite_sequence WHERE name = ?",
 			`SELECT s.last_value FROM pg_sequences s
 				WHERE to_regclass(quote_ident(s.schemaname) || '.' || quote_ident(s.sequencename)) = to_regclass(pg_get_serial_sequence(?, 'id'))`)
-		if err := l.r.QueryRowContext(ctx, q, n).Scan(&seq); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err := q.QueryRowContext(ctx, s, n).Scan(&seq); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
 		out[n] = max(out[n], seq.Int64)
@@ -292,12 +307,12 @@ func (t *txn) setGiven(given map[string]int64, cols map[string][]column) error {
 // checksum is the SHA-256 of a table's rows, read in the order of their
 // keys, each value written with its kind: the same rows give the same sum
 // in either database.
-func checksum(ctx context.Context, l *Ledger, table string, cols []column) (string, int64, error) {
+func checksum(ctx context.Context, q rowsQuerier, table string, cols []column) (string, int64, error) {
 	names := make([]string, len(cols))
 	for i, c := range cols {
 		names[i] = c.name
 	}
-	rows, err := l.r.QueryContext(ctx, "SELECT "+strings.Join(names, ", ")+" FROM "+table+" ORDER BY "+orderOf(cols))
+	rows, err := q.QueryContext(ctx, "SELECT "+strings.Join(names, ", ")+" FROM "+table+" ORDER BY "+orderOf(cols))
 	if err != nil {
 		return "", 0, err
 	}

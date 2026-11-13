@@ -238,7 +238,7 @@ func TestChecksumTellsApart(t *testing.T) {
 		t.Fatal(err)
 	}
 	sum := func(l *Ledger) string {
-		s, _, err := checksum(ctx, l, "tasks", cols)
+		s, _, err := checksum(ctx, l.r, "tasks", cols)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -269,8 +269,9 @@ func TestChecksumTellsApart(t *testing.T) {
 	}
 }
 
-// A copy that wrote other than it read is refused when read back: one
-// value of one row changed on its way fails it.
+// A copy that wrote other than it read is refused when read back, before
+// it commits: one value of one row changed on its way fails it, and the
+// ledger copied into is left empty, to be copied into again.
 func TestCopyReadBack(t *testing.T) {
 	ctx := context.Background()
 	src, err := Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), nil)
@@ -288,5 +289,57 @@ func TestCopyReadBack(t *testing.T) {
 	defer func() { copying = nil }()
 	if _, err := Copy(ctx, src, dst, nil); err == nil || !strings.Contains(err.Error(), "tasks: read back, the copy differs") {
 		t.Errorf("a row changed on its way: %v", err)
+	}
+	names, err := dst.tables(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := empty(ctx, dst, names); err != nil {
+		t.Errorf("a copy refused left the ledger copied into holding it: %v", err)
+	}
+	copying = nil
+	if _, err := Copy(ctx, src, dst, nil); err != nil {
+		t.Errorf("copied again: %v", err)
+	}
+}
+
+// A ledger written while it is copied, by a serve left running, is
+// copied as it was when the copy began, and read back as it was then: the
+// copy holds the ledger before the write, and gives next the id the write
+// took.
+func TestCopyWrittenMeanwhile(t *testing.T) {
+	ctx := context.Background()
+	src, err := Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	fill(t, src)
+	before, err := src.Tasks(ctx, TaskQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := open(t, time.UTC)
+	var meanwhile int64
+	copying = func(table string, row []any) {
+		if meanwhile == 0 && table == "tasks" {
+			if meanwhile, err = src.PutTask(ctx, Task{Title: "Meanwhile"}, "ana"); err != nil {
+				t.Errorf("a write meanwhile: %v", err)
+			}
+		}
+	}
+	defer func() { copying = nil }()
+	if _, err := Copy(ctx, src, dst, nil); err != nil {
+		t.Fatalf("copied while written: %v", err)
+	}
+	if meanwhile == 0 {
+		t.Fatal("nothing written meanwhile")
+	}
+	got, err := dst.Tasks(ctx, TaskQuery{})
+	if err != nil || len(got) != len(before) {
+		t.Errorf("the copy's tasks: %d, %v; the ledger had %d when the copy began", len(got), err, len(before))
+	}
+	if id, err := dst.PutTask(ctx, Task{Title: "next"}, "ana"); err != nil || id != meanwhile {
+		t.Errorf("the copy's next task: %d %v, want %d", id, err, meanwhile)
 	}
 }
