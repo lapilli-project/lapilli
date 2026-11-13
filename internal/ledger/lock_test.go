@@ -405,3 +405,52 @@ func TestPostgresHold(t *testing.T) {
 		t.Errorf("a session that let the lock go: %v", err)
 	}
 }
+
+// A pid is given again once its session ends, maybe to another process's
+// session, which may take the ledger: a session of this process's own is
+// its pid and when it began, and another's that has the pid is not one.
+// This process finds the ledger lost, and leaves the other's session be.
+func TestPostgresPIDGivenAgain(t *testing.T) {
+	u := ledgertest.URL(t)
+	if u == "" {
+		t.Skip("no " + ledgertest.Env)
+	}
+	quick(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	a, err := OpenPostgres(ctx, u, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	direct, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer direct.Close(ctx)
+	if _, err := direct.Exec(ctx, "SELECT pg_terminate_backend($1, 5000)", int64(a.pg.pid)); err != nil {
+		t.Fatal(err)
+	}
+	b, err := OpenPostgres(ctx, u, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	// As if b's session had the pid of one of a's that ended: its pid, and
+	// another start.
+	a.pg.mu.Lock()
+	a.pg.own[session{b.pg.pid, time.Now().Add(-time.Hour).UnixMicro()}] = true
+	a.pg.mu.Unlock()
+	for range 2 {
+		a.SetMeta(ctx, "w", "1")
+	}
+	if !a.pg.isLost() {
+		t.Error("a process whose lock another took doesn't find it lost")
+	}
+	if err := b.Hold(ctx); err != nil {
+		t.Errorf("the process that took the ledger: %v", err)
+	}
+	if h := lockHolder(ctx, direct, b); h != int64(b.pg.pid) {
+		t.Errorf("the lock is held by %d, the other process's session is %d", h, b.pg.pid)
+	}
+}

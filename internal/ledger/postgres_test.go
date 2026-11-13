@@ -502,8 +502,12 @@ func TestPostgresOwnSessionEnded(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	var began time.Time
+	if err := stale.QueryRow(ctx, "SELECT backend_start FROM pg_stat_activity WHERE pid = pg_backend_pid()").Scan(&began); err != nil {
+		t.Fatal(err)
+	}
 	l.pg.mu.Lock()
-	l.pg.own[stale.PgConn().PID()] = true
+	l.pg.own[session{stale.PgConn().PID(), began.UnixMicro()}] = true
 	l.pg.mu.Unlock()
 	var err2 error
 	for range 2 {

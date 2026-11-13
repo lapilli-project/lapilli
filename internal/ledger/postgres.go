@@ -101,12 +101,14 @@ type pgWriter struct {
 	// have one.
 	key int32
 	// pid is the session that holds the lock for this process, once one
-	// does; own, every session the writer made, before it asked for the
-	// lock (the answer can be lost on its way): should one hold it after
-	// its connection dropped, which the server can take minutes to notice,
-	// it is this process's own.
+	// does; own, the sessions the writer made since it last held it, each
+	// known before it asked for the lock (the answer can be lost on its
+	// way): should one hold it after its connection dropped, which the
+	// server can take minutes to notice, it is this process's own. A
+	// session is its pid and when it began, as a pid is given again once
+	// its session ends, to another process's maybe.
 	pid uint32
-	own map[uint32]bool
+	own map[session]bool
 	// writers is schema_version.writers once this process took the lock:
 	// each process that takes it counts one more. Another connection that
 	// finds another count finds the ledger written by someone else since.
@@ -197,7 +199,11 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 	}
 	// This process's own from now, should the lock be taken and the answer
 	// not reach it.
-	w.own[c.PgConn().PID()] = true
+	var began time.Time
+	if err := c.QueryRow(ctx, "SELECT backend_start FROM pg_stat_activity WHERE pid = pg_backend_pid()").Scan(&began); err != nil {
+		return err
+	}
+	w.own[session{c.PgConn().PID(), began.UnixMicro()}] = true
 	took, err := w.try(ctx, c)
 	if err != nil {
 		return err
@@ -207,7 +213,7 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 		// dropped (maybe while it was made), may hold it still, which the
 		// server can keep for minutes: it is ended, and the lock taken
 		// again. Its client is gone: it writes nothing more.
-		if h, err := w.holder(ctx, c); err == nil && h != nil && w.own[uint32(h.PID)] {
+		if h, err := w.holder(ctx, c); err == nil && h != nil && w.own[session{uint32(h.PID), h.Since.UnixMicro()}] {
 			c.Exec(ctx, "SELECT pg_terminate_backend($1, 5000)", h.PID)
 			if took, err = w.try(ctx, c); err != nil {
 				return err
@@ -242,7 +248,15 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 		w.again.Store(true)
 	}
 	w.pid = c.PgConn().PID()
+	// Those before it are gone, or ended above.
+	w.own = map[session]bool{{w.pid, began.UnixMicro()}: true}
 	return nil
+}
+
+// session is a server's session: its pid, and when it began, in µs.
+type session struct {
+	pid   uint32
+	began int64
 }
 
 // unlock lets the lock go on a session that took it, with a context of its
@@ -731,7 +745,7 @@ func OpenPostgres(ctx context.Context, conn string, loc *time.Location) (*Ledger
 		return nil, err
 	}
 	secrets := secretsOf(conn, cfg)
-	pw := &pgWriter{lost: make(chan struct{}), own: map[uint32]bool{}}
+	pw := &pgWriter{lost: make(chan struct{}), own: map[session]bool{}}
 	writer := stdlib.GetConnector(*cfg, stdlib.OptionAfterConnect(pw.connected), stdlib.OptionBeforeConnect(pw.connecting))
 	w := sql.OpenDB(pgConnector{writer, secrets, cfg.ConnectTimeout + connectWithin})
 	// One connection writes, as for SQLite: writes take turns, and the
