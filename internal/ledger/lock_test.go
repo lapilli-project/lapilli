@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/ledger/ledgertest"
 )
 
@@ -56,15 +57,19 @@ func TestPostgresSearchPath(t *testing.T) {
 	}
 	// Made in the first schema of a path that holds no ledger, which is
 	// all its statements read: a table of the same name further on is
-	// another's.
+	// another's, and so is a function before pg_catalog's, here an md5
+	// that would make every label set one (series_labels).
 	third := ledgertest.URL(t)
 	tu, _ := url.Parse(third)
 	fresh := tu.Query().Get("search_path")
-	if _, err := c.Exec(ctx, "CREATE TABLE "+empty+".changes (id int)"); err != nil {
-		t.Fatal(err)
+	for _, s := range []string{"CREATE TABLE " + empty + ".changes (id int)",
+		"CREATE FUNCTION " + empty + ".md5(text) RETURNS text LANGUAGE sql IMMUTABLE AS $$SELECT 'same'$$"} {
+		if _, err := c.Exec(ctx, s); err != nil {
+			t.Fatal(err)
+		}
 	}
 	q = tu.Query()
-	q.Set("search_path", fresh+","+empty)
+	q.Set("search_path", fresh+","+empty+",pg_catalog")
 	tu.RawQuery = q.Encode()
 	l, err := OpenPostgres(ctx, tu.String(), time.UTC)
 	if err != nil {
@@ -73,6 +78,12 @@ func TestPostgresSearchPath(t *testing.T) {
 	defer l.Close()
 	if err := l.SetSwitch(ctx, "paused", true, "ana", "paused"); err != nil {
 		t.Fatal(err)
+	}
+	f := Found{From: t0, To: t0.Add(time.Hour), Run: Run{Kind: "test", Started: t0.Add(time.Hour), Finished: t0.Add(time.Hour), From: t0, To: t0.Add(time.Hour)},
+		Firings: []firing.Firing{{Rule: "Errors", Labels: map[string]string{"service": "a"}, Start: t0.Add(time.Minute)},
+			{Rule: "Errors", Labels: map[string]string{"service": "b"}, Start: t0.Add(time.Minute)}}}
+	if err := l.Record(ctx, f, opts); err != nil {
+		t.Errorf("two alerts of a rule, with another's md5 on the path: %v", err)
 	}
 	var n int
 	if err := c.QueryRow(ctx, "SELECT count(*) FROM information_schema.tables WHERE table_schema = $1", fresh).Scan(&n); err != nil || n < 30 {
