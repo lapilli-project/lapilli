@@ -67,7 +67,8 @@ the UI, the API and the metrics; `cmd/lapilli/serve.go` the flags.
 ## The ledger
 
 One SQLite file, through the pure-Go driver `modernc.org/sqlite`: no cgo, so
-the image stays distroless and static. It adds about 5 MB to the binary.
+the image stays distroless and static. Or a Postgres database, through pgx,
+pure Go too, with the same tables and statements ([postgres.md](postgres.md)). It adds about 5 MB to the binary.
 Also considered: `github.com/ncruces/go-sqlite3` (about 6 MB); bbolt (no SQL:
 harder for the next maintainer to read and query); JSON files (no
 transaction to replace a period's firings in).
@@ -575,7 +576,8 @@ tasks, comments) is in [work.md](work.md).
 
 ## Not in this
 
-More than one replica; Postgres; several Prometheus
+More than one replica (what it would take is in [postgres.md](postgres.md));
+several Prometheus
 servers in one ledger; firings from Alertmanager's webhook; a cloud's own
 alarms; editing rules. Each is a piece someone can take on. Alertmanager's webhook, beside the replay, would also show
 where a replay differs from what really fired.

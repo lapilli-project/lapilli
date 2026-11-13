@@ -3,17 +3,17 @@ package serve
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/ledger/ledgertest"
 	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/signin/idptest"
 )
@@ -250,6 +250,14 @@ func TestSignOutTwoProcesses(t *testing.T) {
 	cfg := s.cfg
 	cfg.OIDC = &signin.OIDC{Issuer: idp.URL, ClientID: "lapilli", SecretFile: s.cfg.OIDC.SecretFile, Claims: s.cfg.OIDC.Claims}
 	s2, err := New(context.Background(), cfg, &history{}, s.log)
+	if ledgertest.On() {
+		// A Postgres ledger takes one process: the second is refused.
+		var locked *ledger.LockedError
+		if !errors.As(err, &locked) {
+			t.Fatalf("a second process on a Postgres ledger: %v", err)
+		}
+		return
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,11 +341,7 @@ func TestSessionKeyNotInLedger(t *testing.T) {
 	s, idp := oidcServer(t, func(c *Config) { c.SessionKey = "" })
 	b := newBrowser(t, s.Handler())
 	b.signIn(idp, "/", claimsOf("ed@example.com"))
-	db, err := os.ReadFile(filepath.Join(s.cfg.Ledger, "ledger.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(db, []byte("session-key")) {
+	if ledgerHolds(t, s, "session-key") {
 		t.Error("a session key in the ledger")
 	}
 	cfg := s.cfg

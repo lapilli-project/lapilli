@@ -59,10 +59,17 @@ var (
 // Queries that must use rules_recorded, the index of recorded rules: its
 // rows are those with a source, so each also asks for a source that isn't
 // empty, for SQLite to see it may.
-const (
-	qRecordedRule = "SELECT id FROM rules WHERE source = ? AND source != '' AND sent = ? AND severity = ?"
-	qRecordedTwin = "SELECT EXISTS (SELECT 1 FROM rules WHERE source = ? AND source != '' AND sent = ? AND severity != ?)"
-)
+// In Postgres, rules_recorded holds the md5s of sent and severity, which
+// can be longer than a btree holds (017.sql), and is found by them.
+func qRecordedRule(d dialect) string {
+	return d.pick("SELECT id FROM rules WHERE source = ? AND source != '' AND sent = ? AND severity = ?",
+		"SELECT id FROM rules WHERE source = ?1 AND source != '' AND md5(sent) = md5(?2) AND md5(severity) = md5(?3) AND sent = ?2 AND severity = ?3")
+}
+
+func qRecordedTwin(d dialect) string {
+	return d.pick("SELECT EXISTS (SELECT 1 FROM rules WHERE source = ? AND source != '' AND sent = ? AND severity != ?)",
+		"SELECT EXISTS (SELECT 1 FROM rules WHERE source = ?1 AND source != '' AND md5(sent) = md5(?2) AND sent = ?2 AND severity != ?3)")
+}
 
 var sourceRE = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$`)
 
@@ -146,12 +153,13 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 			return out, err
 		}
 		rk := recordedKey{f.Rule, labels["severity"]}
-		k := key{rk, string(b), f.Start.Unix()}
+		text := l.d.kept(string(b))
+		k := key{rk, text, f.Start.Unix()}
 		end := nullable(f.End)
 		if was, ok := wants[k]; ok && (was.end.Valid && (!end.Valid || was.end.Int64 >= end.Int64) || !was.end.Valid && !end.Valid) {
 			continue
 		}
-		wants[k] = want{rk, string(b), end}
+		wants[k] = want{rk, text, end}
 	}
 	err := l.write(ctx, func(t *txn) error {
 		var known bool
@@ -219,16 +227,16 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		newSeries, err := t.PrepareContext(t.ctx, "INSERT INTO series (rule_id, labels) VALUES (?, ?) RETURNING id")
-		if err != nil {
-			return err
-		}
-		defer newSeries.Close()
 		type add struct {
 			rule, series, start int64
 			end                 sql.NullInt64
+			// fresh is, for an alert new to the ledger, its place in
+			// made, and series its id once made.
+			fresh int
 		}
 		var adds []add
+		// The alerts new to the ledger, made together once all are known.
+		var made []seriesKey
 		// In order, so a write names new rules the same way each time.
 		keys := slices.SortedFunc(maps.Keys(wants), func(a, b key) int {
 			return cmp.Or(cmp.Compare(a.rule.sent, b.rule.sent), cmp.Compare(a.rule.severity, b.rule.severity),
@@ -269,17 +277,33 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 				if len(series) >= maxSourceSeries {
 					return invalid("a source has %d alerts at most, a rule and its labels each", maxSourceSeries)
 				}
-				if err := newSeries.QueryRowContext(t.ctx, id, w.labels).Scan(&sid); err != nil {
-					return err
-				}
-				series[sk], t.series[sk] = sid, sid
+				// Made below; none of the ledger's firings is of it.
+				sid = -int64(len(made)) - 1
+				made = append(made, sk)
+				series[sk] = sid
+			}
+			if sid < 0 {
+				adds = append(adds, add{rule: id, start: k.start, end: w.end, fresh: int(-sid)})
+				continue
 			}
 			a := at{sid, k.start}
 			if i := slices.IndexFunc(had[a], func(h have) bool { return h.end == w.end }); i >= 0 {
 				had[a] = slices.Delete(had[a], i, i+1)
 				continue
 			}
-			adds = append(adds, add{id, sid, k.start, w.end})
+			adds = append(adds, add{rule: id, series: sid, start: k.start, end: w.end})
+		}
+		sids, err := l.makeSeries(t, made)
+		if err != nil {
+			return err
+		}
+		for i, sk := range made {
+			series[sk], t.series[sk] = sids[i], sids[i]
+		}
+		for i := range adds {
+			if adds[i].fresh > 0 {
+				adds[i].series = sids[adds[i].fresh-1]
+			}
 		}
 		var gone []have
 		for _, hs := range had {
@@ -288,29 +312,35 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 		out.Added, out.Removed = len(adds), len(gone)
 		now := time.Now().Unix()
 		if out.Changed() {
-			del, err := t.PrepareContext(t.ctx, "DELETE FROM firings WHERE id = ?")
+			del, err := t.deleting("firings")
 			if err != nil {
 				return err
 			}
-			defer del.Close()
 			for _, h := range gone {
-				if _, err := del.ExecContext(t.ctx, h.id); err != nil {
+				if err := del.add(h.id); err != nil {
+					del.close()
 					return err
 				}
 			}
-			ins, err := t.PrepareContext(t.ctx, "INSERT INTO firings (series_id, rule_id, start_at, end_at, day) VALUES (?, ?, ?, ?, ?)")
+			if err := del.close(); err != nil {
+				return err
+			}
+			ins, err := t.inserting("firings", []string{"series_id", "rule_id", "start_at", "end_at", "day"}, []string{"BIGINT", "BIGINT", "BIGINT", "BIGINT", "BIGINT"})
 			if err != nil {
 				return err
 			}
-			defer ins.Close()
 			// In order, so a series' firings keep their ids in time.
 			slices.SortFunc(adds, func(a, b add) int {
 				return cmp.Or(cmp.Compare(a.series, b.series), cmp.Compare(a.start, b.start))
 			})
 			for _, a := range adds {
-				if _, err := ins.ExecContext(t.ctx, a.series, a.rule, a.start, a.end, l.day(a.start)); err != nil {
+				if err := ins.add(a.series, a.rule, a.start, a.end, l.day(a.start)); err != nil {
+					ins.close()
 					return err
 				}
+			}
+			if err := ins.close(); err != nil {
+				return err
 			}
 			// The stones of what changed, of the incidents near it, and of a
 			// series' next firing, which may have refired after one taken
@@ -356,13 +386,14 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 		if err := l.copied(t, source, from.Unix(), end); err != nil {
 			return err
 		}
+		// ?7 is a bool: 1 or 0 to Postgres (CheckNamedValue).
 		_, err = t.ExecContext(t.ctx, `INSERT INTO sources (name, written, written_by, period_from, period_to, firings, changed)
-			VALUES (?1, ?2, ?3, ?4, ?5, ?6, CASE WHEN ?7 THEN ?2 ELSE 0 END)
+			VALUES (?1, ?2, ?3, ?4, ?5, ?6, CASE WHEN `+t.d.pick("?7", "?7 = 1")+` THEN `+t.d.pick("?2", "CAST(?2 AS BIGINT)")+` ELSE 0 END)
 			ON CONFLICT (name) DO UPDATE SET written = excluded.written, written_by = excluded.written_by,
 				period_from = CASE WHEN excluded.period_to >= sources.period_to THEN excluded.period_from ELSE sources.period_from END,
 				firings = CASE WHEN excluded.period_to >= sources.period_to THEN excluded.firings ELSE sources.firings END,
-				period_to = max(sources.period_to, excluded.period_to),
-				changed = CASE WHEN ?7 THEN excluded.written ELSE sources.changed END`,
+				period_to = `+t.d.greatest("sources.period_to", "excluded.period_to")+`,
+				changed = CASE WHEN `+t.d.pick("?7", "?7 = 1")+` THEN excluded.written ELSE sources.changed END`,
 			source, now, by, from.Unix(), end, len(fs), out.Changed())
 		return err
 	})
@@ -495,7 +526,7 @@ func checkRecorded(source string, from, to time.Time, fs []firing.Firing, now ti
 // it when no other rule has that name; otherwise it is told apart,
 // "checkout-5xx [cloudwatch-prod]".
 func (l *Ledger) recordedRule(t *txn, source string, k recordedKey, room func() error) (id int64, made bool, err error) {
-	err = t.QueryRowContext(t.ctx, qRecordedRule, source, k.sent, k.severity).Scan(&id)
+	err = t.QueryRowContext(t.ctx, qRecordedRule(t.d), source, k.sent, k.severity).Scan(&id)
 	if err == nil || !errors.Is(err, sql.ErrNoRows) {
 		return id, false, err
 	}
@@ -522,7 +553,7 @@ func (l *Ledger) recordedRule(t *txn, source string, k recordedKey, room func() 
 // doesn't take its name, to carry the note off when the rule comes.
 func (l *Ledger) freeName(t *txn, source string, k recordedKey, claimed map[string]bool) (string, error) {
 	var twin bool
-	if err := t.QueryRowContext(t.ctx, qRecordedTwin, source, k.sent, k.severity).Scan(&twin); err != nil {
+	if err := t.QueryRowContext(t.ctx, qRecordedTwin(t.d), source, k.sent, k.severity).Scan(&twin); err != nil {
 		return "", err
 	}
 	versioned, err := t.versionNames()
@@ -603,7 +634,8 @@ func (l *Ledger) yield(t *txn, names []string, kept map[string]bool) error {
 			return err
 		}
 		for _, q := range []string{
-			"UPDATE OR IGNORE notes SET rule = ? WHERE rule = ?",
+			t.d.pick("UPDATE OR IGNORE notes SET rule = ? WHERE rule = ?",
+				"UPDATE notes SET rule = ?1 WHERE rule = ?2 AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.rule = ?1)"),
 			"UPDATE tasks SET rule = ? WHERE rule = ?",
 			"UPDATE comments SET on_key = ? WHERE on_kind = 'rule' AND on_key = ?",
 		} {
@@ -637,7 +669,7 @@ func (l *Ledger) SharedLabels(ctx context.Context) (map[string]map[string]string
 	// alerts the rule has: those all have.
 	rows, err := l.r.QueryContext(ctx, `WITH n AS (SELECT s.rule_id, count(*) AS alerts FROM series s JOIN rules r ON r.id = s.rule_id
 			WHERE r.source != '' GROUP BY s.rule_id),
-		kv AS (SELECT s.rule_id, j.key, j.value, count(*) AS alerts FROM n JOIN series s ON s.rule_id = n.rule_id, json_each(s.labels) j
+		kv AS (SELECT s.rule_id, j.key, j.value, count(*) AS alerts FROM n JOIN series s ON s.rule_id = n.rule_id, `+l.d.keys("s.labels", "j")+`
 			GROUP BY s.rule_id, j.key, j.value)
 		SELECT r.name, kv.key, kv.value FROM kv JOIN n ON n.rule_id = kv.rule_id AND n.alerts = kv.alerts JOIN rules r ON r.id = kv.rule_id`)
 	if err != nil {

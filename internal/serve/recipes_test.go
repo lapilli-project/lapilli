@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/ledger/ledgertest"
 )
 
 const recipes = "../../recipes/incidents/"
@@ -463,6 +464,12 @@ func TestTokenRate(t *testing.T) {
 	const token = "a-token-long-enough"
 	file := tokenFile(t, token)
 	s, _ := server(t, func(c *Config) { c.IncidentsListen, c.IncidentsToken = "127.0.0.1:0", file })
+	// In Postgres across a network an incident takes tens of milliseconds,
+	// sixty a second or more, in which twenty a second refill the burst:
+	// there, it refills slower. SQLite holds the rate New gives.
+	if ledgertest.On() {
+		s.tokenRate.rate = 1
+	}
 	port := s.IncidentsHandler()
 	codes := map[int]int{}
 	for i := range 60 {

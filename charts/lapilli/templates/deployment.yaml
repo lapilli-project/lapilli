@@ -9,6 +9,7 @@ metadata:
     {{- include "lapilli.labels" . | nindent 4 }}
 spec:
   # One writer for the ledger: the old pod stops before the new one starts.
+  # In Postgres too: a second process is refused the ledger's lock.
   replicas: 1
   strategy:
     type: Recreate
@@ -37,7 +38,11 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - serve
+            {{- if $s.ledger.postgres.secret.name }}
+            - {{ printf "--ledger-url-file=/var/run/lapilli/ledger/%s" $s.ledger.postgres.secret.key | quote }}
+            {{- else }}
             - --ledger=/var/lib/lapilli
+            {{- end }}
             - --listen=:8080
             - {{ printf "--metrics-listen=:%d" (int .Values.serve.metricsPort) | quote }}
             - {{ printf "--every=%s" $s.every | quote }}
@@ -289,8 +294,14 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           volumeMounts:
+            {{- if $s.ledger.postgres.secret.name }}
+            - name: ledger
+              mountPath: /var/run/lapilli/ledger
+              readOnly: true
+            {{- else }}
             - name: ledger
               mountPath: /var/lib/lapilli
+            {{- end }}
             {{- include "lapilli.mounts" . | trim | nindent 12 }}
             {{- if $s.notify.webhookSecret.name }}
             - name: notify
@@ -392,7 +403,10 @@ spec:
         {{- end }}
       volumes:
         - name: ledger
-          {{- if $s.ledger.existingClaim }}
+          {{- if $s.ledger.postgres.secret.name }}
+          secret:
+            secretName: {{ $s.ledger.postgres.secret.name }}
+          {{- else if $s.ledger.existingClaim }}
           persistentVolumeClaim:
             claimName: {{ $s.ledger.existingClaim }}
           {{- else if $s.ledger.persistence }}

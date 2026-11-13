@@ -577,14 +577,19 @@ func (l *Ledger) FiringAlarm(ctx context.Context, source, id string, fold bool) 
 	if source == "" || id == "" {
 		return false, nil
 	}
-	v := "json_extract(s.labels, '$." + AlarmID + "')"
-	is := alarmIs(v, "?2", "?3")
+	v := l.d.text("s.labels", AlarmID)
+	is := alarmIs(l.d, v, "?2", "?3")
+	args := []any{source, id, AlarmKey(id)}
 	if fold {
-		is = "lower(" + v + ") = lower(?2)"
+		// ASCII letters folded alike on both sides, as SQLite's lower()
+		// folds them and Postgres's of a "C" text: the id is folded here,
+		// not by the database's collation, which would fold an É too.
+		is = "lower(" + v + ") = ?2"
+		args = []any{source, ASCIILower(id)}
 	}
 	var on bool
 	err := l.r.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM firings f JOIN series s ON s.id = f.series_id JOIN rules r ON r.id = f.rule_id
-		WHERE r.source = ?1 AND f.end_at IS NULL AND `+is+`)`, source, id, AlarmKey(id)).Scan(&on)
+		WHERE r.source = ?1 AND f.end_at IS NULL AND `+is+`)`, args...).Scan(&on)
 	return on, err
 }
 

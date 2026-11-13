@@ -216,24 +216,9 @@ func TestTrackerStatusSetPartlyPruned(t *testing.T) {
 // not by reading every change kept: at a million changes, a full scan took
 // a quarter of a second a page.
 func TestTrackerStatusSetIndexed(t *testing.T) {
-	ctx := context.Background()
 	l := open(t, time.UTC)
-	rows, err := l.r.QueryContext(ctx, "EXPLAIN QUERY PLAN "+statusSetQuery, `["task 1 made","task 1 changed"]`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	var plan []string
-	for rows.Next() {
-		var id, parent, unused int
-		var detail string
-		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
-			t.Fatal(err)
-		}
-		plan = append(plan, detail)
-	}
-	text := strings.Join(plan, "; ")
-	if !strings.Contains(text, "SEARCH changes USING INDEX changes_what") || strings.Contains(text, "SCAN changes") {
+	text := plan(t, l, statusSetQuery(l.d), `["task 1 made","task 1 changed"]`)
+	if !strings.Contains(text, "changes_what") || scansAll(l, text, "changes") {
 		t.Errorf("plan: %s", text)
 	}
 }

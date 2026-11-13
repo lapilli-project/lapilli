@@ -160,24 +160,9 @@ func TestRecordedFurthest(t *testing.T) {
 // with tens of thousands of rules, a scan for each of a write's would make
 // a write's cost grow with the square of them.
 func TestRecordedQueriesUseTheIndex(t *testing.T) {
-	ctx := context.Background()
 	l := open(t, time.UTC)
-	for _, q := range []string{qRecordedRule, qRecordedTwin} {
-		rows, err := l.r.QueryContext(ctx, "EXPLAIN QUERY PLAN "+q, "cw", "A", "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		var plan []string
-		for rows.Next() {
-			var id, parent, unused int
-			var detail string
-			if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
-				t.Fatal(err)
-			}
-			plan = append(plan, detail)
-		}
-		rows.Close()
-		if p := strings.Join(plan, "; "); !strings.Contains(p, "rules_recorded") {
+	for _, q := range []string{qRecordedRule(l.d), qRecordedTwin(l.d)} {
+		if p := plan(t, l, q, "cw", "A", ""); !strings.Contains(p, "rules_recorded") {
 			t.Errorf("%s\nplan: %s", q, p)
 		}
 	}

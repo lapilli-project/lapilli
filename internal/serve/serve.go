@@ -98,6 +98,10 @@ type Config struct {
 	Loc  *time.Location
 
 	Ledger string // the directory the ledger is kept in
+	// LedgerURLFile is a file holding a Postgres connection string: the
+	// ledger is kept in that database, not in Ledger (docs/design/postgres.md).
+	// The string is read once, at start, and said nowhere.
+	LedgerURLFile string
 	// CheckReplay sets the replay beside what really fired, read from
 	// CheckSeries or ALERTS and GRAFANA_ALERTS; a rule differs as
 	// CheckDiffers says (docs/design/fidelity.md).
@@ -420,12 +424,9 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 	if err := CheckRoles(cfg); err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(cfg.Ledger, 0o750); err != nil {
-		return nil, fmt.Errorf("--ledger: %w", err)
-	}
-	l, err := ledger.Open(ctx, filepath.Join(cfg.Ledger, "ledger.db"), cfg.Loc)
+	l, err := openLedger(ctx, cfg, log)
 	if err != nil {
-		return nil, fmt.Errorf("--ledger: %w", err)
+		return nil, err
 	}
 	s := &Server{cfg: cfg, h: h, l: l, log: log, now: time.Now, wake: make(chan struct{}, 1), boot: strconv.FormatInt(time.Now().UnixNano(), 36),
 		heavy: make(chan struct{}, 1), tokenRate: &limiter{rate: 20, burst: 40}, tokenBusy: make(chan struct{}, 1),
@@ -467,6 +468,33 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 	}
 	l.TellTo(s.dests())
 	return s, nil
+}
+
+// openLedger opens the ledger: in Postgres, with --ledger-url-file, else
+// the SQLite file in --ledger.
+func openLedger(ctx context.Context, cfg Config, log *slog.Logger) (*ledger.Ledger, error) {
+	if cfg.LedgerURLFile != "" {
+		b, err := os.ReadFile(cfg.LedgerURLFile)
+		if err != nil {
+			return nil, fmt.Errorf("--ledger-url-file: %w", err)
+		}
+		l, err := ledger.OpenPostgres(ctx, string(b), cfg.Loc)
+		if err != nil {
+			return nil, fmt.Errorf("--ledger-url-file: %w", err)
+		}
+		for _, w := range l.Warnings() {
+			log.Warn(w)
+		}
+		return l, nil
+	}
+	if err := os.MkdirAll(cfg.Ledger, 0o750); err != nil {
+		return nil, fmt.Errorf("--ledger: %w", err)
+	}
+	l, err := ledger.Open(ctx, filepath.Join(cfg.Ledger, "ledger.db"), cfg.Loc)
+	if err != nil {
+		return nil, fmt.Errorf("--ledger: %w", err)
+	}
+	return l, nil
 }
 
 // ledgerID is the ledger's name, twelve hex digits made at random the first
@@ -598,6 +626,10 @@ func (s *Server) Close() error { return s.l.Close() }
 
 // Run serves the UI and keeps the ledger until ctx is done.
 func (s *Server) Run(ctx context.Context) error {
+	// Stopped as well when a server fails, or the ledger's lock is lost:
+	// the workers stop with it.
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
 	// The versions from before the ledger began, before anything replays.
 	if err := s.history(ctx); err != nil {
 		return err
@@ -626,7 +658,11 @@ func (s *Server) Run(ctx context.Context) error {
 		MaxHeaderBytes:    64 << 10,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
-	s.log.Info("serving", "listen", ln.Addr().String(), "ledger", s.cfg.Ledger)
+	where := s.cfg.Ledger
+	if s.l.Postgres() {
+		where = "postgres"
+	}
+	s.log.Info("serving", "listen", ln.Addr().String(), "ledger", where)
 	served := make(chan error, 4)
 	go func() { served <- srv.Serve(ln) }()
 	if s.cfg.MetricsListen != "" {
@@ -705,7 +741,12 @@ func (s *Server) Run(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 	case serr = <-served:
+	case <-s.l.Lost():
+		// Another process may write the ledger now: this one stops, and
+		// writes nothing more, rather than send a notice twice.
+		serr = ledger.ErrLockLost
 	}
+	stop()
 	shut, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	srv.Shutdown(shut)

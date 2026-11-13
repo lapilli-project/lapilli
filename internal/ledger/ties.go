@@ -35,9 +35,13 @@ func AlarmKey(id string) string { return verdict.AlarmKey(id) }
 // ID given as ?id, or, for a Google policy, of the key given as ?key, with
 // its project named either way: through series_alarm and notified_alarm,
 // the policy's names a range of them.
-func alarmIs(v, id, key string) string {
-	return "(" + v + " = " + id + " OR (" + key + " != " + id + " AND " + v + " >= 'projects/' AND " + v + " < 'projects0' AND substr(" + v +
-		", instr(" + v + ", '/alertPolicies/') + 1) = " + key + "))"
+func alarmIs(d dialect, v, id, key string) string {
+	p, is := d.alarmPrefix(v), v+" = "+id
+	if d == postgres {
+		is = p + " = " + d.alarmPrefix(id) + " AND " + is
+	}
+	return "((" + is + ") OR (" + key + " != " + id + " AND " + p + " >= 'projects/' AND " + p + " < 'projects0' AND substr(" + v +
+		", " + d.strpos(v, "'/alertPolicies/'") + " + 1) = " + key + "))"
 }
 
 // A Tie is an alarm and the rule its history is copied in as.
@@ -200,8 +204,8 @@ func (l *Ledger) recordedOf(ctx context.Context, q reader, sources map[string]bo
 	out := map[string][]heldBy{}
 	for src := range sources {
 		rows, err := q.QueryContext(ctx, `SELECT r.id, r.name, r.sent, r.severity, count(s.id),
-				count(DISTINCT json_extract(s.labels, '$.`+AlarmID+`')), ifnull(min(json_extract(s.labels, '$.`+AlarmID+`')), ''),
-				ifnull((SELECT max(f.start_at) FROM firings f WHERE f.rule_id = r.id), 0)
+				count(DISTINCT `+l.d.text("s.labels", AlarmID)+`), coalesce(min(`+l.d.text("s.labels", AlarmID)+`), ''),
+				coalesce((SELECT max(f.start_at) FROM firings f WHERE f.rule_id = r.id), 0)
 			FROM rules r LEFT JOIN series s ON s.rule_id = r.id WHERE r.source = ? AND r.source != '' GROUP BY r.id`, src)
 		if err != nil {
 			return nil, err
@@ -371,7 +375,8 @@ func (l *Ledger) rename(t *txn, id int64, was, name string) error {
 		return err
 	}
 	for _, q := range []string{
-		"UPDATE OR IGNORE notes SET rule = ? WHERE rule = ?",
+		t.d.pick("UPDATE OR IGNORE notes SET rule = ? WHERE rule = ?",
+			"UPDATE notes SET rule = ?1 WHERE rule = ?2 AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.rule = ?1)"),
 		"UPDATE tasks SET rule = ? WHERE rule = ?",
 		"UPDATE comments SET on_key = ? WHERE on_kind = 'rule' AND on_key = ?",
 	} {

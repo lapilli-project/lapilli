@@ -2,6 +2,45 @@
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-11-14
+
+The ledger where a team keeps the rest of what matters: in a Postgres
+database, with its backups, failover and SQL, beside SQLite, which stays
+the default. Still one replica; what more would take is in the design
+note. Reviewed three times, as an attacker would, for correctness and
+concurrency, and the fixes once more; what each found is fixed in what is
+described here, as are two things CI's Postgres runs found (a server that
+stops answering, which nothing waited on for long enough, and a page's
+round trips). No change to a SQLite ledger's schema or files.
+
+### Added
+
+- **The ledger in Postgres** ([docs/design/postgres.md](docs/design/postgres.md)):
+  `lapilli serve --ledger-url-file FILE` keeps the ledger in the Postgres
+  database (15 or later) a connection string names, read from a file and
+  said nowhere, in no flag, log, error, page, `/metrics` or MCP answer.
+  To another machine, a string that says no `sslmode` (pgx's `prefer`) is
+  refused, saying to ask for `verify-full`; one that checks no certificate
+  is warned of at start. The string is read by pgx alone, as `psql` reads it.
+  The same tables and statements as SQLite's, every text compared byte by
+  byte, every key of any length and every label kept, so every page and
+  answer is what SQLite gives; the ledger's and serve's tests run on both,
+  on Postgres 15 and 18 in CI. Still one replica: the process that writes
+  holds an advisory lock on the ledger's schema, a second is refused,
+  saying which session and role hold it, and one whose connection dropped
+  takes it again, or stops, and sends nothing more, if another process
+  took it in between. SQLite stays the default, its files as they were:
+  upgrading changes nothing there.
+- **`lapilli ledger copy`**: a ledger copied into an empty one, a SQLite
+  ledger into Postgres or one back, in one transaction, ids kept and no
+  deleted id given again, both read back table by table and checked
+  before it commits, the ledger copied from read as of one moment. A
+  ledger that isn't empty is refused.
+- **The chart**: `serve.ledger.postgres.secret` names the Secret holding
+  the connection string, mounted whole so it can hold the server's CA; no
+  PersistentVolumeClaim is made, and with the egress NetworkPolicy,
+  `serve.ledger.postgres.to` says where the database is.
+
 ## [0.33.0] - 2026-11-13
 
 Reading history from an API with a request quota, as a managed Prometheus

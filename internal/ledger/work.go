@@ -237,22 +237,22 @@ func (l *Ledger) PutTeam(ctx context.Context, t Team, by string) (int64, error) 
 		var res sql.Result
 		var err error
 		if id == 0 {
-			res, err = tx.ExecContext(tx.ctx, "INSERT INTO teams (name, rules, labels, note, work_hours, sleep_hours, tz, shifts, updated, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-				t.Name, t.Rules, labelsText(t.Labels), t.Note, t.WorkHours, t.SleepHours, t.TZ, t.Shifts, now, by)
+			err = tx.QueryRowContext(tx.ctx, "INSERT INTO teams (name, rules, labels, note, work_hours, sleep_hours, tz, shifts, updated, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+				t.Name, t.Rules, labelsText(t.Labels), t.Note, t.WorkHours, t.SleepHours, t.TZ, t.Shifts, now, by).Scan(&id)
 		} else {
 			res, err = tx.ExecContext(tx.ctx, "UPDATE teams SET name = ?, rules = ?, labels = ?, note = ?, work_hours = ?, sleep_hours = ?, tz = ?, shifts = ?, updated = ?, updated_by = ? WHERE id = ?",
 				t.Name, t.Rules, labelsText(t.Labels), t.Note, t.WorkHours, t.SleepHours, t.TZ, t.Shifts, now, by, id)
 		}
 		if err != nil {
-			if strings.Contains(err.Error(), "UNIQUE") {
+			if unique(err) {
 				return invalid("there is a team called %s already", t.Name)
 			}
 			return err
 		}
-		if id == 0 {
-			id, _ = res.LastInsertId()
-		} else if n, _ := res.RowsAffected(); n == 0 {
-			return ErrNotFound
+		if res != nil {
+			if n, _ := res.RowsAffected(); n == 0 {
+				return ErrNotFound
+			}
 		}
 		return change(tx, by, "team "+t.Name+" kept", nil, t)
 	})
@@ -379,7 +379,7 @@ func (l *Ledger) PutNote(ctx context.Context, n Note, by string) error {
 			}
 		}
 		if _, err := t.ExecContext(t.ctx, `INSERT INTO notes (rule, team_id, status, runbook, note, updated, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT (rule) DO UPDATE SET team_id = excluded.team_id, status = excluded.status, runbook = excluded.runbook,
+			ON CONFLICT `+t.d.pick("(rule)", "(md5(rule))")+` DO UPDATE SET team_id = excluded.team_id, status = excluded.status, runbook = excluded.runbook,
 				note = excluded.note, updated = excluded.updated, updated_by = excluded.updated_by`,
 			n.Rule, team, n.Status, n.Runbook, n.Note, time.Now().Unix(), by); err != nil {
 			return err
@@ -951,13 +951,11 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 			if err := windowsLeft(t, w.TeamID); err != nil {
 				return err
 			}
-			res, err := t.ExecContext(t.ctx, `INSERT INTO windows (title, start_at, end_at, every, repeat_on, until_at, team_id, rules, labels, updated, updated_by)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				w.Title, w.Start.Unix(), w.End.Unix(), w.Every, w.On, nullable(w.Until), w.TeamID, w.Rules, labelsText(w.Labels), now, by)
-			if err != nil {
+			if err := t.QueryRowContext(t.ctx, `INSERT INTO windows (title, start_at, end_at, every, repeat_on, until_at, team_id, rules, labels, updated, updated_by)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+				w.Title, w.Start.Unix(), w.End.Unix(), w.Every, w.On, nullable(w.Until), w.TeamID, w.Rules, labelsText(w.Labels), now, by).Scan(&id); err != nil {
 				return err
 			}
-			id, _ = res.LastInsertId()
 			w.ID = id
 			kept, err := l.windows(t.ctx, t, "WHERE id = ?", id)
 			if err != nil || len(kept) == 0 {
@@ -1196,7 +1194,7 @@ func (l *Ledger) Tasks(ctx context.Context, q TaskQuery) ([]Task, error) {
 	var args []any
 	if len(q.Status) > 0 {
 		b, _ := json.Marshal(q.Status)
-		sq += " AND status IN (SELECT value FROM json_each(?))"
+		sq += " AND status IN (" + l.d.texts("?") + ")"
 		args = append(args, string(b))
 	}
 	if q.Rule != "" {
@@ -1304,13 +1302,11 @@ func (l *Ledger) putTask(ctx context.Context, id int64, edit func(was Task) (Tas
 		}
 		what := fmt.Sprintf("task %d changed", id)
 		if id == 0 {
-			res, err := tx.ExecContext(tx.ctx, `INSERT INTO tasks (title, kind, rule, incident, team_id, assignee, status, due, body, link, done_at,
-				created, created_by, updated, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				t.Title, t.Kind, t.Rule, t.Incident, team, t.Assignee, t.Status, nullable(t.Due), t.Body, t.Link, done, now, by, now, by)
-			if err != nil {
+			if err := tx.QueryRowContext(tx.ctx, `INSERT INTO tasks (title, kind, rule, incident, team_id, assignee, status, due, body, link, done_at,
+				created, created_by, updated, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+				t.Title, t.Kind, t.Rule, t.Incident, team, t.Assignee, t.Status, nullable(t.Due), t.Body, t.Link, done, now, by, now, by).Scan(&id); err != nil {
 				return err
 			}
-			id, _ = res.LastInsertId()
 			what = fmt.Sprintf("task %d made", id)
 		} else if _, err := tx.ExecContext(tx.ctx, `UPDATE tasks SET title = ?, kind = ?, rule = ?, incident = ?, team_id = ?, assignee = ?,
 			status = ?, due = ?, body = ?, link = ?, done_at = ?, updated = ?, updated_by = ? WHERE id = ?`,
@@ -1478,12 +1474,10 @@ func (l *Ledger) PutComment(ctx context.Context, c Comment, by string) (int64, e
 			} else if err != nil {
 				return err
 			}
-			res, err := t.ExecContext(t.ctx, "INSERT INTO comments (on_kind, on_key, body, created, created_by, updated) VALUES (?, ?, ?, ?, ?, ?)",
-				c.On, c.Key, c.Body, now, by, now)
-			if err != nil {
+			if err := t.QueryRowContext(t.ctx, "INSERT INTO comments (on_kind, on_key, body, created, created_by, updated) VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+				c.On, c.Key, c.Body, now, by, now).Scan(&id); err != nil {
 				return err
 			}
-			id, _ = res.LastInsertId()
 			c.ID, c.Created, c.By, c.Updated = id, unix(now), by, unix(now)
 			if err := l.tell(t, "comment.written", by, map[string]any{"comment": c}); err != nil {
 				return err

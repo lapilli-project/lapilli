@@ -87,7 +87,7 @@ func (l *Ledger) SyncFile(ctx context.Context, incs []incident.Incident, o verdi
 		for _, in := range incs {
 			old, ok := have[in.ID]
 			delete(have, in.ID)
-			if ok && same(old.Incident, in) {
+			if ok && same(l.d, old.Incident, in) {
 				continue
 			}
 			other, err := l.get(t, in.ID)
@@ -147,11 +147,19 @@ func (e *TakenError) Unwrap() error { return ErrTaken }
 func pair(a, b int64) [2]int64 { return [2]int64{a, b} }
 
 // same reports whether two incidents are alike as the ledger keeps them:
-// whatever zones their times are written in, to the second.
-func same(a, b incident.Incident) bool {
+// whatever zones their times are written in, to the second, and their texts
+// as the database keeps them: in Postgres, an incident with a NUL in its
+// title, kept U+FFFD (pgText), is the same the next time it comes.
+func same(d dialect, a, b incident.Incident) bool {
+	text := func(s string) string {
+		if d == postgres {
+			return pgText(s)
+		}
+		return s
+	}
 	x, _ := json.Marshal(orEmpty(a.Labels))
 	y, _ := json.Marshal(orEmpty(b.Labels))
-	return a.ID == b.ID && a.Title == b.Title && a.Start.Unix() == b.Start.Unix() && a.End.IsZero() == b.End.IsZero() &&
+	return text(a.ID) == text(b.ID) && text(a.Title) == text(b.Title) && a.Start.Unix() == b.Start.Unix() && a.End.IsZero() == b.End.IsZero() &&
 		(a.End.IsZero() || a.End.Unix() == b.End.Unix()) && string(x) == string(y)
 }
 
@@ -175,7 +183,7 @@ func put(t *txn, in incident.Incident, origin, by string, now int64) error {
 	}
 	_, err = t.ExecContext(t.ctx, `INSERT INTO incidents (key, origin, counts, title, start_at, end_at, labels, updated, updated_by)
 		VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (key) DO UPDATE SET title = excluded.title, start_at = excluded.start_at, end_at = excluded.end_at,
+		ON CONFLICT `+t.d.pick("(key)", "(md5(key))")+` DO UPDATE SET title = excluded.title, start_at = excluded.start_at, end_at = excluded.end_at,
 			labels = excluded.labels, updated = excluded.updated, updated_by = excluded.updated_by`,
 		in.ID, origin, in.Title, in.Start.Unix(), nullable(in.End), string(labels), now, by)
 	return err
@@ -244,7 +252,7 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 	}
 	in.Candidate = false
 	if in.ID != "" {
-		if old, err := l.IncidentByID(ctx, in.ID); err == nil && old.Origin == origin && same(old.Incident, in) {
+		if old, err := l.IncidentByID(ctx, in.ID); err == nil && old.Origin == origin && same(l.d, old.Incident, in) {
 			return in.ID, nil
 		}
 	}
@@ -292,7 +300,7 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 		what := "incident " + in.ID + " written"
 		var spans [][2]int64
 		// A new title judges nothing again: stones hang on times and labels.
-		if err != nil || !sameWhereWhen(old.Incident, in) {
+		if err != nil || !sameWhereWhen(l.d, old.Incident, in) {
 			spans = append(spans, pair(span(in, o)))
 		}
 		if err != nil && by != Copier { // a new one
@@ -343,9 +351,9 @@ func originOf(by string) string {
 
 // sameWhereWhen reports whether two incidents have the same times and labels,
 // all their stones hang on.
-func sameWhereWhen(a, b incident.Incident) bool {
+func sameWhereWhen(d dialect, a, b incident.Incident) bool {
 	a.Title, b.Title = "", ""
-	return same(a, b)
+	return same(d, a, b)
 }
 
 func oldOrNil(err error, old incidentRow) any {
@@ -467,6 +475,6 @@ func change(t *txn, by, what string, before, after any) error {
 		return string(b)
 	}
 	_, err := t.ExecContext(t.ctx, "INSERT INTO changes (at, by, what, before, after) VALUES (?, ?, ?, ?, ?)",
-		time.Now().Unix(), by, what, text(before), text(after))
+		time.Now().Unix(), by, what, t.d.kept(text(before)), t.d.kept(text(after)))
 	return err
 }

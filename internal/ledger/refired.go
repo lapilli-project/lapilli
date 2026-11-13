@@ -20,7 +20,7 @@ func (l *Ledger) RefiredOf(ctx context.Context, rule string, from, to time.Time,
 	return l.refired(ctx, `SELECT r.name, s.id, s.labels, x.n FROM (SELECT series_id, count(*) AS n FROM firings
 		WHERE rule_id = (SELECT id FROM rules WHERE name = ?) AND refired = 1 AND excused = 0 AND start_at >= ? AND start_at < ?
 		GROUP BY series_id) x JOIN series s ON s.id = x.series_id JOIN rules r ON r.id = s.rule_id
-		ORDER BY x.n DESC, s.id LIMIT ?`, rule, from.Unix(), to.Unix(), limit)
+		ORDER BY x.n DESC, s.id LIMIT ?`, rule, from.Unix(), to.Unix(), l.d.limit(limit))
 }
 
 // MostRefired are the alerts, of any rule, that re-fired most in [from,
@@ -32,7 +32,7 @@ func (l *Ledger) MostRefired(ctx context.Context, from, to time.Time, limit int,
 	}
 	all, err := l.refired(ctx, `SELECT r.name, s.id, s.labels, x.n FROM (SELECT series_id, count(*) AS n FROM firings
 		WHERE start_at >= ? AND start_at < ? AND refired = 1 AND excused = 0 GROUP BY series_id) x
-		JOIN series s ON s.id = x.series_id JOIN rules r ON r.id = s.rule_id ORDER BY x.n DESC, r.name, s.id LIMIT ?`, from.Unix(), to.Unix(), n)
+		JOIN series s ON s.id = x.series_id JOIN rules r ON r.id = s.rule_id ORDER BY x.n DESC, r.name, s.id LIMIT ?`, from.Unix(), to.Unix(), l.d.limit(n))
 	if err != nil || only == nil {
 		return all, err
 	}

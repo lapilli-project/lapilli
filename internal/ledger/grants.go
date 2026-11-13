@@ -332,15 +332,14 @@ func (l *Ledger) PutGrant(ctx context.Context, g Grant, by string) (int64, error
 		if n >= MaxGrants {
 			return invalid("the ledger keeps %d roles at most", MaxGrants)
 		}
-		res, err := t.ExecContext(t.ctx, "INSERT INTO grants (who, role, team_id, created, created_by) VALUES (?, ?, ?, ?, ?)",
-			g.Who, g.Role, g.TeamID, time.Now().Unix(), by)
+		err := t.QueryRowContext(t.ctx, "INSERT INTO grants (who, role, team_id, created, created_by) VALUES (?, ?, ?, ?, ?) RETURNING id",
+			g.Who, g.Role, g.TeamID, time.Now().Unix(), by).Scan(&id)
 		if err != nil {
-			if strings.Contains(err.Error(), "UNIQUE") {
+			if unique(err) {
 				return invalid("%s has that role already", g.Who)
 			}
 			return err
 		}
-		id, _ = res.LastInsertId()
 		g.ID = id
 		return change(t, by, RoleGiven+g.Who, nil, g)
 	})

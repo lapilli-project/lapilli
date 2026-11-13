@@ -85,6 +85,13 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
 
 The ledger:
   --ledger DIR        where the ledger is kept (default lapilli-ledger)
+  --ledger-url-file FILE
+                      keep the ledger in Postgres instead: the file holds
+                      its connection string, as pgx reads it
+                      (postgres://USER:PASSWORD@HOST:5432/DB?sslmode=verify-full),
+                      read at start and said nowhere. One process writes a
+                      ledger at a time: a second is refused. "lapilli ledger
+                      copy" moves a SQLite ledger there (docs/design/postgres.md)
   --every DUR         run this often (default 1h)
   --settle DUR        and replay the last DUR before the last run's end
                       again, for points that arrived late (default 1h)
@@ -467,6 +474,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		Digest: serve.Weekly{Day: time.Monday, Hour: 9}, Version: buildVersion(),
 	}
 	timeoutSet := false
+	ledgerSet := false
 	deployAfter, deployBefore, deployTimes := 10*time.Minute, time.Duration(0), false
 	// The sign-in of lapilli's own, read from the flags that give it.
 	var (
@@ -490,7 +498,18 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		var err error
 		switch name {
 		case "--ledger":
-			cfg.Ledger = val
+			cfg.Ledger, ledgerSet = val, true
+		case "--ledger-url-file":
+			// Read once here, to say at once what is wrong; serve reads it
+			// again, and keeps only the file's name.
+			b, err := os.ReadFile(val)
+			if err != nil {
+				return true, fmt.Errorf("%s: %v", name, err)
+			}
+			if strings.TrimSpace(string(b)) == "" {
+				return true, fmt.Errorf("%s: the file is empty: want a Postgres connection string", name)
+			}
+			cfg.LedgerURLFile = val
 		case "--listen":
 			cfg.Listen = val
 		case "--allowed-hosts":
@@ -801,6 +820,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	signedIn := signIns > 0
 	switch {
 	case err != nil:
+	case ledgerSet && cfg.LedgerURLFile != "":
+		err = fmt.Errorf("--ledger and --ledger-url-file are two places to keep the ledger: give one")
 	case signIns > 1:
 		err = fmt.Errorf("--user-header, --oidc-issuer and --proxy-jwt are three ways to say who people are: give one")
 	case ocSet && (oc.Issuer == "" || oc.ClientID == ""):

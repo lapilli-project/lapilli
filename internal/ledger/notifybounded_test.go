@@ -47,19 +47,18 @@ func TestNotifyStartsBounded(t *testing.T) {
 		t.Errorf("a notification of %d alerts with no start took %s", MaxAlerts, took)
 	}
 	// The plan: the group's index, then the notification's alerts.
-	rows, err := l.r.QueryContext(ctx, "EXPLAIN QUERY PLAN "+qStarts, "sns", "r", "g-0", 1, 0, "", 50)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var plan []string
-	for rows.Next() {
-		var a, b, c int
-		var d string
-		rows.Scan(&a, &b, &c, &d)
-		plan = append(plan, d)
-	}
-	rows.Close()
-	if p := strings.Join(plan, "; "); !strings.Contains(p, "notifications_group") || !strings.Contains(p, "notified_of") || strings.Contains(p, "notified_rule") {
+	if p := plan(t, l, qStarts(l.d), "sns", "r", "g-0", 1, "", 50); !strings.Contains(p, "notifications_group") || !strings.Contains(p, "notified_of") || strings.Contains(p, "notified_rule") {
 		t.Errorf("plan: %s", p)
+	}
+	if p := plan(t, l, qLastOfGroup(l.d), "sns", "r", "g-0", 1); !strings.Contains(p, "notifications_group") {
+		t.Errorf("plan: %s", p)
+	}
+	// In Postgres, searched by the group key's md5 too, not every group of
+	// the source's receiver.
+	for _, q := range []string{qStarts(l.d), qLastOfGroup(l.d)} {
+		p := plan(t, l, q, "sns", "r", "g-0", 1, "", 50)
+		if l.d == postgres && !strings.Contains(p, "Index Cond: ((source = 'sns'::text) AND (receiver = 'r'::text) AND (md5(grp) = ") {
+			t.Errorf("not searched by the group's md5: %s", p)
+		}
 	}
 }

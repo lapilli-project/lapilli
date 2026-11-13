@@ -177,7 +177,7 @@ func (l *Ledger) ReplaceResult(ctx context.Context, kind string, at, from, to ti
 func (l *Ledger) ByPeriod(ctx context.Context, kind string, since time.Time) ([]Result, error) {
 	return l.results(ctx, `SELECT id, kind, at, period_from, period_to, body FROM (
 			SELECT *, row_number() OVER (PARTITION BY period_from ORDER BY at DESC, id DESC) AS n
-			FROM results WHERE kind = ? AND period_from >= ?)
+			FROM results WHERE kind = ? AND period_from >= ?) AS latest
 		WHERE n = 1 ORDER BY period_from DESC`, kind, since.Unix())
 }
 
@@ -217,7 +217,7 @@ func (l *Ledger) results(ctx context.Context, q string, args ...any) ([]Result, 
 func (l *Ledger) JudgeAll(ctx context.Context, o verdict.Options, done func(float64)) error {
 	var lo, hi sql.NullInt64
 	if err := l.r.QueryRowContext(ctx, `SELECT min(t), max(t) FROM (SELECT start_at AS t FROM firings
-		UNION ALL SELECT start_at FROM incidents)`).Scan(&lo, &hi); err != nil || !lo.Valid {
+		UNION ALL SELECT start_at FROM incidents) AS starts`).Scan(&lo, &hi); err != nil || !lo.Valid {
 		return err
 	}
 	const week = 7 * 86400
@@ -257,7 +257,8 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 		// The replay beside what really fired, as firings are.
 		"DELETE FROM check_misses WHERE id IN (SELECT id FROM check_misses WHERE start_at < ? LIMIT 5000)",
 		// On-call turns over before it.
-		"DELETE FROM on_call_turns WHERE rowid IN (SELECT rowid FROM on_call_turns WHERE end_at < ? LIMIT 5000)",
+		l.d.pick("DELETE FROM on_call_turns WHERE rowid IN (SELECT rowid FROM on_call_turns WHERE end_at < ? LIMIT 5000)",
+			"DELETE FROM on_call_turns WHERE (schedule, start_at) IN (SELECT schedule, start_at FROM on_call_turns WHERE end_at < ? LIMIT 5000)"),
 	}
 	for _, q := range steps {
 		arg := at
@@ -298,8 +299,9 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 			WHERE since < ? ORDER BY since DESC, id DESC LIMIT 1)`, at, at); err != nil {
 			return err
 		}
-		if _, err := t.ExecContext(t.ctx, `DELETE FROM docs WHERE hash NOT IN (SELECT json_extract(d.value, '$.hash')
-			FROM versions v, json_each(v.docs) d)`); err != nil {
+		if _, err := t.ExecContext(t.ctx, t.d.pick(`DELETE FROM docs WHERE hash NOT IN (SELECT json_extract(d.value, '$.hash')
+			FROM versions v, json_each(v.docs) d)`, `DELETE FROM docs WHERE hash NOT IN (SELECT d ->> 'hash'
+			FROM versions v, jsonb_array_elements(v.docs::jsonb) d)`)); err != nil {
 			return err
 		}
 		// Alerts with no firing left: their labels go too.
@@ -316,8 +318,14 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 	if err != nil {
 		return err
 	}
+	// SQLite gives the space back a little at a time; Postgres's
+	// autovacuum keeps it for the rows that come.
+	q := l.d.pick("PRAGMA incremental_vacuum(2000)", "")
+	if q == "" {
+		return nil
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	_, err = l.w.ExecContext(ctx, "PRAGMA incremental_vacuum(2000)")
+	_, err = l.w.ExecContext(ctx, q)
 	return err
 }

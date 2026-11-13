@@ -1179,7 +1179,8 @@ rules, a rule's page, the incidents and the overview show them, the digest
 and reports tell them, and `/api/v1/summary` gives them, in a shape that
 keeps its schema, to dashboards and other tools.
 
-The ledger is one SQLite file (`--ledger DIR`). It keeps each firing's stones
+The ledger is one SQLite file (`--ledger DIR`), or a Postgres database
+(`--ledger-url-file FILE`, below). It keeps each firing's stones
 and each rule's by day and by week, so reading twelve weeks costs what
 reading one does, and a change gives stones again only to the firings near
 it. Measured with two million firings (a thousand an hour for twelve
@@ -1386,6 +1387,36 @@ helm install lapilli oci://ghcr.io/lapilli-project/charts/lapilli -n monitoring 
   --set 'rules.configMaps={alert-rules}' --set 'match={service}'
 kubectl -n monitoring port-forward svc/lapilli 8080
 ```
+
+### The ledger in Postgres
+
+A SQLite file is one disk's. To keep the ledger where you keep the rest, with
+its backups, point in time recovery and failover, give `lapilli serve` a
+Postgres database, 15 or later (docs/design/postgres.md):
+
+```sh
+umask 077   # the file only you can read
+cat >ledger-url <<'URL'
+postgres://lapilli:PASSWORD@db.example:5432/lapilli?sslmode=verify-full
+URL
+lapilli ledger copy --ledger lapilli-ledger --to-url-file ledger-url   # once, with serve stopped
+lapilli serve --ledger-url-file ledger-url --rules rules/ --prometheus http://prometheus:9090
+```
+
+The connection string is read from the file, as pgx reads one, and said
+nowhere: not in a flag, a log, an error, a page, `/metrics` or an answer to
+an agent. To another machine, say `sslmode=verify-full`: a string that says no
+`sslmode`, or pgx's default `prefer`, which checks no certificate and falls
+back to none, is refused at start; `require` or `disable` is taken at its word,
+and serve warns. Give the database to the ledger's role alone (`REVOKE CONNECT
+... FROM PUBLIC`). Every page, report and answer is what the
+SQLite ledger gives from the same writes, and the tests run on both. It is
+still one replica: one process writes a ledger at a time, and a second
+`serve` on the same database is refused, saying which session holds the
+ledger's lock. `lapilli ledger copy` copies a ledger into an empty one, a
+SQLite ledger into Postgres or one back, in one transaction, and reads both
+back to check. In the chart, `serve.ledger.postgres.secret` names the
+Secret holding the string, and no PersistentVolumeClaim is made.
 
 ### Firings recorded elsewhere
 
@@ -1894,7 +1925,8 @@ approve in the UI. No tool approves or applies one.
   are marked "replayed in part" until `--late` covers them.
 - Rules alike in name, group and labels are counted together, and so are
   firings read with `--alerts` or `--firings`, which carry no group.
-- `lapilli serve` runs as one replica with one ledger file. Who is who comes
+- `lapilli serve` runs as one replica, with one ledger file or one Postgres
+  database a process writes at a time. Who is who comes
   from its sign-in (an OpenID Connect provider, or a sign-in in front), and
   roles from the flags and the ones admins give; it doesn't sign people out
   at the provider, or refresh a session past `--session-max-age`. A version of the rules is in effect from when it saw

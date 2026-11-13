@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/ledger/ledgertest"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -47,6 +48,7 @@ func schemaVersion(t *testing.T) int {
 // task and a comment on it, migrates to 015: its comment kept, as people's,
 // on-call turns and comments copied from a tracker taken.
 func TestMigrate015(t *testing.T) {
+	ledgertest.SQLiteOnly(t, "a ledger an earlier lapilli wrote")
 	ctx := context.Background()
 	files, _ := fs.Glob(schema, "schema/*.sql")
 	if len(files) < 15 || files[13] != "schema/014.sql" || files[14] != "schema/015.sql" {

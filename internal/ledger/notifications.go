@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -352,7 +353,7 @@ func (l *Ledger) notifyOne(t *txn, n *Notification) (bool, error) {
 		if !a.Start.IsZero() {
 			start = a.Start.Unix()
 		}
-		if _, err := st.ExecContext(t.ctx, id, a.Rule, string(b), start, !a.Resolved); err != nil {
+		if _, err := st.ExecContext(t.ctx, id, a.Rule, t.d.kept(string(b)), start, !a.Resolved); err != nil {
 			return false, err
 		}
 	}
@@ -362,10 +363,25 @@ func (l *Ledger) notifyOne(t *txn, n *Notification) (bool, error) {
 // qStarts reads the starts of the alerts a group's last notifications told
 // of: through notifications_group, then notified_of, never every alert of
 // a rule.
-const qStarts = `SELECT d.labels, d.start_at FROM notified d WHERE d.notification_id IN
-	(SELECT id FROM notifications WHERE source = ? AND receiver = ? AND grp = ? AND at <= ? AND shape = ?
-		ORDER BY at DESC, id DESC LIMIT ?)
+// groupIs is an SQL condition on a notification's group key being the
+// one given as p, through notifications_group: in Postgres the index holds
+// the key's md5, as a key of 1,000 characters can be longer than a btree
+// holds.
+func groupIs(d dialect, p string) string {
+	return d.pick("grp = "+p, "md5(grp) = md5("+p+") AND grp = "+p)
+}
+
+func qStarts(d dialect) string {
+	return `SELECT d.labels, d.start_at FROM notified d WHERE d.notification_id IN
+	(SELECT id FROM notifications WHERE source = ?1 AND receiver = ?2 AND ` + groupIs(d, "?3") + ` AND at <= ?4 AND shape = ?5
+		ORDER BY at DESC, id DESC LIMIT ?6)
 	AND d.start_at > 0 ORDER BY d.notification_id DESC`
+}
+
+func qLastOfGroup(d dialect) string {
+	return `SELECT id, resolved FROM notifications WHERE source = ?1 AND receiver = ?2 AND ` + groupIs(d, "?3") + ` AND at <= ?4
+		ORDER BY at DESC, id DESC LIMIT 1`
+}
 
 // startsFrom is how many of a group's last notifications an alert whose
 // message didn't say its start looks for it in: however long ago they came,
@@ -384,7 +400,7 @@ func (l *Ledger) fill(t *txn, n *Notification) error {
 		return nil
 	}
 	at := n.At.Unix()
-	rows, err := t.QueryContext(t.ctx, qStarts, n.Source, n.Receiver, n.Group, at, n.Shape, startsFrom)
+	rows, err := t.QueryContext(t.ctx, qStarts(t.d), n.Source, n.Receiver, n.Group, at, n.Shape, startsFrom)
 	if err != nil {
 		return err
 	}
@@ -412,7 +428,7 @@ func (l *Ledger) fill(t *txn, n *Notification) error {
 		if err != nil {
 			return err
 		}
-		if start := last[string(labels)]; start > 0 {
+		if start := last[t.d.kept(string(labels))]; start > 0 {
 			a.Start = unix(start)
 		}
 	}
@@ -437,8 +453,7 @@ func (l *Ledger) reason(t *txn, n Notification) (string, error) {
 	}
 	var prev int64
 	var resolved bool
-	err := t.QueryRowContext(t.ctx, `SELECT id, resolved FROM notifications WHERE source = ? AND receiver = ? AND grp = ? AND at <= ?
-		ORDER BY at DESC, id DESC LIMIT 1`, n.Source, n.Receiver, n.Group, n.At.Unix()).Scan(&prev, &resolved)
+	err := t.QueryRowContext(t.ctx, qLastOfGroup(t.d), n.Source, n.Receiver, n.Group, n.At.Unix()).Scan(&prev, &resolved)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && resolved {
 		return ReasonFirst, nil
 	}
@@ -564,7 +579,7 @@ func (l *Ledger) NotifiedSince(ctx context.Context) (map[string]time.Time, error
 		}
 		es = append(es, e)
 		return nil
-	}, `SELECT d.rule, json_extract(d.labels, '$.severity'), json_extract(d.labels, '$.alarm_id'), n.source, n.copied, min(d.start_at)
+	}, `SELECT d.rule, `+l.d.text("d.labels", "severity")+`, `+l.d.text("d.labels", AlarmID)+`, n.source, n.copied, min(d.start_at)
 		FROM notified d JOIN notifications n ON n.id = d.notification_id WHERE d.start_at > 0 GROUP BY d.rule, 2, 3, n.source, n.copied`)
 	if err != nil {
 		return nil, err
@@ -652,6 +667,8 @@ func (r *recordedNames) alarmIDs(ctx context.Context, ids []string) error {
 			keys = append(keys, k)
 		}
 	}
+	v := r.l.d.text("s.labels", AlarmID)
+	p := r.l.d.alarmPrefix(v)
 	for len(ids) > 0 {
 		part := ids[:min(len(ids), 500)]
 		ids = ids[len(part):]
@@ -659,8 +676,8 @@ func (r *recordedNames) alarmIDs(ctx context.Context, ids []string) error {
 		if err != nil {
 			return err
 		}
-		if err := r.l.eachRow(ctx, keep, `SELECT DISTINCT r.source, json_extract(s.labels, '$.alarm_id'), r.sent FROM series s JOIN rules r ON r.id = s.rule_id
-			WHERE json_extract(s.labels, '$.alarm_id') IS NOT NULL AND json_extract(s.labels, '$.alarm_id') IN (SELECT value FROM json_each(?))
+		if err := r.l.eachRow(ctx, keep, `SELECT DISTINCT r.source, `+v+`, r.sent FROM series s JOIN rules r ON r.id = s.rule_id
+			WHERE `+v+` IS NOT NULL AND `+alarmIn(r.l.d, v)+`
 			AND r.source != ''`, string(b)); err != nil {
 			return err
 		}
@@ -673,14 +690,24 @@ func (r *recordedNames) alarmIDs(ctx context.Context, ids []string) error {
 		if err != nil {
 			return err
 		}
-		if err := r.l.eachRow(ctx, keep, `SELECT DISTINCT r.source, json_extract(s.labels, '$.alarm_id'), r.sent FROM series s JOIN rules r ON r.id = s.rule_id
-			WHERE json_extract(s.labels, '$.alarm_id') >= 'projects/' AND json_extract(s.labels, '$.alarm_id') < 'projects0'
-			AND substr(json_extract(s.labels, '$.alarm_id'), instr(json_extract(s.labels, '$.alarm_id'), '/alertPolicies/') + 1) IN (SELECT value FROM json_each(?))
+		if err := r.l.eachRow(ctx, keep, `SELECT DISTINCT r.source, `+v+`, r.sent FROM series s JOIN rules r ON r.id = s.rule_id
+			WHERE `+p+` >= 'projects/' AND `+p+` < 'projects0'
+			AND substr(`+v+`, `+r.l.d.strpos(v, "'/alertPolicies/'")+` + 1) IN (`+r.l.d.texts("?")+`)
 			AND r.source != ''`, string(b)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// alarmIn is an SQL condition on an alarm_id, v, being one of the IDs of
+// a JSON list given as ?1: through series_alarm, which holds a prefix of
+// each in Postgres (alarmPrefix), searched for the list's as an array.
+func alarmIn(d dialect, v string) string {
+	if d == postgres {
+		return d.alarmPrefix(v) + ` = ANY (ARRAY(SELECT left(id, 500) FROM (` + d.texts("?1") + `) AS ids (id))) AND ` + v + ` IN (` + d.texts("?1") + `)`
+	}
+	return v + ` IN (` + d.texts("?") + `)`
 }
 
 // of is the rule an alert is of: copied in from the source named, the rule
@@ -788,6 +815,7 @@ func (t *tier) load(alerts []Alert) error {
 			starts[a.Rule] = append(starts[a.Rule], a.Start.Unix())
 		}
 	}
+	spansOf := map[string][][2]int64{}
 	for rule, ss := range starts {
 		slices.Sort(ss)
 		w := int64(t.within(rule) / time.Second)
@@ -799,10 +827,16 @@ func (t *tier) load(alerts []Alert) error {
 				spans = append(spans, [2]int64{s - w, s + w})
 			}
 		}
+		spansOf[rule] = spans
+	}
+	if t.l.d == postgres {
+		return t.loadSpans(spansOf)
+	}
+	for rule, spans := range spansOf {
 		ids, _ := json.Marshal(t.ids[rule])
 		for _, sp := range spans {
 			rows, err := t.l.r.QueryContext(t.ctx, `SELECT f.id, f.start_at, f.white, f.excused, s.id, s.labels FROM firings f
-				JOIN series s ON s.id = f.series_id WHERE f.rule_id IN (SELECT value FROM json_each(?)) AND f.start_at >= ? AND f.start_at <= ?
+				JOIN series s ON s.id = f.series_id WHERE f.rule_id IN (`+t.l.d.ints("?")+`) AND f.start_at >= ? AND f.start_at <= ?
 				ORDER BY f.start_at, f.id`, string(ids), sp[0], sp[1])
 			if err != nil {
 				return err
@@ -828,6 +862,107 @@ func (t *tier) load(alerts []Alert) error {
 		}
 	}
 	return nil
+}
+
+// spansAtOnce is how many spans of firings Postgres is asked for in one
+// statement.
+const spansAtOnce = 2000
+
+// loadSpans is load's reading in Postgres: a span a statement is a round
+// trip each, some 13,000 for twelve weeks of 20,000 notifications, 6.6 s on
+// CI. The spans are given as JSON, spansAtOnce a statement, and each is
+// searched for apart (LATERAL, OFFSET 0), by firings_rule, as hours are;
+// read in the order of the spans, each in the order of its firings'
+// starts, as SQLite's a span at a time. Their series' labels are read
+// after, by id, in a statement of their own: joined in the span's search,
+// Postgres, which takes a list given as JSON for a hundred rows, reads a
+// small series table whole for each span.
+func (t *tier) loadSpans(spansOf map[string][][2]int64) error {
+	type ask struct {
+		I    int   `json:"i"`
+		Rule int64 `json:"rule"`
+		Lo   int64 `json:"lo"`
+		Hi   int64 `json:"hi"`
+	}
+	var names []string // by span
+	var part []ask
+	read := func() error {
+		if len(part) == 0 {
+			return nil
+		}
+		b, err := json.Marshal(part)
+		if err != nil {
+			return err
+		}
+		part = part[:0]
+		rows, err := t.l.r.QueryContext(t.ctx, `SELECT sp.i, f.id, f.start_at, f.white, f.excused, f.series_id
+			FROM jsonb_to_recordset(CAST(? AS jsonb)) AS sp (i BIGINT, rule BIGINT, lo BIGINT, hi BIGINT),
+				LATERAL (SELECT id, start_at, white, excused, series_id FROM firings
+					WHERE rule_id = sp.rule AND start_at >= sp.lo AND start_at <= sp.hi OFFSET 0) AS f
+			ORDER BY sp.i, f.start_at, f.id`, string(b))
+		if err != nil {
+			return err
+		}
+		type found struct {
+			i      int
+			f      tied
+			series int64
+		}
+		var got []found
+		series := map[int64]map[string]string{}
+		for rows.Next() {
+			var x found
+			if err := rows.Scan(&x.i, &x.f.id, &x.f.start, &x.f.white, &x.f.excused, &x.series); err != nil {
+				rows.Close()
+				return err
+			}
+			got = append(got, x)
+			series[x.series] = nil
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(series) == 0 {
+			return nil
+		}
+		ids, err := json.Marshal(slices.Sorted(maps.Keys(series)))
+		if err != nil {
+			return err
+		}
+		if err := t.l.eachRow(t.ctx, func(row scanner) error {
+			var id int64
+			var text string
+			if err := row.Scan(&id, &text); err != nil {
+				return err
+			}
+			m, err := t.l.labels(id, text)
+			series[id] = m
+			return err
+		}, `SELECT id, labels FROM series WHERE id IN (`+t.l.d.ints("?")+`)`, string(ids)); err != nil {
+			return err
+		}
+		for _, x := range got {
+			x.f.labels = series[x.series]
+			t.near[names[x.i]] = append(t.near[names[x.i]], x.f)
+		}
+		return nil
+	}
+	for _, rule := range slices.Sorted(maps.Keys(spansOf)) {
+		for _, sp := range spansOf[rule] {
+			i := len(names)
+			names = append(names, rule)
+			for _, id := range t.ids[rule] {
+				part = append(part, ask{i, id, sp[0], sp[1]})
+			}
+			if i%spansAtOnce == spansAtOnce-1 {
+				if err := read(); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return read()
 }
 
 // tie is the firing an alert tells of: its rule's firing whose labels are
@@ -1071,9 +1206,9 @@ func (l *Ledger) NotifiedOf(ctx context.Context, fs []Firing, within Within) (ma
 					}
 				}
 				if err := scan(`SELECT d.notification_id, d.rule, d.labels, d.start_at, d.firing, n.copied FROM notified d
-					JOIN notifications n ON n.id = d.notification_id WHERE json_extract(d.labels, '$.alarm_id') IS NOT NULL
-					AND `+alarmIs("json_extract(d.labels, '$.alarm_id')", "?1", "?5")+` AND d.start_at >= ?2 AND d.start_at <= ?3
-					AND d.rule NOT IN (SELECT value FROM json_each(?4))`,
+					JOIN notifications n ON n.id = d.notification_id WHERE `+l.d.text("d.labels", AlarmID)+` IS NOT NULL
+					AND `+alarmIs(l.d, l.d.text("d.labels", AlarmID), "?1", "?5")+` AND d.start_at >= ?2 AND d.start_at <= ?3
+					AND d.rule NOT IN (`+l.d.texts("?4")+`)`,
 					id, f.Start.Unix()-w, f.Start.Unix()+w, jsonList(names), AlarmKey(id)); err != nil {
 					return nil, err
 				}
@@ -1128,7 +1263,7 @@ func Receivers(by map[string]int) string {
 	return strings.Join(parts, ", ")
 }
 
-// jsonList is a list as JSON, for json_each.
+// jsonList is a list as JSON, for texts and ints (dialect.go).
 func jsonList(xs []string) string {
 	b, _ := json.Marshal(xs)
 	return string(b)

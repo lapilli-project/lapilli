@@ -1555,6 +1555,12 @@ func (s *Server) postDigest(ctx context.Context, in digestIn, week string, from,
 	if err != nil {
 		return err
 	}
+	// Posted only while this process still holds the ledger: digest-sent
+	// was read through a reader, and a process that took the ledger over
+	// posts it too.
+	if err := s.l.Hold(ctx); err != nil {
+		return err
+	}
 	sctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	if err := report.Slack(sctx, s.cfg.Slack, text); err != nil {

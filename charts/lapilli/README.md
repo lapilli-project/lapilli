@@ -37,7 +37,7 @@ It needs:
 - what went wrong: `incidents`, `impact`, or both.
 
 With `mode: serve` it runs `lapilli serve` instead: every hour into a ledger
-on a PersistentVolumeClaim, with a web UI, an API and `/metrics`, behind a
+on a PersistentVolumeClaim, or in Postgres (below), with a web UI, an API and `/metrics`, behind a
 ClusterIP Service, or at a URL people open, with a sign-in (below). Incidents can then be written down in the UI, so
 `incidents` and `impact` are optional; `rules.configMaps` takes one
 ConfigMap, read every minute, each change becoming a new version.
@@ -171,6 +171,35 @@ time once the runs won't replay it again, from `ALERTS` and `GRAFANA_ALERTS`
 or the `series` given; a rule whose replay differs over a week (`differs`,
 `5/0.9` unless given) says so on its page and in `/metrics`. It is on;
 `enabled: false` turns it off.
+
+`serve.ledger.postgres` keeps the ledger in a Postgres database, 15 or later,
+rather than on a PersistentVolumeClaim (`docs/design/postgres.md`):
+`secret.name` and `secret.key` name a Secret holding its connection string,
+which goes in no argument, no log and no page. The whole Secret is mounted at
+`/var/run/lapilli/ledger`, so it can hold the server's CA beside the string:
+
+```sh
+kubectl -n monitoring create secret generic lapilli-ledger \
+  --from-literal=url='postgres://lapilli:PASSWORD@db.example:5432/lapilli?sslmode=verify-full&sslrootcert=/var/run/lapilli/ledger/ca.crt' \
+  --from-file=ca.crt=ca.crt
+helm upgrade lapilli ... --set serve.ledger.postgres.secret.name=lapilli-ledger
+```
+
+Say `sslmode=verify-full`: the server's certificate is checked, against the
+system's CAs or `sslrootcert`'s. A string to a server on another machine that
+says no `sslmode` (or `prefer`, pgx's default, which checks no certificate and
+sends the password in clear to anything in the path that declines TLS) is
+refused at start; `require` or `disable` is taken at its word, and serve warns. Give the database to the ledger's role alone (`REVOKE CONNECT ON
+DATABASE lapilli FROM PUBLIC`): any role that can connect can take the
+ledger's lock and keep serve from starting. No
+PersistentVolumeClaim is made. It is still one replica, replaced with
+`Recreate`: one process writes a ledger at a time, and a second is refused
+the ledger's lock, which is a session's, so connect directly or through a
+pooler in session mode, not transaction mode. With
+`serve.networkPolicy.egress`, `serve.ledger.postgres.to` names where the
+database is, as NetworkPolicy peers, and `port` its port (5432). A SQLite
+ledger moves there once, with serve stopped: `lapilli ledger copy --ledger
+DIR --to-url-file FILE`, from a pod that mounts both.
 
 ## Who people are
 

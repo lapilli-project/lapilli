@@ -203,13 +203,23 @@ func TestTeamWindow(t *testing.T) {
 		t.Errorf("payments' window kept team %d, want %d: %v", w.TeamID, -pay, err)
 	}
 	again, err := l.PutTeam(ctx, Team{Name: "zebra", Rules: "^PayErrors$"}, "ana")
-	if err != nil || again != pay {
+	if err != nil || !idAgain(l, again, pay) {
 		t.Fatalf("a team made after has id %d, not %d: %v", again, pay, err)
 	}
 	want("a team made after, with its id", "PayLatency 11-02 02:00", "SearchSlow 11-02 01:00")
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// idAgain says a row made after the one with id was deleted got the id it
+// should: SQLite gives the highest id again, once its row is gone; Postgres
+// never gives an id twice, and gives another.
+func idAgain(l *Ledger, got, was int64) bool {
+	if l.d == postgres {
+		return got != was
+	}
+	return got == was
+}
 
 // A team that owns by labels, and sorts first by name, doesn't take the
 // alerts of a rule another team's pattern owns: the rule's name decides
@@ -417,7 +427,7 @@ func TestGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 	again, _ := l.PutTeam(ctx, Team{Name: "payments", Rules: "^Pay"}, "ana")
-	if gs, _ = l.Grants(ctx); len(gs) != 1 || gs[0].Who != "user:bo" || again != pay {
+	if gs, _ = l.Grants(ctx); len(gs) != 1 || gs[0].Who != "user:bo" || !idAgain(l, again, pay) {
 		t.Fatalf("after payments was removed and made again (%d, was %d): %+v", again, pay, gs)
 	}
 	if err := l.DeleteGrant(ctx, gs[0].ID, "ana"); err != nil {

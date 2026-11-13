@@ -295,7 +295,10 @@ func TestNotificationsScale(t *testing.T) {
 		}
 		record(t, l, from, from.Add(24*time.Hour), day)
 	}
+	// Kept a thousand to a write, as a source's are copied in: what is
+	// held to a budget is reading them.
 	began := time.Now()
+	var ns []Notification
 	for i := range 20000 {
 		f := fs[(i*5)%len(fs)]
 		at := f.Start.Add(30 * time.Second)
@@ -304,17 +307,33 @@ func TestNotificationsScale(t *testing.T) {
 			at = f.Start.Add(4 * time.Hour)
 		}
 		a := Alert{Rule: f.Rule, Start: f.Start, Labels: map[string]string{"alertname": f.Rule, "service": f.Labels["service"], "cluster": "eu-1"}}
-		if _, err := l.Notify(ctx, Notification{At: at, Source: "alertmanager", Receiver: "oncall", Group: f.Rule + f.Labels["service"], Alerts: []Alert{a}}); err != nil {
-			t.Fatal(err)
+		ns = append(ns, Notification{At: at, Source: "alertmanager", Receiver: "oncall", Group: f.Rule + f.Labels["service"], Alerts: []Alert{a}})
+		if len(ns) == 1000 || i == 19999 {
+			kept, errs, err := l.NotifyAll(ctx, ns)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for j := range ns {
+				if errs[j] != nil || !kept[j] {
+					t.Fatalf("notification %d: %v %v", i-len(ns)+1+j, kept[j], errs[j])
+				}
+			}
+			ns = ns[:0]
 		}
 	}
 	t.Logf("20,000 notifications kept in %v", time.Since(began))
 	began = time.Now()
+	was := sent.Load()
 	ps, err := l.Pages(ctx, start, t0, twoMinutes)
 	if err != nil {
 		t.Fatal(err)
 	}
 	took := time.Since(began)
+	// In Postgres, a round trip each is what a slower runner pays for:
+	// some 13,000 spans of firings are read a few thousand a statement.
+	if n := sent.Load() - was; l.d == postgres && n > 50 {
+		t.Errorf("twelve weeks of notifications read in %d statements, want 50 at most", n)
+	}
 	untied := 0
 	for _, p := range ps {
 		if p.Stone == PageUntied {
@@ -327,5 +346,23 @@ func TestNotificationsScale(t *testing.T) {
 	}
 	if budget := time.Duration(float64(3*time.Second) * slow); took > budget {
 		t.Errorf("twelve weeks of notifications read in %v; budget %v", took, budget)
+	}
+}
+
+// A page whose alert tells of no firing near it, its rule's firings all
+// elsewhere, is untied, in either database: none of its spans finds a
+// firing, and none of their series is read.
+func TestPagesNoFiringNear(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	svc := map[string]string{"service": "checkout"}
+	record(t, l, t0, t0.Add(6*time.Hour), []firing.Firing{{Rule: "Errors", Labels: svc, Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour)}})
+	if _, err := l.Notify(ctx, Notification{At: t0.Add(5 * time.Hour), Source: "alertmanager", Receiver: "pager", Group: "g",
+		Alerts: []Alert{{Rule: "Errors", Labels: svc, Start: t0.Add(5 * time.Hour)}}}); err != nil {
+		t.Fatal(err)
+	}
+	ps, err := l.Pages(ctx, t0, t0.Add(24*time.Hour), twoMinutes)
+	if err != nil || len(ps) != 1 || ps[0].Stone != PageUntied {
+		t.Errorf("pages: %+v %v, want one untied", ps, err)
 	}
 }

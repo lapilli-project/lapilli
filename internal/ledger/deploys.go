@@ -177,7 +177,7 @@ func (l *Ledger) SyncDeploys(ctx context.Context, ds []Deploy, o verdict.Options
 		p := reflect.ValueOf(d.Labels).Pointer()
 		text, ok := texts[p]
 		if !ok || p == 0 {
-			text = deployLabelsText(d.Labels)
+			text = l.d.kept(deployLabelsText(d.Labels))
 			texts[p] = text
 		}
 		want[deployKey(d.Start.Unix(), d.End.Unix(), text, d.Revision, d.Source)] = wanted{d, text}
@@ -403,7 +403,7 @@ func (l *Ledger) Deploys(ctx context.Context, from, to time.Time) ([]Deploy, err
 // HasDeploys reports whether the ledger keeps any deploy.
 func (l *Ledger) HasDeploys(ctx context.Context) (bool, error) {
 	var n int
-	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM deploys LIMIT 1)").Scan(&n)
+	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM deploys LIMIT 1) AS one").Scan(&n)
 	return n > 0, err
 }
 

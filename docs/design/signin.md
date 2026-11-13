@@ -156,7 +156,8 @@ than they last now.
   the cross-origin protection every write has, and the cookie is
   SameSite=Lax: a page elsewhere can't sign people out. The provider's own
   session is left as it is (`/auth/signed-out` says so).
-- **Why a cookie, not a table.** One replica, one SQLite writer: a table of
+- **Why a cookie, not a table.** One replica, one writer (SQLite's, or the
+  process that holds a Postgres ledger's lock, [postgres.md](postgres.md)): a table of
   sessions would be written on every sign-in, and would need a schema
   change. A signed cookie needs nothing kept but who signed out.
 - **Size.** A browser keeps 4 KB a cookie. When the groups don't fit, only

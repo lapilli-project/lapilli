@@ -2,7 +2,6 @@ package serve
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"html"
 	"net/http"
@@ -880,14 +879,7 @@ func TestRulerSaysCheckedAgain(t *testing.T) {
 	h := s.Handler()
 	id := proposeRule(t, h, "Other", "says", url.Values{"annotation": {"summary"}, "text": {"Errors over nine"}})
 	approve(t, h, id, ana)
-	db, err := sql.Open("sqlite", filepath.Join(s.cfg.Ledger, "ledger.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if _, err := db.ExecContext(ctx, "UPDATE proposals SET evidence = replace(evidence, 'Errors over nine', '{{ query `up` }}') WHERE id = ?", id); err != nil {
-		t.Fatal(err)
-	}
+	ledgerExec(t, s, "UPDATE proposals SET evidence = replace(evidence, 'Errors over nine', '{{ query `up` }}') WHERE id = ?", id)
 	s.jobs(ctx, false)
 	if p := state(t, s, id); p.State != ledger.StateRefused || !strings.Contains(p.Reason, "query") || len(a.writes) != 0 {
 		t.Errorf("a text changed since: %+v, written %v", p, a.writes)

@@ -15,6 +15,7 @@ import (
 
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/ledger/ledgertest"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -22,12 +23,30 @@ var t0 = time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC) // a Monday
 
 func open(t testing.TB, loc *time.Location) *Ledger {
 	t.Helper()
-	l, err := Open(context.Background(), filepath.Join(t.TempDir(), "ledger.db"), loc)
+	l, err := openAt(context.Background(), place(t), loc)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { l.Close() })
 	return l
+}
+
+// place is where a test's ledger is kept: a file of its own, or, with
+// LAPILLI_TEST_POSTGRES, a schema of its own in that database.
+func place(t testing.TB) string {
+	t.Helper()
+	if u := ledgertest.URL(t); u != "" {
+		return u
+	}
+	return filepath.Join(t.TempDir(), "ledger.db")
+}
+
+// openAt opens the ledger a place names.
+func openAt(ctx context.Context, where string, loc *time.Location) (*Ledger, error) {
+	if strings.HasPrefix(where, "postgres") {
+		return OpenPostgres(ctx, where, loc)
+	}
+	return Open(ctx, where, loc)
 }
 
 var opts = verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour, Match: []string{"service"}}
@@ -361,15 +380,15 @@ func TestImpact(t *testing.T) {
 // Opened in another zone, the ledger counts its days again.
 func TestZone(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "ledger.db")
-	l, err := Open(ctx, path, time.UTC)
+	path := place(t)
+	l, err := openAt(ctx, path, time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}
 	record(t, l, t0, t0.Add(24*time.Hour), []firing.Firing{{Rule: "Errors", Start: t0.Add(20 * time.Hour), End: t0.Add(21 * time.Hour)}})
 	l.Close()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
-	l, err = Open(ctx, path, seoul)
+	l, err = openAt(ctx, path, seoul)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -128,6 +128,33 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 				lo = min(lo, f.from(name).Unix())
 			}
 		}
+		// The alerts of the firings below, found or made at once, in the
+		// order the loops below come to them, as SQLite makes them one at a
+		// time: their rules' ids and theirs are the same in both, and so
+		// are ties broken by id.
+		if t.d == postgres {
+			var keys []seriesKey
+			for _, continued := range []bool{true, false} {
+				for _, x := range f.Firings {
+					before := x.Start.Before(f.from(x.Rule))
+					if f.Keep[x.Rule] || before != continued || !before && x.Start.After(f.To) {
+						continue
+					}
+					rule, err := l.ruleID(t, x.Rule)
+					if err != nil {
+						return err
+					}
+					k, err := keyOf(t.d, rule, x.Labels)
+					if err != nil {
+						return err
+					}
+					keys = append(keys, k)
+				}
+			}
+			if err := l.findSeries(t, keys); err != nil {
+				return err
+			}
+		}
 		// Firings that started before their rule's From: an alert the
 		// ledger has as still on, or one that started in the margin and was
 		// found before.
@@ -196,7 +223,7 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 			return err
 		}
 		for id, at := range ended {
-			if _, err := t.ExecContext(t.ctx, "UPDATE firings SET end_at = max(start_at, ?) WHERE id = ?", at, id); err != nil {
+			if _, err := t.ExecContext(t.ctx, "UPDATE firings SET end_at = "+t.d.greatest("start_at", "?")+" WHERE id = ?", at, id); err != nil {
 				return err
 			}
 		}
@@ -211,7 +238,8 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 		slices.Sort(keep)
 		keepJSON, _ := json.Marshal(keep)
 		if _, err := t.ExecContext(t.ctx, `DELETE FROM firings WHERE start_at >= ? AND start_at <= ?
-			AND rule_id NOT IN (SELECT r.id FROM rules r, json_each(?) k WHERE r.name = k.value)
+			AND rule_id NOT IN (`+t.d.pick("SELECT r.id FROM rules r, json_each(?) k WHERE r.name = k.value",
+			"SELECT id FROM rules WHERE name IN ("+t.d.texts("?")+")")+`)
 			AND rule_id NOT IN (SELECT id FROM rules WHERE source != '')`, f.From.Unix(), to, string(keepJSON)); err != nil {
 			return err
 		}
@@ -225,22 +253,32 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 			}
 		}
 		n := 0
+		ins, err := t.inserting("firings", []string{"series_id", "rule_id", "start_at", "end_at", "day"}, []string{"BIGINT", "BIGINT", "BIGINT", "BIGINT", "BIGINT"})
+		if err != nil {
+			return err
+		}
 		for _, x := range f.Firings {
 			if x.Start.Before(f.from(x.Rule)) || x.Start.After(f.To) || f.Keep[x.Rule] {
 				continue
 			}
 			rule, err := l.ruleID(t, x.Rule)
 			if err != nil {
+				ins.close()
 				return err
 			}
 			sid, err := l.seriesID(t, rule, x.Labels)
 			if err != nil {
+				ins.close()
 				return err
 			}
-			if _, err := l.insert(t, rule, sid, x); err != nil {
+			if err := ins.add(sid, rule, x.Start.Unix(), nullable(x.End), l.day(x.Start.Unix())); err != nil {
+				ins.close()
 				return err
 			}
 			n++
+		}
+		if err := ins.close(); err != nil {
+			return err
 		}
 
 		if f.ImpactOn {
@@ -403,7 +441,7 @@ func (l *Ledger) impact(t *txn, f Found) (int64, error) {
 		}
 		key := "impact-" + in.Start.UTC().Format("20060102T1504Z")
 		if _, err := t.ExecContext(t.ctx, `INSERT INTO incidents (key, origin, state, counts, title, start_at, end_at, labels, updated, updated_by)
-			VALUES (?, 'impact', ?, 0, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO NOTHING`,
+			VALUES (?, 'impact', ?, 0, ?, ?, ?, ?, ?, ?) ON CONFLICT `+t.d.pick("(key)", "(md5(key))")+` DO NOTHING`,
 			key, state, in.Title, in.Start.Unix(), in.End.Unix(), string(labels), updated, by); err != nil {
 			return 0, err
 		}

@@ -28,9 +28,12 @@ Usage:
   lapilli serve --rules DIR --prometheus URL
                                      keep judging, every hour, into a
                                      ledger with a web UI
+  lapilli ledger copy --ledger DIR --to-url-file FILE
+                                     copy a ledger into Postgres
   lapilli version
 
-Run "lapilli verdict -h" or "lapilli serve -h" for the options.
+Run "lapilli verdict -h", "lapilli serve -h" or "lapilli ledger -h" for the
+options.
 `
 
 func main() {
@@ -47,6 +50,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runVerdict(rest, stdout, stderr)
 	case "serve":
 		return runServe(rest, stdout, stderr)
+	case "ledger":
+		return runLedger(rest, stdout, stderr)
 	case "version", "--version":
 		fmt.Fprintln(stdout, "lapilli", buildVersion())
 		return 0
@@ -56,6 +61,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprint(stdout, verdictUsage)
 		case len(rest) > 0 && rest[0] == "serve":
 			fmt.Fprint(stdout, serveUsage)
+		case len(rest) > 0 && rest[0] == "ledger":
+			fmt.Fprint(stdout, ledgerUsage)
 		default:
 			fmt.Fprint(stdout, usage)
 		}
