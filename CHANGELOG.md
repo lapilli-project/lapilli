@@ -8,8 +8,9 @@
   `lapilli serve --ledger-url-file FILE` keeps the ledger in the Postgres
   database (15 or later) a connection string names, read from a file and
   said nowhere, in no flag, log, error, page, `/metrics` or MCP answer.
-  A string that says nothing of `sslmode`, to another machine, asks for
-  `verify-full`; one that checks no certificate is warned of at start.
+  To another machine, a string that says no `sslmode` (pgx's `prefer`) is
+  refused, saying to ask for `verify-full`; one that checks no certificate
+  is warned of at start. The string is read by pgx alone, as `psql` reads it.
   The same tables and statements as SQLite's, every text compared byte by
   byte, every key of any length and every label kept, so every page and
   answer is what SQLite gives; the ledger's and serve's tests run on both,

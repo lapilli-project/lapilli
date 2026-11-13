@@ -107,6 +107,11 @@ func runLedger(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer dst.Close()
+	for _, l := range []*ledger.Ledger{src, dst} {
+		for _, w := range l.Warnings() {
+			fmt.Fprintf(stderr, "lapilli ledger copy: warning: %s\n", w)
+		}
+	}
 	rep, err := ledger.Copy(ctx, src, dst, func(table string, rows int64) {
 		fmt.Fprintf(stderr, "copied %s: %d rows\n", table, rows)
 	})

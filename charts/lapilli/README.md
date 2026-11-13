@@ -185,12 +185,11 @@ kubectl -n monitoring create secret generic lapilli-ledger \
 helm upgrade lapilli ... --set serve.ledger.postgres.secret.name=lapilli-ledger
 ```
 
-A string that says nothing of `sslmode`, to a server on another machine, asks
-for `verify-full`: the server's certificate is checked, against the system's
-CAs or `sslrootcert`'s. pgx's own default, `prefer`, checks none, and sends the
-password in clear to anything in the path that declines TLS; a string that
-asks for it, `require`, or `disable` is taken at its word, and serve warns at
-start. Give the database to the ledger's role alone (`REVOKE CONNECT ON
+Say `sslmode=verify-full`: the server's certificate is checked, against the
+system's CAs or `sslrootcert`'s. A string to a server on another machine that
+says no `sslmode` (or `prefer`, pgx's default, which checks no certificate and
+sends the password in clear to anything in the path that declines TLS) is
+refused at start; `require` or `disable` is taken at its word, and serve warns. Give the database to the ledger's role alone (`REVOKE CONNECT ON
 DATABASE lapilli FROM PUBLIC`): any role that can connect can take the
 ledger's lock and keep serve from starting. No
 PersistentVolumeClaim is made. It is still one replica, replaced with

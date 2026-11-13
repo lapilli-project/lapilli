@@ -38,17 +38,24 @@ lapilli serve --ledger-url-file /var/run/lapilli/ledger/url ...
 - **TLS.** pgx's default, `sslmode=prefer`, encrypts when the server
   offers TLS but checks no certificate, and falls back to none: anything
   in the path can decline TLS and be sent the password in clear (a fake
-  server in `TestPostgresTLSPasswordKept` asks, and gets none). **Builder's
-  decision: a string that says nothing of `sslmode`, nor `PGSSLMODE`, to a
-  server not on this machine, asks for `verify-full`.** The server's
-  certificate is checked against the system's CAs, or `sslrootcert=FILE`'s.
-  A string that names an `sslmode` is taken at its word, and `serve` warns
-  at start when it checks no certificate across a network (`require`,
-  `prefer`, `allow`, `disable`). On this machine (a Unix socket,
-  `localhost`, a loopback address), pgx's `prefer`, as `psql` would. Asking
-  for `require_auth=scram-sha-256` instead would keep the password but let
-  anything in the path read the ledger; refusing a string without
-  `sslmode` would break every string that works with `psql` today.
+  server in `TestPostgresTLSPasswordKept` asks, and gets none). The string
+  is read once, by pgx, and never written again; what it asks for is read
+  from what pgx made of it, to every host it may try. **Builder's
+  decision: to a server not on this machine, pgx's `prefer` is refused**,
+  saying to ask for `sslmode=verify-full` (`sslrootcert=FILE` for the
+  server's CA), or to say `require` or `disable` to go on unchecked. No
+  `sslmode` and `sslmode=prefer` are one to pgx, and telling them apart
+  would mean reading the string a second time, otherwise than pgx may
+  (Go's `net/url` and pgx's parser disagree on `+`, on a `#`, on a
+  repeated key, on a `?` in a password), and guessing; asking for
+  `verify-full` on the string's behalf meant writing it again, which
+  changed what it said. A certificate checked (`verify-ca`,
+  `verify-full`) is taken; `require`, `allow` or `disable`, from the
+  string, a service file or `PGSSLMODE`, is taken at its word, and `serve`
+  and `lapilli ledger copy` warn at start. On this machine (a Unix
+  socket, `localhost`, a loopback address), as given. Asking for
+  `require_auth=scram-sha-256` instead would keep the password but let
+  anything in the path read the ledger.
 - **A database, or a schema, of its own.** The ledger makes its tables in
   the first schema of `search_path` (`public`) when it finds no
   `schema_version` there; a schema that holds tables a ledger has but no

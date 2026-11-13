@@ -7,6 +7,7 @@ package ledger
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"database/sql/driver"
 	"embed"
@@ -17,9 +18,7 @@ import (
 	"io/fs"
 	"net"
 	"net/url"
-	"os"
 	"path"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -40,6 +39,11 @@ var pgSchema embed.FS
 // the string held: an invalid one can be too ambiguous for its password to
 // be found and kept out.
 var ErrBadURL = errors.New("not a Postgres connection string (postgres://USER:PASSWORD@HOST:PORT/DATABASE?sslmode=verify-full, or keyword=value pairs)")
+
+// ErrUnchecked is a connection string to a server on another machine that
+// would send the password to anything in the path that declines TLS: pgx's
+// sslmode=prefer, its default (pgConfig).
+var ErrUnchecked = errors.New("the ledger's connection string asks for no sslmode that keeps its password")
 
 // ErrConnect is a connection to the ledger's database that failed.
 var ErrConnect = errors.New("can't connect to the ledger's database")
@@ -597,55 +601,67 @@ func secretsOf(raw string, cfg *pgx.ConnConfig) []string {
 }
 
 // pgConfig reads a connection string as pgx does, its environment
-// variables and files among it, and names the connections lapilli. A
-// string that says nothing of sslmode, to a server not on this machine,
-// asks for verify-full: pgx's own default, prefer, lets anything in the path
-// decline TLS and be sent the password, in clear. It gives what to warn of.
+// variables and service file among it, and names the connections lapilli.
+// The string is read once, by pgx, and never written again: what TLS it
+// asks for is read from the configuration pgx makes of it, to every host
+// it may try, in the order it tries them. To a server not on this machine:
+//
+//   - a certificate checked on every try (verify-ca, verify-full): taken.
+//   - pgx's default, prefer (TLS that checks nothing, and none when the
+//     server declines it), is refused: anything in the path can decline
+//     TLS and be sent the password. No sslmode and sslmode=prefer are one
+//     to pgx; telling them apart would mean reading the string again,
+//     otherwise than pgx may, and guessing. The string says what it wants.
+//   - require, allow or disable, said by the string, a service file or
+//     PGSSLMODE: taken at its word, and a warning given (what it returns).
+//
+// On this machine (a Unix socket, localhost, a loopback address), as given.
 func pgConfig(raw string) (*pgx.ConnConfig, string, error) {
-	raw = strings.TrimSpace(raw)
-	cfg, err := pgx.ParseConfig(raw)
+	cfg, err := pgx.ParseConfig(strings.TrimSpace(raw))
 	if err != nil {
 		return nil, "", ErrBadURL
-	}
-	mode, given := sslmodeOf(raw)
-	if !given && !onThisMachine(cfg) {
-		with := raw + " sslmode=verify-full"
-		if u, err := url.Parse(raw); err == nil && (u.Scheme == "postgres" || u.Scheme == "postgresql") {
-			q := u.Query()
-			q.Set("sslmode", "verify-full")
-			u.RawQuery = q.Encode()
-			with = u.String()
-		}
-		if cfg, err = pgx.ParseConfig(with); err != nil {
-			return nil, "", ErrBadURL
-		}
-		mode = "verify-full"
-	}
-	warn := ""
-	if mode != "verify-full" && mode != "verify-ca" && !onThisMachine(cfg) {
-		warn = "the ledger's connection doesn't check the Postgres server's certificate (sslmode=" + mode + "): anything in the path can read it, " +
-			"and with prefer, allow or disable take the password: ask for sslmode=verify-full"
 	}
 	if _, ok := cfg.RuntimeParams["application_name"]; !ok {
 		cfg.RuntimeParams["application_name"] = "lapilli"
 	}
-	return cfg, warn, nil
-}
-
-// sslmodeOf is the sslmode a connection string or PGSSLMODE gives, and
-// whether either does.
-func sslmodeOf(raw string) (string, bool) {
-	if u, err := url.Parse(raw); err == nil && (u.Scheme == "postgres" || u.Scheme == "postgresql") {
-		if q := u.Query(); q.Has("sslmode") {
-			return q.Get("sslmode"), true
+	if onThisMachine(cfg) {
+		return cfg, "", nil
+	}
+	type try struct {
+		host string
+		tls  *tls.Config
+	}
+	tries := []try{{cfg.Host, cfg.TLSConfig}}
+	for _, f := range cfg.Fallbacks {
+		tries = append(tries, try{f.Host, f.TLSConfig})
+	}
+	checked := func(c *tls.Config) bool { return c != nil && (!c.InsecureSkipVerify || c.VerifyPeerCertificate != nil) }
+	var hosts []string
+	for _, x := range tries {
+		if !slices.Contains(hosts, x.host) {
+			hosts = append(hosts, x.host)
 		}
-	} else if m := regexp.MustCompile(`(?:^|\s)sslmode\s*=\s*'?([a-z-]*)`).FindStringSubmatch(raw); m != nil {
-		return m[1], true
 	}
-	if v := os.Getenv("PGSSLMODE"); v != "" {
-		return v, true
+	mode := "require"
+	all := true
+	for i, x := range tries {
+		all = all && checked(x.tls)
+		switch {
+		case x.tls != nil && !checked(x.tls) && i+1 < len(tries) && tries[i+1].host == x.host && tries[i+1].tls == nil:
+			return nil, "", fmt.Errorf("%w: to %s, TLS that checks no certificate, and none when the server declines it (sslmode=prefer, "+
+				"pgx's when no sslmode is given): anything in the path can decline it and be sent the password. Ask for sslmode=verify-full "+
+				"(sslrootcert=FILE for the server's CA), or say sslmode=require or sslmode=disable to go on unchecked", ErrUnchecked, strings.Join(hosts, ", "))
+		case x.tls == nil && i+1 < len(tries) && tries[i+1].host == x.host && tries[i+1].tls != nil:
+			mode = "allow"
+		case x.tls == nil && mode != "allow":
+			mode = "disable"
+		}
 	}
-	return "prefer", false
+	if all {
+		return cfg, "", nil
+	}
+	return cfg, "the ledger's connection doesn't check the Postgres server's certificate (sslmode=" + mode + "): anything in the path can read it, " +
+		"and with allow or disable take the password: ask for sslmode=verify-full", nil
 }
 
 // onThisMachine says every host a configuration may connect to is this
