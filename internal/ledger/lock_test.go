@@ -339,6 +339,19 @@ func TestPostgresSilentConnection(t *testing.T) {
 	if took := time.Since(began); took > writeWithin+connectWithin+2*time.Second {
 		t.Errorf("connected again in %v", took)
 	}
+	// Hold, at once on a connection gone silent: no ping, its last within
+	// the second (pgx's), so its statement gives up, within writeWithin.
+	for range 2 {
+		if err := l.SetMeta(wctx, "z", "1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p.cut()
+	began = time.Now()
+	err = l.Hold(wctx)
+	if took := time.Since(began); err == nil || took > writeWithin+2*time.Second {
+		t.Errorf("Hold on a connection gone silent: %v after %v, want an error within %v", err, took, writeWithin)
+	}
 	// A reader's connection, silent since the cut, taken again after a
 	// second: given up within aliveWithin, and the read made on another.
 	time.Sleep(aliveWithin + 200*time.Millisecond)

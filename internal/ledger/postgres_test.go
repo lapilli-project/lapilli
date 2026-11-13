@@ -131,6 +131,21 @@ func TestPostgresErrorsSayNoSecret(t *testing.T) {
 			}
 		}
 	}
+	// With neither, within connectWithin, whatever the caller's context.
+	quick(t)
+	done := make(chan error, 1)
+	go func() {
+		_, err := OpenPostgres(context.Background(), "postgres://lgr_ana:s3cretPassw0rd@"+at+"/lgr_ledger?sslmode=disable", time.UTC)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrConnect) || !strings.Contains(err.Error(), "connecting to "+at+" timed out") {
+			t.Errorf("a server that answers nothing, no deadline given: %v", err)
+		}
+	case <-time.After(connectWithin + 10*time.Second):
+		t.Error("a server that answers nothing, no deadline given: still connecting")
+	}
 	// A password that turns up in a server's answer is taken out.
 	if got := scrub("FATAL: no such role s3cretPassw0rd", []string{"s3cretPassw0rd"}); strings.Contains(got, "s3cret") {
 		t.Errorf("scrubbed: %s", got)
