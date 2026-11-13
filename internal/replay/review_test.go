@@ -132,7 +132,7 @@ func TestFirstsFailing(t *testing.T) {
 		"((x) >= -Inf)":           {at(nil, n, n, 5, 20, 30, 31, 31)},
 	}
 	ran, fs := Run(context.Background(), failingWindow{h}, vs, t0, t0.Add(7*time.Minute), time.Minute, 1)
-	if len(fs) != 0 || !strings.HasPrefix(ran[0].Unsupported, "query failed: the first numbers of A's window") {
+	if len(fs) != 0 || !strings.HasPrefix(ran[0].Unsupported, "query failed for now: the first numbers of A's window") {
 		t.Errorf("%s, %q", spans(fs), ran[0].Unsupported)
 	}
 }

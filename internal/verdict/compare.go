@@ -42,7 +42,8 @@ type Comparison struct {
 	// verdict --compare gives it; lapilli serve keeps none.
 	Summary *Summary `json:"summary,omitempty"`
 	// Unreplayed are the rules that couldn't be replayed, as
-	// UnreplayedRules gives them, for lapilli verdict --json.
+	// UnreplayedRules gives them, set by the run that replayed them: in
+	// lapilli verdict's --json, and named at the top of its text.
 	Unreplayed []Unreplayed `json:"unreplayed,omitempty"`
 }
 
@@ -290,7 +291,7 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 		}
 		fmt.Fprintln(w)
 	}
-	partial(w, c.UnreplayedRules(), 0)
+	partial(w, c.Unreplayed, 0, false)
 
 	if len(shown) > 0 {
 		fmt.Fprintln(w)

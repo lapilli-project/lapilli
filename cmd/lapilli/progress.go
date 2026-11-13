@@ -17,29 +17,35 @@ import (
 // prints nothing for minutes looks hung. Replaced in tests.
 var progressAfter, progressEvery = 15 * time.Second, 30 * time.Second
 
+// watched is told, as a run finishes, what it counted; replaced in tests.
+var watched = func(*replay.Progress, *prom.Counts) {}
+
 // watch counts what the run asks the history and the rules it replays,
 // into ctx, and, unless --progress=false, says on stderr how the run is
 // going. finish stops it, says nothing more of how it was going, and says
-// how often the history answered HTTP 429, if it did.
+// how often the history answered HTTP 429, if it did: that is of the
+// report, not of how the run went, so --progress=false says it too.
 func (f *verdictFlags) watch(ctx context.Context, stderr io.Writer) (_ context.Context, finish func()) {
 	var asked prom.Counts
 	var replayed replay.Progress
 	ctx = replay.Tracking(prom.Counting(ctx, &asked), &replayed)
 	stop := func() {}
 	if !f.noProgress {
-		stop = showProgress(stderr, &replayed, &asked, time.Now())
+		stop = showProgress(stderr, &replayed, &asked, time.Now(), len(f.compare) > 0)
 	}
 	return ctx, func() {
 		stop()
+		watched(&replayed, &asked)
 		if n := asked.TooMany.Load(); n > 0 {
-			fmt.Fprintf(stderr, "lapilli verdict: the history answered %d requests with HTTP 429, too many requests: each was asked again after a wait, fewer at once; --max-rate keeps under a quota\n", n)
+			fmt.Fprintf(stderr, "lapilli verdict: the history answered %d requests with HTTP 429, too many requests, and was asked fewer at once after it; --max-rate keeps a run under a quota\n", n)
 		}
 	}
 }
 
 // showProgress writes a line to w every progressEvery, once the run has
 // gone progressAfter since start. stop ends it; nothing is written after.
-func showProgress(w io.Writer, p *replay.Progress, c *prom.Counts, start time.Time) (stop func()) {
+// compared says the run compares two sets of rules.
+func showProgress(w io.Writer, p *replay.Progress, c *prom.Counts, start time.Time, compared bool) (stop func()) {
 	quit, ended := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(ended)
@@ -50,7 +56,7 @@ func showProgress(w io.Writer, p *replay.Progress, c *prom.Counts, start time.Ti
 			case <-quit:
 				return
 			case <-t.C:
-				fmt.Fprintln(w, progressLine(p, c, time.Since(start)))
+				fmt.Fprintln(w, progressLine(p, c, time.Since(start), compared))
 				t.Reset(progressEvery)
 			}
 		}
@@ -61,11 +67,14 @@ func showProgress(w io.Writer, p *replay.Progress, c *prom.Counts, start time.Ti
 
 // progressLine says how a run is going: "lapilli verdict: after 2m30s, 23
 // of 61 rules replayed, 412 requests to the history, 37 asked again after a
-// wait, 35 answered HTTP 429".
-func progressLine(p *replay.Progress, c *prom.Counts, took time.Duration) string {
+// wait, 35 answered HTTP 429". In a comparison, a rule changed is replayed
+// twice, before and after, and the line counts replays.
+func progressLine(p *replay.Progress, c *prom.Counts, took time.Duration, compared bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "lapilli verdict: after %s,", took.Round(time.Second))
-	if total := p.Total.Load(); total > 0 {
+	if total := p.Total.Load(); total > 0 && compared {
+		fmt.Fprintf(&b, " %d of %d replays of the rules before and after done,", p.Done.Load(), total)
+	} else if total > 0 {
 		fmt.Fprintf(&b, " %d of %d rules replayed,", p.Done.Load(), total)
 	}
 	fmt.Fprintf(&b, " %d requests to the history", c.Requests.Load())

@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -59,6 +60,9 @@ func (h *history) QueryRange(ctx context.Context, expr string, start, end time.T
 	case "slow":
 		<-ctx.Done()
 		return nil, ctx.Err()
+	case "turned":
+		// Turned away to the end, as a quota does.
+		return nil, fmt.Errorf("%w (asked 7 times over 3m2s)", &prom.APIError{Status: 429, Msg: "slow down"})
 	case "impact":
 		out = append(out, run(map[string]string{"service": "search"}, now.Add(-6*time.Hour), now.Add(-6*time.Hour+10*time.Minute)))
 	}

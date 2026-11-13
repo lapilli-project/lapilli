@@ -4,12 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // quick makes lapilli's own waits short and their jitter j, for a test.
@@ -18,6 +25,50 @@ func quick(t *testing.T, j float64) {
 	w, l, f, m := retryWait, limitWait, jitter, maxWaited
 	retryWait, limitWait, jitter = time.Millisecond, time.Millisecond, func() float64 { return j }
 	t.Cleanup(func() { retryWait, limitWait, jitter, maxWaited = w, l, f, m })
+}
+
+// fakeClock is a clock that moves on only as much as is slept, or as a
+// test moves it, from a whole second; it keeps what was slept.
+type fakeClock struct {
+	mu    sync.Mutex
+	at    time.Time
+	slept []time.Duration
+}
+
+func (f *fakeClock) now() time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.at
+}
+
+func (f *fakeClock) move(d time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.at = f.at.Add(d)
+}
+
+func (f *fakeClock) waits() []time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.slept)
+}
+
+// fakeTime makes the package tell the time and sleep by a fakeClock, for a
+// test: nothing it waits takes time.
+func fakeTime(t *testing.T) *fakeClock {
+	t.Helper()
+	f := &fakeClock{at: time.Now().Truncate(time.Second)}
+	c, s := clock, sleep
+	clock = f.now
+	sleep = func(ctx context.Context, d time.Duration) error {
+		f.mu.Lock()
+		f.at = f.at.Add(max(d, 0))
+		f.slept = append(f.slept, d)
+		f.mu.Unlock()
+		return ctx.Err()
+	}
+	t.Cleanup(func() { clock, sleep = c, s })
+	return f
 }
 
 // answers is a server that answers with each of its handlers in turn, the
@@ -70,6 +121,8 @@ func TestRetryAfterRead(t *testing.T) {
 		{429, now.Add(90 * time.Second).Format(http.TimeFormat), 90 * time.Second, true},
 		{429, "Thu, 13 Nov 2026 08:00:00 GMT", 0, true}, // gone by: no wait
 		{429, "99999999999999999999", maxRetryAfter, true},
+		{429, "9999999999", maxRetryAfter, true}, // past a Duration, in nanoseconds
+		{429, "1234567", 1234567 * time.Second, true},
 		{429, "-5", 0, false},
 		{429, "+5", 0, false},
 		{429, "1.5", 0, false},
@@ -121,9 +174,9 @@ func TestBackoff(t *testing.T) {
 			[]time.Duration{20 * s, 20 * s, 20 * s, 20 * s, 20 * s, 20 * s, 20 * s, 20 * s}, []time.Duration{25 * s, 25 * s, 25 * s, 25 * s, 25 * s, 25 * s, 25 * s, 25 * s}},
 		{"Retry-After 0: a second at least", &APIError{Status: 503, said: true},
 			[]time.Duration{s, s, s, s, s, s, s, s}, []time.Duration{s + s/4, s + s/4, s + s/4, s + s/4, s + s/4, s + s/4, s + s/4, s + s/4}},
-		{"Retry-After an hour: two minutes at most", &APIError{Status: 429, said: true, retryAfter: time.Hour},
+		{"Retry-After an hour: two minutes at most, plus up to a quarter", &APIError{Status: 429, said: true, retryAfter: time.Hour},
 			[]time.Duration{2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute},
-			[]time.Duration{2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute}},
+			[]time.Duration{150 * s, 150 * s, 150 * s, 150 * s, 150 * s, 150 * s, 150 * s, 150 * s}},
 	} {
 		jit = 0
 		low := schedule(c.e)
@@ -146,16 +199,15 @@ func TestBackoff(t *testing.T) {
 // second for, and counted.
 func TestRetryAfterSeconds(t *testing.T) {
 	quick(t, 0)
+	clk := fakeTime(t)
 	srv, n := answers(t, refuse(429, "1"), ok)
 	var counts Counts
-	start := time.Now()
 	got, err := ask(Counting(context.Background(), &counts), srv)
-	took := time.Since(start)
 	if err != nil || len(got) != 1 {
 		t.Fatalf("%v %+v", err, got)
 	}
-	if took < time.Second || took > 3*time.Second {
-		t.Errorf("took %s, want the second Retry-After said", took)
+	if w := clk.waits(); len(w) != 1 || w[0] != time.Second {
+		t.Errorf("waited %v, want the second Retry-After said", w)
 	}
 	if n.Load() != 2 || counts.Requests.Load() != 2 || counts.Retries.Load() != 1 || counts.TooMany.Load() != 1 {
 		t.Errorf("asked %d; counted %d requests, %d retries, %d 429s", n.Load(), counts.Requests.Load(), counts.Retries.Load(), counts.TooMany.Load())
@@ -166,16 +218,15 @@ func TestRetryAfterSeconds(t *testing.T) {
 // until then.
 func TestRetryAfterDate(t *testing.T) {
 	quick(t, 0)
+	clk := fakeTime(t)
 	srv, _ := answers(t, func(w http.ResponseWriter, r *http.Request) {
-		// A date is to the second: two seconds on is one to two away.
-		refuse(503, time.Now().Add(2*time.Second).UTC().Format(http.TimeFormat))(w, r)
+		refuse(503, clk.now().Add(2*time.Second).UTC().Format(http.TimeFormat))(w, r)
 	}, ok)
-	start := time.Now()
 	if _, err := ask(context.Background(), srv); err != nil {
 		t.Fatal(err)
 	}
-	if took := time.Since(start); took < 900*time.Millisecond || took > 4*time.Second {
-		t.Errorf("took %s, want until the date Retry-After said", took)
+	if w := clk.waits(); len(w) != 1 || w[0] != 2*time.Second {
+		t.Errorf("waited %v, want until the date Retry-After said", w)
 	}
 }
 
@@ -211,49 +262,178 @@ func Test5xx(t *testing.T) {
 	if _, err := ask(context.Background(), srv); err == nil || n.Load() != 1 {
 		t.Errorf("%v after %d requests: a 400 isn't asked again", err, n.Load())
 	}
+	// 501 says the API doesn't do what was asked: asked again, it won't.
+	srv, n = answers(t, refuse(501, ""), ok)
+	if _, err := ask(context.Background(), srv); err == nil || n.Load() != 1 {
+		t.Errorf("%v after %d requests: a 501 isn't asked again", err, n.Load())
+	}
+}
+
+// TestRetriesCountedApart: 429s and 5xx are each asked again as often as
+// their own kind is: four 429s don't use up the 5xx's.
+func TestRetriesCountedApart(t *testing.T) {
+	quick(t, 0)
+	srv, n := answers(t, refuse(429, ""), refuse(429, ""), refuse(429, ""), refuse(429, ""), refuse(502, ""), refuse(502, ""), ok)
+	if _, err := ask(context.Background(), srv); err != nil || n.Load() != 7 {
+		t.Errorf("%v after %d requests", err, n.Load())
+	}
+	srv, n = answers(t, refuse(502, ""), refuse(502, ""), refuse(502, ""), refuse(502, ""), refuse(429, ""), ok)
+	if _, err := ask(context.Background(), srv); err != nil || n.Load() != 6 {
+		t.Errorf("%v after %d requests", err, n.Load())
+	}
+}
+
+// TestDroppedAskedAgain: a connection the API drops before it answers is
+// asked again, as a 5xx is.
+func TestDroppedAskedAgain(t *testing.T) {
+	quick(t, 0)
+	drop := func(w http.ResponseWriter, r *http.Request) {
+		c, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		c.Close()
+	}
+	srv, n := answers(t, drop, ok)
+	if _, err := ask(context.Background(), srv); err != nil || n.Load() != 2 {
+		t.Errorf("%v after %d requests", err, n.Load())
+	}
+	srv, n = answers(t, drop)
+	if _, err := ask(context.Background(), srv); err == nil || n.Load() != 5 || !Transient(err) {
+		t.Errorf("%v after %d requests: want given up after 5, as after 5xx", err, n.Load())
+	}
 }
 
 // TestWaitsWithinContext: a server saying to wait longer than the run has
-// left holds it no longer than the run: the wait ends with the context, and
-// so does the wait it put on the client's other requests.
+// left holds it no longer than the run: a wait that would end past the
+// context's deadline isn't waited, the answer is the error, and the wait it
+// put on the client's other requests ends with their context.
 func TestWaitsWithinContext(t *testing.T) {
 	quick(t, 0)
 	srv, n := answers(t, refuse(429, "100"))
 	c := New(srv.URL, "test")
 	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	start := time.Now()
-	if _, err := c.QueryRange(ctx, "up", t0, t0.Add(time.Hour), time.Minute); err == nil {
-		t.Fatal("want an error")
+	_, err := c.QueryRange(ctx, "up", t0, t0.Add(time.Hour), time.Minute)
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Status != 429 || time.Since(start) > 10*time.Second || n.Load() != 1 {
+		t.Fatalf("%v after %s and %d requests: want the 429 at once", err, time.Since(start), n.Load())
 	}
-	if took := time.Since(start); took > 2*time.Second {
-		t.Errorf("took %s, past the context's 300ms", took)
-	}
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	// The client's wait ends past the deadline: given up at once, asking
+	// nothing.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel2()
 	start = time.Now()
-	_, err := c.QueryRange(ctx2, "up", t0, t0.Add(time.Hour), time.Minute)
-	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 2*time.Second || n.Load() != 1 {
-		t.Errorf("%v after %s and %d requests: want the client's wait cut short by the context, asking nothing", err, time.Since(start), n.Load())
+	_, err = c.QueryRange(ctx2, "up", t0, t0.Add(time.Hour), time.Minute)
+	if !errors.Is(err, errNoTurn) || !Transient(err) || time.Since(start) > 10*time.Second || n.Load() != 1 {
+		t.Errorf("%v after %s and %d requests: want the client's wait not waited, asking nothing", err, time.Since(start), n.Load())
+	}
+	// Without a deadline, it ends with the context.
+	ctx3, cancel3 := context.WithCancel(context.Background())
+	time.AfterFunc(200*time.Millisecond, cancel3)
+	if _, err = c.QueryRange(ctx3, "up", t0, t0.Add(time.Hour), time.Minute); !errors.Is(err, context.Canceled) || n.Load() != 1 {
+		t.Errorf("%v after %d requests: want the client's wait cut short by the context, asking nothing", err, n.Load())
+	}
+	if _, in, _ := c.limit.state(); in != 0 {
+		t.Errorf("%d in flight at the end", in)
 	}
 }
 
-// TestWaitedAtMost: however a server says to wait, a request waits five
-// minutes at most in all before it is given up (here, three seconds).
+// TestWaitedAtMost: however a server says to wait, a request is asked
+// again for five minutes at most after it was first turned away: told two
+// minutes each time, it is asked three times.
 func TestWaitedAtMost(t *testing.T) {
 	quick(t, 0)
-	maxWaited = 3 * time.Second
-	srv, n := answers(t, refuse(429, "2"))
+	fakeTime(t)
+	srv, n := answers(t, refuse(429, "120"))
 	_, err := ask(context.Background(), srv)
-	if err == nil || n.Load() != 2 || !strings.Contains(err.Error(), "asked 2 times over 2s") {
-		t.Errorf("%v after %d requests: want given up after one wait of 2s", err, n.Load())
+	if err == nil || n.Load() != 3 || !strings.Contains(err.Error(), "asked 3 times over 4m0s") {
+		t.Errorf("%v after %d requests: want given up after 2 waits of 2m", err, n.Load())
 	}
 }
 
-// TestPushBackShared: a 429 one client of a Limiter gets lowers how many
-// requests every client of it has in flight, and its Retry-After holds them
-// all, though only one was told it.
+// TestWaitedCountsAll: the five minutes count the API's answers and the
+// waits for a turn, not only lapilli's own waits: a server that answers
+// each request after 100s, saying to wait none, is asked four times; and a
+// request held by a wait another's answer asked for is pushed back from
+// then.
+func TestWaitedCountsAll(t *testing.T) {
+	quick(t, 0)
+	clk := fakeTime(t)
+	srv, n := answers(t, func(w http.ResponseWriter, r *http.Request) {
+		clk.move(100 * time.Second)
+		refuse(429, "0")(w, r)
+	})
+	if _, err := ask(context.Background(), srv); err == nil || n.Load() != 4 {
+		t.Errorf("%v after %d requests: want given up after 4", err, n.Load())
+	}
+
+	// Told two minutes each time, a is asked at 0, 2m and 4m, and leaves
+	// the client waiting until 6m.
+	l := NewLimiter(0)
+	srv, n = answers(t, refuse(429, "120"))
+	a, b := New(srv.URL, "a", WithLimiter(l)), New(srv.URL, "b", WithLimiter(l))
+	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := a.QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute); err == nil || n.Load() != 3 {
+		t.Fatalf("a: %v after %d requests", err, n.Load())
+	}
+	// b, asking at 4m, waits for its turn till 6m: pushed back from 4m, it
+	// is asked at 6m and 8m, not at 10m.
+	_, err := b.QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute)
+	if err == nil || n.Load() != 5 {
+		t.Errorf("b: %v after %d requests in all: want b asked twice", err, n.Load())
+	}
+	// c is held past its five minutes before it is asked at all.
+	l.mu.Lock()
+	l.until = clk.now().Add(maxWaited + time.Second)
+	l.mu.Unlock()
+	if _, err = b.QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute); !errors.Is(err, errNoTurn) || n.Load() != 5 || !Transient(err) {
+		t.Errorf("c: %v after %d requests in all: want given up, unasked", err, n.Load())
+	}
+	if _, in, _ := l.state(); in != 0 {
+		t.Errorf("%d in flight at the end", in)
+	}
+}
+
+// TestNoTurnGivesTheLastAnswer: a request asked again that doesn't get its
+// turn within its five minutes fails with the answer that turned it away.
+func TestNoTurnGivesTheLastAnswer(t *testing.T) {
+	quick(t, 0)
+	maxWaited = 300 * time.Millisecond
+	l := NewLimiter(0)
+	l.limit, l.changed = 1, time.Now()
+	held := make(chan struct{})
+	srv, n := answers(t, func(w http.ResponseWriter, r *http.Request) {
+		// Another takes the only place while this one waits to ask again.
+		go func() {
+			if err := l.take(context.Background()); err != nil {
+				t.Error(err)
+			}
+			close(held)
+		}()
+		refuse(502, "")(w, r)
+	}, ok)
+	c := New(srv.URL, "test", WithLimiter(l))
+	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	start := time.Now()
+	_, err := c.QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute)
+	<-held
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Status != 502 || n.Load() != 1 || time.Since(start) > 10*time.Second {
+		t.Errorf("%v after %d requests and %s: want the 502", err, n.Load(), time.Since(start))
+	}
+	l.done(200, 0)
+	if _, in, q := l.state(); in != 0 || q != 0 {
+		t.Errorf("%d in flight, %d waiting at the end", in, q)
+	}
+}
+
+// TestPushBackShared: a 429 one client of a Limiter gets halves how many
+// requests every client of it may have in flight, and its Retry-After holds
+// them all, though only one was told it.
 func TestPushBackShared(t *testing.T) {
 	quick(t, 0)
 	l := NewLimiter(0)
@@ -267,13 +447,13 @@ func TestPushBackShared(t *testing.T) {
 	}()
 	var limit int
 	var until time.Time
-	for wait := time.Now().Add(5 * time.Second); time.Now().Before(wait) && until.IsZero(); time.Sleep(5 * time.Millisecond) {
+	for wait := time.Now().Add(30 * time.Second); time.Now().Before(wait) && until.IsZero(); time.Sleep(5 * time.Millisecond) {
 		l.mu.Lock()
 		limit, until = l.limit, l.until
 		l.mu.Unlock()
 	}
-	if limit != 1 || time.Until(until) < time.Second {
-		t.Fatalf("limit %d, asked to wait until %s from now, after a 429 with one in flight: want 1, and about 2s", limit, time.Until(until))
+	if limit != 32 || time.Until(until) < time.Second {
+		t.Fatalf("limit %d, asked to wait until %s from now, after a 429: want 32, and about 2s", limit, time.Until(until))
 	}
 	start := time.Now()
 	if _, err := b.QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute); err != nil {
@@ -284,6 +464,148 @@ func TestPushBackShared(t *testing.T) {
 	}
 	if err := <-done; err != nil || n.Load() != 3 {
 		t.Errorf("%v after %d requests", err, n.Load())
+	}
+}
+
+// TestWaitAtLeastASecond: a Retry-After of 0 holds the client's other
+// requests a second, so that it can't bring them all straight back.
+func TestWaitAtLeastASecond(t *testing.T) {
+	clk := fakeTime(t)
+	srv, _ := answers(t, refuse(429, "0"))
+	c := New(srv.URL, "test")
+	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
+	if _, _, err := c.do(context.Background(), req, true); err != nil {
+		t.Fatal(err)
+	}
+	if d := c.limit.until.Sub(clk.now()); d != time.Second {
+		t.Errorf("the client waits %s, want a second", d)
+	}
+}
+
+// TestBestEffortReads: the configuration and the targets, which lapilli
+// does without, are asked once, and their answers don't change how the
+// API is asked: a 503 halves nothing, a Retry-After holds nothing.
+func TestBestEffortReads(t *testing.T) {
+	quick(t, 0)
+	for _, a := range []http.HandlerFunc{refuse(503, ""), refuse(429, "30"), refuse(502, "")} {
+		srv, n := answers(t, a)
+		c := New(srv.URL, "test")
+		var counts Counts
+		ctx := Counting(context.Background(), &counts)
+		start := time.Now()
+		if _, err := c.StatusConfig(ctx); err == nil {
+			t.Error("want an error")
+		}
+		if _, err := c.Targets(ctx); err == nil {
+			t.Error("want an error")
+		}
+		limit, in, _ := c.limit.state()
+		if n.Load() != 2 || limit != 64 || in != 0 || !c.limit.until.IsZero() || time.Since(start) > 10*time.Second {
+			t.Errorf("asked %d times in %s; then limit %d, %d in flight, waiting until %s", n.Load(), time.Since(start), limit, in, c.limit.until)
+		}
+		if counts.Requests.Load() != 2 {
+			t.Errorf("counted %d requests", counts.Requests.Load())
+		}
+	}
+}
+
+// TestErrorText: the API's text in an error is cut to a few hundred bytes,
+// at a rune, and without the token or the signature sent, which a server
+// may echo back.
+func TestErrorText(t *testing.T) {
+	huge := strings.Repeat("é", 1<<19)
+	srv, _ := answers(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, `{"status":"error","errorType":"bad_data","error":%q}`, huge)
+	})
+	_, err := ask(context.Background(), srv)
+	if err == nil || len(err.Error()) > 400 || !utf8.ValidString(err.Error()) || !strings.HasSuffix(err.Error(), "é…") {
+		t.Errorf("%d bytes: %.80q", len(err.Error()), err)
+	}
+
+	srv, _ = answers(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(403)
+		fmt.Fprintf(w, `{"status":"error","error":"forbidden for %s; signed %s; also Bearer other-token"}`,
+			r.Header.Get("Authorization"), r.Header.Get("X-Amz-Security-Token"))
+	})
+	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for _, o := range []Option{
+		WithToken(func(context.Context) (string, error) { return "s3cr3t-token", nil }),
+		WithSigner(func(r *http.Request) error {
+			r.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20261113/us-east-1/aps/aws4_request, SignedHeaders=host, Signature=0123456789abcdef")
+			r.Header.Set("X-Amz-Security-Token", "session-s3cr3t")
+			return nil
+		}),
+	} {
+		_, err := New(srv.URL, "test", o).QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute)
+		for _, secret := range []string{"s3cr3t-token", "AKIDEXAMPLE", "0123456789abcdef", "session-s3cr3t", "other-token"} {
+			if err == nil || strings.Contains(err.Error(), secret) {
+				t.Errorf("%v", err)
+			}
+		}
+	}
+	// Nor is a signature cut across where a text that isn't JSON is cut.
+	srv, _ = answers(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(403)
+		fmt.Fprintf(w, "%s%s", strings.Repeat("x", 160), r.Header.Get("Authorization"))
+	})
+	sign := WithSigner(func(r *http.Request) error {
+		r.Header.Set("Authorization", "Signature keyId=\"k\",signature=\"0123456789abcdefSECRET\"")
+		return nil
+	})
+	if _, err := New(srv.URL, "test", sign).QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute); err == nil || strings.Contains(err.Error(), "012345") {
+		t.Errorf("%v", err)
+	}
+	// One made elsewhere is said without a bearer token too.
+	if e := (&APIError{Status: 401, Msg: "no: bearer abc.def"}).Error(); e != "HTTP 401: no: Bearer [redacted]" {
+		t.Errorf("%s", e)
+	}
+}
+
+// TestUnreadableSample: a sample the server writes unreadably is quoted in
+// the error, whatever it holds.
+func TestUnreadableSample(t *testing.T) {
+	srv, _ := answers(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "{\"status\":\"success\",\"data\":{\"resultType\":\"matrix\",\"result\":[{\"metric\":{},\"values\":[[\"\u009b31m\u202eRED\",\"1\"]]}]}}")
+	})
+	_, err := ask(context.Background(), srv)
+	if err == nil || strings.ContainsAny(err.Error(), "\u009b\u202e") || !strings.Contains(err.Error(), `\u009b`) {
+		t.Errorf("%q", err)
+	}
+}
+
+// TestTransient: what another run may get an answer to.
+func TestTransient(t *testing.T) {
+	for _, c := range []struct {
+		err  error
+		want bool
+	}{
+		{&APIError{Status: 429}, true},
+		{&APIError{Status: 503}, true},
+		{fmt.Errorf("%w (asked 7 times over 3m0s)", &APIError{Status: 502}), true},
+		{&APIError{Status: 501}, false},
+		{&APIError{Status: 400, Msg: "bad_data: parse error"}, false},
+		{&APIError{Status: 422, Msg: "execution: many-to-many matching not allowed"}, false},
+		{&APIError{Status: 503, Msg: "query processing would load too many samples into memory"}, false},
+		{context.DeadlineExceeded, true},
+		{&net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}, true},
+		{io.ErrUnexpectedEOF, true},
+		{errNoTurn, true},
+		{errors.New("want a matrix, got \"vector\""), false},
+		{fmt.Errorf("credentials: %w", os.ErrNotExist), false},
+		{nil, false},
+	} {
+		if got := Transient(c.err); got != c.want {
+			t.Errorf("%v: %v, want %v", c.err, got, c.want)
+		}
+	}
+}
+
+// TestSteady: a reason as a ledger keeps it, without how often its request
+// was asked.
+func TestSteady(t *testing.T) {
+	if got := Steady("query failed for now: HTTP 429: slow down (asked 7 times over 3m2s)"); got != "query failed for now: HTTP 429: slow down" {
+		t.Errorf("%q", got)
 	}
 }
 

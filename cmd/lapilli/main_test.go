@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -39,6 +40,9 @@ func (fakeHistory) QueryRange(ctx context.Context, expr string, start, end time.
 	switch {
 	case strings.Contains(expr, "broken"):
 		return nil, errors.New("bad_data: parse error")
+	case strings.Contains(expr, "turned"):
+		// Turned away to the end, as by a quota.
+		return nil, fmt.Errorf("%w (asked 7 times over 3m2s)", &prom.APIError{Status: http.StatusTooManyRequests, Msg: "slow down"})
 	case expr == "errors > 5":
 		return run(3*time.Hour, 2*time.Hour), nil
 	case expr == "slow":

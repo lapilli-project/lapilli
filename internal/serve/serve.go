@@ -25,6 +25,7 @@ import (
 	"lapilli.dev/internal/cloud"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/oncall"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/signin"
@@ -51,6 +52,9 @@ type Config struct {
 	// again every minute; LokiLoaded reads them from its ruler's API.
 	Loki, LokiToken, LokiTenant, LokiRules string
 	LokiLoaded                             bool
+	// LokiLimit is the Limiter the Loki's queries are asked by, which its
+	// ruler is read by each minute too (--max-rate, and its push back).
+	LokiLimit *prom.Limiter
 	// Ruler is a managed Prometheus ruler the rules are read from, and
 	// changed through (docs/design/rulers.md): its URL, the file holding a
 	// token that reads it (Mimir, Cortex), and its tenant, sent as

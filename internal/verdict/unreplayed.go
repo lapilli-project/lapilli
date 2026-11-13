@@ -5,6 +5,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"lapilli.dev/internal/rules"
 )
@@ -88,37 +89,60 @@ func failedFirst(us []Unreplayed) []Unreplayed {
 	return out
 }
 
-// shownFirst is how many rules whose replay failed are named at the top;
-// all of them are listed with the rest below.
-const shownFirst = 10
+// shownFirst is how many rules whose replay failed are named at the top,
+// and maxReason how much of why each is said there.
+const (
+	shownFirst = 10
+	maxReason  = 400
+)
 
-// partial writes, at the top, the rules whose replay failed: what follows
-// leaves them out, and a long report shouldn't hide that at its foot. of
-// is how many rules there are, 0 to leave it unsaid.
-func partial(w io.Writer, us []Unreplayed, of int) {
+// partial writes, at the top, the rules whose replay failed, us as a run
+// that replayed them gives them (Report.Unreplayed): what follows leaves
+// them out, and a long report shouldn't hide that at its foot. of is how
+// many rules there are, 0 to leave it unsaid; below says the rest are
+// listed at the foot too, as a report lists every rule it couldn't replay.
+func partial(w io.Writer, us []Unreplayed, of int, below bool) {
 	var failed []Unreplayed
+	names := map[string]bool{}
 	for _, u := range us {
 		if u.Failed {
 			failed = append(failed, u)
+			names[u.Rule] = true
 		}
 	}
 	if len(failed) == 0 {
 		return
 	}
 	if of > 0 {
-		fmt.Fprintf(w, "! %d of %d rules couldn't be replayed, and are left out of what follows:\n", len(failed), of)
+		fmt.Fprintf(w, "! %d of %d rules couldn't be replayed, and are left out of what follows:\n", len(names), of)
 	} else {
-		fmt.Fprintf(w, "! %d rules couldn't be replayed, and are left out of what follows:\n", len(failed))
+		fmt.Fprintf(w, "! %d rules couldn't be replayed, and are left out of what follows:\n", len(names))
 	}
 	for i, u := range failed {
 		if i == shownFirst {
-			fmt.Fprintf(w, "  and %d more, listed below\n", len(failed)-shownFirst)
+			if below {
+				fmt.Fprintf(w, "  and %d more, listed below\n", len(failed)-shownFirst)
+			} else {
+				fmt.Fprintf(w, "  and %d more, all in --json\n", len(failed)-shownFirst)
+			}
 			break
 		}
 		name := Clean(u.Rule)
 		if u.Side != "" {
 			name += " (" + u.Side + ")"
 		}
-		fmt.Fprintf(w, "  %s: %s\n", name, Clean(u.Reason))
+		fmt.Fprintf(w, "  %s: %s\n", name, Clean(cut(u.Reason, maxReason)))
 	}
+}
+
+// cut is s cut to n bytes at most, at the start of a rune, and said to be
+// cut.
+func cut(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "…"
 }

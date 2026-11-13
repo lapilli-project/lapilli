@@ -123,6 +123,13 @@ together() { # binary, door, name, more flags...
     echo "$code" >"$work/$name.code.$n"
   done
 }
+dropped() { # name: the rules, before or after, the runs couldn't replay
+  if [ "${2:-}" = json ]; then
+    cat "$work/$1".out.* | grep -c '"failed": true' || true
+  else
+    cat "$work/$1".out.* | grep -c '^  Load[0-9]* (\(before\|after\)): \(query failed\|not finished\)' || true
+  fi
+}
 replayedAll() { # name: every run exited 0 and replayed every rule
   for n in $(seq 1 "$runs"); do
     [ "$(cat "$work/$1.code.$n")" = 0 ] || return 1
@@ -134,22 +141,21 @@ replayedAll() { # name: every run exited 0 and replayed every rule
 if [ -n "${OLD:-}" ]; then
   start=$(date +%s)
   together "$OLD" 9093 old
-  dropped=$(cat "$work"/old.out.* | grep -c '^  Load[0-9]* (\(before\|after\)): query failed' || true)
-  echo "OLD: $runs runs at once in $(($(date +%s) - start))s, $(answered old 429) answers of 429: $dropped rules couldn't be replayed"
+  echo "OLD: $runs runs at once in $(($(date +%s) - start))s, $(answered old 200) answers of 200, $(answered old 429) of 429: $(dropped old) rules couldn't be replayed"
   grep -h -m1 '^  Load[0-9]* (\(before\|after\)): query failed' "$work"/old.out.* | head -1 || true
 fi
 
 start=$(date +%s)
 together "$work/lapilli" 9090 plain
-echo "429 alone: $runs runs at once in $(($(date +%s) - start))s, $(answered plain 200) answers of 200, $(answered plain 429) of 429"
+echo "429 alone: $runs runs at once in $(($(date +%s) - start))s, $(answered plain 200) answers of 200, $(answered plain 429) of 429: $(dropped plain) rules couldn't be replayed"
 check "429 alone: the quota was hit" "$([ "$(answered plain 429)" -gt 0 ] && echo 1)"
 check "429 alone: every run replayed every rule" "$(replayedAll plain && echo 1)"
 check "429 alone: the 429s were said on stderr" "$(grep -q 'with HTTP 429, too many requests' "$work/plain.err.1" && echo 1)"
-check "429 alone: progress on stderr, not stdout" "$(grep -q 'rules replayed' "$work/plain.err.1" && ! grep -q 'lapilli verdict' "$work/plain.out.1" && echo 1)"
+check "429 alone: progress on stderr, not stdout" "$(grep -q 'replays of the rules before and after done' "$work/plain.err.1" && ! grep -q 'lapilli verdict' "$work/plain.out.1" && echo 1)"
 
 start=$(date +%s)
 together "$work/lapilli" 9091 told
-echo "Retry-After: $runs runs at once in $(($(date +%s) - start))s, $(answered told 200) answers of 200, $(answered told 429) of 429"
+echo "Retry-After: $runs runs at once in $(($(date +%s) - start))s, $(answered told 200) answers of 200, $(answered told 429) of 429: $(dropped told) rules couldn't be replayed"
 check "Retry-After: the quota was hit" "$([ "$(answered told 429)" -gt 0 ] && echo 1)"
 check "Retry-After: every run replayed every rule" "$(replayedAll told && echo 1)"
 
@@ -157,7 +163,7 @@ check "Retry-After: every run replayed every rule" "$(replayedAll told && echo 1
 each=$(awk -v r="$rate" -v n="$runs" 'BEGIN { printf "%.3f", r / n * 0.9 }')
 start=$(date +%s)
 together "$work/lapilli" 9092 rated --max-rate "$each" --json
-echo "--max-rate $each each: $runs runs at once in $(($(date +%s) - start))s, $(answered rated 200) answers of 200, $(answered rated 429) of 429"
+echo "--max-rate $each each: $runs runs at once in $(($(date +%s) - start))s, $(answered rated 200) answers of 200, $(answered rated 429) of 429: $(dropped rated json) rules couldn't be replayed"
 check "--max-rate: nothing turned away" "$([ "$(answered rated 429)" = 0 ] && echo 1)"
 check "--max-rate: every run replayed every rule" "$(for n in $(seq 1 "$runs"); do
   [ "$(cat "$work/rated.code.$n")" = 0 ] && grep -q '"rules": \[' "$work/rated.out.$n" && ! grep -q '"unreplayed"' "$work/rated.out.$n" || exit 1

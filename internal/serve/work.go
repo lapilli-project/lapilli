@@ -18,6 +18,7 @@ import (
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/report"
 	"lapilli.dev/internal/rules"
@@ -438,7 +439,9 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 			}
 			x.Severity = ledger.Severities([]string{x.Severity, r.Labels["severity"]})
 			if r.Unsupported != "" && x.Unsupported == "" {
-				x.Unsupported = r.Unsupported
+				// Kept without how often a request was asked, which
+				// differs from run to run; the run's record says it.
+				x.Unsupported = prom.Steady(r.Unsupported)
 			}
 			switch {
 			case r.Unsupported == replay.Unfinished:
@@ -984,7 +987,7 @@ func (s *Server) extras(ctx context.Context) ([]rules.Rule, []rules.Doc, error) 
 		rs, docs = append(rs, r...), append(docs, d...)
 	}
 	// A Loki's ruler's rules, beside them, the same way.
-	l := source.Loki{URL: s.cfg.Loki, TokenFile: s.cfg.LokiToken, Tenant: s.cfg.LokiTenant}
+	l := source.Loki{URL: s.cfg.Loki, TokenFile: s.cfg.LokiToken, Tenant: s.cfg.LokiTenant, Limit: s.cfg.LokiLimit}
 	switch {
 	case s.cfg.LokiLoaded:
 		r, d, places, err := source.LokiLoaded(ctx, l, agent, func(what string) { s.log.Warn(what) })

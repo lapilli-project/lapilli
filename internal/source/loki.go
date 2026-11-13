@@ -29,17 +29,30 @@ type Loki struct {
 	// MaxRate, when set, is how many requests a second it is asked at most
 	// (--max-rate).
 	MaxRate float64
+	// Limit, when set, is the Limiter every client of the Loki shares, its
+	// queries' and its ruler's: one is made of MaxRate otherwise.
+	Limit *prom.Limiter
 }
 
 // noRedirects is a client that follows no redirect, so a token goes
-// nowhere it wasn't sent.
+// nowhere it wasn't sent; and that gives up on a request after five
+// minutes, as prom's does.
 var noRedirects = &http.Client{
+	Timeout:       5 * time.Minute,
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
+// limiter is the Limiter of the Loki's clients.
+func (l Loki) limiter() *prom.Limiter {
+	if l.Limit != nil {
+		return l.Limit
+	}
+	return prom.NewLimiter(l.MaxRate)
 }
 
 // History is a client for the Loki's query API.
 func (l Loki) History(agent string) *prom.Client {
-	opts := []prom.Option{prom.Loki(), prom.WithHTTPClient(noRedirects), prom.WithLimiter(prom.NewLimiter(l.MaxRate))}
+	opts := []prom.Option{prom.Loki(), prom.WithHTTPClient(noRedirects), prom.WithLimiter(l.limiter())}
 	if l.Tenant != "" {
 		opts = append(opts, prom.WithHeader("X-Scope-OrgID", l.Tenant))
 	}
@@ -62,8 +75,9 @@ func tokenFrom(file string) func(context.Context) (string, error) {
 // Grafana's data source proxy: the Loki, the tenant and the credentials
 // Grafana asks when it evaluates a rule, with the token that reads the
 // rules. Grafana takes only GET there, which is how Loki is asked. limit,
-// when not nil, is shared by every data source of the Grafana, which all
-// go through it.
+// when not nil, is the data source's own Limiter: Grafana passes on what
+// each data source answers, Retry-After included, so each pushes back of
+// its own; the data sources of a Grafana share a Pace (--max-rate).
 func GrafanaLoki(base, tokenFile, agent, uid string, limit *prom.Limiter) *prom.Client {
 	opts := []prom.Option{prom.Loki(), prom.WithHTTPClient(noRedirects)}
 	if limit != nil {
@@ -187,6 +201,8 @@ func LokiLoaded(ctx context.Context, l Loki, agent string, warn func(string)) ([
 // LokiPlaces asks a Loki's ruler where it runs each group within its
 // interval.
 func LokiPlaces(ctx context.Context, l Loki, agent string) (map[rules.Place]time.Duration, error) {
+	// Asked as its queries are: by l.Limit, which lapilli serve shares
+	// between its replays and its reads of the ruler each minute.
 	b, err := l.History(agent).Rules(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("--loki-loaded-rules: %w", err)

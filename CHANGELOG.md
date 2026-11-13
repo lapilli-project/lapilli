@@ -11,47 +11,82 @@ back, and a run of eight minutes said nothing until its end.
 ### Added
 
 - **`--max-rate N`**, for `lapilli verdict` and `lapilli serve`: each API
-  the history is read from (`--prometheus`, `--loki`, Grafana's data source
-  proxy) is asked N requests a second at most, evenly spaced; `0.5` for a
-  quota of 30 a minute.
+  the history is read from (`--prometheus`, `--loki`, its ruler included,
+  and a Grafana's data sources together) is asked N requests a second at
+  most, evenly spaced; `0.5` for a quota of 30 a minute. N is 0.001 at
+  least.
 - **A progress line.** A `lapilli verdict` run past 15 seconds says on
-  stderr, every 30 seconds, the rules replayed of all, the requests to the
-  history, those asked again after a wait and those answered HTTP 429; at
-  its end, how many were answered 429, if any. stdout is unchanged.
-  `--progress=false` keeps it quiet.
+  stderr, every 30 seconds, the rules replayed of all (in a comparison, the
+  replays before and after), the requests to the history, those asked again
+  after a wait and those answered HTTP 429. `--progress=false` keeps it
+  quiet. A run the history answered HTTP 429 says so at its end either way.
+  stdout is unchanged.
 - **`--fail-unreplayed`**: `lapilli verdict` exits 1 when a rule's replay
-  failed. Without it the exit is as before: 0, or 1 when `--timeout` cut the
-  run short.
+  failed for now (its query turned away to the end, the connection lost).
+  Not for a query the API refused as written, nor for a Grafana rule
+  replayed whose query outside its condition failed, which the report notes
+  as before. Without it the exit is as before: 0, or 1 when `--timeout` cut
+  the run short.
 - `unreplayed` in `--json`, of a report and of a comparison: each rule that
   couldn't be replayed, its side in a comparison, why, and `failed`, true
-  when its replay failed for a reason of the run (a query failed, the time
-  ran out) rather than one of the rule's (a CloudWatch metric alarm, a rule
-  paused).
+  when its replay failed for now (a query turned away, the connection lost,
+  the time ran out) and another run may replay it; false for a rule no run
+  replays (a CloudWatch metric alarm, a rule paused, a query refused as
+  written).
 
 ### Changed
 
 - **Asked again after a wait the API says.** An answer of HTTP 429, or 503,
   with `Retry-After`, in seconds or as an HTTP date, is asked again that
-  long after, plus up to a quarter so that requests told alike don't come
-  back together: a second at least, two minutes at most, as often as it
-  says so. A 429 without it is asked again after 4, 8, 16, 32, 60 and 60
+  long after, a second at least and two minutes at most, plus up to a
+  quarter so that requests told alike don't come back together, as often as
+  it says so. A 429 without it is asked again after 4, 8, 16, 32, 60 and 60
   seconds, each less up to half, 90 seconds to 3 minutes in all, past the
   window of a quota by the minute; before, 2, 4, 8 and 16 seconds, 30 in
-  all. A 5xx is asked again as before, each wait less up to half; a 501
-  isn't. A request waits five minutes at most in all, and every wait ends
-  with `--timeout`. An answer too large to send is halved as before.
+  all. A 5xx, or a connection the API dropped before it answered, is asked
+  again as a 5xx was, each wait less up to half; a 501 isn't. 429s and 5xx
+  are counted apart. An answer too large to send is halved as before.
+- **Five minutes at most.** A request is asked again for five minutes at
+  most from when it was first pushed back, by an answer or by a wait for its
+  turn the API asked for; the API's answers and the waits for a turn count.
+  A request whose turn doesn't come by then is given up with the last
+  answer; one already asked is waited for. A wait, or a turn, that would end
+  past `--timeout` isn't waited for: the request fails then, with the API's
+  answer.
 - **Fewer at once after a push back.** A 429 or a 503 halves how many
-  requests go to that API at once, for the whole run (or, in `lapilli
-  serve`, from then on), down to one; one more goes for every ten seconds it
-  takes them again. While it said to wait (`Retry-After`), nothing else is
-  asked of it. Rules sharing a query still share one request.
+  requests may go to that API at once, from 64, once a second at most, for
+  the whole run (or, in `lapilli serve`, from then on), down to one; one
+  more may go for every ten seconds without a push back, asked or not. While
+  it said to wait (`Retry-After`), nothing else is asked of it, a request
+  already waiting for its turn included. Rules sharing a query still share
+  one request.
+- **`--parallel` is of each API.** Up to N rules are replayed at once against
+  each: `--prometheus`, `--loki`, each of Grafana's data sources. Rules held
+  by one API that pushes back no longer hold those of another.
+- Behind one Grafana, each data source backs off of its own, as Grafana's
+  data source proxy passes on what each answers, `Retry-After` included;
+  they share `--max-rate`.
 - The same holds for every API history is read from: Prometheus, Thanos,
   Mimir, Cortex, VictoriaMetrics, each cloud's managed Prometheus and
   CloudWatch through `--auth`, Loki, and Grafana's data source proxy; and
-  for the rules, configuration and targets read from the same API.
-- A rule whose replay failed is named, with why, at the top of the text
-  report and of a comparison, as well as at its foot. A failed query says
-  how often it was asked, and over how long.
+  for the rules read from the same API (`--loaded-rules`, where a Loki's
+  ruler runs its groups). `lapilli serve` reads a Loki's ruler each minute
+  by the same turns as its queries. The configuration and the targets
+  Prometheus is asked for, which lapilli does without, are asked once,
+  within 30 seconds, and their answers don't change how the rest is asked.
+  A request to a Loki, or to a Grafana's data source, is given up after
+  five minutes, as one to a Prometheus was.
+- A rule whose replay failed for now is named, with why, at the top of the
+  text report and of a comparison, as well as at its foot; such a rule's
+  reason begins `query failed for now:`, and one whose query was refused as
+  written `query failed:`, as before. A failed query says how often it was
+  asked, and over how long. `lapilli serve` keeps the reason in its ledger
+  without that, and its weekly digest, whose numbers keep what a rule fired
+  before its replay failed, names no rule at its top.
+- The API's text in an error is cut to a few hundred bytes, and the token or
+  the signature lapilli sent, and any bearer token, are taken out of it,
+  should the API echo them back. A sample the API writes unreadably is
+  quoted in the error.
 
 ## [0.32.0] - 2026-11-13
 

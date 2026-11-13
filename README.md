@@ -406,44 +406,65 @@ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 --i
 `lapilli_incident_detection_delay_seconds`.
 
 A replay asks for each query a day at a time, once for every rule that needs
-it, and runs `--parallel` (8) rules at once. An API that turns a request away
-for now is asked again after a wait, each wait cut short by `--timeout`:
+it, and runs `--parallel` (8) rules at once against each API it reads:
+`--prometheus`, `--loki`, each of Grafana's data sources. An API that turns a
+request away for now is asked again after a wait:
 
-- after HTTP 5xx, 2, 4, 8 and 16 seconds;
+- after HTTP 5xx (not 501), or a connection it dropped, 2, 4, 8 and 16
+  seconds;
 - after HTTP 429 (too many requests), or a 503, that says how long
-  (`Retry-After`, in seconds or as a date), that long, plus up to a quarter,
-  between a second and two minutes, as often as it says so;
+  (`Retry-After`, in seconds or as a date), that long, between a second and
+  two minutes, plus up to a quarter, as often as it says so;
 - after a 429 that doesn't, 4, 8, 16, 32, 60 and 60 seconds, a minute and a
   half to three minutes in all, past the window of a quota by the minute.
 
-Each wait is less up to half, or more up to a quarter, so that requests
-turned away together don't come back together, and a request waits five
-minutes at most in all. A 429 or a 503 also halves how many requests are
-sent to that API at once, for the whole run, down to one; one more is sent
-for every ten seconds it takes them again. While an API said to wait, nothing
-else is asked of it. `--max-rate N` asks each API N requests a second at
-most, evenly spaced, for a quota known beforehand: `--max-rate 0.5` for one
-of 30 a minute. Runs at once that share a quota should each take their part
-of it. This is the same for `--prometheus` and every cloud's `--auth`, for
-`--loki` and Grafana's data source proxy, and for `lapilli serve`, which
-takes `--max-rate` too.
+429s and 5xx are counted apart. Each wait is less up to half, or more up to
+a quarter, so that requests turned away together don't come back together.
+A request is asked again for five minutes at most from when it was first
+pushed back, by an answer or by a wait for its turn the API asked for: the
+API's answers and the waits for a turn count, and a request whose turn
+doesn't come by then is given up; one already asked is waited for. A wait,
+or a turn, that would end past `--timeout` isn't waited for: the request
+fails then, with the API's answer.
+
+A 429 or a 503 also halves how many requests may go to that API at once,
+from 64, for the whole run, down to one, once a second at most; one more may
+go for every ten seconds without a push back, asked or not, so `lapilli
+serve`, back an hour later, asks as many at once as before. While an API said
+to wait, nothing else is asked of it: a request waiting for its turn looks
+again when it wakes. Behind one Grafana, each data source backs off of its
+own, as Grafana passes on what each answers. `--max-rate N` asks each API N
+requests a second at most, evenly spaced, for a quota known beforehand:
+`--max-rate 0.5` for one of 30 a minute; a Grafana's data sources share it.
+Runs at once that share a quota should each take their part of it. This is
+the same for `--prometheus` and every cloud's `--auth`, for `--loki`, its
+ruler included, and Grafana's data source proxy, and for `lapilli serve`,
+which takes `--max-rate` too. The configuration and the targets Prometheus
+is asked for, which lapilli does without, are asked once, within 30
+seconds, and their answers don't change how the rest is asked.
 
 A run that takes longer than 15 seconds says on stderr, every 30 seconds,
-how it is going; `--progress=false` keeps it quiet. stdout has the report
-alone.
+how it is going; `--progress=false` keeps it quiet. A run the history
+answered HTTP 429 says so at its end either way. stdout has the report
+alone. A comparison counts replays: a rule changed is replayed before and
+after.
 
 ```
 lapilli verdict: after 2m30s, 23 of 61 rules replayed, 412 requests to the history, 37 asked again after a wait, 35 answered HTTP 429
 ```
 
-A rule whose replay failed (its query turned away to the end, say) is named
-with why at the top of the report, as the rest of it leaves the rule out,
-and at its foot with the rules that can't be replayed at all (a CloudWatch
-metric alarm, a rule paused). `--json` lists both in `unreplayed`, each with
-`failed` true when its replay failed and another run may replay it. The exit
+A rule whose replay failed for now (its query turned away to the end, say,
+or the connection lost) is named with why at the top of the report, as the
+rest of it leaves the rule out, and at its foot with the rules that can't be
+replayed at all (a CloudWatch metric alarm, a rule paused, a query the API
+refused as written). `--json` lists both in `unreplayed`, each with `failed`
+true when its replay failed for now and another run may replay it. The exit
 stays 0, since what was replayed holds; `--fail-unreplayed` exits 1 instead,
-for a CI check that a partial run shouldn't pass. A run cut short by
-`--timeout` exits 1 either way.
+for a CI check that a partial run shouldn't pass. It doesn't count a Grafana
+rule replayed whose query outside its condition failed, which the report
+notes below its table. A run cut short by `--timeout` exits 1 either way.
+The API's text in a reason is cut to a few hundred bytes, without the token
+or the signature lapilli sent, should the API echo it back.
 
 `--prometheus URL` takes any Prometheus-compatible API: Prometheus, Thanos,
 Mimir, VictoriaMetrics, or a cloud's managed Prometheus. `--bearer-token-file`

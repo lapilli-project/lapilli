@@ -275,19 +275,25 @@ Output:
                       also post the report to the Slack incoming webhook
                       whose URL is in FILE
   --timeout DUR       give up after this long (default 10m)
-  --parallel N        replay up to N rules at once (default 8)
+  --parallel N        replay up to N rules at once against each history
+                      API: --prometheus, --loki, each of Grafana's data
+                      sources (default 8)
   --max-rate N        ask each API the history is read from (--prometheus,
-                      --loki, Grafana's data source proxy) N requests a
-                      second at most, spaced evenly: 0.5 for a quota of 30 a
-                      minute. Without it, an API that answers HTTP 429 is
-                      asked fewer at once, and the request asked again after
-                      the wait it says (Retry-After), or after waits of up
-                      to three minutes in all
+                      --loki, a Grafana's data sources together) N requests
+                      a second at most, spaced evenly, from 0.001: 0.5 for a
+                      quota of 30 a minute. Without it, an API that answers
+                      HTTP 429 is asked fewer at once, and the request asked
+                      again after the wait it says (Retry-After), or after
+                      waits of up to three minutes in all
   --progress=false    don't say on stderr how a run is going: past 15s, every
                       30s, the rules replayed, the requests, those asked
-                      again and those answered HTTP 429
-  --fail-unreplayed   exit 1 when a rule's replay failed, as when the history
-                      turned its queries away: the report is of the others
+                      again and those answered HTTP 429. A run the history
+                      answered HTTP 429 still says so at its end
+  --fail-unreplayed   exit 1 when a rule's replay failed for now, as when the
+                      history turned its queries away to the end: the report
+                      is of the others. Not for a query refused as written,
+                      which another run is refused too, nor for a Grafana
+                      rule replayed whose query outside its condition failed
 
 The incidents file:
 
@@ -379,6 +385,9 @@ type verdictFlags struct {
 	maxRate                 float64
 	noProgress, progressSet bool
 	failUnreplayed          bool
+	// lokiLimit is the Limiter every client of --loki shares, made once
+	// (lokiSource).
+	lokiLimit *prom.Limiter
 }
 
 // alarmsFlag is an --alarms SOURCE=URL.
@@ -701,8 +710,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			}
 		case "--max-rate":
 			f.maxRate, err = strconv.ParseFloat(val, 64)
-			if err != nil || !(f.maxRate > 0) || f.maxRate > 10000 {
-				return nil, fmt.Errorf("--max-rate %s: want requests a second, more than 0, like 5 or 0.5", val)
+			if err != nil || !(f.maxRate >= prom.MinRate) || f.maxRate > 10000 {
+				return nil, fmt.Errorf("--max-rate %s: want requests a second, from %g, like 5 or 0.5", val, prom.MinRate)
 			}
 		default:
 			return nil, fmt.Errorf("unknown flag %s", a)
@@ -1304,7 +1313,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if f.failUnreplayed && len(dropped) > 0 {
-		fmt.Fprintf(stderr, "lapilli verdict: %d of %d rules couldn't be replayed, their queries failed (--fail-unreplayed)\n", len(dropped), len(all))
+		fmt.Fprintf(stderr, "lapilli verdict: %d of %d rules couldn't be replayed, their queries failed for now (--fail-unreplayed)\n", len(dropped), len(all))
 		return 1
 	}
 	if failed {
@@ -1436,20 +1445,34 @@ var newLoki = func(f *verdictFlags) history {
 }
 
 // newGrafanaLoki is a Grafana Loki data source's history, through
-// --grafana's data source proxy, sharing limit with the Grafana's others;
-// replaced in tests.
+// --grafana's data source proxy, asked by limit, its own; replaced in
+// tests.
 var newGrafanaLoki = func(f *verdictFlags, uid string, limit *prom.Limiter) history {
 	return source.GrafanaLoki(f.grafana, f.grafanaTk, "lapilli/"+buildVersion(), uid, limit)
 }
 
+// lokiSource is --loki, its every client sharing one Limiter: its
+// queries', and its ruler's, read once by lapilli verdict and each minute
+// by lapilli serve.
 func (f *verdictFlags) lokiSource() source.Loki {
-	return source.Loki{URL: f.loki, TokenFile: f.lokiTk, Tenant: f.lokiTenant, MaxRate: f.maxRate}
+	if f.lokiLimit == nil {
+		f.lokiLimit = prom.NewLimiter(f.maxRate)
+	}
+	return source.Loki{URL: f.loki, TokenFile: f.lokiTk, Tenant: f.lokiTenant, MaxRate: f.maxRate, Limit: f.lokiLimit}
 }
 
 // withLogs is h with the Lokis rules written in LogQL are replayed
 // against beside it (docs/design/loki.md). A token sent to --loki over
 // plain http is said to warn, as --grafana's is.
 func (f *verdictFlags) withLogs(h history, warn io.Writer) history {
+	if h == nil {
+		h = noPrometheus{}
+	}
+	return replay.WithLogs(h, f.logs(warn).For)
+}
+
+// logs are the Lokis rules written in LogQL are replayed against.
+func (f *verdictFlags) logs(warn io.Writer) *source.Logs {
 	l := &source.Logs{}
 	if f.loki != "" {
 		l.Loki = newLoki(f)
@@ -1458,13 +1481,14 @@ func (f *verdictFlags) withLogs(h history, warn io.Writer) history {
 		}
 	}
 	if f.grafana != "" {
-		limit := prom.NewLimiter(f.maxRate)
-		l.Grafana = func(uid string) replay.History { return newGrafanaLoki(f, uid, limit) }
+		// A Limiter for each data source, as each pushes back of its own
+		// through Grafana's proxy, which passes on what it answers; one
+		// Pace for all, as --max-rate is of the Grafana. Logs.For makes
+		// one history a data source.
+		pace := prom.NewPace(f.maxRate)
+		l.Grafana = func(uid string) replay.History { return newGrafanaLoki(f, uid, prom.NewLimiterPaced(pace)) }
 	}
-	if h == nil {
-		h = noPrometheus{}
-	}
-	return replay.WithLogs(h, l.For)
+	return l
 }
 
 // noPrometheus is the history when there is no --prometheus: only rules
