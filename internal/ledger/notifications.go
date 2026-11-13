@@ -923,6 +923,9 @@ func (t *tier) loadSpans(spansOf map[string][][2]int64) error {
 		if err := rows.Err(); err != nil {
 			return err
 		}
+		if len(series) == 0 {
+			return nil
+		}
 		ids, err := json.Marshal(slices.Sorted(maps.Keys(series)))
 		if err != nil {
 			return err

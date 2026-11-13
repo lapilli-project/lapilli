@@ -348,3 +348,21 @@ func TestNotificationsScale(t *testing.T) {
 		t.Errorf("twelve weeks of notifications read in %v; budget %v", took, budget)
 	}
 }
+
+// A page whose alert tells of no firing near it, its rule's firings all
+// elsewhere, is untied, in either database: none of its spans finds a
+// firing, and none of their series is read.
+func TestPagesNoFiringNear(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	svc := map[string]string{"service": "checkout"}
+	record(t, l, t0, t0.Add(6*time.Hour), []firing.Firing{{Rule: "Errors", Labels: svc, Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour)}})
+	if _, err := l.Notify(ctx, Notification{At: t0.Add(5 * time.Hour), Source: "alertmanager", Receiver: "pager", Group: "g",
+		Alerts: []Alert{{Rule: "Errors", Labels: svc, Start: t0.Add(5 * time.Hour)}}}); err != nil {
+		t.Fatal(err)
+	}
+	ps, err := l.Pages(ctx, t0, t0.Add(24*time.Hour), twoMinutes)
+	if err != nil || len(ps) != 1 || ps[0].Stone != PageUntied {
+		t.Errorf("pages: %+v %v, want one untied", ps, err)
+	}
+}
