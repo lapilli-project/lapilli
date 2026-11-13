@@ -98,7 +98,9 @@ nav.crumbs li + li::before { content: "›"; content: "›" / ""; margin: 0 .45r
 nav.crumbs [aria-current] { color: var(--ink); }
 .bar { display: flex; flex-wrap: wrap; gap: .6rem 1.5rem; align-items: end; justify-content: space-between; margin: 0 0 1.4rem; padding: .6rem .8rem; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
 .bar form { display: flex; flex-wrap: wrap; gap: .5rem .8rem; align-items: end; margin: 0; }
-.bar form.find { margin-left: auto; }
+@media (min-width: 960px) {
+  .bar form.find { margin-left: auto; }
+}
 .find input[type=search] { width: min(18rem, 100%); }
 /* A page's header, with its main action; one the reader may not use is
    shown disabled, with why. */
