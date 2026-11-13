@@ -114,12 +114,36 @@ type prRepo struct {
 	home string
 }
 
+// withoutCI is env without what a CI sets and the recipes read: run in a
+// CI, a recipe under test would otherwise find the CI's own pull request
+// (GITHUB_EVENT_PATH, CI_MERGE_REQUEST_IID, ...) and its settings.
+func withoutCI(env []string) []string {
+	var kept []string
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		ci := false
+		for _, p := range []string{"GITHUB_", "GITEA_", "FORGEJO_", "GITLAB_", "CI_", "BITBUCKET_", "SYSTEM_", "BUILD_", "AZURE_DEVOPS_", "LAPILLI", "RENDER", "MAX_TREE_"} {
+			if strings.HasPrefix(k, p) {
+				ci = true
+			}
+		}
+		switch k {
+		case "CI", "TF_BUILD", "PR", "PATHS", "INCIDENTS", "KEY", "REPO", "TARGET", "TARGET_BRANCH", "FAIL_ON_ERROR":
+			ci = true
+		}
+		if !ci {
+			kept = append(kept, kv)
+		}
+	}
+	return kept
+}
+
 func newPRRepo(t *testing.T, base map[string]string) *prRepo {
 	t.Helper()
 	home := t.TempDir()
 	empty := filepath.Join(home, "gitconfig")
 	os.WriteFile(empty, nil, 0o600)
-	r := &prRepo{t: t, dir: t.TempDir(), home: home, env: append(os.Environ(), "HOME="+home, "GIT_CONFIG_GLOBAL="+empty, "GIT_CONFIG_NOSYSTEM=1",
+	r := &prRepo{t: t, dir: t.TempDir(), home: home, env: append(withoutCI(os.Environ()), "HOME="+home, "GIT_CONFIG_GLOBAL="+empty, "GIT_CONFIG_NOSYSTEM=1",
 		"GIT_TERMINAL_PROMPT=0", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")}
 	r.git("init", "--quiet", "--initial-branch=main")
 	r.write(base)
