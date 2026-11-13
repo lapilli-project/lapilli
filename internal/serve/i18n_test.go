@@ -71,7 +71,8 @@ var pagePaths = []string{"/", "/rules", "/rules?weeks=1", "/rules/Errors", "/inc
 	"/firings?day=2026-11-02", "/settings", "/settings?try=1&lead=1h", "/runs", "/incidents/none",
 	"/teams", "/teams?edit=1", "/windows", "/windows/1", "/tasks", "/tasks?status=all", "/tasks/1", "/?team=payments", "/rules?team=payments", "/outcomes",
 	"/reports", "/reports?edit=1", "/reports/1", "/reports/2", "/reports?edit=digest", "/reports/digest", "/roles", "/windows/2", "/windows/3",
-	"/rules?sort=refired", "/rules?sort=deploys&weeks=12", "/incidents?source=impact&team=payments", "/incidents?source=written", "/rules/Flapping"}
+	"/rules?sort=refired", "/rules?sort=deploys&weeks=12", "/incidents?source=impact&team=payments", "/incidents?source=written", "/rules/Flapping",
+	"/rules/Limited"}
 
 // pagesServer is a server with something on every page: a team, a note,
 // quiet windows, a task, roles, reports, comments, and a run that failed.
@@ -80,11 +81,13 @@ func pagesServer(t *testing.T) *Server {
 	ctx := context.Background()
 	dest := filepath.Join(t.TempDir(), "ops")
 	os.WriteFile(dest, []byte("http://127.0.0.1:1/x"), 0o600)
-	s, _ := server(t, func(c *Config) {
+	s, rules := server(t, func(c *Config) {
 		c.CheckReplay, c.CheckContent, c.ReportDests = true, true, map[string]string{"ops": dest}
 		// An on-call schedule, read once, and once that failed.
 		c.OnCall = &oncall.Config{Schedules: []*oncall.Schedule{{Name: "primary"}, {Name: "secondary"}}}
 	})
+	// A rule in a group with a limit, which a replay doesn't hold it to.
+	os.WriteFile(filepath.Join(rules, "limited.yaml"), []byte("groups:\n  - name: limited\n    limit: 5\n    labels: {team: shop}\n    rules:\n      - {alert: Limited, expr: errors > 5}\n"), 0o644)
 	s.h = &alertsHistory{} // the replay set beside what really fired
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {

@@ -140,3 +140,15 @@ func TestLoadRefusesNothing(t *testing.T) {
 		}
 	}
 }
+
+// A file of incidents is read no further than MaxFile: /dev/zero, or one
+// made to take a reader's memory, is refused.
+func TestLoadTooBig(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "incidents.yaml")
+	if err := os.WriteFile(p, append([]byte("incidents: []\n#"), make([]byte, MaxFile)...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "more than 64 MiB") {
+		t.Errorf("a file of %d bytes: %v", MaxFile+15, err)
+	}
+}

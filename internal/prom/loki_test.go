@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -437,5 +438,28 @@ func seriesLimit(t *testing.T, limits ...int) {
 	t.Logf("always over: %d requests, %v", reqs, err)
 	if err == nil || reqs > 20 {
 		t.Errorf("always over the limit: %d requests, err %v", reqs, err)
+	}
+}
+
+// Loki says what went wrong in plain text, which is taken as its; a page a
+// proxy before it gives, of HTML, isn't: it is no Loki API answer.
+func TestLokiErrorText(t *testing.T) {
+	for _, c := range []struct {
+		kind, body, want string
+	}{
+		{"text/plain; charset=utf-8", "parse error : syntax error: unexpected IDENTIFIER", "HTTP 400: parse error : syntax error: unexpected IDENTIFIER"},
+		{"text/html", "<html><address>Server at loki-0.corp.example Port 3100</address></html>", "HTTP 400: not a Loki API response: <html>"},
+		{"text/plain", "<html>Bad Request</html>", "HTTP 400: not a Loki API response: <html>"},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", c.kind)
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, c.body)
+		}))
+		_, err := New(srv.URL, "test", Loki()).QueryRange(context.Background(), `count_over_time({app="x"}[1m])`, time.Unix(0, 0), time.Unix(60, 0), time.Minute)
+		srv.Close()
+		if err == nil || !strings.HasPrefix(err.Error(), c.want) {
+			t.Errorf("%s: %v, want %q", c.kind, err, c.want)
+		}
 	}
 }

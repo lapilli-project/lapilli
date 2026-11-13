@@ -258,7 +258,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 				r.Unseen = append(r.Unseen, u)
 			}
 		}
-		addSeverity(k.Name, k.Labels["severity"])
+		addSeverity(k.Name, k.AlertLabels()["severity"])
 	}
 
 	var inPeriod []incident.Incident

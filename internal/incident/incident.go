@@ -4,6 +4,7 @@ package incident
 
 import (
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"slices"
@@ -64,6 +65,10 @@ func (l Labels) Agree(other map[string]string, names []string) bool {
 	return true
 }
 
+// MaxFile is the most of a file of incidents Load reads: more is refused.
+// Years of incidents are a few megabytes.
+const MaxFile = 64 << 20
+
 // Load reads a file of incidents:
 //
 //	incidents:
@@ -73,9 +78,18 @@ func (l Labels) Agree(other map[string]string, names []string) bool {
 //	    end: 2026-10-30T17:40:00+09:00
 //	    labels: {service: [checkout, payments]}
 func Load(path string) ([]Incident, error) {
-	b, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
+	}
+	b, err := io.ReadAll(io.LimitReader(f, MaxFile+1))
+	f.Close()
+	switch {
+	case err != nil:
+		return nil, err
+	case len(b) > MaxFile:
+		// /dev/zero, or a file made to take a reader's memory.
+		return nil, fmt.Errorf("%s: more than %d MiB: a file of incidents is less", path, MaxFile>>20)
 	}
 	var raw struct {
 		Incidents yaml.Node `yaml:"incidents"`

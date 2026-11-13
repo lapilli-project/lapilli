@@ -110,6 +110,20 @@ func TestCompareUnreplayed(t *testing.T) {
 	if strings.Contains(out, "Paused  ") {
 		t.Errorf("Paused replayed on neither side, so it should have no row:\n%s", out)
 	}
+
+	// Not replayed on either side, for the same reason: it differs, and
+	// isn't said to fire as it did.
+	same := Judge([]rules.Rule{{Name: "Down", Unsupported: "query failed: connection refused"}}, nil, incs, opts())
+	c := Compare(same, same, []string{"Down"}, 0)
+	c.Summarize(true)
+	b.Reset()
+	if err := CompareText(&b, c, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if out := b.String(); strings.Contains(out, "keep the same stones") || !strings.Contains(out, "Down (before): query failed") ||
+		c.Summary.Alike != 0 || c.Summary.Unreplayed != 1 {
+		t.Errorf("summary %+v:\n%s", c.Summary, out)
+	}
 }
 
 func TestTableWidth(t *testing.T) {
@@ -166,5 +180,20 @@ func TestNoisyAt(t *testing.T) {
 	}
 	if r := Judge(nil, []firing.Firing{{Rule: "A", Start: m(1)}}, nil, opts()); r.Rules[0].Noisy || r.NoisyAt.Firings != NoisyFirings {
 		t.Errorf("defaults: %+v %+v", r.Rules[0], r.NoisyAt)
+	}
+}
+
+// Without incidents, a changed rule that fires as often as it did is said
+// to: there are no stones to keep.
+func TestCompareTextAlikeUnjudged(t *testing.T) {
+	r := Judge([]rules.Rule{{Name: "A", Expr: "x"}}, []firing.Firing{{Rule: "A", Start: m(1), End: m(2)}}, nil, opts())
+	c := Compare(r, r, []string{"A"}, 0)
+	c.Summarize(false)
+	var b bytes.Buffer
+	if err := CompareText(&b, c, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "1 changed rules fire as they did:\n  A\n") || strings.Contains(b.String(), "stones") {
+		t.Errorf("text:\n%s", b.String())
 	}
 }

@@ -219,7 +219,7 @@ func labelsAgree(replayed, real map[string]string) bool {
 // CheckText writes a check of a replay for a person, times in loc.
 func CheckText(w io.Writer, c *ReplayCheck, loc *time.Location) error {
 	const stamp = "2006-01-02 15:04"
-	fmt.Fprintf(w, "Replay beside %s  %s → %s %s\n", strings.Join(c.Series, " and "), c.From.In(loc).Format(stamp), c.To.In(loc).Format(stamp), loc)
+	fmt.Fprintf(w, "Replay beside %s  %s → %s %s\n", strings.Join(c.Series, " and "), c.From.In(loc).Format(stamp), c.To.In(loc).Format(stamp), Zone(loc, c.From, c.To))
 	share := "–"
 	if n := c.Replayed + c.Real - c.Alike; n > 0 {
 		share = fmt.Sprintf("%.0f%%", 100*float64(c.Alike)/float64(n))

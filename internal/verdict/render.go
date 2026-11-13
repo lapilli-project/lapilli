@@ -37,7 +37,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			noisy++
 		}
 	}
-	fmt.Fprintf(w, "Lapilli  %s → %s %s\n", r.From.In(loc).Format(stamp), r.To.In(loc).Format(stamp), loc)
+	fmt.Fprintf(w, "Lapilli  %s → %s %s\n", r.From.In(loc).Format(stamp), r.To.In(loc).Format(stamp), Zone(loc, r.From, r.To))
 	fmt.Fprintf(w, "%d firings, %d incidents written down", firings, written)
 	if found > 0 {
 		fmt.Fprintf(w, ", %d more found by --impact", found)
@@ -534,6 +534,8 @@ func UnseenText(code string) string {
 		return "it has a query on another data source than its condition's, which isn't replayed: whenever that returns nothing, Grafana takes the rule as having no data"
 	case rules.UnseenFailed:
 		return "a query outside its condition failed when it was replayed: whether that returned anything, which Grafana's no data hangs on, isn't known"
+	case rules.UnseenLimit:
+		return "its group has a limit, which the replay doesn't hold it to: past as many alerts at once, Prometheus drops them all"
 	}
 	return code
 }
@@ -554,6 +556,7 @@ func unseen(w io.Writer, rs []RuleResult) {
 		rules.UnseenLate:   "%d rules read a cloud's own metrics, which often arrive minutes late: without --late, they are replayed as filled in since (%s).",
 		rules.UnseenOther:  "%d Grafana rules have a query on another data source than their condition's, which isn't replayed: whenever it returns nothing, Grafana takes the rule as having no data (%s).",
 		rules.UnseenFailed: "%d Grafana rules had a query outside their condition fail when replayed: whether it returned anything, which Grafana's no data hangs on, isn't known (%s).",
+		rules.UnseenLimit:  "%d rules are in a group with a limit, which the replay doesn't hold them to: past as many alerts at once, Prometheus drops them all (%s).",
 	}
 	for _, code := range slices.Sorted(maps.Keys(by)) {
 		names := by[code]

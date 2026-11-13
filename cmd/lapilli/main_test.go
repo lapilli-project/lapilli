@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/replay"
+	"lapilli.dev/internal/verdict"
 )
 
 var t0 = time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
@@ -265,6 +267,32 @@ func TestRun(t *testing.T) {
 		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --changed-only --prometheus http://p --incidents " + incidents,
 			code: 0, stdout: "  after   no changed rule fired"},
 		{args: "verdict --rules " + rulesFile + " --changed-only --prometheus http://p --incidents y", code: 2, stderr: "--changed-only goes with --compare"},
+		// Compared without incidents: the firings counted, not judged.
+		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --prometheus http://p --tz UTC",
+			code: 0, stdout: "Lapilli  2026-10-26 00:00 → 2026-11-02 00:00 UTC\nRules compared: 1 changed, 0 added, 0 taken away, 2 the same\nFiring" +
+				"s 1 → 0\n\nRULE            FIRED  REFIRED\nCheckoutErrors  1 → 0  0 → 0\n"},
+		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --prometheus http://p --json",
+			code: 0, stdout: `"incidents_given": false,`},
+		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --prometheus http://p --incidents " + incidents + " --json",
+			code: 0, stdout: `"incidents_given": true,`},
+		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --changed-only --prometheus http://p --markdown --tz Asia/Seoul",
+			code: 0, stdout: "### Lapilli backtest, 2026-10-26 09:00 → 2026-11-02 09:00 Asia/Seoul (+09:00)\n\nRules compared: **1 changed, 0 added, 0 taken away**, 2 the same. " +
+				"No incidents were given: the firings are counted, not judged.\n\n| | Before | After |\n|---|--:|--:|\n| Firings of the changed rules | 1 | 0 |\n\n" +
+				"#### Rules that differ\n\n| Rule | Fired | Refired |\n| --- | --: | --: |\n| `CheckoutErrors` | 1 → 0 | 0 → 0 |\n"},
+		{args: "verdict --rules " + laterRules + " --compare " + rulesFile + " --prometheus http://p --markdown --incidents " + incidents,
+			code: 0, stdout: "| Incidents with no alert, of 1 | 0 | 1 |\n"},
+		{args: "verdict --rules " + rulesFile + " --compare " + rulesFile + " --prometheus http://p --markdown",
+			code: 0, stdout: `"nothing_changed":true,"changed":0,"added":0,"removed":0,"same":3,`},
+		{args: "verdict --rules " + rulesFile + " --compare " + rulesFile + " --prometheus http://p --markdown",
+			code: 0, stdout: ")\n### Lapilli backtest: nothing changed\n\nNothing that decides when the 3 rules fire has changed: nothing to replay.\n"},
+		{args: "verdict --rules " + rulesFile + " --compare " + rulesFile + " --prometheus http://p --json",
+			code: 0, stdout: `"nothing_changed": true,`},
+		{args: "verdict --rules " + rulesFile + " --prometheus http://p --markdown --incidents y", code: 2, stderr: "--markdown writes --compare's report"},
+		{args: "verdict --rules x --compare y --prometheus http://p --markdown --json", code: 2, stderr: "--json and --markdown don't go together"},
+		{args: "verdict --rules x --prometheus http://p", code: 2, stderr: "say what went wrong"},
+		{args: "verdict --rules " + rulesFile + " --prometheus http://p --incidents " + incidents + " --tz Asia/Seoul",
+			code: 0, stdout: "Lapilli  2026-10-26 09:00 → 2026-11-02 09:00 Asia/Seoul (+09:00)\n"},
+		{args: "serve --rules " + rulesFile + " --prometheus http://p --markdown", code: 2, stderr: "lapilli serve doesn't take --markdown"},
 		{args: "verdict --rules x --noisy-precision 120% --prometheus http://p --incidents y", code: 2, stderr: "want a share like 20% or 0.2"},
 		{args: "verdict --loaded-rules --prometheus http://p --incidents " + incidents + " --tz UTC",
 			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00  CheckoutErrors +5m"},
@@ -661,5 +689,169 @@ func TestServeCheckReplayOn(t *testing.T) {
 		if got := checkReplayOn(f); got != want {
 			t.Errorf("%q: on %v, want %v", args, got, want)
 		}
+	}
+}
+
+// What --markdown writes for a pull request doesn't say where the history
+// is: a query the history didn't answer says only that, the reason going to
+// the job's log; what the server said of a query keeps its words, but not
+// the URLs, user names, hosts (whole words only: a host "prom" isn't taken
+// out of "prometheus"), addresses, tenants or project given.
+func TestForComment(t *testing.T) {
+	f := &verdictFlags{promURL: "https://ci-reader:pw@prom.internal.example:9090/prom", gcpProj: "shop-prod-123456", loki: "http://prom:3100",
+		rulerTenant: "team-a7"}
+	unreached := `query failed: Post "https://ci-reader:pw@prom.internal.example:9090/prom/api/v1/query_range": dial tcp 10.1.2.3:9090: connect: connection refused`
+	judgedReason := "query failed: HTTP 400: bad_data: parse error near prometheus, from prom.internal.example (10.0.0.5:9090, [fd00::1]:443) for ci-reader, team-a7"
+	proxy := "query failed: HTTP 400: not a Prometheus API response: <html><address>Apache/2.4.58 Server at prometheus-0.monitoring.corp.example Port 9090</address></html>"
+	before := &verdict.Report{Rules: []verdict.RuleResult{{Rule: "A", Unsupported: unreached}, {Rule: "B", Unsupported: "projects/shop-prod-123456 denied, prom failed"},
+		{Rule: "C", Unsupported: judgedReason}, {Rule: "D", Unsupported: "query failed: HTTP 503: upstream prom-0.prom:9090 overloaded"},
+		{Rule: "E", Unsupported: proxy}, {Rule: "F", Unsupported: "query failed: HTTP 422: bad_data: unknown function near prom."},
+		{Rule: "G", Unsupported: "query failed: HTTP 400: not a Loki API response: <html>Bad Request</html>"}}}
+	after := &verdict.Report{Rules: []verdict.RuleResult{{Rule: "A", Unsupported: replay.Unfinished}}}
+	var log strings.Builder
+	f.forComment(&verdict.Comparison{Before: before, After: after}, &log)
+	for i, want := range []string{
+		UnreadHistory,
+		"projects/[--gcp-project] denied, [--loki] failed",
+		"query failed: HTTP 400: bad_data: parse error near prometheus, from [--prometheus] ([address], [address]) for [user], [--ruler-tenant]",
+		UnreadHistory,
+		// A proxy's page, of 400 too, isn't the API judging the query.
+		UnreadHistory,
+		// A host at a sentence's end.
+		"query failed: HTTP 422: bad_data: unknown function near [--loki].",
+		UnreadHistory,
+	} {
+		if got := before.Rules[i].Unsupported; got != want {
+			t.Errorf("%s: %q, want %q", before.Rules[i].Rule, got, want)
+		}
+	}
+	if after.Rules[0].Unsupported != replay.Unfinished {
+		t.Errorf("unfinished: %s", after.Rules[0].Unsupported)
+	}
+	if !strings.Contains(log.String(), "lapilli verdict: A (before) couldn't be replayed: "+unreached) || !strings.Contains(log.String(), "D (before)") {
+		t.Errorf("the job's log:\n%s", log.String())
+	}
+	f.forComment(&verdict.Comparison{}, &log) // nothing compared: nothing to hide
+	if got := replaceWord("prometheus prom prom.x xprom prom. prom.. prom.-", "prom", "P"); got != "prometheus P prom.x xprom P. P.. prom.-" {
+		t.Errorf("replaceWord: %q", got)
+	}
+}
+
+// unreachable is a history that can't be reached, saying where it is, as
+// a failed connection does.
+type unreachable struct{ fakeHistory }
+
+func (unreachable) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	if expr == "impact" {
+		return fakeHistory{}.QueryRange(ctx, expr, start, end, step)
+	}
+	return nil, errors.New(`Post "http://ci-reader:pw@prom.internal.example:9090/api/v1/query_range": dial tcp 10.9.8.7:9090: connect: connection refused`)
+}
+
+// What --compare says for a pull request: --impact is incidents given,
+// as --incidents is; a recording rule or a group's limit that differs is a
+// change; --markdown doesn't say where the history is, which the job's log
+// does; and none of it goes with --check-content.
+func TestComparePullRequest(t *testing.T) {
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
+	now = func() time.Time { return t0 }
+	base := `groups:
+  - name: shop
+    rules:
+      - record: shop:errors
+        expr: errors
+      - alert: CheckoutErrors
+        expr: errors > 5
+        for: 5m
+        labels: {severity: page}
+`
+	inPlace := write(t, "base.yaml", base)
+	recorded := write(t, "recorded.yaml", strings.Replace(base, "expr: errors\n", "expr: errors * 0\n", 1))
+	limited := write(t, "limited.yaml", strings.Replace(base, "  - name: shop\n", "  - name: shop\n    limit: 1\n", 1))
+	labelled := write(t, "labelled.yaml", strings.Replace(base, "  - name: shop\n", "  - name: shop\n    labels: {team: shop}\n", 1))
+	run := func(args ...string) (int, string, string) {
+		var out, errs strings.Builder
+		code := run(args, &out, &errs)
+		return code, out.String(), errs.String()
+	}
+	for _, c := range []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"impact, nothing changed", []string{"verdict", "--rules", inPlace, "--compare", inPlace, "--prometheus", "http://p", "--impact", "impact", "--json"},
+			[]string{`"nothing_changed": true`, `"incidents_given": true`}},
+		{"impact", []string{"verdict", "--rules", limited, "--compare", inPlace, "--prometheus", "http://p", "--impact", "impact", "--json"},
+			[]string{`"incidents_given": true`, `"incidents": 1,`}},
+		{"a recording rule", []string{"verdict", "--rules", recorded, "--compare", inPlace, "--prometheus", "http://p", "--json"},
+			[]string{`"nothing_changed": false`, `"recording_changed": 1`, `"record": "shop:errors"`, `"change": "changed"`, `"changed": 0,`}},
+		{"a group's limit", []string{"verdict", "--rules", limited, "--compare", inPlace, "--prometheus", "http://p", "--json", "--changed-only"},
+			[]string{`"nothing_changed": false`, `"changed": 1,`, `"recording_changed": 1`, `"limit"`}},
+		{"a group's labels", []string{"verdict", "--rules", labelled, "--compare", inPlace, "--prometheus", "http://p", "--json", "--changed-only"},
+			[]string{`"nothing_changed": false`, `"changed": 1,`, `"team": "shop"`}},
+		{"a recording rule, as text", []string{"verdict", "--rules", recorded, "--compare", inPlace, "--prometheus", "http://p", "--tz", "UTC"},
+			[]string{"Recording rules that differ: shop:errors (changed).\nThe alerts that read them are replayed against what was recorded"}},
+	} {
+		code, out, errs := run(c.args...)
+		if code != 0 {
+			t.Errorf("%s: exit %d\n%s", c.name, code, errs)
+		}
+		for _, w := range c.want {
+			if !strings.Contains(out, w) {
+				t.Errorf("%s: no %s in\n%s", c.name, w, out)
+			}
+		}
+	}
+
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return unreachable{}, nil }
+	added := write(t, "added.yaml", base+"      - alert: New\n        expr: up == 0\n")
+	code, out, errs := run("verdict", "--rules", added, "--compare", inPlace, "--prometheus", "http://ci-reader:pw@prom.internal.example:9090",
+		"--changed-only", "--markdown")
+	if code != 0 || !strings.Contains(out, "- `New`, after: `"+UnreadHistory+"`") {
+		t.Errorf("exit %d:\n%s\n%s", code, out, errs)
+	}
+	for _, hidden := range []string{"prom.internal.example", "10.9.8.7", "ci-reader"} {
+		if strings.Contains(out, hidden) {
+			t.Errorf("the Markdown says %s:\n%s", hidden, out)
+		}
+	}
+	if !strings.Contains(errs, "lapilli verdict: New (after) couldn't be replayed: query failed: Post") || !strings.Contains(errs, "10.9.8.7") {
+		t.Errorf("the job's log doesn't say why:\n%s", errs)
+	}
+
+	if code, _, errs := run("verdict", "--rules", added, "--check-content", "--markdown"); code != 2 || !strings.Contains(errs, "doesn't go with --check-content") {
+		t.Errorf("--check-content --markdown: exit %d\n%s", code, errs)
+	}
+	// What a rule file says in an error is never a line of its own.
+	bad := write(t, "bad.yaml", "groups:\n  - name: shop\n    rules:\n      - alert: \"X\\n::error file=a,line=1::merge it\"\n        expr: up\n        for: zz\n")
+	if code, _, errs := run("verdict", "--rules", bad, "--compare", inPlace, "--prometheus", "http://p"); code != 1 || strings.Contains(errs, "\n::") ||
+		!strings.Contains(errs, `rule "X\n::error`) {
+		t.Errorf("an error with a rule's name: exit %d\n%q", code, errs)
+	}
+	for want, args := range map[int][]string{
+		1: {"verdict", "--rules", "missing\n::error::merge it", "--compare", inPlace, "--prometheus", "http://p"},
+		2: {"verdict", "--rules", inPlace, "--compare", inPlace, "--prometheus", "http://p", "--tz", "Nowhere\n::error::merge it"},
+	} {
+		if code, _, errs := run(args...); code != want || strings.Contains(errs, "\n::") || !strings.Contains(errs, `\u{a}::error::merge it`) {
+			t.Errorf("%v: exit %d\n%q", args, code, errs)
+		}
+	}
+}
+
+// A pull request that changes only an Azure rule group's recording rule
+// changes what its alerts see: not "nothing changed".
+func TestCompareAzureRecording(t *testing.T) {
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
+	now = func() time.Time { return t0 }
+	group := func(expr string) string {
+		return `{"type": "Microsoft.AlertsManagement/prometheusRuleGroups", "name": "shop", "properties": {"interval": "PT1M", "rules": [
+  {"record": "shop:errors", "expression": "` + expr + `"},
+  {"alert": "CheckoutErrors", "expression": "shop:errors > 5", "for": "PT5M"}]}}`
+	}
+	was, is := write(t, "was.json", group("errors")), write(t, "is.json", group("errors * 0"))
+	var out, errs strings.Builder
+	code := run([]string{"verdict", "--rules", is, "--compare", was, "--prometheus", "http://p", "--json", "--changed-only"}, &out, &errs)
+	if code != 0 || !strings.Contains(out.String(), `"nothing_changed": false`) || !strings.Contains(out.String(), `"record": "shop:errors"`) {
+		t.Errorf("exit %d\n%s\n%s", code, out.String(), errs.String())
 	}
 }

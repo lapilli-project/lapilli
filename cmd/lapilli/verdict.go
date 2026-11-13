@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"lapilli.dev/internal/cloud"
 	"lapilli.dev/internal/content"
@@ -112,9 +115,16 @@ Before a change to the rules:
   --compare FILE      the rules in place, to set --rules beside (repeatable):
                       both are replayed over the same period, and the rules
                       that differ and the incidents caught differently are
-                      shown before → after
+                      shown before → after. Without --incidents or --impact,
+                      the firings are counted, not judged
   --changed-only      with --compare, replay only the rules that differ:
                       much faster, but an incident shows only their catches
+  --markdown          with --compare, the report as Markdown, to post on a
+                      pull request or a merge request: under 64,000
+                      characters, and what comes from the rules written so
+                      that it can't format, link or mention anything. Its
+                      first line, and --json's "summary", say whether
+                      anything changed, and how much (see the README)
 
 What the rules say:
   --check-content     check what each rule says when it fires, and how it is
@@ -172,7 +182,7 @@ Is the replay right?
                       replayed (CloudWatch, Google Cloud, Azure), which keep
                       no series: each tied by its alarm_id, or its name
 
-What went wrong:
+What went wrong (with --compare, if you have them):
   --incidents FILE    incidents written down, in YAML; see below
   --impact PROMQL     an expression that returns something while users are
                       hurt, such as a 5xx ratio above 1%; its windows become
@@ -255,7 +265,10 @@ Output:
   --json              the whole report, every firing included
   --metrics           Prometheus metrics, for node_exporter's textfile
                       collector or Pushgateway
-  --tz ZONE           show times in this zone (default: local)
+  --tz ZONE           show times in this zone, an IANA name such as
+                      Asia/Seoul or UTC (default: the machine's own, as TZ
+                      or /etc/localtime says); the header names it, with
+                      its offset
   --push URL          also put the metrics on this Pushgateway, as job lapilli;
                       or in the group a URL ending /metrics/job/... names
   --slack-webhook-file FILE
@@ -278,10 +291,14 @@ lapilli only reads history and files. It sends the report nowhere but to
 `
 
 type verdictFlags struct {
-	rules              []ruleFile
-	rulesHistory       string
-	rulesSelect        rules.Selector
-	picked             rules.Picked // what reading the rule files passed over
+	rules        []ruleFile
+	rulesHistory string
+	rulesSelect  rules.Selector
+	picked       rules.Picked // what reading the rule files passed over
+	// recorded are, with --compare, the recording rules the files read
+	// held; passedOver what each set's files passed over, as said.
+	recorded           []rules.Recording
+	passedOver         map[string]string
 	loadedRules        bool
 	grafana, grafanaTk string
 
@@ -319,6 +336,7 @@ type verdictFlags struct {
 	ruleRE              *regexp.Regexp
 	late                rules.Lateness
 	json, metrics       bool
+	markdown            bool
 	loc                 *time.Location
 	timeout             time.Duration
 	parallel            int
@@ -381,6 +399,9 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			continue
 		case "--json":
 			f.json = true
+			continue
+		case "--markdown":
+			f.markdown = true
 			continue
 		case "--metrics":
 			f.metrics = true
@@ -723,7 +744,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			on   bool
 			flag string
 		}{{f.firings != "", "--firings"}, {len(f.compare) > 0, "--compare"}, {f.changedOnly, "--changed-only"},
-			{f.json, "--json"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
+			{f.json, "--json"}, {f.markdown, "--markdown"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"}} {
 			if no.on {
@@ -798,6 +819,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--compare doesn't go with --metrics or --push")
 	case f.changedOnly && len(f.compare) == 0:
 		return nil, errors.New("--changed-only goes with --compare")
+	case f.markdown && len(f.compare) == 0:
+		return nil, errors.New("--markdown writes --compare's report, for a pull request: it goes with --compare")
+	case f.markdown && f.json:
+		return nil, errors.New("--json and --markdown don't go together")
 	case validHistory(f) != nil:
 		return nil, validHistory(f)
 	case needsHistory && f.promURL == "" && f.gcpProj == "":
@@ -806,7 +831,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--from and --to go together")
 	case !f.from.IsZero() && !f.to.After(f.from):
 		return nil, errors.New("--to must be after --from")
-	case f.incidents == "" && f.impact == "" && !f.checkReplay:
+	case f.incidents == "" && f.impact == "" && !f.checkReplay && len(f.compare) == 0:
+		// --compare counts the firings on each side even with nothing to
+		// judge them against: what a change to the rules does to how often
+		// they fire is worth knowing alone.
 		return nil, errors.New("say what went wrong: --incidents FILE, --impact PROMQL, or both")
 	}
 	return f, nil
@@ -839,6 +867,8 @@ func validContent(f *verdictFlags, sources int) error {
 		return errors.New("--check-content doesn't go with --check-replay")
 	case len(f.compare) > 0 || f.changedOnly:
 		return errors.New("--check-content checks the rules given: leave out --compare")
+	case f.markdown:
+		return errors.New("--markdown writes --compare's report, for a pull request: it doesn't go with --check-content")
 	case f.metrics || f.push != "" || f.slackFile != "":
 		return errors.New("--check-content is for you to read, or --json: it doesn't go with --metrics, --push or --slack-webhook-file")
 	case f.grafanaTk != "" && f.grafana == "":
@@ -936,13 +966,16 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			return 0
 		}
 	}
+	// What an error says can hold what a rule file or a flag does, a line
+	// break among it: shown as \u{...}, never a line of its own, which a
+	// CI system could read as a command.
 	f, err := parseVerdictFlags(args)
 	if err != nil {
-		fmt.Fprintf(stderr, "lapilli verdict: %v\nRun \"lapilli verdict -h\" for the options.\n", err)
+		fmt.Fprintf(stderr, "lapilli verdict: %s\nRun \"lapilli verdict -h\" for the options.\n", verdict.Clean(err.Error()))
 		return 2
 	}
 	fail := func(err error) int {
-		fmt.Fprintf(stderr, "lapilli verdict: %v\n", err)
+		fmt.Fprintf(stderr, "lapilli verdict: %s\n", verdict.Clean(err.Error()))
 		return 1
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -960,7 +993,13 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
-	f.sayPicked(stderr)
+	var recordedIs []rules.Recording
+	if len(f.compare) > 0 {
+		f.sayPicked(stderr, "--rules")
+		recordedIs, f.recorded = f.recorded, nil
+	} else {
+		f.sayPicked(stderr, "")
+	}
 	// On-call schedules, read once: their turns, each person's hours.
 	if f.onCall != nil {
 		for _, sc := range f.onCall.Schedules {
@@ -996,7 +1035,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			f.replaying().Apply(rs)
 			was = append(was, rs...)
 		}
-		f.sayPicked(stderr)
+		f.sayPicked(stderr, "--compare")
 	}
 	// Rules that share a name are told apart alike in every set, so a
 	// rule's name doesn't hang on its neighbours in one of them.
@@ -1011,11 +1050,17 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			is = versions[0].Rules
 		}
 		same, before, after = source.Split(was, is)
-		if len(before)+len(after) == 0 {
-			if f.json {
-				err = verdict.JSON(stdout, &verdict.Comparison{From: f.opts.From, To: f.opts.To, Same: len(same),
-					Rules: []verdict.RuleChange{}, Incidents: []verdict.IncidentChange{}})
-			} else {
+		recs := recordingChanges(f.recorded, recordedIs)
+		if len(before)+len(after) == 0 && len(recs) == 0 {
+			c := &verdict.Comparison{From: f.opts.From, To: f.opts.To, Same: len(same), ChangedOnly: f.changedOnly,
+				Rules: []verdict.RuleChange{}, Incidents: []verdict.IncidentChange{}, PassedOver: f.passedOver}
+			c.Summarize(f.incidents != "" || f.impact != "")
+			switch {
+			case f.json:
+				err = verdict.JSON(stdout, c)
+			case f.markdown:
+				err = verdict.CompareMarkdown(stdout, c, f.loc)
+			default:
 				_, err = fmt.Fprintf(stdout, "Nothing that decides when the %d rules fire has changed: nothing to replay.\n", len(same))
 			}
 			if err != nil {
@@ -1078,6 +1123,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			verdict.Judge(slices.Concat(ran[0], ran[2]), slices.Concat(fired[0], fired[2]), incs, o),
 			changed, len(was)-len(before))
 		cmp.ChangedOnly = f.changedOnly
+		cmp.Recording = recordingChanges(f.recorded, recordedIs)
+		cmp.PassedOver = f.passedOver
+		cmp.Summarize(f.incidents != "" || f.impact != "")
 	case len(versions) > 0:
 		known, fs = replay.Run(ctx, h, versions, f.opts.From, f.opts.To, f.step, f.parallel)
 	case f.alerts:
@@ -1153,6 +1201,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	switch {
 	case f.json && cmp != nil:
 		err = verdict.JSON(stdout, cmp)
+	case f.markdown:
+		f.forComment(cmp, stderr)
+		err = verdict.CompareMarkdown(stdout, cmp, f.loc)
 	case f.json:
 		err = verdict.JSON(stdout, rep)
 	case f.metrics:
@@ -1203,6 +1254,111 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// forComment readies the reasons rules couldn't be replayed for
+// --markdown, a comment on a pull request, which more people read than the
+// job's log. A query that failed for any reason but the server judging it
+// (HTTP 400 or 422, as the API itself says it: a parse error, a bad
+// expression; not a proxy's page), which is to say for want of reaching
+// the history (a connection, a credential, the server failing), says only
+// that, its whole reason going to the job's log. The
+// rest has where the history is taken out of it: the URLs given, the user
+// names in them and their hosts, each as a whole word, any IP address with
+// its port, the tenants, and a Google Cloud project.
+func (f *verdictFlags) forComment(c *verdict.Comparison, stderr io.Writer) {
+	type hid struct{ val, as string }
+	var hide []hid
+	for _, w := range []struct{ flag, val string }{{"--prometheus", f.promURL}, {"--loki", f.loki}, {"--grafana", f.grafana},
+		{"--ruler", f.ruler}, {"--gcp-project", f.gcpProj}, {"--ruler-tenant", f.rulerTenant}, {"--loki-tenant", f.lokiTenant}} {
+		if w.val == "" {
+			continue
+		}
+		hide = append(hide, hid{w.val, "[" + w.flag + "]"})
+		if u, err := url.Parse(w.val); err == nil && u.Host != "" {
+			hide = append(hide, hid{u.Host, "[" + w.flag + "]"}, hid{u.Hostname(), "[" + w.flag + "]"})
+			if u.User != nil && u.User.Username() != "" {
+				hide = append(hide, hid{u.User.Username(), "[user]"})
+			}
+		}
+	}
+	slices.SortStableFunc(hide, func(a, b hid) int { return len(b.val) - len(a.val) })
+	scrub := func(s string) string {
+		s = userinfo.ReplaceAllString(s, "$1")
+		for _, h := range hide {
+			s = replaceWord(s, h.val, h.as)
+		}
+		return address.ReplaceAllString(s, "[address]")
+	}
+	for _, rep := range []*verdict.Report{c.Before, c.After} {
+		if rep == nil {
+			continue
+		}
+		side := "after"
+		if rep == c.Before {
+			side = "before"
+		}
+		for i := range rep.Rules {
+			r := &rep.Rules[i]
+			switch {
+			case r.Unsupported == "" || r.Unsupported == replay.Unfinished:
+			case strings.HasPrefix(r.Unsupported, "query failed: ") && (!judged.MatchString(r.Unsupported) || notAPI.MatchString(r.Unsupported)):
+				fmt.Fprintf(stderr, "lapilli verdict: %s (%s) couldn't be replayed: %s\n", verdict.Clean(r.Rule), side, verdict.Clean(r.Unsupported))
+				r.Unsupported = UnreadHistory
+			default:
+				r.Unsupported = scrub(r.Unsupported)
+			}
+		}
+	}
+}
+
+// UnreadHistory is, in --markdown, why a rule whose query the history
+// didn't answer couldn't be replayed.
+const UnreadHistory = "query failed: the history couldn't be read; the job's log says why"
+
+var (
+	// judged is a query the server read and refused, as the API says it,
+	// parsed: what it says is of the query, the pull request's.
+	judged = regexp.MustCompile(`^query failed: HTTP (400|422): `)
+	// notAPI is an answer that isn't the API's, a page a proxy before it
+	// gave, of 400 or any: what it says is of where the history is.
+	notAPI = regexp.MustCompile(`^query failed: HTTP [0-9]+: not an? (Prometheus|Loki) API response: `)
+	// userinfo is a URL's user and password.
+	userinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s"']*@`)
+	// address is an IP address, with its port if it has one.
+	address = regexp.MustCompile(`\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*\](:[0-9]+)?|\b([0-9]{1,3}\.){3}[0-9]{1,3}(:[0-9]+)?\b`)
+)
+
+// replaceWord replaces in s each old that is a whole word, with with: no
+// letter, digit, dot, dash or underscore before it, and none but a dot
+// after it, a full stop, which no letter, digit, dash or underscore
+// follows. A host "prom" isn't taken out of "prometheus" or "prom.example",
+// but is out of "failed at prom.": as recipes/backtest/lib.sh takes it out.
+func replaceWord(s, old, with string) string {
+	if old == "" {
+		return s
+	}
+	alnum := func(r rune) bool { return r == '-' || r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) }
+	var b strings.Builder
+	for {
+		i := strings.Index(s, old)
+		if i < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		before, _ := utf8.DecodeLastRuneInString(s[:i])
+		rest := s[i+len(old):]
+		after, n := utf8.DecodeRuneInString(rest)
+		next, _ := utf8.DecodeRuneInString(rest[n:])
+		whole := (i == 0 || !(before == '.' || alnum(before))) && (rest == "" || !(alnum(after) || after == '.' && alnum(next)))
+		b.WriteString(s[:i])
+		if whole {
+			b.WriteString(with)
+		} else {
+			b.WriteString(old)
+		}
+		s = s[i+len(old):]
+	}
 }
 
 // replaying is how the rules are replayed: --late and --scrape-interval,
@@ -1423,12 +1579,59 @@ var newRuler = func(ctx context.Context, f *verdictFlags, stderr io.Writer) (*so
 }
 
 // sayPicked says what reading the rule files passed over, if anything, and
-// forgets it.
-func (f *verdictFlags) sayPicked(stderr io.Writer) {
+// forgets it. side is the flag that named them, when there are two sets
+// of rules to tell apart: --rules or --compare.
+func (f *verdictFlags) sayPicked(stderr io.Writer, side string) {
 	if said := f.picked.String(); said != "" {
-		fmt.Fprintf(stderr, "lapilli verdict: the rule files read held %s: passed over\n", said)
+		files := "the rule files read"
+		if side != "" {
+			files = "the rule files " + side + " read"
+			if f.passedOver == nil {
+				f.passedOver = map[string]string{}
+			}
+			f.passedOver[strings.TrimPrefix(side, "--")] = said
+		}
+		fmt.Fprintf(stderr, "lapilli verdict: %s held %s: passed over\n", files, said)
 	}
 	f.picked = rules.Picked{}
+}
+
+// recordingChanges are the recording rules that differ between was, those
+// in place, and is, those proposed: by what each records and its group,
+// changed when both have it otherwise, added or removed when one hasn't.
+func recordingChanges(was, is []rules.Recording) []verdict.RecordingChange {
+	type id struct{ record, group string }
+	keys := func(rs []rules.Recording) map[id][]string {
+		m := map[id][]string{}
+		for _, r := range rs {
+			k := id{r.Record, r.Group}
+			m[k] = append(m[k], r.Key())
+		}
+		for k := range m {
+			slices.Sort(m[k])
+		}
+		return m
+	}
+	before, after := keys(was), keys(is)
+	var out []verdict.RecordingChange
+	for k, b := range before {
+		a, ok := after[k]
+		switch {
+		case !ok:
+			out = append(out, verdict.RecordingChange{Record: k.record, Group: k.group, Change: "removed"})
+		case !slices.Equal(a, b):
+			out = append(out, verdict.RecordingChange{Record: k.record, Group: k.group, Change: "changed"})
+		}
+	}
+	for k := range after {
+		if _, ok := before[k]; !ok {
+			out = append(out, verdict.RecordingChange{Record: k.record, Group: k.group, Change: "added"})
+		}
+	}
+	slices.SortFunc(out, func(a, b verdict.RecordingChange) int {
+		return cmp.Or(strings.Compare(a.Record, b.Record), strings.Compare(a.Group, b.Group))
+	})
+	return out
 }
 
 // loadVersions reads the --rules files, one version of the rules for each
@@ -1478,7 +1681,12 @@ func loadVersions(f *verdictFlags) ([]replay.Version, error) {
 // keeps, whose names match --rule, or all of them; what it passed over is
 // added to f.picked.
 func loadRules(f *verdictFlags, path string) ([]rules.Rule, error) {
-	rs, _, picked, err := rules.ReadPicked(path, rules.Picking{Select: f.rulesSelect})
+	pick := rules.Picking{Select: f.rulesSelect}
+	if len(f.compare) > 0 {
+		// Set beside each other, what each set records is compared too.
+		pick.Recordings = &f.recorded
+	}
+	rs, _, picked, err := rules.ReadPicked(path, pick)
 	f.picked.Add(picked)
 	if errors.Is(err, rules.ErrNoneSelected) {
 		err = fmt.Errorf("--rules-select %w", err)

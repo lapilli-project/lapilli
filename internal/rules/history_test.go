@@ -128,7 +128,9 @@ func runRecipeIn(t *testing.T, dir string, env ...string) (string, error) {
 	}
 	cmd := exec.Command("sh", script)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), append([]string{"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1"}, env...)...)
+	// A HOME of the test's own: whatever the recipe, or what it runs,
+	// writes there stays in the test's files.
+	cmd.Env = append(os.Environ(), append([]string{"HOME=" + t.TempDir(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1"}, env...)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	err = cmd.Run()

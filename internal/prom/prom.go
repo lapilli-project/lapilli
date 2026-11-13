@@ -12,6 +12,7 @@ import (
 	"io"
 	"maps"
 	"math"
+	"mime"
 	"net/http"
 	"net/url"
 	"slices"
@@ -147,6 +148,13 @@ func (c *Client) QueryRange(ctx context.Context, expr string, start, end time.Ti
 		out = append(out, *byKey[k])
 	}
 	return out, nil
+}
+
+// lokiText reports whether an answer is Loki's own plain text, as it says
+// what went wrong: text/plain, with no markup, which a proxy's page has.
+func lokiText(resp *http.Response, msg string) bool {
+	mt, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	return mt == "text/plain" && !strings.Contains(msg, "<")
 }
 
 // APIError is an error answer from the API.
@@ -333,8 +341,9 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 		if len(msg) > 200 {
 			msg = msg[:200]
 		}
-		if c.loki && resp.StatusCode/100 != 2 {
-			// Loki says what went wrong in plain text.
+		if c.loki && resp.StatusCode/100 != 2 && lokiText(resp, msg) {
+			// Loki says what went wrong in plain text; a page, from a
+			// proxy before it, isn't Loki's.
 			return nil, &APIError{Status: resp.StatusCode, Msg: msg}
 		}
 		what := "a Prometheus"

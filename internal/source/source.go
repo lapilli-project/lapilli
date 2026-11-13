@@ -268,14 +268,15 @@ func GrafanaNotifications(ctx context.Context, base, tokenFile, agent string) (t
 }
 
 // Split sorts the rules in place (was) and those proposed (is) into the
-// rules alike in both, those only in place, and those only proposed.
+// rules alike in both, those only in place, and those only proposed: alike
+// as a whole (rules.Rule.Whole), their groups' labels and limits too.
 func Split(was, is []rules.Rule) (same, before, after []rules.Rule) {
 	left := map[string]int{}
 	for _, r := range was {
-		left[r.Key()]++
+		left[r.Whole()]++
 	}
 	for _, r := range is {
-		if k := r.Key(); left[k] > 0 {
+		if k := r.Whole(); left[k] > 0 {
 			left[k]--
 			same = append(same, r)
 		} else {
@@ -283,7 +284,7 @@ func Split(was, is []rules.Rule) (same, before, after []rules.Rule) {
 		}
 	}
 	for _, r := range was {
-		if k := r.Key(); left[k] > 0 {
+		if k := r.Whole(); left[k] > 0 {
 			left[k]--
 			before = append(before, r)
 		}

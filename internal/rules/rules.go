@@ -53,6 +53,15 @@ type Rule struct {
 	// QueryOffset is how long before each evaluation a Prometheus rule's
 	// query is asked at: its group's query_offset.
 	QueryOffset time.Duration
+	// GroupLabels and Limit are its group's labels and limit, which
+	// Prometheus 3 gives each of its rules: the labels under the rule's own
+	// (AlertLabels); past the limit, as many alerts at once, it drops every
+	// alert of the rule and marks it failed, which a replay doesn't
+	// (UnseenLimit). Neither is in Key, which a rule's name, its version in
+	// lapilli serve and a proposal's hash hang on, as they did before
+	// Lapilli read them: Whole has them, for what a comparison compares.
+	GroupLabels map[string]string
+	Limit       int
 	// Phase, for a rule read from an API that runs it, is where its group
 	// is placed within its interval, as the group's last evaluation there
 	// says, to the second: it is evaluated at times Phase past a whole
@@ -250,10 +259,13 @@ func (r Rule) AlertName() string {
 	return r.Name
 }
 
-// Key is all of a rule that decides when it fires and how it is counted:
-// two rules with the same key fire alike, whichever file they came from.
-// A rule's namespace and its group's query_offset are in it only when it
-// has them, so every rule read otherwise keeps the key it had.
+// Key is a rule as lapilli serve knows it: what its versions, names and
+// proposals hang on. It is all of a rule that decides when it fires and how
+// it is counted but its group's labels and limit, which came later, and
+// which Whole adds: two rules with the same key fire alike but for those,
+// whichever file they came from. A rule's namespace and its group's
+// query_offset are in it only when it has them, so every rule read
+// otherwise keeps the key it had.
 func (r Rule) Key() string {
 	k := fmt.Sprintf("%q %q %q %d %d %d %q %q %q %q", r.Name, r.Group, r.Expr, r.For, r.KeepFiringFor, r.Interval,
 		sse.LabelKey(r.Labels), r.UID, r.Digest, r.Unsupported)
@@ -272,6 +284,31 @@ func (r Rule) Key() string {
 	return k
 }
 
+// Whole is all of a rule that decides when it fires and how it is counted:
+// Key, with the labels its alerts carry, its group's under its own, and its
+// group's limit. Two rules with the same whole fire alike, whether read
+// from a file, which gives its group's labels apart, or from an API, which
+// gives them in the rule's.
+func (r Rule) Whole() string {
+	if len(r.GroupLabels) == 0 && r.Limit == 0 {
+		return r.Key()
+	}
+	w := r
+	w.Labels, w.GroupLabels = r.AlertLabels(), nil
+	return w.Key() + fmt.Sprintf(" limit %d", r.Limit)
+}
+
+// AlertLabels are the labels a rule's alerts carry: its group's, which its
+// own override, as Prometheus 3 adds them. Labels when its group has none.
+func (r Rule) AlertLabels() map[string]string {
+	if len(r.GroupLabels) == 0 {
+		return r.Labels
+	}
+	l := maps.Clone(r.GroupLabels)
+	maps.Copy(l, r.Labels)
+	return l
+}
+
 // What a replay of a rule can't see, as Unseen says.
 const (
 	// UnseenLate is a rule on a cloud's own monitoring, replayed without
@@ -286,6 +323,10 @@ const (
 	// condition, failed when it was replayed (Failed): whether it returned
 	// anything, which Grafana's no data hangs on, isn't known then.
 	UnseenFailed = "query-failed"
+	// UnseenLimit is a Prometheus rule in a group with a limit, which a
+	// replay doesn't hold it to: past as many alerts at once, Prometheus
+	// drops them all.
+	UnseenLimit = "limit"
 )
 
 // Unseen is what a replay of the rule can't see, which may have made it
@@ -303,6 +344,9 @@ func (r Rule) Unseen() []string {
 	}
 	if len(r.Failed) > 0 && r.Unsupported == "" {
 		out = append(out, UnseenFailed)
+	}
+	if r.Limit > 0 && r.Unsupported == "" {
+		out = append(out, UnseenLimit)
 	}
 	return out
 }
@@ -429,7 +473,11 @@ func Read(path string) ([]Rule, []Doc, error) {
 
 // Parse reads every alert rule in a document, which may hold several YAML
 // documents.
-func Parse(b []byte) ([]Rule, error) {
+func Parse(b []byte) ([]Rule, error) { return parse(b, nil) }
+
+// parse is Parse, adding the recording rules it reads to rec, when not
+// nil.
+func parse(b []byte, rec *[]Recording) ([]Rule, error) {
 	dec := yaml.NewDecoder(strings.NewReader(string(b)))
 	var out []Rule
 	found := false
@@ -449,7 +497,7 @@ func Parse(b []byte) ([]Rule, error) {
 		}
 		for _, d := range docs {
 			m, _ := d.(map[string]any)
-			rs, ok, err := parseDoc(m)
+			rs, ok, err := parseDocRec(m, rec)
 			if err != nil {
 				return nil, err
 			}
@@ -463,7 +511,11 @@ func Parse(b []byte) ([]Rule, error) {
 	return out, nil
 }
 
-func parseDoc(doc map[string]any) ([]Rule, bool, error) {
+func parseDoc(doc map[string]any) ([]Rule, bool, error) { return parseDocRec(doc, nil) }
+
+// parseDocRec is parseDoc, adding the recording rules it reads to rec, when
+// not nil: those of Prometheus's form, wherever they are.
+func parseDocRec(doc map[string]any, rec *[]Recording) ([]Rule, bool, error) {
 	switch {
 	case doc == nil:
 		return nil, false, nil
@@ -473,7 +525,7 @@ func parseDoc(doc map[string]any) ([]Rule, bool, error) {
 		found := false
 		for _, it := range list(doc["items"]) {
 			m, _ := it.(map[string]any)
-			rs, ok, err := parseDoc(m)
+			rs, ok, err := parseDocRec(m, rec)
 			if err != nil {
 				return nil, true, err
 			}
@@ -491,9 +543,13 @@ func parseDoc(doc map[string]any) ([]Rule, bool, error) {
 		data, _ := doc["data"].(map[string]any)
 		for _, k := range sortedKeys(data) {
 			s, _ := data[k].(string)
-			rs, err := Parse([]byte(s))
+			var more []Recording
+			rs, err := parse([]byte(s), &more)
 			if err != nil {
 				continue // not every key holds rules
+			}
+			if rec != nil {
+				*rec = append(*rec, more...)
 			}
 			found = true
 			out = append(out, rs...)
@@ -501,14 +557,14 @@ func parseDoc(doc map[string]any) ([]Rule, bool, error) {
 		return out, found, nil
 	case doc["kind"] == "PrometheusRule":
 		spec, _ := doc["spec"].(map[string]any)
-		rs, err := prometheus(spec)
+		rs, err := prometheus(spec, rec)
 		return rs, true, err
 	case strings.HasPrefix(str(doc["apiVersion"]), "monitoring.googleapis.com/") &&
 		(doc["kind"] == "Rules" || doc["kind"] == "ClusterRules" || doc["kind"] == "GlobalRules"):
 		// Google Cloud Managed Service for Prometheus: spec.groups as
 		// Prometheus writes them. Rules see only their namespace's data.
 		spec, _ := doc["spec"].(map[string]any)
-		rs, err := prometheus(spec)
+		rs, err := prometheus(spec, rec)
 		meta, _ := doc["metadata"].(map[string]any)
 		if ns := str(meta["namespace"]); doc["kind"] == "Rules" && ns != "" {
 			for i := range rs {
@@ -520,7 +576,7 @@ func parseDoc(doc map[string]any) ([]Rule, bool, error) {
 		}
 		return rs, true, err
 	case strings.EqualFold(str(doc["type"]), azureRuleGroup):
-		rs, err := azure(doc)
+		rs, err := azure(doc, rec)
 		return rs, true, err
 	case azureAlertKinds[strings.ToLower(str(doc["type"]))] != "":
 		// az monitor metrics alert list, scheduled-query list,
@@ -542,7 +598,7 @@ func parseDoc(doc map[string]any) ([]Rule, bool, error) {
 		for _, r := range list(doc["resources"]) {
 			m, _ := r.(map[string]any)
 			if strings.EqualFold(str(m["type"]), azureRuleGroup) {
-				rs, err := azure(m)
+				rs, err := azure(m, rec)
 				if err != nil {
 					return nil, true, err
 				}
@@ -570,55 +626,106 @@ func parseDoc(doc map[string]any) ([]Rule, bool, error) {
 		ns, _ := doc["ruleGroupsNamespace"].(map[string]any)
 		b, err := base64.StdEncoding.DecodeString(str(ns["data"]))
 		if err != nil {
-			return nil, true, fmt.Errorf("rule groups namespace %s: %w", str(ns["name"]), err)
+			return nil, true, fmt.Errorf("rule groups namespace %q: %w", str(ns["name"]), err)
 		}
-		rs, err := Parse(b)
+		rs, err := parse(b, rec)
 		if err != nil {
-			return nil, true, fmt.Errorf("rule groups namespace %s: %w", str(ns["name"]), err)
+			return nil, true, fmt.Errorf("rule groups namespace %q: %w", str(ns["name"]), err)
 		}
 		return rs, true, nil
 	case doc["apiVersion"] != nil && hasGrafanaRules(doc):
-		rs, err := grafana(doc)
+		rs, err := grafana(doc, rec)
 		return rs, true, err
 	case doc["groups"] != nil:
-		rs, err := prometheus(doc)
+		rs, err := prometheus(doc, rec)
 		return rs, true, err
 	}
 	return nil, false, nil
 }
 
-// prometheus reads groups of Prometheus rules; recording rules are skipped.
-func prometheus(doc map[string]any) ([]Rule, error) {
+// prometheus reads groups of Prometheus rules: each alert rule with its
+// group's labels and limit (GroupLabels, Limit). Recording rules are added
+// to rec, when not nil, with their group's labels under their own, as
+// Prometheus 3 records them; otherwise passed over.
+func prometheus(doc map[string]any, rec *[]Recording) ([]Rule, error) {
 	var out []Rule
 	for _, g := range list(doc["groups"]) {
 		gm, _ := g.(map[string]any)
 		group := str(gm["name"])
 		interval, err := duration(gm["interval"])
 		if err != nil {
-			return nil, fmt.Errorf("group %s: %w", group, err)
+			return nil, fmt.Errorf("group %q: %w", group, err)
 		}
 		offset, err := duration(gm["query_offset"])
 		if err != nil {
-			return nil, fmt.Errorf("group %s: %w", group, err)
+			return nil, fmt.Errorf("group %q: %w", group, err)
+		}
+		limit := 0
+		if v, ok := toFloat(gm["limit"]); ok && v >= 1 && v < math.MaxInt32 {
+			limit = int(v)
+		}
+		groupLabels := labels(gm["labels"])
+		if len(groupLabels) == 0 {
+			groupLabels = nil
+		}
+		withGroup := func(own any) map[string]string {
+			l := maps.Clone(groupLabels)
+			if l == nil {
+				l = map[string]string{}
+			}
+			maps.Copy(l, labels(own))
+			return l
 		}
 		for _, r := range list(gm["rules"]) {
 			rm, _ := r.(map[string]any)
 			name := str(rm["alert"])
 			if name == "" {
+				if record, _ := rm["record"].(string); record != "" && rec != nil {
+					*rec = append(*rec, Recording{Record: record, Group: group, Expr: strings.TrimSpace(str(rm["expr"])),
+						Labels: withGroup(rm["labels"]), Interval: interval, QueryOffset: offset, Limit: limit})
+				}
 				continue
 			}
-			rule := Rule{Name: name, Group: group, Expr: strings.TrimSpace(str(rm["expr"])), Labels: labels(rm["labels"]), Interval: interval,
-				QueryOffset: offset, Says: annotated(rm["annotations"], TemplatePrometheus)}
+			rule := Rule{Name: name, Group: group, Expr: strings.TrimSpace(str(rm["expr"])), Labels: labels(rm["labels"]), GroupLabels: groupLabels,
+				Interval: interval, QueryOffset: offset, Limit: limit, Says: annotated(rm["annotations"], TemplatePrometheus)}
 			if rule.For, err = duration(rm["for"]); err != nil {
-				return nil, fmt.Errorf("rule %s: %w", name, err)
+				return nil, fmt.Errorf("rule %q: %w", name, err)
 			}
 			if rule.KeepFiringFor, err = duration(rm["keep_firing_for"]); err != nil {
-				return nil, fmt.Errorf("rule %s: %w", name, err)
+				return nil, fmt.Errorf("rule %q: %w", name, err)
 			}
 			out = append(out, rule)
 		}
 	}
 	return out, nil
+}
+
+// Recording is a recording rule: a series it records, from what. A replay
+// reads what it recorded, from the history: a change to one changes what
+// the alerts that read it see from then on, which no replay shows. Read
+// from Prometheus's groups wherever they are (a file, a PrometheusRule, a
+// ConfigMap, Google Cloud's Rules, an Amazon rule groups namespace, a
+// Mimir, Cortex or Loki ruler's file), an Azure rule group, and a Grafana
+// provisioning file; a cloud's own alarms record nothing.
+type Recording struct {
+	Record string
+	Group  string
+	Source string // the file it came from
+	// Expr is what it records: its query; for a Grafana rule, a digest of
+	// its queries and what it records from them.
+	Expr   string
+	Labels map[string]string
+	// Interval, QueryOffset and Limit are its group's, as for a Rule.
+	Interval, QueryOffset time.Duration
+	Limit                 int
+	// Off is a recording rule turned off: in Azure, not enabled; in
+	// Grafana, paused. It records nothing.
+	Off bool
+}
+
+// Key is all of a recording rule that decides what it records.
+func (r Recording) Key() string {
+	return fmt.Sprintf("%q %q %q %q %d %d %d %t", r.Record, r.Group, r.Expr, sse.LabelKey(r.Labels), r.Interval, r.QueryOffset, r.Limit, r.Off)
 }
 
 // azureRuleGroup is the Azure resource type of a group of Prometheus rules.
@@ -628,12 +735,12 @@ const azureRuleGroup = "Microsoft.AlertsManagement/prometheusRuleGroups"
 // A rule's severity, 0 to 4, becomes the label severity=Sev0 to Sev4 unless
 // it has one; its resolve configuration's timeToResolve is taken as how
 // long it stays firing once its condition stops holding.
-func azure(doc map[string]any) ([]Rule, error) {
+func azure(doc map[string]any, rec *[]Recording) ([]Rule, error) {
 	props, _ := doc["properties"].(map[string]any)
 	group := str(doc["name"])
 	interval, err := isoDuration(props["interval"])
 	if err != nil {
-		return nil, fmt.Errorf("rule group %s: %w", group, err)
+		return nil, fmt.Errorf("rule group %q: %w", group, err)
 	}
 	groupOff := props["enabled"] == false
 	var out []Rule
@@ -641,16 +748,26 @@ func azure(doc map[string]any) ([]Rule, error) {
 		rm, _ := r.(map[string]any)
 		name := str(rm["alert"])
 		if name == "" {
+			if record, _ := rm["record"].(string); record != "" && rec != nil {
+				x := Recording{Record: record, Group: group, Expr: strings.TrimSpace(str(rm["expression"])), Labels: labels(rm["labels"]),
+					Interval: interval, Off: groupOff || rm["enabled"] == false}
+				if c := str(props["clusterName"]); c != "" {
+					if scoped, err := Scope(x.Expr, map[string]string{"cluster": c}); err == nil {
+						x.Expr = scoped
+					}
+				}
+				*rec = append(*rec, x)
+			}
 			continue
 		}
 		rule := Rule{Name: name, Group: group, Expr: strings.TrimSpace(str(rm["expression"])), Labels: labels(rm["labels"]), Interval: interval,
 			Says: annotated(rm["annotations"], TemplatePrometheus)}
 		if rule.For, err = isoDuration(rm["for"]); err != nil {
-			return nil, fmt.Errorf("rule %s: %w", name, err)
+			return nil, fmt.Errorf("rule %q: %w", name, err)
 		}
 		if rc, ok := rm["resolveConfiguration"].(map[string]any); ok {
 			if rule.KeepFiringFor, err = isoDuration(rc["timeToResolve"]); err != nil {
-				return nil, fmt.Errorf("rule %s: %w", name, err)
+				return nil, fmt.Errorf("rule %q: %w", name, err)
 			}
 			if rc["autoResolved"] == false {
 				rule.KeepFiringFor = never // resolved by hand, if at all
@@ -875,7 +992,7 @@ func cloudWatch(doc map[string]any) ([]Rule, error) {
 			v  any
 		}{{&rule.For, pq["PendingPeriod"]}, {&rule.KeepFiringFor, pq["RecoveryPeriod"]}, {&rule.Interval, m["EvaluationInterval"]}} {
 			if *f.to, err = seconds(f.v); err != nil {
-				return nil, fmt.Errorf("alarm %s: %w", name, err)
+				return nil, fmt.Errorf("alarm %q: %w", name, err)
 			}
 		}
 		if rule.Expr == "" {
@@ -1082,6 +1199,7 @@ func FromAPI(b []byte) ([]Rule, error) {
 			Groups []struct {
 				Name           string    `json:"name"`
 				Interval       float64   `json:"interval"`
+				Limit          float64   `json:"limit"`
 				LastEvaluation time.Time `json:"lastEvaluation"`
 				Rules          []struct {
 					Type          string            `json:"type"`
@@ -1138,8 +1256,16 @@ func FromAPI(b []byte) ([]Rule, error) {
 			for k, v := range x.Annotations {
 				a[k] = v
 			}
+			// Its labels are its group's and its own already, as Prometheus 3
+			// answers: as AlertLabels gives a rule read from its file. Its
+			// group's limit, as there.
+			limit := 0
+			if g.Limit >= 1 && g.Limit < math.MaxInt32 {
+				limit = int(g.Limit)
+			}
 			out = append(out, Rule{Name: x.Name, Group: g.Name, Source: "api", Expr: strings.TrimSpace(x.Query), For: secs(x.Duration),
-				KeepFiringFor: secs(x.KeepFiringFor), Interval: secs(g.Interval), Phase: phase, Labels: l, Says: annotated(a, TemplatePrometheus)})
+				KeepFiringFor: secs(x.KeepFiringFor), Interval: secs(g.Interval), Limit: limit, Phase: phase, Labels: l,
+				Says: annotated(a, TemplatePrometheus)})
 		}
 	}
 	return out, nil
@@ -1149,7 +1275,7 @@ func hasGrafanaRules(doc map[string]any) bool {
 	for _, g := range list(doc["groups"]) {
 		gm, _ := g.(map[string]any)
 		for _, r := range list(gm["rules"]) {
-			if rm, _ := r.(map[string]any); rm["data"] != nil && rm["condition"] != nil {
+			if rm, _ := r.(map[string]any); rm["data"] != nil && (rm["condition"] != nil || grafanaRecord(rm) != nil) {
 				return true
 			}
 		}
@@ -1157,8 +1283,17 @@ func hasGrafanaRules(doc map[string]any) bool {
 	return false
 }
 
-// grafana reads a Grafana alerting provisioning file.
-func grafana(doc map[string]any) ([]Rule, error) {
+// grafanaRecord is what a Grafana recording rule records, its record (the
+// metric, the query it is from, and where it is written), or nil for an
+// alert rule.
+func grafanaRecord(rm map[string]any) map[string]any {
+	m, _ := rm["record"].(map[string]any)
+	return m
+}
+
+// grafana reads a Grafana alerting provisioning file: its alert rules, and
+// its recording rules into rec, when not nil, which are no alert rules.
+func grafana(doc map[string]any, rec *[]Recording) ([]Rule, error) {
 	var out []Rule
 	for _, g := range list(doc["groups"]) {
 		gm, _ := g.(map[string]any)
@@ -1169,11 +1304,22 @@ func grafana(doc map[string]any) ([]Rule, error) {
 		}
 		interval, err := duration(provisioned(gm["interval"]))
 		if err != nil {
-			return nil, fmt.Errorf("group %s: %w", group, err)
+			return nil, fmt.Errorf("group %q: %w", group, err)
 		}
 		for _, r := range list(gm["rules"]) {
 			written, _ := r.(map[string]any)
 			rm := provisionedRule(written)
+			if record := grafanaRecord(written); record != nil {
+				if rec != nil {
+					// What it records is its queries, and which of them as
+					// what metric, where: fmt prints maps in key order.
+					what := fmt.Sprint(map[string]any{"data": written["data"], "record": record})
+					paused, _ := rm["isPaused"].(bool)
+					*rec = append(*rec, Recording{Record: provisioned(record["metric"]), Group: group, Labels: labels(rm["labels"]),
+						Expr: fmt.Sprintf("%x", sha256.Sum256([]byte(what))), Interval: interval, Off: paused})
+				}
+				continue
+			}
 			ns, _ := rm["notification_settings"].(map[string]any)
 			rule := Rule{
 				Name: str(rm["title"]), Group: group, Labels: labels(rm["labels"]), UID: str(rm["uid"]), Interval: interval,
@@ -1185,11 +1331,11 @@ func grafana(doc map[string]any) ([]Rule, error) {
 				rule.Name = str(rm["uid"])
 			}
 			if rule.For, err = duration(rm["for"]); err != nil {
-				return nil, fmt.Errorf("rule %s: %w", rule.Name, err)
+				return nil, fmt.Errorf("rule %q: %w", rule.Name, err)
 			}
 			rule.Fingerprint = fingerprint(rm, provisioned(gm["name"]), folder, rule.For)
 			if rule.KeepFiringFor, err = duration(rm["keepFiringFor"]); err != nil {
-				return nil, fmt.Errorf("rule %s: %w", rule.Name, err)
+				return nil, fmt.Errorf("rule %q: %w", rule.Name, err)
 			}
 			if paused, _ := rm["isPaused"].(bool); paused {
 				rule.Unsupported = Paused

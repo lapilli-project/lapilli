@@ -719,7 +719,7 @@ func (s *Server) version(ctx context.Context, rs []rules.Rule, docs []rules.Doc,
 	if err != nil {
 		return 0, false, err
 	}
-	if ok && latest.Digest == digest {
+	if ok && latest.Digest == digest && s.wholeAsLatest(ctx, latest, docs) {
 		return 0, true, nil
 	}
 	had := map[string]string{}
@@ -894,14 +894,39 @@ func (s *Server) poke() {
 }
 
 // digestOf is the same for two sets of rules that fire alike.
-func digestOf(rs []rules.Rule) string {
+func digestOf(rs []rules.Rule) string { return sumOf(rs, rules.Rule.Key) }
+
+// sumOf is what rules hash to by key, in any order.
+func sumOf(rs []rules.Rule, key func(rules.Rule) string) string {
 	keys := make([]string, len(rs))
 	for i, r := range rs {
-		keys[i] = r.Key()
+		keys[i] = key(r)
 	}
 	slices.Sort(keys)
 	sum := sha256.Sum256([]byte(strings.Join(keys, "\n")))
 	return hex.EncodeToString(sum[:])
+}
+
+// wholeAsLatest reports whether documents of rules whose digest is the
+// latest version's hold its rules as a whole too. A version's digest is of
+// its rules' keys, as it was before Lapilli read a group's labels and
+// limit, which a key leaves out (rules.Rule.Whole): both versions'
+// documents are read again to tell, by this Lapilli and alike, so a ledger
+// written by one before reads as the rules do, and a change to a group's
+// labels or limit alone is a new version. Documents that can't be read
+// again are taken as changed.
+func (s *Server) wholeAsLatest(ctx context.Context, latest ledger.Version, docs []rules.Doc) bool {
+	full, err := s.l.VersionByID(ctx, latest.ID)
+	if err == nil {
+		var was, is []rules.Rule
+		if was, err = rules.FromDocs(full.Docs); err == nil {
+			if is, err = rules.FromDocs(docs); err == nil {
+				return sumOf(s.matching(was), rules.Rule.Whole) == sumOf(s.matching(is), rules.Rule.Whole)
+			}
+		}
+	}
+	s.log.Warn("the rules' documents can't be read again; taken as changed", "version", latest.ID, "err", err)
+	return false
 }
 
 func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
