@@ -19,7 +19,7 @@
 #   PR                 the pull request's number (default: the event's)
 #
 #   GITHUB_TOKEN_FILE=/run/secrets/github GITHUB_REPO=example/monitoring PR=42 \
-#   LAPILLI_VERSION=v0.32.0 PATHS=alerts ./github.sh --prometheus http://prometheus:9090 --since 14d
+#   LAPILLI_VERSION=v0.33.0 PATHS=alerts ./github.sh --prometheus http://prometheus:9090 --since 14d
 recipe=github.sh
 here=$(dirname "$0")
 : "${GITHUB_TOKEN_FILE:?a file holding a token that may comment on the pull request}"
