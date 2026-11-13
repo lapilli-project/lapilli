@@ -295,7 +295,10 @@ func TestNotificationsScale(t *testing.T) {
 		}
 		record(t, l, from, from.Add(24*time.Hour), day)
 	}
+	// Kept a thousand to a write, as a source's are copied in: what is
+	// held to a budget is reading them.
 	began := time.Now()
+	var ns []Notification
 	for i := range 20000 {
 		f := fs[(i*5)%len(fs)]
 		at := f.Start.Add(30 * time.Second)
@@ -304,8 +307,18 @@ func TestNotificationsScale(t *testing.T) {
 			at = f.Start.Add(4 * time.Hour)
 		}
 		a := Alert{Rule: f.Rule, Start: f.Start, Labels: map[string]string{"alertname": f.Rule, "service": f.Labels["service"], "cluster": "eu-1"}}
-		if _, err := l.Notify(ctx, Notification{At: at, Source: "alertmanager", Receiver: "oncall", Group: f.Rule + f.Labels["service"], Alerts: []Alert{a}}); err != nil {
-			t.Fatal(err)
+		ns = append(ns, Notification{At: at, Source: "alertmanager", Receiver: "oncall", Group: f.Rule + f.Labels["service"], Alerts: []Alert{a}})
+		if len(ns) == 1000 || i == 19999 {
+			kept, errs, err := l.NotifyAll(ctx, ns)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for j := range ns {
+				if errs[j] != nil || !kept[j] {
+					t.Fatalf("notification %d: %v %v", i-len(ns)+1+j, kept[j], errs[j])
+				}
+			}
+			ns = ns[:0]
 		}
 	}
 	t.Logf("20,000 notifications kept in %v", time.Since(began))
