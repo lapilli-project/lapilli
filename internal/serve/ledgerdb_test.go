@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -53,6 +54,28 @@ func ledgerDB(t *testing.T, s *Server) *sql.DB {
 		t.Fatal(err)
 	}
 	return db
+}
+
+// urlWith is a connection string file's string with a parameter set, in a
+// file of its own.
+func urlWith(t *testing.T, file, key, value string) string {
+	t.Helper()
+	b, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(strings.TrimSpace(string(b)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := u.Query()
+	q.Set(key, value)
+	u.RawQuery = q.Encode()
+	f := filepath.Join(t.TempDir(), "ledger-url")
+	if err := os.WriteFile(f, []byte(u.String()+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return f
 }
 
 func replaceEach(s, old string, with func() string) string {

@@ -35,7 +35,16 @@ func TestPagesScale(t *testing.T) {
 	}
 	ctx := context.Background()
 	// Counted by the hours, as the command line does by default.
-	s, _ := server(t, func(c *Config) { c.Options.Hours = verdict.DefaultHours(time.UTC) })
+	s, _ := server(t, func(c *Config) {
+		c.Options.Hours = verdict.DefaultHours(time.UTC)
+		if c.LedgerURLFile != "" {
+			// Postgres plans each statement for its own arguments, as a
+			// connection's plan cache can (whether it does depends on what
+			// the statement's first five runs asked for): with the
+			// statistics below, the worst it does, and what CI's did.
+			c.LedgerURLFile = urlWith(t, c.LedgerURLFile, "plan_cache_mode", "force_custom_plan")
+		}
+	})
 	o := s.cfg.Options
 	r := rand.New(rand.NewPCG(3, 4))
 	start := now.Add(-weeks * 7 * 24 * time.Hour)
@@ -60,6 +69,16 @@ func TestPagesScale(t *testing.T) {
 		if err := s.l.Record(ctx, ledger.Found{From: d, To: d.Add(24*time.Hour - time.Second), Firings: fs,
 			Run: ledger.Run{Kind: "backfill", Started: d, Finished: d}}, o); err != nil {
 			t.Fatal(err)
+		}
+		if s.cfg.LedgerURLFile != "" && d.Equal(start.Add(10*24*time.Hour)) {
+			// Postgres's statistics of the firings as autovacuum can leave
+			// them, taken ten days into the backfill: the weeks since are
+			// past them, and a query of a few rules' firings of one of those
+			// weeks is planned by when they started, reading the whole week,
+			// as it often is with any statistics (hoursOf, ledger/read.go).
+			// Fifty teams' hours, a query a team and a week, took 3.4 s so
+			// on CI's Postgres 18.
+			ledgerExec(t, s, "ANALYZE firings")
 		}
 	}
 	// What people keep: teams, quiet windows, tasks and comments.

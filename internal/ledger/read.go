@@ -583,6 +583,13 @@ func (l *Ledger) ByHoursOf(ctx context.Context, from, to int64, h *verdict.Hours
 
 // hoursOf reads the firings of the rules ids in [from, to), along the index
 // on rule and start, or, all, of every rule, and tallies when each came.
+//
+// In Postgres each rule is searched for apart (LATERAL, OFFSET 0 so it stays
+// so): asked for a few rules' firings of a week at once, Postgres rates
+// reading the whole week by firings_start, firings coming in time order,
+// about as cheap as a search a rule, and often reads it, fifty times the
+// rows; for fifty teams' hours, a query a team and a week, 3.4 s on CI's
+// Postgres 18 where 0.15 s would do.
 func (l *Ledger) hoursOf(ctx context.Context, from, to time.Time, h *verdict.Hours, ids []int64, all bool, key func(at int64) int64) (map[int64]map[int64]HourTally, error) {
 	out := map[int64]map[int64]HourTally{}
 	for all || len(ids) > 0 {
@@ -591,10 +598,20 @@ func (l *Ledger) hoursOf(ctx context.Context, from, to time.Time, h *verdict.Hou
 		if !all {
 			part := ids[:min(len(ids), 500)]
 			ids = ids[len(part):]
-			for _, id := range part {
-				args = append(args, id)
+			if l.d == postgres {
+				b, err := json.Marshal(part)
+				if err != nil {
+					return nil, err
+				}
+				q = `SELECT f.rule_id, f.start_at, f.white FROM (` + l.d.ints("?3") + `) AS r (id),
+					LATERAL (SELECT rule_id, start_at, white FROM firings WHERE rule_id = r.id AND start_at >= ?1 AND start_at < ?2 AND excused = 0 OFFSET 0) AS f`
+				args = append(args, string(b))
+			} else {
+				for _, id := range part {
+					args = append(args, id)
+				}
+				q += ` AND rule_id IN (?` + strings.Repeat(", ?", len(part)-1) + `)`
 			}
-			q += ` AND rule_id IN (?` + strings.Repeat(", ?", len(part)-1) + `)`
 		}
 		all = false
 		rows, err := l.r.QueryContext(ctx, q, args...)
