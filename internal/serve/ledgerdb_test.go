@@ -4,13 +4,18 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/ledger/ledgertest"
 )
 
 // ledgerExec runs a statement on a server's ledger from outside lapilli,
@@ -100,4 +105,52 @@ func ledgerHolds(t *testing.T, s *Server, text string) bool {
 		}
 	}
 	return false
+}
+
+// serve stops when its ledger's lock is lost for good: another process may
+// write the ledger, and this one writes nothing more, nor sends a notice.
+func TestRunStopsWhenTheLockIsLost(t *testing.T) {
+	if !ledgertest.On() {
+		t.Skip("the ledgers are SQLite's")
+	}
+	s, _ := server(t, func(c *Config) { c.LedgerURLFile = ledgertest.DatabaseFile(t) })
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	ran := make(chan error, 1)
+	go func() { ran <- s.Run(ctx) }()
+	b, err := os.ReadFile(s.cfg.LedgerURLFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := ledgerDB(t, s)
+	defer db.Close()
+	// The writer's session ends, and another process takes the ledger
+	// meanwhile: when serve connects again, someone else wrote. The
+	// database is the test's own, as are the locks in it.
+	if _, err := db.ExecContext(ctx, `SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype = 'advisory' AND granted`); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		var n int
+		db.QueryRowContext(ctx, "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted").Scan(&n)
+		if n == 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	other, err := ledger.OpenPostgres(ctx, strings.TrimSpace(string(b)), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.Close()
+	// serve finds out at its next write.
+	s.l.SetMeta(ctx, "after", "1")
+	select {
+	case err := <-ran:
+		if !errors.Is(err, ledger.ErrLockLost) {
+			t.Errorf("Run: %v, want ErrLockLost", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("serve went on")
+	}
 }

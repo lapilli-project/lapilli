@@ -48,6 +48,34 @@ func URL(t testing.TB) string {
 	return u.String()
 }
 
+// DatabaseFile is a file holding a connection string for a database of its
+// own on the server Env names, made for the test and dropped after it: for
+// a test that ends every session holding an advisory lock, which are a
+// database's, and would end other tests' in a database shared. "" without
+// Env.
+func DatabaseFile(t testing.TB) string {
+	t.Helper()
+	base := os.Getenv(Env)
+	if base == "" {
+		return ""
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		t.Fatalf("%s: want a postgres:// URL", Env)
+	}
+	b := make([]byte, 6)
+	rand.Read(b)
+	db := "lt_" + hex.EncodeToString(b)
+	run(t, base, "CREATE DATABASE "+db)
+	t.Cleanup(func() { run(t, base, "DROP DATABASE "+db+" WITH (FORCE)") })
+	u.Path = "/" + db
+	f := filepath.Join(t.TempDir(), "ledger-url")
+	if err := os.WriteFile(f, []byte(u.String()+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
 // File is URL written to a file of its own, as --ledger-url-file takes it;
 // "" without Env.
 func File(t testing.TB) string {

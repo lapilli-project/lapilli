@@ -463,6 +463,10 @@ func TestTokenRate(t *testing.T) {
 	const token = "a-token-long-enough"
 	file := tokenFile(t, token)
 	s, _ := server(t, func(c *Config) { c.IncidentsListen, c.IncidentsToken = "127.0.0.1:0", file })
+	// Its burst, refilled slower than the writes go wherever the ledger is:
+	// in Postgres across a network an incident takes tens of milliseconds,
+	// and sixty of them a second or more, in which twenty a second refill.
+	s.tokenRate.rate = 1
 	port := s.IncidentsHandler()
 	codes := map[int]int{}
 	for i := range 60 {

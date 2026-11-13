@@ -177,11 +177,14 @@ func copyTable(ctx context.Context, src *sql.Tx, t *txn, table string, cols []co
 			if b, ok := v.([]byte); ok {
 				// Scanned bytes are the driver's until the next row.
 				v = slices.Clone(b)
-				if !strings.EqualFold(cols[i].ty, "BLOB") && !strings.EqualFold(cols[i].ty, "BYTEA") {
+				if !binaryColumn(cols[i]) {
 					v = string(b)
 				}
 			}
 			row[i] = v
+		}
+		if copying != nil {
+			copying(table, row)
 		}
 		if err := out.add(row...); err != nil {
 			out.close()
@@ -195,6 +198,10 @@ func copyTable(ctx context.Context, src *sql.Tx, t *txn, table string, cols []co
 	}
 	return k, out.close()
 }
+
+// copying, when set, is given each row as it is copied, and may change it:
+// for tests of what reading back finds.
+var copying func(table string, row []any)
 
 // orderOf is an ORDER BY a table's rows read back the same in either
 // database by: its key, or, for a table with none, every column. NULLs
@@ -307,7 +314,14 @@ func checksum(ctx context.Context, l *Ledger, table string, cols []column) (stri
 		if err := rows.Scan(ptrs...); err != nil {
 			return "", 0, err
 		}
-		for _, v := range vals {
+		for i, v := range vals {
+			// A text, compared as Postgres keeps it (pgText).
+			if b, ok := v.([]byte); ok && !binaryColumn(cols[i]) {
+				v = string(b)
+			}
+			if s, ok := v.(string); ok {
+				v = pgText(s)
+			}
 			switch v := v.(type) {
 			case nil:
 				h.Write([]byte{'n'})
@@ -333,6 +347,11 @@ func checksum(ctx context.Context, l *Ledger, table string, cols []column) (stri
 		return "", 0, err
 	}
 	return fmt.Sprintf("%x", h.Sum(nil)), k, nil
+}
+
+// binaryColumn says a column holds bytes, not text.
+func binaryColumn(c column) bool {
+	return strings.EqualFold(c.ty, "BLOB") || strings.EqualFold(c.ty, "BYTEA")
 }
 
 func writeBytes(h interface{ Write([]byte) (int, error) }, b []byte) {

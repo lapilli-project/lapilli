@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -40,6 +41,13 @@ func TestDialectSeam(t *testing.T) {
 		file, err := parser.ParseFile(fset, f, nil, 0)
 		if err != nil {
 			t.Fatal(err)
+		}
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, at := range unnamedSubqueries(string(src)) {
+			t.Errorf("%s:%d: a subquery in FROM without a name: Postgres before 16 refuses it (FROM (...) AS x)", f, at)
 		}
 		allowed := map[*ast.BasicLit]bool{}
 		ast.Inspect(file, func(n ast.Node) bool {
@@ -91,6 +99,32 @@ func TestDialectSeam(t *testing.T) {
 	if checked < 500 {
 		t.Fatalf("only %d strings read: the files weren't", checked)
 	}
+}
+
+// unnamedSubqueries are the lines of a file's statements with a subquery
+// in FROM or a JOIN that has no name after it. The statements are read
+// across the literals they are put together from, roughly.
+func unnamedSubqueries(src string) []int {
+	var at []int
+	name := regexp.MustCompile("^[\\s`\"+]*(AS\\s+)?[a-z_][a-z0-9_]*")
+	clause := regexp.MustCompile("^[\\s`\"+]*(WHERE|GROUP|ORDER|LIMIT|UNION|ON|AND|OR|JOIN|LEFT)\\b")
+	for _, m := range regexp.MustCompile(`\b(FROM|JOIN)\s*\(`).FindAllStringIndex(src, -1) {
+		depth, j := 0, m[1]-1
+		for ; j < len(src); j++ {
+			if src[j] == '(' {
+				depth++
+			} else if src[j] == ')' {
+				if depth--; depth == 0 {
+					break
+				}
+			}
+		}
+		rest := src[min(j+1, len(src)):]
+		if !name.MatchString(rest) || clause.MatchString(rest) {
+			at = append(at, strings.Count(src[:m[0]], "\n")+1)
+		}
+	}
+	return at
 }
 
 // twoArgs says a statement takes the max or min of two or more, not of a

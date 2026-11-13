@@ -205,3 +205,88 @@ func TestCopyBack(t *testing.T) {
 		t.Errorf("the next task is %d, copied back %d (%v)", a, b, err)
 	}
 }
+
+// A ledger that holds no more than a value kept for serve isn't empty.
+func TestCopyRefusesAKeptValue(t *testing.T) {
+	ctx := context.Background()
+	src, err := Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	dst := open(t, time.UTC)
+	if err := dst.SetMeta(ctx, "ledger-id", "0123456789ab"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Copy(ctx, src, dst, nil); !errors.Is(err, ErrNotEmpty) || !strings.Contains(err.Error(), "1 in meta") {
+		t.Errorf("into a ledger holding its id: %v", err)
+	}
+}
+
+// What a copy is read back by tells two ledgers apart by any value of any
+// row, and two alike as alike, whichever database each is in.
+func TestChecksumTellsApart(t *testing.T) {
+	ctx := context.Background()
+	a := open(t, time.UTC)
+	b, err := Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	cols, err := a.columns(ctx, "tasks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := func(l *Ledger) string {
+		s, _, err := checksum(ctx, l, "tasks", cols)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	for _, l := range []*Ledger{a, b} {
+		if _, err := l.PutTask(ctx, Task{Title: "Tune Errors", Rule: "Errors"}, "ana"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := l.w.ExecContext(ctx, "UPDATE tasks SET created = 1, updated = 1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if sum(a) != sum(b) {
+		t.Fatal("alike, told apart")
+	}
+	if _, err := b.w.ExecContext(ctx, "UPDATE tasks SET title = 'Tune errors'"); err != nil {
+		t.Fatal(err)
+	}
+	if sum(a) == sum(b) {
+		t.Error("a title changed, read back alike")
+	}
+	if _, err := b.w.ExecContext(ctx, "UPDATE tasks SET title = 'Tune Errors', due = 5"); err != nil {
+		t.Fatal(err)
+	}
+	if sum(a) == sum(b) {
+		t.Error("a NULL made 5, read back alike")
+	}
+}
+
+// A copy that wrote other than it read is refused when read back: one
+// value of one row changed on its way fails it.
+func TestCopyReadBack(t *testing.T) {
+	ctx := context.Background()
+	src, err := Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	fill(t, src)
+	dst := open(t, nil)
+	copying = func(table string, row []any) {
+		if table == "tasks" {
+			row[1] = "changed on its way"
+		}
+	}
+	defer func() { copying = nil }()
+	if _, err := Copy(ctx, src, dst, nil); err == nil || !strings.Contains(err.Error(), "tasks: read back, the copy differs") {
+		t.Errorf("a row changed on its way: %v", err)
+	}
+}

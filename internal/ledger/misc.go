@@ -217,7 +217,7 @@ func (l *Ledger) results(ctx context.Context, q string, args ...any) ([]Result, 
 func (l *Ledger) JudgeAll(ctx context.Context, o verdict.Options, done func(float64)) error {
 	var lo, hi sql.NullInt64
 	if err := l.r.QueryRowContext(ctx, `SELECT min(t), max(t) FROM (SELECT start_at AS t FROM firings
-		UNION ALL SELECT start_at FROM incidents)`).Scan(&lo, &hi); err != nil || !lo.Valid {
+		UNION ALL SELECT start_at FROM incidents) AS starts`).Scan(&lo, &hi); err != nil || !lo.Valid {
 		return err
 	}
 	const week = 7 * 86400

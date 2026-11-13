@@ -403,7 +403,7 @@ func (l *Ledger) Deploys(ctx context.Context, from, to time.Time) ([]Deploy, err
 // HasDeploys reports whether the ledger keeps any deploy.
 func (l *Ledger) HasDeploys(ctx context.Context) (bool, error) {
 	var n int
-	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM deploys LIMIT 1)").Scan(&n)
+	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM deploys LIMIT 1) AS one").Scan(&n)
 	return n > 0, err
 }
 

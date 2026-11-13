@@ -1,12 +1,17 @@
 package ledger
 
 import (
+	"bytes"
 	"context"
+	"database/sql/driver"
 	"errors"
+	"io"
 	"io/fs"
 	"net"
+	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -182,8 +187,10 @@ func describe(ctx context.Context, l *Ledger) (map[string]string, error) {
 	out := map[string]string{}
 	kind := func(ty string) string {
 		switch ty = strings.ToLower(ty); {
-		case strings.Contains(ty, "int"):
+		case ty == "integer" && l.d == sqlite, ty == "bigint" && l.d == postgres:
 			return "integer"
+		case strings.Contains(ty, "int"):
+			return ty + ", narrower than SQLite's"
 		case ty == "text":
 			return "text"
 		case ty == "blob" || ty == "bytea":
@@ -207,6 +214,24 @@ func describe(ctx context.Context, l *Ledger) (map[string]string, error) {
 			out[tb+"."+c.name] = kind(c.ty) + " notnull=" + strconv.FormatBool(c.notNull || c.pk) + " default=" + def + " pk=" + strconv.FormatBool(c.pk)
 		}
 		out[tb] = strings.Join(names, ", ")
+	}
+	// A text compared other than byte by byte, in Postgres, isn't SQLite's.
+	if l.d == postgres {
+		rows, err := l.r.QueryContext(ctx, `SELECT table_name, column_name, collation_name FROM information_schema.columns
+			WHERE table_schema = current_schema() AND data_type = 'text' AND collation_name IS DISTINCT FROM 'C'`)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var tb, c string
+			var coll *string
+			if err := rows.Scan(&tb, &c, &coll); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out[tb+"."+c] += " collated as the database is"
+		}
+		rows.Close()
 	}
 	idx, err := indexes(ctx, l)
 	if err != nil {
@@ -250,7 +275,7 @@ func indexes(ctx context.Context, l *Ledger) (map[string]string, error) {
 			}
 			for _, k := range strings.Split(strings.Trim(keys, "{}"), ",") {
 				k = strings.Trim(k, `"`)
-				if c, ok := strings.CutPrefix(k, "md5("); ok && strings.HasSuffix(c, ")") {
+				if c, ok := strings.CutPrefix(k, "md5("); ok && strings.HasSuffix(c, ")") && x.unique {
 					k = strings.TrimSuffix(c, ")")
 					x.constraint = true // for SQLite's UNIQUE
 				}
@@ -466,4 +491,275 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	os.RemoveAll(home)
 	os.Exit(code)
+}
+
+// A text holding a NUL, or bytes that aren't UTF-8, is kept in Postgres,
+// which refuses both, with U+FFFD in their place; SQLite keeps it as sent.
+// A SQLite ledger holding such a text copies into Postgres, and is read
+// back alike, the text compared as Postgres keeps it.
+func TestPostgresText(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	id, err := l.PutTask(ctx, Task{Title: "Tune Errors", Body: "a\x00b\xffc"}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := l.TaskByID(ctx, id)
+	want := "a\x00b\xffc"
+	if l.d == postgres {
+		want = "a�b�c"
+	}
+	if err != nil || got.Body != want {
+		t.Errorf("kept as %q, want %q (%v)", got.Body, want, err)
+	}
+	if l.d != postgres {
+		return
+	}
+	src, err := Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	if _, err := src.PutTask(ctx, Task{Title: "a\x00b", Body: "\xff"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	dst := open(t, nil)
+	if _, err := Copy(ctx, src, dst, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Closed, a ledger lets its lock go at once: the next process doesn't wait
+// for the server to see the connection end, which a network can hold up
+// (here, a proxy that passes a closed connection on a second late).
+func TestPostgresLetsGoOnClose(t *testing.T) {
+	u := ledgertest.URL(t)
+	if u == "" {
+		t.Skip("no " + ledgertest.Env)
+	}
+	ctx := context.Background()
+	l, err := OpenPostgres(ctx, slowClose(t, u, time.Second), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := l.pg.key
+	c, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close(ctx)
+	held := func() int {
+		var n int
+		if err := c.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted AND objsubid = 2
+			AND classid::bigint = $1 AND objid::bigint = $2`, int64(lockClass), int64(key)).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := held(); n != 1 {
+		t.Fatalf("open, the lock is held %d times", n)
+	}
+	l.Close()
+	if n := held(); n != 0 {
+		t.Errorf("closed, the lock is still held")
+	}
+}
+
+// slowClose is a connection string through a proxy to the server it names,
+// which passes a session's end on late: its Terminate message, and the end
+// of the connection.
+func slowClose(t *testing.T, conn string, late time.Duration) string {
+	t.Helper()
+	u, err := url.Parse(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := u.Host
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				s, err := net.Dial("tcp", server)
+				if err != nil {
+					c.Close()
+					return
+				}
+				go func() { io.Copy(c, s); c.Close() }()
+				terminate := []byte{'X', 0, 0, 0, 4}
+				b := make([]byte, 64<<10)
+				for {
+					n, err := c.Read(b)
+					if bytes.Equal(b[:n], terminate) {
+						time.Sleep(late)
+					}
+					if n > 0 {
+						s.Write(b[:n])
+					}
+					if err != nil {
+						break
+					}
+				}
+				time.Sleep(late)
+				s.Close()
+			}()
+		}
+	}()
+	u.Host = ln.Addr().String()
+	q := u.Query()
+	q.Set("sslmode", "disable")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// A connection made again while the server still holds the lock for this
+// process's own session from before, which it can for minutes after a
+// network fault, ends that session and takes the lock.
+func TestPostgresOwnSessionEnded(t *testing.T) {
+	u := ledgertest.URL(t)
+	if u == "" {
+		t.Skip("no " + ledgertest.Env)
+	}
+	ctx := context.Background()
+	l, err := OpenPostgres(ctx, u, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	admin, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	// The writer's session ends; another, standing for the session the
+	// server would still keep, takes the lock, and is taken for this
+	// process's own.
+	if _, err := admin.Exec(ctx, "SELECT pg_terminate_backend($1)", int64(l.pg.pid)); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stale.Close(ctx)
+	for range 100 {
+		var took bool
+		if err := stale.QueryRow(ctx, "SELECT pg_try_advisory_lock($1, $2)", int32(lockClass), l.pg.key).Scan(&took); err != nil {
+			t.Fatal(err)
+		}
+		if took {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	l.pg.mu.Lock()
+	l.pg.pid = stale.PgConn().PID()
+	l.pg.mu.Unlock()
+	var err2 error
+	for range 2 {
+		if err2 = l.SetMeta(ctx, "k", "v"); err2 == nil {
+			break
+		}
+	}
+	if err2 != nil {
+		t.Fatalf("with its own old session holding the lock: %v", err2)
+	}
+	if err := stale.Ping(ctx); err == nil {
+		t.Error("its old session wasn't ended")
+	}
+}
+
+// A connection made again reads what it caches of the ledger again: a
+// failover can lose the last writes, the rules and alerts it made with
+// them.
+func TestPostgresForgetsOnReconnect(t *testing.T) {
+	u := ledgertest.URL(t)
+	if u == "" {
+		t.Skip("no " + ledgertest.Env)
+	}
+	ctx := context.Background()
+	l, err := OpenPostgres(ctx, u, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	fs := []firing.Firing{{Rule: "Errors", Labels: map[string]string{"service": "checkout"}, Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour)}}
+	record(t, l, t0, t0.Add(24*time.Hour), fs)
+	admin, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	// What a failover lost: the run, its alert and its rule.
+	if _, err := admin.Exec(ctx, "SELECT pg_terminate_backend($1)", int64(l.pg.pid)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(ctx, "DELETE FROM catches; DELETE FROM firings; DELETE FROM series; DELETE FROM rules; DELETE FROM days; DELETE FROM weeks"); err != nil {
+		t.Fatal(err)
+	}
+	f := Found{From: t0.Add(24 * time.Hour), To: t0.Add(48 * time.Hour), Run: Run{Kind: "test"},
+		Firings: []firing.Firing{{Rule: "Errors", Labels: map[string]string{"service": "checkout"}, Start: t0.Add(25 * time.Hour), End: t0.Add(26 * time.Hour)}}}
+	var werr error
+	for range 2 {
+		if werr = l.Record(ctx, f, opts); werr == nil {
+			break
+		}
+	}
+	if werr != nil {
+		t.Fatalf("after a failover lost the rule: %v", werr)
+	}
+}
+
+// The readers write nothing, and a transaction of reads sees the ledger as
+// of one moment, as SQLite's do.
+func TestReadersAsOfOneMoment(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	if _, err := l.r.ExecContext(ctx, "INSERT INTO meta (key, value) VALUES ('x.r', 'w')"); err == nil {
+		t.Error("a reader wrote")
+	}
+	if err := l.SetMeta(ctx, "k", "1"); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := l.r.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	read := func() string {
+		var v string
+		if err := tx.QueryRowContext(ctx, "SELECT value FROM meta WHERE key = 'x.k'").Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	if v := read(); v != "1" {
+		t.Fatalf("read %q", v)
+	}
+	if err := l.SetMeta(ctx, "k", "2"); err != nil {
+		t.Fatal(err)
+	}
+	if v := read(); v != "1" {
+		t.Errorf("a transaction of reads saw a write after it began: %q", v)
+	}
+}
+
+// Arguments past a statement's last parameter are left out, as SQLite
+// leaves them.
+func TestBindLeavesOutTheRest(t *testing.T) {
+	args := []driver.NamedValue{{Ordinal: 1, Value: "a"}, {Ordinal: 2, Value: "b"}, {Ordinal: 3, Value: "c"}}
+	q, got := bind("a = ?1 OR b = ?2", args)
+	if q != "a = $1 OR b = $2" || len(got) != 2 {
+		t.Errorf("%q %v", q, got)
+	}
+	if _, got := bind("SELECT 1", args); len(got) != 0 {
+		t.Errorf("none: %v", got)
+	}
 }

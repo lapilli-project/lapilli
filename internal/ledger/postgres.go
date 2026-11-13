@@ -22,6 +22,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -256,15 +257,30 @@ func (c pgConnector) Driver() driver.Driver { return c.inner.Driver() }
 type pgConn struct{ *stdlib.Conn }
 
 // CheckNamedValue keeps a bool as 1 or 0, as SQLite keeps it: the
-// ledger's flags are integers in both.
+// ledger's flags are integers in both. A text is kept as Postgres can keep
+// it (pgText).
 func (c *pgConn) CheckNamedValue(v *driver.NamedValue) error {
-	if b, ok := v.Value.(bool); ok {
+	switch x := v.Value.(type) {
+	case bool:
 		v.Value = int64(0)
-		if b {
+		if x {
 			v.Value = int64(1)
 		}
+	case string:
+		v.Value = pgText(x)
 	}
 	return nil
+}
+
+// pgText is a text as Postgres keeps it: Postgres refuses a NUL and bytes
+// that aren't UTF-8, which SQLite keeps, and each is kept as U+FFFD, as
+// encoding/json writes bytes that aren't UTF-8 anyway. Nothing lapilli
+// writes holds either; what people send can.
+func pgText(s string) string {
+	if utf8.ValidString(s) && strings.IndexByte(s, 0) < 0 {
+		return s
+	}
+	return strings.ToValidUTF8(strings.ReplaceAll(s, "\x00", "\uFFFD"), "\uFFFD")
 }
 
 func (c *pgConn) Prepare(q string) (driver.Stmt, error) {

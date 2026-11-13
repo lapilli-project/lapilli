@@ -40,14 +40,10 @@ func (l *Ledger) ruleID(t *txn, name string) (int64, error) {
 // seriesID is the id of a rule's alert with those labels, made if there is
 // none.
 func (l *Ledger) seriesID(t *txn, rule int64, labels map[string]string) (int64, error) {
-	if labels == nil {
-		labels = map[string]string{}
-	}
-	b, err := json.Marshal(labels) // keys sorted: one text for one label set
+	k, err := keyOf(rule, labels)
 	if err != nil {
 		return 0, err
 	}
-	k := seriesKey{rule, string(b)}
 	if id, ok := t.series[k]; ok {
 		return id, nil
 	}
@@ -68,6 +64,83 @@ func (l *Ledger) seriesID(t *txn, rule int64, labels map[string]string) (int64, 
 	}
 	t.series[k] = id
 	return id, nil
+}
+
+// findSeries finds, in Postgres, the alerts of the keys given that the
+// ledger has, and makes those it hasn't, many a statement rather than a
+// round trip or two each; seriesID then has them all. SQLite's are found
+// one at a time, as they cost nothing to ask for.
+func (l *Ledger) findSeries(t *txn, keys []seriesKey) error {
+	if t.d != postgres {
+		return nil
+	}
+	var want []seriesKey
+	seen := map[seriesKey]bool{}
+	l.ids.RLock()
+	for _, k := range keys {
+		if _, ok := t.series[k]; ok || seen[k] {
+			continue
+		}
+		if _, ok := l.ids.series[k]; ok {
+			continue
+		}
+		seen[k] = true
+		want = append(want, k)
+	}
+	l.ids.RUnlock()
+	var missing []seriesKey
+	for part := range slices.Chunk(want, pgRows) {
+		pairs := make([][2]any, len(part))
+		for i, k := range part {
+			pairs[i] = [2]any{k.rule, k.labels}
+		}
+		b, err := json.Marshal(pairs)
+		if err != nil {
+			return err
+		}
+		rows, err := t.QueryContext(t.ctx, `SELECT s.id, s.rule_id, s.labels FROM series s
+			JOIN (SELECT CAST(e ->> 0 AS BIGINT) AS rule_id, e ->> 1 AS labels FROM jsonb_array_elements(CAST(? AS jsonb)) AS e) AS k
+			ON s.rule_id = k.rule_id AND md5(s.labels) = md5(k.labels) AND s.labels = k.labels`, string(b))
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id int64
+			var k seriesKey
+			if err := rows.Scan(&id, &k.rule, &k.labels); err != nil {
+				rows.Close()
+				return err
+			}
+			t.series[k] = id
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, k := range part {
+			if _, ok := t.series[k]; !ok {
+				missing = append(missing, k)
+			}
+		}
+	}
+	ids, err := l.makeSeries(t, missing)
+	if err != nil {
+		return err
+	}
+	for i, k := range missing {
+		t.series[k] = ids[i]
+	}
+	return nil
+}
+
+// keyOf is the key of a rule's alert with those labels: their text, keys
+// sorted, one text for one label set.
+func keyOf(rule int64, labels map[string]string) (seriesKey, error) {
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	b, err := json.Marshal(labels)
+	return seriesKey{rule, string(b)}, err
 }
 
 // makeSeries makes alerts new to the ledger, in turn, and gives their ids:

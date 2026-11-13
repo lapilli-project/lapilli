@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 // plan is how the ledger's database would run a query, as text: SQLite's
@@ -60,4 +61,26 @@ func scansAll(l *Ledger, plan, table string) bool {
 		return strings.Contains(plan+";", "Seq Scan on "+table+" ") || strings.Contains(plan+";", "Seq Scan on "+table+";")
 	}
 	return strings.Contains(plan, "SCAN "+table)
+}
+
+// An alarm's id is found through series_alarm and notified_alarm, in
+// either database: the dialect's text is the expression they are made on.
+func TestAlarmIDIndexed(t *testing.T) {
+	l := open(t, time.UTC)
+	for q, index := range map[string]string{
+		"SELECT s.id FROM series s WHERE " + l.d.text("s.labels", AlarmID) + " = ?":                                                                    "series_alarm",
+		"SELECT d.rule FROM notified d WHERE " + l.d.text("d.labels", AlarmID) + " = ? AND d.start_at >= ?":                                            "notified_alarm",
+		"SELECT s.id FROM series s WHERE " + l.d.text("s.labels", AlarmID) + " >= 'projects/' AND " + l.d.text("s.labels", AlarmID) + " < 'projects0'": "series_alarm",
+	} {
+		// In Postgres, searched by the index (Index Cond), not read whole
+		// through it, which a partial index can be.
+		p := plan(t, l, q, "ocid1.alarm.oc1..a", 0)
+		searched := l.d != postgres
+		for _, step := range strings.Split(p, "; ") {
+			searched = searched || strings.HasPrefix(step, "Index Cond: ") && strings.Contains(step, "'alarm_id'")
+		}
+		if !strings.Contains(p, index) || !searched {
+			t.Errorf("%s\nplan: %s", q, p)
+		}
+	}
 }

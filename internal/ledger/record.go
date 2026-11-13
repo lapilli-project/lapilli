@@ -128,6 +128,27 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 				lo = min(lo, f.from(name).Unix())
 			}
 		}
+		// The alerts of the firings below, found or made at once.
+		if t.d == postgres {
+			var keys []seriesKey
+			for _, x := range f.Firings {
+				if f.Keep[x.Rule] || !x.Start.Before(f.from(x.Rule)) && x.Start.After(f.To) {
+					continue
+				}
+				rule, err := l.ruleID(t, x.Rule)
+				if err != nil {
+					return err
+				}
+				k, err := keyOf(rule, x.Labels)
+				if err != nil {
+					return err
+				}
+				keys = append(keys, k)
+			}
+			if err := l.findSeries(t, keys); err != nil {
+				return err
+			}
+		}
 		// Firings that started before their rule's From: an alert the
 		// ledger has as still on, or one that started in the margin and was
 		// found before.
