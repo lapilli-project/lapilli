@@ -1041,7 +1041,10 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 	l := lang(r)
 	q := r.URL.Query()
 	n := 4
-	if q.Get("weeks") == "12" {
+	switch q.Get("weeks") {
+	case "1":
+		n = 1
+	case "12":
 		n = 12
 	}
 	t, err := s.tallies(ctx, weeks)
@@ -1653,11 +1656,29 @@ var funcs = template.FuncMap{
 		return strings.Join(out, "; ")
 	},
 	"kindText": kindText,
-	"nav": func() []struct{ Page, Href, Name string } {
-		return []struct{ Page, Href, Name string }{
-			{"overview", "/", "Overview"}, {"rules", "/rules", "Rules"}, {"incidents", "/incidents", "Incidents"},
-			{"firings", "/firings", "Firings"}, {"tasks", "/tasks", "Tasks"}, {"proposals", "/proposals", "Proposals"}, {"windows", "/windows", "Quiet windows"},
-			{"teams", "/teams", "Teams"}, {"outcomes", "/outcomes", "Outcomes"}, {"settings", "/settings", "Settings"}, {"reports", "/reports", "Reports"}, {"runs", "/runs", "Runs"},
-		}
+	// navOf is the sidebar of a page, as the menu or the sidebar draws it.
+	"navOf": func(p page, kind string) struct {
+		P    page
+		Kind string
+	} {
+		return struct {
+			P    page
+			Kind string
+		}{p, kind}
+	},
+	"mainAction": mainAction,
+	"emptyOf": func(kind, title, text string) emptyView {
+		return emptyView{Kind: kind, Title: title, Text: text}
+	},
+	// on is what a template given a part of a page draws, with the page it
+	// is on, for its links.
+	"on": func(p page, v any) struct {
+		P page
+		V any
+	} {
+		return struct {
+			P page
+			V any
+		}{p, v}
 	},
 }

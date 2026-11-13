@@ -46,7 +46,7 @@ body {
   margin: 0; background: var(--bg); color: var(--ink);
   font: 16px/1.6 var(--sans); overflow-wrap: break-word;
 }
-/* What a keyboard needs: a way past the header to the page, and a ring
+/* What a keyboard needs: a way past the sidebar to the page, and a ring
    round where the focus is. */
 .skip {
   position: absolute; left: 16px; top: -10rem; z-index: 20; padding: .45rem 1rem;
@@ -57,23 +57,63 @@ body {
 /* Read out, not shown. */
 .vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 
-/* The header: a pill that stays at the top, and what the keyboard
-   reaches scrolls to below it, however many lines it wraps to (up to
-   186px, in Spanish at 641px). */
-@media (min-width: 641px) {
-  html { scroll-padding-top: 12rem; }
+/* The frame (docs/design/ui.md). On a wide screen the pages are a sidebar
+   on the left, in four groups, kept in view as the page scrolls; on a
+   narrow one, or zoomed in, the sidebar is a menu under the name, closed
+   until opened, and nothing stays put over the page. The sidebar is drawn
+   twice, as the menu and as the sidebar, and only one is shown. */
+header.side { background: var(--card); }
+.page { min-width: 0; }
+.nav-group { margin: 1rem .7rem .2rem; font-size: .8rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); }
+header.side ul { list-style: none; margin: 0; padding: 0; }
+.nav-side a, .nav-menu a { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .3rem .7rem; border-radius: 9999px; color: var(--dim); text-decoration: none; }
+.nav-side a:hover, .nav-menu a:hover { color: var(--ink); background: var(--panel); }
+.nav-side a[aria-current], .nav-menu a[aria-current] { color: var(--ink); font-weight: 600; background: var(--accent-wash); }
+.count { font-size: .8rem; font-weight: 500; color: var(--ink); background: var(--panel); border-radius: 9999px; padding: 0 .5rem; font-variant-numeric: tabular-nums; }
+details.menu { margin: 0; }
+details.menu > summary { display: inline-block; padding: .3rem .9rem; border: 1px solid var(--line-ui); border-radius: 9999px; color: var(--ink); font-size: 1rem; }
+.menu-here { color: var(--dim); }
+@media (min-width: 960px) {
+  body { display: grid; grid-template-columns: 15rem minmax(0, 1fr); }
+  header.side {
+    position: sticky; top: 0; height: 100vh; overflow-y: auto; display: flex; flex-direction: column;
+    padding: 1rem .6rem 1rem; border-right: 1px solid var(--line);
+  }
+  header.side .brand { padding: .2rem .7rem; }
+  details.menu { display: none; }
+  header.side .langs { margin: auto .7rem 0; padding-top: 1rem; }
 }
-header {
-  position: sticky; top: 8px; z-index: 10;
-  display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1.4rem;
-  max-width: 1132px; margin: 8px auto 0; padding: .45rem .7rem .45rem 1rem;
-  background: var(--card); border: 1px solid var(--line); border-radius: 9999px; box-shadow: var(--shadow);
+@media (max-width: 959.98px) {
+  header.side { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; padding: .6rem 16px; border-bottom: 1px solid var(--line); }
+  nav.nav-side { display: none; }
+  details.menu { order: 3; flex-basis: 100%; }
+  details.menu[open] > summary { margin-bottom: .2rem; }
+  header.side .langs { order: 2; margin-left: auto; }
 }
-.brand { display: flex; align-items: center; gap: .45rem; font: 600 1.1rem/1 var(--sans); color: var(--ink); text-decoration: none; }
-nav.pages { display: flex; flex-wrap: wrap; gap: .15rem .2rem; font-size: 1rem; }
-.pages a { color: var(--dim); text-decoration: none; padding: .2rem .7rem; border-radius: 9999px; }
-.pages a:hover { color: var(--ink); background: var(--panel); }
-.pages a[aria-current] { color: var(--ink); font-weight: 600; background: var(--accent-wash); }
+/* Where the page is, and the team, the period and the search it is
+   looked at with. */
+nav.crumbs ol { list-style: none; display: flex; flex-wrap: wrap; margin: 0 0 .7rem; padding: 0; font-size: .9rem; color: var(--dim); }
+nav.crumbs li + li::before { content: "›"; content: "›" / ""; margin: 0 .45rem; }
+nav.crumbs [aria-current] { color: var(--ink); }
+.bar { display: flex; flex-wrap: wrap; gap: .6rem 1.5rem; align-items: end; justify-content: space-between; margin: 0 0 1.4rem; padding: .6rem .8rem; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+.bar form { display: flex; flex-wrap: wrap; gap: .5rem .8rem; align-items: end; margin: 0; }
+.bar form.find { margin-left: auto; }
+.find input[type=search] { width: min(18rem, 100%); }
+/* A page's header, with its main action; one the reader may not use is
+   shown disabled, with why. */
+.head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .4rem 1rem; margin-bottom: .6rem; }
+.head h1 { margin: 0; }
+a.button { display: inline-block; font-size: .95rem; font-weight: 500; color: var(--on-accent); background: var(--accent); border-radius: 9999px; padding: .55rem 1.15rem; text-decoration: none; }
+a.button:hover { filter: brightness(1.1); }
+.action-off { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; }
+button:disabled, button:disabled:hover { cursor: not-allowed; filter: none; color: var(--dim); background: var(--panel); border: 1px dashed var(--line-ui); }
+.why { font-size: .9rem; color: var(--dim); }
+/* Nothing to show: nothing judged yet, nothing matching, nothing to do. */
+.empty { background: var(--card); border: 1px dashed var(--line-ui); border-radius: 14px; padding: .9rem 1.1rem; margin: 1rem 0; }
+.empty-first { background: var(--accent-soft); }
+.empty-title { font-weight: 600; margin: 0 0 .3rem; }
+.empty p:last-child { margin-bottom: 0; }
+.statuses { padding: 0 16px; }
 main { max-width: 1132px; margin: 0 auto; padding: 1.8rem 16px 2rem; }
 footer { max-width: 1132px; margin: 0 auto; padding: 1rem 16px 2rem; font-size: .9rem; color: var(--dim); border-top: 1px solid var(--line); }
 footer form.signout { display: inline; margin-left: .75rem; }
@@ -220,10 +260,9 @@ table.heat td.hc { height: 1.7rem; border-radius: 5px; }
   svg.chart text.end { font-size: 20px; }
   svg.chart text.wk.alt { display: none; }
   .tile-value { font-size: 2.1rem; }
-  header { position: static; margin: 0; border-radius: 0 0 18px 18px; border-top: 0; }
   h1 { font-size: 2rem; }
 }
-.langs { margin-left: auto; font-size: .95rem; color: var(--dim); }
+.langs { font-size: .95rem; color: var(--dim); }
 .langs a { color: var(--dim); }
 /* A link of a single sign: room enough to press. */
 a.sign { display: inline-block; min-width: 24px; min-height: 24px; text-align: center; text-decoration: none; }

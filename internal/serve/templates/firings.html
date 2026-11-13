@@ -5,21 +5,21 @@
   <label>{{t "Rule"}} <input name="rule" value="{{.Rule}}"></label>
   <label><input type="checkbox" name="black" value="1"{{if .Black}} checked{{end}}> {{t "only ● nothing"}}</label>
   <button>{{t "Show"}}</button>
-  <a href="/firings?day={{.Prev}}{{with .Rule}}&amp;rule={{.}}{{end}}"><span aria-hidden="true">←</span> {{.Prev}}</a>
-  <a href="/firings?day={{.Then}}{{with .Rule}}&amp;rule={{.}}{{end}}">{{.Then}} <span aria-hidden="true">→</span></a>
+  <a href="{{$.Link "/firings" "day" .Prev "rule" .Rule}}"><span aria-hidden="true">←</span> {{.Prev}}</a>
+  <a href="{{$.Link "/firings" "day" .Then "rule" .Rule}}">{{.Then}} <span aria-hidden="true">→</span></a>
 </form>
 <p class="quiet">{{t "A black stone that was a real problem nobody wrote down: say so, and it is written down as an incident, from the firing's start and end."}}</p>
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Stone"}}</th><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col" class="n">{{t "Notified"}}</th><th scope="col">{{t "Labels"}}</th><td></td></tr></thead>
 <tbody>{{range .Lines}}
 <tr><td>{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else}}●{{end}}{{if .Refired}} {{t "refired"}}{{end}}</td>
-<td><a href="/rules/{{path .Rule}}"><bdi>{{.Rule}}</bdi></a></td>
+<td><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></td>
 <td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td>
 <td class="n">{{template "notified" .}}</td><td class="labels">{{.Labels}}</td>
 <td>{{if and (not .White) (not $ro)}}<form method="post" action="/firings/{{.ID}}/real"><button class="quiet-button">{{t "This was real"}}</button></form>{{end}}</td></tr>
 {{else}}<tr><td colspan="7" class="quiet">{{t "None."}}</td></tr>{{end}}</tbody>
 </table></div>
-{{with .Next}}<p><a href="{{.}}">{{t "Earlier →"}}</a></p>{{end}}
+{{with .Next}}<p><a href="{{$.Link .}}">{{t "Earlier →"}}</a></p>{{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
 {{/* How many notifications told of a firing; that it paged no one, once

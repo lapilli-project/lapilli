@@ -1,17 +1,17 @@
-{{define "reports"}}{{$title := t "Reports"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := not .View.Teams}}{{if .Status.Admin}}{{$ro = false}}{{end}}{{$admin := .Status.Admin}}{{with .View}}
-<h1>{{$title}}</h1>
+{{define "reports"}}{{$title := t "Reports"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := not .View.Teams}}{{if .Status.Admin}}{{$ro = false}}{{end}}{{$admin := .Status.Admin}}{{$none := ""}}{{if not .View.Dests}}{{$none = "Nowhere to send a report yet"}}{{end}}{{with .View}}
+<div class="head"><h1>{{$title}}</h1>{{template "action" (mainAction $ "Add a report" (not $ro) "team" $none)}}</div>
 <p class="lede">{{t "Reports sent on a schedule: when, over what span, for whom, where to, and what each holds. Each is sent once for each span, through the outbox, when the ledger has the span. Admins make and change them; everyone sees them and a preview."}} {{t "A team's editors make their team's, to its own destination."}}</p>
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Report"}}</th><th scope="col">{{t "When"}}</th><th scope="col">{{t "For whom"}}</th><th scope="col">{{t "Holds"}}</th><th scope="col">{{t "To"}}</th><th scope="col">{{t "Last sent for"}}</th><td></td></tr></thead>
 <tbody>{{range .Lines}}<tr>
-  <td>{{if .SetBy}}<a href="/reports/digest">{{t .Name}}</a><br><span class="quiet">{{if eq .SetBy "ledger"}}{{t "set in the UI: --digest isn't used"}}{{else}}{{t "set by flags: --digest, --team-digest, --slack-webhook-file"}}{{end}}</span>{{else}}<a href="/reports/{{.ID}}">{{.Name}}</a>{{end}}
+  <td>{{if .SetBy}}<a href="{{$.Link "/reports/digest"}}">{{t .Name}}</a><br><span class="quiet">{{if eq .SetBy "ledger"}}{{t "set in the UI: --digest isn't used"}}{{else}}{{t "set by flags: --digest, --team-digest, --slack-webhook-file"}}{{end}}</span>{{else}}<a href="{{$.Link (printf "/reports/%d" .ID)}}">{{.Name}}</a>{{end}}
   {{if eq .Stopped "off"}}<br><span class="quiet">{{t "off"}}</span>{{else if .Stopped}}<br><strong>{{t "its team was removed: it isn't sent"}}</strong>{{end}}</td>
   <td><code>{{.Schedule}}</code>{{with .Span}} · {{.}}{{end}}</td>
   <td>{{if .SetBy}}{{t "everyone, and each team"}}{{else if .TeamName}}{{.TeamName}}{{if eq .Zone "team"}} <span class="quiet">({{t "its zone"}})</span>{{end}}{{else if .TeamID}}–{{else}}{{t "everyone"}}{{end}}</td>
   <td>{{range $i, $x := .Sections}}{{if $i}}, {{end}}{{t $x}}{{end}}</td>
   <td>{{join .Dests ", "}}{{with .Unknown}}<br><strong>{{t "nothing names %s now" (join . ", ")}}</strong>{{end}}</td>
   <td class="t">{{at $loc .LastSent}}</td>
-  <td>{{if .SetBy}}{{if $admin}}<a href="/reports?edit=digest">{{t "Change"}}</a>{{end}}{{else if $.View.MayEdit .}}<a href="/reports?edit={{.ID}}">{{t "Change"}}</a>{{end}}</td>
+  <td>{{if .SetBy}}{{if $admin}}<a href="{{$.Link "/reports" "edit" "digest"}}">{{t "Change"}}</a>{{end}}{{else if $.View.MayEdit .}}<a href="{{$.Link "/reports" "edit" .ID}}">{{t "Change"}}</a>{{end}}</td>
 </tr>{{else}}<tr><td colspan="7" class="quiet">{{t "No reports yet."}}</td></tr>{{end}}</tbody>
 </table></div>
 <p class="quiet">{{t "A schedule is daily@09:00, weekly mon@09:00, monthly 1@09:00 (a day from 1 to 28, or last), or a cron expression of five fields, such as 0 9 * * 1-5, hourly at most. A preset covers the day, the week from Monday or the month before it; a cron expression, the time since the one before, or a span given with it, such as 24h or 7d. Times are the ledger's zone's, or the team's."}}</p>
@@ -31,7 +31,7 @@
 {{if not .Dests}}<p>{{t "There is nowhere to send a report: lapilli serve names the destinations, with --report-dest, --slack-webhook-file, --notify-webhook-file or --team-digest. A URL is never typed here."}}</p>
 {{else}}
 {{$e := .Edit}}
-<h2>{{if $e}}{{t "Change %s" $e.Name}}{{else}}{{t "Add a report"}}{{end}}</h2>
+<h2 id="add">{{if $e}}{{t "Change %s" $e.Name}}{{else}}{{t "Add a report"}}{{end}}</h2>
 <form method="post" action="/reports" class="grid">
   {{with $e}}<input type="hidden" name="id" value="{{.ID}}">{{end}}
   <label>{{t "Name"}} <input name="name" required maxlength="100" value="{{with $e}}{{.Name}}{{end}}" placeholder="{{t "payments daily"}}"></label>
@@ -58,8 +58,8 @@
 {{if eq .Stopped "off"}}<br>{{t "off"}}{{else if .Stopped}}<br><strong>{{t "its team was removed: it isn't sent"}}</strong>{{end}}
 {{with .Unknown}}<br><strong>{{t "nothing names %s now" (join . ", ")}}</strong>{{end}}
 <br>{{t "Last sent for the span to %s." (at $loc .LastSent)}}{{with .UpdatedBy}} {{t "Kept by %s, %s." (who .) (at $loc $.View.Updated)}}{{end}}</p>
-{{if .SetBy}}<p class="quiet">{{if eq .SetBy "ledger"}}{{t "set in the UI: --digest isn't used"}}{{else}}{{t "set by flags: --digest, --team-digest, --slack-webhook-file"}}{{end}}</p>{{if not $ro}}<p><a href="/reports?edit=digest#digest">{{t "Change"}}</a></p>{{end}}
-{{else if or (not $ro) (and (gt .TeamID 0) (edits $.Status .TeamID))}}<p><a href="/reports?edit={{.ID}}">{{t "Change"}}</a></p>{{end}}
+{{if .SetBy}}<p class="quiet">{{if eq .SetBy "ledger"}}{{t "set in the UI: --digest isn't used"}}{{else}}{{t "set by flags: --digest, --team-digest, --slack-webhook-file"}}{{end}}</p>{{if not $ro}}<p><a href="{{$.Link "/reports#digest" "edit" "digest"}}">{{t "Change"}}</a></p>{{end}}
+{{else if or (not $ro) (and (gt .TeamID 0) (edits $.Status .TeamID))}}<p><a href="{{$.Link "/reports" "edit" .ID}}">{{t "Change"}}</a></p>{{end}}
 <h2>{{t "As it would be sent now"}}</h2>
 {{with .Preview}}<p class="quiet">{{t "For its last span, %s → %s, sent nowhere." (at $loc .From) (at $loc .To)}} <a href="/api/v1/reports/{{if $.View.SetBy}}digest{{else}}{{$.View.ID}}{{end}}/preview">JSON</a></p>
 <pre class="report">{{.Text}}</pre>{{else}}<p>{{.Why}}</p>{{end}}

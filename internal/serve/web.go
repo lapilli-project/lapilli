@@ -55,7 +55,15 @@ func (s *Server) Handler() http.Handler {
 
 	page := func(name string, view func(*http.Request) (any, error)) http.HandlerFunc {
 		return s.cached(func(w http.ResponseWriter, r *http.Request) {
-			v, err := view(r)
+			// The page context, read once; the view reads the reader's own
+			// team as team= when it was taken for them.
+			r, vr := s.withContext(r, name)
+			v, err := view(vr)
+			var to redirect
+			if errors.As(err, &to) {
+				http.Redirect(w, r, to.to, http.StatusSeeOther)
+				return
+			}
 			if err != nil {
 				s.oops(w, r, err)
 				return
@@ -678,7 +686,29 @@ type page struct {
 	// Title is the page's, as its h1 has it: a template sets it with
 	// titled, for the browser's tab and for screen readers.
 	Title string
+	// Ctx is the team and period the page is looked at for, carried on
+	// its links; Nav the sidebar, Here the page of it the reader is on,
+	// Crumb where the page is, and Bar the bar at its top
+	// (docs/design/ui.md).
+	Ctx            pageCtx
+	Nav            []navGroup
+	Here, HereName string
+	Crumb          crumbOf
+	Bar            barView
 }
+
+// Link is a page's URL with the page context; see pageCtx.Link.
+func (p page) Link(target string, kv ...any) string { return p.Ctx.Link(target, kv...) }
+
+// Rule is a rule's page, Incident an incident's, with the page context.
+func (p page) Rule(name string) string   { return p.Ctx.Rule(name) }
+func (p page) Incident(id string) string { return p.Ctx.Incident(id) }
+
+// redirect is a view's answer that the page is elsewhere: always a path on
+// this server, built from fixed paths and escaped values.
+type redirect struct{ to string }
+
+func (r redirect) Error() string { return "see " + r.to }
 
 // langLink is a language the page is offered in, named in that language.
 type langLink struct {
@@ -701,6 +731,12 @@ func (s *Server) page(r *http.Request, name string, v any) page {
 	if w, ok := whoOf(r); ok && w.by == bySession {
 		p.Status.SignOut = true
 	}
+	if role < editor {
+		p.Status.Why = s.why(r)
+	}
+	p.Ctx = s.pageContext(r)
+	p.Here, p.HereName = navPage(name)
+	p.Nav, p.Crumb, p.Bar = s.nav(r.Context(), p), crumbsOf[name], barOf(name, r, p.Ctx)
 	for _, n := range names {
 		p.Langs = append(p.Langs, langLink{n.Code, n.Name, "/lang?to=" + n.Code + "&back=" + url.QueryEscape(r.URL.RequestURI()), n.Code == l})
 	}
@@ -735,6 +771,9 @@ type statusView struct {
 	ChangesOn, ChangesPaused bool
 	// SignOut offers to sign out: the reader is signed in with a session.
 	SignOut bool
+	// Why is why the reader may change nothing, when it isn't their role
+	// (see Server.why).
+	Why string
 }
 
 func (s *Server) statusView(l string) statusView {
