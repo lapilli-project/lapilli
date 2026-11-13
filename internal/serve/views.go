@@ -822,8 +822,12 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 			switch {
 			case cur == nil && last != nil:
 				v.Changes = append(v.Changes, change{Since: ver.Since, Gone: true})
-			case cur != nil && (last == nil || last.Key() != cur.Key()):
-				v.Changes = append(v.Changes, describe(*cur, ver.Since))
+			case cur != nil && (last == nil || last.Whole() != cur.Whole()):
+				// As it fires: its labels with its group's, a change to
+				// which is a version.
+				c := describe(*cur, ver.Since)
+				c.Labels = labelsText(cur.AlertLabels())
+				v.Changes = append(v.Changes, c)
 			}
 			last = cur
 		}
@@ -945,12 +949,17 @@ func describe(r rules.Rule, since time.Time) change {
 	default:
 		c.Expr = r.Expr
 	}
-	var ls []string
-	for _, k := range slices.Sorted(maps.Keys(r.Labels)) {
-		ls = append(ls, k+"="+r.Labels[k])
-	}
-	c.Labels = strings.Join(ls, " ")
+	c.Labels = labelsText(r.Labels)
 	return c
+}
+
+// labelsText is a rule's labels as k=v, in order.
+func labelsText(l map[string]string) string {
+	var ls []string
+	for _, k := range slices.Sorted(maps.Keys(l)) {
+		ls = append(ls, k+"="+l[k])
+	}
+	return strings.Join(ls, " ")
 }
 
 type incidentLine struct {

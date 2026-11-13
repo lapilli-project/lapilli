@@ -172,7 +172,7 @@ func (s *Server) record(ctx context.Context, v historyVersion, floor time.Time) 
 	if err != nil {
 		return err
 	}
-	if ok && latest.Digest == digestOf(s.matching(v.rules)) {
+	if ok && latest.Digest == digestOf(s.matching(v.rules)) && s.wholeAsLatest(ctx, latest, v.docs) {
 		return nil
 	}
 	at := v.at

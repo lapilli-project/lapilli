@@ -378,7 +378,7 @@ func identity(r rules.Rule, dups map[string]int) string {
 	if r.UID != "" {
 		return "uid\x00" + r.UID
 	}
-	k := r.Group + "\x00" + r.Name + "\x00" + key(r.Labels)
+	k := r.Group + "\x00" + r.Name + "\x00" + key(r.AlertLabels())
 	dups[k]++
 	return k + "\x00" + strconv.Itoa(dups[k])
 }
@@ -489,7 +489,7 @@ func fire(r rules.Rule, series []prom.Series, step time.Duration, fireAt func(ti
 			return t
 		}
 	}
-	return firing.FromSeries(r.Name, r.Labels, series, every, fireAt, keep, end)
+	return firing.FromSeries(r.Name, r.AlertLabels(), series, every, fireAt, keep, end)
 }
 
 // evaluated keeps of each series the steps a rule evaluated every every is

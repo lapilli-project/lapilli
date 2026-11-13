@@ -998,6 +998,7 @@
  "it reads a cloud's own metrics, which often arrive minutes after their time: without --late, the replay reads them as filled in since": "lee métricas propias de una nube, que a menudo llegan minutos después de su hora: sin --late, el backtest las lee tal como se completaron después",
  "it has a query on another data source than its condition's, which isn't replayed: whenever that returns nothing, Grafana takes the rule as having no data": "tiene una consulta sobre una fuente de datos distinta de la de su condición, que no tiene backtest: siempre que esa consulta no devuelva nada, Grafana considera que la regla no tiene datos",
  "a query outside its condition failed when it was replayed: whether that returned anything, which Grafana's no data hangs on, isn't known": "una consulta fuera de su condición falló durante el backtest: no se sabe si devolvió algo, y de eso depende el no data de Grafana",
+ "its group has a limit, which the replay doesn't hold it to: past as many alerts at once, Prometheus drops them all": "su grupo tiene un límite, que el backtest no le aplica: pasadas tantas alertas a la vez, Prometheus las descarta todas",
  "For a cloud's own alarms that are replayed, their history copied in under %s stands in: a day is set beside it once its copies reach past it.": "Para las alarmas propias de una nube con backtest, se usa su historial copiado bajo %s: un día se contrasta con él cuando las copias llegan más allá de ese día.",
  "On-call schedules": "Calendarios de guardia",
  "Schedule": "Calendario",

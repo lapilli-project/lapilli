@@ -702,8 +702,11 @@ func TestForComment(t *testing.T) {
 		rulerTenant: "team-a7"}
 	unreached := `query failed: Post "https://ci-reader:pw@prom.internal.example:9090/prom/api/v1/query_range": dial tcp 10.1.2.3:9090: connect: connection refused`
 	judgedReason := "query failed: HTTP 400: bad_data: parse error near prometheus, from prom.internal.example (10.0.0.5:9090, [fd00::1]:443) for ci-reader, team-a7"
+	proxy := "query failed: HTTP 400: not a Prometheus API response: <html><address>Apache/2.4.58 Server at prometheus-0.monitoring.corp.example Port 9090</address></html>"
 	before := &verdict.Report{Rules: []verdict.RuleResult{{Rule: "A", Unsupported: unreached}, {Rule: "B", Unsupported: "projects/shop-prod-123456 denied, prom failed"},
-		{Rule: "C", Unsupported: judgedReason}, {Rule: "D", Unsupported: "query failed: HTTP 503: upstream prom-0.prom:9090 overloaded"}}}
+		{Rule: "C", Unsupported: judgedReason}, {Rule: "D", Unsupported: "query failed: HTTP 503: upstream prom-0.prom:9090 overloaded"},
+		{Rule: "E", Unsupported: proxy}, {Rule: "F", Unsupported: "query failed: HTTP 422: bad_data: unknown function near prom."},
+		{Rule: "G", Unsupported: "query failed: HTTP 400: not a Loki API response: <html>Bad Request</html>"}}}
 	after := &verdict.Report{Rules: []verdict.RuleResult{{Rule: "A", Unsupported: replay.Unfinished}}}
 	var log strings.Builder
 	f.forComment(&verdict.Comparison{Before: before, After: after}, &log)
@@ -711,6 +714,11 @@ func TestForComment(t *testing.T) {
 		UnreadHistory,
 		"projects/[--gcp-project] denied, [--loki] failed",
 		"query failed: HTTP 400: bad_data: parse error near prometheus, from [--prometheus] ([address], [address]) for [user], [--ruler-tenant]",
+		UnreadHistory,
+		// A proxy's page, of 400 too, isn't the API judging the query.
+		UnreadHistory,
+		// A host at a sentence's end.
+		"query failed: HTTP 422: bad_data: unknown function near [--loki].",
 		UnreadHistory,
 	} {
 		if got := before.Rules[i].Unsupported; got != want {
@@ -724,7 +732,7 @@ func TestForComment(t *testing.T) {
 		t.Errorf("the job's log:\n%s", log.String())
 	}
 	f.forComment(&verdict.Comparison{}, &log) // nothing compared: nothing to hide
-	if got := replaceWord("prometheus prom prom.x xprom prom", "prom", "P"); got != "prometheus P prom.x xprom P" {
+	if got := replaceWord("prometheus prom prom.x xprom prom. prom.. prom.-", "prom", "P"); got != "prometheus P prom.x xprom P. P.. prom.-" {
 		t.Errorf("replaceWord: %q", got)
 	}
 }
@@ -827,5 +835,23 @@ func TestComparePullRequest(t *testing.T) {
 		if code, _, errs := run(args...); code != want || strings.Contains(errs, "\n::") || !strings.Contains(errs, `\u{a}::error::merge it`) {
 			t.Errorf("%v: exit %d\n%q", args, code, errs)
 		}
+	}
+}
+
+// A pull request that changes only an Azure rule group's recording rule
+// changes what its alerts see: not "nothing changed".
+func TestCompareAzureRecording(t *testing.T) {
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
+	now = func() time.Time { return t0 }
+	group := func(expr string) string {
+		return `{"type": "Microsoft.AlertsManagement/prometheusRuleGroups", "name": "shop", "properties": {"interval": "PT1M", "rules": [
+  {"record": "shop:errors", "expression": "` + expr + `"},
+  {"alert": "CheckoutErrors", "expression": "shop:errors > 5", "for": "PT5M"}]}}`
+	}
+	was, is := write(t, "was.json", group("errors")), write(t, "is.json", group("errors * 0"))
+	var out, errs strings.Builder
+	code := run([]string{"verdict", "--rules", is, "--compare", was, "--prometheus", "http://p", "--json", "--changed-only"}, &out, &errs)
+	if code != 0 || !strings.Contains(out.String(), `"nothing_changed": false`) || !strings.Contains(out.String(), `"record": "shop:errors"`) {
+		t.Errorf("exit %d\n%s\n%s", code, out.String(), errs.String())
 	}
 }

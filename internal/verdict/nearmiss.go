@@ -159,7 +159,7 @@ func NearlyBy(in incident.Incident, series []prom.Series, r rules.Rule, b rules.
 	for _, s := range series {
 		l := maps.Clone(s.Labels)
 		delete(l, "__name__")
-		maps.Copy(l, r.Labels)
+		maps.Copy(l, r.AlertLabels())
 		// A value that isn't a number doesn't hold: it breaks a stretch.
 		smp := slices.DeleteFunc(slices.Clone(s.Samples), func(x prom.Sample) bool { return math.IsNaN(x.V) })
 		if len(smp) == 0 || !in.Labels.Agree(l, o.Match) {
@@ -222,7 +222,7 @@ func NearlyBy(in incident.Incident, series []prom.Series, r rules.Rule, b rules.
 		// evaluations that held, with its "for" and keep_firing_for.
 		held := prom.Series{Labels: s.Labels, Samples: slices.DeleteFunc(slices.Clone(smp), func(x prom.Sample) bool { return !nb.Holds(x.V) })}
 		wait := time.Duration(n) * every
-		fs := firing.FromSeries(r.Name, r.Labels, firing.After([]prom.Series{held}, start, every, r.KeepFiringFor), every,
+		fs := firing.FromSeries(r.Name, r.AlertLabels(), firing.After([]prom.Series{held}, start, every, r.KeepFiringFor), every,
 			func(p time.Time) time.Time { return p.Add(wait) }, r.KeepFiringFor, smp[len(smp)-1].T.Add(every))
 		for _, f := range fs {
 			if !Catches(f, in, o) {

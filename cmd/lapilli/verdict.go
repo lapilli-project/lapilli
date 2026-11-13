@@ -1259,9 +1259,10 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 // forComment readies the reasons rules couldn't be replayed for
 // --markdown, a comment on a pull request, which more people read than the
 // job's log. A query that failed for any reason but the server judging it
-// (HTTP 400 or 422: a parse error, a bad expression), which is to say for
-// want of reaching the history (a connection, a credential, the server
-// failing), says only that, its whole reason going to the job's log. The
+// (HTTP 400 or 422, as the API itself says it: a parse error, a bad
+// expression; not a proxy's page), which is to say for want of reaching
+// the history (a connection, a credential, the server failing), says only
+// that, its whole reason going to the job's log. The
 // rest has where the history is taken out of it: the URLs given, the user
 // names in them and their hosts, each as a whole word, any IP address with
 // its port, the tenants, and a Google Cloud project.
@@ -1301,7 +1302,7 @@ func (f *verdictFlags) forComment(c *verdict.Comparison, stderr io.Writer) {
 			r := &rep.Rules[i]
 			switch {
 			case r.Unsupported == "" || r.Unsupported == replay.Unfinished:
-			case strings.HasPrefix(r.Unsupported, "query failed: ") && !judged.MatchString(r.Unsupported):
+			case strings.HasPrefix(r.Unsupported, "query failed: ") && (!judged.MatchString(r.Unsupported) || notAPI.MatchString(r.Unsupported)):
 				fmt.Fprintf(stderr, "lapilli verdict: %s (%s) couldn't be replayed: %s\n", verdict.Clean(r.Rule), side, verdict.Clean(r.Unsupported))
 				r.Unsupported = UnreadHistory
 			default:
@@ -1316,25 +1317,28 @@ func (f *verdictFlags) forComment(c *verdict.Comparison, stderr io.Writer) {
 const UnreadHistory = "query failed: the history couldn't be read; the job's log says why"
 
 var (
-	// judged is a query the server read and refused: what it says is of
-	// the query, the pull request's.
+	// judged is a query the server read and refused, as the API says it,
+	// parsed: what it says is of the query, the pull request's.
 	judged = regexp.MustCompile(`^query failed: HTTP (400|422): `)
+	// notAPI is an answer that isn't the API's, a page a proxy before it
+	// gave, of 400 or any: what it says is of where the history is.
+	notAPI = regexp.MustCompile(`^query failed: HTTP [0-9]+: not an? (Prometheus|Loki) API response: `)
 	// userinfo is a URL's user and password.
 	userinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s"']*@`)
 	// address is an IP address, with its port if it has one.
 	address = regexp.MustCompile(`\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*\](:[0-9]+)?|\b([0-9]{1,3}\.){3}[0-9]{1,3}(:[0-9]+)?\b`)
 )
 
-// replaceWord replaces in s each old that is a whole word, neither
-// letters, digits, dots, dashes nor underscores either side of it, with
-// with: a host "prom" isn't taken out of "prometheus".
+// replaceWord replaces in s each old that is a whole word, with with: no
+// letter, digit, dot, dash or underscore before it, and none but a dot
+// after it, a full stop, which no letter, digit, dash or underscore
+// follows. A host "prom" isn't taken out of "prometheus" or "prom.example",
+// but is out of "failed at prom.": as recipes/backtest/lib.sh takes it out.
 func replaceWord(s, old, with string) string {
 	if old == "" {
 		return s
 	}
-	word := func(r rune) bool {
-		return r == '.' || r == '-' || r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
-	}
+	alnum := func(r rune) bool { return r == '-' || r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) }
 	var b strings.Builder
 	for {
 		i := strings.Index(s, old)
@@ -1343,8 +1347,10 @@ func replaceWord(s, old, with string) string {
 			return b.String()
 		}
 		before, _ := utf8.DecodeLastRuneInString(s[:i])
-		after, _ := utf8.DecodeRuneInString(s[i+len(old):])
-		whole := (i == 0 || !word(before)) && (i+len(old) == len(s) || !word(after))
+		rest := s[i+len(old):]
+		after, n := utf8.DecodeRuneInString(rest)
+		next, _ := utf8.DecodeRuneInString(rest[n:])
+		whole := (i == 0 || !(before == '.' || alnum(before))) && (rest == "" || !(alnum(after) || after == '.' && alnum(next)))
 		b.WriteString(s[:i])
 		if whole {
 			b.WriteString(with)

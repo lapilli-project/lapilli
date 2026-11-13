@@ -823,7 +823,7 @@ most 64,000 bytes, under the 65,536 characters GitHub takes, cut short
 with a note when longer:
 
 ```
-[//]: # (lapilli-compare {"nothing_changed":false,"changed":1,"added":1,"removed":0,"same":42,"alike":0,"unreplayed":0,"firings_before":148,"firings_after":42,"incidents_given":true,"incidents":3,"incidents_changed":1})
+[//]: # (lapilli-compare {"nothing_changed":false,"changed":1,"added":1,"removed":0,"same":42,"alike":0,"unreplayed":0,"recording_changed":0,"firings_before":148,"firings_after":42,"incidents_given":true,"incidents":3,"incidents_changed":1})
 ### Lapilli backtest, 2026-10-26 00:00 → 2026-11-02 00:00 Asia/Seoul (+09:00)
 
 Rules compared: **1 changed, 1 added, 0 taken away**, 42 the same.
@@ -855,10 +855,28 @@ those that differ but fire as they did are folded in `<details>`.
 A recording rule that differs is a change too, listed apart: a replay reads
 what a recording rule recorded, from the history, so the alerts that read
 one are replayed against what it recorded, not what the change would
-record, which the report says. A group's `limit` and `labels` are part of
-each of its rules (Prometheus adds the group's labels to its rules'); a
-limit isn't replayed: past it, Prometheus drops all of a rule's alerts,
-which the report says too. Rule
+record, which the report says. Recording rules are read wherever
+Prometheus's groups are (files, a `PrometheusRule`, a ConfigMap, Google
+Cloud's `Rules`, an Amazon rule groups namespace, a Mimir, Cortex or Loki
+ruler's file), from an Azure rule group, alone or in an ARM template, and
+from a Grafana provisioning file, where a recording rule (one with
+`record`) is no alert rule. A cloud's own alarms record nothing.
+
+A group's `labels` and `limit` are part of each of its rules, as
+Prometheus 3 runs them: its alerts carry the group's labels under the
+rule's own, and a change to either is a change to the rule. A limit isn't
+replayed: past it, Prometheus drops all of a rule's alerts, which the
+report says too. A rule's name, and in `lapilli serve` its versions,
+history and proposals, are as they were before Lapilli read them: a rule
+told apart from another of its name is told apart by its group and its own
+labels. Not every server that takes Prometheus's groups applies these:
+Prometheus 2 refuses a group's `labels`; Google Cloud's `Rules`,
+`ClusterRules` and `GlobalRules` have neither field; and a Mimir, Cortex or
+Amazon ruler may keep them without applying them, depending on its
+version. Where they aren't applied, the replay's alerts carry labels the
+real ones don't.
+
+Rule
 names, labels, incidents and the reasons a rule couldn't be replayed come
 from whoever wrote the rules, and a pull request's author may be anyone:
 each is written as a code span, in which no host reads Markdown, HTML, a
@@ -867,9 +885,10 @@ escaped so it can't end a table's cell, a backtick in it making the span's
 fence longer, and control and format characters (bidirectional overrides,
 zero-width spaces), line separators and spaces other than the space shown
 as `\u{...}`. A query that failed for want of reaching the history (a
-connection, a credential, the server failing: anything but the server
-refusing the query itself, HTTP 400 or 422) says only that in the
-Markdown, its whole reason going to stderr, the job's log; what is left
+connection, a credential, the server failing: anything but the API itself
+refusing the query, HTTP 400 or 422 in its own words, not a proxy's page)
+says only that in the Markdown, its whole reason going to stderr, the
+job's log; what is left
 has where the history and the rules are read from taken out: the
 `--prometheus`, `--loki`, `--grafana` and `--ruler` URLs, the user names
 in them and their hosts, each as a whole word, any IP address and port,

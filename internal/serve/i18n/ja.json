@@ -998,6 +998,7 @@
  "it reads a cloud's own metrics, which often arrive minutes after their time: without --late, the replay reads them as filled in since": "クラウド自身のメトリクスを読むルールです。こうしたメトリクスは数分遅れて届くことが多く、--late なしではバックテストが後から埋まった値を読みます",
  "it has a query on another data source than its condition's, which isn't replayed: whenever that returns nothing, Grafana takes the rule as having no data": "条件とは別のデータソースへのクエリがあり、そのクエリはバックテストしません。そのクエリが何も返さないと、Grafana はルールを No Data とみなします",
  "a query outside its condition failed when it was replayed: whether that returned anything, which Grafana's no data hangs on, isn't known": "条件外のクエリがバックテスト中に失敗しました。Grafana の No Data はそのクエリが何かを返したかどうかで決まりますが、それが分かりません",
+ "its group has a limit, which the replay doesn't hold it to: past as many alerts at once, Prometheus drops them all": "グループに limit がありますが、バックテストはそれに従いません。同時にそれを超えるアラートが出ると、Prometheus はそのすべてを破棄します",
  "For a cloud's own alarms that are replayed, their history copied in under %s stands in: a day is set beside it once its copies reach past it.": "バックテストするクラウド独自のアラームは、%s として取り込んだ履歴と照合します。取り込みがその日を越えてから、その日を照合します。",
  "On-call schedules": "オンコールスケジュール",
  "Schedule": "スケジュール",
