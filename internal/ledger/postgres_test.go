@@ -3,8 +3,10 @@ package ledger
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"database/sql/driver"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"net"
@@ -90,6 +92,43 @@ func TestPostgresErrorsSayNoSecret(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), addr) {
 		t.Errorf("the error doesn't say where: %v", err)
+	}
+	// A server that answers nothing: where, and that it timed out, by the
+	// string's connect_timeout or the caller's deadline.
+	silent, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer silent.Close()
+	go func() {
+		for {
+			c, err := silent.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close()
+		}
+	}()
+	at := silent.Addr().String()
+	short, cancel2 := context.WithTimeout(context.Background(), time.Second)
+	defer cancel2()
+	for _, c := range []struct {
+		ctx  context.Context
+		conn string
+	}{
+		{context.Background(), "postgres://lgr_ana:s3cretPassw0rd@" + at + "/lgr_ledger?sslmode=disable&connect_timeout=1"},
+		{short, "postgres://lgr_ana:s3cretPassw0rd@" + at + "/lgr_ledger?sslmode=disable"},
+	} {
+		_, err := OpenPostgres(c.ctx, c.conn, time.UTC)
+		if !errors.Is(err, ErrConnect) || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "connecting to "+at+" timed out") ||
+			strings.Contains(err.Error(), "%!") {
+			t.Errorf("a server that answers nothing: %v", err)
+		}
+		for _, s := range secret {
+			if err != nil && strings.Contains(err.Error(), s) {
+				t.Errorf("an error says %q: %v", s, err)
+			}
+		}
 	}
 	// A password that turns up in a server's answer is taken out.
 	if got := scrub("FATAL: no such role s3cretPassw0rd", []string{"s3cretPassw0rd"}); strings.Contains(got, "s3cret") {
@@ -761,5 +800,220 @@ func TestBindLeavesOutTheRest(t *testing.T) {
 	}
 	if _, got := bind("SELECT 1", args); len(got) != 0 {
 		t.Errorf("none: %v", got)
+	}
+}
+
+// An Azure alarm's id is compared in any letter case of its ASCII letters,
+// and its other letters as they are, in either database: an id with an É,
+// asked for in another case of its ASCII letters, fires; asked for with an
+// é, it doesn't, as SQLite's lower() leaves an É.
+func TestFiringAlarmFoldsASCII(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	id := "/subscriptions/S/resourceGroups/rg/providers/Microsoft.Insights/metricAlerts/Échec-paiement"
+	now := time.Now().Truncate(time.Second)
+	if _, err := l.PutFirings(ctx, "azure-prod", now.Add(-time.Hour), now, []firing.Firing{
+		{Rule: "Échec-paiement", Labels: map[string]string{AlarmID: strings.ToLower(id[:60]) + id[60:]}, Start: now.Add(-30 * time.Minute)},
+	}, FiringsCopier, opts); err != nil {
+		t.Fatal(err)
+	}
+	for ask, want := range map[string]bool{
+		id: true, strings.ToUpper(id[:20]) + id[20:]: true, strings.Replace(id, "Échec", "échec", 1): false,
+	} {
+		if on, err := l.FiringAlarm(ctx, "azure-prod", ask, true); err != nil || on != want {
+			t.Errorf("%s: firing %v, want %v (%v)", ask, on, want, err)
+		}
+	}
+}
+
+// Any role that may connect can take a ledger's lock: the refusal names the
+// role that holds it, whatever the session calls itself, so a lock taken
+// by another role is told from one of lapilli's own.
+func TestPostgresLockedSaysRole(t *testing.T) {
+	u := ledgertest.URL(t)
+	if u == "" {
+		t.Skip("no " + ledgertest.Env)
+	}
+	ctx := context.Background()
+	l, err := OpenPostgres(ctx, u, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := l.pg.key
+	l.Close()
+	b := make([]byte, 4)
+	rand.Read(b)
+	role := fmt.Sprintf("lt_role_%x", b)
+	admin, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	if _, err := admin.Exec(ctx, "CREATE ROLE "+role+" LOGIN PASSWORD 'lt-role-pw'"); err != nil {
+		t.Skipf("no role to make: %v", err)
+	}
+	defer admin.Exec(ctx, "DROP ROLE "+role)
+	pu, _ := url.Parse(u)
+	pu.User = url.UserPassword(role, "lt-role-pw")
+	q := pu.Query()
+	q.Set("application_name", "lapilli")
+	pu.RawQuery = q.Encode()
+	other, err := pgx.Connect(ctx, pu.String())
+	if err != nil {
+		t.Skipf("the role can't connect here: %v", err)
+	}
+	if _, err := other.Exec(ctx, "SELECT pg_advisory_lock($1, $2)", int32(lockClass), key); err != nil {
+		t.Fatal(err)
+	}
+	_, err = OpenPostgres(ctx, u, time.UTC)
+	other.Close(ctx)
+	var locked *LockedError
+	if !errors.As(err, &locked) || locked.Role != role || !strings.Contains(err.Error(), `role "`+role+`"`) {
+		t.Errorf("held by another role: %v", err)
+	}
+}
+
+// A run makes its rules and alerts in the same order in either database,
+// SQLite's: those still on from before its period first, as Record comes
+// to them. Ties broken by an alert's id (the most re-fired) break alike.
+func TestSeriesMadeInSQLitesOrder(t *testing.T) {
+	ctx := context.Background()
+	from := t0.Add(12 * time.Hour)
+	f := Found{From: from, To: from.Add(12 * time.Hour), Firings: []firing.Firing{
+		{Rule: "Errors", Labels: map[string]string{"service": "a"}, Start: from.Add(time.Hour), End: from.Add(70 * time.Minute)},
+		{Rule: "Errors", Labels: map[string]string{"service": "a"}, Start: from.Add(90 * time.Minute), End: from.Add(100 * time.Minute)},
+		{Rule: "Latency", Labels: map[string]string{"service": "c"}, Start: from.Add(2 * time.Hour), End: from.Add(3 * time.Hour)},
+		{Rule: "Errors", Labels: map[string]string{"service": "b"}, Start: from.Add(-10 * time.Minute), End: from.Add(5 * time.Minute)},
+		{Rule: "Saturation", Labels: map[string]string{"service": "d"}, Start: from.Add(-20 * time.Minute), End: from.Add(time.Minute)},
+		{Rule: "Errors", Labels: map[string]string{"service": "b"}, Start: from.Add(20 * time.Minute), End: from.Add(30 * time.Minute)},
+	}, Run: Run{Kind: "test", Started: from.Add(12 * time.Hour), Finished: from.Add(12 * time.Hour), From: from, To: from.Add(12 * time.Hour)}}
+	made := func(l *Ledger) []string {
+		if err := l.Record(ctx, f, opts); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := l.r.QueryContext(ctx, "SELECT s.id, r.id, r.name, s.labels FROM series s JOIN rules r ON r.id = s.rule_id ORDER BY s.id")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var sid, rid int64
+			var name, labels string
+			rows.Scan(&sid, &rid, &name, &labels)
+			out = append(out, fmt.Sprint(sid, " ", rid, " ", name, " ", labels))
+		}
+		top, err := l.RefiredOf(ctx, "Errors", t0, t0.Add(48*time.Hour), 1)
+		if err != nil || len(top) != 1 {
+			t.Fatalf("re-fired: %v %v", top, err)
+		}
+		return append(out, "top "+top[0].Labels["service"])
+	}
+	lite, err := Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lite.Close()
+	want := made(lite)
+	if got := made(open(t, time.UTC)); !slices.Equal(got, want) {
+		t.Errorf("made:\n  %q\nSQLite made:\n  %q", got, want)
+	}
+}
+
+// A NUL in a label, which every way in takes, as SQLite keeps it: a run,
+// a source's firings, a notification and a task are kept whole in either
+// database, the alert found again the next time, and a ledger holding one
+// copies into Postgres and is read there. Postgres keeps U+FFFD in its
+// place, json.Marshal's \u0000 too, which jsonb refuses (series_alarm,
+// notified_alarm, a change's status).
+func TestNULInLabels(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	nul := map[string]string{"service": "checkout", "path": "/x\x00"}
+	run := func(at time.Time) {
+		t.Helper()
+		f := Found{From: at, To: at.Add(time.Hour), Run: Run{Kind: "test", Started: at.Add(time.Hour), Finished: at.Add(time.Hour), From: at, To: at.Add(time.Hour)},
+			Firings: []firing.Firing{
+				{Rule: "Legit", Labels: map[string]string{"service": "checkout"}, Start: at.Add(10 * time.Minute), End: at.Add(20 * time.Minute)},
+				{Rule: "HighErrors", Labels: nul, Start: at.Add(10 * time.Minute), End: at.Add(20 * time.Minute)},
+			}}
+		if err := l.Record(ctx, f, opts); err != nil {
+			t.Fatalf("a run with a NUL in a label: %v", err)
+		}
+	}
+	run(t0)
+	run(t0.Add(time.Hour))
+	var n int
+	if err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM series s JOIN rules r ON r.id = s.rule_id WHERE r.name = 'HighErrors'").Scan(&n); err != nil || n != 1 {
+		t.Errorf("the alert with a NUL, after two runs: %d series (%v)", n, err)
+	}
+	if _, err := l.PutFirings(ctx, "cloudwatch-prod", t0, t0.Add(time.Hour), []firing.Firing{
+		{Rule: "Other", Labels: map[string]string{"x": "a\x00", AlarmID: "arn:a\x00"}, Start: t0.Add(10 * time.Minute), End: t0.Add(20 * time.Minute)},
+	}, FiringsCopier, opts); err != nil {
+		t.Errorf("a source's firing with a NUL in a label: %v", err)
+	}
+	at := t0.Add(30 * time.Minute)
+	n2 := Notification{At: at, Source: "alertmanager", Receiver: "pager", Group: `{}:{alertname="HighErrors"}`,
+		Alerts: []Alert{{Rule: "HighErrors", Labels: nul, Start: t0.Add(10 * time.Minute)}, {Rule: "HighErrors", Labels: map[string]string{"alarm_id": "\x00"}, Start: at}}}
+	if err := n2.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Notify(ctx, n2); err != nil {
+		t.Errorf("a notification with a NUL in a label: %v", err)
+	}
+	if _, err := l.Pages(ctx, t0, t0.Add(24*time.Hour), func(string) time.Duration { return time.Hour }); err != nil {
+		t.Errorf("its pages: %v", err)
+	}
+	if _, err := l.PutTask(ctx, Task{Title: "Poison\x00", Body: "a\x00b"}, "eve"); err != nil {
+		t.Fatal(err)
+	}
+	if ts, err := l.TrackerTasks(ctx, TrackerQuery{}); err != nil || len(ts) != 1 || ts[0].StatusBy != "eve" {
+		t.Errorf("the tracker job's read after a task with a NUL: %+v %v", ts, err)
+	}
+	// A SQLite ledger that kept them, copied into this one's database.
+	src, err := Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	if _, err := src.Notify(ctx, n2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := src.PutTask(ctx, Task{Title: "a\x00b"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := src.PutFirings(ctx, "cloud", t0, t0.Add(24*time.Hour), []firing.Firing{
+		{Rule: "DiskFull", Labels: map[string]string{"service": "a\x00b"}, Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour)}}, "ana", opts); err != nil {
+		t.Fatal(err)
+	}
+	dst := open(t, nil)
+	if _, err := Copy(ctx, src, dst, nil); err != nil {
+		t.Fatalf("a SQLite ledger with NULs copied: %v", err)
+	}
+	if _, err := dst.TrackerTasks(ctx, TrackerQuery{}); err != nil {
+		t.Errorf("copied, the tracker's tasks: %v", err)
+	}
+	if _, err := dst.PutFirings(ctx, "cloud", t0, t0.Add(24*time.Hour), []firing.Firing{
+		{Rule: "DiskFull", Labels: map[string]string{"service": "a\x00b"}, Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour)}}, "ana", opts); err != nil {
+		t.Errorf("copied, the same firing sent again: %v", err)
+	}
+}
+
+// A JSON text's NULs, and only those, are written U+FFFD.
+func TestJSONNUL(t *testing.T) {
+	for in, want := range map[string]string{
+		`{"a":"x\u0000y"}`:           "{\"a\":\"x�y\"}",
+		`{"a\u0000":"\u0000\u0000"}`: "{\"a�\":\"��\"}",
+		`{"a":"x\\u0000y"}`:          `{"a":"x\\u0000y"}`,
+		`{"a":"\"\u0000"}`:           "{\"a\":\"\\\"�\"}",
+		`["\\\u0000"]`:               "[\"\\\\�\"]",
+		`{"a":"\u00001"}`:            "{\"a\":\"�1\"}",
+	} {
+		if got := pgText(in); got != want {
+			t.Errorf("%s: %s, want %s", in, got, want)
+		}
+	}
+	if got := pgText(`not json \u0000`); got != `not json \u0000` {
+		t.Errorf("a text that isn't JSON: %s", got)
 	}
 }

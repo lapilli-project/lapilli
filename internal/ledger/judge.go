@@ -40,7 +40,7 @@ func (l *Ledger) ruleID(t *txn, name string) (int64, error) {
 // seriesID is the id of a rule's alert with those labels, made if there is
 // none.
 func (l *Ledger) seriesID(t *txn, rule int64, labels map[string]string) (int64, error) {
-	k, err := keyOf(rule, labels)
+	k, err := keyOf(t.d, rule, labels)
 	if err != nil {
 		return 0, err
 	}
@@ -135,12 +135,12 @@ func (l *Ledger) findSeries(t *txn, keys []seriesKey) error {
 
 // keyOf is the key of a rule's alert with those labels: their text, keys
 // sorted, one text for one label set.
-func keyOf(rule int64, labels map[string]string) (seriesKey, error) {
+func keyOf(d dialect, rule int64, labels map[string]string) (seriesKey, error) {
 	if labels == nil {
 		labels = map[string]string{}
 	}
 	b, err := json.Marshal(labels)
-	return seriesKey{rule, string(b)}, err
+	return seriesKey{rule, d.kept(string(b))}, err
 }
 
 // makeSeries makes alerts new to the ledger, in turn, and gives their ids:

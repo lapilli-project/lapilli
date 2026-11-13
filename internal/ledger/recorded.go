@@ -146,12 +146,13 @@ func (l *Ledger) PutFirings(ctx context.Context, source string, from, to time.Ti
 			return out, err
 		}
 		rk := recordedKey{f.Rule, labels["severity"]}
-		k := key{rk, string(b), f.Start.Unix()}
+		text := l.d.kept(string(b))
+		k := key{rk, text, f.Start.Unix()}
 		end := nullable(f.End)
 		if was, ok := wants[k]; ok && (was.end.Valid && (!end.Valid || was.end.Int64 >= end.Int64) || !was.end.Valid && !end.Valid) {
 			continue
 		}
-		wants[k] = want{rk, string(b), end}
+		wants[k] = want{rk, text, end}
 	}
 	err := l.write(ctx, func(t *txn) error {
 		var known bool

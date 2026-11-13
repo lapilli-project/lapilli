@@ -177,7 +177,7 @@ func (l *Ledger) SyncDeploys(ctx context.Context, ds []Deploy, o verdict.Options
 		p := reflect.ValueOf(d.Labels).Pointer()
 		text, ok := texts[p]
 		if !ok || p == 0 {
-			text = deployLabelsText(d.Labels)
+			text = l.d.kept(deployLabelsText(d.Labels))
 			texts[p] = text
 		}
 		want[deployKey(d.Start.Unix(), d.End.Unix(), text, d.Revision, d.Source)] = wanted{d, text}

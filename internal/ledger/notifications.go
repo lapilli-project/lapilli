@@ -412,7 +412,7 @@ func (l *Ledger) fill(t *txn, n *Notification) error {
 		if err != nil {
 			return err
 		}
-		if start := last[string(labels)]; start > 0 {
+		if start := last[t.d.kept(string(labels))]; start > 0 {
 			a.Start = unix(start)
 		}
 	}

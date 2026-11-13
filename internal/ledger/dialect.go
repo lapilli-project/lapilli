@@ -19,6 +19,16 @@ const (
 	postgres
 )
 
+// kept is a text as the ledger's database keeps it: in Postgres, its NULs
+// U+FFFD (pgText). What is told apart by its text, a label set above all,
+// is told apart by this, so that what is asked for is what is kept.
+func (d dialect) kept(s string) string {
+	if d == postgres {
+		return pgText(s)
+	}
+	return s
+}
+
 // pick is the statement for the ledger's database: SQLite's, or
 // Postgres's.
 func (d dialect) pick(sqlite, pg string) string {

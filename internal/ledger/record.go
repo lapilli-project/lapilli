@@ -128,22 +128,28 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 				lo = min(lo, f.from(name).Unix())
 			}
 		}
-		// The alerts of the firings below, found or made at once.
+		// The alerts of the firings below, found or made at once, in the
+		// order the loops below come to them, as SQLite makes them one at a
+		// time: their rules' ids and theirs are the same in both, and so
+		// are ties broken by id.
 		if t.d == postgres {
 			var keys []seriesKey
-			for _, x := range f.Firings {
-				if f.Keep[x.Rule] || !x.Start.Before(f.from(x.Rule)) && x.Start.After(f.To) {
-					continue
+			for _, continued := range []bool{true, false} {
+				for _, x := range f.Firings {
+					before := x.Start.Before(f.from(x.Rule))
+					if f.Keep[x.Rule] || before != continued || !before && x.Start.After(f.To) {
+						continue
+					}
+					rule, err := l.ruleID(t, x.Rule)
+					if err != nil {
+						return err
+					}
+					k, err := keyOf(t.d, rule, x.Labels)
+					if err != nil {
+						return err
+					}
+					keys = append(keys, k)
 				}
-				rule, err := l.ruleID(t, x.Rule)
-				if err != nil {
-					return err
-				}
-				k, err := keyOf(rule, x.Labels)
-				if err != nil {
-					return err
-				}
-				keys = append(keys, k)
 			}
 			if err := l.findSeries(t, keys); err != nil {
 				return err

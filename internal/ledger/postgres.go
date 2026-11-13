@@ -10,10 +10,12 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/fnv"
 	"io/fs"
+	"net"
 	"net/url"
 	"path"
 	"slices"
@@ -50,7 +52,8 @@ var ErrLockLost = errors.New("the ledger's lock was lost: another process may ha
 // ledger at a time, so that, among the rest, no notice is sent twice.
 type LockedError struct {
 	PID   int64     // the Postgres session that holds the lock
-	App   string    // its application_name
+	Role  string    // the role it connected as, when the server says
+	App   string    // its application_name, which it chose itself
 	From  string    // its client's address, when the server says
 	Since time.Time // when it connected, when the server says
 }
@@ -59,8 +62,11 @@ func (e *LockedError) Error() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "the ledger is in use by another process: Postgres session %d", e.PID)
 	var of []string
+	if e.Role != "" {
+		of = append(of, "role "+strconv.Quote(e.Role))
+	}
 	if e.App != "" {
-		of = append(of, strconv.Quote(e.App))
+		of = append(of, "named "+strconv.Quote(e.App))
 	}
 	if e.From != "" {
 		of = append(of, "from "+e.From)
@@ -110,12 +116,30 @@ func (w *pgWriter) release(db *sql.DB) {
 	if w.closed.Swap(true) {
 		return
 	}
+	w.mu.Lock()
+	held := w.pid != 0
+	w.mu.Unlock()
+	if !held {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	db.ExecContext(ctx, "SELECT pg_advisory_unlock(?, ?)", int32(lockClass), w.key)
 }
 
 func (w *pgWriter) lose() { w.once.Do(func() { close(w.lost) }) }
+
+// connecting refuses a connection the writer would make once the ledger is
+// closed or its lock lost, before it reaches the server.
+func (w *pgWriter) connecting(context.Context, *pgx.ConnConfig) error {
+	if w.isLost() {
+		return ErrLockLost
+	}
+	if w.closed.Load() {
+		return errors.New("the ledger is closed")
+	}
+	return nil
+}
 
 func (w *pgWriter) isLost() bool {
 	select {
@@ -219,12 +243,12 @@ func (w *pgWriter) try(ctx context.Context, c *pgx.Conn) (bool, error) {
 func (w *pgWriter) holder(ctx context.Context, c *pgx.Conn) (*LockedError, error) {
 	var h LockedError
 	var since *time.Time
-	err := c.QueryRow(ctx, `SELECT l.pid, coalesce(a.application_name, ''), coalesce(host(a.client_addr), ''), a.backend_start
+	err := c.QueryRow(ctx, `SELECT l.pid, coalesce(a.usename, ''), coalesce(a.application_name, ''), coalesce(host(a.client_addr), ''), a.backend_start
 		FROM pg_locks l LEFT JOIN pg_stat_activity a ON a.pid = l.pid
 		WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 2
 			AND l.classid::bigint = $1 AND l.objid::bigint = $2
 			AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
-		LIMIT 1`, int64(lockClass), int64(w.key)).Scan(&h.PID, &h.App, &h.From, &since)
+		LIMIT 1`, int64(lockClass), int64(w.key)).Scan(&h.PID, &h.Role, &h.App, &h.From, &since)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -245,7 +269,7 @@ type pgConnector struct {
 func (c pgConnector) Connect(ctx context.Context) (driver.Conn, error) {
 	conn, err := c.inner.Connect(ctx)
 	if err != nil {
-		return nil, connectError(err, c.secrets)
+		return nil, connectError(err, c.secrets, err)
 	}
 	return &pgConn{conn.(*stdlib.Conn)}, nil
 }
@@ -274,13 +298,48 @@ func (c *pgConn) CheckNamedValue(v *driver.NamedValue) error {
 
 // pgText is a text as Postgres keeps it: Postgres refuses a NUL and bytes
 // that aren't UTF-8, which SQLite keeps, and each is kept as U+FFFD, as
-// encoding/json writes bytes that aren't UTF-8 anyway. Nothing lapilli
-// writes holds either; what people send can.
+// encoding/json writes bytes that aren't UTF-8 anyway. So is a NUL a JSON
+// text holds, written \u0000, which jsonb (series_alarm, a list given as a
+// parameter, a change's status) refuses: a label set, a list of names, a
+// change. Nothing lapilli makes holds a NUL; what people and alert managers
+// send can.
 func pgText(s string) string {
-	if utf8.ValidString(s) && strings.IndexByte(s, 0) < 0 {
-		return s
+	if !utf8.ValidString(s) || strings.IndexByte(s, 0) >= 0 {
+		s = strings.ToValidUTF8(strings.ReplaceAll(s, "\x00", "\uFFFD"), "\uFFFD")
 	}
-	return strings.ToValidUTF8(strings.ReplaceAll(s, "\x00", "\uFFFD"), "\uFFFD")
+	if strings.Contains(s, `\u0000`) && json.Valid([]byte(s)) {
+		s = jsonNUL(s)
+	}
+	return s
+}
+
+// jsonNUL is a JSON text with each NUL it holds, written \u0000, written
+// U+FFFD, as json.Marshal writes it; the rest as it is. A \\u0000, an
+// escaped backslash and a u, is left. s is valid JSON.
+func jsonNUL(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	in := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case !in:
+			in = c == '"'
+		case c == '"':
+			in = false
+		case c == '\\' && i+1 < len(s):
+			if strings.HasPrefix(s[i:], `\u0000`) {
+				b.WriteString("\uFFFD")
+				i += 5
+				continue
+			}
+			b.WriteByte(c)
+			i++
+			c = s[i]
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
 }
 
 func (c *pgConn) Prepare(q string) (driver.Stmt, error) {
@@ -382,17 +441,28 @@ func rebind(q string) (string, int) {
 
 // connectError says why connecting failed, with neither the connection
 // string nor its password: the server's address and what it answered.
-func connectError(err error, secrets []string) error {
+// cause is what to tell a timeout by: err itself, or the context error that
+// stopped it.
+func connectError(err error, secrets []string, cause error) error {
 	var locked *LockedError
 	if errors.As(err, &locked) || errors.Is(err, ErrLockLost) || errors.Is(err, ErrConnect) {
 		return err
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("%w: %w", ErrConnect, context.Cause(context.Background()))
+	var ce *pgconn.ConnectError
+	if errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
+		// Where it was trying, and that it gave up: the server's address
+		// alone, as pgx's message says more.
+		where := "the server"
+		if errors.As(err, &ce) && ce.Config != nil {
+			where = net.JoinHostPort(ce.Config.Host, strconv.Itoa(int(ce.Config.Port)))
+		}
+		if errors.Is(cause, context.Canceled) {
+			return fmt.Errorf("%w: connecting to %s was given up (%w)", ErrConnect, where, context.Canceled)
+		}
+		return fmt.Errorf("%w: connecting to %s timed out (%w)", ErrConnect, where, context.DeadlineExceeded)
 	}
 	var pe *pgconn.PgError
 	var msg string
-	var ce *pgconn.ConnectError
 	switch {
 	case errors.As(err, &pe):
 		msg = fmt.Sprintf("the server says: %s (SQLSTATE %s)", pe.Message, pe.Code)
@@ -458,7 +528,7 @@ func OpenPostgres(ctx context.Context, conn string, loc *time.Location) (*Ledger
 	}
 	secrets := secretsOf(conn, cfg)
 	pw := &pgWriter{lost: make(chan struct{})}
-	writer := stdlib.GetConnector(*cfg, stdlib.OptionAfterConnect(pw.connected))
+	writer := stdlib.GetConnector(*cfg, stdlib.OptionAfterConnect(pw.connected), stdlib.OptionBeforeConnect(pw.connecting))
 	w := sql.OpenDB(pgConnector{writer, secrets})
 	// One connection writes, as for SQLite: writes take turns, and the
 	// lock is that connection's session's.
@@ -485,6 +555,11 @@ func OpenPostgres(ctx context.Context, conn string, loc *time.Location) (*Ledger
 	l.ids.labels = map[int64]labelsOf{}
 	if err := w.PingContext(ctx); err != nil {
 		l.Close()
+		if !errors.Is(err, ErrConnect) && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) {
+			// database/sql's own, the caller's context done before the
+			// connection was: it says where no more than pgx would.
+			err = connectError(&pgconn.ConnectError{Config: &cfg.Config}, secrets, err)
+		}
 		return nil, err
 	}
 	if err := l.migratePostgres(ctx); err != nil {
