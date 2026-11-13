@@ -7,11 +7,11 @@
 # once. Then the same where each 429 says Retry-After. Then with --max-rate,
 # the runs' rates adding up to under RATE: nginx turns nothing away.
 #
-# OLD=path/to/lapilli runs an earlier lapilli the first way too, and says
-# how many rules it couldn't replay.
+# OLD=path/to/lapilli runs an earlier lapilli the first two ways too, and
+# says how many rules it couldn't replay.
 #
-# Needs Docker and Go. Takes 4 to 8 minutes. Leaves everything up when KEEP
-# is set.
+# Needs Docker, Go and jq. Takes 6 to 8 minutes, and 4 more with OLD.
+# Leaves everything up when KEEP is set.
 # shellcheck disable=SC2016,SC2329 # nginx's variables, not the shell's; cleanup runs on EXIT
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -60,9 +60,9 @@ rulesOf 100000 >"$work/now.yaml"
 rulesOf 200000 >"$work/proposed.yaml"
 printf 'incidents:\n  - {id: INC-1, title: load, start: "%s"}\n' "$(date -u +%Y-%m-%dT%H:00:00Z)" >"$work/incidents.yaml"
 
-# Four doors to one Prometheus, each a quota of its own and a log of what
-# it answered: 429 alone; 429 with Retry-After; one for --max-rate; one for
-# OLD.
+# Five doors to one Prometheus, each a quota of its own and a log of what
+# it answered: 429 alone; 429 with Retry-After; one for --max-rate; and for
+# OLD, 429 alone and with Retry-After.
 server() { # port, zone, log, more
   cat <<NGINX
   server {
@@ -78,7 +78,7 @@ NGINX
 }
 {
   printf 'events {}\nhttp {\n  log_format brief "$msec $status";\n  limit_req_status 429;\n'
-  for z in plain told rated old; do
+  for z in plain told rated old oldtold; do
     printf '  limit_req_zone $server_port zone=%s:1m rate=%sr/s;\n' "$z" "$rate"
   done
   server 9090 plain plain ''
@@ -86,12 +86,14 @@ NGINX
     location @told { add_header Retry-After 3 always; return 429 "too many requests\n"; }'
   server 9092 rated rated ''
   server 9093 old old ''
+  server 9094 oldtold oldtold 'error_page 429 = @told;
+    location @told { add_header Retry-After 3 always; return 429 "too many requests\n"; }'
   printf '}\n'
 } >"$work/nginx.conf"
 
 docker network create "$p" >/dev/null
 docker run -d --name "$p-prom" --network "$p" "$prom" --config.file=/etc/prometheus/prometheus.yml >/dev/null
-docker run -d --name "$p-nginx" --network "$p" -p 127.0.0.1::9090 -p 127.0.0.1::9091 -p 127.0.0.1::9092 -p 127.0.0.1::9093 \
+docker run -d --name "$p-nginx" --network "$p" -p 127.0.0.1::9090 -p 127.0.0.1::9091 -p 127.0.0.1::9092 -p 127.0.0.1::9093 -p 127.0.0.1::9094 \
   -v "$work/nginx.conf:/etc/nginx/nginx.conf:ro" "$nginx" >/dev/null
 port() { docker port "$p-nginx" "$1/tcp" | head -1; }
 # Asked from inside, so that no quota is spent on it.
@@ -141,8 +143,12 @@ replayedAll() { # name: every run exited 0 and replayed every rule
 if [ -n "${OLD:-}" ]; then
   start=$(date +%s)
   together "$OLD" 9093 old
-  echo "OLD: $runs runs at once in $(($(date +%s) - start))s, $(answered old 200) answers of 200, $(answered old 429) of 429: $(dropped old) rules couldn't be replayed"
+  echo "OLD, 429 alone: $runs runs at once in $(($(date +%s) - start))s, $(answered old 200) answers of 200, $(answered old 429) of 429: $(dropped old) rules couldn't be replayed"
   grep -h -m1 '^  Load[0-9]* (\(before\|after\)): query failed' "$work"/old.out.* | head -1 || true
+  start=$(date +%s)
+  together "$OLD" 9094 oldtold
+  echo "OLD, Retry-After: $runs runs at once in $(($(date +%s) - start))s, $(answered oldtold 200) answers of 200, $(answered oldtold 429) of 429: $(dropped oldtold) rules couldn't be replayed"
+  grep -h -m1 '^  Load[0-9]* (\(before\|after\)): query failed' "$work"/oldtold.out.* | head -1 || true
 fi
 
 start=$(date +%s)
@@ -165,8 +171,11 @@ start=$(date +%s)
 together "$work/lapilli" 9092 rated --max-rate "$each" --json
 echo "--max-rate $each each: $runs runs at once in $(($(date +%s) - start))s, $(answered rated 200) answers of 200, $(answered rated 429) of 429: $(dropped rated json) rules couldn't be replayed"
 check "--max-rate: nothing turned away" "$([ "$(answered rated 429)" = 0 ] && echo 1)"
+# The summary's unreplayed, a count, is always there; the list only when a
+# rule is in it.
 check "--max-rate: every run replayed every rule" "$(for n in $(seq 1 "$runs"); do
-  [ "$(cat "$work/rated.code.$n")" = 0 ] && grep -q '"rules": \[' "$work/rated.out.$n" && ! grep -q '"unreplayed"' "$work/rated.out.$n" || exit 1
+  [ "$(cat "$work/rated.code.$n")" = 0 ] &&
+    jq -e '(.rules | type) == "array" and .summary.unreplayed == 0 and (.unreplayed // [] | length) == 0' "$work/rated.out.$n" >/dev/null || exit 1
 done && echo 1)"
 # The busiest second nginx saw, of all the runs together.
 busiest=$(docker exec "$p-nginx" sh -c 'cat /var/log/nginx/rated.log' | awk '{ n[int($1)]++ } END { m = 0; for (s in n) if (n[s] > m) m = n[s]; print m }')

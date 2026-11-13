@@ -29,9 +29,11 @@ const NothingChangedHeading = "### Lapilli backtest: nothing changed"
 
 // CompareMarkdown writes a comparison as Markdown, ready to post as a
 // comment on a pull request or a merge request, times in loc: the summary
-// line, a heading with the period and its zone, the totals, the rules that
-// differ as a table, those that couldn't be replayed, those that fire as
-// they did folded in <details>, and the incidents caught differently. At
+// line, a heading with the period and its zone, how many of the rules that
+// differ couldn't be replayed (as the summary's unreplayed), the totals,
+// the rules that differ as a table, those that couldn't be replayed, with
+// why, those that fire as they did folded in <details>, and the incidents
+// caught differently. At
 // most MarkdownLimit bytes: what doesn't fit is left out, and a note says
 // how much.
 //
@@ -68,6 +70,11 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 		text(" No incidents were given: the firings are counted, not judged.")
 	}
 	text("\n\n")
+	if len(p.broken) > 0 {
+		// Said here, as its count, and below once, with why: a long table
+		// shouldn't hide that the numbers leave rules out.
+		text(fmt.Sprintf("**%d of the rules that differ couldn't be replayed**, and are left out of what follows: the list below says why.\n\n", len(p.broken)))
+	}
 
 	// The totals, before and after.
 	totals := mdPart{head: "| | Before | After |\n|---|--:|--:|\n", foot: "\n", noun: "totals"}

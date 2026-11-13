@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -39,13 +40,19 @@ func pausedLoki(t *testing.T) (*httptest.Server, *atomic.Int64, *prom.Limiter) {
 }
 
 // TestLokiRulerShares: a Loki's ruler is read by the Limiter its queries
-// are asked by: told to wait by an answer to a query, it isn't asked.
+// are asked by: told to wait by an answer to a query past the deadline, it
+// isn't asked; asked as a read lapilli does without, it isn't asked while
+// told to wait, and fails at once.
 func TestLokiRulerShares(t *testing.T) {
 	srv, ruler, l := pausedLoki(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if _, err := LokiPlaces(ctx, Loki{URL: srv.URL, Limit: l}, "test"); !prom.Transient(err) || ruler.Load() != 0 {
+	if _, err := LokiPlaces(ctx, Loki{URL: srv.URL, Limit: l}, "test"); !errors.Is(err, prom.ErrPastDeadline) || ruler.Load() != 0 {
 		t.Errorf("%v, the ruler asked %d times", err, ruler.Load())
+	}
+	start := time.Now()
+	if _, err := LokiPlacesOnce(context.Background(), Loki{URL: srv.URL, Limit: l}, "test"); err == nil || ruler.Load() != 0 || time.Since(start) > 5*time.Second {
+		t.Errorf("once: %v after %s, the ruler asked %d times", err, time.Since(start), ruler.Load())
 	}
 }
 

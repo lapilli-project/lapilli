@@ -251,23 +251,26 @@ func described(name, description string) Says {
 const Paused = "paused"
 
 // Unfinished is the Unsupported of a rule whose replay the deadline cut
-// short. QueryFailedForNow begins that of one whose replay a query failed
-// for a reason of the moment: the API turned it away for now (HTTP 429,
-// 5xx), or the connection failed. QueryFailed begins that of one whose
-// query the API refused as written, or answered unreadably. Both begin
-// "query failed".
+// short, or would have (a wait past it, prom.ErrPastDeadline).
+// HistoryUnread begins that of one whose replay failed as the history
+// couldn't be read: not reached, not let in, not found, turned away to the
+// end (prom.Refused is false). QueryFailed begins that of one whose query
+// the history refused as written, or answered so it can't be replayed
+// (prom.Refused). HistoryUnread begins with QueryFailed: both are "query
+// failed: ".
 const (
-	Unfinished        = "not finished before the timeout"
-	QueryFailedForNow = "query failed for now: "
-	QueryFailed       = "query failed: "
+	Unfinished    = "not finished before the timeout"
+	QueryFailed   = "query failed: "
+	HistoryUnread = QueryFailed + "the history couldn't be read: "
 )
 
 // ReplayFailed says a rule with this Unsupported was replayed and its replay
-// failed for a reason of the run (a query turned away for now, the time
-// ran out), not one of the rule's: another run may replay it. A query the
-// API refused as written isn't such a reason: another run is refused too.
+// failed for a reason of the run (the history couldn't be read, the time
+// ran out), not one of the rule's: another run, or this one with its
+// access mended or more time, may replay it. A query the history refused
+// as written isn't such a reason: another run is refused too.
 func ReplayFailed(unsupported string) bool {
-	return unsupported == Unfinished || strings.HasPrefix(unsupported, QueryFailedForNow)
+	return unsupported == Unfinished || strings.HasPrefix(unsupported, HistoryUnread)
 }
 
 // AlertName is the name the rule's alerts carry, alertname: its name as

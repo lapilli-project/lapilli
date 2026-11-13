@@ -23,7 +23,7 @@
 #
 #   PR               the pull request's number (each host's script finds
 #                    it in its CI's variables)
-#   LAPILLI_VERSION  the Lapilli release to install, such as v0.32.0
+#   LAPILLI_VERSION  the Lapilli release to install, such as v0.33.0
 #   LAPILLI_SHA256   the sha256 of the release's archive for this machine,
 #                    pinned: optional from the release itself, which its
 #                    SHA256SUMS is checked against either way; needed with
@@ -62,9 +62,12 @@
 #                    request: letters, digits, dots, dashes and underscores
 #                    (default: default)
 #   FAIL_ON_ERROR    true: the job fails when the backtest does, or a rule
-#                    that differs couldn't be replayed, or the comment can't
-#                    be posted, once the comment says so if it can (default
-#                    false)
+#                    that differs couldn't be replayed, for whatever reason
+#                    (the summary's unreplayed: the history out of reach, or
+#                    a query it refused as written), or the comment can't be
+#                    posted, once the comment says so if it can (default
+#                    false). lapilli's --fail-unreplayed, which leaves out
+#                    the queries refused as written, isn't taken
 #   MAX_TREE_FILES, MAX_TREE_BYTES
 #                    the most files (20000) and bytes (256 MiB) a commit is
 #                    read with: with RENDER all of its files, without, those
@@ -83,10 +86,11 @@
 # hide or reorder what is shown), and where the history is (the URLs, user
 # names, hosts, tenants and project in the arguments, any IP address) taken
 # out before they are cut; of what lapilli said, nothing about why a rule
-# couldn't be replayed, nor what a server or the network answered, which
-# the job's log alone has. What is copied to the job's log is each line
-# after a "| ", and
-# Azure's ##vso[ made inert, so none of it is a CI's command. A commit
+# couldn't be replayed, nor what a server or the network answered, nor how
+# the run went (its progress lines), which the job's log alone has. What is
+# copied to the job's log, lapilli's stderr as it comes, is each line after
+# a "| ", and Azure's ##vso[ made inert, so none of it is a CI's command. A
+# commit
 # holding a symbolic link where the rules are read, or anywhere with RENDER,
 # isn't read: a link could lead to any file the job can read. The host's
 # token is read from a file and given to curl on stdin, never on a command
@@ -107,6 +111,16 @@ say() { printf '%s: %s\n' "${recipe:-lib.sh}" "$(printf '%s' "$*" | tr '\n\t' ' 
 # logged FILE: FILE in the job's log, each line after a "| ": GitHub's and
 # Gitea's ::commands are read only at a line's start.
 logged() { inert <"$1" | sed 's/^/  | /' >&2; }
+# live FILE: stdin into FILE, and each line in the job's log as it comes,
+# as logged writes it: a long backtest says how it goes every 30 seconds,
+# and a job that says nothing for minutes looks hung.
+live() {
+  : >"$1"
+  while IFS= read -r line || [ -n "$line" ]; do
+    printf '%s\n' "$line" >>"$1"
+    printf '%s\n' "$line" | inert | sed 's/^/  | /' >&2
+  done
+}
 # shown FILE: what a server answered, as a JSON string of 300 bytes at
 # most, to be said.
 shown() { head -c 300 "$1" | jq -Rsc . 2>/dev/null || echo '"(unreadable)"'; }
@@ -197,10 +211,10 @@ fi
 if [ -z "${LAPILLI:-}" ]; then
   case ${LAPILLI_VERSION:-} in
     v[0-9]*.[0-9]*.[0-9]*) ;;
-    *) say "LAPILLI_VERSION ${LAPILLI_VERSION:-}: want the Lapilli release to install, such as v0.32.0"; exit 1 ;;
+    *) say "LAPILLI_VERSION ${LAPILLI_VERSION:-}: want the Lapilli release to install, such as v0.33.0"; exit 1 ;;
   esac
   case $LAPILLI_VERSION in
-    *[!a-z0-9.-]*) say "LAPILLI_VERSION $LAPILLI_VERSION: want a release's tag, such as v0.32.0"; exit 1 ;;
+    *[!a-z0-9.-]*) say "LAPILLI_VERSION $LAPILLI_VERSION: want a release's tag, such as v0.33.0"; exit 1 ;;
   esac
   case ${LAPILLI_SHA256:-} in
     '') ;;
@@ -251,6 +265,10 @@ while [ "$n" -gt 0 ]; do
     --rules | --rules=* | --compare | --compare=* | --rules-history | --rules-history=* | --changed-only | --markdown | \
       --json | --metrics | --check-replay* | --check-content*)
       say "$a: the recipe gives lapilli the rules and asks for the report itself; give it the rest, such as --prometheus URL and --since 14d"
+      exit 1
+      ;;
+    --fail-unreplayed | --fail-unreplayed=*)
+      say "$a: the recipe fails the job itself, with FAIL_ON_ERROR=true, when a rule that differs couldn't be replayed"
       exit 1
       ;;
     --incidents | --on-call | --bearer-token-file | --grafana-token-file | --ruler-token-file | --loki-token-file | --slack-webhook-file)
@@ -626,13 +644,16 @@ backtest() {
     set +f
   fi
   verdict=0
-  "$bin" verdict "$@" --changed-only --markdown >"$tmp/report.md" 2>"$tmp/lapilli.log" || verdict=$?
-  logged "$tmp/lapilli.log"
+  rm -f "$tmp/verdict.status"
+  { "$bin" verdict "$@" --changed-only --markdown 2>&1 >"$tmp/report.md" || echo "$?" >"$tmp/verdict.status"; } | live "$tmp/lapilli.log"
+  [ ! -s "$tmp/verdict.status" ] || verdict=$(cat "$tmp/verdict.status")
   # What of it the comment may show: not why a rule couldn't be replayed,
-  # which --markdown keeps to the job's log, nor what a server or the
-  # network said, which says where the history is and who reads it (an
-  # account, a gateway).
-  grep -E -v "couldn't be replayed: |query failed: |HTTP [0-9]{3}: |dial (tcp|udp)|x509: |tls: " "$tmp/lapilli.log" >"$tmp/lapilli.said" || :
+  # which --markdown keeps to the job's log ("query failed: " begins every
+  # reason a query gives, the history unread or the query refused), nor
+  # what a server or the network said, which says where the history is and
+  # who reads it (an account, a gateway), nor how the run went, its
+  # progress lines.
+  grep -E -v "couldn't be replayed: |query failed: |HTTP [0-9]{3}: |dial (tcp|udp)|x509: |tls: |^lapilli verdict: after [0-9]" "$tmp/lapilli.log" >"$tmp/lapilli.said" || :
   case $verdict in
     0) ;;
     1) trouble "the backtest failed, or didn't finish (lapilli exited 1)" "$tmp/lapilli.said" ;;
@@ -648,7 +669,10 @@ backtest() {
     *) trouble "lapilli didn't run (exit status $verdict)" "$tmp/lapilli.said" ;;
   esac
   # Asked to fail when it does, a backtest of rules that couldn't be
-  # replayed (the history out of reach, say) is one that failed.
+  # replayed is one that failed, whatever why: the history out of reach,
+  # or a query it refuses as written, which is the pull request's to mend.
+  # The summary's unreplayed counts them, as the comment's "Could not
+  # replay" lists them.
   if [ "$verdict" = 0 ] && [ -n "$strict" ]; then
     n=$(summary unreplayed)
     case $n in

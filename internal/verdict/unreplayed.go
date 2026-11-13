@@ -20,11 +20,12 @@ type Unreplayed struct {
 	// replayed once for both.
 	Side   string `json:"side,omitempty"`
 	Reason string `json:"reason"`
-	// Failed says its replay failed, for a reason of the run: a query
-	// failed, as when the history turned it away, or the time ran out.
-	// Another run may replay it; the report is of the other rules. A rule
-	// not Failed can't be replayed at all (a CloudWatch metric alarm, a rule
-	// paused), whatever the run.
+	// Failed says its replay failed, for a reason of the run: the history
+	// couldn't be read (rules.HistoryUnread: not reached, not let in,
+	// turned away), or the time ran out. Another run may replay it; the
+	// report is of the other rules. A rule not Failed can't be replayed by
+	// any run as it is (a CloudWatch metric alarm, a rule paused, a query
+	// the history refused as written).
 	Failed bool `json:"failed"`
 }
 
@@ -90,7 +91,7 @@ func failedFirst(us []Unreplayed) []Unreplayed {
 }
 
 // shownFirst is how many rules whose replay failed are named at the top,
-// and maxReason how much of why each is said there.
+// and maxReason how many bytes of why each is said there.
 const (
 	shownFirst = 10
 	maxReason  = 400
@@ -98,16 +99,20 @@ const (
 
 // partial writes, at the top, the rules whose replay failed, us as a run
 // that replayed them gives them (Report.Unreplayed): what follows leaves
-// them out, and a long report shouldn't hide that at its foot. of is how
-// many rules there are, 0 to leave it unsaid; below says the rest are
-// listed at the foot too, as a report lists every rule it couldn't replay.
+// them out, and a long report shouldn't hide that at its foot. Ten rules
+// are named at most, a line a side in a comparison, and the rest counted.
+// of is how many rules there are, 0 to leave it unsaid; below says the
+// rest are listed at the foot too, as a report lists every rule it
+// couldn't replay.
 func partial(w io.Writer, us []Unreplayed, of int, below bool) {
 	var failed []Unreplayed
-	names := map[string]bool{}
+	var names []string
 	for _, u := range us {
 		if u.Failed {
 			failed = append(failed, u)
-			names[u.Rule] = true
+			if !slices.Contains(names, u.Rule) {
+				names = append(names, u.Rule)
+			}
 		}
 	}
 	if len(failed) == 0 {
@@ -118,29 +123,33 @@ func partial(w io.Writer, us []Unreplayed, of int, below bool) {
 	} else {
 		fmt.Fprintf(w, "! %d rules couldn't be replayed, and are left out of what follows:\n", len(names))
 	}
-	for i, u := range failed {
-		if i == shownFirst {
-			if below {
-				fmt.Fprintf(w, "  and %d more, listed below\n", len(failed)-shownFirst)
-			} else {
-				fmt.Fprintf(w, "  and %d more, all in --json\n", len(failed)-shownFirst)
-			}
-			break
+	shown := names[:min(len(names), shownFirst)]
+	for _, u := range failed {
+		if !slices.Contains(shown, u.Rule) {
+			continue
 		}
 		name := Clean(u.Rule)
 		if u.Side != "" {
 			name += " (" + u.Side + ")"
 		}
-		fmt.Fprintf(w, "  %s: %s\n", name, Clean(cut(u.Reason, maxReason)))
+		// Cut once what doesn't show is shown, as \u{...}: so is the line
+		// as long as it is written.
+		fmt.Fprintf(w, "  %s: %s\n", name, cut(Clean(u.Reason), maxReason))
+	}
+	if more := len(names) - len(shown); more > 0 && below {
+		fmt.Fprintf(w, "  and %d more, listed below\n", more)
+	} else if more > 0 {
+		fmt.Fprintf(w, "  and %d more, all in --json\n", more)
 	}
 }
 
-// cut is s cut to n bytes at most, at the start of a rune, and said to be
-// cut.
+// cut is s cut to n bytes at most, "…" included, at the start of a rune,
+// and said to be cut.
 func cut(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
+	n = max(n-len("…"), 0)
 	for n > 0 && !utf8.RuneStart(s[n]) {
 		n--
 	}

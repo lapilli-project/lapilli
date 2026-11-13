@@ -2,6 +2,7 @@ package prom
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -300,7 +301,7 @@ func TestDroppedAskedAgain(t *testing.T) {
 		t.Errorf("%v after %d requests", err, n.Load())
 	}
 	srv, n = answers(t, drop)
-	if _, err := ask(context.Background(), srv); err == nil || n.Load() != 5 || !Transient(err) {
+	if _, err := ask(context.Background(), srv); err == nil || n.Load() != 5 || Refused(err) {
 		t.Errorf("%v after %d requests: want given up after 5, as after 5xx", err, n.Load())
 	}
 }
@@ -319,8 +320,9 @@ func TestWaitsWithinContext(t *testing.T) {
 	start := time.Now()
 	_, err := c.QueryRange(ctx, "up", t0, t0.Add(time.Hour), time.Minute)
 	var ae *APIError
-	if !errors.As(err, &ae) || ae.Status != 429 || time.Since(start) > 10*time.Second || n.Load() != 1 {
-		t.Fatalf("%v after %s and %d requests: want the 429 at once", err, time.Since(start), n.Load())
+	if !errors.As(err, &ae) || ae.Status != 429 || time.Since(start) > 10*time.Second || n.Load() != 1 ||
+		!errors.Is(err, ErrPastDeadline) || !strings.HasPrefix(err.Error(), "the API said to wait past the deadline, after HTTP 429: ") {
+		t.Fatalf("%v after %s and %d requests: want the 429 at once, past the deadline", err, time.Since(start), n.Load())
 	}
 	// The client's wait ends past the deadline: given up at once, asking
 	// nothing.
@@ -328,7 +330,7 @@ func TestWaitsWithinContext(t *testing.T) {
 	defer cancel2()
 	start = time.Now()
 	_, err = c.QueryRange(ctx2, "up", t0, t0.Add(time.Hour), time.Minute)
-	if !errors.Is(err, errNoTurn) || !Transient(err) || time.Since(start) > 10*time.Second || n.Load() != 1 {
+	if !errors.Is(err, ErrPastDeadline) || Refused(err) || time.Since(start) > 10*time.Second || n.Load() != 1 {
 		t.Errorf("%v after %s and %d requests: want the client's wait not waited, asking nothing", err, time.Since(start), n.Load())
 	}
 	// Without a deadline, it ends with the context.
@@ -390,7 +392,7 @@ func TestWaitedCountsAll(t *testing.T) {
 	l.mu.Lock()
 	l.until = clk.now().Add(maxWaited + time.Second)
 	l.mu.Unlock()
-	if _, err = b.QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute); !errors.Is(err, errNoTurn) || n.Load() != 5 || !Transient(err) {
+	if _, err = b.QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute); !errors.Is(err, errNoTurn) || n.Load() != 5 || Refused(err) {
 		t.Errorf("c: %v after %d requests in all: want given up, unasked", err, n.Load())
 	}
 	if _, in, _ := l.state(); in != 0 {
@@ -422,12 +424,39 @@ func TestNoTurnGivesTheLastAnswer(t *testing.T) {
 	_, err := c.QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute)
 	<-held
 	var ae *APIError
-	if !errors.As(err, &ae) || ae.Status != 502 || n.Load() != 1 || time.Since(start) > 10*time.Second {
+	// Asked once: the turn it didn't get isn't counted as an ask.
+	if !errors.As(err, &ae) || ae.Status != 502 || n.Load() != 1 || time.Since(start) > 10*time.Second || strings.Contains(err.Error(), "asked") {
 		t.Errorf("%v after %d requests and %s: want the 502", err, n.Load(), time.Since(start))
 	}
 	l.done(200, 0)
 	if _, in, q := l.state(); in != 0 || q != 0 {
 		t.Errorf("%d in flight, %d waiting at the end", in, q)
+	}
+}
+
+// TestPastDeadlineGivesTheLastAnswer: a request asked again whose turn
+// would come past its context's deadline, as another's answer said to wait,
+// fails then, past the deadline, with the answer that turned it away.
+func TestPastDeadlineGivesTheLastAnswer(t *testing.T) {
+	quick(t, 0)
+	l := NewLimiter(0)
+	srv, n := answers(t, func(w http.ResponseWriter, r *http.Request) {
+		// Another's answer, meanwhile, says to wait an hour.
+		l.mu.Lock()
+		l.until = time.Now().Add(time.Hour)
+		l.mu.Unlock()
+		refuse(502, "")(w, r)
+	}, ok)
+	c := New(srv.URL, "test", WithLimiter(l))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	start := time.Now()
+	_, err := c.QueryRange(ctx, "up", t0, t0.Add(time.Hour), time.Minute)
+	var ae *APIError
+	if !errors.Is(err, ErrPastDeadline) || !errors.As(err, &ae) || ae.Status != 502 || n.Load() != 1 || time.Since(start) > 10*time.Second ||
+		err.Error() != "the API said to wait past the deadline, after HTTP 502: not a Prometheus API response: <html><body><h1>502 Bad Gateway</h1></body></html>" {
+		t.Errorf("%v after %d requests and %s: want the 502, past the deadline", err, n.Load(), time.Since(start))
 	}
 }
 
@@ -452,8 +481,8 @@ func TestPushBackShared(t *testing.T) {
 		limit, until = l.limit, l.until
 		l.mu.Unlock()
 	}
-	if limit != 32 || time.Until(until) < time.Second {
-		t.Fatalf("limit %d, asked to wait until %s from now, after a 429: want 32, and about 2s", limit, time.Until(until))
+	if limit != 1 || time.Until(until) < time.Second {
+		t.Fatalf("limit %d, asked to wait until %s from now, after a 429 to one asked alone: want 1, and about 2s", limit, time.Until(until))
 	}
 	start := time.Now()
 	if _, err := b.QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute); err != nil {
@@ -503,8 +532,9 @@ func TestBestEffortReads(t *testing.T) {
 		if n.Load() != 2 || limit != 64 || in != 0 || !c.limit.until.IsZero() || time.Since(start) > 10*time.Second {
 			t.Errorf("asked %d times in %s; then limit %d, %d in flight, waiting until %s", n.Load(), time.Since(start), limit, in, c.limit.until)
 		}
-		if counts.Requests.Load() != 2 {
-			t.Errorf("counted %d requests", counts.Requests.Load())
+		// Nor is a 429 counted as one the run asked fewer at once after.
+		if counts.Requests.Load() != 2 || counts.TooMany.Load() != 0 {
+			t.Errorf("counted %d requests, %d answered 429", counts.Requests.Load(), counts.TooMany.Load())
 		}
 	}
 }
@@ -574,38 +604,63 @@ func TestUnreadableSample(t *testing.T) {
 	}
 }
 
-// TestTransient: what another run may get an answer to.
-func TestTransient(t *testing.T) {
+// TestRefused: the API's answer to the query as written, which another
+// run is given too, against a failure of the run, the history not read.
+func TestRefused(t *testing.T) {
 	for _, c := range []struct {
 		err  error
 		want bool
 	}{
-		{&APIError{Status: 429}, true},
-		{&APIError{Status: 503}, true},
-		{fmt.Errorf("%w (asked 7 times over 3m0s)", &APIError{Status: 502}), true},
-		{&APIError{Status: 501}, false},
-		{&APIError{Status: 400, Msg: "bad_data: parse error"}, false},
-		{&APIError{Status: 422, Msg: "execution: many-to-many matching not allowed"}, false},
-		{&APIError{Status: 503, Msg: "query processing would load too many samples into memory"}, false},
-		{context.DeadlineExceeded, true},
-		{&net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}, true},
-		{io.ErrUnexpectedEOF, true},
-		{errNoTurn, true},
-		{errors.New("want a matrix, got \"vector\""), false},
-		{fmt.Errorf("credentials: %w", os.ErrNotExist), false},
+		{&APIError{Status: 400, Msg: "bad_data: parse error"}, true},
+		{&APIError{Status: 422, Msg: "execution: many-to-many matching not allowed"}, true},
+		{&APIError{Status: 501, Msg: "not implemented"}, true},
+		{&APIError{Status: 200, Msg: "the answer left series out: result truncated"}, true},
+		{&APIError{Status: 503, Msg: "query processing would load too many samples into memory"}, true},
+		{&unreadable{"want a matrix, got \"vector\""}, true},
+		// A page a proxy wrote, of 400 too, isn't the API's word.
+		{&APIError{Status: 400, Msg: "not a Prometheus API response: <html>", page: true}, false},
+		{&APIError{Status: 200, Msg: "not a Prometheus API response: <html>", page: true}, false},
+		{&APIError{Status: 302, Msg: "not a Prometheus API response: <a href=\"/login\">Found</a>", page: true}, false},
+		{&APIError{Status: 401, Msg: "token expired"}, false},
+		{&APIError{Status: 403}, false},
+		{&APIError{Status: 404}, false},
+		{&APIError{Status: 407}, false},
+		{&APIError{Status: 408}, false},
+		{&APIError{Status: 429}, false},
+		{&APIError{Status: 503}, false},
+		{fmt.Errorf("%w (asked 7 times over 3m0s)", &APIError{Status: 502}), false},
+		{context.DeadlineExceeded, false},
+		{context.Canceled, false},
+		{&net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}, false},
+		{&net.DNSError{Err: "no such host", Name: "prom"}, false},
+		{io.ErrUnexpectedEOF, false},
+		{errNoTurn, false},
+		{&pastDeadline{why: waitPast, last: &APIError{Status: 429}}, false},
+		{&credsError{os.ErrNotExist}, false},
+		{&credsError{&APIError{Status: 503, Msg: "the token endpoint"}}, false},
+		{&credsError{&APIError{Status: 400, Msg: "invalid_grant"}}, false},
 		{nil, false},
 	} {
-		if got := Transient(c.err); got != c.want {
+		if got := Refused(c.err); got != c.want {
 			t.Errorf("%v: %v, want %v", c.err, got, c.want)
 		}
 	}
 }
 
 // TestSteady: a reason as a ledger keeps it, without how often its request
-// was asked.
+// was asked, which retried writes at its end; one a server wrote elsewhere
+// is left, as taking it out could join a secret it cut in two.
 func TestSteady(t *testing.T) {
-	if got := Steady("query failed for now: HTTP 429: slow down (asked 7 times over 3m2s)"); got != "query failed for now: HTTP 429: slow down" {
-		t.Errorf("%q", got)
+	for in, want := range map[string]string{
+		"query failed: the history couldn't be read: HTTP 429: slow down (asked 7 times over 3m2s)": "query failed: the history couldn't be read: HTTP 429: slow down",
+		"HTTP 503: down (asked 3 times over 1h2m3s)":                                                "HTTP 503: down",
+		"HTTP 503: down (asked 3 times over 1.5s)":                                                  "HTTP 503: down",
+		"HTTP 403: denied for s3cr (asked 1 times over 1s)3t-token":                                 "HTTP 403: denied for s3cr (asked 1 times over 1s)3t-token",
+		"HTTP 403: Bearer s3cr3t-0123 (asked 2 times over 1s)":                                      "HTTP 403: Bearer [redacted]",
+	} {
+		if got := Steady(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
 	}
 }
 
@@ -647,5 +702,162 @@ func TestEveryPath(t *testing.T) {
 	token := WithToken(func(context.Context) (string, error) { return fmt.Sprint(tokens.Add(1)), nil })
 	if _, err := New(srv.URL, "test", token).Rules(context.Background()); err != nil || n.Load() != 2 || tokens.Load() != 2 {
 		t.Errorf("rules: %v after %d requests, %d tokens", err, n.Load(), tokens.Load())
+	}
+}
+
+// TestBestEffortGivesUp: a read lapilli does without is waited for 30
+// seconds at most, whatever the run's own time; and isn't asked at all
+// while the API said to wait, nor waits for it.
+func TestBestEffortGivesUp(t *testing.T) {
+	was := bestEffortTime
+	bestEffortTime = 100 * time.Millisecond
+	t.Cleanup(func() { bestEffortTime = was })
+	srv, n := answers(t, func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(10 * time.Second):
+		}
+	})
+	c := New(srv.URL, "test")
+	start := time.Now()
+	if _, err := c.StatusConfig(context.Background()); err == nil || time.Since(start) > 5*time.Second {
+		t.Errorf("%v after %s: want given up after its 30 seconds", err, time.Since(start))
+	}
+	c.limit.mu.Lock()
+	c.limit.until = time.Now().Add(time.Hour)
+	c.limit.mu.Unlock()
+	start = time.Now()
+	if _, err := c.Targets(context.Background()); !errors.Is(err, errPaused) || n.Load() != 1 || time.Since(start) > 5*time.Second {
+		t.Errorf("%v after %s and %d requests: want not asked, at once", err, time.Since(start), n.Load())
+	}
+	if _, err := c.RulesOnce(context.Background()); !errors.Is(err, errPaused) || n.Load() != 1 {
+		t.Errorf("rules: %v after %d requests", err, n.Load())
+	}
+	if _, in, _ := c.limit.state(); in != 0 {
+		t.Errorf("%d in flight", in)
+	}
+}
+
+// reset is a transport whose first answers are connections reset, as a
+// load balancer shedding load sends them, then the server's.
+type reset struct {
+	left atomic.Int64
+	next http.RoundTripper
+}
+
+func (r *reset) RoundTrip(req *http.Request) (*http.Response, error) {
+	if r.left.Add(-1) >= 0 {
+		return nil, &net.OpError{Op: "read", Net: "tcp", Err: os.NewSyscallError("read", syscall.ECONNRESET)}
+	}
+	return r.next.RoundTrip(req)
+}
+
+// TestResetPushesBack: a connection reset is asked again, as a 5xx is, and
+// pushes back as a 503 does: those asked at once are halved.
+func TestResetPushesBack(t *testing.T) {
+	quick(t, 0)
+	srv, n := answers(t, ok)
+	rt := &reset{next: http.DefaultTransport}
+	rt.left.Store(1)
+	c := New(srv.URL, "test", WithHTTPClient(&http.Client{Transport: rt}))
+	if _, err := ask2(c); err != nil || n.Load() != 1 {
+		t.Fatalf("%v after %d answered: want asked again after the reset", err, n.Load())
+	}
+	if limit, in, _ := c.limit.state(); limit != 1 || in != 0 {
+		t.Errorf("limit %d, %d in flight, after a reset to one asked alone: want 1", limit, in)
+	}
+	// Unheeded, as a read lapilli does without is, it changes nothing.
+	rt.left.Store(1)
+	c = New(srv.URL, "test", WithHTTPClient(&http.Client{Transport: rt}))
+	if _, err := c.StatusConfig(context.Background()); err == nil {
+		t.Error("want the reset")
+	}
+	if limit, _, _ := c.limit.state(); limit != 64 {
+		t.Errorf("limit %d after a reset to a read done without", limit)
+	}
+}
+
+func ask2(c *Client) ([]Series, error) {
+	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	return c.QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute)
+}
+
+// TestBigPastTheCut: an answer too large, said past the bytes an error
+// keeps of the API's text, is still asked again for a shorter range.
+func TestBigPastTheCut(t *testing.T) {
+	var asked atomic.Int64
+	srv, _ := answers(t, func(w http.ResponseWriter, r *http.Request) {
+		asked.Add(1)
+		r.ParseForm()
+		if r.Form.Get("start") != r.Form.Get("end") {
+			w.WriteHeader(422)
+			fmt.Fprintf(w, `{"status":"error","error":"%s: response too large"}`, strings.Repeat("x", 400))
+			return
+		}
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[]}}`)
+	})
+	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := New(srv.URL, "t").QueryRange(context.Background(), "up", t0, t0.Add(4*time.Minute), time.Minute); err != nil || asked.Load() < 3 {
+		t.Errorf("%v after %d requests: want halved till answered", err, asked.Load())
+	}
+}
+
+// TestHiddenSecrets: a token echoed back with a character that doesn't
+// show in it, or a password a URL held, which net/http sends as Basic, is
+// taken out of an error like any other.
+func TestHiddenSecrets(t *testing.T) {
+	const tok = "s3cr3t-token-0123456789"
+	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for _, sep := range []string{"\u200b", "\u2060", "\x1b", "\u00ad"} {
+		srv, _ := answers(t, func(w http.ResponseWriter, r *http.Request) {
+			got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			w.WriteHeader(403)
+			fmt.Fprintf(w, `{"status":"error","error":"denied for %s"}`, got[:4]+sep+got[4:])
+		})
+		c := New(srv.URL, "t", WithToken(func(context.Context) (string, error) { return tok, nil }))
+		if _, err := c.QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute); err == nil || strings.Contains(err.Error(), tok) || strings.Contains(err.Error(), "s3cr") {
+			t.Errorf("%q: %q", sep, err)
+		}
+	}
+	srv, _ := answers(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(401)
+		fmt.Fprintf(w, `{"status":"error","error":"bad credentials %s, hunter2-password"}`, r.Header.Get("Authorization"))
+	})
+	u := strings.Replace(srv.URL, "http://", "http://admin:hunter2-password@", 1)
+	_, err := New(u, "t").QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute)
+	if err == nil || strings.Contains(err.Error(), base64.StdEncoding.EncodeToString([]byte("admin:hunter2-password"))) || strings.Contains(err.Error(), "hunter2") {
+		t.Errorf("%q", err)
+	}
+}
+
+// TestBearerWords: a bearer token is taken out wherever it is; the word
+// "bearer" before a word isn't.
+func TestBearerWords(t *testing.T) {
+	for in, want := range map[string]string{
+		"missing bearer token":                     "missing bearer token",
+		"missing bearer token.":                    "missing bearer token.",
+		"Bearer realm: invalid":                    "Bearer realm: invalid",
+		"no: bearer abc.def":                       "no: Bearer [redacted]",
+		"got Bearer eyJhbGciOi.eyJzdWIi.c2ln, no":  "got Bearer [redacted], no",
+		"bearer abcdefghijklmnopqrstuvwxyz denied": "Bearer [redacted] denied",
+		"bearer Zm9vYmFy==":                        "Bearer [redacted]",
+	} {
+		if got := redact(in, nil); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestClipAtRune: cut where a rune is in two, a text is cut before it; and
+// is no longer than asked, "…" included.
+func TestClipAtRune(t *testing.T) {
+	s := "a" + strings.Repeat("é", 10)
+	for n := 4; n < 12; n++ {
+		if got := clip(s, n); !utf8.ValidString(got) || len(got) > n || !strings.HasSuffix(got, "…") {
+			t.Errorf("clip %d: %q, %d bytes", n, got, len(got))
+		}
+	}
+	if got := clip(s, len(s)); got != s {
+		t.Errorf("%q", got)
 	}
 }

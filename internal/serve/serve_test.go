@@ -63,6 +63,9 @@ func (h *history) QueryRange(ctx context.Context, expr string, start, end time.T
 	case "turned":
 		// Turned away to the end, as a quota does.
 		return nil, fmt.Errorf("%w (asked 7 times over 3m2s)", &prom.APIError{Status: 429, Msg: "slow down"})
+	case "waiting":
+		// Told to wait past the time the run has, as prom gives it up.
+		return nil, fmt.Errorf("the API said to wait %w, after HTTP 429: slow down", prom.ErrPastDeadline)
 	case "impact":
 		out = append(out, run(map[string]string{"service": "search"}, now.Add(-6*time.Hour), now.Add(-6*time.Hour+10*time.Minute)))
 	}

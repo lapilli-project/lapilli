@@ -6,6 +6,7 @@ package prom
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,7 +15,6 @@ import (
 	"math"
 	"math/rand/v2"
 	"mime"
-	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -188,6 +188,9 @@ type APIError struct {
 	// big says the text, before it was cut, said the answer was too large
 	// to send (tooBig).
 	big bool
+	// page says the text isn't the API's own words: a page, or JSON of
+	// another shape, as a proxy, a gateway or a sign-in before it writes.
+	page bool
 }
 
 // maxMsg is how much of the API's text an APIError keeps: a few lines, so
@@ -195,49 +198,75 @@ type APIError struct {
 const maxMsg = 300
 
 // apiError is the API's answer resp to req, as an APIError whose text is
-// msg: cut to maxMsg, and without the token or the signature req carried.
+// msg as serverText gives it, without the token, the signature or the
+// password req carried, cut to maxMsg.
 func apiError(req *http.Request, resp *http.Response, msg string) *APIError {
 	ra, said := retryAfter(resp, clock())
-	return &APIError{Status: resp.StatusCode, Msg: clip(redact(msg, sent(req)), maxMsg), retryAfter: ra, said: said, big: tooBigText(msg)}
+	return &APIError{Status: resp.StatusCode, Msg: clip(serverText(msg, req), maxMsg), retryAfter: ra, said: said, big: tooBigText(msg)}
+}
+
+// pageError is resp, to req, as an APIError whose text, msg, isn't the
+// API's own (APIError.page).
+func pageError(req *http.Request, resp *http.Response, msg string) *APIError {
+	e := apiError(req, resp, msg)
+	e.page = true
+	return e
 }
 
 func (e *APIError) Error() string {
-	// The text is the server's: nothing in it should act on a terminal.
-	msg := strings.Map(func(c rune) rune {
+	return fmt.Sprintf("HTTP %d: %s", e.Status, clip(serverText(e.Msg, nil), maxMsg))
+}
+
+// serverText is a server's text as an error says it: without what doesn't
+// show or acts on a terminal (control and format characters), which could
+// hide a secret in two, and then without what req carried to sign in
+// (sent), or any bearer token.
+func serverText(msg string, req *http.Request) string {
+	msg = strings.Map(func(c rune) rune {
 		if unicode.IsControl(c) || unicode.Is(unicode.Cf, c) {
 			return -1
 		}
 		return c
-	}, e.Msg)
-	return fmt.Sprintf("HTTP %d: %s", e.Status, clip(redact(msg, nil), maxMsg))
+	}, msg)
+	return redact(msg, sent(req))
 }
 
-// clip is s cut to n bytes at most, at the start of a rune, and said to be
-// cut.
+// clip is s cut to n bytes at most, "…" included, at the start of a rune,
+// and said to be cut.
 func clip(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
+	n = max(n-len("…"), 0)
 	for n > 0 && !utf8.RuneStart(s[n]) {
 		n--
 	}
 	return s[:n] + "…"
 }
 
-// bearer is a bearer token, however it got into a text.
-var bearer = regexp.MustCompile(`(?i)\bbearer\s+[^\s"',;]+`)
+// bearer is a bearer token, however it got into a text: what follows
+// "bearer", unless it is a word, letters alone and fewer than twenty, so
+// that "missing bearer token." is left as it is.
+var bearer = regexp.MustCompile(`(?i)\bbearer\s+([^\s"',;]+)`)
 
 // redact is msg without secrets, and without any bearer token.
 func redact(msg string, secrets []string) string {
 	for _, s := range secrets {
 		msg = strings.ReplaceAll(msg, s, "[redacted]")
 	}
-	return bearer.ReplaceAllString(msg, "Bearer [redacted]")
+	return bearer.ReplaceAllStringFunc(msg, func(m string) string {
+		word := strings.TrimRight(bearer.FindStringSubmatch(m)[1], ".:!?)")
+		if len(word) < 20 && word != "" && strings.Trim(word, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz") == "" {
+			return m
+		}
+		return "Bearer [redacted]"
+	})
 }
 
 // sent is what req carried to sign in: its Authorization header, and each
-// part of it (a token, a signature, a credential), and an AWS session
-// token; the longest first, so that none is left in part.
+// part of it (a token, a signature, a credential), an AWS session token,
+// and a password in its URL, which net/http sends as Basic; the longest
+// first, so that none is left in part.
 func sent(req *http.Request) []string {
 	if req == nil {
 		return nil
@@ -246,6 +275,12 @@ func sent(req *http.Request) []string {
 	add := func(s string) {
 		if s = strings.Trim(strings.TrimSpace(s), `"`); len(s) >= 8 {
 			out = append(out, s)
+		}
+	}
+	if u := req.URL.User; u != nil {
+		if pw, ok := u.Password(); ok {
+			add(pw)
+			add(base64.StdEncoding.EncodeToString([]byte(u.Username() + ":" + pw)))
 		}
 	}
 	for _, h := range []string{"Authorization", "X-Amz-Security-Token"} {
@@ -280,34 +315,66 @@ func tooBigText(msg string) bool {
 		strings.Contains(m, "maximum number of series")
 }
 
-// transient reports an overloaded or briefly unavailable API: not 501,
-// which says it doesn't do what was asked, nor 505.
+// transient reports an overloaded or briefly unavailable API, which is
+// asked again: not 501, which says it doesn't do what was asked, nor 505.
 func (e *APIError) transient() bool {
 	return !e.tooBig() && (e.Status == http.StatusTooManyRequests ||
 		e.Status >= 500 && e.Status != http.StatusNotImplemented && e.Status != http.StatusHTTPVersionNotSupported)
 }
 
-// Transient reports whether err is of the moment, not of what was asked:
-// an API that turned the request away for now (HTTP 429, or 5xx but 501
-// and 505), a connection that couldn't be made or dropped, or a time that
-// ran out. Asked again by another run, it may be answered; a query the API
-// refused as written (HTTP 4xx), or answered unreadably, won't be.
-func Transient(err error) bool {
-	var ae *APIError
-	var ne net.Error
-	var op *net.OpError
-	var dns *net.DNSError
+// refused reports an answer of the API's to the query as written: see
+// Refused.
+func (e *APIError) refused() bool {
 	switch {
-	case err == nil:
+	case e.page:
 		return false
-	case errors.As(err, &ae):
-		return ae.transient()
-	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled), errors.Is(err, errNoTurn):
-		return true
-	case errors.As(err, &ne) && ne.Timeout():
+	case e.tooBig():
 		return true
 	}
-	return errors.As(err, &op) || errors.As(err, &dns) || dropped(err)
+	switch e.Status {
+	case http.StatusBadRequest, http.StatusUnprocessableEntity, http.StatusNotImplemented:
+		return true
+	}
+	return e.Status/100 == 2
+}
+
+// credsError is credentials that couldn't be had for a request: a token
+// file gone, a token endpoint that failed.
+type credsError struct{ err error }
+
+func (e *credsError) Error() string { return "credentials: " + e.err.Error() }
+func (e *credsError) Unwrap() error { return e.err }
+
+// unreadable is an answer of the API's, to a query, that isn't one lapilli
+// can read: not a matrix, or a sample not a time and a number.
+type unreadable struct{ msg string }
+
+func (e *unreadable) Error() string { return e.msg }
+
+// Refused reports whether err is the API's answer to the query as written,
+// which another run is given too, whatever its access: the query refused,
+// HTTP 400 or 422 (bad_data, an execution error), in the API's own words,
+// not a page a proxy wrote; an answer too large however short the range
+// asked; HTTP 501, a query the API doesn't do; or an answer that can't be
+// read. Every other failure is of the run, the history not read: not
+// reached (a connection, a name, TLS), not let in (401, 403, 407, the
+// credentials), not found (404), sent elsewhere (3xx), timed out (408),
+// turned away (429, 5xx), or answered with a page that isn't the API's.
+// Another run, or this one with its access mended, may be answered.
+func Refused(err error) bool {
+	var ae *APIError
+	var ua *unreadable
+	var ce *credsError
+	switch {
+	case errors.As(err, &ce):
+		// Whatever the token's source answered.
+		return false
+	case errors.As(err, &ae):
+		return ae.refused()
+	case errors.As(err, &ua):
+		return true
+	}
+	return false
 }
 
 // dropped reports a connection the API closed before it answered whole,
@@ -391,9 +458,10 @@ func spread(d time.Duration) time.Duration { return d/2 + time.Duration(jitter()
 
 // retried asks with ask, and asks again after an answer that says to (HTTP
 // 429, 5xx) or a connection dropped, as backoff says, for maxWaited after
-// it was first pushed back (budget); a wait that would end past ctx's
-// deadline isn't waited, and each wait ends with ctx. An error after more
-// than one ask says how many there were, and over how long.
+// it was first pushed back (budget); each wait ends with ctx, and one that
+// would end past ctx's deadline, before the budget's end, isn't waited:
+// the request fails then, for ErrPastDeadline, with the answer. An error
+// after more than one ask says how many there were, and over how long.
 func retried[T any](ctx context.Context, ask func(context.Context) (T, error)) (T, error) {
 	start := clock()
 	b := &budget{}
@@ -411,7 +479,14 @@ func retried[T any](ctx context.Context, ask func(context.Context) (T, error)) (
 	for {
 		got, err := ask(ctx)
 		asked++
-		if errors.Is(err, errNoTurn) && last != nil {
+		var pd *pastDeadline
+		switch {
+		case last == nil:
+		case errors.As(err, &pd):
+			// The run would end before its turn came: after the last
+			// answer, which it is said with.
+			return got, &pastDeadline{why: pd.why, last: told(last, asked-1)}
+		case errors.Is(err, errNoTurn):
 			// Its time ran out waiting for a turn: the last answer is why
 			// it failed.
 			return got, told(last, asked-1)
@@ -441,9 +516,20 @@ func retried[T any](ctx context.Context, ask func(context.Context) (T, error)) (
 		if b.from.IsZero() {
 			b.from = now
 		}
-		dl, ok := ctx.Deadline()
-		if !again || now.Add(wait).After(b.by()) || ok && now.Add(wait).After(dl) {
+		by, cut := b.by(), false
+		if dl, ok := ctx.Deadline(); ok && dl.Before(by) {
+			by, cut = dl, true
+		}
+		switch {
+		case !again || now.Add(wait).After(by) && !cut:
 			return got, told(err, asked)
+		case now.Add(wait).After(by):
+			// The run would end before the wait did.
+			why := againPast
+			if ae != nil && ae.said {
+				why = waitPast
+			}
+			return got, &pastDeadline{why: why, last: told(err, asked)}
 		}
 		last = err
 		if n := countsOf(ctx); n != nil {
@@ -478,14 +564,16 @@ func (c *Client) fetch(ctx context.Context, expr string, start, end time.Time, s
 	return got, err
 }
 
-// asked is what an error says of how often its request was asked, and over
-// how long: that differs from one run to the next.
-var asked = regexp.MustCompile(` \(asked \d+ times over [0-9hmsµn.]+\)`)
+// asked is what an error says, at its end, of how often its request was
+// asked, and over how long: that differs from one run to the next.
+var asked = regexp.MustCompile(` \(asked \d+ times over [0-9hmsµn.]+\)$`)
 
 // Steady is a reason a rule couldn't be replayed without what differs from
-// one run to the next, how often its request was asked and over how long:
-// as a ledger keeps it.
-func Steady(reason string) string { return asked.ReplaceAllString(reason, "") }
+// one run to the next, how often its request was asked and over how long,
+// which retried writes at its end: as a ledger keeps it. One a server
+// wrote elsewhere in it is left, as what it is taken out of could be a
+// secret cut in two; any bearer token is taken out again.
+func Steady(reason string) string { return redact(asked.ReplaceAllString(reason, ""), nil) }
 
 // retryAfter is how long an answer of 429 or 503 says to wait before
 // asking again: Retry-After, in seconds or as an HTTP date; said is false
@@ -619,21 +707,29 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 			} `json:"result"`
 		} `json:"data"`
 	}
+	what := "a Prometheus"
+	if c.loki {
+		what = "a Loki"
+	}
+	notAPI := func() error {
+		return pageError(req, resp, "not "+what+" API response: "+clip(serverText(strings.TrimSpace(string(body)), req), 200))
+	}
 	if err := json.Unmarshal(body, &r); err != nil {
-		msg := clip(redact(strings.TrimSpace(string(body)), sent(req)), 200)
+		msg := clip(serverText(strings.TrimSpace(string(body)), req), 200)
 		if c.loki && resp.StatusCode/100 != 2 && lokiText(resp, msg) {
 			// Loki says what went wrong in plain text; a page, from a
 			// proxy before it, isn't Loki's.
 			return nil, failed(msg)
 		}
-		what := "a Prometheus"
-		if c.loki {
-			what = "a Loki"
-		}
-		return nil, failed("not " + what + " API response: " + msg)
+		return nil, notAPI()
 	}
-	if r.Status != "success" {
+	switch r.Status {
+	case "success":
+	case "error":
 		return nil, failed(r.Error)
+	default:
+		// JSON, but not the API's: a gateway's, or a sign-in's.
+		return nil, notAPI()
 	}
 	// An API that caps the series in an answer may say so only in a warning
 	// (CloudWatch: "result truncated to the maximum of 500 series"). A replay
@@ -647,7 +743,7 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 		return nil, &APIError{Status: http.StatusBadRequest, Msg: "a log query, which returns log lines, not numbers: only a metric query, such as count_over_time, is replayed"}
 	}
 	if r.Data.ResultType != "matrix" {
-		return nil, fmt.Errorf("want a matrix, got %q", clip(r.Data.ResultType, 64))
+		return nil, &unreadable{fmt.Sprintf("want a matrix, got %q", clip(r.Data.ResultType, 64))}
 	}
 	out := make([]Series, 0, len(r.Data.Result))
 	for _, res := range r.Data.Result {
@@ -658,7 +754,7 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 			f, err2 := strconv.ParseFloat(strings.Trim(string(v[1]), `"`), 64)
 			if err1 != nil || err2 != nil {
 				// Quoted: the text is the server's.
-				return nil, fmt.Errorf("unreadable sample [%q, %q]", clip(string(v[0]), 64), clip(string(v[1]), 64))
+				return nil, &unreadable{fmt.Sprintf("unreadable sample [%q, %q]", clip(string(v[0]), 64), clip(string(v[1]), 64))}
 			}
 			s.Samples = append(s.Samples, Sample{T: ts, V: f})
 		}
@@ -728,13 +824,13 @@ func (c *Client) do(ctx context.Context, req *http.Request, heed bool) ([]byte, 
 	if c.token != nil {
 		t, err := c.token(ctx)
 		if err != nil {
-			return nil, nil, fmt.Errorf("credentials: %w", err)
+			return nil, nil, &credsError{err}
 		}
 		req.Header.Set("Authorization", "Bearer "+t)
 	}
 	if c.sign != nil {
 		if err := c.sign(req); err != nil {
-			return nil, nil, fmt.Errorf("credentials: %w", err)
+			return nil, nil, &credsError{err}
 		}
 	}
 	n := countsOf(ctx)
@@ -743,6 +839,11 @@ func (c *Client) do(ctx context.Context, req *http.Request, heed bool) ([]byte, 
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
+		if dropped(err) {
+			// As an API shedding load does, by closing connections: as a
+			// 503, asked again (retried) and pushing back.
+			status = http.StatusServiceUnavailable
+		}
 		return nil, nil, err
 	}
 	defer resp.Body.Close()
@@ -752,10 +853,15 @@ func (c *Client) do(ctx context.Context, req *http.Request, heed bool) ([]byte, 
 		// so that "Retry-After: 0" can't bring them all straight back.
 		wait = min(max(d, time.Second), maxRetryAfter)
 	}
-	if status == http.StatusTooManyRequests && n != nil {
+	if status == http.StatusTooManyRequests && n != nil && heed {
+		// Counted as an answer the Limiter heeded: a run's end says it
+		// asked fewer at once after it.
 		n.TooMany.Add(1)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 256<<20))
+	if err != nil && dropped(err) {
+		status = http.StatusServiceUnavailable
+	}
 	return body, resp, err
 }
 
@@ -776,21 +882,22 @@ func (c *Client) getOnce(ctx context.Context, path string, heed bool) ([]byte, e
 		return nil, err
 	}
 	if resp.StatusCode/100 != 2 {
-		return nil, apiError(req, resp, clip(redact(strings.TrimSpace(string(body)), sent(req)), 200))
+		return nil, apiError(req, resp, clip(serverText(strings.TrimSpace(string(body)), req), 200))
 	}
 	return body, nil
 }
 
 // bestEffortTime is how long a read lapilli does without when it fails is
-// waited for.
-const bestEffortTime = 30 * time.Second
+// waited for; replaced in tests.
+var bestEffortTime = 30 * time.Second
 
-// bestEffort asks for path once, within bestEffortTime, and the Limiter
-// doesn't heed the answer: what it reads, lapilli does without when it
-// fails, so a failure shouldn't cost the run a wait, and an answer to a
-// request asked alone shouldn't halve how many go at once after it.
+// bestEffort asks for path once, within bestEffortTime, not while the API
+// said to wait, and the Limiter doesn't heed the answer: what it reads,
+// lapilli does without when it fails, so a failure shouldn't cost the run
+// a wait, and an answer to a request asked alone shouldn't halve how many
+// go at once after it.
 func (c *Client) bestEffort(ctx context.Context, path string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, bestEffortTime)
+	ctx, cancel := context.WithTimeout(context.WithValue(ctx, noPauseKey{}, true), bestEffortTime)
 	defer cancel()
 	return c.getOnce(ctx, path, false)
 }
@@ -799,11 +906,22 @@ func (c *Client) bestEffort(ctx context.Context, path string) ([]byte, error) {
 // answers; for a Loki, its ruler's /prometheus/api/v1/rules, which answers
 // the same way.
 func (c *Client) Rules(ctx context.Context) ([]byte, error) {
-	path := "/api/v1/rules?type=alert"
+	return c.get(ctx, c.rulesPath())
+}
+
+// RulesOnce asks for them as a read lapilli can do without (bestEffort):
+// once, within 30 seconds, not while the API said to wait, and without the
+// Limiter heeding the answer. lapilli serve reads a Loki's ruler so each
+// minute, between its queries.
+func (c *Client) RulesOnce(ctx context.Context) ([]byte, error) {
+	return c.bestEffort(ctx, c.rulesPath())
+}
+
+func (c *Client) rulesPath() string {
 	if c.loki {
-		path = "/prometheus/api/v1/rules?type=alert"
+		return "/prometheus/api/v1/rules?type=alert"
 	}
-	return c.get(ctx, path)
+	return "/api/v1/rules?type=alert"
 }
 
 // StatusConfig is the configuration Prometheus runs with, as GET

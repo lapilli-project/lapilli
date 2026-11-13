@@ -418,12 +418,12 @@ func replayRun(ctx context.Context, h History, run []stint, to time.Time, step t
 		lo, hi := st.span(step)
 		series, err := condition(ctx, h, st.Rule, lo, hi, step, false, st.warm(j))
 		switch {
-		case err != nil && ctx.Err() != nil:
+		case err != nil && (ctx.Err() != nil || errors.Is(err, prom.ErrPastDeadline)):
 			return nil, Unfinished, nil
-		case err != nil && prom.Transient(err):
-			return nil, rules.QueryFailedForNow + err.Error(), nil
-		case err != nil:
+		case err != nil && prom.Refused(err):
 			return nil, rules.QueryFailed + err.Error(), nil
+		case err != nil:
+			return nil, rules.HistoryUnread + err.Error(), nil
 		}
 		for _, s := range series {
 			l := maps.Clone(s.Labels)

@@ -371,12 +371,14 @@ type Server struct {
 		uids  []string
 		at    time.Time
 	}
-	// places are where --loki's ruler runs each of its groups, as read
-	// with its rules; notes, what was last said of its rule files.
+	// places are where --loki's ruler runs each of its groups, as last
+	// read with its rules, failing whether the last read of them failed;
+	// notes, what was last said of its rule files.
 	places struct {
 		sync.Mutex
-		m     map[rules.Place]time.Duration
-		notes string
+		m       map[rules.Place]time.Duration
+		failing bool
+		notes   string
 	}
 	// picked is what reading the rule files last passed over, as said.
 	picked atomic.Value

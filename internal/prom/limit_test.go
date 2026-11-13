@@ -18,9 +18,9 @@ func (l *Limiter) state() (limit, inFlight, queued int) {
 }
 
 // TestLimiterHalvesAndRecovers: a Limiter lets 64 in at once; each push
-// back halves that, once a second at most, down to one, whatever is in
-// flight; each ten seconds without one lets one more in, time without a
-// request included.
+// back halves those in flight lately, or the limit, if fewer, once a second
+// at most, down to one; each ten seconds without one lets one more in, time
+// without a request included.
 func TestLimiterHalvesAndRecovers(t *testing.T) {
 	now := time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC)
 	l := NewLimiter(0)
@@ -36,25 +36,19 @@ func TestLimiterHalvesAndRecovers(t *testing.T) {
 			}
 		}
 	}
-	// One request asked alone, answered 503, as a slow query is: half as
-	// many, not one at a time.
-	take(1)
-	l.done(503, 0)
-	if limit, in, _ := l.state(); limit != 32 || in != 0 {
-		t.Fatalf("limit %d, %d in flight, after one 503 to one request: want 32", limit, in)
-	}
+	// Eight at once, the default --parallel, one answered 429: half of the
+	// eight, not of the limit, 32, which would hold none of them back.
 	take(8)
-	now = now.Add(time.Second)
 	l.done(429, 0)
-	if limit, in, _ := l.state(); limit != 16 || in != 7 {
-		t.Fatalf("limit %d, %d in flight: want half of 32", limit, in)
+	if limit, in, _ := l.state(); limit != 4 || in != 7 {
+		t.Fatalf("limit %d, %d in flight: want half of the 8 in flight", limit, in)
 	}
 	l.done(429, 0) // the same push back, answered to another
 	l.done(503, 0)
-	if limit, _, _ := l.state(); limit != 16 {
+	if limit, _, _ := l.state(); limit != 4 {
 		t.Fatalf("limit %d: halved again within a second", limit)
 	}
-	for _, want := range []int{8, 4, 2, 1, 1} {
+	for _, want := range []int{2, 1, 1, 1, 1} {
 		now = now.Add(time.Second)
 		l.done(503, 0)
 		if limit, _, _ := l.state(); limit != want {
@@ -92,6 +86,18 @@ func TestLimiterHalvesAndRecovers(t *testing.T) {
 	l.done(200, 0)
 	if limit, _, _ := l.state(); limit != 64 {
 		t.Errorf("an hour after a push back: limit %d, want 64", limit)
+	}
+	// Then one asked alone, answered 503: one at a time, as the API was
+	// asked one, and back to eight at once in seventy seconds.
+	take(1)
+	l.done(503, 0)
+	if limit, _, _ := l.state(); limit != 1 {
+		t.Errorf("limit %d after a 503 to one asked alone, want 1", limit)
+	}
+	now = now.Add(70 * time.Second)
+	take(1)
+	if limit, _, _ := l.state(); limit != 8 {
+		t.Errorf("limit %d seventy seconds after, want 8", limit)
 	}
 }
 
@@ -226,7 +232,7 @@ func TestPaceShared(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	if err := a.take(ctx); !errors.Is(err, errNoTurn) {
+	if err := a.take(ctx); !errors.Is(err, ErrPastDeadline) || err.Error() != waitPast {
 		t.Errorf("a, told to wait an hour: %v", err)
 	}
 }
@@ -336,7 +342,8 @@ func TestLimiterRateWithinContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	start := time.Now()
-	if err := l.take(ctx); !errors.Is(err, errNoTurn) || time.Since(start) > 2*time.Second {
+	// The rate's turn, not a wait the API asked for.
+	if err := l.take(ctx); !errors.Is(err, ErrPastDeadline) || err.Error() != turnPast || time.Since(start) > 2*time.Second {
 		t.Errorf("%v after %s", err, time.Since(start))
 	}
 	ctx, cancel = context.WithCancel(context.Background())
@@ -388,5 +395,138 @@ func TestLimiterNeverPastLimit(t *testing.T) {
 	}
 	if most.Load() > 3 {
 		t.Errorf("%d in flight at once, limit 3", most.Load())
+	}
+}
+
+// TestCapShared: Limiters within one cap, as a Grafana's data sources are,
+// have no more in flight together than it lets in, each its own pauses and
+// halving kept, and every place given back.
+func TestCapShared(t *testing.T) {
+	most := NewCap(3)
+	a, b := NewLimiter(0).Within(most), NewLimiter(0).Within(most)
+	for range 3 {
+		if err := a.take(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := b.take(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("b let in past the cap: %v", err)
+	}
+	if _, in, _ := b.state(); in != 0 {
+		t.Fatalf("b holds %d places, given up", in)
+	}
+	// a is pushed back: its limit halves, b's and the cap's don't.
+	a.done(429, time.Hour)
+	if limit, _, _ := most.state(); limit != 3 {
+		t.Errorf("the cap is %d after a push back, want 3", limit)
+	}
+	if limit, _, _ := b.state(); limit != 64 {
+		t.Errorf("b's limit %d after a's push back", limit)
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := b.take(ctx); err != nil {
+		t.Fatalf("b, in the place a gave back: %v", err)
+	}
+	if _, in, _ := most.state(); in != 3 {
+		t.Errorf("%d in the cap, want 3", in)
+	}
+	a.done(200, 0)
+	a.done(200, 0)
+	b.done(200, 0)
+	if _, in, _ := most.state(); in != 0 {
+		t.Errorf("%d left in the cap", in)
+	}
+}
+
+// TestCapNotHeldPaused: a request held by its own Limiter's wait, which the
+// API asked for, holds no place in the cap: another data source's asks.
+func TestCapNotHeldPaused(t *testing.T) {
+	most := NewCap(1)
+	a, b := NewLimiter(0).Within(most), NewLimiter(0).Within(most)
+	a.mu.Lock()
+	a.until = time.Now().Add(time.Hour)
+	a.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.take(ctx) // sleeps out the hour, till the test ends
+	for wait := time.Now().Add(5 * time.Second); time.Now().Before(wait); time.Sleep(time.Millisecond) {
+		if _, in, _ := a.state(); in == 1 {
+			break
+		}
+	}
+	time.Sleep(20 * time.Millisecond)
+	bctx, bcancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer bcancel()
+	if err := b.take(bctx); err != nil {
+		t.Fatalf("b, beside a held by its wait: %v", err)
+	}
+	b.done(200, 0)
+}
+
+// TestPeakLately: what is halved is the most in flight since the limit
+// last changed: those let in from the queue count, and those of before the
+// limit recovered don't.
+func TestPeakLately(t *testing.T) {
+	now := time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	move := func(d time.Duration) { mu.Lock(); now = now.Add(d); mu.Unlock() }
+	l := NewLimiter(0)
+	l.now = clock
+	// Eight at once, one pushed back: four.
+	for range 8 {
+		if err := l.take(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l.done(429, 0)
+	for range 7 {
+		l.done(200, 0)
+	}
+	// Twenty seconds later, the limit back to six, one asked alone is
+	// pushed back: one at a time, not half of the eight of before.
+	move(20 * time.Second)
+	if err := l.take(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	move(time.Second)
+	l.done(503, 0)
+	if limit, _, _ := l.state(); limit != 1 {
+		t.Fatalf("limit %d, want 1: halved from what was in flight before it recovered", limit)
+	}
+	// Four waiting for the one place; thirty seconds on, the limit is four,
+	// and the four let in from the queue are in flight at once.
+	if err := l.take(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			if err := l.take(ctx); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	for _, _, q := l.state(); q != 4 && ctx.Err() == nil; _, _, q = l.state() {
+		time.Sleep(time.Millisecond)
+	}
+	move(30 * time.Second)
+	l.done(200, 0)
+	wg.Wait()
+	if t.Failed() {
+		t.FailNow()
+	}
+	move(time.Second)
+	l.done(429, 0)
+	if limit, in, _ := l.state(); limit != 2 || in != 3 {
+		t.Errorf("limit %d, %d in flight: want half the four let in from the queue", limit, in)
+	}
+	for range 3 {
+		l.done(200, 0)
 	}
 }

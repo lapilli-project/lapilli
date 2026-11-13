@@ -2,6 +2,7 @@ package replay
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -54,5 +55,24 @@ func TestPoolsApart(t *testing.T) {
 	}
 	if p.Total.Load() != 4 || p.Done.Load() != 4 {
 		t.Errorf("progress: %d of %d", p.Done.Load(), p.Total.Load())
+	}
+}
+
+// pastDeadline is a history whose every query is given up as a wait would
+// end past the run's deadline, as prom gives it up.
+type pastDeadline struct{}
+
+func (pastDeadline) QueryRange(context.Context, string, time.Time, time.Time, time.Duration) ([]prom.Series, error) {
+	return nil, fmt.Errorf("the API said to wait %w, after HTTP 429: slow down", prom.ErrPastDeadline)
+}
+
+// TestPastDeadlineUnfinished: a query given up as its wait would end past
+// the deadline leaves its rule unfinished, as the deadline itself would,
+// whatever the API answered before: lapilli verdict exits 1, saying to
+// raise --timeout, and lapilli serve's MCP compare says so too.
+func TestPastDeadlineUnfinished(t *testing.T) {
+	ran, _ := Run(context.Background(), pastDeadline{}, []Version{{Rules: []rules.Rule{{Name: "A", Expr: "a > 0"}}}}, t0, t0.Add(time.Hour), time.Minute, 1)
+	if ran[0].Unsupported != Unfinished {
+		t.Errorf("%q", ran[0].Unsupported)
 	}
 }

@@ -43,7 +43,9 @@ type Comparison struct {
 	Summary *Summary `json:"summary,omitempty"`
 	// Unreplayed are the rules that couldn't be replayed, as
 	// UnreplayedRules gives them, set by the run that replayed them: in
-	// lapilli verdict's --json, and named at the top of its text.
+	// lapilli verdict's --json, and named at the top of its text. Those
+	// with a side are the rules that differ Summary.Unreplayed counts, each
+	// once.
 	Unreplayed []Unreplayed `json:"unreplayed,omitempty"`
 }
 
@@ -75,7 +77,8 @@ type Summary struct {
 	// both sides: as often, catching as much.
 	Alike int `json:"alike"`
 	// Unreplayed are the rules that differ that couldn't be replayed, on
-	// one side or both.
+	// one side or both, whatever why: those of Comparison.Unreplayed with a
+	// side, each once.
 	Unreplayed int `json:"unreplayed"`
 	// RecordingChanged are the recording rules that differ (Recording):
 	// what the alerts that read them see changes, which no replay shows.

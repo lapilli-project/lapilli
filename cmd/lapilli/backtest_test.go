@@ -2,6 +2,8 @@ package main
 
 import (
 	"archive/tar"
+	"bufio"
+	"cmp"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/base64"
@@ -27,6 +29,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -837,6 +840,10 @@ func TestBacktestRecipeSettings(t *testing.T) {
 		{[]string{"PATHS=alerts", "FAIL_ON_ERROR=yes"}, nil, "want true or false"},
 		{[]string{"PATHS=alerts"}, []string{"--json"}, "the recipe gives lapilli the rules"},
 		{[]string{"PATHS=alerts"}, []string{"--compare", "x"}, "the recipe gives lapilli the rules"},
+		// The recipe fails the job itself, on every rule that differs that
+		// couldn't be replayed.
+		{[]string{"PATHS=alerts"}, []string{"--fail-unreplayed"}, "with FAIL_ON_ERROR=true"},
+		{[]string{"PATHS=alerts"}, []string{"--fail-unreplayed=true"}, "with FAIL_ON_ERROR=true"},
 		{[]string{"PATHS=alerts", "LAPILLI=", "LAPILLI_VERSION=latest"}, nil, "want the Lapilli release to install"},
 		{[]string{"PATHS=alerts", "LAPILLI=", "LAPILLI_VERSION=v1.2.3", "LAPILLI_SHA256=abc"}, nil, "64 hex digits"},
 		{[]string{"PATHS=alerts", "GITHUB_REPO=o/r/x"}, nil, "want OWNER/REPO"},
@@ -1151,7 +1158,7 @@ func TestBacktestRecipeHidesWhere(t *testing.T) {
 	if m := regexp.MustCompile(`dial tcp|127\.0\.0\.1|\[::1\]|ci-reader|localhost`).FindAllString(body, -1); len(m) > 0 || !strings.Contains(body, UnreadHistory) {
 		t.Errorf("the comment says where the history is: %q\n%s", m, body)
 	}
-	if !strings.Contains(out, "couldn't be replayed: query failed: Post") {
+	if !strings.Contains(out, "couldn't be replayed: "+rules.HistoryUnread+"Post") {
 		t.Errorf("the job's log doesn't say why:\n%s", out)
 	}
 }
@@ -1333,6 +1340,52 @@ func TestBacktestRecipeRefusedReason(t *testing.T) {
 	block = failure(t, rr.body(), "the backtest failed, or didn't finish (lapilli exited 1)")
 	if m := leaks.FindString(block); m != "" || !strings.Contains(block, "the replay did not finish within --timeout") {
 		t.Errorf("the block says %q: %q", m, block)
+	}
+}
+
+// lapilli's stderr reaches the job's log as it is written, each line after
+// a "| ", so a long backtest's progress lines show the job isn't hung;
+// none of them reaches the comment, though what else lapilli said does.
+func TestBacktestRecipeProgress(t *testing.T) {
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	dir := t.TempDir()
+	seen, fake := filepath.Join(dir, "seen"), filepath.Join(dir, "lapilli")
+	os.WriteFile(fake, []byte("#!/bin/sh\n"+
+		"echo 'lapilli verdict: after 30s, 3 of 10 replays of the rules before and after done, 41 requests to the history, 5 answered HTTP 429' >&2\n"+
+		"i=0\nwhile [ ! -e '"+seen+"' ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i + 1)); done\n"+
+		"[ -e '"+seen+"' ] || echo 'lapilli verdict: NOT LIVE: the job log had nothing yet' >&2\n"+
+		"echo 'lapilli verdict: after 1m0s, 9 of 10 replays of the rules before and after done, 90 requests to the history' >&2\n"+
+		"echo 'lapilli verdict: 1 of 10 rules didn'\"'\"'t finish within --timeout 1m; raise it, or shorten the period' >&2\nexit 1\n"), 0o755)
+	script, _ := filepath.Abs(backtestRecipes + rr.h.script)
+	shell := cmp.Or(os.Getenv("RECIPE_SH"), "sh")
+	cmd := exec.Command(shell, script, "--prometheus", "http://127.0.0.1:1")
+	cmd.Dir = repo.dir
+	cmd.Env = append(append([]string{}, rr.env...), "PATHS=alerts", "LAPILLI="+fake)
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	var log strings.Builder
+	sc := bufio.NewScanner(stderr)
+	for sc.Scan() {
+		log.WriteString(sc.Text() + "\n")
+		if strings.HasPrefix(sc.Text(), "  | lapilli verdict: after 30s,") {
+			os.WriteFile(seen, nil, 0o600)
+		}
+	}
+	cmd.Wait()
+	if !strings.Contains(log.String(), "  | lapilli verdict: after 1m0s, 9 of 10") || strings.Contains(log.String(), "NOT LIVE") {
+		t.Errorf("the job's log:\n%s", log.String())
+	}
+	block := failure(t, rr.body(), "the backtest failed, or didn't finish (lapilli exited 1)")
+	if strings.Contains(rr.body(), "after 30s") || strings.Contains(rr.body(), "replays of the rules") || !strings.Contains(block, "1 of 10 rules didn't finish within --timeout 1m") {
+		t.Errorf("the comment:\n%s", rr.body())
 	}
 }
 

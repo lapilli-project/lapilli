@@ -11,16 +11,20 @@ import (
 
 // Limiter shares one API out among everything that asks it in a run, so
 // that they back off together: at most so many requests at once, half as
-// many each time the API says it is asked too much (HTTP 429, or 503), one
-// more again for every recoverEvery it doesn't; none while the API said to
-// wait (Retry-After); and, with a Pace, at most so many a second, spaced
-// evenly.
+// many as were in flight lately each time the API says it is asked too
+// much (HTTP 429, or 503, or a connection dropped), one more again for
+// every recoverEvery it doesn't; none while the API said to wait
+// (Retry-After); and, with a Pace, at most so many a second, spaced
+// evenly. Within a parent (Within), a request takes a place in the
+// parent's too.
 type Limiter struct {
 	mu sync.Mutex
-	// limit is how many requests may be in flight now, inFlight how many
-	// are, and queue those waiting for one to finish, first come first.
-	limit, inFlight int
-	queue           []chan struct{}
+	// limit is how many requests may be in flight now, most how many at
+	// most, inFlight how many are, and queue those waiting for one to
+	// finish, first come first. peak is the most in flight at once since
+	// limit last changed.
+	limit, most, inFlight, peak int
+	queue                       []chan struct{}
 	// until is when the API said to ask again.
 	until time.Time
 	// cut is when limit was last halved, changed when it last changed.
@@ -28,7 +32,9 @@ type Limiter struct {
 	// pace spaces the requests out, nil for no rate; several Limiters may
 	// share one.
 	pace *Pace
-	now  func() time.Time
+	// parent, when set, holds a place for each request in flight too.
+	parent *Limiter
+	now    func() time.Time
 }
 
 // Pace spaces requests evenly: at most so many a second, among all the
@@ -80,17 +86,37 @@ func NewLimiter(rate float64) *Limiter {
 // NewLimiterPaced is a Limiter spaced by p, which other Limiters may share;
 // nil for no rate.
 func NewLimiterPaced(p *Pace) *Limiter {
-	return &Limiter{limit: maxInFlight, pace: p, now: func() time.Time { return clock() }}
+	return &Limiter{limit: maxInFlight, most: maxInFlight, pace: p, now: func() time.Time { return clock() }}
+}
+
+// NewCap is a Limiter of n requests in flight at most, and no rate, which
+// no answer changes: a parent (Within) for the Limiters of the data sources
+// behind one Grafana, so that together they ask it no more at once than a
+// run's --parallel, while each is held and halved by its own answers.
+func NewCap(n int) *Limiter {
+	n = max(n, 1)
+	return &Limiter{limit: n, most: n, now: func() time.Time { return clock() }}
+}
+
+// Within makes each request l lets in take a place in parent too, once it
+// has its turn in l: one held by l's wait, or by its rate, holds none of
+// parent's. It returns l.
+func (l *Limiter) Within(parent *Limiter) *Limiter {
+	l.parent = parent
+	return l
 }
 
 // take waits for a request's turn: a place among those in flight, the end
-// of a wait the API asked for, and its time by the pace. Each is looked at
-// again on waking, as another answer may have said to wait longer
-// meanwhile; a turn by the pace is taken only as the request goes, so one
-// whose context ends first takes none. A request asked with a budget
-// (retried) is pushed back from the first wait the API asked for, if not
-// before. One whose turn can't come within its budget, or before its
-// context's deadline, is given up then (errNoTurn): a wait isn't shortened.
+// of a wait the API asked for, and its time by the pace; then, within a
+// parent, a place in the parent's. Each is looked at again on waking, as
+// another answer may have said to wait longer meanwhile; a turn by the pace
+// is taken only as the request goes, so one whose context ends first takes
+// none. A request asked with a budget (retried) is pushed back from the
+// first wait the API asked for, if not before. A wait isn't shortened: one
+// whose turn comes past its budget is given up then (errNoTurn), and one
+// whose turn comes past its context's deadline, which ends first, is given
+// up then too (ErrPastDeadline). A request asked as one lapilli does
+// without (bestEffort) doesn't wait out the API's wait at all (errPaused).
 // Once it returns nil, done must be called.
 func (l *Limiter) take(ctx context.Context) error {
 	if l == nil {
@@ -104,7 +130,7 @@ func (l *Limiter) take(ctx context.Context) error {
 	for {
 		l.mu.Lock()
 		now := l.now()
-		at := l.until
+		at, paced := l.until, false
 		if at.After(now) && b != nil && b.from.IsZero() {
 			b.from = now // pushed back from here
 		}
@@ -112,19 +138,45 @@ func (l *Limiter) take(ctx context.Context) error {
 			var ok bool
 			if at, ok = l.pace.take(now); ok {
 				l.mu.Unlock()
-				return nil
+				return l.inParent(ctx)
 			}
+			paced = true
 		}
 		l.mu.Unlock()
-		if b != nil && !b.from.IsZero() && at.After(b.by()) || hasDL && at.After(dl) {
-			l.done(0, 0) // its turn comes too late
+		pastBudget := b != nil && !b.from.IsZero() && at.After(b.by())
+		switch {
+		case !paced && ctx.Value(noPauseKey{}) != nil:
+			l.release(0, 0)
+			return errPaused
+		case hasDL && at.After(dl) && !(pastBudget && b.by().Before(dl)):
+			// The run ends before its turn would come.
+			l.release(0, 0)
+			if paced {
+				return &pastDeadline{why: turnPast}
+			}
+			return &pastDeadline{why: waitPast}
+		case pastBudget:
+			l.release(0, 0) // its turn comes too late
 			return errNoTurn
 		}
 		if err := sleep(ctx, at.Sub(now)); err != nil {
-			l.done(0, 0) // the place given back
+			l.release(0, 0) // the place given back
 			return err
 		}
 	}
+}
+
+// inParent takes a place in l's parent for a request l let in, or gives
+// l's back when it can't have one.
+func (l *Limiter) inParent(ctx context.Context) error {
+	if l.parent == nil {
+		return nil
+	}
+	if err := l.parent.place(ctx, nil); err != nil {
+		l.release(0, 0)
+		return err
+	}
+	return nil
 }
 
 // place waits for a place among those in flight: within b's time, when it
@@ -134,6 +186,7 @@ func (l *Limiter) place(ctx context.Context, b *budget) error {
 	l.recover(l.now())
 	if l.inFlight < l.limit && len(l.queue) == 0 {
 		l.inFlight++
+		l.peak = max(l.peak, l.inFlight)
 		l.mu.Unlock()
 		return nil
 	}
@@ -163,7 +216,7 @@ func (l *Limiter) place(ctx context.Context, b *budget) error {
 	}
 	l.mu.Unlock()
 	// Let in as it gave up: give the place back.
-	l.done(0, 0)
+	l.release(0, 0)
 	return err
 }
 
@@ -176,9 +229,47 @@ func (b *budget) by() time.Time { return b.from.Add(maxWaited) }
 
 type budgetKey struct{}
 
-// errNoTurn is a request whose turn wouldn't come within its budget, or
-// before its context's deadline.
-var errNoTurn = errors.New("the API said to wait past the time the request had")
+// errNoTurn is a request pushed back whose turn wouldn't come within its
+// budget: as an answer that turned it away would, it fails the request
+// for the run (retried gives that answer instead, if it had one).
+var errNoTurn = errors.New("the API kept pushing back: no turn came within the five minutes a request is asked again")
+
+// errPaused is a request lapilli does without (bestEffort), not asked
+// while the API said to wait.
+var errPaused = errors.New("not asked: the API said to wait")
+
+type noPauseKey struct{}
+
+// ErrPastDeadline is in the error of a request given up because a wait
+// it was to make, the API's or its turn by the rate, would have ended past
+// its context's deadline, before which it is given up instead: the run
+// would have run out of time first. A replay takes it as one the deadline
+// cut short.
+var ErrPastDeadline = errors.New("past the deadline")
+
+// pastDeadline is a request given up for ErrPastDeadline: why says which
+// wait, last is the answer before it, if any.
+type pastDeadline struct {
+	why  string
+	last error
+}
+
+// What would have waited past the deadline.
+const (
+	waitPast  = "the API said to wait past the deadline"
+	againPast = "the wait to ask again would end past the deadline"
+	turnPast  = "its turn by the rate (--max-rate) would come past the deadline"
+)
+
+func (e *pastDeadline) Error() string {
+	if e.last == nil {
+		return e.why
+	}
+	return e.why + ", after " + e.last.Error()
+}
+
+func (e *pastDeadline) Is(target error) bool { return target == ErrPastDeadline }
+func (e *pastDeadline) Unwrap() error        { return e.last }
 
 // take takes the pace's next turn if it has come by now; otherwise it says
 // when it comes.
@@ -198,15 +289,16 @@ func (p *Pace) take(now time.Time) (time.Time, bool) {
 // recover lets one more in at once for each recoverEvery since the limit
 // last changed. l.mu is held.
 func (l *Limiter) recover(now time.Time) {
-	if l.limit >= maxInFlight {
+	if l.limit >= l.most {
 		return
 	}
 	n := now.Sub(l.changed) / recoverEvery
 	if n <= 0 {
 		return
 	}
-	l.limit = int(min(int64(maxInFlight), int64(l.limit)+int64(n)))
+	l.limit = int(min(int64(l.most), int64(l.limit)+int64(n)))
 	l.changed = l.changed.Add(n * recoverEvery)
+	l.peak = l.inFlight
 }
 
 // done ends a request let in by take: status is the API's answer (0 for
@@ -216,18 +308,26 @@ func (l *Limiter) done(status int, wait time.Duration) {
 	if l == nil {
 		return
 	}
+	l.release(status, wait)
+	if l.parent != nil {
+		l.parent.release(0, 0)
+	}
+}
+
+// release gives back l's place of a request, as done says.
+func (l *Limiter) release(status int, wait time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
 	l.inFlight--
 	l.recover(now)
 	if pushedBack(status) {
-		// Half as many: the limit, not those in flight, so that one answer
-		// to a request asked alone, a configuration read or a slow query,
-		// doesn't leave the rest of the run one at a time.
+		// Half as many as were in flight lately, or as the limit, if fewer:
+		// 8 at once, the default --parallel, are 4 after one push back,
+		// not a limit of 32 that holds none of them back.
 		if now.Sub(l.cut) >= cutEvery {
-			l.limit = max(1, l.limit/2)
-			l.cut, l.changed = now, now
+			l.limit = max(1, min(l.limit, l.peak)/2)
+			l.cut, l.changed, l.peak = now, now, l.inFlight
 		}
 		if wait > 0 && now.Add(wait).After(l.until) {
 			l.until = now.Add(wait)
@@ -237,12 +337,14 @@ func (l *Limiter) done(status int, wait time.Duration) {
 		ch := l.queue[0]
 		l.queue = l.queue[1:]
 		l.inFlight++
+		l.peak = max(l.peak, l.inFlight)
 		close(ch)
 	}
 }
 
 // pushedBack says an answer asks for fewer requests: too many (429), or
-// the API unable to take more just now (503).
+// the API unable to take more just now (503); do takes a connection the
+// API dropped as a 503.
 func pushedBack(status int) bool {
 	return status == 429 || status == 503
 }
