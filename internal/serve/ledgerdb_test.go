@@ -127,12 +127,14 @@ func TestRunStopsWhenTheLockIsLost(t *testing.T) {
 	// The writer's session ends, and another process takes the ledger
 	// meanwhile: when serve connects again, someone else wrote. The
 	// database is the test's own, as are the locks in it.
-	if _, err := db.ExecContext(ctx, `SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype = 'advisory' AND granted`); err != nil {
+	// pg_locks is the whole server's: those of this database alone.
+	const here = "locktype = 'advisory' AND granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
+	if _, err := db.ExecContext(ctx, "SELECT pg_terminate_backend(pid) FROM pg_locks WHERE "+here); err != nil {
 		t.Fatal(err)
 	}
 	for {
 		var n int
-		db.QueryRowContext(ctx, "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted").Scan(&n)
+		db.QueryRowContext(ctx, "SELECT count(*) FROM pg_locks WHERE "+here).Scan(&n)
 		if n == 0 {
 			break
 		}
