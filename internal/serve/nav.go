@@ -76,10 +76,21 @@ var navLayout = []struct {
 	{"manage", "Manage", []struct{ page, href, name string }{{"teams", "/teams", "Teams"}, {"roles", "/roles", "Roles"}, {"settings", "/settings", "Settings"}, {"runs", "/runs", "Runs"}}},
 }
 
+// bare reports whether a page is shown in the frame alone: an error, or
+// the page after signing out, which anyone may be shown. It has no count
+// of what waits, and none of the page context: a stranger refused reads
+// nothing of the ledger from it, nor whether the team the URL names is
+// there.
+func bare(name string) bool { return name == "error" || name == "signedout" }
+
 // nav is the sidebar for a page: Roles only for those who may open it, an
-// admin, and the counts for the team in effect.
+// admin, and the counts for the team in effect, but on a bare page.
 func (s *Server) nav(ctx context.Context, p page) []navGroup {
-	open, approve := s.waiting(ctx)
+	var open map[int64]int
+	var approve int
+	if !bare(p.Page) {
+		open, approve = s.waiting(ctx)
+	}
 	var out []navGroup
 	for _, g := range navLayout {
 		ng := navGroup{ID: g.id, Name: g.name}

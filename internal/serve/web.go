@@ -735,7 +735,12 @@ func (s *Server) page(r *http.Request, name string, v any) page {
 	if role < editor {
 		p.Status.Why = s.why(r)
 	}
-	p.Ctx = s.pageContext(r)
+	// A page that refuses or finds nothing, or says one has signed out, is
+	// shown to whoever asked, a stranger too: nothing of the ledger, nor
+	// of the team and period the URL names (docs/design/ui.md).
+	if !bare(name) {
+		p.Ctx = s.pageContext(r)
+	}
 	p.Here, p.HereName = navPage(name)
 	p.Nav, p.Crumb, p.Bar = s.nav(r.Context(), p), crumbsOf[name], barOf(name, r, p.Ctx)
 	for _, n := range names {

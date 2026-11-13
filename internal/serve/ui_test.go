@@ -49,7 +49,7 @@ func TestLink(t *testing.T) {
 
 // TestContextCarried crawls every page with a team and a period, and finds
 // both on every link to another page: those that choose another team or
-// period choose it, and say so.
+// period choose it, and say so. A page that finds nothing carries neither.
 func TestContextCarried(t *testing.T) {
 	s, paths := a11yServer(t)
 	h := s.Handler()
@@ -78,6 +78,12 @@ func TestContextCarried(t *testing.T) {
 				continue
 			}
 			text := squashed(nodeText(n))
+			if w.Code != http.StatusOK {
+				if l.Query().Has("team") || l.Query().Has("weeks") {
+					t.Errorf("%s, %d: %q (%q) carries the context", p, w.Code, href, text)
+				}
+				continue
+			}
 			switch team, ok := l.Query()["team"]; {
 			case !ok:
 				t.Errorf("%s: %q (%q) doesn't carry the team", p, href, text)
@@ -107,6 +113,67 @@ func toPage(href string) bool {
 		}
 	}
 	return true
+}
+
+// TestErrorPagesBare: a page that refuses, or finds nothing, or says one
+// has signed out, is the frame alone: no count of what waits, nothing of
+// the team or period the URL names, and not the reader's own team. A
+// stranger reads nothing from it, not even whether a team is there.
+func TestErrorPagesBare(t *testing.T) {
+	s, pay, _ := rolesServer(t, func(c *Config) { c.Viewers = []string{"*@example.com"} })
+	ctx := context.Background()
+	if _, err := s.l.PutGrant(ctx, ledger.Grant{Who: "user:pat@example.com", TeamID: pay}, "boss"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.PutTask(ctx, ledger.Task{Title: "t", Kind: "tune", TeamID: pay}, "boss"); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	if _, body, _ := ui(t, h, http.MethodGet, "/", "ed@example.com", "", nil); !strings.Contains(body, `class="count"`) {
+		t.Fatal("no count on the overview")
+	}
+	bare := func(t *testing.T, what, body string) {
+		t.Helper()
+		if strings.Contains(body, `class="count"`) || strings.Contains(body, "your team") {
+			t.Errorf("%s: a count, or the reader's own team", what)
+		}
+		doc, err := html.Parse(strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, n := range allNodes(doc) {
+			if href := nodeAttr(n, "href"); n.DataAtom == atom.A && strings.HasPrefix(href, "/") && toPage(href) {
+				if l, _ := url.Parse(href); l.Query().Has("team") || l.Query().Has("weeks") {
+					t.Errorf("%s: %q carries the context", what, href)
+				}
+			}
+		}
+	}
+	bodies := map[string]string{}
+	for _, c := range []struct {
+		who, path string
+		code      int
+	}{
+		{"eve@other.example", "/?team=payments&weeks=12", http.StatusForbidden},
+		{"eve@other.example", "/?team=nope&weeks=12", http.StatusForbidden},
+		{"ed@example.com", "/rules/Nothing?team=payments&weeks=12", http.StatusNotFound},
+		{"pat@example.com", "/rules/Nothing", http.StatusNotFound},
+	} {
+		code, body, _ := ui(t, h, http.MethodGet, c.path, c.who, "", nil)
+		if code != c.code {
+			t.Errorf("%s as %s: %d, want %d", c.path, c.who, code, c.code)
+		}
+		bare(t, c.path+" as "+c.who, body)
+		bodies[c.path] = body
+	}
+	if strings.ReplaceAll(bodies["/?team=payments&weeks=12"], "payments", "nope") != bodies["/?team=nope&weeks=12"] {
+		t.Error("a stranger refused reads a team that is there apart from one that isn't")
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/auth/signed-out?team=payments&weeks=12", nil)
+	r.Header.Set("X-Forwarded-Email", "pat@example.com")
+	s.render(w, r, "signedout", nil)
+	bare(t, "signed out", w.Body.String())
 }
 
 // TestDefaultTeam: with no team= in the URL, a reader who edits one team,
