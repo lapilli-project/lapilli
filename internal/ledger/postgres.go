@@ -431,27 +431,19 @@ func pgJSON(s string) string {
 var jsonCols = map[string]bool{"series.labels": true, "notified.labels": true, "changes.before": true, "changes.after": true,
 	"versions.docs": true, "versions.names": true}
 
-// asJSONB are the parameters a statement reads as jsonb, CAST($N AS jsonb),
-// by statement.
-var asJSONB sync.Map
-
 var castJSONB = regexp.MustCompile(`CAST\(\$(\d+) AS jsonb\)`)
 
-// jsonParams gives the parameters a statement reads as jsonb as pgJSON.
+// jsonParams gives the parameters a statement reads as jsonb, CAST($N AS
+// jsonb), as pgJSON. Not kept by statement: a statement of many rows is
+// written for each number of them.
 func jsonParams(q string, args []driver.NamedValue) {
-	v, ok := asJSONB.Load(q)
-	if !ok {
-		var ns []int
-		for _, m := range castJSONB.FindAllStringSubmatch(q, -1) {
-			n, _ := strconv.Atoi(m[1])
-			ns = append(ns, n)
-		}
-		v, _ = asJSONB.LoadOrStore(q, ns)
+	if !strings.Contains(q, " AS jsonb)") {
+		return
 	}
-	for _, n := range v.([]int) {
-		if n >= 1 && n <= len(args) {
+	for _, m := range castJSONB.FindAllStringSubmatch(q, -1) {
+		if n, _ := strconv.Atoi(m[1]); n >= 1 && n <= len(args) {
 			if s, ok := args[n-1].Value.(string); ok {
-				args[n-1].Value = jsonNUL(s)
+				args[n-1].Value = pgJSON(s)
 			}
 		}
 	}
