@@ -802,6 +802,10 @@ func TestNULInLabels(t *testing.T) {
 	if ts, err := l.TrackerTasks(ctx, TrackerQuery{}); err != nil || len(ts) != 1 || ts[0].StatusBy != "eve" {
 		t.Errorf("the tracker job's read after a task with a NUL: %+v %v", ts, err)
 	}
+	// Asked for by a list that holds one, given as JSON (CAST(? AS jsonb)).
+	if ts, err := l.Tasks(ctx, TaskQuery{Status: []string{"open\x00"}}); err != nil || len(ts) != 0 {
+		t.Errorf("tasks of a status with a NUL: %v %v", ts, err)
+	}
 	// A SQLite ledger that kept them, copied into this one's database.
 	src, err := Open(ctx, filepath.Join(t.TempDir(), "ledger.db"), time.UTC)
 	if err != nil {
