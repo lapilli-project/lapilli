@@ -169,7 +169,7 @@ func barOf(name string, r *http.Request, c pageCtx) barView {
 		b.WeeksIn = c.Weeks
 	}
 	if name == "search" {
-		b.Q = r.URL.Query().Get("q")
+		b.Q = searchOf(r.URL.Query()["q"]).Q
 	}
 	b.Team = teamPages[name] && len(c.Teams) > 0
 	b.Weeks = weeksPages[name]

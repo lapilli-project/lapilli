@@ -341,7 +341,8 @@ func TestRulesListScale(t *testing.T) {
 	}
 	h := s.Handler()
 	for _, path := range []string{"/api/v1/rules", "/api/v1/rules?weeks=12", "/rules", "/rules?weeks=12", "/rules?perf=noisy&severity=critical&q=rule1+label:tier=t1",
-		"/rules?perf=silent&weeks=1", "/rules?team=team3&status=none&trust=differs&trust=unreplayed", "/search?q=rule12"} {
+		"/rules?perf=silent&weeks=1", "/rules?team=team3&status=none&trust=differs&trust=unreplayed", "/search?q=rule12",
+		"/search?q=r+u+l+e+0+1+2+3+4+5+6+7+8+9+ru+ul+le+e0+e1+e2"} {
 		s.cache.Lock()
 		s.cache.gen = ""
 		s.cache.Unlock()

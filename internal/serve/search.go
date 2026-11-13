@@ -31,6 +31,10 @@ type searchView struct {
 	// than shown.
 	More  string
 	Empty *emptyView
+	// TooLong says the search was too long to be read; Over are its words
+	// past maxWords, left out.
+	TooLong bool
+	Over    []string
 }
 
 // Total is how many were found.
@@ -39,16 +43,15 @@ func (v searchView) Total() int { return v.RulesTotal + v.IncidentsTotal + v.Tea
 func (s *Server) searchPage(r *http.Request) (any, error) {
 	ctx := r.Context()
 	c := s.pageContext(r)
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	v := searchView{Q: q}
-	if q == "" {
+	st := searchOf(r.URL.Query()["q"])
+	v := searchView{Q: st.Q, TooLong: st.TooLong}
+	if st.Q == "" {
 		return v, nil
 	}
-	ts := tokens(q)
-	if filters(ts) {
+	if filters(st.All) {
 		// A search of the rules, shown on the rules page with its filters
 		// as the facets.
-		p := url.Values{"q": {q}}
+		p := url.Values{"q": {st.Q}}
 		for _, f := range c.hidden() {
 			p.Set(f.Name, f.Value)
 		}
@@ -56,18 +59,31 @@ func (s *Server) searchPage(r *http.Request) (any, error) {
 		return nil, redirect{"/rules?" + p.Encode()}
 	}
 	// Each word is a part of a name; a key the rules' search doesn't take
-	// (job:rate5m) is one too.
+	// (job:rate5m) is one too. Each is looked for once, in names each
+	// lowered once.
 	var words []string
-	for _, t := range ts {
+	var asked []qword
+	for _, t := range st.Words {
 		w := t.Value
 		if t.Key != "" {
 			w = t.Key + ":" + t.Value
 		}
-		words = append(words, strings.ToLower(w))
+		if lw := strings.ToLower(w); !slices.Contains(words, lw) {
+			words = append(words, lw)
+			asked = append(asked, qword{Value: w, Quoted: t.Quoted || strings.Contains(w, ":")})
+		}
 	}
-	found := func(names ...string) bool {
+	for _, t := range st.Over {
+		v.Over = append(v.Over, t.String())
+	}
+	if len(words) == 0 {
+		// Nothing to look for, such as a lone quote: no search.
+		v.Q = ""
+		return v, nil
+	}
+	found := func(lowered string) bool {
 		for _, w := range words {
-			if !slices.ContainsFunc(names, func(n string) bool { return strings.Contains(strings.ToLower(n), w) }) {
+			if !strings.Contains(lowered, w) {
 				return false
 			}
 		}
@@ -96,15 +112,16 @@ func (s *Server) searchPage(r *http.Request) (any, error) {
 		}
 	}
 	for n := range names {
-		if found(n) {
+		if found(strings.ToLower(n)) {
 			v.Rules = append(v.Rules, n)
 		}
 	}
 	v.RulesTotal = len(v.Rules)
-	closest(v.Rules, q)
+	closest(v.Rules, st.Q)
 	if len(v.Rules) > searchMost {
 		v.Rules = v.Rules[:searchMost]
-		v.More = c.Link("/rules", "q", q)
+		// The rules page, for every team, reads the words as words.
+		v.More = c.Link("/rules", "q", asWritten(asked), "team", "")
 	}
 
 	// The incidents of the twelve weeks, and any by its id.
@@ -112,7 +129,7 @@ func (s *Server) searchPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if in, err := s.l.IncidentByID(ctx, q); err == nil {
+	if in, err := s.l.IncidentByID(ctx, st.Q); err == nil {
 		if !slices.ContainsFunc(incs, func(x ledger.Incident) bool { return x.ID == in.ID }) {
 			incs = append(incs, in)
 		}
@@ -121,23 +138,27 @@ func (s *Server) searchPage(r *http.Request) (any, error) {
 	}
 	for _, in := range incs {
 		in = shown(lang(r), in)
-		if found(in.ID + " " + in.Title) {
+		if found(strings.ToLower(in.ID + " " + in.Title)) {
 			v.Incidents = append(v.Incidents, in)
 		}
 	}
 	v.IncidentsTotal = len(v.Incidents)
+	lq, ranks := strings.ToLower(st.Q), map[string]int{}
+	for _, in := range v.Incidents {
+		ranks[in.ID] = rankLowered(strings.ToLower(in.ID), lq)
+	}
 	slices.SortStableFunc(v.Incidents, func(a, b ledger.Incident) int {
-		return cmp.Or(cmp.Compare(rank(a.ID, q), rank(b.ID, q)), b.Start.Compare(a.Start))
+		return cmp.Or(cmp.Compare(ranks[a.ID], ranks[b.ID]), b.Start.Compare(a.Start))
 	})
 	v.Incidents = v.Incidents[:min(len(v.Incidents), searchMost)]
 
 	for _, name := range c.Teams {
-		if found(name) {
+		if found(strings.ToLower(name)) {
 			v.Teams = append(v.Teams, name)
 		}
 	}
 	v.TeamsTotal = len(v.Teams)
-	closest(v.Teams, q)
+	closest(v.Teams, st.Q)
 	v.Teams = v.Teams[:min(len(v.Teams), searchMost)]
 
 	switch {
@@ -146,23 +167,27 @@ func (s *Server) searchPage(r *http.Request) (any, error) {
 			Text:  "No rule, incident or team has that in its name. Try fewer letters, or search the rules with a filter, such as is:noisy.",
 			Links: []emptyLink{{"All rules", c.Link("/rules")}, {"All incidents", c.Link("/incidents")}}}
 	case v.Total() == 1:
-		// The one found, opened.
+		// The one found, opened; but a page whose path a redirect would
+		// read as . or .., which it would make another page's.
 		switch {
-		case len(v.Rules) == 1:
+		case len(v.Rules) == 1 && !dots(v.Rules[0]):
 			return nil, redirect{c.Rule(v.Rules[0])}
-		case len(v.Incidents) == 1:
+		case len(v.Incidents) == 1 && !dots(v.Incidents[0].ID):
 			return nil, redirect{c.Incident(v.Incidents[0].ID)}
-		default:
+		case len(v.Teams) == 1:
 			return nil, redirect{c.Link("/", "team", v.Teams[0])}
 		}
 	}
 	return v, nil
 }
 
-// rank is how close a name is to what was searched for: the same, ahead,
-// then anywhere.
-func rank(name, q string) int {
-	n, q := strings.ToLower(name), strings.ToLower(q)
+// dots reports whether a name is a path's . or .., which a path made of it
+// would lose.
+func dots(name string) bool { return name == "." || name == ".." }
+
+// rankLowered is how close a name is to what was searched for, both
+// lowered: the same, ahead, then anywhere.
+func rankLowered(n, q string) int {
 	switch {
 	case n == q:
 		return 0
@@ -172,7 +197,13 @@ func rank(name, q string) int {
 	return 2
 }
 
-// closest puts names in order of how close each is, then by name.
+// closest puts names in order of how close each is, then by name: each
+// lowered once.
 func closest(names []string, q string) {
-	slices.SortFunc(names, func(a, b string) int { return cmp.Or(cmp.Compare(rank(a, q), rank(b, q)), strings.Compare(a, b)) })
+	q = strings.ToLower(q)
+	rank := make(map[string]int, len(names))
+	for _, n := range names {
+		rank[n] = rankLowered(strings.ToLower(n), q)
+	}
+	slices.SortFunc(names, func(a, b string) int { return cmp.Or(cmp.Compare(rank[a], rank[b]), strings.Compare(a, b)) })
 }

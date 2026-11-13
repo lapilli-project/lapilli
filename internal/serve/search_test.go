@@ -1,10 +1,13 @@
 package serve
 
 import (
+	"context"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -149,5 +152,69 @@ func TestQueryTurnsNothingAround(t *testing.T) {
 	outside := regexp.MustCompile(`value="[^"]*"`).ReplaceAllString(body, "")
 	if strings.ContainsAny(outside, "\u202e\u2067") {
 		t.Error("rules page: a direction override outside a form's value")
+	}
+}
+
+// TestSearchBounded: a search is read within bounds, as the rules page
+// reads one; nothing to look for is no search; a rule whose page a
+// redirect would lose is listed, not opened; and the rules page given the
+// words reads them as words, in every team, so that it shows what was
+// counted.
+func TestSearchBounded(t *testing.T) {
+	ctx := context.Background()
+	s, rules := server(t, nil)
+	var b strings.Builder
+	b.WriteString(ruleFile + "  - name: jobs\n    rules:\n      - {alert: \"..\", expr: up == 2}\n")
+	for i := 0; i < 60; i++ {
+		fmt.Fprintf(&b, "      - {alert: \"job:x%02d\", expr: up == %d}\n", i, i+3)
+	}
+	os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte(b.String()), 0o644)
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	h := s.Handler()
+
+	for _, q := range []string{"..", "."} {
+		if code, body, _ := get(t, h, "/search?q="+url.QueryEscape(q)); code != http.StatusOK || !strings.Contains(body, `href="/rules/.."`) {
+			t.Errorf("/search?q=%s: %d, the rule .. not listed", q, code)
+		}
+	}
+
+	_, body, _ := get(t, h, "/search?q=job:x")
+	if !strings.Contains(body, "60 found for “<bdi>job:x</bdi>”.") {
+		t.Error("/search?q=job:x: not 60 found, set apart")
+	}
+	more := regexp.MustCompile(`<a href="([^"]*)">All 60 on the rules page</a>`).FindStringSubmatch(body)
+	if more == nil {
+		t.Fatal("/search?q=job:x: no link to all 60")
+	}
+	u, _ := url.Parse(strings.ReplaceAll(more[1], "&amp;", "&"))
+	if u.Path != "/rules" || u.Query().Get("q") != `"job:x"` || !u.Query().Has("team") || u.Query().Get("team") != "" {
+		t.Errorf("all 60: %s", more[1])
+	}
+	if v := rulesFor(t, s, u.RawQuery); len(v.Rows)+len(v.Quiet) != 60 || len(v.Bad) != 0 {
+		t.Errorf("all 60: the rules page shows %d and %d quiet, left out %q", len(v.Rows), len(v.Quiet), v.Bad)
+	}
+
+	// Twenty words, the rest left out, and said so.
+	q := strings.Repeat("job:x ", 20) + "nothing-is-called-this"
+	if _, body, _ := get(t, h, "/search?q="+url.QueryEscape(q)); !strings.Contains(body, "60 found for") ||
+		!strings.Contains(body, "Left out: more than 20 words: <bdi>nothing-is-called-this</bdi>.") {
+		t.Error("21 words: not 20 used, and the rest named")
+	}
+	// Too long, or nothing to look for: no search.
+	for _, q := range []string{strings.Repeat("x", 501), `"`, `""  "`} {
+		code, body, _ := get(t, h, "/search?q="+url.QueryEscape(q))
+		if code != http.StatusOK || !strings.Contains(body, "Rules by name, incidents by id or title") || strings.Contains(body, "<h2>") || strings.Contains(body, "found for") {
+			t.Errorf("/search?q=%.10s: %d, not the search's help alone", q, code)
+		}
+		if strings.Contains(body, `value="xxxxx`) {
+			t.Error("a search too long is in the bar's box")
+		}
+		if long := len(q) > maxSearch; long != strings.Contains(body, "The search is too long: 500 characters at most.") {
+			t.Errorf("/search?q=%.10s: says it is too long: %v", q, !long)
+		}
 	}
 }
