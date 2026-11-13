@@ -123,7 +123,9 @@ those named above: others may hold anything.
 - `--scrape-interval DUR`: the interval the range check counts with. Without
   it, Lapilli asks Prometheus's `/api/v1/status/config` once a day and uses
   `global.scrape_interval`; where that isn't served (most managed services),
-  the range check is off.
+  the range check is off. An answer over 2 MiB isn't parsed: YAML is
+  parsed whole, some 90 times its size, and a hostile Prometheus's few KB
+  on the wire, gzipped, can be MBs of it.
 - `--check-content=false` turns it off.
 
 ## Alternatives

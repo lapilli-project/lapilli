@@ -503,7 +503,7 @@ func TestWaitAtLeastASecond(t *testing.T) {
 	srv, _ := answers(t, refuse(429, "0"))
 	c := New(srv.URL, "test")
 	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
-	if _, _, err := c.do(context.Background(), req, true); err != nil {
+	if _, _, err := c.do(context.Background(), req, true, maxBody); err != nil {
 		t.Fatal(err)
 	}
 	if d := c.limit.until.Sub(clk.now()); d != time.Second {
@@ -616,7 +616,7 @@ func TestRefused(t *testing.T) {
 		{&APIError{Status: 501, Msg: "not implemented"}, true},
 		{&APIError{Status: 200, Msg: "the answer left series out: result truncated"}, true},
 		{&APIError{Status: 503, Msg: "query processing would load too many samples into memory"}, true},
-		{&unreadable{"want a matrix, got \"vector\""}, true},
+		{&unreadable{msg: "want a matrix, got \"vector\""}, true},
 		// A page a proxy wrote, of 400 too, isn't the API's word.
 		{&APIError{Status: 400, Msg: "not a Prometheus API response: <html>", page: true}, false},
 		{&APIError{Status: 200, Msg: "not a Prometheus API response: <html>", page: true}, false},

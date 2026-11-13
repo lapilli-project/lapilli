@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"slices"
 	"sync"
 	"time"
 
 	"lapilli.dev/internal/content"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/source"
@@ -134,14 +136,21 @@ func (s *Server) askScrape(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	var got content.Scrapes
-	if cfg, err := sc.StatusConfig(ctx); err == nil {
+	switch cfg, err := sc.StatusConfig(ctx); {
+	case err == nil:
 		got, _ = content.ScrapeConfig(cfg)
-	} else {
+	case errors.Is(err, prom.ErrTooLarge):
+		// Not a store that doesn't serve it: one whose configuration is
+		// too large to read, which whoever runs lapilli can mend.
+		s.log.Warn("Prometheus's configuration is larger than is read of it: the range check is off; give --scrape-interval", "err", err)
+	default:
 		s.log.Debug("no scrape interval from Prometheus: the range check is off", "err", err)
 	}
 	if ta, ok := replay.Base(s.h).(targetsAPI); ok && got.Global > 0 {
 		if b, err := ta.Targets(ctx); err == nil {
 			got.Targets(b)
+		} else if errors.Is(err, prom.ErrTooLarge) {
+			s.log.Warn("Prometheus's active targets are more than is read of them: a job is known by its name", "err", err)
 		} else {
 			s.log.Debug("no targets from Prometheus: a job is known by its name", "err", err)
 		}

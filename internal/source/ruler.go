@@ -22,6 +22,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"lapilli.dev/internal/cloud"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
@@ -144,10 +145,23 @@ func NewRuler(raw, agent string) (*Ruler, error) {
 	return &Ruler{URL: strings.TrimRight(raw, "/"), Kind: kind, Agent: agent}, nil
 }
 
-// The most a ruler's answer may be: a list of every rule, and one unit.
+// The most a ruler's answer may be: a list of every rule, and one unit; a
+// Grafana's export, a cloud's page of alarms, as much. A list is parsed
+// whole, its YAML some 20 to 60 times its size in memory (rules.Nodes):
+// 64 MB is 25,000 of Grafana's rules, some 150,000 of a rule file's.
 const (
 	ListLimit = 64 << 20
 	UnitLimit = 4 << 20
+)
+
+// MaxRules is the most rules a ruler's or a Grafana's answer may hold, as
+// counted before they are written out again and read: a hostile one's few
+// MB of tiny rules would otherwise be a GB of rules. maxGroupNodes is the
+// most values one group of a ruler's list may be: it is written out again
+// whole (encodeGroups), which takes some 450 bytes a value.
+const (
+	MaxRules      = 50000
+	maxGroupNodes = 100000
 )
 
 // rulerTimeout is how long a request to a ruler may take.
@@ -228,6 +242,13 @@ func (e endpoint) call(ctx context.Context, method, target string, body []byte, 
 	if resp.StatusCode/100 == 3 {
 		return resp.StatusCode, nil, nil, fmt.Errorf("%s answered %s %s with a redirect, which isn't followed", e.what, method, clipURL(target))
 	}
+	if resp.StatusCode/100 != 2 {
+		// What an error answers is said, on pages, in the log, in a
+		// change's reason, in Slack: without the token or the signature
+		// it was asked with, which a server, or a proxy before it, may
+		// echo.
+		out = []byte(prom.Redact(string(out), req))
+	}
 	return resp.StatusCode, resp.Header, out, nil
 }
 
@@ -240,11 +261,18 @@ func clipURL(s string) string {
 
 // Failed is an answer from a ruler that isn't what was asked for.
 func Failed(code int, body []byte) error {
-	msg := strings.TrimSpace(string(body))
-	if len(msg) > 300 {
-		msg = msg[:300]
+	return fmt.Errorf("the ruler: HTTP %d: %s", code, answered(body, 300))
+}
+
+// answered is the text of an error's answer as an error says it: what
+// doesn't show taken out, and any bearer token, which a server may echo,
+// then cut to n bytes.
+func answered(body []byte, n int) string {
+	msg := prom.ServerText(strings.TrimSpace(string(body)), nil)
+	if len(msg) > n {
+		msg = strings.ToValidUTF8(msg[:n], "")
 	}
-	return fmt.Errorf("the ruler: HTTP %d: %s", code, verdict.Clean(msg))
+	return msg
 }
 
 // NameOK checks a name read from a ruler, which goes into a path as one
@@ -274,10 +302,21 @@ func (r *Ruler) NameOK(name string, namespace bool) error {
 // the top: one that doesn't parse mustn't blind Lapilli to every other.
 // Each is told to Warn, once while it lasts; an Amazon namespace that read
 // before keeps its last rules read.
+//
+// What a ruler's API writes holds no YAML alias, and one that does isn't
+// read (rules.NoAliases): its aliases would expand a few KB into GBs, each
+// namespace a document of its own. An Amazon namespace holds the rule file
+// someone wrote, which may have them: what they expand to is counted for
+// every namespace together (rules.OneInput). Past MaxRules as read, none
+// is.
 func (r *Ruler) Read(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
 	var docs []rules.Doc
 	var passed []string
 	var err error
+	read := rules.NoAliases(ctx)
+	if r.Kind == RulerAmazon {
+		read = rules.OneInput(ctx)
+	}
 	switch r.Kind {
 	case RulerConfig:
 		docs, passed, err = r.readConfig(ctx)
@@ -294,13 +333,19 @@ func (r *Ruler) Read(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
 	var rs []rules.Rule
 	kept := docs[:0]
 	for _, d := range docs {
-		x, err := rules.FromDocs([]rules.Doc{d})
+		x, err := rules.FromDocsContext(read, []rules.Doc{d})
+		if ctx.Err() != nil {
+			return nil, nil, fmt.Errorf("%s: %w", r.flag(), ctx.Err())
+		}
 		if err != nil {
-			passed = append(passed, fmt.Sprintf("%s: %s can't be read, and is passed over: %s", r.flag(), d.Source, clipErr(err)))
+			passed = append(passed, fmt.Sprintf("%s: %s can't be read, and is passed over: %s", r.flag(), clipURL(d.Source), clipErr(err)))
 			continue
 		}
 		rs = append(rs, x...)
 		kept = append(kept, d)
+		if len(rs) > MaxRules {
+			return nil, nil, fmt.Errorf("%s: the ruler holds more than %d rules: not read", r.flag(), MaxRules)
+		}
 	}
 	r.tell(passed)
 	return rs, kept, nil
@@ -368,11 +413,22 @@ func ConfigDocs(base string, body []byte) ([]rules.Doc, []error, error) {
 	if t := strings.TrimSpace(string(body)); t == "" || t == "{}" {
 		return nil, nil, nil
 	}
+	if err := rules.Nodes(body); err != nil {
+		return nil, nil, err
+	}
 	var root yaml.Node
 	if err := yaml.Unmarshal(body, &root); err == nil && len(root.Content) == 1 {
 		m := root.Content[0]
 		if m.Kind != yaml.MappingNode {
 			return nil, nil, errors.New("not the rules a ruler's configuration API lists: want a map of namespaces")
+		}
+		// No ruler writes an alias: one would stand for rules countRules
+		// doesn't count, many times over.
+		if a := alias(m); a != nil {
+			return nil, nil, fmt.Errorf("the ruler's list holds a YAML alias (*%.40s, line %d), which no ruler writes: not read", a.Value, a.Line)
+		}
+		if n := countRules(m); n > MaxRules {
+			return nil, nil, fmt.Errorf("the ruler lists more than %d rules (%d): not read", MaxRules, n)
 		}
 		var docs []rules.Doc
 		var passed []error
@@ -382,8 +438,12 @@ func ConfigDocs(base string, body []byte) ([]rules.Doc, []error, error) {
 				passed = append(passed, fmt.Errorf("namespace %q: not a list of groups", ns))
 				continue
 			}
+			if slices.ContainsFunc(groups.Content, func(g *yaml.Node) bool { return nodes(g, maxGroupNodes) > maxGroupNodes }) {
+				passed = append(passed, fmt.Errorf("namespace %q: a group of more than %d values, more than is read", ns, maxGroupNodes))
+				continue
+			}
 			// Written out again with two spaces, which reads back.
-			b, err := encodeYAML(&yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "groups"}, groups}})
+			b, err := encodeGroups(groups)
 			if err != nil {
 				passed = append(passed, fmt.Errorf("namespace %q: %v", ns, err))
 				continue
@@ -420,7 +480,7 @@ func ConfigDocs(base string, body []byte) ([]rules.Doc, []error, error) {
 	}
 	var docs []rules.Doc
 	var passed []error
-	namespaces := 0
+	namespaces, total := 0, 0
 	for _, c := range chunks {
 		var key yaml.Node
 		head := strings.TrimRight(strings.Join(c.key, ""), "\r\n")
@@ -436,12 +496,20 @@ func ConfigDocs(base string, body []byte) ([]rules.Doc, []error, error) {
 		namespaces++
 		ns := key.Content[0].Content[0].Value
 		var kept []string
-		if groupsOK(c.body) {
-			kept = c.body
-		} else {
+		switch n, read := groupsRead(c.body); read {
+		case readBig:
+			passed = append(passed, fmt.Errorf("namespace %q: a group of more than %d values, more than is read", ns, maxGroupNodes))
+			continue
+		case readOK:
+			kept, total = c.body, total+n
+		default:
 			for _, it := range listItems(c.body) {
-				if groupsOK(it) {
-					kept = append(kept, it...)
+				switch n, read := groupsRead(it); read {
+				case readOK:
+					kept, total = append(kept, it...), total+n
+					continue
+				case readBig:
+					passed = append(passed, fmt.Errorf("namespace %q: a group of more than %d values, more than is read", ns, maxGroupNodes))
 					continue
 				}
 				name := ""
@@ -450,6 +518,11 @@ func ConfigDocs(base string, body []byte) ([]rules.Doc, []error, error) {
 				}
 				passed = append(passed, fmt.Errorf("namespace %q, group %.80q: the ruler gives it in a form that can't be read", ns, name))
 			}
+		}
+		// As a list that reads whole is: past MaxRules, none is read, and
+		// the rest isn't parsed.
+		if total > MaxRules {
+			return nil, nil, fmt.Errorf("the ruler lists more than %d rules: not read", MaxRules)
 		}
 		if len(kept) == 0 {
 			continue
@@ -465,12 +538,56 @@ func ConfigDocs(base string, body []byte) ([]rules.Doc, []error, error) {
 // groupName is a group's name on its item's first line.
 var groupName = regexp.MustCompile(`^\s*-\s+name:\s*(.*?)\s*$`)
 
-// groupsOK reports whether lines are a list of groups that reads.
-func groupsOK(lines []string) bool {
-	var doc struct {
-		Groups []map[string]any `yaml:"groups"`
+// How lines read as a list of groups (groupsRead).
+const (
+	readNot = iota
+	readOK
+	readBig
+)
+
+// groupsRead reads lines as a rule file's list of groups: readOK, and the
+// rules they hold, when they read as yaml.v3 decodes a list of mappings
+// (rules.YAMLValue, in linear time); readBig when a group is of more than
+// maxGroupNodes values, which isn't decoded. Lines holding an alias are
+// readOK too, their rules counted as written, not decoded: Read refuses
+// them (rules.NoAliases), as no ruler writes one, and says so.
+func groupsRead(lines []string) (int, int) {
+	var root yaml.Node
+	if yaml.Unmarshal([]byte("groups:\n"+strings.Join(lines, "")), &root) != nil || len(root.Content) != 1 {
+		return 0, readNot
 	}
-	return yaml.Unmarshal([]byte("groups:\n"+strings.Join(lines, "")), &doc) == nil && len(doc.Groups) > 0
+	if m := root.Content[0]; m.Kind == yaml.MappingNode && len(m.Content) >= 2 &&
+		slices.ContainsFunc(m.Content[1].Content, func(g *yaml.Node) bool { return nodes(g, maxGroupNodes) > maxGroupNodes }) {
+		return 0, readBig
+	}
+	if alias(&root) != nil {
+		return countRules(root.Content[0]), readOK
+	}
+	v, err := rules.YAMLValueContext(rules.NoAliases(context.Background()), &root)
+	if err != nil {
+		return 0, readNot
+	}
+	doc, _ := v.(map[string]any)
+	groups, _ := doc["groups"].([]any)
+	if len(groups) == 0 {
+		return 0, readNot
+	}
+	n := 0
+	for _, g := range groups {
+		var rs any
+		switch m := g.(type) {
+		case map[string]any:
+			rs = m["rules"]
+		case map[any]any:
+			rs = m["rules"]
+		case nil:
+		default:
+			return 0, readNot
+		}
+		l, _ := rs.([]any)
+		n += len(l)
+	}
+	return n, readOK
 }
 
 // listItems splits a block list's lines at its items: each starts on a
@@ -495,6 +612,95 @@ func listItems(lines []string) [][]string {
 		}
 	}
 	return items
+}
+
+// countRules is how many rules a configuration API's list holds: the
+// items of each group's rules, in each namespace.
+func countRules(m *yaml.Node) int {
+	n := 0
+	for i := 1; i < len(m.Content); i += 2 {
+		for _, g := range m.Content[i].Content {
+			for j := 0; g.Kind == yaml.MappingNode && j+1 < len(g.Content); j += 2 {
+				if g.Content[j].Value == "rules" {
+					n += len(g.Content[j+1].Content)
+				}
+			}
+		}
+	}
+	return n
+}
+
+// encodeGroups is a namespace's groups as one rule file, groups: and the
+// list: a group at a time when the list is in block style and nothing in
+// it is an anchor, an alias or a comment on the list, as each item is then
+// written as it would be in the whole; the yaml.v3 emitter holds every
+// event of what it writes until it ends, many times the text.
+//
+// What is written whole is of maxGroupNodes values at most, as a group
+// written alone is: a namespace in flow style of millions of values (ns:
+// [0, 0, ...]), each a group of one, took 6.6 GiB from 24 MB.
+func encodeGroups(groups *yaml.Node) ([]byte, error) {
+	whole := func(seq *yaml.Node) ([]byte, error) {
+		if nodes(seq, maxGroupNodes+1) > maxGroupNodes+1 {
+			return nil, fmt.Errorf("its groups, written whole, are of more than %d values, more than is read", maxGroupNodes)
+		}
+		return encodeYAML(&yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "groups"}, seq}})
+	}
+	if groups.Style&yaml.FlowStyle != 0 || groups.HeadComment != "" || groups.LineComment != "" || groups.FootComment != "" || linked(groups) {
+		return whole(groups)
+	}
+	var b bytes.Buffer
+	b.WriteString("groups:\n")
+	for _, g := range groups.Content {
+		one, err := whole(&yaml.Node{Kind: yaml.SequenceNode, Content: []*yaml.Node{g}})
+		if err != nil {
+			return nil, err
+		}
+		rest, ok := bytes.CutPrefix(one, []byte("groups:\n"))
+		if !ok {
+			return whole(groups)
+		}
+		b.Write(rest)
+	}
+	if len(groups.Content) == 0 {
+		return whole(groups)
+	}
+	return b.Bytes(), nil
+}
+
+// nodes is how many nodes are in n, counted up to past most.
+func nodes(n *yaml.Node, most int) int {
+	c := 1
+	for _, x := range n.Content {
+		if c > most {
+			break
+		}
+		c += nodes(x, most-c)
+	}
+	return c
+}
+
+// alias is the first alias in n, nil for none; looked for without
+// recursion, as a list may be nested deep.
+func alias(n *yaml.Node) *yaml.Node {
+	stack := []*yaml.Node{n}
+	for len(stack) > 0 {
+		x := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if x.Kind == yaml.AliasNode {
+			return x
+		}
+		stack = append(stack, x.Content...)
+	}
+	return nil
+}
+
+// linked reports whether an anchor or an alias is in n.
+func linked(n *yaml.Node) bool {
+	if n.Anchor != "" || n.Kind == yaml.AliasNode {
+		return true
+	}
+	return slices.ContainsFunc(n.Content, linked)
 }
 
 func encodeYAML(n *yaml.Node) ([]byte, error) {
@@ -1009,17 +1215,19 @@ func WrapGroup(group []byte) ([]byte, error) {
 	if !strings.HasSuffix(out, "\n") {
 		out += "\n"
 	}
-	var g, w any
-	if err := yaml.Unmarshal(group, &g); err != nil {
+	g, err := rules.UnmarshalYAML(group)
+	if err != nil {
 		return nil, errors.New("the ruler's group isn't YAML")
 	}
 	if _, ok := g.(map[string]any); !ok {
 		return nil, errors.New("the ruler's answer isn't a group")
 	}
-	if err := yaml.Unmarshal([]byte(out), &w); err != nil {
+	w, err := rules.UnmarshalYAML([]byte(out))
+	if err != nil {
 		return nil, errors.New("the ruler's group can't be read as a rule file")
 	}
-	gs, _ := w.(map[string]any)["groups"].([]any)
+	file, _ := w.(map[string]any)
+	gs, _ := file["groups"].([]any)
 	if len(gs) != 1 || !reflect.DeepEqual(gs[0], g) {
 		return nil, errors.New("the ruler's group can't be read as a rule file")
 	}
@@ -1054,12 +1262,16 @@ func GroupOf(file []byte) ([]byte, bool, error) {
 		return nil, false, err
 	}
 	// Read back: the group as the file has it.
-	var a, w any
-	if yaml.Unmarshal(b, &a) != nil {
+	a, err := rules.UnmarshalYAML(b)
+	if err != nil {
 		return nil, false, errors.New("the group can't be written out")
 	}
-	yaml.Unmarshal(file, &w)
-	gs, _ := w.(map[string]any)["groups"].([]any)
+	w, err := rules.UnmarshalYAML(file)
+	if err != nil {
+		return nil, false, errors.New("not a rule file of one group")
+	}
+	whole, _ := w.(map[string]any)
+	gs, _ := whole["groups"].([]any)
 	if len(gs) != 1 || !reflect.DeepEqual(gs[0], a) {
 		return nil, false, errors.New("the group can't be written out as it reads")
 	}

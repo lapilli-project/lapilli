@@ -1528,11 +1528,15 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 var funcs = template.FuncMap{
 	"static": static,
 	"t":      func(msg string, args ...any) string { return tr("en", msg, args...) }, // each language's own, in pagesIn
-	"who":    func(by string) string { return by },                                   // likewise
-	"dur":    verdict.Duration,
-	"delay":  verdict.Delay,
-	"path":   url.PathEscape,
-	"join":   strings.Join,
+	"tbdi":   func(msg string, args ...any) template.HTML { return trBDI("en", msg, args...) },
+	// shown is a text as a page shows what it can't change: an expression,
+	// a ruler's namespace, with what turns text around as U+FFFD.
+	"shown": rules.Shown,
+	"who":   func(by string) string { return by }, // likewise
+	"dur":   verdict.Duration,
+	"delay": verdict.Delay,
+	"path":  url.PathEscape,
+	"join":  strings.Join,
 	"at": func(loc *time.Location, t time.Time) string {
 		if t.IsZero() {
 			return "–"

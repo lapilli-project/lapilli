@@ -2,6 +2,244 @@
 
 ## [Unreleased]
 
+## [0.34.1] - 2026-11-14
+
+A security release, after two reviews of 0.33.0 (whose code 0.34.0
+holds) from an attacker's point of view: of what comes in to lapilli serve's own sign-in, and of what the
+APIs lapilli reads (a history, a ruler, a Grafana, a cloud, an on-call
+feed) can make it hold, wait for, or say; and a third review of the
+fixes, whose findings are fixed in what is described here. Each fix comes
+with a test that failed before it. No ledger schema change. Read "Before
+you upgrade".
+
+### Fixed (security)
+
+- **A bearer token outlived the record of its person signing out.** An ID
+  token sent as a bearer token was taken until its own `exp`, which the
+  identity provider sets (Dex's are 24h), while who signed out is kept for
+  `--session-max-age` (12h): a token copied before its person signed out
+  was taken again once the record was pruned, at a restart or when anyone
+  else signed out. A bearer token is now refused once it is older than
+  `--session-max-age`, as a session's cookie is.
+- **Strangers signing out could push an admin's sign-out out of the
+  record.** `POST /auth/logout` needs a session cookie, not a role, and the
+  identity provider gives one to whoever it signs in; the record holds
+  10,000 people, and dropped the oldest. With a provider people sign up
+  to, 10,000 sign-outs under names of one's own made a copy of an admin's
+  cookie, refused since they signed out, good again. Only people a role
+  lets in are kept now, and a full record fails closed: the one let go of
+  raises a time for everyone, and every session and bearer token made
+  then or before is ended.
+- **Signing out wrote the ledger for anyone, each time.** With no role, no
+  rate and no look at whether the session was still on, under
+  `--read-only` too, each POST rewrote the record (440 KB, full), and
+  every request read it back. A session signed out of already now writes
+  nothing (its cookie is still taken away), nor a stranger's, and a
+  request reads the record again only when the ledger counts a change to
+  it. Under `--read-only` a sign-out of someone a role lets in is kept:
+  signing out must work, and SECURITY.md now says so.
+- **Each `GET /auth/login` left a cookie, and none was taken away.** A page
+  elsewhere could send a browser there again and again; past 180 cookies a
+  site, browsers drop the least recently used, the session's among them.
+  A login now takes away the sign-ins under way the browser holds but the
+  newest three.
+- **A Grafana that never answered held lapilli serve's work loop
+  (medium).** The weekly proposals read the rules from Grafana again with
+  no deadline, through a client with no timeout: every hourly run, digest,
+  change and report waited on it. A read of the rules gets a minute,
+  whatever starts it, and the client to Grafana gives up after a minute,
+  on its headers after 30 seconds.
+- **Replayed alerts' labels were kept as an API answered them (medium).**
+  The ledger kept the labels of recorded firings, notifications and
+  incidents to 4 KB, but not those of the firings it replays: a hostile
+  API's few KB on the wire, gzipped, were tens of MB in the ledger and its
+  cache, more each run. They are kept as the others now: 4 KB in all, a
+  name of 128 bytes and a value of 256, cut past that with a hash of what
+  was cut, a value with what turns text around in it likewise, and a set
+  still past 4 KB with its longest labels folded into one hash
+  (`__lapilli_cut__`, which an API's own label of that name is folded
+  into too, as is one named as another is kept), so alerts apart stay
+  apart. lapilli serve's replay check takes what really fired as it would
+  be kept. A rule's replay in a run keeps 20,000 alerts at most, told
+  apart by their labels (by a hash seeded as the process starts, which an
+  API can't make two sets share): past that the rule is left as it was,
+  as one whose query failed, and says why. The cache of ids and labels
+  holds 32 MB at most.
+- **A Prometheus's configuration could take hundreds of MB (medium).**
+  `/api/v1/status/config`, a read lapilli does without, could be 256 MiB
+  once its gzip was taken off, and its YAML was parsed whole, some 90 times
+  its size: 4 KB on the wire took 360 MB. An answer over 2 MiB is refused
+  before it is parsed now, and the active targets over 32 MiB; either
+  said as a warning in lapilli serve's log, and on lapilli verdict's
+  stderr, as the range check is off then.
+- **A ruler's or a Grafana's rules took some 280 to 350 times their size
+  (medium).** A list was read whole into YAML nodes, written out again
+  and parsed into rules: 4 MiB of small rules took over a GB. A list, or
+  a Grafana's export, is still 64 MB at most, but read at a value every 4
+  bytes at most, past its first 100,000, and 6 million in all (counted
+  before it is parsed: real ones are a value every 5 to 15 bytes), and of
+  50,000 rules, counted before they are written out again (a list that
+  doesn't parse whole too) and as read; each group is written out on its
+  own, of 100,000 values at most (a namespace with one larger is passed
+  over, as one that can't be read is, and so is one written whole, in
+  flow style, of more), and a document's nodes let go of as they are
+  read. What a ruler's API, a Grafana's export or a cloud's API
+  writes holds no YAML alias, and one that does isn't read: a ruler's
+  namespaces were each a document, their aliases expanding on their own,
+  and 99 KiB read as 230,400 rules in 306 MiB. Those 4 MiB of rules are
+  refused in 133 MiB; 40,000 rules in 2,000 groups, 1.7 MiB, read in
+  132 MiB (579 MiB before); a Grafana export of 25,000 classic rules,
+  62 MB, in 1.4 GiB (1.8 GiB before); and what a hostile list or export
+  can be made to take within the bounds is some 85 times its size, and
+  1.9 GiB, at most.
+- **A range answer was kept whole, whatever it held (medium).** Samples
+  outside the range asked, more than its steps, and any number of series
+  were kept, and the 256 MiB an answer may be counted only once its gzip
+  was off: 24 KB on the wire held 360 MB. An answer is read as it comes
+  now, and only what was asked kept: a sample outside the range dropped; a
+  series of more samples than the range's steps, or taking more of the
+  stream than they could need, unreadable; past 50,000 series or
+  5,000,000 samples, too big, and asked again over a shorter range, as
+  when the API says so; past 128 MiB of labels (50,000 series of 2.7 KB
+  each; a series of tiny labels repeated gzips to nothing), too many or
+  too wide series to read, over any range. The answers to one range, its
+  days and the halves the API asks for, hold 100,000 series, 256 MiB of
+  labels and `--max-samples` samples (10,000,000 by default) in all at
+  most, and past one the rule isn't replayed, said with the bound and how
+  to read it all the same: an API saying every range of more than a step
+  is too large, and answering each step with series of its own, had a day
+  held as 72 million series. Answers read so are some 1.5 times faster, in
+  half the memory.
+- **A mapping of many keys took time with the square of its keys
+  (medium).** A rule document is decoded with go.yaml.in/yaml/v3, which
+  checks a mapping's keys for duplicates pair by pair: a rule of 96,000
+  label keys, a 1 MiB answer from a ruler or a Grafana (or a cloud's
+  alarms, as JSON is YAML), held a CPU for 20 seconds, past any
+  `--timeout`; 64 MB, for hours. Documents are decoded to their nodes,
+  which takes time linear in them, and then to values as yaml.v3 would
+  (fuzzed against it: the same, but near yaml.v3's bound on what aliases
+  expand to, which is kept, counting the keys a merge brings in again); a
+  mapping of more than 10,000 keys, or values nested deeper than 200, are
+  refused, and the context is looked at between documents and within one.
+  What aliases expand to is bounded as yaml.v3 bounds one document's for a
+  whole input: a stream's documents, a directory's files, the rule files
+  a ConfigMap or an Amazon namespace holds, together. A fault in reading
+  a document is an error, not a crash. A ruler's unit, a cloud's alarm
+  and the hash of either are decoded so too. Rule files read a little
+  faster.
+- **An on-call feed could hold a CPU, with no deadline (low).** Replaced
+  occurrences (`RECURRENCE-ID`) and a repeat's days (`BYDAY`) were
+  searched each step, and a `TZID`'s zone loaded for each date: feeds of
+  2 to 8 MB took 13 to 20 seconds and more, past a deadline as lines were
+  read without a look at it. They are looked up now, a zone loaded once a
+  feed (1,024 zones a feed at most, more than IANA has), the lines and the
+  repeats read with a look at the context, and each feed read and parsed
+  within a minute.
+- **Two errors quoted an unreadable answer as the server wrote it
+  (low),** a result type that isn't a matrix or a sample that isn't a
+  number, without taking out the token, as every other error of the API's
+  does; `--markdown` puts that reason in a pull request's comment. Now
+  taken out, before the text is cut, so a long token's start doesn't
+  stay; and from an answer that isn't the API's, said from its first
+  4 KiB, the start of a token cut there.
+- **What a ruler, a cloud or Grafana answered with an error kept a token
+  it echoed (low),** on every page's status line, in a change's reason and
+  in Slack's `change.failed`. The token, signature or credential the
+  request carried, and any bearer token, are taken out as from a history
+  API's errors. IAM Credentials' refusal, and the source of a namespace a
+  ruler's read passes over, are said without what doesn't show.
+- **One slow data source behind a Grafana held every place (low, 0.33.0).**
+  The data sources behind one Grafana share `--parallel` places, held as
+  long as a request is: a slow one, as a broken or hostile Loki behind it
+  can be, took them all, and a healthy one's queries waited for its
+  answers. One holding places doesn't take the last while another holds
+  none that asked within ten seconds (looked at again when that ends, not
+  only when a place is given back), and a place given back goes to the
+  one waiting that holds fewest.
+- **A direction override in a rule's name turned text on the pages around
+  (low).** A name, a group, labels and what a rule says are read with
+  what doesn't show as written or turns the text around it (a control
+  character, a direction mark, embedding, override or isolate) as U+FFFD,
+  as a tracker's comment is taken, from every source, its group's labels
+  too; replayed alerts' labels are kept so too. An expression isn't
+  changed, as its query is its own, but is shown so on the pages, and the
+  pages set names apart in `<bdi>`, those in a sentence too.
+- **`--metrics` wrote an escape sequence of a name as it was (low).** A
+  name an API gave reached stdout raw, an OSC 52 sequence setting the
+  terminal's clipboard among them. `--metrics` and serve's `/metrics` say
+  a control character, and a direction mark, embedding, override or
+  isolate, as every other output does (`\u{1b}`); the joiners names in
+  Persian, Indic scripts and emoji are written with are as they are, as
+  `ALERTS` has them.
+- `*@DOMAIN` and `--oidc-hosted-domain` compare domains by their ASCII
+  letters alone: Unicode's folding takes the Kelvin sign for a `k` and a
+  long s for an `s`.
+- A group holding a character that doesn't show (a zero-width space, a
+  direction mark) is dropped, from a token, a signed header or
+  `--groups-header`, as docs/design/signin.md said: before, only a token's
+  spacing dropped one.
+
+### Changed
+
+- `--max-samples N`, for `lapilli verdict` (`--compare` and
+  `--check-replay` too) and `lapilli serve`, and the chart's
+  `maxSamples`: the most samples the answers to one range, a rule's query
+  over the period, may hold in all (default 10,000,000, some 600 MB at the
+  peak, 64 bytes a sample).
+- The weekly fuzzing in CI takes five targets more: range answers, rule
+  documents' values against yaml.v3's, on-call feeds, a JWKS, and a load
+  balancer's signed header.
+
+### Before you upgrade
+
+- **Bearer tokens older than `--session-max-age` (12h by default) are
+  refused**, whatever their `exp`. An API client or an agent holding a
+  token of a provider that gives longer ones gets another sooner.
+- **Signing out.** Only people a role lets in are kept as signed out: a
+  person with no role who is given one later is let in by a cookie of
+  theirs from before they signed out, until it expires. A record full of
+  10,000 people within `--session-max-age` signs everyone out who signed
+  in before the oldest of them: with `--viewers '*'`, or a provider people
+  sign up to and a broad `*@DOMAIN`, 10,001 accounts signing in and out
+  within it, again and again, sign everyone out, which takes an account
+  each, and is a way to keep people signing in again, not a way in. Under
+  `--read-only`, signing out writes the ledger's record of it. Two
+  processes sharing a ledger should both be 0.34.1: an earlier one's
+  sign-outs aren't counted, and a 0.34.1 doesn't see them until it starts
+  again.
+- **New bounds on what is read.** They may refuse an answer, or cut what
+  is kept of it:
+  - a ruler's list, a Grafana's export: 64 MB (as before), 50,000 rules
+    as written and as read, a group of 100,000 values, and no YAML alias
+    (nor in a cloud's alarms);
+  - a rule document, from anywhere (rule files, a ruler's unit, a cloud's
+    alarms): a value every 4 bytes past its first 100,000, 6 million in
+    all, a mapping of 10,000 keys, values nested 200 deep, and aliases
+    expanding as far as yaml.v3 allows one document, for a whole input
+    (a stream's documents, a directory's files) together;
+  - a range answer: 50,000 series and 5,000,000 samples, then asked over
+    a shorter range; 128 MiB of labels, then not read; samples outside
+    the range asked are dropped; the answers to one range together:
+    100,000 series, 256 MiB of labels and 10,000,000 samples;
+  - a replayed alert's labels: a name of 128 bytes, a value of 256, 4 KB
+    in all, cut with a hash past them, as is one with a direction mark.
+    An alert whose labels are cut is another series in the ledger from
+    the upgrade on, and its earlier firings are replaced as the runs
+    reach them. A rule's replay in a run: 20,000 alerts;
+  - Prometheus's configuration 2 MiB, its active targets 32 MiB: past
+    them, read as when it isn't served, and said;
+  - an on-call feed: 1,024 time zones.
+- **A rule's query over the period reads 10,000,000 samples at most**
+  (`--max-samples`): 1,000 series firing all through a week at a minute,
+  250 through 28 days. Past it, the rule isn't replayed, as one whose
+  query failed, and the reason says so; 0.34.0 read it, in some 64 bytes
+  a sample at the peak. Give a larger `--max-samples` (the chart's
+  `maxSamples`), and memory for it times `--parallel`; or a longer
+  `--step`, or a shorter `--since`.
+- **A rule whose name holds a control character or a direction mark** is
+  read with U+FFFD in its place: a new rule in the ledger, and a change
+  proposed to it isn't found where the rule is written.
+
 ## [0.34.0] - 2026-11-14
 
 The ledger where a team keeps the rest of what matters: in a Postgres

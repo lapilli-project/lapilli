@@ -33,7 +33,9 @@ one of lapilli's own (`incidents-token` and the like), has spaces around
 it, or holds spacing other than the ASCII space (U+00A0, U+3000 and the
 other separators), a format character (a zero-width space, a soft hyphen,
 a direction mark) or a control character: each could read as another's,
-an admin's, in a comment or an approval. A group like that is dropped.
+an admin's, in a comment or an approval. A group like that is dropped,
+from a token, a signed header or `--groups-header` (before 0.34.1, from a
+token only for its spacing, and from `--groups-header` never).
 
 ## Who comes in
 
@@ -50,8 +52,10 @@ a way to sign out. A sign-in with no role list is refused at start.
 
 - Every list takes people (`ana@example.com`, `user:NAME`), groups
   (`group:NAME`), and `*@DOMAIN`, everyone whose name ends in `@DOMAIN` in
-  any letter case: with `--user-claim email`, which the provider must say
-  is verified, that is everyone of a domain.
+  any case of its ASCII letters, as DNS compares names (Unicode's folding
+  would take the Kelvin sign for a `k`, a long s for an `s`): with
+  `--user-claim email`, which the provider must say is verified, that is
+  everyone of a domain. `--oidc-hosted-domain` compares `hd` so too.
 - `*` in `--viewers` is everyone the provider signs in, said in so many
   words. In `--editors`, `--admins` or `--approvers` it is refused until
   `--viewers` names who comes in, and is then everyone `--viewers` lets
@@ -78,7 +82,12 @@ or a public one without it, always with PKCE (S256).
    bytes each, keeps them with `next` in a signed cookie named by the
    state (`lapilli-login-HASH`, ten minutes, HttpOnly, SameSite=Lax), so
    two tabs signing in at once each come back to their own, and sends the
-   browser to the provider's authorization endpoint.
+   browser to the provider's authorization endpoint. The sign-ins under way
+   the browser holds already are taken away but the newest three (one that
+   doesn't verify, or has expired, too): a page elsewhere can send a
+   browser to `/auth/login` again and again, and each would leave a cookie
+   for ten minutes, until the browser, past its 180 cookies a site, drops
+   the least recently used, the session's among them.
 3. `/auth/callback` takes the state's cookie away and refuses the request
    (400) unless the cookie verifies, hasn't expired, holds that state
    (compared in constant time), and the state wasn't used before: states
@@ -147,17 +156,33 @@ than they last now.
   the cookie away and ends every session of that person made until then,
   in this browser and any other, a copy of the cookie among them, and
   every bearer token issued before. Who signed out and when (in
-  milliseconds) is merged into the ledger's `meta` in one transaction, and
-  read from it on each request, so two processes sharing a ledger don't
-  write over each other, and one signing out signs out at both. It is
-  kept until a session made then would have expired, and bounded by the
-  people the provider signs in, not by how often anyone signs in and out:
-  10,000 people at once, the oldest dropped first. It is a POST checked by
-  the cross-origin protection every write has, and the cookie is
-  SameSite=Lax: a page elsewhere can't sign people out. The provider's own
-  session is left as it is (`/auth/signed-out` says so).
+  milliseconds) is merged into the ledger's `meta` in one transaction,
+  with a count of its changes; each request reads the count, and the
+  record again only when the count moved, so two processes sharing a
+  ledger don't write over each other, and one signing out signs out at
+  both. It is kept until a session made then would have expired, and
+  bounded by the people the provider signs in and a role lets in, not by
+  how often anyone signs in and out:
+  - Only someone a role lets in is kept: anyone the provider signs in
+    gets a session cookie, which reaches this page, and a stranger's
+    sign-outs by the thousand mustn't push an admin's out. A stranger's
+    cookie, kept, lets no one in anywhere. A session signed out of already
+    is signed out again (its cookie taken away) with nothing written.
+  - 10,000 people at once. Past that, the oldest is let go of, and a time
+    for everyone raised to when they signed out: every session and bearer
+    token made then or before, anyone's, is ended, failing closed, rather
+    than the one let go of taken again. Those people sign in again. With
+    `--viewers '*'`, or a provider people sign up to and a broad
+    `*@DOMAIN`, 10,001 accounts signing in and out within
+    `--session-max-age`, again and again, sign everyone out so: a way to
+    make people sign in again, at an account each, not a way in.
+  - Under `--read-only` it is written too: signing out must work, and it
+    changes nothing a page shows.
+
+  It is a POST checked by the cross-origin protection every write has, and
+  the cookie is SameSite=Lax: a page elsewhere can't sign people out. The
+  provider's own session is left as it is (`/auth/signed-out` says so).
 - **Why a cookie, not a table.** One replica, one writer (SQLite's, or the
-  process that holds a Postgres ledger's lock, [postgres.md](postgres.md)): a table of
   sessions would be written on every sign-in, and would need a schema
   change. A signed cookie needs nothing kept but who signed out.
 - **Size.** A browser keeps 4 KB a cookie. When the groups don't fit, only
@@ -170,7 +195,10 @@ than they last now.
 An API client or an agent (MCP) sends an ID token the provider gave this
 client as a bearer token, as Kubernetes takes them: verified as above but
 for the nonce, which only the sign-in that asked for it knows, and
-refused when issued before its person signed out. It may do what its role
+refused when issued before its person signed out, or longer ago than
+`--session-max-age`, as a session is, whatever its own `exp` says: who
+signed out is kept that long, and a provider's ID token can outlast it
+(Dex gives 24h). A client gets another. It may do what its role
 allows, but never approve a change, which is a person's, in a browser.
 `--oidc-bearer=false` takes none.
 

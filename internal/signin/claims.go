@@ -66,6 +66,30 @@ func Plain(name string) bool {
 	return true
 }
 
+// EqualFoldASCII reports whether a and b are the same but for the case of
+// their ASCII letters, as names in DNS are: strings.EqualFold folds by
+// Unicode, and takes the Kelvin sign (U+212A) for a k and a long s
+// (U+017F) for an s, so that a domain written with them would pass for
+// another's.
+func EqualFoldASCII(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); i++ {
+		x, y := a[i], b[i]
+		if 'A' <= x && x <= 'Z' {
+			x += 'a' - 'A'
+		}
+		if 'A' <= y && y <= 'Z' {
+			y += 'a' - 'A'
+		}
+		if x != y {
+			return false
+		}
+	}
+	return true
+}
+
 // Identity reads who a token's claims are.
 func (c Claims) Identity(claims map[string]any) (Identity, error) {
 	user, ok := claims[c.UserClaim].(string)

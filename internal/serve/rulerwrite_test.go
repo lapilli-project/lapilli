@@ -129,7 +129,7 @@ func TestRulerMimir(t *testing.T) {
 				t.Fatalf("written before approval: %v", m.written())
 			}
 			// Its page says where it is kept.
-			if _, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(id), ana, "", nil); !strings.Contains(body, "In the ruler: namespace shop, group api.") {
+			if _, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(id), ana, "", nil); !strings.Contains(body, "In the ruler: namespace <bdi>shop</bdi>, group <bdi>api</bdi>.") {
 				t.Error("the page doesn't say where it is kept")
 			}
 			approve(t, h, id, ana)

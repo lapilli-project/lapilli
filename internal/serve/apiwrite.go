@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"go.yaml.in/yaml/v3"
-
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/source"
@@ -773,8 +771,9 @@ func (t rulerTarget) rules(u apiUnit) ([]rules.Rule, error) {
 // unitSize is how many rules a unit's group holds, of any kind, and how
 // many groups it holds.
 func unitSize(raw []byte, group string) (int, int) {
-	var t map[string]any
-	if yaml.Unmarshal(raw, &t) != nil {
+	v, err := rules.UnmarshalYAML(raw)
+	t, _ := v.(map[string]any)
+	if err != nil {
 		return 0, 0
 	}
 	if props, ok := t["properties"].(map[string]any); ok {

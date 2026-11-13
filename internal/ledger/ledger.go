@@ -70,14 +70,65 @@ type Ledger struct {
 		m  map[string]map[string]string
 	}
 	// ids caches rule and series ids, and series labels; written under mu,
-	// only after the transaction that made them commits.
+	// only after the transaction that made them commits. It holds
+	// maxCached bytes of their text at most (cached), any one let go of
+	// past it, and read again from the ledger when asked for.
 	ids struct {
 		sync.RWMutex
 		rules  map[string]int64
 		series map[seriesKey]int64
 		labels map[int64]labelsOf
+		// bytes are what each holds, by its text.
+		rulesBytes, seriesBytes, labelsBytes int
 	}
 }
+
+// maxCached is the most the cache of ids and labels holds, by their text:
+// what a replay finds is an API's answer, and a hostile one's label sets
+// would otherwise be kept, a few MB more each run, for good. Replaced in
+// tests.
+var maxCached = 32 << 20
+
+// trimCached lets go of what the cache holds past maxCached, any of it, the
+// most held first. l.ids is locked.
+func (l *Ledger) trimCached() {
+	for l.ids.rulesBytes+l.ids.seriesBytes+l.ids.labelsBytes > maxCached {
+		switch max(l.ids.rulesBytes, l.ids.seriesBytes, l.ids.labelsBytes) {
+		case 0:
+			return
+		case l.ids.labelsBytes:
+			if len(l.ids.labels) == 0 {
+				l.ids.labelsBytes = 0
+			}
+			for id, c := range l.ids.labels {
+				delete(l.ids.labels, id)
+				l.ids.labelsBytes -= labelsCost(c.text)
+				break
+			}
+		case l.ids.seriesBytes:
+			if len(l.ids.series) == 0 {
+				l.ids.seriesBytes = 0
+			}
+			for k := range l.ids.series {
+				delete(l.ids.series, k)
+				l.ids.seriesBytes -= seriesCost(k)
+				break
+			}
+		default:
+			if len(l.ids.rules) == 0 {
+				l.ids.rulesBytes = 0
+			}
+			for name := range l.ids.rules {
+				delete(l.ids.rules, name)
+				l.ids.rulesBytes -= len(name) + 24
+				break
+			}
+		}
+	}
+}
+
+func seriesCost(k seriesKey) int { return len(k.labels) + 32 }
+func labelsCost(text string) int { return 2*len(text) + 64 }
 
 // labelsOf are a series' labels, and the text they were read from: an id
 // a series pruned or rolled back had can come back as another's.
@@ -398,14 +449,24 @@ func (l *Ledger) writeAside(ctx context.Context, f func(*txn) error) error {
 	}
 	l.ids.Lock()
 	for k := range t.gone {
-		delete(l.ids.rules, k)
+		if _, ok := l.ids.rules[k]; ok {
+			delete(l.ids.rules, k)
+			l.ids.rulesBytes -= len(k) + 24
+		}
 	}
 	for k, v := range t.rules {
+		if _, ok := l.ids.rules[k]; !ok {
+			l.ids.rulesBytes += len(k) + 24
+		}
 		l.ids.rules[k] = v
 	}
 	for k, v := range t.series {
+		if _, ok := l.ids.series[k]; !ok {
+			l.ids.seriesBytes += seriesCost(k)
+		}
 		l.ids.series[k] = v
 	}
+	l.trimCached()
 	l.ids.Unlock()
 	return nil
 }
@@ -476,6 +537,38 @@ func (l *Ledger) UpdateMeta(ctx context.Context, key string, f func(old string) 
 		}
 		return setMeta(ctx, tx, "x."+key, f(old))
 	})
+}
+
+// UpdateMetaCounted is UpdateMeta for a value read on every request and
+// changed seldom: f says whether it changed the value, and only a change is
+// written, counted in the same transaction (MetaCount), so a reader reads
+// the value again only when its count moved.
+func (l *Ledger) UpdateMetaCounted(ctx context.Context, key string, f func(old string) (string, bool)) error {
+	return l.writeAside(ctx, func(tx *txn) error {
+		old, err := l.meta(ctx, tx, "x."+key)
+		if err != nil {
+			return err
+		}
+		v, changed := f(old)
+		if !changed {
+			return nil
+		}
+		if err := setMeta(ctx, tx, "x."+key, v); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "INSERT INTO meta (key, value) VALUES (?, '1') ON CONFLICT (key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT)", "n."+key)
+		return err
+	})
+}
+
+// MetaCount is how often a value kept with UpdateMetaCounted was changed:
+// 0 before the first.
+func (l *Ledger) MetaCount(ctx context.Context, key string) (int64, error) {
+	v, err := l.meta(ctx, l.r, "n."+key)
+	if err != nil || v == "" {
+		return 0, err
+	}
+	return strconv.ParseInt(v, 10, 64)
 }
 
 // SetSwitch keeps a switch a person turned for lapilli serve, and notes in

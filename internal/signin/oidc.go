@@ -256,7 +256,7 @@ func (o *OIDC) verify(ctx context.Context, p *provider, raw string) (map[string]
 	}
 	if len(o.HostedDomains) > 0 {
 		hd, _ := claims["hd"].(string)
-		if !slices.ContainsFunc(o.HostedDomains, func(d string) bool { return strings.EqualFold(d, hd) }) {
+		if !slices.ContainsFunc(o.HostedDomains, func(d string) bool { return EqualFoldASCII(d, hd) }) {
 			return nil, "", fmt.Errorf("the account is in the domain %q, not one of --oidc-hosted-domain", hd)
 		}
 	}

@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/maphash"
 	"maps"
 	"slices"
 	"strconv"
@@ -428,7 +430,11 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 			set = append(set, rv)
 		}
 		ran, fs := replay.Run(ctx, s.h, set, since, to, s.cfg.Step, s.cfg.Parallel)
+		fs, over := withinSeries(fs)
 		for _, r := range ran {
+			if over[r.Name] {
+				r.Unsupported = fmt.Sprintf("query failed: the API answered for more than %d alerts at once, told apart by their labels, which no rule fires: the rule is left as it was", maxRuleSeries)
+			}
 			f.Since[r.Name] = since
 			f.Fresh[r.Name] = since.Add(fresh[r.Name])
 			x := meta[r.Name]
@@ -460,6 +466,61 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 		f.Rules = append(f.Rules, *meta[name])
 	}
 	return f, unfinished, nil
+}
+
+// maxRuleSeries is the most alerts, told apart by their labels, one rule's
+// replay in a run is kept with: what a replay finds is an API's answer,
+// and each label set is kept in the ledger for good. Past it, the rule is
+// left as it was, as one whose query failed. Replaced in tests.
+var maxRuleSeries = 20000
+
+// withinSeries are the firings of rules of maxRuleSeries label sets at
+// most, and the rules past it.
+func withinSeries(fs []firing.Firing) ([]firing.Firing, map[string]bool) {
+	sets := map[string]map[uint64]bool{}
+	over := map[string]bool{}
+	for _, x := range fs {
+		if over[x.Rule] {
+			continue
+		}
+		if sets[x.Rule] == nil {
+			sets[x.Rule] = map[uint64]bool{}
+		}
+		sets[x.Rule][labelsHash(seriesSeed, x.Labels)] = true
+		if len(sets[x.Rule]) > maxRuleSeries {
+			over[x.Rule] = true
+			delete(sets, x.Rule)
+		}
+	}
+	if len(over) == 0 {
+		return fs, nil
+	}
+	return slices.DeleteFunc(fs, func(x firing.Firing) bool { return over[x.Rule] }), over
+}
+
+// seriesSeed is the seed of labelsHash, as the process starts: what label
+// sets hash alike can't be known before, and two made to can't be told.
+var seriesSeed = maphash.MakeSeed()
+
+// labelsHash is a label set's hash under seed, the same for the same set:
+// each name and value written after its length, so that no value,
+// whatever it holds, reads as the labels after it. Seeded, as an API's
+// answer is outside input: a hostile one making label sets that hash
+// alike (2^32 tries a pair of FNV-64a's) would be counted as fewer
+// alerts than it is.
+func labelsHash(seed maphash.Seed, m map[string]string) uint64 {
+	var h maphash.Hash
+	h.SetSeed(seed)
+	var n [binary.MaxVarintLen64]byte
+	field := func(s string) {
+		h.Write(n[:binary.PutUvarint(n[:], uint64(len(s)))])
+		h.WriteString(s)
+	}
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		field(k)
+		field(m[k])
+	}
+	return h.Sum64()
 }
 
 // errSlow is a query on its own that didn't finish within --timeout.
@@ -932,7 +993,15 @@ func (s *Server) wholeAsLatest(ctx context.Context, latest ledger.Version, docs 
 	return false
 }
 
+// rulesReadTime is how long reading the rules may take, wherever they are
+// kept, whoever reads them: the minute look gives, and the same for a
+// proposal's fresh read, so that a Grafana or a ruler that takes the
+// request and never answers can't hold the work loop. Replaced in tests.
+var rulesReadTime = time.Minute
+
 func (s *Server) readRules(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
+	ctx, cancel := context.WithTimeout(ctx, rulesReadTime)
+	defer cancel()
 	agent := "lapilli/" + s.cfg.Version
 	var rs []rules.Rule
 	var docs []rules.Doc

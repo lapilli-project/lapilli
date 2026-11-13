@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/signin"
 )
 
 // Roles: who may change what. Without --editors or --admins, everyone may
@@ -50,24 +51,37 @@ func (r role) String() string { return [...]string{"viewer", "editor", "admin"}[
 // groups are the groups the sign-in proxy says the reader is in, separated
 // by commas: a group's name can have spaces in it, and "Platform Admins"
 // isn't "Admins".
+//
+// A group is dropped as a name is taken for no one's (signedName): over
+// ledger.MaxName, with spacing that isn't the ASCII space, or a character
+// that doesn't show (a zero-width space, a direction mark). It could read
+// as another, an admin group, in the UI's roles.
 func (s *Server) groups(r *http.Request) []string {
-	if s.in != nil {
-		if w, ok := whoOf(r); ok {
-			return w.Groups
+	var in []string
+	switch {
+	case s.in != nil:
+		w, ok := whoOf(r)
+		if !ok {
+			return nil
 		}
+		in = w.Groups
+	case s.cfg.GroupsHeader == "" || len(r.Header.Values(s.cfg.GroupsHeader)) != 1:
 		return nil
-	}
-	if s.cfg.GroupsHeader == "" || len(r.Header.Values(s.cfg.GroupsHeader)) != 1 {
-		return nil
-	}
-	var out []string
-	for _, g := range strings.Split(r.Header.Get(s.cfg.GroupsHeader), ",") {
-		if g = strings.TrimSpace(g); g != "" {
-			out = append(out, g)
+	default:
+		for _, g := range strings.Split(r.Header.Get(s.cfg.GroupsHeader), ",") {
+			if g = strings.TrimSpace(g); g != "" {
+				in = append(in, g)
+			}
 		}
 	}
-	return out
+	if !slices.ContainsFunc(in, badGroup) {
+		return in
+	}
+	return slices.DeleteFunc(slices.Clone(in), badGroup)
 }
+
+// badGroup reports whether a group's name is one taken for no group.
+func badGroup(g string) bool { return len(g) > ledger.MaxName || ledger.Hidden(g) || !signin.Plain(g) }
 
 // role is what the reader may do.
 func (s *Server) role(r *http.Request) role {
@@ -173,7 +187,9 @@ func (s *Server) editsTeams(r *http.Request) []int64 {
 // "user:NAME" is a person alone, "group:NAME" a group alone: one who could
 // pick their own name can't take a group's. A name with neither is either,
 // as before. "*@DOMAIN" is everyone whose name ends in @DOMAIN, in any
-// letter case. Whoever the sign-in didn't name is in none.
+// case of its ASCII letters: Unicode's folding would take the Kelvin sign
+// for a k, and a long s for an s. Whoever the sign-in didn't name is in
+// none.
 func (s *Server) listed(r *http.Request, list []string) bool {
 	user := s.user(r)
 	if user == "anonymous" {
@@ -189,7 +205,7 @@ func (s *Server) listed(r *http.Request, list []string) bool {
 		}
 		if domain, ok := strings.CutPrefix(x, "*@"); ok {
 			at := strings.LastIndexByte(user, '@')
-			return domain != "" && at > 0 && strings.EqualFold(user[at+1:], domain)
+			return domain != "" && at > 0 && signin.EqualFoldASCII(user[at+1:], domain)
 		}
 		return x == "*" || x == user || slices.Contains(groups, x)
 	})

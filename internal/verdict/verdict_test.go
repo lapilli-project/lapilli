@@ -238,3 +238,23 @@ func TestUnseenText(t *testing.T) {
 		}
 	}
 }
+
+// A label's value in --metrics and /metrics, as Prometheus's text format
+// writes it: what doesn't show, or acts on a terminal, said as Clean says
+// it, as every other output does.
+func TestLabelValue(t *testing.T) {
+	for in, want := range map[string]string{
+		"Errors":               "Errors",
+		`a "b" \c` + "\nd":     `a \"b\" \\c\\u{a}d`,
+		"Up\x1b]52;c;eA==\x07": `Up\\u{1b}]52;c;eA==\\u{7}`,
+		"Errors‮":              `Errors\\u{202e}`,
+		"tab\there":            `tab\\u{9}here`,
+		// The joiners names are written with are as they are, as ALERTS
+		// has them.
+		"👩‍💻 ن‌م": "👩‍💻 ن‌م",
+	} {
+		if got := LabelValue(in); got != want {
+			t.Errorf("%q: %s, want %s", in, got, want)
+		}
+	}
+}

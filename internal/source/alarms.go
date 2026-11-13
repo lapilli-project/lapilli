@@ -193,11 +193,7 @@ func (a *Alarms) Call(ctx context.Context, method, target string, body []byte, h
 
 // CloudFailed is an answer from a cloud that isn't what was asked for.
 func CloudFailed(code int, body []byte) error {
-	msg := strings.TrimSpace(string(body))
-	if len(msg) > 300 {
-		msg = msg[:300]
-	}
-	return CloudError{Code: code, msg: clipURL(msg)}
+	return CloudError{Code: code, msg: answered(body, 300)}
 }
 
 // CloudError is a cloud's answer of an HTTP status that isn't what was
@@ -266,7 +262,8 @@ func (a *Alarms) Read(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
 	var passed []string
 	kept := docs[:0]
 	for _, d := range docs {
-		x, err := rules.FromDocs([]rules.Doc{d})
+		// A cloud writes JSON, which holds no YAML alias.
+		x, err := rules.FromDocsContext(rules.NoAliases(ctx), []rules.Doc{d})
 		if err != nil {
 			passed = append(passed, fmt.Sprintf("--alarms %s: %s can't be read, and is passed over: %s", a.Source, d.Source, clipErr(err)))
 			continue

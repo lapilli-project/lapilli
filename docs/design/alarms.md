@@ -668,8 +668,9 @@ used, which then needs the same.
 names (and to what the credential chains reach through their libraries, as
 they do now: AWS STS, Google's token and IAM Credentials endpoints, OCI's
 for workload identity), follows no redirect (a 3xx is an error),
-and reads at most 64 MB for a list and 4 MB for an alarm, within 30
-seconds, as rulers.md's.
+and reads at most 64 MB for a list (a page) and 4 MB for an alarm,
+within 30 seconds, as rulers.md's; an error answer is said without what
+the request was signed with.
 
 - Hosts: AWS, `monitoring` in a region, by `awsHost` (FIPS, dual-stack,
   VPC endpoints), the region signed for being the host's. Azure, Resource

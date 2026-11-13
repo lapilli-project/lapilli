@@ -2,12 +2,12 @@ package rules
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"reflect"
 	"regexp"
 	"strings"
@@ -627,19 +627,10 @@ func Check(before, after []byte, e Edit) error {
 }
 
 func decodeAll(data []byte) ([]any, error) {
-	var out []any
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	for {
-		var x any
-		err := dec.Decode(&x)
-		if errors.Is(err, io.EOF) {
-			return out, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, x)
-	}
+	// In linear time: what a ruler or a cloud holds is outside input, and
+	// yaml.v3 decoding a mapping straight to Go values takes time that
+	// grows with the square of its keys.
+	return DecodeYAML(context.Background(), data)
 }
 
 // change makes the edit in a document's tree, as EditDoc makes it in its

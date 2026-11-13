@@ -376,7 +376,29 @@ in the namespaces or rule groups of one ruler. It is held so:
   (and, for `--changes-aws-role`, to AWS STS, through the SDK, as the
   credential chain does now), follows no redirect (a 3xx is an error), and
   reads at most 64 MB for a list and 4 MB for a unit, within 30 seconds,
-  as Grafana's are.
+  as Grafana's are (64 MB, a minute, the headers within 30 seconds).
+  - A list is parsed whole, its YAML some 20 to 85 times its size: one of
+    more values than one every 4 bytes past its first 100,000, or 6 million
+    in all (counted before it is parsed: each needs a `,`, `:`, `-`, `[`,
+    `{` or a line; real lists are a value every 5 to 15 bytes, and a value
+    takes some 320 bytes at the peak, so 1.9 GiB at most), or of more than
+    50,000 rules (counted before they are written out again, a list that
+    doesn't parse whole and is split at its namespaces too), or that holds a
+    YAML alias, which no ruler writes, isn't read (split, a namespace
+    holding one is kept as written and refused as it is parsed, saying so);
+    a namespace with a group of more than 100,000 values is passed over, as
+    one that can't be read is (so is one written whole, in flow style, of
+    more), and past 50,000 rules as read none is. An Amazon namespace holds
+    a rule file someone wrote, whose aliases are read, what they expand to
+    counted for every namespace together, as yaml.v3 counts one document's.
+    Each group is written out again on its own (the YAML emitter holds every
+    event of what it writes until it ends), as the whole would be, and a
+    document's nodes are let go of as they are decoded. Before 0.34.1 a
+    hostile ruler's 4 MB of tiny rules took over a GB; 132 MiB now. A unit,
+    and a cloud's alarm, are decoded in linear time too.
+  - What a ruler answers with an error is said without the token or the
+    signature it was asked with, which it may echo, as a history API's
+    errors are (`prom.Redact`).
   - Names read from a ruler are data. Each goes into the path as one
     escaped segment; a name that is empty, `.` or `..`, has a control
     character or is longer than 1,024 bytes is refused, and an Amazon

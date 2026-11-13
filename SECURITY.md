@@ -45,7 +45,13 @@ redirects. Of particular interest besides the above:
 - a way for a page to run script, or for a rule, label or incident to
   change what a page shows beyond its own text;
 - a way to make it change the ledger without a request to it, through a
-  page from another site, or with `--read-only`;
+  page from another site, or with `--read-only` (but for who signed out,
+  which signing out keeps there, for people a role lets in, as
+  docs/design/signin.md says). That record is bounded, failing closed:
+  with `--viewers '*'`, or a provider people sign up to and a broad
+  `*@DOMAIN`, 10,001 accounts signing in and out within
+  `--session-max-age` sign everyone out who signed in before, which is
+  known, and a way to make people sign in again, not a way in;
 - a way to read or write files outside its ledger's directory, or to make
   it show a token or a webhook's URL;
 - a request, or a ledger, that makes it use memory or time far out of

@@ -413,6 +413,9 @@ the rules and the incidents are, and how to judge. */}}
 {{- with .Values.hours.shifts }}
 - {{ printf "--shifts=%s" . | quote }}
 {{- end }}
+{{- with .Values.maxSamples }}
+- {{ printf "--max-samples=%d" (int64 .) | quote }}
+{{- end }}
 {{- if .Values.report.slackWebhookSecret.name }}
 - {{ printf "--slack-webhook-file=/var/run/lapilli/slack/%s" .Values.report.slackWebhookSecret.key | quote }}
 {{- end }}

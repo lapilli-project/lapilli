@@ -29,6 +29,9 @@ type Loki struct {
 	// MaxRate, when set, is how many requests a second it is asked at most
 	// (--max-rate).
 	MaxRate float64
+	// MaxSamples, when set, is the most samples the answers to one range
+	// may hold in all (--max-samples; prom.DefaultMaxSamples).
+	MaxSamples int
 	// Limit, when set, is the Limiter every client of the Loki shares, its
 	// queries' and its ruler's: one is made of MaxRate otherwise.
 	Limit *prom.Limiter
@@ -52,7 +55,7 @@ func (l Loki) limiter() *prom.Limiter {
 
 // History is a client for the Loki's query API.
 func (l Loki) History(agent string) *prom.Client {
-	opts := []prom.Option{prom.Loki(), prom.WithHTTPClient(noRedirects), prom.WithLimiter(l.limiter())}
+	opts := []prom.Option{prom.Loki(), prom.WithHTTPClient(noRedirects), prom.WithLimiter(l.limiter()), prom.WithMaxSamples(l.MaxSamples)}
 	if l.Tenant != "" {
 		opts = append(opts, prom.WithHeader("X-Scope-OrgID", l.Tenant))
 	}
@@ -77,9 +80,10 @@ func tokenFrom(file string) func(context.Context) (string, error) {
 // rules. Grafana takes only GET there, which is how Loki is asked. limit,
 // when not nil, is the data source's own Limiter: Grafana passes on what
 // each data source answers, Retry-After included, so each pushes back of
-// its own; the data sources of a Grafana share a Pace (--max-rate).
-func GrafanaLoki(base, tokenFile, agent, uid string, limit *prom.Limiter) *prom.Client {
-	opts := []prom.Option{prom.Loki(), prom.WithHTTPClient(noRedirects)}
+// its own; the data sources of a Grafana share a Pace (--max-rate). more
+// are options besides (prom.WithMaxSamples).
+func GrafanaLoki(base, tokenFile, agent, uid string, limit *prom.Limiter, more ...prom.Option) *prom.Client {
+	opts := append([]prom.Option{prom.Loki(), prom.WithHTTPClient(noRedirects)}, more...)
 	if limit != nil {
 		opts = append(opts, prom.WithLimiter(limit))
 	}

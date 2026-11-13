@@ -30,7 +30,7 @@
   <thead><tr><th scope="col">{{t "Changed"}}</th><th scope="col">{{t "Rule"}}</th><th scope="col" class="n">{{t "Predicted, fired in the week"}}</th><th scope="col" class="n">{{t "Measured, fired a week"}}</th><th scope="col" class="n">{{t "Incidents caught"}}</th><th scope="col" class="n">{{t "Fewer since"}}</th><th scope="col">{{t "Came out"}}</th></tr></thead>
   <tbody>{{range .Rows}}<tr>
     <td class="t">{{at $loc .At}}</td>
-    <td><a href="/rules/{{path .Rule}}">{{.Rule}}</a></td>
+    <td><a href="/rules/{{path .Rule}}"><bdi>{{.Rule}}</bdi></a></td>
     <td class="n">{{.Predicted}}</td><td class="n">{{.Measured}}</td><td class="n">{{.Caught}}</td><td class="n">{{.FewerText}}</td>
     <td><span class="pill {{.Class}}">{{.StateText}}</span></td>
   </tr>{{end}}</tbody>
@@ -54,7 +54,7 @@
     <div class="tile-of">{{t "in seven days"}}{{if .Behind}} · {{t "behind: firings are in up to %s" (at $loc .Cursor)}}{{end}}</div><div class="tile-delta"> </div></div>
   <div class="tile"><div class="tile-label">{{t "Rules not replayed"}}</div>
     <div class="tile-value{{if .Unreplayed}} bad{{end}}">{{len .Unreplayed}}</div>
-    <div class="tile-of">{{range $i, $n := $.View.Unreplayed}}{{if $i}}, {{end}}<a href="/rules/{{path $n}}">{{$n}}</a>{{else}}{{t "of the rules in effect"}}{{end}}{{with $.View.MoreUnreplayed}} {{t "and %d more" .}}{{end}}</div><div class="tile-delta"> </div></div>
+    <div class="tile-of">{{range $i, $n := $.View.Unreplayed}}{{if $i}}, {{end}}<a href="/rules/{{path $n}}"><bdi>{{$n}}</bdi></a>{{else}}{{t "of the rules in effect"}}{{end}}{{with $.View.MoreUnreplayed}} {{t "and %d more" .}}{{end}}</div><div class="tile-delta"> </div></div>
 </section>
 {{if .Quiet}}<p class="note">{{t "No incident written down has started in %d days. If nothing went wrong, good; if something did, the incidents aren't reaching Lapilli, and every firing reads as ● until they do." $.View.QuietDays}}</p>{{end}}
 {{end}}

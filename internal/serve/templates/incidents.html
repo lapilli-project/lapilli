@@ -35,12 +35,12 @@
 {{if eq .Origin "file"}}{{t "From the incidents file, which owns it."}}{{else if eq .Origin "copy"}}{{t "Copied in from the tool it is kept in, %s; it is changed there, not here." (at $loc .Updated)}}{{else if eq .Origin "ui"}}{{if .By}}{{t "Written here by %s, %s." .By (at $loc .Updated)}}{{else}}{{t "Written here, %s." (at $loc .Updated)}}{{end}}{{else}}{{if .State}}{{if .By}}{{t "Found by --impact; %s by %s." (t .State) .By}}{{else}}{{t "Found by --impact; %s." (t .State)}}{{end}}{{else}}{{t "Found by --impact."}}{{end}}{{end}}</p>
 
 <h2>{{t "Caught by"}}</h2>
-{{if .CaughtBy}}<ul class="plain">{{range .CaughtBy}}<li><a href="/rules/{{path .Rule}}">{{.Rule}}</a> {{delay .Delay}}</li>{{end}}</ul>
+{{if .CaughtBy}}<ul class="plain">{{range .CaughtBy}}<li><a href="/rules/{{path .Rule}}"><bdi>{{.Rule}}</bdi></a> {{delay .Delay}}</li>{{end}}</ul>
 {{else if .Counts}}<p class="bad">{{t "Nothing fired."}}</p>{{else}}<p class="quiet">{{if eq .Status "covered"}}{{t "It isn't judged against: an incident written down covers it."}}{{else}}{{t "It isn't judged against: %s." (t .Status)}}{{end}}</p>{{end}}
 
 {{if .Nearly}}
 <h2>{{t "Nearly caught by"}}</h2>
-<ul class="plain">{{range .Nearly}}<li><a href="/rules/{{path .Rule}}">{{.Rule}}</a>: {{.Text}}.{{with .Cost}} <span class="quiet">{{.}}</span>{{end}}</li>{{end}}</ul>
+<ul class="plain">{{range .Nearly}}<li><a href="/rules/{{path .Rule}}"><bdi>{{.Rule}}</bdi></a>: {{.Text}}.{{with .Cost}} <span class="quiet">{{.}}</span>{{end}}</li>{{end}}</ul>
 <p class="quiet">{{t "Worked out with the weekly digest, for the incidents written down by then."}}</p>
 {{end}}
 

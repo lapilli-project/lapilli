@@ -325,10 +325,12 @@ func unixOr0(t time.Time) int64 {
 }
 
 // labelValue escapes a label's value as Prometheus's text format does:
-// backslash, double quote and line feed; anything else as it is.
-func labelValue(v string) string {
-	return strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(v)
-}
+// backslash, double quote and line feed; and a control character or a
+// direction mark, embedding, override or isolate, which a rule's name from
+// an API may hold, as the pages and lapilli verdict say it
+// (verdict.LabelValue). The joiners names are written with are as they
+// are.
+func labelValue(v string) string { return verdict.LabelValue(v) }
 
 type contentProblem struct {
 	rule, check string

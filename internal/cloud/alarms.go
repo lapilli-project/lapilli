@@ -18,6 +18,8 @@ import (
 	"github.com/oracle/oci-go-sdk/v65/common/auth"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+
+	"lapilli.dev/internal/prom"
 )
 
 // The credentials a cloud's own alarms are read and written with
@@ -106,9 +108,12 @@ func (i *impersonated) Token() (*oauth2.Token, error) {
 		return nil, fmt.Errorf("impersonating %s: %w", i.email, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		msg := strings.TrimSpace(string(b))
+		// Shown on pages and in the log: without what doesn't show, which
+		// could act on a terminal, or the pod's token, which a proxy
+		// before IAM Credentials could echo.
+		msg := prom.ServerText(strings.TrimSpace(string(b)), req)
 		if len(msg) > 300 {
-			msg = msg[:300]
+			msg = strings.ToValidUTF8(msg[:300], "")
 		}
 		return nil, fmt.Errorf("impersonating %s: IAM Credentials answered HTTP %d: %s", i.email, resp.StatusCode, msg)
 	}

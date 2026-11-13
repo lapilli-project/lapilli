@@ -34,7 +34,40 @@ type Limiter struct {
 	pace *Pace
 	// parent, when set, holds a place for each request in flight too.
 	parent *Limiter
-	now    func() time.Time
+	// fair, for a cap (NewCap), shares its places among its children.
+	fair *fair
+	now  func() time.Time
+}
+
+// fair is how a cap shares its places among the Limiters within it, the
+// data sources behind one Grafana: one that holds a place already doesn't
+// take the last one free while another holds none and asked lately (or
+// came to be lately: within reserveFor), and a place given back goes to
+// the one waiting that holds fewest, first come first among equals. A data
+// source that answers slowly, as a broken or hostile one behind the
+// Grafana can, holding each place as long as it likes, keeps the others
+// out no longer than it takes another to have one; and one asked once and
+// then no more keeps nothing back after reserveFor.
+type fair struct {
+	held    map[*Limiter]int
+	asked   map[*Limiter]time.Time
+	waiting []fairWait
+	// wake is when places are shared again (share) for one waiting while
+	// the last place is kept, as that ends then, not only when a place is
+	// given back; zero for none.
+	wake time.Time
+}
+
+// reserveFor is how long the last place is kept for a data source after it
+// last asked, or came to be.
+const reserveFor = 10 * time.Second
+
+// afterFunc runs f after d, as time.AfterFunc does. Replaced in tests.
+var afterFunc = func(d time.Duration, f func()) { time.AfterFunc(d, f) }
+
+type fairWait struct {
+	kid *Limiter
+	ch  chan struct{}
 }
 
 // Pace spaces requests evenly: at most so many a second, among all the
@@ -92,10 +125,11 @@ func NewLimiterPaced(p *Pace) *Limiter {
 // NewCap is a Limiter of n requests in flight at most, and no rate, which
 // no answer changes: a parent (Within) for the Limiters of the data sources
 // behind one Grafana, so that together they ask it no more at once than a
-// run's --parallel, while each is held and halved by its own answers.
+// run's --parallel, while each is held and halved by its own answers. It
+// shares its places fairly among them (fair).
 func NewCap(n int) *Limiter {
 	n = max(n, 1)
-	return &Limiter{limit: n, most: n, now: func() time.Time { return clock() }}
+	return &Limiter{limit: n, most: n, fair: &fair{held: map[*Limiter]int{}, asked: map[*Limiter]time.Time{}}, now: func() time.Time { return clock() }}
 }
 
 // Within makes each request l lets in take a place in parent too, once it
@@ -103,7 +137,113 @@ func NewCap(n int) *Limiter {
 // parent's. It returns l.
 func (l *Limiter) Within(parent *Limiter) *Limiter {
 	l.parent = parent
+	if parent.fair != nil {
+		parent.mu.Lock()
+		parent.fair.held[l] += 0
+		parent.fair.asked[l] = parent.now()
+		parent.mu.Unlock()
+	}
 	return l
+}
+
+// placeFor waits for a place in a cap for a request of kid's.
+func (l *Limiter) placeFor(ctx context.Context, kid *Limiter) error {
+	if l.fair == nil {
+		return l.place(ctx, nil)
+	}
+	ch := make(chan struct{})
+	l.mu.Lock()
+	l.fair.asked[kid] = l.now()
+	l.fair.waiting = append(l.fair.waiting, fairWait{kid, ch})
+	l.share()
+	l.mu.Unlock()
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+	}
+	l.mu.Lock()
+	if i := slices.IndexFunc(l.fair.waiting, func(w fairWait) bool { return w.ch == ch }); i >= 0 {
+		l.fair.waiting = slices.Delete(l.fair.waiting, i, i+1)
+		l.mu.Unlock()
+		return ctx.Err()
+	}
+	l.mu.Unlock()
+	l.releaseFor(kid) // let in as it gave up: the place given back
+	return ctx.Err()
+}
+
+// releaseFor gives back a cap's place of a request of kid's.
+func (l *Limiter) releaseFor(kid *Limiter) {
+	if l.fair == nil {
+		l.release(0, 0)
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.inFlight--
+	l.fair.held[kid]--
+	l.share()
+}
+
+// share lets in those waiting for a cap's places, as fair says. l.mu is
+// held.
+func (l *Limiter) share() {
+	now := l.now()
+	for l.inFlight < l.limit {
+		// The last place is kept for another holding none, that asked
+		// lately, while there is one: until the last of them asked
+		// reserveFor ago.
+		var until time.Time
+		if l.limit-l.inFlight == 1 {
+			for kid, held := range l.fair.held {
+				if end := l.fair.asked[kid].Add(reserveFor); held == 0 && end.After(now) && end.After(until) {
+					until = end
+				}
+			}
+		}
+		keep := !until.IsZero()
+		best := -1
+		for i, w := range l.fair.waiting {
+			held := l.fair.held[w.kid]
+			if held > 0 && keep {
+				continue
+			}
+			if best < 0 || held < l.fair.held[l.fair.waiting[best].kid] {
+				best = i
+			}
+		}
+		if best < 0 {
+			if keep && len(l.fair.waiting) > 0 {
+				l.wakeAt(now, until)
+			}
+			return
+		}
+		w := l.fair.waiting[best]
+		l.fair.waiting = slices.Delete(l.fair.waiting, best, best+1)
+		l.inFlight++
+		l.fair.held[w.kid]++
+		l.peak = max(l.peak, l.inFlight)
+		close(w.ch)
+	}
+}
+
+// wakeAt shares places again at until, for those waiting while the last
+// place is kept till then: none may give one back meanwhile, as a slow
+// data source's requests hold theirs. l.mu is held.
+func (l *Limiter) wakeAt(now, until time.Time) {
+	if !l.fair.wake.IsZero() && !until.Before(l.fair.wake) {
+		return // one is set, as soon
+	}
+	l.fair.wake = until
+	afterFunc(until.Sub(now), func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		if l.fair.wake.Equal(until) {
+			l.fair.wake = time.Time{}
+		}
+		l.share()
+	})
 }
 
 // take waits for a request's turn: a place among those in flight, the end
@@ -172,7 +312,7 @@ func (l *Limiter) inParent(ctx context.Context) error {
 	if l.parent == nil {
 		return nil
 	}
-	if err := l.parent.place(ctx, nil); err != nil {
+	if err := l.parent.placeFor(ctx, l); err != nil {
 		l.release(0, 0)
 		return err
 	}
@@ -310,7 +450,7 @@ func (l *Limiter) done(status int, wait time.Duration) {
 	}
 	l.release(status, wait)
 	if l.parent != nil {
-		l.parent.release(0, 0)
+		l.parent.releaseFor(l)
 	}
 }
 

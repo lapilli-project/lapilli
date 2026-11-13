@@ -312,6 +312,7 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 		l.ids.Lock()
 		clear(l.ids.series)
 		clear(l.ids.labels)
+		l.ids.seriesBytes, l.ids.labelsBytes = 0, 0
 		l.ids.Unlock()
 		return nil
 	})
