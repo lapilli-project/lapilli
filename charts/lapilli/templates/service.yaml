@@ -66,7 +66,7 @@ spec:
       {{- end }}
 {{- end }}
 ---
-{{- if and .Values.serve.ledger.persistence (not .Values.serve.ledger.existingClaim) }}
+{{- if and .Values.serve.ledger.persistence (not .Values.serve.ledger.existingClaim) (not .Values.serve.ledger.postgres.secret.name) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

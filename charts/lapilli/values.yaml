@@ -646,6 +646,24 @@ serve:
     size: 2Gi
     storageClass: ""   # the cluster's default when empty
     existingClaim: ""
+    # Keep the ledger in Postgres instead (docs/design/postgres.md): a
+    # Secret holding its connection string under key, such as
+    # postgres://lapilli:PASSWORD@db.example:5432/lapilli?sslmode=verify-full&sslrootcert=/var/run/lapilli/ledger/ca.crt.
+    # The whole Secret is mounted at /var/run/lapilli/ledger, so it can
+    # hold the server's CA beside the string; the string is in no argument
+    # and no log. With it no PersistentVolumeClaim is made, and the ledger's
+    # PVC is left out. Still one replica: one process writes a ledger at a
+    # time, and a second is refused the ledger's lock. Copy a SQLite ledger
+    # in with lapilli ledger copy, once, before switching.
+    postgres:
+      secret:
+        name: ""
+        key: url
+      # Where the database is, as NetworkPolicy egress peers (an ipBlock,
+      # or the pods of a database in the cluster), and its port: with
+      # networkPolicy.egress on, serve may connect there.
+      to: []
+      port: 5432
   # A Prometheus Operator ServiceMonitor for /metrics. Its labels are
   # honoured (a rule's team stays team, not exported_team), and a scrape
   # of more than sampleLimit series is refused, which /metrics, bounded

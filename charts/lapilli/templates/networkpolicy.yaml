@@ -69,6 +69,10 @@ spec:
 {{- if not $e.to }}
 {{- fail "serve.networkPolicy.egress.to: name where lapilli serve may connect, as NetworkPolicy egress rules: its Prometheus, the rules' API, Slack and the webhooks, a cloud's APIs. Empty, it could reach nothing but DNS" }}
 {{- end }}
+{{- $pg := .Values.serve.ledger.postgres }}
+{{- if and $pg.secret.name (not $pg.to) }}
+{{- fail "serve.ledger.postgres.to: name where the ledger's database is, as NetworkPolicy egress peers (an ipBlock, or its pods), for networkPolicy.egress lets serve reach nothing else" }}
+{{- end }}
 ---
 # Where lapilli serve, and its rules history's containers, may
 # connect: the cluster's DNS, and those named in egress.to. Nothing else,
@@ -96,4 +100,12 @@ spec:
           protocol: TCP
     {{- end }}
     {{- toYaml $e.to | nindent 4 }}
+    {{- if $pg.secret.name }}
+    # The ledger's database (serve.ledger.postgres).
+    - to:
+        {{- toYaml $pg.to | nindent 8 }}
+      ports:
+        - port: {{ int $pg.port }}
+          protocol: TCP
+    {{- end }}
 {{- end }}

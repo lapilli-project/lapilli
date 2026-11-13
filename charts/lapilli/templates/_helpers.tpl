@@ -12,6 +12,12 @@ values, not the new chart's): every template reads them through this. */}}
 {{- include "lapilli.fill" (dict "in" $s.signIn "key" "proxyJWT" "with" (dict "kind" "" "audience" "" "albArn" "" "issuer" "" "jwks" "" "header" "")) -}}
 {{- include "lapilli.fill" (dict "in" $s.signIn "key" "sessionKeySecret" "with" (dict "name" "" "key" "session-key" "create" true)) -}}
 {{- include "lapilli.fill" (dict "in" $s "key" "roles" "with" (dict "viewers" (list) "editors" (list) "admins" (list) "groupsHeader" "")) -}}
+{{- include "lapilli.fill" (dict "in" $s "key" "ledger" "with" (dict "persistence" true "size" "2Gi" "storageClass" "" "existingClaim" "")) -}}
+{{- include "lapilli.fill" (dict "in" $s.ledger "key" "postgres" "with" (dict "to" (list) "port" 5432)) -}}
+{{- include "lapilli.fill" (dict "in" $s.ledger.postgres "key" "secret" "with" (dict "name" "" "key" "url")) -}}
+{{- if and $s.ledger.postgres.secret.name $s.ledger.existingClaim }}
+{{- fail "serve.ledger.postgres and serve.ledger.existingClaim are two places to keep the ledger: give one" }}
+{{- end }}
 {{- if not (hasKey $s "exposeWithoutSignIn") }}{{ $_ := set $s "exposeWithoutSignIn" false }}{{ end -}}
 {{- if not (hasKey $s "readinessPath") }}{{ $_ := set $s "readinessPath" "/readyz" }}{{ end -}}
 {{- end -}}

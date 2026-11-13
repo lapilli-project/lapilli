@@ -531,3 +531,62 @@ type historyLimited struct {
 		Requests, Limits map[string]string
 	}
 }
+
+// serve.ledger.postgres keeps the ledger in Postgres: the Secret holding
+// its connection string is mounted and named by --ledger-url-file, no
+// PersistentVolumeClaim is made, and the egress policy lets serve reach the
+// database and nothing more. Still one replica. Beside existingClaim, or
+// with egress and nowhere for the database, it is refused.
+func TestChartPostgres(t *testing.T) {
+	out, err := helmTemplate(t, serveValues...)
+	if err != nil || !strings.Contains(out, "- --ledger=/var/lib/lapilli\n") || !strings.Contains(out, "kind: PersistentVolumeClaim") ||
+		strings.Contains(out, "ledger-url-file") {
+		t.Fatalf("by default: %v\n%s", err, out)
+	}
+	pg := append(serveValues, "--set", "serve.ledger.postgres.secret.name=ledger-db", "--set", "serve.ledger.postgres.secret.key=conn")
+	out, err = helmTemplate(t, pg...)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, want := range []string{`- "--ledger-url-file=/var/run/lapilli/ledger/conn"`, "mountPath: /var/run/lapilli/ledger\n              readOnly: true",
+		"secretName: ledger-db", "replicas: 1", "type: Recreate"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no %q:\n%s", want, out)
+		}
+	}
+	for _, not := range []string{"kind: PersistentVolumeClaim", "--ledger=", "claimName:"} {
+		if strings.Contains(out, not) {
+			t.Errorf("%q with Postgres:\n%s", not, out)
+		}
+	}
+	egress := append(pg, "--set", "serve.networkPolicy.egress.enabled=true", "--set", "serve.networkPolicy.egress.to[0].to[0].ipBlock.cidr=10.0.0.0/8")
+	if out, err := helmTemplate(t, egress...); err == nil || !strings.Contains(out, "serve.ledger.postgres.to") {
+		t.Errorf("egress, and nowhere for the database: %v\n%s", err, out)
+	}
+	out, err = helmTemplate(t, append(egress, "--set", "serve.ledger.postgres.to[0].ipBlock.cidr=10.1.2.3/32", "--set", "serve.ledger.postgres.port=6432")...)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	var np struct {
+		Spec struct {
+			Egress []struct {
+				To    []map[string]any
+				Ports []struct{ Port int }
+			}
+		}
+	}
+	for _, doc := range strings.Split(out, "\n---\n") {
+		if strings.Contains(doc, "name: ops-lapilli-egress") {
+			if err := yaml.Unmarshal([]byte(doc), &np); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	e := np.Spec.Egress
+	if len(e) != 3 || len(e[2].To) != 1 || len(e[2].Ports) != 1 || e[2].Ports[0].Port != 6432 {
+		t.Errorf("the egress policy: %+v", np)
+	}
+	if out, err := helmTemplate(t, append(pg, "--set", "serve.ledger.existingClaim=old")...); err == nil || !strings.Contains(out, "two places to keep the ledger") {
+		t.Errorf("beside existingClaim: %v\n%s", err, out)
+	}
+}
