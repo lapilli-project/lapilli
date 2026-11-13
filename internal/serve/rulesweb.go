@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -76,15 +77,63 @@ type rulesList struct {
 	Facets       []facet
 	Chips        []chip
 	// Q is the search box: its words, labels and groups, and what it
-	// didn't understand, Bad.
-	Q   string
-	Bad []string
+	// didn't understand, Bad; Over, its words past maxWords, left out, and
+	// TooLong, that it was too long to be read at all.
+	Q         string
+	Bad, Over []string
+	TooLong   bool
+	// SortLinks are the orders, each the same page in it.
+	SortLinks []sortLink
 	// Hidden are the form's context: team, weeks, sort. Clear is the same
 	// page without a filter but the team and the weeks.
 	Hidden []field
 	Clear  string
 	Active bool
 	Empty  *emptyView
+}
+
+// sortLink is an order of the list: the same page in it.
+type sortLink struct {
+	By, Href string
+	Current  bool
+}
+
+// rulesAsk is what the rules page was asked, read once from its URL: the
+// context, the order, the facets' values and the search box's words used.
+// The links the page makes to itself (a chip, an order) are made from it,
+// each with one thing changed: never from the URL, which may hold more.
+type rulesAsk struct {
+	c     pageCtx
+	sort  string
+	picks picks
+	words []qword
+}
+
+// url is the rules page for what was asked; what it doesn't take isn't
+// in it.
+func (a rulesAsk) url() string {
+	q := url.Values{}
+	if a.c.TeamSet {
+		q.Set("team", a.c.Team)
+	}
+	if a.c.Weeks != 0 {
+		q.Set("weeks", strconv.Itoa(a.c.Weeks))
+	}
+	if a.sort != "" {
+		q.Set("sort", a.sort)
+	}
+	for _, f := range facetsOf {
+		if vs := a.picks[f.param]; len(vs) > 0 {
+			q[f.param] = vs
+		}
+	}
+	if len(a.words) > 0 {
+		q.Set("q", asWritten(a.words))
+	}
+	if len(q) == 0 {
+		return "/rules"
+	}
+	return "/rules?" + q.Encode()
 }
 
 // The facets, in the order the list shows them.
@@ -131,6 +180,13 @@ func (p picks) in(r ruleRow, param string) bool {
 	return slices.ContainsFunc(r.values(param), func(v string) bool {
 		return slices.ContainsFunc(want, func(w string) bool { return strings.EqualFold(v, w) })
 	})
+}
+
+// without are the picks but one value of one facet.
+func (p picks) without(param, value string) picks {
+	out := maps.Clone(p)
+	out[param] = slices.DeleteFunc(slices.Clone(p[param]), func(w string) bool { return w == value })
+	return out
 }
 
 // but reports whether a row is among those picked in every facet but one.
@@ -236,24 +292,44 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	}
 	v.Total = len(all)
 
-	// What is picked: the facets' parameters, and the search box.
-	p := picks{}
+	// What is picked, read once: the facets' parameters, a severity in the
+	// rules' own spelling, and the search box. Every link the page makes
+	// is made from it, not from the URL.
+	spell := map[string][]string{}
+	for _, row := range all {
+		sev := cmpOr(row.sev, "none")
+		if l := strings.ToLower(sev); !slices.Contains(spell[l], sev) {
+			spell[l] = append(spell[l], sev)
+		}
+	}
+	a := rulesAsk{c: c, sort: v.Sort, picks: picks{}}
 	for _, f := range facetsOf {
 		for _, x := range asked[f.param] {
-			if x = strings.TrimSpace(x); x != "" && (f.values == nil || slices.Contains(f.values, strings.ToLower(x))) {
-				if f.values != nil {
-					x = strings.ToLower(x)
+			if len(a.picks[f.param]) == maxValues {
+				break
+			}
+			switch x = strings.TrimSpace(x); {
+			case x == "":
+				continue
+			case f.values != nil:
+				if x = strings.ToLower(x); !slices.Contains(f.values, x) {
+					continue
 				}
-				if !slices.Contains(p[f.param], x) {
-					p[f.param] = append(p[f.param], x)
-				}
+			case !slices.Contains(spell[strings.ToLower(x)], x) && len(spell[strings.ToLower(x)]) == 1:
+				// One severity, however it is written.
+				x = spell[strings.ToLower(x)][0]
+			}
+			if !slices.Contains(a.picks[f.param], x) {
+				a.picks[f.param] = append(a.picks[f.param], x)
 			}
 		}
 	}
+	p := a.picks
+	st := searchOf(asked["q"])
+	a.words = st.Words
+	v.TooLong = st.TooLong
 	var tf textFilter
-	var kept []string
-	for _, t := range tokens(asked.Get("q")) {
-		kept = append(kept, t.String())
+	for _, t := range st.Words {
 		switch {
 		case t.Bad != "" || t.Key == "team" || t.Key == "severity" || t.Key == "is" || t.Key == "status" || t.Key == "has":
 			// Understood tokens of these keys are parameters by now: what
@@ -268,14 +344,15 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 			tf.words = append(tf.words, strings.ToLower(t.Value))
 		}
 	}
-	v.Q = strings.Join(kept, " ")
+	for _, t := range st.Over {
+		v.Over = append(v.Over, t.String())
+	}
+	v.Q = asWritten(st.Words)
 
 	// The rows, the quiet ones, and each option's count: how many rules
 	// picking it would show, with what the other facets pick.
 	counts := map[string]map[string]int{}
-	severities := map[string]bool{}
 	for _, row := range all {
-		severities[cmpOr(row.sev, "none")] = true
 		if !tf.match(row) {
 			continue
 		}
@@ -303,6 +380,12 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		fc := facet{Param: f.param, Name: f.name}
 		values, labels := f.values, f.labels
 		if f.param == "severity" {
+			severities := map[string]bool{}
+			for _, ss := range spell {
+				for _, x := range ss {
+					severities[x] = true
+				}
+			}
 			for _, x := range p["severity"] {
 				severities[x] = true
 			}
@@ -329,59 +412,46 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		v.Facets = append(v.Facets, fc)
 	}
 
-	// The chips, each the same URL without its filter; the team's gives all
-	// teams. Clear keeps the team, the weeks and the order.
-	without := func(change func(url.Values)) string {
-		q := url.Values{}
-		for k, vs := range asked {
-			q[k] = slices.Clone(vs)
-		}
-		change(q)
-		if q.Get("q") == "" {
-			q.Del("q")
-		}
-		return "/rules?" + q.Encode()
-	}
+	// The chips, each the same page without its filter; the team's gives
+	// all teams. Clear keeps the team, the weeks and the order.
 	if c.Team != "" {
-		v.Chips = append(v.Chips, chip{Group: "Team", Value: c.Team, Raw: true, Href: without(func(q url.Values) { q.Set("team", "") })})
+		b := a
+		b.c.Team, b.c.TeamSet = "", true
+		v.Chips = append(v.Chips, chip{Group: "Team", Value: c.Team, Raw: true, Href: b.url()})
 	}
 	for _, fc := range v.Facets {
-		for _, o := range fc.Options {
-			if o.Checked {
-				v.Chips = append(v.Chips, chip{Group: fc.Name, Value: o.Label, Raw: o.Raw, Href: without(func(q url.Values) {
-					q[fc.Param] = slices.DeleteFunc(q[fc.Param], func(w string) bool { return strings.EqualFold(strings.TrimSpace(w), o.Value) })
-				})})
+		for _, x := range p[fc.Param] {
+			if i := slices.IndexFunc(fc.Options, func(o facetOption) bool { return o.Value == x }); i >= 0 {
+				b := a
+				b.picks = p.without(fc.Param, x)
+				v.Chips = append(v.Chips, chip{Group: fc.Name, Value: fc.Options[i].Label, Raw: fc.Options[i].Raw, Href: b.url()})
 			}
 		}
 	}
-	rest := func(keep func(qword) bool) string {
-		var out []string
-		for _, t := range tokens(asked.Get("q")) {
-			if keep(t) {
-				out = append(out, t.String())
-			}
+	var names []qword
+	for _, t := range a.words {
+		if t.Key == "" {
+			names = append(names, t)
 		}
-		return strings.Join(out, " ")
 	}
-	if words := rest(func(t qword) bool { return t.Key == "" }); words != "" {
-		v.Chips = append(v.Chips, chip{Group: "Name has", Value: words, Raw: true, Href: without(func(q url.Values) {
-			q.Set("q", rest(func(t qword) bool { return t.Key != "" }))
-		})})
+	if len(names) > 0 {
+		b := a
+		b.words = slices.DeleteFunc(slices.Clone(a.words), func(t qword) bool { return t.Key == "" })
+		v.Chips = append(v.Chips, chip{Group: "Name has", Value: asWritten(names), Raw: true, Href: b.url()})
 	}
-	for i, t := range tokens(asked.Get("q")) {
+	for i, t := range a.words {
 		if t.Bad != "" || (t.Key != "label" && t.Key != "group") {
 			continue
 		}
+		b := a
+		b.words = slices.Delete(slices.Clone(a.words), i, i+1)
 		g := map[string]string{"label": "Label", "group": "Group"}[t.Key]
-		v.Chips = append(v.Chips, chip{Group: g, Value: t.Value, Raw: true, Href: without(func(q url.Values) {
-			var out []string
-			for j, u := range tokens(asked.Get("q")) {
-				if j != i {
-					out = append(out, u.String())
-				}
-			}
-			q.Set("q", strings.Join(out, " "))
-		})})
+		v.Chips = append(v.Chips, chip{Group: g, Value: t.Value, Raw: true, Href: b.url()})
+	}
+	for _, by := range v.Sorts {
+		b := a
+		b.sort = by
+		v.SortLinks = append(v.SortLinks, sortLink{By: by, Href: b.url(), Current: by == v.Sort})
 	}
 	v.Active = len(v.Chips) > 0 && !(len(v.Chips) == 1 && c.Team != "")
 	v.Clear = c.Link("/rules", "sort", v.Sort)
@@ -389,6 +459,8 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	if v.Sort != "" {
 		v.Hidden = append(v.Hidden, field{"sort", v.Sort})
 	}
+	allTeams := a
+	allTeams.c.Team, allTeams.c.TeamSet = "", true
 
 	switch {
 	case cursor.IsZero():
@@ -397,7 +469,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	case v.Shown == 0 && (v.Active || len(v.Bad) > 0):
 		v.Empty = &emptyView{Kind: "notfound", Title: "No rule matches these filters.", Links: []emptyLink{{"Clear filters", v.Clear}}}
 		if c.Team != "" {
-			v.Empty.Links = append(v.Empty.Links, emptyLink{"The same filters, in all teams", without(func(q url.Values) { q.Set("team", "") })})
+			v.Empty.Links = append(v.Empty.Links, emptyLink{"The same filters, in all teams", allTeams.url()})
 		}
 	case v.Shown == 0:
 		v.Empty = &emptyView{Kind: "notfound", Title: "No rule fired in these weeks."}

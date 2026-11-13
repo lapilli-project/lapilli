@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // The rules' search box (docs/design/ui.md): words, each a part of a rule's
@@ -41,42 +42,107 @@ type qword struct {
 	Bad        string
 }
 
-// String is the word as written in the box.
+// String is the word as written in the box: what tokens reads as it.
 func (t qword) String() string {
-	switch {
-	case t.Key != "":
-		return t.Key + ":" + t.Value
-	case t.Quoted || strings.ContainsFunc(t.Value, unicode.IsSpace):
-		return `"` + t.Value + `"`
+	v := t.Value
+	if t.Quoted || v == "" && t.Key == "" || strings.ContainsFunc(v, unicode.IsSpace) {
+		v = `"` + v + `"`
 	}
-	return t.Value
+	if t.Key != "" {
+		return t.Key + ":" + v
+	}
+	return v
+}
+
+// The bounds of what a page is asked (docs/design/ui.md): what a page
+// does with a query doesn't grow with it past them.
+const (
+	// maxQuery is a page's query, as sent, in bytes: past it, the page is
+	// refused (414) before any work.
+	maxQuery = 4096
+	// maxSearch is a search's length, in characters: past it, the search
+	// is left out whole, and the page says so.
+	maxSearch = 500
+	// maxWords are the words of a search used: those after are named, and
+	// left out.
+	maxWords = 20
+	// maxValues are the values of a facet used, each once: those after are
+	// left out.
+	maxValues = 20
+)
+
+// searchText is a search box's text as a page reads it: every q= of the
+// URL, joined, and its words, read once.
+type searchText struct {
+	// Q is the text, "" when it is too long: past maxSearch characters,
+	// TooLong, and nothing of it is used.
+	Q       string
+	TooLong bool
+	// All are its words; Words the first maxWords of them, those used,
+	// and Over the rest.
+	All, Words, Over []qword
+}
+
+func searchOf(qs []string) searchText {
+	q := strings.TrimSpace(strings.Join(qs, " "))
+	if utf8.RuneCountInString(q) > maxSearch {
+		return searchText{TooLong: true}
+	}
+	st := searchText{Q: q, All: tokens(q)}
+	st.Words = st.All[:min(len(st.All), maxWords)]
+	st.Over = st.All[len(st.Words):]
+	return st
+}
+
+// asWritten are words as written in the box, joined.
+func asWritten(ts []qword) string {
+	out := make([]string, len(ts))
+	for i, t := range ts {
+		out[i] = t.String()
+	}
+	return strings.Join(out, " ")
 }
 
 // tokens are the words of a search: "a phrase in quotes" is one, and a
 // part of a name, whatever it holds; a word key:value is a filter when key
-// is letters alone (a name such as job:rate5m is written in quotes).
+// is letters alone (a name such as job:rate5m is written in quotes), and
+// key:"a value in quotes" is one whose value has spaces.
 func tokens(q string) []qword {
 	var out []qword
 	rs := []rune(q)
+	// quoted is where the quote begun at i ends, and what it holds.
+	quoted := func(i int) (int, string) {
+		j := i + 1
+		for j < len(rs) && rs[j] != '"' {
+			j++
+		}
+		return j + 1, strings.TrimSpace(string(rs[i+1 : min(j, len(rs))]))
+	}
 	for i := 0; i < len(rs); {
 		switch {
 		case unicode.IsSpace(rs[i]):
 			i++
 			continue
 		case rs[i] == '"':
-			j := i + 1
-			for j < len(rs) && rs[j] != '"' {
-				j++
-			}
-			if v := strings.TrimSpace(string(rs[i+1 : j])); v != "" {
+			var v string
+			if i, v = quoted(i); v != "" {
 				out = append(out, qword{Value: v, Quoted: true})
 			}
-			i = j + 1
 			continue
 		}
 		j := i
 		for j < len(rs) && !unicode.IsSpace(rs[j]) {
+			if rs[j] == '"' && j > i && rs[j-1] == ':' && isKey(rs[i:j-1]) {
+				break
+			}
 			j++
+		}
+		if j < len(rs) && rs[j] == '"' {
+			// key:"a value with spaces"
+			end, v := quoted(j)
+			out = append(out, keyed(string(rs[i:j-1]), v))
+			i = end
+			continue
 		}
 		out = append(out, word(string(rs[i:j])))
 		i = j
@@ -84,12 +150,23 @@ func tokens(q string) []qword {
 	return out
 }
 
+// isKey reports whether a word's part before its colon is a key: letters
+// alone.
+func isKey(k []rune) bool {
+	return len(k) > 0 && !slices.ContainsFunc(k, func(r rune) bool { return !unicode.IsLetter(r) })
+}
+
 // word is a word of a search, unquoted.
 func word(w string) qword {
 	k, v, ok := strings.Cut(w, ":")
-	if !ok || k == "" || strings.ContainsFunc(k, func(r rune) bool { return !unicode.IsLetter(r) }) {
+	if !ok || !isKey([]rune(k)) {
 		return qword{Value: w}
 	}
+	return keyed(k, v)
+}
+
+// keyed is a filter, key:value, and whether it is understood.
+func keyed(k, v string) qword {
 	t := qword{Key: strings.ToLower(k), Value: v}
 	switch {
 	case !slices.Contains(queryKeys, t.Key):
@@ -120,27 +197,32 @@ func filters(ts []qword) bool {
 // the facets, and the team, made parameters: the box keeps the words, the
 // labels and groups, and what it doesn't understand, to say so. changed is
 // false when there was nothing to move. teams are the teams' names: a team
-// no one has stays in the box.
+// no one has stays in the box. A search too long is left as it is, for the
+// page to say so; a facet keeps maxValues values.
 func canonical(q url.Values, teams []string) (out url.Values, changed bool) {
+	st := searchOf(q["q"])
+	if st.TooLong {
+		return q, false
+	}
 	out = url.Values{}
 	for k, vs := range q {
 		out[k] = slices.Clone(vs)
 	}
 	add := func(k, v string) {
-		if !slices.Contains(out[k], v) {
+		if !slices.Contains(out[k], v) && len(out[k]) < maxValues {
 			out[k] = append(out[k], v)
 		}
 	}
-	var kept []string
-	for _, t := range tokens(q.Get("q")) {
+	var kept []qword
+	for _, t := range st.All {
 		if t.Bad != "" {
-			kept = append(kept, t.String())
+			kept = append(kept, t)
 			continue
 		}
 		switch t.Key {
 		case "team":
 			if !slices.Contains(teams, t.Value) {
-				kept = append(kept, t.String())
+				kept = append(kept, t)
 				continue
 			}
 			out.Set("team", t.Value)
@@ -152,7 +234,7 @@ func canonical(q url.Values, teams []string) (out url.Values, changed bool) {
 		case "status", "has":
 			add(t.Key, strings.ToLower(t.Value))
 		default:
-			kept = append(kept, t.String())
+			kept = append(kept, t)
 			continue
 		}
 		changed = true
@@ -161,7 +243,7 @@ func canonical(q url.Values, teams []string) (out url.Values, changed bool) {
 		return q, false
 	}
 	if len(kept) > 0 {
-		out.Set("q", strings.Join(kept, " "))
+		out.Set("q", asWritten(kept))
 	} else {
 		out.Del("q")
 	}

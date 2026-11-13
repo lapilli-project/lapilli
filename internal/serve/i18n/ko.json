@@ -1158,5 +1158,7 @@
  "The same filters, in all teams": "같은 필터로 전체 팀 보기",
  "No rule fired in these weeks.": "이 기간에 울린 규칙이 없어요.",
  "%d rules didn't fire in the last week": "최근 1주 동안 울리지 않은 규칙 %d개",
- "%d rules didn't fire in the last %d weeks": "최근 %[2]d주 동안 울리지 않은 규칙 %[1]d개"
+ "%d rules didn't fire in the last %d weeks": "최근 %[2]d주 동안 울리지 않은 규칙 %[1]d개",
+ "The search is too long: 500 characters at most.": "검색어가 너무 길어요: 500자까지 쓸 수 있어요.",
+ "Left out: more than 20 words: %s.": "20단어를 넘어 빼고 찾았어요: %s."
 }

@@ -215,7 +215,7 @@ func TestRulesFilters(t *testing.T) {
 
 	// What it doesn't understand is said, and left out.
 	code, body, _ := get(t, h, "/rules?q=foo:bar+is:loud+r0")
-	if code != http.StatusOK || !strings.Contains(body, "Left out, as it isn&#39;t understood: foo:bar, is:loud.") || !strings.Contains(body, "label:key=value") {
+	if code != http.StatusOK || !strings.Contains(body, "Left out, as it isn&#39;t understood: <bdi>foo:bar, is:loud</bdi>.") || !strings.Contains(body, "label:key=value") {
 		t.Errorf("unknown keys: %d", code)
 	}
 	if v := rulesFor(t, s, "q=foo:bar+is:loud+r0"); v.Shown == 0 || slices.ContainsFunc(v.Rows, func(r ruleRow) bool { return !strings.Contains(r.Name, "R0") }) {
@@ -356,5 +356,137 @@ func TestRulesListScale(t *testing.T) {
 		if budget := time.Duration(float64(time.Second) * slow); took > budget {
 			t.Errorf("%s took %s, over %s", path, took, budget)
 		}
+	}
+}
+
+// TestRulesAskBounded: what the rules page is asked is read within bounds,
+// once. A search over 500 characters is left out whole, and said so; 20
+// of its words are used, and the rest named; a facet takes 20 values,
+// each once; and the links the page makes to itself hold what it read,
+// not what else the URL had.
+func TestRulesAskBounded(t *testing.T) {
+	s := facetServer(t)
+	h := s.Handler()
+	all := rulesFor(t, s, "")
+
+	// Too long: nothing of it used, not even a filter to move.
+	long := "is:noisy " + strings.Repeat("x", 500)
+	code, body, _ := get(t, h, "/rules?q="+url.QueryEscape(long))
+	if code != http.StatusOK || !strings.Contains(body, "The search is too long: 500 characters at most.") || strings.Count(body, `<input type="search" name="q" value="" maxlength="500"`) != 3 {
+		t.Errorf("a search too long: %d", code)
+	}
+	if v := rulesFor(t, s, "q="+url.QueryEscape(long)); !v.TooLong || v.Shown != all.Shown || v.Q != "" || len(v.Chips) != 0 {
+		t.Errorf("a search too long: shown %d of %d, q %q, chips %d", v.Shown, all.Shown, v.Q, len(v.Chips))
+	}
+	if v := rulesFor(t, s, "q="+url.QueryEscape(strings.Repeat("é", 500))); v.TooLong {
+		t.Error("500 characters are too long")
+	}
+
+	// Twenty words used, the rest named and left out of what is matched,
+	// and of the links.
+	var words []string
+	for i := 0; i < 19; i++ {
+		words = append(words, "r")
+	}
+	words = append(words, "r0", "nothing-is-called-this", "w22")
+	v := rulesFor(t, s, "q="+url.QueryEscape(strings.Join(words, " ")))
+	if v.Shown == 0 || slices.ContainsFunc(v.Rows, func(r ruleRow) bool { return !strings.HasPrefix(r.Name, "R0") }) {
+		t.Errorf("20 words: %q", rowNames(v.Rows))
+	}
+	if !slices.Equal(v.Over, []string{"nothing-is-called-this", "w22"}) || strings.Contains(v.Q, "w22") {
+		t.Errorf("20 words: over %q, q %q", v.Over, v.Q)
+	}
+	for _, l := range v.SortLinks {
+		if !strings.Contains(l.Href, "r0") || strings.Contains(l.Href, "w22") {
+			t.Errorf("an order: %s, the words used, and none left out", l.Href)
+		}
+	}
+	_, body, _ = get(t, h, "/rules?q="+url.QueryEscape(strings.Join(words, " ")))
+	if !strings.Contains(body, "Left out: more than 20 words: <bdi>nothing-is-called-this w22</bdi>.") {
+		t.Error("20 words: the rest aren't named")
+	}
+
+	// A facet takes 20 values, a value repeated once.
+	q := url.Values{}
+	for i := 0; i < 30; i++ {
+		q.Add("severity", "critical")
+	}
+	for i := 0; i < 30; i++ {
+		q.Add("severity", fmt.Sprintf("s%02d", i))
+	}
+	v = rulesFor(t, s, q.Encode())
+	picked := 0
+	for _, o := range v.Facets[1].Options {
+		if o.Checked {
+			picked++
+		}
+	}
+	if picked != 20 || len(v.Chips) != 20 || v.Shown != rulesFor(t, s, "severity=critical").Shown {
+		t.Errorf("60 severities, 31 of them other: %d picked, %d chips, %d shown", picked, len(v.Chips), v.Shown)
+	}
+
+	// The q= of a URL are one search; a chip, an order, the same page
+	// without what it doesn't take.
+	v = rulesFor(t, s, "q=r0&q=label:tier=t1&perf=noisy&perf=loud&foo=bar&weeks=7&sort=refired")
+	if v.Shown == 0 || slices.ContainsFunc(v.Rows, func(r ruleRow) bool { return !strings.HasPrefix(r.Name, "R0") || r.labels["tier"] != "t1" }) {
+		t.Errorf("q= twice: %q", rowNames(v.Rows))
+	}
+	var hrefs []string
+	for _, c := range v.Chips {
+		hrefs = append(hrefs, c.Href)
+	}
+	for _, l := range v.SortLinks {
+		hrefs = append(hrefs, l.Href)
+	}
+	for _, href := range hrefs {
+		if strings.Contains(href, "foo") || strings.Contains(href, "loud") || strings.Contains(href, "weeks") {
+			t.Errorf("a link the page makes to itself has what it doesn't take: %s", href)
+		}
+	}
+}
+
+// TestRulesSortLinks: an order is the same page, every filter and the
+// search kept, in that order; the one in effect says so.
+func TestRulesSortLinks(t *testing.T) {
+	s := facetServer(t)
+	_, body, _ := get(t, s.Handler(), "/rules?perf=noisy&severity=critical&q=r0+label:tier=t1&team=payments&weeks=12&sort=refired")
+	for _, want := range []string{
+		`<a href="/rules?perf=noisy&amp;q=r0&#43;label%3Atier%3Dt1&amp;severity=critical&amp;team=payments&amp;weeks=12">caught nothing, the most first</a>`,
+		`<a href="/rules?perf=noisy&amp;q=r0&#43;label%3Atier%3Dt1&amp;severity=critical&amp;sort=refired&amp;team=payments&amp;weeks=12" aria-current="page">re-fired, the most first</a>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("no %s", want)
+		}
+	}
+	if n := strings.Count(body, `aria-current="page">re-fired`) + strings.Count(body, `aria-current="page">caught nothing`); n != 1 {
+		t.Errorf("%d orders in effect", n)
+	}
+}
+
+// TestSeveritySpelled: a severity is the rules' own spelling, however the
+// URL or the search box writes it, so that one is one option and one chip;
+// and it is shown as a name is.
+func TestSeveritySpelled(t *testing.T) {
+	s := facetServer(t)
+	h := s.Handler()
+	want := rulesFor(t, s, "severity=critical")
+	for _, q := range []string{"severity=Critical", "severity=CRITICAL&severity=critical"} {
+		v := rulesFor(t, s, q)
+		var sevs []string
+		for _, o := range v.Facets[1].Options {
+			sevs = append(sevs, o.Value)
+		}
+		if v.Shown != want.Shown || len(v.Chips) != 1 || v.Chips[0].Value != "critical" || slices.Contains(sevs, "Critical") || slices.Contains(sevs, "CRITICAL") {
+			t.Errorf("%s: shown %d, chips %+v, options %q", q, v.Shown, v.Chips, sevs)
+		}
+	}
+	_, _, hd := get(t, h, "/rules?q=severity:Critical")
+	_, body, _ := get(t, h, hd.Get("Location"))
+	if strings.Count(body, `<input type="checkbox" name="severity" value="critical" checked>`) != 2 || strings.Contains(body, `type="checkbox" name="severity" value="Critical"`) {
+		t.Errorf("severity:Critical: not the rules' critical, in both of the facets' forms")
+	}
+	_, body, _ = get(t, h, "/rules?severity="+url.QueryEscape("x‮y"))
+	if !strings.Contains(body, "<span><bdi>x�y</bdi></span>") || strings.Contains(body, "<span>x‮y") {
+		t.Error("a severity from the URL isn't shown as a name is")
 	}
 }

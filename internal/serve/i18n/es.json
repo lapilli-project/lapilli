@@ -1158,5 +1158,7 @@
  "The same filters, in all teams": "Los mismos filtros, en todos los equipos",
  "No rule fired in these weeks.": "Ninguna regla se disparó en estas semanas.",
  "%d rules didn't fire in the last week": "%d reglas no se dispararon en la última semana",
- "%d rules didn't fire in the last %d weeks": "%d reglas no se dispararon en las últimas %d semanas"
+ "%d rules didn't fire in the last %d weeks": "%d reglas no se dispararon en las últimas %d semanas",
+ "The search is too long: 500 characters at most.": "La búsqueda es demasiado larga: 500 caracteres como mucho.",
+ "Left out: more than 20 words: %s.": "Se omitió por pasar de 20 palabras: %s."
 }

@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"fmt"
 	"math/rand/v2"
 	"net/http"
 	"net/url"
@@ -10,16 +11,21 @@ import (
 )
 
 func TestTokens(t *testing.T) {
-	got := tokens(`  err is:noisy "job:rate5m x" Label:team=pay severity: foo:bar group:shop 10:30 is:loud has:facts`)
+	got := tokens(`  err is:noisy "job:rate5m x" Label:team=pay severity: foo:bar group:shop 10:30 is:loud has:facts label:"a=b c" team:"a b" x:"y z" a"b`)
 	want := []qword{{Value: "err"}, {Key: "is", Value: "noisy"}, {Value: "job:rate5m x", Quoted: true}, {Key: "label", Value: "team=pay"},
 		{Key: "severity", Bad: "value"}, {Key: "foo", Value: "bar", Bad: "key"}, {Key: "group", Value: "shop"}, {Value: "10:30"},
-		{Key: "is", Value: "loud", Bad: "value"}, {Key: "has", Value: "facts"}}
+		{Key: "is", Value: "loud", Bad: "value"}, {Key: "has", Value: "facts"}, {Key: "label", Value: "a=b c"}, {Key: "team", Value: "a b"},
+		{Key: "x", Value: "y z", Bad: "key"}, {Value: `a"b`}}
 	if len(got) != len(want) {
 		t.Fatalf("%d tokens, want %d: %+v", len(got), len(want), got)
 	}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("token %d: %+v, want %+v", i, got[i], want[i])
+		}
+		// As written, each is read again as it was.
+		if again := tokens(got[i].String()); len(again) != 1 || again[0].Key != got[i].Key || again[0].Value != got[i].Value {
+			t.Errorf("token %d, %s, read again: %+v", i, got[i], again)
 		}
 	}
 }
@@ -38,6 +44,9 @@ func TestCanonical(t *testing.T) {
 		// is one.
 		{"q=is:loud+team:nope+severity:page&team=search", "q=is%3Aloud+team%3Anope&severity=page&team=search", true},
 		{"q=severity:page&severity=page", "severity=page", true},
+		// The q= of a URL are one search; a team named in quotes.
+		{"q=err&q=is:noisy", "perf=noisy&q=err", true},
+		{`q=team:"payments"+label:"a=b c"`, "q=label%3A%22a%3Db+c%22&team=payments", true},
 	} {
 		in, _ := url.ParseQuery(c.q)
 		out, changed := canonical(in, teams)
@@ -48,6 +57,19 @@ func TestCanonical(t *testing.T) {
 		if again, changed := canonical(out, teams); changed || again.Encode() != out.Encode() {
 			t.Errorf("%s: canonical twice: %s", c.q, again.Encode())
 		}
+	}
+	// A facet takes 20 values, each once; a search too long is left for
+	// the page to say so.
+	var many []string
+	for i := 0; i < 30; i++ {
+		many = append(many, fmt.Sprintf("severity:s%02d", i%25))
+	}
+	if out, _ := canonical(url.Values{"q": {strings.Join(many, " ")}}, teams); len(out["severity"]) != 20 || out.Has("q") {
+		t.Errorf("25 severities, some twice: %d kept, q %q", len(out["severity"]), out.Get("q"))
+	}
+	long := url.Values{"q": {"is:noisy " + strings.Repeat("x", 500)}}
+	if out, changed := canonical(long, teams); changed || out.Encode() != long.Encode() {
+		t.Errorf("a search too long was moved: %s", out.Encode())
 	}
 }
 

@@ -1158,5 +1158,7 @@
  "The same filters, in all teams": "同じフィルターですべてのチームを見る",
  "No rule fired in these weeks.": "この期間に発火したルールはありません。",
  "%d rules didn't fire in the last week": "直近 1 週間に発火していないルール %d 件",
- "%d rules didn't fire in the last %d weeks": "直近 %[2]d 週間に発火していないルール %[1]d 件"
+ "%d rules didn't fire in the last %d weeks": "直近 %[2]d 週間に発火していないルール %[1]d 件",
+ "The search is too long: 500 characters at most.": "検索が長すぎます。500 文字までです。",
+ "Left out: more than 20 words: %s.": "20 語を超えたため除外しました: %s。"
 }
