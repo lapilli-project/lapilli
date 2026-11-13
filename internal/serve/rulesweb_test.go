@@ -551,3 +551,36 @@ func TestQuietDiffers(t *testing.T) {
 		t.Error("/rules/R18 doesn't say its replay differed")
 	}
 }
+
+// TestBadgeReasonsSaid: a badge's reason, which the list gives in its
+// title alone, the rule's page says in words: why it isn't replayed, and
+// where it is recorded, a rule that never fired too.
+func TestBadgeReasonsSaid(t *testing.T) {
+	ctx := context.Background()
+	s, rules := server(t, func(c *Config) { c.Backfill = 3 * time.Hour })
+	os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte(ruleFile+"      - alert: Turned\n        expr: turned\n"), 0o644)
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	at := now.Add(-26 * time.Hour)
+	if _, err := s.l.PutFirings(ctx, "cloud", at, at.Add(24*time.Hour), []firing.Firing{{Rule: "Copied", Start: at, End: at.Add(time.Minute)}}, "firings-token", s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	why := "query failed: the history couldn&#39;t be read: HTTP 429: slow down"
+	_, body, _ := get(t, h, "/rules?perf=silent")
+	if !strings.Contains(body, `title="not replayed: `+why+`"`) {
+		t.Fatal("/rules?perf=silent: Turned has no badge saying why it isn't replayed")
+	}
+	_, body, _ = get(t, h, "/rules")
+	if !strings.Contains(body, `title="recorded in cloud"`) {
+		t.Fatal("/rules: Copied has no badge saying where it is recorded")
+	}
+	for path, want := range map[string]string{"/rules/Turned": "Not replayed: " + why, "/rules/Copied": "Recorded in cloud and copied in"} {
+		if _, body, _ := get(t, h, path); !strings.Contains(body, want) {
+			t.Errorf("%s doesn't say %q", path, want)
+		}
+	}
+}

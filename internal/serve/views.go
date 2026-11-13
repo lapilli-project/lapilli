@@ -828,6 +828,10 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	v := ruleView{ruleLine: ruleLine{Name: name, Precision: "–"}}
 	if i := slices.IndexFunc(lines, func(l ruleLine) bool { return l.Name == name }); i >= 0 {
 		v.ruleLine, v.Known = lines[i], true
+	} else if rr, ok := t.rules[t.id(name)]; ok && t.id(name) != 0 {
+		// One that didn't fire in the twelve weeks says, as the list's
+		// badges do, why it isn't replayed, and where it is recorded.
+		v.Severity, v.Group, v.Unsupported, v.Source = rr.Severity, rr.Group, rr.Unsupported, rr.Source
 	}
 	v.Known = v.Known || slices.Contains(silent, name)
 	if s.replaying() {
