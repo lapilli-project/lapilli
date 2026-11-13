@@ -53,4 +53,12 @@ func TestNotifyStartsBounded(t *testing.T) {
 	if p := plan(t, l, qLastOfGroup(l.d), "sns", "r", "g-0", 1); !strings.Contains(p, "notifications_group") {
 		t.Errorf("plan: %s", p)
 	}
+	// In Postgres, searched by the group key's md5 too, not every group of
+	// the source's receiver.
+	for _, q := range []string{qStarts(l.d), qLastOfGroup(l.d)} {
+		p := plan(t, l, q, "sns", "r", "g-0", 1, "", 50)
+		if l.d == postgres && !strings.Contains(p, "Index Cond: ((source = 'sns'::text) AND (receiver = 'r'::text) AND (md5(grp) = ") {
+			t.Errorf("not searched by the group's md5: %s", p)
+		}
+	}
 }

@@ -25,11 +25,11 @@ func wide(seed uint64, n int) string {
 
 // Whatever SQLite keeps of any length, a rule file's or a sender's, the
 // ledger keeps in Postgres too, longer than a btree holds (some 2,700
-// bytes), and finds again: a rule's name as a rule file has it, and as
-// a note, a task and a comment take it when the rule is renamed; a check
-// of it; a group key and an alarm's id as a notification says them; a
-// recorded rule's name and severity, and its alarm's id; an incident's
-// id in a file.
+// bytes), and finds again: a rule's name as a rule file has it, as a
+// note, a task and a comment take it when the rule is renamed, and as a
+// proposal names it; a check of it; a group key and an alarm's id as a
+// notification says them; a recorded rule's name and severity, and its
+// alarm's id; an incident's id in a file.
 func TestLongKeys(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
@@ -64,6 +64,12 @@ func TestLongKeys(t *testing.T) {
 	}
 	if ts, err := l.Tasks(ctx, TaskQuery{}); err != nil || len(ts) != 1 || ts[0].Rule != other {
 		t.Errorf("the task, renamed: %v %v", ts, err)
+	}
+	// A proposal for it, and the one unfinished a rule may have.
+	_, err = l.Propose(ctx, Proposal{Rule: long, Kind: KindDisable, Path: PathNone, MadeBy: "ana"})
+	step("proposal", err)
+	if _, err := l.Propose(ctx, Proposal{Rule: long, Kind: KindDisable, Path: PathNone, MadeBy: "ana"}); err == nil {
+		t.Error("a second unfinished proposal for the rule")
 	}
 
 	// A check of it, twice: the second keeps the day's again.
