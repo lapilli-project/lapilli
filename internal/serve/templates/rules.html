@@ -1,6 +1,6 @@
 {{define "rules"}}{{$title := t "Rules"}}{{template "top" (titled . $title)}}{{with .View}}
 <div class="head"><h1>{{$title}}</h1><p class="of">{{t "%d of %d rules" .Shown .Total}}</p></div>
-<p class="lede">{{if eq .Weeks 1}}{{t "Each rule's stones over the last week, the noisiest first."}}{{else}}{{t "Each rule's stones over the last %d weeks, the noisiest first." .Weeks}}{{end}}</p>
+<p class="lede">{{if .Week}}{{t "Each rule's stones in the week of %s, the noisiest first." .Week}}{{else if eq .Weeks 1}}{{t "Each rule's stones over the last week, the noisiest first."}}{{else}}{{t "Each rule's stones over the last %d weeks, the noisiest first." .Weeks}}{{end}}</p>
 {{if and .Empty (eq .Empty.Kind "first")}}{{template "empty" .Empty}}{{else}}
 <div class="rules-body">
 <aside class="facets-side" aria-label="{{t "Filters"}}">{{template "facets" (on $ "side")}}</aside>
@@ -38,10 +38,12 @@
   <td class="n">{{.Incidents}}{{if and .Incidents (not .SomeRules)}}<br><span class="quiet">{{t "first %d, alone %d" .First .Alone}}</span>{{end}}</td>
   <td>{{template "spark" .Spark}}</td>
 </tr>{{end}}</tbody>
+<tfoot><tr><th scope="row" colspan="4">{{if eq (len .Rows) 1}}{{t "The rule shown"}}{{else}}{{t "The %d rules shown, all told" (len .Rows)}}{{end}}</th>
+  <td class="n">{{.Sum.Firings}}{{if .Sum.Notified}}<br><span class="quiet">{{t "%d notifications, %d repeats" .Sum.Notifications .Sum.Repeats}}</span>{{end}}</td><td class="n">{{.Sum.White}}</td><td class="n">{{.Sum.Black}}{{if or .Sum.AsleepBlack .Sum.OffHoursBlack}}<br><span class="quiet">{{t "%d asleep, %d off hours" .Sum.AsleepBlack .Sum.OffHoursBlack}}</span>{{end}}{{if .Sum.Notified}}<br><span class="quiet">{{t "%d notifications for nothing, while people slept" .Sum.Woken}}</span>{{end}}</td><td class="n">{{.Sum.Precision}}</td><td class="n">{{.Sum.Refired}}{{if .Sum.Excused}}<br><span class="quiet">{{t "%d excused" .Sum.Excused}}</span>{{end}}</td>{{if .Deploys}}<td class="n">{{.Sum.Deploys}}</td>{{end}}<td></td><td></td></tr></tfoot>
 </table></div></form>{{end}}
 {{with .Empty}}{{template "empty" .}}{{end}}
 {{if .Quiet}}
-<details><summary>{{if .QuietOlder}}{{if eq .Weeks 1}}{{t "%d rules didn't fire in the last week" (len .Quiet)}}{{else}}{{t "%d rules didn't fire in the last %d weeks" (len .Quiet) .Weeks}}{{end}}{{else}}{{t "%d rules never fired in the last twelve weeks" (len .Quiet)}}{{end}}</summary>
+<details><summary>{{if .Week}}{{t "%d rules didn't fire in the week of %s" (len .Quiet) .Week}}{{else if .QuietOlder}}{{if eq .Weeks 1}}{{t "%d rules didn't fire in the last week" (len .Quiet)}}{{else}}{{t "%d rules didn't fire in the last %d weeks" (len .Quiet) .Weeks}}{{end}}{{else}}{{t "%d rules never fired in the last twelve weeks" (len .Quiet)}}{{end}}</summary>
 <p class="quiet">{{range $i, $r := .Quiet}}{{if $i}}, {{end}}<a href="{{$.Rule $r.Name}}"><bdi>{{$r.Name}}</bdi></a>{{with $r.Facts}} <a class="hint" href="{{$.RuleAt $r.Name "#says"}}">({{t "what it says: %d problems of fact" .}})</a>{{end}}{{end}}</p></details>
 {{end}}
 </div>

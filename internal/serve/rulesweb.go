@@ -9,8 +9,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/verdict"
 )
 
 // The rules list (docs/design/ui.md): each rule's numbers, with badges on
@@ -97,6 +99,23 @@ type rulesList struct {
 	Legend []legendGroup
 	// Bulk is the form that does something with the rules picked.
 	Bulk bulkView
+	// Week is the week shown, when one is asked for (week=), its Monday;
+	// Sum, the rules shown, all told.
+	Week string
+	Sum  ruleSum
+}
+
+// ruleSum is the rules shown, all told: the overview's tiles link to the
+// list whose sum each is.
+type ruleSum struct {
+	Firings, White, Black, Refired, Deploys, Excused int
+	AsleepBlack, OffHoursBlack                       int
+	Precision                                        string
+	// Notified says notifications are kept: Notifications, Repeats; and
+	// Woken, those for firings that caught nothing while people slept,
+	// as the overview counts them (woken).
+	Notified                      bool
+	Notifications, Repeats, Woken int
 }
 
 // legendGroup is a facet's badges, in the list's legend: each its sign,
@@ -161,6 +180,8 @@ type rulesAsk struct {
 	sort  string
 	picks picks
 	words []qword
+	// week is the week asked for, its Monday's date, or "".
+	week string
 }
 
 // url is the rules page for what was asked; what it doesn't take isn't
@@ -175,6 +196,9 @@ func (a rulesAsk) url() string {
 	}
 	if a.sort != "" {
 		q.Set("sort", a.sort)
+	}
+	if a.week != "" {
+		q.Set("week", a.week)
 	}
 	for _, f := range facetsOf {
 		if vs := a.picks[f.param]; len(vs) > 0 {
@@ -295,11 +319,15 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	if out, changed := canonical(asked, c.Teams); changed {
 		return nil, redirect{"/rules?" + out.Encode()}
 	}
-	d, err := s.rulesOf(r)
+	week := s.weekOf(asked)
+	d, err := s.rulesOver(r, week)
 	if err != nil {
 		return nil, err
 	}
 	v := rulesList{rulesView: d.rulesView, Legend: legendOf()}
+	if week != 0 {
+		v.Week = s.l.Midnight(week).In(s.cfg.Loc).Format("2006-01-02")
+	}
 	cursor, err := s.l.Cursor(ctx)
 	if err != nil {
 		return nil, err
@@ -360,7 +388,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 			spell[l] = append(spell[l], sev)
 		}
 	}
-	a := rulesAsk{c: c, sort: v.Sort, picks: picks{}}
+	a := rulesAsk{c: c, sort: v.Sort, picks: picks{}, week: v.Week}
 	for _, f := range facetsOf {
 		for _, x := range asked[f.param] {
 			if len(a.picks[f.param]) == maxValues {
@@ -434,6 +462,21 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		}
 	}
 	v.Shown = len(v.Rows)
+	for _, row := range v.Rows {
+		x := &v.Sum
+		x.Firings += row.Firings
+		x.White += row.White
+		x.Black += row.Black
+		x.Refired += row.Refired
+		x.Deploys += row.Deploys
+		x.Excused += row.Excused
+		x.AsleepBlack += row.AsleepBlack
+		x.OffHoursBlack += row.OffHoursBlack
+	}
+	v.Sum.Precision = pct(v.Sum.White, v.Sum.Firings)
+	if err := s.wokenOf(ctx, d, &v); err != nil {
+		return nil, err
+	}
 	for _, f := range facetsOf {
 		fc := facet{Param: f.param, Name: f.name}
 		values, labels := f.values, f.labels
@@ -476,6 +519,11 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		b := a
 		b.c.Team, b.c.TeamSet = "", true
 		v.Chips = append(v.Chips, chip{Group: "Team", Value: c.Team, Raw: true, Href: b.url()})
+	}
+	if a.week != "" {
+		b := a
+		b.week = ""
+		v.Chips = append(v.Chips, chip{Group: "Week of", Value: a.week, Raw: true, Href: b.url()})
 	}
 	for _, fc := range v.Facets {
 		for _, x := range p[fc.Param] {
@@ -680,4 +728,33 @@ func (s *Server) ruleMeta(ctx context.Context) (map[string]ruleMeta, error) {
 		}
 	}
 	return out, nil
+}
+
+// wokenOf counts, of the rules shown, the notifications kept and those of
+// them for firings that caught nothing while people slept, by the hours of
+// each rule's team, over the weeks shown: as the overview's "woken for
+// nothing" counts a week's.
+func (s *Server) wokenOf(ctx context.Context, d rulesData, v *rulesList) error {
+	p, err := s.notified(ctx)
+	if err != nil || p.first.IsZero() {
+		return err
+	}
+	shown := make(map[string]bool, len(v.Rows))
+	for _, row := range v.Rows {
+		shown[row.Name] = true
+		v.Sum.Notifications += row.Notifications
+		v.Sum.Repeats += row.Repeats
+	}
+	v.Sum.Notified = true
+	from, to := s.l.Midnight(d.t.weeks[len(d.t.weeks)-v.Weeks]), d.t.until(s.now().Add(time.Hour))
+	sc := d.own.schedules(d.t.o.Hours)
+	for _, pg := range p.pages {
+		if pg.Stone != ledger.PageBlack || !shown[pg.Rule] || pg.At.Before(from) || !pg.At.Before(to) {
+			continue
+		}
+		if h := sc.of(pg.Rule); h != nil && h.Of(pg.At) == verdict.Asleep {
+			v.Sum.Woken++
+		}
+	}
+	return nil
 }

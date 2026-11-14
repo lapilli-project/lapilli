@@ -75,6 +75,10 @@ type tile struct {
 	DotX, DotY    float64
 	Has           bool   // the sparkline has a point to end on
 	Values        string // the sparkline's, the oldest first, for those who can't see it
+	// Href is the list that makes its number, over the same week, More
+	// what it is; key, the tile's label, untranslated.
+	Href, More string
+	key        string
 }
 
 // geometry of the column charts
@@ -339,6 +343,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			v.Check = weekCheckOf(all, cs, s.differs(), in)
 		}
 	}
+	drill(v.Tiles, last.Start.In(s.cfg.Loc).Format("2006-01-02"))
 	v.Stones = stonesChart(l, ws, s.cfg.Loc)
 	v.Precision = precisionChart(l, ws, s.cfg.Loc)
 	v.Incidents = incidentsChart(l, ws, s.cfg.Loc)
@@ -425,7 +430,7 @@ func outcomeLines(l string, out *outcomes) []outcomeLine {
 func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep string, deploys bool, refired func() (int, int)) []tile {
 	var out []tile
 	add := func(label string, val func(*weekView) (float64, bool), show func(float64) string, delta func(a, b float64) string, better int, of string) {
-		x := tile{Label: tr(l, label), Value: "–", Of: of}
+		x := tile{Label: tr(l, label), Value: "–", Of: of, key: label}
 		if a, ok := val(last); ok {
 			x.Value = show(a)
 			if b, ok := val(before); ok && a != b {

@@ -211,6 +211,9 @@ td.t { white-space: nowrap; }
 .tile-spark { display: block; width: 120px; height: 30px; margin-top: .4rem; }
 .tile-spark path { fill: none; stroke: var(--viz-nothing); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
 .tile-spark circle { fill: var(--viz-caught); }
+/* Each tile links to the list that makes its number, over the same week. */
+a.tile-more { display: inline-block; margin-top: .4rem; font-size: .875rem; }
+tfoot th, tfoot td { border-bottom: 0; border-top: 1px solid var(--line-strong); font-weight: 600; color: var(--ink); }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 1rem; }
 .card { container-type: inline-size; margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.1rem; min-width: 0; box-shadow: var(--shadow); }
 .card.wide { margin-top: 1rem; }

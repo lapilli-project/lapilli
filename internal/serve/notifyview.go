@@ -167,7 +167,11 @@ func (s *Server) pagedOf(ctx context.Context, t *tallies, n int, lines []ruleLin
 		return err
 	}
 	sc := o.schedules(t.o.Hours)
-	by := p.lines(s.l.Midnight(t.weeks[len(t.weeks)-n]), s.now().Add(time.Hour), sc.of)
+	to := s.now().Add(time.Hour)
+	if t.over {
+		to = t.to
+	}
+	by := p.lines(s.l.Midnight(t.weeks[len(t.weeks)-n]), to, sc.of)
 	for i := range lines {
 		if x := by[lines[i].Name]; x != nil {
 			lines[i].pagedLine = *x

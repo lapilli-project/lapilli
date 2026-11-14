@@ -48,6 +48,10 @@ type tallies struct {
 	// in; ok false with no firing.
 	firstWeek int64
 	firstOK   bool
+	// to is when the span its weeks are over ends, zero for now; over
+	// says its last week is over, a week before this one (talliesTo).
+	to   time.Time
+	over bool
 }
 
 // whole are, of the weeks ws, those the ledger has whole: not the week
@@ -57,7 +61,7 @@ type tallies struct {
 func (t *tallies) whole(ws []int64) []int64 {
 	var out []int64
 	for _, w := range ws {
-		if t.firstOK && w > t.firstWeek && w < t.weeks[len(t.weeks)-1] {
+		if t.firstOK && w > t.firstWeek && (w < t.weeks[len(t.weeks)-1] || t.over) {
 			out = append(out, w)
 		}
 	}
@@ -80,12 +84,21 @@ func (t *tallies) refireWeeks(ws []int64, in func(id int64) bool) (with, of int)
 }
 
 func (s *Server) tallies(ctx context.Context, n int) (*tallies, error) {
+	return s.talliesTo(ctx, n, ledger.Week(s.l.Day(s.now())))
+}
+
+// talliesTo are the tallies of the n weeks to the week starting last: when
+// it is over, a week before this one, they are over the span to its end.
+func (s *Server) talliesTo(ctx context.Context, n int, last int64) (*tallies, error) {
 	o, err := s.options(ctx)
 	if err != nil {
 		return nil, err
 	}
-	now := ledger.Week(s.l.Day(s.now()))
+	now := last
 	t := &tallies{by: map[int64]map[int64]ledger.Tally{}, o: o}
+	if last < ledger.Week(s.l.Day(s.now())) {
+		t.to, t.over = s.l.Midnight(last+7), true
+	}
 	for i := n - 1; i >= 0; i-- {
 		w := now - int64(7*i)
 		t.weeks = append(t.weeks, w)
@@ -109,6 +122,23 @@ func (s *Server) tallies(ctx context.Context, n int) (*tallies, error) {
 		t.firstWeek, t.firstOK = ledger.Week(s.l.Day(first)), true
 	}
 	return t, nil
+}
+
+// until is when the span t's weeks are over ends: its end, or now.
+func (t *tallies) until(now time.Time) time.Time {
+	if t.over {
+		return t.to
+	}
+	return now
+}
+
+// last is 1 when t's last week is over, and is the last whole week; 0
+// when it is under way, and the last whole week the one before.
+func (t *tallies) last() int {
+	if t.over {
+		return 1
+	}
+	return 0
 }
 
 // id is a rule's id, by its name.
@@ -385,7 +415,7 @@ func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]
 		noisyRule[r.Rule] = r.Noisy
 		rs = append(rs, *r)
 	}
-	incs, err := s.l.Incidents(ctx, s.l.Midnight(recent[0]), s.now(), false)
+	incs, err := s.l.Incidents(ctx, s.l.Midnight(recent[0]), t.until(s.now()), false)
 	if err != nil {
 		return nil, err
 	}
@@ -481,7 +511,7 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 		}
 		l.Without = pct(l.White-l.DeploysCaught, l.Firings-l.Deploys)
 		// Weeks running it has been noisy, up to the last whole week.
-		for i := len(t.weeks) - 2; i >= 0 && t.noisy(t.weeks[i], id); i-- {
+		for i := len(t.weeks) - 2 + t.last(); i >= 0 && t.noisy(t.weeks[i], id); i-- {
 			l.Streak++
 		}
 		most := 1
@@ -627,7 +657,11 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 	return d.rulesView, nil
 }
 
-func (s *Server) rulesOf(r *http.Request) (rulesData, error) {
+func (s *Server) rulesOf(r *http.Request) (rulesData, error) { return s.rulesOver(r, 0) }
+
+// rulesOver is rulesOf, over the week starting week alone when it isn't 0:
+// a Monday, as the ledger counts its days, of the twelve weeks kept.
+func (s *Server) rulesOver(r *http.Request, week int64) (rulesData, error) {
 	n := 4
 	switch r.URL.Query().Get("weeks") {
 	case "1":
@@ -635,7 +669,14 @@ func (s *Server) rulesOf(r *http.Request) (rulesData, error) {
 	case "12":
 		n = 12
 	}
-	t, err := s.tallies(r.Context(), weeks)
+	var t *tallies
+	var err error
+	if week != 0 {
+		n = 1
+		t, err = s.talliesTo(r.Context(), weeks, week)
+	} else {
+		t, err = s.tallies(r.Context(), weeks)
+	}
 	if err != nil {
 		return rulesData{}, err
 	}
@@ -1180,6 +1221,10 @@ type incidentsView struct {
 	// way, and the median lead.
 	Judged summaryIncidents
 	Lead   string
+	// State is what those listed are, when asked (state=): caught, noisy
+	// (caught only by noisy rules) or missed. Week is the week shown, when
+	// one is asked for (week=), its Monday.
+	State, Week string
 }
 
 // leadText says how long before an incident's start its first alert came,
@@ -1209,7 +1254,12 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	incs, err := s.l.Incidents(ctx, s.l.Midnight(t.weeks[len(t.weeks)-n]), s.now().Add(24*time.Hour), true)
+	from, to := s.l.Midnight(t.weeks[len(t.weeks)-n]), s.now().Add(24*time.Hour)
+	week := s.weekOf(q)
+	if week != 0 {
+		n, from, to = 1, s.l.Midnight(week), s.l.Midnight(week+7)
+	}
+	incs, err := s.l.Incidents(ctx, from, to, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1222,6 +1272,12 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v := incidentsView{Weeks: n, Match: strings.Join(t.o.Match, ", "), Now: s.now()}
+	if week != 0 {
+		v.Week = from.In(s.cfg.Loc).Format("2006-01-02")
+	}
+	if st := q.Get("state"); st == "caught" || st == "noisy" || st == "missed" {
+		v.State = st
+	}
 	var team *ledger.Team
 	v.Team, team = s.teamFilter(own, q.Get("team"))
 	if src := q.Get("source"); src == "impact" || src == "written" {
@@ -1259,6 +1315,9 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 					line.Nearly, line.NearlyMore = nms[0].Rule, len(nms)-1
 				}
 			}
+		}
+		if v.State != "" && (!in.Counts || line.Status != v.State) {
+			continue // the median lead and the counts are of every one
 		}
 		v.Lines = append(v.Lines, line)
 	}
