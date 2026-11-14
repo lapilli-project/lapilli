@@ -6,6 +6,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -19,6 +20,18 @@ import (
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/verdict"
+)
+
+// The demo's names, every one: its teams (each a group of its rules,
+// and the label team its alerts have), the people who keep its notes,
+// tasks, comments and proposals, and the pods its platform's alerts name.
+// With demoRules' names, services and severities, and demoIncidents'
+// services, they are all a page of the demo can show: TestDemoLedger
+// holds the ledger to them.
+var (
+	demoTeams  = []string{"checkout", "platform", "search"}
+	demoPeople = []string{"ana", "sam", "kim"}
+	demoPods   = []string{"api-7c9f", "worker-5d2b", "web-9a41", "cron-1e07"}
 )
 
 // demoRule is a rule of the demo: its group (each a team's), what it is
@@ -98,7 +111,7 @@ var demoIncidents = []demoIncident{
 func demoFile(version int) string {
 	var b strings.Builder
 	b.WriteString("groups:\n")
-	for _, g := range []string{"checkout", "platform", "search"} {
+	for _, g := range demoTeams {
 		fmt.Fprintf(&b, "  - name: %s-alerts\n    labels: {team: %s}\n    rules:\n", g, g)
 		for _, r := range demoRules {
 			if r.group != g {
@@ -172,9 +185,9 @@ func demoServer(t *testing.T) *Server {
 
 	// The teams, each owning its group's rules.
 	team := map[string]int64{}
-	for _, tm := range []ledger.Team{{Name: "checkout", Rules: "^(Checkout|Cart|Payments|Promo)"},
-		{Name: "platform", Rules: "^(Pod|Node|Disk|High|Container|Deployment|Kube|Etcd|Certificate|Persistent|Job|APIGateway|DNS)"},
-		{Name: "search", Rules: "^(Search|Indexer)"}} {
+	for i, rules := range []string{"^(Checkout|Cart|Payments|Promo)", "^(Pod|Node|Disk|High|Container|Deployment|Kube|Etcd|Certificate|Persistent|Job|APIGateway|DNS)",
+		"^(Search|Indexer)"} {
+		tm := ledger.Team{Name: demoTeams[i], Rules: rules}
 		id, err := s.l.PutTeam(ctx, tm, "ana")
 		if err != nil {
 			t.Fatal(err)
@@ -200,7 +213,7 @@ func demoServer(t *testing.T) *Server {
 
 	// Each day's firings: the noise, those that caught the incidents, and,
 	// on Saturdays, the platform's during its weekly maintenance.
-	pods := []string{"api-7c9f", "worker-5d2b", "web-9a41", "cron-1e07"}
+	pods := demoPods
 	var latency []firing.Firing // CheckoutLatencyP99's, to notify
 	for d := 0; d < stripDays; d++ {
 		var fs []firing.Firing
@@ -383,6 +396,28 @@ func demoServer(t *testing.T) *Server {
 			t.Fatal(err)
 		}
 	}
+	// What people kept is dated by the clock it was written at: dated in
+	// the demo's own weeks instead, in the order it was written, its pages
+	// are the same however late they are made.
+	at := func(d time.Duration) int64 { return now.Add(-d).Unix() }
+	for _, x := range []struct {
+		q    string
+		args []any
+	}{
+		{"UPDATE teams SET updated = ?", []any{first.Add(-7 * 24 * time.Hour).Unix()}},
+		{"UPDATE windows SET updated = ?", []any{first.Add(-7 * 24 * time.Hour).Unix()}},
+		{"UPDATE notes SET updated = ?", []any{at(5 * 24 * time.Hour)}},
+		{"UPDATE proposals SET made = ?, updated = ?", []any{at(30 * time.Hour), at(30 * time.Hour)}},
+		{"UPDATE tasks SET created = ? + id * 3600, updated = ? + id * 3600", []any{at(50 * time.Hour), at(50 * time.Hour)}},
+		{"UPDATE comments SET created = ? + id * 3600, updated = ? + id * 3600", []any{at(26 * time.Hour), at(26 * time.Hour)}},
+		{"UPDATE changes SET at = ? + id WHERE at > ?", []any{at(72 * time.Hour), now.Unix()}},
+	} {
+		ledgerExec(t, s, x.q, x.args...)
+	}
+	// Read again, as after any change.
+	if err := s.l.SetMeta(ctx, "demo-dated", "1"); err != nil {
+		t.Fatal(err)
+	}
 	return s
 }
 
@@ -419,7 +454,8 @@ const demoReady = "lapilli demo ledger, ready"
 // TestDemoLedger: the demo has what its screenshots are to show: a noisy
 // rule, precise ones, a spare one, one whose replay differs, silent ones;
 // incidents caught, missed and caught only by noisy rules; a proposal to
-// approve; and nothing of any company's.
+// approve. Every team, rule, label value and person in it is one the demo
+// declares; and what people kept is dated in its own weeks.
 func TestDemoLedger(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short")
@@ -456,6 +492,118 @@ func TestDemoLedger(t *testing.T) {
 	}
 	if _, approve := s.waiting(context.Background()); approve != 1 {
 		t.Errorf("%d proposals to approve", approve)
+	}
+	demoClosed(t, s)
+}
+
+// demoClosed: every team, rule, label value and person in the demo's
+// ledger is one it declares, and every time people wrote something in it
+// is in its own weeks, by its clock, not the one it was made at.
+func demoClosed(t *testing.T, s *Server) {
+	t.Helper()
+	ctx := context.Background()
+	known := map[string]map[string]bool{"team": {}, "rule": {}, "label value": {}, "person": {}}
+	for _, x := range demoTeams {
+		known["team"][x], known["label value"][x] = true, true
+	}
+	for _, x := range demoPeople {
+		known["person"][x] = true
+	}
+	for _, x := range demoPods {
+		known["label value"][x] = true
+	}
+	for _, r := range demoRules {
+		known["rule"][r.name], known["label value"][r.service], known["label value"][r.severity] = true, true, true
+	}
+	for _, in := range demoIncidents {
+		known["label value"][in.service] = true
+	}
+	db := ledgerDB(t, s)
+	defer db.Close()
+	each := func(what, q string, f func(string) []string) {
+		t.Helper()
+		rows, err := db.QueryContext(ctx, q)
+		if err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+		defer rows.Close()
+		n := 0
+		for rows.Next() {
+			var v string
+			if err := rows.Scan(&v); err != nil {
+				t.Fatal(err)
+			}
+			for _, x := range f(v) {
+				n++
+				if !known[what][x] {
+					t.Errorf("%s: %s %q isn't one the demo declares", q, what, x)
+				}
+			}
+		}
+		if n == 0 {
+			t.Errorf("%s: none", q)
+		}
+	}
+	one := func(v string) []string { return []string{v} }
+	values := func(v string) []string {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(v), &m); err != nil {
+			t.Fatalf("%q: %v", v, err)
+		}
+		var out []string
+		for _, x := range m {
+			switch x := x.(type) {
+			case string:
+				out = append(out, x)
+			case []any:
+				for _, y := range x {
+					out = append(out, fmt.Sprint(y))
+				}
+			}
+		}
+		return out
+	}
+	each("team", "SELECT name FROM teams", one)
+	each("rule", "SELECT name FROM rules", one)
+	for _, q := range []string{"SELECT labels FROM series", "SELECT labels FROM incidents", "SELECT labels FROM deploy_labels"} {
+		each("label value", q, values)
+	}
+	for _, q := range []string{"SELECT DISTINCT by FROM changes", "SELECT updated_by FROM notes", "SELECT created_by FROM tasks",
+		"SELECT assignee FROM tasks WHERE assignee != ''", "SELECT created_by FROM comments", "SELECT made_by FROM proposals",
+		"SELECT updated_by FROM windows", "SELECT updated_by FROM teams"} {
+		each("person", q, one)
+	}
+	// The rules' own labels, as the rules in effect have them.
+	latest, ok, err := s.l.Latest(ctx)
+	if err != nil || !ok {
+		t.Fatal(err)
+	}
+	rs, err := s.parse(ctx, latest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rs {
+		for k, v := range r.AlertLabels() {
+			if !known["label value"][v] {
+				t.Errorf("%s: its label %s=%q isn't one the demo declares", r.Name, k, v)
+			}
+		}
+	}
+	for _, q := range []string{"SELECT count(*) FROM notes WHERE updated > ?", "SELECT count(*) FROM tasks WHERE created > ? OR updated > ?",
+		"SELECT count(*) FROM comments WHERE created > ? OR updated > ?", "SELECT count(*) FROM proposals WHERE made > ? OR updated > ?",
+		"SELECT count(*) FROM teams WHERE updated > ?", "SELECT count(*) FROM windows WHERE updated > ?", "SELECT count(*) FROM changes WHERE at > ?"} {
+		args := []any{now.Unix()}
+		if strings.Contains(q, " OR ") {
+			args = append(args, now.Unix())
+		}
+		if s.cfg.LedgerURLFile != "" {
+			k := 0
+			q = replaceEach(q, "?", func() string { k++; return fmt.Sprint("$", k) })
+		}
+		var n int
+		if err := db.QueryRowContext(ctx, q, args...).Scan(&n); err != nil || n != 0 {
+			t.Errorf("%s: %d after the demo's now (%v)", q, n, err)
+		}
 	}
 }
 
