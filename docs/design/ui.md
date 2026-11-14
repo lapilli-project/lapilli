@@ -356,7 +356,9 @@ deploy of what it is about, and a bar over the days a quiet window covered
 it. A deploy is of what it is about, and a window covers it, as the ledger
 would say of a firing of it (`Deploy.During`, `Window.Excuses`) with the
 labels of its latest firings, or its own; a window's repeats are worked out
-as the ledger works them out, each held to its `Covers`. The legend names
+as the ledger works them out, one by a schedule a day at a time (the last
+to start by the day's end, the one that may last into it), each held to
+its `Covers`. The legend names
 each kind of cell and the marks the strip has, a sign and words; the same
 numbers are a table, a day a row, in a `<details>` under it.
 

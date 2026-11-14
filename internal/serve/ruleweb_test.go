@@ -25,6 +25,7 @@ import (
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/verdict"
 )
 
 // TestRuleTabOf: tab= is one of the five, or the overview: a value it
@@ -535,6 +536,11 @@ func TestWindowRepeats(t *testing.T) {
 		{Title: "weekly", Start: time.Date(2026, 6, 6, 2, 0, 0, 0, time.UTC), End: time.Date(2026, 6, 6, 4, 0, 0, 0, time.UTC), Every: "week"},
 		{Title: "monthly", Start: time.Date(2026, 3, 7, 2, 0, 0, 0, time.UTC), End: time.Date(2026, 3, 7, 3, 0, 0, 0, time.UTC), Every: "month", On: "first sat"},
 		{Title: "cron", Start: time.Date(2026, 3, 3, 1, 15, 0, 0, time.UTC), End: time.Date(2026, 3, 3, 1, 45, 0, 0, time.UTC), Every: "cron", On: "15 1 * * 2,5", Until: at(60, 0)},
+		// Nightly into the next day, until a day: the day after it covered
+		// too; and every hour, two thousand times over the strip.
+		{Title: "nightly, until", Start: time.Date(2026, 3, 3, 23, 0, 0, 0, time.UTC), End: time.Date(2026, 3, 4, 1, 0, 0, 0, time.UTC), Every: "cron", On: "0 23 * * *", Until: at(40, 0)},
+		{Title: "nightly, until the day before", Start: time.Date(2026, 3, 3, 23, 0, 0, 0, time.UTC), End: time.Date(2026, 3, 4, 1, 0, 0, 0, time.UTC), Every: "cron", On: "0 23 * * *", Until: at(-1, 0)},
+		{Title: "hourly", Start: time.Date(2026, 3, 3, 0, 0, 0, 0, time.UTC), End: time.Date(2026, 3, 3, 0, 30, 0, 0, time.UTC), Every: "cron", On: "0 * * * *", Until: at(70, 0)},
 	} {
 		if _, err := s.l.PutWindow(ctx, w, "ana", o); err != nil {
 			t.Fatalf("%s: %v", w.Title, err)
@@ -596,7 +602,8 @@ func TestDayKind(t *testing.T) {
 func glanceServer(t *testing.T) *Server {
 	t.Helper()
 	ctx := context.Background()
-	s, rules := server(t, func(c *Config) { c.Backfill = time.Hour })
+	s, rules := server(t, func(c *Config) { c.Backfill, c.CheckReplay = time.Hour, true })
+	s.h = &alertsHistory{}
 	os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte("groups:\n  - name: shop\n    rules:\n      - {alert: Errors, expr: errors > 5, for: 2m, labels: {severity: page}}\n"), 0o644)
 	s.now = func() time.Time { return now.Add(-20 * 24 * time.Hour) }
 	raw := ""
@@ -616,11 +623,15 @@ func glanceServer(t *testing.T) *Server {
 		day := first.Add(time.Duration(d) * 24 * time.Hour)
 		var fs []firing.Firing
 		// A firing that caught nothing every day; one that caught
-		// something every fifth.
+		// something every fifth, and yesterday, a Monday; on the Saturday
+		// before, two that caught one incident.
 		fs = append(fs, firing.Firing{Rule: "Errors", Labels: map[string]string{"service": "search"}, Start: day.Add(3 * time.Hour), End: day.Add(3*time.Hour + 5*time.Minute)})
-		if d%5 == 0 {
+		if d%5 == 0 || d == 31 || d == 33 {
 			at := day.Add(10 * time.Hour)
 			fs = append(fs, firing.Firing{Rule: "Errors", Labels: map[string]string{"service": "checkout"}, Start: at, End: at.Add(10 * time.Minute)})
+			if d == 31 {
+				fs = append(fs, firing.Firing{Rule: "Errors", Labels: map[string]string{"service": "checkout", "pod": "b"}, Start: at, End: at.Add(10 * time.Minute)})
+			}
 			incs = append(incs, incident.Incident{ID: fmt.Sprint("INC-", d), Start: at.Add(time.Minute), End: at.Add(30 * time.Minute), Labels: incident.Labels{"service": {"checkout"}}})
 		}
 		if err := s.l.Record(ctx, ledger.Found{From: day, To: day.Add(24*time.Hour - time.Second), Firings: fs,
@@ -648,6 +659,44 @@ func glanceServer(t *testing.T) *Server {
 		}
 	}
 	if err := s.l.JudgePending(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	// Its firings of the last six days notified once each, and twice the
+	// last two; its replay beside what really fired over them, a day at a
+	// time, alike but for one firing more really fired yesterday; and an
+	// incident it nearly caught this week, and another rule's.
+	fs, err := s.l.Firings(ctx, ledger.FiringQuery{From: s.l.Midnight(s.l.Day(now) - 6), To: now, Rule: "Errors", Limit: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, f := range fs {
+		for k := 0; k < 1+map[bool]int{true: 1}[!f.Start.Before(s.l.Midnight(s.l.Day(now)-2))]; k++ {
+			if _, err := s.l.Notify(ctx, ledger.Notification{Source: "alertmanager", Receiver: "oncall", Group: fmt.Sprint("g", i), At: f.Start.Add(time.Minute + time.Duration(k)*4*time.Hour),
+				Alerts: []ledger.Alert{{Rule: "Errors", Labels: f.Labels, Start: f.Start}}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	_, seq, err := s.l.AgainFrom(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for d := s.l.Day(now) - 6; d < s.l.Day(now); d++ {
+		fs, err := s.l.Firings(ctx, ledger.FiringQuery{From: s.l.Midnight(d), To: s.l.Midnight(d + 1), Rule: "Errors", Limit: 1000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		x := &verdict.SpanRule{Replayed: len(fs), Real: len(fs), Alike: len(fs)}
+		if d >= s.l.Day(now)-1 {
+			x.Real++
+		}
+		if err := s.l.PutCheck(ctx, s.l.Midnight(d), &verdict.SpanCheck{Rules: map[string]*verdict.SpanRule{"Errors": x}}, nil, s.l.Midnight(d+1), seq); err != nil {
+			t.Fatal(err)
+		}
+	}
+	week := s.l.Midnight(ledger.Week(s.l.Day(now)))
+	if err := s.l.ReplaceResult(ctx, "near_misses", now, week, week.Add(7*24*time.Hour), []verdict.NearMiss{{Incident: "INC-30", Rule: "Errors"},
+		{Incident: "INC-31", Rule: "Other"}}); err != nil {
 		t.Fatal(err)
 	}
 	return s
@@ -702,11 +751,38 @@ func TestRuleGlance(t *testing.T) {
 	if got := v.Panel.IncidentsBy; !got.On || got.By != v.Incidents-bcaught {
 		t.Errorf("weeks=1: incidents changed %+v, want %d", got, v.Incidents-bcaught)
 	}
-	if now1, _ := sharePct(v.White, v.Firings); bn > 0 {
-		then, _ := sharePct(bwhite, bn)
-		if got := v.Panel.PrecisionBy; !got.On || got.By != now1-then {
-			t.Errorf("weeks=1: precision changed %+v, want %d", got, now1-then)
+	now1, _ := sharePct(v.White, v.Firings)
+	then, _ := sharePct(bwhite, bn)
+	if got := v.Panel.PrecisionBy; !got.On || got.By != now1-then || now1 == then {
+		t.Errorf("weeks=1: precision %d%% changed %+v, from %d%%", now1, got, then)
+	}
+	// Two firings caught one incident the Saturday before.
+	if bwhite != 2 || bcaught != 1 {
+		t.Errorf("weeks=1: before, %d caught something, %d incidents; want 2 and 1", bwhite, bcaught)
+	}
+	// The notifications: twice for each firing since Sunday, once before.
+	ns, err := s.l.Notifications(context.Background(), v.Before, now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cur, was := 0, 0
+	for _, x := range ns {
+		if x.At.Before(v.From) {
+			was++
+		} else {
+			cur++
 		}
+	}
+	if got := v.Panel.NotificationsBy; !got.On || got.By != cur-was || v.Notifications != cur || cur != 2*n || was == 0 {
+		t.Errorf("weeks=1: notifications %d changed %+v, want %d (twice %d firings) and %+d", v.Notifications, got, cur, n, cur-was)
+	}
+	// The backtest: all alike before, one firing a day not, since.
+	if c := v.Check; c == nil || v.Panel.Backtest != fmt.Sprintf("%d%%", c.Share) || c.Share >= 100 || !v.Panel.BacktestBy.On || v.Panel.BacktestBy.By != c.Share-100 {
+		t.Errorf("weeks=1: backtest %s changed %+v, its check %+v", v.Panel.Backtest, v.Panel.BacktestBy, v.Check)
+	}
+	// It nearly caught one incident this week; another rule, another.
+	if v.Panel.Near != 1 {
+		t.Errorf("weeks=1: %d nearly caught, want 1", v.Panel.Near)
 	}
 	// Four weeks, and the four before them: the ledger has five weeks, so
 	// not all of them, and nothing is set beside.

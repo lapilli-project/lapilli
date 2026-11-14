@@ -508,14 +508,12 @@ func (s *Server) marks(ctx context.Context, v *ruleView, vs []version, labelSets
 	return nil
 }
 
-// maxRepeats is how many repeats of a quiet window marks looks at: a
-// window every day for twelve weeks is 84 of them.
-const maxRepeats = 200
-
-// windowRepeats are a quiet window's repeats that meet [from, to], each its
-// start and end, the earliest first: its own time, for one that doesn't
-// repeat; worked out as the ledger works them out, by the calendar of loc,
-// for the rest, and each held to Covers, the ledger's own say.
+// windowRepeats are, of a quiet window's repeats that meet [from, to], those
+// a rule's strip marks, each its start and end, the earliest first: its own
+// time, for one that doesn't repeat; every repeat, for one every day or
+// week, worked out by the calendar of loc as the ledger works them out; and
+// for one by a schedule, the last to start by each day's end, which is the
+// one that may last into it. Each is held to Covers, the ledger's own say.
 func windowRepeats(w ledger.Window, loc *time.Location, from, to time.Time) [][2]time.Time {
 	long := w.End.Sub(w.Start)
 	var starts []time.Time
@@ -523,13 +521,14 @@ func windowRepeats(w ledger.Window, loc *time.Location, from, to time.Time) [][2
 	case "":
 		starts = []time.Time{w.Start}
 	case "day", "week":
+		// A repeat lasts less than a period: the first that may meet from
+		// starts on its day, or in the period before it.
 		n := 1
 		if w.Every == "week" {
 			n = 7
 		}
 		s := w.Start.In(loc)
-		k := max(0, int((civilDay(from.In(loc))-civilDay(s))/int64(n))-1)
-		for ; len(starts) < maxRepeats; k++ {
+		for k := max(0, int((civilDay(from.In(loc))-civilDay(s))/int64(n))); ; k++ {
 			at := s.AddDate(0, 0, k*n)
 			if at.After(to) || !w.Until.IsZero() && civilDay(at) > civilDay(w.Until.In(loc)) {
 				break
@@ -537,21 +536,28 @@ func windowRepeats(w ledger.Window, loc *time.Location, from, to time.Time) [][2
 			starts = append(starts, at)
 		}
 	case "month", "cron":
+		// Every repeat lasts as long: when the last to start by a day's end
+		// doesn't last into the day, no other does. The last is on Until's
+		// day at the latest. A day at a time, however often it falls due.
 		sch, ok := windowSchedule(w, loc)
 		if !ok {
 			return nil
 		}
-		hi := to
-		if !w.Until.IsZero() {
-			u := w.Until.In(loc)
-			if end := time.Date(u.Year(), u.Month(), u.Day()+1, 0, 0, 0, 0, loc).Add(-time.Nanosecond); end.Before(hi) {
-				hi = end
+		f := from.In(loc)
+		for day := time.Date(f.Year(), f.Month(), f.Day(), 0, 0, 0, 0, loc); day.Before(to); day = day.AddDate(0, 0, 1) {
+			end := day.AddDate(0, 0, 1).Add(-time.Nanosecond)
+			if !w.Until.IsZero() {
+				u := w.Until.In(loc)
+				if last := time.Date(u.Year(), u.Month(), u.Day()+1, 0, 0, 0, 0, loc).Add(-time.Nanosecond); last.Before(end) {
+					end = last
+				}
 			}
+			due := sch.Last(end, loc)
+			if due.IsZero() || due.Before(w.Start) || due.Add(long).Before(day) || len(starts) > 0 && starts[len(starts)-1].Equal(due) {
+				continue
+			}
+			starts = append(starts, due)
 		}
-		for d := sch.Last(hi, loc); !d.IsZero() && !d.Before(w.Start) && !d.Add(long).Before(from) && len(starts) < maxRepeats; d = sch.Prev(d, loc) {
-			starts = append(starts, d)
-		}
-		slices.Reverse(starts)
 	}
 	var out [][2]time.Time
 	for _, at := range starts {
