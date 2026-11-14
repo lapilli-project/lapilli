@@ -6,8 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"runtime/debug"
+	"runtime/metrics"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -243,8 +244,12 @@ func TestRulerListSplitMaxRules(t *testing.T) {
 }
 
 // An export of 25,000 of those rules, 62 MB, as large as 0.33.0 read, is
-// read whole, its heap at some 24 times its size, under 27: 30 without the
-// nodes let go of as they are decoded, 32 at 0.33.0.
+// read whole, holding at its peak 12 to 17 times its size live, under 18:
+// 20 to 23 without the nodes let go of as they are decoded. What is held
+// to is the live heap, as each collection marks it, with collections at
+// GOGC 50. The heap in use isn't: past what is live, it is what the
+// collector hasn't yet freed, more the less CPU it gets, 22 to 29 times
+// with one to three CPUs, where without the nodes let go of it is 30 to 34.
 func TestGrafanaExportOf25000Rules(t *testing.T) {
 	if testing.Short() || slow > 1 {
 		t.Skip("25,000 rules, 62 MB: a few seconds, 1.5 GB")
@@ -261,19 +266,23 @@ func TestGrafanaExportOf25000Rules(t *testing.T) {
 	body := b.String()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(body)) }))
 	defer ts.Close()
+	defer debug.SetGCPercent(debug.SetGCPercent(50))
 	runtime.GC()
 	var m0 runtime.MemStats
 	runtime.ReadMemStats(&m0)
-	var peak atomic.Uint64
+	live := []metrics.Sample{{Name: "/gc/heap/live:bytes"}}
+	metrics.Read(live)
+	live0 := live[0].Value.Uint64()
+	var inuse, held uint64 // written by the sampler only, read once it is done
 	stop, done := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done)
 		var m runtime.MemStats
 		for {
 			runtime.ReadMemStats(&m)
-			if m.HeapInuse > peak.Load() {
-				peak.Store(m.HeapInuse)
-			}
+			inuse = max(inuse, m.HeapInuse)
+			metrics.Read(live)
+			held = max(held, live[0].Value.Uint64())
 			select {
 			case <-stop:
 				return
@@ -284,13 +293,15 @@ func TestGrafanaExportOf25000Rules(t *testing.T) {
 	rs, _, err := Grafana(context.Background(), ts.URL, "", "test", nil)
 	close(stop)
 	<-done
-	grew := peak.Load() - min(peak.Load(), m0.HeapInuse)
-	t.Logf("%d rules, %.1f MB: %d read, %v; peak heap +%d MiB (%.0fx)", n, float64(len(body))/1e6, len(rs), err, grew>>20, float64(grew)/float64(len(body)))
+	times := func(grew uint64) float64 { return float64(grew) / float64(len(body)) }
+	kept, grew := held-min(held, live0), inuse-min(inuse, m0.HeapInuse)
+	t.Logf("%d rules, %.1f MB: %d read, %v; peak live heap +%d MiB (%.1fx), peak heap in use +%d MiB (%.1fx)",
+		n, float64(len(body))/1e6, len(rs), err, kept>>20, times(kept), grew>>20, times(grew))
 	if err != nil || len(rs) != n {
 		t.Errorf("an export of %d rules: %d read, %v", n, len(rs), err)
 	}
-	if grew > 27*uint64(len(body)) {
-		t.Errorf("an export of %.1f MB took %d MiB of heap, %.0f times it", float64(len(body))/1e6, grew>>20, float64(grew)/float64(len(body)))
+	if kept > 18*uint64(len(body)) {
+		t.Errorf("an export of %.1f MB held %d MiB live, %.1f times it", float64(len(body))/1e6, kept>>20, times(kept))
 	}
 	runtime.KeepAlive(rs)
 }
