@@ -15,7 +15,7 @@
 {{- else}}{{t "%d of its proposals were made against a version of it no longer in effect." .N}} <a href="{{$.Link (print $v.Path "#proposals") "tab" "proposals"}}">{{t "Proposals"}}</a>{{end}}</li>{{end}}</ul>
 </details>{{end}}
 
-<p class="period">{{if eq .Period 1}}{{t "The last week, from %s." (day $loc .From)}}{{else}}{{t "The last %d weeks, from %s." .Period (day $loc .From)}}{{end}}{{if not .Before.IsZero}} {{t "Beside each number, how it changed from as long before."}}{{end}}</p>
+<p class="period">{{if eq .Period 1}}{{t "The last week, from %s." (day $loc .From)}}{{else}}{{t "The last %d weeks, from %s." .Period (day $loc .From)}}{{end}}{{if .Panel.Beside}} {{t "Beside each number, how it changed from as long before."}}{{end}}</p>
 {{with .Panel}}<dl class="panel">
 <div><dt><details class="def"><summary>{{t "Precision"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "Firings that caught an incident, of all its firings."}}</p></details></dt>
 <dd class="big">{{.Precision}}{{with .PrecisionBy}}{{if .On}} <span class="delta {{.Class}}">{{t "%s pt" .Text}}</span>{{end}}{{end}}</dd>

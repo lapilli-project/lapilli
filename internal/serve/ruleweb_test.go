@@ -624,10 +624,10 @@ func glanceServer(t *testing.T) *Server {
 		var fs []firing.Firing
 		// A firing that caught nothing every day; one that caught
 		// something every fifth, and yesterday, a Monday; on the Saturday
-		// before, two that caught one incident.
+		// before, two that caught one incident, in the afternoon.
 		fs = append(fs, firing.Firing{Rule: "Errors", Labels: map[string]string{"service": "search"}, Start: day.Add(3 * time.Hour), End: day.Add(3*time.Hour + 5*time.Minute)})
 		if d%5 == 0 || d == 31 || d == 33 {
-			at := day.Add(10 * time.Hour)
+			at := day.Add(14 * time.Hour)
 			fs = append(fs, firing.Firing{Rule: "Errors", Labels: map[string]string{"service": "checkout"}, Start: at, End: at.Add(10 * time.Minute)})
 			if d == 31 {
 				fs = append(fs, firing.Firing{Rule: "Errors", Labels: map[string]string{"service": "checkout", "pod": "b"}, Start: at, End: at.Add(10 * time.Minute)})
@@ -725,8 +725,8 @@ func TestRuleGlance(t *testing.T) {
 	if v := view(""); !slices.Contains(v.Facts, ruleFact{"severity", "page"}) || v.Severity != "" {
 		t.Errorf("facts %+v; severity %q", v.Facts, v.Severity)
 	}
-	// Today is a Tuesday: the last week is Monday and today, two days; as
-	// long before, the Saturday and Sunday before it.
+	// Today is a Tuesday, noon: the last week is Monday and today, a day and
+	// a half; as long before, from Saturday noon.
 	v := view("weeks=1")
 	sum := func(lo, hi time.Time) (n, white, excused, caught int) {
 		for _, d := range v.Strip.Days {
@@ -737,14 +737,39 @@ func TestRuleGlance(t *testing.T) {
 		}
 		return
 	}
-	if want := s.l.Midnight(s.l.Day(now) - 3); !v.Before.Equal(want) {
-		t.Fatalf("weeks=1: before from %s, want %s", v.Before, want)
+	// The firings and catches of a span, from the ledger, to the second.
+	fired := func(lo, hi time.Time) (n, white, caught int) {
+		fs, err := s.l.Firings(context.Background(), ledger.FiringQuery{From: lo, To: hi, Rule: "Errors", Limit: 1000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range fs {
+			if !f.Excused {
+				n++
+				if f.White {
+					white++
+				}
+			}
+		}
+		ins, err := s.l.CaughtBy(context.Background(), "Errors", 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, in := range ins {
+			if !in.Start.Before(lo) && in.Start.Before(hi) {
+				caught++
+			}
+		}
+		return
+	}
+	if want := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC); !v.From.Equal(time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)) || !v.Before.Equal(want) {
+		t.Fatalf("weeks=1: from %s, before from %s, want %s: as long as from %s to now", v.From, v.Before, want, v.From)
 	}
 	n, white, _, caught := sum(v.From, now.Add(24*time.Hour))
 	if n != v.Firings || white != v.White || caught != v.Incidents || v.Panel.Firings != v.Firings {
 		t.Errorf("weeks=1: the strip's days have %d, %d, %d; the panel %d, %d, %d", n, white, caught, v.Firings, v.White, v.Incidents)
 	}
-	bn, bwhite, _, bcaught := sum(v.Before, v.From)
+	bn, bwhite, bcaught := fired(v.Before, v.From)
 	if got := v.Panel.FiringsBy; !got.On || got.By != v.Firings-bn {
 		t.Errorf("weeks=1: firings changed %+v, want %d", got, v.Firings-bn)
 	}

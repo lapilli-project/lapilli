@@ -301,26 +301,32 @@ func (s *ruleStrip) Latest() []stripDay {
 // labelSets, the labels it fires with, as far as is known.
 func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []version, labelSets []map[string]string) error {
 	name := v.Name
-	today := s.l.Day(s.now())
+	now := s.now()
+	today := s.l.Day(now)
 	first := today - stripDays + 1
 	end := s.l.Midnight(today + 1)
 	from := s.l.Midnight(t.weeks[len(t.weeks)-v.Period])
 	v.From = from
-	// As long a span before the period, when the ledger holds all of it:
-	// runs replayed from then on, and nothing of it pruned.
-	fromDay := s.l.Day(from)
-	before := s.l.Midnight(fromDay - (today + 1 - fromDay))
-	if began, err := s.l.RunsFrom(ctx); err != nil {
+	// The span before the period is as long as the period, to now, and ends
+	// where it starts. A number is set beside it only when what the number
+	// comes from holds all of it, and none of it was pruned (--keep).
+	before := from.Add(-now.Sub(from))
+	kept := s.cfg.Keep <= 0 || !before.Before(now.Add(-s.cfg.Keep))
+	held, err := s.holds(ctx, v, before)
+	if err != nil {
 		return err
-	} else if !began.IsZero() && !began.After(before) && (s.cfg.Keep <= 0 || !before.Before(s.now().Add(-s.cfg.Keep))) {
+	}
+	if kept && held {
 		v.Before = before
 	}
-	var cuts []time.Time
-	if !v.Before.IsZero() && s.l.Day(v.Before) < first {
-		cuts = append(cuts, v.Before)
-	}
+	cuts := make([]time.Time, 0, stripDays+2)
 	for d := first; d <= today+1; d++ {
 		cuts = append(cuts, s.l.Midnight(d))
+	}
+	if !v.Before.IsZero() {
+		if i, ok := slices.BinarySearchFunc(cuts, v.Before, time.Time.Compare); !ok {
+			cuts = slices.Insert(cuts, i, v.Before)
+		}
 	}
 	spans, err := s.l.RuleSpans(ctx, name, cuts)
 	if err != nil {
@@ -342,43 +348,36 @@ func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []versi
 		return x
 	}
 	strip := &ruleStrip{Width: stripDays * stripStep}
-	off := len(cuts) - 1 - stripDays
 	for i := 0; i < stripDays; i++ {
-		sp := spans[off+i]
-		strip.Days = append(strip.Days, stripDay{Day: s.l.Midnight(first + int64(i)).In(s.cfg.Loc).Format("2006-01-02"),
+		day := first + int64(i)
+		sp := sum(s.l.Midnight(day), s.l.Midnight(day+1))
+		strip.Days = append(strip.Days, stripDay{Day: s.l.Midnight(day).In(s.cfg.Loc).Format("2006-01-02"),
 			Kind: dayKind(sp), Span: sp, X: i * stripStep})
 	}
 	v.Strip = strip
 
 	p := rulePanel{Precision: v.Precision, Firings: v.Firings, Black: v.Black, Excused: v.Excused, Incidents: v.Incidents,
 		Notified: v.Notified, Notifications: v.Notifications, Asleep: v.NotifiedAsleep, OffHours: v.NotifiedOffHours, Backtest: "–"}
-	held := !v.Before.IsZero()
-	var was ledger.Span
-	if held {
-		was = sum(v.Before, from)
-		now, okNow := sharePct(v.White, v.Firings)
-		then, okThen := sharePct(was.White, was.Firings)
-		p.PrecisionBy = moved{On: okNow && okThen, By: now - then, Up: true}
-		p.FiringsBy = moved{On: true, By: v.Firings - was.Firings}
-		p.IncidentsBy = moved{On: true, By: v.Incidents - was.Caught, Up: true}
+	if !v.Before.IsZero() {
+		p.PrecisionBy, p.FiringsBy, p.IncidentsBy = besides(v.ruleLine, sum(v.Before, from))
 	}
 	if p.Near, err = s.nearOf(ctx, name, from); err != nil {
 		return err
 	}
-	if v.Notified && held {
+	if v.Notified && kept {
 		pg, err := s.notified(ctx)
 		if err != nil {
 			return err
 		}
-		// The pages hold the notifications of the twelve weeks shown, from
-		// the first kept.
-		if !pg.first.IsZero() && !pg.first.After(v.Before) && !v.Before.Before(s.shownFrom()) {
+		// The notifications' own record: from the first kept, and the
+		// pages hold those of the twelve weeks shown.
+		if !pg.first.IsZero() && !pg.first.After(before) && !before.Before(s.shownFrom()) {
 			o, err := s.owners(ctx)
 			if err != nil {
 				return err
 			}
 			n := 0
-			if x := pg.lines(v.Before, from, o.schedules(t.o.Hours).of)[name]; x != nil {
+			if x := pg.lines(before, from, o.schedules(t.o.Hours).of)[name]; x != nil {
 				n = x.Notifications
 			}
 			p.NotificationsBy = moved{On: true, By: v.Notifications - n}
@@ -386,8 +385,10 @@ func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []versi
 	}
 	if c := v.Check; c != nil {
 		p.Backtest, p.Either = fmt.Sprintf("%d%%", c.Share), c.Either()
-		if held {
-			cs, err := s.l.Checks(ctx, v.Before, from)
+		// A replay is checked a whole day at a time, to yesterday: as many
+		// whole days before the period as it has.
+		if days := today - s.l.Day(from); !v.Before.IsZero() && days > 0 {
+			cs, err := s.l.Checks(ctx, s.l.Midnight(s.l.Day(from)-days), from)
 			if err != nil {
 				return err
 			}
@@ -398,6 +399,37 @@ func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []versi
 	}
 	v.Panel = p
 	return s.marks(ctx, v, vs, labelSets, s.l.Midnight(first), end)
+}
+
+// besides are a rule's precision, firings and incidents caught over the
+// period beside those of the span before it, was: precision only when it
+// fired in both.
+func besides(l ruleLine, was ledger.Span) (precision, firings, incidents moved) {
+	now, okNow := sharePct(l.White, l.Firings)
+	then, okThen := sharePct(was.White, was.Firings)
+	return moved{On: okNow && okThen, By: now - then, Up: true}, moved{On: true, By: l.Firings - was.Firings},
+		moved{On: true, By: l.Incidents - was.Caught, Up: true}
+}
+
+// holds reports whether the ledger holds a rule's firings over all of a
+// span from at on: for one it replays, the replay's runs; for one copied
+// in, its copies without a gap: a cloud's alarm's history from when its
+// tie says, a rule recorded elsewhere from when its source's do.
+func (s *Server) holds(ctx context.Context, v *ruleView, at time.Time) (bool, error) {
+	switch {
+	case v.Tie != nil:
+		return v.Tie.Source != "" && !v.Tie.Since.IsZero() && !v.Tie.Since.After(at), nil
+	case v.Source != "":
+		from, _, err := s.l.Coverage(ctx, v.Source)
+		return err == nil && !from.IsZero() && !from.After(at), err
+	}
+	began, err := s.l.RunsFrom(ctx)
+	return err == nil && !began.IsZero() && !began.After(at), err
+}
+
+// Beside says some number is set beside the span before.
+func (p rulePanel) Beside() bool {
+	return p.PrecisionBy.On || p.FiringsBy.On || p.IncidentsBy.On || p.NotificationsBy.On || p.BacktestBy.On
 }
 
 // nearOf is how many incidents a rule nearly caught that started in the
