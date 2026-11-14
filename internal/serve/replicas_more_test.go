@@ -331,6 +331,125 @@ func TestReplicasSignOutsUnreadRefuse(t *testing.T) {
 	}
 }
 
+// A sign-out made while who signed out can't be read (here the request's
+// context is gone; a database that answers the write but not the read
+// alike) is kept: at once on this replica, which refuses a copy of the
+// cookie, and in the ledger once it can be, for the others.
+func TestReplicasSignOutKeptWhenUnread(t *testing.T) {
+	was := keepAgain
+	keepAgain = []time.Duration{50 * time.Millisecond, 100 * time.Millisecond}
+	t.Cleanup(func() { keepAgain = was })
+	s, idp := oidcServer(t, nil)
+	if !s.l.Shared() {
+		t.Skip("the ledgers are SQLite's")
+	}
+	h := s.Handler()
+	b := newBrowser(t, h)
+	w := b.do("GET", "/auth/login?next=/", nil)
+	back := idp.Authorize(t, w.Header().Get("Location"), claimsOf("ed@example.com"))
+	if w := b.do("GET", back, nil); w.Code != http.StatusSeeOther {
+		t.Fatalf("signed in: %d", w.Code)
+	}
+	copyOf := map[string]*http.Cookie{}
+	for k, v := range b.cookies {
+		c := *v
+		copyOf[k] = &c
+	}
+	other := newBrowser(t, h)
+	other.cookies = copyOf
+	if code := other.do("GET", "/api/v1/runs", nil).Code; code != http.StatusOK {
+		t.Fatalf("a copy of the cookie before the sign-out: %d", code)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r := httptest.NewRequest("POST", "/auth/logout", nil).WithContext(ctx)
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	for _, c := range b.cookies {
+		r.AddCookie(c)
+	}
+	s.logout(httptest.NewRecorder(), r)
+	if code := other.do("GET", "/api/v1/runs", nil).Code; code != http.StatusUnauthorized {
+		t.Errorf("a copy of the cookie after a sign-out made while sign-outs couldn't be read: %d, want 401", code)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		raw, err := s.l.Meta(context.Background(), metaSignedOut)
+		if err == nil && strings.Contains(raw, "ed@example.com") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the sign-out never reached the ledger, for the other replicas: %q %v", raw, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// A stranger the identity provider signs in, whom no role lets in, keeps
+// nothing in the ledger: the state is used once among the replicas only
+// for someone a role lets in. With a provider anyone can sign in to,
+// strangers can't fill it, and refuse everyone their sign-in.
+func TestReplicasStrangersKeepNoSignInStates(t *testing.T) {
+	s, idp := oidcServer(t, nil)
+	if !s.l.Shared() {
+		t.Skip("the ledgers are SQLite's")
+	}
+	h := s.Handler()
+	c := pgConn(t, s)
+	signIn := func(who string) *browser {
+		b := newBrowser(t, h)
+		w := b.do("GET", "/auth/login?next=/", nil)
+		back := idp.Authorize(t, w.Header().Get("Location"), claimsOf(who))
+		b.do("GET", back, nil)
+		return b
+	}
+	count := func() int {
+		var n int
+		if err := c.QueryRow(context.Background(), "SELECT count(*) FROM replica_once WHERE key LIKE 'once:signin:%'").Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	for i := range 20 {
+		b := signIn("mallory@elsewhere.invalid")
+		if i == 0 {
+			if code := b.do("GET", "/api/v1/runs", nil).Code; code != http.StatusForbidden {
+				t.Fatalf("the stranger's session on the API: %d, want 403", code)
+			}
+		}
+	}
+	if n := count(); n > 0 {
+		t.Errorf("a stranger no role lets in kept %d sign-in states in the ledger", n)
+	}
+	signIn("ed@example.com")
+	if n := count(); n != 1 {
+		t.Errorf("someone a role lets in kept %d sign-in states, want 1", n)
+	}
+}
+
+// With the ledger's uses once at their bound, a sign-in is still let in,
+// its state checked by this replica's own set: no one is refused their
+// sign-in until the uses over are swept.
+func TestReplicasSignInWhenStatesFull(t *testing.T) {
+	s, idp := oidcServer(t, nil)
+	if !s.l.Shared() {
+		t.Skip("the ledgers are SQLite's")
+	}
+	c := pgConn(t, s)
+	if _, err := c.Exec(context.Background(), `INSERT INTO replica_once (key, until)
+		SELECT 'once:test:' || n, 9999999999 FROM generate_series(1, 100000) AS n`); err != nil {
+		t.Fatal(err)
+	}
+	b := newBrowser(t, s.Handler())
+	w := b.do("GET", "/auth/login?next=/", nil)
+	back := idp.Authorize(t, w.Header().Get("Location"), claimsOf("ed@example.com"))
+	if w := b.do("GET", back, nil); w.Code != http.StatusSeeOther {
+		t.Fatalf("a sign-in with the uses once at their bound: %d", w.Code)
+	}
+	if code := b.do("GET", "/api/v1/runs", nil).Code; code != http.StatusOK {
+		t.Errorf("the session signed in with the uses once at their bound: %d", code)
+	}
+}
+
 // A leader whose work makes no step for longer than one may gives its
 // lease up: stuck says so.
 func TestReplicasStuckWork(t *testing.T) {
