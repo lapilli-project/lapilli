@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-11-15
+
 The way to change things: the fourth phase of docs/design/ui.md. Still no
 script, against WCAG 2.2 AA, in four languages. No ledger schema change;
 the API and MCP answer as they did. And a security fix, to what an agent
