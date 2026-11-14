@@ -72,6 +72,8 @@ query has bounds: see Changed.
 - The rules list's Rule column has badges for the sentences it had under
   a rule's name; the note's status is a badge, and the Noisy column is
   gone. The suggestion stays, as one line.
+- The team is picked in the bar alone: the overview, the incidents and the
+  tasks no longer have a row of team links of their own.
 - The rules that didn't fire in the weeks shown, listed below the rules
   list, include those that fired in the twelve weeks kept but not in the
   weeks shown, which weren't on the page at all.

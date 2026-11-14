@@ -8,7 +8,6 @@
 {{with .Run}}{{if .Error}}{{t "Last run %s, failed: %s." (at $loc .Finished) .Error}}{{else}}{{t "Last run %s." (at $loc .Finished)}}{{end}}{{end}}
 {{if .Backlog}}<strong>{{t "Catching up: firings are in up to %s." (at $loc .Cursor)}}</strong>{{end}}
 {{with .Check}}<br>{{t "That week, the replay beside what really fired: %d%% alike, of %d firings." .Share .Either}}{{with .Differ}} {{t "Replayed differently:"}}{{range $i, $r := .}}{{if $i}},{{end}} <a href="{{$.Rule $r}}"><bdi>{{$r}}</bdi></a>{{end}}.{{end}}{{end}}</p>
-{{if .Team.Teams}}<p class="tabs">{{t "Team"}}: <a href="{{$.Link "/" "team" ""}}"{{if not .Team.Name}} aria-current="page"{{end}}>{{t "all"}}</a>{{range .Team.Teams}} <a href="{{$.Link "/" "team" .}}"{{if eq . $.View.Team.Name}} aria-current="page"{{end}}>{{.}}</a>{{end}}</p>{{end}}
 
 <section class="tiles" aria-label="{{t "Last week"}}">
 {{range .Tiles}}<div class="tile">

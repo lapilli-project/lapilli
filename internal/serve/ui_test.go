@@ -287,8 +287,12 @@ func TestDefaultTeam(t *testing.T) {
 	if !strings.Contains(body, "pay&#39;s") || strings.Contains(body, "search&#39;s") || !strings.Contains(body, "payments (your team)") {
 		t.Errorf("/tasks for pat isn't payments', as pat's own team:\n%s", body)
 	}
-	if !strings.Contains(body, `href="/tasks?status=open&amp;team="`) {
-		t.Error("/tasks for pat: no link to every team's")
+	if !strings.Contains(body, `<select name="team"><option value="">All teams</option>`) {
+		t.Error("/tasks for pat: the bar offers no way to every team's")
+	}
+	// The bar alone picks the team: no second picker on the page.
+	if strings.Contains(body, "Team: <a href=") {
+		t.Error("/tasks for pat: team links beside the bar's picker")
 	}
 	_, body, _ = ui(t, h, http.MethodGet, "/tasks?team=", "pat@example.com", "", nil)
 	if !strings.Contains(body, "pay&#39;s") || !strings.Contains(body, "search&#39;s") || strings.Contains(body, "(your team)") {
