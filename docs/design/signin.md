@@ -182,9 +182,12 @@ than they last now.
   It is a POST checked by the cross-origin protection every write has, and
   the cookie is SameSite=Lax: a page elsewhere can't sign people out. The
   provider's own session is left as it is (`/auth/signed-out` says so).
-- **Why a cookie, not a table.** One replica, one writer (SQLite's, or the
-  sessions would be written on every sign-in, and would need a schema
-  change. A signed cookie needs nothing kept but who signed out.
+- **Why a cookie, not a table.** Sessions in a table would be written on
+  every sign-in, and would need a schema change. A signed cookie needs
+  nothing kept but who signed out, and every replica sharing a Postgres
+  ledger takes it, signed with the key all of them mount
+  (`--session-key-file`; [replicas.md](replicas.md)): no pod need be the one
+  a person came to. A sign-in's state is used once among the replicas.
 - **Size.** A browser keeps 4 KB a cookie. When the groups don't fit, only
   those roles are given by are kept (named in a role list, or given a role
   in the UI then); a role given to another group later applies from the

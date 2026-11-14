@@ -192,14 +192,44 @@ sends the password in clear to anything in the path that declines TLS) is
 refused at start; `require` or `disable` is taken at its word, and serve warns. Give the database to the ledger's role alone (`REVOKE CONNECT ON
 DATABASE lapilli FROM PUBLIC`): any role that can connect can take the
 ledger's lock and keep serve from starting. No
-PersistentVolumeClaim is made. It is still one replica, replaced with
-`Recreate`: one process writes a ledger at a time, and a second is refused
-the ledger's lock, which is a session's, so connect directly or through a
-pooler in session mode, not transaction mode. With
+PersistentVolumeClaim is made, and `serve.replicas` may be more than one
+(below). The ledger's lock, and each write's turn, are a session's, so
+connect directly or through a pooler in session mode, not transaction mode. With
 `serve.networkPolicy.egress`, `serve.ledger.postgres.to` names where the
 database is, as NetworkPolicy peers, and `port` its port (5432). A SQLite
 ledger moves there once, with serve stopped: `lapilli ledger copy --ledger
 DIR --to-url-file FILE`, from a pod that mounts both.
+
+### Several replicas
+
+```sh
+helm upgrade lapilli ... --set serve.ledger.postgres.secret.name=lapilli-ledger --set serve.replicas=3
+```
+
+On a Postgres ledger, `serve.replicas` pods share it
+(`docs/design/replicas.md` in the repository): one leads, on a lease the
+database keeps, and runs what must run once (the runs, the jobs, the
+digest and reports, the outbox, changes, the rules watched); every pod
+serves the UI, the API, MCP, sign-in and the ports. When the leader's pod
+is killed, another leads within some 17 seconds; when it stops, within 2.
+
+- **Postgres only.** `serve.replicas` above 1 is refused without
+  `serve.ledger.postgres.secret`: a SQLite ledger is one pod's file.
+- **One at a time**: `RollingUpdate` (`maxSurge: 1`, `maxUnavailable: 0`),
+  each new pod a follower until the leader it replaces gives the lease up;
+  a PodDisruptionBudget lets `serve.podDisruptionBudget.maxUnavailable` (1)
+  go at once. One replica stays `Recreate`.
+- **From 0.34 or before, upgrade with `serve.replicas: 1` first**:
+  its pod holds the ledger alone, and refuses new pods until it stops,
+  which `Recreate` waits for. Then raise it.
+- **No sticky sessions**: with `serve.signIn.oidc`, every pod mounts the
+  session key's Secret (the chart's own, or `sessionKeySecret.name`); the
+  chart refuses replicas without one.
+- **Readiness**: a pod is ready once a run is recorded, as before, and
+  while it reaches the database. `/readyz` says which pod leads, and
+  `lapilli_serve_leader` is 1 in the leader's metrics, 0 in the others';
+  the ServiceMonitor scrapes each pod. What the leader's work counts
+  (`lapilli_serve_runs_total`, notices sent) is in its pod's alone.
 
 ## Who people are
 

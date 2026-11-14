@@ -2,6 +2,90 @@
 
 ## [Unreleased]
 
+`lapilli serve` runs as several replicas on one Postgres ledger: one leads,
+and runs what must run once; every replica serves the rest
+(docs/design/replicas.md). No ledger schema change: the replicas' own
+tables are Postgres's alone, made as a ledger opens, and none is copied.
+SQLite is as it was: one process, the same files. Read "Before you
+upgrade".
+
+### Added
+
+- **Replicas on a Postgres ledger.** Every `serve` on a Postgres ledger is
+  a replica, alone or with others, sharing the ledger's advisory lock.
+  - **A leader, on a lease** the database keeps (`replica_lease`), by its
+    clock, at a term one more each time it changes hands. The leader runs
+    the runs and the backfill, judging again, the incidents and deploys
+    files, the check of the replay, near misses, proposals, the digest and
+    the reports, the outbox, changes carried out (Grafana, a ruler, a
+    cloud's alarms), the rules watched and their versions, the rules'
+    history, the on-call feeds, and pruning. Every replica serves the UI,
+    the API, MCP, `/metrics`, sign-in, and the incidents' and
+    notifications' ports, and writes what it is sent.
+  - **Takeover**: a follower takes the lease within 17 s of the leader
+    being killed or cut off (15.2 s measured, the leader's process
+    `SIGKILL`ed), within 2 s of it stopping, which gives the lease up.
+  - **Fencing**: the leader stops leading by its own clock 2 s before its
+    lease ends in the database, its work cancelled at once; each of its
+    jobs looks at the lease first; each write it makes checks the lease in
+    the database, and its clock before it commits; each send waits for
+    `Hold`, which says whether it still leads. A leader whose lease went
+    elsewhere sends and writes nothing as the leader.
+  - **Each write takes the writers' turn across the replicas**
+    (`pg_advisory_xact_lock`): what reads then writes (merged values, the
+    limits on windows, roles and proposals, approvals, `TellOnce`) is as
+    right as with one process. A session cut off in a transaction is ended
+    by the server after 60 s idle in it.
+  - **The caches told of the others' writes**: the generations pages are
+    cached by, and which weeks' firings changed, kept in the ledger
+    (`replica_gens`, `replica_weeks`) and read before each request: a write
+    on one replica shows on the next request to any other. Ids cached are
+    dropped when another replica deleted or renamed some.
+  - **Notices claimed one at a time** (`FOR UPDATE SKIP LOCKED`, under the
+    lease): two leaders for a moment never send one twice. The digest
+    posted to Slack is claimed for its week too.
+  - **Rate limits shared**: the tokens' and the notifications port's
+    buckets are the ledger's, so several replicas let through what one
+    did; the busy guards (one heavy request, one write a token) stay each
+    replica's.
+  - **Sign-in across replicas**: a sign-in's state is used once among
+    them; the approval forms' key is the ledger's; a second replica with a
+    sign-in of lapilli's own and no `--session-key-file` is refused.
+  - **A follower shows what the leader is doing**, as the leader says it
+    every 2 s; it reads the rules for what they say, and the on-call turns
+    kept, as the leader does, without recording a version.
+  - **`/readyz` says which replica leads**, and a replica that can't reach
+    the database isn't ready. `/metrics` has `lapilli_serve_leader` and
+    `lapilli_serve_replicas`.
+- **The chart's `serve.replicas`**, more than one on Postgres alone:
+  `RollingUpdate` one pod at a time (`maxSurge: 1`, `maxUnavailable: 0`),
+  a PodDisruptionBudget (`serve.podDisruptionBudget.maxUnavailable`, 1),
+  and the session key's Secret required with `serve.signIn.oidc`. One
+  replica stays `Recreate`.
+- `test/e2e/replicas.sh`: three replicas on kind, the leader's process
+  killed, another leading within the lease, every notice once, a rolling
+  restart; and `test/e2e/postgres.sh` runs three replicas and kills one.
+
+### Changed
+
+- **A second `serve` on a Postgres ledger is a replica**, no longer
+  refused. `lapilli ledger copy` takes the ledger alone, as serve did, and
+  is refused while any replica runs; a replica is refused while a copy,
+  or a serve of 0.34 or before, holds the ledger alone. Replicas don't
+  count themselves in `schema_version.writers`.
+- A Postgres ledger's migrations take the writers' turn, so replicas
+  started at once migrate it once; a replica that finds the ledger
+  migrated by a newer lapilli stops.
+
+### Before you upgrade
+
+- **From 0.34 with `serve.ledger.postgres`, upgrade with
+  `serve.replicas: 1`** (the default), then raise it: the 0.34 pod holds
+  the ledger alone and refuses new pods until it stops, which `Recreate`
+  waits for and `RollingUpdate` would not.
+- **Each request to a Postgres ledger's serve asks the database once
+  more**, for the others' writes, one replica or several.
+
 ## [0.35.0] - 2026-11-14
 
 The web UI's frame, and the rules list, redone: a sidebar in four groups,

@@ -2,8 +2,9 @@
 
 Status: built, for v0.34.0. `lapilli serve` keeps its ledger in
 SQLite by default, as it always has; `--ledger-url-file FILE` keeps it in a
-Postgres database instead. Still one replica: what more than one would take
-is at the end. The companion to [serve.md](serve.md) (the ledger) and
+Postgres database instead. Since the release after 0.34.1, several replicas
+of serve share it, one leading ([replicas.md](replicas.md)); 0.34 was one
+replica, as below. The companion to [serve.md](serve.md) (the ledger) and
 [signin.md](signin.md) (who signed out, kept in the ledger).
 
 ## Why
@@ -67,9 +68,9 @@ lapilli serve --ledger-url-file /var/run/lapilli/ledger/url ...
   its schema first: the lock is the first schema's, and would let a second
   process write the ledger another holds.
 - **Who can connect.** The lock is an advisory lock, which any role that
-  can connect to the database can take: one that does keeps `serve` from
-  starting, refused "in use by another process", which names the role
-  that holds it. Give the database to the ledger's role alone: `REVOKE
+  can connect to the database can take, alone: one that does keeps
+  `serve`'s replicas from starting, refused "in use by another process",
+  which names the role that holds it. Give the database to the ledger's role alone: `REVOKE
   CONNECT ON DATABASE lapilli FROM PUBLIC; GRANT CONNECT ON DATABASE
   lapilli TO lapilli;`.
 - **Timeouts.** **Builder's decision: lapilli sets no `statement_timeout`
@@ -220,92 +221,66 @@ in `FROM` without a name (which Postgres refuses before 16), and
   check its client every 30 seconds (`tcp_keepalives_*`), where it can, so
   a pod that died lets the lock go within a minute.
 - **Through a pooler** in transaction mode (PgBouncer's), not at all: the
-  lock is a session's, and so are prepared statements. In session mode, or
-  directly.
+  lock is a session's, and so are prepared statements and the writers'
+  turn's lock ([replicas.md](replicas.md)). In session mode, or directly.
 - **Backups** are the database's (`pg_dump`, a managed service's point in
   time recovery), not the volume's.
 
-## One writer, and why still one replica
+## One writer, and then replicas
 
-`serve` writes as SQLite lets one process write: one connection, writes
-taking turns in the process (`Ledger.mu`), each in a transaction. A write
-reads what it wrote, and nothing else changes under it: no one else
-writes. Reads go through four other connections, each transaction of reads
-as of one moment (`REPEATABLE READ`, `READ ONLY`), as SQLite's WAL gives.
+0.34 wrote a Postgres ledger as SQLite lets one process write one: one
+connection, writes taking turns in the process (`Ledger.mu`), each in a
+transaction, and an advisory lock that refused a second process. Reads go
+through four other connections, each transaction of reads as of one moment
+(`REPEATABLE READ`, `READ ONLY`), as SQLite's WAL gives; that is as it was.
 
-More than that is assumed by what the process keeps beside the ledger: the
-ids of rules and series it has made, the generation pages are cached by,
-which weeks changed when, the outbox it sends from, the hourly runs'
-schedule, the rate limits. A second process writing the same ledger would
-send every notice twice, run every hour twice, and serve pages from caches
-the other made stale. With SQLite, the volume (ReadWriteOnce) and the
-chart's `Recreate` keep it to one; with Postgres anyone who has the string
-can start another.
+Since, `serve`'s replicas share the ledger, one leading
+([replicas.md](replicas.md)), and what stays of the one writer is:
 
-So the ledger has a **lock**: an advisory lock, taken by the writer's
-session on every connection it makes (`pg_try_advisory_lock`, keyed by
-`lapl` and the schema's name, so two ledgers in two schemas of one
-database each have one).
-
-- **A second process is refused**, saying which session holds the lock,
-  from where and since when: "the ledger is in use by another process:
-  Postgres session 4242 ("lapilli", from 10.0.3.7, connected
-  2026-11-13T06:00:00Z) holds its lock". `lapilli ledger copy` is refused
-  the same way. **Builder's decision: refused, not waiting.** With the
-  chart's `Recreate` the old pod has stopped, and let the lock go, before
-  the new one starts; a pod that died lets it go within a minute, and
-  Kubernetes starts the refused pod again, with backoff, until then. A
-  process that waited would hide a second deployment, or an operator's
-  `lapilli serve` run by hand, behind a pod that never becomes ready.
-- **On shutdown** the lock is let go at once (`pg_advisory_unlock`), before
-  the connections close, so the next pod doesn't wait for the server to
-  notice.
+- **The lock**, an advisory lock keyed by `lapl` and the schema's name
+  (so two ledgers in two schemas of one database each have one), now
+  taken **shared** by every session of every replica, and **alone** by a
+  process that must be the ledger's only writer: `lapilli ledger copy`,
+  and serve of 0.34 or before. The two refuse each other, saying which
+  session holds the lock, from where and since when: "the ledger is in use
+  by another process: Postgres session 4242 (role "lapilli", from
+  10.0.3.7, connected 2026-11-13T06:00:00Z) holds its lock ...".
+  **Builder's decision: refused, not waiting**, as before.
+- **On shutdown** the lock is let go at once, on each of the replica's
+  sessions (`pg_advisory_unlock_shared`, `pg_advisory_unlock_all`), before
+  they close, so a copy doesn't wait for the server to notice.
 - **A dropped connection** is made again by `database/sql`; the new session
-  takes the lock again. Should the server still hold it for one of this
-  process's own sessions, which it can for minutes after a network fault,
-  that session is ended (`pg_terminate_backend`, its own role's) and the
-  lock taken. A session is this process's own from when the writer makes
-  it, before it asks for the lock (the answer can be lost on its way), until
-  the lock is held again; it is its pid and when it began, as a pid is
-  given again, maybe to another process's session that took the ledger. Each
-  process that takes the lock counts one more in `schema_version.writers`;
-  a connection made again that finds another count finds that another
-  process took the ledger in between, and wrote: this one writes nothing
-  more (`ErrLockLost`), and `serve` stops, to be started again on what is
-  in the ledger now. One that finds its own count reads its caches again,
-  in case a failover lost what it last wrote.
-- **What goes out of the process** is sent only while it holds the lock:
-  a notice of the outbox, which readers, holding no lock, find due, and the
-  week's digest are sent after the writer's session says it still holds it
-  (`Ledger.Hold`), each one, so a process that lost the ledger sends none
-  of what the next will. A rule's or an alarm's change is written through
-  the writer before it is applied (`Move`); a subscription is confirmed as
-  an incoming request asks, which twice does no harm.
-  `TestSendersHoldTheLedger` reads serve's code for every way out of the
-  process, and fails on one it doesn't know.
-- `signin.md`'s guarantees hold: who signed out is merged into `meta` in
-  one transaction and read on each request; with one process, there is no
-  other to sign out at.
+  takes the lock again, and ends the writer's own earlier sessions the
+  server still keeps (`pg_terminate_backend`, its own role's), known by
+  their pid and when they began, as a pid is given again: one kept in a
+  transaction would hold the writers' turn. A process alone that finds its
+  own earlier session holding the lock ends it so too, as before. Each
+  process that takes the lock alone counts one more in
+  `schema_version.writers`; replicas don't. A connection made again that
+  finds another count finds that a process wrote the ledger alone in
+  between: this one writes nothing more (`ErrLockLost`), and `serve`
+  stops, to be started again on what is in the ledger now. One that finds
+  its own count reads its caches again, in case a failover lost what it
+  last wrote.
+- **What goes out of the process** is sent only while it holds the lock
+  and, for what the leader sends, leads (`Ledger.Hold`): a notice, claimed
+  first; the week's digest, claimed too. A rule's or an alarm's change is
+  written through the writer, under the lease, before it is applied
+  (`Move`); a subscription is confirmed as an incoming request asks, which
+  twice does no harm. `TestSendersHoldTheLedger` reads serve's code for
+  every way out of the process, and fails on one it doesn't know.
+- `signin.md`'s guarantees hold across replicas: who signed out is merged
+  into `meta` in one transaction, under the writers' turn, and read on
+  each request.
 
-### What more than one replica would add
+### What more than one replica added
 
-What would let several processes serve one ledger, which is not in this:
-
-- **A leader** for what must run once: the hourly runs, the digest and
-  reports, the outbox, the trackers' and checks' jobs. The advisory lock
-  becomes a lease the others wait on, and take over when its holder is
-  gone.
-- **The caches told of others' writes.** The generation pages are cached
-  by, and which weeks changed, kept in the database (or sent with
-  `LISTEN`/`NOTIFY`) rather than in the process.
-- **Writes from any replica**: the UI's and the API's, each in its own
-  transaction, as now, but with ids read back rather than cached, and the
-  places that read-modify-write (`UpdateMeta`, the limits on windows and
-  grants) at `SERIALIZABLE` or under row locks.
-- **The outbox claimed** a notice at a time (`FOR UPDATE SKIP LOCKED`), so
-  two senders never send one twice.
-- **Rate limits and the busy guards** shared, or kept per replica and
-  divided.
+Built ([replicas.md](replicas.md)): a leader for what must run once, on a
+lease the others take when its holder is gone; the caches told of the
+others' writes through the database; writes from any replica, each taking
+the writers' turn; the outbox claimed a notice at a time (`FOR UPDATE SKIP
+LOCKED`); the rate limits that guard the ledger shared, the busy guards
+each replica's.
 
 ## Moving a ledger
 
