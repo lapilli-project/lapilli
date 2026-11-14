@@ -30,7 +30,7 @@
 {{with .Empty}}{{template "empty" .}}{{end}}
 {{if .Quiet}}
 <details><summary>{{if .QuietOlder}}{{if eq .Weeks 1}}{{t "%d rules didn't fire in the last week" (len .Quiet)}}{{else}}{{t "%d rules didn't fire in the last %d weeks" (len .Quiet) .Weeks}}{{end}}{{else}}{{t "%d rules never fired in the last twelve weeks" (len .Quiet)}}{{end}}</summary>
-<p class="quiet">{{range $i, $r := .Quiet}}{{if $i}}, {{end}}<a href="{{$.Rule $r.Name}}"><bdi>{{$r.Name}}</bdi></a>{{with $r.Facts}} <a class="hint" href="{{$.Link (print "/rules/" (path $r.Name) "#says")}}">({{t "what it says: %d problems of fact" .}})</a>{{end}}{{end}}</p></details>
+<p class="quiet">{{range $i, $r := .Quiet}}{{if $i}}, {{end}}<a href="{{$.Rule $r.Name}}"><bdi>{{$r.Name}}</bdi></a>{{with $r.Facts}} <a class="hint" href="{{$.RuleAt $r.Name "#says"}}">({{t "what it says: %d problems of fact" .}})</a>{{end}}{{end}}</p></details>
 {{end}}
 </div>
 </div>
@@ -55,5 +55,5 @@ its name; the sign is for the eye alone. */}}
 {{define "badges"}}{{$r := .V}}<span class="badges"><span class="badge perf-{{$r.Perf}}">{{if eq $r.Perf "noisy"}}<span aria-hidden="true">●</span> {{if $r.Streak}}{{t "Noisy, %d wk" $r.Streak}}{{else}}{{t "Noisy"}}{{end}}{{else if eq $r.Perf "silent"}}<span aria-hidden="true">–</span> {{t "Silent"}}{{else if eq $r.Perf "spare"}}<span aria-hidden="true">⧉</span> {{t "Spare"}}{{else}}<span aria-hidden="true">○</span> {{t "OK"}}{{end}}</span>
 {{- range $r.Trust}} <span class="badge trust"{{if eq . "recorded"}} title="{{t "recorded in %s" $r.Source}}"{{else if eq . "unreplayed"}} title="{{t "not replayed: %s" $r.Unsupported}}"{{end}}>{{if eq . "differs"}}<span aria-hidden="true">≠</span> {{t "Differs"}}{{else if eq . "unreplayed"}}<span aria-hidden="true">◌</span> {{t "Not replayed"}}{{else}}<span aria-hidden="true">⇣</span> {{t "Recorded only"}}{{end}}</span>{{end}}
 {{- with $r.Status}} <span class="badge pill {{.}}"><span aria-hidden="true">{{if eq . "keep"}}✓{{else if eq . "tune"}}±{{else}}⊘{{end}}</span> {{t .}}</span>{{end}}
-{{- if $r.Proposed}} <a class="badge prog" href="{{$.P.Link (print "/rules/" (path $r.Name) "#proposals") "tab" "proposals"}}"><span aria-hidden="true">✎</span> {{t "Proposed"}}</a>{{end}}
-{{- with $r.Facts}} <a class="badge check" href="{{$.P.Link (print "/rules/" (path $r.Name) "#says")}}"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "%d to check" .}}</a>{{end}}</span>{{end}}
+{{- if $r.Proposed}} <a class="badge prog" href="{{$.P.RuleAt $r.Name "#proposals" "tab" "proposals"}}"><span aria-hidden="true">✎</span> {{t "Proposed"}}</a>{{end}}
+{{- with $r.Facts}} <a class="badge check" href="{{$.P.RuleAt $r.Name "#says"}}"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "%d to check" .}}</a>{{end}}</span>{{end}}

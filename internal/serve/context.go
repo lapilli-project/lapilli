@@ -142,6 +142,22 @@ func (c pageCtx) Link(target string, kv ...any) string {
 // Rule is a rule's page, with the context.
 func (c pageCtx) Rule(name string) string { return c.Link("/rules/" + url.PathEscape(name)) }
 
+// periodOf are the pages that show a period of their own, other than a
+// rule's page's twelve weeks, by the weeks each shows when the URL doesn't
+// say: the rules, the incidents.
+var periodOf = map[string]int{"rules": 4, "incidents": 4}
+
+// ofPage is the context as a link to a rule's page from a page takes it:
+// with the weeks the page shows, when it shows a period of its own and the
+// URL doesn't say, so that the rule's numbers are over the weeks the
+// reader saw. A rule's page shows twelve weeks unless asked.
+func (c pageCtx) ofPage(page string) pageCtx {
+	if c.Weeks == 0 {
+		c.Weeks = periodOf[page]
+	}
+	return c
+}
+
 // Incident is an incident's page, with the context.
 func (c pageCtx) Incident(id string) string { return c.Link("/incidents/" + url.PathEscape(id)) }
 

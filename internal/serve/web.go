@@ -801,8 +801,16 @@ func (p page) Link(target string, kv ...any) string { return p.Ctx.Link(target, 
 func (p page) Hidden() []field { return p.Ctx.hidden() }
 
 // Rule is a rule's page, Incident an incident's, with the page context.
-func (p page) Rule(name string) string   { return p.Ctx.Rule(name) }
+// From a page that shows a period of its own, a rule's page has its weeks:
+// see pageCtx.ofPage.
+func (p page) Rule(name string) string   { return p.RuleAt(name, "") }
 func (p page) Incident(id string) string { return p.Ctx.Incident(id) }
+
+// RuleAt is a part of a rule's page, frag ("#says", or ""), with the pairs
+// kv as Link sets them, and the period of the page it is on.
+func (p page) RuleAt(name, frag string, kv ...any) string {
+	return p.Ctx.ofPage(p.Page).Link("/rules/"+url.PathEscape(name)+frag, kv...)
+}
 
 // errLongQuery is a page asked with a query past maxQuery bytes.
 var errLongQuery = errors.New("this address asks too much: a page's query is 8192 bytes at most")

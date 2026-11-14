@@ -175,7 +175,9 @@ type barView struct {
 
 // barOf is a page's bar.
 func barOf(name string, r *http.Request, c pageCtx) barView {
-	b := barView{Search: c.hidden(), WeeksIn: 4}
+	// The search, from a page of a period of its own, has its weeks: a rule
+	// it opens is over them.
+	b := barView{Search: c.ofPage(name).hidden(), WeeksIn: 4}
 	if name == "rule" {
 		b.WeeksIn = weeks // a rule's page shows twelve weeks, as it always has
 	}
