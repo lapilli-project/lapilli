@@ -18,6 +18,7 @@ import (
 	mrand "math/rand/v2"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -41,7 +42,11 @@ const writeClass = 0x6c617077
 
 // replicaTables are the replicas' own, made with the ledger in Postgres
 // alone, as schema_version is: none of them is the ledger's, none is
-// copied (tables), and SQLite has none.
+// copied (tables), and SQLite has none. They are made, or changed, by a
+// start that finds them older than replicasVersion (replicasMade), in
+// replica_schema: one that finds them as they are makes nothing, since
+// DDL waits for any session that read them (pg_dump, for its whole dump)
+// and needs the tables' owner.
 const replicaTables = `
 CREATE TABLE IF NOT EXISTS replica_lease (
 	one BIGINT PRIMARY KEY CHECK (one = 1),
@@ -96,6 +101,10 @@ CREATE TABLE IF NOT EXISTS replica_fence (
 	holder TEXT COLLATE "C" NOT NULL,
 	term BIGINT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS replica_schema (
+	one BIGINT PRIMARY KEY CHECK (one = 1),
+	version BIGINT NOT NULL
+);
 CREATE OR REPLACE FUNCTION replica_fenced() RETURNS trigger LANGUAGE plpgsql SET search_path FROM CURRENT AS $fenced$
 BEGIN
 	PERFORM 1 FROM replica_lease WHERE holder = NEW.holder AND term = NEW.term AND until > clock_timestamp() FOR SHARE;
@@ -114,6 +123,45 @@ DO $made$ BEGIN
 END
 $made$;
 `
+
+// replicasVersion is replicaTables' version, raised with each change to
+// them (TestReplicaTablesVersioned).
+const replicasVersion = 1
+
+// replicaNames are the replicas' tables, every one replicaTables makes.
+var replicaNames = []string{"replica_lease", "replica_gens", "replica_signals", "replica_log", "replica_weeks",
+	"replica_members", "replica_buckets", "replica_once", "replica_fence", "replica_schema"}
+
+// replicasMade says the replicas' tables are as this lapilli makes them,
+// or as a later one does: each is there, and replica_schema says
+// replicasVersion or more. Read from the catalog, which a lock taken before
+// (schema_version's) has the session read afresh.
+func replicasMade(ctx context.Context, tx *sql.Tx) (bool, error) {
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM information_schema.tables
+		WHERE table_schema = current_schema() AND table_name IN ('`+strings.Join(replicaNames, "', '")+`')`).Scan(&n); err != nil || n < len(replicaNames) {
+		return false, err
+	}
+	var v int64
+	switch err := tx.QueryRowContext(ctx, "SELECT version FROM replica_schema WHERE one = 1").Scan(&v); {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	return v >= replicasVersion, nil
+}
+
+// makeReplicas makes the replicas' tables, or changes them to
+// replicasVersion, and says so in replica_schema.
+func makeReplicas(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, replicaTables); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO replica_schema (one, version) VALUES (1, ?)
+		ON CONFLICT (one) DO UPDATE SET version = greatest(replica_schema.version, excluded.version)`, replicasVersion)
+	return err
+}
 
 // How the replicas share a ledger. Replaced in tests.
 var (

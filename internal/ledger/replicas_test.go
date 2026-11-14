@@ -98,9 +98,14 @@ func TestReplicasStartTogether(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// As replicas.md says to, going back to 0.35.
 	if _, err := l.w.ExecContext(ctx, `DROP TABLE replica_lease, replica_gens, replica_signals, replica_log, replica_weeks, replica_members,
-		replica_buckets, replica_once, replica_fence CASCADE; DROP FUNCTION replica_fenced()`); err != nil {
+		replica_buckets, replica_once, replica_fence, replica_schema CASCADE; DROP FUNCTION replica_fenced()`); err != nil {
 		t.Fatal(err)
+	}
+	var left int
+	if err := l.w.QueryRowContext(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name LIKE 'replica\_%'`).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("the replicas' tables left after the statement replicas.md gives: %d %v", left, err)
 	}
 	l.Close()
 	together(t, u)

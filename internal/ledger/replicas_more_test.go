@@ -10,7 +10,9 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -554,13 +556,176 @@ func TestReplicasStopAtANewerMigration(t *testing.T) {
 	}
 }
 
-// A migration takes the writers' turn: a replica's write that holds it
-// holds the migration up, as the migration holds up each write after it,
-// which then finds the schema it leaves (TestReplicasStopAtANewerMigration).
-func TestReplicasMigrationTakesTheTurn(t *testing.T) {
+// ddlTimings has a migration's DDL wait for a lock within, tried again
+// each every, for so long, for the test.
+func ddlTimings(t *testing.T, within, every, long time.Duration) {
+	t.Helper()
+	was := []time.Duration{ddlWithin, ddlEvery, ddlFor}
+	ddlWithin, ddlEvery, ddlFor = within, every, long
+	t.Cleanup(func() { ddlWithin, ddlEvery, ddlFor = was[0], was[1], was[2] })
+}
+
+// dumping is a session holding ACCESS SHARE on tables, as pg_dump does on
+// each it dumps, for the whole dump, until the test lets them go.
+func dumping(t *testing.T, u string, tables ...string) pgx.Tx {
+	t.Helper()
+	ctx := context.Background()
+	c, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close(ctx) })
+	tx, err := c.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { tx.Rollback(ctx) })
+	if _, err := tx.Exec(ctx, "LOCK TABLE "+strings.Join(tables, ", ")+" IN ACCESS SHARE MODE"); err != nil {
+		t.Fatal(err)
+	}
+	return tx
+}
+
+// The replicas' tables are made again only by a start that finds an older
+// replicasVersion: a change to replicaTables that keeps it makes nothing
+// where they were made before. Each version is the hash of what it makes.
+func TestReplicaTablesVersioned(t *testing.T) {
+	made := map[int]uint64{1: 0xfd276a14a6f69244}
+	h := fnv.New64a()
+	h.Write([]byte(replicaTables))
+	if got := h.Sum64(); made[replicasVersion] != got {
+		t.Errorf("replicaTables changed (%#x): raise replicasVersion, and add its hash here", got)
+	}
+}
+
+// A replica that starts while a dump holds the replicas' tables makes
+// nothing where they are as it makes them: no DDL, which would wait for
+// the dump. It starts at once, and the others write on.
+func TestReplicasStartDuringADump(t *testing.T) {
 	u := replicaURL(t)
+	was := turnWithin
+	turnWithin = 2 * time.Second
+	t.Cleanup(func() { turnWithin = was })
+	ddlTimings(t, 300*time.Millisecond, 100*time.Millisecond, time.Second)
 	ctx := context.Background()
 	a := openReplica(t, u)
+	if err := a.SetMeta(ctx, "k", "1"); err != nil {
+		t.Fatal(err)
+	}
+	dumping(t, u, append([]string{"schema_version", "meta"}, replicaNames...)...)
+	began := time.Now()
+	b, err := OpenPostgres(ctx, u, time.UTC)
+	if err != nil {
+		t.Fatalf("a replica started during a dump: %v", err)
+	}
+	b.Close()
+	if took := time.Since(began); took > time.Second {
+		t.Errorf("a replica took %v to start during a dump", took)
+	}
+	wbegan := time.Now()
+	if err := a.SetMeta(ctx, "k", "2"); err != nil || time.Since(wbegan) > time.Second {
+		t.Errorf("a running replica's write during a dump: %v after %v", err, time.Since(wbegan))
+	}
+}
+
+// The replicas' tables older than this lapilli's are changed as it starts,
+// outside the writers' turn: while a dump holds them, the change waits for
+// its lock ddlWithin at a time, tried again, and the others' writes don't
+// wait with it. Once the dump is done, the start changes them, and says
+// their version.
+func TestReplicasChangedOutsideTheTurn(t *testing.T) {
+	u := replicaURL(t)
+	ddlTimings(t, 500*time.Millisecond, 50*time.Millisecond, 30*time.Second)
+	ctx := context.Background()
+	a := openReplica(t, u)
+	admin, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	if _, err := admin.Exec(ctx, "UPDATE replica_schema SET version = 0"); err != nil {
+		t.Fatal(err)
+	}
+	dump := dumping(t, u, "replica_members")
+	opened := make(chan error, 1)
+	go func() {
+		l, err := OpenPostgres(ctx, u, time.UTC)
+		if err == nil {
+			l.Close()
+		}
+		opened <- err
+	}()
+	within(t, 5*time.Second, "the start waits on the dump", func() bool {
+		var n int
+		admin.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE NOT granted AND relation = to_regclass('replica_members')`).Scan(&n)
+		return n == 1
+	})
+	var longest time.Duration
+	for i := range 10 {
+		began := time.Now()
+		if err := a.SetMeta(ctx, "k", strconv.Itoa(i)); err != nil {
+			t.Fatal(err)
+		}
+		longest = max(longest, time.Since(began))
+	}
+	if longest > 250*time.Millisecond {
+		t.Errorf("a write waited %v while a start changed the replicas' tables", longest)
+	}
+	dump.Rollback(ctx)
+	select {
+	case err := <-opened:
+		if err != nil {
+			t.Fatalf("the start once the dump is done: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the start still waits once the dump is done")
+	}
+	var v int64
+	if err := admin.QueryRow(ctx, "SELECT version FROM replica_schema").Scan(&v); err != nil || v != replicasVersion {
+		t.Errorf("the replicas' tables' version: %d %v, want %d", v, err, replicasVersion)
+	}
+}
+
+// A migration (here one that adds a column) takes the writers' turn: a
+// replica's write that holds it holds the migration up, as the migration
+// holds each write after it, which then finds the schema it leaves
+// (TestReplicasStopAtANewerMigration). Holding the turn, it waits for any
+// other lock ddlWithin at most, tried again: a dump of the table it
+// changes holds a replica's writes no longer than that, each time.
+func TestReplicasMigrationTakesTheTurn(t *testing.T) {
+	u := replicaURL(t)
+	was := turnWithin
+	turnWithin = 5 * time.Second
+	t.Cleanup(func() { turnWithin = was })
+	ddlTimings(t, 300*time.Millisecond, 50*time.Millisecond, 30*time.Second)
+	ctx := context.Background()
+	m, ns, err := pgFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ns[len(ns)-1]
+	a := openReplica(t, u)
+	// The last migration, made again as another that changes a table.
+	wasRead := readSchemaFile
+	readSchemaFile = func(name string) ([]byte, error) {
+		if name == m[want] {
+			return []byte("ALTER TABLE meta ADD COLUMN IF NOT EXISTS migrated BIGINT"), nil
+		}
+		return wasRead(name)
+	}
+	t.Cleanup(func() { readSchemaFile = wasRead })
+	admin, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	back := func() {
+		t.Helper()
+		if _, err := admin.Exec(ctx, "UPDATE schema_version SET version = $1", want-1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	back()
 	holder, err := pgx.Connect(ctx, u)
 	if err != nil {
 		t.Fatal(err)
@@ -575,13 +740,9 @@ func TestReplicasMigrationTakesTheTurn(t *testing.T) {
 	if _, err := tx.Exec(ctx, "SELECT 1 FROM replica_gens WHERE one = 1 FOR UPDATE"); err != nil {
 		t.Fatal(err)
 	}
-	m, ns, err := pgFiles()
-	if err != nil {
-		t.Fatal(err)
-	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.migrateStep(ctx, m, ns, ns[len(ns)-1])
+		_, err := a.migrateStep(ctx, m, ns, want)
 		done <- err
 	}()
 	select {
@@ -593,10 +754,44 @@ func TestReplicasMigrationTakesTheTurn(t *testing.T) {
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Errorf("the migration once the turn is free: %v", err)
+			t.Fatalf("the migration once the turn is free: %v", err)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the migration still waits once the turn is free")
+	}
+	// Again, while a dump holds the table it changes.
+	back()
+	dump := dumping(t, u, "meta")
+	migrated := make(chan error, 1)
+	go func() { migrated <- a.migratePostgres(ctx) }()
+	within(t, 5*time.Second, "the migration waits on the dump", func() bool {
+		var n int
+		admin.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE NOT granted AND mode = 'AccessExclusiveLock' AND relation = to_regclass('meta')`).Scan(&n)
+		return n == 1
+	})
+	var longest time.Duration
+	for i := range 5 {
+		began := time.Now()
+		if err := a.SetMeta(ctx, "k", strconv.Itoa(i)); err != nil {
+			t.Fatal(err)
+		}
+		longest = max(longest, time.Since(began))
+	}
+	if longest > time.Second {
+		t.Errorf("a write waited %v while a migration waited on a dump", longest)
+	}
+	dump.Rollback(ctx)
+	select {
+	case err := <-migrated:
+		if err != nil {
+			t.Fatalf("the migration once the dump is done: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the migration still waits once the dump is done")
+	}
+	var v int
+	if err := admin.QueryRow(ctx, "SELECT version FROM schema_version").Scan(&v); err != nil || v != want {
+		t.Errorf("migrated to %d %v, want %d", v, err, want)
 	}
 }
 

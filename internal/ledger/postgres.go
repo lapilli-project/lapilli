@@ -1103,7 +1103,10 @@ func sqliteFiles() (int, error) {
 // once, and a replica's write waits for a migration and finds it. A
 // database holding tables a ledger has but no schema_version is refused,
 // not written over. Then the replicas' own tables (replicaTables), which
-// every Postgres ledger has.
+// every Postgres ledger has, made or changed only where they are older
+// than this lapilli's. A step that waits longer than ddlWithin for a lock
+// on a table (a pg_dump holds one on each for the whole dump) is tried
+// again each ddlEvery, for ddlFor at most.
 func (l *Ledger) migratePostgres(ctx context.Context) error {
 	m, ns, err := pgFiles()
 	if err != nil {
@@ -1116,17 +1119,45 @@ func (l *Ledger) migratePostgres(ctx context.Context) error {
 	if len(ns) == 0 || ns[len(ns)-1] != want {
 		return fmt.Errorf("the Postgres schema ends at %v, SQLite's at %d", ns, want)
 	}
+	began, tries := time.Now(), 0
 	for {
 		done, err := l.migrateStep(ctx, m, ns, want)
+		if lockWaited(err) && ctx.Err() == nil {
+			tries++
+			if time.Since(began) < ddlFor {
+				select {
+				case <-ctx.Done():
+				case <-time.After(ddlEvery):
+				}
+				continue
+			}
+			return fmt.Errorf("making the ledger's tables waited for a lock another session holds on one (a pg_dump?), %d times over %s: %w",
+				tries, time.Since(began).Round(time.Second), err)
+		}
 		if err != nil || done {
 			return err
 		}
 	}
 }
 
+// How long a migration's DDL waits for a lock on a table, at most, each
+// try (ddlWithin): no longer, as it may hold the writers' turn, and every
+// replica's writes wait with it; how often it is tried again (ddlEvery),
+// and for how long (ddlFor). Replaced in tests.
+var (
+	ddlWithin = 2 * time.Second
+	ddlEvery  = 10 * time.Second
+	ddlFor    = 5 * time.Minute
+)
+
+// readSchemaFile reads a migration of the Postgres schema. Replaced in
+// tests.
+var readSchemaFile = pgSchema.ReadFile
+
 // migrateStep takes the ledger one migration on, in a transaction holding
-// the writers' turn, reading where it is under it: done once it is at want,
-// with the replicas' tables made.
+// schema_version, and the writers' turn while it migrates: done once it is
+// at want, with the replicas' tables made. Every lock but the turn is
+// taken before it, or waited for ddlWithin at most.
 func (l *Ledger) migrateStep(ctx context.Context, m map[int]string, ns []int, want int) (bool, error) {
 	tx, err := l.w.BeginTx(ctx, nil)
 	if err != nil {
@@ -1158,20 +1189,6 @@ func (l *Ledger) migrateStep(ctx context.Context, m map[int]string, ns []int, wa
 		if _, err := tx.ExecContext(ctx, "LOCK TABLE schema_version IN SHARE ROW EXCLUSIVE MODE"); err != nil {
 			return false, err
 		}
-		// And the writers' turn, where replicas have one: a write of an
-		// older replica's waits for the migration, and finds it (turn).
-		var turn bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.tables
-			WHERE table_schema = current_schema() AND table_name = 'replica_gens')`).Scan(&turn); err != nil {
-			return false, err
-		}
-		if turn {
-			if _, err := tx.ExecContext(ctx, "SELECT 1 FROM replica_gens WHERE one = 1 FOR UPDATE"); err != nil {
-				return false, err
-			}
-		}
-	}
-	if made {
 		if err := tx.QueryRowContext(ctx, "SELECT version FROM schema_version").Scan(&have); err != nil {
 			return false, err
 		}
@@ -1189,10 +1206,36 @@ func (l *Ledger) migrateStep(ctx context.Context, m map[int]string, ns []int, wa
 		return false, fmt.Errorf("%w (schema %d; this one knows %d)", ErrNewer, have, want)
 	}
 	if have == want {
-		if _, err := tx.ExecContext(ctx, replicaTables); err != nil {
+		// The replicas' tables, which no write of the ledger's waits for:
+		// made, or changed, outside the turn, and only where they are
+		// older than this lapilli's.
+		if ok, err := replicasMade(ctx, tx); err != nil || ok {
+			if err != nil {
+				return false, err
+			}
+			return true, tx.Commit()
+		}
+		if err := ddlWait(ctx, tx); err != nil {
+			return false, err
+		}
+		if err := makeReplicas(ctx, tx); err != nil {
 			return false, fmt.Errorf("the replicas' tables: %w", err)
 		}
 		return true, tx.Commit()
+	}
+	if made {
+		// The writers' turn, where replicas have one: a write of an older
+		// replica's waits for the migration, and finds it (turn).
+		var turn bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.tables
+			WHERE table_schema = current_schema() AND table_name = 'replica_gens')`).Scan(&turn); err != nil {
+			return false, err
+		}
+		if turn {
+			if _, err := tx.ExecContext(ctx, "SELECT 1 FROM replica_gens WHERE one = 1 FOR UPDATE"); err != nil {
+				return false, err
+			}
+		}
 	}
 	n := 0
 	for _, x := range ns {
@@ -1201,8 +1244,11 @@ func (l *Ledger) migrateStep(ctx context.Context, m map[int]string, ns []int, wa
 			break
 		}
 	}
-	b, err := pgSchema.ReadFile(m[n])
+	b, err := readSchemaFile(m[n])
 	if err != nil {
+		return false, err
+	}
+	if err := ddlWait(ctx, tx); err != nil {
 		return false, err
 	}
 	if have == 0 {
@@ -1218,4 +1264,12 @@ func (l *Ledger) migrateStep(ctx context.Context, m map[int]string, ns []int, wa
 		return false, err
 	}
 	return false, tx.Commit()
+}
+
+// ddlWait has the rest of a migration's transaction wait ddlWithin at
+// most for a lock: past it, the step fails (lock_timeout, lockWaited), and
+// is tried again.
+func ddlWait(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, "SET LOCAL lock_timeout = '"+strconv.FormatInt(ddlWithin.Milliseconds(), 10)+"ms'")
+	return err
 }
