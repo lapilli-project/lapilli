@@ -47,14 +47,16 @@
   weren't there.
 - The firings' days before and after keep "only ● nothing", as the form
   does.
-- Pages not kept already are worked out eight at a time; another waits
-  its turn up to ten seconds, then is answered 503 with `Retry-After`. The
+- Pages not kept already, a quiet window's preview among them, are worked
+  out eight at a time; another waits its turn up to ten seconds, then is
+  answered 503 with `Retry-After`. The
   turn is given back once the page is rendered, before it goes to the
   network, and while the page waits for the heavy turn. A page too big for
   the page cache isn't held twice, in the template's buffer and the
   cache's, and has 30 seconds to go to the network: forty-eight rules
   lists at once, at two thousand rules, peak at 550 MB of heap rather than
-  1.4 GB. The API, MCP and the other ports don't wait.
+  1.4 GB. The API, MCP and the other ports don't wait, and an API's
+  answer too big to keep has the server's two minutes, not 30 seconds.
 - With a team picked, the overview judges the team's incidents against
   everyone's rules, as the incidents page does: one caught only by
   another team's noisy rule is caught only by a noisy rule, and isn't in

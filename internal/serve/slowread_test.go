@@ -68,6 +68,13 @@ func TestSlowReaders(t *testing.T) {
 	if len(body) < 4*cacheOne {
 		t.Fatalf("the rules list is %d bytes, too few to fill the buffers", len(body))
 	}
+	// An API's answer as big, read by a client as slow: not paced.
+	_, api, _ := get(t, s.Handler(), "/api/v1/rules")
+	if len(api) < 2*cacheOne {
+		t.Fatalf("the rules API is %d bytes, too few to spill", len(api))
+	}
+	apiConn := stalled(t, addr, "/api/v1/rules")
+	defer apiConn.Close()
 	before := spills.Load()
 	var conns []net.Conn
 	for range pageRenders {
@@ -100,5 +107,38 @@ func TestSlowReaders(t *testing.T) {
 	got, _ := io.ReadAll(bufio.NewReader(c))
 	if !strings.HasPrefix(string(got), "HTTP/1.1 200") || strings.Contains(string(got), "</html>") {
 		t.Errorf("a reader that didn't read got %d bytes, all of it %v", len(got), strings.Contains(string(got), "</html>"))
+	}
+	// The API's answer, read late, comes whole: its client has the
+	// server's WriteTimeout, not a page's spillWithin.
+	apiConn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	whole, _ := io.ReadAll(bufio.NewReader(apiConn))
+	if !strings.HasPrefix(string(whole), "HTTP/1.1 200") || !strings.Contains(string(whole), strings.TrimSpace(api)[len(strings.TrimSpace(api))-200:]) {
+		t.Errorf("the API's answer, read late, came short: %d bytes of %d", len(whole), len(api))
+	}
+}
+
+// TestPreviewTakesTurn: a quiet window's preview is worked out as a page
+// is, a few at a time: with every turn taken it waits, then is answered
+// 503, as a page is.
+func TestPreviewTakesTurn(t *testing.T) {
+	s, _, _ := rolesServer(t, nil)
+	h := s.Handler()
+	was := renderWait
+	defer func() { renderWait = was }()
+	renderWait = 50 * time.Millisecond
+	if s.renders == nil {
+		t.Fatal("no limit on pages worked out at once")
+	}
+	for range cap(s.renders) {
+		s.renders <- struct{}{}
+	}
+	defer func() {
+		for range cap(s.renders) {
+			<-s.renders
+		}
+	}()
+	f := windowForm("x", "2026-10-07T01:00", "2026-10-07T05:00", "preview", "1")
+	if code, _ := as(t, h, http.MethodPost, "/windows", "ed@example.com", "", f); code != http.StatusServiceUnavailable {
+		t.Errorf("a preview with every turn taken: %d, want 503", code)
 	}
 }

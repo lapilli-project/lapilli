@@ -2,6 +2,7 @@ package serve
 
 import (
 	"cmp"
+	"context"
 	"net/http"
 	"slices"
 	"time"
@@ -77,6 +78,15 @@ type previewStart struct{ Start, End time.Time }
 // typed (as the window would be kept), and what it would do. A window that
 // couldn't be kept is refused as saving it would be.
 func (s *Server) previewWindow(w http.ResponseWriter, r *http.Request, x ledger.Window) {
+	// A preview is worked out as a page is, a few at a time: it takes a
+	// turn, which render gives back before the network.
+	tn, err := s.renderTurn(r.Context())
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	defer tn.give()
+	r = r.WithContext(context.WithValue(r.Context(), turnKey{}, tn))
 	ctx := r.Context()
 	pw, err := s.l.PreviewWindow(ctx, x)
 	if err != nil {

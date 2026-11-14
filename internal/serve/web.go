@@ -782,10 +782,13 @@ func (s *Server) tag() string {
 // from then on, and not kept, so that it isn't held twice, by the
 // recorder and by whatever wrote it.
 type recorder struct {
-	header  http.Header
-	status  int
-	body    bytes.Buffer
-	to      http.ResponseWriter
+	header http.Header
+	status int
+	body   bytes.Buffer
+	to     http.ResponseWriter
+	// paced: a page, given spillWithin to go to the network when it is
+	// too big to keep; an API's answer has the server's WriteTimeout.
+	paced   bool
 	spilled bool
 }
 
@@ -802,7 +805,9 @@ func (r *recorder) Write(b []byte) (int, error) {
 			h.Del("ETag")
 		}
 		spills.Add(1)
-		http.NewResponseController(r.to).SetWriteDeadline(time.Now().Add(spillWithin))
+		if r.paced {
+			http.NewResponseController(r.to).SetWriteDeadline(time.Now().Add(spillWithin))
+		}
 		r.to.WriteHeader(r.status)
 		if _, err := r.to.Write(r.body.Bytes()); err != nil {
 			return 0, err
@@ -852,7 +857,7 @@ func (s *Server) cached(h http.HandlerFunc) http.HandlerFunc {
 		}
 		c, ok := s.cache.get(tag, key)
 		if !ok {
-			rec := &recorder{header: http.Header{}, status: http.StatusOK, to: w}
+			rec := &recorder{header: http.Header{}, status: http.StatusOK, to: w, paced: !strings.HasPrefix(r.URL.Path, "/api/")}
 			h(rec, r)
 			if rec.spilled {
 				return // too big to keep, and written

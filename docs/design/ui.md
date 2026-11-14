@@ -49,9 +49,11 @@ number to what makes it, and what the later phases will add.
   whole into one buffer; one past what the page cache keeps (2 MB: the
   rules list at two thousand rules is 5.5) goes from that buffer to the
   response, not copied into the cache's besides, and has 30 seconds to
-  go to the network, then the server gives it up. Only pages wait: the
-  API, MCP, the health checks, the metrics and the ports that take
-  notifications and copies don't. Forty-eight `/rules` at once, at two
+  go to the network, then the server gives it up; an API's answer as big
+  keeps the server's two minutes. Only pages wait, a quiet window's
+  preview among them (`TestPreviewTakesTurn`): the API, MCP, the health
+  checks, the metrics and the ports that take notifications and copies
+  don't. Forty-eight `/rules` at once, at two
   thousand rules, went from a peak of 1.4 GB of heap to 550 MB.
 
 ## The frame
@@ -723,6 +725,10 @@ lines a side, shown whole, too), a quiet window's preview 35 to 80 ms
 page about a millisecond.
 
 ## Many at once, and ways in
+
+Phase 5: bulk writes on the rules list and the firings, a firing's labels
+as filters and its day by the hour, the overview's tiles and charts as ways
+to what makes their numbers, and an incident's timeline.
 
 ### Bulk writes
 
