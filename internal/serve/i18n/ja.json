@@ -1161,5 +1161,6 @@
  "%d rules didn't fire in the last %d weeks": "直近 %[2]d 週間に発火していないルール %[1]d 件",
  "The search is too long: 500 characters at most.": "検索が長すぎます。500 文字までです。",
  "Left out: more than 20 words: %s.": "20 語を超えたため除外しました: %s。",
- "this address asks too much: a page's query is 4096 bytes at most": "アドレスが長すぎます。ページのクエリは 4096 バイトまでです"
+ "this address asks too much: a page's query is 4096 bytes at most": "アドレスが長すぎます。ページのクエリは 4096 バイトまでです",
+ "No team yet: an editor makes a team's report": "まだチームがありません。編集者はチームのレポートを作ります"
 }

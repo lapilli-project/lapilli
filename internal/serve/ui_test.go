@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -328,6 +330,23 @@ func TestActionDisabled(t *testing.T) {
 		s, _ := server(t, nil)
 		check(t, s.Handler(), "", "/reports", disabled("Add a report", "Nowhere to send a report yet"))
 	})
+	t.Run("no team to make a report for", func(t *testing.T) {
+		// An editor makes a team's report, and there is no team: the
+		// report the form would send is refused.
+		dest := filepath.Join(t.TempDir(), "ops")
+		os.WriteFile(dest, []byte("http://127.0.0.1:1/x"), 0o600)
+		s, _ := server(t, func(c *Config) {
+			c.UserHeader, c.Admins, c.Editors = "X-Forwarded-Email", []string{"boss@example.com"}, []string{"ed@example.com"}
+			c.ReportDests = map[string]string{"ops": dest}
+		})
+		h := s.Handler()
+		check(t, h, "ed@example.com", "/reports", disabled("Add a report", "No team yet: an editor makes a team&#39;s report"))
+		check(t, h, "boss@example.com", "/reports", `<a class="button" href="/reports#add">Add a report</a>`)
+		if code, _, _ := ui(t, h, http.MethodPost, "/reports", "ed@example.com", "same-origin",
+			url.Values{"name": {"r"}, "schedule": {"daily@09:00"}, "dests": {"ops"}, "sections": {"summary"}}); code != http.StatusForbidden {
+			t.Errorf("an editor's report, with no team: %d", code)
+		}
+	})
 }
 
 // TestSidebar: the pages in their groups, the page the reader is on, and
@@ -400,7 +419,7 @@ func TestFrameTextsTranslated(t *testing.T) {
 	for _, c := range crumbsOf {
 		texts[c.Group], texts[c.Name] = true, true
 	}
-	for _, x := range []string{"Admins only", "Editors only", "%d open", "%d to approve", "Nowhere to send a report yet",
+	for _, x := range []string{"Admins only", "Editors only", "%d open", "%d to approve", "Nowhere to send a report yet", "No team yet: an editor makes a team's report",
 		"Read-only: lapilli serve was started with --read-only", "Read-only: no one is given a role here", "Read-only: no one is signed in"} {
 		texts[x] = true
 	}
