@@ -26,21 +26,37 @@ name=lapilli-shots-$$
 work=$(mktemp -d)
 server=
 
+# On every way out: the server stopped, which takes its ledger away, and
+# waited for; the container; and the work directory, with what was left.
 cleanup() {
-  [ -z "$server" ] || kill "$server" 2>/dev/null || true
+  if [ -n "$server" ]; then
+    kill "$server" 2>/dev/null || true
+    wait "$server" 2>/dev/null || true
+  fi
   $local || docker rm -fv "$name" >/dev/null 2>&1 || true
   rm -rf "$work"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
 
 go test -c -o "$work/serve.test" ./internal/serve
-LAPILLI_DEMO_SERVE=127.0.0.1:$port "$work/serve.test" -test.run '^TestDemoServe$' -test.timeout 0 >"$work/serve.log" 2>&1 &
+# The demo's ledger is made under the work directory.
+mkdir "$work/tmp"
+TMPDIR="$work/tmp" LAPILLI_DEMO_SERVE=127.0.0.1:$port "$work/serve.test" -test.run '^TestDemoServe$' -test.timeout 0 >"$work/serve.log" 2>&1 &
 server=$!
+# Ready when the demo itself answers /demo-ready: whatever else might be
+# listening on the port doesn't.
+ready=false
 for _ in $(seq 120); do
-  curl -fs -o /dev/null "http://127.0.0.1:$port/healthz" && break
+  if [ "$(curl -fs "http://127.0.0.1:$port/demo-ready" 2>/dev/null)" = "lapilli demo ledger, ready" ]; then
+    ready=true
+    break
+  fi
   kill -0 "$server" 2>/dev/null || { cat "$work/serve.log"; exit 1; }
   sleep 1
 done
+$ready || { echo "the demo didn't answer on port $port" >&2; cat "$work/serve.log"; exit 1; }
 
 cp test/a11y/package.json test/a11y/package-lock.json test/screenshots/shots.mjs "$work/"
 if $local; then
