@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-11-14
+
 The web UI's frame, and the rules list, redone: a sidebar in four groups,
 breadcrumbs, the team and the period carried on every link, a search on
 every page, a page's main action in its header, and on the rules list
