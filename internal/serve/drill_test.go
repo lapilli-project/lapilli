@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -336,5 +337,23 @@ func TestWeekAsked(t *testing.T) {
 	}
 	if strings.Count(body, `<tr class="missed">`) != 2 || strings.Contains(body, `<tr class="caught">`) {
 		t.Error("incidents: not the missed alone")
+	}
+}
+
+// TestStateCounts: state= lists, of each state, the incidents judged
+// against: one the ledger says isn't, whatever caught it, is in none.
+func TestStateCounts(t *testing.T) {
+	s := drillServer(t, false)
+	ledgerExec(t, s, "UPDATE incidents SET counts = 0 WHERE key = ?", "P-1")
+	for _, st := range []string{"caught", "noisy", "missed"} {
+		iv := viewOf(t, s, "incidents", "/incidents?week=2026-10-26&state="+st, s.incidentsPage).(incidentsView)
+		for _, l := range iv.Lines {
+			if l.ID == "P-1" {
+				t.Errorf("state=%s lists P-1, which isn't judged against", st)
+			}
+		}
+	}
+	if iv := viewOf(t, s, "incidents", "/incidents?week=2026-10-26", s.incidentsPage).(incidentsView); !slices.ContainsFunc(iv.Lines, func(l incidentLine) bool { return l.ID == "P-1" }) {
+		t.Error("P-1 isn't listed with all")
 	}
 }
