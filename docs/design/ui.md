@@ -49,9 +49,11 @@ The pages are in four groups, each named, not a link:
 Roles is listed for admins, who alone may open it. A group's name isn't a
 link, but Manage's, which goes to `/manage`, the page of its own (below),
 `aria-current` there. Tasks has the open
-tasks beside it (the team's, when a team is picked), and Proposals those
-waiting for an approval: two counts the ledger gives once each time it
-changes (`Server.waiting`), not once a page.
+tasks beside it, and Proposals those waiting for an approval, each the
+team's in effect (picked, or the reader's own), as their lists have them,
+or all teams': two counts the ledger gives once each time it changes
+(`Server.waiting`: the open tasks by team, the proposals waiting by
+rule, counted by the database), not once a page.
 
 On a screen 960 CSS px wide or more, the sidebar stays on the left as the
 page scrolls, with the languages at its foot. Narrower, or zoomed in, it is

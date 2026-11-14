@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -243,5 +244,29 @@ func TestProposalsOldNotHidden(t *testing.T) {
 	// An older link's state there is no such of shows none, as before.
 	if v := proposalsFor(t, s, "state=bogus"); v.Shown != 0 || len(v.Lines) != 0 || v.Empty == nil {
 		t.Errorf("state=bogus: %d shown", v.Shown)
+	}
+}
+
+// TestSidebarProposalsOfTheTeam: the sidebar's count of proposals waiting
+// for approval is the team in effect's, as the proposals list's is, on
+// every page; all teams' with none.
+func TestSidebarProposalsOfTheTeam(t *testing.T) {
+	s, h, _ := withProposal(t, nil) // for Errors, which payments owns
+	ctx := context.Background()
+	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "payments", Rules: "^Err"}, ana); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.Propose(ctx, ledger.Proposal{Rule: "Other", Kind: ledger.KindFor, Path: ledger.PathNone, MadeBy: cy}); err != nil {
+		t.Fatal(err)
+	}
+	count := regexp.MustCompile(`<span class="vh">, (\d+) to approve</span>`)
+	for q, want := range map[string]string{"/proposals?team=payments": "1", "/rules?team=payments": "1", "/proposals?team=": "2", "/": "2", "/tasks": "2"} {
+		_, body, _ := ui(t, h, http.MethodGet, q, cy, "", nil)
+		if m := count.FindStringSubmatch(body); m == nil || m[1] != want {
+			t.Errorf("%s: %v to approve, want %s", q, m, want)
+		}
+	}
+	if v := proposalsFor(t, s, "team=payments&state=proposed"); v.Shown != 1 {
+		t.Errorf("the list: %d of payments' to approve", v.Shown)
 	}
 }

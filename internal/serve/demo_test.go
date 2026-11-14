@@ -490,8 +490,8 @@ func TestDemoLedger(t *testing.T) {
 			t.Errorf("/rules/CheckoutLatencyP99: no %q", want)
 		}
 	}
-	if _, approve := s.waiting(context.Background()); approve != 1 {
-		t.Errorf("%d proposals to approve", approve)
+	if _, approve := s.waiting(context.Background()); len(approve) != 1 {
+		t.Errorf("%d proposals to approve", len(approve))
 	}
 	demoClosed(t, s)
 }

@@ -243,3 +243,23 @@ func (l *Ledger) TasksByStatus(ctx context.Context, team int64) (map[string]int,
 	return out, rows.Err()
 }
 
+// ProposedByRule are how many proposals wait for an approval, by rule:
+// counted by the database, for the sidebar, which says those of the team
+// in effect.
+func (l *Ledger) ProposedByRule(ctx context.Context) (map[string]int, error) {
+	rows, err := l.r.QueryContext(ctx, "SELECT rule, count(*) FROM proposals WHERE state = ? GROUP BY rule", StateProposed)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var rule string
+		var n int
+		if err := rows.Scan(&rule, &n); err != nil {
+			return nil, err
+		}
+		out[rule] = n
+	}
+	return out, rows.Err()
+}

@@ -4,8 +4,6 @@ import (
 	"context"
 	"net/http"
 	"sync"
-
-	"lapilli.dev/internal/ledger"
 )
 
 // The frame every page is drawn in (docs/design/ui.md): the pages in four
@@ -97,7 +95,7 @@ func bare(name string) bool { return name == "error" || name == "signedout" }
 // admin, and the counts for the team in effect, but on a bare page.
 func (s *Server) nav(ctx context.Context, p page) []navGroup {
 	var open map[int64]int
-	var approve int
+	var approve map[string]int
 	if !bare(p.Page) {
 		open, approve = s.waiting(ctx)
 	}
@@ -125,7 +123,19 @@ func (s *Server) nav(ctx context.Context, p page) []navGroup {
 				}
 				ni.CountText = "%d open"
 			case "proposals":
-				ni.Count, ni.CountText = approve, "%d to approve"
+				// Those of the team in effect, as the list shows them.
+				if p.Ctx.Team == "" {
+					for _, n := range approve {
+						ni.Count += n
+					}
+				} else if o, err := s.owners(ctx); err == nil {
+					for rule, n := range approve {
+						if o.teamOf(rule) == p.Ctx.Team {
+							ni.Count += n
+						}
+					}
+				}
+				ni.CountText = "%d to approve"
 			}
 			ng.Items = append(ng.Items, ni)
 		}
@@ -135,18 +145,19 @@ func (s *Server) nav(ctx context.Context, p page) []navGroup {
 }
 
 // waitingCache keeps the open tasks, by team, and the proposals waiting for
-// an approval, until the ledger changes: every page's sidebar shows them.
+// an approval, by rule, until the ledger changes: every page's sidebar
+// shows them.
 type waitingCache struct {
 	sync.Mutex
 	gen     int64
 	ok      bool
 	open    map[int64]int
-	approve int
+	approve map[string]int
 }
 
-// waiting are the open tasks, by team (0 for none), and how many proposals
-// wait for an approval; none when they can't be read.
-func (s *Server) waiting(ctx context.Context) (map[int64]int, int) {
+// waiting are the open tasks, by team (0 for none), and the proposals
+// waiting for an approval, by rule; none when they can't be read.
+func (s *Server) waiting(ctx context.Context) (map[int64]int, map[string]int) {
 	gen := s.l.Gen()
 	s.wait.Lock()
 	if s.wait.ok && s.wait.gen == gen {
@@ -157,16 +168,16 @@ func (s *Server) waiting(ctx context.Context) (map[int64]int, int) {
 	s.wait.Unlock()
 	open, err := s.l.OpenTasks(ctx)
 	if err != nil {
-		return nil, 0
+		return nil, nil
 	}
-	ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{States: []string{ledger.StateProposed}, Limit: 1000})
+	approve, err := s.l.ProposedByRule(ctx)
 	if err != nil {
-		return nil, 0
+		return nil, nil
 	}
 	s.wait.Lock()
-	s.wait.gen, s.wait.ok, s.wait.open, s.wait.approve = gen, true, open, len(ps)
+	s.wait.gen, s.wait.ok, s.wait.open, s.wait.approve = gen, true, open, approve
 	s.wait.Unlock()
-	return open, len(ps)
+	return open, approve
 }
 
 // barView is the bar at the top of a page: the team and period it is shown
