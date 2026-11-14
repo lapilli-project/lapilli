@@ -91,8 +91,9 @@ type rulesList struct {
 	TooLong   bool
 	// SortLinks are the orders, each the same page in it.
 	SortLinks []sortLink
-	// Hidden are the form's context: team, weeks, sort. Clear is the same
-	// page without a filter but the team and the weeks.
+	// Hidden are the form's context: team, weeks, sort, and the week
+	// asked for. Clear is the same page without a filter but the team and
+	// the weeks.
 	Hidden []field
 	Clear  string
 	Active bool
@@ -595,6 +596,9 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	v.Hidden = c.hidden()
 	if v.Sort != "" {
 		v.Hidden = append(v.Hidden, field{"sort", v.Sort})
+	}
+	if a.week != "" {
+		v.Hidden = append(v.Hidden, field{"week", a.week}) // its chip takes it away
 	}
 	allTeams := a
 	allTeams.c.Team, allTeams.c.TeamSet = "", true

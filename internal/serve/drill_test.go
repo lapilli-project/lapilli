@@ -311,6 +311,17 @@ func TestWeekAsked(t *testing.T) {
 	if _, body, _ := get(t, h, "/rules?week=2026-10-26"); !strings.Contains(body, "rules didn&#39;t fire in the week of 2026-10-26</summary>") {
 		t.Error("rules: the quiet ones aren't said to be of the week")
 	}
+	// The filters' form keeps the week, in both its places, and what it
+	// sends, or a search box sent to its parameters, is over the week.
+	if _, body, _ := get(t, h, "/rules?week=2026-10-26&sort=refired"); strings.Count(body, `class="facets"><input type="hidden" name="sort" value="refired"><input type="hidden" name="week" value="2026-10-26">`) != 2 {
+		t.Error("rules: the filters' form drops the week")
+	}
+	if rl := viewOf(t, s, "rules", "/rules?week=2026-10-26&sort=refired&perf=noisy&q=", s.rulesList).(rulesList); rl.Week != "2026-10-26" || rl.Weeks != 1 {
+		t.Errorf("rules: the form sent, over %q, %d weeks", rl.Week, rl.Weeks)
+	}
+	if _, _, hd := get(t, h, "/rules?week=2026-10-26&q=is%3Anoisy"); !strings.Contains(hd.Get("Location"), "week=2026-10-26") {
+		t.Errorf("rules: the search box sent to %q", hd.Get("Location"))
+	}
 	_, body, _ = get(t, h, "/incidents?week=2026-10-26&state=missed")
 	for _, want := range []string{"What went wrong in the week of 2026-10-26, and what caught it.",
 		`<a href="/incidents?state=missed&amp;weeks=4">4 weeks</a>`,
