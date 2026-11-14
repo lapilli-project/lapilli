@@ -62,7 +62,6 @@ func (s *Server) Handler() http.Handler {
 			// goes to the network.
 			tn, err := s.renderTurn(r.Context())
 			if err != nil {
-				w.Header().Set("Retry-After", strconv.Itoa(int(renderWait/time.Second)))
 				s.oops(w, r, err)
 				return
 			}
@@ -253,10 +252,13 @@ var errPagesBusy = errors.New("the server is busy with many pages at once: try a
 
 // turn is a page's turn to be worked out (pageRenders), held while it is:
 // given back once it is rendered, before it goes to the network, which a
-// reader who doesn't read can make take minutes; or when the request ends.
+// reader who doesn't read can make take minutes; or when the request ends;
+// and, while the page waits for the heavy turn (busy), given back and taken
+// again.
 type turn struct {
 	mu   sync.Mutex
-	held chan struct{} // the turns it holds one of, nil when it holds none
+	of   chan struct{} // the turns it is one of, nil for none
+	held bool
 }
 
 // turnKey is the context key a page's turn is kept under.
@@ -272,9 +274,29 @@ func turnOf(ctx context.Context) *turn {
 func (t *turn) give() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.held != nil {
-		<-t.held
-		t.held = nil
+	if t.held {
+		<-t.of
+		t.held = false
+	}
+}
+
+// take takes the turn again, given back, waiting for one up to renderWait.
+func (t *turn) take(ctx context.Context) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.held || t.of == nil {
+		return nil
+	}
+	w := time.NewTimer(renderWait)
+	defer w.Stop()
+	select {
+	case t.of <- struct{}{}:
+		t.held = true
+		return nil
+	case <-w.C:
+		return errPagesBusy
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -286,14 +308,14 @@ func (s *Server) renderTurn(ctx context.Context) (*turn, error) {
 	}
 	select {
 	case s.renders <- struct{}{}:
-		return &turn{held: s.renders}, nil
+		return &turn{of: s.renders, held: true}, nil
 	default:
 	}
 	t := time.NewTimer(renderWait)
 	defer t.Stop()
 	select {
 	case s.renders <- struct{}{}:
-		return &turn{held: s.renders}, nil
+		return &turn{of: s.renders, held: true}, nil
 	case <-t.C:
 		return nil, errPagesBusy
 	case <-ctx.Done():
@@ -305,19 +327,43 @@ func (s *Server) renderTurn(ctx context.Context) (*turn, error) {
 var errBusy = errors.New("the server is busy with another large request: try again in a minute")
 
 // busy takes the turn for a heavy request, waiting for it up to thirty
-// seconds; the func it returns gives the turn back.
+// seconds; the func it returns gives the turn back. A page waiting for it
+// holds no turn to be worked out (renderTurn) meanwhile: its turn is given
+// back while it waits, and taken again once this one is, so that pages
+// waiting for heavy work never keep others from being worked out.
 func (s *Server) busy(ctx context.Context) (func(), error) {
+	give := func() { <-s.heavy }
+	select {
+	case s.heavy <- struct{}{}:
+		return give, nil
+	default:
+	}
+	tn := turnOf(ctx)
+	if tn != nil {
+		tn.give()
+	}
+	heavyWaiting.Add(1)
+	defer heavyWaiting.Add(-1)
 	t := time.NewTimer(busyWait)
 	defer t.Stop()
 	select {
 	case s.heavy <- struct{}{}:
-		return func() { <-s.heavy }, nil
 	case <-t.C:
 		return nil, errBusy
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+	if tn != nil {
+		if err := tn.take(ctx); err != nil {
+			give()
+			return nil, err
+		}
+	}
+	return give, nil
 }
+
+// heavyWaiting counts the requests waiting for the heavy turn, for tests.
+var heavyWaiting atomic.Int64
 
 // checks are the health checks and the metrics, which a second listener
 // (--metrics-listen) serves alone: a NetworkPolicy can then let Prometheus
@@ -1100,6 +1146,9 @@ func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
 	text := func(lang string) string { return message(lang, err) }
 	if errors.As(err, new(notLetIn)) {
 		text = func(lang string) string { return tr(lang, notLetInText, s.user(r)) }
+	}
+	if errors.Is(err, errPagesBusy) {
+		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(renderWait/time.Second))))
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		w.Header().Set("Content-Type", "application/json")

@@ -80,3 +80,40 @@ func TestPagesTakeTurns(t *testing.T) {
 		t.Errorf("%d turns not given back", len(s.renders))
 	}
 }
+
+// TestHeavyHoldsNoTurn: pages waiting for the heavy turn (settings tried
+// over a week) hold no turn to be worked out while they wait: nine of them
+// keep no other page from being worked out, and each is, in its turn.
+func TestHeavyHoldsNoTurn(t *testing.T) {
+	s, _ := server(t, nil)
+	h := s.Handler()
+	wasRender, wasBusy := renderWait, busyWait
+	defer func() { renderWait, busyWait = wasRender, wasBusy }()
+	renderWait, busyWait = 300*time.Millisecond, 5*time.Second
+	s.heavy <- struct{}{} // another heavy request's
+	codes := make(chan int, pageRenders+1)
+	for range pageRenders + 1 {
+		go func() {
+			code, _, _ := get(t, h, "/settings?try=1&lead=1h")
+			codes <- code
+		}()
+	}
+	for began := time.Now(); heavyWaiting.Load() < pageRenders; time.Sleep(5 * time.Millisecond) {
+		if time.Since(began) > 5*time.Second {
+			t.Fatalf("%d waiting for the heavy turn", heavyWaiting.Load())
+		}
+	}
+	time.Sleep(renderWait) // as long as a page waits for its turn
+	if code, _, _ := get(t, h, "/runs"); code != http.StatusOK {
+		t.Errorf("with %d pages waiting for the heavy turn, /runs %d", pageRenders+1, code)
+	}
+	<-s.heavy
+	for range pageRenders + 1 {
+		if code := <-codes; code != http.StatusOK {
+			t.Errorf("a page waiting for the heavy turn: %d", code)
+		}
+	}
+	if len(s.renders) != 0 || len(s.heavy) != 0 {
+		t.Errorf("%d page turns, %d heavy, not given back", len(s.renders), len(s.heavy))
+	}
+}
