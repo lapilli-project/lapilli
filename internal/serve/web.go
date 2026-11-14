@@ -83,7 +83,8 @@ func (s *Server) Handler() http.Handler {
 			// cached, by them alone, in one order.
 			if canon := readsOf[name]; canon != nil {
 				r = r.Clone(r.Context())
-				r.URL.RawQuery = canon(r.URL.Query())
+				// A "?" with nothing after it is no query either.
+				r.URL.RawQuery, r.URL.ForceQuery = canon(r.URL.Query()), false
 			}
 			h(w, r)
 		}

@@ -58,7 +58,30 @@ func ruleWeeksOf(q url.Values) int {
 // readsOf are, for the pages that read only some of their query, the
 // query as each reads it: what else a page was asked is nothing to it, and
 // mustn't make it worked out again, nor be said back on it.
-var readsOf = map[string]func(url.Values) string{"rule": ruleQuery}
+var readsOf = map[string]func(url.Values) string{"rule": ruleQuery, "proposal": proposalQuery}
+
+// proposalQuery is a proposal's page's query as the page reads it: its
+// diff's options, and the page context it carries on its links, the team
+// and the weeks, each as it is taken, in one order. Anything else, or
+// another order, is the same page, cached once.
+func proposalQuery(q url.Values) string {
+	out := url.Values{}
+	diff, context := diffOptsOf(q).params()
+	if diff != "" {
+		out.Set("diff", diff)
+	}
+	if context != "" {
+		out.Set("context", context)
+	}
+	switch w := q.Get("weeks"); w {
+	case "1", "4", "12":
+		out.Set("weeks", w)
+	}
+	if vs, ok := q["team"]; ok {
+		out.Set("team", vs[0])
+	}
+	return out.Encode()
+}
 
 // ruleQuery is a rule's page's query as the page reads it: its tab, its
 // weeks, its team (all teams, empty) and edit=note, and, on its versions

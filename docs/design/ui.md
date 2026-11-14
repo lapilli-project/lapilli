@@ -588,6 +588,11 @@ dry run, its history), with the backtest in the dry run's place:
 Dropping, closing (an admin's, with a reason), making it a task and asking
 for an undo are shown disabled with why where the reader may not.
 
+The page is cached by what it reads of its query, its diff's options, the
+team and the weeks, in one order (`proposalQuery`), as a rule's page is:
+another parameter, an option it doesn't take, or another order is the
+same page, worked out and kept once.
+
 ### The proposals list
 
 Facets with counts, as the rules list's, as one GET form, a chip for each

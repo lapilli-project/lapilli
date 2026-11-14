@@ -625,3 +625,48 @@ func TestUndoReadFirst(t *testing.T) {
 		t.Error("a rule in git is said to be put back in Grafana")
 	}
 }
+
+// TestProposalPageCachedByWhatItReads: a proposal's page is cached by what
+// it reads of its query, its diff's options, the team and the weeks, in
+// one order: another parameter, an option it doesn't take, or another
+// order, is the same page, worked out and kept once.
+func TestProposalPageCachedByWhatItReads(t *testing.T) {
+	s, h, id := withProposal(t, nil)
+	path := "/proposals/" + itoa(id)
+	cached := func() int {
+		s.cache.Lock()
+		defer s.cache.Unlock()
+		n := 0
+		for k := range s.cache.body {
+			if strings.Contains(k, path) {
+				n++
+			}
+		}
+		return n
+	}
+	first := ""
+	for i, q := range []string{"", "zz=1", "utm_source=x&y=2", "diff=unified&context=3", "diff=bogus&context=12", "context=3&zz=3"} {
+		code, body, hd := ui(t, h, http.MethodGet, path+"?"+q, cy, "", nil)
+		if code != http.StatusOK {
+			t.Fatalf("%s: %d", q, code)
+		}
+		if strings.Contains(body, "zz") || strings.Contains(body, "utm_source") || strings.Contains(body, "bogus") {
+			t.Errorf("%s: the page says back what it doesn't read", q)
+		}
+		if i == 0 {
+			first = hd.Get("ETag")
+		} else if hd.Get("ETag") != first {
+			t.Errorf("%s: ETag %s, not %s", q, hd.Get("ETag"), first)
+		}
+	}
+	if n := cached(); n != 1 {
+		t.Errorf("%d pages cached, want 1", n)
+	}
+	// What it reads, it is cached by, in one order.
+	for _, q := range []string{"diff=split", "context=all", "context=all&diff=split", "diff=split&context=all", "weeks=4", "team="} {
+		ui(t, h, http.MethodGet, path+"?"+q, cy, "", nil)
+	}
+	if n := cached(); n != 6 {
+		t.Errorf("%d pages cached, want 6", n)
+	}
+}
