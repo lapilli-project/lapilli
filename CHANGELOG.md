@@ -28,40 +28,60 @@ upgrade".
   - **Fencing**: the leader stops leading by its own clock 2 s before its
     lease ends in the database, its work cancelled at once; each of its
     jobs looks at the lease first; each write it makes checks the lease in
-    the database, and its clock before it commits; each send waits for
-    `Hold`, which says whether it still leads. A leader whose lease went
-    elsewhere sends and writes nothing as the leader.
-  - **Each write takes the writers' turn across the replicas**
-    (`pg_advisory_xact_lock`): what reads then writes (merged values, the
-    limits on windows, roles and proposals, approvals, `TellOnce`) is as
-    right as with one process. A session cut off in a transaction is ended
-    by the server after 60 s idle in it.
+    the database as it begins and as it commits (a deferred trigger that
+    reads the lease `FOR SHARE`), and its clock before; each send waits for
+    `Hold`, and for a claim the database checks under the lease. A leader
+    whose lease went elsewhere, a renewal a failover lost or a host
+    suspended among them, sends and writes nothing as the leader.
+  - **A leader whose work is stuck gives the lease up**: a step of its work
+    that runs past any step's time, or a write held past its deadline,
+    stops the renewals; `lapilli_serve_jobs_round_timestamp_seconds` says
+    when it last finished a round.
+  - **Each write takes the writers' turn across the replicas**: a row
+    lock, which a role that may only connect can't take, waited for 30 s
+    at most (`lock_timeout`), the replica not ready meanwhile. What reads
+    then writes (merged values, the limits on windows, roles and
+    proposals, approvals, `TellOnce`) is as right as with one process. A
+    session cut off in a transaction is ended by the server after 60 s
+    idle in it. A write of an older replica after a newer lapilli migrated
+    the ledger writes nothing, and the replica stops.
   - **The caches told of the others' writes**: the generations pages are
     cached by, and which weeks' firings changed, kept in the ledger
-    (`replica_gens`, `replica_weeks`) and read before each request: a write
-    on one replica shows on the next request to any other. Ids cached are
-    dropped when another replica deleted or renamed some.
+    (`replica_gens`, `replica_weeks`) and read before each request, one
+    read at a time, within 5 s, which no write waits for: a write on one
+    replica shows on the next request to any other. Ids cached are dropped
+    when another replica deleted or renamed some, and everything is read
+    again after a failover that lost commits (a nonce logged with each
+    generation).
   - **Notices claimed one at a time** (`FOR UPDATE SKIP LOCKED`, under the
-    lease): two leaders for a moment never send one twice. The digest
+    lease), due and claimed by the database's clock: two leaders for a
+    moment never send one twice, a claim taken late in a long round still
+    lasts, and a replica whose clock is ahead delays none. The digest
     posted to Slack is claimed for its week too.
   - **Rate limits shared**: the tokens' and the notifications port's
     buckets are the ledger's, so several replicas let through what one
     did; the busy guards (one heavy request, one write a token) stay each
     replica's.
   - **Sign-in across replicas**: a sign-in's state is used once among
-    them; the approval forms' key is the ledger's; a second replica with a
-    sign-in of lapilli's own and no `--session-key-file` is refused.
+    them, kept once the provider signed someone in (a sign-in that signs
+    no one in writes nothing), swept at its time and bounded; the approval
+    forms' key is the ledger's; a replica whose session key differs from a
+    live replica's (a fingerprint each keeps) is refused, without
+    `--session-key-file` a second one too; with replicas, a session is
+    refused while who signed out can't be read.
   - **A follower shows what the leader is doing**, as the leader says it
     every 2 s; it reads the rules for what they say, and the on-call turns
     kept, as the leader does, without recording a version.
-  - **`/readyz` says which replica leads**, and a replica that can't reach
-    the database isn't ready. `/metrics` has `lapilli_serve_leader` and
-    `lapilli_serve_replicas`.
+  - **`/readyz` on the metrics' port says which replica leads**; on the
+    UI's, ok alone. A replica that can't reach the database, or whose
+    writes wait too long, isn't ready. `/metrics` has `lapilli_serve_leader`
+    and `lapilli_serve_replicas`.
 - **The chart's `serve.replicas`**, more than one on Postgres alone:
   `RollingUpdate` one pod at a time (`maxSurge: 1`, `maxUnavailable: 0`),
-  a PodDisruptionBudget (`serve.podDisruptionBudget.maxUnavailable`, 1),
-  and the session key's Secret required with `serve.signIn.oidc`. One
-  replica stays `Recreate`.
+  a PodDisruptionBudget (`serve.podDisruptionBudget.maxUnavailable`, 1,
+  a percentage taken as Kubernetes rounds it, up), and a session key
+  Secret of your own (`serve.signIn.sessionKeySecret.name`) required with
+  `serve.signIn.oidc`. One replica stays `Recreate`.
 - `test/e2e/replicas.sh`: three replicas on kind, the leader's process
   killed, another leading within the lease, every notice once, a rolling
   restart; and `test/e2e/postgres.sh` runs three replicas and kills one.
@@ -85,6 +105,13 @@ upgrade".
   waits for and `RollingUpdate` would not.
 - **Each request to a Postgres ledger's serve asks the database once
   more**, for the others' writes, one replica or several.
+- **Give the database to the ledger's role alone** (`REVOKE CONNECT ON
+  DATABASE lapilli FROM PUBLIC`): a role that may only connect can still
+  take or wait for the ledger's advisory lock, and keep replicas from
+  starting or connecting again (docs/design/replicas.md).
+- **Going back to 0.34**: its `lapilli ledger copy` refuses a ledger with
+  the replicas' tables; drop them first, with serve stopped (the
+  statement is in docs/design/replicas.md, "Failure cases").
 
 ## [0.35.0] - 2026-11-14
 

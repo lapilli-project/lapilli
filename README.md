@@ -1460,8 +1460,8 @@ helm upgrade lapilli ... --set serve.ledger.postgres.secret.name=lapilli-ledger 
 They roll one at a time, with a PodDisruptionBudget; `/readyz` and
 `lapilli_serve_leader` say which pod leads. More than one replica needs
 Postgres: the chart refuses `serve.replicas` above 1 on a SQLite ledger,
-and a sign-in of lapilli's own needs the session key from a Secret, which
-the chart makes. From 0.34 or before, upgrade with one replica first: its
+and a sign-in of lapilli's own needs the session key from a Secret of your
+own, which every pod mounts. From 0.34 or before, upgrade with one replica first: its
 pod holds the ledger alone, and refuses new ones until it stops.
 
 ### Firings recorded elsewhere

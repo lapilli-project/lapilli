@@ -223,8 +223,15 @@ is killed, another leads within some 17 seconds; when it stops, within 2.
   its pod holds the ledger alone, and refuses new pods until it stops,
   which `Recreate` waits for. Then raise it.
 - **No sticky sessions**: with `serve.signIn.oidc`, every pod mounts the
-  session key's Secret (the chart's own, or `sessionKeySecret.name`); the
-  chart refuses replicas without one.
+  session key's Secret, which must be one of your own
+  (`serve.signIn.sessionKeySecret.name`): one the chart makes is made again
+  by a render that can't look it up (`helm template`, Argo CD, Flux), and a
+  pod started after would sign with another key. Replicas compare their
+  keys' fingerprints, and one with another is refused.
+- **`/readyz`** says which pod leads on the metrics port (9091); on the
+  UI's port, ok. Give the database to the ledger's role alone (`REVOKE
+  CONNECT ... FROM PUBLIC`): a role that may only connect can keep
+  replicas from starting.
 - **Readiness**: a pod is ready once a run is recorded, as before, and
   while it reaches the database. `/readyz` says which pod leads, and
   `lapilli_serve_leader` is 1 in the leader's metrics, 0 in the others';

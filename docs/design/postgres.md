@@ -74,7 +74,9 @@ lapilli serve --ledger-url-file /var/run/lapilli/ledger/url ...
   CONNECT ON DATABASE lapilli FROM PUBLIC; GRANT CONNECT ON DATABASE
   lapilli TO lapilli;`.
 - **Timeouts.** **Builder's decision: lapilli sets no `statement_timeout`
-  or `lock_timeout`.** A page's statements end with its
+  or `lock_timeout`** for one process; serve's replicas set `lock_timeout`
+  (30 s) on their writers' sessions, for the writers' turn
+  ([replicas.md](replicas.md)). A page's statements end with its
   request, which pgx cancels on the server; the writer's are the ledger's
   own, and a backfill's write of a day's firings takes seconds on a busy
   ledger: a timeout short enough to matter would fail it, and the next
