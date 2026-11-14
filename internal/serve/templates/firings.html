@@ -36,7 +36,7 @@
 </figure>{{end}}
 
 <p class="quiet">{{t "A black stone that was a real problem nobody wrote down: say so, and it is written down as an incident, from the firing's start and end."}}</p>
-{{if .Lines}}<form method="post" action="/firings/real" id="real-picked" class="bulk"><input type="hidden" name="back" value="{{$b.Back}}">{{template "noenter"}}
+{{if .Lines}}<form method="post" action="/firings/real" id="real-picked" class="bulk"><input type="hidden" name="back" value="{{$.Link $b.Back}}">{{template "noenter"}}
 <fieldset class="bulk-bar"><legend>{{t "With the firings picked"}}</legend>
 <button{{if not $b.May}} disabled aria-describedby="real-why"{{end}}>{{t "These were real"}}</button>
 {{if not $b.May}}<span id="real-why" class="why">{{t $b.Why}}</span>{{end}}

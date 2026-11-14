@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -148,4 +149,23 @@ func TestRealWrittenFrom(t *testing.T) {
 		t.Errorf("both: %d to %q", code, hd.Get("Location"))
 	}
 	writtenOnce(t, s, "again", 2)
+}
+
+// TestRealBack: "These were real" goes back to the firings it came from,
+// with the team and the period they were looked at for.
+func TestRealBack(t *testing.T) {
+	s, ids := realServer(t)
+	h := s.Handler()
+	if _, err := s.l.PutTeam(context.Background(), ledger.Team{Name: "payments", Rules: "^R0"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	_, body := getAs(t, h, "/firings?day=2026-11-01&team=payments&weeks=12&label=service%3Ds1", "ana@example.com")
+	want := `<input type="hidden" name="back" value="/firings?day=2026-11-01&amp;label=service%3Ds1&amp;team=payments&amp;weeks=12">`
+	if !strings.Contains(body, want) {
+		t.Fatalf("no %s", want)
+	}
+	code, _, hd := postAs(t, h, "/firings/real", url.Values{"firing": ids[:1], "back": {"/firings?day=2026-11-01&label=service%3Ds1&team=payments&weeks=12"}}, "ana@example.com", "same-origin")
+	if want := "/firings?bulk=real&day=2026-11-01&done=1&label=service%3Ds1&team=payments&weeks=12"; code != http.StatusSeeOther || hd.Get("Location") != want {
+		t.Errorf("%d to %q, not %q", code, hd.Get("Location"), want)
+	}
 }
