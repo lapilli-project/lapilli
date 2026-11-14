@@ -19,6 +19,8 @@ values, not the new chart's): every template reads them through this. */}}
 {{- fail "serve.ledger.postgres and serve.ledger.existingClaim are two places to keep the ledger: give one" }}
 {{- end }}
 {{- if not (hasKey $s "exposeWithoutSignIn") }}{{ $_ := set $s "exposeWithoutSignIn" false }}{{ end -}}
+{{- if not (hasKey $s "replicas") }}{{ $_ := set $s "replicas" 1 }}{{ end -}}
+{{- include "lapilli.fill" (dict "in" $s "key" "podDisruptionBudget" "with" (dict "maxUnavailable" 1)) -}}
 {{- if not (hasKey $s "readinessPath") }}{{ $_ := set $s "readinessPath" "/readyz" }}{{ end -}}
 {{- end -}}
 
@@ -154,6 +156,24 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") (or $in.sessionMaxAge $in.sessionKeySecret.name) (not $in.oidc.issuer) }}
 {{- fail "serve.signIn.sessionMaxAge and sessionKeySecret are serve.signIn.oidc's sessions" }}
+{{- end }}
+{{- if eq .Values.mode "serve" }}
+{{- $n := int $s.replicas }}
+{{- if lt $n 1 }}
+{{- fail "serve.replicas: 1 or more" }}
+{{- end }}
+{{- if and (gt $n 1) (not $s.ledger.postgres.secret.name) }}
+{{- fail (printf "serve.replicas: %d replicas share one ledger only in Postgres (serve.ledger.postgres.secret): a SQLite ledger is one pod's file, on a volume one node mounts. Keep serve.replicas at 1, or move the ledger to Postgres first (lapilli ledger copy)" $n) }}
+{{- end }}
+{{- if and (gt $n 1) $in.oidc.issuer (not (or $in.sessionKeySecret.name $in.sessionKeySecret.create)) }}
+{{- fail "serve.replicas: replicas sign people in with one session key, from a Secret they all mount: give serve.signIn.sessionKeySecret.name, or leave sessionKeySecret.create on" }}
+{{- end }}
+{{- $u := $s.podDisruptionBudget.maxUnavailable }}
+{{- $ok := false }}
+{{- if kindIs "string" $u }}{{ $ok = regexMatch "^[1-9][0-9]?%$" $u }}{{ else }}{{ $ok = and (ge (int $u) 1) (lt (int $u) $n) }}{{ end }}
+{{- if and (gt $n 1) (not $ok) }}
+{{- fail (printf "serve.podDisruptionBudget.maxUnavailable: a number of pods, 1 to %d, or a percentage below 100%%, so that one replica at least stays" (sub $n 1)) }}
+{{- end }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $in.proxyJWT.kind (not (has $in.proxyJWT.kind (list "google-iap" "aws-alb" "jwks"))) }}
 {{- fail "serve.signIn.proxyJWT.kind: google-iap, aws-alb or jwks" }}

@@ -8,11 +8,23 @@ metadata:
   labels:
     {{- include "lapilli.labels" . | nindent 4 }}
 spec:
-  # One writer for the ledger: the old pod stops before the new one starts.
-  # In Postgres too: a second process is refused the ledger's lock.
-  replicas: 1
+  {{- $n := int $s.replicas }}
+  replicas: {{ $n }}
   strategy:
+    {{- if gt $n 1 }}
+    # Replicas sharing a Postgres ledger (docs/design/replicas.md): one at
+    # a time, each new pod a follower until the leader it replaces lets the
+    # lease go, so the UI and the ports never all go.
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    {{- else }}
+    # One pod: the old stops before the new one starts. A SQLite ledger is
+    # its volume's; a Postgres one, upgraded from 0.34 or before,
+    # is refused to a new pod while an old one holds it alone.
     type: Recreate
+    {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ .Chart.Name }}
