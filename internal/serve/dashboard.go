@@ -27,6 +27,11 @@ type weekView struct {
 	Asleep                               int             // firings that caught nothing while people slept; notifications for them, once there are any
 	Uncounted                            bool            // Asleep isn't counted: a week before the first notification
 	Changed, Current                     bool
+	// Quiet says a quiet window was over it: one excused a firing, or
+	// one covers some of it; DeployMark, its firings during deploys: the
+	// marks on the charts, when they are asked for (marksOf).
+	Quiet      bool
+	DeployMark int
 	// Refired are its firings that re-fired; Deploys those that came
 	// during a deploy, DeploysCaught those of them that caught something.
 	Refired, Deploys, DeploysCaught int
@@ -111,12 +116,33 @@ type column struct {
 	Changed   bool
 	Current   bool
 	Alt       bool // every other week, left unlabelled on a narrow screen
+	// Deploys are its firings during deploys, and Quiet says a quiet
+	// window was over it: marks the chart draws when they are asked for.
+	// Band is where its week is, BandW how wide.
+	Deploys     int
+	Quiet       bool
+	Band, BandW float64
+}
+
+// Mark is where the mark of a deploy is drawn, a triangle pointing down;
+// Dot, the rules' change.
+func (c column) Mark() string {
+	return fmt.Sprintf("M%.1f 1.5H%.1fL%.1f 8.5Z", c.Mid+2.5, c.Mid+11.5, c.Mid+7)
+}
+func (c column) Dot() float64 {
+	if c.Deploys > 0 {
+		return c.Mid - 7
+	}
+	return c.Mid
 }
 
 type columnChart struct {
 	Columns []column
 	Ticks   []tick
 	Base    float64
+	// Changed, Deploys and Quiet say a week has that mark, which the
+	// legend then names.
+	Changed, Deploys, Quiet bool
 }
 
 type point struct {
@@ -169,6 +195,8 @@ type dashboard struct {
 	Weeks          []weekView // the latest first, for the table
 	Review         *reviewView
 	Team           teamFilter
+	// Marks are the marks on the charts, as asked (marks=).
+	Marks marksView
 	// Check is the replay beside what really fired over the last whole
 	// week, with the rules that differ; nil when that isn't checked.
 	Check       *weekCheck
@@ -344,6 +372,9 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		}
 	}
 	drill(v.Tiles, last.Start.In(s.cfg.Loc).Format("2006-01-02"))
+	if v.Marks, err = s.marksOf(ctx, r.URL.Query(), t, team, ws, v.Deploys); err != nil {
+		return nil, err
+	}
 	v.Stones = stonesChart(l, ws, s.cfg.Loc)
 	v.Precision = precisionChart(l, ws, s.cfg.Loc)
 	v.Incidents = incidentsChart(l, ws, s.cfg.Loc)
@@ -596,7 +627,7 @@ func stacked(l string, ws []*weekView, loc *time.Location, parts func(*weekView)
 	for i, w := range ws {
 		x := plotL + band*float64(i) + (band-cw)/2
 		col := column{X: x, W: cw, Mid: x + cw/2, Label: w.Start.In(loc).Format("01-02"), Changed: w.Changed, Current: w.Current,
-			Alt: (len(ws)-1-i)%2 == 1}
+			Alt: (len(ws)-1-i)%2 == 1, Deploys: w.DeployMark, Quiet: w.Quiet, Band: plotL + band*float64(i) + 1, BandW: band - 2}
 		ps := parts(w)
 		top := len(ps) - 1
 		for top >= 0 && ps[top] == 0 {
@@ -620,6 +651,7 @@ func stacked(l string, ws []*weekView, loc *time.Location, parts func(*weekView)
 			y = hi
 		}
 		c.Columns = append(c.Columns, col)
+		c.Changed, c.Deploys, c.Quiet = c.Changed || col.Changed, c.Deploys || col.Deploys > 0, c.Quiet || col.Quiet
 	}
 	return c
 }

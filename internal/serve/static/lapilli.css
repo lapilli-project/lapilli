@@ -244,7 +244,12 @@ svg.chart text.wk.now { font-style: italic; }
 svg.chart text.end { text-anchor: middle; font-size: 14px; font-weight: 600; fill: var(--ink); }
 svg.chart path.line { fill: none; stroke: var(--viz-caught); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 svg.chart circle.pt { fill: var(--viz-caught); stroke: var(--card); stroke-width: 2; }
-svg.chart circle.changed { fill: var(--accent); }
+svg.chart circle.changed, svg.sym circle.changed { fill: var(--accent); }
+/* The weeks marked: firings during deploys, a triangle; a quiet window, a
+   bar over the week, as on a rule's strip. */
+svg.chart path.deploy { fill: var(--viz-ui); }
+svg.chart rect.quiet { fill: var(--h3); }
+p.marks { margin: 0 0 .6rem; font-size: .95rem; color: var(--dim); }
 ol.actions { margin: .2rem 0 .6rem; padding-left: 1.2rem; }
 ol.actions li { padding: .35rem 0; }
 table.heat { border-collapse: separate; border-spacing: 3px; width: auto; }
