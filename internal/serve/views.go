@@ -1335,6 +1335,8 @@ type incidentView struct {
 	Tasks    []taskLine
 	Comments commentsView
 	Nearly   []nearLine
+	// Timeline is when the rules fired around it.
+	Timeline *timelineView
 }
 
 // nearLine is a rule that nearly caught an incident, as a person reads it.
@@ -1417,14 +1419,19 @@ func (s *Server) incidentPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v.Tasks = s.taskLines(o, ts)
+	var nms []verdict.NearMiss
 	if v.Status != "caught" {
 		near, err := s.nearMisses(ctx)
 		if err != nil {
 			return nil, err
 		}
-		for _, nm := range near[in.ID] {
+		nms = near[in.ID]
+		for _, nm := range nms {
 			v.Nearly = append(v.Nearly, nearText(lang(r), nm))
 		}
+	}
+	if v.Timeline, err = s.timeline(ctx, lang(r), in, t, nms); err != nil {
+		return nil, err
 	}
 	v.Comments, err = s.commentsView(r, "incident", in.ID)
 	return v, err

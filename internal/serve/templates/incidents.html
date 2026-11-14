@@ -39,6 +39,30 @@
 {{if .CaughtBy}}<ul class="plain">{{range .CaughtBy}}<li><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a> {{delay .Delay}}</li>{{end}}</ul>
 {{else if .Counts}}<p class="bad">{{t "Nothing fired."}}</p>{{else}}<p class="quiet">{{if eq .Status "covered"}}{{t "It isn't judged against: an incident written down covers it."}}{{else}}{{t "It isn't judged against: %s." (t .Status)}}{{end}}</p>{{end}}
 
+{{with .Timeline}}{{if .Rows}}<section class="card timeline" id="timeline">
+<h2>{{t "When the rules fired"}}</h2>
+<p class="quiet">{{t "From %s before it started to %s after it ended, %s to %s; the incident is the shaded span." .Lead .Lead (at $loc .From) (at $loc .To)}}</p>
+<div class="scroll"><table class="timeline">
+<thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "What it did"}}</th><th scope="col" class="tl"><span class="strip-ends"><span>{{at $loc .From}}</span> <span>{{at $loc .To}}</span></span></th></tr></thead>
+<tbody>{{range .Rows}}<tr class="tl-{{.Kind}}"><th scope="row"><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></th><td>{{.Did}}</td>
+<td class="tl"><svg class="tl" viewBox="0 0 {{$.View.Timeline.Width}} 16" role="img" aria-label="{{t "%d firings: %d caught something, %d caught nothing, %d excused; the same are in the table below" .Firings .White .Black .Excused}}"><rect class="span" x="{{$.View.Timeline.SpanX}}" y="0" width="{{$.View.Timeline.SpanW}}" height="16"/>
+{{- range .Marks}}<g><title>{{.Title}}</title>{{if eq .Kind "near"}}<path class="near" d="{{.Diamond}}"/>{{else}}{{if .Line}}<line class="{{.Kind}}" x1="{{.X}}" x2="{{.To}}" y1="8" y2="8"/>{{end}}<circle class="{{.Kind}}" cx="{{.X}}" cy="8" r="4"/>{{end}}</g>{{end}}</svg></td></tr>{{end}}</tbody>
+</table></div>
+{{with .More}}<p class="quiet">{{t "%d more rules fired around it, not drawn." .}}</p>{{end}}{{if .Capped}}<p class="quiet">{{t "More firings were on around it than are drawn: the latest %d are." 5000}}</p>{{end}}
+<ul class="legend">
+<li><svg class="sym" aria-hidden="true" viewBox="0 0 12 12" width="12" height="12"><circle class="caught" cx="6" cy="6" r="4"/></svg>{{t "caught something"}}</li>
+<li><svg class="sym" aria-hidden="true" viewBox="0 0 12 12" width="12" height="12"><circle class="nothing" cx="6" cy="6" r="4"/></svg>{{t "caught nothing"}}</li>
+{{if .Excused}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 12 12" width="12" height="12"><circle class="excused" cx="6" cy="6" r="4"/></svg>{{t "excused"}}</li>{{end}}
+{{if .Near}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 12 16" width="12" height="16"><path class="near" d="M6 2L11 8L6 14L1 8Z"/></svg>{{t "when it would have fired"}}</li>{{end}}
+<li><svg class="sym" aria-hidden="true" viewBox="0 0 12 12" width="12" height="12"><rect class="span" x="0" y="0" width="12" height="12"/></svg>{{t "the incident"}}</li>
+</ul>
+<details class="days"><summary>{{t "The firings, as a table"}}</summary>
+<div class="scroll" tabindex="0" role="region" aria-label="{{t "The firings, as a table"}}"><table>
+<thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th><th scope="col" class="n">{{t "Excused"}}</th><th scope="col">{{t "Started"}}</th></tr></thead>
+<tbody>{{range .Rows}}<tr><th scope="row"><bdi>{{.Rule}}</bdi></th><td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Excused}}</td><td>{{or .Starts "–"}}{{with .More}} {{t "and %d more" .}}{{end}}{{range .Marks}}{{if eq .Kind "near"}} {{.Title}}{{end}}{{end}}</td></tr>{{end}}</tbody>
+</table></div></details>
+</section>{{end}}{{end}}
+
 {{if .Nearly}}
 <h2>{{t "Nearly caught by"}}</h2>
 <ul class="plain">{{range .Nearly}}<li><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a>: {{.Text}}.{{with .Cost}} <span class="quiet">{{.}}</span>{{end}}</li>{{end}}</ul>

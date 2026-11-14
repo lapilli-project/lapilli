@@ -358,6 +358,23 @@ span.chip.on::before { content: "✓ "; content: "✓ " / ""; }
    caught nothing (solid), what was excused (dashed) and what caught
    something (hollow, as ○). */
 svg.strip rect.hollow, svg.sym rect.hollow { fill: var(--card); stroke: var(--viz-caught); stroke-width: 1.5; }
+/* An incident's timeline: a row a rule, its span shaded, each firing a
+   line from its start, its stone a circle at the start, hollow for one
+   that caught something, solid for one that didn't, dashed for excused,
+   and a diamond where a rule that nearly caught it would have fired. */
+table.timeline th[scope=row] { white-space: nowrap; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; }
+table.timeline .tl { width: 55%; min-width: 14rem; }
+table.timeline .strip-ends { margin: 0; }
+svg.tl { display: block; width: 100%; height: auto; }
+svg.tl rect.span, svg.sym rect.span { fill: var(--accent-wash); }
+svg.tl line { stroke-width: 2; }
+svg.tl line.caught { stroke: var(--viz-caught); }
+svg.tl line.nothing, svg.tl line.excused { stroke: var(--viz-nothing); }
+svg.tl line.excused { stroke-dasharray: 2 2; }
+svg.tl circle.caught, svg.sym circle.caught { fill: var(--card); stroke: var(--viz-caught); stroke-width: 2; }
+svg.tl circle.nothing, svg.sym circle.nothing { fill: var(--viz-nothing); }
+svg.tl circle.excused, svg.sym circle.excused { fill: var(--card); stroke: var(--viz-nothing); stroke-width: 1.5; stroke-dasharray: 2 1.5; }
+svg.tl path.near, svg.sym path.near { fill: var(--card); stroke: var(--accent); stroke-width: 1.5; }
 
 /* A rule's page: its name and badges, what can be done, the facts of it and
    what to check; five numbers over the period, each with a definition to
