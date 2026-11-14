@@ -87,7 +87,9 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
-      - run: go test ./internal/ledger ./internal/serve ./cmd/lapilli
+      # On Postgres the serve tests take about ten minutes, go test's own
+      # limit: twenty, inside the job's thirty.
+      - run: go test -timeout 20m ./internal/ledger ./internal/serve ./cmd/lapilli
 
   e2e-postgres:
     # lapilli serve on a real Postgres in Docker: firings kept across a
