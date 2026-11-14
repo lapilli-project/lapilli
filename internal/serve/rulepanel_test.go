@@ -8,16 +8,19 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/verdict"
 )
 
 // besideServer is a ledger replayed from June on, in which Errors fires
-// every day at 03:00 and Fresh only from this Monday on; Disk, recorded
+// every day at 03:00, and again half an hour on twice, and Fresh only from
+// this Monday on; Disk, recorded
 // elsewhere, copied in over the last ten days; and the notifications of
 // Errors, one in May and each day's since September.
 func besideServer(t *testing.T) *Server {
@@ -38,6 +41,10 @@ func besideServer(t *testing.T) *Server {
 		var fs []firing.Firing
 		for d := w; d.Before(to); d = d.Add(24 * time.Hour) {
 			fs = append(fs, firing.Firing{Rule: "Errors", Labels: map[string]string{"service": "search"}, Start: d.Add(3 * time.Hour), End: d.Add(3*time.Hour + time.Minute)})
+			// Re-fired half an hour on, in October and this Monday.
+			if d.Equal(time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)) || d.Equal(monday) {
+				fs = append(fs, firing.Firing{Rule: "Errors", Labels: map[string]string{"service": "search"}, Start: d.Add(3*time.Hour + 30*time.Minute), End: d.Add(3*time.Hour + 31*time.Minute)})
+			}
 			if !d.Before(monday) {
 				fs = append(fs, firing.Firing{Rule: "Fresh", Labels: map[string]string{"service": "search"}, Start: d.Add(5 * time.Hour), End: d.Add(5*time.Hour + time.Minute)})
 			}
@@ -305,5 +312,82 @@ func TestMoved(t *testing.T) {
 	// A share's, in points: its precision, none caught then or now.
 	if _, body, _ := get(t, s.Handler(), "/rules/Errors?weeks=1"); !strings.Contains(body, `<dd class="big">0% <span class="delta">±0 pt</span></dd>`) {
 		t.Error("/rules/Errors?weeks=1: its precision's change isn't in points")
+	}
+}
+
+// TestRulePeriod: what a rule's page shows over its period is over that
+// period: its weeks of re-fires and the alerts that re-fired most, and its
+// replay beside what really fired.
+func TestRulePeriod(t *testing.T) {
+	s := besideServer(t)
+	for q, want := range map[string]struct{ weeks, worst int }{"weeks=1": {1, 1}, "weeks=4": {4, 1}, "weeks=12": {12, 2}} {
+		v := ruleViewOf(t, s, "Errors", q)
+		if v.Refires == nil || len(v.Refires.Weeks) != want.weeks || len(v.Refires.Worst) != 1 || v.Refires.Worst[0].Refired != want.worst {
+			t.Errorf("%s: re-fires %+v", q, v.Refires)
+		}
+	}
+	g := glanceServer(t)
+	ctx := context.Background()
+	for q, n := range map[string]int{"weeks=1": 1, "weeks=12": 12} {
+		v := ruleViewOf(t, g, "Errors", q)
+		cs, err := g.l.Checks(ctx, v.From, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v.Check == nil || v.Check.Either() != cs["Errors"].Either() || v.Period != n {
+			t.Errorf("%s: its replay checked %+v, over its period %+v", q, v.Check, cs["Errors"])
+		}
+	}
+	if a, b := ruleViewOf(t, g, "Errors", "weeks=1").Check.Either(), ruleViewOf(t, g, "Errors", "weeks=12").Check.Either(); a >= b {
+		t.Errorf("a week's replay checked %d firings, twelve weeks' %d", a, b)
+	}
+}
+
+// TestRuleTabsCounted: each tab's count is what it holds: the firings over
+// the period, the versions, the proposals not finished with, the tasks and
+// comments; the tab shown is current.
+func TestRuleTabsCounted(t *testing.T) {
+	v := ruleView{ruleLine: ruleLine{Firings: 7}, Tab: "versions", Changes: make([]change, 4), ruleChanges: ruleChanges{Proposals: []proposalLine{
+		{Proposal: ledger.Proposal{State: ledger.StateProposed}}, {Proposal: ledger.Proposal{State: ledger.StateMerged}},
+		{Proposal: ledger.Proposal{State: ledger.StateApplied}}, {Proposal: ledger.Proposal{State: ledger.StateRefused}}}},
+		Tasks: make([]taskLine, 2), Comments: commentsView{List: make([]ledger.Comment, 3)}}
+	var got []string
+	for _, tab := range tabsOf(&v) {
+		got = append(got, fmt.Sprintf("%s:%s:%d %v %v", tab.ID, tab.Param, tab.Count, tab.Counted, tab.Current))
+	}
+	open := 0
+	for _, p := range v.Proposals {
+		if slices.Contains(ledger.Unfinished(), p.State) {
+			open++
+		}
+	}
+	want := []string{"overview::0 false false", "firings:firings:7 true false", "versions:versions:4 true true", fmt.Sprintf("proposals:proposals:%d true false", open), "activity:activity:5 true false"}
+	if !slices.Equal(got, want) || open == 0 || open == len(v.Proposals) {
+		t.Errorf("tabs %q, want %q", got, want)
+	}
+}
+
+// TestNearOf: the incidents a rule nearly caught are counted once each, as
+// the latest week that names an incident says: one an earlier week said
+// it nearly caught, and a later week another rule, isn't its.
+func TestNearOf(t *testing.T) {
+	s := glanceServer(t)
+	ctx := context.Background()
+	week := s.l.Midnight(ledger.Week(s.l.Day(now)))
+	for i, nms := range [][]verdict.NearMiss{
+		{{Incident: "INC-30", Rule: "Errors"}, {Incident: "INC-29", Rule: "Errors"}, {Incident: "INC-31", Rule: "Errors"}},
+		{{Incident: "INC-29", Rule: "Errors"}, {Incident: "INC-28", Rule: "Other"}},
+	} {
+		from := week.Add(-time.Duration(7*(i+1)) * 24 * time.Hour)
+		if err := s.l.ReplaceResult(ctx, "near_misses", now, from, from.Add(7*24*time.Hour), nms); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// This week: INC-30 (Errors), INC-31 (Other); the week before: INC-29
+	// (Errors), and INC-30 and INC-31 again; two weeks before, INC-29 again.
+	for weeks, want := range map[int]int{1: 1, 2: 2, 3: 2} {
+		if n, err := s.nearOf(ctx, "Errors", week.Add(-time.Duration(7*(weeks-1))*24*time.Hour)); err != nil || n != want {
+			t.Errorf("%d weeks: %d nearly caught, want %d (%v)", weeks, n, want, err)
+		}
 	}
 }
