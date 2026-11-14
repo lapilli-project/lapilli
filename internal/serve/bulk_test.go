@@ -412,3 +412,47 @@ func mustInt(t *testing.T, v string) int64 {
 	}
 	return n
 }
+
+// TestBulkTasksOnce: a rule picked with spaces around its name is the rule,
+// once, and its task is titled by its name; a rule with a task to tune it
+// still open has one already, counted so, and none is made; one done
+// doesn't count.
+func TestBulkTasksOnce(t *testing.T) {
+	const ed = "ed@example.com"
+	s, _, _ := bulkServer(t, nil)
+	h := s.Handler()
+	post := func(rules ...string) string {
+		t.Helper()
+		code, body, hd := postAs(t, h, "/rules/bulk", url.Values{"do": {"task"}, "rule": rules, "back": {"/rules"}}, ed, "same-origin")
+		if code != http.StatusSeeOther {
+			t.Fatalf("%d %s", code, body)
+		}
+		return hd.Get("Location")
+	}
+	if got := post(" Errors", "Errors\t", "Errors\n", "SearchLatency", " "); got != "/rules?bulk=task&done=2" {
+		t.Errorf("trimmed: to %q", got)
+	}
+	_, tasks, _ := worked(t, s)
+	if len(tasks) != 2 || !strings.HasPrefix(tasks[0], "Tune Errors|tune|Errors|") || !strings.HasPrefix(tasks[1], "Tune SearchLatency|tune|SearchLatency|") {
+		t.Errorf("tasks %q", tasks)
+	}
+	if got := post("Errors", "SearchErrors"); got != "/rules?already=1&bulk=task&done=1" {
+		t.Errorf("again: to %q", got)
+	}
+	if _, body := getAs(t, h, "/rules?already=1&bulk=task&done=1", ed); !strings.Contains(body, `role="status">1 done; 1 had an open task to tune them already</p>`) {
+		t.Error("the list doesn't say one had a task already")
+	}
+	// Done, it is no task to tune it still: another is made.
+	ts, err := s.l.Tasks(context.Background(), ledger.TaskQuery{Rule: "Errors"})
+	if err != nil || len(ts) != 1 {
+		t.Fatalf("%v %v", ts, err)
+	}
+	done := ts[0]
+	done.Status = "done"
+	if _, err := s.l.PutTask(context.Background(), done, "ed"); err != nil {
+		t.Fatal(err)
+	}
+	if got := post("Errors"); got != "/rules?bulk=task&done=1" {
+		t.Errorf("after done: to %q", got)
+	}
+}

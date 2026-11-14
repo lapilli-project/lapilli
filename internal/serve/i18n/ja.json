@@ -4,6 +4,7 @@
  "%d asleep, %d off hours": "睡眠時間 %d、業務時間外 %d",
  "%d done": "%d 件完了",
  "%d had caught something already": "%d 件はすでに何かを検知済み",
+ "%d had an open task to tune them already": "%d 件はすでにチューニングのタスクが未完了",
  "%d not your team's": "%d 件は自分のチームのものではない",
  "%d refused": "%d 件は拒否",
  "%d failed: try again": "%d 件は失敗（もう一度お試しください）",

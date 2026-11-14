@@ -4,6 +4,7 @@
  "%d asleep, %d off hours": "자는 시간 %d, 업무 외 %d",
  "%d done": "%d건 완료",
  "%d had caught something already": "%d건은 이미 무언가를 잡았음",
+ "%d had an open task to tune them already": "%d건은 이미 열린 튜닝 태스크가 있음",
  "%d not your team's": "%d건은 내 팀 것이 아님",
  "%d refused": "%d건 거부됨",
  "%d failed: try again": "%d건 실패(다시 시도해 주세요)",

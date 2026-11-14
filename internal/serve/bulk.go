@@ -97,12 +97,13 @@ func bulkBack(back, path, kind string, b bulkResult) string {
 	return u.String()
 }
 
-// picked are the values a form picked, each once, at most maxBulk of them
-// (ok false past that), the empty ones left out.
+// picked are the values a form picked, each once as it is without the
+// spaces around it, at most maxBulk of them (ok false past that), the empty
+// ones left out.
 func picked(vs []string) ([]string, bool) {
 	var out []string
 	for _, v := range vs {
-		if v != "" && !slices.Contains(out, v) {
+		if v = strings.TrimSpace(v); v != "" && !slices.Contains(out, v) {
 			if len(out) == maxBulk {
 				return nil, false
 			}
@@ -188,9 +189,19 @@ func (s *Server) bulkRules(w http.ResponseWriter, r *http.Request) {
 		var err error
 		switch do {
 		case "task":
-			// As "Add a task" on its page, and as the task's form takes it.
-			_, err = s.l.PutTask(ctx, ledger.Task{Title: tr(lg, "Tune %s", rule), Kind: "tune", Rule: strings.TrimSpace(rule),
-				TeamID: o.rule[strings.TrimSpace(rule)]}, by)
+			// As "Add a task" on its page, and as the task's form takes it;
+			// but a rule with a task to tune it still open has one already.
+			if err = s.ruleInScope(r, rule); err != nil {
+				break
+			}
+			var open bool
+			if open, err = s.tuning(ctx, rule); err == nil && open {
+				res.Already++
+				continue
+			}
+			if err == nil {
+				_, err = s.l.PutTask(ctx, ledger.Task{Title: tr(lg, "Tune %s", rule), Kind: "tune", Rule: rule, TeamID: o.rule[rule]}, by)
+			}
 		default:
 			n := notes[rule]
 			n.Rule = rule
@@ -209,6 +220,13 @@ func (s *Server) bulkRules(w http.ResponseWriter, r *http.Request) {
 		s.poke() // who owns a rule may have changed: a team's windows are judged again
 	}
 	back(w, r, bulkBack(r.PostFormValue("back"), "/rules", do, res))
+}
+
+// tuning reports whether a rule has a task to tune it still open, or being
+// done.
+func (s *Server) tuning(ctx context.Context, rule string) (bool, error) {
+	ts, err := s.l.Tasks(ctx, ledger.TaskQuery{Rule: rule, Status: []string{"open", "doing"}, Limit: 500})
+	return slices.ContainsFunc(ts, func(t ledger.Task) bool { return t.Kind == "tune" }), err
 }
 
 // bulkReal is the firings' bulk write: each firing picked that caught
