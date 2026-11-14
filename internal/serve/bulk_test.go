@@ -546,3 +546,40 @@ func TestBulkResultInWords(t *testing.T) {
 		}
 	}
 }
+
+// editOn makes the ledger change other's note to text whenever rule's is
+// written, as someone saving other's note at that moment would.
+func editOn(t *testing.T, s *Server, rule, other, text string) {
+	t.Helper()
+	set := `UPDATE notes SET note = '` + text + `' WHERE rule = '` + other + `'`
+	if s.cfg.LedgerURLFile != "" {
+		ledgerExec(t, s, `CREATE FUNCTION edit_meanwhile() RETURNS trigger AS $$ BEGIN `+set+`; RETURN NEW; END $$ LANGUAGE plpgsql`)
+		ledgerExec(t, s, `CREATE TRIGGER edit_meanwhile AFTER INSERT OR UPDATE ON notes FOR EACH ROW WHEN (NEW.rule = '`+rule+`') EXECUTE FUNCTION edit_meanwhile()`)
+		return
+	}
+	for _, on := range []string{"INSERT", "UPDATE"} {
+		ledgerExec(t, s, `CREATE TRIGGER edit_`+on+` AFTER `+on+` ON notes WHEN NEW.rule = '`+rule+`' BEGIN `+set+`; END`)
+	}
+}
+
+// TestBulkNoteReadEach: each rule's note is read just before it is
+// written, as its own form would send it: a note changed while the rules
+// before it were written is kept as it was changed, its disposition set.
+func TestBulkNoteReadEach(t *testing.T) {
+	ctx := context.Background()
+	s, _, _ := bulkServer(t, nil)
+	for _, rule := range []string{"Errors", "SearchLatency"} {
+		if err := s.l.PutNote(ctx, ledger.Note{Rule: rule, Note: "before"}, "ana"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	editOn(t, s, "Errors", "SearchLatency", "edited meanwhile")
+	if code, body, hd := postAs(t, s.Handler(), "/rules/bulk", url.Values{"do": {"status"}, "status": {"keep"}, "rule": {"Errors", "SearchLatency"}},
+		"ed@example.com", "same-origin"); code != http.StatusSeeOther || !strings.Contains(hd.Get("Location"), "done=2") {
+		t.Fatalf("%d to %q: %s", code, hd.Get("Location"), body)
+	}
+	notes, _, _ := worked(t, s)
+	if n := notes["SearchLatency"]; n.Note != "edited meanwhile" || n.Status != "keep" {
+		t.Errorf("SearchLatency: %+v", n)
+	}
+}

@@ -187,11 +187,6 @@ func (s *Server) bulkRules(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	notes, err := s.l.Notes(ctx)
-	if err != nil {
-		s.oops(w, r, err)
-		return
-	}
 	var res bulkResult
 	if _, limited := scoped(r); limited && do == "team" {
 		// Moving a rule into a team or out of one is an editor's, whichever
@@ -220,16 +215,22 @@ func (s *Server) bulkRules(w http.ResponseWriter, r *http.Request) {
 				_, err = s.l.PutTask(ctx, ledger.Task{Title: tr(lg, "Tune %s", rule), Kind: "tune", Rule: rule, TeamID: o.rule[rule]}, by)
 			}
 		default:
-			n := notes[rule]
-			n.Rule = rule
+			// Its note read just before it is written, as its form shows
+			// it just before it is sent: a change made to another's
+			// meanwhile is kept.
+			if err = s.ruleInScope(r, rule); err != nil {
+				break
+			}
+			var n ledger.Note
+			if n, err = s.l.NoteOf(ctx, rule); err != nil {
+				break
+			}
 			if do == "team" {
 				n.TeamID = team
 			} else {
 				n.Status = status
 			}
-			if err = s.ruleInScope(r, rule); err == nil {
-				err = s.l.PutNote(ctx, n, by)
-			}
+			err = s.l.PutNote(ctx, n, by)
 		}
 		if s.bulkCount(&res, r, err) {
 			res.Untried = len(rules) - i - 1
