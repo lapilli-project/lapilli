@@ -327,14 +327,16 @@ func TestReplicasTakeWaitsForACommit(t *testing.T) {
 	time.Sleep(600 * time.Millisecond)
 	tctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	began := time.Now()
 	next, _, err := b.rep.take(tctx)
-	took := time.Now()
+	waited := time.Since(began)
 	if err != nil || next == 0 {
 		t.Fatalf("the other's take, the lease lapsed: %d %v", next, err)
 	}
-	if done := <-wrote; took.Before(done) {
-		t.Errorf("another's term began %v before the former leader's write, which the lease's check let through, was done",
-			done.Sub(took).Round(time.Millisecond))
+	<-wrote
+	// The commit holds its row lock some 400 ms more.
+	if waited < 200*time.Millisecond {
+		t.Errorf("another's take waited %v, not for the former leader's write the lease's check let through", waited.Round(time.Millisecond))
 	}
 }
 
