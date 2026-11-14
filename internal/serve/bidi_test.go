@@ -59,7 +59,7 @@ func TestRuleNamesDontTurnPages(t *testing.T) {
 	}
 	// The name shows, set apart.
 	for path, want := range map[string]string{"/": "<bdi>Quiet Errors\uFFFD</bdi>", "/rules": "<bdi>Errors\uFFFD</bdi>", "/rules/Errors%EF%BF%BD": "<h1><bdi>Errors\uFFFD</bdi></h1>",
-		"/rules/Errors%EF%BF%BD?": "Group <bdi>shop</bdi>.",
+		"/rules/Errors%EF%BF%BD?": `<span class="k">Group</span> <bdi>shop</bdi>`,
 		"/firings?day=2026-11-02": "<bdi>Errors\uFFFD</bdi>"} {
 		if _, body, _ := get(t, h, path); !strings.Contains(body, want) {
 			i := strings.Index(body, "Errors\uFFFD")

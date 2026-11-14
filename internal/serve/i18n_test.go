@@ -73,7 +73,10 @@ var pagePaths = []string{"/", "/rules", "/rules?weeks=1", "/rules/Errors", "/inc
 	"/reports", "/reports?edit=1", "/reports/1", "/reports/2", "/reports?edit=digest", "/reports/digest", "/roles", "/windows/2", "/windows/3",
 	"/rules?sort=refired", "/rules?sort=deploys&weeks=12", "/incidents?source=impact&team=payments", "/incidents?source=written", "/incidents?weeks=1", "/rules/Flapping",
 	"/rules/Limited", "/search", "/search?q=i", "/search?q=nothing-is-called-this", "/rules?perf=silent&weeks=12",
-	"/rules?perf=ok&severity=none&trust=differs&q=i+label%3Aservice%3Dsearch+group%3Ashop+foo%3Abar", "/rules?team=payments&q=nothing-is-called-this"}
+	"/rules?perf=ok&severity=none&trust=differs&q=i+label%3Aservice%3Dsearch+group%3Ashop+foo%3Abar", "/rules?team=payments&q=nothing-is-called-this",
+	// A rule's page in each tab, and over each period.
+	"/rules/Errors?tab=firings", "/rules/Errors?tab=versions", "/rules/Errors?tab=proposals", "/rules/Errors?tab=activity",
+	"/rules/Flapping?tab=firings", "/rules/Errors?weeks=1", "/rules/Errors?weeks=4&tab=firings", "/rules/Limited?tab=versions"}
 
 // pagesServer is a server with something on every page: a team, a note,
 // quiet windows, a task, roles, reports, comments, and a run that failed.

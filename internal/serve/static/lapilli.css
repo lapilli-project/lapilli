@@ -331,3 +331,65 @@ td.rule { min-width: 16rem; }
 .badge.trust, .badge.check { color: var(--warn); }
 .badge.prog { color: var(--accent); }
 a.badge:hover { text-decoration: underline; }
+
+/* A rule's page: its name and badges, what can be done, the facts of it and
+   what to check; five numbers over the period, each with a definition to
+   open; its last 84 days, a cell a day, with marks above; its sections as
+   tabs. A cell's kind is told by its shape as well as its colour: a hole
+   in one that caught something, solid for nothing, dashed for excused, low
+   for no firing. */
+.rule-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: .4rem 1rem; margin-bottom: .4rem; }
+.rule-name { min-width: 0; }
+.rule-name h1 { display: inline; margin-right: .4rem; }
+.rule-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .5rem; margin: .3rem 0 0; }
+a.button.quiet { color: var(--accent); background: var(--card); border: 1px solid var(--line-strong); }
+a.button.quiet:hover { filter: none; background: var(--accent-soft); }
+ul.rule-facts { list-style: none; display: flex; flex-wrap: wrap; gap: .1rem 1.1rem; margin: .2rem 0 .6rem; padding: 0; color: var(--dim); }
+ul.rule-facts .k { font-size: .9rem; }
+ul.rule-facts bdi { color: var(--ink); }
+details.checks { margin: .2rem 0 .8rem; }
+details.checks > summary { display: inline-block; color: var(--warn); border: 1px solid var(--line-strong); border-radius: 9999px; padding: 0 .6rem; font-size: .9rem; }
+details.checks ul { margin: .5rem 0 0; padding-left: 1.2rem; }
+details.checks li { padding: .2rem 0; }
+p.period { margin: 1rem 0 .4rem; color: var(--dim); font-size: .95rem; }
+dl.panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr)); gap: .8rem; margin: 0 0 1.2rem; }
+dl.panel > div { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: .8rem .95rem; min-width: 0; box-shadow: var(--shadow); }
+dl.panel dt { margin: 0; }
+dl.panel dd { margin: 0; font-size: .875rem; color: var(--dim); }
+dl.panel dd.big { font: 500 2rem/1.2 var(--sans); color: var(--ink); margin: .15rem 0; overflow-wrap: anywhere; }
+details.def { margin: 0; }
+details.def > summary { color: var(--dim); font-size: .95rem; list-style: none; }
+details.def > summary::-webkit-details-marker { display: none; }
+details.def .q { display: inline-block; min-width: 1.2rem; text-align: center; border: 1px solid var(--line-ui); border-radius: 9999px; font-size: .75rem; line-height: 1.2rem; margin-left: .2rem; }
+details.def p { margin: .3rem 0 .2rem; font-size: .875rem; color: var(--ink); }
+.delta { font-size: .9rem; font-weight: 400; color: var(--dim); margin-left: .3rem; white-space: nowrap; }
+.delta.better { color: var(--better); }
+.delta.worse { color: var(--worse); }
+figure.strip { margin: 0 0 1.2rem; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: .8rem .95rem; box-shadow: var(--shadow); }
+figure.strip figcaption { font-size: .95rem; color: var(--dim); margin-bottom: .4rem; }
+svg.strip { display: block; width: 100%; height: auto; }
+svg.strip rect.caught, svg.sym rect.caught { fill: var(--viz-caught); }
+svg.strip circle.hole, svg.sym circle.hole { fill: var(--card); }
+svg.strip rect.nothing, svg.sym rect.nothing { fill: var(--viz-nothing); }
+svg.strip rect.excused, svg.sym rect.excused { fill: none; stroke: var(--viz-nothing); stroke-width: 1; stroke-dasharray: 2 1.5; }
+svg.strip rect.none, svg.sym rect.none { fill: var(--viz-base); }
+svg.strip path.changed, svg.sym path.changed { fill: var(--accent); }
+svg.strip path.deploy, svg.sym path.deploy { fill: var(--viz-ui); }
+svg.strip rect.quiet, svg.sym rect.quiet { fill: var(--h3); }
+p.strip-ends { display: flex; justify-content: space-between; margin: .2rem 0 .5rem; font-size: .85rem; color: var(--dim); }
+svg.sym { vertical-align: middle; }
+details.days { margin-top: .6rem; }
+nav.ruletabs ul { list-style: none; display: flex; flex-wrap: wrap; gap: .3rem; margin: 0 0 1rem; padding: 0 0 .5rem; border-bottom: 1px solid var(--line-strong); }
+nav.ruletabs a { display: inline-block; padding: .3rem .8rem; border-radius: 9999px; }
+nav.ruletabs a[aria-current] { color: var(--ink); font-weight: 600; background: var(--accent-wash); text-decoration: none; }
+main > section.card, main > .moved + section.card { margin: 0 0 1rem; }
+section.card { margin-bottom: 1rem; }
+/* Where a section was before it moved to a tab: shown only when an old
+   link goes to it. */
+p.moved { display: none; }
+p.moved:target { display: block; padding: .6rem 1rem; background: var(--accent-soft); border-radius: 12px; }
+pre.diff { margin: .4rem 0 1rem; padding: .6rem .8rem; background: var(--card); border: 1px solid var(--line-strong); border-radius: 10px; font-family: var(--mono); }
+pre.diff span { display: block; }
+pre.diff .del { color: var(--bad); }
+pre.diff .ins { color: var(--better); }
+pre.diff .hunk { color: var(--dim); }

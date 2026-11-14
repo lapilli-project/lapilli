@@ -453,7 +453,7 @@ func TestNotificationsShown(t *testing.T) {
 	if _, body, _ := get(t, h, "/rules"); !strings.Contains(body, "5 notifications, 1 repeats") {
 		t.Errorf("rules: %s", body)
 	}
-	_, body, _ := get(t, h, "/rules/Errors")
+	_, body, _ := get(t, h, "/rules/Errors?tab=firings")
 	if !strings.Contains(body, "5 notifications were sent for it: 1 of them repeats, 3 while people slept and 1 more off hours; 3 were for firings that caught nothing, and 0 tell of no firing") ||
 		!strings.Contains(body, "By receiver: oncall 5.") || !strings.Contains(body, "counted from 2026-11-01") {
 		t.Errorf("rule: %s", body)

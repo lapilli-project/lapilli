@@ -33,7 +33,7 @@ type ctxKey struct{}
 // 4 or 12 weeks: the bar offers each only where the page honours it.
 var (
 	teamPages  = map[string]bool{"overview": true, "rules": true, "incidents": true, "tasks": true}
-	weeksPages = map[string]bool{"rules": true, "incidents": true}
+	weeksPages = map[string]bool{"rules": true, "incidents": true, "rule": true}
 )
 
 // pageContext reads a request's page context: the team and weeks of its

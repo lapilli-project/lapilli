@@ -709,6 +709,10 @@ type change struct {
 	Since                   time.Time
 	Expr, For, Keep, Labels string
 	Gone                    bool
+	// Diff is it beside the version before it, on a rule's page; First
+	// says there is none before it in the weeks kept.
+	Diff  []diffLine
+	First bool
 }
 
 type reviewView struct {
@@ -771,6 +775,29 @@ type ruleView struct {
 	// Refires are its firings that re-fired, week by week, and its alerts
 	// that re-fired most; nil when it hasn't fired.
 	Refires *refiresView
+
+	// The page (docs/design/ui.md): its own path; the tab shown, and each;
+	// the weeks it shows (1, 4 or 12), from From, and, when the ledger
+	// holds as long a span before them, where that starts, Before.
+	Path         string
+	Tab          string
+	Tabs         []ruleTab
+	Period       int
+	From, Before time.Time
+	// Row is its badges; Conds, what to check; Facts, its header's line;
+	// For, its for as the rules in effect have it.
+	Row   ruleRow
+	Conds []ruleCond
+	Facts []ruleFact
+	For   string
+	// Panel is its five numbers, Strip its last 84 days.
+	Panel rulePanel
+	Strip *ruleStrip
+	// EditNote opens the note's form (edit=note).
+	EditNote bool
+	// LastWeek is its replay beside what really fired over the last week,
+	// which says whether it differs.
+	LastWeek ledger.Check
 }
 
 // refiresView is a rule's re-fires over the twelve weeks shown.
@@ -817,31 +844,48 @@ func (s *Server) checksLastWeek(ctx context.Context) (map[string]ledger.Check, e
 func (s *Server) rulePage(r *http.Request) (any, error) {
 	ctx := r.Context()
 	name := r.PathValue("name")
+	q := r.URL.Query()
+	n := ruleWeeksOf(q)
 	t, err := s.tallies(ctx, weeks)
 	if err != nil {
 		return nil, err
 	}
-	lines, silent, err := s.ruleLines(ctx, lang(r), t, weeks)
+	lines, silent, err := s.ruleLines(ctx, lang(r), t, n)
 	if err != nil {
 		return nil, err
 	}
-	v := ruleView{ruleLine: ruleLine{Name: name, Precision: "–"}}
+	v := ruleView{ruleLine: ruleLine{Name: name, Precision: "–"}, Path: "/rules/" + url.PathEscape(name), Tab: ruleTabOf(q), Period: n,
+		EditNote: q.Get("edit") == "note"}
+	id := t.id(name)
 	if i := slices.IndexFunc(lines, func(l ruleLine) bool { return l.Name == name }); i >= 0 {
 		v.ruleLine, v.Known = lines[i], true
-	} else if rr, ok := t.rules[t.id(name)]; ok && t.id(name) != 0 {
-		// One that didn't fire in the twelve weeks says, as the list's
-		// badges do, why it isn't replayed, and where it is recorded.
+	} else if rr, ok := t.rules[id]; ok && id != 0 {
+		// One that didn't fire in the weeks shown says, as the list's
+		// badges do, why it isn't replayed, and where it is recorded; one
+		// that fired in the twelve weeks kept, before them, is known.
 		v.Severity, v.Group, v.Unsupported, v.Source = rr.Severity, rr.Group, rr.Unsupported, rr.Source
+		for _, w := range t.weeks {
+			if x := t.by[w][id]; x.Firings+x.Excused > 0 {
+				v.Known = true
+			}
+		}
 	}
 	v.Known = v.Known || slices.Contains(silent, name)
+	var vs []version
+	var last *rules.Rule
 	if s.replaying() {
-		// Its versions over the twelve weeks shown.
-		vs, err := s.versions(ctx, s.l.Midnight(t.weeks[0]), s.now())
-		if err != nil {
+		// The versions over the strip's days; its versions over the twelve
+		// weeks shown are those from the one in effect when they began.
+		if vs, err = s.versions(ctx, s.l.Midnight(s.l.Day(s.now())-stripDays+1), s.now()); err != nil {
 			return nil, err
 		}
-		var last *rules.Rule
-		for _, ver := range vs {
+		k := 0
+		for i := range vs {
+			if !vs[i].Since.After(s.l.Midnight(t.weeks[0])) {
+				k = i
+			}
+		}
+		for _, ver := range vs[k:] {
 			i := slices.IndexFunc(ver.Rules, func(x rules.Rule) bool { return x.Name == name })
 			var cur *rules.Rule
 			if i >= 0 {
@@ -863,25 +907,34 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 			}
 			last = cur
 		}
+		for i := range v.Changes {
+			if i == 0 {
+				v.Changes[i].First = true
+			} else {
+				v.Changes[i].Diff = versionDiff(v.Changes[i-1], v.Changes[i])
+			}
+		}
 		slices.Reverse(v.Changes)
 		if last != nil {
 			for _, u := range last.Unseen() {
 				v.Unseen = append(v.Unseen, tr(lang(r), "Replayed in part: %s.", tr(lang(r), verdict.UnseenText(u))))
 			}
+			v.For = verdict.Duration(last.For)
 		}
 	}
 	if !v.Known {
 		return nil, ledger.ErrNotFound
 	}
-	if id := t.id(name); id != 0 && v.Firings > 0 {
+	from := s.l.Midnight(t.weeks[len(t.weeks)-n])
+	if id != 0 && v.Firings > 0 {
 		v.Refires = &refiresView{Within: verdict.Duration(t.o.RefireWithin)}
-		for i := len(t.weeks) - 1; i >= 0; i-- {
+		for i := len(t.weeks) - 1; i >= len(t.weeks)-n; i-- {
 			x := t.by[t.weeks[i]][id]
 			v.Refires.Weeks = append(v.Refires.Weeks, refireWeek{Week: s.l.Midnight(t.weeks[i]).In(s.cfg.Loc).Format("2006-01-02"),
 				Firings: x.Firings, Refired: x.Refired, Shared: pct(x.Refired, x.Firings)})
 		}
 		if v.Refired > 0 {
-			if v.Refires.Worst, err = s.l.RefiredOf(ctx, name, s.l.Midnight(t.weeks[0]), s.now().Add(time.Hour), 5); err != nil {
+			if v.Refires.Worst, err = s.l.RefiredOf(ctx, name, from, s.now().Add(time.Hour), 5); err != nil {
 				return nil, err
 			}
 		}
@@ -945,7 +998,7 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	if s.checking() {
-		all, err := s.l.Checks(ctx, s.l.Midnight(t.weeks[0]), s.now())
+		all, err := s.l.Checks(ctx, from, s.now())
 		if err != nil {
 			return nil, err
 		}
@@ -953,17 +1006,57 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		d := s.differs()
+		v.LastWeek = cw[name]
+		v.Differs = v.LastWeek.Differs(d.N, d.Ratio)
 		if c, ok := all[name]; ok && c.Either() > 0 {
-			d := s.differs()
 			v.Check = &ruleCheck{Check: c, Share: int(math.Round(c.Share() * 100)), OnlyReplayed: c.Replayed - c.Alike,
 				OnlyReal: c.Real - c.Alike, Week: cw[name]}
-			v.Differs = cw[name].Differs(d.N, d.Ratio)
 			if v.Check.Misses, err = s.l.CheckMisses(ctx, name); err != nil {
 				return nil, err
 			}
 		}
 	}
+	s.ruleHeader(&v)
+	// What it fires with, as far as is known: the labels of its latest
+	// firings, and its own; a deploy or a quiet window is set beside them.
+	var sets []map[string]string
+	seen := map[string]bool{}
+	add := func(ls map[string]string) {
+		if k := labelsText(ls); !seen[k] && len(sets) < 50 {
+			seen[k] = true
+			sets = append(sets, ls)
+		}
+	}
+	if last != nil {
+		add(last.AlertLabels())
+	}
+	for _, f := range v.Latest {
+		add(f.Firing.Labels)
+	}
+	if err := s.glance(ctx, &v, t, vs, sets); err != nil {
+		return nil, err
+	}
 	return v, nil
+}
+
+// ruleHeader is what a rule's page says at its top: its badges, what to
+// check, the facts of it, and its tabs.
+func (s *Server) ruleHeader(v *ruleView) {
+	v.Proposed = slices.ContainsFunc(v.Proposals, func(p proposalLine) bool { return slices.Contains(ledger.Unfinished(), p.State) })
+	// What it says is to check with the rest, not as a badge of its own.
+	v.Row = rowOf(v.ruleLine, 0)
+	v.Conds = condsOf(v)
+	v.Tabs = tabsOf(v)
+	runbook := v.Note.Runbook
+	if v.Says != nil && v.Says.RunbookLink != "" {
+		runbook = v.Says.RunbookLink
+	}
+	for _, f := range []ruleFact{{"team", v.Team}, {"severity", v.Severity}, {"for", v.For}, {"group", v.Group}, {"runbook", runbook}} {
+		if f.Value != "" {
+			v.Facts = append(v.Facts, f)
+		}
+	}
 }
 
 func describe(r rules.Rule, since time.Time) change {
@@ -1694,7 +1787,8 @@ var funcs = template.FuncMap{
 			Kind string
 		}{p, kind}
 	},
-	"mainAction": mainAction,
+	"mainAction":  mainAction,
+	"ruleActions": ruleActions,
 	"emptyOf": func(kind, title, text string) emptyView {
 		return emptyView{Kind: kind, Title: title, Text: text}
 	},

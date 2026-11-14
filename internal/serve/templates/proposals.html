@@ -75,9 +75,12 @@
 {{end}}{{template "bottom" .}}{{end}}
 
 {{define "ruleproposals"}}{{$ro := .Status.ReadOnly}}{{with .View}}
-<h2 id="proposals">{{t "Proposals"}}</h2>
+<section class="card" id="proposals">
+<h2>{{t "Proposals"}}</h2>
 {{template "proposallist" (on $ .Proposals)}}
-{{if not $ro}}<details><summary>{{t "Propose a change"}}</summary>
+</section>
+{{if not $ro}}<section class="card" id="propose">
+<h2>{{t "Propose a change"}}</h2>
 <form method="post" action="/proposals" class="grid">
   <input type="hidden" name="rule" value="{{.Name}}"><input type="hidden" name="kind" value="for">{{with .SuggestedFor}}<input type="hidden" name="from" value="suggestion">{{end}}
   <label>{{t "A new for"}} <input name="for" required maxlength="20" value="{{.SuggestedFor}}" placeholder="15m"></label>
@@ -96,5 +99,5 @@
   <button>{{t "Propose it, for a person to approve"}}</button>
 </form>{{end}}
 <form method="post" action="/proposals"><input type="hidden" name="rule" value="{{.Name}}">{{if .Spare}}<input type="hidden" name="from" value="spare">{{end}}<input type="hidden" name="kind" value="{{.RetireKind}}"><button class="quiet-button">{{if eq .RetireKind "disable"}}{{t "Propose turning it off (deleted four weeks later, approved again)"}}{{else}}{{t "Propose deleting it"}}{{end}}</button></form>
-</details>{{end}}
+</section>{{end}}
 {{end}}{{end}}

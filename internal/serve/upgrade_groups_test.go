@@ -285,7 +285,7 @@ func TestUpgradeGroups(t *testing.T) {
 		}
 		// The rule's page lists the version, with the labels its alerts
 		// carry.
-		if _, body, _ := ui(t, s.Handler(), http.MethodGet, "/rules/Busy%20%5Bshop-eu%5D", bo, "", nil); !strings.Contains(body, "<td>region=eu-west</td>") ||
+		if _, body, _ := ui(t, s.Handler(), http.MethodGet, "/rules/Busy%20%5Bshop-eu%5D?tab=versions", bo, "", nil); !strings.Contains(body, "<td>region=eu-west</td>") ||
 			!strings.Contains(body, "<td>region=eu</td>") {
 			t.Errorf("the rule's versions don't show its group's labels")
 		}

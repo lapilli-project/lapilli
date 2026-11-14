@@ -215,16 +215,16 @@ func TestNOCPages(t *testing.T) {
 	if strings.Index(body, `href="/rules/Flap"`) > strings.Index(body, `href="/rules/Noise"`) {
 		t.Error("/rules?sort=deploys: Flap first")
 	}
-	_, body, _ = get(t, h, "/rules/Flap")
-	for _, want := range []string{`id="refired"`, "Over twelve weeks, 7 of its 8 firings re-fired (88%). 1 of the last 2 whole weeks had one.",
+	_, body, _ = get(t, h, "/rules/Flap?tab=firings")
+	for _, want := range []string{`id="refired"`, "7 of its 8 firings re-fired (88%). 1 of the last 2 whole weeks had one.",
 		"Its alerts that re-fired most", "<code>service=search</code> <code>severity=critical</code> 7 times",
-		"Of its firings over twelve weeks, 1 came during a deploy of what they are about, 1 of them catching something: precision 12% with them, 0% without."} {
+		"Of its firings, 1 came during a deploy of what they are about, 1 of them catching something: precision 12% with them, 0% without."} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/rules/Flap: no %q", want)
 		}
 	}
-	_, body, _ = get(t, h, "/rules/Noise")
-	if !strings.Contains(body, "None of its firings re-fired in twelve weeks.") || strings.Contains(body, "Its alerts that re-fired most") {
+	_, body, _ = get(t, h, "/rules/Noise?tab=firings")
+	if !strings.Contains(body, "None of its firings re-fired.") || strings.Contains(body, "Its alerts that re-fired most") {
 		t.Error("/rules/Noise: says it re-fired")
 	}
 	_, body, _ = get(t, h, "/")

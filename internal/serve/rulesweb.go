@@ -481,7 +481,16 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 
 // row is a rule's line as the list shows it.
 func (s *Server) row(l ruleLine, d rulesData, meta map[string]ruleMeta) ruleRow {
-	r := ruleRow{ruleLine: l, labels: meta[l.Name].labels, Facts: max(l.Content.Facts, d.Facts[l.Name])}
+	r := rowOf(l, max(l.Content.Facts, d.Facts[l.Name]))
+	r.labels = meta[l.Name].labels
+	r.sev, r.group = cmpOr(l.Severity, r.labels["severity"]), cmpOr(l.Group, meta[l.Name].group)
+	return r
+}
+
+// rowOf is a rule's line on each axis, with facts problems of fact in what
+// it says: the list's row, and the badges of its page.
+func rowOf(l ruleLine, facts int) ruleRow {
+	r := ruleRow{ruleLine: l, Facts: facts}
 	switch {
 	case l.Firings+l.Excused == 0:
 		r.Perf = "silent"
@@ -507,7 +516,6 @@ func (s *Server) row(l ruleLine, d rulesData, meta map[string]ruleMeta) ruleRow 
 	if r.Facts > 0 {
 		r.Has = append(r.Has, "facts")
 	}
-	r.sev, r.group = cmpOr(l.Severity, r.labels["severity"]), cmpOr(l.Group, meta[l.Name].group)
 	return r
 }
 
