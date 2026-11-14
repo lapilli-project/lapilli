@@ -20,6 +20,7 @@ import (
 
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/ledger/ledgertest"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/verdict"
 )
@@ -668,4 +669,84 @@ func TestReplicasSignInNeedsOneKey(t *testing.T) {
 		t.Fatalf("with the key: %v", err)
 	}
 	b.Close()
+}
+
+// dense is a history whose rules fire often: each of 100 series is true
+// for 10 minutes each hour, so a backfill writes thousands of firings a day.
+type dense struct{}
+
+func (dense) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	if expr == "impact" {
+		return nil, nil
+	}
+	var out []prom.Series
+	for i := range 100 {
+		s := prom.Series{Labels: map[string]string{"service": fmt.Sprintf("svc%d", i%5), "pod": fmt.Sprintf("p%d", i)}}
+		for t := start.Truncate(step); !t.After(end); t = t.Add(step) {
+			if (t.Unix()/60-int64(i))%60 < 10 {
+				s.Samples = append(s.Samples, prom.Sample{T: t, V: 1})
+			}
+		}
+		if len(s.Samples) > 0 {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+// writeWaitBound is how long a write on any replica may wait while the
+// leader works: a run's piece, a day of firings while it backfills, is a
+// write of its own, and no leader's job holds the writers' turn longer.
+const writeWaitBound = time.Second
+
+// A write on a follower or on the leader waits on no leader's job for long
+// while the leader backfills four weeks of dense firings, as a new ledger's
+// first start does: each day is a write of its own.
+func TestReplicasWritesDontWaitOnTheBackfill(t *testing.T) {
+	f := sharedLedger(t)
+	quickReplicas(t)
+	rc := newSink(t)
+	a := replica(t, f, rc, func(c *Config) { c.Backfill = 28 * 24 * time.Hour })
+	a.h = dense{}
+	b := replica(t, f, rc, func(c *Config) { c.Backfill = 28 * 24 * time.Hour })
+	b.h = dense{}
+	running(t, a)
+	until(t, 30*time.Second, "a leads", func() bool { return a.l.Leading() })
+	running(t, b)
+	ctx := context.Background()
+	var longest time.Duration
+	n, during := 0, 0
+	end := time.Now().Add(2 * time.Minute)
+	for time.Now().Before(end) {
+		c, _ := a.l.Cursor(ctx)
+		caughtUp := c.Equal(now)
+		for _, s := range []*Server{b, a} {
+			began := time.Now()
+			task(t, s, fmt.Sprintf("during %d", n))
+			longest = max(longest, time.Since(began))
+			n++
+			if !caughtUp {
+				during++
+			}
+		}
+		if caughtUp {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	runs, err := a.l.Runs(ctx, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firings := 0
+	for _, r := range runs {
+		firings += r.Firings
+	}
+	t.Logf("%d writes, %d of them while %d runs wrote %d firings: the longest waited %v", n, during, len(runs), firings, longest.Round(time.Millisecond))
+	if longest > writeWaitBound {
+		t.Errorf("a write waited %v while the leader backfilled, more than %v", longest, writeWaitBound)
+	}
+	if during < 10 || len(runs) < 20 {
+		t.Errorf("the backfill was over before it could be written beside: %d writes during it, %d runs", during, len(runs))
+	}
 }
