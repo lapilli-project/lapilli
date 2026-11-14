@@ -2,6 +2,48 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Many at once** (docs/design/ui.md). The rules list's table is one
+  form: a checkbox a rule, and a bar to make a task for each, set their
+  team, or set what is to become of them. The firings that caught nothing
+  can be picked and written down as real together. Each item is the write
+  its own form makes, in turn, with every check it has: a team's editor's
+  rules of another team are counted, not changed, and the changes log has
+  a line for each. At most 100 a request, from this site. The list it came
+  from is gone back to, its filters, order and team kept, and says once
+  what was done ("3 done; 2 not your team's").
+- **A firing's labels as chips**, each a link to the same day's firings
+  with that label too (`/firings?label=service=api`, all of them, five at
+  most); a label picked is a chip that takes it away.
+- **A day's firings by the hour** over the firings' table: 24 cells from
+  where the ledger's day starts, caught something hollow, nothing solid,
+  excused dashed; the same as a table, which says an hour the clocks
+  skipped or went back over.
+- **The overview's tiles open what makes their numbers**: each links to
+  the rules or the incidents over last week, the tiles' week, with the
+  same team, and what the list comes to is the tile's number. The rules
+  and the incidents take `week=DATE`, a whole week of the twelve kept;
+  the incidents, `state=caught|noisy|missed`, each a link with its count;
+  the rules list ends with what the rules shown come to, all told.
+- **Marks on the overview's weekly charts**: the weeks with firings during
+  deploys and the weeks a quiet window was over, besides the rules'
+  changes, each with a link to hide it or show it (`marks=`), in the
+  legend and in the table of the weeks.
+- **An incident's timeline** on its page: its span from `--lead` before it
+  to `--lead` after, and a row for each rule that caught it, nearly caught
+  it or was on around it, its firings drawn by their stones; twenty rules
+  at most, fifty firings each; the same as a table.
+
+### Changed
+
+- The overview's "Make it a task", and the firings' "This was real", are
+  shown disabled, with why, to a reader who may not use them, as each
+  page's main action is: they were a form the write then refused, or
+  weren't there.
+- The firings' days before and after keep "only ● nothing", as the form
+  does.
+
 ## [0.38.0] - 2026-11-15
 
 The way to change things: the fourth phase of docs/design/ui.md. Still no
