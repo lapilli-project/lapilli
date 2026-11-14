@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-11-14
+
+A rule's page, redone (the third phase of docs/design/ui.md): a header that
+says what to check, five numbers beside the span before, the last 84 days
+in a strip, and its sections in five tabs. The rules list says what its
+badges mean, and the README's pictures come from a demo ledger. Still no
+script, against WCAG 2.2 AA, in four languages. No ledger schema change;
+the API and MCP answer as they did.
+
 ### Added
 
 - **A rule's page, redone** (docs/design/ui.md). Its header has its
