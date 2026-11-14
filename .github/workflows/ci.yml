@@ -91,9 +91,9 @@ jobs:
 
   e2e-postgres:
     # lapilli serve on a real Postgres in Docker: firings kept across a
-    # restart and a dropped connection, a second serve refused, a SQLite
-    # ledger copied in and read back. Not a required check: it pulls an
-    # image.
+    # restart and a dropped connection, a second serve a replica that
+    # follows, a copy out refused while they hold it, a SQLite ledger copied
+    # in and read back. Not a required check: it pulls an image.
     name: the ledger in a real Postgres
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -105,6 +105,24 @@ jobs:
         with:
           go-version-file: go.mod
       - run: test/e2e/postgres.sh
+
+  e2e-replicas:
+    # Three replicas of serve on one Postgres ledger on kind
+    # (docs/design/replicas.md): the leader's process killed, another
+    # leading within the lease, every notice sent once across it, and a
+    # rolling restart the API answers through. Not a required check: it
+    # pulls images and starts a cluster.
+    name: replicas on kind
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: test/e2e/replicas.sh
 
   e2e:
     # The chart's CronJob on a kind cluster, against a real Prometheus. Not a
