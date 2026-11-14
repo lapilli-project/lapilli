@@ -132,7 +132,8 @@ func describe(ctx context.Context, l *Ledger) (map[string]string, error) {
 	// A text compared other than byte by byte, in Postgres, isn't SQLite's.
 	if l.d == postgres {
 		rows, err := l.r.QueryContext(ctx, `SELECT table_name, column_name FROM information_schema.columns
-			WHERE table_schema = current_schema() AND data_type = 'text' AND collation_name IS DISTINCT FROM 'C'`)
+			WHERE table_schema = current_schema() AND data_type = 'text' AND collation_name IS DISTINCT FROM 'C'
+				AND table_name NOT LIKE 'replica\_%'`)
 		if err != nil {
 			return nil, err
 		}
@@ -198,7 +199,7 @@ func indexes(ctx context.Context, l *Ledger, tables []string, out map[string]str
 		rows, err := l.r.QueryContext(ctx, `SELECT t.relname, i.relname, x.indisunique, coalesce(pg_get_expr(x.indpred, x.indrelid, true), ''), a.amname,
 				ARRAY(SELECT pg_get_indexdef(x.indexrelid, k, true) FROM generate_series(1, x.indnkeyatts) k)
 			FROM pg_index x JOIN pg_class i ON i.oid = x.indexrelid JOIN pg_class t ON t.oid = x.indrelid JOIN pg_am a ON a.oid = i.relam
-			WHERE t.relnamespace = to_regnamespace(current_schema()) AND t.relname != 'schema_version'`)
+			WHERE t.relnamespace = to_regnamespace(current_schema()) AND t.relname != 'schema_version' AND t.relname NOT LIKE 'replica\_%'`)
 		if err != nil {
 			return err
 		}
@@ -352,7 +353,7 @@ func foreignKeys(ctx context.Context, l *Ledger, tables []string, out map[string
 				array_to_string(ARRAY(SELECT a.attname FROM unnest(c.confkey) WITH ORDINALITY k (n, i) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n ORDER BY k.i), ', '),
 				c.confdeltype, c.confupdtype
 			FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_class r ON r.oid = c.confrelid
-			WHERE c.contype = 'f' AND t.relnamespace = to_regnamespace(current_schema())`)
+			WHERE c.contype = 'f' AND t.relnamespace = to_regnamespace(current_schema()) AND t.relname NOT LIKE 'replica\_%'`)
 		if err != nil {
 			return err
 		}
@@ -428,7 +429,7 @@ func checks(ctx context.Context, l *Ledger, tables []string, out map[string]stri
 	by := map[string][]string{}
 	if l.d == postgres {
 		rows, err := l.r.QueryContext(ctx, `SELECT t.relname, pg_get_constraintdef(c.oid, true) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid
-			WHERE c.contype = 'c' AND t.relnamespace = to_regnamespace(current_schema())`)
+			WHERE c.contype = 'c' AND t.relnamespace = to_regnamespace(current_schema()) AND t.relname NOT LIKE 'replica\_%'`)
 		if err != nil {
 			return err
 		}

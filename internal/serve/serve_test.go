@@ -232,7 +232,8 @@ func TestServe(t *testing.T) {
 	if code, _, _ := post(t, h, "/settings", url.Values{"match": {"none"}, "noisy-firings": {"30"}}, "same-origin"); code != http.StatusSeeOther {
 		t.Fatalf("settings: %d", code)
 	}
-	if !s.rejudge.Load() {
+	// Here, or, with replicas, through the ledger, for whichever leads.
+	if _, asked := s.rejudgeAsked(ctx); !s.rejudge.Load() && !asked {
 		t.Error("a change to --match should judge again")
 	}
 	s.jobs(ctx, false)

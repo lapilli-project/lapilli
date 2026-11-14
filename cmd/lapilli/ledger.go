@@ -135,7 +135,9 @@ func openForCopy(ctx context.Context, dir, urlFile string, there bool) (*ledger.
 		if err != nil {
 			return nil, err
 		}
-		return ledger.OpenPostgres(ctx, string(b), nil)
+		// Alone: refused while serve's replicas hold the ledger, and
+		// refusing them while it copies.
+		return ledger.OpenPostgresAlone(ctx, string(b), nil)
 	}
 	path := filepath.Join(dir, "ledger.db")
 	if _, err := os.Stat(path); there && err != nil {

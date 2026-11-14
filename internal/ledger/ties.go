@@ -345,6 +345,7 @@ func (l *Ledger) tie(t *txn, list []Tie) (map[string]bool, error) {
 			if _, err := t.ExecContext(t.ctx, "DELETE FROM rules WHERE id = ?", other); err != nil {
 				return nil, err
 			}
+			t.idsChanged = true
 		case source == "":
 			delete(keep, rule) // a rule that fired under the name: not tied
 			continue
@@ -390,7 +391,7 @@ func (l *Ledger) rename(t *txn, id int64, was, name string) error {
 	t.gone[was] = true
 	delete(t.rules, was)
 	t.rules[name] = id
-	t.all, t.recorded = true, true
+	t.all, t.recorded, t.idsChanged = true, true, true
 	return nil
 }
 

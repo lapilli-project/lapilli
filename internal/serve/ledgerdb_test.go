@@ -144,33 +144,52 @@ func TestRunStopsWhenTheLockIsLost(t *testing.T) {
 	defer cancel()
 	ran := make(chan error, 1)
 	go func() { ran <- s.Run(ctx) }()
-	b, err := os.ReadFile(s.cfg.LedgerURLFile)
-	if err != nil {
-		t.Fatal(err)
-	}
 	db := ledgerDB(t, s)
 	defer db.Close()
-	// The writer's session ends, and another process takes the ledger
-	// meanwhile: when serve connects again, someone else wrote. The
-	// database is the test's own, as are the locks in it.
-	// pg_locks is the whole server's: those of this database alone.
-	const here = "locktype = 'advisory' AND granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
-	if _, err := db.ExecContext(ctx, "SELECT pg_terminate_backend(pid) FROM pg_locks WHERE "+here); err != nil {
-		t.Fatal(err)
-	}
-	for {
-		var n int
-		db.QueryRowContext(ctx, "SELECT count(*) FROM pg_locks WHERE "+here).Scan(&n)
-		if n == 0 {
-			break
+	// A process takes the ledger alone meanwhile, and writes: it waits for
+	// the lock, and serve's sessions end. A replica's sessions (the lease's,
+	// the side pool's, its refreshes') come back within a second, but a try
+	// for the lock shared doesn't pass one waiting for it alone, so the
+	// process gets it. The database is the test's own, as are the locks in
+	// it; pg_locks is the whole server's: those of this database alone.
+	const here = "locktype = 'advisory' AND objsubid = 2 AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
+	var class, key int64
+	for class == 0 {
+		if ctx.Err() != nil {
+			t.Fatal("serve never held its ledger's lock")
 		}
-		time.Sleep(20 * time.Millisecond)
+		db.QueryRowContext(ctx, "SELECT classid::bigint, objid::bigint FROM pg_locks WHERE granted AND mode = 'ShareLock' AND "+here+" LIMIT 1").Scan(&class, &key)
+		time.Sleep(10 * time.Millisecond)
 	}
-	other, err := ledger.OpenPostgres(ctx, strings.TrimSpace(string(b)), time.UTC)
+	alone, err := db.Conn(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	other.Close()
+	defer alone.Close()
+	var pid int
+	alone.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid)
+	took := make(chan error, 1)
+	go func() {
+		_, err := alone.ExecContext(ctx, "SELECT pg_advisory_lock($1, $2)", int32(uint32(class)), int32(uint32(key)))
+		took <- err
+	}()
+	for waits := false; !waits; {
+		db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted AND pid = $1 AND "+here+")", pid).Scan(&waits)
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := db.ExecContext(ctx, "SELECT pg_terminate_backend(pid, 1000) FROM pg_locks WHERE granted AND pid <> $1 AND "+here, pid); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-took; err != nil {
+		t.Fatalf("taking the ledger alone: %v", err)
+	}
+	// What a process alone does first, when it opens the ledger.
+	if _, err := alone.ExecContext(ctx, "UPDATE schema_version SET writers = writers + 1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := alone.ExecContext(ctx, "SELECT pg_advisory_unlock($1, $2)", int32(uint32(class)), int32(uint32(key))); err != nil {
+		t.Fatal(err)
+	}
 	// serve finds out at its next write.
 	s.l.SetMeta(ctx, "after", "1")
 	select {
@@ -184,8 +203,8 @@ func TestRunStopsWhenTheLockIsLost(t *testing.T) {
 }
 
 // A notice found due is sent only while this process holds the ledger:
-// one whose writer's session went, while another process took the ledger
-// and will send it, sends nothing.
+// one whose writer's session went, while a process took the ledger alone,
+// sends nothing.
 func TestSendDueHoldsTheLedger(t *testing.T) {
 	if !ledgertest.On() {
 		t.Skip("the ledgers are SQLite's")
@@ -210,7 +229,7 @@ func TestSendDueHoldsTheLedger(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(s.cfg.LedgerURLFile)
-	other, err := ledger.OpenPostgres(ctx, strings.TrimSpace(string(b)), time.UTC)
+	other, err := ledger.OpenPostgresAlone(ctx, strings.TrimSpace(string(b)), time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}

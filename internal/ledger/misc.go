@@ -308,7 +308,7 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM series WHERE id NOT IN (SELECT DISTINCT series_id FROM firings)"); err != nil {
 			return err
 		}
-		t.recorded = true
+		t.recorded, t.idsChanged = true, true
 		l.ids.Lock()
 		clear(l.ids.series)
 		clear(l.ids.labels)

@@ -1528,11 +1528,9 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.status.Lock()
-	counts := maps.Clone(s.status.runs)
-	took := s.status.took
-	s.status.Unlock()
-	v := runsView{runs, cs, cursor, counts, took, srcs, s.cfg.FiringsToken != "", nil, nil, s.onCallView()}
+	// The leader's, on a replica that follows.
+	st := s.shownStatus()
+	v := runsView{runs, cs, cursor, st.Runs, st.Took, srcs, s.cfg.FiringsToken != "", nil, nil, s.onCallShown(st)}
 	if v.Stopped, err = s.stoppedReports(r.Context()); err != nil {
 		return nil, err
 	}
@@ -1547,9 +1545,7 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 		if c.To, err = s.l.CheckedTo(r.Context()); err != nil {
 			return nil, err
 		}
-		s.status.Lock()
-		c.Empty, c.EmptyDay = slices.Clone(s.status.checkEmpty), s.status.checkDay
-		s.status.Unlock()
+		c.Empty, c.EmptyDay = st.CheckEmpty, st.CheckDay
 		el, err := s.l.CheckElsewhere(r.Context(), s.now().Add(-checkWeek), s.now())
 		if err != nil {
 			return nil, err

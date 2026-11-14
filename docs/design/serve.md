@@ -615,8 +615,8 @@ tasks, comments) is in [work.md](work.md).
 
 ## Not in this
 
-More than one replica (what it would take is in [postgres.md](postgres.md));
-several Prometheus
+Several replicas of a SQLite ledger (with Postgres,
+[replicas.md](replicas.md)); several Prometheus
 servers in one ledger; firings from Alertmanager's webhook; a cloud's own
 alarms; editing rules. Each is a piece someone can take on. Alertmanager's webhook, beside the replay, would also show
 where a replay differs from what really fired.

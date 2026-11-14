@@ -3,7 +3,9 @@ package serve
 import (
 	"cmp"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -21,6 +23,7 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 
+	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/signin"
 )
 
@@ -45,6 +48,15 @@ type signIn struct {
 	used expiring
 	// warned is set once a refusal was logged.
 	warned atomic.Bool
+	// signs is a fingerprint of the key sessions are signed with, which
+	// replicas compare (joinable): it gives the key away no more than a
+	// session signed with it does.
+	signs string
+	// unkept are sign-outs the ledger couldn't keep yet, by person: kept
+	// in out meanwhile, and tried again (keepLater) while retrying is set.
+	unkeptMu sync.Mutex
+	unkept   map[string]int64
+	retrying bool
 }
 
 // expiring is a set of keys, each until a time, of at most max.
@@ -182,14 +194,33 @@ func mergeOut(a, b map[string]int64, now, keep int64, most int) map[string]int64
 // time, is one they signed out of, here or at another process sharing the
 // ledger. The record is read again only when the ledger counts a change to
 // it.
+//
+// With replicas, a record that can't be read is taken for one that ends
+// the session: another replica may have kept a sign-out this one hasn't
+// read, and a copy of the cookie would be taken. A process alone has read
+// every sign-out it kept, and goes on with its own.
 func (s *Server) signedOut(ctx context.Context, user string, made int64) bool {
+	ended, err := s.outOf(ctx, user, made)
+	if err != nil && s.l.Shared() {
+		s.log.Warn("who signed out couldn't be read: the session is refused", "err", err)
+		return true
+	}
+	return ended
+}
+
+// outOf reports whether a session of a person's, made at a time, is one
+// they signed out of, as far as is known here, and the error, if any, of
+// reading the ledger's record.
+func (s *Server) outOf(ctx context.Context, user string, made int64) (bool, error) {
 	keep := s.in.cookies.MaxAge.Milliseconds()
-	if n, err := s.l.MetaCount(ctx, metaSignedOut); err == nil && s.in.out.stale(n) {
-		if raw, err := s.l.Meta(ctx, metaSignedOut); err == nil {
+	n, err := s.l.MetaCount(ctx, metaSignedOut)
+	if err == nil && s.in.out.stale(n) {
+		var raw string
+		if raw, err = s.l.Meta(ctx, metaSignedOut); err == nil {
 			s.in.out.load(raw, n, s.now().UnixMilli(), keep)
 		}
 	}
-	return s.in.out.ended(user, made)
+	return s.in.out.ended(user, made), err
 }
 
 // who is who a request comes from, as the sign-in said, and how: by a
@@ -246,6 +277,9 @@ func (s *Server) newSignIn(ctx context.Context) error {
 		if in.cookies, err = signin.NewCookies(key, strings.HasPrefix(strings.ToLower(s.cfg.ExternalURL), "https://"), maxAge, now); err != nil {
 			return err
 		}
+		m := hmac.New(sha256.New, key)
+		m.Write([]byte("lapilli: the key the replicas sign sessions with"))
+		in.signs = hex.EncodeToString(m.Sum(nil)[:16])
 		o.Redirect = strings.TrimRight(s.cfg.ExternalURL, "/") + "/auth/callback"
 		if o.Client == nil {
 			o.Client = signin.Client(nil)
@@ -279,6 +313,28 @@ func (s *Server) sessionKey() ([]byte, error) {
 	}
 	s.log.Info("sessions are signed with a key made for this process: they end when lapilli restarts. --session-key-file keeps them")
 	return []byte(hex.EncodeToString(b)), nil
+}
+
+// usedOnce reports whether a sign-in's state comes back for the first time
+// to any replica sharing the ledger, which keeps it until it would have
+// expired: a callback replayed to another replica is refused as it is to
+// this one. Without replicas, this process's own set says (in.used).
+func (s *Server) usedOnce(ctx context.Context, state string, until int64) bool {
+	if !s.l.Shared() {
+		return true
+	}
+	first, err := s.l.Once(ctx, "signin:"+state, time.Duration(max(until-s.now().Unix(), 60))*time.Second)
+	switch {
+	case errors.Is(err, ledger.ErrOnceFull):
+		// Past the bound, this process's own set alone says, as without
+		// replicas: the provider refuses its code again anyway.
+		s.log.Warn("the ledger keeps as many sign-ins' states as it may: this one is checked by this replica alone", "err", err)
+		return true
+	case err != nil:
+		s.log.Warn("a sign-in's state couldn't be checked against the other replicas: refused", "err", err)
+		return false
+	}
+	return first
 }
 
 // namesPeople reports whether requests say who they come from: a sign-in
@@ -613,6 +669,16 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, forbiddenSignIn{errNoOne})
 		return
 	}
+	// Used once among the replicas, once the provider signed in someone a
+	// role lets in: a state that signs no one in, or a stranger, writes
+	// nothing to the ledger (this process's own set refuses it again), and
+	// a callback replayed to another replica is refused there, as the
+	// provider refuses its code again.
+	as := r.WithContext(context.WithValue(r.Context(), whoKey{}, who{Identity: id, by: bySession}))
+	if s.letIn(as) && !s.usedOnce(r.Context(), l.State, l.Until) {
+		s.oops(w, r, errBadState)
+		return
+	}
 	if id.Overage {
 		s.log.Warn("the identity provider sent a link to the groups (_claim_names) in place of the groups: Microsoft Entra ID's group overage, past 200. No group is taken. Have it send only the groups the application is given (groupMembershipClaims: ApplicationGroup), or name people", "user", id.User)
 	}
@@ -670,7 +736,9 @@ const keepLogins = 4
 // A stranger's cookie, kept, lets no one in anywhere.
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if sess, ok := s.in.cookies.Read(r); ok && !s.signedOut(r.Context(), sess.User, sess.Made) {
+	// Kept unless the session is read to be one signed out of already:
+	// who signed out unread is no reason to keep no sign-out.
+	if sess, ok := s.in.cookies.Read(r); ok && !s.endedAlready(r.Context(), sess.User, sess.Made) {
 		as := r.WithContext(context.WithValue(r.Context(), whoKey{}, who{Identity: signin.Identity{User: sess.User, Groups: sess.Groups}, by: bySession}))
 		if s.signedName(sess.User) != "anonymous" && s.letIn(as) {
 			s.keepSignOut(r.Context(), sess.User)
@@ -681,18 +749,93 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/auth/signed-out", http.StatusSeeOther)
 }
 
+// endedAlready reports whether a session is read to be one its person
+// signed out of already; not when who signed out can't be read.
+func (s *Server) endedAlready(ctx context.Context, user string, made int64) bool {
+	ended, err := s.outOf(ctx, user, made)
+	return ended && err == nil
+}
+
 // keepSignOut notes that a person signed out now, here and in the ledger,
 // merged with what it holds, written by another process sharing it, too.
+// One the ledger can't keep now is kept here, and tried again
+// (keepLater): until then, the other replicas take a copy of the cookie.
 func (s *Server) keepSignOut(ctx context.Context, user string) {
-	at, keep := s.now().UnixMilli(), s.in.cookies.MaxAge.Milliseconds()
-	s.in.out.add(user, at, keep)
-	err := s.l.UpdateMetaCounted(ctx, metaSignedOut, func(old string) (string, bool) {
+	at := s.now().UnixMilli()
+	s.in.out.add(user, at, s.in.cookies.MaxAge.Milliseconds())
+	// With any the ledger couldn't keep before.
+	s.in.unkeptMu.Lock()
+	out := maps.Clone(s.in.unkept)
+	s.in.unkeptMu.Unlock()
+	if out == nil {
+		out = map[string]int64{}
+	}
+	out[user] = max(out[user], at)
+	if err := s.keepOut(ctx, out); err != nil {
+		s.log.Warn("who signed out can't be kept in the ledger yet: this replica refuses a copy of their cookie, and it is tried again", "err", err)
+		s.keepLater(user, at)
+		return
+	}
+	s.in.unkeptMu.Lock()
+	maps.DeleteFunc(s.in.unkept, func(u string, t int64) bool { return t <= out[u] })
+	s.in.unkeptMu.Unlock()
+}
+
+// keepOut merges sign-outs into the ledger's record.
+func (s *Server) keepOut(ctx context.Context, out map[string]int64) error {
+	now, keep := s.now().UnixMilli(), s.in.cookies.MaxAge.Milliseconds()
+	return s.l.UpdateMetaCounted(ctx, metaSignedOut, func(old string) (string, bool) {
 		var m map[string]int64
 		json.Unmarshal([]byte(old), &m)
-		b, _ := json.Marshal(mergeOut(m, map[string]int64{user: at}, at, keep, s.in.out.max))
+		b, _ := json.Marshal(mergeOut(m, out, now, keep, s.in.out.max))
 		return string(b), string(b) != old
 	})
-	if err != nil {
-		s.log.Warn("who signed out can't be kept in the ledger: a copy of their cookie is refused until lapilli restarts", "err", err)
+}
+
+// keepAgain is how long apart a sign-out the ledger couldn't keep is tried
+// again, in turn; past the last, it stays in this replica alone, and is
+// tried again with the next that can't be kept. Replaced in tests.
+var keepAgain = []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second,
+	time.Minute, time.Minute, time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute}
+
+// keepLater tries a sign-out the ledger couldn't keep again, with any
+// other not kept yet, by one goroutine, until the ledger keeps them all.
+func (s *Server) keepLater(user string, at int64) {
+	in := s.in
+	in.unkeptMu.Lock()
+	defer in.unkeptMu.Unlock()
+	if in.unkept == nil {
+		in.unkept = map[string]int64{}
 	}
+	in.unkept[user] = max(in.unkept[user], at)
+	if in.retrying {
+		return
+	}
+	in.retrying = true
+	go func() {
+		for _, wait := range keepAgain {
+			time.Sleep(wait)
+			in.unkeptMu.Lock()
+			out := maps.Clone(in.unkept)
+			in.unkeptMu.Unlock()
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			err := s.keepOut(ctx, out)
+			cancel()
+			in.unkeptMu.Lock()
+			if err == nil {
+				maps.DeleteFunc(in.unkept, func(u string, t int64) bool { return t <= out[u] })
+			}
+			if len(in.unkept) == 0 {
+				in.retrying = false
+				in.unkeptMu.Unlock()
+				return
+			}
+			in.unkeptMu.Unlock()
+		}
+		in.unkeptMu.Lock()
+		in.retrying = false
+		n := len(in.unkept)
+		in.unkeptMu.Unlock()
+		s.log.Error("who signed out still can't be kept in the ledger: the other replicas take a copy of their cookie until it expires; they are kept with the next sign-out", "people", n)
+	}()
 }

@@ -1,0 +1,18 @@
+{{- include "lapilli.defaults" . }}
+{{- if and (eq .Values.mode "serve") (gt (int .Values.serve.replicas) 1) }}
+# Replicas sharing a Postgres ledger: a node drained takes so many at
+# most, the rest serving, one of them leading.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "lapilli.fullname" . }}
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.serve.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      {{- include "lapilli.selector" . | nindent 6 }}
+{{- end }}

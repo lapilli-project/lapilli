@@ -3,7 +3,6 @@ package serve
 import (
 	"bytes"
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"lapilli.dev/internal/ledger"
-	"lapilli.dev/internal/ledger/ledgertest"
 	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/signin/idptest"
 )
@@ -237,7 +235,8 @@ func TestSignInTwoTabs(t *testing.T) {
 }
 
 // Signing out at one process that shares the ledger signs out at the
-// other too, and neither writes over the other's.
+// other too, and neither writes over the other's: two replicas of a
+// Postgres ledger, or two processes of one SQLite file.
 func TestSignOutTwoProcesses(t *testing.T) {
 	s, idp := oidcServer(t, nil)
 	s.now = func() time.Time { return now.Add(-time.Minute) }
@@ -250,14 +249,6 @@ func TestSignOutTwoProcesses(t *testing.T) {
 	cfg := s.cfg
 	cfg.OIDC = &signin.OIDC{Issuer: idp.URL, ClientID: "lapilli", SecretFile: s.cfg.OIDC.SecretFile, Claims: s.cfg.OIDC.Claims}
 	s2, err := New(context.Background(), cfg, &history{}, s.log)
-	if ledgertest.On() {
-		// A Postgres ledger takes one process: the second is refused.
-		var locked *ledger.LockedError
-		if !errors.As(err, &locked) {
-			t.Fatalf("a second process on a Postgres ledger: %v", err)
-		}
-		return
-	}
 	if err != nil {
 		t.Fatal(err)
 	}

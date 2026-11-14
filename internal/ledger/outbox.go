@@ -24,7 +24,7 @@ func (l *Ledger) tell(t *txn, event, by string, about map[string]any) error {
 	if dests == nil || len(*dests) == 0 {
 		return nil
 	}
-	now := time.Now()
+	now := wallNow()
 	about["event"], about["at"] = event, now.UTC()
 	if by != "" {
 		about["by"] = by
@@ -34,13 +34,26 @@ func (l *Ledger) tell(t *txn, event, by string, about map[string]any) error {
 		return err
 	}
 	for _, d := range *dests {
-		if _, err := t.ExecContext(t.ctx, "INSERT INTO outbox (dest, event, body, created, next_at) VALUES (?, ?, ?, ?, ?)",
+		if _, err := t.ExecContext(t.ctx, t.d.pick("INSERT INTO outbox (dest, event, body, created, next_at) VALUES (?, ?, ?, ?, ?)", outboxDue),
 			d, event, string(body), now.Unix(), now.Unix()); err != nil {
 			return err
 		}
 	}
 	return nil
 }
+
+// outboxDue is Postgres's INSERT of a notice: due by the database's clock,
+// which every replica's claim reads, not by the clock of the replica that
+// told it, which may be ahead.
+const outboxDue = "INSERT INTO outbox (dest, event, body, created, next_at) VALUES (?, ?, ?, ?, " + dbNow + ")"
+
+// dbNow is Postgres's clock, in whole Unix seconds, as Go's Unix() gives
+// them: floored, not rounded.
+const dbNow = "CAST(floor(extract(epoch FROM clock_timestamp())) AS BIGINT)"
+
+// wallNow is this process's clock, for what a notice says of its time;
+// replaced in tests. When it is due is the database's, with replicas.
+var wallNow = time.Now
 
 // Told is something to be told, to one place.
 type Told struct {
@@ -56,7 +69,7 @@ func (l *Ledger) TellOnce(ctx context.Context, key, value, event string, told []
 		if have, err := l.meta(t.ctx, t, key); err != nil || have == value {
 			return err
 		}
-		now := time.Now()
+		now := wallNow()
 		for _, x := range told {
 			about := map[string]any{"event": event, "at": now.UTC()}
 			maps.Copy(about, x.About)
@@ -64,7 +77,7 @@ func (l *Ledger) TellOnce(ctx context.Context, key, value, event string, told []
 			if err != nil {
 				return err
 			}
-			if _, err := t.ExecContext(t.ctx, "INSERT INTO outbox (dest, event, body, created, next_at) VALUES (?, ?, ?, ?, ?)",
+			if _, err := t.ExecContext(t.ctx, t.d.pick("INSERT INTO outbox (dest, event, body, created, next_at) VALUES (?, ?, ?, ?, ?)", outboxDue),
 				x.Dest, event, string(body), now.Unix(), now.Unix()); err != nil {
 				return err
 			}
@@ -117,8 +130,16 @@ func (l *Ledger) Unsent(ctx context.Context) (n int, err error) {
 	return
 }
 
-// Sent notes a notice sent.
+// Sent notes a notice sent. In a ledger replicas share, by itself, a row
+// it holds claimed: it waits for no write's turn, which a write long enough
+// could hold past the claim.
 func (l *Ledger) Sent(ctx context.Context, id int64) error {
+	if l.rep != nil {
+		ctx, cancel := side(ctx)
+		defer cancel()
+		_, err := l.rep.side.ExecContext(ctx, "UPDATE outbox SET sent_at = ?, error = '' WHERE id = ?", time.Now().Unix(), id)
+		return err
+	}
 	return l.writeAside(ctx, func(t *txn) error {
 		_, err := t.ExecContext(t.ctx, "UPDATE outbox SET sent_at = ?, error = '' WHERE id = ?", time.Now().Unix(), id)
 		return err
@@ -131,20 +152,51 @@ const GiveUpAfter = 10
 // Failed notes a notice that couldn't be sent, to be tried again later,
 // further apart each time; after GiveUpAfter tries, not again.
 func (l *Ledger) Failed(ctx context.Context, id int64, why string) error {
+	if len(why) > 300 {
+		why = why[:300]
+	}
+	if l.rep != nil {
+		// As Sent: by itself, the row locked while its attempts are counted.
+		ctx, cancel := side(ctx)
+		defer cancel()
+		tx, err := l.rep.side.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		var attempts int
+		if err := tx.QueryRowContext(ctx, "SELECT attempts FROM outbox WHERE id = ? FOR UPDATE", id).Scan(&attempts); err != nil {
+			return err
+		}
+		// Tried again by the database's clock, as every claim reads it.
+		next, in := dbNow+" + CAST(? AS BIGINT)", int64(retryIn(attempts+1).Seconds())
+		if attempts+1 >= GiveUpAfter {
+			next, in = "CAST(? AS BIGINT)", int64(1<<40) // given up
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE outbox SET attempts = ?, next_at = "+next+", error = ? WHERE id = ?", attempts+1, in, why, id); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	return l.writeAside(ctx, func(t *txn) error {
 		var attempts int
 		if err := t.QueryRowContext(t.ctx, "SELECT attempts FROM outbox WHERE id = ?", id).Scan(&attempts); err != nil {
 			return err
 		}
 		attempts++
-		next := time.Now().Add(min(time.Minute<<min(attempts-1, 9), 6*time.Hour))
-		if attempts >= GiveUpAfter {
-			next = time.Unix(1<<40, 0) // given up
-		}
-		if len(why) > 300 {
-			why = why[:300]
-		}
-		_, err := t.ExecContext(t.ctx, "UPDATE outbox SET attempts = ?, next_at = ?, error = ? WHERE id = ?", attempts, next.Unix(), why, id)
+		_, err := t.ExecContext(t.ctx, "UPDATE outbox SET attempts = ?, next_at = ?, error = ? WHERE id = ?", attempts, retryAt(attempts).Unix(), why, id)
 		return err
 	})
 }
+
+// retryAt is when a notice tried so many times is tried again: further
+// apart each time; after GiveUpAfter tries, not again.
+func retryAt(attempts int) time.Time {
+	if attempts >= GiveUpAfter {
+		return time.Unix(1<<40, 0) // given up
+	}
+	return time.Now().Add(retryIn(attempts))
+}
+
+// retryIn is how long after its last try a notice is tried again.
+func retryIn(attempts int) time.Duration { return min(time.Minute<<min(attempts-1, 9), 6*time.Hour) }

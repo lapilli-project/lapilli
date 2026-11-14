@@ -1,0 +1,1118 @@
+package ledger
+
+// The replicas' guards their reviews asked for: what a role that may only
+// connect can do to them, writes and claims at the lease's end, refreshes
+// and side statements that wait, failovers, migrations, and a leader whose
+// work is stuck.
+
+import (
+	"context"
+	"crypto/rand"
+	"errors"
+	"fmt"
+	"hash/fnv"
+	"net/url"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"lapilli.dev/internal/firing"
+)
+
+// connectOnly is a connection as a role made for the test, which has
+// nothing on the ledger but the CONNECT every role has on a new database.
+func connectOnly(t *testing.T, u string) *pgx.Conn {
+	t.Helper()
+	ctx := context.Background()
+	b := make([]byte, 4)
+	rand.Read(b)
+	role := fmt.Sprintf("lt_role_%x", b)
+	admin, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { admin.Close(ctx) })
+	if _, err := admin.Exec(ctx, "CREATE ROLE "+role+" LOGIN PASSWORD 'lt-role-pw'"); err != nil {
+		t.Fatal(err)
+	}
+	pu, _ := url.Parse(u)
+	pu.User = url.UserPassword(role, "lt-role-pw")
+	c, err := pgx.Connect(ctx, pu.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		c.Close(ctx)
+		admin.Exec(ctx, "DROP ROLE "+role)
+	})
+	return c
+}
+
+// A role that may only connect can't hold the writers' turn: it is a row
+// lock, which needs the ledger's own privileges. Its advisory lock of the
+// turn's old key holds nothing, and every replica writes on.
+func TestReplicasConnectOnlyCantHoldTheTurn(t *testing.T) {
+	u := replicaURL(t)
+	ctx := context.Background()
+	a, b := openReplica(t, u), openReplica(t, u)
+	schema, _ := url.Parse(u)
+	other := connectOnly(t, u)
+	if _, err := other.Exec(ctx, "SELECT pg_advisory_lock($1, $2)", int32(writeClass), a.pg.key); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := other.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT 1 FROM "+schema.Query().Get("search_path")+".replica_gens FOR UPDATE"); err == nil {
+		t.Fatal("a role that may only connect locked the writers' turn")
+	}
+	for i, l := range []*Ledger{a, b} {
+		wctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		err := l.SetMeta(wctx, "k", "v")
+		cancel()
+		if err != nil {
+			t.Errorf("replica %d, with the turn's old key held by a role that may only connect: %v", i, err)
+		}
+	}
+}
+
+// A write that waits too long for the writers' turn (another replica's
+// write holds it, cut off) fails within turnWithin, and the replica says
+// its writes wait until a write takes the turn again.
+func TestReplicasTurnWaitedSaysSo(t *testing.T) {
+	u := replicaURL(t)
+	was := turnWithin
+	turnWithin = 500 * time.Millisecond
+	t.Cleanup(func() { turnWithin = was })
+	ctx := context.Background()
+	a := openReplica(t, u)
+	if err := a.SetMeta(ctx, "k", "1"); err != nil {
+		t.Fatal(err)
+	}
+	holder, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close(ctx)
+	tx, err := holder.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, "SELECT 1 FROM replica_gens WHERE one = 1 FOR UPDATE"); err != nil {
+		t.Fatal(err)
+	}
+	wctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	began := time.Now()
+	err = a.SetMeta(wctx, "k", "2")
+	if !errors.Is(err, ErrTurnWaited) || time.Since(began) > 3*time.Second {
+		t.Errorf("a write behind a turn held: %v after %v, want ErrTurnWaited within %v", err, time.Since(began), turnWithin)
+	}
+	if !a.WritesWaited() {
+		t.Error("the replica doesn't say its writes wait")
+	}
+	tx.Rollback(ctx)
+	if err := a.SetMeta(ctx, "k", "3"); err != nil {
+		t.Fatal(err)
+	}
+	if a.WritesWaited() {
+		t.Error("the replica says its writes wait, a write having taken the turn again")
+	}
+}
+
+// A session that waits for the ledger's lock alone holds nothing and wrote
+// nothing: a new replica is refused, saying which session waits and why; a
+// running replica whose connection dropped can't connect again meanwhile,
+// and doesn't take the ledger for lost; once the session goes, it writes.
+func TestReplicasAWaiterTakesNothing(t *testing.T) {
+	u := replicaURL(t)
+	quick(t)
+	ctx := context.Background()
+	a := openReplica(t, u)
+	if err := a.SetMeta(ctx, "k", "1"); err != nil {
+		t.Fatal(err)
+	}
+	// Its side pool's session holds the lock too, as a running replica's
+	// do: ending the writer's alone doesn't hand the waiter the lock.
+	if err := a.Wake(ctx); err != nil {
+		t.Fatal(err)
+	}
+	other := connectOnly(t, u)
+	wctx, wcancel := context.WithCancel(ctx)
+	waited := make(chan struct{})
+	go func() {
+		defer close(waited)
+		other.Exec(wctx, "SELECT pg_advisory_lock($1, $2)", int32(lockClass), a.pg.key)
+	}()
+	admin, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	within(t, 5*time.Second, "the session waits", func() bool {
+		var n int
+		admin.QueryRow(ctx, "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND mode = 'ExclusiveLock'").Scan(&n)
+		return n == 1
+	})
+	_, err = OpenPostgres(ctx, u, time.UTC)
+	var waits *LockWaitError
+	if !errors.As(err, &waits) || waits.PID == 0 || !strings.Contains(err.Error(), "waits to hold the ledger's lock alone") {
+		t.Errorf("a new replica, while a session waits for the lock alone: %v", err)
+	}
+	if _, err := admin.Exec(ctx, "SELECT pg_terminate_backend($1)", int64(a.pg.pid)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	for range 2 {
+		a.SetMeta(ctx, "k", "2")
+	}
+	if a.pg.isLost() {
+		t.Fatalf("taken for lost, though no process ever held the ledger alone: %v", a.LostWhy())
+	}
+	wcancel()
+	<-waited
+	var werr error
+	for range 3 {
+		if werr = a.SetMeta(ctx, "k", "3"); werr == nil {
+			break
+		}
+	}
+	if werr != nil || a.pg.isLost() {
+		t.Errorf("once the session went: %v (lost %v)", werr, a.pg.isLost())
+	}
+}
+
+// A notice claimed by a round that began long ago is claimed from when it
+// is taken, by the database's clock: no other sender takes it at once.
+func TestReplicasClaimFromAnOldRound(t *testing.T) {
+	u := replicaURL(t)
+	fastLease(t)
+	ctx := context.Background()
+	a, b := openReplica(t, u), openReplica(t, u)
+	if err := a.TellOnce(ctx, "k", "1", "test.event", []Told{{Dest: "webhook", About: map[string]any{"n": 1}}}); err != nil {
+		t.Fatal(err)
+	}
+	round := time.Now().Add(-claimFor - 30*time.Second)
+	n1, ok, err := a.Claim(ctx, "webhook", round, 0)
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if n2, ok, err := b.Claim(ctx, "webhook", time.Now(), 0); err != nil || ok && n2.ID == n1.ID {
+		t.Errorf("a notice claimed by a round that began long ago, claimed again at once: %v %v", ok, err)
+	}
+}
+
+// A notice is due by the database's clock, which every replica reads, not
+// by the clock of the replica that told it.
+func TestReplicasNoticesDueByTheDatabase(t *testing.T) {
+	u := replicaURL(t)
+	was := wallNow
+	wallNow = func() time.Time { return time.Now().Add(time.Hour) } // a replica an hour ahead
+	t.Cleanup(func() { wallNow = was })
+	ctx := context.Background()
+	a := openReplica(t, u)
+	if err := a.TellOnce(ctx, "k", "1", "test.event", []Told{{Dest: "webhook", About: map[string]any{"n": 1}}}); err != nil {
+		t.Fatal(err)
+	}
+	var late int64
+	if err := a.r.QueryRowContext(ctx, "SELECT next_at - CAST(extract(epoch FROM clock_timestamp()) AS BIGINT) FROM outbox").Scan(&late); err != nil {
+		t.Fatal(err)
+	}
+	if late > 5 {
+		t.Errorf("a notice told by a replica an hour ahead is due %d s from now", late)
+	}
+}
+
+// A leader's write whose lease another takes while it runs commits
+// nothing: the lease is checked again as it commits. A take isn't held up
+// by the write while it is open.
+func TestReplicasFenceAtCommit(t *testing.T) {
+	u := replicaURL(t)
+	fastLease(t)
+	ctx := context.Background()
+	a, b := openReplica(t, u), openReplica(t, u)
+	got := make(chan context.Context, 1)
+	ectx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go a.Elect(ectx, Elected{Version: "test"}, func(lctx context.Context) {
+		got <- lctx
+		<-lctx.Done()
+	})
+	var lctx context.Context
+	select {
+	case lctx = <-got:
+	case <-time.After(10 * time.Second):
+		t.Fatal("never led")
+	}
+	ld := leaseOf(lctx)
+	admin, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	var took time.Duration
+	err = a.write(context.WithValue(context.Background(), leaseKey{}, ld), func(t2 *txn) error {
+		// The lease lapses in the database, and another takes it, while this
+		// write is open; the leader's clock didn't move (a suspended host).
+		if _, err := admin.Exec(ctx, "UPDATE replica_lease SET until = clock_timestamp() - interval '1 second'"); err != nil {
+			return err
+		}
+		tctx, c := context.WithTimeout(ctx, 2*time.Second)
+		defer c()
+		began := time.Now()
+		if term, _, err := b.rep.take(tctx); err != nil || term == 0 {
+			return fmt.Errorf("the other's take: %d %v", term, err)
+		}
+		took = time.Since(began)
+		ld.mu.Lock()
+		ld.until = time.Now().Add(time.Hour)
+		ld.mu.Unlock()
+		return setMeta(t2.ctx, t2, "x.late", "the former leader's")
+	})
+	if !errors.Is(err, ErrNotLeading) {
+		t.Errorf("a write committed after another took the lease: %v", err)
+	}
+	if v, _ := a.Meta(ctx, "late"); v != "" {
+		t.Errorf("kept: %q", v)
+	}
+	if took > time.Second {
+		t.Errorf("the take waited %v for the former leader's open write", took)
+	}
+}
+
+// The lease is read FOR SHARE as a leader's write commits: another's take,
+// once the lease lapsed, waits for that write to be done, so its term
+// begins after every write of the former leader's that the check let
+// through. Here the commit is held past the lease's end by a trigger of
+// the test's own, run after the check.
+func TestReplicasTakeWaitsForACommit(t *testing.T) {
+	u := replicaURL(t)
+	ctx := context.Background()
+	a, b := openReplica(t, u), openReplica(t, u)
+	term, _, err := a.rep.take(ctx)
+	if err != nil || term == 0 {
+		t.Fatalf("a's take: %d %v", term, err)
+	}
+	ld := &leadership{r: a.rep, term: term, since: time.Now(), until: time.Now().Add(time.Hour)}
+	admin, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	for _, q := range []string{
+		"CREATE FUNCTION test_slow() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(1); RETURN NULL; END $$",
+		// After replica_fenced, by name.
+		"CREATE CONSTRAINT TRIGGER replica_fenced_slow AFTER INSERT ON replica_fence DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION test_slow()",
+		"UPDATE replica_lease SET until = clock_timestamp() + interval '300 milliseconds'",
+	} {
+		if _, err := admin.Exec(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wrote := make(chan time.Time, 1)
+	go func() {
+		err := a.write(context.WithValue(ctx, leaseKey{}, ld), func(t2 *txn) error { return setMeta(t2.ctx, t2, "x.k", "the leader's") })
+		if err != nil {
+			t.Errorf("the leader's write, its lease checked before it lapsed: %v", err)
+		}
+		wrote <- time.Now()
+	}()
+	time.Sleep(600 * time.Millisecond)
+	tctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	began := time.Now()
+	next, _, err := b.rep.take(tctx)
+	waited := time.Since(began)
+	if err != nil || next == 0 {
+		t.Fatalf("the other's take, the lease lapsed: %d %v", next, err)
+	}
+	<-wrote
+	// The commit holds its row lock some 400 ms more.
+	if waited < 200*time.Millisecond {
+		t.Errorf("another's take waited %v, not for the former leader's write the lease's check let through", waited.Round(time.Millisecond))
+	}
+}
+
+// A writer that connects again to the same server, as one does after a
+// write was cancelled in the middle of a statement (its client went, a
+// probe's deadline), keeps what it cached: the server lost nothing. One
+// that connects to another server, after a failover, reads it all again.
+func TestReplicasSameServerKeepsCaches(t *testing.T) {
+	u := replicaURL(t)
+	was := turnWithin
+	turnWithin = 5 * time.Second
+	t.Cleanup(func() { turnWithin = was })
+	ctx := context.Background()
+	a := openReplica(t, u)
+	if err := a.SetMeta(ctx, "k", "1"); err != nil {
+		t.Fatal(err)
+	}
+	forgotten := func() int64 {
+		a.changed.Lock()
+		defer a.changed.Unlock()
+		return a.changed.all
+	}
+	before := forgotten()
+	holder, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close(ctx)
+	tx, err := holder.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, "SELECT 1 FROM replica_gens WHERE one = 1 FOR UPDATE"); err != nil {
+		t.Fatal(err)
+	}
+	wctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	if err := a.SetMeta(wctx, "k", "2"); err == nil {
+		t.Fatal("a write cancelled behind the turn held went through")
+	}
+	cancel()
+	tx.Rollback(ctx)
+	if err := a.SetMeta(ctx, "k", "3"); err != nil {
+		t.Fatal(err)
+	}
+	if forgotten() != before {
+		t.Error("the caches were all read again after a connection to the same server")
+	}
+	// Another server, as a failover gives: what it started at differs.
+	a.pg.mu.Lock()
+	a.pg.server = a.pg.server.Add(-time.Hour)
+	a.pg.mu.Unlock()
+	if _, err := holder.Exec(ctx, "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid = $1", int(a.pg.pid)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	for range 3 {
+		if err := a.SetMeta(ctx, "k", "4"); err == nil {
+			break
+		}
+	}
+	if forgotten() == before {
+		t.Error("the caches were kept after a connection to another server")
+	}
+}
+
+// A refresh that waits on the database (here, a table it reads locked by
+// another session, as a database that stopped answering holds it) holds
+// nothing up past its own deadline: another caller waits no longer than
+// its own context; the refresh itself gives up within refreshWithin; a
+// write that commits waits for it not at all.
+func TestReplicasStuckRefreshHoldsNothing(t *testing.T) {
+	u := replicaURL(t)
+	was := refreshWithin
+	refreshWithin = 2 * time.Second
+	t.Cleanup(func() { refreshWithin = was })
+	ctx := context.Background()
+	a := openReplica(t, u)
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SetMeta(ctx, "k", "1"); err != nil {
+		t.Fatal(err)
+	}
+	holder, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close(ctx)
+	tx, err := holder.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	// What a refresh reads and no write does.
+	if _, err := tx.Exec(ctx, "LOCK TABLE replica_signals IN ACCESS EXCLUSIVE MODE"); err != nil {
+		t.Fatal(err)
+	}
+	stuck := make(chan error, 1)
+	began := time.Now()
+	go func() { stuck <- a.Refresh(ctx) }()
+	time.Sleep(200 * time.Millisecond)
+	// Another caller, with 500ms.
+	rctx, rcancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	asked := time.Now()
+	a.Refresh(rctx)
+	rcancel()
+	if took := time.Since(asked); took > time.Second {
+		t.Errorf("a refresh with 500ms took %v behind one that waits", took)
+	}
+	// A write commits meanwhile, at once.
+	wbegan := time.Now()
+	if err := a.SetMeta(ctx, "k", "2"); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(wbegan); took > time.Second {
+		t.Errorf("a write took %v while a refresh waited", took)
+	}
+	select {
+	case err := <-stuck:
+		if took := time.Since(began); err == nil || took > refreshWithin+time.Second {
+			t.Errorf("the refresh that waits: %v after %v, want an error within %v", err, took, refreshWithin)
+		}
+	case <-time.After(refreshWithin + 3*time.Second):
+		t.Fatalf("the refresh that waits still waits after %v", time.Since(began))
+	}
+	tx.Rollback(ctx)
+	if err := a.Refresh(ctx); err != nil {
+		t.Errorf("a refresh once the table is free: %v", err)
+	}
+}
+
+// What is noted on the side pool (a notice sent or failed, a bucket, a
+// claim given up) has a deadline of its own, whatever its context: here
+// each waits on a row another session locked, as on a database that
+// stopped answering. Two connections serve them all.
+func TestReplicasSideHasDeadlines(t *testing.T) {
+	u := replicaURL(t)
+	was := sideWithin
+	sideWithin = time.Second
+	t.Cleanup(func() { sideWithin = was })
+	ctx := context.Background()
+	a := openReplica(t, u)
+	if err := a.TellOnce(ctx, "k", "1", "test.event", []Told{{Dest: "webhook", About: map[string]any{"n": 1}}}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := a.Take(ctx, "b", 1, 10, 1); !ok || err != nil {
+		t.Fatal(ok, err)
+	}
+	if ok, err := a.ClaimOnce(ctx, "c", time.Hour); !ok || err != nil {
+		t.Fatal(ok, err)
+	}
+	holder, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close(ctx)
+	tx, err := holder.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	for _, q := range []string{"SELECT 1 FROM outbox FOR UPDATE", "SELECT 1 FROM replica_buckets FOR UPDATE", "SELECT 1 FROM replica_once FOR UPDATE"} {
+		if _, err := tx.Exec(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	posted := WithoutLease(context.WithoutCancel(ctx))
+	for name, f := range map[string]func(context.Context) error{
+		"Sent":    func(c context.Context) error { return a.Sent(c, 1) },
+		"Failed":  func(c context.Context) error { return a.Failed(c, 1, "x") },
+		"Take":    func(c context.Context) error { _, err := a.Take(c, "b", 1, 10, 1); return err },
+		"Unclaim": func(c context.Context) error { return a.Unclaim(c, "c") },
+	} {
+		done := make(chan error, 1)
+		began := time.Now()
+		go func() { done <- f(posted) }()
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Errorf("%s, its row locked: no error", name)
+			}
+		case <-time.After(sideWithin + 3*time.Second):
+			t.Errorf("%s, its row locked, still waits after %v", name, time.Since(began))
+		}
+	}
+}
+
+// A replica whose migration waits for the advisory lock that makes an
+// empty schema a ledger, while another makes it, finds the ledger made once
+// it has the lock: the catalog asked afresh, not what the session cached
+// before it waited, and not made again. The other makes its tables first,
+// then schema_version while this one waits: a server that takes in many
+// catalog changes while a session waits (a whole schema's) has it read its
+// cache again anyway, a few it doesn't.
+func TestReplicasBootstrapSeesTheOthersLedger(t *testing.T) {
+	u := replicaURL(t)
+	ctx := context.Background()
+	admin, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	var schema string
+	if err := admin.QueryRow(ctx, "SELECT current_schema()").Scan(&schema); err != nil {
+		t.Fatal(err)
+	}
+	files, ns, err := pgFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := pgSchema.ReadFile(files[ns[0]])
+	if err != nil {
+		t.Fatal(err)
+	}
+	// As the first replica does: the lock, then the ledger made.
+	if _, err := admin.Exec(ctx, "SELECT pg_advisory_lock($1, $2)", int32(writeClass), keyOf32(schema)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(ctx, string(b)); err != nil {
+		t.Fatal(err)
+	}
+	opened := make(chan error, 1)
+	go func() {
+		l, err := OpenPostgres(ctx, u, time.UTC)
+		if err == nil {
+			l.Close()
+		}
+		opened <- err
+	}()
+	within(t, 10*time.Second, "the replica waits for the lock", func() bool {
+		var n int
+		admin.QueryRow(ctx, "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid::bigint = $1", int64(writeClass)).Scan(&n)
+		return n == 1
+	})
+	if _, err := admin.Exec(ctx, fmt.Sprintf(`CREATE TABLE schema_version (version BIGINT NOT NULL, writers BIGINT NOT NULL DEFAULT 0);
+		INSERT INTO schema_version (version) VALUES (%d)`, ns[0])); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(ctx, "SELECT pg_advisory_unlock($1, $2)", int32(writeClass), keyOf32(schema)); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-opened; err != nil {
+		t.Errorf("a replica that waited while another made the ledger: %v", err)
+	}
+}
+
+// A wake asked while the leader is in a write of its own is not taken in
+// with it: the leader is woken at its next refresh.
+func TestReplicasWakeDuringALeadersWrite(t *testing.T) {
+	u := replicaURL(t)
+	ctx := context.Background()
+	a, b := openReplica(t, u), openReplica(t, u)
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-a.Woken():
+	default:
+	}
+	inside, release, errc := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		errc <- a.write(ctx, func(t *txn) error {
+			close(inside)
+			<-release
+			return setMeta(t.ctx, t, "x.k", "v")
+		})
+	}()
+	<-inside
+	r0 := a.Rejudges()
+	if err := b.AskRejudge(ctx); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err := <-errc; err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-a.Woken():
+	default:
+		t.Error("asked to wake during the leader's own write, and never woken")
+	}
+	if a.Rejudges() != r0+1 {
+		t.Errorf("asked to judge again: %d, from %d", a.Rejudges(), r0)
+	}
+}
+
+// A write of an older replica that waits behind a newer lapilli's
+// migration finds the newer schema once it has the turn, and writes
+// nothing: the replica stops.
+func TestReplicasStopAtANewerMigration(t *testing.T) {
+	u := replicaURL(t)
+	ctx := context.Background()
+	a := openReplica(t, u)
+	if err := a.SetMeta(ctx, "k", "1"); err != nil {
+		t.Fatal(err)
+	}
+	admin, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	tx, err := admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// As migrateStep does: schema_version locked, the turn, the schema on.
+	for _, q := range []string{"LOCK TABLE schema_version IN SHARE ROW EXCLUSIVE MODE", "SELECT 1 FROM replica_gens WHERE one = 1 FOR UPDATE",
+		"UPDATE schema_version SET version = version + 1"} {
+		if _, err := tx.Exec(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	errc := make(chan error, 1)
+	go func() { errc <- a.SetMeta(ctx, "old", "the older replica's") }()
+	time.Sleep(300 * time.Millisecond)
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-errc; !errors.Is(err, ErrNewer) {
+		t.Errorf("an older replica's write after a newer lapilli migrated the ledger: %v", err)
+	}
+	if v, _ := a.Meta(ctx, "old"); v != "" {
+		t.Errorf("written: %q", v)
+	}
+	select {
+	case <-a.Lost():
+	default:
+		t.Error("the older replica goes on")
+	}
+}
+
+// ddlTimings has a migration's DDL wait for a lock within, tried again
+// each every, for so long, for the test.
+func ddlTimings(t *testing.T, within, every, long time.Duration) {
+	t.Helper()
+	was := []time.Duration{ddlWithin, ddlEvery, ddlFor}
+	ddlWithin, ddlEvery, ddlFor = within, every, long
+	t.Cleanup(func() { ddlWithin, ddlEvery, ddlFor = was[0], was[1], was[2] })
+}
+
+// dumping is a session holding ACCESS SHARE on tables, as pg_dump does on
+// each it dumps, for the whole dump, until the test lets them go.
+func dumping(t *testing.T, u string, tables ...string) pgx.Tx {
+	t.Helper()
+	ctx := context.Background()
+	c, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close(ctx) })
+	tx, err := c.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { tx.Rollback(ctx) })
+	if _, err := tx.Exec(ctx, "LOCK TABLE "+strings.Join(tables, ", ")+" IN ACCESS SHARE MODE"); err != nil {
+		t.Fatal(err)
+	}
+	return tx
+}
+
+// The replicas' tables are made again only by a start that finds an older
+// replicasVersion: a change to replicaTables that keeps it makes nothing
+// where they were made before. Each version is the hash of what it makes.
+func TestReplicaTablesVersioned(t *testing.T) {
+	made := map[int]uint64{1: 0xfd276a14a6f69244}
+	h := fnv.New64a()
+	h.Write([]byte(replicaTables))
+	if got := h.Sum64(); made[replicasVersion] != got {
+		t.Errorf("replicaTables changed (%#x): raise replicasVersion, and add its hash here", got)
+	}
+}
+
+// A replica that starts while a dump holds the replicas' tables makes
+// nothing where they are as it makes them: no DDL, which would wait for
+// the dump. It starts at once, and the others write on.
+func TestReplicasStartDuringADump(t *testing.T) {
+	u := replicaURL(t)
+	was := turnWithin
+	turnWithin = 2 * time.Second
+	t.Cleanup(func() { turnWithin = was })
+	ddlTimings(t, 300*time.Millisecond, 100*time.Millisecond, time.Second)
+	ctx := context.Background()
+	a := openReplica(t, u)
+	if err := a.SetMeta(ctx, "k", "1"); err != nil {
+		t.Fatal(err)
+	}
+	dumping(t, u, append([]string{"schema_version", "meta"}, replicaNames...)...)
+	began := time.Now()
+	b, err := OpenPostgres(ctx, u, time.UTC)
+	if err != nil {
+		t.Fatalf("a replica started during a dump: %v", err)
+	}
+	b.Close()
+	if took := time.Since(began); took > time.Second {
+		t.Errorf("a replica took %v to start during a dump", took)
+	}
+	wbegan := time.Now()
+	if err := a.SetMeta(ctx, "k", "2"); err != nil || time.Since(wbegan) > time.Second {
+		t.Errorf("a running replica's write during a dump: %v after %v", err, time.Since(wbegan))
+	}
+}
+
+// The replicas' tables older than this lapilli's are changed as it starts,
+// outside the writers' turn: while a dump holds them, the change waits for
+// its lock ddlWithin at a time, tried again, and the others' writes don't
+// wait with it. Once the dump is done, the start changes them, and says
+// their version.
+func TestReplicasChangedOutsideTheTurn(t *testing.T) {
+	u := replicaURL(t)
+	ddlTimings(t, 500*time.Millisecond, 50*time.Millisecond, 30*time.Second)
+	ctx := context.Background()
+	a := openReplica(t, u)
+	admin, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	if _, err := admin.Exec(ctx, "UPDATE replica_schema SET version = 0"); err != nil {
+		t.Fatal(err)
+	}
+	dump := dumping(t, u, "replica_members")
+	opened := make(chan error, 1)
+	go func() {
+		l, err := OpenPostgres(ctx, u, time.UTC)
+		if err == nil {
+			l.Close()
+		}
+		opened <- err
+	}()
+	within(t, 5*time.Second, "the start waits on the dump", func() bool {
+		var n int
+		admin.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE NOT granted AND relation = to_regclass('replica_members')`).Scan(&n)
+		return n == 1
+	})
+	var longest time.Duration
+	for i := range 10 {
+		began := time.Now()
+		if err := a.SetMeta(ctx, "k", strconv.Itoa(i)); err != nil {
+			t.Fatal(err)
+		}
+		longest = max(longest, time.Since(began))
+	}
+	if longest > 250*time.Millisecond {
+		t.Errorf("a write waited %v while a start changed the replicas' tables", longest)
+	}
+	dump.Rollback(ctx)
+	select {
+	case err := <-opened:
+		if err != nil {
+			t.Fatalf("the start once the dump is done: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the start still waits once the dump is done")
+	}
+	var v int64
+	if err := admin.QueryRow(ctx, "SELECT version FROM replica_schema").Scan(&v); err != nil || v != replicasVersion {
+		t.Errorf("the replicas' tables' version: %d %v, want %d", v, err, replicasVersion)
+	}
+}
+
+// A migration (here one that adds a column) takes the writers' turn: a
+// replica's write that holds it holds the migration up, as the migration
+// holds each write after it, which then finds the schema it leaves
+// (TestReplicasStopAtANewerMigration). Holding the turn, it waits for any
+// other lock ddlWithin at most, tried again: a dump of the table it
+// changes holds a replica's writes no longer than that, each time.
+func TestReplicasMigrationTakesTheTurn(t *testing.T) {
+	u := replicaURL(t)
+	was := turnWithin
+	turnWithin = 5 * time.Second
+	t.Cleanup(func() { turnWithin = was })
+	ddlTimings(t, 300*time.Millisecond, 50*time.Millisecond, 30*time.Second)
+	ctx := context.Background()
+	m, ns, err := pgFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ns[len(ns)-1]
+	a := openReplica(t, u)
+	// The last migration, made again as another that changes a table.
+	wasRead := readSchemaFile
+	readSchemaFile = func(name string) ([]byte, error) {
+		if name == m[want] {
+			return []byte("ALTER TABLE meta ADD COLUMN IF NOT EXISTS migrated BIGINT"), nil
+		}
+		return wasRead(name)
+	}
+	t.Cleanup(func() { readSchemaFile = wasRead })
+	admin, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	back := func() {
+		t.Helper()
+		if _, err := admin.Exec(ctx, "UPDATE schema_version SET version = $1", want-1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	back()
+	holder, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close(ctx)
+	tx, err := holder.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	// As a replica's write holds it.
+	if _, err := tx.Exec(ctx, "SELECT 1 FROM replica_gens WHERE one = 1 FOR UPDATE"); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.migrateStep(ctx, m, ns, want)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("a migration while a write holds the turn: done at once (%v)", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	tx.Rollback(ctx)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("the migration once the turn is free: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the migration still waits once the turn is free")
+	}
+	// Again, while a dump holds the table it changes.
+	back()
+	dump := dumping(t, u, "meta")
+	migrated := make(chan error, 1)
+	go func() { migrated <- a.migratePostgres(ctx) }()
+	within(t, 5*time.Second, "the migration waits on the dump", func() bool {
+		var n int
+		admin.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE NOT granted AND mode = 'AccessExclusiveLock' AND relation = to_regclass('meta')`).Scan(&n)
+		return n == 1
+	})
+	var longest time.Duration
+	for i := range 5 {
+		began := time.Now()
+		if err := a.SetMeta(ctx, "k", strconv.Itoa(i)); err != nil {
+			t.Fatal(err)
+		}
+		longest = max(longest, time.Since(began))
+	}
+	if longest > time.Second {
+		t.Errorf("a write waited %v while a migration waited on a dump", longest)
+	}
+	dump.Rollback(ctx)
+	select {
+	case err := <-migrated:
+		if err != nil {
+			t.Fatalf("the migration once the dump is done: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the migration still waits once the dump is done")
+	}
+	var v int
+	if err := admin.QueryRow(ctx, "SELECT version FROM schema_version").Scan(&v); err != nil || v != want {
+		t.Errorf("migrated to %d %v, want %d", v, err, want)
+	}
+}
+
+// A failover that lost commits, then more made at the same generations
+// before a replica's next refresh: the replica takes every week for
+// changed, not only those it reads as new.
+func TestReplicasFailoverSeenThrough(t *testing.T) {
+	u := replicaURL(t)
+	ctx := context.Background()
+	a, b := openReplica(t, u), openReplica(t, u)
+	w1, w2 := Week(a.Day(t0)), Week(a.Day(t0))+70
+	fs := func(at time.Time) []firing.Firing {
+		return []firing.Firing{{Rule: "Errors", Labels: map[string]string{"service": "checkout"}, Start: at.Add(time.Hour), End: at.Add(2 * time.Hour)}}
+	}
+	record(t, a, t0, t0.Add(24*time.Hour), fs(t0))
+	record(t, a, t0.Add(70*24*time.Hour), t0.Add(71*24*time.Hour), fs(t0.Add(70*24*time.Hour)))
+	a.SetMeta(ctx, "lost1", "1")
+	a.SetMeta(ctx, "lost2", "1")
+	if err := b.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	g0 := b.Gen()
+	admin, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	// The failover: the last two commits gone, their log with them.
+	if _, err := admin.Exec(ctx, "DELETE FROM replica_log WHERE gen > (SELECT gen - 2 FROM replica_gens); UPDATE replica_gens SET gen = gen - 2"); err != nil {
+		t.Fatal(err)
+	}
+	record(t, a, t0, t0.Add(24*time.Hour), fs(t0.Add(3*time.Hour)))
+	a.SetMeta(ctx, "k", "v")
+	record(t, a, t0.Add(70*24*time.Hour), t0.Add(71*24*time.Hour), fs(t0.Add(70*24*time.Hour+3*time.Hour)))
+	if err := b.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if b.Changed(w1) <= g0 || b.Changed(w2) <= g0 {
+		t.Errorf("after a failover hidden by later writes: week 1 changed at %d, week 2 at %d, from %d", b.Changed(w1), b.Changed(w2), g0)
+	}
+}
+
+// A replica that cached an alert's id writes beside another replica that
+// deleted it: the cache is dropped under the writers' turn, before the
+// write uses it, without a refresh in between.
+func TestReplicasIDsDroppedUnderTheTurn(t *testing.T) {
+	u := replicaURL(t)
+	ctx := context.Background()
+	a, b := openReplica(t, u), openReplica(t, u)
+	f := func(at time.Time) []firing.Firing {
+		return []firing.Firing{{Rule: "Errors", Labels: map[string]string{"service": "checkout"}, Start: at.Add(time.Hour), End: at.Add(2 * time.Hour)}}
+	}
+	record(t, b, t0, t0.Add(24*time.Hour), f(t0))
+	if err := a.Prune(ctx, t0.Add(30*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Record(ctx, Found{From: t0.Add(24 * time.Hour), To: t0.Add(48 * time.Hour), Firings: f(t0.Add(24 * time.Hour)),
+		Run: Run{Kind: "test"}}, opts); err != nil {
+		t.Fatalf("a write with an alert's id another replica deleted: %v", err)
+	}
+	var n int
+	if err := b.r.QueryRowContext(ctx, "SELECT count(*) FROM firings f JOIN series s ON s.id = f.series_id").Scan(&n); err != nil || n != 1 {
+		t.Errorf("firings on an alert that is there: %d %v", n, err)
+	}
+}
+
+// A sender claims the next notice at once when another holds the first,
+// rather than wait for it.
+func TestReplicasClaimSkipsWhatIsHeld(t *testing.T) {
+	u := replicaURL(t)
+	ctx := context.Background()
+	a := openReplica(t, u)
+	if err := a.TellOnce(ctx, "k", "1", "test.event", []Told{{Dest: "webhook", About: map[string]any{"n": 1}}, {Dest: "webhook", About: map[string]any{"n": 2}}}); err != nil {
+		t.Fatal(err)
+	}
+	holder, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close(ctx)
+	tx, err := holder.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	var first int64
+	if err := tx.QueryRow(ctx, "SELECT id FROM outbox ORDER BY id LIMIT 1 FOR UPDATE").Scan(&first); err != nil {
+		t.Fatal(err)
+	}
+	cctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	n, ok, err := a.Claim(cctx, "webhook", time.Now(), 0)
+	if err != nil || !ok || n.ID == first {
+		t.Errorf("a claim while another holds the first notice: %v %v %v, want the next at once", n.ID, ok, err)
+	}
+}
+
+// A leader whose work is stuck, or whose writer is held past any write's
+// deadline, gives its lease up, though it reaches the database: another
+// leads.
+func TestReplicasStuckLeaderGivesUp(t *testing.T) {
+	u := replicaURL(t)
+	fastLease(t)
+	for _, how := range []string{"its work", "its writer"} {
+		t.Run(how, func(t *testing.T) {
+			a, b := openReplica(t, u), openReplica(t, u)
+			var mu sync.Mutex
+			stuck := false
+			ls := &leads{}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go a.Elect(ctx, Elected{Version: "test", Stuck: func() bool { mu.Lock(); defer mu.Unlock(); return stuck }}, ls.lead(0, a))
+			within(t, 5*time.Second, "a leads", func() bool { return ls.current() == 0 })
+			elect(t, b, ls, 1)
+			switch how {
+			case "its work":
+				mu.Lock()
+				stuck = true
+				mu.Unlock()
+			case "its writer":
+				a.heldSince.Store(time.Now().Add(-writeWithin - 2*time.Minute).UnixNano())
+				defer a.heldSince.Store(0)
+			}
+			within(t, renewEvery+3*campaignEvery+time.Second, "another leads", func() bool { return ls.current() == 1 })
+			ls.apart(t)
+		})
+	}
+}
+
+// A leader whose work is stuck, and doesn't return, gives its lease up at
+// once rather than letting it lapse: another leads within a renewal and a
+// campaign, sooner than the lease would end. It leads again only once its
+// work has returned.
+func TestReplicasStuckLeaderResignsAtOnce(t *testing.T) {
+	u := replicaURL(t)
+	fastLease(t)
+	a, b := openReplica(t, u), openReplica(t, u)
+	var stuck atomic.Bool
+	release := make(chan struct{})
+	defer close(release)
+	aLeads, bLeads := make(chan struct{}, 1), make(chan time.Time, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.Elect(ctx, Elected{Version: "test", Stuck: stuck.Load}, func(context.Context) {
+		select {
+		case aLeads <- struct{}{}:
+		default:
+		}
+		<-release // whatever its context says
+	})
+	select {
+	case <-aLeads:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a never led")
+	}
+	go b.Elect(ctx, Elected{Version: "test"}, func(lctx context.Context) {
+		select {
+		case bLeads <- time.Now():
+		default:
+		}
+		<-lctx.Done()
+	})
+	time.Sleep(3 * renewEvery)
+	began := time.Now()
+	stuck.Store(true)
+	select {
+	case at := <-bLeads:
+		if took := at.Sub(began); took > renewEvery+3*campaignEvery+300*time.Millisecond {
+			t.Errorf("another led %v after the leader's work was stuck: the lease lapsed, rather than being given up", took)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("another never led")
+	}
+}
+
+// What is over is swept by the leader: a use once past its time, at once,
+// not a day after; and the uses once kept are bounded.
+func TestReplicasSweepAndBoundOnce(t *testing.T) {
+	u := replicaURL(t)
+	fastLease(t)
+	was := sweepEvery
+	sweepEvery = 200 * time.Millisecond
+	t.Cleanup(func() { sweepEvery = was })
+	ctx := context.Background()
+	a := openReplica(t, u)
+	if _, err := a.Once(ctx, "over", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.w.ExecContext(ctx, "UPDATE replica_once SET until = until - 5"); err != nil {
+		t.Fatal(err)
+	}
+	elect(t, a, &leads{}, 0)
+	within(t, 5*time.Second, "the use once over is swept", func() bool {
+		var n int
+		a.r.QueryRowContext(ctx, "SELECT count(*) FROM replica_once").Scan(&n)
+		return n == 0
+	})
+	m := maxOnce
+	maxOnce = 3
+	t.Cleanup(func() { maxOnce = m })
+	for i := range 3 {
+		if ok, err := a.Once(ctx, fmt.Sprint("k", i), time.Hour); !ok || err != nil {
+			t.Fatal(ok, err)
+		}
+	}
+	if ok, err := a.Once(ctx, "one more", time.Hour); ok || !errors.Is(err, ErrOnceFull) {
+		t.Errorf("past the bound: %v %v", ok, err)
+	}
+}

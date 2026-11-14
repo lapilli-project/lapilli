@@ -17,11 +17,11 @@ type column struct {
 
 // tables are the ledger's tables, by name: what a copy copies. Neither
 // database's own bookkeeping is one: SQLite's sqlite_sequence, Postgres's
-// schema_version.
+// schema_version, and the replicas' (replicaTables).
 func (l *Ledger) tables(ctx context.Context) ([]string, error) {
 	q := l.d.pick("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite%' ORDER BY name",
 		`SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'
-			AND table_name != 'schema_version' ORDER BY table_name COLLATE "C"`)
+			AND table_name != 'schema_version' AND table_name NOT LIKE 'replica\_%' ORDER BY table_name COLLATE "C"`)
 	rows, err := l.r.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err

@@ -225,13 +225,16 @@ is built in and none is favoured.
   rule names, cut short.
 
 - The ledger in Postgres (built, [docs/design/postgres.md](docs/design/postgres.md)):
-  `--ledger-url-file`, the same tables and statements as SQLite's, one
-  writer held by an advisory lock, and `lapilli ledger copy`. Still to do:
-  more than one replica, which needs a leader for the runs, the outbox and
-  the jobs, the caches told of other replicas' writes, and notices claimed
-  one at a time (the design says what each takes); fewer round trips to
-  the database where a page or a write still asks a row at a time; and
-  checking managed services (RDS, Cloud SQL, Azure Database) for real.
+  `--ledger-url-file`, the same tables and statements as SQLite's, and
+  `lapilli ledger copy`; and several replicas on it (built,
+  [docs/design/replicas.md](docs/design/replicas.md)): a leader on a lease
+  for what runs once, the caches told of other replicas' writes, each
+  write's turn across them, notices claimed one at a time, the rate limits
+  shared, and the chart's `serve.replicas`. Still to do: fewer round trips
+  to the database where a page or a write still asks a row at a time
+  (each request now asks one more, for the others' writes); the kind e2e
+  of three replicas run in CI for a while; and checking managed services
+  (RDS, Cloud SQL, Azure Database) for real, a failover among them.
 
 The performance budgets are part of the tests (`TestScale`,
 `TestPagesScale`), so a change that slows the ledger fails CI; on Postgres

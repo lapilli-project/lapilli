@@ -89,9 +89,11 @@ The ledger:
                       keep the ledger in Postgres instead: the file holds
                       its connection string, as pgx reads it
                       (postgres://USER:PASSWORD@HOST:5432/DB?sslmode=verify-full),
-                      read at start and said nowhere. One process writes a
-                      ledger at a time: a second is refused. "lapilli ledger
-                      copy" moves a SQLite ledger there (docs/design/postgres.md)
+                      read at start and said nowhere. Several serves on
+                      one Postgres ledger are replicas: one leads, and runs
+                      what is run once; each serves (docs/design/replicas.md).
+                      "lapilli ledger copy" moves a SQLite ledger there
+                      (docs/design/postgres.md)
   --every DUR         run this often (default 1h)
   --settle DUR        and replay the last DUR before the last run's end
                       again, for points that arrived late (default 1h)

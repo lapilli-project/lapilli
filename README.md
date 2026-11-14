@@ -1431,13 +1431,39 @@ an agent. To another machine, say `sslmode=verify-full`: a string that says no
 back to none, is refused at start; `require` or `disable` is taken at its word,
 and serve warns. Give the database to the ledger's role alone (`REVOKE CONNECT
 ... FROM PUBLIC`). Every page, report and answer is what the
-SQLite ledger gives from the same writes, and the tests run on both. It is
-still one replica: one process writes a ledger at a time, and a second
-`serve` on the same database is refused, saying which session holds the
-ledger's lock. `lapilli ledger copy` copies a ledger into an empty one, a
-SQLite ledger into Postgres or one back, in one transaction, and reads both
-back to check. In the chart, `serve.ledger.postgres.secret` names the
-Secret holding the string, and no PersistentVolumeClaim is made.
+SQLite ledger gives from the same writes, and the tests run on both.
+`lapilli ledger copy` copies a ledger into an empty one, a SQLite ledger
+into Postgres or one back, in one transaction, and reads both back to
+check; it is refused while serve holds the ledger. In the chart,
+`serve.ledger.postgres.secret` names the Secret holding the string, and no
+PersistentVolumeClaim is made.
+
+### Several replicas
+
+On a Postgres ledger, `lapilli serve` runs as several replicas
+(docs/design/replicas.md). One leads, on a lease the database keeps, and
+runs what must run once: the runs and the backfill, the jobs, the digest
+and the reports, the outbox, changes carried out, the rules watched, the
+on-call feeds. Every replica serves the UI, the API, MCP, sign-in and the
+ports that take alerts and incidents, and writes what it is sent. A
+follower takes the lease within some 17 seconds of the leader being killed
+or cut off (15 s measured, the leader `SIGKILL`ed), within 2 when it
+stops; the old leader stops first, by its own clock, and what it would
+still write as the leader is refused in the database. Notices are claimed
+one at a time, so two leaders for a moment send none twice. A write on one
+replica shows on the next request to any other. In the chart:
+
+```sh
+helm upgrade lapilli ... --set serve.ledger.postgres.secret.name=lapilli-ledger --set serve.replicas=3
+```
+
+They roll one at a time, with a PodDisruptionBudget; `/readyz` and
+`lapilli_serve_leader` say which pod leads. More than one replica needs
+Postgres: the chart refuses `serve.replicas` above 1 on a SQLite ledger,
+and a sign-in of lapilli's own needs the session key from a Secret of your
+own, which every pod mounts. From 0.35 or before, upgrade with one
+replica first: its pod holds the ledger alone, and refuses new ones until
+it stops.
 
 ### Firings recorded elsewhere
 
@@ -1946,8 +1972,9 @@ approve in the UI. No tool approves or applies one.
   are marked "replayed in part" until `--late` covers them.
 - Rules alike in name, group and labels are counted together, and so are
   firings read with `--alerts` or `--firings`, which carry no group.
-- `lapilli serve` runs as one replica, with one ledger file or one Postgres
-  database a process writes at a time. Who is who comes
+- `lapilli serve` runs as one replica on a ledger file, or as several on
+  one Postgres database, one of them leading (docs/design/replicas.md).
+  Who is who comes
   from its sign-in (an OpenID Connect provider, or a sign-in in front), and
   roles from the flags and the ones admins give; it doesn't sign people out
   at the provider, or refresh a session past `--session-max-age`. A version of the rules is in effect from when it saw

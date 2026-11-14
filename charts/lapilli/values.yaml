@@ -137,6 +137,18 @@ extraArgs: []
 # both be left out: incidents can be written down in the UI. rules takes one
 # ConfigMap, read again every minute: each change is a new version.
 serve:
+  # How many replicas serve: more than one shares a ledger in Postgres
+  # alone (ledger.postgres), and is refused without it. One leads, and runs
+  # what is run once (the runs, the digest, the outbox, the jobs); every
+  # replica serves the UI, the API, MCP, sign-in and the ports, and a
+  # follower takes over within some 17 seconds of the leader's end
+  # (docs/design/replicas.md). They roll one at a time, each pod a follower
+  # until the one it replaces lets the lease go; a PodDisruptionBudget
+  # keeps maxUnavailable at most away. From 0.35 or before, upgrade with 1
+  # first: its pod holds the ledger alone, and refuses new ones.
+  replicas: 1
+  podDisruptionBudget:
+    maxUnavailable: 1
   every: 1h      # run this often
   settle: 1h     # and replay this much before the last run's end again
   backfill: 28d  # on first start, replay this far back
@@ -288,7 +300,8 @@ serve:
     # the chart makes (FULLNAME-session-key, kept across upgrades and when
     # the release is uninstalled). A GitOps tool that renders the chart
     # without the cluster (Argo CD, Flux) would make a new key each render,
-    # signing everyone out: give it a Secret of your own.
+    # signing everyone out: give it a Secret of your own. With
+    # serve.replicas above 1, a Secret of your own (name) is required.
     sessionKeySecret:
       name: ""
       key: session-key
@@ -652,9 +665,9 @@ serve:
     # The whole Secret is mounted at /var/run/lapilli/ledger, so it can
     # hold the server's CA beside the string; the string is in no argument
     # and no log. With it no PersistentVolumeClaim is made, and the ledger's
-    # PVC is left out. Still one replica: one process writes a ledger at a
-    # time, and a second is refused the ledger's lock. Copy a SQLite ledger
-    # in with lapilli ledger copy, once, before switching.
+    # PVC is left out. serve.replicas may then be more than one, sharing
+    # it. Copy a SQLite ledger in with lapilli ledger copy, once, before
+    # switching.
     postgres:
       secret:
         name: ""

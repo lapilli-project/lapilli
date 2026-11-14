@@ -276,8 +276,33 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "# HELP lapilli_serve_deploys_read_timestamp_seconds When the deploys file (--deploys) was last read, and what it held kept, in Unix seconds.\n# TYPE lapilli_serve_deploys_read_timestamp_seconds gauge\nlapilli_serve_deploys_read_timestamp_seconds %d\n", at)
 		}
 	}
-	// Read with the file each run, not kept with the ledger's pages.
-	if s.cfg.Incidents != "" {
+	// Which replica leads: 1 for this one's pod, 0 for the others'. What
+	// the leader's work counts (runs, notices sent, the files read) is in
+	// its pod's metrics alone.
+	if s.l.Shared() {
+		lead := 0
+		if s.l.Leading() {
+			lead = 1
+		}
+		fmt.Fprintf(w, "# HELP lapilli_serve_leader Whether this replica leads, running what is run once among the replicas sharing the ledger: 1 or 0.\n# TYPE lapilli_serve_leader gauge\nlapilli_serve_leader %d\n", lead)
+		fmt.Fprintf(w, "# HELP lapilli_serve_replicas The replicas of lapilli serve that share the ledger and live, this one among them, as last counted.\n# TYPE lapilli_serve_replicas gauge\nlapilli_serve_replicas %d\n", s.l.Replicas())
+		waited := 0
+		if s.l.WritesWaited() {
+			waited = 1
+		}
+		if s.in != nil && s.in.oidc != nil {
+			fmt.Fprintf(w, "# HELP lapilli_serve_session_keys How many keys the live replicas sign sessions with: more than one while a rollout brings in a new key, or replicas were given different ones.\n# TYPE lapilli_serve_session_keys gauge\nlapilli_serve_session_keys %d\n", s.l.SessionKeys())
+		}
+		fmt.Fprintf(w, "# HELP lapilli_serve_ledger_writes_waiting Whether this replica's last write gave up waiting for the ledger's writers' turn, which another session holds, and none has taken it since: 1 or 0.\n# TYPE lapilli_serve_ledger_writes_waiting gauge\nlapilli_serve_ledger_writes_waiting %d\n", waited)
+		// How the leader's work goes: a leader whose step runs past
+		// stepWithin gives its lease up.
+		if at := s.rounded.Load(); lead == 1 && at > 0 {
+			fmt.Fprintf(w, "# HELP lapilli_serve_jobs_round_timestamp_seconds When the leader last finished a round of its jobs, in Unix seconds.\n# TYPE lapilli_serve_jobs_round_timestamp_seconds gauge\nlapilli_serve_jobs_round_timestamp_seconds %d\n", at)
+		}
+	}
+	// Read with the file each run, not kept with the ledger's pages: by
+	// the replica that reads it.
+	if s.cfg.Incidents != "" && (!s.l.Shared() || s.incidentsRead.Load()) {
 		fmt.Fprintf(w, "# HELP lapilli_serve_incidents_passed_over Incidents in the incidents file whose ids the ledger holds from people, and so not read from it.\n# TYPE lapilli_serve_incidents_passed_over gauge\nlapilli_serve_incidents_passed_over %d\n", s.passedOver.Load())
 	}
 	if s.cfg.NotifyListen != "" && s.port != nil {

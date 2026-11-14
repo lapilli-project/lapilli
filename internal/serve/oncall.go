@@ -220,6 +220,22 @@ func (s *Server) onCallView() []onCallRead {
 	return out
 }
 
+// onCallShown is each schedule's last read as a status says it: the
+// leader's, which reads the feeds, on a replica that follows; with its turns
+// as this replica keeps them, read from the ledger.
+func (s *Server) onCallShown(st sharedStatus) []onCallRead {
+	own := s.onCallView()
+	if !s.follows() || st.OnCall == nil {
+		return own
+	}
+	for i, v := range own {
+		if r, ok := st.OnCall[v.Name]; ok {
+			own[i].At, own[i].OK, own[i].Err, own[i].Events, own[i].Notes = r.At, r.OK, r.Err, r.Events, r.Notes
+		}
+	}
+	return own
+}
+
 // checkShifts refuses shifts naming a schedule --on-call doesn't.
 func (s *Server) checkShifts(shifts string) error {
 	name, ok := verdict.OnCallShifts(shifts)

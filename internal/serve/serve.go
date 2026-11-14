@@ -388,6 +388,25 @@ type Server struct {
 	}
 	// picked is what reading the rule files last passed over, as said.
 	picked atomic.Value
+	// leaderSaid is the leader's status as it last said it, read, for a
+	// follower's pages (shownStatus).
+	leaderSaid struct {
+		sync.Mutex
+		text string
+		st   sharedStatus
+	}
+	// incidentsRead is set once this replica read the incidents file: its
+	// metric is the leader's.
+	incidentsRead atomic.Bool
+	// stepAt is when the leader's work last made progress, in Unix
+	// nanoseconds, 0 while it waits for its next round; rounded, when it
+	// last finished a round, in Unix seconds. Progress is a job begun, a
+	// run's piece, or, in the leader's context, a request to a history
+	// (asked) or a rule replayed (replayed): moved is their sum, as last
+	// looked at (stuck).
+	stepAt, rounded, moved atomic.Int64
+	asked                  prom.Counts
+	replayed               replay.Progress
 }
 
 // status is what the worker is doing, for the UI: a text to be shown in
@@ -455,6 +474,10 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		// is an admin for it. Roles come from the lists alone.
 		s.open.Store(false)
 	}
+	if err := s.joinable(ctx); err != nil {
+		l.Close()
+		return nil, err
+	}
 	if !known(s.cfg.Lang) {
 		s.cfg.Lang = "en"
 	}
@@ -469,6 +492,7 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		return nil, err
 	}
 	l.TellTo(s.dests())
+	s.shareLimits()
 	return s, nil
 }
 
@@ -511,6 +535,10 @@ func ledgerID(ctx context.Context, l *ledger.Ledger) (string, error) {
 		return "", err
 	}
 	id = hex.EncodeToString(b)
+	if l.Shared() {
+		// The one kept, by whichever replica made it first.
+		return l.MetaOnce(ctx, "ledger-id", id)
+	}
 	return id, l.SetMeta(ctx, "ledger-id", id)
 }
 
@@ -626,15 +654,22 @@ func (s *Server) alarmsEvery() time.Duration {
 // Close closes the ledger.
 func (s *Server) Close() error { return s.l.Close() }
 
-// Run serves the UI and keeps the ledger until ctx is done.
+// Run serves the UI and keeps the ledger until ctx is done. Every replica
+// serves; the one that leads (all of them in turn, one at a time, on a
+// Postgres ledger; the one process on SQLite's) runs what must run once
+// (lead).
 func (s *Server) Run(ctx context.Context) error {
 	// Stopped as well when a server fails, or the ledger's lock is lost:
 	// the workers stop with it.
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
-	// The versions from before the ledger began, before anything replays.
-	if err := s.history(ctx); err != nil {
-		return err
+	shared := s.l.Shared()
+	if !shared {
+		// The versions from before the ledger began, before anything
+		// replays; a replica's leader adds them as it begins (lead).
+		if err := s.history(ctx); err != nil {
+			return err
+		}
 	}
 	s.logDigest(ctx)
 	// The on-call turns kept, before anything is counted by them.
@@ -664,7 +699,11 @@ func (s *Server) Run(ctx context.Context) error {
 	if s.l.Postgres() {
 		where = "postgres"
 	}
-	s.log.Info("serving", "listen", ln.Addr().String(), "ledger", where)
+	if shared {
+		s.log.Info("serving", "listen", ln.Addr().String(), "ledger", where, "replica", s.l.ReplicaID())
+	} else {
+		s.log.Info("serving", "listen", ln.Addr().String(), "ledger", where)
+	}
 	served := make(chan error, 4)
 	go func() { served <- srv.Serve(ln) }()
 	if s.cfg.MetricsListen != "" {
@@ -705,48 +744,34 @@ func (s *Server) Run(ctx context.Context) error {
 		go func() { served <- nsrv.Serve(nln) }()
 		defer nsrv.Close()
 	}
-	// The rules are read before the first run, which replays them.
-	raw := ""
-	if s.replaying() {
-		if err := s.look(ctx, &raw); err != nil {
-			s.fail("reading the rules", err)
-		}
-	}
+	failed := make(chan error, 1)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		s.work(ctx)
+		// What runs once among the replicas, while this one leads; at
+		// once with SQLite.
+		s.l.Elect(ctx, ledger.Elected{Version: s.cfg.Version, Status: s.publishedStatus, Stuck: s.stuck}, func(lctx context.Context) {
+			s.lead(replay.Tracking(prom.Counting(lctx, &s.asked), &s.replayed), failed)
+		})
 	}()
-	if s.replaying() {
+	if shared {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.watch(ctx, raw)
-		}()
-	}
-	if len(s.sendsTo()) > 0 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			s.notify(ctx)
-		}()
-	}
-	if s.cfg.OnCall != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			s.readOnCall(ctx)
+			s.keepUp(ctx)
 		}()
 	}
 	var serr error
 	select {
 	case <-ctx.Done():
 	case serr = <-served:
+	case serr = <-failed:
 	case <-s.l.Lost():
-		// Another process may write the ledger now: this one stops, and
-		// writes nothing more, rather than send a notice twice.
-		serr = ledger.ErrLockLost
+		// A process may write the ledger alone now, or a newer lapilli
+		// migrated it: this one stops, and writes nothing more, rather
+		// than send a notice twice.
+		serr = s.l.LostWhy()
 	}
 	stop()
 	shut, cancel := context.WithTimeout(context.Background(), 10*time.Second)

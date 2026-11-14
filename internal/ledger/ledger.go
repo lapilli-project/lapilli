@@ -39,14 +39,20 @@ type Ledger struct {
 	w, r *sql.DB
 	loc  *time.Location
 	// d is the database's dialect; pg, for a Postgres ledger, its writer's
-	// lock.
-	d  dialect
-	pg *pgWriter
+	// lock; rep, for one serve's replicas share, what one keeps of the
+	// others (replicas.go).
+	d   dialect
+	pg  *pgWriter
+	rep *replicas
 	// warnings are what to say of how the ledger is reached.
 	warnings []string
-	// mu is held by every write, start to commit.
-	mu sync.Mutex
-	// gen counts writes, for whoever caches what it reads.
+	// mu is held by every write, start to commit: in a ledger replicas
+	// share, the writers' turn across them is taken too (replicas.go).
+	// heldSince is when it was taken, in Unix nanoseconds, 0 while free.
+	mu        sync.Mutex
+	heldSince atomic.Int64
+	// gen counts writes, for whoever caches what it reads: in a ledger
+	// replicas share, the other replicas' too, as Refresh reads them.
 	gen atomic.Int64
 	// changed is, by week, the generation the firings in it last changed
 	// in, since the ledger was opened; all, the last in which every week's
@@ -206,6 +212,9 @@ func Open(ctx context.Context, path string, loc *time.Location) (*Ledger, error)
 // the next process takes it at once, not once the server has seen this
 // one's sessions end.
 func (l *Ledger) Close() error {
+	if l.rep != nil {
+		l.rep.close()
+	}
 	if l.pg != nil {
 		l.pg.release(l.w)
 	}
@@ -354,8 +363,11 @@ type txn struct {
 	// gone are names a rule was known by that it no longer is: named
 	// apart, it gave its name to another.
 	gone map[string]bool
-	// recorded says it may have changed recorded rules or their alerts.
-	recorded bool
+	// recorded says it may have changed recorded rules or their alerts;
+	// count, that a write that isn't counted (writeAside) changed what a
+	// page shows after all; idsChanged, that it deleted or renamed rules or
+	// alerts, whose ids the other replicas may cache.
+	recorded, count, idsChanged bool
 	// weeks are those whose firings it changed; all, that it may have
 	// changed any week's.
 	weeks []int64
@@ -392,24 +404,35 @@ func (t *txn) versionNames() (map[string]bool, error) {
 
 // write runs f in a transaction, one write at a time, and counts it.
 func (l *Ledger) write(ctx context.Context, f func(*txn) error) error {
-	if err := l.writeAside(ctx, f); err != nil {
-		return err
-	}
-	l.gen.Add(1)
-	return nil
+	return l.writeTx(ctx, true, f)
 }
 
 // writeAside is a write that changes nothing a page shows, such as noting a
 // notice sent, so pages kept for the generation stay.
 func (l *Ledger) writeAside(ctx context.Context, f func(*txn) error) error {
+	return l.writeTx(ctx, false, f)
+}
+
+// writeTx runs f in a transaction, one write at a time: in a ledger
+// replicas share, across them, the writers' turn taken first, and the
+// generations read under it and counted in it. A write made with a lease's
+// context (Elect) is made only while this replica leads: checked in the
+// database at its start, and by this process's clock before it commits.
+func (l *Ledger) writeTx(ctx context.Context, counted bool, f func(*txn) error) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.heldSince.Store(time.Now().UnixNano())
+	defer l.heldSince.Store(0)
 	if l.pg != nil && !unbounded(ctx) {
 		// No write waits on a server that stopped answering longer than
 		// writeWithin, holding up every other.
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, writeWithin)
 		defer cancel()
+	}
+	ld := leaseOf(ctx)
+	if ld != nil && !ld.valid() {
+		return ErrNotLeading
 	}
 	tx, err := l.w.BeginTx(ctx, nil)
 	if err != nil {
@@ -422,11 +445,50 @@ func (l *Ledger) writeAside(ctx context.Context, f func(*txn) error) error {
 		l.forget()
 	}
 	t := &txn{Tx: tx, ctx: ctx, rules: map[string]int64{}, series: map[seriesKey]int64{}, d: l.d}
+	var before, after gens
+	var nonce int64
+	if l.rep != nil {
+		if before, err = l.rep.turn(ctx, tx); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if before.ids != l.rep.idsAt.Load() {
+			// Another replica deleted or renamed ids cached here: none of
+			// it can change again until this write is done.
+			l.forgetIDs()
+			l.rep.idsAt.Store(before.ids)
+		}
+		if ld != nil && ld.r == l.rep {
+			if err := l.rep.fenced(t, ld); err != nil {
+				tx.Rollback()
+				return err
+			}
+		}
+	}
 	if err := f(t); err != nil {
 		tx.Rollback()
 		return err
 	}
+	if l.rep != nil && t.counts(counted) {
+		if after, nonce, err = l.rep.bump(ctx, t); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	if ld != nil && ld.r == l.rep && l.rep != nil {
+		if err := l.rep.arm(t, ld); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	if ld != nil && !ld.valid() {
+		tx.Rollback()
+		return ErrNotLeading
+	}
 	if err := tx.Commit(); err != nil {
+		if notLeading(err) {
+			return ErrNotLeading
+		}
 		return err
 	}
 	if t.recorded {
@@ -468,6 +530,15 @@ func (l *Ledger) writeAside(ctx context.Context, f func(*txn) error) error {
 	}
 	l.trimCached()
 	l.ids.Unlock()
+	if counted || t.count {
+		l.gen.Add(1)
+	}
+	if l.rep != nil && t.counts(counted) {
+		if t.idsChanged {
+			l.rep.idsAt.Store(after.ids)
+		}
+		l.rep.wrote(before, after, nonce)
+	}
 	return nil
 }
 

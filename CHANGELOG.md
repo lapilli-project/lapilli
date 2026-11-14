@@ -2,6 +2,142 @@
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-11-14
+
+`lapilli serve` runs as several replicas on one Postgres ledger: one leads,
+and runs what must run once; every replica serves the rest
+(docs/design/replicas.md). No ledger schema change: the replicas' own
+tables are Postgres's alone, made as a ledger opens where they are older
+than its lapilli's (`replica_schema`), with no DDL otherwise, and none is
+copied.
+SQLite is as it was: one process, the same files. Read "Before you
+upgrade". Reviewed three times, as an attacker would, for correctness and
+concurrency, and the fixes once more; what each found is fixed in what is
+described here, as is what the first run of three replicas on kind found
+(the end-to-end test asked the wrong port).
+
+### Added
+
+- **Replicas on a Postgres ledger.** Every `serve` on a Postgres ledger is
+  a replica, alone or with others, sharing the ledger's advisory lock.
+  - **A leader, on a lease** the database keeps (`replica_lease`), by its
+    clock, at a term one more each time it changes hands. The leader runs
+    the runs and the backfill, judging again, the incidents and deploys
+    files, the check of the replay, near misses, proposals, the digest and
+    the reports, the outbox, changes carried out (Grafana, a ruler, a
+    cloud's alarms), the rules watched and their versions, the rules'
+    history, the on-call feeds, and pruning. Every replica serves the UI,
+    the API, MCP, `/metrics`, sign-in, and the incidents' and
+    notifications' ports, and writes what it is sent.
+  - **Takeover**: a follower takes the lease within 17 s of the leader
+    being killed or cut off (15.2 s measured, the leader's process
+    `SIGKILL`ed), within 2 s of it stopping, which gives the lease up.
+  - **Fencing**: the leader stops leading by its own clock 2 s before its
+    lease ends in the database, its work cancelled at once; each of its
+    jobs looks at the lease first; each write it makes checks the lease in
+    the database as it begins and as it commits (a deferred trigger that
+    reads the lease `FOR SHARE`), and its clock before; each send waits for
+    `Hold`, and for a claim the database checks under the lease. A leader
+    whose lease went elsewhere, a renewal a failover lost or a host
+    suspended among them, sends and writes nothing as the leader.
+  - **A leader whose work is stuck gives the lease up**: work that makes no
+    progress for 15 min (no job begun, no request asked of a history, no
+    rule replayed), or a write held past its deadline (6 min), stops the
+    renewals, and the lease is given up at once, though the work hasn't
+    returned: another leads 15 min 7 s after the leader's last progress at
+    most. `lapilli_serve_jobs_round_timestamp_seconds` says when it last
+    finished a round.
+  - **Each write takes the writers' turn across the replicas**: a row
+    lock, which a role that may only connect can't take, waited for 30 s
+    at most (`lock_timeout`); a write that waited longer is said in
+    `lapilli_serve_ledger_writes_waiting`, and every replica stays ready,
+    the turn being one for all. What reads then writes (merged values, the
+    limits on windows, roles and proposals, approvals, `TellOnce`) is as
+    right as with one process. The server ends a session cut off in a
+    transaction a minute after its last statement: 60 s idle in it, or 60
+    s with its answer not taken in (`tcp_user_timeout`, Linux). A write of
+    an older replica after a newer lapilli migrated the ledger writes
+    nothing, and the replica stops.
+  - **The caches told of the others' writes**: the generations pages are
+    cached by, and which weeks' firings changed, kept in the ledger
+    (`replica_gens`, `replica_weeks`) and read before each request, one
+    read at a time, within 5 s, which no write waits for: a write on one
+    replica shows on the next request to any other. Ids cached are dropped
+    when another replica deleted or renamed some, and everything is read
+    again after a failover that lost commits (a nonce logged with each
+    generation). A writer that connects again to the same server, as
+    after a write cancelled in the middle, keeps what it cached.
+  - **Notices claimed one at a time** (`FOR UPDATE SKIP LOCKED`, under the
+    lease), due and claimed by the database's clock: two leaders for a
+    moment never send one twice, a claim taken late in a long round still
+    lasts, and a replica whose clock is ahead delays none. The digest
+    posted to Slack is claimed for its week too.
+  - **Rate limits shared**: the tokens' and the notifications port's
+    buckets are the ledger's, so several replicas let through what one
+    did; the busy guards (one heavy request, one write a token) stay each
+    replica's.
+  - **Sign-in across replicas**: a sign-in's state is used once among
+    them, kept once the provider signed in someone a role lets in (a
+    sign-in that signs no one in, or a stranger's, writes nothing), swept
+    at its time and bounded, past which each replica's own set checks it;
+    the approval forms' key is the ledger's. Replicas compare their
+    session keys' fingerprints: one with a newer key than the live
+    replicas' joins, as a rollout of a new key brings it in, and
+    `lapilli_serve_session_keys` says how many keys sign sessions; one
+    with an older key than another live is refused, and without
+    `--session-key-file` a second replica too. With replicas, a session is
+    refused while who signed out can't be read, and a sign-out made then
+    is kept, here at once and in the ledger once it can be.
+  - **A follower shows what the leader is doing**, as the leader says it
+    every 2 s; it reads the rules for what they say, and the on-call turns
+    kept, as the leader does, without recording a version.
+  - **`/readyz` on the metrics' port says which replica leads**, and
+    whether its writes wait; on the UI's, ok alone. A replica that can't
+    reach the database isn't ready. `/metrics` has `lapilli_serve_leader`,
+    `lapilli_serve_replicas`, `lapilli_serve_ledger_writes_waiting` and
+    `lapilli_serve_session_keys`.
+- **The chart's `serve.replicas`**, more than one on Postgres alone:
+  `RollingUpdate` one pod at a time (`maxSurge: 1`, `maxUnavailable: 0`),
+  a PodDisruptionBudget (`serve.podDisruptionBudget.maxUnavailable`, 1,
+  a percentage taken as Kubernetes rounds it, up), and a session key
+  Secret of your own (`serve.signIn.sessionKeySecret.name`) required with
+  `serve.signIn.oidc`. One replica stays `Recreate`.
+- `test/e2e/replicas.sh`: three replicas on kind, the leader's process
+  killed, another leading within the lease, every notice once, a rolling
+  restart; and `test/e2e/postgres.sh` runs three replicas and kills one.
+
+### Changed
+
+- **A second `serve` on a Postgres ledger is a replica**, no longer
+  refused. `lapilli ledger copy` takes the ledger alone, as serve did, and
+  is refused while any replica runs; a replica is refused while a copy,
+  or a serve of 0.35 or before, holds the ledger alone. Replicas don't
+  count themselves in `schema_version.writers`.
+- A Postgres ledger's migrations take the writers' turn, so replicas
+  started at once migrate it once; a replica that finds the ledger
+  migrated by a newer lapilli stops. A migration's DDL waits 2 s at most
+  for a lock on a table (`pg_dump` holds one on each for the whole dump),
+  and is tried again every 10 s, for 5 min.
+
+### Before you upgrade
+
+- **From 0.34 or 0.35 with `serve.ledger.postgres`, upgrade with
+  `serve.replicas: 1`** (the default), then raise it: the older pod holds
+  the ledger alone and refuses new pods until it stops, which `Recreate`
+  waits for and `RollingUpdate` would not.
+- **Each request to a Postgres ledger's serve asks the database once
+  more**, for the others' writes, one replica or several.
+- **Give the database to the ledger's role alone** (`REVOKE CONNECT ON
+  DATABASE lapilli FROM PUBLIC`): a role that may only connect can still
+  take or wait for the ledger's advisory lock, and keep replicas from
+  starting or connecting again (docs/design/replicas.md).
+- **Going back to 0.35 or 0.34**: its `lapilli ledger copy` refuses a
+  ledger with the replicas' tables; drop them first, with serve stopped
+  (the statement is in docs/design/replicas.md, "Failure cases").
+- **Changing the session key with several replicas**: write the new key
+  into the Secret, then restart the Deployment; until the rollout is done,
+  a session works on the pods of its key alone (docs/design/signin.md).
+
 ## [0.35.0] - 2026-11-14
 
 The web UI's frame, and the rules list, redone: a sidebar in four groups,
