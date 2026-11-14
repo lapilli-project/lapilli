@@ -57,14 +57,17 @@ func (s *Server) Handler() http.Handler {
 
 	page := func(name string, view func(*http.Request) (any, error)) http.HandlerFunc {
 		h := s.cached(func(w http.ResponseWriter, r *http.Request) {
-			// A page worked out, not kept already: a few at a time.
-			done, err := s.renderTurn(r.Context())
+			// A page worked out, not kept already: a few at a time. The
+			// turn is given back once it is rendered (render), before it
+			// goes to the network.
+			tn, err := s.renderTurn(r.Context())
 			if err != nil {
 				w.Header().Set("Retry-After", strconv.Itoa(int(renderWait/time.Second)))
 				s.oops(w, r, err)
 				return
 			}
-			defer done()
+			defer tn.give()
+			r = r.WithContext(context.WithValue(r.Context(), turnKey{}, tn))
 			// The page context, read once; the view reads the reader's own
 			// team as team= when it was taken for them.
 			r, vr := s.withContext(r, name)
@@ -248,23 +251,49 @@ var renderWait = 10 * time.Second
 // errPagesBusy is a page that waited renderWait for its turn.
 var errPagesBusy = errors.New("the server is busy with many pages at once: try again in a few seconds")
 
-// renderTurn takes a turn to work out a page, waiting for one up to
-// renderWait; the func it returns gives it back.
-func (s *Server) renderTurn(ctx context.Context) (func(), error) {
-	if s.renders == nil {
-		return func() {}, nil
+// turn is a page's turn to be worked out (pageRenders), held while it is:
+// given back once it is rendered, before it goes to the network, which a
+// reader who doesn't read can make take minutes; or when the request ends.
+type turn struct {
+	mu   sync.Mutex
+	held chan struct{} // the turns it holds one of, nil when it holds none
+}
+
+// turnKey is the context key a page's turn is kept under.
+type turnKey struct{}
+
+// turnOf is the turn the request whose context ctx is holds, nil for none.
+func turnOf(ctx context.Context) *turn {
+	t, _ := ctx.Value(turnKey{}).(*turn)
+	return t
+}
+
+// give gives the turn back, once.
+func (t *turn) give() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.held != nil {
+		<-t.held
+		t.held = nil
 	}
-	give := func() { <-s.renders }
+}
+
+// renderTurn takes a turn to work out a page, waiting for one up to
+// renderWait.
+func (s *Server) renderTurn(ctx context.Context) (*turn, error) {
+	if s.renders == nil {
+		return &turn{}, nil
+	}
 	select {
 	case s.renders <- struct{}{}:
-		return give, nil
+		return &turn{held: s.renders}, nil
 	default:
 	}
 	t := time.NewTimer(renderWait)
 	defer t.Stop()
 	select {
 	case s.renders <- struct{}{}:
-		return give, nil
+		return &turn{held: s.renders}, nil
 	case <-t.C:
 		return nil, errPagesBusy
 	case <-ctx.Done():
@@ -672,10 +701,17 @@ type cache struct {
 
 // What the cache holds, at most: a page or answer bigger than one
 // worth keeping is worked out each time.
-const (
-	cacheBytes = 32 << 20
-	cacheOne   = 2 << 20
-)
+const cacheBytes = 32 << 20
+
+var cacheOne = 2 << 20
+
+// spillWithin is how long a page or answer too big to keep has to go to
+// the network, from when the first of it does: a reader who doesn't read
+// holds the request no longer.
+var spillWithin = 30 * time.Second
+
+// spills counts the pages and answers too big to keep, for tests.
+var spills atomic.Int64
 
 type cached struct {
 	ctype string
@@ -719,6 +755,8 @@ func (r *recorder) Write(b []byte) (int, error) {
 		if r.status != http.StatusOK {
 			h.Del("ETag")
 		}
+		spills.Add(1)
+		http.NewResponseController(r.to).SetWriteDeadline(time.Now().Add(spillWithin))
 		r.to.WriteHeader(r.status)
 		if _, err := r.to.Write(r.body.Bytes()); err != nil {
 			return 0, err
@@ -988,6 +1026,11 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, v a
 	if err := pagesIn[p.Lang].ExecuteTemplate(&b, name, p); err != nil {
 		s.oops(w, r, err)
 		return
+	}
+	// Rendered: the page's turn is given back before it goes to the
+	// network, however long the reader takes to read it.
+	if t := turnOf(r.Context()); t != nil {
+		t.give()
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(b.Bytes())
