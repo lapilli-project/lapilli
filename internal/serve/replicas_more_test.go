@@ -451,6 +451,9 @@ func TestReplicasSignInWhenStatesFull(t *testing.T) {
 // context.
 func TestReplicasStuckWork(t *testing.T) {
 	was := stepWithin
+	if was != 15*time.Minute {
+		t.Errorf("stepWithin is %v: replicas.md and the CHANGELOG say 15 min", was)
+	}
 	stepWithin = 100 * time.Millisecond
 	t.Cleanup(func() { stepWithin = was })
 	f := sharedLedger(t)
@@ -501,6 +504,58 @@ func TestReplicasStuckWork(t *testing.T) {
 	time.Sleep(2 * stepWithin)
 	if a.stuck() {
 		t.Error("a replica that stopped leading in the middle of a round taken for stuck")
+	}
+}
+
+// tardy is a history that answers each request after a while, with
+// nothing.
+type tardy time.Duration
+
+func (h tardy) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	time.Sleep(time.Duration(h))
+	return nil, nil
+}
+
+// A round longer than stepWithin, in a piece of a run, isn't taken for
+// stuck while it makes progress: each rule replayed is, in the leader's
+// context. Here a day's piece replays twelve rules, one at a time, each
+// answered after 100 ms, while stepWithin is 500 ms; the leader keeps its
+// lease to the round's end.
+func TestReplicasSlowRoundIsNoStall(t *testing.T) {
+	was := stepWithin
+	stepWithin = 500 * time.Millisecond
+	t.Cleanup(func() { stepWithin = was })
+	f := sharedLedger(t)
+	quickReplicas(t)
+	rc := newSink(t)
+	dir := t.TempDir()
+	var rs strings.Builder
+	rs.WriteString("groups:\n  - name: shop\n    rules:\n")
+	for i := range 12 {
+		fmt.Fprintf(&rs, "      - alert: Slow%d\n        expr: slow%d > 1\n", i, i)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "shop.yaml"), []byte(rs.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	change := func(c *Config) { c.RulesPath, c.Parallel, c.Impact = dir, 1, "" }
+	h := tardy(100 * time.Millisecond)
+	a := replicaOn(t, f, rc, h, change)
+	running(t, a)
+	until(t, 10*time.Second, "a leads", a.l.Leading)
+	b := replicaOn(t, f, rc, h, change)
+	running(t, b)
+	began := time.Now()
+	for !a.ready.Load() {
+		if b.l.Leading() {
+			t.Fatalf("another led %v into a slow round that made progress all along", time.Since(began))
+		}
+		if time.Since(began) > 30*time.Second {
+			t.Fatal("the round never ended")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if took := time.Since(began); took < 2*stepWithin {
+		t.Fatalf("the round took %v, no longer than stepWithin: no test of it", took)
 	}
 }
 
