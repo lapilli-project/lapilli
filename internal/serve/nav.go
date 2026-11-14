@@ -160,9 +160,9 @@ func (s *Server) waiting(ctx context.Context) (map[int64]int, int) {
 // for, where the page honours them, and the search.
 type barView struct {
 	// Action is the page the team and period are chosen for; "" where the
-	// page shows neither.
-	Action      string
-	Team, Weeks bool
+	// page shows neither. Label names the form: what it chooses.
+	Action, Label string
+	Team, Weeks   bool
 	// WeeksIn is the period in effect.
 	WeeksIn int
 	// Keep are the page's other parameters, sent again with a choice.
@@ -186,6 +186,14 @@ func barOf(name string, r *http.Request, c pageCtx) barView {
 	b.Weeks = weeksPages[name]
 	if b.Team || b.Weeks {
 		b.Action = crumbsOf[name].Href
+		switch {
+		case b.Team && b.Weeks:
+			b.Label = "Team and period"
+		case b.Team:
+			b.Label = "Team"
+		default:
+			b.Label = "Period"
+		}
 		b.Keep = keepParams(r.URL.Query(), "team", "weeks")
 		// What the bar doesn't offer, it carries as it came.
 		for _, f := range c.hidden() {

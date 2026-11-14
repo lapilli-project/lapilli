@@ -25,7 +25,7 @@
 <main id="main">
 <nav class="crumbs" aria-label="{{t "Breadcrumb"}}"><ol>{{with .Crumb}}{{if .Group}}<li>{{t .Group}}</li>{{end}}{{if .Name}}<li>{{if .Item}}<a href="{{$.Link .Href}}">{{t .Name}}</a>{{else}}<span aria-current="page">{{t .Name}}</span>{{end}}</li>{{end}}{{if .Item}}<li><span aria-current="page"><bdi>{{$.Title}}</bdi></span></li>{{end}}{{end}}</ol></nav>
 <div class="bar">
-{{with .Bar}}{{if .Action}}<form method="get" action="{{.Action}}" class="ctx" aria-label="{{t "Team and period"}}">{{range .Keep}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+{{with .Bar}}{{if .Action}}<form method="get" action="{{.Action}}" class="ctx" aria-label="{{t .Label}}">{{range .Keep}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
   {{if .Team}}<label>{{t "Team"}} <select name="team"><option value=""{{if not $.Ctx.Team}} selected{{end}}>{{t "All teams"}}</option>{{range $.Ctx.Teams}}<option value="{{.}}"{{if eq . $.Ctx.Team}} selected{{end}}>{{.}}{{if and $.Ctx.Mine (eq . $.Ctx.Team)}} ({{t "your team"}}){{end}}</option>{{end}}</select></label>{{end}}
   {{if .Weeks}}<label>{{t "Period"}} <select name="weeks">{{range $w := list "1" "4" "12"}}<option value="{{$w}}"{{if eq $w (print $.Bar.WeeksIn)}} selected{{end}}>{{if eq $w "1"}}{{t "1 week"}}{{else if eq $w "4"}}{{t "4 weeks"}}{{else}}{{t "12 weeks"}}{{end}}</option>{{end}}</select></label>{{end}}
   <button class="quiet-button">{{t "Show"}}</button>

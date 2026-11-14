@@ -446,7 +446,7 @@ func TestFrameTextsTranslated(t *testing.T) {
 	for _, c := range crumbsOf {
 		texts[c.Group], texts[c.Name] = true, true
 	}
-	for _, x := range []string{"Admins only", "Editors only", "%d open", "%d to approve", "Nowhere to send a report yet", "No team yet: an editor makes a team's report",
+	for _, x := range []string{"Team and period", "Team", "Period", "Admins only", "Editors only", "%d open", "%d to approve", "Nowhere to send a report yet", "No team yet: an editor makes a team's report",
 		"Read-only: lapilli serve was started with --read-only", "Read-only: no one is given a role here", "Read-only: no one is signed in"} {
 		texts[x] = true
 	}
@@ -460,5 +460,23 @@ func TestFrameTextsTranslated(t *testing.T) {
 	}
 	if len(texts) < 300 {
 		t.Errorf("only %d texts found", len(texts))
+	}
+}
+
+// TestBarNamed: the bar's form is named for what it chooses: the team, the
+// period, or both.
+func TestBarNamed(t *testing.T) {
+	s := pagesServer(t)
+	alone, _ := server(t, nil)
+	for _, c := range []struct {
+		h          http.Handler
+		path, want string
+	}{
+		{s.Handler(), "/", "Team"}, {s.Handler(), "/tasks", "Team"}, {s.Handler(), "/rules", "Team and period"},
+		{s.Handler(), "/incidents", "Team and period"}, {alone.Handler(), "/rules", "Period"},
+	} {
+		if _, body, _ := get(t, c.h, c.path); !strings.Contains(body, `class="ctx" aria-label="`+c.want+`">`) {
+			t.Errorf("%s: the bar's form isn't %q", c.path, c.want)
+		}
 	}
 }
