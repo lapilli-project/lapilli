@@ -87,7 +87,9 @@ func (s *Server) timeline(ctx context.Context, lg string, in ledger.Incident, t 
 		end = in.Start
 	}
 	v := &timelineView{From: in.Start.Add(-lead), To: end.Add(lead), Lead: verdict.Duration(lead), Width: timelineW}
-	span := v.To.Sub(v.From).Seconds()
+	// A span of no length (--lead 0, and an incident that ended as it
+	// started) draws all at its start.
+	span := max(v.To.Sub(v.From).Seconds(), 1)
 	x := func(at time.Time) float64 {
 		f := at.Sub(v.From).Seconds() / span
 		return math.Round(10*(2+(timelineW-4)*min(1, max(0, f)))) / 10
@@ -104,7 +106,11 @@ func (s *Server) timeline(ctx context.Context, lg string, in ledger.Incident, t 
 	if len(fs) > timelineRead {
 		fs, v.Capped, v.Read = fs[:timelineRead], true, timelineRead
 	}
+	// Times on the clock, with the date when the span crosses a day.
 	clock := "15:04"
+	if v.From.In(s.cfg.Loc).Format("2006-01-02") != v.To.In(s.cfg.Loc).Format("2006-01-02") {
+		clock = "01-02 15:04"
+	}
 	rows := map[string]*timelineRow{}
 	row := func(rule string) *timelineRow {
 		r := rows[rule]

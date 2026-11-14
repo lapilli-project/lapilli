@@ -186,3 +186,35 @@ func TestTimelineRead(t *testing.T) {
 		}
 	}
 }
+
+// TestTimelineShort: a span of no length draws, with no NaN; a span that
+// crosses midnight says the date with each time.
+func TestTimelineShort(t *testing.T) {
+	ctx := context.Background()
+	s, _ := server(t, func(c *Config) { c.Options.Lead = 0 })
+	o := s.cfg.Options
+	at := time.Date(2026, 11, 1, 23, 50, 0, 0, time.UTC)
+	keep(t, s, at.Add(-time.Hour), at.Add(time.Hour), []firing.Firing{{Rule: "Now", Start: at, End: at.Add(time.Minute), Labels: map[string]string{"service": "pay"}}})
+	for _, in := range []incident.Incident{{ID: "Z-1", Start: at, End: at, Labels: incident.Labels{"service": {"pay"}}},
+		{ID: "Z-2", Start: at, End: at.Add(20 * time.Minute), Labels: incident.Labels{"service": {"pay"}}}} {
+		if _, err := s.l.Put(ctx, in, "ana", o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, body, _ := get(t, s.Handler(), "/incidents/Z-1")
+	if strings.Contains(body, "NaN") || !strings.Contains(body, `<section class="card timeline" id="timeline">`) {
+		t.Error("a span of no length: NaN, or no timeline")
+	}
+	in, err := s.l.IncidentByID(ctx, "Z-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tl, err := s.tallies(ctx, weeks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := s.timeline(ctx, "en", in, tl, nil)
+	if err != nil || len(v.Rows) != 1 || v.Rows[0].Starts != "11-01 23:50 ○" || v.Rows[0].Marks[0].Title != "11-01 23:50 → 11-01 23:51" {
+		t.Errorf("across midnight: %+v %v", v, err)
+	}
+}
