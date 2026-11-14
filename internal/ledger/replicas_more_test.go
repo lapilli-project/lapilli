@@ -287,6 +287,57 @@ func TestReplicasFenceAtCommit(t *testing.T) {
 	}
 }
 
+// The lease is read FOR SHARE as a leader's write commits: another's take,
+// once the lease lapsed, waits for that write to be done, so its term
+// begins after every write of the former leader's that the check let
+// through. Here the commit is held past the lease's end by a trigger of
+// the test's own, run after the check.
+func TestReplicasTakeWaitsForACommit(t *testing.T) {
+	u := replicaURL(t)
+	ctx := context.Background()
+	a, b := openReplica(t, u), openReplica(t, u)
+	term, _, err := a.rep.take(ctx)
+	if err != nil || term == 0 {
+		t.Fatalf("a's take: %d %v", term, err)
+	}
+	ld := &leadership{r: a.rep, term: term, since: time.Now(), until: time.Now().Add(time.Hour)}
+	admin, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	for _, q := range []string{
+		"CREATE FUNCTION test_slow() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(1); RETURN NULL; END $$",
+		// After replica_fenced, by name.
+		"CREATE CONSTRAINT TRIGGER replica_fenced_slow AFTER INSERT ON replica_fence DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION test_slow()",
+		"UPDATE replica_lease SET until = clock_timestamp() + interval '300 milliseconds'",
+	} {
+		if _, err := admin.Exec(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wrote := make(chan time.Time, 1)
+	go func() {
+		err := a.write(context.WithValue(ctx, leaseKey{}, ld), func(t2 *txn) error { return setMeta(t2.ctx, t2, "x.k", "the leader's") })
+		if err != nil {
+			t.Errorf("the leader's write, its lease checked before it lapsed: %v", err)
+		}
+		wrote <- time.Now()
+	}()
+	time.Sleep(600 * time.Millisecond)
+	tctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	next, _, err := b.rep.take(tctx)
+	took := time.Now()
+	if err != nil || next == 0 {
+		t.Fatalf("the other's take, the lease lapsed: %d %v", next, err)
+	}
+	if done := <-wrote; took.Before(done) {
+		t.Errorf("another's term began %v before the former leader's write, which the lease's check let through, was done",
+			done.Sub(took).Round(time.Millisecond))
+	}
+}
+
 // A refresh that waits on the database (here, a table it reads locked by
 // another session, as a database that stopped answering holds it) holds
 // nothing up past its own deadline: another caller waits no longer than
