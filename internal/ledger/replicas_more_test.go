@@ -338,6 +338,68 @@ func TestReplicasTakeWaitsForACommit(t *testing.T) {
 	}
 }
 
+// A writer that connects again to the same server, as one does after a
+// write was cancelled in the middle of a statement (its client went, a
+// probe's deadline), keeps what it cached: the server lost nothing. One
+// that connects to another server, after a failover, reads it all again.
+func TestReplicasSameServerKeepsCaches(t *testing.T) {
+	u := replicaURL(t)
+	was := turnWithin
+	turnWithin = 5 * time.Second
+	t.Cleanup(func() { turnWithin = was })
+	ctx := context.Background()
+	a := openReplica(t, u)
+	if err := a.SetMeta(ctx, "k", "1"); err != nil {
+		t.Fatal(err)
+	}
+	forgotten := func() int64 {
+		a.changed.Lock()
+		defer a.changed.Unlock()
+		return a.changed.all
+	}
+	before := forgotten()
+	holder, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close(ctx)
+	tx, err := holder.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, "SELECT 1 FROM replica_gens WHERE one = 1 FOR UPDATE"); err != nil {
+		t.Fatal(err)
+	}
+	wctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	if err := a.SetMeta(wctx, "k", "2"); err == nil {
+		t.Fatal("a write cancelled behind the turn held went through")
+	}
+	cancel()
+	tx.Rollback(ctx)
+	if err := a.SetMeta(ctx, "k", "3"); err != nil {
+		t.Fatal(err)
+	}
+	if forgotten() != before {
+		t.Error("the caches were all read again after a connection to the same server")
+	}
+	// Another server, as a failover gives: what it started at differs.
+	a.pg.mu.Lock()
+	a.pg.server = a.pg.server.Add(-time.Hour)
+	a.pg.mu.Unlock()
+	if _, err := holder.Exec(ctx, "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid = $1", int(a.pg.pid)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	for range 3 {
+		if err := a.SetMeta(ctx, "k", "4"); err == nil {
+			break
+		}
+	}
+	if forgotten() == before {
+		t.Error("the caches were kept after a connection to another server")
+	}
+}
+
 // A refresh that waits on the database (here, a table it reads locked by
 // another session, as a database that stopped answering holds it) holds
 // nothing up past its own deadline: another caller waits no longer than

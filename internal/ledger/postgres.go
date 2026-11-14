@@ -131,11 +131,16 @@ type pgWriter struct {
 	// was read.
 	writers int64
 	known   bool
-	// again is set by each connection after the first: the caches are
-	// read again from the ledger before the next write.
-	again atomic.Bool
-	lost  chan struct{}
-	once  sync.Once
+	// again is set by a connection to another server than the last
+	// one's, by when it started (server): a failover's, which may have
+	// lost what was last written. The caches are read again from the
+	// ledger before the next write. Connecting again to the same server
+	// (a session ended, a connection closed by a write cancelled in the
+	// middle) loses nothing.
+	again  atomic.Bool
+	server time.Time
+	lost   chan struct{}
+	once   sync.Once
 	// why is what lost it: ErrLockLost, or a newer lapilli's schema.
 	why error
 	// closed is set once the ledger is closed: no connection is made
@@ -259,8 +264,8 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 	}
 	// This process's own from now, should the lock be taken and the answer
 	// not reach it.
-	var began time.Time
-	if err := c.QueryRow(ctx, "SELECT backend_start FROM pg_stat_activity WHERE pid = pg_backend_pid()").Scan(&began); err != nil {
+	var began, server time.Time
+	if err := c.QueryRow(ctx, "SELECT backend_start, pg_postmaster_start_time() FROM pg_stat_activity WHERE pid = pg_backend_pid()").Scan(&began, &server); err != nil {
 		return err
 	}
 	w.own[session{c.PgConn().PID(), began.UnixMicro()}] = true
@@ -301,8 +306,11 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 			w.lose()
 			return ErrLockLost
 		}
-		w.again.Store(true)
+		if !server.Equal(w.server) {
+			w.again.Store(true)
+		}
 	}
+	w.server = server
 	w.pid = c.PgConn().PID()
 	// Those before it are gone, or ended above.
 	w.own = map[session]bool{{w.pid, began.UnixMicro()}: true}

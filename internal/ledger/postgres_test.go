@@ -574,9 +574,10 @@ func TestPostgresOwnSessionEnded(t *testing.T) {
 	}
 }
 
-// A connection made again reads what it caches of the ledger again: a
-// failover can lose the last writes, the rules and alerts it made with
-// them.
+// A connection made again to another server reads what it caches of the
+// ledger again: a failover can lose the last writes, the rules and alerts
+// it made with them. (TestReplicasSameServerKeepsCaches: to the same, it
+// doesn't.)
 func TestPostgresForgetsOnReconnect(t *testing.T) {
 	u := ledgertest.URL(t)
 	if u == "" {
@@ -595,7 +596,11 @@ func TestPostgresForgetsOnReconnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer admin.Close(ctx)
-	// What a failover lost: the run, its alert and its rule.
+	// What a failover lost: the run, its alert and its rule; the server
+	// is another, as what it started at says.
+	l.pg.mu.Lock()
+	l.pg.server = l.pg.server.Add(-time.Hour)
+	l.pg.mu.Unlock()
 	if _, err := admin.Exec(ctx, "SELECT pg_terminate_backend($1)", int64(l.pg.pid)); err != nil {
 		t.Fatal(err)
 	}
