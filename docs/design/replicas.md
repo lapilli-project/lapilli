@@ -523,16 +523,31 @@ ms), 20 runs each after the reviews' changes:
 
 | | the old leader stopped | another led |
 |---|---|---|
-| a leader cut off from the database (`TestReplicasTakeOver/cut_off`) | 0.98 to 1.02 s after | 1.30 to 1.36 s after |
-| a leader killed (`TestReplicasTakeOver/killed`) | 10 to 14 ms after | 1.31 to 1.36 s after |
-| a leader cut off, the ledger alone (`TestReplicasTakeOverFromACutOffLeader`) | 1.19 s after | 1.54 to 1.57 s after |
-| a leader that stopped (`TestReplicasOneLeads`) | at once | 11 to 69 ms after |
+| a leader cut off from the database (`TestReplicasTakeOver/cut_off`) | 0.97 to 1.01 s after | 1.29 to 1.36 s after |
+| a leader killed (`TestReplicasTakeOver/killed`) | 10 to 15 ms after | 1.30 to 1.40 s after |
+| a leader cut off, the ledger alone (`TestReplicasTakeOverFromACutOffLeader`) | 1.18 to 1.20 s after | 1.53 to 1.59 s after |
+| a leader that stopped (`TestReplicasOneLeads`) | at once | 10 to 24 ms after |
+| a leader whose history stopped answering, a `stepWithin` of 1 s (`TestReplicasStuckJobHandsOver`) | gave the lease up at its next renewal | 1.24 to 1.28 s after its last progress |
 
 Each time the old leader stopped before another began, at a later term.
 In 20 runs of three replicas each, every run and every notice was done
 once, and a former leader whose lease another took sent nothing; a write
-fenced at commit, a claim, and a stuck leader giving its lease up, 20
-times each, held as well.
+fenced at commit, a take waiting for a former leader's commit, a claim,
+and a stuck leader giving its lease up, at once rather than letting it
+lapse (`TestReplicasStuckLeaderResignsAtOnce`), 20 times each, held as
+well. A stuck leader as shipped is followed 15 min after its last
+progress, 15 min 7 s at most; a round that outlasts `stepWithin` while it
+makes progress kept its lease, at the same term, 20 runs of 20
+(`TestReplicasSlowRoundIsNoStall`).
+
+**A dump while replicas run.** A replica started while a session held
+ACCESS SHARE on every table of the ledger, as `pg_dump` does, in under a
+second, and a running replica's write didn't wait
+(`TestReplicasStartDuringADump`, 20 runs). Replicas' tables older than
+the start's were changed once the dump was done, writes meanwhile 250 ms
+at most (`TestReplicasChangedOutsideTheTurn`); a migration held the turn
+2 s at most each try (`TestReplicasMigrationTakesTheTurn`: 300 ms in the
+test), and writes waited no longer.
 
 **Writes beside the backfill.** Three processes on one ledger while the
 leader backfilled 28 days: 1,278 API writes on the three, the longest 71
@@ -544,49 +559,60 @@ fails.
 **Started together.** `TestReplicasStartTogether` (eight replicas on an
 empty schema, five rounds, then on a ledger without the replicas' tables)
 passed 60 times of 60 while the whole suite ran on the same Postgres 16
-server, twice; before the reviews' change it failed 3 times of 60 so
-(the review's count).
+server, twice, and on Postgres 17 once the replicas' tables had a version;
+before the reviews' change it failed 3 times of 60 so (the review's
+count).
 
 **The tests**, every package's, on SQLite and on Postgres 16 and 17
-locally (CI runs 15 and 18): 1,719 tests and subtests pass on Postgres 17
-and on 16, 11 skipped (SQLite's own, and an accessibility check run on
-its own); 1,661 on SQLite, 67 skipped (Postgres's own). The
+locally (CI runs 15 and 18): 1,731 tests and subtests pass on Postgres
+17 and on 16, 11 skipped (SQLite's own, and an accessibility check run
+on its own); 1,662 on SQLite, 78 skipped (Postgres's own). The
 replicas' own, beside the ledger's tests of the lock: replicas started at
-once, and one that waits while another makes the ledger; writes that read
+once, and one that waits while another makes the ledger; a start during a
+dump, and the replicas' tables changed outside the turn; writes that read
 then write, merged and counted against a limit by three replicas at once;
 another replica's writes on the next refresh, and on the next request's
 page and API; one refresh at a time, within its deadline, which no write
-waits for; deadlines on the side pool; one leader of three, handed over
-when it stops; a leader cut off or killed, followed within the lease; a
-stuck leader giving its lease up; fenced writes, by the database at the
-write's start and at its commit, and by the clock; notices claimed once by
-six senders on two replicas, from when each is taken, due by the
-database's clock, the next taken while another holds the first; shared
-rate limits and uses once, swept and bounded; the leader woken, during
-its own write as well, and asked to judge again, from a follower; a newer
-schema, found by a refresh and by a write under the turn; a migration
-taking the turn; failovers that lost commits; ids another replica deleted;
-a role that may only connect, and a session that waits for the lock alone;
-three servers running each job once; a former leader that sends nothing;
-no job once the lease ended by the clock; the admin's pause, the settings,
-the forms' key, a sign-in's state and the token's burst across replicas;
-no state kept for a sign-in that signed no one in; sign-outs that can't be
-read refusing a session; the leader's status on a follower's pages;
-readiness without the database, while writes wait, and saying ok alone
-on the UI's port; session keys compared; the digest after another's claim;
-stepping down. The chart's: refused without Postgres, the rolling update,
-the budget and its percentages, the session key's Secret.
+waits for; deadlines on the side pool; caches kept on a connection made
+again to the same server, and read again on another; one leader of
+three, handed over when it stops; a leader cut off or killed, followed
+within the lease; a stuck leader giving its lease up at once, a stuck
+job handed over, a slow round that keeps it; fenced writes, by the
+database at the write's start and at its commit, a take that waits for a
+commit, and the clock; notices claimed once by six senders on two
+replicas, from when each is taken, due by the database's clock, the next
+taken while another holds the first; shared rate limits and uses once,
+swept and bounded; the leader woken, during its own write as well, and
+asked to judge again, from a follower; a newer schema, found by a refresh
+and by a write under the turn; a migration taking the turn, its DDL's
+wait bounded; failovers that lost commits; ids another replica deleted;
+versions parsed for their own ledger; a role that may only connect, and a
+session that waits for the lock alone; three servers running each job
+once; a former leader that sends nothing; no job once the lease ended by
+the clock; the admin's pause, the settings, the forms' key, a sign-in's
+state and the token's burst across replicas; no state kept for a sign-in
+that signed no one in, or a stranger's; a sign-in with the uses once at
+their bound; sign-outs that can't be read refusing a session, and a
+sign-out made then kept; the leader's status on a follower's pages;
+readiness without the database, ready while writes wait, saying so, and
+saying ok alone on the UI's port; session keys rotated; the digest after
+another's claim; stepping down. The chart's: refused without Postgres,
+the rolling update, the budget and its percentages, the session key's
+Secret.
 
-**Each guard was taken away in turn** (68), and a test failed for 67:
+**Each guard was taken away in turn** (94), and a test failed for 93:
 those above, and the chart's. The one left is the lease checked as a
 leader's write begins, with the check at commit kept: the commit's catches
 what it would, so no test fails without it. It is kept as the cheaper
-refusal, before a write does its work.
+refusal, before a write does its work. Not taken away, as no test here
+can tell: `tcp_user_timeout`, which a macOS server takes and does nothing
+with.
 
-**Not yet run**: `test/e2e/replicas.sh` on kind (CI's `e2e-replicas`),
+**Run by CI, not here**: `test/e2e/replicas.sh` on kind (`e2e-replicas`),
 `test/e2e/postgres.sh` with its Postgres in Docker, and the suites on
-Postgres 15 and 18, which CI runs. Both scripts pass shellcheck, and the
-workflow actionlint. The kind run failed in CI on a port: the script
-asked the Service on port 80, where it answers on `serve.port` (8080);
-it now reads the Service's ports, times each write, and prints the pods,
-their logs and the Service's endpoints when it fails.
+Postgres 15 and 18: each passed on the commit before the review of the
+fixes, the kind run for the first time. It had failed on a port: the
+script asked the Service on port 80, where it answers on `serve.port`
+(8080); it now reads the Service's ports, times each write, and prints
+the pods, their logs and the Service's endpoints when it fails. Both
+scripts pass shellcheck, and the workflow actionlint.
