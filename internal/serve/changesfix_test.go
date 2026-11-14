@@ -348,7 +348,7 @@ func TestApprovedOnceInAnyCase(t *testing.T) {
 		if key == "" {
 			return 0 // no form offered
 		}
-		r := httptest.NewRequest(http.MethodPost, "/proposals/"+itoa(id)+"/approve", strings.NewReader(url.Values{"key": {key}}.Encode()))
+		r := httptest.NewRequest(http.MethodPost, "/proposals/"+itoa(id)+"/approve", strings.NewReader(url.Values{"key": {key}, "read": {"1"}}.Encode()))
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		r.Header.Set("Sec-Fetch-Site", "same-origin")
 		r.Header.Set("X-Forwarded-Email", who)

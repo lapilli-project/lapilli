@@ -42,6 +42,10 @@ func (s *Server) changesRoutes(mux *http.ServeMux, page func(string, func(*http.
 // errNotApprover is an approval, or an undo, by someone who may not.
 var errNotApprover = errors.New("only an approver can approve or undo a change: one named in --approvers, or an admin when it isn't given")
 
+// errNotRead is an approval without its box ticked: that the approver
+// read the change and its backtest.
+var errNotRead = bad("approve it once you have read the change and what it would do: tick the box on its page that says you have, then approve")
+
 // errNotAForm is an approval that didn't come from the proposal's page, in
 // a browser, on this site.
 var errNotAForm = errors.New("a change is approved on its page, in a browser: this request didn't come from the page's form")
@@ -84,8 +88,9 @@ type proposalLine struct {
 	ledger.Proposal
 	// Stale says the rule in effect isn't the one it was made against.
 	Stale bool
-	Need  int
-	Loc   *time.Location
+	// Have is how many approved it, of Need.
+	Have, Need int
+	Loc        *time.Location
 }
 
 type proposalsView struct {
@@ -138,7 +143,7 @@ func (s *Server) proposalLines(r *http.Request, ps []ledger.Proposal) ([]proposa
 	}
 	var out []proposalLine
 	for _, p := range ps {
-		l := proposalLine{Proposal: p, Need: s.approvals(), Loc: s.cfg.Loc}
+		l := proposalLine{Proposal: p, Have: len(p.Approvals), Need: s.approvals(), Loc: s.cfg.Loc}
 		// One being applied changed the rule itself.
 		if p.Open() && p.BeforeHash != "" && p.State != ledger.StateApplying {
 			now := fires
@@ -206,6 +211,26 @@ type proposalView struct {
 	// make, when it has no path.
 	Body string
 	Task *ledger.Task
+
+	// The page (docs/design/ui.md): Head, what it changes, in words; Diff,
+	// the rule as it is and as proposed, in the options asked, and
+	// DiffLinks the others; File, the file's diff a pull request carries,
+	// with the file's name; Backtest, as a table; Steps, what happened to
+	// it, StepsCut that the oldest may be gone.
+	Head      proposalHead
+	Diff      diffShown
+	DiffLinks [2][]diffLink
+	File      string
+	FileRows  []diffRow
+	Backtest  *btTable
+	Steps     []proposalStep
+	StepsCut  bool
+	// What the reader may not do, each shown disabled with why: approve
+	// it, ask for it to be undone, drop or close it, make it a task.
+	ApproveOff, UndoOff, DropOff, TaskOff *pageAction
+	// Read is what the reader says they read before approving: the
+	// backtest, or, with none, the change and its evidence.
+	Read string
 }
 
 func (s *Server) proposalPage(r *http.Request) (any, error) {
@@ -219,6 +244,9 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v := proposalView{proposalLine: lines[0], Evidence: proposalEvidence(p), On: s.cfg.Changes, Paused: s.changesPaused(), Next: len(p.Approvals) + 1}
+	if p.Kind == ledger.KindUndo {
+		v.Need = 1 // approved by whoever asked for it
+	}
 	user := s.user(r)
 	if s.approver(r) {
 		me := ledger.FoldName(user)
@@ -227,7 +255,7 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 		if p.State == ledger.StateProposed && p.Path != ledger.PathNone && !v.Own && !v.Done {
 			v.CanApprove, v.Approve = true, s.formKey(p, user, "approve")
 		}
-		if p.State == ledger.StateApplied && p.Kind != ledger.KindUndo && p.Path != ledger.PathNone {
+		if undoable(p) {
 			v.CanUndo, v.Undo = true, s.formKey(p, user, "undo")
 		}
 	}
@@ -241,7 +269,43 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 			v.Task = &t
 		}
 	}
+	v.Head = headOf(p, v.Evidence)
+	o := diffOptsOf(r.URL.Query())
+	ds, whole := lineDiff(textLines(p.Before), textLines(p.After))
+	v.Diff = diffShown{D: shapeDiff(ds, whole, o), Old: "Now", New: "As proposed"}
+	if p.Kind == ledger.KindUndo {
+		v.Diff.Old, v.Diff.New = "As the change left it", "As it was before"
+	}
+	c := s.pageContext(r)
+	path := fmt.Sprintf("/proposals/%d", p.ID)
+	v.DiffLinks = diffLinks(o, func(diff, context string) string { return c.Link(path+"#change", "diff", diff, "context", context) })
+	if p.Path == ledger.PathGit && p.Diff != "" {
+		v.File, v.FileRows = s.docName(p.Source), fileRows(p.Diff)
+	}
+	v.Backtest = btTableOf(v.Evidence.Backtest)
+	v.Read = "I have read the backtest"
+	if v.Backtest == nil {
+		v.Read = "I have read the change and its evidence"
+	}
+	if v.Steps, v.StepsCut, err = s.stepsOf(r, p); err != nil {
+		return nil, err
+	}
+	s.offs(r, p, &v)
 	return v, nil
+}
+
+// undoable reports whether a proposal's change can be undone from its
+// page: applied, by a path Lapilli carries out, and not an undo itself.
+func undoable(p ledger.Proposal) bool {
+	return p.State == ledger.StateApplied && p.Kind != ledger.KindUndo && p.Path != ledger.PathNone
+}
+
+// textLines are a text's lines, a last empty one left out: none for none.
+func textLines(text string) []string {
+	if text == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 }
 
 // prBody is a proposal as a pull request's description, in English, as
@@ -388,6 +452,12 @@ func (s *Server) postApprove(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.Path == ledger.PathNone {
 		s.oops(w, r, bad("this change is for a person to make where the rule is written: its diff is on its page"))
+		return
+	}
+	// Approving says the approver read what it would do: the box on the
+	// page, ticked, is checked here too.
+	if r.PostFormValue("read") != "1" {
+		s.oops(w, r, errNotRead)
 		return
 	}
 	if _, err := s.l.Approve(r.Context(), p.ID, s.user(r), s.approvals()); err != nil {

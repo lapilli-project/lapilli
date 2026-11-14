@@ -290,7 +290,8 @@ act() { # serve, who, id, approve or undo
   local key
   key=$(form "$@")
   [ -n "$key" ] || return 1
-  curl -s -o /dev/null -H "X-Forwarded-Email: $2" -H 'Sec-Fetch-Site: same-origin' --data-urlencode "key=$key" "$1/proposals/$3/$4"
+  # An approval says its approver read the change: the box on the page.
+  curl -s -o /dev/null -H "X-Forwarded-Email: $2" -H 'Sec-Fetch-Site: same-origin' --data-urlencode "key=$key" --data-urlencode "read=1" "$1/proposals/$3/$4"
 }
 state() { curl -s -H 'X-Forwarded-Email: ana@example.com' "$1/api/v1/proposals/$2" | jq -r '(.proposal // .) | .state'; }
 reason() { curl -s -H 'X-Forwarded-Email: ana@example.com' "$1/api/v1/proposals/$2" | jq -r '(.proposal // .) | .reason // ""'; }

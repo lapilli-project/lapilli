@@ -44,7 +44,7 @@ func init() {
 	mime.AddExtensionType(".txt", "text/plain; charset=utf-8")
 }
 
-var pages = template.Must(template.New("").Funcs(funcs).ParseFS(files, "templates/*.html"))
+var pages = template.Must(template.New("").Funcs(funcs).Funcs(offFuncs).ParseFS(files, "templates/*.html"))
 
 // Handler is the web UI, the API and the metrics.
 func (s *Server) Handler() http.Handler {
@@ -786,8 +786,9 @@ type page struct {
 	Lang   string
 	Langs  []langLink
 	// Title is the page's, as its h1 has it: a template sets it with
-	// titled, for the browser's tab and for screen readers.
-	Title string
+	// titled, for the browser's tab and for screen readers; Short, with
+	// crumbed, is the breadcrumb's name for it, when shorter.
+	Title, Short string
 	// Ctx is the team and period the page is looked at for, carried on
 	// its links; Nav the sidebar, Here the page of it the reader is on,
 	// Crumb where the page is, and Bar the bar at its top

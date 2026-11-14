@@ -404,6 +404,18 @@ table.diff-split td.del { color: var(--bad); background: color-mix(in srgb, var(
 table.diff-split td.ins { color: var(--better); background: color-mix(in srgb, var(--better) 7%, transparent); }
 table.diff-split td.gap { color: var(--dim); font-family: var(--sans); font-style: italic; }
 p.diffopts { margin: .3rem 0 .5rem; }
+/* A proposal's page: its state's badge, a sign and a word; the warning
+   above a backtest that misses more; what happened to it, in order. */
+.badge.st-wait { color: var(--on-lav); background: var(--tint-lav); border-color: transparent; }
+.badge.st-ok, .badge.st-doing { color: var(--on-blue); background: var(--tint-blue); border-color: transparent; }
+.badge.st-done { color: var(--on-green); background: var(--accent-soft); border-color: var(--line); }
+p.proposal-facts { color: var(--dim); margin: 0 0 .8rem; }
+div.proposal-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .4rem 0 1rem; }
+div.proposal-actions form, div.proposal-actions details { margin: 0; }
+p.warn { color: var(--bad); background: var(--card); border: 1px solid var(--bad); border-radius: 10px; padding: .5rem .8rem; }
+ol.steps { margin: .3rem 0 .8rem; padding-left: 1.4rem; }
+ol.steps li { padding: .25rem 0; }
+ol.steps .t { font-variant-numeric: tabular-nums; color: var(--dim); font-size: .9rem; }
 /* What the badges mean, by facet, near the filters. */
 details.badge-legend { margin: 0 0 .8rem; }
 details.badge-legend p.axis { margin: .6rem 0 .2rem; font-size: .9rem; font-weight: 600; color: var(--dim); }
