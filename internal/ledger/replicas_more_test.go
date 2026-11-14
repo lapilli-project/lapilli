@@ -285,94 +285,185 @@ func TestReplicasFenceAtCommit(t *testing.T) {
 	}
 }
 
-// A refresh that waits on a database that stopped answering holds nothing
-// up past its own deadline, nor writes; one after, on another connection,
-// reads; and a write that commits waits on no refresh.
+// A refresh that waits on the database (here, a table it reads locked by
+// another session, as a database that stopped answering holds it) holds
+// nothing up past its own deadline: another caller waits no longer than
+// its own context; the refresh itself gives up within refreshWithin; a
+// write that commits waits for it not at all.
 func TestReplicasStuckRefreshHoldsNothing(t *testing.T) {
 	u := replicaURL(t)
-	quick(t)
 	was := refreshWithin
 	refreshWithin = 2 * time.Second
 	t.Cleanup(func() { refreshWithin = was })
-	p, via := newPartition(t, u)
-	a := openReplica(t, via)
 	ctx := context.Background()
+	a := openReplica(t, u)
 	if err := a.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.SetMeta(ctx, "k", "1"); err != nil {
 		t.Fatal(err)
 	}
-	p.cut() // what is open goes silent; new connections go through
-	stuck := make(chan error, 1)
-	go func() { stuck <- a.Refresh(ctx) }() // waits on the silent reader
-	time.Sleep(100 * time.Millisecond)
-	rctx, rcancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	began := time.Now()
-	a.Refresh(rctx)
-	rcancel()
-	if took := time.Since(began); took > 1500*time.Millisecond {
-		t.Errorf("a refresh with 500ms took %v behind a stuck one", took)
-	}
-	select {
-	case <-stuck:
-	case <-time.After(refreshWithin + 2*time.Second):
-		t.Errorf("a refresh on a silent connection still waits after %v", refreshWithin+2*time.Second)
-	}
-	within(t, 10*time.Second, "a refresh reads again, on another connection", func() bool {
-		rctx, rcancel := context.WithTimeout(ctx, 3*time.Second)
-		defer rcancel()
-		return a.Refresh(rctx) == nil
-	})
-	// A write: the writer's connection went silent too; the next, on
-	// another, commits at once, waiting on no refresh.
-	wctx, wcancel := context.WithTimeout(ctx, 4*time.Second)
-	a.SetMeta(wctx, "k", "2")
-	wcancel()
-	go a.Refresh(ctx) // one under way as the write commits
-	began = time.Now()
-	if err := a.SetMeta(ctx, "k", "3"); err != nil {
+	holder, err := pgx.Connect(ctx, u)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if took := time.Since(began); took > 2*time.Second {
-		t.Errorf("a write took %v", took)
+	defer holder.Close(ctx)
+	tx, err := holder.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	// What a refresh reads and no write does.
+	if _, err := tx.Exec(ctx, "LOCK TABLE replica_signals IN ACCESS EXCLUSIVE MODE"); err != nil {
+		t.Fatal(err)
+	}
+	stuck := make(chan error, 1)
+	began := time.Now()
+	go func() { stuck <- a.Refresh(ctx) }()
+	time.Sleep(200 * time.Millisecond)
+	// Another caller, with 500ms.
+	rctx, rcancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	asked := time.Now()
+	a.Refresh(rctx)
+	rcancel()
+	if took := time.Since(asked); took > time.Second {
+		t.Errorf("a refresh with 500ms took %v behind one that waits", took)
+	}
+	// A write commits meanwhile, at once.
+	wbegan := time.Now()
+	if err := a.SetMeta(ctx, "k", "2"); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(wbegan); took > time.Second {
+		t.Errorf("a write took %v while a refresh waited", took)
+	}
+	select {
+	case err := <-stuck:
+		if took := time.Since(began); err == nil || took > refreshWithin+time.Second {
+			t.Errorf("the refresh that waits: %v after %v, want an error within %v", err, took, refreshWithin)
+		}
+	case <-time.After(refreshWithin + 3*time.Second):
+		t.Fatalf("the refresh that waits still waits after %v", time.Since(began))
+	}
+	tx.Rollback(ctx)
+	if err := a.Refresh(ctx); err != nil {
+		t.Errorf("a refresh once the table is free: %v", err)
 	}
 }
 
-// What is noted on the side pool (a notice sent, a claim given up) has a
-// deadline of its own, whatever its context: two connections serve them
-// all.
+// What is noted on the side pool (a notice sent or failed, a bucket, a
+// claim given up) has a deadline of its own, whatever its context: here
+// each waits on a row another session locked, as on a database that
+// stopped answering. Two connections serve them all.
 func TestReplicasSideHasDeadlines(t *testing.T) {
 	u := replicaURL(t)
-	quick(t)
 	was := sideWithin
-	sideWithin = 2 * time.Second
+	sideWithin = time.Second
 	t.Cleanup(func() { sideWithin = was })
-	p, via := newPartition(t, u)
-	a := openReplica(t, via)
 	ctx := context.Background()
+	a := openReplica(t, u)
 	if err := a.TellOnce(ctx, "k", "1", "test.event", []Told{{Dest: "webhook", About: map[string]any{"n": 1}}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Sent(ctx, 1); err != nil { // the side pool's connection made
+	if ok, err := a.Take(ctx, "b", 1, 10, 1); !ok || err != nil {
+		t.Fatal(ok, err)
+	}
+	if ok, err := a.ClaimOnce(ctx, "c", time.Hour); !ok || err != nil {
+		t.Fatal(ok, err)
+	}
+	holder, err := pgx.Connect(ctx, u)
+	if err != nil {
 		t.Fatal(err)
 	}
-	p.cut()
-	p.down.Store(true)
-	for _, f := range []func(context.Context) error{
-		func(c context.Context) error { return a.Sent(c, 1) },
-		func(c context.Context) error { return a.Failed(c, 1, "x") },
-		func(c context.Context) error { return a.Unclaim(c, "k") },
-		func(c context.Context) error { _, err := a.Take(c, "b", 1, 1, 1); return err },
+	defer holder.Close(ctx)
+	tx, err := holder.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	for _, q := range []string{"SELECT 1 FROM outbox FOR UPDATE", "SELECT 1 FROM replica_buckets FOR UPDATE", "SELECT 1 FROM replica_once FOR UPDATE"} {
+		if _, err := tx.Exec(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	posted := WithoutLease(context.WithoutCancel(ctx))
+	for name, f := range map[string]func(context.Context) error{
+		"Sent":    func(c context.Context) error { return a.Sent(c, 1) },
+		"Failed":  func(c context.Context) error { return a.Failed(c, 1, "x") },
+		"Take":    func(c context.Context) error { _, err := a.Take(c, "b", 1, 10, 1); return err },
+		"Unclaim": func(c context.Context) error { return a.Unclaim(c, "c") },
 	} {
 		done := make(chan error, 1)
 		began := time.Now()
-		go func() { done <- f(WithoutLease(context.WithoutCancel(ctx))) }()
+		go func() { done <- f(posted) }()
 		select {
-		case <-done:
+		case err := <-done:
+			if err == nil {
+				t.Errorf("%s, its row locked: no error", name)
+			}
 		case <-time.After(sideWithin + 3*time.Second):
-			t.Fatalf("a side statement on a silent connection still waits after %v", time.Since(began))
+			t.Errorf("%s, its row locked, still waits after %v", name, time.Since(began))
 		}
+	}
+}
+
+// A replica whose migration waits for the advisory lock that makes an
+// empty schema a ledger, while another makes it, finds the ledger made once
+// it has the lock: the catalog asked afresh, not what the session cached
+// as it connected, and not made again.
+func TestReplicasBootstrapSeesTheOthersLedger(t *testing.T) {
+	u := replicaURL(t)
+	ctx := context.Background()
+	admin, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	var schema string
+	if err := admin.QueryRow(ctx, "SELECT current_schema()").Scan(&schema); err != nil {
+		t.Fatal(err)
+	}
+	// As the first replica does: the lock, then the ledger made.
+	tx, err := admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1, $2)", int32(writeClass), keyOf32(schema)); err != nil {
+		t.Fatal(err)
+	}
+	opened := make(chan error, 1)
+	go func() {
+		l, err := OpenPostgres(ctx, u, time.UTC)
+		if err == nil {
+			l.Close()
+		}
+		opened <- err
+	}()
+	within(t, 10*time.Second, "the replica waits for the lock", func() bool {
+		var n int
+		admin.QueryRow(ctx, "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid::bigint = $1", int64(writeClass)).Scan(&n)
+		return n == 1
+	})
+	files, ns, err := pgFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := pgSchema.ReadFile(files[ns[0]])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{"CREATE TABLE schema_version (version BIGINT NOT NULL, writers BIGINT NOT NULL DEFAULT 0); INSERT INTO schema_version (version) VALUES (0)",
+		string(b), fmt.Sprintf("UPDATE schema_version SET version = %d", ns[0])} {
+		if _, err := tx.Exec(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-opened; err != nil {
+		t.Errorf("a replica that waited while another made the ledger: %v", err)
 	}
 }
 
