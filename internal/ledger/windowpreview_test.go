@@ -31,7 +31,10 @@ func TestWindowStarts(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s %s: %v", zone, w.Title, err)
 			}
-			got := p.Starts(from, to, 100)
+			var got []time.Time
+			for _, f := range p.Falls(from, to, 100) {
+				got = append(got, f.Start)
+			}
 			var want []time.Time
 			for at := from; at.Before(to); at = at.Add(time.Hour) {
 				if p.Covers(at) && !p.Covers(at.Add(-time.Minute)) {
@@ -41,8 +44,64 @@ func TestWindowStarts(t *testing.T) {
 			if !slices.EqualFunc(got, want, time.Time.Equal) {
 				t.Errorf("%s %s: starts %v, want %v", zone, w.Title, got, want)
 			}
-			if most := p.Starts(from, to, 2); len(want) > 2 && len(most) != 2 {
+			if most := p.Falls(from, to, 2); len(want) > 2 && len(most) != 2 {
 				t.Errorf("%s %s: %d starts, at most 2", zone, w.Title, len(most))
+			}
+		}
+	}
+}
+
+// TestWindowFallsAsCovered: the repeats a preview lists are what Covers
+// covers, minute by minute, and no more: in UTC, and where the clocks skip
+// midnight (America/Santiago on 2026-09-06, America/Havana on 2026-03-08),
+// where a repeat set at midnight falls, by the calendar, at 23:00 the day
+// before, which Covers doesn't take for it; every day, every week, by cron
+// and once, at midnight and either side of it.
+func TestWindowFallsAsCovered(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct {
+		zone string
+		skip time.Time // a day whose midnight the clocks skip, or any
+	}{{"UTC", time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC)}, {"America/Santiago", time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC)}, {"America/Havana", time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC)}} {
+		loc, err := time.LoadLocation(c.zone)
+		if err != nil {
+			t.Fatal(err)
+		}
+		l := open(t, loc)
+		y, m, d := c.skip.Date()
+		at := func(days, h, min int) time.Time { return time.Date(y, m, d+days, h, min, 0, 0, loc) }
+		var ws []Window
+		for _, hm := range [][2]int{{0, 0}, {0, 30}, {23, 30}, {1, 0}} {
+			for _, long := range []time.Duration{30 * time.Minute, time.Hour, 90 * time.Minute, 3 * time.Hour} {
+				ws = append(ws,
+					Window{Title: "daily", Start: at(-5, hm[0], hm[1]), End: at(-5, hm[0], hm[1]).Add(long), Every: "day"},
+					Window{Title: "daily until", Start: at(-5, hm[0], hm[1]), End: at(-5, hm[0], hm[1]).Add(long), Every: "day", Until: at(0, 0, 0)},
+					Window{Title: "weekly", Start: at(-7, hm[0], hm[1]), End: at(-7, hm[0], hm[1]).Add(long), Every: "week"},
+					Window{Title: "once", Start: at(-1, hm[0], hm[1]), End: at(-1, hm[0], hm[1]).Add(long)},
+				)
+			}
+		}
+		ws = append(ws, Window{Title: "cron", Start: at(-3, 0, 0), End: at(-3, 1, 0), Every: "cron", On: "0 0 * * *"})
+		from, to := at(-3, 0, 0), at(4, 0, 0)
+		for _, w := range ws {
+			p, err := l.PreviewWindow(ctx, w)
+			if err != nil {
+				t.Fatalf("%s %s: %v", c.zone, w.Title, err)
+			}
+			falls := p.Falls(from.Add(-48*time.Hour), to, 1000)
+			// Each listed is covered from its start to its end.
+			for _, f := range falls {
+				if f.End.Before(f.Start) || !p.Covers(f.Start) || !p.Covers(f.End) {
+					t.Errorf("%s %s: listed %s–%s, which Covers doesn't cover", c.zone, w.Title, f.Start.In(loc).Format("01-02 15:04"), f.End.In(loc).Format("01-02 15:04"))
+				}
+			}
+			for x := from; x.Before(to.Add(-48 * time.Hour)); x = x.Add(time.Minute) {
+				listed := slices.ContainsFunc(falls, func(f Fall) bool { return !x.Before(f.Start) && !x.After(f.End) })
+				if listed != p.Covers(x) {
+					t.Errorf("%s %s %s→%s: at %s, listed %v, Covers %v", c.zone, w.Title, w.Start.In(loc).Format("15:04"), w.End.In(loc).Format("15:04"),
+						x.In(loc).Format("2006-01-02 15:04 MST"), listed, p.Covers(x))
+					break
+				}
 			}
 		}
 	}
@@ -98,3 +157,4 @@ func TestPreviewWindow(t *testing.T) {
 		t.Errorf("a preview kept a window: %v", ws)
 	}
 }
+

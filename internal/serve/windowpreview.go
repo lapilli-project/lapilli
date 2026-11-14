@@ -153,13 +153,14 @@ func (s *Server) windowPreviewOf(r *http.Request, w ledger.Window) (*windowPrevi
 	if len(p.Rules) > previewRules {
 		p.Rules, p.MoreRules = p.Rules[:previewRules], len(p.Rules)-previewRules
 	}
-	long := w.End.Sub(w.Start)
-	starts := w.Starts(now, now.Add(previewSpan), previewStarts+1)
-	if len(starts) > previewStarts {
-		starts, p.MoreStarts = starts[:previewStarts], true
+	// Its repeats as judging covers them (Covers), not by the calendar
+	// alone.
+	falls := w.Falls(now, now.Add(previewSpan), previewStarts+1)
+	if len(falls) > previewStarts {
+		falls, p.MoreStarts = falls[:previewStarts], true
 	}
-	for _, t := range starts {
-		p.Starts = append(p.Starts, previewStart{t, t.Add(long)})
+	for _, f := range falls {
+		p.Starts = append(p.Starts, previewStart{f.Start, f.End})
 	}
 	return p, nil
 }

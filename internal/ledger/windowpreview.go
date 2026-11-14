@@ -58,18 +58,31 @@ func (l *Ledger) PreviewWindow(ctx context.Context, w Window) (Window, error) {
 	return w, nil
 }
 
-// Starts are when a window's repeats start in [from, to), most at most, the
-// earliest first: its own start, for one that doesn't repeat.
-func (w Window) Starts(from, to time.Time, most int) []time.Time {
-	var out []time.Time
+// Fall is a repeat of a quiet window, as Covers covers it: from Start to
+// End, both covered.
+type Fall struct{ Start, End time.Time }
+
+// Falls are a window's repeats that Covers starts to cover in [from, to),
+// most at most, the earliest first: its own span, for one that doesn't
+// repeat. Each is what Covers says of it, worked out by its own rule, not
+// by the calendar alone: a repeat every day or week is covered by Covers
+// only from the start of the day it falls on, and where the clocks skip
+// midnight (America/Santiago, America/Havana) a repeat set at midnight
+// starts, by the calendar, the hour before, on the day before, which
+// Covers doesn't take for it. A repeat Covers never covers isn't one.
+func (w Window) Falls(from, to time.Time, most int) []Fall {
+	var out []Fall
 	in := func(t time.Time) bool { return !t.Before(from) && t.Before(to) }
 	loc := w.where()
+	long := w.End.Sub(w.Start)
 	switch {
 	case w.Every == "":
 		if in(w.Start) {
-			out = append(out, w.Start)
+			out = append(out, Fall{w.Start, w.End})
 		}
 	case w.scheduled():
+		// Covers takes the last time the schedule fell due by a time, and
+		// each repeat is shorter than the shortest time between two.
 		w.resolve()
 		if w.sch == nil {
 			return nil
@@ -80,25 +93,52 @@ func (w Window) Starts(from, to time.Time, most int) []time.Time {
 				break
 			}
 			if !d.Before(w.Start) && in(d) {
-				out = append(out, d)
+				out = append(out, Fall{d, d.Add(long)})
 			}
 		}
 	default:
 		s := w.Start.In(loc)
+		days := int64(w.days())
 		// The first repeat that may start in the span, by the calendar.
-		n := 0
+		n := int64(0)
 		if from.After(w.Start) {
-			n = max(0, int((civil(from.In(loc))-civil(s))/int64(w.days()))-1)
+			n = max(0, (civil(from.In(loc))-civil(s))/days-1)
 		}
 		for ; len(out) < most; n++ {
-			d := s.AddDate(0, 0, n*w.days())
-			if !d.Before(to) || !w.Until.IsZero() && civil(d) > civil(w.Until.In(loc)) {
+			d := s.AddDate(0, 0, int(n*days))
+			if !w.Until.IsZero() && civil(d) > civil(w.Until.In(loc)) {
 				break
 			}
-			if in(d) {
-				out = append(out, d)
+			// Covers takes a time for repeat n when it falls in the n-th
+			// period of days from the window's first, or the next: from the
+			// first of its days on. A repeat is shorter than its period
+			// (checkWindow), so it ends before the next is over.
+			f := Fall{d, d.Add(long)}
+			if lo := dayStart(civil(s)+n*days, loc); f.Start.Before(lo) {
+				f.Start = lo
+			}
+			if !f.Start.Before(to) {
+				break
+			}
+			if f.Start.After(f.End) || f.Start.Before(w.Start) {
+				continue
+			}
+			if in(f.Start) {
+				out = append(out, f)
 			}
 		}
 	}
 	return out
+}
+
+// dayStart is when a day, as civil counts it, starts in loc: its midnight,
+// or, where the clocks skip midnight, the first time of the day, as the
+// ledger's Midnight has it.
+func dayStart(day int64, loc *time.Location) time.Time {
+	y, m, d := time.Unix(day*86400, 0).UTC().Date()
+	t := time.Date(y, m, d, 0, 0, 0, 0, loc)
+	for civil(t.In(loc)) < day {
+		t = t.Add(time.Hour)
+	}
+	return t
 }

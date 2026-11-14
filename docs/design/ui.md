@@ -630,7 +630,15 @@ window would be kept (what was typed put in again, escaped) and, above it:
   over the latest 20,000 firings of the four weeks, in one read, said so
   when there are more;
 - when it falls in the next four weeks: each repeat that starts in them,
-  31 at most (`Window.Starts`).
+  31 at most, as judging covers it (`Window.Falls`, from `Covers`'s own
+  rule), not by the calendar alone. A repeat every day or week is covered
+  from the start of the day it falls on, and where the clocks skip
+  midnight (America/Santiago, America/Havana) a repeat set at midnight
+  falls, by the calendar, at 23:00 the day before, which `Covers` doesn't
+  take for it: the preview lists it from that day's first time, or not at
+  all when it is over by then, as judging will excuse firings. `Covers`
+  isn't changed in this release. `TestWindowFallsAsCovered` holds what is
+  listed to `Covers`, minute by minute, in UTC and those two zones.
 
 Preview is the form's first button, so that Enter in a field writes
 nothing.
