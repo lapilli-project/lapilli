@@ -6,6 +6,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/rules"
 )
 
 // a11yServer is pagesServer with a proposal, a rule that caught nothing
@@ -45,7 +47,31 @@ func a11yServer(t *testing.T) (*Server, []string) {
 	if _, err := s.l.PutTask(ctx, ledger.Task{Title: "linked", Kind: "tune", Rule: "Noise", Link: "https://tracker.example/1"}, "ana"); err != nil {
 		t.Fatal(err)
 	}
-	return s, append(slices.Clone(pagePaths), "/proposals", "/proposals?state=all", "/proposals/1", "/rules/Nothing")
+	// A change an agent proposed, applied, that waited while its rule
+	// fired, and its undo: their pages, the history's steps, the backtest
+	// read the other way.
+	five := 5 * time.Minute
+	ev, _ := json.Marshal(evidence{From: "agent", Reason: "fewer pages", Edit: &rules.Edit{Name: "Noise", For: &five},
+		Backtest: &backtest{From: now.Add(-weekLen), To: now, Before: side{Firings: 9, White: 1}, After: side{Firings: 2, White: 1}, Gained: []string{"INC-1"}, Later: []string{"INC-1"}}})
+	id, err := s.l.Propose(ctx, ledger.Proposal{Rule: "Noise", Kind: ledger.KindFor, Path: ledger.PathGrafana, MadeBy: "bo", Agent: true,
+		Before: "Noise ()\nfor: 0s\n", After: "Noise ()\nfor: 5m\n", Evidence: ev})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []struct{ from, to, reason string }{{ledger.StateProposed, ledger.StateApproved, ""}, {ledger.StateApproved, ledger.StateApproved, firesNote},
+		{ledger.StateApproved, ledger.StateApplying, firedNote}, {ledger.StateApplying, ledger.StateApplied, ""}} {
+		if _, err := s.l.Move(ctx, id, []string{m.from}, m.to, ledger.Proposer, ledger.Step{Reason: m.reason}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	uev, _ := json.Marshal(undoEvidence(proposalEvidence(state(t, s, id))))
+	undo, err := s.l.Undo(ctx, ledger.Proposal{Rule: "Noise", Kind: ledger.KindUndo, Path: ledger.PathGrafana, Follows: id, Before: "Noise ()\nfor: 5m\n",
+		After: "Noise ()\nfor: 0s\n", Evidence: uev}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, append(slices.Clone(pagePaths), "/proposals", "/proposals?state=all", "/proposals/1", "/rules/Nothing",
+		"/proposals/"+strconv.FormatInt(id, 10), "/proposals/"+strconv.FormatInt(undo, 10))
 }
 
 // TestA11yServe serves the pages at LAPILLI_A11Y_SERVE until it is
