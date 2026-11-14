@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -33,15 +34,17 @@ var bulkKinds = []string{"task", "team", "status", "real"}
 
 // bulkResult is what a bulk write did, as the page it goes back to says it
 // once: how many were done; of the rest, how many weren't the reader's
-// team's, how many were refused for what they are, and, of firings, how
-// many had caught something already. None says nothing was picked.
+// team's, how many were refused for what they are, how many, of firings,
+// had caught something already, and how many failed, by an error of
+// another kind. None says nothing was picked; Kind is what was done.
 type bulkResult struct {
-	Done, Theirs, Refused, Already int
-	None                           bool
+	Kind                                   string
+	Done, Theirs, Refused, Already, Failed int
+	None                                   bool
 }
 
 // bulkParams are the parameters a bulk write's result is said by.
-var bulkParams = []string{"bulk", "done", "theirs", "refused", "already"}
+var bulkParams = []string{"bulk", "done", "theirs", "refused", "already", "failed"}
 
 // bulkOf is the result a page was sent back with, read within bounds:
 // nil when there is none, or what is there isn't one.
@@ -57,16 +60,18 @@ func bulkOf(q url.Values) *bulkResult {
 		x, err := strconv.Atoi(v)
 		return x, err == nil && x >= 0 && x <= maxBulk
 	}
-	var b bulkResult
-	var ok [4]bool
+	b := bulkResult{Kind: q.Get("bulk")}
+	var ok [5]bool
 	b.Done, ok[0] = n("done")
 	b.Theirs, ok[1] = n("theirs")
 	b.Refused, ok[2] = n("refused")
 	b.Already, ok[3] = n("already")
-	if slices.Contains(ok[:], false) || b.Done+b.Theirs+b.Refused+b.Already > maxBulk {
+	b.Failed, ok[4] = n("failed")
+	all := b.Done + b.Theirs + b.Refused + b.Already + b.Failed
+	if slices.Contains(ok[:], false) || all > maxBulk {
 		return nil
 	}
-	b.None = b.Done+b.Theirs+b.Refused+b.Already == 0
+	b.None = all == 0
 	return &b
 }
 
@@ -83,7 +88,7 @@ func bulkBack(back, path, kind string, b bulkResult) string {
 		q.Del(k)
 	}
 	q.Set("bulk", kind)
-	for k, n := range map[string]int{"done": b.Done, "theirs": b.Theirs, "refused": b.Refused, "already": b.Already} {
+	for k, n := range map[string]int{"done": b.Done, "theirs": b.Theirs, "refused": b.Refused, "already": b.Already, "failed": b.Failed} {
 		if n > 0 {
 			q.Set(k, strconv.Itoa(n))
 		}
@@ -107,10 +112,13 @@ func picked(vs []string) ([]string, bool) {
 	return out, true
 }
 
-// count adds a write's outcome to a result: done, the reader's team's not,
-// or refused for what it is. An error of another kind is returned, to stop
-// at, as the write alone would.
-func (b *bulkResult) count(err error) error {
+// bulkCount adds a write's outcome to a result: done, the reader's team's
+// not, or refused for what it is (what the ledger refuses as invalid, or
+// what isn't there). An error of another kind is counted failed, and
+// logged as an error page would log it: the rest are still written, and
+// the list the write came from says so; a bulk write never ends part-way
+// on an error page.
+func (s *Server) bulkCount(b *bulkResult, r *http.Request, err error) {
 	var inv ledger.ErrInvalid
 	switch {
 	case err == nil:
@@ -120,9 +128,11 @@ func (b *bulkResult) count(err error) error {
 	case errors.As(err, &inv), errors.Is(err, ledger.ErrNotFound):
 		b.Refused++
 	default:
-		return err
+		b.Failed++
+		if !errors.Is(err, context.Canceled) {
+			s.log.Error("serving", "path", r.URL.Path, "err", err)
+		}
 	}
-	return nil
 }
 
 // bulkRules is the rules list's bulk write: for each rule picked, the task
@@ -193,10 +203,7 @@ func (s *Server) bulkRules(w http.ResponseWriter, r *http.Request) {
 				err = s.l.PutNote(ctx, n, by)
 			}
 		}
-		if err := res.count(err); err != nil {
-			s.oops(w, r, err)
-			return
-		}
+		s.bulkCount(&res, r, err)
 	}
 	if do != "task" && res.Done > 0 {
 		s.poke() // who owns a rule may have changed: a team's windows are judged again
@@ -230,17 +237,11 @@ func (s *Server) bulkReal(w http.ResponseWriter, r *http.Request) {
 	var res bulkResult
 	for _, id := range ids {
 		made, _, err := s.realOne(r, id)
-		switch {
-		case errors.Is(err, ledger.ErrNotFound):
-			res.Refused++
-		case err != nil:
-			s.oops(w, r, err)
-			return
-		case made == "":
+		if err == nil && made == "" {
 			res.Already++
-		default:
-			res.Done++
+			continue
 		}
+		s.bulkCount(&res, r, err)
 	}
 	back(w, r, bulkBack(r.PostFormValue("back"), "/firings", "real", res))
 }

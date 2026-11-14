@@ -17,7 +17,8 @@ import (
 // same title, times and labels. So two at once, by one person or two, write
 // one incident and tell of it once. It returns the incident's id, "" when
 // none was written, and the firing as it was read; ErrNotFound for no such
-// firing.
+// firing, and an ErrInvalid for one Put would refuse (one that lasted
+// longer than an incident may).
 func (l *Ledger) Real(ctx context.Context, id int64, by string, o verdict.Options) (string, Firing, error) {
 	var f Firing
 	var made string

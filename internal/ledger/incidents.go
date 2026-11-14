@@ -239,30 +239,31 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 	return in.ID, err
 }
 
-// checkIncident is what Put refuses of an incident for what it is.
+// checkIncident is what Put refuses of an incident for what it is: an
+// ErrInvalid, said as the field's own sentence.
 func checkIncident(in incident.Incident) error {
 	stored, _ := marshal(orEmpty(in.Labels))
 	switch {
 	case in.Start.IsZero():
-		return errors.New("an incident needs a start")
+		return invalid("an incident needs a start")
 	case !in.End.IsZero() && in.End.Before(in.Start):
-		return errors.New("an incident can't end before it starts")
+		return invalid("an incident can't end before it starts")
 	case in.ID != "" && !keyRE.MatchString(in.ID):
-		return errors.New("an id is letters, digits and . _ : / # -, up to 64")
+		return invalid("an id is letters, digits and . _ : / # -, up to 64")
 	case !in.End.IsZero() && in.End.Sub(in.Start) > maxIncident:
-		return errors.New("an incident lasts 31 days at most")
+		return invalid("an incident lasts 31 days at most")
 	case len(in.Title) > 500:
-		return errors.New("an incident's title is 500 bytes at most")
+		return invalid("an incident's title is 500 bytes at most")
 	case len(in.Labels) > 32:
-		return errors.New("an incident has 32 labels at most")
+		return invalid("an incident has 32 labels at most")
 	case len(stored) > maxLabelBytes:
-		return errors.New("an incident's labels are 4 KB at most in all, as JSON")
+		return invalid("an incident's labels are 4 KB at most in all, as JSON")
 	case !sane(in.Start) || (!in.End.IsZero() && !sane(in.End)):
-		return errors.New("an incident's times are from 1970 to 9999")
+		return invalid("an incident's times are from 1970 to 9999")
 	}
 	for k, vs := range in.Labels {
 		if len(k) > 128 || len(vs) > 64 || slices.ContainsFunc(vs, func(v string) bool { return len(v) > 256 }) {
-			return errors.New("an incident's label is a name of up to 128 bytes, with up to 64 values of up to 256")
+			return invalid("an incident's label is a name of up to 128 bytes, with up to 64 values of up to 256")
 		}
 	}
 	return nil
