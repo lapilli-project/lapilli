@@ -16,7 +16,7 @@
 {{with .Chips}}<ul class="chips" aria-label="{{t "Filters in effect"}}">{{range .}}<li><a class="chip" href="{{.Href}}"><span class="vh">{{t "Remove filter:"}} </span>{{t .Group}}: {{if .Raw}}<bdi>{{shown .Value}}</bdi>{{else}}{{t .Value}}{{end}} <span aria-hidden="true">✕</span></a></li>{{end}}</ul>{{end}}
 <p class="tabs">{{t "In order of"}}:{{range .SortLinks}} <a href="{{.Href}}"{{if .Current}} aria-current="page"{{end}}>{{if eq .By "refired"}}{{t "re-fired, the most first"}}{{else if eq .By "deploys"}}{{t "during deploys, the most first"}}{{else}}{{t "caught nothing, the most first"}}{{end}}</a>{{end}}</p>
 {{with .Bulk.Result}}{{template "bulkresult" .}}{{end}}
-{{if .Rows}}<form method="post" action="/rules/bulk" class="bulk">{{$b := .Bulk}}<input type="hidden" name="back" value="{{$b.Back}}">
+{{if .Rows}}<form method="post" action="/rules/bulk" class="bulk">{{$b := .Bulk}}<input type="hidden" name="back" value="{{$b.Back}}">{{template "noenter"}}
 <fieldset class="bulk-bar"><legend>{{t "With the rules picked"}}</legend>
 <button name="do" value="task"{{if not $b.May}} disabled aria-describedby="bulk-why"{{end}}>{{t "Make a task for each"}}</button>
 {{$tw := "bulk-why"}}{{if $b.May}}{{$tw = "bulk-team-why"}}{{end}}<span class="bulk-set"><label>{{t "Team"}} <select name="team"{{if not $b.Team}} disabled aria-describedby="{{$tw}}"{{end}}><option value="0">{{t "by the teams' patterns"}}</option>{{range $b.Teams}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
@@ -50,6 +50,11 @@
 </div>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
+
+{{/* A bulk form's first button, which Enter in it presses (implicit
+submission): disabled, so that Enter writes nothing; hidden, so that no one
+sees it, and no screen reader says it. */}}
+{{define "noenter"}}<button type="submit" disabled hidden></button>{{end}}
 
 {{/* What a bulk write did, said once on the page it went back to. */}}
 {{define "bulkresult"}}{{$k := .Kind}}<p class="note bulk-done" role="status">{{if .None}}{{t "Nothing was picked: tick the ones to change first."}}{{else}}{{t "%d done" .Done}}{{with .Already}}; {{if eq $k "task"}}{{t "%d had an open task to tune them already" .}}{{else}}{{t "%d had caught something already" .}}{{end}}{{end}}{{with .Theirs}}; {{t "%d not your team's" .}}{{end}}{{with .Refused}}; {{t "%d refused" .}}{{end}}{{with .Failed}}; {{t "%d failed: try again" .}}{{end}}{{end}}</p>{{end}}

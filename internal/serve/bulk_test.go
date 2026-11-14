@@ -329,7 +329,8 @@ func TestBulkDisabled(t *testing.T) {
 				t.Errorf("%q: no %s", who, w)
 			}
 		}
-		if who == "ed@example.com" && strings.Contains(body, "disabled") {
+		// But the button Enter presses, which no one sees (TestBulkNoEnter).
+		if who == "ed@example.com" && strings.Contains(strings.Replace(body, `<button type="submit" disabled hidden></button>`, "", 1), "disabled") {
 			t.Errorf("an editor sees something disabled")
 		}
 	}

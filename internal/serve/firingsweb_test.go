@@ -374,6 +374,8 @@ func TestBulkReal(t *testing.T) {
 		}
 	}
 	_, body = getAs(t, h, "/firings?day=2026-11-01", ed)
+	// But the button Enter presses, which no one sees (TestBulkNoEnter).
+	body = strings.Replace(body, `<button type="submit" disabled hidden></button>`, "", 1)
 	if strings.Contains(body, "disabled") || !strings.Contains(body, `<form method="post" action="/firings/`+ids[5]+`/real">`) {
 		t.Error("an editor's firings are disabled, or lack their own buttons")
 	}
