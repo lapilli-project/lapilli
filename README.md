@@ -1155,7 +1155,7 @@ lapilli serve --rules alert-rules/ --prometheus http://prometheus:9090 --match s
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/serve-dashboard-dark.png">
-  <img alt="The lapilli serve dashboard: last week's precision, firings, incidents missed, time to catch and noisy rules, then firings and precision by week" src="assets/serve-dashboard.png" width="820">
+  <img alt="The lapilli serve overview, with its pages in a sidebar: last week's precision, firings, incidents missed, time to catch, noisy rules, firings that woke people for nothing, re-fires and firings during deploys, each beside the week before, then firings by week" src="assets/serve-dashboard.png" width="820">
 </picture>
 
 A web UI opens on a dashboard of the last twelve weeks: last week's
@@ -1187,6 +1187,19 @@ name and `is:noisy`, `severity:critical`, `status:tune`, `has:proposal`,
 `label:team=pay`, `group:shop` and `team:pay`; each filter in effect is a
 chip that takes it away, and the URL keeps them all
 ([docs/design/ui.md](docs/design/ui.md)).
+
+A rule's page has its badges, what to check about it and what can be done
+at its top; five numbers over the period picked (precision, firings,
+incidents caught, the notifications it sent, and how alike its backtest is
+to what really fired), each beside as long a span before; its last 84
+days, a cell a day, marked where it changed, where what it is about was
+deployed and where a quiet window covered it; and its sections in tabs:
+firings, versions (each beside the one before), proposals and activity.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/serve-rule-dark.png">
+  <img alt="A noisy rule's page over four weeks: its badges and actions; precision, firings, incidents caught, notifications sent and the backtest, each beside the four weeks before; its last 84 days as a strip of cells, marked where the rule changed and where checkout was deployed; and its tabs" src="assets/serve-rule.png" width="820">
+</picture>
 
 What an operations team measures its alerts by is there too, week by week
 and team by team (docs/design/noc.md): the share of critical firings that

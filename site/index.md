@@ -20,7 +20,7 @@ incident with no stone is one your alerts missed.</p>
 <div class="shot">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="{{ '/serve-dashboard-dark.png' | relative_url }}">
-  <img alt="The lapilli serve dashboard: last week's precision, firings, incidents missed, time to catch and noisy rules, then firings and precision by week" src="{{ '/serve-dashboard.png' | relative_url }}" width="1240" height="980">
+  <img alt="The lapilli serve overview, with its pages in a sidebar: last week's precision, firings, incidents missed, time to catch, noisy rules, firings that woke people for nothing, re-fires and firings during deploys, each beside the week before, then firings by week" src="{{ '/serve-dashboard.png' | relative_url }}" width="1240" height="980">
 </picture>
 </div>
 
