@@ -330,4 +330,62 @@ replica's.**
 
 ## As built
 
-To be measured: see the test list and the takeover times below.
+**Takeover, measured.** Three `lapilli serve` processes on one Postgres 17
+ledger, the timings as shipped (a lease of 15 s, renewed every 5 s, a
+campaign every 2 s), the leader's process `SIGKILL`ed: another led 15.2 s
+later, and each of five tasks' notices, made on the three before and the
+two after, reached the webhook once (`test/e2e/postgres.sh`, run against a
+local server, its Docker steps left out). With the tests' timings (a lease
+of 1.5 s, renewed every 300 ms, a campaign every 100 ms, a margin of 300
+ms), 20 runs each:
+
+| | the old leader stopped | another led |
+|---|---|---|
+| a leader cut off from the database (`TestReplicasTakeOver/cut_off`) | 0.99 to 1.01 s after | 1.30 to 1.42 s after |
+| a leader killed (`TestReplicasTakeOver/killed`) | at once | 1.30 to 1.38 s after |
+| a leader cut off, the ledger alone (`TestReplicasTakeOverFromACutOffLeader`) | 1.19 s after | 1.53 to 1.56 s after |
+| a leader that stopped (`TestReplicasOneLeads`) | at once | 11 to 23 ms after |
+
+Each time the old leader stopped before another began, at a later term.
+In 20 runs of three replicas each, every run and every notice was done
+once, and a former leader whose lease another took sent nothing.
+
+**The tests**, on SQLite and on Postgres 16 and 17 locally (CI runs 15 and
+18): the ledger's, serve's and the command's suites pass on all three: 698
+tests on SQLite (38 of Postgres's alone skipped), 730 on Postgres 17 and
+728 on 16 (the last two tests added after it ran), 6 of SQLite's alone
+skipped. The replicas' own, beside the ledger's tests of
+the lock: replicas started at once; writes that read then write, merged
+and counted against a limit by three replicas at once; another replica's
+writes on the next refresh, and on the next request's page and API; one
+leader of three, handed over when it stops; a leader cut off or killed,
+followed within the lease; fenced writes, by the database and by the
+clock; notices claimed once by six senders on two replicas; shared rate
+limits and uses once; the leader woken and asked to judge again; a newer
+schema; three servers running each job once; a former leader that sends
+nothing; no job once the lease ended by the clock; the admin's pause, the
+settings, the forms' key, a sign-in's state and the token's burst across
+replicas; the leader's status on a follower's pages; readiness without
+the database; one session key. The chart's: refused without Postgres, the
+rolling update, the budget, the session key.
+
+**Each guard was taken away in turn** (31), and a test failed each time:
+the lease checked in the database in a leader's write, and the clock
+before it commits; the leader stopping at its lease's end by its clock;
+`Hold` saying whether it leads; the lease looked at before each job; the
+lease taken only once lapsed; the outbox claimed `FOR UPDATE SKIP LOCKED`,
+under the lease, each notice once a round; the digest's post claimed; the
+generation counted in the database, and the weeks changed; each request
+reading the others' writes; a refresh begun before the request not taken
+for one after; ids another replica deleted dropped; the writers' turn, for
+writes and for migrations; the writer's own earlier sessions ended; the
+lock shared, and alone for a copy; a newer schema stopping a replica; the
+rate limits shared; the pause, the rejudge, the forms' key and a sign-in's
+state across replicas; the leader's status shown; only the leader running
+the singletons; readiness without the database; one session key; the
+chart's refusal and its rolling update.
+
+**Not yet run**: `test/e2e/replicas.sh` on kind (CI's `e2e-replicas`),
+`test/e2e/postgres.sh` with its Postgres in Docker, and the suites on
+Postgres 15 and 18, which CI runs. Both scripts pass shellcheck, and the
+workflow actionlint.
