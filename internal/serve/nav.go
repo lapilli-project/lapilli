@@ -208,7 +208,9 @@ type pageAction struct {
 // team's editor too ("team"); may, whether the reader may, as the page
 // shows its form; none, a reason the form isn't there for anyone.
 func mainAction(p page, label string, may bool, need, none string) pageAction {
-	a := pageAction{Label: label, Href: p.Ctx.Link(p.Path) + "#add"}
+	// The form is on the page: a link to it alone, which doesn't load the
+	// page again, with fewer parameters than it has.
+	a := pageAction{Label: label, Href: "#add"}
 	switch {
 	case may && none == "":
 		return a

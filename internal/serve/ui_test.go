@@ -311,10 +311,10 @@ func TestActionDisabled(t *testing.T) {
 		check(t, h, "ed@example.com", "/teams", disabled("Add a team", "Admins only"))
 		// A team's editor writes no incident, and adds their team's tasks.
 		check(t, h, "pat@example.com", "/incidents", disabled("Write one down", "Editors only"))
-		check(t, h, "pat@example.com", "/tasks", `<a class="button" href="/tasks#add">Add a task</a>`)
-		check(t, h, "ed@example.com", "/incidents?team=search", `<a class="button" href="/incidents?team=search#add">Write one down</a>`)
-		check(t, h, "boss@example.com", "/teams?edit=1", `<a class="button" href="/teams#add">Add a team</a>`)
-		check(t, h, "boss@example.com", "/reports", `<a class="button" href="/reports#add">Add a report</a>`)
+		check(t, h, "pat@example.com", "/tasks", `<a class="button" href="#add">Add a task</a>`)
+		check(t, h, "ed@example.com", "/incidents?team=search&source=written&weeks=12", `<a class="button" href="#add">Write one down</a>`)
+		check(t, h, "boss@example.com", "/teams?edit=1", `<a class="button" href="#add">Add a team</a>`)
+		check(t, h, "boss@example.com", "/reports", `<a class="button" href="#add">Add a report</a>`)
 		for _, path := range []string{"/incidents", "/tasks", "/teams", "/reports"} {
 			if _, body, _ := ui(t, h, http.MethodGet, path, "boss@example.com", "", nil); !strings.Contains(body, `id="add"`) {
 				t.Errorf("%s: no form the action goes to", path)
@@ -341,7 +341,7 @@ func TestActionDisabled(t *testing.T) {
 		})
 		h := s.Handler()
 		check(t, h, "ed@example.com", "/reports", disabled("Add a report", "No team yet: an editor makes a team&#39;s report"))
-		check(t, h, "boss@example.com", "/reports", `<a class="button" href="/reports#add">Add a report</a>`)
+		check(t, h, "boss@example.com", "/reports", `<a class="button" href="#add">Add a report</a>`)
 		if code, _, _ := ui(t, h, http.MethodPost, "/reports", "ed@example.com", "same-origin",
 			url.Values{"name": {"r"}, "schedule": {"daily@09:00"}, "dests": {"ops"}, "sections": {"summary"}}); code != http.StatusForbidden {
 			t.Errorf("an editor's report, with no team: %d", code)
