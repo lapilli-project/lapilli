@@ -651,6 +651,7 @@ func (l *Ledger) yield(t *txn, names []string, kept map[string]bool) error {
 		t.rules[name] = r.id
 		t.all = true
 		t.recorded = true
+		t.idsChanged = true
 	}
 	return nil
 }

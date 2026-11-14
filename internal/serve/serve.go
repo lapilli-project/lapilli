@@ -480,7 +480,9 @@ func openLedger(ctx context.Context, cfg Config, log *slog.Logger) (*ledger.Ledg
 		if err != nil {
 			return nil, fmt.Errorf("--ledger-url-file: %w", err)
 		}
-		l, err := ledger.OpenPostgres(ctx, string(b), cfg.Loc)
+		// Alone, as one process writes it, until serve leads and follows
+		// (replicas).
+		l, err := ledger.OpenPostgresAlone(ctx, string(b), cfg.Loc)
 		if err != nil {
 			return nil, fmt.Errorf("--ledger-url-file: %w", err)
 		}

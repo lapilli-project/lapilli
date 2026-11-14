@@ -18,9 +18,9 @@ import (
 	"lapilli.dev/internal/ledger/ledgertest"
 )
 
-// takeLedger ends the session that holds a server's ledger's lock, and
-// opens the ledger in another process's stead, which takes it: the server
-// no longer holds it, and doesn't know yet.
+// takeLedger ends the sessions that hold a server's ledger's lock, and
+// opens the ledger alone in another process's stead, which takes it: the
+// server no longer holds it, and doesn't know yet.
 func takeLedger(t *testing.T, s *Server) {
 	t.Helper()
 	ctx := context.Background()
@@ -31,7 +31,7 @@ func takeLedger(t *testing.T, s *Server) {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(s.cfg.LedgerURLFile)
-	other, err := ledger.OpenPostgres(ctx, strings.TrimSpace(string(b)), time.UTC)
+	other, err := ledger.OpenPostgresAlone(ctx, strings.TrimSpace(string(b)), time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}

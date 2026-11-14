@@ -1,9 +1,10 @@
 package ledger
 
 // The ledger in a Postgres database (docs/design/postgres.md): the same
-// tables, the same statements but where the two differ (dialect.go), one
-// writer as SQLite has, and an advisory lock that keeps a second process
-// from writing the same ledger.
+// tables, the same statements but where the two differ (dialect.go), and an
+// advisory lock: shared by the replicas of serve that write it at once
+// (replicas.go, docs/design/replicas.md), and taken alone by a process
+// that must be its only writer, a copy.
 
 import (
 	"context"
@@ -50,19 +51,25 @@ var ErrUnchecked = errors.New("the ledger's connection string asks for no sslmod
 var ErrConnect = errors.New("can't connect to the ledger's database")
 
 // ErrLockLost is a ledger whose lock this process held and can't be sure
-// of again: its connection dropped, and another process took the lock, or
-// took it and let it go, in between. Nothing more is written: what this one
+// of again: its connection dropped, and a process that writes the ledger
+// alone (a copy, or a lapilli from before replicas) took the lock, or took
+// it and let it go, in between. Nothing more is written: what this one
 // knows of the ledger may no longer be so.
 var ErrLockLost = errors.New("the ledger's lock was lost: another process may have written the ledger since; stopping")
 
-// LockedError is a ledger another process writes: one process writes a
-// ledger at a time, so that, among the rest, no notice is sent twice.
+// LockedError is a ledger another process holds: one that writes it alone
+// (a copy) while serve's replicas share it, or serve's replicas while a
+// process would write it alone, so that, among the rest, no notice is sent
+// twice.
 type LockedError struct {
 	PID   int64     // the Postgres session that holds the lock
 	Role  string    // the role it connected as, when the server says
 	App   string    // its application_name, which it chose itself
 	From  string    // its client's address, when the server says
 	Since time.Time // when it connected, when the server says
+	// Alone says it holds the lock alone, not shared as serve's replicas
+	// do.
+	Alone bool
 }
 
 func (e *LockedError) Error() string {
@@ -84,7 +91,11 @@ func (e *LockedError) Error() string {
 	if len(of) > 0 {
 		b.WriteString(" (" + strings.Join(of, ", ") + ")")
 	}
-	b.WriteString(" holds its lock, and one process writes a ledger at a time. Stop it, or end that session")
+	if e.Alone {
+		b.WriteString(" holds its lock alone, as a copy, or a lapilli of 0.34 or before, does. Stop it, or end that session")
+	} else {
+		b.WriteString(" holds its lock, and a ledger serve's replicas share is written by no other process. Stop serve, or end that session")
+	}
 	return b.String()
 }
 
@@ -96,6 +107,10 @@ const lockClass = 0x6c61706c
 // holds its lock, taken on every connection the writer makes.
 type pgWriter struct {
 	mu sync.Mutex
+	// shared says the lock is taken shared, as serve's replicas take it, so
+	// that several write the ledger at once; else alone, as a copy does.
+	// The two refuse each other.
+	shared bool
 	// key is the advisory lock's second key: a hash of the schema the
 	// ledger is in, so that ledgers in two schemas of one database each
 	// have one.
@@ -110,14 +125,19 @@ type pgWriter struct {
 	pid uint32
 	own map[session]bool
 	// writers is schema_version.writers once this process took the lock:
-	// each process that takes it counts one more. Another connection that
-	// finds another count finds the ledger written by someone else since.
+	// each process that takes it alone counts one more (replicas, which
+	// share it, don't). Another connection that finds another count finds
+	// the ledger written by a process alone since. known is set once it
+	// was read.
 	writers int64
+	known   bool
 	// again is set by each connection after the first: the caches are
 	// read again from the ledger before the next write.
 	again atomic.Bool
 	lost  chan struct{}
 	once  sync.Once
+	// why is what lost it: ErrLockLost, or a newer lapilli's schema.
+	why error
 	// closed is set once the ledger is closed: no connection is made
 	// again to take the lock.
 	closed atomic.Bool
@@ -136,10 +156,34 @@ func (w *pgWriter) release(db *sql.DB) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	db.ExecContext(ctx, "SELECT pg_advisory_unlock(?, ?)", int32(lockClass), w.key)
+	db.ExecContext(ctx, w.unlockQuery(), int32(lockClass), w.key)
 }
 
-func (w *pgWriter) lose() { w.once.Do(func() { close(w.lost) }) }
+// unlockQuery lets the lock go, as it was taken.
+func (w *pgWriter) unlockQuery() string {
+	if w.shared {
+		return "SELECT pg_advisory_unlock_shared(?, ?)"
+	}
+	return "SELECT pg_advisory_unlock(?, ?)"
+}
+
+// idleInWrite is how long the server lets a session of a replica's sit in
+// a transaction between two statements before it ends it: a replica cut
+// off in the middle of a write, behind a proxy that keeps its connection
+// open, would otherwise hold the writers' turn, and every replica's
+// writes, for as long as the proxy kept it. No write waits that long
+// between its statements.
+const idleInWrite = "60s"
+
+func (w *pgWriter) lose() { w.loseFor(ErrLockLost) }
+
+// loseFor gives the ledger up for good, for why.
+func (w *pgWriter) loseFor(why error) {
+	w.once.Do(func() {
+		w.why = why
+		close(w.lost)
+	})
+}
 
 // connecting refuses a connection the writer would make once the ledger is
 // closed or its lock lost, before it reaches the server.
@@ -181,6 +225,11 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 	if _, err := c.Exec(ctx, "SET default_transaction_read_only = off"); err != nil {
 		return err
 	}
+	if w.shared {
+		if _, err := c.Exec(ctx, "SET idle_in_transaction_session_timeout = '"+idleInWrite+"'"); err != nil {
+			return err
+		}
+	}
 	// So that the server ends this session about a minute after its client
 	// is gone, rather than hours, and the lock is free for the pod that
 	// replaces this one. Not every server takes them (they need TCP); none
@@ -193,9 +242,7 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 		return err
 	}
 	if w.key == 0 {
-		h := fnv.New32a()
-		h.Write([]byte(schema))
-		w.key = int32(h.Sum32()&0x7fffffff) | 1
+		w.key = keyOf32(schema)
 	}
 	// This process's own from now, should the lock be taken and the answer
 	// not reach it.
@@ -207,6 +254,13 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 	took, err := w.try(ctx, c)
 	if err != nil {
 		return err
+	}
+	if took && w.shared {
+		// The writer's earlier sessions are given up once another is made:
+		// one the server still keeps, in a write's transaction, would hold
+		// the writers' turn for every replica. Each is ended, as its own
+		// role may; a session that isn't one of them, by its start, is left.
+		w.endOwn(ctx, c, session{c.PgConn().PID(), began.UnixMicro()})
 	}
 	if !took {
 		// One of this process's own sessions, from before a connection
@@ -225,7 +279,7 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 		if err != nil {
 			return err
 		}
-		if w.writers != 0 {
+		if w.known {
 			w.lose()
 			return ErrLockLost
 		}
@@ -234,7 +288,7 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 		}
 		return h
 	}
-	if w.writers != 0 {
+	if w.known {
 		var n int64
 		if err := c.QueryRow(ctx, "SELECT writers FROM schema_version").Scan(&n); err != nil {
 			w.unlock(c)
@@ -251,6 +305,18 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 	// Those before it are gone, or ended above.
 	w.own = map[session]bool{{w.pid, began.UnixMicro()}: true}
 	return nil
+}
+
+// endOwn ends this process's own earlier writer's sessions that the server
+// still keeps, all but now's.
+func (w *pgWriter) endOwn(ctx context.Context, c *pgx.Conn, now session) {
+	for s := range w.own {
+		if s == now {
+			continue
+		}
+		c.Exec(ctx, `SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity
+			WHERE pid = $1 AND (extract(epoch FROM backend_start) * 1000000)::bigint = $2`, int64(s.pid), s.began)
+	}
 }
 
 // session is a server's session: its pid, and when it began, in µs.
@@ -292,20 +358,84 @@ func pinSchema(ctx context.Context, c *pgx.Conn) (string, error) {
 
 func (w *pgWriter) try(ctx context.Context, c *pgx.Conn) (bool, error) {
 	var took bool
-	err := c.QueryRow(ctx, "SELECT pg_try_advisory_lock($1, $2)", int32(lockClass), w.key).Scan(&took)
+	q := "SELECT pg_try_advisory_lock($1, $2)"
+	if w.shared {
+		q = "SELECT pg_try_advisory_lock_shared($1, $2)"
+	}
+	err := c.QueryRow(ctx, q, int32(lockClass), w.key).Scan(&took)
 	return took, err
+}
+
+// keyOf32 is the advisory lock's second key for a schema.
+func keyOf32(schema string) int32 {
+	h := fnv.New32a()
+	h.Write([]byte(schema))
+	return int32(h.Sum32()&0x7fffffff) | 1
+}
+
+// joined readies a connection of the replicas' own pools (replicas.go):
+// read-write, the ledger's schema alone, and the lock shared, as the
+// writer's is, so that a process that would write the ledger alone is
+// refused while any of this one's sessions lives.
+func (w *pgWriter) joined(ctx context.Context, c *pgx.Conn) error {
+	if w.isLost() {
+		return ErrLockLost
+	}
+	if w.closed.Load() {
+		return errors.New("the ledger is closed")
+	}
+	for _, s := range []string{"SET default_transaction_isolation = 'read committed'", "SET default_transaction_read_only = off",
+		"SET idle_in_transaction_session_timeout = '" + idleInWrite + "'"} {
+		if _, err := c.Exec(ctx, s); err != nil {
+			return err
+		}
+	}
+	for _, s := range []string{"SET tcp_keepalives_idle = 30", "SET tcp_keepalives_interval = 10", "SET tcp_keepalives_count = 3"} {
+		c.Exec(ctx, s)
+	}
+	schema, err := pinSchema(ctx, c)
+	if err != nil {
+		return err
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.key == 0 {
+		w.key = keyOf32(schema)
+	}
+	took, err := w.try(ctx, c)
+	if err != nil {
+		return err
+	}
+	if !took {
+		h, err := w.holder(ctx, c)
+		if err != nil {
+			return err
+		}
+		if w.known {
+			w.lose()
+			return ErrLockLost
+		}
+		if h == nil {
+			h = &LockedError{}
+		}
+		return h
+	}
+	return nil
 }
 
 // holder is the session that holds the lock, nil when none does.
 func (w *pgWriter) holder(ctx context.Context, c *pgx.Conn) (*LockedError, error) {
 	var h LockedError
 	var since *time.Time
-	err := c.QueryRow(ctx, `SELECT l.pid, coalesce(a.usename, ''), coalesce(a.application_name, ''), coalesce(host(a.client_addr), ''), a.backend_start
+	// One holding it alone first: it is what refuses a replica.
+	err := c.QueryRow(ctx, `SELECT l.pid, coalesce(a.usename, ''), coalesce(a.application_name, ''), coalesce(host(a.client_addr), ''), a.backend_start,
+			l.mode = 'ExclusiveLock'
 		FROM pg_locks l LEFT JOIN pg_stat_activity a ON a.pid = l.pid
 		WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 2
 			AND l.classid::bigint = $1 AND l.objid::bigint = $2
 			AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
-		LIMIT 1`, int64(lockClass), int64(w.key)).Scan(&h.PID, &h.Role, &h.App, &h.From, &since)
+		ORDER BY l.mode = 'ExclusiveLock' DESC, a.backend_start
+		LIMIT 1`, int64(lockClass), int64(w.key)).Scan(&h.PID, &h.Role, &h.App, &h.From, &since, &h.Alone)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -728,16 +858,28 @@ var onThisMachine = func(cfg *pgx.ConnConfig) bool {
 
 // OpenPostgres opens the ledger in the Postgres database a connection
 // string names, in its schema (search_path), making it if the database
-// holds none, in the time zone its days and weeks are counted in. It takes
-// the ledger's lock, and refuses a ledger another process holds
+// holds none, in the time zone its days and weeks are counted in, as one of
+// the replicas of serve that share it (docs/design/replicas.md): it takes
+// the ledger's lock shared, and refuses a ledger a process holds alone
 // (*LockedError). No error it gives holds the connection string.
 func OpenPostgres(ctx context.Context, conn string, loc *time.Location) (*Ledger, error) {
+	return openPostgres(ctx, conn, loc, true)
+}
+
+// OpenPostgresAlone opens the ledger as OpenPostgres does, as its only
+// writer: it takes the ledger's lock alone, and refuses a ledger any other
+// process holds, serve's replicas too. A copy opens the ledgers so.
+func OpenPostgresAlone(ctx context.Context, conn string, loc *time.Location) (*Ledger, error) {
+	return openPostgres(ctx, conn, loc, false)
+}
+
+func openPostgres(ctx context.Context, conn string, loc *time.Location, shared bool) (*Ledger, error) {
 	cfg, warn, err := pgConfig(conn)
 	if err != nil {
 		return nil, err
 	}
 	secrets := secretsOf(conn, cfg)
-	pw := &pgWriter{lost: make(chan struct{}), own: map[session]bool{}}
+	pw := &pgWriter{lost: make(chan struct{}), own: map[session]bool{}, shared: shared}
 	writer := stdlib.GetConnector(*cfg, stdlib.OptionAfterConnect(pw.connected), stdlib.OptionBeforeConnect(pw.connecting))
 	w := sql.OpenDB(pgConnector{writer, secrets, cfg.ConnectTimeout + connectWithin})
 	// One connection writes, as for SQLite: writes take turns, and the
@@ -783,10 +925,26 @@ func OpenPostgres(ctx context.Context, conn string, loc *time.Location) (*Ledger
 		l.Close()
 		return nil, err
 	}
-	// This process writes the ledger from here: one more of them.
-	if err := w.QueryRowContext(ctx, "UPDATE schema_version SET writers = writers + 1 RETURNING writers").Scan(&pw.writers); err != nil {
+	if shared {
+		// One of the replicas: they don't count themselves, so that a
+		// count that moved is a process that wrote the ledger alone.
+		err = w.QueryRowContext(ctx, "SELECT writers FROM schema_version").Scan(&pw.writers)
+	} else {
+		// This process writes the ledger from here, alone: one more of them.
+		err = w.QueryRowContext(ctx, "UPDATE schema_version SET writers = writers + 1 RETURNING writers").Scan(&pw.writers)
+	}
+	if err != nil {
 		l.Close()
 		return nil, err
+	}
+	pw.mu.Lock()
+	pw.known = true
+	pw.mu.Unlock()
+	if shared {
+		if l.rep, err = newReplicas(*cfg, secrets, pw); err != nil {
+			l.Close()
+			return nil, err
+		}
 	}
 	if err := l.zone(ctx); err != nil {
 		l.Close()
@@ -796,17 +954,22 @@ func OpenPostgres(ctx context.Context, conn string, loc *time.Location) (*Ledger
 }
 
 // Hold says this process still holds the ledger, before it does what
-// leaves the process on the ledger's word, such as sending a notice a reader
-// found due: in Postgres, that the writer's session holds the lock,
-// connecting again (and taking it again, or finding it lost) if the session
-// went. A notice sent by a process whose lock went, while another took the
-// ledger, would be sent twice. SQLite's, always.
+// leaves the process on the ledger's word, such as sending a notice: in
+// Postgres, that the writer's session holds the lock, connecting again (and
+// taking it again, or finding it lost) if the session went; and, for what
+// the replica that leads does (a context a lease gave, Elect), that it
+// still leads. A notice sent by a process whose lock went, while another
+// took the ledger, or by a replica that no longer leads, while the one that
+// does sends it, would be sent twice. SQLite's, always.
 func (l *Ledger) Hold(ctx context.Context) error {
 	if l.pg == nil {
 		return nil
 	}
 	if l.pg.isLost() {
-		return ErrLockLost
+		return l.pg.why
+	}
+	if !Leads(ctx) {
+		return ErrNotLeading
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -821,16 +984,28 @@ func (l *Ledger) Hold(ctx context.Context) error {
 		l.pg.lose()
 		return ErrLockLost
 	}
+	if !Leads(ctx) {
+		return ErrNotLeading
+	}
 	return nil
 }
 
-// Lost is closed when the ledger's lock is lost for good (ErrLockLost):
+// Lost is closed when the ledger is lost for good: its lock (ErrLockLost),
+// or to a newer lapilli that migrated it (ErrNewer); LostWhy says which.
 // lapilli serve stops. A SQLite ledger's never is.
 func (l *Ledger) Lost() <-chan struct{} {
 	if l.pg == nil {
 		return nil
 	}
 	return l.pg.lost
+}
+
+// LostWhy is why the ledger was lost, once Lost is closed.
+func (l *Ledger) LostWhy() error {
+	if l.pg == nil || !l.pg.isLost() {
+		return nil
+	}
+	return l.pg.why
 }
 
 // Warnings are what serve says at start of how the ledger is reached: a
@@ -871,8 +1046,11 @@ func sqliteFiles() (int, error) {
 
 // migratePostgres brings a Postgres ledger's schema up to date: an empty
 // database is given the whole schema at once, then each later migration
-// in turn. A database holding tables a ledger has but no schema_version
-// is refused, not written over.
+// in turn, each in a transaction that holds the writers' turn
+// (writeClass), so that replicas started at once migrate it once. A
+// database holding tables a ledger has but no schema_version is refused,
+// not written over. Then the replicas' own tables (replicaTables), which
+// every Postgres ledger has.
 func (l *Ledger) migratePostgres(ctx context.Context) error {
 	m, ns, err := pgFiles()
 	if err != nil {
@@ -885,59 +1063,76 @@ func (l *Ledger) migratePostgres(ctx context.Context) error {
 	if len(ns) == 0 || ns[len(ns)-1] != want {
 		return fmt.Errorf("the Postgres schema ends at %v, SQLite's at %d", ns, want)
 	}
+	for {
+		done, err := l.migrateStep(ctx, m, ns, want)
+		if err != nil || done {
+			return err
+		}
+	}
+}
+
+// migrateStep takes the ledger one migration on, in a transaction holding
+// the writers' turn, reading where it is under it: done once it is at want,
+// with the replicas' tables made.
+func (l *Ledger) migrateStep(ctx context.Context, m map[int]string, ns []int, want int) (bool, error) {
+	tx, err := l.w.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(?, ?)", int32(writeClass), l.pg.key); err != nil {
+		return false, err
+	}
 	var have int
 	var made bool
-	if err := l.w.QueryRowContext(ctx, "SELECT to_regclass('schema_version') IS NOT NULL").Scan(&made); err != nil {
-		return err
+	if err := tx.QueryRowContext(ctx, "SELECT to_regclass('schema_version') IS NOT NULL").Scan(&made); err != nil {
+		return false, err
 	}
 	if made {
-		if err := l.w.QueryRowContext(ctx, "SELECT version FROM schema_version").Scan(&have); err != nil {
-			return err
+		if err := tx.QueryRowContext(ctx, "SELECT version FROM schema_version").Scan(&have); err != nil {
+			return false, err
 		}
 	} else {
 		var n int
-		if err := l.w.QueryRowContext(ctx, `SELECT count(*) FROM information_schema.tables
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM information_schema.tables
 			WHERE table_schema = current_schema() AND table_name IN ('meta', 'firings', 'rules', 'series', 'versions')`).Scan(&n); err != nil {
-			return err
+			return false, err
 		}
 		if n > 0 {
-			return errors.New("the database's schema holds tables a ledger has, but no schema_version: not a ledger this lapilli made, and not written over")
+			return false, errors.New("the database's schema holds tables a ledger has, but no schema_version: not a ledger this lapilli made, and not written over")
 		}
 	}
 	if have > want {
-		return fmt.Errorf("%w (schema %d; this one knows %d)", ErrNewer, have, want)
+		return false, fmt.Errorf("%w (schema %d; this one knows %d)", ErrNewer, have, want)
 	}
-	for _, n := range ns {
-		if n <= have {
-			continue
+	if have == want {
+		if _, err := tx.ExecContext(ctx, replicaTables); err != nil {
+			return false, fmt.Errorf("the replicas' tables: %w", err)
 		}
-		b, err := pgSchema.ReadFile(m[n])
-		if err != nil {
-			return err
-		}
-		tx, err := l.w.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		if have == 0 {
-			if _, err := tx.ExecContext(ctx, `CREATE TABLE schema_version (version BIGINT NOT NULL, writers BIGINT NOT NULL DEFAULT 0);
-				INSERT INTO schema_version (version) VALUES (0)`); err != nil {
-				tx.Rollback()
-				return err
-			}
-		}
-		if _, err := tx.ExecContext(ctx, string(b)); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("%s: %w", m[n], err)
-		}
-		if _, err := tx.ExecContext(ctx, "UPDATE schema_version SET version = "+strconv.Itoa(n)); err != nil {
-			tx.Rollback()
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		have = n
+		return true, tx.Commit()
 	}
-	return nil
+	n := 0
+	for _, x := range ns {
+		if x > have {
+			n = x
+			break
+		}
+	}
+	b, err := pgSchema.ReadFile(m[n])
+	if err != nil {
+		return false, err
+	}
+	if have == 0 {
+		if _, err := tx.ExecContext(ctx, `CREATE TABLE schema_version (version BIGINT NOT NULL, writers BIGINT NOT NULL DEFAULT 0);
+			INSERT INTO schema_version (version) VALUES (0)`); err != nil {
+			return false, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, string(b)); err != nil {
+		return false, fmt.Errorf("%s: %w", m[n], err)
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE schema_version SET version = "+strconv.Itoa(n)); err != nil {
+		return false, err
+	}
+	return false, tx.Commit()
 }

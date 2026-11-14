@@ -285,14 +285,14 @@ func (l *Ledger) NotifyAll(ctx context.Context, ns []Notification) (kept []bool,
 			kept[i] = ok
 			some = some || ok
 		}
+		// One kept is a page's, counted with the write: the other
+		// replicas' pages read it too.
+		t.count = some
 		return nil
 	})
 	if err != nil {
 		clear(kept)
 		return kept, errs, err
-	}
-	if some {
-		l.gen.Add(1)
 	}
 	return kept, errs, nil
 }

@@ -117,8 +117,14 @@ func (l *Ledger) Unsent(ctx context.Context) (n int, err error) {
 	return
 }
 
-// Sent notes a notice sent.
+// Sent notes a notice sent. In a ledger replicas share, by itself, a row
+// it holds claimed: it waits for no write's turn, which a write long enough
+// could hold past the claim.
 func (l *Ledger) Sent(ctx context.Context, id int64) error {
+	if l.rep != nil {
+		_, err := l.rep.side.ExecContext(ctx, "UPDATE outbox SET sent_at = ?, error = '' WHERE id = ?", time.Now().Unix(), id)
+		return err
+	}
 	return l.writeAside(ctx, func(t *txn) error {
 		_, err := t.ExecContext(t.ctx, "UPDATE outbox SET sent_at = ?, error = '' WHERE id = ?", time.Now().Unix(), id)
 		return err
@@ -131,20 +137,41 @@ const GiveUpAfter = 10
 // Failed notes a notice that couldn't be sent, to be tried again later,
 // further apart each time; after GiveUpAfter tries, not again.
 func (l *Ledger) Failed(ctx context.Context, id int64, why string) error {
+	if len(why) > 300 {
+		why = why[:300]
+	}
+	if l.rep != nil {
+		// As Sent: by itself, the row locked while its attempts are counted.
+		tx, err := l.rep.side.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		var attempts int
+		if err := tx.QueryRowContext(ctx, "SELECT attempts FROM outbox WHERE id = ? FOR UPDATE", id).Scan(&attempts); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE outbox SET attempts = ?, next_at = ?, error = ? WHERE id = ?", attempts+1, retryAt(attempts+1).Unix(), why, id); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	return l.writeAside(ctx, func(t *txn) error {
 		var attempts int
 		if err := t.QueryRowContext(t.ctx, "SELECT attempts FROM outbox WHERE id = ?", id).Scan(&attempts); err != nil {
 			return err
 		}
 		attempts++
-		next := time.Now().Add(min(time.Minute<<min(attempts-1, 9), 6*time.Hour))
-		if attempts >= GiveUpAfter {
-			next = time.Unix(1<<40, 0) // given up
-		}
-		if len(why) > 300 {
-			why = why[:300]
-		}
-		_, err := t.ExecContext(t.ctx, "UPDATE outbox SET attempts = ?, next_at = ?, error = ? WHERE id = ?", attempts, next.Unix(), why, id)
+		_, err := t.ExecContext(t.ctx, "UPDATE outbox SET attempts = ?, next_at = ?, error = ? WHERE id = ?", attempts, retryAt(attempts).Unix(), why, id)
 		return err
 	})
+}
+
+// retryAt is when a notice tried so many times is tried again: further
+// apart each time; after GiveUpAfter tries, not again.
+func retryAt(attempts int) time.Time {
+	if attempts >= GiveUpAfter {
+		return time.Unix(1<<40, 0) // given up
+	}
+	return time.Now().Add(min(time.Minute<<min(attempts-1, 9), 6*time.Hour))
 }

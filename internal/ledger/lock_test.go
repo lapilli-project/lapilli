@@ -52,8 +52,9 @@ func TestPostgresSearchPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close(ctx)
+	// Replicas don't count themselves among those that wrote it alone.
 	var w int64
-	if err := c.QueryRow(ctx, "SELECT writers FROM schema_version").Scan(&w); err != nil || w != 1 {
+	if err := c.QueryRow(ctx, "SELECT writers FROM schema_version").Scan(&w); err != nil || w != 0 {
 		t.Errorf("writers: %d %v", w, err)
 	}
 	// Made in the first schema of a path that holds no ledger, which is
@@ -109,6 +110,9 @@ type partition struct {
 	kept    []net.Conn
 	onLock  atomic.Bool
 	cutLock atomic.Bool
+	// down cuts the connections made from now on too, as they are made: a
+	// replica cut off from the database altogether.
+	down atomic.Bool
 }
 
 // newPartition starts a partition before the server a test's URL names,
@@ -143,6 +147,7 @@ func (p *partition) run(up string) {
 			continue
 		}
 		dead, asked := &atomic.Bool{}, &atomic.Bool{}
+		dead.Store(p.down.Load())
 		p.mu.Lock()
 		p.dead = append(p.dead, dead)
 		p.kept = append(p.kept, s, c)
@@ -236,7 +241,9 @@ func TestPostgresOwnSessionFromAReconnect(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	p, via := newPartition(t, u)
-	l, err := OpenPostgres(ctx, via, time.UTC)
+	// Alone, as a copy writes: the lock is a session's alone, which this
+	// process's own earlier one may hold.
+	l, err := OpenPostgresAlone(ctx, via, time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,9 +373,9 @@ func TestPostgresSilentConnection(t *testing.T) {
 	}
 }
 
-// A process whose writer's session went, and another took the ledger,
-// doesn't hold it: Hold says so before it sends what a reader found due,
-// and never says it holds it again.
+// A process whose writer's session went, and a process took the ledger
+// alone, doesn't hold it: Hold says so before it sends what a reader found
+// due, and never says it holds it again.
 func TestPostgresHold(t *testing.T) {
 	u := ledgertest.URL(t)
 	if u == "" {
@@ -391,7 +398,7 @@ func TestPostgresHold(t *testing.T) {
 	if _, err := c.Exec(ctx, "SELECT pg_terminate_backend($1, 5000)", int64(a.pg.pid)); err != nil {
 		t.Fatal(err)
 	}
-	b, err := OpenPostgres(ctx, u, time.UTC)
+	b, err := OpenPostgresAlone(ctx, u, time.UTC)
 	if err != nil {
 		t.Fatalf("another process: %v", err)
 	}
@@ -449,7 +456,7 @@ func TestPostgresPIDGivenAgain(t *testing.T) {
 	if _, err := direct.Exec(ctx, "SELECT pg_terminate_backend($1, 5000)", int64(a.pg.pid)); err != nil {
 		t.Fatal(err)
 	}
-	b, err := OpenPostgres(ctx, u, time.UTC)
+	b, err := OpenPostgresAlone(ctx, u, time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}

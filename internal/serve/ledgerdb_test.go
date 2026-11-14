@@ -150,7 +150,7 @@ func TestRunStopsWhenTheLockIsLost(t *testing.T) {
 	}
 	db := ledgerDB(t, s)
 	defer db.Close()
-	// The writer's session ends, and another process takes the ledger
+	// The writer's session ends, and a process takes the ledger alone
 	// meanwhile: when serve connects again, someone else wrote. The
 	// database is the test's own, as are the locks in it.
 	// pg_locks is the whole server's: those of this database alone.
@@ -166,7 +166,7 @@ func TestRunStopsWhenTheLockIsLost(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	other, err := ledger.OpenPostgres(ctx, strings.TrimSpace(string(b)), time.UTC)
+	other, err := ledger.OpenPostgresAlone(ctx, strings.TrimSpace(string(b)), time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,8 +184,8 @@ func TestRunStopsWhenTheLockIsLost(t *testing.T) {
 }
 
 // A notice found due is sent only while this process holds the ledger:
-// one whose writer's session went, while another process took the ledger
-// and will send it, sends nothing.
+// one whose writer's session went, while a process took the ledger alone,
+// sends nothing.
 func TestSendDueHoldsTheLedger(t *testing.T) {
 	if !ledgertest.On() {
 		t.Skip("the ledgers are SQLite's")
@@ -210,7 +210,7 @@ func TestSendDueHoldsTheLedger(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(s.cfg.LedgerURLFile)
-	other, err := ledger.OpenPostgres(ctx, strings.TrimSpace(string(b)), time.UTC)
+	other, err := ledger.OpenPostgresAlone(ctx, strings.TrimSpace(string(b)), time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -190,9 +190,11 @@ func TestPostgresMigrationsKeepUp(t *testing.T) {
 	}
 }
 
-// One process writes a Postgres ledger: a second is refused while the first
-// holds it, saying who does, and opens it once the first has let go.
-func TestPostgresOneWriter(t *testing.T) {
+// serve's replicas share a Postgres ledger: a second opens it while the
+// first holds it, and both write it. A process that would write it alone
+// (a copy) is refused while either holds it, saying who does, and refuses
+// them while it holds it; it opens once they have let go.
+func TestPostgresReplicasAndAlone(t *testing.T) {
 	u := ledgertest.URL(t)
 	if u == "" {
 		t.Skip("no " + ledgertest.Env)
@@ -202,35 +204,54 @@ func TestPostgresOneWriter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = OpenPostgres(ctx, u, time.UTC)
-	var locked *LockedError
-	if !errors.As(err, &locked) || locked.PID == 0 || !strings.Contains(err.Error(), "in use by another process") {
-		t.Fatalf("a second writer: %v", err)
+	b, err := OpenPostgres(ctx, u, time.UTC)
+	if err != nil {
+		t.Fatalf("a second replica: %v", err)
 	}
 	if err := a.SetMeta(ctx, "k", "a"); err != nil {
 		t.Fatal(err)
 	}
+	if err := b.SetMeta(ctx, "j", "b"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := a.Meta(ctx, "j"); v != "b" {
+		t.Errorf("the other replica's write: %q", v)
+	}
+	_, err = OpenPostgresAlone(ctx, u, time.UTC)
+	var locked *LockedError
+	if !errors.As(err, &locked) || locked.PID == 0 || locked.Alone || !strings.Contains(err.Error(), "in use by another process") {
+		t.Fatalf("a process alone, while replicas hold the ledger: %v", err)
+	}
 	a.Close()
-	b, err := OpenPostgres(ctx, u, time.UTC)
+	b.Close()
+	c, err := OpenPostgresAlone(ctx, u, time.UTC)
 	if err != nil {
-		t.Fatalf("once the first let go: %v", err)
+		t.Fatalf("once the replicas let go: %v", err)
 	}
-	defer b.Close()
-	if v, _ := b.Meta(ctx, "k"); v != "a" {
-		t.Errorf("the first's write: %q", v)
+	if v, _ := c.Meta(ctx, "k"); v != "a" {
+		t.Errorf("the replicas' write: %q", v)
 	}
+	_, err = OpenPostgres(ctx, u, time.UTC)
+	if !errors.As(err, &locked) || !locked.Alone || !strings.Contains(err.Error(), "alone") {
+		t.Fatalf("a replica, while a process holds the ledger alone: %v", err)
+	}
+	if _, err := OpenPostgresAlone(ctx, u, time.UTC); !errors.As(err, &locked) {
+		t.Fatalf("a second process alone: %v", err)
+	}
+	c.Close()
 	// Another schema of the same database is another ledger, with a lock
 	// of its own.
-	c, err := OpenPostgres(ctx, ledgertest.URL(t), time.UTC)
+	d, err := OpenPostgresAlone(ctx, ledgertest.URL(t), time.UTC)
 	if err != nil {
 		t.Fatalf("another schema: %v", err)
 	}
-	c.Close()
+	d.Close()
 }
 
 // A writer whose connection drops connects again, takes the lock again and
-// goes on writing; one that finds another process wrote the ledger in
-// between writes nothing more, and says so.
+// goes on writing; one that finds a process wrote the ledger alone in
+// between writes nothing more, and says so. Another replica in between is
+// no such process.
 func TestPostgresDroppedConnection(t *testing.T) {
 	u := ledgertest.URL(t)
 	if u == "" {
@@ -279,11 +300,26 @@ func TestPostgresDroppedConnection(t *testing.T) {
 		t.Fatal("the lock is taken for lost")
 	default:
 	}
-	// Dropped again, and another process takes the ledger in between.
+	// Dropped again, and another replica writes in between.
 	drop()
-	other, err := OpenPostgres(ctx, u, time.UTC)
+	replica, err := OpenPostgres(ctx, u, time.UTC)
 	if err != nil {
-		t.Fatalf("another process, while the first is away: %v", err)
+		t.Fatalf("another replica: %v", err)
+	}
+	if err := replica.SetMeta(ctx, "between", "1"); err != nil {
+		t.Fatal(err)
+	}
+	replica.Close()
+	if err := l.SetMeta(ctx, "after2", "1"); err != nil {
+		if err := l.SetMeta(ctx, "after2", "1"); err != nil {
+			t.Fatalf("after another replica wrote: %v", err)
+		}
+	}
+	// Dropped again, and a process takes the ledger alone in between.
+	drop()
+	other, err := OpenPostgresAlone(ctx, u, time.UTC)
+	if err != nil {
+		t.Fatalf("a process alone, while the first is away: %v", err)
 	}
 	other.Close()
 	var werr error
@@ -486,7 +522,7 @@ func TestPostgresOwnSessionEnded(t *testing.T) {
 		t.Skip("no " + ledgertest.Env)
 	}
 	ctx := context.Background()
-	l, err := OpenPostgres(ctx, u, time.UTC)
+	l, err := OpenPostgresAlone(ctx, u, time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}
