@@ -92,7 +92,7 @@ func (e *LockedError) Error() string {
 		b.WriteString(" (" + strings.Join(of, ", ") + ")")
 	}
 	if e.Alone {
-		b.WriteString(" holds its lock alone, as a copy, or a lapilli of 0.34 or before, does. Stop it, or end that session")
+		b.WriteString(" holds its lock alone, as a copy, or a lapilli of 0.35 or before, does. Stop it, or end that session")
 	} else {
 		b.WriteString(" holds its lock, and a ledger serve's replicas share is written by no other process. Stop serve, or end that session")
 	}

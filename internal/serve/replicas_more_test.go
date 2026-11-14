@@ -1,8 +1,8 @@
 package serve
 
-// The replicas' guards the reviews of 0.35's replicas asked for, in serve:
-// sign-in across replicas, readiness, the digest after a takeover, a
-// rejudge asked on a follower, and how the leader steps down.
+// The replicas' guards their reviews asked for, in serve: sign-in across
+// replicas, readiness, the digest after a takeover, a rejudge asked on a
+// follower, and how the leader steps down.
 
 import (
 	"context"

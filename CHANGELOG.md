@@ -91,7 +91,7 @@ upgrade".
 - **A second `serve` on a Postgres ledger is a replica**, no longer
   refused. `lapilli ledger copy` takes the ledger alone, as serve did, and
   is refused while any replica runs; a replica is refused while a copy,
-  or a serve of 0.34 or before, holds the ledger alone. Replicas don't
+  or a serve of 0.35 or before, holds the ledger alone. Replicas don't
   count themselves in `schema_version.writers`.
 - A Postgres ledger's migrations take the writers' turn, so replicas
   started at once migrate it once; a replica that finds the ledger
@@ -99,8 +99,8 @@ upgrade".
 
 ### Before you upgrade
 
-- **From 0.34 with `serve.ledger.postgres`, upgrade with
-  `serve.replicas: 1`** (the default), then raise it: the 0.34 pod holds
+- **From 0.34 or 0.35 with `serve.ledger.postgres`, upgrade with
+  `serve.replicas: 1`** (the default), then raise it: the older pod holds
   the ledger alone and refuses new pods until it stops, which `Recreate`
   waits for and `RollingUpdate` would not.
 - **Each request to a Postgres ledger's serve asks the database once
@@ -109,7 +109,7 @@ upgrade".
   DATABASE lapilli FROM PUBLIC`): a role that may only connect can still
   take or wait for the ledger's advisory lock, and keep replicas from
   starting or connecting again (docs/design/replicas.md).
-- **Going back to 0.34**: its `lapilli ledger copy` refuses a ledger with
+- **Going back to 0.35 or 0.34**: its `lapilli ledger copy` refuses a ledger with
   the replicas' tables; drop them first, with serve stopped (the
   statement is in docs/design/replicas.md, "Failure cases").
 

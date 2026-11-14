@@ -21,7 +21,7 @@ spec:
       maxUnavailable: 0
     {{- else }}
     # One pod: the old stops before the new one starts. A SQLite ledger is
-    # its volume's; a Postgres one, upgraded from 0.34 or before,
+    # its volume's; a Postgres one, upgraded from 0.35 or before,
     # is refused to a new pod while an old one holds it alone.
     type: Recreate
     {{- end }}

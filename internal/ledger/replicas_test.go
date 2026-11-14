@@ -64,7 +64,8 @@ func within(t *testing.T, d time.Duration, what string, ok func() bool) {
 // Replicas started at once on an empty schema make the ledger once, each
 // migration under the lock that keeps migrations apart: none finds tables
 // half made, nor takes the ledger for none it made. And on a ledger a
-// lapilli of 0.34 made, without the replicas' tables, they make those once.
+// lapilli of 0.34 or 0.35 made, without the replicas' tables, they make
+// those once.
 func TestReplicasStartTogether(t *testing.T) {
 	ctx := context.Background()
 	together := func(t *testing.T, u string) {

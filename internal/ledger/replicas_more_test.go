@@ -1,9 +1,9 @@
 package ledger
 
-// The replicas' guards the reviews of 0.35's replicas asked for: what a
-// role that may only connect can do to them, writes and claims at the
-// lease's end, refreshes and side statements that wait, failovers, and a
-// leader whose work is stuck.
+// The replicas' guards their reviews asked for: what a role that may only
+// connect can do to them, writes and claims at the lease's end, refreshes
+// and side statements that wait, failovers, migrations, and a leader whose
+// work is stuck.
 
 import (
 	"context"

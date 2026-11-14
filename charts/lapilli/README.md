@@ -219,7 +219,7 @@ is killed, another leads within some 17 seconds; when it stops, within 2.
   each new pod a follower until the leader it replaces gives the lease up;
   a PodDisruptionBudget lets `serve.podDisruptionBudget.maxUnavailable` (1)
   go at once. One replica stays `Recreate`.
-- **From 0.34 or before, upgrade with `serve.replicas: 1` first**:
+- **From 0.35 or before, upgrade with `serve.replicas: 1` first**:
   its pod holds the ledger alone, and refuses new pods until it stops,
   which `Recreate` waits for. Then raise it.
 - **No sticky sessions**: with `serve.signIn.oidc`, every pod mounts the

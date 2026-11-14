@@ -144,7 +144,7 @@ serve:
   # follower takes over within some 17 seconds of the leader's end
   # (docs/design/replicas.md). They roll one at a time, each pod a follower
   # until the one it replaces lets the lease go; a PodDisruptionBudget
-  # keeps maxUnavailable at most away. From 0.34 or before, upgrade with 1
+  # keeps maxUnavailable at most away. From 0.35 or before, upgrade with 1
   # first: its pod holds the ledger alone, and refuses new ones.
   replicas: 1
   podDisruptionBudget:

@@ -2,9 +2,9 @@
 
 Status: built, for v0.34.0. `lapilli serve` keeps its ledger in
 SQLite by default, as it always has; `--ledger-url-file FILE` keeps it in a
-Postgres database instead. Since the release after 0.34.1, several replicas
-of serve share it, one leading ([replicas.md](replicas.md)); 0.34 was one
-replica, as below. The companion to [serve.md](serve.md) (the ledger) and
+Postgres database instead. Since the release after 0.35.0, several replicas
+of serve share it, one leading ([replicas.md](replicas.md)); 0.34 and 0.35
+were one replica, as below. The companion to [serve.md](serve.md) (the ledger) and
 [signin.md](signin.md) (who signed out, kept in the ledger).
 
 ## Why
@@ -230,7 +230,7 @@ in `FROM` without a name (which Postgres refuses before 16), and
 
 ## One writer, and then replicas
 
-0.34 wrote a Postgres ledger as SQLite lets one process write one: one
+0.34 and 0.35 wrote a Postgres ledger as SQLite lets one process write one: one
 connection, writes taking turns in the process (`Ledger.mu`), each in a
 transaction, and an advisory lock that refused a second process. Reads go
 through four other connections, each transaction of reads as of one moment
@@ -243,7 +243,7 @@ Since, `serve`'s replicas share the ledger, one leading
   (so two ledgers in two schemas of one database each have one), now
   taken **shared** by every session of every replica, and **alone** by a
   process that must be the ledger's only writer: `lapilli ledger copy`,
-  and serve of 0.34 or before. The two refuse each other, saying which
+  and serve of 0.35 or before. The two refuse each other, saying which
   session holds the lock, from where and since when: "the ledger is in use
   by another process: Postgres session 4242 (role "lapilli", from
   10.0.3.7, connected 2026-11-13T06:00:00Z) holds its lock ...".
