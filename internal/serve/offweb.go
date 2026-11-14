@@ -72,6 +72,8 @@ func (s *Server) offs(r *http.Request, p ledger.Proposal, v *proposalView) {
 		switch {
 		case p.Path == ledger.PathNone:
 			v.ApproveOff = &pageAction{Label: "Approve", ID: "approve-why", Why: "For a person to make where the rule is kept: nothing to approve here"}
+		case v.Bearer && s.approver(r):
+			v.ApproveOff = off("Approve", "approve-why", "Signed in with a bearer token, as an API client is: approve from a browser signed in with a session")
 		case v.Own && p.Agent:
 			v.ApproveOff = off("Approve", "approve-why", "Your agent proposed this: someone else approves it.")
 		case v.Own:
@@ -83,7 +85,11 @@ func (s *Server) offs(r *http.Request, p ledger.Proposal, v *proposalView) {
 		}
 	}
 	if undoable(p) && !v.CanUndo {
-		v.UndoOff = off("Ask to undo it", "undo-why", "Approvers only")
+		why := "Approvers only"
+		if v.Bearer && s.approver(r) {
+			why = "Signed in with a bearer token, as an API client is: approve from a browser signed in with a session"
+		}
+		v.UndoOff = off("Ask to undo it", "undo-why", why)
 	}
 	if !v.CanDrop {
 		switch {

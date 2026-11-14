@@ -692,6 +692,7 @@
  "I have read the change and its evidence": "변경 내용과 근거를 봤어요",
  "approve it once you have read the change and what it would do: tick the box on its page that says you have, then approve": "변경 내용과 그 결과를 본 뒤 승인해 주세요: 제안 페이지에서 확인했다는 칸에 표시하고 승인하면 돼요",
  "ask for it to be undone once you have read the change and what it did: tick the box on its page that says you have, then ask": "변경 내용과 그 결과를 본 뒤 되돌리기를 요청해 주세요: 제안 페이지에서 확인했다는 칸에 표시하고 요청하면 돼요",
+ "Signed in with a bearer token, as an API client is: approve from a browser signed in with a session": "API 클라이언트처럼 bearer 토큰으로 로그인했어요: 세션으로 로그인한 브라우저에서 승인하세요",
  "Approvers only": "승인자만 가능",
  "For a person to make where the rule is kept: nothing to approve here": "규칙이 있는 곳에서 사람이 직접 바꿀 변경이라, 여기서 승인할 것이 없어요",
  "Changes are off: lapilli serve was started without --changes": "변경이 꺼져 있어요: lapilli serve 를 --changes 없이 시작했어요",

@@ -692,6 +692,7 @@
  "I have read the change and its evidence": "He leído el cambio y su evidencia",
  "approve it once you have read the change and what it would do: tick the box on its page that says you have, then approve": "apruébalo cuando hayas leído el cambio y lo que haría: marca en su página la casilla que dice que lo has leído y luego aprueba",
  "ask for it to be undone once you have read the change and what it did: tick the box on its page that says you have, then ask": "Pide deshacerlo después de leer el cambio y lo que hizo: marca la casilla de su página que dice que lo leíste y vuelve a pedirlo",
+ "Signed in with a bearer token, as an API client is: approve from a browser signed in with a session": "Has iniciado sesión con un token bearer, como un cliente de la API: aprueba desde un navegador con una sesión iniciada",
  "Approvers only": "Solo aprobadores",
  "For a person to make where the rule is kept: nothing to approve here": "Lo hace una persona donde se guarda la regla: aquí no hay nada que aprobar",
  "Changes are off: lapilli serve was started without --changes": "Los cambios están desactivados: lapilli serve se inició sin --changes",

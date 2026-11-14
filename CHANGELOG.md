@@ -93,6 +93,11 @@ this phase.
   in (a session, a bearer token, a sign-in in front, `--user-header`);
   with a sign-in, a proposal for no one known is refused; and each
   person's agents count against that person's own twenty an hour.
+  **After upgrading**, look at the agents' proposals still open
+  (`/proposals?by=agent`): one made before this release, with a sign-in,
+  is kept as "anonymous"'s, and whoever its agent acted for may still
+  approve it; drop any you aren't sure of, and let the agent propose it
+  again.
   `--user-header` alone was not affected.
 
 ## [0.37.0] - 2026-11-14

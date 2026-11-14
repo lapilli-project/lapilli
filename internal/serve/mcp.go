@@ -70,7 +70,13 @@ func (s *Server) mcpHandler() http.Handler {
 	h := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		at := s.role(r)
 		return servers[[2]bool{compare && at >= needCompare, propose && at >= needPropose && !s.cfg.ReadOnly}]
-	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true,
+	}, &mcp.StreamableHTTPOptions{
+		// Stateless: each request is its own, with its own context, which
+		// says who signed in: who an agent acts for is read from it
+		// (actsFor). A session would hand every call the first
+		// request's context, and act for whoever opened it.
+		// TestAgentProposesSignedIn holds it.
+		Stateless: true, JSONResponse: true,
 		// Origin is checked below instead: behind a sign-in proxy on the
 		// same host, requests arrive at 127.0.0.1 under the proxy's name.
 		DisableLocalhostProtection: true})

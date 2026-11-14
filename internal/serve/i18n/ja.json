@@ -692,6 +692,7 @@
  "I have read the change and its evidence": "変更内容と根拠を読みました",
  "approve it once you have read the change and what it would do: tick the box on its page that says you have, then approve": "変更内容とその結果を読んでから承認してください: 提案のページで、読んだことを示すチェックボックスにチェックを入れてから承認します",
  "ask for it to be undone once you have read the change and what it did: tick the box on its page that says you have, then ask": "変更とその結果を確認してから元に戻すよう求めてください: 提案のページで確認した旨のチェックを入れてから求めます",
+ "Signed in with a bearer token, as an API client is: approve from a browser signed in with a session": "API クライアントと同じく bearer トークンでサインインしています: セッションでサインインしたブラウザから承認してください",
  "Approvers only": "承認者のみ",
  "For a person to make where the rule is kept: nothing to approve here": "ルールの置き場所で人が手動で変更するものなので、ここで承認するものはありません",
  "Changes are off: lapilli serve was started without --changes": "変更はオフです: lapilli serve が --changes なしで起動されています",

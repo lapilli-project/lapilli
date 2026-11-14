@@ -300,6 +300,9 @@ type proposalView struct {
 	// TwoAlike, that they settled in the console the two Google policies a
 	// lost answer left (twoAlikeNote).
 	CanApprove, CanUndo, CanDrop bool
+	// Bearer says the reader is signed in by a bearer token, as an API
+	// client is, which no approval or undo is taken from.
+	Bearer                       bool
 	Closing, Unwritten, TwoAlike bool
 	Approve, Undo                string
 	// Why the reader can't approve it, when they are an approver; Next
@@ -361,14 +364,17 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 		v.Need = 1 // approved by whoever asked for it
 	}
 	user := s.user(r)
+	if id, ok := whoOf(r); ok && id.by == byBearer {
+		v.Bearer = true
+	}
 	if s.approver(r) {
 		me := ledger.FoldName(user)
 		v.Own = ledger.FoldName(p.MadeBy) == me
 		v.Done = slices.ContainsFunc(p.Approvals, func(a ledger.Approval) bool { return ledger.FoldName(a.By) == me })
-		if p.State == ledger.StateProposed && p.Path != ledger.PathNone && !v.Own && !v.Done {
+		if p.State == ledger.StateProposed && p.Path != ledger.PathNone && !v.Own && !v.Done && !v.Bearer {
 			v.CanApprove, v.Approve = true, s.formKey(p, user, "approve")
 		}
-		if undoable(p) {
+		if undoable(p) && !v.Bearer {
 			v.CanUndo, v.Undo = true, s.formKey(p, user, "undo")
 		}
 	}

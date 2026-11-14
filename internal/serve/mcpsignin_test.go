@@ -164,6 +164,20 @@ func TestAgentProposesSignedIn(t *testing.T) {
 			if !p.Agent || p.MadeBy != cy {
 				t.Fatalf("an agent's proposal for %s kept as made by %q (agent %v)", cy, p.MadeBy, p.Agent)
 			}
+			// Signed in by a bearer token, as an API client is, ana is
+			// offered no approval, which would be refused as no form's:
+			// it is shown off, with why.
+			if name == "oidc bearer" {
+				r := httptest.NewRequest(http.MethodGet, "/proposals/"+itoa(out.ID), nil)
+				for k, v := range w.agent(ana) {
+					r.Header.Set(k, v)
+				}
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, r)
+				if rec.Code != 200 || formKey.MatchString(rec.Body.String()) || !strings.Contains(rec.Body.String(), "Signed in with a bearer token") {
+					t.Errorf("signed in by a bearer token, offered an approval: %d", rec.Code)
+				}
+			}
 			// cy can't approve it, by the page or by a form made up.
 			asCy := w.browser(t, h, cy)
 			page := asCy(http.MethodGet, "/proposals/"+itoa(out.ID), nil)

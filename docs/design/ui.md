@@ -569,7 +569,11 @@ dry run, its history), with the backtest in the dry run's place:
   the form and checked by the server, an approval without it refused, 400.
   To a reader who may not approve, the button disabled with why: Approvers
   only, You proposed this, Your agent proposed this, You approved it,
-  Read-only, Changes are off, or a change for a person to make. Who may
+  Read-only, Changes are off, a change for a person to make, or, to an
+  approver signed in by a bearer token as an API client is (an
+  oauth2-proxy's on the `Authorization` header among them), approve from
+  a browser signed in with a session: a form is taken from a session
+  alone, so the page is kept apart for a bearer token. Who may
   approve is as it was. Each reason is what the handler allows: dropping
   one waiting for approval or approved is an editor's or an approver's
   ("Editors and approvers only"), one ready an approver's or an admin's

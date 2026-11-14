@@ -83,8 +83,18 @@ func (s *Server) Handler() http.Handler {
 			// cached, by them alone, in one order.
 			if canon := readsOf[name]; canon != nil {
 				r = r.Clone(r.Context())
+				q := r.URL.Query()
+				// A team no one has is all teams, as the page reads it:
+				// another name mustn't make it worked out again.
+				if vs, ok := q["team"]; ok && vs[0] != "" {
+					if o, err := s.owners(r.Context()); err == nil {
+						if _, ok := o.team(vs[0]); !ok {
+							q.Set("team", "")
+						}
+					}
+				}
 				// A "?" with nothing after it is no query either.
-				r.URL.RawQuery, r.URL.ForceQuery = canon(r.URL.Query()), false
+				r.URL.RawQuery, r.URL.ForceQuery = canon(q), false
 			}
 			h(w, r)
 		}
@@ -657,6 +667,11 @@ func (s *Server) cached(h http.HandlerFunc) http.HandlerFunc {
 		key := lang(r) + " " + r.URL.RequestURI()
 		if s.namesPeople() {
 			key = s.user(r) + "\x00" + strings.Join(s.groups(r), ",") + "\x00" + key
+		}
+		// Signed in by a bearer token, as an API client is, a reader is
+		// offered no approval, which a session's page offers: kept apart.
+		if id, ok := whoOf(r); ok && id.by == byBearer {
+			key = "bearer\x00" + key
 		}
 		etag := `"` + tag + "-" + strconv.FormatUint(hash(key), 16) + `"`
 		w.Header().Set("ETag", etag)
