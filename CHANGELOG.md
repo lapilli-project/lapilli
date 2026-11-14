@@ -2,6 +2,52 @@
 
 ## [Unreleased]
 
+### Added
+
+- **A rule's page, redone** (docs/design/ui.md). Its header has its
+  badges, its team, severity, `for`, group and runbook, and three actions:
+  propose a change, add a task, edit the note, each shown disabled, with
+  why, to a reader who may not. "⚠ n to check" lists what to check about
+  it, each with a link to where it is explained: problems of fact in what
+  it says, its replay differing from what really fired, why it isn't
+  replayed, a record copied in, an alarm with no history, a proposal made
+  against a version no longer in effect.
+- **A panel of five numbers** on a rule's page: precision, firings,
+  incidents caught (and nearly caught), human cost (notifications sent,
+  and those while people slept and off hours) and the backtest, each with
+  a definition to open, over the page's period, each beside as long a span
+  before when the ledger holds all of it.
+- **A rule's last 84 days**, a cell a day (caught something, caught
+  nothing only, excused only, no firing), with marks for its versions,
+  deploys of what it is about and the quiet windows that covered it, drawn
+  on the server, its numbers in a table under it.
+- **Each version of a rule beside the one before**, as a diff of its
+  expression, `for`, `keep_firing_for` and labels, on its versions tab.
+- **What the badges mean**, on the rules list, near the filters: each
+  badge, named as its facet names it, with a line on what it means.
+- The README's screenshots are of a demo ledger with names anyone might
+  use, served by a test (`TestDemoServe`) and taken by
+  `test/screenshots/shots.sh`, with Docker or, with `--local`, without.
+
+### Changed
+
+- **A rule's page is in tabs**, `?tab=`: overview (what to do first,
+  about this rule, incidents it caught, what it says), firings (latest,
+  refired, notifications, while people slept, during deploys, the replay
+  check), versions, proposals (proposals, the forms to propose a change,
+  changes reviewed) and activity (tasks, comments). A `tab=` it doesn't
+  have is the overview. An old link to `/rules/NAME#says` lands on what it
+  says, as before; one to `#proposals` or `#refired` lands on a line on
+  the overview that links to the tab, `?tab=proposals#proposals` or
+  `?tab=firings#refired`, where the links the pages make now go.
+- **A rule's page takes `weeks=`** (1, 4 or 12; twelve when not given, as
+  before), picked in its bar: its numbers, re-fires, notifications, deploys
+  and replay check are over that period, and its sentences no longer say
+  "over twelve weeks". `/api/v1/rules` and MCP's rule tool are as they
+  were.
+- The forms to propose a change to a rule are open on its proposals tab,
+  not in a "Propose a change" `<details>`.
+
 ## [0.36.0] - 2026-11-14
 
 `lapilli serve` runs as several replicas on one Postgres ledger: one leads,
