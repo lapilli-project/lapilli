@@ -1225,7 +1225,7 @@
  "Its note says to tune it.": "メモでは調整することになっています。",
  "Its note says to retire it.": "メモでは廃止することになっています。",
  "A change to it is proposed and not finished with.": "変更が提案されていて、まだ終わっていません。",
- "What it says when it fires has problems of fact.": "発火時のアラート内容に事実の問題があります。",
  "%d during a deploy": "デプロイ中の発火 %d 件",
- "fired during a deploy of what it is about": "このルールの対象のデプロイ中に発火"
+ "fired during a deploy of what it is about": "このルールの対象のデプロイ中に発火",
+ "What it says when it fires has problems of fact; the badge, “n to check”, counts them with whatever else its page lists to check.": "発火時のアラート内容に事実の問題があります。「要確認 n 件」のバッジは、これとルールのページが確認を求めるほかの項目をあわせて数えます。"
 }

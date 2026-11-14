@@ -4,10 +4,15 @@ package serve
 // show a period of their own.
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -132,4 +137,53 @@ func searchForm(body string) string {
 	}
 	j := strings.Index(body[i:], "</form>")
 	return body[i : i+j]
+}
+
+// TestRuleChecksCounted: the rules list's "n to check" is the count of
+// what the rule's page lists to check, in the same words, and links to
+// that list; the list's facet of problems of fact still picks those alone.
+func TestRuleChecksCounted(t *testing.T) {
+	s, _ := a11yServer(t)
+	// Errors changed since its proposal was made: the proposal is stale.
+	os.WriteFile(filepath.Join(s.cfg.RulesPath, "shop.yaml"), []byte(strings.Replace(ruleFile, "errors > 5", "errors > 6", 1)), 0o644)
+	raw := ""
+	if err := s.look(context.Background(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	more, stale := 0, 0
+	for _, q := range []string{"weeks=12", "weeks=1"} {
+		v := rulesFor(t, s, q)
+		for _, row := range append(v.Rows, v.Quiet...) {
+			page := ruleViewOf(t, s, row.Name, q)
+			if row.Checks != len(page.Conds) {
+				t.Errorf("%s?%s: the list counts %d to check, its page lists %d: %+v", row.Name, q, row.Checks, len(page.Conds), page.Conds)
+			}
+			if row.Checks > row.Facts {
+				more++
+			}
+			if slices.ContainsFunc(page.Conds, func(c ruleCond) bool { return c.Kind == "stale" }) {
+				stale++
+			}
+			if (row.Facts > 0) != slices.Contains(row.Has, "facts") {
+				t.Errorf("%s: %d problems of fact, has %q", row.Name, row.Facts, row.Has)
+			}
+		}
+		_, body, _ := get(t, h, "/rules?"+q)
+		for _, row := range v.Rows {
+			badge := `href="/rules/` + url.PathEscape(row.Name) + "?" + q + `#checks"><span aria-hidden="true">⚠&#xFE0E;</span> ` + fmt.Sprintf("%d to check</a>", row.Checks)
+			if strings.Contains(body, badge) != (row.Checks > 0) {
+				t.Errorf("/rules?%s: %s's badge, %d to check", q, row.Name, row.Checks)
+			}
+			if row.Checks > 0 {
+				_, page, _ := get(t, h, "/rules/"+url.PathEscape(row.Name)+"?"+q)
+				if !strings.Contains(page, fmt.Sprintf(`<details class="checks" id="checks"><summary><span aria-hidden="true">⚠&#xFE0E;</span> %d to check</summary>`, row.Checks)) {
+					t.Errorf("/rules/%s?%s: no list of %d to check", row.Name, q, row.Checks)
+				}
+			}
+		}
+	}
+	if more == 0 || stale == 0 {
+		t.Errorf("%d rules have more to check than problems of fact, %d a proposal made against an older version", more, stale)
+	}
 }

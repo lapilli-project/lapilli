@@ -820,6 +820,15 @@ type tieView struct {
 	Why    string
 }
 
+// tieViewOf is what a rule's page says of a cloud's alarm's tie.
+func tieViewOf(x ledger.TieState) *tieView {
+	v := &tieView{Source: x.Source, Why: x.Why}
+	if x.Since > 0 {
+		v.Since = time.Unix(x.Since, 0)
+	}
+	return v
+}
+
 // ruleCheck is a rule's replay beside what really fired, as its page shows
 // it: over twelve weeks, and over the last week, which says whether it
 // differs.
@@ -950,10 +959,7 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 			return ruleView{}, err
 		}
 		if x, ok := ties[name]; ok {
-			v.Tie = &tieView{Source: x.Source, Why: x.Why}
-			if x.Since > 0 {
-				v.Tie.Since = time.Unix(x.Since, 0)
-			}
+			v.Tie = tieViewOf(x)
 		}
 	}
 	st, err := s.content(ctx)
@@ -1053,7 +1059,7 @@ func (s *Server) ruleHeader(v *ruleView, sev string) {
 	v.Proposed = slices.ContainsFunc(v.Proposals, func(p proposalLine) bool { return slices.Contains(ledger.Unfinished(), p.State) })
 	// What it says is to check with the rest, not as a badge of its own.
 	v.Row = rowOf(v.ruleLine, 0)
-	v.Conds = condsOf(v)
+	v.Conds = condsOf(v.condsIn())
 	v.Tabs = tabsOf(v)
 	runbook := v.Note.Runbook
 	if v.Says != nil && v.Says.RunbookLink != "" {

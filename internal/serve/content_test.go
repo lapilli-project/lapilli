@@ -126,7 +126,7 @@ func TestContentPages(t *testing.T) {
 	}
 	// The rules list marks a rule with a problem of fact, fired or not.
 	_, body, _ = get(t, h, "/rules")
-	if !strings.Contains(body, `href="/rules/Errors?weeks=4#says"><span aria-hidden="true">⚠&#xFE0E;</span> 1 to check</a>`) || strings.Contains(body, "/rules/Quiet?weeks=4#says") {
+	if !strings.Contains(body, `href="/rules/Errors?weeks=4#checks"><span aria-hidden="true">⚠&#xFE0E;</span> 1 to check</a>`) || strings.Contains(body, "/rules/Quiet?weeks=4#says") {
 		t.Errorf("/rules: the marks:\n%s", body)
 	}
 }

@@ -336,21 +336,21 @@ func TestRuleConds(t *testing.T) {
 			{Proposal: ledger.Proposal{State: ledger.StateProposed}, Stale: true}, {Proposal: ledger.Proposal{State: ledger.StateMerged}, Stale: true},
 			{Proposal: ledger.Proposal{State: ledger.StateApplied}, Stale: true}, {Proposal: ledger.Proposal{State: ledger.StateProposed}}}}}
 	var kinds []string
-	for _, c := range condsOf(&v) {
+	for _, c := range condsOf(v.condsIn()) {
 		kinds = append(kinds, fmt.Sprint(c.Kind, c.N, c.Text))
 	}
 	if want := []string{"facts2", "differs0", "unreplayed0why", "unseen0Replayed in part: x.", "recorded0cloud", "stale2"}; !slices.Equal(kinds, want) {
 		t.Errorf("conds %q, want %q", kinds, want)
 	}
 	v.Tie = &tieView{Why: "no history"}
-	if c := condsOf(&v); c[4].Kind != "untied" || c[4].Text != "no history" {
+	if c := condsOf(v.condsIn()); c[4].Kind != "untied" || c[4].Text != "no history" {
 		t.Errorf("an alarm with no history: %+v", c[4])
 	}
 	v.Tie.Source = "cw"
-	if c := condsOf(&v); c[4].Kind != "alarm" {
+	if c := condsOf(v.condsIn()); c[4].Kind != "alarm" {
 		t.Errorf("an alarm with its history: %+v", c[4])
 	}
-	if c := condsOf(&ruleView{}); len(c) != 0 {
+	if c := condsOf(condsIn{}); len(c) != 0 {
 		t.Errorf("nothing to check: %+v", c)
 	}
 

@@ -143,43 +143,62 @@ type ruleCond struct {
 	Text string
 }
 
-// condsOf are what to check about a rule: problems of fact in what it says;
-// its replay differing from what really fired; why it isn't replayed, or
-// only in part; that its record is copied in, from a cloud's alarm or from
-// elsewhere, or that an alarm has none; and proposals made against a
-// version of it no longer in effect.
-func condsOf(v *ruleView) []ruleCond {
+// condsIn is what a rule's conditions are worked out from, as the rules
+// list and its page each have it: the problems of fact in what it says;
+// whether its replay differs from what really fired; why it isn't
+// replayed, and how it is replayed only in part; its alarm's tie, for a
+// cloud's alarm; where it is recorded, for one copied in; and how many of
+// its proposals not finished with were made against a version of it no
+// longer in effect.
+type condsIn struct {
+	Facts       int
+	Differs     bool
+	Unsupported string
+	Unseen      []string
+	Tie         *tieView
+	Source      string
+	Stale       int
+}
+
+// condsOf are what to check about a rule, in the order its header lists
+// them; the rules list's badge, "n to check", counts them.
+func condsOf(c condsIn) []ruleCond {
 	var out []ruleCond
-	if v.Content.Facts > 0 {
-		out = append(out, ruleCond{Kind: "facts", N: v.Content.Facts})
+	if c.Facts > 0 {
+		out = append(out, ruleCond{Kind: "facts", N: c.Facts})
 	}
-	if v.Differs {
+	if c.Differs {
 		out = append(out, ruleCond{Kind: "differs"})
 	}
-	if v.Unsupported != "" {
-		out = append(out, ruleCond{Kind: "unreplayed", Text: v.Unsupported})
+	if c.Unsupported != "" {
+		out = append(out, ruleCond{Kind: "unreplayed", Text: c.Unsupported})
 	}
-	for _, u := range v.Unseen {
+	for _, u := range c.Unseen {
 		out = append(out, ruleCond{Kind: "unseen", Text: u})
 	}
 	switch {
-	case v.Tie != nil && v.Tie.Source != "":
+	case c.Tie != nil && c.Tie.Source != "":
 		out = append(out, ruleCond{Kind: "alarm"})
-	case v.Tie != nil:
-		out = append(out, ruleCond{Kind: "untied", Text: v.Tie.Why})
-	case v.Source != "":
-		out = append(out, ruleCond{Kind: "recorded", Text: v.Source})
+	case c.Tie != nil:
+		out = append(out, ruleCond{Kind: "untied", Text: c.Tie.Why})
+	case c.Source != "":
+		out = append(out, ruleCond{Kind: "recorded", Text: c.Source})
 	}
+	if c.Stale > 0 {
+		out = append(out, ruleCond{Kind: "stale", N: c.Stale})
+	}
+	return out
+}
+
+// condsIn is what its page has of a rule's conditions.
+func (v *ruleView) condsIn() condsIn {
 	stale := 0
 	for _, p := range v.Proposals {
 		if p.Stale && slices.Contains(ledger.Unfinished(), p.State) {
 			stale++
 		}
 	}
-	if stale > 0 {
-		out = append(out, ruleCond{Kind: "stale", N: stale})
-	}
-	return out
+	return condsIn{Facts: v.Content.Facts, Differs: v.Differs, Unsupported: v.Unsupported, Unseen: v.Unseen, Tie: v.Tie, Source: v.Source, Stale: stale}
 }
 
 // ruleFact is a line of what a rule's header says of it: its team,

@@ -56,4 +56,4 @@ its name; the sign is for the eye alone. */}}
 {{- range $r.Trust}} <span class="badge trust"{{if eq . "recorded"}} title="{{t "recorded in %s" $r.Source}}"{{else if eq . "unreplayed"}} title="{{t "not replayed: %s" $r.Unsupported}}"{{end}}>{{if eq . "differs"}}<span aria-hidden="true">≠</span> {{t "Differs"}}{{else if eq . "unreplayed"}}<span aria-hidden="true">◌</span> {{t "Not replayed"}}{{else}}<span aria-hidden="true">⇣</span> {{t "Recorded only"}}{{end}}</span>{{end}}
 {{- with $r.Status}} <span class="badge pill {{.}}"><span aria-hidden="true">{{if eq . "keep"}}✓{{else if eq . "tune"}}±{{else}}⊘{{end}}</span> {{t .}}</span>{{end}}
 {{- if $r.Proposed}} <a class="badge prog" href="{{$.P.RuleAt $r.Name "#proposals" "tab" "proposals"}}"><span aria-hidden="true">✎</span> {{t "Proposed"}}</a>{{end}}
-{{- with $r.Facts}} <a class="badge check" href="{{$.P.RuleAt $r.Name "#says"}}"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "%d to check" .}}</a>{{end}}</span>{{end}}
+{{- with $r.Checks}} <a class="badge check" href="{{$.P.RuleAt $r.Name "#checks"}}"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "%d to check" .}}</a>{{end}}</span>{{end}}
