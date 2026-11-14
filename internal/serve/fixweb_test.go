@@ -2,8 +2,10 @@ package serve
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -142,4 +144,152 @@ func TestFixTextsTranslated(t *testing.T) {
 			}
 		}
 	}
+}
+
+// windowForm is a quiet window's form, as a browser sends it.
+func windowForm(title, start, end string, more ...string) url.Values {
+	f := url.Values{"title": {title}, "start": {start}, "end": {end}, "every": {""}, "on": {""}, "until": {""}, "team": {"0"}, "rules": {""}, "labels": {""}}
+	for i := 0; i+1 < len(more); i += 2 {
+		f.Set(more[i], more[i+1])
+	}
+	return f
+}
+
+// TestWindowPreview: Preview, on the same POST as saving, writes nothing,
+// and shows the form as typed with what the window would do: the rules it
+// applies to, the firings of the last four weeks it would have excused,
+// as many as saving it excuses, and when it falls in the next four weeks.
+// It is checked as saving is: the role, the team, the same site; what was
+// typed comes back escaped, and a window that couldn't be kept is refused.
+func TestWindowPreview(t *testing.T) {
+	s, pay, search := rolesServer(t, nil)
+	h := s.Handler()
+	ctx := context.Background()
+	from, to := now.Add(-27*24*time.Hour).In(time.UTC).Format("2006-01-02T15:04"), now.Add(-time.Minute).In(time.UTC).Format("2006-01-02T15:04")
+	f := windowForm("Checkout <b>deploy</b>", from, to, "rules", "^Err", "labels", "service=search", "preview", "1")
+	gen := s.l.Gen()
+	code, body := as(t, h, http.MethodPost, "/windows", "ed@example.com", "", f)
+	if code != http.StatusOK {
+		t.Fatalf("preview: %d\n%s", code, body)
+	}
+	if s.l.Gen() != gen {
+		t.Error("a preview wrote to the ledger")
+	}
+	if ws, _ := s.l.Windows(ctx, now.Add(-60*24*time.Hour), now.Add(60*24*time.Hour)); len(ws) != 0 {
+		t.Errorf("a preview kept a window: %+v", ws)
+	}
+	for _, want := range []string{`<section class="card preview" id="preview" aria-labelledby="preview-h">`,
+		`<td><a href="/rules/Errors"><bdi>Errors</bdi></a></td><td class="n">20</td>`,
+		`it would have excused 20 firings that caught nothing; 0 of them are excused already.`,
+		`It doesn&#39;t fall in the next four weeks.`,
+		// The form as typed, escaped, and its buttons.
+		`<input name="title" required maxlength="200" value="Checkout &lt;b&gt;deploy&lt;/b&gt;"`, `value="` + from + `"`, `value="^Err"`, `value="service=search"`,
+		`<button name="preview" value="1" formaction="/windows#preview" class="quiet-button">Preview</button> <button>Add it</button>`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("no %s", want)
+		}
+	}
+	if strings.Contains(body, "<b>deploy") {
+		t.Error("the title is said back raw")
+	}
+	// A firing that caught something isn't excused, whatever matches it:
+	// of Errors' 21 over the weeks, one caught INC-1.
+	if _, body := as(t, h, http.MethodPost, "/windows", "ed@example.com", "", windowForm("all", from, to, "preview", "1")); !strings.Contains(body,
+		`it would have excused 20 firings that caught nothing`) {
+		t.Error("a firing that caught something is counted excused")
+	}
+	// Saved as previewed, it excuses as many.
+	f.Del("preview")
+	if code, _ := as(t, h, http.MethodPost, "/windows", "ed@example.com", "", f); code != http.StatusSeeOther {
+		t.Fatalf("saving: %d", code)
+	}
+	n, err := s.l.CountFirings(ctx, now.Add(-28*24*time.Hour), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs, _ := s.l.Firings(ctx, ledger.FiringQuery{From: now.Add(-28 * 24 * time.Hour), To: now, Excused: true, Limit: n + 1})
+	if len(fs) != 20 {
+		t.Errorf("saved, it excused %d, previewed 20", len(fs))
+	}
+	// Every day: its repeats in the next four weeks; changing one shows
+	// its own page, the window as it was kept.
+	daily := windowForm("Nightly", now.Add(time.Hour).In(time.UTC).Format("2006-01-02T15:04"), now.Add(2*time.Hour).In(time.UTC).Format("2006-01-02T15:04"),
+		"every", "day", "id", "1", "preview", "1")
+	code, body = as(t, h, http.MethodPost, "/windows", "ed@example.com", "", daily)
+	if code != http.StatusOK || strings.Count(body, " → ") < 28 || !strings.Contains(body, `<input type="hidden" name="id" value="1">`) ||
+		!strings.Contains(body, "<h1>Checkout &lt;b&gt;deploy&lt;/b&gt;</h1>") || !strings.Contains(body, `<button>Save</button>`) {
+		t.Errorf("a daily window's preview: %d, %d repeats", code, strings.Count(body, " → "))
+	}
+	if w, _ := s.l.WindowByID(ctx, 1); w.Title != "Checkout <b>deploy</b>" || w.Every != "" {
+		t.Errorf("a preview changed the window: %+v", w)
+	}
+	// Checked as saving is.
+	if _, err := s.l.PutGrant(ctx, ledger.Grant{Who: "user:pat@example.com", TeamID: pay}, "boss"); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		who, site string
+		form      url.Values
+		want      int
+	}{
+		{"vic@example.com", "same-origin", f, http.StatusForbidden},
+		{"", "same-origin", f, http.StatusForbidden},
+		{"pat@example.com", "same-origin", windowForm("w", from, to, "team", fmt.Sprint(search), "preview", "1"), http.StatusForbidden},
+		{"pat@example.com", "same-origin", windowForm("w", from, to, "preview", "1"), http.StatusForbidden},
+		{"pat@example.com", "same-origin", windowForm("w", from, to, "team", fmt.Sprint(pay), "id", "1", "preview", "1"), http.StatusForbidden},
+		{"pat@example.com", "same-origin", windowForm("w", from, to, "team", fmt.Sprint(pay), "preview", "1"), http.StatusOK},
+		{"ed@example.com", "same-origin", windowForm("w", to, from, "preview", "1"), http.StatusBadRequest},
+		{"ed@example.com", "same-origin", windowForm("w", from, to, "rules", "(", "preview", "1"), http.StatusBadRequest},
+	} {
+		r := httptest.NewRequest(http.MethodPost, "/windows", strings.NewReader(c.form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		r.Header.Set("Sec-Fetch-Site", c.site)
+		if c.who != "" {
+			r.Header.Set("X-Forwarded-Email", c.who)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != c.want {
+			t.Errorf("%s, %v: %d, want %d", c.who, c.form, w.Code, c.want)
+		}
+	}
+	// From another site, refused before anything is read.
+	r := httptest.NewRequest(http.MethodPost, "/windows", strings.NewReader(f.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Sec-Fetch-Site", "cross-site")
+	r.Header.Set("X-Forwarded-Email", "ed@example.com")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("from another site: %d", w.Code)
+	}
+}
+
+// a11yPreviews are a quiet window's preview, to add one and to change one,
+// as GET pages for axe (test/a11y/axe.sh), which reads pages by their
+// URLs: each answers what the form's Preview would.
+func a11yPreviews(mux *http.ServeMux, s *Server) []string {
+	h := s.Handler()
+	for path, form := range map[string]url.Values{
+		"/a11y/window-preview":      windowForm("Checkout deploy", "2026-11-02T10:00", "2026-11-02T11:00", "every", "day", "rules", "^Err", "preview", "1"),
+		"/a11y/window-preview-edit": windowForm("Nightly", "2026-11-02T01:00", "2026-11-02T02:00", "id", "1", "preview", "1"),
+	} {
+		mux.HandleFunc("GET "+path, func(w http.ResponseWriter, r *http.Request) {
+			p := httptest.NewRequest(http.MethodPost, "/windows", strings.NewReader(form.Encode()))
+			p.Header = r.Header.Clone()
+			p.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			p.Header.Set("Sec-Fetch-Site", "same-origin")
+			p.Host = r.Host
+			h.ServeHTTP(w, p)
+		})
+	}
+	return []string{"/a11y/window-preview", "/a11y/window-preview-edit"}
+}
+
+// TestPreviewAccessible: a quiet window's preview, to add one and to
+// change one, passes the pages' checks in each language.
+func TestPreviewAccessible(t *testing.T) {
+	s, _ := a11yServer(t)
+	mux := http.NewServeMux()
+	pageA11y(t, mux, "", a11yPreviews(mux, s)...)
 }

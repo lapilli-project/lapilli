@@ -877,27 +877,27 @@ func (l *Ledger) WindowByID(ctx context.Context, id int64) (Window, error) {
 	return ws[0], nil
 }
 
-// PutWindow makes a quiet window, or changes the one with w's ID, gives the
-// firings it meets, before and after, their stones again, and returns its
-// ID.
-func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.Options) (int64, error) {
+// checkWindow checks a quiet window as PutWindow keeps it, and puts it as
+// it is kept: its title trimmed, its schedule read, what doesn't apply to
+// how it repeats left out.
+func (l *Ledger) checkWindow(w *Window) error {
 	w.Title = strings.TrimSpace(w.Title)
 	switch {
 	case w.Title == "":
-		return 0, invalid("a quiet window needs a title")
+		return invalid("a quiet window needs a title")
 	case w.Start.IsZero() || w.End.IsZero() || !w.End.After(w.Start):
-		return 0, invalid("a quiet window needs a start, and an end after it")
+		return invalid("a quiet window needs a start, and an end after it")
 	case w.End.Sub(w.Start) > maxWindow:
-		return 0, invalid("a quiet window lasts 31 days at most")
+		return invalid("a quiet window lasts 31 days at most")
 	case w.Every != "" && !slices.Contains(Everies, w.Every):
-		return 0, invalid("a quiet window repeats every day, week or month, or by a cron expression")
+		return invalid("a quiet window repeats every day, week or month, or by a cron expression")
 	case w.Every == "day" && w.End.Sub(w.Start) >= 24*time.Hour,
 		w.Every == "week" && w.End.Sub(w.Start) >= 7*24*time.Hour:
-		return 0, invalid("a repeating quiet window is shorter than how often it repeats")
+		return invalid("a repeating quiet window is shorter than how often it repeats")
 	case w.Every != "" && !w.Until.IsZero() && w.Until.Before(w.Start):
-		return 0, invalid("a quiet window repeats until a day after it starts")
+		return invalid("a quiet window repeats until a day after it starts")
 	case len(w.On) > 100:
-		return 0, invalid("a quiet window's schedule is 100 characters at most")
+		return invalid("a quiet window's schedule is 100 characters at most")
 	}
 	if w.Every == "" {
 		w.Until = time.Time{}
@@ -908,15 +908,15 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 	} else {
 		sch, err := w.schedule(l.loc)
 		if err != nil {
-			return 0, err
+			return err
 		}
 		// Its first repeat is a time it falls due; each repeat is shorter
 		// than the shortest time between two.
 		if !sch.Last(w.Start, l.loc).Equal(w.Start) {
-			return 0, invalid("a quiet window that repeats starts at a time its schedule falls due: the next is %s", sch.Next(w.Start, l.loc).Format("2006-01-02 15:04"))
+			return invalid("a quiet window that repeats starts at a time its schedule falls due: the next is %s", sch.Next(w.Start, l.loc).Format("2006-01-02 15:04"))
 		}
 		if gap := sch.Gap(w.Start, l.loc); gap > 0 && w.End.Sub(w.Start) >= gap {
-			return 0, invalid("a repeating quiet window is shorter than how often it repeats")
+			return invalid("a repeating quiet window is shorter than how often it repeats")
 		}
 		if w.Every == "month" && w.On == "" {
 			w.On = strconv.Itoa(w.Start.In(l.loc).Day())
@@ -925,12 +925,19 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 		w.sch = &sch
 	}
 	if w.TeamID < 0 {
-		return 0, invalid("no such team")
+		return invalid("no such team")
 	}
 	if _, err := checkRE(w.Rules); err != nil {
-		return 0, err
+		return err
 	}
-	if err := errors.Join(checkLabels(w.Labels), checkText("a title is %d characters at most", w.Title, 200)); err != nil {
+	return errors.Join(checkLabels(w.Labels), checkText("a title is %d characters at most", w.Title, 200))
+}
+
+// PutWindow makes a quiet window, or changes the one with w's ID, gives the
+// firings it meets, before and after, their stones again, and returns its
+// ID.
+func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.Options) (int64, error) {
+	if err := l.checkWindow(&w); err != nil {
 		return 0, err
 	}
 	id := w.ID

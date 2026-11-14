@@ -154,6 +154,10 @@ type windowsView struct {
 	// TeamOf names each window's team.
 	TeamOf map[int64]string
 	Pick   teamPick
+	// Draft is the form to add one, as typed when Preview shows what it
+	// would do.
+	Draft   windowDraft
+	Preview *windowPreview
 }
 
 func (s *Server) windowsPage(r *http.Request) (any, error) {
@@ -169,7 +173,8 @@ func (s *Server) windowsPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return windowsView{ws, now, teamNames(o), s.teamPick(r, o)}, nil
+	pick := s.teamPick(r, o)
+	return windowsView{Lines: ws, Now: now, TeamOf: teamNames(o), Pick: pick, Draft: windowDraft{Pick: pick}}, nil
 }
 
 // teamNames are the teams' names by id.
@@ -195,6 +200,10 @@ type windowView struct {
 	Excused  []excusedLine
 	TeamName string
 	Pick     teamPick
+	// Draft is the form to change it: as it is kept, or as typed when
+	// Preview shows what it would do.
+	Draft   windowDraft
+	Preview *windowPreview
 }
 
 func (s *Server) windowPage(r *http.Request) (any, error) {
@@ -202,23 +211,29 @@ func (s *Server) windowPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, ledger.ErrNotFound
 	}
+	return s.windowViewOf(r, id)
+}
+
+// windowViewOf is a quiet window's page.
+func (s *Server) windowViewOf(r *http.Request, id int64) (windowView, error) {
 	w, err := s.l.WindowByID(r.Context(), id)
 	if err != nil {
-		return nil, err
+		return windowView{}, err
 	}
 	o, err := s.owners(r.Context())
 	if err != nil {
-		return nil, err
+		return windowView{}, err
 	}
 	v := windowView{Window: w, Labels: labelText(w.Labels), TeamName: o.byID[w.TeamID].Name, Pick: s.teamPick(r, o)}
 	if !w.Until.IsZero() {
 		v.UntilText = w.Until.In(s.cfg.Loc).Format("2006-01-02")
 	}
+	v.Draft = draftOf(w, s.cfg.Loc, v.Pick)
 	// Those it excused, the latest first: of a repeating window, over each
 	// repeat so far.
 	fs, err := s.l.Firings(r.Context(), ledger.FiringQuery{From: w.Start, To: w.Through(s.now()).Add(time.Second), Excused: true, Limit: 500})
 	if err != nil {
-		return nil, err
+		return windowView{}, err
 	}
 	for _, f := range fs {
 		if w.Excuses(f.Firing) { // and not only another window overlapping it
@@ -477,9 +492,15 @@ func (s *Server) postWindow(w http.ResponseWriter, r *http.Request) {
 		}
 		until = s.l.Midnight(day)
 	}
-	id, err := s.l.PutWindow(r.Context(), ledger.Window{ID: formInt(r, "id"), Title: r.PostFormValue("title"), Start: start, End: end,
+	x := ledger.Window{ID: formInt(r, "id"), Title: r.PostFormValue("title"), Start: start, End: end,
 		Every: r.PostFormValue("every"), On: r.PostFormValue("on"), Until: until, TeamID: formInt(r, "team"),
-		Rules: strings.TrimSpace(r.PostFormValue("rules")), Labels: labels}, s.user(r), o)
+		Rules: strings.TrimSpace(r.PostFormValue("rules")), Labels: labels}
+	if r.PostFormValue("preview") == "1" {
+		// What it would do, shown with the form as typed: nothing written.
+		s.previewWindow(w, r, x)
+		return
+	}
+	id, err := s.l.PutWindow(r.Context(), x, s.user(r), o)
 	s.poke() // to carry on judging what is left
 	s.written(w, r, err, fmt.Sprintf("/windows/%d", id))
 }

@@ -55,6 +55,7 @@ func TestA11yServe(t *testing.T) {
 	s, paths := a11yServer(t)
 	s.cfg.AllowedHosts = append(s.cfg.AllowedHosts, "host.docker.internal")
 	mux := http.NewServeMux()
+	paths = append(paths, a11yPreviews(mux, s)...)
 	mux.HandleFunc("GET /a11y-paths", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintln(w, strings.Join(paths, "\n"))
 	})
