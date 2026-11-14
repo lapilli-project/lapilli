@@ -283,8 +283,24 @@ func TestBulkResultShown(t *testing.T) {
 		if want == "" && said || want != "" && !strings.Contains(body, `<p class="note bulk-done" role="status">`+want) {
 			t.Errorf("%s: says %v, want %q", q, said, want)
 		}
-		if strings.Contains(body, "done=") || strings.Contains(body, "bulk=") {
+		if strings.Contains(body, "done=") || strings.Contains(body, "bulk=") || strings.Contains(body, "done%3D") || strings.Contains(body, "bulk%3D") {
 			t.Errorf("%s: a link carries the result on", q)
+		}
+	}
+	// The language links, the page's own address query-escaped, too; and
+	// a comment's form, which goes back to its page.
+	for path, want := range map[string]string{
+		"/rules?bulk=task&done=3&weeks=12":                      `href="/lang?to=ko&amp;back=%2Frules%3Fweeks%3D12"`,
+		"/rules?done=3&bulk=status&refused=1&failed=2&theirs=1": `href="/lang?to=ja&amp;back=%2Frules"`,
+		"/firings?day=2026-11-02&bulk=real&done=1&already=1":    `href="/lang?to=es&amp;back=%2Ffirings%3Fday%3D2026-11-02"`,
+		"/incidents/INC-1?bulk=task&done=1":                     `<input type="hidden" name="back" value="/incidents/INC-1">`,
+	} {
+		_, body := getAs(t, h, path, "ed@example.com")
+		if !strings.Contains(body, want) {
+			t.Errorf("%s: no %s", path, want)
+		}
+		if strings.Contains(body, "done%3D") || strings.Contains(body, "bulk%3D") || strings.Contains(body, "bulk=") {
+			t.Errorf("%s: a link carries the result on", path)
 		}
 	}
 }

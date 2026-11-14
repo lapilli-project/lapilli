@@ -882,7 +882,7 @@ func (s *Server) page(r *http.Request, name string, v any) page {
 	}
 	p.Here, p.HereName = navPage(name)
 	p.Nav, p.Crumb, p.Bar = s.nav(r.Context(), p), crumbsOf[name], barOf(name, r, p.Ctx)
-	back := r.URL.RequestURI()
+	back := unsaid(r.URL)
 	if len(r.URL.RawQuery) > maxQuery {
 		back = r.URL.EscapedPath()
 	}
@@ -890,6 +890,21 @@ func (s *Server) page(r *http.Request, name string, v any) page {
 		p.Langs = append(p.Langs, langLink{n.Code, n.Name, "/lang?to=" + n.Code + "&back=" + url.QueryEscape(back), n.Code == l})
 	}
 	return p
+}
+
+// unsaid is a page's own address as the links it makes name it: without
+// what a bulk write did (bulkParams), which the page says once.
+func unsaid(u *url.URL) string {
+	q := u.Query()
+	if !slices.ContainsFunc(bulkParams, q.Has) {
+		return u.RequestURI()
+	}
+	for _, k := range bulkParams {
+		q.Del(k)
+	}
+	v := *u
+	v.RawQuery = q.Encode()
+	return v.RequestURI()
 }
 
 // render writes a page, in the reader's language.

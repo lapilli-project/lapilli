@@ -397,7 +397,7 @@ func (s *Server) commentsView(r *http.Request, on, key string) (commentsView, er
 	if teams := s.editsTeams(r); ro && len(teams) > 0 {
 		ro = s.commentInScope(r.WithContext(ledger.WithTeams(r.Context(), teams)), 0, on, key) != nil
 	}
-	return commentsView{On: on, Key: key, Back: r.URL.RequestURI(), List: cs, Me: s.user(r), ReadOnly: ro, Loc: s.cfg.Loc}, err
+	return commentsView{On: on, Key: key, Back: unsaid(r.URL), List: cs, Me: s.user(r), ReadOnly: ro, Loc: s.cfg.Loc}, err
 }
 
 // The forms.
