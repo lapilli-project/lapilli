@@ -175,7 +175,9 @@ func btTableOf(bt *backtest) *btTable {
 // proposalStep is a step of what happened to a proposal, as its page's
 // history lists it: made, approved (Of of Need), approved or waiting again
 // as --approvals changed, moved to a state (with its pull request's Link,
-// or why), an undo asked for (#Undo).
+// or why), waiting, approved, while its rule fires, an undo asked for
+// (#Undo). Reason is said only when the step set it: a proposal keeps its
+// reason from one step to the next.
 type proposalStep struct {
 	At          time.Time
 	By          string
@@ -186,41 +188,58 @@ type proposalStep struct {
 	Undo        int64
 }
 
-// stepsMost is how many of a proposal's steps its page reads.
+// stepsMost is how many of a proposal's steps its page reads, the latest.
 const stepsMost = 100
+
+// stepFields are the fields of a proposal's step, as the ledger keeps its
+// before and after: an approval's (approvals, need), or the proposal's
+// summary when it moved (state, reason, link). Which are there says what
+// the step was, never the step's text.
+type stepFields struct {
+	Approvals *int    `json:"approvals"`
+	Need      *int    `json:"need"`
+	State     *string `json:"state"`
+	Reason    string  `json:"reason"`
+	Link      string  `json:"link"`
+}
 
 // stepsOf are what happened to a proposal, in order: its making and its
 // approvals from what the ledger keeps of it, and every step it took
-// since, from the changes the ledger keeps (those older than --keep are
-// gone); cut says they are, its making's among them.
-func (s *Server) stepsOf(r *http.Request, p ledger.Proposal) (steps []proposalStep, cut bool, err error) {
-	cs, err := s.l.ProposalSteps(r.Context(), p.ID, stepsMost)
+// since, from the changes the ledger keeps, in the order they were made,
+// the latest stepsMost of them. gone says its making's change is gone
+// (older than --keep); older, that there were older steps than those read.
+func (s *Server) stepsOf(r *http.Request, p ledger.Proposal) (steps []proposalStep, gone, older bool, err error) {
+	cs, older, err := s.l.ProposalSteps(r.Context(), p.ID, stepsMost)
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	steps = append(steps, proposalStep{At: p.Made, By: p.MadeBy, Kind: "made"})
 	prefix := fmt.Sprintf("proposal #%d ", p.ID)
-	approvals := 0
-	made := false
+	approved, made := false, false
 	for _, c := range cs {
 		what := strings.TrimPrefix(c.What, prefix)
 		st := proposalStep{At: c.At, By: c.By}
-		var after struct {
-			Approvals int    `json:"approvals"`
-			Need      int    `json:"need"`
-			Reason    string `json:"reason"`
-			Link      string `json:"link"`
-		}
+		var before, after stepFields
+		json.Unmarshal([]byte(c.Before), &before)
 		json.Unmarshal([]byte(c.After), &after)
+		// A proposal moved to a state keeps its summary as the step's
+		// after, its state in it; an approval keeps how many approved of
+		// how many are needed. "approved" is both an approval's text and
+		// that of a proposal moved to approved, from approved too, as one
+		// waits while its rule fires.
+		moved := after.State != nil && after.Approvals == nil
 		switch {
 		case what == "made":
 			made = true
 			continue // from the proposal itself
-		case what == "approved":
-			approvals++
-			st.Kind, st.Of, st.Need = "approved", after.Approvals, after.Need
-			if st.Of == 0 {
-				st.Of = approvals
+		case what == "approved" && !moved:
+			if after.Approvals == nil {
+				continue // nothing kept says how many
+			}
+			approved = true
+			st.Kind, st.Of = "approved", *after.Approvals
+			if after.Need != nil {
+				st.Need = *after.Need
 			}
 		case strings.HasPrefix(what, "approved, as fewer"):
 			st.Kind = "promoted"
@@ -229,9 +248,17 @@ func (s *Server) stepsOf(r *http.Request, p ledger.Proposal) (steps []proposalSt
 		case strings.HasPrefix(what, "asked to be undone, as #"):
 			st.Kind = "undo"
 			st.Undo, _ = strconv.ParseInt(strings.TrimPrefix(what, "asked to be undone, as #"), 10, 64)
-		case stateGroups[what] != "":
-			st.Kind, st.State, st.Reason = "state", what, after.Reason
-			if what == ledger.StateOpened {
+		case moved && stateGroups[*after.State] != "" && what == *after.State:
+			st.Kind, st.State = "state", *after.State
+			if before.State != nil && *before.State == *after.State {
+				// Moved to where it was: an approved change waiting, as
+				// its rule fires.
+				st.Kind = "waits"
+			}
+			if after.Reason != before.Reason {
+				st.Reason = after.Reason
+			}
+			if st.State == ledger.StateOpened {
 				st.Link = after.Link
 			}
 		default:
@@ -239,14 +266,15 @@ func (s *Server) stepsOf(r *http.Request, p ledger.Proposal) (steps []proposalSt
 		}
 		steps = append(steps, st)
 	}
-	// An undo is approved as it is asked for: by whoever asked, then.
-	if p.Kind == ledger.KindUndo && approvals == 0 && len(p.Approvals) > 0 {
-		steps = append(steps[:1], append([]proposalStep{{At: p.Approvals[0].At, By: p.Approvals[0].By, Kind: "approved", Of: 1, Need: 1}}, steps[1:]...)...)
+	// An undo is approved as it is asked for: by whoever asked, then. Its
+	// approval is kept with the step of the change it undoes, before any of
+	// its own.
+	if p.Kind == ledger.KindUndo && !approved && len(p.Approvals) > 0 {
+		steps = slices.Insert(steps, 1, proposalStep{At: p.Approvals[0].At, By: p.Approvals[0].By, Kind: "approved", Of: 1, Need: 1})
 	}
-	slices.SortStableFunc(steps, func(a, b proposalStep) int { return a.At.Compare(b.At) })
 	// An undo is made by its asking, kept as a step of the change it
 	// undoes: its own steps start with its approval.
-	return steps, !made && p.Kind != ledger.KindUndo, nil
+	return steps, !made && !older && p.Kind != ledger.KindUndo, older, nil
 }
 
 // Who is who took a step, as a page names them: Lapilli itself and a

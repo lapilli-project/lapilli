@@ -548,11 +548,20 @@ dry run, its history), with the backtest in the dry run's place:
 - **History**: what happened to it, in order, each with who and when:
   made (by an agent, for whom), each approval (k of m), approved or waiting
   again as `--approvals` changed, each state it moved to (with the pull
-  request's link, or why it was refused or failed), an undo asked for,
-  linked to it. Its making and approvals are the proposal's own; the rest
-  are the ledger's changes whose `what` is the proposal's (`ProposalSteps`,
-  an additive read by the changes' index on `what`), those older than
-  `--keep` gone, and said so. An applied change's ends with "Ask to undo
+  request's link, or why it was refused or failed), an approved change
+  waiting while its rule fires ("waits: it fires now", with why), an undo
+  asked for, linked to it. Its making and approvals are the proposal's
+  own; the rest are the ledger's changes whose `what` is the proposal's
+  (`ProposalSteps`, an additive read by the changes' index on `what`),
+  those older than `--keep` gone, and said so. A step is told by the
+  fields its change keeps, never by its text: waiting while the rule fires
+  is kept as a move from approved to approved, "proposal #N approved" as
+  an approval is, but with the proposal's state where an approval has how
+  many approved of how many. A reason is said under the step that gave it,
+  not again under each after it, which keep it. The steps are in the
+  order the ledger kept them, by the changes' ids (replicas' clocks set
+  their times to the second), the latest 100 of them, with "older steps
+  aren't shown" when there are more. An applied change's ends with "Ask to undo
   it": undoing is a proposal of its own, approved by the approver who asks
   as they ask, checked again and carried out the same way, which the page
   says; it is what `/proposals/{id}/undo` has done since v0.22.0.

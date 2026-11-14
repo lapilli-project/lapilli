@@ -305,6 +305,10 @@ type proposalView struct {
 	Backtest  *btTable
 	Steps     []proposalStep
 	StepsCut  bool
+	// StepsOlder says older steps than those shown are kept, past the
+	// latest stepsMost.
+	StepsOlder bool
+	StepsMost  int
 	// What the reader may not do, each shown disabled with why: approve
 	// it, ask for it to be undone, drop or close it, make it a task.
 	ApproveOff, UndoOff, DropOff, TaskOff *pageAction
@@ -367,7 +371,8 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 	if v.Backtest == nil {
 		v.Read = "I have read the change and its evidence"
 	}
-	if v.Steps, v.StepsCut, err = s.stepsOf(r, p); err != nil {
+	v.StepsMost = stepsMost
+	if v.Steps, v.StepsCut, v.StepsOlder, err = s.stepsOf(r, p); err != nil {
 		return nil, err
 	}
 	s.offs(r, p, &v)

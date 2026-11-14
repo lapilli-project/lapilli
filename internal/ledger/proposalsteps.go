@@ -4,37 +4,46 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 )
 
 // What the proposals' pages read beside the proposals themselves
 // (docs/design/ui.md): each proposal's steps, as the changes keep them, and
 // the proposals in brief, for the list's facets.
 
-// ProposalSteps are the changes kept of a proposal, in the order they were
-// made, most at most: its making, each approval, each state it moved to,
-// an undo asked for. They are those whose what starts "proposal #ID ",
-// read by the changes' index on what; those older than --keep are gone.
-func (l *Ledger) ProposalSteps(ctx context.Context, id int64, most int) ([]Change, error) {
+// ProposalSteps are the latest changes kept of a proposal, most at most,
+// in the order they were made (by the changes' ids, not their times, which
+// replicas' clocks set to the second): its making, each approval, each
+// state it moved to, an undo asked for. They are those whose what starts
+// "proposal #ID ", read by the changes' index on what; those older than
+// --keep are gone. more says there are older ones than those given.
+func (l *Ledger) ProposalSteps(ctx context.Context, id int64, most int) (steps []Change, more bool, err error) {
 	// Every what of one proposal, and none of another's (#1 is not #12):
 	// the space after its number, up to the character after the space.
 	from := fmt.Sprintf("proposal #%d ", id)
 	to := from[:len(from)-1] + "!"
-	rows, err := l.r.QueryContext(ctx, "SELECT at, by, what, before, after FROM changes WHERE what >= ? AND what < ? ORDER BY id LIMIT ?", from, to, most)
+	rows, err := l.r.QueryContext(ctx, "SELECT at, by, what, before, after FROM changes WHERE what >= ? AND what < ? ORDER BY id DESC LIMIT ?", from, to, most+1)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer rows.Close()
-	var out []Change
 	for rows.Next() {
 		var c Change
 		var at int64
 		if err := rows.Scan(&at, &c.By, &c.What, &c.Before, &c.After); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		c.At = unix(at)
-		out = append(out, c)
+		steps = append(steps, c)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	if len(steps) > most {
+		steps, more = steps[:most], true
+	}
+	slices.Reverse(steps)
+	return steps, more, nil
 }
 
 // ProposalHead is a proposal in brief, as the proposals list shows and

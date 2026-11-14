@@ -104,11 +104,13 @@
 <h2>{{t "History"}}</h2>
 <ol class="steps">{{range .Steps}}<li><span class="t">{{at $loc .At}}</span> {{if eq .Kind "made"}}{{if $v.Agent}}{{tbdi "Made by an agent, for %s" (.Name $.Lang)}}{{else}}{{tbdi "Made by %s" (.Name $.Lang)}}{{end}}
 {{- else if eq .Kind "approved"}}{{tbdi "Approved by %s: %d of %d" (.Name $.Lang) .Of (or .Need $v.Need)}}
+{{- else if eq .Kind "waits"}}{{template "proposalbadge" .Badge}} {{t "waits: it fires now"}}{{with .Reason}}<br><span class="quiet">{{shown .}}</span>{{end}}
 {{- else if eq .Kind "promoted"}}{{t "Approved, as fewer approvals are needed"}}
 {{- else if eq .Kind "demoted"}}{{t "Waiting for approval again, as more approvals are needed"}}
 {{- else if eq .Kind "undo"}}{{tbdi "%s asked to undo it, as" (.Name $.Lang)}} <a href="{{$.Link (printf "/proposals/%d" .Undo)}}">#{{.Undo}}</a>
 {{- else}}{{template "proposalbadge" .Badge}} {{tbdi "by %s" (.Name $.Lang)}}{{with .Link}} <a href="{{.}}" rel="noopener noreferrer">{{t "Pull request"}} <span aria-hidden="true">↗</span></a>{{end}}{{with .Reason}}<br><span class="quiet">{{shown .}}</span>{{end}}{{end}}</li>{{end}}</ol>
 {{if .StepsCut}}<p class="quiet">{{t "Steps older than the changes the ledger keeps (--keep) aren't shown."}}</p>{{end}}
+{{if .StepsOlder}}<p class="quiet">{{t "Older steps aren't shown: only the latest %d are." .StepsMost}}</p>{{end}}
 {{if .CanUndo}}<h3>{{t "Undo it"}}</h3>
 <p class="quiet">{{t "Undoing it is a change of its own: a new proposal, which you approve as you ask for it, checked again and carried out the same way, with the rule as it was kept before this one changed it."}}</p>
 <form method="post" action="/proposals/{{.ID}}/undo"><input type="hidden" name="key" value="{{.Undo}}"><button class="quiet-button">{{t "Ask to undo it"}}</button></form>

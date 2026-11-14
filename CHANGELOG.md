@@ -19,7 +19,8 @@ this phase.
   incidents caught later), with a warning above it when the change misses
   an incident the rule catches now; the approval, n of m; and what
   happened to it, in order, each step with who and when, the pull
-  request's link and an undo asked for.
+  request's link, a change waiting while its rule fires, and an undo asked
+  for: the latest hundred steps, in the order the ledger kept them.
 - **A diff with options**, `?diff=unified|split` and `?context=3|all`, as
   links, on a proposal's page and on a rule's versions tab: side by side is
   a table headed with its two sides; around each change, the lines the

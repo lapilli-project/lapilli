@@ -351,7 +351,7 @@ func TestProposalSteps(t *testing.T) {
 		id   int64
 		want []string
 	}{{ids[0], []string{"proposal #1 made", "proposal #1 dropped"}}, {ids[11], []string{"proposal #12 made"}}, {ids[9], []string{"proposal #10 made"}}} {
-		cs, err := s.l.ProposalSteps(ctx, c.id, 10)
+		cs, _, err := s.l.ProposalSteps(ctx, c.id, 10)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -364,4 +364,111 @@ func TestProposalSteps(t *testing.T) {
 		}
 	}
 
+}
+
+// historyOf is a proposal's history as a page lists it to cy, a step a
+// line, its tags taken out; the page worked out afresh.
+func historyOf(t *testing.T, s *Server, id int64) []string {
+	t.Helper()
+	s.cache.Lock()
+	s.cache.gen = "" // a write to the database isn't the ledger's
+	s.cache.Unlock()
+	_, body, _ := ui(t, s.Handler(), http.MethodGet, "/proposals/"+itoa(id), cy, "", nil)
+	i := strings.Index(body, `<ol class="steps">`)
+	j := strings.Index(body[max(i, 0):], "</ol>")
+	if i < 0 || j < 0 {
+		t.Fatal("no history")
+	}
+	var steps []string
+	for _, li := range regexp.MustCompile(`(?s)<li><span class="t">[^<]*</span> (.*?)</li>`).FindAllStringSubmatch(body[i:i+j], -1) {
+		text := regexp.MustCompile(`<[^>]+>`).ReplaceAllString(strings.ReplaceAll(li[1], "<br>", " "), "")
+		steps = append(steps, strings.Join(strings.Fields(text), " "))
+	}
+	return steps
+}
+
+// waitingDeletion is a deletion of Errors, approved by ana, that waited
+// while its rule fired and was then handed to a recipe, its pull request
+// opened and merged: each step as the ledger keeps it.
+func waitingDeletion(t *testing.T) (*Server, int64) {
+	t.Helper()
+	ctx := context.Background()
+	s, _ := changesServer(t, nil)
+	id, err := s.l.Propose(ctx, ledger.Proposal{Rule: "Errors", Kind: ledger.KindDelete, Path: ledger.PathGit, MadeBy: bo, Before: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.Approve(ctx, id, ana, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, waits, err := s.waitsWhileFiring(ctx, state(t, s, id), true); err != nil || !waits {
+		t.Fatalf("doesn't wait: %v", err)
+	}
+	for _, m := range []struct {
+		from, to string
+		step     ledger.Step
+	}{
+		{ledger.StateApproved, ledger.StateReady, ledger.Step{Reason: firedNote, Applied: true}},
+		{ledger.StateReady, ledger.StateOpened, ledger.Step{Link: "https://git.example/pull/3"}},
+		{ledger.StateOpened, ledger.StateMerged, ledger.Step{}},
+	} {
+		if _, err := s.l.Move(ctx, id, []string{m.from}, m.to, ledger.Proposer, m.step); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return s, id
+}
+
+// TestProposalHistoryWaits: an approved change that waits while its rule
+// fires is kept as a move from approved to approved, its text "proposal #N
+// approved" as an approval's: its history says it waited, with why, not
+// that Lapilli approved it; and a step's reason is said under the step
+// that gave it, not again under each after it.
+func TestProposalHistoryWaits(t *testing.T) {
+	s, id := waitingDeletion(t)
+	steps := historyOf(t, s, id)
+	want := []string{
+		"Made by bo@example.com",
+		"Approved by ana@example.com: 1 of 1",
+		"✓ approved waits: it fires now " + firesNote,
+		"↻ being applied (checked again, waiting for a recipe) by Lapilli " + firedNote,
+		"↻ being applied (its pull request is open) by Lapilli Pull request ↗",
+		"↻ being applied (merged, not yet read back) by Lapilli",
+	}
+	if !slices.Equal(steps, want) {
+		t.Errorf("history:\n%q\nwant\n%q", steps, want)
+	}
+}
+
+// TestProposalHistoryByID: a proposal's steps are in the order the ledger
+// kept them, not by their times, which replicas' clocks set to the second.
+func TestProposalHistoryByID(t *testing.T) {
+	s, id := waitingDeletion(t)
+	// The merge kept by a replica whose clock is two hours behind.
+	ledgerExec(t, s, "UPDATE changes SET at = at - 7200 WHERE what = ?", fmt.Sprintf("proposal #%d merged", id))
+	steps := historyOf(t, s, id)
+	if len(steps) != 6 || steps[0] != "Made by bo@example.com" || steps[5] != "↻ being applied (merged, not yet read back) by Lapilli" {
+		t.Errorf("not in the order kept: %q", steps)
+	}
+}
+
+// TestProposalHistoryLatest: a proposal's page reads its latest hundred
+// steps, and says older ones aren't shown; its making, from the proposal
+// itself, first.
+func TestProposalHistoryLatest(t *testing.T) {
+	s, id := waitingDeletion(t)
+	at := time.Now().Unix()
+	for i := range 150 {
+		before := fmt.Sprintf(`{"state":"approved","reason":"step %d"}`, i-1)
+		after := fmt.Sprintf(`{"state":"approved","reason":"step %d"}`, i)
+		ledgerExec(t, s, "INSERT INTO changes (at, by, what, before, after) VALUES (?, ?, ?, ?, ?)", at, ledger.Proposer, fmt.Sprintf("proposal #%d approved", id), before, after)
+	}
+	steps := historyOf(t, s, id)
+	if len(steps) != 1+stepsMost || steps[0] != "Made by bo@example.com" || steps[1] != "✓ approved waits: it fires now step 50" || steps[stepsMost] != "✓ approved waits: it fires now step 149" {
+		t.Errorf("%d steps: %q … %q", len(steps), steps[:min(3, len(steps))], steps[len(steps)-1])
+	}
+	_, body, _ := ui(t, s.Handler(), http.MethodGet, "/proposals/"+itoa(id), cy, "", nil)
+	if !strings.Contains(body, "Older steps aren&#39;t shown: only the latest 100 are.") || strings.Contains(body, "--keep") {
+		t.Error("doesn't say older steps aren't shown, or says they were pruned")
+	}
 }
