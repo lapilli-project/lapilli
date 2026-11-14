@@ -281,6 +281,22 @@ func (s *Server) sessionKey() ([]byte, error) {
 	return []byte(hex.EncodeToString(b)), nil
 }
 
+// usedOnce reports whether a sign-in's state comes back for the first time
+// to any replica sharing the ledger, which keeps it until it would have
+// expired: a callback replayed to another replica is refused as it is to
+// this one. Without replicas, this process's own set says (in.used).
+func (s *Server) usedOnce(ctx context.Context, state string, until int64) bool {
+	if !s.l.Shared() {
+		return true
+	}
+	first, err := s.l.Once(ctx, "signin:"+state, time.Duration(max(until-s.now().Unix(), 60))*time.Second)
+	if err != nil {
+		s.log.Warn("a sign-in's state couldn't be checked against the other replicas: refused", "err", err)
+		return false
+	}
+	return first
+}
+
 // namesPeople reports whether requests say who they come from: a sign-in
 // proxy's header, or a sign-in of lapilli's own.
 func (s *Server) namesPeople() bool { return s.cfg.UserHeader != "" || s.in != nil }
@@ -583,7 +599,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, errBadState)
 		return
 	}
-	if !s.in.used.add(l.State, l.Until, s.now().Unix()) {
+	if !s.in.used.add(l.State, l.Until, s.now().Unix()) || !s.usedOnce(r.Context(), l.State, l.Until) {
 		s.oops(w, r, errBadState)
 		return
 	}

@@ -119,7 +119,26 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/mcp", s.mcpHandler())
 
 	cop := http.NewCrossOriginProtection()
-	return s.hosts(headers(s.signedIn(gzipped(cop.Handler(mux)))))
+	return s.hosts(s.fresh(headers(s.signedIn(gzipped(cop.Handler(mux))))))
+}
+
+// fresh reads, before a request is answered, what other replicas wrote
+// since this one last did (ledger.Refresh), so that what a request shows
+// holds every write made before it was asked, on whichever replica: a
+// round trip to the database, with replicas. The health checks and the
+// static files need none.
+func (s *Server) fresh(h http.Handler) http.Handler {
+	if !s.l.Shared() {
+		return h
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p := r.URL.Path; p != "/healthz" && p != "/readyz" && !strings.HasPrefix(p, "/static/") {
+			// One that fails says nothing more than the request's own reads
+			// will: it is answered from what this replica has.
+			s.l.Refresh(r.Context())
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 // hosts answers only requests to a host name this server answers to. A
@@ -215,6 +234,10 @@ func (s *Server) checks(mux *http.ServeMux) {
 	// sign-in's callback) away from a load balancer for a run's timeout; on
 	// a first start, after the backfill's first day. What is being worked
 	// out is on the pages.
+	//
+	// A replica that follows is ready as the leader is, once a run is
+	// recorded; one that can't reach the ledger's database isn't, so that
+	// the others answer for it. Which replica leads is said after.
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		if !s.ready.Load() {
 			if c, err := s.l.Cursor(r.Context()); err == nil && !c.IsZero() {
@@ -225,7 +248,17 @@ func (s *Server) checks(mux *http.ServeMux) {
 			http.Error(w, "no run is recorded yet", http.StatusServiceUnavailable)
 			return
 		}
-		io.WriteString(w, "ok\n")
+		if !s.l.Shared() {
+			io.WriteString(w, "ok\n")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		if err := s.l.Refresh(ctx); err != nil {
+			http.Error(w, "can't reach the ledger's database", http.StatusServiceUnavailable)
+			return
+		}
+		io.WriteString(w, "ok\n"+s.leadership()+"\n")
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
 }
@@ -234,7 +267,7 @@ func (s *Server) checks(mux *http.ServeMux) {
 func (s *Server) MetricsHandler() http.Handler {
 	mux := http.NewServeMux()
 	s.checks(mux)
-	return s.hosts(headers(gzipped(mux)))
+	return s.hosts(s.fresh(headers(gzipped(mux))))
 }
 
 // IncidentsHandler is writing incidents, and firings recorded elsewhere,
@@ -257,7 +290,7 @@ func (s *Server) IncidentsHandler() http.Handler {
 	}
 	s.trackerPaths(mux)
 	s.changesTokenRoutes(mux)
-	return s.hosts(headers(mux))
+	return s.hosts(s.fresh(headers(mux)))
 }
 
 // tokenUser is who changes made with the incidents token are noted as: not a
@@ -283,15 +316,48 @@ type token struct {
 // minToken is how long the incidents token is, at least.
 const minToken = 16
 
-// limiter lets so many things a second through, and a burst of more.
+// limiter lets so many things a second through, and a burst of more: in
+// this process, or, shared, among the replicas of a ledger (shareLimits),
+// from a bucket the ledger keeps.
 type limiter struct {
 	mu          sync.Mutex
 	rate, burst float64
 	left        float64
 	last        time.Time
+	// shared is the server whose ledger keeps the bucket, by name; nil
+	// for this process's own.
+	shared *Server
+	name   string
+}
+
+// share has the limiter's bucket kept by the ledger the replicas share.
+func (l *limiter) share(s *Server, name string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.shared, l.name = s, name
+}
+
+// take takes n from the ledger's bucket: refused when the ledger can't be
+// asked, as the write it guards would be. A connection the server ended is
+// tried again once, on another: taken twice, it costs a token, no more.
+func (l *limiter) take(n float64) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ok, err := l.shared.l.Take(ctx, l.name, l.rate, l.burst, n)
+	if err != nil && ctx.Err() == nil {
+		ok, err = l.shared.l.Take(ctx, l.name, l.rate, l.burst, n)
+	}
+	if err != nil {
+		l.shared.log.Warn("a rate limit the replicas share couldn't be read: refused", "limit", l.name, "err", err)
+		return false
+	}
+	return ok
 }
 
 func (l *limiter) allow(now time.Time) bool {
+	if l.shared != nil {
+		return l.take(1)
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.last.IsZero() {
@@ -310,6 +376,9 @@ func (l *limiter) allow(now time.Time) bool {
 // allowN reports whether n may be taken now, as allow does for one: a
 // budget of bytes, say. More than the burst is never taken.
 func (l *limiter) allowN(now time.Time, n float64) bool {
+	if l.shared != nil {
+		return l.take(n)
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.last.IsZero() {
@@ -327,6 +396,12 @@ func (l *limiter) allowN(now time.Time, n float64) bool {
 
 // give gives back what allow took, for something that cost nothing.
 func (l *limiter) give() {
+	if l.shared != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		l.shared.l.Give(ctx, l.name, l.burst)
+		return
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.left = min(l.burst, l.left+1)
@@ -533,9 +608,8 @@ type cached struct {
 
 // tag is the version of everything a page can show.
 func (s *Server) tag() string {
-	s.status.Lock()
-	st := fmt.Sprintf("%s|%v|%s|%.2f", s.status.doing, s.status.args, s.status.err, s.status.judged)
-	s.status.Unlock()
+	shown := s.shownStatus()
+	st := fmt.Sprintf("%s|%v|%s|%.2f", shown.Doing, shown.Args, shown.Err, shown.Judged)
 	// The file that pauses changes can come and go at any time.
 	if s.cfg.Changes && s.changesPaused() {
 		st += "|paused"
@@ -807,16 +881,16 @@ type statusView struct {
 }
 
 func (s *Server) statusView(l string) statusView {
-	s.status.Lock()
-	defer s.status.Unlock()
-	v := statusView{Judged: int(100 * s.status.judged), ReadOnly: s.cfg.ReadOnly, Version: s.cfg.Version, Zone: s.cfg.Loc.String(),
+	// The leader's, on a replica that follows.
+	st := s.shownStatus()
+	v := statusView{Judged: int(100 * st.Judged), ReadOnly: s.cfg.ReadOnly, Version: s.cfg.Version, Zone: s.cfg.Loc.String(),
 		ChangesOn: s.cfg.Changes}
 	v.ChangesPaused = s.cfg.Changes && s.changesPaused()
-	if s.status.doing != "" {
-		v.Doing = tr(l, s.status.doing, s.status.args...)
+	if st.Doing != "" {
+		v.Doing = tr(l, st.Doing, st.args()...)
 	}
-	if s.status.err != "" {
-		v.Err = tr(l, s.status.errWhat) + ": " + s.status.err
+	if st.Err != "" {
+		v.Err = tr(l, st.ErrWhat) + ": " + st.Err
 	}
 	return v
 }
@@ -1106,8 +1180,8 @@ func (s *Server) postSettings(w http.ResponseWriter, r *http.Request) {
 	// The noisy thresholds are read when stones are counted; the rest
 	// decide the stones themselves.
 	if before.Lead != after.Lead || before.RefireWithin != after.RefireWithin || strings.Join(before.Match, ",") != strings.Join(after.Match, ",") {
-		s.rejudge.Store(true)
-		s.poke()
+		// Here, and through the ledger, wherever the leader runs.
+		s.askRejudge(r.Context())
 	}
 	back(w, r, "/settings")
 }

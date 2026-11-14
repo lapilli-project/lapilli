@@ -69,8 +69,10 @@ type changesState struct {
 	// key signs the approval forms: a form is good for one proposal, as it
 	// stood, for one person.
 	key []byte
-	// paused is the admin's switch, as last kept.
-	paused atomic.Bool
+	// paused is the admin's switch, as last kept: with replicas, as last
+	// read from the ledger, at pausedAt, the ledger's generation then.
+	paused   atomic.Bool
+	pausedAt atomic.Int64
 	// The changes token's: see token.
 	warned atomic.Bool
 	rate   *limiter
@@ -82,6 +84,17 @@ type changesState struct {
 func newChanges(ctx context.Context, l *ledger.Ledger) *changesState {
 	c := &changesState{key: make([]byte, 32), rate: &limiter{rate: 1, burst: 30}, busy: make(chan struct{}, 1)}
 	rand.Read(c.key)
+	if l.Shared() {
+		// A form one replica shows is good on another: the key is the
+		// ledger's, made by whichever replica first needed it. It signs
+		// nothing that lets anyone in; the session key isn't kept so.
+		if k, err := l.MetaOnce(ctx, "changes-form-key", hex.EncodeToString(c.key)); err == nil {
+			if b, err := hex.DecodeString(k); err == nil && len(b) == 32 {
+				c.key = b
+			}
+		}
+		c.pausedAt.Store(-1)
+	}
 	if v, err := l.Meta(ctx, pausedKey); err == nil && v == "1" {
 		c.paused.Store(true)
 	}
@@ -94,6 +107,23 @@ const pausedKey = "changes_paused"
 // changesPaused reports whether changes are stopped: by an admin, or by
 // --changes-paused's file being there.
 func (s *Server) changesPaused() bool {
+	if s.l.Shared() {
+		// The switch as the ledger keeps it, read again whenever the
+		// ledger moved: an admin may have turned it on another replica.
+		if g := s.l.Gen(); s.changes.pausedAt.Load() != g {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			v, err := s.l.Meta(ctx, pausedKey)
+			cancel()
+			switch {
+			case err == nil:
+				s.changes.paused.Store(v == "1")
+				s.changes.pausedAt.Store(g)
+			default:
+				// Unread: taken for paused, until it is read.
+				return true
+			}
+		}
+	}
 	if s.changes.paused.Load() {
 		return true
 	}
@@ -1228,6 +1258,10 @@ func (s *Server) carryOut(ctx context.Context) error {
 	}
 	s.changes.mu.Lock()
 	defer s.changes.mu.Unlock()
+	// What another replica wrote, a pause above all, read first.
+	if err := s.l.Refresh(ctx); err != nil {
+		return err
+	}
 	// Approved before --approvals was lowered: moved on; before it was
 	// raised, and not yet carried out or taken by a recipe: approved again.
 	if _, err := s.l.Promote(ctx, s.approvals()); err != nil {
@@ -1248,7 +1282,11 @@ func (s *Server) carryOut(ctx context.Context) error {
 	}
 	slices.Reverse(ps)
 	for _, p := range ps {
-		// The stop is looked at before each: pausing stops what is left.
+		// The stop is looked at before each: pausing stops what is left,
+		// on whichever replica it was turned.
+		if err := s.l.Refresh(ctx); err != nil {
+			return err
+		}
 		if s.changesPaused() {
 			return nil
 		}

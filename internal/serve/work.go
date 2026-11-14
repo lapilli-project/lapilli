@@ -31,7 +31,9 @@ import (
 
 // work does the ledger's jobs one at a time, so that Prometheus is asked
 // for one thing at a time: runs, reviews of changes to the rules, the
-// weekly digest, judging again after the settings change, pruning.
+// weekly digest, judging again after the settings change, pruning. It is
+// the leader's (lead): a change on another replica wakes it through the
+// ledger (Woken).
 func (s *Server) work(ctx context.Context) {
 	tick := time.NewTicker(s.cfg.Every)
 	defer tick.Stop()
@@ -47,14 +49,22 @@ func (s *Server) work(ctx context.Context) {
 		case <-tick.C:
 			next = true
 		case <-s.wake:
+		case <-s.l.Woken():
 		}
 	}
 }
 
+// jobs does each job in turn, each only while this replica still leads
+// (still): one whose lease ended starts none of them.
 func (s *Server) jobs(ctx context.Context, run bool) {
+	if !still(ctx) {
+		return
+	}
 	// Taken before the settings are read, so a change saved in between is
-	// judged with.
+	// judged with: here, or, asked on another replica, in the ledger.
 	rejudge := s.rejudge.Swap(false)
+	asked, other := s.rejudgeAsked(ctx)
+	rejudge = rejudge || other
 	o, err := s.options(ctx)
 	if err != nil {
 		s.rejudge.Store(rejudge || s.rejudge.Load())
@@ -63,10 +73,14 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	}
 	// Spans a quiet window left to judge again, should its write have been
 	// cut short.
+	if !still(ctx) {
+		s.rejudge.Store(rejudge || s.rejudge.Load())
+		return
+	}
 	if err := s.l.JudgePending(ctx, o); err != nil {
 		s.fail("judging again", err)
 	}
-	if rejudge {
+	if rejudge && still(ctx) {
 		s.status.set("judging every firing again with the new settings")
 		err := s.l.JudgeAll(ctx, o, func(done float64) {
 			s.status.Lock()
@@ -79,7 +93,17 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		if err != nil {
 			s.rejudge.Store(true)
 			s.fail("judging again", err)
+		} else if s.l.Shared() {
+			// What was asked is done: the next leader doesn't do it again.
+			if err := s.l.SetMeta(ctx, "rejudged", fmt.Sprint(asked)); err != nil {
+				s.fail("judging again", err)
+			}
 		}
+	} else if rejudge {
+		s.rejudge.Store(true)
+	}
+	if !still(ctx) {
+		return
 	}
 	if s.cfg.Incidents != "" {
 		if err := s.syncIncidents(ctx, o); err != nil {
@@ -112,6 +136,9 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		s.status.errWhat, s.status.err = "deploys", errDeploysUnread.Error()
 		s.status.Unlock()
 	}
+	if !still(ctx) {
+		return
+	}
 	// With no rules to replay, there is nothing to run for but --impact:
 	// what is copied in is judged as it comes.
 	if run && s.running() {
@@ -119,11 +146,14 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		if err := s.keepBegan(ctx); err != nil {
 			s.fail("a run", err)
 		}
-		if s.checking() {
+		if s.checking() && still(ctx) {
 			if err := s.checkReplay(ctx); err != nil {
 				s.fail("setting the replay beside what really fired", err)
 			}
 		}
+	}
+	if !still(ctx) {
+		return
 	}
 	if len(s.dests()) > 0 {
 		if _, err := s.l.Overdue(ctx, s.l.Midnight(s.l.Day(s.now()))); err != nil {
@@ -133,10 +163,13 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 			s.fail("notifying", err)
 		}
 	}
-	if s.replaying() {
+	if s.replaying() && still(ctx) {
 		if err := s.reviewChanges(ctx, o); err != nil {
 			s.fail("reviewing a change to the rules", err)
 		}
+	}
+	if !still(ctx) {
+		return
 	}
 	fresh, err := s.digest(ctx, o)
 	if err != nil {
@@ -144,19 +177,30 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	}
 	// After a digest worked out afresh, the next round: the two don't hold
 	// the runs up for twice --timeout.
-	if s.replaying() && !fresh {
+	if s.replaying() && !fresh && still(ctx) {
 		if err := s.nearLater(ctx, o); err != nil {
 			s.fail("near misses", err)
 		}
-		if err := s.proposeWeekly(ctx); err != nil {
-			s.fail("proposing changes to the rules", err)
+		if still(ctx) {
+			if err := s.proposeWeekly(ctx); err != nil {
+				s.fail("proposing changes to the rules", err)
+			}
 		}
+	}
+	if !still(ctx) {
+		return
 	}
 	if err := s.carryOut(ctx); err != nil {
 		s.fail("changing the rules", err)
 	}
+	if !still(ctx) {
+		return
+	}
 	if err := s.reports(ctx, o); err != nil {
 		s.fail("a scheduled report", err)
+	}
+	if !still(ctx) {
+		return
 	}
 	if err := s.prune(ctx); err != nil {
 		s.fail("pruning", err)
@@ -167,7 +211,8 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 var errDeploysUnread = errors.New("the ledger keeps deploys, but --deploys isn't given: their firings stay marked as they were. To take them away, give --deploys a file holding deploys: [] once")
 
 func (s *Server) fail(what string, err error) {
-	if errors.Is(err, context.Canceled) {
+	// Stopped, or no longer the leader's to do: lead says so once.
+	if errors.Is(err, context.Canceled) || errors.Is(err, ledger.ErrNotLeading) {
 		return
 	}
 	s.log.Error(what, "err", err)
@@ -182,6 +227,7 @@ func (s *Server) syncIncidents(ctx context.Context, o verdict.Options) error {
 		return err
 	}
 	changed, err := s.l.SyncFile(ctx, incs, o)
+	s.incidentsRead.Store(true)
 	var taken *ledger.TakenError
 	if errors.As(err, &taken) {
 		s.passedOver.Store(int64(len(taken.IDs)))
@@ -949,11 +995,19 @@ func (s *Server) matching(rs []rules.Rule) []rules.Rule {
 	return keep
 }
 
-// poke asks the worker to look at its jobs now, if it isn't already asked.
+// poke asks the worker to look at its jobs now, if it isn't already asked:
+// this replica's, and the leader's through the ledger, wherever it runs.
 func (s *Server) poke() {
 	select {
 	case s.wake <- struct{}{}:
 	default:
+	}
+	if s.l.Shared() && !s.l.Leading() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.l.Wake(ctx); err != nil {
+			s.log.Warn("waking the replica that leads; it looks at its jobs at its next round", "err", err)
+		}
 	}
 }
 
@@ -1630,13 +1684,23 @@ func (s *Server) postDigest(ctx context.Context, in digestIn, week string, from,
 	if err := s.l.Hold(ctx); err != nil {
 		return err
 	}
+	// Claimed, among the replicas: two leaders for a moment post it once.
+	// Whoever claims it posts it, within the minute its claim outlasts.
+	claim := "digest-post:" + week
+	if ok, err := s.l.ClaimOnce(ctx, claim, 2*time.Minute); err != nil || !ok {
+		return err
+	}
+	if sent, err := s.l.Meta(ctx, "digest-sent"); err != nil || sent == week {
+		return err
+	}
 	sctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	if err := report.Slack(sctx, s.cfg.Slack, text); err != nil {
 		s.l.AddRun(ctx, ledger.Run{Kind: "digest", Started: s.now(), Finished: s.now(), From: from, To: to, Error: err.Error()})
+		s.l.Unclaim(s.posted(ctx), claim)
 		return err
 	}
-	return s.l.SetMeta(ctx, "digest-sent", week)
+	return s.l.SetMeta(s.posted(ctx), "digest-sent", week)
 }
 
 // digestReport is the week's report, with the suggestions worked out for it.

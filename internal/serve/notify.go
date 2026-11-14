@@ -74,17 +74,40 @@ func (s *Server) notify(ctx context.Context) {
 // fails, the rest wait for the next round, rather than each wait out a
 // receiver that is down; except teams' and reports', each its own receiver.
 func (s *Server) sendDue(ctx context.Context, dest string, now time.Time) error {
-	due, err := s.l.Due(ctx, dest, now, 50)
-	if err != nil {
-		return err
+	var due []ledger.Notice
+	if !s.l.Shared() {
+		var err error
+		if due, err = s.l.Due(ctx, dest, now, 50); err != nil {
+			return err
+		}
 	}
-	for _, n := range due {
-		// Read through a reader: sent only while this process still holds
-		// the ledger, or a process that took it over sends it too.
+	var last int64
+	for i := 0; i < 50; i++ {
+		// Read through a reader, or claimed: sent only while this process
+		// still holds the ledger, and leads, or a process that took it
+		// over sends it too.
 		if err := s.l.Hold(ctx); err != nil {
 			return err
 		}
-		sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		within := 10 * time.Second
+		var n ledger.Notice
+		if s.l.Shared() {
+			// Claimed for this sender alone, one at a time: another, a
+			// leader for a moment beside this one, takes another or none.
+			// Sent well within the claim, or not at all.
+			claimed := time.Now()
+			x, ok, err := s.l.Claim(ctx, dest, now, last)
+			if err != nil || !ok {
+				return err
+			}
+			n, within, last = x, min(within, ledger.ClaimFor()/2-time.Since(claimed)), x.ID
+		} else {
+			if i >= len(due) {
+				return nil
+			}
+			n = due[i]
+		}
+		sctx, cancel := context.WithTimeout(ctx, within)
 		err := s.send(sctx, n)
 		cancel()
 		if ctx.Err() != nil {
@@ -99,12 +122,12 @@ func (s *Server) sendDue(ctx context.Context, dest string, now time.Time) error 
 		s.status.Unlock()
 		if err != nil {
 			s.log.Warn("a notice wasn't sent; it is tried again later", "event", n.Event, "to", n.Dest, "attempts", n.Attempts+1, "err", err)
-			if err := s.l.Failed(ctx, n.ID, err.Error()); err != nil || (dest != teamDest && dest != reportDest) {
+			if err := s.l.Failed(s.posted(ctx), n.ID, err.Error()); err != nil || (dest != teamDest && dest != reportDest) {
 				return err
 			}
 			continue
 		}
-		if err := s.l.Sent(ctx, n.ID); err != nil {
+		if err := s.l.Sent(s.posted(ctx), n.ID); err != nil {
 			return err
 		}
 	}

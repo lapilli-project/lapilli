@@ -111,6 +111,8 @@ type notifyPort struct {
 		start  time.Time
 		alerts map[string]int
 		warned map[string]bool
+		// counted is when the alerts were last counted from the ledger.
+		counted time.Time
 	}
 	// warned are the files whose token or secret can't be used, logged
 	// once each.
@@ -495,12 +497,18 @@ func (s *Server) dayRoom(ctx context.Context, source string, alerts int) (bool, 
 	defer d.Unlock()
 	now := s.now().UTC()
 	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	if !d.start.Equal(start) {
+	// With replicas, each takes a part of what a source sends: counted
+	// again from the ledger each minute, so that what they all kept today is
+	// what is held to the day's most.
+	if !d.start.Equal(start) || s.l.Shared() && time.Since(d.counted) >= time.Minute {
 		n, err := s.l.AlertsSince(ctx, start)
 		if err != nil {
 			return false, err
 		}
-		d.start, d.alerts, d.warned = start, n, map[string]bool{}
+		if !d.start.Equal(start) {
+			d.warned = map[string]bool{}
+		}
+		d.start, d.alerts, d.counted = start, n, time.Now()
 	}
 	if d.alerts[source]+alerts <= maxAlertsPerDay {
 		return true, nil
