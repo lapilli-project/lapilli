@@ -250,6 +250,8 @@ svg.chart circle.changed, svg.sym circle.changed { fill: var(--accent); }
 svg.chart path.deploy { fill: var(--viz-ui); }
 svg.chart rect.quiet { fill: var(--h3); }
 p.marks { margin: 0 0 .6rem; font-size: .95rem; color: var(--dim); }
+/* A count in a tab is the tab's own colour, on whatever it sits on. */
+.tabs a .quiet { color: inherit; font-size: inherit; }
 ol.actions { margin: .2rem 0 .6rem; padding-left: 1.2rem; }
 ol.actions li { padding: .35rem 0; }
 table.heat { border-collapse: separate; border-spacing: 3px; width: auto; }

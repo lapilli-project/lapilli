@@ -314,3 +314,13 @@ func TestBulkDisabled(t *testing.T) {
 		}
 	}
 }
+
+// TestBulkAccessibleReadOnly: the pages with bulk forms and disabled
+// actions pass the HTML checks the other pages do when the reader may
+// change nothing: the bar, the firings' buttons and the overview's
+// suggestions disabled, with why.
+func TestBulkAccessibleReadOnly(t *testing.T) {
+	s, _ := a11yServer(t)
+	s.cfg.ReadOnly = true
+	pageA11y(t, s.Handler(), "", "/", "/rules", "/rules?weeks=12&bulk=task&done=1", "/firings?day=2026-11-02", "/incidents/INC-1")
+}
