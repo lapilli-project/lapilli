@@ -277,14 +277,20 @@ const postedWithin = 30 * time.Second
 // leadership says which replica leads, for /readyz.
 func (s *Server) leadership() string {
 	p, ok := s.l.Leader()
+	var line string
 	switch {
 	case !ok:
-		return fmt.Sprintf("replica %s follows; no replica leads now (%d live)", s.l.ReplicaID(), s.l.Replicas())
+		line = fmt.Sprintf("replica %s follows; no replica leads now (%d live)", s.l.ReplicaID(), s.l.Replicas())
 	case p.Self:
-		return fmt.Sprintf("replica %s leads, term %d, since %s (%d live)", s.l.ReplicaID(), p.Term, p.Since.UTC().Format(time.RFC3339), s.l.Replicas())
+		line = fmt.Sprintf("replica %s leads, term %d, since %s (%d live)", s.l.ReplicaID(), p.Term, p.Since.UTC().Format(time.RFC3339), s.l.Replicas())
+	default:
+		line = fmt.Sprintf("replica %s follows %s (%s), term %d, since %s (%d live)", s.l.ReplicaID(), p.ID, p.Version, p.Term,
+			p.Since.UTC().Format(time.RFC3339), s.l.Replicas())
 	}
-	return fmt.Sprintf("replica %s follows %s (%s), term %d, since %s (%d live)", s.l.ReplicaID(), p.ID, p.Version, p.Term,
-		p.Since.UTC().Format(time.RFC3339), s.l.Replicas())
+	if s.l.WritesWaited() {
+		line += "; writes wait on the ledger's writers' turn, which another session holds"
+	}
+	return line
 }
 
 // askRejudge asks the leader, this replica or another, to judge every

@@ -84,7 +84,7 @@ func TestReplicasConnectOnlyCantHoldTheTurn(t *testing.T) {
 
 // A write that waits too long for the writers' turn (another replica's
 // write holds it, cut off) fails within turnWithin, and the replica says
-// its writes wait until it takes the turn again.
+// its writes wait until a write takes the turn again.
 func TestReplicasTurnWaitedSaysSo(t *testing.T) {
 	u := replicaURL(t)
 	was := turnWithin
@@ -114,16 +114,15 @@ func TestReplicasTurnWaitedSaysSo(t *testing.T) {
 	if !errors.Is(err, ErrTurnWaited) || time.Since(began) > 3*time.Second {
 		t.Errorf("a write behind a turn held: %v after %v, want ErrTurnWaited within %v", err, time.Since(began), turnWithin)
 	}
-	rctx, rcancel := context.WithTimeout(ctx, 2*time.Second)
-	if !a.WritesWait(rctx) {
+	if !a.WritesWaited() {
 		t.Error("the replica doesn't say its writes wait")
 	}
-	rcancel()
 	tx.Rollback(ctx)
-	rctx, rcancel = context.WithTimeout(ctx, 2*time.Second)
-	defer rcancel()
-	if a.WritesWait(rctx) {
-		t.Error("the replica says its writes wait, the turn free again")
+	if err := a.SetMeta(ctx, "k", "3"); err != nil {
+		t.Fatal(err)
+	}
+	if a.WritesWaited() {
+		t.Error("the replica says its writes wait, a write having taken the turn again")
 	}
 }
 

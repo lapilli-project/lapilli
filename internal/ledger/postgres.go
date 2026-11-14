@@ -175,6 +175,11 @@ func (w *pgWriter) unlockQuery() string {
 // between its statements.
 const idleInWrite = "60s"
 
+// lingering is what has the server end a session whose client is gone
+// (connected).
+var lingering = []string{"SET tcp_keepalives_idle = 30", "SET tcp_keepalives_interval = 10", "SET tcp_keepalives_count = 3",
+	"SET tcp_user_timeout = '" + idleInWrite + "'"}
+
 func (w *pgWriter) lose() { w.loseFor(ErrLockLost) }
 
 // loseFor gives the ledger up for good, for why.
@@ -235,9 +240,14 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 	}
 	// So that the server ends this session about a minute after its client
 	// is gone, rather than hours, and the lock is free for the pod that
-	// replaces this one. Not every server takes them (they need TCP); none
-	// is needed.
-	for _, s := range []string{"SET tcp_keepalives_idle = 30", "SET tcp_keepalives_interval = 10", "SET tcp_keepalives_count = 3"} {
+	// replaces this one; and the writers' turn, should the session hold it
+	// in a write (gone). Keepalives end a session that waits for its
+	// client, idle_in_transaction_session_timeout one idle in a
+	// transaction, and tcp_user_timeout one whose answer its client never
+	// takes in, which would otherwise wait for TCP to give up (some 15
+	// min): a minute after its last statement, at most. Not every server
+	// takes them (they need TCP; tcp_user_timeout, Linux); none is needed.
+	for _, s := range lingering {
 		c.Exec(ctx, s)
 	}
 	schema, err := pinSchema(ctx, c)
@@ -382,7 +392,7 @@ func (w *pgWriter) joined(ctx context.Context, c *pgx.Conn) error {
 			return err
 		}
 	}
-	for _, s := range []string{"SET tcp_keepalives_idle = 30", "SET tcp_keepalives_interval = 10", "SET tcp_keepalives_count = 3"} {
+	for _, s := range lingering {
 		c.Exec(ctx, s)
 	}
 	schema, err := pinSchema(ctx, c)

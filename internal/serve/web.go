@@ -243,7 +243,9 @@ func (s *Server) checks(mux *http.ServeMux, detail bool) {
 	//
 	// A replica that follows is ready as the leader is, once a run is
 	// recorded; one that can't reach the ledger's database isn't, so that
-	// the others answer for it. Which replica leads is said after.
+	// the others answer for it. One whose writes wait for the writers'
+	// turn is: the turn is every replica's, and reads are answered. Which
+	// replica leads is said after, and whether writes wait.
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		if !s.ready.Load() {
 			if c, err := s.l.Cursor(r.Context()); err == nil && !c.IsZero() {
@@ -262,12 +264,6 @@ func (s *Server) checks(mux *http.ServeMux, detail bool) {
 		defer cancel()
 		if err := s.l.Refresh(ctx); err != nil {
 			http.Error(w, "can't reach the ledger's database", http.StatusServiceUnavailable)
-			return
-		}
-		if s.l.WritesWait(ctx) {
-			// Its last write waited too long for the writers' turn: another
-			// replica's write holds it, cut off.
-			http.Error(w, "writes wait on the ledger's writers' turn", http.StatusServiceUnavailable)
 			return
 		}
 		if !detail {

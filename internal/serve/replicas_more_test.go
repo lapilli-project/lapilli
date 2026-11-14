@@ -165,15 +165,18 @@ func TestReplicasReadinessSaysLittle(t *testing.T) {
 	}
 }
 
-// A replica whose writes wait too long for the writers' turn isn't ready,
-// until it takes it again.
-func TestReplicasNotReadyWhileWritesWait(t *testing.T) {
+// The writers' turn is one row for every replica: while a session holds it
+// past turnWithin (a replica cut off in a write, until the server ends its
+// session), every replica's writes wait, but each is still ready, as each
+// answers its pages. Each says its writes wait, on the metrics' port, until
+// a write takes the turn again.
+func TestReplicasReadyWhileWritesWait(t *testing.T) {
 	f := sharedLedger(t)
 	q := quickReplicas(t)
 	q.Turn = 500 * time.Millisecond
 	ledger.SetReplicaTimings(q)
 	rc := newSink(t)
-	a := replica(t, f, rc, nil)
+	a, b := replica(t, f, rc, nil), replica(t, f, rc, nil)
 	ctx := context.Background()
 	if err := a.l.Record(ctx, ledger.Found{From: now.Add(-time.Hour), To: now,
 		Run: ledger.Run{Kind: "hourly", Started: now, Finished: now}}, a.cfg.Options); err != nil {
@@ -184,18 +187,34 @@ func TestReplicasNotReadyWhileWritesWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tx.Rollback(ctx)
 	if _, err := tx.Exec(ctx, "SELECT 1 FROM replica_gens WHERE one = 1 FOR UPDATE"); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.l.SetMeta(ctx, "k", "v"); !errors.Is(err, ledger.ErrTurnWaited) {
-		t.Fatalf("a write behind a turn held: %v", err)
-	}
-	if code, body, _ := get(t, a.MetricsHandler(), "/readyz"); code != http.StatusServiceUnavailable || !strings.Contains(body, "writes wait") {
-		t.Errorf("while writes wait: %d %q", code, body)
+	for i, s := range []*Server{a, b} {
+		if err := s.l.SetMeta(ctx, "k", "v"); !errors.Is(err, ledger.ErrTurnWaited) {
+			t.Fatalf("replica %d, a write behind a turn held: %v", i, err)
+		}
+		code, body, _ := get(t, s.MetricsHandler(), "/readyz")
+		if code != http.StatusOK || !strings.Contains(body, "writes wait") {
+			t.Errorf("replica %d while writes wait: %d %q, want ready, saying writes wait", i, code, body)
+		}
+		if code, _ := api(t, s.Handler(), "GET", "/api/v1/runs", ""); code != http.StatusOK {
+			t.Errorf("replica %d's pages while writes wait: %d", i, code)
+		}
+		if _, body, _ := get(t, s.MetricsHandler(), "/metrics"); !strings.Contains(body, "lapilli_serve_ledger_writes_waiting 1") {
+			t.Errorf("replica %d's metrics don't say its writes wait", i)
+		}
 	}
 	tx.Rollback(ctx)
-	if code, body, _ := get(t, a.MetricsHandler(), "/readyz"); code != http.StatusOK {
-		t.Errorf("the turn free again: %d %q", code, body)
+	if err := a.l.SetMeta(ctx, "k", "w"); err != nil {
+		t.Fatal(err)
+	}
+	if code, body, _ := get(t, a.MetricsHandler(), "/readyz"); code != http.StatusOK || strings.Contains(body, "writes wait") {
+		t.Errorf("the turn taken again: %d %q", code, body)
+	}
+	if _, body, _ := get(t, a.MetricsHandler(), "/metrics"); !strings.Contains(body, "lapilli_serve_ledger_writes_waiting 0") {
+		t.Error("the metrics still say writes wait, the turn taken again")
 	}
 }
 

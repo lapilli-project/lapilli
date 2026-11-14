@@ -391,23 +391,14 @@ func lockWaited(err error) bool {
 	return errors.As(err, &pe) && pe.Code == "55P03"
 }
 
-// WritesWait says this replica's last write waited longer than it may for
-// the writers' turn, and it still can't take the turn within ctx: a
-// replica that can't write isn't ready. It is asked again each time, as
-// one not ready is sent no write that would find the turn free again.
-func (l *Ledger) WritesWait(ctx context.Context) bool {
-	if l.rep == nil || !l.rep.stuck.Load() {
-		return false
-	}
-	tx, err := l.w.BeginTx(ctx, nil)
-	if err != nil {
-		return true
-	}
-	defer tx.Rollback()
-	if _, err := l.rep.turn(ctx, tx); err != nil {
-		return true
-	}
-	return l.rep.stuck.Load()
+// WritesWaited says this replica's last write waited longer than it may
+// for the writers' turn (ErrTurnWaited), and none has taken it since:
+// another session holds it (a replica cut off in a write, until the server
+// ends its session; a migration). The turn is every replica's, so it is
+// said (metrics, the status) rather than taken out of readiness, which
+// would take every replica out at once: reads are answered meanwhile.
+func (l *Ledger) WritesWaited() bool {
+	return l.rep != nil && l.rep.stuck.Load()
 }
 
 // bump counts a write in the generations, in its transaction, for the
