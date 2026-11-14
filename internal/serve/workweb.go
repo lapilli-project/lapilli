@@ -237,6 +237,9 @@ type taskLine struct {
 
 // taskForm is the form to make or change a task.
 type taskForm struct {
+	// Action is where it is sent: /tasks, with the page context, which the
+	// task's page it goes to after keeps.
+	Action          string
 	Task            ledger.Task
 	Due             string
 	Teams           []ledger.Team
@@ -306,6 +309,7 @@ func (s *Server) tasksPage(r *http.Request) (any, error) {
 		nt.TeamID = o.rule[nt.Rule]
 	}
 	v.Form = s.taskForm(nt, s.teamPick(r, o))
+	v.Form.Action = s.pageContext(r).Link("/tasks")
 	return v, nil
 }
 
@@ -333,6 +337,7 @@ func (s *Server) taskPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v := taskView{taskLine: s.taskLines(o, []ledger.Task{t})[0], Form: s.taskForm(t, s.teamPick(r, o))}
+	v.Form.Action = s.pageContext(r).Link("/tasks")
 	if p, err := s.l.ProposalOfTask(ctx, id); err == nil {
 		v.Proposal = &p
 	} else if !errors.Is(err, ledger.ErrNotFound) {
@@ -504,14 +509,16 @@ func (s *Server) postTask(w http.ResponseWriter, r *http.Request) {
 	}
 	to := r.PostFormValue("back")
 	if to == "" {
-		to = fmt.Sprintf("/tasks/%d", id)
+		// The task's page, with the team and period of the page the form
+		// was on, which its target's URL has.
+		to = urlContext(r.URL.Query()).Link(fmt.Sprintf("/tasks/%d", id))
 	}
 	s.written(w, r, err, to)
 }
 
 func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	s.written(w, r, s.l.DeleteTask(r.Context(), id, s.user(r)), "/tasks")
+	s.written(w, r, s.l.DeleteTask(r.Context(), id, s.user(r)), urlContext(r.URL.Query()).Link("/tasks"))
 }
 
 func (s *Server) postComment(w http.ResponseWriter, r *http.Request) {
@@ -894,6 +901,8 @@ func errCode(err error) (int, bool) {
 		return http.StatusBadRequest, true
 	case errors.Is(err, errSignInDown):
 		return http.StatusServiceUnavailable, true
+	case errors.Is(err, errLongQuery):
+		return http.StatusRequestURITooLong, true
 	case errors.Is(err, ledger.ErrMoved), errors.Is(err, ledger.ErrApproved), errors.Is(err, ledger.ErrProposed):
 		return http.StatusConflict, true
 	}

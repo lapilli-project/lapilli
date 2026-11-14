@@ -1,7 +1,7 @@
 {{define "settings"}}{{$title := t "Settings"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := not .Status.Admin}}{{with .View}}
 <h1>{{$title}}</h1>
 <p class="lede">{{t "How firings are judged. These only judge the ledger again, so they can be changed here; where the history and rules come from, and anything else that would need Prometheus again, is set where lapilli serve is started. A change here is kept with who made it;"}} <a href="/settings.yaml">settings.yaml</a> {{t "gives the changes as Helm values, to commit."}}</p>
-{{if not $ro}}<form method="post" action="/settings">{{end}}
+{{if not $ro}}<form method="post" action="/settings">{{range $.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{end}}
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Setting"}}</th><th scope="col">{{t "Started with"}}</th><th scope="col">{{t "In effect"}}</th><td></td></tr></thead>
 <tbody>{{range .Settings}}
@@ -14,7 +14,7 @@
 <p class="quiet"><code>--lead</code>: {{t "how long before an incident a firing still catches it."}} <code>--match</code>: {{t "labels a firing and an incident must agree on; none for no labels."}} <code>--refire</code>: {{t "how soon after resolving a firing counts as refired."}} {{t "A rule is noisy when it fired --noisy-firings times or more and under --noisy-precision of them caught anything."}}</p>
 
 <h2>{{t "Changes to the rules"}}</h2>
-<p>{{if not $.Status.ChangesOn}}{{t "Off: proposals are kept, and nothing is applied. Turned on with --changes."}}{{else if $.Status.ChangesPaused}}{{t "On, and paused."}}{{else}}{{t "On."}}{{end}} <a href="/proposals">{{t "Proposals"}}</a></p>
+<p>{{if not $.Status.ChangesOn}}{{t "Off: proposals are kept, and nothing is applied. Turned on with --changes."}}{{else if $.Status.ChangesPaused}}{{t "On, and paused."}}{{else}}{{t "On."}}{{end}} <a href="{{$.Link "/proposals"}}">{{t "Proposals"}}</a></p>
 {{if and $.Status.ChangesOn $.Status.Admin}}<form method="post" action="/settings/changes">{{if $.Status.ChangesPaused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>{{end}}
 
 {{with .Try}}
@@ -61,7 +61,7 @@
 {{with .Notes}}<tr><td colspan="4" class="quiet">{{t "Passed over in its feed: %s" (join . "; ")}}</td></tr>{{end}}{{end}}</tbody>
 </table></div>{{end}}
 {{with .Stopped}}<h2>{{t "Reports stopped"}}</h2>
-<p>{{t "Their team was removed, so they aren't sent until they name another: %s." (join . ", ")}} <a href="/reports">{{t "Reports"}}</a></p>{{end}}
+<p>{{t "Their team was removed, so they aren't sent until they name another: %s." (join . ", ")}} <a href="{{$.Link "/reports"}}">{{t "Reports"}}</a></p>{{end}}
 <h2>{{t "Changes made here"}}</h2>
 {{if .Changes}}<ul class="plain">{{range .Changes}}<li>{{at $loc .At}} {{.By}}: {{.What}}</li>{{end}}</ul>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 {{end}}{{template "bottom" .}}{{end}}

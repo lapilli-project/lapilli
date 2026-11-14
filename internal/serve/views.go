@@ -472,7 +472,14 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 		l.Noisy = noisy(l.Firings, l.White, t.o)
 		l.Precision = pct(l.White, l.Firings)
 		l.RefiredShare = pct(l.Refired, l.Firings)
-		l.RefiredWeeks, l.RefiredOf = t.refireWeeks(recent, func(rid int64) bool { return rid == id })
+		// refireWeeks for this rule alone, a week at a time rather than
+		// every rule's each week: two thousand rules cost what forty do.
+		for _, w := range t.whole(recent) {
+			l.RefiredOf++
+			if t.by[w][id].Refired > 0 {
+				l.RefiredWeeks++
+			}
+		}
 		l.Without = pct(l.White-l.DeploysCaught, l.Firings-l.Deploys)
 		// Weeks running it has been noisy, up to the last whole week.
 		for i := len(t.weeks) - 2; i >= 0 && t.noisy(t.weeks[i], id); i-- {
@@ -600,7 +607,28 @@ func sortRules(lines []ruleLine, by string) {
 	sort.SliceStable(lines, func(a, b int) bool { return key(lines[a]) > key(lines[b]) })
 }
 
+// rulesData is the rules page's view, as the API gives it, and what the
+// list works the rest out from: the tallies, kept to the team's, the
+// owners, the rules a change is proposed to, and the last week's checks
+// of the replay, with when one differs.
+type rulesData struct {
+	rulesView
+	t        *tallies
+	own      *owners
+	proposed map[string]bool
+	checks   map[string]ledger.Check
+	differs  Differs
+}
+
 func (s *Server) rulesPage(r *http.Request) (any, error) {
+	d, err := s.rulesOf(r)
+	if err != nil {
+		return nil, err
+	}
+	return d.rulesView, nil
+}
+
+func (s *Server) rulesOf(r *http.Request) (rulesData, error) {
 	n := 4
 	switch r.URL.Query().Get("weeks") {
 	case "1":
@@ -610,11 +638,11 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 	}
 	t, err := s.tallies(r.Context(), weeks)
 	if err != nil {
-		return nil, err
+		return rulesData{}, err
 	}
 	o, err := s.owners(r.Context())
 	if err != nil {
-		return nil, err
+		return rulesData{}, err
 	}
 	f, team := s.teamFilter(o, r.URL.Query().Get("team"))
 	if team != nil {
@@ -622,7 +650,7 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 	}
 	lines, silent, err := s.ruleLines(r.Context(), lang(r), t, n)
 	if err != nil {
-		return nil, err
+		return rulesData{}, err
 	}
 	if team != nil {
 		silent = slices.DeleteFunc(silent, func(name string) bool { return o.rule[name] != team.ID })
@@ -630,12 +658,12 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 	s.annotate(o, lines)
 	cw, err := s.checksLastWeek(r.Context())
 	if err != nil {
-		return nil, err
+		return rulesData{}, err
 	}
 	d := s.differs()
 	proposed, err := s.proposedRules(r.Context())
 	if err != nil {
-		return nil, err
+		return rulesData{}, err
 	}
 	for i := range lines {
 		lines[i].Differs = cw[lines[i].Name].Differs(d.N, d.Ratio)
@@ -643,7 +671,7 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 	}
 	cf, err := s.contentFindings(r.Context())
 	if err != nil {
-		return nil, err
+		return rulesData{}, err
 	}
 	facts := map[string]int{}
 	for name, fs := range cf {
@@ -656,7 +684,7 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 	}
 	deploys, err := s.l.HasDeploys(r.Context())
 	if err != nil {
-		return nil, err
+		return rulesData{}, err
 	}
 	v := rulesView{Weeks: n, Team: f, Lines: lines, Silent: silent, Facts: facts, Deploys: deploys, Sorts: []string{"", "refired"}}
 	if deploys {
@@ -666,7 +694,7 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 		v.Sort = by
 	}
 	sortRules(v.Lines, v.Sort)
-	return v, nil
+	return rulesData{v, t, o, proposed, cw, d}, nil
 }
 
 // annotate gives rule lines their teams and what is to become of them.
@@ -800,6 +828,10 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	v := ruleView{ruleLine: ruleLine{Name: name, Precision: "–"}}
 	if i := slices.IndexFunc(lines, func(l ruleLine) bool { return l.Name == name }); i >= 0 {
 		v.ruleLine, v.Known = lines[i], true
+	} else if rr, ok := t.rules[t.id(name)]; ok && t.id(name) != 0 {
+		// One that didn't fire in the twelve weeks says, as the list's
+		// badges do, why it isn't replayed, and where it is recorded.
+		v.Severity, v.Group, v.Unsupported, v.Source = rr.Severity, rr.Group, rr.Unsupported, rr.Source
 	}
 	v.Known = v.Known || slices.Contains(silent, name)
 	if s.replaying() {
@@ -1041,7 +1073,10 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 	l := lang(r)
 	q := r.URL.Query()
 	n := 4
-	if q.Get("weeks") == "12" {
+	switch q.Get("weeks") {
+	case "1":
+		n = 1
+	case "12":
 		n = 12
 	}
 	t, err := s.tallies(ctx, weeks)
@@ -1653,11 +1688,29 @@ var funcs = template.FuncMap{
 		return strings.Join(out, "; ")
 	},
 	"kindText": kindText,
-	"nav": func() []struct{ Page, Href, Name string } {
-		return []struct{ Page, Href, Name string }{
-			{"overview", "/", "Overview"}, {"rules", "/rules", "Rules"}, {"incidents", "/incidents", "Incidents"},
-			{"firings", "/firings", "Firings"}, {"tasks", "/tasks", "Tasks"}, {"proposals", "/proposals", "Proposals"}, {"windows", "/windows", "Quiet windows"},
-			{"teams", "/teams", "Teams"}, {"outcomes", "/outcomes", "Outcomes"}, {"settings", "/settings", "Settings"}, {"reports", "/reports", "Reports"}, {"runs", "/runs", "Runs"},
-		}
+	// navOf is the sidebar of a page, as the menu or the sidebar draws it.
+	"navOf": func(p page, kind string) struct {
+		P    page
+		Kind string
+	} {
+		return struct {
+			P    page
+			Kind string
+		}{p, kind}
+	},
+	"mainAction": mainAction,
+	"emptyOf": func(kind, title, text string) emptyView {
+		return emptyView{Kind: kind, Title: title, Text: text}
+	},
+	// on is what a template given a part of a page draws, with the page it
+	// is on, for its links.
+	"on": func(p page, v any) struct {
+		P page
+		V any
+	} {
+		return struct {
+			P page
+			V any
+		}{p, v}
 	},
 }

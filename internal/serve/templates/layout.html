@@ -9,22 +9,53 @@
 </head>
 <body>
 <a class="skip" href="#main">{{t "Skip to the page"}}</a>
-<header>
-  <a class="brand" href="/"><img src="{{static "icon.svg"}}" alt="" width="24" height="24">Lapilli</a>
-  <nav class="pages" aria-label="{{t "Pages"}}">{{range nav}}<a href="{{.Href}}"{{if eq $.Page .Page}} aria-current="page"{{end}}>{{t .Name}}</a>{{end}}</nav>
+<header class="side">
+  <a class="brand" href="{{.Link "/"}}"><img src="{{static "icon.svg"}}" alt="" width="24" height="24">Lapilli</a>
+  <details class="menu"><summary>{{t "Menu"}}{{with .HereName}}<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>{{t .}}</span>{{end}}</summary>
+  {{template "navlist" (navOf . "menu")}}
+  </details>
+  {{template "navlist" (navOf . "side")}}
   <nav class="langs" aria-label="{{t "Language"}}">{{range $i, $l := .Langs}}{{if $i}}<span aria-hidden="true"> · </span>{{end}}{{if $l.Current}}<strong lang="{{$l.Code}}" aria-current="true">{{$l.Name}}</strong>{{else}}<a href="{{$l.Href}}" lang="{{$l.Code}}" hreflang="{{$l.Code}}">{{$l.Name}}</a>{{end}}{{end}}</nav>
 </header>
-{{if or .Status.ChangesPaused .Status.Doing .Status.Err}}<section aria-label="{{t "Status"}}">
-{{if .Status.ChangesPaused}}<p class="status err">{{t "Changes to the rules are paused: nothing is applied or handed to a recipe."}} <a href="/proposals">{{t "Proposals"}}</a></p>{{end}}
+<div class="page">
+{{if or .Status.ChangesPaused .Status.Doing .Status.Err}}<section class="statuses" aria-label="{{t "Status"}}">
+{{if .Status.ChangesPaused}}<p class="status err">{{t "Changes to the rules are paused: nothing is applied or handed to a recipe."}} <a href="{{.Link "/proposals"}}">{{t "Proposals"}}</a></p>{{end}}
 {{with .Status}}{{if .Doing}}<p class="status">{{.Doing}}{{if .Judged}}: {{.Judged}}%{{end}}</p>{{end}}{{if .Err}}<p class="status err">{{.Err}}</p>{{end}}{{end}}
 </section>{{end}}
 <main id="main">
+<nav class="crumbs" aria-label="{{t "Breadcrumb"}}"><ol>{{with .Crumb}}{{if .Group}}<li>{{t .Group}}</li>{{end}}{{if .Name}}<li>{{if .Item}}<a href="{{$.Link .Href}}">{{t .Name}}</a>{{else}}<span aria-current="page">{{t .Name}}</span>{{end}}</li>{{end}}{{if .Item}}<li><span aria-current="page"><bdi>{{$.Title}}</bdi></span></li>{{end}}{{end}}</ol></nav>
+<div class="bar">
+{{with .Bar}}{{if .Action}}<form method="get" action="{{.Action}}" class="ctx" aria-label="{{t .Label}}">{{range .Keep}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+  {{if .Team}}<label>{{t "Team"}} <select name="team"><option value=""{{if not $.Ctx.Team}} selected{{end}}>{{t "All teams"}}</option>{{range $.Ctx.Teams}}<option value="{{.}}"{{if eq . $.Ctx.Team}} selected{{end}}>{{.}}{{if and $.Ctx.Mine (eq . $.Ctx.Team)}} ({{t "your team"}}){{end}}</option>{{end}}</select></label>{{end}}
+  {{if .Weeks}}<label>{{t "Period"}} <select name="weeks">{{range $w := list "1" "4" "12"}}<option value="{{$w}}"{{if eq $w (print $.Bar.WeeksIn)}} selected{{end}}>{{if eq $w "1"}}{{t "1 week"}}{{else if eq $w "4"}}{{t "4 weeks"}}{{else}}{{t "12 weeks"}}{{end}}</option>{{end}}</select></label>{{end}}
+  <button class="quiet-button">{{t "Show"}}</button>
+</form>{{end}}
+<form method="get" action="/search" role="search" class="find" aria-label="{{t "Search"}}">{{range .Search}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+  <label>{{t "Search"}} <input type="search" name="q" value="{{.Q}}" maxlength="500" placeholder="{{t "Rules, incidents, teams"}}"></label>
+  <button class="quiet-button">{{t "Search"}}</button>
+</form>{{end}}
+</div>
 {{end}}
+
+{{/* The sidebar's pages, in their groups: drawn twice, as the menu a narrow
+screen opens and the sidebar a wide one keeps, and shown one at a time. */}}
+{{define "navlist"}}<nav class="nav-{{.Kind}}" aria-label="{{if eq .Kind "menu"}}{{t "Menu"}}{{else}}{{t "Pages"}}{{end}}">{{range .P.Nav}}
+  <p class="nav-group" id="{{$.Kind}}-{{.ID}}">{{t .Name}}</p>
+  <ul aria-labelledby="{{$.Kind}}-{{.ID}}">{{range .Items}}<li><a href="{{.Href}}"{{if eq .Page $.P.Here}} aria-current="{{if $.P.Crumb.Item}}true{{else}}page{{end}}"{{end}}>{{t .Name}}{{if .Count}} <span class="count" aria-hidden="true">{{.Count}}</span><span class="vh">, {{t .CountText .Count}}</span>{{end}}</a></li>{{end}}</ul>{{end}}
+</nav>{{end}}
+
+{{/* A page's main action, or the button disabled, with why. */}}
+{{define "action"}}{{if .Href}}<a class="button" href="{{.Href}}">{{t .Label}}</a>{{else}}<span class="action-off"><button type="button" disabled aria-describedby="action-why">{{t .Label}}</button> <span id="action-why" class="why">{{t .Why}}</span></span>{{end}}{{end}}
+
+{{/* An empty state: nothing judged yet (first), nothing matching
+(notfound), or nothing left to do (done). */}}
+{{define "empty"}}<div class="empty empty-{{.Kind}}">{{with .Title}}<p class="empty-title">{{t .}}</p>{{end}}{{with .Text}}<p class="quiet">{{t .}}</p>{{end}}{{with .Links}}<p class="row">{{range .}}<a href="{{.Href}}">{{t .Name}}</a>{{end}}</p>{{end}}</div>{{end}}
 
 {{define "bottom"}}
 </main>
-<footer>lapilli {{.Status.Version}} · {{t "times in %s" .Status.Zone}}{{with .Status.User}} · {{t "you are %s, %s" (who .) (t $.Status.Role)}}{{else}}{{if .Status.ReadOnly}} · {{t "read-only"}}{{end}}{{end}}{{if .Status.SignOut}}
+<footer>lapilli{{with .Status.Version}} {{.}}{{end}} · {{t "times in %s" .Status.Zone}}{{with .Status.User}} · {{t "you are %s, %s" (who .) (t $.Status.Role)}}{{else}}{{if .Status.ReadOnly}} · {{t "read-only"}}{{end}}{{end}}{{if .Status.SignOut}}
 <form class="signout" method="post" action="/auth/logout"><button type="submit">{{t "Sign out"}}</button></form>{{end}}</footer>
+</div>
 </body>
 </html>
 {{end}}
@@ -32,7 +63,7 @@
 {{define "error"}}{{template "top" (titled . (print .View.Code))}}
 <h1>{{.View.Code}}</h1>
 <p>{{.View.Err}}</p>
-<p><a href="/">{{t "Back to the overview"}}</a></p>
+<p><a href="{{.Link "/"}}">{{t "Back to the overview"}}</a></p>
 {{template "bottom" .}}{{end}}
 
 {{define "signedout"}}{{template "top" (titled . (t "Signed out"))}}

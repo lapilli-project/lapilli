@@ -1,16 +1,13 @@
 {{define "overview"}}{{$title := t "Your alerts, the last twelve weeks"}}{{if .View.Empty}}{{$title = t "Nothing judged yet"}}{{end}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
 {{if .Empty}}
-<section class="note">
-  <h1>{{$title}}</h1>
-  <p>{{t "The first run replays the rules over the weeks before it started; this page fills in when it has. It can take a few minutes for a busy set of rules."}}</p>
-</section>
+<h1>{{$title}}</h1>
+{{template "empty" (emptyOf "first" "" "The first run replays the rules over the weeks before it started; this page fills in when it has. It can take a few minutes for a busy set of rules.")}}
 {{else}}
 <h1>{{$title}}</h1>
 <p class="lede">{{t "Each firing gets a stone: ○ when it caught an incident, ● when nothing was wrong."}} {{t "The numbers are the week of %s, beside the week before." (day $loc .From)}}
 {{with .Run}}{{if .Error}}{{t "Last run %s, failed: %s." (at $loc .Finished) .Error}}{{else}}{{t "Last run %s." (at $loc .Finished)}}{{end}}{{end}}
 {{if .Backlog}}<strong>{{t "Catching up: firings are in up to %s." (at $loc .Cursor)}}</strong>{{end}}
-{{with .Check}}<br>{{t "That week, the replay beside what really fired: %d%% alike, of %d firings." .Share .Either}}{{with .Differ}} {{t "Replayed differently:"}}{{range $i, $r := .}}{{if $i}},{{end}} <a href="/rules/{{path $r}}"><bdi>{{$r}}</bdi></a>{{end}}.{{end}}{{end}}</p>
-{{if .Team.Teams}}<p class="tabs">{{t "Team"}}: <a href="/"{{if not .Team.Name}} aria-current="page"{{end}}>{{t "all"}}</a>{{range .Team.Teams}} <a href="/?team={{.}}"{{if eq . $.View.Team.Name}} aria-current="page"{{end}}>{{.}}</a>{{end}}</p>{{end}}
+{{with .Check}}<br>{{t "That week, the replay beside what really fired: %d%% alike, of %d firings." .Share .Either}}{{with .Differ}} {{t "Replayed differently:"}}{{range $i, $r := .}}{{if $i}},{{end}} <a href="{{$.Rule $r}}"><bdi>{{$r}}</bdi></a>{{end}}.{{end}}{{end}}</p>
 
 <section class="tiles" aria-label="{{t "Last week"}}">
 {{range .Tiles}}<div class="tile">
@@ -60,19 +57,19 @@
 
 <section class="card">
   <h2>{{t "What to look at"}}</h2>
-  {{if .Actions}}<ol class="actions">{{range .Actions}}<li><a href="{{.Href}}"><bdi>{{.Text}}</bdi></a><br><span class="quiet">{{.Detail}}</span>
-    {{if .Task}}<br><a class="pill open" href="/tasks/{{.Task}}">{{t "task #%d" .Task}}</a>
-    {{else if and .Kind (not $.View.ReadOnly)}}<form method="post" action="/tasks" class="track"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="rule" value="{{.Rule}}"><input type="hidden" name="incident" value="{{.Incident}}"><input type="hidden" name="back" value="{{$.Path}}{{with $.View.Team.Name}}?team={{.}}{{end}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>{{end}}</li>{{end}}</ol>
-  {{else}}<p class="quiet">{{t "Nothing stands out: no noisy rules, no incident missed."}}</p>{{end}}
+  {{if .Actions}}<ol class="actions">{{range .Actions}}<li><a href="{{$.Link .Href}}"><bdi>{{.Text}}</bdi></a><br><span class="quiet">{{.Detail}}</span>
+    {{if .Task}}<br><a class="pill open" href="{{$.Link (printf "/tasks/%d" .Task)}}">{{t "task #%d" .Task}}</a>
+    {{else if and .Kind (not $.View.ReadOnly)}}<form method="post" action="/tasks" class="track"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="rule" value="{{.Rule}}"><input type="hidden" name="incident" value="{{.Incident}}"><input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>{{end}}</li>{{end}}</ol>
+  {{else}}{{template "empty" (emptyOf "done" "Nothing to look at now." "Nothing stands out: no noisy rules, no incident missed.")}}{{end}}
   {{with .Review}}<p class="quiet">{{t "The last change to the rules, replayed over the week before %s:" (at $loc .At)}}
-  {{range $i, $x := .Rules}}{{if $i}}, {{end}}<a href="/rules/{{path $x.Rule}}"><bdi>{{$x.Rule}}</bdi></a> {{t "fired %d → %d" (fired $x.Before) (fired $x.After)}}{{end}}</p>{{end}}
+  {{range $i, $x := .Rules}}{{if $i}}, {{end}}<a href="{{$.Rule $x.Rule}}"><bdi>{{$x.Rule}}</bdi></a> {{t "fired %d → %d" (fired $x.Before) (fired $x.After)}}{{end}}</p>{{end}}
 </section>
 
 <section class="card">
   <h2>{{t "Open tasks"}}</h2>
-  {{if .Tasks}}<ul class="plain">{{range .Tasks}}<li><a href="/tasks/{{.ID}}">#{{.ID}} {{.Title}}</a> <span class="pill {{.Status}}">{{t .Status}}</span><br>
+  {{if .Tasks}}<ul class="plain">{{range .Tasks}}<li><a href="{{$.Link (printf "/tasks/%d" .ID)}}">#{{.ID}} {{.Title}}</a> <span class="pill {{.Status}}">{{t .Status}}</span><br>
     <span class="quiet">{{with .Assignee}}{{.}} · {{end}}{{with .Team}}{{.}} · {{end}}{{if .DueText}}<span{{if .Overdue}} class="bad"{{end}}>{{t "due %s" .DueText}}</span>{{else}}{{t "no due date"}}{{end}}</span></li>{{end}}</ul>
-  <p><a href="/tasks{{with $.View.Team.Name}}?team={{.}}{{end}}">{{t "All tasks"}}</a></p>
+  <p><a href="{{$.Link "/tasks"}}">{{t "All tasks"}}</a></p>
   {{else}}<p class="quiet">{{t "None open. A suggestion under What to look at becomes one with a press."}}</p>{{end}}
 </section>
 
@@ -80,7 +77,7 @@
   <h2>{{t "Outcomes"}}</h2>
   {{if .OutcomesAll}}<p class="quiet">{{t "For all teams."}}</p>{{end}}
   <ul class="plain">{{range .Outcomes}}<li{{if .Bad}} class="bad"{{end}}>{{.Text}}</li>{{end}}</ul>
-  <p><a href="/outcomes">{{t "What the changes did, and whether the record is kept up"}}</a></p>
+  <p><a href="{{$.Link "/outcomes"}}">{{t "What the changes did, and whether the record is kept up"}}</a></p>
 </section>
 </div>
 
@@ -91,7 +88,7 @@
   <span class="heat-scale" aria-hidden="true">{{t "fewer"}} <i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i><i class="h5"></i> {{t "more"}}</span></p>
   <div class="scroll"><table class="heat">
     <thead><tr><th scope="col">{{t "Rule"}}</th>{{range .HeatWeeks}}<th scope="col" class="hw">{{.}}</th>{{end}}<th scope="col" class="n">{{t "● 4 weeks"}}</th></tr></thead>
-    <tbody>{{range .Heat}}<tr><th scope="row" class="hn"><a href="/rules/{{path .Name}}" title="{{.Name}}"><bdi>{{.Name}}</bdi></a></th>{{range .Cells}}<td class="hc {{.Class}}" title="{{.Title}}"><span class="vh">{{.Black}}</span></td>{{end}}<td class="n">{{.Black}}</td></tr>{{end}}</tbody>
+    <tbody>{{range .Heat}}<tr><th scope="row" class="hn"><a href="{{$.Rule .Name}}" title="{{.Name}}"><bdi>{{.Name}}</bdi></a></th>{{range .Cells}}<td class="hc {{.Class}}" title="{{.Title}}"><span class="vh">{{.Black}}</span></td>{{end}}<td class="n">{{.Black}}</td></tr>{{end}}</tbody>
   </table></div>
 </section>
 {{end}}

@@ -1,14 +1,13 @@
 {{define "incidents"}}{{$title := t "Incidents"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
-<h1>{{$title}}</h1>
-<p class="lede">{{t "What went wrong in the last %d weeks, and what caught it." .Weeks}} <span class="tabs"><a href="/incidents?team={{.Team.Name}}&amp;source={{.Source}}"{{if eq .Weeks 4}} aria-current="page"{{end}}>{{t "4 weeks"}}</a> <a href="/incidents?weeks=12&amp;team={{.Team.Name}}&amp;source={{.Source}}"{{if eq .Weeks 12}} aria-current="page"{{end}}>{{t "12 weeks"}}</a></span></p>
-<p class="tabs">{{t "Of"}}: <a href="/incidents?weeks={{.Weeks}}&amp;team={{.Team.Name}}"{{if not .Source}} aria-current="page"{{end}}>{{t "all"}}</a> <a href="/incidents?weeks={{.Weeks}}&amp;team={{.Team.Name}}&amp;source=written"{{if eq .Source "written"}} aria-current="page"{{end}}>{{t "written down"}}</a> <a href="/incidents?weeks={{.Weeks}}&amp;team={{.Team.Name}}&amp;source=impact"{{if eq .Source "impact"}} aria-current="page"{{end}}>{{t "user impact (--impact)"}}</a></p>
-{{if .Team.Teams}}<p class="tabs">{{t "Team"}}: <a href="/incidents?weeks={{.Weeks}}&amp;source={{.Source}}"{{if not .Team.Name}} aria-current="page"{{end}}>{{t "all"}}</a>{{range .Team.Teams}} <a href="/incidents?weeks={{$.View.Weeks}}&amp;source={{$.View.Source}}&amp;team={{.}}"{{if eq . $.View.Team.Name}} aria-current="page"{{end}}>{{.}}</a>{{end}}</p>{{end}}
+<div class="head"><h1>{{$title}}</h1>{{template "action" (mainAction $ "Write one down" (not $ro) "editor" "")}}</div>
+<p class="lede">{{if eq .Weeks 1}}{{t "What went wrong in the last week, and what caught it."}}{{else}}{{t "What went wrong in the last %d weeks, and what caught it." .Weeks}}{{end}} <span class="tabs"><a href="{{$.Link "/incidents" "weeks" 1 "source" .Source}}"{{if eq .Weeks 1}} aria-current="page"{{end}}>{{t "1 week"}}</a> <a href="{{$.Link "/incidents" "weeks" 4 "source" .Source}}"{{if eq .Weeks 4}} aria-current="page"{{end}}>{{t "4 weeks"}}</a> <a href="{{$.Link "/incidents" "weeks" 12 "source" .Source}}"{{if eq .Weeks 12}} aria-current="page"{{end}}>{{t "12 weeks"}}</a></span></p>
+<p class="tabs">{{t "Of"}}: <a href="{{$.Link "/incidents" "weeks" .Weeks}}"{{if not .Source}} aria-current="page"{{end}}>{{t "all"}}</a> <a href="{{$.Link "/incidents" "weeks" .Weeks "source" "written"}}"{{if eq .Source "written"}} aria-current="page"{{end}}>{{t "written down"}}</a> <a href="{{$.Link "/incidents" "weeks" .Weeks "source" "impact"}}"{{if eq .Source "impact"}} aria-current="page"{{end}}>{{t "user impact (--impact)"}}</a></p>
 {{with .Judged}}{{if .Total}}<p>{{t "Of the %d judged against: %d caught, %d caught only by noisy rules, %d missed." .Total .Caught .NoisyOnly .Missed}}{{with $.View.Lead}} {{t "The first alert of a rule that isn't noisy came, at the median, %s." .}}{{end}}</p>{{end}}{{end}}
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Incident"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "From"}}</th><th scope="col">{{t "Caught"}}</th><th scope="col">{{t "Lead"}}</th></tr></thead>
 <tbody>{{range .Lines}}
 <tr class="{{.Status}}">
-  <td><a href="/incidents/{{path .ID}}">{{.ID}}</a>{{if .Title}} {{.Title}}{{end}}</td>
+  <td><a href="{{$.Incident .ID}}">{{.ID}}</a>{{if .Title}} {{.Title}}{{end}}</td>
   <td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td>
   <td>{{if eq .Origin "file"}}{{t "incidents file"}}{{else if eq .Origin "ui"}}{{t "written here"}}{{else if eq .Origin "copy"}}{{t "copied in"}}{{else}}{{t "found by --impact"}}{{end}}</td>
   <td>{{if eq .Status "caught"}}○ {{.First}}{{else if eq .Status "noisy"}}◐ {{.First}}, {{t "noisy"}}{{else if eq .Status "missed"}}{{t "✗ nothing fired"}}{{else if eq .Status "covered"}}{{t "covered by one written down"}}{{else}}{{t .Status}}{{end}}{{with .Nearly}}<br><span class="quiet">{{t "nearly caught by %s" .}}</span>{{end}}{{if .NearlyMore}} <span class="quiet">{{t "and %d more" .NearlyMore}}</span>{{end}}</td>
@@ -17,7 +16,7 @@
 </table></div>
 
 {{if not $ro}}
-<h2>{{t "Write one down"}}</h2>
+<h2 id="add">{{t "Write one down"}}</h2>
 <form method="post" action="/incidents" class="grid">
   <label>{{t "Title"}} <input name="title" required maxlength="200" placeholder="{{t "Checkout errors"}}"></label>
   <label>{{t "Start"}} <input name="start" type="datetime-local" required></label>
@@ -35,18 +34,18 @@
 {{if eq .Origin "file"}}{{t "From the incidents file, which owns it."}}{{else if eq .Origin "copy"}}{{t "Copied in from the tool it is kept in, %s; it is changed there, not here." (at $loc .Updated)}}{{else if eq .Origin "ui"}}{{if .By}}{{t "Written here by %s, %s." .By (at $loc .Updated)}}{{else}}{{t "Written here, %s." (at $loc .Updated)}}{{end}}{{else}}{{if .State}}{{if .By}}{{t "Found by --impact; %s by %s." (t .State) .By}}{{else}}{{t "Found by --impact; %s." (t .State)}}{{end}}{{else}}{{t "Found by --impact."}}{{end}}{{end}}</p>
 
 <h2>{{t "Caught by"}}</h2>
-{{if .CaughtBy}}<ul class="plain">{{range .CaughtBy}}<li><a href="/rules/{{path .Rule}}"><bdi>{{.Rule}}</bdi></a> {{delay .Delay}}</li>{{end}}</ul>
+{{if .CaughtBy}}<ul class="plain">{{range .CaughtBy}}<li><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a> {{delay .Delay}}</li>{{end}}</ul>
 {{else if .Counts}}<p class="bad">{{t "Nothing fired."}}</p>{{else}}<p class="quiet">{{if eq .Status "covered"}}{{t "It isn't judged against: an incident written down covers it."}}{{else}}{{t "It isn't judged against: %s." (t .Status)}}{{end}}</p>{{end}}
 
 {{if .Nearly}}
 <h2>{{t "Nearly caught by"}}</h2>
-<ul class="plain">{{range .Nearly}}<li><a href="/rules/{{path .Rule}}"><bdi>{{.Rule}}</bdi></a>: {{.Text}}.{{with .Cost}} <span class="quiet">{{.}}</span>{{end}}</li>{{end}}</ul>
+<ul class="plain">{{range .Nearly}}<li><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a>: {{.Text}}.{{with .Cost}} <span class="quiet">{{.}}</span>{{end}}</li>{{end}}</ul>
 <p class="quiet">{{t "Worked out with the weekly digest, for the incidents written down by then."}}</p>
 {{end}}
 
 <h2>{{t "Tasks"}}</h2>
-{{template "tasklist" .Tasks}}
-{{if not $ro}}<p><a href="/tasks?incident={{.ID}}&amp;kind=write&amp;title={{t "A rule for %s" .ID}}">{{t "Add a task about this incident"}}</a></p>{{end}}
+{{template "tasklist" (on $ .Tasks)}}
+{{if not $ro}}<p><a href="{{$.Link "/tasks" "incident" .ID "kind" "write" "title" (t "A rule for %s" .ID) "team" ""}}">{{t "Add a task about this incident"}}</a></p>{{end}}
 
 {{template "comments" .Comments}}
 

@@ -6,9 +6,9 @@
 
 {{define "changesoff"}}{{if not .On}}<p class="hint">{{t "Changes are off: proposals are kept, and nothing is applied or handed to a recipe. lapilli serve was started without --changes."}}</p>{{else if .Paused}}<p class="hint bad">{{t "Changes are paused: nothing is applied or handed to a recipe until they are resumed."}}</p>{{end}}{{end}}
 
-{{define "proposallist"}}{{if .}}<div class="scroll"><table>
+{{define "proposallist"}}{{if .V}}<div class="scroll"><table>
 <thead><tr><th scope="col">#</th><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Change"}}</th><th scope="col">{{t "Way"}}</th><th scope="col">{{t "State"}}</th><th scope="col">{{t "Made"}}</th></tr></thead>
-<tbody>{{range .}}<tr><td><a href="/proposals/{{.ID}}">#{{.ID}}</a></td><td><a href="/rules/{{path .Rule}}"><bdi>{{.Rule}}</bdi></a>{{if .Stale}}<br><span class="hint">{{t "the rule changed since"}}</span>{{end}}</td>
+<tbody>{{range .V}}<tr><td><a href="{{$.P.Link (printf "/proposals/%d" .ID)}}">#{{.ID}}</a></td><td><a href="{{$.P.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a>{{if .Stale}}<br><span class="hint">{{t "the rule changed since"}}</span>{{end}}</td>
 <td>{{template "proposalkind" .Kind}}{{if .Agent}}<br><span class="quiet">{{t "proposed by an agent"}}</span>{{end}}</td><td>{{template "proposalpath" .Path}}</td>
 <td>{{template "proposalstate" .State}}{{if eq .State "proposed"}} <span class="quiet">{{t "%d of %d approvals" (len .Approvals) .Need}}</span>{{end}}</td>
 <td class="t">{{at .Loc .Made}}<br><span class="quiet">{{who .MadeBy}}</span></td></tr>{{end}}</tbody>
@@ -20,14 +20,14 @@
 {{template "changesoff" .}}
 {{if .On}}<p class="quiet">{{t "%d approvals each; at most %d deletions a day and %d changes an hour." .Need .Limits.Deletions .Limits.Changes}}</p>{{end}}
 {{if and .On $.Status.Admin}}<form method="post" action="/settings/changes">{{if .Paused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>{{end}}
-<p class="tabs">{{t "State"}}: <a href="/proposals"{{if eq .State "open"}} aria-current="page"{{end}}>{{t "open"}}</a> <a href="/proposals?state=applied"{{if eq .State "applied"}} aria-current="page"{{end}}>{{t "applied"}}</a> <a href="/proposals?state=refused"{{if eq .State "refused"}} aria-current="page"{{end}}>{{t "refused"}}</a> <a href="/proposals?state=all"{{if eq .State "all"}} aria-current="page"{{end}}>{{t "all"}}</a></p>
-{{template "proposallist" .Lines}}
+<p class="tabs">{{t "State"}}: <a href="{{$.Link "/proposals"}}"{{if eq .State "open"}} aria-current="page"{{end}}>{{t "open"}}</a> <a href="{{$.Link "/proposals" "state" "applied"}}"{{if eq .State "applied"}} aria-current="page"{{end}}>{{t "applied"}}</a> <a href="{{$.Link "/proposals" "state" "refused"}}"{{if eq .State "refused"}} aria-current="page"{{end}}>{{t "refused"}}</a> <a href="{{$.Link "/proposals" "state" "all"}}"{{if eq .State "all"}} aria-current="page"{{end}}>{{t "all"}}</a></p>
+{{template "proposallist" (on $ .Lines)}}
 {{end}}{{template "bottom" .}}{{end}}
 
 {{define "proposal"}}{{template "top" (titled . (print "#" .View.ID " " (t (kindText .View.Kind)) ", " .View.Rule))}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
 {{if .Agent}}<p class="hint bad">{{t "An agent proposed this, for %s. What it says is its own: check the diff and the backtest, not its words." (who .MadeBy)}}</p>{{end}}
-<h1>#{{.ID}} {{template "proposalkind" .Kind}}, <a href="/rules/{{path .Rule}}"><bdi>{{.Rule}}</bdi></a></h1>
-<p class="lede">{{template "proposalstate" .State}} {{template "proposalpath" .Path}} · {{t "made by %s, %s" (who .MadeBy) (at $loc .Made)}}{{with .Evidence.From}} · {{t "from %s" (t .)}}{{end}}{{with .Evidence.Incident}} · <a href="/incidents/{{path .}}">{{.}}</a>{{end}}{{if .Follows}} · {{t "after"}} <a href="/proposals/{{.Follows}}">#{{.Follows}}</a>{{end}}</p>
+<h1>#{{.ID}} {{template "proposalkind" .Kind}}, <a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></h1>
+<p class="lede">{{template "proposalstate" .State}} {{template "proposalpath" .Path}} · {{t "made by %s, %s" (who .MadeBy) (at $loc .Made)}}{{with .Evidence.From}} · {{t "from %s" (t .)}}{{end}}{{with .Evidence.Incident}} · <a href="{{$.Incident .}}">{{.}}</a>{{end}}{{if .Follows}} · {{t "after"}} <a href="{{$.Link (printf "/proposals/%d" .Follows)}}">#{{.Follows}}</a>{{end}}</p>
 {{template "changesoff" .}}
 {{if .Evidence.Cloud}}{{with .Evidence.Edit}}{{if .Namespace}}<p class="quiet">{{t "A cloud's alarm, read with --alarms %s:" .Namespace}} <code>{{$.View.Source}}</code></p>{{end}}{{end}}
 {{with .Evidence.NoPath}}<p class="hint">{{t "Lapilli doesn't change it in the cloud:"}} {{t .}}</p>{{end}}
@@ -67,7 +67,7 @@
   <button class="quiet-button">{{t "Close it"}}</button>
 </form></details>
 {{else if .CanDrop}}<form method="post" action="/proposals/{{.ID}}/drop"><button class="quiet-button">{{t "Drop it"}}</button></form>{{end}}
-{{if not $ro}}{{with .Task}}<p><a href="/tasks/{{.ID}}">{{t "Task #%d" .ID}}</a></p>{{else}}<form method="post" action="/proposals/{{.ID}}/task"><button class="quiet-button">{{t "Make it a task"}}</button></form>{{end}}{{end}}
+{{if not $ro}}{{with .Task}}<p><a href="{{$.Link (printf "/tasks/%d" .ID)}}">{{t "Task #%d" .ID}}</a></p>{{else}}<form method="post" action="/proposals/{{.ID}}/task"><button class="quiet-button">{{t "Make it a task"}}</button></form>{{end}}{{end}}
 
 <details><summary>{{t "The rule, as it was and as proposed"}}</summary>
 <pre>{{.Before}}</pre>
@@ -76,7 +76,7 @@
 
 {{define "ruleproposals"}}{{$ro := .Status.ReadOnly}}{{with .View}}
 <h2 id="proposals">{{t "Proposals"}}</h2>
-{{template "proposallist" .Proposals}}
+{{template "proposallist" (on $ .Proposals)}}
 {{if not $ro}}<details><summary>{{t "Propose a change"}}</summary>
 <form method="post" action="/proposals" class="grid">
   <input type="hidden" name="rule" value="{{.Name}}"><input type="hidden" name="kind" value="for">{{with .SuggestedFor}}<input type="hidden" name="from" value="suggestion">{{end}}

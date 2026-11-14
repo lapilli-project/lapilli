@@ -7,7 +7,7 @@
 {{with .Tie}}{{if .Source}}<br>{{t "A cloud's alarm, read with --alarms: its history, copied in under %s from %s on, is its record, as Lapilli doesn't replay it." .Source (day $loc .Since)}}{{else}}<br>{{t "A cloud's alarm, read with --alarms, that Lapilli doesn't replay: it has no record, since no history is tied to it."}} {{t .Why}}{{end}}{{else}}{{with .Source}}<br>{{t "Recorded in %s and copied in: Lapilli has what it fired, not its condition, so it can't say what a change to it would do." .}}{{end}}{{end}}
 {{if .Differs}}<br><strong>{{t "Over the last week its replay differed from how it really fired: %d of %d firings alike. Its stones rest on that replay." .Check.Week.Alike .Check.Week.Either}}</strong>{{end}}</p>
 {{with .Check}}<p>{{t "Over twelve weeks, beside what really fired: %d%% alike, of %d firings; %d only in the replay, %d only in what really fired; the alike ones started %s apart on average." .Share .Either .OnlyReplayed .OnlyReal (dur .Off)}}
-{{with .Misses}}<details><summary>{{t "The last firings found only one way"}}</summary><ul>{{range .}}<li>{{if eq .Way "replayed"}}{{t "only in the replay"}}{{else}}{{t "only in what really fired"}}{{end}}: <a href="/firings?day={{day $loc .Start}}&amp;rule={{$.View.Name}}">{{at $loc .Start}}</a>{{range $k, $v := .Labels}} <code>{{$k}}={{$v}}</code>{{end}}</li>{{end}}</ul></details>{{end}}</p>{{end}}
+{{with .Misses}}<details><summary>{{t "The last firings found only one way"}}</summary><ul>{{range .}}<li>{{if eq .Way "replayed"}}{{t "only in the replay"}}{{else}}{{t "only in what really fired"}}{{end}}: <a href="{{$.Link "/firings" "day" (day $loc .Start) "rule" $.View.Name}}">{{at $loc .Start}}</a>{{range $k, $v := .Labels}} <code>{{$k}}={{$v}}</code>{{end}}</li>{{end}}</ul></details>{{end}}</p>{{end}}
 {{if or .AsleepBlack .OffHoursBlack}}<p>{{t "Of the firings that caught nothing, %d came while people slept, and %d more off hours." .AsleepBlack .OffHoursBlack}}</p>{{end}}
 {{if .Notified}}<p>{{if .Notifications}}{{t "Over twelve weeks, %d notifications were sent for it: %d of them repeats, %d while people slept and %d more off hours; %d were for firings that caught nothing, and %d tell of no firing Lapilli has." .Notifications .Repeats .NotifiedAsleep .NotifiedOffHours .ForNothing .Untied}}{{with .RepeatsForNothing}} {{t "Of the repeats, %d were for firings that caught nothing: what repeat_interval cost." .}}{{end}} {{t "By receiver: %s." .Receivers}}{{else}}{{t "No notification was sent for it over twelve weeks."}}{{end}}
 <span class="quiet">{{t "Notifications are counted from %s, when the first told of it." (day $loc .NotifiedSince)}}</span></p>{{end}}
@@ -66,8 +66,8 @@
 </section>
 
 <h2>{{t "Tasks"}}</h2>
-{{template "tasklist" .Tasks}}
-{{if edits $.Status .TeamID}}<p><a href="/tasks?rule={{.Name}}&amp;kind=tune&amp;title={{t "Tune %s" .Name}}">{{t "Add a task about this rule"}}</a></p>{{end}}
+{{template "tasklist" (on $ .Tasks)}}
+{{if edits $.Status .TeamID}}<p><a href="{{$.Link "/tasks" "rule" .Name "kind" "tune" "title" (t "Tune %s" .Name) "team" .Team}}">{{t "Add a task about this rule"}}</a></p>{{end}}
 
 {{template "ruleproposals" $}}
 
@@ -93,7 +93,7 @@
 <h2>{{t "Incidents it caught"}}</h2>
 {{if .Caught}}<div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Incident"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "First caught by"}}</th></tr></thead>
-<tbody>{{range .Caught}}<tr><td><a href="/incidents/{{path .ID}}">{{.ID}}</a> {{.Title}}</td><td class="t">{{at $loc .Start}}</td><td>{{.First}}</td></tr>{{end}}</tbody>
+<tbody>{{range .Caught}}<tr><td><a href="{{$.Incident .ID}}">{{.ID}}</a> {{.Title}}</td><td class="t">{{at $loc .Start}}</td><td>{{.First}}</td></tr>{{end}}</tbody>
 </table></div>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 
 <h2>{{t "Latest firings"}}</h2>
@@ -101,7 +101,7 @@
 <thead><tr><th scope="col">{{t "Stone"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col" class="n">{{t "Notified"}}</th><th scope="col">{{t "Labels"}}</th></tr></thead>
 <tbody>{{range .Latest}}<tr><td>{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else}}●{{end}}{{if .Refired}} {{t "refired"}}{{end}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="n">{{template "notified" .}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
 </table></div>
-<p><a href="/firings?rule={{.Name}}">{{t "All its firings, by day"}}</a></p>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
+<p><a href="{{$.Link "/firings" "rule" .Name}}">{{t "All its firings, by day"}}</a></p>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 
 {{template "comments" .Comments}}
 {{end}}{{template "bottom" .}}{{end}}

@@ -519,6 +519,7 @@ func TestContrast(t *testing.T) {
 		"dim":       {"bg", "card", "panel", "accent-soft"},
 		"accent":    {"bg", "card", "panel", "accent-soft"},
 		"bad":       {"bg", "card", "panel"},
+		"warn":      {"bg", "card", "panel"}, // a badge of what to check
 		"better":    {"card"},
 		"worse":     {"card"},
 		"viz-muted": {"card"},

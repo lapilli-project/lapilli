@@ -196,7 +196,8 @@ func TestNOCPages(t *testing.T) {
 	s := nocServer(t)
 	h := s.Handler()
 	_, body, _ := get(t, h, "/rules?weeks=4")
-	flap, noise := strings.Index(body, `href="/rules/Flap"`), strings.Index(body, `href="/rules/Noise"`)
+	// Each rule's link carries the period, as every link does.
+	flap, noise := strings.Index(body, `href="/rules/Flap?weeks=4"`), strings.Index(body, `href="/rules/Noise?weeks=4"`)
 	if flap < 0 || noise < 0 || noise > flap {
 		t.Errorf("/rules: the noisiest first, Noise before Flap: %d %d", noise, flap)
 	}
@@ -206,7 +207,7 @@ func TestNOCPages(t *testing.T) {
 		}
 	}
 	_, body, _ = get(t, h, "/rules?weeks=4&sort=refired")
-	flap, noise = strings.Index(body, `href="/rules/Flap"`), strings.Index(body, `href="/rules/Noise"`)
+	flap, noise = strings.Index(body, `href="/rules/Flap?weeks=4"`), strings.Index(body, `href="/rules/Noise?weeks=4"`)
 	if flap < 0 || flap > noise || !strings.Contains(body, `aria-current="page">re-fired, the most first`) {
 		t.Errorf("/rules?sort=refired: Flap first: %d %d", flap, noise)
 	}

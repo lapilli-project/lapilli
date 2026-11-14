@@ -106,11 +106,17 @@ func tr(lang, msg string, args ...any) string {
 // trBDI is tr with each argument set apart in <bdi>, as a name within a
 // sentence is: one written right to left, or holding what turns text
 // around, doesn't turn the sentence around it. The text is escaped, the
-// translation's and each argument's.
+// translation's and each argument's. A number is as its verb (%d) has it:
+// digits, nothing to set apart.
 func trBDI(lang, msg string, args ...any) template.HTML {
 	set := make([]any, len(args))
 	for i, a := range args {
-		set[i] = template.HTML("<bdi>" + template.HTMLEscapeString(fmt.Sprint(a)) + "</bdi>")
+		switch a.(type) {
+		case int, int64:
+			set[i] = a
+		default:
+			set[i] = template.HTML("<bdi>" + template.HTMLEscapeString(fmt.Sprint(a)) + "</bdi>")
+		}
 	}
 	// tr without arguments is the translation as it is, its verbs too.
 	return template.HTML(fmt.Sprintf(template.HTMLEscapeString(tr(lang, msg)), set...))

@@ -82,6 +82,11 @@ func TestNamesInSentencesSetApart(t *testing.T) {
 		if got := string(trBDI(l.Code, "Group %s.", "g")); !strings.Contains(got, "<bdi>g</bdi>") {
 			t.Errorf("%s: %q", l.Code, got)
 		}
+		// A count beside a name is a number, as its verb has it, in a
+		// translation that puts them in another order too.
+		if got := string(trBDI(l.Code, "%d found for “%s”.", 3, "g")); !strings.Contains(got, "3") || !strings.Contains(got, "<bdi>g</bdi>") || strings.Contains(got, "%!") {
+			t.Errorf("%s: %q", l.Code, got)
+		}
 	}
 	if got := funcs["shown"].(func(string) string)("up{x=\"\u202e\"}"); got != "up{x=\"\uFFFD\"}" {
 		t.Errorf("an expression shown: %q", got)

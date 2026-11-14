@@ -340,7 +340,9 @@ Pages are rendered on the server with `html/template`, embedded in the
 binary with their CSS: no scripts, no JavaScript build. Charts are SVG drawn
 on the server. Pages are in the reader's language (English, Spanish, Japanese or
 Korean, from a choice kept in a cookie or the browser's), kept apart in the cache by it;
-a language is one JSON file of translations.
+a language is one JSON file of translations. The frame of every page (the
+sidebar, the breadcrumbs, the team and period carried on every link, the
+search) and the rules list's badges and filters are in [ui.md](ui.md).
 
 - `/`: a dashboard of the last twelve weeks, read from the weekly tallies
   and the weeks' incidents: last week's precision, firings, incidents
@@ -375,6 +377,7 @@ a language is one JSON file of translations.
 - `/outcomes`: whether Lapilli earns its keep: the reviewed changes, measured;
   then and now; the record; the use (see Outcomes).
 - `/incidents`, `/incidents/ID`, `/firings?day=`, `/settings`, `/runs`.
+- `/search?q=`: rules, incidents and teams by name ([ui.md](ui.md)).
 - `/api/v1/report?from=&to=`: `lapilli verdict --json`'s report for a period
   (up to 31 days with every firing, a year without: `firings=false`).
   `/api/v1/incidents` (GET, POST, PUT, DELETE), `/api/v1/rules`, `/runs`,

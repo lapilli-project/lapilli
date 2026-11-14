@@ -352,6 +352,8 @@ type Server struct {
 	creds      creditCache
 	hours      hoursCache
 	outs       outcomesCache
+	// wait keeps the counts the sidebar shows.
+	wait waitingCache
 	// saidRules are the rules as last read, for what they say.
 	saidRules saidRules
 	ready     atomic.Bool

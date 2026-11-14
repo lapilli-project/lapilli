@@ -423,7 +423,13 @@ func (s *Server) notSignedIn(w http.ResponseWriter, r *http.Request, err error) 
 	page := (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.Header.Get("Authorization") == "" &&
 		!strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/mcp"
 	if s.in.oidc != nil && page {
-		http.Redirect(w, r, s.loginURL(r.URL.RequestURI()), http.StatusSeeOther)
+		// Back to where the reader was, but its query only while the
+		// sign-in's cookie holds it: past that, the page alone.
+		next := r.URL.RequestURI()
+		if len(next) > maxNext {
+			next = r.URL.EscapedPath()
+		}
+		http.Redirect(w, r, s.loginURL(next), http.StatusSeeOther)
 		return
 	}
 	msg := "sign in: send a session cookie, or an ID token from the identity provider as a bearer token"
@@ -467,6 +473,22 @@ func (s *Server) protectedResource(w http.ResponseWriter, r *http.Request) {
 // a page: a browser that reached lapilli by another name (a load
 // balancer's address) is taken to the one the identity provider sends it
 // back to, where its cookies are.
+// shortNext is where to go back to after signing in, its query left out
+// past maxNext: the sign-in's cookie holds it, and a browser drops a cookie
+// past 4096 bytes, and the sign-in with it.
+func shortNext(next string) string {
+	if len(next) <= maxNext {
+		return next
+	}
+	if i := strings.IndexByte(next, '?'); i >= 0 {
+		next = next[:i]
+	}
+	if len(next) > maxNext {
+		return "/"
+	}
+	return next
+}
+
 func (s *Server) loginURL(next string) string {
 	return strings.TrimRight(s.cfg.ExternalURL, "/") + "/auth/login?next=" + url.QueryEscape(safeBack(next, "/"))
 }
@@ -503,7 +525,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	// again, and each would leave a cookie for ten minutes, until the
 	// browser, full, drops the session's.
 	s.in.cookies.Prune(w, r, keepLogins)
-	if err := s.in.cookies.Begin(w, st, safeBack(r.URL.Query().Get("next"), "/")); err != nil {
+	if err := s.in.cookies.Begin(w, st, shortNext(safeBack(r.URL.Query().Get("next"), "/"))); err != nil {
 		s.oops(w, r, err)
 		return
 	}
