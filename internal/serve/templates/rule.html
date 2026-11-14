@@ -1,7 +1,7 @@
 {{define "rule"}}{{template "top" (titled . .View.Name)}}{{$loc := .Loc}}{{with .View}}{{$v := .}}
 <div class="rule-head">
 <div class="rule-name"><h1><bdi>{{.Name}}</bdi></h1> {{template "badges" (on $ .Row)}}</div>
-{{$acts := ruleActions $ .}}<p class="rule-actions">{{range $acts}}{{if .Href}}<a class="button{{if .Quiet}} quiet{{end}}" href="{{.Href}}">{{t .Label}}</a> {{else}}<button type="button" disabled aria-describedby="{{.ID}}">{{t .Label}}</button> {{end}}{{end}}{{range $acts}}{{if .Said}}<span id="{{.ID}}" class="why">{{t .Why}}</span> {{end}}{{end}}</p>
+{{$acts := ruleActions $ .}}<p class="rule-actions">{{range $acts}}{{if .Href}}<a class="button{{if .Quiet}} quiet{{end}}" href="{{.Href}}">{{t .Label}}</a> {{else}}<button type="button" disabled aria-describedby="{{.ID}}">{{t .Label}}</button> {{end}}{{end}}{{range $acts}}{{if .Said}}<span id="{{.ID}}" class="why">{{if .WhyOf}}{{tbdi .Why .WhyOf}}{{else}}{{t .Why}}{{end}}</span> {{end}}{{end}}</p>
 </div>
 {{with .Facts}}<ul class="rule-facts">{{range .}}<li>{{if eq .Key "runbook"}}<a href="{{.Value}}" rel="noopener noreferrer">{{t "Runbook"}}</a>{{else if eq .Key "rulebook"}}<a href="{{.Value}}" rel="noopener noreferrer">{{t "Runbook, from the rule"}}</a>{{with .Host}} <span class="k">(<bdi>{{shown .}}</bdi>)</span>{{end}}{{else}}<span class="k">{{if eq .Key "team"}}{{t "Team"}}{{else if eq .Key "severity"}}{{t "Severity"}}{{else if eq .Key "for"}}{{t "For"}}{{else}}{{t "Group"}}{{end}}</span> <bdi>{{.Value}}</bdi>{{end}}</li>{{end}}</ul>{{end}}
 {{with .Conds}}<details class="checks" id="checks"><summary><span aria-hidden="true">⚠&#xFE0E;</span> {{t "%d to check" (len .)}}</summary>

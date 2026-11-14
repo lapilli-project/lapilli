@@ -1235,5 +1235,6 @@
  "rule tab|Proposals": "変更提案",
  "rule tab|Activity": "アクティビティ",
  "better": "改善",
- "worse": "悪化"
+ "worse": "悪化",
+ "Only %s's editors": "%s チームの編集者のみ"
 }

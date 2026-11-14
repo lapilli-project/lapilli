@@ -225,7 +225,9 @@ func barOf(name string, r *http.Request, c pageCtx) barView {
 // disabled for it; Quiet, one drawn less loudly than the first.
 type pageAction struct {
 	Label, Href, Why, ID string
-	Said, Quiet          bool
+	// WhyOf is the name Why says, a team's, when it says one.
+	WhyOf       string
+	Said, Quiet bool
 }
 
 // mainAction is a page's main action. need is who may: "editor", "admin", a

@@ -1235,5 +1235,6 @@
  "rule tab|Proposals": "변경 제안",
  "rule tab|Activity": "활동",
  "better": "좋아짐",
- "worse": "나빠짐"
+ "worse": "나빠짐",
+ "Only %s's editors": "%s 팀 편집자만"
 }

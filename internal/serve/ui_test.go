@@ -515,7 +515,7 @@ func TestFrameTextsTranslated(t *testing.T) {
 	for _, c := range crumbsOf {
 		texts[c.Group], texts[c.Name] = true, true
 	}
-	for _, x := range []string{"Team and period", "Team", "Period", "Admins only", "Editors only", "%d open", "%d to approve", "Nowhere to send a report yet", "No team yet: an editor makes a team's report",
+	for _, x := range []string{"Team and period", "Team", "Period", "Admins only", "Editors only", "Only %s's editors", "%d open", "%d to approve", "Nowhere to send a report yet", "No team yet: an editor makes a team's report",
 		"Read-only: lapilli serve was started with --read-only", "Read-only: no one is given a role here", "Read-only: no one is signed in"} {
 		texts[x] = true
 	}

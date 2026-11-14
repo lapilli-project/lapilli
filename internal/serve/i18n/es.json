@@ -1235,5 +1235,6 @@
  "rule tab|Proposals": "Propuestas",
  "rule tab|Activity": "Actividad",
  "better": "mejor",
- "worse": "peor"
+ "worse": "peor",
+ "Only %s's editors": "Solo los editores de %s"
 }

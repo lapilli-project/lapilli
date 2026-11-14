@@ -412,7 +412,7 @@ func TestRuleActions(t *testing.T) {
 
 	// A team's editor adds their team's tasks and edits its notes, and
 	// proposes nothing.
-	r, pay, _ := rolesServer(t, nil)
+	r, pay, search := rolesServer(t, nil)
 	if _, err := r.l.PutGrant(context.Background(), ledger.Grant{Who: "user:pat@example.com", TeamID: pay}, "boss"); err != nil {
 		t.Fatal(err)
 	}
@@ -424,6 +424,18 @@ func TestRuleActions(t *testing.T) {
 		`<span id="rule-why-1" class="why">Editors only</span>`, `">Add a task</a>`, `">Edit the note</a>`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("a team's editor: no %s", want)
+		}
+	}
+	// Of another team's rule, they are told whose editors may.
+	if err := r.l.PutNote(context.Background(), ledger.Note{Rule: "Errors", TeamID: search}, "boss"); err != nil {
+		t.Fatal(err)
+	}
+	_, body, _ = ui(t, r.Handler(), http.MethodGet, "/rules/Errors", "pat@example.com", "", nil)
+	for _, want := range []string{`<span id="rule-why-1" class="why">Editors only</span>`,
+		`<button type="button" disabled aria-describedby="rule-why-2">Add a task</button> <button type="button" disabled aria-describedby="rule-why-2">Edit the note</button>`,
+		`<span id="rule-why-2" class="why">Only <bdi>search</bdi>&#39;s editors</span>`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("a team's editor, of another team's rule: no %s", want)
 		}
 	}
 }

@@ -119,20 +119,27 @@ func ruleActions(p page, v ruleView) []pageAction {
 	edits := !p.Status.ReadOnly || v.TeamID > 0 && slices.Contains(p.Status.Teams, v.TeamID)
 	as := []pageAction{mainAction(p, "Propose a change", !p.Status.ReadOnly, "editor", ""),
 		mainAction(p, "Add a task", edits, "editor", ""), mainAction(p, "Edit the note", edits, "editor", "")}
+	// A team's editor, of another team's rule: whose editors may.
+	for i := 1; i < len(as); i++ {
+		if as[i].Why == "Editors only" && len(p.Status.Teams) > 0 && v.TeamID > 0 && v.Team != "" {
+			as[i].Why, as[i].WhyOf = "Only %s's editors", v.Team
+		}
+	}
 	to := []string{p.Link(v.Path+"#propose", "tab", "proposals"),
 		p.Link("/tasks", "rule", v.Name, "kind", "tune", "title", tr(p.Lang, "Tune %s", v.Name), "team", v.Team),
 		p.Link(v.Path+"#note", "edit", "note")}
 	ids := map[string]string{}
 	for i := range as {
 		as[i].Quiet = i > 0
-		switch id, ok := ids[as[i].Why]; {
+		why := as[i].Why + "\x00" + as[i].WhyOf
+		switch id, ok := ids[why]; {
 		case as[i].Why == "":
 			as[i].Href = to[i]
 		case ok:
 			as[i].ID = id
 		default:
 			as[i].ID, as[i].Said = fmt.Sprintf("rule-why-%d", len(ids)+1), true
-			ids[as[i].Why] = as[i].ID
+			ids[why] = as[i].ID
 		}
 	}
 	return as
