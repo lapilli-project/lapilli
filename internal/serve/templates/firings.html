@@ -1,6 +1,6 @@
 {{define "firings"}}{{$title := t "Firings, %s" .View.Day}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
 <h1>{{$title}}</h1>
-<form method="get" action="/firings" class="row">
+<form method="get" action="/firings" class="row">{{range $.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
   <label>{{t "Day"}} <input name="day" type="date" value="{{.Day}}"></label>
   <label>{{t "Rule"}} <input name="rule" value="{{.Rule}}"></label>
   <label><input type="checkbox" name="black" value="1"{{if .Black}} checked{{end}}> {{t "only ● nothing"}}</label>

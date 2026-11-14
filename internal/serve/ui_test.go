@@ -50,12 +50,13 @@ func TestLink(t *testing.T) {
 }
 
 // TestContextCarried crawls every page with a team and a period, and finds
-// both on every link to another page: those that choose another team or
-// period choose it, and say so. A page that finds nothing carries neither.
+// both on every link to another page, and in every form that is sent as a
+// GET: those that choose another team or period choose it, and say so. A
+// page that finds nothing carries neither.
 func TestContextCarried(t *testing.T) {
 	s, paths := a11yServer(t)
 	h := s.Handler()
-	links := 0
+	links, forms := 0, 0
 	for _, p := range append(paths, "/tasks?status=done", "/reports?edit=1", "/teams?edit=1") {
 		u, _ := url.Parse(p)
 		q := u.Query()
@@ -69,6 +70,22 @@ func TestContextCarried(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, n := range allNodes(doc) {
+			if n.DataAtom == atom.Form && w.Code == http.StatusOK {
+				get := strings.EqualFold(nodeAttr(n, "method"), "get")
+				names := map[string]bool{}
+				for _, m := range allNodes(n) {
+					get = get || m.DataAtom == atom.Button && strings.EqualFold(nodeAttr(m, "formmethod"), "get")
+					if m.DataAtom == atom.Input || m.DataAtom == atom.Select {
+						names[nodeAttr(m, "name")] = true
+					}
+				}
+				if get {
+					forms++
+					if !names["team"] || !names["weeks"] {
+						t.Errorf("%s: the form to %s doesn't carry the team and period", p, nodeAttr(n, "action"))
+					}
+				}
+			}
 			href := nodeAttr(n, "href")
 			if n.DataAtom != atom.A || !strings.HasPrefix(href, "/") || strings.HasPrefix(href, "//") || !toPage(href) {
 				continue
@@ -101,9 +118,19 @@ func TestContextCarried(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("%d links crawled", links)
-	if links < 500 {
-		t.Errorf("only %d links crawled", links)
+	t.Logf("%d links and %d forms crawled", links, forms)
+	if links < 500 || forms < 80 {
+		t.Errorf("only %d links and %d forms crawled", links, forms)
+	}
+
+	// A task added from a page goes to the task's page, with the context.
+	code, body, _ := get(t, h, "/tasks?team=payments&weeks=12")
+	if code != http.StatusOK || !strings.Contains(body, `<form method="post" action="/tasks?team=payments&amp;weeks=12" class="grid">`) {
+		t.Fatal("/tasks?team=payments&weeks=12: the form to add a task doesn't carry the context")
+	}
+	code, _, hd := post(t, h, "/tasks?team=payments&weeks=12", url.Values{"title": {"x"}, "kind": {"tune"}, "team": {"0"}}, "same-origin")
+	if loc := hd.Get("Location"); code != http.StatusSeeOther || !regexp.MustCompile(`^/tasks/[0-9]+\?team=payments&weeks=12$`).MatchString(loc) {
+		t.Errorf("a task added: %d to %q", code, loc)
 	}
 }
 

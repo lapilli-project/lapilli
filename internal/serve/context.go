@@ -68,6 +68,20 @@ func (s *Server) pageContext(r *http.Request) pageCtx {
 	return c
 }
 
+// urlContext is the team and period a URL has, as they are: for a link
+// that carries them on, as the page it goes to reads them.
+func urlContext(q url.Values) pageCtx {
+	var c pageCtx
+	if vs, ok := q["team"]; ok {
+		c.Team, c.TeamSet = vs[0], true
+	}
+	switch v := q.Get("weeks"); v {
+	case "1", "4", "12":
+		c.Weeks, _ = strconv.Atoi(v)
+	}
+	return c
+}
+
 // myTeam is the team the reader edits when it is the one team they edit,
 // and they are no editor of every team, nor an admin: "" otherwise.
 func (s *Server) myTeam(r *http.Request, o *owners) string {

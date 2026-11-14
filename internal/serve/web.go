@@ -710,6 +710,10 @@ type page struct {
 // Link is a page's URL with the page context; see pageCtx.Link.
 func (p page) Link(target string, kv ...any) string { return p.Ctx.Link(target, kv...) }
 
+// Hidden is the page context as a form's hidden fields, for a GET form of
+// the page's own.
+func (p page) Hidden() []field { return p.Ctx.hidden() }
+
 // Rule is a rule's page, Incident an incident's, with the page context.
 func (p page) Rule(name string) string   { return p.Ctx.Rule(name) }
 func (p page) Incident(id string) string { return p.Ctx.Incident(id) }
