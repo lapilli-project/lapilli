@@ -45,6 +45,28 @@ func listServer(t *testing.T) *Server {
 	return s
 }
 
+// proposalValues are a proposal's values in a facet, as the list counts
+// them.
+func proposalValues(p ledger.Proposal, param string) []string {
+	switch param {
+	case "state":
+		return []string{stateGroups[p.State], p.State}
+	case "kind":
+		return []string{p.Kind}
+	case "path":
+		return []string{p.Path}
+	case "by":
+		switch {
+		case p.Agent:
+			return []string{ledger.MakerAgent}
+		case p.MadeBy == ledger.Proposer:
+			return []string{ledger.MakerLapilli}
+		}
+		return []string{ledger.MakerPerson}
+	}
+	return nil
+}
+
 // proposalsFor is the proposals list for a query, as cy sees it.
 func proposalsFor(t *testing.T, s *Server, query string) proposalsView {
 	t.Helper()
@@ -85,7 +107,7 @@ func TestProposalsFacets(t *testing.T) {
 	if l := open.Lines; len(l) < 4 || l[0].State != ledger.StateProposed || l[1].State != ledger.StateProposed || l[2].State != ledger.StateProposed || l[3].State == ledger.StateProposed {
 		t.Errorf("not those waiting for approval first: %q", ids(open))
 	}
-	for q, want := range map[string]int{"state=open": 12, "state=all": 30, "state=": 12, "state=refused": 3, "state=closed": 12, "state=bogus": 30,
+	for q, want := range map[string]int{"state=open": 12, "state=all": 30, "state=": 12, "state=refused": 3, "state=closed": 12, "state=bogus": 0, "state=bogus&state=refused": 3,
 		"state=all&kind=for": 6, "state=all&by=agent": 4, "state=all&by=lapilli": 9, "state=all&path=none": 6} {
 		if v := proposalsFor(t, s, q); v.Shown != want {
 			t.Errorf("%s: %d shown, want %d", q, v.Shown, want)
@@ -116,6 +138,10 @@ func TestProposalsFacets(t *testing.T) {
 			q.Set("state", "all")
 		}
 		v := proposalsFor(t, s, q.Encode())
+		// The list the database picks is the one the counts say.
+		if len(v.Lines) != min(v.Shown, proposalsShown) {
+			t.Errorf("%s: %d shown of %d counted", q.Encode(), len(v.Lines), v.Shown)
+		}
 		for _, f := range v.Pick.Facets {
 			for _, o := range f.Options {
 				alone := url.Values{}
@@ -166,5 +192,56 @@ func TestProposalsFacets(t *testing.T) {
 	}
 	if v := proposalsFor(t, s, "state=all&state=proposed"); v.Shown != 3 {
 		t.Errorf("all and one state: %d, want the one", v.Shown)
+	}
+}
+
+// TestProposalsOldNotHidden: the list is picked by the database, its
+// states in its query and its facets counted there: two thousand proposals
+// moved since, dropped, don't push an older one waiting for approval off
+// the list, or out of its counts; past the two hundred shown, the list
+// says so.
+func TestProposalsOldNotHidden(t *testing.T) {
+	s, _ := changesServer(t, nil)
+	ctx := context.Background()
+	old, err := s.l.Propose(ctx, ledger.Proposal{Rule: "Old", Kind: ledger.KindFor, Path: ledger.PathGit, MadeBy: bo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 2000 {
+		id, err := s.l.Propose(ctx, ledger.Proposal{Rule: fmt.Sprintf("New%04d", i), Kind: ledger.KindFor, Path: ledger.PathGit, MadeBy: ledger.Proposer})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.l.Move(ctx, id, []string{ledger.StateProposed}, ledger.StateDropped, cy, ledger.Step{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	v := proposalsFor(t, s, "")
+	if v.Total != 2001 || v.Shown != 1 || len(v.Lines) != 1 || v.Lines[0].ID != old || v.More {
+		t.Errorf("unless asked: %d of %d, %d lines, more %v", v.Shown, v.Total, len(v.Lines), v.More)
+	}
+	count := func(v proposalsView, param, value string) int {
+		for _, f := range v.Pick.Facets {
+			for _, o := range f.Options {
+				if f.Param == param && o.Value == value {
+					return o.Count
+				}
+			}
+		}
+		return -1
+	}
+	if count(v, "state", "proposed") != 1 || count(v, "state", "closed") != 2000 {
+		t.Errorf("counts: proposed %d, closed %d", count(v, "state", "proposed"), count(v, "state", "closed"))
+	}
+	all := proposalsFor(t, s, "state=all")
+	if all.Shown != 2001 || len(all.Lines) != proposalsShown || !all.More || all.Lines[0].ID != old {
+		t.Errorf("all: %d shown, %d lines, more %v, first #%d", all.Shown, len(all.Lines), all.More, all.Lines[0].ID)
+	}
+	if by := proposalsFor(t, s, "state=all&by=person"); by.Shown != 1 || len(by.Lines) != 1 || by.Lines[0].ID != old {
+		t.Errorf("made by a person: %d shown", by.Shown)
+	}
+	// An older link's state there is no such of shows none, as before.
+	if v := proposalsFor(t, s, "state=bogus"); v.Shown != 0 || len(v.Lines) != 0 || v.Empty == nil {
+		t.Errorf("state=bogus: %d shown", v.Shown)
 	}
 }

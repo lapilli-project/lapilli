@@ -3,6 +3,8 @@ package ledger
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -128,5 +130,78 @@ func TestUndoOnePerRule(t *testing.T) {
 	}
 	if _, err := l.Propose(ctx, proposal("HighErrors", KindSays)); !errors.Is(err, ErrProposed) {
 		t.Errorf("proposed beside an undo: %v", err)
+	}
+}
+
+// TestProposalListByRules: the proposals list of a team's rules, more than
+// a statement names at once, is the list of every rule's but for the
+// others: in the same order, the first most of them, and counted alike.
+func TestProposalListByRules(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	var mine []string
+	for i := range 3*ruleChunk + 7 {
+		mine = append(mine, fmt.Sprintf("Mine%05d", i))
+	}
+	for i := range 40 {
+		rule := fmt.Sprintf("Mine%05d", i*(len(mine)/40))
+		if i%4 == 3 {
+			rule = fmt.Sprintf("Other%02d", i)
+		}
+		id, err := l.Propose(ctx, Proposal{Rule: rule, Kind: []string{KindFor, KindSays}[i%2], Path: PathGit, MadeBy: []string{fmt.Sprintf("p%d", i), Proposer}[i%3/2], Agent: i%5 == 0})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i%3 == 0 {
+			if _, err := l.Move(ctx, id, []string{StateProposed}, StateDropped, "bo", Step{}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	all, err := l.ProposalList(ctx, ProposalPick{}, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []int64
+	for _, h := range all {
+		if strings.HasPrefix(h.Rule, "Mine") {
+			want = append(want, h.ID)
+		}
+	}
+	for _, most := range []int{1000, 7} {
+		got, err := l.ProposalList(ctx, ProposalPick{Rules: mine}, most)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []int64
+		for _, h := range got {
+			ids = append(ids, h.ID)
+		}
+		if w := want[:min(most, len(want))]; !slices.Equal(ids, w) {
+			t.Errorf("most %d: %v, want %v", most, ids, w)
+		}
+	}
+	if got, _ := l.ProposalList(ctx, ProposalPick{Rules: []string{}}, 10); len(got) != 0 {
+		t.Errorf("no rules: %d", len(got))
+	}
+	counts, err := l.ProposalCounts(ctx, mine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, c := range counts {
+		n += c.N
+	}
+	if n != len(want) {
+		t.Errorf("counted %d of the rules', want %d", n, len(want))
+	}
+	if picked, _ := l.ProposalList(ctx, ProposalPick{Rules: mine, States: []string{StateDropped}, Kinds: []string{KindFor}, Makers: []string{MakerAgent}}, 100); len(picked) == 0 {
+		t.Error("none picked by state, kind and maker")
+	} else {
+		for _, h := range picked {
+			if h.State != StateDropped || h.Kind != KindFor || !h.Agent {
+				t.Errorf("picked %+v", h)
+			}
+		}
 	}
 }

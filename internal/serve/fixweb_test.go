@@ -34,7 +34,8 @@ func tasksFor(t *testing.T, s *Server, query string) tasksView {
 
 // TestTasksFacet: the tasks' status is a facet, each value counted for the
 // team: the open ones (open and being done) unless asked; done, dropped,
-// all, and an older link's status as it was; the team kept in the form.
+// all, and an older link's status as it was (doing, or one there is no
+// such of, the open ones); the team kept in the form.
 func TestTasksFacet(t *testing.T) {
 	s, _ := server(t, nil)
 	ctx := context.Background()
@@ -67,8 +68,11 @@ func TestTasksFacet(t *testing.T) {
 		{"status=all", 7, 7, nil},
 		{"status=done", 3, 7, nil},
 		{"status=done&status=dropped", 4, 7, nil},
-		{"status=doing", 1, 7, map[string]int{"open": 3, "done": 3, "dropped": 1, "doing": 1}},
-		{"status=bogus", 7, 7, nil},
+		// An older link's doing, or a status there is no such of, is the
+		// open ones, as it was.
+		{"status=doing", 3, 7, map[string]int{"open": 3, "done": 3, "dropped": 1}},
+		{"status=bogus", 3, 7, nil},
+		{"status=bogus&status=done", 3, 7, nil},
 		{"team=payments", 2, 4, map[string]int{"open": 2, "done": 1, "dropped": 1}},
 		{"team=payments&status=all", 4, 4, nil},
 	} {

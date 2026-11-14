@@ -176,92 +176,107 @@ var proposalFacets = []pickFacet{
 		labels: []string{"awaiting approval", "approved", "being applied", "applied", "undone", "closed"},
 		def:    []string{"proposed", "approved", "doing"}, aliases: map[string][]string{"open": {"proposed", "approved", "doing"}, "": {"proposed", "approved", "doing"}},
 		raw: []string{ledger.StateReady, ledger.StateApplying, ledger.StateOpened, ledger.StateMerged, ledger.StateRefused, ledger.StateFailed,
-			ledger.StateDropped, ledger.StateAmended}},
+			ledger.StateDropped, ledger.StateAmended},
+		// A state there is no such of, as an older link may name, is none.
+		none: true},
 	{param: "kind", name: "Kind", values: []string{ledger.KindFor, ledger.KindThreshold, ledger.KindDisable, ledger.KindDelete, ledger.KindSays, ledger.KindUndo},
 		labels: []string{"a new for", "a new threshold", "turning it off", "deleting it", "a fix to what it says", "undoing a change"}},
 	{param: "path", name: "Way", values: []string{ledger.PathGit, ledger.PathGrafana, ledger.PathRuler, ledger.PathAlarm, ledger.PathNone},
 		labels: []string{"a pull request", "Grafana's API", "the ruler's API", "the cloud's API", "for a person to make"}},
-	{param: "by", name: "Made by", values: []string{"person", "agent", "lapilli"}, labels: []string{"a person", "an agent", "Lapilli itself"}},
+	{param: "by", name: "Made by", values: []string{ledger.MakerPerson, ledger.MakerAgent, ledger.MakerLapilli}, labels: []string{"a person", "an agent", "Lapilli itself"}},
 }
 
-// Of the proposals, the list reads proposalsRead in brief, the latest
-// moved first, and shows proposalsShown.
-const (
-	proposalsRead  = 2000
-	proposalsShown = 200
-)
+// proposalsShown is how many proposals the list shows at most, saying so
+// past them.
+const proposalsShown = 200
 
-// proposalValues are a proposal's values in a facet.
-func proposalValues(p ledger.Proposal, param string) []string {
+// countValues are a count of proposals' values in a facet.
+func countValues(c ledger.ProposalCount, param string) []string {
 	switch param {
 	case "state":
-		return []string{stateGroups[p.State], p.State}
+		return []string{stateGroups[c.State], c.State}
 	case "kind":
-		return []string{p.Kind}
+		return []string{c.Kind}
 	case "path":
-		return []string{p.Path}
+		return []string{c.Path}
 	case "by":
-		switch {
-		case p.Agent:
-			return []string{"agent"}
-		case p.MadeBy == ledger.Proposer:
-			return []string{"lapilli"}
-		}
-		return []string{"person"}
+		return []string{c.Maker}
 	}
 	return nil
+}
+
+// proposalPick is what the list's facets pick, as the database reads it:
+// a state's group as its states.
+func proposalPick(p picks, rules []string) ledger.ProposalPick {
+	q := ledger.ProposalPick{Rules: rules, Kinds: p["kind"], Paths: p["path"], Makers: p["by"]}
+	for _, v := range p["state"] {
+		for _, st := range append(ledger.Unfinished(), ledger.StateApplied, ledger.StateUndone, ledger.StateRefused, ledger.StateFailed, ledger.StateDropped, ledger.StateAmended) {
+			if (st == v || stateGroups[st] == v) && !slices.Contains(q.States, st) {
+				q.States = append(q.States, st)
+			}
+		}
+	}
+	return q
 }
 
 func (s *Server) proposalsPage(r *http.Request) (any, error) {
 	ctx := r.Context()
 	c := s.pageContext(r)
-	heads, err := s.l.ProposalHeads(ctx, proposalsRead)
-	if err != nil {
-		return nil, err
-	}
+	// A proposal's team is its rule's: with a team, its rules alone, as
+	// the ledger knows them.
+	var rules []string
 	if c.Team != "" {
 		o, err := s.owners(ctx)
 		if err != nil {
 			return nil, err
 		}
-		heads = slices.DeleteFunc(heads, func(h ledger.ProposalHead) bool { return o.teamOf(h.Rule) != c.Team })
+		rules = o.rulesOf(c.Team)
+	}
+	// Counted by the database, every proposal, however many: the facets,
+	// and how many the list has.
+	counts, err := s.l.ProposalCounts(ctx, rules)
+	if err != nil {
+		return nil, err
 	}
 	// The links made from what was asked: with the reader's own team taken
 	// for them (c.Mine), none carries it, and the next page takes it again.
 	p := picksOf(r.URL.Query(), proposalFacets)
-	idx, pick := pickItems("/proposals", c, proposalFacets, p, len(heads), func(i int, param string) []string { return proposalValues(heads[i].Proposal, param) })
-	// Those waiting for approval first, then those under way, then the
-	// rest, each the latest moved first.
-	rank := func(st string) int {
-		switch {
-		case st == ledger.StateProposed:
-			return 0
-		case slices.Contains(ledger.Unfinished(), st):
-			return 1
-		}
-		return 2
+	idx, pick := pickItems("/proposals", c, proposalFacets, p, len(counts), func(i int, param string) []string { return countValues(counts[i], param) },
+		func(i int) int { return counts[i].N })
+	v := proposalsView{On: s.cfg.Changes, Paused: s.changesPaused(), Limits: s.limits(), Need: s.approvals(), Approver: s.approver(r), Pick: pick}
+	for _, x := range counts {
+		v.Total += x.N
 	}
-	slices.SortStableFunc(idx, func(a, b int) int { return rank(heads[a].State) - rank(heads[b].State) })
-	v := proposalsView{On: s.cfg.Changes, Paused: s.changesPaused(), Limits: s.limits(), Need: s.approvals(), Approver: s.approver(r),
-		Pick: pick, Shown: len(idx), Total: len(heads)}
-	if len(idx) > proposalsShown {
-		idx, v.More = idx[:proposalsShown], true
-	}
-	ps := make([]ledger.Proposal, 0, len(idx))
 	for _, i := range idx {
-		ps = append(ps, heads[i].Proposal)
+		v.Shown += counts[i].N
+	}
+	// Picked by the database, in its order: those waiting for approval
+	// first, then those under way, then the rest, each the latest moved
+	// first, proposalsShown of them, said so past them.
+	var heads []ledger.ProposalHead
+	if v.Shown > 0 {
+		if heads, err = s.l.ProposalList(ctx, proposalPick(p, rules), proposalsShown+1); err != nil {
+			return nil, err
+		}
+	}
+	if len(heads) > proposalsShown {
+		heads, v.More = heads[:proposalsShown], true
+	}
+	ps := make([]ledger.Proposal, 0, len(heads))
+	for _, h := range heads {
+		ps = append(ps, h.Proposal)
 	}
 	if v.Lines, err = s.proposalLines(r, ps); err != nil {
 		return nil, err
 	}
-	for k, i := range idx {
-		v.Lines[k].Have = heads[i].Approved
+	for k, h := range heads {
+		v.Lines[k].Have = h.Approved
 	}
 	switch {
-	case len(heads) == 0:
+	case v.Total == 0:
 		v.Empty = &emptyView{Kind: "done", Title: "No proposals yet.",
 			Text: "A rule's page proposes a change to it, with its backtest; Lapilli proposes of itself with --changes, after the weekly digest."}
-	case len(idx) == 0:
+	case len(v.Lines) == 0:
 		v.Empty = &emptyView{Kind: "notfound", Title: "No proposal matches these filters.", Links: []emptyLink{{"Clear filters", pick.Clear}}}
 	}
 	if s.cfg.Changes && s.role(r) < admin {

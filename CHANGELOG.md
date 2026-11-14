@@ -28,7 +28,10 @@ this phase.
 - **Facets with counts on the proposals list** (state, kind, way, made by
   a person, an agent or Lapilli), with chips and the team in the bar, as
   the rules list has them; the open ones unless asked, those waiting for
-  approval first.
+  approval first. The database picks the list and counts the facets, so
+  every proposal counts, and newer ones can't push an older one waiting
+  for approval off the list; a state there is no such of shows none, as
+  it did.
 - **A quiet window's preview**: a Preview button on the form to add or
   change one, the same POST, which writes nothing and is checked as saving
   is, shows the form as typed with the rules it applies to, the firings
@@ -68,7 +71,8 @@ this phase.
   it says, proposing a change, a task about it).
 - **The tasks' status is a facet with counts** (open, done, dropped), the
   team kept, in place of the status links; `?status=done`, `dropped` and
-  `all` mean what they meant.
+  `all` mean what they meant, and any other, `doing` among them, the open
+  ones, as it did.
 - The proposals are shown for the team picked in the bar, and a team's
   editor sees their team's unless they pick all teams.
 - A quiet window's form has Preview as its first button: Enter in a field

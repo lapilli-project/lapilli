@@ -281,10 +281,10 @@ type tasksView struct {
 }
 
 // taskFacets are the tasks list's facet: its status, the open ones (open
-// and being done) unless asked; an older link's all, done, dropped, or
-// doing, as it was.
+// and being done) unless asked; an older link's all, done or dropped as
+// it was, and any other, doing among them, the open ones, as it was.
 var taskFacets = []pickFacet{{param: "status", name: "Status", values: []string{"open", "done", "dropped"}, labels: []string{"open", "done", "dropped"},
-	def: []string{"open"}, aliases: map[string][]string{"": {"open"}}, raw: []string{"doing"}}}
+	def: []string{"open"}, aliases: map[string][]string{"": {"open"}}}}
 
 func (s *Server) taskLines(o *owners, ts []ledger.Task) []taskLine {
 	var out []taskLine

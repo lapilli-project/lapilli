@@ -602,9 +602,15 @@ team taken as on the other pages); a proposal's team is its rule's.
 Unless `state=` is given, the open ones, as the list was, those waiting for
 approval first. The form sends `state=all` with what is ticked, so none
 ticked is all of them; `?state=all`, `?state=applied` and `?state=refused`
-mean what they meant. The list reads the latest 2,000 proposals in brief
-(`ProposalHeads`: no document, only an undo's evidence, how many approved)
-and shows 200, saying so past them. Each count is how many the list would
+mean what they meant, and a state there is no such of (`?state=bogus`)
+shows none, as it did. The database picks the list, its states, kinds,
+ways and makers in the query, in brief (`ProposalList`: no document, only
+an undo's evidence, how many approved), and counts the facets with
+`GROUP BY` (`ProposalCounts`), both additive reads: every proposal is
+counted however many there are, and newer ones, dropped by the thousand,
+never push an older one waiting for approval off the list. A team's are
+those of its rules, named to the database 2,000 at a time. It shows 200,
+saying so past them. Each count is how many the list would
 show with the value picked alone in its facet and what the others pick
 (`TestProposalsFacets` checks it, on filters picked at random).
 
@@ -613,7 +619,8 @@ show with the value picked alone in its facet and what the others pick
 Their status is a facet with counts in place of the status links: open
 (open and being done), done, dropped, the form sending `status=all` as the
 proposals' does, the team kept. `?status=done`, `dropped` and `all` mean
-what they meant, and `doing` is offered as it is once asked. The counts
+what they meant, and any other, `doing` among them, is the open ones, as
+it was. The counts
 are the team's tasks in each status, in one read (`TasksByStatus`), and
 the page says how many of them it shows.
 

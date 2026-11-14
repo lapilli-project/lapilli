@@ -20,19 +20,24 @@ import (
 // aliases are values the URL may give for some of the values (open: the
 // states not finished with), and raw, values the URL may give that the
 // facet doesn't offer but its items have (a state of its own, from an
-// older link), each offered as it is once picked.
+// older link), each offered as it is once picked. A value it doesn't know
+// is left out, never shown; one named with none it knows is its default,
+// or, with none, matches no item, as an older link to a state there is no
+// such of did.
 type pickFacet struct {
 	param, name    string
 	values, labels []string
 	def            []string
 	aliases        map[string][]string
 	raw            []string
+	none           bool
 }
 
 // picksOf reads what a list's URL picks in each facet: values it offers,
 // its aliases' values, and its raw values, each once, maxValues at most;
-// def when the facet isn't named. What else it gives is left out, never
-// shown.
+// def when the facet isn't named, and "all" none, so every item. What else
+// it gives is left out, never shown: named with nothing else, the facet is
+// its default, or, for one with none, matches no item.
 func picksOf(q url.Values, fs []pickFacet) picks {
 	p := picks{}
 	for _, f := range fs {
@@ -47,6 +52,7 @@ func picksOf(q url.Values, fs []pickFacet) picks {
 				got = append(got, x)
 			}
 		}
+		known, unknown := false, false
 		for _, v := range vs {
 			v = strings.ToLower(strings.TrimSpace(v))
 			switch {
@@ -56,12 +62,31 @@ func picksOf(q url.Values, fs []pickFacet) picks {
 				for _, x := range f.aliases[v] {
 					add(x)
 				}
+			case v == "all" && f.def != nil:
+			default:
+				unknown = true
+				continue
 			}
+			known = true
 		}
-		p[f.param] = got
+		switch {
+		case known || !unknown:
+			p[f.param] = got
+		case f.none:
+			p[f.param], p[noneOf(f.param)] = nil, []string{"1"}
+		default:
+			p[f.param] = slices.Clone(f.def)
+		}
 	}
 	return p
 }
+
+// noneOf is where picks says a facet matches no item.
+func noneOf(param string) string { return "\x00none:" + param }
+
+// none reports whether a facet picks no item: named in the URL with no
+// value it knows, for a facet whose unknown values match none.
+func (p picks) none(param string) bool { return p[noneOf(param)] != nil }
 
 // pickURL is a list's page, path, for what is picked, with the page
 // context: a facet picking its default left out, one with a default
@@ -115,10 +140,15 @@ type pickView struct {
 }
 
 // pickItems works out a list's facets over its n items, values giving an
-// item's values in a facet: the items shown, in their order, and the view
-// of the facets, for the list at path with the page context c.
-func pickItems(path string, c pageCtx, fs []pickFacet, p picks, n int, values func(i int, param string) []string) ([]int, pickView) {
+// item's values in a facet and weight how many items it stands for (a
+// count of them, as the database groups them): the items shown, in their
+// order, and the view of the facets, for the list at path with the page
+// context c.
+func pickItems(path string, c pageCtx, fs []pickFacet, p picks, n int, values func(i int, param string) []string, weight func(i int) int) ([]int, pickView) {
 	in := func(i int, f pickFacet) bool {
+		if p.none(f.param) {
+			return false
+		}
 		want := p[f.param]
 		return len(want) == 0 || slices.ContainsFunc(values(i, f.param), func(v string) bool { return slices.Contains(want, v) })
 	}
@@ -149,7 +179,7 @@ func pickItems(path string, c pageCtx, fs []pickFacet, p picks, n int, values fu
 			vs := values(i, f.param)
 			for k, v := range vs {
 				if !slices.Contains(vs[:k], v) { // a value an item has twice counts once
-					counts[f.param][v]++
+					counts[f.param][v] += weight(i)
 				}
 			}
 		}
@@ -197,8 +227,8 @@ func facetView(path string, c pageCtx, fs []pickFacet, p picks, counts map[strin
 				label = f.labels[i]
 			}
 			q := picks{}
-			for k, vs := range p {
-				q[k] = vs
+			for _, g := range fs {
+				q[g.param] = p[g.param]
 			}
 			q[f.param] = slices.DeleteFunc(slices.Clone(p[f.param]), func(w string) bool { return w == x })
 			v.Chips = append(v.Chips, chip{Group: f.name, Value: label, Href: pickURL(path, c, fs, q)})

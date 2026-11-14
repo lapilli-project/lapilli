@@ -127,6 +127,23 @@ func (o *owners) team(name string) (ledger.Team, bool) {
 	return ledger.Team{}, false
 }
 
+// rulesOf are the names of the rules a team owns, as the ledger knows
+// them, in order; none for a team there isn't.
+func (o *owners) rulesOf(team string) []string {
+	out := []string{}
+	t, ok := o.team(team)
+	if !ok {
+		return out
+	}
+	for name, id := range o.rule {
+		if id == t.ID {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // teamOf is the name of the team that owns a rule, "" for none.
 func (o *owners) teamOf(rule string) string {
 	return o.byID[o.rule[rule]].Name
