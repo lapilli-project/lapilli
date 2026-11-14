@@ -158,7 +158,8 @@ for _ in $(seq 60); do
   [ -n "$lead" ] && break
   sleep 2
 done
-check "one replica leads" "$(wc -l <<<"$lead" | tr -d ' ')" '^1$'
+# Lines with something in them: an empty here-string is one line to wc.
+check "one replica leads" "$(grep -c . <<<"$lead" || true)" '^1$'
 read -r leader replica term <<<"$lead"
 echo "leader: pod $leader, replica $replica, term $term"
 for i in 1 2 3 4 5 6; do task "before $i"; done
@@ -213,7 +214,7 @@ check "no write waited long" "$([ "$longest" -le 5000 ] && echo short || echo "$
 sleep 5 # a notice sent twice, after its claim, would be by now
 told=$(told)
 echo "$told"
-check "every notice reached the webhook" "$(wc -l <<<"$told" | tr -d ' ')" '^(1[3-9]|[2-9][0-9])$'
+check "every notice reached the webhook" "$(grep -c . <<<"$told" || true)" '^(1[3-9]|[2-9][0-9])$'
 check "and none twice" "$(awk '$1 > 1' <<<"$told" | wc -l | tr -d ' ')" '^0$'
 check "the tasks made, each told once" "$(kubectl -n "$ns" logs deploy/fakeslack | grep -c '"event":"task.created"')" '^13$'
 for p in $(pods | cut -d' ' -f1); do
