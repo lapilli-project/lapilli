@@ -833,7 +833,7 @@ func TestRuleGlance(t *testing.T) {
 	}
 	// Its severity, which the ledger hasn't, from its labels, as the list
 	// has it.
-	if v := view(""); !slices.Contains(v.Facts, ruleFact{"severity", "page"}) || v.Severity != "" {
+	if v := view(""); !slices.Contains(v.Facts, ruleFact{Key: "severity", Value: "page"}) || v.Severity != "" {
 		t.Errorf("facts %+v; severity %q", v.Facts, v.Severity)
 	}
 	// Today is a Tuesday, noon: the last week is Monday and today, a day and

@@ -1228,5 +1228,6 @@
  "%d during a deploy": "%d durante un despliegue",
  "fired during a deploy of what it is about": "disparó durante un despliegue de lo que trata",
  "What it says when it fires has problems of fact; the badge, “n to check”, counts them with whatever else its page lists to check.": "Lo que dice al dispararse tiene problemas de hecho; la insignia «n por revisar» los cuenta junto con lo demás que su página pide revisar.",
- "Too long to set beside the version before line by line: the version before, taken out, then this one.": "Demasiado larga para compararla línea a línea con la versión anterior: la anterior, quitada, y luego esta."
+ "Too long to set beside the version before line by line: the version before, taken out, then this one.": "Demasiado larga para compararla línea a línea con la versión anterior: la anterior, quitada, y luego esta.",
+ "Runbook, from the rule": "Runbook, de la regla"
 }

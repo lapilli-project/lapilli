@@ -1228,5 +1228,6 @@
  "%d during a deploy": "デプロイ中の発火 %d 件",
  "fired during a deploy of what it is about": "このルールの対象のデプロイ中に発火",
  "What it says when it fires has problems of fact; the badge, “n to check”, counts them with whatever else its page lists to check.": "発火時のアラート内容に事実の問題があります。「要確認 n 件」のバッジは、これとルールのページが確認を求めるほかの項目をあわせて数えます。",
- "Too long to set beside the version before line by line: the version before, taken out, then this one.": "長すぎるため直前のバージョンと行ごとには比べていません。直前のバージョンを削除行として、このバージョンを追加行として示します。"
+ "Too long to set beside the version before line by line: the version before, taken out, then this one.": "長すぎるため直前のバージョンと行ごとには比べていません。直前のバージョンを削除行として、このバージョンを追加行として示します。",
+ "Runbook, from the rule": "ランブック(ルールに記載)"
 }

@@ -207,6 +207,9 @@ func (v *ruleView) condsIn() condsIn {
 // severity, for, group and runbook, each when known. Key says which.
 type ruleFact struct {
 	Key, Value string
+	// Host is, for a runbook named by the rule itself (rulebook) rather
+	// than in its note, the host its link goes to.
+	Host string
 }
 
 // moved is how a number changed from as long a span before, when On. Up

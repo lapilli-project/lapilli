@@ -1071,11 +1071,17 @@ func (s *Server) ruleHeader(v *ruleView, sev string) {
 	v.Row = rowOf(v.ruleLine, 0)
 	v.Conds = condsOf(v.condsIn())
 	v.Tabs = tabsOf(v)
-	runbook := v.Note.Runbook
-	if v.Says != nil && v.Says.RunbookLink != "" {
-		runbook = v.Says.RunbookLink
+	// Its runbook: the one a person gave its note in Lapilli, or else the
+	// one whoever writes the rules named, said to be the rule's, its host
+	// beside it.
+	runbook := ruleFact{Key: "runbook", Value: v.Note.Runbook}
+	if runbook.Value == "" && v.Says != nil && v.Says.RunbookLink != "" {
+		runbook = ruleFact{Key: "rulebook", Value: v.Says.RunbookLink}
+		if u, err := url.Parse(runbook.Value); err == nil {
+			runbook.Host = u.Host
+		}
 	}
-	for _, f := range []ruleFact{{"team", v.Team}, {"severity", sev}, {"for", v.For}, {"group", v.Group}, {"runbook", runbook}} {
+	for _, f := range []ruleFact{{Key: "team", Value: v.Team}, {Key: "severity", Value: sev}, {Key: "for", Value: v.For}, {Key: "group", Value: v.Group}, runbook} {
 		if f.Value != "" {
 			v.Facts = append(v.Facts, f)
 		}

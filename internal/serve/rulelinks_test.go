@@ -187,3 +187,29 @@ func TestRuleChecksCounted(t *testing.T) {
 		t.Errorf("%d rules have more to check than problems of fact, %d a proposal made against an older version", more, stale)
 	}
 }
+
+// TestRuleRunbook: a rule's header links to the runbook a person gave its
+// note in Lapilli; only without one, to the one the rule names, said to be
+// the rule's, with the host it goes to beside it.
+func TestRuleRunbook(t *testing.T) {
+	s, _ := saying(t, nil)
+	h := s.Handler()
+	header := func() string {
+		t.Helper()
+		_, body, _ := get(t, h, "/rules/Quiet")
+		head, _, ok := strings.Cut(body, `<p class="period">`)
+		if !ok {
+			t.Fatal("/rules/Quiet: no period")
+		}
+		return head
+	}
+	if got := header(); !strings.Contains(got, `<li><a href="https://runbooks.example/quiet" rel="noopener noreferrer">Runbook, from the rule</a> <span class="k">(<bdi>runbooks.example</bdi>)</span></li>`) {
+		t.Errorf("the rule's runbook, not said to be:\n%s", got)
+	}
+	if err := s.l.PutNote(context.Background(), ledger.Note{Rule: "Quiet", Runbook: "https://wiki.example/quiet"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	if got := header(); !strings.Contains(got, `<li><a href="https://wiki.example/quiet" rel="noopener noreferrer">Runbook</a></li>`) || strings.Contains(got, "runbooks.example") {
+		t.Errorf("the note's runbook isn't the one linked:\n%s", got)
+	}
+}
