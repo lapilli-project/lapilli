@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-11-14
+
 `lapilli serve` runs as several replicas on one Postgres ledger: one leads,
 and runs what must run once; every replica serves the rest
 (docs/design/replicas.md). No ledger schema change: the replicas' own
@@ -9,7 +11,10 @@ tables are Postgres's alone, made as a ledger opens where they are older
 than its lapilli's (`replica_schema`), with no DDL otherwise, and none is
 copied.
 SQLite is as it was: one process, the same files. Read "Before you
-upgrade".
+upgrade". Reviewed three times, as an attacker would, for correctness and
+concurrency, and the fixes once more; what each found is fixed in what is
+described here, as is what the first run of three replicas on kind found
+(the end-to-end test asked the wrong port).
 
 ### Added
 

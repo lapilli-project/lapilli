@@ -2,7 +2,7 @@
 
 Status: built, for v0.34.0. `lapilli serve` keeps its ledger in
 SQLite by default, as it always has; `--ledger-url-file FILE` keeps it in a
-Postgres database instead. Since the release after 0.35.0, several replicas
+Postgres database instead. Since v0.36.0, several replicas
 of serve share it, one leading ([replicas.md](replicas.md)); 0.34 and 0.35
 were one replica, as below. The companion to [serve.md](serve.md) (the ledger) and
 [signin.md](signin.md) (who signed out, kept in the ledger).

@@ -1,6 +1,6 @@
 # Replicas on one Postgres ledger
 
-Status: built, for the release after 0.35.0. `lapilli serve` with its
+Status: built, for v0.36.0. `lapilli serve` with its
 ledger in Postgres (`--ledger-url-file`, [postgres.md](postgres.md)) runs
 as several replicas on one ledger: one leads, and runs what must run once;
 every replica serves the rest. With SQLite it is one process, as it always
