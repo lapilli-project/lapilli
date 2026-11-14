@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -158,3 +159,64 @@ func TestPreviewWindow(t *testing.T) {
 	}
 }
 
+// TestPreviewWindowLimited: a preview asks the limits saving asks, so a
+// preview that passes is a window that saving keeps: a team's editors'
+// windows of a team, a window moved by them to a team that has as many,
+// and the ledger's own. Each preview refused is refused saved too.
+func TestPreviewWindowLimited(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	pay, err := l.PutTeam(ctx, Team{Name: "payments", Rules: "^Pay"}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	search, err := l.PutTeam(ctx, Team{Name: "search", Rules: "^Search"}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cron := func(team int64) Window {
+		return Window{Title: "new year", Start: start, End: start.Add(time.Hour), Every: "cron", On: "0 0 1 1 *", TeamID: team}
+	}
+	both := WithTeams(ctx, []int64{pay, search})
+	for range MaxTeamWindows {
+		if _, err := l.PutWindow(both, cron(pay), "payer", opts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	other, err := l.PutWindow(both, cron(search), "payer", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := cron(pay)
+	moved.ID = other
+	refused := func(name string, c context.Context, w Window, says string) {
+		t.Helper()
+		var inv ErrInvalid
+		if _, err := l.PreviewWindow(c, w); !errors.As(err, &inv) || !strings.Contains(err.Error(), says) {
+			t.Errorf("%s, previewed: %v", name, err)
+		}
+		if _, err := l.PutWindow(c, w, "payer", opts); !errors.As(err, &inv) || !strings.Contains(err.Error(), says) {
+			t.Errorf("%s, saved: %v", name, err)
+		}
+	}
+	refused("a team's editors past its windows", both, cron(pay), "of its quiet windows at most")
+	refused("moved by them to a team that has as many", both, moved, "of its quiet windows at most")
+	for name, c := range map[string]struct {
+		ctx context.Context
+		w   Window
+	}{"of a team that has room": {both, cron(search)}, "by an editor of every team": {ctx, cron(pay)}, "moved by an editor of every team": {ctx, moved}} {
+		if _, err := l.PreviewWindow(c.ctx, c.w); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for n := MaxTeamWindows + 1; n < MaxWindows; n++ {
+		if _, err := l.PutWindow(ctx, cron(0), "ed", opts); err != nil {
+			t.Fatal(n, err)
+		}
+	}
+	refused("past the ledger's windows", ctx, cron(0), "quiet windows at most")
+	if _, err := l.PreviewWindow(ctx, Window{ID: other, Title: "renamed", Start: start, End: start.Add(time.Hour), Every: "cron", On: "0 0 1 1 *", TeamID: search}); err != nil {
+		t.Errorf("a window changed, at the ledger's limit: %v", err)
+	}
+}

@@ -16,7 +16,9 @@ import (
 // PreviewWindow is a quiet window as PutWindow would keep it, checked as
 // it is: its title, times, schedule, pattern and labels; that its team is
 // there, and, for a team's editor (WithTeams), theirs, as is the window it
-// changes, when it changes one. Nothing is written.
+// changes, when it changes one; and the limits on how many the ledger and
+// a team keep, a new one's or one moved to another team. Nothing is
+// written.
 func (l *Ledger) PreviewWindow(ctx context.Context, w Window) (Window, error) {
 	if err := l.checkWindow(&w); err != nil {
 		return w, err
@@ -34,6 +36,8 @@ func (l *Ledger) PreviewWindow(ctx context.Context, w Window) (Window, error) {
 			return w, err
 		}
 	}
+	// The limits on how many there are, as saving asks them: a preview
+	// that passes is a window that saving keeps.
 	if w.ID != 0 {
 		was, err := l.WindowByID(ctx, w.ID)
 		if err != nil {
@@ -42,6 +46,11 @@ func (l *Ledger) PreviewWindow(ctx context.Context, w Window) (Window, error) {
 		if !mine(was.TeamID) {
 			return w, ErrNotYourTeam
 		}
+		if err := movedLeft(ctx, l.r, was.TeamID, w.TeamID); err != nil {
+			return w, err
+		}
+	} else if err := windowsLeft(ctx, l.r, w.TeamID); err != nil {
+		return w, err
 	}
 	w.loc, w.ruled = l.loc, map[string]bool{}
 	if w.Rules != "" {

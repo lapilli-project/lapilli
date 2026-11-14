@@ -623,7 +623,10 @@ The form to add a quiet window, and the one to change one, have a Preview
 button: the same POST to `/windows`, with `preview=1` (and
 `formaction="/windows#preview"`, so that the page lands on it), checked as
 saving is (the role, a team's editor's teams, the same site, the window's
-own checks, shared with `PutWindow`), and writing nothing
+own checks, shared with `PutWindow`, and the limits on how many windows
+the ledger and a team keep, for a new one and for one a team's editor
+moves to another of their teams: `windowsLeft`, `movedLeft`), so that a
+preview that passes is a window saving keeps, and writing nothing
 (`PreviewWindow`). The page comes back, `no-store`, with the form as the
 window would be kept (what was typed put in again, escaped) and, above it:
 
