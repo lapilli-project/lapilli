@@ -57,7 +57,7 @@ sees it, and no screen reader says it. */}}
 {{define "noenter"}}<button type="submit" disabled hidden></button>{{end}}
 
 {{/* What a bulk write did, said once on the page it went back to. */}}
-{{define "bulkresult"}}{{$k := .Kind}}<p class="note bulk-done" role="status">{{if .None}}{{t "Nothing was picked: tick the ones to change first."}}{{else}}{{t "%d done" .Done}}{{with .Already}}; {{if eq $k "task"}}{{t "%d had an open task to tune them already" .}}{{else}}{{t "%d had caught something already" .}}{{end}}{{end}}{{with .Theirs}}; {{t "%d not your team's" .}}{{end}}{{with .Refused}}; {{t "%d refused" .}}{{end}}{{with .Failed}}; {{t "%d failed: try again" .}}{{end}}{{end}}</p>{{end}}
+{{define "bulkresult"}}<p class="note bulk-done" role="status">{{if .None}}{{t "Nothing was picked: tick the ones to change first."}}{{else if eq .Kind "real"}}{{t "%d written down" .Done}}{{with .Already}}; {{t "%d had caught something already" .}}{{end}}{{with .Refused}}; {{t "%d couldn't be written down" .}}{{end}}{{with .Failed}}; {{t "%d failed: try again" .}}{{end}}{{else}}{{t "%d done" .Done}}{{with .Already}}; {{t "%d had an open task to tune them already" .}}{{end}}{{with .Theirs}}; {{t "%d not your team's" .}}{{end}}{{with .Refused}}; {{t "%d refused" .}}{{end}}{{with .Failed}}; {{t "%d failed: try again" .}}{{end}}{{end}}</p>{{end}}
 
 {{/* The facets, the search box and the context, as one form: drawn twice,
 as the panel beside the rules on a wide screen and in a details above them

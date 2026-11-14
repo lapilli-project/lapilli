@@ -265,7 +265,8 @@ func TestBulkResultShown(t *testing.T) {
 	for q, want := range map[string]string{
 		"bulk=task&done=3&theirs=2":            "3 done; 2 not your team&#39;s</p>",
 		"bulk=status&done=1&refused=1":         "1 done; 1 refused</p>",
-		"bulk=real&done=2&already=1":           "2 done; 1 had caught something already</p>",
+		"bulk=real&done=2&already=1":           "2 written down; 1 had caught something already</p>",
+		"bulk=real&done=1&refused=1&failed=1":  "1 written down; 1 couldn&#39;t be written down; 1 failed: try again</p>",
 		"bulk=task":                            "Nothing was picked: tick the ones to change first.</p>",
 		"bulk=task&done=101":                   "",
 		"bulk=task&done=60&theirs=60":          "",
@@ -496,6 +497,40 @@ func TestBulkKeepsNotes(t *testing.T) {
 			if got := notes[name]; got != n {
 				t.Errorf("%s %s: %+v, not %+v", c.form.Get("do"), name, got, n)
 			}
+		}
+	}
+}
+
+// TestBulkResultInWords: the result line agrees with what was done in each
+// language: in Spanish, rules and tasks done (feminine), firings written
+// down (masculine); and the phrases the reviews found wanting say what
+// they mean.
+func TestBulkResultInWords(t *testing.T) {
+	s, _, _ := bulkServer(t, nil)
+	h := s.Handler()
+	for _, c := range []struct{ lang, path, want string }{
+		{"es", "/rules?bulk=task&done=3&refused=1", "3 hechas; 1 rechazadas</p>"},
+		{"es", "/firings?day=2026-11-02&bulk=real&done=2&refused=1", "2 anotados como incidentes; 1 no se pudieron anotar</p>"},
+		{"ja", "/firings?day=2026-11-02&bulk=real&done=2", "2 件をインシデントとして記録</p>"},
+		{"ko", "/rules?bulk=status&done=1&failed=1", "1건 완료; 1건 실패(다시 시도해 주세요)</p>"},
+	} {
+		r := httptest.NewRequest(http.MethodGet, c.path, nil)
+		r.Header.Set("Accept-Language", c.lang)
+		r.Header.Set("X-Forwarded-Email", "ed@example.com")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if !strings.Contains(w.Body.String(), `role="status">`+c.want) {
+			t.Errorf("%s %s: no %s", c.lang, c.path, c.want)
+		}
+	}
+	for _, c := range []struct{ lang, en, has, not string }{
+		{"ja", "On the clock", "切り替え", "時計の上で"},
+		{"es", "The rules, the most during deploys first", "se dispararon", ""},
+		{"es", "caught it, %s, and noisy that week", "regla ruidosa", ""},
+		{"ja", "caught it, %s, and noisy that week", "ノイズの多いルール", ""},
+	} {
+		if x := catalogs[c.lang][c.en]; !strings.Contains(x, c.has) || c.not != "" && strings.Contains(x, c.not) {
+			t.Errorf("%s %q: %q", c.lang, c.en, x)
 		}
 	}
 }
