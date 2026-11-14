@@ -34,19 +34,20 @@ var bulkKinds = []string{"task", "team", "status", "real"}
 
 // bulkResult is what a bulk write did, as the page it goes back to says it
 // once: how many were done; of the rest, how many weren't the reader's
-// team's, how many were refused for what they are, how many, of firings,
-// had caught something already; and, when an error of another kind
-// stopped it, the one that failed and how many weren't tried after it.
-// None says nothing was picked; Kind is what was done.
+// team's, how many were refused for what they are, and how many because
+// only editors may do it (a team's editor's "Set the team"), how many, of
+// firings, had caught something already; and, when an error of another
+// kind stopped it, the one that failed and how many weren't tried after
+// it. None says nothing was picked; Kind is what was done.
 type bulkResult struct {
 	Kind                                   string
 	Done, Theirs, Refused, Already, Failed int
-	Untried                                int
+	Untried, Editors                       int
 	None                                   bool
 }
 
 // bulkParams are the parameters a bulk write's result is said by.
-var bulkParams = []string{"bulk", "done", "theirs", "refused", "already", "failed", "untried"}
+var bulkParams = []string{"bulk", "done", "theirs", "refused", "already", "failed", "untried", "editors"}
 
 // bulkOf is the result a page was sent back with, read within bounds:
 // nil when there is none, or what is there isn't one.
@@ -63,14 +64,15 @@ func bulkOf(q url.Values) *bulkResult {
 		return x, err == nil && x >= 0 && x <= maxBulk
 	}
 	b := bulkResult{Kind: q.Get("bulk")}
-	var ok [6]bool
+	var ok [7]bool
 	b.Done, ok[0] = n("done")
 	b.Theirs, ok[1] = n("theirs")
 	b.Refused, ok[2] = n("refused")
 	b.Already, ok[3] = n("already")
 	b.Failed, ok[4] = n("failed")
 	b.Untried, ok[5] = n("untried")
-	all := b.Done + b.Theirs + b.Refused + b.Already + b.Failed + b.Untried
+	b.Editors, ok[6] = n("editors")
+	all := b.Done + b.Theirs + b.Refused + b.Already + b.Failed + b.Untried + b.Editors
 	if slices.Contains(ok[:], false) || all > maxBulk {
 		return nil
 	}
@@ -91,7 +93,7 @@ func bulkBack(back, path, kind string, b bulkResult) string {
 		q.Del(k)
 	}
 	q.Set("bulk", kind)
-	for k, n := range map[string]int{"done": b.Done, "theirs": b.Theirs, "refused": b.Refused, "already": b.Already, "failed": b.Failed, "untried": b.Untried} {
+	for k, n := range map[string]int{"done": b.Done, "theirs": b.Theirs, "refused": b.Refused, "already": b.Already, "failed": b.Failed, "untried": b.Untried, "editors": b.Editors} {
 		if n > 0 {
 			q.Set(k, strconv.Itoa(n))
 		}
@@ -191,6 +193,14 @@ func (s *Server) bulkRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var res bulkResult
+	if _, limited := scoped(r); limited && do == "team" {
+		// Moving a rule into a team or out of one is an editor's, whichever
+		// team's (ledger.PutNote): a team's editor's are refused, each,
+		// for that, not as another team's.
+		res.Editors = len(rules)
+		back(w, r, bulkBack(r.PostFormValue("back"), "/rules", do, res))
+		return
+	}
 	by, lg := s.user(r), lang(r)
 	for i, rule := range rules {
 		var err error

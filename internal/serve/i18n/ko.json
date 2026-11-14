@@ -8,6 +8,7 @@
  "%d had an open task to tune them already": "%d건은 이미 열린 튜닝 태스크가 있음",
  "%d not your team's": "%d건은 내 팀 것이 아님",
  "%d refused": "%d건 거부됨",
+ "%d refused: editors only": "%d건 거부됨: 편집자만 가능",
  "%d couldn't be written down": "%d건은 기록할 수 없음",
  "%d failed: try again": "%d건 실패(다시 시도해 주세요)",
  "stopped there: %d not tried": "거기서 멈춤: %d건은 시도하지 않음",

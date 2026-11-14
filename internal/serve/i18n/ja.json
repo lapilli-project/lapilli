@@ -8,6 +8,7 @@
  "%d had an open task to tune them already": "%d 件はすでにチューニングのタスクが未完了",
  "%d not your team's": "%d 件は自分のチームのものではない",
  "%d refused": "%d 件は拒否",
+ "%d refused: editors only": "%d 件は拒否: 編集者のみ",
  "%d couldn't be written down": "%d 件は記録できない",
  "%d failed: try again": "%d 件は失敗（もう一度お試しください）",
  "stopped there: %d not tried": "そこで中止: %d 件は未実施",

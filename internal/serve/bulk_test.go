@@ -134,7 +134,7 @@ func TestBulkRules(t *testing.T) {
 		}, "bulk=status&done=3"},
 		{pat, url.Values{"do": {"team"}, "team": {"SEARCH"}}, func(rule string, _, search int64) (string, url.Values) {
 			return "/notes", url.Values{"rule": {rule}, "team": {fmt.Sprint(search)}}
-		}, "bulk=team&theirs=3"},
+		}, "bulk=team&editors=3"},
 		{ed, url.Values{"do": {"team"}, "team": {"SEARCH"}}, func(rule string, _, search int64) (string, url.Values) {
 			return "/notes", url.Values{"rule": {rule}, "team": {fmt.Sprint(search)}}
 		}, "bulk=team&done=3"},
@@ -267,6 +267,7 @@ func TestBulkResultShown(t *testing.T) {
 	for q, want := range map[string]string{
 		"bulk=task&done=3&theirs=2":            "3 done; 2 not your team&#39;s</p>",
 		"bulk=status&done=1&refused=1":         "1 done; 1 refused</p>",
+		"bulk=team&editors=2":                  "0 done; 2 refused: editors only</p>",
 		"bulk=real&done=2&already=1":           "2 written down; 1 had caught something already</p>",
 		"bulk=real&done=1&refused=1&failed=1":  "1 written down; 1 couldn&#39;t be written down; 1 failed: try again</p>",
 		"bulk=task":                            "Nothing was picked: tick the ones to change first.</p>",
