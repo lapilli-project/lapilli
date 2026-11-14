@@ -602,3 +602,25 @@ func TestBadgesInKorean(t *testing.T) {
 		t.Error("/rules in Korean: not the badges' Korean")
 	}
 }
+
+// TestQuietFiltered: the rules that didn't fire, listed below the list,
+// are those its filters pick, the search box's words too; and with some
+// listed, the list doesn't say none matches.
+func TestQuietFiltered(t *testing.T) {
+	s := facetServer(t)
+	for q, want := range map[string][]string{
+		"q=r2":                  {"R20", "R21", "R22", "R23"},
+		"has=proposal":          {"R20"},
+		"q=r1&status=none":      {"R16", "R17", "R18", "R19"},
+		"q=r2+label:tier=t0":    {"R20", "R22"},
+		"severity=warning&q=r2": {"R21"},
+	} {
+		v := rulesFor(t, s, q)
+		if got := rowNames(v.Quiet); !slices.Equal(got, want) {
+			t.Errorf("%s: quiet %q, want %q", q, got, want)
+		}
+		if len(v.Quiet) > 0 && v.Shown == 0 && (v.Empty == nil || v.Empty.Title == "No rule matches these filters.") {
+			t.Errorf("%s: %d didn't fire, listed, and the list says %+v", q, len(v.Quiet), v.Empty)
+		}
+	}
+}

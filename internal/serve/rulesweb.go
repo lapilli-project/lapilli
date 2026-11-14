@@ -466,7 +466,9 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	case cursor.IsZero():
 		v.Empty = &emptyView{Kind: "first", Title: "Nothing judged yet",
 			Text: "The first run replays the rules over the weeks before it started; this page fills in when it has. It can take a few minutes for a busy set of rules."}
-	case v.Shown == 0 && (v.Active || len(v.Bad) > 0):
+	case v.Shown == 0 && (v.Active || len(v.Bad) > 0) && len(v.Quiet) == 0:
+		// None at all: with some that didn't fire listed below, it is
+		// that none of them fired.
 		v.Empty = &emptyView{Kind: "notfound", Title: "No rule matches these filters.", Links: []emptyLink{{"Clear filters", v.Clear}}}
 		if c.Team != "" {
 			v.Empty.Links = append(v.Empty.Links, emptyLink{"The same filters, in all teams", allTeams.url()})
