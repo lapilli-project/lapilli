@@ -10,6 +10,7 @@
  "%d refused": "%d건 거부됨",
  "%d couldn't be written down": "%d건은 기록할 수 없음",
  "%d failed: try again": "%d건 실패(다시 시도해 주세요)",
+ "stopped there: %d not tried": "거기서 멈춤: %d건은 시도하지 않음",
  "Nothing was picked: tick the ones to change first.": "선택한 항목이 없어요. 바꿀 항목을 먼저 체크해 주세요.",
  "With the rules picked": "선택한 규칙에",
  "Make a task for each": "각각 작업 만들기",

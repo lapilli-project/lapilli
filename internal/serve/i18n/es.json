@@ -10,6 +10,7 @@
  "%d refused": "%d rechazadas",
  "%d couldn't be written down": "%d no se pudieron anotar",
  "%d failed: try again": "%d fallaron: vuelve a intentarlo",
+ "stopped there: %d not tried": "se detuvo ahí: %d sin intentar",
  "Nothing was picked: tick the ones to change first.": "No se eligió nada: marca primero los que quieras cambiar.",
  "With the rules picked": "Con las reglas elegidas",
  "Make a task for each": "Crear una tarea para cada una",

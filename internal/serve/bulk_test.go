@@ -1,8 +1,10 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -361,9 +363,10 @@ func failOn(t *testing.T, s *Server, table, column, value string) {
 }
 
 // TestBulkPartial: what the ledger refuses for what it is, the single
-// write answers 400, and a bulk write counts refused; a write that fails
-// otherwise, it counts failed, and goes on: it ends on the list it came
-// from, saying so, with the rest written.
+// write answers 400, and a bulk write counts refused, and goes on; a write
+// that fails otherwise, which would fail the same for the rest, it counts
+// failed, logs once, and stops there: it ends on the list it came from,
+// saying how many weren't tried.
 func TestBulkPartial(t *testing.T) {
 	s, ids := realServer(t)
 	h := s.Handler()
@@ -385,26 +388,34 @@ func TestBulkPartial(t *testing.T) {
 		t.Fatal(err)
 	}
 	failOn(t, s, "incidents", "title", "caught by "+f1.Rule)
-	code, body, hd := postAs(t, h, "/firings/real", url.Values{"firing": {fmt.Sprint(long[0].ID), ids[0], ids[1]}, "back": {"/firings?day=2026-11-01"}}, "ana@example.com", "same-origin")
-	if want := "/firings?bulk=real&day=2026-11-01&done=1&failed=1&refused=1"; code != http.StatusSeeOther || hd.Get("Location") != want {
+	var logged bytes.Buffer
+	s.log = slog.New(slog.NewTextHandler(&logged, nil))
+	code, body, hd := postAs(t, h, "/firings/real", url.Values{"firing": {fmt.Sprint(long[0].ID), ids[2], ids[1], ids[0], ids[3]},
+		"back": {"/firings?day=2026-11-01"}}, "ana@example.com", "same-origin")
+	if want := "/firings?bulk=real&day=2026-11-01&done=1&failed=1&refused=1&untried=2"; code != http.StatusSeeOther || hd.Get("Location") != want {
 		t.Errorf("firings: %d to %q, not %q: %s", code, hd.Get("Location"), want, body)
 	}
-	if f0, err := s.l.FiringByID(ctx, mustInt(t, ids[0])); err != nil || !f0.White {
-		t.Errorf("the firing written down: %+v %v", f0, err)
+	for i, white := range []bool{true, false, false, false} {
+		if f, err := s.l.FiringByID(ctx, mustInt(t, ids[[]int{2, 1, 0, 3}[i]])); err != nil || f.White != white {
+			t.Errorf("firing %d written down %v, not %v: %v", i, f.White, white, err)
+		}
+	}
+	if n := strings.Count(logged.String(), "level=ERROR"); n != 1 {
+		t.Errorf("%d errors logged", n)
 	}
 
 	b, _, _ := bulkServer(t, nil)
 	failOn(t, b, "tasks", "rule", "SearchErrors")
 	code, body, hd = postAs(t, b.Handler(), "/rules/bulk", url.Values{"do": {"task"}, "rule": {"Errors", "SearchErrors", "SearchLatency"}, "back": {"/rules"}},
 		"ed@example.com", "same-origin")
-	if want := "/rules?bulk=task&done=2&failed=1"; code != http.StatusSeeOther || hd.Get("Location") != want {
+	if want := "/rules?bulk=task&done=1&failed=1&untried=1"; code != http.StatusSeeOther || hd.Get("Location") != want {
 		t.Errorf("rules: %d to %q, not %q: %s", code, hd.Get("Location"), want, body)
 	}
-	if _, tasks, _ := worked(t, b); len(tasks) != 2 {
+	if _, tasks, _ := worked(t, b); len(tasks) != 1 {
 		t.Errorf("tasks %v", tasks)
 	}
-	if _, body := getAs(t, b.Handler(), "/rules?bulk=task&done=2&failed=1", "ed@example.com"); !strings.Contains(body, `role="status">2 done; 1 failed: try again</p>`) {
-		t.Error("the list doesn't say one failed")
+	if _, body := getAs(t, b.Handler(), "/rules?bulk=task&done=1&failed=1&untried=1", "ed@example.com"); !strings.Contains(body, `role="status">1 done; 1 failed: try again; stopped there: 1 not tried</p>`) {
+		t.Error("the list doesn't say it stopped")
 	}
 }
 

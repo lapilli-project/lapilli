@@ -35,16 +35,18 @@ var bulkKinds = []string{"task", "team", "status", "real"}
 // bulkResult is what a bulk write did, as the page it goes back to says it
 // once: how many were done; of the rest, how many weren't the reader's
 // team's, how many were refused for what they are, how many, of firings,
-// had caught something already, and how many failed, by an error of
-// another kind. None says nothing was picked; Kind is what was done.
+// had caught something already; and, when an error of another kind
+// stopped it, the one that failed and how many weren't tried after it.
+// None says nothing was picked; Kind is what was done.
 type bulkResult struct {
 	Kind                                   string
 	Done, Theirs, Refused, Already, Failed int
+	Untried                                int
 	None                                   bool
 }
 
 // bulkParams are the parameters a bulk write's result is said by.
-var bulkParams = []string{"bulk", "done", "theirs", "refused", "already", "failed"}
+var bulkParams = []string{"bulk", "done", "theirs", "refused", "already", "failed", "untried"}
 
 // bulkOf is the result a page was sent back with, read within bounds:
 // nil when there is none, or what is there isn't one.
@@ -61,13 +63,14 @@ func bulkOf(q url.Values) *bulkResult {
 		return x, err == nil && x >= 0 && x <= maxBulk
 	}
 	b := bulkResult{Kind: q.Get("bulk")}
-	var ok [5]bool
+	var ok [6]bool
 	b.Done, ok[0] = n("done")
 	b.Theirs, ok[1] = n("theirs")
 	b.Refused, ok[2] = n("refused")
 	b.Already, ok[3] = n("already")
 	b.Failed, ok[4] = n("failed")
-	all := b.Done + b.Theirs + b.Refused + b.Already + b.Failed
+	b.Untried, ok[5] = n("untried")
+	all := b.Done + b.Theirs + b.Refused + b.Already + b.Failed + b.Untried
 	if slices.Contains(ok[:], false) || all > maxBulk {
 		return nil
 	}
@@ -88,7 +91,7 @@ func bulkBack(back, path, kind string, b bulkResult) string {
 		q.Del(k)
 	}
 	q.Set("bulk", kind)
-	for k, n := range map[string]int{"done": b.Done, "theirs": b.Theirs, "refused": b.Refused, "already": b.Already, "failed": b.Failed} {
+	for k, n := range map[string]int{"done": b.Done, "theirs": b.Theirs, "refused": b.Refused, "already": b.Already, "failed": b.Failed, "untried": b.Untried} {
 		if n > 0 {
 			q.Set(k, strconv.Itoa(n))
 		}
@@ -115,11 +118,13 @@ func picked(vs []string) ([]string, bool) {
 
 // bulkCount adds a write's outcome to a result: done, the reader's team's
 // not, or refused for what it is (what the ledger refuses as invalid, or
-// what isn't there). An error of another kind is counted failed, and
-// logged as an error page would log it: the rest are still written, and
-// the list the write came from says so; a bulk write never ends part-way
-// on an error page.
-func (s *Server) bulkCount(b *bulkResult, r *http.Request, err error) {
+// what isn't there), and the rest go on. An error of another kind (the
+// writers' turn waited for too long, a database that stopped answering,
+// a lead lost) would be the same for the rest: it is counted failed, and
+// logged once, as an error page would log it, and stop reports true: the
+// write stops there, and goes back to the list it came from, which says
+// how many weren't tried. A bulk write never ends on an error page.
+func (s *Server) bulkCount(b *bulkResult, r *http.Request, err error) (stop bool) {
 	var inv ledger.ErrInvalid
 	switch {
 	case err == nil:
@@ -133,7 +138,9 @@ func (s *Server) bulkCount(b *bulkResult, r *http.Request, err error) {
 		if !errors.Is(err, context.Canceled) {
 			s.log.Error("serving", "path", r.URL.Path, "err", err)
 		}
+		return true
 	}
+	return false
 }
 
 // bulkRules is the rules list's bulk write: for each rule picked, the task
@@ -185,7 +192,7 @@ func (s *Server) bulkRules(w http.ResponseWriter, r *http.Request) {
 	}
 	var res bulkResult
 	by, lg := s.user(r), lang(r)
-	for _, rule := range rules {
+	for i, rule := range rules {
 		var err error
 		switch do {
 		case "task":
@@ -214,7 +221,10 @@ func (s *Server) bulkRules(w http.ResponseWriter, r *http.Request) {
 				err = s.l.PutNote(ctx, n, by)
 			}
 		}
-		s.bulkCount(&res, r, err)
+		if s.bulkCount(&res, r, err) {
+			res.Untried = len(rules) - i - 1
+			break
+		}
 	}
 	if do != "task" && res.Done > 0 {
 		s.poke() // who owns a rule may have changed: a team's windows are judged again
@@ -253,13 +263,16 @@ func (s *Server) bulkReal(w http.ResponseWriter, r *http.Request) {
 		ids = append(ids, id)
 	}
 	var res bulkResult
-	for _, id := range ids {
+	for i, id := range ids {
 		made, _, err := s.realOne(r, id)
 		if err == nil && made == "" {
 			res.Already++
 			continue
 		}
-		s.bulkCount(&res, r, err)
+		if s.bulkCount(&res, r, err) {
+			res.Untried = len(ids) - i - 1
+			break
+		}
 	}
 	back(w, r, bulkBack(r.PostFormValue("back"), "/firings", "real", res))
 }
