@@ -95,6 +95,8 @@ type rulesList struct {
 	Empty  *emptyView
 	// Legend is what each badge means, facet by facet.
 	Legend []legendGroup
+	// Bulk is the form that does something with the rules picked.
+	Bulk bulkView
 }
 
 // legendGroup is a facet's badges, in the list's legend: each its sign,
@@ -517,6 +519,8 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	}
 	allTeams := a
 	allTeams.c.Team, allTeams.c.TeamSet = "", true
+	v.Bulk = s.bulkFor(r, "team")
+	v.Bulk.Back, v.Bulk.Teams = a.url(), d.own.teams
 
 	switch {
 	case cursor.IsZero():

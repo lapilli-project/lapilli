@@ -122,6 +122,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /incidents/{id}/delete", s.write(s.deleteIncident))
 	mux.HandleFunc("POST /incidents/{id}/decide", s.write(s.decide))
 	mux.HandleFunc("POST /firings/{id}/real", s.write(s.real))
+	s.bulkRoutes(mux)
 	mux.HandleFunc("POST /settings", s.admin(s.postSettings))
 	mux.HandleFunc("GET /api/v1/me", s.me)
 
@@ -1152,20 +1153,29 @@ func (s *Server) real(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, bad("no such firing"))
 		return
 	}
-	f, err := s.l.FiringByID(r.Context(), id)
-	if err != nil {
+	made, f, err := s.realOne(r, id)
+	switch {
+	case err != nil:
 		s.oops(w, r, err)
-		return
-	}
-	if f.White {
+	case made == "":
 		// Pressed twice, or caught since: there is an incident already.
 		back(w, r, "/firings?day="+f.Start.In(s.cfg.Loc).Format("2006-01-02"))
-		return
+	default:
+		back(w, r, "/incidents/"+url.PathEscape(made))
+	}
+}
+
+// realOne writes the firing id down as an incident, from its start and end,
+// with the labels --match matches on: the incident's id, or "" when the
+// firing has caught something, and there is one already.
+func (s *Server) realOne(r *http.Request, id int64) (string, ledger.Firing, error) {
+	f, err := s.l.FiringByID(r.Context(), id)
+	if err != nil || f.White {
+		return "", f, err
 	}
 	o, err := s.options(r.Context())
 	if err != nil {
-		s.oops(w, r, err)
-		return
+		return "", f, err
 	}
 	in := incident.Incident{Title: "caught by " + f.Rule, Start: f.Start, End: f.End}
 	for _, m := range o.Match {
@@ -1177,11 +1187,7 @@ func (s *Server) real(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	made, err := s.l.Put(r.Context(), in, s.user(r), o)
-	if err != nil {
-		s.oops(w, r, err)
-		return
-	}
-	back(w, r, "/incidents/"+url.PathEscape(made))
+	return made, f, err
 }
 
 func (s *Server) postSettings(w http.ResponseWriter, r *http.Request) {

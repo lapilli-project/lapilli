@@ -331,6 +331,15 @@ td.rule { min-width: 16rem; }
 .badge.trust, .badge.check { color: var(--warn); }
 .badge.prog { color: var(--accent); }
 a.badge:hover { text-decoration: underline; }
+/* Many at once: a bar over a list whose rows are picked by a checkbox,
+   what it can do to them, each its own button; and what it did, once. */
+fieldset.bulk-bar { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem .9rem; margin: 0 0 .8rem; padding: .6rem .8rem; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--card); min-width: 0; }
+fieldset.bulk-bar legend { padding: 0 .3rem; font-size: .9rem; font-weight: 600; color: var(--dim); }
+fieldset.bulk-bar p { margin: 0; flex-basis: 100%; }
+.bulk-set { display: inline-flex; flex-wrap: wrap; align-items: end; gap: .4rem; }
+td.pick, th.pick { width: 2rem; padding-right: 0; }
+td.pick input { width: 1.1rem; height: 1.1rem; margin: .2rem 0 0; }
+p.bulk-done { margin: 0 0 .8rem; }
 
 /* A rule's page: its name and badges, what can be done, the facts of it and
    what to check; five numbers over the period, each with a definition to
