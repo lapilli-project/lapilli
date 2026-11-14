@@ -10,9 +10,11 @@
   can be picked and written down as real together. Each item is the write
   its own form makes, in turn, with every check it has: a team's editor's
   rules of another team are counted, not changed, and the changes log has
-  a line for each. At most 100 a request, from this site. The list it came
-  from is gone back to, its filters, order and team kept, and says once
-  what was done ("3 done; 2 not your team's").
+  a line for each; a rule with a task to tune it still open has one
+  already; an item that fails is counted, and the rest written. At most
+  100 a request, from this site; Enter in the form writes nothing. The
+  list it came from is gone back to, its filters, order, team and period
+  kept, and says once what was done ("3 done; 2 not your team's").
 - **A firing's labels as chips**, each a link to the same day's firings
   with that label too (`/firings?label=service=api`, all of them, five at
   most); a label picked is a chip that takes it away.
@@ -27,7 +29,8 @@
   the incidents, `state=caught|noisy|missed`, each a link with its count;
   the rules list ends with what the rules shown come to, all told.
 - **Marks on the overview's weekly charts**: the weeks with firings during
-  deploys and the weeks a quiet window was over, besides the rules'
+  deploys and the weeks a quiet window was over (up to now; with a team
+  picked, one that applies to the team's rules), besides the rules'
   changes, each with a link to hide it or show it (`marks=`), in the
   legend and in the table of the weeks.
 - **An incident's timeline** on its page: its span from `--lead` before it
@@ -43,6 +46,25 @@
   weren't there.
 - The firings' days before and after keep "only ● nothing", as the form
   does.
+- Pages not kept already are worked out eight at a time; another waits
+  its turn up to ten seconds, then is answered 503 with `Retry-After`. A
+  page too big for the page cache is written out as it comes, not held
+  twice: forty-eight rules lists at once, at two thousand rules, peak at
+  550 MB of heap rather than 1.4 GB. The API, MCP and the other ports
+  don't wait.
+- With a team picked, the overview judges the team's incidents against
+  everyone's rules, as the incidents page does: one caught only by
+  another team's noisy rule is caught only by a noisy rule, and isn't in
+  "Time to catch".
+
+### Fixed
+
+- Two "This was real" pressed at once for one firing, by one person or
+  two, wrote an incident each, and told of each; the bulk "These were
+  real" beside them, more. A firing is written down in one write now, read
+  again in it: once.
+- "This was real" on a firing longer than an incident may be (31 days)
+  answered 500; it answers 400, saying so.
 
 ## [0.38.0] - 2026-11-15
 
