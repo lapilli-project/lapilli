@@ -584,3 +584,21 @@ func TestBadgeReasonsSaid(t *testing.T) {
 		}
 	}
 }
+
+// TestBadgesInKorean: the badges and facets say what a DevOps team says,
+// a backtest, a firing, in Korean, not a replay or "quiet".
+func TestBadgesInKorean(t *testing.T) {
+	for en, ko := range map[string]string{"Not replayed": "백테스트 불가", "Not replayed: %s": "백테스트하지 못함: %s", "not replayed: %s": "백테스트하지 못함: %s", "Silent": "발화 없음"} {
+		if got := catalogs["ko"][en]; got != ko {
+			t.Errorf("%q in Korean: %q, want %q", en, got, ko)
+		}
+	}
+	s := facetServer(t)
+	r := httptest.NewRequest(http.MethodGet, "/rules?weeks=12&perf=silent", nil)
+	r.Header.Set("Accept-Language", "ko")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if body := w.Body.String(); !strings.Contains(body, "발화 없음") || strings.Contains(body, "조용함") || strings.Contains(body, "재생 못 함") {
+		t.Error("/rules in Korean: not the badges' Korean")
+	}
+}
