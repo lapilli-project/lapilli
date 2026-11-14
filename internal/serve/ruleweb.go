@@ -643,7 +643,16 @@ type dayLedger interface {
 // each day asks for the last due by its end instead, a short way back for
 // a schedule due so often.
 func windowDays(w ledger.Window, l dayLedger, first int64, n int, mark func(i int)) {
+	windowDaysTo(w, l, first, n, time.Time{}, mark)
+}
+
+// windowDaysTo is windowDays, of what a window covers up to until alone
+// when it isn't zero: of a week under way, up to now.
+func windowDaysTo(w ledger.Window, l dayLedger, first int64, n int, until time.Time, mark func(i int)) {
 	from, to := l.Midnight(first), l.Midnight(first+int64(n))
+	if !until.IsZero() && until.Before(to) {
+		to = until.Add(time.Nanosecond)
+	}
 	long := w.End.Sub(w.Start)
 	span := func(lo, hi time.Time) {
 		if lo.Before(from) {
@@ -699,9 +708,9 @@ func windowDays(w ledger.Window, l dayLedger, first int64, n int, mark func(i in
 		for at := sch.Last(upTo(to.Add(-time.Nanosecond)), loc); !at.IsZero() && !at.Before(w.Start) && !at.Before(floor); at = sch.Prev(at, loc) {
 			if k++; k > stripMost {
 				// Due more often than that: a day at a time.
-				for d := first; d < first+int64(n); d++ {
+				for d := first; d < first+int64(n) && l.Midnight(d).Before(to); d++ {
 					start := l.Midnight(d)
-					if at := sch.Last(upTo(l.Midnight(d+1).Add(-time.Nanosecond)), loc); !at.IsZero() && !at.Before(w.Start) && !at.Add(long).Before(start) {
+					if at := sch.Last(upTo(earliest(l.Midnight(d+1), to).Add(-time.Nanosecond)), loc); !at.IsZero() && !at.Before(w.Start) && !at.Add(long).Before(start) {
 						mark(int(d - first))
 					}
 				}

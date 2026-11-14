@@ -13,9 +13,9 @@ import (
 
 // TestChartMarks: the overview's charts mark the weeks with firings during
 // deploys, and the weeks a quiet window of the team's, or everyone's, was
-// over, as the ledger's own Covers says, besides the rules' changes; each
-// can be turned off and on by a link, and the table of the weeks says the
-// same.
+// over, up to now, as the ledger's own Covers says, for a team one that
+// applies to a rule of the team's, besides the rules' changes; each can be
+// turned off and on by a link, and the table of the weeks says the same.
 func TestChartMarks(t *testing.T) {
 	ctx := context.Background()
 	s := drillServer(t, false)
@@ -35,6 +35,8 @@ func TestChartMarks(t *testing.T) {
 		{Title: "payments'", Start: at(10, 20, 2), End: at(10, 20, 3), TeamID: id["payments"]},
 		{Title: "search's, weekly, three of them", Start: at(9, 7, 23), End: at(9, 8, 1), Every: "week", Until: at(9, 21, 0), TeamID: id["search"]},
 		{Title: "before the twelve weeks", Start: at(8, 3, 2), End: at(8, 3, 3)},
+		{Title: "everyone's, of search's rules", Start: at(10, 6, 2), End: at(10, 6, 3), Rules: "^Search"},
+		{Title: "everyone's, later this week", Start: at(11, 5, 2), End: at(11, 5, 3)},
 	} {
 		if _, err := s.l.PutWindow(ctx, w, "ana", o); err != nil {
 			t.Fatal(err)
@@ -70,7 +72,11 @@ func TestChartMarks(t *testing.T) {
 				if w.TeamID < 0 || team != "" && w.TeamID != 0 && w.TeamID != id[team] {
 					continue
 				}
-				for x := from; x.Before(from.Add(7 * 24 * time.Hour)); x = x.Add(5 * time.Minute) {
+				if team != "" && !slices.ContainsFunc(map[string][]string{"payments": {"PayErrors", "PayLatency"}, "search": {"SearchNoise", "SearchSlow"}}[team],
+					func(r string) bool { return w.Applies(r, nil) }) {
+					continue
+				}
+				for x := from; x.Before(from.Add(7*24*time.Hour)) && !x.After(now); x = x.Add(5 * time.Minute) {
 					quiet = quiet || w.Covers(x)
 				}
 			}
@@ -88,7 +94,7 @@ func TestChartMarks(t *testing.T) {
 				n++
 			}
 		}
-		if want := map[string]int{"": 6, "payments": 3, "search": 5}[team]; n != want {
+		if want := map[string]int{"": 7, "payments": 3, "search": 6}[team]; n != want {
 			t.Errorf("%s: %d weeks quiet, not %d", cmpOr(team, "all"), n, want)
 		}
 	}

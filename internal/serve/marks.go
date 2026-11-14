@@ -3,7 +3,9 @@ package serve
 import (
 	"context"
 	"net/url"
+	"slices"
 	"strings"
+	"time"
 
 	"lapilli.dev/internal/ledger"
 )
@@ -59,9 +61,11 @@ func marksParam(deploys, windows bool) string {
 
 // marksOf works out the overview's marks: the weeks ws, as tallied in t,
 // are marked Quiet where a quiet window excused one of the team's firings,
-// the ledger's own say, or covers some time of it and is the team's or
-// everyone's (any team's, for all teams).
-func (s *Server) marksOf(ctx context.Context, q url.Values, t *tallies, team *ledger.Team, ws []*weekView, deploys bool) (marksView, error) {
+// the ledger's own say, or covers some time of it, up to now, and is the
+// team's or everyone's (any team's, for all teams); for a team, one that
+// applies to some rule of the team's, by its name, team and labels, as a
+// rule's strip has it.
+func (s *Server) marksOf(ctx context.Context, q url.Values, t *tallies, o *owners, team *ledger.Team, ws []*weekView, deploys bool) (marksView, error) {
 	var m marksView
 	m.Deploys, m.Windows = marksAsked(q)
 	m.Deploys = m.Deploys && deploys
@@ -91,6 +95,23 @@ func (s *Server) marksOf(ctx context.Context, q url.Values, t *tallies, team *le
 	if err != nil {
 		return m, err
 	}
+	var until time.Time // the week under way, up to now
+	if !t.over {
+		until = s.now()
+	}
+	var mine []string
+	var meta map[string]ruleMeta
+	if team != nil && len(windows) > 0 {
+		if meta, err = s.ruleMeta(ctx); err != nil {
+			return m, err
+		}
+		for name, id := range o.rule {
+			if id == team.ID {
+				mine = append(mine, name)
+			}
+		}
+		slices.Sort(mine)
+	}
 	for _, w := range windows {
 		if quiet == len(ws) {
 			break
@@ -98,7 +119,10 @@ func (s *Server) marksOf(ctx context.Context, q url.Values, t *tallies, team *le
 		if w.TeamID < 0 || team != nil && w.TeamID != 0 && w.TeamID != team.ID {
 			continue // before working out when it falls due
 		}
-		windowDays(w, s.l, first, n, func(i int) {
+		if team != nil && !slices.ContainsFunc(mine, func(rule string) bool { return w.Applies(rule, meta[rule].labels) }) {
+			continue
+		}
+		windowDaysTo(w, s.l, first, n, until, func(i int) {
 			if k := i / 7; k < len(ws) && !ws[k].Quiet {
 				ws[k].Quiet = true
 				quiet++

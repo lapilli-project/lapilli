@@ -381,7 +381,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		}
 	}
 	drill(v.Tiles, last.Start.In(s.cfg.Loc).Format("2006-01-02"))
-	if v.Marks, err = s.marksOf(ctx, r.URL.Query(), t, team, ws, v.Deploys); err != nil {
+	if v.Marks, err = s.marksOf(ctx, r.URL.Query(), t, o, team, ws, v.Deploys); err != nil {
 		return nil, err
 	}
 	v.Stones = stonesChart(l, ws, s.cfg.Loc)
