@@ -123,8 +123,11 @@ repository credentials. Of particular interest:
   annotations;
 - a way for the changes token to do anything but read the changes handed
   out and say what became of them;
-- a way for an agent's words to pass as a person's, or for an agent to do
-  anything but propose.
+- a way for an agent's words to pass as a person's, for an agent to do
+  anything but propose, or for its proposal to be kept as anyone's but the
+  person's it acts for (whom its request to `/mcp` came from, however they
+  signed in), which they could then approve, or whose limit it wouldn't
+  count against.
 
 ## Versions
 

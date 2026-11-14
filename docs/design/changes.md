@@ -381,7 +381,12 @@ The first step, for v0.22.0, as above, except:
   neither would be seen applied. A fix to what a rule says isn't kept apart:
   its hash covers when the rule fires, and a Grafana rule's digest covers
   what it says. A person, with the agents acting for them, makes twenty
-  proposals an hour at most; Lapilli's own are bounded apart. The incident
+  proposals an hour at most; Lapilli's own are bounded apart. An agent
+  acts for the person its request to `/mcp` came from, as the sign-in says
+  of that request, whichever it is; with a sign-in of lapilli's own or in
+  front, a proposal for no one known is refused (until the release after
+  0.37.0, such an agent's proposal was kept as "anonymous"'s: its person
+  could approve it, and every agent shared one twenty an hour). The incident
   a proposal is made for is an ID the ledger has, written into the pull
   request as code. A proposal made into a task gives the task none of its
   links, so the tracker job opens the task's issue whenever the pull request

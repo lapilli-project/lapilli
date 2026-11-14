@@ -84,8 +84,24 @@ func (s *Server) mcpHandler() http.Handler {
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, mcpBody)
-		h.ServeHTTP(w, r)
+		// Who the agent acts for, as the sign-in said of this request: its
+		// tools are called with this request's context, which holds it,
+		// never with a request made up of its headers alone, which would
+		// hold no one signed in by lapilli or in front.
+		h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), agentFor{}, s.user(r))))
 	})
+}
+
+// agentFor is who an agent acts for, in the context its tools are called
+// with: the person the request to /mcp came from, however they are signed
+// in (a session, a bearer token, a sign-in in front, a proxy's header).
+type agentFor struct{}
+
+// actsFor is who an agent acts for, from a tool's context; false when the
+// request it came with didn't say.
+func actsFor(ctx context.Context) (string, bool) {
+	by, ok := ctx.Value(agentFor{}).(string)
+	return by, ok
 }
 
 // originOf is a URL's origin as a browser sends it: its scheme and host,

@@ -4,7 +4,9 @@
 
 The way to change things: the fourth phase of docs/design/ui.md. Still no
 script, against WCAG 2.2 AA, in four languages. No ledger schema change;
-the API and MCP answer as they did.
+the API and MCP answer as they did. And a security fix, to what an agent
+proposes with a sign-in of lapilli's own or in front, found by a review of
+this phase.
 
 ### Added
 
@@ -57,6 +59,23 @@ the API and MCP answer as they did.
   editor sees their team's unless they pick all teams.
 - A quiet window's form has Preview as its first button: Enter in a field
   previews, and writes nothing.
+
+### Fixed (security)
+
+- **With a sign-in, an agent's proposal was no one's.** Since 0.30.0, with
+  `--oidc-issuer` or `--proxy-jwt`, a change an agent proposed through
+  MCP's `propose` (behind `--mcp-propose`, since 0.22.0) was kept as made
+  by "anonymous": who the agent acted for was worked out from the
+  request's headers alone, and these sign-ins keep who in the request
+  itself, not in a header. So the person whose token the agent held could
+  approve their own agent's proposal, alone with `--approvals 1`, which
+  changes.md forbids; and every agent shared one twenty proposals an hour,
+  which one of them could use up for all. Who an agent acts for is now
+  worked out from the request to `/mcp` itself, for every way of signing
+  in (a session, a bearer token, a sign-in in front, `--user-header`);
+  with a sign-in, a proposal for no one known is refused; and each
+  person's agents count against that person's own twenty an hour.
+  `--user-header` alone was not affected.
 
 ## [0.37.0] - 2026-11-14
 
