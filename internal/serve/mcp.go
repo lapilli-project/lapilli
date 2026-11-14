@@ -626,14 +626,13 @@ type checkOut struct {
 func (s *Server) toolRule(ctx context.Context, _ *mcp.CallToolRequest, in ruleIn) (*mcp.CallToolResult, ruleDetailOut, error) {
 	out := ruleDetailOut{Weeks: []ruleWeekOut{}, Versions: []versionOut{}, Reviews: []reviewOut{}, Caught: []incidentOut{},
 		Latest: []firingOut{}, Tasks: []taskOut{}, Proposals: []proposalOut{}}
-	v, err := s.rulePage(asked(ctx, "/rules/"+url.PathEscape(in.Name), nil, map[string]string{"name": in.Name}))
+	rv, err := s.rule(asked(ctx, "/rules/"+url.PathEscape(in.Name), nil, map[string]string{"name": in.Name}), false)
 	if errors.Is(err, ledger.ErrNotFound) {
 		return nil, out, fmt.Errorf("no rule called %q; rules lists them", in.Name)
 	}
 	if err != nil {
 		return nil, out, err
 	}
-	rv := v.(ruleView)
 	out.Rule = ruleOutOf(rv.ruleLine)
 	out.Says = saysOutOf(rv.Says)
 	if c := rv.Check; c != nil {

@@ -8,10 +8,8 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -53,10 +51,7 @@ func a11yServer(t *testing.T) (*Server, []string) {
 // TestA11yServe serves the pages at LAPILLI_A11Y_SERVE until it is
 // stopped, for test/a11y/axe.sh; /a11y-paths lists them.
 func TestA11yServe(t *testing.T) {
-	addr := os.Getenv("LAPILLI_A11Y_SERVE")
-	if addr == "" {
-		t.Skip("LAPILLI_A11Y_SERVE isn't set")
-	}
+	addr := serveAddr(t, "LAPILLI_A11Y_SERVE")
 	s, paths := a11yServer(t)
 	s.cfg.AllowedHosts = append(s.cfg.AllowedHosts, "host.docker.internal")
 	mux := http.NewServeMux()
@@ -64,12 +59,8 @@ func TestA11yServe(t *testing.T) {
 		fmt.Fprintln(w, strings.Join(paths, "\n"))
 	})
 	mux.Handle("/", s.Handler())
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("serving %d pages on %s", len(paths), ln.Addr())
-	t.Fatal((&http.Server{Handler: mux, ReadHeaderTimeout: time.Minute}).Serve(ln))
+	t.Logf("serving %d pages", len(paths))
+	serveTest(t, s, addr, mux)
 }
 
 // Every page, in every language, has its parts where assistive technology

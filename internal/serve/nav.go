@@ -175,7 +175,12 @@ type barView struct {
 
 // barOf is a page's bar.
 func barOf(name string, r *http.Request, c pageCtx) barView {
-	b := barView{Search: c.hidden(), WeeksIn: 4}
+	// The search, from a page of a period of its own, has its weeks: a rule
+	// it opens is over them.
+	b := barView{Search: c.ofPage(name).hidden(), WeeksIn: 4}
+	if name == "rule" {
+		b.WeeksIn = weeks // a rule's page shows twelve weeks, as it always has
+	}
 	if c.Weeks != 0 {
 		b.WeeksIn = c.Weeks
 	}
@@ -195,6 +200,14 @@ func barOf(name string, r *http.Request, c pageCtx) barView {
 			b.Label = "Period"
 		}
 		b.Keep = keepParams(r.URL.Query(), "team", "weeks")
+		if name == "rule" {
+			// A rule's own page, in the tab it shows: nothing else it was
+			// asked is sent again.
+			b.Action, b.Keep = r.URL.EscapedPath(), nil
+			if tab := ruleTabOf(r.URL.Query()); tab != "overview" {
+				b.Keep = []field{{"tab", tab}}
+			}
+		}
 		// What the bar doesn't offer, it carries as it came.
 		for _, f := range c.hidden() {
 			if f.Name == "team" && !b.Team || f.Name == "weeks" && !b.Weeks {
@@ -207,9 +220,14 @@ func barOf(name string, r *http.Request, c pageCtx) barView {
 
 // pageAction is a page's main action, in its header: a link to the form
 // on the page, or, when the reader may not use it, the button disabled
-// with why beside it, never hidden.
+// with why beside it, never hidden. Where a page has several (a rule's),
+// ID is the id of the why, Said whether this one says it, the first
+// disabled for it; Quiet, one drawn less loudly than the first.
 type pageAction struct {
-	Label, Href, Why string
+	Label, Href, Why, ID string
+	// WhyOf is the name Why says, a team's, when it says one.
+	WhyOf       string
+	Said, Quiet bool
 }
 
 // mainAction is a page's main action. need is who may: "editor", "admin", a

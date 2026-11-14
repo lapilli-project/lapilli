@@ -121,10 +121,11 @@ func TestCheckReplay(t *testing.T) {
 	// The pages say so.
 	h := s.Handler()
 	for path, want := range map[string][]string{
-		"/rules/Errors": {"Over the last week its replay differed", "73% alike, of 22 firings; 5 only in the replay, 1 only in what really fired", "only in what really fired", "service=cart"},
-		"/rules":        {`<span class="badge trust"><span aria-hidden="true">≠</span> Differs</span>`},
-		"/runs":         {"Set beside ALERTS", "with no rule given by that name: Watchdog"},
-		"/":             {"That week, the replay beside what really fired: 93% alike, of 15 firings."},
+		"/rules/Errors":             {"Over the last week its replay differed"},
+		"/rules/Errors?tab=firings": {"73% alike, of 22 firings; 5 only in the replay, 1 only in what really fired", "only in what really fired", "service=cart"},
+		"/rules":                    {`<span class="badge trust"><span aria-hidden="true">≠</span> Differs</span>`},
+		"/runs":                     {"Set beside ALERTS", "with no rule given by that name: Watchdog"},
+		"/":                         {"That week, the replay beside what really fired: 93% alike, of 15 firings."},
 	} {
 		_, body, _ := get(t, h, path)
 		for _, w := range want {

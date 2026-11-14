@@ -1,9 +1,9 @@
 # The web UI of `lapilli serve`
 
-Status: phases 1 and 2 built, unreleased. This is how the pages are put
-together: the frame every page has, the team and period carried from page
-to page, the search, the rules list and its filters, and what the later
-phases will add. [serve.md](serve.md) says what each page shows;
+Status: phases 1 and 2 in v0.35.0; phase 3, a rule's page, built,
+unreleased. This is how the pages are put together: the frame every page
+has, the team and period carried from page to page, the search, the rules
+list and its filters, a rule's page, and what the later phases will add. [serve.md](serve.md) says what each page shows;
 [access.md](access.md) how the pages meet WCAG 2.2 AA.
 
 ## What holds for every page
@@ -86,10 +86,15 @@ with the page context.
 Under the breadcrumbs, every page has a search (below), and the pages that
 show one team's or a period, a GET form to pick them: the team (all teams,
 or one) on the overview, the rules, the incidents and the tasks; the period
-(1, 4 or 12 weeks) on the rules and the incidents. The overview has no
-period: its tiles are last week beside the week before, by design. The form
-sends the page's other parameters again, as they were, and is named for
-what it chooses: "Team", "Period", or "Team and period".
+(1, 4 or 12 weeks) on the rules, the incidents and a rule's page. The
+overview has no period: its tiles are last week beside the week before, by
+design. The form sends the page's other parameters again, as they were, and
+is named for what it chooses: "Team", "Period", or "Team and period". A
+rule's page is twelve weeks unless asked, as it has always been, and its
+form is sent to the rule's own page with the tab it shows, and nothing
+else it was asked. On a page that shows a period of its own other than a
+rule's page's twelve weeks (the rules, the incidents: four unless asked),
+the bar's search has its weeks, so that a rule it opens is over them.
 
 ### A page's main action
 
@@ -106,6 +111,7 @@ beside it, tied with `aria-describedby`:
 | no roles, listening beyond loopback | Read-only: no one is given a role here |
 | roles, and no one signed in | Read-only: no one is signed in |
 | signed in, the role isn't enough | Editors only; Admins only (teams) |
+| a team's editor, on another team's rule | Only search's editors (the owning team in `<bdi>`) |
 | no destination for a report | Nowhere to send a report yet |
 | an editor, and no team for a report | No team yet: an editor makes a team's report |
 
@@ -140,7 +146,12 @@ don't use them, so they hold however the reader goes.
   the URL had them, unless the path sets them; pairs after it set others,
   an empty value taking one out, but `team`, where it is all teams. Only
   pages are linked so: not `/static/`, `/auth/`, `/api/`, `/settings.yaml`
-  or a form's POST target. A form going to another page (the search), or
+  or a form's POST target. A link to a rule's page from a page that shows
+  a period of its own (`$.Rule`, `$.RuleAt NAME "#frag"`) has that page's
+  weeks even when the URL hasn't them (`pageCtx.ofPage`): the rules list
+  is four weeks unless asked and a rule's page twelve, so a row's numbers
+  and the page it opens are over the same weeks. So do the overview's
+  items that speak of four weeks. A form going to another page (the search), or
   a GET form of a page's own (the firings', settings' "Try them"), has
   them as hidden fields. The form that adds or changes a task is sent to
   `/tasks` with them in its URL, and the task's page it goes to after
@@ -202,16 +213,27 @@ Each rule has a badge on each of three axes, and what is under way:
 | How it did, over the weeks shown (one of) | `● Noisy` ("Noisy, 3 wk" when it has been noisy weeks running), `○ OK`, `– Silent` (no firing in the weeks shown), `⧉ Spare` (another rule caught every incident it caught, as soon) |
 | Its backtest, only when it can't be taken for granted | `≠ Differs` (its replay differed from what really fired over the last week checked), `◌ Not replayed`, `⇣ Recorded only` (copied in from where it fired; its condition unknown) |
 | What people mean to do (its note's status) | `✓ keep`, `± tune`, `⊘ retire` |
-| Under way | `✎ Proposed` (a change waits for approval), `⚠ n to check` (problems of fact in what it says) |
+| Under way | `✎ Proposed` (a change waits for approval), `⚠ n to check` (what its page lists to check, below) |
 
 Noisy wins over Spare: a rule that is both is noisy first. Differs is
 looked up for a rule that didn't fire in the weeks shown too: one replayed
 to nothing while it really fired is the case it is most for. A badge with a
 reason (Not replayed, Recorded only) has it in its `title`; the rule's page
 says it in words, a rule that never fired too. The badge partial, `badges`,
-is shared: the rule's page will use it. Proposed and "to check" link to the
-rule's proposals and to what it says. The suggestion (a longer `for` that
-would quiet it) stays as one quiet line under the badges: it is what to do.
+is shared with the rule's page. Proposed and "to check" link to the rule's
+proposals tab and to its list of what to check (`#checks`), in the period
+the list shows. "n to check" counts the conditions its page lists, one
+function working them out for both (`condsOf`): the list reads the
+alarms' ties and the stale proposals once for every row. The Progress
+facet's "Problems to check" (`has=facts`) still picks the rules with
+problems of fact in what they say, and the legend says the badge counts
+those with the rest. The suggestion (a
+longer `for` that would quiet it) stays as one quiet line under the badges:
+it is what to do.
+
+Near the filters, "What the badges mean", a `<details>`, lists each badge,
+its sign and its name as the facet names it, with a line on what it means,
+facet by facet (`legendOf`, from the facets and `badgeMeans`).
 
 ### Filters
 
@@ -284,12 +306,180 @@ doesn't, or a team no one has stays in `q`, is left out of the filtering,
 and is named in a message that lists the keys and values the box takes;
 never an error page.
 
+## A rule's page
+
+`/rules/NAME`, in five tabs. What every tab has at its top:
+
+### The header
+
+- The breadcrumb, See › Rules › NAME; the name, in `<bdi>`, as the `h1`,
+  and the badges as the list has them, but "to check", which the header
+  says in full.
+- A line of what is known of it, each only when known: its team, its
+  severity (the ledger's, or its labels'), its `for` as the rules in
+  effect have it, its group, and its runbook: the one a person gave its
+  note in Lapilli, or, without one, the one the rule names, said so,
+  "Runbook, from the rule", with the host it goes to beside it.
+- Three actions: "Propose a change" (the proposals tab's forms), "Add a
+  task" (the tasks page's form, about it, for the team that owns it, `team=`
+  for none), "Edit the note" (the summary's form, opened by `edit=note`;
+  any other `edit=` is nothing). To a reader who may not, each is shown
+  disabled, `aria-describedby` the reason; those disabled for one reason
+  share the sentence that says it. Proposing is for editors; a team's
+  editor adds the tasks and edits the notes of their team's rules, and is
+  told whose editors may for another team's ("Only search's editors").
+- "⚠ n to check", as Argo CD has an application's conditions: a
+  `<details id="checks">` listing, each with a link to where it is
+  explained, the problems of fact in what it says (to What it says), its
+  replay differing from what really fired over the last week (to the
+  firings tab's replay check), why it isn't replayed, or is in part (to
+  its versions), that its record is copied in, a cloud's alarm's history
+  or from elsewhere (to its latest firings), that an alarm has none (to
+  Runs), and proposals made against a version of it no longer in effect
+  (to its proposals). With none, there is no `<details>`. The rules
+  list's badge counts the same (`condsOf`).
+
+### The panel
+
+Five numbers over the page's period, each a card: precision (and how many
+of how many caught something), firings (and of them those that caught
+nothing, and how many more a quiet window excused), incidents caught (and
+those it nearly caught: the weeks' near misses, an incident once, as the
+latest week that names it says), human cost (the notifications sent, and
+of them those while people slept and off hours; in Korean 알림 부담), and
+the backtest (the share of its firings alike in its replay and in what
+really fired, of how many). Each label is a `<details>` "?" with a
+sentence that says what it is. A number with nothing to say is "–":
+precision without a firing, notifications not kept, a backtest not
+checked; never 0%.
+
+The period is the rules list's: the weeks from the Monday 1, 4 or 12 weeks
+back, to now, and the page says it: "The last 4 weeks, from 2026-10-12."
+Beside each number is its change from the span before it, as long as the
+period, to the second, and ending where it starts: `[from − (now − from),
+from)`. A replay's check is a whole day's, so the backtest is set beside
+as many whole days before as the period has checked. A number is set
+beside that span only when what it comes from holds all of it, and none
+of it was pruned (`--keep`): for a rule it replays, the replay's runs from
+its start on; for one recorded elsewhere, its source's copies without a
+gap (`Coverage`) from the span's start, and still coming, not quiet past
+`--source-quiet`: a copy that stopped would read as a rule grown quieter;
+for a cloud's alarm, its history from when its tie says, and its source's
+copies likewise; the notifications from the first kept (they come as they
+are sent, so a receiver that stops sending isn't told from a quiet rule), and only in the pages (the twelve
+weeks shown), whatever the replay holds. Precision is set beside only
+when the rule fired in both. The shares' changes are in points, each
+signed (+3, −2, ±0), and a change better or worse says so in words as
+well as colour ("+27 worse"). The period's line says how they changed
+only when one is set beside.
+
+### The strip
+
+The last 84 days, a cell a day, drawn on the server as an SVG, each day
+with a `<title>` of its numbers: caught something (a cell with a hole, as
+○), caught nothing only (solid, as ●), excused only (dashed), no firing
+(low). Above the cells, marks: a diamond where the rule changed (a new
+version of it, or it taken away or put back); a triangle on a day it fired
+during a deploy of what it is about, as the ledger judged each of its
+firings (the days' tally, `ledger.RuleDeploys`: no deploy is read or
+matched against labels for the page); and a bar over each day a quiet
+window was over it: a day a window excused one of its firings, the
+ledger's own say, and a day a window covers that applies to the rule by
+its own name, team and labels, as the rules in effect have them, or, for
+one recorded elsewhere, the labels all its alerts have
+(`ledger.Window.Applies`, the window's match without its time).
+
+A window that doesn't apply is passed over before its repeats are worked
+out. One by a schedule (every month, or cron) is walked back from the
+strip's last day, so it costs its repeats and one lookup back; past four
+repeats a day, it is a lookup a day. One every day or week covers what
+`Covers` says of each repeat: from its start, and from the start of the
+first day of its period, by the ledger's own day starts (`Midnight`),
+which aren't the hour before where the clocks skip midnight
+(America/Santiago, 2026-09-06). `TestWindowDays` sets the days marked
+beside `Covers` in UTC and four zones whose clocks change over the strip.
+A date the pages read (`/firings?day=`, a window's until, a task's due,
+the summary's from and to) is the ledger's day likewise (`dateDay`).
+
+The legend names each kind of cell and the marks the strip has, a sign
+and words; the same numbers are a table, a day a row, in a `<details>`
+under it. The days a rule fired during a deploy, and how often, are on
+its page for every reader who may read the rule, as the firings tab's
+"During deploys" already was: when a team deploys is nothing kept from
+them.
+
+The days, and the span before the period, are one read of the rule's
+daily tallies (`RuleSpans`, by the days' index, the span's start a cut of
+its own); its days during deploys and its quiet windows, one read each.
+At two thousand rules and twelve weeks of firings, a rule's page takes
+about 60 ms, each tab and period alike (`TestRulesListScale`). Against 480
+yearly windows by cron that match nothing, 440 daily windows for it with
+labels it hasn't, or 50,000 deploys, it took 161, 77 and 169 ms; it takes
+3, 3 and 1 ms, and 6 ms against 480 yearly windows that apply to it.
+
+The header, the panel and the strip are worked out for the HTML page
+alone, and the versions' diffs on the versions tab alone: MCP's rule tool
+reads the rest, and says what it said. The page is cached by what it
+reads of its query, `tab`, `weeks`, `team` and `edit`, in one order
+(`ruleQuery`): another parameter, or another order, is the same page, not
+worked out again, and isn't said back on it.
+
+### The tabs
+
+`?tab=`, a query parameter, as a rule's name may hold a `/`: links in a
+`nav` named "This rule", each carrying the page context, the one shown
+`aria-current`, with a count where it means something. The tabs' names
+are texts of their own, in the context "rule tab" (`trIn`, kept as `rule
+tab|Firings`), so that they are translated apart from the sidebar's pages
+of the same words.
+
+| Tab | Count | Sections |
+|---|---|---|
+| Summary (no `tab=`) | | What to do first (the suggestion, "Propose it", "Make it a task"), About this rule (its team, disposition, runbook, note, and the form to change them), Incidents it caught (what it adds to the others, spare or not), What it says (the content check, and the forms that propose a fix) |
+| `firings` | its firings over the period | Latest firings (and all of them by day), Refired (by week, and its alerts that re-fired most, over the period), Notifications (by receiver, repeats), While people slept and off hours, During deploys, The replay beside what really fired (over the period, and the last firings found only one way) |
+| `versions` | its versions | the table, and each of the latest twenty versions beside the one before it, line by line by their longest common run: its expression, `for`, `keep_firing_for`, and a label a line, its value quoted; a side past 400 lines is shown whole, after the one before. Copied, a diff is its lines alone |
+| `proposals` | those not finished with | its proposals, the forms to propose a change (open, not in a `<details>`), the changes reviewed |
+| `activity` | its tasks and comments | its tasks (and a link to add one), comments (`#comments`) |
+
+A `tab=` that isn't one of these is the summary, and the page never says
+what it was. Links to where a section was before it was a tab still land:
+`#says` is on the summary; `#proposals` and `#refired` are, on the
+summary, a line shown only when a link goes to it (`:target`), linking to
+the tab. The links the pages make go to the tab (`?tab=proposals#proposals`);
+a notice of a comment on a rule links to `?tab=activity#comments`, and one
+that a rule's replay differs to `/rules?trust=differs`.
+`TestRuleSectionsKept` holds every text the page had before its tabs to
+some tab, and each section to its own.
+
+### The demo ledger
+
+`TestDemoServe` (`internal/serve/demo_test.go`) serves, at
+`LAPILLI_DEMO_SERVE`, a ledger of twelve weeks of three teams' alerts
+(checkout, platform, search), made from a fixed clock and seed: noisy rules
+and precise ones, a spare one, one whose replay differs, some that never
+fire, incidents caught, missed and caught only by noisy rules, deploys, a
+weekly quiet window, a proposal to approve, tasks, comments, and versions
+of the rules over time. What people kept in it is dated in its own weeks,
+so its pages are the same however late it is made. Every team, rule,
+label value and person in it is one it declares (`demoTeams`,
+`demoRules`, `demoPods`, `demoIncidents`, `demoPeople`), and
+`TestDemoLedger` holds it to that, and to what its screenshots show.
+Like `TestA11yServe`, it listens on loopback alone (everyone is an admin
+on it), refusing any other address before it makes anything, and stops
+on SIGINT or SIGTERM, its ledger taken away. It answers `/demo-ready`,
+which `test/screenshots/shots.sh` waits for before it takes the README's
+screenshots, in the Playwright image `axe.sh` uses, or with `--local`
+with Node and the browser of the same version; on any exit the script
+stops the server and removes what it made.
+
 ## Without a script
 
 | Elsewhere | Here |
 |---|---|
-| tabs | links, one URL each (`?weeks=`, `?sort=`, later `?tab=`) |
+| tabs | links, one URL each (`?weeks=`, `?sort=`, `?tab=`) |
 | a panel that opens | a `<details>`, or a page of its own |
+| a tooltip that defines a number | a `<details>` "?" beside its label |
+| a form a button elsewhere opens | a link with a parameter that opens it (`edit=note`) |
 | a menu that opens | a `<details>`, drawn twice where a wide screen keeps it open |
 | filters that apply as they are ticked | a GET form with Apply; the result is a URL to keep and share |
 | a chip's ✕ | a link to the URL without it |
@@ -298,8 +488,6 @@ never an error page.
 
 ## Later phases
 
-- **A rule's page**: a status panel of the four axes at its top, an
-  84-day strip of its stones, and its sections as `?tab=` links.
 - **Proposals**: the diff with options (unified, side by side, the whole
   rule), an approval panel that says who may approve and what is left, and
   each proposal's history.

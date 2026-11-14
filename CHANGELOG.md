@@ -2,6 +2,86 @@
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-11-14
+
+A rule's page, redone (the third phase of docs/design/ui.md): a header that
+says what to check, five numbers beside the span before, the last 84 days
+in a strip, and its sections in five tabs. The rules list says what its
+badges mean, and the README's pictures come from a demo ledger. Still no
+script, against WCAG 2.2 AA, in four languages. No ledger schema change;
+the API and MCP answer as they did.
+
+### Added
+
+- **A rule's page, redone** (docs/design/ui.md). Its header has its
+  badges, its team, severity, `for`, group and runbook (its note's, or
+  else the rule's, said so, with its host), and three actions: propose a
+  change, add a task, edit the note, each shown disabled, with why, to a
+  reader who may not; a team's editor is told whose editors may change
+  another team's rule. "⚠ n to check" lists what to check about it, each
+  with a link to where it is explained: problems of fact in what it says,
+  its replay differing from what really fired, why it isn't replayed, a
+  record copied in, an alarm with no history, a proposal made against a
+  version no longer in effect.
+- **A panel of five numbers** on a rule's page: precision, firings,
+  incidents caught (and nearly caught), human cost (notifications sent,
+  and those while people slept and off hours) and the backtest, each with
+  a definition to open, over the page's period, each beside the span
+  before it, as long, when what the number comes from holds all of it
+  (the replay's runs; a source's copies, still coming; an alarm's
+  history; the notifications kept), better or worse said in words as
+  well as colour.
+- **A rule's last 84 days**, a cell a day (caught something, caught
+  nothing only, excused only, no firing), with marks for its versions,
+  the days it fired during a deploy of what it is about, and the days a
+  quiet window excused it or covered it, drawn on the server, its numbers
+  in a table under it.
+- **Each version of a rule beside the one before**, line by line, a
+  label a line, on its versions tab, for the latest twenty.
+- **What the badges mean**, on the rules list, near the filters: each
+  badge, named as its facet names it, with a line on what it means.
+- The README's screenshots are of a demo ledger with names anyone might
+  use, served by a test (`TestDemoServe`) and taken by
+  `test/screenshots/shots.sh`, with Docker or, with `--local`, without.
+
+### Changed
+
+- **A rule's page is in tabs**, `?tab=`: summary (what to do first,
+  about this rule, incidents it caught, what it says), firings (latest,
+  refired, notifications, while people slept, during deploys, the replay
+  check), versions, proposals (proposals, the forms to propose a change,
+  changes reviewed) and activity (tasks, comments), named apart from the
+  sidebar's pages. A `tab=` it doesn't have is the summary. An old link to
+  `/rules/NAME#says` lands on what it says, as before; one to
+  `#proposals` or `#refired` lands on a line on the summary that links to
+  the tab, `?tab=proposals#proposals` or `?tab=firings#refired`, where
+  the links the pages make now go. A notice of a comment on a rule links
+  to `?tab=activity#comments`.
+- **A rule's page takes `weeks=`** (1, 4 or 12; twelve when not given, as
+  before), picked in its bar: its numbers, re-fires, notifications, deploys
+  and replay check are over that period, and its sentences no longer say
+  "over twelve weeks". A link to it from the rules list, the overview's
+  items over four weeks and the search from those pages carry their weeks,
+  so its numbers are over the weeks the reader saw. `/api/v1/rules` and
+  MCP's rule tool are as they were.
+- **The rules list's "⚠ n to check" counts what the rule's page lists to
+  check**, not only problems of fact, and links to that list; the
+  Progress facet's "Problems to check" still picks the rules with
+  problems of fact.
+- A notice that a rule's replay differs links to the rules whose replay
+  does, `/rules?trust=differs`, not the overview.
+- The forms to propose a change to a rule are open on its proposals tab,
+  not in a "Propose a change" `<details>`.
+
+### Fixed
+
+- In a time zone whose clocks skip midnight (America/Santiago), a date in
+  a URL or a form (`/firings?day=`, a quiet window's until, a task's due,
+  the summary's from and to) was read as the day before it.
+- `TestA11yServe`, on which everyone is an admin, served wherever it was
+  told; it, and `TestDemoServe`, listen on loopback alone, and stop
+  cleanly when told to.
+
 ## [0.36.0] - 2026-11-14
 
 `lapilli serve` runs as several replicas on one Postgres ledger: one leads,

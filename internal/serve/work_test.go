@@ -45,7 +45,7 @@ func TestWork(t *testing.T) {
 		t.Errorf("teams page:\n%s", body)
 	}
 	_, body, _ = get(t, h, "/rules?team=payments")
-	if !strings.Contains(body, `href="/rules/Errors?team=payments"`) {
+	if !strings.Contains(body, `href="/rules/Errors?team=payments&amp;weeks=4"`) {
 		t.Errorf("payments' rules should list Errors:\n%s", body)
 	}
 	if code, _, _ := get(t, h, "/?team=payments"); code != 200 {
@@ -117,7 +117,7 @@ func TestWork(t *testing.T) {
 	if code, _, _ := post(t, h, "/comments", url.Values{"on": {"rule"}, "key": {"Errors"}, "body": {"raised for to 10m"}, "back": {"/rules/Errors"}}, "same-origin"); code != http.StatusSeeOther {
 		t.Fatalf("comment: %d", code)
 	}
-	_, body, _ = get(t, h, "/rules/Errors")
+	_, body, _ = get(t, h, "/rules/Errors?tab=activity")
 	if !strings.Contains(body, "raised for to 10m") {
 		t.Errorf("the comment on the rule's page:\n%s", body)
 	}
@@ -201,10 +201,10 @@ func TestWorkReview(t *testing.T) {
 	if _, err := s.l.PutComment(ctx, ledger.Comment{On: "rule", Key: "Errors", Body: "mine"}, "ana@example.com"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(as("ana@example.com", "/rules/Errors"), "/comments/1/delete") {
+	if !strings.Contains(as("ana@example.com", "/rules/Errors?tab=activity"), "/comments/1/delete") {
 		t.Error("ana should be offered her comment to change")
 	}
-	if strings.Contains(as("bo@example.com", "/rules/Errors"), "/comments/1/delete") {
+	if strings.Contains(as("bo@example.com", "/rules/Errors?tab=activity"), "/comments/1/delete") {
 		t.Error("bo was offered ana's comment, from the cache")
 	}
 
@@ -212,7 +212,7 @@ func TestWorkReview(t *testing.T) {
 	if _, err := s.l.PutComment(ctx, ledger.Comment{On: "rule", Key: "Errors", Body: "theirs"}, "anonymous"); err != nil {
 		t.Fatal(err)
 	}
-	if body := as("bo@example.com", "/rules/Errors"); !strings.Contains(body, "익명") || strings.Contains(body, "<strong>anonymous</strong>") {
+	if body := as("bo@example.com", "/rules/Errors?tab=activity"); !strings.Contains(body, "익명") || strings.Contains(body, "<strong>anonymous</strong>") {
 		t.Error("anonymous should be shown in Korean")
 	}
 

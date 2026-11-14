@@ -357,7 +357,8 @@ search) and the rules list's badges and filters are in [ui.md](ui.md).
 - `/rules`, `/rules/NAME`: each rule's stones over 1, 4 or 12 weeks, how long
   it has been noisy, its suggestion, what it adds to the others, how many of
   its firings that caught nothing came while people slept or off hours; a
-  rule's versions, reviews, catches and latest firings. When firings came is
+  rule's numbers beside as long before, its last 84 days, and in tabs its
+  versions, reviews, catches and latest firings ([ui.md](ui.md)). When firings came is
   worked out as pages are read, from when each started: by the hours given,
   `--work-hours` and `--sleep-hours`, in `--tz`, or `--shifts`, or by the
   rule's team's own (a team's `work_hours`, `sleep_hours` and `tz`, each

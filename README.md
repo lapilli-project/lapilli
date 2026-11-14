@@ -1155,7 +1155,7 @@ lapilli serve --rules alert-rules/ --prometheus http://prometheus:9090 --match s
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/serve-dashboard-dark.png">
-  <img alt="The lapilli serve dashboard: last week's precision, firings, incidents missed, time to catch and noisy rules, then firings and precision by week" src="assets/serve-dashboard.png" width="820">
+  <img alt="The lapilli serve overview, with its pages in a sidebar: last week's precision, firings, incidents missed, time to catch (none), noisy rules, notifications for firings that caught nothing while people slept, re-fires and firings during deploys, each with a line of its weeks and most beside the week before; under them, the top of the firings by week" src="assets/serve-dashboard.png" width="820">
 </picture>
 
 A web UI opens on a dashboard of the last twelve weeks: last week's
@@ -1187,6 +1187,20 @@ name and `is:noisy`, `severity:critical`, `status:tune`, `has:proposal`,
 `label:team=pay`, `group:shop` and `team:pay`; each filter in effect is a
 chip that takes it away, and the URL keeps them all
 ([docs/design/ui.md](docs/design/ui.md)).
+
+A rule's page has its badges, what to check about it and what can be done
+at its top; five numbers over the period picked (precision, firings,
+incidents caught, the notifications it sent, and how alike its backtest is
+to what really fired), each beside as long a span before when the ledger
+holds all of it; its last 84 days, a cell a day, marked where it changed,
+where it fired during a deploy of what it is about and where a quiet
+window was over it; and its sections in tabs: summary, firings, versions
+(each beside the one before), proposals and activity.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/serve-rule-dark.png">
+  <img alt="A noisy rule's page over four weeks: its name, its badges (noisy six weeks, to tune) and three actions; its team, severity, for, group and the runbook the rule names; precision and firings beside the four weeks before, one better, one worse, incidents caught the same, the notifications it sent and its backtest with nothing beside; its last 84 days as a strip of cells, marked where the rule changed and on the days it fired during a deploy of checkout; its tabs; and what to do first" src="assets/serve-rule.png" width="820">
+</picture>
 
 What an operations team measures its alerts by is there too, week by week
 and team by team (docs/design/noc.md): the share of critical firings that

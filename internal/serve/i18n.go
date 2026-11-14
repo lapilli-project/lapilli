@@ -67,6 +67,7 @@ func init() {
 		pagesIn[lang] = t.Funcs(template.FuncMap{
 			"t":    func(msg string, args ...any) string { return tr(lang, msg, args...) },
 			"tbdi": func(msg string, args ...any) template.HTML { return trBDI(lang, msg, args...) },
+			"tin":  func(ctx, msg string) string { return trIn(lang, ctx, msg) },
 			// who is who did something; "anonymous" in the reader's
 			// language when no sign-in proxy said.
 			"who": func(by string) string {
@@ -101,6 +102,22 @@ func tr(lang, msg string, args ...any) string {
 		return msg
 	}
 	return fmt.Sprintf(msg, args...)
+}
+
+// trIn is a text said in a context, ctx, where the same words elsewhere
+// may want another translation (a rule's tabs, beside the pages of the
+// sidebar): it is kept as "ctx|msg", and in English it is msg.
+func trIn(lang, ctx, msg string) string {
+	if lang != "en" {
+		key := ctx + "|" + msg
+		if t, ok := catalogs[lang][key]; ok {
+			return t
+		}
+		missing.Lock()
+		missing.m[lang+"\x00"+key] = true
+		missing.Unlock()
+	}
+	return msg
 }
 
 // trBDI is tr with each argument set apart in <bdi>, as a name within a

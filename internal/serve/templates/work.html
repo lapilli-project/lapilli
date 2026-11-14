@@ -1,7 +1,7 @@
 {{define "who"}}{{if or (eq . "anonymous") (eq . "")}}{{t "anonymous"}}{{else}}{{.}}{{end}}{{end}}
 
 {{define "comments"}}
-<section class="comments">
+<section class="comments" id="comments">
 <h2>{{t "Comments"}}</h2>
 {{if .List}}<ul class="plain">{{range .List}}<li>
   <div class="comment-head">{{if eq .Origin "tracker"}}<strong>{{.Author}}</strong> <span class="quiet">{{t "in the tracker"}}</span>{{else}}<strong>{{template "who" .By}}</strong>{{end}} <span class="quiet">{{at $.Loc .Created}}{{if ne .Updated .Created}} · {{t "edited"}}{{end}}</span></div>

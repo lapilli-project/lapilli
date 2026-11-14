@@ -108,7 +108,7 @@ func TestContextCarried(t *testing.T) {
 			case !ok:
 				t.Errorf("%s: %q (%q) doesn't carry the team", p, href, text)
 			case team[0] != "payments" && !(team[0] == "" && (text == "all" || strings.HasPrefix(text, "Remove filter: Team:") || text == "The same filters, in all teams" ||
-				text == "Add a task about this rule" || text == "Add a task about this incident")):
+				text == "Add a task about this rule" || text == "Add a task about this incident" || text == "Add a task" && strings.HasPrefix(p, "/rules/"))):
 				t.Errorf("%s: %q (%q) carries another team", p, href, text)
 			}
 			switch weeks := l.Query().Get("weeks"); {
@@ -207,12 +207,14 @@ func toPage(href string) bool {
 func TestTaskAboutItsOwner(t *testing.T) {
 	s := pagesServer(t)
 	h := s.Handler()
-	link := regexp.MustCompile(`<a href="([^"]*)">Add a task about this (?:rule|incident)</a>`)
+	link := regexp.MustCompile(`<a (?:class="button quiet" )?href="([^"]*)">Add a task(?: about this (?:rule|incident))?</a>`)
 	for path, want := range map[string]string{
-		"/rules/Errors?team=":            "payments",
-		"/rules/Errors?team=payments":    "payments",
-		"/rules/Flapping?team=payments":  "",
-		"/incidents/INC-1?team=payments": "",
+		"/rules/Errors?team=":                        "payments",
+		"/rules/Errors?team=payments":                "payments",
+		"/rules/Flapping?team=payments":              "",
+		"/rules/Errors?team=&tab=activity":           "payments",
+		"/rules/Flapping?team=payments&tab=activity": "",
+		"/incidents/INC-1?team=payments":             "",
 	} {
 		_, body, _ := get(t, h, path)
 		m := link.FindStringSubmatch(body)
@@ -513,7 +515,7 @@ func TestFrameTextsTranslated(t *testing.T) {
 	for _, c := range crumbsOf {
 		texts[c.Group], texts[c.Name] = true, true
 	}
-	for _, x := range []string{"Team and period", "Team", "Period", "Admins only", "Editors only", "%d open", "%d to approve", "Nowhere to send a report yet", "No team yet: an editor makes a team's report",
+	for _, x := range []string{"Team and period", "Team", "Period", "Admins only", "Editors only", "Only %s's editors", "%d open", "%d to approve", "Nowhere to send a report yet", "No team yet: an editor makes a team's report",
 		"Read-only: lapilli serve was started with --read-only", "Read-only: no one is given a role here", "Read-only: no one is signed in"} {
 		texts[x] = true
 	}

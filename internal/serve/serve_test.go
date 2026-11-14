@@ -255,9 +255,13 @@ func TestServe(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.jobs(ctx, false)
-	_, body, _ = get(t, h, "/rules/Errors")
-	if !strings.Contains(body, "Changes reviewed") || !strings.Contains(body, "fired 21 → 1") || !strings.Contains(body, "Versions") {
-		t.Errorf("the rule's page should show the review and the versions:\n%s", body)
+	_, body, _ = get(t, h, "/rules/Errors?tab=proposals")
+	if !strings.Contains(body, "Changes reviewed") || !strings.Contains(body, "fired 21 → 1") {
+		t.Errorf("the rule's proposals should show the review:\n%s", body)
+	}
+	_, body, _ = get(t, h, "/rules/Errors?tab=versions")
+	if !strings.Contains(body, `<h2>Versions</h2>`) || !strings.Contains(body, "<pre>errors &gt; 5</pre></td><td>15m</td>") {
+		t.Errorf("the rule's versions should show the new one:\n%s", body)
 	}
 }
 

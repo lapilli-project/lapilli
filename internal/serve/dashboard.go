@@ -723,6 +723,8 @@ func (s *Server) heat(l string, t *tallies, lines []ruleLine) ([]heatRow, []stri
 func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []ledger.Incident, undecided int) []action {
 	var out []action
 	path := func(name string) string { return "/rules/" + url.PathEscape(name) }
+	// What speaks of four weeks links to the rule's page over them.
+	four := func(name string) string { return path(name) + "?weeks=4" }
 	for _, x := range lines {
 		if x.Suggestion != "" {
 			out = append(out, action{Text: tr(l, "Quiet %s", x.Name), Detail: x.Suggestion, Href: path(x.Name),
@@ -735,7 +737,7 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 			if x.Streak > 1 {
 				d += tr(l, "; noisy %d weeks running", x.Streak)
 			}
-			out = append(out, action{Text: tr(l, "Look at %s", x.Name), Detail: d, Href: path(x.Name),
+			out = append(out, action{Text: tr(l, "Look at %s", x.Name), Detail: d, Href: four(x.Name),
 				Kind: "tune", Rule: x.Name, Title: tr(l, "Tune %s", x.Name)})
 		}
 	}
@@ -760,7 +762,7 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 		if x.Spare {
 			out = append(out, action{Text: tr(l, "Does %s still earn its place?", x.Name),
 				Detail: tr(l, "caught %d incidents in four weeks; another rule caught each as soon, at the same severity or above", x.Incidents),
-				Href:   path(x.Name), Kind: "retire", Rule: x.Name, Title: tr(l, "Retire %s?", x.Name)})
+				Href:   four(x.Name), Kind: "retire", Rule: x.Name, Title: tr(l, "Retire %s?", x.Name)})
 		}
 	}
 	if len(silent) > 0 {

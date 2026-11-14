@@ -366,13 +366,15 @@ func (s *Server) summaryAsk(ctx context.Context, q url.Values) (summaryAsked, er
 		if v == "" {
 			continue
 		}
-		t, err := time.ParseInLocation("2006-01-02", v, s.cfg.Loc)
+		day, err := dateDay(v)
 		if err != nil {
-			if t, err = time.Parse(time.RFC3339, v); err != nil {
+			t, err := time.Parse(time.RFC3339, v)
+			if err != nil {
 				return a, bad("%s %q: want a day like 2026-11-02, or an RFC 3339 time", x.name, v)
 			}
+			day = s.l.Day(t)
 		}
-		*x.to = ledger.Week(s.l.Day(t))
+		*x.to = ledger.Week(day)
 	}
 	switch {
 	case a.w2 < a.w1:

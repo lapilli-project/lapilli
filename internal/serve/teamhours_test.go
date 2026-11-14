@@ -71,7 +71,7 @@ func TestTeamHours(t *testing.T) {
 	if _, body, _ := get(t, h, "/rules?team=search"); !strings.Contains(body, "10 asleep, 3 off hours") || strings.Contains(body, "8 asleep, 4 off hours") {
 		t.Errorf("the team's rules: %s", body)
 	}
-	if _, body, _ := get(t, h, "/rules/Errors"); !strings.Contains(body, "10 came while people slept, and 3 more off hours") {
+	if _, body, _ := get(t, h, "/rules/Errors?tab=firings"); !strings.Contains(body, "10 came while people slept, and 3 more off hours") {
 		t.Errorf("rule: %s", body)
 	}
 	code, body, _ = get(t, h, "/api/v1/report?from=2026-10-31T00:00:00Z&to=2026-11-03T12:00:00Z&firings=false")

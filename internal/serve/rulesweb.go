@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"lapilli.dev/internal/ledger"
 )
 
 // The rules list (docs/design/ui.md): each rule's numbers, with badges on
@@ -30,8 +32,9 @@ type ruleRow struct {
 	// Has is what is under way: proposal, facts (problems of fact in what
 	// it says).
 	Has []string
-	// Facts is how many problems of fact what it says has.
-	Facts int
+	// Facts is how many problems of fact what it says has; Checks, how
+	// many things to check its page lists, these among them (condsOf).
+	Facts, Checks int
 	// labels are those it fires with, for label:; sev and group, its
 	// severity and group, from them and the rules in effect where the
 	// ledger hasn't them.
@@ -90,6 +93,55 @@ type rulesList struct {
 	Clear  string
 	Active bool
 	Empty  *emptyView
+	// Legend is what each badge means, facet by facet.
+	Legend []legendGroup
+}
+
+// legendGroup is a facet's badges, in the list's legend: each its sign,
+// its name as the facet names it, and a line on what it means.
+type legendGroup struct {
+	Name  string
+	Items []legendItem
+}
+
+type legendItem struct {
+	Class, Sign, Label, Means string
+}
+
+// badgeMeans are, by facet and value, each badge's class and sign, as the
+// badges partial draws them, and what it means; a value with none has no
+// badge (Undecided).
+var badgeMeans = map[string][3]string{
+	"perf/noisy":       {"perf-noisy", "●", "Fired often over the weeks shown, and few of its firings caught something; with weeks, how many weeks running."},
+	"perf/ok":          {"perf-ok", "○", "Fired over the weeks shown, and isn't noisy."},
+	"perf/silent":      {"perf-silent", "–", "No firing in the weeks shown."},
+	"perf/spare":       {"perf-spare", "⧉", "Another rule caught every incident it caught, as soon, at the same severity or above."},
+	"trust/differs":    {"trust", "≠", "Over the last week checked, its replay differed from what really fired."},
+	"trust/unreplayed": {"trust", "◌", "Lapilli can't replay it; its page says why."},
+	"trust/recorded":   {"trust", "⇣", "Copied in from where it fired: what it fired is known, not its condition."},
+	"status/keep":      {"pill keep", "✓", "Its note says to keep it as it is."},
+	"status/tune":      {"pill tune", "±", "Its note says to tune it."},
+	"status/retire":    {"pill retire", "⊘", "Its note says to retire it."},
+	"has/proposal":     {"prog", "✎", "A change to it is proposed and not finished with."},
+	"has/facts":        {"check", "⚠\uFE0E", "What it says when it fires has problems of fact; the badge, “n to check”, counts them with whatever else its page lists to check."},
+}
+
+// legendOf is the badges' legend: the facets' values that have a badge,
+// named as the facets name them.
+func legendOf() []legendGroup {
+	var out []legendGroup
+	for _, f := range facetsOf {
+		g := legendGroup{Name: f.name}
+		for i, x := range f.values {
+			if m, ok := badgeMeans[f.param+"/"+x]; ok {
+				g.Items = append(g.Items, legendItem{Class: m[0], Sign: m[1], Label: f.labels[i], Means: m[2]})
+			}
+		}
+		if len(g.Items) > 0 {
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 // sortLink is an order of the list: the same page in it.
@@ -245,12 +297,16 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := rulesList{rulesView: d.rulesView}
+	v := rulesList{rulesView: d.rulesView, Legend: legendOf()}
 	cursor, err := s.l.Cursor(ctx)
 	if err != nil {
 		return nil, err
 	}
 	meta, err := s.ruleMeta(ctx)
+	if err != nil {
+		return nil, err
+	}
+	w, err := s.checkingOf(r)
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +317,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	var all []ruleRow
 	listed := map[string]bool{}
 	for _, l := range d.Lines {
-		all = append(all, s.row(l, d, meta))
+		all = append(all, s.row(l, d, meta, w))
 		listed[l.Name] = true
 	}
 	inEffect := map[string]bool{}
@@ -288,7 +344,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	}
 	slices.Sort(quiet)
 	for _, name := range slices.Compact(quiet) {
-		all = append(all, s.row(s.quietLine(name, d, meta), d, meta))
+		all = append(all, s.row(s.quietLine(name, d, meta), d, meta, w))
 	}
 	v.Total = len(all)
 
@@ -479,9 +535,58 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	return v, nil
 }
 
-// row is a rule's line as the list shows it.
-func (s *Server) row(l ruleLine, d rulesData, meta map[string]ruleMeta) ruleRow {
-	r := ruleRow{ruleLine: l, labels: meta[l.Name].labels, Facts: max(l.Content.Facts, d.Facts[l.Name])}
+// row is a rule's line as the list shows it; its badge of what to check
+// counts what its page lists (condsOf), from what the list has, w.
+func (s *Server) row(l ruleLine, d rulesData, meta map[string]ruleMeta, w checking) ruleRow {
+	r := rowOf(l, max(l.Content.Facts, d.Facts[l.Name]))
+	r.labels = meta[l.Name].labels
+	r.sev, r.group = cmpOr(l.Severity, r.labels["severity"]), cmpOr(l.Group, meta[l.Name].group)
+	r.Checks = len(condsOf(condsIn{Facts: r.Facts, Differs: l.Differs, Unsupported: l.Unsupported, Unseen: meta[l.Name].unseen,
+		Tie: w.ties[l.Name], Source: l.Source, Stale: w.stale[l.Name]}))
+	return r
+}
+
+// checking is what the rules list has, besides each rule's line, of what
+// to check about them: the clouds' alarms' ties, and how many of each
+// rule's proposals not finished with were made against a version no
+// longer in effect.
+type checking struct {
+	ties  map[string]*tieView
+	stale map[string]int
+}
+
+// checkingOf is what the rules list reads, once, of what to check.
+func (s *Server) checkingOf(r *http.Request) (checking, error) {
+	w := checking{ties: map[string]*tieView{}, stale: map[string]int{}}
+	if len(s.alarms) > 0 {
+		ties, err := s.l.Ties(r.Context())
+		if err != nil {
+			return w, err
+		}
+		for name, x := range ties {
+			w.ties[name] = tieViewOf(x)
+		}
+	}
+	ps, err := s.l.Proposals(r.Context(), ledger.ProposalQuery{States: ledger.Unfinished(), Limit: 1000})
+	if err != nil {
+		return w, err
+	}
+	lines, err := s.proposalLines(r, ps)
+	if err != nil {
+		return w, err
+	}
+	for _, p := range lines {
+		if p.Stale {
+			w.stale[p.Rule]++
+		}
+	}
+	return w, nil
+}
+
+// rowOf is a rule's line on each axis, with facts problems of fact in what
+// it says: the list's row, and the badges of its page.
+func rowOf(l ruleLine, facts int) ruleRow {
+	r := ruleRow{ruleLine: l, Facts: facts}
 	switch {
 	case l.Firings+l.Excused == 0:
 		r.Perf = "silent"
@@ -507,7 +612,6 @@ func (s *Server) row(l ruleLine, d rulesData, meta map[string]ruleMeta) ruleRow 
 	if r.Facts > 0 {
 		r.Has = append(r.Has, "facts")
 	}
-	r.sev, r.group = cmpOr(l.Severity, r.labels["severity"]), cmpOr(l.Group, meta[l.Name].group)
 	return r
 }
 
@@ -545,6 +649,8 @@ func (s *Server) quietLine(name string, d rulesData, meta map[string]ruleMeta) r
 type ruleMeta struct {
 	group  string
 	labels map[string]string
+	// unseen are the ways the replay has it only in part.
+	unseen []string
 }
 
 // ruleMeta is what the latest version of the rules says of each, and, of a
@@ -565,7 +671,7 @@ func (s *Server) ruleMeta(ctx context.Context) (map[string]ruleMeta, error) {
 		}
 		if len(vs) > 0 {
 			for _, r := range vs[len(vs)-1].Rules {
-				out[r.Name] = ruleMeta{group: r.Group, labels: r.AlertLabels()}
+				out[r.Name] = ruleMeta{group: r.Group, labels: r.AlertLabels(), unseen: r.Unseen()}
 			}
 		}
 	}

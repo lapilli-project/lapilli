@@ -188,11 +188,11 @@ func TestChangeByPullRequest(t *testing.T) {
 	if ev.Backtest == nil || ev.Backtest.Before.Firings != 21 || ev.Backtest.After.Firings != 1 || len(ev.Backtest.Lost) != 0 || ev.Backtest.Before.White != 1 {
 		t.Errorf("the backtest: %+v", ev.Backtest)
 	}
-	// It shows on the rule's page and the rules list.
-	if _, body, _ := ui(t, h, http.MethodGet, "/rules/Errors", bo, "", nil); !strings.Contains(body, `href="/proposals/`+itoa(id)+`"`) {
+	// It shows on the rule's page, its proposals tab, and the rules list.
+	if _, body, _ := ui(t, h, http.MethodGet, "/rules/Errors?tab=proposals", bo, "", nil); !strings.Contains(body, `href="/proposals/`+itoa(id)+`"`) {
 		t.Errorf("the rule's page doesn't show it")
 	}
-	if _, body, _ := ui(t, h, http.MethodGet, "/rules", bo, "", nil); !strings.Contains(body, `href="/rules/Errors#proposals"><span aria-hidden="true">✎</span> Proposed</a>`) {
+	if _, body, _ := ui(t, h, http.MethodGet, "/rules", bo, "", nil); !strings.Contains(body, `href="/rules/Errors?tab=proposals&amp;weeks=4#proposals"><span aria-hidden="true">✎</span> Proposed</a>`) {
 		t.Errorf("the rules list doesn't mark it")
 	}
 	// Nothing is handed out before it is approved.

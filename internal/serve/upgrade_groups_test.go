@@ -174,7 +174,7 @@ func TestUpgradeGroups(t *testing.T) {
 		if _, names, err := s.named(ctx, latest.ID); err != nil || !slices.Equal(names, want) {
 			t.Errorf("names %q, want %q (%v)", names, want, err)
 		}
-		if _, body, _ := ui(t, h, http.MethodGet, "/rules?team=eu", bo, "", nil); !strings.Contains(body, `href="/rules/Busy%20%5Bshop-eu%5D?team=eu"`) {
+		if _, body, _ := ui(t, h, http.MethodGet, "/rules?team=eu", bo, "", nil); !strings.Contains(body, `href="/rules/Busy%20%5Bshop-eu%5D?team=eu&amp;weeks=4"`) {
 			t.Errorf("the team's rules don't list Busy [shop-eu]:\n%s", body)
 		}
 		if _, body, _ := ui(t, h, http.MethodGet, "/rules/Busy%20%5Bshop-eu%5D", bo, "", nil); !strings.Contains(body, "the eu note") {
@@ -285,7 +285,7 @@ func TestUpgradeGroups(t *testing.T) {
 		}
 		// The rule's page lists the version, with the labels its alerts
 		// carry.
-		if _, body, _ := ui(t, s.Handler(), http.MethodGet, "/rules/Busy%20%5Bshop-eu%5D", bo, "", nil); !strings.Contains(body, "<td>region=eu-west</td>") ||
+		if _, body, _ := ui(t, s.Handler(), http.MethodGet, "/rules/Busy%20%5Bshop-eu%5D?tab=versions", bo, "", nil); !strings.Contains(body, "<td>region=eu-west</td>") ||
 			!strings.Contains(body, "<td>region=eu</td>") {
 			t.Errorf("the rule's versions don't show its group's labels")
 		}

@@ -352,11 +352,13 @@ check "the summary agrees with the rules API" \
   "$firings $caught $refired $deployed $deployed_caught" \
   "^$(jq -r '"\(.Firings) \(.White) \(.Refired) \(.Deploys) \(.DeploysCaught)"' <<<"$rule")$"
 check "which says two firings, both caught, one re-fired, during the deploy" "$firings $caught $refired $deployed $deployed_caught" '^2 2 1 1 1$'
+# Its page: the numbers on its summary, the rest on its firings' tab.
 rule_page=$(page /rules/ShopErrors)
-check "the rule's page says so" "$rule_page" \
-  "fired $firings times, $caught caught something, $((firings - caught)) nothing; precision 100%, refired $refired\."
-check "the rule's page: the firing during the deploy" "$rule_page" \
-  "Of its firings over twelve weeks, $deployed came during a deploy of what they are about, $deployed_caught of them catching something"
+rule_firings=$(page '/rules/ShopErrors?tab=firings')
+check "the rule's page says so" "$rule_page" "$caught of $firings caught something"
+check "the rule's page: its re-fire" "$rule_firings" "$refired of its $firings firings re-fired \(50%\)\."
+check "the rule's page: the firing during the deploy" "$rule_firings" \
+  "Of its firings, $deployed came during a deploy of what they are about, $deployed_caught of them catching something: precision 100% with them"
 check "/rules: its re-fire, and its firing during the deploy" "$(page /rules)" \
   "ShopErrors .* $refired 50% of firings $deployed precision 100% without them"
 check "/firings: the second firing, re-fired" "$(page /firings)" '○ refired ShopErrors'
@@ -365,7 +367,7 @@ check "/firings: the second firing, re-fired" "$(page /firings)" '○ refired Sh
 # and Lapilli's firings start and end when Grafana's alert did.
 check "the notifications Grafana sent, kept: two firing, two resolved, to the receiver lapilli" \
   "$(jq -c '[.Notifications, .Untied, .ByReceiver]' <<<"$rule")" '^\[4,0,\{"lapilli":4\}\]$'
-check "the rule's page: none of a firing Lapilli hasn't" "$rule_page" \
+check "the rule's page: none of a firing Lapilli hasn't" "$rule_firings" \
   '4 notifications were sent for it: 0 of them repeats.* and 0 tell of no firing Lapilli has'
 gapi "$gf/api/annotations?type=alert&limit=100" >"$work/history.json"
 grafana_spans=$(jq -c '[.[] | select(.alertName == "ShopErrors") | {t: (.time / 1000 | floor), s: .newState, p: .prevState}] | sort_by(.t) |
@@ -444,7 +446,8 @@ wait "$pulling" || { cat "$work/pull.log"; exit 1; }
 pages=$(printf '%s\t%s\n' \
   / 'Your alerts, the last twelve weeks' \
   /rules 'ShopErrors' \
-  /rules/ShopErrors 'came during a deploy of what they are about' \
+  /rules/ShopErrors 'caught something' \
+  '/rules/ShopErrors?tab=firings' 'came during a deploy of what they are about' \
   /incidents 'Of the 2 judged against: 2 caught' \
   /firings 'refired' \
   /teams 'shop' \

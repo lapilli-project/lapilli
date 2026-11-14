@@ -657,7 +657,7 @@ func TestGrafanaRetirement(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Off, its page offers to delete it, following the disable.
-	if _, body, _ := ui(t, h, http.MethodGet, "/rules/Other", bo, "", nil); !strings.Contains(body, `name="kind" value="delete"`) {
+	if _, body, _ := ui(t, h, http.MethodGet, "/rules/Other?tab=proposals", bo, "", nil); !strings.Contains(body, `name="kind" value="delete"`) {
 		t.Error("the page of a rule off doesn't offer to delete it")
 	}
 	if _, err := s.propose(ctx, ask{Rule: "Other", Kind: ledger.KindDelete, From: "person"}, bo, false, true); err == nil ||

@@ -265,7 +265,7 @@ func TestRulesFilters(t *testing.T) {
 	// The badges: a sign for the eye, a name for everyone.
 	_, body, _ = get(t, h, "/rules?weeks=12")
 	for _, want := range []string{`<span aria-hidden="true">●</span> Noisy`, `<span aria-hidden="true">○</span> OK`, `<span aria-hidden="true">⇣</span> Recorded only`,
-		`<span class="badge pill tune"><span aria-hidden="true">±</span> tune</span>`, `href="/rules/R01?weeks=12#proposals"><span aria-hidden="true">✎</span> Proposed</a>`} {
+		`<span class="badge pill tune"><span aria-hidden="true">±</span> tune</span>`, `href="/rules/R01?tab=proposals&amp;weeks=12#proposals"><span aria-hidden="true">✎</span> Proposed</a>`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/rules?weeks=12: no %s", want)
 		}
@@ -301,7 +301,8 @@ func TestRulesSameData(t *testing.T) {
 }
 
 // TestRulesListScale: the rules list over two thousand rules, twelve weeks
-// of firings, with filters, each worked out afresh, holds to a budget.
+// of firings, with filters, and a rule's page in each tab, each worked out
+// afresh, holds to a budget.
 func TestRulesListScale(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short")
@@ -343,7 +344,10 @@ func TestRulesListScale(t *testing.T) {
 	h := s.Handler()
 	for _, path := range []string{"/api/v1/rules", "/api/v1/rules?weeks=12", "/rules", "/rules?weeks=12", "/rules?perf=noisy&severity=critical&q=rule1+label:tier=t1",
 		"/rules?perf=silent&weeks=1", "/rules?team=team3&status=none&trust=differs&trust=unreplayed", "/search?q=rule12",
-		"/search?q=r+u+l+e+0+1+2+3+4+5+6+7+8+9+ru+ul+le+e0+e1+e2"} {
+		"/search?q=r+u+l+e+0+1+2+3+4+5+6+7+8+9+ru+ul+le+e0+e1+e2",
+		// A rule's page, each tab, and over each period.
+		"/rules/Rule0007", "/rules/Rule0007?tab=firings", "/rules/Rule0007?tab=versions", "/rules/Rule0007?tab=proposals",
+		"/rules/Rule0007?tab=activity", "/rules/Rule0007?weeks=1", "/rules/Rule0007?weeks=4", "/rules/Rule1999"} {
 		s.cache.Lock()
 		s.cache.gen = ""
 		s.cache.Unlock()

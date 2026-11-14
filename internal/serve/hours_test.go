@@ -42,7 +42,7 @@ func TestHours(t *testing.T) {
 	if _, body, _ := get(t, h, "/rules"); !strings.Contains(body, "8 asleep, 12 off hours") {
 		t.Errorf("rules: %s", body)
 	}
-	if _, body, _ := get(t, h, "/rules/Errors"); !strings.Contains(body, "8 came while people slept, and 12 more off hours") {
+	if _, body, _ := get(t, h, "/rules/Errors?tab=firings"); !strings.Contains(body, "8 came while people slept, and 12 more off hours") {
 		t.Errorf("rule: %s", body)
 	}
 	// The last whole week has the two on Sunday night.
