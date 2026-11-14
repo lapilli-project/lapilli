@@ -244,12 +244,15 @@ func TestRulerListSplitMaxRules(t *testing.T) {
 }
 
 // An export of 25,000 of those rules, 62 MB, as large as 0.33.0 read, is
-// read whole, holding at its peak 12 to 17 times its size live, under 18:
-// 20 to 23 without the nodes let go of as they are decoded. What is held
-// to is the live heap, as each collection marks it, with collections at
-// GOGC 50. The heap in use isn't: past what is live, it is what the
-// collector hasn't yet freed, more the less CPU it gets, 22 to 29 times
-// with one to three CPUs, where without the nodes let go of it is 30 to 34.
+// read whole, holding at its peak some 14 times its size live, under 18:
+// 21 without the nodes let go of as they are decoded. What is held to is
+// the live heap as each collection marks it, collections at GOGC 10. A
+// collection counts as live what is allocated while it marks, more the
+// less CPU it gets, and GOGC bounds that: at 10, 14 to 15 times with one
+// to three CPUs and 24 others busy, at 50 up to 17.5. The heap in use
+// isn't held to: at GOGC 100 it was 22 to 29 times, past what is live by
+// what the collector hadn't yet freed, and 30 to 34 without the nodes let
+// go of.
 func TestGrafanaExportOf25000Rules(t *testing.T) {
 	if testing.Short() || slow > 1 {
 		t.Skip("25,000 rules, 62 MB: a few seconds, 1.5 GB")
@@ -266,7 +269,7 @@ func TestGrafanaExportOf25000Rules(t *testing.T) {
 	body := b.String()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(body)) }))
 	defer ts.Close()
-	defer debug.SetGCPercent(debug.SetGCPercent(50))
+	defer debug.SetGCPercent(debug.SetGCPercent(10))
 	runtime.GC()
 	var m0 runtime.MemStats
 	runtime.ReadMemStats(&m0)
