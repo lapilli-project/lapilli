@@ -290,6 +290,7 @@ a.sign { display: inline-block; min-width: 24px; min-height: 24px; text-align: c
 .pill.done, .pill.keep { background: var(--accent-soft); color: var(--on-green); border-color: var(--line); }
 .pill.dropped, .pill.retire { color: var(--dim); text-decoration: line-through; }
 form.track { display: block; margin-top: .35rem; }
+.track-off { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; margin-top: .35rem; }
 textarea { width: 100%; padding: .45rem .6rem; }
 select { padding: .35rem .45rem; }
 .comment-head { font-size: .95rem; }

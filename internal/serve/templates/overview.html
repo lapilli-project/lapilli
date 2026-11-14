@@ -62,7 +62,8 @@
   <h2>{{t "What to look at"}}</h2>
   {{if .Actions}}<ol class="actions">{{range .Actions}}<li><a href="{{$.Link .Href}}"><bdi>{{.Text}}</bdi></a><br><span class="quiet">{{.Detail}}</span>
     {{if .Task}}<br><a class="pill open" href="{{$.Link (printf "/tasks/%d" .Task)}}">{{t "task #%d" .Task}}</a>
-    {{else if and .Kind (not $.View.ReadOnly)}}<form method="post" action="/tasks" class="track"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="rule" value="{{.Rule}}"><input type="hidden" name="incident" value="{{.Incident}}"><input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>{{end}}</li>{{end}}</ol>
+    {{else if .May}}<form method="post" action="/tasks" class="track"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="rule" value="{{.Rule}}"><input type="hidden" name="incident" value="{{.Incident}}"><input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
+    {{else if .Kind}}<span class="track-off"><button class="quiet-button" type="button" disabled aria-describedby="{{.WhyID}}">{{t "Make it a task"}}</button>{{if .Said}} <span id="{{.WhyID}}" class="why">{{if .WhyOf}}{{tbdi .Why .WhyOf}}{{else}}{{t .Why}}{{end}}</span>{{end}}</span>{{end}}</li>{{end}}</ol>
   {{else}}{{template "empty" (emptyOf "done" "Nothing to look at now." "Nothing stands out: no noisy rules, no incident missed.")}}{{end}}
   {{with .Review}}<p class="quiet">{{t "The last change to the rules, replayed over the week before %s:" (at $loc .At)}}
   {{range $i, $x := .Rules}}{{if $i}}, {{end}}<a href="{{$.Rule $x.Rule}}"><bdi>{{$x.Rule}}</bdi></a> {{t "fired %d → %d" (fired $x.Before) (fired $x.After)}}{{end}}</p>{{end}}

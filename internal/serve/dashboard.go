@@ -178,6 +178,12 @@ type action struct {
 	Text, Detail, Href          string
 	Kind, Rule, Incident, Title string
 	Task                        int64
+	// May says the reader may make the task; else Why is why, WhyOf the
+	// team it names, and WhyID the id of the sentence that says it, said
+	// by the first action disabled for it (Said).
+	May               bool
+	Why, WhyOf, WhyID string
+	Said              bool
 }
 
 type dashboard struct {
@@ -419,6 +425,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			}
 		}
 	}
+	s.mayTask(r, o, v.Actions)
 	if len(v.Tasks) > 6 {
 		v.Tasks = v.Tasks[:6]
 	}
@@ -825,4 +832,38 @@ func weekCheckOf(all ledger.Check, cs map[string]ledger.Check, d Differs, in fun
 		return nil
 	}
 	return &weekCheck{Share: int(math.Round(all.Share() * 100)), Either: all.Either(), Differ: ledger.Differing(cs, in, d.N, d.Ratio)}
+}
+
+// mayTask says, of each action that would make a task, whether the reader
+// may: an editor any, a team's editor one about their team's rule; and,
+// for one they may not, why, those disabled for one reason sharing the
+// sentence that says it.
+func (s *Server) mayTask(r *http.Request, o *owners, as []action) {
+	role, teams := s.role(r), s.editsTeams(r)
+	ids := map[string]string{}
+	for i := range as {
+		a := &as[i]
+		if a.Kind == "" || a.Task != 0 {
+			continue
+		}
+		team := o.rule[a.Rule]
+		switch {
+		case role >= editor, len(teams) > 0 && a.Rule != "" && team > 0 && slices.Contains(teams, team):
+			a.May = true
+			continue
+		case len(teams) > 0 && a.Rule != "" && team > 0:
+			a.Why, a.WhyOf = "Only %s's editors", o.byID[team].Name
+		case len(teams) > 0:
+			a.Why = "Editors only"
+		default:
+			a.Why = cmpOr(s.why(r), "Editors only")
+		}
+		key := a.Why + "\x00" + a.WhyOf
+		if id, ok := ids[key]; ok {
+			a.WhyID = id
+		} else {
+			a.WhyID, a.Said = fmt.Sprintf("look-why-%d", len(ids)+1), true
+			ids[key] = a.WhyID
+		}
+	}
 }
