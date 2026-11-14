@@ -20,6 +20,7 @@ import (
 
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/ledger/ledgertest"
+	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -614,4 +615,57 @@ func TestReplicasShowTheLeadersStatus(t *testing.T) {
 	if _, body, _ := get(t, b.Handler(), "/runs"); !strings.Contains(body, "prometheus said no") {
 		t.Error("the follower's runs page doesn't say the leader's error")
 	}
+}
+
+// A replica that can't reach the ledger's database isn't ready, so that the
+// others answer for it; while it can, its readiness says who leads.
+func TestReplicasReadyNeedsTheDatabase(t *testing.T) {
+	f := sharedLedger(t)
+	rc := newSink(t)
+	p, via := throughProxy(t, f)
+	a := replica(t, via, rc, nil)
+	ctx := context.Background()
+	if err := a.l.Record(ctx, ledger.Found{From: now.Add(-time.Hour), To: now,
+		Run: ledger.Run{Kind: "hourly", Started: now, Finished: now}}, a.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	if code, body, _ := get(t, a.MetricsHandler(), "/readyz"); code != http.StatusOK || !strings.Contains(body, "no replica leads now") {
+		t.Fatalf("reaching the database: %d %q", code, body)
+	}
+	p.drop()
+	until(t, 10*time.Second, "not ready without the database", func() bool {
+		code, body, _ := get(t, a.MetricsHandler(), "/readyz")
+		return code == http.StatusServiceUnavailable && strings.Contains(body, "can't reach the ledger's database")
+	})
+}
+
+// Replicas sign people in with one key: a second with a sign-in of its own
+// and no --session-key-file is refused while another lives, and one with
+// the key joins.
+func TestReplicasSignInNeedsOneKey(t *testing.T) {
+	f := sharedLedger(t)
+	quickReplicas(t)
+	rc := newSink(t)
+	a := replica(t, f, rc, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.l.Elect(ctx, ledger.Elected{Version: "test"}, func(c context.Context) { <-c.Done() })
+	until(t, 5*time.Second, "the first replica lives", func() bool { return a.l.Replicas() == 1 })
+	s, _ := oidcServer(t, nil)
+	cfg := s.cfg
+	cfg.LedgerURLFile, cfg.OIDC = f, &signin.OIDC{Issuer: s.cfg.OIDC.Issuer, ClientID: "lapilli", SecretFile: s.cfg.OIDC.SecretFile, Claims: s.cfg.OIDC.Claims}
+	key := cfg.SessionKey
+	cfg.SessionKey = ""
+	if b, err := New(context.Background(), cfg, &history{}, s.log); err == nil {
+		b.Close()
+		t.Fatal("a second replica, each signing sessions with a key of its own, joined")
+	} else if !strings.Contains(err.Error(), "--session-key-file") {
+		t.Errorf("refused, saying: %v", err)
+	}
+	cfg.SessionKey = key
+	b, err := New(context.Background(), cfg, &history{}, s.log)
+	if err != nil {
+		t.Fatalf("with the key: %v", err)
+	}
+	b.Close()
 }
