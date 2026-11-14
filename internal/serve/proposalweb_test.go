@@ -862,3 +862,55 @@ func TestNoHonorificForLapilli(t *testing.T) {
 		}
 	}
 }
+
+// TestProposalHistoryStillApplying: a change being applied, moved to being
+// applied again (sent to Grafana, not read back yet), is a step of its own:
+// its history doesn't say it waits as its rule fires.
+func TestProposalHistoryStillApplying(t *testing.T) {
+	ctx := context.Background()
+	s, _ := changesServer(t, nil)
+	id, err := s.l.Propose(ctx, ledger.Proposal{Rule: "Errors", Kind: ledger.KindDelete, Path: ledger.PathGit, MadeBy: bo, Before: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.Approve(ctx, id, ana, 1); err != nil {
+		t.Fatal(err)
+	}
+	const unread = "sent, but not read back yet"
+	for _, m := range []struct {
+		from, to string
+		step     ledger.Step
+	}{
+		{ledger.StateApproved, ledger.StateApplying, ledger.Step{Applied: true}},
+		{ledger.StateApplying, ledger.StateApplying, ledger.Step{Reason: unread}},
+	} {
+		if _, err := s.l.Move(ctx, id, []string{m.from}, m.to, ledger.Proposer, m.step); err != nil {
+			t.Fatal(err)
+		}
+	}
+	steps := historyOf(t, s, id)
+	last := steps[len(steps)-1]
+	if slices.ContainsFunc(steps, func(st string) bool { return strings.Contains(st, "waits") }) ||
+		!strings.Contains(last, "being applied") || !strings.Contains(last, unread) {
+		t.Errorf("history:\n%q", steps)
+	}
+}
+
+// TestProposalPageTeamNoOneHas: a team no one has is all teams, as the page
+// reads it, so asking with one names nothing new: the page is the same, and
+// cached once, whatever name it was asked with.
+func TestProposalPageTeamNoOneHas(t *testing.T) {
+	ctx := context.Background()
+	s, _ := changesServer(t, nil)
+	id, err := s.l.Propose(ctx, ledger.Proposal{Rule: "Errors", Kind: ledger.KindDelete, Path: ledger.PathGit, MadeBy: bo, Before: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	_, all, _ := get(t, h, "/proposals/"+itoa(id)+"?team=")
+	for _, team := range []string{"nobody-1", "nobody-2"} {
+		if _, body, _ := get(t, h, "/proposals/"+itoa(id)+"?team="+team); body != all || strings.Contains(body, team) {
+			t.Errorf("team=%s: a page of its own", team)
+		}
+	}
+}

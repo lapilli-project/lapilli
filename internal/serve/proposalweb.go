@@ -311,9 +311,10 @@ func (s *Server) stepsOf(r *http.Request, p ledger.Proposal) (steps []proposalSt
 			st.Undo, _ = strconv.ParseInt(strings.TrimPrefix(what, "asked to be undone, as #"), 10, 64)
 		case moved && stateGroups[*after.State] != "" && what == *after.State:
 			st.Kind, st.State = "state", *after.State
-			if before.State != nil && *before.State == *after.State {
-				// Moved to where it was: an approved change waiting, as
-				// its rule fires.
+			if before.State != nil && *before.State == ledger.StateApproved && *after.State == ledger.StateApproved {
+				// An approved change moved to where it was: waiting, as
+				// its rule fires. Being applied, moved to being applied,
+				// is a step of its own (sent, not read back yet).
 				st.Kind = "waits"
 			}
 			if after.Reason != before.Reason {
