@@ -45,7 +45,7 @@ func TestWork(t *testing.T) {
 		t.Errorf("teams page:\n%s", body)
 	}
 	_, body, _ = get(t, h, "/rules?team=payments")
-	if !strings.Contains(body, `href="/rules/Errors?team=payments"`) {
+	if !strings.Contains(body, `href="/rules/Errors?team=payments&amp;weeks=4"`) {
 		t.Errorf("payments' rules should list Errors:\n%s", body)
 	}
 	if code, _, _ := get(t, h, "/?team=payments"); code != 200 {
