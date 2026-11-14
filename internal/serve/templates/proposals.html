@@ -101,3 +101,17 @@
 <form method="post" action="/proposals"><input type="hidden" name="rule" value="{{.Name}}">{{if .Spare}}<input type="hidden" name="from" value="spare">{{end}}<input type="hidden" name="kind" value="{{.RetireKind}}"><button class="quiet-button">{{if eq .RetireKind "disable"}}{{t "Propose turning it off (deleted four weeks later, approved again)"}}{{else}}{{t "Propose deleting it"}}{{end}}</button></form>
 </section>{{end}}
 {{end}}{{end}}
+
+{{/* A diff's options, as two pairs of links, each the page with the diff
+shown so (docs/design/ui.md). */}}
+{{define "diffopts"}}<p class="tabs diffopts">{{t "Show the change"}}:{{range index . 0}} <a href="{{.Href}}"{{if .Current}} aria-current="true"{{end}}>{{t .Label}}</a>{{end}} <span aria-hidden="true">·</span>{{range index . 1}} <a href="{{.Href}}"{{if .Current}} aria-current="true"{{end}}>{{t .Label}}</a>{{end}}</p>{{end}}
+
+{{/* A diff, unified (a line a span, each with its own newline, so that
+copied it is its lines alone), or side by side, in a table headed with
+its sides; a run of lines the same left out is a row saying how many. */}}
+{{define "difflines"}}{{with .D}}{{if .Opts.Split}}<div class="scroll"><table class="diff-split">
+<thead><tr><th scope="col">{{t $.Old}}</th><th scope="col">{{t $.New}}</th></tr></thead>
+<tbody>{{range .Pairs}}{{if .Skip}}<tr><td colspan="2" class="gap"><span aria-hidden="true">⋯</span> {{t "%d lines the same" .Skip}}</td></tr>{{else}}<tr><td class="{{.OldClass}}">{{.OldOp}}{{shown .Old}}</td><td class="{{.NewClass}}">{{.NewOp}}{{shown .New}}</td></tr>{{end}}{{end}}</tbody>
+</table></div>{{else}}<pre class="diff">{{range .Rows}}{{if .Skip}}<span class="gap"><span aria-hidden="true">⋯</span> {{t "%d lines the same" .Skip}}</span>
+{{else}}<span class="{{.Class}}">{{.Op}}{{shown .Text}}</span>
+{{end}}{{end}}</pre>{{end}}{{end}}{{end}}

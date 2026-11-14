@@ -113,10 +113,10 @@
 <tr><td class="t">{{if .Since.IsZero}}{{t "before the ledger began"}}{{else}}{{at $loc .Since}}{{end}}</td>
 {{if .Gone}}<td colspan="3">{{t "taken away"}}</td>{{else}}<td><pre>{{shown .Expr}}</pre></td><td>{{.For}}{{with .Keep}}, {{t "kept %s" .}}{{end}}</td><td>{{.Labels}}</td>{{end}}</tr>{{end}}</tbody>
 </table></div>
+{{if gt (len .Changes) 1}}{{template "diffopts" .DiffLinks}}{{end}}
 {{range .Changes}}{{if .Diffed}}<h3>{{t "From %s, beside the version before" (at $loc .Since)}}</h3>
 {{if .Whole}}<p class="quiet">{{t "Too long to set beside the version before line by line: the version before, taken out, then this one."}}</p>
-{{end}}<pre class="diff">{{range .Diff}}<span class="{{if eq .Op "-"}}del{{else if eq .Op "+"}}ins{{else}}same{{end}}">{{.Op}}{{shown .Text}}</span>
-{{end}}</pre>{{end}}{{end}}
+{{end}}{{template "difflines" ($v.Shaped .)}}{{end}}{{end}}
 {{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 </section>
 

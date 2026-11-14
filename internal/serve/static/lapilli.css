@@ -395,6 +395,15 @@ pre.diff { margin: .4rem 0 1rem; padding: .6rem .8rem; background: var(--card); 
    lines alone, with no blank line between. */
 pre.diff .del { color: var(--bad); }
 pre.diff .ins { color: var(--better); }
+pre.diff .gap { color: var(--dim); font-style: italic; }
+/* A diff side by side: a table, a side a column, each line as it is
+   written, wrapped rather than scrolled. */
+table.diff-split { table-layout: fixed; }
+table.diff-split td { font-family: var(--mono); font-size: .875rem; white-space: pre-wrap; overflow-wrap: anywhere; padding: .1rem .5rem; border-bottom: 0; }
+table.diff-split td.del { color: var(--bad); background: color-mix(in srgb, var(--bad) 7%, transparent); }
+table.diff-split td.ins { color: var(--better); background: color-mix(in srgb, var(--better) 7%, transparent); }
+table.diff-split td.gap { color: var(--dim); font-family: var(--sans); font-style: italic; }
+p.diffopts { margin: .3rem 0 .5rem; }
 /* What the badges mean, by facet, near the filters. */
 details.badge-legend { margin: 0 0 .8rem; }
 details.badge-legend p.axis { margin: .6rem 0 .2rem; font-size: .9rem; font-weight: 600; color: var(--dim); }

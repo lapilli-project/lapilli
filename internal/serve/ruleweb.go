@@ -61,11 +61,22 @@ func ruleWeeksOf(q url.Values) int {
 var readsOf = map[string]func(url.Values) string{"rule": ruleQuery}
 
 // ruleQuery is a rule's page's query as the page reads it: its tab, its
-// weeks, its team (all teams, empty) and edit=note, in one order.
+// weeks, its team (all teams, empty) and edit=note, and, on its versions
+// tab, how its diffs are shown, in one order.
 func ruleQuery(q url.Values) string {
 	out := url.Values{}
-	if t := ruleTabOf(q); t != "overview" {
+	t := ruleTabOf(q)
+	if t != "overview" {
 		out.Set("tab", t)
+	}
+	if t == "versions" {
+		diff, context := diffOptsOf(q).params()
+		if diff != "" {
+			out.Set("diff", diff)
+		}
+		if context != "" {
+			out.Set("context", context)
+		}
 	}
 	switch w := q.Get("weeks"); w {
 	case "1", "4", "12":
@@ -762,8 +773,10 @@ func versionText(c change) []string {
 // labelName is a label's name as Prometheus has them, written as it is.
 var labelName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
-// diffMost is how many lines a side a version is set beside the one
-// before line by line; past it, it is shown after the one before, whole.
+// diffMost is how many lines a side a diff sets one beside the other line
+// by line: a version beside the one before, a proposal's rule as it is
+// and as proposed. Past it, the one is shown taken out, then the other put
+// in, whole.
 const diffMost = 400
 
 // versionDiff is a version beside the one before it, line by line: the
@@ -771,7 +784,7 @@ const diffMost = 400
 // common run. One taken away is all taken out, one written again after,
 // all put in. Whole says one side was past diffMost lines: the one before,
 // taken out, then this one, put in.
-func versionDiff(before, after change) (out []diffLine, whole bool) {
+func versionDiff(before, after change) ([]diffLine, bool) {
 	var a, b []string
 	if !before.Gone {
 		a = versionText(before)
@@ -779,42 +792,5 @@ func versionDiff(before, after change) (out []diffLine, whole bool) {
 	if !after.Gone {
 		b = versionText(after)
 	}
-	if len(a) > diffMost || len(b) > diffMost {
-		for _, l := range a {
-			out = append(out, diffLine{"-", l})
-		}
-		for _, l := range b {
-			out = append(out, diffLine{"+", l})
-		}
-		return out, true
-	}
-	// lcs[i][j] is the longest common run of a[i:] and b[j:].
-	lcs := make([][]int, len(a)+1)
-	for i := range lcs {
-		lcs[i] = make([]int, len(b)+1)
-	}
-	for i := len(a) - 1; i >= 0; i-- {
-		for j := len(b) - 1; j >= 0; j-- {
-			if a[i] == b[j] {
-				lcs[i][j] = lcs[i+1][j+1] + 1
-			} else {
-				lcs[i][j] = max(lcs[i+1][j], lcs[i][j+1])
-			}
-		}
-	}
-	i, j := 0, 0
-	for i < len(a) || j < len(b) {
-		switch {
-		case i < len(a) && j < len(b) && a[i] == b[j]:
-			out = append(out, diffLine{" ", a[i]})
-			i, j = i+1, j+1
-		case j == len(b) || i < len(a) && lcs[i+1][j] >= lcs[i][j+1]:
-			out = append(out, diffLine{"-", a[i]})
-			i++
-		default:
-			out = append(out, diffLine{"+", b[j]})
-			j++
-		}
-	}
-	return out, false
+	return lineDiff(a, b)
 }

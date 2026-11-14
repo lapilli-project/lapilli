@@ -834,6 +834,16 @@ type ruleChanges struct {
 	SaysForms []saysForm
 	// SaysKeys are the annotations a fix to what it says may change.
 	SaysKeys []string
+	// Diffs are how the versions tab shows each version beside the one
+	// before (?diff=, ?context=), and DiffLinks the links to the others.
+	Diffs     diffOpts
+	DiffLinks [2][]diffLink
+}
+
+// Shaped is a version beside the one before it, as the versions tab shows
+// it.
+func (c ruleChanges) Shaped(v change) diffShown {
+	return diffShown{D: shapeDiff(v.Diff, v.Whole, c.Diffs), Old: "The version before", New: "This version"}
 }
 
 type saysForm struct {
@@ -855,6 +865,11 @@ type thresholdForm struct {
 
 func (s *Server) ruleChangesOf(r *http.Request, v *ruleView) error {
 	ctx := r.Context()
+	v.Diffs = diffOptsOf(r.URL.Query())
+	c := s.pageContext(r)
+	v.DiffLinks = diffLinks(v.Diffs, func(diff, context string) string {
+		return c.Link(v.Path+"#versions", "tab", "versions", "diff", diff, "context", context)
+	})
 	ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{Rule: v.Name, Limit: 20})
 	if err != nil {
 		return err
