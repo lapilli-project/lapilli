@@ -60,7 +60,7 @@
  "What it did": "動き",
  "%d firings: %d caught something, %d caught nothing, %d excused; the same are in the table below": "発火 %d 件: 検知 %d、検知なし %d、免除 %d。同じ内容は下の表にあります",
  "%d more rules fired around it, not drawn.": "ほかに %d 件のルールが前後に発火しました (表示なし)。",
- "More firings were on around it than are drawn: the latest %d are.": "前後の発火は表示より多く、新しい %d 件を表示しています。",
+ "More firings were on around it than are drawn: the earliest %d are.": "前後の発火は表示より多く、古いほうから %d 件を表示しています。",
  "when it would have fired": "発火していたはずの時刻",
  "the incident": "インシデント",
  "The firings, as a table": "発火を表で",

@@ -60,7 +60,7 @@
  "What it did": "Qué hizo",
  "%d firings: %d caught something, %d caught nothing, %d excused; the same are in the table below": "%d disparos: %d capturaron algo, %d no capturaron nada, %d eximidos; lo mismo está en la tabla de abajo",
  "%d more rules fired around it, not drawn.": "%d reglas más se dispararon en torno a él, sin dibujar.",
- "More firings were on around it than are drawn: the latest %d are.": "Hubo más disparos en torno a él de los que se dibujan: se dibujan los %d más recientes.",
+ "More firings were on around it than are drawn: the earliest %d are.": "Hubo más disparos en torno a él de los que se dibujan: se dibujan los %d primeros.",
  "when it would have fired": "cuándo se habría disparado",
  "the incident": "el incidente",
  "The firings, as a table": "Los disparos, en una tabla",

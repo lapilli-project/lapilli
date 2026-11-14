@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -24,9 +23,10 @@ import (
 const (
 	timelineRows    = 20
 	timelineFirings = 50
-	timelineRead    = 5000
 	timelineW       = 400.0
 )
+
+var timelineRead = 5000
 
 // timelineMark is a firing drawn on a rule's row, or when one would have
 // been: Kind caught, nothing, excused or near; X where it starts, To where
@@ -68,9 +68,11 @@ type timelineView struct {
 	SpanX, SpanW float64
 	Rows         []timelineRow
 	More         int
-	// Capped says more firings were on than were read; Near and Excused,
-	// that a row has a mark of that kind, which the legend then names.
+	// Capped says more firings were on than were read, Read of them; Near
+	// and Excused, that a row has a mark of that kind, which the legend
+	// then names.
 	Capped, Near, Excused bool
+	Read                  int
 	Width                 float64
 }
 
@@ -93,15 +95,16 @@ func (s *Server) timeline(ctx context.Context, lg string, in ledger.Incident, t 
 	v.SpanX, v.SpanW = x(in.Start), math.Round(10*(x(end)-x(in.Start)))/10
 
 	// The firings on in the span: started in it, or before it and not ended
-	// by its start, a day back at most; the latest first, as many as read.
-	fs, err := s.l.Firings(ctx, ledger.FiringQuery{From: v.From.Add(-24 * time.Hour), To: v.To, Limit: timelineRead + 1})
+	// by its start, a day back at most; the earliest first, so that those
+	// that caught it are read before any that came after them.
+	fs, err := s.l.FiringsOn(ctx, v.From, v.To, 24*time.Hour, timelineRead+1)
 	if err != nil {
 		return nil, err
 	}
 	if len(fs) > timelineRead {
-		fs, v.Capped = fs[:timelineRead], true
+		fs, v.Capped, v.Read = fs[:timelineRead], true, timelineRead
 	}
-	slices.Reverse(fs) // the earliest first
+	clock := "15:04"
 	rows := map[string]*timelineRow{}
 	row := func(rule string) *timelineRow {
 		r := rows[rule]
@@ -127,13 +130,10 @@ func (s *Server) timeline(ctx context.Context, lg string, in ledger.Incident, t 
 		}
 		at := in.Start.Add(nm.Delay)
 		r.Kind, r.Did, r.delay = "near", tr(lg, `nearly caught it: with "for" %s, it would have fired %s`, verdict.Duration(nm.NewFor), leadText(lg, -nm.Delay)), nm.Delay
-		r.Marks = append(r.Marks, timelineMark{Kind: "near", X: x(at), Start: at, Title: tr(lg, "it would have fired at %s", at.In(s.cfg.Loc).Format("15:04"))})
+		r.Marks = append(r.Marks, timelineMark{Kind: "near", X: x(at), Start: at, Title: tr(lg, "it would have fired at %s", at.In(s.cfg.Loc).Format(clock))})
 		v.Near = true
 	}
 	for _, f := range fs {
-		if !f.End.IsZero() && !f.End.After(v.From) {
-			continue // over before the span
-		}
 		r := row(f.Rule)
 		if r.Firings == 0 {
 			r.first = f.Start
@@ -162,12 +162,12 @@ func (s *Server) timeline(ctx context.Context, lg string, in ledger.Incident, t 
 			m.To = x(f.End)
 		}
 		m.Line = m.To-m.X > 1
-		m.startText = f.Start.In(s.cfg.Loc).Format("15:04")
+		m.startText = f.Start.In(s.cfg.Loc).Format(clock)
 		m.Title = m.startText + " → "
 		if m.Ongoing {
 			m.Title += tr(lg, "firing")
 		} else {
-			m.Title += f.End.In(s.cfg.Loc).Format("15:04")
+			m.Title += f.End.In(s.cfg.Loc).Format(clock)
 		}
 		r.Marks = append(r.Marks, m)
 	}

@@ -60,7 +60,7 @@
  "What it did": "한 일",
  "%d firings: %d caught something, %d caught nothing, %d excused; the same are in the table below": "발화 %d건: 무언가를 잡음 %d, 아무것도 못 잡음 %d, 면제 %d. 같은 내용이 아래 표에 있어요",
  "%d more rules fired around it, not drawn.": "규칙 %d개가 더 전후에 발화했어요(표시하지 않음).",
- "More firings were on around it than are drawn: the latest %d are.": "전후 발화가 표시한 것보다 많아요. 최근 %d건을 표시했어요.",
+ "More firings were on around it than are drawn: the earliest %d are.": "전후 발화가 표시한 것보다 많아요. 가장 이른 %d건을 표시했어요.",
  "when it would have fired": "발화했을 시점",
  "the incident": "인시던트",
  "The firings, as a table": "발화를 표로",

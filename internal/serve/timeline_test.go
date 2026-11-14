@@ -135,3 +135,54 @@ func TestIncidentTimeline(t *testing.T) {
 		}
 	}
 }
+
+// TestTimelineRead: the firings read for a timeline are those on in its
+// span, the earliest first: the one that caught it is drawn however many
+// came after it, and those over before the span aren't counted against
+// what is read.
+func TestTimelineRead(t *testing.T) {
+	ctx := context.Background()
+	s, _ := server(t, nil)
+	o := s.cfg.Options
+	at := func(h, m int) time.Time { return time.Date(2026, 11, 1, h, m, 0, 0, time.UTC) }
+	var fs []firing.Firing
+	add := func(rule string, start, end time.Time) {
+		fs = append(fs, firing.Firing{Rule: rule, Start: start, End: end, Labels: map[string]string{"service": "pay", "n": fmt.Sprint(len(fs))}})
+	}
+	add("Catch", at(9, 58), at(10, 2))
+	for k := 0; k < 60; k++ {
+		add("Late", at(10, 5).Add(time.Duration(k)*30*time.Second), at(10, 6).Add(time.Duration(k)*30*time.Second))
+		add("Gone", at(9, 0).Add(time.Duration(k)*30*time.Second), at(9, 1).Add(time.Duration(k)*30*time.Second)) // over before 09:45
+	}
+	keep(t, s, at(0, 0), at(23, 0), fs)
+	if _, err := s.l.Put(ctx, incident.Incident{ID: "I-1", Start: at(10, 0), End: at(10, 30), Labels: incident.Labels{"service": {"pay"}}}, "ana", o); err != nil {
+		t.Fatal(err)
+	}
+	in, err := s.l.IncidentByID(ctx, "I-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tl, err := s.tallies(ctx, weeks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	was := timelineRead
+	defer func() { timelineRead = was }()
+	for _, c := range []struct {
+		read   int
+		capped bool
+	}{{50, true}, {61, false}} {
+		timelineRead = c.read
+		v, err := s.timeline(ctx, "en", in, tl, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows := map[string]timelineRow{}
+		for _, r := range v.Rows {
+			rows[r.Rule] = r
+		}
+		if r := rows["Catch"]; r.Kind != "caught" || r.White != 1 || v.Capped != c.capped || rows["Gone"].Firings != 0 || rows["Late"].Firings != min(60, c.read-1) {
+			t.Errorf("%d read: Catch %+v, capped %v, %d late, %d gone", c.read, r, v.Capped, rows["Late"].Firings, rows["Gone"].Firings)
+		}
+	}
+}

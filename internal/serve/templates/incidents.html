@@ -48,7 +48,7 @@
 <td class="tl"><svg class="tl" viewBox="0 0 {{$.View.Timeline.Width}} 16" role="img" aria-label="{{t "%d firings: %d caught something, %d caught nothing, %d excused; the same are in the table below" .Firings .White .Black .Excused}}"><rect class="span" x="{{$.View.Timeline.SpanX}}" y="0" width="{{$.View.Timeline.SpanW}}" height="16"/>
 {{- range .Marks}}<g><title>{{.Title}}</title>{{if eq .Kind "near"}}<path class="near" d="{{.Diamond}}"/>{{else}}{{if .Line}}<line class="{{.Kind}}" x1="{{.X}}" x2="{{.To}}" y1="8" y2="8"/>{{end}}<circle class="{{.Kind}}" cx="{{.X}}" cy="8" r="4"/>{{end}}</g>{{end}}</svg></td></tr>{{end}}</tbody>
 </table></div>
-{{with .More}}<p class="quiet">{{t "%d more rules fired around it, not drawn." .}}</p>{{end}}{{if .Capped}}<p class="quiet">{{t "More firings were on around it than are drawn: the latest %d are." 5000}}</p>{{end}}
+{{with .More}}<p class="quiet">{{t "%d more rules fired around it, not drawn." .}}</p>{{end}}{{if .Capped}}<p class="quiet">{{t "More firings were on around it than are drawn: the earliest %d are." .Read}}</p>{{end}}
 <ul class="legend">
 <li><svg class="sym" aria-hidden="true" viewBox="0 0 12 12" width="12" height="12"><circle class="caught" cx="6" cy="6" r="4"/></svg>{{t "caught something"}}</li>
 <li><svg class="sym" aria-hidden="true" viewBox="0 0 12 12" width="12" height="12"><circle class="nothing" cx="6" cy="6" r="4"/></svg>{{t "caught nothing"}}</li>
