@@ -958,6 +958,7 @@
  "the rules changed this week": "この週にルールが変更されました",
  "the rules haven't been read yet: try again in a minute": "ルールをまだ読み込んでいません。1 分後にもう一度お試しください",
  "the server is busy with another large request: try again in a minute": "サーバーは別の大きなリクエストを処理中です。1 分後にもう一度お試しください",
+ "the server is busy with many pages at once: try again in a few seconds": "サーバーが多くのページを同時に処理しています。数秒後にもう一度お試しください",
  "the server's": "サーバーの設定",
  "the value of %s came to %s, short of %s: with %s it would have fired at %s": "%s の値は %s に達しましたが、%s に届きませんでした。%s なら %s に発火していました",
  "the weekly digest": "週次ダイジェスト",

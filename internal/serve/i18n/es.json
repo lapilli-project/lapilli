@@ -958,6 +958,7 @@
  "the rules changed this week": "las reglas cambiaron esta semana",
  "the rules haven't been read yet: try again in a minute": "las reglas aún no se han leído: inténtalo de nuevo en un minuto",
  "the server is busy with another large request: try again in a minute": "el servidor está ocupado con otra solicitud grande: inténtalo de nuevo en un minuto",
+ "the server is busy with many pages at once: try again in a few seconds": "el servidor está ocupado con muchas páginas a la vez: inténtalo de nuevo en unos segundos",
  "the server's": "las del servidor",
  "the value of %s came to %s, short of %s: with %s it would have fired at %s": "el valor de %s llegó a %s, sin alcanzar %s: con %s se habría disparado en %s",
  "the weekly digest": "el resumen semanal",

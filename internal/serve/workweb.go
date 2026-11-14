@@ -933,7 +933,7 @@ func errCode(err error) (int, bool) {
 		return http.StatusBadRequest, true
 	case errors.Is(err, ledger.ErrNotAuthor), errors.Is(err, ledger.ErrNotYourTeam), errors.Is(err, errTeamDest):
 		return http.StatusForbidden, true
-	case errors.Is(err, errBusy):
+	case errors.Is(err, errBusy), errors.Is(err, errPagesBusy):
 		return http.StatusServiceUnavailable, true
 	case errors.Is(err, errNotApprover), errors.Is(err, errNotAForm), errors.Is(err, ledger.ErrOwnProposal):
 		return http.StatusForbidden, true

@@ -315,6 +315,8 @@ type Server struct {
 	// heavy is the one turn there is for a request that takes hundreds of
 	// megabytes: every firing of a month, the settings tried over a week.
 	heavy chan struct{}
+	// renders are the turns to work out a page (pageRenders).
+	renders chan struct{}
 	// refused is set once a request to an unknown host name was logged.
 	refused atomic.Bool
 	// tokenWarned is set once an incidents token that can't be used was
@@ -450,7 +452,7 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		return nil, err
 	}
 	s := &Server{cfg: cfg, h: h, l: l, log: log, now: time.Now, wake: make(chan struct{}, 1), boot: strconv.FormatInt(time.Now().UnixNano(), 36),
-		heavy: make(chan struct{}, 1), tokenRate: &limiter{rate: 20, burst: 40}, tokenBusy: make(chan struct{}, 1),
+		heavy: make(chan struct{}, 1), renders: make(chan struct{}, pageRenders), tokenRate: &limiter{rate: 20, burst: 40}, tokenBusy: make(chan struct{}, 1),
 		// A job sends a source's firings a period at a time, an hour or a
 		// day apart: twenty at once for a first copy of the cloud's months,
 		// then one each five seconds at most.

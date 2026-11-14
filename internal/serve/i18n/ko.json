@@ -958,6 +958,7 @@
  "the rules changed this week": "이 주에 규칙이 바뀌었어요",
  "the rules haven't been read yet: try again in a minute": "아직 규칙을 읽지 못했어요. 1분 뒤 다시 시도하세요",
  "the server is busy with another large request: try again in a minute": "다른 큰 요청을 처리하고 있어요. 잠시 뒤에 다시 시도해 주세요",
+ "the server is busy with many pages at once: try again in a few seconds": "서버가 여러 페이지를 동시에 처리하고 있어요. 몇 초 뒤에 다시 시도해 주세요",
  "the server's": "서버 설정",
  "the value of %s came to %s, short of %s: with %s it would have fired at %s": "%s의 값이 %s까지 갔지만 %s에는 못 미쳤어요. %s였다면 %s에 울렸을 거예요",
  "the weekly digest": "주간 요약",

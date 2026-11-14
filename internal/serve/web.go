@@ -57,6 +57,14 @@ func (s *Server) Handler() http.Handler {
 
 	page := func(name string, view func(*http.Request) (any, error)) http.HandlerFunc {
 		h := s.cached(func(w http.ResponseWriter, r *http.Request) {
+			// A page worked out, not kept already: a few at a time.
+			done, err := s.renderTurn(r.Context())
+			if err != nil {
+				w.Header().Set("Retry-After", strconv.Itoa(int(renderWait/time.Second)))
+				s.oops(w, r, err)
+				return
+			}
+			defer done()
 			// The page context, read once; the view reads the reader's own
 			// team as team= when it was taken for them.
 			r, vr := s.withContext(r, name)
@@ -225,6 +233,43 @@ func loopback(remote string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// pageRenders is how many pages are worked out at once, those not kept
+// already: a page of two thousand rules takes tens of megabytes while it
+// is, and forty of them at once a gigabyte. Another waits its turn up to
+// renderWait, then is answered 503, to try again. The API, MCP, the health
+// checks, the metrics and the ports that take notifications and copies
+// aren't pages, and don't wait.
+const pageRenders = 8
+
+var renderWait = 10 * time.Second
+
+// errPagesBusy is a page that waited renderWait for its turn.
+var errPagesBusy = errors.New("the server is busy with many pages at once: try again in a few seconds")
+
+// renderTurn takes a turn to work out a page, waiting for one up to
+// renderWait; the func it returns gives it back.
+func (s *Server) renderTurn(ctx context.Context) (func(), error) {
+	if s.renders == nil {
+		return func() {}, nil
+	}
+	give := func() { <-s.renders }
+	select {
+	case s.renders <- struct{}{}:
+		return give, nil
+	default:
+	}
+	t := time.NewTimer(renderWait)
+	defer t.Stop()
+	select {
+	case s.renders <- struct{}{}:
+		return give, nil
+	case <-t.C:
+		return nil, errPagesBusy
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // errBusy is a heavy request that found another taking its turn.
@@ -650,15 +695,41 @@ func (s *Server) tag() string {
 	return fmt.Sprintf("%s-%d-%d-%x", s.boot, s.l.Gen(), s.saidGen(), h.Sum64())
 }
 
+// recorder keeps a page or answer as it is written, to be cached: one
+// bigger than the cache keeps (cacheOne) is written to the response, to,
+// from then on, and not kept, so that it isn't held twice, by the
+// recorder and by whatever wrote it.
 type recorder struct {
-	header http.Header
-	status int
-	body   bytes.Buffer
+	header  http.Header
+	status  int
+	body    bytes.Buffer
+	to      http.ResponseWriter
+	spilled bool
 }
 
-func (r *recorder) Header() http.Header         { return r.header }
-func (r *recorder) Write(b []byte) (int, error) { return r.body.Write(b) }
-func (r *recorder) WriteHeader(status int)      { r.status = status }
+func (r *recorder) Header() http.Header    { return r.header }
+func (r *recorder) WriteHeader(status int) { r.status = status }
+
+func (r *recorder) Write(b []byte) (int, error) {
+	if !r.spilled && r.to != nil && r.body.Len()+len(b) > cacheOne {
+		h := r.to.Header()
+		for k, v := range r.header {
+			h[k] = v
+		}
+		if r.status != http.StatusOK {
+			h.Del("ETag")
+		}
+		r.to.WriteHeader(r.status)
+		if _, err := r.to.Write(r.body.Bytes()); err != nil {
+			return 0, err
+		}
+		r.body, r.spilled = bytes.Buffer{}, true
+	}
+	if r.spilled {
+		return r.to.Write(b)
+	}
+	return r.body.Write(b)
+}
 
 func (s *Server) cached(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -697,8 +768,11 @@ func (s *Server) cached(h http.HandlerFunc) http.HandlerFunc {
 		}
 		c, ok := s.cache.get(tag, key)
 		if !ok {
-			rec := &recorder{header: http.Header{}, status: http.StatusOK}
+			rec := &recorder{header: http.Header{}, status: http.StatusOK, to: w}
 			h(rec, r)
+			if rec.spilled {
+				return // too big to keep, and written
+			}
 			if rec.status != http.StatusOK || r.Context().Err() != nil {
 				for k, v := range rec.header {
 					w.Header()[k] = v
