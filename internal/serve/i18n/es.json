@@ -599,6 +599,7 @@
  "dismissed": "descartado",
  "doing": "en curso",
  "done": "hecha",
+ "%d of %d tasks": "%d de %d tareas",
  "Show the change": "Ver el cambio",
  "Unified": "Unificado",
  "Side by side": "Lado a lado",

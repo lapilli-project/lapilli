@@ -71,3 +71,29 @@ func (l *Ledger) ProposalHeads(ctx context.Context, most int) ([]ProposalHead, e
 	}
 	return out, rows.Err()
 }
+
+// TasksByStatus are how many tasks there are in each status, of one team when
+// team isn't 0.
+func (l *Ledger) TasksByStatus(ctx context.Context, team int64) (map[string]int, error) {
+	q := "SELECT status, count(*) FROM tasks"
+	var args []any
+	if team != 0 {
+		q += " WHERE team_id = ?"
+		args = append(args, team)
+	}
+	rows, err := l.r.QueryContext(ctx, q+" GROUP BY status", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var st string
+		var n int
+		if err := rows.Scan(&st, &n); err != nil {
+			return nil, err
+		}
+		out[st] = n
+	}
+	return out, rows.Err()
+}

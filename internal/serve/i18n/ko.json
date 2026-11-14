@@ -599,6 +599,7 @@
  "dismissed": "기각",
  "doing": "진행 중",
  "done": "완료",
+ "%d of %d tasks": "작업 %[2]d건 중 %[1]d건",
  "Show the change": "변경 보기",
  "Unified": "한 줄로",
  "Side by side": "나란히",

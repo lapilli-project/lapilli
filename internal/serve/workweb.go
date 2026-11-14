@@ -256,11 +256,20 @@ func (s *Server) taskForm(t ledger.Task, pick teamPick) taskForm {
 }
 
 type tasksView struct {
-	Status string // open (open and doing), done, dropped, all
-	Team   teamFilter
-	Lines  []taskLine
-	Form   taskForm // to make one
+	Team  teamFilter
+	Lines []taskLine
+	Form  taskForm // to make one
+	// Pick is the status facet, counted (docs/design/ui.md); Total, how
+	// many tasks the team has, all of them.
+	Pick  pickView
+	Total int
 }
+
+// taskFacets are the tasks list's facet: its status, the open ones (open
+// and being done) unless asked; an older link's all, done, dropped, or
+// doing, as it was.
+var taskFacets = []pickFacet{{param: "status", name: "Status", values: []string{"open", "done", "dropped"}, labels: []string{"open", "done", "dropped"},
+	def: []string{"open"}, aliases: map[string][]string{"": {"open"}}, raw: []string{"doing"}}}
 
 func (s *Server) taskLines(o *owners, ts []ledger.Task) []taskLine {
 	var out []taskLine
@@ -282,21 +291,31 @@ func (s *Server) tasksPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	q := r.URL.Query()
-	v := tasksView{Status: q.Get("status")}
+	var v tasksView
 	tq := ledger.TaskQuery{Limit: 300}
-	switch v.Status {
-	case "done", "dropped":
-		tq.Status = []string{v.Status}
-	case "all":
-	default:
-		v.Status = "open"
-		tq.Status = []string{"open", "doing"}
+	p := picksOf(q, taskFacets)
+	for _, st := range p["status"] {
+		if st == "open" {
+			tq.Status = append(tq.Status, "open", "doing")
+		} else if !slices.Contains(tq.Status, st) {
+			tq.Status = append(tq.Status, st)
+		}
 	}
 	var team *ledger.Team
 	v.Team, team = s.teamFilter(o, q.Get("team"))
 	if team != nil {
 		tq.TeamID = team.ID
 	}
+	// Each status counted for the team, all of them, in one read.
+	n, err := s.l.TasksByStatus(ctx, tq.TeamID)
+	if err != nil {
+		return nil, err
+	}
+	counts := map[string]map[string]int{"status": {"open": n["open"] + n["doing"], "doing": n["doing"], "done": n["done"], "dropped": n["dropped"]}}
+	for _, x := range n {
+		v.Total += x
+	}
+	v.Pick = facetView("/tasks", s.pageContext(r), taskFacets, p, counts)
 	ts, err := s.l.Tasks(ctx, tq)
 	if err != nil {
 		return nil, err

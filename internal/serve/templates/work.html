@@ -162,7 +162,8 @@
 {{define "tasks"}}{{$title := t "Tasks"}}{{template "top" (titled . $title)}}{{$ro := .Status.ReadOnly}}{{with .View}}
 <div class="head"><h1>{{$title}}</h1>{{template "action" (mainAction $ "Add a task" (editsAny $.Status) "team" "")}}</div>
 <p class="lede">{{t "What is to be done about a rule or an incident: tune it, write one, retire one, decide on something. A task made from the overview remembers what it is about."}}</p>
-<p class="tabs">{{t "Status"}}: <a href="{{$.Link "/tasks"}}"{{if eq .Status "open"}} aria-current="page"{{end}}>{{t "open"}}</a> <a href="{{$.Link "/tasks" "status" "done"}}"{{if eq .Status "done"}} aria-current="page"{{end}}>{{t "done"}}</a> <a href="{{$.Link "/tasks" "status" "dropped"}}"{{if eq .Status "dropped"}} aria-current="page"{{end}}>{{t "dropped"}}</a> <a href="{{$.Link "/tasks" "status" "all"}}"{{if eq .Status "all"}} aria-current="page"{{end}}>{{t "all"}}</a></p>
+{{template "pickfacets" .Pick}}
+<p class="quiet">{{t "%d of %d tasks" (len .Lines) .Total}}</p>
 {{template "tasklist" (on $ .Lines)}}
 {{if editsAny $.Status}}
 <h2 id="add">{{t "Add a task"}}</h2>

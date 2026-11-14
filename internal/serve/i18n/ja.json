@@ -599,6 +599,7 @@
  "dismissed": "却下",
  "doing": "進行中",
  "done": "完了",
+ "%d of %d tasks": "タスク %[2]d 件中 %[1]d 件",
  "Show the change": "変更の表示",
  "Unified": "1 列",
  "Side by side": "左右に並べる",
