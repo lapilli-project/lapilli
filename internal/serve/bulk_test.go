@@ -458,3 +458,43 @@ func TestBulkTasksOnce(t *testing.T) {
 		t.Errorf("after done: to %q", got)
 	}
 }
+
+// TestBulkKeepsNotes: setting the team, or what is to become of the rules
+// picked, changes that alone of each rule's note: its text, its runbook and
+// the rest are as they were.
+func TestBulkKeepsNotes(t *testing.T) {
+	const ed = "ed@example.com"
+	ctx := context.Background()
+	s, pay, search := bulkServer(t, nil)
+	h := s.Handler()
+	was := map[string]ledger.Note{
+		"Errors":        {Rule: "Errors", TeamID: pay, Status: "tune", Runbook: "https://runbooks.example/errors", Note: "pages at night"},
+		"SearchLatency": {Rule: "SearchLatency", Runbook: "https://runbooks.example/latency", Note: "slow on Mondays"},
+	}
+	for _, n := range was {
+		if err := s.l.PutNote(ctx, n, "ana"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range []struct {
+		form url.Values
+		set  func(*ledger.Note)
+	}{
+		{url.Values{"do": {"team"}, "team": {fmt.Sprint(search)}}, func(n *ledger.Note) { n.TeamID = search }},
+		{url.Values{"do": {"status"}, "status": {"keep"}}, func(n *ledger.Note) { n.Status = "keep" }},
+	} {
+		c.form["rule"] = []string{"Errors", "SearchLatency"}
+		if code, body, hd := postAs(t, h, "/rules/bulk", c.form, ed, "same-origin"); code != http.StatusSeeOther || !strings.Contains(hd.Get("Location"), "done=2") {
+			t.Fatalf("%s: %d to %q: %s", c.form.Get("do"), code, hd.Get("Location"), body)
+		}
+		notes, _, _ := worked(t, s)
+		for name, n := range was {
+			c.set(&n)
+			n.By = ed
+			was[name] = n
+			if got := notes[name]; got != n {
+				t.Errorf("%s %s: %+v, not %+v", c.form.Get("do"), name, got, n)
+			}
+		}
+	}
+}
