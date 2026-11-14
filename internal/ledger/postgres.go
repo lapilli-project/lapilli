@@ -1098,8 +1098,9 @@ func sqliteFiles() (int, error) {
 
 // migratePostgres brings a Postgres ledger's schema up to date: an empty
 // database is given the whole schema at once, then each later migration
-// in turn, each in a transaction that holds the writers' turn
-// (writeClass), so that replicas started at once migrate it once. A
+// in turn, each in a transaction that holds schema_version and the
+// writers' turn (migrateStep), so that replicas started at once migrate it
+// once, and a replica's write waits for a migration and finds it. A
 // database holding tables a ledger has but no schema_version is refused,
 // not written over. Then the replicas' own tables (replicaTables), which
 // every Postgres ledger has.

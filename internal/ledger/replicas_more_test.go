@@ -410,7 +410,10 @@ func TestReplicasSideHasDeadlines(t *testing.T) {
 // A replica whose migration waits for the advisory lock that makes an
 // empty schema a ledger, while another makes it, finds the ledger made once
 // it has the lock: the catalog asked afresh, not what the session cached
-// as it connected, and not made again.
+// before it waited, and not made again. The other makes its tables first,
+// then schema_version while this one waits: a server that takes in many
+// catalog changes while a session waits (a whole schema's) has it read its
+// cache again anyway, a few it doesn't.
 func TestReplicasBootstrapSeesTheOthersLedger(t *testing.T) {
 	u := replicaURL(t)
 	ctx := context.Background()
@@ -423,13 +426,19 @@ func TestReplicasBootstrapSeesTheOthersLedger(t *testing.T) {
 	if err := admin.QueryRow(ctx, "SELECT current_schema()").Scan(&schema); err != nil {
 		t.Fatal(err)
 	}
-	// As the first replica does: the lock, then the ledger made.
-	tx, err := admin.Begin(ctx)
+	files, ns, err := pgFiles()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1, $2)", int32(writeClass), keyOf32(schema)); err != nil {
+	b, err := pgSchema.ReadFile(files[ns[0]])
+	if err != nil {
+		t.Fatal(err)
+	}
+	// As the first replica does: the lock, then the ledger made.
+	if _, err := admin.Exec(ctx, "SELECT pg_advisory_lock($1, $2)", int32(writeClass), keyOf32(schema)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(ctx, string(b)); err != nil {
 		t.Fatal(err)
 	}
 	opened := make(chan error, 1)
@@ -445,21 +454,11 @@ func TestReplicasBootstrapSeesTheOthersLedger(t *testing.T) {
 		admin.QueryRow(ctx, "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid::bigint = $1", int64(writeClass)).Scan(&n)
 		return n == 1
 	})
-	files, ns, err := pgFiles()
-	if err != nil {
+	if _, err := admin.Exec(ctx, fmt.Sprintf(`CREATE TABLE schema_version (version BIGINT NOT NULL, writers BIGINT NOT NULL DEFAULT 0);
+		INSERT INTO schema_version (version) VALUES (%d)`, ns[0])); err != nil {
 		t.Fatal(err)
 	}
-	b, err := pgSchema.ReadFile(files[ns[0]])
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, q := range []string{"CREATE TABLE schema_version (version BIGINT NOT NULL, writers BIGINT NOT NULL DEFAULT 0); INSERT INTO schema_version (version) VALUES (0)",
-		string(b), fmt.Sprintf("UPDATE schema_version SET version = %d", ns[0])} {
-		if _, err := tx.Exec(ctx, q); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := tx.Commit(ctx); err != nil {
+	if _, err := admin.Exec(ctx, "SELECT pg_advisory_unlock($1, $2)", int32(writeClass), keyOf32(schema)); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-opened; err != nil {
@@ -552,6 +551,52 @@ func TestReplicasStopAtANewerMigration(t *testing.T) {
 	case <-a.Lost():
 	default:
 		t.Error("the older replica goes on")
+	}
+}
+
+// A migration takes the writers' turn: a replica's write that holds it
+// holds the migration up, as the migration holds up each write after it,
+// which then finds the schema it leaves (TestReplicasStopAtANewerMigration).
+func TestReplicasMigrationTakesTheTurn(t *testing.T) {
+	u := replicaURL(t)
+	ctx := context.Background()
+	a := openReplica(t, u)
+	holder, err := pgx.Connect(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close(ctx)
+	tx, err := holder.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	// As a replica's write holds it.
+	if _, err := tx.Exec(ctx, "SELECT 1 FROM replica_gens WHERE one = 1 FOR UPDATE"); err != nil {
+		t.Fatal(err)
+	}
+	m, ns, err := pgFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.migrateStep(ctx, m, ns, ns[len(ns)-1])
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("a migration while a write holds the turn: done at once (%v)", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	tx.Rollback(ctx)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("the migration once the turn is free: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the migration still waits once the turn is free")
 	}
 }
 
