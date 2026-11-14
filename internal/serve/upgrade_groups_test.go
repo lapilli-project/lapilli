@@ -249,7 +249,7 @@ func TestUpgradeGroups(t *testing.T) {
 		if key == "" {
 			t.Fatal("no undo offered")
 		}
-		code, body, hd := ui(t, h, http.MethodPost, "/proposals/1/undo", ana, "same-origin", url.Values{"key": {key}})
+		code, body, hd := ui(t, h, http.MethodPost, "/proposals/1/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 		if code != http.StatusSeeOther {
 			t.Fatalf("undo: %d %s", code, body)
 		}

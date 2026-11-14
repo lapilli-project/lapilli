@@ -1217,6 +1217,13 @@ func proposalEvidence(p ledger.Proposal) evidence {
 	return ev
 }
 
+// undoEvidence is what an undo keeps of the change it undoes: the change as
+// written into the rule's document, which says where it was written and
+// what of the rule it touched, and nothing of why it was made. Its words,
+// whoever's, aren't the asker's, and its backtest says what the change
+// did, not what undoing it does: its page reads them from the change.
+func undoEvidence(ev evidence) evidence { return evidence{Edit: ev.Edit} }
+
 // formKey is what an approval form carries: good for one proposal as it
 // stood when the page was shown, for one person, for one thing to do.
 func (s *Server) formKey(p ledger.Proposal, user, what string) string {
@@ -1980,13 +1987,22 @@ type proposeOut struct {
 }
 
 // toolPropose is an agent proposing a change, for the person it acts for:
-// kept as an agent's, which that person can't approve. An agent can't
-// approve or apply one.
+// kept as an agent's, under their name, which that person can't approve,
+// and counted against their own proposals an hour. An agent can't approve
+// or apply one.
 func (s *Server) toolPropose(ctx context.Context, req *mcp.CallToolRequest, in proposeIn) (*mcp.CallToolResult, proposeOut, error) {
 	var out proposeOut
-	by := "anonymous"
-	if req != nil && req.Extra != nil {
-		by = s.user(&http.Request{Header: req.Extra.Header})
+	// Who from the request to /mcp itself, its context and all: a sign-in
+	// of lapilli's own, or one in front, keeps who in the context, not in
+	// a header.
+	by, ok := actsFor(ctx)
+	switch {
+	case !ok:
+		return nil, out, errors.New("who this agent acts for isn't known: nothing is proposed")
+	case by == "anonymous" && s.in != nil:
+		// With a sign-in, every request names someone: no one's proposal
+		// would be one that whoever the agent acts for could approve.
+		return nil, out, errors.New("who this agent acts for isn't known: nothing is proposed")
 	}
 	reason := strings.TrimSpace(strings.Map(func(c rune) rune {
 		if c != '\n' && (unicode.IsControl(c) || unicode.Is(unicode.Cf, c)) {

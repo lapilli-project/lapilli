@@ -70,7 +70,13 @@ func (s *Server) mcpHandler() http.Handler {
 	h := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		at := s.role(r)
 		return servers[[2]bool{compare && at >= needCompare, propose && at >= needPropose && !s.cfg.ReadOnly}]
-	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true,
+	}, &mcp.StreamableHTTPOptions{
+		// Stateless: each request is its own, with its own context, which
+		// says who signed in: who an agent acts for is read from it
+		// (actsFor). A session would hand every call the first
+		// request's context, and act for whoever opened it.
+		// TestAgentProposesSignedIn holds it.
+		Stateless: true, JSONResponse: true,
 		// Origin is checked below instead: behind a sign-in proxy on the
 		// same host, requests arrive at 127.0.0.1 under the proxy's name.
 		DisableLocalhostProtection: true})
@@ -84,8 +90,24 @@ func (s *Server) mcpHandler() http.Handler {
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, mcpBody)
-		h.ServeHTTP(w, r)
+		// Who the agent acts for, as the sign-in said of this request: its
+		// tools are called with this request's context, which holds it,
+		// never with a request made up of its headers alone, which would
+		// hold no one signed in by lapilli or in front.
+		h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), agentFor{}, s.user(r))))
 	})
+}
+
+// agentFor is who an agent acts for, in the context its tools are called
+// with: the person the request to /mcp came from, however they are signed
+// in (a session, a bearer token, a sign-in in front, a proxy's header).
+type agentFor struct{}
+
+// actsFor is who an agent acts for, from a tool's context; false when the
+// request it came with didn't say.
+func actsFor(ctx context.Context) (string, bool) {
+	by, ok := ctx.Value(agentFor{}).(string)
+	return by, ok
 }
 
 // originOf is a URL's origin as a browser sends it: its scheme and host,

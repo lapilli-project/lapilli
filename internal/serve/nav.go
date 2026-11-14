@@ -4,8 +4,6 @@ import (
 	"context"
 	"net/http"
 	"sync"
-
-	"lapilli.dev/internal/ledger"
 )
 
 // The frame every page is drawn in (docs/design/ui.md): the pages in four
@@ -20,10 +18,12 @@ type navItem struct {
 	CountText        string
 }
 
-// navGroup is a group of pages, named, not a link itself.
+// navGroup is a group of pages, named; a link itself only to a page of
+// its own, Href (Manage's), Here when the reader is on it.
 type navGroup struct {
-	ID, Name string
-	Items    []navItem
+	ID, Name, Href string
+	Here           bool
+	Items          []navItem
 }
 
 // crumbOf is where a page is: its group, and the page it is one of, and
@@ -32,6 +32,13 @@ type crumbOf struct {
 	Group, Name, Href string
 	Item              bool
 }
+
+// groupPages are the groups that have a page of their own, which their
+// name in the sidebar and in the breadcrumbs links to: Manage's.
+var groupPages = map[string]string{"Manage": "/manage"}
+
+// GroupHref is the page of a page's group, "" for a group with none.
+func (c crumbOf) GroupHref() string { return groupPages[c.Group] }
 
 var crumbsOf = map[string]crumbOf{
 	"overview": {"See", "Overview", "/", false}, "rules": {"See", "Rules", "/rules", false}, "rule": {"See", "Rules", "/rules", true},
@@ -44,6 +51,7 @@ var crumbsOf = map[string]crumbOf{
 	"outcomes": {"Report", "Outcomes", "/outcomes", false},
 	"teams":    {"Manage", "Teams", "/teams", false}, "roles": {"Manage", "Roles", "/roles", false},
 	"settings": {"Manage", "Settings", "/settings", false}, "runs": {"Manage", "Runs", "/runs", false},
+	"manage": {"", "Manage", "/manage", false},
 	"search": {"", "Search", "/search", false},
 	"error":  {"", "Overview", "/", true}, "signedout": {"", "", "", true},
 }
@@ -87,13 +95,16 @@ func bare(name string) bool { return name == "error" || name == "signedout" }
 // admin, and the counts for the team in effect, but on a bare page.
 func (s *Server) nav(ctx context.Context, p page) []navGroup {
 	var open map[int64]int
-	var approve int
+	var approve map[string]int
 	if !bare(p.Page) {
 		open, approve = s.waiting(ctx)
 	}
 	var out []navGroup
 	for _, g := range navLayout {
 		ng := navGroup{ID: g.id, Name: g.name}
+		if h := groupPages[g.name]; h != "" {
+			ng.Href, ng.Here = p.Ctx.Link(h), crumbsOf[p.Page] == crumbOf{Name: g.name, Href: h}
+		}
 		for _, it := range g.items {
 			if it.page == "roles" && !p.Status.Admin {
 				continue
@@ -112,7 +123,19 @@ func (s *Server) nav(ctx context.Context, p page) []navGroup {
 				}
 				ni.CountText = "%d open"
 			case "proposals":
-				ni.Count, ni.CountText = approve, "%d to approve"
+				// Those of the team in effect, as the list shows them.
+				if p.Ctx.Team == "" {
+					for _, n := range approve {
+						ni.Count += n
+					}
+				} else if o, err := s.owners(ctx); err == nil {
+					for rule, n := range approve {
+						if o.teamOf(rule) == p.Ctx.Team {
+							ni.Count += n
+						}
+					}
+				}
+				ni.CountText = "%d to approve"
 			}
 			ng.Items = append(ng.Items, ni)
 		}
@@ -122,18 +145,19 @@ func (s *Server) nav(ctx context.Context, p page) []navGroup {
 }
 
 // waitingCache keeps the open tasks, by team, and the proposals waiting for
-// an approval, until the ledger changes: every page's sidebar shows them.
+// an approval, by rule, until the ledger changes: every page's sidebar
+// shows them.
 type waitingCache struct {
 	sync.Mutex
 	gen     int64
 	ok      bool
 	open    map[int64]int
-	approve int
+	approve map[string]int
 }
 
-// waiting are the open tasks, by team (0 for none), and how many proposals
-// wait for an approval; none when they can't be read.
-func (s *Server) waiting(ctx context.Context) (map[int64]int, int) {
+// waiting are the open tasks, by team (0 for none), and the proposals
+// waiting for an approval, by rule; none when they can't be read.
+func (s *Server) waiting(ctx context.Context) (map[int64]int, map[string]int) {
 	gen := s.l.Gen()
 	s.wait.Lock()
 	if s.wait.ok && s.wait.gen == gen {
@@ -144,16 +168,16 @@ func (s *Server) waiting(ctx context.Context) (map[int64]int, int) {
 	s.wait.Unlock()
 	open, err := s.l.OpenTasks(ctx)
 	if err != nil {
-		return nil, 0
+		return nil, nil
 	}
-	ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{States: []string{ledger.StateProposed}, Limit: 1000})
+	approve, err := s.l.ProposedByRule(ctx)
 	if err != nil {
-		return nil, 0
+		return nil, nil
 	}
 	s.wait.Lock()
-	s.wait.gen, s.wait.ok, s.wait.open, s.wait.approve = gen, true, open, len(ps)
+	s.wait.gen, s.wait.ok, s.wait.open, s.wait.approve = gen, true, open, approve
 	s.wait.Unlock()
-	return open, len(ps)
+	return open, approve
 }
 
 // barView is the bar at the top of a page: the team and period it is shown

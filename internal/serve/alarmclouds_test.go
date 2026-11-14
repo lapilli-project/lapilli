@@ -116,7 +116,7 @@ func TestAlarmAzure(t *testing.T) {
 		t.Fatalf("off: %s %q", p.State, p.Reason)
 	}
 	key := keyFor(t, h, id, ana, "undo")
-	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	s.jobs(ctx, false)
 	if u := state(t, s, locID(hd)); u.State != ledger.StateApplied || z.Rule(ids["checkout-errors"])["properties"].(map[string]any)["enabled"] != true {
 		t.Errorf("on again: %s %q", u.State, u.Reason)
@@ -208,7 +208,7 @@ func TestAlarmGoogle(t *testing.T) {
 		t.Fatalf("deleted: %s %q", st.State, st.Reason)
 	}
 	key := keyFor(t, h, ps[0].ID, ana, "undo")
-	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(ps[0].ID)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(ps[0].ID)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	s.jobs(ctx, false)
 	u := state(t, s, locID(hd))
 	var again map[string]any
@@ -362,7 +362,7 @@ func TestAlarmOneUnitAtATime(t *testing.T) {
 	crit["allOf"].([]any)[0].(map[string]any)["name"] = "Renamed"
 	z.Unlock()
 	key := keyFor(t, ah, id, ana, "undo")
-	_, _, hd := ui(t, ah, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	_, _, hd := ui(t, ah, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	az.jobs(ctx, false)
 	if u := state(t, az, locID(hd)); u.State != ledger.StateRefused || !strings.Contains(u.Reason, "changed in the cloud since the change") {
 		t.Errorf("undo over a criterion renamed since: %s %q", u.State, u.Reason)

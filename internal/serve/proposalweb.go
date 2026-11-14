@@ -1,0 +1,382 @@
+package serve
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"net/http"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/verdict"
+)
+
+// The proposals' pages, as Argo CD shows a change (docs/design/ui.md): a
+// proposal's diff, its backtest in a dry run's place, its approval, and
+// what happened to it, in order; and the list of them, with facets.
+
+// The proposals are shown for one team's rules, as the tasks are: the bar
+// picks the team, and a team's editor sees their team's unless they pick
+// all teams.
+func init() { teamPages["proposals"] = true }
+
+// stateGroups are where a proposal is, by its state, as its badge says:
+// awaiting approval, approved, being applied (checked again and handed to
+// a recipe, sent, its pull request open or merged, not yet read back),
+// applied, undone, or closed (refused, failed, dropped, or changed in
+// review).
+var stateGroups = map[string]string{
+	ledger.StateProposed: "proposed", ledger.StateApproved: "approved",
+	ledger.StateReady: "doing", ledger.StateApplying: "doing", ledger.StateOpened: "doing", ledger.StateMerged: "doing",
+	ledger.StateApplied: "applied", ledger.StateUndone: "undone",
+	ledger.StateRefused: "closed", ledger.StateFailed: "closed", ledger.StateDropped: "closed", ledger.StateAmended: "closed",
+}
+
+// stateBadge is a proposal's state as its badge shows it: Class, its
+// colour; Sign, for the eye alone; Word, where it is; Detail, the state
+// itself where the word doesn't say it all. Each a text to translate.
+type stateBadge struct {
+	Class, Sign, Word, Detail string
+}
+
+// stateDetails are what each state says beside its group's word.
+var stateDetails = map[string]string{
+	ledger.StateReady:    "checked again, waiting for a recipe",
+	ledger.StateApplying: "sent, not yet read back",
+	ledger.StateOpened:   "its pull request is open",
+	ledger.StateMerged:   "merged, not yet read back",
+	ledger.StateRefused:  "refused",
+	ledger.StateFailed:   "failed",
+	ledger.StateDropped:  "dropped",
+	ledger.StateAmended:  "changed in review",
+}
+
+// badgeOf is a state's badge.
+func badgeOf(state string) stateBadge {
+	b := stateBadge{Detail: stateDetails[state]}
+	switch stateGroups[state] {
+	case "proposed":
+		b.Class, b.Sign, b.Word = "st-wait", "◷", "awaiting approval"
+	case "approved":
+		b.Class, b.Sign, b.Word = "st-ok", "✓", "approved"
+	case "doing":
+		b.Class, b.Sign, b.Word = "st-doing", "↻", "being applied"
+	case "applied":
+		b.Class, b.Sign, b.Word = "st-done", "●", "applied"
+	case "undone":
+		b.Class, b.Sign, b.Word = "st-undone", "↶", "undone"
+	default:
+		b.Class, b.Sign, b.Word = "st-closed", "⊘", "closed"
+	}
+	return b
+}
+
+// Badge is a proposal's badge, for the lists.
+func (l proposalLine) Badge() stateBadge { return badgeOf(l.State) }
+
+// proposalHead is what a proposal changes, in words, as its page's
+// heading says it: a text to translate, and its values.
+type proposalHead struct {
+	Format string
+	Args   []any
+}
+
+// Text is the heading in a language; HTML the same, each value set apart
+// in <bdi>.
+func (h proposalHead) Text(lang string) string        { return tr(lang, h.Format, h.Args...) }
+func (h proposalHead) HTML(lang string) template.HTML { return trBDI(lang, h.Format, h.Args...) }
+
+// headOf is what a proposal changes: a rule's for or threshold, from what
+// to what; turning it off; deleting it; what it says; undoing another.
+// Its values are from what the proposal keeps apart, never read out of a
+// rule's text, whose lines a name or a group could once make look like
+// another's: a for's new value from its edit, and was, its old one, as the
+// rule it was proposed against had it, when that is known ("" when not);
+// a threshold's from its edit. Each is one line, set apart.
+func headOf(p ledger.Proposal, ev evidence, was time.Duration, known bool) proposalHead {
+	v := func(x string) string { return rules.Shown(strings.Join(strings.Fields(x), " ")) }
+	rule := v(p.Rule)
+	switch p.Kind {
+	case ledger.KindFor:
+		to := ev.For
+		if ev.Edit != nil && ev.Edit.For != nil {
+			to = *ev.Edit.For
+		}
+		switch {
+		case to <= 0:
+			return proposalHead{"A new for for %s", []any{rule}}
+		case !known:
+			return proposalHead{"%s's for, to %s", []any{rule, verdict.Duration(to)}}
+		}
+		return proposalHead{"%s's for, %s → %s", []any{rule, verdict.Duration(was), verdict.Duration(to)}}
+	case ledger.KindThreshold:
+		if ev.Edit != nil && ev.Edit.From != "" {
+			return proposalHead{"%s's threshold, %s → %s", []any{rule, v(ev.Edit.From), v(ev.Edit.To)}}
+		}
+		return proposalHead{"A new threshold for %s", []any{rule}}
+	case ledger.KindDisable:
+		return proposalHead{"Turning %s off", []any{rule}}
+	case ledger.KindDelete:
+		return proposalHead{"Deleting %s", []any{rule}}
+	case ledger.KindSays:
+		if ev.Edit != nil && ev.Edit.Unset {
+			return proposalHead{"What %s says: its %s, taken out", []any{rule, v(ev.Edit.Annotation)}}
+		}
+		if ev.Edit != nil {
+			return proposalHead{"What %s says: its %s, written anew", []any{rule, v(ev.Edit.Annotation)}}
+		}
+	case ledger.KindUndo:
+		return proposalHead{"Undoing #%d, on %s", []any{p.Follows, rule}}
+	}
+	return proposalHead{"A change to %s", []any{rule}}
+}
+
+// forWas is the for of the rule a proposal was proposed against, as the
+// rules in effect when it was made had it, or the latest: the rule of its
+// name whose hash it kept. known is false when neither has it.
+func (s *Server) forWas(ctx context.Context, p ledger.Proposal) (time.Duration, bool, error) {
+	vs, err := s.l.Versions(ctx, p.Made, p.Made, false)
+	if err != nil {
+		return 0, false, err
+	}
+	var ids []int64
+	if len(vs) > 0 {
+		ids = append(ids, vs[len(vs)-1].ID)
+	}
+	if latest, ok, err := s.l.Latest(ctx); err != nil {
+		return 0, false, err
+	} else if ok && !slices.Contains(ids, latest.ID) {
+		ids = append(ids, latest.ID)
+	}
+	for _, id := range ids {
+		all, names, err := s.named(ctx, id)
+		if err != nil {
+			return 0, false, err
+		}
+		for i, x := range all {
+			if names[i] == p.Rule && ruleHash(x) == p.BeforeHash {
+				return x.For, true, nil
+			}
+		}
+	}
+	return 0, false, nil
+}
+
+// btRow is a line of a backtest's table: what is counted, as the rule is
+// and as proposed, and the change, signed, better or worse said in words
+// when it is either.
+type btRow struct {
+	Label         string
+	Now, Proposed string
+	By            moved
+}
+
+// btTable is a proposal's backtest as its page shows it: now beside as
+// proposed, over its span, from the evidence kept when it was made.
+// Worse says, above it, that as proposed it misses incidents it catches
+// now.
+type btTable struct {
+	From, To            time.Time
+	Rows                []btRow
+	Lost, Gained, Later []string
+	Unfinished          bool
+	Worse               bool
+	// Undoes is, for an undo, the change it undoes, whose backtest this is,
+	// read the other way: with the change beside after undoing it. Sooner
+	// are the incidents caught sooner once it is undone, those the change
+	// caught later.
+	Undoes int64
+	Sooner []string
+}
+
+// btTableOf is a backtest's table: the firings, those that caught
+// something, the incidents one misses that the other catches, and whether
+// it catches them as soon. The evidence holds no time to catch, only which
+// incidents are caught later: that is what the last row says.
+func btTableOf(bt *backtest) *btTable {
+	if bt == nil {
+		return nil
+	}
+	n := strconv.Itoa
+	x := &btTable{From: bt.From, To: bt.To, Lost: bt.Lost, Gained: bt.Gained, Later: bt.Later, Unfinished: bt.Unfinished, Worse: len(bt.Lost) > 0}
+	x.Rows = []btRow{
+		{"Fired", n(bt.Before.Firings), n(bt.After.Firings), moved{On: true, By: bt.After.Firings - bt.Before.Firings}},
+		{"Caught something", n(bt.Before.White), n(bt.After.White), moved{On: true, By: bt.After.White - bt.Before.White, Up: true}},
+		{"Incidents missed that the other catches", n(len(bt.Gained)), n(len(bt.Lost)), moved{On: true, By: len(bt.Lost) - len(bt.Gained)}},
+		{"Incidents caught later", "–", n(len(bt.Later)), moved{On: true, By: len(bt.Later)}},
+	}
+	return x
+}
+
+// btUndoOf is, for an undo of #n, #n's backtest read the other way: with
+// #n beside after undoing it. Undone, it misses what #n gained and catches
+// what #n lost; the incidents #n caught later are caught sooner, and
+// whether undoing it catches any later the backtest didn't say.
+func btUndoOf(bt *backtest, n int64) *btTable {
+	if bt == nil {
+		return nil
+	}
+	x := &btTable{From: bt.From, To: bt.To, Lost: bt.Gained, Gained: bt.Lost, Sooner: bt.Later, Unfinished: bt.Unfinished,
+		Worse: len(bt.Gained) > 0, Undoes: n}
+	c := strconv.Itoa
+	x.Rows = []btRow{
+		{"Fired", c(bt.After.Firings), c(bt.Before.Firings), moved{On: true, By: bt.Before.Firings - bt.After.Firings}},
+		{"Caught something", c(bt.After.White), c(bt.Before.White), moved{On: true, By: bt.Before.White - bt.After.White, Up: true}},
+		{"Incidents missed that the other catches", c(len(bt.Lost)), c(len(bt.Gained)), moved{On: true, By: len(bt.Gained) - len(bt.Lost)}},
+		{"Incidents caught later", c(len(bt.Later)), "–", moved{}},
+	}
+	return x
+}
+
+// proposalStep is a step of what happened to a proposal, as its page's
+// history lists it: made, approved (Of of Need), approved or waiting again
+// as --approvals changed, moved to a state (with its pull request's Link,
+// or why), waiting, approved, while its rule fires, an undo asked for
+// (#Undo). Reason is said only when the step set it: a proposal keeps its
+// reason from one step to the next.
+type proposalStep struct {
+	At          time.Time
+	By          string
+	Kind, State string
+	Of, Need    int
+	Link        string
+	Reason      string
+	Undo        int64
+}
+
+// stepsMost is how many of a proposal's steps its page reads, the latest.
+const stepsMost = 100
+
+// stepFields are the fields of a proposal's step, as the ledger keeps its
+// before and after: an approval's (approvals, need), or the proposal's
+// summary when it moved (state, reason, link). Which are there says what
+// the step was, never the step's text.
+type stepFields struct {
+	Approvals *int    `json:"approvals"`
+	Need      *int    `json:"need"`
+	State     *string `json:"state"`
+	Reason    string  `json:"reason"`
+	Link      string  `json:"link"`
+}
+
+// stepsOf are what happened to a proposal, in order: its making and its
+// approvals from what the ledger keeps of it, and every step it took
+// since, from the changes the ledger keeps, in the order they were made,
+// the latest stepsMost of them. gone says its making's change is gone
+// (older than --keep); older, that there were older steps than those read.
+func (s *Server) stepsOf(r *http.Request, p ledger.Proposal) (steps []proposalStep, gone, older bool, err error) {
+	cs, older, err := s.l.ProposalSteps(r.Context(), p.ID, stepsMost)
+	if err != nil {
+		return nil, false, false, err
+	}
+	steps = append(steps, proposalStep{At: p.Made, By: p.MadeBy, Kind: "made"})
+	prefix := fmt.Sprintf("proposal #%d ", p.ID)
+	approved, made := false, false
+	for _, c := range cs {
+		what := strings.TrimPrefix(c.What, prefix)
+		st := proposalStep{At: c.At, By: c.By}
+		var before, after stepFields
+		json.Unmarshal([]byte(c.Before), &before)
+		json.Unmarshal([]byte(c.After), &after)
+		// A proposal moved to a state keeps its summary as the step's
+		// after, its state in it; an approval keeps how many approved of
+		// how many are needed. "approved" is both an approval's text and
+		// that of a proposal moved to approved, from approved too, as one
+		// waits while its rule fires.
+		moved := after.State != nil && after.Approvals == nil
+		switch {
+		case what == "made":
+			made = true
+			continue // from the proposal itself
+		case what == "approved" && !moved:
+			if after.Approvals == nil {
+				continue // nothing kept says how many
+			}
+			approved = true
+			st.Kind, st.Of = "approved", *after.Approvals
+			if after.Need != nil {
+				st.Need = *after.Need
+			}
+		case strings.HasPrefix(what, "approved, as fewer"):
+			st.Kind = "promoted"
+		case strings.HasPrefix(what, "waits for approval again"):
+			st.Kind = "demoted"
+		case strings.HasPrefix(what, "asked to be undone, as #"):
+			st.Kind = "undo"
+			st.Undo, _ = strconv.ParseInt(strings.TrimPrefix(what, "asked to be undone, as #"), 10, 64)
+		case moved && stateGroups[*after.State] != "" && what == *after.State:
+			st.Kind, st.State = "state", *after.State
+			if before.State != nil && *before.State == ledger.StateApproved && *after.State == ledger.StateApproved {
+				// An approved change moved to where it was: waiting, as
+				// its rule fires. Being applied, moved to being applied,
+				// is a step of its own (sent, not read back yet).
+				st.Kind = "waits"
+			}
+			if after.Reason != before.Reason {
+				st.Reason = after.Reason
+			}
+			if st.State == ledger.StateOpened {
+				st.Link = after.Link
+			}
+		default:
+			continue
+		}
+		steps = append(steps, st)
+	}
+	// An undo is approved as it is asked for: by whoever asked, then. Its
+	// approval is kept with the step of the change it undoes, before any of
+	// its own.
+	if p.Kind == ledger.KindUndo && !approved && len(p.Approvals) > 0 {
+		steps = slices.Insert(steps, 1, proposalStep{At: p.Approvals[0].At, By: p.Approvals[0].By, Kind: "approved", Of: 1, Need: 1})
+	}
+	// An undo is made by its asking, kept as a step of the change it
+	// undoes: its own steps start with its approval.
+	return steps, !made && !older && p.Kind != ledger.KindUndo, older, nil
+}
+
+// Who is who took a step, as a page names them: Lapilli itself and a
+// change recipe by what they are.
+func (st proposalStep) Who() string {
+	switch st.By {
+	case ledger.Proposer:
+		return "Lapilli"
+	case ledger.ChangesCopier:
+		return "a change recipe"
+	}
+	return ""
+}
+
+// Name is who took a step, as a page names them in a language.
+func (st proposalStep) Name(lang string) string {
+	if w := st.Who(); w != "" {
+		return tr(lang, w)
+	}
+	if st.By == "" || st.By == "anonymous" {
+		return tr(lang, "anonymous")
+	}
+	return st.By
+}
+
+// Badge is the badge of the state a step moved a proposal to.
+func (st proposalStep) Badge() stateBadge { return badgeOf(st.State) }
+
+// fileRows are a file's diff, as a pull request carries it, a line a row:
+// its heads (the file's names, where a run starts) as they are, the rest
+// by their sign.
+func fileRows(diff string) []diffRow {
+	var out []diffRow
+	for _, l := range textLines(diff) {
+		switch {
+		case strings.HasPrefix(l, "--- "), strings.HasPrefix(l, "+++ "), strings.HasPrefix(l, "@@"), l == "":
+			out = append(out, diffRow{Text: l})
+		default:
+			out = append(out, diffRow{Op: l[:1], Text: l[1:]})
+		}
+	}
+	return out
+}

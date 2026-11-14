@@ -58,8 +58,8 @@
 {{if eq .Stopped "off"}}<br>{{t "off"}}{{else if .Stopped}}<br><strong>{{t "its team was removed: it isn't sent"}}</strong>{{end}}
 {{with .Unknown}}<br><strong>{{t "nothing names %s now" (join . ", ")}}</strong>{{end}}
 <br>{{t "Last sent for the span to %s." (at $loc .LastSent)}}{{with .UpdatedBy}} {{t "Kept by %s, %s." (who .) (at $loc $.View.Updated)}}{{end}}</p>
-{{if .SetBy}}<p class="quiet">{{if eq .SetBy "ledger"}}{{t "set in the UI: --digest isn't used"}}{{else}}{{t "set by flags: --digest, --team-digest, --slack-webhook-file"}}{{end}}</p>{{if not $ro}}<p><a href="{{$.Link "/reports#digest" "edit" "digest"}}">{{t "Change"}}</a></p>{{end}}
-{{else if or (not $ro) (and (gt .TeamID 0) (edits $.Status .TeamID))}}<p><a href="{{$.Link "/reports" "edit" .ID}}">{{t "Change"}}</a></p>{{end}}
+{{if .SetBy}}<p class="quiet">{{if eq .SetBy "ledger"}}{{t "set in the UI: --digest isn't used"}}{{else}}{{t "set by flags: --digest, --team-digest, --slack-webhook-file"}}{{end}}</p>{{if not $ro}}<p><a href="{{$.Link "/reports#digest" "edit" "digest"}}">{{t "Change"}}</a></p>{{else}}<p>{{template "off" (offOf $ "Change it" "admin" "report-why")}}</p>{{end}}
+{{else if or (not $ro) (and (gt .TeamID 0) (edits $.Status .TeamID))}}<p><a href="{{$.Link "/reports" "edit" .ID}}">{{t "Change"}}</a></p>{{else if gt .TeamID 0}}<p>{{template "off" (offTeam $ "Change it" "report-why" .TeamName)}}</p>{{else}}<p>{{template "off" (offOf $ "Change it" "admin" "report-why")}}</p>{{end}}
 <h2>{{t "As it would be sent now"}}</h2>
 {{with .Preview}}<p class="quiet">{{t "For its last span, %s → %s, sent nowhere." (at $loc .From) (at $loc .To)}} <a href="/api/v1/reports/{{if $.View.SetBy}}digest{{else}}{{$.View.ID}}{{end}}/preview">JSON</a></p>
 <pre class="report">{{.Text}}</pre>{{else}}<p>{{.Why}}</p>{{end}}

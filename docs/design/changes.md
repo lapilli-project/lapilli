@@ -204,9 +204,17 @@ Always a person, in the UI.
   `--approvers` says otherwise. An editor or an agent proposes; an approver
   approves.
 - **Two people,** with `--approvals 2`: the second approval must be another
-  person's, and no one approves their own proposal.
+  person's, and no one approves their own proposal. An undo of an applied
+  change is the exception, as built: it is approved by the one approver
+  who asks for it, whatever `--approvals` says, so that a change can be
+  taken back at once (below, "Undo").
 - **What they see.** The diff, the evidence, the stale check's result, and
-  who or what proposed it. A proposal an agent made says so at the top.
+  who or what proposed it. A proposal an agent made says so at the top. As
+  built (docs/design/ui.md), the page shows the change as a diff, unified
+  or side by side, around each change or the whole rule; the backtest as a
+  table, now beside as proposed, with a warning above it when the change
+  would miss an incident the rule catches now; and what happened to it, in
+  order.
 - **Only the UI.** Approving is a form on the proposal's page, refused from
   another site as every change through the UI is, and refused through the
   API, MCP, and every token. An agent may propose (MCP's `propose`, behind
@@ -376,7 +384,12 @@ The first step, for v0.22.0, as above, except:
   neither would be seen applied. A fix to what a rule says isn't kept apart:
   its hash covers when the rule fires, and a Grafana rule's digest covers
   what it says. A person, with the agents acting for them, makes twenty
-  proposals an hour at most; Lapilli's own are bounded apart. The incident
+  proposals an hour at most; Lapilli's own are bounded apart. An agent
+  acts for the person its request to `/mcp` came from, as the sign-in says
+  of that request, whichever it is; with a sign-in of lapilli's own or in
+  front, a proposal for no one known is refused (until the release after
+  0.37.0, such an agent's proposal was kept as "anonymous"'s: its person
+  could approve it, and every agent shared one twenty an hour). The incident
   a proposal is made for is an ID the ledger has, written into the pull
   request as code. A proposal made into a task gives the task none of its
   links, so the tracker job opens the task's issue whenever the pull request
@@ -386,7 +399,11 @@ The first step, for v0.22.0, as above, except:
   proposal as it stood and how many had approved it, with a key the
   process makes when it starts (a restart asks for the page again); it must
   come with `Sec-Fetch-Site: same-origin`, which a browser sets and a page
-  elsewhere can't. That keeps out the API, MCP, tokens, other sites and a
+  elsewhere can't. Since phase 4 of the web UI, the form has a box, "I have
+  read the backtest" ("the change and its evidence" for one with none),
+  `required` on the page and checked by the server: an approval without it
+  is refused, 400, and nothing is kept. To a reader who may not approve,
+  the page shows the button disabled, with why. That keeps out the API, MCP, tokens, other sites and a
   script with a stolen key, not someone who can forge the sign-in proxy's
   headers, who could be anyone already. Nor an agent the proxy lets in as
   a person: any client that isn't a browser can send the header, read the
@@ -434,10 +451,21 @@ The first step, for v0.22.0, as above, except:
   unreadable, it stays `applying` and is read again each round, never sent
   again. The pause is looked at again, too, just before a change is handed
   to a recipe.
-- **Undo** is a proposal of its own, approved by the approver who asks: on
-  the git path the file written back as it was, refused if the file changed
-  since (revert it in the repository); in Grafana the rule as it was kept,
-  put back, or made again with its uid when it was deleted.
+- **Undo** is a proposal of its own, approved by the approver who asks
+  (since phase 4 of the web UI, ticking the same box an approval takes,
+  checked by the server): on the git path the file written back as it
+  was, refused if the file changed since (revert it in the repository); in
+  Grafana the rule as it was kept, put back whole, what was edited in
+  Grafana since that doesn't change when it fires (its annotations) put
+  back with it, which the page says, or made again with its uid when it
+  was deleted. The page asks
+  for it as "Ask to undo it", and says that asking is the approval: one
+  approver's, whatever `--approvals` asks for of a change. Its page and the
+  page of the change it undoes link to each other, and each says, in its
+  history, what happened to it. It keeps of the change only the edit
+  (where it was written, what of the rule it touched): the change's words
+  aren't the asker's, and its backtest says what the change did, so the
+  undo's page reads it from the change, the other way round.
 - **Deleting after turning off** needs four weeks since the rule was off
   (since the disable took effect), the rule off still, and the rule as it
   was before, replayed over them, catching no incident that nothing caught.

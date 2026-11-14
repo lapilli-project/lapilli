@@ -23,7 +23,7 @@
 {{with .Status}}{{if .Doing}}<p class="status">{{.Doing}}{{if .Judged}}: {{.Judged}}%{{end}}</p>{{end}}{{if .Err}}<p class="status err">{{.Err}}</p>{{end}}{{end}}
 </section>{{end}}
 <main id="main">
-<nav class="crumbs" aria-label="{{t "Breadcrumb"}}"><ol>{{with .Crumb}}{{if .Group}}<li>{{t .Group}}</li>{{end}}{{if .Name}}<li>{{if .Item}}<a href="{{$.Link .Href}}">{{t .Name}}</a>{{else}}<span aria-current="page">{{t .Name}}</span>{{end}}</li>{{end}}{{if .Item}}<li><span aria-current="page"><bdi>{{$.Title}}</bdi></span></li>{{end}}{{end}}</ol></nav>
+<nav class="crumbs" aria-label="{{t "Breadcrumb"}}"><ol>{{with .Crumb}}{{if .Group}}<li>{{with .GroupHref}}<a href="{{$.Link .}}">{{t $.Crumb.Group}}</a>{{else}}{{t $.Crumb.Group}}{{end}}</li>{{end}}{{if .Name}}<li>{{if .Item}}<a href="{{$.Link .Href}}">{{t .Name}}</a>{{else}}<span aria-current="page">{{t .Name}}</span>{{end}}</li>{{end}}{{if .Item}}<li><span aria-current="page"><bdi>{{or $.Short $.Title}}</bdi></span></li>{{end}}{{end}}</ol></nav>
 <div class="bar">
 {{with .Bar}}{{if .Action}}<form method="get" action="{{.Action}}" class="ctx" aria-label="{{t .Label}}">{{range .Keep}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
   {{if .Team}}<label>{{t "Team"}} <select name="team"><option value=""{{if not $.Ctx.Team}} selected{{end}}>{{t "All teams"}}</option>{{range $.Ctx.Teams}}<option value="{{.}}"{{if eq . $.Ctx.Team}} selected{{end}}>{{.}}{{if and $.Ctx.Mine (eq . $.Ctx.Team)}} ({{t "your team"}}){{end}}</option>{{end}}</select></label>{{end}}
@@ -40,7 +40,7 @@
 {{/* The sidebar's pages, in their groups: drawn twice, as the menu a narrow
 screen opens and the sidebar a wide one keeps, and shown one at a time. */}}
 {{define "navlist"}}<nav class="nav-{{.Kind}}" aria-label="{{if eq .Kind "menu"}}{{t "Menu"}}{{else}}{{t "Pages"}}{{end}}">{{range .P.Nav}}
-  <p class="nav-group" id="{{$.Kind}}-{{.ID}}">{{t .Name}}</p>
+  <p class="nav-group" id="{{$.Kind}}-{{.ID}}">{{if .Href}}<a href="{{.Href}}"{{if .Here}} aria-current="page"{{end}}>{{t .Name}}</a>{{else}}{{t .Name}}{{end}}</p>
   <ul aria-labelledby="{{$.Kind}}-{{.ID}}">{{range .Items}}<li><a href="{{.Href}}"{{if eq .Page $.P.Here}} aria-current="{{if $.P.Crumb.Item}}true{{else}}page{{end}}"{{end}}>{{t .Name}}{{if .Count}} <span class="count" aria-hidden="true">{{.Count}}</span><span class="vh">, {{t .CountText .Count}}</span>{{end}}</a></li>{{end}}</ul>{{end}}
 </nav>{{end}}
 

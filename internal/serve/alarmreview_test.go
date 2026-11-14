@@ -24,7 +24,7 @@ func undo(t *testing.T, s *Server, id int64) ledger.Proposal {
 	t.Helper()
 	h := s.Handler()
 	key := keyFor(t, h, id, ana, "undo")
-	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	if err := s.carryOut(context.Background()); err != nil {
 		t.Fatal(err)
 	}

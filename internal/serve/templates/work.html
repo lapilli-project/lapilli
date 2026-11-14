@@ -77,6 +77,9 @@
   <button>{{t "Add it"}}</button>
 </form>
 {{end}}
+{{else if .Edit}}
+<h2>{{t "Change %s" .Edit.Name}}</h2>
+<p>{{template "off" (offOf $ "Change it" "admin" "team-why")}}</p>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
@@ -93,21 +96,46 @@
 </tr>{{else}}<tr><td colspan="8" class="quiet">{{t "None in the last four weeks, or ahead."}}</td></tr>{{end}}</tbody>
 </table></div>
 {{if editsAny $.Status}}
+{{with .Preview}}{{template "windowpreview" (on $ .)}}{{end}}
 <h2 id="add">{{t "Add a quiet window"}}</h2>
-<form method="post" action="/windows" class="grid">
-  <label>{{t "Title"}} <input name="title" required maxlength="200" placeholder="{{t "Checkout deploy"}}"></label>
-  <label>{{t "Start"}} <input name="start" type="datetime-local" required></label>
-  <label>{{t "End"}} <input name="end" type="datetime-local" required></label>
-  {{template "windowrepeats" (windowForm "" "")}}
-  <label>{{t "Until (when it repeats; for good when empty)"}} <input name="until" type="date"></label>
-  {{template "windowteams" (pickOf .Pick 0)}}
-  <label>{{t "Rules whose names match (all when empty)"}} <input name="rules" maxlength="200" placeholder="^Checkout"></label>
-  <label>{{t "Firings whose labels have (all when empty)"}} <input name="labels" placeholder="service=checkout"></label>
-  <button>{{t "Add it"}}</button>
-</form>
+{{template "windowform" .Draft}}
 <p class="quiet">{{t "A window that repeats starts and ends as its first repeat. Every month, it falls on the start's day, or on what is given: a day from 1 to 28, last, or a weekday of the month, such as first sat or last fri. By a cron expression, on five cron fields, such as 0 2 * * 6, hourly at most; its start is one of its times. Each repeat is shorter than the time between two. A team's window quiets only the rules its team owns."}}</p>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
+
+{{/* A quiet window's form, to add one or change it: as kept, or as typed
+when Preview, which writes nothing, shows what it would do. Preview comes
+first, so that Enter in a field writes nothing. */}}
+{{define "windowform"}}<form method="post" action="/windows" class="grid">
+  {{with .ID}}<input type="hidden" name="id" value="{{.}}">{{end}}
+  <label>{{t "Title"}} <input name="title" required maxlength="200" value="{{.Title}}"{{if not .ID}} placeholder="{{t "Checkout deploy"}}"{{end}}></label>
+  <label>{{t "Start"}} <input name="start" type="datetime-local" required value="{{.Start}}"></label>
+  <label>{{t "End"}} <input name="end" type="datetime-local" required value="{{.End}}"></label>
+  {{template "windowrepeats" (windowForm .Every .On)}}
+  <label>{{t "Until (when it repeats; for good when empty)"}} <input name="until" type="date" value="{{.Until}}"></label>
+  {{template "windowteams" (pickOf .Pick .Team)}}
+  <label>{{t "Rules whose names match (all when empty)"}} <input name="rules" maxlength="200" value="{{.Rules}}"{{if not .ID}} placeholder="^Checkout"{{end}}></label>
+  <label>{{t "Firings whose labels have (all when empty)"}} <input name="labels" value="{{.Labels}}"{{if not .ID}} placeholder="service=checkout"{{end}}></label>
+  <p class="row"><button name="preview" value="1" formaction="/windows#preview" class="quiet-button">{{t "Preview"}}</button> <button>{{if .ID}}{{t "Save"}}{{else}}{{t "Add it"}}{{end}}</button></p>
+</form>{{end}}
+
+{{/* What a quiet window, as its form has it, would do. */}}
+{{define "windowpreview"}}{{$loc := .V.Loc}}<section class="card preview" id="preview" aria-labelledby="preview-h">
+<h2 id="preview-h">{{t "Preview: what it would do"}}</h2>
+<p class="quiet">{{t "As the form below has it. Nothing is kept until you save it."}}</p>
+<h3>{{t "The rules it applies to"}}</h3>
+{{if .V.Rules}}<div class="scroll"><table>
+<thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col" class="n">{{t "Firings it would have excused"}}</th></tr></thead>
+<tbody>{{range .V.Rules}}<tr><td><a href="{{$.P.Rule .Name}}"><bdi>{{.Name}}</bdi></a></td><td class="n">{{.Excused}}</td></tr>{{end}}</tbody>
+</table></div>{{with .V.MoreRules}}<p class="quiet">{{t "And %d more." .}}</p>{{end}}
+{{else}}<p class="quiet">{{t "None of the rules: it would quiet nothing."}}</p>{{end}}
+<h3>{{t "The last four weeks"}}</h3>
+<p>{{if ne .V.Excused 1}}{{t "Since %s, it would have excused %d firings that caught nothing; %d of them are excused already." (day $loc .V.From) .V.Excused .V.Already}}{{else if .V.Already}}{{t "Since %s, it would have excused 1 firing that caught nothing, which is excused already." (day $loc .V.From)}}{{else}}{{t "Since %s, it would have excused 1 firing that caught nothing, which isn't excused yet." (day $loc .V.From)}}{{end}}</p>
+{{if .V.Cut}}<p class="quiet">{{t "Counted over the latest %d firings of the four weeks." .V.Read}}</p>{{end}}
+<h3>{{t "The next four weeks"}}</h3>
+{{if .V.Starts}}<ul class="plain">{{range .V.Starts}}<li>{{at $loc .Start}} → {{at $loc .End}}</li>{{end}}</ul>{{if .V.MoreStarts}}<p class="quiet">{{t "The first %d are listed." (len .V.Starts)}}</p>{{end}}
+{{else}}<p class="quiet">{{t "It doesn't fall in the next four weeks."}}</p>{{end}}
+</section>{{end}}
 
 {{define "windowrepeats"}}<label>{{t "Repeats"}} <select name="every"><option value="">{{t "once"}}</option>{{range $e := list "day" "week" "month" "cron"}}<option value="{{$e}}"{{if eq $e $.Every}} selected{{end}}>{{t (everyText $e)}}</option>{{end}}</select></label>
   <label>{{t "On (every month: 15, last, first sat; by cron: 0 2 * * 6)"}} <input name="on" maxlength="100" value="{{.On}}" placeholder="first sat"></label>{{end}}
@@ -125,20 +153,13 @@
 <tbody>{{range .Excused}}<tr><td><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></td><td>{{or .Team "–"}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
 </table></div>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 {{if not $ro}}
+{{with .Preview}}{{template "windowpreview" (on $ .)}}{{end}}
 <h2>{{t "Change it"}}</h2>
-<form method="post" action="/windows" class="grid">
-  <input type="hidden" name="id" value="{{.ID}}">
-  <label>{{t "Title"}} <input name="title" required maxlength="200" value="{{.Title}}"></label>
-  <label>{{t "Start"}} <input name="start" type="datetime-local" required value="{{input $loc .Start}}"></label>
-  <label>{{t "End"}} <input name="end" type="datetime-local" required value="{{input $loc .End}}"></label>
-  {{template "windowrepeats" (windowForm .Every .On)}}
-  <label>{{t "Until (when it repeats; for good when empty)"}} <input name="until" type="date" value="{{.UntilText}}"></label>
-  {{template "windowteams" (pickOf .Pick .TeamID)}}
-  <label>{{t "Rules whose names match (all when empty)"}} <input name="rules" maxlength="200" value="{{.Window.Rules}}"></label>
-  <label>{{t "Firings whose labels have (all when empty)"}} <input name="labels" value="{{.Labels}}"></label>
-  <button>{{t "Save"}}</button>
-</form>
+{{template "windowform" .Draft}}
 <form method="post" action="/windows/{{.ID}}/delete"><button class="quiet-button">{{t "Delete it"}}</button></form>
+{{else}}
+<h2>{{t "Change it"}}</h2>
+<p>{{template "off" (offTeam $ "Change it" "window-why" .TeamName)}}</p>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
@@ -162,7 +183,8 @@
 {{define "tasks"}}{{$title := t "Tasks"}}{{template "top" (titled . $title)}}{{$ro := .Status.ReadOnly}}{{with .View}}
 <div class="head"><h1>{{$title}}</h1>{{template "action" (mainAction $ "Add a task" (editsAny $.Status) "team" "")}}</div>
 <p class="lede">{{t "What is to be done about a rule or an incident: tune it, write one, retire one, decide on something. A task made from the overview remembers what it is about."}}</p>
-<p class="tabs">{{t "Status"}}: <a href="{{$.Link "/tasks"}}"{{if eq .Status "open"}} aria-current="page"{{end}}>{{t "open"}}</a> <a href="{{$.Link "/tasks" "status" "done"}}"{{if eq .Status "done"}} aria-current="page"{{end}}>{{t "done"}}</a> <a href="{{$.Link "/tasks" "status" "dropped"}}"{{if eq .Status "dropped"}} aria-current="page"{{end}}>{{t "dropped"}}</a> <a href="{{$.Link "/tasks" "status" "all"}}"{{if eq .Status "all"}} aria-current="page"{{end}}>{{t "all"}}</a></p>
+{{template "pickfacets" .Pick}}
+<p class="quiet">{{if eq .Total 1}}{{t "%d of 1 task" (len .Lines)}}{{else}}{{t "%d of %d tasks" (len .Lines) .Total}}{{end}}</p>
 {{template "tasklist" (on $ .Lines)}}
 {{if editsAny $.Status}}
 <h2 id="add">{{t "Add a task"}}</h2>
@@ -186,6 +208,8 @@
 {{template "taskform" .Form}}
 <form method="post" action="{{$.Link (printf "/tasks/%d/delete" .ID)}}"><button class="quiet-button">{{t "Delete it"}}</button></form>
 </details>
+{{else}}
+<p>{{template "off" (offTeam $ "Change it" "task-why" .Team)}}</p>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 

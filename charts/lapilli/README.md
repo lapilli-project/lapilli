@@ -444,7 +444,7 @@ API with `serve.changes.grafanaTokenSecret`. It needs a sign-in
 (`serve.signIn` or `serve.userHeader`), roles, `serve.roles.editors` or `serve.roles.admins` (without them everyone
 is an admin, who could resume changes), and someone to approve: the
 admins, unless `serve.changes.approvers` says who; `approvals: 2` asks for
-two people. The Secrets are mounted only
+two people (an undo is approved by the one approver who asks for it). The Secrets are mounted only
 when changes are on. To stop changes at once, pause them in the UI, or make
 a ConfigMap with a key `paused` named after the chart's full name: the
 release's name followed by `-lapilli`, unless it has `lapilli` in it

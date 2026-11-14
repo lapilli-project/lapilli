@@ -44,7 +44,7 @@ func init() {
 	mime.AddExtensionType(".txt", "text/plain; charset=utf-8")
 }
 
-var pages = template.Must(template.New("").Funcs(funcs).ParseFS(files, "templates/*.html"))
+var pages = template.Must(template.New("").Funcs(funcs).Funcs(offFuncs).ParseFS(files, "templates/*.html"))
 
 // Handler is the web UI, the API and the metrics.
 func (s *Server) Handler() http.Handler {
@@ -83,7 +83,18 @@ func (s *Server) Handler() http.Handler {
 			// cached, by them alone, in one order.
 			if canon := readsOf[name]; canon != nil {
 				r = r.Clone(r.Context())
-				r.URL.RawQuery = canon(r.URL.Query())
+				q := r.URL.Query()
+				// A team no one has is all teams, as the page reads it:
+				// another name mustn't make it worked out again.
+				if vs, ok := q["team"]; ok && vs[0] != "" {
+					if o, err := s.owners(r.Context()); err == nil {
+						if _, ok := o.team(vs[0]); !ok {
+							q.Set("team", "")
+						}
+					}
+				}
+				// A "?" with nothing after it is no query either.
+				r.URL.RawQuery, r.URL.ForceQuery = canon(q), false
 			}
 			h(w, r)
 		}
@@ -97,6 +108,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /settings", page("settings", s.settingsPage))
 	mux.HandleFunc("GET /settings.yaml", s.settingsYAML)
 	mux.HandleFunc("GET /runs", page("runs", s.runsPage))
+	mux.HandleFunc("GET /manage", page("manage", s.managePage))
 	mux.HandleFunc("GET /outcomes", page("outcomes", s.outcomesPage))
 	mux.HandleFunc("GET /search", page("search", s.searchPage))
 	mux.HandleFunc("GET /lang", chooseLang)
@@ -656,6 +668,11 @@ func (s *Server) cached(h http.HandlerFunc) http.HandlerFunc {
 		if s.namesPeople() {
 			key = s.user(r) + "\x00" + strings.Join(s.groups(r), ",") + "\x00" + key
 		}
+		// Signed in by a bearer token, as an API client is, a reader is
+		// offered no approval, which a session's page offers: kept apart.
+		if id, ok := whoOf(r); ok && id.by == byBearer {
+			key = "bearer\x00" + key
+		}
 		etag := `"` + tag + "-" + strconv.FormatUint(hash(key), 16) + `"`
 		w.Header().Set("ETag", etag)
 		w.Header().Set("Cache-Control", "no-cache")
@@ -786,8 +803,9 @@ type page struct {
 	Lang   string
 	Langs  []langLink
 	// Title is the page's, as its h1 has it: a template sets it with
-	// titled, for the browser's tab and for screen readers.
-	Title string
+	// titled, for the browser's tab and for screen readers; Short, with
+	// crumbed, is the breadcrumb's name for it, when shorter.
+	Title, Short string
 	// Ctx is the team and period the page is looked at for, carried on
 	// its links; Nav the sidebar, Here the page of it the reader is on,
 	// Crumb where the page is, and Bar the bar at its top

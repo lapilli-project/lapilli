@@ -6,28 +6,35 @@
 
 {{define "changesoff"}}{{if not .On}}<p class="hint">{{t "Changes are off: proposals are kept, and nothing is applied or handed to a recipe. lapilli serve was started without --changes."}}</p>{{else if .Paused}}<p class="hint bad">{{t "Changes are paused: nothing is applied or handed to a recipe until they are resumed."}}</p>{{end}}{{end}}
 
+{{define "proposalbadge"}}<span class="badge {{.Class}}"><span aria-hidden="true">{{.Sign}}</span> {{t .Word}}</span>{{with .Detail}} <span class="quiet">({{t .}})</span>{{end}}{{end}}
+
 {{define "proposallist"}}{{if .V}}<div class="scroll"><table>
 <thead><tr><th scope="col">#</th><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Change"}}</th><th scope="col">{{t "Way"}}</th><th scope="col">{{t "State"}}</th><th scope="col">{{t "Made"}}</th></tr></thead>
 <tbody>{{range .V}}<tr><td><a href="{{$.P.Link (printf "/proposals/%d" .ID)}}">#{{.ID}}</a></td><td><a href="{{$.P.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a>{{if .Stale}}<br><span class="hint">{{t "the rule changed since"}}</span>{{end}}</td>
 <td>{{template "proposalkind" .Kind}}{{if .Agent}}<br><span class="quiet">{{t "proposed by an agent"}}</span>{{end}}</td><td>{{template "proposalpath" .Path}}</td>
-<td>{{template "proposalstate" .State}}{{if eq .State "proposed"}} <span class="quiet">{{t "%d of %d approvals" (len .Approvals) .Need}}</span>{{end}}</td>
+<td>{{template "proposalbadge" .Badge}}{{if eq .State "proposed"}} <span class="quiet">{{t "%d of %d approvals" .Have .Need}}</span>{{end}}</td>
 <td class="t">{{at .Loc .Made}}<br><span class="quiet">{{who .MadeBy}}</span></td></tr>{{end}}</tbody>
 </table></div>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}{{end}}
 
 {{define "proposals"}}{{$title := t "Proposals"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
-<h1>{{$title}}</h1>
+<div class="head"><h1>{{$title}}</h1><p class="of">{{if eq .Total 1}}{{t "%d of 1 proposal" .Shown}}{{else}}{{t "%d of %d proposals" .Shown .Total}}{{end}}</p></div>
 <p class="lede">{{t "Changes to the rules Lapilli or a person proposed, each with its backtest. Nothing is changed until a person approves it here: then it is checked again, and opened as a pull request where the rule is kept, or applied through Grafana's, a ruler's or a cloud's API, with what it replaces kept for undo."}}</p>
 {{template "changesoff" .}}
 {{if .On}}<p class="quiet">{{t "%d approvals each; at most %d deletions a day and %d changes an hour." .Need .Limits.Deletions .Limits.Changes}}</p>{{end}}
-{{if and .On $.Status.Admin}}<form method="post" action="/settings/changes">{{if .Paused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>{{end}}
-<p class="tabs">{{t "State"}}: <a href="{{$.Link "/proposals"}}"{{if eq .State "open"}} aria-current="page"{{end}}>{{t "open"}}</a> <a href="{{$.Link "/proposals" "state" "applied"}}"{{if eq .State "applied"}} aria-current="page"{{end}}>{{t "applied"}}</a> <a href="{{$.Link "/proposals" "state" "refused"}}"{{if eq .State "refused"}} aria-current="page"{{end}}>{{t "refused"}}</a> <a href="{{$.Link "/proposals" "state" "all"}}"{{if eq .State "all"}} aria-current="page"{{end}}>{{t "all"}}</a></p>
-{{template "proposallist" (on $ .Lines)}}
+{{if and .On $.Status.Admin}}<form method="post" action="/settings/changes">{{if .Paused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>
+{{else}}{{with .PauseOff}}<p>{{template "off" .}}</p>{{end}}{{end}}
+{{template "pickfacets" .Pick}}
+{{if .Lines}}{{template "proposallist" (on $ .Lines)}}{{end}}
+{{if .More}}<p class="quiet">{{t "The first %d are shown: pick fewer to see the rest." (len .Lines)}}</p>{{end}}
+{{with .Empty}}{{template "empty" .}}{{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
-{{define "proposal"}}{{template "top" (titled . (print "#" .View.ID " " (t (kindText .View.Kind)) ", " .View.Rule))}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
+{{define "proposal"}}{{$head := .View.Head.Text .Lang}}{{template "top" (crumbed . (print "#" .View.ID " " $head) (print "#" .View.ID))}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}{{$v := .}}
 {{if .Agent}}<p class="hint bad">{{t "An agent proposed this, for %s. What it says is its own: check the diff and the backtest, not its words." (who .MadeBy)}}</p>{{end}}
-<h1>#{{.ID}} {{template "proposalkind" .Kind}}, <a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></h1>
-<p class="lede">{{template "proposalstate" .State}} {{template "proposalpath" .Path}} · {{t "made by %s, %s" (who .MadeBy) (at $loc .Made)}}{{with .Evidence.From}} · {{t "from %s" (t .)}}{{end}}{{with .Evidence.Incident}} · <a href="{{$.Incident .}}">{{.}}</a>{{end}}{{if .Follows}} · {{t "after"}} <a href="{{$.Link (printf "/proposals/%d" .Follows)}}">#{{.Follows}}</a>{{end}}</p>
+<h1>#{{.ID}} {{.Head.HTML $.Lang}}</h1>
+<p class="proposal-facts">{{template "proposalbadge" .Badge}} <span aria-hidden="true">·</span> <a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a> <span aria-hidden="true">·</span> {{if .Agent}}<span class="badge agent"><span aria-hidden="true">⚙&#xFE0E;</span> {{t "an agent"}}</span> {{end}}{{if .ByLapilli}}{{t "made by Lapilli, %s" (at $loc .Made)}}{{else}}{{t "made by %s, %s" (who .MadeBy) (at $loc .Made)}}{{end}} <span aria-hidden="true">·</span> {{template "proposalpath" .Path}}{{with .Evidence.From}} <span aria-hidden="true">·</span> {{t "from %s" (t .)}}{{end}}{{with .Evidence.Incident}} <span aria-hidden="true">·</span> <a href="{{$.Incident .}}"><bdi>{{.}}</bdi></a>{{end}}{{if .Follows}} <span aria-hidden="true">·</span> {{t "after"}} <a href="{{$.Link (printf "/proposals/%d" .Follows)}}">#{{.Follows}}</a>{{end}}</p>
+{{with .Undoes}}<p>{{t "It puts back the rule as it was before the change it undoes:"}} <a href="{{$.Link (printf "/proposals/%d" .ID)}}">#{{.ID}}</a>.{{if .Agent}} {{t "An agent proposed #%d, for %s." .ID (who .For)}}{{end}}</p>
+{{if eq $v.Path "grafana"}}<p class="hint">{{t "In Grafana, it puts back the whole rule as it was before #%d, its annotations too: whatever was edited in Grafana since is put back with it." .ID}}</p>{{end}}{{end}}
 {{template "changesoff" .}}
 {{if .Evidence.Cloud}}{{with .Evidence.Edit}}{{if .Namespace}}<p class="quiet">{{t "A cloud's alarm, read with --alarms %s:" .Namespace}} <code>{{$.View.Source}}</code></p>{{end}}{{end}}
 {{with .Evidence.NoPath}}<p class="hint">{{t "Lapilli doesn't change it in the cloud:"}} {{t .}}</p>{{end}}
@@ -38,40 +45,86 @@
 {{with .Reason}}<p class="bad">{{.}}</p>{{end}}
 {{with .Link}}<p><a href="{{.}}" rel="noopener noreferrer">{{t "Pull request"}} <span aria-hidden="true">↗</span></a></p>{{end}}
 {{with .Evidence.Reason}}<details open><summary>{{t "What whoever proposed it said"}}</summary><div class="comment-body">{{.}}</div></details>{{end}}
-
-<h2>{{t "The change"}}</h2>
-<pre class="diff">{{.Diff}}</pre>
-
-<h2>{{t "Evidence"}}</h2>
-{{with .Evidence.Backtest}}<p>{{t "Backtest from %s to %s: as it is, fired %d times and %d caught an incident; as proposed, %d and %d." (day $loc .From) (day $loc .To) .Before.Firings .Before.White .After.Firings .After.White}}</p>
-{{if .Lost}}<p class="bad">{{t "Missed as proposed: %s." (join .Lost ", ")}}</p>{{end}}
-{{if .Gained}}<p>{{t "Caught as proposed, missed as it is: %s." (join .Gained ", ")}}</p>{{end}}
-{{if .Later}}<p>{{t "Caught later as proposed: %s." (join .Later ", ")}}</p>{{end}}
-{{if .Unfinished}}<p class="bad">{{t "The backtest didn't finish within --timeout: its numbers are partial."}}</p>{{end}}{{end}}
-{{with .Evidence.Finding}}<p>{{t "It answers what the content check found:"}} {{t .Key}}{{with .Detail}}: <code>{{.}}</code>{{end}}</p>{{end}}
-{{if eq .Kind "says"}}<p class="quiet">{{t "It changes what the alert says, not when it fires: there is nothing to backtest."}}</p>{{end}}
-{{with .Evidence.Record}}<p>{{t "Over %d weeks it fired %d times, %d catching an incident; it caught %d incidents, %d of them first, %d that no other rule caught." .Weeks .Firings .White .Incidents .First .Alone}}</p>
-<p class="hint">{{t "A rule may wait for a rare incident, and incidents nobody wrote down count against it: retiring it is a person's call."}}</p>
-{{with .Would}}<p class="bad">{{t "While it was off, it would have caught: %s." (join . ", ")}}</p>{{end}}{{end}}
-
-<h2>{{t "Approvals"}}</h2>
-{{if .Approvals}}<ul class="plain">{{range .Approvals}}<li>{{who .By}}, {{at $loc .At}}</li>{{end}}</ul>{{else}}<p class="quiet">{{t "None yet."}}</p>{{end}}
-{{if eq .Path "none"}}<p>{{t "Lapilli can't write this change where the rule is kept: make it there. A pull request's description, to copy:"}}</p><pre>{{.Body}}</pre>{{end}}
-{{if .CanApprove}}<form method="post" action="/proposals/{{.ID}}/approve"><input type="hidden" name="key" value="{{.Approve}}"><button>{{if eq .Need 2}}{{t "Approve (%d of %d)" .Next .Need}}{{else}}{{t "Approve"}}{{end}}</button></form>
-{{else if .Own}}<p class="quiet">{{t "You proposed this: someone else approves it."}}</p>{{else if .Done}}<p class="quiet">{{t "You approved it: it waits for another approver."}}</p>{{end}}
-{{if .CanUndo}}<form method="post" action="/proposals/{{.ID}}/undo"><input type="hidden" name="key" value="{{.Undo}}"><button class="quiet-button">{{t "Undo it"}}</button></form>{{end}}
+<div class="row proposal-actions">{{with .Task}}<a href="{{$.Link (printf "/tasks/%d" .ID)}}">{{t "Task #%d" .ID}}</a>{{else}}{{if not $ro}}<form method="post" action="/proposals/{{$v.ID}}/task"><button class="quiet-button">{{t "Make it a task"}}</button></form>{{else}}{{with $v.TaskOff}}{{template "off" .}}{{end}}{{end}}{{end}}
 {{if .Closing}}<details><summary>{{t "Close it"}}</summary><form method="post" action="/proposals/{{.ID}}/drop" class="grid">
   <p class="hint">{{if .TwoAlike}}{{t "It was made again, twice alike after the cloud's answer was lost: it is read back once more first, and closed, failed, only if two are still there."}}{{else if and .Unwritten (eq .Path "ruler")}}{{t "It was sent to the ruler and can't be read back yet: it is read back once more first, and closed, failed, only if it still can't be."}}{{else if and .Unwritten (eq .Path "alarm")}}{{t "It was sent to the cloud and can't be read back yet: it is read back once more first, and closed, failed, only if it still can't be."}}{{else if .Unwritten}}{{t "It was sent to Grafana and can't be read back yet: it is read back once more first, and closed, failed, only if it still can't be."}}{{else}}{{t "Lapilli no longer follows its pull request, which is left as it is on the host: close or revert it there."}}{{end}}</p>
   <label>{{t "Why"}} <input name="reason" required maxlength="400"></label>
   {{if .TwoAlike}}<label><input type="checkbox" name="settled" value="1"> {{t "I settled the two policies alike in the console"}}</label>{{else if and .Unwritten (eq .Path "ruler")}}<label><input type="checkbox" name="unwritten" value="1"> {{t "I know the change didn't reach the ruler"}}</label>{{else if and .Unwritten (eq .Path "alarm")}}<label><input type="checkbox" name="unwritten" value="1"> {{t "I know the change didn't reach the cloud"}}</label>{{else if .Unwritten}}<label><input type="checkbox" name="unwritten" value="1"> {{t "I know the change didn't reach Grafana"}}</label>{{end}}
   <button class="quiet-button">{{t "Close it"}}</button>
 </form></details>
-{{else if .CanDrop}}<form method="post" action="/proposals/{{.ID}}/drop"><button class="quiet-button">{{t "Drop it"}}</button></form>{{end}}
-{{if not $ro}}{{with .Task}}<p><a href="{{$.Link (printf "/tasks/%d" .ID)}}">{{t "Task #%d" .ID}}</a></p>{{else}}<form method="post" action="/proposals/{{.ID}}/task"><button class="quiet-button">{{t "Make it a task"}}</button></form>{{end}}{{end}}
+{{else if .CanDrop}}<form method="post" action="/proposals/{{.ID}}/drop"><button class="quiet-button">{{t "Drop it"}}</button></form>{{else}}{{with .DropOff}}{{template "off" .}}{{end}}{{end}}</div>
 
-<details><summary>{{t "The rule, as it was and as proposed"}}</summary>
-<pre>{{.Before}}</pre>
-<pre>{{.After}}</pre></details>
+<section class="card" id="change">
+<h2>{{t "The change"}}</h2>
+{{template "diffopts" .DiffLinks}}
+{{if .Diff.D.Same}}<p class="quiet">{{t "The rule reads the same as proposed: what changes is in the file around it."}}</p>{{end}}
+{{if .Diff.D.Whole}}<p class="quiet">{{if eq .Kind "undo"}}{{t "Too long to set beside each other line by line: the rule as the change left it, taken out, then as it was before."}}{{else}}{{t "Too long to set beside each other line by line: the rule as it is, taken out, then as proposed."}}{{end}}</p>{{end}}
+{{template "difflines" .Diff}}
+{{with .File}}<details><summary>{{tbdi "The file as the pull request changes it: %s" (shown .)}}</summary>
+<pre class="diff">{{range $v.FileRows}}<span class="{{.Class}}">{{.Op}}{{shown .Text}}</span>
+{{end}}</pre></details>{{end}}
+{{if eq .Path "none"}}<p>{{t "Lapilli can't write this change where the rule is kept: make it there. A pull request's description, to copy:"}}</p><pre>{{.Body}}</pre>{{end}}
+</section>
+
+<section class="card" id="backtest">
+<h2>{{t "Backtest"}}</h2>
+{{with .Backtest}}{{if .Worse}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if .Undoes}}{{if eq (len .Lost) 1}}{{t "Undone, it misses 1 incident it catches with #%d:" .Undoes}}{{else}}{{t "Undone, it misses %d incidents it catches with #%d:" (len .Lost) .Undoes}}{{end}}{{else if eq (len .Lost) 1}}{{t "As proposed, it misses 1 incident it catches now:"}}{{else}}{{t "As proposed, it misses %d incidents it catches now:" (len .Lost)}}{{end}}{{range $i, $x := .Lost}}{{if $i}},{{end}} <a href="{{$.Incident $x}}"><bdi>{{$x}}</bdi></a>{{end}}.</p>{{end}}
+{{if .Undoes}}<p class="quiet">{{t "The backtest of #%d, replayed from %s to %s when it was proposed, read the other way: with it, and as the rule was before it." .Undoes (day $loc .From) (day $loc .To)}}</p>
+{{else}}<p class="quiet">{{t "Replayed from %s to %s, as the rule is now and as proposed." (day $loc .From) (day $loc .To)}}</p>{{end}}
+<div class="scroll"><table class="backtest">
+<thead><tr><td></td>{{if .Undoes}}<th scope="col" class="n">{{t "With #%d" .Undoes}}</th><th scope="col" class="n">{{t "After undoing it"}}</th>{{else}}<th scope="col" class="n">{{t "Now"}}</th><th scope="col" class="n">{{t "As proposed"}}</th>{{end}}<th scope="col" class="n">{{t "Difference"}}</th></tr></thead>
+<tbody>{{range .Rows}}<tr><th scope="row">{{t .Label}}</th><td class="n">{{.Now}}</td><td class="n">{{.Proposed}}</td><td class="n">{{template "delta" .By}}</td></tr>{{end}}</tbody>
+</table></div>
+{{if .Gained}}<p>{{if .Undoes}}{{t "Caught once undone, missed with #%d:" .Undoes}}{{else}}{{t "Caught as proposed, missed as it is:"}}{{end}}{{range $i, $x := .Gained}}{{if $i}},{{end}} <a href="{{$.Incident $x}}"><bdi>{{$x}}</bdi></a>{{end}}.</p>{{end}}
+{{if .Later}}<p>{{t "Caught later as proposed:"}}{{range $i, $x := .Later}}{{if $i}},{{end}} <a href="{{$.Incident $x}}"><bdi>{{$x}}</bdi></a>{{end}}.</p>{{end}}
+{{if .Sooner}}<p>{{t "Caught sooner once undone:"}}{{range $i, $x := .Sooner}}{{if $i}},{{end}} <a href="{{$.Incident $x}}"><bdi>{{$x}}</bdi></a>{{end}}.</p>{{end}}
+{{if .Unfinished}}<p class="bad">{{t "The backtest didn't finish within --timeout: its numbers are partial."}}</p>{{end}}{{end}}
+{{with .Evidence.Finding}}<p>{{t "It answers what the content check found:"}} {{t .Key}}{{with .Detail}}: <code>{{.}}</code>{{end}}</p>{{end}}
+{{if eq .Kind "says"}}<p class="quiet">{{t "It changes what the alert says, not when it fires: there is nothing to backtest."}}</p>{{end}}
+{{with .Evidence.Record}}<p class="quiet">{{if eq .Weeks 1}}{{t "What it did over the last week, for retiring it: turned off, it fires no more."}}{{else}}{{t "What it did over the last %d weeks, for retiring it: turned off, it fires no more." .Weeks}}{{end}}</p>
+<div class="scroll"><table class="backtest">
+<thead><tr><td></td><th scope="col" class="n">{{t "Now"}}</th></tr></thead>
+<tbody><tr><th scope="row">{{t "Fired"}}</th><td class="n">{{.Firings}}</td></tr>
+<tr><th scope="row">{{t "Caught something"}}</th><td class="n">{{.White}}</td></tr>
+<tr><th scope="row">{{t "Incidents caught"}}</th><td class="n">{{.Incidents}}</td></tr>
+<tr><th scope="row">{{t "Of them, first"}}</th><td class="n">{{.First}}</td></tr>
+<tr><th scope="row">{{t "Of them, that no other rule caught"}}</th><td class="n">{{.Alone}}</td></tr></tbody>
+</table></div>
+<p class="hint">{{t "A rule may wait for a rare incident, and incidents nobody wrote down count against it: retiring it is a person's call."}}</p>
+{{with .Would}}<p class="bad">{{t "While it was off, it would have caught: %s." (join . ", ")}}</p>{{end}}{{end}}
+{{if and (not .Backtest) (not .Evidence.Record) (ne .Kind "says")}}<p class="quiet">{{t "None was kept with it."}}</p>{{end}}
+</section>
+
+<section class="card" id="approval">
+<h2>{{t "Approval"}}</h2>
+<p>{{if eq .Need 1}}{{t "%d of 1 approval" .Have}}{{else}}{{t "%d of %d approvals" .Have .Need}}{{end}}{{if eq .Kind "undo"}} <span class="quiet">{{t "An undo is approved by the approver who asks for it."}}</span>{{end}}</p>
+{{if .Approvals}}<ul class="plain">{{range .Approvals}}<li>{{who .By}}, {{at $loc .At}}</li>{{end}}</ul>{{end}}
+{{if .CanApprove}}<form method="post" action="/proposals/{{.ID}}/approve"><input type="hidden" name="key" value="{{.Approve}}">
+  <p><label><input type="checkbox" name="read" value="1" required> {{t .Read}}</label></p>
+  <button>{{if eq .Need 2}}{{t "Approve (%d of %d)" .Next .Need}}{{else}}{{t "Approve"}}{{end}}</button>
+</form>{{else}}{{with .ApproveOff}}<p>{{template "off" .}}</p>{{end}}{{end}}
+</section>
+
+<section class="card" id="history">
+<h2>{{t "History"}}</h2>
+<ol class="steps">{{range .Steps}}<li><span class="t">{{at $loc .At}}</span> {{if eq .Kind "made"}}{{if $v.Agent}}{{tbdi "Made by an agent, for %s" (.Name $.Lang)}}{{else if eq .Who "Lapilli"}}{{t "Made by Lapilli"}}{{else}}{{tbdi "Made by %s" (.Name $.Lang)}}{{end}}
+{{- else if eq .Kind "approved"}}{{tbdi "Approved by %s: %d of %d" (.Name $.Lang) .Of (or .Need $v.Need)}}
+{{- else if eq .Kind "waits"}}{{template "proposalbadge" .Badge}} {{t "waits: it fires now"}}{{with .Reason}}<br><span class="quiet">{{shown .}}</span>{{end}}
+{{- else if eq .Kind "promoted"}}{{t "Approved, as fewer approvals are needed"}}
+{{- else if eq .Kind "demoted"}}{{t "Waiting for approval again, as more approvals are needed"}}
+{{- else if eq .Kind "undo"}}{{tbdi "%s asked to undo it, as" (.Name $.Lang)}} <a href="{{$.Link (printf "/proposals/%d" .Undo)}}">#{{.Undo}}</a>
+{{- else}}{{template "proposalbadge" .Badge}} {{tbdi "by %s" (.Name $.Lang)}}{{with .Link}} <a href="{{.}}" rel="noopener noreferrer">{{t "Pull request"}} <span aria-hidden="true">↗</span></a>{{end}}{{with .Reason}}<br><span class="quiet">{{shown .}}</span>{{end}}{{end}}</li>{{end}}</ol>
+{{if .StepsCut}}<p class="quiet">{{t "Steps older than the changes the ledger keeps (--keep) aren't shown."}}</p>{{end}}
+{{if .StepsOlder}}<p class="quiet">{{t "Older steps aren't shown: only the latest %d are." .StepsMost}}</p>{{end}}
+{{if .CanUndo}}<h3>{{t "Undo it"}}</h3>
+<p class="quiet">{{t "Undoing it is a change of its own: a new proposal, which you approve as you ask for it, checked again and carried out the same way, with the rule as it was kept before this one changed it."}}</p>
+{{if eq .Path "grafana"}}<p class="hint">{{t "In Grafana, undoing it puts back the whole rule as it was before this change, its annotations too: whatever was edited in Grafana since is put back with it."}}</p>{{end}}
+<form method="post" action="/proposals/{{.ID}}/undo"><input type="hidden" name="key" value="{{.Undo}}">
+  <p><label><input type="checkbox" name="read" value="1" required> {{t .Read}}</label></p>
+  <button class="quiet-button">{{t "Ask to undo it"}}</button>
+</form>
+{{else}}{{with .UndoOff}}<h3>{{t "Undo it"}}</h3><p>{{template "off" .}}</p>{{end}}{{end}}
+</section>
 {{end}}{{template "bottom" .}}{{end}}
 
 {{define "ruleproposals"}}{{$ro := .Status.ReadOnly}}{{with .View}}
@@ -99,5 +152,35 @@
   <button>{{t "Propose it, for a person to approve"}}</button>
 </form>{{end}}
 <form method="post" action="/proposals"><input type="hidden" name="rule" value="{{.Name}}">{{if .Spare}}<input type="hidden" name="from" value="spare">{{end}}<input type="hidden" name="kind" value="{{.RetireKind}}"><button class="quiet-button">{{if eq .RetireKind "disable"}}{{t "Propose turning it off (deleted four weeks later, approved again)"}}{{else}}{{t "Propose deleting it"}}{{end}}</button></form>
+</section>{{else}}<section class="card" id="propose">
+<h2>{{t "Propose a change"}}</h2>
+<p>{{template "off" (offOf $ "Propose a change" "editor" "propose-why")}}</p>
 </section>{{end}}
 {{end}}{{end}}
+
+{{/* A diff's options, as two pairs of links, each the page with the diff
+shown so (docs/design/ui.md). */}}
+{{define "diffopts"}}<p class="tabs diffopts">{{t "Show the change"}}:{{range index . 0}} <a href="{{.Href}}"{{if .Current}} aria-current="true"{{end}}>{{t .Label}}</a>{{end}} <span aria-hidden="true">·</span>{{range index . 1}} <a href="{{.Href}}"{{if .Current}} aria-current="true"{{end}}>{{t .Label}}</a>{{end}}</p>{{end}}
+
+{{/* A diff, unified (a line a span, each with its own newline, so that
+copied it is its lines alone), or side by side, in a table headed with
+its sides; a run of lines the same left out is a row saying how many. */}}
+{{define "difflines"}}{{with .D}}{{if .Opts.Split}}<div class="scroll"><table class="diff-split">
+<thead><tr><th scope="col">{{t $.Old}}</th><th scope="col">{{t $.New}}</th></tr></thead>
+<tbody>{{range .Pairs}}{{if .Skip}}<tr><td colspan="2" class="gap"><span aria-hidden="true">⋯</span> {{if eq .Skip 1}}{{t "1 line the same"}}{{else}}{{t "%d lines the same" .Skip}}{{end}}</td></tr>{{else}}<tr><td class="{{.OldClass}}">{{.OldOp}}{{shown .Old}}</td><td class="{{.NewClass}}">{{.NewOp}}{{shown .New}}</td></tr>{{end}}{{end}}</tbody>
+</table></div>{{else}}<pre class="diff">{{range .Rows}}{{if .Skip}}<span class="gap"><span aria-hidden="true">⋯</span> {{if eq .Skip 1}}{{t "1 line the same"}}{{else}}{{t "%d lines the same" .Skip}}{{end}}</span>
+{{else}}<span class="{{.Class}}">{{.Op}}{{shown .Text}}</span>
+{{end}}{{end}}</pre>{{end}}{{end}}{{end}}
+
+{{/* An action the reader may not take: the button, disabled, and why,
+tied to it. */}}
+{{define "off"}}<span class="action-off"><button type="button" disabled aria-describedby="{{.ID}}">{{t .Label}}</button> <span id="{{.ID}}" class="why">{{if .WhyOf}}{{tbdi .Why .WhyOf}}{{else}}{{t .Why}}{{end}}</span></span>{{end}}
+
+{{/* A list's facets (the proposals', the tasks'): one GET form, each value
+counted, and a chip for each filter in effect. */}}
+{{define "pickfacets"}}<form method="get" action="{{.Action}}" class="facets pick" aria-label="{{t "Filters"}}">{{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+<div class="pick-sets">{{range .Facets}}{{$f := .}}<fieldset><legend>{{t .Name}}</legend>{{range .Options}}
+  <label class="opt{{if not .Count}} zero{{end}}"><input type="checkbox" name="{{$f.Param}}" value="{{.Value}}"{{if .Checked}} checked{{end}}> <span>{{t .Label}}</span> <span class="n">{{.Count}}</span></label>{{end}}</fieldset>{{end}}</div>
+<p class="row"><button>{{t "Apply"}}</button> <a href="{{.Clear}}">{{t "Clear filters"}}</a></p>
+</form>
+{{with .Chips}}<ul class="chips" aria-label="{{t "Filters in effect"}}">{{range .}}<li><a class="chip" href="{{.Href}}"><span class="vh">{{t "Remove filter:"}} </span>{{t .Group}}: {{if .Raw}}<bdi>{{shown .Value}}</bdi>{{else}}{{t .Value}}{{end}} <span aria-hidden="true">✕</span></a></li>{{end}}</ul>{{end}}{{end}}

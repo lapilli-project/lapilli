@@ -218,7 +218,13 @@ refused when issued before its person signed out, or longer ago than
 `--session-max-age`, as a session is, whatever its own `exp` says: who
 signed out is kept that long, and a provider's ID token can outlast it
 (Dex gives 24h). A client gets another. It may do what its role
-allows, but never approve a change, which is a person's, in a browser.
+allows, but never approve a change, which is a person's, in a browser. A
+change an agent proposes (MCP's `propose`) is kept under the name of the
+person its request to `/mcp` came from, as the sign-in said of that
+request, so that they can't approve it and it counts against their own
+proposals an hour; one for no one known is refused. Until the release
+after 0.37.0 it was kept as "anonymous"'s, with this sign-in and with
+`--proxy-jwt`: who was worked out from the request's headers alone.
 `--oidc-bearer=false` takes none.
 
 A token refused gets `WWW-Authenticate: Bearer error="invalid_token",

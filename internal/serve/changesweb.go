@@ -42,6 +42,14 @@ func (s *Server) changesRoutes(mux *http.ServeMux, page func(string, func(*http.
 // errNotApprover is an approval, or an undo, by someone who may not.
 var errNotApprover = errors.New("only an approver can approve or undo a change: one named in --approvers, or an admin when it isn't given")
 
+// errNotRead is an approval without its box ticked: that the approver
+// read the change and its backtest.
+var errNotRead = bad("approve it once you have read the change and what it would do: tick the box on its page that says you have, then approve")
+
+// errNotReadUndo is an undo asked for without its box ticked: asking is
+// the undo's approval, and is made, as any is, once the change was read.
+var errNotReadUndo = bad("ask for it to be undone once you have read the change and what it did: tick the box on its page that says you have, then ask")
+
 // errNotAForm is an approval that didn't come from the proposal's page, in
 // a browser, on this site.
 var errNotAForm = errors.New("a change is approved on its page, in a browser: this request didn't come from the page's form")
@@ -84,8 +92,9 @@ type proposalLine struct {
 	ledger.Proposal
 	// Stale says the rule in effect isn't the one it was made against.
 	Stale bool
-	Need  int
-	Loc   *time.Location
+	// Have is how many approved it, of Need.
+	Have, Need int
+	Loc        *time.Location
 }
 
 type proposalsView struct {
@@ -95,7 +104,14 @@ type proposalsView struct {
 	Limits   Limits
 	Need     int
 	Approver bool
-	State    string
+	// The facets, the chips and the form (docs/design/ui.md); Shown of
+	// Total for the team, at most proposalsShown; Empty, why none is.
+	Pick         pickView
+	Shown, Total int
+	More         bool
+	Empty        *emptyView
+	// PauseOff is the admin's switch, for one who isn't.
+	PauseOff *pageAction
 }
 
 // inEffect are the hashes of the rules in effect, by the names the ledger
@@ -138,7 +154,7 @@ func (s *Server) proposalLines(r *http.Request, ps []ledger.Proposal) ([]proposa
 	}
 	var out []proposalLine
 	for _, p := range ps {
-		l := proposalLine{Proposal: p, Need: s.approvals(), Loc: s.cfg.Loc}
+		l := proposalLine{Proposal: p, Have: len(p.Approvals), Need: s.approvals(), Loc: s.cfg.Loc}
 		// One being applied changed the rule itself.
 		if p.Open() && p.BeforeHash != "" && p.State != ledger.StateApplying {
 			now := fires
@@ -152,37 +168,125 @@ func (s *Server) proposalLines(r *http.Request, ps []ledger.Proposal) ([]proposa
 	return out, nil
 }
 
-func (s *Server) proposalsPage(r *http.Request) (any, error) {
-	q := ledger.ProposalQuery{Limit: 200}
-	state := r.URL.Query().Get("state")
-	switch state {
-	case "", "open":
-		state, q.States = "open", ledger.Unfinished()
-	case "all":
-	default:
-		q.States = []string{state}
+// proposalFacets are the proposals list's facets: where each is (the open
+// ones unless asked; open, and an older link's single state, too), what
+// it changes, the way it goes, who made it.
+var proposalFacets = []pickFacet{
+	{param: "state", name: "State", values: []string{"proposed", "approved", "doing", "applied", "undone", "closed"},
+		labels: []string{"awaiting approval", "approved", "being applied", "applied", "undone", "closed"},
+		def:    []string{"proposed", "approved", "doing"}, aliases: map[string][]string{"open": {"proposed", "approved", "doing"}, "": {"proposed", "approved", "doing"}},
+		raw: []string{ledger.StateReady, ledger.StateApplying, ledger.StateOpened, ledger.StateMerged, ledger.StateRefused, ledger.StateFailed,
+			ledger.StateDropped, ledger.StateAmended},
+		// A state there is no such of, as an older link may name, is none.
+		none: true},
+	{param: "kind", name: "Kind", values: []string{ledger.KindFor, ledger.KindThreshold, ledger.KindDisable, ledger.KindDelete, ledger.KindSays, ledger.KindUndo},
+		labels: []string{"a new for", "a new threshold", "turning it off", "deleting it", "a fix to what it says", "undoing a change"}},
+	{param: "path", name: "Way", values: []string{ledger.PathGit, ledger.PathGrafana, ledger.PathRuler, ledger.PathAlarm, ledger.PathNone},
+		labels: []string{"a pull request", "Grafana's API", "the ruler's API", "the cloud's API", "for a person to make"}},
+	{param: "by", name: "Made by", values: []string{ledger.MakerPerson, ledger.MakerAgent, ledger.MakerLapilli}, labels: []string{"a person", "an agent", "Lapilli itself"}},
+}
+
+// proposalsShown is how many proposals the list shows at most, saying so
+// past them.
+const proposalsShown = 200
+
+// countValues are a count of proposals' values in a facet.
+func countValues(c ledger.ProposalCount, param string) []string {
+	switch param {
+	case "state":
+		return []string{stateGroups[c.State], c.State}
+	case "kind":
+		return []string{c.Kind}
+	case "path":
+		return []string{c.Path}
+	case "by":
+		return []string{c.Maker}
 	}
-	ps, err := s.l.Proposals(r.Context(), q)
-	if err != nil {
-		return nil, err
-	}
-	// Those waiting for approval first.
-	slices.SortStableFunc(ps, func(a, b ledger.Proposal) int {
-		x, y := a.State == ledger.StateProposed, b.State == ledger.StateProposed
-		switch {
-		case x && !y:
-			return -1
-		case y && !x:
-			return 1
+	return nil
+}
+
+// proposalPick is what the list's facets pick, as the database reads it:
+// a state's group as its states.
+func proposalPick(p picks, rules []string) ledger.ProposalPick {
+	q := ledger.ProposalPick{Rules: rules, Kinds: p["kind"], Paths: p["path"], Makers: p["by"]}
+	for _, v := range p["state"] {
+		for _, st := range append(ledger.Unfinished(), ledger.StateApplied, ledger.StateUndone, ledger.StateRefused, ledger.StateFailed, ledger.StateDropped, ledger.StateAmended) {
+			if (st == v || stateGroups[st] == v) && !slices.Contains(q.States, st) {
+				q.States = append(q.States, st)
+			}
 		}
-		return 0
-	})
-	lines, err := s.proposalLines(r, ps)
+	}
+	return q
+}
+
+func (s *Server) proposalsPage(r *http.Request) (any, error) {
+	ctx := r.Context()
+	c := s.pageContext(r)
+	// A proposal's team is its rule's: with a team, its rules alone, as
+	// the ledger knows them.
+	var rules []string
+	if c.Team != "" {
+		o, err := s.owners(ctx)
+		if err != nil {
+			return nil, err
+		}
+		rules = o.rulesOf(c.Team)
+	}
+	// Counted by the database, every proposal, however many: the facets,
+	// and how many the list has.
+	counts, err := s.l.ProposalCounts(ctx, rules)
 	if err != nil {
 		return nil, err
 	}
-	return proposalsView{Lines: lines, On: s.cfg.Changes, Paused: s.changesPaused(), Limits: s.limits(), Need: s.approvals(),
-		Approver: s.approver(r), State: state}, nil
+	// The links made from what was asked: with the reader's own team taken
+	// for them (c.Mine), none carries it, and the next page takes it again.
+	p := picksOf(r.URL.Query(), proposalFacets)
+	idx, pick := pickItems("/proposals", c, proposalFacets, p, len(counts), func(i int, param string) []string { return countValues(counts[i], param) },
+		func(i int) int { return counts[i].N })
+	v := proposalsView{On: s.cfg.Changes, Paused: s.changesPaused(), Limits: s.limits(), Need: s.approvals(), Approver: s.approver(r), Pick: pick}
+	for _, x := range counts {
+		v.Total += x.N
+	}
+	for _, i := range idx {
+		v.Shown += counts[i].N
+	}
+	// Picked by the database, in its order: those waiting for approval
+	// first, then those under way, then the rest, each the latest moved
+	// first, proposalsShown of them, said so past them.
+	var heads []ledger.ProposalHead
+	if v.Shown > 0 {
+		if heads, err = s.l.ProposalList(ctx, proposalPick(p, rules), proposalsShown+1); err != nil {
+			return nil, err
+		}
+	}
+	if len(heads) > proposalsShown {
+		heads, v.More = heads[:proposalsShown], true
+	}
+	ps := make([]ledger.Proposal, 0, len(heads))
+	for _, h := range heads {
+		ps = append(ps, h.Proposal)
+	}
+	if v.Lines, err = s.proposalLines(r, ps); err != nil {
+		return nil, err
+	}
+	for k, h := range heads {
+		v.Lines[k].Have = h.Approved
+	}
+	switch {
+	case v.Total == 0:
+		v.Empty = &emptyView{Kind: "done", Title: "No proposals yet.",
+			Text: "A rule's page proposes a change to it, with its backtest; Lapilli proposes of itself with --changes, after the weekly digest."}
+	case len(v.Lines) == 0:
+		v.Empty = &emptyView{Kind: "notfound", Title: "No proposal matches these filters.", Links: []emptyLink{{"Clear filters", pick.Clear}}}
+	}
+	if s.cfg.Changes && s.role(r) < admin {
+		label := "Pause changes"
+		if v.Paused {
+			label = "Resume changes"
+		}
+		v.PauseOff = &pageAction{Label: label, ID: "pause-why", Why: cmpOr(s.why(r), "Admins only")}
+	}
+	return v, nil
 }
 
 type proposalView struct {
@@ -196,6 +300,9 @@ type proposalView struct {
 	// TwoAlike, that they settled in the console the two Google policies a
 	// lost answer left (twoAlikeNote).
 	CanApprove, CanUndo, CanDrop bool
+	// Bearer says the reader is signed in by a bearer token, as an API
+	// client is, which no approval or undo is taken from.
+	Bearer                       bool
 	Closing, Unwritten, TwoAlike bool
 	Approve, Undo                string
 	// Why the reader can't approve it, when they are an approver; Next
@@ -206,6 +313,40 @@ type proposalView struct {
 	// make, when it has no path.
 	Body string
 	Task *ledger.Task
+
+	// The page (docs/design/ui.md): Head, what it changes, in words; Diff,
+	// the rule as it is and as proposed, in the options asked, and
+	// DiffLinks the others; File, the file's diff a pull request carries,
+	// with the file's name; Backtest, as a table; Steps, what happened to
+	// it, StepsCut that the oldest may be gone.
+	Head      proposalHead
+	Diff      diffShown
+	DiffLinks [2][]diffLink
+	File      string
+	FileRows  []diffRow
+	Backtest  *btTable
+	Steps     []proposalStep
+	StepsCut  bool
+	// StepsOlder says older steps than those shown are kept, past the
+	// latest stepsMost.
+	StepsOlder bool
+	StepsMost  int
+	// What the reader may not do, each shown disabled with why: approve
+	// it, ask for it to be undone, drop or close it, make it a task.
+	ApproveOff, UndoOff, DropOff, TaskOff *pageAction
+	// Read is what the reader says they read before approving: the
+	// backtest, or, with none, the change and its evidence.
+	Read string
+	// Undoes is, for an undo, the change it undoes.
+	Undoes *undoneOf
+}
+
+// undoneOf is the change an undo undoes, as the undo's page names it: its
+// id, and whether an agent proposed it, for whom.
+type undoneOf struct {
+	ID    int64
+	Agent bool
+	For   string
 }
 
 func (s *Server) proposalPage(r *http.Request) (any, error) {
@@ -219,15 +360,21 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v := proposalView{proposalLine: lines[0], Evidence: proposalEvidence(p), On: s.cfg.Changes, Paused: s.changesPaused(), Next: len(p.Approvals) + 1}
+	if p.Kind == ledger.KindUndo {
+		v.Need = 1 // approved by whoever asked for it
+	}
 	user := s.user(r)
+	if id, ok := whoOf(r); ok && id.by == byBearer {
+		v.Bearer = true
+	}
 	if s.approver(r) {
 		me := ledger.FoldName(user)
 		v.Own = ledger.FoldName(p.MadeBy) == me
 		v.Done = slices.ContainsFunc(p.Approvals, func(a ledger.Approval) bool { return ledger.FoldName(a.By) == me })
-		if p.State == ledger.StateProposed && p.Path != ledger.PathNone && !v.Own && !v.Done {
+		if p.State == ledger.StateProposed && p.Path != ledger.PathNone && !v.Own && !v.Done && !v.Bearer {
 			v.CanApprove, v.Approve = true, s.formKey(p, user, "approve")
 		}
-		if p.State == ledger.StateApplied && p.Kind != ledger.KindUndo && p.Path != ledger.PathNone {
+		if undoable(p) && !v.Bearer {
 			v.CanUndo, v.Undo = true, s.formKey(p, user, "undo")
 		}
 	}
@@ -241,7 +388,68 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 			v.Task = &t
 		}
 	}
+	var was time.Duration
+	known := false
+	if p.Kind == ledger.KindFor && p.BeforeHash != "" {
+		if was, known, err = s.forWas(ctx, p); err != nil {
+			return nil, err
+		}
+	}
+	v.Head = headOf(p, v.Evidence, was, known)
+	o := diffOptsOf(r.URL.Query())
+	ds, whole := lineDiff(textLines(p.Before), textLines(p.After))
+	v.Diff = diffShown{D: shapeDiff(ds, whole, o), Old: "Now", New: "As proposed"}
+	if p.Kind == ledger.KindUndo {
+		v.Diff.Old, v.Diff.New = "As the change left it", "As it was before"
+	}
+	c := s.pageContext(r)
+	path := fmt.Sprintf("/proposals/%d", p.ID)
+	v.DiffLinks = diffLinks(o, func(diff, context string) string { return c.Link(path+"#change", "diff", diff, "context", context) })
+	if p.Path == ledger.PathGit && p.Diff != "" {
+		v.File, v.FileRows = s.docName(p.Source), fileRows(p.Diff)
+	}
+	v.Backtest = btTableOf(v.Evidence.Backtest)
+	if p.Kind == ledger.KindUndo {
+		// What it undoes is the change's: its backtest read the other way,
+		// who made it; nothing of why it was made is the asker's.
+		v.Undoes = &undoneOf{ID: p.Follows}
+		v.Evidence, v.Backtest = undoEvidence(v.Evidence), nil
+		if was, err := s.l.ProposalByID(ctx, p.Follows); err == nil {
+			wev := proposalEvidence(was)
+			v.Undoes.Agent, v.Undoes.For = was.Agent, was.MadeBy
+			v.Evidence.Cloud = wev.Cloud // how the page names where it is
+			v.Backtest = btUndoOf(wev.Backtest, p.Follows)
+		} else if !errors.Is(err, ledger.ErrNotFound) {
+			return nil, err
+		}
+	}
+	v.Read = "I have read the backtest"
+	if v.Backtest == nil {
+		v.Read = "I have read the change and its evidence"
+	}
+	v.StepsMost = stepsMost
+	if v.Steps, v.StepsCut, v.StepsOlder, err = s.stepsOf(r, p); err != nil {
+		return nil, err
+	}
+	s.offs(r, p, &v)
 	return v, nil
+}
+
+// ByLapilli says Lapilli itself made it, which a page names as it is.
+func (l proposalLine) ByLapilli() bool { return l.MadeBy == ledger.Proposer }
+
+// undoable reports whether a proposal's change can be undone from its
+// page: applied, by a path Lapilli carries out, and not an undo itself.
+func undoable(p ledger.Proposal) bool {
+	return p.State == ledger.StateApplied && p.Kind != ledger.KindUndo && p.Path != ledger.PathNone
+}
+
+// textLines are a text's lines, a last empty one left out: none for none.
+func textLines(text string) []string {
+	if text == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 }
 
 // prBody is a proposal as a pull request's description, in English, as
@@ -250,6 +458,12 @@ func (s *Server) prBody(p ledger.Proposal) string {
 	ev := proposalEvidence(p)
 	var b strings.Builder
 	fmt.Fprintf(&b, "Lapilli proposal #%d: %s, for the rule %s.\n\n", p.ID, kindText(p.Kind), p.Rule)
+	if p.Kind == ledger.KindUndo {
+		// Nothing of why the change was made, nor its backtest, which says
+		// what it did: an undo made before kept them.
+		ev = undoEvidence(ev)
+		fmt.Fprintf(&b, "It puts back the rule as it was before Lapilli proposal #%d changed it.\n\n", p.Follows)
+	}
 	if p.Agent {
 		b.WriteString("Proposed by an agent, for a person to check.\n\n")
 	}
@@ -390,6 +604,12 @@ func (s *Server) postApprove(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, bad("this change is for a person to make where the rule is written: its diff is on its page"))
 		return
 	}
+	// Approving says the approver read what it would do: the box on the
+	// page, ticked, is checked here too.
+	if r.PostFormValue("read") != "1" {
+		s.oops(w, r, errNotRead)
+		return
+	}
 	if _, err := s.l.Approve(r.Context(), p.ID, s.user(r), s.approvals()); err != nil {
 		s.oops(w, r, err)
 		return
@@ -410,8 +630,19 @@ func (s *Server) postUndo(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, ledger.ErrMoved)
 		return
 	}
+	// Asking is the undo's approval, one approver's: it takes the box
+	// ticked, checked here too, as approving does.
+	if r.PostFormValue("read") != "1" {
+		s.oops(w, r, errNotReadUndo)
+		return
+	}
+	ev, err := json.Marshal(undoEvidence(proposalEvidence(p)))
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
 	u := ledger.Proposal{Rule: p.Rule, Kind: ledger.KindUndo, Path: p.Path, Follows: p.ID, Source: p.Source,
-		Before: p.After, BeforeHash: p.AfterHash, After: p.Before, Backup: p.Backup, Evidence: p.Evidence}
+		Before: p.After, BeforeHash: p.AfterHash, After: p.Before, Backup: p.Backup, Evidence: ev}
 	// Undone, the rule is as it was; a deletion undone, it is back.
 	u.AfterHash = p.BeforeHash
 	if p.Kind == ledger.KindDelete {
@@ -834,6 +1065,16 @@ type ruleChanges struct {
 	SaysForms []saysForm
 	// SaysKeys are the annotations a fix to what it says may change.
 	SaysKeys []string
+	// Diffs are how the versions tab shows each version beside the one
+	// before (?diff=, ?context=), and DiffLinks the links to the others.
+	Diffs     diffOpts
+	DiffLinks [2][]diffLink
+}
+
+// Shaped is a version beside the one before it, as the versions tab shows
+// it.
+func (c ruleChanges) Shaped(v change) diffShown {
+	return diffShown{D: shapeDiff(v.Diff, v.Whole, c.Diffs), Old: "The version before", New: "This version"}
 }
 
 type saysForm struct {
@@ -855,6 +1096,11 @@ type thresholdForm struct {
 
 func (s *Server) ruleChangesOf(r *http.Request, v *ruleView) error {
 	ctx := r.Context()
+	v.Diffs = diffOptsOf(r.URL.Query())
+	c := s.pageContext(r)
+	v.DiffLinks = diffLinks(v.Diffs, func(diff, context string) string {
+		return c.Link(v.Path+"#versions", "tab", "versions", "diff", diff, "context", context)
+	})
 	ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{Rule: v.Name, Limit: 20})
 	if err != nil {
 		return err

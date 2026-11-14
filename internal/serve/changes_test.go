@@ -156,7 +156,7 @@ func approve(t *testing.T, h http.Handler, id int64, who string) (int, string) {
 	if key == "" {
 		t.Fatalf("no approval form for %s", who)
 	}
-	code, body, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/approve", who, "same-origin", url.Values{"key": {key}})
+	code, body, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/approve", who, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	return code, body
 }
 
@@ -240,7 +240,7 @@ func TestChangeByPullRequest(t *testing.T) {
 	if key == "" {
 		t.Fatal("no undo form")
 	}
-	code, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	code, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	if code != http.StatusSeeOther {
 		t.Fatalf("undo: %d", code)
 	}
@@ -304,39 +304,45 @@ func TestApprovalOnlyByAPerson(t *testing.T) {
 	path := "/proposals/" + itoa(id) + "/approve"
 	key := keyFor(t, h, id, ana, "approve")
 	for name, try := range map[string]func() int{
-		"no key": func() int { c, _, _ := ui(t, h, http.MethodPost, path, ana, "same-origin", url.Values{}); return c },
+		"no key": func() int {
+			c, _, _ := ui(t, h, http.MethodPost, path, ana, "same-origin", url.Values{"read": {"1"}})
+			return c
+		},
 		"a key made up": func() int {
-			c, _, _ := ui(t, h, http.MethodPost, path, ana, "same-origin", url.Values{"key": {strings.Repeat("0", 64)}})
+			c, _, _ := ui(t, h, http.MethodPost, path, ana, "same-origin", url.Values{"key": {strings.Repeat("0", 64)}, "read": {"1"}})
 			return c
 		},
 		"another person's key": func() int {
-			c, _, _ := ui(t, h, http.MethodPost, path, cy, "same-origin", url.Values{"key": {key}})
+			c, _, _ := ui(t, h, http.MethodPost, path, cy, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 			return c
 		},
 		"from another site": func() int {
-			c, _, _ := ui(t, h, http.MethodPost, path, ana, "cross-site", url.Values{"key": {key}})
+			c, _, _ := ui(t, h, http.MethodPost, path, ana, "cross-site", url.Values{"key": {key}, "read": {"1"}})
 			return c
 		},
-		"not from a browser": func() int { c, _, _ := ui(t, h, http.MethodPost, path, ana, "", url.Values{"key": {key}}); return c },
+		"not from a browser": func() int {
+			c, _, _ := ui(t, h, http.MethodPost, path, ana, "", url.Values{"key": {key}, "read": {"1"}})
+			return c
+		},
 		"from a sibling site": func() int {
-			c, _, _ := ui(t, h, http.MethodPost, path, ana, "same-site", url.Values{"key": {key}})
+			c, _, _ := ui(t, h, http.MethodPost, path, ana, "same-site", url.Values{"key": {key}, "read": {"1"}})
 			return c
 		},
 		"an editor": func() int {
-			c, _, _ := ui(t, h, http.MethodPost, path, bo, "same-origin", url.Values{"key": {key}})
+			c, _, _ := ui(t, h, http.MethodPost, path, bo, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 			return c
 		},
 		"no one signed in": func() int {
-			c, _, _ := ui(t, h, http.MethodPost, path, "", "same-origin", url.Values{"key": {key}})
+			c, _, _ := ui(t, h, http.MethodPost, path, "", "same-origin", url.Values{"key": {key}, "read": {"1"}})
 			return c
 		},
 		"lapilli itself": func() int {
-			c, _, _ := ui(t, h, http.MethodPost, path, ledger.Proposer, "same-origin", url.Values{"key": {key}})
+			c, _, _ := ui(t, h, http.MethodPost, path, ledger.Proposer, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 			return c
 		},
 		"the changes token": func() int { c, _ := recipe(t, port, http.MethodPost, path, changesToken, nil); return c },
 		"the API": func() int {
-			c, _, _ := ui(t, h, http.MethodPost, "/api/v1/proposals/"+itoa(id)+"/approve", ana, "same-origin", url.Values{"key": {key}})
+			c, _, _ := ui(t, h, http.MethodPost, "/api/v1/proposals/"+itoa(id)+"/approve", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 			return c
 		},
 		"the API, as a PATCH": func() int {
@@ -359,13 +365,13 @@ func TestApprovalOnlyByAPerson(t *testing.T) {
 	// nowhere either.
 	for _, who := range []string{bo, ""} {
 		k := s.formKey(state(t, s, id), map[string]string{bo: bo, "": "anonymous"}[who], "approve")
-		if code, _, _ := ui(t, h, http.MethodPost, path, who, "same-origin", url.Values{"key": {k}}); code < 400 {
+		if code, _, _ := ui(t, h, http.MethodPost, path, who, "same-origin", url.Values{"key": {k}, "read": {"1"}}); code < 400 {
 			t.Errorf("%q with a key of their own: %d", who, code)
 		}
 	}
 	// The key is good for the proposal as it stood: once it moved on, not.
 	s.l.Move(context.Background(), id, []string{ledger.StateProposed}, ledger.StateDropped, bo, ledger.Step{})
-	if code, _, _ := ui(t, h, http.MethodPost, path, ana, "same-origin", url.Values{"key": {key}}); code < 400 {
+	if code, _, _ := ui(t, h, http.MethodPost, path, ana, "same-origin", url.Values{"key": {key}, "read": {"1"}}); code < 400 {
 		t.Errorf("a dropped proposal approved with an old key: %d", code)
 	}
 	// One's own proposal: no form, and the ledger refuses it too.
@@ -393,7 +399,7 @@ func TestChangesOff(t *testing.T) {
 	if keyFor(t, h, id, ana, "approve") != "" {
 		t.Error("a form to approve with changes off")
 	}
-	if code, _, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/approve", ana, "same-origin", url.Values{"key": {s.formKey(state(t, s, id), ana, "approve")}}); code < 400 {
+	if code, _, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/approve", ana, "same-origin", url.Values{"key": {s.formKey(state(t, s, id), ana, "approve")}, "read": {"1"}}); code < 400 {
 		t.Errorf("approved with changes off: %d", code)
 	}
 	// Even approved in the ledger, it stays put.
@@ -521,7 +527,7 @@ func TestLimits(t *testing.T) {
 		t.Errorf("deleting a file's only rule: path %s", p.Path)
 	}
 	// Nor is one for a person approved, even with a key.
-	if code, _, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(d)+"/approve", ana, "same-origin", url.Values{"key": {s.formKey(state(t, s, d), ana, "approve")}}); code < 400 {
+	if code, _, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(d)+"/approve", ana, "same-origin", url.Values{"key": {s.formKey(state(t, s, d), ana, "approve")}, "read": {"1"}}); code < 400 {
 		t.Errorf("a change for a person, approved: %d", code)
 	}
 	if _, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(d), ana, "", nil); !strings.Contains(body, "A pull request&#39;s description, to copy") {
@@ -887,7 +893,7 @@ func TestChangeInGrafana(t *testing.T) {
 	}
 	// Undone: written back as it was.
 	key := keyFor(t, h, id, ana, "undo")
-	code, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	code, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	if code != http.StatusSeeOther {
 		t.Fatalf("undo: %d", code)
 	}
@@ -1164,7 +1170,7 @@ func TestSaysByPullRequest(t *testing.T) {
 		t.Fatalf("read back: %s", p.State)
 	}
 	key := keyFor(t, h, id, ana, "undo")
-	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	var uid int64
 	json.Unmarshal([]byte(strings.TrimPrefix(hd.Get("Location"), "/proposals/")), &uid)
 	s.jobs(ctx, false)
@@ -1273,7 +1279,7 @@ func TestSaysInGrafana(t *testing.T) {
 		t.Errorf("more than what it says changed:\n%s\n%s", x, y)
 	}
 	key := keyFor(t, h, id, ana, "undo")
-	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	var uid int64
 	json.Unmarshal([]byte(strings.TrimPrefix(hd.Get("Location"), "/proposals/")), &uid)
 	s.jobs(ctx, false)
