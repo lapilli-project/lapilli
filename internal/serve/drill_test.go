@@ -261,8 +261,8 @@ func TestWeekAsked(t *testing.T) {
 	_, body, _ = get(t, h, "/incidents?week=2026-10-26&state=missed")
 	for _, want := range []string{"What went wrong in the week of 2026-10-26, and what caught it.",
 		`<a href="/incidents?state=missed&amp;weeks=4">4 weeks</a>`,
-		`<a href="/incidents?week=2026-10-26&amp;weeks=1">all <span class="quiet">(5)</span></a>`,
-		`<a href="/incidents?state=missed&amp;week=2026-10-26&amp;weeks=1" aria-current="page">✗ missed <span class="quiet">(2)</span></a>`,
+		`<a href="/incidents?week=2026-10-26">all <span class="quiet">(5)</span></a>`,
+		`<a href="/incidents?state=missed&amp;week=2026-10-26" aria-current="page">✗ missed <span class="quiet">(2)</span></a>`,
 		`<a class="chip" href="/incidents?state=missed"><span class="vh">Remove filter: </span>Week of: <bdi>2026-10-26</bdi>`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("incidents: no %s", want)
