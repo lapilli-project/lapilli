@@ -496,27 +496,77 @@ func TestRuleBadgeLegend(t *testing.T) {
 	}
 }
 
-// TestVersionDiff: each version beside the one before, line by line: one
-// changed, one taken away, one written again.
+// TestVersionDiff: each version beside the one before, line by line: the
+// lines between two changes the same, not taken out and put in again; a
+// label a line, its value quoted, one with a space or an = in it one
+// label; one taken away, one written again; and one too long to set
+// beside line by line, whole, after the one before.
 func TestVersionDiff(t *testing.T) {
-	a := change{Expr: "rate(x[5m])\n  > 1", For: "5m", Labels: "severity=page team=a"}
-	b := change{Expr: "rate(x[5m])\n  > 2", For: "10m", Keep: "1m", Labels: "severity=page team=a"}
-	text := func(ds []diffLine) string {
+	a := change{Expr: "rate(x[5m])\n  > 1", For: "2m", labels: map[string]string{"severity": "page", "team": "a severity=critical"}}
+	b := change{Expr: "rate(x[5m])\n  > 2", For: "2m", Keep: "1m", labels: map[string]string{"severity": "page", "team": "a", "x y": "1"}}
+	text := func(ds []diffLine, whole bool) string {
 		var out []string
 		for _, d := range ds {
 			out = append(out, d.Op+d.Text)
 		}
-		return strings.Join(out, "\n")
+		return fmt.Sprint(whole, "\n", strings.Join(out, "\n"))
 	}
-	if got, want := text(versionDiff(a, b)), "@@ -1,5 +1,6 @@\n expr: rate(x[5m])\n-        > 1\n-for: 5m\n+        > 2\n+for: 10m\n+keep_firing_for: 1m\n label: severity=page\n label: team=a"; got != want {
+	if got, want := text(versionDiff(a, b)), "false\n expr: rate(x[5m])\n-        > 1\n+        > 2\n for: 2m\n+keep_firing_for: 1m\n label: severity=\"page\"\n"+
+		`-label: team="a severity=critical"`+"\n"+`+label: team="a"`+"\n"+`+label: "x y"="1"`; got != want {
 		t.Errorf("a change:\n%s\nwant\n%s", got, want)
 	}
 	gone := change{Gone: true}
-	if got := text(versionDiff(b, gone)); !strings.HasPrefix(got, "@@ -1,6 +1,0 @@\n-expr:") || strings.Contains(got, "\n+") {
+	if got := text(versionDiff(b, gone)); !strings.HasPrefix(got, "false\n-expr:") || strings.Contains(got, "\n+") || strings.Contains(got, "\n ") {
 		t.Errorf("taken away:\n%s", got)
 	}
-	if got := text(versionDiff(gone, a)); !strings.HasPrefix(got, "@@ -1,0 +1,5 @@\n+expr:") || strings.Contains(got, "\n-") {
+	if got := text(versionDiff(gone, a)); !strings.HasPrefix(got, "false\n+expr:") || strings.Contains(got, "\n-") {
 		t.Errorf("written again:\n%s", got)
+	}
+	// Past diffMost lines a side, the one before and this one, whole.
+	long := change{Expr: strings.Repeat("x\n", diffMost), For: "2m"}
+	if ds, whole := versionDiff(a, long); !whole || len(ds) != len(versionText(a))+len(versionText(long)) || ds[0].Op != "-" || ds[len(ds)-1].Op != "+" {
+		t.Errorf("too long: whole %v, %d lines", whole, len(ds))
+	}
+	if _, whole := versionDiff(a, change{Expr: strings.Repeat("x\n", diffMost-3), For: "2m"}); whole {
+		t.Error("as long as diffMost: whole")
+	}
+	// Copied, a diff is its lines: each a span with its own newline, none
+	// drawn as a block of its own.
+	css, err := files.ReadFile("static/lapilli.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if regexp.MustCompile(`pre\.diff[^{]*span[^{]*\{[^}]*display:\s*block`).Match(css) {
+		t.Error("a diff's lines are blocks: copied, a blank line between each")
+	}
+}
+
+// TestVersionsBounded: a rule's versions tab sets the latest twenty
+// versions beside the one before each; older ones are in the table alone.
+func TestVersionsBounded(t *testing.T) {
+	s, rules := server(t, nil)
+	ctx := context.Background()
+	for i := 0; i < 25; i++ {
+		os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte(strings.Replace(ruleFile, "errors > 5", fmt.Sprint("errors > ", 5+i), 1)), 0o644)
+		s.now = func() time.Time { return now.Add(time.Duration(i-30) * 24 * time.Hour) }
+		raw := ""
+		if err := s.look(ctx, &raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.now = func() time.Time { return now }
+	_, body, _ := get(t, s.Handler(), "/rules/Errors?tab=versions")
+	if n := strings.Count(body, ", beside the version before</h3>"); n != diffsShown {
+		t.Errorf("%d versions set beside the one before, want %d", n, diffsShown)
+	}
+	if n := strings.Count(body, "<pre>errors &gt; "); n != 25 {
+		t.Errorf("%d versions in the table, want 25", n)
+	}
+	if !strings.Contains(body, "<span class=\"del\">-expr: errors &gt; 28</span>\n<span class=\"ins\">&#43;expr: errors &gt; 29</span>\n<span class=\"same\"> for: 2m</span>") {
+		t.Error("the latest version isn't beside the one before")
+	}
+	if strings.Contains(body, "&#43;expr: errors &gt; 9<") {
+		t.Error("an old version is beside the one before")
 	}
 }
 

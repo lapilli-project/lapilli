@@ -391,10 +391,10 @@ section.todo form { margin: 0; }
 p.moved { display: none; }
 p.moved:target { display: block; padding: .6rem 1rem; background: var(--accent-soft); border-radius: 12px; }
 pre.diff { margin: .4rem 0 1rem; padding: .6rem .8rem; background: var(--card); border: 1px solid var(--line-strong); border-radius: 10px; font-family: var(--mono); }
-pre.diff span { display: block; }
+/* A line a span, each ending in its own newline: copied, the diff is its
+   lines alone, with no blank line between. */
 pre.diff .del { color: var(--bad); }
 pre.diff .ins { color: var(--better); }
-pre.diff .hunk { color: var(--dim); }
 /* What the badges mean, by facet, near the filters. */
 details.badge-legend { margin: 0 0 .8rem; }
 details.badge-legend p.axis { margin: .6rem 0 .2rem; font-size: .9rem; font-weight: 600; color: var(--dim); }

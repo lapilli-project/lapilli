@@ -1227,5 +1227,6 @@
  "A change to it is proposed and not finished with.": "변경 제안이 있고 아직 끝나지 않았어요.",
  "%d during a deploy": "배포 중 발화 %d건",
  "fired during a deploy of what it is about": "이 규칙 대상의 배포 중 발화",
- "What it says when it fires has problems of fact; the badge, “n to check”, counts them with whatever else its page lists to check.": "울릴 때의 알림 내용에 사실 문제가 있어요. “확인 n건” 배지는 이 문제와 규칙 페이지에서 확인하라고 한 다른 항목을 함께 세요."
+ "What it says when it fires has problems of fact; the badge, “n to check”, counts them with whatever else its page lists to check.": "울릴 때의 알림 내용에 사실 문제가 있어요. “확인 n건” 배지는 이 문제와 규칙 페이지에서 확인하라고 한 다른 항목을 함께 세요.",
+ "Too long to set beside the version before line by line: the version before, taken out, then this one.": "너무 길어 직전 버전과 줄 단위로 비교하지 않았어요: 직전 버전을 뺀 줄로, 이 버전을 더한 줄로 보여 줘요."
 }

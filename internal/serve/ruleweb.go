@@ -3,8 +3,10 @@ package serve
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -702,50 +704,94 @@ func civilDay(t time.Time) int64 {
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Unix() / 86400
 }
 
-// diffLine is a line of a version beside the one before: Op is "-", "+",
-// " ", or "@" for where a hunk starts.
+// diffLine is a line of a version beside the one before: Op is "-" for
+// one taken out, "+" for one put in, " " for one the same.
 type diffLine struct {
 	Op, Text string
 }
 
-// versionText is a version of a rule as its diff compares it: its
-// expression, for, keep_firing_for and labels, a line each.
-func versionText(c change) string {
-	var b strings.Builder
+// versionText is a version of a rule as its diff compares it, a line each:
+// its expression, for, keep_firing_for, and each of its labels, its value
+// quoted, so that a value with spaces or an = in it is one label.
+func versionText(c change) []string {
+	var out []string
 	for i, l := range strings.Split(c.Expr, "\n") {
 		if i == 0 {
-			b.WriteString("expr: " + l + "\n")
+			out = append(out, "expr: "+l)
 		} else {
-			b.WriteString("      " + l + "\n")
+			out = append(out, "      "+l)
 		}
 	}
-	b.WriteString("for: " + c.For + "\n")
+	out = append(out, "for: "+c.For)
 	if c.Keep != "" {
-		b.WriteString("keep_firing_for: " + c.Keep + "\n")
+		out = append(out, "keep_firing_for: "+c.Keep)
 	}
-	for _, l := range strings.Fields(c.Labels) {
-		b.WriteString("label: " + l + "\n")
+	for _, k := range slices.Sorted(maps.Keys(c.labels)) {
+		name := k
+		if !labelName.MatchString(k) {
+			name = strconv.Quote(k)
+		}
+		out = append(out, "label: "+name+"="+strconv.Quote(c.labels[k]))
 	}
-	return b.String()
+	return out
 }
 
-// versionDiff is a version beside the one before it, as a unified diff
-// (rules.Diff), its header left out: one taken away is all taken out, one
-// written again after, all put in.
-func versionDiff(before, after change) []diffLine {
-	a, b := "", ""
+// labelName is a label's name as Prometheus has them, written as it is.
+var labelName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
+// diffMost is how many lines a side a version is set beside the one
+// before line by line; past it, it is shown after the one before, whole.
+const diffMost = 400
+
+// versionDiff is a version beside the one before it, line by line: the
+// lines the same in both, and those taken out and put in, by their longest
+// common run. One taken away is all taken out, one written again after,
+// all put in. Whole says one side was past diffMost lines: the one before,
+// taken out, then this one, put in.
+func versionDiff(before, after change) (out []diffLine, whole bool) {
+	var a, b []string
 	if !before.Gone {
 		a = versionText(before)
 	}
 	if !after.Gone {
 		b = versionText(after)
 	}
-	var out []diffLine
-	for i, l := range strings.Split(strings.TrimSuffix(rules.Diff("rule", []byte(a), []byte(b)), "\n"), "\n") {
-		if i < 2 || l == "" {
-			continue // --- a/rule, +++ b/rule
+	if len(a) > diffMost || len(b) > diffMost {
+		for _, l := range a {
+			out = append(out, diffLine{"-", l})
 		}
-		out = append(out, diffLine{Op: l[:1], Text: l[1:]})
+		for _, l := range b {
+			out = append(out, diffLine{"+", l})
+		}
+		return out, true
 	}
-	return out
+	// lcs[i][j] is the longest common run of a[i:] and b[j:].
+	lcs := make([][]int, len(a)+1)
+	for i := range lcs {
+		lcs[i] = make([]int, len(b)+1)
+	}
+	for i := len(a) - 1; i >= 0; i-- {
+		for j := len(b) - 1; j >= 0; j-- {
+			if a[i] == b[j] {
+				lcs[i][j] = lcs[i+1][j+1] + 1
+			} else {
+				lcs[i][j] = max(lcs[i+1][j], lcs[i][j+1])
+			}
+		}
+	}
+	i, j := 0, 0
+	for i < len(a) || j < len(b) {
+		switch {
+		case i < len(a) && j < len(b) && a[i] == b[j]:
+			out = append(out, diffLine{" ", a[i]})
+			i, j = i+1, j+1
+		case j == len(b) || i < len(a) && lcs[i+1][j] >= lcs[i][j+1]:
+			out = append(out, diffLine{"-", a[i]})
+			i++
+		default:
+			out = append(out, diffLine{"+", b[j]})
+			j++
+		}
+	}
+	return out, false
 }

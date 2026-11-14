@@ -709,10 +709,15 @@ type change struct {
 	Since                   time.Time
 	Expr, For, Keep, Labels string
 	Gone                    bool
-	// Diff is it beside the version before it, on a rule's page; First
-	// says there is none before it in the weeks kept.
-	Diff  []diffLine
-	First bool
+	// Diff is it beside the version before it, on a rule's page, for the
+	// latest diffsShown versions; Whole, that it is the one before and
+	// this one whole, too long to set beside line by line. First says
+	// there is none before it in the weeks kept. labels are its labels,
+	// which Labels writes out.
+	Diff         []diffLine
+	Diffed       bool
+	Whole, First bool
+	labels       map[string]string
 }
 
 type reviewView struct {
@@ -916,7 +921,8 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 				// As it fires: its labels with its group's, a change to
 				// which is a version.
 				c := describe(*cur, ver.Since)
-				c.Labels = labelsText(cur.AlertLabels())
+				c.labels = cur.AlertLabels()
+				c.Labels = labelsText(c.labels)
 				v.Changes = append(v.Changes, c)
 			}
 			last = cur
@@ -924,8 +930,12 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 		for i := range v.Changes {
 			if i == 0 {
 				v.Changes[i].First = true
-			} else if html && v.Tab == "versions" {
-				v.Changes[i].Diff = versionDiff(v.Changes[i-1], v.Changes[i])
+			} else if html && v.Tab == "versions" && i >= len(v.Changes)-diffsShown {
+				// The latest versions' alone: the page doesn't grow with
+				// every version kept.
+				c := &v.Changes[i]
+				c.Diff, c.Whole = versionDiff(v.Changes[i-1], *c)
+				c.Diffed = true
 			}
 		}
 		slices.Reverse(v.Changes)
@@ -1087,9 +1097,14 @@ func describe(r rules.Rule, since time.Time) change {
 	default:
 		c.Expr = r.Expr
 	}
+	c.labels = r.Labels
 	c.Labels = labelsText(r.Labels)
 	return c
 }
+
+// diffsShown is how many of a rule's latest versions its versions tab sets
+// beside the one before each.
+const diffsShown = 20
 
 // labelsText is a rule's labels as k=v, in order.
 func labelsText(l map[string]string) string {
