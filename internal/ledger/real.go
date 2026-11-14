@@ -18,22 +18,28 @@ import (
 // one incident and tell of it once. It returns the incident's id, "" when
 // none was written, and the firing as it was read; ErrNotFound for no such
 // firing, and an ErrInvalid for one Put would refuse (one that lasted
-// longer than an incident may).
+// longer than an incident may). A write of nothing is rolled back, not
+// counted: what pages keep, and other replicas, stand.
 func (l *Ledger) Real(ctx context.Context, id int64, by string, o verdict.Options) (string, Firing, error) {
 	var f Firing
 	var made string
 	err := l.write(ctx, func(t *txn) error {
 		made = ""
 		var err error
-		if f, err = l.firingIn(t, id); err != nil || f.White {
+		if f, err = l.firingIn(t, id); err != nil {
 			return err
+		}
+		if f.White {
+			return errNothing
 		}
 		in := realOf(f, o.Match)
 		if err := checkIncident(in); err != nil {
 			return err
 		}
-		if ok, err := l.writtenFrom(t, in); err != nil || ok {
+		if ok, err := l.writtenFrom(t, in); err != nil {
 			return err
+		} else if ok {
+			return errNothing
 		}
 		if err := l.putIn(t, &in, originOf(by), by, o); err != nil {
 			return err
@@ -41,11 +47,15 @@ func (l *Ledger) Real(ctx context.Context, id int64, by string, o verdict.Option
 		made = in.ID
 		return nil
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, errNothing) {
 		return "", f, err
 	}
 	return made, f, nil
 }
+
+// errNothing ends a write that finds nothing to write: rolled back, it
+// isn't counted as a change.
+var errNothing = errors.New("nothing to write")
 
 // realOf is the incident a firing is written down as.
 func realOf(f Firing, match []string) incident.Incident {

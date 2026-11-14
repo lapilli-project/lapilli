@@ -169,3 +169,33 @@ func TestRealBack(t *testing.T) {
 		t.Errorf("%d to %q, not %q", code, hd.Get("Location"), want)
 	}
 }
+
+// TestRealNothingCounted: "This was real" on a firing that has caught
+// something, or was written down already, writes nothing, and isn't
+// counted as a change: the ledger's generation, which what pages keep
+// hangs on, stands.
+func TestRealNothingCounted(t *testing.T) {
+	s, ids := realServer(t)
+	h := s.Handler()
+	if code, _, _ := postAs(t, h, "/firings/"+ids[0]+"/real", nil, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Fatal(code)
+	}
+	gen := s.l.Gen()
+	if code, _, hd := postAs(t, h, "/firings/"+ids[0]+"/real", nil, "bo@example.com", "same-origin"); code != http.StatusSeeOther || hd.Get("Location") != "/firings?day=2026-11-01" {
+		t.Fatalf("again: %d to %q", code, hd.Get("Location"))
+	}
+	if g := s.l.Gen(); g != gen {
+		t.Errorf("a second press: generation %d, not %d", g, gen)
+	}
+	// Written down already, though the ledger has it black still.
+	ledgerExec(t, s, "UPDATE firings SET white = 0 WHERE id = ?", ids[0])
+	gen = s.l.Gen()
+	if code, _, hd := postAs(t, h, "/firings/real", url.Values{"firing": ids[:1], "back": {"/firings?day=2026-11-01"}}, "bo@example.com", "same-origin"); code != http.StatusSeeOther ||
+		hd.Get("Location") != "/firings?already=1&bulk=real&day=2026-11-01" {
+		t.Fatalf("written already: %d to %q", code, hd.Get("Location"))
+	}
+	if g := s.l.Gen(); g != gen {
+		t.Errorf("written already: generation %d, not %d", g, gen)
+	}
+	writtenOnce(t, s, "nothing counted", 1)
+}
