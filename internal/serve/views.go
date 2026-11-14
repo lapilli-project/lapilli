@@ -647,6 +647,8 @@ type rulesData struct {
 	proposed map[string]bool
 	checks   map[string]ledger.Check
 	differs  Differs
+	// team is the team the rules are of, nil for all.
+	team *ledger.Team
 }
 
 func (s *Server) rulesPage(r *http.Request) (any, error) {
@@ -734,7 +736,7 @@ func (s *Server) rulesOver(r *http.Request, week int64) (rulesData, error) {
 		v.Sort = by
 	}
 	sortRules(v.Lines, v.Sort)
-	return rulesData{v, t, o, proposed, cw, d}, nil
+	return rulesData{v, t, o, proposed, cw, d, team}, nil
 }
 
 // annotate gives rule lines their teams and what is to become of them.

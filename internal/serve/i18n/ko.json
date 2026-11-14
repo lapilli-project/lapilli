@@ -44,6 +44,7 @@
  "The rules, the most re-fired first": "규칙 (재발화가 많은 순)",
  "What went wrong in the week of %s, and what caught it.": "%s 주에 무엇이 잘못됐고 무엇이 잡았는지예요.",
  "%d notifications for nothing, while people slept": "자는 시간에 괜히 보낸 알림 %d건",
+ "Notifications for nothing, while people slept: – (none were kept yet)": "자는 시간에 괜히 보낸 알림: –(아직 알림을 기록하기 전)",
  "firings during deploys": "배포 중 발화",
  "Hide deploys": "배포 숨기기",
  "Hide quiet windows": "메인터넌스 윈도우 숨기기",

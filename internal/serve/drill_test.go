@@ -21,7 +21,10 @@ import (
 // incident, one of search that did, an incident caught only by search's
 // noisy rule, one nothing caught; firings that re-fired, some while people
 // slept, some during a deploy; and the weeks before and after with some
-// of their own. With notify, the firings were notified too.
+// of their own. With notify, the firings were notified too, a minute after
+// each started: one, at 23:59:30 the Sunday before, notified in the week;
+// and one began the week before, still firing, was notified again in it;
+// but one, two weeks before, that came before any notification was kept.
 func drillServer(t *testing.T, notify bool) *Server {
 	t.Helper()
 	ctx := context.Background()
@@ -54,7 +57,13 @@ func drillServer(t *testing.T, notify bool) *Server {
 	add("PayErrors", week.Add(-3*24*time.Hour), "service", "pay")
 	add("PayErrors", week.Add(8*24*time.Hour+time.Hour), "service", "pay")
 	add("SearchSlow", week.Add(8*24*time.Hour), "service", "search") // catches S-2
-	if err := s.l.Record(ctx, ledger.Found{From: week.Add(-7 * 24 * time.Hour), To: now, Firings: fs, Run: ledger.Run{Kind: "backfill", Started: week, Finished: week}}, s.cfg.Options); err != nil {
+	if notify {
+		add("PayOld", week.Add(-12*24*time.Hour), "service", "pay") // before the first notification
+		add("PayNight", week.Add(-30*time.Second), "service", "pay")
+		fs = append(fs, firing.Firing{Rule: "PayLong", Start: week.Add(-6*24*time.Hour + 3*time.Hour), End: week.Add(2 * 24 * time.Hour),
+			Labels: map[string]string{"service": "pay"}})
+	}
+	if err := s.l.Record(ctx, ledger.Found{From: week.Add(-14 * 24 * time.Hour), To: now, Firings: fs, Run: ledger.Run{Kind: "backfill", Started: week, Finished: week}}, s.cfg.Options); err != nil {
 		t.Fatal(err)
 	}
 	for _, tm := range []ledger.Team{{Name: "payments", Rules: "^Pay", Labels: incident.Labels{"service": {"pay"}}},
@@ -84,10 +93,18 @@ func drillServer(t *testing.T, notify bool) *Server {
 	}
 	if notify {
 		for _, f := range fs {
+			if f.Rule == "PayOld" {
+				continue
+			}
 			if _, err := s.l.Notify(ctx, ledger.Notification{Source: "alertmanager", Receiver: "oncall", Group: fmt.Sprint(f.Rule, f.Start.Unix()), At: f.Start.Add(time.Minute),
 				Alerts: []ledger.Alert{{Rule: f.Rule, Labels: f.Labels, Start: f.Start}}}); err != nil {
 				t.Fatal(err)
 			}
+		}
+		long := fs[len(fs)-1]
+		if _, err := s.l.Notify(ctx, ledger.Notification{Source: "alertmanager", Receiver: "oncall", Group: fmt.Sprint(long.Rule, long.Start.Unix()),
+			At: week.Add(27 * time.Hour), Alerts: []ledger.Alert{{Rule: long.Rule, Labels: long.Labels, Start: long.Start}}}); err != nil {
+			t.Fatal(err)
 		}
 	}
 	return s
@@ -148,12 +165,21 @@ func drillDown(t *testing.T, s *Server, notify bool) {
 				if rl.Week != "2026-10-26" {
 					t.Errorf("%s: over %q", what, rl.Week)
 				}
-				woken := rl.Sum.AsleepBlack
+				woken := fmt.Sprint(rl.Sum.AsleepBlack)
 				if notify {
-					woken = rl.Sum.Woken // notifications, once they are kept, as the tile says
+					// Notifications, once they are kept, as the tile says:
+					// what the rows shown come to.
+					woken = fmt.Sprint(rl.Sum.Woken)
+					rows := 0
+					for _, r := range rl.Rows {
+						rows += r.Woken
+					}
+					if rows != rl.Sum.Woken {
+						t.Errorf("%s: the rows come to %d woken, the list %d", what, rows, rl.Sum.Woken)
+					}
 				}
 				got := map[string]string{"Precision": rl.Sum.Precision, "Firings": fmt.Sprint(rl.Sum.Firings), "Noisy rules": fmt.Sprint(rl.Shown),
-					"Refired": fmt.Sprint(rl.Sum.Refired), "During deploys": fmt.Sprint(rl.Sum.Deploys), "Woken for nothing": fmt.Sprint(woken)}[x.key]
+					"Refired": fmt.Sprint(rl.Sum.Refired), "During deploys": fmt.Sprint(rl.Sum.Deploys), "Woken for nothing": woken}[x.key]
 				if got != x.Value {
 					t.Errorf("%s: the list comes to %s, the tile %s", what, got, x.Value)
 				}
@@ -212,6 +238,33 @@ func drillDown(t *testing.T, s *Server, notify bool) {
 	}
 	if iv := viewOf(t, s, "incidents", "/incidents?week=2026-10-26&state=missed", s.incidentsPage).(incidentsView); len(iv.Lines) != 2 {
 		t.Errorf("%d missed that week", len(iv.Lines))
+	}
+	if notify {
+		// Notified that week, at night, for nothing: the one begun Sunday
+		// at 23:59:30, and the long one, notified again, neither of them a
+		// firing that started in it, are listed, each woken once.
+		for _, name := range []string{"PayNight", "PayLong"} {
+			if r, ok := rows[name]; !ok || r.Woken != 1 || r.Firings != 0 {
+				t.Errorf("%s: listed %v, %d woken, %d fired", name, ok, r.Woken, r.Firings)
+			}
+		}
+		// A week before notifications were kept counts none: "–", as the
+		// overview's week does, not 0.
+		d := viewOf(t, s, "overview", "/", s.overview).(dashboard)
+		var before *weekView
+		for i := range d.Weeks {
+			if d.Weeks[i].Start.Format("2006-01-02") == "2026-10-12" {
+				before = &d.Weeks[i]
+			}
+		}
+		old := viewOf(t, s, "rules", "/rules?week=2026-10-12", s.rulesList).(rulesList)
+		if before == nil || !before.Uncounted || !old.Sum.Uncounted || !rl.Sum.Notified || rl.Sum.Uncounted {
+			t.Errorf("the week of 10-12 uncounted: overview %v, list %v; last week %v", before != nil && before.Uncounted, old.Sum.Uncounted, rl.Sum.Uncounted)
+		}
+		_, body, _ := get(t, s.Handler(), "/rules?week=2026-10-12&weeks=12")
+		if !strings.Contains(body, "Notifications for nothing, while people slept: – (none were kept yet)") || strings.Contains(body, "notifications for nothing, while people slept</span>") {
+			t.Error("the week before notifications were kept says a number")
+		}
 	}
 
 	// The page links each tile, with the team.

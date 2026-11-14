@@ -44,6 +44,7 @@
  "The rules, the most re-fired first": "Las reglas, primero las que más se redispararon",
  "What went wrong in the week of %s, and what caught it.": "Qué falló en la semana del %s, y qué lo capturó.",
  "%d notifications for nothing, while people slept": "%d notificaciones por nada, mientras se dormía",
+ "Notifications for nothing, while people slept: – (none were kept yet)": "Notificaciones por nada, mientras se dormía: – (aún no se guardaban)",
  "firings during deploys": "disparos durante despliegues",
  "Hide deploys": "Ocultar despliegues",
  "Hide quiet windows": "Ocultar ventanas de mantenimiento",

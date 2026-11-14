@@ -44,6 +44,7 @@
  "The rules, the most re-fired first": "ルール (再発火が多い順)",
  "What went wrong in the week of %s, and what caught it.": "%s の週に起きた問題と、それを検知したもの。",
  "%d notifications for nothing, while people slept": "就寝中の空振り通知 %d 件",
+ "Notifications for nothing, while people slept: – (none were kept yet)": "就寝中の空振り通知: –（まだ記録していない期間）",
  "firings during deploys": "デプロイ中の発火",
  "Hide deploys": "デプロイを隠す",
  "Hide quiet windows": "メンテナンスウィンドウを隠す",
