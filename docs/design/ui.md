@@ -22,6 +22,13 @@ phases will add. [serve.md](serve.md) says what each page shows;
   3:1 on every surface, in light and dark (`TestContrast` holds the
   stylesheet's tokens to it). At 320 CSS px and at 200% zoom no page scrolls
   sideways; a wide table scrolls in its own box.
+- **Bounds.** A page asked with a query of more than 4096 bytes is
+  refused, 414, before anything is read for it. A search (`q=`, the bar's
+  or the rules') of more than 500 characters is left out whole, and the
+  page says so; of its words, the first 20 are used, and the rest named,
+  "Left out: more than 20 words". A facet takes 20 values, a value given
+  twice once. Several `q=` are one search, joined. What a page does with
+  what it is asked doesn't grow past these.
 
 ## The frame
 
@@ -53,6 +60,14 @@ accessibility tree. The page the reader is on has `aria-current="page"`;
 the page an item is of (Rules, on a rule's page), `aria-current="true"`.
 The skip link is first, as before.
 
+### Error pages
+
+An error page (403, 404, 414, 500), and the page after signing out, are
+shown to whoever asked, a stranger refused too. They are the frame alone:
+no count beside Tasks or Proposals, no team or period on any link, and no
+reader's own team, so that a stranger reads nothing of the ledger from
+them, nor whether the team the URL names is there (`bare`).
+
 ### Breadcrumbs
 
 Every page starts with `<nav aria-label="Breadcrumb"><ol>`: the group, the
@@ -67,15 +82,17 @@ show one team's or a period, a GET form to pick them: the team (all teams,
 or one) on the overview, the rules, the incidents and the tasks; the period
 (1, 4 or 12 weeks) on the rules and the incidents. The overview has no
 period: its tiles are last week beside the week before, by design. The form
-sends the page's other parameters again, as they were.
+sends the page's other parameters again, as they were, and is named for
+what it chooses: "Team", "Period", or "Team and period".
 
 ### A page's main action
 
 A page whose purpose includes adding something has it in its header, beside
-the title, as a link to the form on the page (`#add`): Incidents "Write one
-down", Tasks "Add a task", Quiet windows "Add a quiet window", Teams "Add a
-team", Reports "Add a report". A reader who may not use it sees the button
-disabled, never hidden, with why beside it, tied with `aria-describedby`:
+the title, as a link to the form on the page, `#add` alone, which loads
+nothing again: Incidents "Write one down", Tasks "Add a task", Quiet
+windows "Add a quiet window", Teams "Add a team", Reports "Add a report". A
+reader who may not use it sees the button disabled, never hidden, with why
+beside it, tied with `aria-describedby`:
 
 | Why | Said |
 |---|---|
@@ -84,6 +101,7 @@ disabled, never hidden, with why beside it, tied with `aria-describedby`:
 | roles, and no one signed in | Read-only: no one is signed in |
 | signed in, the role isn't enough | Editors only; Admins only (teams) |
 | no destination for a report | Nowhere to send a report yet |
+| an editor, and no team for a report | No team yet: an editor makes a team's report |
 
 A team's editor may add their team's tasks, quiet windows and reports, and
 no incident: the incidents' action is disabled for them, "Editors only".
@@ -116,8 +134,15 @@ don't use them, so they hold however the reader goes.
   the URL had them, unless the path sets them; pairs after it set others,
   an empty value taking one out, but `team`, where it is all teams. Only
   pages are linked so: not `/static/`, `/auth/`, `/api/`, `/settings.yaml`
-  or a form's POST target. A form going to another page (the search) has
-  them as hidden fields.
+  or a form's POST target. A form going to another page (the search), or
+  a GET form of a page's own (the firings', settings' "Try them"), has
+  them as hidden fields. The form that adds or changes a task is sent to
+  `/tasks` with them in its URL, and the task's page it goes to after
+  keeps them.
+- A link that adds a task about a rule names the rule's own team
+  (`team=` when no team owns it), whatever the page's: the tasks page
+  picks the team in its URL for the form, and the task is its owner's.
+  One about an incident, which no team owns, `team=`.
 
 ### The reader's own team
 
@@ -141,7 +166,16 @@ found. The incidents are those of the twelve weeks kept, and any whose id
 is `q`; the rules, those that fired in them and those in effect.
 
 - One found, of every kind together, is opened (303) with the page context:
-  a rule's page, an incident's, or a team's overview.
+  a rule's page, an incident's, or a team's overview; but a rule or an
+  incident named `.` or `..`, whose path a redirect would clean into
+  another page's, is listed.
+- Each word is looked for once (twenty at most, as everywhere), in names
+  each lowered once. A search with no word, such as a lone quote, is none:
+  the help, and nothing found.
+- More rules than fifty found give a link to all of them on the rules
+  page: the words as words there, quoted where one has a colon, and
+  `team=`, so that the reader's own team isn't taken, and the page shows
+  as many as were counted.
 - A filter for the rules in `q` (`team:`, `severity:`, `is:`, `status:`,
   `has:`, `label:`, `group:`) makes it a search of the rules: 303 to the
   rules page, in its canonical form (below).
@@ -164,11 +198,14 @@ Each rule has a badge on each of three axes, and what is under way:
 | What people mean to do (its note's status) | `✓ keep`, `± tune`, `⊘ retire` |
 | Under way | `✎ Proposed` (a change waits for approval), `⚠ n to check` (problems of fact in what it says) |
 
-Noisy wins over Spare: a rule that is both is noisy first. The badge
-partial, `badges`, is shared: the rule's page will use it. Proposed and "to
-check" link to the rule's proposals and to what it says. The suggestion (a
-longer `for` that would quiet it) stays as one quiet line under the
-badges: it is what to do.
+Noisy wins over Spare: a rule that is both is noisy first. Differs is
+looked up for a rule that didn't fire in the weeks shown too: one replayed
+to nothing while it really fired is the case it is most for. A badge with a
+reason (Not replayed, Recorded only) has it in its `title`; the rule's page
+says it in words, a rule that never fired too. The badge partial, `badges`,
+is shared: the rule's page will use it. Proposed and "to check" link to the
+rule's proposals and to what it says. The suggestion (a longer `for` that
+would quiet it) stays as one quiet line under the badges: it is what to do.
 
 ### Filters
 
@@ -181,7 +218,7 @@ in effect. Like the sidebar, it is drawn twice and shown once.
 | Facet | Parameter | Values |
 |---|---|---|
 | Performance | `perf` | `noisy`, `ok`, `silent`, `spare` |
-| Severity | `severity` | each the rules have; `none` for a rule without one |
+| Severity | `severity` | each the rules have; `none` for a rule without one. A value the same as one of theirs but for its case is theirs |
 | Trust | `trust` | `differs`, `unreplayed`, `recorded` |
 | Disposition | `status` | `keep`, `tune`, `retire`, `none` |
 | Progress | `has` | `proposal`, `facts` |
@@ -204,13 +241,20 @@ Every filter in effect has a chip, a link to the same page without it,
 named "Remove filter: Severity: critical": each value, the words, each
 `label:` and `group:`, and the team, whose chip gives `team=`, all teams.
 "Clear filters" keeps the team, the weeks and the order. The order is as
-before: the noisiest first, the most re-fired, the most during deploys.
+before: the noisiest first, the most re-fired, the most during deploys;
+each order's link is the same page in it, every filter kept. A chip's
+link, and an order's, are made from what the page read of its URL
+(`rulesAsk`), with one thing changed, never from the URL itself: what the
+page doesn't take, or left out, isn't in them. With no rule shown and
+some listed below that didn't fire, the page says none of them fired, not
+that none matches.
 
 ### The search box
 
 Words are parts of a rule's name, in any case, each one in it; a phrase in
 quotes is one, and is how to search for a name with a colon (`"job:rate5m"`).
-Filters are written `key:value`:
+Filters are written `key:value`, and `key:"a value"` when the value has
+spaces (`label:"a=b c"`, `team:"a b"`):
 
 | Filter | Is |
 |---|---|
@@ -227,10 +271,12 @@ Filters are written `key:value`:
 **Canonical URLs.** A search with a filter a facet has, or `team:`, is sent
 (303) to the URL with it as a parameter, and `q` keeps the words, `label:`
 and `group:` (`/rules?q=is:noisy+err` → `/rules?perf=noisy&q=err`), so the
-checkboxes always show what is in effect and unchecking one works. A key the
-box doesn't take, a value its key doesn't, or a team no one has stays in
-`q`, is left out of the filtering, and is named in a message that lists the
-keys and values the box takes; never an error page.
+checkboxes always show what is in effect and unchecking one works. The
+filters are moved from the whole search, and the twenty words are counted
+in what stays in the box. A key the box doesn't take, a value its key
+doesn't, or a team no one has stays in `q`, is left out of the filtering,
+and is named in a message that lists the keys and values the box takes;
+never an error page.
 
 ## Without a script
 

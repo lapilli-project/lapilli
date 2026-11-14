@@ -6,8 +6,10 @@ The web UI's frame, and the rules list, redone: a sidebar in four groups,
 breadcrumbs, the team and the period carried on every link, a search on
 every page, a page's main action in its header, and on the rules list
 badges, filters, a search box and chips (docs/design/ui.md). Still no
-script, in four languages, against WCAG 2.2 AA. Every URL means what it
-did; the API, MCP and the ledger are as they were.
+script, in four languages, against WCAG 2.2 AA. The API, MCP and the
+ledger are as they were. What two URLs show has changed, `weeks=1` on
+the incidents and no `team=` for a reader of one team, and a page's
+query has bounds: see Changed.
 
 ### Added
 
@@ -26,8 +28,9 @@ did; the API, MCP and the ledger are as they were.
   all teams.
 - **Search**, `/search?q=`, in every page's bar: rules by name, incidents
   by id or title, teams by name, fifty of each at most. One found is
-  opened; a search with a rules filter is the rules page with it; nothing
-  found says so.
+  opened, but a rule or incident named `.` or `..`, which a redirect would
+  make another page; a search with a rules filter is the rules page with
+  it; nothing found says so.
 - **The rules list's badges**, on three axes and what is under way:
   ● Noisy (with its weeks running), ○ OK, – Silent, ⧉ Spare; ≠ Differs,
   ◌ Not replayed, ⇣ Recorded only; keep, tune, retire; ✎ Proposed,
@@ -38,9 +41,11 @@ did; the API, MCP and the ledger are as they were.
   that takes words of a rule's name and `team:`, `severity:`, `is:`,
   `status:`, `has:`, `label:KEY=VALUE` and `group:`. Those a facet has
   become its parameters, by a redirect; what the box doesn't understand is
-  named and left out. Each filter in effect is a chip that takes it away;
-  "Clear filters" keeps the team, the weeks and the order; the header says
-  "14 of 63 rules".
+  named and left out. `key:"a value"` takes a value with spaces. Each
+  filter in effect is a chip that takes it away; an order keeps every
+  filter; "Clear filters" keeps the team, the weeks and the order; the
+  header says "14 of 63 rules". A severity is the rules' own spelling,
+  whatever its case in the URL.
 - **A page's main action in its header**: "Write one down", "Add a task",
   "Add a quiet window", "Add a team", "Add a report". To a reader who may
   not, the button shows disabled, with why: read-only, no one signed in,
@@ -50,6 +55,20 @@ did; the API, MCP and the ledger are as they were.
 
 ### Changed
 
+- **`/incidents?weeks=1` shows the last week.** It showed four, as every
+  `weeks=` but 12 did.
+- **With no `team=` in the URL, a reader who edits one team, and only one,
+  sees that team's** on the overview, the rules, the incidents and the
+  tasks, where they saw every team's. `team=` shows every team's; the API
+  and MCP take a team only when asked, as before.
+- **A page asked with a query of more than 4096 bytes is refused, 414**,
+  before anything is read for it. A search (`q=`) of more than 500
+  characters is left out, and the page says so; of its words, the first
+  20 are used and the rest named; a filter (`perf=`, `severity=`,
+  `trust=`, `status=`, `has=`) takes 20 values. Several `q=` are one
+  search.
+- An error page (403, 404, 414, 500) shows no count of open tasks or
+  proposals, and carries no team or period on its links.
 - The rules list's Rule column has badges for the sentences it had under
   a rule's name; the note's status is a badge, and the Noisy column is
   gone. The suggestion stays, as one line.
