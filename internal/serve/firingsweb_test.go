@@ -166,7 +166,9 @@ func TestFiringLabels(t *testing.T) {
 // TestHourStrip: the day's firings an hour at a time are those the ledger
 // has for that day, by the hour of the clock each started in, in zones
 // whose clocks change: a day whose midnight is skipped starts at 01:00,
-// and an hour the clocks go back over counts both.
+// and an hour the clocks go back over counts both; in zones a half and
+// three quarters of an hour off UTC; the ledger counting them a quarter of
+// an hour at a time, not a firing at a time.
 func TestHourStrip(t *testing.T) {
 	for _, c := range []struct {
 		zone, day string
@@ -178,6 +180,9 @@ func TestHourStrip(t *testing.T) {
 		{"America/Santiago", "2026-04-04", map[int]int{23: 2}},
 		{"Europe/Berlin", "2026-10-25", map[int]int{2: 2}},
 		{"America/New_York", "2026-03-08", map[int]int{2: 0}},
+		{"Asia/Kathmandu", "2026-11-02", nil},
+		{"Asia/Kolkata", "2026-11-02", nil},
+		{"Australia/Lord_Howe", "2026-10-04", nil}, // 02:00 is 02:30, half an hour on
 	} {
 		loc, err := time.LoadLocation(c.zone)
 		if err != nil {
@@ -189,14 +194,21 @@ func TestHourStrip(t *testing.T) {
 		r := rand.New(rand.NewPCG(uint64(d), 7))
 		var fs []firing.Firing
 		for i := 0; i < 400; i++ {
-			// From three hours before the day to three after.
-			at := from.Add(-3*time.Hour + time.Duration(r.IntN(int(to.Sub(from)/time.Minute)+360))*time.Minute)
+			// From three hours before the day to three after, to the second.
+			at := from.Add(-3*time.Hour + time.Duration(r.IntN(int(to.Sub(from)/time.Second)+6*3600))*time.Second)
 			fs = append(fs, firing.Firing{Rule: "Errors", Start: at, End: at.Add(time.Minute), Labels: map[string]string{"service": []string{"checkout", "search"}[i%2], "i": fmt.Sprint(i)}})
 		}
 		// An incident to catch some of them.
 		at := from.Add(10 * time.Hour)
 		keep(t, s, from.Add(-4*time.Hour), to.Add(4*time.Hour), fs)
 		if _, err := s.l.Put(context.Background(), ledgerIncident("X-1", at, at.Add(time.Hour), "checkout"), "ana", s.cfg.Options); err != nil {
+			t.Fatal(err)
+		}
+		// A quiet window to excuse some.
+		if _, err := s.l.PutWindow(context.Background(), ledger.Window{Title: "w", Start: from.Add(15 * time.Hour), End: from.Add(17*time.Hour + 7*time.Minute)}, "ana", s.cfg.Options); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.l.JudgePending(context.Background(), s.cfg.Options); err != nil {
 			t.Fatal(err)
 		}
 		// The day's, as its date on the clock says, not as the ledger's
@@ -206,12 +218,16 @@ func TestHourStrip(t *testing.T) {
 			t.Fatal(err)
 		}
 		day := slices.DeleteFunc(kept, func(f ledger.Firing) bool { return f.Start.In(loc).Format("2006-01-02") != c.day })
-		var want [24][3]int
+		var want [24][4]int
+		excused := 0
 		for _, f := range day {
 			h := f.Start.In(loc).Hour()
 			switch {
 			case f.White:
 				want[h][1]++
+			case f.Excused:
+				want[h][3]++
+				excused++
 			default:
 				want[h][2]++
 			}
@@ -220,8 +236,8 @@ func TestHourStrip(t *testing.T) {
 		v := firingsOf(t, s, "day="+c.day)
 		sum, white := 0, 0
 		for h, x := range v.Strip.Hours {
-			if [3]int{x.Firings, x.White, x.Black} != want[h] {
-				t.Errorf("%s %s %02d:00: %d %d %d, the ledger %v", c.zone, c.day, h, x.Firings, x.White, x.Black, want[h])
+			if [4]int{x.Firings, x.White, x.Black, x.Excused} != want[h] {
+				t.Errorf("%s %s %02d:00: %d %d %d %d, the ledger %v", c.zone, c.day, h, x.Firings, x.White, x.Black, x.Excused, want[h])
 			}
 			clock := 1
 			if n, ok := c.clocks[h]; ok {
@@ -233,8 +249,12 @@ func TestHourStrip(t *testing.T) {
 			sum += x.Firings
 			white += x.White
 		}
-		if sum != len(day) || white == 0 || len(day) < 100 {
-			t.Errorf("%s %s: %d counted of %d, %d caught something", c.zone, c.day, sum, len(day), white)
+		if sum != len(day) || white == 0 || excused == 0 || len(day) < 100 {
+			t.Errorf("%s %s: %d counted of %d, %d caught something, %d excused", c.zone, c.day, sum, len(day), white, excused)
+		}
+		// A row a quarter of an hour, at most, however many fired.
+		if qs, err := s.l.FiringStarts(context.Background(), ledger.FiringQuery{From: from, To: to}); err != nil || len(qs) > 100 || len(qs) >= len(day) {
+			t.Errorf("%s %s: %d rows for %d firings: %v", c.zone, c.day, len(qs), len(day), err)
 		}
 		// The table says the same, and an hour off the clock says so.
 		_, body, _ := get(t, s.Handler(), "/firings?day="+c.day)

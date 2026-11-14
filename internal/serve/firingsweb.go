@@ -182,7 +182,7 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 
 	// The firings listed, and those the strip counts: the day's whole.
 	var fs []ledger.Firing
-	var starts []ledger.FiringStart
+	var starts []ledger.StartCount
 	if len(a.labels) == 0 {
 		var err error
 		list := fq
@@ -214,7 +214,14 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 			if !hasLabels(f.Labels, a.labels) {
 				continue
 			}
-			starts = append(starts, ledger.FiringStart{Start: f.Start, White: f.White, Excused: f.Excused})
+			x := ledger.StartCount{Start: f.Start, Firings: 1}
+			switch {
+			case f.White:
+				x.White = 1
+			case f.Excused:
+				x.Excused = 1
+			}
+			starts = append(starts, x)
 			if after != nil && !(f.Start.Before(after.Start) || f.Start.Equal(after.Start) && f.ID < after.ID) {
 				continue
 			}
@@ -273,8 +280,9 @@ func hasLabels(ls map[string]string, want [][2]string) bool {
 // hourStrip counts a day's firings by the hour of the clock each started
 // in, the day as the ledger's days start (Midnight: on a day whose midnight
 // the clocks skip, from 01:00), each hour as often as the clocks came to
-// it that day.
-func (s *Server) hourStrip(day int64, starts []ledger.FiringStart, capped bool) dayStrip {
+// it that day: from starts, counted by a quarter of an hour, or a firing
+// at a time, which each fall in one hour of the clock.
+func (s *Server) hourStrip(day int64, starts []ledger.StartCount, capped bool) dayStrip {
 	st := dayStrip{Width: 24 * hourStep, Capped: capped}
 	loc := s.cfg.Loc
 	for h := range 24 {
@@ -284,16 +292,12 @@ func (s *Server) hourStrip(day int64, starts []ledger.FiringStart, capped bool) 
 	for t := from; t.Before(to); t = t.Add(time.Hour) {
 		st.Hours[t.In(loc).Hour()].Clock++
 	}
-	for _, f := range starts {
-		c := &st.Hours[f.Start.In(loc).Hour()]
-		c.Firings++
-		switch {
-		case f.White:
-			c.White++
-		case f.Excused:
-			c.Excused++
-			st.Excused = true
-		}
+	for _, x := range starts {
+		c := &st.Hours[x.Start.In(loc).Hour()]
+		c.Firings += x.Firings
+		c.White += x.White
+		c.Excused += x.Excused
+		st.Excused = st.Excused || x.Excused > 0
 	}
 	most := 1
 	for i := range st.Hours {
