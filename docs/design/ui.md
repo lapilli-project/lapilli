@@ -362,8 +362,11 @@ as many whole days before as the period has checked. A number is set
 beside that span only when what it comes from holds all of it, and none
 of it was pruned (`--keep`): for a rule it replays, the replay's runs from
 its start on; for one recorded elsewhere, its source's copies without a
-gap (`Coverage`); for a cloud's alarm, its history from when its tie says;
-the notifications from the first kept, and only in the pages (the twelve
+gap (`Coverage`) from the span's start, and still coming, not quiet past
+`--source-quiet`: a copy that stopped would read as a rule grown quieter;
+for a cloud's alarm, its history from when its tie says, and its source's
+copies likewise; the notifications from the first kept (they come as they
+are sent, so a receiver that stops sending isn't told from a quiet rule), and only in the pages (the twelve
 weeks shown), whatever the replay holds. Precision is set beside only
 when the rule fired in both. The shares' changes are in points, each
 signed (+3, −2, ±0), and a change better or worse says so in words as

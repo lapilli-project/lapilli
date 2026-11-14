@@ -19,8 +19,9 @@
   and those while people slept and off hours) and the backtest, each with
   a definition to open, over the page's period, each beside the span
   before it, as long, when what the number comes from holds all of it
-  (the replay's runs, a source's copies, an alarm's history, the
-  notifications kept), better or worse said in words as well as colour.
+  (the replay's runs; a source's copies, still coming; an alarm's
+  history; the notifications kept), better or worse said in words as
+  well as colour.
 - **A rule's last 84 days**, a cell a day (caught something, caught
   nothing only, excused only, no firing), with marks for its versions,
   the days it fired during a deploy of what it is about, and the days a

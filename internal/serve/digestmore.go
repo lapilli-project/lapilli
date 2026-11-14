@@ -52,11 +52,7 @@ func (s *Server) copied(ctx context.Context, rep *verdict.Report) ([]copiedIn, e
 // quiet reports whether nothing has been copied in from a source for
 // longer than --source-quiet.
 func (s *Server) quiet(src ledger.Source) bool {
-	after := s.cfg.SourceQuiet
-	if after <= 0 {
-		after = sourceQuiet
-	}
-	return s.now().Sub(src.Written) > after
+	return s.now().Sub(src.Written) > s.quietAfter()
 }
 
 // sourcesLine says where firings were copied in from, and which source has

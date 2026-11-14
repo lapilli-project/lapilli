@@ -137,18 +137,33 @@ func TestPanelBesideHeld(t *testing.T) {
 		t.Errorf("weeks=4: notifications %d changed %+v, %d before", v.Notifications, got, len(ns))
 	}
 
-	// A cloud's alarm's history, from when its tie says.
-	at := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	// A cloud's alarm's history, from when its tie says, as its source's
+	// copies hold it; and a source whose copies stopped ten days ago holds
+	// nothing to now, however far back it began: what stopped coming would
+	// read as a rule grown quieter.
+	ctx := context.Background()
+	now := s.now()
+	if _, err := s.l.PutFirings(ctx, "old", now.Add(-40*24*time.Hour), now.Add(-10*24*time.Hour), nil, ledger.FiringsCopier, s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	at := now.Add(-5 * 24 * time.Hour)
 	for _, c := range []struct {
-		tie  tieView
+		v    ruleView
+		at   time.Time
 		want bool
 	}{
-		{tieView{Source: "cw", Since: at}, true}, {tieView{Source: "cw", Since: at.Add(time.Second)}, false},
-		{tieView{Source: "cw"}, false}, {tieView{Why: "no history"}, false},
+		{ruleView{Tie: &tieView{Source: "cw", Since: at}}, at, true},
+		{ruleView{Tie: &tieView{Source: "cw", Since: at.Add(time.Second)}}, at, false},
+		{ruleView{Tie: &tieView{Source: "cw", Since: at}}, now.Add(-11 * 24 * time.Hour), false}, // before its copies
+		{ruleView{Tie: &tieView{Source: "cw"}}, at, false},
+		{ruleView{Tie: &tieView{Why: "no history"}}, at, false},
+		{ruleView{ruleLine: ruleLine{Source: "cw"}}, at, true},
+		{ruleView{ruleLine: ruleLine{Source: "old"}}, now.Add(-20 * 24 * time.Hour), false},
+		{ruleView{Tie: &tieView{Source: "old", Since: now.Add(-40 * 24 * time.Hour)}}, now.Add(-20 * 24 * time.Hour), false},
 	} {
-		tie := c.tie
-		if got, err := s.holds(context.Background(), &ruleView{Tie: &tie}, at); err != nil || got != c.want {
-			t.Errorf("%+v from %s: %v %v", c.tie, at, got, err)
+		v := c.v
+		if got, err := s.holds(ctx, &v, c.at); err != nil || got != c.want {
+			t.Errorf("%+v %+v from %s: %v %v, want %v", c.v.Source, c.v.Tie, c.at, got, err, c.want)
 		}
 	}
 }

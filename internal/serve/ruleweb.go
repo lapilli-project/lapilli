@@ -202,6 +202,9 @@ func condsOf(c condsIn) []ruleCond {
 
 // condsIn is what its page has of a rule's conditions.
 func (v *ruleView) condsIn() condsIn {
+	// The latest twenty proposals hold any unfinished one: the ledger keeps
+	// one unfinished proposal a rule at a time, so the rules list, which
+	// reads every unfinished proposal, counts the same.
 	stale := 0
 	for _, p := range v.Proposals {
 		if p.Stale && slices.Contains(ledger.Unfinished(), p.State) {
@@ -468,16 +471,24 @@ func besides(l ruleLine, was ledger.Span) (precision, firings, incidents moved) 
 }
 
 // holds reports whether the ledger holds a rule's firings over all of a
-// span from at on: for one it replays, the replay's runs; for one copied
-// in, its copies without a gap: a cloud's alarm's history from when its
-// tie says, a rule recorded elsewhere from when its source's do.
+// span from at on, to now: for one it replays, the replay's runs; for one
+// copied in, its source's copies without a gap from at, and still coming,
+// not quiet past --source-quiet (a cloud's alarm's history from when its
+// tie says too). A copy that stopped would read as a rule grown quieter.
 func (s *Server) holds(ctx context.Context, v *ruleView, at time.Time) (bool, error) {
-	switch {
-	case v.Tie != nil:
-		return v.Tie.Source != "" && !v.Tie.Since.IsZero() && !v.Tie.Since.After(at), nil
-	case v.Source != "":
-		from, _, err := s.l.Coverage(ctx, v.Source)
-		return err == nil && !from.IsZero() && !from.After(at), err
+	src := v.Source
+	if v.Tie != nil {
+		if v.Tie.Source == "" || v.Tie.Since.IsZero() || v.Tie.Since.After(at) {
+			return false, nil
+		}
+		src = v.Tie.Source
+	}
+	if src != "" {
+		from, to, err := s.l.Coverage(ctx, src)
+		if err != nil || from.IsZero() {
+			return false, err
+		}
+		return !from.After(at) && s.now().Sub(to) <= s.quietAfter(), nil
 	}
 	began, err := s.l.RunsFrom(ctx)
 	return err == nil && !began.IsZero() && !began.After(at), err
