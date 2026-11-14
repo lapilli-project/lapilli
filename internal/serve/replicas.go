@@ -28,8 +28,6 @@ import (
 // a single replica, leads from its start. failed is told of what makes
 // serve stop: the rules' history that can't be added.
 func (s *Server) lead(ctx context.Context, failed chan<- error) {
-	// Done leading: no step is under way.
-	defer s.stepAt.Store(0)
 	if s.l.Shared() {
 		p, _ := s.l.Leader()
 		s.log.Info("leading: this replica runs what is run once", "replica", s.l.ReplicaID(), "term", p.Term)
