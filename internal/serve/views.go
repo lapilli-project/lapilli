@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1398,51 +1397,6 @@ func (s *Server) firingLine(f ledger.Firing) firingLine {
 		ls = append(ls, k+"="+f.Labels[k])
 	}
 	return firingLine{Firing: f, Labels: strings.Join(ls, " ")}
-}
-
-type firingsView struct {
-	Day, Rule  string
-	Black      bool
-	Lines      []firingLine
-	Next       string
-	Prev, Then string // the day before and after
-}
-
-func (s *Server) firingsPage(r *http.Request) (any, error) {
-	q := r.URL.Query()
-	d := s.l.Day(s.now())
-	if v := q.Get("day"); v != "" {
-		day, err := dateDay(v)
-		if err != nil {
-			return nil, bad("day %q: want a date like 2026-11-02", v)
-		}
-		d = day
-	}
-	v := firingsView{Day: s.l.Midnight(d).In(s.cfg.Loc).Format("2006-01-02"), Rule: q.Get("rule"), Black: q.Get("black") != "",
-		Prev: s.l.Midnight(d - 1).In(s.cfg.Loc).Format("2006-01-02"), Then: s.l.Midnight(d + 1).In(s.cfg.Loc).Format("2006-01-02")}
-	before, _ := strconv.ParseInt(q.Get("before"), 10, 64)
-	const page = 100
-	fs, err := s.l.Firings(r.Context(), ledger.FiringQuery{From: s.l.Midnight(d), To: s.l.Midnight(d + 1), Rule: v.Rule, Black: v.Black, Before: before, Limit: page})
-	if err != nil {
-		return nil, err
-	}
-	for _, f := range fs {
-		v.Lines = append(v.Lines, s.firingLine(f))
-	}
-	if err := s.notifiedFirings(r.Context(), v.Lines); err != nil {
-		return nil, err
-	}
-	if len(fs) == page {
-		nq := url.Values{"day": {v.Day}, "before": {fmt.Sprint(fs[len(fs)-1].ID)}}
-		if v.Rule != "" {
-			nq.Set("rule", v.Rule)
-		}
-		if v.Black {
-			nq.Set("black", "1")
-		}
-		v.Next = "/firings?" + nq.Encode()
-	}
-	return v, nil
 }
 
 // dateDay is the day a date names, as days since 1970-01-01, as the ledger

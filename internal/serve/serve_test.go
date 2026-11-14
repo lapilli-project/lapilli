@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -207,12 +208,11 @@ func TestServe(t *testing.T) {
 
 	// A black stone was real: written down from the UI, it turns white.
 	_, body, _ = get(t, h, "/firings?day=2026-11-01&black=1")
-	i := strings.Index(body, `action="/firings/`)
-	if i < 0 {
+	m := regexp.MustCompile(`action="(/firings/[0-9]+/real)"`).FindStringSubmatch(body)
+	if m == nil {
 		t.Fatalf("no black stone to say was real:\n%s", body)
 	}
-	action := body[i+len(`action="`):]
-	action = action[:strings.Index(action, `"`)]
+	action := m[1]
 	if code, body, _ := post(t, h, action, nil, "cross-site"); code != http.StatusForbidden {
 		t.Errorf("a post from another site: %d %s", code, body)
 	}
