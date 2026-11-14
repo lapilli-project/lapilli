@@ -88,10 +88,13 @@ clock**:
   s), only while it is still its own and not lapsed; a renewal that fails
   is tried again each second.
 - **Given up** as soon as the leader stops leading, whatever stopped it
-  (serve shut down, a lease it couldn't renew), once its work has
-  returned: `until` is set in the past, and a follower takes it at its
-  next campaign. A renewal answered after the leader stopped would
-  otherwise keep it from the others for its length.
+  (serve shut down, a lease it couldn't renew, work that is stuck), before
+  its work has returned, which stuck work may never do: `until` is set in
+  the past, and a follower takes it at its next campaign. What the old
+  work would still write, claim or apply is refused in the database
+  (below). The replica leads again only once that work returned. A
+  renewal answered after the leader stopped would otherwise keep the
+  lease from the others for its length.
 - On its own pool (`lease`, one connection), so that no write, which can
   take seconds, holds a renewal up; and each renewal is asked apart from
   the clock that ends the lease, so that one waiting on the database
@@ -108,20 +111,28 @@ leader believes, and a suspended host's clock stops. So the database has
 the last word on everything the leader does (below).
 
 **A leader whose work is stuck gives the lease up.** Reaching the database
-isn't leading. Each step of the leader's work (a job begun, a run's piece)
-is noted; a step that runs longer than any may (twice the longer of
-`--timeout` and a write's deadline, and a minute), or a write that has
-held the writer past its own deadline, stops the renewals: the lease is
-given up, and the replica asks for none while it stays stuck.
+isn't leading. The leader's work, in a round, notes its progress: a job
+begun, a run's piece, and, in its context, each request asked of a
+history (Prometheus, Loki, a Grafana's) and each rule replayed. Work that
+makes none for 15 min (`stepWithin`: three times the longest one step
+takes, a request answered within 5 min or a wait of 2 min before asking
+again, or a write within its deadline of 5 min), or a write that has held
+the writer past its deadline and a minute (6 min), stops the renewals at
+the next one due: the lease is given up, and the replica asks for none
+while it stays stuck. Another leads at its next campaign: **15 min 7 s
+after the leader's last progress, at most.** A round can take long on
+purpose (a first backfill of weeks, a review of many versions): it makes
+progress all along, and isn't taken for stuck.
 `lapilli_serve_jobs_round_timestamp_seconds` says when the leader last
-finished a round of its jobs. A round can take long on purpose (a first
-backfill of weeks): it is a step that hasn't moved, not a round, that is
-taken for stuck.
+finished a round of its jobs. A write that waits for the writers' turn
+isn't stuck work: it gives up after 30 s (`lock_timeout`, below), and the
+turn is every replica's, so another leading wouldn't write sooner.
 
 **Takeover**: within `leaseFor` and a campaign of the leader's last
 renewal, killed or cut off: 10 to 17 s after its end, as it renewed 0 to 5
 s before it. Given up (a rolling update, `SIGTERM`): within a campaign, 2
-s at most. Measured, under "As built".
+s at most. Stuck: 15 min 7 s after its last progress at most. Measured,
+under "As built".
 
 ### Fencing
 
@@ -217,16 +228,23 @@ holds them to 1 s).
   lock is anyone's who can connect, and its key is in `pg_locks`.
 - **Bounded.** Each replica's writer session waits `lock_timeout` (30 s)
   for any lock, the turn among them: a write that waits longer fails
-  (`ErrTurnWaited`), and the replica isn't ready until it takes the turn
-  again, which readiness tries. **Builder's decision: replicas set
-  `lock_timeout`** (postgres.md's one process sets none): every lock a
-  replica's write waits for is the turn, or a row another replica holds
-  for a statement.
+  (`ErrTurnWaited`), and the replica says its writes wait (metrics and
+  status, below) until a write takes the turn again. It stays ready: the
+  turn is every replica's, so a session holding it would take every
+  replica out of the Service at once, though each answers its pages.
+  **Builder's decision: replicas set `lock_timeout`** (postgres.md's one
+  process sets none): what a replica's write waits for is the turn, a
+  row another replica holds for a statement, or a table a migration
+  changes, which waits 2 s at most for its own lock (below). The
+  replicas' own tables are changed outside the turn, and only by a start
+  that finds them older.
 - **A replica cut off in a write** holds the turn until the server ends
-  its session: after 60 s idle in a transaction
-  (`idle_in_transaction_session_timeout`), behind a proxy that keeps a
-  dead client's connection too; TCP's keepalives end it within a minute
-  otherwise. No write waits that long between two statements.
+  its session, a minute after its last statement ended at most: 60 s idle
+  in a transaction (`idle_in_transaction_session_timeout`), behind a proxy
+  that keeps a dead client's connection too; 60 s with its answer not
+  taken in (`tcp_user_timeout`, on Linux servers), which TCP would
+  otherwise retry some 15 min; TCP's keepalives end an idle one within a
+  minute. No write waits that long between two statements.
 - **This process's own earlier writer's sessions are ended** when the
   writer connects again (one the server kept, in a transaction, would hold
   the turn): known by pid and start, as before.
@@ -244,7 +262,17 @@ holds them to 1 s).
   privileges, so replicas started at once migrate it once. On an empty
   schema, where there is none yet, an advisory lock instead, and the
   catalog asked afresh once it is held (`to_regclass` would answer from
-  what the session cached at connect).
+  what the session cached at connect). Every lock but the turn is taken
+  before it, or waited for 2 s at most: a migration's DDL waits that long
+  for a table's lock (`pg_dump` holds one on each table for the whole
+  dump), the turn held meanwhile, then gives up, and is tried again every
+  10 s, for 5 min, after which the start fails, and is tried again as the
+  pod is.
+- **The replicas' own tables** have a version of their own
+  (`replica_schema`): a start that finds them as it makes them, or newer,
+  runs no DDL, which would wait on a dump, and needs no owner of them.
+  One that finds them older changes them outside the turn, which no
+  write of the ledger's needs, its DDL bounded as a migration's.
 
 ## Caches told of the others' writes
 
@@ -353,22 +381,40 @@ replica's.**
   that can't look it up (`helm template`, Argo CD, Flux), and a pod started
   after would sign with another key. The key is never kept in the ledger
   ([signin.md](signin.md)).
-- **Replicas that sign with other keys are refused.** Each replica keeps a
+- **Replicas compare the keys they sign with.** Each replica keeps a
   fingerprint of its key (an HMAC of a fixed text with it) in its row of
   `replica_members`, writing it before it reads the others', so that of
-  two started at once one at least sees the other; one whose fingerprint
-  differs from a live replica's is refused at start. Without
-  `--session-key-file` each process makes a key of its own: a second
-  replica is refused, and the first warns.
+  two started at once one at least sees the other. A key is as new as the
+  first live replica started with it. One whose key is the newest joins
+  while others sign with an older one, as a rollout of a new key brings
+  it in, and says so; `lapilli_serve_session_keys` and the status line
+  say how many keys the live replicas sign with until the older replicas
+  go, and meanwhile a session works on the replicas of its key alone. One
+  whose key is older than another live, as a pod the rollout replaces,
+  started again with the old Secret, is refused. **Builder's decision:
+  the newer key joins, rather than every other key being refused**,
+  which stalled a rollout of a new key with `maxUnavailable: 0`, and kept
+  a pod restarted after an edit of the Secret from coming back. What it
+  costs: replicas given different keys on purpose run, each warning, and
+  the metric says 2 or more for longer than a rollout. Without
+  `--session-key-file` each process makes a key of its own, never a
+  rotation: a second replica is refused, and the first warns. Changing
+  the key: [signin.md](signin.md).
 - **A sign-in's state is used once among the replicas** (`replica_once`),
-  kept once the provider signed someone in: a callback replayed to another
-  replica is refused there, as the provider refuses its code again, and a
-  sign-in that signs no one in, which anyone can make without signing in,
-  writes nothing to the ledger. The uses once kept are swept at their time
-  and bounded (100,000): past it, a sign-in is refused until they are.
+  kept once the provider signed in someone a role lets in: a callback
+  replayed to another replica is refused there, as the provider refuses
+  its code again. A sign-in that signs no one in, which anyone can make
+  without signing in, writes nothing to the ledger, nor one of a stranger
+  the provider signs in (a provider anyone can sign in to); each process's
+  own set refuses them again. The uses once kept are swept at their time
+  and bounded (100,000): past it, this replica's own set checks a state.
 - **Who signed out** is in the ledger already, read on each request; with
   replicas, one that can't be read is taken for a sign-out: another
-  replica may have kept one this one hasn't read.
+  replica may have kept one this one hasn't read. A sign-out made while
+  it can't be read is kept all the same: on this replica at once, and in
+  the ledger, tried again when it can't take it (for some 20 min, then
+  with the next sign-out); meanwhile another replica takes a copy of the
+  cookie.
 - **The approval forms' key** is the ledger's (`changes-form-key`, made by
   the first replica that needed one): a form one replica shows is good on
   another. It lets no one in, and signs no session.
@@ -376,16 +422,21 @@ replica's.**
 ## Readiness and metrics
 
 - **A follower is ready as the leader is**: once a run is recorded. A
-  replica that can't reach the ledger's database within 3 s isn't ready,
-  nor one whose writes wait too long for the writers' turn, until it takes
-  it again: the others answer for it. When none can, none is, and the
-  Service has no endpoint, as pages would fail anyway.
+  replica that can't reach the ledger's database within 3 s isn't ready:
+  the others answer for it. When none can, none is, and the Service has no
+  endpoint, as pages would fail anyway. One whose writes wait for the
+  writers' turn is ready, as is every other: the turn is one for them all,
+  and their pages answer; they say so (below).
 - **Which replica leads** is said on the metrics' port's `/readyz`, which
   Prometheus alone need reach: "replica ops-lapilli-6c5d-x2b-1a2b3c4d
-  leads, term 7, since ... (3 live)", or "follows ...". The UI's port's,
-  which answers anyone whatever the host, says ok.
+  leads, term 7, since ... (3 live)", or "follows ...", and whether its
+  writes wait on the turn, and how many keys sign sessions when more than
+  one. The UI's port's, which answers anyone whatever the host, says ok.
 - `/metrics`: `lapilli_serve_leader` (1 on the leader's pod, 0 on the
-  others), `lapilli_serve_replicas` (those live), and on the leader's,
+  others), `lapilli_serve_replicas` (those live),
+  `lapilli_serve_ledger_writes_waiting` (1 since a write gave up on the
+  turn, until one takes it), `lapilli_serve_session_keys` (with a sign-in
+  of lapilli's own), and on the leader's,
   `lapilli_serve_jobs_round_timestamp_seconds`. What the leader's work
   counts (`lapilli_serve_runs_total`, the last run's duration, notices
   sent, the incidents file passed over) is in its pod's metrics; what is
@@ -404,9 +455,21 @@ replica's.**
   follower leads 2 s or more after that. What it would write as the leader
   is refused in the database once another's term is there. A write of its
   cut off in the middle holds the writers' turn until the server ends the
-  session (60 s at most, above).
+  session (a minute after its last statement, above): every replica's
+  writes wait meanwhile, and say so; each stays ready.
+- **The leader's work stuck** (a history that stops answering, a request
+  that doesn't return): it gives the lease up 15 min after its last
+  progress, and another leads within 7 s more.
+- **A backup** (`pg_dump`, which holds a lock on each table for the whole
+  dump) while replicas run, or start: a start makes nothing where the
+  replicas' tables are as it makes them, so it starts, and no write
+  waits. A start that must migrate, or change the replicas' tables, waits
+  2 s at a time for the dump's locks, tried again for 5 min.
 - **A follower cut off**: it is no longer ready; the others serve.
-- **The database fails over**: every connection drops, and is made again;
+- **The database fails over**: every connection drops, and is made again,
+  to a server that started at another time, which has the writer read what
+  it caches again (a connection made again to the same server, as after a
+  write cancelled in the middle, loses nothing, and keeps it);
   a write in flight fails, and is retried by its caller as before (a run,
   at the next round). The lease's row is the database's: if the failover
   lost its last renewal, its lease ends up to 5 s sooner than the leader
@@ -430,7 +493,8 @@ replica's.**
   ("the two ledgers' tables differ"). Drop them first, with every serve
   stopped: `DROP TABLE replica_lease, replica_gens, replica_signals,
   replica_log, replica_weeks, replica_members, replica_buckets,
-  replica_once, replica_fence CASCADE; DROP FUNCTION replica_fenced();`.
+  replica_once, replica_fence, replica_schema CASCADE; DROP FUNCTION
+  replica_fenced();`.
   **Builder's decision: in the ledger's schema, not one of their own**: a
   schema of their own would need the role to create schemas, and the
   search path pinned to two.

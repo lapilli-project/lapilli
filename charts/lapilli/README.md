@@ -227,14 +227,20 @@ is killed, another leads within some 17 seconds; when it stops, within 2.
   (`serve.signIn.sessionKeySecret.name`): one the chart makes is made again
   by a render that can't look it up (`helm template`, Argo CD, Flux), and a
   pod started after would sign with another key. Replicas compare their
-  keys' fingerprints, and one with another is refused.
+  keys' fingerprints: one with a newer key joins, as a rollout brings it
+  in, one with an older key than another live is refused. To change the
+  key, write the new one into the Secret, then `kubectl rollout restart`
+  the Deployment: sessions signed with the old one end, and
+  `lapilli_serve_session_keys` says 2 until the rollout is done.
 - **`/readyz`** says which pod leads on the metrics port (9091); on the
   UI's port, ok. Give the database to the ledger's role alone (`REVOKE
   CONNECT ... FROM PUBLIC`): a role that may only connect can keep
   replicas from starting.
 - **Readiness**: a pod is ready once a run is recorded, as before, and
-  while it reaches the database. `/readyz` says which pod leads, and
-  `lapilli_serve_leader` is 1 in the leader's metrics, 0 in the others';
+  while it reaches the database; a pod whose writes wait for the ledger's
+  writers' turn stays ready, and says so
+  (`lapilli_serve_ledger_writes_waiting`). `/readyz` says which pod leads,
+  and `lapilli_serve_leader` is 1 in the leader's metrics, 0 in the others';
   the ServiceMonitor scrapes each pod. What the leader's work counts
   (`lapilli_serve_runs_total`, notices sent) is in its pod's alone.
 

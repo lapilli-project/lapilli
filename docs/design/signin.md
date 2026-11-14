@@ -143,7 +143,19 @@ than they last now.
   them, so it is never kept in the ledger: `--session-key-file`, 32
   characters or more, or else one made at random for the process, and
   sessions end when it restarts. The chart makes a Secret for it and keeps
-  it, or takes one the user names. A new key signs everyone out.
+  it, or takes one the user names (with several replicas, one of your
+  own). A new key signs everyone out.
+- **Changing the key**, with several replicas: write the new key into the
+  Secret, then restart them (`kubectl rollout restart deployment/...`).
+  Each new pod signs with the new key, and joins while the old ones still
+  sign with the old: replicas take a key first seen on the newest of them
+  for a new one ([replicas.md](replicas.md)). Until the rollout is done, a
+  session works on the pods of its key alone, and a sign-in begun on one
+  pod may fail on another: people sign in again, as after any new key.
+  `lapilli_serve_session_keys` says 2 meanwhile. A pod whose key is older
+  than another live, started again with the old Secret, is refused. An
+  edit of the Secret with no restart reaches each pod only as it starts
+  again.
 - **Secure cookies.** With an https `--external-url`, the cookies are
   `Secure` and named `__Host-lapilli-session` and
   `__Host-lapilli-login-HASH`, which a browser keeps from any other host
@@ -160,7 +172,11 @@ than they last now.
   with a count of its changes; each request reads the count, and the
   record again only when the count moved, so two processes sharing a
   ledger don't write over each other, and one signing out signs out at
-  both. It is kept until a session made then would have expired, and
+  both. One the ledger can't keep, or made while the record can't be
+  read, is kept in this process at once, and tried again in the ledger
+  for some 20 min, then with the next sign-out: until it is, a process
+  sharing the ledger takes a copy of the cookie. It is kept until a
+  session made then would have expired, and
   bounded by the people the provider signs in and a role lets in, not by
   how often anyone signs in and out:
   - Only someone a role lets in is kept: anyone the provider signs in
