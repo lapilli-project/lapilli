@@ -1,23 +1,57 @@
-{{define "firings"}}{{$title := t "Firings, %s" .View.Day}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
+{{define "firings"}}{{$title := t "Firings, %s" .View.Day}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}{{$b := .Bulk}}
 <h1>{{$title}}</h1>
-<form method="get" action="/firings" class="row">{{range $.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+<form method="get" action="/firings" class="row">{{range $.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
   <label>{{t "Day"}} <input name="day" type="date" value="{{.Day}}"></label>
   <label>{{t "Rule"}} <input name="rule" value="{{.Rule}}"></label>
   <label><input type="checkbox" name="black" value="1"{{if .Black}} checked{{end}}> {{t "only ● nothing"}}</label>
   <button>{{t "Show"}}</button>
-  <a href="{{$.Link "/firings" "day" .Prev "rule" .Rule}}"><span aria-hidden="true">←</span> {{.Prev}}</a>
-  <a href="{{$.Link "/firings" "day" .Then "rule" .Rule}}">{{.Then}} <span aria-hidden="true">→</span></a>
+  <a href="{{$.Link .Prev}}"><span aria-hidden="true">←</span> {{.PrevDay}}</a>
+  <a href="{{$.Link .Then}}">{{.ThenDay}} <span aria-hidden="true">→</span></a>
 </form>
+{{with .Labels}}<ul class="chips" aria-label="{{t "Filters in effect"}}">{{range .}}<li><a class="chip" href="{{$.Link .Href}}"><span class="vh">{{t "Remove filter:"}} </span>{{t .Group}}: <bdi>{{shown .Value}}</bdi> <span aria-hidden="true">✕</span></a></li>{{end}}</ul>{{end}}
+{{if .More}}<p class="bad">{{t "Five labels at most: the others are left out."}}</p>{{end}}
+{{with .Bulk.Result}}{{template "bulkresult" .}}{{end}}
+
+{{with .Strip}}<figure class="strip hours">
+<figcaption>{{t "By the hour they started"}}</figcaption>
+<svg class="strip" viewBox="0 0 {{.Width}} 46" role="img" aria-label="{{t "The day's firings by the hour they started; the same numbers are in the table below"}}">{{range .Hours}}
+<g><title>{{.Hour}}: {{t "%d fired, %d caught something, %d caught nothing, %d excused" .Firings .White .Black .Excused}}</title>
+{{- if not .Firings}}<rect class="none" x="{{.Cell}}" y="42" width="14" height="2"/>{{end}}
+{{- if .BlackH}}<rect class="nothing" x="{{.Cell}}" y="{{.BlackY}}" width="14" height="{{.BlackH}}"/>{{end}}
+{{- if .ExcusedH}}<rect class="excused" x="{{.Cell}}" y="{{.ExcusedY}}" width="14" height="{{.ExcusedH}}"/>{{end}}
+{{- if .WhiteH}}<rect class="hollow" x="{{.Cell}}" y="{{.WhiteY}}" width="14" height="{{.WhiteH}}"/>{{end}}</g>{{end}}
+</svg>
+<p class="strip-ends"><span>00:00</span> <span>12:00</span> <span>23:00</span></p>
+<ul class="legend">
+<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 12" width="10" height="12"><rect class="hollow" x="1.5" y="0.5" width="7" height="11"/></svg>{{t "caught something"}}</li>
+<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 12" width="10" height="12"><rect class="nothing" x="1" y="0" width="8" height="12"/></svg>{{t "caught nothing"}}</li>
+{{if .Excused}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 12" width="10" height="12"><rect class="excused" x="1.5" y="0.5" width="7" height="11"/></svg>{{t "excused"}}</li>{{end}}
+</ul>
+{{if .Capped}}<p class="quiet">{{t "Of the day's firings, the latest %d were looked through for the labels picked." 20000}}</p>{{end}}
+<details class="days"><summary>{{t "The 24 hours, as a table"}}</summary>
+<div class="scroll" tabindex="0" role="region" aria-label="{{t "The 24 hours, as a table"}}"><table>
+<thead><tr><th scope="col">{{t "Hour"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th><th scope="col" class="n">{{t "Excused"}}</th>{{if .Odd}}<th scope="col">{{t "On the clock"}}</th>{{end}}</tr></thead>
+<tbody>{{range .Hours}}<tr><th scope="row">{{.Hour}}</th><td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Excused}}</td>{{if $.View.Strip.Odd}}<td>{{if eq .Clock 0}}{{t "not this day: the clocks skipped it"}}{{else if eq .Clock 2}}{{t "twice: the clocks went back"}}{{else}}–{{end}}</td>{{end}}</tr>{{end}}</tbody>
+</table></div></details>
+</figure>{{end}}
+
 <p class="quiet">{{t "A black stone that was a real problem nobody wrote down: say so, and it is written down as an incident, from the firing's start and end."}}</p>
+{{if .Lines}}<form method="post" action="/firings/real" id="real-picked" class="bulk"><input type="hidden" name="back" value="{{$.Link $b.Back}}">{{template "noenter"}}
+<fieldset class="bulk-bar"><legend>{{t "With the firings picked"}}</legend>
+<button{{if not $b.May}} disabled aria-describedby="real-why"{{end}}>{{t "These were real"}}</button>
+{{if not $b.May}}<span id="real-why" class="why">{{t $b.Why}}</span>{{end}}
+<p class="quiet">{{t "Each one picked that caught nothing is written down as an incident, as its own button does: at most %d at a time." 100}}</p>
+</fieldset></form>{{end}}
 <div class="scroll"><table>
-<thead><tr><th scope="col">{{t "Stone"}}</th><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col" class="n">{{t "Notified"}}</th><th scope="col">{{t "Labels"}}</th><td></td></tr></thead>
+<thead><tr><th scope="col" class="pick"><span class="vh">{{t "Pick"}}</span></th><th scope="col">{{t "Stone"}}</th><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col" class="n">{{t "Notified"}}</th><th scope="col">{{t "Labels"}}</th><td></td></tr></thead>
 <tbody>{{range .Lines}}
-<tr><td>{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else}}●{{end}}{{if .Refired}} {{t "refired"}}{{end}}</td>
+<tr><td class="pick">{{if not .White}}<input type="checkbox" form="real-picked" name="firing" value="{{.ID}}" aria-label="{{.Rule}}, {{at $loc .Start}}"{{if not $b.May}} disabled{{end}}>{{end}}</td>
+<td>{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else}}●{{end}}{{if .Refired}} {{t "refired"}}{{end}}</td>
 <td><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></td>
 <td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td>
-<td class="n">{{template "notified" .}}</td><td class="labels">{{.Labels}}</td>
-<td>{{if and (not .White) (not $ro)}}<form method="post" action="/firings/{{.ID}}/real"><button class="quiet-button">{{t "This was real"}}</button></form>{{end}}</td></tr>
-{{else}}<tr><td colspan="7" class="quiet">{{t "None."}}</td></tr>{{end}}</tbody>
+<td class="n">{{template "notified" .}}</td><td class="labels">{{range .Chips}}{{if .Href}}<a class="chip label" href="{{$.Link .Href}}"><span class="vh">{{t "Only those with the label"}} </span><bdi>{{shown .Text}}</bdi></a> {{else}}<span class="chip label{{if .On}} on{{end}}"><bdi>{{shown .Text}}</bdi></span> {{end}}{{end}}</td>
+<td>{{if not .White}}{{if $b.May}}<form method="post" action="/firings/{{.ID}}/real"><button class="quiet-button">{{t "This was real"}}</button></form>{{else}}<button class="quiet-button" type="button" disabled aria-describedby="real-why">{{t "This was real"}}</button>{{end}}{{end}}</td></tr>
+{{else}}<tr><td colspan="8" class="quiet">{{t "None."}}</td></tr>{{end}}</tbody>
 </table></div>
 {{with .Next}}<p><a href="{{$.Link .}}">{{t "Earlier →"}}</a></p>{{end}}
 {{end}}{{template "bottom" .}}{{end}}

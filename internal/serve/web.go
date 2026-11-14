@@ -57,6 +57,16 @@ func (s *Server) Handler() http.Handler {
 
 	page := func(name string, view func(*http.Request) (any, error)) http.HandlerFunc {
 		h := s.cached(func(w http.ResponseWriter, r *http.Request) {
+			// A page worked out, not kept already: a few at a time. The
+			// turn is given back once it is rendered (render), before it
+			// goes to the network.
+			tn, err := s.renderTurn(r.Context())
+			if err != nil {
+				s.oops(w, r, err)
+				return
+			}
+			defer tn.give()
+			r = r.WithContext(context.WithValue(r.Context(), turnKey{}, tn))
 			// The page context, read once; the view reads the reader's own
 			// team as team= when it was taken for them.
 			r, vr := s.withContext(r, name)
@@ -122,6 +132,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /incidents/{id}/delete", s.write(s.deleteIncident))
 	mux.HandleFunc("POST /incidents/{id}/decide", s.write(s.decide))
 	mux.HandleFunc("POST /firings/{id}/real", s.write(s.real))
+	s.bulkRoutes(mux)
 	mux.HandleFunc("POST /settings", s.admin(s.postSettings))
 	mux.HandleFunc("GET /api/v1/me", s.me)
 
@@ -226,23 +237,133 @@ func loopback(remote string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// pageRenders is how many pages are worked out at once, those not kept
+// already: a page of two thousand rules takes tens of megabytes while it
+// is, and forty of them at once a gigabyte. Another waits its turn up to
+// renderWait, then is answered 503, to try again. The API, MCP, the health
+// checks, the metrics and the ports that take notifications and copies
+// aren't pages, and don't wait.
+const pageRenders = 8
+
+var renderWait = 10 * time.Second
+
+// errPagesBusy is a page that waited renderWait for its turn.
+var errPagesBusy = errors.New("the server is busy with many pages at once: try again in a few seconds")
+
+// turn is a page's turn to be worked out (pageRenders), held while it is:
+// given back once it is rendered, before it goes to the network, which a
+// reader who doesn't read can make take minutes; or when the request ends;
+// and, while the page waits for the heavy turn (busy), given back and taken
+// again.
+type turn struct {
+	mu   sync.Mutex
+	of   chan struct{} // the turns it is one of, nil for none
+	held bool
+}
+
+// turnKey is the context key a page's turn is kept under.
+type turnKey struct{}
+
+// turnOf is the turn the request whose context ctx is holds, nil for none.
+func turnOf(ctx context.Context) *turn {
+	t, _ := ctx.Value(turnKey{}).(*turn)
+	return t
+}
+
+// give gives the turn back, once.
+func (t *turn) give() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.held {
+		<-t.of
+		t.held = false
+	}
+}
+
+// take takes the turn again, given back, waiting for one up to renderWait.
+func (t *turn) take(ctx context.Context) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.held || t.of == nil {
+		return nil
+	}
+	w := time.NewTimer(renderWait)
+	defer w.Stop()
+	select {
+	case t.of <- struct{}{}:
+		t.held = true
+		return nil
+	case <-w.C:
+		return errPagesBusy
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// renderTurn takes a turn to work out a page, waiting for one up to
+// renderWait.
+func (s *Server) renderTurn(ctx context.Context) (*turn, error) {
+	if s.renders == nil {
+		return &turn{}, nil
+	}
+	select {
+	case s.renders <- struct{}{}:
+		return &turn{of: s.renders, held: true}, nil
+	default:
+	}
+	t := time.NewTimer(renderWait)
+	defer t.Stop()
+	select {
+	case s.renders <- struct{}{}:
+		return &turn{of: s.renders, held: true}, nil
+	case <-t.C:
+		return nil, errPagesBusy
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // errBusy is a heavy request that found another taking its turn.
 var errBusy = errors.New("the server is busy with another large request: try again in a minute")
 
 // busy takes the turn for a heavy request, waiting for it up to thirty
-// seconds; the func it returns gives the turn back.
+// seconds; the func it returns gives the turn back. A page waiting for it
+// holds no turn to be worked out (renderTurn) meanwhile: its turn is given
+// back while it waits, and taken again once this one is, so that pages
+// waiting for heavy work never keep others from being worked out.
 func (s *Server) busy(ctx context.Context) (func(), error) {
+	give := func() { <-s.heavy }
+	select {
+	case s.heavy <- struct{}{}:
+		return give, nil
+	default:
+	}
+	tn := turnOf(ctx)
+	if tn != nil {
+		tn.give()
+	}
+	heavyWaiting.Add(1)
+	defer heavyWaiting.Add(-1)
 	t := time.NewTimer(busyWait)
 	defer t.Stop()
 	select {
 	case s.heavy <- struct{}{}:
-		return func() { <-s.heavy }, nil
 	case <-t.C:
 		return nil, errBusy
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+	if tn != nil {
+		if err := tn.take(ctx); err != nil {
+			give()
+			return nil, err
+		}
+	}
+	return give, nil
 }
+
+// heavyWaiting counts the requests waiting for the heavy turn, for tests.
+var heavyWaiting atomic.Int64
 
 // checks are the health checks and the metrics, which a second listener
 // (--metrics-listen) serves alone: a NetworkPolicy can then let Prometheus
@@ -626,10 +747,17 @@ type cache struct {
 
 // What the cache holds, at most: a page or answer bigger than one
 // worth keeping is worked out each time.
-const (
-	cacheBytes = 32 << 20
-	cacheOne   = 2 << 20
-)
+const cacheBytes = 32 << 20
+
+var cacheOne = 2 << 20
+
+// spillWithin is how long a page or answer too big to keep has to go to
+// the network, from when the first of it does: a reader who doesn't read
+// holds the request no longer.
+var spillWithin = 30 * time.Second
+
+// spills counts the pages and answers too big to keep, for tests.
+var spills atomic.Int64
 
 type cached struct {
 	ctype string
@@ -649,15 +777,48 @@ func (s *Server) tag() string {
 	return fmt.Sprintf("%s-%d-%d-%x", s.boot, s.l.Gen(), s.saidGen(), h.Sum64())
 }
 
+// recorder keeps a page or answer as it is written, to be cached: one
+// bigger than the cache keeps (cacheOne) is written to the response, to,
+// from then on, and not kept, so that it isn't held twice, by the
+// recorder and by whatever wrote it.
 type recorder struct {
 	header http.Header
 	status int
 	body   bytes.Buffer
+	to     http.ResponseWriter
+	// paced: a page, given spillWithin to go to the network when it is
+	// too big to keep; an API's answer has the server's WriteTimeout.
+	paced   bool
+	spilled bool
 }
 
-func (r *recorder) Header() http.Header         { return r.header }
-func (r *recorder) Write(b []byte) (int, error) { return r.body.Write(b) }
-func (r *recorder) WriteHeader(status int)      { r.status = status }
+func (r *recorder) Header() http.Header    { return r.header }
+func (r *recorder) WriteHeader(status int) { r.status = status }
+
+func (r *recorder) Write(b []byte) (int, error) {
+	if !r.spilled && r.to != nil && r.body.Len()+len(b) > cacheOne {
+		h := r.to.Header()
+		for k, v := range r.header {
+			h[k] = v
+		}
+		if r.status != http.StatusOK {
+			h.Del("ETag")
+		}
+		spills.Add(1)
+		if r.paced {
+			http.NewResponseController(r.to).SetWriteDeadline(time.Now().Add(spillWithin))
+		}
+		r.to.WriteHeader(r.status)
+		if _, err := r.to.Write(r.body.Bytes()); err != nil {
+			return 0, err
+		}
+		r.body, r.spilled = bytes.Buffer{}, true
+	}
+	if r.spilled {
+		return r.to.Write(b)
+	}
+	return r.body.Write(b)
+}
 
 func (s *Server) cached(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -696,8 +857,11 @@ func (s *Server) cached(h http.HandlerFunc) http.HandlerFunc {
 		}
 		c, ok := s.cache.get(tag, key)
 		if !ok {
-			rec := &recorder{header: http.Header{}, status: http.StatusOK}
+			rec := &recorder{header: http.Header{}, status: http.StatusOK, to: w, paced: !strings.HasPrefix(r.URL.Path, "/api/")}
 			h(rec, r)
+			if rec.spilled {
+				return // too big to keep, and written
+			}
 			if rec.status != http.StatusOK || r.Context().Err() != nil {
 				for k, v := range rec.header {
 					w.Header()[k] = v
@@ -881,7 +1045,7 @@ func (s *Server) page(r *http.Request, name string, v any) page {
 	}
 	p.Here, p.HereName = navPage(name)
 	p.Nav, p.Crumb, p.Bar = s.nav(r.Context(), p), crumbsOf[name], barOf(name, r, p.Ctx)
-	back := r.URL.RequestURI()
+	back := unsaid(r.URL)
 	if len(r.URL.RawQuery) > maxQuery {
 		back = r.URL.EscapedPath()
 	}
@@ -891,6 +1055,21 @@ func (s *Server) page(r *http.Request, name string, v any) page {
 	return p
 }
 
+// unsaid is a page's own address as the links it makes name it: without
+// what a bulk write did (bulkParams), which the page says once.
+func unsaid(u *url.URL) string {
+	q := u.Query()
+	if !slices.ContainsFunc(bulkParams, q.Has) {
+		return u.RequestURI()
+	}
+	for _, k := range bulkParams {
+		q.Del(k)
+	}
+	v := *u
+	v.RawQuery = q.Encode()
+	return v.RequestURI()
+}
+
 // render writes a page, in the reader's language.
 func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, v any) {
 	var b bytes.Buffer
@@ -898,6 +1077,11 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, v a
 	if err := pagesIn[p.Lang].ExecuteTemplate(&b, name, p); err != nil {
 		s.oops(w, r, err)
 		return
+	}
+	// Rendered: the page's turn is given back before it goes to the
+	// network, however long the reader takes to read it.
+	if t := turnOf(r.Context()); t != nil {
+		t.give()
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(b.Bytes())
@@ -967,6 +1151,9 @@ func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
 	text := func(lang string) string { return message(lang, err) }
 	if errors.As(err, new(notLetIn)) {
 		text = func(lang string) string { return tr(lang, notLetInText, s.user(r)) }
+	}
+	if errors.Is(err, errPagesBusy) {
+		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(renderWait/time.Second))))
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		w.Header().Set("Content-Type", "application/json")
@@ -1152,36 +1339,28 @@ func (s *Server) real(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, bad("no such firing"))
 		return
 	}
-	f, err := s.l.FiringByID(r.Context(), id)
-	if err != nil {
+	made, f, err := s.realOne(r, id)
+	switch {
+	case err != nil:
 		s.oops(w, r, err)
-		return
-	}
-	if f.White {
+	case made == "":
 		// Pressed twice, or caught since: there is an incident already.
 		back(w, r, "/firings?day="+f.Start.In(s.cfg.Loc).Format("2006-01-02"))
-		return
+	default:
+		back(w, r, "/incidents/"+url.PathEscape(made))
 	}
+}
+
+// realOne writes the firing id down as an incident, from its start and end,
+// with the labels --match matches on: the incident's id, or "" when the
+// firing has caught something, or one was written from it already. The
+// ledger does it in one write (ledger.Real): two at once write one.
+func (s *Server) realOne(r *http.Request, id int64) (string, ledger.Firing, error) {
 	o, err := s.options(r.Context())
 	if err != nil {
-		s.oops(w, r, err)
-		return
+		return "", ledger.Firing{}, err
 	}
-	in := incident.Incident{Title: "caught by " + f.Rule, Start: f.Start, End: f.End}
-	for _, m := range o.Match {
-		if v, ok := f.Labels[m]; ok {
-			if in.Labels == nil {
-				in.Labels = incident.Labels{}
-			}
-			in.Labels[m] = []string{v}
-		}
-	}
-	made, err := s.l.Put(r.Context(), in, s.user(r), o)
-	if err != nil {
-		s.oops(w, r, err)
-		return
-	}
-	back(w, r, "/incidents/"+url.PathEscape(made))
+	return s.l.Real(r.Context(), id, s.user(r), o)
 }
 
 func (s *Server) postSettings(w http.ResponseWriter, r *http.Request) {

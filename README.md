@@ -1155,7 +1155,7 @@ lapilli serve --rules alert-rules/ --prometheus http://prometheus:9090 --match s
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/serve-dashboard-dark.png">
-  <img alt="The lapilli serve overview, with its pages in a sidebar: last week's precision, firings, incidents missed, time to catch (none), noisy rules, notifications for firings that caught nothing while people slept, re-fires and firings during deploys, each with a line of its weeks and most beside the week before; under them, the top of the firings by week" src="assets/serve-dashboard.png" width="820">
+  <img alt="The lapilli serve overview, with its pages in a sidebar: last week's precision, firings, incidents missed, time to catch (none), noisy rules, notifications for firings that caught nothing while people slept, re-fires and firings during deploys, each with a line of its weeks, most beside the week before, and a link to the list that makes it; under them, links to hide the charts' marks of deploys and quiet windows" src="assets/serve-dashboard.png" width="820">
 </picture>
 
 A web UI opens on a dashboard of the last twelve weeks: last week's
@@ -1187,6 +1187,21 @@ name and `is:noisy`, `severity:critical`, `status:tune`, `has:proposal`,
 `label:team=pay`, `group:shop` and `team:pay`; each filter in effect is a
 chip that takes it away, and the URL keeps them all
 ([docs/design/ui.md](docs/design/ui.md)).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/serve-rules-dark.png">
+  <img alt="The rules list filtered to the noisy rules over four weeks: the filters beside it with their counts, the filter in effect as a chip, a bar to make a task for each rule picked or set their team or disposition, and the rules, each with a checkbox, its badges and its numbers, and what they come to all told" src="assets/serve-rules.png" width="820">
+</picture>
+
+Many can be changed at once: rules picked on the list get a task each, a
+team or a disposition, and firings picked are written down as real, each
+as its own page would change it, with the same checks and a line each in
+the changes log. Each of the overview's numbers opens the list that makes
+it, over the same week and team (the noisy rules, the incidents missed);
+its weekly charts mark deploys and quiet windows. A day's firings are
+counted by the hour, and each firing's labels are chips that pick the
+firings with them; an incident's page draws when each rule fired around
+it.
 
 A rule's page has its badges, what to check about it and what can be done
 at its top; five numbers over the period picked (precision, firings,

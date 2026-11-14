@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"lapilli.dev/internal/ledger"
@@ -33,6 +34,40 @@ type paged struct {
 	since  map[string]time.Time
 	first  time.Time
 	within ledger.Within
+	// woken are, by week and rule, those for firings that caught nothing
+	// that came while people slept: worked out once (wokenBy).
+	wokenOnce sync.Once
+	woken     map[int64]map[string]int
+}
+
+// wokenWalks counts the walks wokenBy makes over the notifications kept:
+// for tests of how often a page makes one.
+var wokenWalks atomic.Int64
+
+// wokenBy are, by the week each came in and by rule, the notifications
+// for firings that caught nothing that came while people slept, by the
+// hours of each rule's team, sc: worked out once for the generation of the
+// ledger p is of, for the overview's "woken for nothing" and the rules
+// list alike, rather than for each page.
+func (s *Server) wokenBy(p *paged, sc schedules) map[int64]map[string]int {
+	p.wokenOnce.Do(func() {
+		wokenWalks.Add(1)
+		p.woken = map[int64]map[string]int{}
+		for _, pg := range p.pages {
+			if pg.Stone != ledger.PageBlack {
+				continue
+			}
+			if h := sc.of(pg.Rule); h == nil || h.Of(pg.At) != verdict.Asleep {
+				continue
+			}
+			w := ledger.Week(s.l.Day(pg.At))
+			if p.woken[w] == nil {
+				p.woken[w] = map[string]int{}
+			}
+			p.woken[w][pg.Rule]++
+		}
+	})
+	return p.woken
 }
 
 // shownFrom is when the twelve weeks shown start.
@@ -167,7 +202,11 @@ func (s *Server) pagedOf(ctx context.Context, t *tallies, n int, lines []ruleLin
 		return err
 	}
 	sc := o.schedules(t.o.Hours)
-	by := p.lines(s.l.Midnight(t.weeks[len(t.weeks)-n]), s.now().Add(time.Hour), sc.of)
+	to := s.now().Add(time.Hour)
+	if t.over {
+		to = t.to
+	}
+	by := p.lines(s.l.Midnight(t.weeks[len(t.weeks)-n]), to, sc.of)
 	for i := range lines {
 		if x := by[lines[i].Name]; x != nil {
 			lines[i].pagedLine = *x
@@ -211,18 +250,14 @@ func (s *Server) woken(ctx context.Context, t *tallies, o *owners, team *ledger.
 	if err != nil || p.first.IsZero() {
 		return time.Time{}, false, err
 	}
-	sc := o.schedules(t.o.Hours)
+	by := s.wokenBy(p, o.schedules(t.o.Hours))
 	for w, wv := range byWeek {
 		wv.Asleep = 0
 		wv.Uncounted = !s.l.Midnight(w + 7).After(p.first)
-	}
-	for _, pg := range p.pages {
-		if pg.Stone != ledger.PageBlack || (team != nil && o.rule[pg.Rule] != team.ID) {
-			continue
-		}
-		wv := byWeek[ledger.Week(s.l.Day(pg.At))]
-		if h := sc.of(pg.Rule); wv != nil && h != nil && h.Of(pg.At) == verdict.Asleep {
-			wv.Asleep++
+		for rule, n := range by[w] {
+			if team == nil || o.rule[rule] == team.ID {
+				wv.Asleep += n
+			}
 		}
 	}
 	return p.first, true, nil

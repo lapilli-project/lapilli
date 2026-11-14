@@ -2,6 +2,86 @@
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-11-15
+
+Many at once, and ways in: the fifth phase of docs/design/ui.md, the last of
+its plan. The rules list and the firings write to many rules or firings at
+once, as each would one by one; a firing's labels are filters, and its day
+is drawn by the hour; the overview's tiles and charts lead to what makes
+their numbers; an incident's page draws when the rules fired around it.
+Pages are worked out a few at a time, and two "This was real" at once
+write one incident. Still no script, against WCAG 2.2 AA, in four
+languages. No ledger schema change; the API and MCP answer as they did.
+
+### Added
+
+- **Many at once** (docs/design/ui.md). The rules list's table is one
+  form: a checkbox a rule, and a bar to make a task for each, set their
+  team, or set what is to become of them. The firings that caught nothing
+  can be picked and written down as real together. Each item is the write
+  its own form makes, in turn, with every check it has: a team's editor's
+  rules of another team are counted, not changed, and the changes log has
+  a line for each; a rule with a task to tune it still open has one
+  already; an error that isn't the item's stops it there, and says how
+  many weren't tried. At most
+  100 a request, from this site; Enter in the form writes nothing. The
+  list it came from is gone back to, its filters, order, team and period
+  kept, and says once what was done ("3 done; 2 not your team's").
+- **A firing's labels as chips**, each a link to the same day's firings
+  with that label too (`/firings?label=service=api`, all of them, five at
+  most); a label picked is a chip that takes it away.
+- **A day's firings by the hour** over the firings' table: 24 cells from
+  where the ledger's day starts, caught something hollow, nothing solid,
+  excused dashed; the same as a table, which says an hour the clocks
+  skipped or went back over.
+- **The overview's tiles open what makes their numbers**: each links to
+  the rules or the incidents over last week, the tiles' week, with the
+  same team, and what the list comes to is the tile's number. The rules
+  and the incidents take `week=DATE`, a whole week of the twelve kept;
+  the incidents, `state=caught|noisy|missed`, each a link with its count;
+  the rules list ends with what the rules shown come to, all told.
+- **Marks on the overview's weekly charts**: the weeks with firings during
+  deploys and the weeks a quiet window was over (up to now; with a team
+  picked, one that applies to the team's rules), besides the rules'
+  changes, each with a link to hide it or show it (`marks=`), in the
+  legend and in the table of the weeks.
+- **An incident's timeline** on its page: its span from `--lead` before it
+  to `--lead` after, and a row for each rule that caught it, nearly caught
+  it or was on around it, its firings drawn by their stones; twenty rules
+  at most, fifty firings each; the same as a table.
+
+### Changed
+
+- The overview's "Make it a task", and the firings' "This was real", are
+  shown disabled, with why, to a reader who may not use them, as each
+  page's main action is: they were a form the write then refused, or
+  weren't there.
+- The firings' days before and after keep "only ● nothing", as the form
+  does.
+- Pages not kept already, a quiet window's preview among them, are worked
+  out eight at a time; another waits its turn up to ten seconds, then is
+  answered 503 with `Retry-After`. The
+  turn is given back once the page is rendered, before it goes to the
+  network, and while the page waits for the heavy turn. A page too big for
+  the page cache isn't held twice, in the template's buffer and the
+  cache's, and has 30 seconds to go to the network: forty-eight rules
+  lists at once, at two thousand rules, peak at 550 MB of heap rather than
+  1.4 GB. The API, MCP and the other ports don't wait, and an API's
+  answer too big to keep has the server's two minutes, not 30 seconds.
+- With a team picked, the overview judges the team's incidents against
+  everyone's rules, as the incidents page does: one caught only by
+  another team's noisy rule is caught only by a noisy rule, and isn't in
+  "Time to catch".
+
+### Fixed
+
+- Two "This was real" pressed at once for one firing, by one person or
+  two, wrote an incident each, and told of each; the bulk "These were
+  real" beside them, more. A firing is written down in one write now, read
+  again in it: once.
+- "This was real" on a firing longer than an incident may be (31 days)
+  answered 500; it answers 400, saying so.
+
 ## [0.38.0] - 2026-11-15
 
 The way to change things: the fourth phase of docs/design/ui.md. Still no

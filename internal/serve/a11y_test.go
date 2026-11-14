@@ -416,8 +416,8 @@ func a11yProblems(doc *html.Node, lang string) []string {
 				bad("%s name=%q has no label", n.Data, nodeAttr(n, "name"))
 			}
 		case atom.A, atom.Button:
-			if n.DataAtom == atom.A && !hasNodeAttr(n, "href") {
-				continue
+			if n.DataAtom == atom.A && !hasNodeAttr(n, "href") || hasNodeAttr(n, "hidden") {
+				continue // no link, or not shown nor said
 			}
 			if l := firstOf(name(n), nodeText(n)); !strings.ContainsFunc(l, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsNumber(r) }) {
 				bad("%s %q has no name in words", n.Data, l)

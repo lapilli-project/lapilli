@@ -1,6 +1,6 @@
 {{define "rules"}}{{$title := t "Rules"}}{{template "top" (titled . $title)}}{{with .View}}
 <div class="head"><h1>{{$title}}</h1><p class="of">{{t "%d of %d rules" .Shown .Total}}</p></div>
-<p class="lede">{{if eq .Weeks 1}}{{t "Each rule's stones over the last week, the noisiest first."}}{{else}}{{t "Each rule's stones over the last %d weeks, the noisiest first." .Weeks}}{{end}}</p>
+<p class="lede">{{if .Week}}{{t "Each rule's stones in the week of %s, the noisiest first." .Week}}{{else if eq .Weeks 1}}{{t "Each rule's stones over the last week, the noisiest first."}}{{else}}{{t "Each rule's stones over the last %d weeks, the noisiest first." .Weeks}}{{end}}</p>
 {{if and .Empty (eq .Empty.Kind "first")}}{{template "empty" .Empty}}{{else}}
 <div class="rules-body">
 <aside class="facets-side" aria-label="{{t "Filters"}}">{{template "facets" (on $ "side")}}</aside>
@@ -15,27 +15,49 @@
 {{with .Bad}}<p class="bad">{{tbdi "Left out, as it isn't understood: %s." (shown (join . ", "))}} {{t "The search takes words of a rule's name, and team:, severity:, is:, status:, has:, label:key=value and group:. is: takes noisy, ok, silent, spare, differs, unreplayed, recorded, proposed or facts; status: keep, tune, retire or none; has: proposal or facts."}}</p>{{end}}
 {{with .Chips}}<ul class="chips" aria-label="{{t "Filters in effect"}}">{{range .}}<li><a class="chip" href="{{.Href}}"><span class="vh">{{t "Remove filter:"}} </span>{{t .Group}}: {{if .Raw}}<bdi>{{shown .Value}}</bdi>{{else}}{{t .Value}}{{end}} <span aria-hidden="true">✕</span></a></li>{{end}}</ul>{{end}}
 <p class="tabs">{{t "In order of"}}:{{range .SortLinks}} <a href="{{.Href}}"{{if .Current}} aria-current="page"{{end}}>{{if eq .By "refired"}}{{t "re-fired, the most first"}}{{else if eq .By "deploys"}}{{t "during deploys, the most first"}}{{else}}{{t "caught nothing, the most first"}}{{end}}</a>{{end}}</p>
-{{if .Rows}}<div class="scroll"><table>
-<thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Severity"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th><th scope="col" class="n">{{t "Precision"}}</th><th scope="col" class="n">{{t "Refired"}}</th>{{if .Deploys}}<th scope="col" class="n">{{t "During deploys"}}</th>{{end}}<th scope="col" class="n">{{t "Incidents"}}</th><th scope="col">{{t "12 weeks"}}</th></tr></thead>
+{{with .Bulk.Result}}{{template "bulkresult" .}}{{end}}
+{{if .Rows}}<form method="post" action="/rules/bulk" class="bulk">{{$b := .Bulk}}<input type="hidden" name="back" value="{{$b.Back}}">{{template "noenter"}}
+<fieldset class="bulk-bar"><legend>{{t "With the rules picked"}}</legend>
+<button name="do" value="task"{{if not $b.May}} disabled aria-describedby="bulk-why"{{end}}>{{t "Make a task for each"}}</button>
+{{$tw := "bulk-why"}}{{if $b.May}}{{$tw = "bulk-team-why"}}{{end}}<span class="bulk-set"><label>{{t "Team"}} <select name="team"{{if not $b.Team}} disabled aria-describedby="{{$tw}}"{{end}}><option value="0">{{t "by the teams' patterns"}}</option>{{range $b.Teams}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+<button class="quiet-button" name="do" value="team"{{if not $b.Team}} disabled aria-describedby="{{$tw}}"{{end}}>{{t "Set the team"}}</button></span>
+<span class="bulk-set"><label>{{t "Disposition"}} <select name="status"{{if not $b.May}} disabled aria-describedby="bulk-why"{{end}}><option value="">{{t "Undecided"}}</option>{{range list "keep" "tune" "retire"}}<option value="{{.}}">{{t .}}</option>{{end}}</select></label>
+<button class="quiet-button" name="do" value="status"{{if not $b.May}} disabled aria-describedby="bulk-why"{{end}}>{{t "Set the disposition"}}</button></span>
+{{if not $b.May}}<span id="bulk-why" class="why">{{t $b.Why}}</span>{{else if not $b.Team}}<span id="bulk-team-why" class="why">{{t $b.TeamWhy}}</span>{{end}}
+<p class="quiet">{{t "Each rule picked is changed as its own page would change it, and only if you may: at most %d at a time." 100}}</p>
+</fieldset>
+<div class="scroll"><table>
+<thead><tr><th scope="col" class="pick"><span class="vh">{{t "Pick"}}</span></th><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Severity"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th><th scope="col" class="n">{{t "Precision"}}</th><th scope="col" class="n">{{t "Refired"}}</th>{{if .Deploys}}<th scope="col" class="n">{{t "During deploys"}}</th>{{end}}<th scope="col" class="n">{{t "Incidents"}}</th><th scope="col">{{t "12 weeks"}}</th></tr></thead>
 <tbody>{{range .Rows}}
 <tr{{if .Noisy}} class="noisy"{{end}}>
+  <td class="pick"><input type="checkbox" name="rule" value="{{.Name}}" aria-label="{{.Name}}"{{if not $b.May}} disabled{{end}}></td>
   <td class="rule"><a href="{{$.Rule .Name}}"><bdi>{{.Name}}</bdi></a> {{template "badges" (on $ .)}}{{with .Suggestion}}<br><span class="hint">{{.}}</span>{{end}}</td>
   <td>{{or .Team "–"}}</td>
   <td>{{or .Severity "–"}}</td>
-  <td class="n">{{.Firings}}{{if .Notifications}}<br><span class="quiet">{{t "%d notifications, %d repeats" .Notifications .Repeats}}</span>{{end}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}{{if or .AsleepBlack .OffHoursBlack}}<br><span class="quiet">{{t "%d asleep, %d off hours" .AsleepBlack .OffHoursBlack}}</span>{{end}}</td><td class="n">{{.Precision}}</td><td class="n">{{.Refired}}{{if .Refired}}<br><span class="quiet">{{if .RefiredOf}}{{t "%s of firings, %d of %d whole weeks" .RefiredShare .RefiredWeeks .RefiredOf}}{{else}}{{t "%s of firings" .RefiredShare}}{{end}}</span>{{end}}{{if .Excused}}<br><span class="quiet">{{t "%d excused" .Excused}}</span>{{end}}</td>{{if $.View.Deploys}}<td class="n">{{.Deploys}}{{if .Deploys}}<br><span class="quiet">{{t "precision %s without them" .Without}}</span>{{end}}</td>{{end}}
+  <td class="n">{{.Firings}}{{if .Notifications}}<br><span class="quiet">{{t "%d notifications, %d repeats" .Notifications .Repeats}}</span>{{end}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}{{if or .AsleepBlack .OffHoursBlack}}<br><span class="quiet">{{t "%d asleep, %d off hours" .AsleepBlack .OffHoursBlack}}</span>{{end}}{{if .Woken}}<br><span class="quiet">{{t "%d notifications for nothing, while people slept" .Woken}}</span>{{end}}</td><td class="n">{{.Precision}}</td><td class="n">{{.Refired}}{{if .Refired}}<br><span class="quiet">{{if .RefiredOf}}{{t "%s of firings, %d of %d whole weeks" .RefiredShare .RefiredWeeks .RefiredOf}}{{else}}{{t "%s of firings" .RefiredShare}}{{end}}</span>{{end}}{{if .Excused}}<br><span class="quiet">{{t "%d excused" .Excused}}</span>{{end}}</td>{{if $.View.Deploys}}<td class="n">{{.Deploys}}{{if .Deploys}}<br><span class="quiet">{{t "precision %s without them" .Without}}</span>{{end}}</td>{{end}}
   <td class="n">{{.Incidents}}{{if and .Incidents (not .SomeRules)}}<br><span class="quiet">{{t "first %d, alone %d" .First .Alone}}</span>{{end}}</td>
   <td>{{template "spark" .Spark}}</td>
 </tr>{{end}}</tbody>
-</table></div>{{end}}
+<tfoot><tr><th scope="row" colspan="4">{{if eq (len .Rows) 1}}{{t "The rule shown"}}{{else}}{{t "The %d rules shown, all told" (len .Rows)}}{{end}}</th>
+  <td class="n">{{.Sum.Firings}}{{if and .Sum.Notified (not .Sum.Uncounted)}}<br><span class="quiet">{{t "%d notifications, %d repeats" .Sum.Notifications .Sum.Repeats}}</span>{{end}}</td><td class="n">{{.Sum.White}}</td><td class="n">{{.Sum.Black}}{{if or .Sum.AsleepBlack .Sum.OffHoursBlack}}<br><span class="quiet">{{t "%d asleep, %d off hours" .Sum.AsleepBlack .Sum.OffHoursBlack}}</span>{{end}}{{if .Sum.Uncounted}}<br><span class="quiet">{{t "Notifications for nothing, while people slept: – (none were kept yet)"}}</span>{{else if .Sum.Notified}}<br><span class="quiet">{{t "%d notifications for nothing, while people slept" .Sum.Woken}}</span>{{end}}</td><td class="n">{{.Sum.Precision}}</td><td class="n">{{.Sum.Refired}}{{if .Sum.Excused}}<br><span class="quiet">{{t "%d excused" .Sum.Excused}}</span>{{end}}</td>{{if .Deploys}}<td class="n">{{.Sum.Deploys}}</td>{{end}}<td></td><td></td></tr></tfoot>
+</table></div></form>{{end}}
 {{with .Empty}}{{template "empty" .}}{{end}}
 {{if .Quiet}}
-<details><summary>{{if .QuietOlder}}{{if eq .Weeks 1}}{{t "%d rules didn't fire in the last week" (len .Quiet)}}{{else}}{{t "%d rules didn't fire in the last %d weeks" (len .Quiet) .Weeks}}{{end}}{{else}}{{t "%d rules never fired in the last twelve weeks" (len .Quiet)}}{{end}}</summary>
+<details><summary>{{if .Week}}{{t "%d rules didn't fire in the week of %s" (len .Quiet) .Week}}{{else if .QuietOlder}}{{if eq .Weeks 1}}{{t "%d rules didn't fire in the last week" (len .Quiet)}}{{else}}{{t "%d rules didn't fire in the last %d weeks" (len .Quiet) .Weeks}}{{end}}{{else}}{{t "%d rules never fired in the last twelve weeks" (len .Quiet)}}{{end}}</summary>
 <p class="quiet">{{range $i, $r := .Quiet}}{{if $i}}, {{end}}<a href="{{$.Rule $r.Name}}"><bdi>{{$r.Name}}</bdi></a>{{with $r.Facts}} <a class="hint" href="{{$.RuleAt $r.Name "#says"}}">({{t "what it says: %d problems of fact" .}})</a>{{end}}{{end}}</p></details>
 {{end}}
 </div>
 </div>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
+
+{{/* A bulk form's first button, which Enter in it presses (implicit
+submission): disabled, so that Enter writes nothing; hidden, so that no one
+sees it, and no screen reader says it. */}}
+{{define "noenter"}}<button type="submit" disabled hidden></button>{{end}}
+
+{{/* What a bulk write did, said once on the page it went back to. */}}
+{{define "bulkresult"}}<p class="note bulk-done" role="status">{{if .None}}{{t "Nothing was picked: tick the ones to change first."}}{{else if eq .Kind "real"}}{{t "%d written down" .Done}}{{with .Already}}; {{t "%d had caught something already" .}}{{end}}{{with .Refused}}; {{t "%d couldn't be written down" .}}{{end}}{{with .Failed}}; {{t "%d failed: try again" .}}{{end}}{{with .Untried}}; {{t "stopped there: %d not tried" .}}{{end}}{{else}}{{t "%d done" .Done}}{{with .Already}}; {{t "%d had an open task to tune them already" .}}{{end}}{{with .Theirs}}; {{t "%d not your team's" .}}{{end}}{{with .Refused}}; {{t "%d refused" .}}{{end}}{{with .Editors}}; {{t "%d refused: editors only" .}}{{end}}{{with .Failed}}; {{t "%d failed: try again" .}}{{end}}{{with .Untried}}; {{t "stopped there: %d not tried" .}}{{end}}{{end}}</p>{{end}}
 
 {{/* The facets, the search box and the context, as one form: drawn twice,
 as the panel beside the rules on a wide screen and in a details above them

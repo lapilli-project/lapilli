@@ -35,6 +35,10 @@ type ruleRow struct {
 	// Facts is how many problems of fact what it says has; Checks, how
 	// many things to check its page lists, these among them (condsOf).
 	Facts, Checks int
+	// Woken are the notifications for its firings that caught nothing
+	// that came while people slept, in the weeks shown, by when each came,
+	// as the overview's "woken for nothing" counts them.
+	Woken int
 	// labels are those it fires with, for label:; sev and group, its
 	// severity and group, from them and the rules in effect where the
 	// ledger hasn't them.
@@ -87,14 +91,36 @@ type rulesList struct {
 	TooLong   bool
 	// SortLinks are the orders, each the same page in it.
 	SortLinks []sortLink
-	// Hidden are the form's context: team, weeks, sort. Clear is the same
-	// page without a filter but the team and the weeks.
+	// Hidden are the form's context: team, weeks, sort, and the week
+	// asked for. Clear is the same page without a filter but the team and
+	// the weeks.
 	Hidden []field
 	Clear  string
 	Active bool
 	Empty  *emptyView
 	// Legend is what each badge means, facet by facet.
 	Legend []legendGroup
+	// Bulk is the form that does something with the rules picked.
+	Bulk bulkView
+	// Week is the week shown, when one is asked for (week=), its Monday;
+	// Sum, the rules shown, all told.
+	Week string
+	Sum  ruleSum
+}
+
+// ruleSum is the rules shown, all told: the overview's tiles link to the
+// list whose sum each is.
+type ruleSum struct {
+	Firings, White, Black, Refired, Deploys, Excused int
+	AsleepBlack, OffHoursBlack                       int
+	Precision                                        string
+	// Notified says notifications are kept: Notifications, Repeats; and
+	// Woken, those for firings that caught nothing while people slept,
+	// as the overview counts them (woken). Uncounted says the weeks shown
+	// were over before the first notification came: none is counted, as
+	// the tile says "–".
+	Notified, Uncounted           bool
+	Notifications, Repeats, Woken int
 }
 
 // legendGroup is a facet's badges, in the list's legend: each its sign,
@@ -159,6 +185,8 @@ type rulesAsk struct {
 	sort  string
 	picks picks
 	words []qword
+	// week is the week asked for, its Monday's date, or "".
+	week string
 }
 
 // url is the rules page for what was asked; what it doesn't take isn't
@@ -173,6 +201,9 @@ func (a rulesAsk) url() string {
 	}
 	if a.sort != "" {
 		q.Set("sort", a.sort)
+	}
+	if a.week != "" {
+		q.Set("week", a.week)
 	}
 	for _, f := range facetsOf {
 		if vs := a.picks[f.param]; len(vs) > 0 {
@@ -227,7 +258,9 @@ type picks map[string][]string
 func (p picks) in(r ruleRow, param string) bool {
 	want := p[param]
 	if len(want) == 0 {
-		return param != "perf" || r.Perf != "silent"
+		// One that woke people for nothing, a firing begun before the
+		// weeks shown notified again in them, is listed with the rest.
+		return param != "perf" || r.Perf != "silent" || r.Woken > 0
 	}
 	return slices.ContainsFunc(r.values(param), func(v string) bool {
 		return slices.ContainsFunc(want, func(w string) bool { return strings.EqualFold(v, w) })
@@ -293,11 +326,15 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	if out, changed := canonical(asked, c.Teams); changed {
 		return nil, redirect{"/rules?" + out.Encode()}
 	}
-	d, err := s.rulesOf(r)
+	week := s.weekOf(asked)
+	d, err := s.rulesOver(r, week)
 	if err != nil {
 		return nil, err
 	}
 	v := rulesList{rulesView: d.rulesView, Legend: legendOf()}
+	if week != 0 {
+		v.Week = s.l.Midnight(week).In(s.cfg.Loc).Format("2006-01-02")
+	}
 	cursor, err := s.l.Cursor(ctx)
 	if err != nil {
 		return nil, err
@@ -346,6 +383,31 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	for _, name := range slices.Compact(quiet) {
 		all = append(all, s.row(s.quietLine(name, d, meta), d, meta, w))
 	}
+	// Each rule's notifications for nothing while people slept, as the
+	// overview counts them: by when each came, so a rule with some is
+	// listed though no firing of it started in the weeks shown.
+	woke, err := s.wokenOver(ctx, d, &v)
+	if err != nil {
+		return nil, err
+	}
+	var more []ruleLine
+	for i := range all {
+		all[i].Woken = woke[all[i].Name]
+		delete(woke, all[i].Name)
+	}
+	for _, name := range slices.Sorted(maps.Keys(woke)) {
+		more = append(more, s.quietLine(name, d, meta))
+	}
+	if len(more) > 0 {
+		if err := s.pagedOf(ctx, d.t, d.Weeks, more); err != nil {
+			return nil, err
+		}
+	}
+	for _, l := range more {
+		row := s.row(l, d, meta, w)
+		row.Woken = woke[l.Name]
+		all = append(all, row)
+	}
 	v.Total = len(all)
 
 	// What is picked, read once: the facets' parameters, a severity in the
@@ -358,7 +420,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 			spell[l] = append(spell[l], sev)
 		}
 	}
-	a := rulesAsk{c: c, sort: v.Sort, picks: picks{}}
+	a := rulesAsk{c: c, sort: v.Sort, picks: picks{}, week: v.Week}
 	for _, f := range facetsOf {
 		for _, x := range asked[f.param] {
 			if len(a.picks[f.param]) == maxValues {
@@ -432,6 +494,21 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		}
 	}
 	v.Shown = len(v.Rows)
+	for _, row := range v.Rows {
+		x := &v.Sum
+		x.Firings += row.Firings
+		x.White += row.White
+		x.Black += row.Black
+		x.Refired += row.Refired
+		x.Deploys += row.Deploys
+		x.Excused += row.Excused
+		x.AsleepBlack += row.AsleepBlack
+		x.OffHoursBlack += row.OffHoursBlack
+		x.Notifications += row.Notifications
+		x.Repeats += row.Repeats
+		x.Woken += row.Woken
+	}
+	v.Sum.Precision = pct(v.Sum.White, v.Sum.Firings)
 	for _, f := range facetsOf {
 		fc := facet{Param: f.param, Name: f.name}
 		values, labels := f.values, f.labels
@@ -475,6 +552,11 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		b.c.Team, b.c.TeamSet = "", true
 		v.Chips = append(v.Chips, chip{Group: "Team", Value: c.Team, Raw: true, Href: b.url()})
 	}
+	if a.week != "" {
+		b := a
+		b.week = ""
+		v.Chips = append(v.Chips, chip{Group: "Week of", Value: a.week, Raw: true, Href: b.url()})
+	}
 	for _, fc := range v.Facets {
 		for _, x := range p[fc.Param] {
 			if i := slices.IndexFunc(fc.Options, func(o facetOption) bool { return o.Value == x }); i >= 0 {
@@ -515,8 +597,13 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	if v.Sort != "" {
 		v.Hidden = append(v.Hidden, field{"sort", v.Sort})
 	}
+	if a.week != "" {
+		v.Hidden = append(v.Hidden, field{"week", a.week}) // its chip takes it away
+	}
 	allTeams := a
 	allTeams.c.Team, allTeams.c.TeamSet = "", true
+	v.Bulk = s.bulkFor(r, "team")
+	v.Bulk.Back, v.Bulk.Teams = a.url(), d.own.teams
 
 	switch {
 	case cursor.IsZero():
@@ -672,6 +759,30 @@ func (s *Server) ruleMeta(ctx context.Context) (map[string]ruleMeta, error) {
 		if len(vs) > 0 {
 			for _, r := range vs[len(vs)-1].Rules {
 				out[r.Name] = ruleMeta{group: r.Group, labels: r.AlertLabels(), unseen: r.Unseen()}
+			}
+		}
+	}
+	return out, nil
+}
+
+// wokenOver is, by rule, what the overview's "woken for nothing" counts
+// over the weeks the list shows, of the team's rules: the notifications for
+// firings that caught nothing that came while people slept, each in the
+// week it came in. It notes on v that notifications are kept, and whether
+// the weeks shown were over before the first came.
+func (s *Server) wokenOver(ctx context.Context, d rulesData, v *rulesList) (map[string]int, error) {
+	p, err := s.notified(ctx)
+	if err != nil || p.first.IsZero() {
+		return nil, err
+	}
+	v.Sum.Notified = true
+	v.Sum.Uncounted = !s.l.Midnight(d.t.weeks[len(d.t.weeks)-1] + 7).After(p.first)
+	by := s.wokenBy(p, d.own.schedules(d.t.o.Hours))
+	out := map[string]int{}
+	for _, w := range d.t.weeks[len(d.t.weeks)-d.Weeks:] {
+		for rule, n := range by[w] {
+			if d.team == nil || d.own.rule[rule] == d.team.ID {
+				out[rule] += n
 			}
 		}
 	}

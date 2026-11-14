@@ -226,29 +226,8 @@ func merge(spans [][2]int64) [][2]int64 {
 // theirs.
 func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o verdict.Options) (string, error) {
 	origin := originOf(by)
-	stored, _ := marshal(orEmpty(in.Labels))
-	switch {
-	case in.Start.IsZero():
-		return "", errors.New("an incident needs a start")
-	case !in.End.IsZero() && in.End.Before(in.Start):
-		return "", errors.New("an incident can't end before it starts")
-	case in.ID != "" && !keyRE.MatchString(in.ID):
-		return "", errors.New("an id is letters, digits and . _ : / # -, up to 64")
-	case !in.End.IsZero() && in.End.Sub(in.Start) > maxIncident:
-		return "", errors.New("an incident lasts 31 days at most")
-	case len(in.Title) > 500:
-		return "", errors.New("an incident's title is 500 bytes at most")
-	case len(in.Labels) > 32:
-		return "", errors.New("an incident has 32 labels at most")
-	case len(stored) > maxLabelBytes:
-		return "", errors.New("an incident's labels are 4 KB at most in all, as JSON")
-	case !sane(in.Start) || (!in.End.IsZero() && !sane(in.End)):
-		return "", errors.New("an incident's times are from 1970 to 9999")
-	}
-	for k, vs := range in.Labels {
-		if len(k) > 128 || len(vs) > 64 || slices.ContainsFunc(vs, func(v string) bool { return len(v) > 256 }) {
-			return "", errors.New("an incident's label is a name of up to 128 bytes, with up to 64 values of up to 256")
-		}
+	if err := checkIncident(in); err != nil {
+		return "", err
 	}
 	in.Candidate = false
 	if in.ID != "" {
@@ -256,78 +235,111 @@ func (l *Ledger) Put(ctx context.Context, in incident.Incident, by string, o ver
 			return in.ID, nil
 		}
 	}
-	err := l.write(ctx, func(t *txn) error {
-		if in.ID == "" {
-			n, err := l.meta(t.ctx, t, "next_incident")
-			if err != nil {
-				return err
-			}
-			next, _ := strconv.Atoi(n)
-			for {
-				next++
-				in.ID = "L-" + strconv.Itoa(next)
-				var x int
-				if err := t.QueryRowContext(t.ctx, "SELECT 1 FROM incidents WHERE key = ?", in.ID).Scan(&x); errors.Is(err, sql.ErrNoRows) {
-					break
-				} else if err != nil {
-					return err
-				}
-			}
-			if err := setMeta(t.ctx, t, "next_incident", strconv.Itoa(next)); err != nil {
-				return err
-			}
-		}
-		old, err := l.get(t, in.ID)
-		switch {
-		case errors.Is(err, ErrNotFound):
-			if origin == "copy" {
-				var n int
-				if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM incidents WHERE origin = 'copy'").Scan(&n); err != nil {
-					return err
-				}
-				if n >= maxCopied {
-					return ErrTooMany
-				}
-			}
-		case err != nil:
-			return err
-		case old.origin != origin:
-			return ErrNotYours
-		}
-		if err := put(t, in, origin, by, time.Now().Unix()); err != nil {
-			return err
-		}
-		what := "incident " + in.ID + " written"
-		var spans [][2]int64
-		// A new title judges nothing again: stones hang on times and labels.
-		if err != nil || !sameWhereWhen(l.d, old.Incident, in) {
-			spans = append(spans, pair(span(in, o)))
-		}
-		if err != nil && by != Copier { // a new one
-			told := in
-			told.Start, told.End = in.Start.UTC(), in.End.UTC()
-			if err := l.tell(t, "incident.written", by, map[string]any{"incident": told}); err != nil {
-				return err
-			}
-		}
-		if err == nil {
-			what = "incident " + in.ID + " changed"
-			if len(spans) > 0 {
-				spans = append(spans, pair(span(old.Incident, o)))
-			}
-		}
-		// The tool keeps what its incidents were; the ledger notes only
-		// that they changed.
-		before, after := oldOrNil(err, old), any(in)
-		if by == Copier {
-			before, after = nil, nil
-		}
-		if err := change(t, by, what, before, after); err != nil {
-			return err
-		}
-		return l.judgeSpans(t, spans, o)
-	})
+	err := l.write(ctx, func(t *txn) error { return l.putIn(t, &in, origin, by, o) })
 	return in.ID, err
+}
+
+// checkIncident is what Put refuses of an incident for what it is: an
+// ErrInvalid, said as the field's own sentence.
+func checkIncident(in incident.Incident) error {
+	stored, _ := marshal(orEmpty(in.Labels))
+	switch {
+	case in.Start.IsZero():
+		return invalid("an incident needs a start")
+	case !in.End.IsZero() && in.End.Before(in.Start):
+		return invalid("an incident can't end before it starts")
+	case in.ID != "" && !keyRE.MatchString(in.ID):
+		return invalid("an id is letters, digits and . _ : / # -, up to 64")
+	case !in.End.IsZero() && in.End.Sub(in.Start) > maxIncident:
+		return invalid("an incident lasts 31 days at most")
+	case len(in.Title) > 500:
+		return invalid("an incident's title is 500 bytes at most")
+	case len(in.Labels) > 32:
+		return invalid("an incident has 32 labels at most")
+	case len(stored) > maxLabelBytes:
+		return invalid("an incident's labels are 4 KB at most in all, as JSON")
+	case !sane(in.Start) || (!in.End.IsZero() && !sane(in.End)):
+		return invalid("an incident's times are from 1970 to 9999")
+	}
+	for k, vs := range in.Labels {
+		if len(k) > 128 || len(vs) > 64 || slices.ContainsFunc(vs, func(v string) bool { return len(v) > 256 }) {
+			return invalid("an incident's label is a name of up to 128 bytes, with up to 64 values of up to 256")
+		}
+	}
+	return nil
+}
+
+// putIn is Put's write, in t: in, with no id, gets the next L-n.
+func (l *Ledger) putIn(t *txn, in *incident.Incident, origin, by string, o verdict.Options) error {
+	if in.ID == "" {
+		n, err := l.meta(t.ctx, t, "next_incident")
+		if err != nil {
+			return err
+		}
+		next, _ := strconv.Atoi(n)
+		for {
+			next++
+			in.ID = "L-" + strconv.Itoa(next)
+			var x int
+			if err := t.QueryRowContext(t.ctx, "SELECT 1 FROM incidents WHERE key = ?", in.ID).Scan(&x); errors.Is(err, sql.ErrNoRows) {
+				break
+			} else if err != nil {
+				return err
+			}
+		}
+		if err := setMeta(t.ctx, t, "next_incident", strconv.Itoa(next)); err != nil {
+			return err
+		}
+	}
+	old, err := l.get(t, in.ID)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		if origin == "copy" {
+			var n int
+			if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM incidents WHERE origin = 'copy'").Scan(&n); err != nil {
+				return err
+			}
+			if n >= maxCopied {
+				return ErrTooMany
+			}
+		}
+	case err != nil:
+		return err
+	case old.origin != origin:
+		return ErrNotYours
+	}
+	if err := put(t, *in, origin, by, time.Now().Unix()); err != nil {
+		return err
+	}
+	what := "incident " + in.ID + " written"
+	var spans [][2]int64
+	// A new title judges nothing again: stones hang on times and labels.
+	if err != nil || !sameWhereWhen(l.d, old.Incident, *in) {
+		spans = append(spans, pair(span(*in, o)))
+	}
+	if err != nil && by != Copier { // a new one
+		told := *in
+		told.Start, told.End = in.Start.UTC(), in.End.UTC()
+		if err := l.tell(t, "incident.written", by, map[string]any{"incident": told}); err != nil {
+			return err
+		}
+	}
+	if err == nil {
+		what = "incident " + in.ID + " changed"
+		if len(spans) > 0 {
+			spans = append(spans, pair(span(old.Incident, o)))
+		}
+	}
+	// The tool keeps what its incidents were; the ledger notes only
+	// that they changed.
+	before, after := oldOrNil(err, old), any(*in)
+	if by == Copier {
+		before, after = nil, nil
+	}
+	if err := change(t, by, what, before, after); err != nil {
+		return err
+	}
+	return l.judgeSpans(t, spans, o)
 }
 
 // The bounds on what is written: see Put.

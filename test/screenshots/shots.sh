@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Takes the README's screenshots of lapilli serve, assets/serve-*.png, from
 # the demo ledger TestDemoServe serves (internal/serve/demo_test.go): the
-# overview and a noisy rule's page, 1240×980, in English, light and dark.
+# overview, the noisy rules and a noisy rule's page, 1240×980, in English,
+# light and dark.
 #
 # In the Playwright image of the version test/a11y/package.json pins, as
 # axe.sh runs it, which needs Go and Docker; with --local, with Go, Node and

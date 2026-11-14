@@ -16,18 +16,20 @@
   <div class="tile-of">{{or .Of " "}}</div>
   <div class="tile-delta{{if .Better}} better{{else if .Worse}} worse{{end}}">{{or .Delta " "}}</div>
   {{if .Spark}}<svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="{{t "%s, eleven weeks: %s" .Label .Values}}"><path d="{{.Spark}}"/>{{if .Has}}<circle cx="{{.DotX}}" cy="{{.DotY}}" r="3"/>{{end}}</svg>{{end}}
+  {{if .Href}}<a class="tile-more" href="{{$.Link .Href}}">{{t .More}}<span class="vh">: {{.Label}}</span> <span aria-hidden="true">→</span></a>{{end}}
 </div>{{end}}
 </section>
 
+<p class="tabs marks">{{t "Marked on the charts"}}:{{if .Marks.HasDeploys}} <a href="{{$.Link "/" "marks" .Marks.DeploysTo}}">{{if .Marks.Deploys}}{{t "Hide deploys"}}{{else}}{{t "Show deploys"}}{{end}}</a>{{end}} <a href="{{$.Link "/" "marks" .Marks.WindowsTo}}">{{if .Marks.Windows}}{{t "Hide quiet windows"}}{{else}}{{t "Show quiet windows"}}{{end}}</a></p>
 <div class="cards">
 <figure class="card">
   <figcaption><h2>{{t "Firings by week"}}</h2>
-    <ul class="legend"><li><span class="key caught"></span>{{t "caught something"}}</li><li><span class="key nothing"></span>{{t "caught nothing"}}</li></ul></figcaption>
+    <ul class="legend"><li><span class="key caught"></span>{{t "caught something"}}</li><li><span class="key nothing"></span>{{t "caught nothing"}}</li>{{template "marklegend" .Stones}}</ul></figcaption>
   <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="{{t "Firings by week, caught something and caught nothing; the same numbers are in the table below"}}">
     {{range .Stones.Ticks}}<line class="grid" x1="44" x2="550" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="38" y="{{.Y}}" dy="4">{{.Label}}</text>{{end}}
     {{range .Stones.Columns}}<g>{{range .Segments}}<path class="{{.Class}}" d="{{.Path}}"><title>{{.Title}}</title></path>{{end}}
       <text class="wk{{if .Current}} now{{end}}{{if .Alt}} alt{{end}}" x="{{.Mid}}" y="192">{{if .Current}}{{t "so far"}}{{else}}{{.Label}}{{end}}</text>
-      {{if .Changed}}<circle class="changed" cx="{{.Mid}}" cy="6" r="3.5"><title>{{t "the rules changed this week"}}</title></circle>{{end}}</g>{{end}}
+      {{template "marks" .}}</g>{{end}}
     <line class="base" x1="44" x2="550" y1="{{.Stones.Base}}" y2="{{.Stones.Base}}"/>
   </svg>
 </figure>
@@ -46,11 +48,12 @@
 
 <figure class="card">
   <figcaption><h2>{{t "Incidents by week"}}</h2>
-    <ul class="legend"><li><span class="key good"></span>{{t "✓ caught"}}</li><li><span class="key warn"></span>{{t "◐ only noisy rules caught it"}}</li><li><span class="key bad"></span>{{t "✗ missed"}}</li></ul></figcaption>
+    <ul class="legend"><li><span class="key good"></span>{{t "✓ caught"}}</li><li><span class="key warn"></span>{{t "◐ only noisy rules caught it"}}</li><li><span class="key bad"></span>{{t "✗ missed"}}</li>{{template "marklegend" .Incidents}}</ul></figcaption>
   <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="{{t "Incidents by week: caught, caught only by noisy rules, missed; the same numbers are in the table below"}}">
     {{range .Incidents.Ticks}}<line class="grid" x1="44" x2="550" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="38" y="{{.Y}}" dy="4">{{.Label}}</text>{{end}}
     {{range .Incidents.Columns}}<g>{{range .Segments}}<path class="{{.Class}}" d="{{.Path}}"><title>{{.Title}}</title></path>{{end}}
-      <text class="wk{{if .Current}} now{{end}}{{if .Alt}} alt{{end}}" x="{{.Mid}}" y="192">{{if .Current}}{{t "so far"}}{{else}}{{.Label}}{{end}}</text></g>{{end}}
+      <text class="wk{{if .Current}} now{{end}}{{if .Alt}} alt{{end}}" x="{{.Mid}}" y="192">{{if .Current}}{{t "so far"}}{{else}}{{.Label}}{{end}}</text>
+      {{template "marks" .}}</g>{{end}}
     <line class="base" x1="44" x2="550" y1="{{.Incidents.Base}}" y2="{{.Incidents.Base}}"/>
   </svg>
 </figure>
@@ -59,7 +62,8 @@
   <h2>{{t "What to look at"}}</h2>
   {{if .Actions}}<ol class="actions">{{range .Actions}}<li><a href="{{$.Link .Href}}"><bdi>{{.Text}}</bdi></a><br><span class="quiet">{{.Detail}}</span>
     {{if .Task}}<br><a class="pill open" href="{{$.Link (printf "/tasks/%d" .Task)}}">{{t "task #%d" .Task}}</a>
-    {{else if and .Kind (not $.View.ReadOnly)}}<form method="post" action="/tasks" class="track"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="rule" value="{{.Rule}}"><input type="hidden" name="incident" value="{{.Incident}}"><input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>{{end}}</li>{{end}}</ol>
+    {{else if .May}}<form method="post" action="/tasks" class="track"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="rule" value="{{.Rule}}"><input type="hidden" name="incident" value="{{.Incident}}"><input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
+    {{else if .Kind}}<span class="track-off"><button class="quiet-button" type="button" disabled aria-describedby="{{.WhyID}}">{{t "Make it a task"}}</button>{{if .Said}} <span id="{{.WhyID}}" class="why">{{if .WhyOf}}{{tbdi .Why .WhyOf}}{{else}}{{t .Why}}{{end}}</span>{{end}}</span>{{end}}</li>{{end}}</ol>
   {{else}}{{template "empty" (emptyOf "done" "Nothing to look at now." "Nothing stands out: no noisy rules, no incident missed.")}}{{end}}
   {{with .Review}}<p class="quiet">{{t "The last change to the rules, replayed over the week before %s:" (at $loc .At)}}
   {{range $i, $x := .Rules}}{{if $i}}, {{end}}<a href="{{$.Rule $x.Rule}}"><bdi>{{$x.Rule}}</bdi></a> {{t "fired %d → %d" (fired $x.Before) (fired $x.After)}}{{end}}</p>{{end}}
@@ -98,10 +102,17 @@
 <thead><tr><th scope="col">{{t "Week of"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th><th scope="col" class="n">{{t "Precision"}}</th><th scope="col" class="n">{{t "Noisy rules"}}</th><th scope="col" class="n">{{t "Refired"}}</th>{{if .Deploys}}<th scope="col" class="n">{{t "During deploys"}}</th>{{end}}<th scope="col" class="n">{{t "Incidents"}}</th><th scope="col" class="n">{{t "✓ Caught"}}</th><th scope="col" class="n">{{t "◐ Noisy only"}}</th><th scope="col" class="n">{{t "✗ Missed"}}</th></tr></thead>
 <tbody>{{range .Weeks}}
 <tr{{if .Current}} class="current"{{end}}>
-  <td class="t">{{day $loc .Start}}{{if .Current}} {{t "(so far)"}}{{end}}{{if .Changed}} <span class="tag" title="{{t "the rules changed this week"}}">{{t "rules changed"}}</span>{{end}}</td>
+  <td class="t">{{day $loc .Start}}{{if .Current}} {{t "(so far)"}}{{end}}{{if .Changed}} <span class="tag" title="{{t "the rules changed this week"}}">{{t "rules changed"}}</span>{{end}}{{if .DeployMark}} <span class="tag">{{t "deploys"}}</span>{{end}}{{if .Quiet}} <span class="tag">{{t "a quiet window"}}</span>{{end}}</td>
   <td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Precision}}</td><td class="n">{{.Noisy}}</td><td class="n">{{.Refired}}</td>{{if $.View.Deploys}}<td class="n">{{.Deploys}}</td>{{end}}
   <td class="n">{{.Incidents}}</td><td class="n">{{.Caught}}</td><td class="n">{{.NoisyOnly}}</td><td class="n{{if .Missed}} bad{{end}}">{{.Missed}}</td>
 </tr>{{end}}</tbody>
 </table></div>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
+
+{{/* A week's marks on a chart, above its column: the rules changed (a
+dot), firings during deploys (a triangle), a quiet window (a bar). */}}
+{{define "marks"}}{{if .Quiet}}<rect class="quiet" x="{{.Band}}" y="9.5" width="{{.BandW}}" height="2"><title>{{t "a quiet window"}}</title></rect>{{end}}{{if .Changed}}<circle class="changed" cx="{{.Dot}}" cy="5" r="3.5"><title>{{t "the rules changed this week"}}</title></circle>{{end}}{{if .Deploys}}<path class="deploy" d="{{.Mark}}"><title>{{t "%d fired during a deploy" .Deploys}}</title></path>{{end}}{{end}}
+
+{{/* The marks a chart has, in its legend. */}}
+{{define "marklegend"}}{{if .Changed}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 8 8" width="8" height="8"><circle class="changed" cx="4" cy="4" r="3.5"/></svg>{{t "rules changed"}}</li>{{end}}{{if .Deploys}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 8" width="10" height="8"><path class="deploy" d="M1 1H9L5 7.5Z"/></svg>{{t "firings during deploys"}}</li>{{end}}{{if .Quiet}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 12 3" width="12" height="3"><rect class="quiet" x="0" y="0" width="12" height="3"/></svg>{{t "a quiet window"}}</li>{{end}}{{end}}

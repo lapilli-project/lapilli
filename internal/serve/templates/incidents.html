@@ -1,7 +1,9 @@
 {{define "incidents"}}{{$title := t "Incidents"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
 <div class="head"><h1>{{$title}}</h1>{{template "action" (mainAction $ "Write one down" (not $ro) "editor" "")}}</div>
-<p class="lede">{{if eq .Weeks 1}}{{t "What went wrong in the last week, and what caught it."}}{{else}}{{t "What went wrong in the last %d weeks, and what caught it." .Weeks}}{{end}} <span class="tabs"><a href="{{$.Link "/incidents" "weeks" 1 "source" .Source}}"{{if eq .Weeks 1}} aria-current="page"{{end}}>{{t "1 week"}}</a> <a href="{{$.Link "/incidents" "weeks" 4 "source" .Source}}"{{if eq .Weeks 4}} aria-current="page"{{end}}>{{t "4 weeks"}}</a> <a href="{{$.Link "/incidents" "weeks" 12 "source" .Source}}"{{if eq .Weeks 12}} aria-current="page"{{end}}>{{t "12 weeks"}}</a></span></p>
-<p class="tabs">{{t "Of"}}: <a href="{{$.Link "/incidents" "weeks" .Weeks}}"{{if not .Source}} aria-current="page"{{end}}>{{t "all"}}</a> <a href="{{$.Link "/incidents" "weeks" .Weeks "source" "written"}}"{{if eq .Source "written"}} aria-current="page"{{end}}>{{t "written down"}}</a> <a href="{{$.Link "/incidents" "weeks" .Weeks "source" "impact"}}"{{if eq .Source "impact"}} aria-current="page"{{end}}>{{t "user impact (--impact)"}}</a></p>
+{{$wk := ""}}{{$wkn := print .Weeks}}{{if .Week}}{{$wk = .Week}}{{$wkn = ""}}{{with $.Ctx.Weeks}}{{$wkn = print .}}{{end}}{{end}}<p class="lede">{{if .Week}}{{t "What went wrong in the week of %s, and what caught it." .Week}}{{else if eq .Weeks 1}}{{t "What went wrong in the last week, and what caught it."}}{{else}}{{t "What went wrong in the last %d weeks, and what caught it." .Weeks}}{{end}} <span class="tabs"><a href="{{$.Link "/incidents" "weeks" 1 "source" .Source "state" .State}}"{{if and (eq .Weeks 1) (not .Week)}} aria-current="page"{{end}}>{{t "1 week"}}</a> <a href="{{$.Link "/incidents" "weeks" 4 "source" .Source "state" .State}}"{{if and (eq .Weeks 4) (not .Week)}} aria-current="page"{{end}}>{{t "4 weeks"}}</a> <a href="{{$.Link "/incidents" "weeks" 12 "source" .Source "state" .State}}"{{if and (eq .Weeks 12) (not .Week)}} aria-current="page"{{end}}>{{t "12 weeks"}}</a></span></p>
+{{with .Week}}<ul class="chips" aria-label="{{t "Filters in effect"}}"><li><a class="chip" href="{{$.Link "/incidents" "source" $.View.Source "state" $.View.State}}"><span class="vh">{{t "Remove filter:"}} </span>{{t "Week of"}}: <bdi>{{.}}</bdi> <span aria-hidden="true">✕</span></a></li></ul>{{end}}
+<p class="tabs">{{t "Of"}}: <a href="{{$.Link "/incidents" "weeks" $wkn "week" $wk "state" .State}}"{{if not .Source}} aria-current="page"{{end}}>{{t "all"}}</a> <a href="{{$.Link "/incidents" "weeks" $wkn "source" "written" "week" $wk "state" .State}}"{{if eq .Source "written"}} aria-current="page"{{end}}>{{t "written down"}}</a> <a href="{{$.Link "/incidents" "weeks" $wkn "source" "impact" "week" $wk "state" .State}}"{{if eq .Source "impact"}} aria-current="page"{{end}}>{{t "user impact (--impact)"}}</a></p>
+{{with .Judged}}{{if .Total}}<p class="tabs">{{t "How they were caught"}}: <a href="{{$.Link "/incidents" "weeks" $wkn "source" $.View.Source "week" $wk}}"{{if not $.View.State}} aria-current="page"{{end}}>{{t "all"}} <span class="quiet">({{.Total}})</span></a> <a href="{{$.Link "/incidents" "weeks" $wkn "source" $.View.Source "week" $wk "state" "caught"}}"{{if eq $.View.State "caught"}} aria-current="page"{{end}}>{{t "✓ caught"}} <span class="quiet">({{.Caught}})</span></a> <a href="{{$.Link "/incidents" "weeks" $wkn "source" $.View.Source "week" $wk "state" "noisy"}}"{{if eq $.View.State "noisy"}} aria-current="page"{{end}}>{{t "◐ only noisy rules caught it"}} <span class="quiet">({{.NoisyOnly}})</span></a> <a href="{{$.Link "/incidents" "weeks" $wkn "source" $.View.Source "week" $wk "state" "missed"}}"{{if eq $.View.State "missed"}} aria-current="page"{{end}}>{{t "✗ missed"}} <span class="quiet">({{.Missed}})</span></a></p>{{end}}{{end}}
 {{with .Judged}}{{if .Total}}<p>{{t "Of the %d judged against: %d caught, %d caught only by noisy rules, %d missed." .Total .Caught .NoisyOnly .Missed}}{{with $.View.Lead}} {{t "The first alert of a rule that isn't noisy came, at the median, %s." .}}{{end}}</p>{{end}}{{end}}
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Incident"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "From"}}</th><th scope="col">{{t "Caught"}}</th><th scope="col">{{t "Lead"}}</th></tr></thead>
@@ -36,6 +38,30 @@
 <h2>{{t "Caught by"}}</h2>
 {{if .CaughtBy}}<ul class="plain">{{range .CaughtBy}}<li><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a> {{delay .Delay}}</li>{{end}}</ul>
 {{else if .Counts}}<p class="bad">{{t "Nothing fired."}}</p>{{else}}<p class="quiet">{{if eq .Status "covered"}}{{t "It isn't judged against: an incident written down covers it."}}{{else}}{{t "It isn't judged against: %s." (t .Status)}}{{end}}</p>{{end}}
+
+{{with .Timeline}}{{if .Rows}}<section class="card timeline" id="timeline">
+<h2>{{t "When the rules fired"}}</h2>
+<p class="quiet">{{t "From %s before it started to %s after it ended, %s to %s; the incident is the shaded span." .Lead .Lead (at $loc .From) (at $loc .To)}}</p>
+<div class="scroll"><table class="timeline">
+<thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "What it did"}}</th><th scope="col" class="tl"><span class="strip-ends"><span>{{at $loc .From}}</span> <span>{{at $loc .To}}</span></span></th></tr></thead>
+<tbody>{{range .Rows}}<tr class="tl-{{.Kind}}"><th scope="row"><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></th><td>{{.Did}}</td>
+<td class="tl"><svg class="tl" viewBox="0 0 {{$.View.Timeline.Width}} 16" role="img" aria-label="{{t "%d firings: %d caught something, %d caught nothing, %d excused; the same are in the table below" .Firings .White .Black .Excused}}"><rect class="span" x="{{$.View.Timeline.SpanX}}" y="0" width="{{$.View.Timeline.SpanW}}" height="16"/>
+{{- range .Marks}}<g><title>{{.Title}}</title>{{if eq .Kind "near"}}<path class="near" d="{{.Diamond}}"/>{{else}}{{if .Line}}<line class="{{.Kind}}" x1="{{.X}}" x2="{{.To}}" y1="8" y2="8"/>{{end}}<circle class="{{.Kind}}" cx="{{.X}}" cy="8" r="4"/>{{end}}</g>{{end}}</svg></td></tr>{{end}}</tbody>
+</table></div>
+{{with .More}}<p class="quiet">{{t "%d more rules fired around it, not drawn." .}}</p>{{end}}{{if .Capped}}<p class="quiet">{{t "More firings were on around it than are drawn: the earliest %d are." .Read}}</p>{{end}}
+<ul class="legend">
+<li><svg class="sym" aria-hidden="true" viewBox="0 0 12 12" width="12" height="12"><circle class="caught" cx="6" cy="6" r="4"/></svg>{{t "caught something"}}</li>
+<li><svg class="sym" aria-hidden="true" viewBox="0 0 12 12" width="12" height="12"><circle class="nothing" cx="6" cy="6" r="4"/></svg>{{t "caught nothing"}}</li>
+{{if .Excused}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 12 12" width="12" height="12"><circle class="excused" cx="6" cy="6" r="4"/></svg>{{t "excused"}}</li>{{end}}
+{{if .Near}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 12 16" width="12" height="16"><path class="near" d="M6 2L11 8L6 14L1 8Z"/></svg>{{t "when it would have fired"}}</li>{{end}}
+<li><svg class="sym" aria-hidden="true" viewBox="0 0 12 12" width="12" height="12"><rect class="span" x="0" y="0" width="12" height="12"/></svg>{{t "the incident"}}</li>
+</ul>
+<details class="days"><summary>{{t "The firings, as a table"}}</summary>
+<div class="scroll" tabindex="0" role="region" aria-label="{{t "The firings, as a table"}}"><table>
+<thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th><th scope="col" class="n">{{t "Excused"}}</th><th scope="col">{{t "Started"}}</th></tr></thead>
+<tbody>{{range .Rows}}<tr><th scope="row"><bdi>{{.Rule}}</bdi></th><td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Excused}}</td><td>{{or .Starts "–"}}{{with .More}} {{t "and %d more" .}}{{end}}{{range .Marks}}{{if eq .Kind "near"}} {{.Title}}{{end}}{{end}}</td></tr>{{end}}</tbody>
+</table></div></details>
+</section>{{end}}{{end}}
 
 {{if .Nearly}}
 <h2>{{t "Nearly caught by"}}</h2>

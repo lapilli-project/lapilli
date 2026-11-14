@@ -211,6 +211,9 @@ td.t { white-space: nowrap; }
 .tile-spark { display: block; width: 120px; height: 30px; margin-top: .4rem; }
 .tile-spark path { fill: none; stroke: var(--viz-nothing); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
 .tile-spark circle { fill: var(--viz-caught); }
+/* Each tile links to the list that makes its number, over the same week. */
+a.tile-more { display: inline-block; margin-top: .4rem; font-size: .875rem; }
+tfoot th, tfoot td { border-bottom: 0; border-top: 1px solid var(--line-strong); font-weight: 600; color: var(--ink); }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 1rem; }
 .card { container-type: inline-size; margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.1rem; min-width: 0; box-shadow: var(--shadow); }
 .card.wide { margin-top: 1rem; }
@@ -241,7 +244,14 @@ svg.chart text.wk.now { font-style: italic; }
 svg.chart text.end { text-anchor: middle; font-size: 14px; font-weight: 600; fill: var(--ink); }
 svg.chart path.line { fill: none; stroke: var(--viz-caught); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 svg.chart circle.pt { fill: var(--viz-caught); stroke: var(--card); stroke-width: 2; }
-svg.chart circle.changed { fill: var(--accent); }
+svg.chart circle.changed, svg.sym circle.changed { fill: var(--accent); }
+/* The weeks marked: firings during deploys, a triangle; a quiet window, a
+   bar over the week, as on a rule's strip. */
+svg.chart path.deploy { fill: var(--viz-ui); }
+svg.chart rect.quiet { fill: var(--h3); }
+p.marks { margin: 0 0 .6rem; font-size: .95rem; color: var(--dim); }
+/* A count in a tab is the tab's own colour, on whatever it sits on. */
+.tabs a .quiet { color: inherit; font-size: inherit; }
 ol.actions { margin: .2rem 0 .6rem; padding-left: 1.2rem; }
 ol.actions li { padding: .35rem 0; }
 table.heat { border-collapse: separate; border-spacing: 3px; width: auto; }
@@ -282,6 +292,7 @@ a.sign { display: inline-block; min-width: 24px; min-height: 24px; text-align: c
 .pill.done, .pill.keep { background: var(--accent-soft); color: var(--on-green); border-color: var(--line); }
 .pill.dropped, .pill.retire { color: var(--dim); text-decoration: line-through; }
 form.track { display: block; margin-top: .35rem; }
+.track-off { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; margin-top: .35rem; }
 textarea { width: 100%; padding: .45rem .6rem; }
 select { padding: .35rem .45rem; }
 .comment-head { font-size: .95rem; }
@@ -331,6 +342,42 @@ td.rule { min-width: 16rem; }
 .badge.trust, .badge.check { color: var(--warn); }
 .badge.prog { color: var(--accent); }
 a.badge:hover { text-decoration: underline; }
+/* Many at once: a bar over a list whose rows are picked by a checkbox,
+   what it can do to them, each its own button; and what it did, once. */
+fieldset.bulk-bar { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem .9rem; margin: 0 0 .8rem; padding: .6rem .8rem; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--card); min-width: 0; }
+fieldset.bulk-bar legend { padding: 0 .3rem; font-size: .9rem; font-weight: 600; color: var(--dim); }
+fieldset.bulk-bar p { margin: 0; flex-basis: 100%; }
+.bulk-set { display: inline-flex; flex-wrap: wrap; align-items: end; gap: .4rem; }
+td.pick, th.pick { width: 2rem; padding-right: 0; }
+td.pick input { width: 1.1rem; height: 1.1rem; margin: .2rem 0 0; }
+p.bulk-done { margin: 0 0 .8rem; }
+/* A firing's labels, each a chip that picks the firings with it; one
+   picked already is drawn solid, and isn't a link. */
+td.labels .chip { font-family: var(--mono); font-size: .8rem; padding: 0 .5rem; margin: .1rem 0; overflow-wrap: anywhere; }
+span.chip { display: inline-block; border: 1px solid var(--line-ui); border-radius: 9999px; color: var(--ink); background: var(--card); }
+span.chip.on { border: 2px solid var(--accent); background: var(--accent-soft); }
+span.chip.on::before { content: "✓ "; content: "✓ " / ""; }
+/* A day's firings by the hour: each hour's bar, from the foot up, what
+   caught nothing (solid), what was excused (dashed) and what caught
+   something (hollow, as ○). */
+svg.strip rect.hollow, svg.sym rect.hollow { fill: var(--card); stroke: var(--viz-caught); stroke-width: 1.5; }
+/* An incident's timeline: a row a rule, its span shaded, each firing a
+   line from its start, its stone a circle at the start, hollow for one
+   that caught something, solid for one that didn't, dashed for excused,
+   and a diamond where a rule that nearly caught it would have fired. */
+table.timeline th[scope=row] { white-space: nowrap; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; }
+table.timeline .tl { width: 55%; min-width: 14rem; }
+table.timeline .strip-ends { margin: 0; }
+svg.tl { display: block; width: 100%; height: auto; }
+svg.tl rect.span, svg.sym rect.span { fill: var(--accent-wash); }
+svg.tl line { stroke-width: 2; }
+svg.tl line.caught { stroke: var(--viz-caught); }
+svg.tl line.nothing, svg.tl line.excused { stroke: var(--viz-nothing); }
+svg.tl line.excused { stroke-dasharray: 2 2; }
+svg.tl circle.caught, svg.sym circle.caught { fill: var(--card); stroke: var(--viz-caught); stroke-width: 2; }
+svg.tl circle.nothing, svg.sym circle.nothing { fill: var(--viz-nothing); }
+svg.tl circle.excused, svg.sym circle.excused { fill: var(--card); stroke: var(--viz-nothing); stroke-width: 1.5; stroke-dasharray: 2 1.5; }
+svg.tl path.near, svg.sym path.near { fill: var(--card); stroke: var(--accent); stroke-width: 1.5; }
 
 /* A rule's page: its name and badges, what can be done, the facts of it and
    what to check; five numbers over the period, each with a definition to

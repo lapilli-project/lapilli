@@ -1,6 +1,6 @@
 // Takes the README's screenshots of lapilli serve from the demo ledger
-// TestDemoServe serves: the overview and a noisy rule's page, 1240×980, in
-// English, light and dark. Run by shots.sh.
+// TestDemoServe serves: the overview, the noisy rules and a noisy rule's
+// page, 1240×980, in English, light and dark. Run by shots.sh.
 //
 // BASE is where the demo is served; OUT, the directory the PNGs are
 // written to.
@@ -10,6 +10,7 @@ const base = process.env.BASE;
 const out = process.env.OUT ?? '.';
 const shots = [
   ['/', 'serve-dashboard'],
+  ['/rules?perf=noisy&weeks=4', 'serve-rules'],
   ['/rules/CheckoutLatencyP99?weeks=4', 'serve-rule'],
 ];
 

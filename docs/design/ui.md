@@ -1,12 +1,14 @@
 # The web UI of `lapilli serve`
 
 Status: phases 1 and 2 in v0.35.0; phase 3, a rule's page, in v0.37.0;
-phase 4, the way to change things, built, unreleased. This is how the
-pages are put together: the frame every page has, the team and period
-carried from page to page, the search, the rules list and its filters, a
-rule's page, the way to change things (a proposal's page, the lists'
-facets, a quiet window's preview, the Manage page), and what the later
-phases will add. [serve.md](serve.md) says what each page shows;
+phase 4, the way to change things, in v0.38.0; phase 5, many at once and
+ways in, built, unreleased. This is how the pages are put together: the
+frame every page has, the team and period carried from page to page, the
+search, the rules list and its filters, a rule's page, the way to change
+things (a proposal's page, the lists' facets, a quiet window's preview,
+the Manage page), what can be done to many at once and the ways from a
+number to what makes it, and what the later phases will add.
+[serve.md](serve.md) says what each page shows;
 [access.md](access.md) how the pages meet WCAG 2.2 AA.
 
 ## What holds for every page
@@ -36,6 +38,23 @@ phases will add. [serve.md](serve.md) says what each page shows;
   "Left out: more than 20 words". A facet takes 20 values, a value given
   twice once. Several `q=` are one search, joined. What a page does with
   what it is asked doesn't grow past these.
+- **A few at a time.** A page not kept already is worked out with seven
+  others at most (`pageRenders`); another waits its turn up to ten
+  seconds, then is answered 503, with `Retry-After`. The turn is held
+  while the page is worked out and rendered, and given back before any of
+  it goes to the network, so that readers who don't read hold none
+  (`TestSlowReaders`); and while the page waits for the heavy turn (the
+  settings tried over a week, a report's preview), given back and taken
+  again once it has that one (`TestHeavyHoldsNoTurn`). A page is rendered
+  whole into one buffer; one past what the page cache keeps (2 MB: the
+  rules list at two thousand rules is 5.5) goes from that buffer to the
+  response, not copied into the cache's besides, and has 30 seconds to
+  go to the network, then the server gives it up; an API's answer as big
+  keeps the server's two minutes. Only pages wait, a quiet window's
+  preview among them (`TestPreviewTakesTurn`): the API, MCP, the health
+  checks, the metrics and the ports that take notifications and copies
+  don't. Forty-eight `/rules` at once, at two
+  thousand rules, went from a peak of 1.4 GB of heap to 550 MB.
 
 ## The frame
 
@@ -73,7 +92,7 @@ The skip link is first, as before.
 
 ### Error pages
 
-An error page (403, 404, 414, 500), and the page after signing out, are
+An error page (403, 404, 414, 500, 503), and the page after signing out, are
 shown to whoever asked, a stranger refused too. They are the frame alone:
 no count beside Tasks or Proposals, no team or period on any link, no
 reader's own team, and no status line or version (a failed run's error
@@ -705,6 +724,188 @@ lines a side, shown whole, too), a quiet window's preview 35 to 80 ms
 (every day, once over the four weeks, by cron), the tasks and the Manage
 page about a millisecond.
 
+## Many at once, and ways in
+
+Phase 5: bulk writes on the rules list and the firings, a firing's labels
+as filters and its day by the hour, the overview's tiles and charts as ways
+to what makes their numbers, and an incident's timeline.
+
+### Bulk writes
+
+The rules list's table is a POST form to `/rules/bulk` (the facets are a
+GET form of their own, beside it, not around it): a checkbox a row, its
+accessible name the rule's, and a bar over the table, "With the rules
+picked": Make a task for each, a team and Set the team, a disposition and
+Set the disposition, each its own button (`do=task|team|status`). There is
+no "pick every row": that takes a script. The firings have the same for
+what caught nothing, "These were real", a form of its own above the table
+whose checkboxes join it by `form=`, so that each row's own "This was
+real" form stays as it was, outside it.
+
+Each item is the write the same form makes for one, in turn, with every
+check it has: a task as a rule's "Add a task" makes it (`Tune NAME`, kind
+tune, the rule's team; `ledger.PutTask`, which refuses a team's editor
+another team's), a note as the rule's note form keeps it, its other fields
+as they are, read just before it is written, as the form shows it just
+before it is sent (`ruleInScope`, `ledger.NoteOf`, then `ledger.PutNote`,
+which refuses a team's editor a rule's team changed), an incident as the firing's own "This was
+real" writes it (`realOne`). So the changes log has a line for each, by
+whom, as one by one would, and a refusal is counted, not written: a
+team's editor's rules of another team are "not your team's", and a
+team's editor's "Set the team", which only editors may, "refused: editors
+only", each rule, their own team's too; what the
+ledger refuses for what it is (an `ErrInvalid`, as Put's checks are: a
+firing longer than an incident may be, 31 days, which the single button
+answers 400), "refused"; a firing that has caught something by its turn
+(an incident written from one picked before it covers it), "had caught
+something already". A rule is picked by its name, the spaces around it
+taken off before the picks are made unique, and a rule with a task to
+tune it still open, or being done, has one already: it is counted so,
+and none is made. Those go on to the next. An error of another kind (the
+writers' turn waited for too long, a database that stopped answering, a
+lead lost) would be the same for the rest: it is counted "failed",
+logged once as an error page logs it, and the write stops there, and ends
+on the list it came from, which says how many weren't tried ("1 failed:
+try again; stopped there: 96 not tried"), never on an error page.
+`TestBulkRules` sets each beside the same writes made one at a time on a
+twin ledger: the same notes, the same tasks, the same lines in the
+changes log, for an editor, an admin and a team's editor;
+`TestBulkKeepsNotes` holds a note's text and runbook as they were, and
+`TestBulkNoteReadEach` one changed while the rules before it were
+written; `TestBulkPartial` makes an item fail.
+
+A firing is written down as real in one write of the ledger's
+(`ledger.Real`), by the single button and the bulk form alike: the firing
+read again in it, and nothing written when it has caught something by
+then, or an incident written here from it is there already (its title,
+times and labels); a write of nothing is rolled back, not counted, so
+what pages keep, and other replicas, stand. Two at once, by one person or
+two, write one incident, and tell of it once: `TestRealOnce` posts a hundred four times at once,
+beside each firing's own button, on SQLite, and on Postgres with
+`LAPILLI_TEST_POSTGRES`; it wrote 107 to 110 incidents before.
+
+A request takes 100 at most, each once, however often it is picked; past
+that it is refused whole, 400. The writes are the same doors: same-site
+POSTs (a cross-site one is refused before the handler), `--read-only`,
+the role (`teamWrite` for the rules, `write` for the firings). The form
+names the list it came from (`back`), which is gone back to only if it is
+that list's path (`safeBack`, then the path checked), with what was done
+in its query, `bulk=task&done=3&theirs=2&failed=1`, with the team and
+the period it was looked at for: the page says it once, in a
+`role="status"` line, read within bounds (counts of 0 to 100, a kind it
+knows; anything else says nothing), and none of the links or forms the
+page makes carry it on, the language links (which name the page
+query-escaped), the bar's form and a comment's way back among them
+(`unsaid`). A link can still be made to say a result that wasn't, as any
+text in a URL can be: to whoever opens that link alone, on their own
+screen, and it changes nothing. The bar is disabled for whoever may not
+use it, with why (`aria-describedby`); a team's editor's "Set the team"
+is, "Editors only", as moving a rule into or out of a team is an
+editor's, and refused when it is sent all the same.
+
+Enter in a form presses its first button (implicit submission): from a
+row's checkbox, that would be a write for every row picked. Each bulk
+form's first button is a disabled one, `hidden`, so that Enter does
+nothing, and no one sees it, nor does a screen reader say it; each
+action is a button pressed (`TestBulkNoEnter`).
+
+### The firings: labels, and the day by the hour
+
+Each firing's labels are chips, `name=value` in `<bdi>`, each a link to the
+same day's firings with that label too (`label=name=value`, repeatable,
+all of them, five at most, a name of 128 bytes and a value of 256 as the
+ledger keeps them); a label already picked is drawn solid and isn't a
+link; with five picked, none adds one. Those picked are chips in "Filters
+in effect", each taking its label away, and the form's hidden fields; the
+days before and after, and the next page, keep them, and the rule and
+"only ● nothing" (which the day links used to drop). A label that isn't
+one is left out and not said back; past five, the page says some were.
+With labels picked, the page looks through the day's latest 20,000
+firings for them, and says so when there were more.
+
+Over the table, the day's firings by the hour of the clock each started
+in: 24 cells, from where the ledger's day starts (on a day whose midnight
+the clocks skip, America/Santiago 2026-09-06, from 01:00), each counting
+the firings the page lists, all of them, not only the hundred shown:
+caught something hollow (○), caught nothing solid (●), excused dashed,
+stacked from the foot. The same as a table in a `<details>`, which says of
+an hour the clocks skipped "not this day" and of one they went back over
+"twice". Without labels, it is one read of the day's firings counted by
+the database, by the quarter of an hour (in UTC) each started in, the
+caught and the excused apart (`ledger.FiringStarts`): every zone is a
+whole number of quarters off UTC, so each quarter falls in one hour of
+the clock; 96 rows a day, however many fired, and no labels read.
+`TestHourStrip` sets it beside the ledger's firings, by the date on the
+clock, in UTC, Seoul, Santiago (a skipped midnight, a repeated hour),
+Berlin, New York, Kathmandu, Kolkata and Lord Howe (half an hour on), to
+the second.
+
+### The overview's ways in
+
+Each tile links to the list that makes its number, with the same team,
+over the tiles' week, last week: `week=DATE` on the rules and the
+incidents is a whole week of the twelve kept, over (a date in it is its
+Monday; another date, or this week, is no week, and the list is over its
+period). The list says so in its lede and has a chip for it, and the
+filters' form keeps it as a hidden field, so that Apply stays in the week;
+the chip takes it away. Precision,
+Firings and Woken for nothing go to the rules over the week; Noisy rules
+to `perf=noisy`; Refired and During deploys to the order by each; the
+incidents missed and caught to the incidents, `state=missed|caught`
+(`state=` takes caught, noisy or missed, each a link with its count, the
+counts and the median lead of every one). The rules list ends with a row
+of what the rules shown come to: firings, caught, nothing (and asleep, off
+hours, and the notifications for nothing while people slept, once
+notifications are kept), precision, re-fires, during deploys.
+
+"Woken for nothing", once notifications are kept, counts notifications,
+by the week each came in, not firings: the overview and the rules list
+both count from one table, by week and by rule, worked out once for a
+generation of the ledger (`wokenBy`). So the list counts each rule's, of
+the team's rules, and a rule with some is listed though no firing of it
+started in the week (one at 23:59:30 the Sunday before, notified at
+00:00:30; a long one begun the week before, notified again), its row
+saying how many. A week over before the first notification was kept says
+"–" there, as the tile does, not 0. With a team picked, the overview
+judges its incidents against everyone's rules, as the incidents page
+does: one caught only by another team's noisy rule is caught only by a
+noisy rule on both. `TestDrillDown` holds each tile to what its list comes
+to, for all teams and each, with notifications kept and without.
+
+The firings and incidents charts mark, besides the weeks the rules
+changed, the weeks with firings during deploys (a triangle) and the weeks
+a quiet window was over (a bar): one excused a firing of the team's, or
+one of the team's or everyone's (any team's, for all teams; one of a team
+removed, none) covers some time of the week, up to now in the week under
+way (a window due later in it marks nothing yet), as `windowDays` works it
+out for a rule's strip; for a team, a window that applies to some rule of
+the team's, by its name, team and labels (`Window.Applies`), as a rule's
+strip has it. Each kind has a link to hide it and show it again
+(`marks=deploys,windows`, both when not given, `none` for neither; a value
+it doesn't take is none); the legend names the marks shown; the table of
+the weeks says the same, a tag a mark. "What to look at" is as it was, and
+its "Make it a task" is disabled, with why, for whoever may not: a team's
+editor makes tasks of their team's rules, and none about an incident.
+
+### An incident's timeline
+
+An incident's page draws it on a time axis from `--lead` before it to
+`--lead` after it ends (with no end, as long as the verdict takes one,
+`UnknownLen`): its span shaded, and a row for each rule that caught it,
+then each that nearly caught it (the near misses the page lists, a diamond
+where it would have fired), then each that was on around it, by when it
+first was, its firings drawn from their starts, the stone a circle at the
+start: hollow, solid, dashed. Twenty rules at most, fifty firings each,
+the rest counted; the firings read once, those on in the span, started in
+it or before and not ended by its start, a day back, the earliest first,
+5,000 at most (`ledger.FiringsOn`): those that caught it are read before
+any that came after them, and those over before the span don't count
+against the 5,000. A span of no length (`--lead 0`, and an incident that
+ended as it started) draws all at its start; one that crosses midnight
+says the date with each time. The rows are a table, a rule's name in a
+row header and its firings an SVG on the shared axis; the same numbers,
+and when each firing started, are a table in a `<details>` under it.
+
 ## Without a script
 
 | Elsewhere | Here |
@@ -721,14 +922,12 @@ page about a millisecond.
 | a dry run before saving | a Preview button on the same POST, which writes nothing |
 | a box that enables a button | `required`, and checked again by the server |
 | a diff view's toggles | links, `?diff=` and `?context=` |
+| rows picked, then an action | a checkbox a row in one POST form, a button an action; each row's own write in turn; Enter presses a disabled button first |
+| a toast saying what was done | the page gone back to says it once, from its query |
+| annotations toggled on a chart | a link to the same page with `marks=` |
 
 ## Later phases
 
-- **Bulk actions** on the rules list: a task, a note's status, a proposal
-  for the rules picked, as one POST form.
-- **Label chips**: the labels a rule fires with as chips on its row, each a
-  `label:` filter.
-- **The overview's drill-down**: each tile and chart a link to the rules or
-  incidents it counts, with the filters that give them.
-- Disabled-with-why on the rules list, the firings and the overview, by
-  the phase that changes them.
+- **A proposal for the rules picked**, beside the bulk writes.
+- **Label chips on the rules list**: the labels a rule fires with as chips
+  on its row, each a `label:` filter.

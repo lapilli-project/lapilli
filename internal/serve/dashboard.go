@@ -27,6 +27,11 @@ type weekView struct {
 	Asleep                               int             // firings that caught nothing while people slept; notifications for them, once there are any
 	Uncounted                            bool            // Asleep isn't counted: a week before the first notification
 	Changed, Current                     bool
+	// Quiet says a quiet window was over it: one excused a firing, or
+	// one covers some of it; DeployMark, its firings during deploys: the
+	// marks on the charts, when they are asked for (marksOf).
+	Quiet      bool
+	DeployMark int
 	// Refired are its firings that re-fired; Deploys those that came
 	// during a deploy, DeploysCaught those of them that caught something.
 	Refired, Deploys, DeploysCaught int
@@ -75,6 +80,10 @@ type tile struct {
 	DotX, DotY    float64
 	Has           bool   // the sparkline has a point to end on
 	Values        string // the sparkline's, the oldest first, for those who can't see it
+	// Href is the list that makes its number, over the same week, More
+	// what it is; key, the tile's label, untranslated.
+	Href, More string
+	key        string
 }
 
 // geometry of the column charts
@@ -107,12 +116,33 @@ type column struct {
 	Changed   bool
 	Current   bool
 	Alt       bool // every other week, left unlabelled on a narrow screen
+	// Deploys are its firings during deploys, and Quiet says a quiet
+	// window was over it: marks the chart draws when they are asked for.
+	// Band is where its week is, BandW how wide.
+	Deploys     int
+	Quiet       bool
+	Band, BandW float64
+}
+
+// Mark is where the mark of a deploy is drawn, a triangle pointing down;
+// Dot, the rules' change.
+func (c column) Mark() string {
+	return fmt.Sprintf("M%.1f 1.5H%.1fL%.1f 8.5Z", c.Mid+2.5, c.Mid+11.5, c.Mid+7)
+}
+func (c column) Dot() float64 {
+	if c.Deploys > 0 {
+		return c.Mid - 7
+	}
+	return c.Mid
 }
 
 type columnChart struct {
 	Columns []column
 	Ticks   []tick
 	Base    float64
+	// Changed, Deploys and Quiet say a week has that mark, which the
+	// legend then names.
+	Changed, Deploys, Quiet bool
 }
 
 type point struct {
@@ -148,6 +178,12 @@ type action struct {
 	Text, Detail, Href          string
 	Kind, Rule, Incident, Title string
 	Task                        int64
+	// May says the reader may make the task; else Why is why, WhyOf the
+	// team it names, and WhyID the id of the sentence that says it, said
+	// by the first action disabled for it (Said).
+	May               bool
+	Why, WhyOf, WhyID string
+	Said              bool
 }
 
 type dashboard struct {
@@ -165,6 +201,8 @@ type dashboard struct {
 	Weeks          []weekView // the latest first, for the table
 	Review         *reviewView
 	Team           teamFilter
+	// Marks are the marks on the charts, as asked (marks=).
+	Marks marksView
 	// Check is the replay beside what really fired over the last whole
 	// week, with the rules that differ; nil when that isn't checked.
 	Check       *weekCheck
@@ -283,11 +321,14 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			continue
 		}
 		wv.Incidents++
-		switch t.state(in, w) {
+		// Judged against everyone's rules, as the incidents page judges
+		// them: one of the team's caught only by another team's noisy rule
+		// was caught only by a noisy rule.
+		switch t.stateAll(in, w) {
 		case "caught":
 			wv.Caught++
 			for _, c := range in.CaughtBy {
-				if !t.noisy(w, t.id(c.Rule)) {
+				if !t.noisyAll(w, t.id(c.Rule)) {
 					wv.Delays = append(wv.Delays, c.Delay)
 					break
 				}
@@ -339,6 +380,10 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			v.Check = weekCheckOf(all, cs, s.differs(), in)
 		}
 	}
+	drill(v.Tiles, last.Start.In(s.cfg.Loc).Format("2006-01-02"))
+	if v.Marks, err = s.marksOf(ctx, r.URL.Query(), t, o, team, ws, v.Deploys); err != nil {
+		return nil, err
+	}
 	v.Stones = stonesChart(l, ws, s.cfg.Loc)
 	v.Precision = precisionChart(l, ws, s.cfg.Loc)
 	v.Incidents = incidentsChart(l, ws, s.cfg.Loc)
@@ -383,6 +428,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			}
 		}
 	}
+	s.mayTask(r, o, v.Actions)
 	if len(v.Tasks) > 6 {
 		v.Tasks = v.Tasks[:6]
 	}
@@ -425,7 +471,7 @@ func outcomeLines(l string, out *outcomes) []outcomeLine {
 func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep string, deploys bool, refired func() (int, int)) []tile {
 	var out []tile
 	add := func(label string, val func(*weekView) (float64, bool), show func(float64) string, delta func(a, b float64) string, better int, of string) {
-		x := tile{Label: tr(l, label), Value: "–", Of: of}
+		x := tile{Label: tr(l, label), Value: "–", Of: of, key: label}
 		if a, ok := val(last); ok {
 			x.Value = show(a)
 			if b, ok := val(before); ok && a != b {
@@ -591,7 +637,7 @@ func stacked(l string, ws []*weekView, loc *time.Location, parts func(*weekView)
 	for i, w := range ws {
 		x := plotL + band*float64(i) + (band-cw)/2
 		col := column{X: x, W: cw, Mid: x + cw/2, Label: w.Start.In(loc).Format("01-02"), Changed: w.Changed, Current: w.Current,
-			Alt: (len(ws)-1-i)%2 == 1}
+			Alt: (len(ws)-1-i)%2 == 1, Deploys: w.DeployMark, Quiet: w.Quiet, Band: plotL + band*float64(i) + 1, BandW: band - 2}
 		ps := parts(w)
 		top := len(ps) - 1
 		for top >= 0 && ps[top] == 0 {
@@ -615,6 +661,7 @@ func stacked(l string, ws []*weekView, loc *time.Location, parts func(*weekView)
 			y = hi
 		}
 		c.Columns = append(c.Columns, col)
+		c.Changed, c.Deploys, c.Quiet = c.Changed || col.Changed, c.Deploys || col.Deploys > 0, c.Quiet || col.Quiet
 	}
 	return c
 }
@@ -788,4 +835,38 @@ func weekCheckOf(all ledger.Check, cs map[string]ledger.Check, d Differs, in fun
 		return nil
 	}
 	return &weekCheck{Share: int(math.Round(all.Share() * 100)), Either: all.Either(), Differ: ledger.Differing(cs, in, d.N, d.Ratio)}
+}
+
+// mayTask says, of each action that would make a task, whether the reader
+// may: an editor any, a team's editor one about their team's rule; and,
+// for one they may not, why, those disabled for one reason sharing the
+// sentence that says it.
+func (s *Server) mayTask(r *http.Request, o *owners, as []action) {
+	role, teams := s.role(r), s.editsTeams(r)
+	ids := map[string]string{}
+	for i := range as {
+		a := &as[i]
+		if a.Kind == "" || a.Task != 0 {
+			continue
+		}
+		team := o.rule[a.Rule]
+		switch {
+		case role >= editor, len(teams) > 0 && a.Rule != "" && team > 0 && slices.Contains(teams, team):
+			a.May = true
+			continue
+		case len(teams) > 0 && a.Rule != "" && team > 0:
+			a.Why, a.WhyOf = "Only %s's editors", o.byID[team].Name
+		case len(teams) > 0:
+			a.Why = "Editors only"
+		default:
+			a.Why = cmpOr(s.why(r), "Editors only")
+		}
+		key := a.Why + "\x00" + a.WhyOf
+		if id, ok := ids[key]; ok {
+			a.WhyID = id
+		} else {
+			a.WhyID, a.Said = fmt.Sprintf("look-why-%d", len(ids)+1), true
+			ids[key] = a.WhyID
+		}
+	}
 }

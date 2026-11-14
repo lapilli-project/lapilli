@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +48,10 @@ type tallies struct {
 	// in; ok false with no firing.
 	firstWeek int64
 	firstOK   bool
+	// to is when the span its weeks are over ends, zero for now; over
+	// says its last week is over, a week before this one (talliesTo).
+	to   time.Time
+	over bool
 }
 
 // whole are, of the weeks ws, those the ledger has whole: not the week
@@ -58,7 +61,7 @@ type tallies struct {
 func (t *tallies) whole(ws []int64) []int64 {
 	var out []int64
 	for _, w := range ws {
-		if t.firstOK && w > t.firstWeek && w < t.weeks[len(t.weeks)-1] {
+		if t.firstOK && w > t.firstWeek && (w < t.weeks[len(t.weeks)-1] || t.over) {
 			out = append(out, w)
 		}
 	}
@@ -81,12 +84,21 @@ func (t *tallies) refireWeeks(ws []int64, in func(id int64) bool) (with, of int)
 }
 
 func (s *Server) tallies(ctx context.Context, n int) (*tallies, error) {
+	return s.talliesTo(ctx, n, ledger.Week(s.l.Day(s.now())))
+}
+
+// talliesTo are the tallies of the n weeks to the week starting last: when
+// it is over, a week before this one, they are over the span to its end.
+func (s *Server) talliesTo(ctx context.Context, n int, last int64) (*tallies, error) {
 	o, err := s.options(ctx)
 	if err != nil {
 		return nil, err
 	}
-	now := ledger.Week(s.l.Day(s.now()))
+	now := last
 	t := &tallies{by: map[int64]map[int64]ledger.Tally{}, o: o}
+	if last < ledger.Week(s.l.Day(s.now())) {
+		t.to, t.over = s.l.Midnight(last+7), true
+	}
 	for i := n - 1; i >= 0; i-- {
 		w := now - int64(7*i)
 		t.weeks = append(t.weeks, w)
@@ -112,6 +124,23 @@ func (s *Server) tallies(ctx context.Context, n int) (*tallies, error) {
 	return t, nil
 }
 
+// until is when the span t's weeks are over ends: its end, or now.
+func (t *tallies) until(now time.Time) time.Time {
+	if t.over {
+		return t.to
+	}
+	return now
+}
+
+// last is 1 when t's last week is over, and is the last whole week; 0
+// when it is under way, and the last whole week the one before.
+func (t *tallies) last() int {
+	if t.over {
+		return 1
+	}
+	return 0
+}
+
 // id is a rule's id, by its name.
 func (t *tallies) id(name string) int64 {
 	if t.names == nil {
@@ -126,6 +155,31 @@ func (t *tallies) id(name string) int64 {
 func (t *tallies) noisy(week, rule int64) bool {
 	x := t.by[week][rule]
 	return noisy(x.Firings, x.White, t.o)
+}
+
+// noisyAll reports whether a rule was noisy in a week, as everyone's rules
+// were tallied, before only kept one team's: one of another team's, which
+// the tallies of a team's alone don't have, too.
+func (t *tallies) noisyAll(week, rule int64) bool {
+	if t.everyone == nil {
+		return t.noisy(week, rule)
+	}
+	x := t.everyone[week][rule]
+	return noisy(x.Firings, x.White, t.o)
+}
+
+// stateAll is state, judged against everyone's rules: as the incidents
+// page judges them, with a team picked or not.
+func (t *tallies) stateAll(in ledger.Incident, week int64) string {
+	if len(in.CaughtBy) == 0 {
+		return "missed"
+	}
+	for _, c := range in.CaughtBy {
+		if !t.noisyAll(week, t.id(c.Rule)) {
+			return "caught"
+		}
+	}
+	return "noisy"
 }
 
 // state is whether an incident was caught, caught only by rules noisy that
@@ -386,7 +440,7 @@ func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]
 		noisyRule[r.Rule] = r.Noisy
 		rs = append(rs, *r)
 	}
-	incs, err := s.l.Incidents(ctx, s.l.Midnight(recent[0]), s.now(), false)
+	incs, err := s.l.Incidents(ctx, s.l.Midnight(recent[0]), t.until(s.now()), false)
 	if err != nil {
 		return nil, err
 	}
@@ -482,7 +536,7 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 		}
 		l.Without = pct(l.White-l.DeploysCaught, l.Firings-l.Deploys)
 		// Weeks running it has been noisy, up to the last whole week.
-		for i := len(t.weeks) - 2; i >= 0 && t.noisy(t.weeks[i], id); i-- {
+		for i := len(t.weeks) - 2 + t.last(); i >= 0 && t.noisy(t.weeks[i], id); i-- {
 			l.Streak++
 		}
 		most := 1
@@ -618,6 +672,8 @@ type rulesData struct {
 	proposed map[string]bool
 	checks   map[string]ledger.Check
 	differs  Differs
+	// team is the team the rules are of, nil for all.
+	team *ledger.Team
 }
 
 func (s *Server) rulesPage(r *http.Request) (any, error) {
@@ -628,7 +684,11 @@ func (s *Server) rulesPage(r *http.Request) (any, error) {
 	return d.rulesView, nil
 }
 
-func (s *Server) rulesOf(r *http.Request) (rulesData, error) {
+func (s *Server) rulesOf(r *http.Request) (rulesData, error) { return s.rulesOver(r, 0) }
+
+// rulesOver is rulesOf, over the week starting week alone when it isn't 0:
+// a Monday, as the ledger counts its days, of the twelve weeks kept.
+func (s *Server) rulesOver(r *http.Request, week int64) (rulesData, error) {
 	n := 4
 	switch r.URL.Query().Get("weeks") {
 	case "1":
@@ -636,7 +696,14 @@ func (s *Server) rulesOf(r *http.Request) (rulesData, error) {
 	case "12":
 		n = 12
 	}
-	t, err := s.tallies(r.Context(), weeks)
+	var t *tallies
+	var err error
+	if week != 0 {
+		n = 1
+		t, err = s.talliesTo(r.Context(), weeks, week)
+	} else {
+		t, err = s.tallies(r.Context(), weeks)
+	}
 	if err != nil {
 		return rulesData{}, err
 	}
@@ -694,7 +761,7 @@ func (s *Server) rulesOf(r *http.Request) (rulesData, error) {
 		v.Sort = by
 	}
 	sortRules(v.Lines, v.Sort)
-	return rulesData{v, t, o, proposed, cw, d}, nil
+	return rulesData{v, t, o, proposed, cw, d, team}, nil
 }
 
 // annotate gives rule lines their teams and what is to become of them.
@@ -1181,6 +1248,10 @@ type incidentsView struct {
 	// way, and the median lead.
 	Judged summaryIncidents
 	Lead   string
+	// State is what those listed are, when asked (state=): caught, noisy
+	// (caught only by noisy rules) or missed. Week is the week shown, when
+	// one is asked for (week=), its Monday.
+	State, Week string
 }
 
 // leadText says how long before an incident's start its first alert came,
@@ -1210,7 +1281,12 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	incs, err := s.l.Incidents(ctx, s.l.Midnight(t.weeks[len(t.weeks)-n]), s.now().Add(24*time.Hour), true)
+	from, to := s.l.Midnight(t.weeks[len(t.weeks)-n]), s.now().Add(24*time.Hour)
+	week := s.weekOf(q)
+	if week != 0 {
+		n, from, to = 1, s.l.Midnight(week), s.l.Midnight(week+7)
+	}
+	incs, err := s.l.Incidents(ctx, from, to, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1223,6 +1299,12 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v := incidentsView{Weeks: n, Match: strings.Join(t.o.Match, ", "), Now: s.now()}
+	if week != 0 {
+		v.Week = from.In(s.cfg.Loc).Format("2006-01-02")
+	}
+	if st := q.Get("state"); st == "caught" || st == "noisy" || st == "missed" {
+		v.State = st
+	}
 	var team *ledger.Team
 	v.Team, team = s.teamFilter(own, q.Get("team"))
 	if src := q.Get("source"); src == "impact" || src == "written" {
@@ -1261,6 +1343,9 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 				}
 			}
 		}
+		if v.State != "" && (!in.Counts || line.Status != v.State) {
+			continue // the median lead and the counts are of every one
+		}
 		v.Lines = append(v.Lines, line)
 	}
 	if m := medianSeconds(leads); m != nil {
@@ -1277,6 +1362,8 @@ type incidentView struct {
 	Tasks    []taskLine
 	Comments commentsView
 	Nearly   []nearLine
+	// Timeline is when the rules fired around it.
+	Timeline *timelineView
 }
 
 // nearLine is a rule that nearly caught an incident, as a person reads it.
@@ -1359,14 +1446,19 @@ func (s *Server) incidentPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v.Tasks = s.taskLines(o, ts)
+	var nms []verdict.NearMiss
 	if v.Status != "caught" {
 		near, err := s.nearMisses(ctx)
 		if err != nil {
 			return nil, err
 		}
-		for _, nm := range near[in.ID] {
+		nms = near[in.ID]
+		for _, nm := range nms {
 			v.Nearly = append(v.Nearly, nearText(lang(r), nm))
 		}
+	}
+	if v.Timeline, err = s.timeline(ctx, lang(r), in, t, nms); err != nil {
+		return nil, err
 	}
 	v.Comments, err = s.commentsView(r, "incident", in.ID)
 	return v, err
@@ -1398,51 +1490,6 @@ func (s *Server) firingLine(f ledger.Firing) firingLine {
 		ls = append(ls, k+"="+f.Labels[k])
 	}
 	return firingLine{Firing: f, Labels: strings.Join(ls, " ")}
-}
-
-type firingsView struct {
-	Day, Rule  string
-	Black      bool
-	Lines      []firingLine
-	Next       string
-	Prev, Then string // the day before and after
-}
-
-func (s *Server) firingsPage(r *http.Request) (any, error) {
-	q := r.URL.Query()
-	d := s.l.Day(s.now())
-	if v := q.Get("day"); v != "" {
-		day, err := dateDay(v)
-		if err != nil {
-			return nil, bad("day %q: want a date like 2026-11-02", v)
-		}
-		d = day
-	}
-	v := firingsView{Day: s.l.Midnight(d).In(s.cfg.Loc).Format("2006-01-02"), Rule: q.Get("rule"), Black: q.Get("black") != "",
-		Prev: s.l.Midnight(d - 1).In(s.cfg.Loc).Format("2006-01-02"), Then: s.l.Midnight(d + 1).In(s.cfg.Loc).Format("2006-01-02")}
-	before, _ := strconv.ParseInt(q.Get("before"), 10, 64)
-	const page = 100
-	fs, err := s.l.Firings(r.Context(), ledger.FiringQuery{From: s.l.Midnight(d), To: s.l.Midnight(d + 1), Rule: v.Rule, Black: v.Black, Before: before, Limit: page})
-	if err != nil {
-		return nil, err
-	}
-	for _, f := range fs {
-		v.Lines = append(v.Lines, s.firingLine(f))
-	}
-	if err := s.notifiedFirings(r.Context(), v.Lines); err != nil {
-		return nil, err
-	}
-	if len(fs) == page {
-		nq := url.Values{"day": {v.Day}, "before": {fmt.Sprint(fs[len(fs)-1].ID)}}
-		if v.Rule != "" {
-			nq.Set("rule", v.Rule)
-		}
-		if v.Black {
-			nq.Set("black", "1")
-		}
-		v.Next = "/firings?" + nq.Encode()
-	}
-	return v, nil
 }
 
 // dateDay is the day a date names, as days since 1970-01-01, as the ledger
