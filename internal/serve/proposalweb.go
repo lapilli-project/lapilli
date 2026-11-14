@@ -192,7 +192,7 @@ const stepsMost = 100
 // stepsOf are what happened to a proposal, in order: its making and its
 // approvals from what the ledger keeps of it, and every step it took
 // since, from the changes the ledger keeps (those older than --keep are
-// gone); Cut says some may be.
+// gone); cut says they are, its making's among them.
 func (s *Server) stepsOf(r *http.Request, p ledger.Proposal) (steps []proposalStep, cut bool, err error) {
 	cs, err := s.l.ProposalSteps(r.Context(), p.ID, stepsMost)
 	if err != nil {
@@ -244,7 +244,9 @@ func (s *Server) stepsOf(r *http.Request, p ledger.Proposal) (steps []proposalSt
 		steps = append(steps[:1], append([]proposalStep{{At: p.Approvals[0].At, By: p.Approvals[0].By, Kind: "approved", Of: 1, Need: 1}}, steps[1:]...)...)
 	}
 	slices.SortStableFunc(steps, func(a, b proposalStep) int { return a.At.Compare(b.At) })
-	return steps, !made && len(cs) < stepsMost, nil
+	// An undo is made by its asking, kept as a step of the change it
+	// undoes: its own steps start with its approval.
+	return steps, !made && p.Kind != ledger.KindUndo, nil
 }
 
 // Who is who took a step, as a page names them: Lapilli itself and a

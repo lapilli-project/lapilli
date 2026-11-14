@@ -259,9 +259,31 @@ func TestProposalHistory(t *testing.T) {
 	}
 	// The undo's own page: approved by whoever asked, one of one.
 	_, body, _ = ui(t, h, http.MethodGet, "/proposals/"+itoa(uid), cy, "", nil)
+	if strings.Contains(body, "aren&#39;t shown") {
+		t.Error("the undo's page says its older steps are gone")
+	}
 	if !strings.Contains(body, "An undo is approved by the approver who asks for it.") || !strings.Contains(body, "1 of 1 approvals") ||
 		!strings.Contains(body, `<th scope="col">As the change left it</th>`) && !strings.Contains(body, `<span class="ins">`) {
 		t.Error("the undo's page doesn't say who approved it")
+	}
+}
+
+// TestProposalStepsGone: a proposal whose making the ledger no longer
+// keeps (--keep pruned its changes) says its older steps aren't shown;
+// one whose making is kept, nothing of it.
+func TestProposalStepsGone(t *testing.T) {
+	s, h, id := withProposal(t, nil)
+	path := "/proposals/" + itoa(id)
+	if _, body, _ := ui(t, h, http.MethodGet, path, cy, "", nil); strings.Contains(body, "aren&#39;t shown") {
+		t.Error("a proposal's whole history said to be cut")
+	}
+	ledgerExec(t, s, "DELETE FROM changes")
+	s.cache.Lock()
+	s.cache.gen = "" // the page worked out afresh: a write to the database isn't the ledger's
+	s.cache.Unlock()
+	if _, body, _ := ui(t, h, http.MethodGet, path, cy, "", nil); !strings.Contains(body, "Steps older than the changes the ledger keeps (--keep) aren&#39;t shown.") ||
+		!strings.Contains(body, "Made by <bdi>bo@example.com</bdi>") {
+		t.Error("a proposal whose changes were pruned doesn't say so, or its making")
 	}
 }
 
