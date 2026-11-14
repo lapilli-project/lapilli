@@ -429,6 +429,9 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 	return v, nil
 }
 
+// ByLapilli says Lapilli itself made it, which a page names as it is.
+func (l proposalLine) ByLapilli() bool { return l.MadeBy == ledger.Proposer }
+
 // undoable reports whether a proposal's change can be undone from its
 // page: applied, by a path Lapilli carries out, and not an undo itself.
 func undoable(p ledger.Proposal) bool {

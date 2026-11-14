@@ -4,6 +4,6 @@
 <ul class="manage-cards">{{range .Cards}}<li class="card">
   <h2><a href="{{$.Link .Href}}">{{t .Name}}</a></h2>
   <p>{{t .About}}</p>
-  {{if .Fact}}<p class="quiet">{{if .At.IsZero}}{{t .Fact .N}}{{else}}{{t .Fact (at $loc .At)}}{{end}}</p>{{end}}
+  {{if .Fact}}<p class="quiet">{{if .At.IsZero}}{{if and .One (eq .N 1)}}{{t .One}}{{else}}{{t .Fact .N}}{{end}}{{else}}{{t .Fact (at $loc .At)}}{{end}}</p>{{end}}
 </li>{{end}}</ul>
 {{end}}{{template "bottom" .}}{{end}}

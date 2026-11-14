@@ -130,7 +130,7 @@ first, so that Enter in a field writes nothing. */}}
 </table></div>{{with .V.MoreRules}}<p class="quiet">{{t "And %d more." .}}</p>{{end}}
 {{else}}<p class="quiet">{{t "None of the rules: it would quiet nothing."}}</p>{{end}}
 <h3>{{t "The last four weeks"}}</h3>
-<p>{{t "Since %s, it would have excused %d firings that caught nothing; %d of them are excused already." (day $loc .V.From) .V.Excused .V.Already}}</p>
+<p>{{if ne .V.Excused 1}}{{t "Since %s, it would have excused %d firings that caught nothing; %d of them are excused already." (day $loc .V.From) .V.Excused .V.Already}}{{else if .V.Already}}{{t "Since %s, it would have excused 1 firing that caught nothing, which is excused already." (day $loc .V.From)}}{{else}}{{t "Since %s, it would have excused 1 firing that caught nothing, which isn't excused yet." (day $loc .V.From)}}{{end}}</p>
 {{if .V.Cut}}<p class="quiet">{{t "Counted over the latest %d firings of the four weeks." .V.Read}}</p>{{end}}
 <h3>{{t "The next four weeks"}}</h3>
 {{if .V.Starts}}<ul class="plain">{{range .V.Starts}}<li>{{at $loc .Start}} → {{at $loc .End}}</li>{{end}}</ul>{{if .V.MoreStarts}}<p class="quiet">{{t "The first %d are listed." (len .V.Starts)}}</p>{{end}}
@@ -184,7 +184,7 @@ first, so that Enter in a field writes nothing. */}}
 <div class="head"><h1>{{$title}}</h1>{{template "action" (mainAction $ "Add a task" (editsAny $.Status) "team" "")}}</div>
 <p class="lede">{{t "What is to be done about a rule or an incident: tune it, write one, retire one, decide on something. A task made from the overview remembers what it is about."}}</p>
 {{template "pickfacets" .Pick}}
-<p class="quiet">{{t "%d of %d tasks" (len .Lines) .Total}}</p>
+<p class="quiet">{{if eq .Total 1}}{{t "%d of 1 task" (len .Lines)}}{{else}}{{t "%d of %d tasks" (len .Lines) .Total}}{{end}}</p>
 {{template "tasklist" (on $ .Lines)}}
 {{if editsAny $.Status}}
 <h2 id="add">{{t "Add a task"}}</h2>

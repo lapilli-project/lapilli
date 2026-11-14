@@ -19,7 +19,11 @@ phases will add. [serve.md](serve.md) says what each page shows;
 - **Four languages.** Every text goes through `t` and is in
   `internal/serve/i18n/{es,ja,ko}.json`; `TestPagesInEachLanguage` fails on
   a text a page shows without one, and `TestFrameTextsTranslated` on a text
-  a template or the frame names that the pages it renders don't show.
+  a template or the frame names that the pages it renders don't show. The
+  catalogs have no plurals of their own: a count of one has a text of its
+  own where English says it apart ("1 line the same", "1 of 1 proposal").
+  In Korean and Japanese a person is named with an honorific (님, さん),
+  Lapilli itself and a recipe without ("Lapilli 가 만듦").
 - **WCAG 2.2 AA.** A sign (●, ≠, ⚠) is never alone: each badge has its name
   in words, the sign `aria-hidden`. Text is 4.5:1 and the edges of controls
   3:1 on every surface, in light and dark (`TestContrast` holds the

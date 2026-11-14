@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -263,7 +264,7 @@ func TestProposalHistory(t *testing.T) {
 	if strings.Contains(body, "aren&#39;t shown") {
 		t.Error("the undo's page says its older steps are gone")
 	}
-	if !strings.Contains(body, "An undo is approved by the approver who asks for it.") || !strings.Contains(body, "1 of 1 approvals") ||
+	if !strings.Contains(body, "An undo is approved by the approver who asks for it.") || !strings.Contains(body, "<p>1 of 1 approval <span class=\"quiet\">") ||
 		!strings.Contains(body, `<th scope="col">As the change left it</th>`) && !strings.Contains(body, `<span class="ins">`) {
 		t.Error("the undo's page doesn't say who approved it")
 	}
@@ -758,6 +759,106 @@ func TestProposalLongRuleSaid(t *testing.T) {
 	for _, q := range []string{"", "?diff=split"} {
 		if _, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(long)+q, cy, "", nil); !strings.Contains(body, said) {
 			t.Errorf("%q: a rule past %d lines isn't said to be shown whole", q, diffMost)
+		}
+	}
+}
+
+// TestOnesInEnglish: a count of one is said in the singular, in English:
+// a line the same in a diff, a proposal or a task of one, an approval of
+// one, a team, a report, a firing a quiet window would have excused.
+func TestOnesInEnglish(t *testing.T) {
+	ctx := context.Background()
+	s, h, id := withProposal(t, nil)
+	_, body, _ := ui(t, h, http.MethodGet, "/proposals", cy, "", nil)
+	if !strings.Contains(body, "1 of 1 proposal</p>") {
+		t.Error("not 1 of 1 proposal")
+	}
+	_, body, _ = ui(t, h, http.MethodGet, "/proposals/"+itoa(id), cy, "", nil)
+	if !strings.Contains(body, "0 of 1 approval</p>") || strings.Contains(body, "1 approvals") {
+		t.Error("not 0 of 1 approval")
+	}
+	// Nine lines, the first and the last changed: the fifth, alone, is
+	// three from each change, and left out.
+	p := state(t, s, id)
+	s.l.Move(ctx, id, []string{ledger.StateProposed}, ledger.StateDropped, bo, ledger.Step{})
+	p.ID, p.Before, p.After = 0, "a\n2\n3\n4\n5\n6\n7\n8\ni\n", "A\n2\n3\n4\n5\n6\n7\n8\nI\n"
+	nine, err := s.l.Propose(ctx, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{"", "?diff=split"} {
+		_, body, _ = ui(t, h, http.MethodGet, "/proposals/"+itoa(nine)+q, cy, "", nil)
+		if !strings.Contains(body, "</span> 1 line the same</") || strings.Contains(body, "1 lines") {
+			t.Errorf("%q: not 1 line the same", q)
+		}
+	}
+	// Retiring a rule with a week of its record.
+	s.l.Move(ctx, nine, []string{ledger.StateProposed}, ledger.StateDropped, bo, ledger.Step{})
+	ev, _ := json.Marshal(evidence{From: "silent", Record: &ruleRecord{Weeks: 1}})
+	p.Kind, p.Evidence = ledger.KindDelete, ev
+	week, err := s.l.Propose(ctx, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, body, _ = ui(t, h, http.MethodGet, "/proposals/"+itoa(week), cy, "", nil); !strings.Contains(body, "What it did over the last week, for retiring it") {
+		t.Error("not over the last week")
+	}
+	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "payments", Rules: "^E"}, ana); err != nil {
+		t.Fatal(err)
+	}
+	if _, body, _ = ui(t, h, http.MethodGet, "/manage", ana, "", nil); !strings.Contains(body, ">1 team</p>") || strings.Contains(body, "1 teams") {
+		t.Error("not 1 team")
+	}
+	if _, err := s.l.PutTask(ctx, ledger.Task{Title: "t", Kind: "tune"}, ana); err != nil {
+		t.Fatal(err)
+	}
+	if _, body, _ = ui(t, h, http.MethodGet, "/tasks", ana, "", nil); !strings.Contains(body, "1 of 1 task</p>") {
+		t.Error("not 1 of 1 task")
+	}
+	// A quiet window's preview of one firing it would have excused.
+	for already, want := range map[int]string{0: "1 firing that caught nothing, which isn&#39;t excused yet.", 1: "1 firing that caught nothing, which is excused already."} {
+		r := httptest.NewRequest(http.MethodGet, "/windows", nil)
+		r.Header.Set("X-Forwarded-Email", ana)
+		v, err := s.windowsPage(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ws := v.(windowsView)
+		ws.Preview = &windowPreview{From: now.Add(-previewSpan), To: now, Excused: 1, Already: already, Loc: time.UTC}
+		w := httptest.NewRecorder()
+		s.render(w, r, "windows", ws)
+		if body := w.Body.String(); !strings.Contains(body, want) || strings.Contains(body, "1 firings") {
+			t.Errorf("already %d: not %q", already, want)
+		}
+	}
+}
+
+// TestNoHonorificForLapilli: in Korean and Japanese, a person is named with
+// an honorific and Lapilli without: what Lapilli made is "Lapilli 가 만듦",
+// not "Lapilli 님이".
+func TestNoHonorificForLapilli(t *testing.T) {
+	s, _ := changesServer(t, nil)
+	id, err := s.propose(context.Background(), ask{Rule: "Errors", Kind: ledger.KindFor, For: 15 * time.Minute, From: "suggestion"}, ledger.Proposer, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for lang, c := range map[string]struct{ want, not string }{
+		"ko": {"Lapilli 가 만듦", "님"}, "ja": {"Lapilli が作成", "さん"},
+	} {
+		r := httptest.NewRequest(http.MethodGet, "/proposals/"+itoa(id), nil)
+		r.Header.Set("X-Forwarded-Email", cy)
+		r.Header.Set("Accept-Language", lang)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		body := w.Body.String()
+		i := strings.Index(body, `<section class="card" id="history">`)
+		if i < 0 || !strings.Contains(body[i:], c.want) || strings.Contains(body[i:], "Lapilli "+c.not) || strings.Contains(body[i:], "lapilli "+c.not) {
+			t.Errorf("%s: Lapilli named with an honorific, or not %q", lang, c.want)
+		}
+		facts := body[strings.Index(body, `<p class="proposal-facts">`):]
+		facts = facts[:strings.Index(facts, "</p>")]
+		if strings.Contains(facts, c.not) {
+			t.Errorf("%s: %s", lang, facts)
 		}
 	}
 }
