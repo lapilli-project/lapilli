@@ -400,8 +400,8 @@ pre.diff .gap { color: var(--dim); font-style: italic; }
    written, wrapped rather than scrolled. */
 table.diff-split { table-layout: fixed; }
 table.diff-split td { font-family: var(--mono); font-size: .875rem; white-space: pre-wrap; overflow-wrap: anywhere; padding: .1rem .5rem; border-bottom: 0; }
-table.diff-split td.del { color: var(--bad); background: color-mix(in srgb, var(--bad) 7%, transparent); }
-table.diff-split td.ins { color: var(--better); background: color-mix(in srgb, var(--better) 7%, transparent); }
+table.diff-split td.del { color: var(--bad); }
+table.diff-split td.ins { color: var(--better); }
 table.diff-split td.gap { color: var(--dim); font-family: var(--sans); font-style: italic; }
 p.diffopts { margin: .3rem 0 .5rem; }
 /* A proposal's page: its state's badge, a sign and a word; the warning
