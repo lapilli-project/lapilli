@@ -538,6 +538,17 @@ dry run, its history), with the backtest in the dry run's place:
   the rule catches now has a warning above the table naming it. Retiring a
   rule shows its record over the weeks it carries as a table instead; a
   fix to what a rule says has nothing to backtest, and says so.
+- **An undo's page** says it puts back the rule as it was before the
+  change it undoes, linked, and, when an agent proposed that change, for
+  whom. Its backtest is that change's, read the other way, "With #n"
+  beside "After undoing it": undone, it misses what the change gained and
+  catches what the change lost, with the warning when it misses an
+  incident the change catches; the incidents the change caught later are
+  caught sooner. An undo keeps of the change only its edit (where it was
+  written, what of the rule it touched), never its words, where it came
+  from or its backtest, which aren't the asker's and say what the change
+  did; an undo made before, which kept them whole, is shown so too, and
+  its pull request's description likewise.
 - **The approval**: approvals n of m (an undo, one of one: approved by the
   approver who asks); who approved, when; the form, with a box "I have read
   the backtest" ("the change and its evidence" without one), `required` in

@@ -315,6 +315,16 @@ type proposalView struct {
 	// Read is what the reader says they read before approving: the
 	// backtest, or, with none, the change and its evidence.
 	Read string
+	// Undoes is, for an undo, the change it undoes.
+	Undoes *undoneOf
+}
+
+// undoneOf is the change an undo undoes, as the undo's page names it: its
+// id, and whether an agent proposed it, for whom.
+type undoneOf struct {
+	ID    int64
+	Agent bool
+	For   string
 }
 
 func (s *Server) proposalPage(r *http.Request) (any, error) {
@@ -367,6 +377,20 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 		v.File, v.FileRows = s.docName(p.Source), fileRows(p.Diff)
 	}
 	v.Backtest = btTableOf(v.Evidence.Backtest)
+	if p.Kind == ledger.KindUndo {
+		// What it undoes is the change's: its backtest read the other way,
+		// who made it; nothing of why it was made is the asker's.
+		v.Undoes = &undoneOf{ID: p.Follows}
+		v.Evidence, v.Backtest = undoEvidence(v.Evidence), nil
+		if was, err := s.l.ProposalByID(ctx, p.Follows); err == nil {
+			wev := proposalEvidence(was)
+			v.Undoes.Agent, v.Undoes.For = was.Agent, was.MadeBy
+			v.Evidence.Cloud = wev.Cloud // how the page names where it is
+			v.Backtest = btUndoOf(wev.Backtest, p.Follows)
+		} else if !errors.Is(err, ledger.ErrNotFound) {
+			return nil, err
+		}
+	}
 	v.Read = "I have read the backtest"
 	if v.Backtest == nil {
 		v.Read = "I have read the change and its evidence"
@@ -399,6 +423,12 @@ func (s *Server) prBody(p ledger.Proposal) string {
 	ev := proposalEvidence(p)
 	var b strings.Builder
 	fmt.Fprintf(&b, "Lapilli proposal #%d: %s, for the rule %s.\n\n", p.ID, kindText(p.Kind), p.Rule)
+	if p.Kind == ledger.KindUndo {
+		// Nothing of why the change was made, nor its backtest, which says
+		// what it did: an undo made before kept them.
+		ev = undoEvidence(ev)
+		fmt.Fprintf(&b, "It puts back the rule as it was before Lapilli proposal #%d changed it.\n\n", p.Follows)
+	}
 	if p.Agent {
 		b.WriteString("Proposed by an agent, for a person to check.\n\n")
 	}
@@ -565,8 +595,13 @@ func (s *Server) postUndo(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, ledger.ErrMoved)
 		return
 	}
+	ev, err := json.Marshal(undoEvidence(proposalEvidence(p)))
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
 	u := ledger.Proposal{Rule: p.Rule, Kind: ledger.KindUndo, Path: p.Path, Follows: p.ID, Source: p.Source,
-		Before: p.After, BeforeHash: p.AfterHash, After: p.Before, Backup: p.Backup, Evidence: p.Evidence}
+		Before: p.After, BeforeHash: p.AfterHash, After: p.Before, Backup: p.Backup, Evidence: ev}
 	// Undone, the rule is as it was; a deletion undone, it is back.
 	u.AfterHash = p.BeforeHash
 	if p.Kind == ledger.KindDelete {

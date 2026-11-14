@@ -1217,6 +1217,13 @@ func proposalEvidence(p ledger.Proposal) evidence {
 	return ev
 }
 
+// undoEvidence is what an undo keeps of the change it undoes: the change as
+// written into the rule's document, which says where it was written and
+// what of the rule it touched, and nothing of why it was made. Its words,
+// whoever's, aren't the asker's, and its backtest says what the change
+// did, not what undoing it does: its page reads them from the change.
+func undoEvidence(ev evidence) evidence { return evidence{Edit: ev.Edit} }
+
 // formKey is what an approval form carries: good for one proposal as it
 // stood when the page was shown, for one person, for one thing to do.
 func (s *Server) formKey(p ledger.Proposal, user, what string) string {

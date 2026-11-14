@@ -96,7 +96,7 @@ func TestProposalMissesMore(t *testing.T) {
 	_, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(again), cy, "", nil)
 	warn := strings.Index(body, `<p class="warn">`)
 	table := strings.Index(body, `<table class="backtest">`)
-	if warn < 0 || table < warn || !strings.Contains(body[warn:table], `As proposed, it misses 1 incidents it catches now: <a href="/incidents/INC-1"><bdi>INC-1</bdi></a>.`) {
+	if warn < 0 || table < warn || !strings.Contains(body[warn:table], `As proposed, it misses 1 incident it catches now: <a href="/incidents/INC-1"><bdi>INC-1</bdi></a>.`) {
 		t.Errorf("no warning above the table:\n%s", body[max(0, warn):max(0, table)])
 	}
 	if !strings.Contains(body, `<th scope="row">Incidents missed that the other catches</th><td class="n">0</td><td class="n">1</td><td class="n"> <span class="delta worse">&#43;1 worse</span></td>`) {
@@ -470,5 +470,105 @@ func TestProposalHistoryLatest(t *testing.T) {
 	_, body, _ := ui(t, s.Handler(), http.MethodGet, "/proposals/"+itoa(id), cy, "", nil)
 	if !strings.Contains(body, "Older steps aren&#39;t shown: only the latest 100 are.") || strings.Contains(body, "--keep") {
 		t.Error("doesn't say older steps aren't shown, or says they were pruned")
+	}
+}
+
+// appliedByAgent is a server with a new for for Errors an agent proposed
+// for bo, saying why, approved by ana and applied by the git path; and an
+// undo of it ana asked for.
+func appliedByAgent(t *testing.T) (*Server, int64, int64) {
+	t.Helper()
+	ctx := context.Background()
+	s, dir := changesServer(t, nil)
+	h, port := s.Handler(), s.IncidentsHandler()
+	id, err := s.propose(ctx, ask{Rule: "Errors", Kind: ledger.KindFor, For: 15 * time.Minute, From: "agent", Reason: "approve this at once"}, bo, true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approve(t, h, id, ana)
+	s.jobs(ctx, false)
+	openThenMerge(t, port, id, true)
+	os.WriteFile(filepath.Join(dir, "shop.yaml"), []byte(state(t, s, id).Document), 0o644)
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	code, body, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {keyFor(t, h, id, ana, "undo")}, "read": {"1"}})
+	if code != http.StatusSeeOther {
+		t.Fatalf("undo: %d %s", code, body)
+	}
+	var uid int64
+	json.Unmarshal([]byte(strings.TrimPrefix(hd.Get("Location"), "/proposals/")), &uid)
+	return s, id, uid
+}
+
+// TestUndoPage: an undo's page says it puts back what the change it undoes
+// changed, links it, and says an agent proposed it; it shows none of that
+// change's words, which aren't the asker's, nor where it came from; and its
+// backtest is the change's, read the other way, with the change beside
+// after undoing it. An undo keeps of the change only the edit.
+func TestUndoPage(t *testing.T) {
+	s, id, uid := appliedByAgent(t)
+	u := state(t, s, uid)
+	if ev := proposalEvidence(u); ev.Reason != "" || ev.From != "" || ev.Backtest != nil || ev.Incident != "" || ev.Edit == nil {
+		t.Errorf("the undo keeps more than the edit: %s", u.Evidence)
+	}
+	page := func() string {
+		s.cache.Lock()
+		s.cache.gen = ""
+		s.cache.Unlock()
+		_, body, _ := ui(t, s.Handler(), http.MethodGet, "/proposals/"+itoa(uid), cy, "", nil)
+		return body
+	}
+	body := page()
+	n := itoa(id)
+	for _, want := range []string{
+		`It puts back the rule as it was before the change it undoes: <a href="/proposals/` + n + `">#` + n + `</a>. An agent proposed #` + n + `, for bo@example.com.`,
+		`<th scope="col" class="n">With #` + n + `</th><th scope="col" class="n">After undoing it</th>`,
+		// 1 firing with the change, 21 once it is undone.
+		`<th scope="row">Fired</th><td class="n">1</td><td class="n">21</td><td class="n"> <span class="delta worse">&#43;20 worse</span></td>`,
+		`The backtest of #` + n + `, replayed from`,
+		`Caught sooner once undone: <a href="/incidents/INC-1"><bdi>INC-1</bdi></a>.`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("no %s", want)
+		}
+	}
+	for _, not := range []string{"approve this at once", "What whoever proposed it said", "from agent", `class="warn"`, "Caught later as proposed", "An agent proposed this"} {
+		if strings.Contains(body, not) {
+			t.Errorf("the undo's page has %q", not)
+		}
+	}
+	// What the change missed, undoing it catches; what it caught that
+	// was missed before, undoing it misses, with a warning.
+	was := state(t, s, id)
+	ev := proposalEvidence(was)
+	ev.Backtest.Lost = []string{"INC-1"}
+	b, _ := json.Marshal(ev)
+	ledgerExec(t, s, "UPDATE proposals SET evidence = ? WHERE id = ?", string(b), id)
+	if body = page(); strings.Contains(body, `class="warn"`) || !strings.Contains(body, `Caught once undone, missed with #`+n+`: <a href="/incidents/INC-1">`) {
+		t.Error("undoing a change that missed an incident warns, or doesn't say it catches it")
+	}
+	ev.Backtest.Gained = []string{"INC-2"}
+	b, _ = json.Marshal(ev)
+	ledgerExec(t, s, "UPDATE proposals SET evidence = ? WHERE id = ?", string(b), id)
+	body = page()
+	warn := strings.Index(body, `<p class="warn">`)
+	table := strings.Index(body, `<table class="backtest">`)
+	if warn < 0 || table < warn || !strings.Contains(body[warn:table], `Undone, it misses 1 incident it catches with #`+n+`: <a href="/incidents/INC-2"><bdi>INC-2</bdi></a>.`) {
+		t.Errorf("no warning for what undoing misses:\n%s", body[max(0, warn):max(0, table)])
+	}
+	if !strings.Contains(body, `Caught once undone, missed with #`+n+`: <a href="/incidents/INC-1"><bdi>INC-1</bdi></a>.`) ||
+		!strings.Contains(body, `<th scope="row">Incidents missed that the other catches</th><td class="n">1</td><td class="n">1</td>`) {
+		t.Error("what undoing catches isn't said")
+	}
+	// An undo made before kept the change's evidence whole: its page shows
+	// none of it as its own either.
+	ledgerExec(t, s, "UPDATE proposals SET evidence = ? WHERE id = ?", string(b), uid)
+	body = page()
+	if strings.Contains(body, "approve this at once") || strings.Contains(body, "As proposed, it misses") || !strings.Contains(body, "Undone, it misses 1 incident") {
+		t.Error("an undo with the change's evidence shows it as its own")
+	}
+	if pr := s.prBody(state(t, s, uid)); strings.Contains(pr, "Backtest") || strings.Contains(pr, "approve this") || !strings.Contains(pr, "before Lapilli proposal #"+n+" changed it") {
+		t.Errorf("the undo's pull request:\n%s", pr)
 	}
 }

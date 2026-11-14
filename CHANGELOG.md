@@ -46,6 +46,14 @@ this phase.
 - **Undoing an applied change is asked for as "Ask to undo it"**, and the
   page says what it has always been: a proposal of its own, approved by
   the approver who asks.
+- **An undo keeps of the change it undoes only the edit.** It kept the
+  change's evidence whole, so its page showed the words of whoever made
+  the change, an agent's among them, as the asker's, and the change's
+  backtest the wrong way round, with a warning of incidents missed that
+  undoing it would catch. Its page now says it puts back the rule as it
+  was before the change, links it and says whether an agent proposed it,
+  and shows the change's backtest read the other way, "With #n" beside
+  "After undoing it"; an undo made before is shown so too.
 - **What a reader may not do is shown, disabled, with why**, in place of
   the form that was hidden: on a proposal's page (approve, ask to undo,
   drop or close, make it a task), the proposals' and the settings' switch

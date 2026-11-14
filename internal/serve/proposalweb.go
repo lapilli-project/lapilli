@@ -151,6 +151,12 @@ type btTable struct {
 	Lost, Gained, Later []string
 	Unfinished          bool
 	Worse               bool
+	// Undoes is, for an undo, the change it undoes, whose backtest this is,
+	// read the other way: with the change beside after undoing it. Sooner
+	// are the incidents caught sooner once it is undone, those the change
+	// caught later.
+	Undoes int64
+	Sooner []string
 }
 
 // btTableOf is a backtest's table: the firings, those that caught
@@ -168,6 +174,26 @@ func btTableOf(bt *backtest) *btTable {
 		{"Caught something", n(bt.Before.White), n(bt.After.White), moved{On: true, By: bt.After.White - bt.Before.White, Up: true}},
 		{"Incidents missed that the other catches", n(len(bt.Gained)), n(len(bt.Lost)), moved{On: true, By: len(bt.Lost) - len(bt.Gained)}},
 		{"Incidents caught later", "–", n(len(bt.Later)), moved{On: true, By: len(bt.Later)}},
+	}
+	return x
+}
+
+// btUndoOf is, for an undo of #n, #n's backtest read the other way: with
+// #n beside after undoing it. Undone, it misses what #n gained and catches
+// what #n lost; the incidents #n caught later are caught sooner, and
+// whether undoing it catches any later the backtest didn't say.
+func btUndoOf(bt *backtest, n int64) *btTable {
+	if bt == nil {
+		return nil
+	}
+	x := &btTable{From: bt.From, To: bt.To, Lost: bt.Gained, Gained: bt.Lost, Sooner: bt.Later, Unfinished: bt.Unfinished,
+		Worse: len(bt.Gained) > 0, Undoes: n}
+	c := strconv.Itoa
+	x.Rows = []btRow{
+		{"Fired", c(bt.After.Firings), c(bt.Before.Firings), moved{On: true, By: bt.Before.Firings - bt.After.Firings}},
+		{"Caught something", c(bt.After.White), c(bt.Before.White), moved{On: true, By: bt.Before.White - bt.After.White, Up: true}},
+		{"Incidents missed that the other catches", c(len(bt.Lost)), c(len(bt.Gained)), moved{On: true, By: len(bt.Gained) - len(bt.Lost)}},
+		{"Incidents caught later", c(len(bt.Later)), "–", moved{}},
 	}
 	return x
 }

@@ -455,7 +455,10 @@ The first step, for v0.22.0, as above, except:
   for it as "Ask to undo it", and says that asking is the approval: one
   approver's, whatever `--approvals` asks for of a change. Its page and the
   page of the change it undoes link to each other, and each says, in its
-  history, what happened to it.
+  history, what happened to it. It keeps of the change only the edit
+  (where it was written, what of the rule it touched): the change's words
+  aren't the asker's, and its backtest says what the change did, so the
+  undo's page reads it from the change, the other way round.
 - **Deleting after turning off** needs four weeks since the rule was off
   (since the disable took effect), the rule off still, and the rule as it
   was before, replayed over them, catching no incident that nothing caught.
