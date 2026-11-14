@@ -223,7 +223,8 @@ func barOf(name string, r *http.Request, c pageCtx) barView {
 		default:
 			b.Label = "Period"
 		}
-		b.Keep = keepParams(r.URL.Query(), "team", "weeks")
+		// What a bulk write did is said once, not carried on.
+		b.Keep = keepParams(r.URL.Query(), append([]string{"team", "weeks"}, bulkParams...)...)
 		if name == "rule" {
 			// A rule's own page, in the tab it shows: nothing else it was
 			// asked is sent again.

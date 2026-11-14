@@ -283,8 +283,9 @@ func TestBulkResultShown(t *testing.T) {
 		if want == "" && said || want != "" && !strings.Contains(body, `<p class="note bulk-done" role="status">`+want) {
 			t.Errorf("%s: says %v, want %q", q, said, want)
 		}
-		if strings.Contains(body, "done=") || strings.Contains(body, "bulk=") || strings.Contains(body, "done%3D") || strings.Contains(body, "bulk%3D") {
-			t.Errorf("%s: a link carries the result on", q)
+		if strings.Contains(body, "done=") || strings.Contains(body, "bulk=") || strings.Contains(body, "done%3D") || strings.Contains(body, "bulk%3D") ||
+			strings.Contains(body, `name="bulk"`) || strings.Contains(body, `name="done"`) {
+			t.Errorf("%s: a link or a form carries the result on", q)
 		}
 	}
 	// The language links, the page's own address query-escaped, too; and
@@ -299,8 +300,9 @@ func TestBulkResultShown(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("%s: no %s", path, want)
 		}
-		if strings.Contains(body, "done%3D") || strings.Contains(body, "bulk%3D") || strings.Contains(body, "bulk=") {
-			t.Errorf("%s: a link carries the result on", path)
+		if strings.Contains(body, "done%3D") || strings.Contains(body, "bulk%3D") || strings.Contains(body, "bulk=") || strings.Contains(body, `name="bulk"`) ||
+			strings.Contains(body, `name="done"`) {
+			t.Errorf("%s: a link or a form carries the result on", path)
 		}
 	}
 }
