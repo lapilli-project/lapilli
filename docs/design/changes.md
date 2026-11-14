@@ -204,7 +204,10 @@ Always a person, in the UI.
   `--approvers` says otherwise. An editor or an agent proposes; an approver
   approves.
 - **Two people,** with `--approvals 2`: the second approval must be another
-  person's, and no one approves their own proposal.
+  person's, and no one approves their own proposal. An undo of an applied
+  change is the exception, as built: it is approved by the one approver
+  who asks for it, whatever `--approvals` says, so that a change can be
+  taken back at once (below, "Undo").
 - **What they see.** The diff, the evidence, the stale check's result, and
   who or what proposed it. A proposal an agent made says so at the top. As
   built (docs/design/ui.md), the page shows the change as a diff, unified
@@ -448,10 +451,14 @@ The first step, for v0.22.0, as above, except:
   unreadable, it stays `applying` and is read again each round, never sent
   again. The pause is looked at again, too, just before a change is handed
   to a recipe.
-- **Undo** is a proposal of its own, approved by the approver who asks: on
-  the git path the file written back as it was, refused if the file changed
-  since (revert it in the repository); in Grafana the rule as it was kept,
-  put back, or made again with its uid when it was deleted. The page asks
+- **Undo** is a proposal of its own, approved by the approver who asks
+  (since phase 4 of the web UI, ticking the same box an approval takes,
+  checked by the server): on the git path the file written back as it
+  was, refused if the file changed since (revert it in the repository); in
+  Grafana the rule as it was kept, put back whole, what was edited in
+  Grafana since that doesn't change when it fires (its annotations) put
+  back with it, which the page says, or made again with its uid when it
+  was deleted. The page asks
   for it as "Ask to undo it", and says that asking is the approval: one
   approver's, whatever `--approvals` asks for of a change. Its page and the
   page of the change it undoes link to each other, and each says, in its

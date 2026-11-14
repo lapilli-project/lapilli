@@ -214,7 +214,7 @@ func TestProposalHistory(t *testing.T) {
 		!strings.Contains(body, `<button class="quiet-button">Ask to undo it</button>`) {
 		t.Error("undoing it isn't offered as a proposal of its own")
 	}
-	code, _, hd := ui(t, h, http.MethodPost, path+"/undo", ana, "same-origin", url.Values{"key": {keyFor(t, h, id, ana, "undo")}})
+	code, _, hd := ui(t, h, http.MethodPost, path+"/undo", ana, "same-origin", url.Values{"key": {keyFor(t, h, id, ana, "undo")}, "read": {"1"}})
 	if code != http.StatusSeeOther {
 		t.Fatalf("undo: %d", code)
 	}
@@ -570,5 +570,58 @@ func TestUndoPage(t *testing.T) {
 	}
 	if pr := s.prBody(state(t, s, uid)); strings.Contains(pr, "Backtest") || strings.Contains(pr, "approve this") || !strings.Contains(pr, "before Lapilli proposal #"+n+" changed it") {
 		t.Errorf("the undo's pull request:\n%s", pr)
+	}
+}
+
+// undoForm is the form asking for a change to be undone.
+var undoForm = regexp.MustCompile(`(?s)<form method="post" action="/proposals/\d+/undo">.*?</form>`)
+
+// TestUndoReadFirst: asking for a change to be undone is the undo's
+// approval, one approver's, and takes the box ticked as approving does:
+// required on the page, and checked again when it comes, refused with why
+// and nothing kept without it. On a Grafana rule, the page says undoing
+// puts back the whole rule as it was, annotations too, and the undo's page
+// says it again.
+func TestUndoReadFirst(t *testing.T) {
+	ctx := context.Background()
+	g := &grafanaStandIn{t: t, rules: grafanaRules(), provenance: map[string]string{}}
+	s := grafanaServer(t, g)
+	h := s.Handler()
+	id := proposeFor(t, h, "15m")
+	approve(t, h, id, ana)
+	s.jobs(ctx, false)
+	if p := state(t, s, id); p.State != ledger.StateApplied {
+		t.Fatalf("not applied: %+v", p)
+	}
+	path := "/proposals/" + itoa(id)
+	_, body, _ := ui(t, h, http.MethodGet, path, ana, "", nil)
+	if f := undoForm.FindString(body); !strings.Contains(f, `<label><input type="checkbox" name="read" value="1" required> I have read the backtest</label>`) {
+		t.Errorf("no box to tick, required:\n%s", f)
+	}
+	if !strings.Contains(body, "In Grafana, undoing it puts back the whole rule as it was before this change, its annotations too") {
+		t.Error("no word that undoing puts back the whole rule in Grafana")
+	}
+	key := keyFor(t, h, id, ana, "undo")
+	for _, read := range []string{"", "0", "on"} {
+		code, body, _ := ui(t, h, http.MethodPost, path+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {read}})
+		if code != http.StatusBadRequest || !strings.Contains(body, "tick the box on its page that says you have, then ask") {
+			t.Errorf("read=%q: %d", read, code)
+		}
+	}
+	if ps, _ := s.l.Proposals(ctx, ledger.ProposalQuery{}); len(ps) != 1 {
+		t.Fatalf("an undo kept without the box: %d proposals", len(ps))
+	}
+	code, _, hd := ui(t, h, http.MethodPost, path+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
+	if code != http.StatusSeeOther {
+		t.Fatalf("with the box: %d", code)
+	}
+	_, body, _ = ui(t, h, http.MethodGet, hd.Get("Location"), cy, "", nil)
+	if !strings.Contains(body, "In Grafana, it puts back the whole rule as it was before #"+itoa(id)+", its annotations too") {
+		t.Error("the undo's page doesn't say it puts back the whole rule in Grafana")
+	}
+	// A rule in git: no word of Grafana.
+	_, h2, id2 := withProposal(t, nil)
+	if _, body, _ := ui(t, h2, http.MethodGet, "/proposals/"+itoa(id2), ana, "", nil); strings.Contains(body, "In Grafana") {
+		t.Error("a rule in git is said to be put back in Grafana")
 	}
 }

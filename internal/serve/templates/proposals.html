@@ -33,7 +33,8 @@
 {{if .Agent}}<p class="hint bad">{{t "An agent proposed this, for %s. What it says is its own: check the diff and the backtest, not its words." (who .MadeBy)}}</p>{{end}}
 <h1>#{{.ID}} {{.Head.HTML $.Lang}}</h1>
 <p class="proposal-facts">{{template "proposalbadge" .Badge}} <span aria-hidden="true">·</span> <a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a> <span aria-hidden="true">·</span> {{if .Agent}}<span class="badge agent"><span aria-hidden="true">⚙&#xFE0E;</span> {{t "an agent"}}</span> {{end}}{{t "made by %s, %s" (who .MadeBy) (at $loc .Made)}} <span aria-hidden="true">·</span> {{template "proposalpath" .Path}}{{with .Evidence.From}} <span aria-hidden="true">·</span> {{t "from %s" (t .)}}{{end}}{{with .Evidence.Incident}} <span aria-hidden="true">·</span> <a href="{{$.Incident .}}"><bdi>{{.}}</bdi></a>{{end}}{{if .Follows}} <span aria-hidden="true">·</span> {{t "after"}} <a href="{{$.Link (printf "/proposals/%d" .Follows)}}">#{{.Follows}}</a>{{end}}</p>
-{{with .Undoes}}<p>{{t "It puts back the rule as it was before the change it undoes:"}} <a href="{{$.Link (printf "/proposals/%d" .ID)}}">#{{.ID}}</a>.{{if .Agent}} {{t "An agent proposed #%d, for %s." .ID (who .For)}}{{end}}</p>{{end}}
+{{with .Undoes}}<p>{{t "It puts back the rule as it was before the change it undoes:"}} <a href="{{$.Link (printf "/proposals/%d" .ID)}}">#{{.ID}}</a>.{{if .Agent}} {{t "An agent proposed #%d, for %s." .ID (who .For)}}{{end}}</p>
+{{if eq $v.Path "grafana"}}<p class="hint">{{t "In Grafana, it puts back the whole rule as it was before #%d, its annotations too: whatever was edited in Grafana since is put back with it." .ID}}</p>{{end}}{{end}}
 {{template "changesoff" .}}
 {{if .Evidence.Cloud}}{{with .Evidence.Edit}}{{if .Namespace}}<p class="quiet">{{t "A cloud's alarm, read with --alarms %s:" .Namespace}} <code>{{$.View.Source}}</code></p>{{end}}{{end}}
 {{with .Evidence.NoPath}}<p class="hint">{{t "Lapilli doesn't change it in the cloud:"}} {{t .}}</p>{{end}}
@@ -116,7 +117,11 @@
 {{if .StepsOlder}}<p class="quiet">{{t "Older steps aren't shown: only the latest %d are." .StepsMost}}</p>{{end}}
 {{if .CanUndo}}<h3>{{t "Undo it"}}</h3>
 <p class="quiet">{{t "Undoing it is a change of its own: a new proposal, which you approve as you ask for it, checked again and carried out the same way, with the rule as it was kept before this one changed it."}}</p>
-<form method="post" action="/proposals/{{.ID}}/undo"><input type="hidden" name="key" value="{{.Undo}}"><button class="quiet-button">{{t "Ask to undo it"}}</button></form>
+{{if eq .Path "grafana"}}<p class="hint">{{t "In Grafana, undoing it puts back the whole rule as it was before this change, its annotations too: whatever was edited in Grafana since is put back with it."}}</p>{{end}}
+<form method="post" action="/proposals/{{.ID}}/undo"><input type="hidden" name="key" value="{{.Undo}}">
+  <p><label><input type="checkbox" name="read" value="1" required> {{t .Read}}</label></p>
+  <button class="quiet-button">{{t "Ask to undo it"}}</button>
+</form>
 {{else}}{{with .UndoOff}}<h3>{{t "Undo it"}}</h3><p>{{template "off" .}}</p>{{end}}{{end}}
 </section>
 {{end}}{{template "bottom" .}}{{end}}

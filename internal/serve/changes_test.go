@@ -240,7 +240,7 @@ func TestChangeByPullRequest(t *testing.T) {
 	if key == "" {
 		t.Fatal("no undo form")
 	}
-	code, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	code, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	if code != http.StatusSeeOther {
 		t.Fatalf("undo: %d", code)
 	}
@@ -893,7 +893,7 @@ func TestChangeInGrafana(t *testing.T) {
 	}
 	// Undone: written back as it was.
 	key := keyFor(t, h, id, ana, "undo")
-	code, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	code, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	if code != http.StatusSeeOther {
 		t.Fatalf("undo: %d", code)
 	}
@@ -1170,7 +1170,7 @@ func TestSaysByPullRequest(t *testing.T) {
 		t.Fatalf("read back: %s", p.State)
 	}
 	key := keyFor(t, h, id, ana, "undo")
-	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	var uid int64
 	json.Unmarshal([]byte(strings.TrimPrefix(hd.Get("Location"), "/proposals/")), &uid)
 	s.jobs(ctx, false)
@@ -1279,7 +1279,7 @@ func TestSaysInGrafana(t *testing.T) {
 		t.Errorf("more than what it says changed:\n%s\n%s", x, y)
 	}
 	key := keyFor(t, h, id, ana, "undo")
-	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	var uid int64
 	json.Unmarshal([]byte(strings.TrimPrefix(hd.Get("Location"), "/proposals/")), &uid)
 	s.jobs(ctx, false)

@@ -575,7 +575,13 @@ dry run, its history), with the backtest in the dry run's place:
   aren't shown" when there are more. An applied change's ends with "Ask to undo
   it": undoing is a proposal of its own, approved by the approver who asks
   as they ask, checked again and carried out the same way, which the page
-  says; it is what `/proposals/{id}/undo` has done since v0.22.0.
+  says; it is what `/proposals/{id}/undo` has done since v0.22.0, and the
+  one exception to `--approvals`, as changes.md has had it since. Asking
+  is that approval, so it takes the same box ticked, `required` and
+  checked by the server, refused, 400, without it. On a Grafana rule the
+  page says undoing puts back the whole rule as it was before the change,
+  annotations edited in Grafana since too, and the undo's page says it
+  again.
 
 Dropping, closing (an admin's, with a reason), making it a task and asking
 for an undo are shown disabled with why where the reader may not.

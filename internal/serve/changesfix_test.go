@@ -146,7 +146,7 @@ func TestGrafanaDeleteAnswersBadly(t *testing.T) {
 		t.Fatalf("deleted, answered 504: %+v, Grafana has %v", p, g.rules["def"])
 	}
 	key := keyFor(t, h, id, ana, "undo")
-	_, _, hd = ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	_, _, hd = ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	s.jobs(ctx, false)
 	if u := state(t, s, locID(hd)); u.State != ledger.StateApplied || g.rules["def"] == nil {
 		t.Errorf("undone: %+v", u)

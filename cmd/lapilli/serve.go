@@ -369,7 +369,11 @@ and proposes; docs/design/changes.md):
                       and groups (default: the admins). Approving is a form
                       on the proposal's page, in a browser: never the API,
                       MCP or a token. No one approves their own
-  --approvals N       how many people approve each change: 1 (default) or 2
+                      proposal, or one their agent made
+  --approvals N       how many people approve each change: 1 (default) or
+                      2. An undo of an applied change is the exception: the
+                      one approver who asks for it approves it, ticking the
+                      box that they read the change, as an approval does
   --changes-token-file FILE
                       the change recipes' token, on --incidents-listen: GET
                       /api/v1/changes and PATCH /api/v1/changes/ID, what

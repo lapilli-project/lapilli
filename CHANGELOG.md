@@ -42,7 +42,12 @@ this phase.
 
 - **Approving a change takes a box ticked**, "I have read the backtest",
   `required` on the page and checked by the server: an approval without it
-  is refused, 400, and nothing is kept. `test/e2e/changes.sh` sends it.
+  is refused, 400, and nothing is kept. So does asking for an undo, which
+  is the undo's approval, one approver's, as it has been since 0.22.0 and
+  as the help of `--approvals`, the README and changes.md now say plainly.
+  `test/e2e/changes.sh` sends it. On a Grafana rule, the page says undoing
+  puts back the whole rule as it was, annotations edited in Grafana since
+  too.
 - **Undoing an applied change is asked for as "Ask to undo it"**, and the
   page says what it has always been: a proposal of its own, approved by
   the approver who asks.

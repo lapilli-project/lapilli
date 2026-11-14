@@ -46,6 +46,10 @@ var errNotApprover = errors.New("only an approver can approve or undo a change: 
 // read the change and its backtest.
 var errNotRead = bad("approve it once you have read the change and what it would do: tick the box on its page that says you have, then approve")
 
+// errNotReadUndo is an undo asked for without its box ticked: asking is
+// the undo's approval, and is made, as any is, once the change was read.
+var errNotReadUndo = bad("ask for it to be undone once you have read the change and what it did: tick the box on its page that says you have, then ask")
+
 // errNotAForm is an approval that didn't come from the proposal's page, in
 // a browser, on this site.
 var errNotAForm = errors.New("a change is approved on its page, in a browser: this request didn't come from the page's form")
@@ -593,6 +597,12 @@ func (s *Server) postUndo(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.State != ledger.StateApplied || p.Kind == ledger.KindUndo || p.Path == ledger.PathNone {
 		s.oops(w, r, ledger.ErrMoved)
+		return
+	}
+	// Asking is the undo's approval, one approver's: it takes the box
+	// ticked, checked here too, as approving does.
+	if r.PostFormValue("read") != "1" {
+		s.oops(w, r, errNotReadUndo)
 		return
 	}
 	ev, err := json.Marshal(undoEvidence(proposalEvidence(p)))

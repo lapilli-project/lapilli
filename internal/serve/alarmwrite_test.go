@@ -136,7 +136,7 @@ func TestAlarmCloudWatch(t *testing.T) {
 	cw.Metric["checkout-5xx"]["AlarmActions"] = []any{"arn:aws:sns:eu-west-1:111122223333:oncall", "arn:aws:sns:eu-west-1:111122223333:chat"}
 	cw.Unlock()
 	key := keyFor(t, h, id, ana, "undo")
-	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	undo := locID(hd)
 	s.jobs(ctx, false)
 	a = cw.Alarm("checkout-5xx")
@@ -447,7 +447,7 @@ func TestAlarmCloudWatchRetire(t *testing.T) {
 	}
 	// Undone: on again.
 	key := keyFor(t, h, id, ana, "undo")
-	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	s.jobs(ctx, false)
 	if u := state(t, s, locID(hd)); u.State != ledger.StateApplied || cw.Alarm("cpu-high")["ActionsEnabled"] != true ||
 		cw.Took()[len(cw.Took())-1] != "EnableAlarmActions cpu-high" {
@@ -481,7 +481,7 @@ func TestAlarmCloudWatchRetire(t *testing.T) {
 		t.Fatalf("deleted: %s %q %v", p.State, p.Reason, cw.Took())
 	}
 	key = keyFor(t, h, ps[0].ID, ana, "undo")
-	_, _, hd = ui(t, h, http.MethodPost, "/proposals/"+itoa(ps[0].ID)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	_, _, hd = ui(t, h, http.MethodPost, "/proposals/"+itoa(ps[0].ID)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	s.jobs(ctx, false)
 	if u := state(t, s, locID(hd)); u.State != ledger.StateApplied || cw.Alarm("latency") == nil || cw.Tags[cw.ARN("latency")]["team"] != "shop" {
 		t.Errorf("made again: %s %q %v %v", u.State, u.Reason, cw.Alarm("latency"), cw.Tags[cw.ARN("latency")])

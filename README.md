@@ -1780,13 +1780,14 @@ Nothing is changed until a person approves it, on its page, in a browser:
   and someone to approve. `--approvals 2` asks for two people, of a proposal approved by
   one before it was raised too, unless it was carried out already. No one
   approves their own proposal, or one an agent made for them, in any letter
-  case.
+  case. An undo of an applied change is the exception: the one approver
+  who asks for it approves it, whatever `--approvals` says.
 - The form is signed for the person and the proposal as it stood, and comes
   from the page itself (`Sec-Fetch-Site: same-origin`). The API, MCP and
   every token can't approve.
 - The page shows the change as a diff and its backtest, now beside as
-  proposed; approving takes a box ticked, "I have read the backtest",
-  which the server checks too.
+  proposed; approving, and asking for an undo, takes a box ticked, "I have
+  read the backtest", which the server checks too.
 
 `--changes` turns carrying them out on; without it Lapilli only proposes.
 With it, each approved change is checked again first: the rule is read

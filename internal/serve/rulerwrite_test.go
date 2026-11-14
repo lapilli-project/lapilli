@@ -153,7 +153,7 @@ func TestRulerMimir(t *testing.T) {
 				t.Fatal(err)
 			}
 			key := keyFor(t, h, id, ana, "undo")
-			code, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+			code, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 			if code != http.StatusSeeOther {
 				t.Fatalf("undo: %d", code)
 			}
@@ -208,7 +208,7 @@ func TestRulerMimirKinds(t *testing.T) {
 		t.Fatalf("a group's last rule: %s %s, written %v", p.State, p.Reason, m.written())
 	}
 	key := keyFor(t, h, del, ana, "undo")
-	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(del)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(del)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	s.jobs(ctx, false)
 	if u := state(t, s, locID(hd)); u.State != ledger.StateApplied || !strings.Contains(m.group("shop", "edge"), "alert: EdgeDown") {
 		t.Errorf("undone: %s %s\n%s", u.State, u.Reason, m.group("shop", "edge"))
@@ -490,7 +490,7 @@ func TestRulerAmazon(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := keyFor(t, h, del, ana, "undo")
-	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(del)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(del)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	s.jobs(ctx, false)
 	s.jobs(ctx, false)
 	if u := state(t, s, locID(hd)); u.State != ledger.StateApplied || !strings.Contains(a.data("shop"), "      - alert: EdgeDown\n        expr: up == 0\n") {
@@ -822,7 +822,7 @@ func TestRulerUndoRefused(t *testing.T) {
 	undo := func(id int64) ledger.Proposal {
 		t.Helper()
 		key := keyFor(t, h, id, ana, "undo")
-		_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+		_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 		s.jobs(ctx, false)
 		return state(t, s, locID(hd))
 	}
@@ -892,7 +892,7 @@ func undoNow(t *testing.T, s *Server, id int64, rounds int) ledger.Proposal {
 	t.Helper()
 	h := s.Handler()
 	key := keyFor(t, h, id, ana, "undo")
-	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}})
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/undo", ana, "same-origin", url.Values{"key": {key}, "read": {"1"}})
 	for range rounds {
 		s.jobs(context.Background(), false)
 	}

@@ -316,7 +316,7 @@ func TestApprovalsRaised(t *testing.T) {
 	if p := state(t, s, waiting); p.State != ledger.StateApplied {
 		t.Fatalf("applied: %s", p.State)
 	}
-	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(waiting)+"/undo", ana, "same-origin", url.Values{"key": {keyFor(t, h, waiting, ana, "undo")}})
+	_, _, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(waiting)+"/undo", ana, "same-origin", url.Values{"key": {keyFor(t, h, waiting, ana, "undo")}, "read": {"1"}})
 	s.jobs(ctx, false)
 	if u := state(t, s, locID(hd)); u.State != ledger.StateReady || ready(t, port) != 1 {
 		t.Errorf("the undo, under two approvals: %s", u.State)
