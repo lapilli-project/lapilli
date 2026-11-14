@@ -1202,6 +1202,15 @@ window was over it; and its sections in tabs: summary, firings, versions
   <img alt="A noisy rule's page over four weeks: its name, its badges (noisy six weeks, to tune) and three actions; its team, severity, for, group and the runbook the rule names; precision and firings beside the four weeks before, one better, one worse, incidents caught the same, the notifications it sent and its backtest with nothing beside; its last 84 days as a strip of cells, marked where the rule changed and on the days it fired during a deploy of checkout; its tabs; and what to do first" src="assets/serve-rule.png" width="820">
 </picture>
 
+A proposal's page shows the change as a diff (unified or side by side, the
+lines around it or the whole rule), its backtest as a table, now beside as
+proposed, the approval, and what happened to it; the proposals and the
+tasks have counted facets, as the rules do; a quiet window can be
+previewed before it is saved (the rules it applies to, the firings of the
+last four weeks it would have excused, when it falls next); `/manage`
+gathers the pages that set Lapilli up; and an action a reader may not take
+is shown disabled, with why.
+
 What an operations team measures its alerts by is there too, week by week
 and team by team (docs/design/noc.md): the share of critical firings that
 caught something; firings that re-fired, the alert that did most, and the
@@ -1775,6 +1784,9 @@ Nothing is changed until a person approves it, on its page, in a browser:
 - The form is signed for the person and the proposal as it stood, and comes
   from the page itself (`Sec-Fetch-Site: same-origin`). The API, MCP and
   every token can't approve.
+- The page shows the change as a diff and its backtest, now beside as
+  proposed; approving takes a box ticked, "I have read the backtest",
+  which the server checks too.
 
 `--changes` turns carrying them out on; without it Lapilli only proposes.
 With it, each approved change is checked again first: the rule is read

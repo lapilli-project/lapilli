@@ -206,7 +206,12 @@ Always a person, in the UI.
 - **Two people,** with `--approvals 2`: the second approval must be another
   person's, and no one approves their own proposal.
 - **What they see.** The diff, the evidence, the stale check's result, and
-  who or what proposed it. A proposal an agent made says so at the top.
+  who or what proposed it. A proposal an agent made says so at the top. As
+  built (docs/design/ui.md), the page shows the change as a diff, unified
+  or side by side, around each change or the whole rule; the backtest as a
+  table, now beside as proposed, with a warning above it when the change
+  would miss an incident the rule catches now; and what happened to it, in
+  order.
 - **Only the UI.** Approving is a form on the proposal's page, refused from
   another site as every change through the UI is, and refused through the
   API, MCP, and every token. An agent may propose (MCP's `propose`, behind
@@ -386,7 +391,11 @@ The first step, for v0.22.0, as above, except:
   proposal as it stood and how many had approved it, with a key the
   process makes when it starts (a restart asks for the page again); it must
   come with `Sec-Fetch-Site: same-origin`, which a browser sets and a page
-  elsewhere can't. That keeps out the API, MCP, tokens, other sites and a
+  elsewhere can't. Since phase 4 of the web UI, the form has a box, "I have
+  read the backtest" ("the change and its evidence" for one with none),
+  `required` on the page and checked by the server: an approval without it
+  is refused, 400, and nothing is kept. To a reader who may not approve,
+  the page shows the button disabled, with why. That keeps out the API, MCP, tokens, other sites and a
   script with a stolen key, not someone who can forge the sign-in proxy's
   headers, who could be anyone already. Nor an agent the proxy lets in as
   a person: any client that isn't a browser can send the header, read the
@@ -437,7 +446,11 @@ The first step, for v0.22.0, as above, except:
 - **Undo** is a proposal of its own, approved by the approver who asks: on
   the git path the file written back as it was, refused if the file changed
   since (revert it in the repository); in Grafana the rule as it was kept,
-  put back, or made again with its uid when it was deleted.
+  put back, or made again with its uid when it was deleted. The page asks
+  for it as "Ask to undo it", and says that asking is the approval: one
+  approver's, whatever `--approvals` asks for of a change. Its page and the
+  page of the change it undoes link to each other, and each says, in its
+  history, what happened to it.
 - **Deleting after turning off** needs four weeks since the rule was off
   (since the disable took effect), the rule off still, and the rule as it
   was before, replayed over them, catching no incident that nothing caught.

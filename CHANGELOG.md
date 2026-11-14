@@ -2,6 +2,62 @@
 
 ## [Unreleased]
 
+The way to change things: the fourth phase of docs/design/ui.md. Still no
+script, against WCAG 2.2 AA, in four languages. No ledger schema change;
+the API and MCP answer as they did.
+
+### Added
+
+- **A proposal's page, redone**, in Argo CD's order for a change: its id
+  and what it changes in words ("Errors's for, 2m → 15m"), its state as a
+  sign and a word (awaiting approval, approved, being applied, applied,
+  undone, closed), who made it (an agent marked so), its way and when;
+  the change as a diff; the backtest as a table, now beside as proposed
+  (fired, caught something, incidents one misses that the other catches,
+  incidents caught later), with a warning above it when the change misses
+  an incident the rule catches now; the approval, n of m; and what
+  happened to it, in order, each step with who and when, the pull
+  request's link and an undo asked for.
+- **A diff with options**, `?diff=unified|split` and `?context=3|all`, as
+  links, on a proposal's page and on a rule's versions tab: side by side is
+  a table headed with its two sides; around each change, the lines the
+  same further off are one row saying how many.
+- **Facets with counts on the proposals list** (state, kind, way, made by
+  a person, an agent or Lapilli), with chips and the team in the bar, as
+  the rules list has them; the open ones unless asked, those waiting for
+  approval first.
+- **A quiet window's preview**: a Preview button on the form to add or
+  change one, the same POST, which writes nothing and is checked as saving
+  is, shows the form as typed with the rules it applies to, the firings
+  that caught nothing over the last four weeks it would have excused, and
+  when it falls in the next four weeks.
+- **A Manage page**, `/manage`: a card for Teams, Roles (admins only),
+  Settings, Runs and Reports, each with what it is for. The sidebar's
+  Manage links to it, and its pages' breadcrumbs start with it.
+
+### Changed
+
+- **Approving a change takes a box ticked**, "I have read the backtest",
+  `required` on the page and checked by the server: an approval without it
+  is refused, 400, and nothing is kept. `test/e2e/changes.sh` sends it.
+- **Undoing an applied change is asked for as "Ask to undo it"**, and the
+  page says what it has always been: a proposal of its own, approved by
+  the approver who asks.
+- **What a reader may not do is shown, disabled, with why**, in place of
+  the form that was hidden: on a proposal's page (approve, ask to undo,
+  drop or close, make it a task), the proposals' and the settings' switch
+  that pauses changes, a quiet window's, a task's and a team's change, the
+  settings' save, a report's change, an incident's change and whether it
+  was real, and a rule's forms (what to do first, its note, a fix to what
+  it says, proposing a change, a task about it).
+- **The tasks' status is a facet with counts** (open, done, dropped), the
+  team kept, in place of the status links; `?status=done`, `dropped` and
+  `all` mean what they meant.
+- The proposals are shown for the team picked in the bar, and a team's
+  editor sees their team's unless they pick all teams.
+- A quiet window's form has Preview as its first button: Enter in a field
+  previews, and writes nothing.
+
 ## [0.37.0] - 2026-11-14
 
 A rule's page, redone (the third phase of docs/design/ui.md): a header that

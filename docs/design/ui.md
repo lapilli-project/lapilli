@@ -1,9 +1,12 @@
 # The web UI of `lapilli serve`
 
-Status: phases 1 and 2 in v0.35.0; phase 3, a rule's page, built,
-unreleased. This is how the pages are put together: the frame every page
-has, the team and period carried from page to page, the search, the rules
-list and its filters, a rule's page, and what the later phases will add. [serve.md](serve.md) says what each page shows;
+Status: phases 1 and 2 in v0.35.0; phase 3, a rule's page, in v0.37.0;
+phase 4, the way to change things, built, unreleased. This is how the
+pages are put together: the frame every page has, the team and period
+carried from page to page, the search, the rules list and its filters, a
+rule's page, the way to change things (a proposal's page, the lists'
+facets, a quiet window's preview, the Manage page), and what the later
+phases will add. [serve.md](serve.md) says what each page shows;
 [access.md](access.md) how the pages meet WCAG 2.2 AA.
 
 ## What holds for every page
@@ -43,7 +46,9 @@ The pages are in four groups, each named, not a link:
 | Report | Reports `/reports`, Outcomes `/outcomes` |
 | Manage | Teams `/teams`, Roles `/roles`, Settings `/settings`, Runs `/runs` |
 
-Roles is listed for admins, who alone may open it. Tasks has the open
+Roles is listed for admins, who alone may open it. A group's name isn't a
+link, but Manage's, which goes to `/manage`, the page of its own (below),
+`aria-current` there. Tasks has the open
 tasks beside it (the team's, when a team is picked), and Proposals those
 waiting for an approval: two counts the ledger gives once each time it
 changes (`Server.waiting`), not once a page.
@@ -78,14 +83,16 @@ past 4096: past that, the page without its query.
 
 Every page starts with `<nav aria-label="Breadcrumb"><ol>`: the group, the
 page, and the item, the last with `aria-current="page"`: See › Rules ›
-LatencyP99; Fix › Proposals › #12 …. The group isn't a link; the page is,
-with the page context.
+LatencyP99; Fix › Proposals › #12. The group isn't a link, but Manage,
+whose page lists its pages (Manage › Teams); the page is, with the page
+context. A proposal's item is its `#id` alone, the page's title its whole
+heading (`crumbed`).
 
 ### The bar
 
 Under the breadcrumbs, every page has a search (below), and the pages that
 show one team's or a period, a GET form to pick them: the team (all teams,
-or one) on the overview, the rules, the incidents and the tasks; the period
+or one) on the overview, the rules, the incidents, the tasks and the proposals; the period
 (1, 4 or 12 weeks) on the rules, the incidents and a rule's page. The
 overview has no period: its tiles are last week beside the week before, by
 design. The form sends the page's other parameters again, as they were, and
@@ -117,8 +124,18 @@ beside it, tied with `aria-describedby`:
 
 A team's editor may add their team's tasks, quiet windows and reports, and
 no incident: the incidents' action is disabled for them, "Editors only".
-The forms elsewhere on a page (to change a task, to comment) are as before;
-a later phase does the same for them.
+
+The forms elsewhere on a page do the same (phase 4): where one is for those
+who may change something, everyone else sees one button, disabled, naming
+what it does, with why beside it, in place of the whole form (`off`, with
+`offOf` for a role and `offTeam` for what is a team's, "Only search's
+editors"): a quiet window's and a task's change, a team's (`?edit=`), the
+settings' save, the switch that pauses changes (Admins only), a report's
+change, an incident's (its change, whether it was real, a task about it),
+a rule's (what to do first, its note, a fix to what it says, proposing a
+change, a task about it) and a proposal's (below). Comments are as before.
+The server checks every write as it did: a disabled button is never the
+only check.
 
 ### Empty states
 
@@ -472,6 +489,150 @@ screenshots, in the Playwright image `axe.sh` uses, or with `--local`
 with Node and the browser of the same version; on any exit the script
 stops the server and removes what it made.
 
+## The way to change things
+
+Phase 4: a proposal's page, the lists' facets beside the rules', a quiet
+window's preview, and the Manage page.
+
+### A diff in its options
+
+A proposal's change and a rule's versions are shown by one component
+(`diffweb.go`), its options as links: `?diff=unified|split` and
+`?context=3|all`, unified and three lines by default, anything else the
+default and never said back. Unified is a `pre`, a line a span with its
+sign (`-`, `+`, a space), so that copied it is its lines alone; the lines
+the same more than three from a change are one row, "⋯ 12 lines the same".
+Side by side is a table headed with its two sides ("Now", "As proposed";
+on the versions tab "The version before", "This version"), a run taken out
+set beside the run put in after it, line by line, each line's sign in its
+cell, the table scrolling in its own box. The line diff is the versions
+tab's, by the longest common run, a side past 400 lines shown whole. A
+rule's page is cached by the options on its versions tab alone
+(`ruleQuery`).
+
+### A proposal's page
+
+`/proposals/{id}`, in Argo CD's order for a change (its diff, its sync's
+dry run, its history), with the backtest in the dry run's place:
+
+- **The header**: `#id` and what it changes in words, "Errors's for,
+  2m → 15m" (a threshold from what to what, turning a rule off, deleting
+  it, what it says, undoing #n), as the `h1`, its values in `<bdi>`; its
+  state as a badge, a sign and a word: ◷ awaiting approval, ✓ approved,
+  ↻ being applied (checked again and waiting for a recipe, sent and not
+  yet read back, its pull request open, merged and not yet read back),
+  ● applied, ↶ undone, ⊘ closed (refused, failed, dropped, changed in
+  review); its rule; who made it, an agent marked so; its way (a pull
+  request; Grafana's, a ruler's or a cloud's API; or for a person to
+  make); when. Breadcrumb Fix › Proposals › #id.
+- **The change**: the rule as it is and as proposed, in the diff's
+  options; for the git path, the file as the pull request changes it, in a
+  `<details>`; for one with no path, the pull request's description to
+  copy.
+- **The backtest**: a table, now beside as proposed, from the evidence the
+  proposal kept when it was made: fired, caught something, the incidents
+  one misses that the other catches, the incidents caught later, each with
+  its difference signed and, where better or worse, said so in words. The
+  evidence holds which incidents are caught later, not by how much, so
+  that is the last row: no time is made up. One that misses an incident
+  the rule catches now has a warning above the table naming it. Retiring a
+  rule shows its record over the weeks it carries as a table instead; a
+  fix to what a rule says has nothing to backtest, and says so.
+- **The approval**: approvals n of m (an undo, one of one: approved by the
+  approver who asks); who approved, when; the form, with a box "I have read
+  the backtest" ("the change and its evidence" without one), `required` in
+  the form and checked by the server, an approval without it refused, 400.
+  To a reader who may not approve, the button disabled with why: Approvers
+  only, You proposed this, You approved it, Read-only, Changes are off, or
+  a change for a person to make. Who may approve is as it was.
+- **History**: what happened to it, in order, each with who and when:
+  made (by an agent, for whom), each approval (k of m), approved or waiting
+  again as `--approvals` changed, each state it moved to (with the pull
+  request's link, or why it was refused or failed), an undo asked for,
+  linked to it. Its making and approvals are the proposal's own; the rest
+  are the ledger's changes whose `what` is the proposal's (`ProposalSteps`,
+  an additive read by the changes' index on `what`), those older than
+  `--keep` gone, and said so. An applied change's ends with "Ask to undo
+  it": undoing is a proposal of its own, approved by the approver who asks
+  as they ask, checked again and carried out the same way, which the page
+  says; it is what `/proposals/{id}/undo` has done since v0.22.0.
+
+Dropping, closing (an admin's, with a reason), making it a task and asking
+for an undo are shown disabled with why where the reader may not.
+
+### The proposals list
+
+Facets with counts, as the rules list's, as one GET form, a chip for each
+filter in effect, and the team in the bar (`team=`, a team's editor's own
+team taken as on the other pages); a proposal's team is its rule's.
+
+| Facet | Parameter | Values |
+|---|---|---|
+| State | `state` | `proposed`, `approved`, `doing` (being applied), `applied`, `undone`, `closed`; `open` is the first three, and a state of its own (`refused`, `opened`, …) is offered as it is once asked |
+| Kind | `kind` | `for`, `threshold`, `disable`, `delete`, `says`, `undo` |
+| Way | `path` | `git`, `grafana`, `ruler`, `alarm`, `none` |
+| Made by | `by` | `person`, `agent`, `lapilli` |
+
+Unless `state=` is given, the open ones, as the list was, those waiting for
+approval first. The form sends `state=all` with what is ticked, so none
+ticked is all of them; `?state=all`, `?state=applied` and `?state=refused`
+mean what they meant. The list reads the latest 2,000 proposals in brief
+(`ProposalHeads`: no document, only an undo's evidence, how many approved)
+and shows 200, saying so past them. Each count is how many the list would
+show with the value picked alone in its facet and what the others pick
+(`TestProposalsFacets` checks it, on filters picked at random).
+
+### The tasks
+
+Their status is a facet with counts in place of the status links: open
+(open and being done), done, dropped, the form sending `status=all` as the
+proposals' does, the team kept. `?status=done`, `dropped` and `all` mean
+what they meant, and `doing` is offered as it is once asked. The counts
+are the team's tasks in each status, in one read (`TasksByStatus`), and
+the page says how many of them it shows.
+
+### A quiet window's preview
+
+The form to add a quiet window, and the one to change one, have a Preview
+button: the same POST to `/windows`, with `preview=1` (and
+`formaction="/windows#preview"`, so that the page lands on it), checked as
+saving is (the role, a team's editor's teams, the same site, the window's
+own checks, shared with `PutWindow`), and writing nothing
+(`PreviewWindow`). The page comes back, `no-store`, with the form as the
+window would be kept (what was typed put in again, escaped) and, above it:
+
+- the rules it applies to: by their own names, team and labels, as the
+  rules in effect have them, and those whose firings it would have
+  excused, each with how many, 50 at most, the rest counted;
+- how many firings that caught nothing over the last four weeks it would
+  have excused, its repeats worked out once for the span as judging does
+  (`ledger.Excusing`), and of them those another window excused already:
+  over the latest 20,000 firings of the four weeks, in one read, said so
+  when there are more;
+- when it falls in the next four weeks: each repeat that starts in them,
+  31 at most (`Window.Starts`).
+
+Preview is the form's first button, so that Enter in a field writes
+nothing.
+
+### The Manage page
+
+`/manage`: a card for each page of the Manage group and for the reports
+(their recipients and the weekly digest), each with a line on what it is
+for and, where cheap, a fact (how many teams, how many reports, how far
+the firings are in): Teams, Roles (admins only, as in the sidebar),
+Settings, Runs, Reports. The sidebar's Manage links to it, and the
+breadcrumbs of its pages start with it.
+
+### What they cost
+
+At two thousand rules, four weeks of their firings (84,000) and a thousand
+proposals (`TestChangePagesScale`), worked out afresh: the proposals list
+takes 20 to 45 ms, a proposal's page 15 to 25 ms (one whose rule is 600
+lines a side, shown whole, too), a quiet window's preview 35 to 80 ms
+(every day, once over the four weeks, by cron), the tasks and the Manage
+page about a millisecond.
+
 ## Without a script
 
 | Elsewhere | Here |
@@ -485,17 +646,17 @@ stops the server and removes what it made.
 | a chip's ✕ | a link to the URL without it |
 | a search that opens the one result | a 303 |
 | a disabled button with a tooltip | the button disabled, why beside it in words |
+| a dry run before saving | a Preview button on the same POST, which writes nothing |
+| a box that enables a button | `required`, and checked again by the server |
+| a diff view's toggles | links, `?diff=` and `?context=` |
 
 ## Later phases
 
-- **Proposals**: the diff with options (unified, side by side, the whole
-  rule), an approval panel that says who may approve and what is left, and
-  each proposal's history.
 - **Bulk actions** on the rules list: a task, a note's status, a proposal
   for the rules picked, as one POST form.
 - **Label chips**: the labels a rule fires with as chips on its row, each a
   `label:` filter.
 - **The overview's drill-down**: each tile and chart a link to the rules or
   incidents it counts, with the filters that give them.
-- The page actions and disabled-with-reason for every form, not only each
-  page's main one.
+- Disabled-with-why on the rules list, the firings and the overview, by
+  the phase that changes them.
