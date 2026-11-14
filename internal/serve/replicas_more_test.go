@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -507,20 +508,47 @@ func TestReplicasStuckWork(t *testing.T) {
 	}
 }
 
-// tardy is a history that answers each request after a while, with
-// nothing.
-type tardy time.Duration
+// Two Postgres ledgers in one process each have a version 1 of their own:
+// what a version holds is parsed for its ledger, not taken from another's
+// kept under the same id.
+func TestReplicasVersionsParsedPerLedger(t *testing.T) {
+	rc := newSink(t)
+	ctx := context.Background()
+	for i, name := range []string{"Checkout", "Search"} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "shop.yaml"), []byte("groups:\n  - name: shop\n    rules:\n      - alert: "+name+"\n        expr: errors > 5\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		s := replica(t, sharedLedger(t), rc, func(c *Config) { c.RulesPath = dir })
+		raw := ""
+		if err := s.look(ctx, &raw); err != nil {
+			t.Fatal(err)
+		}
+		vs, err := s.versions(ctx, now.Add(-time.Hour), now)
+		if err != nil || len(vs) != 1 || len(vs[0].Rules) != 1 || vs[0].Rules[0].Name != name {
+			t.Errorf("ledger %d's version: %+v %v, want its rule %s", i, vs, err, name)
+		}
+	}
+}
 
-func (h tardy) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
-	time.Sleep(time.Duration(h))
+// tardy is a history that answers each request after a while, with
+// nothing, counting them.
+type tardy struct {
+	d     time.Duration
+	asked atomic.Int64
+}
+
+func (h *tardy) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	h.asked.Add(1)
+	time.Sleep(h.d)
 	return nil, nil
 }
 
 // A round longer than stepWithin, in a piece of a run, isn't taken for
 // stuck while it makes progress: each rule replayed is, in the leader's
-// context. Here a day's piece replays twelve rules, one at a time, each
+// context. Here each day's piece replays twelve rules, one at a time, each
 // answered after 100 ms, while stepWithin is 500 ms; the leader keeps its
-// lease to the round's end.
+// lease, at the same term, to the round's end.
 func TestReplicasSlowRoundIsNoStall(t *testing.T) {
 	was := stepWithin
 	stepWithin = 500 * time.Millisecond
@@ -538,13 +566,14 @@ func TestReplicasSlowRoundIsNoStall(t *testing.T) {
 		t.Fatal(err)
 	}
 	change := func(c *Config) { c.RulesPath, c.Parallel, c.Impact = dir, 1, "" }
-	h := tardy(100 * time.Millisecond)
+	h := &tardy{d: 100 * time.Millisecond}
 	a := replicaOn(t, f, rc, h, change)
 	running(t, a)
 	until(t, 10*time.Second, "a leads", a.l.Leading)
+	began := time.Now()
+	p, _ := a.l.Leader()
 	b := replicaOn(t, f, rc, h, change)
 	running(t, b)
-	began := time.Now()
 	for !a.ready.Load() {
 		if b.l.Leading() {
 			t.Fatalf("another led %v into a slow round that made progress all along", time.Since(began))
@@ -554,8 +583,15 @@ func TestReplicasSlowRoundIsNoStall(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if took := time.Since(began); took < 2*stepWithin {
-		t.Fatalf("the round took %v, no longer than stepWithin: no test of it", took)
+	took := time.Since(began)
+	if n := h.asked.Load(); n < 36 || took < 2*stepWithin {
+		a.status.Lock()
+		what, why, runs := a.status.errWhat, a.status.err, a.status.runs
+		a.status.Unlock()
+		t.Fatalf("the round asked %d times over %v, short of a slow round: %s %s, runs %v", n, took, what, why, runs)
+	}
+	if q, ok := a.l.Leader(); !ok || !q.Self || q.Term != p.Term {
+		t.Errorf("after a slow round: %+v %v, want this replica leading at term %d still", q, ok, p.Term)
 	}
 }
 

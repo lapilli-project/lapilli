@@ -580,10 +580,12 @@ type version struct {
 	Rules []rules.Rule
 }
 
-// parsed keeps the versions read lately: a version doesn't change.
+// parsed keeps the versions read lately: a version doesn't change. By the
+// ledger (its path, or the file naming its Postgres database: every one of
+// those has a version 1), the version's id and its digest.
 var parsed = struct {
 	sync.Mutex
-	m map[string][]rules.Rule // by the ledger's path and the version's id
+	m map[string][]rules.Rule
 }{m: map[string][]rules.Rule{}}
 
 // versions are the versions of the rules in effect over [from, to], each
@@ -606,7 +608,7 @@ func (s *Server) versions(ctx context.Context, from, to time.Time) ([]version, e
 
 func (s *Server) parse(ctx context.Context, v ledger.Version) ([]rules.Rule, error) {
 	as, scrapes := s.replayedAs(), s.scrapes()
-	k := fmt.Sprint(s.cfg.Ledger, "\x00", v.ID, "\x00", as.DataSources, "\x00", scrapes.String(), "\x00", as.Kinds, "\x00", as.Places, as.NoLoki, as.NoGrafanaLoki)
+	k := fmt.Sprint(s.cfg.Ledger, "\x00", s.cfg.LedgerURLFile, "\x00", v.ID, "\x00", v.Digest, "\x00", as.DataSources, "\x00", scrapes.String(), "\x00", as.Kinds, "\x00", as.Places, as.NoLoki, as.NoGrafanaLoki)
 	parsed.Lock()
 	rs, ok := parsed.m[k]
 	parsed.Unlock()
