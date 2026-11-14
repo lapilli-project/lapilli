@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -91,45 +93,78 @@ func (h proposalHead) HTML(lang string) template.HTML { return trBDI(lang, h.For
 
 // headOf is what a proposal changes: a rule's for or threshold, from what
 // to what; turning it off; deleting it; what it says; undoing another.
-func headOf(p ledger.Proposal, ev evidence) proposalHead {
+// Its values are from what the proposal keeps apart, never read out of a
+// rule's text, whose lines a name or a group could once make look like
+// another's: a for's new value from its edit, and was, its old one, as the
+// rule it was proposed against had it, when that is known ("" when not);
+// a threshold's from its edit. Each is one line, set apart.
+func headOf(p ledger.Proposal, ev evidence, was time.Duration, known bool) proposalHead {
+	v := func(x string) string { return rules.Shown(strings.Join(strings.Fields(x), " ")) }
+	rule := v(p.Rule)
 	switch p.Kind {
 	case ledger.KindFor:
-		now := lineOf(p.After, "for: ")
+		to := ev.For
 		if ev.Edit != nil && ev.Edit.For != nil {
-			now = verdict.Duration(*ev.Edit.For)
+			to = *ev.Edit.For
 		}
-		return proposalHead{"%s's for, %s → %s", []any{p.Rule, cmpOr(lineOf(p.Before, "for: "), "–"), cmpOr(now, "–")}}
+		switch {
+		case to <= 0:
+			return proposalHead{"A new for for %s", []any{rule}}
+		case !known:
+			return proposalHead{"%s's for, to %s", []any{rule, verdict.Duration(to)}}
+		}
+		return proposalHead{"%s's for, %s → %s", []any{rule, verdict.Duration(was), verdict.Duration(to)}}
 	case ledger.KindThreshold:
 		if ev.Edit != nil && ev.Edit.From != "" {
-			return proposalHead{"%s's threshold, %s → %s", []any{p.Rule, ev.Edit.From, ev.Edit.To}}
+			return proposalHead{"%s's threshold, %s → %s", []any{rule, v(ev.Edit.From), v(ev.Edit.To)}}
 		}
-		return proposalHead{"A new threshold for %s", []any{p.Rule}}
+		return proposalHead{"A new threshold for %s", []any{rule}}
 	case ledger.KindDisable:
-		return proposalHead{"Turning %s off", []any{p.Rule}}
+		return proposalHead{"Turning %s off", []any{rule}}
 	case ledger.KindDelete:
-		return proposalHead{"Deleting %s", []any{p.Rule}}
+		return proposalHead{"Deleting %s", []any{rule}}
 	case ledger.KindSays:
 		if ev.Edit != nil && ev.Edit.Unset {
-			return proposalHead{"What %s says: its %s, taken out", []any{p.Rule, ev.Edit.Annotation}}
+			return proposalHead{"What %s says: its %s, taken out", []any{rule, v(ev.Edit.Annotation)}}
 		}
 		if ev.Edit != nil {
-			return proposalHead{"What %s says: its %s, written anew", []any{p.Rule, ev.Edit.Annotation}}
+			return proposalHead{"What %s says: its %s, written anew", []any{rule, v(ev.Edit.Annotation)}}
 		}
 	case ledger.KindUndo:
-		return proposalHead{"Undoing #%d, on %s", []any{p.Follows, p.Rule}}
+		return proposalHead{"Undoing #%d, on %s", []any{p.Follows, rule}}
 	}
-	return proposalHead{"A change to %s", []any{p.Rule}}
+	return proposalHead{"A change to %s", []any{rule}}
 }
 
-// lineOf is what follows prefix on the first line of a rule's text that
-// has it: its for, say.
-func lineOf(text, prefix string) string {
-	for _, l := range strings.Split(text, "\n") {
-		if v, ok := strings.CutPrefix(l, prefix); ok {
-			return strings.TrimSpace(v)
+// forWas is the for of the rule a proposal was proposed against, as the
+// rules in effect when it was made had it, or the latest: the rule of its
+// name whose hash it kept. known is false when neither has it.
+func (s *Server) forWas(ctx context.Context, p ledger.Proposal) (time.Duration, bool, error) {
+	vs, err := s.l.Versions(ctx, p.Made, p.Made, false)
+	if err != nil {
+		return 0, false, err
+	}
+	var ids []int64
+	if len(vs) > 0 {
+		ids = append(ids, vs[len(vs)-1].ID)
+	}
+	if latest, ok, err := s.l.Latest(ctx); err != nil {
+		return 0, false, err
+	} else if ok && !slices.Contains(ids, latest.ID) {
+		ids = append(ids, latest.ID)
+	}
+	for _, id := range ids {
+		all, names, err := s.named(ctx, id)
+		if err != nil {
+			return 0, false, err
+		}
+		for i, x := range all {
+			if names[i] == p.Rule && ruleHash(x) == p.BeforeHash {
+				return x.For, true, nil
+			}
 		}
 	}
-	return ""
+	return 0, false, nil
 }
 
 // btRow is a line of a backtest's table: what is counted, as the rule is

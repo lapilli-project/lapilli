@@ -382,7 +382,14 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 			v.Task = &t
 		}
 	}
-	v.Head = headOf(p, v.Evidence)
+	var was time.Duration
+	known := false
+	if p.Kind == ledger.KindFor && p.BeforeHash != "" {
+		if was, known, err = s.forWas(ctx, p); err != nil {
+			return nil, err
+		}
+	}
+	v.Head = headOf(p, v.Evidence, was, known)
 	o := diffOptsOf(r.URL.Query())
 	ds, whole := lineDiff(textLines(p.Before), textLines(p.After))
 	v.Diff = diffShown{D: shapeDiff(ds, whole, o), Old: "Now", New: "As proposed"}

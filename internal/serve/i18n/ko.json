@@ -643,6 +643,8 @@
  "merged, not yet read back": "병합됨, 아직 다시 읽지 않음",
  "changed in review": "리뷰에서 수정됨",
  "%s's for, %s → %s": "%s의 for, %s → %s",
+ "%s's for, to %s": "%s의 for, %s 로",
+ "A new for for %s": "%s의 새 for",
  "%s's threshold, %s → %s": "%s의 임계값, %s → %s",
  "A new threshold for %s": "%s의 새 임계값",
  "Turning %s off": "%s 끄기",

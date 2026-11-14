@@ -117,7 +117,9 @@ func TestFixTextsTranslated(t *testing.T) {
 	d := time.Minute
 	for _, ev := range []evidence{{}, {Edit: &rules.Edit{For: &d, From: "1", To: "2", Annotation: "summary"}}, {Edit: &rules.Edit{Annotation: "summary", Unset: true}}} {
 		for _, k := range []string{ledger.KindFor, ledger.KindThreshold, ledger.KindDisable, ledger.KindDelete, ledger.KindSays, ledger.KindUndo, "other"} {
-			texts[headOf(ledger.Proposal{Kind: k, Rule: "r"}, ev).Format] = true
+			for _, known := range []bool{false, true} {
+				texts[headOf(ledger.Proposal{Kind: k, Rule: "r"}, ev, time.Minute, known).Format] = true
+			}
 		}
 	}
 	for _, r := range btTableOf(&backtest{}).Rows {

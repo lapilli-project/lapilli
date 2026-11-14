@@ -643,6 +643,8 @@
  "merged, not yet read back": "マージ済み、まだ読み戻していません",
  "changed in review": "レビューで修正済み",
  "%s's for, %s → %s": "%s の for、%s → %s",
+ "%s's for, to %s": "%s の for、→ %s",
+ "A new for for %s": "%s の新しい for",
  "%s's threshold, %s → %s": "%s のしきい値、%s → %s",
  "A new threshold for %s": "%s の新しいしきい値",
  "Turning %s off": "%s をオフにする",

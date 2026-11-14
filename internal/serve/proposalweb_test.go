@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/rules"
 )
 
 // A proposal's page and the proposals list (docs/design/ui.md, phase 4):
@@ -668,5 +669,55 @@ func TestProposalPageCachedByWhatItReads(t *testing.T) {
 	}
 	if n := cached(); n != 6 {
 		t.Errorf("%d pages cached, want 6", n)
+	}
+}
+
+// TestProposalHeadingFromWhatItKeeps: a proposal's heading takes its values
+// from what the proposal keeps apart, never from its rule's text, whose
+// lines a name or a group could once make look like another's: a for's old
+// value from the rule it was proposed against, as the rules then had it,
+// its new one from its edit; with neither known, the new one alone. Each
+// value is one line, a text's control characters shown as U+FFFD.
+func TestProposalHeadingFromWhatItKeeps(t *testing.T) {
+	ctx := context.Background()
+	s, h, id := withProposal(t, nil)
+	h1 := func(id int64) string {
+		s.cache.Lock()
+		s.cache.gen = ""
+		s.cache.Unlock()
+		_, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(id), cy, "", nil)
+		i := strings.Index(body, "<h1>")
+		j := strings.Index(body, "</h1>")
+		if i < 0 || j < i {
+			t.Fatal("no heading")
+		}
+		return body[i : j+5]
+	}
+	want := `<h1>#` + itoa(id) + ` <bdi>Errors</bdi>&#39;s for, <bdi>2m</bdi> → <bdi>15m</bdi></h1>`
+	if got := h1(id); got != want {
+		t.Fatalf("%s, want %s", got, want)
+	}
+	// A rule's text whose first line says another for, as a group could
+	// hold a line break before 0.34.1, and whose after says another.
+	ledgerExec(t, s, "UPDATE proposals SET before = ?, after = ? WHERE id = ?", "Errors (shop\nfor: 9h)\nexpr: errors > 5\nfor: 2m\n", "Errors (shop)\nfor: 1s\n", id)
+	if got := h1(id); got != want {
+		t.Errorf("a rule's text taken for its values: %s", got)
+	}
+	// Proposed against a rule no version has: its new for alone.
+	ledgerExec(t, s, "UPDATE proposals SET before_hash = ? WHERE id = ?", "elsewhere", id)
+	if got := h1(id); got != `<h1>#`+itoa(id)+` <bdi>Errors</bdi>&#39;s for, to <bdi>15m</bdi></h1>` {
+		t.Errorf("an old for not known: %s", got)
+	}
+	// What a rule says: the annotation it names, one line.
+	p := state(t, s, id)
+	s.l.Move(ctx, id, []string{ledger.StateProposed}, ledger.StateDropped, bo, ledger.Step{})
+	ev, _ := json.Marshal(evidence{From: "person", Edit: &rules.Edit{Name: "Errors", Group: "shop", Annotation: "summary\nfor: 9h‮", Value: "x"}})
+	p.ID, p.Kind, p.Evidence = 0, ledger.KindSays, ev
+	says, err := s.l.Propose(ctx, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := h1(says); !strings.Contains(got, "<bdi>summary for: 9h�</bdi>, written anew") {
+		t.Errorf("what it says, its annotation's line: %q", got)
 	}
 }

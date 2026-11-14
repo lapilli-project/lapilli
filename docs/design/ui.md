@@ -519,7 +519,14 @@ dry run, its history), with the backtest in the dry run's place:
 
 - **The header**: `#id` and what it changes in words, "Errors's for,
   2m → 15m" (a threshold from what to what, turning a rule off, deleting
-  it, what it says, undoing #n), as the `h1`, its values in `<bdi>`; its
+  it, what it says, undoing #n), as the `h1`, its values in `<bdi>`, each
+  one line, and each from what the proposal keeps apart, never read out of
+  the rule's text, whose lines a group's name holding a line break (which
+  0.34.1's rule keeps, as it keeps a description's) could make look like a
+  `for`: the new `for` from its edit, the old one from the rule it was
+  proposed against, as the rules in effect when it was made (or the
+  latest) have it by its hash, and, with neither, the new one alone
+  ("Errors's for, to 15m"); a threshold's from its edit; its
   state as a badge, a sign and a word: ◷ awaiting approval, ✓ approved,
   ↻ being applied (checked again and waiting for a recipe, sent and not
   yet read back, its pull request open, merged and not yet read back),

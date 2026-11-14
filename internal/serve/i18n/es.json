@@ -643,6 +643,8 @@
  "merged, not yet read back": "fusionado, aún sin volver a leer",
  "changed in review": "modificado en la revisión",
  "%s's for, %s → %s": "El for de %s, %s → %s",
+ "%s's for, to %s": "El for de %s, a %s",
+ "A new for for %s": "Un nuevo for para %s",
  "%s's threshold, %s → %s": "El umbral de %s, %s → %s",
  "A new threshold for %s": "Un nuevo umbral para %s",
  "Turning %s off": "Apagar %s",
