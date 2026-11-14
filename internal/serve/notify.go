@@ -183,6 +183,9 @@ type proposalNotice struct {
 func (s *Server) pageOf(n notice) string {
 	path := "/"
 	switch {
+	case n.Event == "replay.differs":
+		// The rules whose replay differs, this one among them.
+		path = "/rules?trust=differs"
 	case n.ReportID != 0:
 		path = fmt.Sprintf("/reports/%d", n.ReportID)
 	case n.Team != "":
@@ -197,6 +200,9 @@ func (s *Server) pageOf(n notice) string {
 		path = fmt.Sprintf("/windows/%d", n.Window.ID)
 	case n.Comment != nil && n.Comment.On == "task":
 		path = "/tasks/" + url.PathEscape(n.Comment.Key)
+	case n.Comment != nil && n.Comment.On == "rule":
+		// A rule's comments are on its activity tab.
+		path = "/rules/" + url.PathEscape(n.Comment.Key) + "?tab=activity#comments"
 	case n.Comment != nil:
 		path = "/" + n.Comment.On + "s/" + url.PathEscape(n.Comment.Key)
 	case n.Incident != nil:
