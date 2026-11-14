@@ -407,11 +407,20 @@ ask() { # EXPR REF INSTANT: Grafana's answer to a query of the dashboard's
       instant: $instant, range: ($instant | not), intervalMs: 15000, maxDataPoints: 200}]}')"
 }
 points() { jq --arg ref "$1" '[.results[$ref].frames[]?.data.values[1]? // [] | length] | add // 0'; }
-scraped() { test "$(ask "$1" A true | points A)" -gt 0; }
+# scraped EXPR: true now, and at a step of the range the panels ask for.
+# Grafana ends that range at the last step (15s) before now, so a series
+# scraped since has a value now but no point in the panels yet: the
+# deploys' series, there once Lapilli reads the deploys file, often in
+# the run that comes to the rest, came up empty so.
+scraped() { test "$(ask "$1" A true | points A)" -gt 0 && test "$(ask "$1" A false | points A)" -gt 0; }
 # Once Prometheus has scraped what Lapilli came to: both incidents' leads,
 # the firing during the deploy and the re-fire, the shop team's.
-until_true 120 scraped 'count(lapilli_incident_lead_seconds) == 2 and on () lapilli_rule_firings_during_deploys{team="shop"} == 1
+came='count(lapilli_incident_lead_seconds) == 2 and on () lapilli_rule_firings_during_deploys{team="shop"} == 1
   and on () lapilli_rule_refired{team="shop"} == 1'
+if ! until_true 120 scraped "$came"; then
+  echo "FAILED: Prometheus didn't come to it within two minutes: $(ask "$came" A true | points A) points now, $(ask "$came" A false | points A) in the panels' range"
+  exit 1
+fi
 asked=0
 empty=0
 for team in '.*' shop; do
