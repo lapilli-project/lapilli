@@ -1,6 +1,6 @@
 # Replicas on one Postgres ledger
 
-Status: built, for the release after 0.34.1. `lapilli serve` with its
+Status: built, for the release after 0.35.0. `lapilli serve` with its
 ledger in Postgres (`--ledger-url-file`, [postgres.md](postgres.md)) runs
 as several replicas on one ledger: one leads, and runs what must run once;
 every replica serves the rest. With SQLite it is one process, as it always
@@ -34,7 +34,7 @@ helm upgrade lapilli ... --set serve.ledger.postgres.secret.name=lapilli-ledger 
   `maxUnavailable: 0`, so a new pod is ready (as a follower) before an
   old one goes; a `PodDisruptionBudget` lets `serve.podDisruptionBudget.maxUnavailable`
   (1) go at once. One replica stays `Recreate`, as before.
-- **From 0.34 or before, upgrade with one replica first.** A 0.34 process
+- **From 0.35 or before, upgrade with one replica first.** Such a process
   holds the ledger's lock alone (below): a new pod is refused until it has
   stopped, which `Recreate` does first and `RollingUpdate` never would.
   Then raise `serve.replicas`.
@@ -46,11 +46,11 @@ helm upgrade lapilli ... --set serve.ledger.postgres.secret.name=lapilli-ledger 
 
 The advisory lock of [postgres.md](postgres.md) is kept, now taken
 **shared** by every session of every replica (`pg_try_advisory_lock_shared`),
-and **alone** by `lapilli ledger copy` (`OpenPostgresAlone`), as 0.34 and
+and **alone** by `lapilli ledger copy` (`OpenPostgresAlone`), as 0.35 and
 before took it. The two refuse each other: a copy is refused while any
 replica runs ("holds its lock, and a ledger serve's replicas share is
-written by no other process"), and a replica while a copy, or a 0.34
-`serve`, holds it ("holds its lock alone, as a copy, or a lapilli of 0.34
+written by no other process"), and a replica while a copy, or a 0.35
+`serve`, holds it ("holds its lock alone, as a copy, or a lapilli of 0.35
 or before, does"). Replicas don't count themselves in `schema_version.writers`:
 a replica that connects again and finds the count moved finds that a
 process wrote the ledger alone in between, and stops (`ErrLockLost`), as a
@@ -70,7 +70,7 @@ ledger's lock alone, and keep replicas from starting or connecting again
 `pg_locks`); take the advisory lock that makes an empty schema a ledger,
 and hold the first start up. It can't hold the writers' turn, the lease,
 a claim or a bucket: each is a row of the ledger's, which it can't lock.
-A lapilli of 0.34 or before, or a copy, alone, is refused while such a
+A lapilli of 0.35 or before, or a copy, alone, is refused while such a
 role holds the lock, and one whose connection drops finds it taken, and
 stops, as before.
 
@@ -421,11 +421,11 @@ replica's.**
   the new pod migrates as it starts, under the writers' turn; each older
   replica finds the newer schema at its next read (a second) and stops,
   and is replaced by the rollout. Each migration says so in the changelog.
-- **A copy, or a 0.34 serve, started against a ledger replicas share** is
+- **A copy, or a 0.35 serve, started against a ledger replicas share** is
   refused; one that took the lock alone while every replica's sessions
   were gone (a database restart) is found by the replicas as they connect
   again, and they stop.
-- **Going back to 0.34**: its `lapilli ledger copy` takes a Postgres
+- **Going back to 0.35 or 0.34**: its `lapilli ledger copy` takes a Postgres
   ledger's tables to be the ledger's, the replicas' among them, and refuses
   ("the two ledgers' tables differ"). Drop them first, with every serve
   stopped: `DROP TABLE replica_lease, replica_gens, replica_signals,
@@ -442,9 +442,8 @@ replica's.**
 - **Leaders by kind of work** (one for the runs, another for the outbox):
   one leads it all, as one process did.
 - **Rate limits divided among replicas**: shared instead, above.
-- **A pooler in transaction mode** (PgBouncer's): the lock is a session's,
-  and so is the writers' turn's transaction lock; in session mode, or
-  directly, as before.
+- **A pooler in transaction mode** (PgBouncer's): the lock is a session's;
+  in session mode, or directly, as before.
 - **SQLite replicas**: one process, one file.
 
 ## As built
@@ -456,55 +455,74 @@ later, and each of five tasks' notices, made on the three before and the
 two after, reached the webhook once (`test/e2e/postgres.sh`, run against a
 local server, its Docker steps left out). With the tests' timings (a lease
 of 1.5 s, renewed every 300 ms, a campaign every 100 ms, a margin of 300
-ms), 20 runs each:
+ms), 20 runs each after the reviews' changes:
 
 | | the old leader stopped | another led |
 |---|---|---|
-| a leader cut off from the database (`TestReplicasTakeOver/cut_off`) | 0.99 to 1.01 s after | 1.30 to 1.42 s after |
-| a leader killed (`TestReplicasTakeOver/killed`) | at once | 1.30 to 1.38 s after |
-| a leader cut off, the ledger alone (`TestReplicasTakeOverFromACutOffLeader`) | 1.19 s after | 1.53 to 1.56 s after |
-| a leader that stopped (`TestReplicasOneLeads`) | at once | 11 to 23 ms after |
+| a leader cut off from the database (`TestReplicasTakeOver/cut_off`) | 0.98 to 1.02 s after | 1.30 to 1.36 s after |
+| a leader killed (`TestReplicasTakeOver/killed`) | 10 to 14 ms after | 1.31 to 1.36 s after |
+| a leader cut off, the ledger alone (`TestReplicasTakeOverFromACutOffLeader`) | 1.19 s after | 1.54 to 1.57 s after |
+| a leader that stopped (`TestReplicasOneLeads`) | at once | 11 to 69 ms after |
 
 Each time the old leader stopped before another began, at a later term.
 In 20 runs of three replicas each, every run and every notice was done
-once, and a former leader whose lease another took sent nothing.
+once, and a former leader whose lease another took sent nothing; a write
+fenced at commit, a claim, and a stuck leader giving its lease up, 20
+times each, held as well.
 
-**The tests**, on SQLite and on Postgres 16 and 17 locally (CI runs 15 and
-18): the ledger's, serve's and the command's suites pass on all three: 698
-tests on SQLite (38 of Postgres's alone skipped), 730 on Postgres 17 and
-728 on 16 (the last two tests added after it ran), 6 of SQLite's alone
-skipped. The replicas' own, beside the ledger's tests of
-the lock: replicas started at once; writes that read then write, merged
-and counted against a limit by three replicas at once; another replica's
-writes on the next refresh, and on the next request's page and API; one
-leader of three, handed over when it stops; a leader cut off or killed,
-followed within the lease; fenced writes, by the database and by the
-clock; notices claimed once by six senders on two replicas; shared rate
-limits and uses once; the leader woken and asked to judge again; a newer
-schema; three servers running each job once; a former leader that sends
-nothing; no job once the lease ended by the clock; the admin's pause, the
-settings, the forms' key, a sign-in's state and the token's burst across
-replicas; the leader's status on a follower's pages; readiness without
-the database; one session key. The chart's: refused without Postgres, the
-rolling update, the budget, the session key.
+**Writes beside the backfill.** Three processes on one ledger while the
+leader backfilled 28 days: 1,278 API writes on the three, the longest 71
+ms. `TestReplicasWritesDontWaitOnTheBackfill` holds a write to 1 s while
+a leader backfills four weeks of 70,000 firings: 65 to 274 ms in its
+runs; with the backfill taken in one write, 1.23 to 1.38 s, and the test
+fails.
 
-**Each guard was taken away in turn** (31), and a test failed each time:
-the lease checked in the database in a leader's write, and the clock
-before it commits; the leader stopping at its lease's end by its clock;
-`Hold` saying whether it leads; the lease looked at before each job; the
-lease taken only once lapsed; the outbox claimed `FOR UPDATE SKIP LOCKED`,
-under the lease, each notice once a round; the digest's post claimed; the
-generation counted in the database, and the weeks changed; each request
-reading the others' writes; a refresh begun before the request not taken
-for one after; ids another replica deleted dropped; the writers' turn, for
-writes and for migrations; the writer's own earlier sessions ended; the
-lock shared, and alone for a copy; a newer schema stopping a replica; the
-rate limits shared; the pause, the rejudge, the forms' key and a sign-in's
-state across replicas; the leader's status shown; only the leader running
-the singletons; readiness without the database; one session key; the
-chart's refusal and its rolling update.
+**Started together.** `TestReplicasStartTogether` (eight replicas on an
+empty schema, five rounds, then on a ledger without the replicas' tables)
+passed 60 times of 60 while the whole suite ran on the same Postgres 16
+server, twice; before the reviews' change it failed 3 times of 60 so
+(the review's count).
+
+**The tests**, every package's, on SQLite and on Postgres 16 and 17
+locally (CI runs 15 and 18): 1,719 tests and subtests pass on Postgres 17
+and on 16, 11 skipped (SQLite's own, and an accessibility check run on
+its own); 1,661 on SQLite, 67 skipped (Postgres's own). The
+replicas' own, beside the ledger's tests of the lock: replicas started at
+once, and one that waits while another makes the ledger; writes that read
+then write, merged and counted against a limit by three replicas at once;
+another replica's writes on the next refresh, and on the next request's
+page and API; one refresh at a time, within its deadline, which no write
+waits for; deadlines on the side pool; one leader of three, handed over
+when it stops; a leader cut off or killed, followed within the lease; a
+stuck leader giving its lease up; fenced writes, by the database at the
+write's start and at its commit, and by the clock; notices claimed once by
+six senders on two replicas, from when each is taken, due by the
+database's clock, the next taken while another holds the first; shared
+rate limits and uses once, swept and bounded; the leader woken, during
+its own write as well, and asked to judge again, from a follower; a newer
+schema, found by a refresh and by a write under the turn; a migration
+taking the turn; failovers that lost commits; ids another replica deleted;
+a role that may only connect, and a session that waits for the lock alone;
+three servers running each job once; a former leader that sends nothing;
+no job once the lease ended by the clock; the admin's pause, the settings,
+the forms' key, a sign-in's state and the token's burst across replicas;
+no state kept for a sign-in that signed no one in; sign-outs that can't be
+read refusing a session; the leader's status on a follower's pages;
+readiness without the database, while writes wait, and saying ok alone
+on the UI's port; session keys compared; the digest after another's claim;
+stepping down. The chart's: refused without Postgres, the rolling update,
+the budget and its percentages, the session key's Secret.
+
+**Each guard was taken away in turn** (68), and a test failed for 67:
+those above, and the chart's. The one left is the lease checked as a
+leader's write begins, with the check at commit kept: the commit's catches
+what it would, so no test fails without it. It is kept as the cheaper
+refusal, before a write does its work.
 
 **Not yet run**: `test/e2e/replicas.sh` on kind (CI's `e2e-replicas`),
 `test/e2e/postgres.sh` with its Postgres in Docker, and the suites on
 Postgres 15 and 18, which CI runs. Both scripts pass shellcheck, and the
-workflow actionlint.
+workflow actionlint. The kind run failed in CI on a port: the script
+asked the Service on port 80, where it answers on `serve.port` (8080);
+it now reads the Service's ports, times each write, and prints the pods,
+their logs and the Service's endpoints when it fails.
