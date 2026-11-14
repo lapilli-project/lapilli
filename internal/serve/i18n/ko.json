@@ -1173,7 +1173,6 @@
  "%s pt": "%s%%p",
  "a quiet window covered it": "메인터넌스 윈도우 적용",
  "a quiet window": "메인터넌스 윈도우",
- "Activity": "활동",
  "alike with what really fired, of %d": "실제 발화와 일치, %d건 중",
  "Backtest": "백테스트",
  "Beside each number, how it changed from as long before.": "숫자 옆은 같은 길이의 직전 기간 대비 변화예요.",
@@ -1202,7 +1201,6 @@
  "Of its firings, %d came during a deploy of what they are about, %d of them catching something: precision %s with them, %s without.": "발화 중 %d번은 해당 대상의 배포 중에 울렸고, 그중 %d번은 정탐이었어요. 정밀도는 포함하면 %s, 제외하면 %s예요.",
  "Of its firings, the share alike in its replay and in what really fired: how far its stones can be taken as they are.": "발화 중 백테스트와 실제 발화가 일치한 비율이에요. 이 규칙의 판정을 얼마나 믿을 수 있는지 보여 줘요.",
  "Propose it": "이대로 변경 제안",
- "Sections of this rule": "이 규칙의 탭",
  "The 84 days, as a table": "84일을 표로 보기",
  "The last %d weeks, from %s.": "최근 %[1]d주, %[2]s부터예요.",
  "The last 84 days": "최근 84일",
@@ -1229,5 +1227,11 @@
  "fired during a deploy of what it is about": "이 규칙 대상의 배포 중 발화",
  "What it says when it fires has problems of fact; the badge, “n to check”, counts them with whatever else its page lists to check.": "울릴 때의 알림 내용에 사실 문제가 있어요. “확인 n건” 배지는 이 문제와 규칙 페이지에서 확인하라고 한 다른 항목을 함께 세요.",
  "Too long to set beside the version before line by line: the version before, taken out, then this one.": "너무 길어 직전 버전과 줄 단위로 비교하지 않았어요: 직전 버전을 뺀 줄로, 이 버전을 더한 줄로 보여 줘요.",
- "Runbook, from the rule": "런북 (규칙에 적힌 것)"
+ "Runbook, from the rule": "런북 (규칙에 적힌 것)",
+ "This rule": "이 규칙",
+ "rule tab|Summary": "요약",
+ "rule tab|Firings": "발화",
+ "rule tab|Versions": "버전",
+ "rule tab|Proposals": "변경 제안",
+ "rule tab|Activity": "활동"
 }

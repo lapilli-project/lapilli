@@ -24,10 +24,11 @@ import (
 // 84 days, a cell a day; and its sections in five tabs, ?tab=.
 
 // ruleTabs are the tabs of a rule's page, in order, each named by a text
-// to translate. The overview is the one a page shows without tab=, or with
-// one it doesn't have.
+// translated in the context "rule tab" (trIn), apart from the same words
+// in the sidebar. The overview, named Summary, is the one a page shows
+// without tab=, or with one it doesn't have.
 var ruleTabs = []struct{ id, name string }{
-	{"overview", "Overview"}, {"firings", "Firings"}, {"versions", "Versions"}, {"proposals", "Proposals"}, {"activity", "Activity"},
+	{"overview", "Summary"}, {"firings", "Firings"}, {"versions", "Versions"}, {"proposals", "Proposals"}, {"activity", "Activity"},
 }
 
 // ruleTabOf is the tab a rule's page is asked for: one it has, or else the

@@ -1173,7 +1173,6 @@
  "%s pt": "%s ポイント",
  "a quiet window covered it": "メンテナンスウィンドウが適用",
  "a quiet window": "メンテナンスウィンドウ",
- "Activity": "アクティビティ",
  "alike with what really fired, of %d": "実際の発火と一致、%d 件中",
  "Backtest": "バックテスト",
  "Beside each number, how it changed from as long before.": "数字の横は、同じ長さの直前の期間からの変化です。",
@@ -1202,7 +1201,6 @@
  "Of its firings, %d came during a deploy of what they are about, %d of them catching something: precision %s with them, %s without.": "発火のうち %d 回は対象のデプロイ中に発火し、そのうち %d 回は何かを検知しました。適合率は含めると %s、除くと %s です。",
  "Of its firings, the share alike in its replay and in what really fired: how far its stones can be taken as they are.": "発火のうち、バックテストと実際の発火が一致した割合です。このルールの石をどこまでそのまま信じられるかを示します。",
  "Propose it": "このまま変更提案",
- "Sections of this rule": "このルールのタブ",
  "The 84 days, as a table": "84 日分を表で見る",
  "The last %d weeks, from %s.": "直近 %[1]d 週間、%[2]s から。",
  "The last 84 days": "直近 84 日",
@@ -1229,5 +1227,11 @@
  "fired during a deploy of what it is about": "このルールの対象のデプロイ中に発火",
  "What it says when it fires has problems of fact; the badge, “n to check”, counts them with whatever else its page lists to check.": "発火時のアラート内容に事実の問題があります。「要確認 n 件」のバッジは、これとルールのページが確認を求めるほかの項目をあわせて数えます。",
  "Too long to set beside the version before line by line: the version before, taken out, then this one.": "長すぎるため直前のバージョンと行ごとには比べていません。直前のバージョンを削除行として、このバージョンを追加行として示します。",
- "Runbook, from the rule": "ランブック(ルールに記載)"
+ "Runbook, from the rule": "ランブック(ルールに記載)",
+ "This rule": "このルール",
+ "rule tab|Summary": "概要",
+ "rule tab|Firings": "発火",
+ "rule tab|Versions": "バージョン",
+ "rule tab|Proposals": "変更提案",
+ "rule tab|Activity": "アクティビティ"
 }

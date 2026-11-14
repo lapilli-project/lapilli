@@ -56,7 +56,7 @@ func TestRuleTabOf(t *testing.T) {
 	}
 	// Each tab is a link with the page context, the one shown current.
 	_, body, _ := get(t, h, "/rules/Errors?tab=versions&team=payments&weeks=4")
-	for _, want := range []string{`<a href="/rules/Errors?team=payments&amp;weeks=4">Overview</a>`,
+	for _, want := range []string{`<a href="/rules/Errors?team=payments&amp;weeks=4">Summary</a>`,
 		`<a href="/rules/Errors?tab=firings&amp;team=payments&amp;weeks=4">Firings <span class="count">`,
 		`<a href="/rules/Errors?tab=versions&amp;team=payments&amp;weeks=4" aria-current="page">Versions <span class="count">1</span></a>`,
 		`<a href="/rules/Errors?tab=proposals&amp;team=payments&amp;weeks=4">Proposals <span class="count">1</span></a>`,
@@ -1055,6 +1055,36 @@ func TestRulePanelText(t *testing.T) {
 	for _, mark := range []string{"the rule changed", "fired during a deploy of what it is about", "a quiet window covered it"} {
 		if strings.Contains(body, mark) {
 			t.Errorf("/rules/R20: the legend names %q, which it hasn't", mark)
+		}
+	}
+}
+
+// TestRuleTabNames: a rule's tabs are named apart from the sidebar's
+// pages: in a list of their own, "This rule", each from its own text in
+// every language, the first Summary, where the sidebar has Overview.
+func TestRuleTabNames(t *testing.T) {
+	for lang, c := range catalogs {
+		for _, tab := range ruleTabs {
+			if _, ok := c["rule tab|"+tab.name]; !ok {
+				t.Errorf("%s has no translation for the tab %q", lang, tab.name)
+			}
+		}
+	}
+	s, _ := a11yServer(t)
+	for lang, want := range map[string][]string{
+		"en": {`<nav class="ruletabs" aria-label="This rule">`, `aria-current="page">Summary</a>`, `>Firings <span class="count">`, `>Proposals <span class="count">`},
+		"ko": {`<nav class="ruletabs" aria-label="이 규칙">`, `aria-current="page">요약</a>`, `>발화 <span class="count">`, `>변경 제안 <span class="count">`, `>버전 <span class="count">`, `>활동 <span class="count">`},
+		"es": {`<nav class="ruletabs" aria-label="Esta regla">`, `aria-current="page">Resumen</a>`, `>Disparos <span class="count">`},
+		"ja": {`<nav class="ruletabs" aria-label="このルール">`, `aria-current="page">概要</a>`},
+	} {
+		r := httptest.NewRequest(http.MethodGet, "/rules/Errors", nil)
+		r.Header.Set("Accept-Language", lang)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		for _, x := range want {
+			if !strings.Contains(w.Body.String(), x) {
+				t.Errorf("%s: no %s", lang, x)
+			}
 		}
 	}
 }

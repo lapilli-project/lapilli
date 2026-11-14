@@ -1173,7 +1173,6 @@
  "%s pt": "%s pp",
  "a quiet window covered it": "la cubrió una ventana de mantenimiento",
  "a quiet window": "una ventana de mantenimiento",
- "Activity": "Actividad",
  "alike with what really fired, of %d": "iguales a lo que realmente se disparó, de %d",
  "Backtest": "Backtest",
  "Beside each number, how it changed from as long before.": "Junto a cada número, cómo cambió respecto a un periodo igual de largo antes.",
@@ -1202,7 +1201,6 @@
  "Of its firings, %d came during a deploy of what they are about, %d of them catching something: precision %s with them, %s without.": "De sus disparos, %d llegaron durante un despliegue de lo que tratan, %d de ellos detectando algo: precisión %s con ellos, %s sin ellos.",
  "Of its firings, the share alike in its replay and in what really fired: how far its stones can be taken as they are.": "De sus disparos, la proporción igual en su backtest y en lo que realmente se disparó: cuánto pueden tomarse sus piedras tal cual.",
  "Propose it": "Proponerlo",
- "Sections of this rule": "Secciones de esta regla",
  "The 84 days, as a table": "Los 84 días, como tabla",
  "The last %d weeks, from %s.": "Las últimas %d semanas, desde el %s.",
  "The last 84 days": "Los últimos 84 días",
@@ -1229,5 +1227,11 @@
  "fired during a deploy of what it is about": "disparó durante un despliegue de lo que trata",
  "What it says when it fires has problems of fact; the badge, “n to check”, counts them with whatever else its page lists to check.": "Lo que dice al dispararse tiene problemas de hecho; la insignia «n por revisar» los cuenta junto con lo demás que su página pide revisar.",
  "Too long to set beside the version before line by line: the version before, taken out, then this one.": "Demasiado larga para compararla línea a línea con la versión anterior: la anterior, quitada, y luego esta.",
- "Runbook, from the rule": "Runbook, de la regla"
+ "Runbook, from the rule": "Runbook, de la regla",
+ "This rule": "Esta regla",
+ "rule tab|Summary": "Resumen",
+ "rule tab|Firings": "Disparos",
+ "rule tab|Versions": "Versiones",
+ "rule tab|Proposals": "Propuestas",
+ "rule tab|Activity": "Actividad"
 }

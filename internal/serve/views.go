@@ -1698,6 +1698,7 @@ var funcs = template.FuncMap{
 	"static": static,
 	"t":      func(msg string, args ...any) string { return tr("en", msg, args...) }, // each language's own, in pagesIn
 	"tbdi":   func(msg string, args ...any) template.HTML { return trBDI("en", msg, args...) },
+	"tin":    func(ctx, msg string) string { return trIn("en", ctx, msg) },
 	// shown is a text as a page shows what it can't change: an expression,
 	// a ruler's namespace, with what turns text around as U+FFFD.
 	"shown": rules.Shown,

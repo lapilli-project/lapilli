@@ -58,7 +58,7 @@
 </table></div></details>
 </figure>{{end}}
 
-<nav class="ruletabs" aria-label="{{t "Sections of this rule"}}"><ul>{{range .Tabs}}<li><a href="{{$.Link $v.Path "tab" .Param}}"{{if .Current}} aria-current="page"{{end}}>{{t .Name}}{{if .Counted}} <span class="count">{{.Count}}</span>{{end}}</a></li>{{end}}</ul></nav>
+<nav class="ruletabs" aria-label="{{t "This rule"}}"><ul>{{range .Tabs}}<li><a href="{{$.Link $v.Path "tab" .Param}}"{{if .Current}} aria-current="page"{{end}}>{{tin "rule tab" .Name}}{{if .Counted}} <span class="count">{{.Count}}</span>{{end}}</a></li>{{end}}</ul></nav>
 
 {{if eq .Tab "firings"}}{{/* tab: firings */}}
 <section class="card" id="latest">
