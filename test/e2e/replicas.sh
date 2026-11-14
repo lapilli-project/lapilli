@@ -6,7 +6,9 @@
 # replica, before the kill and after it, goes to the webhook once; a
 # rolling restart keeps the API answering and leaves one leader. Needs
 # Docker, Go, kubectl, helm and jq; deletes the cluster afterwards unless
-# KEEP is set.
+# KEEP is set. A run that fails says what the cluster held, each pod's log
+# among it.
+# shellcheck disable=SC2329 # dump and done_ run on EXIT
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 cluster=lapilli-e2e-replicas
@@ -22,7 +24,27 @@ docker buildx build --load --platform "linux/$arch" -t lapilli:e2e .
 go install sigs.k8s.io/kind@v0.27.0
 kind="$(go env GOPATH)/bin/kind"
 "$kind" get clusters | grep -qx "$cluster" || "$kind" create cluster --name "$cluster" --wait 2m
-trap '[ -n "${KEEP:-}" ] || "$kind" delete cluster --name "$cluster"' EXIT
+# dump: what the cluster holds of lapilli, for a run that failed: its pods,
+# the Service and its endpoints, and every pod's log.
+dump() {
+  echo "::group::what the cluster holds"
+  kubectl -n "$ns" get pods,svc,endpointslices,pdb -o wide || true
+  kubectl -n "$ns" describe deploy/lapilli || true
+  for p in $(kubectl -n "$ns" get pods -l app.kubernetes.io/instance=lapilli -o name 2>/dev/null); do
+    echo "--- $p"
+    kubectl -n "$ns" logs "$p" --all-containers --tail=300 || true
+    kubectl -n "$ns" logs "$p" --all-containers --previous --tail=100 2>/dev/null || true
+  done
+  echo "--- fakeslack"
+  kubectl -n "$ns" logs deploy/fakeslack --tail=100 || true
+  echo "::endgroup::"
+}
+done_() {
+  local rc=$?
+  if [ "$rc" != 0 ] || [ "${fail:-0}" != 0 ]; then dump; fi
+  [ -n "${KEEP:-}" ] || "$kind" delete cluster --name "$cluster"
+}
+trap done_ EXIT
 trap 'echo "stopped at line $LINENO: $BASH_COMMAND" >&2' ERR
 "$kind" load docker-image lapilli:e2e --name "$cluster"
 kubectl config use-context "kind-$cluster"
@@ -79,6 +101,13 @@ helm upgrade --install lapilli charts/lapilli -n "$ns" --wait --timeout 5m \
   --set serve.notify.webhookSecret.name=hook
 
 fail=0
+# The ports the in-cluster Service gives the UI and the metrics: the
+# chart's serve.port and serve.metricsPort, not serve.service.port, which is
+# the -ui Service's alone.
+http=$(kubectl -n "$ns" get svc lapilli -o jsonpath='{.spec.ports[?(@.name=="http")].port}')
+metrics=$(kubectl -n "$ns" get svc lapilli -o jsonpath='{.spec.ports[?(@.name=="metrics")].port}')
+ui=http://lapilli:$http
+echo "the Service: http $http, metrics $metrics"
 check() { # what, text, pattern
   if grep -qE -- "$3" <<<"$2"; then echo "ok: $1"; else echo "FAILED: $1"; echo "$2"; fail=1; fi
 }
@@ -90,16 +119,26 @@ pods() { kubectl -n "$ns" get pods -l app.kubernetes.io/instance=lapilli,app.kub
 leaders() {
   pods | while read -r pod ip; do
     [ -n "$ip" ] || continue
-    incluster wget -qO- -T 3 "http://$ip:9091/readyz" 2>/dev/null |
+    incluster wget -qO- -T 3 "http://$ip:$metrics/readyz" 2>/dev/null |
       sed -nE "s/^replica ([^ ]+) leads, term ([0-9]+).*/$pod \1 \2/p" || true
   done
 }
-# task: one made through the Service, on whichever replica it sends it to.
+# task: one made through the Service, on whichever replica it sends it to;
+# how long it took (ms) kept in $waited, the longest in $longest.
+waited=0
+longest=0
 task() {
-  incluster wget -qO- -T 10 --header 'Content-Type: application/json' --header 'X-Forwarded-Email: e2e@example.com' \
-    --post-data "{\"title\": \"$1\", \"rule\": \"LateStart\"}" http://lapilli/api/v1/tasks >/dev/null
+  local began=$EPOCHREALTIME
+  if ! incluster wget -qO- -T 30 --header 'Content-Type: application/json' --header 'X-Forwarded-Email: e2e@example.com' \
+    --post-data "{\"title\": \"$1\", \"rule\": \"LateStart\"}" "$ui/api/v1/tasks" >/dev/null; then
+    echo "FAILED: the task \"$1\", through the Service at $ui"
+    fail=1
+    return 1
+  fi
+  waited=$(awk -v a="$began" -v b="$EPOCHREALTIME" 'BEGIN { printf "%d", (b - a) * 1000 }')
+  [ "$waited" -le "$longest" ] || longest=$waited
 }
-unsent() { incluster wget -qO- -T 5 http://lapilli:9091/metrics | sed -nE 's/^lapilli_serve_notices_unsent ([0-9]+)$/\1/p'; }
+unsent() { incluster wget -qO- -T 5 "http://lapilli:$metrics/metrics" | sed -nE 's/^lapilli_serve_notices_unsent ([0-9]+)$/\1/p'; }
 wait_sent() {
   for _ in $(seq 60); do
     [ "$(unsent)" = 0 ] && return 0
@@ -151,7 +190,7 @@ wait_sent
 # A rolling restart: the API answers throughout, to a client that tries a
 # request a second time (one may reach a pod as it stops), and one leads
 # after.
-runs() { incluster wget -qO- -T 5 http://lapilli/api/v1/runs >/dev/null 2>&1; }
+runs() { incluster wget -qO- -T 5 "$ui/api/v1/runs" >/dev/null 2>&1; }
 kubectl -n "$ns" rollout restart deploy/lapilli
 refused=0
 while ! kubectl -n "$ns" rollout status deploy/lapilli --timeout=2s >/dev/null 2>&1; do
@@ -165,6 +204,11 @@ done
 check "one leads after it" "$(leaders | wc -l | tr -d ' ')" '^1$'
 task "rolled"
 wait_sent
+
+# A write through the Service, kubectl exec's own time included, waits on no
+# leader's job for long.
+echo "the longest write through the Service: ${longest} ms"
+check "no write waited long" "$([ "$longest" -le 5000 ] && echo short || echo "${longest} ms")" '^short$'
 
 sleep 5 # a notice sent twice, after its claim, would be by now
 told=$(told)
