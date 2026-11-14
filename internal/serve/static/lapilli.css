@@ -420,6 +420,15 @@ ol.steps .t { font-variant-numeric: tabular-nums; color: var(--dim); font-size: 
 form.pick { margin: 0 0 .8rem; padding: .7rem .9rem; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
 form.pick .pick-sets { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: .8rem 1.2rem; }
 form.pick p.row { margin: .2rem 0 0; }
+/* The Manage page: a card for each of its pages. */
+ul.manage-cards { list-style: none; margin: 1rem 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 1rem; }
+ul.manage-cards h2 { margin: 0 0 .3rem; font-size: 1.2rem; }
+ul.manage-cards p { margin: .2rem 0; }
+/* The Manage group's name, a link to its page: as the other groups' names,
+   underlined when pointed at and where the reader is. */
+.nav-side .nav-group a, .nav-menu .nav-group a { display: inline; padding: 0; border-radius: 0; color: inherit; font-weight: inherit; text-decoration: none; }
+.nav-side .nav-group a:hover, .nav-menu .nav-group a:hover { background: none; text-decoration: underline; }
+.nav-side .nav-group a[aria-current], .nav-menu .nav-group a[aria-current] { background: none; color: var(--ink); text-decoration: underline; }
 /* What the badges mean, by facet, near the filters. */
 details.badge-legend { margin: 0 0 .8rem; }
 details.badge-legend p.axis { margin: .6rem 0 .2rem; font-size: .9rem; font-weight: 600; color: var(--dim); }

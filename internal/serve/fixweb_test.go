@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -292,4 +293,44 @@ func TestPreviewAccessible(t *testing.T) {
 	s, _ := a11yServer(t)
 	mux := http.NewServeMux()
 	pageA11y(t, mux, "", a11yPreviews(mux, s)...)
+}
+
+// TestManagePage: /manage has a card for each of the Manage group's pages
+// and the reports, each with what it is for, Roles for admins alone; the
+// sidebar's Manage links to it, with the page context; and the Manage
+// pages' breadcrumbs start with it.
+func TestManagePage(t *testing.T) {
+	s, _, _ := rolesServer(t, nil)
+	h := s.Handler()
+	cards := func(who string) []string {
+		_, body := as(t, h, http.MethodGet, "/manage", who, "", nil)
+		var out []string
+		for _, m := range regexp.MustCompile(`<li class="card">\s*<h2><a href="([^"]+)">([^<]+)</a></h2>\s*<p>([^<]+)</p>`).FindAllStringSubmatch(body, -1) {
+			out = append(out, m[1]+" "+m[2])
+		}
+		return out
+	}
+	if got, want := cards("boss@example.com"), []string{"/teams Teams", "/roles Roles", "/settings Settings", "/runs Runs", "/reports Reports"}; !slices.Equal(got, want) {
+		t.Errorf("an admin's cards: %q, want %q", got, want)
+	}
+	if got, want := cards("ed@example.com"), []string{"/teams Teams", "/settings Settings", "/runs Runs", "/reports Reports"}; !slices.Equal(got, want) {
+		t.Errorf("an editor's cards: %q, want %q", got, want)
+	}
+	_, body := as(t, h, http.MethodGet, "/manage?team=payments", "ed@example.com", "", nil)
+	if !strings.Contains(body, `<p class="nav-group" id="side-manage"><a href="/manage?team=payments" aria-current="page">Manage</a></p>`) ||
+		!strings.Contains(body, `<a href="/teams?team=payments">Teams</a>`) || !strings.Contains(body, "2 teams") {
+		t.Error("the sidebar's Manage doesn't link to it, current, or the cards don't carry the team")
+	}
+	if !strings.Contains(body, `<ol><li><span aria-current="page">Manage</span></li></ol>`) {
+		t.Error("the Manage page's breadcrumb")
+	}
+	for _, p := range []string{"/teams", "/settings", "/runs"} {
+		_, body := as(t, h, http.MethodGet, p, "boss@example.com", "", nil)
+		if !strings.Contains(body, `<ol><li><a href="/manage">Manage</a></li>`) || !strings.Contains(body, `<p class="nav-group" id="side-manage"><a href="/manage">Manage</a></p>`) {
+			t.Errorf("%s: its breadcrumb doesn't start with a link to Manage", p)
+		}
+	}
+	if _, body := as(t, h, http.MethodGet, "/rules", "boss@example.com", "", nil); !strings.Contains(body, `<ol><li>See</li>`) || !strings.Contains(body, `<p class="nav-group" id="side-see">See</p>`) {
+		t.Error("a group without a page of its own is a link")
+	}
 }

@@ -97,6 +97,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /settings", page("settings", s.settingsPage))
 	mux.HandleFunc("GET /settings.yaml", s.settingsYAML)
 	mux.HandleFunc("GET /runs", page("runs", s.runsPage))
+	mux.HandleFunc("GET /manage", page("manage", s.managePage))
 	mux.HandleFunc("GET /outcomes", page("outcomes", s.outcomesPage))
 	mux.HandleFunc("GET /search", page("search", s.searchPage))
 	mux.HandleFunc("GET /lang", chooseLang)
