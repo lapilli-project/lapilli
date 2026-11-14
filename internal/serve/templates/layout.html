@@ -53,7 +53,7 @@ screen opens and the sidebar a wide one keeps, and shown one at a time. */}}
 
 {{define "bottom"}}
 </main>
-<footer>lapilli {{.Status.Version}} · {{t "times in %s" .Status.Zone}}{{with .Status.User}} · {{t "you are %s, %s" (who .) (t $.Status.Role)}}{{else}}{{if .Status.ReadOnly}} · {{t "read-only"}}{{end}}{{end}}{{if .Status.SignOut}}
+<footer>lapilli{{with .Status.Version}} {{.}}{{end}} · {{t "times in %s" .Status.Zone}}{{with .Status.User}} · {{t "you are %s, %s" (who .) (t $.Status.Role)}}{{else}}{{if .Status.ReadOnly}} · {{t "read-only"}}{{end}}{{end}}{{if .Status.SignOut}}
 <form class="signout" method="post" action="/auth/logout"><button type="submit">{{t "Sign out"}}</button></form>{{end}}</footer>
 </div>
 </body>

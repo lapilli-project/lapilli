@@ -59,7 +59,11 @@ func (t qword) String() string {
 const (
 	// maxQuery is a page's query, as sent, in bytes: past it, the page is
 	// refused (414) before any work.
-	maxQuery = 4096
+	maxQuery = 8192
+	// maxNext is where a reader is sent back to after signing in, in
+	// bytes: a sign-in's cookie holds it, and browsers keep a cookie of
+	// 4096 bytes at most.
+	maxNext = 2048
 	// maxSearch is a search's length, in characters: past it, the search
 	// is left out whole, and the page says so.
 	maxSearch = 500

@@ -61,7 +61,7 @@ query has bounds: see Changed.
   sees that team's** on the overview, the rules, the incidents and the
   tasks, where they saw every team's. `team=` shows every team's; the API
   and MCP take a team only when asked, as before.
-- **A page asked with a query of more than 4096 bytes is refused, 414**,
+- **A page asked with a query of more than 8192 bytes is refused, 414**,
   before anything is read for it. A search (`q=`) of more than 500
   characters is left out, and the page says so; of its words, the first
   20 are used and the rest named; a filter (`perf=`, `severity=`,
@@ -69,6 +69,21 @@ query has bounds: see Changed.
   search.
 - An error page (403, 404, 414, 500) shows no count of open tasks or
   proposals, and carries no team or period on its links.
+
+### Fixed
+
+- **An error page, and the page after signing out, showed how lapilli
+  serve's runs were going, and its version, to anyone (low).** A stranger
+  refused (403), a page not found, and the signed-out page, which anyone
+  may open, had the status line: what is being done, a failed run's error
+  as the API gave it (a host inside among it), whether changes are
+  paused, and the version. They have none of it now.
+- **Signing in from a page asked with a long query failed.** Where to go
+  back to was kept in the sign-in's cookie whole, and past about 2.9 KB of
+  it the browser dropped the cookie: the sign-in "didn't start here". Past
+  2048 bytes the page is gone back to without its query.
+- A task's change of status, and its deletion, come back with the team and
+  the period, as adding one does.
 - The rules list's Rule column has badges for the sentences it had under
   a rule's name; the note's status is a badge, and the Noisy column is
   gone. The suggestion stays, as one line.

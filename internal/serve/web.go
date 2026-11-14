@@ -719,7 +719,7 @@ func (p page) Rule(name string) string   { return p.Ctx.Rule(name) }
 func (p page) Incident(id string) string { return p.Ctx.Incident(id) }
 
 // errLongQuery is a page asked with a query past maxQuery bytes.
-var errLongQuery = errors.New("this address asks too much: a page's query is 4096 bytes at most")
+var errLongQuery = errors.New("this address asks too much: a page's query is 8192 bytes at most")
 
 // redirect is a view's answer that the page is elsewhere: always a path on
 // this server, built from fixed paths and escaped values.
@@ -756,6 +756,10 @@ func (s *Server) page(r *http.Request, name string, v any) page {
 	// of the team and period the URL names (docs/design/ui.md).
 	if !bare(name) {
 		p.Ctx = s.pageContext(r)
+	} else {
+		// Nor how the runs are going: an error's text can name a host
+		// inside, and the version is no stranger's business.
+		p.Status.Doing, p.Status.Judged, p.Status.Err, p.Status.ChangesPaused, p.Status.Version = "", 0, "", false, ""
 	}
 	p.Here, p.HereName = navPage(name)
 	p.Nav, p.Crumb, p.Bar = s.nav(r.Context(), p), crumbsOf[name], barOf(name, r, p.Ctx)

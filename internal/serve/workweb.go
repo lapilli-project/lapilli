@@ -518,7 +518,7 @@ func (s *Server) postTask(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteTask(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	s.written(w, r, s.l.DeleteTask(r.Context(), id, s.user(r)), "/tasks")
+	s.written(w, r, s.l.DeleteTask(r.Context(), id, s.user(r)), urlContext(r.URL.Query()).Link("/tasks"))
 }
 
 func (s *Server) postComment(w http.ResponseWriter, r *http.Request) {

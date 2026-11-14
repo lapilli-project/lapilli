@@ -178,13 +178,13 @@
 {{with .Proposal}}<p><a href="{{$.Link (printf "/proposals/%d" .ID)}}">{{t "Proposal #%d" .ID}}</a> {{template "proposalstate" .State}}{{with .Link}} · <a href="{{.}}" rel="noopener noreferrer">{{t "Pull request"}} <span aria-hidden="true">↗</span></a>{{end}}</p>{{end}}
 {{with .Body}}<div class="comment-body">{{.}}</div>{{end}}
 {{if not $ro}}
-<p class="row">{{range statusesBut .Status}}<form method="post" action="/tasks"><input type="hidden" name="id" value="{{$.View.ID}}"><input type="hidden" name="only" value="status"><input type="hidden" name="status" value="{{.}}"><button class="quiet-button">{{t "Mark %s" (t .)}}</button></form>{{end}}</p>
+<p class="row">{{range statusesBut .Status}}<form method="post" action="{{$.Link "/tasks"}}"><input type="hidden" name="id" value="{{$.View.ID}}"><input type="hidden" name="only" value="status"><input type="hidden" name="status" value="{{.}}"><button class="quiet-button">{{t "Mark %s" (t .)}}</button></form>{{end}}</p>
 {{end}}
 {{template "comments" .Comments}}
 {{if not $ro}}
 <details><summary>{{t "Change it"}}</summary>
 {{template "taskform" .Form}}
-<form method="post" action="/tasks/{{.ID}}/delete"><button class="quiet-button">{{t "Delete it"}}</button></form>
+<form method="post" action="{{$.Link (printf "/tasks/%d/delete" .ID)}}"><button class="quiet-button">{{t "Delete it"}}</button></form>
 </details>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}

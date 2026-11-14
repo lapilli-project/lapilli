@@ -22,7 +22,7 @@ phases will add. [serve.md](serve.md) says what each page shows;
   3:1 on every surface, in light and dark (`TestContrast` holds the
   stylesheet's tokens to it). At 320 CSS px and at 200% zoom no page scrolls
   sideways; a wide table scrolls in its own box.
-- **Bounds.** A page asked with a query of more than 4096 bytes is
+- **Bounds.** A page asked with a query of more than 8192 bytes is
   refused, 414, before anything is read for it. A search (`q=`, the bar's
   or the rules') of more than 500 characters is left out whole, and the
   page says so; of its words, the first 20 are used, and the rest named,
@@ -64,9 +64,15 @@ The skip link is first, as before.
 
 An error page (403, 404, 414, 500), and the page after signing out, are
 shown to whoever asked, a stranger refused too. They are the frame alone:
-no count beside Tasks or Proposals, no team or period on any link, and no
-reader's own team, so that a stranger reads nothing of the ledger from
-them, nor whether the team the URL names is there (`bare`).
+no count beside Tasks or Proposals, no team or period on any link, no
+reader's own team, and no status line or version (a failed run's error
+can name a host inside), so that a stranger reads nothing of the ledger
+or of the server from them, nor whether the team the URL names is there
+(`bare`).
+
+Where a reader goes back to after signing in is kept to 2048 bytes
+(`maxNext`), as the sign-in's cookie holds it and a browser drops a cookie
+past 4096: past that, the page without its query.
 
 ### Breadcrumbs
 

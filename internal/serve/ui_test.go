@@ -7,6 +7,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -129,8 +130,63 @@ func TestContextCarried(t *testing.T) {
 		t.Fatal("/tasks?team=payments&weeks=12: the form to add a task doesn't carry the context")
 	}
 	code, _, hd := post(t, h, "/tasks?team=payments&weeks=12", url.Values{"title": {"x"}, "kind": {"tune"}, "team": {"0"}}, "same-origin")
-	if loc := hd.Get("Location"); code != http.StatusSeeOther || !regexp.MustCompile(`^/tasks/[0-9]+\?team=payments&weeks=12$`).MatchString(loc) {
-		t.Errorf("a task added: %d to %q", code, loc)
+	loc := hd.Get("Location")
+	if code != http.StatusSeeOther || !regexp.MustCompile(`^/tasks/[0-9]+\?team=payments&weeks=12$`).MatchString(loc) {
+		t.Fatalf("a task added: %d to %q", code, loc)
+	}
+	// On the task's page, a change of status and a delete come back with
+	// the context too.
+	id := strings.TrimPrefix(strings.SplitN(loc, "?", 2)[0], "/tasks/")
+	_, body, _ = get(t, h, loc)
+	for _, want := range []string{`<form method="post" action="/tasks?team=payments&amp;weeks=12"><input type="hidden" name="id" value="` + id + `"><input type="hidden" name="only" value="status">`,
+		`<form method="post" action="/tasks/` + id + `/delete?team=payments&amp;weeks=12">`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("%s: no %s", loc, want)
+		}
+	}
+	code, _, hd = post(t, h, "/tasks?team=payments&weeks=12", url.Values{"id": {id}, "only": {"status"}, "status": {"done"}}, "same-origin")
+	if l := hd.Get("Location"); code != http.StatusSeeOther || l != "/tasks/"+id+"?team=payments&weeks=12" {
+		t.Errorf("a task's status changed: %d to %q", code, l)
+	}
+	code, _, hd = post(t, h, "/tasks/"+id+"/delete?team=payments&weeks=12", url.Values{}, "same-origin")
+	if l := hd.Get("Location"); code != http.StatusSeeOther || l != "/tasks?team=payments&weeks=12" {
+		t.Errorf("a task deleted: %d to %q", code, l)
+	}
+}
+
+// TestLongSearchAnyScript: a search of 500 characters is a search, in any
+// script, though one of Hangul is 4.5 KB in a URL; past 500, the page
+// says it is too long; neither is refused.
+func TestLongSearchAnyScript(t *testing.T) {
+	h := facetServer(t).Handler()
+	for _, ch := range []string{"a", "가", "検"} {
+		for _, path := range []string{"/rules", "/search"} {
+			code, body, _ := get(t, h, path+"?team=&q="+url.QueryEscape(strings.Repeat(ch, maxSearch)))
+			if code != http.StatusOK || strings.Contains(body, "The search is too long") {
+				t.Errorf("%s, %d × %q: %d", path, maxSearch, ch, code)
+			}
+			code, body, _ = get(t, h, path+"?team=&q="+url.QueryEscape(strings.Repeat(ch, maxSearch+1)))
+			if code != http.StatusOK || !strings.Contains(body, "The search is too long") {
+				t.Errorf("%s, %d × %q: %d", path, maxSearch+1, ch, code)
+			}
+		}
+	}
+}
+
+// TestShortNext: where a reader goes back to after signing in is kept to
+// what the sign-in's cookie holds: past it, the page alone, else the
+// overview.
+func TestShortNext(t *testing.T) {
+	long := strings.Repeat("a", maxNext)
+	for _, c := range []struct{ in, want string }{
+		{"/rules?perf=noisy", "/rules?perf=noisy"},
+		{"/rules?q=" + long, "/rules"},
+		{"/rules/" + long, "/"},
+		{"/" + long[1:], "/" + long[1:]},
+	} {
+		if got := shortNext(c.in); got != c.want {
+			t.Errorf("shortNext(%.40q…) = %.40q, want %.40q", c.in, got, c.want)
+		}
 	}
 }
 
@@ -184,8 +240,11 @@ func TestTaskAboutItsOwner(t *testing.T) {
 // the team or period the URL names, and not the reader's own team. A
 // stranger reads nothing from it, not even whether a team is there.
 func TestErrorPagesBare(t *testing.T) {
-	s, pay, _ := rolesServer(t, func(c *Config) { c.Viewers = []string{"*@example.com"} })
+	s, pay, _ := rolesServer(t, func(c *Config) { c.Viewers = []string{"*@example.com"}; c.Version = "v9.9.9" })
 	ctx := context.Background()
+	// A run that failed, its error naming a host inside: the pages say so
+	// to those let in, and a bare page to no one.
+	s.fail("reading the rules", errors.New(`Get "http://prometheus.inside.svc:9090/api/v1/rules": refused`))
 	if _, err := s.l.PutGrant(ctx, ledger.Grant{Who: "user:pat@example.com", TeamID: pay}, "boss"); err != nil {
 		t.Fatal(err)
 	}
@@ -193,13 +252,17 @@ func TestErrorPagesBare(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := s.Handler()
-	if _, body, _ := ui(t, h, http.MethodGet, "/", "ed@example.com", "", nil); !strings.Contains(body, `class="count"`) {
-		t.Fatal("no count on the overview")
+	if _, body, _ := ui(t, h, http.MethodGet, "/", "ed@example.com", "", nil); !strings.Contains(body, `class="count"`) ||
+		!strings.Contains(body, "prometheus.inside.svc") || !strings.Contains(body, "v9.9.9") {
+		t.Fatal("no count, failed run or version on the overview")
 	}
 	bare := func(t *testing.T, what, body string) {
 		t.Helper()
 		if strings.Contains(body, `class="count"`) || strings.Contains(body, "your team") {
 			t.Errorf("%s: a count, or the reader's own team", what)
+		}
+		if strings.Contains(body, "prometheus.inside.svc") || strings.Contains(body, "v9.9.9") {
+			t.Errorf("%s: how the runs go, or the version", what)
 		}
 		doc, err := html.Parse(strings.NewReader(body))
 		if err != nil {

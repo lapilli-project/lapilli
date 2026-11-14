@@ -493,21 +493,21 @@ func TestSeveritySpelled(t *testing.T) {
 	}
 }
 
-// TestLongQueryRefused: a page asked with a query past 4096 bytes is
+// TestLongQueryRefused: a page asked with a query past 8192 bytes is
 // refused, 414, with a page of its own size, in the reader's language;
-// one of 4096 is a page.
+// one of 8192 is a page.
 func TestLongQueryRefused(t *testing.T) {
 	s := facetServer(t)
 	h := s.Handler()
 	for _, path := range []string{"/", "/rules", "/rules/R01", "/search", "/tasks", "/incidents"} {
 		q := "q=" + strings.Repeat("a", maxQuery-2)
 		if code, _, _ := get(t, h, path+"?"+q); code == http.StatusRequestURITooLong {
-			t.Errorf("%s, a query of 4096 bytes: %d", path, code)
+			t.Errorf("%s, a query of 8192 bytes: %d", path, code)
 		}
 		code, body, _ := get(t, h, path+"?"+q+"a")
 		if code != http.StatusRequestURITooLong || len(body) > 8000 || strings.Contains(body, "aaaaaaaa") || strings.Contains(body, `class="count"`) ||
-			!strings.Contains(body, "this address asks too much: a page&#39;s query is 4096 bytes at most") {
-			t.Errorf("%s, a query of 4097 bytes: %d, %d bytes", path, code, len(body))
+			!strings.Contains(body, "this address asks too much: a page&#39;s query is 8192 bytes at most") {
+			t.Errorf("%s, a query of 8193 bytes: %d, %d bytes", path, code, len(body))
 		}
 	}
 	r := httptest.NewRequest(http.MethodGet, "/rules?q="+strings.Repeat("group:a+", 7900), nil)
