@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -401,22 +400,21 @@ func slicesBefore(fs []firing.Firing, t time.Time) []firing.Firing {
 	return out
 }
 
-// TestDemoServe serves the demo ledger at LAPILLI_DEMO_SERVE until it is
-// stopped, for test/screenshots/shots.sh.
+// TestDemoServe serves the demo ledger at LAPILLI_DEMO_SERVE, on loopback,
+// until it is stopped, for test/screenshots/shots.sh, which waits for
+// /demo-ready: only the demo answers it, with demoReady.
 func TestDemoServe(t *testing.T) {
-	addr := os.Getenv("LAPILLI_DEMO_SERVE")
-	if addr == "" {
-		t.Skip("LAPILLI_DEMO_SERVE isn't set")
-	}
+	addr := serveAddr(t, "LAPILLI_DEMO_SERVE")
 	s := demoServer(t)
 	s.cfg.AllowedHosts = append(s.cfg.AllowedHosts, "host.docker.internal")
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("serving the demo on %s", ln.Addr())
-	t.Fatal((&http.Server{Handler: s.Handler(), ReadHeaderTimeout: time.Minute}).Serve(ln))
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /demo-ready", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprintln(w, demoReady) })
+	mux.Handle("/", s.Handler())
+	serveTest(t, s, addr, mux)
 }
+
+// demoReady is what the demo answers at /demo-ready.
+const demoReady = "lapilli demo ledger, ready"
 
 // TestDemoLedger: the demo has what its screenshots are to show: a noisy
 // rule, precise ones, a spare one, one whose replay differs, silent ones;
