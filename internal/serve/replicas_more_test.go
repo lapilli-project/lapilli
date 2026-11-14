@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/signin"
 )
 
@@ -450,27 +451,122 @@ func TestReplicasSignInWhenStatesFull(t *testing.T) {
 	}
 }
 
-// A leader whose work makes no step for longer than one may gives its
-// lease up: stuck says so.
+// A leader whose work makes no progress for longer than stepWithin, in a
+// round, gives its lease up: stuck says so. A job begun is progress, and
+// so is a request asked of a history, or a rule replayed, in the leader's
+// context.
 func TestReplicasStuckWork(t *testing.T) {
+	was := stepWithin
+	stepWithin = 100 * time.Millisecond
+	t.Cleanup(func() { stepWithin = was })
 	f := sharedLedger(t)
 	rc := newSink(t)
-	a := replica(t, f, rc, func(c *Config) { c.Timeout = time.Minute })
+	a := replica(t, f, rc, nil)
+	ctx := context.Background()
 	if a.stuck() {
 		t.Fatal("idle, taken for stuck")
 	}
-	a.stepped()
+	a.still(ctx)
 	if a.stuck() {
-		t.Fatal("a step begun, taken for stuck")
+		t.Fatal("a job begun, taken for stuck")
 	}
-	a.stepAt.Store(time.Now().Add(-a.stepWithin() - time.Second).UnixNano())
+	time.Sleep(2 * stepWithin)
 	if !a.stuck() {
-		t.Error("a step longer than any may take, not taken for stuck")
+		t.Error("a job begun and no progress since, past stepWithin, not taken for stuck")
+	}
+	a.still(ctx)
+	for range 6 {
+		time.Sleep(stepWithin / 2)
+		a.asked.Requests.Add(1)
+		if a.stuck() {
+			t.Fatal("a request asked each half of stepWithin, taken for stuck")
+		}
+	}
+	for range 6 {
+		time.Sleep(stepWithin / 2)
+		a.replayed.Done.Add(1)
+		if a.stuck() {
+			t.Fatal("a rule replayed each half of stepWithin, taken for stuck")
+		}
+	}
+	time.Sleep(2 * stepWithin)
+	if !a.stuck() {
+		t.Error("no progress since the last rule replayed, past stepWithin, not taken for stuck")
 	}
 	a.idle()
 	if a.stuck() {
 		t.Error("idle again, taken for stuck")
 	}
+	// One that stops leading in the middle of a round has no step under
+	// way: else, past stepWithin, it would be taken for stuck, and ask for
+	// no lease again.
+	a.still(ctx)
+	gone, cancel := context.WithCancel(ctx)
+	cancel()
+	a.lead(gone, make(chan error, 1))
+	time.Sleep(2 * stepWithin)
+	if a.stuck() {
+		t.Error("a replica that stopped leading in the middle of a round taken for stuck")
+	}
+}
+
+// stalling is a history that stops answering once held, as one cut off
+// does, whatever its context says, until let go; stalled is when it was
+// first asked while held.
+type stalling struct {
+	history
+	held    chan struct{}
+	mu      sync.Mutex
+	stalled time.Time
+}
+
+func (h *stalling) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	select {
+	case <-h.held:
+	default:
+		h.mu.Lock()
+		if h.stalled.IsZero() {
+			h.stalled = time.Now()
+		}
+		h.mu.Unlock()
+		<-h.held
+	}
+	return h.history.QueryRange(ctx, expr, start, end, step)
+}
+
+// A leader whose job is stuck (here, its history stopped answering, and
+// its request doesn't return) gives its lease up stepWithin after its last
+// progress, at its next renewal, and another leads at its next campaign:
+// the bound replicas.md gives.
+func TestReplicasStuckJobHandsOver(t *testing.T) {
+	was := stepWithin
+	stepWithin = time.Second
+	t.Cleanup(func() { stepWithin = was })
+	f := sharedLedger(t)
+	q := quickReplicas(t)
+	rc := newSink(t)
+	h := &stalling{held: make(chan struct{})}
+	var let sync.Once
+	t.Cleanup(func() { let.Do(func() { close(h.held) }) })
+	a := replicaOn(t, f, rc, h, nil)
+	running(t, a)
+	until(t, 10*time.Second, "a leads", a.l.Leading)
+	b := replicaOn(t, f, rc, h, nil)
+	running(t, b)
+	until(t, 10*time.Second, "a's job is stuck", func() bool {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return !h.stalled.IsZero()
+	})
+	until(t, 10*time.Second, "b leads", b.l.Leading)
+	h.mu.Lock()
+	took := time.Since(h.stalled)
+	h.mu.Unlock()
+	let.Do(func() { close(h.held) })
+	if bound := stepWithin + q.Renew + q.Campaign + 400*time.Millisecond; took > bound {
+		t.Errorf("b led %v after a's job was stuck, past %v", took, bound)
+	}
+	t.Logf("b led %v after a's job was stuck (stepWithin %v)", took, stepWithin)
 }
 
 // freshOIDC is a server's sign-in settings, for another server: what

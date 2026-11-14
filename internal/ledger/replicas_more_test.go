@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -917,6 +918,52 @@ func TestReplicasStuckLeaderGivesUp(t *testing.T) {
 			within(t, renewEvery+3*campaignEvery+time.Second, "another leads", func() bool { return ls.current() == 1 })
 			ls.apart(t)
 		})
+	}
+}
+
+// A leader whose work is stuck, and doesn't return, gives its lease up at
+// once rather than letting it lapse: another leads within a renewal and a
+// campaign, sooner than the lease would end. It leads again only once its
+// work has returned.
+func TestReplicasStuckLeaderResignsAtOnce(t *testing.T) {
+	u := replicaURL(t)
+	fastLease(t)
+	a, b := openReplica(t, u), openReplica(t, u)
+	var stuck atomic.Bool
+	release := make(chan struct{})
+	defer close(release)
+	aLeads, bLeads := make(chan struct{}, 1), make(chan time.Time, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.Elect(ctx, Elected{Version: "test", Stuck: stuck.Load}, func(context.Context) {
+		select {
+		case aLeads <- struct{}{}:
+		default:
+		}
+		<-release // whatever its context says
+	})
+	select {
+	case <-aLeads:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a never led")
+	}
+	go b.Elect(ctx, Elected{Version: "test"}, func(lctx context.Context) {
+		select {
+		case bLeads <- time.Now():
+		default:
+		}
+		<-lctx.Done()
+	})
+	time.Sleep(3 * renewEvery)
+	began := time.Now()
+	stuck.Store(true)
+	select {
+	case at := <-bLeads:
+		if took := at.Sub(began); took > renewEvery+3*campaignEvery+300*time.Millisecond {
+			t.Errorf("another led %v after the leader's work was stuck: the lease lapsed, rather than being given up", took)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("another never led")
 	}
 }
 

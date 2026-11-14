@@ -28,6 +28,8 @@ import (
 // a single replica, leads from its start. failed is told of what makes
 // serve stop: the rules' history that can't be added.
 func (s *Server) lead(ctx context.Context, failed chan<- error) {
+	// Done leading: no step is under way.
+	defer s.stepAt.Store(0)
 	if s.l.Shared() {
 		p, _ := s.l.Leader()
 		s.log.Info("leading: this replica runs what is run once", "replica", s.l.ReplicaID(), "term", p.Term)
@@ -108,19 +110,28 @@ func (s *Server) idle() {
 	s.rounded.Store(time.Now().Unix())
 }
 
-// stuck says the leader's work has made no step for longer than a step may
-// take: a run's replay is cut off at --timeout, a write at the ledger's own
-// deadline. Its lease is then given up, for a replica whose work isn't.
+// stuck says the leader's work, in a round, has made no progress for
+// longer than stepWithin: no job begun, no run's piece, no request asked
+// of a history, no rule replayed. Its lease is then given up, for a
+// replica whose work isn't.
 func (s *Server) stuck() bool {
 	b := s.stepAt.Load()
-	return b != 0 && time.Since(time.Unix(0, b)) > s.stepWithin()
+	if b == 0 {
+		return false
+	}
+	if n := s.asked.Requests.Load() + s.asked.Retries.Load() + s.replayed.Done.Load(); n != s.moved.Load() {
+		s.moved.Store(n)
+		s.stepAt.CompareAndSwap(b, time.Now().UnixNano())
+		return false
+	}
+	return time.Since(time.Unix(0, b)) > stepWithin
 }
 
-// stepWithin is how long one step of the leader's work may take: twice the
-// longer of --timeout and a write's deadline, and a minute.
-func (s *Server) stepWithin() time.Duration {
-	return 2*max(s.cfg.Timeout, 5*time.Minute) + time.Minute
-}
+// stepWithin is how long the leader's work may make no progress: three
+// times the longest any one step takes, a request (each answer within 5
+// min; a wait before asking again, 2 min at most) or a write (writeWithin,
+// 5 min). Replaced in tests.
+var stepWithin = 15 * time.Minute
 
 // keepUp keeps what a follower shows that the leader's loops keep in
 // theirs, until ctx is done: what the rules say, and Grafana's data

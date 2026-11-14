@@ -398,10 +398,15 @@ type Server struct {
 	// incidentsRead is set once this replica read the incidents file: its
 	// metric is the leader's.
 	incidentsRead atomic.Bool
-	// stepAt is when the leader's work began its current step, in Unix
+	// stepAt is when the leader's work last made progress, in Unix
 	// nanoseconds, 0 while it waits for its next round; rounded, when it
-	// last finished a round, in Unix seconds.
-	stepAt, rounded atomic.Int64
+	// last finished a round, in Unix seconds. Progress is a job begun, a
+	// run's piece, or, in the leader's context, a request to a history
+	// (asked) or a rule replayed (replayed): moved is their sum, as last
+	// looked at (stuck).
+	stepAt, rounded, moved atomic.Int64
+	asked                  prom.Counts
+	replayed               replay.Progress
 }
 
 // status is what the worker is doing, for the UI: a text to be shown in
@@ -746,7 +751,9 @@ func (s *Server) Run(ctx context.Context) error {
 		defer wg.Done()
 		// What runs once among the replicas, while this one leads; at
 		// once with SQLite.
-		s.l.Elect(ctx, ledger.Elected{Version: s.cfg.Version, Status: s.publishedStatus, Stuck: s.stuck}, func(lctx context.Context) { s.lead(lctx, failed) })
+		s.l.Elect(ctx, ledger.Elected{Version: s.cfg.Version, Status: s.publishedStatus, Stuck: s.stuck}, func(lctx context.Context) {
+			s.lead(replay.Tracking(prom.Counting(lctx, &s.asked), &s.replayed), failed)
+		})
 	}()
 	if shared {
 		wg.Add(1)

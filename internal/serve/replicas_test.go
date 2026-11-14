@@ -21,6 +21,7 @@ import (
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/ledger/ledgertest"
 	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -92,6 +93,12 @@ func (rc *sink) got() (ids, twice int) {
 // it, sending what happens to rc.
 func replica(t *testing.T, ledgerFile string, rc *sink, change func(*Config)) *Server {
 	t.Helper()
+	return replicaOn(t, ledgerFile, rc, &history{}, change)
+}
+
+// replicaOn is replica, reading the history h.
+func replicaOn(t *testing.T, ledgerFile string, rc *sink, h replay.History, change func(*Config)) *Server {
+	t.Helper()
 	dir := t.TempDir()
 	rules := filepath.Join(dir, "rules")
 	os.MkdirAll(rules, 0o755)
@@ -110,7 +117,7 @@ func replica(t *testing.T, ledgerFile string, rc *sink, change func(*Config)) *S
 	if change != nil {
 		change(&cfg)
 	}
-	s, err := New(context.Background(), cfg, &history{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s, err := New(context.Background(), cfg, h, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}

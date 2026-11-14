@@ -942,8 +942,8 @@ func (r *replicas) resign(term int64) {
 // leadFor leads with a lease of a term taken when sent: lead runs with a
 // context carrying it, renewed every renewEvery, and ended, at once, by
 // this process's own clock, leaseMargin before the database could let
-// another take it, when it can't be. Once lead has returned, the lease is
-// given up.
+// another take it, when it can't be. Once it ends, the lease is given up,
+// and lead waited for.
 func (l *Ledger) leadFor(ctx context.Context, e Elected, term int64, sent time.Time, lead func(context.Context)) {
 	r := l.rep
 	ld := &leadership{r: r, term: term, since: time.Now(), until: sent.Add(leaseFor - leaseMargin)}
@@ -1012,16 +1012,21 @@ func (l *Ledger) leadFor(ctx context.Context, e Elected, term int64, sent time.T
 	ld.end()
 	r.lead.CompareAndSwap(ld, nil)
 	cancel(ErrNotLeading)
-	if !returned {
-		<-done
-	}
 	if asking {
 		<-renewed // within its timeout
 	}
-	// Given up, whatever ended it: a renewal answered after this replica
-	// stopped would keep the lease from the others for its length. A
-	// lease another holds, or that lapsed, is left as it is.
+	// Given up, whatever ended it, before the work that led returns: work
+	// that is stuck may never, and what it would write, claim or apply is
+	// refused in the database once the lease is given up (fenced). A
+	// renewal answered after this replica stopped would keep the lease
+	// from the others for its length. A lease another holds, or that
+	// lapsed, is left as it is.
 	r.resign(term)
+	// The work is waited for, so that this replica leads again only once
+	// it returned: no two of its own at once.
+	if !returned {
+		<-done
+	}
 }
 
 // beat says this replica lives, with what the leader says of itself, and
