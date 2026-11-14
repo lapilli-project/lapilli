@@ -40,10 +40,17 @@ number to what makes it, and what the later phases will add.
   what it is asked doesn't grow past these.
 - **A few at a time.** A page not kept already is worked out with seven
   others at most (`pageRenders`); another waits its turn up to ten
-  seconds, then is answered 503, with `Retry-After`. A page past what the
-  page cache keeps (2 MB: the rules list at two thousand rules is 5.5) is
-  written to the response as it comes, not kept besides. Only pages wait:
-  the API, MCP, the health checks, the metrics and the ports that take
+  seconds, then is answered 503, with `Retry-After`. The turn is held
+  while the page is worked out and rendered, and given back before any of
+  it goes to the network, so that readers who don't read hold none
+  (`TestSlowReaders`); and while the page waits for the heavy turn (the
+  settings tried over a week, a report's preview), given back and taken
+  again once it has that one (`TestHeavyHoldsNoTurn`). A page is rendered
+  whole into one buffer; one past what the page cache keeps (2 MB: the
+  rules list at two thousand rules is 5.5) goes from that buffer to the
+  response, not copied into the cache's besides, and has 30 seconds to
+  go to the network, then the server gives it up. Only pages wait: the
+  API, MCP, the health checks, the metrics and the ports that take
   notifications and copies don't. Forty-eight `/rules` at once, at two
   thousand rules, went from a peak of 1.4 GB of heap to 550 MB.
 
@@ -733,11 +740,14 @@ Each item is the write the same form makes for one, in turn, with every
 check it has: a task as a rule's "Add a task" makes it (`Tune NAME`, kind
 tune, the rule's team; `ledger.PutTask`, which refuses a team's editor
 another team's), a note as the rule's note form keeps it, its other fields
-as they are (`ruleInScope`, then `ledger.PutNote`, which refuses a team's
-editor a rule's team changed), an incident as the firing's own "This was
+as they are, read just before it is written, as the form shows it just
+before it is sent (`ruleInScope`, `ledger.NoteOf`, then `ledger.PutNote`,
+which refuses a team's editor a rule's team changed), an incident as the firing's own "This was
 real" writes it (`realOne`). So the changes log has a line for each, by
 whom, as one by one would, and a refusal is counted, not written: a
-team's editor's rules of another team are "not your team's"; what the
+team's editor's rules of another team are "not your team's", and a
+team's editor's "Set the team", which only editors may, "refused: editors
+only", each rule, their own team's too; what the
 ledger refuses for what it is (an `ErrInvalid`, as Put's checks are: a
 firing longer than an incident may be, 31 days, which the single button
 answers 400), "refused"; a firing that has caught something by its turn
@@ -745,21 +755,26 @@ answers 400), "refused"; a firing that has caught something by its turn
 something already". A rule is picked by its name, the spaces around it
 taken off before the picks are made unique, and a rule with a task to
 tune it still open, or being done, has one already: it is counted so,
-and none is made. Any other error of an item is counted "failed", and
-logged as an error page logs it; the rest are written, and the write ends
-on the list it came from, never part-way on an error page.
+and none is made. Those go on to the next. An error of another kind (the
+writers' turn waited for too long, a database that stopped answering, a
+lead lost) would be the same for the rest: it is counted "failed",
+logged once as an error page logs it, and the write stops there, and ends
+on the list it came from, which says how many weren't tried ("1 failed:
+try again; stopped there: 96 not tried"), never on an error page.
 `TestBulkRules` sets each beside the same writes made one at a time on a
 twin ledger: the same notes, the same tasks, the same lines in the
 changes log, for an editor, an admin and a team's editor;
-`TestBulkKeepsNotes` holds a note's text and runbook as they were;
-`TestBulkPartial` makes an item fail.
+`TestBulkKeepsNotes` holds a note's text and runbook as they were, and
+`TestBulkNoteReadEach` one changed while the rules before it were
+written; `TestBulkPartial` makes an item fail.
 
 A firing is written down as real in one write of the ledger's
 (`ledger.Real`), by the single button and the bulk form alike: the firing
 read again in it, and nothing written when it has caught something by
 then, or an incident written here from it is there already (its title,
-times and labels). Two at once, by one person or two, write one incident,
-and tell of it once: `TestRealOnce` posts a hundred four times at once,
+times and labels); a write of nothing is rolled back, not counted, so
+what pages keep, and other replicas, stand. Two at once, by one person or
+two, write one incident, and tell of it once: `TestRealOnce` posts a hundred four times at once,
 beside each firing's own button, on SQLite, and on Postgres with
 `LAPILLI_TEST_POSTGRES`; it wrote 107 to 110 incidents before.
 
@@ -780,7 +795,7 @@ text in a URL can be: to whoever opens that link alone, on their own
 screen, and it changes nothing. The bar is disabled for whoever may not
 use it, with why (`aria-describedby`); a team's editor's "Set the team"
 is, "Editors only", as moving a rule into or out of a team is an
-editor's.
+editor's, and refused when it is sent all the same.
 
 Enter in a form presses its first button (implicit submission): from a
 row's checkbox, that would be a write for every row picked. Each bulk

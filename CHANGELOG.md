@@ -11,7 +11,8 @@
   its own form makes, in turn, with every check it has: a team's editor's
   rules of another team are counted, not changed, and the changes log has
   a line for each; a rule with a task to tune it still open has one
-  already; an item that fails is counted, and the rest written. At most
+  already; an error that isn't the item's stops it there, and says how
+  many weren't tried. At most
   100 a request, from this site; Enter in the form writes nothing. The
   list it came from is gone back to, its filters, order, team and period
   kept, and says once what was done ("3 done; 2 not your team's").
@@ -47,11 +48,13 @@
 - The firings' days before and after keep "only ● nothing", as the form
   does.
 - Pages not kept already are worked out eight at a time; another waits
-  its turn up to ten seconds, then is answered 503 with `Retry-After`. A
-  page too big for the page cache is written out as it comes, not held
-  twice: forty-eight rules lists at once, at two thousand rules, peak at
-  550 MB of heap rather than 1.4 GB. The API, MCP and the other ports
-  don't wait.
+  its turn up to ten seconds, then is answered 503 with `Retry-After`. The
+  turn is given back once the page is rendered, before it goes to the
+  network, and while the page waits for the heavy turn. A page too big for
+  the page cache isn't held twice, in the template's buffer and the
+  cache's, and has 30 seconds to go to the network: forty-eight rules
+  lists at once, at two thousand rules, peak at 550 MB of heap rather than
+  1.4 GB. The API, MCP and the other ports don't wait.
 - With a team picked, the overview judges the team's incidents against
   everyone's rules, as the incidents page does: one caught only by
   another team's noisy rule is caught only by a noisy rule, and isn't in
