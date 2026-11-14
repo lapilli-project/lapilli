@@ -79,6 +79,12 @@ func (s *Server) Handler() http.Handler {
 				s.oops(w, r, errLongQuery)
 				return
 			}
+			// A page that reads only some of its query is asked, and
+			// cached, by them alone, in one order.
+			if canon := readsOf[name]; canon != nil {
+				r = r.Clone(r.Context())
+				r.URL.RawQuery = canon(r.URL.Query())
+			}
 			h(w, r)
 		}
 	}

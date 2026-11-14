@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/schedule"
@@ -51,6 +50,31 @@ func ruleWeeksOf(q url.Values) int {
 		return 4
 	}
 	return weeks
+}
+
+// readsOf are, for the pages that read only some of their query, the
+// query as each reads it: what else a page was asked is nothing to it, and
+// mustn't make it worked out again, nor be said back on it.
+var readsOf = map[string]func(url.Values) string{"rule": ruleQuery}
+
+// ruleQuery is a rule's page's query as the page reads it: its tab, its
+// weeks, its team (all teams, empty) and edit=note, in one order.
+func ruleQuery(q url.Values) string {
+	out := url.Values{}
+	if t := ruleTabOf(q); t != "overview" {
+		out.Set("tab", t)
+	}
+	switch w := q.Get("weeks"); w {
+	case "1", "4", "12":
+		out.Set("weeks", w)
+	}
+	if vs, ok := q["team"]; ok {
+		out.Set("team", vs[0])
+	}
+	if q.Get("edit") == "note" {
+		out.Set("edit", "note")
+	}
+	return out.Encode()
 }
 
 // ruleTab is a tab of a rule's page: Param its tab=, "" for the overview;
@@ -233,8 +257,8 @@ const stripDays = 84
 // stripDay is a day of a rule's strip: its stones, which Kind sums up
 // (caught: one caught something; nothing: only some that caught nothing;
 // excused: only some a quiet window excused; none: no firing), whether the
-// rule changed, how many deploys of what it is about there were, and
-// whether a quiet window covered it. X is where it is drawn.
+// rule changed, how many of its firings came during a deploy of what it is
+// about, and whether a quiet window was over it. X is where it is drawn.
 type stripDay struct {
 	Day  string
 	Kind string
@@ -297,14 +321,13 @@ func (s *ruleStrip) Latest() []stripDay {
 // (ledger.RuleSpans); the notifications are those the pages hold; its
 // replay beside what really fired, before the period, the incidents it
 // nearly caught, its deploys and quiet windows, each one read. vs are the
-// versions of the rules over the strip's days, the earliest first;
-// labelSets, the labels it fires with, as far as is known.
-func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []version, labelSets []map[string]string) error {
+// versions of the rules over the strip's days, the earliest first; own,
+// its labels, as far as they are known.
+func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []version, own map[string]string) error {
 	name := v.Name
 	now := s.now()
 	today := s.l.Day(now)
 	first := today - stripDays + 1
-	end := s.l.Midnight(today + 1)
 	from := s.l.Midnight(t.weeks[len(t.weeks)-v.Period])
 	v.From = from
 	// The span before the period is as long as the period, to now, and ends
@@ -398,7 +421,7 @@ func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []versi
 		}
 	}
 	v.Panel = p
-	return s.marks(ctx, v, vs, labelSets, s.l.Midnight(first), end)
+	return s.marks(ctx, v, vs, own, first)
 }
 
 // besides are a rule's precision, firings and incidents caught over the
@@ -461,20 +484,15 @@ func (s *Server) nearOf(ctx context.Context, rule string, from time.Time) (int, 
 	return n, nil
 }
 
-// marks marks the strip's days the rule changed on, those with a deploy of
-// what it is about, and those a quiet window covered it on. A deploy is of
-// what it is about, and a window covers it, as the ledger says a firing of
-// it would come during one, or be excused by one (ledger.Deploy.During,
-// ledger.Window.Excuses), with one of the sets of labels it fires with.
-func (s *Server) marks(ctx context.Context, v *ruleView, vs []version, labelSets []map[string]string, from, to time.Time) error {
+// marks marks the strip's days, from the day first on: those the rule
+// changed on (vs, the versions of the rules over them); those on which it
+// fired during a deploy of what it is about, as the ledger judged each of
+// its firings; and those a quiet window was over it: each day a window
+// excused one of its firings, the ledger's own say, and each a window
+// covers that applies to it by its own name, team and labels, own.
+func (s *Server) marks(ctx context.Context, v *ruleView, vs []version, own map[string]string, first int64) error {
 	days := v.Strip.Days
-	first := s.l.Day(from)
-	at := func(t time.Time) int {
-		if i := int(s.l.Day(t) - first); i >= 0 && i < len(days) {
-			return i
-		}
-		return -1
-	}
+	from := s.l.Midnight(first)
 	var last *rules.Rule
 	for k, ver := range vs {
 		var cur *rules.Rule
@@ -482,55 +500,43 @@ func (s *Server) marks(ctx context.Context, v *ruleView, vs []version, labelSets
 			cur = &ver.Rules[i]
 		}
 		if k > 0 && (cur == nil) != (last == nil) || cur != nil && last != nil && cur.Whole() != last.Whole() {
-			if i := at(ver.Since); i >= 0 && !ver.Since.Before(from) {
+			if i := int(s.l.Day(ver.Since) - first); i >= 0 && i < len(days) && !ver.Since.Before(from) {
 				days[i].Changed = true
 			}
 		}
 		last = cur
 	}
-	if len(labelSets) == 0 {
-		labelSets = []map[string]string{{}}
-	}
-	has, err := s.l.HasDeploys(ctx)
+	deployed, err := s.l.RuleDeploys(ctx, v.Name, first, first+int64(len(days))-1)
 	if err != nil {
 		return err
 	}
-	if has {
-		ds, err := s.l.Deploys(ctx, from, to)
-		if err != nil {
-			return err
-		}
-		for _, d := range ds {
-			i := at(d.Start)
-			if i < 0 {
-				continue
-			}
-			for _, ls := range labelSets {
-				if d.During(firing.Firing{Rule: v.Name, Labels: ls, Start: d.Start}, 0, 0) {
-					days[i].Deploys++
-					break
-				}
-			}
+	for d, n := range deployed {
+		days[d-first].Deploys = n
+	}
+	quiet := 0
+	for i := range days {
+		if days[i].Excused > 0 {
+			days[i].Quiet = true
+			quiet++
 		}
 	}
-	ws, err := s.l.Windows(ctx, from, to)
+	ws, err := s.l.Windows(ctx, from, s.l.Midnight(first+int64(len(days))))
 	if err != nil {
 		return err
 	}
-	loc := s.l.Location()
 	for _, w := range ws {
-		for _, rp := range windowRepeats(w, loc, from, to) {
-			if !slices.ContainsFunc(labelSets, func(ls map[string]string) bool {
-				return w.Excuses(firing.Firing{Rule: v.Name, Labels: ls, Start: rp[0]})
-			}) {
-				continue
-			}
-			for d := max(s.l.Day(rp[0]), first); d <= s.l.Day(rp[1]); d++ {
-				if i := int(d - first); i >= 0 && i < len(days) {
-					days[i].Quiet = true
-				}
-			}
+		if quiet == len(days) {
+			break
 		}
+		if w.TeamID < 0 || !w.Applies(v.Name, own) {
+			continue // before working out when it falls due
+		}
+		windowDays(w, s.l, first, len(days), func(i int) {
+			if !days[i].Quiet {
+				days[i].Quiet = true
+				quiet++
+			}
+		})
 	}
 	for _, d := range days {
 		v.Strip.Changed = v.Strip.Changed || d.Changed
@@ -540,74 +546,129 @@ func (s *Server) marks(ctx context.Context, v *ruleView, vs []version, labelSets
 	return nil
 }
 
-// windowRepeats are, of a quiet window's repeats that meet [from, to], those
-// a rule's strip marks, each its start and end, the earliest first: its own
-// time, for one that doesn't repeat; every repeat, for one every day or
-// week, worked out by the calendar of loc as the ledger works them out; and
-// for one by a schedule, the last to start by each day's end, which is the
-// one that may last into it. Each is held to Covers, the ledger's own say.
-func windowRepeats(w ledger.Window, loc *time.Location, from, to time.Time) [][2]time.Time {
+// dayLedger is what windowDays reads a day by: the ledger's zone, and its
+// days and when each starts.
+type dayLedger interface {
+	Location() *time.Location
+	Day(time.Time) int64
+	Midnight(int64) time.Time
+}
+
+// windowDays marks each of the n days from first that a quiet window covers
+// some time of, as the ledger's own Covers says: a day is i, from 0. One
+// that doesn't repeat covers its own time. One every day or week covers,
+// of each repeat, the part on its day and the period after it, as Covers
+// sets a time beside the repeats of the periods it falls in. One by a
+// schedule covers each repeat, from when it falls due to as long after:
+// they are walked back from the last day's end, so what it costs is how
+// many fall due over the days and one lookup back; past stripMost of them,
+// each day asks for the last due by its end instead, a short way back for
+// a schedule due so often.
+func windowDays(w ledger.Window, l dayLedger, first int64, n int, mark func(i int)) {
+	from, to := l.Midnight(first), l.Midnight(first+int64(n))
 	long := w.End.Sub(w.Start)
-	var starts []time.Time
-	switch w.Every {
-	case "":
-		starts = []time.Time{w.Start}
-	case "day", "week":
-		// A repeat lasts less than a period: the first that may meet from
-		// starts on its day, or in the period before it.
-		n := 1
-		if w.Every == "week" {
-			n = 7
+	span := func(lo, hi time.Time) {
+		if lo.Before(from) {
+			lo = from
 		}
-		s := w.Start.In(loc)
-		for k := max(0, int((civilDay(from.In(loc))-civilDay(s))/int64(n))); ; k++ {
-			at := s.AddDate(0, 0, k*n)
-			if at.After(to) || !w.Until.IsZero() && civilDay(at) > civilDay(w.Until.In(loc)) {
-				break
-			}
-			starts = append(starts, at)
+		if !hi.Before(to) {
+			hi = to.Add(-time.Nanosecond)
 		}
-	case "month", "cron":
-		// Every repeat lasts as long: when the last to start by a day's end
-		// doesn't last into the day, no other does. The last is on Until's
-		// day at the latest. A day at a time, however often it falls due.
-		sch, ok := windowSchedule(w, loc)
-		if !ok {
-			return nil
-		}
-		f := from.In(loc)
-		for day := time.Date(f.Year(), f.Month(), f.Day(), 0, 0, 0, 0, loc); day.Before(to); day = day.AddDate(0, 0, 1) {
-			end := day.AddDate(0, 0, 1).Add(-time.Nanosecond)
-			if !w.Until.IsZero() {
-				u := w.Until.In(loc)
-				if last := time.Date(u.Year(), u.Month(), u.Day()+1, 0, 0, 0, 0, loc).Add(-time.Nanosecond); last.Before(end) {
-					end = last
-				}
-			}
-			due := sch.Last(end, loc)
-			if due.IsZero() || due.Before(w.Start) || due.Add(long).Before(day) || len(starts) > 0 && starts[len(starts)-1].Equal(due) {
-				continue
-			}
-			starts = append(starts, due)
+		for d := l.Day(lo); !lo.After(hi) && d <= l.Day(hi); d++ {
+			mark(int(d - first))
 		}
 	}
-	var out [][2]time.Time
-	for _, at := range starts {
-		if at.Add(long).Before(from) || at.After(to) || !w.Covers(at) {
-			continue
+	loc := l.Location()
+	switch w.Every {
+	case "":
+		span(w.Start, w.End)
+	case "day", "week":
+		per := int64(1)
+		if w.Every == "week" {
+			per = 7
 		}
-		out = append(out, [2]time.Time{at, at.Add(long)})
+		s := w.Start.In(loc)
+		c0 := civilDay(s)
+		// Covers sets a time beside the repeats of its period and the one
+		// before: repeat k covers what it lasts over of its period and the
+		// next, from its period's first day's start, and from its start,
+		// which a skipped midnight can put in the day before.
+		lo := max(0, (l.Day(from)-c0)/per-1)
+		for k := lo; k <= (l.Day(to)-c0)/per; k++ {
+			at := s.AddDate(0, 0, int(k*per))
+			if !w.Until.IsZero() && civilDay(at) > civilDay(w.Until.In(loc)) {
+				break
+			}
+			span(latest(at, w.Start, l.Midnight(c0+k*per)), earliest(at.Add(long), l.Midnight(c0+(k+2)*per).Add(-time.Nanosecond)))
+		}
+	case "month", "cron":
+		sch, ok := windowSchedule(w, loc)
+		if !ok {
+			return
+		}
+		// The last repeat starts by the end of Until's day, as Covers has it.
+		upTo := func(t time.Time) time.Time {
+			if !w.Until.IsZero() {
+				u := w.Until.In(loc)
+				if end := time.Date(u.Year(), u.Month(), u.Day()+1, 0, 0, 0, 0, loc).Add(-time.Nanosecond); t.After(end) {
+					return end
+				}
+			}
+			return t
+		}
+		floor := from.Add(-long)
+		k := 0
+		for at := sch.Last(upTo(to.Add(-time.Nanosecond)), loc); !at.IsZero() && !at.Before(w.Start) && !at.Before(floor); at = sch.Prev(at, loc) {
+			if k++; k > stripMost {
+				// Due more often than that: a day at a time.
+				for d := first; d < first+int64(n); d++ {
+					start := l.Midnight(d)
+					if at := sch.Last(upTo(l.Midnight(d+1).Add(-time.Nanosecond)), loc); !at.IsZero() && !at.Before(w.Start) && !at.Add(long).Before(start) {
+						mark(int(d - first))
+					}
+				}
+				return
+			}
+			span(at, at.Add(long))
+		}
+	}
+}
+
+// stripMost is how many repeats of a quiet window by a schedule a rule's
+// strip walks, four a day; past that, it looks a day at a time.
+const stripMost = 4 * stripDays
+
+func latest(ts ...time.Time) time.Time {
+	out := ts[0]
+	for _, t := range ts[1:] {
+		if t.After(out) {
+			out = t
+		}
+	}
+	return out
+}
+
+func earliest(ts ...time.Time) time.Time {
+	out := ts[0]
+	for _, t := range ts[1:] {
+		if t.Before(out) {
+			out = t
+		}
 	}
 	return out
 }
 
 // windowSchedule is when a window repeating every month, or by a cron
-// expression, falls due, read as the ledger reads it.
+// expression, falls due, read as the ledger reads it: one every month on
+// a day past the 28th, with no day given, has none.
 func windowSchedule(w ledger.Window, loc *time.Location) (schedule.Schedule, bool) {
 	on := strings.ToLower(strings.Join(strings.Fields(w.On), " "))
 	if w.Every == "month" {
 		s := w.Start.In(loc)
 		if on == "" {
+			if s.Day() > 28 {
+				return schedule.Schedule{}, false
+			}
 			on = strconv.Itoa(s.Day())
 		}
 		on = fmt.Sprintf("monthly %s@%02d:%02d", on, s.Hour(), s.Minute())

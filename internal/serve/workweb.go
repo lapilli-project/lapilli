@@ -451,10 +451,12 @@ func (s *Server) postWindow(w http.ResponseWriter, r *http.Request) {
 	}
 	var until time.Time
 	if v := r.PostFormValue("until"); v != "" {
-		if until, err = time.ParseInLocation("2006-01-02", v, s.cfg.Loc); err != nil {
+		day, err := dateDay(v)
+		if err != nil {
 			s.oops(w, r, bad("until %q: want a date like 2026-12-31", v))
 			return
 		}
+		until = s.l.Midnight(day)
 	}
 	id, err := s.l.PutWindow(r.Context(), ledger.Window{ID: formInt(r, "id"), Title: r.PostFormValue("title"), Start: start, End: end,
 		Every: r.PostFormValue("every"), On: r.PostFormValue("on"), Until: until, TeamID: formInt(r, "team"),
@@ -482,12 +484,12 @@ func (s *Server) postTask(w http.ResponseWriter, r *http.Request) {
 		Incident: strings.TrimSpace(r.PostFormValue("incident")), TeamID: formInt(r, "team"), Assignee: strings.TrimSpace(r.PostFormValue("assignee")),
 		Status: r.PostFormValue("status"), Body: strings.TrimSpace(r.PostFormValue("body")), Link: strings.TrimSpace(r.PostFormValue("link"))}
 	if v := r.PostFormValue("due"); v != "" {
-		d, err := time.ParseInLocation("2006-01-02", v, s.cfg.Loc)
+		day, err := dateDay(v)
 		if err != nil {
 			s.oops(w, r, bad("due %q: want a date like 2026-11-20", v))
 			return
 		}
-		t.Due = d
+		t.Due = s.l.Midnight(day)
 	}
 	// A new task about a rule is its team's, unless one is named.
 	if t.ID == 0 && t.TeamID == 0 && t.Rule != "" {

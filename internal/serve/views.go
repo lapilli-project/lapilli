@@ -841,18 +841,23 @@ func (s *Server) checksLastWeek(ctx context.Context) (map[string]ledger.Check, e
 	return s.l.Checks(ctx, from, to)
 }
 
-func (s *Server) rulePage(r *http.Request) (any, error) {
+func (s *Server) rulePage(r *http.Request) (any, error) { return s.rule(r, true) }
+
+// rule is what a rule's page shows. Only the page itself, html, has its
+// header, its panel and its strip and, on its versions tab, each version
+// beside the one before: MCP's rule tool reads the rest.
+func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 	ctx := r.Context()
 	name := r.PathValue("name")
 	q := r.URL.Query()
 	n := ruleWeeksOf(q)
 	t, err := s.tallies(ctx, weeks)
 	if err != nil {
-		return nil, err
+		return ruleView{}, err
 	}
 	lines, silent, err := s.ruleLines(ctx, lang(r), t, n)
 	if err != nil {
-		return nil, err
+		return ruleView{}, err
 	}
 	v := ruleView{ruleLine: ruleLine{Name: name, Precision: "–"}, Path: "/rules/" + url.PathEscape(name), Tab: ruleTabOf(q), Period: n,
 		EditNote: q.Get("edit") == "note"}
@@ -877,7 +882,7 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 		// The versions over the strip's days; its versions over the twelve
 		// weeks shown are those from the one in effect when they began.
 		if vs, err = s.versions(ctx, s.l.Midnight(s.l.Day(s.now())-stripDays+1), s.now()); err != nil {
-			return nil, err
+			return ruleView{}, err
 		}
 		k := 0
 		for i := range vs {
@@ -910,7 +915,7 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 		for i := range v.Changes {
 			if i == 0 {
 				v.Changes[i].First = true
-			} else {
+			} else if html && v.Tab == "versions" {
 				v.Changes[i].Diff = versionDiff(v.Changes[i-1], v.Changes[i])
 			}
 		}
@@ -923,7 +928,7 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 		}
 	}
 	if !v.Known {
-		return nil, ledger.ErrNotFound
+		return ruleView{}, ledger.ErrNotFound
 	}
 	from := s.l.Midnight(t.weeks[len(t.weeks)-n])
 	if id != 0 && v.Firings > 0 {
@@ -935,14 +940,14 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 		}
 		if v.Refired > 0 {
 			if v.Refires.Worst, err = s.l.RefiredOf(ctx, name, from, s.now().Add(time.Hour), 5); err != nil {
-				return nil, err
+				return ruleView{}, err
 			}
 		}
 	}
 	if len(s.alarms) > 0 {
 		ties, err := s.l.Ties(ctx)
 		if err != nil {
-			return nil, err
+			return ruleView{}, err
 		}
 		if x, ok := ties[name]; ok {
 			v.Tie = &tieView{Source: x.Source, Why: x.Why}
@@ -953,7 +958,7 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 	}
 	st, err := s.content(ctx)
 	if err != nil {
-		return nil, err
+		return ruleView{}, err
 	}
 	if says, ok := st.says[name]; ok {
 		v.Says = saysViewOf(says, st.findings[name], s.cfg.RunbookAnnotations, s.cfg.RunbookBase)
@@ -961,50 +966,50 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 		v.Content = countOf(st.findings[name])
 	}
 	if v.Reviews, err = s.reviews(ctx, name, 10); err != nil {
-		return nil, err
+		return ruleView{}, err
 	}
 	caught, err := s.l.CaughtBy(ctx, name, 20)
 	if err != nil {
-		return nil, err
+		return ruleView{}, err
 	}
 	for _, in := range caught {
 		v.Caught = append(v.Caught, s.incidentLine(lang(r), in, t.state(in, ledger.Week(s.l.Day(in.Start)))))
 	}
 	fs, err := s.l.Firings(ctx, ledger.FiringQuery{From: time.Unix(0, 0), To: s.now().Add(time.Hour), Rule: name, Limit: 50})
 	if err != nil {
-		return nil, err
+		return ruleView{}, err
 	}
 	for _, f := range fs {
 		v.Latest = append(v.Latest, s.firingLine(f))
 	}
 	if err := s.notifiedFirings(ctx, v.Latest); err != nil {
-		return nil, err
+		return ruleView{}, err
 	}
 	o, err := s.owners(ctx)
 	if err != nil {
-		return nil, err
+		return ruleView{}, err
 	}
 	v.Team, v.TeamID, v.Note, v.Teams, v.Statuses = o.teamOf(name), o.rule[name], o.notes[name], o.teams, ledger.Statuses
 	v.Status = v.Note.Status
 	ts, err := s.l.Tasks(ctx, ledger.TaskQuery{Rule: name, Limit: 50})
 	if err != nil {
-		return nil, err
+		return ruleView{}, err
 	}
 	v.Tasks = s.taskLines(o, ts)
 	if v.Comments, err = s.commentsView(r, "rule", name); err != nil {
-		return nil, err
+		return ruleView{}, err
 	}
 	if err := s.ruleChangesOf(r, &v); err != nil {
-		return nil, err
+		return ruleView{}, err
 	}
 	if s.checking() {
 		all, err := s.l.Checks(ctx, from, s.now())
 		if err != nil {
-			return nil, err
+			return ruleView{}, err
 		}
 		cw, err := s.checksLastWeek(ctx)
 		if err != nil {
-			return nil, err
+			return ruleView{}, err
 		}
 		d := s.differs()
 		v.LastWeek = cw[name]
@@ -1013,34 +1018,31 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 			v.Check = &ruleCheck{Check: c, Share: int(math.Round(c.Share() * 100)), OnlyReplayed: c.Replayed - c.Alike,
 				OnlyReal: c.Real - c.Alike, Week: cw[name]}
 			if v.Check.Misses, err = s.l.CheckMisses(ctx, name); err != nil {
-				return nil, err
+				return ruleView{}, err
 			}
 		}
 	}
+	if !html {
+		return v, nil
+	}
 	// Its severity as the list has it: the ledger's, or its labels'.
 	sev := v.Severity
+	// Its own labels, as far as they are known: those of the rules in
+	// effect, or, of one recorded elsewhere, those all its alerts have.
+	var own map[string]string
 	if last != nil {
-		sev = cmpOr(sev, last.AlertLabels()["severity"])
+		own = last.AlertLabels()
+		sev = cmpOr(sev, own["severity"])
+	} else if v.Source != "" || v.Tie != nil {
+		shared, err := s.l.SharedLabels(ctx)
+		if err != nil {
+			return ruleView{}, err
+		}
+		own = shared[name]
 	}
 	s.ruleHeader(&v, sev)
-	// What it fires with, as far as is known: the labels of its latest
-	// firings, and its own; a deploy or a quiet window is set beside them.
-	var sets []map[string]string
-	seen := map[string]bool{}
-	add := func(ls map[string]string) {
-		if k := labelsText(ls); !seen[k] && len(sets) < 50 {
-			seen[k] = true
-			sets = append(sets, ls)
-		}
-	}
-	if last != nil {
-		add(last.AlertLabels())
-	}
-	for _, f := range v.Latest {
-		add(f.Firing.Labels)
-	}
-	if err := s.glance(ctx, &v, t, vs, sets); err != nil {
-		return nil, err
+	if err := s.glance(ctx, &v, t, vs, own); err != nil {
+		return ruleView{}, err
 	}
 	return v, nil
 }
@@ -1381,15 +1383,14 @@ type firingsView struct {
 
 func (s *Server) firingsPage(r *http.Request) (any, error) {
 	q := r.URL.Query()
-	day := s.now().In(s.cfg.Loc)
+	d := s.l.Day(s.now())
 	if v := q.Get("day"); v != "" {
-		d, err := time.ParseInLocation("2006-01-02", v, s.cfg.Loc)
+		day, err := dateDay(v)
 		if err != nil {
 			return nil, bad("day %q: want a date like 2026-11-02", v)
 		}
-		day = d
+		d = day
 	}
-	d := s.l.Day(day)
 	v := firingsView{Day: s.l.Midnight(d).In(s.cfg.Loc).Format("2006-01-02"), Rule: q.Get("rule"), Black: q.Get("black") != "",
 		Prev: s.l.Midnight(d - 1).In(s.cfg.Loc).Format("2006-01-02"), Then: s.l.Midnight(d + 1).In(s.cfg.Loc).Format("2006-01-02")}
 	before, _ := strconv.ParseInt(q.Get("before"), 10, 64)
@@ -1415,6 +1416,18 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 		v.Next = "/firings?" + nq.Encode()
 	}
 	return v, nil
+}
+
+// dateDay is the day a date names, as days since 1970-01-01, as the ledger
+// counts its days. Read as a time in the zone, a date whose midnight the
+// clocks skip (America/Santiago, 2026-09-06) is the hour before it, the
+// day before: the day starts where the ledger says, s.l.Midnight.
+func dateDay(date string) (int64, error) {
+	t, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return 0, err
+	}
+	return civilDay(t), nil
 }
 
 type settingView struct {

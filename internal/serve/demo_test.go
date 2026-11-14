@@ -451,7 +451,7 @@ func TestDemoLedger(t *testing.T) {
 		}
 	}
 	_, body, _ = get(t, s.Handler(), "/rules/CheckoutLatencyP99?weeks=4")
-	for _, want := range []string{"Noisy, ", "Beside each number", "the rule changed", "a deploy of what it is about", `class="delta`} {
+	for _, want := range []string{"Noisy, ", "Beside each number", "the rule changed", "fired during a deploy of what it is about", `class="delta`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/rules/CheckoutLatencyP99: no %q", want)
 		}

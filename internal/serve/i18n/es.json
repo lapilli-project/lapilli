@@ -1164,7 +1164,6 @@
  "this address asks too much: a page's query is 8192 bytes at most": "esta dirección pide demasiado: la consulta de una página es de 8192 bytes como mucho",
  "No team yet: an editor makes a team's report": "Aún no hay equipos: un editor hace el informe de un equipo",
  "%d caught nothing, %d excused": "%d no detectaron nada, %d eximidos",
- "%d deploys": "%d despliegues",
  "%d fired, %d caught something, %d caught nothing, %d excused": "%d disparos, %d detectaron algo, %d no detectaron nada, %d eximidos",
  "%d nearly caught": "%d casi detectadas",
  "%d notifications were sent for it: %d of them repeats, %d while people slept and %d more off hours; %d were for firings that caught nothing, and %d tell of no firing Lapilli has.": "Se enviaron %d notificaciones por ella: %d de ellas repeticiones, %d mientras la gente dormía y %d más fuera de horario; %d fueron por disparos que no detectaron nada, y %d avisan de un disparo que Lapilli no tiene.",
@@ -1172,7 +1171,6 @@
  "%d of its %d firings re-fired (%s).": "%d de sus %d disparos fueron redisparos (%s).",
  "%d of its proposals were made against a version of it no longer in effect.": "%d de sus propuestas se hicieron sobre una versión de la regla que ya no está en vigor.",
  "%s pt": "%s pp",
- "a deploy of what it is about": "un despliegue de lo que trata",
  "a quiet window covered it": "la cubrió una ventana de mantenimiento",
  "a quiet window": "una ventana de mantenimiento",
  "Activity": "Actividad",
@@ -1227,5 +1225,7 @@
  "Its note says to tune it.": "Su nota dice que se ajuste.",
  "Its note says to retire it.": "Su nota dice que se retire.",
  "A change to it is proposed and not finished with.": "Hay un cambio propuesto que aún no ha terminado.",
- "What it says when it fires has problems of fact.": "Lo que dice al dispararse tiene problemas de hecho."
+ "What it says when it fires has problems of fact.": "Lo que dice al dispararse tiene problemas de hecho.",
+ "%d during a deploy": "%d durante un despliegue",
+ "fired during a deploy of what it is about": "disparó durante un despliegue de lo que trata"
 }

@@ -1164,7 +1164,6 @@
  "this address asks too much: a page's query is 8192 bytes at most": "アドレスが長すぎます。ページのクエリは 8192 バイトまでです",
  "No team yet: an editor makes a team's report": "まだチームがありません。編集者はチームのレポートを作ります",
  "%d caught nothing, %d excused": "検知なし %d 件、免除 %d 件",
- "%d deploys": "デプロイ %d 件",
  "%d fired, %d caught something, %d caught nothing, %d excused": "発火 %d 件、検知 %d 件、検知なし %d 件、免除 %d 件",
  "%d nearly caught": "ニアミス %d 件",
  "%d notifications were sent for it: %d of them repeats, %d while people slept and %d more off hours; %d were for firings that caught nothing, and %d tell of no firing Lapilli has.": "このルールの通知を %d 件送りました。うち繰り返し %d 件、睡眠時間中 %d 件、業務時間外 %d 件です。%d 件は何も検知しなかった発火によるもので、%d 件は Lapilli にない発火を通知していました。",
@@ -1172,7 +1171,6 @@
  "%d of its %d firings re-fired (%s).": "発火 %[2]d 回のうち %[1]d 回が再発火でした(%[3]s)。",
  "%d of its proposals were made against a version of it no longer in effect.": "変更提案 %d 件は、今は有効でないバージョンのルールに対して作られました。",
  "%s pt": "%s ポイント",
- "a deploy of what it is about": "このルールの対象のデプロイ",
  "a quiet window covered it": "メンテナンスウィンドウが適用",
  "a quiet window": "メンテナンスウィンドウ",
  "Activity": "アクティビティ",
@@ -1227,5 +1225,7 @@
  "Its note says to tune it.": "メモでは調整することになっています。",
  "Its note says to retire it.": "メモでは廃止することになっています。",
  "A change to it is proposed and not finished with.": "変更が提案されていて、まだ終わっていません。",
- "What it says when it fires has problems of fact.": "発火時のアラート内容に事実の問題があります。"
+ "What it says when it fires has problems of fact.": "発火時のアラート内容に事実の問題があります。",
+ "%d during a deploy": "デプロイ中の発火 %d 件",
+ "fired during a deploy of what it is about": "このルールの対象のデプロイ中に発火"
 }

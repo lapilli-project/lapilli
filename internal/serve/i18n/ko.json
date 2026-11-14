@@ -1164,7 +1164,6 @@
  "this address asks too much: a page's query is 8192 bytes at most": "주소가 너무 길어요: 페이지 주소의 쿼리는 8192바이트까지예요",
  "No team yet: an editor makes a team's report": "아직 팀이 없어요: 편집자는 팀의 리포트를 만들어요",
  "%d caught nothing, %d excused": "오탐 %d건, 면제 %d건",
- "%d deploys": "배포 %d건",
  "%d fired, %d caught something, %d caught nothing, %d excused": "발화 %d건, 정탐 %d건, 오탐 %d건, 면제 %d건",
  "%d nearly caught": "근접 탐지 %d건",
  "%d notifications were sent for it: %d of them repeats, %d while people slept and %d more off hours; %d were for firings that caught nothing, and %d tell of no firing Lapilli has.": "이 규칙으로 알림을 %d건 보냈어요. 그중 반복이 %d건, 자는 시간에 간 것이 %d건, 업무 외 시간에 간 것이 %d건이에요. %d건은 오탐 발화 때문이었고, %d건은 Lapilli 에 없는 발화를 알렸어요.",
@@ -1172,7 +1171,6 @@
  "%d of its %d firings re-fired (%s).": "발화 %[2]d번 중 %[1]d번이 재발화였어요(%[3]s).",
  "%d of its proposals were made against a version of it no longer in effect.": "변경 제안 %d건이 지금은 적용되지 않는 버전의 규칙을 기준으로 만들어졌어요.",
  "%s pt": "%s%%p",
- "a deploy of what it is about": "이 규칙 대상의 배포",
  "a quiet window covered it": "메인터넌스 윈도우 적용",
  "a quiet window": "메인터넌스 윈도우",
  "Activity": "활동",
@@ -1227,5 +1225,7 @@
  "Its note says to tune it.": "메모에 조정하라고 되어 있어요.",
  "Its note says to retire it.": "메모에 폐기하라고 되어 있어요.",
  "A change to it is proposed and not finished with.": "변경 제안이 있고 아직 끝나지 않았어요.",
- "What it says when it fires has problems of fact.": "울릴 때의 알림 내용에 사실 문제가 있어요."
+ "What it says when it fires has problems of fact.": "울릴 때의 알림 내용에 사실 문제가 있어요.",
+ "%d during a deploy": "배포 중 발화 %d건",
+ "fired during a deploy of what it is about": "이 규칙 대상의 배포 중 발화"
 }

@@ -399,6 +399,9 @@ func TestRuleActions(t *testing.T) {
 	}
 
 	s.cfg.ReadOnly = true
+	s.cache.Lock()
+	s.cache.gen = "" // as a server started with --read-only
+	s.cache.Unlock()
 	_, body, _ = get(t, s.Handler(), "/rules/Errors")
 	want := `<p class="rule-actions"><button type="button" disabled aria-describedby="rule-why-1">Propose a change</button> ` +
 		`<button type="button" disabled aria-describedby="rule-why-1">Add a task</button> <button type="button" disabled aria-describedby="rule-why-1">Edit the note</button> ` +
@@ -517,66 +520,121 @@ func TestVersionDiff(t *testing.T) {
 	}
 }
 
-// TestWindowRepeats: the repeats of a quiet window a rule's strip marks are
-// the times the ledger's own Covers says the window covers: for a window
-// once, every day until a day, every week, every month and by cron.
-func TestWindowRepeats(t *testing.T) {
-	s, _ := server(t, nil)
-	ctx := context.Background()
-	o := s.cfg.Options
-	from, to := s.l.Midnight(s.l.Day(now)-stripDays+1), s.l.Midnight(s.l.Day(now)+1)
-	at := func(d int, h int) time.Time {
-		return from.Add(time.Duration(d)*24*time.Hour + time.Duration(h)*time.Hour)
+// TestWindowDays: the days of a rule's strip a quiet window covers are
+// those the ledger's own Covers says it covers some time of, in UTC and in
+// zones whose clocks change over the strip: one that skips midnight
+// (America/Santiago, 2026-09-06), one that goes back an hour at night
+// (America/New_York, Europe/London) and one that goes forward half an hour
+// (Australia/Lord_Howe). For a window once, every day (until a day), every
+// week, every month and by cron, often or once a year; each starting at,
+// or lasting over, the times the clocks skip or repeat.
+func TestWindowDays(t *testing.T) {
+	for _, zone := range []string{"UTC", "America/Santiago", "America/New_York", "Europe/London", "Australia/Lord_Howe"} {
+		t.Run(zone, func(t *testing.T) {
+			loc, err := time.LoadLocation(zone)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s, _ := server(t, func(c *Config) { c.Loc = loc })
+			ctx := context.Background()
+			o := s.cfg.Options
+			first := s.l.Day(now) - stripDays + 1
+			from, to := s.l.Midnight(first), s.l.Midnight(first+stripDays)
+			at := func(y int, m time.Month, d, h, min int) time.Time { return time.Date(y, m, d, h, min, 0, 0, loc) }
+			for _, w := range []ledger.Window{
+				{Title: "once, over the clocks' change", Start: at(2026, 9, 5, 22, 0), End: at(2026, 9, 6, 3, 0)},
+				{Title: "once, before", Start: from.Add(-30 * time.Hour), End: from.Add(-2 * time.Hour)},
+				{Title: "once, into it", Start: from.Add(-3 * time.Hour), End: from.Add(2 * time.Hour)},
+				{Title: "daily 00:25, two hours", Start: at(2026, 8, 1, 0, 25), End: at(2026, 8, 1, 2, 25), Every: "day"},
+				{Title: "daily 00:25, half an hour", Start: at(2026, 8, 1, 0, 25), End: at(2026, 8, 1, 0, 55), Every: "day"},
+				{Title: "daily 23:30, over midnight, until", Start: at(2026, 8, 1, 23, 30), End: at(2026, 8, 2, 1, 0), Every: "day", Until: at(2026, 10, 30, 0, 0)},
+				{Title: "daily 01:30, an hour", Start: at(2026, 8, 1, 1, 30), End: at(2026, 8, 1, 2, 30), Every: "day"},
+				{Title: "daily 02:15, twenty minutes", Start: at(2026, 8, 1, 2, 15), End: at(2026, 8, 1, 2, 35), Every: "day"},
+				{Title: "weekly, Sundays 00:25, from the Sunday before the clocks' change", Start: at(2026, 8, 30, 0, 25), End: at(2026, 8, 30, 2, 25), Every: "week"},
+				{Title: "weekly, Saturdays 23:00, five hours", Start: at(2026, 8, 1, 23, 0), End: at(2026, 8, 2, 4, 0), Every: "week", Until: at(2026, 10, 10, 0, 0)},
+				{Title: "monthly, the 6th 00:10", Start: at(2026, 7, 6, 0, 10), End: at(2026, 7, 6, 1, 40), Every: "month"},
+				{Title: "monthly, the first Sunday", Start: at(2026, 7, 5, 1, 30), End: at(2026, 7, 5, 2, 30), Every: "month", On: "first sun"},
+				{Title: "cron 00:25 daily", Start: at(2026, 8, 1, 0, 25), End: at(2026, 8, 1, 2, 25), Every: "cron", On: "25 0 * * *"},
+				{Title: "cron twice a week, until", Start: at(2026, 3, 3, 1, 15), End: at(2026, 3, 3, 1, 45), Every: "cron", On: "15 1 * * 2,5", Until: at(2026, 10, 1, 0, 0)},
+				{Title: "cron yearly, the clocks' change", Start: at(2025, 9, 6, 0, 0), End: at(2025, 9, 6, 3, 0), Every: "cron", On: "0 0 6 9 *"},
+				{Title: "cron nightly over midnight, until the day before", Start: at(2026, 3, 3, 23, 0), End: at(2026, 3, 4, 1, 0), Every: "cron", On: "0 23 * * *", Until: from.Add(-24 * time.Hour)},
+				// Six times a day, more than the strip walks: a day at a
+				// time, until a day.
+				{Title: "cron six times a night, until", Start: at(2026, 3, 3, 0, 0), End: at(2026, 3, 3, 0, 20), Every: "cron", On: "0 0-5 * * *", Until: at(2026, 10, 20, 0, 0)},
+			} {
+				if _, err := s.l.PutWindow(ctx, w, "ana", o); err != nil {
+					t.Fatalf("%s: %v", w.Title, err)
+				}
+			}
+			ws, err := s.l.Windows(ctx, from.Add(-48*time.Hour), to)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(ws) != 17 {
+				t.Fatalf("%d windows", len(ws))
+			}
+			for _, w := range ws {
+				got := map[int64]bool{}
+				windowDays(w, s.l, first, stripDays, func(i int) {
+					if i < 0 || i >= stripDays {
+						t.Fatalf("%s: day %d of %d", w.Title, i, stripDays)
+					}
+					got[first+int64(i)] = true
+				})
+				// The days Covers says it covers some time of: every time
+				// it covers starts and ends on five minutes, as the zones'
+				// days do.
+				want := map[int64]bool{}
+				for m := from; m.Before(to); m = m.Add(5 * time.Minute) {
+					if w.Covers(m) {
+						want[s.l.Day(m)] = true
+					}
+				}
+				if len(want) == 0 && w.Title != "once, before" && !strings.Contains(w.Title, "the day before") {
+					t.Errorf("%s covers nothing of the strip", w.Title)
+				}
+				for d := first; d < first+stripDays; d++ {
+					if got[d] != want[d] {
+						t.Errorf("%s: %s marked %v, covered %v", w.Title, s.l.Midnight(d).In(loc).Format("2006-01-02"), got[d], want[d])
+					}
+				}
+			}
+		})
 	}
-	for _, w := range []ledger.Window{
-		{Title: "once", Start: at(10, 22), End: at(11, 3)},
-		{Title: "before", Start: from.Add(-30 * time.Hour), End: from.Add(-2 * time.Hour)},
-		{Title: "into it", Start: from.Add(-3 * time.Hour), End: from.Add(2 * time.Hour)},
-		{Title: "daily, until", Start: at(-3, 23), End: at(-2, 1), Every: "day", Until: at(20, 0)},
-		{Title: "weekly", Start: time.Date(2026, 6, 6, 2, 0, 0, 0, time.UTC), End: time.Date(2026, 6, 6, 4, 0, 0, 0, time.UTC), Every: "week"},
-		{Title: "monthly", Start: time.Date(2026, 3, 7, 2, 0, 0, 0, time.UTC), End: time.Date(2026, 3, 7, 3, 0, 0, 0, time.UTC), Every: "month", On: "first sat"},
-		{Title: "cron", Start: time.Date(2026, 3, 3, 1, 15, 0, 0, time.UTC), End: time.Date(2026, 3, 3, 1, 45, 0, 0, time.UTC), Every: "cron", On: "15 1 * * 2,5", Until: at(60, 0)},
-		// Nightly into the next day, until a day: the day after it covered
-		// too; and every hour, two thousand times over the strip.
-		{Title: "nightly, until", Start: time.Date(2026, 3, 3, 23, 0, 0, 0, time.UTC), End: time.Date(2026, 3, 4, 1, 0, 0, 0, time.UTC), Every: "cron", On: "0 23 * * *", Until: at(40, 0)},
-		{Title: "nightly, until the day before", Start: time.Date(2026, 3, 3, 23, 0, 0, 0, time.UTC), End: time.Date(2026, 3, 4, 1, 0, 0, 0, time.UTC), Every: "cron", On: "0 23 * * *", Until: at(-1, 0)},
-		{Title: "hourly", Start: time.Date(2026, 3, 3, 0, 0, 0, 0, time.UTC), End: time.Date(2026, 3, 3, 0, 30, 0, 0, time.UTC), Every: "cron", On: "0 * * * *", Until: at(70, 0)},
-	} {
-		if _, err := s.l.PutWindow(ctx, w, "ana", o); err != nil {
-			t.Fatalf("%s: %v", w.Title, err)
-		}
-	}
-	ws, err := s.l.Windows(ctx, from.Add(-48*time.Hour), to)
+}
+
+// TestFiringsDay: /firings?day= shows that day's firings, from where the
+// day starts, also where its midnight is skipped.
+func TestFiringsDay(t *testing.T) {
+	loc, err := time.LoadLocation("America/Santiago")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, w := range ws {
-		got := map[int64]bool{}
-		for _, rp := range windowRepeats(w, s.l.Location(), from, to) {
-			for d := max(s.l.Day(rp[0]), s.l.Day(from)); d <= s.l.Day(rp[1]); d++ {
-				got[d] = true
-			}
+	s, _ := server(t, func(c *Config) { c.Loc = loc })
+	ctx := context.Background()
+	o := s.cfg.Options
+	for _, f := range []struct {
+		rule string
+		at   time.Time
+	}{{"Saturday", time.Date(2026, 9, 5, 21, 0, 0, 0, loc)}, {"Sunday", time.Date(2026, 9, 6, 10, 0, 0, 0, loc)}} {
+		if err := s.l.Record(ctx, ledger.Found{From: f.at.Add(-time.Hour), To: f.at.Add(time.Hour), Firings: []firing.Firing{{Rule: f.rule, Labels: map[string]string{"service": "x"}, Start: f.at, End: f.at.Add(time.Minute)}},
+			Run: ledger.Run{Kind: "backfill", Started: f.at, Finished: f.at, From: f.at.Add(-time.Hour), To: f.at.Add(time.Hour)}}, o); err != nil {
+			t.Fatal(err)
 		}
-		// The days Covers says it covers some minute of.
-		want := map[int64]bool{}
-		for m := from; m.Before(to); m = m.Add(time.Minute) {
-			if w.Covers(m) {
-				want[s.l.Day(m)] = true
-			}
+	}
+	for day, want := range map[string]string{"2026-09-06": "Sunday", "2026-09-05": "Saturday"} {
+		r := httptest.NewRequest(http.MethodGet, "/firings?day="+day, nil)
+		v, err := s.firingsPage(r)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if len(want) == 0 && w.Title != "before" {
-			t.Errorf("%s covers nothing of the strip", w.Title)
+		fv := v.(firingsView)
+		if fv.Day != day || len(fv.Lines) != 1 || fv.Lines[0].Rule != want {
+			t.Errorf("/firings?day=%s: the day %s, %d firings %+v", day, fv.Day, len(fv.Lines), fv.Lines)
 		}
-		for d := range want {
-			if !got[d] {
-				t.Errorf("%s: %s covered, not marked", w.Title, s.l.Midnight(d).Format("2006-01-02"))
-			}
-		}
-		for d := range got {
-			if !want[d] && d < s.l.Day(to) {
-				t.Errorf("%s: %s marked, not covered", w.Title, s.l.Midnight(d).Format("2006-01-02"))
-			}
-		}
+	}
+	if d, err := dateDay("2026-09-06"); err != nil || s.l.Midnight(d).In(loc).Format("2006-01-02 15:04") != "2026-09-06 01:00" {
+		t.Errorf("2026-09-06 starts at %s, %v", s.l.Midnight(d).In(loc), err)
 	}
 }
 
@@ -643,16 +701,19 @@ func glanceServer(t *testing.T) *Server {
 		t.Fatal(err)
 	}
 	o.DeployAfter = 10 * time.Minute
-	if _, err := s.l.SyncDeploys(ctx, []ledger.Deploy{{Start: first.Add(30*24*time.Hour + 9*time.Hour), End: first.Add(30*24*time.Hour + 9*time.Hour + 5*time.Minute), Labels: map[string]string{"service": "checkout"}},
+	if _, err := s.l.SyncDeploys(ctx, []ledger.Deploy{{Start: first.Add(30*24*time.Hour + 13*time.Hour + 50*time.Minute), End: first.Add(30*24*time.Hour + 13*time.Hour + 55*time.Minute), Labels: map[string]string{"service": "checkout"}},
 		{Start: first.Add(31 * 24 * time.Hour), End: first.Add(31*24*time.Hour + 5*time.Minute), Labels: map[string]string{"service": "elsewhere"}}}, o, ledger.DeploysRead{}); err != nil {
 		t.Fatal(err)
 	}
 	// Every Sunday 02:00-04:00 for this rule's search alerts, which excuses
-	// that day's 03:00 firing; and one for another rule.
+	// that day's 03:00 firing; one for another rule; and two once, before
+	// it fired: one for its own labels, one for labels it hasn't.
 	for _, w := range []ledger.Window{
 		{Title: "sundays", Start: time.Date(2026, 6, 7, 2, 0, 0, 0, time.UTC), End: time.Date(2026, 6, 7, 4, 0, 0, 0, time.UTC), Every: "week",
 			Labels: incident.Labels{"service": {"search"}}},
 		{Title: "another's", Start: time.Date(2026, 6, 9, 2, 0, 0, 0, time.UTC), End: time.Date(2026, 6, 9, 4, 0, 0, 0, time.UTC), Every: "week", Rules: "^Other$"},
+		{Title: "its own", Start: first.Add(-20*24*time.Hour + time.Hour), End: first.Add(-20*24*time.Hour + 2*time.Hour), Labels: incident.Labels{"severity": {"page"}}},
+		{Title: "not its own", Start: first.Add(-25*24*time.Hour + time.Hour), End: first.Add(-25*24*time.Hour + 2*time.Hour), Labels: incident.Labels{"service": {"search"}}},
 	} {
 		if _, err := s.l.PutWindow(ctx, w, "ana", o); err != nil {
 			t.Fatal(err)
@@ -816,6 +877,7 @@ func TestRuleGlance(t *testing.T) {
 	}
 	// The strip: the Sundays covered and excused; the deploy of checkout,
 	// and not the other; the change of version.
+	first := func(d int64) string { return s.l.Midnight(s.l.Day(now) - 34 + d).Format("2006-01-02") }
 	v = view("")
 	marked := map[string][]string{}
 	for _, d := range v.Strip.Days {
@@ -832,8 +894,12 @@ func TestRuleGlance(t *testing.T) {
 			t.Errorf("%s, a Sunday: its 03:00 firing not excused", d.Day)
 		}
 	}
-	if len(marked["quiet"]) != 12 || !slices.Contains(marked["quiet"], "2026-11-01") {
-		t.Errorf("quiet %q, want the twelve Sundays", marked["quiet"])
+	// Quiet: the Sundays a window excused its firings on, the ledger's
+	// say; and the day a window for its own labels covered, before it
+	// fired; not the Sundays before it fired, as its own labels aren't
+	// the window's, nor the day of the window for labels it hasn't.
+	if want := []string{first(-20), "2026-10-04", "2026-10-11", "2026-10-18", "2026-10-25", "2026-11-01"}; !slices.Equal(marked["quiet"], want) {
+		t.Errorf("quiet %q, want %q", marked["quiet"], want)
 	}
 	if want := []string{s.l.Midnight(s.l.Day(now)-4).Format("2006-01-02") + "×1"}; !slices.Equal(marked["deploy"], want) {
 		t.Errorf("deploys %q, want %q", marked["deploy"], want)
@@ -853,7 +919,7 @@ func TestRuleGlance(t *testing.T) {
 	// The page: a cell a day, each saying its numbers, and the table's row
 	// for that day the same; the legend names its marks.
 	_, body, _ := get(t, h, "/rules/Errors")
-	for _, mark := range []string{"</svg>the rule changed</li>", "</svg>a deploy of what it is about</li>", "</svg>a quiet window covered it</li>"} {
+	for _, mark := range []string{"</svg>the rule changed</li>", "</svg>fired during a deploy of what it is about</li>", "</svg>a quiet window covered it</li>"} {
 		if !strings.Contains(body, mark) {
 			t.Errorf("the legend has no %q", mark)
 		}
@@ -936,7 +1002,7 @@ func TestRulePanelText(t *testing.T) {
 		t.Error("/rules/R20: 0% for a rule that didn't fire, or a change beside nothing")
 	}
 	// The strip's legend names the marks it has, and no other.
-	for _, mark := range []string{"the rule changed", "a deploy of what it is about", "a quiet window covered it"} {
+	for _, mark := range []string{"the rule changed", "fired during a deploy of what it is about", "a quiet window covered it"} {
 		if strings.Contains(body, mark) {
 			t.Errorf("/rules/R20: the legend names %q, which it hasn't", mark)
 		}

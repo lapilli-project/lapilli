@@ -37,7 +37,7 @@
 {{with .Strip}}<figure class="strip">
 <figcaption>{{t "The last 84 days"}}</figcaption>
 <svg class="strip" viewBox="0 0 {{.Width}} 40" role="img" aria-label="{{t "Its last 84 days, a cell a day; the same numbers are in the table below"}}">{{range .Days}}
-<g><title>{{.Day}}: {{t "%d fired, %d caught something, %d caught nothing, %d excused" .Firings .White .Black .Excused}}{{if .Changed}}; {{t "the rule changed"}}{{end}}{{if .Deploys}}; {{t "%d deploys" .Deploys}}{{end}}{{if .Quiet}}; {{t "a quiet window"}}{{end}}</title>
+<g><title>{{.Day}}: {{t "%d fired, %d caught something, %d caught nothing, %d excused" .Firings .White .Black .Excused}}{{if .Changed}}; {{t "the rule changed"}}{{end}}{{if .Deploys}}; {{t "%d during a deploy" .Deploys}}{{end}}{{if .Quiet}}; {{t "a quiet window"}}{{end}}</title>
 {{- if .Changed}}<path class="changed" d="{{.Version}}"/>{{end}}{{if .Deploys}}<path class="deploy" d="{{.Deploy}}"/>{{end}}{{if .Quiet}}<rect class="quiet" x="{{.X}}" y="16" width="10" height="3"/>{{end}}
 {{- if eq .Kind "none"}}<rect class="none" x="{{.Cell}}" y="36" width="8" height="4"/>{{else}}<rect class="{{.Kind}}" x="{{.Cell}}" y="21" width="8" height="19"/>{{if eq .Kind "caught"}}<circle class="hole" cx="{{.Hole}}" cy="30.5" r="2.2"/>{{end}}{{end}}</g>{{end}}
 </svg>
@@ -48,13 +48,13 @@
 <li><svg class="sym" aria-hidden="true" viewBox="0 0 10 12" width="10" height="12"><rect class="excused" x="1.5" y="0.5" width="7" height="11"/></svg>{{t "excused only"}}</li>
 <li><svg class="sym" aria-hidden="true" viewBox="0 0 10 12" width="10" height="12"><rect class="none" x="1" y="8" width="8" height="4"/></svg>{{t "no firing"}}</li>
 {{if .Changed}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 8" width="10" height="8"><path class="changed" d="M5 0.5L8 4L5 7.5L2 4Z"/></svg>{{t "the rule changed"}}</li>{{end}}
-{{if .Deploys}}<li><svg class="sym" aria-hidden="true" viewBox="0 9 10 6" width="10" height="6"><path class="deploy" d="M1 9L9 9L5 14Z"/></svg>{{t "a deploy of what it is about"}}</li>{{end}}
+{{if .Deploys}}<li><svg class="sym" aria-hidden="true" viewBox="0 9 10 6" width="10" height="6"><path class="deploy" d="M1 9L9 9L5 14Z"/></svg>{{t "fired during a deploy of what it is about"}}</li>{{end}}
 {{if .Quiet}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 3" width="10" height="3"><rect class="quiet" x="0" y="0" width="10" height="3"/></svg>{{t "a quiet window covered it"}}</li>{{end}}
 </ul>
 <details class="days"><summary>{{t "The 84 days, as a table"}}</summary>
 <div class="scroll" tabindex="0" role="region" aria-label="{{t "The 84 days, as a table"}}"><table>
 <thead><tr><th scope="col">{{t "Day"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th><th scope="col" class="n">{{t "Excused"}}</th><th scope="col" class="n">{{t "Incidents"}}</th><th scope="col">{{t "Marks"}}</th></tr></thead>
-<tbody>{{range .Latest}}<tr><th scope="row">{{.Day}}</th><td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Excused}}</td><td class="n">{{.Caught}}</td><td>{{if or .Changed .Deploys .Quiet}}{{if .Changed}}{{t "the rule changed"}}{{end}}{{if .Deploys}}{{if .Changed}}, {{end}}{{t "%d deploys" .Deploys}}{{end}}{{if .Quiet}}{{if or .Changed .Deploys}}, {{end}}{{t "a quiet window"}}{{end}}{{else}}–{{end}}</td></tr>{{end}}</tbody>
+<tbody>{{range .Latest}}<tr><th scope="row">{{.Day}}</th><td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Excused}}</td><td class="n">{{.Caught}}</td><td>{{if or .Changed .Deploys .Quiet}}{{if .Changed}}{{t "the rule changed"}}{{end}}{{if .Deploys}}{{if .Changed}}, {{end}}{{t "%d during a deploy" .Deploys}}{{end}}{{if .Quiet}}{{if or .Changed .Deploys}}, {{end}}{{t "a quiet window"}}{{end}}{{else}}–{{end}}</td></tr>{{end}}</tbody>
 </table></div></details>
 </figure>{{end}}
 

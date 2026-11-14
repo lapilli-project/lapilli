@@ -199,3 +199,75 @@ func TestSharePct(t *testing.T) {
 		t.Error("a share of none")
 	}
 }
+
+// TestRuleOnlyHTML: a rule's header, panel and strip are worked out for its
+// page alone, and each version beside the one before only on its versions
+// tab; MCP's rule tool, which reads the rest, has none of them.
+func TestRuleOnlyHTML(t *testing.T) {
+	s := glanceServer(t)
+	r := httptest.NewRequest(http.MethodGet, "/rules/Errors", nil)
+	r.SetPathValue("name", "Errors")
+	v, err := s.rule(r, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Strip != nil || v.Panel != (rulePanel{}) || v.Conds != nil || v.Facts != nil || v.Tabs != nil || len(v.Changes) < 2 {
+		t.Errorf("not for the page: strip %v, panel %+v, header %v %v %v, %d versions", v.Strip != nil, v.Panel, v.Conds, v.Facts, v.Tabs, len(v.Changes))
+	}
+	for tab, diffs := range map[string]bool{"": false, "tab=firings": false, "tab=versions": true} {
+		v := ruleViewOf(t, s, "Errors", tab)
+		if v.Strip == nil || len(v.Tabs) == 0 {
+			t.Errorf("%s: the page has no strip or tabs", tab)
+		}
+		for _, c := range v.Changes {
+			if (len(c.Diff) > 0) != (diffs && !c.First) {
+				t.Errorf("%s: a version from %s with %d lines of diff", tab, c.Since, len(c.Diff))
+			}
+		}
+	}
+	// MCP's rule tool says the same as before: it has no strip to say.
+	_, out, err := s.toolRule(context.Background(), nil, ruleIn{Name: "Errors"})
+	if err != nil || out.Rule.Name != "Errors" || len(out.Versions) != len(v.Changes) {
+		t.Errorf("the rule tool: %v %+v", err, out.Rule)
+	}
+}
+
+// TestRulePageCached: a rule's page is worked out once for what it reads
+// of its query, however it is asked: what else is in the URL, in any
+// order, is nothing to it, and isn't said back on it.
+func TestRulePageCached(t *testing.T) {
+	s := glanceServer(t)
+	h := s.Handler()
+	var first string
+	for i, q := range []string{"weeks=4&tab=firings", "tab=firings&weeks=4", "tab=firings&weeks=4&zz=1", "zz=2&weeks=4&tab=firings&tab=versions",
+		"tab=firings&weeks=4&edit=x&weeks=12", "tab=firings&weeks=4&lang=ko&utm_source=x"} {
+		code, body, hdr := get(t, h, "/rules/Errors?"+q)
+		if code != http.StatusOK {
+			t.Fatalf("%s: %d", q, code)
+		}
+		if strings.Contains(body, "zz") || strings.Contains(body, "utm_source") {
+			t.Errorf("%s: the page says back what it doesn't read", q)
+		}
+		if i == 0 {
+			first = hdr.Get("ETag")
+		} else if hdr.Get("ETag") != first {
+			t.Errorf("%s: ETag %s, not %s", q, hdr.Get("ETag"), first)
+		}
+	}
+	s.cache.Lock()
+	n := len(s.cache.body)
+	s.cache.Unlock()
+	if n != 1 {
+		t.Errorf("%d pages cached, want 1", n)
+	}
+	// What it reads, it is cached by.
+	for _, q := range []string{"tab=firings&weeks=1", "tab=firings&weeks=4&team=", "tab=firings&weeks=4&edit=note", "weeks=4"} {
+		get(t, h, "/rules/Errors?"+q)
+	}
+	s.cache.Lock()
+	n = len(s.cache.body)
+	s.cache.Unlock()
+	if n != 5 {
+		t.Errorf("%d pages cached, want 5", n)
+	}
+}
