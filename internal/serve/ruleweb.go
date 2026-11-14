@@ -279,10 +279,10 @@ func (d stripDay) Deploy() string {
 // ruleStrip is a rule's last 84 days, the earliest first.
 type ruleStrip struct {
 	Days []stripDay
-	// Width is the drawing's; Deploys says the ledger keeps deploys, so a
-	// day without one had none.
-	Width   int
-	Deploys bool
+	// Width is the drawing's; Changed, Deploys and Quiet say some day has
+	// that mark, which the legend then names.
+	Width                   int
+	Changed, Deploys, Quiet bool
 }
 
 // Latest are the days, the latest first, as the table lists them.
@@ -463,7 +463,6 @@ func (s *Server) marks(ctx context.Context, v *ruleView, vs []version, labelSets
 	if err != nil {
 		return err
 	}
-	v.Strip.Deploys = has
 	if has {
 		ds, err := s.l.Deploys(ctx, from, to)
 		if err != nil {
@@ -500,6 +499,11 @@ func (s *Server) marks(ctx context.Context, v *ruleView, vs []version, labelSets
 				}
 			}
 		}
+	}
+	for _, d := range days {
+		v.Strip.Changed = v.Strip.Changed || d.Changed
+		v.Strip.Deploys = v.Strip.Deploys || d.Deploys > 0
+		v.Strip.Quiet = v.Strip.Quiet || d.Quiet
 	}
 	return nil
 }

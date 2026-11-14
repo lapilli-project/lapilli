@@ -386,6 +386,8 @@ main > section.card, main > .moved + section.card { margin: 0 0 1rem; }
 section.card { margin-bottom: 1rem; }
 /* Where a section was before it moved to a tab: shown only when an old
    link goes to it. */
+section.todo div.row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+section.todo form { margin: 0; }
 p.moved { display: none; }
 p.moved:target { display: block; padding: .6rem 1rem; background: var(--accent-soft); border-radius: 12px; }
 pre.diff { margin: .4rem 0 1rem; padding: .6rem .8rem; background: var(--card); border: 1px solid var(--line-strong); border-radius: 10px; font-family: var(--mono); }

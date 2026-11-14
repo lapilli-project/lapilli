@@ -671,6 +671,11 @@ func TestRuleGlance(t *testing.T) {
 		}
 		return v.(ruleView)
 	}
+	// Its severity, which the ledger hasn't, from its labels, as the list
+	// has it.
+	if v := view(""); !slices.Contains(v.Facts, ruleFact{"severity", "page"}) || v.Severity != "" {
+		t.Errorf("facts %+v; severity %q", v.Facts, v.Severity)
+	}
 	// Today is a Tuesday: the last week is Monday and today, two days; as
 	// long before, the Saturday and Sunday before it.
 	v := view("weeks=1")
@@ -745,8 +750,13 @@ func TestRuleGlance(t *testing.T) {
 	}
 
 	// The page: a cell a day, each saying its numbers, and the table's row
-	// for that day the same.
+	// for that day the same; the legend names its marks.
 	_, body, _ := get(t, h, "/rules/Errors")
+	for _, mark := range []string{"</svg>the rule changed</li>", "</svg>a deploy of what it is about</li>", "</svg>a quiet window covered it</li>"} {
+		if !strings.Contains(body, mark) {
+			t.Errorf("the legend has no %q", mark)
+		}
+	}
 	doc, err := html.Parse(strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -823,5 +833,11 @@ func TestRulePanelText(t *testing.T) {
 	}
 	if strings.Contains(body, `<dd class="big">0%</dd>`) || strings.Contains(body, "Beside each number") {
 		t.Error("/rules/R20: 0% for a rule that didn't fire, or a change beside nothing")
+	}
+	// The strip's legend names the marks it has, and no other.
+	for _, mark := range []string{"the rule changed", "a deploy of what it is about", "a quiet window covered it"} {
+		if strings.Contains(body, mark) {
+			t.Errorf("/rules/R20: the legend names %q, which it hasn't", mark)
+		}
 	}
 }

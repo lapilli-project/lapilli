@@ -1017,7 +1017,12 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 			}
 		}
 	}
-	s.ruleHeader(&v)
+	// Its severity as the list has it: the ledger's, or its labels'.
+	sev := v.Severity
+	if last != nil {
+		sev = cmpOr(sev, last.AlertLabels()["severity"])
+	}
+	s.ruleHeader(&v, sev)
 	// What it fires with, as far as is known: the labels of its latest
 	// firings, and its own; a deploy or a quiet window is set beside them.
 	var sets []map[string]string
@@ -1041,8 +1046,8 @@ func (s *Server) rulePage(r *http.Request) (any, error) {
 }
 
 // ruleHeader is what a rule's page says at its top: its badges, what to
-// check, the facts of it, and its tabs.
-func (s *Server) ruleHeader(v *ruleView) {
+// check, the facts of it (its severity, sev), and its tabs.
+func (s *Server) ruleHeader(v *ruleView, sev string) {
 	v.Proposed = slices.ContainsFunc(v.Proposals, func(p proposalLine) bool { return slices.Contains(ledger.Unfinished(), p.State) })
 	// What it says is to check with the rest, not as a badge of its own.
 	v.Row = rowOf(v.ruleLine, 0)
@@ -1052,7 +1057,7 @@ func (s *Server) ruleHeader(v *ruleView) {
 	if v.Says != nil && v.Says.RunbookLink != "" {
 		runbook = v.Says.RunbookLink
 	}
-	for _, f := range []ruleFact{{"team", v.Team}, {"severity", v.Severity}, {"for", v.For}, {"group", v.Group}, {"runbook", runbook}} {
+	for _, f := range []ruleFact{{"team", v.Team}, {"severity", sev}, {"for", v.For}, {"group", v.Group}, {"runbook", runbook}} {
 		if f.Value != "" {
 			v.Facts = append(v.Facts, f)
 		}

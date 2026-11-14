@@ -47,9 +47,9 @@
 <li><svg class="sym" aria-hidden="true" viewBox="0 0 10 12" width="10" height="12"><rect class="nothing" x="1" y="0" width="8" height="12"/></svg>{{t "caught nothing only"}}</li>
 <li><svg class="sym" aria-hidden="true" viewBox="0 0 10 12" width="10" height="12"><rect class="excused" x="1.5" y="0.5" width="7" height="11"/></svg>{{t "excused only"}}</li>
 <li><svg class="sym" aria-hidden="true" viewBox="0 0 10 12" width="10" height="12"><rect class="none" x="1" y="8" width="8" height="4"/></svg>{{t "no firing"}}</li>
-<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 8" width="10" height="8"><path class="changed" d="M5 0.5L8 4L5 7.5L2 4Z"/></svg>{{t "the rule changed"}}</li>
+{{if .Changed}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 8" width="10" height="8"><path class="changed" d="M5 0.5L8 4L5 7.5L2 4Z"/></svg>{{t "the rule changed"}}</li>{{end}}
 {{if .Deploys}}<li><svg class="sym" aria-hidden="true" viewBox="0 9 10 6" width="10" height="6"><path class="deploy" d="M1 9L9 9L5 14Z"/></svg>{{t "a deploy of what it is about"}}</li>{{end}}
-<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 3" width="10" height="3"><rect class="quiet" x="0" y="0" width="10" height="3"/></svg>{{t "a quiet window covered it"}}</li>
+{{if .Quiet}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 3" width="10" height="3"><rect class="quiet" x="0" y="0" width="10" height="3"/></svg>{{t "a quiet window covered it"}}</li>{{end}}
 </ul>
 <details class="days"><summary>{{t "The 84 days, as a table"}}</summary>
 <div class="scroll" tabindex="0" role="region" aria-label="{{t "The 84 days, as a table"}}"><table>
