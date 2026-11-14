@@ -135,7 +135,7 @@
 <section class="card" id="tasks">
 <h2>{{t "Tasks"}}</h2>
 {{template "tasklist" (on $ .Tasks)}}
-{{if edits $.Status .TeamID}}<p><a href="{{$.Link "/tasks" "rule" .Name "kind" "tune" "title" (t "Tune %s" .Name) "team" .Team}}">{{t "Add a task about this rule"}}</a></p>{{end}}
+{{if edits $.Status .TeamID}}<p><a href="{{$.Link "/tasks" "rule" .Name "kind" "tune" "title" (t "Tune %s" .Name) "team" .Team}}">{{t "Add a task about this rule"}}</a></p>{{else}}<p>{{template "off" (offTeam $ "Add a task about this rule" "activity-task-why" .Team)}}</p>{{end}}
 </section>
 {{template "comments" .Comments}}
 
@@ -148,8 +148,8 @@ lands here, and is shown the way to it. */}}
 {{with .Suggestion}}<section class="card todo" id="first">
 <h2>{{t "What to do first"}}</h2>
 <p class="hint">{{.}}</p>
-<div class="row">{{if and $v.SuggestedFor (not $.Status.ReadOnly)}}<form method="post" action="/proposals"><input type="hidden" name="rule" value="{{$v.Name}}"><input type="hidden" name="kind" value="for"><input type="hidden" name="from" value="suggestion"><input type="hidden" name="for" value="{{$v.SuggestedFor}}"><button>{{t "Propose it"}}</button></form>{{end}}
-{{if edits $.Status $v.TeamID}}<form method="post" action="/tasks"><input type="hidden" name="title" value="{{t "Quiet %s" $v.Name}}: {{.}}"><input type="hidden" name="kind" value="tune"><input type="hidden" name="rule" value="{{$v.Name}}"><input type="hidden" name="back" value="{{$.Link $v.Path "tab" "activity"}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>{{end}}</div>
+<div class="row">{{if and $v.SuggestedFor (not $.Status.ReadOnly)}}<form method="post" action="/proposals"><input type="hidden" name="rule" value="{{$v.Name}}"><input type="hidden" name="kind" value="for"><input type="hidden" name="from" value="suggestion"><input type="hidden" name="for" value="{{$v.SuggestedFor}}"><button>{{t "Propose it"}}</button></form>{{else if $v.SuggestedFor}}{{template "off" (offOf $ "Propose it" "editor" "first-propose-why")}}{{end}}
+{{if edits $.Status $v.TeamID}}<form method="post" action="/tasks"><input type="hidden" name="title" value="{{t "Quiet %s" $v.Name}}: {{.}}"><input type="hidden" name="kind" value="tune"><input type="hidden" name="rule" value="{{$v.Name}}"><input type="hidden" name="back" value="{{$.Link $v.Path "tab" "activity"}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>{{else}}{{template "off" (offTeam $ "Make it a task" "first-task-why" $v.Team)}}{{end}}</div>
 </section>{{end}}
 
 <section class="card about" id="note">
@@ -166,7 +166,7 @@ lands here, and is shown the way to it. */}}
   <label>{{t "Runbook"}} <input name="runbook" type="url" maxlength="500" value="{{.Note.Runbook}}" placeholder="https://"></label>
   <label>{{t "Note"}} <textarea name="note" rows="3" maxlength="5000">{{.Note.Note}}</textarea></label>
   <button>{{t "Save"}}</button>
-</form></details>{{end}}
+</form></details>{{else}}<p>{{template "off" (offTeam $ "Change it" "note-why" .Team)}}</p>{{end}}
 </section>
 
 <section class="card" id="caught">
@@ -193,7 +193,7 @@ lands here, and is shown the way to it. */}}
   <input type="hidden" name="rule" value="{{$v.Name}}"><input type="hidden" name="kind" value="says"><input type="hidden" name="annotation" value="{{.Annotation}}"><input type="hidden" name="check" value="{{.Check}}">
   <label>{{t .Label}} <input name="text" required maxlength="{{if eq .Annotation "summary"}}4096{{else}}2048{{end}}"{{if ne .Annotation "summary"}} type="url" placeholder="https://"{{end}}></label>
   <button>{{t "Propose it, for a person to approve"}}</button>
-</form>{{end}}{{end}}
+</form>{{end}}{{else if $v.SaysForms}}<p>{{template "off" (offOf $ "Propose a fix" "editor" "says-why")}}</p>{{end}}
 {{with .Unchecked}}<p class="quiet">{{t "Its notification templates weren't checked: %s." (t .)}}</p>{{end}}
 {{if .Guesses}}<p class="quiet">{{t "Guesses, which may be wrong:"}}</p>
 <ul class="plain">{{range .Guesses}}<li>{{t .Key}}{{with .Detail}}: <code>{{.}}</code>{{end}} <span class="quiet">({{t .Why}})</span></li>{{end}}</ul>{{end}}

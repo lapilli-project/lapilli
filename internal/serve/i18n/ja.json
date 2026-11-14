@@ -599,6 +599,8 @@
  "dismissed": "却下",
  "doing": "進行中",
  "done": "完了",
+ "Propose a fix": "修正を提案する",
+ "Confirm or dismiss it": "確定または却下する",
  "Who owns what and who may change it, how firings are judged, what Lapilli ran, and the reports it sends.": "何を誰が担当し誰が変更できるか、発火をどう判定するか、Lapilli が何を実行したか、どのレポートを送るかを管理します。",
  "Who owns which rules and incidents, and each team's hours.": "どのチームがどのルールとインシデントを担当するか、チームごとの勤務時間。",
  "Who may change what, and a team's own editors.": "誰が何を変更できるか、チームごとの編集者。",

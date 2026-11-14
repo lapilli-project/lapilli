@@ -599,6 +599,8 @@
  "dismissed": "descartado",
  "doing": "en curso",
  "done": "hecha",
+ "Propose a fix": "Proponer una corrección",
+ "Confirm or dismiss it": "Confirmarlo o descartarlo",
  "Who owns what and who may change it, how firings are judged, what Lapilli ran, and the reports it sends.": "Quién es dueño de qué y quién puede cambiarlo, cómo se juzgan los disparos, qué ejecutó Lapilli y los informes que envía.",
  "Who owns which rules and incidents, and each team's hours.": "Quién es dueño de qué reglas e incidentes, y el horario de cada equipo.",
  "Who may change what, and a team's own editors.": "Quién puede cambiar qué, y los editores de cada equipo.",

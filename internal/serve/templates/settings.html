@@ -9,13 +9,13 @@
 <td>{{if $ro}}{{or .Value "–"}}{{else}}<input name="{{.Key}}" value="{{.Value}}" size="14" aria-labelledby="setting-{{.Key}}">{{end}}{{if .Changed}}<br><span class="quiet">{{t "changed by %s, %s" .By (at $loc .Updated)}}</span>{{end}}</td>
 <td>{{if and .Changed (not $ro)}}<label><input type="checkbox" name="reset-{{.Key}}" value="1" aria-describedby="setting-{{.Key}}"> {{t "back to the start"}}</label>{{end}}</td></tr>{{end}}</tbody>
 </table></div>
-{{if not $ro}}<p><button>{{t "Save, and judge again"}}</button> <button formmethod="get" formaction="/settings" name="try" value="1" class="quiet-button">{{t "Try them on the last week first"}}</button></p>{{end}}
+{{if not $ro}}<p><button>{{t "Save, and judge again"}}</button> <button formmethod="get" formaction="/settings" name="try" value="1" class="quiet-button">{{t "Try them on the last week first"}}</button></p>{{else}}<p>{{template "off" (offOf $ "Save, and judge again" "admin" "settings-why")}}</p>{{end}}
 {{if not $ro}}</form>{{end}}
 <p class="quiet"><code>--lead</code>: {{t "how long before an incident a firing still catches it."}} <code>--match</code>: {{t "labels a firing and an incident must agree on; none for no labels."}} <code>--refire</code>: {{t "how soon after resolving a firing counts as refired."}} {{t "A rule is noisy when it fired --noisy-firings times or more and under --noisy-precision of them caught anything."}}</p>
 
 <h2>{{t "Changes to the rules"}}</h2>
 <p>{{if not $.Status.ChangesOn}}{{t "Off: proposals are kept, and nothing is applied. Turned on with --changes."}}{{else if $.Status.ChangesPaused}}{{t "On, and paused."}}{{else}}{{t "On."}}{{end}} <a href="{{$.Link "/proposals"}}">{{t "Proposals"}}</a></p>
-{{if and $.Status.ChangesOn $.Status.Admin}}<form method="post" action="/settings/changes">{{if $.Status.ChangesPaused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>{{end}}
+{{if and $.Status.ChangesOn $.Status.Admin}}<form method="post" action="/settings/changes">{{if $.Status.ChangesPaused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>{{else if $.Status.ChangesOn}}<p>{{if $.Status.ChangesPaused}}{{template "off" (offOf $ "Resume changes" "admin" "pause-why")}}{{else}}{{template "off" (offOf $ "Pause changes" "admin" "pause-why")}}{{end}}</p>{{end}}
 
 {{with .Try}}
 <h2>{{t "Tried on %s → %s" (at $loc .From) (at $loc .To)}}</h2>

@@ -45,7 +45,7 @@
 
 <h2>{{t "Tasks"}}</h2>
 {{template "tasklist" (on $ .Tasks)}}
-{{if not $ro}}<p><a href="{{$.Link "/tasks" "incident" .ID "kind" "write" "title" (t "A rule for %s" .ID) "team" ""}}">{{t "Add a task about this incident"}}</a></p>{{end}}
+{{if not $ro}}<p><a href="{{$.Link "/tasks" "incident" .ID "kind" "write" "title" (t "A rule for %s" .ID) "team" ""}}">{{t "Add a task about this incident"}}</a></p>{{else}}<p>{{template "off" (offOf $ "Add a task about this incident" "editor" "incident-task-why")}}</p>{{end}}
 
 {{template "comments" .Comments}}
 
@@ -74,5 +74,11 @@
 <form method="post" action="/incidents/{{path .ID}}/decide"><input type="hidden" name="state" value=""><button class="quiet-button">{{t "Undo: %s" (t .State)}}</button></form>
 {{end}}
 {{end}}
+{{else if .Mine}}
+<h2>{{t "Change it"}}</h2>
+<p>{{template "off" (offOf $ "Change it" "editor" "incident-why")}}</p>
+{{else if eq .Origin "impact"}}
+<h2>{{t "Was it real?"}}</h2>
+<p>{{template "off" (offOf $ "Confirm or dismiss it" "editor" "incident-why")}}</p>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}

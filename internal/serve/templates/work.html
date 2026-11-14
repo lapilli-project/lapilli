@@ -77,6 +77,9 @@
   <button>{{t "Add it"}}</button>
 </form>
 {{end}}
+{{else if .Edit}}
+<h2>{{t "Change %s" .Edit.Name}}</h2>
+<p>{{template "off" (offOf $ "Change it" "admin" "team-why")}}</p>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
@@ -154,6 +157,9 @@ first, so that Enter in a field writes nothing. */}}
 <h2>{{t "Change it"}}</h2>
 {{template "windowform" .Draft}}
 <form method="post" action="/windows/{{.ID}}/delete"><button class="quiet-button">{{t "Delete it"}}</button></form>
+{{else}}
+<h2>{{t "Change it"}}</h2>
+<p>{{template "off" (offTeam $ "Change it" "window-why" .TeamName)}}</p>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
@@ -202,6 +208,8 @@ first, so that Enter in a field writes nothing. */}}
 {{template "taskform" .Form}}
 <form method="post" action="{{$.Link (printf "/tasks/%d/delete" .ID)}}"><button class="quiet-button">{{t "Delete it"}}</button></form>
 </details>
+{{else}}
+<p>{{template "off" (offTeam $ "Change it" "task-why" .Team)}}</p>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 

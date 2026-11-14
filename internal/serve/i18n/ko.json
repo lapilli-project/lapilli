@@ -599,6 +599,8 @@
  "dismissed": "기각",
  "doing": "진행 중",
  "done": "완료",
+ "Propose a fix": "수정 제안하기",
+ "Confirm or dismiss it": "확정하거나 기각하기",
  "Who owns what and who may change it, how firings are judged, what Lapilli ran, and the reports it sends.": "무엇을 누가 맡고 누가 바꿀 수 있는지, 발화를 어떻게 판정하는지, Lapilli가 무엇을 실행했는지, 어떤 리포트를 보내는지 관리해요.",
  "Who owns which rules and incidents, and each team's hours.": "어느 팀이 어떤 규칙과 인시던트를 맡는지, 팀마다의 근무 시간.",
  "Who may change what, and a team's own editors.": "누가 무엇을 바꿀 수 있는지, 팀별 편집자.",

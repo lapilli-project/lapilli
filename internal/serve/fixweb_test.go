@@ -334,3 +334,141 @@ func TestManagePage(t *testing.T) {
 		t.Error("a group without a page of its own is a link")
 	}
 }
+
+// TestOffTextsTranslated: every action a template shows disabled, with
+// offOf or offTeam, is named in each language.
+func TestOffTextsTranslated(t *testing.T) {
+	tpls, err := files.ReadDir("templates")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, f := range tpls {
+		b, err := files.ReadFile("templates/" + f.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range regexp.MustCompile(`\boff(?:Of|Team) \$ "((?:[^"\\]|\\.)+)"`).FindAllStringSubmatch(string(b), -1) {
+			n++
+			for lang, c := range catalogs {
+				if _, ok := c[m[1]]; !ok {
+					t.Errorf("%s has no translation for %q", lang, m[1])
+				}
+			}
+		}
+	}
+	if n < 15 {
+		t.Errorf("only %d disabled actions found", n)
+	}
+}
+
+// TestFormsDisabledWithWhy: where a page's form is for those who may change
+// something, a reader who may not sees one button, disabled, naming what it
+// does, and why, and no form: a quiet window's, a task's, a team's, the
+// settings', a report's, an incident's, and a rule's (what to do first,
+// its note, what it says, proposing a change, a task about it).
+func TestFormsDisabledWithWhy(t *testing.T) {
+	t.Run("read-only", func(t *testing.T) {
+		s := pagesServer(t)
+		s.cfg.ReadOnly = true
+		h := s.Handler()
+		ro := "Read-only: lapilli serve was started with --read-only"
+		for _, c := range []struct {
+			path   string
+			offs   [][2]string // label, id
+			forms  []string
+			status int
+		}{
+			{"/windows/1", [][2]string{{"Change it", "window-why"}}, []string{`action="/windows"`, `/windows/1/delete`}, 200},
+			{"/tasks/1", [][2]string{{"Change it", "task-why"}}, []string{`/tasks/1/delete`, `name="only"`}, 200},
+			{"/teams?edit=1", [][2]string{{"Change it", "team-why"}}, []string{`action="/teams"`}, 200},
+			{"/settings", [][2]string{{"Save, and judge again", "settings-why"}}, []string{`<form method="post" action="/settings">`}, 200},
+			{"/reports/1", [][2]string{{"Change it", "report-why"}}, nil, 200},
+			{"/incidents/impact-20261103T0600Z", [][2]string{{"Confirm or dismiss it", "incident-why"}, {"Add a task about this incident", "incident-task-why"}}, []string{`/decide`}, 200},
+			{"/rules/Errors", [][2]string{{"Change it", "note-why"}}, []string{`action="/notes"`}, 200},
+			{"/rules/Errors?tab=proposals", [][2]string{{"Propose a change", "propose-why"}}, []string{`action="/proposals"`}, 200},
+			{"/rules/Errors?tab=activity", [][2]string{{"Add a task about this rule", "activity-task-why"}}, nil, 200},
+		} {
+			code, body, _ := get(t, h, c.path)
+			if code != c.status {
+				t.Errorf("%s: %d", c.path, code)
+				continue
+			}
+			for _, o := range c.offs {
+				if !strings.Contains(body, offButton(o[0], o[1], ro)) {
+					t.Errorf("%s: no %q disabled with why", c.path, o[0])
+				}
+			}
+			for _, f := range c.forms {
+				if strings.Contains(body, f) {
+					t.Errorf("%s: a form, %s", c.path, f)
+				}
+			}
+		}
+	})
+	t.Run("roles", func(t *testing.T) {
+		s, pay, search := rolesServer(t, nil)
+		ctx := context.Background()
+		if _, err := s.l.PutGrant(ctx, ledger.Grant{Who: "user:pat@example.com", TeamID: pay}, "boss"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.l.PutGrant(ctx, ledger.Grant{Who: "user:sam@example.com", TeamID: search}, "boss"); err != nil {
+			t.Fatal(err)
+		}
+		mine, err := s.l.PutWindow(ctx, ledger.Window{Title: "pay's", Start: now, End: now.Add(time.Hour), TeamID: pay}, "boss", s.cfg.Options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		theirs, err := s.l.PutWindow(ctx, ledger.Window{Title: "search's", Start: now, End: now.Add(time.Hour), TeamID: search}, "boss", s.cfg.Options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		task, err := s.l.PutTask(ctx, ledger.Task{Title: "search's", Kind: "tune", TeamID: search}, "boss")
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := s.Handler()
+		for _, c := range []struct {
+			who, path, label, id, why string
+		}{
+			{"vic@example.com", "/windows/" + itoa(mine), "Change it", "window-why", "Editors only"},
+			{"pat@example.com", "/windows/" + itoa(theirs), "Change it", "window-why", "Only <bdi>search</bdi>&#39;s editors"},
+			{"pat@example.com", "/tasks/" + itoa(task), "Change it", "task-why", "Only <bdi>search</bdi>&#39;s editors"},
+			{"", "/tasks/" + itoa(task), "Change it", "task-why", "Read-only: no one is signed in"},
+			{"ed@example.com", "/teams?edit=" + itoa(pay), "Change it", "team-why", "Admins only"},
+			{"ed@example.com", "/settings", "Save, and judge again", "settings-why", "Admins only"},
+			{"sam@example.com", "/rules/Errors?tab=activity", "Add a task about this rule", "activity-task-why", "Only <bdi>payments</bdi>&#39;s editors"},
+			{"sam@example.com", "/rules/Errors", "Change it", "note-why", "Only <bdi>payments</bdi>&#39;s editors"},
+		} {
+			_, body := as(t, h, http.MethodGet, c.path, c.who, "", nil)
+			if !strings.Contains(body, offButton(c.label, c.id, c.why)) {
+				t.Errorf("%s as %q: no %q disabled with %q", c.path, c.who, c.label, c.why)
+			}
+		}
+		// Whoever may, has the form, and no button disabled.
+		if _, body := as(t, h, http.MethodGet, "/windows/"+itoa(mine), "pat@example.com", "", nil); !strings.Contains(body, `action="/windows"`) || strings.Contains(body, `id="window-why"`) {
+			t.Error("pat's own team's window: no form")
+		}
+		// And the server refuses whoever may not, as before.
+		if code, _ := as(t, h, http.MethodPost, "/windows", "pat@example.com", "", windowForm("x", "2026-11-01T10:00", "2026-11-01T11:00", "id", itoa(theirs), "team", itoa(search))); code != http.StatusForbidden {
+			t.Errorf("pat changing search's window: %d", code)
+		}
+	})
+}
+
+// The pages and states phase 4 adds, among those every page test renders
+// in each language and checks for accessibility; a proposal's are where a
+// server has one.
+func init() {
+	pagePaths = append(pagePaths, "/manage", "/proposals/1?diff=split&context=all", "/proposals/1?context=all",
+		"/proposals?state=all&kind=for&by=person", "/tasks?status=done&status=dropped")
+}
+
+// TestDisabledAccessible: the pages with the actions a reader may not take
+// shown disabled, and the Manage page, pass the pages' checks in each
+// language.
+func TestDisabledAccessible(t *testing.T) {
+	ro, _ := a11yServer(t)
+	ro.cfg.ReadOnly = true
+	pageA11y(t, ro.Handler(), "", "/incidents/impact-20261103T0600Z", "/teams?edit=1", "/rules/Errors?tab=proposals", "/rules/Errors?tab=activity", "/manage")
+}

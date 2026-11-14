@@ -141,6 +141,9 @@
   <button>{{t "Propose it, for a person to approve"}}</button>
 </form>{{end}}
 <form method="post" action="/proposals"><input type="hidden" name="rule" value="{{.Name}}">{{if .Spare}}<input type="hidden" name="from" value="spare">{{end}}<input type="hidden" name="kind" value="{{.RetireKind}}"><button class="quiet-button">{{if eq .RetireKind "disable"}}{{t "Propose turning it off (deleted four weeks later, approved again)"}}{{else}}{{t "Propose deleting it"}}{{end}}</button></form>
+</section>{{else}}<section class="card" id="propose">
+<h2>{{t "Propose a change"}}</h2>
+<p>{{template "off" (offOf $ "Propose a change" "editor" "propose-why")}}</p>
 </section>{{end}}
 {{end}}{{end}}
 
