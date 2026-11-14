@@ -167,7 +167,7 @@ func TestAgentProposesSignedIn(t *testing.T) {
 			// cy can't approve it, by the page or by a form made up.
 			asCy := w.browser(t, h, cy)
 			page := asCy(http.MethodGet, "/proposals/"+itoa(out.ID), nil)
-			if page.Code != 200 || formKey.MatchString(page.Body.String()) || !strings.Contains(page.Body.String(), "You proposed this") {
+			if page.Code != 200 || formKey.MatchString(page.Body.String()) || !strings.Contains(page.Body.String(), "Your agent proposed this: someone else approves it.") {
 				t.Errorf("the person an agent acted for is offered its approval: %d\n%s", page.Code, page.Body)
 			}
 			cyKey := s.formKey(p, cy, "approve")

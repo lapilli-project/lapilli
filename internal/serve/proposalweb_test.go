@@ -300,7 +300,7 @@ func TestProposalActionsDisabled(t *testing.T) {
 	id := proposeFor(t, h, "15m")
 	path := "/proposals/" + itoa(id)
 	_, body, _ := ui(t, h, http.MethodGet, path, "dee@example.com", "", nil)
-	for _, want := range []string{offButton("Drop it", "drop-why", "Editors only"), offButton("Make it a task", "task-why", "Editors only")} {
+	for _, want := range []string{offButton("Drop it", "drop-why", "Editors and approvers only"), offButton("Make it a task", "task-why", "Editors only")} {
 		if !strings.Contains(body, want) {
 			t.Errorf("a viewer: no %s", want)
 		}
@@ -310,6 +310,17 @@ func TestProposalActionsDisabled(t *testing.T) {
 	}
 	approve(t, h, id, ana)
 	s.jobs(ctx, false)
+	// Checked again and waiting for a recipe: an approver's or an admin's
+	// to drop, not an editor's, as the handler has it.
+	if _, body, _ := ui(t, h, http.MethodGet, path, bo, "", nil); !strings.Contains(body, offButton("Drop it", "drop-why", "Approvers and admins only")) || strings.Contains(body, path+"/drop") {
+		t.Error("an editor: dropping one ready isn't disabled with why")
+	}
+	if code, _, _ := ui(t, h, http.MethodPost, path+"/drop", bo, "same-origin", url.Values{}); code < 400 || state(t, s, id).State != ledger.StateReady {
+		t.Errorf("an editor dropped one ready: %d", code)
+	}
+	if _, body, _ := ui(t, h, http.MethodGet, path, cy, "", nil); !strings.Contains(body, `action="`+path+`/drop"`) {
+		t.Error("an approver may drop one ready")
+	}
 	openThenMerge(t, port, id, false)
 	if _, body, _ := ui(t, h, http.MethodGet, path, cy, "", nil); !strings.Contains(body, offButton("Close it", "drop-why", "Admins only")) || strings.Contains(body, "/drop") {
 		t.Error("an approver, not an admin: closing it isn't disabled with why")
@@ -719,5 +730,34 @@ func TestProposalHeadingFromWhatItKeeps(t *testing.T) {
 	}
 	if got := h1(says); !strings.Contains(got, "<bdi>summary for: 9h�</bdi>, written anew") {
 		t.Errorf("what it says, its annotation's line: %q", got)
+	}
+}
+
+// TestProposalLongRuleSaid: a rule past diffMost lines a side is shown
+// whole, the one side then the other, and the page says so, as the
+// versions tab does; one shorter, nothing of it.
+func TestProposalLongRuleSaid(t *testing.T) {
+	ctx := context.Background()
+	s, h, id := withProposal(t, nil)
+	said := "Too long to set beside each other line by line: the rule as it is, taken out, then as proposed."
+	if _, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(id), cy, "", nil); strings.Contains(body, said) {
+		t.Error("a short rule said to be too long")
+	}
+	var a, b strings.Builder
+	for i := range diffMost + 1 {
+		fmt.Fprintf(&a, "line %d\n", i)
+		fmt.Fprintf(&b, "line %d\n", i+1)
+	}
+	p := state(t, s, id)
+	s.l.Move(ctx, id, []string{ledger.StateProposed}, ledger.StateDropped, bo, ledger.Step{})
+	p.ID, p.Before, p.After = 0, a.String(), b.String()
+	long, err := s.l.Propose(ctx, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{"", "?diff=split"} {
+		if _, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(long)+q, cy, "", nil); !strings.Contains(body, said) {
+			t.Errorf("%q: a rule past %d lines isn't said to be shown whole", q, diffMost)
+		}
 	}
 }

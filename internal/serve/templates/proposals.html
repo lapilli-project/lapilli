@@ -58,6 +58,7 @@
 <h2>{{t "The change"}}</h2>
 {{template "diffopts" .DiffLinks}}
 {{if .Diff.D.Same}}<p class="quiet">{{t "The rule reads the same as proposed: what changes is in the file around it."}}</p>{{end}}
+{{if .Diff.D.Whole}}<p class="quiet">{{if eq .Kind "undo"}}{{t "Too long to set beside each other line by line: the rule as the change left it, taken out, then as it was before."}}{{else}}{{t "Too long to set beside each other line by line: the rule as it is, taken out, then as proposed."}}{{end}}</p>{{end}}
 {{template "difflines" .Diff}}
 {{with .File}}<details><summary>{{tbdi "The file as the pull request changes it: %s" (shown .)}}</summary>
 <pre class="diff">{{range $v.FileRows}}<span class="{{.Class}}">{{.Op}}{{shown .Text}}</span>

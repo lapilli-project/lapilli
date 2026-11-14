@@ -535,7 +535,8 @@ dry run, its history), with the backtest in the dry run's place:
   request; Grafana's, a ruler's or a cloud's API; or for a person to
   make); when. Breadcrumb Fix › Proposals › #id.
 - **The change**: the rule as it is and as proposed, in the diff's
-  options; for the git path, the file as the pull request changes it, in a
+  options, a side past 400 lines shown whole, after the other, and said
+  so, as the versions tab does; for the git path, the file as the pull request changes it, in a
   `<details>`; for one with no path, the pull request's description to
   copy.
 - **The backtest**: a table, now beside as proposed, from the evidence the
@@ -563,8 +564,13 @@ dry run, its history), with the backtest in the dry run's place:
   the backtest" ("the change and its evidence" without one), `required` in
   the form and checked by the server, an approval without it refused, 400.
   To a reader who may not approve, the button disabled with why: Approvers
-  only, You proposed this, You approved it, Read-only, Changes are off, or
-  a change for a person to make. Who may approve is as it was.
+  only, You proposed this, Your agent proposed this, You approved it,
+  Read-only, Changes are off, or a change for a person to make. Who may
+  approve is as it was. Each reason is what the handler allows: dropping
+  one waiting for approval or approved is an editor's or an approver's
+  ("Editors and approvers only"), one ready an approver's or an admin's
+  ("Approvers and admins only"), closing an admin's, making it a task an
+  editor's.
 - **History**: what happened to it, in order, each with who and when:
   made (by an agent, for whom), each approval (k of m), approved or waiting
   again as `--approvals` changed, each state it moved to (with the pull

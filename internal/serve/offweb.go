@@ -50,9 +50,12 @@ var offFuncs = template.FuncMap{
 	},
 }
 
-// offs are a proposal's actions its reader may not take, each with why:
-// approving it, asking for it to be undone, dropping or closing it, making
-// it a task. Each only where someone could, in its state.
+// offs are a proposal's actions its reader may not take, each with why, as
+// the handler that takes it allows: approving it and asking for it to be
+// undone (an approver's, person), dropping it (an editor's or an
+// approver's, droppable; one ready, an approver's or an admin's), closing
+// it (an admin's), making it a task (an editor's, write). Each only where
+// someone could, in its state.
 func (s *Server) offs(r *http.Request, p ledger.Proposal, v *proposalView) {
 	why := s.why(r)
 	off := func(label, id, whose string) *pageAction {
@@ -69,6 +72,8 @@ func (s *Server) offs(r *http.Request, p ledger.Proposal, v *proposalView) {
 		switch {
 		case p.Path == ledger.PathNone:
 			v.ApproveOff = &pageAction{Label: "Approve", ID: "approve-why", Why: "For a person to make where the rule is kept: nothing to approve here"}
+		case v.Own && p.Agent:
+			v.ApproveOff = off("Approve", "approve-why", "Your agent proposed this: someone else approves it.")
 		case v.Own:
 			v.ApproveOff = off("Approve", "approve-why", "You proposed this: someone else approves it.")
 		case v.Done:
@@ -85,9 +90,9 @@ func (s *Server) offs(r *http.Request, p ledger.Proposal, v *proposalView) {
 		case slices.Contains(closing, p.State):
 			v.DropOff = off("Close it", "drop-why", "Admins only")
 		case p.State == ledger.StateReady:
-			v.DropOff = off("Drop it", "drop-why", "Approvers only")
+			v.DropOff = off("Drop it", "drop-why", "Approvers and admins only")
 		case p.State == ledger.StateProposed || p.State == ledger.StateApproved:
-			v.DropOff = off("Drop it", "drop-why", "Editors only")
+			v.DropOff = off("Drop it", "drop-why", "Editors and approvers only")
 		}
 	}
 	if p.TaskID == 0 && s.role(r) < editor {

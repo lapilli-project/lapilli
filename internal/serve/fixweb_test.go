@@ -137,9 +137,11 @@ func TestFixTextsTranslated(t *testing.T) {
 		}
 	}
 	for _, x := range []string{"Now", "As proposed", "As the change left it", "As it was before", "The version before", "This version",
+		"Too long to set beside each other line by line: the rule as the change left it, taken out, then as it was before.",
 		"I have read the backtest", "I have read the change and its evidence", "Approvers only", "Editors only", "Admins only",
 		"Changes are off: lapilli serve was started without --changes", "For a person to make where the rule is kept: nothing to approve here",
-		"You proposed this: someone else approves it.", "You approved it: it waits for another approver.", "Ask to undo it", "Drop it", "Close it",
+		"You proposed this: someone else approves it.", "Your agent proposed this: someone else approves it.", "You approved it: it waits for another approver.",
+		"Approvers and admins only", "Editors and approvers only", "Ask to undo it", "Drop it", "Close it",
 		"Make it a task", "Approve", "Pause changes", "Resume changes", "Lapilli", "a change recipe", "No proposals yet.", "No proposal matches these filters.",
 		"A rule's page proposes a change to it, with its backtest; Lapilli proposes of itself with --changes, after the weekly digest."} {
 		texts[x] = true
