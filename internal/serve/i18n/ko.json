@@ -1183,7 +1183,7 @@
  "Excused": "면제",
  "Firings that caught an incident, of all its firings.": "전체 발화 중 인시던트를 잡은 발화의 비율이에요.",
  "From %s, beside the version before": "%s부터, 직전 버전과 비교",
- "Human cost": "사람 비용",
+ "Human cost": "알림 부담",
  "Incidents it fired for, as they began; nearly caught, those it would have caught with a for or a threshold a little different.": "인시던트가 시작될 때 이 규칙이 울려서 잡은 인시던트예요. 근접 탐지는 for 나 임곗값이 조금 달랐다면 잡았을 인시던트예요.",
  "Its last 84 days, a cell a day; the same numbers are in the table below": "최근 84일, 하루에 한 칸이에요. 같은 숫자는 아래 표에 있어요",
  "Its proposals are on the Proposals tab.": "변경 제안은 변경 제안 탭에 있어요.",
@@ -1233,5 +1233,7 @@
  "rule tab|Firings": "발화",
  "rule tab|Versions": "버전",
  "rule tab|Proposals": "변경 제안",
- "rule tab|Activity": "활동"
+ "rule tab|Activity": "활동",
+ "better": "좋아짐",
+ "worse": "나빠짐"
 }

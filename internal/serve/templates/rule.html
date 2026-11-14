@@ -18,19 +18,19 @@
 <p class="period">{{if eq .Period 1}}{{t "The last week, from %s." (day $loc .From)}}{{else}}{{t "The last %d weeks, from %s." .Period (day $loc .From)}}{{end}}{{if .Panel.Beside}} {{t "Beside each number, how it changed from as long before."}}{{end}}</p>
 {{with .Panel}}<dl class="panel">
 <div><dt><details class="def"><summary>{{t "Precision"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "Firings that caught an incident, of all its firings."}}</p></details></dt>
-<dd class="big">{{.Precision}}{{with .PrecisionBy}}{{if .On}} <span class="delta {{.Class}}">{{t "%s pt" .Text}}</span>{{end}}{{end}}</dd>
+<dd class="big">{{.Precision}}{{template "delta" .PrecisionBy}}</dd>
 <dd>{{if .Firings}}{{t "%d of %d caught something" $v.White .Firings}}{{else}}{{t "no firing"}}{{end}}</dd></div>
 <div><dt><details class="def"><summary>{{t "Firings"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "The times it fired and was judged; those a quiet window excused are counted apart."}}</p></details></dt>
-<dd class="big">{{.Firings}}{{with .FiringsBy}}{{if .On}} <span class="delta {{.Class}}">{{.Text}}</span>{{end}}{{end}}</dd>
+<dd class="big">{{.Firings}}{{template "delta" .FiringsBy}}</dd>
 <dd>{{t "%d caught nothing, %d excused" .Black .Excused}}</dd></div>
 <div><dt><details class="def"><summary>{{t "Incidents caught"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "Incidents it fired for, as they began; nearly caught, those it would have caught with a for or a threshold a little different."}}</p></details></dt>
-<dd class="big">{{.Incidents}}{{with .IncidentsBy}}{{if .On}} <span class="delta {{.Class}}">{{.Text}}</span>{{end}}{{end}}</dd>
+<dd class="big">{{.Incidents}}{{template "delta" .IncidentsBy}}</dd>
 <dd>{{t "%d nearly caught" .Near}}</dd></div>
 <div><dt><details class="def"><summary>{{t "Human cost"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "Notifications sent for it, as the alert manager sent them, and of them those that came while people slept and off hours."}}</p></details></dt>
-<dd class="big">{{if .Notified}}{{.Notifications}}{{with .NotificationsBy}}{{if .On}} <span class="delta {{.Class}}">{{.Text}}</span>{{end}}{{end}}{{else}}–{{end}}</dd>
+<dd class="big">{{if .Notified}}{{.Notifications}}{{template "delta" .NotificationsBy}}{{else}}–{{end}}</dd>
 <dd>{{if .Notified}}{{t "notifications; %d while people slept, %d off hours" .Asleep .OffHours}}{{else}}{{t "no notification kept"}}{{end}}</dd></div>
 <div><dt><details class="def"><summary>{{t "Backtest"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "Of its firings, the share alike in its replay and in what really fired: how far its stones can be taken as they are."}}</p></details></dt>
-<dd class="big">{{.Backtest}}{{with .BacktestBy}}{{if .On}} <span class="delta {{.Class}}">{{t "%s pt" .Text}}</span>{{end}}{{end}}</dd>
+<dd class="big">{{.Backtest}}{{template "delta" .BacktestBy}}</dd>
 <dd>{{if .Either}}{{t "alike with what really fired, of %d" .Either}}{{else}}{{t "not set beside what really fired"}}{{end}}</dd></div>
 </dl>{{end}}
 
@@ -200,3 +200,7 @@ lands here, and is shown the way to it. */}}
 </section>{{end}}
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
+
+{{/* A number's change from as long before, signed, in points for a share,
+and, when it is better or worse, said so in words as well as colour. */}}
+{{define "delta"}}{{if .On}} <span class="delta{{with .Class}} {{.}}{{end}}">{{if .Pt}}{{t "%s pt" .Text}}{{else}}{{.Text}}{{end}}{{if eq .Class "better"}} {{t "better"}}{{else if eq .Class "worse"}} {{t "worse"}}{{end}}</span>{{end}}{{end}}

@@ -1233,5 +1233,7 @@
  "rule tab|Firings": "Disparos",
  "rule tab|Versions": "Versiones",
  "rule tab|Proposals": "Propuestas",
- "rule tab|Activity": "Actividad"
+ "rule tab|Activity": "Actividad",
+ "better": "mejor",
+ "worse": "peor"
 }

@@ -214,11 +214,12 @@ type ruleFact struct {
 }
 
 // moved is how a number changed from as long a span before, when On. Up
-// says more is better: the sign's colour follows it, beside its text.
+// says more is better: its colour and its word follow it. Pt says it is a
+// share's, in points.
 type moved struct {
-	On bool
-	By int
-	Up bool
+	On     bool
+	By     int
+	Up, Pt bool
 }
 
 // Text is the change, signed: +3, −2, ±0.
@@ -441,7 +442,7 @@ func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []versi
 				return err
 			}
 			if b, ok := cs[name]; ok && b.Either() > 0 {
-				p.BacktestBy = moved{On: true, By: c.Share - int(math.Round(b.Share()*100)), Up: true}
+				p.BacktestBy = moved{On: true, By: c.Share - int(math.Round(b.Share()*100)), Up: true, Pt: true}
 			}
 		}
 	}
@@ -455,7 +456,7 @@ func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []versi
 func besides(l ruleLine, was ledger.Span) (precision, firings, incidents moved) {
 	now, okNow := sharePct(l.White, l.Firings)
 	then, okThen := sharePct(was.White, was.Firings)
-	return moved{On: okNow && okThen, By: now - then, Up: true}, moved{On: true, By: l.Firings - was.Firings},
+	return moved{On: okNow && okThen, By: now - then, Up: true, Pt: true}, moved{On: true, By: l.Firings - was.Firings},
 		moved{On: true, By: l.Incidents - was.Caught, Up: true}
 }
 

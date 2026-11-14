@@ -271,3 +271,39 @@ func TestRulePageCached(t *testing.T) {
 		t.Errorf("%d pages cached, want 5", n)
 	}
 }
+
+// TestMoved: a change is signed; better or worse as more is better or not,
+// in colour and in words, in each language; no change, neither.
+func TestMoved(t *testing.T) {
+	for _, c := range []struct {
+		m           moved
+		text, class string
+	}{
+		{moved{On: true, By: 3, Up: true}, "+3", "better"}, {moved{On: true, By: 3}, "+3", "worse"},
+		{moved{On: true, By: -2, Up: true}, "−2", "worse"}, {moved{On: true, By: -2}, "−2", "better"}, {moved{On: true, Up: true}, "±0", ""},
+	} {
+		if c.m.Text() != c.text || c.m.Class() != c.class {
+			t.Errorf("%+v: %s %q, want %s %q", c.m, c.m.Text(), c.m.Class(), c.text, c.class)
+		}
+	}
+	s := besideServer(t)
+	for lang, want := range map[string][]string{
+		"en": {`<span class="delta worse">&#43;2 worse</span>`, `<span class="delta">±0</span>`},
+		"ko": {`<span class="delta worse">&#43;2 나빠짐</span>`, `<summary>알림 부담 <span`},
+		"es": {`<span class="delta worse">&#43;2 peor</span>`},
+	} {
+		r := httptest.NewRequest(http.MethodGet, "/rules/Fresh?weeks=1", nil)
+		r.Header.Set("Accept-Language", lang)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		for _, x := range want {
+			if !strings.Contains(w.Body.String(), x) {
+				t.Errorf("%s: no %s", lang, x)
+			}
+		}
+	}
+	// A share's, in points: its precision, none caught then or now.
+	if _, body, _ := get(t, s.Handler(), "/rules/Errors?weeks=1"); !strings.Contains(body, `<dd class="big">0% <span class="delta">±0 pt</span></dd>`) {
+		t.Error("/rules/Errors?weeks=1: its precision's change isn't in points")
+	}
+}

@@ -1233,5 +1233,7 @@
  "rule tab|Firings": "発火",
  "rule tab|Versions": "バージョン",
  "rule tab|Proposals": "変更提案",
- "rule tab|Activity": "アクティビティ"
+ "rule tab|Activity": "アクティビティ",
+ "better": "改善",
+ "worse": "悪化"
 }
