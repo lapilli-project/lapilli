@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-11-15
+
+Many at once, and ways in: the fifth phase of docs/design/ui.md, the last of
+its plan. The rules list and the firings write to many rules or firings at
+once, as each would one by one; a firing's labels are filters, and its day
+is drawn by the hour; the overview's tiles and charts lead to what makes
+their numbers; an incident's page draws when the rules fired around it.
+Pages are worked out a few at a time, and two "This was real" at once
+write one incident. Still no script, against WCAG 2.2 AA, in four
+languages. No ledger schema change; the API and MCP answer as they did.
+
 ### Added
 
 - **Many at once** (docs/design/ui.md). The rules list's table is one
