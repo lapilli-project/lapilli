@@ -165,12 +165,16 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (gt $n 1) (not $s.ledger.postgres.secret.name) }}
 {{- fail (printf "serve.replicas: %d replicas share one ledger only in Postgres (serve.ledger.postgres.secret): a SQLite ledger is one pod's file, on a volume one node mounts. Keep serve.replicas at 1, or move the ledger to Postgres first (lapilli ledger copy)" $n) }}
 {{- end }}
-{{- if and (gt $n 1) $in.oidc.issuer (not (or $in.sessionKeySecret.name $in.sessionKeySecret.create)) }}
-{{- fail "serve.replicas: replicas sign people in with one session key, from a Secret they all mount: give serve.signIn.sessionKeySecret.name, or leave sessionKeySecret.create on" }}
+{{- if and (gt $n 1) $in.oidc.issuer (not $in.sessionKeySecret.name) }}
+{{- fail "serve.replicas: replicas sign people in with one session key, from a Secret they all mount: give serve.signIn.sessionKeySecret.name, a Secret of your own. One the chart makes is made again by a render that can't look it up (helm template, Argo CD, Flux), and a pod started after would sign with another key" }}
 {{- end }}
 {{- $u := $s.podDisruptionBudget.maxUnavailable }}
 {{- $ok := false }}
-{{- if kindIs "string" $u }}{{ $ok = regexMatch "^[1-9][0-9]?%$" $u }}{{ else }}{{ $ok = and (ge (int $u) 1) (lt (int $u) $n) }}{{ end }}
+{{- if kindIs "string" $u }}
+{{- /* Kubernetes rounds a percentage of pods up: one replica at least
+must stay. */}}
+{{- if regexMatch "^[1-9][0-9]?%$" $u }}{{ $p := int (trimSuffix "%" $u) }}{{ $ok = lt (div (add (mul $n $p) 99) 100) $n }}{{ end }}
+{{- else }}{{ $ok = and (ge (int $u) 1) (lt (int $u) $n) }}{{ end }}
 {{- if and (gt $n 1) (not $ok) }}
 {{- fail (printf "serve.podDisruptionBudget.maxUnavailable: a number of pods, 1 to %d, or a percentage below 100%%, so that one replica at least stays" (sub $n 1)) }}
 {{- end }}

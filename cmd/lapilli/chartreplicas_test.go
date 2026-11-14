@@ -39,6 +39,13 @@ func TestChartReplicas(t *testing.T) {
 		{append(serveValues, "--set", "serve.replicas=0"), "serve.replicas: 1 or more"},
 		{append(pg, "--set", "serve.replicas=3", "--set", "serve.podDisruptionBudget.maxUnavailable=3"), "so that one replica at least stays"},
 		{append(pg, "--set", "serve.replicas=3", "--set", "serve.podDisruptionBudget.maxUnavailable=100%"), "so that one replica at least stays"},
+		// Kubernetes rounds a percentage of pods up.
+		{append(pg, "--set", "serve.replicas=2", "--set", "serve.podDisruptionBudget.maxUnavailable=51%"), "so that one replica at least stays"},
+		{append(pg, "--set", "serve.replicas=3", "--set", "serve.podDisruptionBudget.maxUnavailable=67%"), "so that one replica at least stays"},
+		// The chart's own key is made again by a render that can't look it
+		// up: replicas need a Secret of their own.
+		{append(pg, "--set", "serve.replicas=2", "--set", "serve.signIn.oidc.issuer=https://idp.example.com", "--set", "serve.signIn.oidc.clientId=lapilli",
+			"--set", "serve.externalURL=https://lapilli.example.com", "--set", "serve.roles.viewers={ana@example.com}"), "give serve.signIn.sessionKeySecret.name"},
 		{append(pg, "--set", "serve.replicas=2", "--set", "serve.signIn.oidc.issuer=https://idp.example.com", "--set", "serve.signIn.oidc.clientId=lapilli",
 			"--set", "serve.externalURL=https://lapilli.example.com", "--set", "serve.roles.viewers={ana@example.com}",
 			"--set", "serve.signIn.sessionKeySecret.create=false"), "replicas sign people in with one session key"},
@@ -46,6 +53,16 @@ func TestChartReplicas(t *testing.T) {
 		out, err := helmTemplate(t, c.values...)
 		if err == nil || !strings.Contains(out, c.says) {
 			t.Errorf("%v: %v, want refused saying %q\n%s", c.values[len(serveValues):], err, c.says, out)
+		}
+	}
+	for _, ok := range [][]string{
+		append(pg, "--set", "serve.replicas=2", "--set", "serve.podDisruptionBudget.maxUnavailable=50%"),
+		append(pg, "--set", "serve.replicas=3", "--set", "serve.podDisruptionBudget.maxUnavailable=66%"),
+		append(pg, "--set", "serve.replicas=2", "--set", "serve.signIn.oidc.issuer=https://idp.example.com", "--set", "serve.signIn.oidc.clientId=lapilli",
+			"--set", "serve.externalURL=https://lapilli.example.com", "--set", "serve.roles.viewers={ana@example.com}", "--set", "serve.signIn.sessionKeySecret.name=lapilli-key"),
+	} {
+		if out, err := helmTemplate(t, ok...); err != nil {
+			t.Errorf("%v: %v\n%s", ok[len(serveValues):], err, out)
 		}
 	}
 	for _, one := range [][]string{serveValues, pg} {

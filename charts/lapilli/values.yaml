@@ -300,7 +300,8 @@ serve:
     # the chart makes (FULLNAME-session-key, kept across upgrades and when
     # the release is uninstalled). A GitOps tool that renders the chart
     # without the cluster (Argo CD, Flux) would make a new key each render,
-    # signing everyone out: give it a Secret of your own.
+    # signing everyone out: give it a Secret of your own. With
+    # serve.replicas above 1, a Secret of your own (name) is required.
     sessionKeySecret:
       name: ""
       key: session-key
