@@ -8,6 +8,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -34,7 +35,7 @@ func (s *Server) lead(ctx context.Context, failed chan<- error) {
 		// The rules' history and the on-call turns, as a process does at
 		// start, by the one that leads.
 		if err := s.history(ctx); err != nil {
-			if ctx.Err() == nil {
+			if !steppingDown(ctx, err) {
 				failed <- err
 			}
 			return
@@ -80,10 +81,46 @@ func (s *Server) lead(ctx context.Context, failed chan<- error) {
 	wg.Wait()
 }
 
+// steppingDown says an error of the leader's work is its lease ending, not
+// a failure: the replica follows again, and goes on serving.
+func steppingDown(ctx context.Context, err error) bool {
+	return ctx.Err() != nil || !ledger.Leads(ctx) || errors.Is(err, ledger.ErrNotLeading) || errors.Is(err, context.Canceled)
+}
+
 // still says whether the leader's work may go on with ctx: not done, and
 // this replica still leads by its lease's clock. Looked at before each of
-// the jobs, so one that no longer leads starts none of them.
-func still(ctx context.Context) bool { return ctx.Err() == nil && ledger.Leads(ctx) }
+// the jobs, so one that no longer leads starts none of them; and each is a
+// step of the work, which the lease is renewed only while one comes
+// (stuck).
+func (s *Server) still(ctx context.Context) bool {
+	s.stepped()
+	return ctx.Err() == nil && ledger.Leads(ctx)
+}
+
+// stepped notes that the leader's work made a step: a job begun, a run's
+// piece.
+func (s *Server) stepped() { s.stepAt.Store(time.Now().UnixNano()) }
+
+// idle notes that the leader's work waits for its next round, done with
+// this one.
+func (s *Server) idle() {
+	s.stepAt.Store(0)
+	s.rounded.Store(time.Now().Unix())
+}
+
+// stuck says the leader's work has made no step for longer than a step may
+// take: a run's replay is cut off at --timeout, a write at the ledger's own
+// deadline. Its lease is then given up, for a replica whose work isn't.
+func (s *Server) stuck() bool {
+	b := s.stepAt.Load()
+	return b != 0 && time.Since(time.Unix(0, b)) > s.stepWithin()
+}
+
+// stepWithin is how long one step of the leader's work may take: twice the
+// longer of --timeout and a write's deadline, and a minute.
+func (s *Server) stepWithin() time.Duration {
+	return 2*max(s.cfg.Timeout, 5*time.Minute) + time.Minute
+}
 
 // keepUp keeps what a follower shows that the leader's loops keep in
 // theirs, until ctx is done: what the rules say, and Grafana's data
@@ -225,12 +262,17 @@ func (st sharedStatus) args() []any {
 // posted is the context what was sent is noted with, once sent: with
 // replicas, noted even when the lease ended meanwhile, or serve stops, as
 // a notice sent is, so that the leader that follows doesn't send it again.
-func (s *Server) posted(ctx context.Context) context.Context {
+// Within postedWithin all the same: a database that stopped answering holds
+// it no longer.
+func (s *Server) posted(ctx context.Context) (context.Context, context.CancelFunc) {
 	if !s.l.Shared() {
-		return ctx
+		return ctx, func() {}
 	}
-	return ledger.WithoutLease(context.WithoutCancel(ctx))
+	return context.WithTimeout(ledger.WithoutLease(context.WithoutCancel(ctx)), postedWithin)
 }
+
+// postedWithin is how long noting what was sent waits at most.
+const postedWithin = 30 * time.Second
 
 // leadership says which replica leads, for /readyz.
 func (s *Server) leadership() string {
@@ -246,10 +288,13 @@ func (s *Server) leadership() string {
 }
 
 // askRejudge asks the leader, this replica or another, to judge every
-// firing again, and to look at its jobs now.
+// firing again, and to look at its jobs now: with replicas, through the
+// ledger alone, which says whether it was done (rejudged), and not in this
+// replica, which may lead later, when it has been.
 func (s *Server) askRejudge(ctx context.Context) {
-	s.rejudge.Store(true)
-	if err := s.l.AskRejudge(ctx); err != nil {
+	if !s.l.Shared() {
+		s.rejudge.Store(true)
+	} else if err := s.l.AskRejudge(ctx); err != nil {
 		s.log.Error("asking the replica that leads to judge again", "err", err)
 	}
 	s.poke()
@@ -295,21 +340,34 @@ func (s *Server) shareLimits() {
 	}
 }
 
-// joinable refuses to join replicas already running with a sign-in of
-// lapilli's own and no --session-key-file: each replica would sign its
-// sessions with a key of its own, and a person signed in on one would not
-// be on the next.
+// joinable says this replica lives, before it serves, with the
+// fingerprint of the key it signs sessions with, and refuses to join live
+// replicas that sign them with another: a session one signs is none on the
+// next, and a sign-in begun on one fails on the other. Two started at once
+// each write their own first: one at least sees the other. Without
+// --session-key-file each process makes a key of its own, so a second
+// replica is refused, and the first warns.
 func (s *Server) joinable(ctx context.Context) error {
-	if !s.l.Shared() || s.in == nil || s.in.oidc == nil || s.cfg.SessionKey != "" {
+	if !s.l.Shared() {
 		return nil
 	}
-	n, err := s.l.Others(ctx)
+	signs := ""
+	if s.in != nil && s.in.oidc != nil {
+		signs = s.in.signs
+	}
+	n, err := s.l.Join(ctx, signs)
 	if err != nil {
 		return err
 	}
 	if n > 0 {
-		return fmt.Errorf("--session-key-file: %d other replicas of lapilli serve share this ledger, and each signs its sessions with a key of its own without one: give them all the same key", n)
+		why := "give them all the same key"
+		if s.cfg.SessionKey == "" {
+			why = "without --session-key-file, each process makes a key of its own: give them all the same one"
+		}
+		return fmt.Errorf("--session-key-file: %d other replicas of lapilli serve sharing this ledger sign sessions with another key: %s", n, why)
 	}
-	s.log.Warn("sessions are signed with a key made for this process: a second replica sharing the ledger is refused until both have --session-key-file")
+	if signs != "" && s.cfg.SessionKey == "" {
+		s.log.Warn("sessions are signed with a key made for this process: a second replica sharing the ledger is refused until each has the same --session-key-file")
+	}
 	return nil
 }

@@ -43,6 +43,7 @@ func (s *Server) work(ctx context.Context) {
 		next = false
 		s.ready.Store(true)
 		s.status.set("")
+		s.idle()
 		select {
 		case <-ctx.Done():
 			return
@@ -57,7 +58,7 @@ func (s *Server) work(ctx context.Context) {
 // jobs does each job in turn, each only while this replica still leads
 // (still): one whose lease ended starts none of them.
 func (s *Server) jobs(ctx context.Context, run bool) {
-	if !still(ctx) {
+	if !s.still(ctx) {
 		return
 	}
 	// Taken before the settings are read, so a change saved in between is
@@ -73,14 +74,14 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	}
 	// Spans a quiet window left to judge again, should its write have been
 	// cut short.
-	if !still(ctx) {
+	if !s.still(ctx) {
 		s.rejudge.Store(rejudge || s.rejudge.Load())
 		return
 	}
 	if err := s.l.JudgePending(ctx, o); err != nil {
 		s.fail("judging again", err)
 	}
-	if rejudge && still(ctx) {
+	if rejudge && s.still(ctx) {
 		s.status.set("judging every firing again with the new settings")
 		err := s.l.JudgeAll(ctx, o, func(done float64) {
 			s.status.Lock()
@@ -102,7 +103,7 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	} else if rejudge {
 		s.rejudge.Store(true)
 	}
-	if !still(ctx) {
+	if !s.still(ctx) {
 		return
 	}
 	if s.cfg.Incidents != "" {
@@ -136,7 +137,7 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		s.status.errWhat, s.status.err = "deploys", errDeploysUnread.Error()
 		s.status.Unlock()
 	}
-	if !still(ctx) {
+	if !s.still(ctx) {
 		return
 	}
 	// With no rules to replay, there is nothing to run for but --impact:
@@ -146,13 +147,13 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		if err := s.keepBegan(ctx); err != nil {
 			s.fail("a run", err)
 		}
-		if s.checking() && still(ctx) {
+		if s.checking() && s.still(ctx) {
 			if err := s.checkReplay(ctx); err != nil {
 				s.fail("setting the replay beside what really fired", err)
 			}
 		}
 	}
-	if !still(ctx) {
+	if !s.still(ctx) {
 		return
 	}
 	if len(s.dests()) > 0 {
@@ -163,12 +164,12 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 			s.fail("notifying", err)
 		}
 	}
-	if s.replaying() && still(ctx) {
+	if s.replaying() && s.still(ctx) {
 		if err := s.reviewChanges(ctx, o); err != nil {
 			s.fail("reviewing a change to the rules", err)
 		}
 	}
-	if !still(ctx) {
+	if !s.still(ctx) {
 		return
 	}
 	fresh, err := s.digest(ctx, o)
@@ -177,29 +178,29 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	}
 	// After a digest worked out afresh, the next round: the two don't hold
 	// the runs up for twice --timeout.
-	if s.replaying() && !fresh && still(ctx) {
+	if s.replaying() && !fresh && s.still(ctx) {
 		if err := s.nearLater(ctx, o); err != nil {
 			s.fail("near misses", err)
 		}
-		if still(ctx) {
+		if s.still(ctx) {
 			if err := s.proposeWeekly(ctx); err != nil {
 				s.fail("proposing changes to the rules", err)
 			}
 		}
 	}
-	if !still(ctx) {
+	if !s.still(ctx) {
 		return
 	}
 	if err := s.carryOut(ctx); err != nil {
 		s.fail("changing the rules", err)
 	}
-	if !still(ctx) {
+	if !s.still(ctx) {
 		return
 	}
 	if err := s.reports(ctx, o); err != nil {
 		s.fail("a scheduled report", err)
 	}
-	if !still(ctx) {
+	if !s.still(ctx) {
 		return
 	}
 	if err := s.prune(ctx); err != nil {
@@ -278,6 +279,7 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 	}
 	piece := 24 * time.Hour
 	for cursor.Before(now) && ctx.Err() == nil {
+		s.stepped()
 		from := cursor.Add(-settle).Truncate(s.cfg.Step)
 		to := cursor.Add(piece)
 		if to.After(now) {
@@ -1687,7 +1689,13 @@ func (s *Server) postDigest(ctx context.Context, in digestIn, week string, from,
 	// Claimed, among the replicas: two leaders for a moment post it once.
 	// Whoever claims it posts it, within the minute its claim outlasts.
 	claim := "digest-post:" + week
-	if ok, err := s.l.ClaimOnce(ctx, claim, 2*time.Minute); err != nil || !ok {
+	if ok, err := s.l.ClaimOnce(ctx, claim, digestClaim); err != nil || !ok {
+		if err == nil {
+			// Another replica, the leader before this one, holds the claim:
+			// tried again once it is over, not an hour from now.
+			s.slackTried = time.Time{}
+			time.AfterFunc(digestClaim+time.Second, s.poke)
+		}
 		return err
 	}
 	if sent, err := s.l.Meta(ctx, "digest-sent"); err != nil || sent == week {
@@ -1697,11 +1705,18 @@ func (s *Server) postDigest(ctx context.Context, in digestIn, week string, from,
 	defer cancel()
 	if err := report.Slack(sctx, s.cfg.Slack, text); err != nil {
 		s.l.AddRun(ctx, ledger.Run{Kind: "digest", Started: s.now(), Finished: s.now(), From: from, To: to, Error: err.Error()})
-		s.l.Unclaim(s.posted(ctx), claim)
+		pctx, pcancel := s.posted(ctx)
+		defer pcancel()
+		s.l.Unclaim(pctx, claim)
 		return err
 	}
-	return s.l.SetMeta(s.posted(ctx), "digest-sent", week)
+	pctx, pcancel := s.posted(ctx)
+	defer pcancel()
+	return s.l.SetMeta(pctx, "digest-sent", week)
 }
+
+// digestClaim is how long a replica holds the digest's post for itself.
+const digestClaim = 2 * time.Minute
 
 // digestReport is the week's report, with the suggestions worked out for it.
 func (s *Server) digestReport(ctx context.Context, from, to time.Time, o verdict.Options) (*verdict.Report, error) {

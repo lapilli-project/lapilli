@@ -51,7 +51,9 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	assets, _ := fs.Sub(files, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", immutable(http.FileServerFS(assets))))
-	s.checks(mux)
+	// The UI's port answers anyone, whatever the host: its readiness says
+	// no more than ok.
+	s.checks(mux, false)
 
 	page := func(name string, view func(*http.Request) (any, error)) http.HandlerFunc {
 		h := s.cached(func(w http.ResponseWriter, r *http.Request) {
@@ -227,7 +229,11 @@ func (s *Server) busy(ctx context.Context) (func(), error) {
 // checks are the health checks and the metrics, which a second listener
 // (--metrics-listen) serves alone: a NetworkPolicy can then let Prometheus
 // reach them, and no more.
-func (s *Server) checks(mux *http.ServeMux) {
+//
+// detail says, on the port Prometheus alone reaches, which replica leads:
+// this one's id and its host, the leader's and its version, the term, how
+// many live. The UI's port, which answers anyone, says ok.
+func (s *Server) checks(mux *http.ServeMux, detail bool) {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok\n") })
 	// Ready once the ledger has a run recorded: at once after a restart,
 	// so a Prometheus that is slow, or down, doesn't keep the UI (and the
@@ -258,6 +264,16 @@ func (s *Server) checks(mux *http.ServeMux) {
 			http.Error(w, "can't reach the ledger's database", http.StatusServiceUnavailable)
 			return
 		}
+		if s.l.WritesWait(ctx) {
+			// Its last write waited too long for the writers' turn: another
+			// replica's write holds it, cut off.
+			http.Error(w, "writes wait on the ledger's writers' turn", http.StatusServiceUnavailable)
+			return
+		}
+		if !detail {
+			io.WriteString(w, "ok\n")
+			return
+		}
 		io.WriteString(w, "ok\n"+s.leadership()+"\n")
 	})
 	mux.HandleFunc("GET /metrics", s.metrics)
@@ -266,7 +282,7 @@ func (s *Server) checks(mux *http.ServeMux) {
 // MetricsHandler is the health checks and the metrics alone.
 func (s *Server) MetricsHandler() http.Handler {
 	mux := http.NewServeMux()
-	s.checks(mux)
+	s.checks(mux, true)
 	return s.hosts(s.fresh(headers(gzipped(mux))))
 }
 

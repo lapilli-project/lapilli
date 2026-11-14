@@ -286,6 +286,11 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Fprintf(w, "# HELP lapilli_serve_leader Whether this replica leads, running what is run once among the replicas sharing the ledger: 1 or 0.\n# TYPE lapilli_serve_leader gauge\nlapilli_serve_leader %d\n", lead)
 		fmt.Fprintf(w, "# HELP lapilli_serve_replicas The replicas of lapilli serve that share the ledger and live, this one among them, as last counted.\n# TYPE lapilli_serve_replicas gauge\nlapilli_serve_replicas %d\n", s.l.Replicas())
+		// How the leader's work goes: a leader whose step runs past
+		// stepWithin gives its lease up.
+		if at := s.rounded.Load(); lead == 1 && at > 0 {
+			fmt.Fprintf(w, "# HELP lapilli_serve_jobs_round_timestamp_seconds When the leader last finished a round of its jobs, in Unix seconds.\n# TYPE lapilli_serve_jobs_round_timestamp_seconds gauge\nlapilli_serve_jobs_round_timestamp_seconds %d\n", at)
+		}
 	}
 	// Read with the file each run, not kept with the ledger's pages: by
 	// the replica that reads it.

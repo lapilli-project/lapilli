@@ -398,6 +398,10 @@ type Server struct {
 	// incidentsRead is set once this replica read the incidents file: its
 	// metric is the leader's.
 	incidentsRead atomic.Bool
+	// stepAt is when the leader's work began its current step, in Unix
+	// nanoseconds, 0 while it waits for its next round; rounded, when it
+	// last finished a round, in Unix seconds.
+	stepAt, rounded atomic.Int64
 }
 
 // status is what the worker is doing, for the UI: a text to be shown in
@@ -742,7 +746,7 @@ func (s *Server) Run(ctx context.Context) error {
 		defer wg.Done()
 		// What runs once among the replicas, while this one leads; at
 		// once with SQLite.
-		s.l.Elect(ctx, ledger.Elected{Version: s.cfg.Version, Status: s.publishedStatus}, func(lctx context.Context) { s.lead(lctx, failed) })
+		s.l.Elect(ctx, ledger.Elected{Version: s.cfg.Version, Status: s.publishedStatus, Stuck: s.stuck}, func(lctx context.Context) { s.lead(lctx, failed) })
 	}()
 	if shared {
 		wg.Add(1)

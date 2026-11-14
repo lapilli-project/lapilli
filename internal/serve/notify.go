@@ -82,6 +82,7 @@ func (s *Server) sendDue(ctx context.Context, dest string, now time.Time) error 
 		}
 	}
 	var last int64
+	round := time.Now()
 	for i := 0; i < 50; i++ {
 		// Read through a reader, or claimed: sent only while this process
 		// still holds the ledger, and leads, or a process that took it
@@ -95,8 +96,10 @@ func (s *Server) sendDue(ctx context.Context, dest string, now time.Time) error 
 			// Claimed for this sender alone, one at a time: another, a
 			// leader for a moment beside this one, takes another or none.
 			// Sent well within the claim, or not at all.
+			// Now, as of the round's now: a claim lasts from when it is
+			// taken, however long the round has run.
 			claimed := time.Now()
-			x, ok, err := s.l.Claim(ctx, dest, now, last)
+			x, ok, err := s.l.Claim(ctx, dest, now.Add(claimed.Sub(round)), last)
 			if err != nil || !ok {
 				return err
 			}
@@ -122,12 +125,18 @@ func (s *Server) sendDue(ctx context.Context, dest string, now time.Time) error 
 		s.status.Unlock()
 		if err != nil {
 			s.log.Warn("a notice wasn't sent; it is tried again later", "event", n.Event, "to", n.Dest, "attempts", n.Attempts+1, "err", err)
-			if err := s.l.Failed(s.posted(ctx), n.ID, err.Error()); err != nil || (dest != teamDest && dest != reportDest) {
+			pctx, pcancel := s.posted(ctx)
+			err := s.l.Failed(pctx, n.ID, err.Error())
+			pcancel()
+			if err != nil || (dest != teamDest && dest != reportDest) {
 				return err
 			}
 			continue
 		}
-		if err := s.l.Sent(s.posted(ctx), n.ID); err != nil {
+		pctx, pcancel := s.posted(ctx)
+		err = s.l.Sent(pctx, n.ID)
+		pcancel()
+		if err != nil {
 			return err
 		}
 	}

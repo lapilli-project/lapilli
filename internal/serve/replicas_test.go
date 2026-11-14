@@ -21,7 +21,6 @@ import (
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/ledger/ledgertest"
 	"lapilli.dev/internal/prom"
-	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -641,29 +640,30 @@ func TestReplicasReadyNeedsTheDatabase(t *testing.T) {
 }
 
 // Replicas sign people in with one key: a second with a sign-in of its own
-// and no --session-key-file is refused while another lives, and one with
-// the key joins.
+// and no --session-key-file (a key of its own) is refused while one that
+// signs with the key lives, and one with the key joins.
 func TestReplicasSignInNeedsOneKey(t *testing.T) {
-	f := sharedLedger(t)
 	quickReplicas(t)
-	rc := newSink(t)
-	a := replica(t, f, rc, nil)
+	s, _ := oidcServer(t, nil)
+	if !s.l.Shared() {
+		t.Skip("the ledgers are SQLite's")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go a.l.Elect(ctx, ledger.Elected{Version: "test"}, func(c context.Context) { <-c.Done() })
-	until(t, 5*time.Second, "the first replica lives", func() bool { return a.l.Replicas() == 1 })
-	s, _ := oidcServer(t, nil)
+	go s.l.Elect(ctx, ledger.Elected{Version: "test"}, func(c context.Context) { <-c.Done() })
+	until(t, 5*time.Second, "the first replica lives", func() bool { return s.l.Replicas() == 1 })
 	cfg := s.cfg
-	cfg.LedgerURLFile, cfg.OIDC = f, &signin.OIDC{Issuer: s.cfg.OIDC.Issuer, ClientID: "lapilli", SecretFile: s.cfg.OIDC.SecretFile, Claims: s.cfg.OIDC.Claims}
+	cfg.OIDC = freshOIDC(s)
 	key := cfg.SessionKey
 	cfg.SessionKey = ""
 	if b, err := New(context.Background(), cfg, &history{}, s.log); err == nil {
 		b.Close()
-		t.Fatal("a second replica, each signing sessions with a key of its own, joined")
+		t.Fatal("a second replica, signing sessions with a key of its own, joined")
 	} else if !strings.Contains(err.Error(), "--session-key-file") {
 		t.Errorf("refused, saying: %v", err)
 	}
 	cfg.SessionKey = key
+	cfg.OIDC = freshOIDC(s)
 	b, err := New(context.Background(), cfg, &history{}, s.log)
 	if err != nil {
 		t.Fatalf("with the key: %v", err)

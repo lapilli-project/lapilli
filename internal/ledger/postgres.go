@@ -226,8 +226,11 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 		return err
 	}
 	if w.shared {
-		if _, err := c.Exec(ctx, "SET idle_in_transaction_session_timeout = '"+idleInWrite+"'"); err != nil {
-			return err
+		for _, s := range []string{"SET idle_in_transaction_session_timeout = '" + idleInWrite + "'",
+			"SET lock_timeout = '" + strconv.FormatInt(turnWithin.Milliseconds(), 10) + "ms'"} {
+			if _, err := c.Exec(ctx, s); err != nil {
+				return err
+			}
 		}
 	}
 	// So that the server ends this session about a minute after its client
@@ -275,18 +278,7 @@ func (w *pgWriter) connected(ctx context.Context, c *pgx.Conn) error {
 		}
 	}
 	if !took {
-		h, err := w.holder(ctx, c)
-		if err != nil {
-			return err
-		}
-		if w.known {
-			w.lose()
-			return ErrLockLost
-		}
-		if h == nil {
-			h = &LockedError{}
-		}
-		return h
+		return w.refused(ctx, c)
 	}
 	if w.known {
 		var n int64
@@ -407,20 +399,79 @@ func (w *pgWriter) joined(ctx context.Context, c *pgx.Conn) error {
 		return err
 	}
 	if !took {
-		h, err := w.holder(ctx, c)
-		if err != nil {
-			return err
-		}
-		if w.known {
-			w.lose()
-			return ErrLockLost
-		}
-		if h == nil {
-			h = &LockedError{}
-		}
-		return h
+		return w.refused(ctx, c)
 	}
 	return nil
+}
+
+// refused says why a connection didn't get the lock. A process holds it
+// that refuses this one (for a replica, a process alone; for a process
+// alone, any): once this process knew the ledger, it is lost
+// (ErrLockLost), else refused (*LockedError). Or no holder refuses it, and
+// a session waits for the lock alone, which keeps any session from taking
+// it shared after: no lapilli waits so (each asks, and is refused), so it
+// holds nothing and wrote nothing, and the ledger isn't taken for lost;
+// this connection is refused (*LockWaitError), and the next is tried anew.
+func (w *pgWriter) refused(ctx context.Context, c *pgx.Conn) error {
+	h, err := w.holder(ctx, c)
+	if err != nil {
+		return err
+	}
+	if h == nil || (w.shared && !h.Alone) {
+		if q, err := w.waiter(ctx, c); err != nil || q != nil {
+			if err != nil {
+				return err
+			}
+			return q
+		}
+		// Held by none that refuses this one, and waited for by none now:
+		// whoever stood in the way went. The next connection tries again.
+		return fmt.Errorf("%w: the ledger's lock wasn't taken, and no process holds it alone: tried again at the next connection", ErrConnect)
+	}
+	if w.known {
+		w.lose()
+		return ErrLockLost
+	}
+	return h
+}
+
+// LockWaitError is a session that waits for the ledger's lock alone, which
+// no lapilli does: while it waits, no replica's session can take the lock
+// shared, so no replica connects, and none starts.
+type LockWaitError struct{ LockedError }
+
+func (e *LockWaitError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Postgres session %d", e.PID)
+	if e.Role != "" {
+		fmt.Fprintf(&b, " (role %s", strconv.Quote(e.Role))
+		if e.From != "" {
+			b.WriteString(", from " + e.From)
+		}
+		b.WriteString(")")
+	}
+	b.WriteString(" waits to hold the ledger's lock alone, which no lapilli does, and until it goes no replica can take it shared: " +
+		"end that session, and revoke CONNECT on the database from PUBLIC (docs/design/replicas.md)")
+	return b.String()
+}
+
+// waiter is a session waiting for the lock alone, nil for none.
+func (w *pgWriter) waiter(ctx context.Context, c *pgx.Conn) (*LockWaitError, error) {
+	var q LockWaitError
+	var since *time.Time
+	err := c.QueryRow(ctx, `SELECT l.pid, coalesce(a.usename, ''), coalesce(a.application_name, ''), coalesce(host(a.client_addr), ''), a.backend_start
+		FROM pg_locks l LEFT JOIN pg_stat_activity a ON a.pid = l.pid
+		WHERE l.locktype = 'advisory' AND NOT l.granted AND l.mode = 'ExclusiveLock' AND l.objsubid = 2
+			AND l.classid::bigint = $1 AND l.objid::bigint = $2
+			AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
+		ORDER BY a.backend_start LIMIT 1`, int64(lockClass), int64(w.key)).Scan(&q.PID, &q.Role, &q.App, &q.From, &since)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if since != nil {
+		q.Since = *since
+	}
+	return &q, err
 }
 
 // holder is the session that holds the lock, nil when none does.
@@ -719,7 +770,8 @@ func rebind(q string) (string, int) {
 // stopped it.
 func connectError(err error, secrets []string, cause error) error {
 	var locked *LockedError
-	if errors.As(err, &locked) || errors.Is(err, ErrLockLost) || errors.Is(err, ErrConnect) {
+	var waits *LockWaitError
+	if errors.As(err, &locked) || errors.As(err, &waits) || errors.Is(err, ErrLockLost) || errors.Is(err, ErrConnect) {
 		return err
 	}
 	var ce *pgconn.ConnectError
@@ -1080,13 +1132,43 @@ func (l *Ledger) migrateStep(ctx context.Context, m map[int]string, ns []int, wa
 		return false, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(?, ?)", int32(writeClass), l.pg.key); err != nil {
-		return false, err
-	}
+	// schema_version locked, which needs the ledger's own privileges: an
+	// advisory lock only while there is none, to make an empty schema a
+	// ledger once.
 	var have int
 	var made bool
 	if err := tx.QueryRowContext(ctx, "SELECT to_regclass('schema_version') IS NOT NULL").Scan(&made); err != nil {
 		return false, err
+	}
+	if !made {
+		if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(?, ?)", int32(writeClass), l.pg.key); err != nil {
+			return false, err
+		}
+		// Asked of the catalog afresh: to_regclass answers from what this
+		// session cached when it connected, which waiting for an advisory
+		// lock doesn't make it read again, and another replica may have made
+		// the ledger meanwhile.
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.tables
+			WHERE table_schema = current_schema() AND table_name = 'schema_version')`).Scan(&made); err != nil {
+			return false, err
+		}
+	}
+	if made {
+		if _, err := tx.ExecContext(ctx, "LOCK TABLE schema_version IN SHARE ROW EXCLUSIVE MODE"); err != nil {
+			return false, err
+		}
+		// And the writers' turn, where replicas have one: a write of an
+		// older replica's waits for the migration, and finds it (turn).
+		var turn bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.tables
+			WHERE table_schema = current_schema() AND table_name = 'replica_gens')`).Scan(&turn); err != nil {
+			return false, err
+		}
+		if turn {
+			if _, err := tx.ExecContext(ctx, "SELECT 1 FROM replica_gens WHERE one = 1 FOR UPDATE"); err != nil {
+				return false, err
+			}
+		}
 	}
 	if made {
 		if err := tx.QueryRowContext(ctx, "SELECT version FROM schema_version").Scan(&have); err != nil {

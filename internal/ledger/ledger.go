@@ -48,7 +48,9 @@ type Ledger struct {
 	warnings []string
 	// mu is held by every write, start to commit: in a ledger replicas
 	// share, the writers' turn across them is taken too (replicas.go).
-	mu sync.Mutex
+	// heldSince is when it was taken, in Unix nanoseconds, 0 while free.
+	mu        sync.Mutex
+	heldSince atomic.Int64
 	// gen counts writes, for whoever caches what it reads: in a ledger
 	// replicas share, the other replicas' too, as Refresh reads them.
 	gen atomic.Int64
@@ -419,6 +421,8 @@ func (l *Ledger) writeAside(ctx context.Context, f func(*txn) error) error {
 func (l *Ledger) writeTx(ctx context.Context, counted bool, f func(*txn) error) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.heldSince.Store(time.Now().UnixNano())
+	defer l.heldSince.Store(0)
 	if l.pg != nil && !unbounded(ctx) {
 		// No write waits on a server that stopped answering longer than
 		// writeWithin, holding up every other.
@@ -442,6 +446,7 @@ func (l *Ledger) writeTx(ctx context.Context, counted bool, f func(*txn) error) 
 	}
 	t := &txn{Tx: tx, ctx: ctx, rules: map[string]int64{}, series: map[seriesKey]int64{}, d: l.d}
 	var before, after gens
+	var nonce int64
 	if l.rep != nil {
 		if before, err = l.rep.turn(ctx, tx); err != nil {
 			tx.Rollback()
@@ -465,7 +470,13 @@ func (l *Ledger) writeTx(ctx context.Context, counted bool, f func(*txn) error) 
 		return err
 	}
 	if l.rep != nil && t.counts(counted) {
-		if after, err = l.rep.bump(ctx, t); err != nil {
+		if after, nonce, err = l.rep.bump(ctx, t); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	if ld != nil && ld.r == l.rep && l.rep != nil {
+		if err := l.rep.arm(t, ld); err != nil {
 			tx.Rollback()
 			return err
 		}
@@ -475,6 +486,9 @@ func (l *Ledger) writeTx(ctx context.Context, counted bool, f func(*txn) error) 
 		return ErrNotLeading
 	}
 	if err := tx.Commit(); err != nil {
+		if notLeading(err) {
+			return ErrNotLeading
+		}
 		return err
 	}
 	if t.recorded {
@@ -523,7 +537,7 @@ func (l *Ledger) writeTx(ctx context.Context, counted bool, f func(*txn) error) 
 		if t.idsChanged {
 			l.rep.idsAt.Store(after.ids)
 		}
-		l.rep.wrote(before, after)
+		l.rep.wrote(before, after, nonce)
 	}
 	return nil
 }

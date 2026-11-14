@@ -62,28 +62,47 @@ func within(t *testing.T, d time.Duration, what string, ok func() bool) {
 }
 
 // Replicas started at once on an empty schema make the ledger once, each
-// migration under the writers' turn: none finds tables half made.
+// migration under the lock that keeps migrations apart: none finds tables
+// half made, nor takes the ledger for none it made. And on a ledger a
+// lapilli of 0.34 made, without the replicas' tables, they make those once.
 func TestReplicasStartTogether(t *testing.T) {
-	u := replicaURL(t)
-	var wg sync.WaitGroup
-	errs := make([]error, 4)
-	for i := range errs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			l, err := OpenPostgres(context.Background(), u, time.UTC)
-			if err == nil {
-				l.Close()
+	ctx := context.Background()
+	together := func(t *testing.T, u string) {
+		t.Helper()
+		var wg sync.WaitGroup
+		errs := make([]error, 8)
+		for i := range errs {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				l, err := OpenPostgres(ctx, u, time.UTC)
+				if err == nil {
+					l.Close()
+				}
+				errs[i] = err
+			}()
+		}
+		wg.Wait()
+		for i, err := range errs {
+			if err != nil {
+				t.Errorf("replica %d: %v", i, err)
 			}
-			errs[i] = err
-		}()
-	}
-	wg.Wait()
-	for i, err := range errs {
-		if err != nil {
-			t.Errorf("replica %d: %v", i, err)
 		}
 	}
+	for range 5 {
+		together(t, replicaURL(t))
+	}
+	u := replicaURL(t)
+	l, err := OpenPostgresAlone(ctx, u, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.w.ExecContext(ctx, `DROP TABLE replica_lease, replica_gens, replica_signals, replica_log, replica_weeks, replica_members,
+		replica_buckets, replica_once, replica_fence CASCADE; DROP FUNCTION replica_fenced()`); err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+	together(t, u)
 }
 
 // A write that reads what it changes reads what no other replica's write

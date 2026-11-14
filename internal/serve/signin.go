@@ -3,7 +3,9 @@ package serve
 import (
 	"cmp"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -45,6 +47,10 @@ type signIn struct {
 	used expiring
 	// warned is set once a refusal was logged.
 	warned atomic.Bool
+	// signs is a fingerprint of the key sessions are signed with, which
+	// replicas compare (joinable): it gives the key away no more than a
+	// session signed with it does.
+	signs string
 }
 
 // expiring is a set of keys, each until a time, of at most max.
@@ -182,12 +188,23 @@ func mergeOut(a, b map[string]int64, now, keep int64, most int) map[string]int64
 // time, is one they signed out of, here or at another process sharing the
 // ledger. The record is read again only when the ledger counts a change to
 // it.
+//
+// With replicas, a record that can't be read is taken for one that ends
+// the session: another replica may have kept a sign-out this one hasn't
+// read, and a copy of the cookie would be taken. A process alone has read
+// every sign-out it kept, and goes on with its own.
 func (s *Server) signedOut(ctx context.Context, user string, made int64) bool {
 	keep := s.in.cookies.MaxAge.Milliseconds()
-	if n, err := s.l.MetaCount(ctx, metaSignedOut); err == nil && s.in.out.stale(n) {
-		if raw, err := s.l.Meta(ctx, metaSignedOut); err == nil {
+	n, err := s.l.MetaCount(ctx, metaSignedOut)
+	if err == nil && s.in.out.stale(n) {
+		var raw string
+		if raw, err = s.l.Meta(ctx, metaSignedOut); err == nil {
 			s.in.out.load(raw, n, s.now().UnixMilli(), keep)
 		}
+	}
+	if err != nil && s.l.Shared() {
+		s.log.Warn("who signed out couldn't be read: the session is refused", "err", err)
+		return true
 	}
 	return s.in.out.ended(user, made)
 }
@@ -246,6 +263,9 @@ func (s *Server) newSignIn(ctx context.Context) error {
 		if in.cookies, err = signin.NewCookies(key, strings.HasPrefix(strings.ToLower(s.cfg.ExternalURL), "https://"), maxAge, now); err != nil {
 			return err
 		}
+		m := hmac.New(sha256.New, key)
+		m.Write([]byte("lapilli: the key the replicas sign sessions with"))
+		in.signs = hex.EncodeToString(m.Sum(nil)[:16])
 		o.Redirect = strings.TrimRight(s.cfg.ExternalURL, "/") + "/auth/callback"
 		if o.Client == nil {
 			o.Client = signin.Client(nil)
@@ -599,7 +619,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, errBadState)
 		return
 	}
-	if !s.in.used.add(l.State, l.Until, s.now().Unix()) || !s.usedOnce(r.Context(), l.State, l.Until) {
+	if !s.in.used.add(l.State, l.Until, s.now().Unix()) {
 		s.oops(w, r, errBadState)
 		return
 	}
@@ -622,6 +642,14 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		s.log.Warn("refused a sign-in", "err", err)
 		s.oops(w, r, forbiddenSignIn{errSignInFails})
+		return
+	}
+	// Used once among the replicas, once the provider signed someone in:
+	// a state that signs no one in writes nothing to the ledger, and a
+	// callback replayed to another replica is refused there, as the
+	// provider refuses its code again.
+	if !s.usedOnce(r.Context(), l.State, l.Until) {
+		s.oops(w, r, errBadState)
 		return
 	}
 	if id.User = s.signedName(id.User); id.User == "anonymous" {

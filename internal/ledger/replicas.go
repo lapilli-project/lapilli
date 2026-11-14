@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	mrand "math/rand/v2"
 	"os"
 	"slices"
 	"sync"
@@ -22,15 +23,20 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
-// writeClass is the first key of the writers' turn, a transaction's
-// advisory lock ("lapw"); the second is the ledger's schema's, as the
-// lock's. Every write takes it first, on every replica: writes take turns
-// across them as they do in one process, and a write that reads what it
-// then changes (a count against a limit, a value merged) reads what no
-// other write is changing.
+// The writers' turn is replica_gens's one row, locked FOR UPDATE: every
+// write takes it first, on every replica, so writes take turns across them
+// as they do in one process, and a write that reads what it then changes (a
+// count against a limit, a value merged) reads what no other write is
+// changing. A row lock needs the ledger's own privileges on the table: a
+// role that may only connect can't hold it, as it could an advisory lock.
+//
+// writeClass is the first key of the advisory lock that makes an empty
+// schema a ledger once, before schema_version is there to lock ("lapw");
+// the second is the schema's, as the lock's.
 const writeClass = 0x6c617077
 
 // replicaTables are the replicas' own, made with the ledger in Postgres
@@ -49,11 +55,19 @@ CREATE TABLE IF NOT EXISTS replica_gens (
 	gen BIGINT NOT NULL DEFAULT 0,
 	every_week BIGINT NOT NULL DEFAULT 0,
 	recorded BIGINT NOT NULL DEFAULT 0,
-	ids BIGINT NOT NULL DEFAULT 0,
+	ids BIGINT NOT NULL DEFAULT 0
+);
+INSERT INTO replica_gens (one) VALUES (1) ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS replica_signals (
+	one BIGINT PRIMARY KEY CHECK (one = 1),
 	wake BIGINT NOT NULL DEFAULT 0,
 	rejudge BIGINT NOT NULL DEFAULT 0
 );
-INSERT INTO replica_gens (one) VALUES (1) ON CONFLICT DO NOTHING;
+INSERT INTO replica_signals (one) VALUES (1) ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS replica_log (
+	gen BIGINT PRIMARY KEY,
+	nonce BIGINT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS replica_weeks (
 	week BIGINT PRIMARY KEY,
 	gen BIGINT NOT NULL
@@ -76,6 +90,29 @@ CREATE TABLE IF NOT EXISTS replica_once (
 	key TEXT COLLATE "C" PRIMARY KEY,
 	until BIGINT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS replica_once_until ON replica_once (until);
+ALTER TABLE replica_members ADD COLUMN IF NOT EXISTS signs TEXT COLLATE "C" NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS replica_fence (
+	holder TEXT COLLATE "C" NOT NULL,
+	term BIGINT NOT NULL
+);
+CREATE OR REPLACE FUNCTION replica_fenced() RETURNS trigger LANGUAGE plpgsql SET search_path FROM CURRENT AS $fenced$
+BEGIN
+	PERFORM 1 FROM replica_lease WHERE holder = NEW.holder AND term = NEW.term AND until > clock_timestamp() FOR SHARE;
+	IF NOT FOUND THEN
+		RAISE EXCEPTION 'this replica no longer leads: another does what is done once' USING ERRCODE = 'LP001';
+	END IF;
+	DELETE FROM replica_fence WHERE ctid = NEW.ctid;
+	RETURN NULL;
+END
+$fenced$;
+DO $made$ BEGIN
+	IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'replica_fenced' AND tgrelid = to_regclass('replica_fence')) THEN
+		CREATE CONSTRAINT TRIGGER replica_fenced AFTER INSERT ON replica_fence DEFERRABLE INITIALLY DEFERRED
+			FOR EACH ROW EXECUTE FUNCTION replica_fenced();
+	END IF;
+END
+$made$;
 `
 
 // How the replicas share a ledger. Replaced in tests.
@@ -104,23 +141,53 @@ var (
 	liveFor   = 10 * time.Second
 	// claimFor is how long a notice claimed is its sender's alone.
 	claimFor = 2 * time.Minute
+	// turnWithin is how long a replica's write, and every statement in it,
+	// waits for a lock (lock_timeout): the writers' turn above all, which no
+	// write of the ledger's own holds for more than a second or so. One
+	// that waits longer fails, and the replica says it isn't ready.
+	turnWithin = 30 * time.Second
+	// sweepEvery is how often the leader sweeps what is over: replicas gone
+	// a day, claims and sign-ins' states past their time.
+	sweepEvery = time.Minute
 )
+
+// sideWithin is how long a statement on the side pool (a claim, a notice
+// noted, a bucket, a use once, a wake) waits on the database at most,
+// whoever asked: two connections serve them all.
+var sideWithin = 30 * time.Second
+
+// side bounds a statement of the side pool's.
+func side(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, sideWithin)
+}
+
+// ErrTurnWaited is a write that waited longer than turnWithin for the
+// writers' turn, or a lock in it: a write of another replica's holds it,
+// cut off in the middle, until the server ends its session.
+var ErrTurnWaited = errors.New("a write waited too long for the ledger's writers' turn, which another replica's write holds")
 
 // ReplicaTimings are how the replicas share a ledger: how long a lease
 // lasts, how often it is renewed and tried again, how much sooner than its
 // end the leader stops, how often a follower asks for it, reads what the
-// others wrote and says it lives, how long one is taken to live after, and
-// how long a notice claimed is its sender's.
+// others wrote and says it lives, how long one is taken to live after, how
+// long a notice claimed is its sender's, how long a write waits for a lock
+// (zero: as it is), and how often what is over is swept (zero: as it is).
 type ReplicaTimings struct {
-	Lease, Renew, Retry, Margin, Campaign, Refresh, Beat, Live, Claim time.Duration
+	Lease, Renew, Retry, Margin, Campaign, Refresh, Beat, Live, Claim, Turn, Sweep time.Duration
 }
 
 // SetReplicaTimings sets them, for tests, giving what they were. Not while
-// a replica runs.
+// a replica runs: a ledger opened after takes them.
 func SetReplicaTimings(t ReplicaTimings) ReplicaTimings {
-	was := ReplicaTimings{leaseFor, renewEvery, retryEvery, leaseMargin, campaignEvery, refreshEvery, beatEvery, liveFor, claimFor}
+	was := ReplicaTimings{leaseFor, renewEvery, retryEvery, leaseMargin, campaignEvery, refreshEvery, beatEvery, liveFor, claimFor, turnWithin, sweepEvery}
 	leaseFor, renewEvery, retryEvery, leaseMargin = t.Lease, t.Renew, t.Retry, t.Margin
 	campaignEvery, refreshEvery, beatEvery, liveFor, claimFor = t.Campaign, t.Refresh, t.Beat, t.Live, t.Claim
+	if t.Turn > 0 {
+		turnWithin = t.Turn
+	}
+	if t.Sweep > 0 {
+		sweepEvery = t.Sweep
+	}
 	return was
 }
 
@@ -139,17 +206,29 @@ type replicas struct {
 	id, host string
 	started  time.Time
 	key      func() int32
+	pw       *pgWriter
 
 	mu      sync.Mutex
 	version string
 	status  func() []byte
+	// signs is a fingerprint of the key this replica signs sessions with,
+	// "" for none (Join).
+	signs string
 
-	// seen is replica_gens as last read, under refreshMu; readAt, when
-	// that read began. idsAt is the generation the caches of ids hold to.
-	refreshMu sync.Mutex
-	seen      gens
-	readAt    time.Time
-	idsAt     atomic.Int64
+	// seen is replica_gens as last read or written, and nonce, the nonce
+	// logged with its generation; said, replica_signals; both under
+	// applyMu, held for memory alone. flight is the refresh under way, under
+	// flightMu. idsAt is the generation the caches of ids hold to.
+	applyMu  sync.Mutex
+	seen     gens
+	nonce    int64
+	said     signals
+	flightMu sync.Mutex
+	flight   *flight
+	// stuck is set while the last write waited longer than turnWithin for
+	// the writers' turn, until one takes it.
+	stuck atomic.Bool
+	idsAt atomic.Int64
 	// woken is told when another replica asks the leader to look at its
 	// jobs now.
 	woken chan struct{}
@@ -163,9 +242,12 @@ type replicas struct {
 
 // gens is replica_gens: the generation of the ledger, the last in which
 // every week's firings may have changed, how often recorded rules may
-// have, the last in which ids were deleted or renamed, and how often the
-// leader was asked to wake and to judge again.
-type gens struct{ gen, every, recorded, ids, wake, rejudge int64 }
+// have, and the last in which ids were deleted or renamed.
+type gens struct{ gen, every, recorded, ids int64 }
+
+// signals is replica_signals: how often the leader was asked to wake, and
+// to judge again. A row of their own, which a write's turn doesn't hold.
+type signals struct{ wake, rejudge int64 }
 
 // newReplicas readies what a replica keeps of the others, with pools of
 // its own to the ledger's database.
@@ -188,7 +270,7 @@ func newReplicas(cfg pgx.ConnConfig, secrets []string, pw *pgWriter) (*replicas,
 	if host == "" {
 		host = "lapilli"
 	}
-	r := &replicas{lease: pool(1), side: pool(2), host: host, id: host + "-" + hex.EncodeToString(b), started: time.Now(),
+	r := &replicas{lease: pool(1), side: pool(2), host: host, id: host + "-" + hex.EncodeToString(b), started: time.Now(), pw: pw,
 		woken: make(chan struct{}, 1), key: func() int32 {
 			pw.mu.Lock()
 			defer pw.mu.Unlock()
@@ -227,40 +309,87 @@ func (l *Ledger) Shared() bool { return l.rep != nil }
 
 // turn takes the writers' turn for a write's transaction, across the
 // replicas, and reads the generations as they stand under it: what no
-// other write changes until this one is done.
+// other write changes until this one is done. One that waits longer than
+// turnWithin gives up (ErrTurnWaited), and says so for readiness.
 func (r *replicas) turn(ctx context.Context, tx *sql.Tx) (gens, error) {
 	var g gens
-	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(?, ?)", int32(writeClass), r.key()); err != nil {
+	err := tx.QueryRowContext(ctx, "SELECT gen, every_week, recorded, ids FROM replica_gens WHERE one = 1 FOR UPDATE").
+		Scan(&g.gen, &g.every, &g.recorded, &g.ids)
+	switch {
+	case lockWaited(err):
+		r.stuck.Store(true)
+		return g, fmt.Errorf("%w (%v)", ErrTurnWaited, turnWithin)
+	case err != nil:
 		return g, err
 	}
-	err := tx.QueryRowContext(ctx, "SELECT gen, every_week, recorded, ids, wake, rejudge FROM replica_gens").
-		Scan(&g.gen, &g.every, &g.recorded, &g.ids, &g.wake, &g.rejudge)
-	return g, err
+	r.stuck.Store(false)
+	// Read after the turn, in a statement of its own, which sees what a
+	// migration that held it committed: a newer lapilli's schema is not
+	// this one's to write.
+	var version int
+	if err := tx.QueryRowContext(ctx, "SELECT version FROM schema_version").Scan(&version); err != nil {
+		return g, err
+	}
+	if want, err := sqliteFiles(); err == nil && version > want {
+		r.pw.loseFor(fmt.Errorf("%w (schema %d; this one knows %d): stopping", ErrNewer, version, want))
+		return g, ErrNewer
+	}
+	return g, nil
+}
+
+// lockWaited says a statement gave up waiting for a lock (lock_timeout).
+func lockWaited(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && pe.Code == "55P03"
+}
+
+// WritesWait says this replica's last write waited longer than it may for
+// the writers' turn, and it still can't take the turn within ctx: a
+// replica that can't write isn't ready. It is asked again each time, as
+// one not ready is sent no write that would find the turn free again.
+func (l *Ledger) WritesWait(ctx context.Context) bool {
+	if l.rep == nil || !l.rep.stuck.Load() {
+		return false
+	}
+	tx, err := l.w.BeginTx(ctx, nil)
+	if err != nil {
+		return true
+	}
+	defer tx.Rollback()
+	if _, err := l.rep.turn(ctx, tx); err != nil {
+		return true
+	}
+	return l.rep.stuck.Load()
 }
 
 // bump counts a write in the generations, in its transaction, for the
 // other replicas to read: the weeks whose firings it changed, or all of
 // them, recorded rules, ids deleted or renamed. It gives the write's
-// generation.
-func (r *replicas) bump(ctx context.Context, t *txn) (gens, error) {
+// generation, and the nonce logged with it (replica_log): a replica that
+// saw a generation whose nonce is no longer the ledger's (a failover lost
+// the commit, and another took its number) takes everything for changed.
+func (r *replicas) bump(ctx context.Context, t *txn) (gens, int64, error) {
 	var g gens
-	err := t.QueryRowContext(ctx, `UPDATE replica_gens SET gen = gen + 1,
-			every_week = CASE WHEN ? = 1 THEN gen + 1 ELSE every_week END,
-			recorded = recorded + ?,
-			ids = CASE WHEN ? = 1 THEN gen + 1 ELSE ids END
-		RETURNING gen, every_week, recorded, ids, wake, rejudge`, t.all, t.recorded, t.idsChanged).
-		Scan(&g.gen, &g.every, &g.recorded, &g.ids, &g.wake, &g.rejudge)
+	nonce := mrand.Int64()
+	err := t.QueryRowContext(ctx, `WITH g AS (UPDATE replica_gens SET gen = gen + 1,
+				every_week = CASE WHEN ? = 1 THEN gen + 1 ELSE every_week END,
+				recorded = recorded + ?,
+				ids = CASE WHEN ? = 1 THEN gen + 1 ELSE ids END
+			WHERE one = 1 RETURNING gen, every_week, recorded, ids),
+		n AS (INSERT INTO replica_log (gen, nonce) SELECT gen, CAST(? AS BIGINT) FROM g ON CONFLICT (gen) DO UPDATE SET nonce = excluded.nonce)
+		SELECT gen, every_week, recorded, ids FROM g`, t.all, t.recorded, t.idsChanged, nonce).
+		Scan(&g.gen, &g.every, &g.recorded, &g.ids)
 	if err != nil || len(t.weeks) == 0 || t.all {
-		return g, err
+		return g, nonce, err
 	}
 	weeks := slices.Compact(slices.Sorted(slices.Values(t.weeks)))
 	b, err := json.Marshal(weeks)
 	if err != nil {
-		return g, err
+		return g, nonce, err
 	}
 	_, err = t.ExecContext(ctx, `INSERT INTO replica_weeks (week, gen) SELECT CAST(value AS BIGINT), ? FROM jsonb_array_elements_text(CAST(? AS jsonb))
 		ON CONFLICT (week) DO UPDATE SET gen = excluded.gen`, g.gen, string(b))
-	return g, err
+	return g, nonce, err
 }
 
 // counts says whether a write is counted in the generations: one a page
@@ -269,73 +398,151 @@ func (t *txn) counts(counted bool) bool {
 	return counted || t.count || len(t.weeks) > 0 || t.all || t.recorded || t.idsChanged
 }
 
-// wrote is a write committed at generation g, from before: what was seen
-// moves on with it when nothing else was written in between (what was is
-// read by the next Refresh).
-func (r *replicas) wrote(before, after gens) {
-	r.refreshMu.Lock()
-	defer r.refreshMu.Unlock()
+// wrote is a write committed at generation after, from before, its bump's
+// nonce: what was seen moves on with it when nothing else was written in
+// between (what was is read by the next Refresh). Memory alone: it is
+// called under the writer's mu, and waits on no read of the database.
+func (r *replicas) wrote(before, after gens, nonce int64) {
+	r.applyMu.Lock()
+	defer r.applyMu.Unlock()
 	if r.seen == before {
-		r.seen = after
+		r.seen, r.nonce = after, nonce
 	}
+}
+
+// refreshWithin is how long a refresh waits on the database at most,
+// whoever asked for it.
+var refreshWithin = 5 * time.Second
+
+// flight is a refresh under way: when it began, and, once done, how it
+// went.
+type flight struct {
+	began time.Time
+	done  chan struct{}
+	err   error
 }
 
 // Refresh reads what the other replicas wrote since this one last did,
 // before it answers a request with what it keeps: the generation pages are
 // cached by moves on, the weeks whose firings changed are taken for
 // changed, and the ids cached are read again if any was deleted or
-// renamed. A refresh that began after it was asked for is as good, and is
-// waited for. Nothing to do but in a ledger serve's replicas share.
+// renamed. One refresh is under way at a time, each within refreshWithin;
+// one that began after this was asked is as good, and is waited for, as
+// long as ctx lets. Nothing to do but in a ledger serve's replicas share.
 func (l *Ledger) Refresh(ctx context.Context) error {
 	r := l.rep
 	if r == nil {
 		return nil
 	}
 	asked := time.Now()
-	r.refreshMu.Lock()
-	defer r.refreshMu.Unlock()
-	if r.readAt.After(asked) {
-		return nil
+	for {
+		r.flightMu.Lock()
+		f := r.flight
+		switch {
+		case f != nil && !f.began.Before(asked):
+			// Begun since this was asked: its answer is this one's.
+		case f != nil && !f.over():
+			// Begun before: what it reads may miss a write this asks for.
+			// Waited for, then another.
+			r.flightMu.Unlock()
+			select {
+			case <-f.done:
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		default:
+			f = &flight{began: time.Now(), done: make(chan struct{})}
+			r.flight = f
+			go l.fly(f)
+		}
+		r.flightMu.Unlock()
+		select {
+		case <-f.done:
+			return f.err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
-	at := time.Now()
+}
+
+func (f *flight) over() bool {
+	select {
+	case <-f.done:
+		return true
+	default:
+		return false
+	}
+}
+
+// fly is a refresh: what the ledger says, read within refreshWithin, then
+// taken in, in memory alone.
+func (l *Ledger) fly(f *flight) {
+	defer close(f.done)
+	r := l.rep
+	ctx, cancel := context.WithTimeout(context.Background(), refreshWithin)
+	defer cancel()
+	r.applyMu.Lock()
+	was, wasNonce := r.seen, r.nonce
+	r.applyMu.Unlock()
 	var g gens
+	var sg signals
 	var version int
-	if err := l.r.QueryRowContext(ctx, "SELECT gen, every_week, recorded, ids, wake, rejudge, (SELECT version FROM schema_version) FROM replica_gens").
-		Scan(&g.gen, &g.every, &g.recorded, &g.ids, &g.wake, &g.rejudge, &version); err != nil {
-		return err
+	var nonce sql.NullInt64
+	if f.err = l.r.QueryRowContext(ctx, `SELECT g.gen, g.every_week, g.recorded, g.ids, s.wake, s.rejudge, (SELECT version FROM schema_version),
+			(SELECT nonce FROM replica_log WHERE gen = ?)
+		FROM replica_gens g, replica_signals s`, was.gen).
+		Scan(&g.gen, &g.every, &g.recorded, &g.ids, &sg.wake, &sg.rejudge, &version, &nonce); f.err != nil {
+		return
 	}
 	if want, err := sqliteFiles(); err == nil && version > want {
 		// A newer lapilli migrated the ledger under this one.
 		l.pg.loseFor(fmt.Errorf("%w (schema %d; this one knows %d): stopping", ErrNewer, version, want))
-		return ErrNewer
+		f.err = ErrNewer
+		return
 	}
-	was := r.seen
-	if g.gen != was.gen {
-		var weeks []int64
-		all := g.gen < was.gen || g.every > was.gen
-		if !all {
-			rows, err := l.r.QueryContext(ctx, "SELECT week FROM replica_weeks WHERE gen > ?", was.gen)
-			if err != nil {
-				return err
-			}
-			for rows.Next() {
-				var w int64
-				if err := rows.Scan(&w); err != nil {
-					rows.Close()
-					return err
-				}
-				weeks = append(weeks, w)
-			}
-			rows.Close()
-			if err := rows.Err(); err != nil {
-				return err
-			}
+	// The generation this replica saw is no longer the ledger's: a
+	// failover lost commits, and others may have been made since at the
+	// same generations. Every week is taken for changed.
+	diverged := was.gen > 0 && (g.gen < was.gen || !nonce.Valid || nonce.Int64 != wasNonce)
+	var weeks []int64
+	if g.gen != was.gen && !diverged && g.every <= was.gen {
+		rows, err := l.r.QueryContext(ctx, "SELECT week FROM replica_weeks WHERE gen > ?", was.gen)
+		if err != nil {
+			f.err = err
+			return
 		}
-		if g.ids != r.idsAt.Load() || g.gen < was.gen {
+		for rows.Next() {
+			var w int64
+			if err := rows.Scan(&w); err != nil {
+				rows.Close()
+				f.err = err
+				return
+			}
+			weeks = append(weeks, w)
+		}
+		rows.Close()
+		if f.err = rows.Err(); f.err != nil {
+			return
+		}
+	}
+	var gNonce sql.NullInt64
+	if g.gen != was.gen || diverged {
+		// The nonce now at the generation read, for the next refresh.
+		if f.err = l.r.QueryRowContext(ctx, "SELECT nonce FROM replica_log WHERE gen = ?", g.gen).Scan(&gNonce); f.err != nil && !errors.Is(f.err, sql.ErrNoRows) {
+			return
+		}
+		f.err = nil
+	}
+	r.applyMu.Lock()
+	defer r.applyMu.Unlock()
+	if g.gen != was.gen || diverged {
+		all := diverged || g.every > was.gen
+		if g.ids != r.idsAt.Load() || diverged {
 			l.forgetIDs()
 			r.idsAt.Store(g.ids)
 		}
-		if g.recorded != was.recorded || g.gen < was.gen {
+		if g.recorded != was.recorded || diverged {
 			l.recorded.Add(1)
 		}
 		// Taken for changed before the generation moves, as a write does:
@@ -353,15 +560,18 @@ func (l *Ledger) Refresh(ctx context.Context) error {
 		}
 		l.changed.Unlock()
 		l.gen.Add(1)
+		// A write of this replica's own, since the read, keeps what it saw.
+		if diverged || g.gen > r.seen.gen || r.seen == was {
+			r.seen, r.nonce = g, gNonce.Int64
+		}
 	}
-	if g.wake != was.wake {
+	if sg.wake != r.said.wake {
 		select {
 		case r.woken <- struct{}{}:
 		default:
 		}
 	}
-	r.seen, r.readAt = g, at
-	return nil
+	r.said = sg
 }
 
 // forgetIDs drops the rules' and alerts' ids cached: another replica
@@ -456,7 +666,8 @@ func (l *Ledger) Leading() bool {
 
 // fenced checks, in a write made with a lease's context, that the lease is
 // still this replica's in the database: a leader cut off, or stopped for
-// longer than its lease, whose lease another took, writes nothing.
+// longer than its lease, whose lease another took, writes nothing. As it
+// begins, and again as it commits (arm).
 func (r *replicas) fenced(t *txn, ld *leadership) error {
 	if !ld.valid() {
 		return ErrNotLeading
@@ -470,6 +681,23 @@ func (r *replicas) fenced(t *txn, ld *leadership) error {
 		return ErrNotLeading
 	}
 	return nil
+}
+
+// arm has the lease checked again as the write commits: a row that a
+// deferred trigger (replica_fenced) checks the lease for, holding it FOR
+// SHARE for the commit alone, so that another replica's take, which waits
+// for no write while it is open, waits for this commit, and one that came
+// first refuses it. A leader whose host was suspended past its lease, or
+// whose commit was held up, commits nothing after another's term began.
+func (r *replicas) arm(t *txn, ld *leadership) error {
+	_, err := t.ExecContext(t.ctx, "INSERT INTO replica_fence (holder, term) VALUES (?, ?)", r.id, ld.term)
+	return err
+}
+
+// notLeading says a commit was refused by the lease's check (arm).
+func notLeading(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && pe.Code == "LP001"
 }
 
 // Leader is the replica that leads, as last read.
@@ -512,15 +740,33 @@ func (l *Ledger) Replicas() int {
 	return max(1, int(l.rep.live.Load()))
 }
 
-// Others is how many other replicas live, as the ledger says now: 0 for a
-// ledger no replicas share.
-func (l *Ledger) Others(ctx context.Context) (int, error) {
+// Join says this replica lives, signing sessions with a key whose
+// fingerprint is signs ("" for none), before it serves, and gives how many
+// other live replicas sign them with another: a session one signs is none
+// to the other. It writes its own first, then reads the others', so that of
+// two started at once one at least sees the other.
+func (l *Ledger) Join(ctx context.Context, signs string) (int, error) {
+	ctx, cancel := side(ctx)
+	defer cancel()
 	if l.rep == nil {
 		return 0, nil
 	}
+	r := l.rep
+	r.mu.Lock()
+	r.signs = signs
+	version := r.version
+	r.mu.Unlock()
+	if _, err := r.side.ExecContext(ctx, `INSERT INTO replica_members (id, host, version, started, seen, signs) VALUES (?, ?, ?, ?, clock_timestamp(), ?)
+		ON CONFLICT (id) DO UPDATE SET seen = clock_timestamp(), signs = excluded.signs`, r.id, r.host, version, r.started.UTC(), signs); err != nil {
+		return 0, err
+	}
+	if signs == "" {
+		return 0, nil
+	}
 	var n int
-	err := l.rep.side.QueryRowContext(ctx, "SELECT count(*) FROM replica_members WHERE id != ? AND seen > clock_timestamp() - make_interval(secs => ?)",
-		l.rep.id, liveFor.Seconds()).Scan(&n)
+	err := r.side.QueryRowContext(ctx, `SELECT count(*) FROM replica_members
+		WHERE id != ? AND seen > clock_timestamp() - make_interval(secs => ?) AND signs != '' AND signs != ?`,
+		r.id, liveFor.Seconds(), signs).Scan(&n)
 	return n, err
 }
 
@@ -539,6 +785,16 @@ type Elected struct {
 	// Status is what the replica says of itself while it leads, for the
 	// others' pages: a JSON text, read each beatEvery.
 	Status func() []byte
+	// Stuck says the leader's work has made no progress for longer than it
+	// may: then the lease isn't renewed, and is given up, for another.
+	Stuck func() bool
+}
+
+// wedged says a write has held the writer for longer than any may (each
+// is cut off at writeWithin): the replica can't write as the leader must.
+func (l *Ledger) wedged() bool {
+	h := l.heldSince.Load()
+	return h != 0 && time.Since(time.Unix(0, h)) > writeWithin+time.Minute
 }
 
 // Elect takes part in choosing the replica that leads, until ctx is done.
@@ -571,11 +827,20 @@ func (l *Ledger) Elect(ctx context.Context, e Elected, lead func(context.Context
 		every(ctx, beatEvery, func() { r.beat(ctx) })
 	}()
 	for ctx.Err() == nil {
+		if (e.Stuck != nil && e.Stuck()) || l.wedged() {
+			// A replica whose work, or writer, is stuck asks for no lease:
+			// it would give it up again.
+			select {
+			case <-ctx.Done():
+			case <-time.After(campaignEvery):
+			}
+			continue
+		}
 		tctx, cancel := context.WithTimeout(ctx, max(campaignEvery, time.Second))
 		term, sent, err := r.take(tctx)
 		cancel()
 		if err == nil && term > 0 {
-			l.leadFor(ctx, term, sent, lead)
+			l.leadFor(ctx, e, term, sent, lead)
 			continue
 		}
 		select {
@@ -640,7 +905,7 @@ func (r *replicas) resign(term int64) {
 // this process's own clock, leaseMargin before the database could let
 // another take it, when it can't be. Once lead has returned, the lease is
 // given up.
-func (l *Ledger) leadFor(ctx context.Context, term int64, sent time.Time, lead func(context.Context)) {
+func (l *Ledger) leadFor(ctx context.Context, e Elected, term int64, sent time.Time, lead func(context.Context)) {
 	r := l.rep
 	ld := &leadership{r: r, term: term, since: time.Now(), until: sent.Add(leaseFor - leaseMargin)}
 	lctx, cancel := context.WithCancelCause(context.WithValue(ctx, leaseKey{}, ld))
@@ -673,6 +938,12 @@ func (l *Ledger) leadFor(ctx context.Context, term int64, sent time.Time, lead f
 			// Not renewed in time: another may take the lease soon.
 			running = false
 		case <-next.C:
+			if (e.Stuck != nil && e.Stuck()) || l.wedged() {
+				// Reaching the database isn't leading: a leader whose work is
+				// stuck gives the lease up, for one whose isn't.
+				running = false
+				continue
+			}
 			if asking {
 				next.Reset(retryEvery)
 				continue
@@ -727,9 +998,12 @@ func (r *replicas) beat(ctx context.Context) {
 	if ld != nil && ld.valid() && status != nil {
 		said = string(status())
 	}
-	if _, err := r.side.ExecContext(ctx, `INSERT INTO replica_members (id, host, version, started, seen, status) VALUES (?, ?, ?, ?, clock_timestamp(), ?)
-		ON CONFLICT (id) DO UPDATE SET seen = clock_timestamp(), version = excluded.version, status = excluded.status`,
-		r.id, r.host, version, r.started.UTC(), said); err != nil {
+	r.mu.Lock()
+	signs := r.signs
+	r.mu.Unlock()
+	if _, err := r.side.ExecContext(ctx, `INSERT INTO replica_members (id, host, version, started, seen, status, signs) VALUES (?, ?, ?, ?, clock_timestamp(), ?, ?)
+		ON CONFLICT (id) DO UPDATE SET seen = clock_timestamp(), version = excluded.version, status = excluded.status, signs = excluded.signs`,
+		r.id, r.host, version, r.started.UTC(), said, signs); err != nil {
 		return
 	}
 	var n int64
@@ -749,12 +1023,15 @@ func (r *replicas) beat(ctx context.Context) {
 		p.Status, p.Self = []byte(st), p.ID == r.id
 		r.leader.Store(&p)
 	}
-	if ld != nil && ld.valid() && time.Since(r.swept) >= time.Minute {
-		// The leader sweeps what is long gone, each minute: replicas,
-		// claims, sign-ins' states.
+	if ld != nil && ld.valid() && time.Since(r.swept) >= sweepEvery {
+		// The leader sweeps what is over, each sweepEvery: replicas gone a
+		// day, claims and sign-ins' states past their time.
 		r.swept = time.Now()
 		r.side.ExecContext(ctx, "DELETE FROM replica_members WHERE seen < clock_timestamp() - interval '1 day'")
-		r.side.ExecContext(ctx, "DELETE FROM replica_once WHERE until < CAST(extract(epoch FROM clock_timestamp()) AS BIGINT) - 86400")
+		r.side.ExecContext(ctx, "DELETE FROM replica_once WHERE until < "+dbNow)
+		// The nonces of all but the last generations: a replica that saw one
+		// older reads everything again.
+		r.side.ExecContext(ctx, "DELETE FROM replica_log WHERE gen < (SELECT gen FROM replica_gens) - 100000")
 	}
 }
 
@@ -771,20 +1048,24 @@ func (l *Ledger) Woken() <-chan struct{} {
 // made on any replica may ask. Nothing for a ledger no replicas share: its
 // process is the leader.
 func (l *Ledger) Wake(ctx context.Context) error {
+	ctx, cancel := side(ctx)
+	defer cancel()
 	if l.rep == nil {
 		return nil
 	}
-	_, err := l.rep.side.ExecContext(ctx, "UPDATE replica_gens SET wake = wake + 1")
+	_, err := l.rep.side.ExecContext(ctx, "UPDATE replica_signals SET wake = wake + 1 WHERE one = 1")
 	return err
 }
 
 // AskRejudge asks the replica that leads to judge every firing again, as
 // settings changed on any replica ask, and wakes it.
 func (l *Ledger) AskRejudge(ctx context.Context) error {
+	ctx, cancel := side(ctx)
+	defer cancel()
 	if l.rep == nil {
 		return nil
 	}
-	_, err := l.rep.side.ExecContext(ctx, "UPDATE replica_gens SET rejudge = rejudge + 1, wake = wake + 1")
+	_, err := l.rep.side.ExecContext(ctx, "UPDATE replica_signals SET rejudge = rejudge + 1, wake = wake + 1 WHERE one = 1")
 	return err
 }
 
@@ -794,9 +1075,9 @@ func (l *Ledger) Rejudges() int64 {
 	if l.rep == nil {
 		return 0
 	}
-	l.rep.refreshMu.Lock()
-	defer l.rep.refreshMu.Unlock()
-	return l.rep.seen.rejudge
+	l.rep.applyMu.Lock()
+	defer l.rep.applyMu.Unlock()
+	return l.rep.said.rejudge
 }
 
 // Claim takes the oldest notice due to dest at now after the id after that
@@ -809,24 +1090,31 @@ func (l *Ledger) Rejudges() int64 {
 // context, it is taken only while this replica still leads, in the
 // database. For a ledger no replicas share, Due is what a process reads.
 func (l *Ledger) Claim(ctx context.Context, dest string, now time.Time, after int64) (Notice, bool, error) {
+	ctx, cancel := side(ctx)
+	defer cancel()
 	var n Notice
 	if l.rep == nil {
 		return n, false, errors.New("only a ledger serve's replicas share claims notices")
 	}
-	args := []any{now.Add(claimFor).Unix(), dest, after, now.Unix()}
+	// From when it is taken, by the later of now and the database's
+	// clock, which every replica reads: a claim given an old now (a round's
+	// start) still lasts claimFor, and the claim and what frees it are read
+	// by one clock.
+	args := []any{now.Unix(), int64(claimFor.Seconds()), dest, after}
 	fence := ""
 	if ld := leaseOf(ctx); ld != nil && ld.r == l.rep {
 		if !ld.valid() {
 			return n, false, ErrNotLeading
 		}
-		fence = " AND EXISTS (SELECT 1 FROM replica_lease WHERE holder = ? AND term = ? AND until > clock_timestamp())"
+		fence = " AND EXISTS (SELECT 1 FROM replica_lease WHERE holder = ?5 AND term = ?6 AND until > clock_timestamp() FOR SHARE)"
 		args = append(args, l.rep.id, ld.term)
 	}
 	var body string
 	var created int64
 	var sent sql.NullInt64
-	err := l.rep.side.QueryRowContext(ctx, `UPDATE outbox SET next_at = ? WHERE id = (SELECT id FROM outbox
-			WHERE dest = ? AND id > ? AND sent_at IS NULL AND next_at <= ? ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)`+fence+`
+	err := l.rep.side.QueryRowContext(ctx, `UPDATE outbox SET next_at = greatest(CAST(?1 AS BIGINT), `+dbNow+`) + ?2 WHERE id = (SELECT id FROM outbox
+			WHERE dest = ?3 AND id > ?4 AND sent_at IS NULL AND next_at <= greatest(CAST(?1 AS BIGINT), `+dbNow+`)
+			ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)`+fence+`
 		RETURNING id, dest, event, body, created, attempts, sent_at, error`, args...).
 		Scan(&n.ID, &n.Dest, &n.Event, &body, &created, &n.Attempts, &sent, &n.Error)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -847,6 +1135,8 @@ func ClaimFor() time.Duration { return claimFor }
 // context, it is taken only while this replica still leads. For a ledger
 // no replicas share, always true: its process is the only one.
 func (l *Ledger) ClaimOnce(ctx context.Context, key string, d time.Duration) (bool, error) {
+	ctx, cancel := side(ctx)
+	defer cancel()
 	if l.rep == nil {
 		return true, nil
 	}
@@ -856,7 +1146,7 @@ func (l *Ledger) ClaimOnce(ctx context.Context, key string, d time.Duration) (bo
 		if !ld.valid() {
 			return false, ErrNotLeading
 		}
-		fence = " AND EXISTS (SELECT 1 FROM replica_lease WHERE holder = ?3 AND term = ?4 AND until > clock_timestamp())"
+		fence = " AND EXISTS (SELECT 1 FROM replica_lease WHERE holder = ?3 AND term = ?4 AND until > clock_timestamp() FOR SHARE)"
 		args = append(args, l.rep.id, ld.term)
 	}
 	var one int
@@ -889,6 +1179,8 @@ func (r *replicas) stillLeads(ctx context.Context, ld *leadership) error {
 
 // Unclaim gives up what ClaimOnce took, for another to take at once.
 func (l *Ledger) Unclaim(ctx context.Context, key string) error {
+	ctx, cancel := side(ctx)
+	defer cancel()
 	if l.rep == nil {
 		return nil
 	}
@@ -896,12 +1188,30 @@ func (l *Ledger) Unclaim(ctx context.Context, key string) error {
 	return err
 }
 
+// maxOnce is how many uses once the replicas keep at most, swept at their
+// time: past it, Once refuses, as a process's own set did past its bound.
+// Replaced in tests.
+var maxOnce = 100_000
+
+// ErrOnceFull is Once with maxOnce kept: what would be used once is
+// refused until some are swept.
+var ErrOnceFull = errors.New("the uses once the replicas keep are as many as they may be: refused until those over are swept")
+
 // Once says whether key is new to every replica, keeping it for d: a
 // sign-in's state used once, wherever its callback lands. For a ledger no
 // replicas share, an error: its process keeps what it used.
 func (l *Ledger) Once(ctx context.Context, key string, d time.Duration) (bool, error) {
+	ctx, cancel := side(ctx)
+	defer cancel()
 	if l.rep == nil {
 		return false, errors.New("only a ledger serve's replicas share what was used once")
+	}
+	var kept int
+	if err := l.rep.side.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM replica_once LIMIT ?) AS kept", maxOnce).Scan(&kept); err != nil {
+		return false, err
+	}
+	if kept >= maxOnce {
+		return false, ErrOnceFull
 	}
 	var one int
 	err := l.rep.side.QueryRowContext(ctx, `INSERT INTO replica_once (key, until) VALUES (?1, CAST(extract(epoch FROM clock_timestamp()) + ?2 AS BIGINT))
@@ -918,6 +1228,8 @@ func (l *Ledger) Once(ctx context.Context, key string, d time.Duration) (bool, e
 // holds less. For a ledger no replicas share, an error: each process keeps
 // its own.
 func (l *Ledger) Take(ctx context.Context, name string, rate, burst, n float64) (bool, error) {
+	ctx, cancel := side(ctx)
+	defer cancel()
 	if l.rep == nil {
 		return false, errors.New("only a ledger serve's replicas share rate limits")
 	}
@@ -940,6 +1252,8 @@ func (l *Ledger) Take(ctx context.Context, name string, rate, burst, n float64) 
 
 // Give gives one back to a bucket Take took from, up to burst.
 func (l *Ledger) Give(ctx context.Context, name string, burst float64) error {
+	ctx, cancel := side(ctx)
+	defer cancel()
 	if l.rep == nil {
 		return nil
 	}
