@@ -393,3 +393,10 @@ pre.diff span { display: block; }
 pre.diff .del { color: var(--bad); }
 pre.diff .ins { color: var(--better); }
 pre.diff .hunk { color: var(--dim); }
+/* What the badges mean, by facet, near the filters. */
+details.badge-legend { margin: 0 0 .8rem; }
+details.badge-legend p.axis { margin: .6rem 0 .2rem; font-size: .9rem; font-weight: 600; color: var(--dim); }
+details.badge-legend dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .25rem .8rem; margin: 0; }
+details.badge-legend dl > div { display: contents; }
+details.badge-legend dt, details.badge-legend dd { margin: 0; }
+details.badge-legend dd { font-size: .9rem; }

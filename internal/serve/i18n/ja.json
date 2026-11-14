@@ -1214,5 +1214,18 @@
  "today": "今日",
  "What it says has %d problems of fact.": "アラート内容に事実の問題が %d 件あります。",
  "What to do first": "まずやること",
- "While people slept, and off hours": "睡眠時間中と業務時間外"
+ "While people slept, and off hours": "睡眠時間中と業務時間外",
+ "What the badges mean": "バッジの意味",
+ "Fired often over the weeks shown, and few of its firings caught something; with weeks, how many weeks running.": "表示中の期間によく発火したのに、検知した発火はわずかでした。週が付いていれば、何週続けてノイズかを示します。",
+ "Fired over the weeks shown, and isn't noisy.": "表示中の期間に発火し、ノイズではありません。",
+ "No firing in the weeks shown.": "表示中の期間に発火はありません。",
+ "Another rule caught every incident it caught, as soon, at the same severity or above.": "このルールが検知したインシデントは、すべて別のルールが同じかそれ以上の重大度で、同じかそれより早く検知しました。",
+ "Over the last week checked, its replay differed from what really fired.": "最後に確認した 1 週間、バックテストが実際の発火と異なりました。",
+ "Lapilli can't replay it; its page says why.": "Lapilli はバックテストできません。理由はルールのページにあります。",
+ "Copied in from where it fired: what it fired is known, not its condition.": "発火した場所から記録を取り込みました。発火はわかりますが、条件はわかりません。",
+ "Its note says to keep it as it is.": "メモでは今のまま維持することになっています。",
+ "Its note says to tune it.": "メモでは調整することになっています。",
+ "Its note says to retire it.": "メモでは廃止することになっています。",
+ "A change to it is proposed and not finished with.": "変更が提案されていて、まだ終わっていません。",
+ "What it says when it fires has problems of fact.": "発火時のアラート内容に事実の問題があります。"
 }

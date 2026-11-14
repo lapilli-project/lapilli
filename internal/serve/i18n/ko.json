@@ -1214,5 +1214,18 @@
  "today": "오늘",
  "What it says has %d problems of fact.": "알림 내용에 사실 문제가 %d건 있어요.",
  "What to do first": "먼저 할 일",
- "While people slept, and off hours": "자는 시간과 업무 외 시간"
+ "While people slept, and off hours": "자는 시간과 업무 외 시간",
+ "What the badges mean": "배지의 뜻",
+ "Fired often over the weeks shown, and few of its firings caught something; with weeks, how many weeks running.": "보이는 기간 동안 자주 울렸지만 정탐은 적었어요. 주가 붙어 있으면 몇 주째 노이즈인지예요.",
+ "Fired over the weeks shown, and isn't noisy.": "보이는 기간 동안 울렸고, 노이즈 룰이 아니에요.",
+ "No firing in the weeks shown.": "보이는 기간 동안 발화가 없었어요.",
+ "Another rule caught every incident it caught, as soon, at the same severity or above.": "이 규칙이 잡은 인시던트를 다른 규칙이 같은 심각도 이상으로, 같거나 더 빨리 모두 잡았어요.",
+ "Over the last week checked, its replay differed from what really fired.": "마지막으로 확인한 일주일 동안 백테스트가 실제 발화와 달랐어요.",
+ "Lapilli can't replay it; its page says why.": "Lapilli 가 백테스트할 수 없어요. 이유는 규칙 페이지에 있어요.",
+ "Copied in from where it fired: what it fired is known, not its condition.": "울린 곳에서 기록을 가져왔어요. 발화는 알지만 조건은 몰라요.",
+ "Its note says to keep it as it is.": "메모에 지금 그대로 유지하라고 되어 있어요.",
+ "Its note says to tune it.": "메모에 조정하라고 되어 있어요.",
+ "Its note says to retire it.": "메모에 폐기하라고 되어 있어요.",
+ "A change to it is proposed and not finished with.": "변경 제안이 있고 아직 끝나지 않았어요.",
+ "What it says when it fires has problems of fact.": "울릴 때의 알림 내용에 사실 문제가 있어요."
 }

@@ -1214,5 +1214,18 @@
  "today": "hoy",
  "What it says has %d problems of fact.": "Lo que dice tiene %d problemas de hecho.",
  "What to do first": "Qué hacer primero",
- "While people slept, and off hours": "Mientras la gente dormía, y fuera de horario"
+ "While people slept, and off hours": "Mientras la gente dormía, y fuera de horario",
+ "What the badges mean": "Qué significan las insignias",
+ "Fired often over the weeks shown, and few of its firings caught something; with weeks, how many weeks running.": "Se disparó a menudo en las semanas mostradas, y pocos de sus disparos detectaron algo; con semanas, cuántas seguidas.",
+ "Fired over the weeks shown, and isn't noisy.": "Se disparó en las semanas mostradas, y no es ruidosa.",
+ "No firing in the weeks shown.": "Ningún disparo en las semanas mostradas.",
+ "Another rule caught every incident it caught, as soon, at the same severity or above.": "Otra regla detectó cada incidente que detectó, igual de pronto, con la misma gravedad o mayor.",
+ "Over the last week checked, its replay differed from what really fired.": "En la última semana comprobada, su backtest difirió de lo que realmente se disparó.",
+ "Lapilli can't replay it; its page says why.": "Lapilli no puede hacerle backtest; su página dice por qué.",
+ "Copied in from where it fired: what it fired is known, not its condition.": "Copiada de donde se disparó: se sabe lo que disparó, no su condición.",
+ "Its note says to keep it as it is.": "Su nota dice que se mantenga como está.",
+ "Its note says to tune it.": "Su nota dice que se ajuste.",
+ "Its note says to retire it.": "Su nota dice que se retire.",
+ "A change to it is proposed and not finished with.": "Hay un cambio propuesto que aún no ha terminado.",
+ "What it says when it fires has problems of fact.": "Lo que dice al dispararse tiene problemas de hecho."
 }

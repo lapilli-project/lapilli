@@ -446,6 +446,52 @@ func TestRuleBar(t *testing.T) {
 	}
 }
 
+// TestRuleBadgeLegend: the rules list says what each badge means, named
+// and signed as the facets and the badges are.
+func TestRuleBadgeLegend(t *testing.T) {
+	s := facetServer(t)
+	_, body, _ := get(t, s.Handler(), "/rules")
+	doc, err := html.Parse(strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legend *html.Node
+	for _, n := range allNodes(doc) {
+		if n.DataAtom == atom.Details && nodeAttr(n, "class") == "badge-legend" {
+			legend = n
+		}
+	}
+	if legend == nil {
+		t.Fatal("no legend")
+	}
+	var got []string
+	for _, n := range allNodes(legend) {
+		if n.DataAtom == atom.Dt {
+			got = append(got, squashed(nodeText(n)))
+		}
+	}
+	want := []string{"● Noisy", "○ OK", "– Silent", "⧉ Spare", "≠ Differs", "◌ Not replayed", "⇣ Recorded only", "✓ keep", "± tune", "⊘ retire",
+		"✎ Proposed", "⚠︎ Problems to check"}
+	if !slices.Equal(got, want) {
+		t.Errorf("legend %q, want %q", got, want)
+	}
+	// The same words as the facets'.
+	for _, f := range facetsOf {
+		for i, x := range f.values {
+			if _, ok := badgeMeans[f.param+"/"+x]; ok && !slices.ContainsFunc(got, func(g string) bool { return strings.HasSuffix(g, " "+f.labels[i]) }) {
+				t.Errorf("%s=%s, %q, isn't in the legend", f.param, x, f.labels[i])
+			}
+		}
+	}
+	// And the signs the badges have.
+	for _, badge := range []string{`<span aria-hidden="true">●</span> Noisy`, `<span aria-hidden="true">⇣</span> Recorded only`, `<span aria-hidden="true">±</span> tune`,
+		`<span aria-hidden="true">✎</span> Proposed`} {
+		if strings.Count(body, badge) < 2 {
+			t.Errorf("%s: not both a badge and in the legend", badge)
+		}
+	}
+}
+
 // TestVersionDiff: each version beside the one before, line by line: one
 // changed, one taken away, one written again.
 func TestVersionDiff(t *testing.T) {
