@@ -18,6 +18,11 @@ import (
 // proposal's diff, its backtest in a dry run's place, its approval, and
 // what happened to it, in order; and the list of them, with facets.
 
+// The proposals are shown for one team's rules, as the tasks are: the bar
+// picks the team, and a team's editor sees their team's unless they pick
+// all teams.
+func init() { teamPages["proposals"] = true }
+
 // stateGroups are where a proposal is, by its state, as its badge says:
 // awaiting approval, approved, being applied (checked again and handed to
 // a recipe, sent, its pull request open or merged, not yet read back),

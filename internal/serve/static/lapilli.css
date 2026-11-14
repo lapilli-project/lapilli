@@ -416,6 +416,10 @@ p.warn { color: var(--bad); background: var(--card); border: 1px solid var(--bad
 ol.steps { margin: .3rem 0 .8rem; padding-left: 1.4rem; }
 ol.steps li { padding: .25rem 0; }
 ol.steps .t { font-variant-numeric: tabular-nums; color: var(--dim); font-size: .9rem; }
+/* A list's facets (the proposals', the tasks'): side by side as they fit. */
+form.pick { margin: 0 0 .8rem; padding: .7rem .9rem; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+form.pick .pick-sets { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: .8rem 1.2rem; }
+form.pick p.row { margin: .2rem 0 0; }
 /* What the badges mean, by facet, near the filters. */
 details.badge-legend { margin: 0 0 .8rem; }
 details.badge-legend p.axis { margin: .6rem 0 .2rem; font-size: .9rem; font-weight: 600; color: var(--dim); }

@@ -100,7 +100,14 @@ type proposalsView struct {
 	Limits   Limits
 	Need     int
 	Approver bool
-	State    string
+	// The facets, the chips and the form (docs/design/ui.md); Shown of
+	// Total for the team, at most proposalsShown; Empty, why none is.
+	Pick         pickView
+	Shown, Total int
+	More         bool
+	Empty        *emptyView
+	// PauseOff is the admin's switch, for one who isn't.
+	PauseOff *pageAction
 }
 
 // inEffect are the hashes of the rules in effect, by the names the ledger
@@ -157,37 +164,110 @@ func (s *Server) proposalLines(r *http.Request, ps []ledger.Proposal) ([]proposa
 	return out, nil
 }
 
-func (s *Server) proposalsPage(r *http.Request) (any, error) {
-	q := ledger.ProposalQuery{Limit: 200}
-	state := r.URL.Query().Get("state")
-	switch state {
-	case "", "open":
-		state, q.States = "open", ledger.Unfinished()
-	case "all":
-	default:
-		q.States = []string{state}
+// proposalFacets are the proposals list's facets: where each is (the open
+// ones unless asked; open, and an older link's single state, too), what
+// it changes, the way it goes, who made it.
+var proposalFacets = []pickFacet{
+	{param: "state", name: "State", values: []string{"proposed", "approved", "doing", "applied", "undone", "closed"},
+		labels: []string{"awaiting approval", "approved", "being applied", "applied", "undone", "closed"},
+		def:    []string{"proposed", "approved", "doing"}, aliases: map[string][]string{"open": {"proposed", "approved", "doing"}, "": {"proposed", "approved", "doing"}},
+		raw: []string{ledger.StateReady, ledger.StateApplying, ledger.StateOpened, ledger.StateMerged, ledger.StateRefused, ledger.StateFailed,
+			ledger.StateDropped, ledger.StateAmended}},
+	{param: "kind", name: "Kind", values: []string{ledger.KindFor, ledger.KindThreshold, ledger.KindDisable, ledger.KindDelete, ledger.KindSays, ledger.KindUndo},
+		labels: []string{"a new for", "a new threshold", "turning it off", "deleting it", "a fix to what it says", "undoing a change"}},
+	{param: "path", name: "Way", values: []string{ledger.PathGit, ledger.PathGrafana, ledger.PathRuler, ledger.PathAlarm, ledger.PathNone},
+		labels: []string{"a pull request", "Grafana's API", "the ruler's API", "the cloud's API", "for a person to make"}},
+	{param: "by", name: "Made by", values: []string{"person", "agent", "lapilli"}, labels: []string{"a person", "an agent", "Lapilli itself"}},
+}
+
+// Of the proposals, the list reads proposalsRead in brief, the latest
+// moved first, and shows proposalsShown.
+const (
+	proposalsRead  = 2000
+	proposalsShown = 200
+)
+
+// proposalValues are a proposal's values in a facet.
+func proposalValues(p ledger.Proposal, param string) []string {
+	switch param {
+	case "state":
+		return []string{stateGroups[p.State], p.State}
+	case "kind":
+		return []string{p.Kind}
+	case "path":
+		return []string{p.Path}
+	case "by":
+		switch {
+		case p.Agent:
+			return []string{"agent"}
+		case p.MadeBy == ledger.Proposer:
+			return []string{"lapilli"}
+		}
+		return []string{"person"}
 	}
-	ps, err := s.l.Proposals(r.Context(), q)
+	return nil
+}
+
+func (s *Server) proposalsPage(r *http.Request) (any, error) {
+	ctx := r.Context()
+	c := s.pageContext(r)
+	heads, err := s.l.ProposalHeads(ctx, proposalsRead)
 	if err != nil {
 		return nil, err
 	}
-	// Those waiting for approval first.
-	slices.SortStableFunc(ps, func(a, b ledger.Proposal) int {
-		x, y := a.State == ledger.StateProposed, b.State == ledger.StateProposed
+	if c.Team != "" {
+		o, err := s.owners(ctx)
+		if err != nil {
+			return nil, err
+		}
+		heads = slices.DeleteFunc(heads, func(h ledger.ProposalHead) bool { return o.teamOf(h.Rule) != c.Team })
+	}
+	// The links made from what was asked: with the reader's own team taken
+	// for them (c.Mine), none carries it, and the next page takes it again.
+	p := picksOf(r.URL.Query(), proposalFacets)
+	idx, pick := pickItems("/proposals", c, proposalFacets, p, len(heads), func(i int, param string) []string { return proposalValues(heads[i].Proposal, param) })
+	// Those waiting for approval first, then those under way, then the
+	// rest, each the latest moved first.
+	rank := func(st string) int {
 		switch {
-		case x && !y:
-			return -1
-		case y && !x:
+		case st == ledger.StateProposed:
+			return 0
+		case slices.Contains(ledger.Unfinished(), st):
 			return 1
 		}
-		return 0
-	})
-	lines, err := s.proposalLines(r, ps)
-	if err != nil {
+		return 2
+	}
+	slices.SortStableFunc(idx, func(a, b int) int { return rank(heads[a].State) - rank(heads[b].State) })
+	v := proposalsView{On: s.cfg.Changes, Paused: s.changesPaused(), Limits: s.limits(), Need: s.approvals(), Approver: s.approver(r),
+		Pick: pick, Shown: len(idx), Total: len(heads)}
+	if len(idx) > proposalsShown {
+		idx, v.More = idx[:proposalsShown], true
+	}
+	ps := make([]ledger.Proposal, 0, len(idx))
+	for _, i := range idx {
+		ps = append(ps, heads[i].Proposal)
+	}
+	if v.Lines, err = s.proposalLines(r, ps); err != nil {
 		return nil, err
 	}
-	return proposalsView{Lines: lines, On: s.cfg.Changes, Paused: s.changesPaused(), Limits: s.limits(), Need: s.approvals(),
-		Approver: s.approver(r), State: state}, nil
+	for k, i := range idx {
+		v.Lines[k].Have = heads[i].Approved
+	}
+	switch {
+	case len(heads) == 0:
+		v.Empty = &emptyView{Kind: "done", Title: "No proposals yet.",
+			Text: "A rule's page proposes a change to it, with its backtest; Lapilli proposes of itself with --changes, after the weekly digest."}
+	case len(idx) == 0:
+		v.Empty = &emptyView{Kind: "notfound", Title: "No proposal matches these filters.", Links: []emptyLink{{"Clear filters", pick.Clear}}}
+	}
+	if s.cfg.Changes && s.role(r) < admin {
+		label := "Pause changes"
+		if v.Paused {
+			label = "Resume changes"
+		}
+		v.PauseOff = &pageAction{Label: label, ID: "pause-why", Why: cmpOr(s.why(r), "Admins only")}
+	}
+	return v, nil
 }
 
 type proposalView struct {

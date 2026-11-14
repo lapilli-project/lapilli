@@ -2,11 +2,13 @@ package ledger
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 )
 
 // What the proposals' pages read beside the proposals themselves
-// (docs/design/ui.md): each proposal's steps, as the changes keep them.
+// (docs/design/ui.md): each proposal's steps, as the changes keep them, and
+// the proposals in brief, for the list's facets.
 
 // ProposalSteps are the changes kept of a proposal, in the order they were
 // made, most at most: its making, each approval, each state it moved to,
@@ -31,6 +33,41 @@ func (l *Ledger) ProposalSteps(ctx context.Context, id int64, most int) ([]Chang
 		}
 		c.At = unix(at)
 		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// ProposalHead is a proposal in brief, as the proposals list shows and
+// counts it: none of its documents, its evidence only for an undo (whether
+// it undoes a change to what a rule says), and how many approved it.
+type ProposalHead struct {
+	Proposal
+	Approved int
+}
+
+// ProposalHeads are the latest proposals in brief, most at most, the
+// latest moved first.
+func (l *Ledger) ProposalHeads(ctx context.Context, most int) ([]ProposalHead, error) {
+	rows, err := l.r.QueryContext(ctx, `SELECT p.id, p.rule, p.kind, p.path, p.state, p.made, p.made_by, p.agent, p.before_hash,
+		CASE WHEN p.kind = ? THEN p.evidence ELSE '' END, p.updated, (SELECT count(*) FROM approvals a WHERE a.proposal_id = p.id)
+		FROM proposals p ORDER BY p.updated DESC, p.id DESC LIMIT ?`, KindUndo, most)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ProposalHead
+	for rows.Next() {
+		var h ProposalHead
+		var made, updated int64
+		var evidence string
+		if err := rows.Scan(&h.ID, &h.Rule, &h.Kind, &h.Path, &h.State, &made, &h.MadeBy, &h.Agent, &h.BeforeHash, &evidence, &updated, &h.Approved); err != nil {
+			return nil, err
+		}
+		h.Made, h.Updated = unix(made), unix(updated)
+		if evidence != "" {
+			h.Evidence = json.RawMessage(evidence)
+		}
+		out = append(out, h)
 	}
 	return out, rows.Err()
 }

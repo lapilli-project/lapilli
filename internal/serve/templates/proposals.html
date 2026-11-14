@@ -12,18 +12,21 @@
 <thead><tr><th scope="col">#</th><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Change"}}</th><th scope="col">{{t "Way"}}</th><th scope="col">{{t "State"}}</th><th scope="col">{{t "Made"}}</th></tr></thead>
 <tbody>{{range .V}}<tr><td><a href="{{$.P.Link (printf "/proposals/%d" .ID)}}">#{{.ID}}</a></td><td><a href="{{$.P.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a>{{if .Stale}}<br><span class="hint">{{t "the rule changed since"}}</span>{{end}}</td>
 <td>{{template "proposalkind" .Kind}}{{if .Agent}}<br><span class="quiet">{{t "proposed by an agent"}}</span>{{end}}</td><td>{{template "proposalpath" .Path}}</td>
-<td>{{template "proposalstate" .State}}{{if eq .State "proposed"}} <span class="quiet">{{t "%d of %d approvals" (len .Approvals) .Need}}</span>{{end}}</td>
+<td>{{template "proposalbadge" .Badge}}{{if eq .State "proposed"}} <span class="quiet">{{t "%d of %d approvals" .Have .Need}}</span>{{end}}</td>
 <td class="t">{{at .Loc .Made}}<br><span class="quiet">{{who .MadeBy}}</span></td></tr>{{end}}</tbody>
 </table></div>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}{{end}}
 
 {{define "proposals"}}{{$title := t "Proposals"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
-<h1>{{$title}}</h1>
+<div class="head"><h1>{{$title}}</h1><p class="of">{{t "%d of %d proposals" .Shown .Total}}</p></div>
 <p class="lede">{{t "Changes to the rules Lapilli or a person proposed, each with its backtest. Nothing is changed until a person approves it here: then it is checked again, and opened as a pull request where the rule is kept, or applied through Grafana's, a ruler's or a cloud's API, with what it replaces kept for undo."}}</p>
 {{template "changesoff" .}}
 {{if .On}}<p class="quiet">{{t "%d approvals each; at most %d deletions a day and %d changes an hour." .Need .Limits.Deletions .Limits.Changes}}</p>{{end}}
-{{if and .On $.Status.Admin}}<form method="post" action="/settings/changes">{{if .Paused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>{{end}}
-<p class="tabs">{{t "State"}}: <a href="{{$.Link "/proposals"}}"{{if eq .State "open"}} aria-current="page"{{end}}>{{t "open"}}</a> <a href="{{$.Link "/proposals" "state" "applied"}}"{{if eq .State "applied"}} aria-current="page"{{end}}>{{t "applied"}}</a> <a href="{{$.Link "/proposals" "state" "refused"}}"{{if eq .State "refused"}} aria-current="page"{{end}}>{{t "refused"}}</a> <a href="{{$.Link "/proposals" "state" "all"}}"{{if eq .State "all"}} aria-current="page"{{end}}>{{t "all"}}</a></p>
-{{template "proposallist" (on $ .Lines)}}
+{{if and .On $.Status.Admin}}<form method="post" action="/settings/changes">{{if .Paused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>
+{{else}}{{with .PauseOff}}<p>{{template "off" .}}</p>{{end}}{{end}}
+{{template "pickfacets" .Pick}}
+{{if .Lines}}{{template "proposallist" (on $ .Lines)}}{{end}}
+{{if .More}}<p class="quiet">{{t "The first %d are shown: pick fewer to see the rest." (len .Lines)}}</p>{{end}}
+{{with .Empty}}{{template "empty" .}}{{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
 {{define "proposal"}}{{$head := .View.Head.Text .Lang}}{{template "top" (crumbed . (print "#" .View.ID " " $head) (print "#" .View.ID))}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}{{$v := .}}
@@ -158,3 +161,12 @@ its sides; a run of lines the same left out is a row saying how many. */}}
 {{/* An action the reader may not take: the button, disabled, and why,
 tied to it. */}}
 {{define "off"}}<span class="action-off"><button type="button" disabled aria-describedby="{{.ID}}">{{t .Label}}</button> <span id="{{.ID}}" class="why">{{if .WhyOf}}{{tbdi .Why .WhyOf}}{{else}}{{t .Why}}{{end}}</span></span>{{end}}
+
+{{/* A list's facets (the proposals', the tasks'): one GET form, each value
+counted, and a chip for each filter in effect. */}}
+{{define "pickfacets"}}<form method="get" action="{{.Action}}" class="facets pick" aria-label="{{t "Filters"}}">{{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+<div class="pick-sets">{{range .Facets}}{{$f := .}}<fieldset><legend>{{t .Name}}</legend>{{range .Options}}
+  <label class="opt{{if not .Count}} zero{{end}}"><input type="checkbox" name="{{$f.Param}}" value="{{.Value}}"{{if .Checked}} checked{{end}}> <span>{{t .Label}}</span> <span class="n">{{.Count}}</span></label>{{end}}</fieldset>{{end}}</div>
+<p class="row"><button>{{t "Apply"}}</button> <a href="{{.Clear}}">{{t "Clear filters"}}</a></p>
+</form>
+{{with .Chips}}<ul class="chips" aria-label="{{t "Filters in effect"}}">{{range .}}<li><a class="chip" href="{{.Href}}"><span class="vh">{{t "Remove filter:"}} </span>{{t .Group}}: {{if .Raw}}<bdi>{{shown .Value}}</bdi>{{else}}{{t .Value}}{{end}} <span aria-hidden="true">✕</span></a></li>{{end}}</ul>{{end}}{{end}}
