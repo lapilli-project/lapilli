@@ -19,7 +19,7 @@ import (
 // drillServer is a server with last week (from Monday 2026-10-26) of two
 // teams' rules: a noisy one of each, one of payments that caught an
 // incident, one of search that did, an incident caught only by search's
-// noisy rule, one nothing caught; firings that re-fired, some while people
+// noisy rule, and one of both teams' too, one nothing caught; firings that re-fired, some while people
 // slept, some during a deploy; and the weeks before and after with some
 // of their own. With notify, the firings were notified too, a minute after
 // each started: one, at 23:59:30 the Sunday before, notified in the week;
@@ -83,6 +83,8 @@ func drillServer(t *testing.T, notify bool) *Server {
 		{ID: "N-1", Start: week.Add(82*time.Hour + 5*time.Minute), End: week.Add(83 * time.Hour), Labels: incident.Labels{"service": {"search"}}},
 		{ID: "M-1", Start: week.Add(120 * time.Hour), End: week.Add(121 * time.Hour), Labels: incident.Labels{"service": {"pay"}}},
 		{ID: "M-2", Start: week.Add(121 * time.Hour), End: week.Add(122 * time.Hour), Labels: incident.Labels{"service": {"search"}}},
+		// Both teams', caught only by search's noisy rule.
+		{ID: "B-1", Start: week.Add(76*time.Hour + 5*time.Minute), End: week.Add(76*time.Hour + 20*time.Minute), Labels: incident.Labels{"service": {"pay", "search"}}},
 		// This week.
 		{ID: "M-3", Start: week.Add(7*24*time.Hour + 10*time.Hour), End: week.Add(7*24*time.Hour + 11*time.Hour), Labels: incident.Labels{"service": {"pay"}}},
 		{ID: "S-2", Start: week.Add(8*24*time.Hour + 5*time.Minute), End: week.Add(8*24*time.Hour + time.Hour), Labels: incident.Labels{"service": {"search"}}},
@@ -219,7 +221,7 @@ func drillDown(t *testing.T, s *Server, notify bool) {
 			}
 		}
 		// Something to count, each way.
-		if team == "" && (last.Firings < 30 || last.Noisy != 2 || last.Missed != 2 || last.Caught != 2 || last.NoisyOnly != 1 || last.Refired == 0 || last.Deploys == 0 || last.Asleep == 0) {
+		if team == "" && (last.Firings < 30 || last.Noisy != 2 || last.Missed != 2 || last.Caught != 2 || last.NoisyOnly != 2 || last.Refired == 0 || last.Deploys == 0 || last.Asleep == 0) {
 			t.Errorf("last week: %+v", last)
 		}
 	}
@@ -325,7 +327,7 @@ func TestWeekAsked(t *testing.T) {
 	_, body, _ = get(t, h, "/incidents?week=2026-10-26&state=missed")
 	for _, want := range []string{"What went wrong in the week of 2026-10-26, and what caught it.",
 		`<a href="/incidents?state=missed&amp;weeks=4">4 weeks</a>`,
-		`<a href="/incidents?week=2026-10-26">all <span class="quiet">(5)</span></a>`,
+		`<a href="/incidents?week=2026-10-26">all <span class="quiet">(6)</span></a>`,
 		`<a href="/incidents?state=missed&amp;week=2026-10-26" aria-current="page">✗ missed <span class="quiet">(2)</span></a>`,
 		`<a class="chip" href="/incidents?state=missed"><span class="vh">Remove filter: </span>Week of: <bdi>2026-10-26</bdi>`} {
 		if !strings.Contains(body, want) {

@@ -321,11 +321,14 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			continue
 		}
 		wv.Incidents++
-		switch t.state(in, w) {
+		// Judged against everyone's rules, as the incidents page judges
+		// them: one of the team's caught only by another team's noisy rule
+		// was caught only by a noisy rule.
+		switch t.stateAll(in, w) {
 		case "caught":
 			wv.Caught++
 			for _, c := range in.CaughtBy {
-				if !t.noisy(w, t.id(c.Rule)) {
+				if !t.noisyAll(w, t.id(c.Rule)) {
 					wv.Delays = append(wv.Delays, c.Delay)
 					break
 				}

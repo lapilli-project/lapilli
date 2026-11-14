@@ -157,6 +157,31 @@ func (t *tallies) noisy(week, rule int64) bool {
 	return noisy(x.Firings, x.White, t.o)
 }
 
+// noisyAll reports whether a rule was noisy in a week, as everyone's rules
+// were tallied, before only kept one team's: one of another team's, which
+// the tallies of a team's alone don't have, too.
+func (t *tallies) noisyAll(week, rule int64) bool {
+	if t.everyone == nil {
+		return t.noisy(week, rule)
+	}
+	x := t.everyone[week][rule]
+	return noisy(x.Firings, x.White, t.o)
+}
+
+// stateAll is state, judged against everyone's rules: as the incidents
+// page judges them, with a team picked or not.
+func (t *tallies) stateAll(in ledger.Incident, week int64) string {
+	if len(in.CaughtBy) == 0 {
+		return "missed"
+	}
+	for _, c := range in.CaughtBy {
+		if !t.noisyAll(week, t.id(c.Rule)) {
+			return "caught"
+		}
+	}
+	return "noisy"
+}
+
 // state is whether an incident was caught, caught only by rules noisy that
 // week, or missed.
 func (t *tallies) state(in ledger.Incident, week int64) string {
