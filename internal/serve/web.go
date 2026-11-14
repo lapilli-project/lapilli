@@ -1167,27 +1167,14 @@ func (s *Server) real(w http.ResponseWriter, r *http.Request) {
 
 // realOne writes the firing id down as an incident, from its start and end,
 // with the labels --match matches on: the incident's id, or "" when the
-// firing has caught something, and there is one already.
+// firing has caught something, or one was written from it already. The
+// ledger does it in one write (ledger.Real): two at once write one.
 func (s *Server) realOne(r *http.Request, id int64) (string, ledger.Firing, error) {
-	f, err := s.l.FiringByID(r.Context(), id)
-	if err != nil || f.White {
-		return "", f, err
-	}
 	o, err := s.options(r.Context())
 	if err != nil {
-		return "", f, err
+		return "", ledger.Firing{}, err
 	}
-	in := incident.Incident{Title: "caught by " + f.Rule, Start: f.Start, End: f.End}
-	for _, m := range o.Match {
-		if v, ok := f.Labels[m]; ok {
-			if in.Labels == nil {
-				in.Labels = incident.Labels{}
-			}
-			in.Labels[m] = []string{v}
-		}
-	}
-	made, err := s.l.Put(r.Context(), in, s.user(r), o)
-	return made, f, err
+	return s.l.Real(r.Context(), id, s.user(r), o)
 }
 
 func (s *Server) postSettings(w http.ResponseWriter, r *http.Request) {
