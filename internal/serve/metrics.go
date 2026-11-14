@@ -290,6 +290,9 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		if s.l.WritesWaited() {
 			waited = 1
 		}
+		if s.in != nil && s.in.oidc != nil {
+			fmt.Fprintf(w, "# HELP lapilli_serve_session_keys How many keys the live replicas sign sessions with: more than one while a rollout brings in a new key, or replicas were given different ones.\n# TYPE lapilli_serve_session_keys gauge\nlapilli_serve_session_keys %d\n", s.l.SessionKeys())
+		}
 		fmt.Fprintf(w, "# HELP lapilli_serve_ledger_writes_waiting Whether this replica's last write gave up waiting for the ledger's writers' turn, which another session holds, and none has taken it since: 1 or 0.\n# TYPE lapilli_serve_ledger_writes_waiting gauge\nlapilli_serve_ledger_writes_waiting %d\n", waited)
 		// How the leader's work goes: a leader whose step runs past
 		// stepWithin gives its lease up.

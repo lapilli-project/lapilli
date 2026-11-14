@@ -97,9 +97,12 @@ func TestReplicasSignInStatesWriteNothingUnsigned(t *testing.T) {
 	}
 }
 
-// Replicas that sign sessions with other keys are refused: a second with
-// another key, whichever starts first, two started at once, one at least.
-func TestReplicasSessionKeysAgree(t *testing.T) {
+// Replicas compare the keys they sign sessions with. A replica whose key
+// is newer than the live replicas' joins, as a rollout of a new key starts
+// one, and every replica says how many keys sign sessions until the older
+// go; one whose key is older than another live, as a pod the rollout
+// replaces would be, started again, is refused.
+func TestReplicasSessionKeysRotate(t *testing.T) {
 	quickReplicas(t)
 	s, _ := oidcServer(t, nil)
 	if !s.l.Shared() {
@@ -109,38 +112,29 @@ func TestReplicasSessionKeysAgree(t *testing.T) {
 	defer cancel()
 	go s.l.Elect(ectx, ledger.Elected{Version: "test"}, func(c context.Context) { <-c.Done() })
 	until(t, 5*time.Second, "the first lives", func() bool { return s.l.Replicas() == 1 })
-	other := filepath.Join(t.TempDir(), "key2")
-	os.WriteFile(other, []byte(strings.Repeat("z", 40)), 0o600)
+	newKey := filepath.Join(t.TempDir(), "key2")
+	os.WriteFile(newKey, []byte(strings.Repeat("z", 40)), 0o600)
 	cfg := s.cfg
-	cfg.OIDC = freshOIDC(s)
-	cfg.SessionKey = other
-	if b, err := New(context.Background(), cfg, &history{}, s.log); err == nil {
-		b.Close()
-		t.Fatal("a replica with another session key joined")
-	} else if !strings.Contains(err.Error(), "sign sessions with another key") {
+	cfg.OIDC, cfg.SessionKey = freshOIDC(s), newKey
+	b, err := New(context.Background(), cfg, &history{}, s.log)
+	if err != nil {
+		t.Fatalf("a replica with a newer key: %v", err)
+	}
+	defer b.Close()
+	go b.l.Elect(ectx, ledger.Elected{Version: "test"}, func(c context.Context) { <-c.Done() })
+	until(t, 5*time.Second, "the replicas count two keys", func() bool { return s.l.SessionKeys() == 2 })
+	if _, body, _ := get(t, s.MetricsHandler(), "/metrics"); !strings.Contains(body, "lapilli_serve_session_keys 2") {
+		t.Error("the metrics don't say two keys sign sessions")
+	}
+	if line := s.leadership(); !strings.Contains(line, "sign sessions with 2 keys") {
+		t.Errorf("the status doesn't say two keys sign sessions: %q", line)
+	}
+	cfg.OIDC, cfg.SessionKey = freshOIDC(s), s.cfg.SessionKey
+	if c, err := New(context.Background(), cfg, &history{}, s.log); err == nil {
+		c.Close()
+		t.Fatal("a replica with the older key joined, a newer one live")
+	} else if !strings.Contains(err.Error(), "newer than this one's") {
 		t.Errorf("refused, saying: %v", err)
-	}
-	// Two at once, on a ledger of their own: one at least refused.
-	f := sharedLedger(t)
-	keys := []string{s.cfg.SessionKey, other}
-	errs := make([]error, 2)
-	var wg sync.WaitGroup
-	for i := range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			c := cfg
-			c.OIDC, c.LedgerURLFile, c.SessionKey = freshOIDC(s), f, keys[i]
-			b, err := New(context.Background(), c, &history{}, s.log)
-			if err == nil {
-				t.Cleanup(func() { b.Close() })
-			}
-			errs[i] = err
-		}()
-	}
-	wg.Wait()
-	if errs[0] == nil && errs[1] == nil {
-		t.Error("two replicas with other keys, started at once, both joined")
 	}
 }
 

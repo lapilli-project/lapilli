@@ -284,6 +284,7 @@ type replicas struct {
 	lead   atomic.Pointer[leadership]
 	leader atomic.Pointer[Leader]
 	live   atomic.Int64
+	keys   atomic.Int64
 	// swept is when the leader last swept what is long gone.
 	swept time.Time
 }
@@ -780,15 +781,18 @@ func (l *Ledger) Replicas() int {
 }
 
 // Join says this replica lives, signing sessions with a key whose
-// fingerprint is signs ("" for none), before it serves, and gives how many
-// other live replicas sign them with another: a session one signs is none
-// to the other. It writes its own first, then reads the others', so that of
-// two started at once one at least sees the other.
-func (l *Ledger) Join(ctx context.Context, signs string) (int, error) {
+// fingerprint is signs ("" for none), before it serves. It gives how many
+// other live replicas sign them with another key, and how many other keys
+// are newer than this one's: first seen, among the live, on a replica
+// started after the first that signs with this one's. A session one key
+// signs is none to another; a newer key is the one a rollout brings in,
+// and an older one, one it replaces. It writes its own first, then reads
+// the others', so that of two started at once one at least sees the other.
+func (l *Ledger) Join(ctx context.Context, signs string) (others, newer int, err error) {
 	ctx, cancel := side(ctx)
 	defer cancel()
 	if l.rep == nil {
-		return 0, nil
+		return 0, 0, nil
 	}
 	r := l.rep
 	r.mu.Lock()
@@ -797,16 +801,28 @@ func (l *Ledger) Join(ctx context.Context, signs string) (int, error) {
 	r.mu.Unlock()
 	if _, err := r.side.ExecContext(ctx, `INSERT INTO replica_members (id, host, version, started, seen, signs) VALUES (?, ?, ?, ?, clock_timestamp(), ?)
 		ON CONFLICT (id) DO UPDATE SET seen = clock_timestamp(), signs = excluded.signs`, r.id, r.host, version, r.started.UTC(), signs); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if signs == "" {
-		return 0, nil
+		return 0, 0, nil
 	}
-	var n int
-	err := r.side.QueryRowContext(ctx, `SELECT count(*) FROM replica_members
-		WHERE id != ? AND seen > clock_timestamp() - make_interval(secs => ?) AND signs != '' AND signs != ?`,
-		r.id, liveFor.Seconds(), signs).Scan(&n)
-	return n, err
+	err = r.side.QueryRowContext(ctx, `WITH live AS (SELECT signs, started FROM replica_members
+			WHERE seen > clock_timestamp() - make_interval(secs => ?1) AND signs != ''),
+		keys AS (SELECT signs, min(started) AS first FROM live GROUP BY signs)
+		SELECT (SELECT count(*) FROM live WHERE signs != ?2),
+			(SELECT count(*) FROM keys WHERE signs != ?2 AND first > (SELECT first FROM keys WHERE signs = ?2))`,
+		liveFor.Seconds(), signs).Scan(&others, &newer)
+	return others, newer, err
+}
+
+// SessionKeys is how many keys the live replicas sign sessions with, as
+// last counted every beatEvery: more than one while a rollout brings in
+// another, or replicas that were given different ones.
+func (l *Ledger) SessionKeys() int {
+	if l.rep == nil {
+		return 0
+	}
+	return int(l.rep.keys.Load())
 }
 
 // ReplicaID names this replica among the others; "" for a ledger no
@@ -1050,10 +1066,11 @@ func (r *replicas) beat(ctx context.Context) {
 		r.id, r.host, version, r.started.UTC(), said, signs); err != nil {
 		return
 	}
-	var n int64
-	if err := r.side.QueryRowContext(ctx, "SELECT count(*) FROM replica_members WHERE seen > clock_timestamp() - make_interval(secs => ?)",
-		liveFor.Seconds()).Scan(&n); err == nil {
+	var n, keys int64
+	if err := r.side.QueryRowContext(ctx, "SELECT count(*), count(DISTINCT nullif(signs, '')) FROM replica_members WHERE seen > clock_timestamp() - make_interval(secs => ?)",
+		liveFor.Seconds()).Scan(&n, &keys); err == nil {
 		r.live.Store(n)
+		r.keys.Store(keys)
 	}
 	var p Leader
 	var st string

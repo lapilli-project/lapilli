@@ -301,6 +301,9 @@ func (s *Server) leadership() string {
 	if s.l.WritesWaited() {
 		line += "; writes wait on the ledger's writers' turn, which another session holds"
 	}
+	if n := s.l.SessionKeys(); n > 1 {
+		line += fmt.Sprintf("; the live replicas sign sessions with %d keys", n)
+	}
 	return line
 }
 
@@ -358,12 +361,15 @@ func (s *Server) shareLimits() {
 }
 
 // joinable says this replica lives, before it serves, with the
-// fingerprint of the key it signs sessions with, and refuses to join live
-// replicas that sign them with another: a session one signs is none on the
-// next, and a sign-in begun on one fails on the other. Two started at once
-// each write their own first: one at least sees the other. Without
-// --session-key-file each process makes a key of its own, so a second
-// replica is refused, and the first warns.
+// fingerprint of the key it signs sessions with. A session one key signs
+// is none to another, and a sign-in begun on one replica fails on another
+// that signs with another key. Live replicas with another key are taken
+// for a rollout of a new key when this one's is the newest: it joins,
+// saying so, and the replicas say how many keys sign sessions until the
+// older go. One whose key is older than another live is refused: the
+// rollout replaces it. Without --session-key-file each process makes a key
+// of its own, never a new one for every replica: a second is refused, and
+// the first warns.
 func (s *Server) joinable(ctx context.Context) error {
 	if !s.l.Shared() {
 		return nil
@@ -372,18 +378,18 @@ func (s *Server) joinable(ctx context.Context) error {
 	if s.in != nil && s.in.oidc != nil {
 		signs = s.in.signs
 	}
-	n, err := s.l.Join(ctx, signs)
-	if err != nil {
+	others, newer, err := s.l.Join(ctx, signs)
+	switch {
+	case err != nil:
 		return err
-	}
-	if n > 0 {
-		why := "give them all the same key"
-		if s.cfg.SessionKey == "" {
-			why = "without --session-key-file, each process makes a key of its own: give them all the same one"
-		}
-		return fmt.Errorf("--session-key-file: %d other replicas of lapilli serve sharing this ledger sign sessions with another key: %s", n, why)
-	}
-	if signs != "" && s.cfg.SessionKey == "" {
+	case others > 0 && s.cfg.SessionKey == "":
+		return fmt.Errorf("--session-key-file: %d other replicas of lapilli serve sharing this ledger sign sessions with another key: without --session-key-file, each process makes a key of its own: give them all the same one", others)
+	case newer > 0:
+		return fmt.Errorf("--session-key-file: replicas of lapilli serve sharing this ledger sign sessions with a key newer than this one's: give this one theirs (docs/design/signin.md, changing the session key)")
+	case others > 0:
+		s.log.Warn("other replicas sharing this ledger sign sessions with an older key: taken for the key changed, and this one joins. A session one key signs is none to the other until those replicas are replaced",
+			"replicas", others)
+	case signs != "" && s.cfg.SessionKey == "":
 		s.log.Warn("sessions are signed with a key made for this process: a second replica sharing the ledger is refused until each has the same --session-key-file")
 	}
 	return nil
