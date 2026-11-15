@@ -225,6 +225,9 @@ func (l *Ledger) PutScheduled(ctx context.Context, r Scheduled, by string, at ti
 			if n >= MaxScheduled {
 				return invalid("the ledger keeps %d reports at most", MaxScheduled)
 			}
+			if err := fullOf(t, "reports"); err != nil {
+				return err
+			}
 			err = t.QueryRowContext(t.ctx, `INSERT INTO reports (name, team_id, schedule, span, zone, sections, dests, enabled, created, created_by, updated, updated_by)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
 				r.Name, r.TeamID, r.Schedule, int64(span/time.Second), r.Zone, string(sections), string(dests), r.Enabled, now, by, now, by).Scan(&id)

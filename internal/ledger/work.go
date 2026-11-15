@@ -344,11 +344,24 @@ func (l *Ledger) PutTeam(ctx context.Context, t Team, by string) (int64, error) 
 			}
 			// Renamed, a team a declared window, report or role names
 			// would leave the file naming one that isn't there.
+			// A rename in letter case alone is found all the same.
 			var name string
-			if err := tx.QueryRowContext(tx.ctx, "SELECT name FROM teams WHERE id = ?", id).Scan(&name); err == nil && name != t.Name {
+			if err := tx.QueryRowContext(tx.ctx, "SELECT name FROM teams WHERE id = ?", id).Scan(&name); err == nil && FoldName(name) != FoldName(t.Name) {
 				if err := namedByDeclared(tx, id); err != nil {
 					return err
 				}
+			}
+		} else {
+			// The UI's own most, and both kinds' together.
+			ui, all, err := originCounts(tx, "teams")
+			if err != nil {
+				return err
+			}
+			if ui >= MaxTeams {
+				return invalid("the ledger keeps %d teams made in the UI at most", MaxTeams)
+			}
+			if err := full("teams", all); err != nil {
+				return err
 			}
 		}
 		var err error
@@ -804,8 +817,14 @@ func windowsLeft(ctx context.Context, q rowQuerier, team int64) error {
 	if err := q.QueryRowContext(ctx, "SELECT count(*) FILTER (WHERE team_id = ?), count(*) FROM windows WHERE declared = 0", team).Scan(&own, &all); err != nil {
 		return err
 	}
+	var both int
+	if err := q.QueryRowContext(ctx, "SELECT count(*) FROM windows").Scan(&both); err != nil {
+		return err
+	}
 	_, limited := scopeOf(ctx)
 	switch {
+	case both >= allMost["windows"]:
+		return full("windows", both)
 	case all >= MaxWindows:
 		return invalid("the ledger keeps %d quiet windows at most: delete those no longer needed", MaxWindows)
 	case limited && own >= MaxTeamWindows:

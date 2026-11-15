@@ -342,6 +342,9 @@ func (l *Ledger) PutGrant(ctx context.Context, g Grant, by string) (int64, error
 		if n >= MaxGrants {
 			return invalid("the ledger keeps %d roles at most", MaxGrants)
 		}
+		if err := fullOf(t, "grants"); err != nil {
+			return err
+		}
 		err := t.QueryRowContext(t.ctx, "INSERT INTO grants (who, role, team_id, created, created_by) VALUES (?, ?, ?, ?, ?) RETURNING id",
 			g.Who, g.Role, g.TeamID, time.Now().Unix(), by).Scan(&id)
 		if err != nil {
