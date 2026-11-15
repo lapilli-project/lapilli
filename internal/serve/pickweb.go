@@ -26,14 +26,16 @@ import (
 // such of did. A scope is no facet of its own: what it picks (ids, each a
 // positive number) is picked by the database before the list is counted,
 // as the team is; it has no checkboxes, but a chip a value, and its values
-// are carried on every link and by the form.
+// are carried on every link and by the form. A flag is a scope of one
+// value, 1 (stale=1), picked by the page rather than the database: no
+// checkboxes, a chip that says its one label, and carried as a scope is.
 type pickFacet struct {
-	param, name    string
-	values, labels []string
-	def            []string
-	aliases        map[string][]string
-	raw            []string
-	none, scope    bool
+	param, name       string
+	values, labels    []string
+	def               []string
+	aliases           map[string][]string
+	raw               []string
+	none, scope, flag bool
 }
 
 // picksOf reads what a list's URL picks in each facet: values it offers,
@@ -45,6 +47,12 @@ func picksOf(q url.Values, fs []pickFacet) picks {
 	p := picks{}
 	for _, f := range fs {
 		vs, named := q[f.param]
+		if f.flag {
+			if slices.Contains(vs, "1") {
+				p[f.param] = []string{"1"}
+			}
+			continue
+		}
 		if f.scope {
 			for _, v := range vs {
 				if n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil && n > 0 {
@@ -159,7 +167,7 @@ type pickView struct {
 // context c.
 func pickItems(path string, c pageCtx, fs []pickFacet, p picks, n int, values func(i int, param string) []string, weight func(i int) int) ([]int, pickView) {
 	in := func(i int, f pickFacet) bool {
-		if f.scope {
+		if f.scope || f.flag {
 			return true // picked before
 		}
 		if p.none(f.param) {
@@ -179,7 +187,7 @@ func pickItems(path string, c pageCtx, fs []pickFacet, p picks, n int, values fu
 			shown = append(shown, i)
 		}
 		for _, f := range fs {
-			if f.scope {
+			if f.scope || f.flag {
 				continue
 			}
 			but := true
@@ -212,7 +220,7 @@ func pickItems(path string, c pageCtx, fs []pickFacet, p picks, n int, values fu
 func facetView(path string, c pageCtx, fs []pickFacet, p picks, counts map[string]map[string]int) pickView {
 	v := pickView{Action: path, Hidden: c.hidden()}
 	for _, f := range fs {
-		if f.scope {
+		if f.scope || f.flag {
 			for _, x := range p[f.param] {
 				v.Hidden = append(v.Hidden, field{f.param, x})
 			}
@@ -251,8 +259,11 @@ func facetView(path string, c pageCtx, fs []pickFacet, p picks, counts map[strin
 			if i := slices.Index(f.values, x); i >= 0 {
 				label = f.labels[i]
 			}
-			if f.scope {
+			switch {
+			case f.scope:
 				label = "#" + x
+			case f.flag:
+				label = f.labels[0]
 			}
 			q := picks{}
 			for _, g := range fs {
