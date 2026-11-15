@@ -22,7 +22,9 @@ import (
 // three thousand a day, the rules list with its bulk form and over a week,
 // the firings of a day by the hour and by a label, the overview with its
 // marks, an incident's page with its timeline, and bulk writes of a
-// hundred, each within its budget.
+// hundred, each within its budget; the rules list with each rule's labels
+// as chips, six a rule; and a proposal for twenty rules, each read again
+// and backtested.
 func TestManyAtOnceScale(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short")
@@ -35,7 +37,8 @@ func TestManyAtOnceScale(t *testing.T) {
 	for g := 0; g < 20; g++ {
 		fmt.Fprintf(&b, "  - name: g%d\n    rules:\n", g)
 		for i := g; i < n; i += 20 {
-			fmt.Fprintf(&b, "      - {alert: Rule%04d, expr: up == %d, labels: {severity: %s}}\n", i, i, []string{"critical", "warning", "info"}[i%3])
+			fmt.Fprintf(&b, "      - {alert: Rule%04d, expr: up == %d, for: 2m, labels: {severity: %s, tier: t%d, service: s%d, owner: o%d, env: prod, region: r%d}}\n",
+				i, i, []string{"critical", "warning", "info"}[i%3], i%4, i%7, i%11, i%3)
 		}
 	}
 	os.WriteFile(filepath.Join(rules, "shop.yaml"), []byte(b.String()), 0o644)
@@ -112,6 +115,7 @@ func TestManyAtOnceScale(t *testing.T) {
 		{"/rules/bulk", url.Values{"do": {"task"}, "rule": picks, "back": {"/rules"}}},
 		{"/rules/bulk", url.Values{"do": {"status"}, "status": {"tune"}, "rule": picks, "back": {"/rules"}}},
 		{"/firings/real", url.Values{"firing": ids, "back": {"/firings?day=2026-11-01"}}},
+		{"/rules/bulk", url.Values{"do": {"propose"}, "propose": {"for"}, "for": {"15m"}, "rule": picks[:maxPropose], "back": {"/rules"}}},
 	} {
 		began := time.Now()
 		code, body, hd := post(t, h, c.path, c.form, "same-origin")

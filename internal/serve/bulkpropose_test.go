@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -545,5 +546,40 @@ func TestProposeWhyKept(t *testing.T) {
 		if !strings.Contains(got, c.want) || stop != strings.Contains(c.want, "failed") {
 			t.Errorf("%v: %s, stop %v", c.err, got, stop)
 		}
+	}
+}
+
+// TestBulkProposeWritesBack: twenty proposals, each waiting for the heavy
+// turn and its backtest, may take longer than the server gives an answer
+// to be written (two minutes): each moves that on, so the reader is sent
+// back to the list, not shown an error for what was made.
+func TestBulkProposeWritesBack(t *testing.T) {
+	s := proposeServer(t, nil)
+	srv := httptest.NewUnstartedServer(s.Handler())
+	srv.Config.WriteTimeout = 300 * time.Millisecond
+	srv.Start()
+	defer srv.Close()
+	s.heavy <- struct{}{} // another heavy request's, for longer than that
+	go func() {
+		time.Sleep(time.Second)
+		<-s.heavy
+	}()
+	form := url.Values{"do": {"propose"}, "propose": {"for"}, "for": {"10m"}, "rule": {"BulkA", "BulkB"}, "back": {"/rules"}}
+	r, err := http.NewRequest(http.MethodPost, srv.URL+"/rules/bulk", strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Host = "example.com"
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	r.Header.Set("X-Forwarded-Email", bo)
+	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := c.Do(r)
+	if err != nil {
+		t.Fatalf("no answer: %v", err)
+	}
+	resp.Body.Close()
+	if res := bulkOf(mustQuery(t, resp.Header.Get("Location"))); resp.StatusCode != http.StatusSeeOther || res == nil || res.Done != 2 {
+		t.Errorf("%d %s", resp.StatusCode, resp.Header.Get("Location"))
 	}
 }

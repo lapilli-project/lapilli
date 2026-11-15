@@ -328,6 +328,10 @@ tr.task-done td, tr.task-dropped td { color: var(--dim); }
   aside.facets-side { display: none; }
 }
 details.facets-menu { margin: 0 0 1rem; }
+/* Above the table, the facets side by side as they fit, so that the table
+   isn't pushed a screen down; the search and the buttons across them. */
+details.facets-menu form.facets { grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: .6rem 1.2rem; }
+details.facets-menu form.facets > :not(fieldset) { grid-column: 1 / -1; }
 form.facets { display: grid; gap: .8rem; }
 form.facets input[type=search] { width: 100%; }
 form.facets fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
@@ -342,14 +346,15 @@ a.chip { display: inline-block; padding: .1rem .7rem; border: 1px solid var(--li
 a.chip:hover { background: var(--accent-soft); }
 /* What makes the table wide, measured: a name or a label value in one
    word, a team's name, a number's notes kept on one line, the headers.
-   Names, teams and label values wrap anywhere, a number's notes under it,
-   a header between its words (Korean's too, keep-all, not between its
-   syllables); the cells are a little tighter. */
-.rules-main table th, .rules-main table td { padding: .5rem; }
-.rules-main table th { white-space: normal; word-break: keep-all; }
-.rules-main td.n .quiet { white-space: normal; word-break: keep-all; }
-td.rule { min-width: 11rem; }
-td.rule bdi, td.name { overflow-wrap: anywhere; }
+   Names and label values wrap anywhere; a team's name between its words
+   and after its hyphens; a number's notes under it, a little smaller; a
+   header between its words, a little smaller (Korean's too, keep-all, not
+   between its syllables); the cells are a little tighter. */
+.rules-main table th, .rules-main table td { padding: .5rem .4rem; }
+.rules-main table th { white-space: normal; word-break: keep-all; font-size: .85rem; }
+.rules-main td.n .quiet { white-space: normal; word-break: keep-all; font-size: .8rem; }
+td.rule { min-width: 10rem; }
+td.rule bdi { overflow-wrap: anywhere; }
 .badges { display: inline; }
 .badge { display: inline-block; font-size: .8rem; line-height: 1.5; padding: 0 .5rem; margin: .1rem 0; border-radius: 9999px; border: 1px solid var(--line-strong); color: var(--dim); background: var(--card); white-space: nowrap; text-decoration: none; font-weight: 400; }
 .badge.perf-noisy { color: var(--on-lav); background: var(--tint-lav); border-color: transparent; }

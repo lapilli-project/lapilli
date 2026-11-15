@@ -109,7 +109,13 @@ func (s *Server) bulkPropose(w http.ResponseWriter, r *http.Request, rules []str
 		}
 	}
 	by := s.user(r)
+	rc := http.NewResponseController(w)
 	for i, rule := range rules {
+		// Each has its wait for the heavy turn and its backtest's time
+		// before the answer is due: twenty may take longer than the
+		// server's two minutes to write it, and the reader would see an
+		// error for what was made.
+		rc.SetWriteDeadline(time.Now().Add(busyWait + s.cfg.Timeout + time.Minute))
 		q := ask{Rule: rule, From: "person"}
 		var err error
 		switch what {
