@@ -82,6 +82,12 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			return err
 		}
 	}
+	if len(r.Unrecorded) > 0 {
+		fmt.Fprintf(w, "\nRules that fired as often as a noisy rule, with no record to judge them by:\n")
+		for _, u := range r.Unrecorded {
+			fmt.Fprintf(w, "  %s: %s\n", Clean(u.Rule), u.Text())
+		}
+	}
 	outlasting(w, r.Rules)
 	if len(r.Suggestions) > 0 {
 		fmt.Fprintf(w, "\nNoisy rules that a longer \"for\" would quiet, still catching every incident they caught:\n")

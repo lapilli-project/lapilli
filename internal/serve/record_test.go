@@ -16,6 +16,8 @@ import (
 
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -221,5 +223,93 @@ func TestNoRecordPages(t *testing.T) {
 	missing.Unlock()
 	if _, body, _ := get(t, week.Handler(), "/rules?week=2026-10-26"); !strings.Contains(body, "No incident was written down in the week of 2026-10-26") {
 		t.Error("a week's list doesn't say it has no record")
+	}
+}
+
+// pastBound is the test history, with the Errors rule's bound a fifth
+// further, errors > 6, held as errors > 5 is: each firing went well past it.
+type pastBound struct{ replay.History }
+
+func (p pastBound) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	if expr == "errors > 6" {
+		expr = "errors > 5"
+	}
+	return p.History.QueryRange(ctx, expr, start, end, step)
+}
+
+// TestDigestUnrecorded: the week before has no record, and Errors fired 14
+// times in it: the digest works out what its firings were and keeps it,
+// and the digest's text, the rule's page in place of a suggestion, the
+// overview first among what to look at, and MCP say it, in each language;
+// once an incident is written down for the week, none of them does.
+func TestDigestUnrecorded(t *testing.T) {
+	var got string
+	slack := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got = string(b)
+	}))
+	defer slack.Close()
+	hook := filepath.Join(t.TempDir(), "hook")
+	os.WriteFile(hook, []byte(slack.URL+"/services/T/B/SECRET"), 0o600)
+	s, _ := server(t, func(c *Config) { c.Slack = hook; c.Backfill = 10 * 24 * time.Hour })
+	s.h = pastBound{s.h}
+	ctx := context.Background()
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	from := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
+	r, ok, err := s.l.ForPeriod(ctx, "unrecorded", from)
+	if err != nil || !ok {
+		t.Fatalf("kept %v %v", ok, err)
+	}
+	var us []verdict.Unrecorded
+	if err := r.Decode(&us); err != nil || len(us) != 1 {
+		t.Fatalf("%+v %v", us, err)
+	}
+	u := us[0]
+	if u.Rule != "Errors" || u.Firings != 14 || u.Clear == nil || *u.Clear != 14 || u.Bound != "> 5" || u.Alerts != 1 ||
+		len(u.Top) != 1 || u.Top[0].Labels["service"] != "search" || u.Top[0].Firings != 14 {
+		t.Errorf("%+v", u)
+	}
+	if !strings.Contains(got, "Errors: Fired 14 times with no incident written down to judge them by. All 14 went well past its bound") {
+		t.Errorf("the digest:\n%s", got)
+	}
+
+	h := s.Handler()
+	_, body, _ := get(t, h, "/rules/Errors")
+	for _, want := range []string{"In the week of 2026-10-26 it fired 14 times with no incident written down to judge them by.",
+		"All 14 went well past its bound (> 5), not a flicker at its edge: these happened.", "A longer for would hide them", "Its firings, to mark the real ones"} {
+		if !strings.Contains(html.UnescapeString(body), want) {
+			t.Errorf("/rules/Errors: no %q", want)
+		}
+	}
+	d, err := s.overview(httptest.NewRequest(http.MethodGet, "/", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if as := d.(dashboard).Actions; len(as) == 0 || as[0].Text != "Errors fired 14 times with no incident written down" || as[0].Kind != "tune" {
+		t.Errorf("what to look at: %+v", as)
+	}
+	_, out, err := s.toolRules(ctx, nil, rulesIn{Weeks: 4})
+	if err != nil || len(out.Rules) == 0 || out.Rules[0].Unrecorded == nil || out.Rules[0].Unrecorded.Clear == nil || *out.Rules[0].Unrecorded.Clear != 14 {
+		t.Errorf("MCP rules: %+v %v", out.Rules, err)
+	}
+	missing.Lock()
+	clear(missing.m)
+	missing.Unlock()
+	pageA11y(t, h, "", "/", "/rules/Errors")
+	missing.Lock()
+	for k := range missing.m {
+		lang, msg, _ := strings.Cut(k, "\x00")
+		t.Errorf("%s has no translation for %q", lang, msg)
+	}
+	missing.Unlock()
+
+	// Written down since: the week has a record, and nothing is said.
+	keepRecordIn(t, s)
+	if _, body, _ := get(t, h, "/rules/Errors"); strings.Contains(body, "with no incident written down to judge them by") {
+		t.Error("/rules/Errors: said once the week has a record")
 	}
 }

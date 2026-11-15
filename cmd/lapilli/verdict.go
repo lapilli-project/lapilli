@@ -1262,6 +1262,23 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "lapilli verdict: looking for near misses: %v\n", err)
 			}
 		}
+		// With no record, what the firings of the rules that fired most were:
+		// how many went well past their bound, and from which alerts.
+		if !f.metrics && rep.NoRecord && len(versions) > 0 {
+			fired := func(rule string) ([]firing.Firing, error) {
+				var out []firing.Firing
+				for _, x := range fs {
+					if x.Rule == rule && x.Active(f.opts.From, f.opts.To) {
+						out = append(out, x)
+					}
+				}
+				return out, nil
+			}
+			var err error
+			if rep.Unrecorded, err = source.Unrecorded(ctx, h, versions, rep, fired, nil, f.step); err != nil && ctx.Err() == nil {
+				fmt.Fprintf(stderr, "lapilli verdict: looking at the firings with no record to judge them by: %v\n", err)
+			}
+		}
 		reports = append(reports, rep)
 	}
 	text := func(w io.Writer) error {

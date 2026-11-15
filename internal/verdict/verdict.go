@@ -221,6 +221,10 @@ type Report struct {
 	// NearMissesCut says the time ran out before every incident was looked
 	// at for near misses.
 	NearMissesCut bool `json:"near_misses_cut,omitempty"`
+	// Unrecorded are, of a period with no record (NoRecord), the rules
+	// replayed that fired as often as a noisy rule, and what their firings
+	// were: the most firings first.
+	Unrecorded []Unrecorded `json:"unrecorded,omitempty"`
 	// Unreplayed are the rules that couldn't be replayed, as
 	// UnreplayedRules gives them, set by the run that replayed them: in
 	// lapilli verdict's --json, and named at the top of its text. A report

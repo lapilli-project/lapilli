@@ -1462,5 +1462,21 @@
  "a for as long as the range its condition counts events over, or longer: one event alone can never fire it": "条件がイベントを数える範囲と同じか、それより長い for: イベント 1 回だけでは決して発火しません",
  "Its for (%s) is as long as the %s its condition counts over, or longer: one event alone can never fire it; only events that keep coming for %s will.": "for（%s）が、条件が数える範囲（%s）と同じか、それより長いです。イベント 1 回だけでは決して発火せず、%s のあいだイベントが続いたときだけ発火します。",
  "As proposed, its for (%s) is as long as the %s its condition counts over, or longer: one event alone could never fire it; only events that keep coming for %s would.": "提案どおりだと、for（%s）が条件が数える範囲（%s）と同じか、それより長くなります。イベント 1 回だけでは決して発火せず、%s のあいだイベントが続いたときだけ発火するようになります。",
- "Its condition counts events over %s: with a for that long or longer, one event alone can never fire it.": "このルールの条件は %s のあいだのイベントを数えます。for をそれと同じか、それより長くすると、イベント 1 回だけでは決して発火しません。"
+ "Its condition counts events over %s: with a for that long or longer, one event alone can never fire it.": "このルールの条件は %s のあいだのイベントを数えます。for をそれと同じか、それより長くすると、イベント 1 回だけでは決して発火しません。",
+ "In the week of %s it fired %d times with no incident written down to judge them by.": "%s の週に、判定するための記録済みインシデントがないまま %d 回発火しました。",
+ "All %d went well past its bound (%s), not a flicker at its edge: these happened.": "%d 件すべてが閾値（%s）を大きく超えました。閾値付近の一時的な揺れではなく、実際に起きたことです。",
+ "%d of them went well past its bound (%s), not a flicker at its edge: these happened.": "そのうち %d 件が閾値（%s）を大きく超えました。閾値付近の一時的な揺れではなく、実際に起きたことです。",
+ "None went well past its bound (%s): each came within a fifth of it.": "閾値（%s）を大きく超えたものはありません。どれも閾値の 5 分の 1 以内でした。",
+ "%d came during a deploy.": "%d 件はデプロイ中に発火しました。",
+ "All came from one alert:": "すべて 1 つのアラートからです:",
+ "Most came from these, of %d alerts:": "%d 件のアラートのうち、ほとんどがこれらからです:",
+ "Most came from:": "ほとんどがこれらからです:",
+ "(what %s owns)": "（%s が所有する対象）",
+ "A longer for would hide them: write down whether they mattered (This was real), or fix what fires them.": "for を長くすると、これらの発火が隠れてしまいます。重要だったかを記録するか（実際の問題だった）、発火の原因を直してください。",
+ "Write down whether they mattered (This was real), or fix what fires them.": "重要だったかを記録するか（実際の問題だった）、発火の原因を直してください。",
+ "Its firings, to mark the real ones": "発火の一覧で実際の問題に印を付ける",
+ "Find out why %s fires": "%s が発火する原因を調べる",
+ "did they matter? Write it down, or fix what fires them": "重要でしたか？記録するか、発火の原因を直してください",
+ "%d went well past its bound, not a flicker at its edge: did they matter? A longer for would hide them.": "%d 件が閾値を大きく超えました。一時的な揺れではありません。重要でしたか？for を長くすると隠れてしまいます。",
+ "%s fired %d times with no incident written down": "%s: 記録済みインシデントなしで %d 回発火"
 }

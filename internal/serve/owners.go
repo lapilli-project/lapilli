@@ -149,6 +149,17 @@ func (o *owners) teamOf(rule string) string {
 	return o.byID[o.rule[rule]].Name
 }
 
+// labelTeam is the name of the team whose labels an alert has: the first
+// by name, as a rule's are found (owners); "" for none.
+func (o *owners) labelTeam(labels map[string]string) string {
+	for _, t := range o.teams {
+		if len(t.Labels) > 0 && has(labels, t.Labels) {
+			return t.Name
+		}
+	}
+	return ""
+}
+
 // ownsIncident reports whether a team owns an incident: one of its rules
 // caught it, or it has a value of a label the team owns by.
 func (o *owners) ownsIncident(t ledger.Team, in ledger.Incident) bool {

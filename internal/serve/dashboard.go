@@ -102,6 +102,9 @@ const (
 	heatRows             = 12
 	actionsShown         = 8
 	missedShownInActions = 3
+	// unrecordedShown is how many rules that fired often with no record
+	// what to look at names.
+	unrecordedShown = 5
 )
 
 type tick struct {
@@ -783,27 +786,53 @@ func (s *Server) heat(l string, t *tallies, lines []ruleLine) ([]heatRow, []stri
 	return rows, labels
 }
 
-// actions are what to look at this week, the most telling first. noRecord
-// says the four weeks' record isn't kept: that comes first, as nothing
-// else is judged.
+// actions are what to look at this week, the most telling first: the
+// rules the last digest found firing often with no record to judge them
+// by, those that went well past their bound most first; then, when the
+// four weeks' record isn't kept (noRecord), that, as nothing else is
+// judged.
 func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []ledger.Incident, undecided int, noRecord bool) []action {
 	var out []action
+	path := func(name string) string { return "/rules/" + url.PathEscape(name) }
+	var unrec []*unrecordedView
+	for _, x := range lines {
+		if x.Unrecord != nil {
+			unrec = append(unrec, x.Unrecord)
+		}
+	}
+	slices.SortStableFunc(unrec, func(a, b *unrecordedView) int {
+		if a.Clear != b.Clear {
+			return b.Clear - a.Clear
+		}
+		if a.Firings != b.Firings {
+			return b.Firings - a.Firings
+		}
+		return strings.Compare(a.Rule, b.Rule)
+	})
+	for _, u := range unrec[:min(len(unrec), unrecordedShown)] {
+		d := tr(l, "did they matter? Write it down, or fix what fires them")
+		if u.Clear > 0 {
+			d = tr(l, "%d went well past its bound, not a flicker at its edge: did they matter? A longer for would hide them.", u.Clear)
+		}
+		out = append(out, action{Text: tr(l, "%s fired %d times with no incident written down", u.Rule, u.Firings), Detail: d, Href: path(u.Rule),
+			Kind: "tune", Rule: u.Rule, Title: tr(l, "Find out why %s fires", u.Rule)})
+	}
 	if noRecord && slices.ContainsFunc(lines, func(x ruleLine) bool { return x.Firings > 0 }) {
 		out = append(out, action{Text: tr(l, "No incident written down to judge the firings by"),
 			Detail: tr(l, "in the last four weeks or the two before them: a firing that caught nothing can't be told from one nobody wrote down, so no rule is called noisy. Write incidents down, or mark the firings that were real."),
 			Href:   "/incidents"})
 	}
-	path := func(name string) string { return "/rules/" + url.PathEscape(name) }
 	// What speaks of four weeks links to the rule's page over them.
 	four := func(name string) string { return path(name) + "?weeks=4" }
+	// A rule said above isn't said again.
 	for _, x := range lines {
-		if x.Suggestion != "" {
+		if x.Suggestion != "" && x.Unrecord == nil {
 			out = append(out, action{Text: tr(l, "Quiet %s", x.Name), Detail: x.Suggestion, Href: path(x.Name),
 				Kind: "tune", Rule: x.Name, Title: tr(l, "Quiet %s", x.Name) + ": " + x.Suggestion})
 		}
 	}
 	for _, x := range lines {
-		if x.Noisy && x.Suggestion == "" {
+		if x.Noisy && x.Suggestion == "" && x.Unrecord == nil {
 			d := tr(l, "fired %d times in four weeks, %d caught something", x.Firings, x.White)
 			if x.Streak > 1 {
 				d += tr(l, "; noisy %d weeks running", x.Streak)

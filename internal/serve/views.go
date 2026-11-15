@@ -220,7 +220,10 @@ type ruleLine struct {
 	// NoRecord says it fired over weeks whose record isn't kept: its
 	// precision isn't known, and it isn't noisy; Unrecorded, that it fired
 	// as often as a noisy rule fires, with no record to judge it by.
-	NoRecord, Unrecorded    bool
+	NoRecord, Unrecorded bool
+	// Unrecord is what the last digest said its firings were, of a week
+	// with no record: in place of a suggestion.
+	Unrecord                *unrecordedView
 	Spark                   []spark
 	Suggestion, Unsupported string
 	// Source is where a rule's firings were recorded before they were
@@ -498,6 +501,10 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 	if err != nil {
 		return nil, nil, err
 	}
+	unrec, unrecWeek, err := s.unrecordedWeek(ctx, t)
+	if err != nil {
+		return nil, nil, err
+	}
 	sum := map[int64]*ruleLine{}
 	recent := t.weeks[len(t.weeks)-n:]
 	for _, w := range recent {
@@ -574,6 +581,9 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 				Title: fmt.Sprintf("%s: %d ○ %d ●", s.l.Midnight(w).In(s.cfg.Loc).Format("01-02"), x.White, x.Black())})
 		}
 		l.Suggestion = sugg[l.Name]
+		if u, ok := unrec[l.Name]; ok {
+			l.Unrecord = unrecordedViewOf(u, unrecWeek)
+		}
 		out = append(out, *l)
 	}
 	sort.Slice(out, func(a, b int) bool {

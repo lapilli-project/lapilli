@@ -1462,5 +1462,21 @@
  "a for as long as the range its condition counts events over, or longer: one event alone can never fire it": "un for tan largo como el rango sobre el que su condición cuenta eventos, o más: un evento solo nunca puede dispararla",
  "Its for (%s) is as long as the %s its condition counts over, or longer: one event alone can never fire it; only events that keep coming for %s will.": "Su for (%s) es tan largo como los %s sobre los que cuenta su condición, o más: un evento solo nunca puede dispararla; solo lo harán eventos que sigan llegando durante %s.",
  "As proposed, its for (%s) is as long as the %s its condition counts over, or longer: one event alone could never fire it; only events that keep coming for %s would.": "Tal como se propone, su for (%s) es tan largo como los %s sobre los que cuenta su condición, o más: un evento solo nunca podría dispararla; solo lo harían eventos que sigan llegando durante %s.",
- "Its condition counts events over %s: with a for that long or longer, one event alone can never fire it.": "Su condición cuenta eventos durante %s: con un for así de largo o más, un evento solo nunca puede dispararla."
+ "Its condition counts events over %s: with a for that long or longer, one event alone can never fire it.": "Su condición cuenta eventos durante %s: con un for así de largo o más, un evento solo nunca puede dispararla.",
+ "In the week of %s it fired %d times with no incident written down to judge them by.": "En la semana del %s se disparó %d veces sin ningún incidente registrado con el que juzgarlas.",
+ "All %d went well past its bound (%s), not a flicker at its edge: these happened.": "Los %d pasaron con creces su umbral (%s), no un parpadeo en el borde: ocurrieron.",
+ "%d of them went well past its bound (%s), not a flicker at its edge: these happened.": "%d de ellos pasaron con creces su umbral (%s), no un parpadeo en el borde: ocurrieron.",
+ "None went well past its bound (%s): each came within a fifth of it.": "Ninguno pasó con creces su umbral (%s): todos quedaron a menos de una quinta parte de él.",
+ "%d came during a deploy.": "%d llegaron durante un despliegue.",
+ "All came from one alert:": "Todos vinieron de una sola alerta:",
+ "Most came from these, of %d alerts:": "La mayoría vino de estas, de %d alertas:",
+ "Most came from:": "La mayoría vino de:",
+ "(what %s owns)": "(lo que posee %s)",
+ "A longer for would hide them: write down whether they mattered (This was real), or fix what fires them.": "Un for más largo los ocultaría: registra si importaban (Esto fue real), o arregla lo que los dispara.",
+ "Write down whether they mattered (This was real), or fix what fires them.": "Registra si importaban (Esto fue real), o arregla lo que los dispara.",
+ "Its firings, to mark the real ones": "Sus disparos, para marcar los reales",
+ "Find out why %s fires": "Averiguar por qué se dispara %s",
+ "did they matter? Write it down, or fix what fires them": "¿importaban? Regístralo, o arregla lo que los dispara",
+ "%d went well past its bound, not a flicker at its edge: did they matter? A longer for would hide them.": "%d pasaron con creces su umbral, no un parpadeo en el borde: ¿importaban? Un for más largo los ocultaría.",
+ "%s fired %d times with no incident written down": "%s se disparó %d veces sin ningún incidente registrado"
 }

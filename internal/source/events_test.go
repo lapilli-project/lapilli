@@ -2,11 +2,14 @@ package source
 
 import (
 	"context"
+	"reflect"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
@@ -91,5 +94,68 @@ func TestSuggestNotPastTheWindow(t *testing.T) {
 	}
 	if got := Suggest(context.Background(), restarts{}, versions[0].Rules, rep, nil, o, time.Minute, nil); len(got) != 0 {
 		t.Errorf("suggested with no record %+v", got)
+	}
+}
+
+// firedOf gives a rule's firings, as a report judged them.
+func firedOf(rep *verdict.Report) func(string) ([]firing.Firing, error) {
+	return func(rule string) ([]firing.Firing, error) {
+		var out []firing.Firing
+		for _, j := range rep.Firings {
+			if j.Rule == rule {
+				out = append(out, j.Firing)
+			}
+		}
+		return out, nil
+	}
+}
+
+// With no incident written down, the restart rule isn't noisy: what its
+// firings were is said instead. Each restart held the count at 1, well past
+// the bound of 0.5, so 36 of its 37 firings happened; the flicker at 0.55
+// didn't go past 0.6. Its alerts, by the label that tells them apart, with
+// the team whose labels each has.
+func TestUnrecorded(t *testing.T) {
+	versions, rep, _ := restartsWeek(t, nil)
+	teamOf := func(l map[string]string) string {
+		if l["pod"] == "a" {
+			return "web"
+		}
+		return ""
+	}
+	us, err := Unrecorded(context.Background(), restarts{}, versions, rep, firedOf(rep), teamOf, time.Minute)
+	if err != nil || len(us) != 1 {
+		t.Fatalf("%+v %v", us, err)
+	}
+	u := us[0]
+	if u.Rule != "Restarts" || u.Firings != 37 || u.Clear == nil || *u.Clear != 36 || u.Bound != "> 0.5" || u.Alerts != 3 {
+		t.Errorf("%+v", u)
+	}
+	want := []verdict.AlertCount{{Labels: map[string]string{"pod": "a"}, Firings: 18, Team: "web"}, {Labels: map[string]string{"pod": "b"}, Firings: 18},
+		{Labels: map[string]string{"pod": "c"}, Firings: 1}}
+	if !reflect.DeepEqual(u.Top, want) {
+		t.Errorf("top %+v", u.Top)
+	}
+	if got := u.Text(); got != `Fired 37 times with no incident written down to judge them by. 36 of them went well past its bound (> 0.5), not a flicker at its edge: these happened. Most came from: pod=a 18 (web), pod=b 18, pod=c 1. A longer "for" would hide them: write down whether they mattered, or fix what fires them.` {
+		t.Errorf("text %q", got)
+	}
+
+	// Judged, nothing to say.
+	away := []incident.Incident{{ID: "INC-1", Start: t0.Add(6 * 24 * time.Hour), End: t0.Add(6*24*time.Hour + time.Hour), Labels: incident.Labels{"service": {"x"}}}}
+	versions, rep, _ = restartsWeek(t, away)
+	if us, err := Unrecorded(context.Background(), restarts{}, versions, rep, firedOf(rep), nil, time.Minute); err != nil || len(us) != 0 {
+		t.Errorf("with a record: %+v %v", us, err)
+	}
+
+	// A condition with no one bound that decides it: how many went past it
+	// isn't known, and isn't guessed.
+	versions, rep, _ = restartsWeek(t, nil)
+	versions[0].Rules[0].Expr = "up == 1 and increase(restarts[30m]) > 0.5"
+	us, err = Unrecorded(context.Background(), restarts{}, versions, rep, firedOf(rep), nil, time.Minute)
+	if err != nil || len(us) != 1 || us[0].Clear != nil || us[0].Bound != "" || us[0].Alerts != 3 {
+		t.Errorf("and: %+v %v", us, err)
+	}
+	if strings.Contains(us[0].Text(), "well past") || strings.Contains(us[0].Text(), "would hide") {
+		t.Errorf("and: %q", us[0].Text())
 	}
 }

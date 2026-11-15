@@ -1,6 +1,8 @@
 package verdict
 
 import (
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -114,5 +116,35 @@ func TestCompareNoRecord(t *testing.T) {
 	}
 	if !strings.Contains(b.String(), NoRecordCompared) || strings.Contains(b.String(), "No incidents were given") {
 		t.Errorf("markdown:\n%s", b.String())
+	}
+}
+
+// A rule's alerts are named by the labels that tell them apart, the most
+// firings first, five at most; one alone, by its own.
+func TestTopAlerts(t *testing.T) {
+	var all []AlertCount
+	for i := range 7 {
+		all = append(all, AlertCount{Labels: map[string]string{"alertname": "R", "team": "infra", "pod": fmt.Sprintf("p%d", i), "ns": "a"}, Firings: i + 1})
+	}
+	n, top := TopAlerts(all)
+	if n != 7 || len(top) != TopShown || top[0].Firings != 7 || !reflect.DeepEqual(top[0].Labels, map[string]string{"pod": "p6"}) {
+		t.Errorf("%d %+v", n, top)
+	}
+	n, top = TopAlerts(all[:1])
+	if n != 1 || !reflect.DeepEqual(top[0].Labels, map[string]string{"pod": "p0", "ns": "a", "team": "infra"}) {
+		t.Errorf("one: %d %+v", n, top)
+	}
+	u := Unrecorded{Rule: "R", Firings: 12, Alerts: 1, Top: top}
+	if got := u.Text(); got != "Fired 12 times with no incident written down to judge them by. All came from one alert: ns=a pod=p0 team=infra. Write down whether they mattered, or fix what fires them." {
+		t.Errorf("%q", got)
+	}
+	zero, all7 := 0, 12
+	u.Clear, u.Bound = &zero, "> 0.5"
+	if got := u.Text(); !strings.Contains(got, "None went well past its bound (> 0.5): each came within a fifth of it.") || strings.Contains(got, "would hide") {
+		t.Errorf("%q", got)
+	}
+	u.Clear = &all7
+	if got := u.Text(); !strings.Contains(got, "All 12 went well past its bound (> 0.5), not a flicker at its edge: these happened.") || !strings.Contains(got, "would hide") {
+		t.Errorf("%q", got)
 	}
 }

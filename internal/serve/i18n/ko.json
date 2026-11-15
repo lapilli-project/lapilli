@@ -1462,5 +1462,21 @@
  "a for as long as the range its condition counts events over, or longer: one event alone can never fire it": "조건이 이벤트를 세는 범위만큼, 또는 그보다 긴 for: 이벤트 하나로는 절대 발화하지 않아요",
  "Its for (%s) is as long as the %s its condition counts over, or longer: one event alone can never fire it; only events that keep coming for %s will.": "for(%s)가 조건이 세는 범위(%s)와 같거나 더 길어요. 이벤트 하나로는 절대 발화하지 않고, %s 동안 이벤트가 계속 이어질 때만 발화해요.",
  "As proposed, its for (%s) is as long as the %s its condition counts over, or longer: one event alone could never fire it; only events that keep coming for %s would.": "제안대로라면 for(%s)가 조건이 세는 범위(%s)와 같거나 더 길어져요. 이벤트 하나로는 절대 발화하지 않고, %s 동안 이벤트가 계속 이어질 때만 발화하게 돼요.",
- "Its condition counts events over %s: with a for that long or longer, one event alone can never fire it.": "이 룰의 조건은 %s 동안의 이벤트를 세요. for를 그만큼 또는 더 길게 하면 이벤트 하나로는 절대 발화하지 않아요."
+ "Its condition counts events over %s: with a for that long or longer, one event alone can never fire it.": "이 룰의 조건은 %s 동안의 이벤트를 세요. for를 그만큼 또는 더 길게 하면 이벤트 하나로는 절대 발화하지 않아요.",
+ "In the week of %s it fired %d times with no incident written down to judge them by.": "%s 주에 판정할 기록된 인시던트 없이 %d번 발화했어요.",
+ "All %d went well past its bound (%s), not a flicker at its edge: these happened.": "%d건 모두 임계값(%s)을 크게 넘었어요. 임계값 근처에서 잠깐 튄 게 아니라 실제로 일어난 일이에요.",
+ "%d of them went well past its bound (%s), not a flicker at its edge: these happened.": "그중 %d건은 임계값(%s)을 크게 넘었어요. 임계값 근처에서 잠깐 튄 게 아니라 실제로 일어난 일이에요.",
+ "None went well past its bound (%s): each came within a fifth of it.": "임계값(%s)을 크게 넘은 건 없어요. 모두 임계값의 5분의 1 안쪽이었어요.",
+ "%d came during a deploy.": "%d건은 배포 중에 발화했어요.",
+ "All came from one alert:": "모두 알림 하나에서 나왔어요:",
+ "Most came from these, of %d alerts:": "알림 %d개 중 대부분이 여기서 나왔어요:",
+ "Most came from:": "대부분 여기서 나왔어요:",
+ "(what %s owns)": "(%s 소유 대상)",
+ "A longer for would hide them: write down whether they mattered (This was real), or fix what fires them.": "for를 늘리면 이 발화들이 가려져요. 중요했는지 기록하거나(실제 문제였음), 발화 원인을 고쳐 주세요.",
+ "Write down whether they mattered (This was real), or fix what fires them.": "중요했는지 기록하거나(실제 문제였음), 발화 원인을 고쳐 주세요.",
+ "Its firings, to mark the real ones": "발화 목록에서 실제 문제 표시하기",
+ "Find out why %s fires": "%s 발화 원인 찾기",
+ "did they matter? Write it down, or fix what fires them": "중요했나요? 기록하거나, 발화 원인을 고쳐 주세요",
+ "%d went well past its bound, not a flicker at its edge: did they matter? A longer for would hide them.": "%d건이 임계값을 크게 넘었어요. 잠깐 튄 게 아니에요. 중요했나요? for를 늘리면 가려져요.",
+ "%s fired %d times with no incident written down": "%s: 기록된 인시던트 없이 %d번 발화"
 }

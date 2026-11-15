@@ -1299,6 +1299,7 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 		}
 		var sugg []verdict.Suggestion
 		var near []verdict.NearMiss
+		var unrec []verdict.Unrecorded
 		if s.replaying() {
 			in, err := s.replayInput(ctx, rep, from, to, o)
 			if err != nil {
@@ -1333,8 +1334,16 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 			} else {
 				seen = seenNow(seen, rep, nil)
 			}
+			// With no record, no rule was noisy: what the firings of those
+			// that fired as often were, in the time that is left.
+			if unrec, err = s.unrecordedOf(rctx, in, rep, from, to); err != nil {
+				s.log.Warn("the digest's firings with no record to judge them by weren't all looked at", "err", err)
+			}
 		}
 		if err := s.l.AddResult(ctx, "suggestions", s.now(), from, to, orNone(sugg)); err != nil {
+			return true, err
+		}
+		if err := s.l.ReplaceResult(ctx, "unrecorded", s.now(), from, to, orNoneOf(unrec)); err != nil {
 			return true, err
 		}
 		if err := s.keepNear(ctx, from, to, cursor, seen, orNoneOf(near)); err != nil {
@@ -1759,6 +1768,16 @@ func (s *Server) digestReport(ctx context.Context, from, to time.Time, o verdict
 		open[ir.ID] = ir.Missed() || ir.OnlyNoisy()
 	}
 	rep.NearMisses = slices.DeleteFunc(rep.NearMisses, func(nm verdict.NearMiss) bool { return !open[nm.Incident] })
+	// What the firings with no record were, while the week still has none.
+	if rep.NoRecord {
+		if r, ok, err := s.l.ForPeriod(ctx, "unrecorded", from); err != nil {
+			return nil, err
+		} else if ok {
+			if err := r.Decode(&rep.Unrecorded); err != nil {
+				return nil, err
+			}
+		}
+	}
 	return rep, nil
 }
 
@@ -1916,6 +1935,9 @@ func digestAbout(rep *verdict.Report, text, team string, spare []string) map[str
 	about := map[string]any{"from": rep.From.UTC(), "to": rep.To.UTC(), "firings": firings, "caught": white, "nothing": firings - white,
 		"never_fired": silent, "incidents": len(rep.Incidents), "missed": missed, "only_noisy": onlyNoisy,
 		"noisy_rules": noisy, "spare_rules": spare, "suggestions": suggestions,
+		// With no record, no rule is noisy: what the firings of those that
+		// fired as often were.
+		"no_record": rep.NoRecord, "unrecorded": orNoneOf(rep.Unrecorded),
 		// text is the report as written, from rule names and incident titles
 		// others wrote: escape it for where it goes. slack_text is it as the
 		// Slack digest posts it.
@@ -1937,6 +1959,11 @@ func teamReport(rep *verdict.Report, o *owners, t ledger.Team, server *verdict.H
 		out.Hours = o.schedules(server).used(nil, &t)
 	}
 	out.Suggestions = slices.DeleteFunc(slices.Clone(rep.Suggestions), func(x verdict.Suggestion) bool { return o.rule[x.Rule] != t.ID })
+	// Its rules' firings with no record, and those of another's on what it
+	// owns, by the labels they had.
+	out.Unrecorded = slices.DeleteFunc(slices.Clone(rep.Unrecorded), func(u verdict.Unrecorded) bool {
+		return o.rule[u.Rule] != t.ID && !slices.ContainsFunc(u.Top, func(a verdict.AlertCount) bool { return a.Team == t.Name })
+	})
 	out.Incidents = slices.DeleteFunc(slices.Clone(rep.Incidents), func(in verdict.IncidentResult) bool {
 		return !o.ownsIncident(t, ledger.Incident{Incident: in.Incident, CaughtBy: in.CaughtBy})
 	})
