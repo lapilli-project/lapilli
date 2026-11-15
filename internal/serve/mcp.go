@@ -628,7 +628,11 @@ func saysOutOf(v *saysView) *saysOut {
 	out := &saysOut{Summary: v.Summary, Description: v.Description, Runbook: v.Runbook, Template: v.Template, Severity: v.Severity,
 		Problems: []contentOut{}, Guesses: []contentOut{}}
 	for _, f := range v.Problems {
-		out.Problems = append(out.Problems, contentOut{Check: f.Kind, Class: f.Class, Message: f.Key, Detail: f.Detail})
+		x := contentOut{Check: f.Kind, Class: f.Class, Message: f.Key, Detail: f.Detail}
+		if f.Outlasts != nil {
+			x.Message = f.Outlasts.Text() // what it means, for this rule
+		}
+		out.Problems = append(out.Problems, x)
 	}
 	for _, f := range v.Guesses {
 		out.Guesses = append(out.Guesses, contentOut{Check: f.Kind, Class: f.Class, Message: f.Key, Detail: f.Detail, Why: f.Why()})
@@ -647,6 +651,8 @@ type proposalOut struct {
 	Diff   string `json:"diff"`
 	Link   string `json:"link,omitempty"`
 	Reason string `json:"reason,omitempty" jsonschema:"why it was refused or failed"`
+	// Outlasts warns of a for proposed that one event can't outlast.
+	Outlasts string `json:"for_outlasts,omitempty" jsonschema:"for a for proposed as long as the range the rule's condition counts events over, or longer: what it means, that one event alone could never fire it"`
 }
 
 type checkOut struct {
@@ -723,8 +729,12 @@ func (s *Server) toolRule(ctx context.Context, _ *mcp.CallToolRequest, in ruleIn
 	out.Tasks = taskOuts(rv.Tasks)
 	out.Proposals = []proposalOut{}
 	for _, p := range rv.Proposals {
-		out.Proposals = append(out.Proposals, proposalOut{ID: p.ID, Kind: p.Kind, Path: p.Path, State: p.State, Stale: p.Stale,
-			MadeBy: p.MadeBy, Agent: p.Agent, Diff: p.Diff, Link: p.Link, Reason: p.Reason})
+		x := proposalOut{ID: p.ID, Kind: p.Kind, Path: p.Path, State: p.State, Stale: p.Stale,
+			MadeBy: p.MadeBy, Agent: p.Agent, Diff: p.Diff, Link: p.Link, Reason: p.Reason}
+		if o := proposalEvidence(p.Proposal).Outlasts; o != nil {
+			x.Outlasts = o.Proposed()
+		}
+		out.Proposals = append(out.Proposals, x)
 	}
 	return nil, out, nil
 }

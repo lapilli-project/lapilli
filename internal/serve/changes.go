@@ -528,6 +528,11 @@ type evidence struct {
 	Bound *int          `json:"bound,omitempty"`
 	Value *float64      `json:"value,omitempty"`
 	For   time.Duration `json:"for_ns,omitempty"`
+	// Outlasts says the for proposed is as long as the range the rule's
+	// condition counts events over, or longer: one event alone could never
+	// fire it. Not refused: a person may want a rule for events that keep
+	// coming; said, on its page and to whoever approves it.
+	Outlasts *verdict.Outlast `json:"for_outlasts,omitempty"`
 	// Backtest is the change replayed: a for or a threshold.
 	Backtest *backtest `json:"backtest,omitempty"`
 	// Finding is the content check's finding a change to what a rule says
@@ -753,6 +758,9 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 			return 0, bad("it isn't replayed (%s): no backtest could check a change to it", r.Unsupported)
 		}
 		want.For, e.For, ev.For = q.For, &q.For, q.For
+		if w, ok := want.ForOutlasts(); ok {
+			ev.Outlasts = &verdict.Outlast{For: q.For, Window: w}
+		}
 	case ledger.KindThreshold:
 		if math.IsNaN(q.Value) || math.IsInf(q.Value, 0) {
 			return 0, bad("threshold %q: want a number", strconv.FormatFloat(q.Value, 'g', -1, 64))
@@ -2021,6 +2029,8 @@ type proposeOut struct {
 	ID   int64  `json:"id"`
 	Path string `json:"path" jsonschema:"git, a pull request once approved; grafana, Grafana's API once approved; ruler, a managed Prometheus ruler's API once approved; alarm, a cloud's own alarm through its API once approved; none, for a person to make"`
 	Page string `json:"page,omitempty" jsonschema:"its page, where a person approves it"`
+	// Outlasts warns of a for proposed that one event can't outlast.
+	Outlasts string `json:"for_outlasts,omitempty" jsonschema:"for a for as long as the range the rule's condition counts events over, or longer: one event alone could never fire it, only events that keep coming for all of it. Proposed all the same, and said on its page"`
 }
 
 // toolPropose is an agent proposing a change, for the person it acts for:
@@ -2081,6 +2091,9 @@ func (s *Server) toolPropose(ctx context.Context, req *mcp.CallToolRequest, in p
 	out.ID, out.Path = id, p.Path
 	if s.cfg.ExternalURL != "" {
 		out.Page = fmt.Sprintf("%s/proposals/%d", strings.TrimRight(s.cfg.ExternalURL, "/"), id)
+	}
+	if o := proposalEvidence(p).Outlasts; o != nil {
+		out.Outlasts = o.Proposed()
 	}
 	return nil, out, nil
 }

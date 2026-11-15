@@ -515,6 +515,9 @@ func (s *Server) prBody(p ledger.Proposal) string {
 	if p.Kind == ledger.KindSays {
 		b.WriteString("It changes what the alert says, not when it fires.\n\n")
 	}
+	if o := ev.Outlasts; o != nil {
+		b.WriteString(o.Proposed() + "\n\n")
+	}
 	fmt.Fprintf(&b, "```diff\n%s```\n", strings.ReplaceAll(p.Diff, "```", "'''"))
 	if s.cfg.ExternalURL != "" {
 		fmt.Fprintf(&b, "\n%s/proposals/%d\n", strings.TrimRight(s.cfg.ExternalURL, "/"), p.ID)
@@ -1071,6 +1074,10 @@ type ruleChanges struct {
 	Proposals []proposalLine
 	// SuggestedFor is the digest's suggested for, when there is one.
 	SuggestedFor string
+	// EventWindow is, of a rule whose condition counts events, the range
+	// it counts them over: a for that long or longer, one event can never
+	// fire it (rules.Rule.EventWindow).
+	EventWindow string
 	// Thresholds are the numbers its condition compares with, and a near
 	// miss's when one was found.
 	Thresholds []thresholdForm
@@ -1136,6 +1143,9 @@ func (s *Server) ruleChangesOf(r *http.Request, v *ruleView) error {
 			return nil // not in effect: nothing to propose
 		}
 		return err
+	}
+	if w, ok := f.rule.EventWindow(); ok {
+		v.EventWindow = verdict.Duration(w)
 	}
 	v.RetireKind = ledger.KindDelete
 	if s.offable(f) && !isOff(f.rule) {

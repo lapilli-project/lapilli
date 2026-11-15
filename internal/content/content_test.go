@@ -293,6 +293,7 @@ func TestDuplicate(t *testing.T) {
 
 func TestShortRange(t *testing.T) {
 	r := good("Rate")
+	r.For = time.Minute // shorter than its increase's range: TestForOutlasts has one that isn't
 	r.Expr = `rate(x[1m]) > 0 and increase(y[ 5m ]) > 0 and rate(z[1m:15s]) > 0 and irate(w[90s]) > 1`
 	one(t, r, Options{Scrape: time.Minute}, ShortRange+":rate[1m] < 2 × 1m", ShortRange+":irate[90s] < 2 × 1m")
 	// Not known, not checked.
@@ -601,4 +602,26 @@ func TestRunbookPastCap(t *testing.T) {
 	if got := Runbook(rs[0].Says, []string{"zz_wiki"}); got != "https://runbooks.example/a" {
 		t.Errorf("a name cut, falling back: %q", got)
 	}
+}
+
+// A for as long as the range a condition counts events over is a fact of
+// how the rule is written: one event alone can never fire it. A rate's, or
+// a count one event doesn't pass, is what a for is for.
+func TestForOutlasts(t *testing.T) {
+	r := good("Restarts")
+	r.Expr = `increase(kubernetes_io:container_restart_count{namespace_name=~"a|b"}[30m]) > 0.5`
+	for _, c := range []struct {
+		for_ time.Duration
+		want []string
+	}{{time.Minute, nil}, {30 * time.Minute, []string{ForOutlasts + ":for 30m ≥ 30m"}}, {time.Hour, []string{ForOutlasts + ":for 1h ≥ 30m"}}} {
+		r.For = c.for_
+		one(t, r, Options{}, c.want...)
+	}
+	if Class(ForOutlasts) != Fact || Message(ForOutlasts) == "" {
+		t.Error("a fact, with its message")
+	}
+	r.Expr, r.For = `rate(x[5m]) > 0.05`, 10*time.Minute
+	one(t, r, Options{})
+	r.Expr, r.For = `increase(x[30m]) > 5`, time.Hour
+	one(t, r, Options{})
 }

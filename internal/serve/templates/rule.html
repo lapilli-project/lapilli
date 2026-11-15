@@ -187,7 +187,7 @@ lands here, and is shown the way to it. */}}
 {{with .Description}}<dt>{{t "Description"}}</dt><dd><pre>{{.}}</pre></dd>{{end}}
 {{with .Runbook}}<dt>{{t "Runbook"}}</dt><dd>{{if $v.Says.RunbookLink}}<a href="{{$v.Says.RunbookLink}}" rel="noopener noreferrer">{{.}}</a>{{else}}<code>{{.}}</code>{{end}}</dd>{{end}}
 </dl>{{end}}
-{{if .Problems}}<ul>{{range .Problems}}<li>{{t .Key}}{{with .Detail}}: <code>{{.}}</code>{{end}}{{if eq .Class "measured"}} <span class="quiet">({{t "from what it fired"}})</span>{{end}}</li>{{end}}</ul>
+{{if .Problems}}<ul>{{range .Problems}}<li>{{with .Outlasts}}{{t "Its for (%s) is as long as the %s its condition counts over, or longer: one event alone can never fire it; only events that keep coming for %s will." (dur .For) (dur .Window) (dur .For)}}{{else}}{{t .Key}}{{with .Detail}}: <code>{{.}}</code>{{end}}{{end}}{{if eq .Class "measured"}} <span class="quiet">({{t "from what it fired"}})</span>{{end}}</li>{{end}}</ul>
 {{else}}<p>{{t "Nothing to fix in what it says, as far as can be told."}}</p>{{end}}
 {{if not $.Status.ReadOnly}}{{range $v.SaysForms}}<form method="post" action="/proposals" class="grid">
   <input type="hidden" name="rule" value="{{$v.Name}}"><input type="hidden" name="kind" value="says"><input type="hidden" name="annotation" value="{{.Annotation}}"><input type="hidden" name="check" value="{{.Check}}">

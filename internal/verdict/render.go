@@ -82,6 +82,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			return err
 		}
 	}
+	outlasting(w, r.Rules)
 	if len(r.Suggestions) > 0 {
 		fmt.Fprintf(w, "\nNoisy rules that a longer \"for\" would quiet, still catching every incident they caught:\n")
 		rows := [][]string{{"RULE", "FOR", "FIRED", "INCIDENTS", "CAUGHT LATER BY"}}
@@ -144,6 +145,22 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		}
 	}
 	return nil
+}
+
+// outlasting writes the rules replayed whose "for" one event can't
+// outlast, those that never fired among them: what it means for each.
+func outlasting(w io.Writer, rs []RuleResult) {
+	said := false
+	for _, rr := range rs {
+		if rr.Outlasts == nil || rr.Unsupported != "" {
+			continue
+		}
+		if !said {
+			fmt.Fprintf(w, "\nA \"for\" one event can't outlast:\n")
+			said = true
+		}
+		fmt.Fprintf(w, "  %s: %s\n", Clean(rr.Rule), rr.Outlasts.Text())
+	}
 }
 
 // outOfHours writes when the firings that caught nothing came: those that

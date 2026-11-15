@@ -1458,5 +1458,9 @@
  "No incident was written down in the week of %s or the two weeks before its end: a firing that caught nothing can't be told from one nobody wrote down, so no precision is known and no rule is called noisy.": "%s の週を含め、その週の終わりまでの 2 週間に記録されたインシデントがありません。何も検知しなかった発火が、誤検知なのか誰も記録しなかった実際の問題なのか区別できないため、適合率は分からず、どのルールもノイズルールとは判定しません。",
  "No incident was written down in these weeks or the two before their end: a firing that caught nothing can't be told from one nobody wrote down, so no precision is known and no rule is called noisy.": "この期間にも、期間の終わりまでの 2 週間にも、記録されたインシデントがありません。何も検知しなかった発火が、誤検知なのか誰も記録しなかった実際の問題なのか区別できないため、適合率は分からず、どのルールもノイズルールとは判定しません。",
  "Write incidents down": "インシデントを記録する",
- "no incident written down in it or in the two weeks before its end: its firings are counted, not judged": "この週にも、週の終わりまでの 2 週間にも記録されたインシデントがない: 発火は数えるだけで判定しない"
+ "no incident written down in it or in the two weeks before its end: its firings are counted, not judged": "この週にも、週の終わりまでの 2 週間にも記録されたインシデントがない: 発火は数えるだけで判定しない",
+ "a for as long as the range its condition counts events over, or longer: one event alone can never fire it": "条件がイベントを数える範囲と同じか、それより長い for: イベント 1 回だけでは決して発火しません",
+ "Its for (%s) is as long as the %s its condition counts over, or longer: one event alone can never fire it; only events that keep coming for %s will.": "for（%s）が、条件が数える範囲（%s）と同じか、それより長いです。イベント 1 回だけでは決して発火せず、%s のあいだイベントが続いたときだけ発火します。",
+ "As proposed, its for (%s) is as long as the %s its condition counts over, or longer: one event alone could never fire it; only events that keep coming for %s would.": "提案どおりだと、for（%s）が条件が数える範囲（%s）と同じか、それより長くなります。イベント 1 回だけでは決して発火せず、%s のあいだイベントが続いたときだけ発火するようになります。",
+ "Its condition counts events over %s: with a for that long or longer, one event alone can never fire it.": "このルールの条件は %s のあいだのイベントを数えます。for をそれと同じか、それより長くすると、イベント 1 回だけでは決して発火しません。"
 }

@@ -15,6 +15,7 @@ import (
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/source"
+	"lapilli.dev/internal/verdict"
 )
 
 // What each rule says when it fires, checked (docs/design/content.md): of
@@ -33,6 +34,14 @@ type contentFinding struct {
 	// Detail is what in particular: a label, a severity, another rule, a
 	// range, a template's error. From the rules: data, bounded.
 	Detail string `json:"detail,omitempty"`
+	// Outlasts is, of a for one event can't outlast (content.ForOutlasts),
+	// the for and the range its condition counts events over.
+	Outlasts *verdict.Outlast `json:"for_outlasts,omitempty"`
+}
+
+// same reports whether two findings say the same.
+func (f contentFinding) same(g contentFinding) bool {
+	return f.Kind == g.Kind && f.Class == g.Class && f.Key == g.Key && f.Detail == g.Detail
 }
 
 // Why is why a heuristic is only a guess, in English, a key into the
@@ -356,7 +365,10 @@ func (s *Server) checkContent(ctx context.Context, rs []rules.Rule, scrape conte
 		st.says[r.Name] = r.Says
 		for _, f := range fs[i] {
 			cf := contentFinding{Kind: f.Check, Class: f.Class, Key: content.Message(f.Check), Detail: f.Detail}
-			if !slices.Contains(st.findings[r.Name], cf) { // a rule read twice, from two files
+			if w, ok := r.ForOutlasts(); ok && f.Check == content.ForOutlasts {
+				cf.Outlasts = &verdict.Outlast{For: r.For, Window: w}
+			}
+			if !slices.ContainsFunc(st.findings[r.Name], cf.same) { // a rule read twice, from two files
 				st.findings[r.Name] = append(st.findings[r.Name], cf)
 			}
 		}

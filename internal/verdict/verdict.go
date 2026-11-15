@@ -104,6 +104,10 @@ type RuleResult struct {
 	Unsupported string `json:"unsupported,omitempty"`
 	// Unseen is what its replay can't see, as rules.Rule.Unseen says.
 	Unseen []string `json:"unseen,omitempty"`
+	// Outlasts, when not nil, says its "for" is as long as the range its
+	// condition counts events over, or longer: one event alone can never
+	// fire it (rules.Rule.ForOutlasts). Of a rule replayed.
+	Outlasts *Outlast `json:"for_outlasts,omitempty"`
 	// Source is, in lapilli serve, where a rule's firings were recorded
 	// before they were copied in: a rule not replayed, whose condition
 	// Lapilli doesn't have.
@@ -272,6 +276,11 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			if !slices.Contains(r.Unseen, u) {
 				r.Unseen = append(r.Unseen, u)
 			}
+		}
+		// Of a rule as it was at several times, as the last given is.
+		r.Outlasts = nil
+		if w, ok := k.ForOutlasts(); ok {
+			r.Outlasts = &Outlast{For: k.For, Window: w}
 		}
 		addSeverity(k.Name, k.AlertLabels()["severity"])
 	}

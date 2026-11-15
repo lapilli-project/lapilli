@@ -41,6 +41,7 @@ const (
 	NoSeverity      = "no_severity"      // fact
 	UnknownSeverity = "unknown_severity" // fact: not in --severities
 	Duplicate       = "duplicate"        // fact: the same condition as another rule
+	ForOutlasts     = "for_outlasts"     // fact: a for one event can't outlast
 	LabelNeverSeen  = "label_never_seen" // measured: a label no firing had
 	NoisyNoFor      = "noisy_no_for"     // measured: noisy, and no for
 	LabelNotGiven   = "label_not_given"  // heuristic: a label the expression can't give
@@ -57,7 +58,7 @@ const (
 
 // Checks are every check, in the order they are shown: facts, then what is
 // measured, then heuristics.
-var Checks = []string{NoText, NoRunbook, RunbookNotURL, TemplateError, NoSeverity, UnknownSeverity, Duplicate, NotifyNoText,
+var Checks = []string{NoText, NoRunbook, RunbookNotURL, TemplateError, NoSeverity, UnknownSeverity, Duplicate, ForOutlasts, NotifyNoText,
 	LabelNeverSeen, NoisyNoFor, NotifyLabelNeverSeen, LabelNotGiven, RareSeverity, ShortRange, AbsentNoFor, NotifyLabelNotGiven}
 
 // Class is the kind of check a check is.
@@ -248,6 +249,11 @@ func checkOne(r rules.Rule, o Options, sevs map[string]*sevCount, dups []string)
 	}
 	for _, other := range dups {
 		add(Duplicate, other)
+	}
+	// A condition that counts events, whose for one event can't outlast:
+	// it fires only on events that keep coming for all of its for.
+	if w, ok := r.ForOutlasts(); ok {
+		add(ForOutlasts, fmt.Sprintf("for %s ≥ %s", promDuration(r.For), promDuration(w)))
 	}
 	var seen map[string]bool
 	fired := false
