@@ -2278,12 +2278,14 @@ func duration(v any) (time.Duration, error) {
 			}
 			return d, nil
 		}
-		// Prometheus also takes days and weeks.
-		if n, err := strconv.Atoi(strings.TrimSuffix(x, "d")); err == nil && strings.HasSuffix(x, "d") {
-			if n < 0 || n > int(never/(24*time.Hour)) {
+		// As Prometheus writes one (model.ParseDuration): years, weeks,
+		// days, hours, minutes, seconds and milliseconds, in that order,
+		// 1w or 1d12h, as PromQL writes a range (readRange).
+		if d, ok := readRange(x); ok {
+			if d > never {
 				return 0, fmt.Errorf("duration %q out of range", x)
 			}
-			return time.Duration(n) * 24 * time.Hour, nil
+			return d, nil
 		}
 		return 0, fmt.Errorf("unreadable duration %q", x)
 	}
