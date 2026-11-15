@@ -609,7 +609,7 @@ func TestRunbookPastCap(t *testing.T) {
 // a count one event doesn't pass, is what a for is for.
 func TestForOutlasts(t *testing.T) {
 	r := good("Restarts")
-	r.Expr = `increase(kubernetes_io:container_restart_count{namespace_name=~"a|b"}[30m]) > 0.5`
+	r.Expr = `increase(kube_pod_container_status_restarts_total{namespace=~"a|b"}[30m]) > 0.5`
 	for _, c := range []struct {
 		for_ time.Duration
 		want []string

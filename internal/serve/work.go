@@ -1233,9 +1233,12 @@ func (s *Server) replayChange(ctx context.Context, gone, came []rules.Rule, same
 	if err != nil {
 		return nil, err
 	}
-	plain := make([]incident.Incident, len(incs))
-	for i, in := range incs {
-		plain[i] = in.Incident
+	plain, err := s.recordBefore(ctx, from, to) // the record kept, as the ledger's
+	if err != nil {
+		return nil, err
+	}
+	for _, in := range incs {
+		plain = append(plain, in.Incident)
 	}
 	o.From, o.To, o.SomeRules = from, to, true
 	var changed []string
@@ -1336,7 +1339,7 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 			}
 			// With no record, no rule was noisy: what the firings of those
 			// that fired as often were, in the time that is left.
-			if unrec, err = s.unrecordedOf(rctx, in, rep, from, to); err != nil {
+			if unrec, err = s.unrecordedOf(ctx, rctx, in, rep, from, to); err != nil {
 				s.log.Warn("the digest's firings with no record to judge them by weren't all looked at", "err", err)
 			}
 		}
@@ -1391,6 +1394,11 @@ func (s *Server) replayInput(ctx context.Context, rep *verdict.Report, from, to 
 	in := replayInput{o: o}
 	for _, v := range vs {
 		in.versions = append(in.versions, replay.Version{From: v.Since, Rules: v.Rules})
+	}
+	// Those that keep the period's record from before it, so that a replay
+	// judged against them has the record the ledger's report has.
+	if in.incs, err = s.recordBefore(ctx, from, to); err != nil {
+		return replayInput{}, err
 	}
 	for _, x := range rep.Incidents {
 		in.incs = append(in.incs, x.Incident)

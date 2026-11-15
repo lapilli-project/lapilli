@@ -27,8 +27,10 @@ const (
 	baseline = 28 * 24 * time.Hour
 	leastFor = 7 * 24 * time.Hour
 	// quietFor is how long without an incident before the page asks
-	// whether they are still being written down.
-	quietFor = 14 * 24 * time.Hour
+	// whether they are still being written down: as long as a period's
+	// record looks back (verdict.RecordLookback), past which its firings
+	// are counted, not judged.
+	quietFor = verdict.RecordLookback
 	weekLen  = 7 * 24 * time.Hour
 )
 

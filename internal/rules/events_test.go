@@ -11,7 +11,7 @@ import (
 // longer. A rate held for its "for" is what "for" is for; and so is a count
 // one event doesn't pass.
 func TestEventWindow(t *testing.T) {
-	restarts := `increase(kubernetes_io:container_restart_count{namespace_name=~"a|b"}[30m]) > 0.5`
+	restarts := `increase(kube_pod_container_status_restarts_total{namespace=~"a|b"}[30m]) > 0.5`
 	for _, c := range []struct {
 		expr     string
 		for_     time.Duration

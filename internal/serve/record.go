@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -32,6 +33,19 @@ func (s *Server) readRecord(ctx context.Context, t *tallies) error {
 		t.kept[w] = t.recorded(t.mid(w), to)
 	}
 	return nil
+}
+
+// recordBefore are the incidents that keep the record of [from, to) and
+// started before from: what verdict.Judge is given beside the period's own,
+// so that it says what the ledger's report says (ledger.RecordKept). It
+// judges no firing against them.
+func (s *Server) recordBefore(ctx context.Context, from, to time.Time) ([]incident.Incident, error) {
+	before, err := s.l.Incidents(ctx, verdict.RecordFrom(from, to), from, false)
+	out := make([]incident.Incident, len(before))
+	for i, in := range before {
+		out[i] = in.Incident
+	}
+	return out, err
 }
 
 // recorded reports whether the record of [from, to) is kept, by the

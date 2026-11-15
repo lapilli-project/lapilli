@@ -20,10 +20,11 @@ import (
 // unrecordedOf is what the firings of the rules that fired often in a week
 // with no record were: by source.Unrecorded, each rule's team, and each
 // alert's, the team whose labels it has, beside them, and, once the ledger
-// keeps deploys, how many came during one. A replay that failed, or ran out
-// of the digest's time, leaves what it would have said unknown, and err
-// says why; the rest is kept.
-func (s *Server) unrecordedOf(ctx context.Context, in replayInput, rep *verdict.Report, from, to time.Time) ([]verdict.Unrecorded, error) {
+// keeps deploys, how many came during one. The replays have rctx, the
+// digest's --timeout, the ledger's reads ctx. A replay that failed, or ran
+// out of time, leaves what it would have said unknown, and err says why;
+// the rest is kept.
+func (s *Server) unrecordedOf(ctx, rctx context.Context, in replayInput, rep *verdict.Report, from, to time.Time) ([]verdict.Unrecorded, error) {
 	if !rep.NoRecord || len(in.versions) == 0 {
 		return nil, nil
 	}
@@ -41,7 +42,7 @@ func (s *Server) unrecordedOf(ctx context.Context, in replayInput, rep *verdict.
 		}
 		return out, err
 	}
-	us, failed := source.Unrecorded(ctx, s.h, in.versions, rep, fired, own.labelTeam, s.cfg.Step)
+	us, failed := source.Unrecorded(rctx, s.h, in.versions, rep, fired, own.labelTeam, s.cfg.Step)
 	deploys, err := s.l.HasDeploys(ctx)
 	if err != nil {
 		return nil, err

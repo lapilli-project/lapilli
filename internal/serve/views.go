@@ -1660,9 +1660,12 @@ func (s *Server) try(ctx context.Context, o, tried verdict.Options) (*tryView, e
 	for i, f := range fs {
 		plain[i] = f.Firing
 	}
-	incs := make([]incident.Incident, len(now.Incidents))
-	for i, in := range now.Incidents {
-		incs[i] = in.Incident
+	incs, err := s.recordBefore(ctx, from, to) // the record kept, as the ledger's
+	if err != nil {
+		return nil, err
+	}
+	for _, in := range now.Incidents {
+		incs = append(incs, in.Incident)
 	}
 	would := verdict.Judge(nil, plain, incs, tried)
 	v := &tryView{From: from, To: to}
