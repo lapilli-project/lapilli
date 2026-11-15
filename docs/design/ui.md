@@ -265,7 +265,7 @@ Each rule has a badge on each of three axes, and what is under way:
 
 | Axis | Badges |
 |---|---|
-| How it did, over the weeks shown (one of) | `● Noisy` ("Noisy, 3 wk" when it has been noisy weeks running), `? No record` (fired as often as a noisy rule, with no incident written down in the weeks shown or the two before their end to judge it by), `○ OK`, `– Silent` (no firing in the weeks shown), `⧉ Spare` (another rule caught every incident it caught, as soon) |
+| How it did, over the weeks shown (one of) | `● Noisy` ("Noisy, 3 wk" when it has been noisy weeks running), `? No record` (fired as often as a noisy rule in weeks with no record to judge it by: no incident written down, or found by `--impact`, in the week or the two before it, each week judged by its own), `○ OK`, `– Silent` (no firing in the weeks shown), `⧉ Spare` (another rule caught every incident it caught, as soon) |
 | Its backtest, only when it can't be taken for granted | `≠ Differs` (its replay differed from what really fired over the last week checked), `◌ Not replayed`, `⇣ Recorded only` (copied in from where it fired; its condition unknown) |
 | What people mean to do (its note's status) | `✓ keep`, `± tune`, `⊘ retire` |
 | Under way | `✎ Proposed` (a change waits for approval), `⚠ n to check` (what its page lists to check, below) |

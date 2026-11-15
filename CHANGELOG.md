@@ -11,29 +11,42 @@ restart can hold the condition, so the suggestion would have hidden them
 all. Now a firing with no record at its time is counted, not judged; a rule
 that fires that often with none says what its firings were instead; a `for`
 one event can't outlast is said to be one, and never suggested; and a
-rule's firings are counted by the team whose labels they have. No ledger
-schema change: what the weekly digest works out is kept with its other
-results, from when `--impact` was read in `meta`. JSON, the API and MCP add
-fields; none is renamed.
+rule's firings are counted by the team whose labels they have. **Ledger
+schema 018**, after 0.28's 017: an index of when incidents ended, so that a
+page reads the incidents that keep its weeks' record and no others (a
+lapilli before 0.41 doesn't open a ledger this one has migrated). What the
+weekly digest works out is kept with its other results, from when
+`--impact` was read in `meta`. JSON, the API and MCP add fields; none is
+renamed.
 
 ### Added
 
 - **No record, no verdict.** A firing is judged only when the record was
   kept at its time: an incident firings are judged against (written down,
   or an impact window that counts) was on at some time in the two weeks
-  before it, one still open included, or it caught one; or an impact signal
-  was read over its time. `--impact` is read from two weeks before the
-  period, and keeps the record of all of it whatever it finds, as it says
-  whether users were hurt; in lapilli serve, from when its runs first read
-  it. Any other firing caught nothing written down, which can't be told
+  before it, one with no end taken to last `--unknown-len`, as long as it
+  is caught for, or it caught one; or an impact signal was read over its
+  time. `--impact` is read from two weeks before the period, and keeps the
+  record of all of it whatever it finds, as it says whether users were
+  hurt; the firings are judged against the windows it finds in the period,
+  as they were. In lapilli serve, from when its runs read it, with no run
+  since that didn't (`impact_since` in `meta`: a run without `--impact`
+  ends it; the first run with it in a ledger an earlier lapilli wrote takes
+  it from the earliest impact window kept). Any other firing caught nothing written down, which can't be told
   from one nobody wrote down: it is counted, in the firings and the black
   stones, and is in no precision and makes no rule noisy. A rule none of
   whose firings is judged has a precision of `–`, and no longer `for` is
   suggested for it. `lapilli verdict` judges each firing so; lapilli serve
   judges by week, a week's firings by whether its record is kept, and,
   with a team picked, in its digest and its reports, by the incidents the
-  team owns; over several weeks, each week by its own, so the rules list
-  and the overview's weeks agree. The text report, the digest, a report's
+  team owns (a team with no labels, which owns one only when its rules
+  caught it, by everyone's); over several weeks, or part of one, each week
+  by its own, whole, so the rules list and the overview's weeks agree, and
+  what it replays (a change's backtest, the try page, the digest's
+  suggestions and near misses) by the same weeks, so that it compares like
+  with like. Every precision serve shows is of the firings judged: the
+  rules list's sum, the span before a rule's period, the outcomes' then
+  and now, during deploys, a report's and MCP's. The text report, the digest, a report's
   noise line, the overview (where the noise is leaves such weeks out), the
   rules list and a rule's page say so once, with how to keep a record, and
   what came out of hours is said to have had no incident to judge it by.
@@ -65,7 +78,8 @@ fields; none is renamed.
   it replays such firings (`"unrecorded"` in `--json`); the weekly digest
   for its week, everyone's and each team's by its own record, within its
   `--timeout`, its reads bounded (5,000 firings a rule, the 1,000 alerts
-  that fired most, counted by the ledger), kept as an `unrecorded` result:
+  that fired most, counted by the ledger: past 5,000, "Too many firings to
+  tell how many happened", `too_many`), kept as an `unrecorded` result:
   the digest and `digest.ready`, a team's digest (another team's rule with
   the alerts on what the team owns alone), a rule's page in place of a
   suggestion (with its firings to mark the real ones, and a task), the
@@ -104,7 +118,9 @@ fields; none is renamed.
   by name), from one grouped read of the week's firings by alert (the
   20,000 that fired most), and keeps the rules most of whose firings, more
   than half, came from what another team owns than the one their alerts go
-  to (or no team's): kept as a `fired_on` result. A rule's page says "Its
+  to (or no team's): kept as a `fired_on` result, under the digest's
+  `--timeout`; a rule's `unread` says how many of its firings were past the
+  alerts read, and the digest logs how many in all. A rule's page says "Its
   alerts go to payments; most came from what web owns (14 of 14)", web's
   rules list lists them, web's digest names them, and MCP's `rules` and
   `rule` give `fired_on`.
@@ -124,6 +140,10 @@ fields; none is renamed.
   were with no record, when the last digest said it, in place of its
   suggestion or its noisiness.
 - A rule with no record the span before isn't newly noisy in a report.
+- Where the noise is names the rules with the most black stones judged.
+- A result the digest kept that doesn't decode (suggestions, near misses,
+  a change's backtest) is logged and taken as none, on every page and in
+  the digest, rather than failing them.
 
 ## [0.40.1] - 2026-11-15
 
