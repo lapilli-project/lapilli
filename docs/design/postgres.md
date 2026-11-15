@@ -115,7 +115,8 @@ there, and CI runs them so on Postgres 15 and 18
 - **The tables.** Every table, column, default, key, foreign key (and what
   a delete does to it), CHECK and index SQLite's migrations make, with the
   same names, expressions and WHEREs, made at once by
-  `schema/postgres/017.sql`: a Postgres ledger starts at schema 17.
+  `schema/postgres/017.sql`: a Postgres ledger starts at schema 17, and
+  takes the migrations after it as SQLite does (`018.sql`).
   `TestPostgresSchemaSame` sets the two side by side; where they differ
   on purpose (keys longer than a btree holds, below), its `byDesign` says
   both.
