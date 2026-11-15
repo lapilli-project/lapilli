@@ -1185,18 +1185,22 @@ OK, Silent, Spare; Differs, Not replayed, Recorded only; keep, tune,
 retire), filters by each, counted, and a search box that takes words of a
 name and `is:noisy`, `severity:critical`, `status:tune`, `has:proposal`,
 `label:team=pay`, `group:shop` and `team:pay`; each filter in effect is a
-chip that takes it away, and the URL keeps them all
+chip that takes it away, and the URL keeps them all; each rule's own labels
+are chips too, each picking the rules with it
 ([docs/design/ui.md](docs/design/ui.md)).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/serve-rules-dark.png">
-  <img alt="The rules list filtered to the noisy rules over four weeks: the filters beside it with their counts, the filter in effect as a chip, a bar to make a task for each rule picked or set their team or disposition, and the rules, each with a checkbox, its badges and its numbers, and what they come to all told" src="assets/serve-rules.png" width="820">
+  <img alt="The rules list filtered to the noisy rules over four weeks: the filters above it, side by side with their counts, the filter in effect as a chip, a bar to make a task for each rule picked, set their team or disposition, or propose a change for each, and the rules, each with a checkbox, its badges, its labels as chips and its numbers" src="assets/serve-rules.png" width="820">
 </picture>
 
 Many can be changed at once: rules picked on the list get a task each, a
 team or a disposition, and firings picked are written down as real, each
 as its own page would change it, with the same checks and a line each in
-the changes log. Each of the overview's numbers opens the list that makes
+the changes log. Up to twenty rules picked can each be proposed a change
+(a new `for`, the one suggested for it, retiring it), each the proposal
+its own page would make, with its backtest, waiting for a person to
+approve it. Each of the overview's numbers opens the list that makes
 it, over the same week and team (the noisy rules, the incidents missed);
 its weekly charts mark deploys and quiet windows. A day's firings are
 counted by the hour, and each firing's labels are chips that pick the
