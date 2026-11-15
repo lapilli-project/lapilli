@@ -74,8 +74,6 @@ page. No ledger schema change; the API and MCP answer as they did.
   out; the ledger, judging a team's quiet windows, already took it for the
   team's.
 
-### Fixed
-
 - **The weekly digest could hold the runs up for twice `--timeout`.** In
   0.41.0 its count of the firings by team had a `--timeout` of its own,
   after the replays had used theirs. It has a minute at most now, or
