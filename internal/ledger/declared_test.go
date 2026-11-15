@@ -325,6 +325,23 @@ func TestDeclaredOwnLimits(t *testing.T) {
 	if r.Made != 1 || len(skipped) != 0 {
 		t.Errorf("a file beside the UI's most: %+v %v", r, skipped)
 	}
+	// And the other way: as many declared as a file holds, and the UI
+	// still makes one.
+	l = open(t, time.UTC)
+	err = l.write(ctx, func(t *txn) error {
+		for i := range MaxWindows {
+			if _, err := t.ExecContext(t.ctx, "INSERT INTO windows (title, start_at, end_at, updated, declared) VALUES (?, ?, ?, 1, 1)", fmt.Sprint("w", i), start.Unix(), start.Unix()+60); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.PutWindow(ctx, Window{Title: "the UI's", Start: start, End: start.Add(time.Hour)}, "ana", opts); err != nil {
+		t.Errorf("the UI beside a file's most: %v", err)
+	}
 }
 
 // What the UI made is taken over only of the same team: a declared quiet
