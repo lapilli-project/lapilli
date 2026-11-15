@@ -14,7 +14,7 @@ import (
 // undo019 takes back what 019 made, for the tests of the migrations
 // before it.
 var undo019 = []string{
-	"DROP INDEX teams_name_key",
+	"DROP INDEX teams_name_fold",
 	"ALTER TABLE teams DROP COLUMN name_key",
 	"ALTER TABLE teams DROP COLUMN declared",
 	"ALTER TABLE windows DROP COLUMN declared",

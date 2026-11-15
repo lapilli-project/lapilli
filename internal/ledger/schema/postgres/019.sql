@@ -15,4 +15,4 @@ ALTER TABLE grants ADD COLUMN given_back BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE teams ADD COLUMN name_key TEXT COLLATE "C";
 UPDATE teams SET name_key = lower(name)
 	WHERE lower(name) IN (SELECT lower(name) FROM teams GROUP BY lower(name) HAVING count(*) = 1);
-CREATE UNIQUE INDEX teams_name_key ON teams (name_key);
+CREATE UNIQUE INDEX teams_name_fold ON teams (name_key);
