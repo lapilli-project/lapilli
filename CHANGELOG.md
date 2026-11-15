@@ -2,6 +2,47 @@
 
 ## [Unreleased]
 
+First use: what a first-time reader got stuck on, on a real deployment
+(rules saying whose each is in a `team` label, no team, no incident, one
+admin, nowhere to send a notice). No ledger schema change; the API and MCP
+answer as they did.
+
+### Added
+
+- **Teams the rules' labels suggest.** The Teams page lists each value of
+  a `team`, `owner` or `squad` label (`--team-labels` names others) that
+  no team owns by, with how many rules it would own, worked out as
+  ownership is; an admin makes them with one button ("Make these teams"),
+  each as the team form would, its name the value and its labels the
+  label. With no team at all, the rules list says why its Team column is
+  empty, and links to them.
+- **Why a rule is a team's.** A rule's page says how its team was found:
+  its note, its name matching a team's pattern, its labels having a
+  team's; or that none matches.
+- **Who may approve.** The Roles page says who may approve a change in
+  effect (those `--approvers` names, or the admins, named; or no one, and
+  why). A proposal waiting for approval says who may approve it, but the
+  one it was made by or for: named to an admin, in words to anyone else;
+  and, when no one is left (the only admin made it) or fewer than it
+  needs, says so to every reader, with what to change.
+- **Where notices go.** A Notifications card on the Manage page, and a
+  section of the Settings page: where what happens is told, how many
+  places reports and teams' digests can go, the weekly digest's schedule,
+  when the outbox last sent and how many of the last day's notices failed.
+  The weekly digest, or a report, on with nowhere to go is said so in
+  words. Counts, never a URL. These two pages are worked out for each
+  request, as a notice sent empties no page kept.
+- `--team-labels LIST`.
+
+### Changed
+
+- **The firings open on the last day with firings**, said so, when no day
+  is asked; with `day=`, as before.
+- **A time a page shows is rounded**: "The last run took 3.4s.", not
+  3.412345678s; a rule's `for` as before.
+- **Korean says 정탐 and 오탐**, as DevOps does, not stones (돌);
+  `TestKoreanSaysNoStones` keeps it so.
+
 ### Fixed
 
 - **The weekly digest could hold the runs up for twice `--timeout`.** In

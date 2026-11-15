@@ -128,6 +128,10 @@ Admins give roles in the UI, on top of the flags:
 | editor of a team | an admin in the UI | that team's notes, tasks, quiet windows and reports, and comments on what is the team's |
 | viewer | everyone else | nothing |
 
+The Roles page says who may approve in effect (those `--approvers` names,
+the admins, or no one, and why), and a proposal's page who may approve it,
+and when no one is left ([ui.md](ui.md), "First use").
+
 **Builder's decision: the UI gives editor and editor of a team, never admin
 or approver.** The flags stay the floor and the ceiling: a role a flag gives
 can't be taken away in the UI, and the UI can't make anyone more than an
