@@ -184,6 +184,9 @@ var proposalFacets = []pickFacet{
 	{param: "path", name: "Way", values: []string{ledger.PathGit, ledger.PathGrafana, ledger.PathRuler, ledger.PathAlarm, ledger.PathNone},
 		labels: []string{"a pull request", "Grafana's API", "the ruler's API", "the cloud's API", "for a person to make"}},
 	{param: "by", name: "Made by", values: []string{ledger.MakerPerson, ledger.MakerAgent, ledger.MakerLapilli}, labels: []string{"a person", "an agent", "Lapilli itself"}},
+	// The proposals made together, as a bulk proposal's result links to
+	// them: these alone, maxValues of them.
+	{param: "id", name: "Proposals", scope: true},
 }
 
 // proposalsShown is how many proposals the list shows at most, saying so
@@ -208,7 +211,7 @@ func countValues(c ledger.ProposalCount, param string) []string {
 // proposalPick is what the list's facets pick, as the database reads it:
 // a state's group as its states.
 func proposalPick(p picks, rules []string) ledger.ProposalPick {
-	q := ledger.ProposalPick{Rules: rules, Kinds: p["kind"], Paths: p["path"], Makers: p["by"]}
+	q := ledger.ProposalPick{Rules: rules, IDs: pickedIDs(p), Kinds: p["kind"], Paths: p["path"], Makers: p["by"]}
 	for _, v := range p["state"] {
 		for _, st := range append(ledger.Unfinished(), ledger.StateApplied, ledger.StateUndone, ledger.StateRefused, ledger.StateFailed, ledger.StateDropped, ledger.StateAmended) {
 			if (st == v || stateGroups[st] == v) && !slices.Contains(q.States, st) {
@@ -217,6 +220,18 @@ func proposalPick(p picks, rules []string) ledger.ProposalPick {
 		}
 	}
 	return q
+}
+
+// pickedIDs are the proposals the list's URL names by id (picksOf has read
+// them, each a positive number).
+func pickedIDs(p picks) []int64 {
+	var out []int64
+	for _, v := range p["id"] {
+		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func (s *Server) proposalsPage(r *http.Request) (any, error) {
@@ -232,15 +247,15 @@ func (s *Server) proposalsPage(r *http.Request) (any, error) {
 		}
 		rules = o.rulesOf(c.Team)
 	}
-	// Counted by the database, every proposal, however many: the facets,
-	// and how many the list has.
-	counts, err := s.l.ProposalCounts(ctx, rules)
-	if err != nil {
-		return nil, err
-	}
 	// The links made from what was asked: with the reader's own team taken
 	// for them (c.Mine), none carries it, and the next page takes it again.
 	p := picksOf(r.URL.Query(), proposalFacets)
+	// Counted by the database, every proposal, however many (of those the
+	// URL names, when it names some): the facets, and how many the list has.
+	counts, err := s.l.ProposalCountsOf(ctx, rules, pickedIDs(p))
+	if err != nil {
+		return nil, err
+	}
 	idx, pick := pickItems("/proposals", c, proposalFacets, p, len(counts), func(i int, param string) []string { return countValues(counts[i], param) },
 		func(i int) int { return counts[i].N })
 	v := proposalsView{On: s.cfg.Changes, Paused: s.changesPaused(), Limits: s.limits(), Need: s.approvals(), Approver: s.approver(r), Pick: pick}

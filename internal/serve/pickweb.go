@@ -23,14 +23,17 @@ import (
 // older link), each offered as it is once picked. A value it doesn't know
 // is left out, never shown; one named with none it knows is its default,
 // or, with none, matches no item, as an older link to a state there is no
-// such of did.
+// such of did. A scope is no facet of its own: what it picks (ids, each a
+// positive number) is picked by the database before the list is counted,
+// as the team is; it has no checkboxes, but a chip a value, and its values
+// are carried on every link and by the form.
 type pickFacet struct {
 	param, name    string
 	values, labels []string
 	def            []string
 	aliases        map[string][]string
 	raw            []string
-	none           bool
+	none, scope    bool
 }
 
 // picksOf reads what a list's URL picks in each facet: values it offers,
@@ -42,6 +45,16 @@ func picksOf(q url.Values, fs []pickFacet) picks {
 	p := picks{}
 	for _, f := range fs {
 		vs, named := q[f.param]
+		if f.scope {
+			for _, v := range vs {
+				if n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil && n > 0 {
+					if x := strconv.FormatInt(n, 10); !slices.Contains(p[f.param], x) && len(p[f.param]) < maxValues {
+						p[f.param] = append(p[f.param], x)
+					}
+				}
+			}
+			continue
+		}
 		if !named && f.def != nil {
 			p[f.param] = slices.Clone(f.def)
 			continue
@@ -146,6 +159,9 @@ type pickView struct {
 // context c.
 func pickItems(path string, c pageCtx, fs []pickFacet, p picks, n int, values func(i int, param string) []string, weight func(i int) int) ([]int, pickView) {
 	in := func(i int, f pickFacet) bool {
+		if f.scope {
+			return true // picked before
+		}
 		if p.none(f.param) {
 			return false
 		}
@@ -163,6 +179,9 @@ func pickItems(path string, c pageCtx, fs []pickFacet, p picks, n int, values fu
 			shown = append(shown, i)
 		}
 		for _, f := range fs {
+			if f.scope {
+				continue
+			}
 			but := true
 			for _, g := range fs {
 				if g.param != f.param && !in(i, g) {
@@ -193,6 +212,12 @@ func pickItems(path string, c pageCtx, fs []pickFacet, p picks, n int, values fu
 func facetView(path string, c pageCtx, fs []pickFacet, p picks, counts map[string]map[string]int) pickView {
 	v := pickView{Action: path, Hidden: c.hidden()}
 	for _, f := range fs {
+		if f.scope {
+			for _, x := range p[f.param] {
+				v.Hidden = append(v.Hidden, field{f.param, x})
+			}
+			continue
+		}
 		fc := facet{Param: f.param, Name: f.name}
 		values, labels := slices.Clone(f.values), slices.Clone(f.labels)
 		// A raw value picked is offered as it is, so that it can be
@@ -226,12 +251,15 @@ func facetView(path string, c pageCtx, fs []pickFacet, p picks, counts map[strin
 			if i := slices.Index(f.values, x); i >= 0 {
 				label = f.labels[i]
 			}
+			if f.scope {
+				label = "#" + x
+			}
 			q := picks{}
 			for _, g := range fs {
 				q[g.param] = p[g.param]
 			}
 			q[f.param] = slices.DeleteFunc(slices.Clone(p[f.param]), func(w string) bool { return w == x })
-			v.Chips = append(v.Chips, chip{Group: f.name, Value: label, Href: pickURL(path, c, fs, q)})
+			v.Chips = append(v.Chips, chip{Group: f.name, Value: label, Raw: f.scope, Href: pickURL(path, c, fs, q)})
 		}
 	}
 	v.Active = len(v.Chips) > 0 && !(len(v.Chips) == 1 && c.Team != "")
