@@ -384,7 +384,7 @@ func TestApprovalOnlyByAPerson(t *testing.T) {
 	if keyFor(t, h, own, ana, "approve") != "" {
 		t.Error("a form to approve one's own proposal")
 	}
-	if _, err := s.l.Approve(context.Background(), own, "ANA@example.com", 1); err == nil {
+	if _, err := s.l.Approve(context.Background(), own, "ANA@example.com", 1, time.Time{}); err == nil {
 		t.Error("one's own, in another case: approved")
 	}
 }
@@ -403,7 +403,7 @@ func TestChangesOff(t *testing.T) {
 		t.Errorf("approved with changes off: %d", code)
 	}
 	// Even approved in the ledger, it stays put.
-	s.l.Approve(ctx, id, ana, 1)
+	s.l.Approve(ctx, id, ana, 1, time.Time{})
 	s.jobs(ctx, false)
 	if p := state(t, s, id); p.State != ledger.StateApproved {
 		t.Errorf("carried out with changes off: %s", p.State)
@@ -1300,7 +1300,7 @@ func TestSaysInGrafana(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.l.Approve(ctx, forged, ana, 1)
+	s.l.Approve(ctx, forged, ana, 1, time.Time{})
 	s.jobs(ctx, false)
 	if a, _ := g.rules["abc"]["annotations"].(map[string]any); state(t, s, forged).State != ledger.StateRefused || a["__panelId__"] != "4" {
 		t.Errorf("Grafana's panel changed: %s %v", state(t, s, forged).State, a)

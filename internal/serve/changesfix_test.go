@@ -508,7 +508,7 @@ func TestSaysTemplates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.l.Approve(ctx, forged, ana, 1)
+	s.l.Approve(ctx, forged, ana, 1, time.Time{})
 	s.jobs(ctx, false)
 	if p := state(t, s, forged); p.State != ledger.StateRefused {
 		t.Errorf("a template that doesn't parse, kept in the ledger: %s", p.State)
@@ -523,7 +523,7 @@ func TestSaysTemplates(t *testing.T) {
 	ev, _ = json.Marshal(evidence{From: "person", Edit: &rules.Edit{Name: "Errors", UID: "abc", Annotation: "summary", Value: `{{ query "up" }}`}})
 	forged, _ = gs.l.Propose(ctx, ledger.Proposal{Rule: "Errors", Kind: ledger.KindSays, Path: ledger.PathGrafana, MadeBy: bo,
 		Before: "x", BeforeHash: saysHash(gf.rule), After: "y", Diff: "d", Evidence: ev})
-	gs.l.Approve(ctx, forged, ana, 1)
+	gs.l.Approve(ctx, forged, ana, 1, time.Time{})
 	gs.jobs(ctx, false)
 	if p := state(t, gs, forged); p.State != ledger.StateRefused || len(g.writes) != 0 {
 		t.Errorf("a query, kept in the ledger, for Grafana: %s, written %v", p.State, g.writes)
@@ -644,7 +644,7 @@ func TestGrafanaRetirement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.l.Approve(ctx, forged, ana, 1)
+	s.l.Approve(ctx, forged, ana, 1, time.Time{})
 	s.jobs(ctx, false)
 	if p := state(t, s, forged); p.State != ledger.StateRefused || g.rules["def"] == nil {
 		t.Fatalf("a deletion with no disable before it: %s", p.State)

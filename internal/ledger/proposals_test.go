@@ -47,22 +47,22 @@ func TestProposals(t *testing.T) {
 		}
 	}
 	// No one approves their own; nobody twice; at need, approved.
-	if _, err := l.Approve(ctx, id, Proposer, 1); !errors.Is(err, ErrOwnProposal) {
+	if _, err := l.Approve(ctx, id, Proposer, 1, time.Time{}); !errors.Is(err, ErrOwnProposal) {
 		t.Errorf("own: %v", err)
 	}
-	p, err := l.Approve(ctx, id, "ana", 2)
+	p, err := l.Approve(ctx, id, "ana", 2, time.Time{})
 	if err != nil || p.State != StateProposed || len(p.Approvals) != 1 {
 		t.Fatalf("first of two: %+v %v", p, err)
 	}
 	for _, again := range []string{"ana", "ANA"} {
-		if _, err := l.Approve(ctx, id, again, 2); !errors.Is(err, ErrApproved) {
+		if _, err := l.Approve(ctx, id, again, 2, time.Time{}); !errors.Is(err, ErrApproved) {
 			t.Errorf("twice, as %s: %v", again, err)
 		}
 	}
-	if p, err = l.Approve(ctx, id, "bo", 2); err != nil || p.State != StateApproved {
+	if p, err = l.Approve(ctx, id, "bo", 2, time.Time{}); err != nil || p.State != StateApproved {
 		t.Fatalf("second: %+v %v", p, err)
 	}
-	if _, err := l.Approve(ctx, id, "cy", 2); !errors.Is(err, ErrMoved) {
+	if _, err := l.Approve(ctx, id, "cy", 2, time.Time{}); !errors.Is(err, ErrMoved) {
 		t.Errorf("approved already: %v", err)
 	}
 	// Steps move it on only from where it is.
@@ -109,7 +109,7 @@ func TestUndo(t *testing.T) {
 	if _, err := l.Undo(ctx, undo, "ana"); !errors.Is(err, ErrMoved) {
 		t.Errorf("undoing one not applied: %v", err)
 	}
-	if _, err := l.Approve(ctx, id, "ana", 1); err != nil {
+	if _, err := l.Approve(ctx, id, "ana", 1, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := l.Move(ctx, id, []string{StateApproved}, StateApplied, Proposer, Step{Applied: true}); err != nil {
@@ -141,7 +141,7 @@ func TestBacktestAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := l.Approve(ctx, id, "ana", 2); err != nil {
+	if _, err := l.Approve(ctx, id, "ana", 2, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	was := []byte(`{"from":"suggestion","backtest":{"before":{"firings":141}}}`)
@@ -276,5 +276,36 @@ func TestBacktestAgainBounded(t *testing.T) {
 		if _, _, err := l.BacktestAgain(ctx, id, who, false, now, ev, nil, nil); !errors.Is(err, ErrBacktestedJustNow) {
 			t.Errorf("%s, written within the cooldown: %v", who, err)
 		}
+	}
+}
+
+// TestApproveAsShown: an approval of a proposal as it was shown is refused
+// once it moved since, backtested again meanwhile: in the write itself,
+// with nothing kept.
+func TestApproveAsShown(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	p := proposal("HighErrors", KindFor)
+	p.Evidence = []byte(`{"backtest":{}}`)
+	id, err := l.Propose(ctx, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown, err := l.ProposalByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := l.BacktestAgain(ctx, id, "bo", false, shown.Evidence, []byte(`{"backtest":{"semantics":1}}`), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Approve(ctx, id, "ana", 1, shown.Updated); !errors.Is(err, ErrMoved) {
+		t.Errorf("approved as it was before it was backtested again: %v", err)
+	}
+	if p, _ := l.ProposalByID(ctx, id); len(p.Approvals) != 0 || p.State != StateProposed {
+		t.Errorf("kept: %+v", p)
+	}
+	now, _ := l.ProposalByID(ctx, id)
+	if p, err := l.Approve(ctx, id, "ana", 1, now.Updated); err != nil || p.State != StateApproved {
+		t.Errorf("approved as it is: %+v %v", p, err)
 	}
 }

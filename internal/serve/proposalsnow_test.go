@@ -198,7 +198,7 @@ func TestBacktestAgain(t *testing.T) {
 	h := s.Handler()
 	id := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
 	// Approved once before it was found stale, as before an upgrade.
-	if _, err := s.l.Approve(ctx, id, ana, 2); err != nil {
+	if _, err := s.l.Approve(ctx, id, ana, 2, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	code, body, hd := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/backtest", bo, "same-origin", url.Values{})
@@ -545,7 +545,7 @@ func TestStalePagesTranslated(t *testing.T) {
 	s, dir := restartsServer(t, func(c *Config) { c.Approvals = 2 })
 	h := s.Handler()
 	stale := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
-	s.l.Approve(ctx, stale, ana, 2)
+	s.l.Approve(ctx, stale, ana, 2, time.Time{})
 	if code, body, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(stale)+"/backtest", bo, "same-origin", url.Values{}); code != http.StatusSeeOther {
 		t.Fatalf("backtesting again: %d %s", code, body)
 	}
@@ -811,7 +811,7 @@ func TestBacktestedTold(t *testing.T) {
 	s, _ := restartsServer(t, func(c *Config) { c.Approvals = 2 })
 	s.l.TellTo([]string{"webhook"})
 	id := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
-	if _, err := s.l.Approve(ctx, id, ana, 2); err != nil {
+	if _, err := s.l.Approve(ctx, id, ana, 2, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	if code, body, _ := ui(t, s.Handler(), http.MethodPost, "/proposals/"+itoa(id)+"/backtest", bo, "same-origin", url.Values{}); code != http.StatusSeeOther {

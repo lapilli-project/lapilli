@@ -340,8 +340,12 @@ var ErrMoved = errors.New("this proposal has moved on since: read it again")
 
 // Approve notes a person's approval of a proposal, and approves it once it
 // has need of them. No one approves their own proposal, or one twice, in
-// any letter case: names are kept as FoldName gives them.
-func (l *Ledger) Approve(ctx context.Context, id int64, by string, need int) (Proposal, error) {
+// any letter case: names are kept as FoldName gives them. shown is when
+// the proposal had last moved as the approver was shown it (its Updated):
+// one that moved since, its evidence backtested again among what moves
+// it, is refused with ErrMoved, in the write itself. Zero takes it as it
+// is, as an approval given outside a form is.
+func (l *Ledger) Approve(ctx context.Context, id int64, by string, need int, shown time.Time) (Proposal, error) {
 	var p Proposal
 	by = FoldName(by)
 	err := l.write(ctx, func(t *txn) error {
@@ -352,7 +356,7 @@ func (l *Ledger) Approve(ctx context.Context, id int64, by string, need int) (Pr
 			return err
 		}
 		switch {
-		case p.State != StateProposed:
+		case p.State != StateProposed, !shown.IsZero() && !p.Updated.Equal(shown):
 			return ErrMoved
 		case FoldName(p.MadeBy) == by:
 			return ErrOwnProposal

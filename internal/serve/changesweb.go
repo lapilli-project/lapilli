@@ -799,7 +799,9 @@ func (s *Server) postApprove(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, errHeld)
 		return
 	}
-	if _, err := s.l.Approve(r.Context(), p.ID, s.user(r), s.approvals()); err != nil {
+	// As it was shown, and read here: backtested again meanwhile, it
+	// moved, and the ledger refuses it.
+	if _, err := s.l.Approve(r.Context(), p.ID, s.user(r), s.approvals(), p.Updated); err != nil {
 		s.oops(w, r, err)
 		return
 	}

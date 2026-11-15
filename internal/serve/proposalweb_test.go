@@ -411,7 +411,7 @@ func waitingDeletion(t *testing.T) (*Server, int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.l.Approve(ctx, id, ana, 1); err != nil {
+	if _, err := s.l.Approve(ctx, id, ana, 1, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, waits, err := s.waitsWhileFiring(ctx, state(t, s, id), true); err != nil || !waits {
@@ -873,7 +873,7 @@ func TestProposalHistoryStillApplying(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.l.Approve(ctx, id, ana, 1); err != nil {
+	if _, err := s.l.Approve(ctx, id, ana, 1, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	const unread = "sent, but not read back yet"
