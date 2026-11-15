@@ -403,9 +403,10 @@ func TestRuleActions(t *testing.T) {
 	s.cache.gen = "" // as a server started with --read-only
 	s.cache.Unlock()
 	_, body, _ = get(t, s.Handler(), "/rules/Errors")
-	want := `<p class="rule-actions"><button type="button" disabled aria-describedby="rule-why-1">Propose a change</button> ` +
-		`<button type="button" disabled aria-describedby="rule-why-1">Add a task</button> <button type="button" disabled aria-describedby="rule-why-1">Edit the note</button> ` +
-		`<span id="rule-why-1" class="why">Read-only: lapilli serve was started with --read-only</span> </p>`
+	want := `<p class="rule-actions"><span class="action-off"><button type="button" disabled aria-describedby="rule-why-1">Propose a change</button></span> ` +
+		`<span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="rule-why-1">Add a task</button></span> ` +
+		`<span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="rule-why-1">Edit the note</button> ` +
+		`<span id="rule-why-1" class="why">Read-only: lapilli serve was started with --read-only</span></span> </p>`
 	if !strings.Contains(body, want) {
 		t.Errorf("read-only: no %s", want)
 	}
@@ -420,8 +421,8 @@ func TestRuleActions(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, body, _ = ui(t, r.Handler(), http.MethodGet, "/rules/Errors", "pat@example.com", "", nil)
-	for _, want := range []string{`<button type="button" disabled aria-describedby="rule-why-1">Propose a change</button>`,
-		`<span id="rule-why-1" class="why">Editors only</span>`, `">Add a task</a>`, `">Edit the note</a>`} {
+	for _, want := range []string{`<span class="action-off"><button type="button" disabled aria-describedby="rule-why-1">Propose a change</button> ` +
+		`<span id="rule-why-1" class="why">Editors only</span></span>`, `">Add a task</a>`, `">Edit the note</a>`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("a team's editor: no %s", want)
 		}
@@ -432,8 +433,9 @@ func TestRuleActions(t *testing.T) {
 	}
 	_, body, _ = ui(t, r.Handler(), http.MethodGet, "/rules/Errors", "pat@example.com", "", nil)
 	for _, want := range []string{`<span id="rule-why-1" class="why">Editors only</span>`,
-		`<button type="button" disabled aria-describedby="rule-why-2">Add a task</button> <button type="button" disabled aria-describedby="rule-why-2">Edit the note</button>`,
-		`<span id="rule-why-2" class="why">Only <bdi>search</bdi>&#39;s editors</span>`} {
+		`<span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="rule-why-2">Add a task</button></span> ` +
+			`<span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="rule-why-2">Edit the note</button> ` +
+			`<span id="rule-why-2" class="why">Only <bdi>search</bdi>&#39;s editors</span></span>`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("a team's editor, of another team's rule: no %s", want)
 		}

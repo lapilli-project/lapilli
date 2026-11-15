@@ -178,6 +178,9 @@ button {
 button:hover { filter: brightness(1.1); }
 button.quiet-button { color: var(--accent); background: var(--card); border: 1px solid var(--line-strong); padding: .25rem .75rem; font-weight: 400; }
 button.quiet-button:hover { filter: none; background: var(--accent-soft); }
+/* A quiet button disabled looks as any disabled one: its own look, after
+   the one above, would draw it as one that can be pressed. */
+button.quiet-button:disabled, button.quiet-button:disabled:hover { color: var(--dim); background: var(--panel); border: 1px dashed var(--line-ui); }
 details { margin-top: 1rem; }
 summary { cursor: pointer; color: var(--dim); font-size: .95rem; }
 td.t { white-space: nowrap; }

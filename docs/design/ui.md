@@ -169,8 +169,11 @@ change, a task about it) and a proposal's (below). Comments are as before.
 The server checks every write as it did: a disabled button is never the
 only check. Phase 5's are drawn so too, the overview's "Make it a task",
 the firings' "These were real" and "This was real" and the rules list's
-bar, and `TestDisabledOneWay` holds every disabled button on every page to
-it, but a rule's header's, whose reasons are said after its buttons.
+bar, and a rule's header, whose buttons disabled for one reason share it,
+said after the last of them; `TestDisabledOneWay` holds every disabled
+button on every page to it. A quiet button disabled looks as any disabled
+one (`TestDisabledLooksDisabled`): until 0.40.1 its own look came after
+the disabled one and drew it as one that could be pressed.
 
 ### Empty states
 
@@ -1115,5 +1118,6 @@ and when each firing started, are a table in a `<details>` under it.
 
 ## What is left
 
-- **A rule's header** draws its disabled actions its own way, every reason
-  said after the buttons, not by the `off` template.
+Nothing of what the phases set out: the last two (the overview's table of
+the weeks on a laptop's screen, a rule's header drawn by the `off`
+template) went out in 0.40.1. New work starts from ROADMAP.md.
