@@ -56,6 +56,10 @@ type Scheduled struct {
 	// Declared says --config declares it: the UI and the API don't change
 	// or delete it (docs/design/serveops.md).
 	Declared bool `json:"declared,omitempty"`
+	// GivenBack says a file declared it and a leader without --config gave
+	// it back to the UI: until the UI changes it, the next file that
+	// doesn't declare it again leaves it as one it no longer declares.
+	GivenBack bool `json:"-"`
 }
 
 // When is its schedule, read.
@@ -233,7 +237,7 @@ func (l *Ledger) PutScheduled(ctx context.Context, r Scheduled, by string, at ti
 				r.Name, r.TeamID, r.Schedule, int64(span/time.Second), r.Zone, string(sections), string(dests), r.Enabled, now, by, now, by).Scan(&id)
 		} else {
 			res, err = t.ExecContext(t.ctx, `UPDATE reports SET name = ?, team_id = ?, schedule = ?, span = ?, zone = ?, sections = ?, dests = ?, enabled = ?,
-				updated = ?, updated_by = ? WHERE id = ?`,
+				updated = ?, updated_by = ?, given_back = 0 WHERE id = ?`,
 				r.Name, r.TeamID, r.Schedule, int64(span/time.Second), r.Zone, string(sections), string(dests), r.Enabled, now, by, id)
 		}
 		if err != nil {
@@ -324,14 +328,14 @@ func (l *Ledger) Told(ctx context.Context, key string) (string, error) {
 	return l.meta(ctx, l.r, key)
 }
 
-const reportCols = "id, name, team_id, schedule, span, zone, sections, dests, enabled, created, created_by, updated, updated_by, declared"
+const reportCols = "id, name, team_id, schedule, span, zone, sections, dests, enabled, created, created_by, updated, updated_by, declared, given_back"
 
 func scanScheduled(rows interface{ Scan(...any) error }) (Scheduled, error) {
 	var r Scheduled
 	var span, created, updated int64
 	var sections, dests string
 	if err := rows.Scan(&r.ID, &r.Name, &r.TeamID, &r.Schedule, &span, &r.Zone, &sections, &dests, &r.Enabled,
-		&created, &r.CreatedBy, &updated, &r.UpdatedBy, &r.Declared); err != nil {
+		&created, &r.CreatedBy, &updated, &r.UpdatedBy, &r.Declared, &r.GivenBack); err != nil {
 		return r, err
 	}
 	r.Span, r.Created, r.Updated = spanText(time.Duration(span)*time.Second), unix(created), unix(updated)

@@ -20,6 +20,10 @@ var undo019 = []string{
 	"ALTER TABLE windows DROP COLUMN declared",
 	"ALTER TABLE reports DROP COLUMN declared",
 	"ALTER TABLE grants DROP COLUMN declared",
+	"ALTER TABLE teams DROP COLUMN given_back",
+	"ALTER TABLE windows DROP COLUMN given_back",
+	"ALTER TABLE reports DROP COLUMN given_back",
+	"ALTER TABLE grants DROP COLUMN given_back",
 }
 
 // A ledger at 018 holding teams whose names differ only in letter case

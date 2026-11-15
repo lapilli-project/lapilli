@@ -1590,7 +1590,21 @@ type settingsView struct {
 	Notify   *notifyStatus `json:"-"` // the page's alone
 	// Config is what the leader last made of --config; nil without it.
 	Config *configShown `json:"config,omitempty"`
+	// GivenBack is what a leader without --config gave back to the UI of
+	// what a file declared, marked, for an admin; GivenBackN, how many,
+	// for anyone.
+	GivenBack  []givenBackView `json:"-"`
+	GivenBackN int             `json:"-"`
 }
+
+// givenBackView is one given back without --config: what it is, a text to
+// translate, its name, and its team's.
+type givenBackView struct {
+	What, Name, Team string
+}
+
+// givenBackWhat are the kinds of what is given back, as the page says them.
+var givenBackWhat = map[string]string{ledger.KindTeam: "Team", ledger.KindWindow: "Quiet window", ledger.KindReport: "Report", ledger.KindGrant: "Role"}
 
 func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
 	o, err := s.options(ctx)
@@ -1627,6 +1641,17 @@ func (s *Server) settingsPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v.Config = s.configFor(r)
+	gb, err := s.l.GivenBack(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	v.GivenBackN = len(gb)
+	if s.role(r) == admin {
+		// Whom a role was given to is an admin's to read.
+		for _, g := range gb {
+			v.GivenBack = append(v.GivenBack, givenBackView{givenBackWhat[g.Kind], g.Name, g.Team})
+		}
+	}
 	if v.Notify, err = s.notifyStatus(r.Context(), lang(r)); err != nil {
 		return nil, err
 	}

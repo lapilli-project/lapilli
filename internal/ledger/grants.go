@@ -31,6 +31,10 @@ type Grant struct {
 	// Declared says --config declares it: the UI and the API don't take it
 	// away (docs/design/serveops.md).
 	Declared bool `json:"declared,omitempty"`
+	// GivenBack says a file declared it and a leader without --config gave
+	// it back to the UI: until the UI changes it, the next file that
+	// doesn't declare it again leaves it as one it no longer declares.
+	GivenBack bool `json:"-"`
 }
 
 // RoleGiven and RoleTaken begin what the changes say of a role given or
@@ -288,7 +292,7 @@ func (l *Ledger) Grants(ctx context.Context) ([]Grant, error) {
 // grants are the roles given in the UI or declared, read with q: the
 // ledger's reader, or a write.
 func grants(ctx context.Context, q queryer) ([]Grant, error) {
-	rows, err := q.QueryContext(ctx, "SELECT id, who, role, team_id, created, created_by, declared FROM grants ORDER BY who, team_id")
+	rows, err := q.QueryContext(ctx, "SELECT id, who, role, team_id, created, created_by, declared, given_back FROM grants ORDER BY who, team_id")
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +301,7 @@ func grants(ctx context.Context, q queryer) ([]Grant, error) {
 	for rows.Next() {
 		var g Grant
 		var at int64
-		if err := rows.Scan(&g.ID, &g.Who, &g.Role, &g.TeamID, &at, &g.By, &g.Declared); err != nil {
+		if err := rows.Scan(&g.ID, &g.Who, &g.Role, &g.TeamID, &at, &g.By, &g.Declared, &g.GivenBack); err != nil {
 			return nil, err
 		}
 		g.Created = unix(at)

@@ -9,6 +9,16 @@ ALTER TABLE windows ADD COLUMN declared INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE reports ADD COLUMN declared INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE grants ADD COLUMN declared INTEGER NOT NULL DEFAULT 0;
 
+-- given_back = 1 is one a file declared that a leader without --config
+-- gave back to the UI (declared = 0): until the UI changes it, the next
+-- file that doesn't declare it again leaves it as one it no longer
+-- declares, a role taken away, so that a rollback past --config and
+-- forward again keeps no role the file took out.
+ALTER TABLE teams ADD COLUMN given_back INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE windows ADD COLUMN given_back INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE reports ADD COLUMN given_back INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE grants ADD COLUMN given_back INTEGER NOT NULL DEFAULT 0;
+
 -- A team's name is unique in any letter case: name_key is its name in
 -- lower case (ASCII letters alone, as SQLite's lower() and Postgres's
 -- under COLLATE "C" both fold them), kept unique. Lapilli checks every new

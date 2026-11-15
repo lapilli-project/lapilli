@@ -4,6 +4,10 @@ ALTER TABLE teams ADD COLUMN declared BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE windows ADD COLUMN declared BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE reports ADD COLUMN declared BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE grants ADD COLUMN declared BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE teams ADD COLUMN given_back BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE windows ADD COLUMN given_back BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE reports ADD COLUMN given_back BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE grants ADD COLUMN given_back BIGINT NOT NULL DEFAULT 0;
 
 -- A team's name in lower case, ASCII letters alone under COLLATE "C", as
 -- SQLite's lower(); NULL for those whose names differ only in letter case

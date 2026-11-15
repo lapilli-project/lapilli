@@ -124,6 +124,10 @@ type Team struct {
 	// Declared says --config declares it: the UI and the API don't change
 	// or delete it (docs/design/serveops.md).
 	Declared bool `json:"declared,omitempty"`
+	// GivenBack says a file declared it and a leader without --config gave
+	// it back to the UI: until the UI changes it, the next file that
+	// doesn't declare it again leaves it as one it no longer declares.
+	GivenBack bool `json:"-"`
 }
 
 // Hours are the team's own hours, what it doesn't set taken from server's;
@@ -185,7 +189,7 @@ func (l *Ledger) Teams(ctx context.Context) ([]Team, error) {
 // teams are every team, by name, read with q: the ledger's reader, or a
 // write.
 func teams(ctx context.Context, q queryer) ([]Team, error) {
-	rows, err := q.QueryContext(ctx, "SELECT id, name, rules, labels, note, work_hours, sleep_hours, tz, shifts, updated, updated_by, declared FROM teams ORDER BY name")
+	rows, err := q.QueryContext(ctx, "SELECT id, name, rules, labels, note, work_hours, sleep_hours, tz, shifts, updated, updated_by, declared, given_back FROM teams ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +199,7 @@ func teams(ctx context.Context, q queryer) ([]Team, error) {
 		var t Team
 		var labels string
 		var at int64
-		if err := rows.Scan(&t.ID, &t.Name, &t.Rules, &labels, &t.Note, &t.WorkHours, &t.SleepHours, &t.TZ, &t.Shifts, &at, &t.By, &t.Declared); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Rules, &labels, &t.Note, &t.WorkHours, &t.SleepHours, &t.TZ, &t.Shifts, &at, &t.By, &t.Declared, &t.GivenBack); err != nil {
 			return nil, err
 		}
 		if t.Labels, err = readLabels(labels); err != nil {
@@ -421,7 +425,7 @@ func (l *Ledger) putTeam(tx *txn, id int64, t Team, by string, declared bool, wh
 			t.Name, t.Rules, labelsText(t.Labels), t.Note, t.WorkHours, t.SleepHours, t.TZ, t.Shifts, now, by, declared, nameKey(t.Name)).Scan(&id)
 	} else {
 		_, err = tx.ExecContext(tx.ctx, `UPDATE teams SET name = ?, rules = ?, labels = ?, note = ?, work_hours = ?, sleep_hours = ?, tz = ?, shifts = ?,
-			updated = ?, updated_by = ?, declared = ?, name_key = CASE WHEN name = ? THEN name_key ELSE ? END WHERE id = ?`,
+			updated = ?, updated_by = ?, declared = ?, given_back = 0, name_key = CASE WHEN name = ? THEN name_key ELSE ? END WHERE id = ?`,
 			t.Name, t.Rules, labelsText(t.Labels), t.Note, t.WorkHours, t.SleepHours, t.TZ, t.Shifts, now, by, declared, t.Name, nameKey(t.Name), id)
 	}
 	if err != nil {
@@ -634,11 +638,15 @@ type Window struct {
 	// Declared says --config declares it: the UI and the API don't change
 	// or delete it (docs/design/serveops.md).
 	Declared bool `json:"declared,omitempty"`
-	re       *regexp.Regexp
-	ruled    map[string]bool // whether re matched each rule's name
-	loc      *time.Location
-	sch      *schedule.Schedule // for month and cron
-	own      *ownership         // who owns what, for a team's window
+	// GivenBack says a file declared it and a leader without --config gave
+	// it back to the UI: until the UI changes it, the next file that
+	// doesn't declare it again leaves it as one it no longer declares.
+	GivenBack bool `json:"-"`
+	re        *regexp.Regexp
+	ruled     map[string]bool // whether re matched each rule's name
+	loc       *time.Location
+	sch       *schedule.Schedule // for month and cron
+	own       *ownership         // who owns what, for a team's window
 }
 
 // Everies are how often a quiet window can repeat.
@@ -1069,7 +1077,7 @@ func (l *Ledger) windowsMeeting(ctx context.Context, q queryer, lo, hi int64) ([
 }
 
 func (l *Ledger) windows(ctx context.Context, q queryer, where string, args ...any) ([]Window, error) {
-	rows, err := q.QueryContext(ctx, "SELECT id, title, start_at, end_at, every, repeat_on, until_at, team_id, rules, labels, updated, updated_by, declared FROM windows "+where, args...)
+	rows, err := q.QueryContext(ctx, "SELECT id, title, start_at, end_at, every, repeat_on, until_at, team_id, rules, labels, updated, updated_by, declared, given_back FROM windows "+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1080,7 +1088,7 @@ func (l *Ledger) windows(ctx context.Context, q queryer, where string, args ...a
 		var start, end, at int64
 		var until sql.NullInt64
 		var labels string
-		if err := rows.Scan(&w.ID, &w.Title, &start, &end, &w.Every, &w.On, &until, &w.TeamID, &w.Rules, &labels, &at, &w.By, &w.Declared); err != nil {
+		if err := rows.Scan(&w.ID, &w.Title, &start, &end, &w.Every, &w.On, &until, &w.TeamID, &w.Rules, &labels, &at, &w.By, &w.Declared, &w.GivenBack); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -1277,7 +1285,7 @@ func (l *Ledger) insertWindow(t *txn, w Window, by string, declared bool) (int64
 // do.
 func updateWindow(t *txn, id int64, w Window, by string, declared bool) error {
 	_, err := t.ExecContext(t.ctx, `UPDATE windows SET title = ?, start_at = ?, end_at = ?, every = ?, repeat_on = ?, until_at = ?, team_id = ?,
-		rules = ?, labels = ?, updated = ?, updated_by = ?, declared = ? WHERE id = ?`,
+		rules = ?, labels = ?, updated = ?, updated_by = ?, declared = ?, given_back = 0 WHERE id = ?`,
 		w.Title, w.Start.Unix(), w.End.Unix(), w.Every, w.On, nullable(w.Until), w.TeamID, w.Rules, labelsText(w.Labels), time.Now().Unix(), by, declared, id)
 	return err
 }

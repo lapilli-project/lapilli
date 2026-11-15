@@ -68,10 +68,29 @@ func configServer(t *testing.T, body string, change func(*Config)) (*Server, str
 			change(c)
 		}
 	})
-	if err := s.reconcileConfig(context.Background()); err != nil {
+	readTwice(t, s)
+	return s, path
+}
+
+// readTwice reads --config as the leader does once it changed: the first
+// read noted, changing nothing, and the second, configEvery after, keeping
+// the ledger to it.
+func readTwice(t *testing.T, s *Server) {
+	t.Helper()
+	ctx := context.Background()
+	if err := s.reconcileConfig(ctx); err != nil {
 		t.Fatal(err)
 	}
-	return s, path
+	clockOn(s, configEvery)
+	if err := s.reconcileConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// clockOn moves the server's clock on by d, from where it stands.
+func clockOn(s *Server, d time.Duration) {
+	at := s.wall().Add(d)
+	s.wall = func() time.Time { return at }
 }
 
 // A config is read strictly: a key it doesn't know, a value of the wrong
@@ -116,6 +135,12 @@ func TestParseConfig(t *testing.T) {
 		// A key with nothing after it, as a file cut short reads.
 		{"teams:\n", "line 1: teams has nothing after it: give teams: [] for none"},
 		{"teams: []\nwindows:\n", "line 2: windows has nothing after it"},
+		// A value with nothing after it, as a file cut short reads: read as
+		// nothing, a role's team would be every team, a window's rules
+		// every rule.
+		{"grants:\n  - user: mallory@example.com\n    team:\n", "line 3: team has nothing after it: leave the key out for every team"},
+		{"windows:\n  - title: freeze\n    team: payments\n    rules:\n", "line 4: rules has nothing after it: leave the key out for every rule"},
+		{"teams:\n  - name: payments\n    tz: ~\n", "line 3: tz has nothing after it: give it a value, or leave the key out"},
 		// What Helm, reading values as YAML 1.1, gives as a boolean or a
 		// number where a name is wanted.
 		{"teams:\n  - name: false\n    rules: ^A\n", "line 2: name is false, read as a boolean or a number"},
@@ -189,8 +214,15 @@ func TestConfigReloaded(t *testing.T) {
 	if err := s.reconcileConfig(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if teamOf(t, s, "payments").TZ != "Europe/Berlin" {
-		t.Error("the change isn't kept")
+	if teamOf(t, s, "payments").TZ != "Asia/Seoul" || s.configShown().Pending.IsZero() {
+		t.Error("read once, the change is kept already")
+	}
+	clockOn(s, configEvery)
+	if err := s.reconcileConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if teamOf(t, s, "payments").TZ != "Europe/Berlin" || !s.configShown().Pending.IsZero() {
+		t.Error("read twice, the change isn't kept")
 	}
 	h := s.Handler()
 	for _, c := range []struct {
@@ -210,9 +242,7 @@ func TestConfigReloaded(t *testing.T) {
 		{strings.Replace(berlin, "dests: [team:payments]", "dests: [nowhere]", 1), `there is no destination called "nowhere"`, false},
 	} {
 		writeConfig(t, path, c.body)
-		if err := s.reconcileConfig(ctx); err != nil {
-			t.Fatalf("a file that can't all be kept: %v", err)
-		}
+		readTwice(t, s)
 		if teamOf(t, s, "payments").TZ != "Europe/Berlin" {
 			t.Errorf("%s: payments isn't kept as it was", c.want)
 		}
@@ -236,9 +266,7 @@ func TestConfigReloaded(t *testing.T) {
 		}
 		// Put back, after one that can't be read: nothing wrong is shown.
 		writeConfig(t, path, berlin)
-		if err := s.reconcileConfig(ctx); err != nil {
-			t.Fatal(err)
-		}
+		readTwice(t, s)
 		if e := s.configShown().ErrText("en"); e != "" {
 			t.Errorf("%s: put back, it still says %q", c.want, e)
 		}
@@ -302,15 +330,24 @@ func TestConfigBadAtStart(t *testing.T) {
 }
 
 // A replica that leads again keeps the ledger to the file, whatever an
-// earlier term kept: another leader with an older copy may have since.
+// earlier term kept: another leader with an older copy may have since. As
+// any file, it is read twice first: kept to at the term's first read
+// again, configEvery after it begins.
 func TestConfigNewTerm(t *testing.T) {
 	ctx := context.Background()
 	s, _ := configServer(t, configFile, nil)
 	o, _ := s.options(ctx)
-	if _, _, err := s.l.Reconcile(ctx, ledger.Declared{}, ledger.Leave{Sure: true}, o); err != nil { // as another leader would
+	if _, _, err := s.l.Reconcile(ctx, ledger.Declared{}, ledger.Leave{}, o); err != nil { // as another leader would
 		t.Fatal(err)
 	}
 	if err := s.configTerm(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if teamOf(t, s, "payments").Declared {
+		t.Error("kept to on the term's first read")
+	}
+	clockOn(s, configEvery)
+	if err := s.reconcileConfig(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if !teamOf(t, s, "payments").Declared {
@@ -458,7 +495,7 @@ func TestDeclaredRefusedEveryPath(t *testing.T) {
 // Without --config, what a file declared before is the UI's again. With
 // --config-prune, what the file no longer declares is deleted once it is
 // read the same twice in a row: an empty file deletes nothing, nor a
-// half-written one read once, but the roles it no longer gives.
+// half-written one read once.
 func TestConfigTakenAway(t *testing.T) {
 	ctx := context.Background()
 	s, path := configServer(t, configFile, nil)
@@ -474,18 +511,22 @@ func TestConfigTakenAway(t *testing.T) {
 	if err := s.configTerm(ctx); err != nil {
 		t.Fatal(err)
 	}
-	// Teams, windows and reports: a role the file no longer gives is taken
-	// away at once (TestConfigGrantRevoked).
+	clockOn(s, configEvery)
+	if err := s.reconcileConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
 	count := func() int {
 		ts, _ := s.l.Teams(ctx)
 		ws, _ := s.l.Windows(ctx, now.Add(-30*24*time.Hour), now.Add(30*24*time.Hour))
 		rs, _ := s.l.Scheduleds(ctx)
-		return len(ts) + len(ws) + len(rs)
+		gs, _ := s.l.Grants(ctx)
+		return len(ts) + len(ws) + len(rs) + len(gs)
 	}
 	all := count()
 	// Empty, then half written, each read once: nothing deleted.
 	for _, body := range []string{"", configFile[:strings.Index(configFile, "windows:")]} {
 		writeConfig(t, path, body)
+		clockOn(s, configEvery)
 		if err := s.reconcileConfig(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -495,11 +536,13 @@ func TestConfigTakenAway(t *testing.T) {
 	}
 	// Whole again, then teams: [] read twice: deleted the second time.
 	writeConfig(t, path, configFile)
+	clockOn(s, configEvery)
 	if err := s.reconcileConfig(ctx); err != nil {
 		t.Fatal(err)
 	}
 	writeConfig(t, path, "teams: []\n")
 	for i := 1; i <= 2; i++ {
+		clockOn(s, configEvery)
 		if err := s.reconcileConfig(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -573,9 +616,7 @@ func TestConfigExportRoundTrip(t *testing.T) {
 	before, _ := s.l.AllDeclarable(ctx)
 	writeConfig(t, path, first)
 	gen := s.l.Gen()
-	if err := s.reconcileConfig(ctx); err != nil {
-		t.Fatal(err)
-	}
+	readTwice(t, s)
 	if e := s.configShown().ErrText("en"); e != "" {
 		t.Fatalf("the export read back: %s\n%s", e, first)
 	}
@@ -596,12 +637,13 @@ func TestConfigExportRoundTrip(t *testing.T) {
 	if second != first {
 		t.Errorf("exported again:\n%s\nwas:\n%s", second, first)
 	}
-	// Read once more: nothing at all.
-	s.config.applied = ""
+	// Read once more, as a term begins: nothing at all.
+	s.config.newTerm()
 	gen = s.l.Gen()
-	if err := s.reconcileConfig(ctx); err != nil || s.l.Gen() != gen {
+	readTwice(t, s)
+	if s.l.Gen() != gen || s.config.applied == "" {
 		cs, _ := s.l.Changes(ctx, 5)
-		t.Errorf("once more: %v, generation %d → %d: %+v %+v", err, gen, s.l.Gen(), s.configShown().Did, cs)
+		t.Errorf("once more: generation %d → %d: %+v %+v", gen, s.l.Gen(), s.configShown().Did, cs)
 	}
 }
 
@@ -661,9 +703,7 @@ func TestExportHostileNames(t *testing.T) {
 	// Read back, each such title is skipped, and no role is made.
 	s, path := configServer(t, configFile, nil)
 	writeConfig(t, path, string(out))
-	if err := s.reconcileConfig(ctx); err != nil {
-		t.Fatal(err)
-	}
+	readTwice(t, s)
 	gs, _ := s.l.Grants(ctx)
 	if slices.ContainsFunc(gs, func(g ledger.Grant) bool { return strings.Contains(g.Who, "mallory") }) {
 		t.Errorf("mallory was given a role: %+v", gs)
@@ -707,18 +747,22 @@ func TestRenameNamedTeam(t *testing.T) {
 
 // A role the file no longer gives is taken away, --config-prune or not,
 // one the UI made and the file took over among them, once the file is
-// read the same twice in a row.
+// read the same twice in a row, configEvery apart.
 func TestConfigGrantRevoked(t *testing.T) {
 	ctx := context.Background()
 	s, path := configServer(t, configFile, nil)
 	writeConfig(t, path, strings.Replace(configFile, "  - user: ana@example.com\n", "", 1))
-	if err := s.reconcileConfig(ctx); err != nil {
-		t.Fatal(err)
+	// Read once, and again at once: kept, as a file read half written
+	// takes no one's role.
+	for range 2 {
+		if err := s.reconcileConfig(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if gs, _ := s.l.Grants(ctx); !slices.ContainsFunc(gs, func(g ledger.Grant) bool { return g.Who == "user:ana@example.com" && g.Declared }) {
+			t.Errorf("read once, ana's role: %+v", gs)
+		}
 	}
-	// Read once, kept: a file read half written takes no one's role.
-	if gs, _ := s.l.Grants(ctx); !slices.ContainsFunc(gs, func(g ledger.Grant) bool { return g.Who == "user:ana@example.com" && g.Declared }) {
-		t.Errorf("read once, ana's role: %+v", gs)
-	}
+	clockOn(s, configEvery)
 	if err := s.reconcileConfig(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -743,6 +787,7 @@ func TestConfigPruneReadTwiceInARow(t *testing.T) {
 	read := func(body string) int {
 		t.Helper()
 		writeConfig(t, path, body)
+		clockOn(s, configEvery)
 		if err := s.reconcileConfig(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -784,19 +829,21 @@ func TestConfigBackoff(t *testing.T) {
 		t.Fatalf("tried again four times, backoff %s", s.config.backoff)
 	}
 	writeConfig(t, path, bad+"  - {title: other, team: nowhere, start: 2026-11-02T02:00, end: 2026-11-02T03:00}\n")
-	if err := s.reconcileConfig(ctx); err != nil {
-		t.Fatal(err)
-	}
+	readTwice(t, s)
 	if s.config.backoff != configEvery {
 		t.Errorf("a new file waits %s, want %s", s.config.backoff, configEvery)
 	}
 	// The settings can't be read: tried again after a while, not at once.
 	writeConfig(t, path, configFile)
+	if err := s.reconcileConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	clockOn(s, configEvery)
 	s.Close()
 	if err := s.reconcileConfig(ctx); err == nil {
 		t.Fatal("no error from a closed ledger")
 	}
-	if !s.config.failAt.After(at) {
+	if !s.config.failAt.After(s.wall()) {
 		t.Errorf("not tried again after a while: %v", s.config.failAt)
 	}
 }
@@ -811,9 +858,10 @@ func TestConfigErrorBacksOff(t *testing.T) {
 	if err := s.reconcileConfig(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if s.config.keptFor == "" {
-		t.Fatal("nothing kept to delete when read again")
+	if s.config.pending == "" {
+		t.Fatal("not noted, read once")
 	}
+	clockOn(s, configEvery)
 	s.Close() // the ledger fails every write
 	if err := s.reconcileConfig(ctx); err == nil {
 		t.Fatal("read twice, not tried")
@@ -823,8 +871,7 @@ func TestConfigErrorBacksOff(t *testing.T) {
 			t.Errorf("tried again at once: %v", err)
 		}
 	}
-	at := time.Now().Add(time.Hour)
-	s.wall = func() time.Time { return at }
+	clockOn(s, time.Hour)
 	if err := s.reconcileConfig(ctx); err == nil {
 		t.Error("not tried again after a while")
 	}
@@ -832,10 +879,11 @@ func TestConfigErrorBacksOff(t *testing.T) {
 
 // Without --config, what a file declared before is the UI's again, roles
 // included, none taken away, whatever the UI holds: a chart rolled back to
-// before --config takes no one's role away. Settings says so.
+// before --config takes no one's role away. Settings says how many, and
+// to an admin which.
 func TestConfigNoFileGivesBack(t *testing.T) {
 	ctx := context.Background()
-	s, _ := configServer(t, configFile, nil)
+	s, _ := configServer(t, configFile, func(c *Config) { c.Viewers = []string{"*"} })
 	s.cfg.Config = ""
 	if err := s.configTerm(ctx); err != nil {
 		t.Fatal(err)
@@ -848,7 +896,162 @@ func TestConfigNoFileGivesBack(t *testing.T) {
 	if slices.ContainsFunc(cs, func(c ledger.Change) bool { return strings.HasPrefix(c.What, ledger.RoleTaken) }) {
 		t.Error("a role taken away without --config")
 	}
-	if _, body := callAs(t, s.Handler(), "GET", "/settings", "boss@example.com", "", "", ""); !strings.Contains(body, "the UI&#39;s again, roles included, none taken away: 5 of them") {
-		t.Errorf("settings doesn't say what was given back")
+	h := s.Handler()
+	_, admin := callAs(t, h, "GET", "/settings", "boss@example.com", "", "", "")
+	_, viewer := callAs(t, h, "GET", "/settings", "viewer@example.com", "", "", "")
+	for who, body := range map[string]string{"an admin": admin, "a viewer": viewer} {
+		if !strings.Contains(body, "5 of what a file declared were given back to the UI") {
+			t.Errorf("%s isn't told how many were given back", who)
+		}
+	}
+	if !strings.Contains(admin, "user:ana@example.com") || strings.Contains(viewer, "ana@example.com") {
+		t.Errorf("whom a role was given to: to an admin %v, to a viewer %v", strings.Contains(admin, "ana@"), strings.Contains(viewer, "ana@"))
+	}
+}
+
+// A new file is kept to only once it is read the same twice in a row,
+// configEvery apart: a file cut short after a role's holder, read once,
+// gives no one a role, of every team or of any, nor does one read again
+// too soon; another between makes two reads not in a row.
+func TestConfigKeptOnlyReadTwice(t *testing.T) {
+	ctx := context.Background()
+	s, path := configServer(t, configFile, nil)
+	mallory := func() []ledger.Grant {
+		gs, _ := s.l.Grants(ctx)
+		return slices.DeleteFunc(gs, func(g ledger.Grant) bool { return !strings.Contains(g.Who, "mallory") })
+	}
+	cut := configFile + "  - user: mallory@example.com\n"
+	whole := cut + "    team: payments\n"
+	read := func(body string, after time.Duration) {
+		t.Helper()
+		writeConfig(t, path, body)
+		clockOn(s, after)
+		if err := s.reconcileConfig(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read(cut, 0)
+	read(cut, configEvery-time.Second) // too soon
+	if gs := mallory(); len(gs) != 0 {
+		t.Errorf("cut short, read once and again too soon: %+v", gs)
+	}
+	read(whole, configEvery)
+	read(cut, configEvery)
+	read(whole, configEvery)
+	if gs := mallory(); len(gs) != 0 {
+		t.Errorf("whole, cut short, whole: %+v", gs)
+	}
+	read(whole, configEvery)
+	if gs := mallory(); len(gs) != 1 || gs[0].TeamID == 0 {
+		t.Errorf("whole, read twice in a row: %+v", gs)
+	}
+}
+
+// An error of the ledger's between two reads of a file makes them not in a
+// row: kept to one file, another read twice that the ledger fails to keep
+// to, then the first again, takes no role away; the other is kept to only
+// once it is read twice in a row again.
+func TestConfigErrorBetweenReads(t *testing.T) {
+	ctx := context.Background()
+	s, path := configServer(t, configFile, nil)
+	ana := func() bool {
+		gs, _ := s.l.Grants(ctx)
+		return slices.ContainsFunc(gs, func(g ledger.Grant) bool { return g.Who == "user:ana@example.com" })
+	}
+	without := strings.Replace(configFile, "  - user: ana@example.com\n", "", 1)
+	writeConfig(t, path, without)
+	if err := s.reconcileConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	clockOn(s, configEvery)
+	gone, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := s.reconcileConfig(gone); err == nil {
+		t.Fatal("no error from the ledger")
+	}
+	writeConfig(t, path, configFile)
+	clockOn(s, configEvery)
+	if err := s.reconcileConfig(ctx); err != nil || !ana() {
+		t.Fatalf("the first again: %v, ana's role %v", err, ana())
+	}
+	writeConfig(t, path, without)
+	clockOn(s, time.Hour) // past what the error waits
+	if err := s.reconcileConfig(ctx); err != nil || !ana() {
+		t.Errorf("the other, read once again: %v, ana's role %v", err, ana())
+	}
+	clockOn(s, configEvery)
+	if err := s.reconcileConfig(ctx); err != nil || ana() {
+		t.Errorf("read twice in a row: %v, ana's role %v", err, ana())
+	}
+}
+
+// A team a full ledger makes only once others are let go, in the same
+// write, is made after what names it was read: that is tried again, not
+// left until the ledger changes for another reason.
+func TestConfigDeferredTeamTriedAgain(t *testing.T) {
+	ctx := context.Background()
+	s, path := configServer(t, "teams: []\n", nil)
+	for i := range ledger.MaxTeams - 2 { // payments and search are the UI's
+		if _, err := s.l.PutTeam(ctx, ledger.Team{Name: fmt.Sprint("ui", i), Rules: "^U"}, "boss"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	file := func(from int, also string) string {
+		var b strings.Builder
+		b.WriteString("teams:\n")
+		for i := from; i < ledger.MaxDeclaredTeams; i++ {
+			fmt.Fprintf(&b, "  - {name: d%d, rules: ^D}\n", i)
+		}
+		return b.String() + also
+	}
+	writeConfig(t, path, file(0, ""))
+	readTwice(t, s)
+	// One let go for one made, and a window of it.
+	writeConfig(t, path, file(1, "  - {name: fresh, rules: ^F}\nwindows:\n  - {title: freeze, team: fresh, start: 2026-11-02T02:00, end: 2026-11-02T03:00}\n"))
+	readTwice(t, s)
+	if !strings.Contains(s.configShown().ErrText("en"), "no team called fresh") {
+		t.Fatalf("shown: %q", s.configShown().ErrText("en"))
+	}
+	clockOn(s, configEvery)
+	if err := s.reconcileConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ws, _ := s.l.Windows(ctx, now.Add(-30*24*time.Hour), now.Add(30*24*time.Hour))
+	if len(ws) != 1 || !ws[0].Declared || s.configShown().ErrText("en") != "" {
+		t.Errorf("tried again: %+v, %q", ws, s.configShown().ErrText("en"))
+	}
+}
+
+// A role the file took out, read once, then a leader without --config,
+// then --config again: the role is taken away once the file is read twice,
+// not left the UI's for good.
+func TestConfigRolledBackAndForward(t *testing.T) {
+	ctx := context.Background()
+	s, path := configServer(t, configFile, nil)
+	writeConfig(t, path, strings.Replace(configFile, "  - user: ana@example.com\n", "", 1))
+	if err := s.reconcileConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Rolled back past --config.
+	s.cfg.Config = ""
+	if err := s.configTerm(ctx); err != nil {
+		t.Fatal(err)
+	}
+	gs, _ := s.l.Grants(ctx)
+	if !slices.ContainsFunc(gs, func(g ledger.Grant) bool { return g.Who == "user:ana@example.com" && !g.Declared }) {
+		t.Fatalf("without --config, ana's role: %+v", gs)
+	}
+	// And forward again.
+	s.cfg.Config = path
+	if err := s.configTerm(ctx); err != nil {
+		t.Fatal(err)
+	}
+	clockOn(s, configEvery)
+	if err := s.reconcileConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	gs, _ = s.l.Grants(ctx)
+	if slices.ContainsFunc(gs, func(g ledger.Grant) bool { return g.Who == "user:ana@example.com" }) || len(gs) != 1 || !gs[0].Declared {
+		t.Errorf("forward again, the roles: %+v", gs)
 	}
 }

@@ -59,7 +59,7 @@ func changesBy(t *testing.T, l *Ledger, by string) []string {
 func TestReconcileMakes(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	r, skipped := reconcile(t, l, declaredOf(), Leave{Sure: true})
+	r, skipped := reconcile(t, l, declaredOf(), Leave{})
 	if r != (Reconciled{Made: 5}) || len(skipped) != 0 {
 		t.Errorf("reconciled: %+v %v, want 5 made", r, skipped)
 	}
@@ -83,7 +83,7 @@ func TestReconcileMakes(t *testing.T) {
 	if len(logged) != 5 {
 		t.Errorf("the activity log: %q", logged)
 	}
-	r, _ = reconcile(t, l, declaredOf(), Leave{Sure: true})
+	r, _ = reconcile(t, l, declaredOf(), Leave{})
 	if r.Any() {
 		t.Errorf("the same file again: %+v", r)
 	}
@@ -105,7 +105,7 @@ func TestDeclaredRefused(t *testing.T) {
 	}
 	d := declaredOf()
 	d.Grants = append(d.Grants, DeclaredGrant{Who: "user:bo@example.com", Team: "search", Line: 24})
-	reconcile(t, l, d, Leave{Sure: true})
+	reconcile(t, l, d, Leave{})
 	ts, _ := l.Teams(ctx)
 	var pay Team
 	for _, x := range ts {
@@ -147,7 +147,7 @@ func TestDeclaredRefused(t *testing.T) {
 	if _, err := l.PutTeam(ctx, Team{ID: ui, Name: "Search", Rules: "^Search", Note: "ours"}, "ana"); err != nil {
 		t.Errorf("a team a declared role names, changed but for its name's case: %v", err)
 	}
-	if r, skipped := reconcile(t, l, d, Leave{Sure: true}); r.Any() || len(skipped) != 0 {
+	if r, skipped := reconcile(t, l, d, Leave{}); r.Any() || len(skipped) != 0 {
 		t.Errorf("the file read again after the case changed: %+v %v", r, skipped)
 	}
 	if _, err := l.PutTeam(ctx, Team{ID: ui, Name: "search", Rules: "^Search", Note: "ours"}, "ana"); err != nil {
@@ -169,9 +169,8 @@ func TestDeclaredRefused(t *testing.T) {
 }
 
 // Taken out of the file, what was declared is the UI's again, as it was,
-// and the UI may change it, but a role: kept while the file hasn't been
-// read twice without it, then taken away, noted with whom it gave what.
-// Pruned, the rest is kept, then deleted. With no file at all, all of it
+// and the UI may change it, but a role: taken away, noted with whom it
+// gave what. Pruned, the rest is deleted. With no file at all, all of it
 // is the UI's again, roles included, and nothing deleted.
 func TestReconcileRemoved(t *testing.T) {
 	ctx := context.Background()
@@ -180,12 +179,10 @@ func TestReconcileRemoved(t *testing.T) {
 		left Leave
 		want Reconciled
 	}{
-		{"read once", Leave{}, Reconciled{Undeclared: 3, Kept: 2}},
-		{"read twice", Leave{Sure: true}, Reconciled{Undeclared: 3, Deleted: 2}},
-		{"pruned, read once", Leave{Prune: true}, Reconciled{Kept: 5}},
-		{"pruned, read twice", Leave{Prune: true, Sure: true}, Reconciled{Deleted: 5}},
+		{"taken out", Leave{}, Reconciled{Undeclared: 3, Deleted: 2}},
+		{"pruned", Leave{Prune: true}, Reconciled{Deleted: 5}},
 		{"no file", Leave{NoFile: true}, Reconciled{Undeclared: 5}},
-		{"no file, pruned", Leave{NoFile: true, Prune: true, Sure: true}, Reconciled{Undeclared: 5}},
+		{"no file, pruned", Leave{NoFile: true, Prune: true}, Reconciled{Undeclared: 5}},
 	} {
 		l := open(t, time.UTC)
 		reconcile(t, l, declaredOf(), Leave{})
@@ -214,7 +211,7 @@ func TestReconcileRemoved(t *testing.T) {
 		if declared != c.want.Kept || len(ts)+len(ws)+len(rs)+len(gs) != 5-c.want.Deleted {
 			t.Errorf("%s: %d declared of %d left", c.name, declared, len(ts)+len(ws)+len(rs)+len(gs))
 		}
-		if c.left.Sure && !c.left.NoFile {
+		if !c.left.NoFile {
 			// Taken away, noted with what it was: whom to, of which team.
 			cs, _ := l.Changes(ctx, 100)
 			i := slices.IndexFunc(cs, func(x Change) bool { return x.What == RoleTaken+"group:payments-oncall" })
@@ -248,7 +245,7 @@ func TestReconcilePruneKeepsWhatIsNamed(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
 	d := Declared{Teams: []DeclaredTeam{{Team: Team{Name: "payments", Rules: "^P"}, Line: 1}, {Team: Team{Name: "search", Rules: "^S"}, Line: 2}}}
-	reconcile(t, l, d, Leave{Prune: true, Sure: true})
+	reconcile(t, l, d, Leave{Prune: true})
 	ts, _ := l.Teams(ctx)
 	pay := ts[0].ID
 	start := time.Date(2026, 11, 2, 2, 0, 0, 0, time.UTC)
@@ -259,7 +256,7 @@ func TestReconcilePruneKeepsWhatIsNamed(t *testing.T) {
 	if _, err := l.PutGrant(ctx, Grant{Who: "user:pat", TeamID: pay}, "ana"); err != nil {
 		t.Fatal(err)
 	}
-	r, _ := reconcile(t, l, Declared{Teams: []DeclaredTeam{{Team: Team{Name: "other", Rules: "^O"}, Line: 1}}}, Leave{Prune: true, Sure: true})
+	r, _ := reconcile(t, l, Declared{Teams: []DeclaredTeam{{Team: Team{Name: "other", Rules: "^O"}, Line: 1}}}, Leave{Prune: true})
 	if r != (Reconciled{Made: 1, Undeclared: 1, Deleted: 1}) {
 		t.Errorf("pruned: %+v", r)
 	}
@@ -276,7 +273,7 @@ func TestReconcilePruneKeepsWhatIsNamed(t *testing.T) {
 		t.Errorf("the activity log:\n%s", logged)
 	}
 	// Put back: payments taken over as it is, by its id.
-	r, _ = reconcile(t, l, d, Leave{Prune: true, Sure: true})
+	r, _ = reconcile(t, l, d, Leave{Prune: true})
 	ts, _ = l.Teams(ctx)
 	if r != (Reconciled{Made: 1, Adopted: 1, Deleted: 1}) || !slices.ContainsFunc(ts, func(x Team) bool { return x.ID == pay && x.Declared }) {
 		t.Errorf("put back: %+v %+v", r, ts)
@@ -303,14 +300,14 @@ func TestReconcilePruneKeepsWhatIsNamed(t *testing.T) {
 func TestReconcileSkipsWhatCantBeKept(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	reconcile(t, l, declaredOf(), Leave{Prune: true, Sure: true})
+	reconcile(t, l, declaredOf(), Leave{Prune: true})
 	d := declaredOf()
 	d.Teams[0].Note = "changed"
 	d.Windows[0].End = d.Windows[0].Start.Add(-time.Hour) // can't be kept
 	d.Grants = d.Grants[:1]                               // ana's taken away
 	d.Reports[0].Bad = errors.New("there is no destination called nowhere")
 	d.Windows = append(d.Windows, DeclaredWindow{Window: Window{Title: "of nobody", Start: d.Windows[0].Start, End: d.Windows[0].Start.Add(time.Hour)}, Team: "nobody", Line: 30})
-	r, skipped := reconcile(t, l, d, Leave{Prune: true, Sure: true})
+	r, skipped := reconcile(t, l, d, Leave{Prune: true})
 	if r != (Reconciled{Changed: 1, Deleted: 1}) {
 		t.Errorf("reconciled: %+v", r)
 	}
@@ -351,7 +348,7 @@ func TestDeclaredOwnLimits(t *testing.T) {
 	if _, err := l.PutWindow(ctx, Window{Title: "one more", Start: start, End: start.Add(time.Hour)}, "ana", opts); !invalidErr(err) {
 		t.Errorf("the UI past its most: %v", err)
 	}
-	r, skipped := reconcile(t, l, Declared{Windows: []DeclaredWindow{{Window: Window{Title: "declared", Start: start, End: start.Add(time.Hour)}, Line: 1}}}, Leave{Sure: true})
+	r, skipped := reconcile(t, l, Declared{Windows: []DeclaredWindow{{Window: Window{Title: "declared", Start: start, End: start.Add(time.Hour)}, Line: 1}}}, Leave{})
 	if r.Made != 1 || len(skipped) != 0 {
 		t.Errorf("a file beside the UI's most: %+v %v", r, skipped)
 	}
@@ -396,7 +393,7 @@ func TestReconcileAdoptsOfItsTeam(t *testing.T) {
 	if _, err := l.PutGrant(ctx, Grant{Who: "user:ana@example.com"}, "ana"); err != nil {
 		t.Fatal(err)
 	}
-	r, skipped := reconcile(t, l, d, Leave{Sure: true})
+	r, skipped := reconcile(t, l, d, Leave{})
 	// payments taken over and renamed, ana's role taken over; the window
 	// and the other role made; the report skipped.
 	if r != (Reconciled{Made: 2, Adopted: 2}) || len(skipped) != 1 || skipped[0].Kind != KindReport {
@@ -433,17 +430,17 @@ func TestReconcileWindowsByTitle(t *testing.T) {
 			{Window: Window{Title: "deploy", Start: start, End: start.Add(2 * time.Hour)}, Team: "b", Line: 4},
 		},
 	}
-	reconcile(t, l, d, Leave{Sure: true})
+	reconcile(t, l, d, Leave{})
 	ws, _ := l.windows(ctx, l.r, "ORDER BY id")
 	d.Windows = d.Windows[1:]
-	r, _ := reconcile(t, l, d, Leave{Sure: true})
+	r, _ := reconcile(t, l, d, Leave{})
 	after, _ := l.windows(ctx, l.r, "ORDER BY id")
 	if r != (Reconciled{Undeclared: 1}) || len(after) != 2 || after[0].Declared || !after[1].Declared || !sameWindow(after[1], ws[1]) {
 		t.Errorf("one of two taken out: %+v; %+v", r, after)
 	}
 	// Moved by the file to another team, a declared window is changed.
 	d.Windows[0].Team = "a"
-	r, _ = reconcile(t, l, d, Leave{Sure: true})
+	r, _ = reconcile(t, l, d, Leave{})
 	after, _ = l.windows(ctx, l.r, "ORDER BY id")
 	if r != (Reconciled{Changed: 1}) || after[1].ID != ws[1].ID || after[1].TeamID != after[0].TeamID {
 		t.Errorf("moved to another team: %+v; %+v", r, after)
@@ -454,13 +451,13 @@ func TestReconcileWindowsByTitle(t *testing.T) {
 func TestReconcileRenamedFrom(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	reconcile(t, l, Declared{Teams: []DeclaredTeam{{Team: Team{Name: "payments", Rules: "^P"}, Line: 1}}}, Leave{Prune: true, Sure: true})
+	reconcile(t, l, Declared{Teams: []DeclaredTeam{{Team: Team{Name: "payments", Rules: "^P"}, Line: 1}}}, Leave{Prune: true})
 	ts, _ := l.Teams(ctx)
 	id := ts[0].ID
 	if _, err := l.PutTask(ctx, Task{Title: "t", TeamID: id}, "ana"); err != nil {
 		t.Fatal(err)
 	}
-	r, _ := reconcile(t, l, Declared{Teams: []DeclaredTeam{{Team: Team{Name: "payments-eu", Rules: "^P"}, RenamedFrom: "payments", Line: 1}}}, Leave{Prune: true, Sure: true})
+	r, _ := reconcile(t, l, Declared{Teams: []DeclaredTeam{{Team: Team{Name: "payments-eu", Rules: "^P"}, RenamedFrom: "payments", Line: 1}}}, Leave{Prune: true})
 	ts, _ = l.Teams(ctx)
 	if r != (Reconciled{Changed: 1}) || len(ts) != 1 || ts[0].ID != id || ts[0].Name != "payments-eu" || !ts[0].Declared {
 		t.Errorf("renamed: %+v %+v", r, ts)
@@ -490,7 +487,7 @@ func TestPruneKeepsDeclaredWindows(t *testing.T) {
 	l := open(t, time.UTC)
 	old := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	d := Declared{Windows: []DeclaredWindow{{Window: Window{Title: "old freeze", Start: old, End: old.Add(24 * time.Hour)}, Line: 1}}}
-	reconcile(t, l, d, Leave{Sure: true})
+	reconcile(t, l, d, Leave{})
 	if _, err := l.PutWindow(ctx, Window{Title: "old ui", Start: old, End: old.Add(time.Hour)}, "ana", opts); err != nil {
 		t.Fatal(err)
 	}
@@ -501,7 +498,7 @@ func TestPruneKeepsDeclaredWindows(t *testing.T) {
 	if len(ws) != 1 || ws[0].Title != "old freeze" {
 		t.Errorf("after pruning: %+v", ws)
 	}
-	if r, _ := reconcile(t, l, d, Leave{Sure: true}); r.Any() {
+	if r, _ := reconcile(t, l, d, Leave{}); r.Any() {
 		t.Errorf("read again after pruning: %+v", r)
 	}
 }
@@ -519,11 +516,11 @@ func TestReconcileUnfoundTeamKeepsNothing(t *testing.T) {
 		Grants:  []DeclaredGrant{{Who: "user:eve", Line: 2}},
 		Windows: []DeclaredWindow{{Window: Window{Title: "freeze", Start: start, End: start.Add(time.Hour)}, Line: 3}},
 	}
-	reconcile(t, l, v1, Leave{Sure: true})
+	reconcile(t, l, v1, Leave{})
 	v2 := v1
 	v2.Grants = []DeclaredGrant{{Who: "user:eve", Team: "paymnets", Line: 2}}
 	v2.Windows = []DeclaredWindow{{Window: v1.Windows[0].Window, Team: "nobody", Line: 3}}
-	_, skipped := reconcile(t, l, v2, Leave{Sure: true})
+	_, skipped := reconcile(t, l, v2, Leave{})
 	if len(skipped) != 2 {
 		t.Errorf("skipped: %v", skipped)
 	}
@@ -553,7 +550,7 @@ func TestReconcileRenamedFromOrder(t *testing.T) {
 		for i, n := range names {
 			d.Teams = append(d.Teams, team(n, "", i+1))
 		}
-		reconcile(t, l, d, Leave{Sure: true})
+		reconcile(t, l, d, Leave{})
 		return l
 	}
 	names := func(l *Ledger) string {
@@ -583,13 +580,13 @@ func TestReconcileRenamedFromOrder(t *testing.T) {
 		{"C from B", []string{"B"}, []DeclaredTeam{team("C", " B ", 1)}, "C:1:true", 0},
 	} {
 		l := start(t, c.have...)
-		_, skipped := reconcile(t, l, Declared{Teams: c.want}, Leave{Sure: true})
+		_, skipped := reconcile(t, l, Declared{Teams: c.want}, Leave{})
 		if got := names(l); got != c.result || len(skipped) != c.skips {
 			t.Errorf("%s: %s, %d skipped (%v); want %s, %d", c.name, got, len(skipped), skipped, c.result, c.skips)
 		}
 	}
 	l := start(t, "B")
-	reconcile(t, l, Declared{Teams: []DeclaredTeam{team("C", "B", 1)}}, Leave{Sure: true})
+	reconcile(t, l, Declared{Teams: []DeclaredTeam{team("C", "B", 1)}}, Leave{})
 	if !slices.Contains(changesBy(t, l, ConfigBy), "team B renamed to C") {
 		t.Errorf("the activity log: %q", changesBy(t, l, ConfigBy))
 	}
@@ -628,10 +625,10 @@ func TestDeclaredLeftPastTheUIsMost(t *testing.T) {
 		for i := range 10 {
 			d.Windows = append(d.Windows, DeclaredWindow{Window: Window{Title: fmt.Sprint("d", i), Start: start, End: start.Add(time.Hour)}, Line: i + 2})
 		}
-		if r, skipped := reconcile(t, l, d, Leave{Sure: true}); r.Made < 10 || len(skipped) != 0 {
+		if r, skipped := reconcile(t, l, d, Leave{}); r.Made < 10 || len(skipped) != 0 {
 			t.Fatalf("declared: %+v %v", r, skipped)
 		}
-		if r, _ := reconcile(t, l, Declared{Teams: []DeclaredTeam{{Team: Team{Name: "other", Rules: "^O"}, Line: 1}}}, Leave{Sure: true}); r.Undeclared != 0 {
+		if r, _ := reconcile(t, l, Declared{Teams: []DeclaredTeam{{Team: Team{Name: "other", Rules: "^O"}, Line: 1}}}, Leave{}); r.Undeclared != 0 {
 			t.Errorf("given back past the UI's most: %+v", r)
 		}
 	}
@@ -645,11 +642,9 @@ func TestDeclaredLeftPastTheUIsMost(t *testing.T) {
 	}
 }
 
-// Past the UI's most, what the file no longer declares is kept declared
-// on a first read, and deleted, said why, only once the file is read the
-// same twice: a half-written file read once deletes nothing, a team
-// included.
-func TestPastTheUIsMostWaitsForSure(t *testing.T) {
+// Past the UI's most, what the file no longer declares is deleted, said
+// why; with no file at all, given back all the same.
+func TestPastTheUIsMost(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
 	err := l.write(ctx, func(t *txn) error {
@@ -671,11 +666,8 @@ func TestPastTheUIsMostWaitsForSure(t *testing.T) {
 	d := Declared{Teams: []DeclaredTeam{{Team: Team{Name: "declared", Rules: "^D"}, Line: 1}},
 		Reports: []DeclaredReport{{Scheduled: Scheduled{Name: "declared daily", Schedule: "daily@09:00", Dests: []string{"ops"}, Enabled: true}, Line: 2}}}
 	reconcile(t, l, d, Leave{})
-	if r, _ := reconcile(t, l, Declared{}, Leave{}); r != (Reconciled{Kept: 2}) {
-		t.Errorf("read once: %+v", r)
-	}
-	if r, _ := reconcile(t, l, Declared{}, Leave{Sure: true}); r != (Reconciled{Deleted: 2}) {
-		t.Errorf("read twice: %+v", r)
+	if r, _ := reconcile(t, l, Declared{}, Leave{}); r != (Reconciled{Deleted: 2}) {
+		t.Errorf("taken out: %+v", r)
 	}
 	logged := changesBy(t, l, ConfigBy)
 	for _, want := range []string{fmt.Sprintf("team declared deleted, as the file no longer declares it and the UI keeps %d at most", MaxTeams),
@@ -716,10 +708,10 @@ func TestReplacedAtTheMost(t *testing.T) {
 		}
 		return d
 	}
-	if r, skipped := reconcile(t, l, windows("old"), Leave{Prune: true, Sure: true}); r.Made != MaxWindows || len(skipped) != 0 {
+	if r, skipped := reconcile(t, l, windows("old"), Leave{Prune: true}); r.Made != MaxWindows || len(skipped) != 0 {
 		t.Fatalf("the first: %+v %d skipped", r, len(skipped))
 	}
-	r, skipped := reconcile(t, l, windows("new"), Leave{Prune: true, Sure: true})
+	r, skipped := reconcile(t, l, windows("new"), Leave{Prune: true})
 	if r.Made != MaxWindows || r.Deleted != MaxWindows || len(skipped) != 0 {
 		t.Errorf("replaced: %+v, %d skipped (%v)", r, len(skipped), skipped[:min(len(skipped), 2)])
 	}
@@ -756,10 +748,10 @@ func TestReplacedAtTheMostReportsRoles(t *testing.T) {
 		return d
 	}
 	all := MaxScheduled + MaxGrants
-	if r, skipped := reconcile(t, l, declared("old"), Leave{Prune: true, Sure: true}); r.Made != all || len(skipped) != 0 {
+	if r, skipped := reconcile(t, l, declared("old"), Leave{Prune: true}); r.Made != all || len(skipped) != 0 {
 		t.Fatalf("the first: %+v %d skipped", r, len(skipped))
 	}
-	r, skipped := reconcile(t, l, declared("new"), Leave{Prune: true, Sure: true})
+	r, skipped := reconcile(t, l, declared("new"), Leave{Prune: true})
 	if r.Made != all || r.Deleted != all || len(skipped) != 0 {
 		t.Errorf("replaced: %+v, %d skipped (%v)", r, len(skipped), skipped[:min(len(skipped), 2)])
 	}
@@ -803,7 +795,7 @@ func TestRoleTakenKeepsWhom(t *testing.T) {
 func TestSkippedTeamNamesNothingElse(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
-	reconcile(t, l, Declared{Teams: []DeclaredTeam{{Team: Team{Name: "B", Rules: "^B"}, Line: 1}}}, Leave{Prune: true, Sure: true})
+	reconcile(t, l, Declared{Teams: []DeclaredTeam{{Team: Team{Name: "B", Rules: "^B"}, Line: 1}}}, Leave{Prune: true})
 	c, err := l.PutTeam(ctx, Team{Name: "C", Rules: "^C"}, "ana")
 	if err != nil {
 		t.Fatal(err)
@@ -812,7 +804,7 @@ func TestSkippedTeamNamesNothingElse(t *testing.T) {
 		Teams:  []DeclaredTeam{{Team: Team{Name: "C", Rules: "^C"}, RenamedFrom: "B", Line: 1}},
 		Grants: []DeclaredGrant{{Who: "user:mallory", Team: "C", Line: 2}},
 	}
-	_, skipped := reconcile(t, l, d, Leave{Prune: true, Sure: true})
+	_, skipped := reconcile(t, l, d, Leave{Prune: true})
 	if len(skipped) != 2 || skipped[1].Kind != KindGrant || !strings.Contains(skipped[1].Error(), "declared on line 1, can't be kept") {
 		t.Errorf("skipped: %v", skipped)
 	}
@@ -821,9 +813,161 @@ func TestSkippedTeamNamesNothingElse(t *testing.T) {
 	}
 	// Declared twice by its name, the second renamed from B: B is kept.
 	d = Declared{Teams: []DeclaredTeam{{Team: Team{Name: "X", Rules: "^X"}, Line: 1}, {Team: Team{Name: "x", Rules: "^X"}, RenamedFrom: "B", Line: 2}}}
-	reconcile(t, l, d, Leave{Prune: true, Sure: true})
+	reconcile(t, l, d, Leave{Prune: true})
 	ts, _ := l.Teams(ctx)
 	if !slices.ContainsFunc(ts, func(x Team) bool { return x.Name == "B" && x.Declared }) {
 		t.Errorf("B, which a team declared twice was renamed from: %+v", ts)
+	}
+}
+
+// What no --config gave back is marked so: the next file that doesn't
+// declare it again lets it go as one it no longer declares, a role taken
+// away, the rest deleted when pruned and the UI's for good when not, a
+// team something names given back, but what the UI changed since, which
+// is the UI's. Given back, a role is noted as not declared.
+func TestGivenBackLetGoByTheNextFile(t *testing.T) {
+	ctx := context.Background()
+	for _, prune := range []bool{false, true} {
+		l := open(t, time.UTC)
+		reconcile(t, l, declaredOf(), Leave{Prune: prune})
+		if r, _ := reconcile(t, l, Declared{}, Leave{NoFile: true, Prune: prune}); r != (Reconciled{Undeclared: 5}) {
+			t.Fatalf("no file: %+v", r)
+		}
+		gb, err := l.GivenBack(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []GivenBackRow{{KindGrant, "group:payments-oncall", "payments"}, {KindGrant, "user:ana@example.com", ""},
+			{KindReport, "payments weekly", "payments"}, {KindTeam, "payments", ""}, {KindWindow, "nightly backup", "payments"}}
+		if !slices.Equal(gb, want) {
+			t.Errorf("given back: %+v", gb)
+		}
+		cs, _ := l.Changes(ctx, 100)
+		if i := slices.IndexFunc(cs, func(c Change) bool { return c.What == RoleGiven+"user:ana@example.com"+givenBackNow }); i < 0 || strings.Contains(cs[i].After, `"declared":true`) {
+			t.Errorf("a role given back, noted: %+v", cs)
+		}
+		// Again with no file: as it is.
+		if r, _ := reconcile(t, l, Declared{}, Leave{NoFile: true}); r.Any() {
+			t.Errorf("no file again: %+v", r)
+		}
+		// The UI changes the report: the UI's.
+		rs, _ := l.Scheduleds(ctx)
+		rs[0].Schedule = "weekly tue@09:00"
+		if _, err := l.PutScheduled(ctx, rs[0], "ana", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		// A file with another team alone: payments, which the report names,
+		// given back for good either way.
+		d := Declared{Teams: []DeclaredTeam{{Team: Team{Name: "other", Rules: "^O"}, Line: 1}}}
+		r, _ := reconcile(t, l, d, Leave{Prune: prune})
+		want2 := Reconciled{Made: 1, Undeclared: 2, Deleted: 2}
+		if prune {
+			want2 = Reconciled{Made: 1, Undeclared: 1, Deleted: 3}
+		}
+		if r != want2 {
+			t.Errorf("pruned %v: the next file: %+v, want %+v", prune, r, want2)
+		}
+		if gs, _ := l.Grants(ctx); len(gs) != 0 {
+			t.Errorf("pruned %v: roles the file no longer gives: %+v", prune, gs)
+		}
+		ws, _ := l.windows(ctx, l.r, "")
+		if len(ws) != b2i(!prune) || len(ws) == 1 && (ws[0].Declared || ws[0].GivenBack) {
+			t.Errorf("pruned %v: windows: %+v", prune, ws)
+		}
+		if rs, _ := l.Scheduleds(ctx); len(rs) != 1 || rs[0].Declared {
+			t.Errorf("pruned %v: the report the UI changed: %+v", prune, rs)
+		}
+		if ts, _ := l.Teams(ctx); len(ts) != 2 || ts[1].Name != "payments" || ts[1].Declared || ts[1].GivenBack {
+			t.Errorf("pruned %v: the teams: %+v", prune, ts)
+		}
+		if gb, _ := l.GivenBack(ctx); len(gb) != 0 {
+			t.Errorf("pruned %v: given back still: %+v", prune, gb)
+		}
+	}
+}
+
+// A quiet window that can't be kept, of a team that can't be, keeps the
+// declared one of its title and team as it was: another team's window of
+// the title doesn't take it.
+func TestBadWindowKeepsItsOwn(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	start := time.Date(2026, 11, 2, 2, 0, 0, 0, time.UTC)
+	freeze := func(team string) DeclaredWindow {
+		return DeclaredWindow{Window: Window{Title: "freeze", Start: start, End: start.Add(time.Hour)}, Team: team, Line: 5}
+	}
+	d := Declared{Teams: []DeclaredTeam{{Team: Team{Name: "pay", Rules: "^P"}, Line: 1}, {Team: Team{Name: "search", Rules: "^S"}, Line: 2}},
+		Windows: []DeclaredWindow{freeze("pay")}}
+	reconcile(t, l, d, Leave{})
+	ws, _ := l.windows(ctx, l.r, "")
+	pay := ws[0].TeamID
+	d.Teams[0].Bad = errors.New("can't be kept")
+	d.Windows = []DeclaredWindow{freeze("pay"), freeze("search")}
+	if _, skipped := reconcile(t, l, d, Leave{}); len(skipped) != 2 {
+		t.Errorf("skipped: %v", skipped)
+	}
+	ws, _ = l.windows(ctx, l.r, "ORDER BY id")
+	if len(ws) != 2 || ws[0].TeamID != pay || !ws[0].Declared || ws[1].TeamID == pay {
+		t.Errorf("windows: %+v", ws)
+	}
+}
+
+// A team that can't be kept holds its name: another of it, in another
+// letter case, is skipped as a second, and the team kept as it was.
+func TestBadTeamHoldsItsName(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	reconcile(t, l, Declared{Teams: []DeclaredTeam{{Team: Team{Name: "ops", Rules: "^Ops"}, Line: 1}}}, Leave{})
+	d := Declared{Teams: []DeclaredTeam{{Team: Team{Name: "ops", Rules: "^Ops"}, Bad: errors.New("can't be kept"), Line: 1},
+		{Team: Team{Name: "OPS", Rules: "^Other"}, Line: 2}}}
+	_, skipped := reconcile(t, l, d, Leave{})
+	if len(skipped) != 2 || !strings.Contains(skipped[1].Error(), "declared on line 1 already") {
+		t.Errorf("skipped: %v", skipped)
+	}
+	if ts, _ := l.Teams(ctx); len(ts) != 1 || ts[0].Name != "ops" || ts[0].Rules != "^Ops" || !ts[0].Declared {
+		t.Errorf("teams: %+v", ts)
+	}
+}
+
+// What no --config gave back is the UI's for good once the UI changes it:
+// a team, a quiet window or a report changed is given back no more.
+func TestGivenBackClearedByTheUI(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	reconcile(t, l, declaredOf(), Leave{})
+	reconcile(t, l, Declared{}, Leave{NoFile: true})
+	ts, _ := l.Teams(ctx)
+	ts[0].Note = "ours"
+	if _, err := l.PutTeam(ctx, ts[0], "ana"); err != nil {
+		t.Fatal(err)
+	}
+	ws, _ := l.windows(ctx, l.r, "")
+	ws[0].Rules = "^Backups?"
+	if _, err := l.PutWindow(ctx, ws[0], "ana", opts); err != nil {
+		t.Fatal(err)
+	}
+	rs, _ := l.Scheduleds(ctx)
+	rs[0].Enabled = false
+	if _, err := l.PutScheduled(ctx, rs[0], "ana", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	gb, _ := l.GivenBack(ctx)
+	if len(gb) != 2 || gb[0].Kind != KindGrant || gb[1].Kind != KindGrant {
+		t.Errorf("given back still: %+v", gb)
+	}
+}
+
+// What no --config gave back that the next file declares again is
+// declared again, given back no more.
+func TestGivenBackDeclaredAgain(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	reconcile(t, l, declaredOf(), Leave{})
+	reconcile(t, l, Declared{}, Leave{NoFile: true})
+	if r, _ := reconcile(t, l, declaredOf(), Leave{Prune: true}); r != (Reconciled{Adopted: 5}) {
+		t.Errorf("declared again: %+v", r)
+	}
+	if gb, _ := l.GivenBack(ctx); len(gb) != 0 {
+		t.Errorf("given back still: %+v", gb)
 	}
 }

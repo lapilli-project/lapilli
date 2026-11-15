@@ -16,11 +16,11 @@ import (
 	"lapilli.dev/internal/ledger"
 )
 
-// declaredPages gives s what --config declares (a team, its quiet window,
-// its report and a role), a file that can't be used since, a rule's name
-// gone that the ledger keeps a note and a task of, and proposals that
-// expire: the pages that show them, for the accessibility and language
-// checks (a11yServer).
+// declaredPages gives s what --config declares (a team, its quiet windows,
+// its report and a role), what a leader without --config gave back that a
+// file since can't keep, a rule's name gone that the ledger keeps a note
+// and a task of, and proposals that expire: the pages that show them, for
+// the accessibility and language checks (a11yServer).
 func declaredPages(t *testing.T, s *Server) []string {
 	t.Helper()
 	ctx := context.Background()
@@ -34,6 +34,11 @@ windows:
     start: 2026-11-02T22:00
     end: 2026-11-03T02:00
     every: week
+  - title: Platform patching
+    team: platform
+    start: 2026-11-03T22:00
+    end: 2026-11-03T23:00
+    every: week
 reports:
   - name: platform weekly
     team: platform
@@ -45,16 +50,21 @@ grants:
 `
 	os.WriteFile(path, []byte(good), 0o644)
 	s.cfg.Config, s.cfg.ProposalsExpire = path, 30*24*time.Hour
-	if err := s.reconcileConfig(ctx); err != nil {
-		t.Fatal(err)
-	}
+	readTwice(t, s)
 	if e := s.configShown().ErrText("en"); e != "" {
 		t.Fatal(e)
 	}
-	// Changed since to what can't be kept: the ledger keeps the last.
-	os.WriteFile(path, []byte(strings.Replace(good, "every: week", "every: fortnight", 1)), 0o644)
+	// Given back by a leader without --config, then changed to what can't
+	// be kept: the ledger keeps the last, and the freeze given back.
+	s.cfg.Config = ""
 	if err := s.reconcileConfig(ctx); err != nil {
 		t.Fatal(err)
+	}
+	s.cfg.Config = path
+	os.WriteFile(path, []byte(strings.Replace(good, "every: week", "every: fortnight", 1)), 0o644)
+	readTwice(t, s)
+	if gb, _ := s.l.GivenBack(ctx); len(gb) != 1 {
+		t.Fatalf("given back: %+v", gb)
 	}
 	// A rule's name gone, that the ledger keeps a note and a task of.
 	if err := s.l.PutNote(ctx, ledger.Note{Rule: "ErrorsOld", Status: "retire", Note: "renamed"}, "ana"); err != nil {

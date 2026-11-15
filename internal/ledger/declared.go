@@ -127,21 +127,20 @@ func (e DeclaredError) Error() string {
 func (e DeclaredError) Unwrap() error { return e.Err }
 
 // Leave says what becomes of what is declared that the file no longer
-// names.
+// names. Its caller keeps the ledger to a file only once it has read the
+// same file twice in a row, so that one read half written changes
+// nothing: what the file no longer names is let go at once.
 type Leave struct {
-	// Prune deletes it (--config-prune), once Sure; a team something still
-	// names is given back to the UI instead.
+	// Prune deletes it (--config-prune); a team something still names is
+	// given back to the UI instead.
 	Prune bool
-	// Sure says the file has been read the same twice in a row: what it no
-	// longer names may be deleted (pruned, a role taken away, one past the
-	// UI's own most). Not sure, what would be deleted is kept declared, so
-	// that a file read half written deletes nothing.
-	Sure bool
 	// NoFile says there is no file at all (no --config): everything
 	// declared, roles included, is given back to the UI, whatever the UI
-	// holds, and nothing is deleted. A file that isn't given says nothing
-	// of who may change what; a chart rolled back to before --config
-	// takes no one's role away.
+	// holds, and nothing is deleted; each is marked given back (GivenBack),
+	// for the next file. A file that isn't given says nothing of who may
+	// change what; a chart rolled back to before --config takes no one's
+	// role away, and one rolled forward again takes away what its file no
+	// longer gives.
 	NoFile bool
 }
 
@@ -149,41 +148,46 @@ type Leave struct {
 type fate int
 
 const (
-	fateKeep fate = iota
+	// fateStay leaves it as it is: given back already, with no file.
+	fateStay fate = iota
+	// fateGiveBack makes it the UI's.
 	fateGiveBack
+	// fateMark makes it the UI's, marked given back (GivenBack).
+	fateMark
 	fateDelete
 )
 
-// of is the fate of a team, a quiet window or a report; atMost says the
-// UI holds its own most of them already, so it isn't given back.
-func (lv Leave) of(atMost bool) fate {
+// of is the fate of a team, a quiet window or a report: givenBack says a
+// leader without --config gave it back to the UI, marked; atMost says the
+// UI holds its own most already, so one declared isn't given back.
+func (lv Leave) of(givenBack, atMost bool) fate {
 	switch {
+	case lv.NoFile && givenBack:
+		return fateStay
 	case lv.NoFile:
-		return fateGiveBack
-	case (lv.Prune || atMost) && lv.Sure:
+		return fateMark
+	case lv.Prune, atMost && !givenBack:
 		return fateDelete
-	case lv.Prune || atMost:
-		return fateKeep
 	}
 	return fateGiveBack
 }
 
-// role is the fate of a role: taken away once the file read twice no
-// longer gives it.
-func (lv Leave) role() fate {
+// role is the fate of a role: taken away, as the file no longer gives it,
+// one given back without a file among them.
+func (lv Leave) role(givenBack bool) fate {
 	switch {
+	case lv.NoFile && givenBack:
+		return fateStay
 	case lv.NoFile:
-		return fateGiveBack
-	case lv.Sure:
-		return fateDelete
+		return fateMark
 	}
-	return fateKeep
+	return fateDelete
 }
 
 // Reconciled is what Reconcile did: what it made, changed, took over from
 // the UI (declared, as it was or as the file says it), gave back to the
-// UI, deleted, and kept declared though the file no longer names it, its
-// deletion not yet sure (Leave.Sure).
+// UI, deleted, and kept declared though the file no longer names it (a
+// team something names, past the teams the UI keeps).
 type Reconciled struct {
 	Made, Changed, Adopted, Undeclared, Deleted, Kept int
 }
@@ -198,11 +202,12 @@ var errUnchanged = errors.New("unchanged")
 // it declares that can't be kept (its own check refuses it, its team
 // isn't there, its caller found it Bad) is skipped, and said, and what
 // the ledger held of it is kept as it was; the rest is kept, and what the
-// file no longer names is given back, kept or deleted as left says, always,
+// file no longer names is given back or deleted as left says, always,
 // before anything is added, so that a file that replaces what it declares
-// isn't refused as full. A role is taken away (RoleTaken), not given back,
-// once the file is read twice without it: declared, it was the file's to
-// give; with no file at all, it is given back.
+// isn't refused as full. A role is taken away (RoleTaken), not given back:
+// declared, it was the file's to give; with no file at all, it is given
+// back. What a leader without --config gave back, marked, the file
+// doesn't declare again is let go as if it were declared.
 //
 // Each team is matched by its name, or else in any letter case when one
 // team alone has it, or by RenamedFrom; each report by its name; each role
@@ -312,13 +317,27 @@ func sameTeam(a, b Team) bool {
 		a.WorkHours == b.WorkHours && a.SleepHours == b.SleepHours && a.TZ == b.TZ && a.Shifts == b.Shifts
 }
 
-// setDeclared marks a row of table declared or not, and notes it.
+// setDeclared marks a row of table declared or not, given back no more,
+// and notes it.
 func setDeclared(t *txn, table string, id int64, declared bool, what string, after any) error {
-	if _, err := t.ExecContext(t.ctx, "UPDATE "+table+" SET declared = ? WHERE id = ?", declared, id); err != nil {
+	if _, err := t.ExecContext(t.ctx, "UPDATE "+table+" SET declared = ?, given_back = 0 WHERE id = ?", declared, id); err != nil {
 		return err
 	}
 	return change(t, ConfigBy, what, nil, after)
 }
+
+// markGivenBack gives a row of table back to the UI, as no --config does,
+// marked given back for the next file, and notes it.
+func markGivenBack(t *txn, table string, id int64, what string, after any) error {
+	if _, err := t.ExecContext(t.ctx, "UPDATE "+table+" SET declared = 0, given_back = 1 WHERE id = ?", id); err != nil {
+		return err
+	}
+	return change(t, ConfigBy, what, nil, after)
+}
+
+// givenBackNow is the activity log's words for a row given back without
+// --config.
+const givenBackNow = " given back to the UI, as serve runs without --config"
 
 // The activity log's words for a row taken over from the UI, and for one
 // the file no longer names, given back.
@@ -401,17 +420,19 @@ func (l *Ledger) declareTeams(t *txn, want []DeclaredTeam, r *Reconciled, skip f
 	for wi := range want {
 		dt := &want[wi]
 		dt.RenamedFrom = strings.TrimSpace(dt.RenamedFrom)
-		if dt.Bad != nil {
-			keep(dt.Name, dt.RenamedFrom) // kept as they were
-			skipTeam(*dt, dt.Bad)
-			continue
-		}
 		if line, dup := seen[FoldName(dt.Name)]; dup {
 			keep(dt.Name, dt.RenamedFrom)
 			skip(KindTeam, dt.Line, dt.Name, invalid("a team called %s is declared on line %d already: a team's name is unique in any letter case", dt.Name, line))
 			continue
 		}
+		// One that can't be kept holds its name all the same: another of
+		// it, in another letter case, is a second.
 		seen[FoldName(dt.Name)] = dt.Line
+		if dt.Bad != nil {
+			keep(dt.Name, dt.RenamedFrom) // kept as they were
+			skipTeam(*dt, dt.Bad)
+			continue
+		}
 		ok[wi] = true
 	}
 	// An old name given twice renames neither.
@@ -534,22 +555,22 @@ func (l *Ledger) declareTeams(t *txn, want []DeclaredTeam, r *Reconciled, skip f
 		}
 	}
 	for i, x := range have {
-		if !matched[i] && x.Declared {
+		if !matched[i] && (x.Declared || x.GivenBack) {
 			leftover = append(leftover, DeclaredTeam{Team: x})
 		}
 	}
 	return leftover, deferred, refused, nil
 }
 
-// leaveTeams gives back, keeps or deletes the declared teams the file no
-// longer names, as left says. One something still names (a quiet window,
-// a report, a role, a task, a rule's note), the UI's or declared, isn't
-// deleted, but given back to the UI, and said why: deleted, it would leave
-// them no one's, and the file, put back, would make another team in its
-// place, which they wouldn't name. Past the teams the UI keeps (MaxTeams),
-// one isn't given back but deleted, once the file is read twice without
-// it, or, something naming it, kept declared and said. With no file at
-// all, every one is given back, whatever the UI holds.
+// leaveTeams gives back or deletes the declared teams the file no longer
+// names, and those given back without --config, as left says. One
+// something still names (a quiet window, a report, a role, a task, a
+// rule's note), the UI's or declared, isn't deleted, but given back to the
+// UI, and said why: deleted, it would leave them no one's, and the file,
+// put back, would make another team in its place, which they wouldn't
+// name. Past the teams the UI keeps (MaxTeams), a declared one isn't given
+// back but deleted, or, something naming it, kept declared and said. With
+// no file at all, every one is given back, whatever the UI holds.
 func (l *Ledger) leaveTeams(t *txn, leftover []DeclaredTeam, left Leave, r *Reconciled, skip func(string, int, string, error)) error {
 	ui, _, err := originCounts(t, "teams")
 	if err != nil {
@@ -557,16 +578,23 @@ func (l *Ledger) leaveTeams(t *txn, leftover []DeclaredTeam, left Leave, r *Reco
 	}
 	for _, dt := range leftover {
 		x := dt.Team
-		f := left.of(ui >= MaxTeams)
-		if f == fateKeep {
-			r.Kept++
+		switch left.of(x.GivenBack, ui >= MaxTeams) {
+		case fateStay:
 			continue
-		}
-		if f == fateGiveBack {
-			if err := setDeclared(t, "teams", x.ID, false, "team "+x.Name+undeclaredNow, nil); err != nil {
+		case fateMark:
+			if err := markGivenBack(t, "teams", x.ID, "team "+x.Name+givenBackNow, nil); err != nil {
 				return err
 			}
 			ui++
+			r.Undeclared++
+			continue
+		case fateGiveBack:
+			if err := setDeclared(t, "teams", x.ID, false, "team "+x.Name+undeclaredNow, nil); err != nil {
+				return err
+			}
+			if !x.GivenBack {
+				ui++
+			}
 			r.Undeclared++
 			continue
 		}
@@ -578,7 +606,7 @@ func (l *Ledger) leaveTeams(t *txn, leftover []DeclaredTeam, left Leave, r *Reco
 		}
 		named := windows+reports+roles+tasks+notes > 0
 		switch {
-		case named && ui >= MaxTeams:
+		case named && ui >= MaxTeams && !x.GivenBack:
 			skip(KindTeam, 0, x.Name, invalid("kept declared, though the file no longer names it: the UI keeps %d teams at most, and what it owns names it", MaxTeams))
 			r.Kept++
 		case named:
@@ -586,7 +614,9 @@ func (l *Ledger) leaveTeams(t *txn, leftover []DeclaredTeam, left Leave, r *Reco
 			if err := setDeclared(t, "teams", x.ID, false, "team "+x.Name+" no longer declared in config, and not deleted: what it owns names it, so it is the UI's to change", counts); err != nil {
 				return err
 			}
-			ui++
+			if !x.GivenBack {
+				ui++
+			}
 			r.Undeclared++
 		default:
 			what := "team " + x.Name + " deleted"
@@ -728,6 +758,26 @@ func (l *Ledger) declareWindows(t *txn, want []DeclaredWindow, team resolver, le
 	for i := range pair {
 		pair[i] = -1
 	}
+	// One that can't be kept keeps a declared one of its title and its
+	// team as it was, before any other is matched, which would take it
+	// for its own; of a team that isn't there, none: kept, another team's
+	// window, or everyone's, would go on quieting what the file no longer
+	// says to.
+	for wi, w := range ws {
+		if bad[wi] == nil {
+			continue
+		}
+		skip(KindWindow, want[wi].Line, want[wi].Title, bad[wi])
+		if !known[wi] {
+			continue
+		}
+		for _, hi := range byTitle[strings.TrimSpace(want[wi].Title)] {
+			if h := have[hi]; !matched[hi] && (h.Declared || h.GivenBack) && h.TeamID == w.TeamID {
+				matched[hi] = true
+				break
+			}
+		}
+	}
 	// Those alike; then a declared one of the same team, then of another
 	// (moved by the file); then, of the same team alone, one the UI made,
 	// taken over. A window taken out of a file of several with one title
@@ -751,25 +801,6 @@ func (l *Ledger) declareWindows(t *txn, want []DeclaredWindow, team resolver, le
 			}
 		}
 	}
-	// One that can't be kept keeps a declared one of its title and its
-	// team as it was; of a team that isn't there, none: kept, another
-	// team's window, or everyone's, would go on quieting what the file no
-	// longer says to.
-	for wi, w := range ws {
-		if bad[wi] == nil {
-			continue
-		}
-		skip(KindWindow, want[wi].Line, want[wi].Title, bad[wi])
-		if !known[wi] {
-			continue
-		}
-		for _, hi := range byTitle[strings.TrimSpace(want[wi].Title)] {
-			if h := have[hi]; !matched[hi] && h.Declared && h.TeamID == w.TeamID {
-				matched[hi] = true
-				break
-			}
-		}
-	}
 	now := time.Now()
 	var spans [][2]int64
 	ui, all, err := originCounts(t, "windows")
@@ -779,12 +810,17 @@ func (l *Ledger) declareWindows(t *txn, want []DeclaredWindow, team resolver, le
 	// What the file no longer declares first, so that one that replaces
 	// its windows isn't refused as full.
 	for i, h := range have {
-		if matched[i] || !h.Declared {
+		if matched[i] || !h.Declared && !h.GivenBack {
 			continue
 		}
-		switch left.of(ui >= MaxWindows) {
-		case fateKeep:
-			r.Kept++
+		switch left.of(h.GivenBack, ui >= MaxWindows) {
+		case fateStay:
+		case fateMark:
+			if err := markGivenBack(t, "windows", h.ID, "quiet window "+h.Title+givenBackNow, nil); err != nil {
+				return nil, err
+			}
+			ui++
+			r.Undeclared++
 		case fateDelete:
 			what := "quiet window " + h.Title + " deleted"
 			if !left.Prune {
@@ -803,7 +839,9 @@ func (l *Ledger) declareWindows(t *txn, want []DeclaredWindow, team resolver, le
 			if err := setDeclared(t, "windows", h.ID, false, "quiet window "+h.Title+undeclaredNow, nil); err != nil {
 				return nil, err
 			}
-			ui++
+			if !h.GivenBack {
+				ui++
+			}
 			r.Undeclared++
 		}
 	}
@@ -916,7 +954,7 @@ func (l *Ledger) declareReports(t *txn, want []DeclaredReport, team resolver, le
 			there = false
 		}
 		if err != nil {
-			if there && have[i].Declared {
+			if there && (have[i].Declared || have[i].GivenBack) {
 				matched[i] = true // kept as it was
 			}
 			skip(KindReport, dr.Line, dr.Name, err)
@@ -937,12 +975,17 @@ func (l *Ledger) declareReports(t *txn, want []DeclaredReport, team resolver, le
 	// What the file no longer declares first, so that one that replaces
 	// its reports isn't refused as full.
 	for i, h := range have {
-		if matched[i] || !h.Declared {
+		if matched[i] || !h.Declared && !h.GivenBack {
 			continue
 		}
-		switch left.of(ui >= MaxScheduled) {
-		case fateKeep:
-			r.Kept++
+		switch left.of(h.GivenBack, ui >= MaxScheduled) {
+		case fateStay:
+		case fateMark:
+			if err := markGivenBack(t, "reports", h.ID, "report "+h.Name+givenBackNow, nil); err != nil {
+				return err
+			}
+			ui++
+			r.Undeclared++
 		case fateDelete:
 			what := "report " + h.Name + " deleted"
 			if !left.Prune {
@@ -963,7 +1006,9 @@ func (l *Ledger) declareReports(t *txn, want []DeclaredReport, team resolver, le
 			if err := setDeclared(t, "reports", h.ID, false, "report "+h.Name+undeclaredNow, nil); err != nil {
 				return err
 			}
-			ui++
+			if !h.GivenBack {
+				ui++
+			}
 			r.Undeclared++
 		}
 	}
@@ -997,7 +1042,7 @@ func (l *Ledger) declareReports(t *txn, want []DeclaredReport, team resolver, le
 		switch {
 		case !sameReport(h, x):
 			if _, err := t.ExecContext(t.ctx, `UPDATE reports SET team_id = ?, schedule = ?, span = ?, zone = ?, sections = ?, dests = ?, enabled = ?,
-				updated = ?, updated_by = ?, declared = 1 WHERE id = ?`,
+				updated = ?, updated_by = ?, declared = 1, given_back = 0 WHERE id = ?`,
 				x.TeamID, x.Schedule, int64(span/time.Second), x.Zone, string(sections), string(dests), x.Enabled, now.Unix(), ConfigBy, h.ID); err != nil {
 				return err
 			}
@@ -1058,7 +1103,7 @@ func (l *Ledger) declareGrants(t *txn, want []DeclaredGrant, team resolver, left
 			}
 		}
 		if err != nil {
-			if there && have[i].Declared {
+			if there && (have[i].Declared || have[i].GivenBack) {
 				matched[i] = true // kept as it was
 			}
 			skip(KindGrant, dg.Line, dg.Who, err)
@@ -1081,17 +1126,16 @@ func (l *Ledger) declareGrants(t *txn, want []DeclaredGrant, team resolver, left
 	if err != nil {
 		return err
 	}
-	// A role the file no longer gives first: taken away once the file is
-	// read twice without it, pruned or not, the UI's taken over included
+	// A role the file no longer gives first: taken away, pruned or not, the
+	// UI's taken over and one given back without a file included
 	// (declared, it was the file's to give, as Argo CD's RBAC policy is);
-	// with no file at all, given back.
+	// with no file at all, given back, marked.
 	for i, g := range have {
-		if matched[i] || !g.Declared {
+		if matched[i] || !g.Declared && !g.GivenBack {
 			continue
 		}
-		switch left.role() {
-		case fateKeep:
-			r.Kept++
+		switch left.role(g.GivenBack) {
+		case fateStay:
 		case fateDelete:
 			if _, err := t.ExecContext(t.ctx, "DELETE FROM grants WHERE id = ?", g.ID); err != nil {
 				return err
@@ -1102,8 +1146,9 @@ func (l *Ledger) declareGrants(t *txn, want []DeclaredGrant, team resolver, left
 			all--
 			r.Deleted++
 		default:
-			// Said as a role given, which only admins read.
-			if err := setDeclared(t, "grants", g.ID, false, RoleGiven+g.Who+undeclaredNow, g); err != nil {
+			// Said as a role given, which only admins read, as it is now.
+			g.Declared, g.GivenBack = false, true
+			if err := markGivenBack(t, "grants", g.ID, RoleGiven+g.Who+givenBackNow, g); err != nil {
 				return err
 			}
 			r.Undeclared++
@@ -1172,4 +1217,37 @@ func (l *Ledger) AllDeclarable(ctx context.Context) (Declaring, error) {
 	}
 	d.Grants, err = grants(ctx, tx)
 	return d, err
+}
+
+// GivenBackRow is one a file declared that a leader without --config gave
+// back to the UI, marked (GivenBack): its kind (KindTeam, KindWindow,
+// KindReport, KindGrant), its name or title, a role's holder, and the name
+// of its team, "" for everyone's.
+type GivenBackRow struct {
+	Kind, Name, Team string
+}
+
+// GivenBack lists what is marked given back, by kind and name: the next
+// file that doesn't declare one again lets it go (a role taken away, the
+// rest deleted with --config-prune), unless the UI changes it first.
+func (l *Ledger) GivenBack(ctx context.Context) ([]GivenBackRow, error) {
+	rows, err := l.r.QueryContext(ctx, `SELECT k, name, team FROM (
+		SELECT CAST(? AS TEXT) AS k, name, '' AS team FROM teams WHERE given_back = 1
+		UNION ALL SELECT CAST(? AS TEXT), w.title, COALESCE(t.name, '') FROM windows w LEFT JOIN teams t ON t.id = w.team_id WHERE w.given_back = 1
+		UNION ALL SELECT CAST(? AS TEXT), r.name, COALESCE(t.name, '') FROM reports r LEFT JOIN teams t ON t.id = r.team_id WHERE r.given_back = 1
+		UNION ALL SELECT CAST(? AS TEXT), g.who, COALESCE(t.name, '') FROM grants g LEFT JOIN teams t ON t.id = g.team_id WHERE g.given_back = 1
+	) x ORDER BY k, name, team`, KindTeam, KindWindow, KindReport, KindGrant)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []GivenBackRow
+	for rows.Next() {
+		var g GivenBackRow
+		if err := rows.Scan(&g.Kind, &g.Name, &g.Team); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
 }

@@ -78,6 +78,8 @@ var (
 		"a report has a name", "enabled is true or false", "a role is given to a user or a group: one of user and group",
 		"the file declares nothing: an empty file would take away all it declared; to declare nothing, give teams: []",
 		"%s has nothing after it: give %s: [] for none",
+		"team has nothing after it: leave the key out for every team", "rules has nothing after it: leave the key out for every rule",
+		"%s has nothing after it: give it a value, or leave the key out",
 		"%s is %s, read as a boolean or a number, not a text: quote it, or give serve.config as a text",
 		"label %s's value %s is read as a boolean or a number, not a text: quote it, or give serve.config as a text",
 		"a config declares %d teams at most", "a config declares %d quiet windows at most", "a config declares %d reports at most",
@@ -240,11 +242,28 @@ func each(n *yaml.Node, what string, fn func(key string, v *yaml.Node) error) er
 			}
 			return badAt(k, unknownIn[what], k.Value, strings.Join(configKeys[what], ", "))
 		}
+		if what != "" && null(v) {
+			return nothingAfter(what, k.Value, v)
+		}
 		if err := fn(k.Value, v); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// nothingAfter refuses a key of a thing given with nothing after it, as a
+// file cut short reads, or a value left out: read as nothing, a role's or
+// a quiet window's team would be every team, a quiet window's rules every
+// rule. Left out, the key says so.
+func nothingAfter(what, key string, v *yaml.Node) error {
+	switch {
+	case key == "team":
+		return badAt(v, "team has nothing after it: leave the key out for every team")
+	case what == "window" && key == "rules":
+		return badAt(v, "rules has nothing after it: leave the key out for every rule")
+	}
+	return badAt(v, "%s has nothing after it: give it a value, or leave the key out", key)
 }
 
 // text is a scalar's text: a string, or a number or a word as written.
@@ -604,13 +623,13 @@ const configProblemsKept = 50
 // configState is what the leader last made of --config, in its term: the
 // file's hash it last kept the ledger to (applied), when, what the last
 // that wrote did, and what of it couldn't be kept; a file that couldn't be
-// used as a whole (failed); one kept with what it no longer declares kept
-// too, to be deleted when it is read again (keptFor); and when to try
-// again a file kept in part, or after an error of the ledger's.
+// used as a whole (failed); another read once (pending, at pendingAt), to
+// be kept to once it is read the same again; and when to try again a file
+// kept in part, or after an error of the ledger's.
 type configState struct {
 	sync.Mutex
-	applied, failed, keptFor string
-	at                       time.Time
+	applied, failed, pending string
+	at, pendingAt            time.Time
 	did                      ledger.Reconciled
 	// shown are the problems the pages show; kept, those of the file
 	// applied, shown again once a file that failed is put back.
@@ -656,7 +675,7 @@ func problemsOf(errs []ledger.DeclaredError) configProblems {
 func (c *configState) newTerm() {
 	c.Lock()
 	defer c.Unlock()
-	c.applied, c.failed, c.keptFor, c.retryHash, c.retryAt, c.backoff = "", "", "", "", time.Time{}, 0
+	c.applied, c.failed, c.pending, c.retryHash, c.retryAt, c.backoff = "", "", "", "", time.Time{}, 0
 	c.failHash, c.failAt, c.failBackoff = "", time.Time{}, 0
 }
 
@@ -674,6 +693,9 @@ type configShown struct {
 	More     int               `json:"more,omitempty"`
 	ErrAt    time.Time         `json:"err_at,omitzero"`
 	Brief    bool              `json:"brief,omitempty"`
+	// Pending is when another file was read, once: the ledger is kept to
+	// it once it is read the same again.
+	Pending time.Time `json:"pending,omitzero"`
 }
 
 // ErrText is what is wrong, in a language, "" for nothing.
@@ -708,21 +730,18 @@ func (s *Server) configFor(r *http.Request) *configShown {
 	return s.shownStatus().Config.forReader(s.role(r) == admin)
 }
 
-// configShown is this replica's: without --config, nil, or what it gave
-// back to the UI that a file declared before.
+// configShown is this replica's: without --config, nil.
 func (s *Server) configShown() *configShown {
 	if s.cfg.Config == "" {
-		s.config.Lock()
-		defer s.config.Unlock()
-		if s.config.did.Undeclared == 0 {
-			return nil
-		}
-		return &configShown{Did: s.config.did}
+		return nil
 	}
 	s.config.Lock()
 	defer s.config.Unlock()
 	c := &configShown{File: s.cfg.Config, Prune: s.cfg.ConfigPrune, Did: s.config.did, ErrAt: s.config.errAt,
 		Whole: s.config.shown.whole, Problems: s.config.shown.list, More: s.config.shown.more}
+	if s.config.pending != "" {
+		c.Pending = s.config.pendingAt
+	}
 	if len(s.config.applied) >= 12 {
 		c.Hash, c.Applied = s.config.applied[:12], s.config.at
 	}
@@ -751,14 +770,21 @@ func (s *Server) configTerm(ctx context.Context) error {
 // Kubernetes updates each one's copy, and two writing by turns would undo
 // each other.
 //
-// A file that can't be read as --config changes nothing, and is said once
-// why. One read, each thing it declares that can't be kept is skipped, and
-// kept as it was, and the rest is kept; such a file is tried again, as the
-// ledger changes (a team it names made in the UI), from configEvery to
-// configBackoffMost after. With --config-prune, what it no longer declares
-// is kept until the file is read the same twice, then deleted: an empty or
-// half-written file read once deletes nothing. An error of the ledger's is
-// returned, and the file tried again after a while.
+// A file is kept to only once it has been read the same twice in a row,
+// configEvery apart at least, with no other read between: the first read
+// of it is noted, and nothing changed. A file read half written, or a
+// ConfigMap swapped in part, changes nothing, then: no one is given a
+// role, nor taken one away, nothing is deleted, and no quiet window
+// quiets more. Kept to, what it no longer declares is let go at once. As
+// a term begins, the file is kept to configEvery to twice that after.
+//
+// A file that can't be read as --config changes nothing, and is said at
+// once why, on its first read. Kept to, each thing it declares that can't
+// be kept is skipped, and kept as it was, and the rest is kept; such a
+// file is tried again, as the ledger changes (a team it names made in the
+// UI, or made by the write itself), from configEvery to configBackoffMost
+// after. An error of the ledger's is returned, and the file tried again
+// after a while.
 func (s *Server) reconcileConfig(ctx context.Context) error {
 	d, hash := ledger.Declared{}, noConfig
 	var fileErr error
@@ -771,46 +797,56 @@ func (s *Server) reconcileConfig(ctx context.Context) error {
 	now, gen := s.wall(), s.l.Gen()
 	st := &s.config
 	st.Lock()
-	// Read the same twice in a row: what the file no longer names may be
-	// deleted, a role taken away. Without --config, there is no file to
-	// say so: everything is given back, nothing deleted.
-	sure := fileErr == nil && hash == st.keptFor && hash == st.applied
-	left := ledger.Leave{Prune: s.cfg.ConfigPrune, Sure: sure, NoFile: s.cfg.Config == ""}
 	switch {
 	case hash == st.failHash && now.Before(st.failAt):
 		// The ledger's error, this file met last: not before a while.
 		st.Unlock()
 		return nil
-	case fileErr != nil && hash == st.failed:
-		st.Unlock()
-		return nil
 	case fileErr != nil:
-	case hash == st.applied:
-		back := st.failed != ""
-		if back {
-			// Back to the file the ledger is kept to: what is wrong with it
-			// is what is shown again, and it is read afresh, as one read
-			// once, for what would be deleted.
-			st.failed, st.shown, st.loggedText = "", st.kept, ""
+		// Said at once, on its first read; and between two reads of a
+		// file, it makes them not in a row.
+		st.pending = ""
+		again := hash == st.failed
+		st.Unlock()
+		if !again {
+			s.configSaid(configProblems{list: []configProblem{problemOf(fileErr)}, whole: true}, func() { st.failed = hash })
 		}
+		return nil
+	case hash == st.applied:
+		// The file the ledger is kept to: another read once since is read
+		// twice in a row no more.
+		st.pending = ""
+		back, kept := st.failed != "", st.kept
 		retry := len(st.kept.list) > 0 && gen != st.triedGen && !now.Before(st.retryAt)
-		if !sure && !retry && !back {
-			st.Unlock()
+		st.Unlock()
+		if back {
+			// Back to it after one that couldn't be used: what is wrong
+			// with it is what is shown again.
+			s.configSaid(kept, func() { st.failed = "" })
+		}
+		if !retry {
 			return nil
 		}
+		st.Lock()
+	case s.cfg.Config == "":
+		// No file to read twice: what one declared is given back at once,
+		// and nothing taken away.
+	case hash != st.pending:
+		// Read once: kept to once it is read the same again.
+		st.pending, st.pendingAt = hash, now
+		st.Unlock()
+		return nil
+	case now.Before(st.pendingAt.Add(configEvery)):
+		st.Unlock()
+		return nil
 	}
 	if hash != st.retryHash {
 		// Another file: tried from the start.
 		st.backoff, st.retryAt = 0, time.Time{}
 	}
 	st.Unlock()
-	if fileErr != nil {
-		// Read the same twice in a row, a file is: one that can't be read
-		// between two reads of it makes them two.
-		s.configSaid(configProblems{list: []configProblem{problemOf(fileErr)}, whole: true}, func() { st.failed, st.keptFor = hash, "" })
-		return nil
-	}
-	// An error of the ledger's: the file is tried again, after a while.
+	// An error of the ledger's: the file is tried again, after a while,
+	// still read twice.
 	later := func(err error) error {
 		st.Lock()
 		defer st.Unlock()
@@ -826,17 +862,17 @@ func (s *Server) reconcileConfig(ctx context.Context) error {
 	if err != nil {
 		return later(err)
 	}
-	r, skipped, err := s.l.Reconcile(ctx, d, left, o)
+	r, skipped, err := s.l.Reconcile(ctx, d, ledger.Leave{Prune: s.cfg.ConfigPrune, NoFile: s.cfg.Config == ""}, o)
 	if err != nil {
 		return later(err)
 	}
 	st.Lock()
-	st.applied, st.at, st.failed, st.keptFor = hash, now, "", ""
+	st.applied, st.at, st.failed, st.pending = hash, now, "", ""
 	st.failHash, st.failAt, st.failBackoff = "", time.Time{}, 0
-	if !sure && r.Kept > 0 {
-		st.keptFor = hash // deleted, or taken away, once it is read the same again
-	}
-	st.triedGen, st.retryHash = s.l.Gen(), hash
+	// The ledger as it was before this write: what the write itself made
+	// (a team made once others were let go) is a change, and what names
+	// it is tried again.
+	st.triedGen, st.retryHash = gen, hash
 	if len(skipped) > 0 {
 		st.backoff = nextBackoff(st.backoff)
 		st.retryAt = now.Add(st.backoff)
@@ -852,7 +888,7 @@ func (s *Server) reconcileConfig(ctx context.Context) error {
 	if r.Any() {
 		s.poke() // the windows changed are judged again
 		s.log.Info("the ledger keeps what --config declares", "file", s.cfg.Config, "made", r.Made, "changed", r.Changed,
-			"taken over", r.Adopted, "given back to the UI", r.Undeclared, "deleted", r.Deleted, "kept to delete when read again", r.Kept)
+			"taken over", r.Adopted, "given back to the UI", r.Undeclared, "deleted", r.Deleted, "kept declared", r.Kept)
 	}
 	return nil
 }
