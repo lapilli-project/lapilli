@@ -142,6 +142,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /firings/{id}/real", s.write(s.real))
 	s.bulkRoutes(mux)
 	mux.HandleFunc("POST /settings", s.admin(s.postSettings))
+	mux.HandleFunc("POST /settings/given-back", s.admin(s.postKeepGivenBack))
 	mux.HandleFunc("GET /api/v1/me", s.me)
 
 	mux.HandleFunc("GET /api/v1/report", s.report)

@@ -695,9 +695,11 @@ func (l *Ledger) teamResolver(t *txn, refused map[string]DeclaredError) (func(na
 		folds[FoldName(x.Name)] = append(folds[FoldName(x.Name)], x)
 	}
 	return func(name string) (int64, bool, error) {
-		name = strings.TrimSpace(name)
 		if name == "" {
-			return 0, true, nil
+			return 0, true, nil // left out: everyone's, or every team
+		}
+		if name = strings.TrimSpace(name); name == "" {
+			return 0, false, invalid("team has nothing after it: leave the key out for every team")
 		}
 		id, known := exact[name]
 		if !known {
@@ -744,11 +746,12 @@ func (l *Ledger) declareWindows(t *txn, want []DeclaredWindow, team resolver, le
 	if err != nil {
 		return nil, err
 	}
-	// Those of each title, the declared first, each by its id.
+	// Those of each title, the file's first (declared, or given back
+	// without --config), each by its id.
 	byTitle := map[string][]int{}
-	for _, declared := range []bool{true, false} {
+	for _, file := range []bool{true, false} {
 		for i, h := range have {
-			if h.Declared == declared {
+			if (h.Declared || h.GivenBack) == file {
 				byTitle[h.Title] = append(byTitle[h.Title], i)
 			}
 		}
@@ -758,9 +761,38 @@ func (l *Ledger) declareWindows(t *txn, want []DeclaredWindow, team resolver, le
 	for i := range pair {
 		pair[i] = -1
 	}
-	// One that can't be kept keeps a declared one of its title and its
-	// team as it was, before any other is matched, which would take it
-	// for its own; of a team that isn't there, none: kept, another team's
+	// match pairs each window that can be kept with one the ledger holds
+	// of its title, as stage says: one alike (0); one of the file's of the
+	// same team (1), then of another, moved by the file (2); then, of the
+	// same team alone, one the UI made, taken over (3). A window taken out
+	// of a file of several with one title leaves the others as they were,
+	// and what the file declares is kept in the rows it was before any of
+	// the UI's is taken.
+	match := func(stage int) {
+		for wi, w := range ws {
+			if pair[wi] >= 0 || bad[wi] != nil {
+				continue
+			}
+			for _, hi := range byTitle[w.Title] {
+				if matched[hi] {
+					continue
+				}
+				h := have[hi]
+				file := h.Declared || h.GivenBack
+				if stage == 0 && sameWindow(h, w) || stage == 1 && file && h.TeamID == w.TeamID || stage == 2 && file ||
+					stage == 3 && h.TeamID == w.TeamID {
+					pair[wi], matched[hi] = hi, true
+					break
+				}
+			}
+		}
+	}
+	// Those alike first: a window the file keeps as it was keeps its row,
+	// which one of its title that can't be kept doesn't take.
+	match(0)
+	// One that can't be kept keeps one of the file's of its title and its
+	// team as it was, before any other is matched, which would take it for
+	// its own; of a team that isn't there, none: kept, another team's
 	// window, or everyone's, would go on quieting what the file no longer
 	// says to.
 	for wi, w := range ws {
@@ -778,28 +810,8 @@ func (l *Ledger) declareWindows(t *txn, want []DeclaredWindow, team resolver, le
 			}
 		}
 	}
-	// Those alike; then a declared one of the same team, then of another
-	// (moved by the file); then, of the same team alone, one the UI made,
-	// taken over. A window taken out of a file of several with one title
-	// leaves the others as they were, and what the file declares is kept
-	// in the rows it was before any of the UI's is taken.
-	for stage := range 4 {
-		for wi, w := range ws {
-			if pair[wi] >= 0 || bad[wi] != nil {
-				continue
-			}
-			for _, hi := range byTitle[w.Title] {
-				if matched[hi] {
-					continue
-				}
-				h := have[hi]
-				if stage == 0 && sameWindow(h, w) || stage == 1 && h.Declared && h.TeamID == w.TeamID || stage == 2 && h.Declared ||
-					stage == 3 && h.TeamID == w.TeamID {
-					pair[wi], matched[hi] = hi, true
-					break
-				}
-			}
-		}
+	for stage := 1; stage < 4; stage++ {
+		match(stage)
 	}
 	now := time.Now()
 	var spans [][2]int64
@@ -948,7 +960,7 @@ func (l *Ledger) declareReports(t *txn, want []DeclaredReport, team resolver, le
 			}
 		}
 		i, there := byName[strings.TrimSpace(x.Name)]
-		if err == nil && there && !have[i].Declared && have[i].TeamID != x.TeamID {
+		if err == nil && there && !have[i].Declared && !have[i].GivenBack && have[i].TeamID != x.TeamID {
 			// The UI's, of another team: not taken over.
 			err = invalid("a report called %s is the UI's, for another team: rename one of them", x.Name)
 			there = false
@@ -1220,23 +1232,29 @@ func (l *Ledger) AllDeclarable(ctx context.Context) (Declaring, error) {
 }
 
 // GivenBackRow is one a file declared that a leader without --config gave
-// back to the UI, marked (GivenBack): its kind (KindTeam, KindWindow,
-// KindReport, KindGrant), its name or title, a role's holder, and the name
-// of its team, "" for everyone's.
+// back to the UI, marked (GivenBack): its row's id, its kind (KindTeam,
+// KindWindow, KindReport, KindGrant), its name or title, a role's holder,
+// and the name of its team, "" for everyone's.
 type GivenBackRow struct {
+	ID               int64
 	Kind, Name, Team string
 }
 
 // GivenBack lists what is marked given back, by kind and name: the next
 // file that doesn't declare one again lets it go (a role taken away, the
-// rest deleted with --config-prune), unless the UI changes it first.
+// rest the UI's for good, or deleted with --config-prune), unless the UI
+// changes it first, or keeps it (KeepGivenBack). The mark doesn't expire.
 func (l *Ledger) GivenBack(ctx context.Context) ([]GivenBackRow, error) {
-	rows, err := l.r.QueryContext(ctx, `SELECT k, name, team FROM (
-		SELECT CAST(? AS TEXT) AS k, name, '' AS team FROM teams WHERE given_back = 1
-		UNION ALL SELECT CAST(? AS TEXT), w.title, COALESCE(t.name, '') FROM windows w LEFT JOIN teams t ON t.id = w.team_id WHERE w.given_back = 1
-		UNION ALL SELECT CAST(? AS TEXT), r.name, COALESCE(t.name, '') FROM reports r LEFT JOIN teams t ON t.id = r.team_id WHERE r.given_back = 1
-		UNION ALL SELECT CAST(? AS TEXT), g.who, COALESCE(t.name, '') FROM grants g LEFT JOIN teams t ON t.id = g.team_id WHERE g.given_back = 1
-	) x ORDER BY k, name, team`, KindTeam, KindWindow, KindReport, KindGrant)
+	return givenBack(ctx, l.r)
+}
+
+func givenBack(ctx context.Context, q queryer) ([]GivenBackRow, error) {
+	rows, err := q.QueryContext(ctx, `SELECT id, k, name, team FROM (
+		SELECT id, CAST(? AS TEXT) AS k, name, '' AS team FROM teams WHERE given_back = 1
+		UNION ALL SELECT w.id, CAST(? AS TEXT), w.title, COALESCE(t.name, '') FROM windows w LEFT JOIN teams t ON t.id = w.team_id WHERE w.given_back = 1
+		UNION ALL SELECT r.id, CAST(? AS TEXT), r.name, COALESCE(t.name, '') FROM reports r LEFT JOIN teams t ON t.id = r.team_id WHERE r.given_back = 1
+		UNION ALL SELECT g.id, CAST(? AS TEXT), g.who, COALESCE(t.name, '') FROM grants g LEFT JOIN teams t ON t.id = g.team_id WHERE g.given_back = 1
+	) x ORDER BY k, name, team, id`, KindTeam, KindWindow, KindReport, KindGrant)
 	if err != nil {
 		return nil, err
 	}
@@ -1244,10 +1262,53 @@ func (l *Ledger) GivenBack(ctx context.Context) ([]GivenBackRow, error) {
 	var out []GivenBackRow
 	for rows.Next() {
 		var g GivenBackRow
-		if err := rows.Scan(&g.Kind, &g.Name, &g.Team); err != nil {
+		if err := rows.Scan(&g.ID, &g.Kind, &g.Name, &g.Team); err != nil {
 			return nil, err
 		}
 		out = append(out, g)
 	}
 	return out, rows.Err()
 }
+
+// givenBackTables are the tables of each kind of what is given back.
+var givenBackTables = map[string]string{KindTeam: "teams", KindWindow: "windows", KindReport: "reports", KindGrant: "grants"}
+
+// KeepGivenBack makes what no --config gave back the UI's for good, as the
+// UI changing it does, so that no file takes it away: the row of kind of
+// id, or, kind "", every one. Each is noted as by's. It returns how many;
+// ErrNotFound when none of them is given back.
+func (l *Ledger) KeepGivenBack(ctx context.Context, kind string, id int64, by string) (int, error) {
+	if _, ok := givenBackTables[kind]; !ok && kind != "" {
+		return 0, invalid("%q is a team, a quiet window, a report or a role", kind)
+	}
+	var n int
+	err := l.write(ctx, func(t *txn) error {
+		n = 0
+		gb, err := givenBack(t.ctx, t)
+		if err != nil {
+			return err
+		}
+		for _, g := range gb {
+			if kind != "" && (g.Kind != kind || g.ID != id) {
+				continue
+			}
+			if _, err := t.ExecContext(t.ctx, "UPDATE "+givenBackTables[g.Kind]+" SET given_back = 0 WHERE id = ?", g.ID); err != nil {
+				return err
+			}
+			what := map[string]string{KindTeam: "team ", KindWindow: "quiet window ", KindReport: "report ", KindGrant: RoleGiven}[g.Kind] + g.Name
+			if err := change(t, by, what+keptAsTheUIs, nil, nil); err != nil {
+				return err
+			}
+			n++
+		}
+		if n == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+	return n, err
+}
+
+// keptAsTheUIs is the activity log's words for one given back without
+// --config that an admin keeps.
+const keptAsTheUIs = " kept as the UI's: given back without --config, it is no file's to take away"

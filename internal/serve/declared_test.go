@@ -1,9 +1,11 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -141,6 +143,11 @@ func TestParseConfig(t *testing.T) {
 		{"grants:\n  - user: mallory@example.com\n    team:\n", "line 3: team has nothing after it: leave the key out for every team"},
 		{"windows:\n  - title: freeze\n    team: payments\n    rules:\n", "line 4: rules has nothing after it: leave the key out for every rule"},
 		{"teams:\n  - name: payments\n    tz: ~\n", "line 3: tz has nothing after it: give it a value, or leave the key out"},
+		// Or blanks, as much.
+		{"grants:\n  - user: mallory@example.com\n    team: \"\"\n", "line 3: team has nothing after it: leave the key out for every team"},
+		{"grants:\n  - user: mallory@example.com\n    team: ' '\n", "line 3: team has nothing after it: leave the key out for every team"},
+		{"windows:\n  - title: freeze\n    team: \"\"\n", "line 3: team has nothing after it: leave the key out for every team"},
+		{"windows:\n  - title: freeze\n    team: payments\n    rules: \"  \"\n", "line 4: rules has nothing after it: leave the key out for every rule"},
 		// What Helm, reading values as YAML 1.1, gives as a boolean or a
 		// number where a name is wanted.
 		{"teams:\n  - name: false\n    rules: ^A\n", "line 2: name is false, read as a boolean or a number"},
@@ -216,6 +223,9 @@ func TestConfigReloaded(t *testing.T) {
 	}
 	if teamOf(t, s, "payments").TZ != "Asia/Seoul" || s.configShown().Pending.IsZero() {
 		t.Error("read once, the change is kept already")
+	}
+	if _, body := callAs(t, s.Handler(), "GET", "/settings", "boss@example.com", "", "", ""); !strings.Contains(body, "A new file was read at") {
+		t.Error("settings doesn't say a new file was read once")
 	}
 	clockOn(s, configEvery)
 	if err := s.reconcileConfig(ctx); err != nil {
@@ -317,10 +327,12 @@ func TestConfigProblemsForAdmins(t *testing.T) {
 }
 
 // A bad file at start, as a pod restarted on it reads it: serve starts on
-// the ledger as it is, and says why.
+// the ledger as it is, and says why on its first read.
 func TestConfigBadAtStart(t *testing.T) {
 	ctx := context.Background()
-	s, _ := configServer(t, "teams:\n  - name: payments\n    colour: red\n", nil)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeConfig(t, path, "teams:\n  - name: payments\n    colour: red\n")
+	s, _, _ := rolesServer(t, func(c *Config) { c.Config = path })
 	if err := s.configTerm(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -638,7 +650,7 @@ func TestConfigExportRoundTrip(t *testing.T) {
 		t.Errorf("exported again:\n%s\nwas:\n%s", second, first)
 	}
 	// Read once more, as a term begins: nothing at all.
-	s.config.newTerm()
+	s.config.newTerm(s.wall())
 	gen = s.l.Gen()
 	readTwice(t, s)
 	if s.l.Gen() != gen || s.config.applied == "" {
@@ -1053,5 +1065,193 @@ func TestConfigRolledBackAndForward(t *testing.T) {
 	gs, _ = s.l.Grants(ctx)
 	if slices.ContainsFunc(gs, func(g ledger.Grant) bool { return g.Who == "user:ana@example.com" }) || len(gs) != 1 || !gs[0].Declared {
 		t.Errorf("forward again, the roles: %+v", gs)
+	}
+}
+
+// A read of another file while one waits out an error of the ledger's
+// makes two reads of a third not in a row.
+func TestConfigBackoffBreaksTheRow(t *testing.T) {
+	ctx := context.Background()
+	s, path := configServer(t, configFile, nil)
+	mallory := func() bool {
+		gs, _ := s.l.Grants(ctx)
+		return slices.ContainsFunc(gs, func(g ledger.Grant) bool { return strings.Contains(g.Who, "mallory") })
+	}
+	b := strings.Replace(configFile, "  - user: ana@example.com\n", "", 1)
+	a := configFile + "  - user: mallory@example.com\n    team: payments\n"
+	read := func(body string, after time.Duration) {
+		t.Helper()
+		writeConfig(t, path, body)
+		clockOn(s, after)
+		if err := s.reconcileConfig(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// B read twice, the ledger failing.
+	read(b, 0)
+	clockOn(s, configEvery)
+	gone, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := s.reconcileConfig(gone); err == nil {
+		t.Fatal("no error from the ledger")
+	}
+	// A read once, B while it waits, A again.
+	read(a, time.Second)
+	read(b, time.Second)
+	read(a, configEvery)
+	if mallory() {
+		t.Error("A kept to, read with B between")
+	}
+	read(a, configEvery)
+	if !mallory() {
+		t.Error("A read twice in a row isn't kept to")
+	}
+}
+
+// A file the ledger couldn't be kept to is shown so, with when it is tried
+// again, not as one read once; kept to after, it is said no more.
+func TestConfigWriteFailureShown(t *testing.T) {
+	ctx := context.Background()
+	s, path := configServer(t, configFile, nil)
+	writeConfig(t, path, strings.Replace(configFile, "  - user: ana@example.com\n", "", 1))
+	if err := s.reconcileConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	clockOn(s, configEvery)
+	gone, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := s.reconcileConfig(gone); err == nil {
+		t.Fatal("no error from the ledger")
+	}
+	if c := s.configShown(); c.WriteFailed.IsZero() || !c.Retry.After(c.WriteFailed) || !c.Pending.IsZero() {
+		t.Errorf("shown: %+v", c)
+	}
+	_, body := callAs(t, s.Handler(), "GET", "/settings", "boss@example.com", "", "", "")
+	if !strings.Contains(body, "couldn&#39;t be kept to it at") || strings.Contains(body, "A new file was read at") {
+		t.Error("settings doesn't say the ledger couldn't be kept to it")
+	}
+	clockOn(s, time.Hour)
+	if err := s.reconcileConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if c := s.configShown(); !c.WriteFailed.IsZero() || c.Applied.IsZero() {
+		t.Errorf("kept to after: %+v", c)
+	}
+}
+
+// Files other than the one applied, read for minutes, none the same twice
+// in a row (a ConfigMap changing back and forth): Settings says since
+// when, it is logged once, and the one applied read twice in a row ends
+// it.
+func TestConfigStuckShown(t *testing.T) {
+	ctx := context.Background()
+	s, path := configServer(t, configFile, nil)
+	var logged bytes.Buffer
+	s.log = slog.New(slog.NewTextHandler(&logged, nil))
+	other := strings.Replace(configFile, "tz: Asia/Seoul", "tz: Europe/Berlin", 1)
+	read := func(body string) {
+		t.Helper()
+		writeConfig(t, path, body)
+		clockOn(s, configEvery)
+		if err := s.reconcileConfig(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read(other)
+	since := s.wall()
+	for i := range 2 * int(configStuck/configEvery) {
+		if i%2 == 0 {
+			read(configFile)
+		} else {
+			read(other)
+		}
+	}
+	if c := s.configShown(); !c.PendingSince.Equal(since) || teamOf(t, s, "payments").TZ != "Asia/Seoul" {
+		t.Errorf("shown: %+v", c)
+	}
+	if n := strings.Count(logged.String(), "no file has been read the same twice in a row since"); n != 1 {
+		t.Errorf("logged %d times:\n%s", n, logged.String())
+	}
+	if _, body := callAs(t, s.Handler(), "GET", "/settings", "boss@example.com", "", "", ""); !strings.Contains(body, "have been read since") {
+		t.Error("settings doesn't say since when")
+	}
+	read(configFile)
+	read(configFile)
+	if c := s.configShown(); !c.PendingSince.IsZero() {
+		t.Errorf("the one applied, read twice: %+v", c)
+	}
+}
+
+// Terms too short to read a file twice keep the ledger from it: that is
+// shown since the first of them, and logged.
+func TestConfigShortTermsShown(t *testing.T) {
+	ctx := context.Background()
+	s, path := configServer(t, configFile, nil)
+	var logged bytes.Buffer
+	s.log = slog.New(slog.NewTextHandler(&logged, nil))
+	writeConfig(t, path, strings.Replace(configFile, "tz: Asia/Seoul", "tz: Europe/Berlin", 1))
+	var since time.Time
+	for i := range int(configStuck/(5*time.Second)) + 2 {
+		if err := s.configTerm(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			since = s.wall()
+		}
+		clockOn(s, 5*time.Second)
+	}
+	if c := s.configShown(); !c.PendingSince.Equal(since) || teamOf(t, s, "payments").TZ != "Asia/Seoul" {
+		t.Errorf("shown: %+v, since %v", c, since)
+	}
+	if !strings.Contains(logged.String(), "no file has been read the same twice in a row since") {
+		t.Errorf("not logged:\n%s", logged.String())
+	}
+}
+
+// What no --config gave back is an admin's to keep as the UI's, one or all,
+// from Settings, which says how, a role's too; no one else's, nor a page
+// elsewhere's.
+func TestKeepGivenBackOnSettings(t *testing.T) {
+	ctx := context.Background()
+	s, _ := configServer(t, configFile, func(c *Config) { c.Viewers = []string{"*"} })
+	s.cfg.Config = ""
+	if err := s.configTerm(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	_, admin := callAs(t, h, "GET", "/settings", "boss@example.com", "", "", "")
+	_, viewer := callAs(t, h, "GET", "/settings", "viewer@example.com", "", "", "")
+	if !strings.Contains(admin, `action="/settings/given-back"`) || !strings.Contains(admin, "delete it and give it again on the Roles page") {
+		t.Error("an admin isn't shown how to keep them")
+	}
+	if strings.Contains(viewer, `action="/settings/given-back"`) || !strings.Contains(viewer, `disabled aria-describedby="givenback-why"`) {
+		t.Error("a viewer is shown the form, or not why it is off")
+	}
+	gb, _ := s.l.GivenBack(ctx)
+	ana := gb[slices.IndexFunc(gb, func(g ledger.GivenBackRow) bool { return g.Name == "user:ana@example.com" })]
+	one := url.Values{"kind": {ana.Kind}, "id": {itoa(ana.ID)}}
+	if code, _, _ := ui(t, h, "POST", "/settings/given-back", "viewer@example.com", "same-origin", one); code != http.StatusForbidden {
+		t.Errorf("a viewer keeps one: %d", code)
+	}
+	if code, _, _ := ui(t, h, "POST", "/settings/given-back", "boss@example.com", "cross-site", one); code != http.StatusForbidden {
+		t.Errorf("a page elsewhere keeps one: %d", code)
+	}
+	if code, _, _ := ui(t, h, "POST", "/settings/given-back", "boss@example.com", "same-origin", one); code != http.StatusSeeOther {
+		t.Errorf("an admin keeps one: %d", code)
+	}
+	if left, _ := s.l.GivenBack(ctx); len(left) != len(gb)-1 {
+		t.Errorf("after one: %+v", left)
+	}
+	if code, _, _ := ui(t, h, "POST", "/settings/given-back", "boss@example.com", "same-origin", url.Values{"all": {"1"}}); code != http.StatusSeeOther {
+		t.Errorf("an admin keeps them all: %d", code)
+	}
+	if left, _ := s.l.GivenBack(ctx); len(left) != 0 {
+		t.Errorf("after all: %+v", left)
+	}
+	cs, _ := s.l.Changes(ctx, 50)
+	if !slices.ContainsFunc(cs, func(c ledger.Change) bool {
+		return c.By == "boss@example.com" && c.What == ledger.RoleGiven+"user:ana@example.com kept as the UI's: given back without --config, it is no file's to take away"
+	}) {
+		t.Errorf("the activity log: %+v", cs)
 	}
 }

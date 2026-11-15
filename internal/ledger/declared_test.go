@@ -837,8 +837,14 @@ func TestGivenBackLetGoByTheNextFile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := []GivenBackRow{{KindGrant, "group:payments-oncall", "payments"}, {KindGrant, "user:ana@example.com", ""},
-			{KindReport, "payments weekly", "payments"}, {KindTeam, "payments", ""}, {KindWindow, "nightly backup", "payments"}}
+		want := []GivenBackRow{{0, KindGrant, "group:payments-oncall", "payments"}, {0, KindGrant, "user:ana@example.com", ""},
+			{0, KindReport, "payments weekly", "payments"}, {0, KindTeam, "payments", ""}, {0, KindWindow, "nightly backup", "payments"}}
+		for i := range gb {
+			if gb[i].ID == 0 {
+				t.Errorf("no id: %+v", gb[i])
+			}
+			gb[i].ID = 0
+		}
 		if !slices.Equal(gb, want) {
 			t.Errorf("given back: %+v", gb)
 		}
@@ -979,5 +985,128 @@ func TestGivenBackDeclaredAgain(t *testing.T) {
 	}
 	if rs, _ := l.Scheduleds(ctx); len(rs) != 0 {
 		t.Errorf("reports: %+v", rs)
+	}
+}
+
+// What no --config gave back that the next file declares again of another
+// team is the file's again, moved, in its own row: a report isn't skipped
+// as another team's, nor made again, losing when it was last sent; a
+// quiet window isn't made anew beside it, pruned or not.
+func TestGivenBackMovedToAnotherTeam(t *testing.T) {
+	ctx := context.Background()
+	for _, prune := range []bool{false, true} {
+		l := open(t, time.UTC)
+		d := declaredOf()
+		d.Teams = append(d.Teams, DeclaredTeam{Team: Team{Name: "search", Rules: "^S"}, Line: 30})
+		reconcile(t, l, d, Leave{})
+		ws0, _ := l.windows(ctx, l.r, "")
+		rs0, _ := l.Scheduleds(ctx)
+		reconcile(t, l, Declared{}, Leave{NoFile: true})
+		d.Windows[0].Team, d.Reports[0].Team = "search", "search"
+		r, skipped := reconcile(t, l, d, Leave{Prune: prune})
+		if len(skipped) != 0 || r.Made != 0 || r.Deleted != 0 {
+			t.Errorf("pruned %v: %+v %v", prune, r, skipped)
+		}
+		ws, _ := l.windows(ctx, l.r, "")
+		if len(ws) != 1 || ws[0].ID != ws0[0].ID || !ws[0].Declared || ws[0].TeamID == ws0[0].TeamID {
+			t.Errorf("pruned %v: windows %+v, were %+v", prune, ws, ws0)
+		}
+		rs, _ := l.Scheduleds(ctx)
+		if len(rs) != 1 || rs[0].ID != rs0[0].ID || !rs[0].Declared || rs[0].TeamID == rs0[0].TeamID {
+			t.Errorf("pruned %v: reports %+v, were %+v", prune, rs, rs0)
+		}
+	}
+}
+
+// Of a quiet window given back and one the UI made alike, the next file
+// that declares it takes the one given back, not the UI's.
+func TestGivenBackTakenBeforeTheUIs(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	search, err := l.PutTeam(ctx, Team{Name: "search", Rules: "^S"}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := declaredOf()
+	w := d.Windows[0].Window
+	w.TeamID = search
+	ui, err := l.PutWindow(ctx, w, "ana", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconcile(t, l, d, Leave{}) // made beside the UI's, of search
+	reconcile(t, l, Declared{}, Leave{NoFile: true})
+	ts, _ := l.Teams(ctx)
+	pay := ts[slices.IndexFunc(ts, func(x Team) bool { return x.Name == "payments" })].ID
+	w.ID, w.TeamID = ui, pay // the UI's, alike now
+	if _, err := l.PutWindow(ctx, w, "ana", opts); err != nil {
+		t.Fatal(err)
+	}
+	reconcile(t, l, d, Leave{})
+	ws, _ := l.windows(ctx, l.r, "ORDER BY id")
+	if len(ws) != 2 || ws[0].Declared || !ws[1].Declared {
+		t.Errorf("windows: %+v", ws)
+	}
+}
+
+// Of two quiet windows of one title and team, one that can't be kept keeps
+// its own row as it was, not its twin's, which the other, as it was, keeps.
+func TestBadWindowKeepsItsTwin(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	start := time.Date(2026, 11, 2, 2, 0, 0, 0, time.UTC)
+	deploy := func(rules string) DeclaredWindow {
+		return DeclaredWindow{Window: Window{Title: "deploy", Start: start, End: start.Add(time.Hour), Rules: rules}, Team: "pay", Line: 2}
+	}
+	d := Declared{Teams: []DeclaredTeam{{Team: Team{Name: "pay", Rules: "^P"}, Line: 1}}, Windows: []DeclaredWindow{deploy("^X"), deploy("^Y")}}
+	reconcile(t, l, d, Leave{})
+	d.Windows[1].Bad = errors.New("can't be kept")
+	reconcile(t, l, d, Leave{})
+	ws, _ := l.windows(ctx, l.r, "ORDER BY id")
+	if len(ws) != 2 || ws[0].Rules != "^X" || ws[1].Rules != "^Y" {
+		t.Errorf("windows: %+v", ws)
+	}
+}
+
+// A team given as blanks names no team: not every team, as one left out
+// does.
+func TestBlankTeamNamesNone(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	_, skipped := reconcile(t, l, Declared{Grants: []DeclaredGrant{{Who: "user:mallory", Team: "  ", Line: 1}}}, Leave{})
+	if len(skipped) != 1 || !strings.Contains(skipped[0].Error(), "leave the key out for every team") {
+		t.Errorf("skipped: %v", skipped)
+	}
+	if gs, _ := l.Grants(ctx); len(gs) != 0 {
+		t.Errorf("roles: %+v", gs)
+	}
+}
+
+// An admin keeps what no --config gave back as the UI's, one or all, each
+// noted: the next file that doesn't declare it takes none of it away.
+func TestKeepGivenBack(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	reconcile(t, l, declaredOf(), Leave{})
+	reconcile(t, l, Declared{}, Leave{NoFile: true})
+	gb, _ := l.GivenBack(ctx)
+	ana := gb[slices.IndexFunc(gb, func(g GivenBackRow) bool { return g.Name == "user:ana@example.com" })]
+	if n, err := l.KeepGivenBack(ctx, KindGrant, ana.ID, "boss"); n != 1 || err != nil {
+		t.Fatalf("one: %d %v", n, err)
+	}
+	if n, err := l.KeepGivenBack(ctx, KindGrant, ana.ID, "boss"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("one again: %d %v", n, err)
+	}
+	if n, err := l.KeepGivenBack(ctx, "", 0, "boss"); n != 4 || err != nil {
+		t.Errorf("all: %d %v", n, err)
+	}
+	if !slices.Contains(changesBy(t, l, "boss"), RoleGiven+"user:ana@example.com"+keptAsTheUIs) {
+		t.Errorf("the activity log: %q", changesBy(t, l, "boss"))
+	}
+	if r, _ := reconcile(t, l, Declared{}, Leave{Prune: true}); r.Any() {
+		t.Errorf("the next file: %+v", r)
+	}
+	if gs, _ := l.Grants(ctx); len(gs) != 2 {
+		t.Errorf("roles: %+v", gs)
 	}
 }

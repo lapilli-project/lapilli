@@ -242,7 +242,7 @@ func each(n *yaml.Node, what string, fn func(key string, v *yaml.Node) error) er
 			}
 			return badAt(k, unknownIn[what], k.Value, strings.Join(configKeys[what], ", "))
 		}
-		if what != "" && null(v) {
+		if what != "" && (null(v) || blank(v) && broadens(what, k.Value)) {
 			return nothingAfter(what, k.Value, v)
 		}
 		if err := fn(k.Value, v); err != nil {
@@ -250,6 +250,18 @@ func each(n *yaml.Node, what string, fn func(key string, v *yaml.Node) error) er
 		}
 	}
 	return nil
+}
+
+// blank says a scalar is empty, or blanks alone: "" or ' '.
+func blank(v *yaml.Node) bool {
+	return v.Kind == yaml.ScalarNode && strings.TrimSpace(v.Value) == ""
+}
+
+// broadens says a key of a thing, given as nothing, would make it hold for
+// more: a role's, a quiet window's or a report's team, every team; a quiet
+// window's rules, every rule.
+func broadens(what, key string) bool {
+	return key == "team" || what == "window" && key == "rules"
 }
 
 // nothingAfter refuses a key of a thing given with nothing after it, as a
@@ -630,7 +642,15 @@ type configState struct {
 	sync.Mutex
 	applied, failed, pending string
 	at, pendingAt            time.Time
-	did                      ledger.Reconciled
+	// last is the hash last read. pendingSince is when a file other than
+	// the one applied was first read, since it was kept to: none kept to
+	// since, it is said (stuckLogged, once configStuck on). backAt is when
+	// the one applied was read again after another, which, read the same
+	// again, ends the wait. termAt is when this term began.
+	last                         string
+	pendingSince, backAt, termAt time.Time
+	stuckLogged                  bool
+	did                          ledger.Reconciled
 	// shown are the problems the pages show; kept, those of the file
 	// applied, shown again once a file that failed is put back.
 	shown, kept configProblems
@@ -640,13 +660,14 @@ type configState struct {
 	retryAt   time.Time
 	backoff   time.Duration
 	triedGen  int64
-	// failHash met an error of the ledger's, and isn't tried again before
-	// failAt, after failBackoff, whatever else would read it again.
-	failHash    string
-	failAt      time.Time
-	failBackoff time.Duration
-	errAt       time.Time
-	loggedText  string
+	// failHash met an error of the ledger's, at failedAt, and isn't tried
+	// again before failAt, after failBackoff, whatever else would read it
+	// again.
+	failHash         string
+	failedAt, failAt time.Time
+	failBackoff      time.Duration
+	errAt            time.Time
+	loggedText       string
 }
 
 // configProblems are what is wrong with a file: the first kept, how many
@@ -671,12 +692,20 @@ func problemsOf(errs []ledger.DeclaredError) configProblems {
 
 // newTerm forgets what an earlier term made of the file: another leader
 // may have kept the ledger to another since, or a failover lost what this
-// one wrote. Kept again to the same file, the ledger writes nothing.
-func (c *configState) newTerm() {
+// one wrote. Kept again to the same file, the ledger writes nothing. A
+// file the last term read once, that began within configStuck of now, is
+// still waited for (pendingSince): terms too short to read a file twice
+// keep the ledger from every file, and that is said.
+func (c *configState) newTerm(now time.Time) {
 	c.Lock()
 	defer c.Unlock()
+	short := c.pending != "" && now.Sub(c.termAt) < configStuck
 	c.applied, c.failed, c.pending, c.retryHash, c.retryAt, c.backoff = "", "", "", "", time.Time{}, 0
-	c.failHash, c.failAt, c.failBackoff = "", time.Time{}, 0
+	c.failHash, c.failedAt, c.failAt, c.failBackoff = "", time.Time{}, time.Time{}, 0
+	c.last, c.backAt, c.termAt = "", time.Time{}, now
+	if !short {
+		c.pendingSince, c.stuckLogged = time.Time{}, false
+	}
 }
 
 // configShown is what the pages say of --config, as the leader last made
@@ -693,9 +722,15 @@ type configShown struct {
 	More     int               `json:"more,omitempty"`
 	ErrAt    time.Time         `json:"err_at,omitzero"`
 	Brief    bool              `json:"brief,omitempty"`
-	// Pending is when another file was read, once: the ledger is kept to
-	// it once it is read the same again.
-	Pending time.Time `json:"pending,omitzero"`
+	// Pending is when a new file was read, once: the ledger is kept to it
+	// once it is read the same again. PendingSince is when files other
+	// than the one applied began to be read, none kept to since, said
+	// when that is more than the one read once. WriteFailed is when the
+	// ledger couldn't be kept to the file last read, tried again at Retry.
+	Pending      time.Time `json:"pending,omitzero"`
+	PendingSince time.Time `json:"pending_since,omitzero"`
+	WriteFailed  time.Time `json:"write_failed,omitzero"`
+	Retry        time.Time `json:"retry,omitzero"`
 }
 
 // ErrText is what is wrong, in a language, "" for nothing.
@@ -739,8 +774,15 @@ func (s *Server) configShown() *configShown {
 	defer s.config.Unlock()
 	c := &configShown{File: s.cfg.Config, Prune: s.cfg.ConfigPrune, Did: s.config.did, ErrAt: s.config.errAt,
 		Whole: s.config.shown.whole, Problems: s.config.shown.list, More: s.config.shown.more}
-	if s.config.pending != "" {
-		c.Pending = s.config.pendingAt
+	st := &s.config
+	if st.failHash != "" && st.failHash == st.last {
+		c.WriteFailed, c.Retry = st.failedAt, st.failAt
+	}
+	if st.pending != "" && st.pending != st.failHash {
+		c.Pending = st.pendingAt
+	}
+	if !st.pendingSince.IsZero() && (c.Pending.IsZero() || st.pendingSince.Before(st.pendingAt)) {
+		c.PendingSince = st.pendingSince
 	}
 	if len(s.config.applied) >= 12 {
 		c.Hash, c.Applied = s.config.applied[:12], s.config.at
@@ -755,10 +797,15 @@ const noConfig = "none"
 // error, waits to be tried again.
 const configBackoffMost = 10 * time.Minute
 
+// configStuck is how long files other than the one applied are read, none
+// twice in a row, before it is logged: a ConfigMap that changes back and
+// forth, or terms too short to read a file twice.
+const configStuck = 5 * time.Minute
+
 // configTerm keeps the ledger to --config as a term of leading begins:
 // whatever an earlier term kept it to.
 func (s *Server) configTerm(ctx context.Context) error {
-	s.config.newTerm()
+	s.config.newTerm(s.wall())
 	return s.reconcileConfig(ctx)
 }
 
@@ -776,7 +823,11 @@ func (s *Server) configTerm(ctx context.Context) error {
 // ConfigMap swapped in part, changes nothing, then: no one is given a
 // role, nor taken one away, nothing is deleted, and no quiet window
 // quiets more. Kept to, what it no longer declares is let go at once. As
-// a term begins, the file is kept to configEvery to twice that after.
+// a term begins, the file is read once, and kept to at the next read,
+// configEvery after the rules are read (lead): no sooner, and no bound on
+// how much later, as a ConfigMap that changes back and forth, or terms
+// too short, keep any file from being read twice; that is shown, and
+// logged once configStuck on.
 //
 // A file that can't be read as --config changes nothing, and is said at
 // once why, on its first read. Kept to, each thing it declares that can't
@@ -797,28 +848,51 @@ func (s *Server) reconcileConfig(ctx context.Context) error {
 	now, gen := s.wall(), s.l.Gen()
 	st := &s.config
 	st.Lock()
+	st.last = hash
+	// waiting gives the lock back, for a read that keeps the ledger to
+	// nothing, and says once that files have been read for configStuck,
+	// none twice in a row.
+	waiting := func() {
+		var stuck time.Time
+		if !st.pendingSince.IsZero() && !now.Before(st.pendingSince.Add(configStuck)) && !st.stuckLogged {
+			st.stuckLogged, stuck = true, st.pendingSince
+		}
+		st.Unlock()
+		if !stuck.IsZero() {
+			s.log.Warn("--config has changed, and no file has been read the same twice in a row since; the ledger keeps what it was last kept to", "file", s.cfg.Config, "since", stuck)
+		}
+	}
 	switch {
 	case hash == st.failHash && now.Before(st.failAt):
-		// The ledger's error, this file met last: not before a while.
-		st.Unlock()
+		// The ledger's error, this file met last: not before a while. Read
+		// between two of another, it makes them not in a row.
+		if st.pending != hash {
+			st.pending, st.backAt = "", time.Time{}
+		}
+		waiting()
 		return nil
 	case fileErr != nil:
 		// Said at once, on its first read; and between two reads of a
 		// file, it makes them not in a row.
-		st.pending = ""
+		st.pending, st.backAt = "", time.Time{}
 		again := hash == st.failed
-		st.Unlock()
+		waiting()
 		if !again {
 			s.configSaid(configProblems{list: []configProblem{problemOf(fileErr)}, whole: true}, func() { st.failed = hash })
 		}
 		return nil
 	case hash == st.applied:
 		// The file the ledger is kept to: another read once since is read
-		// twice in a row no more.
-		st.pending = ""
+		// twice in a row no more; read the same twice in a row itself, no
+		// other is waited for.
+		if st.pending != "" || st.backAt.IsZero() {
+			st.pending, st.backAt = "", now
+		} else if !now.Before(st.backAt.Add(configEvery)) {
+			st.pendingSince, st.stuckLogged = time.Time{}, false
+		}
 		back, kept := st.failed != "", st.kept
 		retry := len(st.kept.list) > 0 && gen != st.triedGen && !now.Before(st.retryAt)
-		st.Unlock()
+		waiting()
 		if back {
 			// Back to it after one that couldn't be used: what is wrong
 			// with it is what is shown again.
@@ -833,11 +907,14 @@ func (s *Server) reconcileConfig(ctx context.Context) error {
 		// and nothing taken away.
 	case hash != st.pending:
 		// Read once: kept to once it is read the same again.
-		st.pending, st.pendingAt = hash, now
-		st.Unlock()
+		st.pending, st.pendingAt, st.backAt = hash, now, time.Time{}
+		if st.pendingSince.IsZero() {
+			st.pendingSince = now
+		}
+		waiting()
 		return nil
 	case now.Before(st.pendingAt.Add(configEvery)):
-		st.Unlock()
+		waiting()
 		return nil
 	}
 	if hash != st.retryHash {
@@ -854,7 +931,7 @@ func (s *Server) reconcileConfig(ctx context.Context) error {
 			st.failBackoff = 0
 		}
 		st.failHash, st.failBackoff = hash, nextBackoff(st.failBackoff)
-		st.failAt = now.Add(st.failBackoff)
+		st.failedAt, st.failAt = now, now.Add(st.failBackoff)
 		return err
 	}
 	s.checkDeclared(&d)
@@ -868,7 +945,8 @@ func (s *Server) reconcileConfig(ctx context.Context) error {
 	}
 	st.Lock()
 	st.applied, st.at, st.failed, st.pending = hash, now, "", ""
-	st.failHash, st.failAt, st.failBackoff = "", time.Time{}, 0
+	st.failHash, st.failedAt, st.failAt, st.failBackoff = "", time.Time{}, time.Time{}, 0
+	st.pendingSince, st.backAt, st.stuckLogged = time.Time{}, time.Time{}, false
 	// The ledger as it was before this write: what the write itself made
 	// (a team made once others were let go) is a change, and what names
 	// it is tried again.
@@ -941,4 +1019,28 @@ func (s *Server) watchConfig(ctx context.Context) {
 			s.log.Error("keeping the ledger to --config", "err", err)
 		}
 	}
+}
+
+// postKeepGivenBack keeps what a leader without --config gave back as the
+// UI's, so that no file takes it away: one (kind and id), or all of them
+// (all=1). An admin's, as only an admin sees which they are.
+func (s *Server) postKeepGivenBack(w http.ResponseWriter, r *http.Request) {
+	if err := form(r); err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	kind, id := "", int64(0)
+	if r.PostFormValue("all") != "1" {
+		var err error
+		kind = r.PostFormValue("kind")
+		if id, err = strconv.ParseInt(r.PostFormValue("id"), 10, 64); err != nil || kind == "" {
+			s.oops(w, r, bad("say which to keep, by its kind and id, or keep them all"))
+			return
+		}
+	}
+	if _, err := s.l.KeepGivenBack(r.Context(), kind, id, s.user(r)); err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	back(w, r, "/settings#config")
 }

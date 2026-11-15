@@ -1598,9 +1598,11 @@ type settingsView struct {
 }
 
 // givenBackView is one given back without --config: what it is, a text to
-// translate, its name, and its team's.
+// translate, its name, and its team's; and its kind and id, to keep it.
 type givenBackView struct {
 	What, Name, Team string
+	Kind             string
+	ID               int64
 }
 
 // givenBackWhat are the kinds of what is given back, as the page says them.
@@ -1649,7 +1651,7 @@ func (s *Server) settingsPage(r *http.Request) (any, error) {
 	if s.role(r) == admin {
 		// Whom a role was given to is an admin's to read.
 		for _, g := range gb {
-			v.GivenBack = append(v.GivenBack, givenBackView{givenBackWhat[g.Kind], g.Name, g.Team})
+			v.GivenBack = append(v.GivenBack, givenBackView{givenBackWhat[g.Kind], g.Name, g.Team, g.Kind, g.ID})
 		}
 	}
 	if v.Notify, err = s.notifyStatus(r.Context(), lang(r)); err != nil {
