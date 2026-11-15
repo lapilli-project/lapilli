@@ -2,8 +2,10 @@ package serve
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"slices"
+	"sync"
 	"time"
 )
 
@@ -35,14 +37,53 @@ type notifyStatus struct {
 	Reports, ReportsNowhere int // reports on, and of them those with nowhere to go
 	Sends                   bool
 	LastSent                time.Time
-	Failed                  int // notices made in the last day whose last try failed
-	Loc                     *time.Location
+	// Failed are the notices made in the last day whose last try failed,
+	// ledger.FailedCounted at most; FailedMore, that there were more.
+	Failed     int
+	FailedMore bool
+	// Posted is, when the digest goes to Slack, posted there itself, not
+	// through the outbox, how its last post went, since the process
+	// started (slackPost).
+	Posted *slackPostAt
+	Loc    *time.Location
 }
 
-// Warned says something on is going nowhere, or failed to go.
-func (n notifyStatus) Warned() bool { return n.DigestNowhere || n.ReportsNowhere > 0 || n.Failed > 0 }
+// slackPost is how the weekly digest's last post to Slack went: kept in
+// memory, by the process that posted it, as no page read it before; a
+// failed one is a run of the ledger's too (Runs). Since the process
+// started, and on the replica that leads.
+type slackPost struct {
+	sync.Mutex
+	last slackPostAt
+}
 
-func (s *Server) notifyStatus(ctx context.Context) (*notifyStatus, error) {
+type slackPostAt struct {
+	At     time.Time
+	Failed bool
+}
+
+func (p *slackPost) set(err error) {
+	p.Lock()
+	p.last = slackPostAt{time.Now(), err != nil}
+	p.Unlock()
+}
+
+func (p *slackPost) get() slackPostAt {
+	p.Lock()
+	defer p.Unlock()
+	return p.last
+}
+
+// weekdays are the days of a week, as a person reads a schedule that falls
+// on one each week: "Mondays 09:00".
+var weekdays = [...]string{"Sundays %s", "Mondays %s", "Tuesdays %s", "Wednesdays %s", "Thursdays %s", "Fridays %s", "Saturdays %s"}
+
+// weeklyText is a weekly time as a person reads it, in a language.
+func weeklyText(lang string, w Weekly) string {
+	return tr(lang, weekdays[w.Day], fmt.Sprintf("%02d:%02d", w.Hour, w.Minute))
+}
+
+func (s *Server) notifyStatus(ctx context.Context, lang string) (*notifyStatus, error) {
 	known := s.reportDests()
 	n := &notifyStatus{Webhook: s.cfg.NotifyWebhook != "", Slack: s.cfg.NotifySlack && s.cfg.Slack != "", ReportDests: len(s.cfg.ReportDests),
 		TeamDigests: len(s.cfg.TeamDigests), Loc: s.cfg.Loc}
@@ -50,7 +91,11 @@ func (s *Server) notifyStatus(ctx context.Context) (*notifyStatus, error) {
 	if err != nil {
 		return nil, err
 	}
-	n.DigestWhen, n.DigestOn, n.DigestSet = d.When.String(), d.On, d.Set != nil
+	n.DigestWhen, n.DigestOn, n.DigestSet = weeklyText(lang, d.When), d.On, d.Set != nil
+	if d.On && s.cfg.Slack != "" && slices.Contains(d.Dests, "slack") {
+		p := s.slackPosted.get()
+		n.Posted = &p
+	}
 	for _, x := range d.Dests {
 		if slices.Contains(known, x) {
 			n.DigestTo++
@@ -76,7 +121,7 @@ func (s *Server) notifyStatus(ctx context.Context) (*notifyStatus, error) {
 	if err != nil {
 		return nil, err
 	}
-	n.LastSent, n.Failed = st.LastSent, st.Failed
+	n.LastSent, n.Failed, n.FailedMore = st.LastSent, st.Failed, st.More
 	return n, nil
 }
 

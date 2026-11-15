@@ -1624,7 +1624,7 @@ func (s *Server) settingsPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if v.Notify, err = s.notifyStatus(r.Context()); err != nil {
+	if v.Notify, err = s.notifyStatus(r.Context(), lang(r)); err != nil {
 		return nil, err
 	}
 	if r.URL.Query().Get("try") == "" {

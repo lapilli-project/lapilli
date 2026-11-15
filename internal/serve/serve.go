@@ -351,15 +351,17 @@ type Server struct {
 	// deploysUnread is set once a ledger keeping deploys with no
 	// --deploys to read was logged.
 	deploysUnread atomic.Bool
-	// slackTried is when the worker last tried to post the digest.
-	slackTried time.Time
-	status     status
-	cache      cache
-	own        ownersCache
-	grantsC    grantsCache
-	creds      creditCache
-	hours      hoursCache
-	outs       outcomesCache
+	// slackTried is when the worker last tried to post the digest;
+	// slackPosted, how its last post went, in this process alone.
+	slackTried  time.Time
+	slackPosted slackPost
+	status      status
+	cache       cache
+	own         ownersCache
+	grantsC     grantsCache
+	creds       creditCache
+	hours       hoursCache
+	outs        outcomesCache
 	// wait keeps the counts the sidebar shows.
 	wait waitingCache
 	// saidRules are the rules as last read, for what they say.

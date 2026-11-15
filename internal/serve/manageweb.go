@@ -56,6 +56,6 @@ func (s *Server) managePage(r *http.Request) (any, error) {
 	if s.role(r) < admin {
 		v.Cards = append(v.Cards[:1], v.Cards[2:]...) // Roles, for admins alone
 	}
-	v.Notify, err = s.notifyStatus(ctx)
+	v.Notify, err = s.notifyStatus(ctx, lang(r))
 	return v, err
 }

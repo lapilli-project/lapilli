@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,10 +18,10 @@ import (
 func TestNotifyStatusNowhere(t *testing.T) {
 	s, _ := server(t, nil)
 	h := s.Handler()
-	nowhere := "The weekly digest is worked out every mon@09:00 and goes nowhere: give it a place to go"
+	nowhere := "The weekly digest is worked out Mondays 09:00 and goes nowhere: give lapilli serve --slack-webhook-file, --notify-webhook-file or --team-digest, or set it on the Reports page"
 	_, body, _ := get(t, h, "/settings")
 	for _, x := range []string{`<h2 id="notifications">Notifications</h2>`, nowhere, "What happens isn&#39;t told anywhere",
-		"Nothing goes out: no webhook, Slack or place for reports is given.", "The weekly digest: every mon@09:00, to 0 places, as the flags set it."} {
+		"Nothing goes out: no webhook, Slack or place for reports is given.", "The weekly digest: Mondays 09:00, to 0 places, as the flags set it."} {
 		if !strings.Contains(body, x) {
 			t.Errorf("/settings lacks %q", x)
 		}
@@ -90,7 +91,7 @@ func TestNotifyStatusSent(t *testing.T) {
 	}
 	_, body, _ = get(t, h, "/settings")
 	for _, x := range []string{"What happens is told to the webhook.", "Places reports can go to by name (--report-dest): 2. Teams with a digest of their own (--team-digest): 1.",
-		"The weekly digest: every mon@09:00, to 2 places, as the flags set it."} {
+		"The weekly digest: Mondays 09:00, to 2 places, as the flags set it."} {
 		if !strings.Contains(body, x) {
 			t.Errorf("/settings lacks %q", x)
 		}
@@ -108,8 +109,9 @@ func TestNotifyStatusSent(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, body, _ = get(t, h, "/settings")
-	for _, x := range []string{"The weekly digest is worked out every tue@10:00 and goes nowhere", "1 report is on with nowhere to go: the places it names are gone.",
-		"The weekly digest: every tue@10:00, to 0 of the places it names, as set on the Reports page.", "Reports on: 1."} {
+	for _, x := range []string{"The weekly digest is worked out Tuesdays 10:00 and goes nowhere: none of the places set for it on the Reports page is there now.",
+		"1 report is on with nowhere to go: the places it names are gone.",
+		"The weekly digest: Tuesdays 10:00, to 0 of the places it names, as set on the Reports page.", "Reports on: 1."} {
 		if !strings.Contains(body, x) {
 			t.Errorf("/settings lacks %q:\n%s", x, body)
 		}
@@ -147,4 +149,80 @@ func TestNotifyStatusInEachLanguage(t *testing.T) {
 	inEachLanguage(t, s.Handler(), "", "/settings", "/manage")
 	s, _ = server(t, func(c *Config) { c.NotifySlack, c.Slack = true, hook })
 	inEachLanguage(t, s.Handler(), "", "/settings")
+}
+
+// TestNotifyStatusSlackPost: the weekly digest is posted to Slack itself,
+// not through the outbox: how its last post went, kept since the process
+// started, is said, a failed one as a warning.
+func TestNotifyStatusSlackPost(t *testing.T) {
+	hook := filepath.Join(t.TempDir(), "hook")
+	os.WriteFile(hook, []byte("https://127.0.0.1:1/x"), 0o600)
+	s, _ := server(t, func(c *Config) { c.Slack = hook })
+	h := s.Handler()
+	if _, body, _ := get(t, h, "/settings"); !strings.Contains(body, "The weekly digest hasn&#39;t been posted to Slack since lapilli serve started.") {
+		t.Errorf("/settings doesn't say the digest wasn't posted yet:\n%s", body)
+	}
+	// Posted where nothing answers, its post fails, and is kept so.
+	if err := s.postDigest(context.Background(), digestIn{On: true, Dests: []string{"slack"}}, "1", now.Add(-weekLen), now, s.cfg.Options); err == nil {
+		t.Fatal("posting the digest where nothing answers worked")
+	}
+	if p := s.slackPosted.get(); p.At.IsZero() || !p.Failed {
+		t.Errorf("the digest's failed post isn't kept: %+v", p)
+	}
+	s.slackPosted.set(errors.New("410 Gone"))
+	_, body, _ := get(t, h, "/settings")
+	if !strings.Contains(body, "The weekly digest&#39;s last post to Slack failed: the log says why.") || !strings.Contains(body, "Its last post to Slack, at ") ||
+		strings.Contains(body, "410") {
+		t.Errorf("/settings doesn't say the digest's last post failed, or says how:\n%s", body)
+	}
+	if _, body, _ := get(t, h, "/manage"); !strings.Contains(body, "The weekly digest&#39;s last post to Slack failed.") {
+		t.Errorf("/manage doesn't say the digest's last post failed:\n%s", body)
+	}
+	s.slackPosted.set(nil)
+	if _, body, _ := get(t, h, "/settings"); !strings.Contains(body, "Last posted to Slack at ") || strings.Contains(body, "post to Slack failed") {
+		t.Errorf("/settings doesn't say the digest was posted:\n%s", body)
+	}
+	// Not going to Slack, nothing is said of it.
+	s, _ = server(t, nil)
+	if _, body, _ := get(t, s.Handler(), "/settings"); strings.Contains(body, "to Slack since") {
+		t.Error("/settings speaks of Slack, with no Slack")
+	}
+}
+
+// TestNotifyStatusTexts: every way the notifications are said, past the
+// failures counted and with the digest's post failed, on every day of the
+// week, is in every language.
+func TestNotifyStatusTexts(t *testing.T) {
+	missing.Lock()
+	clear(missing.m)
+	missing.Unlock()
+	for _, n := range names {
+		for day := range 7 {
+			for _, st := range []notifyStatus{
+				{Sends: true, Failed: 1000, FailedMore: true, DigestOn: true, DigestNowhere: true, Posted: &slackPostAt{At: now, Failed: true}, Loc: time.UTC},
+				{Sends: true, Failed: 1, ReportsNowhere: 1, DigestOn: true, DigestSet: true, DigestNowhere: true, Posted: &slackPostAt{}, Loc: time.UTC},
+				{Sends: true, LastSent: now, Failed: 2, ReportsNowhere: 2, DigestOn: true, Posted: &slackPostAt{At: now}, Loc: time.UTC},
+			} {
+				st.DigestWhen = weeklyText(n.Code, Weekly{time.Weekday(day), 9, 0})
+				for _, tpl := range []string{"notifystatus", "notifycard"} {
+					var b strings.Builder
+					if err := pagesIn[n.Code].ExecuteTemplate(&b, tpl, struct {
+						P page
+						V any
+					}{page{Loc: time.UTC, Lang: n.Code}, &st}); err != nil {
+						t.Fatal(err)
+					}
+					if tpl == "notifystatus" && (strings.Contains(b.String(), "@09") || !strings.Contains(b.String(), "09:00")) {
+						t.Errorf("%s %s: the digest's time isn't as a person reads it:\n%s", n.Code, tpl, b.String())
+					}
+				}
+			}
+		}
+	}
+	missing.Lock()
+	defer missing.Unlock()
+	for k := range missing.m {
+		lang, msg, _ := strings.Cut(k, "\x00")
+		t.Errorf("%s has no translation for %q", lang, msg)
+	}
 }

@@ -1753,7 +1753,9 @@ func (s *Server) postDigest(ctx context.Context, in digestIn, week string, from,
 	}
 	sctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	if err := report.Slack(sctx, s.cfg.Slack, text); err != nil {
+	err = report.Slack(sctx, s.cfg.Slack, text)
+	s.slackPosted.set(err)
+	if err != nil {
 		s.l.AddRun(ctx, ledger.Run{Kind: "digest", Started: s.now(), Finished: s.now(), From: from, To: to, Error: err.Error()})
 		pctx, pcancel := s.posted(ctx)
 		defer pcancel()
