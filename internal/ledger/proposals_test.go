@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -210,6 +211,70 @@ func TestProposalListEvidence(t *testing.T) {
 		want := map[string]bool{"A": true, "B": true}[h.Rule]
 		if got := len(h.Evidence) > 0; got != want || h.AfterHash != "after-"+h.Rule {
 			t.Errorf("%s (%s, %s): evidence %q, after %q", h.Rule, h.Kind, h.State, h.Evidence, h.AfterHash)
+		}
+	}
+}
+
+// TestBacktestAgainBounded: a proposal backtested again isn't again for
+// BacktestCooldown, by anyone; a person backtests BacktestsAnHour again in
+// an hour, and the agents acting for them as many apart, counted by the
+// changes the ledger keeps; Lapilli's own aren't counted.
+func TestBacktestAgainBounded(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	ev := []byte(`{"backtest":{}}`)
+	again := func(rule, by string, agent bool) error {
+		t.Helper()
+		p := proposal(rule, KindFor)
+		p.Evidence = ev
+		id, err := l.Propose(ctx, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := l.MayBacktestAgain(ctx, id, by, agent); err != nil {
+			return err
+		}
+		_, _, err = l.BacktestAgain(ctx, id, by, agent, ev, []byte(`{"backtest":{"semantics":1}}`), nil, nil)
+		return err
+	}
+	for i := 0; i < BacktestsAnHour; i++ {
+		if err := again(fmt.Sprint("P", i), "bo", false); err != nil {
+			t.Fatalf("the %dth: %v", i+1, err)
+		}
+	}
+	if err := again("Over", "BO", false); !errors.Is(err, ErrTooManyBacktests) {
+		t.Errorf("one past the hour's: %v", err)
+	}
+	// Agents acting for bo: their own count, as many.
+	for i := 0; i < BacktestsAnHour; i++ {
+		if err := again(fmt.Sprint("A", i), "bo", true); err != nil {
+			t.Fatalf("the agents' %dth: %v", i+1, err)
+		}
+	}
+	if err := again("AgentOver", "bo", true); !errors.Is(err, ErrTooManyBacktests) {
+		t.Errorf("the agents', one past: %v", err)
+	}
+	// Lapilli's own: not counted.
+	if err := again("Own", Proposer, false); err != nil {
+		t.Errorf("Lapilli's own: %v", err)
+	}
+	// One proposal, again within the cooldown: no one, Lapilli neither.
+	p := proposal("Twice", KindFor)
+	p.Evidence = ev
+	id, err := l.Propose(ctx, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := []byte(`{"backtest":{"semantics":1}}`)
+	if _, _, err := l.BacktestAgain(ctx, id, "cy", false, ev, now, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, who := range []string{"cy", "dee", Proposer} {
+		if err := l.MayBacktestAgain(ctx, id, who, false); !errors.Is(err, ErrBacktestedJustNow) {
+			t.Errorf("%s, within the cooldown: %v", who, err)
+		}
+		if _, _, err := l.BacktestAgain(ctx, id, who, false, now, ev, nil, nil); !errors.Is(err, ErrBacktestedJustNow) {
+			t.Errorf("%s, written within the cooldown: %v", who, err)
 		}
 	}
 }

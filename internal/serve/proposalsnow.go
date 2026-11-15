@@ -512,8 +512,14 @@ func (s *Server) backtestAgain(ctx context.Context, id int64, by string, agent b
 	case l.StaleWhy == nil:
 		return errFresh
 	}
+	// Refused without waiting for the heavy turn: the hour's backtests
+	// again, and the proposal's last, as the ledger keeps them; and the
+	// reader's tries, as proposing counts them.
+	if err := s.l.MayBacktestAgain(ctx, id, by, agent); err != nil {
+		return err
+	}
 	if by != ledger.Proposer && !s.tries.may(by, agent, time.Now()) {
-		return errTooManyTries // refused without waiting for the heavy turn
+		return errTooManyTries
 	}
 	done, err := s.busy(ctx)
 	if err != nil {

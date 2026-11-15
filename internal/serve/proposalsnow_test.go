@@ -843,3 +843,31 @@ func TestBacktestedTold(t *testing.T) {
 		}
 	}
 }
+
+// TestBacktestAgainLedgerBound: what bounds backtesting again is kept in
+// the ledger, not a replica's memory: once one ran, the same proposal,
+// stale again (an incident written down in its weeks and taken away, say),
+// isn't backtested again for ten minutes, with this replica's tries
+// forgotten as another's would be, and the reader is told why.
+func TestBacktestAgainLedgerBound(t *testing.T) {
+	s, _ := restartsServer(t, nil)
+	h := s.Handler()
+	id := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
+	path := "/proposals/" + itoa(id) + "/backtest"
+	if code, body, _ := ui(t, h, http.MethodPost, path, bo, "same-origin", url.Values{}); code != http.StatusSeeOther {
+		t.Fatalf("backtesting again: %d %s", code, body)
+	}
+	// Stale again, as an earlier lapilli's would be.
+	ev := proposalEvidence(state(t, s, id))
+	ev.Semantics = 0
+	raw, _ := json.Marshal(ev)
+	ledgerExec(t, s, "UPDATE proposals SET evidence = ? WHERE id = ?", string(raw), id)
+	s.tries = tries{}
+	code, body, _ := ui(t, h, http.MethodPost, path, cy, "same-origin", url.Values{})
+	if code != http.StatusTooManyRequests || !strings.Contains(body, "less than ten minutes ago") {
+		t.Errorf("again within ten minutes, by another: %d %s", code, body)
+	}
+	if got := proposalEvidence(state(t, s, id)); got.Semantics != 0 {
+		t.Errorf("backtested again within ten minutes: %+v", got)
+	}
+}

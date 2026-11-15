@@ -1611,5 +1611,7 @@
  "lapilli: %s backtested #%d, %s for %s, again": "lapilli: %s repitió el backtest de #%d, %s para %s",
  "lapilli: %s backtested #%d, %s for %s, again, and withdrew the approvals of %s": "lapilli: %s repitió el backtest de #%d, %s para %s, y retiró las aprobaciones de %s",
  "lapilli: an agent, for %s, backtested #%d, %s for %s, again": "lapilli: un agente, en nombre de %s, repitió el backtest de #%d, %s para %s",
- "lapilli: an agent, for %s, backtested #%d, %s for %s, again, and withdrew the approvals of %s": "lapilli: un agente, en nombre de %s, repitió el backtest de #%d, %s para %s, y retiró las aprobaciones de %s"
+ "lapilli: an agent, for %s, backtested #%d, %s for %s, again, and withdrew the approvals of %s": "lapilli: un agente, en nombre de %s, repitió el backtest de #%d, %s para %s, y retiró las aprobaciones de %s",
+ "you have backtested as many proposals again in the last hour as anyone may: try again later": "has repetido en la última hora tantos backtests como cualquiera puede: inténtalo más tarde",
+ "it was backtested again less than ten minutes ago: try again in a few minutes": "se repitió su backtest hace menos de diez minutos: inténtalo en unos minutos"
 }

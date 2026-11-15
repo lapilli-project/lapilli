@@ -148,7 +148,8 @@ func TestFixTextsTranslated(t *testing.T) {
 		staleRule, staleNoVersion, staleVersion, staleRecorded, staleUnrecorded, staleNotice, "No proposal waiting for approval is stale.",
 		"Held until it is backtested again: it is stale", "Backtest again", "Backtested again by an agent, for %s, with lapilli %s",
 		"Approvals withdrawn, given to the backtest it replaced: %s. Approve it again.",
-		"An earlier backtest of it, before it was backtested again, said that as proposed it misses:", "It said that as proposed it misses:"} {
+		"An earlier backtest of it, before it was backtested again, said that as proposed it misses:", "It said that as proposed it misses:",
+		ledger.ErrTooManyBacktests.Error(), ledger.ErrBacktestedJustNow.Error()} {
 		texts[x] = true
 	}
 	for x := range texts {

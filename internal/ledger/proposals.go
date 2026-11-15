@@ -559,6 +559,75 @@ func (l *Ledger) Move(ctx context.Context, id int64, from []string, to, by strin
 	return p, err
 }
 
+// BacktestsAnHour is how many proposals one person backtests again in an
+// hour at most, and the agents acting for them as many again, apart:
+// counted by the changes the ledger keeps, on every replica alike.
+// Lapilli's own are bounded by its work loop.
+const BacktestsAnHour = 20
+
+// BacktestCooldown is how long a proposal backtested again isn't again,
+// by anyone: an incident written down and taken away in its period makes
+// it stale and fresh by turns, and each backtest is twelve weeks replayed.
+const BacktestCooldown = 10 * time.Minute
+
+// ErrTooManyBacktests is a backtest run again past BacktestsAnHour.
+var ErrTooManyBacktests = errors.New("you have backtested as many proposals again in the last hour as anyone may: try again later")
+
+// ErrBacktestedJustNow is a proposal backtested again within
+// BacktestCooldown of the last time.
+var ErrBacktestedJustNow = errors.New("it was backtested again less than ten minutes ago: try again in a few minutes")
+
+// MayBacktestAgain says whether BacktestAgain would refuse a proposal
+// backtested again by a person, or an agent acting for them, now: asked
+// before the work (the rules read again, twelve weeks replayed), so that
+// one refused costs nothing. BacktestAgain asks again as it keeps it.
+func (l *Ledger) MayBacktestAgain(ctx context.Context, id int64, by string, agent bool) error {
+	return backtestable(ctx, l.r, id, FoldName(by), agent, time.Now())
+}
+
+// backtestable is MayBacktestAgain, asked of the ledger or within a write.
+func backtestable(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, id int64, by string, agent bool, now time.Time) error {
+	var last sql.NullInt64
+	if err := q.QueryRowContext(ctx, "SELECT max(at) FROM changes WHERE what = ?", fmt.Sprintf("proposal #%d backtested again", id)).Scan(&last); err != nil {
+		return err
+	}
+	if last.Valid && now.Unix()-last.Int64 < int64(BacktestCooldown/time.Second) {
+		return ErrBacktestedJustNow
+	}
+	if by == Proposer {
+		return nil
+	}
+	rows, err := q.QueryContext(ctx, "SELECT what, after FROM changes WHERE at > ? AND by = ? AND what LIKE 'proposal #%'",
+		now.Add(-time.Hour).Unix(), by)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var what, after string
+		if err := rows.Scan(&what, &after); err != nil {
+			return err
+		}
+		var kept struct {
+			Agent bool `json:"agent"`
+		}
+		if strings.HasSuffix(what, " backtested again") && json.Unmarshal([]byte(after), &kept) == nil && kept.Agent == agent {
+			n++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if n >= BacktestsAnHour {
+		return ErrTooManyBacktests
+	}
+	return nil
+}
+
 // BacktestAgain keeps the evidence of a proposal waiting for approval
 // worked out again, now in place of was: its backtest run again, by who
 // asked for it, or by an agent acting for them (agent). The approvals it
@@ -568,8 +637,9 @@ func (l *Ledger) Move(ctx context.Context, id int64, from []string, to, by strin
 // whether an agent asked and whose approvals were withdrawn: its page's
 // history says so. It is told as proposal.backtested, naming them.
 // ErrMoved when it isn't waiting for approval, or its evidence isn't was
-// any more (backtested again meanwhile). A proposal's own columns are as
-// they were, but for when it moved: no schema of its own.
+// any more (backtested again meanwhile); ErrBacktestedJustNow and
+// ErrTooManyBacktests as MayBacktestAgain says. A proposal's own columns
+// are as they were, but for when it moved: no schema of its own.
 func (l *Ledger) BacktestAgain(ctx context.Context, id int64, by string, agent bool, was, now json.RawMessage, before, after map[string]any) (Proposal, []string, error) {
 	var p Proposal
 	var withdrawn []string
@@ -583,6 +653,9 @@ func (l *Ledger) BacktestAgain(ctx context.Context, id int64, by string, agent b
 		}
 		if p.State != StateProposed || string(p.Evidence) != string(was) {
 			return ErrMoved
+		}
+		if err := backtestable(t.ctx, t, id, by, agent, time.Now()); err != nil {
+			return err
 		}
 		as, err := l.approvals(t.ctx, t, id)
 		if err != nil {
