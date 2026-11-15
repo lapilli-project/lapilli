@@ -250,11 +250,11 @@ is killed, another leads within some 17 seconds; when it stops, within 2.
 
 ```yaml
 serve:
-  config:
+  config: |
     teams:
       - {name: payments, rules: ^Checkout, labels: {team: payments}, tz: Asia/Seoul}
     windows:
-      - {title: Nightly backup, team: payments, start: "2026-11-02T02:00", end: "2026-11-02T03:00", every: day, rules: ^Backup}
+      - {title: Nightly backup, team: payments, start: 2026-11-02T02:00, end: 2026-11-02T03:00, every: day, rules: ^Backup}
     reports:
       - {name: payments weekly, team: payments, schedule: weekly mon@09:00, dests: [team:payments]}
     grants:
@@ -266,29 +266,43 @@ serve:
 `serve.config` declares teams, quiet windows (`windows`), reports and the
 editor roles admins give (`grants`), each with the fields the UI's form for
 it takes (`values.yaml` lists them all), rather than having them made in
-the UI. The chart renders it into a ConfigMap, `FULLNAME-config`, mounted
-as a directory and passed as `--config`; lapilli keeps the ledger holding
-what it says when it starts, and again whenever the file changes, without a
-restart: the kubelet updates the file within a minute or so, and lapilli
-reads it every 15 seconds. With several replicas, the leader alone writes
-it, in one transaction. Each is matched by its name (a team's in any letter
-case, a quiet window's by its title); what the UI made under that name is
-taken over. What `serve.config` declares is marked declared in the UI,
-which doesn't change or delete it, nor does the API: change it here. Taken
-out of `serve.config`, a thing is the UI's again, as it was, unless
-`serve.configPrune` deletes it. A file that can't be used (a key it
-doesn't know, a report to a destination nothing names, a team that isn't
-there) changes nothing: the Settings and Runs pages say why, with the line,
-and the ledger keeps what the file last declared. An admin's `/config.yaml`
-gives everything the ledger holds in this form, declared and made in the
-UI alike, to paste under `serve.config`. Quote what YAML 1.1, which Helm
-reads values by, would read as something else: `"23:00-07:00"`, a label's
-value `"on"` or `"1.10"`; a quiet window's `on` is `repeat_on` for that
-reason.
+the UI. Give it as a text, a block scalar, as above: the chart renders it
+as written. Given as a mapping, Helm reads it as YAML 1.1 first, and
+writes `no`, `off`, `y` as `false` or `true`, `0123` as `83`, `1.10` as
+`1.1`; lapilli refuses a name, a title, a user or a group that reaches it
+as a boolean or a number, and a label's value as a boolean or a fraction,
+but can't tell `83` from `0123`. Times stay as written either way.
 
-`serve.proposalsExpire` closes a proposal that waited for approval longer,
-such as `30d`, as expired, so its rule can have another. Empty, the
-default, keeps it waiting however long.
+The chart renders it into a ConfigMap, `FULLNAME-config`, mounted as a
+directory and passed as `--config`; lapilli keeps the ledger holding what
+it says when a pod starts to lead, and again whenever the file changes,
+without a restart: the kubelet updates the file within a minute or so,
+and lapilli reads it every 15 seconds. With several replicas, the leader
+alone writes it, in one transaction. Each thing is matched by its name (a
+team's in any letter case, a quiet window's by its title); what the UI made
+of the same team under that name is taken over. What `serve.config`
+declares is marked declared in the UI, which doesn't change or delete it,
+nor does the API: change it here. A file that can't be read (YAML that
+isn't, a key it doesn't know, an empty file) changes nothing; a thing in it
+that can't be kept (a report to a destination nothing names, a team that
+isn't there) is kept as it was, and the rest is kept. The Settings and Runs
+pages say what can't, and to an admin why, with the line. An admin's
+`/config.yaml` gives everything the ledger holds in this form, declared
+and made in the UI alike, to paste under `serve.config`.
+
+Taken out of `serve.config`, a thing is the UI's again, as it was. With
+`serve.configPrune`, it is deleted once the same file is read twice in a
+row, so a half-written file read once deletes nothing; but a team that
+something still names (a window, a report, a role, a task, a note) is
+given back to the UI instead. To rename a team in place, keeping what
+names it, give the new `name` with the old as `renamed_from`, and change
+every `team:` that names it, in one change: renamed by its name alone, it
+is another team.
+
+`serve.proposalsExpire` closes a proposal that waited for approval longer
+since it was made, such as `30d`, and that no one approved, as expired, so
+its rule can have another. Empty, the default, keeps it waiting however
+long. Neither goes with `serve.readOnly`, which the chart refuses.
 
 ## Who people are
 

@@ -35,6 +35,12 @@ metadata:
   labels:
     {{- include "lapilli.labels" . | nindent 4 }}
 data:
+  {{- if kindIs "string" .Values.serve.config }}
+  # As written: Helm doesn't read it.
+  config.yaml: |
+    {{- .Values.serve.config | trimSuffix "\n" | nindent 4 }}
+  {{- else }}
   config.yaml: |
     {{- toYaml .Values.serve.config | nindent 4 }}
+  {{- end }}
 {{- end }}

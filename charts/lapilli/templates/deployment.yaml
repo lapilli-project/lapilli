@@ -96,6 +96,9 @@ spec:
             - {{ printf "--user-header=%s" . | quote }}
             {{- end }}
             {{- if $s.readOnly }}
+            {{- if or $s.config $s.proposalsExpire }}
+            {{- fail "serve.readOnly writes nothing: serve.config and serve.proposalsExpire write the ledger" }}
+            {{- end }}
             - --read-only
             {{- end }}
             {{- if $s.config }}

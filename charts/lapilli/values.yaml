@@ -337,48 +337,62 @@ serve:
   # it changes, without a restart (within about a minute and a half, as the
   # kubelet updates the file). What it declares is marked declared in the
   # UI, which doesn't change or delete it: change it here. Matched by name,
-  # a team's in any letter case; what the UI made already under that name
-  # is taken over. A file that can't be used changes nothing: the Settings
-  # and Runs pages say why, and the ledger keeps what it last declared.
+  # a team's in any letter case; what the UI made of the same team under
+  # that name is taken over. A file that can't be read changes nothing; a
+  # thing in it that can't be kept is kept as it was, and the rest is kept.
+  # The Settings and Runs pages say what can't be, and why to admins.
+  #
+  # Give it as a text, a block scalar, as below: lapilli reads it as it is
+  # written. Given as a mapping, Helm reads it first, as YAML 1.1, and
+  # writes it again: no, off, y and n become false and true, 0123 becomes
+  # 83, 1e3 1000, 0x1F 31, 1.10 1.1, and a long number loses its last
+  # digits. lapilli refuses a name, a title, a user, a group or a label's
+  # value it is given as a boolean or a number, but can't tell 83 from
+  # 0123. Times (09:00, 23:00-07:00) stay as written either way.
   # Each thing takes the fields the UI's forms do:
-  #   config:
+  #   config: |
   #     teams:
   #       - name: payments
-  #         rules: ^Checkout        # rules whose names match
+  #         rules: ^Checkout         # rules whose names match
   #         labels: {team: payments} # or whose labels have these values
   #         note: owns checkout and cart
   #         work_hours: mon-fri@09:00-18:00
-  #         sleep_hours: "23:00-07:00"
+  #         sleep_hours: 23:00-07:00
   #         tz: Asia/Seoul
   #         shifts: ""
-  #     windows:                    # quiet windows
+  #         renamed_from: ""         # its name before, to rename it in place
+  #     windows:                     # quiet windows
   #       - title: Nightly backup
-  #         team: payments          # everyone's when left out
-  #         start: 2026-11-02T02:00 # in serve's time zone, or with an offset
+  #         team: payments           # everyone's when left out
+  #         start: 2026-11-02T02:00  # in serve's time zone, or with an offset
   #         end: 2026-11-02T03:00
-  #         every: day              # day, week, month or cron; once when left out
-  #         repeat_on: ""           # month: 15, last, first sat; cron: 0 2 * * 6
-  #         until: 2027-06-30       # the last day one starts; for good when left out
+  #         every: day               # day, week, month or cron; once when left out
+  #         repeat_on: ""            # month: 15, last, first sat; cron: 0 2 * * 6
+  #         until: 2027-06-30        # the last day one starts; for good when left out
   #         rules: ^Backup
   #         labels: {env: [prod, stage]}
   #     reports:
   #       - name: payments weekly
   #         team: payments
   #         schedule: weekly mon@09:00
-  #         span: ""                # a cron schedule's span, such as 24h
-  #         zone: team              # ledger (default) or team
+  #         span: ""                 # a cron schedule's span, such as 24h
+  #         zone: team               # ledger (default) or team
   #         sections: [summary, noise, missed, woken]
-  #         dests: [team:payments]  # names reports.destinations, slack, webhook, team:NAME
+  #         dests: [team:payments]   # names reports.destinations, slack, webhook, team:NAME
   #         enabled: true
-  #     grants:                     # an editor's role, of every team or of one
+  #     grants:                      # an editor's role, of every team or of one
   #       - group: payments-oncall
   #         team: payments
   #       - user: ana@example.com
-  # An admin's GET /config.yaml gives everything the ledger holds in this
+  # An empty file is refused: to declare nothing, give teams: []. An
+  # admin's GET /config.yaml gives everything the ledger holds in this
   # form, declared and made in the UI alike, to paste here.
-  config: {}
-  # Delete what config no longer declares (--config-prune). Off, it is the
-  # UI's again, as it was.
+  config: ""
+  # Delete what config no longer declares (--config-prune), once the file
+  # is read the same twice in a row, 15 seconds apart; but a team what the
+  # UI made names, which is given back to the UI instead. Off, it is the
+  # UI's again, as it was. With it, rename a team with renamed_from: a team
+  # renamed by its name alone is another, and the old one is deleted.
   configPrune: false
   # Close a proposal that waited for approval longer than this, such as 30d,
   # as expired, so its rule takes another (--proposals-expire). Empty keeps

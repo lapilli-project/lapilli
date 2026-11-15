@@ -87,4 +87,64 @@ func TestChartConfig(t *testing.T) {
 		!strings.Contains(out, "serve.configPrune deletes what serve.config no longer declares") {
 		t.Errorf("serve.configPrune alone: %v\n%s", err, out)
 	}
+	for _, set := range []string{"serve.proposalsExpire=30d", "serve.config=teams: []"} {
+		if out, err := helmTemplate(t, append(append([]string{}, serveValues...), "--set", "serve.readOnly=true", "--set", set)...); err == nil ||
+			!strings.Contains(out, "serve.readOnly writes nothing") {
+			t.Errorf("serve.readOnly with %s: %v\n%s", set, err, out)
+		}
+	}
+}
+
+// serve.config given as a text, a block scalar, is rendered as written:
+// Helm, which reads values as YAML 1.1, never reads it, so no becomes no,
+// not false, and 0123 stays 0123. Given as a mapping, what Helm turned into
+// a boolean where a name is wanted is refused, not taken as "false".
+func TestChartConfigText(t *testing.T) {
+	text := "teams:\n  - name: no\n    rules: ^A\ngrants:\n  - user: \"0123\"\n    team: no\n"
+	values := filepath.Join(t.TempDir(), "values.yaml")
+	os.WriteFile(values, []byte("serve:\n  config: |\n"+indent(text, "    ")), 0o644)
+	out, err := helmTemplate(t, append(append([]string{}, serveValues...), "-f", values)...)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if strings.Contains(out, "warning") {
+		t.Errorf("a warning:\n%s", out)
+	}
+	d, err := serve.ParseConfig([]byte(rendered(t, out)), time.UTC)
+	if err != nil || len(d.Teams) != 1 || d.Teams[0].Name != "no" || len(d.Grants) != 1 || d.Grants[0].Who != "user:0123" {
+		t.Errorf("as a text: %+v %v\n%s", d, err, rendered(t, out))
+	}
+	os.WriteFile(values, []byte("serve:\n  config:\n"+indent(text, "    ")), 0o644)
+	out, err = helmTemplate(t, append(append([]string{}, serveValues...), "-f", values)...)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, err := serve.ParseConfig([]byte(rendered(t, out)), time.UTC); err == nil || !strings.Contains(err.Error(), "read as a boolean or a number") {
+		t.Errorf("as a mapping, no read as false: %v\n%s", err, rendered(t, out))
+	}
+}
+
+// rendered is the config.yaml of a render's FULLNAME-config.
+func rendered(t *testing.T, out string) string {
+	t.Helper()
+	for _, doc := range strings.Split(out, "\n---\n") {
+		var cm struct {
+			Kind     string
+			Metadata struct{ Name string }
+			Data     map[string]string
+		}
+		if yaml.Unmarshal([]byte(doc), &cm) == nil && cm.Kind == "ConfigMap" && cm.Metadata.Name == "ops-lapilli-config" {
+			return cm.Data["config.yaml"]
+		}
+	}
+	t.Fatalf("no ops-lapilli-config in:\n%s", out)
+	return ""
+}
+
+func indent(s, by string) string {
+	lines := strings.Split(strings.TrimSuffix(s, "\n"), "\n")
+	for i := range lines {
+		lines[i] = by + lines[i]
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
