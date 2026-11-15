@@ -767,11 +767,12 @@ func prometheus(ctx context.Context, doc map[string]any, rec *[]Recording) ([]Ru
 				return fmt.Sprintf("group %.80q puts its %d labels, %d bytes with what holds them, on each of its %s", group, len(groupLabels), each, what)
 			}
 		}
+		byAlerts, byRecordings := by("alert rules"), by("recording rules")
 		withGroup := func(own map[string]string) (map[string]string, error) {
 			if groupLabels == nil {
 				return own, nil
 			}
-			if err := in.charge(each+labelEntry*len(own), by("recording rules")); err != nil {
+			if err := in.charge(each+labelEntry*len(own), byRecordings); err != nil {
 				return nil, err
 			}
 			l := maps.Clone(groupLabels)
@@ -793,7 +794,7 @@ func prometheus(ctx context.Context, doc map[string]any, rec *[]Recording) ([]Ru
 				continue
 			}
 			if groupLabels != nil {
-				if err := in.charge(each, by("alert rules")); err != nil {
+				if err := in.charge(each, byAlerts); err != nil {
 					return nil, err
 				}
 			}
