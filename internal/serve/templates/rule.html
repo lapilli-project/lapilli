@@ -162,7 +162,7 @@ lands here, and is shown the way to it. */}}
 
 <section class="card about" id="note">
 <h2>{{t "About this rule"}}</h2>
-<p>{{if .Team}}{{t "Owned by %s." .Team}}{{else}}{{t "No team owns it."}}{{end}}
+<p>{{if .Team}}{{t "Owned by %s." .Team}}{{else}}{{t "No team owns it."}}{{end}} {{template "ownwhy" (on $ .Owned)}}
 {{with .Note.Status}} <span class="pill {{.}}">{{t .}}</span>{{end}}
 {{with .Note.Runbook}} · <a href="{{.}}" rel="noopener noreferrer">{{t "Runbook"}}</a>{{end}}</p>
 {{with .FiredOn}}<p>{{if .Owner}}{{tbdi "Its alerts go to %s; most came from what %s owns (%d of %d), in the week of %s." .Owner .Team .Firings .Of (day $loc .Week)}}{{else}}{{tbdi "Its alerts go to no team; most came from what %s owns (%d of %d), in the week of %s." .Team .Firings .Of (day $loc .Week)}}{{end}}</p>{{end}}

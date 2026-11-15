@@ -36,6 +36,8 @@
 <div class="head"><h1>{{$title}}</h1>{{template "action" (mainAction $ "Add a team" (not $ro) "admin" "")}}</div>
 <p class="lede">{{t "A team owns the rules whose names match its pattern, or whose labels have its values, and the incidents with those values. A rule's own note can name its team instead. The overview, the rules and the tasks can be shown for one team."}}</p>
 {{if $.Status.RolesKept}}<p><a href="{{$.Link "/roles"}}">{{t "Roles: who may change what, and a team's own editors"}}</a></p>{{end}}
+{{with .Made}}{{template "teamsmade" .}}{{end}}
+{{if .Suggested.Lines}}{{template "teamsuggest" (on $ .Suggested)}}{{end}}
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Rules matching"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "Hours"}}</th><th scope="col" class="n">{{t "Rules owned"}}</th><th scope="col" class="n">{{t "Open tasks"}}</th><td></td></tr></thead>
 <tbody>{{range .Lines}}<tr>
@@ -222,7 +224,7 @@ first, so that Enter in a field writes nothing. */}}
 <div class="scroll"><table>
 <tbody><tr><th scope="row">{{t "admin"}}</th><td>{{join .Admins ", "}}</td></tr>
 <tr><th scope="row">{{t "editor"}}</th><td>{{or (join .Editors ", ") "–"}}</td></tr>
-<tr><th scope="row">{{t "approver"}}</th><td>{{or (join .Approvers ", ") "–"}}</td></tr></tbody>
+<tr><th scope="row">{{t "approver"}}</th><td>{{template "approvers" .Approvers}}</td></tr></tbody>
 </table></div>
 <h2>{{t "Given here"}}</h2>
 <div class="scroll"><table>

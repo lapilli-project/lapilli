@@ -100,6 +100,7 @@
 <h2>{{t "Approval"}}</h2>
 <p>{{if eq .Need 1}}{{t "%d of 1 approval" .Have}}{{else}}{{t "%d of %d approvals" .Have .Need}}{{end}}{{if eq .Kind "undo"}} <span class="quiet">{{t "An undo is approved by the approver who asks for it."}}</span>{{end}}</p>
 {{if .Approvals}}<ul class="plain">{{range .Approvals}}<li>{{who .By}}, {{at $loc .At}}</li>{{end}}</ul>{{end}}
+{{with .MayApprove}}{{template "mayapprove" .}}{{end}}
 {{if .CanApprove}}<form method="post" action="/proposals/{{.ID}}/approve"><input type="hidden" name="key" value="{{.Approve}}">
   <p><label><input type="checkbox" name="read" value="1" required> {{t .Read}}</label></p>
   <button>{{if eq .Need 2}}{{t "Approve (%d of %d)" .Next .Need}}{{else}}{{t "Approve"}}{{end}}</button>

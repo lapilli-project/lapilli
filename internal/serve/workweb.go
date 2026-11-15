@@ -27,6 +27,7 @@ func (s *Server) workRoutes(mux *http.ServeMux, page func(string, func(*http.Req
 
 	mux.HandleFunc("POST /teams", s.admin(s.postTeam))
 	mux.HandleFunc("POST /teams/{id}/delete", s.admin(s.deleteTeam))
+	mux.HandleFunc("POST /teams/suggested", s.admin(s.postSuggested))
 	mux.HandleFunc("POST /notes", s.teamWrite(s.postNote))
 	mux.HandleFunc("POST /windows", s.teamWrite(s.postWindow))
 	mux.HandleFunc("POST /windows/{id}/delete", s.teamWrite(s.deleteWindow))
@@ -89,6 +90,10 @@ type teamsView struct {
 	Lines  []teamLine
 	Edit   *teamLine
 	Server string // the server's hours
+	// Suggested are the teams the rules' labels suggest; Made, what making
+	// them did, from the query.
+	Suggested teamSuggestions
+	Made      *teamsMade
 }
 
 func (s *Server) teamsPage(r *http.Request) (any, error) {
@@ -107,7 +112,7 @@ func (s *Server) teamsPage(r *http.Request) (any, error) {
 	}
 	lg := lang(r)
 	sc := o.schedules(opts.Hours)
-	v := teamsView{Server: hoursLine(lg, opts.Hours)}
+	v := teamsView{Server: hoursLine(lg, opts.Hours), Suggested: s.suggestTeams(o), Made: teamsMadeOf(r.URL.Query(), o, s.user(r))}
 	for _, t := range o.teams {
 		l := teamLine{Team: t, Labels: labelText(t.Labels)}
 		if h := sc.team[t.ID]; h != nil {

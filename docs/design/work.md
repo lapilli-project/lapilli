@@ -80,12 +80,19 @@ judged again beside 500 that cover nothing in the week, 58 ms
 
 A rule's note can name its team. Otherwise the first team, by name, whose
 pattern matches the rule's name owns it; or, when none does, the first whose
-labels the rule has (as the latest version of the rules gives them). The
+labels the rule has (as the latest version of the rules gives them, its
+own over its group's, as its alerts carry them; a recorded rule's, those
+all its alerts have). The
 rule's name decides before its labels since
 [serveops.md](serveops.md), so a team that owns by labels can't take a rule
 another team's pattern names. A team owns an incident it has a
 label value of, or that one of its rules caught. Owners are worked out once
-per change to the ledger and kept until the next.
+per change to the ledger and kept until the next. A rule's page says which
+of these found its team, or that none did; and the Teams page suggests a
+team for each value of a `team`, `owner` or `squad` label
+(`--team-labels`) on rules no team owns, which an admin makes with one
+button, but none that would take another team's rules or reads as another
+team's name ([ui.md](ui.md), "First use").
 
 ## Roles
 
@@ -135,8 +142,10 @@ kept, unsent, until it is pruned with the rest after `--keep`. A notice can
 come twice (taken by a receiver that answered too late) and, once one has
 been tried again, out of order: the webhook's `id`, also its
 `Idempotency-Key` header, is the same each time it is sent, and `at` is
-when it happened. Sending changes nothing a page shows, so it doesn't empty the
-cache. `/metrics` gives `lapilli_serve_notices_total{to,result}` and
+when it happened. Sending changes nothing a page kept shows, so it doesn't
+empty the cache: the Manage and Settings pages, which say where notices go,
+when the outbox last sent and how many of the last day's failed, are worked
+out for each request instead ([ui.md](ui.md), "First use"). `/metrics` gives `lapilli_serve_notices_total{to,result}` and
 `lapilli_serve_notices_unsent`. The webhook's and Slack's URLs are read
 from files, never shown, and no redirect is followed.
 

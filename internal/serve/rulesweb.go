@@ -103,6 +103,8 @@ type rulesList struct {
 	Clear  string
 	Active bool
 	Empty  *emptyView
+	// Teamless is, where no team is kept, how many the labels suggest.
+	Teamless *teamless
 	// Legend is what each badge means, facet by facet.
 	Legend []legendGroup
 	// Bulk is the form that does something with the rules picked.
@@ -658,6 +660,9 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		}
 	case v.Shown == 0:
 		v.Empty = &emptyView{Kind: "notfound", Title: "No rule fired in these weeks."}
+	}
+	if len(v.Rows) > 0 { // what it says is of the table's Team column
+		v.Teamless = s.teamlessOf(d.own)
 	}
 	return v, nil
 }

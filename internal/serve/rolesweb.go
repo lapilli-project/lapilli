@@ -43,11 +43,13 @@ type roleLine struct {
 
 type rolesView struct {
 	Kept bool // roles can be given here
-	// The flags' lists, which the UI doesn't change.
-	Admins, Editors, Approvers []string
-	Lines                      []roleLine
-	Teams                      []ledger.Team
-	Most                       int
+	// The flags' lists, which the UI doesn't change, and who may approve
+	// a change in effect.
+	Admins, Editors []string
+	Approvers       approversIn
+	Lines           []roleLine
+	Teams           []ledger.Team
+	Most            int
 }
 
 // roleLines are the roles given in the UI, with their teams' names.
@@ -75,11 +77,7 @@ func (s *Server) rolesPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	approvers := s.cfg.Approvers
-	if len(approvers) == 0 && s.cfg.Changes {
-		approvers = []string{"(" + tr(lang(r), "the admins") + ")"}
-	}
-	return rolesView{Kept: s.rolesKept(), Admins: s.cfg.Admins, Editors: s.cfg.Editors, Approvers: approvers, Lines: lines, Teams: teams,
+	return rolesView{Kept: s.rolesKept(), Admins: s.cfg.Admins, Editors: s.cfg.Editors, Approvers: s.approversIn(), Lines: lines, Teams: teams,
 		Most: ledger.MaxGrants}, nil
 }
 

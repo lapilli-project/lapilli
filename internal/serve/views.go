@@ -897,8 +897,9 @@ type ruleView struct {
 	Known   bool
 	Note    ledger.Note
 	Teams   []ledger.Team
-	// TeamID is the team that owns it, 0 for none.
+	// TeamID is the team that owns it, 0 for none; Owned, how it was found.
 	TeamID   int64
+	Owned    ownedView
 	Statuses []string
 	Tasks    []taskLine
 	Comments commentsView
@@ -1141,6 +1142,7 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 		return ruleView{}, err
 	}
 	v.Team, v.TeamID, v.Note, v.Teams, v.Statuses = o.teamOf(name), o.rule[name], o.notes[name], o.teams, ledger.Statuses
+	v.Owned = s.ownedOf(o, name)
 	v.Status = v.Note.Status
 	ts, err := s.l.Tasks(ctx, ledger.TaskQuery{Rule: name, Limit: 50})
 	if err != nil {
@@ -1585,6 +1587,7 @@ type settingsView struct {
 	Settings []settingView
 	Changes  []ledger.Change
 	Try      *tryView
+	Notify   *notifyStatus `json:"-"` // the page's alone
 }
 
 func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
@@ -1619,6 +1622,9 @@ func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
 func (s *Server) settingsPage(r *http.Request) (any, error) {
 	v, err := s.settingsView(r.Context())
 	if err != nil {
+		return nil, err
+	}
+	if v.Notify, err = s.notifyStatus(r.Context(), lang(r)); err != nil {
 		return nil, err
 	}
 	if r.URL.Query().Get("try") == "" {
@@ -1821,7 +1827,7 @@ var funcs = template.FuncMap{
 	// a ruler's namespace, with what turns text around as U+FFFD.
 	"shown": rules.Shown,
 	"who":   func(by string) string { return by }, // likewise
-	"dur":   verdict.Duration,
+	"dur":   shownDur,
 	"delay": verdict.Delay,
 	"path":  url.PathEscape,
 	"join":  strings.Join,

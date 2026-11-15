@@ -1762,7 +1762,9 @@ func (s *Server) postDigest(ctx context.Context, in digestIn, week string, from,
 	}
 	pctx, pcancel := s.posted(ctx)
 	defer pcancel()
-	return s.l.SetMeta(pctx, "digest-sent", week)
+	// digest-sent is set for a week passed over too; digest-posted, for a
+	// week posted alone, which the pages say.
+	return errors.Join(s.l.SetMeta(pctx, "digest-sent", week), s.l.SetMeta(pctx, "digest-posted", week))
 }
 
 // digestClaim is how long a replica holds the digest's post for itself.

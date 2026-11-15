@@ -1,6 +1,7 @@
 {{define "rules"}}{{$title := t "Rules"}}{{template "top" (titled . $title)}}{{with .View}}
 <div class="head"><h1>{{$title}}</h1><p class="of">{{t "%d of %d rules" .Shown .Total}}</p></div>
 <p class="lede">{{if .Week}}{{t "Each rule's stones in the week of %s, the noisiest first." .Week}}{{else if eq .Weeks 1}}{{t "Each rule's stones over the last week, the noisiest first."}}{{else}}{{t "Each rule's stones over the last %d weeks, the noisiest first." .Weeks}}{{end}}</p>
+{{with .Teamless}}{{template "teamless" (on $ .)}}{{end}}
 {{if and .Empty (eq .Empty.Kind "first")}}{{template "empty" .Empty}}{{else}}
 <div class="rules-body">
 <aside class="facets-side" aria-label="{{t "Filters"}}">{{template "facets" (on $ "side")}}</aside>

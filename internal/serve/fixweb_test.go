@@ -303,10 +303,10 @@ func TestPreviewAccessible(t *testing.T) {
 	pageA11y(t, mux, "", a11yPreviews(mux, s)...)
 }
 
-// TestManagePage: /manage has a card for each of the Manage group's pages
-// and the reports, each with what it is for, Roles for admins alone; the
-// sidebar's Manage links to it, with the page context; and the Manage
-// pages' breadcrumbs start with it.
+// TestManagePage: /manage has a card for each of the Manage group's pages,
+// the reports and the notifications, each with what it is for, Roles for
+// admins alone; the sidebar's Manage links to it, with the page context;
+// and the Manage pages' breadcrumbs start with it.
 func TestManagePage(t *testing.T) {
 	s, _, _ := rolesServer(t, nil)
 	h := s.Handler()
@@ -318,10 +318,10 @@ func TestManagePage(t *testing.T) {
 		}
 		return out
 	}
-	if got, want := cards("boss@example.com"), []string{"/teams Teams", "/roles Roles", "/settings Settings", "/runs Runs", "/reports Reports"}; !slices.Equal(got, want) {
+	if got, want := cards("boss@example.com"), []string{"/teams Teams", "/roles Roles", "/settings Settings", "/runs Runs", "/reports Reports", "/settings#notifications Notifications"}; !slices.Equal(got, want) {
 		t.Errorf("an admin's cards: %q, want %q", got, want)
 	}
-	if got, want := cards("ed@example.com"), []string{"/teams Teams", "/settings Settings", "/runs Runs", "/reports Reports"}; !slices.Equal(got, want) {
+	if got, want := cards("ed@example.com"), []string{"/teams Teams", "/settings Settings", "/runs Runs", "/reports Reports", "/settings#notifications Notifications"}; !slices.Equal(got, want) {
 		t.Errorf("an editor's cards: %q, want %q", got, want)
 	}
 	_, body := as(t, h, http.MethodGet, "/manage?team=payments", "ed@example.com", "", nil)

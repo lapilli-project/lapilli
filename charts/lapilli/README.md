@@ -61,7 +61,9 @@ the runs find:
 It speaks English, Spanish, Japanese and Korean (`serve.notify.lang` picks
 what it posts in: `en`, `es`, `ja` or `ko`).
 
-`serve.teamDigests` posts a team its own weekly digest. `serve.reports.destinations`
+`serve.teamDigests` posts a team its own weekly digest. `serve.teamLabels`
+names the labels whose values the Teams page suggests as teams (`team`,
+`owner` and `squad` when empty). `serve.reports.destinations`
 names the Slack-style webhooks, each in a Secret, that the reports people
 schedule in the UI can go to; the UI picks among the names, never takes a URL. `serve.incidentsAPI`
 opens a port that takes incidents, and does nothing else, from a job holding a

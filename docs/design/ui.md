@@ -4,12 +4,13 @@ Status: phases 1 and 2 in v0.35.0; phase 3, a rule's page, in v0.37.0;
 phase 4, the way to change things, in v0.38.0; phase 5, many at once and
 ways in, in v0.39.0; the two items left after it (a proposal for the rules
 picked, a rule's labels as chips on the list), with the rules table made to
-fit a laptop's screen, built, unreleased. This is how the pages are put
-together: the frame every page has, the team and period carried from page
-to page, the search, the rules list and its filters, a rule's page, the
-way to change things (a proposal's page, the lists' facets, a quiet
-window's preview, the Manage page), what can be done to many at once and
-the ways from a number to what makes it, and what is left.
+fit a laptop's screen, in v0.40.0; first use (bundle 20), built,
+unreleased. This is how the pages are put together: the frame every page
+has, the team and period carried from page to page, the search, the rules
+list and its filters, a rule's page, the way to change things (a
+proposal's page, the lists' facets, a quiet window's preview, the Manage
+page), what can be done to many at once and the ways from a number to what
+makes it, what a first-time reader would get stuck on, and what is left.
 [serve.md](serve.md) says what each page shows;
 [access.md](access.md) how the pages meet WCAG 2.2 AA.
 
@@ -788,8 +789,9 @@ nothing.
 (their recipients and the weekly digest), each with a line on what it is
 for and, where cheap, a fact (how many teams, how many reports, how far
 the firings are in): Teams, Roles (admins only, as in the sidebar),
-Settings, Runs, Reports. The sidebar's Manage links to it, and the
-breadcrumbs of its pages start with it.
+Settings, Runs, Reports, and where notices go (below, "First use"). The
+sidebar's Manage links to it, and the breadcrumbs of its pages start with
+it.
 
 ### What they cost
 
@@ -1105,6 +1107,171 @@ says the date with each time. The rows are a table, a rule's name in a
 row header and its firings an SVG on the shared axis; the same numbers,
 and when each firing started, are a table in a `<details>` under it.
 
+## First use
+
+Bundle 20, from a real deployment used as a first-time reader would: 62
+rules saying whose each is in a `team` label of four values, no team in the
+ledger, no incident, one admin, and nowhere to send a notice. Each page
+below said nothing of what was missing, or said it so that the reader
+couldn't act on it. The blocks are templates of their own
+(`templates/firstuse.html`), drawn by the pages they are on.
+
+### Teams the rules' labels suggest
+
+The Teams page lists, under "Teams these rules' labels suggest"
+(`#suggested`), each value of a label `--team-labels` names (`team`,
+`owner`, `squad` unless given; label names, eight at most; the chart's
+`serve.teamLabels`) on the rules no team owns, as `key=value` in `<bdi>`,
+with how many of them it would own (`suggestTeams`). Always from the rules
+in effect and those recorded elsewhere, with the labels `owners` matches
+them by (a rule's own over its group's); nothing is kept.
+
+- Only the rules no team owns, by a note, a name pattern or labels, are
+  counted. Each goes to the first team made, by name, whose label it has;
+  one that would own nothing isn't suggested. The counts are worked out
+  over every value before the fifty (`maxSuggested`) with the most are
+  kept and the rest counted.
+- A value under two of those labels is one team, by the label named first.
+  A value longer than a team's name (64 bytes) is counted, before anything
+  is made of it, and left out.
+- "Make these teams" makes a value into a team only when nothing says
+  not to, and each line it doesn't make says why: a team of its name is
+  there, in any case (giving it the label owns these rules only when it
+  owns by that label alone or by none, as a team owns the rules with all
+  of its labels; otherwise the page says to name it in the rules' notes),
+  with a link to change it for an admin; its label is on rules another
+  team owns now, which a team made of it, first by name, would take with
+  their editors, windows and digest; or it isn't a plain lowercase name
+  (`^[a-z0-9][a-z0-9._-]{0,62}$`): `pаyments`, its а Cyrillic, beside
+  `payments`, or `Web` beside `web`, reads as another team's, and is made
+  by hand.
+- "Make these teams" is a POST to `/teams/suggested`, an admin's on the
+  server (`s.admin`) and from the same site, as every form. It works the
+  suggestions out again, and makes those it says it makes as the team form
+  does (its name the value, its labels the label), passing over one whose
+  name, in any case, is a team's in the teams read in the request, not in
+  the owners kept for the ledger's generation, which another request or a
+  replica behind may have made meanwhile (`teams.name`'s UNIQUE is in
+  case; one in any case is the schema's, for bundle 22). The page it goes
+  back to names the teams made, by their ids in its query (`made`, fifty
+  at most), those alone that are there and the reader made or changed in
+  the last ten minutes (a team keeps who changed it last and when, not who
+  made it), as a bulk proposal's result does: a link can't make it say
+  more. Anyone else sees the button disabled, with why (`off`, "Admins
+  only").
+
+With no team at all, the rules list says, under its lede, why its Team
+column is empty, with a link to the teams suggested, or to the form to add
+one when none is; only when it has a table, not before the first run.
+
+### Why a rule is a team's
+
+A rule's "About this rule" says how its team was found, after whose it is:
+by its note; its name matching a team's pattern (the team and the pattern
+named); its labels having a team's (the labels named); or that no team's
+name pattern or labels match it, with the link above when there is no team.
+`ownWalk` finds it as `owners` does, the note, then the patterns, then the
+labels, each team in name order; `TestTeamsSuggestedAsOwnersWould` holds it
+to `owners` for every rule. The rules list's Team cell is as it was: the
+reason doesn't fit the table at 1280 px, and a visually hidden one would
+tell a screen reader what no one else is told.
+
+### Who may approve
+
+The Roles page's approver row says who may approve a change in effect
+(`approversIn`): those `--approvers` names, or the admins, named, as
+`--approvers` isn't given; or no one, as changes are off, lapilli serve is
+read-only, or neither list is given. It said "(the admins)" before,
+changes on or off.
+
+A proposal waiting for approval says who may approve it, in its approval
+panel (`mayApproveOf`), to an admin, who reads the flags on the Roles page:
+those, but the one it was made by or for (an agent's proposal is the
+person's it acted for) and those who approved it, named. When fewer are
+left than the approvals it needs, and none of them may be anyone (a group,
+a domain, everyone, or a name with neither `user:` nor `group:`, which
+`listed` takes for a group of that name too), it says so as a warning, and
+what to change: "No one may approve it: only the admins approve, as
+--approvers isn't given, and the only admin is the one it was made by or
+for. Give --approvers to name who else may." Anyone else, an anonymous
+reader among them, reads only "Who may approve it: an approver other than
+the one it was made by or for", or, stuck, "No one can approve this yet;
+an admin sees why on the Roles page": whether `--approvers` is given, who
+the admins are and whether its maker is the only one are an admin's to
+read. With changes off, the disabled Approve says so already, and nothing
+more is said. Who may approve is as it was (`approver`).
+
+### Where notices go
+
+The Manage page has a Notifications card, and the Settings page a section
+of that name (`#notifications`): where what happens is told (the webhook,
+Slack, or nowhere), how many places reports can go to by name and how many
+teams have a digest of their own, when the weekly digest goes ("Mondays
+09:00", "매주 월요일 09:00": `weeklyText`) and to how many places that are
+there, set by the flags or on the Reports page, how many reports are on,
+when the outbox last sent a notice, how many notices made in the last
+day failed their last try and wait to be tried again, of the latest 1,000
+waiting a place has (`ledger.FailedCounted`; past those, "More than 1000
+notices wait to be sent", not a count it didn't read), and, apart, how
+many made in the last day were given up on, after ten tries, of the
+latest 1,000 given up: given up on are next tried never, and read with
+the rest they came first, so that a place given up on long ago hid the
+day's failures. The digest posts to Slack itself, not through the outbox:
+the last week posted (`digest-posted`, set by a post alone; a week passed
+over, while the digest is off or newly set, sets `digest-sent` alone, and
+a ledger that knows only that says "went to Slack or was passed over")
+and a later week whose digest failed, worked out or posted (a digest
+run's error, `ledger.LastFailed`), are read from the ledger, the same on
+every replica and after a restart (`digestPosted`). Counts and kinds,
+never a URL. The weekly digest on with nowhere to go, its last post
+to Slack failed, a report on whose places are all gone, and failures are
+each a sentence with a sign (`p.warn`), never a colour alone: in full on
+the Settings page, with the way out (for a digest the flags set, the
+flags or the Reports page, as it never goes to a `--report-dest` by
+itself; for one set there, another place there); in a line on the card
+("The weekly digest goes nowhere.").
+
+It is read from the flags, the reports, the runs and the outbox
+(`ledger.Standing`: a place's last send by the outbox's index on its place
+and when each was sent; its waiting notices and its given up by the same
+index, each a range of it read backward from its end, ordered by when each
+was sent and when it is next tried, 1,001 rows at most, however many
+there are, which `EXPLAIN` holds to on SQLite and on Postgres: ordered by
+the next try alone, Postgres read and sorted them all), nothing kept for
+it. A notice sent is written
+aside, emptying no page kept, so these two
+pages are worked out for each request (`freshPage`, `Cache-Control:
+no-store`), the Settings page but when it tries settings on the last week.
+
+### The firings, a day with some
+
+`/firings` with no `day=` opens the last day with firings in the twelve
+weeks the pages show, of the rule and of those that caught nothing when
+asked (`lastFiringDay`: one firing read, the latest), and says once that it
+is "the last day with firings"; with none, today, and says so. The labels
+picked aren't looked for in choosing it. With `day=`, and the links and
+canonical URLs, as before.
+
+### Times, and Korean
+
+A time a page shows (`dur`, `shownDur`) is rounded as a person reads one:
+under a tenth of a second to the millisecond, under a minute to a tenth of
+a second ("The last run took 3.4s."), longer to the second; a rule's `for`,
+whole minutes, is as it was. The API and MCP answer as they did.
+
+The Korean texts say 정탐 (○), 오탐 (●) and 면제, never the stones the
+English names them by (돌, 흰 돌, 검은 돌); `TestKoreanSaysNoStones` fails
+on one, read as a noun with what Korean puts after it (돌이면, 돌까지,
+돌처럼, 돌이지만, 돌은요, 돌(○)), and not on the verbs that hold the
+syllable (돌아가기, 되돌리기, 돌 수, 돌 때).
+
+`TestA11yServe` serves a first-time user's deployment under `/first`
+(`firstUseServer`: labelled rules and no team, changes on and the only
+admin's proposal waiting, nowhere to send a notice, a report going
+nowhere), so that `test/a11y/axe.mjs` checks these pages too;
+`TestFirstUseAccessible` holds them to what `TestPagesAccessible` holds
+every page to.
+
 ## Without a script
 
 | Elsewhere | Here |
@@ -1129,4 +1296,6 @@ and when each firing started, are a table in a `<details>` under it.
 
 Nothing of what the phases set out: the last two (the overview's table of
 the weeks on a laptop's screen, a rule's header drawn by the `off`
-template) went out in 0.40.1. New work starts from ROADMAP.md.
+template) went out in 0.40.1. Of first use, the rules list's Team cell
+doesn't say how its team was found (above). New work starts from
+ROADMAP.md.

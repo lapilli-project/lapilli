@@ -22,6 +22,8 @@ type owners struct {
 	rule   map[string]int64 // rule name to team id
 	notes  map[string]ledger.Note
 	labels []map[string][]string // each team's labels, in teams' order
+	// ruleLabels are each rule's labels, as its team was found by them.
+	ruleLabels map[string]map[string]string
 	// sched are the schedules worked out last, and the server's hours they
 	// were worked out with.
 	schedMu  sync.Mutex
@@ -66,8 +68,10 @@ func (s *Server) owners(ctx context.Context) (*owners, error) {
 		}
 		o.labels = append(o.labels, t.Labels)
 	}
-	// The rules' labels, from the latest version of them; a recorded
-	// rule's, those all its alerts have alike.
+	// The rules' labels, from the latest version of them, its group's
+	// with its own, as its alerts carry them, its chips show them and
+	// label: matches them; a recorded rule's, those all its alerts have
+	// alike.
 	shared, err := s.l.SharedLabels(ctx)
 	if err != nil {
 		return nil, err
@@ -76,9 +80,13 @@ func (s *Server) owners(ctx context.Context) (*owners, error) {
 	if s.replaying() {
 		if vs, err := s.versions(ctx, s.now(), s.now()); err == nil && len(vs) > 0 {
 			for _, r := range vs[len(vs)-1].Rules {
-				labels[r.Name] = r.Labels
+				labels[r.Name] = r.AlertLabels()
 			}
 		}
+	}
+	o.ruleLabels = make(map[string]map[string]string, len(table))
+	for _, r := range table {
+		o.ruleLabels[r.Name] = labels[r.Name]
 	}
 	for _, r := range table {
 		if n, ok := notes[r.Name]; ok && n.TeamID != 0 {

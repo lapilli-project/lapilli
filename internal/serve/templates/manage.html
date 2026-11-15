@@ -5,5 +5,6 @@
   <h2><a href="{{$.Link .Href}}">{{t .Name}}</a></h2>
   <p>{{t .About}}</p>
   {{if .Fact}}<p class="quiet">{{if .At.IsZero}}{{if and .One (eq .N 1)}}{{t .One}}{{else}}{{t .Fact .N}}{{end}}{{else}}{{t .Fact (at $loc .At)}}{{end}}</p>{{end}}
-</li>{{end}}</ul>
+</li>{{end}}
+{{with .Notify}}{{template "notifycard" (on $ .)}}{{end}}</ul>
 {{end}}{{template "bottom" .}}{{end}}

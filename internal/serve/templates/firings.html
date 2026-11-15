@@ -1,5 +1,6 @@
 {{define "firings"}}{{$title := t "Firings, %s" .View.Day}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}{{$b := .Bulk}}
 <h1>{{$title}}</h1>
+{{if .Said.Latest}}<p class="lede">{{t "The last day with firings."}}</p>{{else if .Said.None}}<p class="lede">{{t "No firing to show in the last twelve weeks."}}</p>{{end}}
 <form method="get" action="/firings" class="row">{{range $.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
   <label>{{t "Day"}} <input name="day" type="date" value="{{.Day}}"></label>
   <label>{{t "Rule"}} <input name="rule" value="{{.Rule}}"></label>

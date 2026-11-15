@@ -1313,7 +1313,10 @@ the pages, worked out afresh over 200,000 firings, 1 to 21 ms.
 It isn't only to look at. Teams own rules (by a note, a name pattern, or
 labels, in that order: a team that owns by labels can't take a rule another
 team's pattern names) and incidents, so the dashboard, the rules and the tasks can be shown for
-one team. A rule keeps a note: its team, whether to keep, tune or retire
+one team. Rules that say whose they are in a label (`team`, `owner`,
+`squad`, or those `--team-labels` names) make their teams with one press:
+the Teams page suggests one for each value on rules no team owns, and a
+rule's page says how its team was found. A rule keeps a note: its team, whether to keep, tune or retire
 it, its runbook. A quiet window (a deploy, maintenance, a load test)
 excuses the firings in it that caught nothing, so expected noise doesn't
 weigh on a rule's precision. A suggestion on the dashboard becomes a task

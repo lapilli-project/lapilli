@@ -17,6 +17,8 @@
 <p>{{if not $.Status.ChangesOn}}{{t "Off: proposals are kept, and nothing is applied. Turned on with --changes."}}{{else if $.Status.ChangesPaused}}{{t "On, and paused."}}{{else}}{{t "On."}}{{end}} <a href="{{$.Link "/proposals"}}">{{t "Proposals"}}</a></p>
 {{if and $.Status.ChangesOn $.Status.Admin}}<form method="post" action="/settings/changes">{{if $.Status.ChangesPaused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>{{else if $.Status.ChangesOn}}<p>{{if $.Status.ChangesPaused}}{{template "off" (offOf $ "Resume changes" "admin" "pause-why")}}{{else}}{{template "off" (offOf $ "Pause changes" "admin" "pause-why")}}{{end}}</p>{{end}}
 
+{{with .Notify}}{{template "notifystatus" (on $ .)}}{{end}}
+
 {{with .Try}}
 <h2>{{t "Tried on %s → %s" (at $loc .From) (at $loc .To)}}</h2>
 {{if .Same}}<p>{{t "Nothing would change."}}</p>{{end}}

@@ -202,7 +202,10 @@ Always a person, in the UI.
 - **Who.** A new role, approver, given by `--approvers` (users and groups,
   as `--editors` and `--admins` are); admins are approvers unless
   `--approvers` says otherwise. An editor or an agent proposes; an approver
-  approves.
+  approves. As built, the Roles page says who may approve, and a
+  proposal's page, to an admin, who may approve it, and, when only the one
+  it was made by or for could, that no one may and what to give; anyone
+  else reads that no one can yet ([ui.md](ui.md), "First use").
 - **Two people,** with `--approvals 2`: the second approval must be another
   person's, and no one approves their own proposal. An undo of an applied
   change is the exception, as built: it is approved by the one approver
