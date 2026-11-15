@@ -293,7 +293,7 @@ func TestDuplicate(t *testing.T) {
 
 func TestShortRange(t *testing.T) {
 	r := good("Rate")
-	r.For = time.Minute // shorter than its increase's range: TestForOutlasts has one that isn't
+	r.For = 30 * time.Second // shorter than its counts' ranges: TestForOutlasts has one that isn't
 	r.Expr = `rate(x[1m]) > 0 and increase(y[ 5m ]) > 0 and rate(z[1m:15s]) > 0 and irate(w[90s]) > 1`
 	one(t, r, Options{Scrape: time.Minute}, ShortRange+":rate[1m] < 2 × 1m", ShortRange+":irate[90s] < 2 × 1m")
 	// Not known, not checked.

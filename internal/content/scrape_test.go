@@ -107,12 +107,12 @@ func TestShortRangeByJob(t *testing.T) {
 		{`rate(x{other="job", z="batch"}[1m]) > 0`, nil},
 	} {
 		r := good("R")
-		r.Expr, r.For = c.expr, time.Minute // shorter than an increase's range (TestForOutlasts)
+		r.Expr, r.For = c.expr, 10*time.Second // shorter than its counts' ranges (TestForOutlasts)
 		one(t, r, o, c.want...)
 	}
 	// Every job scraped alike: that interval, whatever the global says.
 	r := good("R")
-	r.Expr = `rate(x[40s]) > 0`
+	r.Expr, r.For = `rate(x[40s]) > 0`, 10*time.Second
 	one(t, r, Options{Scrape: 30 * time.Second, Jobs: map[string]time.Duration{"a": 15 * time.Second, "b": 15 * time.Second}})
 	one(t, r, Options{Scrape: 30 * time.Second, Jobs: map[string]time.Duration{"a": 15 * time.Second, "b": time.Minute}}, ShortRange+":rate[40s] < 2 × 30s")
 }
