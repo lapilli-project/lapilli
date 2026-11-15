@@ -72,8 +72,8 @@ func a11yServer(t *testing.T) (*Server, []string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s, append(slices.Clone(pagePaths), "/proposals", "/proposals?state=all", "/proposals/1", "/rules/Nothing",
-		"/proposals/"+strconv.FormatInt(id, 10), "/proposals/"+strconv.FormatInt(undo, 10))
+	return s, append(append(slices.Clone(pagePaths), "/proposals", "/proposals?state=all", "/proposals/1", "/rules/Nothing",
+		"/proposals/"+strconv.FormatInt(id, 10), "/proposals/"+strconv.FormatInt(undo, 10)), declaredPages(t, s)...)
 }
 
 // longNames are rules named as a real set's can be: long, in one word,
