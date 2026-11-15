@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -190,5 +191,34 @@ func TestBulkProposeNothingPicked(t *testing.T) {
 	code, _, hd := postAs(t, s.Handler(), "/rules/bulk", url.Values{"do": {"propose"}, "propose": {"bogus"}, "back": {"/rules"}}, bo, "same-origin")
 	if res := bulkOf(mustQuery(t, hd.Get("Location"))); code != http.StatusSeeOther || res == nil || !res.None {
 		t.Errorf("%d %s", code, hd.Get("Location"))
+	}
+}
+
+// TestProposalsPickedNone: the proposals list asked for proposals by id
+// that aren't there says so, with a way out, not that there are none.
+func TestProposalsPickedNone(t *testing.T) {
+	s, _ := changesServer(t, nil)
+	_, body := getAs(t, s.Handler(), "/proposals?state=all&id=999999", bo)
+	if !strings.Contains(body, "None of the proposals picked is here.") || !strings.Contains(body, `>Clear filters</a>`) || strings.Contains(body, "No proposals yet.") {
+		t.Error("the proposals picked, not there, aren't said so")
+	}
+}
+
+// TestLanguagesWhole: each language's name at the sidebar's foot is kept
+// whole, as the stylesheet says: 한국어 wasn't, broken between its
+// syllables where the sidebar is narrow.
+func TestLanguagesWhole(t *testing.T) {
+	css, err := files.ReadFile("static/lapilli.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`\.langs a, \.langs strong \{[^}]*white-space:\s*nowrap`).Match(css) {
+		t.Error("a language's name may be broken")
+	}
+	_, body := getAs(t, pagesServer(t).Handler(), "/", "")
+	for _, w := range []string{`class="langs"`, `lang="ko" hreflang="ko">한국어</a>`} {
+		if !strings.Contains(body, w) {
+			t.Errorf("no %s", w)
+		}
 	}
 }

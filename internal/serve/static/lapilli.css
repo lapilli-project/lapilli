@@ -279,6 +279,9 @@ table.heat td.hc { height: 1.7rem; border-radius: 5px; }
   h1 { font-size: 2rem; }
 }
 .langs { font-size: .95rem; color: var(--dim); }
+/* A language's name is kept whole: 한국어 isn't broken between its
+   syllables at the sidebar's foot. */
+.langs a, .langs strong { white-space: nowrap; }
 .langs a { color: var(--dim); }
 /* A link of a single sign: room enough to press. */
 a.sign { display: inline-block; min-width: 24px; min-height: 24px; text-align: center; text-decoration: none; }

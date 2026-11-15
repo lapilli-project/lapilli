@@ -288,6 +288,9 @@ func (s *Server) proposalsPage(r *http.Request) (any, error) {
 		v.Lines[k].Have = h.Approved
 	}
 	switch {
+	case v.Total == 0 && len(pickedIDs(p)) > 0:
+		// Those the URL names aren't there, or not the team's.
+		v.Empty = &emptyView{Kind: "notfound", Title: "None of the proposals picked is here.", Links: []emptyLink{{"Clear filters", pick.Clear}}}
 	case v.Total == 0:
 		v.Empty = &emptyView{Kind: "done", Title: "No proposals yet.",
 			Text: "A rule's page proposes a change to it, with its backtest; Lapilli proposes of itself with --changes, after the weekly digest."}

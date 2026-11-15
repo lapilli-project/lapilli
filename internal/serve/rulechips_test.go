@@ -35,13 +35,14 @@ func chipsServer(t *testing.T) *Server {
       - {alert: SameTier, expr: up == 2, labels: {severity: warning, tier: GOLD, service: "a b"}}
       - {alert: Quoted, expr: up == 3, labels: {note: 'say "hi"', service: checkout}}
       - {alert: Plain, expr: up == 4, labels: {severity: info}}
+      - {alert: Padded, expr: up == 5, labels: {pad: " x "}}
 `), 0o644)
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {
 		t.Fatal(err)
 	}
 	var fs []firing.Firing
-	for i, n := range []string{"ManyLabels", "SameTier", "Quoted", "Plain", "Errors"} {
+	for i, n := range []string{"ManyLabels", "SameTier", "Quoted", "Plain", "Errors", "Padded"} {
 		at := now.Add(-time.Duration(30+i) * time.Hour)
 		fs = append(fs, firing.Firing{Rule: n, Labels: map[string]string{"service": "checkout"}, Start: at, End: at.Add(10 * time.Minute)})
 	}
@@ -128,6 +129,7 @@ func TestRuleLabelChips(t *testing.T) {
 		"SameTier":   {"service=a b", "tier=GOLD"},
 		"Quoted":     {`note=say "hi"`, "service=checkout", "tier=gold"},
 		"Plain":      {"tier=gold"},
+		"Padded":     {"pad= x", "tier=gold"}, // as a reader reads it
 		"Errors":     nil,
 	}
 	for rule, labels := range want {
@@ -147,6 +149,17 @@ func TestRuleLabelChips(t *testing.T) {
 	}
 	if href, ok := byRule["Quoted"].href[`note=say "hi"`]; ok {
 		t.Errorf("a value the search can't write is a link: %s", href)
+	}
+	if len(byRule["Padded"].href) != 1 || byRule["Padded"].href["tier=gold"] == "" {
+		t.Errorf("a value with spaces after it, which the search takes off, is a link: %v", byRule["Padded"].href)
+	}
+	// A name with "=" (copied in, as a recorded rule's labels are) would be
+	// cut at it, and a value's spaces at its end taken off: no link; a
+	// space at its start, after the "=", is kept, and the link is right.
+	if picksLabel(qword{Key: "label", Value: "a=b=c"}, "a=b", "c") || !picksLabel(qword{Key: "label", Value: "a=b=c"}, "a", "b=c") ||
+		picksLabel(qword{Key: "label", Value: "k=v "}, "k", "v ") || !picksLabel(qword{Key: "label", Value: "k= v"}, "k", " v") ||
+		!picksLabel(qword{Key: "label", Value: "k=a b"}, "k", "a b") {
+		t.Error("picksLabel")
 	}
 	// Each link shows the rows with its label, and only those, from the
 	// list as it was asked.

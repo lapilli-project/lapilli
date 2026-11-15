@@ -675,7 +675,7 @@ func (a rulesAsk) chipsOf(labels map[string]string) (shown, more []labelChip) {
 		switch {
 		case slices.ContainsFunc(a.words, func(t qword) bool { return t.Key == "label" && t.Bad == "" && sameLabel(t.Value, k, val) }):
 			c.On = true
-		case strings.Contains(c.Text, `"`) || len(a.words) >= maxWords ||
+		case !picksLabel(w, k, val) || len(a.words) >= maxWords ||
 			utf8.RuneCountInString(written)+1+utf8.RuneCountInString(w.String()) > maxSearch:
 		default:
 			b := a
@@ -691,6 +691,19 @@ func (a rulesAsk) chipsOf(labels map[string]string) (shown, more []labelChip) {
 		}
 	}
 	return shown, more
+}
+
+// picksLabel reports whether the search box reads w, as written, back as
+// the filter of the label name=value and no other: not a value with a
+// quote, or spaces around it, which it takes off, nor a name with "=",
+// which it cuts the value at.
+func picksLabel(w qword, name, value string) bool {
+	ts := tokens(w.String())
+	if len(ts) != 1 || ts[0].Key != "label" || ts[0].Bad != "" || ts[0].Value != w.Value {
+		return false
+	}
+	k, v, _ := strings.Cut(ts[0].Value, "=")
+	return k == name && v == value
 }
 
 // sameLabel reports whether a label: filter's value, NAME=VALUE, picks the

@@ -1447,5 +1447,6 @@
  "what to do with the rules picked: a task, a team, a disposition or a proposal": "選んだルールに何をするか: タスク、チーム、方針、変更提案のいずれか",
  "you have asked for as many proposals in the last hour as anyone may, made or refused: try again later": "この 1 時間に出せるだけの変更提案を求めました（作られたものも拒否されたものも含む）。しばらくしてからもう一度お試しください",
  "%d not read: you have asked for as many proposals in the last hour as anyone may, made or refused": "%d 件は読まず: この 1 時間に出せるだけの変更提案を求めた（作られたものも拒否されたものも含む）",
- "the time for one request was up: %d not tried; pick them again": "1 回のリクエストの時間切れ: %d 件は未実施。もう一度選んでください"
+ "the time for one request was up: %d not tried; pick them again": "1 回のリクエストの時間切れ: %d 件は未実施。もう一度選んでください",
+ "None of the proposals picked is here.": "選んだ変更提案はここにありません。"
 }

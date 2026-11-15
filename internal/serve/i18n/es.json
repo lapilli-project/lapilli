@@ -1447,5 +1447,6 @@
  "what to do with the rules picked: a task, a team, a disposition or a proposal": "qué hacer con las reglas elegidas: una tarea, un equipo, una decisión o una propuesta",
  "you have asked for as many proposals in the last hour as anyone may, made or refused: try again later": "has pedido en la última hora tantas propuestas como cualquiera puede, hechas o rechazadas: vuelve a intentarlo más tarde",
  "%d not read: you have asked for as many proposals in the last hour as anyone may, made or refused": "%d sin leer: has pedido en la última hora tantas propuestas como cualquiera puede, hechas o rechazadas",
- "the time for one request was up: %d not tried; pick them again": "se acabó el tiempo de una petición: %d sin intentar; elígelas de nuevo"
+ "the time for one request was up: %d not tried; pick them again": "se acabó el tiempo de una petición: %d sin intentar; elígelas de nuevo",
+ "None of the proposals picked is here.": "Ninguna de las propuestas elegidas está aquí."
 }
