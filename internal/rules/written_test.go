@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -46,34 +47,62 @@ func TestPickWrittenCharged(t *testing.T) {
 	if rs, err := FromDocs(docs); err != nil || len(rs) != 60 {
 		t.Errorf("kept, read again: %d, %v", len(rs), err)
 	}
-	// What is written is no more than was charged.
-	var v any
-	if err := yaml.Unmarshal([]byte(doc), &v); err != nil {
-		t.Fatal(err)
-	}
-	if out, _ := yaml.Marshal(v); len(out) > emitted(v, 0) {
-		t.Errorf("written in %d bytes, charged %d", len(out), emitted(v, 0))
-	}
 }
 
-// TestEmittedNoLess: what a document is charged as written afresh is no
-// less than what yaml.Marshal writes it in: text that isn't UTF-8, control
-// characters, marks it escapes, lines of a block of text, nesting.
-func TestEmittedNoLess(t *testing.T) {
+// deepBinary is a List of a Secret and a PrometheusRule whose metadata
+// holds, under an anchor, depth mappings around raw bytes that aren't
+// UTF-8 (written as !!binary), aliased n times: written afresh, yaml.v3
+// writes the base64 in lines, each indented four spaces a level.
+func deepBinary(raw, depth, n int) string {
+	var b strings.Builder
+	b.WriteString("apiVersion: v1\nkind: List\nitems:\n- {apiVersion: v1, kind: Secret, metadata: {name: s}}\n- apiVersion: monitoring.coreos.com/v1\n" +
+		"  kind: PrometheusRule\n  metadata:\n    name: p\n    x: &x ")
+	b.WriteString(strings.Repeat("{a: ", depth))
+	b.WriteString("!!binary " + base64.StdEncoding.EncodeToString([]byte(strings.Repeat("\xff", raw))))
+	b.WriteString(strings.Repeat("}", depth))
+	b.WriteString("\n    y: [" + strings.TrimSuffix(strings.Repeat("*x, ", n), ", ") + "]\n")
+	b.WriteString("  spec:\n    groups:\n    - name: g\n      rules:\n      - {alert: A, expr: up}\n")
+	return b.String()
+}
+
+// TestWrittenBounded: what a document written afresh is written in is
+// what is charged, written into no more than the input may make: it was
+// estimated, and the estimate fell short (four spaces a level, base64 in
+// lines), so a List of 820 KB, 600 KiB of bytes that aren't UTF-8 under
+// 190 mappings aliased ten times, was kept as 109 MB, 133 times the file,
+// having allocated 861 MB, with or without Trim. Refused now, having
+// written no more than the room; and what is written is yaml.Marshal's.
+func TestWrittenBounded(t *testing.T) {
+	doc := deepBinary(600<<10, 190, 10)
+	p := filepath.Join(t.TempDir(), "list.yaml")
+	if err := os.WriteFile(p, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, trim := range []bool{false, true} {
+		var docs []Doc
+		var err error
+		bytes, took := allocated(func() { _, docs, _, err = ReadPicked(p, Picking{Trim: trim}) })
+		kept := 0
+		for _, d := range docs {
+			kept += len(d.Data)
+		}
+		t.Logf("%d KB, trim %t: kept %d KB, %d MB allocated, %v: %.120v", len(doc)>>10, trim, kept>>10, bytes>>20, took, err)
+		if !refused(err) || bytes > 192<<20 {
+			t.Errorf("trim %t: %d MB allocated, kept %d: %v", trim, bytes>>20, kept, err)
+		}
+	}
 	deep := any("x\ny\nz")
 	for range 40 {
 		deep = []any{map[string]any{"k\n": deep, "q": "\"\\"}}
 	}
-	for _, v := range []any{
-		"plain", "a\x01b\x02\x7f", "\xff\xfe not UTF-8 \xc3", "\u200e\ufeff\u2028 marks", strings.Repeat("line\n", 300), "\"quoted\" \\back\\",
-		map[string]any{"a\x00b": []any{1, 2.5, true, nil, "s"}}, deep, map[any]any{1: "one", true: []any{"t"}},
-	} {
-		out, err := yaml.Marshal(v)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n := emitted(v, 0); len(out) > n {
-			t.Errorf("%.60q: written in %d bytes, charged %d", out, len(out), n)
+	for _, v := range []any{"plain", "a\x01b\x7f", "\xff\xfe not UTF-8", strings.Repeat("line\n", 300), deep, map[any]any{1: "one", true: []any{"t"}}} {
+		ctx := OneInput(t.Context())
+		in := inputOf(ctx)
+		in.size = 1 << 20
+		out, err := written(ctx, v)
+		want, _ := yaml.Marshal(v)
+		if err != nil || string(out) != string(want) || in.made != len(want) {
+			t.Errorf("%.40q: written %d bytes, charged %d, yaml.Marshal %d: %v", want, len(out), in.made, len(want), err)
 		}
 	}
 }

@@ -515,64 +515,49 @@ func pickDoc(ctx context.Context, doc any, sel Selector) (keep bool, rewritten [
 	return true, rewritten, picked, nil
 }
 
-// written is a document written afresh (yaml.Marshal), what that writes
-// charged to the input first (emitted): aliases are written out in full, and
-// what is kept, the documents of rules read again from the ledger, could
-// otherwise be many times what was read.
+// written is a document written afresh, as yaml.Marshal writes it, into
+// no more than the input may make still, and charged what it was written
+// in: aliases are written out in full, each line of a block of text and
+// of base64 indented, and what is kept, the documents of rules read again
+// from the ledger, could otherwise be many times what was read. The
+// encoder writes as it goes, and gives up once its writer refuses more.
 func written(ctx context.Context, v any) ([]byte, error) {
-	n := emitted(v, 0)
-	if err := inputOf(ctx).charge(n, func() string {
-		return fmt.Sprintf("a document picked out of a stream, written again, %d bytes, its aliases in full", n)
-	}); err != nil {
+	in := inputOf(ctx)
+	w := &roomWriter{room: in.room()}
+	e := yaml.NewEncoder(w)
+	err := e.Encode(v)
+	if cerr := e.Close(); err == nil {
+		err = cerr
+	}
+	by := func() string {
+		return fmt.Sprintf("a document picked out of a stream, written again with its aliases in full, past %d bytes", w.room)
+	}
+	switch {
+	case w.over:
+		return nil, in.charge(w.room+1, by)
+	case err != nil:
 		return nil, err
 	}
-	return yaml.Marshal(v)
+	if err := in.charge(w.buf.Len(), by); err != nil {
+		return nil, err
+	}
+	return w.buf.Bytes(), nil
 }
 
-// emitted is, near enough and no less, what yaml.Marshal writes v in: its
-// text (scalarEmitted), and each value's indent and marks.
-func emitted(v any, depth int) int {
-	indent := 2*depth + 4
-	switch x := v.(type) {
-	case map[string]any:
-		n := 2
-		for k, e := range x {
-			n += indent + scalarEmitted(k, indent) + emitted(e, depth+1)
-		}
-		return n
-	case map[any]any:
-		n := 2
-		for k, e := range x {
-			n += indent + emitted(k, depth+1) + emitted(e, depth+1)
-		}
-		return n
-	case []any:
-		n := 2
-		for _, e := range x {
-			n += indent + emitted(e, depth+1)
-		}
-		return n
-	case string:
-		return scalarEmitted(x, indent)
-	}
-	return 32
+// roomWriter keeps what is written to it, room bytes at most: past them,
+// it refuses, and says it did.
+type roomWriter struct {
+	buf  bytes.Buffer
+	room int
+	over bool
 }
 
-// scalarEmitted is what a string is written in, at most: quoted, twice
-// its bytes for a character escaped (\u200E) or one not UTF-8 (written in
-// base64), a byte that isn't printable four times (\xNN), and each line of
-// a block of text indented (TestEmittedNoLess).
-func scalarEmitted(s string, indent int) int {
-	n := 2*len(s) + 4
-	for i := 0; i < len(s); i++ {
-		switch c := s[i]; {
-		case c == '\n':
-			n += indent + 3
-		case c < 0x20 || c == 0x7f || c == '"' || c == '\\':
-			n += 2
-		}
+func (w *roomWriter) Write(p []byte) (int, error) {
+	if w.buf.Len()+len(p) > w.room {
+		w.over = true
+		return 0, errors.New("past the room it has")
 	}
-	return n
+	return w.buf.Write(p)
 }
 
 // pickItem says whether to keep a document, and what of it: a List with
