@@ -111,6 +111,10 @@ type rulesList struct {
 	// Sum, the rules shown, all told.
 	Week string
 	Sum  ruleSum
+	// FiredOn are, with a team picked, the rules of other teams, or of no
+	// team, most of whose firings in the last digest's week came from what
+	// it owns.
+	FiredOn []firedOnView
 }
 
 // ruleSum is the rules shown, all told: the overview's tiles link to the
@@ -611,6 +615,13 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	}
 	allTeams := a
 	allTeams.c.Team, allTeams.c.TeamSet = "", true
+	if d.team != nil {
+		on, week, err := s.firedOnWeek(ctx)
+		if err != nil {
+			return nil, err
+		}
+		v.FiredOn = firedOnLines(on, week, d.team.Name)
+	}
 	v.Bulk = s.bulkFor(r, "team")
 	v.Bulk.Back, v.Bulk.Teams = a.url(), d.own.teams
 	switch {

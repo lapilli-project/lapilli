@@ -1478,5 +1478,14 @@
  "Find out why %s fires": "Averiguar por qué se dispara %s",
  "did they matter? Write it down, or fix what fires them": "¿importaban? Regístralo, o arregla lo que los dispara",
  "%d went well past its bound, not a flicker at its edge: did they matter? A longer for would hide them.": "%d pasaron con creces su umbral, no un parpadeo en el borde: ¿importaban? Un for más largo los ocultaría.",
- "%s fired %d times with no incident written down": "%s se disparó %d veces sin ningún incidente registrado"
+ "%s fired %d times with no incident written down": "%s se disparó %d veces sin ningún incidente registrado",
+ "Its alerts go to %s; most came from what %s owns (%d of %d), in the week of %s.": "Sus alertas van a %s; la mayoría vino de lo que posee %s (%d de %d), en la semana del %s.",
+ "Its alerts go to no team; most came from what %s owns (%d of %d), in the week of %s.": "Sus alertas no van a ningún equipo; la mayoría vino de lo que posee %s (%d de %d), en la semana del %s.",
+ "Fired on what %s owns": "Se dispararon en lo que posee %s",
+ "Rules of other teams, or of no team, most of whose firings in the week of %s came from what this team owns, by their labels:": "Reglas de otros equipos, o de ninguno, la mayoría de cuyos disparos en la semana del %s vino de lo que posee este equipo, por sus etiquetas:",
+ "(owned by %s)": "(de %s)",
+ "(no team owns it)": "(sin equipo)",
+ "%s (%d of %d firings)": "%s (%d de %d disparos)",
+ "Rules of other teams, or of no team, that fired mostly on what %s owns: %s.": "Reglas de otros equipos, o de ninguno, que se dispararon sobre todo en lo que posee %s: %s.",
+ "%d of %d firings": "%d de %d disparos"
 }

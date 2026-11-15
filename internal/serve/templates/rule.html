@@ -165,6 +165,7 @@ lands here, and is shown the way to it. */}}
 <p>{{if .Team}}{{t "Owned by %s." .Team}}{{else}}{{t "No team owns it."}}{{end}}
 {{with .Note.Status}} <span class="pill {{.}}">{{t .}}</span>{{end}}
 {{with .Note.Runbook}} · <a href="{{.}}" rel="noopener noreferrer">{{t "Runbook"}}</a>{{end}}</p>
+{{with .FiredOn}}<p>{{if .Owner}}{{tbdi "Its alerts go to %s; most came from what %s owns (%d of %d), in the week of %s." .Owner .Team .Firings .Of (day $loc .Week)}}{{else}}{{tbdi "Its alerts go to no team; most came from what %s owns (%d of %d), in the week of %s." .Team .Firings .Of (day $loc .Week)}}{{end}}</p>{{end}}
 {{with .Note.Note}}<div class="comment-body">{{.}}</div>{{end}}
 {{if edits $.Status .TeamID}}<details{{if .EditNote}} open{{end}}><summary>{{t "Change it"}}</summary>
 <form method="post" action="/notes" class="grid">

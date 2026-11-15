@@ -1478,5 +1478,14 @@
  "Find out why %s fires": "%s 발화 원인 찾기",
  "did they matter? Write it down, or fix what fires them": "중요했나요? 기록하거나, 발화 원인을 고쳐 주세요",
  "%d went well past its bound, not a flicker at its edge: did they matter? A longer for would hide them.": "%d건이 임계값을 크게 넘었어요. 잠깐 튄 게 아니에요. 중요했나요? for를 늘리면 가려져요.",
- "%s fired %d times with no incident written down": "%s: 기록된 인시던트 없이 %d번 발화"
+ "%s fired %d times with no incident written down": "%s: 기록된 인시던트 없이 %d번 발화",
+ "Its alerts go to %s; most came from what %s owns (%d of %d), in the week of %s.": "알림은 %s 팀으로 가지만, 대부분 %s 팀 소유 대상에서 발화했어요(%d/%d건, %s 주).",
+ "Its alerts go to no team; most came from what %s owns (%d of %d), in the week of %s.": "알림이 어느 팀으로도 가지 않지만, 대부분 %s 팀 소유 대상에서 발화했어요(%d/%d건, %s 주).",
+ "Fired on what %s owns": "%s 팀 소유 대상에서 발화한 룰",
+ "Rules of other teams, or of no team, most of whose firings in the week of %s came from what this team owns, by their labels:": "다른 팀의 룰이나 소유 팀이 없는 룰 중, %s 주 발화의 대부분이 라벨로 보아 이 팀 소유 대상에서 나온 룰이에요:",
+ "(owned by %s)": "(%s 팀 소유)",
+ "(no team owns it)": "(소유 팀 없음)",
+ "%s (%d of %d firings)": "%s (%d/%d건)",
+ "Rules of other teams, or of no team, that fired mostly on what %s owns: %s.": "%s 팀 소유 대상에서 주로 발화한 다른 팀 또는 소유 팀 없는 룰: %s.",
+ "%d of %d firings": "발화 %d/%d건"
 }

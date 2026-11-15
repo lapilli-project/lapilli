@@ -45,6 +45,11 @@
   <td class="n">{{.Sum.Firings}}{{if and .Sum.Notified (not .Sum.Uncounted)}}<br><span class="quiet">{{t "%d notifications, %d repeats" .Sum.Notifications .Sum.Repeats}}</span>{{end}}</td><td class="n">{{.Sum.White}}</td><td class="n">{{.Sum.Black}}{{if or .Sum.AsleepBlack .Sum.OffHoursBlack}}<br><span class="quiet">{{t "%d asleep, %d off hours" .Sum.AsleepBlack .Sum.OffHoursBlack}}</span>{{end}}{{if .Sum.Uncounted}}<br><span class="quiet">{{t "Notifications for nothing, while people slept: – (none were kept yet)"}}</span>{{else if .Sum.Notified}}<br><span class="quiet">{{t "%d notifications for nothing, while people slept" .Sum.Woken}}</span>{{end}}</td><td class="n">{{.Sum.Precision}}</td><td class="n">{{.Sum.Refired}}{{if .Sum.Excused}}<br><span class="quiet">{{t "%d excused" .Sum.Excused}}</span>{{end}}</td>{{if .Deploys}}<td class="n">{{.Sum.Deploys}}</td>{{end}}<td></td><td></td></tr></tfoot>
 </table></div></form>{{end}}
 {{with .Empty}}{{template "empty" .}}{{end}}
+{{with .FiredOn}}<section class="card" id="fired-on">
+<h2>{{tbdi "Fired on what %s owns" $.View.Team.Name}}</h2>
+<p class="quiet">{{t "Rules of other teams, or of no team, most of whose firings in the week of %s came from what this team owns, by their labels:" (day $.Loc (index . 0).Week)}}</p>
+<ul class="plain">{{range .}}<li><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a> {{if .Owner}}<span class="quiet">{{tbdi "(owned by %s)" .Owner}}</span>{{else}}<span class="quiet">{{t "(no team owns it)"}}</span>{{end}} {{t "%d of %d firings" .Firings .Of}}</li>{{end}}</ul>
+</section>{{end}}
 {{if .Quiet}}
 <details><summary>{{if .Week}}{{t "%d rules didn't fire in the week of %s" (len .Quiet) .Week}}{{else if .QuietOlder}}{{if eq .Weeks 1}}{{t "%d rules didn't fire in the last week" (len .Quiet)}}{{else}}{{t "%d rules didn't fire in the last %d weeks" (len .Quiet) .Weeks}}{{end}}{{else}}{{t "%d rules never fired in the last twelve weeks" (len .Quiet)}}{{end}}</summary>
 <p class="quiet">{{range $i, $r := .Quiet}}{{if $i}}, {{end}}<a href="{{$.Rule $r.Name}}"><bdi>{{$r.Name}}</bdi></a>{{with $r.Facts}} <a class="hint" href="{{$.RuleAt $r.Name "#says"}}">({{t "what it says: %d problems of fact" .}})</a>{{end}}{{end}}</p></details>

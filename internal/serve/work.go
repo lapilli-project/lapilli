@@ -1346,6 +1346,14 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 		if err := s.l.ReplaceResult(ctx, "unrecorded", s.now(), from, to, orNoneOf(unrec)); err != nil {
 			return true, err
 		}
+		// The rules that fired mostly on what another team owns.
+		on, err := s.firedOnOf(ctx, from, to)
+		if err != nil {
+			return true, err
+		}
+		if err := s.l.ReplaceResult(ctx, "fired_on", s.now(), from, to, orNoneOf(on)); err != nil {
+			return true, err
+		}
 		if err := s.keepNear(ctx, from, to, cursor, seen, orNoneOf(near)); err != nil {
 			return true, err
 		}
@@ -1866,6 +1874,24 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	if err != nil {
 		return "", err
 	}
+	// Of a team's, the rules of others that fired mostly on what it owns.
+	var onLine string
+	if team != nil {
+		on, err := s.firedOnFor(ctx, from)
+		if err != nil {
+			return "", err
+		}
+		if xs := firedOnLines(on, from, team.Name); len(xs) > 0 {
+			items := make([]string, 0, len(xs))
+			for _, x := range xs[:min(len(xs), 20)] {
+				items = append(items, tr(s.cfg.Lang, "%s (%d of %d firings)", verdict.Clean(x.Rule), x.Firings, x.Of))
+			}
+			onLine = tr(s.cfg.Lang, "Rules of other teams, or of no team, that fired mostly on what %s owns: %s.", verdict.Clean(team.Name), strings.Join(items, "; "))
+			if n := len(xs) - len(items); n > 0 {
+				onLine += " " + tr(s.cfg.Lang, "And %d more.", n)
+			}
+		}
+	}
 	line := ""
 	if len(spare) > 0 {
 		names := make([]string, 0, len(spare))
@@ -1882,7 +1908,7 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	head, rest, _ := strings.Cut(report.String(), "\n\n")
 	var b strings.Builder
 	b.WriteString(head + "\n")
-	for _, x := range []string{rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
+	for _, x := range []string{onLine, rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
 		if x != "" {
 			b.WriteString("\n" + x + "\n")
 		}
@@ -2029,6 +2055,10 @@ func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh
 	if err != nil {
 		return err
 	}
+	on, err := s.firedOnFor(ctx, from)
+	if err != nil {
+		return err
+	}
 	for name := range s.cfg.TeamDigests {
 		if _, ok := own.team(name); !ok {
 			s.log.Warn("--team-digest names a team the ledger doesn't have", "team", name)
@@ -2058,8 +2088,8 @@ func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh
 		}
 		part := teamReport(rep, own, t, o.Hours)
 		fired := slices.ContainsFunc(part.Rules, func(r verdict.RuleResult) bool { return r.Firings+r.Excused > 0 })
-		if !fired && len(part.Incidents) == 0 {
-			continue
+		if !fired && len(part.Incidents) == 0 && len(firedOnLines(on, from, t.Name)) == 0 {
+			continue // nothing happened to it, nor fired on what it owns
 		}
 		mine := slices.DeleteFunc(slices.Clone(spare), func(name string) bool { return own.rule[name] != t.ID })
 		text, err := s.digestText(ctx, part, mine, from, to, &t)

@@ -1478,5 +1478,14 @@
  "Find out why %s fires": "%s が発火する原因を調べる",
  "did they matter? Write it down, or fix what fires them": "重要でしたか？記録するか、発火の原因を直してください",
  "%d went well past its bound, not a flicker at its edge: did they matter? A longer for would hide them.": "%d 件が閾値を大きく超えました。一時的な揺れではありません。重要でしたか？for を長くすると隠れてしまいます。",
- "%s fired %d times with no incident written down": "%s: 記録済みインシデントなしで %d 回発火"
+ "%s fired %d times with no incident written down": "%s: 記録済みインシデントなしで %d 回発火",
+ "Its alerts go to %s; most came from what %s owns (%d of %d), in the week of %s.": "アラートの送り先は %s ですが、ほとんどは %s が所有する対象から発火しました（%d / %d 件、%s の週）。",
+ "Its alerts go to no team; most came from what %s owns (%d of %d), in the week of %s.": "アラートの送り先のチームはありませんが、ほとんどは %s が所有する対象から発火しました（%d / %d 件、%s の週）。",
+ "Fired on what %s owns": "%s が所有する対象で発火したルール",
+ "Rules of other teams, or of no team, most of whose firings in the week of %s came from what this team owns, by their labels:": "他のチームのルール、またはどのチームも所有しないルールのうち、%s の週の発火のほとんどが、ラベルから見てこのチームの所有する対象から来たものです:",
+ "(owned by %s)": "（%s が所有）",
+ "(no team owns it)": "（所有チームなし）",
+ "%s (%d of %d firings)": "%s（%d / %d 件）",
+ "Rules of other teams, or of no team, that fired mostly on what %s owns: %s.": "%s が所有する対象で主に発火した、他のチームまたは所有チームのないルール: %s。",
+ "%d of %d firings": "発火 %d / %d 件"
 }

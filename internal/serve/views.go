@@ -222,8 +222,10 @@ type ruleLine struct {
 	// as often as a noisy rule fires, with no record to judge it by.
 	NoRecord, Unrecorded bool
 	// Unrecord is what the last digest said its firings were, of a week
-	// with no record: in place of a suggestion.
+	// with no record: in place of a suggestion. FiredOn, that most of them
+	// came from what another team owns than the one its alerts go to.
 	Unrecord                *unrecordedView
+	FiredOn                 *firedOnView
 	Spark                   []spark
 	Suggestion, Unsupported string
 	// Source is where a rule's firings were recorded before they were
@@ -505,6 +507,10 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 	if err != nil {
 		return nil, nil, err
 	}
+	on, onWeek, err := s.firedOnWeek(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 	sum := map[int64]*ruleLine{}
 	recent := t.weeks[len(t.weeks)-n:]
 	for _, w := range recent {
@@ -583,6 +589,9 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 		l.Suggestion = sugg[l.Name]
 		if u, ok := unrec[l.Name]; ok {
 			l.Unrecord = unrecordedViewOf(u, unrecWeek)
+		}
+		if x, ok := on[l.Name]; ok {
+			l.FiredOn = &firedOnView{x, onWeek}
 		}
 		out = append(out, *l)
 	}
