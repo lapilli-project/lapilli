@@ -1215,3 +1215,27 @@ type pastDeadline struct{}
 func (pastDeadline) QueryRange(context.Context, string, time.Time, time.Time, time.Duration) ([]prom.Series, error) {
 	return nil, prom.ErrPastDeadline
 }
+
+// TestPRBodyIDsAsCode: every incident ID a pull request's description
+// names, those missed, caught later, missed by an earlier backtest and the
+// one it was made for, is a code span of its own: a backtick or a line
+// break in one can't end it, so a mention or a link in it stays text.
+func TestPRBodyIDsAsCode(t *testing.T) {
+	s, _ := restartsServer(t, nil)
+	evil := "a`b\nc @team [x](y)"
+	ev := evidence{From: "near miss", Incident: evil, EarlierLost: []string{evil + "1"},
+		Backtest: &backtest{From: unrecordedFrom, To: unrecordedTo, Before: side{Firings: 9, White: 1}, After: side{Firings: 3}, Lost: []string{evil + "2"}, Later: []string{evil + "3"}}}
+	raw, _ := json.Marshal(ev)
+	pr := s.prBody(proposalLine{Proposal: ledger.Proposal{ID: 1, Rule: "RestartsNow", Kind: ledger.KindFor, Path: ledger.PathGit, Evidence: raw}})
+	for _, want := range []string{"Missed as proposed: `a'b c @team [x](y)2`.", "Caught later: `a'b c @team [x](y)3`.",
+		"An earlier backtest said that as proposed it misses: `a'b c @team [x](y)1`.", "Made for the incident `a'b c @team [x](y)`, which nothing caught."} {
+		if !strings.Contains(pr, want) {
+			t.Errorf("its description doesn't say %q:\n%s", want, pr)
+		}
+	}
+	for _, line := range strings.Split(pr, "\n") {
+		if strings.HasPrefix(line, "c @team") || !strings.HasPrefix(line, "```") && strings.Count(line, "`")%2 != 0 {
+			t.Errorf("a line an ID broke: %q", line)
+		}
+	}
+}

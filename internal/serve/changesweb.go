@@ -636,16 +636,15 @@ func (s *Server) prBody(l proposalLine) string {
 		fmt.Fprintf(&b, "Backtest from %s to %s: fired %d times, %d catching an incident, as it is; %d and %d as proposed.",
 			bt.From.Format("2006-01-02"), bt.To.Format("2006-01-02"), bt.Before.Firings, bt.Before.White, bt.After.Firings, bt.After.White)
 		if len(bt.Lost) > 0 {
-			fmt.Fprintf(&b, " Missed as proposed: %s.", strings.Join(bt.Lost, ", "))
+			fmt.Fprintf(&b, " Missed as proposed: %s.", mdIDs(bt.Lost))
 		}
 		if len(bt.Later) > 0 {
-			fmt.Fprintf(&b, " Caught later: %s.", strings.Join(bt.Later, ", "))
+			fmt.Fprintf(&b, " Caught later: %s.", mdIDs(bt.Later))
 		}
 		b.WriteString("\n\n")
 	}
 	if ids := ev.EarlierMissed(); len(ids) > 0 {
-		// As code, as an incident's ID is below: nothing in it read as markdown.
-		fmt.Fprintf(&b, "An earlier backtest said that as proposed it misses: %s.\n\n", "`"+strings.Join(ids, "`, `")+"`")
+		fmt.Fprintf(&b, "An earlier backtest said that as proposed it misses: %s.\n\n", mdIDs(ids))
 	}
 	if rec := ev.Record; rec != nil {
 		fmt.Fprintf(&b, "Over %d weeks it fired %d times, %d catching an incident; it caught %d incidents, %d first, %d that no other rule caught.\n\n",
@@ -654,7 +653,7 @@ func (s *Server) prBody(l proposalLine) string {
 	}
 	if ev.Incident != "" {
 		// An ID the ledger has, as code: nothing in it is read as markdown.
-		fmt.Fprintf(&b, "Made for the incident `%s`, which nothing caught.\n\n", strings.NewReplacer("`", "'", "\n", " ").Replace(ev.Incident))
+		fmt.Fprintf(&b, "Made for the incident %s, which nothing caught.\n\n", mdIDs([]string{ev.Incident}))
 	}
 	if f := ev.Finding; f != nil {
 		fmt.Fprintf(&b, "It answers the content check's %s: %s", f.Kind, f.Key)
@@ -678,6 +677,21 @@ func (s *Server) prBody(l proposalLine) string {
 		fmt.Fprintf(&b, "\n%s/proposals/%d\n", strings.TrimRight(s.cfg.ExternalURL, "/"), p.ID)
 	}
 	return b.String()
+}
+
+// mdID makes an incident's ID one code span of a pull request's
+// description, as its own line: no backtick in it to end the span, and no
+// line break to end the line, so nothing in it (a mention, a link, a
+// heading) is read as Markdown.
+var mdID = strings.NewReplacer("`", "'", "\r", " ", "\n", " ")
+
+// mdIDs are incidents' IDs, each a code span (mdID), joined.
+func mdIDs(ids []string) string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = "`" + mdID.Replace(id) + "`"
+	}
+	return strings.Join(out, ", ")
 }
 
 // kindText is what a kind of proposal does, in English.
