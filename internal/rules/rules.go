@@ -606,7 +606,7 @@ func parseContext(ctx context.Context, b []byte, rec *[]Recording) ([]Rule, erro
 		}
 		doc, err := YAMLValueContext(ctx, &node)
 		if err != nil {
-			return nil, unreadAs(err, &node)
+			return nil, unreadAs(err, &node, b)
 		}
 		// A list of documents, as a cloud's CLI lists resources.
 		docs := []any{doc}
@@ -632,11 +632,15 @@ func parseContext(ctx context.Context, b []byte, rec *[]Recording) ([]Rule, erro
 // unreadAs is what YAMLValue refusing a document's node, err, is as the
 // rules readers take it: a key given twice in a document in the shape of
 // rules, which yaml.v3 refuses too, a rule file that doesn't read, as it
-// is; any other refusal unread, saying whether it is in the shape of rules
-// (rulesShaped), which is said, never passed over.
-func unreadAs(err error, n *yaml.Node) error {
+// is; any other refusal unread, saying whether it is in the shape of rules,
+// which is said, never passed over. The shape is the document's
+// (rulesShaped) or, as the refused document need not be the one of rules,
+// the whole input's, b, by its text (textShaped): a Deployment's tagged key
+// in a stream with a PrometheusRule refuses the stream, whose rules
+// mustn't be left out unsaid where a file that doesn't read would be.
+func unreadAs(err error, n *yaml.Node, b []byte) error {
 	var dk dupKey
-	switch shaped := rulesShaped(n); {
+	switch shaped := rulesShaped(n) || textShaped(b); {
 	case errors.As(err, &dk) && shaped:
 		return err
 	default:
@@ -670,7 +674,7 @@ func decodeRules(ctx context.Context, data []byte) ([]any, error) {
 		}
 		v, err := YAMLValueContext(ctx, &n)
 		if err != nil {
-			return nil, unreadAs(err, &n)
+			return nil, unreadAs(err, &n, data)
 		}
 		out = append(out, v)
 	}

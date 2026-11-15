@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"go.yaml.in/yaml/v3"
 )
 
 // TestKeysAsText: the rules readers read a mapping's keys as text, as
@@ -57,5 +59,34 @@ func TestKeysAsText(t *testing.T) {
 		strconv.Quote("!x groups: [{name: g, rules: [{alert: B, expr: up}]}]") + "\n"
 	if rs, err := Parse([]byte(tagged)); err == nil || !strings.Contains(err.Error(), `"r.yaml"`) || !strings.Contains(err.Error(), "tagged !x") {
 		t.Errorf("a ConfigMap's rule file whose groups key is tagged !x: %d, %v", len(rs), err)
+	}
+	// Two keys of one text, an alias of a key beside the key, which
+	// Prometheus loads, the last set: an error naming the key, not a rule
+	// file that doesn't read, counted broken and left out.
+	dup := "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: c}\ndata:\n  ok.yaml: " + small + "\n  dup.yaml: " +
+		strconv.Quote("groups: [{name: g, rules: [{alert: Hidden, expr: up, labels: {&k team: a, *k: b}}]}]") + "\n"
+	if rs, err := Parse([]byte(dup)); err == nil || !strings.Contains(err.Error(), `"dup.yaml"`) || !strings.Contains(err.Error(), "already defined") {
+		t.Errorf("a ConfigMap's rule file with an alias of a key beside it: %d, %v", len(rs), err)
+	}
+}
+
+// TestRulesShaped: a document's nodes are in the shape of rules by its
+// keys as their text is read: a groups key written as !!binary, and a
+// spec with groups, as a PrometheusRule or a Google Rules has, are; a
+// spec without, and a list of targets, aren't.
+func TestRulesShaped(t *testing.T) {
+	for doc, want := range map[string]bool{
+		"!!binary " + base64.StdEncoding.EncodeToString([]byte("groups")) + ": []\n": true,
+		"kind: PrometheusRule\nspec: {groups: []}\n":                                 true,
+		"kind: Deployment\nspec: {replicas: 1}\n":                                    false,
+		"[{targets: [a], labels: {env: p}}]\n":                                       false,
+	} {
+		var n yaml.Node
+		if err := yaml.Unmarshal([]byte(doc), &n); err != nil {
+			t.Fatal(err)
+		}
+		if got := rulesShaped(&n); got != want {
+			t.Errorf("%q: %t", doc, got)
+		}
 	}
 }

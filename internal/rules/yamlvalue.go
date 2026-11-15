@@ -129,7 +129,8 @@ type input struct {
 	total   *total
 	brought map[*byte]bool
 	// name is what it is read from, as what the inputs read with it made
-	// names it (total.most): a ruler's namespace, a version's source.
+	// names it (total.most): the source of a document of a namespace (a
+	// ruler's, an alarm's: FromDocsContext). Other inputs have none.
 	name string
 }
 
@@ -525,10 +526,14 @@ func (c *converting) fill(n *yaml.Node, m *mapOut, merged map[any]bool, depth in
 			return err
 		}
 		if c.textKeys && merged == nil {
-			// Two keys written apart, one text: a !!binary key and what it
-			// decodes to. Only the mapping's own keys are set so far.
+			// Two keys written apart, one text: an alias of a key and the
+			// key, a !!binary key and what it decodes to. yaml.v3 tells
+			// keys apart as written, so Prometheus loads it, the last one
+			// set: refused as Lapilli's own reader refuses (unread), said,
+			// not a key given twice, a file that doesn't read. Only the
+			// mapping's own keys are set so far.
 			if _, twice := m.s[key.(string)]; twice {
-				return dupKey{errNode{fmt.Sprintf("unmarshal errors:\n  line %d: mapping key %.80q already defined", k.Line, key)}}
+				return errNode{fmt.Sprintf("line %d: mapping key %.80q already defined, by a key written otherwise (an alias, !!binary), which isn't read", k.Line, key)}
 			}
 		}
 		if own != nil {

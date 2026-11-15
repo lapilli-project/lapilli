@@ -3,9 +3,13 @@ package rules
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
+	"unicode"
+	"unicode/utf8"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -29,18 +33,23 @@ func (e unread) Unwrap() error { return e.error }
 
 // rulesShaped reports whether a document, as its nodes, is in the shape of
 // rules, as a rule file a ConfigMap holds is: a mapping with groups, or a
-// merge (<<) that may bring them; or a list (of documents, as a cloud's CLI
-// writes) one of whose items is a mapping with groups or a kind. Its keys
-// are read as yaml.v3 resolves them, escapes and aliases too, so a rule
-// file can't be written so it isn't. A list of targets, as a file_sd file
-// is, isn't.
+// spec with groups (a PrometheusRule, a Google Rules), or a merge (<<) that
+// may bring them; or a list (of documents, as a cloud's CLI writes) one of
+// whose items is a mapping with groups or a kind. Its keys are read as
+// yaml.v3 resolves them, escapes and aliases too, and as their text is
+// read (keysAsText), so a rule file can't be written so it isn't. A list
+// of targets, as a file_sd file is, isn't.
 func rulesShaped(n *yaml.Node) bool {
 	n = resolved(n)
 	switch {
 	case n == nil:
 		return false
 	case n.Kind == yaml.MappingNode:
-		return hasKey(n, true, "groups")
+		if hasKey(n, true, "groups") {
+			return true
+		}
+		spec := resolved(keyed(n, "spec"))
+		return spec != nil && spec.Kind == yaml.MappingNode && hasKey(spec, true, "groups")
 	case n.Kind == yaml.SequenceNode:
 		for _, it := range n.Content {
 			if it = resolved(it); it != nil && it.Kind == yaml.MappingNode && hasKey(it, false, "groups", "kind") {
@@ -67,34 +76,128 @@ func resolved(n *yaml.Node) *yaml.Node {
 	return nil
 }
 
-// hasKey reports whether a mapping has one of keys, or, when merges, a
-// merge (<<) that may bring it: a key as written, whatever its tag, or as
-// its text is read (scalarText), a !!binary one decoded.
+// keyed is the value of a mapping's key k (isKey), nil for none.
+func keyed(m *yaml.Node, k string) *yaml.Node {
+	for j := 0; j+1 < len(m.Content); j += 2 {
+		if isKey(resolved(m.Content[j]), k) {
+			return m.Content[j+1]
+		}
+	}
+	return nil
+}
+
+// hasKey reports whether a mapping has one of keys (isKey), or, when
+// merges, a merge (<<) that may bring it.
 func hasKey(m *yaml.Node, merges bool, keys ...string) bool {
 	for j := 0; j+1 < len(m.Content); j += 2 {
 		k := resolved(m.Content[j])
-		if k == nil || k.Kind != yaml.ScalarNode {
-			continue
-		}
-		if merges && isMerge(k) || slices.Contains(keys, k.Value) {
-			return true
-		}
-		if t, ok := scalarText(k); ok && slices.Contains(keys, t) {
+		if merges && k != nil && isMerge(k) || isKey(k, keys...) {
 			return true
 		}
 	}
 	return false
 }
 
-// textShaped reports whether a document not decoded (Nodes refused it, or
-// an alias brought it in again) may be in the shape of rules: whether
-// groups is written in it, or what could write it otherwise, as a key's
-// text is read (keysAsText): a backslash (an escape), binary (a !!binary
-// key), or both a ! and a % (a tag written with %-escapes, or made by a
-// %TAG directive, as !!binary).
+// isKey reports whether a key node is one of keys: as written, whatever
+// its tag, or as its text is read (scalarText), a !!binary one decoded.
+func isKey(k *yaml.Node, keys ...string) bool {
+	if k == nil || k.Kind != yaml.ScalarNode {
+		return false
+	}
+	if slices.Contains(keys, k.Value) {
+		return true
+	}
+	t, ok := scalarText(k)
+	return ok && slices.Contains(keys, t)
+}
+
+// textShaped reports whether a document Lapilli's nodes don't tell the
+// shape of (Nodes refused it, an alias brought it in again, or it is the
+// input a refused document is of: unreadAs) may be in the shape of rules:
+// whether groups may be a key in it, as a key's text is read (keysAsText).
+// Such a key is groups written; or written by double-quoted escapes
+// (\x67roups, an escaped line break), seen once they are read
+// (unescaped); or a !!binary key whose base64 decodes to groups,
+// Z3JvdXBz, however its tag is written (!!binary, a %-escape, a %TAG
+// directive) and whatever spaces or line breaks it is written across, as
+// a key's !!binary is read without them. Only these: a backslash, or
+// binary, written in a file of data or an env-style value says nothing of
+// rules, and a directory holding such a file isn't refused for it.
 func textShaped(b []byte) bool {
-	return bytes.Contains(b, []byte("groups")) || bytes.IndexByte(b, '\\') >= 0 || bytes.Contains(b, []byte("binary")) ||
-		bytes.IndexByte(b, '!') >= 0 && bytes.IndexByte(b, '%') >= 0
+	if bytes.Contains(b, groupsText) || bytes.Contains(b, groupsBase64) {
+		return true
+	}
+	if bytes.IndexByte(b, '\\') >= 0 {
+		if b = unescaped(b); bytes.Contains(b, groupsText) {
+			return true
+		}
+	}
+	return bytes.Contains(unspaced(b), groupsBase64)
+}
+
+var (
+	groupsText   = []byte("groups")
+	groupsBase64 = []byte(base64.StdEncoding.EncodeToString(groupsText))
+)
+
+// yamlEscapes are what YAML's double-quoted escapes of one character
+// stand for.
+var yamlEscapes = map[byte]rune{'0': 0, 'a': 7, 'b': 8, 't': 9, '\t': 9, 'n': 10, 'v': 11, 'f': 12, 'r': 13, 'e': 0x1b,
+	' ': ' ', '"': '"', '/': '/', '\\': '\\', '\'': '\'', 'N': 0x85, '_': 0xa0, 'L': 0x2028, 'P': 0x2029}
+
+// unescaped is b with YAML's double-quoted escapes read, wherever they
+// are: \x67, \u0067 and \U00000067 as g, \t, \N, \L and the rest as what
+// they stand for, an escaped line break and the blanks after it as
+// nothing, a backslash before anything else as that.
+func unescaped(b []byte) []byte {
+	out := make([]byte, 0, len(b))
+	for i := 0; i < len(b); i++ {
+		if b[i] != '\\' || i+1 == len(b) {
+			out = append(out, b[i])
+			continue
+		}
+		i++
+		switch e := b[i]; e {
+		case 'x', 'u', 'U':
+			n := map[byte]int{'x': 2, 'u': 4, 'U': 8}[e]
+			if i+n < len(b) {
+				if v, err := strconv.ParseUint(string(b[i+1:i+1+n]), 16, 32); err == nil {
+					out = utf8.AppendRune(out, rune(v))
+					i += n
+					continue
+				}
+			}
+			out = append(out, e)
+		case '\n', '\r':
+			if e == '\r' && i+1 < len(b) && b[i+1] == '\n' {
+				i++
+			}
+			for i+1 < len(b) && (b[i+1] == ' ' || b[i+1] == '\t') {
+				i++
+			}
+		default:
+			if r, ok := yamlEscapes[e]; ok {
+				out = utf8.AppendRune(out, r)
+			} else {
+				out = append(out, e)
+			}
+		}
+	}
+	return out
+}
+
+// unspaced is b without what unicode calls space, as a !!binary key is
+// read (scalarText).
+func unspaced(b []byte) []byte {
+	out := make([]byte, 0, len(b))
+	for len(b) > 0 {
+		r, n := utf8.DecodeRune(b)
+		if !unicode.IsSpace(r) {
+			out = append(out, b[:n]...)
+		}
+		b = b[n:]
+	}
+	return out
 }
 
 // configMapRules reads the rule files a ConfigMap holds, a key each. A key
