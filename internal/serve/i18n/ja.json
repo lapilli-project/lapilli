@@ -1027,7 +1027,6 @@
  "written in Lapilli": "Lapilli で記録",
  "you are %s, %s": "ログイン中: %s（%s）",
  "you have approved this proposal already": "この提案はすでに承認済みです",
- "you have made %d proposals in the last hour, with your agents, the most anyone may: try again later": "直近 1 時間に、エージェント分を含めて %d 件の提案をしました。1 人あたりの上限です。しばらくしてからもう一度お試しください",
  "you have made as many proposals in the last hour as anyone may: try again later": "直近 1 時間の提案数が 1 人あたりの上限に達しました。しばらくしてからもう一度お試しください",
  "○ Caught": "○ 検知",
  "○ Caught now": "○ 現在検知",

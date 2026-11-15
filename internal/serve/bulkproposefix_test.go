@@ -222,3 +222,90 @@ func TestLanguagesWhole(t *testing.T) {
 		}
 	}
 }
+
+// TestTriesApart: an agent asking again and again uses up its own tries,
+// not those of the person it acts for: where no one is named, everyone is
+// "anonymous", and an agent's refusals would otherwise lock every person
+// out of proposing for an hour, with nothing in the ledger to show for it.
+func TestTriesApart(t *testing.T) {
+	s := proposeServer(t, nil)
+	ctx := context.Background()
+	same := ask{Rule: "BulkB", Kind: ledger.KindFor, For: 15 * time.Minute, From: "agent"}
+	for i := range triesAnHour {
+		if _, err := s.propose(ctx, same, "anonymous", true, true); err == nil || !strings.Contains(err.Error(), "that is its for already") {
+			t.Fatalf("an agent's try %d: %v", i, err)
+		}
+	}
+	if _, err := s.propose(ctx, same, "anonymous", true, true); err != errTooManyTries {
+		t.Errorf("past its tries, an agent: %v", err)
+	}
+	if _, err := s.propose(ctx, ask{Rule: "BulkD", Kind: ledger.KindFor, For: 10 * time.Minute, From: "person"}, "anonymous", false, true); err != nil {
+		t.Errorf("the person, after their agent's tries: %v", err)
+	}
+}
+
+// TestTriesAtTheRead: a try is counted only when the rules are read again:
+// a proposal refused before (a rule not in effect, one waiting already)
+// costs none.
+func TestTriesAtTheRead(t *testing.T) {
+	s := proposeServer(t, nil)
+	h := s.Handler()
+	for i := range triesAnHour + 5 {
+		if code, _, _ := postAs(t, h, "/proposals", url.Values{"rule": {"Gone"}, "kind": {"for"}, "for": {"10m"}}, bo, "same-origin"); code != http.StatusBadRequest {
+			t.Fatalf("try %d: %d", i, code)
+		}
+	}
+	if code, body, _ := postAs(t, h, "/proposals", url.Values{"rule": {"BulkD"}, "kind": {"for"}, "for": {"10m"}}, bo, "same-origin"); code != http.StatusSeeOther {
+		t.Errorf("after refusals that read nothing again: %d %.200s", code, body)
+	}
+}
+
+// TestRefusedWithoutWaiting: a reader past the hour's twenty, or past
+// their tries, is refused before waiting for the heavy turn, by the bulk
+// proposal and the single form alike.
+func TestRefusedWithoutWaiting(t *testing.T) {
+	s := proposeServer(t, nil)
+	ctx := context.Background()
+	was, wasTime := busyWait, proposeTime
+	defer func() { busyWait, proposeTime = was, wasTime }()
+	busyWait, proposeTime = 10*time.Second, 10*time.Second
+	for i := range ledger.ProposalsAnHour {
+		if _, err := s.l.Propose(ctx, ledger.Proposal{Rule: fmt.Sprint("Other", i), Kind: ledger.KindFor, Path: ledger.PathNone, MadeBy: bo}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range triesAnHour {
+		s.tries.take(ana, false, time.Now())
+	}
+	s.heavy <- struct{}{} // another heavy request's
+	defer func() { <-s.heavy }()
+	h := s.Handler()
+	for _, c := range []struct {
+		who, want string
+	}{{bo, "limit=3"}, {ana, "tries=3"}} {
+		began := time.Now()
+		_, _, hd := postAs(t, h, "/rules/bulk", url.Values{"do": {"propose"}, "propose": {"for"}, "for": {"10m"}, "rule": {"BulkA", "BulkB", "BulkD"}, "back": {"/rules"}}, c.who, "same-origin")
+		if took := time.Since(began); took > 2*time.Second || !strings.Contains(hd.Get("Location"), c.want) {
+			t.Errorf("%s's bulk: %s after %s", c.who, hd.Get("Location"), took)
+		}
+		began = time.Now()
+		code, _, _ := postAs(t, h, "/proposals", url.Values{"rule": {"BulkD"}, "kind": {"for"}, "for": {"10m"}}, c.who, "same-origin")
+		if took := time.Since(began); took > 2*time.Second || code != http.StatusTooManyRequests {
+			t.Errorf("%s's single: %d after %s", c.who, code, took)
+		}
+	}
+}
+
+// TestRetireNotAFormKind: retiring as propose decides it is the bulk
+// proposal's and MCP's; a rule's page's form names its kind, and one
+// sending "retire" is refused, nothing made.
+func TestRetireNotAFormKind(t *testing.T) {
+	s := proposeServer(t, nil)
+	before := len(proposalsKept(t, s))
+	if code, _, _ := postAs(t, s.Handler(), "/proposals", url.Values{"rule": {"BulkD"}, "kind": {"retire"}}, bo, "same-origin"); code != http.StatusBadRequest {
+		t.Errorf("kind=retire: %d", code)
+	}
+	if n := len(proposalsKept(t, s)); n != before {
+		t.Errorf("%d proposals, not %d", n, before)
+	}
+}

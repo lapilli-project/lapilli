@@ -487,8 +487,9 @@ func TestBulkProposeTimeUp(t *testing.T) {
 	}()
 	s.Handler().ServeHTTP(httptest.NewRecorder(), r)
 	<-s.heavy
-	if !strings.Contains(logs.String(), "a proposal for the rules picked stopped: its request ended") {
-		t.Errorf("a request ended isn't logged: %s", logs.String())
+	if l := logs.String(); !strings.Contains(l, "a proposal for the rules picked stopped: its request ended") || !strings.Contains(l, "failed=") ||
+		!strings.Contains(l, `"not tried, time up"=`) {
+		t.Errorf("a request ended isn't logged, with what became of each: %s", l)
 	}
 }
 
@@ -631,7 +632,11 @@ func TestProposeWhyKept(t *testing.T) {
 
 // refusalsOf are the texts bad is called with, as written, in the function
 // or method of this package named root and what it calls of this package,
-// transitively (by name: a method of any type with the name), with where.
+// or refers to as a method value, transitively (by name: a method of any
+// type with the name), with where. A function passed by its bare name, as
+// a value, isn't followed. A refusal it can't read the text of (bad
+// called with other than a string as written, a badRequest made by hand)
+// fails the test: say it in proposeWhy's terms, or write it as a string.
 func refusalsOf(t *testing.T, root string) map[string][]string {
 	t.Helper()
 	fset := gotoken.NewFileSet()
@@ -664,23 +669,33 @@ func refusalsOf(t *testing.T, root string) map[string][]string {
 		seen[name] = true
 		for _, fd := range funcs[name] {
 			ast.Inspect(fd.Body, func(n ast.Node) bool {
-				c, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				switch fn := c.Fun.(type) {
-				case *ast.Ident:
-					if fn.Name == "bad" && len(c.Args) > 0 {
-						if lit, ok := c.Args[0].(*ast.BasicLit); ok {
-							text, _ := strconv.Unquote(lit.Value)
-							out[text] = append(out[text], name)
+				switch x := n.(type) {
+				case *ast.CallExpr:
+					if id, ok := x.Fun.(*ast.Ident); ok && id.Name != "bad" && funcs[id.Name] != nil {
+						walk(id.Name)
+					}
+					// A method called on whatever else (a target, a value of
+					// another type of this package).
+					if sel, ok := x.Fun.(*ast.SelectorExpr); ok && funcs[sel.Sel.Name] != nil {
+						walk(sel.Sel.Name)
+					}
+					if id, ok := x.Fun.(*ast.Ident); ok && id.Name == "bad" && len(x.Args) > 0 {
+						lit, ok := x.Args[0].(*ast.BasicLit)
+						if !ok || lit.Kind != gotoken.STRING {
+							t.Errorf("%s: %s refuses with bad and a text not written there", fset.Position(x.Pos()), name)
+							return true
 						}
-					} else if funcs[fn.Name] != nil {
-						walk(fn.Name)
+						text, _ := strconv.Unquote(lit.Value)
+						out[text] = append(out[text], name)
+					}
+				case *ast.CompositeLit:
+					if id, ok := x.Type.(*ast.Ident); ok && id.Name == "badRequest" {
+						t.Errorf("%s: %s makes a badRequest by hand", fset.Position(x.Pos()), name)
 					}
 				case *ast.SelectorExpr:
-					if funcs[fn.Sel.Name] != nil {
-						walk(fn.Sel.Name)
+					// Called, or the server's method as a value.
+					if id, ok := x.X.(*ast.Ident); ok && id.Name == "s" && funcs[x.Sel.Name] != nil {
+						walk(x.Sel.Name)
 					}
 				}
 				return true

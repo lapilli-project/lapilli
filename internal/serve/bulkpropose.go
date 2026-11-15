@@ -200,7 +200,8 @@ func (s *Server) bulkPropose(w http.ResponseWriter, r *http.Request, rules []str
 	if err := ctx.Err(); err != nil {
 		// A proxy's timeout, the reader gone, the server stopping: what
 		// was made is kept, and no one is told but here.
-		s.log.Warn("a proposal for the rules picked stopped: its request ended", "made", res.Done, "not tried", res.Untried, "err", err)
+		s.log.Warn("a proposal for the rules picked stopped: its request ended", "made", res.Done, "failed", res.Failed,
+			"not tried", res.Untried, "not tried, time up", res.Late, "err", err)
 	}
 	back(w, r, bulkBack(from, "/rules", "propose", res))
 }
@@ -256,6 +257,9 @@ var errTimeUp = errors.New("the time for one request is up")
 // proposeUntil is a proposal as a rule's page's form makes it (proposeOne),
 // for a bulk proposal: its wait for the heavy turn ends at until, errTimeUp.
 func (s *Server) proposeUntil(ctx context.Context, until time.Time, q ask, by string) (int64, error) {
+	if err := s.mayPropose(ctx, q.Rule, by, false); err != nil {
+		return 0, err // refused without waiting for the heavy turn
+	}
 	wait, cancel := context.WithDeadline(ctx, until)
 	defer cancel()
 	done, err := s.busy(wait)
@@ -274,6 +278,9 @@ func (s *Server) proposeUntil(ctx context.Context, until time.Time, q ask, by st
 // holding no turn to be worked out meanwhile, and given back once it is
 // made.
 func (s *Server) proposeOne(ctx context.Context, q ask, by string) (int64, error) {
+	if err := s.mayPropose(ctx, q.Rule, by, false); err != nil {
+		return 0, err // refused without waiting for the heavy turn
+	}
 	done, err := s.busy(ctx)
 	if err != nil {
 		return 0, err

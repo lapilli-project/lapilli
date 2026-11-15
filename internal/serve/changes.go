@@ -639,29 +639,41 @@ func (s *Server) current(ctx context.Context, name string, fresh bool) (found, e
 		return found{}, bad("more than one rule in effect is called %q, alike in group and labels: change them where they are kept", name)
 	}
 	f := found{rule: all[i], name: name}
-	docs := full.Docs
 	if fresh {
-		rs, now, err := s.readRules(ctx)
-		if err != nil {
-			return found{}, err
-		}
-		j := slices.IndexFunc(rs, func(r rules.Rule) bool { return identity(r) == identity(f.rule) && r.Source == f.rule.Source })
-		if j < 0 {
-			return found{}, bad("the rule changed since it was read: try again in a minute")
-		}
-		f.rule, docs = rs[j], now
+		return s.reread(ctx, f)
 	}
-	// The document it was read from: of its source, and a Loki ruler's for
-	// a Loki ruler's rule, as one file can be read both ways (--rules and
-	// --loki-rules over one directory).
-	loki := f.rule.Logs != "" && f.rule.Graph == nil
-	for _, d := range docs {
-		if d.Source == f.rule.Source && (d.Logs != "") == loki {
-			f.doc = d
-			break
-		}
-	}
+	f.doc = docOf(f.rule, full.Docs)
 	return f, nil
+}
+
+// reread is a rule in effect, f, as the rules read again from where they
+// are kept have it, and the document it was read from now: the live read,
+// of Grafana, a ruler, a cloud's alarms or the files.
+func (s *Server) reread(ctx context.Context, f found) (found, error) {
+	rs, now, err := s.readRules(ctx)
+	if err != nil {
+		return found{}, err
+	}
+	j := slices.IndexFunc(rs, func(r rules.Rule) bool { return identity(r) == identity(f.rule) && r.Source == f.rule.Source })
+	if j < 0 {
+		return found{}, bad("the rule changed since it was read: try again in a minute")
+	}
+	f.rule = rs[j]
+	f.doc = docOf(f.rule, now)
+	return f, nil
+}
+
+// docOf is the document a rule was read from, of docs: of its source, and
+// a Loki ruler's for a Loki ruler's rule, as one file can be read both ways
+// (--rules and --loki-rules over one directory).
+func docOf(r rules.Rule, docs []rules.Doc) rules.Doc {
+	loki := r.Logs != "" && r.Graph == nil
+	for _, d := range docs {
+		if d.Source == r.Source && (d.Logs != "") == loki {
+			return d
+		}
+	}
+	return rules.Doc{}
 }
 
 // grafanaKept reports whether a rule was read from Grafana's API: kept
@@ -700,18 +712,23 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 		return 0, err
 	}
 	// Before the rules are read again and the backtest runs: a proposal
-	// the ledger would refuse costs nothing.
-	if err := s.l.MayPropose(ctx, q.Rule, by); err != nil {
+	// the ledger would refuse costs nothing, nor one of a rule not in
+	// effect as the rules read last have it.
+	if err := s.mayPropose(ctx, q.Rule, by, agent); err != nil {
+		return 0, err
+	}
+	f, err := s.current(ctx, q.Rule, false)
+	if err != nil {
 		return 0, err
 	}
 	// Reading the rules again, from where they are kept, costs whatever a
-	// proposal is refused for after it: a reader asks for triesAnHour at
-	// most, made or refused. Lapilli's own are bounded apart.
-	if by != ledger.Proposer && !s.tries.take(by, time.Now()) {
+	// proposal is refused for after it: each read is a try, a reader's
+	// triesAnHour at most, made or refused, their agents' apart from
+	// theirs. Lapilli's own are bounded apart.
+	if by != ledger.Proposer && !s.tries.take(by, agent, time.Now()) {
 		return 0, errTooManyTries
 	}
-	f, err := s.current(ctx, q.Rule, true)
-	if err != nil {
+	if f, err = s.reread(ctx, f); err != nil {
 		return 0, err
 	}
 	r := f.rule

@@ -548,6 +548,12 @@ func (s *Server) postProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := ask{Rule: r.PostFormValue("rule"), Kind: r.PostFormValue("kind"), From: "person"}
+	if q.Kind == kindRetire {
+		// The bulk proposal's and MCP's: a rule's page's form names the
+		// kind it proposes.
+		s.oops(w, r, bad("a proposal's kind is for, threshold, disable, delete or says"))
+		return
+	}
 	if v := r.PostFormValue("for"); v != "" {
 		d, err := ParseDuration(v)
 		if err != nil {

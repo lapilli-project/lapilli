@@ -658,8 +658,9 @@ const rowChips = 5
 // too, made from what was asked (rulesAsk), as a chip's link is: a
 // canonical URL, which the page doesn't send on. One in the search
 // already is drawn so, and isn't a link; nor is one the search couldn't
-// take: a value with a quote, which the box can't write, or a search past
-// its words, its length, or a page past its query.
+// take, reading what the link writes back as another filter or none
+// (picksLabel), or a search past its words, its length, or a page past its
+// query.
 func (a rulesAsk) chipsOf(labels map[string]string) (shown, more []labelChip) {
 	if len(labels) == 0 {
 		return nil, nil
