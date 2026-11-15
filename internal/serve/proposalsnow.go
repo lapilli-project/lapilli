@@ -348,7 +348,7 @@ func (s *Server) proposalsNow(ctx context.Context, ls []proposalLine, rd *readin
 		now := false
 		if bt != nil {
 			now = !kept[spanOf(bt)]
-			l.NoRecord = now
+			l.NoRecord = now && !bt.judgedSome()
 			if bt.NoRecord != nil {
 				l.NoRecord = *bt.NoRecord
 			}
@@ -400,15 +400,28 @@ func (s *Server) linesNow(ctx context.Context, ps []ledger.Proposal) ([]proposal
 	return ls, s.proposalsNow(ctx, ls, rd)
 }
 
+// judgedSome reports whether a backtest judged some of its firings: one
+// caught an incident, or an incident was caught otherwise, missed or
+// caught later. Its period had a record then, whatever the ledger says of
+// it now (an incident since taken away): one made before it kept no_record
+// isn't taken as having none.
+func (bt *backtest) judgedSome() bool {
+	return bt.Before.White > 0 || bt.After.White > 0 || len(bt.Lost)+len(bt.Gained)+len(bt.Later) > 0
+}
+
 // spanNoRecord reports whether a backtest's period had no record: as the
-// backtest kept it, or, of one made before it kept it, as the ledger has
-// the period now. An undo's page reads it of the change it undoes.
+// backtest kept it, or, of one made before it kept it and judged none of
+// its firings, as the ledger has the period now. An undo's page reads it
+// of the change it undoes.
 func (s *Server) spanNoRecord(ctx context.Context, bt *backtest) (bool, error) {
 	if bt == nil {
 		return false, nil
 	}
 	if bt.NoRecord != nil {
 		return *bt.NoRecord, nil
+	}
+	if bt.judgedSome() {
+		return false, nil
 	}
 	o, err := s.options(ctx)
 	if err != nil {

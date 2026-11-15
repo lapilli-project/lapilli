@@ -704,3 +704,41 @@ func TestFlightsOnce(t *testing.T) {
 		t.Errorf("asked again once done: %d", v)
 	}
 }
+
+// TestOldNoRecordJudged: a backtest made before no_record was kept that
+// caught an incident, or would miss one, judged its firings: its period
+// had a record then, whatever the ledger says of it now, and its page
+// says what it would miss, never that its firings were counted, not
+// judged.
+func TestOldNoRecordJudged(t *testing.T) {
+	ctx := context.Background()
+	s, _ := restartsServer(t, nil)
+	f, err := s.current(ctx, "RestartsNow", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hour := time.Hour
+	for _, bt := range []backtest{
+		{Before: side{Firings: 141, White: 2}, After: side{Firings: 3, White: 1}, Lost: []string{"INC-9"}, Gained: []string{}, Later: []string{}},
+		{Before: side{Firings: 141}, After: side{Firings: 3}, Lost: []string{}, Gained: []string{"INC-9"}, Later: []string{}},
+	} {
+		bt.From, bt.To = unrecordedFrom, unrecordedTo
+		ev, _ := json.Marshal(evidence{From: "suggestion", Edit: &rules.Edit{Name: "RestartsNow", Group: "pods", For: &hour}, For: hour, Backtest: &bt})
+		id, err := s.l.Propose(ctx, ledger.Proposal{Rule: "RestartsNow", Kind: ledger.KindFor, Path: ledger.PathNone, MadeBy: ledger.Proposer,
+			Before: ruleText(f.rule), BeforeHash: ruleHash(f.rule), After: "for: 1h\n", Evidence: ev})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ls, err := s.linesNow(ctx, []ledger.Proposal{state(t, s, id)})
+		if err != nil || ls[0].NoRecord {
+			t.Errorf("%+v: taken as having no record: %v", bt, err)
+		}
+		if _, body, _ := ui(t, s.Handler(), http.MethodGet, "/proposals/"+itoa(id), cy, "", nil); strings.Contains(body, "counted, not judged") {
+			t.Errorf("%+v: its page says it was counted, not judged", bt)
+		}
+		if no, err := s.spanNoRecord(ctx, &bt); err != nil || no {
+			t.Errorf("%+v: an undo's page would take it as having no record", bt)
+		}
+		s.l.Move(ctx, id, []string{ledger.StateProposed}, ledger.StateDropped, "ana", ledger.Step{})
+	}
+}
