@@ -1606,5 +1606,7 @@
  "it has no backtest to run again: only a new for or a new threshold is backtested": "다시 돌릴 백테스트가 없어요. 새 for 나 새 임계값만 백테스트해요",
  "the rule changed since it was proposed, so the proposal no longer applies to the rule as it is: propose it again from the rule's page": "제안한 뒤 규칙이 바뀌어서, 이 제안은 지금 규칙에 더 이상 맞지 않아요. 규칙 화면에서 다시 제안하세요",
  "it is stale, so it isn't approved until it is backtested again: backtest it again from its page, then approve it": "오래된 제안이라 다시 백테스트하기 전에는 승인할 수 없어요. 제안 화면에서 다시 백테스트한 뒤 승인하세요",
- "Show the stale ones alone": "오래된 제안만 보기"
+ "Show the stale ones alone": "오래된 제안만 보기",
+ "An earlier backtest of it, before it was backtested again, said that as proposed it misses:": "다시 백테스트하기 전의 백테스트는 제안대로면 다음을 놓친다고 했어요:",
+ "It said that as proposed it misses:": "제안대로면 놓친다고 한 인시던트:"
 }

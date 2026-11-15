@@ -370,6 +370,33 @@ func (s *Server) proposalsNow(ctx context.Context, ls []proposalLine, rd *readin
 	return nil
 }
 
+// EarlierMissed are the incidents an earlier backtest said the change
+// misses that its backtest now doesn't name: said on its page, in its pull
+// request's description and through MCP, beside those it does.
+func (ev evidence) EarlierMissed() []string {
+	var out []string
+	for _, id := range ev.EarlierLost {
+		if ev.Backtest == nil || !slices.Contains(ev.Backtest.Lost, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// earlierLost are the incidents ev's backtests, this one and those before
+// it, said the change misses, each once, as a backtest run again keeps them.
+func earlierLost(ev evidence) []string {
+	out := slices.Clone(ev.EarlierLost)
+	if ev.Backtest != nil {
+		for _, id := range ev.Backtest.Lost {
+			if !slices.Contains(out, id) {
+				out = append(out, id)
+			}
+		}
+	}
+	return out
+}
+
 // staleText is why a proposal is stale, in English, as JSON, the API and
 // MCP give it: its rule changed since, of one not finished with (Stale), or
 // why, waiting for approval, it waits to be backtested again; "" for
@@ -524,6 +551,7 @@ func (s *Server) backtestAgain(ctx context.Context, id int64, by string, agent b
 	}
 	again := ev
 	again.Backtest, again.Semantics, again.Version, again.Outlasts = bt, verdict.Semantics, s.versionOf(), nil
+	again.EarlierLost = earlierLost(ev)
 	if p.Kind == ledger.KindFor {
 		if w, ok := want.ForOutlasts(); ok {
 			again.Outlasts = &verdict.Outlast{For: want.For, Window: w}

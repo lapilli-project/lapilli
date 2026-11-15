@@ -643,6 +643,10 @@ func (s *Server) prBody(l proposalLine) string {
 		}
 		b.WriteString("\n\n")
 	}
+	if ids := ev.EarlierMissed(); len(ids) > 0 {
+		// As code, as an incident's ID is below: nothing in it read as markdown.
+		fmt.Fprintf(&b, "An earlier backtest said that as proposed it misses: %s.\n\n", "`"+strings.Join(ids, "`, `")+"`")
+	}
 	if rec := ev.Record; rec != nil {
 		fmt.Fprintf(&b, "Over %d weeks it fired %d times, %d catching an incident; it caught %d incidents, %d first, %d that no other rule caught.\n\n",
 			rec.Weeks, rec.Firings, rec.White, rec.Incidents, rec.First, rec.Alone)

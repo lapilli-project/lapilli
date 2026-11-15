@@ -1606,5 +1606,7 @@
  "it has no backtest to run again: only a new for or a new threshold is backtested": "no tiene backtest que repetir: solo se hace backtest de un nuevo for o un nuevo umbral",
  "the rule changed since it was proposed, so the proposal no longer applies to the rule as it is: propose it again from the rule's page": "la regla cambió desde que se propuso, así que la propuesta ya no se aplica a la regla tal como está: proponla de nuevo desde la página de la regla",
  "it is stale, so it isn't approved until it is backtested again: backtest it again from its page, then approve it": "está desactualizada, así que no se aprueba hasta que se repita su backtest: repítelo desde su página y luego apruébala",
- "Show the stale ones alone": "Mostrar solo las desactualizadas"
+ "Show the stale ones alone": "Mostrar solo las desactualizadas",
+ "An earlier backtest of it, before it was backtested again, said that as proposed it misses:": "Un backtest anterior, antes de repetirlo, dijo que con la propuesta no detecta:",
+ "It said that as proposed it misses:": "Dijo que con la propuesta no detecta:"
 }

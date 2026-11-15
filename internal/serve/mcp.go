@@ -716,6 +716,8 @@ type proposalBacktestOut struct {
 	Missed   []string  `json:"missed,omitempty" jsonschema:"incidents it catches as it is and would miss as proposed"`
 	Gained   []string  `json:"gained,omitempty" jsonschema:"incidents it misses as it is and would catch as proposed"`
 	Later    []string  `json:"later,omitempty" jsonschema:"incidents it would catch later as proposed"`
+	// EarlierMissed are those an earlier backtest said it misses.
+	EarlierMissed []string `json:"earlier_missed,omitempty" jsonschema:"incidents an earlier backtest of it, before it was backtested again, said it misses as proposed, which this one doesn't name: the twelve weeks moved on past them"`
 }
 
 // proposalBacktestOf is a proposal's backtest for MCP, nil for none.
@@ -724,7 +726,8 @@ func proposalBacktestOf(l proposalLine) *proposalBacktestOut {
 	if bt == nil || !backtested(l.Kind) {
 		return nil
 	}
-	out := &proposalBacktestOut{From: bt.From, To: bt.To, Fired: [2]int{bt.Before.Firings, bt.After.Firings}, NoRecord: l.NoRecord}
+	out := &proposalBacktestOut{From: bt.From, To: bt.To, Fired: [2]int{bt.Before.Firings, bt.After.Firings}, NoRecord: l.NoRecord,
+		EarlierMissed: proposalEvidence(l.Proposal).EarlierMissed()}
 	if !l.NoRecord {
 		out.Caught = &[2]int{bt.Before.White, bt.After.White}
 		out.Missed, out.Gained, out.Later = bt.Lost, bt.Gained, bt.Later

@@ -1606,5 +1606,7 @@
  "it has no backtest to run again: only a new for or a new threshold is backtested": "やり直すバックテストがありません。バックテストするのは新しい for か新しいしきい値だけです",
  "the rule changed since it was proposed, so the proposal no longer applies to the rule as it is: propose it again from the rule's page": "提案後にルールが変更されたため、この提案は現在のルールにはもう当てはまりません。ルールのページから提案し直してください",
  "it is stale, so it isn't approved until it is backtested again: backtest it again from its page, then approve it": "古い提案のため、バックテストをやり直すまで承認できません。提案のページでバックテストをやり直してから承認してください",
- "Show the stale ones alone": "古い提案だけを表示"
+ "Show the stale ones alone": "古い提案だけを表示",
+ "An earlier backtest of it, before it was backtested again, said that as proposed it misses:": "やり直す前のバックテストでは、提案どおりだと次を見逃すとされていました:",
+ "It said that as proposed it misses:": "提案どおりだと見逃すとしたもの:"
 }

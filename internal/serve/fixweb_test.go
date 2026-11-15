@@ -147,7 +147,8 @@ func TestFixTextsTranslated(t *testing.T) {
 		// A proposal stale, or backtested again (proposalsNow).
 		staleRule, staleNoVersion, staleVersion, staleRecorded, staleUnrecorded, staleNotice, "No proposal waiting for approval is stale.",
 		"Held until it is backtested again: it is stale", "Backtest again", "Backtested again by %s",
-		"The %d approvals it had were taken back: approve it again."} {
+		"The %d approvals it had were taken back: approve it again.",
+		"An earlier backtest of it, before it was backtested again, said that as proposed it misses:", "It said that as proposed it misses:"} {
 		texts[x] = true
 	}
 	for x := range texts {

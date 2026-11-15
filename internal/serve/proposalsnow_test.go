@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -740,5 +741,53 @@ func TestOldNoRecordJudged(t *testing.T) {
 			t.Errorf("%+v: an undo's page would take it as having no record", bt)
 		}
 		s.l.Move(ctx, id, []string{ledger.StateProposed}, ledger.StateDropped, "ana", ledger.Step{})
+	}
+}
+
+// TestEarlierMissKept: a backtest run again over the twelve weeks to now
+// can leave out an incident the one before it said the change misses, as
+// the weeks move on. The proposal keeps it, and says so on its page, in
+// its pull request's description and through MCP; its history says what
+// the backtest replaced named; and what is checked again when it is
+// carried out isn't refused for missing it, which was said.
+func TestEarlierMissKept(t *testing.T) {
+	ctx := context.Background()
+	s, _ := restartsServer(t, nil)
+	h := s.Handler()
+	id := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
+	p := state(t, s, id)
+	ev := proposalEvidence(p)
+	ev.Backtest.Before.White, ev.Backtest.Lost, ev.Backtest.Later = 3, []string{"INC-OLD"}, []string{"INC-LATE"}
+	raw, _ := json.Marshal(ev)
+	ledgerExec(t, s, "UPDATE proposals SET evidence = ? WHERE id = ?", string(raw), id)
+	if code, body, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(id)+"/backtest", bo, "same-origin", url.Values{}); code != http.StatusSeeOther {
+		t.Fatalf("backtesting again: %d %s", code, body)
+	}
+	p = state(t, s, id)
+	if got := proposalEvidence(p); len(got.EarlierLost) != 1 || got.EarlierLost[0] != "INC-OLD" || slices.Contains(got.Backtest.Lost, "INC-OLD") {
+		t.Fatalf("kept: %s", p.Evidence)
+	}
+	_, page, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(id), cy, "", nil)
+	for _, want := range []string{"An earlier backtest of it, before it was backtested again, said that as proposed it misses: <a href=\"/incidents/INC-OLD\"><bdi>INC-OLD</bdi></a>.",
+		"It said that as proposed it misses: <a href=\"/incidents/INC-OLD\"><bdi>INC-OLD</bdi></a>.", "Caught later as proposed: <a href=\"/incidents/INC-LATE\"><bdi>INC-LATE</bdi></a>."} {
+		if !strings.Contains(page, want) {
+			t.Errorf("its page doesn't say %q", want)
+		}
+	}
+	if pr := bodyOf(t, s, p); !strings.Contains(pr, "An earlier backtest said that as proposed it misses: `INC-OLD`.") {
+		t.Errorf("its description:\n%s", pr)
+	}
+	_, out, err := s.toolRule(ctx, nil, ruleIn{Name: "RestartsNow"})
+	if err != nil || len(out.Proposals) != 1 || out.Proposals[0].Backtest == nil || !slices.Equal(out.Proposals[0].Backtest.EarlierMissed, []string{"INC-OLD"}) {
+		t.Errorf("MCP: %+v %v", out.Proposals, err)
+	}
+	// Checked again: an incident an earlier backtest named was approved
+	// as missed; one none named is refused.
+	was := proposalEvidence(p)
+	if why := worse(was, evidence{Backtest: &backtest{Lost: []string{"INC-OLD"}}}); why != "" {
+		t.Errorf("missing what an earlier backtest said: %q", why)
+	}
+	if why := worse(was, evidence{Backtest: &backtest{Lost: []string{"INC-NEW"}}}); why == "" {
+		t.Error("missing what none said: not refused")
 	}
 }

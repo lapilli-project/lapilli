@@ -535,6 +535,11 @@ type evidence struct {
 	Outlasts *verdict.Outlast `json:"for_outlasts,omitempty"`
 	// Backtest is the change replayed: a for or a threshold.
 	Backtest *backtest `json:"backtest,omitempty"`
+	// EarlierLost are the incidents a backtest it had before it was
+	// backtested again said it misses as proposed, each kept for good: the
+	// twelve weeks to now can leave one out as they move on, and it is
+	// still one the change would have missed (EarlierMissed).
+	EarlierLost []string `json:"earlier_lost,omitempty"`
 	// Finding is the content check's finding a change to what a rule says
 	// answers, when it answers one.
 	Finding *contentFinding `json:"finding,omitempty"`
@@ -1261,7 +1266,9 @@ func worse(was, now evidence) string {
 			return "the backtest didn't finish within --timeout, so the change couldn't be checked again"
 		}
 		for _, id := range now.Backtest.Lost {
-			if !slices.Contains(was.Backtest.Lost, id) {
+			// What was approved said it misses those its backtest named,
+			// and those an earlier one did.
+			if !slices.Contains(was.Backtest.Lost, id) && !slices.Contains(was.EarlierLost, id) {
 				return fmt.Sprintf("the backtest now says it would miss %s, which the rule catches as it is", id)
 			}
 		}
