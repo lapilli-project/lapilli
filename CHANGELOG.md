@@ -2,6 +2,69 @@
 
 ## [Unreleased]
 
+A deployment upgraded to 0.41.0 had a proposal 0.40 made still waiting:
+the restart rule's `for`, 1m → 1h, from 0.40's suggestion. Its page said
+nothing of a `for` one event can't outlast, as that was worked out only
+when a proposal was made, and its backtest still said 141 firings → 3,
+better, of weeks with no incident written down, where fewer may be the
+restarts hidden. Now what a proposal's evidence says is worked out when it
+is read, whatever lapilli made it; a backtest with no record is counted,
+not judged; and a proposal whose backtest another version ran, or whose
+period's record changed since, waits to be backtested again before anyone
+approves it. No schema change: what is kept is in a proposal's evidence.
+JSON, the API and MCP add fields; MCP's `stale` is a string now.
+
+### Added
+
+- **A proposal read as it is now.** On its page, the proposals list, a
+  rule's proposals tab, its pull request's description, the API and MCP,
+  a proposal of a `for` says whether one event can outlast it
+  (`for_outlasts`), worked out from the rule it was made against, which
+  its hash names, with the `for` proposed, as carrying it out makes the
+  rule: of the rule in effect, or of the version in effect when it was
+  made; one whose rule neither has says what it kept. Each proposal's is
+  worked out once while serve runs. Whether its backtest's period had an
+  incident written down to judge its firings by (`no_record`) is kept with
+  each backtest from now on, as the ledger has the period when it runs
+  (`ledger.RecordKept`), and worked out from the ledger for one made before.
+  `GET /api/v1/proposals` and `/api/v1/proposals/{id}` add `stale`,
+  `for_outlasts` and `no_record`; MCP's `rule` gives each proposal's
+  backtest (`backtest`: its firings, and, with a record, what it caught,
+  missed and caught later).
+- **A backtest with no record is counted, not judged.** Its table says
+  once that no incident was written down, or found by `--impact`, in the
+  period or the two weeks before it: "the firings are counted, not judged.
+  Fewer firings aren't better, nor more worse: fewer may be events that
+  happened, hidden." 141 → 3 is −138, neither better nor worse, and what
+  was caught or missed is "–". Its pull request's description says it as
+  `--compare` does of such a period, with no "catching an incident", and
+  MCP gives its firings alone, with `no_record`.
+- **Stale proposals, backtested again.** A proposal waiting for approval
+  whose backtest was run by another minor version of lapilli, or by one
+  that kept none (`version` in its evidence, kept from now on), or whose
+  period's record changed since (an incident written down in it, or none
+  keeping it any more), is stale: its page says why, the list has a badge
+  and links to `/proposals?stale=1`, which lists the stale ones (with those
+  whose rule changed since), and `stale` says why in the API and MCP. It
+  isn't approved until it is backtested again: its page shows the button
+  disabled, with why, and the server refuses it. An editor backtests it
+  again from its page (`POST /proposals/{id}/backtest`, asked for as a
+  proposal is: the role, from this site, and the tries an hour, read
+  again where it is kept), and an agent with `--mcp-propose`, through
+  `backtest_again`, its tries counted apart from its person's: the change
+  replayed with this lapilli against the rule in effect, over the twelve
+  weeks to now. The backtest it replaces is kept in the proposal's
+  history, with who backtested it again, and an approval given to that
+  one is taken back. Refused when the rule changed since: propose it again.
+
+### Changed
+
+- MCP's `stale` on a proposal is why it is stale, a string, where it was
+  `true`: the rule changed since it was proposed, as before, or why it
+  waits to be backtested again.
+- The proposals list reads, in brief, the evidence of a proposal of a new
+  `for` and of one waiting for approval, beside an undo's.
+
 ## [0.42.0] - 2026-11-16
 
 First use: what a first-time reader got stuck on, on a real deployment

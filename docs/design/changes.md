@@ -78,7 +78,7 @@ them from what it already finds; a person or an agent can make one too.
 
 | Kind | From | Evidence attached |
 |---|---|---|
-| A longer `for` | a noisy rule's suggestion (`verdict.Suggestion`): none in a week with no record, and none as long as the range a rule that counts events counts over | the backtest over twelve weeks: firings before and after, incidents caught and how much later; and, for a `for` one event can't outlast (`rules.Rule.ForOutlasts`), what it means (`for_outlasts`), shown on its page and in its pull request's description |
+| A longer `for` | a noisy rule's suggestion (`verdict.Suggestion`): none in a week with no record, and none as long as the range a rule that counts events counts over | the backtest over twelve weeks: firings before and after, incidents caught and how much later; and, for a `for` one event can't outlast (`rules.Rule.ForOutlasts`), what it means (`for_outlasts`), worked out when it is read ("Read when shown"), shown on its page and in its pull request's description |
 | A nearer threshold, or a shorter `for` | a near miss for an incident nothing caught | the incident, the value it reached, and the backtest of the new threshold over twelve weeks |
 | Retire (disable, then delete) | a spare rule, or one that never fired | twelve weeks of firings, what caught each of its incidents first; and the caveat, shown, that a rule may wait for a rare incident and that incidents nobody wrote down count against it |
 | A fix to what it says | the content check ([content.md](content.md)) | the finding: a missing runbook link, a template naming a label the expression drops |
@@ -542,6 +542,58 @@ The first step, for v0.22.0, as above, except:
   not only when it fires; and as it makes no new version of the rules, it
   is applied when the rules read next say it. In Grafana the one
   annotation is set or taken out, the rest of the rule as Grafana gave it.
+- **Read when shown** (the release after 0.41.0). What a proposal's
+  evidence says is worked out again whenever it is read, on its page, the
+  proposals list, a rule's proposals tab, its pull request's description
+  (the recipes' too), the API and MCP, whatever lapilli made it: kept when
+  it was made, it would say what that lapilli worked out (`proposalsNow`).
+  - **`for_outlasts`**, of a new `for`: the rule it was made against, by
+    the hash it kept, in the rules in effect or else the version in effect
+    when it was made, with the `for` proposed, as carrying it out makes the
+    rule (`proposedRule`, which `checkEvidence` uses too). The rule texts a
+    proposal keeps are for people, never parsed. One whose rule neither
+    has says what its evidence kept. Worked out once a proposal (its id and
+    hashes) while serve runs, at most 20,000 kept, so a list reads an older
+    version once, not on every request.
+  - **`no_record`**: a backtest keeps whether its period had a record, as
+    the ledger says (`ledger.RecordKept`: an incident on in one of its
+    weeks or the two weeks before, or `--impact` read over one); one made
+    before is worked out from the ledger for its own `from` and `to`. All
+    of a page's are read in one read of the incidents around them.
+  - **Stale**, waiting for approval, with a backtest: its `version` (the
+    lapilli that ran it, `Config.Version`, kept from now on) none, or of
+    another minor version (0.41.0 and 0.41.2 are one; 0.40 and 0.41 are
+    two; a version that isn't one, `dev`, is compared whole); or its
+    record then not the ledger's now, for the same period. It isn't
+    approved until it is backtested again: the page offers no form, and
+    the server refuses an approval with a form shown before, 400. A
+    proposal whose rule changed since, as the rules in effect last
+    recorded have it (the latest version's hash; a change to what it says,
+    the rules read last), is stale as before: said, `stale` in JSON, and
+    refused when checked again, read where it is kept. Not held at
+    approval: that check lags a change Lapilli made through an API until
+    the rules are read next, and a hold on it would ask to propose again
+    a proposal that is as it was made. Lapilli's `--approvals` lowered
+    approves one with the approvals it has, stale or not, and it is then
+    backtested again as it is carried out.
+  - **Backtested again**, `POST /proposals/{id}/backtest`: an editor's, as
+    `POST /proposals` is (`write`, the same cross-origin check), counted
+    against the reader's tries an hour (`triesAnHour`) once the rule is
+    found in effect, under the heavy turn, one comparison at a time. The
+    rule is read again where it is kept and refused if it isn't the one
+    the proposal was made against ("propose it again"); else the change is
+    replayed over the twelve weeks to now, as a proposal's backtest is
+    (one shorter as the runs began later is as long as there are runs, not
+    as long as before), and its evidence kept in place of the old, with
+    this version, `no_record` and `for_outlasts` (`ledger.BacktestAgain`:
+    one write, refused if the proposal moved on or its evidence changed
+    meanwhile). The approvals it had were given to the backtest replaced,
+    so they are taken back, and the change keeps the old backtest, the
+    new one and how many approvals were taken back, which the history
+    shows. A proposal that isn't stale isn't backtested again; one without
+    a backtest has none to run. An agent backtests again with
+    `backtest_again`, only where `--mcp-propose` lets it propose, its
+    tries counted apart from its person's, as `propose` counts them.
 - **Not yet:** proposals in the weekly digest's tasks line, and a
   proposal carried by a task made elsewhere (a proposal can be made into a
   task).

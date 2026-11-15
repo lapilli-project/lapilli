@@ -639,7 +639,26 @@ dry run, its history), with the backtest in the dry run's place:
   that is the last row: no time is made up. One that misses an incident
   the rule catches now has a warning above the table naming it. Retiring a
   rule shows its record over the weeks it carries as a table instead; a
-  fix to what a rule says has nothing to backtest, and says so.
+  fix to what a rule says has nothing to backtest, and says so. Since the
+  release after 0.41.0, a backtest whose period had no incident written
+  down to judge its firings by (`no_record`, kept with it, or worked out
+  from the ledger for one made before) says so once above the table, that
+  its firings are counted, not judged, and fewer aren't better, nor more
+  worse; its firings' difference is a number with no word or colour
+  (`moved.Plain`), and what was caught or missed is "–", with no incident
+  named. A `for` one event can't outlast, as proposed, is worked out when
+  the page is read, whatever lapilli made it (changes.md, "Read when
+  shown").
+- **Stale**: one waiting for approval whose backtest another minor
+  version of lapilli ran, or one that kept no version, or whose period's
+  record changed since, says so at the top, "It is stale, so it isn't
+  approved until it is backtested again:" and why, with a link to its
+  backtest, where an editor has "Backtest again" (a form of its own, with
+  what it does: replayed with this lapilli over the twelve weeks to now,
+  the backtest replaced kept in the history, the approvals given to it
+  taken back), and anyone else the button disabled with why. Approving it
+  is shown disabled to an approver, "Held until it is backtested again:
+  it is stale". One whose rule changed since says so as before.
 - **An undo's page** says it puts back the rule as it was before the
   change it undoes, linked, and, when an agent proposed that change, for
   whom. Its backtest is that change's, read the other way, "With #n"
@@ -672,9 +691,12 @@ dry run, its history), with the backtest in the dry run's place:
   again as `--approvals` changed, each state it moved to (with the pull
   request's link, or why it was refused or failed), an approved change
   waiting while its rule fires ("waits: it fires now", with why), an undo
-  asked for, linked to it. Its making and approvals are the proposal's
-  own; the rest are the ledger's changes whose `what` is the proposal's
-  (`ProposalSteps`, an additive read by the changes' index on `what`),
+  asked for, linked to it, a backtest run again ("Backtested again by bo,
+  with lapilli v0.42.0", the backtest it replaced from when to when, with
+  its firings, and the approvals taken back). Its making and approvals are
+  the proposal's own; the rest are the ledger's changes whose `what` is
+  the proposal's (`ProposalSteps`, an additive read by the changes' index
+  on `what`),
   those older than `--keep` gone, and said so. A step is told by the
   fields its change keeps, never by its text: waiting while the rule fires
   is kept as a move from approved to approved, "proposal #N approved" as
@@ -723,13 +745,26 @@ each is a chip, "Proposals: #12", and the form and the other chips keep
 them; "Clear filters" takes them away. None of them there says so, "None of the proposals picked is
 here.", with Clear, not that there are none.
 
+`stale=1` picks those waiting for approval that are stale (backtested by
+another version, their period's record changed since, or their rule changed
+since), worked out as they are read: the 10,000 waiting moved last are
+read, with their evidence, and counted for the facets in Go, as the database
+would (`staleLines`, `countLines`). It is a flag (`pickFacet.flag`): no
+checkboxes, a chip, "Proposals: stale", carried by the form and the other
+links as `id=` is; none stale says so, "No proposal waiting for approval is
+stale.". A row waiting to be backtested again has a badge under its state,
+"⟳ stale: backtest it again", and the list links to `stale=1`, "Show the
+stale ones alone", when one it shows is stale. A row of a new `for` one
+event can't outlast says so under its change.
+
 Unless `state=` is given, the open ones, as the list was, those waiting for
 approval first. The form sends `state=all` with what is ticked, so none
 ticked is all of them; `?state=all`, `?state=applied` and `?state=refused`
 mean what they meant, and a state there is no such of (`?state=bogus`)
 shows none, as it did. The database picks the list, its states, kinds,
 ways and makers in the query, in brief (`ProposalList`: no document, only
-an undo's evidence, how many approved), and counts the facets with
+the evidence of an undo, a new `for` and one waiting for approval, how many
+approved), and counts the facets with
 `GROUP BY` (`ProposalCounts`), both additive reads: every proposal is
 counted however many there are, and newer ones, dropped by the thousand,
 never push an older one waiting for approval off the list. A team's are
@@ -801,6 +836,16 @@ takes 20 to 45 ms, a proposal's page 15 to 25 ms (one whose rule is 600
 lines a side, shown whole, too), a quiet window's preview 35 to 80 ms
 (every day, once over the four weeks, by cron), the tasks and the Manage
 page about a millisecond.
+
+What a proposal says when it is read costs, at a thousand rules that count
+events and a thousand proposals of a longer `for`, two thirds waiting
+(`TestProposalsNowScale`, worked out afresh, the median of seven, on a
+laptop): the proposals list 14.5 ms (12.6 before), with every state 13.6
+(11.7), `stale=1` 16 ms, its 667 waiting read and judged, and the API's
+list 12.6 ms (3.8), which now reads the rules in effect for whether each
+is stale, as the list did already. The record of the backtests' periods is
+one read of the incidents around them all, and a `for_outlasts` is worked
+out once a proposal.
 
 ## Many at once, and ways in
 

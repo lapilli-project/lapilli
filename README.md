@@ -1874,6 +1874,17 @@ Nothing is changed until a person approves it, on its page, in a browser:
 - The page shows the change as a diff and its backtest, now beside as
   proposed; approving, and asking for an undo, takes a box ticked, "I have
   read the backtest", which the server checks too.
+- What a proposal's evidence says is worked out when it is read, whatever
+  version of lapilli made it: whether its `for` is one one event can't
+  outlast, and whether its backtest's period had an incident written down
+  to judge its firings by. With none, the backtest counts its firings and
+  doesn't judge them: fewer aren't better, nor more worse.
+- A proposal waiting for approval whose backtest another minor version of
+  lapilli ran, or whose period's record changed since, is stale, and isn't
+  approved until it is backtested again: an editor does it from its page,
+  with this lapilli, over the twelve weeks to now, the old backtest kept in
+  its history and the approvals given to it taken back.
+  `/proposals?stale=1` lists the stale ones.
 
 `--changes` turns carrying them out on; without it Lapilli only proposes.
 With it, each approved change is checked again first: the rule is read
@@ -2028,7 +2039,8 @@ Nothing an agent asks for changes anything: `compare` replays and keeps
 nothing. With `--mcp-propose editors` (or `admins`), an eighth tool,
 `propose`, keeps a change to one rule, or to what it says, as a proposal ([above](#changing-rules)),
 marked as an agent's, for someone other than the person it acts for to
-approve in the UI. No tool approves or applies one.
+approve in the UI, and `backtest_again` backtests a stale proposal again,
+as an editor does from its page. No tool approves or applies one.
 
 - **Access.** Agents come through the same sign-in as the pages (with
   `--oidc-issuer`, an ID token as a bearer token), and
