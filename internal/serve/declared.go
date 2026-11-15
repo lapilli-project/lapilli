@@ -42,9 +42,11 @@ var configEvery = 15 * time.Second
 // configKeys are the keys of a --config file and of each thing in it, in
 // the order an export writes them.
 var configKeys = map[string][]string{
-	"":       {"teams", "windows", "reports", "grants"},
-	"team":   {"name", "rules", "labels", "note", "work_hours", "sleep_hours", "tz", "shifts"},
-	"window": {"title", "team", "start", "end", "every", "on", "until", "rules", "labels"},
+	"":     {"teams", "windows", "reports", "grants"},
+	"team": {"name", "rules", "labels", "note", "work_hours", "sleep_hours", "tz", "shifts"},
+	// A window's on is repeat_on: YAML 1.1, which Helm reads values by,
+	// takes a key on, unquoted, for true.
+	"window": {"title", "team", "start", "end", "every", "repeat_on", "until", "rules", "labels"},
 	"report": {"name", "team", "schedule", "span", "zone", "sections", "dests", "enabled"},
 	"grant":  {"user", "group", "team"},
 }
@@ -347,7 +349,7 @@ func parseWindow(n *yaml.Node, loc *time.Location, d *ledger.Declared) error {
 			w.End, err = when(key, v, loc)
 		case "every":
 			w.Every, err = text(key, v)
-		case "on":
+		case "repeat_on":
 			w.On, err = text(key, v)
 		case "until":
 			// A day, as the form's: its start in loc; or a time.

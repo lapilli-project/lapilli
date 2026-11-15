@@ -281,8 +281,10 @@ doesn't know, a report to a destination nothing names, a team that isn't
 there) changes nothing: the Settings and Runs pages say why, with the line,
 and the ledger keeps what the file last declared. An admin's `/config.yaml`
 gives everything the ledger holds in this form, declared and made in the
-UI alike, to paste under `serve.config`. Quote what YAML would read as
-something else: `"23:00-07:00"`, a label's value `"1.10"`.
+UI alike, to paste under `serve.config`. Quote what YAML 1.1, which Helm
+reads values by, would read as something else: `"23:00-07:00"`, a label's
+value `"on"` or `"1.10"`; a quiet window's `on` is `repeat_on` for that
+reason.
 
 `serve.proposalsExpire` closes a proposal that waited for approval longer,
 such as `30d`, as expired, so its rule can have another. Empty, the

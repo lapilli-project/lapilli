@@ -36,6 +36,7 @@ func TestChartConfig(t *testing.T) {
       - {name: payments, rules: ^Checkout, labels: {team: payments}, sleep_hours: "23:00-07:00"}
     windows:
       - {title: Nightly backup, team: payments, start: "2026-11-02T02:00", end: "2026-11-02T03:00", every: day, until: 2027-06-30}
+      - {title: Patching, start: "2026-11-07T22:00", end: "2026-11-08T01:00", every: month, repeat_on: first sat}
     reports:
       - {name: payments weekly, team: payments, schedule: weekly mon@09:00, dests: [team:payments], enabled: false}
     grants:
@@ -76,7 +77,9 @@ func TestChartConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the rendered file: %v\n%s", err, file)
 	}
-	if len(d.Teams) != 1 || d.Teams[0].SleepHours != "23:00-07:00" || len(d.Windows) != 1 || d.Windows[0].Until.IsZero() ||
+	// repeat_on, not on: Helm reads values as YAML 1.1, where a key on,
+	// unquoted, is true.
+	if len(d.Teams) != 1 || d.Teams[0].SleepHours != "23:00-07:00" || len(d.Windows) != 2 || d.Windows[0].Until.IsZero() || d.Windows[1].On != "first sat" ||
 		len(d.Reports) != 1 || d.Reports[0].Enabled || len(d.Grants) != 2 {
 		t.Errorf("the rendered file reads as %+v\n%s", d, file)
 	}

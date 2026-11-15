@@ -69,7 +69,7 @@ type yWindow struct {
 	Start  string  `yaml:"start"`
 	End    string  `yaml:"end"`
 	Every  string  `yaml:"every,omitempty"`
-	On     string  `yaml:"on,omitempty"`
+	On     string  `yaml:"repeat_on,omitempty"`
 	Until  string  `yaml:"until,omitempty"`
 	Rules  string  `yaml:"rules,omitempty"`
 	Labels yLabels `yaml:"labels,omitempty"`

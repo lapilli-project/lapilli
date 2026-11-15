@@ -513,7 +513,7 @@ windows:                          # quiet windows
     start: 2026-11-02T02:00       # in --tz, or with an offset (RFC 3339)
     end: 2026-11-02T03:00
     every: day                    # day, week, month or cron; once when left out
-    on: ""                        # month: 15, last, first sat; cron: 0 2 * * 6
+    repeat_on: ""                 # month: 15, last, first sat; cron: 0 2 * * 6
     until: 2027-06-30             # the last day one starts; for good when left out
     rules: ^Backup
     labels: {env: [prod, stage]}  # a value, or a list of them
@@ -531,6 +531,11 @@ grants:                           # an editor's role, of every team or of one
     team: payments
   - user: ana@example.com
 ```
+
+A window's `on` is `repeat_on`, the ledger's column: Helm reads values as
+YAML 1.1, where a key `on`, unquoted, is `true`, and the file would have a
+key `"true"`. Quote, likewise, a label's value YAML 1.1 reads as something
+else: `"on"`, `"yes"`, `"1.10"`.
 
 It is read strictly: a key it doesn't know, a value of another kind, a key
 given twice, a second document, or a file over 1 MiB (a ConfigMap's most)
