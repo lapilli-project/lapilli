@@ -567,8 +567,12 @@ func (p configProblem) Shown(lang string) string {
 	if t, ok := p.Text["en"]; ok {
 		return t
 	}
-	if p.Line == 0 && p.Kind == "file" {
+	switch {
+	case p.Line == 0 && p.Kind == "file":
 		return tr(lang, "the file can't be read as --config")
+	case p.Line == 0:
+		// What the file no longer names, which couldn't be let go.
+		return tr(lang, "a team the file no longer declares, kept declared")
 	}
 	return tr(lang, briefs[p.Kind], p.Line)
 }
@@ -765,13 +769,15 @@ func (s *Server) reconcileConfig(ctx context.Context) error {
 		return nil
 	case fileErr != nil:
 	case hash == st.applied:
-		if st.failed != "" {
+		back := st.failed != ""
+		if back {
 			// Back to the file the ledger is kept to: what is wrong with it
-			// is what is shown again.
+			// is what is shown again, and it is read afresh, as one read
+			// once, for what --config-prune would delete.
 			st.failed, st.shown, st.loggedText = "", st.kept, ""
 		}
 		retry := len(st.kept.list) > 0 && gen != st.triedGen && !now.Before(st.retryAt)
-		if left != ledger.LeftDelete && !retry {
+		if left != ledger.LeftDelete && !retry && !back {
 			st.Unlock()
 			return nil
 		}
@@ -779,25 +785,35 @@ func (s *Server) reconcileConfig(ctx context.Context) error {
 		st.Unlock()
 		return nil
 	}
+	if hash != st.retryHash {
+		// Another file: tried from the start.
+		st.backoff, st.retryAt = 0, time.Time{}
+	}
 	st.Unlock()
 	if fileErr != nil {
-		s.configSaid(configProblems{list: []configProblem{problemOf(fileErr)}, whole: true}, func() { st.failed = hash })
+		// Read the same twice in a row, a file is: one that can't be read
+		// between two reads of it makes them two.
+		s.configSaid(configProblems{list: []configProblem{problemOf(fileErr)}, whole: true}, func() { st.failed, st.keptFor = hash, "" })
 		return nil
+	}
+	// An error of the ledger's: the file is tried again, after a while.
+	later := func(err error) error {
+		st.Lock()
+		defer st.Unlock()
+		st.retryHash, st.backoff = hash, nextBackoff(st.backoff)
+		st.retryAt = now.Add(st.backoff)
+		return err
 	}
 	s.checkDeclared(&d)
 	o, err := s.options(ctx)
 	if err != nil {
-		return err
+		return later(err)
 	}
 	r, skipped, err := s.l.Reconcile(ctx, d, left, o)
-	st.Lock()
 	if err != nil {
-		// The ledger's: the file is tried again, after a while.
-		st.retryHash, st.backoff = hash, nextBackoff(st.backoff)
-		st.retryAt = now.Add(st.backoff)
-		st.Unlock()
-		return err
+		return later(err)
 	}
+	st.Lock()
 	st.applied, st.at, st.failed, st.keptFor = hash, now, "", ""
 	if left == ledger.LeftKeep && r.Kept > 0 {
 		st.keptFor = hash // deleted once it is read the same again

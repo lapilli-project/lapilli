@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -450,7 +451,7 @@ func TestDeclaredRefusedEveryPath(t *testing.T) {
 // Without --config, what a file declared before is the UI's again. With
 // --config-prune, what the file no longer declares is deleted once it is
 // read the same twice in a row: an empty file deletes nothing, nor a
-// half-written one read once.
+// half-written one read once, but the roles it no longer gives.
 func TestConfigTakenAway(t *testing.T) {
 	ctx := context.Background()
 	s, path := configServer(t, configFile, nil)
@@ -466,12 +467,13 @@ func TestConfigTakenAway(t *testing.T) {
 	if err := s.configTerm(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// Teams, windows and reports: a role the file no longer gives is taken
+	// away at once (TestConfigGrantRevoked).
 	count := func() int {
 		ts, _ := s.l.Teams(ctx)
 		ws, _ := s.l.Windows(ctx, now.Add(-30*24*time.Hour), now.Add(30*24*time.Hour))
 		rs, _ := s.l.Scheduleds(ctx)
-		gs, _ := s.l.Grants(ctx)
-		return len(ts) + len(ws) + len(rs) + len(gs)
+		return len(ts) + len(ws) + len(rs)
 	}
 	all := count()
 	// Empty, then half written, each read once: nothing deleted.
@@ -693,5 +695,93 @@ func TestRenameNamedTeam(t *testing.T) {
 	}
 	if teamOf(t, s, "search").Note != "ours" {
 		t.Error("the note isn't kept")
+	}
+}
+
+// A role the file no longer gives is taken away, --config-prune or not,
+// one the UI made and the file took over among them.
+func TestConfigGrantRevoked(t *testing.T) {
+	ctx := context.Background()
+	s, path := configServer(t, configFile, nil)
+	writeConfig(t, path, strings.Replace(configFile, "  - user: ana@example.com\n", "", 1))
+	if err := s.reconcileConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	gs, _ := s.l.Grants(ctx)
+	cs, _ := s.l.Changes(ctx, 50)
+	if slices.ContainsFunc(gs, func(g ledger.Grant) bool { return g.Who == "user:ana@example.com" }) ||
+		!slices.ContainsFunc(cs, func(c ledger.Change) bool {
+			return c.By == ledger.ConfigBy && c.What == ledger.RoleTaken+"user:ana@example.com"
+		}) {
+		t.Errorf("ana's role: %+v", gs)
+	}
+}
+
+// With --config-prune, a file read, then one that can't be read, then the
+// first again, hasn't been read twice in a row: nothing is deleted until
+// it is read once more.
+func TestConfigPruneReadTwiceInARow(t *testing.T) {
+	ctx := context.Background()
+	s, path := configServer(t, configFile, func(c *Config) { c.ConfigPrune = true })
+	short := configFile[:strings.Index(configFile, "reports:")]
+	writeConfig(t, path, short)
+	read := func(body string) int {
+		t.Helper()
+		writeConfig(t, path, body)
+		if err := s.reconcileConfig(ctx); err != nil {
+			t.Fatal(err)
+		}
+		rs, _ := s.l.Scheduleds(ctx)
+		return len(rs)
+	}
+	if n := read(short); n != 1 {
+		t.Fatalf("read once: %d reports", n)
+	}
+	if n := read("teams: [\n"); n != 1 {
+		t.Fatalf("then a file that can't be read: %d reports", n)
+	}
+	if n := read(short); n != 1 {
+		t.Errorf("the first again, after one that couldn't be read: %d reports, want it kept", n)
+	}
+	if n := read(short); n != 0 {
+		t.Errorf("read twice in a row: %d reports, want none", n)
+	}
+}
+
+// A new file is tried again from configEvery, however long the last waited;
+// an error reading the settings is tried again after a while too.
+func TestConfigBackoff(t *testing.T) {
+	ctx := context.Background()
+	bad := "windows:\n  - {title: freeze, team: platform, start: 2026-11-02T02:00, end: 2026-11-02T03:00}\n"
+	s, path := configServer(t, bad, nil)
+	at := time.Now()
+	for range 4 {
+		at = at.Add(time.Hour)
+		s.wall = func() time.Time { return at }
+		if _, err := s.l.PutTeam(ctx, ledger.Team{Name: fmt.Sprint("t", at.Unix()), Rules: "^T"}, "boss"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.reconcileConfig(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s.config.backoff <= configEvery {
+		t.Fatalf("tried again four times, backoff %s", s.config.backoff)
+	}
+	writeConfig(t, path, bad+"  - {title: other, team: nowhere, start: 2026-11-02T02:00, end: 2026-11-02T03:00}\n")
+	if err := s.reconcileConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if s.config.backoff != configEvery {
+		t.Errorf("a new file waits %s, want %s", s.config.backoff, configEvery)
+	}
+	// The settings can't be read: tried again after a while, not at once.
+	writeConfig(t, path, configFile)
+	s.Close()
+	if err := s.reconcileConfig(ctx); err == nil {
+		t.Fatal("no error from a closed ledger")
+	}
+	if s.config.retryAt.IsZero() || !s.config.retryAt.After(at) {
+		t.Errorf("not tried again after a while: %v", s.config.retryAt)
 	}
 }

@@ -114,7 +114,7 @@ func TestDeclaredPagesTranslated(t *testing.T) {
 	missing.Unlock()
 	// What --config can be told is wrong with, in each language: every
 	// way ParseConfig and configText say it.
-	formats := slices.Concat(configFormats, slices.Collect(maps.Values(briefs)), []string{"the file can't be read as --config", "and %d more"})
+	formats := slices.Concat(configFormats, slices.Collect(maps.Values(briefs)), []string{"the file can't be read as --config", "and %d more", "a team the file no longer declares, kept declared"})
 	for _, f := range formats {
 		for lang, c := range catalogs {
 			if _, ok := c[f]; !ok {
