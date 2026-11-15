@@ -631,17 +631,35 @@ func (s *Server) wokenSection(ctx context.Context, rep *verdict.Report, from, to
 		total += n
 	}
 	slices.SortFunc(ws, func(a, b woke) int { return cmp.Or(cmp.Compare(b.N, a.N), cmp.Compare(a.Rule, b.Rule)) })
-	nums := map[string]any{"counted": what, "total": total, "rules": orNoneOf(ws)}
+	// With no record, a firing that caught nothing may have caught
+	// something nobody wrote down: it came while people slept, and
+	// whether for nothing isn't known (as the command line says it).
+	some := slices.ContainsFunc(rep.Rules, func(r verdict.RuleResult) bool { return scope[r.Rule] && r.Unjudged > 0 })
+	nums := map[string]any{"counted": what, "total": total, "rules": orNoneOf(ws), "no_record": rep.NoRecord, "unjudged": some}
 	if total == 0 {
+		if rep.NoRecord {
+			return tr(l, "Nothing came while people slept."), nums, nil
+		}
 		return tr(l, "Nothing woke people for nothing."), nums, nil
 	}
 	items := make([]string, 0, 10)
 	for _, w := range ws[:min(len(ws), 10)] {
 		items = append(items, fmt.Sprintf("%s (%d)", verdict.Clean(w.Rule), w.N))
 	}
-	line := tr(l, "Firings that woke people for nothing: %d. By rule: %s.", total, strings.Join(items, ", "))
-	if what == "notifications" {
+	var line string
+	switch notified := what == "notifications"; {
+	case rep.NoRecord && notified:
+		line = tr(l, "Notifications that came while people slept, with no incident written down to judge their firings by: %d. By rule: %s.", total, strings.Join(items, ", "))
+	case rep.NoRecord:
+		line = tr(l, "Firings that came while people slept, with no incident written down to judge them by: %d. By rule: %s.", total, strings.Join(items, ", "))
+	case some && notified:
+		line = tr(l, "Notifications that woke people for nothing, or for firings with no incident written down to judge them by: %d. By rule: %s.", total, strings.Join(items, ", "))
+	case some:
+		line = tr(l, "Firings that woke people for nothing, or came while they slept with no incident written down to judge them by: %d. By rule: %s.", total, strings.Join(items, ", "))
+	case notified:
 		line = tr(l, "Notifications that woke people for nothing: %d. By rule: %s.", total, strings.Join(items, ", "))
+	default:
+		line = tr(l, "Firings that woke people for nothing: %d. By rule: %s.", total, strings.Join(items, ", "))
 	}
 	if k := len(ws) - len(items); k > 0 {
 		line += " " + tr(l, "And %d more.", k)

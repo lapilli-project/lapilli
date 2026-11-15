@@ -89,6 +89,12 @@ type sentLine struct {
 	// Most are the rules that sent the most for firings that caught
 	// nothing, the most first, five at most.
 	Most []sentFor `json:"most_for_nothing"`
+	// NoRecord says no incident was written down to judge the span's
+	// firings by: those that caught nothing aren't known to be for nothing;
+	// Unjudged, that some of them had none, as over a span that isn't the
+	// ledger's weeks.
+	NoRecord bool `json:"no_record,omitempty"`
+	Unjudged bool `json:"unjudged,omitempty"`
 }
 
 type sentFor struct {
@@ -117,7 +123,8 @@ func (s *Server) sent(ctx context.Context, rep *verdict.Report, from, to time.Ti
 	for _, r := range rep.Rules {
 		in[r.Rule] = true
 	}
-	out := &sentLine{ByReceiver: map[string]int{}}
+	out := &sentLine{ByReceiver: map[string]int{}, NoRecord: rep.NoRecord,
+		Unjudged: slices.ContainsFunc(rep.Rules, func(r verdict.RuleResult) bool { return r.Unjudged > 0 })}
 	for rule, x := range p.lines(from, to, sc.of) {
 		if !in[rule] {
 			continue
@@ -147,12 +154,24 @@ func (x *sentLine) text(l string) string {
 	}
 	line := tr(l, "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing.",
 		x.Notifications, x.Rules, x.Repeats, x.Asleep, x.ForNothing)
+	switch {
+	case x.NoRecord:
+		line = tr(l, "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings with no incident written down to judge them by.",
+			x.Notifications, x.Rules, x.Repeats, x.Asleep, x.ForNothing)
+	case x.Unjudged:
+		line = tr(l, "Notifications sent, as the alert managers sent them: %d, for %d rules; %d repeats, %d while people slept, %d for firings that caught nothing, or had no incident written down to judge them by.",
+			x.Notifications, x.Rules, x.Repeats, x.Asleep, x.ForNothing)
+	}
 	if len(x.Most) > 0 {
 		var names []string
 		for _, m := range x.Most {
 			names = append(names, fmt.Sprintf("%s (%d)", verdict.Clean(m.Rule), m.N))
 		}
-		line += " " + tr(l, "The most for nothing: %s.", strings.Join(names, ", "))
+		if x.NoRecord || x.Unjudged {
+			line += " " + tr(l, "The most for those firings: %s.", strings.Join(names, ", "))
+		} else {
+			line += " " + tr(l, "The most for nothing: %s.", strings.Join(names, ", "))
+		}
 	}
 	return line
 }

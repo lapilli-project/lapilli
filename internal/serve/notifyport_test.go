@@ -469,13 +469,52 @@ func TestNotificationsShown(t *testing.T) {
 	if !strings.Contains(body, `<td class="n">2</td>`) {
 		t.Errorf("Monday: the checkout firing told of twice: %s", body)
 	}
-	// The last whole week ended that Sunday: two notifications woke people
-	// for nothing.
+	// The last whole week ended that Sunday: two notifications came while
+	// people slept, for firings with no incident written down to judge
+	// them by.
 	_, body, _ = get(t, h, "/")
 	i := strings.Index(body, "Woken for nothing")
-	if i < 0 || !strings.Contains(body[i:min(len(body), i+400)], ">2<") ||
-		!strings.Contains(body, "notifications for firings that caught nothing, while people slept, since 2026-11-01") {
+	if i < 0 || !strings.Contains(body[i:min(len(body), i+400)], ">–<") ||
+		!strings.Contains(body, "not known: no incident written down to judge their firings by; 2 notifications came while people slept that week (counted since 2026-11-01)") {
 		t.Errorf("overview: %s", body)
+	}
+	// The rules that week, which the tile leads to, say the same: not "for
+	// nothing".
+	_, body, _ = get(t, h, "/rules?week=2026-10-26")
+	if !strings.Contains(body, "2 notifications while people slept, with no incident written down to judge their firings by") ||
+		strings.Contains(body, "notifications for nothing, while people slept") {
+		t.Errorf("the rules that week: %s", body)
+	}
+	// A report's woken section and its notifications line, over a span of
+	// notifications with no record, and over one with some: from just after
+	// the first notification, so they are what is counted.
+	o, err := s.options(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		from, to    time.Time
+		woken, sent string
+	}{
+		{time.Date(2026, 11, 1, 15, 3, 0, 0, time.UTC), time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC),
+			"Notifications that came while people slept, with no incident written down to judge their firings by: 2. By rule: Errors (2).",
+			"2 for firings with no incident written down to judge them by. The most for those firings: Errors (2)."},
+		{time.Date(2026, 11, 1, 15, 3, 0, 0, time.UTC), time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC),
+			"Notifications that woke people for nothing, or for firings with no incident written down to judge them by: 2. By rule: Errors (2).",
+			"2 for firings that caught nothing, or had no incident written down to judge them by. The most for those firings: Errors (2)."},
+	} {
+		rep, err := s.ledgerReportFor(ctx, c.from, c.to, o, false, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		line, _, err := s.wokenSection(ctx, rep, c.from, c.to, o, func(string) bool { return true })
+		if err != nil || line != c.woken {
+			t.Errorf("%s: woken %q %v", c.to, line, err)
+		}
+		x, err := s.sent(ctx, rep, c.from, c.to)
+		if err != nil || x == nil || !strings.HasSuffix(x.text(""), c.sent) || strings.Contains(x.text(""), "for nothing") {
+			t.Errorf("%s: sent %+v %v", c.to, x, err)
+		}
 	}
 	_, body, _ = get(t, s.MetricsHandler(), "/metrics")
 	for _, want := range []string{`lapilli_rule_notifications{rule="Errors",receiver="oncall",reason="first"} 4`,

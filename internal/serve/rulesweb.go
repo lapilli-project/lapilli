@@ -39,8 +39,9 @@ type ruleRow struct {
 	Facts, Checks int
 	// Woken are the notifications for its firings that caught nothing
 	// that came while people slept, in the weeks shown, by when each came,
-	// as the overview's "woken for nothing" counts them.
-	Woken int
+	// as the overview's "woken for nothing" counts them; WokenUnjudged,
+	// those of them in weeks with no record, not known to be for nothing.
+	Woken, WokenUnjudged int
 	// Chips are the labels label: picks it by, but its severity, which
 	// has a column of its own: rowChips of them, and More, the rest.
 	Chips, More []labelChip
@@ -129,11 +130,12 @@ type ruleSum struct {
 	Precision                  string
 	// Notified says notifications are kept: Notifications, Repeats; and
 	// Woken, those for firings that caught nothing while people slept,
-	// as the overview counts them (woken). Uncounted says the weeks shown
-	// were over before the first notification came: none is counted, as
-	// the tile says "–".
-	Notified, Uncounted           bool
-	Notifications, Repeats, Woken int
+	// as the overview counts them (woken), WokenUnjudged those of them in
+	// weeks with no record. Uncounted says the weeks shown were over
+	// before the first notification came: none is counted, as the tile
+	// says "–".
+	Notified, Uncounted                          bool
+	Notifications, Repeats, Woken, WokenUnjudged int
 }
 
 // legendGroup is a facet's badges, in the list's legend: each its sign,
@@ -274,7 +276,7 @@ func (p picks) in(r ruleRow, param string) bool {
 	if len(want) == 0 {
 		// One that woke people for nothing, a firing begun before the
 		// weeks shown notified again in them, is listed with the rest.
-		return param != "perf" || r.Perf != "silent" || r.Woken > 0
+		return param != "perf" || r.Perf != "silent" || r.Woken+r.WokenUnjudged > 0
 	}
 	return slices.ContainsFunc(r.values(param), func(v string) bool {
 		return slices.ContainsFunc(want, func(w string) bool { return strings.EqualFold(v, w) })
@@ -400,16 +402,19 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	// Each rule's notifications for nothing while people slept, as the
 	// overview counts them: by when each came, so a rule with some is
 	// listed though no firing of it started in the weeks shown.
-	woke, err := s.wokenOver(ctx, d, &v)
+	woke, unjudged, err := s.wokenOver(ctx, d, &v)
 	if err != nil {
 		return nil, err
 	}
 	var more []ruleLine
 	for i := range all {
-		all[i].Woken = woke[all[i].Name]
+		all[i].Woken, all[i].WokenUnjudged = woke[all[i].Name], unjudged[all[i].Name]
 		delete(woke, all[i].Name)
+		delete(unjudged, all[i].Name)
 	}
-	for _, name := range slices.Sorted(maps.Keys(woke)) {
+	others := maps.Clone(woke)
+	maps.Copy(others, unjudged)
+	for _, name := range slices.Sorted(maps.Keys(others)) {
 		more = append(more, s.quietLine(name, d, meta))
 	}
 	if len(more) > 0 {
@@ -419,7 +424,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	}
 	for _, l := range more {
 		row := s.row(l, d, meta, w)
-		row.Woken = woke[l.Name]
+		row.Woken, row.WokenUnjudged = woke[l.Name], unjudged[l.Name]
 		all = append(all, row)
 	}
 	v.Total = len(all)
@@ -522,6 +527,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		x.Notifications += row.Notifications
 		x.Repeats += row.Repeats
 		x.Woken += row.Woken
+		x.WokenUnjudged += row.WokenUnjudged
 	}
 	v.Sum.Precision = pct(v.Sum.White, v.Sum.Firings-v.Sum.Unjudged)
 	for _, f := range facetsOf {
@@ -884,23 +890,28 @@ func (s *Server) ruleMeta(ctx context.Context) (map[string]ruleMeta, error) {
 // wokenOver is, by rule, what the overview's "woken for nothing" counts
 // over the weeks the list shows, of the team's rules: the notifications for
 // firings that caught nothing that came while people slept, each in the
-// week it came in. It notes on v that notifications are kept, and whether
-// the weeks shown were over before the first came.
-func (s *Server) wokenOver(ctx context.Context, d rulesData, v *rulesList) (map[string]int, error) {
+// week it came in; and apart, those in weeks with no record (unjudged),
+// which aren't known to be for nothing. It notes on v that notifications
+// are kept, and whether the weeks shown were over before the first came.
+func (s *Server) wokenOver(ctx context.Context, d rulesData, v *rulesList) (woken, unjudged map[string]int, err error) {
 	p, err := s.notified(ctx)
 	if err != nil || p.first.IsZero() {
-		return nil, err
+		return nil, nil, err
 	}
 	v.Sum.Notified = true
 	v.Sum.Uncounted = !s.l.Midnight(d.t.weeks[len(d.t.weeks)-1] + 7).After(p.first)
 	by := s.wokenBy(p, d.own.schedules(d.t.o.Hours))
-	out := map[string]int{}
+	woken, unjudged = map[string]int{}, map[string]int{}
 	for _, w := range d.t.weeks[len(d.t.weeks)-d.Weeks:] {
+		into := woken
+		if !d.t.kept[w] {
+			into = unjudged
+		}
 		for rule, n := range by[w] {
 			if d.team == nil || d.own.rule[rule] == d.team.ID {
-				out[rule] += n
+				into[rule] += n
 			}
 		}
 	}
-	return out, nil
+	return woken, unjudged, nil
 }

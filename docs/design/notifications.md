@@ -121,7 +121,14 @@ are pages for nothing.
   and how many came while people slept.
 - A firing's notifications; a firing that paged no one says so.
 - The dashboard's "woken for nothing" counts notifications once there are any,
-  and says which it counts.
+  and says which it counts. A week with no incident written down to judge
+  its firings by has no number there, as it has no precision: the tile says
+  how many came while people slept. The digest's line says those were for
+  firings with no record, and names the rules that sent the most of them,
+  not the most "for nothing"; its numbers say `no_record` (or `unjudged`,
+  over a span with some firings judged), and keep the names `for_nothing`
+  and `most_for_nothing`. The rules list counts a rule's notifications in
+  weeks with no record apart from those for nothing.
 - `/metrics`: `lapilli_rule_notifications` by rule, receiver and reason.
 - MCP's `rules` and `rule` tools carry the same.
 

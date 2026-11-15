@@ -31,6 +31,9 @@ type weekView struct {
 	// incident on in it, or in the two weeks before it. Its
 	// precision isn't known, and no rule was noisy in it.
 	NoRecord bool
+	// Kept says an incident written down in it or the two weeks before
+	// keeps its record: what caught nothing in it was for nothing.
+	Kept bool
 	// Quiet says a quiet window was over it: one excused a firing, or
 	// one covers some of it; DeployMark, its firings during deploys: the
 	// marks on the charts, when they are asked for (marksOf).
@@ -302,7 +305,8 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			}
 		}
 		wv.Black = wv.Firings - wv.White
-		wv.NoRecord = wv.Firings > 0 && !t.kept[w]
+		wv.Kept = t.kept[w]
+		wv.NoRecord = wv.Firings > 0 && !wv.Kept
 		byWeek[w] = wv
 		ws = append(ws, wv)
 	}
@@ -370,15 +374,17 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	asleep := o.schedules(t.o.Hours).asleepNote(l, t, team, s.cfg.Loc)
 	// Once notifications come, woken for nothing counts them: a
 	// notification, unlike a firing, is a person woken.
+	since := ""
 	if first, ok, err := s.woken(ctx, t, o, team, byWeek); err != nil {
 		return nil, err
 	} else if ok && asleep != "" {
-		asleep = tr(l, "notifications for firings that caught nothing, while people slept, since %s", first.In(s.cfg.Loc).Format("2006-01-02"))
+		since = first.In(s.cfg.Loc).Format("2006-01-02")
+		asleep = tr(l, "notifications for firings that caught nothing, while people slept, since %s", since)
 	}
 	if v.Deploys, err = s.l.HasDeploys(ctx); err != nil {
 		return nil, err
 	}
-	v.Tiles = s.tiles(l, ws, last, before, asleep, v.Deploys, func() (int, int) {
+	v.Tiles = s.tiles(l, ws, last, before, asleep, since, v.Deploys, func() (int, int) {
 		return t.refireWeeks(t.weeks, func(int64) bool { return true }) // the team's, when one is picked
 	})
 	if s.checking() {
@@ -492,7 +498,7 @@ func outcomeLines(l string, out *outcomes) []outcomeLine {
 }
 
 // tiles are the headline numbers.
-func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep string, deploys bool, refired func() (int, int)) []tile {
+func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep, since string, deploys bool, refired func() (int, int)) []tile {
 	var out []tile
 	add := func(label string, val func(*weekView) (float64, bool), show func(float64) string, delta func(a, b float64) string, better int, of string) {
 		x := tile{Label: tr(l, label), Value: "–", Of: of, key: label}
@@ -556,11 +562,22 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep 
 	add("Noisy rules", func(w *weekView) (float64, bool) { return float64(w.Noisy), !w.NoRecord }, count,
 		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, unjudged)
 	if asleep != "" {
-		// With no record, "for nothing" is for nothing written down.
-		if last.NoRecord {
-			asleep = tr(l, "%s, with no incident written down to judge them by", asleep)
+		// With no record, whether a firing woke people for nothing isn't
+		// known, as its precision isn't: a week with none shows no number,
+		// and says how many came while people slept. A week of
+		// notifications alone, for a firing begun before it, is one too.
+		unknown := func(w *weekView) bool { return !w.Kept && w.Asleep > 0 }
+		switch {
+		case last.Uncounted:
+			if last.NoRecord {
+				asleep = tr(l, "%s, with no incident written down to judge them by", asleep)
+			}
+		case unknown(last) && since != "":
+			asleep = tr(l, "not known: no incident written down to judge their firings by; %d notifications came while people slept that week (counted since %s)", last.Asleep, since)
+		case unknown(last):
+			asleep = tr(l, "not known: no incident written down to judge them by; %d came while people slept (%s)", last.Asleep, asleep)
 		}
-		add("Woken for nothing", func(w *weekView) (float64, bool) { return float64(w.Asleep), !w.Uncounted }, count,
+		add("Woken for nothing", func(w *weekView) (float64, bool) { return float64(w.Asleep), !w.Uncounted && !unknown(w) }, count,
 			func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, asleep)
 	}
 	// Re-fires: how many, and in how many of the whole weeks shown, for a
