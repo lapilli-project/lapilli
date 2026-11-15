@@ -1218,7 +1218,18 @@ or say a black stone was real; the stones are given again at once, for the
 whole ledger, without asking Prometheus. The settings that only judge the
 ledger again (`--lead`, `--match`, `--refire`, the noisy thresholds) can be
 changed there and tried on the last week first; `/settings.yaml` gives the
-changes as Helm values to commit. The API gives `lapilli verdict --json`'s
+changes as Helm values to commit. Teams, quiet windows, reports and roles
+can be declared in Git instead: `--config FILE` (`serve.config` in the
+chart) is YAML of them, as the UI's forms make them, which the ledger is
+kept holding as the file changes, without a restart; what it declares is
+marked declared in the UI, which doesn't change it, and what it no longer
+declares is the UI's again, or deleted with `--config-prune`, but a role,
+taken away. A file is kept to only once it has been read the same twice
+in a row, so one read half written changes nothing. An admin's
+`/config.yaml` gives everything the ledger holds in that form, to commit
+(docs/design/serveops.md). The Orphans page lists the notes, tasks,
+comments and proposals of rules deleted or renamed, to move to the rule as
+it is named now, or delete. The API gives `lapilli verdict --json`'s
 report for any period (`/api/v1/report?from=&to=`) and takes incidents
 (`/api/v1/incidents`); `/metrics` gives `--metrics` over the last seven days,
 so Prometheus scrapes it instead of a Pushgateway, and the chart has a
@@ -1481,7 +1492,12 @@ owns, and comments on what is its, and nothing of another team's or of
 everyone's; the ledger checks each in the write. The UI never makes an
 admin or an approver, and can't take away a role the flags give: those stay
 `--admins`, `--editors` and `--approvers`. Only admins see who holds a
-role. A team removed takes its editors with it.
+role. A team removed takes its editors with it. A team's name is unique in
+any letter case. With `--config`, the roles it declares (`grants`) are
+taken away there alone.
+
+`--proposals-expire 30d` closes a proposal nobody approved within thirty
+days as expired, so its rule can have another; off by default.
 
 With `--user-header`, the proxy must be the only way in. The chart's
 `serve.networkPolicy` lets in only the proxy (or the ingress controller,

@@ -94,6 +94,10 @@ type teamsView struct {
 	// them did, from the query.
 	Suggested teamSuggestions
 	Made      *teamsMade
+	// Declared says some of them --config declares; Alike are the teams a
+	// ledger held from before whose names differ only in letter case.
+	Declared bool
+	Alike    [][]string
 }
 
 func (s *Server) teamsPage(r *http.Request) (any, error) {
@@ -113,6 +117,9 @@ func (s *Server) teamsPage(r *http.Request) (any, error) {
 	lg := lang(r)
 	sc := o.schedules(opts.Hours)
 	v := teamsView{Server: hoursLine(lg, opts.Hours), Suggested: s.suggestTeams(o), Made: teamsMadeOf(r.URL.Query(), o, s.user(r))}
+	if v.Alike, err = s.l.LikeNames(ctx); err != nil {
+		return nil, err
+	}
 	for _, t := range o.teams {
 		l := teamLine{Team: t, Labels: labelText(t.Labels)}
 		if h := sc.team[t.ID]; h != nil {
@@ -124,6 +131,7 @@ func (s *Server) teamsPage(r *http.Request) (any, error) {
 			}
 		}
 		l.Open = open[t.ID]
+		v.Declared = v.Declared || t.Declared
 		v.Lines = append(v.Lines, l)
 		if r.URL.Query().Get("edit") == strconv.FormatInt(t.ID, 10) {
 			v.Edit = &v.Lines[len(v.Lines)-1]
@@ -951,6 +959,9 @@ func errCode(err error) (int, bool) {
 	case errors.Is(err, errLongQuery):
 		return http.StatusRequestURITooLong, true
 	case errors.Is(err, ledger.ErrMoved), errors.Is(err, ledger.ErrApproved), errors.Is(err, ledger.ErrProposed):
+		return http.StatusConflict, true
+	case errors.Is(err, ledger.ErrDeclared), errors.Is(err, ledger.ErrNamedByDeclared):
+		// --config's: changed in the file alone.
 		return http.StatusConflict, true
 	case errors.Is(err, ledger.ErrTooManyProposals), errors.Is(err, errTooManyTries), errors.Is(err, ledger.ErrTooManyBacktests), errors.Is(err, ledger.ErrBacktestedJustNow):
 		// Asked before the rule is read again (MayPropose): the hour's

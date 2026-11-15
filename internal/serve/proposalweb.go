@@ -35,6 +35,7 @@ var stateGroups = map[string]string{
 	ledger.StateReady: "doing", ledger.StateApplying: "doing", ledger.StateOpened: "doing", ledger.StateMerged: "doing",
 	ledger.StateApplied: "applied", ledger.StateUndone: "undone",
 	ledger.StateRefused: "closed", ledger.StateFailed: "closed", ledger.StateDropped: "closed", ledger.StateAmended: "closed",
+	ledger.StateExpired: "closed",
 }
 
 // stateBadge is a proposal's state as its badge shows it: Class, its
@@ -54,6 +55,7 @@ var stateDetails = map[string]string{
 	ledger.StateFailed:   "failed",
 	ledger.StateDropped:  "dropped",
 	ledger.StateAmended:  "changed in review",
+	ledger.StateExpired:  "expired",
 }
 
 // badgeOf is a state's badge.

@@ -1912,7 +1912,8 @@ func (s *Server) proposeFound(ctx context.Context) error {
 	// Not again what is waiting, or what people turned down.
 	asked := map[string]bool{}
 	for _, p := range have {
-		if p.Open() || p.State == ledger.StateRefused || p.State == ledger.StateDropped || p.State == ledger.StateFailed || p.State == ledger.StateAmended {
+		if p.Open() || p.State == ledger.StateRefused || p.State == ledger.StateDropped || p.State == ledger.StateFailed || p.State == ledger.StateAmended ||
+			p.State == ledger.StateExpired {
 			asked[p.Rule+"\x00"+p.Kind] = true
 		}
 	}

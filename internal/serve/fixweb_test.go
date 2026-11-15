@@ -325,10 +325,10 @@ func TestManagePage(t *testing.T) {
 		}
 		return out
 	}
-	if got, want := cards("boss@example.com"), []string{"/teams Teams", "/roles Roles", "/settings Settings", "/runs Runs", "/reports Reports", "/settings#notifications Notifications"}; !slices.Equal(got, want) {
+	if got, want := cards("boss@example.com"), []string{"/teams Teams", "/roles Roles", "/settings Settings", "/runs Runs", "/reports Reports", "/orphans Orphans", "/settings#notifications Notifications"}; !slices.Equal(got, want) {
 		t.Errorf("an admin's cards: %q, want %q", got, want)
 	}
-	if got, want := cards("ed@example.com"), []string{"/teams Teams", "/settings Settings", "/runs Runs", "/reports Reports", "/settings#notifications Notifications"}; !slices.Equal(got, want) {
+	if got, want := cards("ed@example.com"), []string{"/teams Teams", "/settings Settings", "/runs Runs", "/reports Reports", "/orphans Orphans", "/settings#notifications Notifications"}; !slices.Equal(got, want) {
 		t.Errorf("an editor's cards: %q, want %q", got, want)
 	}
 	_, body := as(t, h, http.MethodGet, "/manage?team=payments", "ed@example.com", "", nil)

@@ -51,9 +51,10 @@ var crumbsOf = map[string]crumbOf{
 	"outcomes": {"Report", "Outcomes", "/outcomes", false},
 	"teams":    {"Manage", "Teams", "/teams", false}, "roles": {"Manage", "Roles", "/roles", false},
 	"settings": {"Manage", "Settings", "/settings", false}, "runs": {"Manage", "Runs", "/runs", false},
-	"manage": {"", "Manage", "/manage", false},
-	"search": {"", "Search", "/search", false},
-	"error":  {"", "Overview", "/", true}, "signedout": {"", "", "", true},
+	"orphans": {"Manage", "Orphans", "/orphans", false},
+	"manage":  {"", "Manage", "/manage", false},
+	"search":  {"", "Search", "/search", false},
+	"error":   {"", "Overview", "/", true}, "signedout": {"", "", "", true},
 }
 
 // navPage is the page of the sidebar a page is under, and its name: a
@@ -81,7 +82,7 @@ var navLayout = []struct {
 	{"see", "See", []struct{ page, href, name string }{{"overview", "/", "Overview"}, {"rules", "/rules", "Rules"}, {"incidents", "/incidents", "Incidents"}, {"firings", "/firings", "Firings"}}},
 	{"fix", "Fix", []struct{ page, href, name string }{{"tasks", "/tasks", "Tasks"}, {"proposals", "/proposals", "Proposals"}, {"windows", "/windows", "Quiet windows"}}},
 	{"report", "Report", []struct{ page, href, name string }{{"reports", "/reports", "Reports"}, {"outcomes", "/outcomes", "Outcomes"}}},
-	{"manage", "Manage", []struct{ page, href, name string }{{"teams", "/teams", "Teams"}, {"roles", "/roles", "Roles"}, {"settings", "/settings", "Settings"}, {"runs", "/runs", "Runs"}}},
+	{"manage", "Manage", []struct{ page, href, name string }{{"teams", "/teams", "Teams"}, {"roles", "/roles", "Roles"}, {"settings", "/settings", "Settings"}, {"runs", "/runs", "Runs"}, {"orphans", "/orphans", "Orphans"}}},
 }
 
 // bare reports whether a page is shown in the frame alone: an error, or

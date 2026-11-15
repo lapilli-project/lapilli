@@ -246,7 +246,9 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 		"DELETE FROM runs WHERE id IN (SELECT id FROM runs WHERE started < ? LIMIT 5000)",
 		"DELETE FROM results WHERE id IN (SELECT id FROM results WHERE at < ? LIMIT 5000)",
 		"DELETE FROM changes WHERE id IN (SELECT id FROM changes WHERE at < ? LIMIT 5000)",
-		"DELETE FROM windows WHERE id IN (SELECT id FROM windows WHERE (every = '' AND end_at < ?1) OR (every != '' AND until_at < ?1) LIMIT 5000)",
+		// A window --config declares stays while it does: the file would make
+		// it again, and tell of it, each time.
+		"DELETE FROM windows WHERE id IN (SELECT id FROM windows WHERE declared = 0 AND ((every = '' AND end_at < ?1) OR (every != '' AND until_at < ?1)) LIMIT 5000)",
 		"DELETE FROM outbox WHERE id IN (SELECT id FROM outbox WHERE created < ?1 LIMIT 5000)",
 		// Their alerts go with them.
 		"DELETE FROM notifications WHERE id IN (SELECT id FROM notifications WHERE at < ?1 LIMIT 5000)",

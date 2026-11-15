@@ -123,6 +123,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /firings", page("firings", s.firingsPage))
 	mux.HandleFunc("GET /settings", page("settings", s.settingsPage))
 	mux.HandleFunc("GET /settings.yaml", s.settingsYAML)
+	mux.HandleFunc("GET /config.yaml", s.configYAML)
 	mux.HandleFunc("GET /runs", page("runs", s.runsPage))
 	mux.HandleFunc("GET /manage", page("manage", s.managePage))
 	mux.HandleFunc("GET /outcomes", page("outcomes", s.outcomesPage))
@@ -131,6 +132,7 @@ func (s *Server) Handler() http.Handler {
 	s.workRoutes(mux, page)
 	s.reportRoutes(mux, page)
 	s.rolesRoutes(mux, page)
+	s.orphansRoutes(mux, page)
 	s.changesRoutes(mux, page)
 	s.signInRoutes(mux, page)
 
@@ -140,6 +142,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /firings/{id}/real", s.write(s.real))
 	s.bulkRoutes(mux)
 	mux.HandleFunc("POST /settings", s.admin(s.postSettings))
+	mux.HandleFunc("POST /settings/given-back", s.admin(s.postKeepGivenBack))
 	mux.HandleFunc("GET /api/v1/me", s.me)
 
 	mux.HandleFunc("GET /api/v1/report", s.report)
@@ -774,6 +777,11 @@ type cached struct {
 func (s *Server) tag() string {
 	shown := s.shownStatus()
 	st := fmt.Sprintf("%s|%v|%s|%.2f", shown.Doing, shown.Args, shown.Err, shown.Judged)
+	// What --config came to, which the ledger doesn't keep when the file
+	// can't be used.
+	if c := shown.Config; c != nil {
+		st += "|" + c.Hash + "|" + c.ErrText("en")
+	}
 	// The file that pauses changes can come and go at any time.
 	if s.cfg.Changes && s.changesPaused() {
 		st += "|paused"
@@ -1671,5 +1679,6 @@ func (s *Server) apiSettings(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
+	v.Config = s.configFor(r)
 	writeJSON(w, v)
 }

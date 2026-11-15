@@ -1588,7 +1588,25 @@ type settingsView struct {
 	Changes  []ledger.Change
 	Try      *tryView
 	Notify   *notifyStatus `json:"-"` // the page's alone
+	// Config is what the leader last made of --config; nil without it.
+	Config *configShown `json:"config,omitempty"`
+	// GivenBack is what a leader without --config gave back to the UI of
+	// what a file declared, marked, for an admin; GivenBackN, how many,
+	// for anyone.
+	GivenBack  []givenBackView `json:"-"`
+	GivenBackN int             `json:"-"`
 }
+
+// givenBackView is one given back without --config: what it is, a text to
+// translate, its name, and its team's; and its kind and id, to keep it.
+type givenBackView struct {
+	What, Name, Team string
+	Kind             string
+	ID               int64
+}
+
+// givenBackWhat are the kinds of what is given back, as the page says them.
+var givenBackWhat = map[string]string{ledger.KindTeam: "Team", ledger.KindWindow: "Quiet window", ledger.KindReport: "Report", ledger.KindGrant: "Role"}
 
 func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
 	o, err := s.options(ctx)
@@ -1623,6 +1641,18 @@ func (s *Server) settingsPage(r *http.Request) (any, error) {
 	v, err := s.settingsView(r.Context())
 	if err != nil {
 		return nil, err
+	}
+	v.Config = s.configFor(r)
+	gb, err := s.l.GivenBack(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	v.GivenBackN = len(gb)
+	if s.role(r) == admin {
+		// Whom a role was given to is an admin's to read.
+		for _, g := range gb {
+			v.GivenBack = append(v.GivenBack, givenBackView{givenBackWhat[g.Kind], g.Name, g.Team, g.Kind, g.ID})
+		}
 	}
 	if v.Notify, err = s.notifyStatus(r.Context(), lang(r)); err != nil {
 		return nil, err
@@ -1755,6 +1785,8 @@ type runsView struct {
 	Stopped []string
 	// OnCall are the on-call schedules, as each was last read.
 	OnCall []onCallRead
+	// Config is what the leader last made of --config.
+	Config *configShown
 }
 
 // runsCheck is how far the replay has been set beside what really fired,
@@ -1792,7 +1824,7 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 	}
 	// The leader's, on a replica that follows.
 	st := s.shownStatus()
-	v := runsView{runs, cs, cursor, st.Runs, st.Took, srcs, s.cfg.FiringsToken != "", nil, nil, s.onCallShown(st)}
+	v := runsView{runs, cs, cursor, st.Runs, st.Took, srcs, s.cfg.FiringsToken != "", nil, nil, s.onCallShown(st), s.configFor(r)}
 	if v.Stopped, err = s.stoppedReports(r.Context()); err != nil {
 		return nil, err
 	}

@@ -246,6 +246,88 @@ is killed, another leads within some 17 seconds; when it stops, within 2.
   the ServiceMonitor scrapes each pod. What the leader's work counts
   (`lapilli_serve_runs_total`, notices sent) is in its pod's alone.
 
+### Teams, quiet windows, reports and roles in Git
+
+```yaml
+serve:
+  config: |
+    teams:
+      - {name: payments, rules: ^Checkout, labels: {team: payments}, tz: Asia/Seoul}
+    windows:
+      - {title: Nightly backup, team: payments, start: 2026-11-02T02:00, end: 2026-11-02T03:00, every: day, rules: ^Backup}
+    reports:
+      - {name: payments weekly, team: payments, schedule: weekly mon@09:00, dests: [team:payments]}
+    grants:
+      - {group: payments-oncall, team: payments}
+  configPrune: false
+  proposalsExpire: 30d
+```
+
+`serve.config` declares teams, quiet windows (`windows`), reports and the
+editor roles admins give (`grants`), each with the fields the UI's form for
+it takes (`values.yaml` lists them all), rather than having them made in
+the UI. Give it as a text, a block scalar, as above: the chart renders it
+as written. Given as a mapping, Helm reads it as YAML 1.1 first, and
+writes `no`, `off`, `y` as `false` or `true`, `0123` as `83`, `1.10` as
+`1.1`; lapilli refuses a name, a title, a user or a group that reaches it
+as a boolean or a number, and a label's value as a boolean or a fraction,
+but can't tell `83` from `0123`. Times stay as written either way.
+
+The chart renders it into a ConfigMap, `FULLNAME-config`, mounted as a
+directory and passed as `--config`; lapilli keeps the ledger holding what
+it says when a pod starts to lead, and again whenever the file changes,
+without a restart: the kubelet updates the file within a minute or so,
+and lapilli reads it every 15 seconds. **A file is kept to only once the
+same file has been read twice in a row**, 15 seconds or more apart, with
+no other read between: a file read half written, or swapped in part,
+changes nothing, giving no one a role and taking none away. So a new
+file is kept to 15 seconds or more after it is first read, and a pod that
+starts to lead keeps the ledger to it 15 seconds after it has read the
+rules: usually within half a minute, but that is no bound. The Settings
+page says when a file waits, and why (a ConfigMap changing back and
+forth, or a ledger write that failed). With several replicas, the leader
+alone writes it, in one transaction. Each thing is matched by its name (a
+team's in any letter case, a quiet window's by its title); what the UI made
+of the same team under that name is taken over. What `serve.config`
+declares is marked declared in the UI, which doesn't change or delete it,
+nor does the API: change it here. A file that can't be read (YAML that
+isn't, a key it doesn't know, an empty file, `grants:` or a role's `team:`
+with nothing after it: leave a key out for every team) changes nothing,
+and is said at once; a thing in it that can't be kept (a report to a
+destination nothing names, a team that isn't there) is kept as it was, and
+the rest is kept. A team that can't be kept keeps what names it in the
+file as it was too. The Settings and Runs
+pages say what can't, and to an admin why, with the line. An admin's
+`/config.yaml` gives everything the ledger holds in this form, declared
+and made in the UI alike, to paste under `serve.config`.
+
+Taken out of `serve.config`, a thing is the UI's again, as it was, but a
+role (`grants`). **A role is taken away only when a file that was read
+twice no longer lists it**, as a file is kept to only then. Declaring a
+role gives it to the file, as Argo CD's RBAC policy owns its roles. With
+`serve.configPrune`, the rest is deleted then too; but a team that
+something still names (a window, a report, a role, a task, a note) is
+given back to the UI instead. Without `serve.config` (left `null`, or the
+chart rolled back to before it), everything a file declared is the UI's
+again, roles included, none taken away and nothing deleted, each marked
+given back: until the UI changes one, a `serve.config` put back that
+doesn't declare it again takes it away (a role), or deletes it with
+`serve.configPrune`. The Settings page lists them. The mark doesn't
+expire: to keep one, change it in the UI, or keep it on the Settings page
+(an admin's, one or all); a role can't be changed, so delete it and give
+it again, or keep it there. What the file declares
+has limits of its own beside the UI's; given back past the UI's own, a
+thing is deleted. What the file no longer declares goes before what it
+adds is made. To rename a team
+in place, keeping what names it, give the new `name` with the old as
+`renamed_from`, and change every `team:` that names it, in one change:
+renamed by its name alone, it is another team.
+
+`serve.proposalsExpire` closes a proposal that waited for approval longer
+since it began to wait (made, or backtested again), such as `30d`, and
+that no one approved, as expired, so its rule can have another. Empty, the default, keeps it waiting however
+long. Neither goes with `serve.readOnly`, which the chart refuses.
+
 ## Who people are
 
 

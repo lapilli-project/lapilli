@@ -58,6 +58,16 @@ func TestContextCarried(t *testing.T) {
 	s, paths := a11yServer(t)
 	h := s.Handler()
 	links, forms := 0, 0
+	// The Teams page links each team's row to its own overview, rules and
+	// tasks.
+	teams := map[string]bool{}
+	ts, err := s.l.Teams(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range ts {
+		teams[x.Name] = true
+	}
 	for _, p := range append(paths, "/tasks?status=done", "/reports?edit=1", "/teams?edit=1") {
 		u, _ := url.Parse(p)
 		q := u.Query()
@@ -107,7 +117,7 @@ func TestContextCarried(t *testing.T) {
 			switch team, ok := l.Query()["team"]; {
 			case !ok:
 				t.Errorf("%s: %q (%q) doesn't carry the team", p, href, text)
-			case team[0] != "payments" && !(team[0] == "" && (text == "all" || strings.HasPrefix(text, "Remove filter: Team:") || text == "The same filters, in all teams" ||
+			case team[0] != "payments" && !(strings.HasPrefix(p, "/teams") && teams[team[0]]) && !(team[0] == "" && (text == "all" || strings.HasPrefix(text, "Remove filter: Team:") || text == "The same filters, in all teams" ||
 				text == "Add a task about this rule" || text == "Add a task about this incident" || text == "Add a task" && strings.HasPrefix(p, "/rules/"))):
 				t.Errorf("%s: %q (%q) carries another team", p, href, text)
 			}
@@ -193,7 +203,7 @@ func TestShortNext(t *testing.T) {
 // toPage reports whether a link on this server goes to a page, not a file,
 // the sign-in, the API or the choice of a language.
 func toPage(href string) bool {
-	for _, not := range []string{"/static/", "/auth/", "/api/", "/settings.yaml", "/lang?", "/metrics", "/mcp"} {
+	for _, not := range []string{"/static/", "/auth/", "/api/", "/settings.yaml", "/config.yaml", "/lang?", "/metrics", "/mcp"} {
 		if strings.HasPrefix(href, not) {
 			return false
 		}

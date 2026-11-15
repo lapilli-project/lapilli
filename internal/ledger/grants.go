@@ -28,6 +28,13 @@ type Grant struct {
 	TeamID  int64     `json:"team_id,omitempty"`
 	Created time.Time `json:"created"`
 	By      string    `json:"by,omitempty"`
+	// Declared says --config declares it: the UI and the API don't take it
+	// away (docs/design/serveops.md).
+	Declared bool `json:"declared,omitempty"`
+	// GivenBack says a file declared it and a leader without --config gave
+	// it back to the UI: until the UI changes it, the next file that
+	// doesn't declare it again leaves it as one it no longer declares.
+	GivenBack bool `json:"-"`
 }
 
 // RoleGiven and RoleTaken begin what the changes say of a role given or
@@ -270,7 +277,7 @@ func grantName(who string) (string, error) {
 	case kind == "group" && strings.Contains(name, ","):
 		return "", invalid("a group's name has no comma: the sign-in proxy separates groups by commas")
 	}
-	if f := FoldName(name); kind == "user" && slices.ContainsFunc([]string{"anonymous", Copier, FiringsCopier, TaskTracker, ChangesCopier, Proposer},
+	if f := FoldName(name); kind == "user" && slices.ContainsFunc([]string{"anonymous", Copier, FiringsCopier, TaskTracker, ChangesCopier, Proposer, ConfigBy},
 		func(n string) bool { return f == FoldName(n) }) {
 		return "", invalid("%s is a name Lapilli keeps for itself", name)
 	}
@@ -279,7 +286,13 @@ func grantName(who string) (string, error) {
 
 // Grants are the roles given in the UI, by whom they are given to.
 func (l *Ledger) Grants(ctx context.Context) ([]Grant, error) {
-	rows, err := l.r.QueryContext(ctx, "SELECT id, who, role, team_id, created, created_by FROM grants ORDER BY who, team_id")
+	return grants(ctx, l.r)
+}
+
+// grants are the roles given in the UI or declared, read with q: the
+// ledger's reader, or a write.
+func grants(ctx context.Context, q queryer) ([]Grant, error) {
+	rows, err := q.QueryContext(ctx, "SELECT id, who, role, team_id, created, created_by, declared, given_back FROM grants ORDER BY who, team_id")
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +301,7 @@ func (l *Ledger) Grants(ctx context.Context) ([]Grant, error) {
 	for rows.Next() {
 		var g Grant
 		var at int64
-		if err := rows.Scan(&g.ID, &g.Who, &g.Role, &g.TeamID, &at, &g.By); err != nil {
+		if err := rows.Scan(&g.ID, &g.Who, &g.Role, &g.TeamID, &at, &g.By, &g.Declared, &g.GivenBack); err != nil {
 			return nil, err
 		}
 		g.Created = unix(at)
@@ -325,12 +338,16 @@ func (l *Ledger) PutGrant(ctx context.Context, g Grant, by string) (int64, error
 				return invalid("no such team")
 			}
 		}
+		// What --config declares has its own most (MaxGrants a file).
 		var n int
-		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM grants").Scan(&n); err != nil {
+		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM grants WHERE declared = 0").Scan(&n); err != nil {
 			return err
 		}
 		if n >= MaxGrants {
 			return invalid("the ledger keeps %d roles at most", MaxGrants)
+		}
+		if err := fullOf(t, "grants"); err != nil {
+			return err
 		}
 		err := t.QueryRowContext(t.ctx, "INSERT INTO grants (who, role, team_id, created, created_by) VALUES (?, ?, ?, ?, ?) RETURNING id",
 			g.Who, g.Role, g.TeamID, time.Now().Unix(), by).Scan(&id)
@@ -352,15 +369,22 @@ func (l *Ledger) DeleteGrant(ctx context.Context, id int64, by string) error {
 		if _, limited := scopeOf(t.ctx); limited {
 			return ErrNotYourTeam
 		}
-		var who string
-		if err := t.QueryRowContext(t.ctx, "SELECT who FROM grants WHERE id = ?", id).Scan(&who); errors.Is(err, sql.ErrNoRows) {
+		var g Grant
+		var at int64
+		if err := t.QueryRowContext(t.ctx, "SELECT id, who, role, team_id, created, created_by FROM grants WHERE id = ?", id).
+			Scan(&g.ID, &g.Who, &g.Role, &g.TeamID, &at, &g.By); errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {
+			return err
+		}
+		g.Created = unix(at)
+		if err := isDeclared(t, "grants", id); err != nil {
 			return err
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM grants WHERE id = ?", id); err != nil {
 			return err
 		}
-		return change(t, by, RoleTaken+who, nil, nil)
+		// What was taken, of which team, kept with it.
+		return change(t, by, RoleTaken+g.Who, g, nil)
 	})
 }

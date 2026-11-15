@@ -96,7 +96,22 @@ spec:
             - {{ printf "--user-header=%s" . | quote }}
             {{- end }}
             {{- if $s.readOnly }}
+            {{- if or $s.config $s.proposalsExpire }}
+            {{- fail "serve.readOnly writes nothing: serve.config and serve.proposalsExpire write the ledger" }}
+            {{- end }}
             - --read-only
+            {{- end }}
+            {{- if $s.config }}
+            - --config=/etc/lapilli/config/config.yaml
+            {{- end }}
+            {{- if $s.configPrune }}
+            {{- if not $s.config }}
+            {{- fail "serve.configPrune deletes what serve.config no longer declares: give serve.config" }}
+            {{- end }}
+            - --config-prune
+            {{- end }}
+            {{- with $s.proposalsExpire }}
+            - {{ printf "--proposals-expire=%s" . | quote }}
             {{- end }}
             {{- if $s.everyoneAdmin }}
             - --everyone-admin
@@ -372,6 +387,13 @@ spec:
               mountPath: /etc/lapilli/on-call
               readOnly: true
             {{- end }}
+            {{- if $s.config }}
+            # The whole directory, not a subPath: the kubelet updates it as
+            # the ConfigMap changes.
+            - name: config
+              mountPath: /etc/lapilli/config
+              readOnly: true
+            {{- end }}
             {{- if ($s.deploys).configMap.name }}
             - name: deploys
               mountPath: /etc/lapilli/deploys
@@ -487,6 +509,11 @@ spec:
         - name: on-call
           configMap:
             name: {{ $s.onCall.configMap.name }}
+        {{- end }}
+        {{- if $s.config }}
+        - name: config
+          configMap:
+            name: {{ include "lapilli.fullname" . }}-config
         {{- end }}
         {{- if ($s.deploys).configMap.name }}
         - name: deploys

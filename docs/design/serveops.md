@@ -476,3 +476,344 @@ Found while checking these against Grafana 13.3.1, and left for its own
 change: Grafana's export writes a `$` in a template as `$$`, so a Grafana
 rule read with `--grafana` whose annotations use `{{ $labels.x }}` is
 faulted for a template that doesn't parse.
+
+## Declared configuration
+
+Status: built, for the next release, schema 019. Teams, quiet windows,
+reports and the editor roles admins give were the ledger's alone, made in
+the UI: a team that runs everything through Git couldn't review them,
+restore them or copy them to another cluster, and Helm's values declared
+only the roles and five judging settings. Argo CD declares its projects
+and repositories in the cluster; Grafana provisions dashboards and alert
+rules from files and marks them provisioned, read-only in its UI. Lapilli
+takes Grafana's model: what a file declares is read-only in the UI, which
+says where to change it. **Maintainer's call, 2026-11-16**: no drift or
+self-heal model; the file is read as it changes, not against what the UI
+did meanwhile, which it can't do to what is declared.
+
+### The file
+
+`lapilli serve --config FILE` (`serve.config` in the chart, rendered into a
+ConfigMap) is YAML of four lists, each item with the fields the UI's form
+for it takes, under the names the API gives them:
+
+```yaml
+teams:
+  - name: payments
+    rules: ^Checkout              # rules whose names match
+    labels: {team: payments}      # or whose labels have these values
+    note: owns checkout and cart
+    work_hours: mon-fri@09:00-18:00
+    sleep_hours: 23:00-07:00
+    tz: Asia/Seoul
+    shifts: ""
+    renamed_from: ""              # its name before: renamed in place
+windows:                          # quiet windows
+  - title: Nightly backup
+    team: payments                # everyone's when left out
+    start: 2026-11-02T02:00       # in --tz, or with an offset (RFC 3339)
+    end: 2026-11-02T03:00
+    every: day                    # day, week, month or cron; once when left out
+    repeat_on: ""                 # month: 15, last, first sat; cron: 0 2 * * 6
+    until: 2027-06-30             # the last day one starts; for good when left out
+    rules: ^Backup
+    labels: {env: [prod, stage]}  # a value, or a list of them
+reports:
+  - name: payments weekly
+    team: payments
+    schedule: weekly mon@09:00
+    span: ""                      # a cron schedule's span, such as 24h
+    zone: team                    # ledger (when left out) or team
+    sections: [summary, noise, missed, woken]
+    dests: [team:payments]        # --report-dest's names, slack, webhook, team:NAME
+    enabled: true                 # true when left out
+grants:                           # an editor's role, of every team or of one
+  - group: payments-oncall
+    team: payments
+  - user: ana@example.com
+```
+
+A window's `on` is `repeat_on`, the ledger's column: Helm reads values as
+YAML 1.1, where a key `on`, unquoted, is `true`.
+
+**Read strictly, or not at all.** A key it doesn't know, a value of
+another kind, a key given twice, a second document, a file over 1 MiB (a
+ConfigMap's most), more things than the ledger keeps (1,000 teams, 500
+quiet windows, 50 reports, 1,000 roles), an empty file, or a key of the
+four with nothing after it (`grants:` alone, which YAML reads as null) is
+refused as a whole, with its line, and changes nothing: the ledger keeps
+what the last file declared. An empty or truncated file, read as
+Kubernetes swaps a ConfigMap, would otherwise take away everything
+declared; to declare nothing, `teams: []`, and to declare no roles,
+`grants: []`. So is a key of a thing with nothing after it (`team:` or
+`rules:` alone): read as nothing, a role's or a quiet window's team would
+be every team, and a quiet window's rules every rule; to mean that, leave
+the key out. A name, a title, a user, a group or a team given as
+a boolean or a number (`no`, `0123`, `1.10`), and a label's value given as
+a boolean or a fraction, is refused too: see "Through Helm" below.
+
+**Each thing, on its own.** Read, each item is checked as the UI's form is:
+the ledger's checks (`checkTeam`, `checkWindow`, a report's `check`,
+`grantName`) and the server's (a report's destinations, a team's
+`on-call=NAME` shifts), and its team must be one the file declares or the
+ledger holds. One that fails is skipped, and what the ledger held of it is
+kept as it was, when what it is can be told: a quiet window of its title
+and its team, a role of its holder and its team, a team of its name; one
+whose team isn't there keeps nothing, so no window of another team, or
+everyone's, stays declared, quieting what the file no longer says to; everything else is kept, and what the file no longer
+declares is given back (or deleted) all the same: a file that takes a role
+away and adds a quiet window that can't be kept still takes the role
+away. A team that can't be kept is kept as it was, and so is everything in
+the file that names it, each skipped and said why: the file meant the team
+as it declares it, so a window, a report or a role of it isn't moved onto
+the team the ledger holds under that name. The costly checks (a cron
+window's gaps) run before the write.
+
+**Limits of its own.** What a file declares isn't counted against what the
+UI may make (1,000 teams, 500 quiet windows, 50 reports, 1,000 roles), nor
+the UI's against it: an editor who fills the windows can't keep a file
+from declaring one. Both together are bounded too, at twice each: past
+it, a thing the file would add is skipped, said why. What the file no
+longer declares is let go before what it adds is made, so a file that
+swaps one thing for another at that most makes the new one. It is given
+back to the UI only while the UI holds less than its own most; past it, it
+is deleted, the activity log saying why, or, a team something names, kept
+declared and said: declared and taken out again and again, nothing piles
+up past what the UI may make. Without `--config`, everything is given
+back, whatever the UI holds.
+
+### Read twice before it is kept
+
+**A file is kept to only once the same file has been read twice in a
+row.** The leader reads it every 15 seconds and hashes it (SHA-256). A
+hash the ledger isn't kept to is only noted on its first read; read again,
+15 seconds or more after, with no other read between (another file, one
+that can't be read, or the one the ledger is kept to), the ledger is kept
+to it, in one write, and the next new file starts over. A write the
+ledger fails doesn't count: the file is tried again after a while, still
+needing its two reads in a row if another is read before then. So a file
+read half written, or swapped in part as Kubernetes updates a ConfigMap,
+changes nothing at all: it gives no one a role, of a team or of every
+team, widens no quiet window, takes no role away and deletes nothing.
+Kept to, a file is kept to as a whole: what it no longer declares is let
+go at once (below). A file that can't be read as `--config` is said at
+once, on its first read; what of one can't be kept is said once it is
+kept to. As a term begins, at start or as another replica takes over,
+the file is read once, before the rules are read, and the ledger is kept
+to it at the next read, 15 seconds after it has read the rules: usually
+within half a minute of the term's start, but that is no bound. Until then the ledger holds what
+the last leader kept it to, and the Settings page says when a new file
+was read once. A ledger write that fails is shown there too, with when it
+is tried again, not as a file read once. Files other than the one
+applied, read with none of them the same twice in a row (a ConfigMap
+changing back and forth, or terms too short to read a file twice, which
+keep the ledger from every file), are shown with since when they have
+been, and logged once that has lasted five minutes; the one applied, read
+the same twice in a row, ends it. Without `--config` there is no file to
+read twice: what a file declared is given back at once.
+
+A blank team or quiet window's rules, `team: ""` or `rules: ' '`, is
+refused as one with nothing after it is: as nothing, either would hold for
+every team or every rule.
+
+### Keeping the ledger to it
+
+`ledger.Reconcile` makes the ledger hold what the file says in one write.
+Each thing is matched by its name:
+
+- a team by its name, or else in any letter case when one team alone has
+  it (a file's `Payments` renames the ledger's `payments`); every team by
+  its name first, then, of those no team has the name of, by its
+  `renamed_from` (trimmed), so the order the file lists them in changes
+  nothing. A name and a `renamed_from` that are two teams, an old name
+  given twice, or one another team declares by its name, is skipped and
+  said, and the teams it names kept as they were. A rename is noted as one
+  (`team B renamed to C`);
+- a report by its name; a role by whom it is given to and its team;
+- a quiet window by its title: those alike first, then a declared one of
+  its team, then a declared one of another team (the file moved it), then
+  one the UI made of its team. A window taken out of a file of several with
+  one title leaves the others as they were.
+
+What the UI made is taken over only of the same team: a declared window
+whose title only another team's window has is made beside it, and a report
+whose name the UI gave another team's report is skipped, as names are
+unique. Taken over, it is counted so ("taken over") and noted `X declared
+in config`, as the file says it. A new one is made, marked declared. Each
+change is noted in the activity log, by `config`; a quiet window made is
+told as one the UI makes is (`window.kept`), and the windows changed are
+judged again. A file that says what the ledger holds writes nothing at
+all: the write is taken back, and no page is worked out again.
+
+What is declared and the file no longer names is the UI's again, as it
+was, but a role. With `--config-prune` (`serve.configPrune`) it is
+deleted.
+
+**A role is taken away only when a file that was read twice no longer
+lists it**, pruned or not: a file is kept to only once it is read the same
+twice in a row (above), so a file read once takes no one's role. One the
+UI made and the file took over is
+taken away so too, each noted as a role taken (`RoleTaken`, by `config`,
+with whom it was given to and its team). **Maintainer's call,
+2026-11-16**: for permissions, safety first. Declaring a role gives it to
+the file, as Argo CD's RBAC policy owns its roles; given back to the UI, a
+role no one meant to keep would stay. Teams, quiet windows and reports keep
+being given back. A role whose team the file misspells keeps none of the
+person's roles as they were: one of every team the file gave before is
+taken away with the rest.
+
+**Without `--config`**, there is no file to say a role is gone:
+everything a file declared before is the UI's again, roles included, none
+taken away and nothing deleted, whatever the UI holds. Each is marked
+given back (`given_back`): until the UI changes one, the next file that
+doesn't declare it again lets it go as one it no longer declares, a role
+taken away, a team, a quiet window or a report the UI's for good, or
+deleted with prune; one it declares again is declared again, of the
+team it says, in its own row (a quiet window or a report moved to another
+team isn't made again beside it, nor a report's last send lost). The
+Settings page lists them to an admin, and says how many to anyone else.
+**The mark doesn't expire**: a file put back months on still lets go of
+what it doesn't declare, roles taken away all together. To keep one as
+the UI's, change it in the UI, or keep it on the Settings page (an
+admin's: one, or all of them, each noted in the activity log); a role
+can't be changed, so delete it and give it again, or keep it there. A
+chart rolled back to before `serve.config` takes no one's role away, and
+rolled forward again, the file takes away what it no longer gives.
+
+A declared team something still names (a quiet window, a
+report, a role, a task, a rule's note, the UI's or declared) isn't
+deleted, but given back to the UI, the activity log saying why: deleted,
+its windows would quiet nothing and its roles go, and the file put back
+would make a new team, which they wouldn't name.
+
+**Renaming a team.** By its name alone, a team renamed in the file is
+another: the old one is given back to the UI (or, with prune, deleted
+unless something names it), and what named the old one doesn't follow.
+To rename one in place, keeping what names it, give the new `name` and the
+old as `renamed_from` in one change, with every `team:` in the file that
+named it; once it is renamed, `renamed_from` can be left out. A rename in
+letter case alone needs neither.
+
+**When.** The leader reads the file as each term it leads begins,
+forgetting what an earlier term kept the ledger to (another leader with an
+older copy may have since, or a failover lost a write), and again every
+15 seconds, comparing its SHA-256 with the one it last kept the ledger to,
+and keeps the ledger to it on the second read alike (above). The term's
+first read comes before the rules are read, and the second 15 seconds
+after it has read the rules: usually within half a minute of the term's
+start, but with no bound. Kubernetes updates a mounted ConfigMap by swapping a link to
+a new directory, which a watch on the file misses, so the content is
+hashed instead. The chart mounts the directory, not a `subPath`, which the
+kubelet doesn't update. No restart is needed, and none is made. A file with
+things that couldn't be kept is tried again as the ledger changes (a team
+it names made in the UI, or one the write itself made once others were let
+go), 15 seconds after, then twice as long each time, ten minutes at most;
+one refused as a whole isn't, until it changes.
+
+**Several replicas.** Only the leader keeps the ledger to the file, in a
+write its lease fences (a leader whose lease another took commits
+nothing). Each replica mounts the ConfigMap, and the kubelet updates each
+copy on its own clock, so for a minute two replicas can read two
+versions; were each to write, they would undo each other by turns. One
+writer, and the transaction, make it safe; the write is idempotent, so a
+leader that takes over after another kept the ledger to the same file
+writes nothing.
+
+**What is wrong** is logged once, and shown on the Settings page (under
+"Declared configuration") and the Runs page, and the Manage page's
+Settings card says so; the leader says it to the other replicas with its
+status. An admin is shown why, with the line; anyone else, the line and
+the kind alone ("line 23: a role that can't be kept"), as why can name who
+holds a role or where a report goes: so is `/api/v1/settings`. Put back as
+it was, the file the ledger is kept to shows nothing wrong again. At start,
+a file that isn't there or can't be read is a flag given wrong; one that
+can't be used starts `lapilli serve` all the same, on the ledger as it is,
+and is said as above: a pod restarted on it serves rather than loop.
+
+### Through Helm
+
+`serve.config` given as a text, a block scalar, is rendered as written
+(with an indentation indicator, so a first line indented more than the
+rest renders), and recommended; its default is `null`, which neither form
+warns over:
+
+```yaml
+serve:
+  config: |
+    teams:
+      - {name: payments, rules: ^Checkout}
+```
+
+Given as a mapping, Helm reads it first as YAML 1.1 and writes it again:
+`no`, `off`, `y` and `n` become `false` and `true`, `0123` becomes `83`,
+`1e3` `1000`, `0x1F` `31`, `1.10` `1.1`, and a number past 2^53 loses its
+last digits. Lapilli refuses a name, a title, a user, a group or a team
+it is given as a boolean or a number, and a label's value given as a
+boolean or a fraction, but can't tell `83` from `0123`. Times (`09:00`,
+`23:00-07:00`) stay as written either way.
+
+### Read-only
+
+`declared` is a column of `teams`, `windows`, `reports` and `grants`. Every
+write the ledger takes to one of those rows checks it, in the write itself
+(`PutTeam`, `DeleteTeam`, `PutWindow`, `DeleteWindow`, `PutScheduled`,
+`DeleteScheduled`, `DeleteGrant`), and refuses a declared one with
+`ErrDeclared`: "declared in config — change it in values", 409. The forms,
+the JSON API and anything else reach the ledger through them, so no path
+is missed; MCP has no tool that writes them. A team a declared window,
+report or role names isn't deleted, nor renamed (`ErrNamedByDeclared`):
+the file would name a team that isn't there. The ledger's pruning (`--keep`)
+leaves a declared window that ended: the file would make it again, and
+tell of it. The pages mark what is declared with a badge, and draw each
+action on it with the `off` template: the button disabled, "Declared in
+config — change it in values" beside it.
+
+### Export
+
+`GET /config.yaml`, an admin's (it names who holds which role), gives every
+team, quiet window, report and role the ledger holds, declared and made in
+the UI alike, as `--config` takes them: times as RFC 3339 in `--tz`, so each
+is the instant it is wherever it is read; a window's last day as a date
+when it is that day's start. What a file can't name is left out and said
+in a comment, each name quoted, its line breaks and characters that don't
+show escaped: a title kept from before titles were one line can't end the
+comment and declare a role for whoever pastes the export. A quiet window's
+title is one line now, with nothing that doesn't show, as a team's and a
+role's holder's names are. Teams whose names differ only in letter case
+are said too. Read back as `--config`, it makes, changes and deletes
+nothing; it takes over what the UI made; exported again, it is the same
+file; read once more, it writes nothing.
+
+### A team's name in any letter case
+
+A new team's name, and a team renamed, is unique in any letter case
+(Unicode case folding, `ledger.FoldName`), checked in the write, which the
+ledger takes one at a time, every replica's too. Schema 019 adds
+`teams.name_key`, the name with ASCII letters lowered (SQLite's `lower()`,
+and Postgres's under `COLLATE "C"`, fold those alone), under a unique
+index. A ledger may already hold teams whose names differ only in case
+(`Payments`, `payments`): the upgrade doesn't fail on them, nor choose
+one. 019 keys every team but those, whose key stays NULL, which a unique
+index takes any number of. Either can be changed but for its name; the
+Teams page lists them to be renamed; once one is renamed or deleted, the
+other is keyed. A file can't declare both: it names which to rename.
+
+### Proposals that expire
+
+`--proposals-expire DURATION` (`serve.proposalsExpire`), off by default (0,
+`0s`, `0d`): the leader's work closes as `expired` a proposal that waited
+for approval longer than that since it began to wait (it was made, or
+backtested again, its approvals withdrawn, or sent back to wait for more:
+its `updated`, which nothing else moves while it waits), that no one
+approved: one with an approval waits on (one
+of two, or the one `--approvals`, lowered, now asks for, which carrying it
+out approves). A hundred a round, each in a write that moves it only while
+it still waits, noted in its history and the activity log as Lapilli's;
+its rule is free for another, and Lapilli doesn't propose the same again
+by itself. They are closed before Lapilli backtests stale proposals again,
+so no backtest is spent on one about to close, and Lapilli doesn't
+backtest again one past its expiry, which someone approved: backtested
+again, its approvals withdrawn, it would wait anew; one being backtested again
+on the leader is left until it is done, and one backtested on another
+replica, closed meanwhile, has its backtest refused as moved. A proposal's
+page says when it would expire, while no one approved it.
