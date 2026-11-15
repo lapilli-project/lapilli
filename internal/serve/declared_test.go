@@ -113,6 +113,9 @@ func TestParseConfig(t *testing.T) {
 		{"", "the file declares nothing"},
 		{"# nothing\n", "the file declares nothing"},
 		{"~\n", "the file declares nothing"},
+		// A key with nothing after it, as a file cut short reads.
+		{"teams:\n", "line 1: teams has nothing after it: give teams: [] for none"},
+		{"teams: []\nwindows:\n", "line 2: windows has nothing after it"},
 		// What Helm, reading values as YAML 1.1, gives as a boolean or a
 		// number where a name is wanted.
 		{"teams:\n  - name: false\n    rules: ^A\n", "line 2: name is false, read as a boolean or a number"},
@@ -135,7 +138,7 @@ func TestParseConfig(t *testing.T) {
 		t.Errorf("a file past the size: %v", err)
 	}
 	// Said to declare nothing, it does.
-	for _, body := range []string{"{}\n", "teams: []\n", "teams:\n"} {
+	for _, body := range []string{"{}\n", "teams: []\n", "teams: []\ngrants: []\n"} {
 		if d, err := ParseConfig([]byte(body), time.UTC); err != nil || len(d.Teams)+len(d.Windows)+len(d.Reports)+len(d.Grants) != 0 {
 			t.Errorf("%q: %+v %v", body, d, err)
 		}
@@ -196,9 +199,13 @@ func TestConfigReloaded(t *testing.T) {
 	}{
 		// Not readable as --config: nothing kept.
 		{strings.Replace(berlin, "tz: Europe/Berlin", "tz: Asia/Seoul\n    color: red", 1), `unknown key "color" in a team`, true},
-		// A team that can't be kept: kept as it was, the window changed.
+		// A team that can't be kept: kept as it was, and what names it too,
+		// the window's change not kept.
 		{strings.Replace(strings.Replace(berlin, "tz: Europe/Berlin", "tz: Mars/Olympus", 1), "end: 2026-11-02T03:00", "end: 2026-11-02T04:00", 1),
 			`"Mars/Olympus" isn't a time zone`, false},
+		// A window that can't be kept, the rest kept.
+		{strings.Replace(strings.Replace(berlin, "every: day", "every: fortnight", 1), "dests: [team:payments]", "dests: [team:payments]\n    enabled: false", 1),
+			`repeats every day, week or month`, false},
 		// A report to nowhere: kept as it was.
 		{strings.Replace(berlin, "dests: [team:payments]", "dests: [nowhere]", 1), `there is no destination called "nowhere"`, false},
 	} {
@@ -210,12 +217,12 @@ func TestConfigReloaded(t *testing.T) {
 			t.Errorf("%s: payments isn't kept as it was", c.want)
 		}
 		ws, _ := s.l.Windows(ctx, now.Add(-30*24*time.Hour), now.Add(30*24*time.Hour))
-		if long := ws[0].End.Sub(ws[0].Start) == 2*time.Hour; long != strings.Contains(c.body, "04:00") {
-			t.Errorf("%s: the rest isn't kept: %+v", c.want, ws[0])
+		if ws[0].End.Sub(ws[0].Start) != time.Hour || ws[0].Every != "day" {
+			t.Errorf("%s: the window isn't kept as it was: %+v", c.want, ws[0])
 		}
 		rs, _ := s.l.Scheduleds(ctx)
-		if len(rs) != 1 || rs[0].Dests[0] != "team:payments" {
-			t.Errorf("%s: the report isn't kept as it was: %+v", c.want, rs)
+		if len(rs) != 1 || rs[0].Dests[0] != "team:payments" || rs[0].Enabled == strings.Contains(c.body, "enabled: false") {
+			t.Errorf("%s: the report: %+v", c.want, rs)
 		}
 		shown := s.configShown()
 		if !strings.Contains(shown.ErrText("en"), c.want) || shown.ErrText("ko") == shown.ErrText("en") || shown.Whole != c.whole {
@@ -300,7 +307,7 @@ func TestConfigNewTerm(t *testing.T) {
 	ctx := context.Background()
 	s, _ := configServer(t, configFile, nil)
 	o, _ := s.options(ctx)
-	if _, _, err := s.l.Reconcile(ctx, ledger.Declared{}, ledger.LeftUndeclare, o); err != nil { // as another leader would
+	if _, _, err := s.l.Reconcile(ctx, ledger.Declared{}, ledger.Leave{Sure: true}, o); err != nil { // as another leader would
 		t.Fatal(err)
 	}
 	if err := s.configTerm(ctx); err != nil {
@@ -699,11 +706,19 @@ func TestRenameNamedTeam(t *testing.T) {
 }
 
 // A role the file no longer gives is taken away, --config-prune or not,
-// one the UI made and the file took over among them.
+// one the UI made and the file took over among them, once the file is
+// read the same twice in a row.
 func TestConfigGrantRevoked(t *testing.T) {
 	ctx := context.Background()
 	s, path := configServer(t, configFile, nil)
 	writeConfig(t, path, strings.Replace(configFile, "  - user: ana@example.com\n", "", 1))
+	if err := s.reconcileConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Read once, kept: a file read half written takes no one's role.
+	if gs, _ := s.l.Grants(ctx); !slices.ContainsFunc(gs, func(g ledger.Grant) bool { return g.Who == "user:ana@example.com" && g.Declared }) {
+		t.Errorf("read once, ana's role: %+v", gs)
+	}
 	if err := s.reconcileConfig(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -781,7 +796,59 @@ func TestConfigBackoff(t *testing.T) {
 	if err := s.reconcileConfig(ctx); err == nil {
 		t.Fatal("no error from a closed ledger")
 	}
-	if s.config.retryAt.IsZero() || !s.config.retryAt.After(at) {
-		t.Errorf("not tried again after a while: %v", s.config.retryAt)
+	if !s.config.failAt.After(at) {
+		t.Errorf("not tried again after a while: %v", s.config.failAt)
+	}
+}
+
+// An error of the ledger's holds off the file it met for a while, even
+// read the same twice, when it would delete what it no longer names, or
+// put back after one that couldn't be read.
+func TestConfigErrorBacksOff(t *testing.T) {
+	ctx := context.Background()
+	s, path := configServer(t, configFile, func(c *Config) { c.ConfigPrune = true })
+	writeConfig(t, path, strings.Replace(configFile, "  - user: ana@example.com\n", "", 1))
+	if err := s.reconcileConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if s.config.keptFor == "" {
+		t.Fatal("nothing kept to delete when read again")
+	}
+	s.Close() // the ledger fails every write
+	if err := s.reconcileConfig(ctx); err == nil {
+		t.Fatal("read twice, not tried")
+	}
+	for range 3 {
+		if err := s.reconcileConfig(ctx); err != nil {
+			t.Errorf("tried again at once: %v", err)
+		}
+	}
+	at := time.Now().Add(time.Hour)
+	s.wall = func() time.Time { return at }
+	if err := s.reconcileConfig(ctx); err == nil {
+		t.Error("not tried again after a while")
+	}
+}
+
+// Without --config, what a file declared before is the UI's again, roles
+// included, none taken away, whatever the UI holds: a chart rolled back to
+// before --config takes no one's role away. Settings says so.
+func TestConfigNoFileGivesBack(t *testing.T) {
+	ctx := context.Background()
+	s, _ := configServer(t, configFile, nil)
+	s.cfg.Config = ""
+	if err := s.configTerm(ctx); err != nil {
+		t.Fatal(err)
+	}
+	gs, _ := s.l.Grants(ctx)
+	if len(gs) != 2 || slices.ContainsFunc(gs, func(g ledger.Grant) bool { return g.Declared }) {
+		t.Errorf("roles without --config: %+v", gs)
+	}
+	cs, _ := s.l.Changes(ctx, 50)
+	if slices.ContainsFunc(cs, func(c ledger.Change) bool { return strings.HasPrefix(c.What, ledger.RoleTaken) }) {
+		t.Error("a role taken away without --config")
+	}
+	if _, body := callAs(t, s.Handler(), "GET", "/settings", "boss@example.com", "", "", ""); !strings.Contains(body, "the UI&#39;s again, roles included, none taken away: 5 of them") {
+		t.Errorf("settings doesn't say what was given back")
 	}
 }

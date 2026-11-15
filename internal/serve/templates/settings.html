@@ -14,11 +14,14 @@
 <p class="quiet"><code>--lead</code>: {{t "how long before an incident a firing still catches it."}} <code>--match</code>: {{t "labels a firing and an incident must agree on; none for no labels."}} <code>--refire</code>: {{t "how soon after resolving a firing counts as refired."}} {{t "A rule is noisy when it fired --noisy-firings times or more and under --noisy-precision of them caught anything."}}</p>
 
 <h2 id="config">{{t "Declared configuration"}}</h2>
-{{with .Config}}
-<p>{{tbdi "Teams, quiet windows, reports and roles are declared in %s: serve.config in the Helm chart's values. What it declares is changed there alone." .File}} {{if .Prune}}{{t "What it no longer declares is deleted (--config-prune)."}}{{else}}{{t "What it no longer declares is the UI's again; with --config-prune, it is deleted."}}{{end}}</p>
+{{with .Config}}{{if not .File}}
+<p>{{t "Nothing is declared: lapilli serve was started without --config, so teams, quiet windows, reports and roles are made here, in the UI."}}</p>
+<p>{{t "What a file declared before is the UI's again, roles included, none taken away: %d of them." .Did.Undeclared}}</p>
+{{else}}
+<p>{{tbdi "Teams, quiet windows, reports and roles are declared in %s: serve.config in the Helm chart's values. What it declares is changed there alone." .File}} {{if .Prune}}{{t "What it no longer declares is deleted once the file is read the same twice in a row (--config-prune), but a team something names, which is the UI's again."}}{{else}}{{t "What it no longer declares is the UI's again, but a role, taken away once the file is read the same twice in a row; with --config-prune, the rest is deleted then too."}}{{end}}</p>
 {{if .Applied.IsZero}}<p class="quiet">{{t "Not kept to it yet."}}</p>{{else}}<p class="quiet">{{t "The ledger is kept to it as of %s, the file's hash beginning %s." (at $loc .Applied) .Hash}}</p>{{end}}
 {{if .Problems}}{{template "configproblems" (on $ .)}}{{end}}
-{{else}}<p>{{t "Nothing is declared: lapilli serve was started without --config, so teams, quiet windows, reports and roles are made here, in the UI."}}</p>{{end}}
+{{end}}{{else}}<p>{{t "Nothing is declared: lapilli serve was started without --config, so teams, quiet windows, reports and roles are made here, in the UI."}}</p>{{end}}
 <p>{{if $.Status.Admin}}<a href="/config.yaml">config.yaml</a> {{t "gives them all, declared and made here alike, as --config takes them, to commit."}}{{else}}{{t "An admin can have them all as --config takes them, from config.yaml."}}{{end}}</p>
 
 <h2>{{t "Changes to the rules"}}</h2>

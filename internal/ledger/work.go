@@ -458,8 +458,12 @@ func (l *Ledger) DeleteTeam(ctx context.Context, id int64, by string) error {
 	})
 }
 
-// deleteTeam deletes a team in a write, as DeleteTeam and --config-prune do.
-func (l *Ledger) deleteTeam(t *txn, id int64, by string) error {
+// deleteTeam deletes a team in a write, as DeleteTeam does.
+func (l *Ledger) deleteTeam(t *txn, id int64, by string) error { return l.deleteTeamAs(t, id, by, "") }
+
+// deleteTeamAs deletes a team in a write, noted as what ("team NAME
+// deleted" for ""), as DeleteTeam and --config do.
+func (l *Ledger) deleteTeamAs(t *txn, id int64, by, what string) error {
 	var name string
 	if err := t.QueryRowContext(t.ctx, "SELECT name FROM teams WHERE id = ?", id).Scan(&name); errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
@@ -475,25 +479,15 @@ func (l *Ledger) deleteTeam(t *txn, id int64, by string) error {
 		return err
 	}
 	// Its editors go, each noted, as a role taken away is.
-	rows, err := t.QueryContext(t.ctx, "SELECT who FROM grants WHERE team_id = ? ORDER BY id", id)
+	gs, err := grants(t.ctx, t)
 	if err != nil {
 		return err
 	}
-	var whos []string
-	for rows.Next() {
-		var who string
-		if err := rows.Scan(&who); err != nil {
-			rows.Close()
-			return err
+	for _, g := range gs {
+		if g.TeamID != id {
+			continue
 		}
-		whos = append(whos, who)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, who := range whos {
-		if err := change(t, by, RoleTaken+who, nil, nil); err != nil {
+		if err := change(t, by, RoleTaken+g.Who, g, nil); err != nil {
 			return err
 		}
 	}
@@ -509,7 +503,10 @@ func (l *Ledger) deleteTeam(t *txn, id int64, by string) error {
 	if err := keyNames(t); err != nil {
 		return err
 	}
-	return change(t, by, "team "+name+" deleted", nil, nil)
+	if what == "" {
+		what = "team " + name + " deleted"
+	}
+	return change(t, by, what, nil, nil)
 }
 
 // Note is what people keep about a rule.

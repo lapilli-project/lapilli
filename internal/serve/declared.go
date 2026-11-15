@@ -77,6 +77,7 @@ var (
 		"%s %q: want a time like 2026-11-02T09:30, or 2026-11-02T09:30:00+09:00", "a team has a name", "a quiet window has a title",
 		"a report has a name", "enabled is true or false", "a role is given to a user or a group: one of user and group",
 		"the file declares nothing: an empty file would take away all it declared; to declare nothing, give teams: []",
+		"%s has nothing after it: give %s: [] for none",
 		"%s is %s, read as a boolean or a number, not a text: quote it, or give serve.config as a text",
 		"label %s's value %s is read as a boolean or a number, not a text: quote it, or give serve.config as a text",
 		"a config declares %d teams at most", "a config declares %d quiet windows at most", "a config declares %d reports at most",
@@ -167,8 +168,10 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 		return d, empty
 	}
 	err := each(root, "", func(key string, v *yaml.Node) error {
+		// A key with nothing after it, as a file cut short reads: not a
+		// list of none, which [] says.
 		if null(v) {
-			return nil
+			return badAt(v, "%s has nothing after it: give %s: [] for none", key, key)
 		}
 		if v.Kind != yaml.SequenceNode {
 			return badAt(v, "%s is a list", key)
@@ -612,14 +615,19 @@ type configState struct {
 	// shown are the problems the pages show; kept, those of the file
 	// applied, shown again once a file that failed is put back.
 	shown, kept configProblems
-	// retryHash is tried again from retryAt, after backoff, once the
-	// ledger changed since triedGen.
-	retryHash  string
-	retryAt    time.Time
-	backoff    time.Duration
-	triedGen   int64
-	errAt      time.Time
-	loggedText string
+	// retryHash, kept in part, is tried again from retryAt, after backoff,
+	// once the ledger changed since triedGen.
+	retryHash string
+	retryAt   time.Time
+	backoff   time.Duration
+	triedGen  int64
+	// failHash met an error of the ledger's, and isn't tried again before
+	// failAt, after failBackoff, whatever else would read it again.
+	failHash    string
+	failAt      time.Time
+	failBackoff time.Duration
+	errAt       time.Time
+	loggedText  string
 }
 
 // configProblems are what is wrong with a file: the first kept, how many
@@ -649,6 +657,7 @@ func (c *configState) newTerm() {
 	c.Lock()
 	defer c.Unlock()
 	c.applied, c.failed, c.keptFor, c.retryHash, c.retryAt, c.backoff = "", "", "", "", time.Time{}, 0
+	c.failHash, c.failAt, c.failBackoff = "", time.Time{}, 0
 }
 
 // configShown is what the pages say of --config, as the leader last made
@@ -699,10 +708,16 @@ func (s *Server) configFor(r *http.Request) *configShown {
 	return s.shownStatus().Config.forReader(s.role(r) == admin)
 }
 
-// configShown is this replica's: nil without --config.
+// configShown is this replica's: without --config, nil, or what it gave
+// back to the UI that a file declared before.
 func (s *Server) configShown() *configShown {
 	if s.cfg.Config == "" {
-		return nil
+		s.config.Lock()
+		defer s.config.Unlock()
+		if s.config.did.Undeclared == 0 {
+			return nil
+		}
+		return &configShown{Did: s.config.did}
 	}
 	s.config.Lock()
 	defer s.config.Unlock()
@@ -756,14 +771,16 @@ func (s *Server) reconcileConfig(ctx context.Context) error {
 	now, gen := s.wall(), s.l.Gen()
 	st := &s.config
 	st.Lock()
-	left := ledger.LeftUndeclare
-	if s.cfg.ConfigPrune {
-		left = ledger.LeftKeep
-		if fileErr == nil && hash == st.keptFor && hash == st.applied {
-			left = ledger.LeftDelete
-		}
-	}
+	// Read the same twice in a row: what the file no longer names may be
+	// deleted, a role taken away. Without --config, there is no file to
+	// say so: everything is given back, nothing deleted.
+	sure := fileErr == nil && hash == st.keptFor && hash == st.applied
+	left := ledger.Leave{Prune: s.cfg.ConfigPrune, Sure: sure, NoFile: s.cfg.Config == ""}
 	switch {
+	case hash == st.failHash && now.Before(st.failAt):
+		// The ledger's error, this file met last: not before a while.
+		st.Unlock()
+		return nil
 	case fileErr != nil && hash == st.failed:
 		st.Unlock()
 		return nil
@@ -773,17 +790,14 @@ func (s *Server) reconcileConfig(ctx context.Context) error {
 		if back {
 			// Back to the file the ledger is kept to: what is wrong with it
 			// is what is shown again, and it is read afresh, as one read
-			// once, for what --config-prune would delete.
+			// once, for what would be deleted.
 			st.failed, st.shown, st.loggedText = "", st.kept, ""
 		}
 		retry := len(st.kept.list) > 0 && gen != st.triedGen && !now.Before(st.retryAt)
-		if left != ledger.LeftDelete && !retry && !back {
+		if !sure && !retry && !back {
 			st.Unlock()
 			return nil
 		}
-	case hash == st.retryHash && now.Before(st.retryAt):
-		st.Unlock()
-		return nil
 	}
 	if hash != st.retryHash {
 		// Another file: tried from the start.
@@ -800,8 +814,11 @@ func (s *Server) reconcileConfig(ctx context.Context) error {
 	later := func(err error) error {
 		st.Lock()
 		defer st.Unlock()
-		st.retryHash, st.backoff = hash, nextBackoff(st.backoff)
-		st.retryAt = now.Add(st.backoff)
+		if st.failHash != hash {
+			st.failBackoff = 0
+		}
+		st.failHash, st.failBackoff = hash, nextBackoff(st.failBackoff)
+		st.failAt = now.Add(st.failBackoff)
 		return err
 	}
 	s.checkDeclared(&d)
@@ -815,8 +832,9 @@ func (s *Server) reconcileConfig(ctx context.Context) error {
 	}
 	st.Lock()
 	st.applied, st.at, st.failed, st.keptFor = hash, now, "", ""
-	if left == ledger.LeftKeep && r.Kept > 0 {
-		st.keptFor = hash // deleted once it is read the same again
+	st.failHash, st.failAt, st.failBackoff = "", time.Time{}, 0
+	if !sure && r.Kept > 0 {
+		st.keptFor = hash // deleted, or taken away, once it is read the same again
 	}
 	st.triedGen, st.retryHash = s.l.Gen(), hash
 	if len(skipped) > 0 {

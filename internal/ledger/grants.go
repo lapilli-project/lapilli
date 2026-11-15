@@ -365,18 +365,22 @@ func (l *Ledger) DeleteGrant(ctx context.Context, id int64, by string) error {
 		if _, limited := scopeOf(t.ctx); limited {
 			return ErrNotYourTeam
 		}
-		var who string
-		if err := t.QueryRowContext(t.ctx, "SELECT who FROM grants WHERE id = ?", id).Scan(&who); errors.Is(err, sql.ErrNoRows) {
+		var g Grant
+		var at int64
+		if err := t.QueryRowContext(t.ctx, "SELECT id, who, role, team_id, created, created_by FROM grants WHERE id = ?", id).
+			Scan(&g.ID, &g.Who, &g.Role, &g.TeamID, &at, &g.By); errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {
 			return err
 		}
+		g.Created = unix(at)
 		if err := isDeclared(t, "grants", id); err != nil {
 			return err
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM grants WHERE id = ?", id); err != nil {
 			return err
 		}
-		return change(t, by, RoleTaken+who, nil, nil)
+		// What was taken, of which team, kept with it.
+		return change(t, by, RoleTaken+g.Who, g, nil)
 	})
 }
