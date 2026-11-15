@@ -391,19 +391,6 @@ in the namespaces or rule groups of one ruler. It is held so:
     more), and past 50,000 rules as read none is. An Amazon namespace holds
     a rule file someone wrote, whose aliases are read, what they expand to
     counted for every namespace together, as yaml.v3 counts one document's.
-    What any document of rules makes beyond its own text, however it makes
-    it, is bounded too (`rules.bounded`): the text its aliases bring in
-    again, judged against the whole document's size, and its rules' names,
-    expressions, labels (a group's on each of its rules, recording rules'
-    too) and what they say, past its size: the larger of 4 MiB and 16
-    times its size, and 16 MiB at most (`ExpandMin`, `ExpandTimes`,
-    `MaxFile`); a label's name and value are 16 KiB each at most
-    (`MaxLabel`), and what a rule says is cut to 4 KiB a text. A document
-    past them is refused, its biggest group or the alias that crossed the
-    line named. Real sets are far inside them: 5,000 rules sharing 300
-    bytes of group labels and 800 of annotations make some 5.5 MB beyond a
-    file of 1 MB. Before them, one group label of 8 MB on 3,000 rules, no
-    alias, was 27 GB of rules to hash.
     Each group is written out again on its own (the YAML emitter holds every
     event of what it writes until it ends), as the whole would be, and a
     document's nodes are let go of as they are decoded. Before 0.34.1 a

@@ -83,10 +83,9 @@ func YAMLValueContext(ctx context.Context, n *yaml.Node) (v any, err error) {
 		b = &input{}
 	}
 	b.mu.Lock()
-	c := &converting{ctx: ctx, none: b.none, aliases: map[*yaml.Node]bool{}, decoded: b.decoded, aliased: b.aliased, written: b.written, copied: b.copied,
-		size: b.size}
+	c := &converting{ctx: ctx, none: b.none, aliases: map[*yaml.Node]bool{}, decoded: b.decoded, aliased: b.aliased}
 	b.mu.Unlock()
-	decoded, aliased, written, copied := c.decoded, c.aliased, c.written, c.copied
+	decoded, aliased := c.decoded, c.aliased
 	defer func() {
 		if p := recover(); p != nil {
 			v, err = nil, errNode{fmt.Sprintf("a document lapilli failed to read (%v), which is a fault of lapilli's", p)}
@@ -94,8 +93,6 @@ func YAMLValueContext(ctx context.Context, n *yaml.Node) (v any, err error) {
 		b.mu.Lock()
 		b.decoded += c.decoded - decoded
 		b.aliased += c.aliased - aliased
-		b.written += c.written - written
-		b.copied += c.copied - copied
 		b.mu.Unlock()
 	}()
 	return c.value(n, 0)
@@ -110,11 +107,7 @@ func YAMLValueContext(ctx context.Context, n *yaml.Node) (v any, err error) {
 type input struct {
 	mu               sync.Mutex
 	decoded, aliased int
-	written, copied  int
-	// size is the input's documents' bytes, as counted (counted): what
-	// aliases may bring in again is judged against it.
-	size int
-	none bool
+	none             bool
 }
 
 type inputKey struct{}
@@ -144,12 +137,6 @@ type converting struct {
 	// decoded and aliased count the values and keys visited, and those
 	// visited in an alias's expansion, as yaml.v3 counts them.
 	decoded, aliased, inAlias int
-	// written and copied are the text of the scalars visited, those
-	// written in the input and those an alias brought in again, judged
-	// against size, the input's bytes, when it is known (expandLimit); via
-	// is the alias whose expansion is being read, the outermost.
-	written, copied, size int
-	via                   *yaml.Node
 	// anchored is how many anchors the node visited is under: one under
 	// none is let go of once decoded, as no alias reads it again.
 	anchored int
@@ -174,40 +161,6 @@ func (c *converting) step() error {
 		return c.ctx.Err()
 	}
 	return nil
-}
-
-// text counts a scalar's text, the value or key visited, refusing the
-// input once its aliases have brought in more text again than a document
-// of its size may make beyond it (expandLimit): judged against the whole
-// input's size where it is known, else against what was written so far.
-// copied says it came of an alias.
-func (c *converting) text(n *yaml.Node, copied bool) error {
-	if !copied {
-		c.written += len(n.Value)
-		return nil
-	}
-	c.copied += len(n.Value)
-	size := c.size
-	if size == 0 {
-		size = c.written
-	}
-	if limit := expandLimit(size); c.copied > limit {
-		anchor, line := "", 0
-		if c.via != nil {
-			anchor, line = c.via.Value, c.via.Line
-		}
-		return errNode{fmt.Sprintf("line %d: aliases, *%.40s the last, bring in %d bytes of text again, more than a document of %d bytes may: the larger of %d MiB and %d times its size, %d MiB at most",
-			line, anchor, c.copied, size, ExpandMin>>20, ExpandTimes, MaxFile>>20)}
-	}
-	return nil
-}
-
-// into notes an alias whose expansion is read, as text names it.
-func (c *converting) into(n *yaml.Node) {
-	if c.inAlias == 0 {
-		c.via = n
-	}
-	c.inAlias++
 }
 
 // alias refuses an alias where none is read (NoAliases).
@@ -251,15 +204,12 @@ func (c *converting) value(n *yaml.Node, depth int) (any, error) {
 			return nil, errNode{fmt.Sprintf("unknown anchor '%s' referenced", n.Value)}
 		}
 		c.aliases[n] = true
-		c.into(n)
+		c.inAlias++
 		v, err := c.value(n.Alias, depth+1)
 		c.inAlias--
 		delete(c.aliases, n)
 		return v, err
 	case yaml.ScalarNode:
-		if err := c.text(n, c.inAlias > 0); err != nil {
-			return nil, err
-		}
 		return scalar(n)
 	case yaml.SequenceNode:
 		out := make([]any, 0, len(n.Content))
@@ -358,12 +308,6 @@ func (m *mapOut) key(k *yaml.Node, c *converting, depth int) (any, error) {
 		return nil, errNode{fmt.Sprintf("line %d: invalid map key", k.Line)}
 	}
 	if m.s != nil {
-		if k.Kind == yaml.AliasNode && c.inAlias == 0 {
-			c.via = k
-		}
-		if err := c.text(target, c.inAlias > 0 || k.Kind == yaml.AliasNode); err != nil {
-			return nil, err
-		}
 		return target.Value, nil
 	}
 	return c.value(k, depth+1)
@@ -427,15 +371,12 @@ func (c *converting) fill(n *yaml.Node, m *mapOut, merged map[any]bool, depth in
 		return nil
 	}
 	if merged == nil {
-		// The keys set already, read again: their text is counted once.
 		merged = map[any]bool{}
-		written, copied := c.written, c.copied
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			if key, err := m.key(n.Content[i], c, depth); err == nil {
 				merged[key] = true
 			}
 		}
-		c.written, c.copied = written, copied
 	}
 	into := func(x *yaml.Node) error {
 		mapping := x
@@ -453,7 +394,7 @@ func (c *converting) fill(n *yaml.Node, m *mapOut, merged map[any]bool, depth in
 				return errNode{fmt.Sprintf("anchor '%s' value contains itself", x.Value)}
 			}
 			c.aliases[x] = true
-			c.into(x)
+			c.inAlias++
 			defer func() { c.inAlias--; delete(c.aliases, x) }()
 		}
 		// A merge's mapping written in place under an anchor (<<: &m
@@ -518,7 +459,7 @@ func DecodeYAML(ctx context.Context, data []byte) ([]any, error) {
 	if err := Nodes(data); err != nil {
 		return nil, err
 	}
-	ctx = counted(OneInput(ctx), len(data))
+	ctx = OneInput(ctx)
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var out []any
 	for {

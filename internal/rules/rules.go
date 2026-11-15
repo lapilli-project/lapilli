@@ -526,14 +526,10 @@ func parseContext(ctx context.Context, b []byte, rec *[]Recording) ([]Rule, erro
 	if err := Nodes(b); err != nil {
 		return nil, err
 	}
-	ctx = counted(OneInput(ctx), len(b))
+	ctx = OneInput(ctx)
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	var out []Rule
 	found := false
-	recs := 0
-	if rec != nil {
-		recs = len(*rec)
-	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -567,13 +563,6 @@ func parseContext(ctx context.Context, b []byte, rec *[]Recording) ([]Rule, erro
 	}
 	if !found {
 		return nil, errNoRules
-	}
-	var made []Recording
-	if rec != nil {
-		made = (*rec)[recs:]
-	}
-	if err := bounded(out, made, len(b)); err != nil {
-		return nil, err
 	}
 	return shownRules(out), nil
 }
@@ -1336,9 +1325,6 @@ func FromAPI(b []byte) ([]Rule, error) {
 				KeepFiringFor: secs(x.KeepFiringFor), Interval: secs(g.Interval), Limit: limit, Phase: phase, Labels: l,
 				Says: annotated(a, TemplatePrometheus)})
 		}
-	}
-	if err := bounded(out, nil, len(b)); err != nil {
-		return nil, err
 	}
 	return shownRules(out), nil
 }

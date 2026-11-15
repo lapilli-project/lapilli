@@ -4,28 +4,8 @@
 
 First use: what a first-time reader got stuck on, on a real deployment
 (rules saying whose each is in a `team` label, no team, no incident, one
-admin, nowhere to send a notice), and a rule file that could hold up every
-page. No ledger schema change; the API and MCP answer as they did.
-
-### Security
-
-- **What a document of rules makes beyond its own text is bounded**,
-  however it makes it (affected versions: every version that reads rule
-  files). Nothing bounded the text YAML aliases bring in again (yaml.v3's
-  bound counts values), nor a group's labels, which are on each of its
-  rules: a rule file with one 8 MB string under an anchor, aliased from
-  300 rules' labels, was 2.4 GB of labels (`lapilli serve` read it in 26 s,
-  replayed it in 15 more, and a rule's page took 59 s, holding a page's
-  turn); one group label of 8 MB on 3,000 rules, no alias, took 32 s to
-  parse and 96 s to hash (27 GB). Anyone who can write a rule file could
-  do it. What a document makes beyond its size (the text its aliases bring
-  in again, judged against the whole document, and its rules' names,
-  expressions, labels, its groups' on each rule, recording rules' too, and
-  what they say) is the larger of 4 MiB and 16 times its size, 16 MiB at
-  most; a label's name and value are 16 KiB each at most; what a rule says
-  is cut to 4 KiB a text, as before. Past them the document is refused, at
-  once, naming the group or the alias: the files above in 0.1 s, the
-  rule's page 404 in 21 ms. Real sets are far inside them.
+admin, nowhere to send a notice). No ledger schema change; the API and MCP
+answer as they did.
 
 ### Added
 
