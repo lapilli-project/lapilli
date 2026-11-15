@@ -43,9 +43,9 @@ type staleWhy struct {
 // Why a proposal is stale, in English: keys into the catalogs, and what
 // JSON, the API and MCP give as stale (staleText).
 const (
-	staleRule       = "the rule changed since it was proposed"
-	staleNoVersion  = "it was backtested by an earlier lapilli, before backtests were numbered by how they replay and judge"
-	staleVersion    = "it was backtested by lapilli %s, which replays or judges otherwise than this one"
+	staleRule      = "the rule changed since it was proposed"
+	staleNoVersion = "it was backtested by an earlier lapilli, before backtests were numbered by how they replay and judge"
+	staleVersion   = "it was backtested by lapilli %s, which replays or judges otherwise than this one"
 	// The record is judged by whole weeks (verdict.Record): an incident
 	// in a week the period has some of, or the two weeks before, keeps it.
 	staleRecorded   = "an incident was written down in its period's weeks since it was backtested"
