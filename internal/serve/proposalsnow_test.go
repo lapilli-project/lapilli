@@ -1288,6 +1288,11 @@ func TestPRBodyIDsAsCode(t *testing.T) {
 			t.Errorf("a line an ID broke: %q", line)
 		}
 	}
+	// One with nothing in it, or a line break alone: none, not two
+	// backticks.
+	if got := mdIDs([]string{"", "\n", "INC-1"}); got != "(none), (none), `INC-1`" {
+		t.Errorf("empty IDs: %q", got)
+	}
 }
 
 // TestReadTimeFailsSoft: what a proposal says when it is read is shown,

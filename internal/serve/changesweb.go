@@ -685,11 +685,16 @@ func (s *Server) prBody(l proposalLine) string {
 // heading) is read as Markdown.
 var mdID = strings.NewReplacer("`", "'", "\r", " ", "\n", " ")
 
-// mdIDs are incidents' IDs, each a code span (mdID), joined.
+// mdIDs are incidents' IDs, each a code span (mdID), joined; one with
+// nothing in it is "(none)", as an empty code span is two backticks.
 func mdIDs(ids []string) string {
 	out := make([]string, len(ids))
 	for i, id := range ids {
-		out[i] = "`" + mdID.Replace(id) + "`"
+		if x := mdID.Replace(id); strings.TrimSpace(x) == "" {
+			out[i] = "(none)"
+		} else {
+			out[i] = "`" + x + "`"
+		}
 	}
 	return strings.Join(out, ", ")
 }
