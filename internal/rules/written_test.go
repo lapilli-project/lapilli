@@ -81,7 +81,8 @@ func TestEmittedNoLess(t *testing.T) {
 // TestPickStreamOnce: a stream not cut where YAML cuts it is read again
 // whole, what its pieces counted given back first: Pick read a stream of a
 // group's labels on 20 rules, a document end and a directive (some 2.4 MB
-// made, within the 4 MiB it may), twice, and refused what Parse reads.
+// made, within the 4 MiB it may), twice, and refused what Parse reads; and
+// what the inputs read together made was counted twice.
 func TestPickStreamOnce(t *testing.T) {
 	b := groupBomb(1000, 20, false, false) + "...\n%YAML 1.1\n---\ngroups: [{name: h, rules: [{alert: B, expr: up}]}]\n"
 	if rs, err := Parse([]byte(b)); err != nil || len(rs) != 21 {
@@ -91,5 +92,14 @@ func TestPickStreamOnce(t *testing.T) {
 		t.Errorf("Pick: %v", err)
 	} else if rs, err := Parse(kept); err != nil || len(rs) != 21 {
 		t.Errorf("what Pick kept: %d, %v", len(rs), err)
+	}
+	// What the inputs read together made is given back too: the stream is
+	// counted once there as well.
+	ctx := OneInput(Together(t.Context()))
+	if _, _, err := pick(ctx, []byte(b), Selector{}); err != nil {
+		t.Fatal(err)
+	}
+	if made, total := inputOf(ctx).made, totalOf(ctx).made; made == 0 || total != made {
+		t.Errorf("the input made %d, the inputs together %d", made, total)
 	}
 }

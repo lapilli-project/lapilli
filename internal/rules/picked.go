@@ -449,7 +449,7 @@ func pick(ctx context.Context, b []byte, sel Selector) ([]byte, Picked, error) {
 		// and those kept written afresh. What the pieces counted is given
 		// back, as the whole counts it again.
 		picked, out = Picked{}, nil
-		in.undo(at)
+		in.again(at)
 		docs, err := DecodeYAML(ctx, b)
 		if err != nil {
 			return nil, picked, err

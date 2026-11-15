@@ -92,3 +92,48 @@ func TestReadInItsInputs(t *testing.T) {
 		t.Errorf("a file passed over: %d, %v", len(rs), err)
 	}
 }
+
+// TestTotalInAnyOrder: what a ruler's namespaces make together counts what
+// each made, not a charge refused, which isn't made: a namespace whose name
+// on each of its 4,200 rules would be 275 MB is refused on its own, and the
+// next is read, in either order. Before, the refused charge was counted, so
+// the next namespace, whatever it was, failed the whole read with an alias
+// it didn't have ("line 0: aliases, * the last"), and read last, the
+// refused one left the read whole. Past what they may make together, the
+// namespace that took them past is named, in either order.
+func TestTotalInAnyOrder(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("groups:\n- name: g\n  rules:\n")
+	for range 4200 {
+		b.WriteString("  - {alert: a, expr: x}\n")
+	}
+	atk := Doc{Source: "atk", Namespace: strings.Repeat("n", 64<<10), Data: []byte(b.String())}
+	ok := Doc{Source: "ok", Namespace: "shop", Data: []byte("groups:\n- name: h\n  rules:\n  - {alert: Real, expr: up}\n")}
+	for _, order := range [][]Doc{{atk, ok}, {ok, atk}} {
+		read := NoAliases(Together(context.Background()))
+		for _, d := range order {
+			_, err := FromDocsContext(read, []Doc{d})
+			switch {
+			case d.Source == "atk" && (!refused(err) || OverTotal(err) || !strings.Contains(err.Error(), "atk: its namespace")):
+				t.Errorf("%s first: atk: %v", order[0].Source, err)
+			case d.Source == "ok" && err != nil:
+				t.Errorf("%s first: ok: %v", order[0].Source, err)
+			}
+		}
+	}
+	heavy := groupBomb(1000, 33, false, false)
+	for _, reversed := range []bool{false, true} {
+		read := NoAliases(Together(context.Background()))
+		var err error
+		for i := 0; i < 100 && err == nil; i++ {
+			n := i
+			if reversed {
+				n = 99 - i
+			}
+			_, err = FromDocsContext(read, []Doc{{Source: fmt.Sprintf("ns%02d", n), Namespace: fmt.Sprintf("ns%02d", n), Data: []byte(heavy)}})
+		}
+		if !OverTotal(err) || !strings.HasPrefix(err.Error(), "ns") || strings.Contains(err.Error(), "aliases") {
+			t.Errorf("reversed %t: %v", reversed, err)
+		}
+	}
+}

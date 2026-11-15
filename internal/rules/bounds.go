@@ -103,25 +103,51 @@ func OverTotal(err error) bool {
 }
 
 // total is what inputs read together (Together) have made beyond their
-// text, refused and passed over ones' too: never given back, MaxMade at
-// most.
+// text, refused and passed over ones' too, what they made before they
+// were: never given back, MaxMade at most. A charge refused isn't made,
+// and isn't counted: what all of them make is the same, read in any
+// order, and the read past MaxMade names the input whose making took it
+// past.
 type total struct {
 	mu   sync.Mutex
 	made int
 }
 
-// add counts n made by the inputs together, refusing them past MaxMade.
+// add counts n made by the inputs together, refusing it past MaxMade, and
+// not counting it then. Nothing made is never refused: the input that
+// took them past MaxMade was.
 func (t *total) add(n int, by func() string) error {
-	if t == nil {
+	if t == nil || n <= 0 {
 		return nil
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.made += n
-	if t.made > MaxMade {
-		return &MadeError{By: by(), Made: t.made, Limit: MaxMade, Together: true}
+	if t.made+n > MaxMade {
+		return &MadeError{By: by(), Made: t.made + n, Limit: MaxMade, Together: true}
 	}
+	t.made += n
 	return nil
+}
+
+// left is what the inputs read together may make still.
+func (t *total) left() int {
+	if t == nil {
+		return MaxMade
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return max(0, MaxMade-t.made)
+}
+
+// takeBack takes back n the inputs together made, of a document read
+// again whole (pick), not passed over.
+func (t *total) takeBack(n int) {
+	if t == nil || n <= 0 {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.made = max(0, t.made-n)
 }
 
 type totalKey struct{}
@@ -153,31 +179,34 @@ func inputOf(ctx context.Context) *input {
 }
 
 // charge counts n bytes made, refusing the input past madeLimit, and the
-// inputs read with it past MaxMade (Together); by says what made them,
-// only worked out then.
+// inputs read with it past MaxMade (Together), the input named either way;
+// by says what made them, only worked out then. A charge refused isn't
+// counted, as it isn't made.
 func (b *input) charge(n int, by func() string) error {
 	b.mu.Lock()
-	b.made += n
-	made, size := b.made, b.size
-	b.mu.Unlock()
-	if limit := madeLimit(size); made > limit {
-		b.total.add(n, by)
-		return &MadeError{By: by(), Made: made, Size: size, Limit: limit}
+	defer b.mu.Unlock()
+	if limit := madeLimit(b.size); b.made+n > limit {
+		return &MadeError{By: by(), Made: b.made + n, Size: b.size, Limit: limit}
 	}
-	return b.total.add(n, by)
+	if err := b.total.add(n, by); err != nil {
+		return err
+	}
+	b.made += n
+	return nil
 }
 
-// room is what the input may make still.
+// room is what the input may make still, and the inputs read with it.
 func (b *input) room() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return max(0, madeLimit(b.size)-b.made)
+	return min(max(0, madeLimit(b.size)-b.made), b.total.left())
 }
 
 // mark is what an input had counted, to take back what a document passed
 // over counted (undo), as nothing it made is kept: a file below a
-// directory's top that doesn't read, the pieces of a stream read again
-// whole. What the inputs read together made (Together) isn't taken back.
+// directory's top that doesn't read. What the inputs read together made
+// (Together) isn't taken back then; it is (again) of the pieces of a
+// stream read again whole, which are read, not passed over.
 type mark struct{ size, made, written, decoded, aliased int }
 
 func (b *input) mark() mark {
@@ -190,6 +219,16 @@ func (b *input) undo(m mark) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.size, b.made, b.written, b.decoded, b.aliased = m.size, m.made, m.written, m.decoded, m.aliased
+}
+
+// again is undo, what the inputs read together made since m taken back
+// too: the input reads what it read since again.
+func (b *input) again(m mark) {
+	b.mu.Lock()
+	made := b.made - m.made
+	b.mu.Unlock()
+	b.total.takeBack(made)
+	b.undo(m)
 }
 
 // errReadAgain is a ConfigMap's value read as rules already in the input:

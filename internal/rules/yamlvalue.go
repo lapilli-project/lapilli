@@ -84,7 +84,9 @@ func YAMLValueContext(ctx context.Context, n *yaml.Node) (v any, err error) {
 	c := &converting{ctx: ctx, none: b.none, aliases: map[*yaml.Node]bool{}, decoded: b.decoded, aliased: b.aliased, written: b.written, made: b.made,
 		size: b.size}
 	b.mu.Unlock()
+	c.left = b.total.left()
 	decoded, aliased, written, made := c.decoded, c.aliased, c.written, c.made
+	c.made0 = made
 	defer func() {
 		if p := recover(); p != nil {
 			v, err = nil, errNode{fmt.Sprintf("a document lapilli failed to read (%v), which is a fault of lapilli's", p)}
@@ -158,6 +160,9 @@ type converting struct {
 	// outermost.
 	written, made, size int
 	via                 *yaml.Node
+	// made0 is made when it began, and left what the inputs read with it
+	// (Together) might make still then.
+	made0, left int
 	// anchored is how many anchors the node visited is under: one under
 	// none is let go of once decoded, as no alias reads it again.
 	anchored int
@@ -203,15 +208,19 @@ func (c *converting) text(n *yaml.Node, copied bool) error {
 }
 
 // make counts n bytes an alias brought in again (text, step).
+// A charge refused isn't counted, as it isn't made.
 func (c *converting) make(n int) error {
-	c.made += n
 	size := c.size
 	if size == 0 {
 		size = c.written
 	}
-	if limit := madeLimit(size); c.made > limit {
-		return &MadeError{By: c.by(), Made: c.made, Size: size, Limit: limit}
+	switch {
+	case c.made+n > madeLimit(size):
+		return &MadeError{By: c.by(), Made: c.made + n, Size: size, Limit: madeLimit(size)}
+	case c.made+n-c.made0 > c.left:
+		return &MadeError{By: c.by(), Made: MaxMade - c.left + c.made + n - c.made0, Limit: MaxMade, Together: true}
 	}
+	c.made += n
 	return nil
 }
 
