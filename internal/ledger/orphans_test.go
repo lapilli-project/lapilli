@@ -155,7 +155,7 @@ func TestWaitingSince(t *testing.T) {
 		ids = append(ids, id)
 	}
 	for i, at := range []int64{100, 50, 200} {
-		if _, err := l.w.ExecContext(ctx, "UPDATE proposals SET made = ? WHERE id = ?", at, ids[i]); err != nil {
+		if _, err := l.w.ExecContext(ctx, "UPDATE proposals SET made = ?, updated = ? WHERE id = ?", at, at, ids[i]); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -222,5 +222,22 @@ func TestWaitingSinceApproved(t *testing.T) {
 	got, err := l.WaitingSince(ctx, time.Now().Add(time.Hour), 10)
 	if err != nil || !slices.Equal(got, []int64{b}) {
 		t.Errorf("waiting since: %v %v, want %d alone", got, err, b)
+	}
+}
+
+// A proposal waits from when it last began to: backtested again, its
+// approvals withdrawn, it waits anew, however long ago it was made.
+func TestWaitingSinceBacktestedAgain(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	id, _ := l.Propose(ctx, proposal("A", KindFor))
+	if _, err := l.w.ExecContext(ctx, "UPDATE proposals SET made = 100, updated = 1000 WHERE id = ?", id); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := l.WaitingSince(ctx, time.Unix(500, 0), 10); len(got) != 0 {
+		t.Errorf("made before the cutoff, waiting again since after it: %v", got)
+	}
+	if got, _ := l.WaitingSince(ctx, time.Unix(1000, 0), 10); !slices.Equal(got, []int64{id}) {
+		t.Errorf("waiting since the cutoff: %v", got)
 	}
 }

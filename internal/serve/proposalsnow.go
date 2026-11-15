@@ -886,6 +886,10 @@ func (s *Server) backtestStale(ctx context.Context) error {
 	ls = slices.DeleteFunc(ls, func(l proposalLine) bool {
 		return l.StaleWhy == nil || !l.StaleWhy.Auto || l.Stale || s.againFailed.waits(l.ID, proposalEvidence(l.Proposal).Semantics, now)
 	})
+	// Not one past --proposals-expire (someone approved it, or it would be
+	// closed): backtested again, its approvals withdrawn, it would wait
+	// anew, and close as expired once more had passed than anyone meant.
+	ls = slices.DeleteFunc(ls, s.pastExpiry)
 	if len(ls) == 0 {
 		return nil
 	}

@@ -16,7 +16,8 @@ import (
 // one nobody approves doesn't hold its rule for good.
 
 // expireProposals closes, as expired, the proposals that waited for
-// approval longer than --proposals-expire since they were made, that no one
+// approval longer than --proposals-expire since they began to (made,
+// backtested again, or sent back to wait: ledger.WaitingSince), that no one
 // approved, a hundred a round at most: the leader's, each in a write of its
 // own that moves it only while it still waits, noted in its history and
 // the activity log as Lapilli's. Its rule is free for another. One being
@@ -83,4 +84,12 @@ func (f *inFlight) has(id int64) bool {
 	f.Lock()
 	defer f.Unlock()
 	return f.n[id] > 0
+}
+
+// pastExpiry says a proposal waiting for approval has waited longer than
+// --proposals-expire: one someone approved, which waits on, or one about
+// to close. Never without --proposals-expire.
+func (s *Server) pastExpiry(l proposalLine) bool {
+	d := s.cfg.ProposalsExpire
+	return d > 0 && l.State == ledger.StateProposed && !l.Updated.Add(d).After(s.wall())
 }

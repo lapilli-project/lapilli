@@ -115,3 +115,29 @@ func TestProposalsExpireLeaves(t *testing.T) {
 		t.Errorf("once its backtest is done: %+v", p)
 	}
 }
+
+// Lapilli doesn't backtest again itself a stale proposal past
+// --proposals-expire, which someone approved: backtested again, its
+// approvals withdrawn, it would wait anew, and close once more had passed
+// than anyone meant. Before it is past, it does.
+func TestBacktestStaleLeavesPastExpiry(t *testing.T) {
+	ctx := context.Background()
+	s, ids := staleServer(t, 1, func(c *Config) { c.Approvals = 2; c.ProposalsExpire = 30 * 24 * time.Hour })
+	if _, err := s.l.Approve(ctx, ids[0], ana, 2, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	s.wall = func() time.Time { return time.Now().Add(40 * 24 * time.Hour) }
+	if err := s.backtestStale(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if p := state(t, s, ids[0]); againCount(t, s, ids) != 0 || len(p.Approvals) != 1 {
+		t.Fatalf("past expiry, backtested again: %+v", p)
+	}
+	s.wall = time.Now
+	if err := s.backtestStale(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if againCount(t, s, ids) != 1 {
+		t.Error("before expiry, not backtested again")
+	}
+}
