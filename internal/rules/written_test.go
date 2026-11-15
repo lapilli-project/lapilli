@@ -202,9 +202,11 @@ func TestPickCopyChargedAsTheFile(t *testing.T) {
 }
 
 // TestPickCopyHeldToMaxFile: what is kept of a file, written afresh, is
-// held to MaxFile, as the file it is read as: a file of 1.4 MB whose
-// aliases, written out, are 19 MB, within what it may make, was kept so
-// and read, below a directory's top as at it. It is refused now, said.
+// held to MaxFile where it is read as the file (Trim, or a selector leaving
+// an item out): a file of 1.4 MB whose aliases, written out, are 19 MB,
+// within what it may make, was kept so and read, below a directory's top
+// as at it. It is refused now, said. Read as it is, the copy unread, the
+// file reads, as Parse reads it.
 func TestPickCopyHeldToMaxFile(t *testing.T) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "apiVersion: v1\nkind: List\nitems:\n- {apiVersion: v1, kind: Secret, metadata: {name: s}, data: {pad: %q}}\n", strings.Repeat("p", 1200<<10))
@@ -227,5 +229,8 @@ func TestPickCopyHeldToMaxFile(t *testing.T) {
 	var made *MadeError
 	if _, _, _, err := ReadPicked(dir, Picking{Trim: true}); !errors.As(err, &made) || !made.File || !strings.Contains(err.Error(), "list.yaml") {
 		t.Errorf("%d KB: %v", b.Len()>>10, err)
+	}
+	if rs, _, _, err := ReadPicked(dir, Picking{}); err != nil || len(rs) != 2 {
+		t.Errorf("%d KB read as it is: %d, %v", b.Len()>>10, len(rs), err)
 	}
 }

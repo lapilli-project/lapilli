@@ -364,6 +364,12 @@ func (in reading) load(path string, p Picking, picked *Picked) ([]Rule, Doc, err
 	// and they were never charged.
 	parse := in.parse
 	if q.Unselected > 0 || p.Trim && q.Other > 0 {
+		if len(kept) > MaxFile {
+			// Read as a file is, and kept as one: held to what one may
+			// be, refused, as what it made, never passed over. A copy not
+			// read, the file read as it is, isn't.
+			return nil, Doc{}, fmt.Errorf("%s: %w", path, &MadeError{By: "what is kept of it, written afresh", Made: len(kept), Size: len(b), Limit: MaxFile, File: true})
+		}
 		parse = counted(in.parse, len(b))
 		if more := len(kept) - len(b); more > 0 {
 			if err := inputOf(parse).charge(more, func() string {
@@ -424,9 +430,9 @@ func readFile(path string) ([]byte, error) {
 // items were left out, which is written afresh with the others. It says
 // what it passed over. A stream that isn't YAML is refused as Parse refuses
 // it; a document of rules that can't be read is refused only when kept;
-// a ConfigMap whose data a YAML alias brings in is refused, as Parse
-// refuses it; and what is kept, written afresh, is MaxFile at most, as the
-// file it is read as.
+// and a ConfigMap whose data a YAML alias brings in is refused, as Parse
+// refuses it. What ReadPicked reads of what is kept, written afresh, is
+// MaxFile at most, as the file it is read as.
 func Pick(b []byte, sel Selector) ([]byte, Picked, error) {
 	return pick(context.Background(), b, sel)
 }
@@ -443,8 +449,7 @@ func pick(ctx context.Context, b []byte, sel Selector) ([]byte, Picked, error) {
 	var picked Picked
 	pieces := split(b)
 	var out [][]byte
-	rewrote := false // a document written afresh
-	whole := true    // each piece one document, read alone
+	whole := true // each piece one document, read alone
 	for _, piece := range pieces {
 		docs, err := decodeRules(ctx, piece)
 		if refused(err) {
@@ -466,7 +471,6 @@ func pick(ctx context.Context, b []byte, sel Selector) ([]byte, Picked, error) {
 		case !keep:
 		case rewritten != nil:
 			out = append(out, rewritten)
-			rewrote = true
 		default:
 			out = append(out, piece)
 		}
@@ -475,7 +479,7 @@ func pick(ctx context.Context, b []byte, sel Selector) ([]byte, Picked, error) {
 		// Not cut where YAML cuts it: the documents decoded from the whole,
 		// and those kept written afresh. What the pieces counted is given
 		// back, as the whole counts it again.
-		picked, out, rewrote = Picked{}, nil, true
+		picked, out = Picked{}, nil
 		in.again(at)
 		docs, err := decodeRules(ctx, b)
 		if err != nil {
@@ -501,13 +505,7 @@ func pick(ctx context.Context, b []byte, sel Selector) ([]byte, Picked, error) {
 			out = append(out, rewritten)
 		}
 	}
-	kept := join(out)
-	if rewrote && len(kept) > MaxFile {
-		// Read as a file is, and kept as one: held to what one may be,
-		// refused, as what it made, never passed over.
-		return nil, picked, &MadeError{By: "what is kept of it, written afresh", Made: len(kept), Size: len(b), Limit: MaxFile, File: true}
-	}
-	return kept, picked, nil
+	return join(out), picked, nil
 }
 
 // pickDoc says whether to keep a document: one that holds rules and is
