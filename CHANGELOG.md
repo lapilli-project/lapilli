@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-11-16
+
 Teams, quiet windows, reports and the editor roles admins give were the
 ledger's alone, made in the UI, so a team that runs everything through Git
 couldn't review, restore or copy them; rules deleted or renamed left notes,
