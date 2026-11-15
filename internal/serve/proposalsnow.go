@@ -193,31 +193,47 @@ type flight[T any] struct {
 	err  error
 }
 
-// do is fn's value for key, worked out once for all who ask while it is.
-func (f *flights[T]) do(ctx context.Context, key int64, fn func() (T, error)) (T, error) {
+// parseWithin is how long a version of the rules is parsed for at most,
+// for whoever asks for it.
+const parseWithin = 30 * time.Second
+
+// do is fn's value for key, worked out once for all who ask while it is:
+// by the first to ask, under a context of its own that no asker's leaving
+// cancels (only within), so that one reader leaving fails none of the
+// others; a panic of fn's is each one's error. Each asker waits as long as
+// its own context lets it.
+func (f *flights[T]) do(ctx context.Context, key int64, within time.Duration, fn func(context.Context) (T, error)) (T, error) {
 	f.Lock()
-	if c, ok := f.m[key]; ok {
-		f.Unlock()
-		select {
-		case <-c.done:
-			return c.v, c.err
-		case <-ctx.Done():
-			var zero T
-			return zero, ctx.Err()
+	c, ok := f.m[key]
+	if !ok {
+		c = &flight[T]{done: make(chan struct{})}
+		if f.m == nil {
+			f.m = map[int64]*flight[T]{}
 		}
+		f.m[key] = c
+		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), within)
+		go func() {
+			defer func() {
+				if p := recover(); p != nil {
+					c.err = fmt.Errorf("lapilli: %v", p)
+				}
+				cancel()
+				f.Lock()
+				delete(f.m, key)
+				f.Unlock()
+				close(c.done)
+			}()
+			c.v, c.err = fn(fctx)
+		}()
 	}
-	c := &flight[T]{done: make(chan struct{})}
-	if f.m == nil {
-		f.m = map[int64]*flight[T]{}
+	f.Unlock()
+	select {
+	case <-c.done:
+		return c.v, c.err
+	case <-ctx.Done():
+		var zero T
+		return zero, ctx.Err()
 	}
-	f.m[key] = c
-	f.Unlock()
-	c.v, c.err = fn()
-	f.Lock()
-	delete(f.m, key)
-	f.Unlock()
-	close(c.done)
-	return c.v, c.err
 }
 
 // namedRules are a version's rules and the names the ledger judges them
@@ -291,7 +307,7 @@ func (s *Server) outlastsNow(ctx context.Context, ls []proposalLine, evs []evide
 		if n == oldVersionsMost {
 			break // the rest say what they kept, this time
 		}
-		v, err := s.parsing.do(ctx, id, func() (namedRules, error) {
+		v, err := s.parsing.do(ctx, id, parseWithin, func(ctx context.Context) (namedRules, error) {
 			all, names, err := s.named(ctx, id)
 			return namedRules{all, names}, err
 		})

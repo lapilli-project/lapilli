@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"net/http"
@@ -712,7 +713,7 @@ func TestFlightsOnce(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		f.do(context.Background(), 7, func() (int, error) {
+		f.do(context.Background(), 7, time.Minute, func(context.Context) (int, error) {
 			close(started)
 			<-release
 			return 42, nil
@@ -724,7 +725,7 @@ func TestFlightsOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			got[i], _ = f.do(context.Background(), 7, func() (int, error) {
+			got[i], _ = f.do(context.Background(), 7, time.Minute, func(context.Context) (int, error) {
 				if !released.Load() {
 					t.Error("worked out again while it was being worked out")
 				}
@@ -735,14 +736,88 @@ func TestFlightsOnce(t *testing.T) {
 	time.Sleep(20 * time.Millisecond) // the others ask meanwhile
 	released.Store(true)
 	close(release)
-	wg.Wait()
+	waitGroup(t, &wg)
 	for i, v := range got {
 		if v != 42 {
 			t.Errorf("%d got %d", i, v)
 		}
 	}
-	if v, _ := f.do(context.Background(), 7, func() (int, error) { return 1, nil }); v != 1 {
+	if v, _ := f.do(context.Background(), 7, time.Minute, func(context.Context) (int, error) { return 1, nil }); v != 1 {
 		t.Errorf("asked again once done: %d", v)
+	}
+}
+
+// waitGroup waits for wg, failing the test after ten seconds rather than
+// hanging.
+func waitGroup(t *testing.T, wg *sync.WaitGroup) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("hung")
+	}
+}
+
+// TestFlightsFail: what is worked out fails each who asks, an error or a
+// panic alike, and is worked out afresh when asked again; one who leaves
+// fails none of the others, nor what is worked out for them; and each
+// waits as long as its own context lets it. None hangs.
+func TestFlightsFail(t *testing.T) {
+	var f flights[int]
+	boom := errors.New("boom")
+	if _, err := f.do(context.Background(), 1, time.Minute, func(context.Context) (int, error) { return 0, boom }); !errors.Is(err, boom) {
+		t.Errorf("an error: %v", err)
+	}
+	if _, err := f.do(context.Background(), 1, time.Minute, func(context.Context) (int, error) { panic("lost") }); err == nil || !strings.Contains(err.Error(), "lost") {
+		t.Errorf("a panic: %v", err)
+	}
+	if v, err := f.do(context.Background(), 1, time.Minute, func(context.Context) (int, error) { return 5, nil }); v != 5 || err != nil {
+		t.Errorf("asked again after a panic: %d %v", v, err)
+	}
+	// The first to ask leaves; the second, still there, gets it, worked
+	// out under a context the first's leaving didn't cancel.
+	first, leave := context.WithCancel(context.Background())
+	release, started := make(chan struct{}), make(chan struct{})
+	var wg sync.WaitGroup
+	var firstErr, secondErr, fnErr error
+	var second int
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, firstErr = f.do(first, 2, time.Minute, func(ctx context.Context) (int, error) {
+			close(started)
+			<-release
+			fnErr = ctx.Err()
+			return 9, nil
+		})
+	}()
+	<-started
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		second, secondErr = f.do(context.Background(), 2, time.Minute, func(context.Context) (int, error) { return 0, errors.New("asked again") })
+	}()
+	// One who can't wait that long leaves on time.
+	short, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := f.do(short, 2, time.Minute, func(context.Context) (int, error) { return 0, nil }); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("one who can't wait: %v", err)
+	}
+	leave()
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	waitGroup(t, &wg)
+	if !errors.Is(firstErr, context.Canceled) || second != 9 || secondErr != nil || fnErr != nil {
+		t.Errorf("the first left (%v); the second got %d (%v); worked out under %v", firstErr, second, secondErr, fnErr)
+	}
+	// Within its own time at most.
+	if _, err := f.do(context.Background(), 3, 10*time.Millisecond, func(ctx context.Context) (int, error) {
+		<-ctx.Done()
+		return 0, ctx.Err()
+	}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("past its time: %v", err)
 	}
 }
 
