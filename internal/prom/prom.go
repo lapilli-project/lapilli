@@ -113,6 +113,10 @@ func Loki() Option {
 // IsLoki reports whether the client asks a Loki.
 func (c *Client) IsLoki() bool { return c.loki }
 
+// MaxSamples is the most samples the answers to one range may hold in all
+// (WithMaxSamples, --max-samples).
+func (c *Client) MaxSamples() int { return c.maxSamples }
+
 // client is what a Client asks with, unless WithHTTPClient replaces it. It
 // follows no redirect: a query, a token or a signature goes only to the API
 // it was given. Go would send a bearer token on to the same host's other
