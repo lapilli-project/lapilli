@@ -1120,35 +1120,44 @@ couldn't act on it. The blocks are templates of their own
 
 The Teams page lists, under "Teams these rules' labels suggest"
 (`#suggested`), each value of a label `--team-labels` names (`team`,
-`owner`, `squad` unless given; label names, eight at most) that no team
-owns by, as `key=value` in `<bdi>`, with how many rules it would own
-(`suggestTeams`). Always from the rules in effect and those recorded
-elsewhere, with the labels `owners` matches them by; nothing is kept.
+`owner`, `squad` unless given; label names, eight at most; the chart's
+`serve.teamLabels`) on the rules no team owns, as `key=value` in `<bdi>`,
+with how many of them it would own (`suggestTeams`). Always from the rules
+in effect and those recorded elsewhere, with the labels `owners` matches
+them by (a rule's own over its group's); nothing is kept.
 
-- A rule its note or a team's name pattern gives a team isn't counted. A
-  rule goes to the first team, by name, whose labels it has: a team there
-  already, or one made, as `owners` would put it with them all made; one
-  that would own nothing so isn't suggested.
+- Only the rules no team owns, by a note, a name pattern or labels, are
+  counted. Each goes to the first team made, by name, whose label it has;
+  one that would own nothing isn't suggested. The counts are worked out
+  over every value before the fifty (`maxSuggested`) with the most are
+  kept and the rest counted.
 - A value under two of those labels is one team, by the label named first.
-  A value a team's name has already, whose labels don't have it, is said so
-  ("A team called search is there already, owning by something else"),
-  with a link to change it for an admin, and isn't made; one whose team
-  owns all its rules already isn't listed. A value that can't be a team's
-  name (`ledger.TeamNameOK`) is counted and left out.
-- Fifty at most (`maxSuggested`), those with the most rules first, the rest
-  counted.
+  A value longer than a team's name (64 bytes) is counted, before anything
+  is made of it, and left out.
+- "Make these teams" makes a value into a team only when nothing says
+  not to, and each line it doesn't make says why: a team of its name is
+  there, in any case (giving it the label owns these rules only when it
+  owns by that label alone or by none, as a team owns the rules with all
+  of its labels; otherwise the page says to name it in the rules' notes),
+  with a link to change it for an admin; its label is on rules another
+  team owns now, which a team made of it, first by name, would take with
+  their editors, windows and digest; or it isn't a plain lowercase name
+  (`^[a-z0-9][a-z0-9._-]{0,62}$`): `pаyments`, its а Cyrillic, beside
+  `payments`, or `Web` beside `web`, reads as another team's, and is made
+  by hand.
 - "Make these teams" is a POST to `/teams/suggested`, an admin's on the
   server (`s.admin`) and from the same site, as every form. It works the
-  suggestions out again, and makes each as the team form does (its name
-  the value, its labels the label), passing over one a team of the name
-  took meanwhile. The page it goes back to says once how many were made
-  and passed over, from its query (`made`, `skipped`, fifty at most
-  between them, else nothing). Anyone else sees the button disabled, with
-  why (`off`, "Admins only").
+  suggestions out again, and makes those it says it makes as the team form
+  does (its name the value, its labels the label), passing over one a team
+  of the name took meanwhile. The page it goes back to names the teams
+  made, by their ids in its query (`made`, fifty at most), those alone
+  that are there and were made by the reader, as a bulk proposal's result
+  does: a link can't make it say more. Anyone else sees the button
+  disabled, with why (`off`, "Admins only").
 
 With no team at all, the rules list says, under its lede, why its Team
 column is empty, with a link to the teams suggested, or to the form to add
-one when none is.
+one when none is; only when it has a table, not before the first run.
 
 ### Why a rule is a team's
 
@@ -1171,35 +1180,47 @@ read-only, or neither list is given. It said "(the admins)" before,
 changes on or off.
 
 A proposal waiting for approval says who may approve it, in its approval
-panel (`mayApproveOf`): those, but the one it was made by or for (an
-agent's proposal is the person's it acted for) and those who approved it.
-They are named to an admin alone, who reads them on the Roles page; anyone
-else is told in words. When fewer are left than the approvals it needs,
-and none of them is a group, a domain or everyone (who may be anyone),
-every reader is told, as a warning with its sign, and what to change: "No
-one may approve it: only the admins approve, as --approvers isn't given,
-and the only admin is the one it was made by or for. Give --approvers to
-name who else may." With
-changes off, the disabled Approve says so already, and nothing more is
-said. Who may approve is as it was (`approver`).
+panel (`mayApproveOf`), to an admin, who reads the flags on the Roles page:
+those, but the one it was made by or for (an agent's proposal is the
+person's it acted for) and those who approved it, named. When fewer are
+left than the approvals it needs, and none of them may be anyone (a group,
+a domain, everyone, or a name with neither `user:` nor `group:`, which
+`listed` takes for a group of that name too), it says so as a warning, and
+what to change: "No one may approve it: only the admins approve, as
+--approvers isn't given, and the only admin is the one it was made by or
+for. Give --approvers to name who else may." Anyone else, an anonymous
+reader among them, reads only "Who may approve it: an approver other than
+the one it was made by or for", or, stuck, "No one can approve this yet;
+an admin sees why on the Roles page": whether `--approvers` is given, who
+the admins are and whether its maker is the only one are an admin's to
+read. With changes off, the disabled Approve says so already, and nothing
+more is said. Who may approve is as it was (`approver`).
 
 ### Where notices go
 
 The Manage page has a Notifications card, and the Settings page a section
 of that name (`#notifications`): where what happens is told (the webhook,
 Slack, or nowhere), how many places reports can go to by name and how many
-teams have a digest of their own, when the weekly digest goes and to how
-many places that are there, set by the flags or on the Reports page, how
-many reports are on, when the outbox last sent a notice, and how many
-notices made in the last day weren't sent, their last try having failed.
-Counts and kinds, never a URL. The weekly digest on with nowhere to go, a
-report on whose places are all gone, and failures are each a sentence with
-a sign (`p.warn`), never a colour alone: in full on the Settings page, with
-what to give; in a line on the card ("The weekly digest goes nowhere.").
+teams have a digest of their own, when the weekly digest goes ("Mondays
+09:00", "매주 월요일 09:00": `weeklyText`) and to how many places that are
+there, set by the flags or on the Reports page, how many reports are on,
+when the outbox last sent a notice, and how many notices made in the last
+day weren't sent, their last try having failed: 1,000 counted at most
+(`ledger.FailedCounted`), "More than 1000" past them. The digest posts to
+Slack itself, not through the outbox: how its last post went is kept in
+memory, by the process that posted it, since it started (`slackPost`), and
+said so; a failed one is also a run of the ledger's, as before. Counts and
+kinds, never a URL. The weekly digest on with nowhere to go, its last post
+to Slack failed, a report on whose places are all gone, and failures are
+each a sentence with a sign (`p.warn`), never a colour alone: in full on
+the Settings page, with the way out (for a digest the flags set, the
+flags or the Reports page, as it never goes to a `--report-dest` by
+itself; for one set there, another place there); in a line on the card
+("The weekly digest goes nowhere.").
 
-It is read from the flags, the reports and the outbox
-(`ledger.Standing`: two reads a place, by the outbox's index), nothing kept
-for it. A notice sent is written aside, emptying no page kept, so these two
+It is read from the flags, the reports and the outbox (`ledger.Standing`:
+a place's last send by the outbox's index on its place and when each was
+sent, its failed notices by the same, to 1,000), nothing kept for it. A notice sent is written aside, emptying no page kept, so these two
 pages are worked out for each request (`freshPage`, `Cache-Control:
 no-store`), the Settings page but when it tries settings on the last week.
 
@@ -1221,7 +1242,9 @@ whole minutes, is as it was. The API and MCP answer as they did.
 
 The Korean texts say 정탐 (○), 오탐 (●) and 면제, never the stones the
 English names them by (돌, 흰 돌, 검은 돌); `TestKoreanSaysNoStones` fails
-on one, and not on the verbs that hold the syllable (돌아가기, 되돌리기).
+on one, read as a noun with what Korean puts after it (돌이면, 돌까지,
+돌처럼, 돌(○)), and not on the verbs that hold the syllable (돌아가기,
+되돌리기, 돌 수, 돌 때).
 
 `TestA11yServe` serves a first-time user's deployment under `/first`
 (`firstUseServer`: labelled rules and no team, changes on and the only

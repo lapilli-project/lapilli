@@ -129,8 +129,10 @@ Admins give roles in the UI, on top of the flags:
 | viewer | everyone else | nothing |
 
 The Roles page says who may approve in effect (those `--approvers` names,
-the admins, or no one, and why), and a proposal's page who may approve it,
-and when no one is left ([ui.md](ui.md), "First use").
+the admins, or no one, and why), and a proposal's page, to an admin, who
+may approve it and when no one is left; anyone else reads only that an
+approver approves it, or that no one can yet ([ui.md](ui.md), "First
+use").
 
 **Builder's decision: the UI gives editor and editor of a team, never admin
 or approver.** The flags stay the floor and the ceiling: a role a flag gives

@@ -4,34 +4,55 @@
 
 First use: what a first-time reader got stuck on, on a real deployment
 (rules saying whose each is in a `team` label, no team, no incident, one
-admin, nowhere to send a notice). No ledger schema change; the API and MCP
-answer as they did.
+admin, nowhere to send a notice), and a rule file that could hold up every
+page. No ledger schema change; the API and MCP answer as they did.
+
+### Security
+
+- **What YAML aliases bring in again is bounded by its text** (released
+  in every version that reads rule files). yaml.v3's bound counts values,
+  not their text: a rule file that writes one 8 MB string under an anchor
+  and aliases it from 300 rules' labels is 600 values and 2.4 GB of
+  labels. `lapilli serve` read it in 26 s, replayed it in 15 more, and a
+  rule's page took 59 s, holding a page's turn; anyone who can write a
+  rule file could do it. Past 1 MiB, an input whose aliases bring in more
+  than four times the text written in it, or more than 16 MiB (`MaxFile`)
+  in all, is refused, as a file past `MaxFile` is: the same file is
+  refused in 0.13 s, and the rule's page is 404 in 21 ms.
 
 ### Added
 
 - **Teams the rules' labels suggest.** The Teams page lists each value of
-  a `team`, `owner` or `squad` label (`--team-labels` names others) that
-  no team owns by, with how many rules it would own, worked out as
-  ownership is; an admin makes them with one button ("Make these teams"),
+  a `team`, `owner` or `squad` label (`--team-labels`, or the chart's
+  `serve.teamLabels`, names others) on rules no team owns, with how many
+  it would own; an admin makes them with one button ("Make these teams"),
   each as the team form would, its name the value and its labels the
-  label. With no team at all, the rules list says why its Team column is
-  empty, and links to them.
+  label. Only a plain lowercase name is made (`pаyments`, its а Cyrillic,
+  or `Web` beside `web`, would read as another team's); one whose label
+  is on rules another team owns isn't, as it would take them; one whose
+  name a team has, in any case, isn't, and the page says what to do as
+  that team owns. The result names the teams made, by their ids, those
+  alone the reader made. With no team at all, the rules list says why its
+  Team column is empty, and links to them.
 - **Why a rule is a team's.** A rule's page says how its team was found:
   its note, its name matching a team's pattern, its labels having a
   team's; or that none matches.
 - **Who may approve.** The Roles page says who may approve a change in
   effect (those `--approvers` names, or the admins, named; or no one, and
-  why). A proposal waiting for approval says who may approve it, but the
-  one it was made by or for: named to an admin, in words to anyone else;
-  and, when no one is left (the only admin made it) or fewer than it
-  needs, says so to every reader, with what to change.
+  why). A proposal waiting for approval says, to an admin, who may approve
+  it, but the one it was made by or for, and, when no one is left or fewer
+  than it needs, why and what to change; anyone else reads only that an
+  approver approves it, or that no one can yet and an admin sees why on
+  the Roles page.
 - **Where notices go.** A Notifications card on the Manage page, and a
   section of the Settings page: where what happens is told, how many
-  places reports and teams' digests can go, the weekly digest's schedule,
-  when the outbox last sent and how many of the last day's notices failed.
-  The weekly digest, or a report, on with nowhere to go is said so in
-  words. Counts, never a URL. These two pages are worked out for each
-  request, as a notice sent empties no page kept.
+  places reports and teams' digests can go, the weekly digest's time as a
+  person reads it ("Mondays 09:00"), its last post to Slack (kept in
+  memory since the process started), when the outbox last sent and how
+  many of the last day's notices failed (1,000 counted at most). The
+  weekly digest, or a report, on with nowhere to go is said so in words,
+  with the way out. Counts, never a URL. These two pages are worked out
+  for each request, as a notice sent empties no page kept.
 - `--team-labels LIST`.
 
 ### Changed
@@ -41,7 +62,17 @@ answer as they did.
 - **A time a page shows is rounded**: "The last run took 3.4s.", not
   3.412345678s; a rule's `for` as before.
 - **Korean says 정탐 and 오탐**, as DevOps does, not stones (돌);
-  `TestKoreanSaysNoStones` keeps it so.
+  `TestKoreanSaysNoStones` keeps it so, the noun read as Korean has it.
+
+### Fixed
+
+- **A rule's team is found by its group's labels too**, its own over its
+  group's, as its alerts carry them, for every source. A file's rule read
+  its own labels alone, so a rule whose group says `team: payments` had
+  the chip on the rules list (since 0.40.0) and `label:` picked it, while
+  its page said no team's labels matched it and its team's list left it
+  out; the ledger, judging a team's quiet windows, already took it for the
+  team's.
 
 ### Fixed
 

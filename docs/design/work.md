@@ -80,7 +80,9 @@ judged again beside 500 that cover nothing in the week, 58 ms
 
 A rule's note can name its team. Otherwise the first team, by name, whose
 pattern matches the rule's name owns it; or, when none does, the first whose
-labels the rule has (as the latest version of the rules gives them). The
+labels the rule has (as the latest version of the rules gives them, its
+own over its group's, as its alerts carry them; a recorded rule's, those
+all its alerts have). The
 rule's name decides before its labels since
 [serveops.md](serveops.md), so a team that owns by labels can't take a rule
 another team's pattern names. A team owns an incident it has a
@@ -88,8 +90,9 @@ label value of, or that one of its rules caught. Owners are worked out once
 per change to the ledger and kept until the next. A rule's page says which
 of these found its team, or that none did; and the Teams page suggests a
 team for each value of a `team`, `owner` or `squad` label
-(`--team-labels`) no team owns by, which an admin makes with one button
-([ui.md](ui.md), "First use").
+(`--team-labels`) on rules no team owns, which an admin makes with one
+button, but none that would take another team's rules or reads as another
+team's name ([ui.md](ui.md), "First use").
 
 ## Roles
 
