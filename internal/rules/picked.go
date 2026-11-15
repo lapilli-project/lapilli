@@ -413,6 +413,8 @@ func Pick(b []byte, sel Selector) ([]byte, Picked, error) {
 // Parse refuses it.
 func pick(ctx context.Context, b []byte, sel Selector) ([]byte, Picked, error) {
 	ctx = counted(OneInput(ctx), len(b))
+	in := inputOf(ctx)
+	at := in.mark()
 	var picked Picked
 	pieces := split(b)
 	var out [][]byte
@@ -444,8 +446,10 @@ func pick(ctx context.Context, b []byte, sel Selector) ([]byte, Picked, error) {
 	}
 	if !whole {
 		// Not cut where YAML cuts it: the documents decoded from the whole,
-		// and those kept written afresh.
+		// and those kept written afresh. What the pieces counted is given
+		// back, as the whole counts it again.
 		picked, out = Picked{}, nil
+		in.undo(at)
 		docs, err := DecodeYAML(ctx, b)
 		if err != nil {
 			return nil, picked, err
@@ -463,7 +467,7 @@ func pick(ctx context.Context, b []byte, sel Selector) ([]byte, Picked, error) {
 				continue
 			}
 			if rewritten == nil {
-				if rewritten, err = yaml.Marshal(d); err != nil {
+				if rewritten, err = written(ctx, d); err != nil {
 					return nil, picked, err
 				}
 			}
@@ -481,8 +485,8 @@ func pickDoc(ctx context.Context, doc any, sel Selector) (keep bool, rewritten [
 	l, ok := doc.([]any)
 	if !ok {
 		keep, kept, changed, picked, err := pickItem(ctx, doc, sel)
-		if keep && changed {
-			rewritten, _ = yaml.Marshal(kept)
+		if keep && changed && err == nil {
+			rewritten, err = written(ctx, kept)
 		}
 		return keep, rewritten, picked, err
 	}
@@ -504,9 +508,71 @@ func pickDoc(ctx context.Context, doc any, sel Selector) (keep bool, rewritten [
 		return false, nil, picked, nil
 	}
 	if changed {
-		rewritten, _ = yaml.Marshal(kept)
+		if rewritten, err = written(ctx, kept); err != nil {
+			return false, nil, picked, err
+		}
 	}
 	return true, rewritten, picked, nil
+}
+
+// written is a document written afresh (yaml.Marshal), what that writes
+// charged to the input first (emitted): aliases are written out in full, and
+// what is kept, the documents of rules read again from the ledger, could
+// otherwise be many times what was read.
+func written(ctx context.Context, v any) ([]byte, error) {
+	n := emitted(v, 0)
+	if err := inputOf(ctx).charge(n, func() string {
+		return fmt.Sprintf("a document picked out of a stream, written again, %d bytes, its aliases in full", n)
+	}); err != nil {
+		return nil, err
+	}
+	return yaml.Marshal(v)
+}
+
+// emitted is, near enough and no less, what yaml.Marshal writes v in: its
+// text (scalarEmitted), and each value's indent and marks.
+func emitted(v any, depth int) int {
+	indent := 2*depth + 4
+	switch x := v.(type) {
+	case map[string]any:
+		n := 2
+		for k, e := range x {
+			n += indent + scalarEmitted(k, indent) + emitted(e, depth+1)
+		}
+		return n
+	case map[any]any:
+		n := 2
+		for k, e := range x {
+			n += indent + emitted(k, depth+1) + emitted(e, depth+1)
+		}
+		return n
+	case []any:
+		n := 2
+		for _, e := range x {
+			n += indent + emitted(e, depth+1)
+		}
+		return n
+	case string:
+		return scalarEmitted(x, indent)
+	}
+	return 32
+}
+
+// scalarEmitted is what a string is written in, at most: quoted, twice
+// its bytes for a character escaped (\u200E) or one not UTF-8 (written in
+// base64), a byte that isn't printable four times (\xNN), and each line of
+// a block of text indented (TestEmittedNoLess).
+func scalarEmitted(s string, indent int) int {
+	n := 2*len(s) + 4
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '\n':
+			n += indent + 3
+		case c < 0x20 || c == 0x7f || c == '"' || c == '\\':
+			n += 2
+		}
+	}
+	return n
 }
 
 // pickItem says whether to keep a document, and what of it: a List with
