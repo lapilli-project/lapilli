@@ -1100,7 +1100,8 @@ func TestKeepGivenBack(t *testing.T) {
 	if n, err := l.KeepGivenBack(ctx, "", 0, "boss"); n != 4 || err != nil {
 		t.Errorf("all: %d %v", n, err)
 	}
-	if !slices.Contains(changesBy(t, l, "boss"), RoleGiven+"user:ana@example.com"+keptAsTheUIs) {
+	if logged := changesBy(t, l, "boss"); !slices.Contains(logged, RoleGiven+"user:ana@example.com"+keptAsTheUIs) ||
+		!slices.Contains(logged, RoleGiven+"group:payments-oncall (team payments)"+keptAsTheUIs) {
 		t.Errorf("the activity log: %q", changesBy(t, l, "boss"))
 	}
 	if r, _ := reconcile(t, l, Declared{}, Leave{Prune: true}); r.Any() {

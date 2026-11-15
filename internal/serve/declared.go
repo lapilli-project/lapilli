@@ -725,12 +725,16 @@ type configShown struct {
 	// Pending is when a new file was read, once: the ledger is kept to it
 	// once it is read the same again. PendingSince is when files other
 	// than the one applied began to be read, none kept to since, said
-	// when that is more than the one read once. WriteFailed is when the
-	// ledger couldn't be kept to the file last read, tried again at Retry.
+	// when that is more than the one read once, and not of a file read
+	// twice that the ledger failed to keep to. WriteFailed is when the
+	// ledger couldn't be kept to the file last read, tried again at Retry;
+	// Again, the file it was kept to, tried again for what couldn't be
+	// kept of it.
 	Pending      time.Time `json:"pending,omitzero"`
 	PendingSince time.Time `json:"pending_since,omitzero"`
 	WriteFailed  time.Time `json:"write_failed,omitzero"`
 	Retry        time.Time `json:"retry,omitzero"`
+	Again        bool      `json:"again,omitempty"`
 }
 
 // ErrText is what is wrong, in a language, "" for nothing.
@@ -775,13 +779,14 @@ func (s *Server) configShown() *configShown {
 	c := &configShown{File: s.cfg.Config, Prune: s.cfg.ConfigPrune, Did: s.config.did, ErrAt: s.config.errAt,
 		Whole: s.config.shown.whole, Problems: s.config.shown.list, More: s.config.shown.more}
 	st := &s.config
+	failing := st.failHash != "" && st.pending == st.failHash // read twice, the write failing
 	if st.failHash != "" && st.failHash == st.last {
-		c.WriteFailed, c.Retry = st.failedAt, st.failAt
+		c.WriteFailed, c.Retry, c.Again = st.failedAt, st.failAt, st.failHash == st.applied
 	}
 	if st.pending != "" && st.pending != st.failHash {
 		c.Pending = st.pendingAt
 	}
-	if !st.pendingSince.IsZero() && (c.Pending.IsZero() || st.pendingSince.Before(st.pendingAt)) {
+	if !st.pendingSince.IsZero() && !failing && (c.Pending.IsZero() || st.pendingSince.Before(st.pendingAt)) {
 		c.PendingSince = st.pendingSince
 	}
 	if len(s.config.applied) >= 12 {
@@ -854,7 +859,10 @@ func (s *Server) reconcileConfig(ctx context.Context) error {
 	// none twice in a row.
 	waiting := func() {
 		var stuck time.Time
-		if !st.pendingSince.IsZero() && !now.Before(st.pendingSince.Add(configStuck)) && !st.stuckLogged {
+		// A file read twice that the ledger fails to keep to isn't one
+		// waited for: the write's error is logged, and shown.
+		failing := st.failHash != "" && st.pending == st.failHash
+		if !st.pendingSince.IsZero() && !now.Before(st.pendingSince.Add(configStuck)) && !st.stuckLogged && !failing {
 			st.stuckLogged, stuck = true, st.pendingSince
 		}
 		st.Unlock()

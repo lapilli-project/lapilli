@@ -1296,6 +1296,9 @@ func (l *Ledger) KeepGivenBack(ctx context.Context, kind string, id int64, by st
 				return err
 			}
 			what := map[string]string{KindTeam: "team ", KindWindow: "quiet window ", KindReport: "report ", KindGrant: RoleGiven}[g.Kind] + g.Name
+			if g.Team != "" {
+				what += " (team " + g.Team + ")"
+			}
 			if err := change(t, by, what+keptAsTheUIs, nil, nil); err != nil {
 				return err
 			}

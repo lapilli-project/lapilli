@@ -1203,8 +1203,8 @@ func TestConfigShortTermsShown(t *testing.T) {
 	if c := s.configShown(); !c.PendingSince.Equal(since) || teamOf(t, s, "payments").TZ != "Asia/Seoul" {
 		t.Errorf("shown: %+v, since %v", c, since)
 	}
-	if !strings.Contains(logged.String(), "no file has been read the same twice in a row since") {
-		t.Errorf("not logged:\n%s", logged.String())
+	if n := strings.Count(logged.String(), "no file has been read the same twice in a row since"); n != 1 {
+		t.Errorf("logged %d times:\n%s", n, logged.String())
 	}
 }
 
@@ -1221,7 +1221,7 @@ func TestKeepGivenBackOnSettings(t *testing.T) {
 	h := s.Handler()
 	_, admin := callAs(t, h, "GET", "/settings", "boss@example.com", "", "", "")
 	_, viewer := callAs(t, h, "GET", "/settings", "viewer@example.com", "", "", "")
-	if !strings.Contains(admin, `action="/settings/given-back"`) || !strings.Contains(admin, "delete it and give it again on the Roles page") {
+	if !strings.Contains(admin, `action="/settings/given-back"`) || !strings.Contains(admin, "keep it here, or delete it on the Roles page and give it again") {
 		t.Error("an admin isn't shown how to keep them")
 	}
 	if strings.Contains(viewer, `action="/settings/given-back"`) || !strings.Contains(viewer, `disabled aria-describedby="givenback-why"`) {
@@ -1253,5 +1253,66 @@ func TestKeepGivenBackOnSettings(t *testing.T) {
 		return c.By == "boss@example.com" && c.What == ledger.RoleGiven+"user:ana@example.com kept as the UI's: given back without --config, it is no file's to take away"
 	}) {
 		t.Errorf("the activity log: %+v", cs)
+	}
+}
+
+// A file read twice that the ledger keeps failing to keep to, for longer
+// than files are waited for, isn't said to be one never read twice in a
+// row: not on Settings, beside its write's failure, nor in the log.
+func TestConfigFailingNotStuck(t *testing.T) {
+	ctx := context.Background()
+	s, path := configServer(t, configFile, nil)
+	var logged bytes.Buffer
+	s.log = slog.New(slog.NewTextHandler(&logged, nil))
+	writeConfig(t, path, strings.Replace(configFile, "  - user: ana@example.com\n", "", 1))
+	if err := s.reconcileConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	gone, cancel := context.WithCancel(ctx)
+	cancel()
+	for range 8 {
+		clockOn(s, configBackoffMost)
+		if err := s.reconcileConfig(gone); err == nil {
+			t.Fatal("no error from the ledger")
+		}
+	}
+	clockOn(s, time.Second) // read while it waits
+	if err := s.reconcileConfig(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if c := s.configShown(); c.WriteFailed.IsZero() || !c.PendingSince.IsZero() {
+		t.Errorf("shown: %+v", c)
+	}
+	_, body := callAs(t, s.Handler(), "GET", "/settings", "boss@example.com", "", "", "")
+	if !strings.Contains(body, "couldn&#39;t be kept to it at") || strings.Contains(body, "have been read since") {
+		t.Error("settings says both that it was read twice and that none was")
+	}
+	if strings.Contains(logged.String(), "no file has been read the same twice in a row since") {
+		t.Errorf("logged as never read twice:\n%s", logged.String())
+	}
+}
+
+// The file the ledger is kept to, tried again for what couldn't be kept of
+// it, that the ledger fails to keep to again, is said so: not as a new
+// file read twice.
+func TestConfigRetryFailureShown(t *testing.T) {
+	ctx := context.Background()
+	body := "windows:\n  - {title: freeze, team: platform, start: 2026-11-02T02:00, end: 2026-11-02T03:00}\n"
+	s, _ := configServer(t, body, nil)
+	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "platform", Rules: "^P"}, "boss"); err != nil {
+		t.Fatal(err)
+	}
+	clockOn(s, time.Hour)
+	gone, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := s.reconcileConfig(gone); err == nil {
+		t.Fatal("not tried again")
+	}
+	if c := s.configShown(); c.WriteFailed.IsZero() || !c.Again {
+		t.Errorf("shown: %+v", c)
+	}
+	_, page := callAs(t, s.Handler(), "GET", "/settings", "boss@example.com", "", "", "")
+	if !strings.Contains(page, "couldn&#39;t be kept again to the file it is kept to") || strings.Contains(page, "A new file was read twice in a row") {
+		t.Error("settings doesn't say the file kept to failed again")
 	}
 }
