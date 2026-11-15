@@ -187,7 +187,8 @@ most for each. The first ten such rules tried are replayed over the week with
 it, as each version stood and with the quiet windows excusing what they
 excuse, to say what it would cost. A rule the same across versions is asked
 once, the questions are 2,000 at most, and the suggestions and these share one
-`--timeout`, so the digest holds the runs up no longer than a run may. They are
+`--timeout`; with the firings by team read after them, in a minute at most,
+the digest holds the runs up for `--timeout` and a minute at most. They are
 kept as a result (`near_misses`) beside the suggestions, not in a table of
 their own, and shown on the incident's page, in the digest (a team's, for its
 incidents) and through MCP. A rule whose condition compares a value with a
@@ -300,8 +301,9 @@ firings in the week by the team whose labels they have (the teams'
 labels, the first by name, as a rule's are), from one grouped read of the
 week's firings by alert (`AlertCounts`, the 20,000 alerts that fired most,
 those past them no team's: a rule's `unread` says how many of its firings
-were, and the digest logs it), under a `--timeout` of its own, apart from
-the replays', which, run out, keeps none and logs it; a rule most of whose firings, more
+were, and the digest logs it), in a time of its own after the replays',
+`--timeout` or a minute, whichever is shorter, which, run out, keeps none
+and logs it; a rule most of whose firings, more
 than half, came from what another team owns than the one its alerts go to
 (or from a team's, for a rule no team owns) is kept as a `fired_on` result.
 A rule's page, the rules list with a team picked and that team's digest say

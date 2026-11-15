@@ -177,8 +177,9 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	if err != nil {
 		s.fail("the weekly digest", err)
 	}
-	// After a digest worked out afresh, the next round: the two don't hold
-	// the runs up for twice --timeout.
+	// After a digest worked out afresh, the next round: the digest holds the
+	// runs up for --timeout and firedOnWithin at most, and the two together
+	// not for twice --timeout.
 	if s.replaying() && !fresh && s.still(ctx) {
 		if err := s.nearLater(ctx, o); err != nil {
 			s.fail("near misses", err)
@@ -1304,8 +1305,8 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 		var near []verdict.NearMiss
 		var unrec []verdict.Unrecorded
 		// The suggestions, the near misses and what firings with no record
-		// were share one --timeout, so the digest holds the runs up no
-		// longer than a run may take.
+		// were share one --timeout, so the digest's replays hold the runs up
+		// no longer than a run may take.
 		rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 		defer cancel()
 		if s.replaying() {
@@ -1351,14 +1352,17 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 		if err := s.l.ReplaceResult(ctx, "unrecorded", s.now(), from, to, orNoneOf(unrec)); err != nil {
 			return true, err
 		}
-		// The rules that fired mostly on what another team owns, one read
-		// with a --timeout of its own, which the replays above can't have
-		// used up: what runs out of it isn't kept, and says so.
-		fctx, fcancel := context.WithTimeout(ctx, s.cfg.Timeout)
-		defer fcancel()
+		// The rules that fired mostly on what another team owns: one read,
+		// with a time of its own, which the replays above can't have used
+		// up, and short (firedOnWithin), so that the digest holds the runs
+		// up for --timeout and that at most. What runs out of it isn't kept,
+		// and says so.
+		fctx, fcancel := context.WithTimeout(ctx, min(s.cfg.Timeout, firedOnWithin))
 		on, unread, err := s.firedOnOf(fctx, from, to)
+		late := fctx.Err() != nil
+		fcancel()
 		switch {
-		case err != nil && fctx.Err() != nil:
+		case err != nil && late:
 			s.log.Warn("the digest's firings by team weren't counted in its --timeout", "err", err)
 		case err != nil:
 			return true, err
