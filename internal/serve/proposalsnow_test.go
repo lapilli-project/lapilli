@@ -368,13 +368,13 @@ func TestStaleWhy(t *testing.T) {
 		End: unrecordedFrom.Add(30*24*time.Hour + time.Hour)}, "ana", s.cfg.Options); err != nil {
 		t.Fatal(err)
 	}
-	if got := why(id); got != staleRecorded {
+	if got := why(id); got != "an incident was written down in its period's weeks since it was backtested" {
 		t.Errorf("an incident written down since: %q", got)
 	}
 	drop(id)
 	// Kept then, none keeping it now.
 	id = keptAs(t, s, verdict.Semantics, "v0.41.0", unrecordedFrom.AddDate(0, 0, -100), unrecordedFrom.AddDate(0, 0, -16), &no)
-	if got := why(id); got != staleUnrecorded {
+	if got := why(id); got != "no incident keeps the record of its period's weeks any more" {
 		t.Errorf("no record any more: %q", got)
 	}
 	// Approved, it isn't held: it is backtested again when carried out.

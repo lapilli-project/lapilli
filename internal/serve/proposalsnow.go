@@ -46,8 +46,10 @@ const (
 	staleRule       = "the rule changed since it was proposed"
 	staleNoVersion  = "it was backtested by an earlier lapilli, before backtests were numbered by how they replay and judge"
 	staleVersion    = "it was backtested by lapilli %s, which replays or judges otherwise than this one"
-	staleRecorded   = "an incident was written down in its period since it was backtested"
-	staleUnrecorded = "no incident keeps its period's record any more"
+	// The record is judged by whole weeks (verdict.Record): an incident
+	// in a week the period has some of, or the two weeks before, keeps it.
+	staleRecorded   = "an incident was written down in its period's weeks since it was backtested"
+	staleUnrecorded = "no incident keeps the record of its period's weeks any more"
 )
 
 // staleNotice is what a stale proposal's page says at its top, with why.
