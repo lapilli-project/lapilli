@@ -1821,7 +1821,7 @@ var funcs = template.FuncMap{
 	// a ruler's namespace, with what turns text around as U+FFFD.
 	"shown": rules.Shown,
 	"who":   func(by string) string { return by }, // likewise
-	"dur":   verdict.Duration,
+	"dur":   shownDur,
 	"delay": verdict.Delay,
 	"path":  url.PathEscape,
 	"join":  strings.Join,
