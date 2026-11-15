@@ -171,6 +171,10 @@ func (s *Server) mcpServer(edit, propose bool) *mcp.Server {
 			Annotations: &mcp.ToolAnnotations{IdempotentHint: true, OpenWorldHint: &no, DestructiveHint: &no},
 			Description: `Propose a change to one rule, for a person to approve in Lapilli's UI: a longer or shorter "for" (kind for, with for such as 15m), a new number for one of its thresholds (kind threshold, with bound, which number of its condition from 0, and value), retiring it (kind retire: turned off where it can be, otherwise deleted), or a fix to what it says when it fires (kind says: one annotation, summary, description, runbook_url or runbook, set to the text you write, or taken out with unset; give check, the content finding it answers, when it answers one). Lapilli never writes that text itself: judge whether the alert says clearly what is wrong and what to do, and propose the rewrite. Lapilli writes the change where the rule is kept (a pull request, Grafana's API, or a managed Prometheus ruler's API in the namespaces the operator lets it change), backtests a for or a threshold over twelve weeks, and keeps it as a proposal made by an agent, for the person you act for: that person can't approve it, and nothing is changed until someone else does, in the UI. You can't approve or apply a change. Say why in reason; it is shown as your words. One proposal waits for a rule at a time, and the person you act for makes 20 an hour at most, yours included. It answers with the proposal's number and page.`},
 			guarded(s.toolPropose))
+		mcp.AddTool(srv, &mcp.Tool{Name: "backtest_again", Title: "Backtest a stale proposal again",
+			Annotations: &mcp.ToolAnnotations{IdempotentHint: true, OpenWorldHint: &no, DestructiveHint: &no},
+			Description: `Backtest again a proposal waiting for approval that is stale (stale, on rule's proposals): made or backtested by another version of lapilli, or its period's incidents changed since. A stale proposal isn't approved until it is. Lapilli replays the change with this version, against the rule in effect, over the twelve weeks to now, and keeps the new backtest in place of the old, which the proposal's history keeps; any approval given to the old one is taken back. Refused when the rule changed since it was proposed: propose it again instead. Each is a try of yours, as each proposal you ask for is: the agents acting for one person ask for 60 an hour at most, made or refused. You can't approve or apply a change.`},
+			guarded(s.toolBacktestAgain))
 	}
 	return srv
 }
@@ -684,18 +688,48 @@ func saysOutOf(v *saysView) *saysOut {
 }
 
 type proposalOut struct {
-	ID     int64  `json:"id"`
-	Kind   string `json:"kind"`
-	Path   string `json:"path" jsonschema:"git, a pull request; grafana, Grafana's API; none, for a person to make"`
-	State  string `json:"state"`
-	Stale  bool   `json:"stale,omitempty" jsonschema:"the rule in effect isn't the one it was proposed against"`
+	ID    int64  `json:"id"`
+	Kind  string `json:"kind"`
+	Path  string `json:"path" jsonschema:"git, a pull request; grafana, Grafana's API; none, for a person to make"`
+	State string `json:"state"`
+	// Stale is why it is stale (staleText).
+	Stale  string `json:"stale,omitempty" jsonschema:"why it is stale: the rule in effect isn't the one it was proposed against (the rule changed since it was proposed: propose it again; checked again, it is refused); or, waiting for approval, it was backtested by another version of lapilli, or its period's record changed since, and isn't approved until it is backtested again (backtest_again). Empty when it isn't"`
 	MadeBy string `json:"made_by"`
 	Agent  bool   `json:"agent,omitempty"`
 	Diff   string `json:"diff"`
 	Link   string `json:"link,omitempty"`
 	Reason string `json:"reason,omitempty" jsonschema:"why it was refused or failed"`
 	// Outlasts warns of a for proposed that one event can't outlast.
-	Outlasts string `json:"for_outlasts,omitempty" jsonschema:"for a for proposed as long as the range the rule's condition counts events over, or longer: what it means, that one event alone could never fire it"`
+	Outlasts string `json:"for_outlasts,omitempty" jsonschema:"for a for proposed as long as the range the rule's condition counts events over, or longer: what it means, that one event alone could never fire it. Worked out when it is read, whichever lapilli made it"`
+	// Backtest is its backtest, a for's or a threshold's.
+	Backtest *proposalBacktestOut `json:"backtest,omitempty"`
+}
+
+// proposalBacktestOut is a proposal's backtest, as it is beside as
+// proposed. With no record, its firings alone: counted, not judged.
+type proposalBacktestOut struct {
+	From     time.Time `json:"from"`
+	To       time.Time `json:"to"`
+	Fired    [2]int    `json:"fired" jsonschema:"as it is, and as proposed"`
+	NoRecord bool      `json:"no_record,omitempty" jsonschema:"no incident was written down, or found by --impact, in the period or the two weeks before it: the firings are counted, not judged, so fewer of them as proposed isn't better, nor more worse; fewer may be events that happened, hidden. caught, missed and later are left out"`
+	Caught   *[2]int   `json:"caught,omitempty" jsonschema:"firings that caught an incident, as it is and as proposed"`
+	Missed   []string  `json:"missed,omitempty" jsonschema:"incidents it catches as it is and would miss as proposed"`
+	Gained   []string  `json:"gained,omitempty" jsonschema:"incidents it misses as it is and would catch as proposed"`
+	Later    []string  `json:"later,omitempty" jsonschema:"incidents it would catch later as proposed"`
+}
+
+// proposalBacktestOf is a proposal's backtest for MCP, nil for none.
+func proposalBacktestOf(l proposalLine) *proposalBacktestOut {
+	bt := proposalEvidence(l.Proposal).Backtest
+	if bt == nil || !backtested(l.Kind) {
+		return nil
+	}
+	out := &proposalBacktestOut{From: bt.From, To: bt.To, Fired: [2]int{bt.Before.Firings, bt.After.Firings}, NoRecord: l.NoRecord}
+	if !l.NoRecord {
+		out.Caught = &[2]int{bt.Before.White, bt.After.White}
+		out.Missed, out.Gained, out.Later = bt.Lost, bt.Gained, bt.Later
+	}
+	return out
 }
 
 type checkOut struct {
@@ -772,9 +806,9 @@ func (s *Server) toolRule(ctx context.Context, _ *mcp.CallToolRequest, in ruleIn
 	out.Tasks = taskOuts(rv.Tasks)
 	out.Proposals = []proposalOut{}
 	for _, p := range rv.Proposals {
-		x := proposalOut{ID: p.ID, Kind: p.Kind, Path: p.Path, State: p.State, Stale: p.Stale,
-			MadeBy: p.MadeBy, Agent: p.Agent, Diff: p.Diff, Link: p.Link, Reason: p.Reason}
-		if o := proposalEvidence(p.Proposal).Outlasts; o != nil {
+		x := proposalOut{ID: p.ID, Kind: p.Kind, Path: p.Path, State: p.State, Stale: p.staleText(),
+			MadeBy: p.MadeBy, Agent: p.Agent, Diff: p.Diff, Link: p.Link, Reason: p.Reason, Backtest: proposalBacktestOf(p)}
+		if o := p.Outlasts; o != nil {
 			x.Outlasts = o.Proposed()
 		}
 		out.Proposals = append(out.Proposals, x)

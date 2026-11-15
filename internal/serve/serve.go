@@ -318,6 +318,9 @@ type Server struct {
 	// tries are, by reader, the proposals asked for in the last hour that
 	// read the rules again (propose).
 	tries tries
+	// outlasts are the proposals' for_outlasts, worked out as they are
+	// read (outlastsNow).
+	outlasts outlasts
 	// heavy is the one turn there is for a request that takes hundreds of
 	// megabytes: every firing of a month, the settings tried over a week.
 	heavy chan struct{}

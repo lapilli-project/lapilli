@@ -205,8 +205,17 @@ func TestUpgradeGroups(t *testing.T) {
 		if err := s.look(ctx, &raw); err != nil {
 			t.Fatal(err)
 		}
-		if _, body, _ := ui(t, h, http.MethodGet, "/proposals", bo, "", nil); strings.Contains(body, "the rule changed since") {
-			t.Errorf("a proposal is taken as stale:\n%s", body)
+		_, body, _ := ui(t, h, http.MethodGet, "/proposals", bo, "", nil)
+		if strings.Contains(body, "the rule changed since") {
+			t.Errorf("a proposal's rule is taken as changed:\n%s", body)
+		}
+		// Backtested by a lapilli that kept no version, it is stale: held
+		// until it is backtested again, by this one.
+		if !strings.Contains(body, "stale: backtest it again") || keyFor(t, h, 2, ana, "approve") != "" {
+			t.Errorf("a proposal an earlier lapilli backtested isn't held:\n%s", body)
+		}
+		if code, body, _ := ui(t, h, http.MethodPost, "/proposals/2/backtest", bo, "same-origin", url.Values{}); code != http.StatusSeeOther {
+			t.Fatalf("backtesting it again: %d %s", code, body)
 		}
 		if code, body := approve(t, h, 2, ana); code != http.StatusSeeOther {
 			t.Fatalf("approving: %d %s", code, body)

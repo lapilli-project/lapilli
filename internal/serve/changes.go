@@ -548,6 +548,11 @@ type evidence struct {
 	// doesn't replay it.
 	Cloud   string `json:"cloud,omitempty"`
 	OffOnly bool   `json:"off_only,omitempty"`
+	// Version is the lapilli that made it, or last backtested it again
+	// (Config.Version, as its pages' footer says it): one made by another
+	// minor version, or before it was kept, is stale while it waits for
+	// approval (proposalsNow).
+	Version string `json:"version,omitempty"`
 }
 
 // backtest is a change replayed, as it is and as proposed.
@@ -560,6 +565,11 @@ type backtest struct {
 	Gained     []string  `json:"gained"` // missed as it is, caught as proposed
 	Later      []string  `json:"later"`  // caught later as proposed
 	Unfinished bool      `json:"unfinished,omitempty"`
+	// NoRecord says no week of its period had its record kept
+	// (ledger.RecordKept): its firings were counted, not judged, so fewer
+	// of them is no better, nor more worse. nil for a backtest made before
+	// it was kept, worked out from the ledger when it is read.
+	NoRecord *bool `json:"no_record,omitempty"`
 }
 
 type side struct {
@@ -745,7 +755,7 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 	}
 	e := rules.Edit{Name: r.Name, Group: r.Group, UID: r.UID, Namespace: r.Namespace}
 	want := r
-	ev := evidence{From: q.From, Incident: q.Incident, Reason: q.Reason}
+	ev := evidence{From: q.From, Incident: q.Incident, Reason: q.Reason, Version: s.cfg.Version}
 	var b rules.Bound
 	switch q.Kind {
 	case ledger.KindFor:
@@ -1184,7 +1194,14 @@ func (s *Server) backtest(ctx context.Context, name string, before, after rules.
 	if err != nil {
 		return nil, err
 	}
-	bt := &backtest{From: from, To: to, Lost: []string{}, Gained: []string{}, Later: []string{}}
+	// Whether the period had its record, as the ledger says, which is what
+	// it is told by when it is read again (proposalsNow).
+	kept, err := s.l.RecordKept(ctx, from, to, o)
+	if err != nil {
+		return nil, err
+	}
+	no := !kept
+	bt := &backtest{From: from, To: to, Lost: []string{}, Gained: []string{}, Later: []string{}, NoRecord: &no}
 	for _, rc := range cmp.Rules {
 		if rc.Rule != name {
 			continue
@@ -1584,19 +1601,9 @@ func (s *Server) checkEvidence(ctx context.Context, p ledger.Proposal, ev eviden
 		if now != nil {
 			r = *now
 		}
-		want := r
-		switch p.Kind {
-		case ledger.KindFor:
-			want.For = ev.For
-		case ledger.KindThreshold:
-			if ev.Bound == nil || ev.Value == nil {
-				return refusal{"the proposal doesn't say which number to change"}
-			}
-			j := slices.IndexFunc(r.Bounds(), func(x rules.Bound) bool { return x.At == *ev.Bound })
-			if j < 0 {
-				return refusal{"the rule changed since it was proposed, or is gone: propose it again"}
-			}
-			want = r.WithBound(r.Bounds()[j], *ev.Value)
+		want, err := proposedRule(p, ev, r)
+		if err != nil {
+			return err
 		}
 		bt, err := s.backtest(ctx, p.Rule, r, want, true)
 		if err != nil {

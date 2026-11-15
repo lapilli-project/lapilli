@@ -122,7 +122,7 @@ func TestFixTextsTranslated(t *testing.T) {
 			}
 		}
 	}
-	for _, r := range btTableOf(&backtest{}).Rows {
+	for _, r := range btTableOf(&backtest{}, false).Rows {
 		texts[r.Label] = true
 	}
 	for _, f := range append(slices.Clone(proposalFacets), taskFacets...) {
@@ -143,7 +143,11 @@ func TestFixTextsTranslated(t *testing.T) {
 		"You proposed this: someone else approves it.", "Your agent proposed this: someone else approves it.", "You approved it: it waits for another approver.",
 		"Approvers and admins only", "Editors and approvers only", "Ask to undo it", "Drop it", "Close it",
 		"Make it a task", "Approve", "Pause changes", "Resume changes", "Lapilli", "a change recipe", "No proposals yet.", "No proposal matches these filters.",
-		"A rule's page proposes a change to it, with its backtest; Lapilli proposes of itself with --changes, after the weekly digest."} {
+		"A rule's page proposes a change to it, with its backtest; Lapilli proposes of itself with --changes, after the weekly digest.",
+		// A proposal stale, or backtested again (proposalsNow).
+		staleRule, staleNoVersion, staleVersion, staleRecorded, staleUnrecorded, staleNotice, "No proposal waiting for approval is stale.",
+		"Held until it is backtested again: it is stale", "Backtest again", "Backtested again by %s",
+		"The %d approvals it had were taken back: approve it again."} {
 		texts[x] = true
 	}
 	for x := range texts {

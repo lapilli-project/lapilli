@@ -179,13 +179,17 @@ type btRow struct {
 // btTable is a proposal's backtest as its page shows it: now beside as
 // proposed, over its span, from the evidence kept when it was made.
 // Worse says, above it, that as proposed it misses incidents it catches
-// now.
+// now. NoRecord says its period had no incident written down to judge its
+// firings by: they are counted, not judged, so their difference is said
+// as a number alone, never better or worse, and what was caught or missed
+// is "–".
 type btTable struct {
 	From, To            time.Time
 	Rows                []btRow
 	Lost, Gained, Later []string
 	Unfinished          bool
 	Worse               bool
+	NoRecord            bool
 	// Undoes is, for an undo, the change it undoes, whose backtest this is,
 	// read the other way: with the change beside after undoing it. Sooner
 	// are the incidents caught sooner once it is undone, those the change
@@ -197,8 +201,9 @@ type btTable struct {
 // btTableOf is a backtest's table: the firings, those that caught
 // something, the incidents one misses that the other catches, and whether
 // it catches them as soon. The evidence holds no time to catch, only which
-// incidents are caught later: that is what the last row says.
-func btTableOf(bt *backtest) *btTable {
+// incidents are caught later: that is what the last row says. With no
+// record (noRecord), the firings alone, their difference a number.
+func btTableOf(bt *backtest, noRecord bool) *btTable {
 	if bt == nil {
 		return nil
 	}
@@ -210,14 +215,30 @@ func btTableOf(bt *backtest) *btTable {
 		{"Incidents missed that the other catches", n(len(bt.Gained)), n(len(bt.Lost)), moved{On: true, By: len(bt.Lost) - len(bt.Gained)}},
 		{"Incidents caught later", "–", n(len(bt.Later)), moved{On: true, By: len(bt.Later)}},
 	}
+	if noRecord {
+		x.counted()
+	}
 	return x
+}
+
+// counted makes a table of a period with no record say what was counted
+// and nothing judged: the firings' difference a number, neither better nor
+// worse, and what was caught or missed "–", with no incident to name.
+func (x *btTable) counted() {
+	x.NoRecord, x.Worse = true, false
+	x.Lost, x.Gained, x.Later, x.Sooner = nil, nil, nil, nil
+	x.Rows[0].By.Plain = true
+	for i := range x.Rows[1:] {
+		x.Rows[i+1] = btRow{Label: x.Rows[i+1].Label, Now: "–", Proposed: "–"}
+	}
 }
 
 // btUndoOf is, for an undo of #n, #n's backtest read the other way: with
 // #n beside after undoing it. Undone, it misses what #n gained and catches
 // what #n lost; the incidents #n caught later are caught sooner, and
-// whether undoing it catches any later the backtest didn't say.
-func btUndoOf(bt *backtest, n int64) *btTable {
+// whether undoing it catches any later the backtest didn't say. With no
+// record (noRecord), as btTableOf has it.
+func btUndoOf(bt *backtest, n int64, noRecord bool) *btTable {
 	if bt == nil {
 		return nil
 	}
@@ -229,6 +250,9 @@ func btUndoOf(bt *backtest, n int64) *btTable {
 		{"Caught something", c(bt.After.White), c(bt.Before.White), moved{On: true, By: bt.Before.White - bt.After.White, Up: true}},
 		{"Incidents missed that the other catches", c(len(bt.Lost)), c(len(bt.Gained)), moved{On: true, By: len(bt.Gained) - len(bt.Lost)}},
 		{"Incidents caught later", c(len(bt.Later)), "–", moved{}},
+	}
+	if noRecord {
+		x.counted()
 	}
 	return x
 }
@@ -247,6 +271,11 @@ type proposalStep struct {
 	Link        string
 	Reason      string
 	Undo        int64
+	// Of a backtest run again: Was, the backtest it replaced; Version, the
+	// lapilli that ran it; TakenBack, the approvals taken back.
+	Was       *backtest
+	Version   string
+	TakenBack int
 }
 
 // stepsMost is how many of a proposal's steps its page reads, the latest.
@@ -262,6 +291,11 @@ type stepFields struct {
 	State     *string `json:"state"`
 	Reason    string  `json:"reason"`
 	Link      string  `json:"link"`
+	// A backtest run again's (ledger.BacktestAgain): the backtest, before
+	// and after, the version that ran each, and the approvals taken back.
+	Backtest  *backtest `json:"backtest"`
+	Version   string    `json:"version"`
+	TakenBack int       `json:"approvals_taken_back"`
 }
 
 // stepsOf are what happened to a proposal, in order: its making and its
@@ -293,6 +327,8 @@ func (s *Server) stepsOf(r *http.Request, p ledger.Proposal) (steps []proposalSt
 		case what == "made":
 			made = true
 			continue // from the proposal itself
+		case what == "backtested again":
+			st.Kind, st.Was, st.Version, st.TakenBack = "backtest", before.Backtest, after.Version, after.TakenBack
 		case what == "approved" && !moved:
 			if after.Approvals == nil {
 				continue // nothing kept says how many

@@ -264,11 +264,12 @@ type ruleFact struct {
 
 // moved is how a number changed from as long a span before, when On. Up
 // says more is better: its colour and its word follow it. Pt says it is a
-// share's, in points.
+// share's, in points. Plain says it is neither better nor worse, only
+// counted: firings with no record to judge them by.
 type moved struct {
-	On     bool
-	By     int
-	Up, Pt bool
+	On            bool
+	By            int
+	Up, Pt, Plain bool
 }
 
 // Text is the change, signed: +3, −2, ±0.
@@ -285,7 +286,7 @@ func (m moved) Text() string {
 // Class is better or worse, or "" for no change.
 func (m moved) Class() string {
 	switch {
-	case m.By == 0:
+	case m.By == 0, m.Plain:
 		return ""
 	case (m.By > 0) == m.Up:
 		return "better"

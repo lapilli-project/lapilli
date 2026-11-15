@@ -581,7 +581,7 @@ func TestUndoPage(t *testing.T) {
 	if strings.Contains(body, "approve this at once") || strings.Contains(body, "As proposed, it misses") || !strings.Contains(body, "Undone, it misses 1 incident") {
 		t.Error("an undo with the change's evidence shows it as its own")
 	}
-	if pr := s.prBody(state(t, s, uid)); strings.Contains(pr, "Backtest") || strings.Contains(pr, "approve this") || !strings.Contains(pr, "before Lapilli proposal #"+n+" changed it") {
+	if pr := bodyOf(t, s, state(t, s, uid)); strings.Contains(pr, "Backtest") || strings.Contains(pr, "approve this") || !strings.Contains(pr, "before Lapilli proposal #"+n+" changed it") {
 		t.Errorf("the undo's pull request:\n%s", pr)
 	}
 }

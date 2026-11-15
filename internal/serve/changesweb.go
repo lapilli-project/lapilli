@@ -33,6 +33,8 @@ func (s *Server) changesRoutes(mux *http.ServeMux, page func(string, func(*http.
 	mux.HandleFunc("POST /proposals/{id}/undo", s.person(s.postUndo))
 	mux.HandleFunc("POST /proposals/{id}/drop", s.need(viewer, s.postDrop)) // an approver need not be an editor
 	mux.HandleFunc("POST /proposals/{id}/task", s.write(s.postProposalTask))
+	// An editor's, as proposing is: the same role, site and tries an hour.
+	mux.HandleFunc("POST /proposals/{id}/backtest", s.write(s.postBacktestAgain))
 	mux.HandleFunc("POST /settings/changes", s.admin(s.postChangesPaused))
 	// To read, as every page can be; none of the API approves or applies.
 	mux.HandleFunc("GET /api/v1/proposals", s.cached(s.apiProposals))
@@ -95,6 +97,16 @@ type proposalLine struct {
 	// Have is how many approved it, of Need.
 	Have, Need int
 	Loc        *time.Location
+	// What its evidence says now, once proposalsNow has read it (read):
+	// StaleWhy, waiting for approval, why it waits to be backtested again
+	// before it is approved, nil when it doesn't;
+	// Outlasts, of a new for one event can't outlast as proposed, the for
+	// and the range; NoRecord, its backtest's period had no incident
+	// written down to judge its firings by.
+	StaleWhy *staleWhy
+	Outlasts *verdict.Outlast
+	NoRecord bool
+	read     bool
 }
 
 type proposalsView struct {
@@ -112,27 +124,38 @@ type proposalsView struct {
 	Empty        *emptyView
 	// PauseOff is the admin's switch, for one who isn't.
 	PauseOff *pageAction
+	// StaleLink is the list with the stale ones alone (stale=1), when some
+	// of those shown are.
+	StaleLink string
 }
 
-// inEffect are the hashes of the rules in effect, by the names the ledger
-// judges them under: of when they fire, from the latest version, and with
-// what they say, from the rules read last, which a change to what a rule
-// says doesn't make a version of.
-func (s *Server) inEffect(r *http.Request) (fires, says map[string]string, err error) {
-	ctx := r.Context()
-	fires, says = map[string]string{}, map[string]string{}
+// inForce is what the rules in effect hash to, by the names the ledger
+// judges them under: fires, of when they fire, from the latest version,
+// and says, with what they say, from the rules read last, which a change
+// to what a rule says doesn't make a version of; and byHash, the latest
+// version's rules as read, by what they hash to, for what a proposal made
+// against one of them proposes.
+type inForce struct {
+	fires, says map[string]string
+	byHash      map[string]rules.Rule
+}
+
+// inEffect is what the rules in effect hash to (inForce).
+func (s *Server) inEffect(ctx context.Context) (inForce, error) {
+	e := inForce{fires: map[string]string{}, says: map[string]string{}, byHash: map[string]rules.Rule{}}
 	latest, ok, err := s.l.Latest(ctx)
 	if err != nil || !ok {
-		return fires, says, err
+		return e, err
 	}
 	all, names, err := s.named(ctx, latest.ID)
 	if err != nil {
-		return nil, nil, err
+		return inForce{}, err
 	}
 	name := map[string]string{}
 	for i, x := range all {
 		if names[i] != "" {
-			fires[names[i]] = ruleHash(x)
+			h := ruleHash(x)
+			e.fires[names[i]], e.byHash[h] = h, x
 			name[identity(x)] = names[i]
 		}
 	}
@@ -141,31 +164,40 @@ func (s *Server) inEffect(r *http.Request) (fires, says map[string]string, err e
 	s.saidRules.Unlock()
 	for _, x := range rs {
 		if n, ok := name[identity(x)]; ok {
-			says[n] = saysHash(x)
+			e.says[n] = saysHash(x)
 		}
 	}
-	return fires, says, nil
+	return e, nil
 }
 
+// proposalLines are proposals' lines, each told whether the rule in effect
+// is the one it was made against (Stale): what the rules list counts.
+// linesNow also works out what their evidence says now.
 func (s *Server) proposalLines(r *http.Request, ps []ledger.Proposal) ([]proposalLine, error) {
-	fires, says, err := s.inEffect(r)
+	ls, _, err := s.linesOf(r.Context(), ps)
+	return ls, err
+}
+
+// linesOf are proposalLines, and what they read of the rules in effect.
+func (s *Server) linesOf(ctx context.Context, ps []ledger.Proposal) ([]proposalLine, *reading, error) {
+	e, err := s.inEffect(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var out []proposalLine
 	for _, p := range ps {
 		l := proposalLine{Proposal: p, Have: len(p.Approvals), Need: s.approvals(), Loc: s.cfg.Loc}
 		// One being applied changed the rule itself.
 		if p.Open() && p.BeforeHash != "" && p.State != ledger.StateApplying {
-			now := fires
+			now := e.fires
 			if saysChange(p) {
-				now = says
+				now = e.says
 			}
 			l.Stale = now[p.Rule] != p.BeforeHash
 		}
 		out = append(out, l)
 	}
-	return out, nil
+	return out, &reading{inForce: e}, nil
 }
 
 // proposalFacets are the proposals list's facets: where each is (the open
@@ -187,6 +219,74 @@ var proposalFacets = []pickFacet{
 	// The proposals made together, as a bulk proposal's result links to
 	// them: these alone, maxValues of them.
 	{param: "id", name: "Proposals", scope: true},
+	// Those waiting for approval that are stale (stale=1), as their pages
+	// say: worked out as they are read, never by the database.
+	{param: "stale", name: "Proposals", labels: []string{"stale"}, flag: true},
+}
+
+// staleMost is how many proposals waiting for approval the list reads, the
+// latest moved first, for those that are stale: more than a ledger keeps
+// waiting at once, one a rule.
+const staleMost = 10000
+
+// staleLines are the proposals waiting for approval that are stale, for
+// either reason (staleNow), of the rules named (every rule's for nil) and
+// the proposals ids names when it names some, the latest moved first, each
+// with what its evidence says now.
+func (s *Server) staleLines(ctx context.Context, rules []string, ids []int64) ([]proposalLine, error) {
+	heads, err := s.l.ProposalList(ctx, ledger.ProposalPick{Rules: rules, IDs: ids, States: []string{ledger.StateProposed}}, staleMost)
+	if err != nil {
+		return nil, err
+	}
+	ps := make([]ledger.Proposal, len(heads))
+	for i, h := range heads {
+		ps[i] = h.Proposal
+	}
+	ls, err := s.linesNow(ctx, ps)
+	if err != nil {
+		return nil, err
+	}
+	for i := range ls {
+		ls[i].Have = heads[i].Approved
+	}
+	return slices.DeleteFunc(ls, func(l proposalLine) bool { return !l.staleNow() }), nil
+}
+
+// makerOf is who made a proposal, as the list's facet tells them apart and
+// the database does (ledger.ProposalCounts).
+func makerOf(p ledger.Proposal) string {
+	switch {
+	case p.Agent:
+		return ledger.MakerAgent
+	case p.MadeBy == ledger.FoldName(ledger.Proposer):
+		return ledger.MakerLapilli
+	}
+	return ledger.MakerPerson
+}
+
+// countLines are proposals counted as the database counts them for the
+// facets (ledger.ProposalCounts), by kind, way, state and maker.
+func countLines(ls []proposalLine) []ledger.ProposalCount {
+	n := map[ledger.ProposalCount]int{}
+	for _, l := range ls {
+		n[ledger.ProposalCount{Kind: l.Kind, Path: l.Path, State: l.State, Maker: makerOf(l.Proposal)}]++
+	}
+	out := make([]ledger.ProposalCount, 0, len(n))
+	for c, k := range n {
+		c.N = k
+		out = append(out, c)
+	}
+	slices.SortFunc(out, func(a, b ledger.ProposalCount) int {
+		return strings.Compare(a.Kind+"\x00"+a.Path+"\x00"+a.State+"\x00"+a.Maker, b.Kind+"\x00"+b.Path+"\x00"+b.State+"\x00"+b.Maker)
+	})
+	return out
+}
+
+// pickedLine reports whether a proposal is among what a pick picks of states,
+// kinds, ways and makers, as the database picks them (ledger.ProposalList).
+func pickedLine(q ledger.ProposalPick, l proposalLine) bool {
+	in := func(vs []string, v string) bool { return len(vs) == 0 || slices.Contains(vs, v) }
+	return in(q.States, l.State) && in(q.Kinds, l.Kind) && in(q.Paths, l.Path) && in(q.Makers, makerOf(l.Proposal))
 }
 
 // proposalsShown is how many proposals the list shows at most, saying so
@@ -252,8 +352,17 @@ func (s *Server) proposalsPage(r *http.Request) (any, error) {
 	p := picksOf(r.URL.Query(), proposalFacets)
 	// Counted by the database, every proposal, however many (of those the
 	// URL names, when it names some): the facets, and how many the list has.
-	counts, err := s.l.ProposalCountsOf(ctx, rules, pickedIDs(p))
-	if err != nil {
+	// The stale ones are worked out as they are read, and counted so.
+	var stale []proposalLine
+	var counts []ledger.ProposalCount
+	var err error
+	staleOnly := len(p["stale"]) > 0
+	if staleOnly {
+		if stale, err = s.staleLines(ctx, rules, pickedIDs(p)); err != nil {
+			return nil, err
+		}
+		counts = countLines(stale)
+	} else if counts, err = s.l.ProposalCountsOf(ctx, rules, pickedIDs(p)); err != nil {
 		return nil, err
 	}
 	idx, pick := pickItems("/proposals", c, proposalFacets, p, len(counts), func(i int, param string) []string { return countValues(counts[i], param) },
@@ -269,25 +378,43 @@ func (s *Server) proposalsPage(r *http.Request) (any, error) {
 	// first, then those under way, then the rest, each the latest moved
 	// first, proposalsShown of them, said so past them.
 	var heads []ledger.ProposalHead
-	if v.Shown > 0 {
+	switch {
+	case v.Shown > 0 && staleOnly:
+		q := proposalPick(p, rules)
+		for _, l := range stale {
+			if pickedLine(q, l) {
+				v.Lines = append(v.Lines, l)
+			}
+		}
+		if len(v.Lines) > proposalsShown {
+			v.Lines, v.More = v.Lines[:proposalsShown], true
+		}
+	case v.Shown > 0:
 		if heads, err = s.l.ProposalList(ctx, proposalPick(p, rules), proposalsShown+1); err != nil {
 			return nil, err
 		}
+		if len(heads) > proposalsShown {
+			heads, v.More = heads[:proposalsShown], true
+		}
+		ps := make([]ledger.Proposal, 0, len(heads))
+		for _, h := range heads {
+			ps = append(ps, h.Proposal)
+		}
+		if v.Lines, err = s.linesNow(ctx, ps); err != nil {
+			return nil, err
+		}
+		for k, h := range heads {
+			v.Lines[k].Have = h.Approved
+		}
 	}
-	if len(heads) > proposalsShown {
-		heads, v.More = heads[:proposalsShown], true
-	}
-	ps := make([]ledger.Proposal, 0, len(heads))
-	for _, h := range heads {
-		ps = append(ps, h.Proposal)
-	}
-	if v.Lines, err = s.proposalLines(r, ps); err != nil {
-		return nil, err
-	}
-	for k, h := range heads {
-		v.Lines[k].Have = h.Approved
+	if !staleOnly && slices.ContainsFunc(v.Lines, proposalLine.staleNow) {
+		q := maps.Clone(p)
+		q["stale"] = []string{"1"}
+		v.StaleLink = pickURL("/proposals", c, proposalFacets, q)
 	}
 	switch {
+	case v.Total == 0 && staleOnly:
+		v.Empty = &emptyView{Kind: "done", Title: "No proposal waiting for approval is stale.", Links: []emptyLink{{"Clear filters", pick.Clear}}}
 	case v.Total == 0 && len(pickedIDs(p)) > 0:
 		// Those the URL names aren't there, or not the team's.
 		v.Empty = &emptyView{Kind: "notfound", Title: "None of the proposals picked is here.", Links: []emptyLink{{"Clear filters", pick.Clear}}}
@@ -352,6 +479,11 @@ type proposalView struct {
 	// What the reader may not do, each shown disabled with why: approve
 	// it, ask for it to be undone, drop or close it, make it a task.
 	ApproveOff, UndoOff, DropOff, TaskOff *pageAction
+	// CanAgain is the form to backtest it again: an editor's, of one
+	// waiting for approval that waits for it (StaleWhy); AgainOff, the
+	// button disabled with why, to anyone else.
+	CanAgain bool
+	AgainOff *pageAction
 	// Read is what the reader says they read before approving: the
 	// backtest, or, with none, the change and its evidence.
 	Read string
@@ -375,7 +507,7 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	lines, err := s.proposalLines(r, []ledger.Proposal{p})
+	lines, err := s.linesNow(ctx, []ledger.Proposal{p})
 	if err != nil {
 		return nil, err
 	}
@@ -391,7 +523,8 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 		me := ledger.FoldName(user)
 		v.Own = ledger.FoldName(p.MadeBy) == me
 		v.Done = slices.ContainsFunc(p.Approvals, func(a ledger.Approval) bool { return ledger.FoldName(a.By) == me })
-		if p.State == ledger.StateProposed && p.Path != ledger.PathNone && !v.Own && !v.Done && !v.Bearer {
+		// A stale one is held until it is backtested again (postApprove).
+		if p.State == ledger.StateProposed && p.Path != ledger.PathNone && !v.Own && !v.Done && !v.Bearer && v.StaleWhy == nil {
 			v.CanApprove, v.Approve = true, s.formKey(p, user, "approve")
 		}
 		if undoable(p) && !v.Bearer {
@@ -402,7 +535,8 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 	v.Closing = v.CanDrop && slices.Contains(closing, p.State)
 	v.Unwritten = v.Closing && p.State == ledger.StateApplying
 	v.TwoAlike = v.Unwritten && p.Path == ledger.PathAlarm && strings.HasPrefix(p.Reason, twoAlikeNote)
-	v.Body = s.prBody(p)
+	v.CanAgain = v.StaleWhy != nil && s.role(r) >= editor
+	v.Body = s.prBody(v.proposalLine)
 	if p.TaskID != 0 {
 		if t, err := s.l.TaskByID(ctx, p.TaskID); err == nil {
 			v.Task = &t
@@ -428,7 +562,7 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 	if p.Path == ledger.PathGit && p.Diff != "" {
 		v.File, v.FileRows = s.docName(p.Source), fileRows(p.Diff)
 	}
-	v.Backtest = btTableOf(v.Evidence.Backtest)
+	v.Backtest = btTableOf(v.Evidence.Backtest, v.NoRecord)
 	if p.Kind == ledger.KindUndo {
 		// What it undoes is the change's: its backtest read the other way,
 		// who made it; nothing of why it was made is the asker's.
@@ -438,7 +572,11 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 			wev := proposalEvidence(was)
 			v.Undoes.Agent, v.Undoes.For = was.Agent, was.MadeBy
 			v.Evidence.Cloud = wev.Cloud // how the page names where it is
-			v.Backtest = btUndoOf(wev.Backtest, p.Follows)
+			no, err := s.spanNoRecord(ctx, wev.Backtest)
+			if err != nil {
+				return nil, err
+			}
+			v.Backtest = btUndoOf(wev.Backtest, p.Follows, no)
 		} else if !errors.Is(err, ledger.ErrNotFound) {
 			return nil, err
 		}
@@ -474,8 +612,10 @@ func textLines(text string) []string {
 }
 
 // prBody is a proposal as a pull request's description, in English, as
-// what is written in a repository is.
-func (s *Server) prBody(p ledger.Proposal) string {
+// what is written in a repository is: with what its evidence says now
+// (linesNow), its for_outlasts and its backtest's record.
+func (s *Server) prBody(l proposalLine) string {
+	p := l.Proposal
 	ev := proposalEvidence(p)
 	var b strings.Builder
 	fmt.Fprintf(&b, "Lapilli proposal #%d: %s, for the rule %s.\n\n", p.ID, kindText(p.Kind), p.Rule)
@@ -488,7 +628,11 @@ func (s *Server) prBody(p ledger.Proposal) string {
 	if p.Agent {
 		b.WriteString("Proposed by an agent, for a person to check.\n\n")
 	}
-	if bt := ev.Backtest; bt != nil {
+	if bt := ev.Backtest; bt != nil && l.NoRecord {
+		// Counted, not judged, as --compare says of such a period.
+		fmt.Fprintf(&b, "Backtest from %s to %s: fired %d times as it is, %d as proposed. %s %s\n\n",
+			bt.From.Format("2006-01-02"), bt.To.Format("2006-01-02"), bt.Before.Firings, bt.After.Firings, verdict.NoRecordCompared, noRecordFewer)
+	} else if bt != nil {
 		fmt.Fprintf(&b, "Backtest from %s to %s: fired %d times, %d catching an incident, as it is; %d and %d as proposed.",
 			bt.From.Format("2006-01-02"), bt.To.Format("2006-01-02"), bt.Before.Firings, bt.Before.White, bt.After.Firings, bt.After.White)
 		if len(bt.Lost) > 0 {
@@ -518,7 +662,11 @@ func (s *Server) prBody(p ledger.Proposal) string {
 	if p.Kind == ledger.KindSays {
 		b.WriteString("It changes what the alert says, not when it fires.\n\n")
 	}
-	if o := ev.Outlasts; o != nil {
+	o := ev.Outlasts
+	if l.read {
+		o = l.Outlasts // as it is read now, whichever lapilli made it
+	}
+	if o != nil {
 		b.WriteString(o.Proposed() + "\n\n")
 	}
 	fmt.Fprintf(&b, "```diff\n%s```\n", strings.ReplaceAll(p.Diff, "```", "'''"))
@@ -632,6 +780,19 @@ func (s *Server) postApprove(w http.ResponseWriter, r *http.Request) {
 	// page, ticked, is checked here too.
 	if r.PostFormValue("read") != "1" {
 		s.oops(w, r, errNotRead)
+		return
+	}
+	// One that waits to be backtested again is held until it is: its page
+	// offers no form, and one shown before it was found stale is refused
+	// here. One whose rule changed since is refused when it is checked
+	// again, read where it is kept, as before.
+	ls, err := s.linesNow(r.Context(), []ledger.Proposal{p})
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	if ls[0].StaleWhy != nil {
+		s.oops(w, r, errHeld)
 		return
 	}
 	if _, err := s.l.Approve(r.Context(), p.ID, s.user(r), s.approvals()); err != nil {
@@ -844,11 +1005,16 @@ func (s *Server) postProposalTask(w http.ResponseWriter, r *http.Request) {
 	if p.Kind == ledger.KindDisable || p.Kind == ledger.KindDelete {
 		kind = "retire"
 	}
+	ls, err := s.linesNow(ctx, []ledger.Proposal{p})
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
 	// None of its links: a task's link is its tracker's issue, which the
 	// tracker job opens for a task without one. Its page shows the
 	// proposal's pull request, through the proposal.
 	t := ledger.Task{Title: clip(fmt.Sprintf("Proposal #%d: %s, %s", p.ID, kindText(p.Kind), p.Rule), 200), Kind: kind, Rule: p.Rule,
-		Body: clip(s.prBody(p), 10000)}
+		Body: clip(s.prBody(ls[0]), 10000)}
 	id, err := s.l.PutTask(ctx, t, s.user(r))
 	if err != nil {
 		s.oops(w, r, err)
@@ -893,13 +1059,20 @@ func (s *Server) apiProposals(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	if ps == nil {
-		ps = []ledger.Proposal{}
-	}
 	for i := range ps {
 		ps[i].Document = "" // on its own page
 	}
-	writeJSON(w, map[string]any{"proposals": ps, "changes": s.cfg.Changes, "paused": s.changesPaused()})
+	// With what each one's evidence says now (proposalJSON).
+	ls, err := s.linesNow(r.Context(), ps)
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	out := make([]proposalJSON, 0, len(ls))
+	for _, l := range ls {
+		out = append(out, proposalJSONOf(l))
+	}
+	writeJSON(w, map[string]any{"proposals": out, "changes": s.cfg.Changes, "paused": s.changesPaused()})
 }
 
 func (s *Server) apiProposal(w http.ResponseWriter, r *http.Request) {
@@ -908,7 +1081,12 @@ func (s *Server) apiProposal(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	writeJSON(w, p)
+	ls, err := s.linesNow(r.Context(), []ledger.Proposal{p})
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	writeJSON(w, proposalJSONOf(ls[0]))
 }
 
 // The change recipes' token, on the incidents port: it reads the changes
@@ -956,8 +1134,14 @@ func (s *Server) apiChanges(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
+	// Each description says what its evidence says now (linesNow).
+	ls, err := s.linesNow(r.Context(), ps)
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
 	out := []handedOut{}
-	for _, p := range ps {
+	for i, p := range ps {
 		if p.Path != ledger.PathGit {
 			continue
 		}
@@ -967,7 +1151,7 @@ func (s *Server) apiChanges(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		h := handedOut{ID: p.ID, Ledger: s.ledgerID, Rule: p.Rule, Kind: p.Kind, State: p.State, Source: p.Source, DocHash: p.DocHash,
-			Link: p.Link, Branch: fmt.Sprintf("lapilli/%s/proposal-%d", s.ledgerID, p.ID), Title: prTitle(p), Body: s.prBody(p)}
+			Link: p.Link, Branch: fmt.Sprintf("lapilli/%s/proposal-%d", s.ledgerID, p.ID), Title: prTitle(p), Body: s.prBody(ls[i])}
 		if p.State == ledger.StateReady {
 			h.Document = p.Document
 		}
@@ -1133,7 +1317,7 @@ func (s *Server) ruleChangesOf(r *http.Request, v *ruleView) error {
 	if err != nil {
 		return err
 	}
-	if v.Proposals, err = s.proposalLines(r, ps); err != nil {
+	if v.Proposals, err = s.linesNow(ctx, ps); err != nil {
 		return err
 	}
 	if !s.replaying() {
