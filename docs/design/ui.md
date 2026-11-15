@@ -270,12 +270,16 @@ Each rule has a badge on each of three axes, and what is under way:
 | What people mean to do (its note's status) | `✓ keep`, `± tune`, `⊘ retire` |
 | Under way | `✎ Proposed` (a change waits for approval), `⚠ n to check` (what its page lists to check, below) |
 
-Noisy wins over Spare: a rule that is both is noisy first. With no record
-no rule is noisy: the list says so once above the table, links to the
-incidents to write them down, and shows each rule's precision as `–`; the
-overview's precision and noisy rules are `–` for such a week, and its
-"What to look at" says it first, after the rules the last digest found
-firing well past their bound with no record (below). Differs is
+Noisy wins over Spare: a rule that is both is noisy first. A week with no
+record is counted, not judged (docs/design/serve.md): over several weeks,
+the list judges each by its own, and says once how many of those shown had
+none; with none of them judged, that no precision is known and no rule is
+called noisy, links to the incidents to write them down, and shows each
+rule's precision as `–`. With a team picked, by the incidents the team
+owns. The overview's precision and noisy rules are `–` for such a week,
+where the noise is leaves its black stones out and says so, and "What to
+look at" says it first, after the rules the last digest found firing with
+no record (below). Differs is
 looked up for a rule that didn't fire in the weeks shown too: one replayed
 to nothing while it really fired is the case it is most for. A badge with a
 reason (Not replayed, Recorded only) has it in its `title`; the rule's page

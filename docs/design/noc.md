@@ -218,7 +218,8 @@ way, with the same bounds. A request given up stops at the next row.
 changed in meaning or taken away changes it, and the API's path stays. A
 share is null with nothing to divide by, and every share caught (`precision`,
 `share_caught`, `precision_without`) with no record to judge by: a week with
-no incident started in it or in the week before it says `no_record: true`.
+no incident on in it or in the two weeks before it, and no `--impact` read
+over it, says `no_record: true`.
 `off_hours` and `asleep` are null with
 no hours given, a median null with nothing caught. `TestSummaryAPI` holds
 the fields by name.

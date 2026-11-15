@@ -93,8 +93,11 @@ noisy: a rule that fires as often says what its firings were (0.41).
   with one bound that decides it. A range, or `and`, `or` and `unless`
   joining comparisons, is still left unsaid.
 - A `for` one event can't outlast is known of PromQL's counts of events
-  (`increase`, `changes`, `resets`, `delta`, `idelta`). LogQL's
+  (`increase`, `changes`, `resets`, `rate` of a counter). LogQL's
   `count_over_time` and Grafana's reduces of them are still left unsaid.
+- lapilli serve judges a firing by its week's record; lapilli verdict by the
+  record at the firing's own time. Judging serve's by the day, from its
+  daily tallies, would bring the two closer.
 
 - Near misses by value for a Grafana math expression joining comparisons
   with `&&` or `||`, and for classic conditions, are built (0.25). A

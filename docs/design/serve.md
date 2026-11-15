@@ -244,30 +244,45 @@ isn't a failure. The digest and the incident's page show near misses only
 for incidents still not caught. A week from before this was kept,
 with no digest's result, isn't looked at. `lapilli verdict` works them out for any period.
 
-**No record.** A week with firings and no incident started in it, or in the
-week before it (one written down, or an impact window that counts), has no
-record to judge them by: a firing that caught nothing can't be told from
-one nobody wrote down (`verdict.RecordKept`, the same two weeks the
-outcomes page asks about). The digest says so once, calls no rule noisy and
-suggests no longer `for`; the pages say so of any span, a week, four or
-twelve, looked back two weeks from its end, from the incidents' starts read
-once with the weekly tallies (`IncidentStarts`), never from the firings.
-Instead, for each rule replayed that fired as often as a noisy rule, the
-ten that fired most, the digest works out what its firings were
-(`verdict.Unrecorded`, kept as an `unrecorded` result for the week): how
-many had the value its condition compares go well past its bound, from the
-rule replayed over the week with its one bound a fifth further (a firing of
-that one overlapping it, alike in its labels, went well past it; a
-condition with no one bound that decides it, a range, `and`, `or`,
-`unless`, says nothing), the alerts that fired most by the labels that tell
-them apart, each with the team whose labels it has, and those during
-deploys. It shares the digest's `--timeout`. A week whose record is kept
-since, by an incident written down later, no longer shows it.
+**No record.** `serve` judges a firing by its week: a week's firings are
+judged when the record of the week is kept, an incident (written down, or
+an impact window that counts) on at some time in it or in the two weeks
+before it, one with no end still on; or the impact signal read, by the
+runs, over all of it (`impact_since` in `meta`, the earliest a run read
+`--impact` from: `verdict.Options.ImpactFrom`). Any other week's firings
+are counted, and not judged: a firing that caught nothing can't be told from
+one nobody wrote down. They are in no precision and make no rule noisy, and
+the stored suggestions of such a week are shown nowhere: not on the pages,
+the rule's form, a report, nor the digest worked out again. `lapilli
+verdict` judges each firing by the record at its own time, the two weeks
+before it; `serve`, by the week, so that what the rules list and a rule's
+page say of four or twelve weeks is the sum of what the overview says of
+each. With a team picked, and in its digest and reports, by the incidents
+it owns. What keeps the record is read once with the weekly tallies
+(`RecordIncidents`), never from the firings; a report over a span, week by
+week, from the daily tallies. The digest says so once, and, for each rule
+replayed that fired as often as a noisy rule with no record, the ten that
+fired most, works out what those firings were (`verdict.Unrecorded`, kept
+as an `unrecorded` result for the week, said for everyone's record or for a
+team's): of a condition that counts events (`rules.Rule.EventWindow`),
+each is one, a count that went up; of another, how many had the value its
+condition compares go well past its bound, from the rule replayed over the
+week with its one bound a fifth further (a firing of that one overlapping
+it, alike in its labels, went well past it; a condition with no one bound
+that decides it, a range, `and`, `or`, `unless`, says nothing, nor does a
+rule with more than 5,000 such firings); and the alerts that fired most, of
+the 1,000 counted most in one grouped read (`RuleAlerts`), by the labels
+that tell them apart, each with the team whose labels it has, and those
+during deploys. Its reads and replays share the digest's `--timeout`. A
+week whose record is kept since, by an incident written down later, no
+longer shows it; a result kept that doesn't decode is logged and taken as
+none.
 
 **Firings on what a team owns.** The digest also counts each rule's
 firings in the week by the team whose labels they have (the teams'
 labels, the first by name, as a rule's are), from one grouped read of the
-week's firings by alert (`AlertCounts`); a rule most of whose firings, more
+week's firings by alert (`AlertCounts`, the 20,000 alerts that fired most,
+those past them no team's); a rule most of whose firings, more
 than half, came from what another team owns than the one its alerts go to
 (or from a team's, for a rule no team owns) is kept as a `fired_on` result.
 A rule's page, the rules list with a team picked and that team's digest say
