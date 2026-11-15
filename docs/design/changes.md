@@ -641,9 +641,16 @@ The first step, for v0.22.0, as above, except:
     Lapilli proposes of itself; while it replays and isn't read-only. The
     longest unmoved first, three a run at most, and twelve an hour
     (`LapilliBacktestsAnHour`), counted by the ledger on every replica
-    together, as a person's are, each tried as each kept: one that keeps
-    nothing is kept in the changes all the same ("backtest tried again",
-    `ledger.BacktestTried`, said in the proposal's history). One at a time
+    together, as a person's are, each counted once, as it begins: a row
+    kept in the changes just before the replay ("backtest tried again",
+    `ledger.BacktestTried`, the comparison taken), so that one cut short,
+    the process gone or its lease lost, is counted all the same; a kept
+    backtest beside it isn't counted again. The history shows tries in a
+    row that kept nothing as one step, how many and the last, and hides
+    the try a kept backtest began; MCP's `backtested_again` reads the last
+    kept directly (`LastBacktestedAgain`), however many tries came after.
+    Those never begun first, then the one begun longest ago, as the ledger
+    says (`LastTried`), whichever replica began it. One at a time
     under the heavy turn, never waiting for a comparison running (the run
     is over then), each replayed for ten minutes at most (`--timeout` when
     shorter, `autoWithinMost`), the whole of it a minute more: it holds the
@@ -652,12 +659,14 @@ The first step, for v0.22.0, as above, except:
     person's: an incident written down and taken away doesn't make Lapilli
     replay twelve weeks. One that doesn't finish replaces nothing and
     withdraws nothing, and ends the run, so that a history that never
-    answers holds the work for one at most; it, and one it failed to
-    otherwise, is left an hour, then two, four, up to a day, each time it
-    fails again, afresh once the semantics number changes (a replica's own
-    memory: the next leader starts afresh, which the ledger's twelve an
-    hour bounds); one backtested again in the last ten minutes isn't
-    either.
+    answers holds the work for one at most, as does one whose time ran
+    out, whatever error it gave (`againLate`); and it leaves every
+    proposal, not only itself, an hour, then two, four, up to a day, as a
+    history too slow for one is too slow for the rest, afresh once one is
+    kept or the semantics number changes. One it failed to otherwise is
+    left so on its own. Both are a replica's own memory: the next leader
+    starts afresh, which the ledger's twelve an hour bounds. One
+    backtested again in the last ten minutes isn't tried either.
   - **Shown, never decisive.** What a proposal says when read never stops
     a change being carried out: an older version that won't parse, or a
     read that fails, leaves `for_outlasts` as the proposal kept it, and
@@ -667,7 +676,8 @@ The first step, for v0.22.0, as above, except:
     (`flights`) runs under the server's own context, ended as it shuts
     down or is closed, thirty seconds at most, that no reader's leaving
     cancels, two at once; none starts for a reader already gone, and the
-    last two read are kept a minute for the next reader; a panic in it is
+    last four read (`oldVersionsMost`, one read's older versions) are kept
+    a minute for the next reader; a panic in it is
     each reader's error, logged at Error with its stack, and each waits as
     long as its own request does. Every incident ID a pull request's
     description names is a code span of its own, a backtick in it a quote

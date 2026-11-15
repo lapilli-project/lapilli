@@ -67,13 +67,14 @@ string now.
   nor does `--approvals` lowered approve one. With `--changes`, Lapilli
   backtests again itself, as Lapilli, those an earlier lapilli backtested,
   on a run of its work alone (never when a write pokes it): three a run,
-  twelve an hour at most on every replica together, tried or kept, the
-  longest unmoved first, one at a time under the heavy turn, each within
-  ten minutes (`--timeout` when shorter), never waiting for a comparison
-  running. One that doesn't finish replaces nothing, is said in the
-  proposal's history, ends the run, and is left an hour, then two, four,
-  up to a day. A record that changed, or a newer lapilli's, is a
-  person's. An editor backtests one again from its page (`POST
+  twelve an hour at most on every replica together, each counted as it
+  begins, kept or not, the one begun longest ago last, one at a time
+  under the heavy turn, each within ten minutes (`--timeout` when
+  shorter), never waiting for a comparison running. One that doesn't
+  finish replaces nothing, is said in the proposal's history (tries in a
+  row as one line), ends the run, and leaves that proposal, and every
+  other, an hour, then two, four, up to a day, until one is kept. A
+  record that changed, or a newer lapilli's, is a person's. An editor backtests one again from its page (`POST
   /proposals/{id}/backtest`, asked for as a proposal is: the role, from
   this site, and the tries an hour, read again where it is kept), and an
   agent with `--mcp-propose`, through `backtest_again` (destructive, not
