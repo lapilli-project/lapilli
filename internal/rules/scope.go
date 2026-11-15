@@ -44,14 +44,47 @@ var errNoRoom = errors.New("no room")
 
 // scopeWith is Scope, with the matchers written: the expression grows by
 // them at each selector, and past room bytes more (room >= 0), it is given
-// up, errNoRoom, before it is made.
+// up, errNoRoom, before anything is made. What it grows by is worked out
+// first, without writing it (scopeScan), and the expression written into
+// as much: written as it grew, a builder grows a quarter at a time, five
+// times what it holds made by the end.
 func scopeWith(expr, matchers string, room int) (string, error) {
-	var b strings.Builder
-	added := 0 // what the matchers, and the commas before them, are
-	add := func(n int) bool {
-		added += n
-		return room < 0 || added <= room
+	grows, err := scopeScan(expr, matchers, nil)
+	if err != nil {
+		return "", err
 	}
+	if room >= 0 && grows > room {
+		return "", errNoRoom
+	}
+	var b strings.Builder
+	b.Grow(len(expr) + grows)
+	if _, err := scopeScan(expr, matchers, &b); err != nil {
+		return "", err
+	}
+	return b.String(), nil
+}
+
+// scopeOut is what scopeScan writes into; nil, nothing.
+type scopeOut struct{ b *strings.Builder }
+
+func (o scopeOut) byte(c byte) {
+	if o.b != nil {
+		o.b.WriteByte(c)
+	}
+}
+
+func (o scopeOut) str(s string) {
+	if o.b != nil {
+		o.b.WriteString(s)
+	}
+}
+
+// scopeScan reads expr as Scope does, writing it with matchers added into
+// b, unless b is nil, and says how much they add: the matchers, and the
+// commas and brackets around them.
+func scopeScan(expr, matchers string, b *strings.Builder) (int, error) {
+	w := scopeOut{b}
+	added := 0
 	var parens []bool // for each open parenthesis, whether it holds label names
 	listNext := false // a label list's parenthesis comes next
 	i := 0
@@ -70,13 +103,13 @@ func scopeWith(expr, matchers string, room int) (string, error) {
 	}
 	str := func() error { // copy a quoted string
 		q := expr[i]
-		b.WriteByte(q)
+		w.byte(q)
 		for i++; i < len(expr); i++ {
-			b.WriteByte(expr[i])
+			w.byte(expr[i])
 			switch {
 			case expr[i] == '\\' && q != '`' && i+1 < len(expr):
 				i++
-				b.WriteByte(expr[i])
+				w.byte(expr[i])
 			case expr[i] == q:
 				i++
 				return nil
@@ -92,71 +125,69 @@ func scopeWith(expr, matchers string, room int) (string, error) {
 		switch {
 		case c == '"' || c == '\'' || c == '`':
 			if err := str(); err != nil {
-				return "", err
+				return 0, err
 			}
 		case c == '#':
 			for i < len(expr) && expr[i] != '\n' {
-				b.WriteByte(expr[i])
+				w.byte(expr[i])
 				i++
 			}
 		case c == '{':
 			// A selector's matchers: copy them, then add ours.
-			start := b.Len()
-			b.WriteByte(c)
+			open := i
+			w.byte(c)
 			for i++; ; {
 				if i >= len(expr) {
-					return "", errors.New("a { isn't closed")
+					return 0, errors.New("a { isn't closed")
 				}
 				if q := expr[i]; q == '"' || q == '\'' || q == '`' {
 					if err := str(); err != nil {
-						return "", err
+						return 0, err
 					}
 					continue
 				}
 				if expr[i] == '}' {
 					break
 				}
-				b.WriteByte(expr[i])
+				w.byte(expr[i])
 				i++
 			}
-			inner := strings.TrimSpace(b.String()[start+1:])
-			grows := len(matchers)
+			// What is in it is copied as written.
+			inner := strings.TrimSpace(expr[open+1 : i])
+			added += len(matchers)
 			if inner != "" && !strings.HasSuffix(inner, ",") {
-				grows++ // a comma
+				added++
+				w.byte(',')
 			}
-			if !add(grows) {
-				return "", errNoRoom
-			}
-			if grows > len(matchers) {
-				b.WriteByte(',')
-			}
-			b.WriteString(matchers)
-			b.WriteByte('}')
+			w.str(matchers)
+			w.byte('}')
 			i++
 		case c == '[':
 			// A range or a subquery's window and step.
 			end := strings.IndexByte(expr[i:], ']')
 			if end < 0 {
-				return "", errors.New("a [ isn't closed")
+				return 0, errors.New("a [ isn't closed")
 			}
-			b.WriteString(expr[i : i+end+1])
+			w.str(expr[i : i+end+1])
 			i += end + 1
 		case c == '(':
 			parens = append(parens, listNext)
 			listNext = false
-			b.WriteByte(c)
+			w.byte(c)
 			i++
 		case c == ')':
 			if len(parens) == 0 {
-				return "", errors.New("a ) wasn't opened")
+				return 0, errors.New("a ) wasn't opened")
 			}
 			parens = parens[:len(parens)-1]
-			b.WriteByte(c)
+			w.byte(c)
 			i++
 		case c >= '0' && c <= '9' || c == '.':
 			// A number or a duration: 5, 0.5, 1e-3, 0x1f, 5m, 1h30m.
 			start := i
-			hex := strings.HasPrefix(strings.ToLower(expr[i:]), "0x")
+			// Its first two bytes alone: lowering the rest of the
+			// expression at every number took time with its square.
+			hex := expr[i] == '0' && i+1 < len(expr) && expr[i+1]|0x20 == 'x'
 			for i < len(expr) {
 				d := expr[i]
 				alnum := d >= '0' && d <= '9' || d >= 'a' && d <= 'z' || d >= 'A' && d <= 'Z' || d == '.' || d == '_'
@@ -164,7 +195,7 @@ func scopeWith(expr, matchers string, room int) (string, error) {
 				if !alnum && !exp {
 					break
 				}
-				b.WriteByte(d)
+				w.byte(d)
 				i++
 			}
 		case c == '_' || c == ':' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z':
@@ -174,7 +205,7 @@ func scopeWith(expr, matchers string, room int) (string, error) {
 				j++
 			}
 			word := expr[i:j]
-			b.WriteString(word)
+			w.str(word)
 			i = j
 			lower := strings.ToLower(word)
 			after := next()
@@ -188,22 +219,20 @@ func scopeWith(expr, matchers string, room int) (string, error) {
 			case nextWord(expr[i:]) == "by" || nextWord(expr[i:]) == "without":
 				// sum by (...) (...), sum without (...) (...)
 			case after != '{':
-				if !add(len(matchers) + len("{}")) {
-					return "", errNoRoom
-				}
-				b.WriteByte('{')
-				b.WriteString(matchers)
-				b.WriteByte('}')
+				added += len(matchers) + len("{}")
+				w.byte('{')
+				w.str(matchers)
+				w.byte('}')
 			}
 		default:
-			b.WriteByte(c)
+			w.byte(c)
 			i++
 		}
 	}
 	if len(parens) > 0 {
-		return "", fmt.Errorf("%d ( not closed", len(parens))
+		return 0, fmt.Errorf("%d ( not closed", len(parens))
 	}
-	return b.String(), nil
+	return added, nil
 }
 
 // nextWord is the word s starts with, after spaces, in lower case.
