@@ -72,7 +72,7 @@ The pages are in four groups, each named, not a link:
 | See | Overview `/`, Rules `/rules`, Incidents `/incidents`, Firings `/firings` |
 | Fix | Tasks `/tasks`, Proposals `/proposals`, Quiet windows `/windows` |
 | Report | Reports `/reports`, Outcomes `/outcomes` |
-| Manage | Teams `/teams`, Roles `/roles`, Settings `/settings`, Runs `/runs` |
+| Manage | Teams `/teams`, Roles `/roles`, Settings `/settings`, Runs `/runs`, Orphans `/orphans` |
 
 Roles is listed for admins, who alone may open it. A group's name isn't a
 link, but Manage's, which goes to `/manage`, the page of its own (below),
@@ -829,9 +829,66 @@ nothing.
 (their recipients and the weekly digest), each with a line on what it is
 for and, where cheap, a fact (how many teams, how many reports, how far
 the firings are in): Teams, Roles (admins only, as in the sidebar),
-Settings, Runs, Reports, and where notices go (below, "First use"). The
-sidebar's Manage links to it, and the breadcrumbs of its pages start with
-it.
+Settings, Runs, Reports, Orphans, and where notices go (below, "First
+use"). The sidebar's Manage links to it, and the breadcrumbs of its pages
+start with it. When `--config` can't be used, the Settings card says so.
+
+### What `--config` declares
+
+A team, a quiet window, a report or a role that `--config` declares
+(serveops.md, "Declared configuration") is changed in the file alone. The
+Teams, Quiet windows, Reports and Roles pages, and a window's and a
+report's own, mark it with a badge, "declared", beside its name, as a
+rule's badges are drawn. Each action on it is drawn with the `off`
+template, never hidden: on a list, the row's "Change" or "Take it away"
+is the button disabled, tied (`again`) to one sentence above the table,
+"Declared in config — change it in values"; on its own page, or its form
+asked for (`/teams?edit=ID`, `/reports?edit=ID`), "Change it" disabled
+with that sentence beside it, in place of the form and its delete. A
+reader who couldn't change it anyway sees the sentence, as a line, and
+none of the buttons. The server refuses the write all the same, every
+path, with 409.
+
+The Settings page has a section, "Declared configuration": where the file
+is, what becomes of what it no longer declares (`--config-prune`), when
+the ledger was last kept to it and the start of its hash, and, when the
+file can't be used, why, with its line, in the reader's language (the
+Runs page says it too). Beside `settings.yaml`, `config.yaml` (an
+admin's) gives everything as `--config` takes it. The Teams page lists
+teams a ledger kept from before whose names differ only in letter case,
+to be renamed.
+
+### Orphans
+
+`/orphans`, under Manage: a rule deleted or renamed leaves its note, its
+tasks, the comments on it and its proposals not finished with under a
+name no rule in effect has, which no list shows. Argo CD lists resources
+no application owns as orphaned; this lists the names the ledger keeps
+something of that the latest version of the rules doesn't have, in byte
+order, a hundred a page ("1 to 100 of 3,000 names"), with what each kept:
+whether a note, its tasks and how many are open, its comments, and its
+proposals, each linked. An editor moves what a name kept to a rule in
+effect, typed or picked from a `<datalist>` of the rules in effect (2,000
+at most: past them, typed), for a rename (`POST /orphans/move`), or
+deletes it (`POST /orphans/delete`); each is noted in the activity log,
+by who did it. Moved, its tasks and comments are the rule's; its note too,
+or, when the rule has one, what the rule's leaves empty is filled from
+it. Its proposals stay, each made against the rule as it was: they are
+listed with their links, to be dropped on their pages, and a name that
+keeps nothing else says so. `/proposals?stale=1` doesn't list them: it
+lists those waiting for approval that are stale for any reason, a rule
+changed or a backtest from another lapilli among them, and not those
+approved or being applied. A name in effect isn't moved, nor to a name
+none has (400). A viewer sees the buttons disabled, why said once above
+the table.
+
+The names are read one at a time, in order, from the four tables at once
+(`ledger.KeptNames`): each counted, the page's kept, the rest let go; the
+page's are then counted (`ledger.KeptOf`, four reads of a hundred names).
+At 4,000 rules in effect and 3,000 names gone (`TestOrphansScale`), the
+page allocates some 30 MB, the 4,000 names in effect the most of it. Before
+a version of the rules is recorded, the page says it can't tell which
+names are gone.
 
 ### What they cost
 

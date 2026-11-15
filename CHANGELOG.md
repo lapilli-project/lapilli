@@ -2,6 +2,63 @@
 
 ## [Unreleased]
 
+Teams, quiet windows, reports and the editor roles admins give were the
+ledger's alone, made in the UI, so a team that runs everything through Git
+couldn't review, restore or copy them; rules deleted or renamed left notes,
+tasks, comments and proposals no list showed; and a proposal nobody
+approved held its rule for good. Schema 019: upgrading needs nothing, a
+ledger whose teams' names differ only in letter case included.
+
+### Added
+
+- **Declared configuration.** `lapilli serve --config FILE`
+  (`serve.config` in the chart, rendered into a ConfigMap) is YAML of
+  `teams`, `windows` (quiet windows: once, every day, week or month, or by
+  cron, a team's or everyone's), `reports` (when, for whom, what each
+  holds, where it goes) and `grants` (an editor's role, of every team or of
+  one), with the fields the UI's forms take. It is read strictly: a key it
+  doesn't know, a value of another kind, a key given twice or a file over
+  1 MiB is refused with its line, and each thing is checked as its form is,
+  with the same limits. The leader keeps the ledger holding what it says,
+  in one write, all or nothing: as it starts to lead, and whenever the
+  file's content changes, read and hashed every 15 seconds, as Kubernetes
+  swaps a ConfigMap's files through a link; no restart. Each is matched by
+  its name, a team's in any letter case, a quiet window's by its title;
+  what the UI made under that name is taken over. Each change is noted in
+  the activity log by `config`. A file that can't be used changes nothing:
+  the ledger keeps what the last good one declared, and the Settings, Runs
+  and Manage pages say why, with the line, in the reader's language. With
+  several replicas, only the leader writes it, fenced by its lease.
+- **What is declared is read-only.** The UI marks it "declared" and draws
+  its actions disabled, "Declared in config — change it in values" beside
+  them; the ledger refuses every write to it, from the forms, the API or
+  anywhere, 409, and a team it names isn't deleted.
+- **What it no longer declares** is the UI's again, as it was, or, with
+  `--config-prune` (`serve.configPrune`), deleted. Without `--config`,
+  nothing stays declared.
+- **`GET /config.yaml`**, an admin's: every team, quiet window, report and
+  role the ledger holds, declared and made in the UI alike, as `--config`
+  takes them, linked from the Settings page beside `settings.yaml`. Read
+  back, it changes nothing but that what it holds is declared.
+- **Orphans** (`/orphans`, under Manage): the names no rule in effect has
+  that the ledger keeps a note, tasks, comments or proposals not finished
+  with of, a hundred a page. An editor moves what one kept to a rule in
+  effect, for a rename, or deletes it, each noted; its proposals are
+  listed, to be dropped on their pages. At 4,000 rules and 3,000 names
+  gone, the page reads the names one at a time.
+- **`--proposals-expire DURATION`** (`serve.proposalsExpire`), off by
+  default: a proposal that waited for approval longer is closed as
+  `expired` by the leader's work, noted in its history and the activity
+  log, and its rule takes another; its page says when it would.
+
+### Changed
+
+- **A team's name is unique in any letter case**, for new and renamed
+  teams, from the UI, the API and `--config`. Teams a ledger already holds
+  whose names differ only in case are kept and listed on the Teams page,
+  to be renamed; each can be changed but for its name.
+- Lapilli doesn't propose again by itself a change that expired.
+
 ## [0.43.0] - 2026-11-16
 
 A deployment upgraded to 0.41.0 had a proposal 0.40 made still waiting:
