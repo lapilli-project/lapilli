@@ -389,53 +389,89 @@ in the namespaces or rule groups of one ruler. It is held so:
     a namespace with a group of more than 100,000 values is passed over, as
     one that can't be read is (so is one written whole, in flow style, of
     more), and past 50,000 rules as read none is. An Amazon namespace holds
-    a rule file someone wrote, whose aliases are read, what they expand to
-    counted for every namespace together, as yaml.v3 counts one document's.
+    a rule file someone wrote, whose aliases are read: what they expand to
+    is counted for the namespace, as yaml.v3 counts one document's, and
+    what they make, with the rest, for every namespace together (below).
     Each group is written out again on its own (the YAML emitter holds every
     event of what it writes until it ends), as the whole would be, and a
     document's nodes are let go of as they are decoded. Before 0.34.1 a
     hostile ruler's 4 MB of tiny rules took over a GB; 132 MiB now. A unit,
     and a cloud's alarm, are decoded in linear time too.
   - What rules make beyond their own text, however they make it, is
-    bounded for the whole input they are read from (`rules.madeLimit`): a
-    file, a directory's files, a stream, a ConfigMap's files, a ruler's
-    namespaces together, a version's documents in the ledger. It is the
-    larger of 4 MiB and 16 times the input's size, and 256 MiB at most
+    bounded for the input they are read from (`rules.madeLimit`): a file, a
+    directory's files, a stream, a ConfigMap's files, a ruler's namespace,
+    the documents of one source in a version kept in the ledger. It is the
+    larger of 4 MiB and 32 times the input's size, and 256 MiB at most
     (`ExpandMin`, `ExpandTimes`, `MaxMade`), charged where a copy is made,
     before it is made:
-    - the text YAML aliases bring in again, values and keys, judged
-      against the whole input's size (yaml.v3's own bound counts values,
-      not their text);
-    - a group's labels on each of its rules, worked out once for the
-      group, the map and its text (`labelsCost`, no less than what Go
-      allocates for a copy): a recording rule has a copy of its own, and an
-      alert rule's alerts carry them (`AlertLabels`, `Whole`, the replay's
-      identity and firings), worked out for each rule wherever it is
-      judged, shown or hashed, so that what is charged when the rules are
-      read bounds each of those passes too;
+    - what YAML aliases bring in again: the text of the values and keys,
+      and 64 bytes each for the map or list entry and the interface it is
+      held in (`aliasValue`), judged against the whole input's size
+      (yaml.v3's own bound counts values, not their text or what holds
+      them);
+    - a group's labels and its name on each of its rules, worked out once
+      for the group, the map and its text (`labelsCost`, a third more than
+      Go allocates for a copy): a recording rule has a copy of the labels
+      of its own, and an alert rule's alerts carry them, its key holds the
+      name (`AlertLabels`, `Key`, `Whole`, the replay's identity and
+      firings), worked out for each rule wherever it is judged, shown or
+      hashed, so that what is charged when the rules are read bounds each
+      of those passes too; so a Grafana group's name and folder, a rules
+      API's group's name, a Google policy's name on its conditions, and a
+      ruler's namespace on its rules;
     - a Google Rules' namespace and an Azure rule group's cluster, put
-      into each selector of each rule's expression: it is scoped with the
-      room the input has left, and given up before it grows past it.
+      into each selector of each rule's expression: what the expression
+      grows by is worked out first, without writing it, and it is refused,
+      or written into as much at once (written as it grew, a builder grew
+      a quarter at a time, five times its room made by a refusal);
+    - a document picked out of a stream and written afresh (a List some of
+      whose items are left out), its aliases in full, which is what is
+      kept: what it is written in, worked out first, no less than what
+      yaml.Marshal writes (`emitted`).
+
+    A ConfigMap's value is read as rules once in an input, known by where
+    its text is: only an alias makes one value two keys', and one read
+    again is refused, as a ConfigMap the API server keeps holds no alias.
+    Inputs read together are bounded together (`rules.Together`): a ruler's
+    namespaces, each an input of its own so one can't use up another's
+    bound and have it passed over in its place, and the sources of a
+    version read again from the ledger, each read as it was read (a
+    `Namespace`'s document on its own, the others by source); what they
+    make in all, refused ones' and files passed over's among it, is never
+    given back and 256 MiB at most, past which the read fails whole
+    (`rules.OverTotal`) and the version in effect stays.
 
     Why there: the copies were made for each rule before any check could
-    look at the rules (a namespace of 40 KB in a Rules of 99 KB made
-    6.5 GB, a group of 9,999 labels on 6,700 recording rules in a file of
-    286 KB 4.2 GB), and a check of the rules once read takes time for each
-    rule times its group's labels; charged where they are made, a refusal
-    comes at the rule that crosses the line, in time of the input's bytes.
-    For the input, not each document: 200 documents of 21 KB, each within
-    4 MiB alone, made 1.9 GB together. A group's labels are looked through
-    once to be shown, its rules sharing what is shown. No label is capped:
-    Prometheus takes a label of any length, and a version kept in the
-    ledger may hold one. Past the bound, a `MadeError` names what made it,
-    and it is never passed over as a rule file that doesn't read may be: a
-    ConfigMap's file so refused is an error naming its key, and a ruler's
-    namespace is passed over saying why, what it counted given back, so
-    the namespaces after it read as they would without it. Real sets are
-    far inside it: kube-prometheus-stack's rules four times over, each
-    group with labels of its own, make 1.5 MB of the 100 MB they may;
-    5,000 rules sharing a group's 300 bytes of labels and 800 of
-    annotations by an alias, 6.8 MB of 16.8.
+    look at the rules (a namespace of 40 KB in a Rules of 99 KB made 6.5
+    GB, a group of 9,999 labels on 6,700 recording rules in a file of 286
+    KB 4.2 GB, a group's name of 1 MiB on 1,000 rules 1.07 GB), and a check
+    of the rules once read takes time for each rule times its group's
+    labels; charged where they are made, a refusal comes at the rule that
+    crosses the line, in time of the input's bytes. For the input, not each
+    document: 200 documents of 21 KB, each within 4 MiB alone, made 1.9 GB
+    together. Thirty-two times, not sixteen: a file sharing six labels and
+    three annotations among each of its rules by YAML anchors makes some 16
+    times its size. No label or name is capped: Prometheus takes them of
+    any length, and a version kept in the ledger may hold one. Past the
+    bound, a `MadeError` names what made it, and it is never passed over as
+    a rule file that doesn't read may be: a ConfigMap's file so refused is
+    an error naming its key, as is one Lapilli's reader refuses though
+    yaml.v3 decodes it (only a value yaml.v3 can't decode isn't YAML), and
+    a ruler's namespace is passed over saying why. Real sets are far inside
+    it: kube-prometheus-stack's rules four times over, each group with
+    labels of its own, make 1.8 MB of the 208 MB they may; 5,000 rules
+    sharing six labels and three annotations by aliases, 10.4 MB of 20.
+  - A replayed rule's firings carry a copy of its labels with each series'
+    own: what those take, 96 bytes a label, is held to what a range's
+    samples are (`--max-samples`, 64 bytes a sample), past which the rule
+    isn't replayed, saying why. A rule of 9,999 labels on 1,000 series made
+    1.3 GB.
+  - What is still multiplied: each bound is a version's or a request's.
+    lapilli serve holds every version of the rules in a window at once
+    (`Server.versions`) and keeps the rules of up to 128 versions read, and
+    each request that works out every rule's labels makes them again at
+    once with others: what one version may make is multiplied by those. A
+    bound on all of them is serve's to keep, not the reader's.
   - What a ruler answers with an error is said without the token or the
     signature it was asked with, which it may echo, as a history API's
     errors are (`prom.Redact`).

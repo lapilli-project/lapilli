@@ -25,8 +25,9 @@ func bomb(size, n int) string {
 
 // TestAliasText: what aliases bring in again is bounded by its text, not
 // only by how many values it is, for the whole input, with what else it
-// makes (madeLimit): an 8 MB string aliased by 300 rules (2.4 GB of labels,
-// which yaml.v3's count of values lets through) is refused at once, as is
+// makes (madeLimit): an 8 MB string aliased by 300 rules (2.4 GB of labels'
+// text, which yaml.v3's count of values lets through; by 100, parsed and
+// hashed, it made 5.1 GB) is refused at once, as is
 // a 1 MB key aliased 40 times, each naming the alias. Labels and
 // annotations shared by an alias, an anchor near the top of a file, and a
 // big value aliased twice, read as before.
