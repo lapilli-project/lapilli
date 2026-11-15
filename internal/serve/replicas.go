@@ -44,6 +44,11 @@ func (s *Server) lead(ctx context.Context, failed chan<- error) {
 			s.log.Error("reading the on-call turns kept", "err", err)
 		}
 	}
+	// The ledger kept to --config before anything else, and then as the
+	// file changes.
+	if err := s.reconcileConfig(ctx); err != nil && !steppingDown(ctx, err) {
+		s.fail("keeping the ledger to --config", err)
+	}
 	// The rules are read before the first run, which replays them.
 	raw := ""
 	if s.replaying() {
@@ -52,10 +57,14 @@ func (s *Server) lead(ctx context.Context, failed chan<- error) {
 		}
 	}
 	var wg sync.WaitGroup
-	wg.Add(1)
+	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		s.work(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		s.watchConfig(ctx)
 	}()
 	if s.replaying() {
 		wg.Add(1)
@@ -200,6 +209,8 @@ type sharedStatus struct {
 	CheckEmpty []string              `json:"check_empty,omitempty"`
 	CheckDay   time.Time             `json:"check_day,omitzero"`
 	OnCall     map[string]onCallRead `json:"on_call,omitempty"`
+	// Config is what the leader last made of --config.
+	Config *configShown `json:"config,omitempty"`
 }
 
 // ownStatus is this replica's status, as it would say it.
@@ -217,6 +228,7 @@ func (s *Server) ownStatus() sharedStatus {
 			st.OnCall[v.Name] = v
 		}
 	}
+	st.Config = s.configShown()
 	return st
 }
 

@@ -244,6 +244,17 @@ type Config struct {
 	// RulerTransport carries the ruler's and the alarms' requests: nil but
 	// in tests.
 	RulerTransport http.RoundTripper
+
+	// Config is a YAML file declaring teams, quiet windows, reports and
+	// roles (docs/design/serveops.md), which the ledger is kept holding,
+	// read again as it changes; what it declares the UI doesn't change.
+	// ConfigPrune deletes what it no longer declares, which is otherwise
+	// the UI's again.
+	Config      string
+	ConfigPrune bool
+	// ProposalsExpire closes a proposal that waited for approval longer
+	// (docs/design/changes.md): 0 for never.
+	ProposalsExpire time.Duration
 }
 
 // AlarmsAt is an --alarms: the source a cloud's alarms are named by, and
@@ -332,6 +343,11 @@ type Server struct {
 	// againFailed are the stale proposals Lapilli failed to backtest again
 	// itself (backtestStale).
 	againFailed againFailed
+	// config is what the leader last made of --config.
+	config configState
+	// wall is the clock proposals are made and expire by: time.Now but in
+	// tests.
+	wall func() time.Time
 	// heavy is the one turn there is for a request that takes hundreds of
 	// megabytes: every firing of a month, the settings tried over a week.
 	heavy chan struct{}
@@ -471,7 +487,7 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{cfg: cfg, h: h, l: l, log: log, now: time.Now, wake: make(chan struct{}, 1), boot: strconv.FormatInt(time.Now().UnixNano(), 36),
+	s := &Server{cfg: cfg, h: h, l: l, log: log, now: time.Now, wall: time.Now, wake: make(chan struct{}, 1), boot: strconv.FormatInt(time.Now().UnixNano(), 36),
 		heavy: make(chan struct{}, 1), renders: make(chan struct{}, pageRenders), tokenRate: &limiter{rate: 20, burst: 40}, tokenBusy: make(chan struct{}, 1),
 		// A job sends a source's firings a period at a time, an hour or a
 		// day apart: twenty at once for a first copy of the cloud's months,

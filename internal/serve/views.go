@@ -1588,6 +1588,8 @@ type settingsView struct {
 	Changes  []ledger.Change
 	Try      *tryView
 	Notify   *notifyStatus `json:"-"` // the page's alone
+	// Config is what the leader last made of --config; nil without it.
+	Config *configShown `json:"config,omitempty"`
 }
 
 func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
@@ -1607,6 +1609,7 @@ func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
 		}
 		v.Settings = append(v.Settings, x)
 	}
+	v.Config = s.shownStatus().Config
 	cs, err := s.l.Changes(ctx, 100)
 	if err != nil {
 		return v, err
@@ -1755,6 +1758,8 @@ type runsView struct {
 	Stopped []string
 	// OnCall are the on-call schedules, as each was last read.
 	OnCall []onCallRead
+	// Config is what the leader last made of --config.
+	Config *configShown
 }
 
 // runsCheck is how far the replay has been set beside what really fired,
@@ -1792,7 +1797,7 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 	}
 	// The leader's, on a replica that follows.
 	st := s.shownStatus()
-	v := runsView{runs, cs, cursor, st.Runs, st.Took, srcs, s.cfg.FiringsToken != "", nil, nil, s.onCallShown(st)}
+	v := runsView{runs, cs, cursor, st.Runs, st.Took, srcs, s.cfg.FiringsToken != "", nil, nil, s.onCallShown(st), st.Config}
 	if v.Stopped, err = s.stoppedReports(r.Context()); err != nil {
 		return nil, err
 	}

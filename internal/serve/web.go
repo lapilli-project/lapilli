@@ -123,6 +123,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /firings", page("firings", s.firingsPage))
 	mux.HandleFunc("GET /settings", page("settings", s.settingsPage))
 	mux.HandleFunc("GET /settings.yaml", s.settingsYAML)
+	mux.HandleFunc("GET /config.yaml", s.configYAML)
 	mux.HandleFunc("GET /runs", page("runs", s.runsPage))
 	mux.HandleFunc("GET /manage", page("manage", s.managePage))
 	mux.HandleFunc("GET /outcomes", page("outcomes", s.outcomesPage))
@@ -774,6 +775,11 @@ type cached struct {
 func (s *Server) tag() string {
 	shown := s.shownStatus()
 	st := fmt.Sprintf("%s|%v|%s|%.2f", shown.Doing, shown.Args, shown.Err, shown.Judged)
+	// What --config came to, which the ledger doesn't keep when the file
+	// can't be used.
+	if c := shown.Config; c != nil {
+		st += "|" + c.Hash + "|" + c.ErrText("en")
+	}
 	// The file that pauses changes can come and go at any time.
 	if s.cfg.Changes && s.changesPaused() {
 		st += "|paused"

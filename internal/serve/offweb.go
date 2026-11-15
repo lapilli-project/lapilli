@@ -41,6 +41,11 @@ var offFuncs = template.FuncMap{
 		a.Again = true
 		return a
 	},
+	// offDeclared is an action on what --config declares: changed in the
+	// file alone (docs/design/serveops.md).
+	"offDeclared": func(label, id string) pageAction {
+		return pageAction{Label: label, ID: id, Why: declaredWhy}
+	},
 	// offWhy is an action no one may take here, for why.
 	"offWhy": func(label, id, why string) pageAction {
 		return pageAction{Label: label, ID: id, Why: why}
@@ -65,6 +70,9 @@ var offFuncs = template.FuncMap{
 		return a
 	},
 }
+
+// declaredWhy is why what --config declares isn't changed in the UI.
+const declaredWhy = "Declared in config — change it in values"
 
 // offs are a proposal's actions its reader may not take, each with why, as
 // the handler that takes it allows: approving it and asking for it to be

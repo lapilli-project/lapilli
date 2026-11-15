@@ -195,6 +195,16 @@ The web UI and API:
                       only behind a proxy that sets it and strips it from
                       callers
   --read-only         take no changes through the UI or API
+  --config FILE       a YAML file declaring teams, quiet windows (windows),
+                      reports and roles (grants), as the UI's forms make
+                      them, which the ledger is kept holding: at start, and
+                      whenever its content changes, read again every 15s.
+                      What it declares the UI shows and doesn't change; GET
+                      /config.yaml gives what the ledger holds in its form.
+                      A file that can't be used changes nothing, and the
+                      Settings and Runs pages say why (docs/design/serveops.md)
+  --config-prune      delete what --config no longer declares; without it,
+                      that is the UI's again
   --team-labels LIST  the labels whose values the Teams page suggests as
                       teams, when the rules carry values no team owns by,
                       comma-separated (default team,owner,squad)
@@ -445,6 +455,10 @@ and proposes; docs/design/changes.md):
   --changes-paused FILE
                       while this file is there, nothing is carried out or
                       handed out; an admin can also pause changes in the UI
+  --proposals-expire DURATION
+                      close a proposal that waited for approval longer, such
+                      as 30d, as expired, so its rule takes another; 0, the
+                      default, keeps it waiting
 
 Agents, over MCP at /mcp:
   --mcp-compare editors|admins
@@ -682,6 +696,16 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			cfg.UserHeader = val
 		case "--read-only":
 			cfg.ReadOnly = val == "true"
+		case "--config":
+			cfg.Config = val
+		case "--config-prune":
+			cfg.ConfigPrune = val == "true"
+		case "--proposals-expire":
+			if val == "0" {
+				cfg.ProposalsExpire = 0
+				break
+			}
+			cfg.ProposalsExpire, err = dur(time.Hour)
 		case "--everyone-admin":
 			cfg.EveryoneAdmin = val == "true"
 		case "--editors":
@@ -943,6 +967,18 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--deploy-before and --deploy-after go with --deploys, the file deploys are read from")
 	case cfg.MCPCompare != "" && len(cfg.Editors)+len(cfg.Admins) == 0:
 		err = fmt.Errorf("--mcp-compare needs --editors or --admins: without roles, whoever may change anything is an admin, and anyone who reaches /mcp could run PromQL with lapilli's access")
+	case cfg.ConfigPrune && cfg.Config == "":
+		err = fmt.Errorf("--config-prune deletes what --config no longer declares: give --config")
+	case cfg.Config != "" && cfg.ReadOnly:
+		err = fmt.Errorf("--config is kept in the ledger, and --read-only refuses writes")
+	case cfg.ProposalsExpire > 0 && cfg.ReadOnly:
+		err = fmt.Errorf("--proposals-expire closes proposals in the ledger, and --read-only refuses writes")
+	case cfg.Config != "":
+		// Read now, to say at once what is wrong with it; read again, and
+		// kept to, once serve runs.
+		if _, _, cerr := serve.ReadConfig(cfg.Config, f.loc); cerr != nil {
+			err = fmt.Errorf("--config %s: %w", cfg.Config, cerr)
+		}
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "lapilli serve: %v\nRun \"lapilli serve -h\" for the options.\n", err)

@@ -13,6 +13,14 @@
 {{if not $ro}}</form>{{end}}
 <p class="quiet"><code>--lead</code>: {{t "how long before an incident a firing still catches it."}} <code>--match</code>: {{t "labels a firing and an incident must agree on; none for no labels."}} <code>--refire</code>: {{t "how soon after resolving a firing counts as refired."}} {{t "A rule is noisy when it fired --noisy-firings times or more and under --noisy-precision of them caught anything."}}</p>
 
+<h2 id="config">{{t "Declared configuration"}}</h2>
+{{with .Config}}
+<p>{{tbdi "Teams, quiet windows, reports and roles are declared in %s: serve.config in the Helm chart's values. What it declares is changed there alone." .File}} {{if .Prune}}{{t "What it no longer declares is deleted (--config-prune)."}}{{else}}{{t "What it no longer declares is the UI's again; with --config-prune, it is deleted."}}{{end}}</p>
+{{if .Applied.IsZero}}<p class="quiet">{{t "Not kept to it yet."}}</p>{{else}}<p class="quiet">{{t "The ledger is kept to it as of %s, the file's hash beginning %s." (at $loc .Applied) .Hash}}</p>{{end}}
+{{with .ErrText $.Lang}}<p class="warn" role="status"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "The file can't be used, so nothing in it was kept, and the ledger keeps what it last declared: %s" .}}</p>{{end}}
+{{else}}<p>{{t "Nothing is declared: lapilli serve was started without --config, so teams, quiet windows, reports and roles are made here, in the UI."}}</p>{{end}}
+<p>{{if $.Status.Admin}}<a href="/config.yaml">config.yaml</a> {{t "gives them all, declared and made here alike, as --config takes them, to commit."}}{{else}}{{t "An admin can have them all as --config takes them, from config.yaml."}}{{end}}</p>
+
 <h2>{{t "Changes to the rules"}}</h2>
 <p>{{if not $.Status.ChangesOn}}{{t "Off: proposals are kept, and nothing is applied. Turned on with --changes."}}{{else if $.Status.ChangesPaused}}{{t "On, and paused."}}{{else}}{{t "On."}}{{end}} <a href="{{$.Link "/proposals"}}">{{t "Proposals"}}</a></p>
 {{if and $.Status.ChangesOn $.Status.Admin}}<form method="post" action="/settings/changes">{{if $.Status.ChangesPaused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>{{else if $.Status.ChangesOn}}<p>{{if $.Status.ChangesPaused}}{{template "off" (offOf $ "Resume changes" "admin" "pause-why")}}{{else}}{{template "off" (offOf $ "Pause changes" "admin" "pause-why")}}{{end}}</p>{{end}}
@@ -38,6 +46,7 @@
 {{define "runs"}}{{$title := t "Runs"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
 <h1>{{$title}}</h1>
 <p class="lede">{{t "Firings are in up to %s." (at $loc .Cursor)}}{{with .Took}} {{t "The last run took %s." (dur .)}}{{end}}</p>
+{{with .Config}}{{with .ErrText $.Lang}}<p class="warn" role="status"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "--config can't be used, so the ledger keeps what it last declared: %s" .}} <a href="{{$.Link "/settings#config"}}">{{t "Settings"}}</a></p>{{end}}{{end}}
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Kind"}}</th><th scope="col">{{t "Started"}}</th><th scope="col">{{t "Period"}}</th><th scope="col" class="n">{{t "Firings"}}</th><th scope="col">{{t "Not replayed"}}</th><th scope="col">{{t "Error"}}</th></tr></thead>
 <tbody>{{range .Runs}}
