@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-11-15
+
 What docs/design/ui.md left for later phases: a proposal for the rules
 picked on the rules list, and a rule's labels as chips on its row; the
 rules table made to fit a laptop's screen; and every disabled action drawn
