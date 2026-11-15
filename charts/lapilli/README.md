@@ -246,6 +246,48 @@ is killed, another leads within some 17 seconds; when it stops, within 2.
   the ServiceMonitor scrapes each pod. What the leader's work counts
   (`lapilli_serve_runs_total`, notices sent) is in its pod's alone.
 
+### Teams, quiet windows, reports and roles in Git
+
+```yaml
+serve:
+  config:
+    teams:
+      - {name: payments, rules: ^Checkout, labels: {team: payments}, tz: Asia/Seoul}
+    windows:
+      - {title: Nightly backup, team: payments, start: "2026-11-02T02:00", end: "2026-11-02T03:00", every: day, rules: ^Backup}
+    reports:
+      - {name: payments weekly, team: payments, schedule: weekly mon@09:00, dests: [team:payments]}
+    grants:
+      - {group: payments-oncall, team: payments}
+  configPrune: false
+  proposalsExpire: 30d
+```
+
+`serve.config` declares teams, quiet windows (`windows`), reports and the
+editor roles admins give (`grants`), each with the fields the UI's form for
+it takes (`values.yaml` lists them all), rather than having them made in
+the UI. The chart renders it into a ConfigMap, `FULLNAME-config`, mounted
+as a directory and passed as `--config`; lapilli keeps the ledger holding
+what it says when it starts, and again whenever the file changes, without a
+restart: the kubelet updates the file within a minute or so, and lapilli
+reads it every 15 seconds. With several replicas, the leader alone writes
+it, in one transaction. Each is matched by its name (a team's in any letter
+case, a quiet window's by its title); what the UI made under that name is
+taken over. What `serve.config` declares is marked declared in the UI,
+which doesn't change or delete it, nor does the API: change it here. Taken
+out of `serve.config`, a thing is the UI's again, as it was, unless
+`serve.configPrune` deletes it. A file that can't be used (a key it
+doesn't know, a report to a destination nothing names, a team that isn't
+there) changes nothing: the Settings and Runs pages say why, with the line,
+and the ledger keeps what the file last declared. An admin's `/config.yaml`
+gives everything the ledger holds in this form, declared and made in the
+UI alike, to paste under `serve.config`. Quote what YAML would read as
+something else: `"23:00-07:00"`, a label's value `"1.10"`.
+
+`serve.proposalsExpire` closes a proposal that waited for approval longer,
+such as `30d`, as expired, so its rule can have another. Empty, the
+default, keeps it waiting however long.
+
 ## Who people are
 
 

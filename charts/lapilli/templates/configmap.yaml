@@ -24,3 +24,17 @@ data:
   follow.sh: |
     {{- .Files.Get "files/versions-follow.sh" | trimSuffix "\n" | nindent 4 }}
 {{- end }}
+{{- if and (eq .Values.mode "serve") .Values.serve.config }}
+---
+# What serve.config declares (docs/design/serveops.md): read again as it
+# changes, through the file the kubelet swaps in place.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lapilli.fullname" . }}-config
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- toYaml .Values.serve.config | nindent 4 }}
+{{- end }}
