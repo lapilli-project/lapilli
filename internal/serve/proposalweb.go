@@ -278,6 +278,9 @@ type proposalStep struct {
 	Version   string
 	Agent     bool
 	Withdrawn []string
+	// Tries is, of Lapilli's tries in a row that kept nothing, how many:
+	// one step, at the last.
+	Tries int
 }
 
 // stepsMost is how many of a proposal's steps its page reads, the latest.
@@ -315,7 +318,7 @@ func (s *Server) stepsOf(r *http.Request, p ledger.Proposal) (steps []proposalSt
 	steps = append(steps, proposalStep{At: p.Made, By: p.MadeBy, Kind: "made"})
 	prefix := fmt.Sprintf("proposal #%d ", p.ID)
 	approved, made := false, false
-	for _, c := range cs {
+	for k, c := range cs {
 		what := strings.TrimPrefix(c.What, prefix)
 		st := proposalStep{At: c.At, By: c.By}
 		var before, after stepFields
@@ -332,7 +335,18 @@ func (s *Server) stepsOf(r *http.Request, p ledger.Proposal) (steps []proposalSt
 			made = true
 			continue // from the proposal itself
 		case what == "backtest tried again":
-			st.Kind, st.Reason = "tried", after.Reason
+			// Lapilli began to backtest it again: kept, the step after it
+			// says so; else tries in a row are one step, how many, and
+			// the last.
+			if k+1 < len(cs) && cs[k+1].What == prefix+"backtested again" && cs[k+1].By == c.By {
+				continue
+			}
+			if n := len(steps); n > 0 && steps[n-1].Kind == "tried" && steps[n-1].By == c.By {
+				steps[n-1].At = c.At
+				steps[n-1].Tries++
+				continue
+			}
+			st.Kind, st.Tries = "tried", 1
 		case what == "backtested again":
 			st.Kind, st.Was, st.Version, st.Agent, st.Withdrawn = "backtest", before.Backtest, after.Version, after.Agent, after.Withdrawn
 		case what == "approved" && !moved:

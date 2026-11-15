@@ -1616,5 +1616,6 @@
  "it was backtested again less than ten minutes ago: try again in a few minutes": "10 分以内にバックテストをやり直したばかりです。数分後にもう一度試してください",
  "backtesting stale proposals again": "古い提案のバックテストのやり直し",
  "it was backtested by lapilli %s, which replays or judges as a newer lapilli does: approve it once this one is as new, or backtest it again here": "lapilli %s がバックテストしましたが、より新しい lapilli の再生・判定方式です。この lapilli が同じく新しくなってから承認するか、ここでバックテストをやり直してください",
- "%s ran its backtest again and kept nothing of it": "%s がバックテストをやり直しましたが、何も残しませんでした"
+ "%s ran its backtest again and kept nothing of it": "%s がバックテストをやり直しましたが、何も残しませんでした",
+ "%s ran its backtest again %d times in a row and kept nothing of it, the last at the time shown": "%[1]s が %[2]d 回続けてバックテストをやり直しましたが、何も残しませんでした（最後は表示の時刻）"
 }

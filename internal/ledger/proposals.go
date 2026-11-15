@@ -618,16 +618,21 @@ var ErrBacktestedJustNow = errors.New("it was backtested again less than ten min
 // MayBacktestAgain says whether BacktestAgain would refuse a proposal
 // backtested again by a person, or an agent acting for them, now: asked
 // before the work (the rules read again, twelve weeks replayed), so that
-// one refused costs nothing. BacktestAgain asks again as it keeps it.
+// one refused costs nothing. BacktestAgain asks again as it keeps it. Of
+// Lapilli's own, it says whether BacktestTried would.
 func (l *Ledger) MayBacktestAgain(ctx context.Context, id int64, by string, agent bool) error {
-	return backtestable(ctx, l.r, id, FoldName(by), agent, time.Now())
+	return backtestable(ctx, l.r, id, FoldName(by), agent, time.Now(), true)
 }
 
-// backtestable is MayBacktestAgain, asked of the ledger or within a write.
+// backtestable is MayBacktestAgain, asked of the ledger or within a write:
+// the proposal's cooldown, and, with hour, the hour's. A person's, and
+// their agents', are counted by the backtests they kept; Lapilli's by the
+// tries it began (BacktestTried), each one whether it kept it or not, so
+// that a try counts once.
 func backtestable(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, id int64, by string, agent bool, now time.Time) error {
+}, id int64, by string, agent bool, now time.Time, hour bool) error {
 	var last sql.NullInt64
 	if err := q.QueryRowContext(ctx, "SELECT max(at) FROM changes WHERE what = ?", fmt.Sprintf("proposal #%d backtested again", id)).Scan(&last); err != nil {
 		return err
@@ -635,9 +640,12 @@ func backtestable(ctx context.Context, q interface {
 	if last.Valid && now.Unix()-last.Int64 < int64(BacktestCooldown/time.Second) {
 		return ErrBacktestedJustNow
 	}
-	most := BacktestsAnHour
+	if !hour {
+		return nil
+	}
+	most, counted := BacktestsAnHour, " backtested again"
 	if by == Proposer {
-		most = LapilliBacktestsAnHour
+		most, counted = LapilliBacktestsAnHour, " "+tried
 	}
 	rows, err := q.QueryContext(ctx, "SELECT what, after FROM changes WHERE at > ? AND by = ? AND what LIKE 'proposal #%'",
 		now.Add(-time.Hour).Unix(), by)
@@ -654,9 +662,7 @@ func backtestable(ctx context.Context, q interface {
 		var kept struct {
 			Agent bool `json:"agent"`
 		}
-		// A backtest run again, kept or tried (BacktestTried): each cost the
-		// same twelve weeks replayed.
-		if (strings.HasSuffix(what, " backtested again") || strings.HasSuffix(what, " "+tried)) && json.Unmarshal([]byte(after), &kept) == nil && kept.Agent == agent {
+		if strings.HasSuffix(what, counted) && json.Unmarshal([]byte(after), &kept) == nil && kept.Agent == agent {
 			n++
 		}
 	}
@@ -669,20 +675,63 @@ func backtestable(ctx context.Context, q interface {
 	return nil
 }
 
-// tried is what changes keeps of a backtest Lapilli ran again itself and
-// kept nothing of: "proposal #N backtest tried again".
+// tried is what changes keeps of a backtest Lapilli begins to run again
+// itself: "proposal #N backtest tried again".
 const tried = "backtest tried again"
 
-// BacktestTried keeps that who (Lapilli, ledger.Proposer) ran a proposal's
-// backtest again and kept nothing of it, and why: one that didn't finish,
-// or was refused once the work was done. It changes nothing of the
-// proposal, and counts toward the hour's backtests again as one kept does
-// (backtestable), so that one which never finishes can't be tried past
-// them; its history says so.
-func (l *Ledger) BacktestTried(ctx context.Context, id int64, by, why string) error {
+// BacktestTried keeps that Lapilli (ledger.Proposer) begins to run a
+// proposal's backtest again, before it replays it: so that a try cut short
+// (the process gone, the lease lost) is counted all the same, toward
+// LapilliBacktestsAnHour, which it checks in the same write, refusing one
+// past it (ErrTooManyBacktests). One kept is kept by BacktestAgain beside
+// it, and counted by this row alone. It changes nothing of the proposal.
+func (l *Ledger) BacktestTried(ctx context.Context, id int64) error {
 	return l.write(ctx, func(t *txn) error {
-		return change(t, FoldName(by), fmt.Sprintf("proposal #%d %s", id, tried), nil, map[string]any{"agent": false, "reason": why})
+		if err := backtestable(t.ctx, t, id, Proposer, false, time.Now(), true); err != nil {
+			return err
+		}
+		return change(t, Proposer, fmt.Sprintf("proposal #%d %s", id, tried), nil, map[string]any{"agent": false})
 	})
+}
+
+// LastTried are, by proposal, when Lapilli last began to run its backtest
+// again (BacktestTried), of those it began since: so that the next it tries
+// isn't the same, whichever replica tries it.
+func (l *Ledger) LastTried(ctx context.Context, since time.Time) (map[int64]time.Time, error) {
+	rows, err := l.r.QueryContext(ctx, "SELECT what, max(at) FROM changes WHERE at > ? AND by = ? AND what LIKE ? GROUP BY what",
+		since.Unix(), Proposer, "proposal #% "+tried)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]time.Time{}
+	for rows.Next() {
+		var what string
+		var at int64
+		if err := rows.Scan(&what, &at); err != nil {
+			return nil, err
+		}
+		var id int64
+		if _, err := fmt.Sscanf(what, "proposal #%d", &id); err == nil {
+			out[id] = unix(at)
+		}
+	}
+	return out, rows.Err()
+}
+
+// LastBacktestedAgain is the last time a proposal's backtest run again was
+// kept: its change, and false for never. Read by the changes' index on
+// what, whatever else its history holds.
+func (l *Ledger) LastBacktestedAgain(ctx context.Context, id int64) (Change, bool, error) {
+	var c Change
+	var at int64
+	err := l.r.QueryRowContext(ctx, "SELECT at, by, what, before, after FROM changes WHERE what = ? ORDER BY id DESC LIMIT 1",
+		fmt.Sprintf("proposal #%d backtested again", id)).Scan(&at, &c.By, &c.What, &c.Before, &c.After)
+	if errors.Is(err, sql.ErrNoRows) {
+		return c, false, nil
+	}
+	c.At = unix(at)
+	return c, err == nil, err
 }
 
 // BacktestAgain keeps the evidence of a proposal waiting for approval
@@ -712,7 +761,8 @@ func (l *Ledger) BacktestAgain(ctx context.Context, id int64, by string, agent b
 		if p.State != StateProposed || string(p.Evidence) != string(was) {
 			return ErrMoved
 		}
-		if err := backtestable(t.ctx, t, id, by, agent, time.Now()); err != nil {
+		// Lapilli's own was counted as it began (BacktestTried).
+		if err := backtestable(t.ctx, t, id, by, agent, time.Now(), by != Proposer); err != nil {
 			return err
 		}
 		as, err := l.approvals(t.ctx, t, id)

@@ -682,10 +682,14 @@ func (s *Server) alarmsEvery() time.Duration {
 func (s *Server) Close() error {
 	s.closed.Do(func() {
 		s.end()
-		s.closeErr = s.l.Close()
+		s.closeErr = closeLedger(s.l)
 	})
 	return s.closeErr
 }
+
+// closeLedger closes a server's ledger: a variable, so that a test can
+// count how often.
+var closeLedger = (*ledger.Ledger).Close
 
 // Run serves the UI and keeps the ledger until ctx is done. Every replica
 // serves; the one that leads (all of them in turn, one at a time, on a

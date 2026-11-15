@@ -1211,7 +1211,7 @@ func TestLapilliBacktestsOnRunsAlone(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := s2.l.BacktestAgain(ctx, id, ledger.Proposer, false, []byte(`{}`), []byte(`{"semantics":1}`), nil, nil); err != nil {
+		if err := s2.l.BacktestTried(ctx, id); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1391,12 +1391,15 @@ func TestBacktestAgainRace(t *testing.T) {
 }
 
 // expireBackoff makes a proposal Lapilli failed to backtest again itself
-// due to be tried again now, its failures in a row kept.
+// due to be tried again now, and every proposal, their failures in a row
+// kept.
 func expireBackoff(s *Server, id int64) {
 	s.againFailed.Lock()
-	b := s.againFailed.m[id]
-	b.next = time.Now().Add(-time.Second)
-	s.againFailed.m[id] = b
+	if b, ok := s.againFailed.m[id]; ok {
+		b.next = time.Now().Add(-time.Second)
+		s.againFailed.m[id] = b
+	}
+	s.againFailed.all.next = time.Now().Add(-time.Second)
 	s.againFailed.Unlock()
 }
 
@@ -1475,22 +1478,26 @@ func TestLapilliNeverFinishing(t *testing.T) {
 	if _, body, _ := ui(t, s.Handler(), http.MethodGet, "/proposals/"+itoa(ids[0]), cy, "", nil); !strings.Contains(body, "Lapilli</bdi> ran its backtest again and kept nothing of it") {
 		t.Error("its history doesn't say it was tried")
 	}
-	// Left until then: the next round tries the next one.
+	// A history too slow for one is too slow for the rest: the next run
+	// tries none, until every one's wait is up; then the next one, the
+	// first left on its own.
+	round()
+	if n := tries(); n != 1 {
+		t.Errorf("%d tried by the next run, want none more", n)
+	}
+	s.againFailed.Lock()
+	s.againFailed.all.next = time.Now().Add(-time.Second)
+	s.againFailed.Unlock()
 	round()
 	if n := tries(); n != 2 {
-		t.Errorf("%d tried in two rounds, want 2", n)
+		t.Errorf("%d tried once every one's wait was up, want 2", n)
 	}
-	for _, want := range []time.Duration{2 * time.Hour, 4 * time.Hour} {
-		expireBackoff(s, ids[0])
-		expireBackoff(s, ids[1])
-		round()
-		if b := backoff(); b != want {
-			t.Errorf("left %s, want %s", b, want)
-		}
+	if steps, _, _ := s.l.ProposalSteps(ctx, ids[1], 10); !slices.ContainsFunc(steps, func(c ledger.Change) bool { return strings.HasSuffix(c.What, " backtest tried again") }) {
+		t.Error("the one left on its own tried again first")
 	}
 	// Each counted toward the hour's, as one kept is.
 	for n := tries(); n < ledger.LapilliBacktestsAnHour; n++ {
-		if err := s.l.BacktestTried(ctx, ids[2], ledger.Proposer, "elsewhere"); err != nil {
+		if err := s.l.BacktestTried(ctx, ids[2]); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1537,12 +1544,20 @@ func TestFlightsBounded(t *testing.T) {
 	if m := most.Load(); m != flightsMost {
 		t.Errorf("%d ran at once, want %d", m, flightsMost)
 	}
+	// One read's older versions are kept, all of them: none pushes another
+	// out.
+	f.Lock()
+	kept := len(f.kept)
+	f.Unlock()
+	if kept != oldVersionsMost {
+		t.Errorf("%d kept of the 4 read, want %d", kept, oldVersionsMost)
+	}
 	// A reader already gone: nothing started.
 	gone, cancel := context.WithCancel(context.Background())
 	cancel()
-	ran := false
-	if _, err := f.do(gone, 9, time.Minute, func(context.Context) (int, error) { ran = true; return 0, nil }); !errors.Is(err, context.Canceled) || ran {
-		t.Errorf("for a reader gone: %v, ran %v", err, ran)
+	flown := f.flown.Load()
+	if _, err := f.do(gone, 9, time.Minute, func(context.Context) (int, error) { return 0, nil }); !errors.Is(err, context.Canceled) || f.flown.Load() != flown {
+		t.Errorf("for a reader gone: %v, %d flights started", err, f.flown.Load()-flown)
 	}
 	// One a reader left is kept for the next.
 	leaving, leave := context.WithCancel(context.Background())
@@ -1613,9 +1628,243 @@ func TestComparingBusyText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.backtestWithin(context.Background(), f.name, f.rule, f.rule, false, time.Minute)
+	_, err = s.backtestWithin(context.Background(), f.name, f.rule, f.rule, false, time.Minute, nil)
 	var b badRequest
 	if !errors.As(err, &b) || b.format != comparingBusy {
 		t.Errorf("refused with %v, not comparingBusy", err)
+	}
+}
+
+// TestLapilliBackoffGrows: one Lapilli fails to backtest again, as every
+// one after one doesn't finish, is left an hour, then two, then four.
+func TestLapilliBackoffGrows(t *testing.T) {
+	ctx := context.Background()
+	s, ids := staleServer(t, 1, nil)
+	s.h = neverAnswers{}
+	defer func(was time.Duration) { autoWithinMost = was }(autoWithinMost)
+	autoWithinMost = 100 * time.Millisecond
+	for _, want := range []time.Duration{time.Hour, 2 * time.Hour, 4 * time.Hour} {
+		expireBackoff(s, ids[0])
+		if err := s.backtestStale(ctx); err != nil {
+			t.Fatal(err)
+		}
+		s.againFailed.Lock()
+		one, all := time.Until(s.againFailed.m[ids[0]].next).Round(time.Hour), time.Until(s.againFailed.all.next).Round(time.Hour)
+		s.againFailed.Unlock()
+		if one != want || all != want {
+			t.Errorf("left %s, every one %s, want %s", one, all, want)
+		}
+	}
+	// Any kept starts every one afresh.
+	s.h = &history{}
+	expireBackoff(s, ids[0])
+	if err := s.backtestStale(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if s.againFailed.allWaits(time.Now()) || againCount(t, s, ids) != 1 {
+		t.Error("kept, and every one still left")
+	}
+}
+
+// TestLapilliSlowHistoryLeavesAll: with thirty proposals stale and a
+// history that never answers in time, the first run tries one, the next
+// none until every one's wait is up, then one again: a slow history costs
+// a run once, not an hour's work each hour.
+func TestLapilliSlowHistoryLeavesAll(t *testing.T) {
+	ctx := context.Background()
+	s, ids := staleServer(t, 30, nil)
+	s.h = neverAnswers{}
+	defer func(was time.Duration) { autoWithinMost = was }(autoWithinMost)
+	autoWithinMost = 100 * time.Millisecond
+	tried := func() int {
+		t.Helper()
+		began, err := s.l.LastTried(ctx, time.Now().Add(-time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(began)
+	}
+	for _, c := range []struct {
+		expire bool
+		want   int
+	}{{false, 1}, {false, 1}, {false, 1}, {true, 2}} {
+		if c.expire {
+			s.againFailed.Lock()
+			s.againFailed.all.next = time.Now().Add(-time.Second)
+			s.againFailed.Unlock()
+		}
+		if err := s.backtestStale(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if n := tried(); n != c.want {
+			t.Errorf("tried %d, want %d", n, c.want)
+		}
+	}
+	if n := againCount(t, s, ids); n != 0 {
+		t.Errorf("%d kept", n)
+	}
+}
+
+// TestLapilliTryCutShort: a try is counted as it begins, before the
+// replay: one cut short (the process gone, its lease lost) is counted
+// toward the hour's all the same, and the next, whichever replica, tries
+// another first.
+func TestLapilliTryCutShort(t *testing.T) {
+	ctx := context.Background()
+	s, ids := staleServer(t, 2, nil)
+	s.h = neverAnswers{}
+	s.cfg.Timeout = time.Hour
+	defer func(was time.Duration) { autoWithinMost = was }(autoWithinMost)
+	autoWithinMost = time.Hour
+	run, stop := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() { done <- s.backtestStale(run) }()
+	for waited := time.Now(); ; time.Sleep(time.Millisecond) {
+		if began, _ := s.l.LastTried(ctx, time.Now().Add(-time.Hour)); len(began) == 1 {
+			break
+		}
+		if time.Since(waited) > 10*time.Second {
+			t.Fatal("not counted as it began")
+		}
+	}
+	stop() // the process gone
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("not stopped")
+	}
+	began, _ := s.l.LastTried(ctx, time.Now().Add(-time.Hour))
+	if _, ok := began[ids[0]]; !ok || len(began) != 1 {
+		t.Fatalf("counted: %v", began)
+	}
+	// Another replica, knowing nothing of it, tries the other first.
+	s.againFailed = againFailed{}
+	autoWithinMost = 100 * time.Millisecond
+	if err := s.backtestStale(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if began, _ := s.l.LastTried(ctx, time.Now().Add(-time.Hour)); len(began) != 2 {
+		t.Errorf("tried the one cut short again first: %v", began)
+	}
+}
+
+// TestLapilliTriesShownOnce: Lapilli's tries in a row that kept nothing are
+// one step of the history, how many and the last; one it kept is the
+// step saying so, its try with it; and MCP's backtested_again is the last
+// kept, however many tries came after it.
+func TestLapilliTriesShownOnce(t *testing.T) {
+	ctx := context.Background()
+	s, ids := staleServer(t, 1, nil)
+	id := ids[0]
+	for range 3 {
+		if err := s.l.BacktestTried(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page := func() string {
+		t.Helper()
+		_, body, _ := ui(t, s.Handler(), http.MethodGet, "/proposals/"+itoa(id), cy, "", nil)
+		return html.UnescapeString(body)
+	}
+	if body := page(); !strings.Contains(body, "Lapilli</bdi> ran its backtest again 3 times in a row and kept nothing of it, the last at the time shown") ||
+		strings.Count(body, "ran its backtest again") != 1 {
+		t.Error("three tries not one step")
+	}
+	if err := s.backtestAgainOf(ctx, id, ledger.Proposer, false, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if body := page(); strings.Count(body, "ran its backtest again") != 1 || !strings.Contains(body, "Backtested again by <bdi>Lapilli</bdi>") {
+		t.Error("a kept try shown as kept nothing")
+	}
+	// Past the steps a page reads, MCP still says when it was kept.
+	for i := 0; i < stepsMost+5; i++ {
+		ledgerExec(t, s, "INSERT INTO changes (at, by, what, before, after) VALUES (?, ?, ?, ?, ?)", time.Now().Unix(), ledger.Proposer,
+			fmt.Sprintf("proposal #%d backtest tried again", id), "{}", `{"agent":false}`)
+	}
+	if again, err := s.againOf(ctx, id); err != nil || again == nil || again.By != ledger.Proposer {
+		t.Errorf("MCP's backtested_again past the steps read: %+v %v", again, err)
+	}
+}
+
+// TestAgainLate: a run of Lapilli's own ends at a try whose time ran out,
+// whatever error it gave (a database driver's own, say), not only an
+// unfinished replay or a deadline.
+func TestAgainLate(t *testing.T) {
+	if !againLate(errors.New("sqlite: interrupted"), true) || !againLate(errUnfinished, false) || !againLate(context.DeadlineExceeded, false) {
+		t.Error("a try out of time not taken so")
+	}
+	if againLate(errors.New("refused"), false) {
+		t.Error("a try refused in time taken as out of time")
+	}
+}
+
+// TestLapilliComparingBusy: a person's comparison running, Lapilli's own
+// backtests again wait for the next run: none tried, none left for long.
+func TestLapilliComparingBusy(t *testing.T) {
+	ctx := context.Background()
+	s, ids := staleServer(t, 3, nil)
+	s.comparing.Lock()
+	err := s.backtestStale(ctx)
+	s.comparing.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.againFailed.Lock()
+	left := len(s.againFailed.m)
+	s.againFailed.Unlock()
+	if began, _ := s.l.LastTried(ctx, time.Now().Add(-time.Hour)); left != 0 || len(began) != 0 || s.againFailed.allWaits(time.Now()) {
+		t.Errorf("a comparison running: %d left, %d tried", left, len(began))
+	}
+	if err := s.backtestStale(ctx); err != nil || againCount(t, s, ids) != againARun {
+		t.Errorf("the next run: %v, %d kept", err, againCount(t, s, ids))
+	}
+}
+
+// TestRunEndsFlights: a server stopping ends its flights at once, before
+// it waits for its requests to finish, so that none waits out parseWithin.
+func TestRunEndsFlights(t *testing.T) {
+	s, _ := server(t, nil)
+	ctx, stop := context.WithCancel(context.Background())
+	ran := make(chan error, 1)
+	go func() { ran <- s.Run(ctx) }()
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.parsing.do(context.Background(), 1, parseWithin, func(ctx context.Context) (namedRules, error) {
+			<-ctx.Done()
+			return namedRules{}, ctx.Err()
+		})
+		done <- err
+	}()
+	for waited := time.Now(); s.parsing.flown.Load() == 0; time.Sleep(time.Millisecond) {
+		if time.Since(waited) > 10*time.Second {
+			t.Fatal("never flew")
+		}
+	}
+	stop()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("the flight ended with %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("stopping waited for a flight")
+	}
+	select {
+	case <-ran:
+	case <-time.After(20 * time.Second):
+		t.Fatal("never stopped")
+	}
+}
+
+// TestCloseOnce: closing a server twice closes its ledger once.
+func TestCloseOnce(t *testing.T) {
+	s, _ := server(t, nil)
+	var n atomic.Int64
+	defer func(was func(*ledger.Ledger) error) { closeLedger = was }(closeLedger)
+	closeLedger = func(l *ledger.Ledger) error { n.Add(1); return l.Close() }
+	s.Close()
+	s.Close()
+	if n.Load() != 1 {
+		t.Errorf("the ledger closed %d times", n.Load())
 	}
 }

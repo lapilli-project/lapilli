@@ -271,13 +271,31 @@ func TestBacktestAgainBounded(t *testing.T) {
 	if err := again("AgentOver", "bo", true); !errors.Is(err, ErrTooManyBacktests) {
 		t.Errorf("the agents', one past: %v", err)
 	}
-	// Lapilli's own: LapilliBacktestsAnHour of them, apart.
+	// Lapilli's own: LapilliBacktestsAnHour of them, apart, each counted
+	// once, as it began (BacktestTried), kept (BacktestAgain beside it) or
+	// not.
+	own := func(rule string, keep bool) error {
+		t.Helper()
+		p := proposal(rule, KindFor)
+		p.Evidence = ev
+		id, err := l.Propose(ctx, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := l.BacktestTried(ctx, id); err != nil {
+			return err
+		}
+		if keep {
+			_, _, err = l.BacktestAgain(ctx, id, Proposer, false, ev, []byte(`{"backtest":{"semantics":1}}`), nil, nil)
+		}
+		return err
+	}
 	for i := 0; i < LapilliBacktestsAnHour; i++ {
-		if err := again(fmt.Sprint("Own", i), Proposer, false); err != nil {
+		if err := own(fmt.Sprint("Own", i), i%2 == 0); err != nil {
 			t.Fatalf("Lapilli's %dth: %v", i+1, err)
 		}
 	}
-	if err := again("OwnOver", Proposer, false); !errors.Is(err, ErrTooManyBacktests) {
+	if err := own("OwnOver", false); !errors.Is(err, ErrTooManyBacktests) {
 		t.Errorf("Lapilli's, one past: %v", err)
 	}
 	// One proposal, again within the cooldown: no one, Lapilli neither.

@@ -719,22 +719,16 @@ type againOut struct {
 	Withdrawn []string  `json:"approvals_withdrawn,omitempty" jsonschema:"whose approvals were withdrawn, given to the backtest it replaced"`
 }
 
-// againOf is when a proposal was last backtested again, by its steps; nil
-// for never.
+// againOf is when a proposal was last backtested again and kept, read for
+// it alone, whatever else its history holds; nil for never.
 func (s *Server) againOf(ctx context.Context, id int64) (*againOut, error) {
-	cs, _, err := s.l.ProposalSteps(ctx, id, stepsMost)
-	if err != nil {
+	c, ok, err := s.l.LastBacktestedAgain(ctx, id)
+	if err != nil || !ok {
 		return nil, err
 	}
-	for i := len(cs) - 1; i >= 0; i-- {
-		if !strings.HasSuffix(cs[i].What, " backtested again") {
-			continue
-		}
-		var after stepFields
-		json.Unmarshal([]byte(cs[i].After), &after)
-		return &againOut{At: cs[i].At, By: cs[i].By, Agent: after.Agent, Withdrawn: after.Withdrawn}, nil
-	}
-	return nil, nil
+	var after stepFields
+	json.Unmarshal([]byte(c.After), &after)
+	return &againOut{At: c.At, By: c.By, Agent: after.Agent, Withdrawn: after.Withdrawn}, nil
 }
 
 // proposalBacktestOut is a proposal's backtest, as it is beside as
