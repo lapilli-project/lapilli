@@ -126,3 +126,82 @@ func TestUndo(t *testing.T) {
 		t.Errorf("undone twice at once: %v", err)
 	}
 }
+
+// TestBacktestAgain: a proposal waiting for approval is given its evidence
+// worked out again in place of what it had, the approvals given to that
+// taken back, and both kept in its history, with who asked; one that
+// moved on, or whose evidence changed meanwhile, isn't.
+func TestBacktestAgain(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	p := proposal("HighErrors", KindFor)
+	p.Evidence = []byte(`{"from":"suggestion","backtest":{"before":{"firings":141}}}`)
+	id, err := l.Propose(ctx, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Approve(ctx, id, "ana", 2); err != nil {
+		t.Fatal(err)
+	}
+	was := []byte(`{"from":"suggestion","backtest":{"before":{"firings":141}}}`)
+	now := []byte(`{"from":"suggestion","version":"v0.42.0","backtest":{"before":{"firings":140},"no_record":true}}`)
+	if _, _, err := l.BacktestAgain(ctx, id, "bo", []byte(`{"other":1}`), now, nil, nil); !errors.Is(err, ErrMoved) {
+		t.Errorf("its evidence changed meanwhile: %v", err)
+	}
+	got, taken, err := l.BacktestAgain(ctx, id, "Bo", was, now, map[string]any{"version": ""}, map[string]any{"version": "v0.42.0"})
+	if err != nil || taken != 1 || string(got.Evidence) != string(now) || got.State != StateProposed {
+		t.Fatalf("backtested again: %+v %d %v", got, taken, err)
+	}
+	if p, err := l.ProposalByID(ctx, id); err != nil || len(p.Approvals) != 0 || string(p.Evidence) != string(now) {
+		t.Errorf("kept: %+v %v", p, err)
+	}
+	steps, _, err := l.ProposalSteps(ctx, id, 10)
+	if err != nil || len(steps) == 0 {
+		t.Fatal(steps, err)
+	}
+	last := steps[len(steps)-1]
+	if last.What != "proposal #"+itoa(id)+" backtested again" || last.By != "bo" || !strings.Contains(last.After, `"approvals_taken_back":1`) ||
+		!strings.Contains(last.After, `"version":"v0.42.0"`) || last.Before != `{"version":""}` {
+		t.Errorf("its step: %+v", last)
+	}
+	// Moved on: not.
+	if _, err := l.Move(ctx, id, []string{StateProposed}, StateDropped, "ana", Step{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := l.BacktestAgain(ctx, id, "bo", now, was, nil, nil); !errors.Is(err, ErrMoved) {
+		t.Errorf("dropped: %v", err)
+	}
+}
+
+// TestProposalListEvidence: the proposals list reads, in brief, the
+// evidence of an undo, of a new for, and of one waiting for approval, and
+// no other's.
+func TestProposalListEvidence(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	for _, c := range []struct {
+		rule, kind, to string
+	}{{"A", KindFor, StateApplied}, {"B", KindThreshold, ""}, {"C", KindThreshold, StateApplied}, {"D", KindSays, StateDropped}} {
+		p := proposal(c.rule, c.kind)
+		p.Evidence, p.AfterHash = []byte(`{"from":"`+c.rule+`"}`), "after-"+c.rule
+		id, err := l.Propose(ctx, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.to != "" {
+			if _, err := l.Move(ctx, id, []string{StateProposed}, c.to, "ana", Step{}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	hs, err := l.ProposalList(ctx, ProposalPick{}, 10)
+	if err != nil || len(hs) != 4 {
+		t.Fatal(hs, err)
+	}
+	for _, h := range hs {
+		want := map[string]bool{"A": true, "B": true}[h.Rule]
+		if got := len(h.Evidence) > 0; got != want || h.AfterHash != "after-"+h.Rule {
+			t.Errorf("%s (%s, %s): evidence %q, after %q", h.Rule, h.Kind, h.State, h.Evidence, h.AfterHash)
+		}
+	}
+}

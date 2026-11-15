@@ -559,6 +559,54 @@ func (l *Ledger) Move(ctx context.Context, id int64, from []string, to, by strin
 	return p, err
 }
 
+// BacktestAgain keeps the evidence of a proposal waiting for approval
+// worked out again, now in place of was: its backtest run again, by who
+// asked for it. The approvals it had were given to the evidence it
+// replaces, so they are taken back, and it waits for them again. What it
+// replaced is kept in changes, as before, and what it is now, as after,
+// with how many approvals were taken back: its page's history says so.
+// ErrMoved when it isn't waiting for approval, or its evidence isn't was
+// any more (backtested again meanwhile). A proposal's own columns are as
+// they were, but for when it moved: no schema of its own.
+func (l *Ledger) BacktestAgain(ctx context.Context, id int64, by string, was, now json.RawMessage, before, after map[string]any) (Proposal, int, error) {
+	var p Proposal
+	var taken int
+	by = FoldName(by)
+	err := l.write(ctx, func(t *txn) error {
+		var err error
+		if p, err = scanProposal(t.QueryRowContext(t.ctx, "SELECT "+proposalColumns+" FROM proposals WHERE id = ?", id)); errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if p.State != StateProposed || string(p.Evidence) != string(was) {
+			return ErrMoved
+		}
+		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM approvals WHERE proposal_id = ?", id).Scan(&taken); err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM approvals WHERE proposal_id = ?", id); err != nil {
+			return err
+		}
+		// Later than it was, so that an approval form shown before, which is
+		// good for the proposal as it stood then, isn't any more.
+		updated := time.Now().Truncate(time.Second)
+		if !updated.After(p.Updated) {
+			updated = p.Updated.Add(time.Second)
+		}
+		if _, err := t.ExecContext(t.ctx, "UPDATE proposals SET evidence = ?, updated = ? WHERE id = ?", string(now), updated.Unix(), id); err != nil {
+			return err
+		}
+		p.Evidence, p.Updated, p.Approvals = now, updated, nil
+		kept := map[string]any{"approvals_taken_back": taken}
+		for k, v := range after {
+			kept[k] = v
+		}
+		return change(t, by, fmt.Sprintf("proposal #%d backtested again", id), before, kept)
+	})
+	return p, taken, err
+}
+
 // Firing reports whether a rule has an alert the ledger has as still on:
 // it fires now, as far as what was replayed or copied in says.
 func (l *Ledger) Firing(ctx context.Context, rule string) (bool, error) {
