@@ -132,6 +132,7 @@ func (s *Server) Handler() http.Handler {
 	s.workRoutes(mux, page)
 	s.reportRoutes(mux, page)
 	s.rolesRoutes(mux, page)
+	s.orphansRoutes(mux, page)
 	s.changesRoutes(mux, page)
 	s.signInRoutes(mux, page)
 

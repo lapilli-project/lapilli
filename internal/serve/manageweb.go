@@ -51,6 +51,7 @@ func (s *Server) managePage(r *http.Request) (any, error) {
 		{Href: "/settings", Name: "Settings", About: "How firings are judged, whether changes to the rules are paused, and what --config declares."},
 		{Href: "/runs", Name: "Runs", About: "Each replay and what was copied in, and what failed."},
 		{Href: "/reports", Name: "Reports", About: "Who gets which report, where, and the weekly digest.", Fact: "%d reports", One: "1 report", N: len(reports)},
+		{Href: "/orphans", Name: "Orphans", About: "Notes, tasks, comments and proposals of rules no longer in effect, deleted or renamed: moved to a rule, or deleted."},
 	}}
 	if !cursor.IsZero() {
 		v.Cards[3].Fact, v.Cards[3].At = "Firings are in up to %s.", cursor
