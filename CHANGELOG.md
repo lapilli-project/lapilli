@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **The overview's table of the weeks fits a laptop's screen.** Its first
+  column kept the week and its marks' tags on one line (598 px in Spanish),
+  and Spanish's headers alone were wider than the box; at 1280 to 1920 CSS
+  px it was scrolled sideways in English, Spanish and Japanese, and at 1280
+  in Korean. The date is kept whole and the tags go under it, the headers
+  wrap between their words, and the cells are as close as the rules
+  list's. `test/a11y/axe.mjs` checks it with the rules list's table.
+
 ## [0.40.0] - 2026-11-15
 
 What docs/design/ui.md left for later phases: a proposal for the rules
