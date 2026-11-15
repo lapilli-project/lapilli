@@ -1094,10 +1094,10 @@ var clientID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}
 // snsTopic is an SNS topic's ARN, in any partition.
 var snsTopic = regexp.MustCompile(`^arn:aws(-cn|-us-gov)?:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,256}$`)
 
-// list is a comma-separated list, without blanks.
 // labelName is a Prometheus label's name.
 var labelName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,127}$`)
 
+// list is a comma-separated list, without blanks.
 func list(s string) []string {
 	var out []string
 	for _, x := range strings.Split(s, ",") {

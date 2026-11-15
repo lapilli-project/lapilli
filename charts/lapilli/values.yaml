@@ -350,6 +350,10 @@ serve:
   teamDigests:
     secretName: ""
     teams: {}
+  # The labels whose values the Teams page suggests as teams, when the rules
+  # carry values no team owns by (--team-labels): label names; empty for
+  # team, owner and squad.
+  teamLabels: []
   # Where the reports people schedule in the UI can go, by name: each a
   # Slack-style incoming webhook whose URL is in a Secret's key. A report picks
   # among these names, and slack (report.slackWebhookSecret), webhook

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -21,5 +22,23 @@ func TestServeTeamLabelsFlag(t *testing.T) {
 		"--listen", "256.0.0.1:1", "--ledger", t.TempDir()}, &strings.Builder{}, &errs)
 	if strings.Contains(errs.String(), "--team-labels") || !strings.Contains(errs.String(), "--listen") {
 		t.Errorf("--team-labels team,service_owner: %s", errs.String())
+	}
+}
+
+// serve.teamLabels gives --team-labels; none by default.
+func TestChartTeamLabels(t *testing.T) {
+	out, err := helmTemplate(t, serveValues...)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if strings.Contains(out, "--team-labels") {
+		t.Errorf("by default: --team-labels given\n%s", out)
+	}
+	out, err = helmTemplate(t, append(slices.Clone(serveValues), "--set", "serve.teamLabels={team,service_owner}")...)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, `- "--team-labels=team,service_owner"`) {
+		t.Errorf("serve.teamLabels: no --team-labels\n%s", out)
 	}
 }
