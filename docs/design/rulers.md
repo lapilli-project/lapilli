@@ -426,20 +426,34 @@ in the namespaces or rule groups of one ruler. It is held so:
       a quarter at a time, five times its room made by a refusal);
     - a document picked out of a stream and written afresh (a List some of
       whose items are left out), its aliases in full, which is what is
-      kept: what it is written in, worked out first, no less than what
-      yaml.Marshal writes (`emitted`).
+      kept: written by yaml.v3's encoder into a writer that refuses past
+      the room the input has left, the encoder giving up as it does, and
+      charged what it was written in. An estimate fell short (yaml.v3
+      indents four spaces a level, and writes bytes that aren't UTF-8 as
+      base64 in lines, each indented), and 820 KB were kept as 109 MB.
 
-    A ConfigMap's value is read as rules once in an input, known by where
-    its text is: only an alias makes one value two keys', and one read
-    again is refused, as a ConfigMap the API server keeps holds no alias.
-    Inputs read together are bounded together (`rules.Together`): a ruler's
-    namespaces, each an input of its own so one can't use up another's
-    bound and have it passed over in its place, and the sources of a
-    version read again from the ledger, each read as it was read (a
-    `Namespace`'s document on its own, the others by source); what they
-    make in all, refused ones' and files passed over's among it, is never
-    given back and 256 MiB at most, past which the read fails whole
-    (`rules.OverTotal`) and the version in effect stays.
+    A value a YAML alias brings in is refused in a ConfigMap's `data`,
+    naming its key, whatever its tag and wherever the alias is (the value,
+    the data, a merge into it, the whole ConfigMap in a List): YAMLValue
+    notes the text of each string it makes in an alias's expansion (an
+    alias of a `!!str` shares its anchor's text, so the anchor's own is
+    noted too; a `!!binary` is decoded afresh for each alias), and the
+    ConfigMap's reader refuses a value whose text is noted. A ConfigMap the
+    API server keeps holds no alias; each would be read into rules again
+    (10,000 rules by 16 keys made 1.2 GB, and as `!!binary`, past a check
+    by where a value's text is, 1.22 GB). `binaryData` isn't read for
+    rules. Inputs read together are bounded together (`rules.Together`): a
+    ruler's namespaces, each an input of its own so one can't use up
+    another's bound and have it passed over in its place, and the sources
+    of a version read again from the ledger, each read as it was read (a
+    `Namespace`'s document on its own, the others by source). What they
+    make in all counts what each made, refused ones' and files passed
+    over's among it, never given back; a charge refused isn't made and
+    isn't counted, so the sum is the same in whatever order they are read.
+    Past 256 MiB the read fails whole (`rules.OverTotal`), naming the input
+    whose making took them past, and the version in effect stays. Each
+    input's room is what it may make and what they may still make
+    together, whichever is less.
 
     Why there: the copies were made for each rule before any check could
     look at the rules (a namespace of 40 KB in a Rules of 99 KB made 6.5
@@ -455,17 +469,32 @@ in the namespaces or rule groups of one ruler. It is held so:
     any length, and a version kept in the ledger may hold one. Past the
     bound, a `MadeError` names what made it, and it is never passed over as
     a rule file that doesn't read may be: a ConfigMap's file so refused is
-    an error naming its key, as is one Lapilli's reader refuses though
-    yaml.v3 decodes it (only a value yaml.v3 can't decode isn't YAML), and
-    a ruler's namespace is passed over saying why. Real sets are far inside
+    an error naming its key, as is one in the shape of rules that Lapilli's
+    reader refuses though yaml.v3 decodes it (only a value yaml.v3 can't
+    decode isn't YAML), and a ruler's namespace is passed over saying why.
+    In the shape of rules is a mapping with `groups`, its keys as yaml.v3
+    resolves them, or a merge; a list one of whose items is a mapping with
+    `groups` or a `kind`; a value `Nodes` refused before it was decoded,
+    one in which `groups` or a backslash is written. Any other value is
+    passed over whatever the reader says of it (a file_sd list whose labels
+    have a key twice, which Go's JSON takes), and a rule file with a key
+    twice, which yaml.v3 refuses too, is broken, not an error. Real sets are far inside
     it: kube-prometheus-stack's rules four times over, each group with
     labels of its own, make 1.8 MB of the 208 MB they may; 5,000 rules
     sharing six labels and three annotations by aliases, 10.4 MB of 20.
   - A replayed rule's firings carry a copy of its labels with each series'
     own: what those take, 96 bytes a label, is held to what a range's
     samples are (`--max-samples`, 64 bytes a sample), past which the rule
-    isn't replayed, saying why. A rule of 9,999 labels on 1,000 series made
+    isn't replayed, saying so in its own words (`rules.TooWide`), which
+    `--fail-unreplayed` counts (`rules.Unreplayable`): taken for a query
+    refused as written, a rule's writer could keep a rule out of a
+    backtest, the run passing. A rule of 9,999 labels on 1,000 series made
     1.3 GB.
+  - Durations are read as Prometheus writes them (`model.ParseDuration`'s
+    years down to milliseconds) after Go's reading, which reads some
+    Prometheus doesn't (`1.5h`, `1m1h`, `1us`); one past 100 years is
+    refused, which Prometheus takes to some 292 years. Neither is newly
+    refused.
   - What is still multiplied: each bound is a version's or a request's.
     lapilli serve holds every version of the rules in a window at once
     (`Server.versions`) and keeps the rules of up to 128 versions read, and
