@@ -386,9 +386,10 @@ serve:
   #       - user: ana@example.com
   # An empty file is refused, and so is a key with nothing after it: to
   # declare nothing, give teams: [], and no roles, grants: []; for every
-  # team, leave team out. A file is kept to once it is read the same twice
-  # in a row, 15 seconds apart: a change, or a pod that starts to lead,
-  # within half a minute. Left null, what a file declared before is the
+  # team, leave team out (team: "" is refused). A file is kept to once it
+  # is read the same twice in a row, 15 seconds or more apart: a change,
+  # or a pod that starts to lead, usually within half a minute, but that
+  # is no bound. Left null, what a file declared before is the
   # UI's again, roles included, none taken away, each marked given back:
   # a config put back that doesn't declare it again takes it away. An
   # admin's GET /config.yaml gives everything the ledger holds in this

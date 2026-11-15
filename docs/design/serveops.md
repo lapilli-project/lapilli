@@ -598,11 +598,23 @@ team, widens no quiet window, takes no role away and deletes nothing.
 Kept to, a file is kept to as a whole: what it no longer declares is let
 go at once (below). A file that can't be read as `--config` is said at
 once, on its first read; what of one can't be kept is said once it is
-kept to. As a term begins, at start or as another replica takes over, the
-ledger is kept to the file 15 to 30 seconds after; until then it holds
-what the last leader kept it to, and the Settings page says when a new
-file was read once. Without `--config` there is no file to read twice:
-what a file declared is given back at once.
+kept to. As a term begins, at start or as another replica takes over,
+the file is read once, after the rules are read, and the ledger is kept
+to it at the next read, 15 seconds after: usually within half a minute of
+the term's start, but that is no bound. Until then the ledger holds what
+the last leader kept it to, and the Settings page says when a new file
+was read once. A ledger write that fails is shown there too, with when it
+is tried again, not as a file read once. Files other than the one
+applied, read with none of them the same twice in a row (a ConfigMap
+changing back and forth, or terms too short to read a file twice, which
+keep the ledger from every file), are shown with since when they have
+been, and logged once that has lasted five minutes; the one applied, read
+the same twice in a row, ends it. Without `--config` there is no file to
+read twice: what a file declared is given back at once.
+
+A blank team or quiet window's rules, `team: ""` or `rules: ' '`, is
+refused as one with nothing after it is: as nothing, either would hold for
+every team or every rule.
 
 ### Keeping the ledger to it
 
@@ -656,10 +668,17 @@ taken away and nothing deleted, whatever the UI holds. Each is marked
 given back (`given_back`): until the UI changes one, the next file that
 doesn't declare it again lets it go as one it no longer declares, a role
 taken away, a team, a quiet window or a report the UI's for good, or
-deleted with prune; one it declares again is declared again. The Settings
-page lists them to an admin, and says how many to anyone else. A chart
-rolled back to before `serve.config` takes no one's role away, and rolled
-forward again, the file takes away what it no longer gives.
+deleted with prune; one it declares again is declared again, of the
+team it says, in its own row (a quiet window or a report moved to another
+team isn't made again beside it, nor a report's last send lost). The
+Settings page lists them to an admin, and says how many to anyone else.
+**The mark doesn't expire**: a file put back months on still lets go of
+what it doesn't declare, roles taken away all together. To keep one as
+the UI's, change it in the UI, or keep it on the Settings page (an
+admin's: one, or all of them, each noted in the activity log); a role
+can't be changed, so delete it and give it again, or keep it there. A
+chart rolled back to before `serve.config` takes no one's role away, and
+rolled forward again, the file takes away what it no longer gives.
 
 A declared team something still names (a quiet window, a
 report, a role, a task, a rule's note, the UI's or declared) isn't
@@ -679,8 +698,9 @@ letter case alone needs neither.
 forgetting what an earlier term kept the ledger to (another leader with an
 older copy may have since, or a failover lost a write), and again every
 15 seconds, comparing its SHA-256 with the one it last kept the ledger to,
-and keeps the ledger to it on the second read alike (above): 15 to 30
-seconds into the term. Kubernetes updates a mounted ConfigMap by swapping a link to
+and keeps the ledger to it on the second read alike (above): 15 seconds
+after the term's first read, which comes once the rules are read, so
+usually within half a minute of the term's start, but with no bound. Kubernetes updates a mounted ConfigMap by swapping a link to
 a new directory, which a watch on the file misses, so the content is
 hashed instead. The chart mounts the directory, not a `subPath`, which the
 kubelet doesn't update. No restart is needed, and none is made. A file with

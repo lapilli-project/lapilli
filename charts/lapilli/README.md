@@ -281,7 +281,11 @@ and lapilli reads it every 15 seconds. **A file is kept to only once the
 same file has been read twice in a row**, 15 seconds or more apart, with
 no other read between: a file read half written, or swapped in part,
 changes nothing, giving no one a role and taking none away. So a new
-file, or a pod that starts to lead, is kept to 15 to 30 seconds after. With several replicas, the leader
+file is kept to 15 seconds or more after it is first read, and a pod that
+starts to lead keeps the ledger to it 15 seconds after it has read the
+rules: usually within half a minute, but that is no bound. The Settings
+page says when a file waits, and why (a ConfigMap changing back and
+forth, or a ledger write that failed). With several replicas, the leader
 alone writes it, in one transaction. Each thing is matched by its name (a
 team's in any letter case, a quiet window's by its title); what the UI made
 of the same team under that name is taken over. What `serve.config`
@@ -308,7 +312,10 @@ chart rolled back to before it), everything a file declared is the UI's
 again, roles included, none taken away and nothing deleted, each marked
 given back: until the UI changes one, a `serve.config` put back that
 doesn't declare it again takes it away (a role), or deletes it with
-`serve.configPrune`. The Settings page lists them. What the file declares
+`serve.configPrune`. The Settings page lists them. The mark doesn't
+expire: to keep one, change it in the UI, or keep it on the Settings page
+(an admin's, one or all); a role can't be changed, so delete it and give
+it again, or keep it there. What the file declares
 has limits of its own beside the UI's; given back past the UI's own, a
 thing is deleted. What the file no longer declares goes before what it
 adds is made. To rename a team

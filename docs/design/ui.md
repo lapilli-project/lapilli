@@ -860,7 +860,11 @@ a role that can't be kept"), as why can name who holds a role. The Runs
 page says it the same way. Without `--config`, the section says nothing is
 declared. What a leader without `--config` gave back of what a file
 declared, which the next file lets go unless it declares it again, is
-listed, to an admin (kind, name and team), with how many to anyone. Beside `settings.yaml`, `config.yaml` (an
+listed, to an admin (kind, name and team), with how many to anyone, how to
+keep one (a role deleted and given again), and, an admin's, "Keep as the
+UI's" for each and "Keep them all as the UI's", drawn off for anyone else.
+A ledger write that failed, a file read once, and files read for minutes
+none of them twice in a row are each said, with when. Beside `settings.yaml`, `config.yaml` (an
 admin's) gives everything as `--config` takes it. The Teams page lists
 teams a ledger kept from before whose names differ only in letter case,
 to be renamed.
