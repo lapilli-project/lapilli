@@ -51,8 +51,8 @@ you upgrade: some rule sets passed over unsaid before are an error now.
   allocated 1 to 121 MB, its YAML read among it, within 0.11 s; the
   expression of 20,000 numbers is scoped having allocated under 1 MB; the
   ConfigMap's recording rules are made only when asked for, and it reads
-  having allocated 13 MB. A value in the shape of rules a YAML alias brings in is
-  refused in a ConfigMap's `data`, naming its key, whatever its tag
+  having allocated 13 MB. A value in the shape of rules a YAML alias
+  brings in is refused in a ConfigMap's `data`, naming its key, whatever its tag
   (`!!str`, `!!binary`, read as the text it decodes to) and wherever the
   alias is (the value, the data, a merge into it, the whole ConfigMap): a
   ConfigMap the API server keeps holds none, and `binaryData` isn't read
@@ -60,18 +60,21 @@ you upgrade: some rule sets passed over unsaid before are an error now.
   another key), is passed over unread, as before. So is an Amazon rule
   groups namespace's `data` an alias brings in refused before it is
   decoded, naming the namespace: each namespace aliasing it was decoded
-  and read into rules again, and the AWS CLI writes none. A document written afresh is
-  written into the room the input has left and charged what it is written
-  in, not estimated; what is kept so is read as the file it is of, what it
-  may make judged by the file's size and what the copy holds beyond the
-  file charged as made, and the copy is 16 MiB at most, as a file is (read
-  as a file of its own, its size, aliases written out, set what it might
-  make: a List of 41 KB written out to 1.5 MB, read with its recording
-  rules, made past what the file may). A ConfigMap whose `data` an alias
-  brings in is refused there too, with `Trim` or a selector: counted broken
-  and kept, it was written afresh with each alias in full and read so, a
-  rule file again for each key. No label and no name is capped: Prometheus takes
-  them of any length. Real sets are far inside the bound:
+  and read into rules again, and the AWS CLI writes none. A document
+  written afresh is written into the room the input has left and charged
+  what it is written in, not estimated; what is kept so, where it is read
+  in the file's place (`--rules-select` leaving an item out, `lapilli
+  serve` keeping only the documents of rules), is read as the file it is
+  of, what it may make judged by the file's size and what the copy holds
+  beyond the file charged as made, and is 16 MiB at most, as a file is
+  (read as a file of its own, its size, aliases written out, set what it
+  might make: a List of 41 KB written out to 1.5 MB, read with its
+  recording rules, made past what the file may). A file read as it is
+  isn't held to what its copy would be. A ConfigMap whose `data` an alias
+  brings in is refused there too: counted broken and kept, it was written
+  afresh with each alias in full and read so, a rule file again for each
+  key. No label and no name is capped: Prometheus takes them of any
+  length. Real sets are far inside the bound:
   kube-prometheus-stack's rules four times over, each group with labels of
   its own, make 1.8 MB of the 208 MB they may; 5,000 rules sharing six
   labels and three annotations by aliases, 10.4 MB of 20 MB.
@@ -102,14 +105,20 @@ you upgrade: some rule sets passed over unsaid before are an error now.
   YAML now: one Lapilli refuses, in the shape of rules, is an error naming
   its key, and broken where a stream is picked. So is a file below a
   directory's top in that shape, as at the top: it was passed over as one
-  that doesn't read is. In the shape of rules is a mapping with `groups`
-  (a key as written, whatever its tag, or as its text is read, below) or a
-  merge, or a list one of whose items is a mapping with `groups` or a
-  `kind`; a value Lapilli wasn't asked to decode (past `Nodes`, or brought
-  in by an alias), one in which `groups`, a backslash or `binary` is
-  written, or both a `!` and a `%` (a tag written with %-escapes, or made
-  by a `%TAG` directive, as `!!bin%61ry` is `!!binary`). A value not in that shape is passed over,
-  whatever Lapilli's reader says of it (a file_sd list whose labels have a
+  that doesn't read is, though the document refused may be another of the
+  file (a stream whose Deployment has a key Lapilli refuses, beside its
+  PrometheusRule). In the shape of rules is a mapping with `groups` (a key
+  as written, whatever its tag, or as its text is read, below), a `spec`
+  with `groups` (a PrometheusRule, a Google `Rules`), or a merge, or a
+  list one of whose items is a mapping with `groups` or a `kind`; and a
+  document whose nodes don't tell (past `Nodes`, brought in by an alias,
+  or another document refused in the same file) by its text: `groups`
+  written, or written by double-quoted escapes (`gr\x6fups`), or
+  `Z3JvdXBz`, the base64 a `!!binary` key `groups` is written in, however
+  its tag is written (`!!bin%61ry`, a `%TAG` directive) and across
+  whatever spaces and line breaks. A backslash or `binary` alone in a file
+  of data or an env-style value isn't. A value not in that shape is passed
+  over, whatever Lapilli's reader says of it (a file_sd list whose labels have a
   key twice, a list 250 deep), and a rule file with a key twice, which
   yaml.v3 refuses too, is broken, as before. A refusal for what an input
   makes is said wherever it is read: `lapilli verdict --rules` and
@@ -125,9 +134,12 @@ you upgrade: some rule sets passed over unsaid before are an error now.
   lost every label, unsaid. Keys are read as text now, as Prometheus
   decodes a rule file's: plain scalars as written (`0`, `true`, `1.5`, a
   date), a `!!binary` key as the text it decodes to; a key that isn't a
-  scalar, a null one (which Prometheus passes over and Kubernetes
-  refuses), one of another tag (`!x`), and two keys of one text (a
-  `!!binary` key and what it decodes to) are refused, naming the line.
+  scalar (as before), a null one (which Prometheus passes over and
+  Kubernetes refuses), one of another tag (`!x`), and two keys of one text
+  (an alias of a key beside the key, a `!!binary` key beside what it
+  decodes to, which Prometheus loads, the last one set) are refused,
+  naming the line, said as Lapilli's own refusals are, never passed over
+  as a file that doesn't read.
 - **A replay copied a rule's labels for each of its series** (from 0.1.0):
   a rule of 9,999 labels on 1,000 series made 1.3 GB in one replay. The
   copies are counted before they are made now, against what a range's
@@ -163,9 +175,10 @@ you upgrade: some rule sets passed over unsaid before are an error now.
 - **A mapping's keys are read as text** in rules inputs, as Prometheus
   reads them: what was under a key `0`, `true`, `1.5` or `!!binary` (a
   ConfigMap's rule files, a rule file's groups, labels) was left out, and
-  is read now. A key that isn't a scalar, a null key, a key tagged other
-  than YAML's own (`!x`), and two keys of one text are refused, naming the
-  line: in a ConfigMap's rule file, an error naming its key.
+  is read now. A null key, a key tagged other than YAML's own (`!x`), and
+  two keys of one text (an alias of a key beside the key, which Prometheus
+  loads) are refused, naming the line: in a ConfigMap's rule file, an
+  error naming its key; below a directory's top, an error, as at it.
 - **What a stream keeps, written afresh, is read as the file it came
   from** (a List some of whose items `--rules-select` leaves out, or
   `lapilli serve` keeps only the documents of rules of): what it may make is

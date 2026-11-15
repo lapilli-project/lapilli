@@ -431,13 +431,15 @@ in the namespaces or rule groups of one ruler. It is held so:
       charged what it was written in. An estimate fell short (yaml.v3
       indents four spaces a level, and writes bytes that aren't UTF-8 as
       base64 in lines, each indented), and 820 KB were kept as 109 MB.
-      What is kept so is read as the file it is of (`load`): what it may
-      make judged by the file's size, what the copy holds beyond the file
-      charged as made, and the copy held to `MaxFile`, as a file is, a
-      `MadeError` past it (read as a file of its own, the copy's size,
-      aliases written out, set what it might make, and a List of 41 KB
-      written out to 1.5 MB made its recording rules' labels past what
-      the file may). A ConfigMap whose `data` an alias brings in is refused
+      What is kept so, where it is read in the file's place (`Trim`, a
+      selector leaving an item out), is read as the file it is of
+      (`load`): what it may make judged by the file's size, what the copy
+      holds beyond the file charged as made, and the copy held to
+      `MaxFile`, as a file is, a `MadeError` past it (read as a file of its
+      own, the copy's size, aliases written out, set what it might make,
+      and a List of 41 KB written out to 1.5 MB made its recording rules'
+      labels past what the file may). A file read as it is isn't held to
+      what its copy, unread, would be. A ConfigMap whose `data` an alias brings in is refused
       where the stream is picked (`pickItem`), as `Parse` refuses it:
       counted broken and kept, it was written afresh with each alias in
       full and read so, a rule file again for each key.
@@ -494,12 +496,22 @@ in the namespaces or rule groups of one ruler. It is held so:
     (`unreadAs`, where a stream is picked as where it is parsed): it was
     passed over as one that doesn't read is. In the shape of rules is a
     mapping with `groups`, a key as written whatever its tag or as its
-    text is read (below), or a merge; a list one of whose items is a
-    mapping with `groups` or a `kind`; a value not decoded (`Nodes` refused
-    it, or an alias brought it in), one in which `groups`, a backslash or
-    `binary` is written, or both a `!` and a `%` (`textShaped`: a tag
-    written with %-escapes, or made by a `%TAG` directive, is `!!binary`
-    though `binary` isn't written, as `!!bin%61ry` is). Any other value is
+    text is read (below), a `spec` with `groups` (a PrometheusRule, a
+    Google `Rules`), or a merge; a list one of whose items is a mapping
+    with `groups` or a `kind` (`rulesShaped`); and, by its text
+    (`textShaped`), a document whose nodes don't tell: one `Nodes` refused,
+    one an alias brought in, and the whole input a refused document is of,
+    as that document may not be the one of rules (a stream whose
+    Deployment has a key Lapilli refuses, beside its PrometheusRule, was
+    passed over below the top). By its text is `groups` written, or written
+    by double-quoted escapes (`gr\x6fups`, an escaped line break), read as
+    YAML reads them, or `Z3JvdXBz`, the only base64 a `!!binary` key
+    `groups` can be, however its tag is written (`!!bin%61ry`, a `%TAG`
+    directive) and across whatever spaces and line breaks, as a key's
+    `!!binary` is read without them. A backslash or `binary` alone isn't:
+    a file of data below the top with one (585 KB of a CSV, one Windows
+    path in it) refused the directory, and an env-style value with a
+    Windows path, aliased by another key, its ConfigMap. Any other value is
     passed over whatever the reader says of it (a file_sd list whose labels
     have a key twice, which Go's JSON takes), and a rule file with a key
     twice, which yaml.v3 refuses too, is broken, not an error. Real sets are far inside
@@ -516,8 +528,13 @@ in the namespaces or rule groups of one ruler. It is held so:
     whose `groups` key was `!!binary` its rules, labels with a key `true`
     every label, unsaid. A key that isn't a scalar, a null one (which
     Prometheus passes over and Kubernetes refuses), one of another tag
-    (`!x`, which Prometheus reads as its text), and two keys of one text (a
-    `!!binary` key and what it decodes to) are refused, naming the line.
+    (`!x`, which Prometheus reads as its text), and two keys of one text
+    (an alias of a key beside the key, a `!!binary` key beside what it
+    decodes to) are refused, naming the line, as Lapilli's own refusals
+    are: yaml.v3 tells keys apart as written, so Prometheus loads two of
+    one text, the last set, and they aren't a key given twice, a file that
+    doesn't read, passed over below a directory's top and counted broken in
+    a ConfigMap.
     `YAMLValue` without it decodes as yaml.v3 does, as what compares or
     hashes a ruler's documents reads them.
   - A replayed rule's firings carry a copy of its labels with each series'
