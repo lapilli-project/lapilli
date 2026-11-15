@@ -1882,7 +1882,8 @@ Nothing is changed until a person approves it, on its page, in a browser:
 - A proposal waiting for approval whose backtest was replayed or judged
   otherwise than this lapilli does, or whose period's record changed
   since, is stale, and isn't approved until it is backtested again:
-  Lapilli does it itself, a few each round of its work, and an editor can
+  with `--changes`, Lapilli does it itself for those an earlier lapilli
+  backtested, a few each run of its work, and an editor can
   from its page, with this lapilli, over the twelve weeks to now, the old
   backtest kept in its history and the approvals given to it withdrawn and
   told (`proposal.backtested`). `/proposals?stale=1` lists the stale ones.

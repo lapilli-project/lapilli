@@ -53,18 +53,22 @@ string now.
   (`semantics` in its evidence, `verdict.Semantics`, a number bumped only
   when replaying or judging changes; once, for one kept before it was;
   the `version` that ran it is kept beside it, `dev` for none, to be
-  shown), or whose period's record changed since (an incident written down
-  in its weeks, or none keeping it any more), is stale: its page says why,
-  the list has a badge
-  and links to `/proposals?stale=1`, which lists the stale ones (with those
+  shown; a newer lapilli's, in a rolling update or after a rollback, is
+  held and said so, and left for a person), or whose period's record
+  changed since (an incident written down in its weeks, or none keeping it
+  any more), is stale: its page says why, the list has a badge and links
+  to `/proposals?stale=1`, which lists the stale ones (with those
   whose rule changed since), and `stale` says why in the API and MCP. It
   isn't approved until it is backtested again: its page shows the button
   disabled, with why, the server refuses it, and so does the ledger an
   approval of a proposal as it no longer is, backtested again meanwhile;
-  nor does `--approvals` lowered approve one. Lapilli backtests stale ones
-  again itself, as Lapilli, in its work: three a round at most, the
-  longest unmoved first, one at a time under the heavy turn, while it
-  replays. An editor backtests one again from its page (`POST
+  nor does `--approvals` lowered approve one. With `--changes`, Lapilli
+  backtests again itself, as Lapilli, those an earlier lapilli backtested,
+  on a run of its work alone (never when a write pokes it): three a run,
+  twelve an hour at most on every replica together, the longest unmoved
+  first, one at a time under the heavy turn; one that doesn't finish
+  within `--timeout` replaces nothing, and is tried again an hour later. A
+  record that changed, or a newer lapilli's, is a person's. An editor backtests one again from its page (`POST
   /proposals/{id}/backtest`, asked for as a proposal is: the role, from
   this site, and the tries an hour, read again where it is kept), and an
   agent with `--mcp-propose`, through `backtest_again` (destructive, not
@@ -79,7 +83,13 @@ string now.
   (`earlier_missed`), and not refused when it is checked again as it is
   carried out. The approvals given to the backtest replaced are withdrawn,
   and told as `proposal.backtested` to the webhook and Slack, naming who
-  gave them; MCP's `rule` gives each proposal's `backtested_again`.
+  gave them, when any were or an agent asked; MCP's `rule` gives each
+  proposal's `backtested_again`. Every incident ID its pull request's
+  description names is a code span of its own, nothing in it read as
+  Markdown. What a proposal shows when read never stops a change being
+  carried out: for_outlasts falls back to what it kept, and stale ones
+  that can't be read are approved by none as fewer approvals are needed,
+  that round.
   Refused when the rule changed since: propose it again.
 
 ### Changed

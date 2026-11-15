@@ -574,8 +574,13 @@ The first step, for v0.22.0, as above, except:
     otherwise than this lapilli does. A backtest keeps `semantics`
     (`verdict.Semantics`, a number bumped whenever a change to replaying or
     judging would make a backtest of the same history say something else,
-    and for no other release), and is stale under another number, or none
-    (once, for one kept before it was). The version that ran it (`version`,
+    and for no other release), and is stale under an older number, or none
+    (once, for one kept before it was), when Lapilli backtests it again
+    itself; under a newer one, a newer lapilli's in a rolling update or
+    after a rollback, it is held and says so ("approve it once this one is
+    as new, or backtest it again here"), and only a person backtests it
+    again, so that two releases never take each other's back and forth.
+    The version that ran it (`version`,
     `dev` for none) is kept beside it to be shown, and decides nothing: a
     minor upgrade that changes neither leaves every proposal as it was. Or
     its record then not the ledger's now, for the same period's weeks. It
@@ -615,7 +620,9 @@ The first step, for v0.22.0, as above, except:
     taken as worse than what was approved. The approvals it had were given
     to the backtest replaced, so they are withdrawn, and told as
     `proposal.backtested` (through the outbox, to the webhook and Slack),
-    naming who gave them and whether an agent asked; the change keeps the
+    naming who gave them and whether an agent asked, when any were or an
+    agent asked (Lapilli's own after an upgrade, withdrawing nothing, are
+    in the history alone); the change keeps the
     old backtest, the new one, whose approvals were withdrawn and whether
     an agent asked, which the history shows, with what the old one missed,
     caught and caught later; MCP's `rule` gives each proposal's
@@ -625,15 +632,35 @@ The first step, for v0.22.0, as above, except:
     and the weeks move on), only where `--mcp-propose` lets it propose,
     its tries counted apart from its person's, as `propose` counts them.
   - **Lapilli backtests stale ones itself**, as Lapilli, in its work
-    (`backtestStale`), while it replays and isn't read-only: those waiting
-    for approval, the longest unmoved first, three a round at most, one at
-    a time under the heavy turn, waiting for a comparison running, each
-    within `--timeout`. So a change to `verdict.Semantics` leaves no
-    proposal waiting for a click, Lapilli's own above all, which no one
-    owns. Never one whose rule changed since, one backtested again in the
-    last ten minutes, or one it failed to in the last hour (a replica's
-    own memory: the next leader tries again). Its are bounded by the round,
-    not the hour's twenty.
+    (`backtestStale`): those waiting for approval an earlier lapilli
+    backtested (an older `semantics`, or none), so that a change to
+    `verdict.Semantics` leaves no proposal waiting for a click, Lapilli's
+    own above all, which no one owns. On a run of its work alone (`jobs`'
+    `run`), never when a write pokes it, so that no editor's quiet window
+    or note, again and again, makes it replay; only with `--changes`, as
+    Lapilli proposes of itself; while it replays and isn't read-only. The
+    longest unmoved first, three a run at most, and twelve an hour
+    (`LapilliBacktestsAnHour`), counted by the ledger on every replica
+    together, as a person's are; one at a time under the heavy turn,
+    waiting for a comparison running, each within `--timeout`. A record
+    that changed since, a rule that did, or a newer lapilli's backtest is a
+    person's: an incident written down and taken away doesn't make Lapilli
+    replay twelve weeks. One that doesn't finish within `--timeout`
+    replaces nothing and withdraws nothing; it, and one it failed to
+    otherwise, isn't tried again for an hour (a replica's own memory: the
+    next leader tries again); one backtested again in the last ten minutes
+    isn't either.
+  - **Shown, never decisive.** What a proposal says when read never stops
+    a change being carried out: an older version that won't parse, or a
+    read that fails, leaves `for_outlasts` as the proposal kept it, and
+    when which proposals are stale can't be read, `carryOut` approves none
+    as fewer approvals are needed that round and goes on (Demote, and the
+    changes approved, with it). The single read of an older version
+    (`flights`) runs under a context of its own, thirty seconds at most,
+    that no reader's leaving cancels; a panic in it is each reader's
+    error, and each waits as long as its own request does. Every incident
+    ID a pull request's description names is a code span of its own, a
+    backtick in it a quote and a line break a space (`mdIDs`).
 - **Not yet:** proposals in the weekly digest's tasks line, and a
   proposal carried by a task made elsewhere (a proposal can be made into a
   task).
