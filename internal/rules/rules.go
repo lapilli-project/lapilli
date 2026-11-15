@@ -275,6 +275,16 @@ const (
 // keep it out of a backtest unseen (Unreplayable).
 const TooWide = "too many labels on its series to replay: "
 
+// Unanswered says a rule with this Unsupported was replayed and the
+// replay gave no answer: it didn't finish (Unfinished), its query failed
+// (QueryFailed, HistoryUnread among them), or its labels on its series
+// were too many (TooWide). Its firings as kept stand, and the run says it
+// failed; a rule that can't be replayed (paused, a cloud's alarm in its own
+// terms) isn't one.
+func Unanswered(unsupported string) bool {
+	return unsupported == Unfinished || strings.HasPrefix(unsupported, QueryFailed) || strings.HasPrefix(unsupported, TooWide)
+}
+
 // Unreplayable says a run should count a rule with this Unsupported as
 // one it couldn't replay (--fail-unreplayed): its replay failed for a
 // reason of the run (ReplayFailed), or its labels on its series were too

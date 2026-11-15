@@ -511,7 +511,7 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 				unfinished = true
 				f.Keep[r.Name] = true
 				failed[r.Name] = r.Unsupported
-			case strings.HasPrefix(r.Unsupported, "query failed"):
+			case rules.Unanswered(r.Unsupported):
 				f.Keep[r.Name] = true
 				failed[r.Name] = r.Unsupported
 			}
