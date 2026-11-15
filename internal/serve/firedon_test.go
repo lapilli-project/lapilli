@@ -8,6 +8,7 @@ import (
 
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -98,5 +99,56 @@ func TestFiredOnNoLabels(t *testing.T) {
 	s.jobs(ctx, true)
 	if xs, _, err := s.firedOnOf(ctx, time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC), now); err != nil || xs != nil {
 		t.Errorf("%+v %v", xs, err)
+	}
+}
+
+// unanswering is a history that answers nothing until it is given up on: a
+// replay asking it uses up all its time.
+type unanswering struct{}
+
+func (unanswering) QueryRange(ctx context.Context, _ string, _, _ time.Time, _ time.Duration) ([]prom.Series, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// TestFiredOnAfterSlowReplays: the digest's replays use up its --timeout,
+// and its count of the firings by team, in a time of its own, is kept all
+// the same; the digest holds the runs up for --timeout and that at most.
+func TestFiredOnAfterSlowReplays(t *testing.T) {
+	ctx := context.Background()
+	// Errors is noisy in the week before, which INC-0 keeps the record of:
+	// the digest replays it with longer fors.
+	s, _ := server(t, func(c *Config) { c.Backfill = 10 * 24 * time.Hour; c.Impact = ""; keepRecord(c) })
+	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "web", Labels: incident.Labels{"service": {"search"}}}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	from := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
+	if _, ok, err := s.l.ForPeriod(ctx, "suggestions", from); err != nil || !ok {
+		t.Fatalf("the digest worked out no suggestions: %v", err)
+	}
+	// Worked out again, with replays that answer nothing in its time.
+	if err := s.l.ReplaceResult(ctx, "fired_on", now, from, from.Add(7*24*time.Hour), []firedOn{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.SetMeta(ctx, "digest", "0"); err != nil {
+		t.Fatal(err)
+	}
+	s.h, s.cfg.Timeout = unanswering{}, 300*time.Millisecond
+	o, _ := s.options(ctx)
+	start := time.Now()
+	if fresh, err := s.digest(ctx, o); err != nil || !fresh {
+		t.Fatalf("the digest: %v %v", fresh, err)
+	}
+	if took := time.Since(start); took < s.cfg.Timeout {
+		t.Fatalf("the replays took %s: they didn't use up --timeout", took)
+	}
+	on, err := s.firedOnFor(ctx, from)
+	if err != nil || on["Errors"].Team != "web" {
+		t.Errorf("fired_on after the replays ran out of time: %+v %v", on, err)
 	}
 }

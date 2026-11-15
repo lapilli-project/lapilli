@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **The weekly digest could hold the runs up for twice `--timeout`.** In
+  0.41.0 its count of the firings by team had a `--timeout` of its own,
+  after the replays had used theirs. It has a minute at most now, or
+  `--timeout` when that is shorter, so the digest holds the runs up for
+  `--timeout` and a minute at most.
+
 ## [0.41.0] - 2026-11-15
 
 A deployment with no incident source had every rule that fired ten times

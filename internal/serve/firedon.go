@@ -32,6 +32,10 @@ type firedOn struct {
 	Unread int `json:"unread,omitempty"`
 }
 
+// firedOnWithin is the most time the weekly digest gives the read of the
+// firings by team, past its replays' --timeout; --timeout, when shorter.
+const firedOnWithin = time.Minute
+
 // firedOnRead is how many of the alerts that fired most in a week are read
 // to count firings by team: those past them are counted as no team's.
 // Replaced in tests.
