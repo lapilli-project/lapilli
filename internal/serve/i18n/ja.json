@@ -784,6 +784,7 @@
  "More than %d notices made in the last day were given up on, after ten tries: the log says why.": "直近 1 日に作った通知のうち %d 件を超えるものは、10 回試して送信をあきらめました。理由はログにあります。",
  "1 notice made in the last day was given up on, after ten tries: the log says why.": "直近 1 日に作った通知 1 件は、10 回試して送信をあきらめました。理由はログにあります。",
  "%d notices made in the last day were given up on, after ten tries: the log says why.": "直近 1 日に作った通知 %d 件は、10 回試して送信をあきらめました。理由はログにあります。",
+ "Up to the week to %s, the weekly digest went to Slack or was passed over.": "%s までの週まで、週次ダイジェストは Slack に投稿したか、見送りました。",
  "%d of %d tasks": "タスク %[2]d 件中 %[1]d 件",
  "%d of 1 task": "タスク 1 件中 %d 件",
  "Show the change": "変更の表示",

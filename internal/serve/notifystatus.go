@@ -58,29 +58,37 @@ type notifyStatus struct {
 }
 
 // digestPosted is how the weekly digest's posts to Slack went, as the
-// ledger keeps it, the same on every replica and after a restart: To, the
-// end of the last week posted (digest-sent); Failed, a later week whose
-// digest failed, worked out or posted (a run of the digest's with an
-// error), At when, and FailedTo its end.
+// ledger keeps it, the same on every replica and after a restart: Posted,
+// the end of the last week posted (digest-posted, set for a post alone);
+// Done, the end of the last week done with, posted or passed over while
+// the digest was off or newly set (digest-sent), said so where a ledger
+// from before digest-posted was kept has none of that; Failed, a later
+// week whose digest failed, worked out or posted (a run of the digest's
+// with an error), At when, and FailedTo its end.
 type digestPosted struct {
-	To, At, FailedTo time.Time
-	Failed           bool
+	Posted, Done, At, FailedTo time.Time
+	Failed                     bool
 }
 
 func (s *Server) digestPosted(ctx context.Context) (*digestPosted, error) {
 	var p digestPosted
-	v, err := s.l.Meta(ctx, "digest-sent")
-	if err != nil {
-		return nil, err
-	}
-	if week, err := strconv.ParseInt(v, 10, 64); err == nil {
-		p.To = s.l.Midnight(week)
+	for _, m := range []struct {
+		key string
+		to  *time.Time
+	}{{"digest-posted", &p.Posted}, {"digest-sent", &p.Done}} {
+		v, err := s.l.Meta(ctx, m.key)
+		if err != nil {
+			return nil, err
+		}
+		if week, err := strconv.ParseInt(v, 10, 64); err == nil {
+			*m.to = s.l.Midnight(week)
+		}
 	}
 	r, ok, err := s.l.LastFailed(ctx, "digest")
 	if err != nil {
 		return nil, err
 	}
-	if ok && r.To.After(p.To) {
+	if ok && r.To.After(p.Done) {
 		p.Failed, p.At, p.FailedTo = true, r.Started, r.To
 	}
 	return &p, nil

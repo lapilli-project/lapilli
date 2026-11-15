@@ -79,8 +79,9 @@ page. Counts and kinds, never a URL. */}}
 {{define "notifysent"}}{{if not .Sends}}{{t "Nothing goes out: no webhook, Slack or place for reports is given."}}{{else if .LastSent.IsZero}}{{t "Nothing sent from the outbox yet."}}{{else}}{{t "Last sent from the outbox: %s." (at .Loc .LastSent)}}{{end}}{{end}}
 
 {{/* How the weekly digest's posts to Slack went, as the ledger has it:
-the last week posted. */}}
-{{define "slackposted"}}{{$loc := .P.Loc}}{{with .V}}{{if .To.IsZero}}{{t "No weekly digest has been posted to Slack yet."}}{{else}}{{t "Last posted to Slack for the week to %s." (day $loc .To)}}{{end}}{{end}}{{end}}
+the last week posted; or, where the ledger knows only the last week done
+with, posted or passed over, that. */}}
+{{define "slackposted"}}{{$loc := .P.Loc}}{{with .V}}{{if not .Posted.IsZero}}{{t "Last posted to Slack for the week to %s." (day $loc .Posted)}}{{else if not .Done.IsZero}}{{t "Up to the week to %s, the weekly digest went to Slack or was passed over." (day $loc .Done)}}{{else}}{{t "No weekly digest has been posted to Slack yet."}}{{end}}{{end}}{{end}}
 
 {{/* What is on and goes nowhere, or failed to go: a sentence each, never a
 colour alone. */}}

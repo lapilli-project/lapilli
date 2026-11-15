@@ -784,6 +784,7 @@
  "More than %d notices made in the last day were given up on, after ten tries: the log says why.": "Más de %d avisos hechos en el último día se dieron por perdidos, tras diez intentos: el registro dice por qué.",
  "1 notice made in the last day was given up on, after ten tries: the log says why.": "1 aviso hecho en el último día se dio por perdido, tras diez intentos: el registro dice por qué.",
  "%d notices made in the last day were given up on, after ten tries: the log says why.": "%d avisos hechos en el último día se dieron por perdidos, tras diez intentos: el registro dice por qué.",
+ "Up to the week to %s, the weekly digest went to Slack or was passed over.": "Hasta la semana que termina el %s, el resumen semanal fue a Slack o se omitió.",
  "%d of %d tasks": "%d de %d tareas",
  "%d of 1 task": "%d de 1 tarea",
  "Show the change": "Ver el cambio",

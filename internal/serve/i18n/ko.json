@@ -784,6 +784,7 @@
  "More than %d notices made in the last day were given up on, after ten tries: the log says why.": "최근 하루 동안 만든 알림 중 %d건 넘게 열 번 시도한 끝에 보내기를 포기했어요. 이유는 로그에 있어요.",
  "1 notice made in the last day was given up on, after ten tries: the log says why.": "최근 하루 동안 만든 알림 1건을 열 번 시도한 끝에 보내기를 포기했어요. 이유는 로그에 있어요.",
  "%d notices made in the last day were given up on, after ten tries: the log says why.": "최근 하루 동안 만든 알림 %d건을 열 번 시도한 끝에 보내기를 포기했어요. 이유는 로그에 있어요.",
+ "Up to the week to %s, the weekly digest went to Slack or was passed over.": "%s 까지의 주까지 주간 요약을 Slack 에 올렸거나 건너뛰었어요.",
  "%d of %d tasks": "작업 %[2]d건 중 %[1]d건",
  "%d of 1 task": "작업 1건 중 %d건",
  "Show the change": "변경 보기",
