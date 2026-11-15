@@ -181,6 +181,14 @@ button.quiet-button:hover { filter: none; background: var(--accent-soft); }
 details { margin-top: 1rem; }
 summary { cursor: pointer; color: var(--dim); font-size: .95rem; }
 td.t { white-space: nowrap; }
+/* The overview's table of the weeks fits a laptop's screen: the week's
+   date kept whole, its marks' tags under it as they fit, the headers
+   between their words (Korean at its spaces), the cells as close as the
+   rules list's. */
+table.weeks th, table.weeks td { padding: .5rem .4rem; }
+table.weeks th { white-space: normal; word-break: keep-all; font-size: .85rem; }
+table.weeks td.t { white-space: normal; }
+table.weeks td.t .d { white-space: nowrap; }
 
 /* The dashboard. Chart colours were checked for colour blindness and
    contrast against the card: caught and nothing separate by ΔE 15 or more,

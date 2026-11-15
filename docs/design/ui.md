@@ -1064,6 +1064,16 @@ the weeks says the same, a tag a mark. "What to look at" is as it was, and
 its "Make it a task" is disabled, with why, for whoever may not: a team's
 editor makes tasks of their team's rules, and none about an incident.
 
+The table of the weeks fits its box on a laptop's screen. Its first
+column, the week with its marks' tags kept on one line, grew to 422 px in
+English and 598 in Spanish on the test pages, and Spanish's headers alone
+were wider than the box (1133 px of 1100). Now the week's date is kept
+whole and its tags go under it as they fit, the headers wrap between their
+words (Korean's at its spaces), a little smaller, and the cells are as
+close as the rules list's. `test/a11y/axe.mjs` checks it as it checks the
+rules list's, at 1280, 1440, 1600 and 1920 px in each language: against
+the stylesheet before, it found 47 (Spanish at 1280, 721 px too wide).
+
 ### An incident's timeline
 
 An incident's page draws it on a time axis from `--lead` before it to
@@ -1105,10 +1115,5 @@ and when each firing started, are a table in a `<details>` under it.
 
 ## What is left
 
-- **The overview's table of the weeks** is wider than its box from 1280 to
-  1920 px in Spanish and Japanese, and at 1280 and 1440 in English: its
-  first column, the week with its marks' tags, grows. It is a region of its
-  own, focusable, that scrolls, as a wide table may; the rules list's fit
-  check doesn't hold it.
 - **A rule's header** draws its disabled actions its own way, every reason
   said after the buttons, not by the `off` template.
