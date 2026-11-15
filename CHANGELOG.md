@@ -2,6 +2,52 @@
 
 ## [Unreleased]
 
+A security fix: what a rules input makes beyond its own text is bounded,
+for the whole input, where it is made. No ledger schema change; the API
+and MCP answer as they did.
+
+### Security
+
+- **A small rules input could make gigabytes** (affected: every release
+  from 0.1.0). Copies were made for each rule before anything looked at
+  them: a Google Rules' namespace, and an Azure rule group's cluster, put
+  into each selector of each rule's expression (from 0.5.0); a group's
+  labels copied into each recording rule (from 0.32.0), and into each
+  alert rule, to be shown, when one of them had a character that doesn't
+  show (from 0.34.1), and carried by each alert rule's alerts wherever it
+  is judged, shown or hashed (from 0.32.0); and the text YAML aliases
+  bring in again, which yaml.v3 bounds by how many values it is, not by
+  their text (from 0.1.0). Anyone who can write a rule file, a ConfigMap
+  of rules or a ruler's rule group could do it. Read and hashed, a Rules
+  of 99 KB (a namespace of 40 KB on 1,000 rules of 16 selectors) made
+  6.5 GB in 2.8 s, and an Azure rule group as much; a group of 9,999
+  labels on 6,700 recording rules (286 KB) 4.2 GB; on 6,700 alert rules,
+  one label with a direction mark, 4.2 GB; on 3,000 recording rules in a
+  ConfigMap (193 KB), 1.9 GB; on 1,000 alert rules (123 KB), 2.3 GB; on
+  60,000 alert rules (1.8 MB), 11.7 s to read; an 8 MB string aliased by
+  100 rules' labels, 5.1 GB; 200 documents of 21 KB, 1.9 GB.
+  What an input makes beyond its own text is now charged where it is
+  made, before it is made, for the whole input (a file, a directory's
+  files, a stream, a ConfigMap's files, a ruler's namespaces, a version's
+  documents in the ledger): the larger of 4 MiB and 16 times its size,
+  256 MiB at most. Each input above is refused having allocated 3 to 96
+  MB (reading its YAML among it), in 2 to 96 ms; the ConfigMap's recording
+  rules are no longer made when nothing asks for them, and it reads in 12
+  ms. No label is capped: one past 16 KiB, which Prometheus takes, reads,
+  as do versions kept in the ledger before this release. Real sets are
+  far inside the bound: kube-prometheus-stack's rules four times over,
+  each group with labels of its own, make 1.5 MB of the 100 MB they may.
+  A refusal names what made it, as `group "g" puts its 9999 labels,
+  1019898 bytes with what holds them, on each of its alert rules: what the
+  input makes beyond its own text, 6119388 bytes so far, is past the
+  5227488 an input of 326718 bytes may make`, and is never passed over: an
+  error from `lapilli verdict --rules`, in `lapilli serve`'s log and status
+  as "reading the rules" (the version in effect stays), and for a version
+  in the ledger read again; a ConfigMap's rule file so refused is an error
+  naming its key, where one passed over left its rules out unsaid; a
+  ruler's namespace so refused is passed over saying why, and the others
+  are read as they would be without it.
+
 ## [0.43.0] - 2026-11-16
 
 A deployment upgraded to 0.41.0 had a proposal 0.40 made still waiting:

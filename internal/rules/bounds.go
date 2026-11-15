@@ -21,15 +21,19 @@ import (
 //     alerts carry them (Rule.AlertLabels, Rule.Whole, the replay's), which
 //     is worked out for each rule wherever its rules are judged, shown or
 //     hashed, and each recording rule has a copy of its own. A group of
-//     9,999 labels on 6,700 recording rules, a file of 268 KB, made 3.1 GB;
+//     9,999 labels on 6,700 recording rules, a file of 286 KB, made 4.2 GB;
 //   - a Google Rules' namespace, and an Azure rule group's cluster, put into
 //     each selector of each rule's expression (scopeWith): a namespace of
-//     40 KB in a file of 78 KB made 1.6 GB.
+//     40 KB on 1,000 rules of 16 selectors, a file of 99 KB, made 6.5 GB,
+//     read and hashed.
 //
 // Real sets are far inside it: their text is what they make, but for the
-// labels a group shares, some kilobyte a rule, and annotations shared by an
-// alias. 5,000 rules, a group's 300 bytes of labels on each and 800 bytes
-// of annotations shared, make some 10 MB beyond a file of 1.1 MB.
+// labels a group shares, some hundreds of bytes a rule, and annotations
+// shared by an alias. kube-prometheus-stack's rules four times over, each
+// group with labels of its own, make 1.5 MB of the 100 MB they may; 5,000
+// rules, a group's 300 bytes of labels on each and 800 bytes of
+// annotations shared by an alias, 6.8 MB beyond a file of 1 MB
+// (TestRealSetsRead).
 const (
 	ExpandMin   = 4 << 20
 	ExpandTimes = 16

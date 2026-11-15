@@ -396,6 +396,46 @@ in the namespaces or rule groups of one ruler. It is held so:
     document's nodes are let go of as they are decoded. Before 0.34.1 a
     hostile ruler's 4 MB of tiny rules took over a GB; 132 MiB now. A unit,
     and a cloud's alarm, are decoded in linear time too.
+  - What rules make beyond their own text, however they make it, is
+    bounded for the whole input they are read from (`rules.madeLimit`): a
+    file, a directory's files, a stream, a ConfigMap's files, a ruler's
+    namespaces together, a version's documents in the ledger. It is the
+    larger of 4 MiB and 16 times the input's size, and 256 MiB at most
+    (`ExpandMin`, `ExpandTimes`, `MaxMade`), charged where a copy is made,
+    before it is made:
+    - the text YAML aliases bring in again, values and keys, judged
+      against the whole input's size (yaml.v3's own bound counts values,
+      not their text);
+    - a group's labels on each of its rules, worked out once for the
+      group, the map and its text (`labelsCost`, no less than what Go
+      allocates for a copy): a recording rule has a copy of its own, and an
+      alert rule's alerts carry them (`AlertLabels`, `Whole`, the replay's
+      identity and firings), worked out for each rule wherever it is
+      judged, shown or hashed, so that what is charged when the rules are
+      read bounds each of those passes too;
+    - a Google Rules' namespace and an Azure rule group's cluster, put
+      into each selector of each rule's expression: it is scoped with the
+      room the input has left, and given up before it grows past it.
+
+    Why there: the copies were made for each rule before any check could
+    look at the rules (a namespace of 40 KB in a Rules of 99 KB made
+    6.5 GB, a group of 9,999 labels on 6,700 recording rules in a file of
+    286 KB 4.2 GB), and a check of the rules once read takes time for each
+    rule times its group's labels; charged where they are made, a refusal
+    comes at the rule that crosses the line, in time of the input's bytes.
+    For the input, not each document: 200 documents of 21 KB, each within
+    4 MiB alone, made 1.9 GB together. A group's labels are looked through
+    once to be shown, its rules sharing what is shown. No label is capped:
+    Prometheus takes a label of any length, and a version kept in the
+    ledger may hold one. Past the bound, a `MadeError` names what made it,
+    and it is never passed over as a rule file that doesn't read may be: a
+    ConfigMap's file so refused is an error naming its key, and a ruler's
+    namespace is passed over saying why, what it counted given back, so
+    the namespaces after it read as they would without it. Real sets are
+    far inside it: kube-prometheus-stack's rules four times over, each
+    group with labels of its own, make 1.5 MB of the 100 MB they may;
+    5,000 rules sharing a group's 300 bytes of labels and 800 of
+    annotations by an alias, 6.8 MB of 16.8.
   - What a ruler answers with an error is said without the token or the
     signature it was asked with, which it may echo, as a history API's
     errors are (`prom.Redact`).
