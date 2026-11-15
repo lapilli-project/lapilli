@@ -31,3 +31,17 @@ suggest, or to the form that adds one. */}}
 {{/* How a rule's team was found, on its page, after whose it is: by its
 note, its name, or its labels; or why no team owns it. */}}
 {{define "ownwhy"}}{{$p := .P}}{{with .V}}{{with .How}}{{if eq .By "note"}}{{if .Team}}{{t "Its note names the team."}}{{else}}{{t "Its note names a team that is gone: change the note's team."}}{{end}}{{else if eq .By "pattern"}}{{tbdi "Its name matches %s's pattern, %s." .Team (shown .Pattern)}}{{else if eq .By "labels"}}{{tbdi "Its labels have %s, which %s owns by." (shown .Labels) .Team}}{{else}}{{t "No team's name pattern or labels match it."}}{{end}}{{end}}{{with .Teamless}} {{template "teamslink" (on $p .)}}{{end}}{{end}}{{end}}
+
+{{/* Who may approve a change, on the Roles page (an admin's): those
+--approvers names, the admins without it, or no one, and why. */}}
+{{define "approvers"}}{{if eq .No "changes"}}{{t "No one: changes are off, as lapilli serve was started without --changes."}}{{else if eq .No "read-only"}}{{t "No one: lapilli serve was started with --read-only."}}{{else if eq .No "roles"}}{{t "No one: without --approvers or --admins, no one approves a change."}}{{else if eq .From "approvers"}}{{tbdi "Those --approvers names: %s." (join .List ", ")}}{{else}}{{tbdi "The admins, as --approvers isn't given: %s." (join .List ", ")}}{{end}}{{end}}
+
+{{/* Who may approve a proposal waiting for approval, in its approval
+panel: who may approve a change, but the one it was made by or for and
+those who approved it, named to an admin alone; and, when fewer are left
+than it needs, why, and how to change it. */}}
+{{define "mayapprove"}}<p id="may-approve">{{if .In.No}}{{if eq .In.No "read-only"}}{{t "No one may approve it: lapilli serve was started with --read-only."}}{{else}}{{t "No one may approve it: without --approvers or --admins, no one approves a change."}}{{end}}
+{{- else if .NoOne}}{{if eq .In.From "admins"}}{{t "No one may approve it: only the admins approve, as --approvers isn't given, and the only admin is the one it was made by or for. Give --approvers to name who else may."}}{{else}}{{t "No one may approve it: --approvers names only the one it was made by or for. Name others in --approvers."}}{{end}}
+{{- else if .Stuck}}{{t "It needs %d more approvals, and only %d of those who may approve haven't made or approved it: name more in --approvers, or give --approvals 1." .Need (len .Left)}}
+{{- else if .Named}}{{if eq .In.From "admins"}}{{tbdi "Who may approve it: the admins, as --approvers isn't given, but the one it was made by or for: %s." (join .Left ", ")}}{{else}}{{tbdi "Who may approve it: those --approvers names, but the one it was made by or for: %s." (join .Left ", ")}}{{end}}
+{{- else}}{{if eq .In.From "admins"}}{{t "Who may approve it: the admins, as --approvers isn't given, but the one it was made by or for."}}{{else}}{{t "Who may approve it: those --approvers names, but the one it was made by or for."}}{{end}}{{end}}</p>{{end}}

@@ -224,7 +224,7 @@ first, so that Enter in a field writes nothing. */}}
 <div class="scroll"><table>
 <tbody><tr><th scope="row">{{t "admin"}}</th><td>{{join .Admins ", "}}</td></tr>
 <tr><th scope="row">{{t "editor"}}</th><td>{{or (join .Editors ", ") "–"}}</td></tr>
-<tr><th scope="row">{{t "approver"}}</th><td>{{or (join .Approvers ", ") "–"}}</td></tr></tbody>
+<tr><th scope="row">{{t "approver"}}</th><td>{{template "approvers" .Approvers}}</td></tr></tbody>
 </table></div>
 <h2>{{t "Given here"}}</h2>
 <div class="scroll"><table>

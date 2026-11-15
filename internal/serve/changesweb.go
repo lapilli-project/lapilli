@@ -357,6 +357,8 @@ type proposalView struct {
 	Read string
 	// Undoes is, for an undo, the change it undoes.
 	Undoes *undoneOf
+	// MayApprove is, waiting for approval, who may approve it.
+	MayApprove *mayApprove
 }
 
 // undoneOf is the change an undo undoes, as the undo's page names it: its
@@ -450,6 +452,7 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	s.offs(r, p, &v)
+	v.MayApprove = s.mayApproveOf(r, p, v.Need)
 	return v, nil
 }
 
