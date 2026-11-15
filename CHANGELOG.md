@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.44.2] - 2026-11-16
+
 A deployment with no incident written down had its overview read
 "Woken for nothing: 21": a judgement, in a tile's number, of firings no
 record could judge. Precision and noisy rules there said "not known"; the
