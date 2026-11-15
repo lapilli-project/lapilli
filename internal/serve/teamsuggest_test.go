@@ -87,7 +87,7 @@ func TestTeamsSuggested(t *testing.T) {
 	_, body, _ = get(t, h, "/teams")
 	for _, x := range []string{`id="suggested"`, "Teams these rules&#39; labels suggest", "<bdi>payments</bdi>", "<code><bdi>owner=cart</bdi></code>",
 		`<form method="post" action="/teams/suggested"><button>Make these teams</button></form>`,
-		"1 label values can&#39;t be a team&#39;s name"} {
+		"1 label value can&#39;t be a team&#39;s name"} {
 		if !strings.Contains(body, x) {
 			t.Errorf("/teams lacks %q", x)
 		}

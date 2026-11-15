@@ -12,8 +12,8 @@ admin, the button that makes them; disabled, with why, for anyone else. */}}
 <tbody>{{range .Lines}}<tr><td class="name"><bdi>{{.Value}}</bdi></td><td class="labels"><code><bdi>{{shown .Key}}={{shown .Value}}</bdi></code></td>
 <td class="n">{{if .Taken}}{{tbdi "A team called %s is there already, owning by something else: give it this label to own these rules." .Value}}{{if $p.Status.Admin}} <a href="{{$p.Link "/teams" "edit" .Taken.ID}}">{{t "Change it"}}</a>{{end}}{{else}}{{.Rules}}{{end}}</td></tr>{{end}}</tbody>
 </table></div>
-{{with .More}}<p class="quiet">{{t "%d more values are left out: those with the most rules are listed and made first, and the rest are suggested once they are." .}}</p>{{end}}
-{{with .Unnamed}}<p class="quiet">{{t "%d label values can't be a team's name (letters, digits, spaces and . _ -, up to 64): give their teams a name and the label with the form below." .}}</p>{{end}}
+{{with .More}}<p class="quiet">{{if eq . 1}}{{t "1 more value is left out: those with the most rules are listed and made first, and the rest are suggested once they are."}}{{else}}{{t "%d more values are left out: those with the most rules are listed and made first, and the rest are suggested once they are." .}}{{end}}</p>{{end}}
+{{with .Unnamed}}<p class="quiet">{{if eq . 1}}{{t "1 label value can't be a team's name (letters, digits, spaces and . _ -, up to 64): give its team a name and the label with the form below."}}{{else}}{{t "%d label values can't be a team's name (letters, digits, spaces and . _ -, up to 64): give their teams a name and the label with the form below." .}}{{end}}</p>{{end}}
 {{if .Make}}{{if $p.Status.Admin}}<form method="post" action="/teams/suggested"><button>{{t "Make these teams"}}</button></form>{{else}}<p>{{template "off" (offOf $p "Make these teams" "admin" "suggested-why")}}</p>{{end}}
 <p class="quiet">{{t "Each is made as the form below makes a team: named for the value, owning the rules with the label. Change or delete any of them after."}}</p>{{end}}
 </section>{{end}}{{end}}
@@ -40,7 +40,7 @@ note, its name, or its labels; or why no team owns it. */}}
 panel: who may approve a change, but the one it was made by or for and
 those who approved it, named to an admin alone; and, when fewer are left
 than it needs, why, and how to change it. */}}
-{{define "mayapprove"}}<p id="may-approve">{{if .In.No}}{{if eq .In.No "read-only"}}{{t "No one may approve it: lapilli serve was started with --read-only."}}{{else}}{{t "No one may approve it: without --approvers or --admins, no one approves a change."}}{{end}}
+{{define "mayapprove"}}<p id="may-approve"{{if or .In.No .Stuck}} class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{else}}>{{end}}{{if .In.No}}{{if eq .In.No "read-only"}}{{t "No one may approve it: lapilli serve was started with --read-only."}}{{else}}{{t "No one may approve it: without --approvers or --admins, no one approves a change."}}{{end}}
 {{- else if .NoOne}}{{if eq .In.From "admins"}}{{t "No one may approve it: only the admins approve, as --approvers isn't given, and the only admin is the one it was made by or for. Give --approvers to name who else may."}}{{else}}{{t "No one may approve it: --approvers names only the one it was made by or for. Name others in --approvers."}}{{end}}
 {{- else if .Stuck}}{{t "It needs %d more approvals, and only %d of those who may approve haven't made or approved it: name more in --approvers, or give --approvals 1." .Need (len .Left)}}
 {{- else if .Named}}{{if eq .In.From "admins"}}{{tbdi "Who may approve it: the admins, as --approvers isn't given, but the one it was made by or for: %s." (join .Left ", ")}}{{else}}{{tbdi "Who may approve it: those --approvers names, but the one it was made by or for: %s." (join .Left ", ")}}{{end}}
@@ -61,7 +61,9 @@ page. Counts and kinds, never a URL. */}}
 {{define "notifycard"}}{{$p := .P}}{{with .V}}<li class="card">
   <h2><a href="{{$p.Link "/settings#notifications"}}">{{t "Notifications"}}</a></h2>
   <p>{{t "Where notices, the weekly digest and reports go, and whether they went."}}</p>
-  {{template "notifywarn" .}}
+  {{if .DigestNowhere}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "The weekly digest goes nowhere."}}</p>{{end}}
+  {{- with .ReportsNowhere}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if eq . 1}}{{t "1 report goes nowhere."}}{{else}}{{t "%d reports go nowhere." .}}{{end}}</p>{{end}}
+  {{- with .Failed}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if eq . 1}}{{t "1 notice failed in the last day."}}{{else}}{{t "%d notices failed in the last day." .}}{{end}}</p>{{end}}
   <p class="quiet">{{template "notifysent" .}}</p>
 </li>{{end}}{{end}}
 

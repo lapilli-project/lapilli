@@ -26,7 +26,7 @@ func TestNotifyStatusNowhere(t *testing.T) {
 		}
 	}
 	_, body, _ = get(t, h, "/manage")
-	for _, x := range []string{`href="/settings#notifications">Notifications</a>`, nowhere, "Nothing goes out"} {
+	for _, x := range []string{`href="/settings#notifications">Notifications</a>`, "The weekly digest goes nowhere.", "Nothing goes out"} {
 		if !strings.Contains(body, x) {
 			t.Errorf("/manage lacks %q", x)
 		}
@@ -73,9 +73,10 @@ func TestNotifyStatusSent(t *testing.T) {
 	}
 	// Sending is written aside, and empties no page kept: these are
 	// worked out again.
-	for _, p := range []string{"/manage", "/settings"} {
+	for p, failed := range map[string]string{"/manage": "2 notices failed in the last day.",
+		"/settings": "2 notices made in the last day weren&#39;t sent: their last try failed, and the log says why."} {
 		_, body, hd := get(t, h, p)
-		for _, x := range []string{"Last sent from the outbox: ", "2 notices made in the last day weren&#39;t sent: their last try failed, and the log says why."} {
+		for _, x := range []string{"Last sent from the outbox: ", failed} {
 			if !strings.Contains(body, x) {
 				t.Errorf("%s lacks %q:\n%s", p, x, body)
 			}

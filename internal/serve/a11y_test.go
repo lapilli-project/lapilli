@@ -134,6 +134,13 @@ func TestA11yServe(t *testing.T) {
 	s.cfg.AllowedHosts = append(s.cfg.AllowedHosts, "host.docker.internal")
 	mux := http.NewServeMux()
 	paths = append(paths, a11yPreviews(mux, s)...)
+	// A first-time user's deployment, under /first.
+	first, firstPaths := firstUseServer(t)
+	first.cfg.AllowedHosts = append(first.cfg.AllowedHosts, "host.docker.internal")
+	mux.Handle("/first/", http.StripPrefix("/first", first.Handler()))
+	for _, p := range firstPaths {
+		paths = append(paths, "/first"+p)
+	}
 	mux.HandleFunc("GET /a11y-paths", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintln(w, strings.Join(paths, "\n"))
 	})
