@@ -699,6 +699,8 @@
  "The next four weeks": "앞으로 4주",
  "The first %d are listed.": "처음 %d개만 보여요.",
  "It doesn't fall in the next four weeks.": "앞으로 4주 안에는 해당하는 때가 없어요.",
+ "The last day with firings.": "발화가 있었던 마지막 날이에요.",
+ "No firing to show in the last twelve weeks.": "최근 12주 동안 보여 줄 발화가 없어요.",
  "%d of %d tasks": "작업 %[2]d건 중 %[1]d건",
  "%d of 1 task": "작업 1건 중 %d건",
  "Show the change": "변경 보기",

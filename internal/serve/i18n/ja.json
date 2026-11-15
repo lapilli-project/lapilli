@@ -699,6 +699,8 @@
  "The next four weeks": "今後 4 週",
  "The first %d are listed.": "最初の %d 件のみ表示しています。",
  "It doesn't fall in the next four weeks.": "今後 4 週間に該当する時間はありません。",
+ "The last day with firings.": "発火があった最後の日です。",
+ "No firing to show in the last twelve weeks.": "直近 12 週間に表示できる発火はありません。",
  "%d of %d tasks": "タスク %[2]d 件中 %[1]d 件",
  "%d of 1 task": "タスク 1 件中 %d 件",
  "Show the change": "変更の表示",

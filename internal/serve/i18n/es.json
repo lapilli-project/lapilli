@@ -699,6 +699,8 @@
  "The next four weeks": "Las próximas cuatro semanas",
  "The first %d are listed.": "Se muestran los primeros %d.",
  "It doesn't fall in the next four weeks.": "No cae en las próximas cuatro semanas.",
+ "The last day with firings.": "El último día con disparos.",
+ "No firing to show in the last twelve weeks.": "Ningún disparo que mostrar en las últimas doce semanas.",
  "%d of %d tasks": "%d de %d tareas",
  "%d of 1 task": "%d de 1 tarea",
  "Show the change": "Ver el cambio",

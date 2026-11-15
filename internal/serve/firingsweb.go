@@ -135,6 +135,8 @@ type firingsView struct {
 	PrevDay, ThenDay string
 	Strip            dayStrip
 	Bulk             bulkView
+	// Said is, asked for no day, which it shows: the last with firings.
+	Said firingsSaid
 }
 
 // The strip's geometry: an hour every hourStep, its bar hourBar wide, in
@@ -156,11 +158,19 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 		}
 		a.day = day
 	}
+	// Without a day, the last day with firings, not an empty today.
+	var said firingsSaid
+	if q.Get("day") == "" {
+		var err error
+		if a.day, said, err = s.lastFiringDay(r, a.rule, a.black); err != nil {
+			return nil, err
+		}
+	}
 	a.before, _ = strconv.ParseInt(q.Get("before"), 10, 64)
 	var more bool
 	a.labels, more = labelsOf(q["label"])
 	dl := s.l
-	v := firingsView{Day: s.l.Midnight(a.day).In(s.cfg.Loc).Format("2006-01-02"), Rule: a.rule, Black: a.black, More: more,
+	v := firingsView{Said: said, Day: s.l.Midnight(a.day).In(s.cfg.Loc).Format("2006-01-02"), Rule: a.rule, Black: a.black, More: more,
 		PrevDay: s.l.Midnight(a.day - 1).In(s.cfg.Loc).Format("2006-01-02"), ThenDay: s.l.Midnight(a.day + 1).In(s.cfg.Loc).Format("2006-01-02")}
 	for _, kv := range a.labels {
 		v.Hidden = append(v.Hidden, field{"label", kv[0] + "=" + kv[1]})
