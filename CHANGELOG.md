@@ -22,8 +22,10 @@ ledger schema change; the API and MCP answer as they did.
   `for` already, no suggestion, not replayed, not in effect, the hour's
   twenty made), and links to the proposals made: those the reader made,
   read again, whatever the address says. A request starts no rule after
-  twenty seconds, so that it answers within a proxy's timeout, and says
-  which weren't tried.
+  twenty seconds, and says which weren't tried; a rule started before then
+  takes what its backtest takes, within `--timeout` (50 minutes unless
+  set), so behind a proxy whose timeout is shorter, raise it for
+  `POST /rules/bulk` and `POST /proposals`, or lower `--timeout`.
 - **A rule's labels as chips on the rules list**: the labels `label:`
   picks it by, but its severity, five a row and the rest behind "+N", each
   a link to the list with that label too.
@@ -63,8 +65,10 @@ ledger schema change; the API and MCP answer as they did.
   alarms, the files), isn't a proposal the hour's twenty count: a reader
   could ask for them without end, each a live read. A reader now asks for
   60 proposals an hour at most that read the rules again, made or refused,
-  the agents acting for them included (kept in memory, a replica's own);
-  past them, 429. Hardening of released behaviour.
+  counted only when the rules are read again, and the agents acting for
+  them 60 of their own, so that an agent's refusals can't use up a
+  person's (kept in memory, a replica's own); past them, 429, before
+  waiting for the heavy turn. Hardening of released behaviour.
 - **MCP's `retire` reads the rule once, after the reader's checks.** It
   read every rule in effect, parsed whole, to decide between turning a
   rule off and deleting it, before checking that the person may propose at

@@ -707,7 +707,7 @@ left out) picks the proposals named alone, as a bulk proposal's result
 links to them: the database picks them before the facets count, as it does
 the team's (`ledger.ProposalPick.IDs`, `ProposalCountsOf`, additive reads),
 each is a chip, "Proposals: #12", and the form and the other chips keep
-them; "Clear filters" takes them away None of them there says so, "None of the proposals picked is
+them; "Clear filters" takes them away. None of them there says so, "None of the proposals picked is
 here.", with Clear, not that there are none.
 
 Unless `state=` is given, the open ones, as the list was, those waiting for
@@ -912,9 +912,10 @@ finished with already, that `for` already, no `for` suggested, not replayed
 say. What would be the same for every rule left stops there: the hour's
 twenty made, or the reader's tries (below) used, each rule left counted so
 and none read; what is the server's or the request's (nothing replayed yet,
-the rules not read yet, another comparison running, the heavy turn waited
-for past thirty seconds, a database that stopped answering), counted
-failed, the rest "not tried", as the bulk writes do.
+the rules not read yet, another comparison running, a database that
+stopped answering), counted failed, the rest "not tried", as the bulk
+writes do. A reader past the twenty, or their tries, is refused before
+waiting for the heavy turn, the single form too.
 
 **A request's time.** A bulk proposal starts no rule after twenty seconds
 (`proposeTime`), and a rule's wait for the heavy turn ends then too: the
@@ -937,9 +938,15 @@ already, it isn't replayed, its history is too short to retire it) costs
 that read, of Grafana, a ruler or a cloud's alarms among them, and isn't a
 proposal the ledger counts. So a reader asks for 60 proposals an hour at
 most that read the rules again, made or refused, three times the twenty
-they may make, the agents acting for them included (`triesAnHour`, kept in
-memory, a replica's own); past them the single form answers 429, and a bulk
-proposal counts every rule left so. Lapilli's own are bounded apart. At
+they may make (`triesAnHour`, kept in memory, a replica's own). A try is
+counted when the rules are read again, not for a refusal before (a rule
+not in effect, one waiting already). The agents acting for a person have
+60 of their own, apart from theirs: where no one is named (no roles on
+loopback, `--everyone-admin`) every person is "anonymous", and an agent
+asking again and again would otherwise lock every person out for an hour,
+with nothing in the ledger to show for it; people who share a name share
+their tries, as they share the twenty. Past them the single form answers
+429, and a bulk proposal counts every rule left so. Lapilli's own are bounded apart. At
 four thousand rules, a bulk retire of twenty by a reader who has made the
 hour's twenty took 504 ms and 641 MB, each rule parsed whole twice; it
 takes 15 ms and 12 MB (`TestBulkProposeAtLimitScale`). A proposal past the

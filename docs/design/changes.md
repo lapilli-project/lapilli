@@ -384,7 +384,13 @@ The first step, for v0.22.0, as above, except:
   neither would be seen applied. A fix to what a rule says isn't kept apart:
   its hash covers when the rule fires, and a Grafana rule's digest covers
   what it says. A person, with the agents acting for them, makes twenty
-  proposals an hour at most; Lapilli's own are bounded apart. An agent
+  proposals an hour at most; Lapilli's own are bounded apart. A person
+  asks for 60 an hour at most that read the rules again, made or refused,
+  and the agents acting for them 60 of their own (since the release after
+  0.39.2, docs/design/ui.md): a refusal after that live read, of Grafana,
+  a ruler or a cloud's alarms, isn't a proposal the twenty count. Where no
+  one is named, every person is "anonymous" and shares the twenty and the
+  60, and so do their agents theirs. An agent
   acts for the person its request to `/mcp` came from, as the sign-in says
   of that request, whichever it is; with a sign-in of lapilli's own or in
   front, a proposal for no one known is refused (until the release after
