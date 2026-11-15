@@ -2,6 +2,81 @@
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-11-15
+
+What docs/design/ui.md left for later phases: a proposal for the rules
+picked on the rules list, and a rule's labels as chips on its row; the
+rules table made to fit a laptop's screen; and every disabled action drawn
+one way. Still no script, against WCAG 2.2 AA, in four languages. No
+ledger schema change; the API and MCP answer as they did.
+
+### Added
+
+- **A proposal for the rules picked.** The rules list's bar proposes, for
+  each rule picked, what its own page would: a new `for`, the `for`
+  suggested for it, or retiring it (turned off where it can be, deleted
+  where it can't). Each is the proposal the rule's page's form makes, made
+  by the reader with every check it has: an editor's, read again,
+  backtested under the heavy turn, one unfinished proposal a rule, twenty
+  an hour a person; and each waits for a person's approval on its own
+  page. At most twenty rules a request. The list says once how many were
+  proposed, and why the others weren't (a proposal waiting already, that
+  `for` already, no suggestion, not replayed, not in effect, the hour's
+  twenty made), and links to the proposals made: those the reader made,
+  read again, whatever the address says. A request starts no rule after
+  twenty seconds, and says which weren't tried; a rule started before then
+  takes what its backtest takes, within `--timeout` (50 minutes unless
+  set), so behind a proxy whose timeout is shorter, raise it for
+  `POST /rules/bulk` and `POST /proposals`, or lower `--timeout`.
+- **A rule's labels as chips on the rules list**: the labels `label:`
+  picks it by, but its severity, five a row and the rest behind "+N", each
+  a link to the list with that label too.
+- **The proposals list takes `id=`**, the proposals named alone, each a
+  chip: the link a bulk proposal's result gives.
+
+### Changed
+
+- **The rules table fits a laptop's screen.** On a real deployment (62
+  rules, Korean, long names and label values, 1440x900) its last columns
+  were reachable only by scrolling it sideways. Names and label values
+  wrap anywhere, a team's name between its words, a number's notes under
+  it, a header between its words; the facets are beside the table from
+  1600 CSS px (1200 before), above it narrower, side by side as they fit.
+  `test/a11y/axe.mjs` checks the table against its box at 1280, 1440, 1600
+  and 1920 px, with rules named as long as a real set's. The README's
+  screenshot of the list is taller, to show the table under the filters.
+- The overview's "Make it a task", the firings' "These were real" and
+  "This was real", and the rules list's bar draw what a reader may not do
+  as every other page does (phase 4's `off`), each reason said once.
+
+### Fixed
+
+- A proposal past the twenty an hour a person may make answered 500, and
+  was logged as a server's error, when it was refused before the rule was
+  read again, and 400 when two at once found the ledger's write past them;
+  it answers 429, saying so, either way.
+- A team's long name in a select pushed the bar, and the rules list's bulk
+  bar, past the width of a 320 CSS px screen.
+- The sidebar's languages broke 한국어 between its syllables; each name is
+  kept whole.
+
+### Security
+
+- **What a refused proposal costs is bounded.** A refusal after the rules
+  are read again, from where they are kept (Grafana, a ruler, a cloud's
+  alarms, the files), isn't a proposal the hour's twenty count: a reader
+  could ask for them without end, each a live read. A reader now asks for
+  60 proposals an hour at most that read the rules again, made or refused,
+  counted only when the rules are read again, and the agents acting for
+  them 60 of their own, so that an agent's refusals can't use up a
+  person's (kept in memory, a replica's own); past them, 429, before
+  waiting for the heavy turn. Hardening of released behaviour.
+- **MCP's `retire` reads the rule once, after the reader's checks.** It
+  read every rule in effect, parsed whole, to decide between turning a
+  rule off and deleting it, before checking that the person may propose at
+  all; `propose` now decides, from its own read, after them. Hardening of
+  released behaviour.
+
 ## [0.39.2] - 2026-11-15
 
 The chart's workloads stay in sync under a GitOps tool that diffs what it

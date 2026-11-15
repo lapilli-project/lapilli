@@ -2,12 +2,14 @@
 
 Status: phases 1 and 2 in v0.35.0; phase 3, a rule's page, in v0.37.0;
 phase 4, the way to change things, in v0.38.0; phase 5, many at once and
-ways in, built, unreleased. This is how the pages are put together: the
-frame every page has, the team and period carried from page to page, the
-search, the rules list and its filters, a rule's page, the way to change
-things (a proposal's page, the lists' facets, a quiet window's preview,
-the Manage page), what can be done to many at once and the ways from a
-number to what makes it, and what the later phases will add.
+ways in, in v0.39.0; the two items left after it (a proposal for the rules
+picked, a rule's labels as chips on the list), with the rules table made to
+fit a laptop's screen, built, unreleased. This is how the pages are put
+together: the frame every page has, the team and period carried from page
+to page, the search, the rules list and its filters, a rule's page, the
+way to change things (a proposal's page, the lists' facets, a quiet
+window's preview, the Manage page), what can be done to many at once and
+the ways from a number to what makes it, and what is left.
 [serve.md](serve.md) says what each page shows;
 [access.md](access.md) how the pages meet WCAG 2.2 AA.
 
@@ -30,7 +32,9 @@ number to what makes it, and what the later phases will add.
   in words, the sign `aria-hidden`. Text is 4.5:1 and the edges of controls
   3:1 on every surface, in light and dark (`TestContrast` holds the
   stylesheet's tokens to it). At 320 CSS px and at 200% zoom no page scrolls
-  sideways; a wide table scrolls in its own box.
+  sideways; a wide table scrolls in its own box. A field's label holds it
+  within the page's width, a select as wide as its longest option among
+  them: a team's long name doesn't push the bar past 320 px.
 - **Bounds.** A page asked with a query of more than 8192 bytes is
   refused, 414, before anything is read for it. A search (`q=`, the bar's
   or the rules') of more than 500 characters is left out whole, and the
@@ -79,7 +83,8 @@ or all teams': two counts the ledger gives once each time it changes
 rule, counted by the database), not once a page.
 
 On a screen 960 CSS px wide or more, the sidebar stays on the left as the
-page scrolls, with the languages at its foot. Narrower, or zoomed in, it is
+page scrolls, with the languages at its foot, each name kept whole (한국어
+was broken between its syllables there). Narrower, or zoomed in, it is
 a `<details>` under the name, closed until opened, whose summary names the
 page the reader is on ("Menu · Rules"), and nothing stays put over the
 page. A `<details>` can't be open on one screen and closed on another
@@ -154,13 +159,18 @@ The forms elsewhere on a page do the same (phase 4): where one is for those
 who may change something, everyone else sees one button, disabled, naming
 what it does, with why beside it, in place of the whole form (`off`, with
 `offOf` for a role and `offTeam` for what is a team's, "Only search's
-editors"): a quiet window's and a task's change, a team's (`?edit=`), the
+editors"; where several share a reason, the first says it and the rest are
+the button alone, tied to it, `again`; a row's drawn quietly, `quiet`): a
+quiet window's and a task's change, a team's (`?edit=`), the
 settings' save, the switch that pauses changes (Admins only), a report's
 change, an incident's (its change, whether it was real, a task about it),
 a rule's (what to do first, its note, a fix to what it says, proposing a
 change, a task about it) and a proposal's (below). Comments are as before.
 The server checks every write as it did: a disabled button is never the
-only check.
+only check. Phase 5's are drawn so too, the overview's "Make it a task",
+the firings' "These were real" and "This was real" and the rules list's
+bar, and `TestDisabledOneWay` holds every disabled button on every page to
+it, but a rule's header's, whose reasons are said after its buttons.
 
 ### Empty states
 
@@ -281,9 +291,11 @@ facet by facet (`legendOf`, from the facets and `badgeMeans`).
 
 The facets are one GET form to `/rules`: the search box, a checkbox for
 each value, the context as hidden fields (team, weeks, order), and Apply;
-beside it, "Clear filters". On a screen 1200 px wide or more it is a panel
-beside the table; narrower, a `<details>` above it, open when a filter is
-in effect. Like the sidebar, it is drawn twice and shown once.
+beside it, "Clear filters". On a screen 1600 px wide or more it is a panel
+beside the table, the page let wider for it (1400 px); narrower, a
+`<details>` above it, open when a filter is in effect, and the table has
+the page's width (below, "The table fits a laptop's screen"). Like the
+sidebar, it is drawn twice and shown once.
 
 | Facet | Parameter | Values |
 |---|---|---|
@@ -318,6 +330,50 @@ link, and an order's, are made from what the page read of its URL
 page doesn't take, or left out, isn't in them. With no rule shown and
 some listed below that didn't fire, the page says none of them fired, not
 that none matches.
+
+### A rule's labels
+
+Each row has the labels `label:` picks the rule by as chips, under its name
+and badges: the labels it fires with, its group's included, as the rules in
+effect have them, or, of a rule recorded elsewhere, those all its alerts
+have (`ruleMeta`), as the filter matches them; but its severity, which has
+its column and its facet. Five a row, by name, the rest behind "+N", a
+`<details>`. Each is `name=value` in `<bdi>`, a link to the list as it was
+asked with `label:NAME=VALUE` in the search too, made from what the page
+read of its URL (`rulesAsk`), as a filter chip's is: canonical, so no
+redirect, and carrying no result of a bulk write. One in the search already
+is drawn solid, and isn't a link; nor is one the search couldn't take,
+the box reading what the link writes back as another filter, or none (a
+value with a double quote, or with spaces after it, which the box takes
+off; a name with "=", which it cuts the value at), or a search with its
+twenty words, past 500 characters, or a page past 8192 bytes.
+`TestRuleLabelChips` follows each link and holds what it shows to the rows
+that had the chip, the value in any case, as the filter matches. At two
+thousand rules of six labels each (`TestManyAtOnceScale`), the list worked
+out afresh is 6.4 MB and 260 ms, 1.2 MB and 30 ms more than without them.
+
+### The table fits a laptop's screen
+
+On a real deployment (62 rules, Korean, long rule names and label values,
+Chromium at 1440×900) the table was wider than its box, its last three
+columns reachable only by scrolling it sideways. Measured by column, what
+grew was a number's notes kept on one line (re-fired 257 px, during deploys
+199, nothing 336 on the demo ledger), a name or a label value in one word
+(599), a team's name (111) and the headers, and the facets beside the table
+from 1200 px left it 758 px of a 1280 px screen and 850 of 1440. Now names
+and label values wrap anywhere, a team's name between its words and after
+its hyphens, a number's notes under it, a little smaller, a header between
+its words, a little smaller (Korean's at its spaces, `keep-all`, not
+between its syllables); the rule's column's floor is 10rem, not 16; the
+cells are a little tighter; and the facets are beside the table from 1600
+px, and, above it, side by side as they fit, so that a filter in effect,
+which opens them, doesn't push the table a screen down. The table has 1008
+px at 1280 and 1100 at 1440, and fits in each language with rules named as
+long as a real set's and with the demo ledger's; at 320 px and at 200% zoom
+it scrolls in its box. `TestA11yServe` has such rules (`longNamed`), and `test/a11y/axe.mjs`
+checks the table is no wider than its box at 1280, 1440, 1600 and 1920 px,
+in each language: against the stylesheet before, it found 96 (Spanish at
+1280, 1096 px too wide).
 
 ### The search box
 
@@ -646,6 +702,14 @@ team taken as on the other pages); a proposal's team is its rule's.
 | Way | `path` | `git`, `grafana`, `ruler`, `alarm`, `none` |
 | Made by | `by` | `person`, `agent`, `lapilli` |
 
+`id=` (repeatable, twenty at most, each a positive number; anything else is
+left out) picks the proposals named alone, as a bulk proposal's result
+links to them: the database picks them before the facets count, as it does
+the team's (`ledger.ProposalPick.IDs`, `ProposalCountsOf`, additive reads),
+each is a chip, "Proposals: #12", and the form and the other chips keep
+them; "Clear filters" takes them away. None of them there says so, "None of the proposals picked is
+here.", with Clear, not that there are none.
+
 Unless `state=` is given, the open ones, as the list was, those waiting for
 approval first. The form sends `state=all` with what is ticked, so none
 ticked is all of them; `?state=all`, `?state=applied` and `?state=refused`
@@ -809,6 +873,119 @@ form's first button is a disabled one, `hidden`, so that Enter does
 nothing, and no one sees it, nor does a screen reader say it; each
 action is a button pressed (`TestBulkNoEnter`).
 
+### A proposal for the rules picked
+
+The bar has, beside the writes, "Propose for each": a select of what, a new
+`for` (as the rule's proposals tab's form, the `for` typed), the `for`
+suggested for each (as its summary's "Propose it"), or retiring each (as
+its proposals tab's form: turned off where it is kept so that it can be,
+deleted where it can't be, and, off already, deleted once it has been off
+four weeks); the new `for`; and Propose (`do=propose`). A threshold and a
+fix to what a rule says, each a rule's own, are on its page alone. Each
+rule picked gets the proposal its page's form would make, made by the
+reader, through the same doors as `POST /proposals`: an editor's (a team's
+editor's are counted, each, "refused: editors only", as the single form
+refuses them); its evidence as that form gives it, from the suggestion
+where the digest has one, spare where it is over the weeks the list showed
+(1, 4 or 12, as the rule's page opened from the list says); read again,
+written where it is kept and backtested as one is (`propose`), under the
+heavy turn, taken and given back for each as `POST /proposals` takes it;
+one unfinished proposal a rule; twenty an hour a person, counted as one by
+one. Retiring is decided by `propose`, after it has checked the reader may
+propose, from the rule as it reads it again: turned off where it can be
+and isn't, deleted otherwise (`kindRetire`, MCP's `retire` the same). What
+a rule's page reads for its forms (the suggestions, the spare rules), and
+the rules in effect, are read once for the request, under a page's turn,
+given back before any proposal waits for the heavy turn: a name no rule in
+effect has is refused as not in effect, and one two alike have as
+`propose` refuses it, without `propose` reading the rules for each (each
+read parses every rule, and a refusal before the rules are read again
+costs no try). A reader past the hour's twenty, or their tries, is refused
+every rule before any of it is read. At most
+twenty rules a request, refused whole past them, 400, as are a `for` that
+isn't one or a kind it doesn't offer; a server with no rules of its own is
+refused whole, and its bar says why; nothing picked says so first, and
+reads nothing. Nothing changes until someone approves each on its page, as
+one made on its rule's page is.
+
+What is refused for what the rule is is counted by why: a proposal not
+finished with already, that `for` already, no `for` suggested, not replayed
+(no backtest could check it), not in effect here, and anything else,
+"propose each from its page to see why". `proposeWhy` says, of every text
+`propose` and what it calls refuse with, which it is, and
+`TestProposeWhyKept` walks them in the source and fails on one it doesn't
+say. What would be the same for every rule left stops there: the hour's
+twenty made, or the reader's tries (below) used, each rule left counted so
+and none read; what is the server's or the request's (nothing replayed yet,
+the rules not read yet, another comparison running, a database that
+stopped answering), counted failed, the rest "not tried", as the bulk
+writes do. A reader past the twenty, or their tries, is refused before
+waiting for the heavy turn, the single form too.
+
+**A request's time.** A bulk proposal starts no rule after twenty seconds
+(`proposeTime`), and a rule's wait for the heavy turn ends then too: the
+rest are "not tried: the time for one request was up, pick them again". The
+answer so comes back within what a proxy in front commonly gives a request
+(30 seconds for some load balancers' backends, 60 for some ingresses),
+which past it closes the request, and the reader would see an error for
+what was made. A rule started just before then takes what it takes: its
+backtest within `--timeout`, against Prometheus as long as that asks. A
+single proposal's backtest is bounded the same way and no more: where a
+proxy's timeout is shorter than `--timeout`, raise it for `POST /proposals`
+and `POST /rules/bulk`, or lower `--timeout`. The answer's write deadline is
+moved on before each rule, past the server's two minutes
+(`TestBulkProposeWritesBack`). A request that ends (a proxy's timeout, the
+reader gone, the server stopping) keeps what was made and is logged, with
+how many.
+
+**Tries.** A refusal after the rules are read again (it has that `for`
+already, it isn't replayed, its history is too short to retire it) costs
+that read, of Grafana, a ruler or a cloud's alarms among them, and isn't a
+proposal the ledger counts. So a reader asks for 60 proposals an hour at
+most that read the rules again, made or refused, three times the twenty
+they may make (`triesAnHour`, kept in memory, a replica's own). A try is
+counted when the rules are read again, not for a refusal before (a rule
+not in effect, one waiting already). The agents acting for a person have
+60 of their own, apart from theirs: where no one is named (no roles on
+loopback, `--everyone-admin`) every person is "anonymous", and an agent
+asking again and again would otherwise lock every person out for an hour,
+with nothing in the ledger to show for it; people who share a name share
+their tries, as they share the twenty. Past them the single form answers
+429, and a bulk proposal counts every rule left so. Lapilli's own are bounded apart. At
+four thousand rules, a bulk retire of twenty by a reader who has made the
+hour's twenty took 504 ms and 641 MB, each rule parsed whole twice; it
+takes 15 ms and 12 MB; one of twenty names no rule has, by an editor with
+every try left, took 489 ms and 640 MB, and takes 36 ms and 42 MB, the
+rules in effect read once (`TestBulkProposeAtLimitScale`,
+`TestBulkProposeAbsentOneRead`). A proposal past the
+twenty answers 429, whichever check finds it, the ledger's write among
+them.
+
+**The result.** The list gone back to says it once, with a link to the
+proposals made, the proposals list with their `id=`. `made=` in the
+result's query is read within bounds (twenty at most, as many as `done=`, a
+bulk proposal's), and what it says was proposed is counted from it, read
+again: those that are the reader's, made in Lapilli, not by an agent; any
+other is left out, and a result that claimed some and has none of theirs
+says nothing. So a link made to say "20 proposed" says what the reader
+proposed. Neither is carried on by any link or form.
+
+At two thousand rules, against the tests' stand-in history, a proposal for
+twenty took 1.3 s.
+
+`TestBulkPropose` sets each kind beside the same rules posted one at a
+time, each from the form its own page gives, on a twin ledger: the same
+proposals kept (rule, kind, way, who, what it was and is proposed to be,
+the diff, the document, the evidence and its backtest), the same lines in
+the changes log; `TestBulkProposeOff` the same for Grafana's rules, turned
+off; `TestBulkProposeSpareOverWeeks` a rule spare over four weeks and not
+twelve, from lists of each; `TestAgentRetires` MCP's retire;
+`TestBulkProposeLimit` and `TestProposeLimitRace` the hour's twenty;
+`TestProposeTries` the tries; `TestBulkProposeTurns` the page's turn and the
+heavy turn; `TestBulkProposeTimeUp` the request's time, and a request that
+ended; `TestBulkProposeRefused`, `TestBulkProposeBar` and
+`TestBulkProposeNothingPicked` who may, why not, and nothing picked.
+
 ### The firings: labels, and the day by the hour
 
 Each firing's labels are chips, `name=value` in `<bdi>`, each a link to the
@@ -926,8 +1103,12 @@ and when each firing started, are a table in a `<details>` under it.
 | a toast saying what was done | the page gone back to says it once, from its query |
 | annotations toggled on a chart | a link to the same page with `marks=` |
 
-## Later phases
+## What is left
 
-- **A proposal for the rules picked**, beside the bulk writes.
-- **Label chips on the rules list**: the labels a rule fires with as chips
-  on its row, each a `label:` filter.
+- **The overview's table of the weeks** is wider than its box from 1280 to
+  1920 px in Spanish and Japanese, and at 1280 and 1440 in English: its
+  first column, the week with its marks' tags, grows. It is a region of its
+  own, focusable, that scrolls, as a wide table may; the rules list's fit
+  check doesn't hold it.
+- **A rule's header** draws its disabled actions its own way, every reason
+  said after the buttons, not by the `off` template.

@@ -11,6 +11,8 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -74,11 +76,61 @@ func a11yServer(t *testing.T) (*Server, []string) {
 		"/proposals/"+strconv.FormatInt(id, 10), "/proposals/"+strconv.FormatInt(undo, 10))
 }
 
+// longNames are rules named as a real set's can be: long, in one word,
+// with long label values and more labels than a row of the rules list
+// shows.
+var longNames = []string{
+	"KubernetesPersistentVolumeFillingUpPredictedWithinFourDaysOnTheLargestClusters",
+	"ServiceLevelObjectiveErrorBudgetBurnRateTooHighForTheAuthorizationGatewayAPI",
+	"ObjectStorageReplicationLagAboveThresholdBetweenPrimaryAndSecondaryRegions",
+	"MessageQueueConsumerGroupLagGrowingForTheSettlementEventsPipelineWorkers",
+	"DatabaseConnectionPoolSaturatedForReadReplicasBehindTheInternalLoadBalancer",
+	"CertificateExpiringWithinFourteenDaysForTheCustomerFacingIngressHostnames",
+}
+
+// longNamed gives s the rules longNames names, owned by a team with a long
+// name, each fired over the twelve weeks: the rules list as a real
+// deployment's can be, which test/a11y/axe.mjs holds to fit a laptop's
+// screen.
+func longNamed(t *testing.T, s *Server) {
+	t.Helper()
+	ctx := context.Background()
+	var b strings.Builder
+	b.WriteString("groups:\n  - name: observability-and-site-reliability-engineering-platform\n    labels: {environment: production-primary-region-north-east}\n    rules:\n")
+	for i, n := range longNames {
+		fmt.Fprintf(&b, "      - {alert: %s, expr: up == %d, for: 5m, labels: {severity: %s, component: ingress-controller-public-edge-load-balancer-fleet-%d, "+
+			"tier: customer-facing-critical-path, service: settlement-and-reconciliation-batch-processing, runbook_section: persistent-volumes-and-storage-classes, "+
+			"owner: platform-reliability-on-call-rotation-secondary}}\n", n, 100+i, []string{"critical", "warning"}[i%2], i)
+	}
+	if err := os.WriteFile(filepath.Join(s.cfg.RulesPath, "long.yaml"), []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	var fs []firing.Firing
+	for w := 0; w < weeks; w++ {
+		for i, n := range longNames {
+			at := now.Add(-time.Duration(w*7*24+i+1) * time.Hour)
+			fs = append(fs, firing.Firing{Rule: n, Labels: map[string]string{"service": "settlement-and-reconciliation-batch-processing"}, Start: at, End: at.Add(20 * time.Minute)})
+		}
+	}
+	from := now.Add(-weeks * weekLen)
+	if err := s.l.Record(ctx, ledger.Found{From: from, To: now, Firings: fs, Run: ledger.Run{Kind: "backfill", Started: from, Finished: from}}, s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "observability-and-site-reliability-engineering", Rules: "^(Kubernetes|ServiceLevel|ObjectStorage)"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestA11yServe serves the pages at LAPILLI_A11Y_SERVE until it is
 // stopped, for test/a11y/axe.sh; /a11y-paths lists them.
 func TestA11yServe(t *testing.T) {
 	addr := serveAddr(t, "LAPILLI_A11Y_SERVE")
 	s, paths := a11yServer(t)
+	longNamed(t, s)
 	s.cfg.AllowedHosts = append(s.cfg.AllowedHosts, "host.docker.internal")
 	mux := http.NewServeMux()
 	paths = append(paths, a11yPreviews(mux, s)...)

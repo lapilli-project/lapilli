@@ -64,11 +64,26 @@ const (
 )
 
 // ProposalPick is what the proposals list picks: of the rules named (every
-// rule's when Rules is nil, none's when it is empty), any of the states,
-// kinds, ways and makers given in each (any at all for one given none).
+// rule's when Rules is nil, none's when it is empty), and of the proposals
+// IDs names when it names some, any of the states, kinds, ways and makers
+// given in each (any at all for one given none).
 type ProposalPick struct {
 	Rules                        []string
+	IDs                          []int64
 	States, Kinds, Paths, Makers []string
+}
+
+// idsIn is a condition on the proposals' ids, of the table as at names it,
+// and its arguments: none for no ids.
+func idsIn(at string, ids []int64) (string, []any) {
+	if len(ids) == 0 {
+		return "", nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	return at + "id IN (" + marks(len(ids)) + ")", args
 }
 
 // ProposalCount is how many proposals there are of a kind, a way, a state
@@ -110,14 +125,27 @@ func byRules(rules []string, read func(where string, args []any) error) error {
 // when nil) there are of each kind, way, state and maker, counted by the
 // database: the list's facets, whatever the proposals' number.
 func (l *Ledger) ProposalCounts(ctx context.Context, rules []string) ([]ProposalCount, error) {
+	return l.ProposalCountsOf(ctx, rules, nil)
+}
+
+// ProposalCountsOf is ProposalCounts of the proposals ids names alone, when
+// it names some: those made together, as a list's link names them.
+func (l *Ledger) ProposalCountsOf(ctx context.Context, rules []string, ids []int64) ([]ProposalCount, error) {
 	m, margs := maker("")
 	sum := map[ProposalCount]int{}
+	in, iargs := idsIn("", ids)
 	err := byRules(rules, func(where string, args []any) error {
 		q := "SELECT kind, path, state, " + m + ", count(*) FROM proposals"
-		if where != "" {
-			q += " WHERE " + where
+		var conds []string
+		for _, c := range []string{where, in} {
+			if c != "" {
+				conds = append(conds, c)
+			}
 		}
-		rows, err := l.r.QueryContext(ctx, q+" GROUP BY 1, 2, 3, 4", append(margs, args...)...)
+		if len(conds) > 0 {
+			q += " WHERE " + strings.Join(conds, " AND ")
+		}
+		rows, err := l.r.QueryContext(ctx, q+" GROUP BY 1, 2, 3, 4", append(append(slices.Clone(margs), args...), iargs...)...)
 		if err != nil {
 			return err
 		}
@@ -177,6 +205,10 @@ func (l *Ledger) ProposalList(ctx context.Context, pick ProposalPick, most int) 
 		if len(pick.Makers) > 0 {
 			q += " AND " + m + " IN (" + marks(len(pick.Makers)) + ")"
 			qargs = append(append(qargs, margs...), anys(pick.Makers)...)
+		}
+		if in, iargs := idsIn("p.", pick.IDs); in != "" {
+			q += " AND " + in
+			qargs = append(qargs, iargs...)
 		}
 		q += " ORDER BY 13, p.updated DESC, p.id DESC LIMIT ?"
 		rows, err := l.r.QueryContext(ctx, q, append(qargs, most)...)

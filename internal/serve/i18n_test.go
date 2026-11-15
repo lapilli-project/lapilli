@@ -76,7 +76,8 @@ var pagePaths = []string{"/", "/rules", "/rules?weeks=1", "/rules/Errors", "/inc
 	"/rules?perf=ok&severity=none&trust=differs&q=i+label%3Aservice%3Dsearch+group%3Ashop+foo%3Abar", "/rules?team=payments&q=nothing-is-called-this",
 	// Many at once, and ways in: what a bulk write did, the lists over a
 	// week, a day's firings by a label, the overview's marks off.
-	"/rules?bulk=task&done=3&theirs=2&refused=1", "/firings?day=2026-11-02&label=service%3Dcheckout&bulk=real&done=1&already=1",
+	"/rules?bulk=task&done=3&theirs=2&refused=1",
+	"/rules?bulk=propose&done=2&made=1&made=2&already=1&same=1&nosuggest=1&unreplayed=1&absent=1&limit=1&refused=1&editors=1&failed=1&untried=1", "/firings?day=2026-11-02&label=service%3Dcheckout&bulk=real&done=1&already=1",
 	"/rules?week=2026-10-26&perf=noisy", "/incidents?week=2026-10-26&state=missed", "/?marks=none", "/?marks=deploys",
 	// A rule's page in each tab, and over each period.
 	"/rules/Errors?tab=firings", "/rules/Errors?tab=versions", "/rules/Errors?tab=proposals", "/rules/Errors?tab=activity",

@@ -1,6 +1,8 @@
 // Checks every page lapilli serve gives TestA11yServe with axe-core, against
-// WCAG 2.2 AA, in each language, in light and in dark; and that no page
-// scrolls sideways at 320 CSS px (WCAG 1.4.10). Run by axe.sh.
+// WCAG 2.2 AA, in each language, in light and in dark; that no page
+// scrolls sideways at 320 CSS px (WCAG 1.4.10); and that the rules list's
+// table, with rules named as long as a real set's (longNamed), fits its
+// box on a laptop's screen, 1280 CSS px and wider. Run by axe.sh.
 //
 // BASE is where the pages are served. Prints the violations by rule, and
 // writes them all as JSON to OUT when it is set. Exits 1 when there are any.
@@ -47,7 +49,30 @@ async function reflow(lang) {
   await context.close();
 }
 
-await Promise.all(langs.flatMap((l) => [...schemes.map((s) => check(l, s)), reflow(l)]));
+// fit is the rules list's table wider than the box it scrolls in, at the
+// widths of a laptop's screen and wider: at 1280 and 1440 CSS px the page
+// is the table's, at 1600 and 1920 the facets are beside it. Narrower, or
+// zoomed in, the table scrolls in its box, as a wide table may.
+async function fit(lang) {
+  for (const width of [1280, 1440, 1600, 1920]) {
+    const context = await browser.newContext({ viewport: { width, height: 900 }, extraHTTPHeaders: { 'Accept-Language': lang } });
+    const page = await context.newPage();
+    for (const path of paths.filter((p) => p === '/rules' || p.startsWith('/rules?'))) {
+      await page.goto(base + path);
+      const over = await page.evaluate(() => [...document.querySelectorAll('.rules-main .scroll')]
+        .filter((box) => box.offsetParent && box.querySelector('table'))
+        .map((box) => box.querySelector('table').scrollWidth - box.clientWidth)
+        .filter((x) => x > 0));
+      if (over.length) {
+        found.push({ rule: 'table-fit', impact: 'serious', path, lang, scheme: `${width}px`, nodes: over.length,
+          targets: over.map((x) => `${x}px wider than its box`), help: 'The rules table is wider than its box on a laptop\'s screen' });
+      }
+    }
+    await context.close();
+  }
+}
+
+await Promise.all(langs.flatMap((l) => [...schemes.map((s) => check(l, s)), reflow(l), fit(l)]));
 await browser.close();
 
 const rules = new Map();

@@ -127,7 +127,11 @@ repository credentials. Of particular interest:
   anything but propose, or for its proposal to be kept as anyone's but the
   person's it acts for (whom its request to `/mcp` came from, however they
   signed in), which they could then approve, or whose limit it wouldn't
-  count against.
+  count against; or for a proposal's refusals to read the rules from
+  where they are kept more than 60 times an hour for a person, and as
+  many for their agents, apart (per replica; where no one is named,
+  everyone is "anonymous" and shares them, as they share the twenty
+  proposals an hour).
 
 ## Versions
 
