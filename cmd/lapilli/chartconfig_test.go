@@ -52,6 +52,9 @@ func TestChartConfig(t *testing.T) {
 	if again != out {
 		t.Error("two renders differ")
 	}
+	if strings.Contains(out, "warning") {
+		t.Errorf("a warning, given as a mapping:\n%s", out)
+	}
 	for _, want := range []string{"- --config=/etc/lapilli/config/config.yaml", "- --config-prune", `- "--proposals-expire=30d"`,
 		"mountPath: /etc/lapilli/config", "name: ops-lapilli-config"} {
 		if !strings.Contains(out, want) {
@@ -121,6 +124,14 @@ func TestChartConfigText(t *testing.T) {
 	}
 	if _, err := serve.ParseConfig([]byte(rendered(t, out)), time.UTC); err == nil || !strings.Contains(err.Error(), "read as a boolean or a number") {
 		t.Errorf("as a mapping, no read as false: %v\n%s", err, rendered(t, out))
+	}
+	// A first line indented more than the rest renders, as written.
+	out, err = helmTemplate(t, append(append([]string{}, serveValues...), "--set-string", "serve.config=  # first\nteams: []")...)
+	if err != nil {
+		t.Fatalf("a first line indented more: %v\n%s", err, out)
+	}
+	if got := strings.TrimSuffix(rendered(t, out), "\n"); got != "  # first\nteams: []" {
+		t.Errorf("a first line indented more renders as %q", got)
 	}
 }
 

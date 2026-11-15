@@ -387,16 +387,17 @@ serve:
   # An empty file is refused: to declare nothing, give teams: []. An
   # admin's GET /config.yaml gives everything the ledger holds in this
   # form, declared and made in the UI alike, to paste here.
-  config: ""
+  config: null
   # Delete what config no longer declares (--config-prune), once the file
   # is read the same twice in a row, 15 seconds apart; but a team what the
   # UI made names, which is given back to the UI instead. Off, it is the
-  # UI's again, as it was. With it, rename a team with renamed_from: a team
-  # renamed by its name alone is another, and the old one is deleted.
+  # UI's again, as it was. A role (grants) is taken away either way: the
+  # file gave it. With it, rename a team with renamed_from: a team renamed
+  # by its name alone is another, and the old one is deleted.
   configPrune: false
-  # Close a proposal that waited for approval longer than this, such as 30d,
-  # as expired, so its rule takes another (--proposals-expire). Empty keeps
-  # it waiting however long.
+  # Close a proposal no one approved that waited longer than this since it
+  # began to wait (made, or backtested again), such as 30d, as expired, so
+  # its rule takes another (--proposals-expire). Empty keeps it waiting.
   proposalsExpire: ""
   # Telling of what happens: tasks made, assigned, done or overdue; incidents
   # written down; quiet windows kept; comments.

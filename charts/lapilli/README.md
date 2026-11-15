@@ -290,18 +290,21 @@ pages say what can't, and to an admin why, with the line. An admin's
 `/config.yaml` gives everything the ledger holds in this form, declared
 and made in the UI alike, to paste under `serve.config`.
 
-Taken out of `serve.config`, a thing is the UI's again, as it was. With
-`serve.configPrune`, it is deleted once the same file is read twice in a
-row, so a half-written file read once deletes nothing; but a team that
-something still names (a window, a report, a role, a task, a note) is
-given back to the UI instead. To rename a team in place, keeping what
-names it, give the new `name` with the old as `renamed_from`, and change
-every `team:` that names it, in one change: renamed by its name alone, it
-is another team.
+Taken out of `serve.config`, a thing is the UI's again, as it was, but a
+role (`grants`), which is taken away: declaring a role gives it to the
+file, as Argo CD's RBAC policy owns its roles. With `serve.configPrune`,
+the rest is deleted once the same file is read twice in a row, so a
+half-written file read once deletes nothing; but a team that something
+still names (a window, a report, a role, a task, a note) is given back to
+the UI instead. What the file declares has limits of its own beside the
+UI's; given back past the UI's own, a thing is deleted. To rename a team
+in place, keeping what names it, give the new `name` with the old as
+`renamed_from`, and change every `team:` that names it, in one change:
+renamed by its name alone, it is another team.
 
 `serve.proposalsExpire` closes a proposal that waited for approval longer
-since it was made, such as `30d`, and that no one approved, as expired, so
-its rule can have another. Empty, the default, keeps it waiting however
+since it began to wait (made, or backtested again), such as `30d`, and
+that no one approved, as expired, so its rule can have another. Empty, the default, keeps it waiting however
 long. Neither goes with `serve.readOnly`, which the chart refuses.
 
 ## Who people are

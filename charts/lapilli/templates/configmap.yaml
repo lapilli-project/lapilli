@@ -36,8 +36,9 @@ metadata:
     {{- include "lapilli.labels" . | nindent 4 }}
 data:
   {{- if kindIs "string" .Values.serve.config }}
-  # As written: Helm doesn't read it.
-  config.yaml: |
+  # As written: Helm doesn't read it. The indentation said (2, past the
+  # key's), so a first line indented more than the rest is kept as it is.
+  config.yaml: |2
     {{- .Values.serve.config | trimSuffix "\n" | nindent 4 }}
   {{- else }}
   config.yaml: |
