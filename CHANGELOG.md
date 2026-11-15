@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-11-16
+
 First use: what a first-time reader got stuck on, on a real deployment
 (rules saying whose each is in a `team` label, no team, no incident, one
 admin, nowhere to send a notice). No ledger schema change; the API and MCP
