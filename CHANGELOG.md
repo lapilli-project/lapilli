@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-11-16
+
 A deployment upgraded to 0.41.0 had a proposal 0.40 made still waiting:
 the restart rule's `for`, 1m → 1h, from 0.40's suggestion. Its page said
 nothing of a `for` one event can't outlast, as that was worked out only
