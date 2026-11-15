@@ -67,9 +67,15 @@ type summaryRow struct {
 	Partial bool      `json:"partial"`
 	Team    string    `json:"team"`
 	// Firings are those judged; Caught those that caught an incident.
+	// Precision, and every share caught, is null with no firings, and with
+	// no record (NoRecord).
 	Firings   int      `json:"firings"`
 	Caught    int      `json:"caught"`
 	Precision *float64 `json:"precision"`
+	// NoRecord says no incident was on in the week, or in the two weeks
+	// before it, and no impact signal was read over it: its firings are
+	// counted, not judged.
+	NoRecord bool `json:"no_record"`
 	// Excused are firings quiet windows excused, in none of the others.
 	Excused    int                     `json:"excused"`
 	Critical   summaryCount            `json:"critical"`
@@ -169,6 +175,9 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 	if t.rules, err = s.l.RuleTable(ctx); err != nil {
 		return nil, err
 	}
+	if err := s.readRecord(ctx, t); err != nil {
+		return nil, err
+	}
 	hours, err := s.byHours(ctx, t)
 	if err != nil {
 		return nil, err
@@ -228,13 +237,21 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 					crit.Caught += x.White
 				}
 			}
+			// With no record, what was caught is no share of anything known.
+			row.NoRecord = !t.kept[w]
+			judged := func(n, of int) *float64 {
+				if row.NoRecord {
+					return nil
+				}
+				return share(n, of)
+			}
 			for sev, c := range row.BySeverity {
-				c.Share = share(c.Caught, c.Firings)
+				c.Share = judged(c.Caught, c.Firings)
 				row.BySeverity[sev] = c
 			}
-			crit.Share = share(crit.Caught, crit.Firings)
+			crit.Share = judged(crit.Caught, crit.Firings)
 			row.Critical = crit
-			row.Precision = share(row.Caught, row.Firings)
+			row.Precision = judged(row.Caught, row.Firings)
 			row.Refired.Share, row.Refired.Rules = share(row.Refired.Firings, row.Firings), refiredRules
 			for i, x := range refired {
 				if mine(x.Rule) {
@@ -242,7 +259,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 					break
 				}
 			}
-			row.DuringDeploys.PrecisionWithout = share(row.Caught-row.DuringDeploys.Caught, row.Firings-row.DuringDeploys.Firings)
+			row.DuringDeploys.PrecisionWithout = judged(row.Caught-row.DuringDeploys.Caught, row.Firings-row.DuringDeploys.Firings)
 			if hours != nil {
 				row.OffHours, row.Asleep = &summaryHours{}, &summaryHours{}
 				for id, x := range hours[w] {
@@ -468,6 +485,8 @@ type refires struct {
 	Precision        *float64 `json:"precision"`
 	PrecisionWithout *float64 `json:"precision_without"`
 	caught           int
+	judged           int // the firings judged, deploysJudged of them during deploys
+	deploysJudged    int
 	deploysKept      bool
 }
 
@@ -483,12 +502,16 @@ func (s *Server) refiresOf(ctx context.Context, rep *verdict.Report, from, to ti
 		x.Refired += r.Refired
 		x.Deploys += r.DuringDeploys
 		x.DeploysCaught += r.DeploysCaught
+		// Precision of the firings judged alone: a week with no record's
+		// that caught nothing aren't (verdict.RuleResult.Unjudged).
+		x.judged += r.Firings - r.Unjudged
+		x.deploysJudged += r.DuringDeploys - r.DeploysUnjudged
 		if r.Refired > 0 {
 			x.Rules++
 		}
 	}
 	x.Share, x.caught = share(x.Refired, x.Firings), white
-	x.Precision, x.PrecisionWithout = share(white, x.Firings), share(white-x.DeploysCaught, x.Firings-x.Deploys)
+	x.Precision, x.PrecisionWithout = share(white, x.judged), share(white-x.DeploysCaught, x.judged-x.deploysJudged)
 	if x.Refired > 0 {
 		worst, err := s.l.MostRefired(ctx, from, to, 1, func(rule string) bool { return in[rule] })
 		if err != nil {
@@ -533,7 +556,7 @@ func (x *refires) deployLine(l string) string {
 		return ""
 	}
 	return tr(l, "During deploys: %d firings, %d of them catching something; precision %s with them, %s without.",
-		x.Deploys, x.DeploysCaught, pct(x.caught, x.Firings), pct(x.caught-x.DeploysCaught, x.Firings-x.Deploys))
+		x.Deploys, x.DeploysCaught, pct(x.caught, x.judged), pct(x.caught-x.DeploysCaught, x.judged-x.deploysJudged))
 }
 
 // labelsLine is a label set as a person reads it, in braces.

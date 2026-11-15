@@ -27,6 +27,10 @@ type weekView struct {
 	Asleep                               int             // firings that caught nothing while people slept; notifications for them, once there are any
 	Uncounted                            bool            // Asleep isn't counted: a week before the first notification
 	Changed, Current                     bool
+	// NoRecord says it had firings and no record to judge them by: no
+	// incident on in it, or in the two weeks before it. Its
+	// precision isn't known, and no rule was noisy in it.
+	NoRecord bool
 	// Quiet says a quiet window was over it: one excused a firing, or
 	// one covers some of it; DeployMark, its firings during deploys: the
 	// marks on the charts, when they are asked for (marksOf).
@@ -37,18 +41,24 @@ type weekView struct {
 	Refired, Deploys, DeploysCaught int
 }
 
-// Without is the week's precision leaving out the firings during deploys.
-func (w weekView) Without() string { return pct(w.White-w.DeploysCaught, w.Firings-w.Deploys) }
+// Without is the week's precision leaving out the firings during deploys;
+// "–" with no record to judge them by.
+func (w weekView) Without() string {
+	if w.NoRecord {
+		return "–"
+	}
+	return pct(w.White-w.DeploysCaught, w.Firings-w.Deploys)
+}
 
 func (w weekView) precision() (float64, bool) {
-	if w.Firings == 0 {
+	if w.Firings == 0 || w.NoRecord {
 		return 0, false
 	}
 	return float64(w.White) / float64(w.Firings), true
 }
 
 // Precision is the week's precision for the table, as the precision chart
-// draws it; "–" with no firings.
+// draws it; "–" with no firings, or no record to judge them by.
 func (w weekView) Precision() string {
 	p, ok := w.precision()
 	if !ok {
@@ -98,6 +108,9 @@ const (
 	heatRows             = 12
 	actionsShown         = 8
 	missedShownInActions = 3
+	// unrecordedShown is how many rules that fired often with no record
+	// what to look at names.
+	unrecordedShown = 5
 )
 
 type tick struct {
@@ -203,6 +216,7 @@ type dashboard struct {
 	Incidents      columnChart
 	Heat           []heatRow
 	HeatWeeks      []string
+	HeatLeft       bool // weeks with no record left out of it
 	Actions        []action
 	Weeks          []weekView // the latest first, for the table
 	Review         *reviewView
@@ -288,6 +302,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			}
 		}
 		wv.Black = wv.Firings - wv.White
+		wv.NoRecord = wv.Firings > 0 && !t.kept[w]
 		byWeek[w] = wv
 		ws = append(ws, wv)
 	}
@@ -403,7 +418,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	v.Heat, v.HeatWeeks = s.heat(l, t, lines)
+	v.Heat, v.HeatWeeks, v.HeatLeft = s.heat(l, t, lines)
 	reviews, err := s.reviews(ctx, "", 1)
 	if err != nil {
 		return nil, err
@@ -423,7 +438,10 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v.Tasks = s.taskLines(o, open)
-	v.Actions = s.actions(l, lines, silent, missed, undecided)
+	// None of the four weeks' firings judged: that says it first.
+	noRecord := slices.ContainsFunc(lines, func(x ruleLine) bool { return x.Firings > 0 }) &&
+		!slices.ContainsFunc(lines, func(x ruleLine) bool { return x.Firings > x.Unjudged })
+	v.Actions = s.actions(l, lines, silent, missed, undecided, noRecord)
 	// What is already being seen to links to its task.
 	for i, a := range v.Actions {
 		for _, x := range open {
@@ -507,8 +525,14 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep 
 	}
 	pct := func(f float64) string { return fmt.Sprintf("%.0f%%", 100*f) }
 	count := func(f float64) string { return fmt.Sprintf("%d", int(f)) }
+	// With no record, what isn't known says why.
+	caught, unjudged := tr(l, "of firings caught something"), ""
+	if last.NoRecord {
+		caught = tr(l, "not known: no incident written down to judge the firings by")
+		unjudged = caught
+	}
 	add("Precision", func(w *weekView) (float64, bool) { return w.precision() }, pct,
-		func(a, b float64) string { return fmt.Sprintf("%+.0f pt", 100*(a-b)) }, +1, tr(l, "of firings caught something"))
+		func(a, b float64) string { return fmt.Sprintf("%+.0f pt", 100*(a-b)) }, +1, caught)
 	excused := ""
 	if last.Excused > 0 {
 		excused = tr(l, "%d more excused by quiet windows", last.Excused)
@@ -529,9 +553,13 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep 
 		func(a, b float64) string {
 			return verdict.Delay(time.Duration(a-b) * time.Second)
 		}, -1, tr(l, "median, by a rule that isn't noisy"))
-	add("Noisy rules", func(w *weekView) (float64, bool) { return float64(w.Noisy), true }, count,
-		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, "")
+	add("Noisy rules", func(w *weekView) (float64, bool) { return float64(w.Noisy), !w.NoRecord }, count,
+		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, unjudged)
 	if asleep != "" {
+		// With no record, "for nothing" is for nothing written down.
+		if last.NoRecord {
+			asleep = tr(l, "%s, with no incident written down to judge them by", asleep)
+		}
 		add("Woken for nothing", func(w *weekView) (float64, bool) { return float64(w.Asleep), !w.Uncounted }, count,
 			func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, asleep)
 	}
@@ -736,29 +764,45 @@ func precisionChart(l string, ws []*weekView, loc *time.Location) lineChart {
 }
 
 // heat is the noisiest rules of the last four weeks, their black stones
-// week by week, in five steps of the one hue.
-func (s *Server) heat(l string, t *tallies, lines []ruleLine) ([]heatRow, []string) {
-	var labels []string
+// week by week, in five steps of the one hue: those of weeks with a record
+// alone, as with none a black stone caught nothing written down, which is
+// no noise known. left says some weeks' were left out.
+func (s *Server) heat(l string, t *tallies, lines []ruleLine) (rows []heatRow, labels []string, left bool) {
 	for _, w := range t.weeks {
 		labels = append(labels, s.l.Midnight(w).In(s.cfg.Loc).Format("01-02"))
 	}
-	var rows []heatRow
-	var ids []int64
-	most := 1
+	black := func(w, id int64) int {
+		if !t.kept[w] {
+			return 0
+		}
+		return t.by[w][id].Black()
+	}
+	// The heatRows with the most black stones judged, whatever they had
+	// besides with no record.
 	for _, l := range lines {
-		if l.Black == 0 || len(rows) == heatRows {
-			continue
+		left = left || l.Unjudged > 0
+		if judged := l.Black - l.Unjudged; judged > 0 {
+			rows = append(rows, heatRow{Name: l.Name, Black: judged})
 		}
-		id := t.id(l.Name)
+	}
+	slices.SortStableFunc(rows, func(a, b heatRow) int { return b.Black - a.Black })
+	rows = rows[:min(len(rows), heatRows)]
+	ids := make([]int64, len(rows))
+	most := 1
+	for i, r := range rows {
+		ids[i] = t.id(r.Name)
 		for _, w := range t.weeks {
-			most = max(most, t.by[w][id].Black())
+			most = max(most, black(w, ids[i]))
 		}
-		rows = append(rows, heatRow{Name: l.Name, Black: l.Black})
-		ids = append(ids, id)
 	}
 	for i := range rows {
 		for j, w := range t.weeks {
 			x := t.by[w][ids[i]]
+			if !t.kept[w] && x.Firings > 0 {
+				rows[i].Cells = append(rows[i].Cells, heatCell{"h0",
+					tr(l, "%s, week of %s: %d fired with no incident written down to judge them by", rows[i].Name, labels[j], x.Firings), 0})
+				continue
+			}
 			class := "h0"
 			if n := x.Black(); n > 0 {
 				// Five steps, by the square root: a few noisy weeks
@@ -769,23 +813,59 @@ func (s *Server) heat(l string, t *tallies, lines []ruleLine) ([]heatRow, []stri
 				tr(l, "%s, week of %s: %d caught nothing, %d caught something", rows[i].Name, labels[j], x.Black(), x.White), x.Black()})
 		}
 	}
-	return rows, labels
+	return rows, labels, left
 }
 
-// actions are what to look at this week, the most telling first.
-func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []ledger.Incident, undecided int) []action {
+// actions are what to look at this week, the most telling first: the
+// rules the last digest found firing often with no record to judge them
+// by, those that went well past their bound most first; then, when the
+// four weeks' record isn't kept (noRecord), that, as nothing else is
+// judged.
+func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []ledger.Incident, undecided int, noRecord bool) []action {
 	var out []action
 	path := func(name string) string { return "/rules/" + url.PathEscape(name) }
+	var unrec []*unrecordedView
+	for _, x := range lines {
+		if x.Unrecord != nil {
+			unrec = append(unrec, x.Unrecord)
+		}
+	}
+	slices.SortStableFunc(unrec, func(a, b *unrecordedView) int {
+		if a.Clear != b.Clear {
+			return b.Clear - a.Clear
+		}
+		if a.Firings != b.Firings {
+			return b.Firings - a.Firings
+		}
+		return strings.Compare(a.Rule, b.Rule)
+	})
+	for _, u := range unrec[:min(len(unrec), unrecordedShown)] {
+		d := tr(l, "did they matter? Write it down, or fix what fires them")
+		switch {
+		case u.Events:
+			d = tr(l, "each is an event its condition counts: did they matter? A longer for would hide them.")
+		case u.Clear > 0:
+			d = tr(l, "%d went well past its bound, not a flicker at its edge: did they matter? A longer for would hide them.", u.Clear)
+		}
+		out = append(out, action{Text: tr(l, "%s fired %d times with no incident written down", u.Rule, u.Firings), Detail: d, Href: path(u.Rule),
+			Kind: "tune", Rule: u.Rule, Title: tr(l, "Find out why %s fires", u.Rule)})
+	}
+	if noRecord && slices.ContainsFunc(lines, func(x ruleLine) bool { return x.Firings > 0 }) {
+		out = append(out, action{Text: tr(l, "No incident written down to judge the firings by"),
+			Detail: tr(l, "in the last four weeks or the two before them: a firing that caught nothing can't be told from one nobody wrote down, so no rule is called noisy. Write incidents down, or mark the firings that were real."),
+			Href:   "/incidents"})
+	}
 	// What speaks of four weeks links to the rule's page over them.
 	four := func(name string) string { return path(name) + "?weeks=4" }
+	// A rule said above isn't said again.
 	for _, x := range lines {
-		if x.Suggestion != "" {
+		if x.Suggestion != "" && x.Unrecord == nil {
 			out = append(out, action{Text: tr(l, "Quiet %s", x.Name), Detail: x.Suggestion, Href: path(x.Name),
 				Kind: "tune", Rule: x.Name, Title: tr(l, "Quiet %s", x.Name) + ": " + x.Suggestion})
 		}
 	}
 	for _, x := range lines {
-		if x.Noisy && x.Suggestion == "" {
+		if x.Noisy && x.Suggestion == "" && x.Unrecord == nil {
 			d := tr(l, "fired %d times in four weeks, %d caught something", x.Firings, x.White)
 			if x.Streak > 1 {
 				d += tr(l, "; noisy %d weeks running", x.Streak)

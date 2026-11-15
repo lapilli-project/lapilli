@@ -267,8 +267,9 @@ func (s *Server) buildReport(ctx context.Context, r ledger.Scheduled, team *ledg
 		in = func(rule string) bool { return own.rule[rule] == team.ID }
 	}
 	// A report of the ledger over a span, for whom the report is for.
+	// A team's judged by the incidents it owns.
 	of := func(from, to time.Time) (*verdict.Report, error) {
-		rep, err := s.ledgerReport(ctx, from, to, o, false)
+		rep, err := s.ledgerReportFor(ctx, from, to, o, false, team)
 		if err != nil || team == nil {
 			return rep, err
 		}
@@ -357,7 +358,7 @@ func (s *Server) buildReport(ctx context.Context, r ledger.Scheduled, team *ledg
 				}
 			}
 		case "suggestions":
-			line, nums, err = s.suggestionsSection(ctx, from, to, in)
+			line, nums, err = s.suggestionsSection(ctx, from, to, in, team)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", sec, err)
@@ -373,7 +374,8 @@ func (s *Server) buildReport(ctx context.Context, r ledger.Scheduled, team *ledg
 }
 
 // counted are a report's firings, those that caught something and those
-// that caught nothing, and its precision, nil with no firings.
+// that caught nothing, and its precision, of those judged alone: nil with
+// none judged, as in weeks with no record to judge them by.
 type counted struct {
 	Firings   int      `json:"firings"`
 	Caught    int      `json:"caught"`
@@ -383,13 +385,15 @@ type counted struct {
 
 func count(rep *verdict.Report) counted {
 	var c counted
+	unjudged := 0
 	for _, r := range rep.Rules {
 		c.Firings += r.Firings
 		c.Caught += r.White
+		unjudged += r.Unjudged
 	}
 	c.Nothing = c.Firings - c.Caught
-	if c.Firings > 0 {
-		p := float64(c.Caught) / float64(c.Firings)
+	if judged := c.Firings - unjudged; judged > 0 {
+		p := float64(c.Caught) / float64(judged)
 		c.Precision = &p
 	}
 	return c
@@ -442,9 +446,12 @@ func (s *Server) noiseSection(rep *verdict.Report, from, to time.Time, loc *time
 	if err != nil {
 		return "", nil, err
 	}
-	was := map[string]bool{}
+	// A rule judged by none of its firings before isn't newly noisy: it
+	// wasn't known not to be.
+	was, unjudged := map[string]bool{}, map[string]bool{}
 	for _, r := range prev.Rules {
 		was[r.Rule] = r.Noisy
+		unjudged[r.Rule] = r.NoRecord
 	}
 	var noisy []noisyRule
 	newly := []string{}
@@ -453,7 +460,7 @@ func (s *Server) noiseSection(rep *verdict.Report, from, to time.Time, loc *time
 			continue
 		}
 		noisy = append(noisy, noisyRule{r.Rule, r.Firings, r.Firings - r.White})
-		if !was[r.Rule] {
+		if !was[r.Rule] && !unjudged[r.Rule] {
 			newly = append(newly, r.Rule)
 		}
 	}
@@ -461,7 +468,11 @@ func (s *Server) noiseSection(rep *verdict.Report, from, to time.Time, loc *time
 		return cmp.Or(cmp.Compare(b.Nothing, a.Nothing), cmp.Compare(a.Rule, b.Rule))
 	})
 	slices.Sort(newly)
-	nums := map[string]any{"from": cur.From.UTC(), "to": cur.To.UTC(), "noisy": orNoneOf(noisy), "newly_noisy": newly}
+	nums := map[string]any{"from": cur.From.UTC(), "to": cur.To.UTC(), "noisy": orNoneOf(noisy), "newly_noisy": newly, "no_record": cur.NoRecord}
+	if cur.NoRecord && slices.ContainsFunc(cur.Rules, func(r verdict.RuleResult) bool { return r.Firings > 0 }) {
+		return tr(l, "No incident written down from %s, or in the two weeks before: a firing that caught nothing can't be told from one nobody wrote down, so no rule is called noisy. Write incidents down, or mark the firings that were real.",
+			cur.From.In(loc).Format("2006-01-02")), nums, nil
+	}
 	if len(noisy) == 0 {
 		return tr(l, "No rule was noisy."), nums, nil
 	}
@@ -559,8 +570,8 @@ func (s *Server) nearKept(ctx context.Context, from, to time.Time) ([]verdict.Ne
 			continue
 		}
 		var nms []verdict.NearMiss
-		if err := r.Decode(&nms); err != nil {
-			return nil, err
+		if !s.decodeKept(r, &nms) {
+			continue
 		}
 		out = append(out, nms...)
 	}
@@ -682,20 +693,15 @@ func (s *Server) replaySection(ctx context.Context, from, to, checkedTo time.Tim
 // suggestionsSection: the longer fors the weekly digest worked out last,
 // and the spare rules over twelve weeks; for a week or longer only, as a
 // shorter span is too short to tell.
-func (s *Server) suggestionsSection(ctx context.Context, from, to time.Time, in func(string) bool) (string, any, error) {
+func (s *Server) suggestionsSection(ctx context.Context, from, to time.Time, in func(string) bool, team *ledger.Team) (string, any, error) {
 	if to.Sub(from) < 7*24*time.Hour-time.Hour { // a week across a change of the clocks
 		return "", nil, nil
 	}
 	l := s.cfg.Lang
-	var sugg []verdict.Suggestion
-	rs, err := s.l.Results(ctx, "suggestions", 1)
+	// None once their week has no record, everyone's or the team's.
+	sugg, _, err := s.suggestionsNow(ctx, team)
 	if err != nil {
 		return "", nil, err
-	}
-	if len(rs) > 0 {
-		if err := rs[0].Decode(&sugg); err != nil {
-			return "", nil, err
-		}
 	}
 	sugg = slices.DeleteFunc(sugg, func(x verdict.Suggestion) bool { return !in(x.Rule) })
 	spare, err := s.spareRules(ctx)

@@ -269,6 +269,13 @@ func (r ref) Eval(refs func(string) (Set, bool)) Set {
 }
 func (r ref) Refs() []string { return []string{string(r)} }
 
+// Ref is the ref an expression is when it is one and nothing else: B of
+// $B.
+func Ref(e Expr) (string, bool) {
+	r, ok := e.(ref)
+	return string(r), ok
+}
+
 type unaryOp struct {
 	op string
 	e  Expr

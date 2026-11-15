@@ -309,6 +309,9 @@ func TestMoved(t *testing.T) {
 		}
 	}
 	s := besideServer(t)
+	// An incident written down keeps the record of both spans: a precision
+	// is set beside another only then.
+	keepRecordIn(t, s)
 	for lang, want := range map[string][]string{
 		"en": {`<span class="delta worse">&#43;2 worse</span>`, `<span class="delta">±0</span>`},
 		"ko": {`<span class="delta worse">&#43;2 나빠짐</span>`, `<summary>알림 부담 <span`},

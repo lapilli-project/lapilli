@@ -288,6 +288,9 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 			}
 			lo = min(lo, ilo)
 		}
+		if err := l.impactSince(t, f); err != nil {
+			return err
+		}
 		if err := l.judge(t, lo-int64(o.Lead/time.Second), to, o); err != nil {
 			return err
 		}
@@ -300,6 +303,33 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 		}
 		return setMeta(t.ctx, t, "cursor", strconv.FormatInt(to, 10))
 	})
+}
+
+// impactNone is impact_since once a run didn't read the impact signal.
+const impactNone = "none"
+
+// impactSince keeps from when the runs read the impact signal (--impact),
+// all of it, without a run between that didn't: what keeps the record of
+// the firings since (ImpactSince). A run that doesn't read it ends that
+// (impactNone); the first to read it with none kept, after it or after an
+// upgrade, keeps its own start. An earlier window found isn't taken for
+// one: the runs between may not have read it.
+func (l *Ledger) impactSince(t *txn, f Found) error {
+	was, err := l.meta(t.ctx, t, "impact_since")
+	if err != nil {
+		return err
+	}
+	if !f.ImpactOn {
+		if was == impactNone {
+			return nil
+		}
+		return setMeta(t.ctx, t, "impact_since", impactNone)
+	}
+	since := f.ImpactSince.Unix()
+	if n, err := strconv.ParseInt(was, 10, 64); err == nil && n <= since {
+		return nil
+	}
+	return setMeta(t.ctx, t, "impact_since", strconv.FormatInt(since, 10))
 }
 
 // miss keeps, for the next run, where each rule this run couldn't replay

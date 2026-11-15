@@ -51,6 +51,12 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		fmt.Fprintf(w, "Rules replayed as they stood: replaced at %s\n", strings.Join(at, ", "))
 	}
 	partial(w, r.Unreplayed, len(r.Rules), true)
+	switch {
+	case r.NoRecord && firings > 0:
+		fmt.Fprintln(w, NoRecordText)
+	case r.Unjudged > 0:
+		fmt.Fprintf(w, SomeUnjudgedText+"\n", r.Unjudged, firings)
+	}
 
 	var fired, silent, unsupported []RuleResult
 	for _, rr := range r.Rules {
@@ -79,6 +85,13 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			return err
 		}
 	}
+	if len(r.Unrecorded) > 0 {
+		fmt.Fprintf(w, "\nRules that fired as often as a noisy rule, with no record to judge them by:\n")
+		for _, u := range r.Unrecorded {
+			fmt.Fprintf(w, "  %s: %s\n", Clean(u.Rule), u.Text())
+		}
+	}
+	outlasting(w, r.Rules)
 	if len(r.Suggestions) > 0 {
 		fmt.Fprintf(w, "\nNoisy rules that a longer \"for\" would quiet, still catching every incident they caught:\n")
 		rows := [][]string{{"RULE", "FOR", "FIRED", "INCIDENTS", "CAUGHT LATER BY"}}
@@ -143,6 +156,22 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 	return nil
 }
 
+// outlasting writes the rules replayed whose "for" one event can't
+// outlast, those that never fired among them: what it means for each.
+func outlasting(w io.Writer, rs []RuleResult) {
+	said := false
+	for _, rr := range rs {
+		if rr.Outlasts == nil || rr.Unsupported != "" {
+			continue
+		}
+		if !said {
+			fmt.Fprintf(w, "\nA \"for\" one event can't outlast:\n")
+			said = true
+		}
+		fmt.Fprintf(w, "  %s: %s\n", Clean(rr.Rule), rr.Outlasts.Text())
+	}
+}
+
 // outOfHours writes when the firings that caught nothing came: those that
 // woke people first.
 func outOfHours(w io.Writer, r *Report) error {
@@ -187,7 +216,16 @@ func outOfHours(w io.Writer, r *Report) error {
 		}
 		fmt.Fprintf(w, "%s's rules by its own hours, in %s (at work %s, asleep %s);\n", Clean(t.Team), t.Zone, HoursText(t.Work), HoursText(t.Sleep))
 	}
-	fmt.Fprintf(w, "of the firings that caught nothing, %d came while people slept, and %d more off hours.\n", asleep, off)
+	// With no record, what caught nothing may have caught something nobody
+	// wrote down.
+	switch {
+	case r.NoRecord:
+		fmt.Fprintf(w, "of the firings, with no incident written down to judge them by, %d came while people slept, and %d more off hours.\n", asleep, off)
+	case r.Unjudged > 0:
+		fmt.Fprintf(w, "of the firings that caught nothing, or had no incident written down to judge them by, %d came while people slept, and %d more off hours.\n", asleep, off)
+	default:
+		fmt.Fprintf(w, "of the firings that caught nothing, %d came while people slept, and %d more off hours.\n", asleep, off)
+	}
 	sev := slices.ContainsFunc(rows, func(rr RuleResult) bool { return rr.Severity != "" })
 	table := [][]string{withSeverity(sev, "RULE", "SEVERITY", "● ASLEEP", "● OFF HOURS", "● AT WORK")}
 	const most = 10

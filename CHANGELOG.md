@@ -2,6 +2,152 @@
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-11-15
+
+A deployment with no incident source had every rule that fired ten times
+or more called noisy, at 0% precision, and its noisiest suggested a longer
+`for`. On one, a restart rule (`increase(restarts[30m]) > 0.5`, `for:
+1m`) was told to wait an hour: every one of its firings was a real restart,
+of services that failed to start for weeks, and an hour is longer than one
+restart can hold the condition, so the suggestion would have hidden them
+all. Now a firing with no record at its time is counted, not judged; a rule
+that fires that often with none says what its firings were instead; a `for`
+one event can't outlast is said to be one, and never suggested; and a
+rule's firings are counted by the team whose labels they have. **Ledger
+schema 018**, after 0.31's 017: an index of when incidents ended, so that a
+page reads the incidents that keep its weeks' record and no others (a
+lapilli before 0.41 doesn't open a ledger this one has migrated). What the
+weekly digest works out is kept with its other results, from when
+`--impact` was read in `meta`. JSON, the API and MCP add fields; none is
+renamed.
+
+### Added
+
+- **No record, no verdict.** A firing is judged only when the record was
+  kept at its time: an incident firings are judged against (written down,
+  or an impact window that counts) was on at some time in the two weeks
+  before it, one with no end taken to last an hour, as long as it is
+  caught for, or it caught one; or an impact signal was read over its
+  time. `--impact` is read from two weeks before the period, and keeps the
+  record of all of it whatever it finds, as it says whether users were
+  hurt; the firings are judged against the windows it finds in the period,
+  as they were. In lapilli serve, from when its runs read it, with no run
+  since that didn't (`impact_since` in `meta`: a run without `--impact`
+  ends it; after an upgrade, it starts with the first run that reads it,
+  as an earlier lapilli kept no word of when its runs did). Any other
+  firing caught nothing written down, which can't be told
+  from one nobody wrote down: it is counted, in the firings and the black
+  stones, and is in no precision and makes no rule noisy. A rule none of
+  whose firings is judged has a precision of `–`, and no longer `for` is
+  suggested for it. `lapilli verdict` judges each firing so; lapilli serve
+  judges by week, a week's firings by whether its record is kept, and,
+  with a team picked, in its digest and its reports, by the incidents the
+  team owns (a team with no labels, which owns one only when its rules
+  caught it, by everyone's); over several weeks, or part of one, each week
+  by its own, whole, so the rules list and the overview's weeks agree, and
+  what it replays (a change's backtest, the try page, the digest's
+  suggestions and near misses) by the same weeks, so that it compares like
+  with like. Every precision serve shows is of the firings judged: the
+  rules list's sum, the span before a rule's period, the outcomes' then
+  and now, during deploys, a report's and MCP's. The text report, the digest, a report's
+  noise line, the overview (where the noise is leaves such weeks out), the
+  rules list and a rule's page say so once, with how to keep a record, and
+  what came out of hours is said to have had no incident to judge it by.
+  `--json`, the API, the summary and MCP have `no_record` on the report,
+  the week and each rule none of whose firings is judged, `unjudged` counts
+  the rest, and a precision of null. A comparison given incidents, none of
+  which keeps its record, counts its firings and doesn't judge them, and
+  its summary says `no_record` (README, "Pull request backtests in CI");
+  `--check-content` says which rules are noisy can't be told. The rules
+  list's Performance has a value for a rule that fired as often as a noisy
+  one with no record (`? No record`, `perf=unrecorded`, `is:unrecorded`).
+  The pages know it from the incidents read once with the weekly tallies,
+  never from the firings.
+- **What a rule's firings were, with no record.** For each rule replayed
+  that fired as often as a noisy one with no record, the ten that fired
+  most. Of a condition that counts events, each firing is one, a count that
+  went up (a Grafana rule's on no data is none: with one among them, that
+  isn't said, nor, of another condition, that it went past its bound): "Fired 141 times with no incident written down to judge them by.
+  All 141 are events its condition counts (a count that went up): these
+  happened. … A longer "for" would hide them: write down whether they
+  mattered, or fix what fires them." Of another with one bound that
+  decides it, how many had the value its condition compares go past it by
+  more than a fifth of it, for its `for` (the rule replayed once with the
+  bound that much further), not a flicker at its edge; of a range, `and`,
+  `or` or `unless`, that is left unsaid, not guessed. How many alerts
+  fired, and the five that fired most by the labels that tell them apart;
+  in lapilli serve, the team that owns the rule, the team whose labels each
+  alert has, and those during deploys. `lapilli verdict` works it out when
+  it replays such firings (`"unrecorded"` in `--json`); the weekly digest
+  for its week, everyone's and each team's by its own record, within its
+  `--timeout`, its reads bounded (5,000 firings a rule, the 1,000 alerts
+  that fired most, counted by the ledger: past 5,000, "Too many firings to
+  tell how many happened", `too_many`), kept as an `unrecorded` result:
+  the digest and `digest.ready`, a team's digest (another team's rule with
+  the alerts on what the team owns alone), a rule's page in place of a
+  suggestion (with its firings to mark the real ones, and a task), the
+  overview first among what to look at, and MCP's `rules` and `rule`
+  (its text without the alerts' labels, which are in `top`, as data) read
+  it from there. A week written down for since shows nothing.
+- **A `for` one event can't outlast.** A rule whose condition counts events
+  (`increase`, `changes`, `resets` or `rate` of a counter's range or a
+  subquery of one, summed or maxed by some labels or not, times or over
+  numbers or not, compared with a number no event passes and one event
+  does) and whose `for` is as long as the range or longer fires only on
+  events that keep coming for all of its `for`: "Its for (1h) is as long as
+  the 30m its condition counts over, or longer: one event alone can never
+  fire it; only events that keep coming for 1h will." `delta` is a
+  gauge's, `idelta` and `irate` hold for about a scrape, and a counter of
+  seconds or bytes, or a histogram's `_sum`, counts an amount: none of
+  these counts events. A Grafana rule counts events when its condition is
+  a threshold of one number (`gt`, `gte`), or a math expression that is
+  one comparison of a ref with a number, of its one PromQL instant query's
+  value, as it is or through reduces that leave it so (`last`, `max`,
+  `min` or `mean` of its one value): a query of `increase(...[30m])`, a
+  reduce (`last`) and a threshold (`> 0.5`) is the restart rule. Not a
+  range query, whose points one event can hold for as long again as its
+  range, a classic condition, other math, a reduce that changes the value
+  or puts a number in place of NaN, two queries, or a rule that fires on
+  no data (`noDataState` `Alerting` or `KeepLast`). It is a fact of the content check (`for_outlasts`),
+  on a rule's page and through MCP, and `lapilli verdict` says it of each
+  rule it replays (`for_outlasts` in `--json`). A proposal of such a `for`
+  is made all the same, as a team may want a rule for a crash loop, and
+  says what it means on its page, in its pull request's description and
+  through MCP; a rule's proposals tab says how long its condition counts
+  over. An expression over 4 KiB, or nested 8 brackets deep, isn't read
+  for it.
+- **Firings on what a team owns.** The weekly digest counts each rule's
+  firings by the team whose labels they had (the teams' labels, the first
+  by name), from one grouped read of the week's firings by alert (the
+  20,000 that fired most), and keeps the rules most of whose firings, more
+  than half, came from what another team owns than the one their alerts go
+  to (or no team's): kept as a `fired_on` result, read under a `--timeout`
+  of its own, apart from the replays'; a rule's `unread` says how many of its firings were past the
+  alerts read, and the digest logs how many in all. A rule's page says "Its
+  alerts go to payments; most came from what web owns (14 of 14)", web's
+  rules list lists them, web's digest names them, and MCP's `rules` and
+  `rule` give `fired_on`.
+
+### Changed
+
+- **No longer `for` past what one event holds is suggested.** A noisy rule
+  that counts events is replayed with longer `for`s shorter than its range
+  only. Before, a rule that had caught nothing kept the first `for` that
+  halved its firings, which for such a rule was the one at which one event
+  could no longer fire it.
+- **A stored suggestion follows the record.** The last digest's longer
+  `for`s are shown, proposed and sent only while the week they were worked
+  out for still has its record: not after an upgrade to a week that had
+  none, nor once an incident is taken away.
+- The overview names a rule once among what to look at: what its firings
+  were with no record, when the last digest said it, in place of its
+  suggestion or its noisiness.
+- A rule with no record the span before isn't newly noisy in a report.
+- Where the noise is names the rules with the most black stones judged.
+- A result the digest kept that doesn't decode (suggestions, near misses,
+  a change's backtest) is logged and taken as none, on every page and in
+  the digest, rather than failing them.
+
 ## [0.40.1] - 2026-11-15
 
 The two things docs/design/ui.md had left, and a disabled button that

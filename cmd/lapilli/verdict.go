@@ -1163,11 +1163,10 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	// Impact first: it is one query, and a replay that runs out of time
 	// should still be judged against it.
 	if f.impact != "" {
-		series, err := h.QueryRange(ctx, f.impact, f.opts.From, f.opts.To, f.step)
-		if err != nil {
-			return fail(fmt.Errorf("--impact: %w", err))
+		var err error
+		if incs, err = f.readImpact(ctx, h, incs); err != nil {
+			return fail(err)
 		}
-		incs = incident.Merge(incs, incident.FromImpact(series, f.step, f.impactFor), f.opts.UnknownLen, f.opts.Match)
 	}
 
 	var known []rules.Rule
@@ -1260,6 +1259,14 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			rep.NearMissesCut = !done
 			if err != nil && ctx.Err() == nil {
 				fmt.Fprintf(stderr, "lapilli verdict: looking for near misses: %v\n", err)
+			}
+		}
+		// With no record, what the firings of the rules that fired most were:
+		// how many went well past their bound, and from which alerts.
+		if !f.metrics && rep.Unjudged > 0 && len(versions) > 0 {
+			var err error
+			if rep.Unrecorded, err = source.Unrecorded(ctx, h, versions, rep, source.Judged(rep.Firings), f.step); err != nil && ctx.Err() == nil {
+				fmt.Fprintf(stderr, "lapilli verdict: looking at the firings with no record to judge them by: %v\n", err)
 			}
 		}
 		reports = append(reports, rep)

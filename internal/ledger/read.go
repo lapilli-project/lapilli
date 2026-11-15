@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -281,7 +282,17 @@ func (l *Ledger) FiringByID(ctx context.Context, id int64) (Firing, error) {
 // lapilli verdict --json writes: the firings that started in it and the
 // incidents that did, each firing's stones given against every incident the
 // ledger has. With firings false, the firings themselves are left out.
+//
+// A firing is judged by week: those of a week whose record is kept
+// (WeekKept), and any that caught something; the rest are counted, not
+// judged (verdict.RuleResult.Unjudged).
 func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Options, firings bool) (*verdict.Report, error) {
+	return l.ReportFor(ctx, from, to, o, firings, nil)
+}
+
+// ReportFor is Report, with the record kept only by the incidents keeps
+// says keep it, all when nil: a team's, by what it owns.
+func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Options, firings bool, keeps func(Incident) bool) (*verdict.Report, error) {
 	o.From, o.To = from, to
 	at := verdict.NoisyAt{Firings: o.NoisyFirings, Precision: o.NoisyPrecision}
 	if at.Firings == 0 {
@@ -326,58 +337,75 @@ func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Optio
 			rr.Replayed = r.Unsupported == ""
 		}
 	}
-	// Whole days come from the daily tallies; the hours at either end, from
-	// the firings.
-	d1, d2 := l.day(from.Unix()), l.day(to.Unix())
-	if l.midnight(d1) < from.Unix() {
-		d1++
-	}
-	type part struct {
-		q    string
-		a, b int64
-	}
-	byFirings := `SELECT rule_id, count(*) - sum(excused), sum(white), sum(refired * (1 - excused)), sum(excused), sum(deploy), sum(deploy * white) FROM firings
-		WHERE start_at >= ? AND start_at < ? GROUP BY rule_id`
-	parts := []part{{byFirings, from.Unix(), to.Unix()}}
-	if d1 < d2 {
-		parts = []part{
-			{byFirings, from.Unix(), l.midnight(d1)},
-			{"SELECT rule_id, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white) FROM days WHERE day >= ? AND day < ? GROUP BY rule_id", d1, d2},
-			{byFirings, l.midnight(d2), to.Unix()},
+	parts := l.parts(from.Unix(), to.Unix())
+	count := func(parts []reportPart, judged bool) error {
+		for _, p := range parts {
+			if p.b <= p.a {
+				continue
+			}
+			rows, err := l.r.QueryContext(ctx, p.q, p.a, p.b)
+			if err != nil {
+				return err
+			}
+			for rows.Next() {
+				var id int64
+				var n, white, again, excused, deploy, deployWhite int
+				if err := rows.Scan(&id, &n, &white, &again, &excused, &deploy, &deployWhite); err != nil {
+					rows.Close()
+					return err
+				}
+				rr := result(table[id])
+				rr.Firings += n
+				rr.White += white
+				rr.Black += n - white
+				rr.Refired += again
+				rr.Excused += excused
+				rr.DuringDeploys += deploy
+				rr.DeploysCaught += deployWhite
+				if !judged {
+					rr.Unjudged += n - white
+					rr.DeploysUnjudged += deploy - deployWhite
+					rep.Unjudged += n - white
+				}
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
 		}
+		return nil
 	}
-	for _, p := range parts {
-		if p.b <= p.a {
-			continue
-		}
-		rows, err := l.r.QueryContext(ctx, p.q, p.a, p.b)
-		if err != nil {
+	rec, err := l.record(ctx, from, to, o, keeps)
+	if err != nil {
+		return nil, err
+	}
+	// Each week judged by its own record: the span whole when every week of
+	// it is judged alike, or else a week at a time. With none kept, the span
+	// has no record.
+	weeks := l.spanWeeks(from, to)
+	kept := map[int64]bool{}
+	alike := true
+	rep.NoRecord = true
+	for _, w := range weeks {
+		kept[w] = l.weekKept(rec, w)
+		alike = alike && kept[w] == kept[weeks[0]]
+		rep.NoRecord = rep.NoRecord && !kept[w]
+	}
+	if alike {
+		if err := count(parts, kept[weeks[0]]); err != nil {
 			return nil, err
 		}
-		for rows.Next() {
-			var id int64
-			var n, white, again, excused, deploy, deployWhite int
-			if err := rows.Scan(&id, &n, &white, &again, &excused, &deploy, &deployWhite); err != nil {
-				rows.Close()
+	} else {
+		for _, w := range weeks {
+			a, b := max(from.Unix(), l.midnight(w)), min(to.Unix(), l.midnight(w+7))
+			if err := count(l.parts(a, b), kept[w]); err != nil {
 				return nil, err
 			}
-			rr := result(table[id])
-			rr.Firings += n
-			rr.White += white
-			rr.Black += n - white
-			rr.Refired += again
-			rr.Excused += excused
-			rr.DuringDeploys += deploy
-			rr.DeploysCaught += deployWhite
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return nil, err
 		}
 	}
 	for _, rr := range byName {
-		p, ok := rr.Precision()
-		rr.Noisy = ok && rr.Firings >= at.Firings && p < at.Precision
+		rr.NoRecord = rr.Firings > 0 && rr.Unjudged == rr.Firings
+		rr.Noisy = verdict.IsNoisy(rr.Judged(), rr.White, at)
 		rep.Rules = append(rep.Rules, *rr)
 	}
 	if o.Hours != nil && to.Sub(from) <= HoursLongest {
@@ -439,7 +467,7 @@ func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Optio
 		if f.Excused {
 			continue // counted in the rule's Excused, not judged
 		}
-		j := verdict.Judged{Firing: f.Firing, White: f.White}
+		j := verdict.Judged{Firing: f.Firing, White: f.White, NoRecord: !f.White && !l.weekKept(rec, Week(l.day(f.Start.Unix())))}
 		for _, in := range near {
 			if verdict.Catches(f.Firing, in, o) {
 				j.Incidents = append(j.Incidents, in.ID)
@@ -448,6 +476,138 @@ func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Optio
 		rep.Firings = append(rep.Firings, j)
 	}
 	return rep, nil
+}
+
+// reportPart is a query of a report's counts over [a, b).
+type reportPart struct {
+	q    string
+	a, b int64
+}
+
+const (
+	countFirings = `SELECT rule_id, count(*) - sum(excused), sum(white), sum(refired * (1 - excused)), sum(excused), sum(deploy), sum(deploy * white) FROM firings
+		WHERE start_at >= ? AND start_at < ? GROUP BY rule_id`
+	countDays = "SELECT rule_id, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white) FROM days WHERE day >= ? AND day < ? GROUP BY rule_id"
+)
+
+// parts are the queries of a report's counts over [lo, hi): whole days from
+// the daily tallies; the hours at either end, from the firings.
+func (l *Ledger) parts(lo, hi int64) []reportPart {
+	d1, d2 := l.day(lo), l.day(hi)
+	if l.midnight(d1) < lo {
+		d1++
+	}
+	if d1 >= d2 {
+		return []reportPart{{countFirings, lo, hi}}
+	}
+	return []reportPart{{countFirings, lo, l.midnight(d1)}, {countDays, d1, d2}, {countFirings, l.midnight(d2), hi}}
+}
+
+// recordOn are the incidents firings are judged against (written down, or
+// impact windows that count) on at some time in [?1, ?2): started before
+// the end, and ended at the start or after it; one with no end, taken to
+// last as long as a firing catches it for, started at ?3 (the start less
+// that) or after. Read by the index of when they ended (schema 018), so
+// only those near are: the start's bound has a + before it, so that SQLite
+// doesn't read every incident before the end by the index of starts.
+const recordOn = `i.counts = 1 AND +i.start_at < ?2 AND (i.end_at >= ?1 OR i.end_at IS NULL AND i.start_at >= ?3)`
+
+// RecordIncidents are the incidents on at some time in [from, to) (recordOn),
+// one with no end taken to last unknown, as a firing catches it; each with
+// what caught it, for who owns it.
+func (l *Ledger) RecordIncidents(ctx context.Context, from, to time.Time, unknown time.Duration) ([]Incident, error) {
+	return l.incidents(ctx, `SELECT i.id, i.key, i.origin, i.title, i.start_at, i.end_at, i.labels, i.state, i.counts, i.updated, i.updated_by
+		FROM incidents i WHERE `+recordOn+` ORDER BY i.start_at, i.key`, recordArgs(from, to, unknown)...)
+}
+
+func recordArgs(from, to time.Time, unknown time.Duration) []any {
+	return []any{from.Unix(), to.Unix(), from.Unix() - int64(max(unknown, 0)/time.Second)}
+}
+
+// RecordOf is what keeps the record of [from, to)'s weeks, and of any time
+// in them: the incidents on from two weeks before the first to the end of
+// the last, of those keeps says keep it (all, when nil), and the impact
+// signal read from o.ImpactFrom.
+func (l *Ledger) RecordOf(ctx context.Context, from, to time.Time, o verdict.Options, keeps func(Incident) bool) (verdict.Record, error) {
+	return l.record(ctx, from, to, o, keeps)
+}
+
+func (l *Ledger) record(ctx context.Context, from, to time.Time, o verdict.Options, keeps func(Incident) bool) (verdict.Record, error) {
+	wf, wt := l.weeksOf(from, to)
+	incs, err := l.RecordIncidents(ctx, verdict.RecordFrom(wf, wt), wt, o.UnknownLen)
+	if err != nil {
+		return verdict.Record{}, err
+	}
+	var plain []incident.Incident
+	for _, in := range incs {
+		if keeps == nil || keeps(in) {
+			plain = append(plain, in.Incident)
+		}
+	}
+	return verdict.RecordOf(plain, o), nil
+}
+
+// weeksOf is from the Monday of the first week [from, to) has some of to
+// the end of the last.
+func (l *Ledger) weeksOf(from, to time.Time) (time.Time, time.Time) {
+	ws := l.spanWeeks(from, to)
+	return unix(l.midnight(ws[0])), unix(l.midnight(ws[len(ws)-1] + 7))
+}
+
+// WeekOf is the week t is in, from its Monday to the next, as the ledger
+// keeps weeks: what lapilli serve judges the record by
+// (verdict.Options.RecordWeek).
+func (l *Ledger) WeekOf(t time.Time) (time.Time, time.Time) {
+	w := Week(l.day(t.Unix()))
+	return unix(l.midnight(w)), unix(l.midnight(w + 7))
+}
+
+// RecordKept reports whether the record of one of [from, to)'s weeks is
+// kept (WeekKept): the impact signal read over all of one, or an incident
+// on from two weeks before the first to the end of the last.
+func (l *Ledger) RecordKept(ctx context.Context, from, to time.Time, o verdict.Options) (bool, error) {
+	wf, wt := l.weeksOf(from, to)
+	if last, _ := l.WeekOf(wt.Add(-time.Second)); !o.ImpactFrom.IsZero() && !o.ImpactFrom.After(last) {
+		return true, nil
+	}
+	var n int
+	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM incidents i WHERE "+recordOn+" LIMIT 1) x",
+		recordArgs(verdict.RecordFrom(wf, wt), wt, o.UnknownLen)...).Scan(&n)
+	return n > 0, err
+}
+
+// WeekKept reports whether a week's record is kept, by rec: the granularity
+// lapilli serve judges firings by. w is its Monday.
+func (l *Ledger) WeekKept(rec verdict.Record, w int64) bool { return l.weekKept(rec, w) }
+
+func (l *Ledger) weekKept(rec verdict.Record, w int64) bool {
+	return rec.Kept(unix(l.midnight(w)), unix(l.midnight(w+7)))
+}
+
+// SpanWeeks are the Mondays of the weeks [from, to) has some of: one at
+// least.
+func (l *Ledger) SpanWeeks(from, to time.Time) []int64 { return l.spanWeeks(from, to) }
+
+func (l *Ledger) spanWeeks(from, to time.Time) []int64 {
+	var out []int64
+	for w := Week(l.day(from.Unix())); l.midnight(w) < to.Unix(); w += 7 {
+		out = append(out, w)
+	}
+	if len(out) == 0 {
+		out = append(out, Week(l.day(from.Unix())))
+	}
+	return out
+}
+
+// ImpactSince is from when the impact signal (--impact) was read, all of
+// it, by the runs; zero when it never was.
+func (l *Ledger) ImpactSince(ctx context.Context) (time.Time, error) {
+	v, err := l.meta(ctx, l.r, "impact_since")
+	if err != nil || v == "" || v == impactNone {
+		return time.Time{}, err
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	return unix(n), err
 }
 
 // SortRules puts the noisiest rules first, as verdict.Judge does.

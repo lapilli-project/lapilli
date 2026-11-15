@@ -13,6 +13,10 @@ import (
 	"lapilli.dev/internal/ledger/ledgertest"
 )
 
+// undo018 takes back what 018 made, for the tests of the migrations
+// before it.
+var undo018 = []string{"DROP INDEX incidents_end"}
+
 // undo017 takes back what 017 made, for the tests of the migrations
 // before it.
 var undo017 = []string{

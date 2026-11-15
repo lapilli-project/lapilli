@@ -51,6 +51,9 @@ func rolesServer(t *testing.T, change func(*Config)) (s *Server, pay, search int
 		c.Admins, c.Editors = []string{"boss@example.com"}, []string{"ed@example.com"}
 		c.TeamDigests = map[string]string{"payments": hook, "search": hook}
 		c.Slack = hook
+		// The impact signal read from before the week before: its record
+		// kept, everyone's and each team's, and Errors noisy.
+		c.Backfill = 10 * 24 * time.Hour
 		if change != nil {
 			change(c)
 		}

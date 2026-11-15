@@ -49,6 +49,15 @@ type Options struct {
 	// Hours, when not nil, say when people are at work and asleep, to count
 	// each rule's firings out of hours by.
 	Hours *Hours
+	// ImpactFrom, when not zero, is from when an impact signal (--impact)
+	// was read, all of it: a measure of whether users were hurt, found or
+	// not, that keeps the record of every firing from then (Record).
+	ImpactFrom time.Time
+	// RecordWeek, when not nil, is the week a time is in, [from, to), as
+	// lapilli serve aligns its weeks: a firing is judged when the record of
+	// its week is kept, as serve's stones are kept by week. Nil judges each
+	// firing by the record at its own time, as lapilli verdict does.
+	RecordWeek func(t time.Time) (from, to time.Time) `json:"-"`
 }
 
 // The defaults for Options.NoisyFirings and Options.NoisyPrecision.
@@ -74,11 +83,14 @@ type NoisyAt struct {
 	Precision float64 `json:"precision"`
 }
 
-// Judged is a firing and its stone.
+// Judged is a firing and its stone. NoRecord says the record wasn't kept
+// at its time (Record.At): it caught nothing written down, and is counted,
+// not judged.
 type Judged struct {
 	firing.Firing
 	White     bool     `json:"white"`
 	Incidents []string `json:"incidents,omitempty"`
+	NoRecord  bool     `json:"no_record,omitempty"`
 }
 
 // RuleResult is one rule's stones.
@@ -95,10 +107,20 @@ type RuleResult struct {
 	Replayed bool   `json:"replayed"`
 	// Noisy says the rule fires whatever happens: see Options.
 	Noisy bool `json:"noisy"`
+	// Unjudged are its firings with no record at their time (Record): in
+	// Firings and Black, as they caught nothing written down, and in no
+	// precision, nor in whether it is noisy. NoRecord says none of its
+	// firings was judged: it has no precision, and isn't noisy.
+	Unjudged int  `json:"unjudged,omitempty"`
+	NoRecord bool `json:"no_record,omitempty"`
 	// Unsupported is why the rule couldn't be replayed.
 	Unsupported string `json:"unsupported,omitempty"`
 	// Unseen is what its replay can't see, as rules.Rule.Unseen says.
 	Unseen []string `json:"unseen,omitempty"`
+	// Outlasts, when not nil, says its "for" is as long as the range its
+	// condition counts events over, or longer: one event alone can never
+	// fire it (rules.Rule.ForOutlasts). Of a rule replayed.
+	Outlasts *Outlast `json:"for_outlasts,omitempty"`
 	// Source is, in lapilli serve, where a rule's firings were recorded
 	// before they were copied in: a rule not replayed, whose condition
 	// Lapilli doesn't have.
@@ -127,15 +149,40 @@ type RuleResult struct {
 	// caught something: in Firings and White, and shown apart.
 	DuringDeploys int `json:"during_deploys,omitempty"`
 	DeploysCaught int `json:"during_deploys_caught,omitempty"`
+	// DeploysUnjudged are those of DuringDeploys among Unjudged.
+	DeploysUnjudged int `json:"during_deploys_unjudged,omitempty"`
 }
 
-// Precision is the share of firings that caught something; ok is false
-// when the rule never fired.
+// Judged is how many of its firings were judged: those with a record at
+// their time.
+func (r RuleResult) Judged() int {
+	if r.NoRecord {
+		return 0
+	}
+	return r.Firings - r.Unjudged
+}
+
+// Precision is the share of the firings judged that caught something; ok
+// is false when none was: it never fired, or had no record to judge by.
 func (r RuleResult) Precision() (float64, bool) {
-	if r.Firings == 0 {
+	n := r.Judged()
+	if n <= 0 {
 		return 0, false
 	}
-	return float64(r.White) / float64(r.Firings), true
+	return float64(r.White) / float64(n), true
+}
+
+// Unrecorded reports whether it fired as often as a noisy rule, with no
+// record to judge those firings by, and isn't noisy by those it has.
+func (r RuleResult) Unrecorded(at NoisyAt) bool {
+	return !r.Noisy && r.Firings-r.Judged() >= at.Firings
+}
+
+// IsNoisy reports whether a rule fires whatever happens, by the firings
+// judged alone: at least at.Firings of them, and under at.Precision of them
+// catching anything.
+func IsNoisy(judged, white int, at NoisyAt) bool {
+	return judged > 0 && judged >= at.Firings && float64(white)/float64(judged) < at.Precision
 }
 
 // Catch is one rule catching an incident.
@@ -149,10 +196,7 @@ type Catch struct {
 	Noisy bool `json:"noisy"`
 }
 
-func (r RuleResult) noisy(at NoisyAt) bool {
-	p, ok := r.Precision()
-	return ok && r.Firings >= at.Firings && p < at.Precision
-}
+func (r RuleResult) noisy(at NoisyAt) bool { return IsNoisy(r.Judged(), r.White, at) }
 
 // IncidentResult is one incident and the rules that caught it.
 type IncidentResult struct {
@@ -190,11 +234,18 @@ type Report struct {
 	To   time.Time `json:"to"`
 	// RulesChanged is when, in the period, the rules replayed were
 	// replaced by the next version of them.
-	RulesChanged []time.Time      `json:"rules_changed,omitempty"`
-	NoisyAt      NoisyAt          `json:"noisy_at"`
-	Rules        []RuleResult     `json:"rules"`
-	Incidents    []IncidentResult `json:"incidents"`
-	Firings      []Judged         `json:"firings"`
+	RulesChanged []time.Time `json:"rules_changed,omitempty"`
+	NoisyAt      NoisyAt     `json:"noisy_at"`
+	// NoRecord says the record of the period isn't kept for any time in it
+	// (Record.Kept): none of its firings is judged, no rule is noisy, and
+	// none is suggested a longer "for". Unjudged are its firings with no
+	// record at their time, of it or of a period whose record is kept only
+	// at times.
+	NoRecord  bool             `json:"no_record,omitempty"`
+	Unjudged  int              `json:"unjudged,omitempty"`
+	Rules     []RuleResult     `json:"rules"`
+	Incidents []IncidentResult `json:"incidents"`
+	Firings   []Judged         `json:"firings"`
 	// Suggestions are noisy rules that would have kept their catches with
 	// a longer "for".
 	Suggestions []Suggestion `json:"suggestions,omitempty"`
@@ -208,6 +259,10 @@ type Report struct {
 	// NearMissesCut says the time ran out before every incident was looked
 	// at for near misses.
 	NearMissesCut bool `json:"near_misses_cut,omitempty"`
+	// Unrecorded are, of a period with no record (NoRecord), the rules
+	// replayed that fired as often as a noisy rule, and what their firings
+	// were: the most firings first.
+	Unrecorded []Unrecorded `json:"unrecorded,omitempty"`
 	// Unreplayed are the rules that couldn't be replayed, as
 	// UnreplayedRules gives them, set by the run that replayed them: in
 	// lapilli verdict's --json, and named at the top of its text. A report
@@ -236,6 +291,8 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	at := o.noisyAt()
 	rep := &Report{From: o.From, To: o.To, NoisyAt: at, Rules: []RuleResult{}, Incidents: []IncidentResult{}, Firings: []Judged{}, SomeRules: o.SomeRules,
 		Hours: o.Hours.Used()}
+	rec := RecordOf(incs, o)
+	rep.NoRecord = !rec.JudgesAny(o.From, o.To)
 	severities := map[string][]string{}
 	addSeverity := func(rule, sev string) {
 		if sev != "" && !slices.Contains(severities[rule], sev) {
@@ -263,6 +320,11 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			if !slices.Contains(r.Unseen, u) {
 				r.Unseen = append(r.Unseen, u)
 			}
+		}
+		// Of a rule as it was at several times, as the last given is.
+		r.Outlasts = nil
+		if w, ok := k.ForOutlasts(); ok {
+			r.Outlasts = &Outlast{For: k.For, Window: w}
 		}
 		addSeverity(k.Name, k.AlertLabels()["severity"])
 	}
@@ -304,6 +366,11 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			r.White++
 		} else {
 			r.Black++
+			if !rec.Judges(f.Start) {
+				j.NoRecord = true
+				r.Unjudged++
+				rep.Unjudged++
+			}
 		}
 		o.Hours.Count(r, f.Start, j.White)
 		k := f.Rule + "\x00" + labelKey(f.Labels)
@@ -315,6 +382,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	}
 
 	for name, r := range byRule {
+		r.NoRecord = r.Firings > 0 && r.Unjudged == r.Firings
 		r.Noisy = r.noisy(at)
 		slices.Sort(severities[name])
 		r.Severity = strings.Join(severities[name], "/")

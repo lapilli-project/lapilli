@@ -335,12 +335,8 @@ func (s *Server) proposeOne(ctx context.Context, q ask, by string) (int64, error
 // rule's page offers them: written as its form sends them.
 func (s *Server) suggestedFors(ctx context.Context) (map[string]string, error) {
 	out := map[string]string{}
-	rs, err := s.l.Results(ctx, "suggestions", 1)
-	if err != nil || len(rs) == 0 {
-		return out, err
-	}
-	var ss []verdict.Suggestion
-	if err := rs[0].Decode(&ss); err != nil {
+	ss, _, err := s.suggestionsNow(ctx, nil) // none once its week has no record
+	if err != nil {
 		return nil, err
 	}
 	for _, x := range ss {

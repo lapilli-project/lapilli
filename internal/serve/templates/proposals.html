@@ -68,6 +68,7 @@
 
 <section class="card" id="backtest">
 <h2>{{t "Backtest"}}</h2>
+{{with .Evidence.Outlasts}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "As proposed, its for (%s) is as long as the %s its condition counts over, or longer: one event alone could never fire it; only events that keep coming for %s would." (dur .For) (dur .Window) (dur .For)}}</p>{{end}}
 {{with .Backtest}}{{if .Worse}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if .Undoes}}{{if eq (len .Lost) 1}}{{t "Undone, it misses 1 incident it catches with #%d:" .Undoes}}{{else}}{{t "Undone, it misses %d incidents it catches with #%d:" (len .Lost) .Undoes}}{{end}}{{else if eq (len .Lost) 1}}{{t "As proposed, it misses 1 incident it catches now:"}}{{else}}{{t "As proposed, it misses %d incidents it catches now:" (len .Lost)}}{{end}}{{range $i, $x := .Lost}}{{if $i}},{{end}} <a href="{{$.Incident $x}}"><bdi>{{$x}}</bdi></a>{{end}}.</p>{{end}}
 {{if .Undoes}}<p class="quiet">{{t "The backtest of #%d, replayed from %s to %s when it was proposed, read the other way: with it, and as the rule was before it." .Undoes (day $loc .From) (day $loc .To)}}</p>
 {{else}}<p class="quiet">{{t "Replayed from %s to %s, as the rule is now and as proposed." (day $loc .From) (day $loc .To)}}</p>{{end}}
@@ -136,7 +137,8 @@
 <h2>{{t "Propose a change"}}</h2>
 <form method="post" action="/proposals" class="grid">
   <input type="hidden" name="rule" value="{{.Name}}"><input type="hidden" name="kind" value="for">{{with .SuggestedFor}}<input type="hidden" name="from" value="suggestion">{{end}}
-  <label>{{t "A new for"}} <input name="for" required maxlength="20" value="{{.SuggestedFor}}" placeholder="15m"></label>
+  <label>{{t "A new for"}} <input name="for" required maxlength="20" value="{{.SuggestedFor}}" placeholder="15m"{{if .EventWindow}} aria-describedby="for-window"{{end}}></label>
+  {{with .EventWindow}}<p class="quiet" id="for-window">{{t "Its condition counts events over %s: with a for that long or longer, one event alone can never fire it." .}}</p>{{end}}
   <button>{{t "Propose it, with its backtest"}}</button>
 </form>
 {{range .Thresholds}}<form method="post" action="/proposals" class="grid">

@@ -310,7 +310,10 @@ func TestProgressCounts(t *testing.T) {
       - alert: Quiet
         expr: never
 `)
+	// INC-0, before the period, keeps the record of all of it: Flappy is
+	// judged, and noisy.
 	incidents := write(t, "incidents.yaml", `incidents:
+  - {id: INC-0, title: Before, start: "2026-10-24T00:00:00Z", end: "2026-10-24T00:30:00Z"}
   - {id: INC-7, title: Checkout down, start: "2026-11-01T21:00:00Z", end: "2026-11-01T22:00:00Z"}
 `)
 	var stdout, stderr bytes.Buffer

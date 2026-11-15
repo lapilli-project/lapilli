@@ -23,7 +23,8 @@ import (
 // each axis.
 type ruleRow struct {
 	ruleLine
-	// Perf is how it did over the weeks shown: noisy, ok, silent (no
+	// Perf is how it did over the weeks shown: noisy, unrecorded (fired as
+	// often as a noisy rule, with no record to judge it by), ok, silent (no
 	// firing) or spare (another rule caught what it caught, as soon).
 	Perf string
 	// Trust are what its stones can't be taken for granted for: differs
@@ -110,14 +111,20 @@ type rulesList struct {
 	// Sum, the rules shown, all told.
 	Week string
 	Sum  ruleSum
+	// FiredOn are, with a team picked, the rules of other teams, or of no
+	// team, most of whose firings in the last digest's week came from what
+	// it owns.
+	FiredOn []firedOnView
 }
 
 // ruleSum is the rules shown, all told: the overview's tiles link to the
 // list whose sum each is.
 type ruleSum struct {
 	Firings, White, Black, Refired, Deploys, Excused int
-	AsleepBlack, OffHoursBlack                       int
-	Precision                                        string
+	// Unjudged are those in weeks with no record, in no precision.
+	Unjudged                   int
+	AsleepBlack, OffHoursBlack int
+	Precision                  string
 	// Notified says notifications are kept: Notifications, Repeats; and
 	// Woken, those for firings that caught nothing while people slept,
 	// as the overview counts them (woken). Uncounted says the weeks shown
@@ -143,6 +150,7 @@ type legendItem struct {
 // badge (Undecided).
 var badgeMeans = map[string][3]string{
 	"perf/noisy":       {"perf-noisy", "●", "Fired often over the weeks shown, and few of its firings caught something; with weeks, how many weeks running."},
+	"perf/unrecorded":  {"perf-unrecorded", "?", "Fired often over the weeks shown, with no incident written down to judge it by: whether its firings mattered isn't known."},
 	"perf/ok":          {"perf-ok", "○", "Fired over the weeks shown, and isn't noisy."},
 	"perf/silent":      {"perf-silent", "–", "No firing in the weeks shown."},
 	"perf/spare":       {"perf-spare", "⧉", "Another rule caught every incident it caught, as soon, at the same severity or above."},
@@ -229,7 +237,7 @@ var facetsOf = []struct {
 	values      []string
 	labels      []string
 }{
-	{"perf", "Performance", perfValues, []string{"Noisy", "OK", "Silent", "Spare"}},
+	{"perf", "Performance", perfValues, []string{"Noisy", "No record", "OK", "Silent", "Spare"}},
 	{"severity", "Severity", nil, nil},
 	{"trust", "Trust", trustValues, []string{"Differs", "Not replayed", "Recorded only"}},
 	{"status", "Disposition", statusValues, []string{"keep", "tune", "retire", "Undecided"}},
@@ -502,6 +510,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		x := &v.Sum
 		x.Firings += row.Firings
 		x.White += row.White
+		x.Unjudged += row.Unjudged
 		x.Black += row.Black
 		x.Refired += row.Refired
 		x.Deploys += row.Deploys
@@ -512,7 +521,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		x.Repeats += row.Repeats
 		x.Woken += row.Woken
 	}
-	v.Sum.Precision = pct(v.Sum.White, v.Sum.Firings)
+	v.Sum.Precision = pct(v.Sum.White, v.Sum.Firings-v.Sum.Unjudged)
 	for _, f := range facetsOf {
 		fc := facet{Param: f.param, Name: f.name}
 		values, labels := f.values, f.labels
@@ -609,6 +618,13 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	}
 	allTeams := a
 	allTeams.c.Team, allTeams.c.TeamSet = "", true
+	if d.team != nil {
+		on, week, err := s.firedOnWeek(ctx)
+		if err != nil {
+			return nil, err
+		}
+		v.FiredOn = firedOnLines(on, week, d.team.Name)
+	}
 	v.Bulk = s.bulkFor(r, "team")
 	v.Bulk.Back, v.Bulk.Teams = a.url(), d.own.teams
 	switch {
@@ -772,6 +788,8 @@ func rowOf(l ruleLine, facts int) ruleRow {
 		r.Perf = "silent"
 	case l.Noisy:
 		r.Perf = "noisy"
+	case l.Unrecorded:
+		r.Perf = "unrecorded"
 	case l.Spare:
 		r.Perf = "spare"
 	default:

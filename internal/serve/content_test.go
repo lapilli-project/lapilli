@@ -54,6 +54,7 @@ func saying(t *testing.T, change func(*Config)) (*Server, string) {
 	ctx := context.Background()
 	s, dir := server(t, func(c *Config) {
 		c.CheckContent = true
+		keepRecord(c) // its weeks judged: Errors noisy over four of them
 		if change != nil {
 			change(c)
 		}

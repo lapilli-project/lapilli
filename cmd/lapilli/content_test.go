@@ -63,7 +63,9 @@ func TestCheckContent(t *testing.T) {
 	}
 
 	// Replayed, and judged against incidents: what is measured too.
-	incidents := write(t, "incidents.yaml", "incidents:\n  - {id: INC-1, title: Checkout down, start: 2026-11-01T21:00:00Z, end: 2026-11-01T21:30:00Z, labels: {service: checkout}}\n")
+	// INC-0, before the period, keeps the record of all of it.
+	incidents := write(t, "incidents.yaml", "incidents:\n  - {id: INC-0, title: Before, start: 2026-10-24T00:00:00Z, end: 2026-10-24T00:30:00Z, labels: {service: elsewhere}}\n"+
+		"  - {id: INC-1, title: Checkout down, start: 2026-11-01T21:00:00Z, end: 2026-11-01T21:30:00Z, labels: {service: checkout}}\n")
 	stdout.Reset()
 	if code := run([]string{"verdict", "--rules", rulesFile, "--check-content", "--prometheus", "http://x", "--incidents", incidents,
 		"--severities", "page,ticket", "--json"}, &stdout, &stderr); code != 0 {

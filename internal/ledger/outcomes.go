@@ -8,6 +8,8 @@ import (
 	"slices"
 	"sort"
 	"time"
+
+	"lapilli.dev/internal/verdict"
 )
 
 // What the ledger can tell of its own worth: a rule's stones over any
@@ -21,6 +23,9 @@ type Span struct {
 	White   int `json:"white"`
 	Excused int `json:"excused"`
 	Caught  int `json:"caught"`
+	// Unjudged are, of Firings, those in a week with no record that caught
+	// nothing, when the reader works them out: in no precision.
+	Unjudged int `json:"unjudged,omitempty"`
 }
 
 // Black is how many firings caught nothing.
@@ -153,6 +158,29 @@ func (l *Ledger) Stones(ctx context.Context, from, to time.Time) (firings, white
 		firings, white = firings+n, white+w
 	}
 	return firings, white, nil
+}
+
+// StonesJudged are Stones, and, of them, unjudged: those in a week with no
+// record that caught nothing, as Report counts them, in no precision.
+func (l *Ledger) StonesJudged(ctx context.Context, from, to time.Time, o verdict.Options) (firings, white, unjudged int, err error) {
+	if firings, white, err = l.Stones(ctx, from, to); err != nil || firings == white {
+		return firings, white, 0, err
+	}
+	rec, err := l.record(ctx, from, to, o, nil)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	for _, w := range l.spanWeeks(from, to) {
+		if l.weekKept(rec, w) {
+			continue
+		}
+		n, wh, err := l.Stones(ctx, unix(max(from.Unix(), l.midnight(w))), unix(min(to.Unix(), l.midnight(w+7))))
+		if err != nil {
+			return 0, 0, 0, err
+		}
+		unjudged += n - wh
+	}
+	return firings, white, unjudged, nil
 }
 
 // CountFirings is how many firings started in [from, to), excused or not:

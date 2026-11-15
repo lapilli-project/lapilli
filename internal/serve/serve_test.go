@@ -139,7 +139,8 @@ func post(t *testing.T, h http.Handler, path string, form url.Values, site strin
 
 func TestServe(t *testing.T) {
 	ctx := context.Background()
-	s, rules := server(t, func(c *Config) { c.UserHeader = "X-Forwarded-Email" })
+	// INC-0 keeps the week before's record: every firing is judged.
+	s, rules := server(t, func(c *Config) { c.UserHeader = "X-Forwarded-Email"; keepRecord(c) })
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {
 		t.Fatal(err)
@@ -306,7 +307,9 @@ func TestDigest(t *testing.T) {
 	defer slack.Close()
 	hook := filepath.Join(t.TempDir(), "hook")
 	os.WriteFile(hook, []byte(slack.URL+"/services/T/B/SECRET"), 0o600)
-	s, _ := server(t, func(c *Config) { c.Slack = hook; c.Backfill = 10 * 24 * time.Hour })
+	// An incident written down in the week keeps its record: its firings
+	// are judged (TestDigestNoRecord has the week without).
+	s, _ := server(t, func(c *Config) { c.Slack = hook; c.Backfill = 10 * 24 * time.Hour; keepRecord(c) })
 	ctx := context.Background()
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {

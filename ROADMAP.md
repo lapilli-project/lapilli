@@ -86,7 +86,20 @@ Still to do:
 
 A noisy rule gets a longer `for` that would quiet it; a rule that nearly caught
 an incident nothing caught gets the shorter `for`, or the number short of its
-threshold, that would have.
+threshold, that would have. With no incident written down, nothing is
+noisy: a rule that fires as often says what its firings were (0.41).
+
+- What a rule's firings were with no record is said only of a condition
+  with one bound that decides it. A range, or `and`, `or` and `unless`
+  joining comparisons, is still left unsaid.
+- A `for` one event can't outlast is known of PromQL's counts of events
+  (`increase`, `changes`, `resets`, `rate` of a counter), in a Prometheus
+  rule or a Grafana rule's one instant query, reduced by `last` or compared
+  as it is. LogQL's `count_over_time`, Grafana's classic conditions, and a
+  Grafana rule's range queries are still left unsaid.
+- lapilli serve judges a firing by its week's record; lapilli verdict by the
+  record at the firing's own time. Judging serve's by the day, from its
+  daily tallies, would bring the two closer.
 
 - Near misses by value for a Grafana math expression joining comparisons
   with `&&` or `||`, and for classic conditions, are built (0.25). A

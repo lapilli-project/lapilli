@@ -488,7 +488,7 @@ func TestRuleBadgeLegend(t *testing.T) {
 			got = append(got, squashed(nodeText(n)))
 		}
 	}
-	want := []string{"● Noisy", "○ OK", "– Silent", "⧉ Spare", "≠ Differs", "◌ Not replayed", "⇣ Recorded only", "✓ keep", "± tune", "⊘ retire",
+	want := []string{"● Noisy", "? No record", "○ OK", "– Silent", "⧉ Spare", "≠ Differs", "◌ Not replayed", "⇣ Recorded only", "✓ keep", "± tune", "⊘ retire",
 		"✎ Proposed", "⚠︎ Problems to check"}
 	if !slices.Equal(got, want) {
 		t.Errorf("legend %q, want %q", got, want)

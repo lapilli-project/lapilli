@@ -27,8 +27,10 @@ const (
 	baseline = 28 * 24 * time.Hour
 	leastFor = 7 * 24 * time.Hour
 	// quietFor is how long without an incident before the page asks
-	// whether they are still being written down.
-	quietFor = 14 * 24 * time.Hour
+	// whether they are still being written down: as long as a period's
+	// record looks back (verdict.RecordLookback), past which its firings
+	// are counted, not judged.
+	quietFor = verdict.RecordLookback
 	weekLen  = 7 * 24 * time.Hour
 )
 
@@ -67,12 +69,15 @@ type effect struct {
 
 // period is the stones of all the rules over a stretch of time.
 type period struct {
-	From      time.Time `json:"from"`
-	To        time.Time `json:"to"`
-	Firings   int       `json:"firings"`
-	White     int       `json:"white"`
-	Incidents int       `json:"incidents"`
-	Missed    int       `json:"missed"`
+	From    time.Time `json:"from"`
+	To      time.Time `json:"to"`
+	Firings int       `json:"firings"`
+	White   int       `json:"white"`
+	// Unjudged are, of Firings, those in a week with no record that caught
+	// nothing: in no precision.
+	Unjudged  int `json:"unjudged,omitempty"`
+	Incidents int `json:"incidents"`
+	Missed    int `json:"missed"`
 }
 
 // perWeek is n over the period, a week at a time.
@@ -349,10 +354,14 @@ func (s *Server) effects(ctx context.Context, out *outcomes) error {
 	}
 	if then != nil {
 		if from := later(rec.Cursor.Add(-baseline), then.To); rec.Cursor.Sub(from) >= leastFor {
+			o, err := s.options(ctx)
+			if err != nil {
+				return err
+			}
 			e.Then, e.Now = then, &period{From: from, To: rec.Cursor}
 			for _, p := range []*period{e.Then, e.Now} {
 				var err error
-				if p.Firings, p.White, err = s.l.Stones(ctx, p.From, p.To); err != nil {
+				if p.Firings, p.White, p.Unjudged, err = s.l.StonesJudged(ctx, p.From, p.To, o); err != nil {
 					return err
 				}
 				incs, err := s.l.Incidents(ctx, p.From, p.To, false)
@@ -377,8 +386,8 @@ func (s *Server) effects(ctx context.Context, out *outcomes) error {
 	seen := map[string]bool{}
 	for _, r := range rs {
 		var c verdict.Comparison
-		if err := r.Decode(&c); err != nil {
-			return err
+		if !s.decodeKept(r, &c) {
+			continue
 		}
 		for _, rc := range c.Rules {
 			// One that fires alike changes nothing to measure: the change
@@ -630,8 +639,8 @@ func (s *Server) inUse(ctx context.Context, out *outcomes) error {
 			continue
 		}
 		var ss []verdict.Suggestion
-		if err := r.Decode(&ss); err != nil {
-			return err
+		if !s.decodeKept(r, &ss) {
+			continue
 		}
 		for _, x := range ss {
 			since[x.Rule] = r.From // the earliest, as the latest come first

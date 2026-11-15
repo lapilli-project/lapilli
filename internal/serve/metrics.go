@@ -46,6 +46,15 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			s.oops(w, r, err)
 			return
 		}
+		// A catch by a rule noisy in the incident's week, as /incidents,
+		// the overview and the summary judge it: not by the seven days to
+		// now, so an incident is in the same state everywhere. Each day's
+		// firings are judged by its week's record, as the tallies have it.
+		t, err := s.tallies(ctx, weeks)
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
 		sum := map[int64]*verdict.RuleResult{}
 		for _, d := range days {
 			rr := sum[d.Rule]
@@ -60,10 +69,18 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			rr.Refired += d.Refired
 			rr.DuringDeploys += d.Deploy
 			rr.DeploysCaught += d.DeployWhite
+			if !t.kept[ledger.Week(d.At)] {
+				rr.Unjudged += d.Firings - d.White
+				rr.DeploysUnjudged += d.Deploy - d.DeployWhite
+			}
 		}
-		rep := &verdict.Report{}
+		// By the weeks the seven days have some of, as their firings are.
+		rep := &verdict.Report{NoRecord: !t.rec.JudgesAny(s.l.Midnight(today-6), s.now())}
+		at := noisyAt(o)
 		for _, rr := range sum {
-			rr.Noisy = noisy(rr.Firings, rr.White, o)
+			rr.NoRecord = rr.Firings > 0 && rr.Unjudged == rr.Firings
+			rr.Noisy = verdict.IsNoisy(rr.Firings-rr.Unjudged, rr.White, at)
+			rep.Unjudged += rr.Unjudged
 			rep.Rules = append(rep.Rules, *rr)
 		}
 		// Each rule's by its team's hours, or the server's.
@@ -76,14 +93,6 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		}
 		ledger.SortRules(rep.Rules)
 		incs, err := s.l.Incidents(ctx, s.l.Midnight(today-6), s.now().Add(time.Hour), false)
-		if err != nil {
-			s.oops(w, r, err)
-			return
-		}
-		// A catch by a rule noisy in the incident's week, as /incidents,
-		// the overview and the summary judge it: not by the seven days to
-		// now, so an incident is in the same state everywhere.
-		t, err := s.tallies(ctx, weeks)
 		if err != nil {
 			s.oops(w, r, err)
 			return

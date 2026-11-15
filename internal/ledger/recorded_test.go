@@ -43,6 +43,8 @@ func TestRecordedSameAsJudge(t *testing.T) {
 	for seed := uint64(1); seed <= 4; seed++ {
 		l := open(t, time.UTC)
 		all, incs := world(seed, 400)
+		// The record kept for every firing, as TestSameAsJudge has it.
+		incs = append([]incident.Incident{keepAll}, incs...)
 		if _, err := l.SyncFile(ctx, incs, opts); err != nil {
 			t.Fatal(err)
 		}

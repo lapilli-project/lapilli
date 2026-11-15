@@ -1233,9 +1233,12 @@ func (s *Server) replayChange(ctx context.Context, gone, came []rules.Rule, same
 	if err != nil {
 		return nil, err
 	}
-	plain := make([]incident.Incident, len(incs))
-	for i, in := range incs {
-		plain[i] = in.Incident
+	plain, err := s.recordAround(ctx, from, to, o) // the record kept, as the ledger's
+	if err != nil {
+		return nil, err
+	}
+	for _, in := range incs {
+		plain = append(plain, in.Incident)
 	}
 	o.From, o.To, o.SomeRules = from, to, true
 	var changed []string
@@ -1299,15 +1302,17 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 		}
 		var sugg []verdict.Suggestion
 		var near []verdict.NearMiss
+		var unrec []verdict.Unrecorded
+		// The suggestions, the near misses and what firings with no record
+		// were share one --timeout, so the digest holds the runs up no
+		// longer than a run may take.
+		rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+		defer cancel()
 		if s.replaying() {
 			in, err := s.replayInput(ctx, rep, from, to, o)
 			if err != nil {
 				return true, err
 			}
-			// The suggestions and the near misses share one --timeout, so the
-			// digest holds the runs up no longer than a run may take.
-			rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
-			defer cancel()
 			if len(in.versions) == 1 {
 				sugg = source.Suggest(rctx, s.h, in.versions[0].Rules, rep, in.incs, in.o, s.cfg.Step, in.excuse)
 			}
@@ -1325,17 +1330,45 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 					return true, err
 				} else if ok {
 					var kept []verdict.NearMiss
-					if err := prev.Decode(&kept); err != nil {
-						return true, err
+					if !s.decodeKept(prev, &kept) {
+						kept = nil
 					}
 					near, _ = addNew(kept, near, rep)
 				}
 			} else {
 				seen = seenNow(seen, rep, nil)
 			}
+			// With no record, no rule was noisy: what the firings of those
+			// that fired as often were, in the time that is left; and of a
+			// team's rules, by its own record, when the ledger's is kept.
+			if unrec, err = s.unrecordedTeams(ctx, rctx, in, rep, o, from, to); err != nil {
+				s.log.Warn("the digest's firings with no record to judge them by weren't all looked at", "err", err)
+			}
 		}
 		if err := s.l.AddResult(ctx, "suggestions", s.now(), from, to, orNone(sugg)); err != nil {
 			return true, err
+		}
+		if err := s.l.ReplaceResult(ctx, "unrecorded", s.now(), from, to, orNoneOf(unrec)); err != nil {
+			return true, err
+		}
+		// The rules that fired mostly on what another team owns, one read
+		// with a --timeout of its own, which the replays above can't have
+		// used up: what runs out of it isn't kept, and says so.
+		fctx, fcancel := context.WithTimeout(ctx, s.cfg.Timeout)
+		defer fcancel()
+		on, unread, err := s.firedOnOf(fctx, from, to)
+		switch {
+		case err != nil && fctx.Err() != nil:
+			s.log.Warn("the digest's firings by team weren't counted in its --timeout", "err", err)
+		case err != nil:
+			return true, err
+		default:
+			if unread > 0 {
+				s.log.Warn("the digest counted the firings by team of the alerts that fired most alone", "alerts read", firedOnRead, "firings not read", unread)
+			}
+			if err := s.l.ReplaceResult(ctx, "fired_on", s.now(), from, to, orNoneOf(on)); err != nil {
+				return true, err
+			}
 		}
 		if err := s.keepNear(ctx, from, to, cursor, seen, orNoneOf(near)); err != nil {
 			return true, err
@@ -1374,6 +1407,11 @@ func (s *Server) replayInput(ctx context.Context, rep *verdict.Report, from, to 
 	in := replayInput{o: o}
 	for _, v := range vs {
 		in.versions = append(in.versions, replay.Version{From: v.Since, Rules: v.Rules})
+	}
+	// Those that keep the period's record from before it, so that a replay
+	// judged against them has the record the ledger's report has.
+	if in.incs, err = s.recordAround(ctx, from, to, o); err != nil {
+		return replayInput{}, err
 	}
 	for _, x := range rep.Incidents {
 		in.incs = append(in.incs, x.Incident)
@@ -1556,8 +1594,8 @@ func (s *Server) nearLater(ctx context.Context, o verdict.Options) error {
 		}
 		var kept []verdict.NearMiss
 		if worked {
-			if err := prev.Decode(&kept); err != nil {
-				return err
+			if !s.decodeKept(prev, &kept) {
+				kept = nil
 			}
 		}
 		if x.Incidents == nil {
@@ -1728,7 +1766,14 @@ const digestClaim = 2 * time.Minute
 
 // digestReport is the week's report, with the suggestions worked out for it.
 func (s *Server) digestReport(ctx context.Context, from, to time.Time, o verdict.Options) (*verdict.Report, error) {
-	rep, err := s.ledgerReport(ctx, from, to, o, false)
+	return s.digestReportFor(ctx, from, to, o, nil)
+}
+
+// digestReportFor is digestReport, judged by a team's record when team
+// isn't nil: by the incidents it owns. Its suggestions, while the week has a
+// record; what its firings were with no record, while it has none.
+func (s *Server) digestReportFor(ctx context.Context, from, to time.Time, o verdict.Options, team *ledger.Team) (*verdict.Report, error) {
+	rep, err := s.ledgerReportFor(ctx, from, to, o, false, team)
 	if err != nil {
 		return nil, err
 	}
@@ -1736,10 +1781,8 @@ func (s *Server) digestReport(ctx context.Context, from, to time.Time, o verdict
 	if err != nil {
 		return nil, err
 	}
-	if len(rs) > 0 && rs[0].From.Equal(from) {
-		if err := rs[0].Decode(&rep.Suggestions); err != nil {
-			return nil, err
-		}
+	if len(rs) > 0 && rs[0].From.Equal(from) && !rep.NoRecord && !s.decodeKept(rs[0], &rep.Suggestions) {
+		rep.Suggestions = nil
 	}
 	// The week's near misses, as last worked out: by the digest, or since,
 	// for an incident written down later.
@@ -1747,10 +1790,8 @@ func (s *Server) digestReport(ctx context.Context, from, to time.Time, o verdict
 	if err != nil {
 		return nil, err
 	}
-	if ok {
-		if err := r.Decode(&rep.NearMisses); err != nil {
-			return nil, err
-		}
+	if ok && !s.decodeKept(r, &rep.NearMisses) {
+		rep.NearMisses = nil
 	}
 	// Only for an incident nothing caught, or only noisy rules did, still:
 	// judged again with other settings, it may have been caught since.
@@ -1759,6 +1800,21 @@ func (s *Server) digestReport(ctx context.Context, from, to time.Time, o verdict
 		open[ir.ID] = ir.Missed() || ir.OnlyNoisy()
 	}
 	rep.NearMisses = slices.DeleteFunc(rep.NearMisses, func(nm verdict.NearMiss) bool { return !open[nm.Incident] })
+	// What the firings with no record were, while the week still has none,
+	// of everyone's or the team's.
+	if rep.NoRecord {
+		if r, ok, err := s.l.ForPeriod(ctx, "unrecorded", from); err != nil {
+			return nil, err
+		} else if ok && s.decodeKept(r, &rep.Unrecorded) {
+			scope := ""
+			if team != nil {
+				scope = team.Name
+			}
+			rep.Unrecorded = slices.DeleteFunc(rep.Unrecorded, func(u verdict.Unrecorded) bool { return u.Scope != "" && u.Scope != scope })
+		} else {
+			rep.Unrecorded = nil
+		}
+	}
 	return rep, nil
 }
 
@@ -1847,6 +1903,24 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	if err != nil {
 		return "", err
 	}
+	// Of a team's, the rules of others that fired mostly on what it owns.
+	var onLine string
+	if team != nil {
+		on, err := s.firedOnFor(ctx, from)
+		if err != nil {
+			return "", err
+		}
+		if xs := firedOnLines(on, from, team.Name); len(xs) > 0 {
+			items := make([]string, 0, len(xs))
+			for _, x := range xs[:min(len(xs), 20)] {
+				items = append(items, tr(s.cfg.Lang, "%s (%d of %d firings)", verdict.Clean(x.Rule), x.Firings, x.Of))
+			}
+			onLine = tr(s.cfg.Lang, "Rules of other teams, or of no team, that fired mostly on what %s owns: %s.", verdict.Clean(team.Name), strings.Join(items, "; "))
+			if n := len(xs) - len(items); n > 0 {
+				onLine += " " + tr(s.cfg.Lang, "And %d more.", n)
+			}
+		}
+	}
 	line := ""
 	if len(spare) > 0 {
 		names := make([]string, 0, len(spare))
@@ -1863,7 +1937,7 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	head, rest, _ := strings.Cut(report.String(), "\n\n")
 	var b strings.Builder
 	b.WriteString(head + "\n")
-	for _, x := range []string{rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
+	for _, x := range []string{onLine, rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
 		if x != "" {
 			b.WriteString("\n" + x + "\n")
 		}
@@ -1916,6 +1990,9 @@ func digestAbout(rep *verdict.Report, text, team string, spare []string) map[str
 	about := map[string]any{"from": rep.From.UTC(), "to": rep.To.UTC(), "firings": firings, "caught": white, "nothing": firings - white,
 		"never_fired": silent, "incidents": len(rep.Incidents), "missed": missed, "only_noisy": onlyNoisy,
 		"noisy_rules": noisy, "spare_rules": spare, "suggestions": suggestions,
+		// With no record, no rule is noisy: what the firings of those that
+		// fired as often were.
+		"no_record": rep.NoRecord, "unrecorded": orNoneOf(rep.Unrecorded),
 		// text is the report as written, from rule names and incident titles
 		// others wrote: escape it for where it goes. slack_text is it as the
 		// Slack digest posts it.
@@ -1937,6 +2014,18 @@ func teamReport(rep *verdict.Report, o *owners, t ledger.Team, server *verdict.H
 		out.Hours = o.schedules(server).used(nil, &t)
 	}
 	out.Suggestions = slices.DeleteFunc(slices.Clone(rep.Suggestions), func(x verdict.Suggestion) bool { return o.rule[x.Rule] != t.ID })
+	// Its rules' firings with no record; and of another's, its alerts on
+	// what the team owns alone, no third team's labels with them.
+	out.Unrecorded = nil
+	for _, u := range rep.Unrecorded {
+		if o.rule[u.Rule] != t.ID {
+			u.Top = slices.DeleteFunc(slices.Clone(u.Top), func(a verdict.AlertCount) bool { return a.Team != t.Name })
+			if len(u.Top) == 0 {
+				continue
+			}
+		}
+		out.Unrecorded = append(out.Unrecorded, u)
+	}
 	out.Incidents = slices.DeleteFunc(slices.Clone(rep.Incidents), func(in verdict.IncidentResult) bool {
 		return !o.ownsIncident(t, ledger.Incident{Incident: in.Incident, CaughtBy: in.CaughtBy})
 	})
@@ -2002,6 +2091,10 @@ func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh
 	if err != nil {
 		return err
 	}
+	on, err := s.firedOnFor(ctx, from)
+	if err != nil {
+		return err
+	}
 	for name := range s.cfg.TeamDigests {
 		if _, ok := own.team(name); !ok {
 			s.log.Warn("--team-digest names a team the ledger doesn't have", "team", name)
@@ -2029,10 +2122,15 @@ func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh
 		if !webhook && !own1 {
 			continue
 		}
-		part := teamReport(rep, own, t, o.Hours)
+		// Judged by the incidents it owns.
+		judged, err := s.digestReportFor(ctx, from, to, o, &t)
+		if err != nil {
+			return err
+		}
+		part := teamReport(judged, own, t, o.Hours)
 		fired := slices.ContainsFunc(part.Rules, func(r verdict.RuleResult) bool { return r.Firings+r.Excused > 0 })
-		if !fired && len(part.Incidents) == 0 {
-			continue
+		if !fired && len(part.Incidents) == 0 && len(firedOnLines(on, from, t.Name)) == 0 {
+			continue // nothing happened to it, nor fired on what it owns
 		}
 		mine := slices.DeleteFunc(slices.Clone(spare), func(name string) bool { return own.rule[name] != t.ID })
 		text, err := s.digestText(ctx, part, mine, from, to, &t)

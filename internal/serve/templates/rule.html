@@ -19,7 +19,7 @@
 {{with .Panel}}<dl class="panel">
 <div><dt><details class="def"><summary>{{t "Precision"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "Firings that caught an incident, of all its firings."}}</p></details></dt>
 <dd class="big">{{.Precision}}{{template "delta" .PrecisionBy}}</dd>
-<dd>{{if .Firings}}{{t "%d of %d caught something" $v.White .Firings}}{{else}}{{t "no firing"}}{{end}}</dd></div>
+<dd>{{if $v.NoRecord}}{{t "not known: no incident written down to judge the firings by"}}{{else if .Firings}}{{t "%d of %d caught something" $v.White .Firings}}{{else}}{{t "no firing"}}{{end}}</dd></div>
 <div><dt><details class="def"><summary>{{t "Firings"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "The times it fired and was judged; those a quiet window excused are counted apart."}}</p></details></dt>
 <dd class="big">{{.Firings}}{{template "delta" .FiringsBy}}</dd>
 <dd>{{t "%d caught nothing, %d excused" .Black .Excused}}</dd></div>
@@ -89,7 +89,7 @@
 
 {{if or .AsleepBlack .OffHoursBlack}}<section class="card" id="hours">
 <h2>{{t "While people slept, and off hours"}}</h2>
-<p>{{t "Of the firings that caught nothing, %d came while people slept, and %d more off hours." .AsleepBlack .OffHoursBlack}}</p>
+<p>{{if .NoRecord}}{{t "Of its firings, with no incident written down to judge them by, %d came while people slept, and %d more off hours." .AsleepBlack .OffHoursBlack}}{{else}}{{t "Of the firings that caught nothing, %d came while people slept, and %d more off hours." .AsleepBlack .OffHoursBlack}}{{end}}</p>
 </section>{{end}}
 
 {{if .Deploys}}<section class="card" id="deploys">
@@ -145,18 +145,27 @@ lands here, and is shown the way to it. */}}
 <p id="proposals" class="moved"><a href="{{$.Link (print .Path "#proposals") "tab" "proposals"}}">{{t "Its proposals are on the Proposals tab."}}</a></p>
 <p id="refired" class="moved"><a href="{{$.Link (print .Path "#refired") "tab" "firings"}}">{{t "Its re-fires are on the Firings tab."}}</a></p>
 
-{{with .Suggestion}}<section class="card todo" id="first">
+{{with .Unrecord}}{{$u := .}}<section class="card todo" id="first">
+<h2>{{t "What to do first"}}</h2>
+<p>{{t "In the week of %s it fired %d times with no incident written down to judge them by." (day $loc .Week) .Firings}}{{if .Events}} {{t "All %d are events its condition counts (a count that went up): these happened." .Firings}}{{else if .Known}} {{if eq .Clear .Firings}}{{t "All %d went well past its bound (%s), not a flicker at its edge: these happened." .Clear .Bound}}{{else if .Clear}}{{t "%d of them went well past its bound (%s), not a flicker at its edge: these happened." .Clear .Bound}}{{else}}{{t "None stayed more than a fifth past its bound (%s) for all of its for." .Bound}}{{end}}{{else if .TooMany}} {{t "Too many firings to tell how many happened."}}{{end}}{{if .Deploys}} {{t "%d came during a deploy." .Deploys}}{{end}}</p>
+{{with .Top}}<p>{{if eq $u.Alerts 1}}{{t "All came from one alert:"}}{{else if gt $u.Alerts (len .)}}{{t "Most came from these, of %d alerts:" $u.Alerts}}{{else}}{{t "Most came from:"}}{{end}}</p>
+<ul class="plain">{{range .}}<li>{{range $k, $val := .Labels}}<code>{{$k}}={{$val}}</code> {{end}}{{if gt $u.Alerts 1}}{{t "%d times" .Firings}}{{end}}{{with .Team}} <span class="quiet">{{tbdi "(what %s owns)" .}}</span>{{end}}</li>{{end}}</ul>{{end}}
+<p class="hint">{{if .Clear}}{{t "A longer for would hide them: write down whether they mattered (This was real), or fix what fires them."}}{{else}}{{t "Write down whether they mattered (This was real), or fix what fires them."}}{{end}}</p>
+<div class="row"><a class="button" href="{{$.Link "/firings" "rule" $v.Name}}">{{t "Its firings, to mark the real ones"}}</a>
+{{if edits $.Status $v.TeamID}}<form method="post" action="/tasks"><input type="hidden" name="title" value="{{t "Find out why %s fires" $v.Name}}"><input type="hidden" name="kind" value="tune"><input type="hidden" name="rule" value="{{$v.Name}}"><input type="hidden" name="back" value="{{$.Link $v.Path "tab" "activity"}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>{{else}}{{template "off" (offTeam $ "Make it a task" "first-task-why" $v.Team)}}{{end}}</div>
+</section>{{else}}{{with .Suggestion}}<section class="card todo" id="first">
 <h2>{{t "What to do first"}}</h2>
 <p class="hint">{{.}}</p>
 <div class="row">{{if and $v.SuggestedFor (not $.Status.ReadOnly)}}<form method="post" action="/proposals"><input type="hidden" name="rule" value="{{$v.Name}}"><input type="hidden" name="kind" value="for"><input type="hidden" name="from" value="suggestion"><input type="hidden" name="for" value="{{$v.SuggestedFor}}"><button>{{t "Propose it"}}</button></form>{{else if $v.SuggestedFor}}{{template "off" (offOf $ "Propose it" "editor" "first-propose-why")}}{{end}}
 {{if edits $.Status $v.TeamID}}<form method="post" action="/tasks"><input type="hidden" name="title" value="{{t "Quiet %s" $v.Name}}: {{.}}"><input type="hidden" name="kind" value="tune"><input type="hidden" name="rule" value="{{$v.Name}}"><input type="hidden" name="back" value="{{$.Link $v.Path "tab" "activity"}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>{{else}}{{template "off" (offTeam $ "Make it a task" "first-task-why" $v.Team)}}{{end}}</div>
-</section>{{end}}
+</section>{{end}}{{end}}
 
 <section class="card about" id="note">
 <h2>{{t "About this rule"}}</h2>
 <p>{{if .Team}}{{t "Owned by %s." .Team}}{{else}}{{t "No team owns it."}}{{end}}
 {{with .Note.Status}} <span class="pill {{.}}">{{t .}}</span>{{end}}
 {{with .Note.Runbook}} · <a href="{{.}}" rel="noopener noreferrer">{{t "Runbook"}}</a>{{end}}</p>
+{{with .FiredOn}}<p>{{if .Owner}}{{tbdi "Its alerts go to %s; most came from what %s owns (%d of %d), in the week of %s." .Owner .Team .Firings .Of (day $loc .Week)}}{{else}}{{tbdi "Its alerts go to no team; most came from what %s owns (%d of %d), in the week of %s." .Team .Firings .Of (day $loc .Week)}}{{end}}</p>{{end}}
 {{with .Note.Note}}<div class="comment-body">{{.}}</div>{{end}}
 {{if edits $.Status .TeamID}}<details{{if .EditNote}} open{{end}}><summary>{{t "Change it"}}</summary>
 <form method="post" action="/notes" class="grid">
@@ -187,7 +196,7 @@ lands here, and is shown the way to it. */}}
 {{with .Description}}<dt>{{t "Description"}}</dt><dd><pre>{{.}}</pre></dd>{{end}}
 {{with .Runbook}}<dt>{{t "Runbook"}}</dt><dd>{{if $v.Says.RunbookLink}}<a href="{{$v.Says.RunbookLink}}" rel="noopener noreferrer">{{.}}</a>{{else}}<code>{{.}}</code>{{end}}</dd>{{end}}
 </dl>{{end}}
-{{if .Problems}}<ul>{{range .Problems}}<li>{{t .Key}}{{with .Detail}}: <code>{{.}}</code>{{end}}{{if eq .Class "measured"}} <span class="quiet">({{t "from what it fired"}})</span>{{end}}</li>{{end}}</ul>
+{{if .Problems}}<ul>{{range .Problems}}<li>{{with .Outlasts}}{{t "Its for (%s) is as long as the %s its condition counts over, or longer: one event alone can never fire it; only events that keep coming for %s will." (dur .For) (dur .Window) (dur .For)}}{{else}}{{t .Key}}{{with .Detail}}: <code>{{.}}</code>{{end}}{{end}}{{if eq .Class "measured"}} <span class="quiet">({{t "from what it fired"}})</span>{{end}}</li>{{end}}</ul>
 {{else}}<p>{{t "Nothing to fix in what it says, as far as can be told."}}</p>{{end}}
 {{if not $.Status.ReadOnly}}{{range $v.SaysForms}}<form method="post" action="/proposals" class="grid">
   <input type="hidden" name="rule" value="{{$v.Name}}"><input type="hidden" name="kind" value="says"><input type="hidden" name="annotation" value="{{.Annotation}}"><input type="hidden" name="check" value="{{.Check}}">

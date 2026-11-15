@@ -202,7 +202,7 @@ way, with the same bounds. A request given up stops at the next row.
   "ledger_to": "2026-11-03T12:00:00Z",
   "rows": [{
     "from": "2026-10-26T00:00:00Z", "to": "2026-11-02T00:00:00Z", "partial": false, "team": "",
-    "firings": 20, "caught": 1, "precision": 0.05, "excused": 0,
+    "firings": 20, "caught": 1, "precision": 0.05, "no_record": false, "excused": 0,
     "critical": {"firings": 8, "caught": 1, "share_caught": 0.125},
     "by_severity": {"critical": {"firings": 8, "caught": 1, "share_caught": 0.125}, "warning": {"firings": 12, "caught": 0, "share_caught": 0}},
     "refired": {"firings": 7, "share": 0.35, "rules": 1, "worst": {"rule": "Flap", "labels": {"service": "search"}, "refired": 7}},
@@ -216,7 +216,11 @@ way, with the same bounds. A request given up stops at the next row.
 
 **Versioned.** `schema` is 1. A field may be added without changing it; one
 changed in meaning or taken away changes it, and the API's path stays. A
-share is null with nothing to divide by, `off_hours` and `asleep` null with
+share is null with nothing to divide by, and every share caught (`precision`,
+`share_caught`, `precision_without`) with no record to judge by: a week with
+no incident on in it or in the two weeks before it, and no `--impact` read
+over it, says `no_record: true`.
+`off_hours` and `asleep` are null with
 no hours given, a median null with nothing caught. `TestSummaryAPI` holds
 the fields by name.
 

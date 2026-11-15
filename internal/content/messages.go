@@ -10,6 +10,7 @@ var messages = map[string]string{
 	NoSeverity:      "no severity",
 	UnknownSeverity: "a severity not in --severities",
 	Duplicate:       "the same condition as another rule",
+	ForOutlasts:     "a for as long as the range its condition counts events over, or longer: one event alone can never fire it",
 	LabelNeverSeen:  "a label no firing had",
 	NoisyNoFor:      "noisy, with no for",
 	LabelNotGiven:   "a label its expression may not give",

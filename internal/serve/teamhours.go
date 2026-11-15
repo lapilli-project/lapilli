@@ -91,13 +91,19 @@ func (sc schedules) used(rules []verdict.RuleResult, team *ledger.Team) *verdict
 // ledgerReport is the ledger's report, each rule's firings counted asleep or
 // off hours by its team's hours, for 31 days at most.
 func (s *Server) ledgerReport(ctx context.Context, from, to time.Time, o verdict.Options, firings bool) (*verdict.Report, error) {
+	return s.ledgerReportFor(ctx, from, to, o, firings, nil)
+}
+
+// ledgerReportFor is ledgerReport, its firings judged by the record of a
+// team's when team isn't nil: by the incidents it owns.
+func (s *Server) ledgerReportFor(ctx context.Context, from, to time.Time, o verdict.Options, firings bool, team *ledger.Team) (*verdict.Report, error) {
 	own, err := s.owners(ctx)
 	if err != nil {
 		return nil, err
 	}
 	sc := own.schedules(o.Hours)
 	o.Hours = nil // counted below
-	rep, err := s.l.Report(ctx, from, to, o, firings)
+	rep, err := s.l.ReportFor(ctx, from, to, o, firings, teamKeeps(own, team))
 	if err != nil || sc.none() || to.Sub(from) > ledger.HoursLongest {
 		return rep, err
 	}

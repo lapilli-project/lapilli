@@ -182,10 +182,56 @@ caught only by noisy rules is reported as such, and its detection delay is
 taken from the first rule that isn't noisy. `--noisy-firings` and
 `--noisy-precision` move the line.
 
+**No record, no verdict.** A firing that caught nothing caught nothing
+written down. It is judged only when the record was kept at its time: an
+incident (written down, or a window `--impact` found) was on at some time
+in the two weeks before it, or it caught one. One with no end is taken to
+last an hour, as long as it is caught for. Given `--impact`, the
+signal is read from two weeks before the period, and keeps the record of
+all of it whatever it finds: it says whether users were hurt; the firings
+are judged against the windows it finds in the period, as they were.
+Any other firing can't be told from one nobody wrote down: it is counted
+(in FIRED and ● NOTHING), and not judged: it is in no precision, and makes
+no rule noisy. A rule none of whose firings is judged has a precision of
+`–`; a period none of whose firings is, says so once, and suggests no
+longer `for`; one only some of whose are, says how many. `--json` has
+`"no_record"` on the report and on each rule none of whose firings is
+judged, and `"unjudged"` counts the rest. A rule replayed that fired as
+often as a noisy rule with no record says instead what those firings were:
+of a condition that counts events (below), each firing is an event it
+counted, a count that went up; of another with one bound that decides it,
+how many had the value its condition compares go well past its bound (by
+more than a fifth of it, for its `for`), not a flicker at its edge; and the
+alerts that fired most. Those happened; whether they mattered is for a
+person to write down (`"unrecorded"` in `--json`). lapilli serve judges a
+firing by its week instead: a week whose record is kept, an incident on in
+it or in the two weeks before it, or `--impact` read over all of it, and,
+with a team picked, by the incidents the team owns.
+
 **What to change.** Each noisy rule replayed from `--rules` is replayed again
 with a longer `for` (5m, 10m, 15m, 30m, 1h, 2h). The shortest that would have
 caught every incident the rule caught, firing at most half as often, is
 suggested. Rules with a `severity` label show it, and `--metrics` carries it.
+A rule whose condition counts events is never suggested a `for` as long as
+the range it counts them over: `increase`, `changes`, `resets` or `rate` of
+a counter's range or a subquery of one, summed or maxed by some labels or
+not, times or over numbers or not, compared with a number no event passes
+and one event does (`increase(x[30m]) > 0.5`, `rate(x[10m]) * 300 > 0`).
+`delta` is a gauge's; `idelta` and `irate` hold for about a scrape after an
+event; and a counter of seconds or bytes, or a histogram's `_sum`, counts an
+amount, not events: none of these is one. A Grafana rule is one when its
+condition is a threshold of one number (`gt`, `gte`), or a math expression
+that is one comparison of a ref with a number, of its one PromQL instant
+query's value, as it is or through reduces that leave it so (`last`,
+`max`, `min` or `mean` of its one value), its PromQL read as above; not a
+range query, whose points one event can hold for as long again as its
+range, nor one that fires on no data (`noDataState` `Alerting` or
+`KeepLast`), and a firing on no data is no event. After one restart, `increase(restarts[30m]) > 0.5` holds for
+30 minutes at most: with `for: 1h`, one restart can never fire it, only
+restarts that keep coming for an hour. The report says so of a rule whose
+`for` is that long already: "Its for (1h) is as long as the 30m its
+condition counts over, or longer: one event alone can never fire it; only
+events that keep coming for 1h will."
 
 **What a rule adds.** Precision doesn't say whether anyone would miss a rule:
 one that is right every time, but always after another, adds nothing. Each
@@ -766,6 +812,7 @@ TargetGone    absent() with no for: a restart pages                     a series
 | A template that doesn't parse, in its source's own language | fact |
 | No severity; one not in `--severities` | fact |
 | The same expression, `for` and labels as another rule | fact |
+| A `for` as long as the range its condition counts events over, or longer: one event alone can never fire it | fact |
 | A template label no firing over the period had (with `--prometheus`) | measured |
 | Noisy, with no `for` (with `--prometheus` and `--incidents` or `--impact`) | measured |
 | A template label after an aggregation by other labels, for a rule that hasn't fired | heuristic |
@@ -919,7 +966,7 @@ most 64,000 bytes, under the 65,536 characters GitHub takes, cut short
 with a note when longer:
 
 ```
-[//]: # (lapilli-compare {"nothing_changed":false,"changed":1,"added":1,"removed":0,"same":42,"alike":0,"unreplayed":0,"recording_changed":0,"firings_before":148,"firings_after":42,"incidents_given":true,"incidents":3,"incidents_changed":1})
+[//]: # (lapilli-compare {"nothing_changed":false,"changed":1,"added":1,"removed":0,"same":42,"alike":0,"unreplayed":0,"recording_changed":0,"firings_before":148,"firings_after":42,"incidents_given":true,"incidents":3,"incidents_changed":1,"no_record":false})
 ### Lapilli backtest, 2026-10-26 00:00 → 2026-11-02 00:00 Asia/Seoul (+09:00)
 
 Rules compared: **1 changed, 1 added, 0 taken away**, 42 the same.
@@ -1006,8 +1053,9 @@ What a tool reads is stable:
   | `unreplayed` | rules that differ that couldn't be replayed, on one side or both, for any reason: those of `--json`'s `"unreplayed"` list with a side, each counted once |
   | `recording_changed` | recording rules that differ, listed as `"recording"`: what the alerts that read them see, which no replay shows |
   | `firings_before`, `firings_after` | firings on each side; of the rules that differ alone with `--changed-only` |
-  | `incidents_given` | judged against `--incidents` or `--impact`; when false, nothing was judged: no firing caught anything, and `incidents` is 0 |
+  | `incidents_given` | incidents were given, `--incidents` or `--impact`; when false, nothing was judged: no firing caught anything, and `incidents` is 0. The firings were judged only when it is true and `no_record` false |
   | `incidents`, `incidents_changed` | incidents in the period, and those caught differently |
+  | `no_record` | incidents were given, and none was on in the period or the two weeks before it (nor `--impact` read): nothing was judged, as without them |
 
 - When nothing changed, `--markdown` writes that line and exactly:
 
@@ -1181,13 +1229,24 @@ menu on a narrow screen, each with a breadcrumb and a bar to pick the team
 and the period, which every link carries; a reader who edits one team sees
 it first. The bar's search finds rules, incidents and teams, and opens the
 one it finds. The rules list gives each rule a badge on three axes (Noisy,
-OK, Silent, Spare; Differs, Not replayed, Recorded only; keep, tune,
+No record, OK, Silent, Spare; Differs, Not replayed, Recorded only; keep, tune,
 retire), filters by each, counted, and a search box that takes words of a
-name and `is:noisy`, `severity:critical`, `status:tune`, `has:proposal`,
+name and `is:noisy`, `is:unrecorded`, `severity:critical`, `status:tune`, `has:proposal`,
 `label:team=pay`, `group:shop` and `team:pay`; each filter in effect is a
 chip that takes it away, and the URL keeps them all; each rule's own labels
 are chips too, each picking the rules with it
 ([docs/design/ui.md](docs/design/ui.md)).
+
+With no incident written down over the weeks shown, or the two before
+their end, the pages call no rule noisy and show no precision, and say why
+once. For a week like that, the weekly digest says, of each rule replayed
+that fired as often as a noisy rule, what its firings were: how many went
+well past its bound, the alerts that fired most and whose labels they have;
+a rule's page shows it in place of a suggestion, the overview first among
+what to look at. Teams own rules, and their firings are counted by the
+team whose labels they have: a rule most of whose firings came from what
+another team owns says so on its page, on that team's rules list and in
+its digest.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/serve-rules-dark.png">

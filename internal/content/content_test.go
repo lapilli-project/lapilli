@@ -293,6 +293,7 @@ func TestDuplicate(t *testing.T) {
 
 func TestShortRange(t *testing.T) {
 	r := good("Rate")
+	r.For = 30 * time.Second // shorter than its counts' ranges: TestForOutlasts has one that isn't
 	r.Expr = `rate(x[1m]) > 0 and increase(y[ 5m ]) > 0 and rate(z[1m:15s]) > 0 and irate(w[90s]) > 1`
 	one(t, r, Options{Scrape: time.Minute}, ShortRange+":rate[1m] < 2 × 1m", ShortRange+":irate[90s] < 2 × 1m")
 	// Not known, not checked.
@@ -600,5 +601,67 @@ func TestRunbookPastCap(t *testing.T) {
 	}
 	if got := Runbook(rs[0].Says, []string{"zz_wiki"}); got != "https://runbooks.example/a" {
 		t.Errorf("a name cut, falling back: %q", got)
+	}
+}
+
+// A for as long as the range a condition counts events over is a fact of
+// how the rule is written: one event alone can never fire it. A rate's, or
+// a count one event doesn't pass, is what a for is for.
+func TestForOutlasts(t *testing.T) {
+	r := good("Restarts")
+	r.Expr = `increase(kube_pod_container_status_restarts_total{namespace=~"a|b"}[30m]) > 0.5`
+	for _, c := range []struct {
+		for_ time.Duration
+		want []string
+	}{{time.Minute, nil}, {30 * time.Minute, []string{ForOutlasts + ":for 30m ≥ 30m"}}, {time.Hour, []string{ForOutlasts + ":for 1h ≥ 30m"}}} {
+		r.For = c.for_
+		one(t, r, Options{}, c.want...)
+	}
+	if Class(ForOutlasts) != Fact || Message(ForOutlasts) == "" {
+		t.Error("a fact, with its message")
+	}
+	r.Expr, r.For = `rate(x[5m]) > 0.05`, 10*time.Minute
+	one(t, r, Options{})
+	r.Expr, r.For = `increase(x[30m]) > 5`, time.Hour
+	one(t, r, Options{})
+}
+
+// The restart rule written in Grafana, a query, a reduce (last) and a
+// threshold (> 0.5), is the same fact.
+func TestForOutlastsGrafana(t *testing.T) {
+	rs, err := rules.Parse([]byte(`apiVersion: 1
+groups:
+  - orgId: 1
+    name: pods
+    folder: Ops
+    interval: 1m
+    rules:
+      - uid: restarts
+        title: Restarts
+        condition: C
+        for: 1m
+        data:
+          - refId: A
+            relativeTimeRange: {from: 1800, to: 0}
+            datasourceUid: prom
+            model: {expr: 'sum by (pod) (increase(restarts_total[30m]))', instant: true, refId: A}
+          - refId: B
+            datasourceUid: __expr__
+            model: {type: reduce, reducer: last, expression: A, refId: B}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: B, refId: C, conditions: [{evaluator: {type: gt, params: [0.5]}}]}
+`))
+	if err != nil || len(rs) != 1 || rs[0].Graph == nil {
+		t.Fatalf("%v %+v", err, rs)
+	}
+	r := good("Restarts")
+	r.Expr, r.Graph = rs[0].Expr, rs[0].Graph
+	for _, c := range []struct {
+		for_ time.Duration
+		want []string
+	}{{time.Minute, nil}, {30 * time.Minute, []string{ForOutlasts + ":for 30m ≥ 30m"}}, {time.Hour, []string{ForOutlasts + ":for 1h ≥ 30m"}}} {
+		r.For = c.for_
+		one(t, r, Options{}, c.want...)
 	}
 }

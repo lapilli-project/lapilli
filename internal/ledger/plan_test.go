@@ -92,3 +92,22 @@ func TestAlarmIDIndexed(t *testing.T) {
 		}
 	}
 }
+
+// The incidents that keep a record are found by when they ended, in either
+// database: not every incident that started before the period's end, which
+// each page load would read whole otherwise.
+func TestRecordIncidentsIndexed(t *testing.T) {
+	l := open(t, time.UTC)
+	from, to := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC), time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
+	for _, q := range []string{
+		"SELECT i.id FROM incidents i WHERE " + recordOn,
+		"SELECT count(*) FROM (SELECT 1 FROM incidents i WHERE " + recordOn + " LIMIT 1) x",
+	} {
+		p := plan(t, l, q, recordArgs(from, to, time.Hour)...)
+		if !strings.Contains(p, "incidents_end") || scansAll(l, p, "incidents") {
+			t.Errorf("%s:\n%s", q, p)
+		} else {
+			t.Log(p)
+		}
+	}
+}

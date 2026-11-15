@@ -454,8 +454,11 @@ var longerFors = []time.Duration{5 * time.Minute, 10 * time.Minute, 15 * time.Mi
 
 // Suggest replays each noisy rule in rep with longer "for"s and keeps the
 // shortest that would have caught every incident the rule caught, firing at
-// most half as often. A name shared by several rules has no one "for" to
-// change, and is passed over. excuse, when not nil, says which firings that
+// most half as often. A rule whose condition counts events is never given
+// one as long as the range it counts them over, or longer: one event alone
+// could never fire it then (rules.Rule.EventWindow). A name shared by several
+// rules has no one "for" to change, and is passed over. A period with no
+// record has no noisy rule, and nothing suggested. excuse, when not nil, says which firings that
 // caught nothing a quiet window excuses, as the ledger does.
 func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdict.Report, incs []incident.Incident, o verdict.Options, step time.Duration,
 	excuse func(firing.Firing) bool) []verdict.Suggestion {
@@ -482,10 +485,14 @@ func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdic
 			continue
 		}
 		var fors []time.Duration
+		w, counts := rs[i].EventWindow()
 		for _, d := range longerFors {
-			if d > rs[i].For {
+			if d > rs[i].For && !(counts && d >= w) {
 				fors = append(fors, d)
 			}
+		}
+		if len(fors) == 0 {
+			continue
 		}
 		alts, err := replay.WithFor(ctx, h, rs[i], fors, o.From, o.To, step)
 		if err != nil {
