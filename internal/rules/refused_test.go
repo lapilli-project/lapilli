@@ -94,7 +94,7 @@ func TestMadeRefusalSeen(t *testing.T) {
 	if rs, err := FromDocsContext(ctx, []Doc{{Source: "ok", Data: []byte(ok)}}); err != nil || len(rs) != 1 {
 		t.Errorf("the next namespace: %d, %v", len(rs), err)
 	}
-	if in := inputOf(ctx); in.size != len(ok) || in.made != labelsCost(map[string]string{"team": "a"}) {
+	if in := inputOf(ctx); in.size != len(ok) || in.made != labelsCost(map[string]string{"team": "a"})+len("ok") {
 		t.Errorf("the input counted %d bytes and %d made, as if the refused namespace were read", in.size, in.made)
 	}
 }
@@ -114,7 +114,7 @@ func TestPickCountsOnce(t *testing.T) {
 	if in.size != len(b) {
 		t.Errorf("picked %d bytes, counted %d", len(b), in.size)
 	}
-	if want := 3 * labelsCost(map[string]string{"team": "a"}); in.made != want {
-		t.Errorf("made %d, want %d: three rules, each its group's labels", in.made, want)
+	if want := 3 * (labelsCost(map[string]string{"team": "a"}) + len("g")); in.made != want {
+		t.Errorf("made %d, want %d: three rules, each its group's labels and name", in.made, want)
 	}
 }

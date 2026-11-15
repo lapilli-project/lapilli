@@ -580,6 +580,30 @@ func parseContext(ctx context.Context, b []byte, rec *[]Recording) ([]Rule, erro
 	return shownRules(out), nil
 }
 
+// policyCharged charges what a Google Cloud alerting policy's rules make
+// of its name, each of its conditions' rules having it as its group, and
+// as its name, but for its own (googlePolicy).
+func policyCharged(ctx context.Context, doc map[string]any) error {
+	display := str(doc["displayName"])
+	if display == "" {
+		display = str(doc["name"])
+	}
+	n := len(list(doc["conditions"]))
+	return inputOf(ctx).charge(2*len(display)*n, func() string {
+		return fmt.Sprintf("alerting policy %.80q puts its name, %d bytes, on each of its %d conditions", display, len(display), n)
+	})
+}
+
+// groupCharged charges a group's name, n bytes, on a rule of it: each
+// rule's, in its key, on its pages and in what a replay carries alerts over
+// by (Key, Whole); what says it worked out once for the group.
+func groupCharged(in *input, group string, n int) func() error {
+	by := func() string {
+		return fmt.Sprintf("group %.80q puts its name, %d bytes, on each of its rules", group, n)
+	}
+	return func() error { return in.charge(n, by) }
+}
+
 func parseDoc(doc map[string]any) ([]Rule, bool, error) {
 	return parseDocRec(context.Background(), doc, nil)
 }
@@ -696,10 +720,16 @@ func parseDocRec(ctx context.Context, doc map[string]any, rec *[]Recording) ([]R
 		var out []Rule
 		for _, p := range list(doc["alertPolicies"]) {
 			m, _ := p.(map[string]any)
+			if err := policyCharged(ctx, m); err != nil {
+				return nil, true, err
+			}
 			out = append(out, googlePolicy(m)...)
 		}
 		return out, true, nil
 	case isGooglePolicy(doc) && doc["groups"] == nil:
+		if err := policyCharged(ctx, doc); err != nil {
+			return nil, true, err
+		}
 		return googlePolicy(doc), true, nil
 	case (doc["MetricAlarms"] != nil || doc["CompositeAlarms"] != nil) && doc["groups"] == nil:
 		// aws cloudwatch describe-alarms
@@ -719,7 +749,7 @@ func parseDocRec(ctx context.Context, doc map[string]any, rec *[]Recording) ([]R
 		}
 		return rs, true, nil
 	case doc["apiVersion"] != nil && hasGrafanaRules(doc):
-		rs, err := grafana(doc, rec)
+		rs, err := grafana(ctx, doc, rec)
 		return rs, true, err
 	case doc["groups"] != nil:
 		rs, err := prometheus(ctx, doc, rec)
@@ -768,6 +798,7 @@ func prometheus(ctx context.Context, doc map[string]any, rec *[]Recording) ([]Ru
 			}
 		}
 		byAlerts, byRecordings := by("alert rules"), by("recording rules")
+		named := groupCharged(in, group, len(group))
 		withGroup := func(own map[string]string) (map[string]string, error) {
 			if groupLabels == nil {
 				return own, nil
@@ -784,6 +815,9 @@ func prometheus(ctx context.Context, doc map[string]any, rec *[]Recording) ([]Ru
 			name := str(rm["alert"])
 			if name == "" {
 				if record, _ := rm["record"].(string); record != "" && rec != nil {
+					if err := named(); err != nil {
+						return nil, err
+					}
 					l, err := withGroup(labels(rm["labels"]))
 					if err != nil {
 						return nil, err
@@ -792,6 +826,9 @@ func prometheus(ctx context.Context, doc map[string]any, rec *[]Recording) ([]Ru
 						Labels: l, Interval: interval, QueryOffset: offset, Limit: limit})
 				}
 				continue
+			}
+			if err := named(); err != nil {
+				return nil, err
 			}
 			if groupLabels != nil {
 				if err := in.charge(each, byAlerts); err != nil {
@@ -857,9 +894,13 @@ func azure(ctx context.Context, doc map[string]any, rec *[]Recording) ([]Rule, e
 	groupOff := props["enabled"] == false
 	cluster := str(props["clusterName"])
 	s := scoping{in: inputOf(ctx), matchers: matchersOf(map[string]string{"cluster": cluster}), what: "cluster", value: cluster}
+	named := groupCharged(inputOf(ctx), group, len(group))
 	var out []Rule
 	for _, r := range list(props["rules"]) {
 		rm, _ := r.(map[string]any)
+		if err := named(); err != nil {
+			return nil, err
+		}
 		name := str(rm["alert"])
 		if name == "" {
 			if record, _ := rm["record"].(string); record != "" && rec != nil {
@@ -1312,6 +1353,14 @@ func isoDuration(v any) (time.Duration, error) {
 // GET /api/v1/rules answers: Prometheus, Thanos, Mimir, VictoriaMetrics'
 // vmalert, Amazon Managed Service for Prometheus.
 func FromAPI(b []byte) ([]Rule, error) {
+	return fromAPI(context.Background(), b)
+}
+
+// fromAPI is FromAPI, a group's name on each of its rules charged to the
+// input ctx says it is of (OneInput), the answer its size.
+func fromAPI(ctx context.Context, b []byte) ([]Rule, error) {
+	ctx = counted(OneInput(ctx), len(b))
+	in := inputOf(ctx)
 	var r struct {
 		Status string `json:"status"`
 		Error  string `json:"error"`
@@ -1356,6 +1405,7 @@ func FromAPI(b []byte) ([]Rule, error) {
 	}
 	var out []Rule
 	for _, g := range r.Data.Groups {
+		charge := groupCharged(in, g.Name, len(g.Name))
 		// Where the group falls in its interval, from when it last ran: an
 		// evaluation starts just after its time, so this is to the second
 		// below. Before its first evaluation, Prometheus says year 1.
@@ -1367,6 +1417,9 @@ func FromAPI(b []byte) ([]Rule, error) {
 		for _, x := range g.Rules {
 			if x.Type != "alerting" {
 				continue
+			}
+			if err := charge(); err != nil {
+				return nil, err
 			}
 			l := x.Labels
 			if l == nil {
@@ -1413,21 +1466,30 @@ func grafanaRecord(rm map[string]any) map[string]any {
 
 // grafana reads a Grafana alerting provisioning file: its alert rules, and
 // its recording rules into rec, when not nil, which are no alert rules.
-func grafana(doc map[string]any, rec *[]Recording) ([]Rule, error) {
+func grafana(ctx context.Context, doc map[string]any, rec *[]Recording) ([]Rule, error) {
+	in := inputOf(ctx)
 	var out []Rule
 	for _, g := range list(doc["groups"]) {
 		gm, _ := g.(map[string]any)
-		group := provisioned(gm["name"])
+		name := provisioned(gm["name"])
+		group := name
 		folder := provisioned(gm["folder"])
 		if folder != "" {
 			group = folder + "/" + group
 		}
+		// Each rule's group and folder, worked out once for the group, as
+		// what its fingerprint is of.
+		named := groupCharged(in, group, len(group)+len(folder))
+		place := fmt.Sprintf("%x", sha256.Sum256([]byte(name+"\x00"+folder)))
 		interval, err := duration(provisioned(gm["interval"]))
 		if err != nil {
 			return nil, fmt.Errorf("group %q: %w", group, err)
 		}
 		for _, r := range list(gm["rules"]) {
 			written, _ := r.(map[string]any)
+			if err := named(); err != nil {
+				return nil, err
+			}
 			rm := provisionedRule(written)
 			if record := grafanaRecord(written); record != nil {
 				if rec != nil {
@@ -1453,7 +1515,7 @@ func grafana(doc map[string]any, rec *[]Recording) ([]Rule, error) {
 			if rule.For, err = duration(rm["for"]); err != nil {
 				return nil, fmt.Errorf("rule %q: %w", rule.Name, err)
 			}
-			rule.Fingerprint = fingerprint(rm, provisioned(gm["name"]), folder, rule.For)
+			rule.Fingerprint = fingerprint(rm, place, rule.For)
 			if rule.KeepFiringFor, err = duration(rm["keepFiringFor"]); err != nil {
 				return nil, fmt.Errorf("rule %q: %w", rule.Name, err)
 			}
@@ -1476,9 +1538,11 @@ func grafana(doc map[string]any, rec *[]Recording) ([]Rule, error) {
 // group, labels, condition, queries, pause, notification settings, for,
 // dashboard and panel, and no data and error states; not its
 // annotations, keepFiringFor, missing_series_evals_to_resolve or its
-// group's interval, which it carries its alerts across.
-func fingerprint(rm map[string]any, group, folder string, forDur time.Duration) string {
-	keep := map[string]any{"group": group, "folder": folder, "for": forDur}
+// group's interval, which it carries its alerts across. place is a hash of
+// its group's name and folder, worked out once for the group: printed for
+// each rule, a long name was copied for each.
+func fingerprint(rm map[string]any, place string, forDur time.Duration) string {
+	keep := map[string]any{"place": place, "for": forDur}
 	for _, k := range []string{"uid", "title", "labels", "condition", "data", "isPaused", "notification_settings", "dashboardUid", "panelId", "noDataState", "execErrState", "record"} {
 		if v, ok := rm[k]; ok {
 			keep[k] = v

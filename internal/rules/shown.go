@@ -5,6 +5,7 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+	"unsafe"
 )
 
 // turns reports whether a character doesn't show as written or turns the
@@ -52,12 +53,19 @@ func Shown(s string) string {
 // its rules has, are looked through once, and its rules share what is
 // shown, as they shared what was read: not looked through, nor copied, for
 // each rule, which a group of 9,999 labels on 60,000 rules made seconds
-// and gigabytes of.
+// and gigabytes of, and a group's name of 1 MiB with a direction mark on
+// 1,000 rules a GB. So is its name.
 func shownRules(rs []Rule) []Rule {
 	var was, is map[string]string
+	var group, shown string
 	for i := range rs {
 		r := &rs[i]
-		r.Name, r.Group = Shown(r.Name), Shown(r.Group)
+		r.Name = Shown(r.Name)
+		// A group's name, which each of its rules has, as its labels.
+		if !sameString(r.Group, group) {
+			group, shown = r.Group, Shown(r.Group)
+		}
+		r.Group = shown
 		r.Labels = shownLabels(r.Labels)
 		if g := r.GroupLabels; len(g) > 0 {
 			if !sameMap(g, was) {
@@ -67,6 +75,12 @@ func shownRules(rs []Rule) []Rule {
 		}
 	}
 	return rs
+}
+
+// sameString reports whether a and b are one string, its text where the
+// other's is, not two alike: a group's name its rules share.
+func sameString(a, b string) bool {
+	return len(a) == len(b) && (len(a) == 0 || unsafe.StringData(a) == unsafe.StringData(b))
 }
 
 // sameMap reports whether a and b are one map, not two alike.
