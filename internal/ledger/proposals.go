@@ -407,14 +407,41 @@ func (l *Ledger) Approve(ctx context.Context, id int64, by string, need int, sho
 	return p, err
 }
 
+// promotable are the proposals waiting for approval that have the
+// approvals need asks for, of those q reads: those approved before
+// --approvals was lowered. A change for a person to make is never
+// approved.
+const promotable = `SELECT ` + proposalColumns + ` FROM proposals WHERE state = ? AND path != ? AND
+	(SELECT count(*) FROM approvals a WHERE a.proposal_id = proposals.id) >= ?`
+
+// Promotable are the proposals Promote would approve, need asking for so
+// many: read for those of them held (lapilli serve's stale ones, which
+// it passes to Promote to skip).
+func (l *Ledger) Promotable(ctx context.Context, need int) ([]Proposal, error) {
+	rows, err := l.r.QueryContext(ctx, promotable, StateProposed, PathNone, max(1, need))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Proposal
+	for rows.Next() {
+		p, err := scanProposal(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // Promote approves the proposals waiting for approval that have need of
-// the approvals they have: those approved before --approvals was lowered.
+// the approvals they have: those approved before --approvals was lowered,
+// but those held names (stale, waiting to be backtested again).
 // A change for a person to make is never approved.
-func (l *Ledger) Promote(ctx context.Context, need int) (int, error) {
+func (l *Ledger) Promote(ctx context.Context, need int, held []int64) (int, error) {
 	n := 0
 	err := l.write(ctx, func(t *txn) error {
-		rows, err := t.QueryContext(t.ctx, `SELECT `+proposalColumns+` FROM proposals WHERE state = ? AND path != ? AND
-			(SELECT count(*) FROM approvals a WHERE a.proposal_id = proposals.id) >= ?`, StateProposed, PathNone, max(1, need))
+		rows, err := t.QueryContext(t.ctx, promotable, StateProposed, PathNone, max(1, need))
 		if err != nil {
 			return err
 		}
@@ -433,6 +460,9 @@ func (l *Ledger) Promote(ctx context.Context, need int) (int, error) {
 		}
 		now := time.Now().Unix()
 		for _, p := range ps {
+			if slices.Contains(held, p.ID) {
+				continue
+			}
 			if _, err := t.ExecContext(t.ctx, "UPDATE proposals SET state = ?, updated = ? WHERE id = ?", StateApproved, now, p.ID); err != nil {
 				return err
 			}

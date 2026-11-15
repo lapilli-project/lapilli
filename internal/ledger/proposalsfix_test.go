@@ -92,10 +92,10 @@ func TestPromote(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if n, err := l.Promote(ctx, 2); err != nil || n != 0 {
+	if n, err := l.Promote(ctx, 2, nil); err != nil || n != 0 {
 		t.Fatalf("none has two: %d %v", n, err)
 	}
-	if n, err := l.Promote(ctx, 1); err != nil || n != 1 {
+	if n, err := l.Promote(ctx, 1, nil); err != nil || n != 1 {
 		t.Fatalf("one has one: %d %v", n, err)
 	}
 	for id, want := range map[int64]string{a: StateApproved, b: StateProposed, c: StateProposed} {

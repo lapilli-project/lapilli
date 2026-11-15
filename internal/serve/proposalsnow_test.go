@@ -871,3 +871,28 @@ func TestBacktestAgainLedgerBound(t *testing.T) {
 		t.Errorf("backtested again within ten minutes: %+v", got)
 	}
 }
+
+// TestPromoteHoldsStale: with --approvals lowered, a proposal that has
+// the approvals it now needs is approved, unless it waits to be backtested
+// again: held, as an approval of it is.
+func TestPromoteHoldsStale(t *testing.T) {
+	ctx := context.Background()
+	s, _ := restartsServer(t, func(c *Config) { c.Approvals = 2 })
+	stale := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
+	fresh := proposeFor(t, s.Handler(), "15m")
+	for _, id := range []int64{stale, fresh} {
+		if _, err := s.l.Approve(ctx, id, ana, 2, time.Time{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.cfg.Approvals = 1
+	if err := s.carryOut(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if p := state(t, s, stale); p.State != ledger.StateProposed {
+		t.Errorf("a stale one approved as fewer approvals are needed: %s", p.State)
+	}
+	if p := state(t, s, fresh); p.State == ledger.StateProposed {
+		t.Errorf("a fresh one not approved as fewer approvals are needed: %s", p.State)
+	}
+}

@@ -573,9 +573,10 @@ The first step, for v0.22.0, as above, except:
     refused when checked again, read where it is kept. Not held at
     approval: that check lags a change Lapilli made through an API until
     the rules are read next, and a hold on it would ask to propose again
-    a proposal that is as it was made. Lapilli's `--approvals` lowered
-    approves one with the approvals it has, stale or not, and it is then
-    backtested again as it is carried out.
+    a proposal that is as it was made. `--approvals` lowered doesn't
+    approve one held so either (`Promote` is given the stale ones to
+    skip): it waits, with the approvals it has, until it is backtested
+    again.
   - **Backtested again**, `POST /proposals/{id}/backtest`: an editor's, as
     `POST /proposals` is (`write`, the same cross-origin check), counted
     against the reader's tries an hour (`triesAnHour`) once the rule is

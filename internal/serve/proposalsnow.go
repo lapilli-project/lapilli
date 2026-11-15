@@ -397,6 +397,26 @@ func earlierLost(ev evidence) []string {
 	return out
 }
 
+// heldPromotable are the proposals --approvals lowered would approve that
+// wait to be backtested again: held, as an approval of one is.
+func (s *Server) heldPromotable(ctx context.Context) ([]int64, error) {
+	ps, err := s.l.Promotable(ctx, s.approvals())
+	if err != nil || len(ps) == 0 {
+		return nil, err
+	}
+	ls, err := s.linesNow(ctx, ps)
+	if err != nil {
+		return nil, err
+	}
+	var out []int64
+	for _, l := range ls {
+		if l.StaleWhy != nil {
+			out = append(out, l.ID)
+		}
+	}
+	return out, nil
+}
+
 // staleText is why a proposal is stale, in English, as JSON, the API and
 // MCP give it: its rule changed since, of one not finished with (Stale), or
 // why, waiting for approval, it waits to be backtested again; "" for

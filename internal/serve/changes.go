@@ -1343,9 +1343,14 @@ func (s *Server) carryOut(ctx context.Context) error {
 	if err := s.l.Refresh(ctx); err != nil {
 		return err
 	}
-	// Approved before --approvals was lowered: moved on; before it was
-	// raised, and not yet carried out or taken by a recipe: approved again.
-	if _, err := s.l.Promote(ctx, s.approvals()); err != nil {
+	// Approved before --approvals was lowered: moved on, unless it waits
+	// to be backtested again (held); before it was raised, and not yet
+	// carried out or taken by a recipe: approved again.
+	held, err := s.heldPromotable(ctx)
+	if err != nil {
+		return err
+	}
+	if _, err := s.l.Promote(ctx, s.approvals(), held); err != nil {
 		return err
 	}
 	if _, err := s.l.Demote(ctx, s.approvals()); err != nil {
