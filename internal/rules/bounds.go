@@ -70,15 +70,27 @@ func madeLimit(size int) int { return min(MaxMade, max(ExpandMin, ExpandTimes*si
 // MadeError is an input refused for what it would make beyond its own text
 // (madeLimit): By says what made it, at the point it went past. Together
 // says it is the inputs read together (Together) that went past MaxMade,
-// not the input alone past what it may make.
+// not the input alone past what it may make; File, that what is kept of a
+// stream, written afresh (pick), is Made bytes, past MaxFile, which it is
+// held to as the file it is read as.
 type MadeError struct {
 	By                string
 	Made, Size, Limit int
-	Together          bool
+	Together, File    bool
+	// Most, of inputs read together, names the one that had made most of
+	// it, MostMade bytes (input.name): what took them past may be little.
+	Most     string
+	MostMade int
 }
 
 func (e *MadeError) Error() string {
-	if e.Together {
+	switch {
+	case e.File:
+		return fmt.Sprintf("%s: %d bytes, more than the %d MiB a file of rules is read of", e.By, e.Made, MaxFile>>20)
+	case e.Together && e.Most != "":
+		return fmt.Sprintf("%s: what the inputs read together make beyond their own text, %d bytes so far, is past the %d MiB they may make in all, refused ones' among it; %.200s made the most of it, %d bytes",
+			e.By, e.Made, MaxMade>>20, e.Most, e.MostMade)
+	case e.Together:
 		return fmt.Sprintf("%s: what the inputs read together make beyond their own text, %d bytes so far, is past the %d MiB they may make in all, refused ones' among it",
 			e.By, e.Made, MaxMade>>20)
 	}
@@ -111,22 +123,64 @@ func OverTotal(err error) bool {
 type total struct {
 	mu   sync.Mutex
 	made int
+	// of is what each input made, by its name (input.name), so the one
+	// that made most is named with the one that took them past.
+	of map[string]int
 }
 
-// add counts n made by the inputs together, refusing it past MaxMade, and
-// not counting it then. Nothing made is never refused: the input that
-// took them past MaxMade was.
-func (t *total) add(n int, by func() string) error {
+// add counts n made by the inputs together, b among them, refusing it past
+// MaxMade, and not counting it then. Nothing made is never refused: the
+// input that took them past MaxMade was.
+func (t *total) add(b *input, n int, by func() string) error {
 	if t == nil || n <= 0 {
 		return nil
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.made+n > MaxMade {
-		return &MadeError{By: by(), Made: t.made + n, Limit: MaxMade, Together: true}
+		e := &MadeError{By: by(), Made: t.made + n, Limit: MaxMade, Together: true}
+		e.Most, e.MostMade = t.mostLocked("", 0)
+		return e
 	}
 	t.made += n
+	if b != nil && b.name != "" {
+		if t.of == nil {
+			t.of = map[string]int{}
+		}
+		t.of[b.name] += n
+	}
 	return nil
+}
+
+// most is the input that has made most of what the inputs together made,
+// and how much, the input named made also made more, not counted yet (as
+// YAMLValue counts what it made once it ends); "" when none is named.
+func (t *total) most(named string, more int) (string, int) {
+	if t == nil {
+		return "", 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.mostLocked(named, more)
+}
+
+func (t *total) mostLocked(named string, more int) (string, int) {
+	name, made := "", 0
+	pick := func(k string, n int) {
+		if n > made || n == made && k < name {
+			name, made = k, n
+		}
+	}
+	for k, n := range t.of {
+		if k == named {
+			n += more
+		}
+		pick(k, n)
+	}
+	if _, ok := t.of[named]; named != "" && !ok {
+		pick(named, more)
+	}
+	return name, made
 }
 
 // left is what the inputs read together may make still.
@@ -188,7 +242,7 @@ func (b *input) charge(n int, by func() string) error {
 	if limit := madeLimit(b.size); b.made+n > limit {
 		return &MadeError{By: by(), Made: b.made + n, Size: b.size, Limit: limit}
 	}
-	if err := b.total.add(n, by); err != nil {
+	if err := b.total.add(b, n, by); err != nil {
 		return err
 	}
 	b.made += n

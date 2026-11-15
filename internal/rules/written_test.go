@@ -2,9 +2,11 @@ package rules
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -130,5 +132,100 @@ func TestPickStreamOnce(t *testing.T) {
 	}
 	if made, total := inputOf(ctx).made, totalOf(ctx).made; made == 0 || total != made {
 		t.Errorf("the input made %d, the inputs together %d", made, total)
+	}
+}
+
+// TestPickAliasedRefused: a ConfigMap whose data a YAML alias brings in is
+// refused where a stream is picked, as Parse refuses it, with Trim and
+// with a selector leaving an item out: counted broken and kept, it was
+// written afresh with each alias in full, and read so, the aliases gone, a
+// rule file read again for each key.
+func TestPickAliasedRefused(t *testing.T) {
+	small := strconv.Quote("groups: [{name: g, rules: [{alert: A, expr: up}]}]")
+	doc := "apiVersion: v1\nkind: List\nitems:\n- {apiVersion: v1, kind: Secret, metadata: {name: s}}\n" +
+		"- {apiVersion: v1, kind: ConfigMap, metadata: {name: c, labels: {team: a}}, data: {a.yaml: &f " + small + ", b.yaml: *f, c.yaml: *f}}\n" +
+		"- {apiVersion: v1, kind: ConfigMap, metadata: {name: d, labels: {team: b}}, data: {d.yaml: " + small + "}}\n"
+	p := filepath.Join(t.TempDir(), "list.yaml")
+	if err := os.WriteFile(p, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sel, err := ParseSelector("team=a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for what, pk := range map[string]Picking{"trimmed": {Trim: true}, "selected": {Select: sel}} {
+		if rs, _, _, err := ReadPicked(p, pk); !errors.Is(err, errAliased) {
+			t.Errorf("%s: %d rules, %v", what, len(rs), err)
+		}
+	}
+}
+
+// TestPickCopyChargedAsTheFile: what is kept of a file, written afresh, is
+// read as the file, with Trim and with a selector leaving an item out:
+// what it may make is judged by the file's size, and what the copy holds
+// beyond the file, its aliases written out, is charged as made. Read as a
+// file of its own, judged by the copy's size, 40 times the file's, it
+// made recording rules' labels (made only when asked for, as a comparison
+// asks) past what the file may make, and was read.
+func TestPickCopyChargedAsTheFile(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("apiVersion: v1\nkind: List\nitems:\n- {apiVersion: v1, kind: Secret, metadata: {name: s}}\n" +
+		"- apiVersion: monitoring.coreos.com/v1\n  kind: PrometheusRule\n  metadata:\n    name: p\n    labels: {team: a}\n    annotations:\n")
+	fmt.Fprintf(&b, "      a00: &s %q\n", strings.Repeat("s", 30<<10))
+	for i := 1; i < 50; i++ {
+		fmt.Fprintf(&b, "      a%02d: *s\n", i)
+	}
+	b.WriteString("  spec:\n    groups:\n    - name: g\n      labels: " + manyLabels(100, false) + "\n      rules:\n")
+	for i := range 300 {
+		fmt.Fprintf(&b, "      - {record: r%d, expr: x}\n", i)
+	}
+	b.WriteString("    - name: h\n      rules:\n      - {alert: A, expr: up}\n" +
+		"- {apiVersion: monitoring.coreos.com/v1, kind: PrometheusRule, metadata: {name: q, labels: {team: b}}, spec: {groups: [{name: k, rules: [{alert: B, expr: up}]}]}}\n")
+	p := filepath.Join(t.TempDir(), "list.yaml")
+	if err := os.WriteFile(p, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sel, err := ParseSelector("team=a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for what, pk := range map[string]Picking{"trimmed": {Trim: true}, "selected": {Select: sel}} {
+		var rec []Recording
+		pk.Recordings = &rec
+		if _, _, _, err := ReadPicked(p, pk); !refused(err) || !strings.Contains(err.Error(), "recording rules") {
+			t.Errorf("%s, %d KB: %v", what, b.Len()>>10, err)
+		}
+	}
+	if rs, _, _, err := ReadPicked(p, Picking{Trim: true}); err != nil || len(rs) != 2 {
+		t.Errorf("its alert rules alone: %d, %v", len(rs), err)
+	}
+}
+
+// TestPickCopyHeldToMaxFile: what is kept of a file, written afresh, is
+// held to MaxFile, as the file it is read as: a file of 1.4 MB whose
+// aliases, written out, are 19 MB, within what it may make, was kept so
+// and read, below a directory's top as at it. It is refused now, said.
+func TestPickCopyHeldToMaxFile(t *testing.T) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "apiVersion: v1\nkind: List\nitems:\n- {apiVersion: v1, kind: Secret, metadata: {name: s}, data: {pad: %q}}\n", strings.Repeat("p", 1200<<10))
+	b.WriteString("- apiVersion: monitoring.coreos.com/v1\n  kind: PrometheusRule\n  metadata:\n    name: p\n    annotations:\n")
+	fmt.Fprintf(&b, "      a000: &s %q\n", strings.Repeat("s", 170<<10))
+	for i := 1; i < 110; i++ {
+		fmt.Fprintf(&b, "      a%03d: *s\n", i)
+	}
+	b.WriteString("  spec: {groups: [{name: g, rules: [{alert: A, expr: up}]}]}\n")
+	dir := t.TempDir()
+	for name, body := range map[string]string{"top.yaml": "groups: [{name: ok, rules: [{alert: Seen, expr: x}]}]\n", "sub/list.yaml": b.String()} {
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var made *MadeError
+	if _, _, _, err := ReadPicked(dir, Picking{Trim: true}); !errors.As(err, &made) || !made.File || !strings.Contains(err.Error(), "list.yaml") {
+		t.Errorf("%d KB: %v", b.Len()>>10, err)
 	}
 }

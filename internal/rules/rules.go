@@ -462,7 +462,9 @@ var errNoRules = errors.New("no alert rules: want a Prometheus rule file, a Prom
 // those below it, such as a ConfigMap mounted in a pod. In a directory,
 // hidden files and directories, files without alert rules, and files below
 // the top that don't parse are passed over; links are followed to files but
-// not to directories below.
+// not to directories below. A file below the top in the shape of rules that
+// Lapilli's own reader refuses, which Prometheus may load, or that makes
+// past what the directory may (MadeError), is an error, as at the top.
 func Load(path string) ([]Rule, error) {
 	rs, _, err := Read(path)
 	return rs, err
@@ -516,7 +518,13 @@ func FromDocsContext(ctx context.Context, docs []Doc) ([]Rule, error) {
 		}
 		in, ok := inputs[unit]
 		if !ok {
-			in = context.WithValue(ctx, inputKey{}, &input{none: none, total: totalOf(ctx)})
+			// A namespace's input is named by its document, as what the
+			// inputs together made names the one that made most.
+			name := ""
+			if d.Namespace != "" {
+				name = d.Source
+			}
+			in = context.WithValue(ctx, inputKey{}, &input{none: none, total: totalOf(ctx), name: name})
 			inputs[unit] = in
 		}
 		var rs []Rule
@@ -580,7 +588,7 @@ func parseContext(ctx context.Context, b []byte, rec *[]Recording) ([]Rule, erro
 	if err := Nodes(b); err != nil {
 		return nil, unread{err, textShaped(b)}
 	}
-	ctx = counted(OneInput(ctx), len(b))
+	ctx = keysAsText(counted(OneInput(ctx), len(b)))
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	var out []Rule
 	found := false
@@ -597,13 +605,8 @@ func parseContext(ctx context.Context, b []byte, rec *[]Recording) ([]Rule, erro
 			return nil, notYAML{err}
 		}
 		doc, err := YAMLValueContext(ctx, &node)
-		var dk dupKey
-		switch shaped := err != nil && rulesShaped(&node); {
-		case errors.As(err, &dk) && shaped:
-			// yaml.v3 refuses it too: a rule file that doesn't read.
-			return nil, err
-		case err != nil:
-			return nil, unread{err, shaped}
+		if err != nil {
+			return nil, unreadAs(err, &node)
 		}
 		// A list of documents, as a cloud's CLI lists resources.
 		docs := []any{doc}
@@ -624,6 +627,53 @@ func parseContext(ctx context.Context, b []byte, rec *[]Recording) ([]Rule, erro
 		return nil, errNoRules
 	}
 	return shownRules(out), nil
+}
+
+// unreadAs is what YAMLValue refusing a document's node, err, is as the
+// rules readers take it: a key given twice in a document in the shape of
+// rules, which yaml.v3 refuses too, a rule file that doesn't read, as it
+// is; any other refusal unread, saying whether it is in the shape of rules
+// (rulesShaped), which is said, never passed over.
+func unreadAs(err error, n *yaml.Node) error {
+	var dk dupKey
+	switch shaped := rulesShaped(n); {
+	case errors.As(err, &dk) && shaped:
+		return err
+	default:
+		return unread{err, shaped}
+	}
+}
+
+// decodeRules is DecodeYAML as parseContext reads a document, its keys as
+// text (keysAsText) and what it refuses told apart as there: what yaml.v3
+// can't decode isn't YAML (notYAML), and what Lapilli's own reader refuses
+// is unread, in the shape of rules or not (unreadAs), so that where a
+// stream is picked, one in the shape of rules is said, not passed over.
+func decodeRules(ctx context.Context, data []byte) ([]any, error) {
+	if err := Nodes(data); err != nil {
+		return nil, unread{err, textShaped(data)}
+	}
+	ctx = keysAsText(counted(OneInput(ctx), len(data)))
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	var out []any
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var n yaml.Node
+		err := dec.Decode(&n)
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, notYAML{err}
+		}
+		v, err := YAMLValueContext(ctx, &n)
+		if err != nil {
+			return nil, unreadAs(err, &n)
+		}
+		out = append(out, v)
+	}
 }
 
 // policyCharged charges what a Google Cloud alerting policy's rules make
@@ -765,6 +815,11 @@ func parseDocRec(ctx context.Context, doc map[string]any, rec *[]Recording) ([]R
 		// Amazon Managed Service for Prometheus: the rule file a rule
 		// groups namespace holds, base64 in the AWS CLI's answer.
 		ns, _ := doc["ruleGroupsNamespace"].(map[string]any)
+		if inputOf(ctx).broughtIn(str(ns["data"])) {
+			// Decoded and read into rules again for each namespace that
+			// aliases it; the AWS CLI writes none.
+			return nil, true, fmt.Errorf("rule groups namespace %q: %w", str(ns["name"]), unread{errAliased, true})
+		}
 		b, err := base64.StdEncoding.DecodeString(str(ns["data"]))
 		if err != nil {
 			return nil, true, fmt.Errorf("rule groups namespace %q: %w", str(ns["name"]), err)

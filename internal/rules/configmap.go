@@ -68,7 +68,8 @@ func resolved(n *yaml.Node) *yaml.Node {
 }
 
 // hasKey reports whether a mapping has one of keys, or, when merges, a
-// merge (<<) that may bring it.
+// merge (<<) that may bring it: a key as written, whatever its tag, or as
+// its text is read (scalarText), a !!binary one decoded.
 func hasKey(m *yaml.Node, merges bool, keys ...string) bool {
 	for j := 0; j+1 < len(m.Content); j += 2 {
 		k := resolved(m.Content[j])
@@ -78,15 +79,22 @@ func hasKey(m *yaml.Node, merges bool, keys ...string) bool {
 		if merges && isMerge(k) || slices.Contains(keys, k.Value) {
 			return true
 		}
+		if t, ok := scalarText(k); ok && slices.Contains(keys, t) {
+			return true
+		}
 	}
 	return false
 }
 
-// textShaped reports whether a document yaml.v3 wasn't asked to decode, as
-// Nodes refused it, may be in the shape of rules: whether groups is
-// written in it, or a backslash, which could write it in a quoted key.
+// textShaped reports whether a document not decoded (Nodes refused it, or
+// an alias brought it in again) may be in the shape of rules: whether
+// groups is written in it, or what could write it otherwise, as a key's
+// text is read (keysAsText): a backslash (an escape), binary (a !!binary
+// key), or both a ! and a % (a tag written with %-escapes, or made by a
+// %TAG directive, as !!binary).
 func textShaped(b []byte) bool {
-	return bytes.Contains(b, []byte("groups")) || bytes.IndexByte(b, '\\') >= 0
+	return bytes.Contains(b, []byte("groups")) || bytes.IndexByte(b, '\\') >= 0 || bytes.Contains(b, []byte("binary")) ||
+		bytes.IndexByte(b, '!') >= 0 && bytes.IndexByte(b, '%') >= 0
 }
 
 // configMapRules reads the rule files a ConfigMap holds, a key each. A key
@@ -98,15 +106,19 @@ func textShaped(b []byte) bool {
 // in the shape of rules that Lapilli's own reader refuses is an error
 // naming its key: Prometheus may load what Lapilli doesn't read, and its
 // rules mustn't be left out unsaid. So is one past what the input may make
-// (MadeError), and a value a YAML alias brings in (errAliased), which would
-// be read into rules again for each alias, decoded afresh if !!binary.
-// binaryData isn't read for rules.
+// (MadeError), and a value in the shape of rules a YAML alias brings in
+// (errAliased), which would be read into rules again for each alias,
+// decoded afresh if !!binary; one that isn't, by its text, is passed over
+// unread. binaryData isn't read for rules.
 func configMapRules(ctx context.Context, doc map[string]any, rec *[]Recording) (out []Rule, found bool, broken int, err error) {
 	in := inputOf(ctx)
 	data, _ := doc["data"].(map[string]any)
 	for _, k := range sortedKeys(data) {
 		s, _ := data[k].(string)
 		if in.broughtIn(s) {
+			if !textShaped([]byte(s)) {
+				continue // an alias of what isn't rules, unread, as before
+			}
 			return nil, true, broken, fmt.Errorf("%.80q: %w", k, unread{errAliased, true})
 		}
 		var more *[]Recording

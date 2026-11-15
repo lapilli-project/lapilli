@@ -17,8 +17,10 @@ import (
 // making 1.2 GB parsed and more than 2.2 GB through ReadPicked; and, a
 // !!binary value decoded afresh for each alias, 320 KB made 1.22 GB past
 // a check by where a value's text is. So too an alias of the whole data, of
-// a whole ConfigMap in a List, and a merge (<<) into the data; and a value
-// that isn't rules. The same text written twice, no alias, reads twice.
+// a whole ConfigMap in a List, and a merge (<<) into the data. An alias of
+// a value that isn't rules by its text (no groups, backslash or binary in
+// it), as an env-style ConfigMap writes, is passed over unread. The same
+// text written twice, no alias, reads twice.
 func TestConfigMapAliased(t *testing.T) {
 	var file strings.Builder
 	file.WriteString("groups:\n- name: g\n  rules:\n")
@@ -42,7 +44,10 @@ func TestConfigMapAliased(t *testing.T) {
 		{"a !!binary value by 16 keys", keys("&s !!binary " + base64.StdEncoding.EncodeToString([]byte(file.String())))},
 		{"a whole ConfigMap in a List", "kind: List\nitems:\n- &c {kind: ConfigMap, metadata: {name: a}, data: {a: !!binary " +
 			base64.StdEncoding.EncodeToString([]byte(small)) + "}}\n- *c\n- *c\n"},
-		{"a value that isn't rules", cm("{a: &on \"true\", b: *on, r.yaml: " + strconv.Quote(small) + "}")},
+		// Rules by their text though neither groups nor binary is written:
+		// its key a !!binary tag written with a %-escape.
+		{"a value whose groups key is !!bin%61ry", keys("&s " + strconv.Quote("!!bin%61ry "+base64.StdEncoding.EncodeToString([]byte("groups"))+
+			": [{name: g, rules: [{alert: A, expr: up}]}]"))},
 	} {
 		var err error
 		bytes, took := allocated(func() { _, err = Parse([]byte(c.doc)) })
@@ -68,9 +73,65 @@ func TestConfigMapAliased(t *testing.T) {
 	if _, _, _, err := ReadPicked(p, Picking{Trim: true}); !errors.Is(err, errAliased) {
 		t.Errorf("ReadPicked: %v", err)
 	}
+	// An alias of what isn't rules, by its text, an env-style value, is
+	// passed over unread, as before; so is it in !!binary.
+	env := cm("{DB_HOST: &db \"db.internal:5432\", REPLICA_HOST: *db, r.yaml: " + strconv.Quote(small) + "}")
+	envBinary := cm("{DB_HOST: &db !!binary " + base64.StdEncoding.EncodeToString([]byte("db.internal")) + ", REPLICA_HOST: *db, r.yaml: " + strconv.Quote(small) + "}")
+	for what, doc := range map[string]string{"an env-style value": env, "an env-style value in !!binary": envBinary} {
+		if rs, err := Parse([]byte(doc)); err != nil || len(rs) != 1 {
+			t.Errorf("%s by an alias: %d, %v", what, len(rs), err)
+		}
+	}
 	twice := cm("{a.yaml: " + strconv.Quote(small) + ", b.yaml: " + strconv.Quote(small) + "}")
 	if rs, err := Parse([]byte(twice)); err != nil || len(rs) != 2 {
 		t.Errorf("the same text written twice: %d, %v", len(rs), err)
+	}
+}
+
+// TestAmazonNamespaceAliased: an Amazon rule groups namespace's data a
+// YAML alias brings in is refused before it is decoded, naming the
+// namespace, as a ConfigMap's value is: each namespace aliasing it was
+// decoded and read into rules again. The AWS CLI writes none. The same
+// data written twice, no alias, reads twice.
+func TestAmazonNamespaceAliased(t *testing.T) {
+	data := base64.StdEncoding.EncodeToString([]byte("groups: [{name: g, rules: [{alert: A, expr: up}]}]"))
+	aliased := "- ruleGroupsNamespace: {name: a, data: &d " + data + "}\n- ruleGroupsNamespace: {name: b, data: *d}\n"
+	if rs, err := Parse([]byte(aliased)); !errors.Is(err, errAliased) || !strings.Contains(err.Error(), `namespace "a"`) {
+		t.Errorf("aliased: %d, %v", len(rs), err)
+	}
+	twice := "- ruleGroupsNamespace: {name: a, data: " + data + "}\n- ruleGroupsNamespace: {name: b, data: " + data + "}\n"
+	if rs, err := Parse([]byte(twice)); err != nil || len(rs) != 2 {
+		t.Errorf("written twice: %d, %v", len(rs), err)
+	}
+}
+
+// TestBelowTopRefusedSaid: a file below a directory's top in the shape of
+// rules that Lapilli's own reader refuses (a rule of 10,001 labels, past
+// MaxKeys), which Prometheus may load, is an error naming it, as it is at
+// the top, whether a rule file or a ConfigMap holding one: it was passed
+// over unsaid, as one that doesn't read is, its rules left out. One that
+// doesn't read, which Prometheus refuses too, is passed over still
+// (TestReadInItsInputs).
+func TestBelowTopRefusedSaid(t *testing.T) {
+	var l strings.Builder
+	for i := range 10001 {
+		fmt.Fprintf(&l, "l%d: v, ", i)
+	}
+	big := "groups: [{name: g, rules: [{alert: Hidden, expr: x, labels: {" + strings.TrimSuffix(l.String(), ", ") + "}}]}]\n"
+	for what, body := range map[string]string{"a rule file": big, "a ConfigMap": configMap(big)} {
+		dir := t.TempDir()
+		for name, b := range map[string]string{"top.yaml": "groups: [{name: ok, rules: [{alert: Seen, expr: x}]}]\n", "sub/x.yaml": body} {
+			p := filepath.Join(dir, name)
+			if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(b), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if rs, _, _, err := ReadPicked(dir, Picking{}); err == nil || !strings.Contains(err.Error(), "x.yaml") || !strings.Contains(err.Error(), "10000 keys") {
+			t.Errorf("%s below the top: %d rules, %v", what, len(rs), err)
+		}
 	}
 }
 

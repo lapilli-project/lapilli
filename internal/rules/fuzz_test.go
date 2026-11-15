@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -145,8 +146,9 @@ func FuzzPick(f *testing.F) {
 			return
 		}
 		// What is kept is documents of rules alone, those selected: no
-		// other object (a Secret) is left in it.
-		docs, err := decodeAll(kept)
+		// other object (a Secret) is left in it, read as the rules
+		// readers read it, its keys as text.
+		docs, err := decodeRules(context.Background(), kept)
 		if err != nil {
 			t.Fatalf("kept doesn't read: %v\n%q", err, kept)
 		}

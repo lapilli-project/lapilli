@@ -137,3 +137,40 @@ func TestTotalInAnyOrder(t *testing.T) {
 		}
 	}
 }
+
+// TestTotalNamesMost: past what a ruler's namespaces may make together,
+// the read names the namespace that took them past and the one that had
+// made the most, which may be another: the one that crosses may have made
+// little. The one that crosses is the most when what it made in reading
+// is the most, counted before it is done.
+func TestTotalNamesMost(t *testing.T) {
+	read := NoAliases(Together(context.Background()))
+	if _, err := FromDocsContext(read, []Doc{{Source: "big", Namespace: "big", Data: []byte(groupBomb(1000, 33, false, false))}}); err != nil {
+		t.Fatal(err)
+	}
+	small := groupBomb(1000, 20, false, false)
+	var err error
+	for i := 0; i < 200 && err == nil; i++ {
+		_, err = FromDocsContext(read, []Doc{{Source: fmt.Sprintf("small%03d", i), Namespace: fmt.Sprintf("small%03d", i), Data: []byte(small)}})
+	}
+	if !OverTotal(err) || !strings.HasPrefix(err.Error(), "small") || !strings.Contains(err.Error(), "; big made the most of it") {
+		t.Errorf("a big one, then small ones: %v", err)
+	}
+
+	// By aliases, which a namespace counts once it is read: the one that
+	// crosses, having made the most in reading, is named the most.
+	aliases := func(n int) []byte {
+		return []byte("x: &s " + strings.Repeat("s", 64<<10) + "\ny: [" + strings.TrimSuffix(strings.Repeat("*s, ", n), ", ") +
+			"]\ngroups: [{name: g, rules: [{alert: A, expr: up}]}]\n")
+	}
+	read = OneInput(Together(context.Background()))
+	for i := 0; i < 200 && totalOf(read).left() > 3<<20; i++ {
+		if _, err := FromDocsContext(read, []Doc{{Source: fmt.Sprintf("ns%03d", i), Namespace: fmt.Sprintf("ns%03d", i), Data: aliases(30)}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err = FromDocsContext(read, []Doc{{Source: "zz", Namespace: "zz", Data: aliases(60)}})
+	if !OverTotal(err) || !strings.HasPrefix(err.Error(), "zz") || !strings.Contains(err.Error(), "; zz made the most of it") {
+		t.Errorf("a big one by aliases, after small ones: %v", err)
+	}
+}
