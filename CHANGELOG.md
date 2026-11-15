@@ -37,8 +37,9 @@ answer as they did.
   places reports and teams' digests can go, the weekly digest's time as a
   person reads it ("Mondays 09:00"), the last week posted to Slack and a
   later week's that failed, as the ledger has them, when the outbox last
-  sent and how many of the last day's notices failed, of the latest 1,000
-  unsent a place has, past which it says more wait. The
+  sent, and how many of the last day's notices failed and wait to be tried
+  again and how many were given up on, each of a place's latest 1,000,
+  past which it says more wait. The
   weekly digest, or a report, on with nowhere to go is said so in words,
   with the way out. Counts, never a URL. These two pages are worked out
   for each request, as a notice sent empties no page kept.

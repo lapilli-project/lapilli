@@ -1209,15 +1209,21 @@ Slack, or nowhere), how many places reports can go to by name and how many
 teams have a digest of their own, when the weekly digest goes ("Mondays
 09:00", "매주 월요일 09:00": `weeklyText`) and to how many places that are
 there, set by the flags or on the Reports page, how many reports are on,
-when the outbox last sent a notice, and how many notices made in the last
-day weren't sent, their last try having failed, of the latest 1,000 unsent
-a place has (`ledger.FailedCounted`); past those, "More than 1000 notices
-wait to be sent", not a count it didn't read. The digest posts to Slack
-itself, not through the outbox: the last week posted (`digest-sent`) and a
-later week whose digest failed, worked out or posted (a digest run's
-error, `ledger.LastFailed`), are read from the ledger, the same on every
-replica and after a restart (`digestPosted`). Counts and kinds, never a
-URL. The weekly digest on with nowhere to go, its last post
+when the outbox last sent a notice, how many notices made in the last
+day failed their last try and wait to be tried again, of the latest 1,000
+waiting a place has (`ledger.FailedCounted`; past those, "More than 1000
+notices wait to be sent", not a count it didn't read), and, apart, how
+many made in the last day were given up on, after ten tries, of the
+latest 1,000 given up: given up on are next tried never, and read with
+the rest they came first, so that a place given up on long ago hid the
+day's failures. The digest posts to Slack itself, not through the outbox:
+the last week posted (`digest-posted`, set by a post alone; a week passed
+over, while the digest is off or newly set, sets `digest-sent` alone, and
+a ledger that knows only that says "went to Slack or was passed over")
+and a later week whose digest failed, worked out or posted (a digest
+run's error, `ledger.LastFailed`), are read from the ledger, the same on
+every replica and after a restart (`digestPosted`). Counts and kinds,
+never a URL. The weekly digest on with nowhere to go, its last post
 to Slack failed, a report on whose places are all gone, and failures are
 each a sentence with a sign (`p.warn`), never a colour alone: in full on
 the Settings page, with the way out (for a digest the flags set, the
@@ -1227,9 +1233,12 @@ itself; for one set there, another place there); in a line on the card
 
 It is read from the flags, the reports, the runs and the outbox
 (`ledger.Standing`: a place's last send by the outbox's index on its place
-and when each was sent; its unsent notices by the same index, a range of
-it from its end, 1,001 rows at most, however many wait, which `EXPLAIN
-QUERY PLAN` holds to), nothing kept for it. A notice sent is written
+and when each was sent; its waiting notices and its given up by the same
+index, each a range of it read backward from its end, ordered by when each
+was sent and when it is next tried, 1,001 rows at most, however many
+there are, which `EXPLAIN` holds to on SQLite and on Postgres: ordered by
+the next try alone, Postgres read and sorted them all), nothing kept for
+it. A notice sent is written
 aside, emptying no page kept, so these two
 pages are worked out for each request (`freshPage`, `Cache-Control:
 no-store`), the Settings page but when it tries settings on the last week.
