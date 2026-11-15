@@ -557,13 +557,13 @@ var errHeld = bad("it is stale, so it isn't approved until it is backtested agai
 // found in effect, then the rules read again from where they are kept;
 // refused when the rule changed since.
 func (s *Server) backtestAgain(ctx context.Context, id int64, by string, agent bool) error {
-	return s.backtestAgainOf(ctx, id, by, agent, false)
+	return s.backtestAgainOf(ctx, id, by, agent, s.cfg.Timeout)
 }
 
-// backtestAgainOf is backtestAgain, wait saying to wait for a comparison
-// running, as Lapilli's own work does; a person asking is told to try
-// again.
-func (s *Server) backtestAgainOf(ctx context.Context, id int64, by string, agent, wait bool) error {
+// backtestAgainOf is backtestAgain, its replay given within at most:
+// --timeout for a person or an agent, less for Lapilli's own (autoWithin).
+// None waits for a comparison running while it holds the heavy turn.
+func (s *Server) backtestAgainOf(ctx context.Context, id int64, by string, agent bool, within time.Duration) error {
 	if !s.replaying() {
 		return bad("this lapilli serve reads no rules of its own: there is nothing to change")
 	}
@@ -625,7 +625,7 @@ func (s *Server) backtestAgainOf(ctx context.Context, id int64, by string, agent
 	if errors.As(err, &no) {
 		return errRuleChanged
 	}
-	bt, err := s.backtest(ctx, f.name, f.rule, want, wait)
+	bt, err := s.backtestWithin(ctx, f.name, f.rule, want, false, within)
 	if err != nil {
 		return err
 	}
@@ -652,20 +652,81 @@ func (s *Server) backtestAgainOf(ctx context.Context, id int64, by string, agent
 }
 
 // againARun is how many stale proposals Lapilli backtests again itself in
-// a run of its work, at most, one at a time, each within --timeout: after
+// a run of its work, at most, one at a time, each within autoWithin: after
 // verdict.Semantics changes, every one waiting is, a few each run, and
-// ledger.LapilliBacktestsAnHour an hour at most.
+// ledger.LapilliBacktestsAnHour an hour at most, tried or kept.
 const againARun = 3
 
-// againRetry is how long Lapilli leaves a proposal it failed to backtest
-// again itself before it tries again.
-const againRetry = time.Hour
+// autoWithinMost is how long Lapilli's own backtest run again replays for
+// at most, --timeout when that is shorter: it holds the heavy turn, the one
+// comparison and the work meanwhile. A variable, for tests.
+var autoWithinMost = 10 * time.Minute
 
-// againFailed are, by proposal, when Lapilli last failed to backtest one
-// again itself (this replica's: the next leader tries again).
+// autoMargin is how much longer than its replay one of Lapilli's own may
+// take in all: the rules read again, the record, the write.
+const autoMargin = time.Minute
+
+// againRetry is how long Lapilli leaves a proposal it failed to backtest
+// again itself before it tries again, the first time: doubled each time it
+// fails again, to againRetryMost.
+const (
+	againRetry     = time.Hour
+	againRetryMost = 24 * time.Hour
+)
+
+// againFailed are, by proposal, when Lapilli may next try to backtest one
+// again itself that it failed to, as this replica knows (the next leader
+// tries again: the ledger's count of the hour's bounds them all).
 type againFailed struct {
 	sync.Mutex
-	m map[int64]time.Time
+	m map[int64]againBackoff
+}
+
+// againBackoff is a proposal Lapilli failed to backtest again itself: not
+// before next, after n failures in a row, under the semantics numbers then
+// (this lapilli's, and its evidence's): a change to either starts afresh.
+type againBackoff struct {
+	next       time.Time
+	n          int
+	ours, kept int
+}
+
+// waits reports whether Lapilli leaves a proposal, its evidence's
+// semantics kept, untried now.
+func (a *againFailed) waits(id int64, kept int, now time.Time) bool {
+	a.Lock()
+	defer a.Unlock()
+	b, ok := a.m[id]
+	return ok && b.ours == semantics && b.kept == kept && now.Before(b.next)
+}
+
+// failed notes a failure to backtest one again: left againRetry, doubled
+// for each failure in a row before it, againRetryMost at most.
+func (a *againFailed) failed(id int64, kept int, now time.Time) time.Duration {
+	a.Lock()
+	defer a.Unlock()
+	if a.m == nil {
+		a.m = map[int64]againBackoff{}
+	}
+	b := a.m[id]
+	if b.ours != semantics || b.kept != kept {
+		b = againBackoff{ours: semantics, kept: kept}
+	}
+	b.n++
+	wait := againRetryMost
+	if b.n <= 5 {
+		wait = min(againRetry<<(b.n-1), againRetryMost)
+	}
+	b.next = now.Add(wait)
+	a.m[id] = b
+	return wait
+}
+
+// forget starts a proposal afresh once it is backtested again.
+func (a *againFailed) forget(id int64) {
+	a.Lock()
+	defer a.Unlock()
+	delete(a.m, id)
 }
 
 // backtestStale backtests again itself, as Lapilli (ledger.Proposer), the
@@ -675,13 +736,16 @@ type againFailed struct {
 // among them, which no one would otherwise ask for. Only on a run of its
 // work, never when a write pokes it, and only with --changes, as Lapilli
 // proposes of itself; ledger.LapilliBacktestsAnHour an hour at most, on
-// every replica together. One whose period's record changed since, or
+// every replica together, each tried counted as one kept is
+// (ledger.BacktestTried). One whose period's record changed since, or
 // whose rule did, is a person's to backtest again, or propose again: an
 // incident written down and taken away doesn't make Lapilli replay twelve
-// weeks. Each under the heavy turn, as a person's is, waiting for a
-// comparison running; never one backtested again in the last ten
-// minutes, or one it failed to in the last hour. Approvals withdrawn so
-// are told, as any are.
+// weeks. Each under the heavy turn, as a person's is, within autoWithin,
+// never waiting for a comparison running; the round ends at the first
+// that doesn't finish, so that a history that never answers holds the
+// work for one at most. One it failed to waits againRetry, doubled each
+// time it fails again; one backtested again in the last ten minutes isn't
+// either. Approvals withdrawn so are told, as any are.
 func (s *Server) backtestStale(ctx context.Context) error {
 	if !s.replaying() || s.cfg.ReadOnly || !s.cfg.Changes {
 		return nil
@@ -699,52 +763,47 @@ func (s *Server) backtestStale(ctx context.Context) error {
 		return err
 	}
 	now := time.Now()
-	s.againFailed.Lock()
 	ls = slices.DeleteFunc(ls, func(l proposalLine) bool {
-		return l.StaleWhy == nil || !l.StaleWhy.Auto || l.Stale || now.Sub(s.againFailed.m[l.ID]) < againRetry
+		return l.StaleWhy == nil || !l.StaleWhy.Auto || l.Stale || s.againFailed.waits(l.ID, proposalEvidence(l.Proposal).Semantics, now)
 	})
-	s.againFailed.Unlock()
 	slices.SortFunc(ls, func(a, b proposalLine) int {
 		if c := a.Updated.Compare(b.Updated); c != 0 {
 			return c
 		}
 		return int(a.ID - b.ID)
 	})
+	within := min(s.cfg.Timeout, autoWithinMost)
 	n := 0
 	for _, l := range ls {
 		if n == againARun || !s.still(ctx) {
 			break
 		}
-		err := s.backtestAgainOf(ctx, l.ID, ledger.Proposer, false, true)
+		actx, cancel := context.WithTimeout(ctx, within+autoMargin)
+		err := s.backtestAgainOf(actx, l.ID, ledger.Proposer, false, within)
+		cancel()
 		var b badRequest
 		switch {
 		case err == nil:
 			n++
+			s.againFailed.forget(l.ID)
 		case errors.Is(err, ledger.ErrBacktestedJustNow), errors.Is(err, ledger.ErrMoved), errors.Is(err, errFresh):
 			// Done by someone else meanwhile, or moved on.
-		case errors.Is(err, errBusy), errors.Is(err, ledger.ErrTooManyBacktests):
-			return nil // a person's heavy request has the turn, or the hour's are done: the next run
-		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil:
-			return err
-		case errors.As(err, &b), errors.Is(err, errRuleChanged), errors.Is(err, errUnfinished):
-			// Its rule changed, it can't be, or it didn't finish: left for
-			// a person, and tried again in an hour.
-			s.log.Warn("a stale proposal wasn't backtested again", "proposal", l.ID, "err", err)
-			s.againFailed.Lock()
-			if s.againFailed.m == nil {
-				s.againFailed.m = map[int64]time.Time{}
-			}
-			s.againFailed.m[l.ID] = now
-			s.againFailed.Unlock()
-			n++
+		case errors.Is(err, errBusy), errors.Is(err, ledger.ErrTooManyBacktests), errors.As(err, &b) && b.format == comparingBusy:
+			return nil // a person's heavy request or comparison has the turn, or the hour's are done: the next run
+		case ctx.Err() != nil:
+			return ctx.Err()
 		default:
-			s.againFailed.Lock()
-			if s.againFailed.m == nil {
-				s.againFailed.m = map[int64]time.Time{}
+			// Tried, and nothing kept: counted as one kept is, and left
+			// for longer each time.
+			n++
+			wait := s.againFailed.failed(l.ID, proposalEvidence(l.Proposal).Semantics, now)
+			s.log.Warn("a stale proposal wasn't backtested again", "proposal", l.ID, "err", err, "again_in", wait)
+			if err := s.l.BacktestTried(ctx, l.ID, ledger.Proposer, clip(err.Error(), 300)); err != nil {
+				return err
 			}
-			s.againFailed.m[l.ID] = now
-			s.againFailed.Unlock()
-			return err
+			if errors.Is(err, errUnfinished) || errors.Is(err, context.DeadlineExceeded) {
+				return nil // a history that doesn't answer in time: no more this run
+			}
 		}
 	}
 	return nil

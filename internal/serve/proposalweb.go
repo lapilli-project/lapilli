@@ -331,6 +331,8 @@ func (s *Server) stepsOf(r *http.Request, p ledger.Proposal) (steps []proposalSt
 		case what == "made":
 			made = true
 			continue // from the proposal itself
+		case what == "backtest tried again":
+			st.Kind, st.Reason = "tried", after.Reason
 		case what == "backtested again":
 			st.Kind, st.Was, st.Version, st.Agent, st.Withdrawn = "backtest", before.Backtest, after.Version, after.Agent, after.Withdrawn
 		case what == "approved" && !moved:

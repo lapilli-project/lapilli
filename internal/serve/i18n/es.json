@@ -1615,5 +1615,6 @@
  "you have backtested as many proposals again in the last hour as anyone may: try again later": "has repetido en la última hora tantos backtests como cualquiera puede: inténtalo más tarde",
  "it was backtested again less than ten minutes ago: try again in a few minutes": "se repitió su backtest hace menos de diez minutos: inténtalo en unos minutos",
  "backtesting stale proposals again": "repitiendo el backtest de las propuestas desactualizadas",
- "it was backtested by lapilli %s, which replays or judges as a newer lapilli does: approve it once this one is as new, or backtest it again here": "su backtest lo hizo lapilli %s, que reproduce o juzga como un lapilli más nuevo: apruébala cuando este sea igual de nuevo, o repite aquí su backtest"
+ "it was backtested by lapilli %s, which replays or judges as a newer lapilli does: approve it once this one is as new, or backtest it again here": "su backtest lo hizo lapilli %s, que reproduce o juzga como un lapilli más nuevo: apruébala cuando este sea igual de nuevo, o repite aquí su backtest",
+ "%s ran its backtest again and kept nothing of it": "%s repitió su backtest y no guardó nada de él"
 }

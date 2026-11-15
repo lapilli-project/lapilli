@@ -1175,6 +1175,15 @@ func ruleText(r rules.Rule) string {
 // runs began when that is later. wait says to wait for a comparison
 // running, as a job does; a person asking is told to try again.
 func (s *Server) backtest(ctx context.Context, name string, before, after rules.Rule, wait bool) (*backtest, error) {
+	return s.backtestWithin(ctx, name, before, after, wait, s.cfg.Timeout)
+}
+
+// comparingBusy is a backtest asked for while another comparison runs, by
+// one that doesn't wait for it.
+const comparingBusy = "another comparison is running: try again in a minute"
+
+// backtestWithin is backtest, its replay given within at most.
+func (s *Server) backtestWithin(ctx context.Context, name string, before, after rules.Rule, wait bool, within time.Duration) (*backtest, error) {
 	to := s.now().Add(-s.cfg.Settle).Truncate(s.cfg.Step).UTC()
 	from := to.Add(-weeks * weekLen)
 	if began, err := s.l.RunsFrom(ctx); err != nil {
@@ -1188,7 +1197,7 @@ func (s *Server) backtest(ctx context.Context, name string, before, after rules.
 	if wait {
 		s.comparing.Lock()
 	} else if !s.comparing.TryLock() {
-		return nil, bad("another comparison is running: try again in a minute")
+		return nil, bad(comparingBusy)
 	}
 	defer s.comparing.Unlock()
 	o, err := s.options(ctx)
@@ -1200,7 +1209,7 @@ func (s *Server) backtest(ctx context.Context, name string, before, after rules.
 	both := []rules.Rule{before, after}
 	both[0].Name, both[1].Name = name, name
 	s.replayedAs().Apply(both)
-	cmp, err := s.replayChange(ctx, both[:1], both[1:], 0, from, to, s.cfg.Timeout, o)
+	cmp, err := s.replayChange(ctx, both[:1], both[1:], 0, from, to, within, o)
 	if err != nil {
 		return nil, err
 	}

@@ -1083,9 +1083,7 @@ func TestLapilliBacktestsStale(t *testing.T) {
 	if proposalEvidence(state(t, s, ids[0])).Semantics != 0 {
 		t.Error("tried again within the hour")
 	}
-	s.againFailed.Lock()
-	s.againFailed.m[ids[0]] = time.Now().Add(-againRetry)
-	s.againFailed.Unlock()
+	expireBackoff(s, ids[0])
 	s.jobs(ctx, true)
 	if n := againCount(t, s, ids); n != len(ids) {
 		t.Errorf("an hour on: %d backtested again, want all %d", n, len(ids))
@@ -1239,9 +1237,7 @@ func TestLapilliUnfinishedKept(t *testing.T) {
 		t.Error("tried again within the hour")
 	}
 	// An hour on, it is.
-	s.againFailed.Lock()
-	s.againFailed.m[ids[0]] = time.Now().Add(-againRetry)
-	s.againFailed.Unlock()
+	expireBackoff(s, ids[0])
 	if err := s.backtestStale(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -1331,7 +1327,7 @@ func TestBacktestAgainRace(t *testing.T) {
 	var wg sync.WaitGroup
 	for i, run := range []func() error{
 		func() error { return s.backtestAgain(ctx, ids[0], bo, false) },
-		func() error { return s.backtestAgainOf(ctx, ids[0], ledger.Proposer, false, true) },
+		func() error { return s.backtestAgainOf(ctx, ids[0], ledger.Proposer, false, time.Minute) },
 	} {
 		wg.Add(1)
 		go func() { defer wg.Done(); errs[i] = run() }()
@@ -1359,5 +1355,123 @@ func TestBacktestAgainRace(t *testing.T) {
 	}
 	if steps, _, _ := s.l.ProposalSteps(ctx, ids[0], 10); len(slices.DeleteFunc(steps, func(c ledger.Change) bool { return !strings.HasSuffix(c.What, "backtested again") })) != 1 {
 		t.Errorf("backtested again twice: %+v", steps)
+	}
+}
+
+// expireBackoff makes a proposal Lapilli failed to backtest again itself
+// due to be tried again now, its failures in a row kept.
+func expireBackoff(s *Server, id int64) {
+	s.againFailed.Lock()
+	b := s.againFailed.m[id]
+	b.next = time.Now().Add(-time.Second)
+	s.againFailed.m[id] = b
+	s.againFailed.Unlock()
+}
+
+// neverAnswers is a history that answers no query: a replay of it ends
+// only at its deadline.
+type neverAnswers struct{}
+
+func (neverAnswers) QueryRange(ctx context.Context, _ string, _, _ time.Time, _ time.Duration) ([]prom.Series, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// TestLapilliNeverFinishing: a history that never answers holds Lapilli's
+// work for one backtest a run, within autoWithin, not --timeout: the heavy
+// turn given back then, the round over. The try is counted toward the
+// hour's twelve, as one kept would be, and said in the proposal's history;
+// the proposal is left an hour, then two, then four, and afresh once the
+// semantics number changes.
+func TestLapilliNeverFinishing(t *testing.T) {
+	ctx := context.Background()
+	s, ids := staleServer(t, 3, nil)
+	s.h = neverAnswers{}
+	s.cfg.Timeout = time.Hour
+	defer func(was time.Duration) { autoWithinMost = was }(autoWithinMost)
+	autoWithinMost = 200 * time.Millisecond
+	round := func() time.Duration {
+		t.Helper()
+		began := time.Now()
+		done := make(chan error, 1)
+		go func() { done <- s.backtestStale(ctx) }()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(20 * time.Second):
+			t.Fatal("held the work past the short deadline")
+		}
+		select {
+		case s.heavy <- struct{}{}:
+			<-s.heavy
+		default:
+			t.Fatal("the heavy turn not given back")
+		}
+		return time.Since(began)
+	}
+	tries := func() (n int) {
+		t.Helper()
+		for _, id := range ids {
+			steps, _, _ := s.l.ProposalSteps(ctx, id, 100)
+			for _, c := range steps {
+				if strings.HasSuffix(c.What, " backtest tried again") && c.By == ledger.Proposer {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	backoff := func() time.Duration {
+		s.againFailed.Lock()
+		defer s.againFailed.Unlock()
+		return time.Until(s.againFailed.m[ids[0]].next).Round(time.Hour)
+	}
+	if took := round(); took > 10*time.Second {
+		t.Errorf("a round took %s", took)
+	}
+	if n := tries(); n != 1 {
+		t.Errorf("%d tried in one round, want 1", n)
+	}
+	if n := againCount(t, s, ids); n != 0 {
+		t.Errorf("%d kept, unfinished", n)
+	}
+	if b := backoff(); b != time.Hour {
+		t.Errorf("left %s, want an hour", b)
+	}
+	if _, body, _ := ui(t, s.Handler(), http.MethodGet, "/proposals/"+itoa(ids[0]), cy, "", nil); !strings.Contains(body, "Lapilli</bdi> ran its backtest again and kept nothing of it") {
+		t.Error("its history doesn't say it was tried")
+	}
+	// Left until then: the next round tries the next one.
+	round()
+	if n := tries(); n != 2 {
+		t.Errorf("%d tried in two rounds, want 2", n)
+	}
+	for _, want := range []time.Duration{2 * time.Hour, 4 * time.Hour} {
+		expireBackoff(s, ids[0])
+		expireBackoff(s, ids[1])
+		round()
+		if b := backoff(); b != want {
+			t.Errorf("left %s, want %s", b, want)
+		}
+	}
+	// Each counted toward the hour's, as one kept is.
+	for n := tries(); n < ledger.LapilliBacktestsAnHour; n++ {
+		if err := s.l.BacktestTried(ctx, ids[2], ledger.Proposer, "elsewhere"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.l.MayBacktestAgain(ctx, ids[2], ledger.Proposer, false); !errors.Is(err, ledger.ErrTooManyBacktests) {
+		t.Errorf("twelve tried in the hour: %v", err)
+	}
+	// Afresh once the semantics number changes.
+	defer func(was int) { semantics = was }(semantics)
+	semantics++
+	if s.againFailed.waits(ids[0], 0, time.Now()) {
+		t.Error("left after the semantics number changed")
+	}
+	if wait := s.againFailed.failed(ids[0], 0, time.Now()); wait != time.Hour {
+		t.Errorf("afresh, left %s", wait)
 	}
 }

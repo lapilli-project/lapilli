@@ -654,7 +654,9 @@ func backtestable(ctx context.Context, q interface {
 		var kept struct {
 			Agent bool `json:"agent"`
 		}
-		if strings.HasSuffix(what, " backtested again") && json.Unmarshal([]byte(after), &kept) == nil && kept.Agent == agent {
+		// A backtest run again, kept or tried (BacktestTried): each cost the
+		// same twelve weeks replayed.
+		if (strings.HasSuffix(what, " backtested again") || strings.HasSuffix(what, " "+tried)) && json.Unmarshal([]byte(after), &kept) == nil && kept.Agent == agent {
 			n++
 		}
 	}
@@ -665,6 +667,22 @@ func backtestable(ctx context.Context, q interface {
 		return ErrTooManyBacktests
 	}
 	return nil
+}
+
+// tried is what changes keeps of a backtest Lapilli ran again itself and
+// kept nothing of: "proposal #N backtest tried again".
+const tried = "backtest tried again"
+
+// BacktestTried keeps that who (Lapilli, ledger.Proposer) ran a proposal's
+// backtest again and kept nothing of it, and why: one that didn't finish,
+// or was refused once the work was done. It changes nothing of the
+// proposal, and counts toward the hour's backtests again as one kept does
+// (backtestable), so that one which never finishes can't be tried past
+// them; its history says so.
+func (l *Ledger) BacktestTried(ctx context.Context, id int64, by, why string) error {
+	return l.write(ctx, func(t *txn) error {
+		return change(t, FoldName(by), fmt.Sprintf("proposal #%d %s", id, tried), nil, map[string]any{"agent": false, "reason": why})
+	})
 }
 
 // BacktestAgain keeps the evidence of a proposal waiting for approval

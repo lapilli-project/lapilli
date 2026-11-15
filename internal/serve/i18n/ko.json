@@ -1615,5 +1615,6 @@
  "you have backtested as many proposals again in the last hour as anyone may: try again later": "지난 한 시간 동안 다시 백테스트할 수 있는 만큼 했어요. 나중에 다시 시도하세요",
  "it was backtested again less than ten minutes ago: try again in a few minutes": "10분 안에 이미 다시 백테스트했어요. 몇 분 뒤 다시 시도하세요",
  "backtesting stale proposals again": "오래된 제안 다시 백테스트",
- "it was backtested by lapilli %s, which replays or judges as a newer lapilli does: approve it once this one is as new, or backtest it again here": "lapilli %s 가 백테스트했는데, 더 새 lapilli 의 재생·판정 방식이에요. 이 lapilli 가 그만큼 새로워진 뒤 승인하거나, 여기서 다시 백테스트하세요"
+ "it was backtested by lapilli %s, which replays or judges as a newer lapilli does: approve it once this one is as new, or backtest it again here": "lapilli %s 가 백테스트했는데, 더 새 lapilli 의 재생·판정 방식이에요. 이 lapilli 가 그만큼 새로워진 뒤 승인하거나, 여기서 다시 백테스트하세요",
+ "%s ran its backtest again and kept nothing of it": "%s 이(가) 다시 백테스트했지만 아무것도 남기지 않음"
 }
