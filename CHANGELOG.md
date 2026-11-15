@@ -22,9 +22,12 @@ ledger whose teams' names differ only in letter case included.
   key with nothing after it is refused with its line, and changes nothing. Each thing is then checked as
   its form is: one that can't be kept is skipped and kept as it was, and
   the rest is kept. The leader keeps the ledger holding what the file says,
-  in one write, at the start of each term it leads and whenever the file's
+  in one write, as each term it leads begins and whenever the file's
   content changes, read and hashed every 15 seconds, as Kubernetes swaps a
-  ConfigMap's files through a link; no restart. Each thing is matched by
+  ConfigMap's files through a link; no restart. A file is kept to only once
+  the same file has been read twice in a row, 15 seconds or more apart: one
+  read half written changes nothing, giving no one a role, and a new file,
+  or a new leader, is kept to 15 to 30 seconds after. Each thing is matched by
   its name, a team's in any letter case or by `renamed_from`, a quiet
   window's by its title; what the UI made of the same team under that name
   is taken over. Each change is noted in the activity log by `config`. What
@@ -40,10 +43,12 @@ ledger whose teams' names differ only in letter case included.
   read twice in a row; a team something still names is given back to the
   UI instead. A role is taken away only when a file that was read twice
   no longer lists it, pruned or not. Given back past what the UI keeps, a
-  thing is deleted, on the second read too. What the file no longer
-  declares goes before what it adds. A team that can't be kept keeps what
-  names it as it was. Without `--config`, everything is the UI's again,
-  roles included, none taken away, and the Settings page says how many.
+  thing is deleted. What the file no longer declares goes before what it
+  adds. A team that can't be kept keeps what names it as it was. Without
+  `--config`, everything is the UI's again, roles included, none taken
+  away, marked given back: until the UI changes one, the next file that
+  doesn't declare it again takes it away, a role, or deletes it, with
+  prune. The Settings page lists them.
 - **`GET /config.yaml`**, an admin's: every team, quiet window, report and
   role the ledger holds, declared and made in the UI alike, as `--config`
   takes them, linked from the Settings page beside `settings.yaml`. Read

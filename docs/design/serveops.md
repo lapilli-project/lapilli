@@ -545,7 +545,10 @@ refused as a whole, with its line, and changes nothing: the ledger keeps
 what the last file declared. An empty or truncated file, read as
 Kubernetes swaps a ConfigMap, would otherwise take away everything
 declared; to declare nothing, `teams: []`, and to declare no roles,
-`grants: []`. A name, a title, a user, a group or a team given as
+`grants: []`. So is a key of a thing with nothing after it (`team:` or
+`rules:` alone): read as nothing, a role's or a quiet window's team would
+be every team, and a quiet window's rules every rule; to mean that, leave
+the key out. A name, a title, a user, a group or a team given as
 a boolean or a number (`no`, `0123`, `1.10`), and a label's value given as
 a boolean or a fraction, is refused too: see "Through Helm" below.
 
@@ -574,11 +577,32 @@ it, a thing the file would add is skipped, said why. What the file no
 longer declares is let go before what it adds is made, so a file that
 swaps one thing for another at that most makes the new one. It is given
 back to the UI only while the UI holds less than its own most; past it, it
-is deleted, but only once the same file has been read twice in a row, as
-a pruned one is (read once, it stays declared), the activity log saying
-why, or, a team something names, kept declared and said: declared and
-taken out again and again, nothing piles up past what the UI may make.
-Without `--config`, everything is given back, whatever the UI holds.
+is deleted, the activity log saying why, or, a team something names, kept
+declared and said: declared and taken out again and again, nothing piles
+up past what the UI may make. Without `--config`, everything is given
+back, whatever the UI holds.
+
+### Read twice before it is kept
+
+**A file is kept to only once the same file has been read twice in a
+row.** The leader reads it every 15 seconds and hashes it (SHA-256). A
+hash the ledger isn't kept to is only noted on its first read; read again,
+15 seconds or more after, with no other read between (another file, one
+that can't be read, or the one the ledger is kept to), the ledger is kept
+to it, in one write, and the next new file starts over. A write the
+ledger fails doesn't count: the file is tried again after a while, still
+needing its two reads in a row if another is read before then. So a file
+read half written, or swapped in part as Kubernetes updates a ConfigMap,
+changes nothing at all: it gives no one a role, of a team or of every
+team, widens no quiet window, takes no role away and deletes nothing.
+Kept to, a file is kept to as a whole: what it no longer declares is let
+go at once (below). A file that can't be read as `--config` is said at
+once, on its first read; what of one can't be kept is said once it is
+kept to. As a term begins, at start or as another replica takes over, the
+ledger is kept to the file 15 to 30 seconds after; until then it holds
+what the last leader kept it to, and the Settings page says when a new
+file was read once. Without `--config` there is no file to read twice:
+what a file declared is given back at once.
 
 ### Keeping the ledger to it
 
@@ -611,14 +635,12 @@ all: the write is taken back, and no page is worked out again.
 
 What is declared and the file no longer names is the UI's again, as it
 was, but a role. With `--config-prune` (`serve.configPrune`) it is
-deleted, once the same file has been read twice in a row, 15 seconds
-apart, with no read that failed between: read once, it is kept as it is
-(a file half written, swapped back at once, deletes nothing).
+deleted.
 
 **A role is taken away only when a file that was read twice no longer
-lists it**: the same file, by its SHA-256, read twice in a row, 15 seconds
-apart, with no read that failed between, pruned or not. Read once, the
-role stays, declared, as it was. One the UI made and the file took over is
+lists it**, pruned or not: a file is kept to only once it is read the same
+twice in a row (above), so a file read once takes no one's role. One the
+UI made and the file took over is
 taken away so too, each noted as a role taken (`RoleTaken`, by `config`,
 with whom it was given to and its team). **Maintainer's call,
 2026-11-16**: for permissions, safety first. Declaring a role gives it to
@@ -626,14 +648,18 @@ the file, as Argo CD's RBAC policy owns its roles; given back to the UI, a
 role no one meant to keep would stay. Teams, quiet windows and reports keep
 being given back. A role whose team the file misspells keeps none of the
 person's roles as they were: one of every team the file gave before is
-taken away with the rest, once the file is read twice.
+taken away with the rest.
 
 **Without `--config`**, there is no file to say a role is gone:
 everything a file declared before is the UI's again, roles included, none
-taken away and nothing deleted, whatever the UI holds, and the Settings
-page says how many. A chart rolled back to before `serve.config`, or one
-that leaves it out, takes no one's role away; to take roles away, keep the
-file and list the rest.
+taken away and nothing deleted, whatever the UI holds. Each is marked
+given back (`given_back`): until the UI changes one, the next file that
+doesn't declare it again lets it go as one it no longer declares, a role
+taken away, a team, a quiet window or a report the UI's for good, or
+deleted with prune; one it declares again is declared again. The Settings
+page lists them to an admin, and says how many to anyone else. A chart
+rolled back to before `serve.config` takes no one's role away, and rolled
+forward again, the file takes away what it no longer gives.
 
 A declared team something still names (a quiet window, a
 report, a role, a task, a rule's note, the UI's or declared) isn't
@@ -649,17 +675,19 @@ old as `renamed_from` in one change, with every `team:` in the file that
 named it; once it is renamed, `renamed_from` can be left out. A rename in
 letter case alone needs neither.
 
-**When.** The leader keeps the ledger to the file at the start of each term
-it leads, whatever an earlier term kept it to (another leader with an
-older copy may have since, or a failover lost a write), and reads the file
-again every 15 seconds, comparing its SHA-256 with the one it last kept
-the ledger to. Kubernetes updates a mounted ConfigMap by swapping a link to
+**When.** The leader reads the file as each term it leads begins,
+forgetting what an earlier term kept the ledger to (another leader with an
+older copy may have since, or a failover lost a write), and again every
+15 seconds, comparing its SHA-256 with the one it last kept the ledger to,
+and keeps the ledger to it on the second read alike (above): 15 to 30
+seconds into the term. Kubernetes updates a mounted ConfigMap by swapping a link to
 a new directory, which a watch on the file misses, so the content is
 hashed instead. The chart mounts the directory, not a `subPath`, which the
 kubelet doesn't update. No restart is needed, and none is made. A file with
 things that couldn't be kept is tried again as the ledger changes (a team
-it names made in the UI), 15 seconds after, then twice as long each time,
-ten minutes at most; one refused as a whole isn't, until it changes.
+it names made in the UI, or one the write itself made once others were let
+go), 15 seconds after, then twice as long each time, ten minutes at most;
+one refused as a whole isn't, until it changes.
 
 **Several replicas.** Only the leader keeps the ledger to the file, in a
 write its lease fences (a leader whose lease another took commits

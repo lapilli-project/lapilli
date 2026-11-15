@@ -277,14 +277,19 @@ The chart renders it into a ConfigMap, `FULLNAME-config`, mounted as a
 directory and passed as `--config`; lapilli keeps the ledger holding what
 it says when a pod starts to lead, and again whenever the file changes,
 without a restart: the kubelet updates the file within a minute or so,
-and lapilli reads it every 15 seconds. With several replicas, the leader
+and lapilli reads it every 15 seconds. **A file is kept to only once the
+same file has been read twice in a row**, 15 seconds or more apart, with
+no other read between: a file read half written, or swapped in part,
+changes nothing, giving no one a role and taking none away. So a new
+file, or a pod that starts to lead, is kept to 15 to 30 seconds after. With several replicas, the leader
 alone writes it, in one transaction. Each thing is matched by its name (a
 team's in any letter case, a quiet window's by its title); what the UI made
 of the same team under that name is taken over. What `serve.config`
 declares is marked declared in the UI, which doesn't change or delete it,
 nor does the API: change it here. A file that can't be read (YAML that
-isn't, a key it doesn't know, an empty file, `grants:` with nothing after
-it) changes nothing; a thing in it that can't be kept (a report to a
+isn't, a key it doesn't know, an empty file, `grants:` or a role's `team:`
+with nothing after it: leave a key out for every team) changes nothing,
+and is said at once; a thing in it that can't be kept (a report to a
 destination nothing names, a team that isn't there) is kept as it was, and
 the rest is kept. A team that can't be kept keeps what names it in the
 file as it was too. The Settings and Runs
@@ -294,18 +299,19 @@ and made in the UI alike, to paste under `serve.config`.
 
 Taken out of `serve.config`, a thing is the UI's again, as it was, but a
 role (`grants`). **A role is taken away only when a file that was read
-twice no longer lists it**: the same file, read twice in a row 15 seconds
-apart, so a half-written file read once takes no one's role. Declaring a
+twice no longer lists it**, as a file is kept to only then. Declaring a
 role gives it to the file, as Argo CD's RBAC policy owns its roles. With
-`serve.configPrune`, the rest is deleted then too, on the second read; but
-a team that something still names (a window, a report, a role, a task, a
-note) is given back to the UI instead. Without `serve.config` (left
-`null`, or the chart rolled back to before it), everything a file
-declared is the UI's again, roles included, none taken away and nothing
-deleted; the Settings page says how many. What the file declares has
-limits of its own beside the UI's; given back past the UI's own, a thing
-is deleted, on the second read too. What the file no longer declares goes
-before what it adds is made. To rename a team
+`serve.configPrune`, the rest is deleted then too; but a team that
+something still names (a window, a report, a role, a task, a note) is
+given back to the UI instead. Without `serve.config` (left `null`, or the
+chart rolled back to before it), everything a file declared is the UI's
+again, roles included, none taken away and nothing deleted, each marked
+given back: until the UI changes one, a `serve.config` put back that
+doesn't declare it again takes it away (a role), or deletes it with
+`serve.configPrune`. The Settings page lists them. What the file declares
+has limits of its own beside the UI's; given back past the UI's own, a
+thing is deleted. What the file no longer declares goes before what it
+adds is made. To rename a team
 in place, keeping what names it, give the new `name` with the old as
 `renamed_from`, and change every `team:` that names it, in one change:
 renamed by its name alone, it is another team.

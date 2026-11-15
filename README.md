@@ -1224,7 +1224,8 @@ chart) is YAML of them, as the UI's forms make them, which the ledger is
 kept holding as the file changes, without a restart; what it declares is
 marked declared in the UI, which doesn't change it, and what it no longer
 declares is the UI's again, or deleted with `--config-prune`, but a role,
-taken away once a file read twice no longer lists it. An admin's
+taken away. A file is kept to only once it has been read the same twice
+in a row, so one read half written changes nothing. An admin's
 `/config.yaml` gives everything the ledger holds in that form, to commit
 (docs/design/serveops.md). The Orphans page lists the notes, tasks,
 comments and proposals of rules deleted or renamed, to move to the rule as

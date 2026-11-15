@@ -385,16 +385,18 @@ serve:
   #         team: payments
   #       - user: ana@example.com
   # An empty file is refused, and so is a key with nothing after it: to
-  # declare nothing, give teams: [], and no roles, grants: []. Left null,
-  # what a file declared before is the UI's again, roles included, none
-  # taken away. An admin's GET /config.yaml gives everything the ledger
-  # holds in this form, declared and made in the UI alike, to paste here.
+  # declare nothing, give teams: [], and no roles, grants: []; for every
+  # team, leave team out. A file is kept to once it is read the same twice
+  # in a row, 15 seconds apart: a change, or a pod that starts to lead,
+  # within half a minute. Left null, what a file declared before is the
+  # UI's again, roles included, none taken away, each marked given back:
+  # a config put back that doesn't declare it again takes it away. An
+  # admin's GET /config.yaml gives everything the ledger holds in this
+  # form, declared and made in the UI alike, to paste here.
   config: null
-  # Delete what config no longer declares (--config-prune), once the file
-  # is read the same twice in a row, 15 seconds apart; but a team what the
-  # UI made names, which is given back to the UI instead. Off, it is the
-  # UI's again, as it was. A role (grants) is taken away either way, but
-  # only when a file read the same twice in a row no longer lists it: the
+  # Delete what config no longer declares (--config-prune); but a team
+  # what the UI made names, which is given back to the UI instead. Off, it
+  # is the UI's again, as it was. A role (grants) is taken away either way: the
   # file gave it. With it, rename a team with renamed_from: a team renamed
   # by its name alone is another, and the old one is deleted.
   configPrune: false
