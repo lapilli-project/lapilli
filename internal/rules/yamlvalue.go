@@ -83,10 +83,10 @@ func YAMLValueContext(ctx context.Context, n *yaml.Node) (v any, err error) {
 		b = &input{}
 	}
 	b.mu.Lock()
-	c := &converting{ctx: ctx, none: b.none, aliases: map[*yaml.Node]bool{}, decoded: b.decoded, aliased: b.aliased, written: b.written, copied: b.copied,
+	c := &converting{ctx: ctx, none: b.none, aliases: map[*yaml.Node]bool{}, decoded: b.decoded, aliased: b.aliased, written: b.written, made: b.made,
 		size: b.size}
 	b.mu.Unlock()
-	decoded, aliased, written, copied := c.decoded, c.aliased, c.written, c.copied
+	decoded, aliased, written, made := c.decoded, c.aliased, c.written, c.made
 	defer func() {
 		if p := recover(); p != nil {
 			v, err = nil, errNode{fmt.Sprintf("a document lapilli failed to read (%v), which is a fault of lapilli's", p)}
@@ -95,7 +95,7 @@ func YAMLValueContext(ctx context.Context, n *yaml.Node) (v any, err error) {
 		b.decoded += c.decoded - decoded
 		b.aliased += c.aliased - aliased
 		b.written += c.written - written
-		b.copied += c.copied - copied
+		b.made += c.made - made
 		b.mu.Unlock()
 	}()
 	return c.value(n, 0)
@@ -110,11 +110,12 @@ func YAMLValueContext(ctx context.Context, n *yaml.Node) (v any, err error) {
 type input struct {
 	mu               sync.Mutex
 	decoded, aliased int
-	written, copied  int
-	// size is the input's documents' bytes, as counted (counted): what
-	// aliases may bring in again is judged against it.
-	size int
-	none bool
+	// written is the text of the scalars its documents' values and keys
+	// are, as written; size its documents' bytes, as counted (counted);
+	// made what it has made beyond them, the text aliases brought in again
+	// among it (madeLimit).
+	written, size, made int
+	none                bool
 }
 
 type inputKey struct{}
@@ -144,12 +145,13 @@ type converting struct {
 	// decoded and aliased count the values and keys visited, and those
 	// visited in an alias's expansion, as yaml.v3 counts them.
 	decoded, aliased, inAlias int
-	// written and copied are the text of the scalars visited, those
-	// written in the input and those an alias brought in again, judged
-	// against size, the input's bytes, when it is known (expandLimit); via
-	// is the alias whose expansion is being read, the outermost.
-	written, copied, size int
-	via                   *yaml.Node
+	// written is the text of the scalars visited as written in the input;
+	// made, the input's made so far, the text an alias brought in again
+	// among it, judged against size, the input's bytes, when it is known
+	// (madeLimit); via is the alias whose expansion is being read, the
+	// outermost.
+	written, made, size int
+	via                 *yaml.Node
 	// anchored is how many anchors the node visited is under: one under
 	// none is let go of once decoded, as no alias reads it again.
 	anchored int
@@ -177,27 +179,26 @@ func (c *converting) step() error {
 }
 
 // text counts a scalar's text, the value or key visited, refusing the
-// input once its aliases have brought in more text again than a document
-// of its size may make beyond it (expandLimit): judged against the whole
-// input's size where it is known, else against what was written so far.
-// copied says it came of an alias.
+// input once its aliases have brought in more text again than an input of
+// its size may make beyond it (madeLimit), with what else it made: judged
+// against the whole input's size where it is known, else against what was
+// written so far. copied says it came of an alias.
 func (c *converting) text(n *yaml.Node, copied bool) error {
 	if !copied {
 		c.written += len(n.Value)
 		return nil
 	}
-	c.copied += len(n.Value)
+	c.made += len(n.Value)
 	size := c.size
 	if size == 0 {
 		size = c.written
 	}
-	if limit := expandLimit(size); c.copied > limit {
+	if limit := madeLimit(size); c.made > limit {
 		anchor, line := "", 0
 		if c.via != nil {
 			anchor, line = c.via.Value, c.via.Line
 		}
-		return errNode{fmt.Sprintf("line %d: aliases, *%.40s the last, bring in %d bytes of text again, more than a document of %d bytes may: the larger of %d MiB and %d times its size, %d MiB at most",
-			line, anchor, c.copied, size, ExpandMin>>20, ExpandTimes, MaxFile>>20)}
+		return &MadeError{By: fmt.Sprintf("line %d: aliases, *%.40s the last, bring in their text again", line, anchor), Made: c.made, Size: size, Limit: limit}
 	}
 	return nil
 }
@@ -429,13 +430,13 @@ func (c *converting) fill(n *yaml.Node, m *mapOut, merged map[any]bool, depth in
 	if merged == nil {
 		// The keys set already, read again: their text is counted once.
 		merged = map[any]bool{}
-		written, copied := c.written, c.copied
+		written, made := c.written, c.made
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			if key, err := m.key(n.Content[i], c, depth); err == nil {
 				merged[key] = true
 			}
 		}
-		c.written, c.copied = written, copied
+		c.written, c.made = written, made
 	}
 	into := func(x *yaml.Node) error {
 		mapping := x

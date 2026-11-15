@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"reflect"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -47,14 +48,30 @@ func Shown(s string) string {
 // labels as Shown gives them: read so, from any source. What they say is
 // (cut). An expression isn't: what it asks is the query's, and a label
 // value in it may be written with a direction mark; it is shown so where
-// a page shows it (the template's shown).
+// a page shows it (the template's shown). A group's labels, which each of
+// its rules has, are looked through once, and its rules share what is
+// shown, as they shared what was read: not looked through, nor copied, for
+// each rule, which a group of 9,999 labels on 60,000 rules made seconds
+// and gigabytes of.
 func shownRules(rs []Rule) []Rule {
+	var was, is map[string]string
 	for i := range rs {
 		r := &rs[i]
 		r.Name, r.Group = Shown(r.Name), Shown(r.Group)
-		r.Labels, r.GroupLabels = shownLabels(r.Labels), shownLabels(r.GroupLabels)
+		r.Labels = shownLabels(r.Labels)
+		if g := r.GroupLabels; len(g) > 0 {
+			if !sameMap(g, was) {
+				was, is = g, shownLabels(g)
+			}
+			r.GroupLabels = is
+		}
 	}
 	return rs
+}
+
+// sameMap reports whether a and b are one map, not two alike.
+func sameMap(a, b map[string]string) bool {
+	return a != nil && b != nil && reflect.ValueOf(a).UnsafePointer() == reflect.ValueOf(b).UnsafePointer()
 }
 
 // shownLabels are labels as Shown gives them: as they are, when they show.

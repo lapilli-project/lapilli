@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -109,7 +110,20 @@ func FuzzScope(f *testing.F) {
 		f.Add(e, "namespace", "shop")
 	}
 	f.Fuzz(func(t *testing.T, expr, k, v string) {
-		Scope(expr, map[string]string{k: v})
+		l := map[string]string{k: v}
+		out, err := Scope(expr, l)
+		if err != nil {
+			return
+		}
+		// Given the room it grows by, it is as Scope writes it; a byte
+		// less, given up.
+		grew := len(out) - len(expr)
+		if got, err := scopeWith(expr, matchersOf(l), grew); err != nil || got != out {
+			t.Fatalf("room %d: %q, %v; Scope wrote %q", grew, got, err, out)
+		}
+		if _, err := scopeWith(expr, matchersOf(l), grew-1); grew > 0 && !errors.Is(err, errNoRoom) {
+			t.Fatalf("room %d, a byte short: %v", grew-1, err)
+		}
 	})
 }
 

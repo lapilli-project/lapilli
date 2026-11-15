@@ -26,12 +26,32 @@ var labelLists = map[string]bool{
 // a cluster does before it evaluates it: errors > 5 becomes
 // errors{namespace="shop"} > 5.
 func Scope(expr string, labels map[string]string) (string, error) {
+	return scopeWith(expr, matchersOf(labels), -1)
+}
+
+// matchersOf are labels as matchers, as Scope adds them, in their names'
+// order: written once for every expression they are added to.
+func matchersOf(labels map[string]string) string {
 	var m []string
 	for _, k := range slices.Sorted(maps.Keys(labels)) {
 		m = append(m, k+"="+strconv.Quote(labels[k]))
 	}
-	matchers := strings.Join(m, ",")
+	return strings.Join(m, ",")
+}
+
+// errNoRoom is an expression that would grow past the room scopeWith has.
+var errNoRoom = errors.New("no room")
+
+// scopeWith is Scope, with the matchers written: the expression grows by
+// them at each selector, and past room bytes more (room >= 0), it is given
+// up, errNoRoom, before it is made.
+func scopeWith(expr, matchers string, room int) (string, error) {
 	var b strings.Builder
+	added := 0 // what the matchers, and the commas before them, are
+	add := func(n int) bool {
+		added += n
+		return room < 0 || added <= room
+	}
 	var parens []bool // for each open parenthesis, whether it holds label names
 	listNext := false // a label list's parenthesis comes next
 	i := 0
@@ -100,10 +120,18 @@ func Scope(expr string, labels map[string]string) (string, error) {
 				i++
 			}
 			inner := strings.TrimSpace(b.String()[start+1:])
+			grows := len(matchers)
 			if inner != "" && !strings.HasSuffix(inner, ",") {
+				grows++ // a comma
+			}
+			if !add(grows) {
+				return "", errNoRoom
+			}
+			if grows > len(matchers) {
 				b.WriteByte(',')
 			}
-			b.WriteString(matchers + "}")
+			b.WriteString(matchers)
+			b.WriteByte('}')
 			i++
 		case c == '[':
 			// A range or a subquery's window and step.
@@ -160,7 +188,12 @@ func Scope(expr string, labels map[string]string) (string, error) {
 			case nextWord(expr[i:]) == "by" || nextWord(expr[i:]) == "without":
 				// sum by (...) (...), sum without (...) (...)
 			case after != '{':
-				b.WriteString("{" + matchers + "}")
+				if !add(len(matchers) + len("{}")) {
+					return "", errNoRoom
+				}
+				b.WriteByte('{')
+				b.WriteString(matchers)
+				b.WriteByte('}')
 			}
 		default:
 			b.WriteByte(c)
@@ -181,4 +214,33 @@ func nextWord(s string) string {
 		j++
 	}
 	return strings.ToLower(s[:j])
+}
+
+// scoping puts matchers into each selector of the expressions of a
+// document's rules, as a managed Prometheus does (a Google Rules'
+// namespace, an Azure rule group's cluster), what that adds to each charged
+// to the input before it is made: what and value name the label.
+type scoping struct {
+	in                    *input
+	matchers, what, value string
+}
+
+// scope is Scope with s's matchers; past what the input may make, a
+// MadeError.
+func (s scoping) scope(expr string) (string, error) {
+	by := func() string {
+		return fmt.Sprintf("the %s %.40q, %d bytes, put into each selector of each rule's expression", s.what, s.value, len(s.value))
+	}
+	room := s.in.room()
+	out, err := scopeWith(expr, s.matchers, room)
+	switch {
+	case errors.Is(err, errNoRoom):
+		return "", s.in.charge(room+1, by)
+	case err != nil:
+		return "", err
+	}
+	if err := s.in.charge(len(out)-len(expr), by); err != nil {
+		return "", err
+	}
+	return out, nil
 }
