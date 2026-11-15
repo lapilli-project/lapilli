@@ -1602,3 +1602,20 @@ func TestFlightsBounded(t *testing.T) {
 		t.Fatal("shutting down waited for a flight")
 	}
 }
+
+// TestComparingBusyText: Lapilli's own backtests again tell a comparison
+// running by the text backtestWithin refuses one with: the two alike.
+func TestComparingBusyText(t *testing.T) {
+	s, _ := restartsServer(t, nil)
+	s.comparing.Lock()
+	defer s.comparing.Unlock()
+	f, err := s.current(context.Background(), "RestartsNow", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.backtestWithin(context.Background(), f.name, f.rule, f.rule, false, time.Minute)
+	var b badRequest
+	if !errors.As(err, &b) || b.format != comparingBusy {
+		t.Errorf("refused with %v, not comparingBusy", err)
+	}
+}

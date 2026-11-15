@@ -1179,7 +1179,9 @@ func (s *Server) backtest(ctx context.Context, name string, before, after rules.
 }
 
 // comparingBusy is a backtest asked for while another comparison runs, by
-// one that doesn't wait for it.
+// one that doesn't wait for it: the text backtestWithin refuses it with,
+// written there too, as the bulk proposal reads each refusal's text
+// (TestComparingBusyText holds them alike).
 const comparingBusy = "another comparison is running: try again in a minute"
 
 // backtestWithin is backtest, its replay given within at most.
@@ -1197,7 +1199,7 @@ func (s *Server) backtestWithin(ctx context.Context, name string, before, after 
 	if wait {
 		s.comparing.Lock()
 	} else if !s.comparing.TryLock() {
-		return nil, bad(comparingBusy)
+		return nil, bad("another comparison is running: try again in a minute")
 	}
 	defer s.comparing.Unlock()
 	o, err := s.options(ctx)
