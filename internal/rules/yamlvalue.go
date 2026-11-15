@@ -152,6 +152,9 @@ type converting struct {
 	// outermost.
 	written, made, size int
 	via                 *yaml.Node
+	// again says the keys visited are a mapping's read again, whose text
+	// was counted the first time (fill).
+	again bool
 	// anchored is how many anchors the node visited is under: one under
 	// none is let go of once decoded, as no alias reads it again.
 	anchored int
@@ -184,7 +187,10 @@ func (c *converting) step() error {
 // against the whole input's size where it is known, else against what was
 // written so far. copied says it came of an alias.
 func (c *converting) text(n *yaml.Node, copied bool) error {
-	if !copied {
+	switch {
+	case c.again:
+		return nil
+	case !copied:
 		c.written += len(n.Value)
 		return nil
 	}
@@ -428,15 +434,16 @@ func (c *converting) fill(n *yaml.Node, m *mapOut, merged map[any]bool, depth in
 		return nil
 	}
 	if merged == nil {
-		// The keys set already, read again: their text is counted once.
+		// The keys set already, read again: their text was counted, and
+		// isn't again, so none is left out for the input's bound.
 		merged = map[any]bool{}
-		written, made := c.written, c.made
+		c.again = true
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			if key, err := m.key(n.Content[i], c, depth); err == nil {
 				merged[key] = true
 			}
 		}
-		c.written, c.made = written, made
+		c.again = false
 	}
 	into := func(x *yaml.Node) error {
 		mapping := x

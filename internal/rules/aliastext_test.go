@@ -114,3 +114,26 @@ func TestMergeKeysCountedOnce(t *testing.T) {
 		t.Errorf("written %d, made %d; want 12, 6", in.written, in.made)
 	}
 }
+
+// TestMergeKeysNearTheBound: a mapping's own keys, read again to know which
+// a merge (<<) doesn't set, aren't counted again, so near what the input
+// may make, none of them is left out of what the merge doesn't set: here
+// 62 copies of a 64 KiB key by an alias, and a mapping whose own *s, read
+// again past the bound, was taken as unset, the merge's value set in its
+// place.
+func TestMergeKeysNearTheBound(t *testing.T) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "k: &k %s\ns: &s s\n", strings.Repeat("k", 64<<10))
+	for i := range 62 {
+		fmt.Fprintf(&b, "c%d: {*k : 1}\n", i)
+	}
+	b.WriteString("m: &m {*s : merged}\nx: {*k : 1, *s : own, <<: *m}\n")
+	docs, err := DecodeYAML(t.Context(), []byte(b.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	x, _ := docs[0].(map[string]any)["x"].(map[string]any)
+	if x["s"] != "own" {
+		t.Errorf("x's own s: %v", x["s"])
+	}
+}
