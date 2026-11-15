@@ -537,7 +537,7 @@ func parse(b []byte, rec *[]Recording) ([]Rule, error) {
 // (OneInput), its size counted once (counted).
 func parseContext(ctx context.Context, b []byte, rec *[]Recording) ([]Rule, error) {
 	if err := Nodes(b); err != nil {
-		return nil, err
+		return nil, unread{err, true}
 	}
 	ctx = counted(OneInput(ctx), len(b))
 	dec := yaml.NewDecoder(bytes.NewReader(b))
@@ -553,11 +553,11 @@ func parseContext(ctx context.Context, b []byte, rec *[]Recording) ([]Rule, erro
 			break
 		}
 		if err != nil {
-			return nil, err
+			return nil, notYAML{err}
 		}
 		doc, err := YAMLValueContext(ctx, &node)
 		if err != nil {
-			return nil, err
+			return nil, unread{err, rulesShaped(&node)}
 		}
 		// A list of documents, as a cloud's CLI lists resources.
 		docs := []any{doc}
@@ -633,31 +633,11 @@ func parseDocRec(ctx context.Context, doc map[string]any, rec *[]Recording) ([]R
 		// else it has: a Secret with a top-level groups is a Secret.
 		return nil, false, nil
 	case doc["kind"] == "ConfigMap":
-		var out []Rule
-		found := false
-		data, _ := doc["data"].(map[string]any)
-		for _, k := range sortedKeys(data) {
-			s, _ := data[k].(string)
-			var more *[]Recording
-			if rec != nil {
-				more = &[]Recording{}
-			}
-			rs, err := parseContext(ctx, []byte(s), more)
-			switch {
-			case refused(err):
-				// Past what the input may make: said, as passing it over
-				// would leave its rules out unseen.
-				return nil, true, fmt.Errorf("%.80q: %w", k, err)
-			case err != nil:
-				continue // not every key holds rules
-			}
-			if rec != nil {
-				*rec = append(*rec, *more...)
-			}
-			found = true
-			out = append(out, rs...)
+		rs, found, _, err := configMapRules(ctx, doc, rec)
+		if err != nil {
+			return nil, true, err
 		}
-		return out, found, nil
+		return rs, found, nil
 	case doc["kind"] == "PrometheusRule":
 		spec, _ := doc["spec"].(map[string]any)
 		rs, err := prometheus(ctx, spec, rec)

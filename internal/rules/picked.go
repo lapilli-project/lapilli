@@ -535,12 +535,23 @@ func pickItem(ctx context.Context, doc any, sel Selector) (keep bool, kept any, 
 		c["items"] = items
 		return true, c, true, picked, nil
 	}
-	_, ok, err := parseDocRec(ctx, m, nil)
-	if refused(err) {
+	var ok bool
+	if m["kind"] == "ConfigMap" {
+		// Its rule files read once: those that don't read counted, and one
+		// Lapilli's reader refuses kept, as reading the rules says why.
+		var broken int
+		_, ok, broken, err = configMapRules(ctx, m, nil)
+		switch {
+		case refused(err):
+			return false, nil, false, picked, err
+		case err != nil:
+			picked.Broken++
+			ok = true
+		case broken > 0:
+			picked.Broken++
+		}
+	} else if _, ok, err = parseDocRec(ctx, m, nil); refused(err) {
 		return false, nil, false, picked, err
-	}
-	if brokenRuleFile(ctx, m) {
-		picked.Broken++
 	}
 	switch {
 	case !ok && picked.Broken > 0:
@@ -566,30 +577,6 @@ func isList(m map[string]any) bool {
 	kind := str(m["kind"])
 	_, items := m["items"].([]any)
 	return kind == "List" || strings.HasSuffix(kind, "List") && items
-}
-
-// brokenRuleFile reports whether a ConfigMap holds a rule file that
-// doesn't read: a value that is YAML, in the shape of rules, that Parse
-// refuses. A value that isn't YAML at all, a configuration file, isn't.
-// Its values were read for their rules already (pickItem): what reading
-// them again makes isn't counted to the input twice.
-func brokenRuleFile(ctx context.Context, m map[string]any) bool {
-	if m["kind"] != "ConfigMap" {
-		return false
-	}
-	in := inputOf(ctx)
-	defer in.undo(in.mark())
-	data, _ := m["data"].(map[string]any)
-	for _, v := range data {
-		s, _ := v.(string)
-		if _, err := DecodeYAML(ctx, []byte(s)); err != nil {
-			continue
-		}
-		if _, err := parseContext(ctx, []byte(s), nil); err != nil && !errors.Is(err, errNoRules) {
-			return true
-		}
-	}
-	return false
 }
 
 // isObject reports whether a document is a Kubernetes object, which has
