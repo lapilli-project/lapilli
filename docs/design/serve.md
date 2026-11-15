@@ -244,6 +244,35 @@ isn't a failure. The digest and the incident's page show near misses only
 for incidents still not caught. A week from before this was kept,
 with no digest's result, isn't looked at. `lapilli verdict` works them out for any period.
 
+**No record.** A week with firings and no incident started in it, or in the
+week before it (one written down, or an impact window that counts), has no
+record to judge them by: a firing that caught nothing can't be told from
+one nobody wrote down (`verdict.RecordKept`, the same two weeks the
+outcomes page asks about). The digest says so once, calls no rule noisy and
+suggests no longer `for`; the pages say so of any span, a week, four or
+twelve, looked back two weeks from its end, from the incidents' starts read
+once with the weekly tallies (`IncidentStarts`), never from the firings.
+Instead, for each rule replayed that fired as often as a noisy rule, the
+ten that fired most, the digest works out what its firings were
+(`verdict.Unrecorded`, kept as an `unrecorded` result for the week): how
+many had the value its condition compares go well past its bound, from the
+rule replayed over the week with its one bound a fifth further (a firing of
+that one overlapping it, alike in its labels, went well past it; a
+condition with no one bound that decides it, a range, `and`, `or`,
+`unless`, says nothing), the alerts that fired most by the labels that tell
+them apart, each with the team whose labels it has, and those during
+deploys. It shares the digest's `--timeout`. A week whose record is kept
+since, by an incident written down later, no longer shows it.
+
+**Firings on what a team owns.** The digest also counts each rule's
+firings in the week by the team whose labels they have (the teams'
+labels, the first by name, as a rule's are), from one grouped read of the
+week's firings by alert (`AlertCounts`); a rule most of whose firings, more
+than half, came from what another team owns than the one its alerts go to
+(or from a team's, for a rule no team owns) is kept as a `fired_on` result.
+A rule's page, the rules list with a team picked and that team's digest say
+it from there.
+
 The numbers and the text also go through the outbox ([work.md](work.md)), once
 (a webhook added on a Friday doesn't hear of Monday's digest):
 `digest.ready` to the webhook, for everyone and for each team something

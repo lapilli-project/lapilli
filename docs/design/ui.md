@@ -265,12 +265,17 @@ Each rule has a badge on each of three axes, and what is under way:
 
 | Axis | Badges |
 |---|---|
-| How it did, over the weeks shown (one of) | `● Noisy` ("Noisy, 3 wk" when it has been noisy weeks running), `○ OK`, `– Silent` (no firing in the weeks shown), `⧉ Spare` (another rule caught every incident it caught, as soon) |
+| How it did, over the weeks shown (one of) | `● Noisy` ("Noisy, 3 wk" when it has been noisy weeks running), `? No record` (fired as often as a noisy rule, with no incident written down in the weeks shown or the two before their end to judge it by), `○ OK`, `– Silent` (no firing in the weeks shown), `⧉ Spare` (another rule caught every incident it caught, as soon) |
 | Its backtest, only when it can't be taken for granted | `≠ Differs` (its replay differed from what really fired over the last week checked), `◌ Not replayed`, `⇣ Recorded only` (copied in from where it fired; its condition unknown) |
 | What people mean to do (its note's status) | `✓ keep`, `± tune`, `⊘ retire` |
 | Under way | `✎ Proposed` (a change waits for approval), `⚠ n to check` (what its page lists to check, below) |
 
-Noisy wins over Spare: a rule that is both is noisy first. Differs is
+Noisy wins over Spare: a rule that is both is noisy first. With no record
+no rule is noisy: the list says so once above the table, links to the
+incidents to write them down, and shows each rule's precision as `–`; the
+overview's precision and noisy rules are `–` for such a week, and its
+"What to look at" says it first, after the rules the last digest found
+firing well past their bound with no record (below). Differs is
 looked up for a rule that didn't fire in the weeks shown too: one replayed
 to nothing while it really fired is the case it is most for. A badge with a
 reason (Not replayed, Recorded only) has it in its `title`; the rule's page
@@ -302,7 +307,7 @@ sidebar, it is drawn twice and shown once.
 
 | Facet | Parameter | Values |
 |---|---|---|
-| Performance | `perf` | `noisy`, `ok`, `silent`, `spare` |
+| Performance | `perf` | `noisy`, `unrecorded`, `ok`, `silent`, `spare` |
 | Severity | `severity` | each the rules have; `none` for a rule without one. A value the same as one of theirs but for its case is theirs |
 | Trust | `trust` | `differs`, `unreplayed`, `recorded` |
 | Disposition | `status` | `keep`, `tune`, `retire`, `none` |
@@ -389,7 +394,7 @@ spaces (`label:"a=b c"`, `team:"a b"`):
 |---|---|
 | `team:NAME` | the team |
 | `severity:VALUE` | the severity facet |
-| `is:noisy`, `is:ok`, `is:silent`, `is:spare` | Performance |
+| `is:noisy`, `is:unrecorded`, `is:ok`, `is:silent`, `is:spare` | Performance |
 | `is:differs`, `is:unreplayed`, `is:recorded` | Trust |
 | `is:proposed`, `is:facts` | Progress |
 | `status:keep\|tune\|retire\|none` | Disposition |

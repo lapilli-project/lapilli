@@ -78,7 +78,7 @@ them from what it already finds; a person or an agent can make one too.
 
 | Kind | From | Evidence attached |
 |---|---|---|
-| A longer `for` | a noisy rule's suggestion (`verdict.Suggestion`) | the backtest over twelve weeks: firings before and after, incidents caught and how much later |
+| A longer `for` | a noisy rule's suggestion (`verdict.Suggestion`): none in a week with no record, and none as long as the range a rule that counts events counts over | the backtest over twelve weeks: firings before and after, incidents caught and how much later; and, for a `for` one event can't outlast (`rules.Rule.ForOutlasts`), what it means (`for_outlasts`), shown on its page and in its pull request's description |
 | A nearer threshold, or a shorter `for` | a near miss for an incident nothing caught | the incident, the value it reached, and the backtest of the new threshold over twelve weeks |
 | Retire (disable, then delete) | a spare rule, or one that never fired | twelve weeks of firings, what caught each of its incidents first; and the caveat, shown, that a rule may wait for a rare incident and that incidents nobody wrote down count against it |
 | A fix to what it says | the content check ([content.md](content.md)) | the finding: a missing runbook link, a template naming a label the expression drops |

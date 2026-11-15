@@ -36,6 +36,7 @@ it is written:
 | A severity no other rule uses | heuristic | a value fewer than 2 rules use, or not in `--severities` when given |
 | Noisy, with no `for` | measured | the rule is noisy over four weeks and its `for` is zero |
 | The same condition as another rule | fact | two rules whose expression (spaces aside), `for` and labels are the same |
+| A `for` one event can't outlast | fact | a condition that counts events (`increase`, `changes`, `resets`, `delta` or `idelta` of a range or a subquery, summed or maxed or not, compared with `>` under 1 or `>=` 1 at most) over a range as long as its `for` or shorter: `increase(restarts[30m]) > 0.5` with `for: 1h` fires only on restarts that keep coming for an hour (`rules.Rule.ForOutlasts`) |
 | A range shorter than two scrapes | heuristic | `rate`, `increase`, `irate` or `delta` over a range shorter than twice the scrape interval, when the interval is known |
 | `absent()` with no `for` | heuristic | an expression of `absent(...)` and a zero `for`: a restart pages |
 

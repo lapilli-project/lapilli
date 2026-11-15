@@ -65,7 +65,7 @@ A report is a row people keep, as they keep quiet windows and tasks:
 | Section | What it says |
 |---|---|
 | `summary` | firings, caught and caught nothing, precision, beside the span before |
-| `noise` | the noisiest rules, and rules newly noisy since the span before |
+| `noise` | the noisiest rules, and rules newly noisy since the span before; with no incident written down in the span or the two weeks before it, that none is called noisy, and why (`no_record`) |
 | `missed` | incidents that started in the span with no alert, and a near miss for each when one was found |
 | `woken` | firings, or notifications once they are taken, that came while people slept and caught nothing, by rule |
 | `notifications` | what the notifications sent came to: repeats, while people slept, for nothing |

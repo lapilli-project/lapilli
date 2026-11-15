@@ -182,10 +182,35 @@ caught only by noisy rules is reported as such, and its detection delay is
 taken from the first rule that isn't noisy. `--noisy-firings` and
 `--noisy-precision` move the line.
 
+**No record, no verdict.** A firing that caught nothing caught nothing
+written down. With no incident in the period, or in the two weeks before
+its end (written down, or found by `--impact`), one can't be told from a
+firing nobody wrote down: the period's firings are counted, not judged. No
+rule is noisy, precision is `–`, no longer `for` is suggested, and the
+report says so once; `--json` has `"no_record": true` on the report and on
+each rule that fired. A rule replayed that fired as often as a noisy rule
+says instead what its firings were: how many had the value its condition
+compares go well past its bound (by more than a fifth of it, for its
+`for`), not a flicker at its edge, and the alerts that fired most. Those
+happened; whether they mattered is for a person to write down
+(`"unrecorded"` in `--json`). How many went well past it is said only of a
+condition with one bound that decides it, not of a range, `and`, `or` or
+`unless`.
+
 **What to change.** Each noisy rule replayed from `--rules` is replayed again
 with a longer `for` (5m, 10m, 15m, 30m, 1h, 2h). The shortest that would have
 caught every incident the rule caught, firing at most half as often, is
 suggested. Rules with a `severity` label show it, and `--metrics` carries it.
+A rule whose condition counts events is never suggested a `for` as long as
+the range it counts them over: `increase`, `changes`, `resets`, `delta` or
+`idelta` of a range or a subquery, summed or maxed by some labels or not,
+compared with `>` a number under 1 or `>=` one of 1 at most, so that one
+event passes. After one restart, `increase(restarts[30m]) > 0.5` holds for
+30 minutes at most: with `for: 1h`, one restart can never fire it, only
+restarts that keep coming for an hour. The report says so of a rule whose
+`for` is that long already: "Its for (1h) is as long as the 30m its
+condition counts over, or longer: one event alone can never fire it; only
+events that keep coming for 1h will."
 
 **What a rule adds.** Precision doesn't say whether anyone would miss a rule:
 one that is right every time, but always after another, adds nothing. Each
@@ -766,6 +791,7 @@ TargetGone    absent() with no for: a restart pages                     a series
 | A template that doesn't parse, in its source's own language | fact |
 | No severity; one not in `--severities` | fact |
 | The same expression, `for` and labels as another rule | fact |
+| A `for` as long as the range its condition counts events over, or longer: one event alone can never fire it | fact |
 | A template label no firing over the period had (with `--prometheus`) | measured |
 | Noisy, with no `for` (with `--prometheus` and `--incidents` or `--impact`) | measured |
 | A template label after an aggregation by other labels, for a rule that hasn't fired | heuristic |
@@ -1181,13 +1207,24 @@ menu on a narrow screen, each with a breadcrumb and a bar to pick the team
 and the period, which every link carries; a reader who edits one team sees
 it first. The bar's search finds rules, incidents and teams, and opens the
 one it finds. The rules list gives each rule a badge on three axes (Noisy,
-OK, Silent, Spare; Differs, Not replayed, Recorded only; keep, tune,
+No record, OK, Silent, Spare; Differs, Not replayed, Recorded only; keep, tune,
 retire), filters by each, counted, and a search box that takes words of a
-name and `is:noisy`, `severity:critical`, `status:tune`, `has:proposal`,
+name and `is:noisy`, `is:unrecorded`, `severity:critical`, `status:tune`, `has:proposal`,
 `label:team=pay`, `group:shop` and `team:pay`; each filter in effect is a
 chip that takes it away, and the URL keeps them all; each rule's own labels
 are chips too, each picking the rules with it
 ([docs/design/ui.md](docs/design/ui.md)).
+
+With no incident written down over the weeks shown, or the two before
+their end, the pages call no rule noisy and show no precision, and say why
+once. For a week like that, the weekly digest says, of each rule replayed
+that fired as often as a noisy rule, what its firings were: how many went
+well past its bound, the alerts that fired most and whose labels they have;
+a rule's page shows it in place of a suggestion, the overview first among
+what to look at. Teams own rules, and their firings are counted by the
+team whose labels they have: a rule most of whose firings came from what
+another team owns says so on its page, on that team's rules list and in
+its digest.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/serve-rules-dark.png">
