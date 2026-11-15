@@ -139,7 +139,7 @@ type teamSuggestion struct {
 // payments): it is made by hand, its name chosen.
 var plainName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 
-// maxTeamName is the longest a team's name is, in bytes (ledger.TeamNameOK):
+// maxTeamName is the longest a team's name is, in bytes, as PutTeam takes it:
 // a label value longer is no team's name, and is passed over before
 // anything is made of it.
 const maxTeamName = 64
