@@ -195,6 +195,9 @@ The web UI and API:
                       only behind a proxy that sets it and strips it from
                       callers
   --read-only         take no changes through the UI or API
+  --team-labels LIST  the labels whose values the Teams page suggests as
+                      teams, when the rules carry values no team owns by,
+                      comma-separated (default team,owner,squad)
   --everyone-admin    with no roles (--editors, --admins), let everyone who
                       reaches the UI and API change anything, as an admin,
                       though it listens beyond this machine. Without roles,
@@ -781,6 +784,11 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 				return true, fmt.Errorf("--lang %s: want one of %s", val, strings.Join(serve.Langs(), ", "))
 			}
 			cfg.Lang = val
+		case "--team-labels":
+			cfg.TeamLabels = list(val)
+			if len(cfg.TeamLabels) == 0 || len(cfg.TeamLabels) > 8 || slices.ContainsFunc(cfg.TeamLabels, func(k string) bool { return !labelName.MatchString(k) }) {
+				return true, fmt.Errorf("--team-labels %s: want label names, comma-separated, eight at most, like team,owner", val)
+			}
 		case "--team-digest":
 			team, file, ok := strings.Cut(val, "=")
 			if !ok || team == "" || file == "" {
@@ -1087,6 +1095,9 @@ var clientID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}
 var snsTopic = regexp.MustCompile(`^arn:aws(-cn|-us-gov)?:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,256}$`)
 
 // list is a comma-separated list, without blanks.
+// labelName is a Prometheus label's name.
+var labelName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,127}$`)
+
 func list(s string) []string {
 	var out []string
 	for _, x := range strings.Split(s, ",") {

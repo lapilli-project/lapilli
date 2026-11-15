@@ -22,6 +22,8 @@ type owners struct {
 	rule   map[string]int64 // rule name to team id
 	notes  map[string]ledger.Note
 	labels []map[string][]string // each team's labels, in teams' order
+	// ruleLabels are each rule's labels, as its team was found by them.
+	ruleLabels map[string]map[string]string
 	// sched are the schedules worked out last, and the server's hours they
 	// were worked out with.
 	schedMu  sync.Mutex
@@ -79,6 +81,10 @@ func (s *Server) owners(ctx context.Context) (*owners, error) {
 				labels[r.Name] = r.Labels
 			}
 		}
+	}
+	o.ruleLabels = make(map[string]map[string]string, len(table))
+	for _, r := range table {
+		o.ruleLabels[r.Name] = labels[r.Name]
 	}
 	for _, r := range table {
 		if n, ok := notes[r.Name]; ok && n.TeamID != 0 {

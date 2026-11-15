@@ -897,8 +897,9 @@ type ruleView struct {
 	Known   bool
 	Note    ledger.Note
 	Teams   []ledger.Team
-	// TeamID is the team that owns it, 0 for none.
+	// TeamID is the team that owns it, 0 for none; Owned, how it was found.
 	TeamID   int64
+	Owned    ownedView
 	Statuses []string
 	Tasks    []taskLine
 	Comments commentsView
@@ -1141,6 +1142,7 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 		return ruleView{}, err
 	}
 	v.Team, v.TeamID, v.Note, v.Teams, v.Statuses = o.teamOf(name), o.rule[name], o.notes[name], o.teams, ledger.Statuses
+	v.Owned = s.ownedOf(o, name)
 	v.Status = v.Note.Status
 	ts, err := s.l.Tasks(ctx, ledger.TaskQuery{Rule: name, Limit: 50})
 	if err != nil {

@@ -186,6 +186,9 @@ type Config struct {
 	// TeamDigests are files holding the incoming webhooks that take a
 	// team's own weekly digest, by the team's name.
 	TeamDigests map[string]string
+	// TeamLabels are the labels whose values the Teams page suggests as
+	// teams, when no team owns by them; none for defaultTeamLabels.
+	TeamLabels []string
 	// ReportDests are files holding the Slack-style incoming webhooks the
 	// reports people schedule can go to, by the names they pick them by.
 	ReportDests map[string]string
