@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
-	"sync"
+	"strconv"
 	"time"
 )
 
@@ -42,36 +42,38 @@ type notifyStatus struct {
 	Failed     int
 	FailedMore bool
 	// Posted is, when the digest goes to Slack, posted there itself, not
-	// through the outbox, how its last post went, since the process
-	// started (slackPost).
-	Posted *slackPostAt
+	// through the outbox, how its posts went, as the ledger has it.
+	Posted *digestPosted
 	Loc    *time.Location
 }
 
-// slackPost is how the weekly digest's last post to Slack went: kept in
-// memory, by the process that posted it, as no page read it before; a
-// failed one is a run of the ledger's too (Runs). Since the process
-// started, and on the replica that leads.
-type slackPost struct {
-	sync.Mutex
-	last slackPostAt
+// digestPosted is how the weekly digest's posts to Slack went, as the
+// ledger keeps it, the same on every replica and after a restart: To, the
+// end of the last week posted (digest-sent); Failed, a later week whose
+// digest failed, worked out or posted (a run of the digest's with an
+// error), At when, and FailedTo its end.
+type digestPosted struct {
+	To, At, FailedTo time.Time
+	Failed           bool
 }
 
-type slackPostAt struct {
-	At     time.Time
-	Failed bool
-}
-
-func (p *slackPost) set(err error) {
-	p.Lock()
-	p.last = slackPostAt{time.Now(), err != nil}
-	p.Unlock()
-}
-
-func (p *slackPost) get() slackPostAt {
-	p.Lock()
-	defer p.Unlock()
-	return p.last
+func (s *Server) digestPosted(ctx context.Context) (*digestPosted, error) {
+	var p digestPosted
+	v, err := s.l.Meta(ctx, "digest-sent")
+	if err != nil {
+		return nil, err
+	}
+	if week, err := strconv.ParseInt(v, 10, 64); err == nil {
+		p.To = s.l.Midnight(week)
+	}
+	r, ok, err := s.l.LastFailed(ctx, "digest")
+	if err != nil {
+		return nil, err
+	}
+	if ok && r.To.After(p.To) {
+		p.Failed, p.At, p.FailedTo = true, r.Started, r.To
+	}
+	return &p, nil
 }
 
 // weekdays are the days of a week, as a person reads a schedule that falls
@@ -93,8 +95,9 @@ func (s *Server) notifyStatus(ctx context.Context, lang string) (*notifyStatus, 
 	}
 	n.DigestWhen, n.DigestOn, n.DigestSet = weeklyText(lang, d.When), d.On, d.Set != nil
 	if d.On && s.cfg.Slack != "" && slices.Contains(d.Dests, "slack") {
-		p := s.slackPosted.get()
-		n.Posted = &p
+		if n.Posted, err = s.digestPosted(ctx); err != nil {
+			return nil, err
+		}
 	}
 	for _, x := range d.Dests {
 		if slices.Contains(known, x) {
@@ -117,6 +120,7 @@ func (s *Server) notifyStatus(ctx context.Context, lang string) (*notifyStatus, 
 	}
 	dests := s.sendsTo()
 	n.Sends = len(dests) > 0
+	// By the wall clock, as the outbox keeps when each notice was made.
 	st, err := s.l.Standing(ctx, dests, time.Now().Add(-24*time.Hour))
 	if err != nil {
 		return nil, err

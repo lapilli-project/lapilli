@@ -68,7 +68,7 @@ page. Counts and kinds, never a URL. */}}
   <h2><a href="{{$p.Link "/settings#notifications"}}">{{t "Notifications"}}</a></h2>
   <p>{{t "Where notices, the weekly digest and reports go, and whether they went."}}</p>
   {{if .DigestNowhere}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "The weekly digest goes nowhere."}}</p>{{end}}
-  {{- with .Posted}}{{if .Failed}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "The weekly digest's last post to Slack failed."}}</p>{{end}}{{end}}
+  {{- with .Posted}}{{if .Failed}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "The weekly digest failed."}}</p>{{end}}{{end}}
   {{- with .ReportsNowhere}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if eq . 1}}{{t "1 report goes nowhere."}}{{else}}{{t "%d reports go nowhere." .}}{{end}}</p>{{end}}
   {{- if .FailedMore}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "More than %d notices failed in the last day." .Failed}}</p>{{else}}{{with .Failed}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if eq . 1}}{{t "1 notice failed in the last day."}}{{else}}{{t "%d notices failed in the last day." .}}{{end}}</p>{{end}}{{end}}
   <p class="quiet">{{template "notifysent" .}}</p>
@@ -77,13 +77,13 @@ page. Counts and kinds, never a URL. */}}
 {{/* When the outbox last sent a notice. */}}
 {{define "notifysent"}}{{if not .Sends}}{{t "Nothing goes out: no webhook, Slack or place for reports is given."}}{{else if .LastSent.IsZero}}{{t "Nothing sent from the outbox yet."}}{{else}}{{t "Last sent from the outbox: %s." (at .Loc .LastSent)}}{{end}}{{end}}
 
-{{/* How the weekly digest's last post to Slack went: posted there itself,
-not through the outbox, and kept in memory since the process started. */}}
-{{define "slackposted"}}{{$loc := .P.Loc}}{{with .V}}{{if .At.IsZero}}{{t "The weekly digest hasn't been posted to Slack since lapilli serve started."}}{{else if .Failed}}{{t "Its last post to Slack, at %s, failed, and the log says why (kept since lapilli serve started)." (at $loc .At)}}{{else}}{{t "Last posted to Slack at %s (kept since lapilli serve started)." (at $loc .At)}}{{end}}{{end}}{{end}}
+{{/* How the weekly digest's posts to Slack went, as the ledger has it:
+the last week posted. */}}
+{{define "slackposted"}}{{$loc := .P.Loc}}{{with .V}}{{if .To.IsZero}}{{t "No weekly digest has been posted to Slack yet."}}{{else}}{{t "Last posted to Slack for the week to %s." (day $loc .To)}}{{end}}{{end}}{{end}}
 
 {{/* What is on and goes nowhere, or failed to go: a sentence each, never a
 colour alone. */}}
 {{define "notifywarn"}}{{if .DigestNowhere}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if .DigestSet}}{{t "The weekly digest is worked out %s and goes nowhere: none of the places set for it on the Reports page is there now. Pick another there." .DigestWhen}}{{else}}{{t "The weekly digest is worked out %s and goes nowhere: give lapilli serve --slack-webhook-file, --notify-webhook-file or --team-digest, or set it on the Reports page to go to a place --report-dest names." .DigestWhen}}{{end}}</p>{{end}}
-{{- with .Posted}}{{if .Failed}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "The weekly digest's last post to Slack failed: the log says why."}}</p>{{end}}{{end}}
+{{- with .Posted}}{{if .Failed}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "The weekly digest for the week to %s failed, at %s: the Runs page says why." (day $.Loc .FailedTo) (at $.Loc .At)}}</p>{{end}}{{end}}
 {{- with .ReportsNowhere}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if eq . 1}}{{t "1 report is on with nowhere to go: the places it names are gone."}}{{else}}{{t "%d reports are on with nowhere to go: the places they name are gone." .}}{{end}}</p>{{end}}
 {{- if .FailedMore}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "More than %d notices made in the last day weren't sent: their last try failed, and the log says why." .Failed}}</p>{{else}}{{with .Failed}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if eq . 1}}{{t "1 notice made in the last day wasn't sent: its last try failed, and the log says why."}}{{else}}{{t "%d notices made in the last day weren't sent: their last try failed, and the log says why." .}}{{end}}</p>{{end}}{{end}}{{end}}

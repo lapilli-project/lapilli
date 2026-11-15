@@ -2,7 +2,6 @@ package serve
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,39 +151,43 @@ func TestNotifyStatusInEachLanguage(t *testing.T) {
 }
 
 // TestNotifyStatusSlackPost: the weekly digest is posted to Slack itself,
-// not through the outbox: how its last post went, kept since the process
-// started, is said, a failed one as a warning.
+// not through the outbox: how its posts went is read from the ledger, the
+// last week posted (digest-sent) and a later week's digest that failed (a
+// run's error), as every replica, and a process restarted, reads it; a
+// failed one is a warning.
 func TestNotifyStatusSlackPost(t *testing.T) {
+	ctx := context.Background()
 	hook := filepath.Join(t.TempDir(), "hook")
 	os.WriteFile(hook, []byte("https://127.0.0.1:1/x"), 0o600)
 	s, _ := server(t, func(c *Config) { c.Slack = hook })
 	h := s.Handler()
-	if _, body, _ := get(t, h, "/settings"); !strings.Contains(body, "The weekly digest hasn&#39;t been posted to Slack since lapilli serve started.") {
+	if _, body, _ := get(t, h, "/settings"); !strings.Contains(body, "No weekly digest has been posted to Slack yet.") {
 		t.Errorf("/settings doesn't say the digest wasn't posted yet:\n%s", body)
 	}
-	// Posted where nothing answers, its post fails, and is kept so.
-	if err := s.postDigest(context.Background(), digestIn{On: true, Dests: []string{"slack"}}, "1", now.Add(-weekLen), now, s.cfg.Options); err == nil {
+	// Posted where nothing answers, its post fails, kept as a run's.
+	week := ledger.Week(s.l.Day(now))
+	if err := s.postDigest(ctx, digestIn{On: true, Dests: []string{"slack"}}, itoa(week), s.l.Midnight(week-7), s.l.Midnight(week), s.cfg.Options); err == nil {
 		t.Fatal("posting the digest where nothing answers worked")
 	}
-	if p := s.slackPosted.get(); p.At.IsZero() || !p.Failed {
-		t.Errorf("the digest's failed post isn't kept: %+v", p)
-	}
-	s.slackPosted.set(errors.New("410 Gone"))
+	failed := "The weekly digest for the week to " + s.l.Midnight(week).Format("2006-01-02") + " failed, at "
 	_, body, _ := get(t, h, "/settings")
-	if !strings.Contains(body, "The weekly digest&#39;s last post to Slack failed: the log says why.") || !strings.Contains(body, "Its last post to Slack, at ") ||
-		strings.Contains(body, "410") {
-		t.Errorf("/settings doesn't say the digest's last post failed, or says how:\n%s", body)
+	if !strings.Contains(body, failed) || !strings.Contains(body, "the Runs page says why.") || strings.Contains(body, "127.0.0.1") {
+		t.Errorf("/settings doesn't say the digest failed, or says where:\n%s", body)
 	}
-	if _, body, _ := get(t, h, "/manage"); !strings.Contains(body, "The weekly digest&#39;s last post to Slack failed.") {
-		t.Errorf("/manage doesn't say the digest's last post failed:\n%s", body)
+	if _, body, _ := get(t, h, "/manage"); !strings.Contains(body, "The weekly digest failed.") {
+		t.Errorf("/manage doesn't say the digest failed:\n%s", body)
 	}
-	s.slackPosted.set(nil)
-	if _, body, _ := get(t, h, "/settings"); !strings.Contains(body, "Last posted to Slack at ") || strings.Contains(body, "post to Slack failed") {
-		t.Errorf("/settings doesn't say the digest was posted:\n%s", body)
+	// The week posted since, as digest-sent has it: posted, not failed.
+	if err := s.l.SetMeta(ctx, "digest-sent", itoa(week)); err != nil {
+		t.Fatal(err)
+	}
+	_, body, _ = get(t, h, "/settings")
+	if !strings.Contains(body, "Last posted to Slack for the week to "+s.l.Midnight(week).Format("2006-01-02")+".") || strings.Contains(body, failed) {
+		t.Errorf("/settings doesn't say the digest was posted, or says it failed:\n%s", body)
 	}
 	// Not going to Slack, nothing is said of it.
 	s, _ = server(t, nil)
-	if _, body, _ := get(t, s.Handler(), "/settings"); strings.Contains(body, "to Slack since") {
+	if _, body, _ := get(t, s.Handler(), "/settings"); strings.Contains(body, "to Slack") {
 		t.Error("/settings speaks of Slack, with no Slack")
 	}
 }
@@ -199,9 +202,9 @@ func TestNotifyStatusTexts(t *testing.T) {
 	for _, n := range names {
 		for day := range 7 {
 			for _, st := range []notifyStatus{
-				{Sends: true, Failed: 1000, FailedMore: true, DigestOn: true, DigestNowhere: true, Posted: &slackPostAt{At: now, Failed: true}, Loc: time.UTC},
-				{Sends: true, Failed: 1, ReportsNowhere: 1, DigestOn: true, DigestSet: true, DigestNowhere: true, Posted: &slackPostAt{}, Loc: time.UTC},
-				{Sends: true, LastSent: now, Failed: 2, ReportsNowhere: 2, DigestOn: true, Posted: &slackPostAt{At: now}, Loc: time.UTC},
+				{Sends: true, Failed: 1000, FailedMore: true, DigestOn: true, DigestNowhere: true, Posted: &digestPosted{At: now, FailedTo: now, Failed: true}, Loc: time.UTC},
+				{Sends: true, Failed: 1, ReportsNowhere: 1, DigestOn: true, DigestSet: true, DigestNowhere: true, Posted: &digestPosted{}, Loc: time.UTC},
+				{Sends: true, LastSent: now, Failed: 2, ReportsNowhere: 2, DigestOn: true, Posted: &digestPosted{To: now}, Loc: time.UTC},
 			} {
 				st.DigestWhen = weeklyText(n.Code, Weekly{time.Weekday(day), 9, 0})
 				for _, tpl := range []string{"notifystatus", "notifycard"} {
