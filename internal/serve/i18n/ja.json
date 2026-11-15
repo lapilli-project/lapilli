@@ -1318,7 +1318,7 @@
  "%d of %d rules": "%[2]d 件中 %[1]d 件のルール",
  "Filters": "フィルター",
  "Left out, as it isn't understood: %s.": "解釈できないため除外しました: %s。",
- "The search takes words of a rule's name, and team:, severity:, is:, status:, has:, label:key=value and group:. is: takes noisy, ok, silent, spare, differs, unreplayed, recorded, proposed or facts; status: keep, tune, retire or none; has: proposal or facts.": "検索には、ルール名の単語と team:、severity:、is:、status:、has:、label:key=value、group: を使えます。is: には noisy、ok、silent、spare、differs、unreplayed、recorded、proposed、facts、status: には keep、tune、retire、none、has: には proposal、facts を指定します。",
+ "The search takes words of a rule's name, and team:, severity:, is:, status:, has:, label:key=value and group:. is: takes noisy, unrecorded, ok, silent, spare, differs, unreplayed, recorded, proposed or facts; status: keep, tune, retire or none; has: proposal or facts.": "検索には、ルール名の単語と team:、severity:、is:、status:、has:、label:key=value、group: を使えます。is: には noisy、unrecorded、ok、silent、spare、differs、unreplayed、recorded、proposed、facts、status: には keep、tune、retire、none、has: には proposal、facts を指定します。",
  "Filters in effect": "適用中のフィルター",
  "Remove filter:": "フィルターを外す:",
  "Name has": "名前に含む",
@@ -1447,5 +1447,16 @@
  "you have asked for as many proposals in the last hour as anyone may, made or refused: try again later": "この 1 時間に出せるだけの変更提案を求めました（作られたものも拒否されたものも含む）。しばらくしてからもう一度お試しください",
  "%d not read: you have asked for as many proposals in the last hour as anyone may, made or refused": "%d 件は読まず: この 1 時間に出せるだけの変更提案を求めた（作られたものも拒否されたものも含む）",
  "the time for one request was up: %d not tried; pick them again": "1 回のリクエストの時間切れ: %d 件は未実施。もう一度選んでください",
- "None of the proposals picked is here.": "選んだ変更提案はここにありません。"
+ "None of the proposals picked is here.": "選んだ変更提案はここにありません。",
+ "No incident written down to judge the firings by": "発火を判定するための記録済みインシデントがありません",
+ "in the last four weeks or the two before them: a firing that caught nothing can't be told from one nobody wrote down, so no rule is called noisy. Write incidents down, or mark the firings that were real.": "過去 4 週間とその前の 2 週間です。何も検知しなかった発火が、誤検知なのか誰も記録しなかった実際の問題なのか区別できないため、どのルールもノイズルールとは判定しません。インシデントを記録するか、実際の問題だった発火に印を付けてください。",
+ "not known: no incident written down to judge the firings by": "不明: 発火を判定するための記録済みインシデントがありません",
+ "No incident written down from %s, or in the two weeks before: a firing that caught nothing can't be told from one nobody wrote down, so no rule is called noisy. Write incidents down, or mark the firings that were real.": "%s 以降も、その前の 2 週間も、記録されたインシデントがありません。何も検知しなかった発火が、誤検知なのか誰も記録しなかった実際の問題なのか区別できないため、どのルールもノイズルールとは判定しません。インシデントを記録するか、実際の問題だった発火に印を付けてください。",
+ "Fired often over the weeks shown, with no incident written down to judge it by: whether its firings mattered isn't known.": "表示中の期間によく発火しましたが、判定するための記録済みインシデントがありません。その発火が重要だったかは分かりません。",
+ "No record": "記録なし",
+ "no record": "記録なし",
+ "No incident was written down in the week of %s or the two weeks before its end: a firing that caught nothing can't be told from one nobody wrote down, so no precision is known and no rule is called noisy.": "%s の週を含め、その週の終わりまでの 2 週間に記録されたインシデントがありません。何も検知しなかった発火が、誤検知なのか誰も記録しなかった実際の問題なのか区別できないため、適合率は分からず、どのルールもノイズルールとは判定しません。",
+ "No incident was written down in these weeks or the two before their end: a firing that caught nothing can't be told from one nobody wrote down, so no precision is known and no rule is called noisy.": "この期間にも、期間の終わりまでの 2 週間にも、記録されたインシデントがありません。何も検知しなかった発火が、誤検知なのか誰も記録しなかった実際の問題なのか区別できないため、適合率は分からず、どのルールもノイズルールとは判定しません。",
+ "Write incidents down": "インシデントを記録する",
+ "no incident written down in it or in the two weeks before its end: its firings are counted, not judged": "この週にも、週の終わりまでの 2 週間にも記録されたインシデントがない: 発火は数えるだけで判定しない"
 }

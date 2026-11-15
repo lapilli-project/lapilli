@@ -686,7 +686,7 @@ func TestProposalTask(t *testing.T) {
 // --changes, once a week, and not again what people turned down.
 func TestProposeFound(t *testing.T) {
 	ctx := context.Background()
-	s, _ := changesServer(t, nil)
+	s, _ := changesServer(t, keepRecord) // the digest's week judged: its noisy rule gets a longer for
 	if err := s.proposeWeekly(ctx); err != nil {
 		t.Fatal(err)
 	}

@@ -67,9 +67,14 @@ type summaryRow struct {
 	Partial bool      `json:"partial"`
 	Team    string    `json:"team"`
 	// Firings are those judged; Caught those that caught an incident.
+	// Precision, and every share caught, is null with no firings, and with
+	// no record (NoRecord).
 	Firings   int      `json:"firings"`
 	Caught    int      `json:"caught"`
 	Precision *float64 `json:"precision"`
+	// NoRecord says no incident started in the week, or in the two weeks
+	// before its end: its firings are counted, not judged.
+	NoRecord bool `json:"no_record"`
 	// Excused are firings quiet windows excused, in none of the others.
 	Excused    int                     `json:"excused"`
 	Critical   summaryCount            `json:"critical"`
@@ -169,6 +174,9 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 	if t.rules, err = s.l.RuleTable(ctx); err != nil {
 		return nil, err
 	}
+	if err := s.readRecord(ctx, t); err != nil {
+		return nil, err
+	}
 	hours, err := s.byHours(ctx, t)
 	if err != nil {
 		return nil, err
@@ -228,13 +236,21 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 					crit.Caught += x.White
 				}
 			}
+			// With no record, what was caught is no share of anything known.
+			row.NoRecord = !t.kept[w]
+			judged := func(n, of int) *float64 {
+				if row.NoRecord {
+					return nil
+				}
+				return share(n, of)
+			}
 			for sev, c := range row.BySeverity {
-				c.Share = share(c.Caught, c.Firings)
+				c.Share = judged(c.Caught, c.Firings)
 				row.BySeverity[sev] = c
 			}
-			crit.Share = share(crit.Caught, crit.Firings)
+			crit.Share = judged(crit.Caught, crit.Firings)
 			row.Critical = crit
-			row.Precision = share(row.Caught, row.Firings)
+			row.Precision = judged(row.Caught, row.Firings)
 			row.Refired.Share, row.Refired.Rules = share(row.Refired.Firings, row.Firings), refiredRules
 			for i, x := range refired {
 				if mine(x.Rule) {
@@ -242,7 +258,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 					break
 				}
 			}
-			row.DuringDeploys.PrecisionWithout = share(row.Caught-row.DuringDeploys.Caught, row.Firings-row.DuringDeploys.Firings)
+			row.DuringDeploys.PrecisionWithout = judged(row.Caught-row.DuringDeploys.Caught, row.Firings-row.DuringDeploys.Firings)
 			if hours != nil {
 				row.OffHours, row.Asleep = &summaryHours{}, &summaryHours{}
 				for id, x := range hours[w] {

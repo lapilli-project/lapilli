@@ -23,7 +23,8 @@ import (
 // each axis.
 type ruleRow struct {
 	ruleLine
-	// Perf is how it did over the weeks shown: noisy, ok, silent (no
+	// Perf is how it did over the weeks shown: noisy, unrecorded (fired as
+	// often as a noisy rule, with no record to judge it by), ok, silent (no
 	// firing) or spare (another rule caught what it caught, as soon).
 	Perf string
 	// Trust are what its stones can't be taken for granted for: differs
@@ -143,6 +144,7 @@ type legendItem struct {
 // badge (Undecided).
 var badgeMeans = map[string][3]string{
 	"perf/noisy":       {"perf-noisy", "●", "Fired often over the weeks shown, and few of its firings caught something; with weeks, how many weeks running."},
+	"perf/unrecorded":  {"perf-unrecorded", "?", "Fired often over the weeks shown, with no incident written down to judge it by: whether its firings mattered isn't known."},
 	"perf/ok":          {"perf-ok", "○", "Fired over the weeks shown, and isn't noisy."},
 	"perf/silent":      {"perf-silent", "–", "No firing in the weeks shown."},
 	"perf/spare":       {"perf-spare", "⧉", "Another rule caught every incident it caught, as soon, at the same severity or above."},
@@ -229,7 +231,7 @@ var facetsOf = []struct {
 	values      []string
 	labels      []string
 }{
-	{"perf", "Performance", perfValues, []string{"Noisy", "OK", "Silent", "Spare"}},
+	{"perf", "Performance", perfValues, []string{"Noisy", "No record", "OK", "Silent", "Spare"}},
 	{"severity", "Severity", nil, nil},
 	{"trust", "Trust", trustValues, []string{"Differs", "Not replayed", "Recorded only"}},
 	{"status", "Disposition", statusValues, []string{"keep", "tune", "retire", "Undecided"}},
@@ -772,6 +774,8 @@ func rowOf(l ruleLine, facts int) ruleRow {
 		r.Perf = "silent"
 	case l.Noisy:
 		r.Perf = "noisy"
+	case l.Unrecorded:
+		r.Perf = "unrecorded"
 	case l.Spare:
 		r.Perf = "spare"
 	default:

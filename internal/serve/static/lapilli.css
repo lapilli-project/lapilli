@@ -374,6 +374,7 @@ td.rule bdi { overflow-wrap: anywhere; }
 .badge.perf-noisy { color: var(--on-lav); background: var(--tint-lav); border-color: transparent; }
 .badge.perf-ok { color: var(--on-blue); background: var(--tint-blue); border-color: transparent; }
 .badge.perf-spare { color: var(--ink); background: var(--panel); border-color: transparent; }
+.badge.perf-unrecorded { color: var(--warn); background: var(--panel); border-color: transparent; }
 .badge.trust, .badge.check { color: var(--warn); }
 .badge.prog { color: var(--accent); }
 a.badge:hover { text-decoration: underline; }

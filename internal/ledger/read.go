@@ -375,7 +375,13 @@ func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Optio
 			return nil, err
 		}
 	}
+	kept, err := l.RecordKept(ctx, from, to)
+	if err != nil {
+		return nil, err
+	}
+	rep.NoRecord = !kept
 	for _, rr := range byName {
+		rr.NoRecord = rep.NoRecord && rr.Firings > 0
 		p, ok := rr.Precision()
 		rr.Noisy = ok && rr.Firings >= at.Firings && p < at.Precision
 		rep.Rules = append(rep.Rules, *rr)
@@ -448,6 +454,37 @@ func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Optio
 		rep.Firings = append(rep.Firings, j)
 	}
 	return rep, nil
+}
+
+// RecordKept reports whether the record of [from, to) is kept: an incident
+// firings are judged against (one written down, or an impact window that
+// counts) started in it, or in the two weeks before its end
+// (verdict.RecordKept).
+func (l *Ledger) RecordKept(ctx context.Context, from, to time.Time) (bool, error) {
+	var n int
+	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM incidents WHERE counts = 1 AND start_at >= ? AND start_at < ? LIMIT 1) x",
+		verdict.RecordFrom(from, to).Unix(), to.Unix()).Scan(&n)
+	return n > 0, err
+}
+
+// IncidentStarts are when the incidents firings are judged against started,
+// of those that started in [from, to), the earliest first: what
+// verdict.RecordKept says a span's record is kept by.
+func (l *Ledger) IncidentStarts(ctx context.Context, from, to time.Time) ([]time.Time, error) {
+	rows, err := l.r.QueryContext(ctx, "SELECT start_at FROM incidents WHERE counts = 1 AND start_at >= ? AND start_at < ? ORDER BY start_at", from.Unix(), to.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []time.Time
+	for rows.Next() {
+		var t int64
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, unix(t))
+	}
+	return out, rows.Err()
 }
 
 // SortRules puts the noisiest rules first, as verdict.Judge does.

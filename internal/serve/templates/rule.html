@@ -19,7 +19,7 @@
 {{with .Panel}}<dl class="panel">
 <div><dt><details class="def"><summary>{{t "Precision"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "Firings that caught an incident, of all its firings."}}</p></details></dt>
 <dd class="big">{{.Precision}}{{template "delta" .PrecisionBy}}</dd>
-<dd>{{if .Firings}}{{t "%d of %d caught something" $v.White .Firings}}{{else}}{{t "no firing"}}{{end}}</dd></div>
+<dd>{{if $v.NoRecord}}{{t "not known: no incident written down to judge the firings by"}}{{else if .Firings}}{{t "%d of %d caught something" $v.White .Firings}}{{else}}{{t "no firing"}}{{end}}</dd></div>
 <div><dt><details class="def"><summary>{{t "Firings"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "The times it fired and was judged; those a quiet window excused are counted apart."}}</p></details></dt>
 <dd class="big">{{.Firings}}{{template "delta" .FiringsBy}}</dd>
 <dd>{{t "%d caught nothing, %d excused" .Black .Excused}}</dd></div>

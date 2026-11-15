@@ -373,7 +373,8 @@ func (s *Server) buildReport(ctx context.Context, r ledger.Scheduled, team *ledg
 }
 
 // counted are a report's firings, those that caught something and those
-// that caught nothing, and its precision, nil with no firings.
+// that caught nothing, and its precision, nil with no firings, or no record
+// to judge them by.
 type counted struct {
 	Firings   int      `json:"firings"`
 	Caught    int      `json:"caught"`
@@ -388,7 +389,7 @@ func count(rep *verdict.Report) counted {
 		c.Caught += r.White
 	}
 	c.Nothing = c.Firings - c.Caught
-	if c.Firings > 0 {
+	if c.Firings > 0 && !rep.NoRecord {
 		p := float64(c.Caught) / float64(c.Firings)
 		c.Precision = &p
 	}
@@ -461,7 +462,11 @@ func (s *Server) noiseSection(rep *verdict.Report, from, to time.Time, loc *time
 		return cmp.Or(cmp.Compare(b.Nothing, a.Nothing), cmp.Compare(a.Rule, b.Rule))
 	})
 	slices.Sort(newly)
-	nums := map[string]any{"from": cur.From.UTC(), "to": cur.To.UTC(), "noisy": orNoneOf(noisy), "newly_noisy": newly}
+	nums := map[string]any{"from": cur.From.UTC(), "to": cur.To.UTC(), "noisy": orNoneOf(noisy), "newly_noisy": newly, "no_record": cur.NoRecord}
+	if cur.NoRecord && slices.ContainsFunc(cur.Rules, func(r verdict.RuleResult) bool { return r.Firings > 0 }) {
+		return tr(l, "No incident written down from %s, or in the two weeks before: a firing that caught nothing can't be told from one nobody wrote down, so no rule is called noisy. Write incidents down, or mark the firings that were real.",
+			cur.From.In(loc).Format("2006-01-02")), nums, nil
+	}
 	if len(noisy) == 0 {
 		return tr(l, "No rule was noisy."), nums, nil
 	}

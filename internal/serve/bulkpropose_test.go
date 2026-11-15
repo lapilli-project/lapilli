@@ -168,8 +168,9 @@ func TestBulkPropose(t *testing.T) {
 			return nil
 		}, "bulk=propose&done=3&already=2&absent=1"},
 	} {
-		bulk := proposeServer(t, nil)
-		one := proposeServer(t, nil)
+		// The digest's week judged, its noisy rule suggested a longer for.
+		bulk := proposeServer(t, keepRecord)
+		one := proposeServer(t, keepRecord)
 		form := url.Values{"do": {"propose"}, "rule": picks, "back": {"/rules?weeks=12&sort=refired"}}
 		for k, v := range c.form {
 			form[k] = v

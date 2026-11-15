@@ -174,7 +174,10 @@ func TestCompareSeverity(t *testing.T) {
 func TestNoisyAt(t *testing.T) {
 	o := opts()
 	o.NoisyFirings, o.NoisyPrecision = 3, 0.5
-	r := Judge(nil, []firing.Firing{{Rule: "A", Start: m(1)}, {Rule: "A", Start: m(200)}, {Rule: "A", Start: m(400)}}, nil, o)
+	// An incident none of them caught keeps the week's record: they are
+	// judged, and caught nothing.
+	kept := []incident.Incident{{ID: "INC-1", Start: m(3000), End: m(3010)}}
+	r := Judge(nil, []firing.Firing{{Rule: "A", Start: m(1)}, {Rule: "A", Start: m(200)}, {Rule: "A", Start: m(400)}}, kept, o)
 	if !r.Rules[0].Noisy || r.NoisyAt.Firings != 3 {
 		t.Errorf("3 firings, none catching, at 3 and 50%%: %+v %+v", r.Rules[0], r.NoisyAt)
 	}

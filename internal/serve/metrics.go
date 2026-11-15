@@ -61,9 +61,19 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			rr.DuringDeploys += d.Deploy
 			rr.DeploysCaught += d.DeployWhite
 		}
-		rep := &verdict.Report{}
+		// A catch by a rule noisy in the incident's week, as /incidents,
+		// the overview and the summary judge it: not by the seven days to
+		// now, so an incident is in the same state everywhere. The record
+		// of the seven days is read with the same tallies.
+		t, err := s.tallies(ctx, weeks)
+		if err != nil {
+			s.oops(w, r, err)
+			return
+		}
+		rep := &verdict.Report{NoRecord: !t.recorded(s.l.Midnight(today-6), s.now())}
 		for _, rr := range sum {
-			rr.Noisy = noisy(rr.Firings, rr.White, o)
+			rr.NoRecord = rep.NoRecord && rr.Firings > 0
+			rr.Noisy = !rep.NoRecord && noisy(rr.Firings, rr.White, o)
 			rep.Rules = append(rep.Rules, *rr)
 		}
 		// Each rule's by its team's hours, or the server's.
@@ -76,14 +86,6 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		}
 		ledger.SortRules(rep.Rules)
 		incs, err := s.l.Incidents(ctx, s.l.Midnight(today-6), s.now().Add(time.Hour), false)
-		if err != nil {
-			s.oops(w, r, err)
-			return
-		}
-		// A catch by a rule noisy in the incident's week, as /incidents,
-		// the overview and the summary judge it: not by the seven days to
-		// now, so an incident is in the same state everywhere.
-		t, err := s.tallies(ctx, weeks)
 		if err != nil {
 			s.oops(w, r, err)
 			return

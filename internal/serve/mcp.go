@@ -224,7 +224,8 @@ type weekOut struct {
 	White        int       `json:"white" jsonschema:"firings that caught an incident"`
 	Black        int       `json:"black" jsonschema:"firings that caught nothing"`
 	Excused      int       `json:"excused"`
-	Precision    *float64  `json:"precision,omitempty" jsonschema:"white over firings, 0 to 1"`
+	Precision    *float64  `json:"precision,omitempty" jsonschema:"white over firings, 0 to 1; not given with no firings, or no record"`
+	NoRecord     bool      `json:"no_record,omitempty" jsonschema:"it had firings, and no incident started in it or in the two weeks before its end: a firing that caught nothing can't be told from one nobody wrote down, so its precision isn't known and no rule was noisy"`
 	NoisyRules   int       `json:"noisy_rules"`
 	Incidents    int       `json:"incidents"`
 	Caught       int       `json:"caught"`
@@ -293,8 +294,11 @@ func (s *Server) toolOverview(ctx context.Context, _ *mcp.CallToolRequest, in ov
 	out.Empty, out.Cursor, out.Behind = d.Empty, d.Cursor, d.Backlog
 	for _, w := range d.Weeks {
 		x := weekOut{Week: w.Start, SoFar: w.Current, Firings: w.Firings, White: w.White, Black: w.Black, Excused: w.Excused,
-			Precision: share(w.White, w.Firings), NoisyRules: w.Noisy, Incidents: w.Incidents, Caught: w.Caught, NoisyOnly: w.NoisyOnly,
+			NoRecord: w.NoRecord, NoisyRules: w.Noisy, Incidents: w.Incidents, Caught: w.Caught, NoisyOnly: w.NoisyOnly,
 			Missed: w.Missed, RulesChanged: w.Changed}
+		if p, ok := w.precision(); ok {
+			x.Precision = &p
+		}
 		if m, ok := w.median(); ok {
 			t := m.Seconds()
 			x.TimeToCatch = &t
@@ -329,8 +333,9 @@ type ruleOut struct {
 	Black       int      `json:"black"`
 	Refired     int      `json:"refired" jsonschema:"firings soon after the same alert resolved"`
 	Excused     int      `json:"excused"`
-	Precision   *float64 `json:"precision,omitempty"`
+	Precision   *float64 `json:"precision,omitempty" jsonschema:"white over firings, 0 to 1; not given with no firings, or no record"`
 	Noisy       bool     `json:"noisy"`
+	NoRecord    bool     `json:"no_record,omitempty" jsonschema:"it fired over weeks with no incident written down in them or in the two weeks before their end: a firing that caught nothing can't be told from one nobody wrote down, so its precision isn't known and it isn't called noisy"`
 	NoisyWeeks  int      `json:"noisy_weeks_running,omitempty"`
 	Suggestion  string   `json:"suggestion,omitempty" jsonschema:"a longer for that would quiet it, from the last weekly digest"`
 	NotReplayed string   `json:"not_replayed,omitempty" jsonschema:"why it couldn't be replayed"`
@@ -362,8 +367,12 @@ type notifiedOut struct {
 }
 
 func ruleOutOf(l ruleLine) ruleOut {
+	precision := share(l.White, l.Firings)
+	if l.NoRecord {
+		precision = nil
+	}
 	return ruleOut{Name: l.Name, Group: l.Group, Severity: l.Severity, Team: l.Team, Status: l.Status, Firings: l.Firings, White: l.White,
-		Black: l.Black, Refired: l.Refired, Excused: l.Excused, Precision: share(l.White, l.Firings), Noisy: l.Noisy, NoisyWeeks: l.Streak,
+		Black: l.Black, Refired: l.Refired, Excused: l.Excused, Precision: precision, Noisy: l.Noisy, NoRecord: l.NoRecord, NoisyWeeks: l.Streak,
 		Suggestion: l.Suggestion, NotReplayed: l.Unsupported, Source: l.Source, Incidents: l.Incidents, First: l.First, Alone: l.Alone, Spare: l.Spare,
 		Asleep: l.AsleepBlack, OffHours: l.OffHoursBlack, Notifications: notifiedOutOf(l.pagedLine), ReplayDiffers: l.Differs,
 		ContentProblems: l.Content.Facts + l.Content.Measured, ContentGuesses: l.Content.Guesses}
@@ -460,6 +469,7 @@ type sideOut struct {
 	Refired     int      `json:"refired"`
 	Precision   *float64 `json:"precision,omitempty"`
 	Noisy       bool     `json:"noisy"`
+	NoRecord    bool     `json:"no_record,omitempty" jsonschema:"no incident in that week or the two before its end: its firings were counted, not judged"`
 	NotReplayed string   `json:"not_replayed,omitempty"`
 }
 
@@ -467,8 +477,11 @@ func sideOf(r *verdict.RuleResult) *sideOut {
 	if r == nil {
 		return nil
 	}
-	return &sideOut{Firings: r.Firings, White: r.White, Black: r.Black, Refired: r.Refired, Precision: share(r.White, r.Firings),
-		Noisy: r.Noisy, NotReplayed: r.Unsupported}
+	out := &sideOut{Firings: r.Firings, White: r.White, Black: r.Black, Refired: r.Refired, Noisy: r.Noisy, NoRecord: r.NoRecord, NotReplayed: r.Unsupported}
+	if p, ok := r.Precision(); ok {
+		out.Precision = &p
+	}
+	return out
 }
 
 type reviewOut struct {

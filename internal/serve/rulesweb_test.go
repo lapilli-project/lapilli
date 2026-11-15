@@ -25,7 +25,11 @@ import (
 // owned by a team, some with a note, two with a proposal, one recorded
 // elsewhere, some silent, and two that fired only before the last four
 // weeks.
-func facetServer(t *testing.T) *Server {
+func facetServer(t *testing.T) *Server { t.Helper(); return facetServerOf(t, true) }
+
+// facetServerOf is facetServer, with the record of its weeks kept or not:
+// an incident written down, or none.
+func facetServerOf(t *testing.T, kept bool) *Server {
 	t.Helper()
 	ctx := context.Background()
 	s, rules := server(t, nil)
@@ -46,6 +50,11 @@ func facetServer(t *testing.T) *Server {
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {
 		t.Fatal(err)
+	}
+	// An incident written down keeps the weeks' record: their firings are
+	// judged, the noisy rules noisy (TestFacetsNoRecord has them without).
+	if kept {
+		keepRecordIn(t, s)
 	}
 	o := s.cfg.Options
 	record := func(at time.Time, fs []firing.Firing) {
@@ -125,7 +134,7 @@ func TestFacetCounts(t *testing.T) {
 	for _, o := range all.Facets[0].Options {
 		perf[o.Value] = o.Count
 	}
-	if want := map[string]int{"noisy": 6, "ok": 11, "silent": 8, "spare": 0}; !reflect.DeepEqual(perf, want) {
+	if want := map[string]int{"noisy": 6, "unrecorded": 0, "ok": 11, "silent": 8, "spare": 0}; !reflect.DeepEqual(perf, want) {
 		t.Errorf("performance: %v, want %v", perf, want)
 	}
 	if all.Shown != 17 || len(all.Quiet) != 8 || !all.QuietOlder {

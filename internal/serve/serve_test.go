@@ -306,7 +306,9 @@ func TestDigest(t *testing.T) {
 	defer slack.Close()
 	hook := filepath.Join(t.TempDir(), "hook")
 	os.WriteFile(hook, []byte(slack.URL+"/services/T/B/SECRET"), 0o600)
-	s, _ := server(t, func(c *Config) { c.Slack = hook; c.Backfill = 10 * 24 * time.Hour })
+	// An incident written down in the week keeps its record: its firings
+	// are judged (TestDigestNoRecord has the week without).
+	s, _ := server(t, func(c *Config) { c.Slack = hook; c.Backfill = 10 * 24 * time.Hour; keepRecord(c) })
 	ctx := context.Background()
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {

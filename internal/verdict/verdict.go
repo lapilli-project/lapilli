@@ -95,6 +95,11 @@ type RuleResult struct {
 	Replayed bool   `json:"replayed"`
 	// Noisy says the rule fires whatever happens: see Options.
 	Noisy bool `json:"noisy"`
+	// NoRecord says it fired in a period whose record isn't kept
+	// (Report.NoRecord): its black stones caught nothing written down, and
+	// whether they mattered isn't known. It isn't noisy, and it has no
+	// precision.
+	NoRecord bool `json:"no_record,omitempty"`
 	// Unsupported is why the rule couldn't be replayed.
 	Unsupported string `json:"unsupported,omitempty"`
 	// Unseen is what its replay can't see, as rules.Rule.Unseen says.
@@ -130,9 +135,9 @@ type RuleResult struct {
 }
 
 // Precision is the share of firings that caught something; ok is false
-// when the rule never fired.
+// when the rule never fired, or fired with no record to judge it by.
 func (r RuleResult) Precision() (float64, bool) {
-	if r.Firings == 0 {
+	if r.Firings == 0 || r.NoRecord {
 		return 0, false
 	}
 	return float64(r.White) / float64(r.Firings), true
@@ -190,11 +195,15 @@ type Report struct {
 	To   time.Time `json:"to"`
 	// RulesChanged is when, in the period, the rules replayed were
 	// replaced by the next version of them.
-	RulesChanged []time.Time      `json:"rules_changed,omitempty"`
-	NoisyAt      NoisyAt          `json:"noisy_at"`
-	Rules        []RuleResult     `json:"rules"`
-	Incidents    []IncidentResult `json:"incidents"`
-	Firings      []Judged         `json:"firings"`
+	RulesChanged []time.Time `json:"rules_changed,omitempty"`
+	NoisyAt      NoisyAt     `json:"noisy_at"`
+	// NoRecord says no incident started in the period, or in the two weeks
+	// before its end (RecordKept): its firings are counted, not judged. No
+	// rule is noisy, and none is suggested a longer "for".
+	NoRecord  bool             `json:"no_record,omitempty"`
+	Rules     []RuleResult     `json:"rules"`
+	Incidents []IncidentResult `json:"incidents"`
+	Firings   []Judged         `json:"firings"`
 	// Suggestions are noisy rules that would have kept their catches with
 	// a longer "for".
 	Suggestions []Suggestion `json:"suggestions,omitempty"`
@@ -235,7 +244,7 @@ type Suggestion struct {
 func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o Options) *Report {
 	at := o.noisyAt()
 	rep := &Report{From: o.From, To: o.To, NoisyAt: at, Rules: []RuleResult{}, Incidents: []IncidentResult{}, Firings: []Judged{}, SomeRules: o.SomeRules,
-		Hours: o.Hours.Used()}
+		Hours: o.Hours.Used(), NoRecord: !RecordKept(o.From, o.To, Starts(incs))}
 	severities := map[string][]string{}
 	addSeverity := func(rule, sev string) {
 		if sev != "" && !slices.Contains(severities[rule], sev) {
@@ -315,6 +324,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	}
 
 	for name, r := range byRule {
+		r.NoRecord = rep.NoRecord && r.Firings > 0
 		r.Noisy = r.noisy(at)
 		slices.Sort(severities[name])
 		r.Severity = strings.Join(severities[name], "/")

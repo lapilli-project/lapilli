@@ -52,6 +52,13 @@ type tallies struct {
 	// says its last week is over, a week before this one (talliesTo).
 	to   time.Time
 	over bool
+	// kept says, of each week, whether its record is kept: starts are when
+	// the incidents that keep it started, read with the tallies; mid is
+	// the ledger's Midnight, at when they were read (record.go).
+	kept   map[int64]bool
+	starts []time.Time
+	mid    func(int64) time.Time
+	at     time.Time
 }
 
 // whole are, of the weeks ws, those the ledger has whole: not the week
@@ -121,7 +128,7 @@ func (s *Server) talliesTo(ctx context.Context, n int, last int64) (*tallies, er
 	if !first.IsZero() {
 		t.firstWeek, t.firstOK = ledger.Week(s.l.Day(first)), true
 	}
-	return t, nil
+	return t, s.readRecord(ctx, t)
 }
 
 // until is when the span t's weeks are over ends: its end, or now.
@@ -152,9 +159,11 @@ func (t *tallies) id(name string) int64 {
 	return t.names[name]
 }
 
+// noisy reports whether a rule was noisy in a week: never in a week whose
+// record isn't kept.
 func (t *tallies) noisy(week, rule int64) bool {
 	x := t.by[week][rule]
-	return noisy(x.Firings, x.White, t.o)
+	return t.kept[week] && noisy(x.Firings, x.White, t.o)
 }
 
 // noisyAll reports whether a rule was noisy in a week, as everyone's rules
@@ -165,7 +174,7 @@ func (t *tallies) noisyAll(week, rule int64) bool {
 		return t.noisy(week, rule)
 	}
 	x := t.everyone[week][rule]
-	return noisy(x.Firings, x.White, t.o)
+	return t.kept[week] && noisy(x.Firings, x.White, t.o)
 }
 
 // stateAll is state, judged against everyone's rules: as the incidents
@@ -208,8 +217,12 @@ type ruleLine struct {
 	Excused                                int
 	Precision                              string
 	Noisy                                  bool
-	Spark                                  []spark
-	Suggestion, Unsupported                string
+	// NoRecord says it fired over weeks whose record isn't kept: its
+	// precision isn't known, and it isn't noisy; Unrecorded, that it fired
+	// as often as a noisy rule fires, with no record to judge it by.
+	NoRecord, Unrecorded    bool
+	Spark                   []spark
+	Suggestion, Unsupported string
 	// Source is where a rule's firings were recorded before they were
 	// copied in: one not replayed.
 	Source string
@@ -435,8 +448,9 @@ func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]
 	}
 	rs := make([]verdict.RuleResult, 0, len(sums))
 	noisyRule := make(map[string]bool, len(sums))
+	kept := t.keptOver(n)
 	for _, r := range sums {
-		r.Noisy = noisy(r.Firings, r.White, t.o)
+		r.Noisy = kept && noisy(r.Firings, r.White, t.o)
 		noisyRule[r.Rule] = r.Noisy
 		rs = append(rs, *r)
 	}
@@ -519,11 +533,17 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 		}
 	}
 	var out []ruleLine
+	kept, at := t.keptOver(n), t.o.NoisyFirings
+	if at == 0 {
+		at = verdict.NoisyFirings
+	}
 	for id, l := range sum {
 		c := credit[l.Name]
 		l.Incidents, l.First, l.Alone, l.Spare, l.SomeRules = c.Incidents, c.First, c.Alone, c.Spare, t.o.SomeRules
 		l.Black = l.Firings - l.White
-		l.Noisy = noisy(l.Firings, l.White, t.o)
+		l.Noisy = kept && noisy(l.Firings, l.White, t.o)
+		l.NoRecord = !kept && l.Firings > 0
+		l.Unrecorded = l.NoRecord && l.Firings >= at
 		l.Precision = pct(l.White, l.Firings)
 		l.RefiredShare = pct(l.Refired, l.Firings)
 		// refireWeeks for this rule alone, a week at a time rather than
@@ -535,6 +555,9 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 			}
 		}
 		l.Without = pct(l.White-l.DeploysCaught, l.Firings-l.Deploys)
+		if l.NoRecord {
+			l.Precision, l.Without = "–", "–" // not known: nothing to judge it by
+		}
 		// Weeks running it has been noisy, up to the last whole week.
 		for i := len(t.weeks) - 2 + t.last(); i >= 0 && t.noisy(t.weeks[i], id); i-- {
 			l.Streak++
@@ -643,6 +666,10 @@ type rulesView struct {
 	// Deploys says the ledger keeps deploys: the firings during them have
 	// a column.
 	Deploys bool
+	// NoRecord says the weeks shown had firings, and no incident started
+	// in them or in the two weeks before their end: no precision is known,
+	// and no rule is called noisy.
+	NoRecord bool `json:"no_record,omitempty"`
 }
 
 // sortRules puts the rules in order of what by: refired, the most re-fired
@@ -753,7 +780,8 @@ func (s *Server) rulesOver(r *http.Request, week int64) (rulesData, error) {
 	if err != nil {
 		return rulesData{}, err
 	}
-	v := rulesView{Weeks: n, Team: f, Lines: lines, Silent: silent, Facts: facts, Deploys: deploys, Sorts: []string{"", "refired"}}
+	v := rulesView{Weeks: n, Team: f, Lines: lines, Silent: silent, Facts: facts, Deploys: deploys, Sorts: []string{"", "refired"},
+		NoRecord: slices.ContainsFunc(lines, func(l ruleLine) bool { return l.NoRecord })}
 	if deploys {
 		v.Sorts = append(v.Sorts, "deploys")
 	}

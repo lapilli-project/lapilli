@@ -27,6 +27,10 @@ type weekView struct {
 	Asleep                               int             // firings that caught nothing while people slept; notifications for them, once there are any
 	Uncounted                            bool            // Asleep isn't counted: a week before the first notification
 	Changed, Current                     bool
+	// NoRecord says it had firings and no record to judge them by: no
+	// incident started in it, or in the two weeks before its end. Its
+	// precision isn't known, and no rule was noisy in it.
+	NoRecord bool
 	// Quiet says a quiet window was over it: one excused a firing, or
 	// one covers some of it; DeployMark, its firings during deploys: the
 	// marks on the charts, when they are asked for (marksOf).
@@ -41,14 +45,14 @@ type weekView struct {
 func (w weekView) Without() string { return pct(w.White-w.DeploysCaught, w.Firings-w.Deploys) }
 
 func (w weekView) precision() (float64, bool) {
-	if w.Firings == 0 {
+	if w.Firings == 0 || w.NoRecord {
 		return 0, false
 	}
 	return float64(w.White) / float64(w.Firings), true
 }
 
 // Precision is the week's precision for the table, as the precision chart
-// draws it; "–" with no firings.
+// draws it; "–" with no firings, or no record to judge them by.
 func (w weekView) Precision() string {
 	p, ok := w.precision()
 	if !ok {
@@ -288,6 +292,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			}
 		}
 		wv.Black = wv.Firings - wv.White
+		wv.NoRecord = wv.Firings > 0 && !t.kept[w]
 		byWeek[w] = wv
 		ws = append(ws, wv)
 	}
@@ -423,7 +428,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v.Tasks = s.taskLines(o, open)
-	v.Actions = s.actions(l, lines, silent, missed, undecided)
+	v.Actions = s.actions(l, lines, silent, missed, undecided, !t.keptOver(4))
 	// What is already being seen to links to its task.
 	for i, a := range v.Actions {
 		for _, x := range open {
@@ -507,8 +512,14 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep 
 	}
 	pct := func(f float64) string { return fmt.Sprintf("%.0f%%", 100*f) }
 	count := func(f float64) string { return fmt.Sprintf("%d", int(f)) }
+	// With no record, what isn't known says why.
+	caught, unjudged := tr(l, "of firings caught something"), ""
+	if last.NoRecord {
+		caught = tr(l, "not known: no incident written down to judge the firings by")
+		unjudged = caught
+	}
 	add("Precision", func(w *weekView) (float64, bool) { return w.precision() }, pct,
-		func(a, b float64) string { return fmt.Sprintf("%+.0f pt", 100*(a-b)) }, +1, tr(l, "of firings caught something"))
+		func(a, b float64) string { return fmt.Sprintf("%+.0f pt", 100*(a-b)) }, +1, caught)
 	excused := ""
 	if last.Excused > 0 {
 		excused = tr(l, "%d more excused by quiet windows", last.Excused)
@@ -529,8 +540,8 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep 
 		func(a, b float64) string {
 			return verdict.Delay(time.Duration(a-b) * time.Second)
 		}, -1, tr(l, "median, by a rule that isn't noisy"))
-	add("Noisy rules", func(w *weekView) (float64, bool) { return float64(w.Noisy), true }, count,
-		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, "")
+	add("Noisy rules", func(w *weekView) (float64, bool) { return float64(w.Noisy), !w.NoRecord }, count,
+		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, unjudged)
 	if asleep != "" {
 		add("Woken for nothing", func(w *weekView) (float64, bool) { return float64(w.Asleep), !w.Uncounted }, count,
 			func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, asleep)
@@ -772,9 +783,16 @@ func (s *Server) heat(l string, t *tallies, lines []ruleLine) ([]heatRow, []stri
 	return rows, labels
 }
 
-// actions are what to look at this week, the most telling first.
-func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []ledger.Incident, undecided int) []action {
+// actions are what to look at this week, the most telling first. noRecord
+// says the four weeks' record isn't kept: that comes first, as nothing
+// else is judged.
+func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []ledger.Incident, undecided int, noRecord bool) []action {
 	var out []action
+	if noRecord && slices.ContainsFunc(lines, func(x ruleLine) bool { return x.Firings > 0 }) {
+		out = append(out, action{Text: tr(l, "No incident written down to judge the firings by"),
+			Detail: tr(l, "in the last four weeks or the two before them: a firing that caught nothing can't be told from one nobody wrote down, so no rule is called noisy. Write incidents down, or mark the firings that were real."),
+			Href:   "/incidents"})
+	}
 	path := func(name string) string { return "/rules/" + url.PathEscape(name) }
 	// What speaks of four weeks links to the rule's page over them.
 	four := func(name string) string { return path(name) + "?weeks=4" }

@@ -325,8 +325,9 @@ func (s *Server) checkContent(ctx context.Context, rs []rules.Rule, scrape conte
 		}
 	}
 	noisyRule := map[string]bool{}
+	kept := t.keptOver(len(t.weeks)) // with no record, no rule is noisy
 	for id, c := range sums {
-		if row, ok := t.rules[id]; ok && row.Source == "" && noisy(c[0], c[1], t.o) {
+		if row, ok := t.rules[id]; ok && row.Source == "" && kept && noisy(c[0], c[1], t.o) {
 			noisyRule[row.Name] = true
 		}
 	}

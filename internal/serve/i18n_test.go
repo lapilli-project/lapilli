@@ -91,6 +91,8 @@ func pagesServer(t *testing.T) *Server {
 	dest := filepath.Join(t.TempDir(), "ops")
 	os.WriteFile(dest, []byte("http://127.0.0.1:1/x"), 0o600)
 	s, rules := server(t, func(c *Config) {
+		// The digest's week judged: its noisy rule, suggested a longer for.
+		keepRecord(c)
 		c.CheckReplay, c.CheckContent, c.ReportDests = true, true, map[string]string{"ops": dest}
 		// An on-call schedule, read once, and once that failed.
 		c.OnCall = &oncall.Config{Schedules: []*oncall.Schedule{{Name: "primary"}, {Name: "secondary"}}}

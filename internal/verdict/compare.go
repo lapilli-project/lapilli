@@ -114,8 +114,21 @@ func (c *Comparison) Summarize(incidents bool) {
 }
 
 // judged says the firings were judged against incidents: always, unless
-// the summary says none were given.
-func (c *Comparison) judged() bool { return c.Summary == nil || c.Summary.IncidentsGiven }
+// the summary says none were given, or no incident keeps the period's
+// record (Report.NoRecord).
+func (c *Comparison) judged() bool {
+	return (c.Summary == nil || c.Summary.IncidentsGiven) && !c.noRecord()
+}
+
+// noRecord says incidents were given, but none keeps the period's record:
+// the firings are counted, not judged, as without them.
+func (c *Comparison) noRecord() bool {
+	return (c.Summary == nil || c.Summary.IncidentsGiven) && c.Before != nil && c.Before.NoRecord
+}
+
+// NoRecordCompared says a comparison of a period with no record counts its
+// firings and doesn't judge them.
+const NoRecordCompared = "No incident was written down, or found by --impact, in the period or the two weeks before it: the firings are counted, not judged."
 
 // RecordingNote says what a comparison can't of a recording rule that
 // differs.
@@ -265,6 +278,9 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 	}
 	if n := p.limited(); n > 0 {
 		fmt.Fprintf(w, "%d of the rules that differ are in a group with a limit, which the replay doesn't hold them to: past it, Prometheus drops all of a rule's alerts.\n", n)
+	}
+	if c.noRecord() {
+		fmt.Fprintln(w, NoRecordCompared)
 	}
 	if c.ChangedOnly {
 		fmt.Fprintf(w, "Firings of the changed rules %d → %d\n", len(c.Before.Firings), len(c.After.Firings))

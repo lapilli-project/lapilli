@@ -51,6 +51,9 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		fmt.Fprintf(w, "Rules replayed as they stood: replaced at %s\n", strings.Join(at, ", "))
 	}
 	partial(w, r.Unreplayed, len(r.Rules), true)
+	if r.NoRecord && firings > 0 {
+		fmt.Fprintln(w, NoRecordText)
+	}
 
 	var fired, silent, unsupported []RuleResult
 	for _, rr := range r.Rules {
