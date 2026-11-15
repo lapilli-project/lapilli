@@ -208,7 +208,7 @@ var proposalFacets = []pickFacet{
 		labels: []string{"awaiting approval", "approved", "being applied", "applied", "undone", "closed"},
 		def:    []string{"proposed", "approved", "doing"}, aliases: map[string][]string{"open": {"proposed", "approved", "doing"}, "": {"proposed", "approved", "doing"}},
 		raw: []string{ledger.StateReady, ledger.StateApplying, ledger.StateOpened, ledger.StateMerged, ledger.StateRefused, ledger.StateFailed,
-			ledger.StateDropped, ledger.StateAmended},
+			ledger.StateDropped, ledger.StateAmended, ledger.StateExpired},
 		// A state there is no such of, as an older link may name, is none.
 		none: true},
 	{param: "kind", name: "Kind", values: []string{ledger.KindFor, ledger.KindThreshold, ledger.KindDisable, ledger.KindDelete, ledger.KindSays, ledger.KindUndo},
@@ -313,7 +313,8 @@ func countValues(c ledger.ProposalCount, param string) []string {
 func proposalPick(p picks, rules []string) ledger.ProposalPick {
 	q := ledger.ProposalPick{Rules: rules, IDs: pickedIDs(p), Kinds: p["kind"], Paths: p["path"], Makers: p["by"]}
 	for _, v := range p["state"] {
-		for _, st := range append(ledger.Unfinished(), ledger.StateApplied, ledger.StateUndone, ledger.StateRefused, ledger.StateFailed, ledger.StateDropped, ledger.StateAmended) {
+		for _, st := range append(ledger.Unfinished(), ledger.StateApplied, ledger.StateUndone, ledger.StateRefused, ledger.StateFailed, ledger.StateDropped, ledger.StateAmended,
+			ledger.StateExpired) {
 			if (st == v || stateGroups[st] == v) && !slices.Contains(q.States, st) {
 				q.States = append(q.States, st)
 			}
@@ -476,6 +477,9 @@ type proposalView struct {
 	// latest stepsMost.
 	StepsOlder bool
 	StepsMost  int
+	// Expires is when it closes unless someone approves it first
+	// (--proposals-expire); zero for never.
+	Expires time.Time
 	// What the reader may not do, each shown disabled with why: approve
 	// it, ask for it to be undone, drop or close it, make it a task.
 	ApproveOff, UndoOff, DropOff, TaskOff *pageAction
@@ -512,6 +516,10 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v := proposalView{proposalLine: lines[0], Evidence: proposalEvidence(p), On: s.cfg.Changes, Paused: s.changesPaused(), Next: len(p.Approvals) + 1}
+	// When it closes, waiting, with --proposals-expire.
+	if p.State == ledger.StateProposed && s.cfg.ProposalsExpire > 0 {
+		v.Expires = p.Made.Add(s.cfg.ProposalsExpire)
+	}
 	if p.Kind == ledger.KindUndo {
 		v.Need = 1 // approved by whoever asked for it
 	}

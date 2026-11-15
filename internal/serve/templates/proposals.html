@@ -45,6 +45,7 @@
 {{if .Stale}}<p class="hint bad">{{t "The rule in effect isn't the one this was proposed against: it changed since, so this is refused when checked again. Propose it again from the rule's page."}}</p>{{end}}
 {{with .StaleWhy}}<p class="hint bad">{{.Notice $.Lang}} <a href="#backtest">{{t "Backtest it again"}}</a></p>{{end}}
 {{with .Reason}}<p class="bad">{{.}}</p>{{end}}
+{{if not .Expires.IsZero}}<p class="quiet">{{t "Unless someone approves it first, it closes as expired on %s (--proposals-expire)." (at $loc .Expires)}}</p>{{end}}
 {{with .Link}}<p><a href="{{.}}" rel="noopener noreferrer">{{t "Pull request"}} <span aria-hidden="true">↗</span></a></p>{{end}}
 {{with .Evidence.Reason}}<details open><summary>{{t "What whoever proposed it said"}}</summary><div class="comment-body">{{.}}</div></details>{{end}}
 <div class="row proposal-actions">{{with .Task}}<a href="{{$.Link (printf "/tasks/%d" .ID)}}">{{t "Task #%d" .ID}}</a>{{else}}{{if not $ro}}<form method="post" action="/proposals/{{$v.ID}}/task"><button class="quiet-button">{{t "Make it a task"}}</button></form>{{else}}{{with $v.TaskOff}}{{template "off" .}}{{end}}{{end}}{{end}}

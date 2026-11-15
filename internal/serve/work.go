@@ -200,6 +200,13 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	if !s.still(ctx) {
 		return
 	}
+	// Before carrying any out: one that waited too long isn't approved now.
+	if err := s.expireProposals(ctx); err != nil {
+		s.fail("closing the proposals that waited too long", err)
+	}
+	if !s.still(ctx) {
+		return
+	}
 	if err := s.carryOut(ctx); err != nil {
 		s.fail("changing the rules", err)
 	}
