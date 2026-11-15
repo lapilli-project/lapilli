@@ -599,9 +599,9 @@ Kept to, a file is kept to as a whole: what it no longer declares is let
 go at once (below). A file that can't be read as `--config` is said at
 once, on its first read; what of one can't be kept is said once it is
 kept to. As a term begins, at start or as another replica takes over,
-the file is read once, after the rules are read, and the ledger is kept
-to it at the next read, 15 seconds after: usually within half a minute of
-the term's start, but that is no bound. Until then the ledger holds what
+the file is read once, before the rules are read, and the ledger is kept
+to it at the next read, 15 seconds after it has read the rules: usually
+within half a minute of the term's start, but that is no bound. Until then the ledger holds what
 the last leader kept it to, and the Settings page says when a new file
 was read once. A ledger write that fails is shown there too, with when it
 is tried again, not as a file read once. Files other than the one
@@ -698,9 +698,10 @@ letter case alone needs neither.
 forgetting what an earlier term kept the ledger to (another leader with an
 older copy may have since, or a failover lost a write), and again every
 15 seconds, comparing its SHA-256 with the one it last kept the ledger to,
-and keeps the ledger to it on the second read alike (above): 15 seconds
-after the term's first read, which comes once the rules are read, so
-usually within half a minute of the term's start, but with no bound. Kubernetes updates a mounted ConfigMap by swapping a link to
+and keeps the ledger to it on the second read alike (above). The term's
+first read comes before the rules are read, and the second 15 seconds
+after it has read the rules: usually within half a minute of the term's
+start, but with no bound. Kubernetes updates a mounted ConfigMap by swapping a link to
 a new directory, which a watch on the file misses, so the content is
 hashed instead. The chart mounts the directory, not a `subPath`, which the
 kubelet doesn't update. No restart is needed, and none is made. A file with
