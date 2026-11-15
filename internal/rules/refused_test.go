@@ -47,14 +47,13 @@ func TestMadeInputWide(t *testing.T) {
 }
 
 // TestMadeRefusalSeen: a rule file refused for what it makes is said
-// wherever it is read: a ConfigMap holding it, through FromDocs (as serve
-// reads a version of the rules in the ledger), is an error naming the key,
-// not "no alert rules", nor its rules left out unsaid beside another
-// file's (before, passed over, a group of 9,999 labels on 3,000 recording
-// rules in a ConfigMap of 193 KB made 1.9 GB); through ReadPicked and
-// Pick, an error. A document refused gives
-// back what it counted: a ruler's next namespace, read with the same
-// input, reads as it would have.
+// wherever it is read: a ConfigMap holding it, a group of 9,999 labels on
+// 3,000 alert rules, through FromDocs (as serve reads a version of the
+// rules in the ledger), is an error naming the key, not "no alert rules",
+// nor its rules left out unsaid beside another file's; through ReadPicked
+// and Pick, an error; and so are its recording rules, when asked for
+// (before, a group of 9,999 labels on 3,000 recording rules in a ConfigMap
+// of 193 KB made 1.9 GB, read through FromDocs).
 func TestMadeRefusalSeen(t *testing.T) {
 	bomb := groupBomb(9999, 3000, false, false)
 	ok := "groups:\n- name: ok\n  labels: {team: a}\n  rules:\n  - {alert: OK, expr: up == 0}\n"
@@ -86,16 +85,15 @@ func TestMadeRefusalSeen(t *testing.T) {
 		t.Errorf("Pick: %v", err)
 	}
 
-	// A ruler's namespaces: one refused, the next read.
-	ctx := NoAliases(context.Background())
-	if _, err := FromDocsContext(ctx, []Doc{{Source: "bomb", Data: []byte(bomb)}}); !errors.As(err, &made) {
-		t.Fatalf("the namespace refused: %v", err)
+	// Asked for its recording rules, as a comparison of two sets reads them:
+	// a group's labels on each of 3,000 recording rules in a ConfigMap.
+	rec := filepath.Join(t.TempDir(), "rec.yaml")
+	if err := os.WriteFile(rec, []byte(configMap(ok, groupBomb(9999, 3000, true, false))), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if rs, err := FromDocsContext(ctx, []Doc{{Source: "ok", Data: []byte(ok)}}); err != nil || len(rs) != 1 {
-		t.Errorf("the next namespace: %d, %v", len(rs), err)
-	}
-	if in := inputOf(ctx); in.size != len(ok) || in.made != labelsCost(map[string]string{"team": "a"})+len("ok") {
-		t.Errorf("the input counted %d bytes and %d made, as if the refused namespace were read", in.size, in.made)
+	var recorded []Recording
+	if _, _, _, err := ReadPicked(rec, Picking{Recordings: &recorded}); !errors.As(err, &made) || !strings.Contains(err.Error(), "recording rules") {
+		t.Errorf("a ConfigMap's recording rules: %v", err)
 	}
 }
 

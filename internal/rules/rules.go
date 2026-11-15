@@ -463,33 +463,48 @@ type Doc struct {
 func FromDocs(docs []Doc) ([]Rule, error) { return FromDocsContext(context.Background(), docs) }
 
 // FromDocsContext is FromDocs, given up when ctx ends: between documents,
-// and between the YAML documents of one. What aliases expand to, and what
-// the rules make beyond their text (madeLimit), is counted for the
-// documents together, as of one input (OneInput): a rule file a ConfigMap
-// holds that makes past it is an error, not passed over as one that
-// doesn't read is. Documents refused give back what they counted, so that
-// a caller that passes them over and reads others with ctx (a ruler's
-// namespaces) has the rest read as they would be without them.
-func FromDocsContext(ctx context.Context, docs []Doc) (_ []Rule, err error) {
-	ctx = OneInput(ctx)
-	in := inputOf(ctx)
-	at := in.mark()
-	defer func() {
-		if err != nil {
-			in.undo(at)
-		}
-	}()
+// and between the YAML documents of one. Documents are read in the inputs
+// they were read in (OneInput): each a ruler's namespace or an alarm's (a
+// Namespace) on its own, and the rest, by the source they came from (a
+// Loki's, an API's, files'), together; each input what it may make beyond
+// its text (madeLimit), and all of them MaxMade at most (Together), as a
+// version of the rules kept in the ledger, read again, was read. Aliases
+// are refused where ctx's input refuses them (NoAliases). A rule file a
+// ConfigMap holds that Lapilli can't read, or that makes past its bound, is
+// an error, not passed over as one that doesn't read may be.
+func FromDocsContext(ctx context.Context, docs []Doc) ([]Rule, error) {
+	ctx = Together(ctx)
+	none := false
+	if b, ok := ctx.Value(inputKey{}).(*input); ok {
+		none = b.none
+	}
+	inputs := map[string]context.Context{}
 	var out []Rule
 	for _, d := range docs {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		unit := fmt.Sprintf("%t %q", d.API, d.Logs)
+		if d.Namespace != "" {
+			unit += fmt.Sprintf(" %q %q", d.Namespace, d.Source)
+		}
+		in, ok := inputs[unit]
+		if !ok {
+			in = context.WithValue(ctx, inputKey{}, &input{none: none, total: totalOf(ctx)})
+			inputs[unit] = in
+		}
 		var rs []Rule
 		var err error
 		if d.API {
-			rs, err = FromAPI(d.Data)
+			rs, err = fromAPI(in, d.Data)
 		} else {
-			rs, err = parseContext(ctx, d.Data, nil)
+			rs, err = parseContext(in, d.Data, nil)
+		}
+		if err == nil && d.Namespace != "" {
+			// Each rule's, in its key and on its pages.
+			err = inputOf(in).charge(len(d.Namespace)*len(rs), func() string {
+				return fmt.Sprintf("its namespace, %d bytes, on each of its %d rules", len(d.Namespace), len(rs))
+			})
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", d.Source, err)

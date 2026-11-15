@@ -258,11 +258,14 @@ var ErrNoneSelected = errors.New("no document of rules has the labels asked for"
 // documents given back hold only what was kept, when Picking.Trim says so
 // or the selector left something out. picked says what was passed over.
 //
-// What aliases expand to is counted for every file read, as of one input
-// (OneInput): a directory of many files mustn't each have yaml.v3's bound.
+// What aliases expand to, and what the rules make, is counted for every
+// file read, as of one input (OneInput): a directory of many files mustn't
+// each have yaml.v3's bound, nor what an input may make. A file passed over
+// gives back what it counted, but for what the read makes in all
+// (Together), MaxMade at most.
 func ReadPicked(path string, p Picking) ([]Rule, []Doc, Picked, error) {
 	var picked Picked
-	in := reading{pick: OneInput(context.Background()), parse: OneInput(context.Background())}
+	in := reading{pick: OneInput(Together(context.Background())), parse: OneInput(Together(context.Background()))}
 	fi, err := os.Stat(path)
 	if err != nil {
 		return nil, nil, picked, err
@@ -297,14 +300,20 @@ func ReadPicked(path string, p Picking) ([]Rule, []Doc, Picked, error) {
 		if st, err := os.Stat(f); err != nil || !st.Mode().IsRegular() {
 			return nil
 		}
+		pickAt, parseAt := inputOf(in.pick).mark(), inputOf(in.parse).mark()
+		passed := func() error {
+			inputOf(in.pick).undo(pickAt)
+			inputOf(in.parse).undo(parseAt)
+			return nil
+		}
 		rs, d, err := in.load(f, p, &picked)
 		switch {
 		case errors.Is(err, errNoRules), errors.Is(err, ErrNoneSelected):
-			return nil
+			return passed()
 		case err != nil && filepath.Dir(f) != root && !refused(err):
 			// What the directory makes past what it may is said, as it
 			// is of every file in it, not of this one alone.
-			return nil
+			return passed()
 		case err != nil:
 			return err
 		}
