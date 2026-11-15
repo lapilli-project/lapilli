@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [0.39.2] - 2026-11-15
+
+The chart's workloads stay in sync under a GitOps tool that diffs what it
+applied. No change to `lapilli` itself.
+
+### Fixed
+
+- **Argo CD showed the chart's Deployment as OutOfSync for as long as it
+  ran**, with server-side apply and diff, though nothing had changed. The
+  API server writes defaults inside fields that are applied whole (atomic):
+  a `resourceFieldRef`'s `divisor` (the `GOMEMLIMIT` from the memory limit)
+  and, in the projected service account token volume, a `fieldRef`'s
+  `apiVersion`. The applied object didn't have them, so every diff saw them
+  as a change. The chart now says both, with the values the API server
+  would give (`divisor: "1"`, `apiVersion: v1`): the pods' values are the
+  same.
+
 ## [0.39.1] - 2026-11-15
 
 The chart's `lapilli serve` takes several rule ConfigMaps. No change to
