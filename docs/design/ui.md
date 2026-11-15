@@ -649,16 +649,19 @@ dry run, its history), with the backtest in the dry run's place:
   named. A `for` one event can't outlast, as proposed, is worked out when
   the page is read, whatever lapilli made it (changes.md, "Read when
   shown").
-- **Stale**: one waiting for approval whose backtest another minor
-  version of lapilli ran, or one that kept no version, or whose period's
-  record changed since, says so at the top, "It is stale, so it isn't
-  approved until it is backtested again:" and why, with a link to its
-  backtest, where an editor has "Backtest again" (a form of its own, with
-  what it does: replayed with this lapilli over the twelve weeks to now,
-  the backtest replaced kept in the history, the approvals given to it
-  taken back), and anyone else the button disabled with why. Approving it
-  is shown disabled to an approver, "Held until it is backtested again:
-  it is stale". One whose rule changed since says so as before.
+- **Stale**: one waiting for approval whose backtest was replayed or
+  judged otherwise than this lapilli does (`verdict.Semantics`), or
+  whose period's record changed since, says so at the top, "It is stale,
+  so it isn't approved until it is backtested again:" and why, with a
+  link to its backtest, where an editor has "Backtest again" (a form of
+  its own, with what it does: replayed with this lapilli over the twelve
+  weeks to now, the backtest replaced kept in the history, the approvals
+  given to it withdrawn), and anyone else the button disabled with why.
+  Approving it is shown disabled to an approver, "Held until it is
+  backtested again: it is stale". One whose rule changed since says so as
+  before. Every incident a backtest of it named as missed and this one
+  doesn't is said under its table, "An earlier backtest of it, before it
+  was backtested again, said that as proposed it misses:".
 - **An undo's page** says it puts back the rule as it was before the
   change it undoes, linked, and, when an agent proposed that change, for
   whom. Its backtest is that change's, read the other way, "With #n"
@@ -692,8 +695,10 @@ dry run, its history), with the backtest in the dry run's place:
   request's link, or why it was refused or failed), an approved change
   waiting while its rule fires ("waits: it fires now", with why), an undo
   asked for, linked to it, a backtest run again ("Backtested again by bo,
-  with lapilli v0.42.0", the backtest it replaced from when to when, with
-  its firings, and the approvals taken back). Its making and approvals are
+  with lapilli v0.42.0", "Backtested again by an agent, for bo", or by
+  Lapilli; the backtest it replaced from when to when, with its firings
+  and the incidents it missed, caught and caught later; whose approvals
+  were withdrawn). Its making and approvals are
   the proposal's own; the rest are the ledger's changes whose `what` is
   the proposal's (`ProposalSteps`, an additive read by the changes' index
   on `what`),
@@ -845,7 +850,13 @@ laptop): the proposals list 14.5 ms (12.6 before), with every state 13.6
 list 12.6 ms (3.8), which now reads the rules in effect for whether each
 is stale, as the list did already. The record of the backtests' periods is
 one read of the incidents around them all, and a `for_outlasts` is worked
-out once a proposal.
+out once a proposal. Cold, with nothing worked out before, and two hundred
+proposals each made against a version of the rules of its own, 1,200
+rules each (`TestProposalsColdScale`): applied, the list of every state
+takes 20 ms and 21 MB, and the API's 12 ms (a second and 1.4 GB, each,
+before a finished proposal said what it kept); waiting, 107 ms and 68 MB,
+four older versions parsed a read, the rest worked out by the reads
+after.
 
 ## Many at once, and ways in
 

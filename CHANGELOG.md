@@ -9,10 +9,12 @@ when a proposal was made, and its backtest still said 141 firings → 3,
 better, of weeks with no incident written down, where fewer may be the
 restarts hidden. Now what a proposal's evidence says is worked out when it
 is read, whatever lapilli made it; a backtest with no record is counted,
-not judged; and a proposal whose backtest another version ran, or whose
-period's record changed since, waits to be backtested again before anyone
-approves it. No schema change: what is kept is in a proposal's evidence.
-JSON, the API and MCP add fields; MCP's `stale` is a string now.
+not judged; and a proposal whose backtest was replayed or judged otherwise
+than this lapilli does, or whose period's record changed since, waits to
+be backtested again before anyone approves it, which Lapilli does itself
+too. No schema change: what is kept is in a proposal's evidence, and the
+ledger's changes. JSON, the API and MCP add fields; MCP's `stale` is a
+string now.
 
 ### Added
 
@@ -22,11 +24,18 @@ JSON, the API and MCP add fields; MCP's `stale` is a string now.
   (`for_outlasts`), worked out from the rule it was made against, which
   its hash names, with the `for` proposed, as carrying it out makes the
   rule: of the rule in effect, or of the version in effect when it was
-  made; one whose rule neither has says what it kept. Each proposal's is
-  worked out once while serve runs. Whether its backtest's period had an
-  incident written down to judge its firings by (`no_record`) is kept with
-  each backtest from now on, as the ledger has the period when it runs
-  (`ledger.RecordKept`), and worked out from the ledger for one made before.
+  made; one whose rule neither has, and one finished with (applied,
+  dropped, refused, failed), says what it kept. Each proposal's is worked
+  out once while serve runs, by its evidence too; a version is parsed
+  once for every proposal made against it, by one of the requests asking
+  at once, its matched rules alone kept, and four older versions a read at
+  most: cold, two hundred proposals each against a version of its own
+  take 20 ms to list, not a second and 1.4 GB. Whether its backtest's
+  period had an incident written down to judge its firings by
+  (`no_record`) is kept with each backtest from now on, as the ledger has
+  the period when it runs (`ledger.RecordKept`), and worked out from the
+  ledger for one made before, unless it judged some firings then (caught,
+  missed or caught later an incident), when it had a record.
   `GET /api/v1/proposals` and `/api/v1/proposals/{id}` add `stale`,
   `for_outlasts` and `no_record`; MCP's `rule` gives each proposal's
   backtest (`backtest`: its firings, and, with a record, what it caught,
@@ -40,22 +49,38 @@ JSON, the API and MCP add fields; MCP's `stale` is a string now.
   `--compare` does of such a period, with no "catching an incident", and
   MCP gives its firings alone, with `no_record`.
 - **Stale proposals, backtested again.** A proposal waiting for approval
-  whose backtest was run by another minor version of lapilli, or by one
-  that kept none (`version` in its evidence, kept from now on), or whose
-  period's record changed since (an incident written down in it, or none
-  keeping it any more), is stale: its page says why, the list has a badge
+  whose backtest was replayed or judged otherwise than this lapilli does
+  (`semantics` in its evidence, `verdict.Semantics`, a number bumped only
+  when replaying or judging changes; once, for one kept before it was;
+  the `version` that ran it is kept beside it, `dev` for none, to be
+  shown), or whose period's record changed since (an incident written down
+  in its weeks, or none keeping it any more), is stale: its page says why,
+  the list has a badge
   and links to `/proposals?stale=1`, which lists the stale ones (with those
   whose rule changed since), and `stale` says why in the API and MCP. It
   isn't approved until it is backtested again: its page shows the button
-  disabled, with why, and the server refuses it. An editor backtests it
-  again from its page (`POST /proposals/{id}/backtest`, asked for as a
-  proposal is: the role, from this site, and the tries an hour, read
-  again where it is kept), and an agent with `--mcp-propose`, through
-  `backtest_again`, its tries counted apart from its person's: the change
-  replayed with this lapilli against the rule in effect, over the twelve
-  weeks to now. The backtest it replaces is kept in the proposal's
-  history, with who backtested it again, and an approval given to that
-  one is taken back. Refused when the rule changed since: propose it again.
+  disabled, with why, the server refuses it, and so does the ledger an
+  approval of a proposal as it no longer is, backtested again meanwhile;
+  nor does `--approvals` lowered approve one. Lapilli backtests stale ones
+  again itself, as Lapilli, in its work: three a round at most, the
+  longest unmoved first, one at a time under the heavy turn, while it
+  replays. An editor backtests one again from its page (`POST
+  /proposals/{id}/backtest`, asked for as a proposal is: the role, from
+  this site, and the tries an hour, read again where it is kept), and an
+  agent with `--mcp-propose`, through `backtest_again` (destructive, not
+  idempotent): the change replayed with this lapilli against the rule in
+  effect, over the twelve weeks to now. The ledger keeps them bounded, on
+  every replica: twenty an hour a person, twenty for the agents acting for
+  them, and a proposal not again for ten minutes. The backtest it replaces
+  is kept in the proposal's history, with what it missed, caught and
+  caught later and who backtested it again, an agent's said so; every
+  incident a backtest named as missed is kept (`earlier_lost`), said on
+  its page, in its pull request's description and through MCP
+  (`earlier_missed`), and not refused when it is checked again as it is
+  carried out. The approvals given to the backtest replaced are withdrawn,
+  and told as `proposal.backtested` to the webhook and Slack, naming who
+  gave them; MCP's `rule` gives each proposal's `backtested_again`.
+  Refused when the rule changed since: propose it again.
 
 ### Changed
 

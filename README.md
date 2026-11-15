@@ -1879,12 +1879,13 @@ Nothing is changed until a person approves it, on its page, in a browser:
   outlast, and whether its backtest's period had an incident written down
   to judge its firings by. With none, the backtest counts its firings and
   doesn't judge them: fewer aren't better, nor more worse.
-- A proposal waiting for approval whose backtest another minor version of
-  lapilli ran, or whose period's record changed since, is stale, and isn't
-  approved until it is backtested again: an editor does it from its page,
-  with this lapilli, over the twelve weeks to now, the old backtest kept in
-  its history and the approvals given to it taken back.
-  `/proposals?stale=1` lists the stale ones.
+- A proposal waiting for approval whose backtest was replayed or judged
+  otherwise than this lapilli does, or whose period's record changed
+  since, is stale, and isn't approved until it is backtested again:
+  Lapilli does it itself, a few each round of its work, and an editor can
+  from its page, with this lapilli, over the twelve weeks to now, the old
+  backtest kept in its history and the approvals given to it withdrawn and
+  told (`proposal.backtested`). `/proposals?stale=1` lists the stale ones.
 
 `--changes` turns carrying them out on; without it Lapilli only proposes.
 With it, each approved change is checked again first: the rule is read
@@ -1990,9 +1991,9 @@ whose pull request is open or merged but never read back, and one sent to
 Grafana or a ruler that can't be read back, once they say it didn't reach
 it.
 Every step is kept in the ledger's changes, and told as `proposal.made`,
-`proposal.approved`, `change.opened`, `change.applied`, `change.amended`,
-`change.refused`, `change.failed` and `change.undone` to the webhook and
-Slack.
+`proposal.approved`, `proposal.backtested`, `change.opened`,
+`change.applied`, `change.amended`, `change.refused`, `change.failed` and
+`change.undone` to the webhook and Slack.
 
 The git path, Grafana's and Mimir's run against real servers in
 `test/e2e/changes.sh` (Gitea 28.3, Prometheus 3.5, Grafana 13.3, Mimir
