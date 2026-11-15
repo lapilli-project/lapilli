@@ -34,10 +34,16 @@ import (
 // it is refused once it is checked again, as it was before (Stale).
 
 // staleWhy is why a proposal waiting for approval waits to be backtested
-// again: a text to translate, and its values.
+// again: a text to translate, and its values. Auto says Lapilli backtests
+// it again itself (backtestStale): one backtested by an earlier lapilli,
+// whose backtests replay or judge as this one no longer does. One a newer
+// lapilli backtested (a replica of another release, or one rolled back
+// from) is held, and left for a person: backtested again here, it would
+// be by the older rules, and the newer one would take it back.
 type staleWhy struct {
 	Format string
 	Args   []any
+	Auto   bool
 }
 
 // Why a proposal is stale, in English: keys into the catalogs, and what
@@ -45,12 +51,18 @@ type staleWhy struct {
 const (
 	staleRule      = "the rule changed since it was proposed"
 	staleNoVersion = "it was backtested by an earlier lapilli, before backtests were numbered by how they replay and judge"
-	staleVersion   = "it was backtested by lapilli %s, which replays or judges otherwise than this one"
+	staleVersion   = "it was backtested by lapilli %s, which replays or judges as an earlier lapilli did"
+	staleNewer     = "it was backtested by lapilli %s, which replays or judges as a newer lapilli does: approve it once this one is as new, or backtest it again here"
 	// The record is judged by whole weeks (verdict.Record): an incident
 	// in a week the period has some of, or the two weeks before, keeps it.
 	staleRecorded   = "an incident was written down in its period's weeks since it was backtested"
 	staleUnrecorded = "no incident keeps the record of its period's weeks any more"
 )
+
+// semantics is how this lapilli replays and judges (verdict.Semantics),
+// as the backtests it runs keep it and those it reads are told stale by: a
+// variable, so that a test can be a lapilli of another number.
+var semantics = verdict.Semantics
 
 // staleNotice is what a stale proposal's page says at its top, with why.
 const staleNotice = "It is stale, so it isn't approved until it is backtested again: %s."
@@ -360,9 +372,11 @@ func (s *Server) proposalsNow(ctx context.Context, ls []proposalLine, rd *readin
 		}
 		switch {
 		case ev.Semantics == 0:
-			l.StaleWhy = &staleWhy{Format: staleNoVersion}
-		case ev.Semantics != verdict.Semantics:
-			l.StaleWhy = &staleWhy{Format: staleVersion, Args: []any{cmpOr(ev.Version, "dev")}}
+			l.StaleWhy = &staleWhy{Format: staleNoVersion, Auto: true}
+		case ev.Semantics < semantics:
+			l.StaleWhy = &staleWhy{Format: staleVersion, Args: []any{cmpOr(ev.Version, "dev")}, Auto: true}
+		case ev.Semantics > semantics:
+			l.StaleWhy = &staleWhy{Format: staleNewer, Args: []any{cmpOr(ev.Version, "dev")}}
 		case bt.NoRecord != nil && *bt.NoRecord && !now:
 			l.StaleWhy = &staleWhy{Format: staleRecorded}
 		case bt.NoRecord != nil && !*bt.NoRecord && now:
@@ -585,7 +599,7 @@ func (s *Server) backtestAgainOf(ctx context.Context, id int64, by string, agent
 		return err
 	}
 	again := ev
-	again.Backtest, again.Semantics, again.Version, again.Outlasts = bt, verdict.Semantics, s.versionOf(), nil
+	again.Backtest, again.Semantics, again.Version, again.Outlasts = bt, semantics, s.versionOf(), nil
 	again.EarlierLost = earlierLost(ev)
 	if p.Kind == ledger.KindFor {
 		if w, ok := want.ForOutlasts(); ok {
@@ -645,7 +659,7 @@ func (s *Server) backtestStale(ctx context.Context) error {
 	now := time.Now()
 	s.againFailed.Lock()
 	ls = slices.DeleteFunc(ls, func(l proposalLine) bool {
-		return l.StaleWhy == nil || l.Stale || now.Sub(s.againFailed.m[l.ID]) < againRetry
+		return l.StaleWhy == nil || !l.StaleWhy.Auto || l.Stale || now.Sub(s.againFailed.m[l.ID]) < againRetry
 	})
 	s.againFailed.Unlock()
 	slices.SortFunc(ls, func(a, b proposalLine) int {

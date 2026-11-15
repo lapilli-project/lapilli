@@ -1593,7 +1593,7 @@
  "The backtest it replaced, from %s to %s: fired %d times as it was, %d as proposed.": "El backtest que reemplazó, de %s a %s: %d disparos como era, %d con la propuesta.",
  "the rule changed since it was proposed": "la regla cambió desde que se propuso",
  "it was backtested by an earlier lapilli, before backtests were numbered by how they replay and judge": "su backtest lo hizo un lapilli anterior, de antes de que los backtests se numeraran por cómo reproducen y juzgan",
- "it was backtested by lapilli %s, which replays or judges otherwise than this one": "su backtest lo hizo lapilli %s, que reproduce o juzga de otro modo que este",
+ "it was backtested by lapilli %s, which replays or judges as an earlier lapilli did": "su backtest lo hizo lapilli %s, que reproduce o juzga como un lapilli anterior",
  "an incident was written down in its period's weeks since it was backtested": "se registró un incidente en las semanas de su periodo después de su backtest",
  "no incident keeps the record of its period's weeks any more": "ya ningún incidente mantiene el registro de las semanas de su periodo",
  "Held until it is backtested again: it is stale": "En espera hasta que se repita el backtest: está desactualizada",
@@ -1614,5 +1614,6 @@
  "lapilli: an agent, for %s, backtested #%d, %s for %s, again, and withdrew the approvals of %s": "lapilli: un agente, en nombre de %s, repitió el backtest de #%d, %s para %s, y retiró las aprobaciones de %s",
  "you have backtested as many proposals again in the last hour as anyone may: try again later": "has repetido en la última hora tantos backtests como cualquiera puede: inténtalo más tarde",
  "it was backtested again less than ten minutes ago: try again in a few minutes": "se repitió su backtest hace menos de diez minutos: inténtalo en unos minutos",
- "backtesting stale proposals again": "repitiendo el backtest de las propuestas desactualizadas"
+ "backtesting stale proposals again": "repitiendo el backtest de las propuestas desactualizadas",
+ "it was backtested by lapilli %s, which replays or judges as a newer lapilli does: approve it once this one is as new, or backtest it again here": "su backtest lo hizo lapilli %s, que reproduce o juzga como un lapilli más nuevo: apruébala cuando este sea igual de nuevo, o repite aquí su backtest"
 }

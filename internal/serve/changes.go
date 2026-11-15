@@ -764,7 +764,7 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 	want := r
 	ev := evidence{From: q.From, Incident: q.Incident, Reason: q.Reason, Version: s.versionOf()}
 	if q.Kind == ledger.KindFor || q.Kind == ledger.KindThreshold {
-		ev.Semantics = verdict.Semantics
+		ev.Semantics = semantics
 	}
 	var b rules.Bound
 	switch q.Kind {

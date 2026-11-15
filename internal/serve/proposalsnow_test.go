@@ -353,10 +353,19 @@ func TestStaleWhy(t *testing.T) {
 	}
 	s.cfg.Version = "v0.42.0"
 	id := keptAs(t, s, verdict.Semantics+1, "v0.43.0", unrecordedFrom, unrecordedTo, &yes)
-	if got := why(id); got != "it was backtested by lapilli v0.43.0, which replays or judges otherwise than this one" {
-		t.Errorf("another number for how it backtests: %q", got)
+	if got := why(id); got != "it was backtested by lapilli v0.43.0, which replays or judges as a newer lapilli does: approve it once this one is as new, or backtest it again here" {
+		t.Errorf("a newer number for how it backtests: %q", got)
 	}
 	drop(id)
+	// This one of the third number: one of the second is older.
+	defer func(was int) { semantics = was }(semantics)
+	semantics = 3
+	id = keptAs(t, s, 2, "v0.41.0", unrecordedFrom, unrecordedTo, &yes)
+	if got := why(id); got != "it was backtested by lapilli v0.41.0, which replays or judges as an earlier lapilli did" {
+		t.Errorf("an older number for how it backtests: %q", got)
+	}
+	drop(id)
+	semantics = verdict.Semantics
 	// Another version that replays and judges alike: not stale, whatever
 	// its number, as an upgrade that changes neither leaves it.
 	id = keptAs(t, s, verdict.Semantics, "v0.40.1", unrecordedFrom, unrecordedTo, &yes)
@@ -970,5 +979,29 @@ func TestLapilliBacktestsStale(t *testing.T) {
 	s.cfg.ReadOnly = true
 	if err := s.backtestStale(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestNewerSemanticsHeld: a proposal a newer lapilli backtested, a replica
+// of another release or one rolled back from, is held, and says so, but
+// Lapilli doesn't backtest it again itself, by the older rules, which the
+// newer one would undo: proposals don't go back and forth between them. A
+// person may.
+func TestNewerSemanticsHeld(t *testing.T) {
+	ctx := context.Background()
+	s, _ := restartsServer(t, nil)
+	newer := keptAs(t, s, semantics+1, "v9.0.0", unrecordedFrom, unrecordedTo, nil)
+	ls, err := s.linesNow(ctx, []ledger.Proposal{state(t, s, newer)})
+	if err != nil || ls[0].StaleWhy == nil || ls[0].StaleWhy.Auto || keyFor(t, s.Handler(), newer, ana, "approve") != "" {
+		t.Fatalf("a newer lapilli's: %v %+v", err, ls[0].StaleWhy)
+	}
+	if err := s.backtestStale(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := proposalEvidence(state(t, s, newer)); got.Semantics != semantics+1 {
+		t.Errorf("backtested again by Lapilli, by the older rules: %+v", got.Semantics)
+	}
+	if code, body, _ := ui(t, s.Handler(), http.MethodPost, "/proposals/"+itoa(newer)+"/backtest", bo, "same-origin", url.Values{}); code != http.StatusSeeOther {
+		t.Errorf("a person backtesting it again here: %d %s", code, body)
 	}
 }

@@ -1593,7 +1593,7 @@
  "The backtest it replaced, from %s to %s: fired %d times as it was, %d as proposed.": "置き換えたバックテスト（%s ～ %s）: 当時のルールで %d 回、提案どおりで %d 回発火。",
  "the rule changed since it was proposed": "提案後にルールが変更されました",
  "it was backtested by an earlier lapilli, before backtests were numbered by how they replay and judge": "再生と判定の方式を番号で記録する前の lapilli がバックテストしました",
- "it was backtested by lapilli %s, which replays or judges otherwise than this one": "lapilli %s がバックテストしましたが、現在のものとは再生か判定の方式が違います",
+ "it was backtested by lapilli %s, which replays or judges as an earlier lapilli did": "lapilli %s がバックテストしましたが、以前の lapilli の再生・判定方式です",
  "an incident was written down in its period's weeks since it was backtested": "バックテスト後に、その期間を含む週のインシデントが記録されました",
  "no incident keeps the record of its period's weeks any more": "その期間を含む週の発火を判定する記録済みインシデントがもうありません",
  "Held until it is backtested again: it is stale": "古い提案のため、バックテストをやり直すまで保留",
@@ -1614,5 +1614,6 @@
  "lapilli: an agent, for %s, backtested #%d, %s for %s, again, and withdrew the approvals of %s": "lapilli: エージェントが %[1]s さんの代わりに #%[2]d、%[4]s の %[3]s のバックテストをやり直し、%[5]s さんの承認が取り消されました",
  "you have backtested as many proposals again in the last hour as anyone may: try again later": "この 1 時間にやり直せるだけのバックテストをやり直しました。後でもう一度試してください",
  "it was backtested again less than ten minutes ago: try again in a few minutes": "10 分以内にバックテストをやり直したばかりです。数分後にもう一度試してください",
- "backtesting stale proposals again": "古い提案のバックテストのやり直し"
+ "backtesting stale proposals again": "古い提案のバックテストのやり直し",
+ "it was backtested by lapilli %s, which replays or judges as a newer lapilli does: approve it once this one is as new, or backtest it again here": "lapilli %s がバックテストしましたが、より新しい lapilli の再生・判定方式です。この lapilli が同じく新しくなってから承認するか、ここでバックテストをやり直してください"
 }

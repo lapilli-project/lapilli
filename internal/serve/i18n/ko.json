@@ -1593,7 +1593,7 @@
  "The backtest it replaced, from %s to %s: fired %d times as it was, %d as proposed.": "바뀌기 전 백테스트(%s ~ %s): 그때 규칙은 %d번, 제안대로면 %d번 발화.",
  "the rule changed since it was proposed": "제안한 뒤 규칙이 바뀌었어요",
  "it was backtested by an earlier lapilli, before backtests were numbered by how they replay and judge": "재생·판정 방식을 번호로 기록하기 전의 이전 lapilli 가 백테스트했어요",
- "it was backtested by lapilli %s, which replays or judges otherwise than this one": "lapilli %s 가 백테스트했는데, 지금 버전과 재생·판정 방식이 달라요",
+ "it was backtested by lapilli %s, which replays or judges as an earlier lapilli did": "lapilli %s 가 백테스트했는데, 이전 lapilli 의 재생·판정 방식이에요",
  "an incident was written down in its period's weeks since it was backtested": "백테스트한 뒤 그 기간이 걸친 주에 인시던트가 기록됐어요",
  "no incident keeps the record of its period's weeks any more": "이제 그 기간이 걸친 주의 발화를 판정할 기록된 인시던트가 없어요",
  "Held until it is backtested again: it is stale": "오래된 제안이라 다시 백테스트할 때까지 보류",
@@ -1614,5 +1614,6 @@
  "lapilli: an agent, for %s, backtested #%d, %s for %s, again, and withdrew the approvals of %s": "lapilli: 에이전트가 %[1]s 님을 대신해 #%[2]d, %[4]s 규칙 %[3]s 을(를) 다시 백테스트해서 %[5]s 님의 승인이 취소됐어요",
  "you have backtested as many proposals again in the last hour as anyone may: try again later": "지난 한 시간 동안 다시 백테스트할 수 있는 만큼 했어요. 나중에 다시 시도하세요",
  "it was backtested again less than ten minutes ago: try again in a few minutes": "10분 안에 이미 다시 백테스트했어요. 몇 분 뒤 다시 시도하세요",
- "backtesting stale proposals again": "오래된 제안 다시 백테스트"
+ "backtesting stale proposals again": "오래된 제안 다시 백테스트",
+ "it was backtested by lapilli %s, which replays or judges as a newer lapilli does: approve it once this one is as new, or backtest it again here": "lapilli %s 가 백테스트했는데, 더 새 lapilli 의 재생·판정 방식이에요. 이 lapilli 가 그만큼 새로워진 뒤 승인하거나, 여기서 다시 백테스트하세요"
 }
