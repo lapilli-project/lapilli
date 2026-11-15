@@ -41,6 +41,18 @@ const (
 	MaxNodes  = 6000000
 )
 
+// What aliases may expand to, in the text of the values and keys they
+// bring in again: AliasText at least, past it as much as AliasTimes the
+// text written in the input itself, and never more than MaxFile, as a file
+// of rules is no more. yaml.v3's bound counts values, not their text: one
+// string of 8 MB under an anchor, aliased by 300 rules' labels, is 600
+// values and 2.4 GB of labels, which every page that hashes or shows the
+// rules went through again (a rule's page took 58 s).
+const (
+	AliasText  = 1 << 20
+	AliasTimes = 4
+)
+
 // Nodes says whether b may parse into more values than it is read with:
 // each but the first needs one of , : - [ { or a line of its own.
 func Nodes(b []byte) error {
@@ -83,9 +95,9 @@ func YAMLValueContext(ctx context.Context, n *yaml.Node) (v any, err error) {
 		b = &input{}
 	}
 	b.mu.Lock()
-	c := &converting{ctx: ctx, none: b.none, aliases: map[*yaml.Node]bool{}, decoded: b.decoded, aliased: b.aliased}
+	c := &converting{ctx: ctx, none: b.none, aliases: map[*yaml.Node]bool{}, decoded: b.decoded, aliased: b.aliased, written: b.written, copied: b.copied}
 	b.mu.Unlock()
-	decoded, aliased := c.decoded, c.aliased
+	decoded, aliased, written, copied := c.decoded, c.aliased, c.written, c.copied
 	defer func() {
 		if p := recover(); p != nil {
 			v, err = nil, errNode{fmt.Sprintf("a document lapilli failed to read (%v), which is a fault of lapilli's", p)}
@@ -93,6 +105,8 @@ func YAMLValueContext(ctx context.Context, n *yaml.Node) (v any, err error) {
 		b.mu.Lock()
 		b.decoded += c.decoded - decoded
 		b.aliased += c.aliased - aliased
+		b.written += c.written - written
+		b.copied += c.copied - copied
 		b.mu.Unlock()
 	}()
 	return c.value(n, 0)
@@ -107,6 +121,7 @@ func YAMLValueContext(ctx context.Context, n *yaml.Node) (v any, err error) {
 type input struct {
 	mu               sync.Mutex
 	decoded, aliased int
+	written, copied  int
 	none             bool
 }
 
@@ -137,6 +152,9 @@ type converting struct {
 	// decoded and aliased count the values and keys visited, and those
 	// visited in an alias's expansion, as yaml.v3 counts them.
 	decoded, aliased, inAlias int
+	// written and copied are the text of the scalars visited, those
+	// written in the input and those an alias brought in again (AliasText).
+	written, copied int
 	// anchored is how many anchors the node visited is under: one under
 	// none is let go of once decoded, as no alias reads it again.
 	anchored int
@@ -159,6 +177,21 @@ func (c *converting) step() error {
 	}
 	if c.decoded%1024 == 0 {
 		return c.ctx.Err()
+	}
+	return nil
+}
+
+// text counts a scalar's text, the value or key visited, refusing the
+// input once its aliases have brought in more than AliasText and AliasTimes
+// allow: copied says it came of an alias.
+func (c *converting) text(n *yaml.Node, copied bool) error {
+	if !copied {
+		c.written += len(n.Value)
+		return nil
+	}
+	c.copied += len(n.Value)
+	if c.copied > MaxFile || c.copied > AliasText && c.copied > AliasTimes*c.written {
+		return errNode{fmt.Sprintf("aliases expand to %d bytes of text, more than %d times what is written (%d), or than %d MiB", c.copied, AliasTimes, c.written, MaxFile>>20)}
 	}
 	return nil
 }
@@ -210,6 +243,9 @@ func (c *converting) value(n *yaml.Node, depth int) (any, error) {
 		delete(c.aliases, n)
 		return v, err
 	case yaml.ScalarNode:
+		if err := c.text(n, c.inAlias > 0); err != nil {
+			return nil, err
+		}
 		return scalar(n)
 	case yaml.SequenceNode:
 		out := make([]any, 0, len(n.Content))
@@ -308,6 +344,9 @@ func (m *mapOut) key(k *yaml.Node, c *converting, depth int) (any, error) {
 		return nil, errNode{fmt.Sprintf("line %d: invalid map key", k.Line)}
 	}
 	if m.s != nil {
+		if err := c.text(target, c.inAlias > 0 || k.Kind == yaml.AliasNode); err != nil {
+			return nil, err
+		}
 		return target.Value, nil
 	}
 	return c.value(k, depth+1)
