@@ -29,6 +29,10 @@ type firedOn struct {
 	Of      int    `json:"of"`
 }
 
+// firedOnRead is how many of the alerts that fired most in a week are read
+// to count firings by team: those past them are counted as no team's.
+const firedOnRead = 20000
+
 // firedOnOf are the rules most of whose firings in [from, to) came from
 // what another team owns than theirs, by name; none when no team owns by
 // labels.
@@ -37,7 +41,7 @@ func (s *Server) firedOnOf(ctx context.Context, from, to time.Time) ([]firedOn, 
 	if err != nil || !slices.ContainsFunc(own.teams, func(t ledger.Team) bool { return len(t.Labels) > 0 }) {
 		return nil, err
 	}
-	counts, err := s.l.AlertCounts(ctx, from, to)
+	counts, all, err := s.l.AlertCounts(ctx, from, to, firedOnRead)
 	if err != nil {
 		return nil, err
 	}
@@ -46,13 +50,14 @@ func (s *Server) firedOnOf(ctx context.Context, from, to time.Time) ([]firedOn, 
 		by map[string]int
 	}
 	by := map[string]*tally{}
+	for rule, n := range all {
+		by[rule] = &tally{of: n, by: map[string]int{}}
+	}
 	for _, a := range counts {
 		x := by[a.Rule]
 		if x == nil {
-			x = &tally{by: map[string]int{}}
-			by[a.Rule] = x
+			continue
 		}
-		x.of += a.Firings
 		if team := own.labelTeam(a.Labels); team != "" {
 			x.by[team] += a.Firings
 		}
@@ -97,8 +102,8 @@ func (s *Server) firedOnFor(ctx context.Context, from time.Time) (map[string]fir
 
 func (s *Server) firedOnIn(ctx context.Context, r ledger.Result) (map[string]firedOn, time.Time, error) {
 	var xs []firedOn
-	if err := r.Decode(&xs); err != nil || len(xs) == 0 {
-		return nil, time.Time{}, err
+	if !s.decodeKept(r, &xs) || len(xs) == 0 {
+		return nil, time.Time{}, nil
 	}
 	own, err := s.owners(ctx)
 	if err != nil {

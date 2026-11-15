@@ -90,6 +90,7 @@
   <h2>{{t "Where the noise is"}}</h2>
   <p class="quiet">{{t "The rules with the most ● in the last four weeks, week by week: the darker, the more firings that caught nothing."}}
   <span class="heat-scale" aria-hidden="true">{{t "fewer"}} <i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i><i class="h5"></i> {{t "more"}}</span></p>
+  {{if .HeatLeft}}<p class="quiet">{{t "Weeks with no incident written down to judge them by are left out: what fired then caught nothing written down, which is no noise known."}}</p>{{end}}
   <div class="scroll"><table class="heat">
     <thead><tr><th scope="col">{{t "Rule"}}</th>{{range .HeatWeeks}}<th scope="col" class="hw">{{.}}</th>{{end}}<th scope="col" class="n">{{t "● 4 weeks"}}</th></tr></thead>
     <tbody>{{range .Heat}}<tr><th scope="row" class="hn"><a href="{{$.Rule .Name}}" title="{{.Name}}"><bdi>{{.Name}}</bdi></a></th>{{range .Cells}}<td class="hc {{.Class}}" title="{{.Title}}"><span class="vh">{{.Black}}</span></td>{{end}}<td class="n">{{.Black}}</td></tr>{{end}}</tbody>
@@ -102,7 +103,7 @@
 <thead><tr><th scope="col">{{t "Week of"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th><th scope="col" class="n">{{t "Precision"}}</th><th scope="col" class="n">{{t "Noisy rules"}}</th><th scope="col" class="n">{{t "Refired"}}</th>{{if .Deploys}}<th scope="col" class="n">{{t "During deploys"}}</th>{{end}}<th scope="col" class="n">{{t "Incidents"}}</th><th scope="col" class="n">{{t "✓ Caught"}}</th><th scope="col" class="n">{{t "◐ Noisy only"}}</th><th scope="col" class="n">{{t "✗ Missed"}}</th></tr></thead>
 <tbody>{{range .Weeks}}
 <tr{{if .Current}} class="current"{{end}}>
-  <td class="t"><span class="d">{{day $loc .Start}}</span>{{if .Current}} {{t "(so far)"}}{{end}}{{if .Changed}} <span class="tag" title="{{t "the rules changed this week"}}">{{t "rules changed"}}</span>{{end}}{{if .DeployMark}} <span class="tag">{{t "deploys"}}</span>{{end}}{{if .Quiet}} <span class="tag">{{t "a quiet window"}}</span>{{end}}{{if .NoRecord}} <span class="tag" title="{{t "no incident written down in it or in the two weeks before its end: its firings are counted, not judged"}}">{{t "no record"}}</span>{{end}}</td>
+  <td class="t"><span class="d">{{day $loc .Start}}</span>{{if .Current}} {{t "(so far)"}}{{end}}{{if .Changed}} <span class="tag" title="{{t "the rules changed this week"}}">{{t "rules changed"}}</span>{{end}}{{if .DeployMark}} <span class="tag">{{t "deploys"}}</span>{{end}}{{if .Quiet}} <span class="tag">{{t "a quiet window"}}</span>{{end}}{{if .NoRecord}} <span class="tag" title="{{t "no incident written down in it or in the two weeks before it: its firings are counted, not judged"}}">{{t "no record"}}</span>{{end}}</td>
   <td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Precision}}</td><td class="n">{{if .NoRecord}}–{{else}}{{.Noisy}}{{end}}</td><td class="n">{{.Refired}}</td>{{if $.View.Deploys}}<td class="n">{{.Deploys}}</td>{{end}}
   <td class="n">{{.Incidents}}</td><td class="n">{{.Caught}}</td><td class="n">{{.NoisyOnly}}</td><td class="n{{if .Missed}} bad{{end}}">{{.Missed}}</td>
 </tr>{{end}}</tbody>

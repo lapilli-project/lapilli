@@ -287,6 +287,17 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 				return err
 			}
 			lo = min(lo, ilo)
+			// From when the impact signal was read, all of it: what keeps the
+			// record of the firings since (ImpactSince).
+			was, err := l.meta(t.ctx, t, "impact_since")
+			if err != nil {
+				return err
+			}
+			if n, err := strconv.ParseInt(was, 10, 64); err != nil || f.ImpactSince.Unix() < n {
+				if err := setMeta(t.ctx, t, "impact_since", strconv.FormatInt(f.ImpactSince.Unix(), 10)); err != nil {
+					return err
+				}
+			}
 		}
 		if err := l.judge(t, lo-int64(o.Lead/time.Second), to, o); err != nil {
 			return err

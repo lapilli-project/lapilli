@@ -460,11 +460,11 @@ func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []versi
 		p.PrecisionBy, p.FiringsBy, p.IncidentsBy = besides(v.ruleLine, sum(v.Before, from))
 		// With no record, now or in the span before, there is no precision
 		// to set beside another.
-		then, err := s.l.RecordKept(ctx, v.Before, from)
+		then, err := s.spanKept(ctx, v.Before, from, nil)
 		if err != nil {
 			return err
 		}
-		p.PrecisionBy.On = p.PrecisionBy.On && !v.NoRecord && then
+		p.PrecisionBy.On = p.PrecisionBy.On && v.Unjudged == 0 && then
 	}
 	if p.Near, err = s.nearOf(ctx, name, from); err != nil {
 		return err

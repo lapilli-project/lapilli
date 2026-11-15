@@ -87,14 +87,18 @@ type Summary struct {
 	// rules that differ alone, with --changed-only.
 	FiringsBefore int `json:"firings_before"`
 	FiringsAfter  int `json:"firings_after"`
-	// IncidentsGiven says the firings were judged against incidents,
+	// IncidentsGiven says incidents were given to judge against,
 	// --incidents or --impact. Without them nothing was judged: no firing
 	// caught anything, each counts as a black stone, and Incidents is 0.
+	// The firings were judged only when it is true and NoRecord false.
 	IncidentsGiven bool `json:"incidents_given"`
 	// Incidents are the incidents in the period, and IncidentsChanged
 	// those the two sets catch differently.
 	Incidents        int `json:"incidents"`
 	IncidentsChanged int `json:"incidents_changed"`
+	// NoRecord says incidents were given, and none keeps the period's
+	// record (Report.NoRecord): nothing was judged, as without them.
+	NoRecord bool `json:"no_record"`
 }
 
 // Summarize sets c.Summary from the rest of c; incidents says whether
@@ -104,6 +108,7 @@ func (c *Comparison) Summarize(incidents bool) {
 	s := &Summary{Changed: p.changed, Added: p.added, Removed: p.gone, Same: c.Same, Alike: len(p.alike),
 		Unreplayed: len(p.broken), RecordingChanged: len(c.Recording), IncidentsGiven: incidents, IncidentsChanged: len(c.Incidents)}
 	s.NothingChanged = s.Changed+s.Added+s.Removed+s.RecordingChanged == 0
+	s.NoRecord = incidents && c.Before != nil && c.Before.NoRecord
 	if c.Before != nil {
 		s.FiringsBefore, s.Incidents = len(c.Before.Firings), len(c.Before.Incidents)
 	}

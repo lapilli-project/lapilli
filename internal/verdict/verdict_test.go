@@ -174,6 +174,9 @@ func TestNoisyCatch(t *testing.T) {
 		{ID: "A", Start: m(238)},  // Chatty fires at 240, by chance
 		{ID: "B", Start: m(600)},  // Chatty at 600, Precise at 605
 		{ID: "C", Start: m(3000)}, // nothing
+		// Written down two days before, nothing caught: the record is kept
+		// from before the first firing, so every one is judged.
+		{ID: "Z", Start: t0.Add(-48 * time.Hour), End: t0.Add(-47 * time.Hour)},
 	}
 	r := Judge(nil, fs, incs, opts())
 	a, b, c := r.Incidents[0], r.Incidents[1], r.Incidents[2]

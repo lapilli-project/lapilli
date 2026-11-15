@@ -1162,17 +1162,14 @@ func (s *Server) ruleChangesOf(r *http.Request, v *ruleView) error {
 			v.SaysForms = append(v.SaysForms, fix)
 		}
 	}
-	if rs, err := s.l.Results(ctx, "suggestions", 1); err != nil {
+	// None once the week it was worked out for has no record.
+	ss, _, err := s.suggestionsNow(ctx, nil)
+	if err != nil {
 		return err
-	} else if len(rs) > 0 {
-		var ss []verdict.Suggestion
-		if err := rs[0].Decode(&ss); err != nil {
-			return err
-		}
-		for _, x := range ss {
-			if x.Rule == v.Name {
-				v.SuggestedFor = verdict.Duration(x.NewFor)
-			}
+	}
+	for _, x := range ss {
+		if x.Rule == v.Name {
+			v.SuggestedFor = verdict.Duration(x.NewFor)
 		}
 	}
 	if f.rule.Graph != nil || f.rule.Unsupported != "" {

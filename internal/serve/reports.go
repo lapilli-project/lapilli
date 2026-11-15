@@ -267,8 +267,9 @@ func (s *Server) buildReport(ctx context.Context, r ledger.Scheduled, team *ledg
 		in = func(rule string) bool { return own.rule[rule] == team.ID }
 	}
 	// A report of the ledger over a span, for whom the report is for.
+	// A team's judged by the incidents it owns.
 	of := func(from, to time.Time) (*verdict.Report, error) {
-		rep, err := s.ledgerReport(ctx, from, to, o, false)
+		rep, err := s.ledgerReportFor(ctx, from, to, o, false, team)
 		if err != nil || team == nil {
 			return rep, err
 		}
@@ -357,7 +358,7 @@ func (s *Server) buildReport(ctx context.Context, r ledger.Scheduled, team *ledg
 				}
 			}
 		case "suggestions":
-			line, nums, err = s.suggestionsSection(ctx, from, to, in)
+			line, nums, err = s.suggestionsSection(ctx, from, to, in, team)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", sec, err)
@@ -443,9 +444,12 @@ func (s *Server) noiseSection(rep *verdict.Report, from, to time.Time, loc *time
 	if err != nil {
 		return "", nil, err
 	}
-	was := map[string]bool{}
+	// A rule judged by none of its firings before isn't newly noisy: it
+	// wasn't known not to be.
+	was, unjudged := map[string]bool{}, map[string]bool{}
 	for _, r := range prev.Rules {
 		was[r.Rule] = r.Noisy
+		unjudged[r.Rule] = r.NoRecord
 	}
 	var noisy []noisyRule
 	newly := []string{}
@@ -454,7 +458,7 @@ func (s *Server) noiseSection(rep *verdict.Report, from, to time.Time, loc *time
 			continue
 		}
 		noisy = append(noisy, noisyRule{r.Rule, r.Firings, r.Firings - r.White})
-		if !was[r.Rule] {
+		if !was[r.Rule] && !unjudged[r.Rule] {
 			newly = append(newly, r.Rule)
 		}
 	}
@@ -687,20 +691,15 @@ func (s *Server) replaySection(ctx context.Context, from, to, checkedTo time.Tim
 // suggestionsSection: the longer fors the weekly digest worked out last,
 // and the spare rules over twelve weeks; for a week or longer only, as a
 // shorter span is too short to tell.
-func (s *Server) suggestionsSection(ctx context.Context, from, to time.Time, in func(string) bool) (string, any, error) {
+func (s *Server) suggestionsSection(ctx context.Context, from, to time.Time, in func(string) bool, team *ledger.Team) (string, any, error) {
 	if to.Sub(from) < 7*24*time.Hour-time.Hour { // a week across a change of the clocks
 		return "", nil, nil
 	}
 	l := s.cfg.Lang
-	var sugg []verdict.Suggestion
-	rs, err := s.l.Results(ctx, "suggestions", 1)
+	// None once their week has no record, everyone's or the team's.
+	sugg, _, err := s.suggestionsNow(ctx, team)
 	if err != nil {
 		return "", nil, err
-	}
-	if len(rs) > 0 {
-		if err := rs[0].Decode(&sugg); err != nil {
-			return "", nil, err
-		}
 	}
 	sugg = slices.DeleteFunc(sugg, func(x verdict.Suggestion) bool { return !in(x.Rule) })
 	spare, err := s.spareRules(ctx)

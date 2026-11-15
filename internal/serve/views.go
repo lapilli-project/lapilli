@@ -52,13 +52,16 @@ type tallies struct {
 	// says its last week is over, a week before this one (talliesTo).
 	to   time.Time
 	over bool
-	// kept says, of each week, whether its record is kept: starts are when
-	// the incidents that keep it started, read with the tallies; mid is
-	// the ledger's Midnight, at when they were read (record.go).
-	kept   map[int64]bool
-	starts []time.Time
-	mid    func(int64) time.Time
-	at     time.Time
+	// kept says, of each week, whether its record is kept, by rec, of the
+	// incidents recs that keep it, read with the tallies; keptAll, by
+	// everyone's, before only kept one team's, team. mid is the ledger's
+	// Midnight, at when they were read (record.go).
+	kept, keptAll map[int64]bool
+	recs          []ledger.Incident
+	rec           verdict.Record
+	team          *ledger.Team
+	mid           func(int64) time.Time
+	at            time.Time
 }
 
 // whole are, of the weeks ws, those the ledger has whole: not the week
@@ -174,7 +177,7 @@ func (t *tallies) noisyAll(week, rule int64) bool {
 		return t.noisy(week, rule)
 	}
 	x := t.everyone[week][rule]
-	return t.kept[week] && noisy(x.Firings, x.White, t.o)
+	return t.keptAll[week] && noisy(x.Firings, x.White, t.o)
 }
 
 // stateAll is state, judged against everyone's rules: as the incidents
@@ -221,6 +224,10 @@ type ruleLine struct {
 	// precision isn't known, and it isn't noisy; Unrecorded, that it fired
 	// as often as a noisy rule fires, with no record to judge it by.
 	NoRecord, Unrecorded bool
+	// Unjudged are its firings in weeks with no record: in Firings and
+	// Black, and in no precision (deploysUnjudged, of those during deploys).
+	Unjudged        int
+	deploysUnjudged int
 	// Unrecord is what the last digest said its firings were, of a week
 	// with no record: in place of a suggestion. FiredOn, that most of them
 	// came from what another team owns than the one its alerts go to.
@@ -438,6 +445,10 @@ func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]
 		by = t.everyone
 	}
 	recent := t.weeks[len(t.weeks)-n:]
+	kept := t.kept
+	if t.everyone != nil {
+		kept = t.keptAll
+	}
 	sums := map[int64]*verdict.RuleResult{}
 	for _, w := range recent {
 		for id, x := range by[w] {
@@ -449,13 +460,16 @@ func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]
 			}
 			r.Firings += x.Firings
 			r.White += x.White
+			if !kept[w] {
+				r.Unjudged += x.Firings - x.White
+			}
 		}
 	}
 	rs := make([]verdict.RuleResult, 0, len(sums))
 	noisyRule := make(map[string]bool, len(sums))
-	kept := t.keptOver(n)
+	at := noisyAt(t.o)
 	for _, r := range sums {
-		r.Noisy = kept && noisy(r.Firings, r.White, t.o)
+		r.Noisy = verdict.IsNoisy(r.Firings-r.Unjudged, r.White, at)
 		noisyRule[r.Rule] = r.Noisy
 		rs = append(rs, *r)
 	}
@@ -499,7 +513,7 @@ func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]
 // ruleLines are each rule's stones over the last n weeks, the noisiest
 // first, and the rules that never fired.
 func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]ruleLine, []string, error) {
-	sugg, err := s.suggestions(ctx, l)
+	sugg, err := s.suggestions(ctx, l, t)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -527,6 +541,11 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 			l.Excused += x.Excused
 			l.Deploys += x.Deploy
 			l.DeploysCaught += x.DeployWhite
+			// A week with no record: counted, not judged.
+			if !t.kept[w] {
+				l.Unjudged += x.Firings - x.White
+				l.deploysUnjudged += x.Deploy - x.DeployWhite
+			}
 		}
 	}
 	credit, err := s.credit(ctx, t, n)
@@ -546,18 +565,16 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 		}
 	}
 	var out []ruleLine
-	kept, at := t.keptOver(n), t.o.NoisyFirings
-	if at == 0 {
-		at = verdict.NoisyFirings
-	}
+	at := noisyAt(t.o)
 	for id, l := range sum {
 		c := credit[l.Name]
 		l.Incidents, l.First, l.Alone, l.Spare, l.SomeRules = c.Incidents, c.First, c.Alone, c.Spare, t.o.SomeRules
 		l.Black = l.Firings - l.White
-		l.Noisy = kept && noisy(l.Firings, l.White, t.o)
-		l.NoRecord = !kept && l.Firings > 0
-		l.Unrecorded = l.NoRecord && l.Firings >= at
-		l.Precision = pct(l.White, l.Firings)
+		judged := l.Firings - l.Unjudged
+		l.Noisy = verdict.IsNoisy(judged, l.White, at)
+		l.NoRecord = l.Firings > 0 && judged == 0
+		l.Unrecorded = !l.Noisy && l.Unjudged >= at.Firings
+		l.Precision = pct(l.White, judged)
 		l.RefiredShare = pct(l.Refired, l.Firings)
 		// refireWeeks for this rule alone, a week at a time rather than
 		// every rule's each week: two thousand rules cost what forty do.
@@ -567,10 +584,7 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 				l.RefiredWeeks++
 			}
 		}
-		l.Without = pct(l.White-l.DeploysCaught, l.Firings-l.Deploys)
-		if l.NoRecord {
-			l.Precision, l.Without = "–", "–" // not known: nothing to judge it by
-		}
+		l.Without = pct(l.White-l.DeploysCaught, judged-(l.Deploys-l.deploysUnjudged))
 		// Weeks running it has been noisy, up to the last whole week.
 		for i := len(t.weeks) - 2 + t.last(); i >= 0 && t.noisy(t.weeks[i], id); i-- {
 			l.Streak++
@@ -652,14 +666,11 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 	return out, silent, nil
 }
 
-// suggestions are the latest week's, by rule.
-func (s *Server) suggestions(ctx context.Context, l string) (map[string]string, error) {
-	rs, err := s.l.Results(ctx, "suggestions", 1)
-	if err != nil || len(rs) == 0 {
-		return map[string]string{}, err
-	}
-	var ss []verdict.Suggestion
-	if err := rs[0].Decode(&ss); err != nil {
+// suggestions are the latest week's, by rule, while that week's record is
+// kept as t's weeks are judged (suggestionsIn).
+func (s *Server) suggestions(ctx context.Context, l string, t *tallies) (map[string]string, error) {
+	ss, err := s.suggestionsIn(ctx, t)
+	if err != nil {
 		return nil, err
 	}
 	out := map[string]string{}
@@ -685,10 +696,11 @@ type rulesView struct {
 	// Deploys says the ledger keeps deploys: the firings during them have
 	// a column.
 	Deploys bool
-	// NoRecord says the weeks shown had firings, and no incident started
-	// in them or in the two weeks before their end: no precision is known,
-	// and no rule is called noisy.
+	// NoRecord says the weeks shown had firings, and none of them a record:
+	// no precision is known, and no rule is called noisy. Unkept is how many
+	// of the weeks shown had firings and no record, when some had one.
 	NoRecord bool `json:"no_record,omitempty"`
+	Unkept   int  `json:"weeks_no_record,omitempty"`
 }
 
 // sortRules puts the rules in order of what by: refired, the most re-fired
@@ -799,8 +811,17 @@ func (s *Server) rulesOver(r *http.Request, week int64) (rulesData, error) {
 	if err != nil {
 		return rulesData{}, err
 	}
-	v := rulesView{Weeks: n, Team: f, Lines: lines, Silent: silent, Facts: facts, Deploys: deploys, Sorts: []string{"", "refired"},
-		NoRecord: slices.ContainsFunc(lines, func(l ruleLine) bool { return l.NoRecord })}
+	v := rulesView{Weeks: n, Team: f, Lines: lines, Silent: silent, Facts: facts, Deploys: deploys, Sorts: []string{"", "refired"}}
+	for _, w := range t.weeks[len(t.weeks)-n:] {
+		if !t.kept[w] && slices.ContainsFunc(slices.Collect(maps.Values(t.by[w])), func(x ledger.Tally) bool { return x.Firings > 0 }) {
+			v.Unkept++
+		}
+	}
+	v.NoRecord = slices.ContainsFunc(lines, func(l ruleLine) bool { return l.Firings > 0 }) &&
+		!slices.ContainsFunc(lines, func(l ruleLine) bool { return l.Firings > l.Unjudged })
+	if v.NoRecord {
+		v.Unkept = 0
+	}
 	if deploys {
 		v.Sorts = append(v.Sorts, "deploys")
 	}

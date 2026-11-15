@@ -80,7 +80,7 @@ func TestFacetsNoRecord(t *testing.T) {
 		t.Errorf("is:unrecorded: %d %q", code, hd.Get("Location"))
 	}
 	_, body, _ := get(t, h, "/rules?weeks=4")
-	for _, want := range []string{"No incident was written down in these weeks or the two before their end", `<span aria-hidden="true">?</span> No record`} {
+	for _, want := range []string{"No incident was written down in these weeks or the two weeks before them", `<span aria-hidden="true">?</span> No record`} {
 		if !strings.Contains(html.UnescapeString(body), want) {
 			t.Errorf("/rules: no %q", want)
 		}
@@ -141,7 +141,8 @@ func TestDigestNoRecord(t *testing.T) {
 	defer slack.Close()
 	hook := filepath.Join(t.TempDir(), "hook")
 	os.WriteFile(hook, []byte(slack.URL+"/services/T/B/SECRET"), 0o600)
-	s, _ := server(t, func(c *Config) { c.Slack = hook; c.Backfill = 10 * 24 * time.Hour })
+	// No incident source, nor an impact signal, keeps the week's record.
+	s, _ := server(t, func(c *Config) { c.Slack = hook; c.Backfill = 10 * 24 * time.Hour; c.Impact = "" })
 	ctx := context.Background()
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {
@@ -251,7 +252,8 @@ func TestDigestUnrecorded(t *testing.T) {
 	defer slack.Close()
 	hook := filepath.Join(t.TempDir(), "hook")
 	os.WriteFile(hook, []byte(slack.URL+"/services/T/B/SECRET"), 0o600)
-	s, _ := server(t, func(c *Config) { c.Slack = hook; c.Backfill = 10 * 24 * time.Hour })
+	// No incident source, nor an impact signal, keeps the week's record.
+	s, _ := server(t, func(c *Config) { c.Slack = hook; c.Backfill = 10 * 24 * time.Hour; c.Impact = "" })
 	s.h = pastBound{s.h}
 	ctx := context.Background()
 	raw := ""

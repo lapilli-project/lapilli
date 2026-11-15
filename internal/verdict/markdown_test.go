@@ -125,7 +125,7 @@ func TestCompareMarkdown(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := SummaryLine + `{"nothing_changed":true,"changed":0,"added":0,"removed":0,"same":42,"alike":0,"unreplayed":0,"recording_changed":0,` +
-		`"firings_before":0,"firings_after":0,"incidents_given":false,"incidents":0,"incidents_changed":0})` + "\n" +
+		`"firings_before":0,"firings_after":0,"incidents_given":false,"incidents":0,"incidents_changed":0,"no_record":false})` + "\n" +
 		NothingChangedHeading + "\n\nNothing that decides when the 42 rules fire has changed: nothing to replay.\n"
 	if b.String() != want {
 		t.Errorf("nothing changed:\n%s\nwant:\n%s", b.String(), want)

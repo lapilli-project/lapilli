@@ -79,7 +79,8 @@ func restartsWeek(t *testing.T, incs []incident.Incident) ([]replay.Version, *ve
 // range it counts over: from 30m, one restart alone can never fire it, so
 // it would fire less for no better reason. Shorter ones don't halve it.
 func TestSuggestNotPastTheWindow(t *testing.T) {
-	away := []incident.Incident{{ID: "INC-1", Start: t0.Add(6 * 24 * time.Hour), End: t0.Add(6*24*time.Hour + time.Hour), Labels: incident.Labels{"service": {"x"}}}}
+	// Written down the day before the week, nothing caught: every firing judged.
+	away := []incident.Incident{{ID: "INC-1", Start: t0.Add(-24 * time.Hour), End: t0.Add(-23 * time.Hour), Labels: incident.Labels{"service": {"x"}}}}
 	versions, rep, o := restartsWeek(t, away)
 	if rep.NoRecord || !rep.Rules[0].Noisy || rep.Rules[0].Firings < 30 {
 		t.Fatalf("the restart rule: %+v", rep.Rules[0])
@@ -97,38 +98,32 @@ func TestSuggestNotPastTheWindow(t *testing.T) {
 	}
 }
 
-// firedOf gives a rule's firings, as a report judged them.
-func firedOf(rep *verdict.Report) func(string) ([]firing.Firing, error) {
-	return func(rule string) ([]firing.Firing, error) {
-		var out []firing.Firing
-		for _, j := range rep.Firings {
-			if j.Rule == rule {
-				out = append(out, j.Firing)
-			}
+// teamed are a report's firings with no record, each alert with the team
+// whose labels it has: pod a is web's.
+type teamed struct{ Judged }
+
+func (t teamed) Alerts(ctx context.Context, rule string, most int) ([]verdict.AlertCount, int, error) {
+	top, all, err := t.Judged.Alerts(ctx, rule, most)
+	for i := range top {
+		if top[i].Labels["pod"] == "a" {
+			top[i].Team = "web"
 		}
-		return out, nil
 	}
+	return top, all, err
 }
 
 // With no incident written down, the restart rule isn't noisy: what its
-// firings were is said instead. Each restart held the count at 1, well past
-// the bound of 0.5, so 36 of its 37 firings happened; the flicker at 0.55
-// didn't go past 0.6. Its alerts, by the label that tells them apart, with
-// the team whose labels each has.
+// firings were is said instead. Its condition counts restarts, so each of
+// its 37 firings is one, the flicker at 0.55 too; its alerts, by the label
+// that tells them apart, with the team whose labels each has.
 func TestUnrecorded(t *testing.T) {
 	versions, rep, _ := restartsWeek(t, nil)
-	teamOf := func(l map[string]string) string {
-		if l["pod"] == "a" {
-			return "web"
-		}
-		return ""
-	}
-	us, err := Unrecorded(context.Background(), restarts{}, versions, rep, firedOf(rep), teamOf, time.Minute)
+	us, err := Unrecorded(context.Background(), restarts{}, versions, rep, teamed{Judged(rep.Firings)}, time.Minute)
 	if err != nil || len(us) != 1 {
 		t.Fatalf("%+v %v", us, err)
 	}
 	u := us[0]
-	if u.Rule != "Restarts" || u.Firings != 37 || u.Clear == nil || *u.Clear != 36 || u.Bound != "> 0.5" || u.Alerts != 3 {
+	if u.Rule != "Restarts" || u.Firings != 37 || !u.Events || u.Clear == nil || *u.Clear != 37 || u.Bound != "" || u.Alerts != 3 {
 		t.Errorf("%+v", u)
 	}
 	want := []verdict.AlertCount{{Labels: map[string]string{"pod": "a"}, Firings: 18, Team: "web"}, {Labels: map[string]string{"pod": "b"}, Firings: 18},
@@ -136,26 +131,56 @@ func TestUnrecorded(t *testing.T) {
 	if !reflect.DeepEqual(u.Top, want) {
 		t.Errorf("top %+v", u.Top)
 	}
-	if got := u.Text(); got != `Fired 37 times with no incident written down to judge them by. 36 of them went well past its bound (> 0.5), not a flicker at its edge: these happened. Most came from: pod=a 18 (web), pod=b 18, pod=c 1. A longer "for" would hide them: write down whether they mattered, or fix what fires them.` {
+	if got := u.Text(); got != `Fired 37 times with no incident written down to judge them by. All 37 are events its condition counts (a count that went up): these happened. Most came from: pod=a 18 (web), pod=b 18, pod=c 1. A longer "for" would hide them: write down whether they mattered, or fix what fires them.` {
 		t.Errorf("text %q", got)
 	}
 
 	// Judged, nothing to say.
-	away := []incident.Incident{{ID: "INC-1", Start: t0.Add(6 * 24 * time.Hour), End: t0.Add(6*24*time.Hour + time.Hour), Labels: incident.Labels{"service": {"x"}}}}
+	away := []incident.Incident{{ID: "INC-1", Start: t0.Add(-24 * time.Hour), End: t0.Add(-23 * time.Hour), Labels: incident.Labels{"service": {"x"}}}}
 	versions, rep, _ = restartsWeek(t, away)
-	if us, err := Unrecorded(context.Background(), restarts{}, versions, rep, firedOf(rep), nil, time.Minute); err != nil || len(us) != 0 {
+	if us, err := Unrecorded(context.Background(), restarts{}, versions, rep, Judged(rep.Firings), time.Minute); err != nil || len(us) != 0 {
 		t.Errorf("with a record: %+v %v", us, err)
 	}
 
-	// A condition with no one bound that decides it: how many went past it
-	// isn't known, and isn't guessed.
+	// A level, not a count of events, with one bound that decides it: the
+	// 36 at 1 went well past 0.5; the flicker at 0.55 didn't stay past 0.6.
 	versions, rep, _ = restartsWeek(t, nil)
-	versions[0].Rules[0].Expr = "up == 1 and increase(restarts[30m]) > 0.5"
-	us, err = Unrecorded(context.Background(), restarts{}, versions, rep, firedOf(rep), nil, time.Minute)
+	versions[0].Rules[0].Expr = "level > 0.5"
+	us, err = Unrecorded(context.Background(), restarts{}, versions, rep, Judged(rep.Firings), time.Minute)
+	if err != nil || len(us) != 1 || us[0].Events || us[0].Clear == nil || *us[0].Clear != 36 || us[0].Bound != "> 0.5" {
+		t.Errorf("a level: %+v %v", us, err)
+	}
+	if !strings.Contains(us[0].Text(), "36 of them went well past its bound (> 0.5), not a flicker at its edge") {
+		t.Errorf("a level: %q", us[0].Text())
+	}
+
+	// No one bound that decides it: how many went past isn't known, and
+	// isn't guessed.
+	versions[0].Rules[0].Expr = "up == 1 and level > 0.5"
+	us, err = Unrecorded(context.Background(), restarts{}, versions, rep, Judged(rep.Firings), time.Minute)
 	if err != nil || len(us) != 1 || us[0].Clear != nil || us[0].Bound != "" || us[0].Alerts != 3 {
 		t.Errorf("and: %+v %v", us, err)
 	}
 	if strings.Contains(us[0].Text(), "well past") || strings.Contains(us[0].Text(), "would hide") {
 		t.Errorf("and: %q", us[0].Text())
+	}
+}
+
+// more is an UnrecordedFrom that has more firings than are read.
+type more struct{ Judged }
+
+func (m more) Firings(ctx context.Context, rule string, most int) ([]firing.Firing, bool, error) {
+	fs, _, err := m.Judged.Firings(ctx, rule, most)
+	return fs, true, err
+}
+
+// A level that fired more times than are read: how many went past its
+// bound isn't told from part of them.
+func TestUnrecordedMoreThanRead(t *testing.T) {
+	versions, rep, _ := restartsWeek(t, nil)
+	versions[0].Rules[0].Expr = "level > 0.5"
+	us, err := Unrecorded(context.Background(), restarts{}, versions, rep, more{Judged(rep.Firings)}, time.Minute)
+	if err != nil || len(us) != 1 || us[0].Clear != nil || us[0].Alerts != 3 {
+		t.Errorf("%+v %v", us, err)
 	}
 }

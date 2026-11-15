@@ -326,17 +326,22 @@ func (s *Server) checkContent(ctx context.Context, rs []rules.Rule, scrape conte
 	if err != nil {
 		return nil, err
 	}
+	// The firings judged, and those that caught something: a week with no
+	// record, its white ones alone.
 	sums := map[int64][2]int{}
 	for _, w := range t.weeks {
 		for id, x := range t.by[w] {
-			c := sums[id]
-			sums[id] = [2]int{c[0] + x.Firings, c[1] + x.White}
+			c, judged := sums[id], x.Firings
+			if !t.kept[w] {
+				judged = x.White
+			}
+			sums[id] = [2]int{c[0] + judged, c[1] + x.White}
 		}
 	}
 	noisyRule := map[string]bool{}
-	kept := t.keptOver(len(t.weeks)) // with no record, no rule is noisy
+	at := noisyAt(t.o)
 	for id, c := range sums {
-		if row, ok := t.rules[id]; ok && row.Source == "" && kept && noisy(c[0], c[1], t.o) {
+		if row, ok := t.rules[id]; ok && row.Source == "" && verdict.IsNoisy(c[0], c[1], at) {
 			noisyRule[row.Name] = true
 		}
 	}
@@ -363,10 +368,18 @@ func (s *Server) checkContent(ctx context.Context, rs []rules.Rule, scrape conte
 	st := &contentState{findings: map[string][]contentFinding{}, says: map[string]rules.Says{}, unchecked: unchecked}
 	for i, r := range named {
 		st.says[r.Name] = r.Says
+		// What a for one event can't outlast means, asked of the rule once,
+		// and only of one found so.
+		var outlasts *verdict.Outlast
+		if slices.ContainsFunc(fs[i], func(f content.Finding) bool { return f.Check == content.ForOutlasts }) {
+			if w, ok := r.ForOutlasts(); ok {
+				outlasts = &verdict.Outlast{For: r.For, Window: w}
+			}
+		}
 		for _, f := range fs[i] {
 			cf := contentFinding{Kind: f.Check, Class: f.Class, Key: content.Message(f.Check), Detail: f.Detail}
-			if w, ok := r.ForOutlasts(); ok && f.Check == content.ForOutlasts {
-				cf.Outlasts = &verdict.Outlast{For: r.For, Window: w}
+			if f.Check == content.ForOutlasts {
+				cf.Outlasts = outlasts
 			}
 			if !slices.ContainsFunc(st.findings[r.Name], cf.same) { // a rule read twice, from two files
 				st.findings[r.Name] = append(st.findings[r.Name], cf)

@@ -1874,16 +1874,13 @@ func (s *Server) proposeFound(ctx context.Context) error {
 		}
 	}
 	var asks []ask
-	if rs, err := s.l.Results(ctx, "suggestions", 1); err != nil {
+	// None once the week they were worked out for has no record.
+	ss, _, err := s.suggestionsNow(ctx, nil)
+	if err != nil {
 		return err
-	} else if len(rs) > 0 {
-		var ss []verdict.Suggestion
-		if err := rs[0].Decode(&ss); err != nil {
-			return err
-		}
-		for _, x := range ss {
-			asks = append(asks, ask{Rule: x.Rule, Kind: ledger.KindFor, For: x.NewFor, From: "suggestion"})
-		}
+	}
+	for _, x := range ss {
+		asks = append(asks, ask{Rule: x.Rule, Kind: ledger.KindFor, For: x.NewFor, From: "suggestion"})
 	}
 	near, err := s.nearMisses(ctx)
 	if err != nil {

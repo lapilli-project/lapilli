@@ -72,8 +72,9 @@ type summaryRow struct {
 	Firings   int      `json:"firings"`
 	Caught    int      `json:"caught"`
 	Precision *float64 `json:"precision"`
-	// NoRecord says no incident started in the week, or in the two weeks
-	// before its end: its firings are counted, not judged.
+	// NoRecord says no incident was on in the week, or in the two weeks
+	// before it, and no impact signal was read over it: its firings are
+	// counted, not judged.
 	NoRecord bool `json:"no_record"`
 	// Excused are firings quiet windows excused, in none of the others.
 	Excused    int                     `json:"excused"`

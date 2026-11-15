@@ -86,7 +86,8 @@ func TestVerdictNoRecord(t *testing.T) {
 	t.Logf("\n%s", out)
 	for _, want := range []string{
 		verdict.NoRecordText,
-		"Restarts: Fired 12 times with no incident written down to judge them by. All 12 went well past its bound (> 0.5), not a flicker at its edge: these happened. Most came from: namespace=api 4, namespace=jobs 4, namespace=web 4. A longer \"for\" would hide them: write down whether they mattered, or fix what fires them.",
+		"Restarts: Fired 12 times with no incident written down to judge them by. All 12 are events its condition counts (a count that went up): these happened. Most came from: namespace=api 4, namespace=jobs 4, namespace=web 4. A longer \"for\" would hide them: write down whether they mattered, or fix what fires them.",
+		"of the firings, with no incident written down to judge them by, 5 came while people slept, and 7 more off hours.",
 		"RestartsForAnHour: Its for (1h) is as long as the 30m its condition counts over, or longer: one event alone can never fire it; only events that keep coming for 1h will.",
 	} {
 		if strings.Count(out, want) != 1 {
@@ -112,5 +113,68 @@ func TestVerdictNoRecord(t *testing.T) {
 		if r.Noisy || r.Rule == "Restarts" && !r.NoRecord || r.Rule == "RestartsForAnHour" && (r.Outlasts == nil || r.Outlasts.Window != 30*time.Minute) {
 			t.Errorf("--json %s: %+v", r.Rule, r)
 		}
+	}
+
+	// --check-content: which rules are noisy can't be said.
+	stdout.Reset()
+	if code := run([]string{"verdict", "--rules", rulesFile, "--prometheus", "http://p", "--incidents", incidents, "--since", "2d", "--check-content"}, &stdout, &stderr); code != 0 ||
+		!strings.Contains(stdout.String(), verdict.NoRecordText) || strings.Contains(stdout.String(), "Measured over") {
+		t.Errorf("--check-content: exit %d\n%s", code, stdout.String())
+	}
+	stdout.Reset()
+	if code := run([]string{"verdict", "--rules", rulesFile, "--prometheus", "http://p", "--incidents", incidents, "--since", "2d", "--check-content", "--json"}, &stdout, &stderr); code != 0 ||
+		!strings.Contains(stdout.String(), `"noisy_measured": false`) || !strings.Contains(stdout.String(), `"no_record": true`) {
+		t.Errorf("--check-content --json: exit %d\n%s", code, stdout.String())
+	}
+}
+
+// impactHistory is restartHistory, with an impact signal that found nothing,
+// and the times it was asked over.
+type impactHistory struct {
+	restartHistory
+	asked *[]time.Time
+}
+
+func (h impactHistory) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	if expr == "impact" {
+		*h.asked = append(*h.asked, start)
+		return nil, nil
+	}
+	return h.restartHistory.QueryRange(ctx, expr, start, end, step)
+}
+
+// With --impact read over the period, and the two weeks before it, its
+// record is kept, found or not: users weren't hurt, as far as it can say, so
+// the restarts are judged, and noisy; a for one restart can't outlast is
+// never suggested all the same.
+func TestVerdictImpactKeepsRecord(t *testing.T) {
+	var asked []time.Time
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return impactHistory{asked: &asked}, nil }
+	now = func() time.Time { return t0 }
+	rulesFile := write(t, "rules.yaml", `groups:
+  - name: pods
+    rules:
+      - alert: Restarts
+        expr: increase(restarts[30m]) > 0.5
+        for: 1m
+`)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"verdict", "--rules", rulesFile, "--prometheus", "http://p", "--impact", "impact", "--since", "2d", "--json"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d\n%s", code, stderr.String())
+	}
+	var rep verdict.Report
+	if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.NoRecord || rep.Unjudged != 0 || !rep.Rules[0].Noisy || len(rep.Unrecorded) != 0 {
+		t.Errorf("%v %d %+v", rep.NoRecord, rep.Unjudged, rep.Rules[0])
+	}
+	for _, s := range rep.Suggestions {
+		if s.NewFor >= 30*time.Minute {
+			t.Errorf("suggested %+v", s)
+		}
+	}
+	if len(asked) == 0 || !asked[0].Equal(t0.Add(-2*24*time.Hour-verdict.RecordLookback)) {
+		t.Errorf("impact asked from %v, want two weeks before the period", asked)
 	}
 }

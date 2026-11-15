@@ -1338,8 +1338,9 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 				seen = seenNow(seen, rep, nil)
 			}
 			// With no record, no rule was noisy: what the firings of those
-			// that fired as often were, in the time that is left.
-			if unrec, err = s.unrecordedOf(ctx, rctx, in, rep, from, to); err != nil {
+			// that fired as often were, in the time that is left; and of a
+			// team's rules, by its own record, when the ledger's is kept.
+			if unrec, err = s.unrecordedTeams(ctx, rctx, in, rep, o, from, to); err != nil {
 				s.log.Warn("the digest's firings with no record to judge them by weren't all looked at", "err", err)
 			}
 		}
@@ -1753,7 +1754,14 @@ const digestClaim = 2 * time.Minute
 
 // digestReport is the week's report, with the suggestions worked out for it.
 func (s *Server) digestReport(ctx context.Context, from, to time.Time, o verdict.Options) (*verdict.Report, error) {
-	rep, err := s.ledgerReport(ctx, from, to, o, false)
+	return s.digestReportFor(ctx, from, to, o, nil)
+}
+
+// digestReportFor is digestReport, judged by a team's record when team
+// isn't nil: by the incidents it owns. Its suggestions, while the week has a
+// record; what its firings were with no record, while it has none.
+func (s *Server) digestReportFor(ctx context.Context, from, to time.Time, o verdict.Options, team *ledger.Team) (*verdict.Report, error) {
+	rep, err := s.ledgerReportFor(ctx, from, to, o, false, team)
 	if err != nil {
 		return nil, err
 	}
@@ -1761,7 +1769,7 @@ func (s *Server) digestReport(ctx context.Context, from, to time.Time, o verdict
 	if err != nil {
 		return nil, err
 	}
-	if len(rs) > 0 && rs[0].From.Equal(from) {
+	if len(rs) > 0 && rs[0].From.Equal(from) && !rep.NoRecord {
 		if err := rs[0].Decode(&rep.Suggestions); err != nil {
 			return nil, err
 		}
@@ -1784,14 +1792,19 @@ func (s *Server) digestReport(ctx context.Context, from, to time.Time, o verdict
 		open[ir.ID] = ir.Missed() || ir.OnlyNoisy()
 	}
 	rep.NearMisses = slices.DeleteFunc(rep.NearMisses, func(nm verdict.NearMiss) bool { return !open[nm.Incident] })
-	// What the firings with no record were, while the week still has none.
+	// What the firings with no record were, while the week still has none,
+	// of everyone's or the team's.
 	if rep.NoRecord {
 		if r, ok, err := s.l.ForPeriod(ctx, "unrecorded", from); err != nil {
 			return nil, err
-		} else if ok {
-			if err := r.Decode(&rep.Unrecorded); err != nil {
-				return nil, err
+		} else if ok && s.decodeKept(r, &rep.Unrecorded) {
+			scope := ""
+			if team != nil {
+				scope = team.Name
 			}
+			rep.Unrecorded = slices.DeleteFunc(rep.Unrecorded, func(u verdict.Unrecorded) bool { return u.Scope != "" && u.Scope != scope })
+		} else {
+			rep.Unrecorded = nil
 		}
 	}
 	return rep, nil
@@ -1993,11 +2006,18 @@ func teamReport(rep *verdict.Report, o *owners, t ledger.Team, server *verdict.H
 		out.Hours = o.schedules(server).used(nil, &t)
 	}
 	out.Suggestions = slices.DeleteFunc(slices.Clone(rep.Suggestions), func(x verdict.Suggestion) bool { return o.rule[x.Rule] != t.ID })
-	// Its rules' firings with no record, and those of another's on what it
-	// owns, by the labels they had.
-	out.Unrecorded = slices.DeleteFunc(slices.Clone(rep.Unrecorded), func(u verdict.Unrecorded) bool {
-		return o.rule[u.Rule] != t.ID && !slices.ContainsFunc(u.Top, func(a verdict.AlertCount) bool { return a.Team == t.Name })
-	})
+	// Its rules' firings with no record; and of another's, its alerts on
+	// what the team owns alone, no third team's labels with them.
+	out.Unrecorded = nil
+	for _, u := range rep.Unrecorded {
+		if o.rule[u.Rule] != t.ID {
+			u.Top = slices.DeleteFunc(slices.Clone(u.Top), func(a verdict.AlertCount) bool { return a.Team != t.Name })
+			if len(u.Top) == 0 {
+				continue
+			}
+		}
+		out.Unrecorded = append(out.Unrecorded, u)
+	}
 	out.Incidents = slices.DeleteFunc(slices.Clone(rep.Incidents), func(in verdict.IncidentResult) bool {
 		return !o.ownsIncident(t, ledger.Incident{Incident: in.Incident, CaughtBy: in.CaughtBy})
 	})
@@ -2094,7 +2114,12 @@ func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh
 		if !webhook && !own1 {
 			continue
 		}
-		part := teamReport(rep, own, t, o.Hours)
+		// Judged by the incidents it owns.
+		judged, err := s.digestReportFor(ctx, from, to, o, &t)
+		if err != nil {
+			return err
+		}
+		part := teamReport(judged, own, t, o.Hours)
 		fired := slices.ContainsFunc(part.Rules, func(r verdict.RuleResult) bool { return r.Firings+r.Excused > 0 })
 		if !fired && len(part.Incidents) == 0 && len(firedOnLines(on, from, t.Name)) == 0 {
 			continue // nothing happened to it, nor fired on what it owns

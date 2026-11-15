@@ -51,8 +51,11 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		fmt.Fprintf(w, "Rules replayed as they stood: replaced at %s\n", strings.Join(at, ", "))
 	}
 	partial(w, r.Unreplayed, len(r.Rules), true)
-	if r.NoRecord && firings > 0 {
+	switch {
+	case r.NoRecord && firings > 0:
 		fmt.Fprintln(w, NoRecordText)
+	case r.Unjudged > 0:
+		fmt.Fprintf(w, SomeUnjudgedText+"\n", r.Unjudged, firings)
 	}
 
 	var fired, silent, unsupported []RuleResult
@@ -213,7 +216,16 @@ func outOfHours(w io.Writer, r *Report) error {
 		}
 		fmt.Fprintf(w, "%s's rules by its own hours, in %s (at work %s, asleep %s);\n", Clean(t.Team), t.Zone, HoursText(t.Work), HoursText(t.Sleep))
 	}
-	fmt.Fprintf(w, "of the firings that caught nothing, %d came while people slept, and %d more off hours.\n", asleep, off)
+	// With no record, what caught nothing may have caught something nobody
+	// wrote down.
+	switch {
+	case r.NoRecord:
+		fmt.Fprintf(w, "of the firings, with no incident written down to judge them by, %d came while people slept, and %d more off hours.\n", asleep, off)
+	case r.Unjudged > 0:
+		fmt.Fprintf(w, "of the firings that caught nothing, or had no incident written down to judge them by, %d came while people slept, and %d more off hours.\n", asleep, off)
+	default:
+		fmt.Fprintf(w, "of the firings that caught nothing, %d came while people slept, and %d more off hours.\n", asleep, off)
+	}
 	sev := slices.ContainsFunc(rows, func(rr RuleResult) bool { return rr.Severity != "" })
 	table := [][]string{withSeverity(sev, "RULE", "SEVERITY", "● ASLEEP", "● OFF HOURS", "● AT WORK")}
 	const most = 10

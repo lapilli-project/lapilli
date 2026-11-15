@@ -139,7 +139,8 @@ func post(t *testing.T, h http.Handler, path string, form url.Values, site strin
 
 func TestServe(t *testing.T) {
 	ctx := context.Background()
-	s, rules := server(t, func(c *Config) { c.UserHeader = "X-Forwarded-Email" })
+	// INC-0 keeps the week before's record: every firing is judged.
+	s, rules := server(t, func(c *Config) { c.UserHeader = "X-Forwarded-Email"; keepRecord(c) })
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {
 		t.Fatal(err)

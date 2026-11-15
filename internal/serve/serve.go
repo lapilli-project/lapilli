@@ -803,6 +803,13 @@ func (s *Server) options(ctx context.Context) (verdict.Options, error) {
 	if err != nil {
 		return o, err
 	}
+	// With --impact, the record is kept from when the runs read it, all of
+	// it (verdict.Options.ImpactFrom).
+	if s.cfg.Impact != "" {
+		if o.ImpactFrom, err = s.l.ImpactSince(ctx); err != nil {
+			return o, err
+		}
+	}
 	for k, v := range set {
 		if err := apply(&o, k, v.Value); err != nil {
 			s.log.Warn("a setting from the UI doesn't parse; the command line's is used", "setting", k, "err", err)

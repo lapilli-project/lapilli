@@ -18,7 +18,8 @@ import (
 // from what the digest kept.
 func TestFiredOn(t *testing.T) {
 	ctx := context.Background()
-	s, _ := server(t, func(c *Config) { c.Backfill = 10 * 24 * time.Hour })
+	// No impact signal: the week before has no record, everyone's or web's.
+	s, _ := server(t, func(c *Config) { c.Backfill = 10 * 24 * time.Hour; c.Impact = "" })
 	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "web", Labels: incident.Labels{"service": {"search"}}}, "ana"); err != nil {
 		t.Fatal(err)
 	}

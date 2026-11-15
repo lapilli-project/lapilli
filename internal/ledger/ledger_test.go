@@ -97,6 +97,10 @@ func TestSameAsJudge(t *testing.T) {
 	for seed := uint64(1); seed <= 5; seed++ {
 		l := open(t, time.UTC)
 		fs, incs := world(seed, 400)
+		// Still on from a month before, it keeps the record of every firing,
+		// as the ledger judges by week and verdict.Judge by firing, and
+		// catches none.
+		incs = append([]incident.Incident{{ID: "KEEP", Start: t0.Add(-30 * 24 * time.Hour)}}, incs...)
 		if _, err := l.SyncFile(ctx, incs, opts); err != nil {
 			t.Fatal(err)
 		}

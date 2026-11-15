@@ -24,8 +24,11 @@ type contentReport struct {
 	To   time.Time `json:"to,omitzero"`
 	// Measured says whether the rules were replayed, for the labels their
 	// alerts had; Noisy, whether they were judged against incidents too.
-	Measured bool          `json:"measured"`
-	Noisy    bool          `json:"noisy_measured"`
+	Measured bool `json:"measured"`
+	Noisy    bool `json:"noisy_measured"`
+	// NoRecord says incidents were given, and none keeps the period's
+	// record: which rules are noisy can't be said.
+	NoRecord bool          `json:"no_record,omitempty"`
 	Scrape   string        `json:"scrape_interval,omitempty" jsonschema:"the one the range check counted with; none when not known"`
 	Rules    []contentRule `json:"rules"`
 }
@@ -42,6 +45,19 @@ type contentOutput struct {
 	content.Finding
 	Message string `json:"message"`
 	Why     string `json:"why,omitempty"`
+}
+
+// readImpact reads the impact signal (--impact) from two weeks before the
+// period to its end, which keeps the record of all of it whatever it finds
+// (verdict.Options.ImpactFrom), and adds the windows it finds to incs.
+func (f *verdictFlags) readImpact(ctx context.Context, h history, incs []incident.Incident) ([]incident.Incident, error) {
+	from := verdict.RecordFrom(f.opts.From, f.opts.To)
+	series, err := h.QueryRange(ctx, f.impact, from, f.opts.To, f.step)
+	if err != nil {
+		return nil, fmt.Errorf("--impact: %w", err)
+	}
+	f.opts.ImpactFrom = from
+	return incident.Merge(incs, incident.FromImpact(series, f.step, f.impactFor), f.opts.UnknownLen, f.opts.Match), nil
 }
 
 // runContent checks what the rules given say when they fire, and how they
@@ -121,11 +137,9 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 				}
 			}
 			if f.impact != "" {
-				series, err := h.QueryRange(ctx, f.impact, f.opts.From, f.opts.To, f.step)
-				if err != nil {
-					return fail(fmt.Errorf("--impact: %w", err))
+				if incs, err = f.readImpact(ctx, h, incs); err != nil {
+					return fail(err)
 				}
-				incs = incident.Merge(incs, incident.FromImpact(series, f.step, f.impactFor), f.opts.UnknownLen, f.opts.Match)
 			}
 			judged := verdict.Judge(known, fs, incs, f.opts)
 			noisy := map[string]bool{}
@@ -133,7 +147,8 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 				noisy[r.Rule] = r.Noisy
 			}
 			o.Noisy = func(rule string) bool { return noisy[rule] }
-			rep.Noisy = true
+			// With no record, which rules are noisy wasn't measured.
+			rep.Noisy, rep.NoRecord = !judged.NoRecord, judged.NoRecord
 		}
 	} else if f.incidents != "" {
 		fmt.Fprintln(stderr, "lapilli verdict: --incidents tells which rules are noisy only with a replay: add --prometheus")
@@ -184,6 +199,8 @@ func contentText(w io.Writer, rep contentReport) error {
 	switch {
 	case !rep.Measured:
 		fmt.Fprintln(w, "Not measured: give --prometheus to replay the rules, for the labels their alerts have, and --incidents for which are noisy.")
+	case rep.NoRecord:
+		fmt.Fprintln(w, verdict.NoRecordText)
 	case !rep.Noisy:
 		fmt.Fprintf(w, "Measured over %s to %s; give --incidents or --impact for which rules are noisy.\n", rep.From.Format(time.RFC3339), rep.To.Format(time.RFC3339))
 	default:

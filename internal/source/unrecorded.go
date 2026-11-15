@@ -3,7 +3,6 @@ package source
 import (
 	"context"
 	"errors"
-	"fmt"
 	"maps"
 	"math"
 	"slices"
@@ -16,70 +15,77 @@ import (
 	"lapilli.dev/internal/verdict"
 )
 
-// unrecordedMost is how many rules Unrecorded looks at, the most firings
-// first: each is replayed once more, over the whole period.
-const unrecordedMost = 10
+// How much Unrecorded looks at: the rules, the most firings with no record
+// first, each replayed once more over the period when its condition doesn't
+// count events; and of each, the firings read to tell how many went well
+// past its bound, past which that isn't told.
+const (
+	unrecordedMost  = 10
+	unrecordedFired = 5000
+)
+
+// UnrecordedFrom is where Unrecorded reads a rule's firings with no record
+// in the period.
+type UnrecordedFrom interface {
+	// Firings are a rule's firings with no record, most of them at most;
+	// more says there were more.
+	Firings(ctx context.Context, rule string, most int) (fs []firing.Firing, more bool, err error)
+	// Alerts are its alerts with no record that fired most, most of them at
+	// most, each with all its labels, how many times, and the team whose
+	// labels it has, when that is known; all is how many there were.
+	Alerts(ctx context.Context, rule string, most int) (top []verdict.AlertCount, all int, err error)
+}
 
 // Unrecorded works out, for each rule of rep that fired rep.NoisyAt.Firings
-// times or more in a period with no record (Report.NoRecord), and was
-// replayed, what its firings were (verdict.Unrecorded): the most firings
-// first, unrecordedMost at most. fired gives a rule's firings in the
-// period, as they were judged, those a quiet window excused aside; teamOf,
-// when not nil, the team whose labels an alert has.
+// times or more with no record (verdict.RuleResult.Unrecorded), and was
+// replayed, what those firings were (verdict.Unrecorded): the most first,
+// unrecordedMost at most.
 //
-// How many went well past the bound is known only of a rule whose
-// condition has one bound that decides it (deciding), in each version it
-// is in: it is replayed with the bound rules.NearBy further, and each of
-// its firings that one of those overlaps, alike in its labels, went well
-// past it. A replay that fails, or runs out of time, leaves it unknown, and
-// err says why; the rest is kept.
-func Unrecorded(ctx context.Context, h replay.History, versions []replay.Version, rep *verdict.Report,
-	fired func(rule string) ([]firing.Firing, error), teamOf func(map[string]string) string, step time.Duration) ([]verdict.Unrecorded, error) {
-	if !rep.NoRecord {
-		return nil, nil
-	}
+// Of a rule whose condition counts events, in every version it is in
+// (rules.Rule.EventWindow), each firing is an event the condition counted:
+// all happened. Of another with one bound that decides it (deciding), it is
+// replayed with the bound rules.NearBy further, and each of its firings one
+// of those overlaps, alike in its labels, went well past it. A replay that
+// fails, or runs out of time, leaves that unknown, and err says why; the
+// rest is kept.
+func Unrecorded(ctx context.Context, h replay.History, versions []replay.Version, rep *verdict.Report, from UnrecordedFrom,
+	step time.Duration) ([]verdict.Unrecorded, error) {
 	var rrs []verdict.RuleResult
 	for _, rr := range rep.Rules {
-		if rr.Replayed && rr.Unsupported == "" && rr.Firings >= rep.NoisyAt.Firings {
+		if rr.Replayed && rr.Unsupported == "" && rr.Unrecorded(rep.NoisyAt) {
 			rrs = append(rrs, rr)
 		}
 	}
 	slices.SortStableFunc(rrs, func(a, b verdict.RuleResult) int {
-		if a.Firings != b.Firings {
-			return b.Firings - a.Firings
+		if a.Unjudged != b.Unjudged {
+			return b.Unjudged - a.Unjudged
 		}
 		return strings.Compare(a.Rule, b.Rule)
 	})
 	var out []verdict.Unrecorded
 	var failed error
 	for _, rr := range rrs[:min(len(rrs), unrecordedMost)] {
-		fs, err := fired(rr.Rule)
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
+		u := verdict.Unrecorded{Rule: rr.Rule, Firings: rr.Firings - rr.Judged(), Top: []verdict.AlertCount{}}
+		top, all, err := from.Alerts(ctx, rr.Rule, verdict.TopRead)
 		if err != nil {
 			return out, err
 		}
-		u := verdict.Unrecorded{Rule: rr.Rule, Firings: rr.Firings, Top: []verdict.AlertCount{}}
-		byKey := map[string]*verdict.AlertCount{}
-		var keys []string
-		for _, f := range fs {
-			k := labelKey(f.Labels)
-			if byKey[k] == nil {
-				a := &verdict.AlertCount{Labels: f.Labels}
-				if teamOf != nil {
-					a.Team = teamOf(f.Labels)
-				}
-				byKey[k] = a
-				keys = append(keys, k)
+		u.Alerts, u.Top = all, verdict.TopAlerts(top)
+		switch counts := countsEvents(versions, rr.Rule); {
+		case counts:
+			all := u.Firings
+			u.Events, u.Clear = true, &all
+		case failed == nil:
+			fs, more, err := from.Firings(ctx, rr.Rule, unrecordedFired)
+			if err != nil {
+				return out, err
 			}
-			byKey[k].Firings++
-		}
-		all := make([]verdict.AlertCount, 0, len(keys))
-		for _, k := range keys {
-			all = append(all, *byKey[k])
-		}
-		if len(all) > 0 {
-			u.Alerts, u.Top = verdict.TopAlerts(all)
-		}
-		if failed == nil && ctx.Err() == nil {
+			if more {
+				break // more than is read: how many went past isn't told
+			}
 			n, bound, err := clearOf(ctx, h, versions, rr.Rule, fs, rep.From, rep.To, step)
 			if err != nil {
 				failed = err
@@ -93,6 +99,60 @@ func Unrecorded(ctx context.Context, h replay.History, versions []replay.Version
 		failed = ctx.Err()
 	}
 	return out, failed
+}
+
+// countsEvents reports whether a rule counts events in every version it is
+// in, and is in one.
+func countsEvents(versions []replay.Version, rule string) bool {
+	in := false
+	for _, ver := range versions {
+		for _, r := range ver.Rules {
+			if r.Name != rule {
+				continue
+			}
+			if _, ok := r.EventWindow(); !ok {
+				return false
+			}
+			in = true
+		}
+	}
+	return in
+}
+
+// Judged are, as an UnrecordedFrom, a report's firings with no record.
+type Judged []verdict.Judged
+
+func (js Judged) Firings(_ context.Context, rule string, most int) ([]firing.Firing, bool, error) {
+	var out []firing.Firing
+	for _, j := range js {
+		if j.Rule == rule && j.NoRecord {
+			if len(out) == most {
+				return out, true, nil
+			}
+			out = append(out, j.Firing)
+		}
+	}
+	return out, false, nil
+}
+
+func (js Judged) Alerts(_ context.Context, rule string, most int) ([]verdict.AlertCount, int, error) {
+	by := map[string]*verdict.AlertCount{}
+	for _, j := range js {
+		if j.Rule != rule || !j.NoRecord {
+			continue
+		}
+		k := labelKey(j.Labels)
+		if by[k] == nil {
+			by[k] = &verdict.AlertCount{Labels: j.Labels}
+		}
+		by[k].Firings++
+	}
+	all := make([]verdict.AlertCount, 0, len(by))
+	for _, k := range slices.Sorted(maps.Keys(by)) {
+		all = append(all, *by[k])
+	}
+	slices.SortStableFunc(all, func(a, b verdict.AlertCount) int { return b.Firings - a.Firings })
+	return all[:min(len(all), most)], len(by), nil
 }
 
 // deciding is the one bound that decides a rule's condition: its only
@@ -192,7 +252,10 @@ func overlap(a, b firing.Firing, to time.Time) bool {
 func labelKey(l map[string]string) string {
 	var b strings.Builder
 	for _, k := range slices.Sorted(maps.Keys(l)) {
-		fmt.Fprintf(&b, "%q=%q,", k, l[k])
+		b.WriteString(k)
+		b.WriteByte(0)
+		b.WriteString(l[k])
+		b.WriteByte(0)
 	}
 	return b.String()
 }

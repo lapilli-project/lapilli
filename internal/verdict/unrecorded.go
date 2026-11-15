@@ -7,25 +7,32 @@ import (
 	"strings"
 )
 
-// A rule that fired as often as a noisy one in a period with no record
-// (Report.NoRecord) can't be called noisy: its firings caught nothing
-// written down, which isn't nothing. What can be said without a record is
-// what they were: whether the value its condition compares went well past
-// its bound, or flickered at its edge, and which alerts fired most. Those
-// that went well past it happened; whether they mattered is for a person to
-// write down. A longer "for" would only hide them.
+// A rule that fired as often as a noisy one with no record (Record) can't be
+// called noisy: its firings caught nothing written down, which isn't
+// nothing. What can be said without a record is what they were. Of a rule
+// whose condition counts events (rules.Rule.EventWindow), each firing is an
+// event it counted, a count that went up: they happened. Of another with one
+// bound that decides it, those whose value went well past the bound
+// happened, and those that stayed within a fifth of it may have flickered at
+// its edge. And which alerts fired most. Whether they mattered is for a
+// person to write down. A longer "for" would only hide them.
 
 // Unrecorded is such a rule, as lapilli verdict, replaying it, and lapilli
 // serve's weekly digest work it out.
 type Unrecorded struct {
-	Rule    string `json:"rule"`
-	Firings int    `json:"firings"`
-	// Clear is how many of its firings had the value its condition
-	// compares go past its bound by more than rules.NearBy of it, for as
-	// long as its "for": not a flicker at its edge. Nil when that can't be
-	// told: its condition has no one bound that decides it (a range, and,
-	// or, unless), its bound is nothing, or it couldn't be replayed with
-	// the bound further. Bound is the bound, as compared: "> 0.5".
+	Rule string `json:"rule"`
+	// Firings are its firings with no record (RuleResult.Unjudged).
+	Firings int `json:"firings"`
+	// Events says its condition counts events: each firing is one, and
+	// Clear is all of them.
+	Events bool `json:"events,omitempty"`
+	// Clear is how many of its firings happened: of a condition that counts
+	// events, all; of another, those whose value went past its bound by
+	// more than rules.NearBy of it, for all of its "for". Nil when that
+	// can't be told: its condition has no one bound that decides it (a
+	// range, and, or, unless), its bound is nothing, it couldn't be
+	// replayed with the bound further, or it fired more than is read. Bound
+	// is the bound, as compared: "> 0.5".
 	Clear *int   `json:"clear,omitempty"`
 	Bound string `json:"bound,omitempty"`
 	// Alerts is how many alerts (label sets) fired; Top, those that fired
@@ -35,11 +42,14 @@ type Unrecorded struct {
 	// DuringDeploys is, when deploys are known (lapilli serve), how many
 	// came during a deploy of what they are about.
 	DuringDeploys *int `json:"during_deploys,omitempty"`
-	// Team is, in lapilli serve, the team that owns the rule.
-	Team string `json:"team,omitempty"`
+	// Team is, in lapilli serve, the team that owns the rule; Scope, the
+	// team whose record it had none of, "" for the ledger's: what is said in
+	// that team's views, and not in others'.
+	Team  string `json:"team,omitempty"`
+	Scope string `json:"scope,omitempty"`
 }
 
-// Happened says the firings went well past the bound, as far as is known.
+// Happened says its firings happened, as far as is known.
 func (u Unrecorded) Happened() bool { return u.Clear != nil && *u.Clear > 0 }
 
 // AlertCount is an alert, by its labels, and how many times it fired. Team
@@ -59,54 +69,73 @@ func (a AlertCount) LabelsText() string {
 	return strings.Join(ls, " ")
 }
 
-// TopShown is how many of a rule's alerts are named; topLabels, how many
-// of the labels that tell them apart each is named by; topValue, how much
-// of a label's value.
+// TopShown is how many of a rule's alerts are named; TopRead, how many of
+// those that fired most are read to name them by; topLabels, how many of
+// the labels that tell them apart each is named by; topValue, how much of a
+// label's value.
 const (
 	TopShown  = 5
+	TopRead   = 1000
 	topLabels = 4
 	topValue  = 80
 )
 
-// TopAlerts are, of a rule's alerts, each with all its labels, how many
-// there are and those that fired most, TopShown at most, the most first,
-// each by the labels whose values aren't the same in all of them: the
-// labels that tell them apart. One alert alone is named by its own, but
-// alertname and severity.
-func TopAlerts(all []AlertCount) (int, []AlertCount) {
-	all = slices.Clone(all)
-	slices.SortStableFunc(all, func(a, b AlertCount) int {
+// TopAlerts are, of a rule's alerts, each with all its labels, those that
+// fired most, TopShown at most, the most first, each by the labels whose
+// values aren't the same in all of them: the labels that tell them apart.
+// One alert alone is named by its own, but alertname and severity. It reads
+// TopRead of them at most, those that fired most, in one pass.
+func TopAlerts(all []AlertCount) []AlertCount {
+	if len(all) == 0 {
+		return []AlertCount{}
+	}
+	type alert struct {
+		AlertCount
+		text string
+	}
+	as := make([]alert, len(all))
+	for i, a := range all {
+		as[i] = alert{a, ""}
+	}
+	slices.SortStableFunc(as, func(a, b alert) int { return b.Firings - a.Firings })
+	as = as[:min(len(as), TopRead)]
+	for i := range as {
+		as[i].text = as[i].LabelsText()
+	}
+	slices.SortStableFunc(as, func(a, b alert) int {
 		if a.Firings != b.Firings {
 			return b.Firings - a.Firings
 		}
-		return strings.Compare(a.LabelsText(), b.LabelsText())
+		return strings.Compare(a.text, b.text)
 	})
-	keys := map[string]bool{}
-	for _, a := range all {
-		for k := range a.Labels {
-			keys[k] = true
+	// Each label: in how many, its first value, and whether another
+	// differs.
+	type seen struct {
+		n       int
+		first   string
+		differs bool
+	}
+	keys := map[string]*seen{}
+	for _, a := range as {
+		for k, v := range a.Labels {
+			if x := keys[k]; x == nil {
+				keys[k] = &seen{n: 1, first: v}
+			} else {
+				x.n++
+				x.differs = x.differs || v != x.first
+			}
 		}
 	}
 	var apart []string
-	for _, k := range slices.Sorted(maps.Keys(keys)) {
-		v0, ok0 := all[0].Labels[k]
-		for _, a := range all[1:] {
-			if v, ok := a.Labels[k]; v != v0 || ok != ok0 {
-				apart = append(apart, k)
-				break
-			}
+	for k, x := range keys {
+		if x.differs || x.n != len(as) || len(as) == 1 && k != "alertname" && k != "severity" {
+			apart = append(apart, k)
 		}
 	}
-	if len(all) == 1 {
-		for _, k := range slices.Sorted(maps.Keys(all[0].Labels)) {
-			if k != "alertname" && k != "severity" {
-				apart = append(apart, k)
-			}
-		}
-	}
+	slices.Sort(apart)
 	apart = apart[:min(len(apart), topLabels)]
-	var top []AlertCount
-	for _, a := range all[:min(len(all), TopShown)] {
+	top := make([]AlertCount, 0, TopShown)
+	for _, a := range as[:min(len(as), TopShown)] {
 		x := AlertCount{Labels: map[string]string{}, Firings: a.Firings, Team: a.Team}
 		for _, k := range apart {
 			if v, ok := a.Labels[k]; ok {
@@ -118,28 +147,37 @@ func TopAlerts(all []AlertCount) (int, []AlertCount) {
 		}
 		top = append(top, x)
 	}
-	return len(all), top
+	return top
 }
 
 // Text says, in English, what is known of the rule's firings, and what to
 // do with them.
-func (u Unrecorded) Text() string {
+func (u Unrecorded) Text() string { return u.text(true) }
+
+// Prose is Text without the alerts' labels, which are their sources' words:
+// for where they are given apart (MCP's top).
+func (u Unrecorded) Prose() string { return u.text(false) }
+
+func (u Unrecorded) text(labels bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Fired %d times with no incident written down to judge them by.", u.Firings)
-	if u.Clear != nil {
-		switch c := *u.Clear; {
-		case c == u.Firings:
-			fmt.Fprintf(&b, " All %d went well past its bound (%s), not a flicker at its edge: these happened.", c, Clean(u.Bound))
-		case c > 0:
-			fmt.Fprintf(&b, " %d of them went well past its bound (%s), not a flicker at its edge: these happened.", c, Clean(u.Bound))
-		default:
-			fmt.Fprintf(&b, " None went well past its bound (%s): each came within a fifth of it.", Clean(u.Bound))
-		}
+	switch {
+	case u.Events:
+		fmt.Fprintf(&b, " All %d are events its condition counts (a count that went up): these happened.", u.Firings)
+	case u.Clear == nil:
+	case *u.Clear == u.Firings:
+		fmt.Fprintf(&b, " All %d went well past its bound (%s), not a flicker at its edge: these happened.", *u.Clear, Clean(u.Bound))
+	case *u.Clear > 0:
+		fmt.Fprintf(&b, " %d of them went well past its bound (%s), not a flicker at its edge: these happened.", *u.Clear, Clean(u.Bound))
+	default:
+		fmt.Fprintf(&b, " None stayed more than a fifth past its bound (%s) for all of its for.", Clean(u.Bound))
 	}
 	if u.DuringDeploys != nil && *u.DuringDeploys > 0 {
 		fmt.Fprintf(&b, " %d came during a deploy.", *u.DuringDeploys)
 	}
 	switch {
+	case !labels && len(u.Top) > 0:
+		fmt.Fprintf(&b, " They came from %d alerts.", u.Alerts)
 	case u.Alerts == 1 && len(u.Top) == 1:
 		fmt.Fprintf(&b, " All came from one alert: %s.", alertText(u.Top[0], false))
 	case len(u.Top) > 0:
