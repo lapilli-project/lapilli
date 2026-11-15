@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -172,6 +173,22 @@ func TestBacktestAgain(t *testing.T) {
 		!strings.Contains(last.After, `"approvals_withdrawn":["ana"]`) || !strings.Contains(last.After, `"agent":true`) ||
 		!strings.Contains(last.After, `"version":"v0.42.0"`) || last.Before != `{"version":""}` {
 		t.Errorf("its step: %+v", last)
+	}
+	// A person's, or Lapilli's, that withdrew nothing: not told.
+	for _, who := range []string{"cy", Proposer} {
+		q := proposal("Quiet"+who, KindFor)
+		q.Evidence = was
+		qid, err := l.Propose(ctx, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := l.BacktestAgain(ctx, qid, who, false, was, now, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ns, _ = l.Due(ctx, "webhook", time.Now().Add(time.Hour), 10)
+	if n := len(slices.DeleteFunc(ns, func(n Notice) bool { return n.Event != "proposal.backtested" })); n != 1 {
+		t.Errorf("proposal.backtested told %d times, want once", n)
 	}
 	// Moved on: not.
 	if _, err := l.Move(ctx, id, []string{StateProposed}, StateDropped, "ana", Step{}); err != nil {

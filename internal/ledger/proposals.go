@@ -674,7 +674,8 @@ func backtestable(ctx context.Context, q interface {
 // it waits for them again; who gave them is given back. What it replaced
 // is kept in changes, as before, and what it is now, as after, with
 // whether an agent asked and whose approvals were withdrawn: its page's
-// history says so. It is told as proposal.backtested, naming them.
+// history says so. It is told as proposal.backtested, naming them, when it
+// withdrew any or an agent asked.
 // ErrMoved when it isn't waiting for approval, or its evidence isn't was
 // any more (backtested again meanwhile); ErrBacktestedJustNow and
 // ErrTooManyBacktests as MayBacktestAgain says. A proposal's own columns
@@ -723,6 +724,12 @@ func (l *Ledger) BacktestAgain(ctx context.Context, id int64, by string, agent b
 		}
 		if err := change(t, by, fmt.Sprintf("proposal #%d backtested again", id), before, kept); err != nil {
 			return err
+		}
+		// Told when it withdrew an approval, or an agent asked for it:
+		// those are what someone should hear of. Evidence kept anew and
+		// nothing else is on its page.
+		if len(withdrawn) == 0 && !agent {
+			return nil
 		}
 		about := p.about()
 		told := about["proposal"].(map[string]any)
