@@ -323,6 +323,12 @@ type Server struct {
 	// proposals were made against.
 	outlasts outlasts
 	parsing  flights[namedRules]
+	// life is the server's own context, ended (end) as it shuts down or is
+	// closed: what runs apart from a request (a flight) runs under it.
+	life     context.Context
+	end      context.CancelFunc
+	closed   sync.Once
+	closeErr error
 	// againFailed are the stale proposals Lapilli failed to backtest again
 	// itself (backtestStale).
 	againFailed againFailed
@@ -475,6 +481,8 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		// writes a link for each: a few a second, a first run's in a burst.
 		tasksRate: &limiter{rate: 5, burst: 100}, tasksBusy: make(chan struct{}, 1), changes: newChanges(ctx, l)}
 	s.status.runs, s.status.notices, s.status.refused = map[string]int{}, map[string]int{}, map[string]int{}
+	s.life, s.end = context.WithCancel(context.Background())
+	s.parsing.base, s.parsing.log = s.life, log
 	if s.ledgerID, err = ledgerID(ctx, l); err != nil {
 		l.Close()
 		return nil, fmt.Errorf("--ledger: %w", err)
@@ -668,7 +676,16 @@ func (s *Server) alarmsEvery() time.Duration {
 }
 
 // Close closes the ledger.
-func (s *Server) Close() error { return s.l.Close() }
+// Close ends what the server runs apart from its requests (the reads of
+// older versions of the rules for what proposals say, flights) and closes
+// the ledger: once, however many times it is called.
+func (s *Server) Close() error {
+	s.closed.Do(func() {
+		s.end()
+		s.closeErr = s.l.Close()
+	})
+	return s.closeErr
+}
 
 // Run serves the UI and keeps the ledger until ctx is done. Every replica
 // serves; the one that leads (all of them in turn, one at a time, on a
@@ -790,6 +807,9 @@ func (s *Server) Run(ctx context.Context) error {
 		serr = s.l.LostWhy()
 	}
 	stop()
+	// What runs apart from the requests ends with them, so that none of
+	// them waits on it to finish.
+	s.end()
 	shut, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	srv.Shutdown(shut)

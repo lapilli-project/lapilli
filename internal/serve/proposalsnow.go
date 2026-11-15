@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"hash/fnv"
 	"html/template"
+	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -181,10 +183,17 @@ type reading struct {
 const oldVersionsMost = 4
 
 // flights are reads under way, by key, so that requests asking for the same
-// at once wait for one (a version of the rules parsed, by its id).
+// at once wait for one (a version of the rules parsed, by its id); and the
+// last flightsKept read, for flightKeptFor, so that one a reader left
+// isn't read again for the next. base is the server's own context (life):
+// a flight ends as the server does. flightsMost run at once.
 type flights[T any] struct {
 	sync.Mutex
-	m map[int64]*flight[T]
+	base context.Context
+	log  *slog.Logger
+	m    map[int64]*flight[T]
+	kept map[int64]keptFlight[T]
+	sem  chan struct{}
 }
 
 type flight[T any] struct {
@@ -193,47 +202,102 @@ type flight[T any] struct {
 	err  error
 }
 
+// keptFlight is a flight's value, as it was read at at.
+type keptFlight[T any] struct {
+	v  T
+	at time.Time
+}
+
+// How many flights run at once, how many of their values are kept, and
+// for how long.
+const (
+	flightsMost   = 2
+	flightsKept   = 2
+	flightKeptFor = time.Minute
+)
+
 // parseWithin is how long a version of the rules is parsed for at most,
 // for whoever asks for it.
 const parseWithin = 30 * time.Second
 
-// do is fn's value for key, worked out once for all who ask while it is:
-// by the first to ask, under a context of its own that no asker's leaving
-// cancels (only within), so that one reader leaving fails none of the
-// others; a panic of fn's is each one's error. Each asker waits as long as
-// its own context lets it.
+// do is fn's value for key: as kept, when it was read within
+// flightKeptFor; else worked out once for all who ask while it is, by the
+// first to ask, under the server's context (base), not any asker's, within
+// at most, flightsMost at once, so that one reader leaving fails none of
+// the others and its read is kept for the next. A panic of fn's is each
+// asker's error, logged with its stack. Each asker waits as long as its
+// own context lets it; one already done starts nothing.
 func (f *flights[T]) do(ctx context.Context, key int64, within time.Duration, fn func(context.Context) (T, error)) (T, error) {
+	var zero T
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
 	f.Lock()
+	if k, ok := f.kept[key]; ok && time.Since(k.at) < flightKeptFor {
+		f.Unlock()
+		return k.v, nil
+	}
 	c, ok := f.m[key]
 	if !ok {
 		c = &flight[T]{done: make(chan struct{})}
 		if f.m == nil {
-			f.m = map[int64]*flight[T]{}
+			f.m, f.kept, f.sem = map[int64]*flight[T]{}, map[int64]keptFlight[T]{}, make(chan struct{}, flightsMost)
 		}
 		f.m[key] = c
-		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), within)
-		go func() {
-			defer func() {
-				if p := recover(); p != nil {
-					c.err = fmt.Errorf("lapilli: %v", p)
-				}
-				cancel()
-				f.Lock()
-				delete(f.m, key)
-				f.Unlock()
-				close(c.done)
-			}()
-			c.v, c.err = fn(fctx)
-		}()
+		base := f.base
+		if base == nil {
+			base = context.WithoutCancel(ctx)
+		}
+		fctx, cancel := context.WithTimeout(base, within)
+		go f.fly(fctx, cancel, key, c, fn)
 	}
 	f.Unlock()
 	select {
 	case <-c.done:
 		return c.v, c.err
 	case <-ctx.Done():
-		var zero T
 		return zero, ctx.Err()
 	}
+}
+
+// fly works a flight out, its turn among flightsMost taken first, keeps
+// its value, and lets those waiting for it have it.
+func (f *flights[T]) fly(ctx context.Context, cancel context.CancelFunc, key int64, c *flight[T], fn func(context.Context) (T, error)) {
+	defer func() {
+		if p := recover(); p != nil {
+			log := f.log
+			if log == nil {
+				log = slog.Default()
+			}
+			log.Error("a read for proposals panicked", "key", key, "panic", p, "stack", string(debug.Stack()))
+			c.err = fmt.Errorf("lapilli: %v", p)
+		}
+		cancel()
+		f.Lock()
+		delete(f.m, key)
+		if c.err == nil {
+			if len(f.kept) >= flightsKept {
+				oldest := int64(0)
+				for k, v := range f.kept {
+					if oldest == 0 || v.at.Before(f.kept[oldest].at) {
+						oldest = k
+					}
+				}
+				delete(f.kept, oldest)
+			}
+			f.kept[key] = keptFlight[T]{c.v, time.Now()}
+		}
+		f.Unlock()
+		close(c.done)
+	}()
+	select {
+	case f.sem <- struct{}{}:
+		defer func() { <-f.sem }()
+	case <-ctx.Done():
+		c.err = ctx.Err()
+		return
+	}
+	c.v, c.err = fn(ctx)
 }
 
 // namedRules are a version's rules and the names the ledger judges them

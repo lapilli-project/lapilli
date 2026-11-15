@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -742,8 +743,15 @@ func TestFlightsOnce(t *testing.T) {
 			t.Errorf("%d got %d", i, v)
 		}
 	}
+	// Once done, it is kept a while, then worked out again.
+	if v, _ := f.do(context.Background(), 7, time.Minute, func(context.Context) (int, error) { return 1, nil }); v != 42 {
+		t.Errorf("asked again at once: %d, not as kept", v)
+	}
+	f.Lock()
+	f.kept[7] = keptFlight[int]{42, time.Now().Add(-flightKeptFor)}
+	f.Unlock()
 	if v, _ := f.do(context.Background(), 7, time.Minute, func(context.Context) (int, error) { return 1, nil }); v != 1 {
-		t.Errorf("asked again once done: %d", v)
+		t.Errorf("asked again once no longer kept: %d", v)
 	}
 }
 
@@ -765,13 +773,17 @@ func waitGroup(t *testing.T, wg *sync.WaitGroup) {
 // fails none of the others, nor what is worked out for them; and each
 // waits as long as its own context lets it. None hangs.
 func TestFlightsFail(t *testing.T) {
-	var f flights[int]
+	var logged strings.Builder
+	f := flights[int]{log: slog.New(slog.NewTextHandler(&logged, nil))}
 	boom := errors.New("boom")
 	if _, err := f.do(context.Background(), 1, time.Minute, func(context.Context) (int, error) { return 0, boom }); !errors.Is(err, boom) {
 		t.Errorf("an error: %v", err)
 	}
 	if _, err := f.do(context.Background(), 1, time.Minute, func(context.Context) (int, error) { panic("lost") }); err == nil || !strings.Contains(err.Error(), "lost") {
 		t.Errorf("a panic: %v", err)
+	}
+	if l := logged.String(); !strings.Contains(l, "level=ERROR") || !strings.Contains(l, "panic=lost") || !strings.Contains(l, "goroutine") {
+		t.Errorf("a panic, logged: %q", l)
 	}
 	if v, err := f.do(context.Background(), 1, time.Minute, func(context.Context) (int, error) { return 5, nil }); v != 5 || err != nil {
 		t.Errorf("asked again after a panic: %d %v", v, err)
@@ -1473,5 +1485,100 @@ func TestLapilliNeverFinishing(t *testing.T) {
 	}
 	if wait := s.againFailed.failed(ids[0], 0, time.Now()); wait != time.Hour {
 		t.Errorf("afresh, left %s", wait)
+	}
+}
+
+// TestFlightsBounded: flights run flightsMost at once; one asked for by a
+// reader already gone starts nothing; one a reader left is kept for the
+// next, not read again; and a server shutting down ends those under way at
+// once, rather than letting its requests wait out parseWithin.
+func TestFlightsBounded(t *testing.T) {
+	var f flights[int]
+	var running, most atomic.Int64
+	release := make(chan struct{})
+	var wg sync.WaitGroup
+	for k := int64(1); k <= 4; k++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			f.do(context.Background(), k, time.Minute, func(context.Context) (int, error) {
+				n := running.Add(1)
+				for m := most.Load(); n > m && !most.CompareAndSwap(m, n); m = most.Load() {
+				}
+				<-release
+				running.Add(-1)
+				return int(k), nil
+			})
+		}()
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	waitGroup(t, &wg)
+	if m := most.Load(); m != flightsMost {
+		t.Errorf("%d ran at once, want %d", m, flightsMost)
+	}
+	// A reader already gone: nothing started.
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	ran := false
+	if _, err := f.do(gone, 9, time.Minute, func(context.Context) (int, error) { ran = true; return 0, nil }); !errors.Is(err, context.Canceled) || ran {
+		t.Errorf("for a reader gone: %v, ran %v", err, ran)
+	}
+	// One a reader left is kept for the next.
+	leaving, leave := context.WithCancel(context.Background())
+	parsed := make(chan struct{})
+	go func() {
+		f.do(leaving, 10, time.Minute, func(context.Context) (int, error) {
+			<-parsed
+			return 10, nil
+		})
+	}()
+	time.Sleep(10 * time.Millisecond)
+	leave()
+	close(parsed)
+	for waited := time.Now(); ; time.Sleep(time.Millisecond) {
+		f.Lock()
+		_, kept := f.kept[10]
+		f.Unlock()
+		if kept {
+			break
+		}
+		if time.Since(waited) > 10*time.Second {
+			t.Fatal("the read a reader left not kept")
+		}
+	}
+	if v, err := f.do(context.Background(), 10, time.Minute, func(context.Context) (int, error) { return 0, errors.New("read again") }); v != 10 || err != nil {
+		t.Errorf("the next reader: %d %v", v, err)
+	}
+	// A server shutting down ends its flights at once.
+	s, _ := restartsServer(t, nil)
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.parsing.do(context.Background(), 99, parseWithin, func(ctx context.Context) (namedRules, error) {
+			<-ctx.Done()
+			return namedRules{}, ctx.Err()
+		})
+		done <- err
+	}()
+	for waited := time.Now(); ; time.Sleep(time.Millisecond) {
+		s.parsing.Lock()
+		flying := s.parsing.m[99] != nil
+		s.parsing.Unlock()
+		if flying {
+			break
+		}
+		if time.Since(waited) > 10*time.Second {
+			t.Fatal("never flew")
+		}
+	}
+	began := time.Now()
+	s.Close()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) || time.Since(began) > 2*time.Second {
+			t.Errorf("shut down: %v after %s", err, time.Since(began))
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("shutting down waited for a flight")
 	}
 }
