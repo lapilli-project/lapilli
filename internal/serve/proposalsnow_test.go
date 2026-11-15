@@ -21,6 +21,7 @@ import (
 
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
@@ -1091,4 +1092,51 @@ func TestLapilliBacktestsOnRunsAlone(t *testing.T) {
 	if n := againCount(t, s2, ids2); n != 0 {
 		t.Errorf("past the hour's, Lapilli backtested %d again", n)
 	}
+}
+
+// TestLapilliUnfinishedKept: a backtest Lapilli runs again itself that
+// doesn't finish within --timeout replaces nothing and withdraws no
+// approval: the proposal keeps its complete evidence, and isn't tried
+// again for an hour.
+func TestLapilliUnfinishedKept(t *testing.T) {
+	ctx := context.Background()
+	s, ids := staleServer(t, 1, func(c *Config) { c.Approvals = 2 })
+	if _, err := s.l.Approve(ctx, ids[0], ana, 2, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	was := state(t, s, ids[0])
+	h := s.h
+	s.h = pastDeadline{}
+	if err := s.backtestStale(ctx); err != nil {
+		t.Fatal(err)
+	}
+	p := state(t, s, ids[0])
+	if string(p.Evidence) != string(was.Evidence) || len(p.Approvals) != 1 {
+		t.Fatalf("an unfinished backtest kept, or approvals withdrawn: %s, %d approvals", p.Evidence, len(p.Approvals))
+	}
+	s.h = h
+	if err := s.backtestStale(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if p := state(t, s, ids[0]); string(p.Evidence) != string(was.Evidence) {
+		t.Error("tried again within the hour")
+	}
+	// An hour on, it is.
+	s.againFailed.Lock()
+	s.againFailed.m[ids[0]] = time.Now().Add(-againRetry)
+	s.againFailed.Unlock()
+	if err := s.backtestStale(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if p := state(t, s, ids[0]); proposalEvidence(p).Semantics != semantics || proposalEvidence(p).Backtest.Unfinished {
+		t.Errorf("an hour on, not backtested again: %s", p.Evidence)
+	}
+}
+
+// pastDeadline is a history that answers every query past the run's
+// deadline: a replay of it doesn't finish.
+type pastDeadline struct{}
+
+func (pastDeadline) QueryRange(context.Context, string, time.Time, time.Time, time.Duration) ([]prom.Series, error) {
+	return nil, prom.ErrPastDeadline
 }

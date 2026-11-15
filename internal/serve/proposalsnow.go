@@ -500,6 +500,10 @@ func (s *Server) spanNoRecord(ctx context.Context, bt *backtest) (bool, error) {
 // language.
 const noRecordFewer = "Fewer firings aren't better, nor more worse: fewer may be events that happened, hidden."
 
+// errUnfinished is a backtest Lapilli ran again itself that didn't finish
+// within --timeout: not kept.
+var errUnfinished = errors.New("the backtest run again didn't finish within --timeout: the one it had is kept")
+
 // errFresh is a proposal backtested again that isn't stale: its backtest
 // is this lapilli's, of its period's record as it is.
 var errFresh = bad("it isn't stale: its backtest replays and judges as this lapilli does, of its period's record as it is, so there is nothing to backtest again")
@@ -598,6 +602,11 @@ func (s *Server) backtestAgainOf(ctx context.Context, id int64, by string, agent
 	if err != nil {
 		return err
 	}
+	if bt.Unfinished && by == ledger.Proposer {
+		// Lapilli's own keeps what it had, complete, and the approvals
+		// given to it: a person may take a partial one, seeing it so.
+		return errUnfinished
+	}
 	again := ev
 	again.Backtest, again.Semantics, again.Version, again.Outlasts = bt, semantics, s.versionOf(), nil
 	again.EarlierLost = earlierLost(ev)
@@ -690,8 +699,10 @@ func (s *Server) backtestStale(ctx context.Context) error {
 			return nil // a person's heavy request has the turn, or the hour's are done: the next run
 		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil:
 			return err
-		case errors.As(err, &b), errors.Is(err, errRuleChanged):
-			// Its rule changed, or it can't be: left for a person.
+		case errors.As(err, &b), errors.Is(err, errRuleChanged), errors.Is(err, errUnfinished):
+			// Its rule changed, it can't be, or it didn't finish: left for
+			// a person, and tried again in an hour.
+			s.log.Warn("a stale proposal wasn't backtested again", "proposal", l.ID, "err", err)
 			s.againFailed.Lock()
 			if s.againFailed.m == nil {
 				s.againFailed.m = map[int64]time.Time{}
