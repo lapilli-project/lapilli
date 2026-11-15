@@ -66,7 +66,7 @@ func TestFirstUseAccessible(t *testing.T) {
 		"/rules":       "No team owns a rule yet, so the Team column is empty.",
 		"/settings":    "1 report is on with nowhere to go",
 		"/manage":      "The weekly digest goes nowhere.",
-		"/proposals/1": "No one may approve it: only the admins approve",
+		"/proposals/1": "No one can approve this yet; an admin sees why on the Roles page.",
 	} {
 		if _, body, _ := get(t, h, p); !strings.Contains(body, said) {
 			t.Errorf("%s doesn't say %q", p, said)

@@ -41,12 +41,17 @@ func (s *Server) approversIn() approversIn {
 // mayApprove is who may approve a proposal waiting for approval, as its
 // page says it: who may approve a change (In), but the one it was made by
 // or for and those who approved it already, Left, as the flag names them.
-// Named is whether the page names them: to an admin alone, who reads them
-// on the Roles page; anyone else is told who in words. Open says a group,
-// everyone of a domain or everyone is among them, who may be anyone; Need
-// is how many more approvals it needs; Approved, that someone approved it.
-// When fewer are left than it needs, and none is open, it can't be
-// approved until the flags change, and the page says how, to every reader.
+// Named is whether the page says who they are, and why none may: to an
+// admin alone, who reads the flags on the Roles page. Anyone else is told
+// only that an approver other than its maker approves it, or that no one
+// can yet and an admin sees why: who the approvers and the admins are, and
+// whether its maker is the only one, are the Roles page's, an admin's.
+// Open says one of them may be anyone, as listed takes them: a group,
+// everyone of a domain, everyone, or a name with neither user: nor group:,
+// which is a group too where there is one of that name. Need is how many
+// more approvals it needs; Approved, that someone approved it. When fewer
+// are left than it needs, and none is open, it can't be approved until the
+// flags change.
 type mayApprove struct {
 	In       approversIn
 	Named    bool
@@ -77,15 +82,19 @@ func (s *Server) mayApproveOf(r *http.Request, p ledger.Proposal, need int) *may
 		out = append(out, ledger.FoldName(a.By))
 	}
 	for _, x := range m.In.List {
-		if x == "*" || strings.HasPrefix(x, "group:") || strings.HasPrefix(x, "*@") {
+		name, person := strings.CutPrefix(x, "user:")
+		switch {
+		case x == "*" || strings.HasPrefix(x, "group:") || strings.HasPrefix(x, "*@"):
 			// Everyone, a group, everyone of a domain: who is in them
 			// isn't known here.
 			m.Open = true
-		} else if name, _ := strings.CutPrefix(x, "user:"); slices.Contains(out, ledger.FoldName(name)) {
+		case slices.Contains(out, ledger.FoldName(name)):
 			// The one it was made by or for, or one who approved it. A
 			// name with neither prefix is a person or a group: taken for
 			// theirs, a group of the same name is passed over.
 			continue
+		case !person:
+			m.Open = true // a person, or a group of the name (listed)
 		}
 		if !slices.Contains(m.Left, x) {
 			m.Left = append(m.Left, x)
