@@ -143,8 +143,8 @@ func TestImpactSince(t *testing.T) {
 }
 
 // A ledger an earlier lapilli wrote, with impact windows and no
-// impact_since: the first run that reads the signal keeps it from the
-// earliest window, as those runs read it then.
+// impact_since: the first run that reads the signal keeps its own start,
+// not the earliest window's, as the runs between may not have read it.
 func TestImpactSinceUpgraded(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
@@ -163,7 +163,7 @@ func TestImpactSinceUpgraded(t *testing.T) {
 	if err := l.Record(ctx, f, opts); err != nil {
 		t.Fatal(err)
 	}
-	if at, err := l.ImpactSince(ctx); err != nil || !at.Equal(first.Add(10*time.Minute)) {
+	if at, err := l.ImpactSince(ctx); err != nil || !at.Equal(t0) {
 		t.Errorf("%s %v", at, err)
 	}
 }

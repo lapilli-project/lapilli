@@ -197,18 +197,20 @@ groups:
 		{"math $B > 0.5", "30m", query("A", restarts, true) + reduce("B", "last", "A") + step("C", `type: math, expression: "$B > 0.5"`), nil, 30 * time.Minute, true},
 		{"math 0 < ${A}", "30m", query("A", restarts, true) + step("C", `type: math, expression: "0 < ${A}"`), nil, 30 * time.Minute, true},
 		{"a rate times a number", "15m", query("A", `rate(restarts_total[10m]) * 60 * 5`, true) + reduce("B", "last", "A") + threshold("C", "gt", "0", "B"), nil, 10 * time.Minute, true},
-		// A range query's last value is its last step's: up to a step (1m)
-		// past the range.
-		{"last of a range query", "30m", query("A", restarts, false) + reduce("B", "last", "A") + threshold("C", "gt", "0.5", "B"), nil, 31 * time.Minute, false},
-		{"last of a range query, for a step past", "31m", query("A", restarts, false) + reduce("B", "last", "A") + threshold("C", "gt", "0.5", "B"), nil, 31 * time.Minute, true},
 
-		// Nothing said.
+		// Nothing said. A range query's points one event can hold for as
+		// long again as its range: a pod's series goes on being returned
+		// over the range after the pod is gone.
+		{"last of a range query", "1h", query("A", restarts, false) + reduce("B", "last", "A") + threshold("C", "gt", "0.5", "B"), nil, 0, false},
+		{"a reduce of the last of a range query", "1h", query("A", restarts, false) + reduce("B", "last", "A") + reduce("D", "last", "B") + threshold("C", "gt", "0.5", "D"), nil, 0, false},
 		{"mean of a range query", "1h", query("A", restarts, false) + reduce("B", "mean", "A") + threshold("C", "gt", "0.5", "B"), nil, 0, false},
 		{"max of a range query", "1h", query("A", restarts, false) + reduce("B", "max", "A") + threshold("C", "gt", "0.5", "B"), nil, 0, false},
 		{"a range query read as it is", "1h", query("A", restarts, false) + step("C", `type: math, expression: "$A > 0.5"`), nil, 0, false},
 		{"count of an instant query", "1h", query("A", restarts, true) + reduce("B", "count", "A") + threshold("C", "gt", "0.5", "B"), nil, 0, false},
 		{"sum of an instant query", "1h", query("A", restarts, true) + reduce("B", "sum", "A") + threshold("C", "gt", "0.5", "B"), nil, 0, false},
 		{"a reduce that puts a number in place of NaN", "1h", query("A", restarts, true) + step("B", `type: reduce, reducer: last, expression: A, settings: {mode: replaceNN, replaceWithValue: 1}`) + threshold("C", "gt", "0.5", "B"), nil, 0, false},
+		{"a reduce of a reduce that puts a number in place of NaN", "1h", query("A", restarts, true) + reduce("B", "last", "A") + step("D", `type: reduce, reducer: last, expression: B, settings: {mode: replaceNN, replaceWithValue: 1}`) + threshold("C", "gt", "0.5", "D"), nil, 0, false},
+		{"a reduce of a reduce that drops NaN", "30m", query("A", restarts, true) + reduce("B", "last", "A") + step("D", `type: reduce, reducer: last, expression: B, settings: {mode: dropNN}`) + threshold("C", "gt", "0.5", "D"), nil, 30 * time.Minute, true},
 		{"math that scales", "1h", query("A", restarts, true) + reduce("B", "last", "A") + step("C", `type: math, expression: "$B * 2 > 0.5"`), nil, 0, false},
 		{"math of two comparisons", "1h", query("A", restarts, true) + reduce("B", "last", "A") + step("C", `type: math, expression: "$B > 0.5 && $B < 100"`), nil, 0, false},
 		{"math of a reduce, not compared", "1h", query("A", restarts, true) + step("C", `type: math, expression: "$A"`), nil, 0, false},

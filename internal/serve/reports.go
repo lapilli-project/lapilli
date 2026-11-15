@@ -374,8 +374,8 @@ func (s *Server) buildReport(ctx context.Context, r ledger.Scheduled, team *ledg
 }
 
 // counted are a report's firings, those that caught something and those
-// that caught nothing, and its precision, nil with no firings, or no record
-// to judge them by.
+// that caught nothing, and its precision, of those judged alone: nil with
+// none judged, as in weeks with no record to judge them by.
 type counted struct {
 	Firings   int      `json:"firings"`
 	Caught    int      `json:"caught"`
@@ -385,13 +385,15 @@ type counted struct {
 
 func count(rep *verdict.Report) counted {
 	var c counted
+	unjudged := 0
 	for _, r := range rep.Rules {
 		c.Firings += r.Firings
 		c.Caught += r.White
+		unjudged += r.Unjudged
 	}
 	c.Nothing = c.Firings - c.Caught
-	if c.Firings > 0 && !rep.NoRecord {
-		p := float64(c.Caught) / float64(c.Firings)
+	if judged := c.Firings - unjudged; judged > 0 {
+		p := float64(c.Caught) / float64(judged)
 		c.Precision = &p
 	}
 	return c

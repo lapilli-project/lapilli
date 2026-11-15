@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -255,4 +257,67 @@ func TestTooManyToTell(t *testing.T) {
 	}
 	missing.Unlock()
 	_ = http.StatusOK
+}
+
+// TestReportCountsJudged: a report's precision, now and the span before, is
+// of the firings judged: those in weeks with no record aren't, and with
+// none judged there is none.
+func TestReportCountsJudged(t *testing.T) {
+	rep := &verdict.Report{Rules: []verdict.RuleResult{{Rule: "A", Firings: 20, White: 2, Unjudged: 14}, {Rule: "B", Firings: 4, White: 1}}}
+	c := count(rep)
+	if c.Firings != 24 || c.Caught != 3 || c.Nothing != 21 || c.Precision == nil || *c.Precision != 0.3 {
+		t.Errorf("%+v %v", c, c.Precision)
+	}
+	if c := count(&verdict.Report{Rules: []verdict.RuleResult{{Rule: "A", Firings: 14, Unjudged: 14}}}); c.Precision != nil || c.pct() != "–" {
+		t.Errorf("none judged: %+v", c)
+	}
+}
+
+// TestSpanBeforeByWeek: over twelve weeks, the span before a rule's period
+// is the twelve before them, of which an incident 20 weeks ago keeps three:
+// its precision is of those three weeks' firings, as the period's is of
+// the three an incident six weeks ago keeps, each week by its own record.
+func TestSpanBeforeByWeek(t *testing.T) {
+	ctx := context.Background()
+	s, _ := server(t, func(c *Config) { c.Backfill, c.Impact = 2*24*time.Hour, "" })
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	mon := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	from := mon.Add(-25 * weekLen)
+	var fs []firing.Firing
+	for at := from.Add(12 * time.Hour); at.Before(now); at = at.Add(24 * time.Hour) {
+		fs = append(fs, firing.Firing{Rule: "Errors", Labels: map[string]string{"service": "search", "severity": "page"}, Start: at, End: at.Add(10 * time.Minute)})
+	}
+	if err := s.l.Record(ctx, ledger.Found{From: from, To: now, Firings: fs, Run: ledger.Run{Kind: "backfill", Started: from, Finished: from, From: from, To: now}}, s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.cfg.Incidents, []byte("incidents: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i, weeksAgo := range []int{20, 6} {
+		at := mon.Add(-time.Duration(weeksAgo)*weekLen + 11*time.Hour + 55*time.Minute)
+		in := incident.Incident{ID: fmt.Sprintf("INC-%d", i), Title: "Search down", Start: at, End: at.Add(30 * time.Minute), Labels: incident.Labels{"service": {"search"}}}
+		if _, err := s.l.Put(ctx, in, "ana", s.cfg.Options); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := httptest.NewRequest(http.MethodGet, "/rules/Errors?weeks=12", nil)
+	r.SetPathValue("name", "Errors")
+	page, err := s.rulePage(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := page.(ruleView)
+	if v.Before.IsZero() || v.Before.After(mon.Add(-20*weekLen)) {
+		t.Fatalf("the span before from %s", v.Before)
+	}
+	// Now: of the 21 judged, one caught INC-1; then: of the 21, INC-0.
+	if now, ok := sharePct(v.White, v.Firings-v.Unjudged); !ok || v.Firings-v.Unjudged != 21 || v.White != 1 {
+		t.Fatalf("the period: %d of %d judged, %d%%", v.White, v.Firings-v.Unjudged, now)
+	}
+	if got := v.Panel.PrecisionBy; !got.On || got.By != 0 {
+		t.Errorf("precision beside the span before: %+v", got)
+	}
 }

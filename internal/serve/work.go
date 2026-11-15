@@ -1303,9 +1303,9 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 		var sugg []verdict.Suggestion
 		var near []verdict.NearMiss
 		var unrec []verdict.Unrecorded
-		// The suggestions, the near misses, what firings with no record were
-		// and the firings by team share one --timeout, so the digest holds
-		// the runs up no longer than a run may take.
+		// The suggestions, the near misses and what firings with no record
+		// were share one --timeout, so the digest holds the runs up no
+		// longer than a run may take.
 		rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 		defer cancel()
 		if s.replaying() {
@@ -1351,11 +1351,14 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 		if err := s.l.ReplaceResult(ctx, "unrecorded", s.now(), from, to, orNoneOf(unrec)); err != nil {
 			return true, err
 		}
-		// The rules that fired mostly on what another team owns: what ran
-		// out of time isn't kept, and says so.
-		on, unread, err := s.firedOnOf(rctx, from, to)
+		// The rules that fired mostly on what another team owns, one read
+		// with a --timeout of its own, which the replays above can't have
+		// used up: what runs out of it isn't kept, and says so.
+		fctx, fcancel := context.WithTimeout(ctx, s.cfg.Timeout)
+		defer fcancel()
+		on, unread, err := s.firedOnOf(fctx, from, to)
 		switch {
-		case err != nil && rctx.Err() != nil:
+		case err != nil && fctx.Err() != nil:
 			s.log.Warn("the digest's firings by team weren't counted in its --timeout", "err", err)
 		case err != nil:
 			return true, err

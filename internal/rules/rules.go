@@ -1555,10 +1555,10 @@ type Graph struct {
 
 // read is what a ref of a Grafana rule's Queries reads: a data query, as it
 // is or by a reduce folded in (fn, Grafana's reducer); the query's range,
-// nothing for an instant query; and the step it is asked at over it.
+// nothing for an instant query.
 type read struct {
-	query, fn   string
-	window, res time.Duration
+	query, fn string
+	window    time.Duration
 }
 
 // dataSources are the data sources a Grafana rule's condition reads, as
@@ -1714,6 +1714,9 @@ type Step struct {
 type Reduce struct {
 	Input string
 	Fn    string // last, mean, max, min, sum, count
+	// Mode is its settings' mode, as read: "", strict, dropNN, or
+	// replaceNN, which puts a number in place of NaN.
+	Mode string
 	// Window is the widest range query under Input; 0 when they are all
 	// instant, and the reduce passes each value through.
 	Window time.Duration
@@ -1995,7 +1998,7 @@ func grafanaGraph(rm map[string]any, ds DataSources, kinds map[string]string) (*
 		g.Queries[ref] = q.expr
 		g.Shift[ref] = q.to
 		g.Data[ref] = Source{Present: ref, UID: str(dm["datasourceUid"])}
-		g.reads[ref] = read{query: ref, window: q.window, res: q.res}
+		g.reads[ref] = read{query: ref, window: q.window}
 	}
 	// A data source query that returns nothing is told by what is asked
 	// of it over its window: a reduce folded in, or a classic condition's
@@ -2015,9 +2018,10 @@ func grafanaGraph(rm map[string]any, ds DataSources, kinds map[string]string) (*
 			if !ok {
 				return nil, fmt.Errorf("reducer %q", str(m["reducer"]))
 			}
+			set, _ := m["settings"].(map[string]any)
 			q, ok := queries[in]
 			if !ok {
-				g.Steps[ref] = Step{Reduce: &Reduce{Input: in, Fn: str(m["reducer"])}}
+				g.Steps[ref] = Step{Reduce: &Reduce{Input: in, Fn: str(m["reducer"]), Mode: str(set["mode"])}}
 				continue
 			}
 			if q.window > 0 && g.Logs != "" && q.res < LokiLeastStep {
@@ -2032,8 +2036,8 @@ func grafanaGraph(rm map[string]any, ds DataSources, kinds map[string]string) (*
 				continue
 			}
 			// One that puts a number in place of NaN can fire on none.
-			if set, _ := m["settings"].(map[string]any); str(set["mode"]) != "replaceNN" {
-				g.reads[ref] = read{query: in, fn: str(m["reducer"]), window: q.window, res: q.res}
+			if str(set["mode"]) != "replaceNN" {
+				g.reads[ref] = read{query: in, fn: str(m["reducer"]), window: q.window}
 			}
 			if q.window > 0 {
 				a := Ask{Fn: fn, Expr: q.expr, Window: q.window, Res: q.res, Counts: fn == "count_over_time" || fn == "sum_over_time"}

@@ -422,8 +422,17 @@ func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []versi
 		cuts = append(cuts, s.l.Midnight(d))
 	}
 	if !v.Before.IsZero() {
-		if i, ok := slices.BinarySearchFunc(cuts, v.Before, time.Time.Compare); !ok {
-			cuts = slices.Insert(cuts, i, v.Before)
+		// The span before, cut at each Monday before the strip's days too,
+		// so that each of its spans is of one week at most, judged by its
+		// own record below.
+		at := []time.Time{v.Before}
+		for w := ledger.Week(s.l.Day(v.Before)) + 7; s.l.Midnight(w).Before(cuts[0]); w += 7 {
+			at = append(at, s.l.Midnight(w))
+		}
+		for _, c := range at {
+			if i, ok := slices.BinarySearchFunc(cuts, c, time.Time.Compare); !ok {
+				cuts = slices.Insert(cuts, i, c)
+			}
 		}
 	}
 	spans, err := s.l.RuleSpans(ctx, name, cuts)
@@ -434,7 +443,8 @@ func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []versi
 		spans = append(spans, make([]ledger.Span, len(cuts)-1-len(spans))...) // a rule the ledger hasn't
 	}
 	// Of the span before, those in a week with no record, everyone's (a
-	// rule's page is), are in no precision: each span is of one day.
+	// rule's page is), are in no precision: each span is of one day, or
+	// of one week at most.
 	if !v.Before.IsZero() {
 		rec, err := s.l.RecordOf(ctx, v.Before, from, t.o, nil)
 		if err != nil {

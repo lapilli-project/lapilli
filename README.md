@@ -186,7 +186,7 @@ taken from the first rule that isn't noisy. `--noisy-firings` and
 written down. It is judged only when the record was kept at its time: an
 incident (written down, or a window `--impact` found) was on at some time
 in the two weeks before it, or it caught one. One with no end is taken to
-last `--unknown-len`, as long as it is caught for. Given `--impact`, the
+last an hour, as long as it is caught for. Given `--impact`, the
 signal is read from two weeks before the period, and keeps the record of
 all of it whatever it finds: it says whether users were hurt; the firings
 are judged against the windows it finds in the period, as they were.
@@ -221,12 +221,12 @@ and one event does (`increase(x[30m]) > 0.5`, `rate(x[10m]) * 300 > 0`).
 event; and a counter of seconds or bytes, or a histogram's `_sum`, counts an
 amount, not events: none of these is one. A Grafana rule is one when its
 condition is a threshold of one number (`gt`, `gte`), or a math expression
-that is one comparison of a ref with a number, of its one PromQL query's
-value, as it is (an instant query's) or through reduces that leave it so
-(`last`, `max`, `min` or `mean` of an instant query's one value, `last` of
-a range query's, which holds a step longer), its PromQL read as above; not
-one that fires on no data (`noDataState` `Alerting` or `KeepLast`), and a
-firing on no data is no event. After one restart, `increase(restarts[30m]) > 0.5` holds for
+that is one comparison of a ref with a number, of its one PromQL instant
+query's value, as it is or through reduces that leave it so (`last`,
+`max`, `min` or `mean` of its one value), its PromQL read as above; not a
+range query, whose points one event can hold for as long again as its
+range, nor one that fires on no data (`noDataState` `Alerting` or
+`KeepLast`), and a firing on no data is no event. After one restart, `increase(restarts[30m]) > 0.5` holds for
 30 minutes at most: with `for: 1h`, one restart can never fire it, only
 restarts that keep coming for an hour. The report says so of a rule whose
 `for` is that long already: "Its for (1h) is as long as the 30m its

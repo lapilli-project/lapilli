@@ -86,12 +86,13 @@ func (r Rule) EventWindow() (time.Duration, bool) {
 // does: a threshold of one number (gt or gte), or a math expression that is
 // one comparison of a ref with a number, of that query's value as it is
 // (an instant query's) or through reduces that leave it so (keeps). The
-// query's PromQL is read as a Prometheus rule's value is. A range query's
-// last value is its last step's, up to a step before the evaluation, so one
-// event holds it a step past the range at most. ok is false for any other:
-// a classic condition, any other math, a reduce that changes the value, two
-// data queries, Loki's; and for a rule that fires on no data (noDataState
-// Alerting, or KeepLast), whose firings needn't be events.
+// query's PromQL is read as a Prometheus rule's value is. ok is false for
+// any other: a range query, whose points one event can hold for as long
+// again as its range (a pod's series that went on being returned after the
+// pod was gone), a classic condition, any other math, a reduce that changes
+// the value or puts a number in place of NaN, two data queries, Loki's; and
+// for a rule that fires on no data (noDataState Alerting, or KeepLast),
+// whose firings needn't be events.
 func (g *Graph) eventWindow() (time.Duration, bool) {
 	if g.Logs != "" || len(g.Data) != 1 || len(g.Other) != 0 || g.NoData == StateAlerting || g.NoData == StateKeepLast {
 		return 0, false
@@ -109,7 +110,7 @@ func (g *Graph) eventWindow() (time.Duration, bool) {
 		}
 		in, op, n = ref, o, x
 	}
-	expr, slack, ok := g.eventQuery(in, 0)
+	expr, ok := g.eventQuery(in, 0)
 	if !ok || op == "" || len(expr) > eventMaxExpr {
 		return 0, false
 	}
@@ -117,45 +118,38 @@ func (g *Graph) eventWindow() (time.Duration, bool) {
 	if !ok || passes(op, 0, n) || !passes(op, one, n) {
 		return 0, false
 	}
-	return w + slack, true
+	return w, true
 }
 
 // graphOps are the thresholds of one number above which events are.
 var graphOps = map[string]string{"gt": ">", "gte": ">="}
 
-// eventQuery is the PromQL of the data query a ref of a Grafana rule reads,
-// as it is or through reduces that leave its value so (keeps), and how long
-// past its range one event can hold that value: a range query's step. ok is
+// eventQuery is the PromQL of the instant data query a ref of a Grafana rule
+// reads, as it is or through reduces that leave its value so (keeps). ok is
 // false for any other ref.
-func (g *Graph) eventQuery(ref string, depth int) (expr string, slack time.Duration, ok bool) {
+func (g *Graph) eventQuery(ref string, depth int) (string, bool) {
 	if depth > eventMaxDepth {
-		return "", 0, false
+		return "", false
 	}
 	if st, isStep := g.Steps[ref]; isStep {
-		if st.Reduce == nil || !keeps(st.Reduce.Fn, st.Reduce.Window) {
-			return "", 0, false
+		if r := st.Reduce; r == nil || r.Mode == "replaceNN" || !keeps(r.Fn, r.Window) {
+			return "", false
 		}
 		return g.eventQuery(st.Reduce.Input, depth+1)
 	}
 	rd, isRead := g.reads[ref]
 	if _, isData := g.Data[rd.query]; !isRead || !isData || !keeps(rd.fn, rd.window) {
-		return "", 0, false
+		return "", false
 	}
-	if rd.window > 0 {
-		slack = rd.res
-	}
-	expr, ok = g.Queries[rd.query]
-	return expr, slack, ok
+	expr, ok := g.Queries[rd.query]
+	return expr, ok
 }
 
 // keeps reports whether a reduce leaves the value it reduces as it is: of
-// an instant query's one value, last, max, min or mean; of a range query's
-// values, last alone. A data query read as it is (fn "") must be instant.
+// an instant query's one value, last, max, min or mean, or the value as it
+// is (fn ""). Nothing of a range query's.
 func keeps(fn string, window time.Duration) bool {
-	if window > 0 {
-		return fn == "last"
-	}
-	return fn == "" || fn == "last" || fn == "max" || fn == "min" || fn == "mean"
+	return window == 0 && (fn == "" || fn == "last" || fn == "max" || fn == "min" || fn == "mean")
 }
 
 // passes reports whether v meets a comparison with n.

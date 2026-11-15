@@ -26,15 +26,16 @@ renamed.
 - **No record, no verdict.** A firing is judged only when the record was
   kept at its time: an incident firings are judged against (written down,
   or an impact window that counts) was on at some time in the two weeks
-  before it, one with no end taken to last `--unknown-len`, as long as it
-  is caught for, or it caught one; or an impact signal was read over its
+  before it, one with no end taken to last an hour, as long as it is
+  caught for, or it caught one; or an impact signal was read over its
   time. `--impact` is read from two weeks before the period, and keeps the
   record of all of it whatever it finds, as it says whether users were
   hurt; the firings are judged against the windows it finds in the period,
   as they were. In lapilli serve, from when its runs read it, with no run
   since that didn't (`impact_since` in `meta`: a run without `--impact`
-  ends it; the first run with it in a ledger an earlier lapilli wrote takes
-  it from the earliest impact window kept). Any other firing caught nothing written down, which can't be told
+  ends it; after an upgrade, it starts with the first run that reads it,
+  as an earlier lapilli kept no word of when its runs did). Any other
+  firing caught nothing written down, which can't be told
   from one nobody wrote down: it is counted, in the firings and the black
   stones, and is in no precision and makes no rule noisy. A rule none of
   whose firings is judged has a precision of `–`, and no longer `for` is
@@ -100,14 +101,14 @@ renamed.
   seconds or bytes, or a histogram's `_sum`, counts an amount: none of
   these counts events. A Grafana rule counts events when its condition is
   a threshold of one number (`gt`, `gte`), or a math expression that is
-  one comparison of a ref with a number, of its one PromQL query's value,
-  as it is (an instant query's) or through reduces that leave it so
-  (`last`, `max`, `min` or `mean` of an instant query's one value, `last`
-  of a range query's, a step longer): a query of `increase(...[30m])`, a
+  one comparison of a ref with a number, of its one PromQL instant query's
+  value, as it is or through reduces that leave it so (`last`, `max`,
+  `min` or `mean` of its one value): a query of `increase(...[30m])`, a
   reduce (`last`) and a threshold (`> 0.5`) is the restart rule. Not a
-  classic condition, other math, a reduce that changes the value, two
-  queries, or a rule that fires on no data (`noDataState` `Alerting` or
-  `KeepLast`). It is a fact of the content check (`for_outlasts`),
+  range query, whose points one event can hold for as long again as its
+  range, a classic condition, other math, a reduce that changes the value
+  or puts a number in place of NaN, two queries, or a rule that fires on
+  no data (`noDataState` `Alerting` or `KeepLast`). It is a fact of the content check (`for_outlasts`),
   on a rule's page and through MCP, and `lapilli verdict` says it of each
   rule it replays (`for_outlasts` in `--json`). A proposal of such a `for`
   is made all the same, as a team may want a rule for a crash loop, and
@@ -120,8 +121,8 @@ renamed.
   by name), from one grouped read of the week's firings by alert (the
   20,000 that fired most), and keeps the rules most of whose firings, more
   than half, came from what another team owns than the one their alerts go
-  to (or no team's): kept as a `fired_on` result, under the digest's
-  `--timeout`; a rule's `unread` says how many of its firings were past the
+  to (or no team's): kept as a `fired_on` result, read under a `--timeout`
+  of its own, apart from the replays'; a rule's `unread` says how many of its firings were past the
   alerts read, and the digest logs how many in all. A rule's page says "Its
   alerts go to payments; most came from what web owns (14 of 14)", web's
   rules list lists them, web's digest names them, and MCP's `rules` and

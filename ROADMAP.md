@@ -94,10 +94,9 @@ noisy: a rule that fires as often says what its firings were (0.41).
   joining comparisons, is still left unsaid.
 - A `for` one event can't outlast is known of PromQL's counts of events
   (`increase`, `changes`, `resets`, `rate` of a counter), in a Prometheus
-  rule or a Grafana rule's one query, reduced by `last` or compared as it
-  is. LogQL's `count_over_time`, Grafana's classic conditions, and a
-  Grafana rule's reduces over a range query other than `last` are still
-  left unsaid.
+  rule or a Grafana rule's one instant query, reduced by `last` or compared
+  as it is. LogQL's `count_over_time`, Grafana's classic conditions, and a
+  Grafana rule's range queries are still left unsaid.
 - lapilli serve judges a firing by its week's record; lapilli verdict by the
   record at the firing's own time. Judging serve's by the day, from its
   daily tallies, would bring the two closer.

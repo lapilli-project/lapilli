@@ -311,9 +311,9 @@ const impactNone = "none"
 // impactSince keeps from when the runs read the impact signal (--impact),
 // all of it, without a run between that didn't: what keeps the record of
 // the firings since (ImpactSince). A run that doesn't read it ends that
-// (impactNone). The first run to read it with none kept yet, a ledger an
-// earlier lapilli wrote, takes it from the earliest impact window the
-// ledger has, if earlier: those runs read it then.
+// (impactNone); the first to read it with none kept, after it or after an
+// upgrade, keeps its own start. An earlier window found isn't taken for
+// one: the runs between may not have read it.
 func (l *Ledger) impactSince(t *txn, f Found) error {
 	was, err := l.meta(t.ctx, t, "impact_since")
 	if err != nil {
@@ -326,15 +326,6 @@ func (l *Ledger) impactSince(t *txn, f Found) error {
 		return setMeta(t.ctx, t, "impact_since", impactNone)
 	}
 	since := f.ImpactSince.Unix()
-	if was == "" {
-		var first sql.NullInt64
-		if err := t.QueryRowContext(t.ctx, "SELECT min(start_at) FROM incidents WHERE origin = 'impact'").Scan(&first); err != nil {
-			return err
-		}
-		if first.Valid && first.Int64 < since {
-			since = first.Int64
-		}
-	}
 	if n, err := strconv.ParseInt(was, 10, 64); err == nil && n <= since {
 		return nil
 	}
