@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/rules"
@@ -451,6 +453,16 @@ func TestBacktestAgainByAgent(t *testing.T) {
 	defer ts.Close()
 	id := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
 	cs := connect(t, ts.URL, bo)
+	// It withdraws approvals, and isn't the same twice: an agent is told so.
+	tools, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(tools.Tools, func(x *mcp.Tool) bool { return x.Name == "backtest_again" })
+	if i < 0 || tools.Tools[i].Annotations == nil || tools.Tools[i].Annotations.IdempotentHint || tools.Tools[i].Annotations.DestructiveHint == nil ||
+		!*tools.Tools[i].Annotations.DestructiveHint {
+		t.Errorf("backtest_again's hints: %+v", tools.Tools)
+	}
 	// Its tries used up: refused, the person's own left as they were.
 	for range triesAnHour {
 		s.tries.take(bo, true, time.Now())
