@@ -2,8 +2,24 @@
 
 ## [Unreleased]
 
+## [0.40.1] - 2026-11-15
+
+The two things docs/design/ui.md had left, and a disabled button that
+looked as if it could be pressed. No ledger schema change; the API and MCP
+answer as they did.
+
 ### Fixed
 
+- **A quiet button, disabled, looks disabled.** The stylesheet's quiet
+  button's own colours and border came after a disabled button's, with as
+  much weight, so the rules list's bar ("Set the team", "Set the
+  disposition", "Propose"), the overview's "Make it a task", a firing's
+  "This was real" and a rule's header drew one a reader may not press as
+  one they could (since 0.39.0). It is drawn as every disabled button is,
+  dashed and dim.
+- **A rule's header draws its disabled actions as every page does** (the
+  `off` template): those disabled for one reason share it, said after the
+  last of them. `TestDisabledOneWay` no longer leaves it out.
 - **The overview's table of the weeks fits a laptop's screen.** Its first
   column kept the week and its marks' tags on one line (598 px in Spanish),
   and Spanish's headers alone were wider than the box; at 1280 to 1920 CSS
