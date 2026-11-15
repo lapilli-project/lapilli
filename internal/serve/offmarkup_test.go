@@ -13,10 +13,9 @@ import (
 // is drawn one way, the off template's (docs/design/ui.md): a button of its
 // own, disabled, in an action-off, tied by aria-describedby to the sentence
 // that says why, which is said once on the page; but the hidden button a
-// bulk form's Enter presses (noenter), and a rule's header, whose reasons
-// are said after its buttons. Read-only, as a viewer, and as a team's
-// editor, the overview's suggestions, the firings' buttons and the rules
-// list's bar among them.
+// bulk form's Enter presses (noenter). Read-only, as a viewer, and as a
+// team's editor, the overview's suggestions, the firings' buttons, the
+// rules list's bar and a rule's header among them.
 func TestDisabledOneWay(t *testing.T) {
 	s, paths := a11yServer(t)
 	h := s.Handler()
@@ -46,7 +45,7 @@ func TestDisabledOneWay(t *testing.T) {
 				}
 			}
 			for _, n := range all {
-				if n.DataAtom != atom.Button || !hasNodeAttr(n, "disabled") || hasNodeAttr(n, "hidden") || inClass(n, "rule-actions") {
+				if n.DataAtom != atom.Button || !hasNodeAttr(n, "disabled") || hasNodeAttr(n, "hidden") {
 					continue
 				}
 				seen++
@@ -72,4 +71,30 @@ func inClass(n *html.Node, class string) bool {
 		}
 	}
 	return false
+}
+
+// TestDisabledLooksDisabled: a button the off template draws quiet, disabled,
+// looks disabled. The stylesheet's quiet button's own colours and border
+// come after button:disabled's, with as much weight, so it was drawn as one
+// that could be pressed (the rules list's bar, the overview's "Make it a
+// task", a firing's "This was real", a rule's header) until a rule for it
+// disabled came after its own.
+func TestDisabledLooksDisabled(t *testing.T) {
+	b, err := files.ReadFile("static/lapilli.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(b)
+	own := strings.Index(css, "button.quiet-button {")
+	off := strings.Index(css, "button.quiet-button:disabled")
+	if own < 0 || off < 0 || off < own {
+		t.Fatalf("the quiet button's own rule at %d, its disabled one at %d: disabled, it would look as if it could be pressed", own, off)
+	}
+	rule := css[off:]
+	rule = rule[:strings.Index(rule, "}")]
+	for _, want := range []string{"color: var(--dim)", "background: var(--panel)", "dashed"} {
+		if !strings.Contains(rule, want) {
+			t.Errorf("the disabled quiet button's rule has no %s: %s", want, rule)
+		}
+	}
 }
