@@ -1148,12 +1148,17 @@ them by (a rule's own over its group's); nothing is kept.
 - "Make these teams" is a POST to `/teams/suggested`, an admin's on the
   server (`s.admin`) and from the same site, as every form. It works the
   suggestions out again, and makes those it says it makes as the team form
-  does (its name the value, its labels the label), passing over one a team
-  of the name took meanwhile. The page it goes back to names the teams
-  made, by their ids in its query (`made`, fifty at most), those alone
-  that are there and were made by the reader, as a bulk proposal's result
-  does: a link can't make it say more. Anyone else sees the button
-  disabled, with why (`off`, "Admins only").
+  does (its name the value, its labels the label), passing over one whose
+  name, in any case, is a team's in the teams read in the request, not in
+  the owners kept for the ledger's generation, which another request or a
+  replica behind may have made meanwhile (`teams.name`'s UNIQUE is in
+  case; one in any case is the schema's, for bundle 22). The page it goes
+  back to names the teams made, by their ids in its query (`made`, fifty
+  at most), those alone that are there and the reader made or changed in
+  the last ten minutes (a team keeps who changed it last and when, not who
+  made it), as a bulk proposal's result does: a link can't make it say
+  more. Anyone else sees the button disabled, with why (`off`, "Admins
+  only").
 
 With no team at all, the rules list says, under its lede, why its Team
 column is empty, with a link to the teams suggested, or to the form to add
@@ -1205,12 +1210,14 @@ teams have a digest of their own, when the weekly digest goes ("Mondays
 09:00", "매주 월요일 09:00": `weeklyText`) and to how many places that are
 there, set by the flags or on the Reports page, how many reports are on,
 when the outbox last sent a notice, and how many notices made in the last
-day weren't sent, their last try having failed: 1,000 counted at most
-(`ledger.FailedCounted`), "More than 1000" past them. The digest posts to
-Slack itself, not through the outbox: how its last post went is kept in
-memory, by the process that posted it, since it started (`slackPost`), and
-said so; a failed one is also a run of the ledger's, as before. Counts and
-kinds, never a URL. The weekly digest on with nowhere to go, its last post
+day weren't sent, their last try having failed, of the latest 1,000 unsent
+a place has (`ledger.FailedCounted`); past those, "More than 1000 notices
+wait to be sent", not a count it didn't read. The digest posts to Slack
+itself, not through the outbox: the last week posted (`digest-sent`) and a
+later week whose digest failed, worked out or posted (a digest run's
+error, `ledger.LastFailed`), are read from the ledger, the same on every
+replica and after a restart (`digestPosted`). Counts and kinds, never a
+URL. The weekly digest on with nowhere to go, its last post
 to Slack failed, a report on whose places are all gone, and failures are
 each a sentence with a sign (`p.warn`), never a colour alone: in full on
 the Settings page, with the way out (for a digest the flags set, the
@@ -1218,9 +1225,12 @@ flags or the Reports page, as it never goes to a `--report-dest` by
 itself; for one set there, another place there); in a line on the card
 ("The weekly digest goes nowhere.").
 
-It is read from the flags, the reports and the outbox (`ledger.Standing`:
-a place's last send by the outbox's index on its place and when each was
-sent, its failed notices by the same, to 1,000), nothing kept for it. A notice sent is written aside, emptying no page kept, so these two
+It is read from the flags, the reports, the runs and the outbox
+(`ledger.Standing`: a place's last send by the outbox's index on its place
+and when each was sent; its unsent notices by the same index, a range of
+it from its end, 1,001 rows at most, however many wait, which `EXPLAIN
+QUERY PLAN` holds to), nothing kept for it. A notice sent is written
+aside, emptying no page kept, so these two
 pages are worked out for each request (`freshPage`, `Cache-Control:
 no-store`), the Settings page but when it tries settings on the last week.
 
@@ -1243,8 +1253,8 @@ whole minutes, is as it was. The API and MCP answer as they did.
 The Korean texts say 정탐 (○), 오탐 (●) and 면제, never the stones the
 English names them by (돌, 흰 돌, 검은 돌); `TestKoreanSaysNoStones` fails
 on one, read as a noun with what Korean puts after it (돌이면, 돌까지,
-돌처럼, 돌(○)), and not on the verbs that hold the syllable (돌아가기,
-되돌리기, 돌 수, 돌 때).
+돌처럼, 돌이지만, 돌은요, 돌(○)), and not on the verbs that hold the
+syllable (돌아가기, 되돌리기, 돌 수, 돌 때).
 
 `TestA11yServe` serves a first-time user's deployment under `/first`
 (`firstUseServer`: labelled rules and no team, changes on and the only

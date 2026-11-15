@@ -9,16 +9,23 @@ page. No ledger schema change; the API and MCP answer as they did.
 
 ### Security
 
-- **What YAML aliases bring in again is bounded by its text** (released
-  in every version that reads rule files). yaml.v3's bound counts values,
-  not their text: a rule file that writes one 8 MB string under an anchor
-  and aliases it from 300 rules' labels is 600 values and 2.4 GB of
-  labels. `lapilli serve` read it in 26 s, replayed it in 15 more, and a
-  rule's page took 59 s, holding a page's turn; anyone who can write a
-  rule file could do it. Past 1 MiB, an input whose aliases bring in more
-  than four times the text written in it, or more than 16 MiB (`MaxFile`)
-  in all, is refused, as a file past `MaxFile` is: the same file is
-  refused in 0.13 s, and the rule's page is 404 in 21 ms.
+- **What a document of rules makes beyond its own text is bounded**,
+  however it makes it (affected versions: every version that reads rule
+  files). Nothing bounded the text YAML aliases bring in again (yaml.v3's
+  bound counts values), nor a group's labels, which are on each of its
+  rules: a rule file with one 8 MB string under an anchor, aliased from
+  300 rules' labels, was 2.4 GB of labels (`lapilli serve` read it in 26 s,
+  replayed it in 15 more, and a rule's page took 59 s, holding a page's
+  turn); one group label of 8 MB on 3,000 rules, no alias, took 32 s to
+  parse and 96 s to hash (27 GB). Anyone who can write a rule file could
+  do it. What a document makes beyond its size (the text its aliases bring
+  in again, judged against the whole document, and its rules' names,
+  expressions, labels, its groups' on each rule, recording rules' too, and
+  what they say) is the larger of 4 MiB and 16 times its size, 16 MiB at
+  most; a label's name and value are 16 KiB each at most; what a rule says
+  is cut to 4 KiB a text, as before. Past them the document is refused, at
+  once, naming the group or the alias: the files above in 0.1 s, the
+  rule's page 404 in 21 ms. Real sets are far inside them.
 
 ### Added
 
@@ -32,8 +39,9 @@ page. No ledger schema change; the API and MCP answer as they did.
   is on rules another team owns isn't, as it would take them; one whose
   name a team has, in any case, isn't, and the page says what to do as
   that team owns. The result names the teams made, by their ids, those
-  alone the reader made. With no team at all, the rules list says why its
-  Team column is empty, and links to them.
+  alone the reader made or changed in the last ten minutes. With no team
+  at all, the rules list says why its Team column is empty, and links to
+  them.
 - **Why a rule is a team's.** A rule's page says how its team was found:
   its note, its name matching a team's pattern, its labels having a
   team's; or that none matches.
@@ -47,9 +55,10 @@ page. No ledger schema change; the API and MCP answer as they did.
 - **Where notices go.** A Notifications card on the Manage page, and a
   section of the Settings page: where what happens is told, how many
   places reports and teams' digests can go, the weekly digest's time as a
-  person reads it ("Mondays 09:00"), its last post to Slack (kept in
-  memory since the process started), when the outbox last sent and how
-  many of the last day's notices failed (1,000 counted at most). The
+  person reads it ("Mondays 09:00"), the last week posted to Slack and a
+  later week's that failed, as the ledger has them, when the outbox last
+  sent and how many of the last day's notices failed, of the latest 1,000
+  unsent a place has, past which it says more wait. The
   weekly digest, or a report, on with nowhere to go is said so in words,
   with the way out. Counts, never a URL. These two pages are worked out
   for each request, as a notice sent empties no page kept.
@@ -73,7 +82,6 @@ page. No ledger schema change; the API and MCP answer as they did.
   its page said no team's labels matched it and its team's list left it
   out; the ledger, judging a team's quiet windows, already took it for the
   team's.
-
 - **The weekly digest could hold the runs up for twice `--timeout`.** In
   0.41.0 its count of the firings by team had a `--timeout` of its own,
   after the replays had used theirs. It has a minute at most now, or
