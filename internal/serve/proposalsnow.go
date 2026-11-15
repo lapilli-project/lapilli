@@ -561,7 +561,7 @@ func (s *Server) backtestAgain(ctx context.Context, id int64, by string, agent b
 	if err != nil {
 		return err
 	}
-	_, _, err = s.l.BacktestAgain(ctx, p.ID, by, p.Evidence, raw,
+	_, _, err = s.l.BacktestAgain(ctx, p.ID, by, agent, p.Evidence, raw,
 		map[string]any{"backtest": ev.Backtest, "version": ev.Version}, map[string]any{"backtest": bt, "version": again.Version})
 	return err
 }

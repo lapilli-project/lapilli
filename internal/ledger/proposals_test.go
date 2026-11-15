@@ -145,12 +145,19 @@ func TestBacktestAgain(t *testing.T) {
 	}
 	was := []byte(`{"from":"suggestion","backtest":{"before":{"firings":141}}}`)
 	now := []byte(`{"from":"suggestion","version":"v0.42.0","backtest":{"before":{"firings":140},"no_record":true}}`)
-	if _, _, err := l.BacktestAgain(ctx, id, "bo", []byte(`{"other":1}`), now, nil, nil); !errors.Is(err, ErrMoved) {
+	if _, _, err := l.BacktestAgain(ctx, id, "bo", false, []byte(`{"other":1}`), now, nil, nil); !errors.Is(err, ErrMoved) {
 		t.Errorf("its evidence changed meanwhile: %v", err)
 	}
-	got, taken, err := l.BacktestAgain(ctx, id, "Bo", was, now, map[string]any{"version": ""}, map[string]any{"version": "v0.42.0"})
-	if err != nil || taken != 1 || string(got.Evidence) != string(now) || got.State != StateProposed {
-		t.Fatalf("backtested again: %+v %d %v", got, taken, err)
+	l.TellTo([]string{"webhook"})
+	got, withdrawn, err := l.BacktestAgain(ctx, id, "Bo", true, was, now, map[string]any{"version": ""}, map[string]any{"version": "v0.42.0"})
+	if err != nil || len(withdrawn) != 1 || withdrawn[0] != "ana" || string(got.Evidence) != string(now) || got.State != StateProposed {
+		t.Fatalf("backtested again: %+v %v %v", got, withdrawn, err)
+	}
+	// Told, naming whose approvals were withdrawn, and that an agent asked.
+	ns, err := l.Due(ctx, "webhook", time.Now().Add(time.Hour), 10)
+	if err != nil || len(ns) != 1 || ns[0].Event != "proposal.backtested" || !strings.Contains(string(ns[0].Body), `"approvals_withdrawn":["ana"]`) ||
+		!strings.Contains(string(ns[0].Body), `"by_agent":true`) || !strings.Contains(string(ns[0].Body), `"by":"bo"`) {
+		t.Errorf("told: %v %v", ns, err)
 	}
 	if p, err := l.ProposalByID(ctx, id); err != nil || len(p.Approvals) != 0 || string(p.Evidence) != string(now) {
 		t.Errorf("kept: %+v %v", p, err)
@@ -161,6 +168,7 @@ func TestBacktestAgain(t *testing.T) {
 	}
 	last := steps[len(steps)-1]
 	if last.What != "proposal #"+itoa(id)+" backtested again" || last.By != "bo" || !strings.Contains(last.After, `"approvals_taken_back":1`) ||
+		!strings.Contains(last.After, `"approvals_withdrawn":["ana"]`) || !strings.Contains(last.After, `"agent":true`) ||
 		!strings.Contains(last.After, `"version":"v0.42.0"`) || last.Before != `{"version":""}` {
 		t.Errorf("its step: %+v", last)
 	}
@@ -168,7 +176,7 @@ func TestBacktestAgain(t *testing.T) {
 	if _, err := l.Move(ctx, id, []string{StateProposed}, StateDropped, "ana", Step{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := l.BacktestAgain(ctx, id, "bo", now, was, nil, nil); !errors.Is(err, ErrMoved) {
+	if _, _, err := l.BacktestAgain(ctx, id, "bo", false, now, was, nil, nil); !errors.Is(err, ErrMoved) {
 		t.Errorf("dropped: %v", err)
 	}
 }

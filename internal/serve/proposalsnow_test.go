@@ -216,7 +216,7 @@ func TestBacktestAgain(t *testing.T) {
 	page = html.UnescapeString(page)
 	for _, want := range []string{"Backtested again by <bdi>bo@example.com</bdi>, with lapilli <bdi>test</bdi>",
 		"The backtest it replaced, from 2026-07-06 to 2026-09-28: fired 141 times as it was, 3 as proposed.",
-		"The approval it had was taken back: approve it again."} {
+		"Approvals withdrawn, given to the backtest it replaced: <bdi>ana@example.com</bdi>. Approve it again."} {
 		if !strings.Contains(page, want) {
 			t.Errorf("its history doesn't say %q", want)
 		}
@@ -464,8 +464,19 @@ func TestBacktestAgainByAgent(t *testing.T) {
 		t.Errorf("not backtested again: %s", p.Evidence)
 	}
 	steps, _, _ := s.l.ProposalSteps(context.Background(), id, 10)
-	if len(steps) == 0 || steps[len(steps)-1].By != bo || !strings.HasSuffix(steps[len(steps)-1].What, "backtested again") {
+	if len(steps) == 0 || steps[len(steps)-1].By != bo || !strings.HasSuffix(steps[len(steps)-1].What, "backtested again") ||
+		!strings.Contains(steps[len(steps)-1].After, `"agent":true`) {
 		t.Errorf("its history: %+v", steps)
+	}
+	// An agent's, for whom, on its page and through MCP.
+	if _, page, _ := ui(t, s.Handler(), http.MethodGet, "/proposals/"+itoa(id), cy, "", nil); !strings.Contains(html.UnescapeString(page),
+		"Backtested again by an agent, for <bdi>bo@example.com</bdi>, with lapilli <bdi>test</bdi>") {
+		t.Error("its page doesn't say an agent backtested it again")
+	}
+	var rule ruleDetailOut
+	if failed, text := call(t, cs, "rule", map[string]any{"name": "RestartsNow"}, &rule); failed || len(rule.Proposals) != 1 || rule.Proposals[0].Again == nil ||
+		!rule.Proposals[0].Again.Agent || rule.Proposals[0].Again.By != bo {
+		t.Errorf("MCP's rule: %s %+v", text, rule.Proposals)
 	}
 	// A fresh one: refused.
 	if failed, _ := call(t, cs, "backtest_again", map[string]any{"id": id}, &out); !failed {
@@ -789,5 +800,46 @@ func TestEarlierMissKept(t *testing.T) {
 	}
 	if why := worse(was, evidence{Backtest: &backtest{Lost: []string{"INC-NEW"}}}); why == "" {
 		t.Error("missing what none said: not refused")
+	}
+}
+
+// TestBacktestedTold: backtesting again is told as proposal.backtested, to
+// the webhook and Slack, naming whose approvals were withdrawn and whether
+// an agent asked for it; Lapilli's own too.
+func TestBacktestedTold(t *testing.T) {
+	ctx := context.Background()
+	s, _ := restartsServer(t, func(c *Config) { c.Approvals = 2 })
+	s.l.TellTo([]string{"webhook"})
+	id := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
+	if _, err := s.l.Approve(ctx, id, ana, 2); err != nil {
+		t.Fatal(err)
+	}
+	if code, body, _ := ui(t, s.Handler(), http.MethodPost, "/proposals/"+itoa(id)+"/backtest", bo, "same-origin", url.Values{}); code != http.StatusSeeOther {
+		t.Fatalf("backtesting again: %d %s", code, body)
+	}
+	ns, err := s.l.Due(ctx, "webhook", time.Now().Add(time.Hour), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(ns, func(n ledger.Notice) bool { return n.Event == "proposal.backtested" })
+	if i < 0 {
+		t.Fatalf("not told: %v", ns)
+	}
+	var n notice
+	if err := json.Unmarshal(ns[i].Body, &n); err != nil || n.Proposal == nil || !slices.Equal(n.Proposal.Withdrawn, []string{ana}) || n.Proposal.ByAgent || n.By != bo {
+		t.Errorf("told: %s", ns[i].Body)
+	}
+	for _, c := range []struct {
+		agent     bool
+		withdrawn []string
+		want      string
+	}{
+		{false, []string{ana}, "lapilli: bo@example.com backtested #" + itoa(id) + ", a new for for RestartsNow, again, and withdrew the approvals of ana@example.com"},
+		{true, nil, "lapilli: an agent, for bo@example.com, backtested #" + itoa(id) + ", a new for for RestartsNow, again"},
+	} {
+		n.Proposal.ByAgent, n.Proposal.Withdrawn = c.agent, c.withdrawn
+		if got := s.line(n); got != c.want {
+			t.Errorf("its line: %q, want %q", got, c.want)
+		}
 	}
 }

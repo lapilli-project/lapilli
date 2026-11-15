@@ -272,10 +272,12 @@ type proposalStep struct {
 	Reason      string
 	Undo        int64
 	// Of a backtest run again: Was, the backtest it replaced; Version, the
-	// lapilli that ran it; TakenBack, the approvals taken back.
+	// lapilli that ran it; Agent, that an agent asked for it, for By;
+	// Withdrawn, whose approvals were withdrawn.
 	Was       *backtest
 	Version   string
-	TakenBack int
+	Agent     bool
+	Withdrawn []string
 }
 
 // stepsMost is how many of a proposal's steps its page reads, the latest.
@@ -292,10 +294,12 @@ type stepFields struct {
 	Reason    string  `json:"reason"`
 	Link      string  `json:"link"`
 	// A backtest run again's (ledger.BacktestAgain): the backtest, before
-	// and after, the version that ran each, and the approvals taken back.
+	// and after, the version that ran each, whether an agent asked for it,
+	// and whose approvals were withdrawn.
 	Backtest  *backtest `json:"backtest"`
 	Version   string    `json:"version"`
-	TakenBack int       `json:"approvals_taken_back"`
+	Agent     bool      `json:"agent"`
+	Withdrawn []string  `json:"approvals_withdrawn"`
 }
 
 // stepsOf are what happened to a proposal, in order: its making and its
@@ -328,7 +332,7 @@ func (s *Server) stepsOf(r *http.Request, p ledger.Proposal) (steps []proposalSt
 			made = true
 			continue // from the proposal itself
 		case what == "backtested again":
-			st.Kind, st.Was, st.Version, st.TakenBack = "backtest", before.Backtest, after.Version, after.TakenBack
+			st.Kind, st.Was, st.Version, st.Agent, st.Withdrawn = "backtest", before.Backtest, after.Version, after.Agent, after.Withdrawn
 		case what == "approved" && !moved:
 			if after.Approvals == nil {
 				continue // nothing kept says how many

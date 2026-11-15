@@ -1590,10 +1590,7 @@
  "Backtesting it again replays the change with this lapilli, against the rule in effect, over the twelve weeks to now. The backtest it replaces is kept in its history, and any approval given to that one is taken back.": "Repetir el backtest reproduce el cambio con este lapilli, contra la regla en vigor, durante las doce semanas hasta hoy. El backtest que reemplaza se guarda en su historial, y se retira cualquier aprobación dada a ese.",
  "Backtest again": "Repetir el backtest",
  "Backtested again by %s, with lapilli %s": "Backtest repetido por %s, con lapilli %s",
- "Backtested again by %s": "Backtest repetido por %s",
  "The backtest it replaced, from %s to %s: fired %d times as it was, %d as proposed.": "El backtest que reemplazó, de %s a %s: %d disparos como era, %d con la propuesta.",
- "The approval it had was taken back: approve it again.": "Se retiró la aprobación que tenía: apruébala de nuevo.",
- "The %d approvals it had were taken back: approve it again.": "Se retiraron las %d aprobaciones que tenía: apruébala de nuevo.",
  "the rule changed since it was proposed": "la regla cambió desde que se propuso",
  "it was backtested by an earlier lapilli, before backtests were numbered by how they replay and judge": "su backtest lo hizo un lapilli anterior, de antes de que los backtests se numeraran por cómo reproducen y juzgan",
  "it was backtested by lapilli %s, which replays or judges otherwise than this one": "su backtest lo hizo lapilli %s, que reproduce o juzga de otro modo que este",
@@ -1608,5 +1605,11 @@
  "it is stale, so it isn't approved until it is backtested again: backtest it again from its page, then approve it": "está desactualizada, así que no se aprueba hasta que se repita su backtest: repítelo desde su página y luego apruébala",
  "Show the stale ones alone": "Mostrar solo las desactualizadas",
  "An earlier backtest of it, before it was backtested again, said that as proposed it misses:": "Un backtest anterior, antes de repetirlo, dijo que con la propuesta no detecta:",
- "It said that as proposed it misses:": "Dijo que con la propuesta no detecta:"
+ "It said that as proposed it misses:": "Dijo que con la propuesta no detecta:",
+ "Backtested again by an agent, for %s, with lapilli %s": "Backtest repetido por un agente, en nombre de %s, con lapilli %s",
+ "Approvals withdrawn, given to the backtest it replaced: %s. Approve it again.": "Aprobaciones retiradas, dadas al backtest que reemplazó: %s. Apruébala de nuevo.",
+ "lapilli: %s backtested #%d, %s for %s, again": "lapilli: %s repitió el backtest de #%d, %s para %s",
+ "lapilli: %s backtested #%d, %s for %s, again, and withdrew the approvals of %s": "lapilli: %s repitió el backtest de #%d, %s para %s, y retiró las aprobaciones de %s",
+ "lapilli: an agent, for %s, backtested #%d, %s for %s, again": "lapilli: un agente, en nombre de %s, repitió el backtest de #%d, %s para %s",
+ "lapilli: an agent, for %s, backtested #%d, %s for %s, again, and withdrew the approvals of %s": "lapilli: un agente, en nombre de %s, repitió el backtest de #%d, %s para %s, y retiró las aprobaciones de %s"
 }

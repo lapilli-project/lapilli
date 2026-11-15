@@ -1590,10 +1590,7 @@
  "Backtesting it again replays the change with this lapilli, against the rule in effect, over the twelve weeks to now. The backtest it replaces is kept in its history, and any approval given to that one is taken back.": "バックテストをやり直すと、この lapilli で、現在有効なルールに対して、今日までの 12 週間で変更を再生します。置き換えたバックテストは履歴に残り、それに対する承認は取り消されます。",
  "Backtest again": "バックテストをやり直す",
  "Backtested again by %s, with lapilli %s": "%s さんが lapilli %s でバックテストをやり直しました",
- "Backtested again by %s": "%s さんがバックテストをやり直しました",
  "The backtest it replaced, from %s to %s: fired %d times as it was, %d as proposed.": "置き換えたバックテスト（%s ～ %s）: 当時のルールで %d 回、提案どおりで %d 回発火。",
- "The approval it had was taken back: approve it again.": "受けていた承認は取り消されました。もう一度承認してください。",
- "The %d approvals it had were taken back: approve it again.": "受けていた %d 件の承認は取り消されました。もう一度承認してください。",
  "the rule changed since it was proposed": "提案後にルールが変更されました",
  "it was backtested by an earlier lapilli, before backtests were numbered by how they replay and judge": "再生と判定の方式を番号で記録する前の lapilli がバックテストしました",
  "it was backtested by lapilli %s, which replays or judges otherwise than this one": "lapilli %s がバックテストしましたが、現在のものとは再生か判定の方式が違います",
@@ -1608,5 +1605,11 @@
  "it is stale, so it isn't approved until it is backtested again: backtest it again from its page, then approve it": "古い提案のため、バックテストをやり直すまで承認できません。提案のページでバックテストをやり直してから承認してください",
  "Show the stale ones alone": "古い提案だけを表示",
  "An earlier backtest of it, before it was backtested again, said that as proposed it misses:": "やり直す前のバックテストでは、提案どおりだと次を見逃すとされていました:",
- "It said that as proposed it misses:": "提案どおりだと見逃すとしたもの:"
+ "It said that as proposed it misses:": "提案どおりだと見逃すとしたもの:",
+ "Backtested again by an agent, for %s, with lapilli %s": "エージェントが %s さんの代わりに lapilli %s でバックテストをやり直しました",
+ "Approvals withdrawn, given to the backtest it replaced: %s. Approve it again.": "置き換えたバックテストへの承認は取り消されました: %s。もう一度承認してください。",
+ "lapilli: %s backtested #%d, %s for %s, again": "lapilli: %[1]s さんが #%[2]d、%[4]s の %[3]s のバックテストをやり直しました",
+ "lapilli: %s backtested #%d, %s for %s, again, and withdrew the approvals of %s": "lapilli: %[1]s さんが #%[2]d、%[4]s の %[3]s のバックテストをやり直し、%[5]s さんの承認が取り消されました",
+ "lapilli: an agent, for %s, backtested #%d, %s for %s, again": "lapilli: エージェントが %[1]s さんの代わりに #%[2]d、%[4]s の %[3]s のバックテストをやり直しました",
+ "lapilli: an agent, for %s, backtested #%d, %s for %s, again, and withdrew the approvals of %s": "lapilli: エージェントが %[1]s さんの代わりに #%[2]d、%[4]s の %[3]s のバックテストをやり直し、%[5]s さんの承認が取り消されました"
 }

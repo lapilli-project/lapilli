@@ -561,16 +561,18 @@ func (l *Ledger) Move(ctx context.Context, id int64, from []string, to, by strin
 
 // BacktestAgain keeps the evidence of a proposal waiting for approval
 // worked out again, now in place of was: its backtest run again, by who
-// asked for it. The approvals it had were given to the evidence it
-// replaces, so they are taken back, and it waits for them again. What it
-// replaced is kept in changes, as before, and what it is now, as after,
-// with how many approvals were taken back: its page's history says so.
+// asked for it, or by an agent acting for them (agent). The approvals it
+// had were given to the evidence it replaces, so they are withdrawn, and
+// it waits for them again; who gave them is given back. What it replaced
+// is kept in changes, as before, and what it is now, as after, with
+// whether an agent asked and whose approvals were withdrawn: its page's
+// history says so. It is told as proposal.backtested, naming them.
 // ErrMoved when it isn't waiting for approval, or its evidence isn't was
 // any more (backtested again meanwhile). A proposal's own columns are as
 // they were, but for when it moved: no schema of its own.
-func (l *Ledger) BacktestAgain(ctx context.Context, id int64, by string, was, now json.RawMessage, before, after map[string]any) (Proposal, int, error) {
+func (l *Ledger) BacktestAgain(ctx context.Context, id int64, by string, agent bool, was, now json.RawMessage, before, after map[string]any) (Proposal, []string, error) {
 	var p Proposal
-	var taken int
+	var withdrawn []string
 	by = FoldName(by)
 	err := l.write(ctx, func(t *txn) error {
 		var err error
@@ -582,8 +584,13 @@ func (l *Ledger) BacktestAgain(ctx context.Context, id int64, by string, was, no
 		if p.State != StateProposed || string(p.Evidence) != string(was) {
 			return ErrMoved
 		}
-		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM approvals WHERE proposal_id = ?", id).Scan(&taken); err != nil {
+		as, err := l.approvals(t.ctx, t, id)
+		if err != nil {
 			return err
+		}
+		withdrawn = nil
+		for _, a := range as {
+			withdrawn = append(withdrawn, a.By)
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM approvals WHERE proposal_id = ?", id); err != nil {
 			return err
@@ -598,13 +605,27 @@ func (l *Ledger) BacktestAgain(ctx context.Context, id int64, by string, was, no
 			return err
 		}
 		p.Evidence, p.Updated, p.Approvals = now, updated, nil
-		kept := map[string]any{"approvals_taken_back": taken}
+		kept := map[string]any{"approvals_taken_back": len(withdrawn), "approvals_withdrawn": orNone(withdrawn), "agent": agent}
 		for k, v := range after {
 			kept[k] = v
 		}
-		return change(t, by, fmt.Sprintf("proposal #%d backtested again", id), before, kept)
+		if err := change(t, by, fmt.Sprintf("proposal #%d backtested again", id), before, kept); err != nil {
+			return err
+		}
+		about := p.about()
+		told := about["proposal"].(map[string]any)
+		told["approvals_withdrawn"], told["by_agent"] = orNone(withdrawn), agent
+		return l.tell(t, "proposal.backtested", by, about)
 	})
-	return p, taken, err
+	return p, withdrawn, err
+}
+
+// orNone is a list as JSON keeps it: [] for none, never null.
+func orNone(ss []string) []string {
+	if ss == nil {
+		return []string{}
+	}
+	return ss
 }
 
 // Firing reports whether a rule has an alert the ledger has as still on:

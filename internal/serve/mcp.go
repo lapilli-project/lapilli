@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -703,6 +704,34 @@ type proposalOut struct {
 	Outlasts string `json:"for_outlasts,omitempty" jsonschema:"for a for proposed as long as the range the rule's condition counts events over, or longer: what it means, that one event alone could never fire it. Worked out when it is read, whichever lapilli made it"`
 	// Backtest is its backtest, a for's or a threshold's.
 	Backtest *proposalBacktestOut `json:"backtest,omitempty"`
+	// Again is when it was last backtested again, and by whom.
+	Again *againOut `json:"backtested_again,omitempty" jsonschema:"when its backtest was last run again, and by whom"`
+}
+
+// againOut is a proposal's backtest run again, as MCP gives it.
+type againOut struct {
+	At        time.Time `json:"at"`
+	By        string    `json:"by" jsonschema:"who asked for it, or whose agent did; lapilli for Lapilli itself"`
+	Agent     bool      `json:"agent,omitempty" jsonschema:"an agent asked for it, acting for by"`
+	Withdrawn []string  `json:"approvals_withdrawn,omitempty" jsonschema:"whose approvals were withdrawn, given to the backtest it replaced"`
+}
+
+// againOf is when a proposal was last backtested again, by its steps; nil
+// for never.
+func (s *Server) againOf(ctx context.Context, id int64) (*againOut, error) {
+	cs, _, err := s.l.ProposalSteps(ctx, id, stepsMost)
+	if err != nil {
+		return nil, err
+	}
+	for i := len(cs) - 1; i >= 0; i-- {
+		if !strings.HasSuffix(cs[i].What, " backtested again") {
+			continue
+		}
+		var after stepFields
+		json.Unmarshal([]byte(cs[i].After), &after)
+		return &againOut{At: cs[i].At, By: cs[i].By, Agent: after.Agent, Withdrawn: after.Withdrawn}, nil
+	}
+	return nil, nil
 }
 
 // proposalBacktestOut is a proposal's backtest, as it is beside as
@@ -813,6 +842,9 @@ func (s *Server) toolRule(ctx context.Context, _ *mcp.CallToolRequest, in ruleIn
 			MadeBy: p.MadeBy, Agent: p.Agent, Diff: p.Diff, Link: p.Link, Reason: p.Reason, Backtest: proposalBacktestOf(p)}
 		if o := p.Outlasts; o != nil {
 			x.Outlasts = o.Proposed()
+		}
+		if x.Again, err = s.againOf(ctx, p.ID); err != nil {
+			return nil, out, err
 		}
 		out.Proposals = append(out.Proposals, x)
 	}
