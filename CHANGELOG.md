@@ -12,30 +12,33 @@ ledger whose teams' names differ only in letter case included.
 ### Added
 
 - **Declared configuration.** `lapilli serve --config FILE`
-  (`serve.config` in the chart, rendered into a ConfigMap) is YAML of
-  `teams`, `windows` (quiet windows: once, every day, week or month, or by
-  cron, a team's or everyone's), `reports` (when, for whom, what each
-  holds, where it goes) and `grants` (an editor's role, of every team or of
-  one), with the fields the UI's forms take. It is read strictly: a key it
-  doesn't know, a value of another kind, a key given twice or a file over
-  1 MiB is refused with its line, and each thing is checked as its form is,
-  with the same limits. The leader keeps the ledger holding what it says,
-  in one write, all or nothing: as it starts to lead, and whenever the
-  file's content changes, read and hashed every 15 seconds, as Kubernetes
-  swaps a ConfigMap's files through a link; no restart. Each is matched by
-  its name, a team's in any letter case, a quiet window's by its title;
-  what the UI made under that name is taken over. Each change is noted in
-  the activity log by `config`. A file that can't be used changes nothing:
-  the ledger keeps what the last good one declared, and the Settings, Runs
-  and Manage pages say why, with the line, in the reader's language. With
-  several replicas, only the leader writes it, fenced by its lease.
+  (`serve.config` in the chart, rendered into a ConfigMap, best given as a
+  text) is YAML of `teams`, `windows` (quiet windows: once, every day, week
+  or month, or by cron, a team's or everyone's), `reports` (when, for
+  whom, what each holds, where it goes) and `grants` (an editor's role, of
+  every team or of one), with the fields the UI's forms take. It is read
+  strictly: a key it doesn't know, a value of another kind, a key given
+  twice, a file over 1 MiB, more than the ledger keeps, or an empty file is
+  refused with its line, and changes nothing. Each thing is then checked as
+  its form is: one that can't be kept is skipped and kept as it was, and
+  the rest is kept. The leader keeps the ledger holding what the file says,
+  in one write, at the start of each term it leads and whenever the file's
+  content changes, read and hashed every 15 seconds, as Kubernetes swaps a
+  ConfigMap's files through a link; no restart. Each thing is matched by
+  its name, a team's in any letter case or by `renamed_from`, a quiet
+  window's by its title; what the UI made of the same team under that name
+  is taken over. Each change is noted in the activity log by `config`. What
+  can't be used or kept is shown on the Settings, Runs and Manage pages,
+  why to admins alone, as it can name who holds a role. What a file
+  declares has limits of its own, apart from the UI's.
 - **What is declared is read-only.** The UI marks it "declared" and draws
   its actions disabled, "Declared in config — change it in values" beside
   them; the ledger refuses every write to it, from the forms, the API or
-  anywhere, 409, and a team it names isn't deleted.
+  anywhere, 409, and a team it names isn't deleted or renamed.
 - **What it no longer declares** is the UI's again, as it was, or, with
-  `--config-prune` (`serve.configPrune`), deleted. Without `--config`,
-  nothing stays declared.
+  `--config-prune` (`serve.configPrune`), deleted once the same file is
+  read twice in a row; a team something still names is given back to the
+  UI instead. Without `--config`, nothing stays declared.
 - **`GET /config.yaml`**, an admin's: every team, quiet window, report and
   role the ledger holds, declared and made in the UI alike, as `--config`
   takes them, linked from the Settings page beside `settings.yaml`. Read
@@ -47,9 +50,10 @@ ledger whose teams' names differ only in letter case included.
   listed, to be dropped on their pages. At 4,000 rules and 3,000 names
   gone, the page reads the names one at a time.
 - **`--proposals-expire DURATION`** (`serve.proposalsExpire`), off by
-  default: a proposal that waited for approval longer is closed as
-  `expired` by the leader's work, noted in its history and the activity
-  log, and its rule takes another; its page says when it would.
+  default: a proposal that waited for approval longer since it was made,
+  and that no one approved, is closed as `expired` by the leader's work,
+  noted in its history and the activity log, and its rule takes another;
+  its page says when it would.
 
 ### Changed
 
@@ -57,6 +61,9 @@ ledger whose teams' names differ only in letter case included.
   teams, from the UI, the API and `--config`. Teams a ledger already holds
   whose names differ only in case are kept and listed on the Teams page,
   to be renamed; each can be changed but for its name.
+- **A quiet window's title is one line**, with no character that doesn't
+  show, as a team's name and a role's holder's are.
+- A team deleted in the UI notes each role it takes away with it.
 - Lapilli doesn't propose again by itself a change that expired.
 
 ## [0.43.0] - 2026-11-16

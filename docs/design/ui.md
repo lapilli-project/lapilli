@@ -851,9 +851,11 @@ path, with 409.
 
 The Settings page has a section, "Declared configuration": where the file
 is, what becomes of what it no longer declares (`--config-prune`), when
-the ledger was last kept to it and the start of its hash, and, when the
-file can't be used, why, with its line, in the reader's language (the
-Runs page says it too). Beside `settings.yaml`, `config.yaml` (an
+the ledger was last kept to it and the start of its hash, and what of the
+file can't be used or kept: to an admin, why, with its line, in the
+reader's language; to anyone else, the line and the kind alone ("line 23:
+a role that can't be kept"), as why can name who holds a role. The Runs
+page says it the same way. Beside `settings.yaml`, `config.yaml` (an
 admin's) gives everything as `--config` takes it. The Teams page lists
 teams a ledger kept from before whose names differ only in letter case,
 to be renamed.
@@ -879,17 +881,19 @@ keeps nothing else says so. `/proposals?stale=1` doesn't list them: it
 lists those waiting for approval that are stale for any reason, a rule
 changed or a backtest from another lapilli among them, and not those
 approved or being applied. A name in effect isn't moved, nor to a name
-none has (400). A viewer sees the buttons disabled, why said once above
-the table.
+none has (400), nor one over 500 bytes or with a character that doesn't
+show (400), nor one the ledger keeps nothing of (404). A viewer sees the
+buttons disabled, why said once above the table. The rules in effect are
+the latest version `lapilli serve` read, as `--rules-select` and `--rule`
+narrow it, and the page says so: a rule they leave out is listed too.
+With no version recorded (`--alerts`, firings copied in alone, or none
+read yet), the page says it can't tell.
 
 The names are read one at a time, in order, from the four tables at once
 (`ledger.KeptNames`): each counted, the page's kept, the rest let go; the
 page's are then counted (`ledger.KeptOf`, four reads of a hundred names).
 At 4,000 rules in effect and 3,000 names gone (`TestOrphansScale`), the
-page allocates some 30 MB, the 4,000 names in effect the most of it. Before
-a version of the rules is recorded, the page says it can't tell which
-names are gone.
-
+page allocates some 30 MB, the 4,000 names in effect the most of it. 
 ### What they cost
 
 At two thousand rules, four weeks of their firings (84,000) and a thousand

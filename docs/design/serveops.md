@@ -504,9 +504,10 @@ teams:
     labels: {team: payments}      # or whose labels have these values
     note: owns checkout and cart
     work_hours: mon-fri@09:00-18:00
-    sleep_hours: "23:00-07:00"
+    sleep_hours: 23:00-07:00
     tz: Asia/Seoul
     shifts: ""
+    renamed_from: ""              # its name before: renamed in place
 windows:                          # quiet windows
   - title: Nightly backup
     team: payments                # everyone's when left out
@@ -533,78 +534,128 @@ grants:                           # an editor's role, of every team or of one
 ```
 
 A window's `on` is `repeat_on`, the ledger's column: Helm reads values as
-YAML 1.1, where a key `on`, unquoted, is `true`, and the file would have a
-key `"true"`. Quote, likewise, a label's value YAML 1.1 reads as something
-else: `"on"`, `"yes"`, `"1.10"`.
+YAML 1.1, where a key `on`, unquoted, is `true`.
 
-It is read strictly: a key it doesn't know, a value of another kind, a key
-given twice, a second document, or a file over 1 MiB (a ConfigMap's most)
-is refused, with its line. Each item is then checked as the UI's form is:
+**Read strictly, or not at all.** A key it doesn't know, a value of
+another kind, a key given twice, a second document, a file over 1 MiB (a
+ConfigMap's most), more things than the ledger keeps (1,000 teams, 500
+quiet windows, 50 reports, 1,000 roles), or an empty file is refused as a
+whole, with its line, and changes nothing: the ledger keeps what the last
+file declared. An empty or truncated file, read as Kubernetes swaps a
+ConfigMap, would otherwise take away everything declared; to declare
+nothing, `teams: []`. A name, a title, a user, a group or a team given as
+a boolean or a number (`no`, `0123`, `1.10`), and a label's value given as
+a boolean or a fraction, is refused too: see "Through Helm" below.
+
+**Each thing, on its own.** Read, each item is checked as the UI's form is:
 the ledger's checks (`checkTeam`, `checkWindow`, a report's `check`,
-`grantName`) and limits (500 quiet windows, 50 reports, 1,000 roles; 1,000
-teams a file), and the server's (a report's destinations, a team's
-`on-call=NAME` shifts). Each of these errors names the line the item
-starts on and its name. A team a window, a report or a role names is one
-the file declares, or one the ledger holds.
+`grantName`) and the server's (a report's destinations, a team's
+`on-call=NAME` shifts), and its team must be one the file declares or the
+ledger holds. One that fails is skipped, and what the ledger held of it is
+kept as it was; everything else is kept, and what the file no longer
+declares is given back (or deleted) all the same: a file that takes a role
+away and adds a quiet window that can't be kept still takes the role
+away. The costly checks (a cron window's gaps) run before the write.
+
+**Limits of its own.** What a file declares isn't counted against what the
+UI may make (500 quiet windows, 50 reports, 1,000 roles), nor the UI's
+against it: an editor who fills the windows can't keep a file from
+declaring one. The ledger can then hold up to twice each.
 
 ### Keeping the ledger to it
 
-`ledger.Reconcile` makes the ledger hold what the file says in one write:
-all of it, or, when anything in it can't be kept, nothing. Each thing is
-matched by its name:
+`ledger.Reconcile` makes the ledger hold what the file says in one write.
+Each thing is matched by its name:
 
 - a team by its name, or else in any letter case when one team alone has
-  it (a file's `Payments` renames the ledger's `payments`);
+  it (a file's `Payments` renames the ledger's `payments`), or by its
+  `renamed_from`;
 - a report by its name; a role by whom it is given to and its team;
-- a quiet window by its title: of those with one title, the declared
-  before the UI's, each by its id, those alike first, then those of the
-  same team, then in order, so that taking one of two `deploy` windows
-  out of the file leaves the other as it was.
+- a quiet window by its title: those alike first, then a declared one of
+  its team, then a declared one of another team (the file moved it), then
+  one the UI made of its team. A window taken out of a file of several with
+  one title leaves the others as they were.
 
-What the UI made already under a declared name is taken over: changed to
-what the file says, or, when it says the same, marked declared as it is.
-A new one is made, marked declared. Each made, changed, taken over, given
-back or deleted is noted in the activity log, by `config` (`team payments
-kept`, `quiet window deploy declared in config`); a quiet window made is
+What the UI made is taken over only of the same team: a declared window
+whose title only another team's window has is made beside it, and a report
+whose name the UI gave another team's report is skipped, as names are
+unique. Taken over, it is counted so ("taken over") and noted `X declared
+in config`, as the file says it. A new one is made, marked declared. Each
+change is noted in the activity log, by `config`; a quiet window made is
 told as one the UI makes is (`window.kept`), and the windows changed are
 judged again. A file that says what the ledger holds writes nothing at
 all: the write is taken back, and no page is worked out again.
 
 What is declared and the file no longer names is the UI's again, as it
-was (`team payments no longer declared in config: the UI's to change`).
-With `--config-prune` (`serve.configPrune`) it is deleted instead, as the
-UI deletes it: a team's windows and reports stop, and its roles go, each
-declared one noted. Without `--config`, everything declared is the UI's
-again: a chart that drops `serve.config` leaves nothing read-only that no
-file can change.
+was. With `--config-prune` (`serve.configPrune`) it is deleted, once the
+same file has been read twice in a row, 15 seconds apart: read once, it is
+kept as it is (a file half written, swapped back at once, deletes
+nothing). A declared team something still names (a quiet window, a
+report, a role, a task, a rule's note, the UI's or declared) isn't
+deleted, but given back to the UI, the activity log saying why: deleted,
+its windows would quiet nothing and its roles go, and the file put back
+would make a new team, which they wouldn't name. Without `--config`,
+everything declared is the UI's again.
 
-**When.** The leader keeps the ledger to the file when it starts to lead,
-before anything else, and reads the file again every 15 seconds,
-comparing its SHA-256 with the one it last kept the ledger to. Kubernetes
-updates a mounted ConfigMap by swapping a link to a new directory, which a
-watch on the file misses, so the content is hashed instead. The chart
-mounts the directory, not a `subPath`, which the kubelet doesn't update.
-No restart is needed, and none is made: there is no checksum annotation.
+**Renaming a team.** By its name alone, a team renamed in the file is
+another: the old one is given back to the UI (or, with prune, deleted
+unless something names it), and what named the old one doesn't follow.
+To rename one in place, keeping what names it, give the new `name` and the
+old as `renamed_from` in one change, with every `team:` in the file that
+named it; once it is renamed, `renamed_from` can be left out. A rename in
+letter case alone needs neither.
+
+**When.** The leader keeps the ledger to the file at the start of each term
+it leads, whatever an earlier term kept it to (another leader with an
+older copy may have since, or a failover lost a write), and reads the file
+again every 15 seconds, comparing its SHA-256 with the one it last kept
+the ledger to. Kubernetes updates a mounted ConfigMap by swapping a link to
+a new directory, which a watch on the file misses, so the content is
+hashed instead. The chart mounts the directory, not a `subPath`, which the
+kubelet doesn't update. No restart is needed, and none is made. A file with
+things that couldn't be kept is tried again as the ledger changes (a team
+it names made in the UI), 15 seconds after, then twice as long each time,
+ten minutes at most; one refused as a whole isn't, until it changes.
 
 **Several replicas.** Only the leader keeps the ledger to the file, in a
 write its lease fences (a leader whose lease another took commits
 nothing). Each replica mounts the ConfigMap, and the kubelet updates each
 copy on its own clock, so for a minute two replicas can read two
 versions; were each to write, they would undo each other by turns. One
-writer, and the transaction, make it safe; the write is also idempotent,
-so a leader that takes over after another kept the ledger to the same
-file writes nothing.
+writer, and the transaction, make it safe; the write is idempotent, so a
+leader that takes over after another kept the ledger to the same file
+writes nothing.
 
-**A file that can't be used** changes nothing. The ledger keeps what the
-last good file declared, the error is logged once, and the Settings page
-(under "Declared configuration"), the Runs page and the Manage page's
-Settings card say why, with the line, in the reader's language; the
-leader says it to the other replicas with its status, and the pages'
-cache is told of it. It is tried again when the file changes, or when the
-ledger does (a team it names made in the UI). At start, a file that can't
-be read as YAML, or has a key it doesn't know, stops `lapilli serve`
-before it serves, as any flag given wrong does; a pod that restarts with
-such a file doesn't come up, while those running keep the last good one.
+**What is wrong** is logged once, and shown on the Settings page (under
+"Declared configuration") and the Runs page, and the Manage page's
+Settings card says so; the leader says it to the other replicas with its
+status. An admin is shown why, with the line; anyone else, the line and
+the kind alone ("line 23: a role that can't be kept"), as why can name who
+holds a role or where a report goes: so is `/api/v1/settings`. Put back as
+it was, the file the ledger is kept to shows nothing wrong again. At start,
+a file that isn't there or can't be read is a flag given wrong; one that
+can't be used starts `lapilli serve` all the same, on the ledger as it is,
+and is said as above: a pod restarted on it serves rather than loop.
+
+### Through Helm
+
+`serve.config` given as a text, a block scalar, is rendered as written,
+and recommended:
+
+```yaml
+serve:
+  config: |
+    teams:
+      - {name: payments, rules: ^Checkout}
+```
+
+Given as a mapping, Helm reads it first as YAML 1.1 and writes it again:
+`no`, `off`, `y` and `n` become `false` and `true`, `0123` becomes `83`,
+`1e3` `1000`, `0x1F` `31`, `1.10` `1.1`, and a number past 2^53 loses its
+last digits. Lapilli refuses a name, a title, a user, a group or a team
+it is given as a boolean or a number, and a label's value given as a
+boolean or a fraction, but can't tell `83` from `0123`. Times (`09:00`,
+`23:00-07:00`) stay as written either way.
 
 ### Read-only
 
@@ -615,10 +666,12 @@ write the ledger takes to one of those rows checks it, in the write itself
 `ErrDeclared`: "declared in config — change it in values", 409. The forms,
 the JSON API and anything else reach the ledger through them, so no path
 is missed; MCP has no tool that writes them. A team a declared window,
-report or role names isn't deleted either (`ErrNamedByDeclared`): the file
-would name a team that is gone. The pages mark what is declared with a
-badge, and draw each action on it with the `off` template: the button
-disabled, "Declared in config — change it in values" beside it.
+report or role names isn't deleted, nor renamed (`ErrNamedByDeclared`):
+the file would name a team that isn't there. The ledger's pruning (`--keep`)
+leaves a declared window that ended: the file would make it again, and
+tell of it. The pages mark what is declared with a badge, and draw each
+action on it with the `off` template: the button disabled, "Declared in
+config — change it in values" beside it.
 
 ### Export
 
@@ -627,11 +680,14 @@ team, quiet window, report and role the ledger holds, declared and made in
 the UI alike, as `--config` takes them: times as RFC 3339 in `--tz`, so each
 is the instant it is wherever it is read; a window's last day as a date
 when it is that day's start. What a file can't name is left out and said
-in a comment: a quiet window or a report whose team was removed. Teams
-whose names differ only in letter case are said too. Read back as
-`--config`, it makes, changes and deletes nothing; it takes over what the
-UI made; exported again, it is the same file; read once more, it writes
-nothing.
+in a comment, each name quoted, its line breaks and characters that don't
+show escaped: a title kept from before titles were one line can't end the
+comment and declare a role for whoever pastes the export. A quiet window's
+title is one line now, with nothing that doesn't show, as a team's and a
+role's holder's names are. Teams whose names differ only in letter case
+are said too. Read back as `--config`, it makes, changes and deletes
+nothing; it takes over what the UI made; exported again, it is the same
+file; read once more, it writes nothing.
 
 ### A team's name in any letter case
 
@@ -649,11 +705,16 @@ other is keyed. A file can't declare both: it names which to rename.
 
 ### Proposals that expire
 
-`--proposals-expire DURATION` (`serve.proposalsExpire`), off by default:
-the leader's work closes a proposal that waited for approval longer than
-that since it was made as `expired`, a hundred a round, each in a write
-that moves it only while it still waits, noted in its history and the
-activity log as Lapilli's; its rule is free for another, and Lapilli
-doesn't propose the same again by itself. One being backtested again
-waits all the same: the backtest, done, finds it closed, and keeps
-nothing. A proposal's page says when it would expire.
+`--proposals-expire DURATION` (`serve.proposalsExpire`), off by default (0,
+`0s`, `0d`): the leader's work closes as `expired` a proposal that waited
+for approval longer than that since it was made, a backtest again
+notwithstanding, that no one approved: one with an approval waits on (one
+of two, or the one `--approvals`, lowered, now asks for, which carrying it
+out approves). A hundred a round, each in a write that moves it only while
+it still waits, noted in its history and the activity log as Lapilli's;
+its rule is free for another, and Lapilli doesn't propose the same again
+by itself. They are closed before Lapilli backtests stale proposals again,
+so no backtest is spent on one about to close; one being backtested again
+on the leader is left until it is done, and one backtested on another
+replica, closed meanwhile, has its backtest refused as moved. A proposal's
+page says when it would expire, while no one approved it.
