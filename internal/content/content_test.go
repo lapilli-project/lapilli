@@ -625,3 +625,43 @@ func TestForOutlasts(t *testing.T) {
 	r.Expr, r.For = `increase(x[30m]) > 5`, time.Hour
 	one(t, r, Options{})
 }
+
+// The restart rule written in Grafana, a query, a reduce (last) and a
+// threshold (> 0.5), is the same fact.
+func TestForOutlastsGrafana(t *testing.T) {
+	rs, err := rules.Parse([]byte(`apiVersion: 1
+groups:
+  - orgId: 1
+    name: pods
+    folder: Ops
+    interval: 1m
+    rules:
+      - uid: restarts
+        title: Restarts
+        condition: C
+        for: 1m
+        data:
+          - refId: A
+            relativeTimeRange: {from: 1800, to: 0}
+            datasourceUid: prom
+            model: {expr: 'sum by (pod) (increase(restarts_total[30m]))', instant: true, refId: A}
+          - refId: B
+            datasourceUid: __expr__
+            model: {type: reduce, reducer: last, expression: A, refId: B}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: B, refId: C, conditions: [{evaluator: {type: gt, params: [0.5]}}]}
+`))
+	if err != nil || len(rs) != 1 || rs[0].Graph == nil {
+		t.Fatalf("%v %+v", err, rs)
+	}
+	r := good("Restarts")
+	r.Expr, r.Graph = rs[0].Expr, rs[0].Graph
+	for _, c := range []struct {
+		for_ time.Duration
+		want []string
+	}{{time.Minute, nil}, {30 * time.Minute, []string{ForOutlasts + ":for 30m ≥ 30m"}}, {time.Hour, []string{ForOutlasts + ":for 1h ≥ 30m"}}} {
+		r.For = c.for_
+		one(t, r, Options{}, c.want...)
+	}
+}

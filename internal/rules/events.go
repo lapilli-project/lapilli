@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"lapilli.dev/internal/sse"
 )
 
 // A rule that counts events compares how many times something happened over
@@ -47,10 +49,17 @@ const (
 // event does: increase(x[30m]) > 0.5, rate(x[10m]) * 300 > 0. A counter of
 // seconds or bytes, or a histogram's sum, is no count of events. Of a
 // condition of comparisons joined by and, each that counts events, the
-// longest range. ok is false for any other rule, and when what its condition
-// is can't be told: nothing is said then.
+// longest range. Of a Grafana rule, as Graph.eventWindow reads it. ok is
+// false for any other rule, and when what its condition is can't be told:
+// nothing is said then.
 func (r Rule) EventWindow() (time.Duration, bool) {
-	if r.Graph != nil || r.Logs != "" || r.Unsupported != "" || len(r.Expr) > eventMaxExpr {
+	if r.Logs != "" || r.Unsupported != "" {
+		return 0, false
+	}
+	if r.Graph != nil {
+		return r.Graph.eventWindow()
+	}
+	if len(r.Expr) > eventMaxExpr {
 		return 0, false
 	}
 	parts, ok := andParts(r.Expr, 0)
@@ -70,6 +79,83 @@ func (r Rule) EventWindow() (time.Duration, bool) {
 		out = max(out, w)
 	}
 	return out, out > 0
+}
+
+// eventWindow is EventWindow of a Grafana rule whose condition compares the
+// value of its one PromQL data query with a number, as a Prometheus rule's
+// does: a threshold of one number (gt or gte), or a math expression that is
+// one comparison of a ref with a number, of that query's value as it is
+// (an instant query's) or through reduces that leave it so (keeps). The
+// query's PromQL is read as a Prometheus rule's value is. A range query's
+// last value is its last step's, up to a step before the evaluation, so one
+// event holds it a step past the range at most. ok is false for any other:
+// a classic condition, any other math, a reduce that changes the value, two
+// data queries, Loki's; and for a rule that fires on no data (noDataState
+// Alerting, or KeepLast), whose firings needn't be events.
+func (g *Graph) eventWindow() (time.Duration, bool) {
+	if g.Logs != "" || len(g.Data) != 1 || len(g.Other) != 0 || g.NoData == StateAlerting || g.NoData == StateKeepLast {
+		return 0, false
+	}
+	var in, op string
+	var n float64
+	switch st := g.Steps[g.Cond]; {
+	case st.Threshold != nil:
+		in, op, n = st.Threshold.Input, graphOps[st.Threshold.Type], st.Threshold.A
+	case st.Math != nil:
+		value, o, x, ok := sse.Compared(st.Math)
+		ref, isRef := sse.Ref(value)
+		if !ok || !isRef {
+			return 0, false
+		}
+		in, op, n = ref, o, x
+	}
+	expr, slack, ok := g.eventQuery(in, 0)
+	if !ok || op == "" || len(expr) > eventMaxExpr {
+		return 0, false
+	}
+	w, one, ok := eventValue(expr, 0)
+	if !ok || passes(op, 0, n) || !passes(op, one, n) {
+		return 0, false
+	}
+	return w + slack, true
+}
+
+// graphOps are the thresholds of one number above which events are.
+var graphOps = map[string]string{"gt": ">", "gte": ">="}
+
+// eventQuery is the PromQL of the data query a ref of a Grafana rule reads,
+// as it is or through reduces that leave its value so (keeps), and how long
+// past its range one event can hold that value: a range query's step. ok is
+// false for any other ref.
+func (g *Graph) eventQuery(ref string, depth int) (expr string, slack time.Duration, ok bool) {
+	if depth > eventMaxDepth {
+		return "", 0, false
+	}
+	if st, isStep := g.Steps[ref]; isStep {
+		if st.Reduce == nil || !keeps(st.Reduce.Fn, st.Reduce.Window) {
+			return "", 0, false
+		}
+		return g.eventQuery(st.Reduce.Input, depth+1)
+	}
+	rd, isRead := g.reads[ref]
+	if _, isData := g.Data[rd.query]; !isRead || !isData || !keeps(rd.fn, rd.window) {
+		return "", 0, false
+	}
+	if rd.window > 0 {
+		slack = rd.res
+	}
+	expr, ok = g.Queries[rd.query]
+	return expr, slack, ok
+}
+
+// keeps reports whether a reduce leaves the value it reduces as it is: of
+// an instant query's one value, last, max, min or mean; of a range query's
+// values, last alone. A data query read as it is (fn "") must be instant.
+func keeps(fn string, window time.Duration) bool {
+	if window > 0 {
+		return fn == "last"
+	}
+	return fn == "" || fn == "last" || fn == "max" || fn == "min" || fn == "mean"
 }
 
 // passes reports whether v meets a comparison with n.

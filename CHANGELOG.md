@@ -50,7 +50,8 @@ fields; none is renamed.
 - **What a rule's firings were, with no record.** For each rule replayed
   that fired as often as a noisy one with no record, the ten that fired
   most. Of a condition that counts events, each firing is one, a count that
-  went up: "Fired 141 times with no incident written down to judge them by.
+  went up (a Grafana rule's on no data is none: with one among them, that
+  isn't said, nor, of another condition, that it went past its bound): "Fired 141 times with no incident written down to judge them by.
   All 141 are events its condition counts (a count that went up): these
   happened. … A longer "for" would hide them: write down whether they
   mattered, or fix what fires them." Of another with one bound that
@@ -81,7 +82,16 @@ fields; none is renamed.
   fire it; only events that keep coming for 1h will." `delta` is a
   gauge's, `idelta` and `irate` hold for about a scrape, and a counter of
   seconds or bytes, or a histogram's `_sum`, counts an amount: none of
-  these counts events. It is a fact of the content check (`for_outlasts`),
+  these counts events. A Grafana rule counts events when its condition is
+  a threshold of one number (`gt`, `gte`), or a math expression that is
+  one comparison of a ref with a number, of its one PromQL query's value,
+  as it is (an instant query's) or through reduces that leave it so
+  (`last`, `max`, `min` or `mean` of an instant query's one value, `last`
+  of a range query's, a step longer): a query of `increase(...[30m])`, a
+  reduce (`last`) and a threshold (`> 0.5`) is the restart rule. Not a
+  classic condition, other math, a reduce that changes the value, two
+  queries, or a rule that fires on no data (`noDataState` `Alerting` or
+  `KeepLast`). It is a fact of the content check (`for_outlasts`),
   on a rule's page and through MCP, and `lapilli verdict` says it of each
   rule it replays (`for_outlasts` in `--json`). A proposal of such a `for`
   is made all the same, as a team may want a rule for a crash loop, and

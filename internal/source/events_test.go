@@ -184,3 +184,163 @@ func TestUnrecordedMoreThanRead(t *testing.T) {
 		t.Errorf("%+v %v", us, err)
 	}
 }
+
+// grafanaRestarts answers the restart rule's query as a Grafana rule asks
+// it, the count alone: as restarts has it where it is more than none, and
+// none elsewhere, each pod's series there all along as a counter's increase
+// is; with gaps, no series at all where there was no restart, which Grafana
+// takes as no data.
+type grafanaRestarts struct{ gaps bool }
+
+func (g grafanaRestarts) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	if strings.Contains(expr, ">") {
+		return nil, nil
+	}
+	ss, err := restarts{}.QueryRange(ctx, expr+" > 0", start, end, step)
+	if g.gaps || err != nil {
+		return ss, err
+	}
+	out := make([]prom.Series, 0, 3)
+	for _, pod := range []string{"a", "b", "c"} {
+		at := map[int64]float64{}
+		for _, s := range ss {
+			if s.Labels["pod"] == pod {
+				for _, smp := range s.Samples {
+					at[smp.T.Unix()] = smp.V
+				}
+			}
+		}
+		s := prom.Series{Labels: map[string]string{"pod": pod}}
+		for t := start; !t.After(end); t = t.Add(step) {
+			s.Samples = append(s.Samples, prom.Sample{T: t, V: at[t.Unix()]})
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+// grafanaRule is a rule as Grafana provisions it: an instant query of expr,
+// a reduce (last) and a threshold (> 0.5), for 1m.
+func grafanaRule(t *testing.T, expr string) rules.Rule {
+	t.Helper()
+	rs, err := rules.Parse([]byte(`apiVersion: 1
+groups:
+  - orgId: 1
+    name: pods
+    folder: Ops
+    interval: 1m
+    rules:
+      - uid: restarts
+        title: Restarts
+        condition: C
+        for: 1m
+        keepFiringFor: 10m
+        labels: {team: infra}
+        data:
+          - refId: A
+            relativeTimeRange: {from: 1800, to: 0}
+            datasourceUid: prom
+            model: {expr: '` + expr + `', instant: true, refId: A}
+          - refId: B
+            datasourceUid: __expr__
+            model: {type: reduce, reducer: last, expression: A, refId: B}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: B, refId: C, conditions: [{evaluator: {type: gt, params: [0.5]}}]}
+`))
+	if err != nil || len(rs) != 1 || rs[0].Unsupported != "" {
+		t.Fatalf("%v %+v", err, rs)
+	}
+	return rs[0]
+}
+
+// grafanaWeek is the week of restarts, with r replayed from h, judged
+// against incs.
+func grafanaWeek(t *testing.T, h replay.History, r rules.Rule, incs []incident.Incident) ([]replay.Version, *verdict.Report, verdict.Options) {
+	t.Helper()
+	o := verdict.Options{From: t0, To: t0.Add(7 * 24 * time.Hour), Lead: 15 * time.Minute, Match: []string{"service"},
+		RefireWithin: time.Hour, UnknownLen: time.Hour}
+	versions := []replay.Version{{Rules: []rules.Rule{r}}}
+	known, fs := replay.Run(context.Background(), h, versions, o.From, o.To, time.Minute, 2)
+	rep := verdict.Judge(known, fs, incs, o)
+	if len(rep.Rules) != 1 || !rep.Rules[0].Replayed || rep.Rules[0].Firings < 30 {
+		t.Fatalf("the restart rule: %+v", rep.Rules)
+	}
+	return versions, rep, o
+}
+
+// The same restart rule written in Grafana: never suggested a for of 30m
+// or more, which one restart can't outlast, though a replay with one fires
+// on none; and, with no incident written down, its firings are events.
+func TestGrafanaRestarts(t *testing.T) {
+	r := grafanaRule(t, `sum by (pod) (increase(restarts[30m]))`)
+	if w, ok := r.EventWindow(); !ok || w != 30*time.Minute {
+		t.Fatalf("window %s %v", w, ok)
+	}
+	h := grafanaRestarts{}
+	away := []incident.Incident{{ID: "INC-1", Start: t0.Add(-24 * time.Hour), End: t0.Add(-23 * time.Hour), Labels: incident.Labels{"service": {"x"}}}}
+	versions, rep, o := grafanaWeek(t, h, r, away)
+	if !rep.Rules[0].Noisy || rep.Rules[0].Firings != 37 {
+		t.Fatalf("the restart rule: %+v", rep.Rules[0])
+	}
+	// What a for of 30m would do: fire on no restart, so it would look
+	// better, though it hides every one.
+	alts, err := replay.WithFor(context.Background(), h, r, []time.Duration{30 * time.Minute}, o.From, o.To, time.Minute)
+	if at, ok := alts[30*time.Minute]; err != nil || !ok || len(at) != 0 {
+		t.Fatalf("for 30m: %v %v %d", err, ok, len(at))
+	}
+	if got := Suggest(context.Background(), h, versions[0].Rules, rep, away, o, time.Minute, nil); len(got) != 0 {
+		t.Errorf("suggested %+v", got)
+	}
+
+	versions, rep, _ = grafanaWeek(t, h, r, nil)
+	us, err := Unrecorded(context.Background(), h, versions, rep, Judged(rep.Firings), time.Minute)
+	if err != nil || len(us) != 1 || !us[0].Events || us[0].Firings != 37 || us[0].Clear == nil || *us[0].Clear != 37 || us[0].Bound != "" {
+		t.Fatalf("%+v %v", us, err)
+	}
+	if !strings.Contains(us[0].Text(), "All 37 are events its condition counts (a count that went up)") {
+		t.Errorf("%q", us[0].Text())
+	}
+}
+
+// A Grafana rule fires on no data too, and such a firing is no event, nor
+// went past any bound: with one among them, that they all are events isn't
+// said; of a level, those on no data aren't counted as gone past its bound.
+func TestGrafanaNoData(t *testing.T) {
+	h := grafanaRestarts{gaps: true}
+	r := grafanaRule(t, `sum by (pod) (increase(restarts[30m]))`)
+	versions, rep, _ := grafanaWeek(t, h, r, nil)
+	nodata := 0
+	for _, f := range rep.Firings {
+		if f.Labels[replay.StateLabel] == replay.NoDataState {
+			nodata++
+		}
+	}
+	if nodata == 0 {
+		t.Fatal("no firing on no data")
+	}
+	us, err := Unrecorded(context.Background(), h, versions, rep, Judged(rep.Firings), time.Minute)
+	if err != nil || len(us) != 1 || us[0].Events || us[0].Clear != nil {
+		t.Fatalf("%+v %v", us, err)
+	}
+	if text := us[0].Text(); strings.Contains(text, "are events") || strings.Contains(text, "would hide") {
+		t.Errorf("%q", text)
+	}
+	// More than are read: not known.
+	us, err = Unrecorded(context.Background(), h, versions, rep, more{Judged(rep.Firings)}, time.Minute)
+	if err != nil || len(us) != 1 || us[0].Events || us[0].Clear != nil {
+		t.Fatalf("more: %+v %v", us, err)
+	}
+
+	// A level: of its 36 at 1, all went past 0.6; the flicker at 0.55,
+	// and those on no data, didn't.
+	r = grafanaRule(t, `level`)
+	if _, ok := r.EventWindow(); ok {
+		t.Fatal("a level counts events")
+	}
+	versions, rep, _ = grafanaWeek(t, h, r, nil)
+	us, err = Unrecorded(context.Background(), h, versions, rep, Judged(rep.Firings), time.Minute)
+	if err != nil || len(us) != 1 || us[0].Events || us[0].Clear == nil || *us[0].Clear != 36 || us[0].Firings <= 37 || us[0].Bound != "> 0.5" {
+		t.Fatalf("a level: %+v %v", us, err)
+	}
+}

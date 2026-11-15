@@ -264,8 +264,10 @@ week, from the daily tallies. The digest says so once, and, for each rule
 replayed that fired as often as a noisy rule with no record, the ten that
 fired most, works out what those firings were (`verdict.Unrecorded`, kept
 as an `unrecorded` result for the week, said for everyone's record or for a
-team's): of a condition that counts events (`rules.Rule.EventWindow`),
-each is one, a count that went up; of another, how many had the value its
+team's): of a condition that counts events (`rules.Rule.EventWindow`, a
+Grafana rule's too), each is one, a count that went up, unless one fired on
+no data (a Grafana rule's, labeled `grafana_alertstate="nodata"`), which is
+none, or more than 5,000 are to be read to tell; of another, how many had the value its
 condition compares go well past its bound, from the rule replayed over the
 week with its one bound a fifth further (a firing of that one overlapping
 it, alike in its labels, went well past it; a condition with no one bound

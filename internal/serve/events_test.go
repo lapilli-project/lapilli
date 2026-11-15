@@ -102,3 +102,61 @@ func TestForOutlastsShown(t *testing.T) {
 		t.Errorf("10m: %s", p.Evidence)
 	}
 }
+
+// The same, of the restart rule written in Grafana: a query, a reduce
+// (last) and a threshold (> 0.5).
+func TestForOutlastsGrafana(t *testing.T) {
+	ctx := context.Background()
+	s, dir := changesServer(t, func(c *Config) { c.CheckContent = true })
+	rule := func(title, for_ string) string {
+		return `
+      - uid: ` + strings.ToLower(title) + `
+        title: ` + title + `
+        condition: C
+        for: ` + for_ + `
+        labels: {severity: page}
+        annotations: {summary: "{{ $labels.pod }} restarted", runbook_url: "https://runbooks.example/restarts"}
+        data:
+          - refId: A
+            relativeTimeRange: {from: 1800, to: 0}
+            datasourceUid: prom
+            model: {expr: 'sum by (pod) (increase(restarts[30m]))', instant: true, refId: A}
+          - refId: B
+            datasourceUid: __expr__
+            model: {type: reduce, reducer: last, expression: A, refId: B}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: B, refId: C, conditions: [{evaluator: {type: gt, params: [0.5]}}]}`
+	}
+	if err := os.WriteFile(filepath.Join(dir, "restarts.yaml"), []byte(`apiVersion: 1
+groups:
+  - orgId: 1
+    name: pods
+    folder: Ops
+    interval: 1m
+    rules:`+rule("Restarts", "1h")+rule("RestartsNow", "1m")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	said := "Its for (1h) is as long as the 30m its condition counts over, or longer: one event alone can never fire it; only events that keep coming for 1h will."
+	if _, body, _ := get(t, h, "/rules/Restarts"); !strings.Contains(html.UnescapeString(body), said) {
+		t.Error("/rules/Restarts: its for isn't said to outlast one event")
+	}
+	if _, body, _ := get(t, h, "/rules/RestartsNow"); strings.Contains(html.UnescapeString(body), "one event alone can never fire it") {
+		t.Error("/rules/RestartsNow: a for of 1m outlasts nothing")
+	}
+	if _, body, _ := ui(t, h, "GET", "/rules/RestartsNow?tab=proposals", ana, "same-origin", nil); !strings.Contains(body, "Its condition counts events over 30m: with a for that long or longer, one event alone can never fire it.") {
+		t.Error("the proposals tab doesn't say the range its condition counts over")
+	}
+	id, err := s.propose(ctx, ask{Rule: "RestartsNow", Kind: ledger.KindFor, For: time.Hour, From: "person"}, "ana", false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, err := s.l.ProposalByID(ctx, id); err != nil || !strings.Contains(string(p.Evidence), `"for_outlasts":{"for_ns":3600000000000,"window_ns":1800000000000}`) {
+		t.Errorf("its evidence: %v %s", err, p.Evidence)
+	}
+}

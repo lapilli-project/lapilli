@@ -43,11 +43,13 @@ type UnrecordedFrom interface {
 //
 // Of a rule whose condition counts events, in every version it is in
 // (rules.Rule.EventWindow), each firing is an event the condition counted:
-// all happened. Of another with one bound that decides it (deciding), it is
-// replayed with the bound rules.NearBy further, and each of its firings one
-// of those overlaps, alike in its labels, went well past it. A replay that
-// fails, or runs out of time, leaves that unknown, and err says why; the
-// rest is kept.
+// all happened. A Grafana rule's firing on no data (noData) is none: with
+// one among them, or more than are read to tell, that isn't said. Of
+// another with one bound that decides it (deciding), it is replayed with
+// the bound rules.NearBy further, and each of its firings one of those
+// overlaps, alike in its labels, went well past it; one on no data didn't.
+// A replay that fails, or runs out of time, leaves that unknown, and err
+// says why; the rest is kept.
 func Unrecorded(ctx context.Context, h replay.History, versions []replay.Version, rep *verdict.Report, from UnrecordedFrom,
 	step time.Duration) ([]verdict.Unrecorded, error) {
 	var rrs []verdict.RuleResult
@@ -76,6 +78,15 @@ func Unrecorded(ctx context.Context, h replay.History, versions []replay.Version
 		u.Alerts, u.Top = all, verdict.TopAlerts(top)
 		switch counts := countsEvents(versions, rr.Rule); {
 		case counts:
+			if firesOnNoData(versions, rr.Rule) {
+				fs, more, err := from.Firings(ctx, rr.Rule, unrecordedFired)
+				if err != nil {
+					return out, err
+				}
+				if more || slices.ContainsFunc(fs, noData) {
+					break // not all events, or not known to be
+				}
+			}
 			all := u.Firings
 			u.Events, u.Clear = true, &all
 		case failed == nil:
@@ -118,6 +129,24 @@ func countsEvents(versions []replay.Version, rule string) bool {
 	}
 	return in
 }
+
+// firesOnNoData reports whether a rule fires when its query returns
+// nothing, in a version it is in: a Grafana rule whose noDataState isn't
+// OK. Its alerts then are NoData's (noData), not its condition's.
+func firesOnNoData(versions []replay.Version, rule string) bool {
+	for _, ver := range versions {
+		for _, r := range ver.Rules {
+			if r.Name == rule && r.Graph != nil && r.Graph.NoData != rules.StateOK {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// noData reports whether a firing is a Grafana rule's on no data, as the
+// replay labels it.
+func noData(f firing.Firing) bool { return f.Labels[replay.StateLabel] == replay.NoDataState }
 
 // Judged are, as an UnrecordedFrom, a report's firings with no record.
 type Judged []verdict.Judged
@@ -229,6 +258,9 @@ func clearOf(ctx context.Context, h replay.History, versions []replay.Version, r
 		byKey[k] = append(byKey[k], c)
 	}
 	for _, f := range fs {
+		if noData(f) {
+			continue // fired on no data, at no value
+		}
 		if slices.ContainsFunc(byKey[labelKey(verdict.KeptLabels(f.Labels))], func(c firing.Firing) bool { return overlap(f, c, to) }) {
 			n++
 		}

@@ -24,7 +24,8 @@ type Unrecorded struct {
 	// Firings are its firings with no record (RuleResult.Unjudged).
 	Firings int `json:"firings"`
 	// Events says its condition counts events: each firing is one, and
-	// Clear is all of them.
+	// Clear is all of them. Not said of a Grafana rule with a firing on no
+	// data among them, which is none.
 	Events bool `json:"events,omitempty"`
 	// Clear is how many of its firings happened: of a condition that counts
 	// events, all; of another, those whose value went past its bound by

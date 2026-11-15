@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -127,5 +128,128 @@ func TestEventWindowBounded(t *testing.T) {
 		t.Errorf("100 of the deepest, longest read: %s", took)
 	} else {
 		t.Logf("100 of the deepest, longest read: %s", took)
+	}
+}
+
+// A Grafana rule counts events when its condition compares its one PromQL
+// query's value, as it is or through a reduce that leaves it so, with a
+// number one event passes: a restart rule written in Grafana as a query, a
+// reduce (last) and a threshold (> 0.5) has the window a Prometheus rule of
+// the same PromQL has, and a for one restart can't outlast. Nothing is said
+// of one whose value is changed on its way, or read any other way.
+func TestGrafanaEventWindow(t *testing.T) {
+	const restarts = `sum by (cluster_name, namespace_name, container_name) (increase(kubernetes_io:container_restart_count{namespace_name!~"kube-.*"}[30m]))`
+	query := func(ref, expr string, instant bool) string {
+		return `
+          - refId: ` + ref + `
+            relativeTimeRange: {from: 1800, to: 0}
+            datasourceUid: prom
+            model: {expr: '` + expr + `', instant: ` + strconv.FormatBool(instant) + `, intervalMs: 60000, refId: ` + ref + `}`
+	}
+	step := func(ref, model string) string {
+		return `
+          - refId: ` + ref + `
+            datasourceUid: __expr__
+            model: {refId: ` + ref + `, ` + model + `}`
+	}
+	reduce := func(ref, fn, in string) string {
+		return step(ref, `type: reduce, reducer: `+fn+`, expression: `+in)
+	}
+	threshold := func(ref, typ, n, in string) string {
+		return step(ref, `type: threshold, expression: `+in+`, conditions: [{evaluator: {type: `+typ+`, params: [`+n+`]}}]`)
+	}
+	rule := func(for_, data string, more ...string) Rule {
+		t.Helper()
+		rs, err := Parse([]byte(`apiVersion: 1
+groups:
+  - orgId: 1
+    name: pods
+    folder: Ops
+    interval: 1m
+    rules:
+      - uid: restarts
+        title: Container restarted
+        condition: C
+        for: ` + for_ + `
+        keepFiringFor: 10m` + strings.Join(more, "") + `
+        data:` + data + "\n"))
+		if err != nil || len(rs) != 1 || rs[0].Graph == nil || rs[0].Unsupported != "" {
+			t.Fatalf("%v %+v", err, rs)
+		}
+		return rs[0]
+	}
+	shape := query("A", restarts, true) + reduce("B", "last", "A") + threshold("C", "gt", "0.5", "B")
+	for _, c := range []struct {
+		name, for_, data string
+		more             []string
+		window           time.Duration // 0: nothing said
+		outlasts         bool
+	}{
+		{"query, reduce last, threshold > 0.5, for 1m", "1m", shape, nil, 30 * time.Minute, false},
+		{"for 30m", "30m", shape, nil, 30 * time.Minute, true},
+		{"for 1h", "1h", shape, nil, 30 * time.Minute, true},
+		{"noDataState NoData, or OK", "1h", shape, []string{"\n        noDataState: OK"}, 30 * time.Minute, true},
+		{"gte 1", "30m", query("A", restarts, true) + reduce("B", "last", "A") + threshold("C", "gte", "1", "B"), nil, 30 * time.Minute, true},
+		{"max of an instant query's one value", "30m", query("A", restarts, true) + reduce("B", "max", "A") + threshold("C", "gt", "0", "B"), nil, 30 * time.Minute, true},
+		{"mean of an instant query's one value", "30m", query("A", restarts, true) + reduce("B", "mean", "A") + threshold("C", "gt", "0", "B"), nil, 30 * time.Minute, true},
+		{"a threshold on the instant query itself", "30m", query("A", restarts, true) + threshold("C", "gt", "0.5", "A"), nil, 30 * time.Minute, true},
+		{"a reduce of a reduce", "30m", query("A", restarts, true) + reduce("B", "last", "A") + reduce("D", "max", "B") + threshold("C", "gt", "0.5", "D"), nil, 30 * time.Minute, true},
+		{"math $B > 0.5", "30m", query("A", restarts, true) + reduce("B", "last", "A") + step("C", `type: math, expression: "$B > 0.5"`), nil, 30 * time.Minute, true},
+		{"math 0 < ${A}", "30m", query("A", restarts, true) + step("C", `type: math, expression: "0 < ${A}"`), nil, 30 * time.Minute, true},
+		{"a rate times a number", "15m", query("A", `rate(restarts_total[10m]) * 60 * 5`, true) + reduce("B", "last", "A") + threshold("C", "gt", "0", "B"), nil, 10 * time.Minute, true},
+		// A range query's last value is its last step's: up to a step (1m)
+		// past the range.
+		{"last of a range query", "30m", query("A", restarts, false) + reduce("B", "last", "A") + threshold("C", "gt", "0.5", "B"), nil, 31 * time.Minute, false},
+		{"last of a range query, for a step past", "31m", query("A", restarts, false) + reduce("B", "last", "A") + threshold("C", "gt", "0.5", "B"), nil, 31 * time.Minute, true},
+
+		// Nothing said.
+		{"mean of a range query", "1h", query("A", restarts, false) + reduce("B", "mean", "A") + threshold("C", "gt", "0.5", "B"), nil, 0, false},
+		{"max of a range query", "1h", query("A", restarts, false) + reduce("B", "max", "A") + threshold("C", "gt", "0.5", "B"), nil, 0, false},
+		{"a range query read as it is", "1h", query("A", restarts, false) + step("C", `type: math, expression: "$A > 0.5"`), nil, 0, false},
+		{"count of an instant query", "1h", query("A", restarts, true) + reduce("B", "count", "A") + threshold("C", "gt", "0.5", "B"), nil, 0, false},
+		{"sum of an instant query", "1h", query("A", restarts, true) + reduce("B", "sum", "A") + threshold("C", "gt", "0.5", "B"), nil, 0, false},
+		{"a reduce that puts a number in place of NaN", "1h", query("A", restarts, true) + step("B", `type: reduce, reducer: last, expression: A, settings: {mode: replaceNN, replaceWithValue: 1}`) + threshold("C", "gt", "0.5", "B"), nil, 0, false},
+		{"math that scales", "1h", query("A", restarts, true) + reduce("B", "last", "A") + step("C", `type: math, expression: "$B * 2 > 0.5"`), nil, 0, false},
+		{"math of two comparisons", "1h", query("A", restarts, true) + reduce("B", "last", "A") + step("C", `type: math, expression: "$B > 0.5 && $B < 100"`), nil, 0, false},
+		{"math of a reduce, not compared", "1h", query("A", restarts, true) + step("C", `type: math, expression: "$A"`), nil, 0, false},
+		{"a math step between", "1h", query("A", restarts, true) + step("B", `type: math, expression: "$A * 2"`) + reduce("D", "last", "B") + threshold("C", "gt", "0.5", "D"), nil, 0, false},
+		{"a classic condition", "1h", query("A", restarts, true) + step("C", `type: classic_conditions, conditions: [{evaluator: {type: gt, params: [0.5]}, operator: {type: and}, query: {params: [A]}, reducer: {type: last}}]`), nil, 0, false},
+		{"two data queries", "1h", query("A", restarts, true) + query("D", `up`, true) + reduce("B", "last", "A") + threshold("C", "gt", "0.5", "B"), nil, 0, false},
+		{"lt", "1h", query("A", restarts, true) + reduce("B", "last", "A") + threshold("C", "lt", "0.5", "B"), nil, 0, false},
+		{"a range", "1h", query("A", restarts, true) + reduce("B", "last", "A") + step("C", `type: threshold, expression: B, conditions: [{evaluator: {type: within_range, params: [0.5, 10]}}]`), nil, 0, false},
+		{"a number one event doesn't pass", "1h", query("A", restarts, true) + reduce("B", "last", "A") + threshold("C", "gt", "5", "B"), nil, 0, false},
+		{"a number none passes", "1h", query("A", restarts, true) + reduce("B", "last", "A") + threshold("C", "gte", "0", "B"), nil, 0, false},
+		{"a gauge's delta", "1h", query("A", `delta(temperature[30m])`, true) + reduce("B", "last", "A") + threshold("C", "gt", "0.5", "B"), nil, 0, false},
+		{"fires on no data", "1h", shape, []string{"\n        noDataState: Alerting"}, 0, false},
+		{"keeps its last state on no data", "1h", shape, []string{"\n        noDataState: KeepLast"}, 0, false},
+	} {
+		r := rule(c.for_, c.data, c.more...)
+		w, ok := r.EventWindow()
+		if ok != (c.window > 0) || w != c.window {
+			t.Errorf("%s: window %s %v, want %s", c.name, w, ok, c.window)
+		}
+		if _, out := r.ForOutlasts(); out != c.outlasts {
+			t.Errorf("%s: outlasts %v, want %v", c.name, out, c.outlasts)
+		}
+	}
+
+	// Bounded as a Prometheus rule is: a query past eventMaxExpr isn't
+	// read, nor reduces deeper than eventMaxDepth.
+	long := `sum(increase(x{a="` + strings.Repeat("y", eventMaxExpr) + `"}[30m]))`
+	if _, ok := rule("1h", query("A", long, true)+reduce("B", "last", "A")+threshold("C", "gt", "0.5", "B")).EventWindow(); ok {
+		t.Error("a query past 4 KB: read")
+	}
+	deep := func(n int) string {
+		data := query("A", restarts, true) + reduce("R0", "last", "A")
+		for i := 1; i < n; i++ {
+			data += reduce("R"+strconv.Itoa(i), "last", "R"+strconv.Itoa(i-1))
+		}
+		return data + threshold("C", "gt", "0.5", "R"+strconv.Itoa(n-1))
+	}
+	if _, ok := rule("1h", deep(eventMaxDepth)).EventWindow(); !ok {
+		t.Errorf("%d reduces: not read", eventMaxDepth)
+	}
+	if _, ok := rule("1h", deep(eventMaxDepth+3)).EventWindow(); ok {
+		t.Errorf("%d reduces: read", eventMaxDepth+3)
 	}
 }

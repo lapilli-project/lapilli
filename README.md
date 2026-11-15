@@ -217,7 +217,14 @@ not, times or over numbers or not, compared with a number no event passes
 and one event does (`increase(x[30m]) > 0.5`, `rate(x[10m]) * 300 > 0`).
 `delta` is a gauge's; `idelta` and `irate` hold for about a scrape after an
 event; and a counter of seconds or bytes, or a histogram's `_sum`, counts an
-amount, not events: none of these is one. After one restart, `increase(restarts[30m]) > 0.5` holds for
+amount, not events: none of these is one. A Grafana rule is one when its
+condition is a threshold of one number (`gt`, `gte`), or a math expression
+that is one comparison of a ref with a number, of its one PromQL query's
+value, as it is (an instant query's) or through reduces that leave it so
+(`last`, `max`, `min` or `mean` of an instant query's one value, `last` of
+a range query's, which holds a step longer), its PromQL read as above; not
+one that fires on no data (`noDataState` `Alerting` or `KeepLast`), and a
+firing on no data is no event. After one restart, `increase(restarts[30m]) > 0.5` holds for
 30 minutes at most: with `for: 1h`, one restart can never fire it, only
 restarts that keep coming for an hour. The report says so of a rule whose
 `for` is that long already: "Its for (1h) is as long as the 30m its
