@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-11-15
+
 A deployment with no incident source had every rule that fired ten times
 or more called noisy, at 0% precision, and its noisiest suggested a longer
 `for`. On one, a restart rule (`increase(restarts[30m]) > 0.5`, `for:
@@ -12,7 +14,7 @@ all. Now a firing with no record at its time is counted, not judged; a rule
 that fires that often with none says what its firings were instead; a `for`
 one event can't outlast is said to be one, and never suggested; and a
 rule's firings are counted by the team whose labels they have. **Ledger
-schema 018**, after 0.28's 017: an index of when incidents ended, so that a
+schema 018**, after 0.31's 017: an index of when incidents ended, so that a
 page reads the incidents that keep its weeks' record and no others (a
 lapilli before 0.41 doesn't open a ledger this one has migrated). What the
 weekly digest works out is kept with its other results, from when
