@@ -67,10 +67,13 @@ string now.
   nor does `--approvals` lowered approve one. With `--changes`, Lapilli
   backtests again itself, as Lapilli, those an earlier lapilli backtested,
   on a run of its work alone (never when a write pokes it): three a run,
-  twelve an hour at most on every replica together, the longest unmoved
-  first, one at a time under the heavy turn; one that doesn't finish
-  within `--timeout` replaces nothing, and is tried again an hour later. A
-  record that changed, or a newer lapilli's, is a person's. An editor backtests one again from its page (`POST
+  twelve an hour at most on every replica together, tried or kept, the
+  longest unmoved first, one at a time under the heavy turn, each within
+  ten minutes (`--timeout` when shorter), never waiting for a comparison
+  running. One that doesn't finish replaces nothing, is said in the
+  proposal's history, ends the run, and is left an hour, then two, four,
+  up to a day. A record that changed, or a newer lapilli's, is a
+  person's. An editor backtests one again from its page (`POST
   /proposals/{id}/backtest`, asked for as a proposal is: the role, from
   this site, and the tries an hour, read again where it is kept), and an
   agent with `--mcp-propose`, through `backtest_again` (destructive, not
@@ -86,13 +89,13 @@ string now.
   carried out. The approvals given to the backtest replaced are withdrawn,
   and told as `proposal.backtested` to the webhook and Slack, naming who
   gave them, when any were or an agent asked; MCP's `rule` gives each
-  proposal's `backtested_again`. Every incident ID its pull request's
-  description names is a code span of its own, nothing in it read as
-  Markdown. What a proposal shows when read never stops a change being
-  carried out: for_outlasts falls back to what it kept, and stale ones
-  that can't be read are approved by none as fewer approvals are needed,
-  that round.
-  Refused when the rule changed since: propose it again.
+  proposal's `backtested_again`. Refused when the rule changed since:
+  propose it again. Every incident ID its pull request's description
+  names is a code span of its own, nothing in it read as Markdown (one
+  with nothing in it, `(none)`). What a proposal shows when read never
+  stops a change being carried out: for_outlasts falls back to what it
+  kept, and stale ones that can't be read are approved by none as fewer
+  approvals are needed, that round.
 
 ### Changed
 

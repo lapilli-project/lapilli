@@ -641,26 +641,37 @@ The first step, for v0.22.0, as above, except:
     Lapilli proposes of itself; while it replays and isn't read-only. The
     longest unmoved first, three a run at most, and twelve an hour
     (`LapilliBacktestsAnHour`), counted by the ledger on every replica
-    together, as a person's are; one at a time under the heavy turn,
-    waiting for a comparison running, each within `--timeout`. A record
-    that changed since, a rule that did, or a newer lapilli's backtest is a
+    together, as a person's are, each tried as each kept: one that keeps
+    nothing is kept in the changes all the same ("backtest tried again",
+    `ledger.BacktestTried`, said in the proposal's history). One at a time
+    under the heavy turn, never waiting for a comparison running (the run
+    is over then), each replayed for ten minutes at most (`--timeout` when
+    shorter, `autoWithinMost`), the whole of it a minute more: it holds the
+    heavy turn, the one comparison and the work meanwhile. A record that
+    changed since, a rule that did, or a newer lapilli's backtest is a
     person's: an incident written down and taken away doesn't make Lapilli
-    replay twelve weeks. One that doesn't finish within `--timeout`
-    replaces nothing and withdraws nothing; it, and one it failed to
-    otherwise, isn't tried again for an hour (a replica's own memory: the
-    next leader tries again); one backtested again in the last ten minutes
-    isn't either.
+    replay twelve weeks. One that doesn't finish replaces nothing and
+    withdraws nothing, and ends the run, so that a history that never
+    answers holds the work for one at most; it, and one it failed to
+    otherwise, is left an hour, then two, four, up to a day, each time it
+    fails again, afresh once the semantics number changes (a replica's own
+    memory: the next leader starts afresh, which the ledger's twelve an
+    hour bounds); one backtested again in the last ten minutes isn't
+    either.
   - **Shown, never decisive.** What a proposal says when read never stops
     a change being carried out: an older version that won't parse, or a
     read that fails, leaves `for_outlasts` as the proposal kept it, and
     when which proposals are stale can't be read, `carryOut` approves none
     as fewer approvals are needed that round and goes on (Demote, and the
     changes approved, with it). The single read of an older version
-    (`flights`) runs under a context of its own, thirty seconds at most,
-    that no reader's leaving cancels; a panic in it is each reader's
-    error, and each waits as long as its own request does. Every incident
-    ID a pull request's description names is a code span of its own, a
-    backtick in it a quote and a line break a space (`mdIDs`).
+    (`flights`) runs under the server's own context, ended as it shuts
+    down or is closed, thirty seconds at most, that no reader's leaving
+    cancels, two at once; none starts for a reader already gone, and the
+    last two read are kept a minute for the next reader; a panic in it is
+    each reader's error, logged at Error with its stack, and each waits as
+    long as its own request does. Every incident ID a pull request's
+    description names is a code span of its own, a backtick in it a quote
+    and a line break a space, one with nothing in it `(none)` (`mdIDs`).
 - **Not yet:** proposals in the weekly digest's tasks line, and a
   proposal carried by a task made elsewhere (a proposal can be made into a
   task).
