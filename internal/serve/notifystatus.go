@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strconv"
 	"time"
+
+	"lapilli.dev/internal/ledger"
 )
 
 // Where notices go, and whether they went (docs/design/ui.md, "First use"):
@@ -37,10 +39,12 @@ type notifyStatus struct {
 	Reports, ReportsNowhere int // reports on, and of them those with nowhere to go
 	Sends                   bool
 	LastSent                time.Time
-	// Failed are the notices made in the last day whose last try failed,
-	// ledger.FailedCounted at most; FailedMore, that there were more.
-	Failed     int
-	FailedMore bool
+	// Failed are the notices made in the last day whose last try failed, of
+	// the latest unsent ledger.FailedCounted a place has; Backlog, that a
+	// place has more unsent than those, which aren't looked through.
+	Failed  int
+	Backlog bool
+	Counted int
 	// Posted is, when the digest goes to Slack, posted there itself, not
 	// through the outbox, how its posts went, as the ledger has it.
 	Posted *digestPosted
@@ -125,7 +129,7 @@ func (s *Server) notifyStatus(ctx context.Context, lang string) (*notifyStatus, 
 	if err != nil {
 		return nil, err
 	}
-	n.LastSent, n.Failed, n.FailedMore = st.LastSent, st.Failed, st.More
+	n.LastSent, n.Failed, n.Backlog, n.Counted = st.LastSent, st.Failed, st.More, ledger.FailedCounted
 	return n, nil
 }
 

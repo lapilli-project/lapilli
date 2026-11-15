@@ -7,25 +7,34 @@ import (
 )
 
 // OutboxStanding is how the outbox stands, as the pages say it: when a
-// notice was last sent, to any of the places asked of, and how many made
-// since a time weren't sent, their last try having failed (those given up
-// on among them): FailedCounted at most, More when there were more.
+// notice was last sent, to any of the places asked of; how many of the
+// unsent ones were made since a time and failed their last try (those given
+// up on among them); and More, that a place has more unsent than
+// FailedCounted, which were not looked through.
 type OutboxStanding struct {
 	LastSent time.Time
 	Failed   int
 	More     bool
 }
 
-// FailedCounted is how many failed notices Standing counts at most: the
-// count reads the unsent notices of a place, and a receiver down for days,
-// with --keep 0, leaves hundreds of thousands, which the pages that say it
-// read on each request.
+// FailedCounted is how many unsent notices of a place Standing looks
+// through at most: a receiver down for days, with --keep 0, leaves hundreds
+// of thousands, and the pages that say it are worked out for each request.
 const FailedCounted = 1000
 
+// standingUnsent are a place's unsent notices, FailedCounted and one more at
+// most, the latest to be tried first: read by the outbox's index on its
+// place, when each was sent and when it is next tried (outbox_due), a range
+// of it read from its end, so that what is read is bounded however many
+// wait; whether each was made since a time and failed is looked at in those
+// rows alone.
+const standingUnsent = `SELECT COUNT(*), COUNT(CASE WHEN error != '' AND created >= ? THEN 1 END) FROM
+	(SELECT error, created FROM outbox WHERE dest = ? AND sent_at IS NULL ORDER BY next_at DESC LIMIT ?) u`
+
 // Standing is how the outbox stands for the places dests: for each, its
-// last notice sent, one read by the outbox's index on its place and when
-// each was sent, and its failed notices made since a time, FailedCounted at
-// most, read by the same index as far as that.
+// last notice sent, one read by the outbox's index, and its unsent notices
+// made since a time that failed, of FailedCounted of them at most
+// (standingUnsent).
 func (l *Ledger) Standing(ctx context.Context, dests []string, since time.Time) (OutboxStanding, error) {
 	var out OutboxStanding
 	for _, d := range dests {
@@ -36,17 +45,12 @@ func (l *Ledger) Standing(ctx context.Context, dests []string, since time.Time) 
 		if at := fromNull(sent); at.After(out.LastSent) {
 			out.LastSent = at
 		}
-		if out.More {
-			continue
-		}
-		var n int
-		if err := l.r.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT 1 FROM outbox
-			WHERE dest = ? AND sent_at IS NULL AND error != '' AND created >= ? LIMIT ?) f`, d, since.Unix(), FailedCounted+1-out.Failed).Scan(&n); err != nil {
+		var unsent, failed int
+		if err := l.r.QueryRowContext(ctx, standingUnsent, since.Unix(), d, FailedCounted+1).Scan(&unsent, &failed); err != nil {
 			return out, err
 		}
-		if out.Failed += n; out.Failed > FailedCounted {
-			out.Failed, out.More = FailedCounted, true
-		}
+		out.Failed += min(failed, FailedCounted)
+		out.More = out.More || unsent > FailedCounted
 	}
 	return out, nil
 }

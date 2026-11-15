@@ -202,7 +202,7 @@ func TestNotifyStatusTexts(t *testing.T) {
 	for _, n := range names {
 		for day := range 7 {
 			for _, st := range []notifyStatus{
-				{Sends: true, Failed: 1000, FailedMore: true, DigestOn: true, DigestNowhere: true, Posted: &digestPosted{At: now, FailedTo: now, Failed: true}, Loc: time.UTC},
+				{Sends: true, Failed: 3, Backlog: true, Counted: 1000, DigestOn: true, DigestNowhere: true, Posted: &digestPosted{At: now, FailedTo: now, Failed: true}, Loc: time.UTC},
 				{Sends: true, Failed: 1, ReportsNowhere: 1, DigestOn: true, DigestSet: true, DigestNowhere: true, Posted: &digestPosted{}, Loc: time.UTC},
 				{Sends: true, LastSent: now, Failed: 2, ReportsNowhere: 2, DigestOn: true, Posted: &digestPosted{To: now}, Loc: time.UTC},
 			} {
