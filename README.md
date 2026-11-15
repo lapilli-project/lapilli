@@ -1428,7 +1428,12 @@ the Gateway, the load balancer in front), and Prometheus only to
 `serve.userHeader`, the chart refuses to go without it. The chart serves
 the UI at a URL with `serve.service` (a LoadBalancer or NodePort),
 `serve.ingress` or `serve.httpRoute` (Gateway API), and `serve.signIn`;
-its README has each cloud's load balancer.
+its README has each cloud's load balancer. A proposal's backtest takes up
+to `--timeout`; a proposal for many rules starts none after twenty seconds
+and says which weren't tried. Where the proxy in front gives a request less
+than `--timeout` (30 seconds by default for some load balancers' backends),
+raise it for `POST /proposals` and `POST /rules/bulk`, or lower
+`--timeout`.
 
 Posts from other sites are refused, and the pages run no scripts. Only host
 names it is reached by are answered, so a page elsewhere can't point a name

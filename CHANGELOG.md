@@ -20,7 +20,10 @@ ledger schema change; the API and MCP answer as they did.
   page. At most twenty rules a request. The list says once how many were
   proposed, and why the others weren't (a proposal waiting already, that
   `for` already, no suggestion, not replayed, not in effect, the hour's
-  twenty made), and links to the proposals made.
+  twenty made), and links to the proposals made: those the reader made,
+  read again, whatever the address says. A request starts no rule after
+  twenty seconds, so that it answers within a proxy's timeout, and says
+  which weren't tried.
 - **A rule's labels as chips on the rules list**: the labels `label:`
   picks it by, but its severity, five a row and the rest behind "+N", each
   a link to the list with that label too.
@@ -46,9 +49,27 @@ ledger schema change; the API and MCP answer as they did.
 
 - A proposal past the twenty an hour a person may make answered 500, and
   was logged as a server's error, when it was refused before the rule was
-  read again; it answers 429, saying so.
+  read again, and 400 when two at once found the ledger's write past them;
+  it answers 429, saying so, either way.
 - A team's long name in a select pushed the bar, and the rules list's bulk
   bar, past the width of a 320 CSS px screen.
+- The sidebar's languages broke 한국어 between its syllables; each name is
+  kept whole.
+
+### Security
+
+- **What a refused proposal costs is bounded.** A refusal after the rules
+  are read again, from where they are kept (Grafana, a ruler, a cloud's
+  alarms, the files), isn't a proposal the hour's twenty count: a reader
+  could ask for them without end, each a live read. A reader now asks for
+  60 proposals an hour at most that read the rules again, made or refused,
+  the agents acting for them included (kept in memory, a replica's own);
+  past them, 429. Hardening of released behaviour.
+- **MCP's `retire` reads the rule once, after the reader's checks.** It
+  read every rule in effect, parsed whole, to decide between turning a
+  rule off and deleting it, before checking that the person may propose at
+  all; `propose` now decides, from its own read, after them. Hardening of
+  released behaviour.
 
 ## [0.39.2] - 2026-11-15
 

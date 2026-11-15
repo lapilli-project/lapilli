@@ -83,7 +83,8 @@ or all teams': two counts the ledger gives once each time it changes
 rule, counted by the database), not once a page.
 
 On a screen 960 CSS px wide or more, the sidebar stays on the left as the
-page scrolls, with the languages at its foot. Narrower, or zoomed in, it is
+page scrolls, with the languages at its foot, each name kept whole (한국어
+was broken between its syllables there). Narrower, or zoomed in, it is
 a `<details>` under the name, closed until opened, whose summary names the
 page the reader is on ("Menu · Rules"), and nothing stays put over the
 page. A `<details>` can't be open on one screen and closed on another
@@ -341,8 +342,10 @@ its column and its facet. Five a row, by name, the rest behind "+N", a
 asked with `label:NAME=VALUE` in the search too, made from what the page
 read of its URL (`rulesAsk`), as a filter chip's is: canonical, so no
 redirect, and carrying no result of a bulk write. One in the search already
-is drawn solid, and isn't a link; nor is one the search couldn't take: a
-value with a double quote, which the box can't write, or a search with its
+is drawn solid, and isn't a link; nor is one the search couldn't take,
+the box reading what the link writes back as another filter, or none (a
+value with a double quote, or with spaces after it, which the box takes
+off; a name with "=", which it cuts the value at), or a search with its
 twenty words, past 500 characters, or a page past 8192 bytes.
 `TestRuleLabelChips` follows each link and holds what it shows to the rows
 that had the chip, the value in any case, as the filter matches. At two
@@ -704,7 +707,8 @@ left out) picks the proposals named alone, as a bulk proposal's result
 links to them: the database picks them before the facets count, as it does
 the team's (`ledger.ProposalPick.IDs`, `ProposalCountsOf`, additive reads),
 each is a chip, "Proposals: #12", and the form and the other chips keep
-them; "Clear filters" takes them away.
+them; "Clear filters" takes them away None of them there says so, "None of the proposals picked is
+here.", with Clear, not that there are none.
 
 Unless `state=` is given, the open ones, as the list was, those waiting for
 approval first. The form sends `state=all` with what is ticked, so none
@@ -878,49 +882,94 @@ its proposals tab's form: turned off where it is kept so that it can be,
 deleted where it can't be, and, off already, deleted once it has been off
 four weeks); the new `for`; and Propose (`do=propose`). A threshold and a
 fix to what a rule says, each a rule's own, are on its page alone. Each
-rule picked gets the proposal its page's form would make, made
-by the reader, through the same doors as `POST /proposals`: an editor's
-(a team's editor's are counted, each, "refused: editors only", as the
-single form refuses them); its evidence as that form gives it (from the
-suggestion where the digest has one, spare where it is over the twelve
-weeks); read again, written where it is kept and backtested as one is
-(`propose`), under the heavy turn, taken and given back for each as
-`POST /proposals` takes it, holding no page's turn meanwhile; one
-unfinished proposal a rule; twenty an hour a person, counted as one by one.
-At most twenty rules a request, refused whole past them, 400, as are a
-`for` that isn't one or a kind it doesn't offer; a server with no rules of
-its own is refused whole, and its bar says why. Nothing changes until
-someone approves each on its page, as one made on its rule's page is.
+rule picked gets the proposal its page's form would make, made by the
+reader, through the same doors as `POST /proposals`: an editor's (a team's
+editor's are counted, each, "refused: editors only", as the single form
+refuses them); its evidence as that form gives it, from the suggestion
+where the digest has one, spare where it is over the weeks the list showed
+(1, 4 or 12, as the rule's page opened from the list says); read again,
+written where it is kept and backtested as one is (`propose`), under the
+heavy turn, taken and given back for each as `POST /proposals` takes it;
+one unfinished proposal a rule; twenty an hour a person, counted as one by
+one. Retiring is decided by `propose`, after it has checked the reader may
+propose, from the rule as it reads it again: turned off where it can be
+and isn't, deleted otherwise (`kindRetire`, MCP's `retire` the same); the
+bulk proposal reads no rule of its own for it. What a rule's page reads for
+its forms (the suggestions, the spare rules) is read once, under a page's
+turn, given back before any proposal waits for the heavy turn. At most
+twenty rules a request, refused whole past them, 400, as are a `for` that
+isn't one or a kind it doesn't offer; a server with no rules of its own is
+refused whole, and its bar says why; nothing picked says so first, and
+reads nothing. Nothing changes until someone approves each on its page, as
+one made on its rule's page is.
 
-What is refused for what the rule is is counted by why (`proposeWhy`, by the
-text `propose` refuses with, which `TestProposeWhyKept` holds it to): a
-proposal not finished with already, that `for` already, no `for` suggested,
-not replayed (no backtest could check it), not in effect here, the hour's
-twenty made, and anything else, "propose each from its page to see why".
-What isn't the rule's (the heavy turn waited for past thirty seconds,
-another comparison running, a database that stopped answering) would be
-the same for the rest: it is counted failed and stops there, "N not
-tried", as the bulk writes do. The list gone back to says it once, with a
-link to the proposals made, the proposals list with their `id=`, and
-`made=` in the result's query is read within bounds (twenty at most, as
-many as were made, a bulk proposal's) and carried on by no link or form.
-The single form's "too many an hour", which answered 500 when asked before
-the rule was read again, answers 429. Before each, the answer's write
-deadline is moved on by the wait for the heavy turn, `--timeout` and a
-minute: twenty may take longer than the server's two minutes to answer,
-and the reader would see an error for what was made
-(`TestBulkProposeWritesBack`). At two thousand rules, against the tests'
-stand-in history, a proposal for twenty took 1.3 s; against Prometheus,
-each backtest takes what it takes, within `--timeout`.
+What is refused for what the rule is is counted by why: a proposal not
+finished with already, that `for` already, no `for` suggested, not replayed
+(no backtest could check it), not in effect here, and anything else,
+"propose each from its page to see why". `proposeWhy` says, of every text
+`propose` and what it calls refuse with, which it is, and
+`TestProposeWhyKept` walks them in the source and fails on one it doesn't
+say. What would be the same for every rule left stops there: the hour's
+twenty made, or the reader's tries (below) used, each rule left counted so
+and none read; what is the server's or the request's (nothing replayed yet,
+the rules not read yet, another comparison running, the heavy turn waited
+for past thirty seconds, a database that stopped answering), counted
+failed, the rest "not tried", as the bulk writes do.
+
+**A request's time.** A bulk proposal starts no rule after twenty seconds
+(`proposeTime`), and a rule's wait for the heavy turn ends then too: the
+rest are "not tried: the time for one request was up, pick them again". The
+answer so comes back within what a proxy in front commonly gives a request
+(30 seconds for some load balancers' backends, 60 for some ingresses),
+which past it closes the request, and the reader would see an error for
+what was made. A rule started just before then takes what it takes: its
+backtest within `--timeout`, against Prometheus as long as that asks. A
+single proposal's backtest is bounded the same way and no more: where a
+proxy's timeout is shorter than `--timeout`, raise it for `POST /proposals`
+and `POST /rules/bulk`, or lower `--timeout`. The answer's write deadline is
+moved on before each rule, past the server's two minutes
+(`TestBulkProposeWritesBack`). A request that ends (a proxy's timeout, the
+reader gone, the server stopping) keeps what was made and is logged, with
+how many.
+
+**Tries.** A refusal after the rules are read again (it has that `for`
+already, it isn't replayed, its history is too short to retire it) costs
+that read, of Grafana, a ruler or a cloud's alarms among them, and isn't a
+proposal the ledger counts. So a reader asks for 60 proposals an hour at
+most that read the rules again, made or refused, three times the twenty
+they may make, the agents acting for them included (`triesAnHour`, kept in
+memory, a replica's own); past them the single form answers 429, and a bulk
+proposal counts every rule left so. Lapilli's own are bounded apart. At
+four thousand rules, a bulk retire of twenty by a reader who has made the
+hour's twenty took 504 ms and 641 MB, each rule parsed whole twice; it
+takes 15 ms and 12 MB (`TestBulkProposeAtLimitScale`). A proposal past the
+twenty answers 429, whichever check finds it, the ledger's write among
+them.
+
+**The result.** The list gone back to says it once, with a link to the
+proposals made, the proposals list with their `id=`. `made=` in the
+result's query is read within bounds (twenty at most, as many as `done=`, a
+bulk proposal's), and what it says was proposed is counted from it, read
+again: those that are the reader's, made in Lapilli, not by an agent; any
+other is left out, and a result that claimed some and has none of theirs
+says nothing. So a link made to say "20 proposed" says what the reader
+proposed. Neither is carried on by any link or form.
+
+At two thousand rules, against the tests' stand-in history, a proposal for
+twenty took 1.3 s.
 
 `TestBulkPropose` sets each kind beside the same rules posted one at a
 time, each from the form its own page gives, on a twin ledger: the same
 proposals kept (rule, kind, way, who, what it was and is proposed to be,
 the diff, the document, the evidence and its backtest), the same lines in
 the changes log; `TestBulkProposeOff` the same for Grafana's rules, turned
-off; `TestBulkProposeLimit` the hour's twenty; `TestBulkProposeTurns` the
-heavy turn, with every page's turn taken and with the heavy turn held;
-`TestBulkProposeRefused` and `TestBulkProposeBar` who may, and why not.
+off; `TestBulkProposeSpareOverWeeks` a rule spare over four weeks and not
+twelve, from lists of each; `TestAgentRetires` MCP's retire;
+`TestBulkProposeLimit` and `TestProposeLimitRace` the hour's twenty;
+`TestProposeTries` the tries; `TestBulkProposeTurns` the page's turn and the
+heavy turn; `TestBulkProposeTimeUp` the request's time, and a request that
+ended; `TestBulkProposeRefused`, `TestBulkProposeBar` and
+`TestBulkProposeNothingPicked` who may, why not, and nothing picked.
 
 ### The firings: labels, and the day by the hour
 
