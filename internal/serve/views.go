@@ -1587,6 +1587,7 @@ type settingsView struct {
 	Settings []settingView
 	Changes  []ledger.Change
 	Try      *tryView
+	Notify   *notifyStatus `json:"-"` // the page's alone
 }
 
 func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
@@ -1621,6 +1622,9 @@ func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
 func (s *Server) settingsPage(r *http.Request) (any, error) {
 	v, err := s.settingsView(r.Context())
 	if err != nil {
+		return nil, err
+	}
+	if v.Notify, err = s.notifyStatus(r.Context()); err != nil {
 		return nil, err
 	}
 	if r.URL.Query().Get("try") == "" {

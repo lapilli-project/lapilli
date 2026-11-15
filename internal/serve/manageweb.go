@@ -25,6 +25,8 @@ type manageCard struct {
 type manageView struct {
 	Cards []manageCard
 	Loc   *time.Location
+	// Notify is where notices go, and whether they went.
+	Notify *notifyStatus
 }
 
 func (s *Server) managePage(r *http.Request) (any, error) {
@@ -54,5 +56,6 @@ func (s *Server) managePage(r *http.Request) (any, error) {
 	if s.role(r) < admin {
 		v.Cards = append(v.Cards[:1], v.Cards[2:]...) // Roles, for admins alone
 	}
-	return v, nil
+	v.Notify, err = s.notifyStatus(ctx)
+	return v, err
 }

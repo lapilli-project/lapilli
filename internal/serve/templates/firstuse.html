@@ -45,3 +45,31 @@ than it needs, why, and how to change it. */}}
 {{- else if .Stuck}}{{t "It needs %d more approvals, and only %d of those who may approve haven't made or approved it: name more in --approvers, or give --approvals 1." .Need (len .Left)}}
 {{- else if .Named}}{{if eq .In.From "admins"}}{{tbdi "Who may approve it: the admins, as --approvers isn't given, but the one it was made by or for: %s." (join .Left ", ")}}{{else}}{{tbdi "Who may approve it: those --approvers names, but the one it was made by or for: %s." (join .Left ", ")}}{{end}}
 {{- else}}{{if eq .In.From "admins"}}{{t "Who may approve it: the admins, as --approvers isn't given, but the one it was made by or for."}}{{else}}{{t "Who may approve it: those --approvers names, but the one it was made by or for."}}{{end}}{{end}}</p>{{end}}
+
+{{/* Where notices go, and whether they went: a section of the Settings
+page. Counts and kinds, never a URL. */}}
+{{define "notifystatus"}}{{$p := .P}}{{with .V}}<h2 id="notifications">{{t "Notifications"}}</h2>
+{{template "notifywarn" .}}
+<ul class="plain">
+<li>{{if and .Webhook .Slack}}{{t "What happens is told to the webhook and to Slack."}}{{else if .Webhook}}{{t "What happens is told to the webhook."}}{{else if .Slack}}{{t "What happens is told to Slack."}}{{else}}{{t "What happens isn't told anywhere: --notify-webhook-file and --notify-slack tell it."}}{{end}}</li>
+<li>{{t "Places reports can go to by name (--report-dest): %d. Teams with a digest of their own (--team-digest): %d." .ReportDests .TeamDigests}}</li>
+<li>{{if not .DigestOn}}{{t "The weekly digest is off, as set on the Reports page."}}{{else if .DigestSet}}{{t "The weekly digest: every %s, to %d of the places it names, as set on the Reports page." .DigestWhen .DigestTo}}{{else}}{{t "The weekly digest: every %s, to %d places, as the flags set it." .DigestWhen .DigestTo}}{{end}}{{with .Reports}} {{t "Reports on: %d." .}}{{end}} <a href="{{$p.Link "/reports"}}">{{t "Reports"}}</a></li>
+<li>{{template "notifysent" .}}</li>
+</ul>{{end}}{{end}}
+
+{{/* Where notices go, and whether they went: a card of the Manage page. */}}
+{{define "notifycard"}}{{$p := .P}}{{with .V}}<li class="card">
+  <h2><a href="{{$p.Link "/settings#notifications"}}">{{t "Notifications"}}</a></h2>
+  <p>{{t "Where notices, the weekly digest and reports go, and whether they went."}}</p>
+  {{template "notifywarn" .}}
+  <p class="quiet">{{template "notifysent" .}}</p>
+</li>{{end}}{{end}}
+
+{{/* When the outbox last sent a notice. */}}
+{{define "notifysent"}}{{if not .Sends}}{{t "Nothing goes out: no webhook, Slack or place for reports is given."}}{{else if .LastSent.IsZero}}{{t "Nothing sent from the outbox yet."}}{{else}}{{t "Last sent from the outbox: %s." (at .Loc .LastSent)}}{{end}}{{end}}
+
+{{/* What is on and goes nowhere, or failed to go: a sentence each, never a
+colour alone. */}}
+{{define "notifywarn"}}{{if .DigestNowhere}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "The weekly digest is worked out every %s and goes nowhere: give it a place to go (--slack-webhook-file, --notify-webhook-file, --team-digest or --report-dest)." .DigestWhen}}</p>{{end}}
+{{- with .ReportsNowhere}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if eq . 1}}{{t "1 report is on with nowhere to go: the places it names are gone."}}{{else}}{{t "%d reports are on with nowhere to go: the places they name are gone." .}}{{end}}</p>{{end}}
+{{- with .Failed}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if eq . 1}}{{t "1 notice made in the last day wasn't sent: its last try failed, and the log says why."}}{{else}}{{t "%d notices made in the last day weren't sent: their last try failed, and the log says why." .}}{{end}}</p>{{end}}{{end}}

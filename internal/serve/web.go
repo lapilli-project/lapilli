@@ -56,7 +56,7 @@ func (s *Server) Handler() http.Handler {
 	s.checks(mux, false)
 
 	page := func(name string, view func(*http.Request) (any, error)) http.HandlerFunc {
-		h := s.cached(func(w http.ResponseWriter, r *http.Request) {
+		worked := func(w http.ResponseWriter, r *http.Request) {
 			// A page worked out, not kept already: a few at a time. The
 			// turn is given back once it is rendered (render), before it
 			// goes to the network.
@@ -81,7 +81,8 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 			s.render(w, r, name, v)
-		})
+		}
+		h := s.cached(worked)
 		return func(w http.ResponseWriter, r *http.Request) {
 			// A query past maxQuery is refused before anything is read
 			// for it.
@@ -105,6 +106,11 @@ func (s *Server) Handler() http.Handler {
 				}
 				// A "?" with nothing after it is no query either.
 				r.URL.RawQuery, r.URL.ForceQuery = canon(q), false
+			}
+			if freshPage(name, r) {
+				w.Header().Set("Cache-Control", "no-store")
+				worked(w, r)
+				return
 			}
 			h(w, r)
 		}
