@@ -49,11 +49,11 @@ var (
 )
 
 // keptAs keeps a proposal of RestartsNow's for, 1m → 1h, with evidence as
-// another lapilli kept it: version ("" for one before it was kept), and
-// its backtest over [from, to), 141 firings → 3, none catching anything,
-// noRecord as it kept it (nil, not kept). It keeps no for_outlasts, as
-// 0.40 didn't.
-func keptAs(t *testing.T, s *Server, version string, from, to time.Time, noRecord *bool) int64 {
+// another lapilli kept it: semantics and version (0 and "" for one before
+// they were kept), and its backtest over [from, to), 141 firings → 3,
+// none catching anything, noRecord as it kept it (nil, not kept). It keeps
+// no for_outlasts, as 0.40 didn't.
+func keptAs(t *testing.T, s *Server, semantics int, version string, from, to time.Time, noRecord *bool) int64 {
 	t.Helper()
 	ctx := context.Background()
 	f, err := s.current(ctx, "RestartsNow", false)
@@ -63,7 +63,7 @@ func keptAs(t *testing.T, s *Server, version string, from, to time.Time, noRecor
 	hour := time.Hour
 	want := f.rule
 	want.For = hour
-	ev := evidence{From: "suggestion", Edit: &rules.Edit{Name: "RestartsNow", Group: "pods", For: &hour}, For: hour, Version: version,
+	ev := evidence{From: "suggestion", Edit: &rules.Edit{Name: "RestartsNow", Group: "pods", For: &hour}, For: hour, Semantics: semantics, Version: version,
 		Backtest: &backtest{From: from, To: to, Before: side{Firings: 141}, After: side{Firings: 3}, Lost: []string{}, Gained: []string{}, Later: []string{}, NoRecord: noRecord}}
 	raw, _ := json.Marshal(ev)
 	id, err := s.l.Propose(ctx, ledger.Proposal{Rule: "RestartsNow", Kind: ledger.KindFor, Path: ledger.PathGit, MadeBy: ledger.Proposer,
@@ -110,7 +110,7 @@ func TestOldProposalReadNow(t *testing.T) {
 	ctx := context.Background()
 	s, _ := restartsServer(t, nil)
 	h := s.Handler()
-	id := keptAs(t, s, "", unrecordedFrom, unrecordedTo, nil)
+	id := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
 	page := func(who string) string {
 		t.Helper()
 		code, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(id), who, "", nil)
@@ -122,7 +122,7 @@ func TestOldProposalReadNow(t *testing.T) {
 	body := page(cy)
 	outlast := "As proposed, its for (1h) is as long as the 30m its condition counts over, or longer: one event alone could never fire it; only events that keep coming for 1h would."
 	noRecord := "No incident was written down, or found by --impact, in the period or the two weeks before it: the firings are counted, not judged. Fewer firings aren't better, nor more worse: fewer may be events that happened, hidden."
-	stale := "It is stale, so it isn't approved until it is backtested again: it was backtested by an earlier lapilli, which kept no version."
+	stale := "It is stale, so it isn't approved until it is backtested again: it was backtested by an earlier lapilli, before backtests were numbered by how they replay and judge."
 	for _, want := range []string{outlast, noRecord, stale, offButton("Approve", "approve-why", "Held until it is backtested again: it is stale"),
 		`<tr><th scope="row">Fired</th><td class="n">141</td><td class="n">3</td><td class="n"> <span class="delta">−138</span></td></tr>`,
 		`<tr><th scope="row">Caught something</th><td class="n">–</td><td class="n">–</td><td class="n">–</td></tr>`} {
@@ -193,7 +193,7 @@ func TestBacktestAgain(t *testing.T) {
 	ctx := context.Background()
 	s, _ := restartsServer(t, func(c *Config) { c.Approvals = 2 })
 	h := s.Handler()
-	id := keptAs(t, s, "", unrecordedFrom, unrecordedTo, nil)
+	id := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
 	// Approved once before it was found stale, as before an upgrade.
 	if _, err := s.l.Approve(ctx, id, ana, 2); err != nil {
 		t.Fatal(err)
@@ -243,7 +243,7 @@ func TestBacktestAgainRefused(t *testing.T) {
 	ctx := context.Background()
 	s, dir := restartsServer(t, func(c *Config) { c.Editors = []string{bo} })
 	h := s.Handler()
-	id := keptAs(t, s, "", unrecordedFrom, unrecordedTo, nil)
+	id := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
 	path := "/proposals/" + itoa(id) + "/backtest"
 	for name, c := range map[string]struct {
 		who, site string
@@ -305,7 +305,7 @@ func TestBacktestAgainRefused(t *testing.T) {
 	if err := s.look(ctx, new(string)); err != nil {
 		t.Fatal(err)
 	}
-	fresh := keptAs(t, s, "test", unrecordedFrom, unrecordedTo, nil)
+	fresh := keptAs(t, s, verdict.Semantics, "test", unrecordedFrom, unrecordedTo, nil)
 	os.WriteFile(filepath.Join(dir, "restarts.yaml"), []byte(strings.Replace(restartsFile, "> 0.5", "> 1.5", 1)), 0o644)
 	if err := s.look(ctx, new(string)); err != nil {
 		t.Fatal(err)
@@ -339,15 +339,17 @@ func TestStaleWhy(t *testing.T) {
 	drop := func(id int64) {
 		s.l.Move(ctx, id, []string{ledger.StateProposed}, ledger.StateDropped, "ana", ledger.Step{})
 	}
-	s.cfg.Version = "v0.41.2"
-	id := keptAs(t, s, "v0.40.1", unrecordedFrom, unrecordedTo, &yes)
-	if got := why(id); got != "it was backtested by lapilli v0.40.1, and this is v0.41.2" {
-		t.Errorf("another minor version: %q", got)
+	s.cfg.Version = "v0.42.0"
+	id := keptAs(t, s, verdict.Semantics+1, "v0.43.0", unrecordedFrom, unrecordedTo, &yes)
+	if got := why(id); got != "it was backtested by lapilli v0.43.0, which replays or judges otherwise than this one" {
+		t.Errorf("another number for how it backtests: %q", got)
 	}
 	drop(id)
-	id = keptAs(t, s, "v0.41.0", unrecordedFrom, unrecordedTo, &yes)
+	// Another version that replays and judges alike: not stale, whatever
+	// its number, as an upgrade that changes neither leaves it.
+	id = keptAs(t, s, verdict.Semantics, "v0.40.1", unrecordedFrom, unrecordedTo, &yes)
 	if got := why(id); got != "" {
-		t.Errorf("another patch of the same minor: %q", got)
+		t.Errorf("another version, backtesting alike: %q", got)
 	}
 	// An incident written down in its period since.
 	if _, err := s.l.Put(ctx, incident.Incident{ID: "INC-8", Title: "Written down late", Start: unrecordedFrom.Add(30 * 24 * time.Hour),
@@ -359,7 +361,7 @@ func TestStaleWhy(t *testing.T) {
 	}
 	drop(id)
 	// Kept then, none keeping it now.
-	id = keptAs(t, s, "v0.41.0", unrecordedFrom.AddDate(0, 0, -100), unrecordedFrom.AddDate(0, 0, -16), &no)
+	id = keptAs(t, s, verdict.Semantics, "v0.41.0", unrecordedFrom.AddDate(0, 0, -100), unrecordedFrom.AddDate(0, 0, -16), &no)
 	if got := why(id); got != staleUnrecorded {
 		t.Errorf("no record any more: %q", got)
 	}
@@ -368,10 +370,36 @@ func TestStaleWhy(t *testing.T) {
 	if got := why(id); got != "" {
 		t.Errorf("approved: %q", got)
 	}
-	for v, want := range map[string]string{"v0.41.0": "0.41", "0.41.3": "0.41", "v0.41.1-0.20261115000000-abcdef": "0.41", "v1.2.3": "1.2", "dev": "dev", "(devel)": "(devel)", "v0": "v0"} {
-		if got := minorOf(v); got != want {
-			t.Errorf("minorOf(%q) = %q, want %q", v, got, want)
-		}
+}
+
+// TestStaleNotByVersion: a proposal made by a lapilli of no version, or of
+// one that backtests as this one does, isn't stale: what decides is how it
+// was backtested (verdict.Semantics), the version kept only to be shown,
+// as dev when there is none. The demo's proposal, made by one of no
+// version, isn't either.
+func TestStaleNotByVersion(t *testing.T) {
+	ctx := context.Background()
+	s, _ := restartsServer(t, func(c *Config) { c.Version = "" })
+	id, err := s.propose(ctx, ask{Rule: "RestartsNow", Kind: ledger.KindFor, For: 10 * time.Minute, From: "person"}, bo, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := state(t, s, id)
+	ls, err := s.linesNow(ctx, []ledger.Proposal{p})
+	if ev := proposalEvidence(p); err != nil || ls[0].StaleWhy != nil || ev.Version != "dev" || ev.Semantics != verdict.Semantics {
+		t.Errorf("made with no version: %v %+v %s", err, ls[0].StaleWhy, p.Evidence)
+	}
+	s.cfg.Version = "v9.9.9"
+	if ls, _ := s.linesNow(ctx, []ledger.Proposal{p}); ls[0].StaleWhy != nil {
+		t.Errorf("upgraded, backtesting alike: %+v", ls[0].StaleWhy)
+	}
+	d := demoServer(t)
+	ps, err := d.l.Proposals(ctx, ledger.ProposalQuery{States: []string{ledger.StateProposed}})
+	if err != nil || len(ps) == 0 {
+		t.Fatalf("the demo's proposals: %v %v", ps, err)
+	}
+	if ls, err := d.linesNow(ctx, ps); err != nil || ls[0].StaleWhy != nil || ls[0].Stale {
+		t.Errorf("the demo's proposal is stale: %v %+v", err, ls[0].StaleWhy)
 	}
 }
 
@@ -382,7 +410,7 @@ func TestProposalsStaleFilter(t *testing.T) {
 	s, _ := restartsServer(t, nil)
 	h := s.Handler()
 	fresh := proposeFor(t, h, "15m")
-	old := keptAs(t, s, "", unrecordedFrom, unrecordedTo, nil)
+	old := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
 	if _, body, _ := ui(t, h, http.MethodGet, "/proposals", cy, "", nil); !strings.Contains(body, `<a href="/proposals?stale=1">Show the stale ones alone</a>`) {
 		t.Error("the list doesn't link to its stale ones")
 	}
@@ -411,7 +439,7 @@ func TestBacktestAgainByAgent(t *testing.T) {
 	s, _ := restartsServer(t, func(c *Config) { c.MCPPropose = "editors" })
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
-	id := keptAs(t, s, "", unrecordedFrom, unrecordedTo, nil)
+	id := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
 	cs := connect(t, ts.URL, bo)
 	// Its tries used up: refused, the person's own left as they were.
 	for range triesAnHour {
@@ -466,7 +494,7 @@ func TestBacktestAgainByAgent(t *testing.T) {
 func TestOutlastsReadOnce(t *testing.T) {
 	ctx := context.Background()
 	s, dir := restartsServer(t, nil)
-	id := keptAs(t, s, "", unrecordedFrom, unrecordedTo, nil)
+	id := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
 	// Made when the version it was made against was in effect, as the
 	// tests' clock has it.
 	ledgerExec(t, s, "UPDATE proposals SET made = ? WHERE id = ?", now.Unix(), id)
@@ -502,7 +530,7 @@ func TestStalePagesTranslated(t *testing.T) {
 	ctx := context.Background()
 	s, dir := restartsServer(t, func(c *Config) { c.Approvals = 2 })
 	h := s.Handler()
-	stale := keptAs(t, s, "", unrecordedFrom, unrecordedTo, nil)
+	stale := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
 	s.l.Approve(ctx, stale, ana, 2)
 	if code, body, _ := ui(t, h, http.MethodPost, "/proposals/"+itoa(stale)+"/backtest", bo, "same-origin", url.Values{}); code != http.StatusSeeOther {
 		t.Fatalf("backtesting again: %d %s", code, body)
@@ -510,7 +538,7 @@ func TestStalePagesTranslated(t *testing.T) {
 	// Backtested again, then stale by the rule.
 	again := stale
 	s.l.Move(ctx, again, []string{ledger.StateProposed}, ledger.StateDropped, "ana", ledger.Step{})
-	other := keptAs(t, s, "v0.40.1", unrecordedFrom, unrecordedTo, nil)
+	other := keptAs(t, s, verdict.Semantics+1, "v0.40.1", unrecordedFrom, unrecordedTo, nil)
 	paths := []string{"/proposals", "/proposals?stale=1", "/proposals?state=all", "/proposals/" + itoa(again), "/proposals/" + itoa(other), "/rules/RestartsNow?tab=proposals"}
 	missing.Lock()
 	clear(missing.m)
@@ -520,7 +548,7 @@ func TestStalePagesTranslated(t *testing.T) {
 	}
 	// One whose rule changed since.
 	s.l.Move(ctx, other, []string{ledger.StateProposed}, ledger.StateDropped, "ana", ledger.Step{})
-	changed := keptAs(t, s, "", unrecordedFrom, unrecordedTo, nil)
+	changed := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
 	os.WriteFile(filepath.Join(dir, "restarts.yaml"), []byte(strings.Replace(restartsFile, "> 0.5", "> 1.5", 1)), 0o644)
 	if err := s.look(ctx, new(string)); err != nil {
 		t.Fatal(err)

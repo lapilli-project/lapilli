@@ -548,11 +548,13 @@ type evidence struct {
 	// doesn't replay it.
 	Cloud   string `json:"cloud,omitempty"`
 	OffOnly bool   `json:"off_only,omitempty"`
+	// Semantics is how its backtest was replayed and judged
+	// (verdict.Semantics): one under another number, or none, as before it
+	// was kept, is stale while it waits for approval (proposalsNow).
 	// Version is the lapilli that made it, or last backtested it again
-	// (Config.Version, as its pages' footer says it): one made by another
-	// minor version, or before it was kept, is stale while it waits for
-	// approval (proposalsNow).
-	Version string `json:"version,omitempty"`
+	// (versionOf), shown beside it, and nothing more.
+	Semantics int    `json:"semantics,omitempty"`
+	Version   string `json:"version,omitempty"`
 }
 
 // backtest is a change replayed, as it is and as proposed.
@@ -755,7 +757,10 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 	}
 	e := rules.Edit{Name: r.Name, Group: r.Group, UID: r.UID, Namespace: r.Namespace}
 	want := r
-	ev := evidence{From: q.From, Incident: q.Incident, Reason: q.Reason, Version: s.cfg.Version}
+	ev := evidence{From: q.From, Incident: q.Incident, Reason: q.Reason, Version: s.versionOf()}
+	if q.Kind == ledger.KindFor || q.Kind == ledger.KindThreshold {
+		ev.Semantics = verdict.Semantics
+	}
 	var b rules.Bound
 	switch q.Kind {
 	case ledger.KindFor:

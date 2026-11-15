@@ -8,7 +8,6 @@ import (
 	"html/template"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -44,8 +43,8 @@ type staleWhy struct {
 // JSON, the API and MCP give as stale (staleText).
 const (
 	staleRule       = "the rule changed since it was proposed"
-	staleNoVersion  = "it was backtested by an earlier lapilli, which kept no version"
-	staleVersion    = "it was backtested by lapilli %s, and this is %s"
+	staleNoVersion  = "it was backtested by an earlier lapilli, before backtests were numbered by how they replay and judge"
+	staleVersion    = "it was backtested by lapilli %s, which replays or judges otherwise than this one"
 	staleRecorded   = "an incident was written down in its period since it was backtested"
 	staleUnrecorded = "no incident keeps its period's record any more"
 )
@@ -61,20 +60,13 @@ func (w staleWhy) Notice(lang string) template.HTML {
 	return template.HTML(fmt.Sprintf(template.HTMLEscapeString(tr(lang, staleNotice)), w.HTML(lang)))
 }
 
-// minorOf is a version's major and minor, as lapilli's releases are
-// numbered (v0.41.0, and a module's v0.41.1-0.2026… are 0.41), or the
-// version as it is when it isn't one (dev).
-func minorOf(v string) string {
-	parts := strings.SplitN(strings.TrimPrefix(v, "v"), ".", 3)
-	if len(parts) < 2 {
-		return v
+// versionOf is the version of lapilli running, as a backtest keeps it:
+// Config.Version, or dev for none, as a build of its own has.
+func (s *Server) versionOf() string {
+	if s.cfg.Version == "" {
+		return "dev"
 	}
-	for _, p := range parts[:2] {
-		if _, err := strconv.ParseUint(p, 10, 32); err != nil {
-			return v
-		}
-	}
-	return parts[0] + "." + parts[1]
+	return s.cfg.Version
 }
 
 // backtested reports whether a proposal's kind has a backtest: a for or a
@@ -285,10 +277,10 @@ func (s *Server) proposalsNow(ctx context.Context, ls []proposalLine, rd *readin
 			continue
 		}
 		switch {
-		case ev.Version == "":
+		case ev.Semantics == 0:
 			l.StaleWhy = &staleWhy{Format: staleNoVersion}
-		case minorOf(ev.Version) != minorOf(s.cfg.Version):
-			l.StaleWhy = &staleWhy{Format: staleVersion, Args: []any{ev.Version, s.cfg.Version}}
+		case ev.Semantics != verdict.Semantics:
+			l.StaleWhy = &staleWhy{Format: staleVersion, Args: []any{cmpOr(ev.Version, "dev")}}
 		case bt.NoRecord != nil && *bt.NoRecord && !now:
 			l.StaleWhy = &staleWhy{Format: staleRecorded}
 		case bt.NoRecord != nil && !*bt.NoRecord && now:
@@ -354,7 +346,7 @@ const noRecordFewer = "Fewer firings aren't better, nor more worse: fewer may be
 
 // errFresh is a proposal backtested again that isn't stale: its backtest
 // is this lapilli's, of its period's record as it is.
-var errFresh = bad("it isn't stale: its backtest is this lapilli's, of its period's record as it is, so there is nothing to backtest again")
+var errFresh = bad("it isn't stale: its backtest replays and judges as this lapilli does, of its period's record as it is, so there is nothing to backtest again")
 
 // errNoBacktest is a proposal backtested again that has no backtest: a
 // change to what a rule says, or retiring it.
@@ -438,7 +430,7 @@ func (s *Server) backtestAgain(ctx context.Context, id int64, by string, agent b
 		return err
 	}
 	again := ev
-	again.Backtest, again.Version, again.Outlasts = bt, s.cfg.Version, nil
+	again.Backtest, again.Semantics, again.Version, again.Outlasts = bt, verdict.Semantics, s.versionOf(), nil
 	if p.Kind == ledger.KindFor {
 		if w, ok := want.ForOutlasts(); ok {
 			again.Outlasts = &verdict.Outlast{For: want.For, Window: w}
