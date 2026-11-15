@@ -148,7 +148,9 @@ func tabsOf(v *ruleView) []ruleTab {
 // ruleActions are a rule's page's actions, in its header: propose a change
 // (the proposals tab's forms), add a task (about it, for its team), edit
 // its note (the overview's form, open). Those the reader may not use are
-// disabled, and those disabled for the same reason share the one saying it.
+// disabled, drawn by the off template, and those disabled for the same
+// reason share the one saying it, said after the last of them (again for
+// those before it).
 func ruleActions(p page, v ruleView) []pageAction {
 	edits := !p.Status.ReadOnly || v.TeamID > 0 && slices.Contains(p.Status.Teams, v.TeamID)
 	as := []pageAction{mainAction(p, "Propose a change", !p.Status.ReadOnly, "editor", ""),
@@ -162,19 +164,22 @@ func ruleActions(p page, v ruleView) []pageAction {
 	to := []string{p.Link(v.Path+"#propose", "tab", "proposals"),
 		p.Link("/tasks", "rule", v.Name, "kind", "tune", "title", tr(p.Lang, "Tune %s", v.Name), "team", v.Team),
 		p.Link(v.Path+"#note", "edit", "note")}
-	ids := map[string]string{}
+	ids, last := map[string]string{}, map[string]int{}
 	for i := range as {
 		as[i].Quiet = i > 0
 		why := as[i].Why + "\x00" + as[i].WhyOf
-		switch id, ok := ids[why]; {
-		case as[i].Why == "":
+		if as[i].Why == "" {
 			as[i].Href = to[i]
-		case ok:
-			as[i].ID = id
-		default:
-			as[i].ID, as[i].Said = fmt.Sprintf("rule-why-%d", len(ids)+1), true
-			ids[why] = as[i].ID
+			continue
 		}
+		if _, ok := ids[why]; !ok {
+			ids[why] = fmt.Sprintf("rule-why-%d", len(ids)+1)
+		}
+		as[i].ID, as[i].Again = ids[why], true
+		last[why] = i
+	}
+	for _, i := range last {
+		as[i].Again = false
 	}
 	return as
 }
