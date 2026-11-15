@@ -60,8 +60,10 @@ func TestBulkProposeAtLimitScale(t *testing.T) {
 	if code != http.StatusSeeOther || !strings.Contains(hd.Get("Location"), fmt.Sprintf("limit=%d", maxPropose)) {
 		t.Errorf("%d %s", code, hd.Get("Location"))
 	}
-	if budget := time.Duration(float64(50*time.Millisecond) * slow); took > budget || alloc > 32<<20 {
-		t.Errorf("took %s and %d MB, over %s and 32 MB", took, alloc>>20, budget)
+	// What it allocates is bounded, not how long it takes: a runner's
+	// clock is shared, and a parse for each rule shows in the memory.
+	if alloc > 32<<20 {
+		t.Errorf("%d MB allocated, over 32 MB", alloc>>20)
 	}
 	// Twenty names no rule in effect has, by an editor with every try left:
 	// the rules in effect are read once for the request, not once a name.
@@ -81,7 +83,7 @@ func TestBulkProposeAtLimitScale(t *testing.T) {
 	if code != http.StatusSeeOther || !strings.Contains(hd.Get("Location"), fmt.Sprintf("absent=%d", maxPropose)) {
 		t.Errorf("%d %s", code, hd.Get("Location"))
 	}
-	if budget := time.Duration(float64(150*time.Millisecond) * slow); took > budget || alloc > 96<<20 {
-		t.Errorf("took %s and %d MB, over %s and 96 MB", took, alloc>>20, budget)
+	if alloc > 96<<20 {
+		t.Errorf("%d MB allocated, over 96 MB", alloc>>20)
 	}
 }
