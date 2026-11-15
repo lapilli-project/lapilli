@@ -3,10 +3,11 @@
 <p class="lede">{{t "What the ledger keeps of rules no longer in effect, deleted or renamed: notes, tasks, comments and proposals not finished with, which no other list shows. For a rule renamed, move what its old name kept to the rule as it is named now; for one deleted, delete it. Its proposals stay: each was made against the rule as it was, and is dropped on its own page."}}</p>
 {{with .Moved}}<p class="note" role="status">{{tbdi "What %s kept was moved to %s." . $.View.To}}</p>{{end}}
 {{with .Deleted}}<p class="note" role="status">{{tbdi "What %s kept was deleted." .}}</p>{{end}}
-{{if not .Known}}<p>{{t "The rules haven't been read yet, so which names are gone isn't known."}}</p>
+{{if not .Known}}<p>{{t "No version of the rules is recorded: lapilli serve hasn't read them yet, or reads none of its own (with --alerts, or firings copied in alone). Which names are gone isn't known."}}</p>
 {{else if not .Lines}}<p class="quiet">{{t "None: every rule the ledger keeps something of is in effect."}}</p>
 {{else}}
 <p class="quiet">{{t "%d to %d of %d names no rule in effect has" .From .Upto .Total}}</p>
+<p class="quiet">{{t "The rules in effect are the latest version lapilli serve read, as --rules-select and --rule narrow it: a rule they leave out is listed here too."}}</p>
 {{if not $may}}<p id="orphan-why" class="why">{{t (or $.Status.Why "Editors only")}}</p>{{end}}
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Name no longer in effect"}}</th><th scope="col">{{t "Note"}}</th><th scope="col" class="n">{{t "Tasks"}}</th><th scope="col" class="n">{{t "Comments"}}</th><th scope="col">{{t "Proposals not finished with"}}</th><th scope="col">{{t "What to do"}}</th></tr></thead>

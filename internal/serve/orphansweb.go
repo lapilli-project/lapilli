@@ -122,6 +122,11 @@ var (
 // orphanOf checks a name is no rule's in effect, and, when to is given,
 // that to is one's.
 func (s *Server) orphanOf(r *http.Request, from, to string) error {
+	// A name the ledger could keep a note of: 500 bytes at most, nothing in
+	// it that doesn't show; the ledger refuses one it keeps nothing of.
+	if len(from) > 500 || !ledger.Plain(from) || len(to) > 500 || !ledger.Plain(to) {
+		return bad("a rule's name is 500 bytes at most, with nothing in it that doesn't show")
+	}
 	set, _, ok, err := s.inEffectNames(r)
 	switch {
 	case err != nil:

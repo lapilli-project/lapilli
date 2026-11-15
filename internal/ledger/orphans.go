@@ -142,7 +142,7 @@ func (l *Ledger) MoveRuleKept(ctx context.Context, from, to, by string) error {
 	if from == to {
 		return ErrSameRule
 	}
-	if to == "" || len(to) > 500 || !plain(to) {
+	if !ruleName(from) || !ruleName(to) {
 		return invalid("a note is on a rule")
 	}
 	return l.write(ctx, func(t *txn) error {
@@ -201,8 +201,11 @@ func (l *Ledger) MoveRuleKept(ctx context.Context, from, to, by string) error {
 		if res, err = t.ExecContext(t.ctx, "UPDATE comments SET on_key = ? WHERE on_kind = 'rule' AND on_key = ?", to, from); err != nil {
 			return err
 		}
-		n, _ = res.RowsAffected()
-		moved["comments"] = n
+		n2, _ := res.RowsAffected()
+		moved["comments"] = n2
+		if was == nil && n == 0 && n2 == 0 {
+			return ErrNotFound // nothing kept by that name
+		}
 		return change(t, by, "what rule "+from+" kept moved to "+to, nil, moved)
 	})
 }
@@ -212,6 +215,9 @@ func (l *Ledger) MoveRuleKept(ctx context.Context, from, to, by string) error {
 // proposals stay. Each task deleted is noted as DeleteTask notes it, and
 // the whole in the activity log.
 func (l *Ledger) DeleteRuleKept(ctx context.Context, rule, by string) error {
+	if !ruleName(rule) {
+		return invalid("a note is on a rule")
+	}
 	return l.write(ctx, func(t *txn) error {
 		if _, limited := scopeOf(t.ctx); limited {
 			return ErrNotYourTeam
@@ -265,9 +271,16 @@ func (l *Ledger) DeleteRuleKept(ctx context.Context, rule, by string) error {
 			return err
 		}
 		n, _ := res.RowsAffected()
+		if was == nil && len(ids) == 0 && n == 0 {
+			return ErrNotFound // nothing kept by that name
+		}
 		return change(t, by, "what rule "+rule+" kept deleted", nil, map[string]any{"note": was, "tasks": len(ids), "comments": n})
 	})
 }
+
+// ruleName says a name could be a rule's the ledger keeps something of: a
+// note's, at most 500 bytes, with nothing that doesn't show.
+func ruleName(s string) bool { return s != "" && len(s) <= 500 && plain(s) }
 
 // noteOf is a rule's note, read in a write; nil for none.
 func noteOf(t *txn, rule string) (*Note, error) {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -55,8 +56,8 @@ func TestOrphans(t *testing.T) {
 		strings.Contains(body, "<bdi>ErrorsRate</bdi>") || !strings.Contains(body, fmt.Sprintf(`/proposals/%d"`, pid)) || !strings.Contains(body, `<option value="ErrorsRate">`) {
 		t.Fatalf("/orphans: %d\n%s", code, body)
 	}
-	if !strings.Contains(body, "1 to 2 of 2") {
-		t.Errorf("the count: %s", body)
+	if !strings.Contains(body, "1 to 2 of 2") || !strings.Contains(body, "--rules-select and --rule narrow it") {
+		t.Errorf("the count, and what it is compared with: %s", body)
 	}
 	_, body = getAs(t, h, "/orphans", "viewer@example.com")
 	if !strings.Contains(body, `id="orphan-why"`) || strings.Count(body, `aria-describedby="orphan-why"`) != 4 || strings.Contains(body, `action="/orphans/move"`) {
@@ -72,18 +73,29 @@ func TestOrphans(t *testing.T) {
 		h.ServeHTTP(w, r)
 		return w.Code
 	}
+	long := strings.Repeat("x", 900<<10)
 	for _, c := range []struct {
 		path string
 		v    url.Values
+		code int
 	}{
-		{"/orphans/move", url.Values{"from": {"Errors"}, "to": {"Nope"}}},
-		{"/orphans/move", url.Values{"from": {"ErrorsRate"}, "to": {"ErrorsRate"}}},
-		{"/orphans/move", url.Values{"from": {"Errors"}}},
-		{"/orphans/delete", url.Values{"rule": {"ErrorsRate"}}},
+		{"/orphans/move", url.Values{"from": {"Errors"}, "to": {"Nope"}}, http.StatusBadRequest},
+		{"/orphans/move", url.Values{"from": {"ErrorsRate"}, "to": {"ErrorsRate"}}, http.StatusBadRequest},
+		{"/orphans/move", url.Values{"from": {"Errors"}}, http.StatusBadRequest},
+		{"/orphans/delete", url.Values{"rule": {"ErrorsRate"}}, http.StatusBadRequest},
+		// A name a note can't be on, or nothing is kept of.
+		{"/orphans/delete", url.Values{"rule": {long}}, http.StatusBadRequest},
+		{"/orphans/move", url.Values{"from": {long}, "to": {"ErrorsRate"}}, http.StatusBadRequest},
+		{"/orphans/delete", url.Values{"rule": {"a\nb"}}, http.StatusBadRequest},
+		{"/orphans/delete", url.Values{"rule": {"NothingKept"}}, http.StatusNotFound},
+		{"/orphans/move", url.Values{"from": {"NothingKept"}, "to": {"ErrorsRate"}}, http.StatusNotFound},
 	} {
-		if code := post(c.path, c.v); code != http.StatusBadRequest {
-			t.Errorf("%s %v: %d", c.path, c.v, code)
+		if code := post(c.path, c.v); code != c.code {
+			t.Errorf("%s %.40v: %d, want %d", c.path, c.v, code, c.code)
 		}
+	}
+	if changes, _ := s.l.Changes(ctx, 100); slices.ContainsFunc(changes, func(c ledger.Change) bool { return len(c.What) > 1000 || strings.Contains(c.What, "NothingKept") }) {
+		t.Error("the activity log holds a refused name")
 	}
 	if code := post("/orphans/move", url.Values{"from": {"Errors"}, "to": {"ErrorsRate"}}); code != http.StatusSeeOther {
 		t.Fatalf("moving: %d", code)

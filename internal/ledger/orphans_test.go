@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -175,5 +176,35 @@ func TestWaitingSince(t *testing.T) {
 	}
 	if err := l.MayPropose(ctx, "A", "ana"); err != nil {
 		t.Errorf("a rule whose proposal expired: %v", err)
+	}
+}
+
+// A name moved or deleted is one a note could be on: 500 bytes at most,
+// nothing in it that doesn't show; and one the ledger keeps something of.
+// Nothing is noted otherwise.
+func TestRuleKeptNames(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	keepOf(t, l, "Kept", Note{Note: "n"})
+	before := len(changesBy(t, l, "ana"))
+	long := strings.Repeat("x", 501)
+	for name, err := range map[string]error{
+		"move a long name":   l.MoveRuleKept(ctx, long, "Kept", "ana"),
+		"move a line break":  l.MoveRuleKept(ctx, "a\nb", "Kept", "ana"),
+		"delete a long name": l.DeleteRuleKept(ctx, long, "ana"),
+		"delete a bidi mark": l.DeleteRuleKept(ctx, "a‮b", "ana"),
+	} {
+		if !invalidErr(err) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if err := l.MoveRuleKept(ctx, "Nothing", "Kept", "ana"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("moving what nothing is kept of: %v", err)
+	}
+	if err := l.DeleteRuleKept(ctx, "Nothing", "ana"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("deleting what nothing is kept of: %v", err)
+	}
+	if after := len(changesBy(t, l, "ana")); after != before {
+		t.Errorf("%d changes noted", after-before)
 	}
 }
