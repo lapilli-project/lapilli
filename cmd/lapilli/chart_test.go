@@ -604,3 +604,27 @@ func TestChartMaxSamples(t *testing.T) {
 		}
 	}
 }
+
+// TestChartServeRuleConfigMaps: lapilli serve reads one directory of rules,
+// so with several ConfigMaps it has them all in one, a projected volume of
+// each one's keys side by side, and one --rules; the CronJob, which takes a
+// --rules a ConfigMap, keeps a volume each.
+func TestChartServeRuleConfigMaps(t *testing.T) {
+	out, err := helmTemplate(t, "--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={main,shared,noc}")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if strings.Count(out, "--rules=") != 1 || !strings.Contains(out, `- "--rules=/etc/lapilli/rules/0"`) || strings.Contains(out, "/etc/lapilli/rules/1") {
+		t.Errorf("serve with three ConfigMaps: not one directory of rules\n%s", out)
+	}
+	if !strings.Contains(out, "projected:\n            sources:\n              - configMap:\n                  name: main\n              - configMap:\n                  name: shared\n              - configMap:\n                  name: noc\n") {
+		t.Errorf("serve with three ConfigMaps: not one projected volume of the three\n%s", out)
+	}
+	out, err = helmTemplate(t, "--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={main,shared}", "--set", "impact=up")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, `- "--rules=/etc/lapilli/rules/0"`) || !strings.Contains(out, `- "--rules=/etc/lapilli/rules/1"`) || strings.Contains(out, "projected:") {
+		t.Errorf("the CronJob with two ConfigMaps: not a volume and a --rules each\n%s", out)
+	}
+}
