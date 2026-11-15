@@ -41,6 +41,10 @@ var offFuncs = template.FuncMap{
 		a.Again = true
 		return a
 	},
+	// offWhy is an action no one may take here, for why.
+	"offWhy": func(label, id, why string) pageAction {
+		return pageAction{Label: label, ID: id, Why: why}
+	},
 	// quiet is an action drawn less loudly, as a row's is.
 	"quiet": func(a pageAction) pageAction {
 		a.Quiet = true

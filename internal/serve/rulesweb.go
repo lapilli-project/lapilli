@@ -611,6 +611,17 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	allTeams.c.Team, allTeams.c.TeamSet = "", true
 	v.Bulk = s.bulkFor(r, "team")
 	v.Bulk.Back, v.Bulk.Teams = a.url(), d.own.teams
+	switch {
+	case s.role(r) < editor:
+		// As POST /proposals: the bar says why, as for its other writes.
+	case !s.replaying():
+		v.Bulk.ProposeWhy = "Nothing to propose: this lapilli serve reads no rules of its own"
+	default:
+		v.Bulk.Propose = true
+	}
+	if res := v.Bulk.Result; res != nil && len(res.Made) > 0 {
+		res.Href = c.Link(proposalsMade(res.Made))
+	}
 
 	switch {
 	case cursor.IsZero():

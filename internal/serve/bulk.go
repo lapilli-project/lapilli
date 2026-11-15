@@ -29,8 +29,8 @@ func (s *Server) bulkRoutes(mux *http.ServeMux) {
 
 // bulkKinds are what a bulk write does, as its result says: a task for
 // each rule, a team for each, a disposition for each, an incident from
-// each firing.
-var bulkKinds = []string{"task", "team", "status", "real"}
+// each firing, a proposal for each rule.
+var bulkKinds = []string{"task", "team", "status", "real", "propose"}
 
 // bulkResult is what a bulk write did, as the page it goes back to says it
 // once: how many were done; of the rest, how many weren't the reader's
@@ -38,16 +38,25 @@ var bulkKinds = []string{"task", "team", "status", "real"}
 // only editors may do it (a team's editor's "Set the team"), how many, of
 // firings, had caught something already; and, when an error of another
 // kind stopped it, the one that failed and how many weren't tried after
-// it. None says nothing was picked; Kind is what was done.
+// it. None says nothing was picked; Kind is what was done. A bulk
+// proposal's says, too, how many were refused for the hour's proposals
+// made (Limit), as not replayed (Unreplayed), not in effect (Absent), as
+// having that for already (Same), as having no suggested for (NoSuggest),
+// and which proposals it made (Made), to link to them (Href).
 type bulkResult struct {
 	Kind                                   string
 	Done, Theirs, Refused, Already, Failed int
 	Untried, Editors                       int
+	Limit, Unreplayed, Absent, Same        int
+	NoSuggest                              int
 	None                                   bool
+	Made                                   []int64
+	Href                                   string
 }
 
 // bulkParams are the parameters a bulk write's result is said by.
-var bulkParams = []string{"bulk", "done", "theirs", "refused", "already", "failed", "untried", "editors"}
+var bulkParams = []string{"bulk", "done", "theirs", "refused", "already", "failed", "untried", "editors",
+	"limit", "unreplayed", "absent", "same", "nosuggest", "made"}
 
 // bulkOf is the result a page was sent back with, read within bounds:
 // nil when there is none, or what is there isn't one.
@@ -64,7 +73,7 @@ func bulkOf(q url.Values) *bulkResult {
 		return x, err == nil && x >= 0 && x <= maxBulk
 	}
 	b := bulkResult{Kind: q.Get("bulk")}
-	var ok [7]bool
+	var ok [12]bool
 	b.Done, ok[0] = n("done")
 	b.Theirs, ok[1] = n("theirs")
 	b.Refused, ok[2] = n("refused")
@@ -72,8 +81,27 @@ func bulkOf(q url.Values) *bulkResult {
 	b.Failed, ok[4] = n("failed")
 	b.Untried, ok[5] = n("untried")
 	b.Editors, ok[6] = n("editors")
-	all := b.Done + b.Theirs + b.Refused + b.Already + b.Failed + b.Untried + b.Editors
+	b.Limit, ok[7] = n("limit")
+	b.Unreplayed, ok[8] = n("unreplayed")
+	b.Absent, ok[9] = n("absent")
+	b.Same, ok[10] = n("same")
+	b.NoSuggest, ok[11] = n("nosuggest")
+	all := b.Done + b.Theirs + b.Refused + b.Already + b.Failed + b.Untried + b.Editors + b.Limit + b.Unreplayed + b.Absent + b.Same + b.NoSuggest
 	if slices.Contains(ok[:], false) || all > maxBulk {
+		return nil
+	}
+	// The proposals made, each once, as many as were made at most: a
+	// bulk proposal's alone.
+	for _, v := range q["made"] {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || id <= 0 || b.Kind != "propose" {
+			return nil
+		}
+		if !slices.Contains(b.Made, id) {
+			b.Made = append(b.Made, id)
+		}
+	}
+	if len(b.Made) > b.Done {
 		return nil
 	}
 	b.None = all == 0
@@ -93,10 +121,14 @@ func bulkBack(back, path, kind string, b bulkResult) string {
 		q.Del(k)
 	}
 	q.Set("bulk", kind)
-	for k, n := range map[string]int{"done": b.Done, "theirs": b.Theirs, "refused": b.Refused, "already": b.Already, "failed": b.Failed, "untried": b.Untried, "editors": b.Editors} {
+	for k, n := range map[string]int{"done": b.Done, "theirs": b.Theirs, "refused": b.Refused, "already": b.Already, "failed": b.Failed, "untried": b.Untried, "editors": b.Editors,
+		"limit": b.Limit, "unreplayed": b.Unreplayed, "absent": b.Absent, "same": b.Same, "nosuggest": b.NoSuggest} {
 		if n > 0 {
 			q.Set(k, strconv.Itoa(n))
 		}
+	}
+	for _, id := range b.Made {
+		q.Add("made", strconv.FormatInt(id, 10))
 	}
 	u.RawQuery = q.Encode()
 	return u.String()
@@ -164,6 +196,9 @@ func (s *Server) bulkRules(w http.ResponseWriter, r *http.Request) {
 	var team int64
 	status := r.PostFormValue("status")
 	switch do {
+	case "propose":
+		s.bulkPropose(w, r, rules)
+		return
 	case "task":
 	case "team":
 		team = formInt(r, "team")
@@ -179,7 +214,7 @@ func (s *Server) bulkRules(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	default:
-		s.oops(w, r, bad("what to do with the rules picked: a task, a team or a disposition"))
+		s.oops(w, r, bad("what to do with the rules picked: a task, a team, a disposition or a proposal"))
 		return
 	}
 	o, err := s.owners(ctx)
@@ -292,13 +327,17 @@ func (s *Server) bulkReal(w http.ResponseWriter, r *http.Request) {
 // they may use it at all; Team, whether they may set a rule's team; Teams,
 // the teams to pick from; Result, what the last bulk write did, said once.
 // What they may not do is shown disabled, with why, as offOf says it: the
-// server is read-only, no one is signed in, or editors only.
+// server is read-only, no one is signed in, or editors only. Propose says
+// they may propose for the rules picked, an editor's; ProposeWhy, why no
+// one may, when it is no one's role.
 type bulkView struct {
-	May    bool
-	Team   bool
-	Teams  []ledger.Team
-	Result *bulkResult
-	Back   string
+	May        bool
+	Team       bool
+	Propose    bool
+	ProposeWhy string
+	Teams      []ledger.Team
+	Result     *bulkResult
+	Back       string
 }
 
 // bulkFor is what a bulk form offers the reader of r: all to an editor;

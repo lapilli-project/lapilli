@@ -580,13 +580,7 @@ func (s *Server) postProposal(w http.ResponseWriter, r *http.Request) {
 			q.From = "content check"
 		}
 	}
-	done, err := s.busy(r.Context())
-	if err != nil {
-		s.oops(w, r, err)
-		return
-	}
-	defer done()
-	id, err := s.propose(r.Context(), q, s.user(r), false, false)
+	id, err := s.proposeOne(r.Context(), q, s.user(r))
 	if err != nil {
 		s.oops(w, r, err)
 		return
