@@ -319,8 +319,10 @@ type Server struct {
 	// read the rules again (propose).
 	tries tries
 	// outlasts are the proposals' for_outlasts, worked out as they are
-	// read (outlastsNow).
+	// read (outlastsNow), and parsing the versions of the rules older
+	// proposals were made against.
 	outlasts outlasts
+	parsing  flights[namedRules]
 	// heavy is the one turn there is for a request that takes hundreds of
 	// megabytes: every firing of a month, the settings tried over a week.
 	heavy chan struct{}

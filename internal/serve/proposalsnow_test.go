@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -567,4 +569,138 @@ func TestStalePagesTranslated(t *testing.T) {
 		t.Errorf("%s has no translation for %q", lang, msg)
 	}
 	missing.Unlock()
+}
+
+// TestOutlastsFinishedKept: a proposal finished with (applied, dropped,
+// refused, failed) says the for_outlasts it kept, and no version is read
+// for it: its rule is as it was, or gone, and its page records what was.
+func TestOutlastsFinishedKept(t *testing.T) {
+	ctx := context.Background()
+	s, dir := restartsServer(t, nil)
+	ids := againstVersions(t, s, dir, 3, 5, ledger.StateApplied)
+	// One kept none, though its for outlasts one event: it says none.
+	var ps []ledger.Proposal
+	for _, id := range ids {
+		ps = append(ps, state(t, s, id))
+	}
+	before := namedReads.Load()
+	ls, err := s.linesNow(ctx, ps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range ls {
+		if l.Outlasts != nil {
+			t.Errorf("#%d, applied: worked out anew: %+v", l.ID, l.Outlasts)
+		}
+	}
+	if n := namedReads.Load() - before; n != 1 {
+		t.Errorf("%d versions parsed, want the latest alone", n)
+	}
+}
+
+// TestOutlastsOldVersionsBounded: open proposals made against older
+// versions have them parsed oldVersionsMost at a time: the rest say what
+// they kept, and are worked out by the reads after.
+func TestOutlastsOldVersionsBounded(t *testing.T) {
+	ctx := context.Background()
+	s, dir := restartsServer(t, nil)
+	ids := againstVersions(t, s, dir, oldVersionsMost+2, oldVersionsMost+3, ledger.StateApproved)
+	var ps []ledger.Proposal
+	for _, id := range ids {
+		ps = append(ps, state(t, s, id))
+	}
+	worked := func() int {
+		t.Helper()
+		before := namedReads.Load()
+		ls, err := s.linesNow(ctx, ps)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := namedReads.Load() - before; n > 1+oldVersionsMost {
+			t.Errorf("%d versions parsed in one read, want %d at most", n, 1+oldVersionsMost)
+		}
+		k := 0
+		for _, l := range ls {
+			if l.Outlasts != nil && l.Outlasts.Window == 30*time.Minute {
+				k++
+			}
+		}
+		return k
+	}
+	if k := worked(); k != oldVersionsMost {
+		t.Errorf("the first read worked out %d, want %d", k, oldVersionsMost)
+	}
+	if k := worked(); k != len(ids) {
+		t.Errorf("the second read worked out %d, want all %d", k, len(ids))
+	}
+}
+
+// TestOutlastsByEvidence: what a proposal's for_outlasts says is kept by
+// its evidence too: evidence kept anew, as backtesting again keeps it, is
+// read anew.
+func TestOutlastsByEvidence(t *testing.T) {
+	ctx := context.Background()
+	s, _ := restartsServer(t, nil)
+	id := keptAs(t, s, verdict.Semantics, "test", unrecordedFrom, unrecordedTo, nil)
+	read := func() *verdict.Outlast {
+		t.Helper()
+		ls, err := s.linesNow(ctx, []ledger.Proposal{state(t, s, id)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ls[0].Outlasts
+	}
+	if read() == nil {
+		t.Fatal("a for of 1h over 30m doesn't outlast")
+	}
+	ten := 10 * time.Minute
+	ev, _ := json.Marshal(evidence{From: "suggestion", Edit: &rules.Edit{Name: "RestartsNow", Group: "pods", For: &ten}, For: ten, Semantics: verdict.Semantics, Version: "test"})
+	ledgerExec(t, s, "UPDATE proposals SET evidence = ? WHERE id = ?", string(ev), id)
+	if o := read(); o != nil {
+		t.Errorf("evidence kept anew, read as before: %+v", o)
+	}
+}
+
+// TestFlightsOnce: those who ask for the same while it is worked out wait
+// for it, worked out once; asked once it is done, it is worked out again.
+func TestFlightsOnce(t *testing.T) {
+	var f flights[int]
+	var released atomic.Bool
+	release, started := make(chan struct{}), make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		f.do(context.Background(), 7, func() (int, error) {
+			close(started)
+			<-release
+			return 42, nil
+		})
+	}()
+	<-started
+	got := make([]int, 4)
+	for i := range got {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got[i], _ = f.do(context.Background(), 7, func() (int, error) {
+				if !released.Load() {
+					t.Error("worked out again while it was being worked out")
+				}
+				return 42, nil
+			})
+		}()
+	}
+	time.Sleep(20 * time.Millisecond) // the others ask meanwhile
+	released.Store(true)
+	close(release)
+	wg.Wait()
+	for i, v := range got {
+		if v != 42 {
+			t.Errorf("%d got %d", i, v)
+		}
+	}
+	if v, _ := f.do(context.Background(), 7, func() (int, error) { return 1, nil }); v != 1 {
+		t.Errorf("asked again once done: %d", v)
+	}
 }

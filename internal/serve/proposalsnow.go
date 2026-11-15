@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"html/template"
 	"net/http"
 	"slices"
@@ -103,11 +104,19 @@ func proposedRule(p ledger.Proposal, ev evidence, r rules.Rule) (rules.Rule, err
 	return want, nil
 }
 
-// outlastKey is a proposal as its for_outlasts is kept: by its id and what
-// its rule hashed to, before and as applied.
+// outlastKey is a proposal as its for_outlasts is kept: by its id, what
+// its rule hashed to, before and as applied, and its evidence, which says
+// the for it proposes and is kept anew when it is backtested again.
 type outlastKey struct {
 	id            int64
 	before, after string
+	evidence      uint64
+}
+
+func outlastKeyOf(p ledger.Proposal) outlastKey {
+	h := fnv.New64a()
+	h.Write(p.Evidence)
+	return outlastKey{p.ID, p.BeforeHash, p.AfterHash, h.Sum64()}
 }
 
 // outlasts are the for_outlasts worked out, by proposal: what the rule a
@@ -145,76 +154,148 @@ func (o *outlasts) put(k outlastKey, v *verdict.Outlast) {
 }
 
 // reading is what proposalsNow reads once for the proposals it is given:
-// the rules in effect, and the versions it read for a rule found only in
-// one of them, by id.
+// the rules in effect.
 type reading struct {
 	inForce
-	versions map[int64]struct {
-		all   []rules.Rule
-		names []string
-	}
 }
 
-// ruleWas is the rule a proposal was made against, as the rules in effect
-// when it was made had it, or the latest, by the hash it kept and its
-// name; false when neither has it (a version older than --keep, say).
-func (s *Server) ruleWas(ctx context.Context, p ledger.Proposal, rd *reading) (rules.Rule, bool, error) {
-	if r, ok := rd.byHash[p.BeforeHash]; ok && p.BeforeHash != "" {
-		return r, true, nil
-	}
-	vs, err := s.l.Versions(ctx, p.Made, p.Made, false)
-	if err != nil || len(vs) == 0 {
-		return rules.Rule{}, false, err
-	}
-	id := vs[len(vs)-1].ID
-	v, ok := rd.versions[id]
-	if !ok {
-		if v.all, v.names, err = s.named(ctx, id); err != nil {
-			return rules.Rule{}, false, err
-		}
-		if rd.versions == nil {
-			rd.versions = map[int64]struct {
-				all   []rules.Rule
-				names []string
-			}{}
-		}
-		rd.versions[id] = v
-	}
-	for i, x := range v.all {
-		if v.names[i] == p.Rule && ruleHash(x) == p.BeforeHash {
-			return x, true, nil
-		}
-	}
-	return rules.Rule{}, false, nil
+// oldVersionsMost is how many versions older than the latest one read of
+// the proposals parses for their for_outlasts, at most: past them, each
+// says what it kept, and a later read works it out. One version of a few
+// thousand rules parsed is some megabytes, until the rules matched are
+// taken out of it.
+const oldVersionsMost = 4
+
+// flights are reads under way, by key, so that requests asking for the same
+// at once wait for one (a version of the rules parsed, by its id).
+type flights[T any] struct {
+	sync.Mutex
+	m map[int64]*flight[T]
 }
 
-// outlastsNow is, of a proposal of a new for, what for_outlasts says of
-// the rule as proposed: worked out from the rule it was made against, with
-// the for it proposes. One whose rule isn't found says what its evidence
-// kept; any other kind, nothing.
-func (s *Server) outlastsNow(ctx context.Context, p ledger.Proposal, ev evidence, rd *reading) (*verdict.Outlast, error) {
-	if p.Kind != ledger.KindFor {
-		return nil, nil
-	}
-	k := outlastKey{p.ID, p.BeforeHash, p.AfterHash}
-	if o, ok := s.outlasts.get(k); ok {
-		return o, nil
-	}
-	r, ok, err := s.ruleWas(ctx, p, rd)
-	if err != nil {
-		return nil, err
-	}
-	o := ev.Outlasts
-	if f := proposedFor(ev); ok && f > 0 {
-		o = nil
-		want := r
-		want.For = f
-		if w, outlast := want.ForOutlasts(); outlast {
-			o = &verdict.Outlast{For: f, Window: w}
+type flight[T any] struct {
+	done chan struct{}
+	v    T
+	err  error
+}
+
+// do is fn's value for key, worked out once for all who ask while it is.
+func (f *flights[T]) do(ctx context.Context, key int64, fn func() (T, error)) (T, error) {
+	f.Lock()
+	if c, ok := f.m[key]; ok {
+		f.Unlock()
+		select {
+		case <-c.done:
+			return c.v, c.err
+		case <-ctx.Done():
+			var zero T
+			return zero, ctx.Err()
 		}
 	}
-	s.outlasts.put(k, o)
-	return o, nil
+	c := &flight[T]{done: make(chan struct{})}
+	if f.m == nil {
+		f.m = map[int64]*flight[T]{}
+	}
+	f.m[key] = c
+	f.Unlock()
+	c.v, c.err = fn()
+	f.Lock()
+	delete(f.m, key)
+	f.Unlock()
+	close(c.done)
+	return c.v, c.err
+}
+
+// namedRules are a version's rules and the names the ledger judges them
+// under (named).
+type namedRules struct {
+	all   []rules.Rule
+	names []string
+}
+
+// outlastOf is what for_outlasts says of a proposal of a new for, made
+// against r, as proposed.
+func outlastOf(r rules.Rule, ev evidence) *verdict.Outlast {
+	f := proposedFor(ev)
+	if f <= 0 {
+		return ev.Outlasts
+	}
+	want := r
+	want.For = f
+	if w, ok := want.ForOutlasts(); ok {
+		return &verdict.Outlast{For: f, Window: w}
+	}
+	return nil
+}
+
+// outlastsNow sets each line's Outlasts, of a proposal of a new for: what
+// for_outlasts says of the rule as proposed, worked out from the rule it
+// was made against, which its hash names, with the for it proposes. A
+// proposal finished with says what it kept, as do any other kind (none)
+// and one whose rule isn't found. The rules in effect come first; the rest
+// are found in the version in effect when each was made, each version
+// parsed once for all of them, and by one of the requests asking for it at
+// once, only the rules matched kept; oldVersionsMost of them at most.
+func (s *Server) outlastsNow(ctx context.Context, ls []proposalLine, evs []evidence, rd *reading) error {
+	older := map[int64][]int{}
+	var order []int64
+	for i := range ls {
+		l, ev := &ls[i], evs[i]
+		switch {
+		case l.Kind != ledger.KindFor:
+			continue
+		case !l.Open():
+			l.Outlasts = ev.Outlasts
+			continue
+		}
+		k := outlastKeyOf(l.Proposal)
+		if o, ok := s.outlasts.get(k); ok {
+			l.Outlasts = o
+			continue
+		}
+		if r, ok := rd.byHash[l.BeforeHash]; ok && l.BeforeHash != "" {
+			l.Outlasts = outlastOf(r, ev)
+			s.outlasts.put(k, l.Outlasts)
+			continue
+		}
+		l.Outlasts = ev.Outlasts // unless its version is read below
+		vs, err := s.l.Versions(ctx, l.Made, l.Made, false)
+		if err != nil {
+			return err
+		}
+		if len(vs) == 0 {
+			s.outlasts.put(k, l.Outlasts)
+			continue
+		}
+		id := vs[len(vs)-1].ID
+		if older[id] == nil {
+			order = append(order, id)
+		}
+		older[id] = append(older[id], i)
+	}
+	for n, id := range order {
+		if n == oldVersionsMost {
+			break // the rest say what they kept, this time
+		}
+		v, err := s.parsing.do(ctx, id, func() (namedRules, error) {
+			all, names, err := s.named(ctx, id)
+			return namedRules{all, names}, err
+		})
+		if err != nil {
+			return err
+		}
+		for _, i := range older[id] {
+			l := &ls[i]
+			for j, x := range v.all {
+				if v.names[j] == l.Rule && ruleHash(x) == l.BeforeHash {
+					l.Outlasts = outlastOf(x, evs[i])
+					break
+				}
+			}
+			s.outlasts.put(outlastKeyOf(l.Proposal), l.Outlasts)
+		}
+	}
+	return nil
 }
 
 // span is a backtest's period, as a map's key: its ends in seconds.
@@ -257,13 +338,12 @@ func (s *Server) proposalsNow(ctx context.Context, ls []proposalLine, rd *readin
 			kept[x] = slices.ContainsFunc(s.l.SpanWeeks(time.Unix(x.from, 0), time.Unix(x.to, 0)), func(w int64) bool { return s.l.WeekKept(rec, w) })
 		}
 	}
+	if err := s.outlastsNow(ctx, ls, evs, rd); err != nil {
+		return err
+	}
 	for i := range ls {
 		l, ev := &ls[i], evs[i]
-		o, err := s.outlastsNow(ctx, l.Proposal, ev, rd)
-		if err != nil {
-			return err
-		}
-		l.Outlasts, l.read = o, true
+		l.read = true
 		bt := ev.Backtest
 		now := false
 		if bt != nil {
