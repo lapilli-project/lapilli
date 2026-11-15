@@ -465,9 +465,20 @@ func FromDocs(docs []Doc) ([]Rule, error) { return FromDocsContext(context.Backg
 // FromDocsContext is FromDocs, given up when ctx ends: between documents,
 // and between the YAML documents of one. What aliases expand to, and what
 // the rules make beyond their text (madeLimit), is counted for the
-// documents together, as of one input (OneInput).
-func FromDocsContext(ctx context.Context, docs []Doc) ([]Rule, error) {
+// documents together, as of one input (OneInput): a rule file a ConfigMap
+// holds that makes past it is an error, not passed over as one that
+// doesn't read is. Documents refused give back what they counted, so that
+// a caller that passes them over and reads others with ctx (a ruler's
+// namespaces) has the rest read as they would be without them.
+func FromDocsContext(ctx context.Context, docs []Doc) (_ []Rule, err error) {
 	ctx = OneInput(ctx)
+	in := inputOf(ctx)
+	at := in.mark()
+	defer func() {
+		if err != nil {
+			in.undo(at)
+		}
+	}()
 	var out []Rule
 	for _, d := range docs {
 		if err := ctx.Err(); err != nil {
@@ -608,7 +619,12 @@ func parseDocRec(ctx context.Context, doc map[string]any, rec *[]Recording) ([]R
 				more = &[]Recording{}
 			}
 			rs, err := parseContext(ctx, []byte(s), more)
-			if err != nil {
+			switch {
+			case refused(err):
+				// Past what the input may make: said, as passing it over
+				// would leave its rules out unseen.
+				return nil, true, fmt.Errorf("%.80q: %w", k, err)
+			case err != nil:
 				continue // not every key holds rules
 			}
 			if rec != nil {
