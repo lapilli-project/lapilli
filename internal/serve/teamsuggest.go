@@ -310,10 +310,9 @@ func (s *Server) postSuggested(w http.ResponseWriter, r *http.Request) {
 	defer s.poke() // who owns a rule changed: a team's windows are judged again
 	// The teams there now, read again, not the owners kept for the
 	// ledger's generation: another request, or replica, may have made one
-	// of a name in another case meanwhile, which teams.name's UNIQUE, in
-	// case (SQLite's BINARY, Postgres's COLLATE "C"), lets through. A
-	// unique name in any case is the schema's to hold: bundle 22, which
-	// takes schema 019.
+	// of a name in another case meanwhile. The ledger refuses it (a team's
+	// name is unique in any case since schema 019), and it is passed over
+	// below; read here, it isn't asked for.
 	teams, err := s.l.Teams(r.Context())
 	if err != nil {
 		s.oops(w, r, err)
