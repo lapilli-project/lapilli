@@ -31,9 +31,10 @@ func (n series) QueryRange(_ context.Context, _ string, start, end time.Time, st
 // TestReplayWide: a replayed rule's firings each carry a copy of its labels
 // with their series' own, and a rule whose labels on each of its series
 // would take past what a range's samples are held to (--max-samples) isn't
-// replayed, saying why: 9,999 labels on 1,000 series made 1.3 GB, its
-// labels from whoever writes rules. One of a dozen labels on the same
-// series is replayed.
+// replayed, saying why in its own words (rules.TooWide), which a run
+// counts as a rule it couldn't replay: 9,999 labels on 1,000 series made
+// 1.3 GB, its labels from whoever writes rules. One of a dozen labels on
+// the same series is replayed.
 func TestReplayWide(t *testing.T) {
 	ctx := context.Background()
 	from := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
@@ -52,7 +53,7 @@ func TestReplayWide(t *testing.T) {
 	ran, fs := Run(ctx, series(1000), []Version{{Rules: []rules.Rule{wide}}}, from, to, time.Minute, 1)
 	runtime.ReadMemStats(&b)
 	t.Logf("9,999 labels on 1,000 series: %d MB allocated: %s", (b.TotalAlloc-a.TotalAlloc)>>20, ran[0].Unsupported)
-	if len(fs) != 0 || !strings.HasPrefix(ran[0].Unsupported, rules.QueryFailed) || !strings.Contains(ran[0].Unsupported, "9999 labels") {
+	if len(fs) != 0 || !strings.HasPrefix(ran[0].Unsupported, rules.TooWide) || !rules.Unreplayable(ran[0].Unsupported) || !strings.Contains(ran[0].Unsupported, "9999 labels") {
 		t.Errorf("replayed: %d firings, %q", len(fs), ran[0].Unsupported)
 	}
 	if got := b.TotalAlloc - a.TotalAlloc; got > 256<<20 {

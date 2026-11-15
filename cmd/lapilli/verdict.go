@@ -299,7 +299,10 @@ Output:
                       answered HTTP 429 still says so at its end
   --fail-unreplayed   exit 1 when a rule's replay failed because the history
                       couldn't be read: not reached, not let in (HTTP 401,
-                      403), turned away to the end (429, 5xx). The report is
+                      403), turned away to the end (429, 5xx); or when a
+                      rule's labels on each of its series are more than
+                      --max-samples lets a replay hold, which a rule's
+                      writer could do to keep it out unseen. The report is
                       of the others. Not for a query the history refused as
                       written (400, 422), which another run is refused too,
                       nor for a Grafana rule replayed whose query outside
@@ -1327,7 +1330,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			if r.Unsupported == replay.Unfinished {
 				unfinished[r.Rule] = true
 			}
-			if rules.ReplayFailed(r.Unsupported) {
+			if rules.Unreplayable(r.Unsupported) {
 				dropped[r.Rule] = true
 			}
 		}
@@ -1338,7 +1341,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if f.failUnreplayed && len(dropped) > 0 {
-		fmt.Fprintf(stderr, "lapilli verdict: %d of %d rules couldn't be replayed, as the history couldn't be read (--fail-unreplayed)\n", len(dropped), len(all))
+		fmt.Fprintf(stderr, "lapilli verdict: %d of %d rules couldn't be replayed, as the history couldn't be read or their labels on their series were too many (--fail-unreplayed)\n", len(dropped), len(all))
 		return 1
 	}
 	if failed {

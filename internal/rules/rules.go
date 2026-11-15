@@ -267,6 +267,22 @@ const (
 	HistoryUnread = QueryFailed + "the history couldn't be read: "
 )
 
+// TooWide begins the Unsupported of a rule whose replay was refused as its
+// alerts would carry its labels on each of its series past what a range's
+// samples are held to (--max-samples): a reason of the rule, as another
+// run refuses it too, but not one a run passes over as it does a query
+// refused as written: labels written so a rule can't be replayed would
+// keep it out of a backtest unseen (Unreplayable).
+const TooWide = "too many labels on its series to replay: "
+
+// Unreplayable says a run should count a rule with this Unsupported as
+// one it couldn't replay (--fail-unreplayed): its replay failed for a
+// reason of the run (ReplayFailed), or its labels on its series were too
+// many (TooWide).
+func Unreplayable(unsupported string) bool {
+	return ReplayFailed(unsupported) || strings.HasPrefix(unsupported, TooWide)
+}
+
 // ReplayFailed says a rule with this Unsupported was replayed and its replay
 // failed for a reason of the run (the history couldn't be read, the time
 // ran out), not one of the rule's: another run, or this one with its

@@ -450,7 +450,7 @@ func replayRun(ctx context.Context, h History, run []stint, to time.Time, step t
 	}
 	last := run[len(run)-1]
 	if err := wide(h, last.Rule, series); err != nil {
-		return nil, rules.QueryFailed + err.Error(), nil
+		return nil, err.Error(), nil
 	}
 	fs := fire(last.Rule, series, step, fireAt(run), to)
 	if !last.hi.After(to) {
@@ -614,7 +614,8 @@ const firingLabel = 96
 
 // wide refuses a rule's replay whose firings would carry its labels, its
 // group's and its own, on each of its series past what the history's
-// samples are held to (--max-samples, prom.SampleBytes each): the rule's
+// samples are held to (--max-samples, prom.SampleBytes each), saying so
+// (rules.TooWide), which --fail-unreplayed counts: the rule's
 // labels come from whoever writes rules, its series from the history, and
 // each series' firings have a copy of them. A rule of 9,999 labels on
 // 1,000 series made 1.3 GB; real ones, a dozen labels on 50,000 series,
@@ -632,8 +633,8 @@ func wide(h History, r rules.Rule, series []prom.Series) error {
 	n := 0
 	for _, s := range series {
 		if n += (len(s.Labels) + own) * firingLabel; n > room {
-			return fmt.Errorf("its alerts would carry its %d labels with each of its %d series' own, past the %d MB a range's samples are held to (--max-samples %d): not replayed",
-				own, len(series), room>>20, most)
+			return fmt.Errorf("%sits alerts would carry its %d labels with each of its %d series' own, past the %d MB a range's samples are held to (--max-samples %d)",
+				rules.TooWide, own, len(series), room>>20, most)
 		}
 	}
 	return nil

@@ -111,7 +111,7 @@ func TestUnreplayedShown(t *testing.T) {
 	}
 
 	code, _, errs := verdictOf("--rules", rs, "--fail-unreplayed")
-	if code != 1 || !strings.Contains(errs, "1 of 4 rules couldn't be replayed, as the history couldn't be read (--fail-unreplayed)") {
+	if code != 1 || !strings.Contains(errs, "1 of 4 rules couldn't be replayed, as the history couldn't be read or their labels on their series were too many (--fail-unreplayed)") {
 		t.Errorf("--fail-unreplayed: exit %d\n%s", code, errs)
 	}
 
@@ -429,7 +429,7 @@ func TestHistoryUnread(t *testing.T) {
 	} {
 		code, out, errs := unreadRun(t, c.answer, append(c.args, "--fail-unreplayed")...)
 		top := strings.Contains(out, "! 2 of 2 rules couldn't be replayed, and are left out of what follows:\n  A: "+rules.HistoryUnread)
-		if c.unread && (code != 1 || !top || !strings.Contains(errs, "2 of 2 rules couldn't be replayed, as the history couldn't be read (--fail-unreplayed)")) {
+		if c.unread && (code != 1 || !top || !strings.Contains(errs, "2 of 2 rules couldn't be replayed, as the history couldn't be read or their labels on their series were too many (--fail-unreplayed)")) {
 			t.Errorf("%s: exit %d\n%s\n%s", c.name, code, errs, out)
 		}
 		if !c.unread && (code != 0 || strings.Contains(out, "! ") || !strings.Contains(out, "  A: query failed: HTTP ")) {
