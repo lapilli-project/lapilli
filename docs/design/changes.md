@@ -78,7 +78,7 @@ them from what it already finds; a person or an agent can make one too.
 
 | Kind | From | Evidence attached |
 |---|---|---|
-| A longer `for` | a noisy rule's suggestion (`verdict.Suggestion`): none in a week with no record, and none as long as the range a rule that counts events counts over | the backtest over twelve weeks: firings before and after, incidents caught and how much later; and, for a `for` one event can't outlast (`rules.Rule.ForOutlasts`), what it means (`for_outlasts`), shown on its page and in its pull request's description |
+| A longer `for` | a noisy rule's suggestion (`verdict.Suggestion`): none in a week with no record, and none as long as the range a rule that counts events counts over | the backtest over twelve weeks: firings before and after, incidents caught and how much later; and, for a `for` one event can't outlast (`rules.Rule.ForOutlasts`), what it means (`for_outlasts`), worked out when it is read ("Read when shown"), shown on its page and in its pull request's description |
 | A nearer threshold, or a shorter `for` | a near miss for an incident nothing caught | the incident, the value it reached, and the backtest of the new threshold over twelve weeks |
 | Retire (disable, then delete) | a spare rule, or one that never fired | twelve weeks of firings, what caught each of its incidents first; and the caveat, shown, that a rule may wait for a rare incident and that incidents nobody wrote down count against it |
 | A fix to what it says | the content check ([content.md](content.md)) | the finding: a missing runbook link, a template naming a label the expression drops |
@@ -223,7 +223,8 @@ Always a person, in the UI.
   API, MCP, and every token. An agent may propose (MCP's `propose`, behind
   `--mcp-propose`, as `compare` is behind `--mcp-compare`), never approve or
   apply.
-- **Told.** `proposal.made`, `proposal.approved`, `change.opened`,
+- **Told.** `proposal.made`, `proposal.approved`, `proposal.backtested`
+  (as built, the release after 0.41.0), `change.opened`,
   `change.applied`, `change.refused`, `change.failed` and `change.undone`
   go to the webhook and Slack, as notices do now.
 
@@ -542,6 +543,145 @@ The first step, for v0.22.0, as above, except:
   not only when it fires; and as it makes no new version of the rules, it
   is applied when the rules read next say it. In Grafana the one
   annotation is set or taken out, the rest of the rule as Grafana gave it.
+- **Read when shown** (the release after 0.41.0). What a proposal's
+  evidence says is worked out again whenever it is read, on its page, the
+  proposals list, a rule's proposals tab, its pull request's description
+  (the recipes' too), the API and MCP, whatever lapilli made it: kept when
+  it was made, it would say what that lapilli worked out (`proposalsNow`).
+  - **`for_outlasts`**, of a new `for` not finished with: the rule it was
+    made against, by the hash it kept, in the rules in effect or else the
+    version in effect when it was made, with the `for` proposed, as
+    carrying it out makes the rule (`proposedRule`, which `checkEvidence`
+    uses too). The rule texts a proposal keeps are for people, never
+    parsed. One finished with (applied, dropped, refused, failed) says what
+    it kept, as does one whose rule neither has. Worked out once a proposal
+    (its id, hashes and evidence) while serve runs, at most 20,000 kept. An
+    older version is parsed once for every proposal of the read made
+    against it, by one of the requests asking for it at once (`flights`),
+    the rules matched alone kept, and four older versions a read at most:
+    the rest say what they kept until a later read works them out. Cold,
+    two hundred applied proposals each made against a version of its own,
+    1,200 rules each, took a second and 1.4 GB to list; now 20 ms and
+    21 MB, and as many waiting 107 ms and 68 MB (`TestProposalsColdScale`).
+  - **`no_record`**: a backtest keeps whether its period had a record, as
+    the ledger says (`ledger.RecordKept`: an incident on in one of its
+    weeks or the two weeks before, or `--impact` read over one); one made
+    before is worked out from the ledger for its own `from` and `to`,
+    unless it judged some firings then (one caught an incident, or it
+    named one missed, caught or caught later), when it had one. All of a
+    page's are read in one read of the incidents around them.
+  - **Stale**, waiting for approval, with a backtest: replayed or judged
+    otherwise than this lapilli does. A backtest keeps `semantics`
+    (`verdict.Semantics`, a number bumped whenever a change to replaying or
+    judging would make a backtest of the same history say something else,
+    and for no other release), and is stale under an older number, or none
+    (once, for one kept before it was), when Lapilli backtests it again
+    itself; under a newer one, a newer lapilli's in a rolling update or
+    after a rollback, it is held and says so ("approve it once this one is
+    as new, or backtest it again here"), and only a person backtests it
+    again, so that two releases never take each other's back and forth.
+    The version that ran it (`version`,
+    `dev` for none) is kept beside it to be shown, and decides nothing: a
+    minor upgrade that changes neither leaves every proposal as it was. Or
+    its record then not the ledger's now, for the same period's weeks. It
+    isn't approved until it is backtested again: the page offers no form,
+    the server refuses an approval with a form shown before, 400, the
+    ledger one of a proposal that moved since it was shown (`Approve`'s
+    `shown`), and `--approvals` lowered doesn't approve one either
+    (`Promote` is given the stale ones to skip): it waits, with the
+    approvals it has, until it is backtested again. A proposal whose rule
+    changed since, as the rules in effect last recorded have it (the
+    latest version's hash; a change to what it says, the rules read last),
+    is stale as before: said, `stale` in JSON, and refused when checked
+    again, read where it is kept. Not held at approval: that check lags a
+    change Lapilli made through an API until the rules are read next, and
+    a hold on it would ask to propose again a proposal that is as it was
+    made.
+  - **Backtested again**, `POST /proposals/{id}/backtest`: an editor's, as
+    `POST /proposals` is (`write`, the same cross-origin check), counted
+    against the reader's tries an hour (`triesAnHour`) once the rule is
+    found in effect, under the heavy turn, one comparison at a time; and
+    by the ledger, on every replica, by the changes it keeps: twenty an
+    hour a person (`BacktestsAnHour`), twenty for the agents acting for
+    them, apart, and a proposal not again, by anyone, for ten minutes
+    (`BacktestCooldown`), as an incident written down in its weeks and
+    taken away makes it stale and fresh by turns. The rule is read again
+    where it is kept and refused if it isn't the one the proposal was made
+    against ("propose it again"); else the change is replayed over the
+    twelve weeks to now, as a proposal's backtest is (one shorter as the
+    runs began later is as long as there are runs, not as long as before),
+    and its evidence kept in place of the old, with this `semantics` and
+    version, `no_record` and `for_outlasts` (`ledger.BacktestAgain`: one
+    write, refused if the proposal moved on or its evidence changed
+    meanwhile). Every incident a backtest named as missed is kept in
+    `earlier_lost`, as the twelve weeks can move past one; the page, the
+    pull request's description and MCP say those the backtest now doesn't
+    name, and checked again as it is carried out, missing one of them isn't
+    taken as worse than what was approved. The approvals it had were given
+    to the backtest replaced, so they are withdrawn, and told as
+    `proposal.backtested` (through the outbox, to the webhook and Slack),
+    naming who gave them and whether an agent asked, when any were or an
+    agent asked (Lapilli's own after an upgrade, withdrawing nothing, are
+    in the history alone); the change keeps the
+    old backtest, the new one, whose approvals were withdrawn and whether
+    an agent asked, which the history shows, with what the old one missed,
+    caught and caught later; MCP's `rule` gives each proposal's
+    `backtested_again`. A proposal that isn't stale isn't backtested again;
+    one without a backtest has none to run. An agent backtests again with
+    `backtest_again` (destructive, not idempotent: it withdraws approvals,
+    and the weeks move on), only where `--mcp-propose` lets it propose,
+    its tries counted apart from its person's, as `propose` counts them.
+  - **Lapilli backtests stale ones itself**, as Lapilli, in its work
+    (`backtestStale`): those waiting for approval an earlier lapilli
+    backtested (an older `semantics`, or none), so that a change to
+    `verdict.Semantics` leaves no proposal waiting for a click, Lapilli's
+    own above all, which no one owns. On a run of its work alone (`jobs`'
+    `run`), never when a write pokes it, so that no editor's quiet window
+    or note, again and again, makes it replay; only with `--changes`, as
+    Lapilli proposes of itself; while it replays and isn't read-only. The
+    longest unmoved first, three a run at most, and twelve an hour
+    (`LapilliBacktestsAnHour`), counted by the ledger on every replica
+    together, as a person's are, each counted once, as it begins: a row
+    kept in the changes just before the replay ("backtest tried again",
+    `ledger.BacktestTried`, the comparison taken), so that one cut short,
+    the process gone or its lease lost, is counted all the same; a kept
+    backtest beside it isn't counted again. The history shows tries in a
+    row that kept nothing as one step, how many and the last, and hides
+    the try a kept backtest began; MCP's `backtested_again` reads the last
+    kept directly (`LastBacktestedAgain`), however many tries came after.
+    Those never begun first, then the one begun longest ago, as the ledger
+    says (`LastTried`), whichever replica began it. One at a time
+    under the heavy turn, never waiting for a comparison running (the run
+    is over then), each replayed for ten minutes at most (`--timeout` when
+    shorter, `autoWithinMost`), the whole of it a minute more: it holds the
+    heavy turn, the one comparison and the work meanwhile. A record that
+    changed since, a rule that did, or a newer lapilli's backtest is a
+    person's: an incident written down and taken away doesn't make Lapilli
+    replay twelve weeks. One that doesn't finish replaces nothing and
+    withdraws nothing, and ends the run, so that a history that never
+    answers holds the work for one at most, as does one whose time ran
+    out, whatever error it gave (`againLate`); and it leaves every
+    proposal, not only itself, an hour, then two, four, up to a day, as a
+    history too slow for one is too slow for the rest, afresh once one is
+    kept or the semantics number changes. One it failed to otherwise is
+    left so on its own. Both are a replica's own memory: the next leader
+    starts afresh, which the ledger's twelve an hour bounds. One
+    backtested again in the last ten minutes isn't tried either.
+  - **Shown, never decisive.** What a proposal says when read never stops
+    a change being carried out: an older version that won't parse, or a
+    read that fails, leaves `for_outlasts` as the proposal kept it, and
+    when which proposals are stale can't be read, `carryOut` approves none
+    as fewer approvals are needed that round and goes on (Demote, and the
+    changes approved, with it). The single read of an older version
+    (`flights`) runs under the server's own context, ended as it shuts
+    down or is closed, thirty seconds at most, that no reader's leaving
+    cancels, two at once; none starts for a reader already gone, and the
+    last four read (`oldVersionsMost`, one read's older versions) are kept
+    a minute for the next reader; a panic in it is
+    each reader's error, logged at Error with its stack, and each waits as
+    long as its own request does. Every incident ID a pull request's
+    description names is a code span of its own, a backtick in it a quote
+    and a line break a space, one with nothing in it `(none)` (`mdIDs`).
 - **Not yet:** proposals in the weekly digest's tasks line, and a
   proposal carried by a task made elsewhere (a proposal can be made into a
   task).

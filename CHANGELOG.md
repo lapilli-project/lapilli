@@ -2,6 +2,110 @@
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-11-16
+
+A deployment upgraded to 0.41.0 had a proposal 0.40 made still waiting:
+the restart rule's `for`, 1m → 1h, from 0.40's suggestion. Its page said
+nothing of a `for` one event can't outlast, as that was worked out only
+when a proposal was made, and its backtest still said 141 firings → 3,
+better, of weeks with no incident written down, where fewer may be the
+restarts hidden. Now what a proposal's evidence says is worked out when it
+is read, whatever lapilli made it; a backtest with no record is counted,
+not judged; and a proposal whose backtest was replayed or judged otherwise
+than this lapilli does, or whose period's record changed since, waits to
+be backtested again before anyone approves it, which Lapilli does itself
+too. No schema change: what is kept is in a proposal's evidence, and the
+ledger's changes. JSON, the API and MCP add fields; MCP's `stale` is a
+string now.
+
+### Added
+
+- **A proposal read as it is now.** On its page, the proposals list, a
+  rule's proposals tab, its pull request's description, the API and MCP,
+  a proposal of a `for` says whether one event can outlast it
+  (`for_outlasts`), worked out from the rule it was made against, which
+  its hash names, with the `for` proposed, as carrying it out makes the
+  rule: of the rule in effect, or of the version in effect when it was
+  made; one whose rule neither has, and one finished with (applied,
+  dropped, refused, failed), says what it kept. Each proposal's is worked
+  out once while serve runs, by its evidence too; a version is parsed
+  once for every proposal made against it, by one of the requests asking
+  at once, its matched rules alone kept, and four older versions a read at
+  most: cold, two hundred proposals each against a version of its own
+  take 20 ms to list, not a second and 1.4 GB. Whether its backtest's
+  period had an incident written down to judge its firings by
+  (`no_record`) is kept with each backtest from now on, as the ledger has
+  the period when it runs (`ledger.RecordKept`), and worked out from the
+  ledger for one made before, unless it judged some firings then (caught,
+  missed or caught later an incident), when it had a record.
+  `GET /api/v1/proposals` and `/api/v1/proposals/{id}` add `stale`,
+  `for_outlasts` and `no_record`; MCP's `rule` gives each proposal's
+  backtest (`backtest`: its firings, and, with a record, what it caught,
+  missed and caught later).
+- **A backtest with no record is counted, not judged.** Its table says
+  once that no incident was written down, or found by `--impact`, in the
+  period or the two weeks before it: "the firings are counted, not judged.
+  Fewer firings aren't better, nor more worse: fewer may be events that
+  happened, hidden." 141 → 3 is −138, neither better nor worse, and what
+  was caught or missed is "–". Its pull request's description says it as
+  `--compare` does of such a period, with no "catching an incident", and
+  MCP gives its firings alone, with `no_record`.
+- **Stale proposals, backtested again.** A proposal waiting for approval
+  whose backtest was replayed or judged otherwise than this lapilli does
+  (`semantics` in its evidence, `verdict.Semantics`, a number bumped only
+  when replaying or judging changes; once, for one kept before it was;
+  the `version` that ran it is kept beside it, `dev` for none, to be
+  shown; a newer lapilli's, in a rolling update or after a rollback, is
+  held and said so, and left for a person), or whose period's record
+  changed since (an incident written down in its weeks, or none keeping it
+  any more), is stale: its page says why, the list has a badge and links
+  to `/proposals?stale=1`, which lists the stale ones (with those
+  whose rule changed since), and `stale` says why in the API and MCP. It
+  isn't approved until it is backtested again: its page shows the button
+  disabled, with why, the server refuses it, and so does the ledger an
+  approval of a proposal as it no longer is, backtested again meanwhile;
+  nor does `--approvals` lowered approve one. With `--changes`, Lapilli
+  backtests again itself, as Lapilli, those an earlier lapilli backtested,
+  on a run of its work alone (never when a write pokes it): three a run,
+  twelve an hour at most on every replica together, each counted as it
+  begins, kept or not, the one begun longest ago last, one at a time
+  under the heavy turn, each within ten minutes (`--timeout` when
+  shorter), never waiting for a comparison running. One that doesn't
+  finish replaces nothing, is said in the proposal's history (tries in a
+  row as one line), ends the run, and leaves that proposal, and every
+  other, an hour, then two, four, up to a day, until one is kept. A
+  record that changed, or a newer lapilli's, is a person's. An editor backtests one again from its page (`POST
+  /proposals/{id}/backtest`, asked for as a proposal is: the role, from
+  this site, and the tries an hour, read again where it is kept), and an
+  agent with `--mcp-propose`, through `backtest_again` (destructive, not
+  idempotent): the change replayed with this lapilli against the rule in
+  effect, over the twelve weeks to now. The ledger keeps them bounded, on
+  every replica: twenty an hour a person, twenty for the agents acting for
+  them, and a proposal not again for ten minutes. The backtest it replaces
+  is kept in the proposal's history, with what it missed, caught and
+  caught later and who backtested it again, an agent's said so; every
+  incident a backtest named as missed is kept (`earlier_lost`), said on
+  its page, in its pull request's description and through MCP
+  (`earlier_missed`), and not refused when it is checked again as it is
+  carried out. The approvals given to the backtest replaced are withdrawn,
+  and told as `proposal.backtested` to the webhook and Slack, naming who
+  gave them, when any were or an agent asked; MCP's `rule` gives each
+  proposal's `backtested_again`. Refused when the rule changed since:
+  propose it again. Every incident ID its pull request's description
+  names is a code span of its own, nothing in it read as Markdown (one
+  with nothing in it, `(none)`). What a proposal shows when read never
+  stops a change being carried out: for_outlasts falls back to what it
+  kept, and stale ones that can't be read are approved by none as fewer
+  approvals are needed, that round.
+
+### Changed
+
+- MCP's `stale` on a proposal is why it is stale, a string, where it was
+  `true`: the rule changed since it was proposed, as before, or why it
+  waits to be backtested again.
+- The proposals list reads, in brief, the evidence of a proposal of a new
+  `for` and of one waiting for approval, beside an undo's.
+
 ## [0.42.0] - 2026-11-16
 
 First use: what a first-time reader got stuck on, on a real deployment

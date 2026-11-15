@@ -535,6 +535,11 @@ type evidence struct {
 	Outlasts *verdict.Outlast `json:"for_outlasts,omitempty"`
 	// Backtest is the change replayed: a for or a threshold.
 	Backtest *backtest `json:"backtest,omitempty"`
+	// EarlierLost are the incidents a backtest it had before it was
+	// backtested again said it misses as proposed, each kept for good: the
+	// twelve weeks to now can leave one out as they move on, and it is
+	// still one the change would have missed (EarlierMissed).
+	EarlierLost []string `json:"earlier_lost,omitempty"`
 	// Finding is the content check's finding a change to what a rule says
 	// answers, when it answers one.
 	Finding *contentFinding `json:"finding,omitempty"`
@@ -548,6 +553,13 @@ type evidence struct {
 	// doesn't replay it.
 	Cloud   string `json:"cloud,omitempty"`
 	OffOnly bool   `json:"off_only,omitempty"`
+	// Semantics is how its backtest was replayed and judged
+	// (verdict.Semantics): one under another number, or none, as before it
+	// was kept, is stale while it waits for approval (proposalsNow).
+	// Version is the lapilli that made it, or last backtested it again
+	// (versionOf), shown beside it, and nothing more.
+	Semantics int    `json:"semantics,omitempty"`
+	Version   string `json:"version,omitempty"`
 }
 
 // backtest is a change replayed, as it is and as proposed.
@@ -560,6 +572,11 @@ type backtest struct {
 	Gained     []string  `json:"gained"` // missed as it is, caught as proposed
 	Later      []string  `json:"later"`  // caught later as proposed
 	Unfinished bool      `json:"unfinished,omitempty"`
+	// NoRecord says no week of its period had its record kept
+	// (ledger.RecordKept): its firings were counted, not judged, so fewer
+	// of them is no better, nor more worse. nil for a backtest made before
+	// it was kept, worked out from the ledger when it is read.
+	NoRecord *bool `json:"no_record,omitempty"`
 }
 
 type side struct {
@@ -745,7 +762,10 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 	}
 	e := rules.Edit{Name: r.Name, Group: r.Group, UID: r.UID, Namespace: r.Namespace}
 	want := r
-	ev := evidence{From: q.From, Incident: q.Incident, Reason: q.Reason}
+	ev := evidence{From: q.From, Incident: q.Incident, Reason: q.Reason, Version: s.versionOf()}
+	if q.Kind == ledger.KindFor || q.Kind == ledger.KindThreshold {
+		ev.Semantics = semantics
+	}
 	var b rules.Bound
 	switch q.Kind {
 	case ledger.KindFor:
@@ -1155,6 +1175,19 @@ func ruleText(r rules.Rule) string {
 // runs began when that is later. wait says to wait for a comparison
 // running, as a job does; a person asking is told to try again.
 func (s *Server) backtest(ctx context.Context, name string, before, after rules.Rule, wait bool) (*backtest, error) {
+	return s.backtestWithin(ctx, name, before, after, wait, s.cfg.Timeout, nil)
+}
+
+// comparingBusy is a backtest asked for while another comparison runs, by
+// one that doesn't wait for it: the text backtestWithin refuses it with,
+// written there too, as the bulk proposal reads each refusal's text
+// (TestComparingBusyText holds them alike).
+const comparingBusy = "another comparison is running: try again in a minute"
+
+// backtestWithin is backtest, its replay given within at most; begun,
+// when given, is told just before it replays, the one comparison taken,
+// and stops it with its error.
+func (s *Server) backtestWithin(ctx context.Context, name string, before, after rules.Rule, wait bool, within time.Duration, begun func() error) (*backtest, error) {
 	to := s.now().Add(-s.cfg.Settle).Truncate(s.cfg.Step).UTC()
 	from := to.Add(-weeks * weekLen)
 	if began, err := s.l.RunsFrom(ctx); err != nil {
@@ -1180,11 +1213,23 @@ func (s *Server) backtest(ctx context.Context, name string, before, after rules.
 	both := []rules.Rule{before, after}
 	both[0].Name, both[1].Name = name, name
 	s.replayedAs().Apply(both)
-	cmp, err := s.replayChange(ctx, both[:1], both[1:], 0, from, to, s.cfg.Timeout, o)
+	if begun != nil {
+		if err := begun(); err != nil {
+			return nil, err
+		}
+	}
+	cmp, err := s.replayChange(ctx, both[:1], both[1:], 0, from, to, within, o)
 	if err != nil {
 		return nil, err
 	}
-	bt := &backtest{From: from, To: to, Lost: []string{}, Gained: []string{}, Later: []string{}}
+	// Whether the period had its record, as the ledger says, which is what
+	// it is told by when it is read again (proposalsNow).
+	kept, err := s.l.RecordKept(ctx, from, to, o)
+	if err != nil {
+		return nil, err
+	}
+	no := !kept
+	bt := &backtest{From: from, To: to, Lost: []string{}, Gained: []string{}, Later: []string{}, NoRecord: &no}
 	for _, rc := range cmp.Rules {
 		if rc.Rule != name {
 			continue
@@ -1239,7 +1284,9 @@ func worse(was, now evidence) string {
 			return "the backtest didn't finish within --timeout, so the change couldn't be checked again"
 		}
 		for _, id := range now.Backtest.Lost {
-			if !slices.Contains(was.Backtest.Lost, id) {
+			// What was approved said it misses those its backtest named,
+			// and those an earlier one did.
+			if !slices.Contains(was.Backtest.Lost, id) && !slices.Contains(was.EarlierLost, id) {
 				return fmt.Sprintf("the backtest now says it would miss %s, which the rule catches as it is", id)
 			}
 		}
@@ -1314,9 +1361,15 @@ func (s *Server) carryOut(ctx context.Context) error {
 	if err := s.l.Refresh(ctx); err != nil {
 		return err
 	}
-	// Approved before --approvals was lowered: moved on; before it was
-	// raised, and not yet carried out or taken by a recipe: approved again.
-	if _, err := s.l.Promote(ctx, s.approvals()); err != nil {
+	// Approved before --approvals was lowered: moved on, unless it waits
+	// to be backtested again (held); before it was raised, and not yet
+	// carried out or taken by a recipe: approved again.
+	// Which wait to be backtested again is read for what it shows, of the
+	// rules in effect and the record: if that can't be read, none is
+	// approved so this round, and the rest goes on.
+	if held, err := s.heldPromotable(ctx); err != nil {
+		s.log.Warn("no proposal approved as fewer approvals are needed this round: which are stale couldn't be read", "err", err)
+	} else if _, err := s.l.Promote(ctx, s.approvals(), held); err != nil {
 		return err
 	}
 	if _, err := s.l.Demote(ctx, s.approvals()); err != nil {
@@ -1584,19 +1637,9 @@ func (s *Server) checkEvidence(ctx context.Context, p ledger.Proposal, ev eviden
 		if now != nil {
 			r = *now
 		}
-		want := r
-		switch p.Kind {
-		case ledger.KindFor:
-			want.For = ev.For
-		case ledger.KindThreshold:
-			if ev.Bound == nil || ev.Value == nil {
-				return refusal{"the proposal doesn't say which number to change"}
-			}
-			j := slices.IndexFunc(r.Bounds(), func(x rules.Bound) bool { return x.At == *ev.Bound })
-			if j < 0 {
-				return refusal{"the rule changed since it was proposed, or is gone: propose it again"}
-			}
-			want = r.WithBound(r.Bounds()[j], *ev.Value)
+		want, err := proposedRule(p, ev, r)
+		if err != nil {
+			return err
 		}
 		bt, err := s.backtest(ctx, p.Rule, r, want, true)
 		if err != nil {

@@ -340,8 +340,12 @@ var ErrMoved = errors.New("this proposal has moved on since: read it again")
 
 // Approve notes a person's approval of a proposal, and approves it once it
 // has need of them. No one approves their own proposal, or one twice, in
-// any letter case: names are kept as FoldName gives them.
-func (l *Ledger) Approve(ctx context.Context, id int64, by string, need int) (Proposal, error) {
+// any letter case: names are kept as FoldName gives them. shown is when
+// the proposal had last moved as the approver was shown it (its Updated):
+// one that moved since, its evidence backtested again among what moves
+// it, is refused with ErrMoved, in the write itself. Zero takes it as it
+// is, as an approval given outside a form is.
+func (l *Ledger) Approve(ctx context.Context, id int64, by string, need int, shown time.Time) (Proposal, error) {
 	var p Proposal
 	by = FoldName(by)
 	err := l.write(ctx, func(t *txn) error {
@@ -352,7 +356,7 @@ func (l *Ledger) Approve(ctx context.Context, id int64, by string, need int) (Pr
 			return err
 		}
 		switch {
-		case p.State != StateProposed:
+		case p.State != StateProposed, !shown.IsZero() && !p.Updated.Equal(shown):
 			return ErrMoved
 		case FoldName(p.MadeBy) == by:
 			return ErrOwnProposal
@@ -403,14 +407,41 @@ func (l *Ledger) Approve(ctx context.Context, id int64, by string, need int) (Pr
 	return p, err
 }
 
+// promotable are the proposals waiting for approval that have the
+// approvals need asks for, of those q reads: those approved before
+// --approvals was lowered. A change for a person to make is never
+// approved.
+const promotable = `SELECT ` + proposalColumns + ` FROM proposals WHERE state = ? AND path != ? AND
+	(SELECT count(*) FROM approvals a WHERE a.proposal_id = proposals.id) >= ?`
+
+// Promotable are the proposals Promote would approve, need asking for so
+// many: read for those of them held (lapilli serve's stale ones, which
+// it passes to Promote to skip).
+func (l *Ledger) Promotable(ctx context.Context, need int) ([]Proposal, error) {
+	rows, err := l.r.QueryContext(ctx, promotable, StateProposed, PathNone, max(1, need))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Proposal
+	for rows.Next() {
+		p, err := scanProposal(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // Promote approves the proposals waiting for approval that have need of
-// the approvals they have: those approved before --approvals was lowered.
+// the approvals they have: those approved before --approvals was lowered,
+// but those held names (stale, waiting to be backtested again).
 // A change for a person to make is never approved.
-func (l *Ledger) Promote(ctx context.Context, need int) (int, error) {
+func (l *Ledger) Promote(ctx context.Context, need int, held []int64) (int, error) {
 	n := 0
 	err := l.write(ctx, func(t *txn) error {
-		rows, err := t.QueryContext(t.ctx, `SELECT `+proposalColumns+` FROM proposals WHERE state = ? AND path != ? AND
-			(SELECT count(*) FROM approvals a WHERE a.proposal_id = proposals.id) >= ?`, StateProposed, PathNone, max(1, need))
+		rows, err := t.QueryContext(t.ctx, promotable, StateProposed, PathNone, max(1, need))
 		if err != nil {
 			return err
 		}
@@ -429,6 +460,9 @@ func (l *Ledger) Promote(ctx context.Context, need int) (int, error) {
 		}
 		now := time.Now().Unix()
 		for _, p := range ps {
+			if slices.Contains(held, p.ID) {
+				continue
+			}
 			if _, err := t.ExecContext(t.ctx, "UPDATE proposals SET state = ?, updated = ? WHERE id = ?", StateApproved, now, p.ID); err != nil {
 				return err
 			}
@@ -557,6 +591,228 @@ func (l *Ledger) Move(ctx context.Context, id int64, from []string, to, by strin
 		return nil
 	})
 	return p, err
+}
+
+// BacktestsAnHour is how many proposals one person backtests again in an
+// hour at most, and the agents acting for them as many again, apart:
+// counted by the changes the ledger keeps, on every replica alike.
+const BacktestsAnHour = 20
+
+// LapilliBacktestsAnHour is how many proposals Lapilli backtests again
+// itself in an hour at most, all its replicas together, counted as a
+// person's are: whatever pokes its work, it backtests no more.
+const LapilliBacktestsAnHour = 12
+
+// BacktestCooldown is how long a proposal backtested again isn't again,
+// by anyone: an incident written down and taken away in its period makes
+// it stale and fresh by turns, and each backtest is twelve weeks replayed.
+const BacktestCooldown = 10 * time.Minute
+
+// ErrTooManyBacktests is a backtest run again past BacktestsAnHour.
+var ErrTooManyBacktests = errors.New("you have backtested as many proposals again in the last hour as anyone may: try again later")
+
+// ErrBacktestedJustNow is a proposal backtested again within
+// BacktestCooldown of the last time.
+var ErrBacktestedJustNow = errors.New("it was backtested again less than ten minutes ago: try again in a few minutes")
+
+// MayBacktestAgain says whether BacktestAgain would refuse a proposal
+// backtested again by a person, or an agent acting for them, now: asked
+// before the work (the rules read again, twelve weeks replayed), so that
+// one refused costs nothing. BacktestAgain asks again as it keeps it. Of
+// Lapilli's own, it says whether BacktestTried would.
+func (l *Ledger) MayBacktestAgain(ctx context.Context, id int64, by string, agent bool) error {
+	return backtestable(ctx, l.r, id, FoldName(by), agent, time.Now(), true)
+}
+
+// backtestable is MayBacktestAgain, asked of the ledger or within a write:
+// the proposal's cooldown, and, with hour, the hour's. A person's, and
+// their agents', are counted by the backtests they kept; Lapilli's by the
+// tries it began (BacktestTried), each one whether it kept it or not, so
+// that a try counts once.
+func backtestable(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, id int64, by string, agent bool, now time.Time, hour bool) error {
+	var last sql.NullInt64
+	if err := q.QueryRowContext(ctx, "SELECT max(at) FROM changes WHERE what = ?", fmt.Sprintf("proposal #%d backtested again", id)).Scan(&last); err != nil {
+		return err
+	}
+	if last.Valid && now.Unix()-last.Int64 < int64(BacktestCooldown/time.Second) {
+		return ErrBacktestedJustNow
+	}
+	if !hour {
+		return nil
+	}
+	most, counted := BacktestsAnHour, " backtested again"
+	if by == Proposer {
+		most, counted = LapilliBacktestsAnHour, " "+tried
+	}
+	rows, err := q.QueryContext(ctx, "SELECT what, after FROM changes WHERE at > ? AND by = ? AND what LIKE 'proposal #%'",
+		now.Add(-time.Hour).Unix(), by)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var what, after string
+		if err := rows.Scan(&what, &after); err != nil {
+			return err
+		}
+		var kept struct {
+			Agent bool `json:"agent"`
+		}
+		if strings.HasSuffix(what, counted) && json.Unmarshal([]byte(after), &kept) == nil && kept.Agent == agent {
+			n++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if n >= most {
+		return ErrTooManyBacktests
+	}
+	return nil
+}
+
+// tried is what changes keeps of a backtest Lapilli begins to run again
+// itself: "proposal #N backtest tried again".
+const tried = "backtest tried again"
+
+// BacktestTried keeps that Lapilli (ledger.Proposer) begins to run a
+// proposal's backtest again, before it replays it: so that a try cut short
+// (the process gone, the lease lost) is counted all the same, toward
+// LapilliBacktestsAnHour, which it checks in the same write, refusing one
+// past it (ErrTooManyBacktests). One kept is kept by BacktestAgain beside
+// it, and counted by this row alone. It changes nothing of the proposal.
+func (l *Ledger) BacktestTried(ctx context.Context, id int64) error {
+	return l.write(ctx, func(t *txn) error {
+		if err := backtestable(t.ctx, t, id, Proposer, false, time.Now(), true); err != nil {
+			return err
+		}
+		return change(t, Proposer, fmt.Sprintf("proposal #%d %s", id, tried), nil, map[string]any{"agent": false})
+	})
+}
+
+// LastTried are, by proposal, when Lapilli last began to run its backtest
+// again (BacktestTried), of those it began since: so that the next it tries
+// isn't the same, whichever replica tries it.
+func (l *Ledger) LastTried(ctx context.Context, since time.Time) (map[int64]time.Time, error) {
+	rows, err := l.r.QueryContext(ctx, "SELECT what, max(at) FROM changes WHERE at > ? AND by = ? AND what LIKE ? GROUP BY what",
+		since.Unix(), Proposer, "proposal #% "+tried)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]time.Time{}
+	for rows.Next() {
+		var what string
+		var at int64
+		if err := rows.Scan(&what, &at); err != nil {
+			return nil, err
+		}
+		var id int64
+		if _, err := fmt.Sscanf(what, "proposal #%d", &id); err == nil {
+			out[id] = unix(at)
+		}
+	}
+	return out, rows.Err()
+}
+
+// LastBacktestedAgain is the last time a proposal's backtest run again was
+// kept: its change, and false for never. Read by the changes' index on
+// what, whatever else its history holds.
+func (l *Ledger) LastBacktestedAgain(ctx context.Context, id int64) (Change, bool, error) {
+	var c Change
+	var at int64
+	err := l.r.QueryRowContext(ctx, "SELECT at, by, what, before, after FROM changes WHERE what = ? ORDER BY id DESC LIMIT 1",
+		fmt.Sprintf("proposal #%d backtested again", id)).Scan(&at, &c.By, &c.What, &c.Before, &c.After)
+	if errors.Is(err, sql.ErrNoRows) {
+		return c, false, nil
+	}
+	c.At = unix(at)
+	return c, err == nil, err
+}
+
+// BacktestAgain keeps the evidence of a proposal waiting for approval
+// worked out again, now in place of was: its backtest run again, by who
+// asked for it, or by an agent acting for them (agent). The approvals it
+// had were given to the evidence it replaces, so they are withdrawn, and
+// it waits for them again; who gave them is given back. What it replaced
+// is kept in changes, as before, and what it is now, as after, with
+// whether an agent asked and whose approvals were withdrawn: its page's
+// history says so. It is told as proposal.backtested, naming them, when it
+// withdrew any or an agent asked.
+// ErrMoved when it isn't waiting for approval, or its evidence isn't was
+// any more (backtested again meanwhile); ErrBacktestedJustNow and
+// ErrTooManyBacktests as MayBacktestAgain says. A proposal's own columns
+// are as they were, but for when it moved: no schema of its own.
+func (l *Ledger) BacktestAgain(ctx context.Context, id int64, by string, agent bool, was, now json.RawMessage, before, after map[string]any) (Proposal, []string, error) {
+	var p Proposal
+	var withdrawn []string
+	by = FoldName(by)
+	err := l.write(ctx, func(t *txn) error {
+		var err error
+		if p, err = scanProposal(t.QueryRowContext(t.ctx, "SELECT "+proposalColumns+" FROM proposals WHERE id = ?", id)); errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if p.State != StateProposed || string(p.Evidence) != string(was) {
+			return ErrMoved
+		}
+		// Lapilli's own was counted as it began (BacktestTried).
+		if err := backtestable(t.ctx, t, id, by, agent, time.Now(), by != Proposer); err != nil {
+			return err
+		}
+		as, err := l.approvals(t.ctx, t, id)
+		if err != nil {
+			return err
+		}
+		withdrawn = nil
+		for _, a := range as {
+			withdrawn = append(withdrawn, a.By)
+		}
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM approvals WHERE proposal_id = ?", id); err != nil {
+			return err
+		}
+		// Later than it was, so that an approval form shown before, which is
+		// good for the proposal as it stood then, isn't any more.
+		updated := time.Now().Truncate(time.Second)
+		if !updated.After(p.Updated) {
+			updated = p.Updated.Add(time.Second)
+		}
+		if _, err := t.ExecContext(t.ctx, "UPDATE proposals SET evidence = ?, updated = ? WHERE id = ?", string(now), updated.Unix(), id); err != nil {
+			return err
+		}
+		p.Evidence, p.Updated, p.Approvals = now, updated, nil
+		kept := map[string]any{"approvals_taken_back": len(withdrawn), "approvals_withdrawn": orNone(withdrawn), "agent": agent}
+		for k, v := range after {
+			kept[k] = v
+		}
+		if err := change(t, by, fmt.Sprintf("proposal #%d backtested again", id), before, kept); err != nil {
+			return err
+		}
+		// Told when it withdrew an approval, or an agent asked for it:
+		// those are what someone should hear of. Evidence kept anew and
+		// nothing else is on its page.
+		if len(withdrawn) == 0 && !agent {
+			return nil
+		}
+		about := p.about()
+		told := about["proposal"].(map[string]any)
+		told["approvals_withdrawn"], told["by_agent"] = orNone(withdrawn), agent
+		return l.tell(t, "proposal.backtested", by, about)
+	})
+	return p, withdrawn, err
+}
+
+// orNone is a list as JSON keeps it: [] for none, never null.
+func orNone(ss []string) []string {
+	if ss == nil {
+		return []string{}
+	}
+	return ss
 }
 
 // Firing reports whether a rule has an alert the ledger has as still on:

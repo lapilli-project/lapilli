@@ -1,0 +1,1005 @@
+package serve
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"hash/fnv"
+	"html/template"
+	"log/slog"
+	"net/http"
+	"runtime/debug"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/verdict"
+)
+
+// What a proposal's evidence says when it is read (docs/design/changes.md,
+// "Read when shown"), whatever version of lapilli made it: whether its for
+// is one one event can't outlast, as proposed (for_outlasts), worked out
+// from the rule it was proposed against, which its hash names, with the
+// for proposed, as carrying it out makes the rule; whether its backtest's
+// period had no incident written down to judge its firings by (no_record),
+// as the backtest kept it or, of one made before it kept it, as the ledger
+// has the period now; and whether, waiting for approval, it is stale: made
+// by another version of lapilli, or its period's record changed since,
+// when it waits to be backtested again before anyone approves it; or the
+// rule changed since, as the rules in effect last recorded have it, when
+// it is refused once it is checked again, as it was before (Stale).
+
+// staleWhy is why a proposal waiting for approval waits to be backtested
+// again: a text to translate, and its values. Auto says Lapilli backtests
+// it again itself (backtestStale): one backtested by an earlier lapilli,
+// whose backtests replay or judge as this one no longer does. One a newer
+// lapilli backtested (a replica of another release, or one rolled back
+// from) is held, and left for a person: backtested again here, it would
+// be by the older rules, and the newer one would take it back.
+type staleWhy struct {
+	Format string
+	Args   []any
+	Auto   bool
+}
+
+// Why a proposal is stale, in English: keys into the catalogs, and what
+// JSON, the API and MCP give as stale (staleText).
+const (
+	staleRule      = "the rule changed since it was proposed"
+	staleNoVersion = "it was backtested by an earlier lapilli, before backtests were numbered by how they replay and judge"
+	staleVersion   = "it was backtested by lapilli %s, which replays or judges as an earlier lapilli did"
+	staleNewer     = "it was backtested by lapilli %s, which replays or judges as a newer lapilli does: approve it once this one is as new, or backtest it again here"
+	// The record is judged by whole weeks (verdict.Record): an incident
+	// in a week the period has some of, or the two weeks before, keeps it.
+	staleRecorded   = "an incident was written down in its period's weeks since it was backtested"
+	staleUnrecorded = "no incident keeps the record of its period's weeks any more"
+)
+
+// semantics is how this lapilli replays and judges (verdict.Semantics),
+// as the backtests it runs keep it and those it reads are told stale by: a
+// variable, so that a test can be a lapilli of another number.
+var semantics = verdict.Semantics
+
+// staleNotice is what a stale proposal's page says at its top, with why.
+const staleNotice = "It is stale, so it isn't approved until it is backtested again: %s."
+
+// Text is why, in a language; HTML the same, each value set apart; Notice
+// what the page says of it.
+func (w staleWhy) Text(lang string) string        { return tr(lang, w.Format, w.Args...) }
+func (w staleWhy) HTML(lang string) template.HTML { return trBDI(lang, w.Format, w.Args...) }
+func (w staleWhy) Notice(lang string) template.HTML {
+	return template.HTML(fmt.Sprintf(template.HTMLEscapeString(tr(lang, staleNotice)), w.HTML(lang)))
+}
+
+// versionOf is the version of lapilli running, as a backtest keeps it:
+// Config.Version, or dev for none, as a build of its own has.
+func (s *Server) versionOf() string {
+	if s.cfg.Version == "" {
+		return "dev"
+	}
+	return s.cfg.Version
+}
+
+// backtested reports whether a proposal's kind has a backtest: a for or a
+// threshold, replayed.
+func backtested(kind string) bool { return kind == ledger.KindFor || kind == ledger.KindThreshold }
+
+// proposedFor is the for a proposal of a new for proposes: its edit's, or
+// its evidence's.
+func proposedFor(ev evidence) time.Duration {
+	if ev.Edit != nil && ev.Edit.For != nil {
+		return *ev.Edit.For
+	}
+	return ev.For
+}
+
+// proposedRule is a proposal's rule as proposed, made from r, the rule it
+// is made against, as carrying it out makes it (checkEvidence): its for,
+// or its threshold, as the evidence keeps them.
+func proposedRule(p ledger.Proposal, ev evidence, r rules.Rule) (rules.Rule, error) {
+	want := r
+	switch p.Kind {
+	case ledger.KindFor:
+		want.For = proposedFor(ev)
+	case ledger.KindThreshold:
+		if ev.Bound == nil || ev.Value == nil {
+			return want, refusal{"the proposal doesn't say which number to change"}
+		}
+		j := slices.IndexFunc(r.Bounds(), func(x rules.Bound) bool { return x.At == *ev.Bound })
+		if j < 0 {
+			return want, refusal{"the rule changed since it was proposed, or is gone: propose it again"}
+		}
+		want = r.WithBound(r.Bounds()[j], *ev.Value)
+	}
+	return want, nil
+}
+
+// outlastKey is a proposal as its for_outlasts is kept: by its id, what
+// its rule hashed to, before and as applied, and its evidence, which says
+// the for it proposes and is kept anew when it is backtested again.
+type outlastKey struct {
+	id            int64
+	before, after string
+	evidence      uint64
+}
+
+func outlastKeyOf(p ledger.Proposal) outlastKey {
+	h := fnv.New64a()
+	h.Write(p.Evidence)
+	return outlastKey{p.ID, p.BeforeHash, p.AfterHash, h.Sum64()}
+}
+
+// outlasts are the for_outlasts worked out, by proposal: what the rule a
+// proposal was made against hashes to doesn't change, nor does the for it
+// proposes, so each is worked out once while serve runs, and a rule found
+// only in an older version is read once.
+type outlasts struct {
+	sync.Mutex
+	m map[outlastKey]*verdict.Outlast
+}
+
+// outlastsKept is how many outlasts keeps at most: one out, any one, past it.
+const outlastsKept = 20000
+
+func (o *outlasts) get(k outlastKey) (*verdict.Outlast, bool) {
+	o.Lock()
+	defer o.Unlock()
+	v, ok := o.m[k]
+	return v, ok
+}
+
+func (o *outlasts) put(k outlastKey, v *verdict.Outlast) {
+	o.Lock()
+	defer o.Unlock()
+	if o.m == nil {
+		o.m = map[outlastKey]*verdict.Outlast{}
+	}
+	if len(o.m) >= outlastsKept {
+		for k := range o.m {
+			delete(o.m, k)
+			break
+		}
+	}
+	o.m[k] = v
+}
+
+// reading is what proposalsNow reads once for the proposals it is given:
+// the rules in effect.
+type reading struct {
+	inForce
+}
+
+// oldVersionsMost is how many versions older than the latest one read of
+// the proposals parses for their for_outlasts, at most: past them, each
+// says what it kept, and a later read works it out. One version of a few
+// thousand rules parsed is some megabytes, until the rules matched are
+// taken out of it.
+const oldVersionsMost = 4
+
+// flights are reads under way, by key, so that requests asking for the same
+// at once wait for one (a version of the rules parsed, by its id); and the
+// last flightsKept read, for flightKeptFor, so that one a reader left
+// isn't read again for the next. base is the server's own context (life):
+// a flight ends as the server does. flightsMost run at once.
+type flights[T any] struct {
+	sync.Mutex
+	base context.Context
+	log  *slog.Logger
+	m    map[int64]*flight[T]
+	kept map[int64]keptFlight[T]
+	sem  chan struct{}
+	// flown counts the flights started.
+	flown atomic.Int64
+}
+
+type flight[T any] struct {
+	done chan struct{}
+	v    T
+	err  error
+}
+
+// keptFlight is a flight's value, as it was read at at.
+type keptFlight[T any] struct {
+	v  T
+	at time.Time
+}
+
+// How many flights run at once, how many of their values are kept, and
+// for how long.
+const (
+	flightsMost   = 2
+	flightsKept   = oldVersionsMost // one read's older versions, all kept
+	flightKeptFor = time.Minute
+)
+
+// parseWithin is how long a version of the rules is parsed for at most,
+// for whoever asks for it.
+const parseWithin = 30 * time.Second
+
+// do is fn's value for key: as kept, when it was read within
+// flightKeptFor; else worked out once for all who ask while it is, by the
+// first to ask, under the server's context (base), not any asker's, within
+// at most, flightsMost at once, so that one reader leaving fails none of
+// the others and its read is kept for the next. A panic of fn's is each
+// asker's error, logged with its stack. Each asker waits as long as its
+// own context lets it; one already done starts nothing.
+func (f *flights[T]) do(ctx context.Context, key int64, within time.Duration, fn func(context.Context) (T, error)) (T, error) {
+	var zero T
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
+	f.Lock()
+	if k, ok := f.kept[key]; ok && time.Since(k.at) < flightKeptFor {
+		f.Unlock()
+		return k.v, nil
+	}
+	c, ok := f.m[key]
+	if !ok {
+		c = &flight[T]{done: make(chan struct{})}
+		if f.m == nil {
+			f.m, f.kept, f.sem = map[int64]*flight[T]{}, map[int64]keptFlight[T]{}, make(chan struct{}, flightsMost)
+		}
+		f.m[key] = c
+		f.flown.Add(1)
+		base := f.base
+		if base == nil {
+			base = context.WithoutCancel(ctx)
+		}
+		fctx, cancel := context.WithTimeout(base, within)
+		go f.fly(fctx, cancel, key, c, fn)
+	}
+	f.Unlock()
+	select {
+	case <-c.done:
+		return c.v, c.err
+	case <-ctx.Done():
+		return zero, ctx.Err()
+	}
+}
+
+// fly works a flight out, its turn among flightsMost taken first, keeps
+// its value, and lets those waiting for it have it.
+func (f *flights[T]) fly(ctx context.Context, cancel context.CancelFunc, key int64, c *flight[T], fn func(context.Context) (T, error)) {
+	defer func() {
+		if p := recover(); p != nil {
+			log := f.log
+			if log == nil {
+				log = slog.Default()
+			}
+			log.Error("a read for proposals panicked", "key", key, "panic", p, "stack", string(debug.Stack()))
+			c.err = fmt.Errorf("lapilli: %v", p)
+		}
+		cancel()
+		f.Lock()
+		delete(f.m, key)
+		if c.err == nil {
+			if len(f.kept) >= flightsKept {
+				oldest := int64(0)
+				for k, v := range f.kept {
+					if oldest == 0 || v.at.Before(f.kept[oldest].at) {
+						oldest = k
+					}
+				}
+				delete(f.kept, oldest)
+			}
+			f.kept[key] = keptFlight[T]{c.v, time.Now()}
+		}
+		f.Unlock()
+		close(c.done)
+	}()
+	select {
+	case f.sem <- struct{}{}:
+		defer func() { <-f.sem }()
+	case <-ctx.Done():
+		c.err = ctx.Err()
+		return
+	}
+	c.v, c.err = fn(ctx)
+}
+
+// namedRules are a version's rules and the names the ledger judges them
+// under (named).
+type namedRules struct {
+	all   []rules.Rule
+	names []string
+}
+
+// outlastOf is what for_outlasts says of a proposal of a new for, made
+// against r, as proposed.
+func outlastOf(r rules.Rule, ev evidence) *verdict.Outlast {
+	f := proposedFor(ev)
+	if f <= 0 {
+		return ev.Outlasts
+	}
+	want := r
+	want.For = f
+	if w, ok := want.ForOutlasts(); ok {
+		return &verdict.Outlast{For: f, Window: w}
+	}
+	return nil
+}
+
+// outlastsNow sets each line's Outlasts, of a proposal of a new for: what
+// for_outlasts says of the rule as proposed, worked out from the rule it
+// was made against, which its hash names, with the for it proposes. A
+// proposal finished with says what it kept, as do any other kind (none)
+// and one whose rule isn't found. The rules in effect come first; the rest
+// are found in the version in effect when each was made, each version
+// parsed once for all of them, and by one of the requests asking for it at
+// once, only the rules matched kept; oldVersionsMost of them at most.
+func (s *Server) outlastsNow(ctx context.Context, ls []proposalLine, evs []evidence, rd *reading) error {
+	older := map[int64][]int{}
+	var order []int64
+	for i := range ls {
+		l, ev := &ls[i], evs[i]
+		switch {
+		case l.Kind != ledger.KindFor:
+			continue
+		case !l.Open():
+			l.Outlasts = ev.Outlasts
+			continue
+		}
+		k := outlastKeyOf(l.Proposal)
+		if o, ok := s.outlasts.get(k); ok {
+			l.Outlasts = o
+			continue
+		}
+		if r, ok := rd.byHash[l.BeforeHash]; ok && l.BeforeHash != "" {
+			l.Outlasts = outlastOf(r, ev)
+			s.outlasts.put(k, l.Outlasts)
+			continue
+		}
+		l.Outlasts = ev.Outlasts // unless its version is read below
+		vs, err := s.l.Versions(ctx, l.Made, l.Made, false)
+		if err != nil {
+			// Shown, not decided by: what it kept, this time.
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			s.log.Debug("a proposal's for_outlasts read as kept", "proposal", l.ID, "err", err)
+			continue
+		}
+		if len(vs) == 0 {
+			s.outlasts.put(k, l.Outlasts)
+			continue
+		}
+		id := vs[len(vs)-1].ID
+		if older[id] == nil {
+			order = append(order, id)
+		}
+		older[id] = append(older[id], i)
+	}
+	for n, id := range order {
+		if n == oldVersionsMost {
+			break // the rest say what they kept, this time
+		}
+		v, err := s.parsing.do(ctx, id, parseWithin, func(ctx context.Context) (namedRules, error) {
+			all, names, err := s.named(ctx, id)
+			return namedRules{all, names}, err
+		})
+		if err != nil {
+			// A version that won't parse, or a read that failed: those made
+			// against it say what they kept, this time.
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			s.log.Debug("proposals' for_outlasts read as kept", "version", id, "err", err)
+			continue
+		}
+		for _, i := range older[id] {
+			l := &ls[i]
+			for j, x := range v.all {
+				if v.names[j] == l.Rule && ruleHash(x) == l.BeforeHash {
+					l.Outlasts = outlastOf(x, evs[i])
+					break
+				}
+			}
+			s.outlasts.put(outlastKeyOf(l.Proposal), l.Outlasts)
+		}
+	}
+	return nil
+}
+
+// span is a backtest's period, as a map's key: its ends in seconds.
+type span struct{ from, to int64 }
+
+func spanOf(bt *backtest) span { return span{bt.From.Unix(), bt.To.Unix()} }
+
+// proposalsNow works out, for each line, what its evidence says now: its
+// for_outlasts, whether its backtest's period had a record, and, waiting
+// for approval, why it is stale. rd has the rules in effect the lines were
+// told stale (Stale) by. The period's record is read once for all of them:
+// the incidents from two weeks before the first to the end of the last.
+func (s *Server) proposalsNow(ctx context.Context, ls []proposalLine, rd *reading) error {
+	evs := make([]evidence, len(ls))
+	var spans []span
+	for i := range ls {
+		evs[i] = proposalEvidence(ls[i].Proposal)
+		if bt := evs[i].Backtest; bt != nil && (bt.NoRecord == nil || ls[i].State == ledger.StateProposed) {
+			spans = append(spans, spanOf(bt))
+		}
+	}
+	kept := map[span]bool{}
+	if len(spans) > 0 {
+		from, to := spans[0].from, spans[0].to
+		for _, x := range spans {
+			from, to = min(from, x.from), max(to, x.to)
+		}
+		o, err := s.options(ctx)
+		if err != nil {
+			return err
+		}
+		rec, err := s.l.RecordOf(ctx, time.Unix(from, 0), time.Unix(to, 0), o, nil)
+		if err != nil {
+			return err
+		}
+		for _, x := range spans {
+			if _, ok := kept[x]; ok || x.from >= x.to {
+				continue
+			}
+			kept[x] = slices.ContainsFunc(s.l.SpanWeeks(time.Unix(x.from, 0), time.Unix(x.to, 0)), func(w int64) bool { return s.l.WeekKept(rec, w) })
+		}
+	}
+	if err := s.outlastsNow(ctx, ls, evs, rd); err != nil {
+		return err
+	}
+	for i := range ls {
+		l, ev := &ls[i], evs[i]
+		l.read = true
+		bt := ev.Backtest
+		now := false
+		if bt != nil {
+			now = !kept[spanOf(bt)]
+			l.NoRecord = now && !bt.judgedSome()
+			if bt.NoRecord != nil {
+				l.NoRecord = *bt.NoRecord
+			}
+		}
+		if l.State != ledger.StateProposed || bt == nil || !backtested(l.Kind) {
+			continue
+		}
+		switch {
+		case ev.Semantics == 0:
+			l.StaleWhy = &staleWhy{Format: staleNoVersion, Auto: true}
+		case ev.Semantics < semantics:
+			l.StaleWhy = &staleWhy{Format: staleVersion, Args: []any{cmpOr(ev.Version, "dev")}, Auto: true}
+		case ev.Semantics > semantics:
+			l.StaleWhy = &staleWhy{Format: staleNewer, Args: []any{cmpOr(ev.Version, "dev")}}
+		case bt.NoRecord != nil && *bt.NoRecord && !now:
+			l.StaleWhy = &staleWhy{Format: staleRecorded}
+		case bt.NoRecord != nil && !*bt.NoRecord && now:
+			l.StaleWhy = &staleWhy{Format: staleUnrecorded}
+		}
+	}
+	return nil
+}
+
+// EarlierMissed are the incidents an earlier backtest said the change
+// misses that its backtest now doesn't name: said on its page, in its pull
+// request's description and through MCP, beside those it does.
+func (ev evidence) EarlierMissed() []string {
+	var out []string
+	for _, id := range ev.EarlierLost {
+		if ev.Backtest == nil || !slices.Contains(ev.Backtest.Lost, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// earlierLost are the incidents ev's backtests, this one and those before
+// it, said the change misses, each once, as a backtest run again keeps them.
+func earlierLost(ev evidence) []string {
+	out := slices.Clone(ev.EarlierLost)
+	if ev.Backtest != nil {
+		for _, id := range ev.Backtest.Lost {
+			if !slices.Contains(out, id) {
+				out = append(out, id)
+			}
+		}
+	}
+	return out
+}
+
+// heldPromotable are the proposals --approvals lowered would approve that
+// wait to be backtested again: held, as an approval of one is.
+func (s *Server) heldPromotable(ctx context.Context) ([]int64, error) {
+	ps, err := s.l.Promotable(ctx, s.approvals())
+	if err != nil || len(ps) == 0 {
+		return nil, err
+	}
+	ls, err := s.linesNow(ctx, ps)
+	if err != nil {
+		return nil, err
+	}
+	var out []int64
+	for _, l := range ls {
+		if l.StaleWhy != nil {
+			out = append(out, l.ID)
+		}
+	}
+	return out, nil
+}
+
+// staleText is why a proposal is stale, in English, as JSON, the API and
+// MCP give it: its rule changed since, of one not finished with (Stale), or
+// why, waiting for approval, it waits to be backtested again; "" for
+// neither.
+func (l proposalLine) staleText() string {
+	switch {
+	case l.Stale:
+		return staleRule
+	case l.StaleWhy != nil:
+		return l.StaleWhy.Text("en")
+	}
+	return ""
+}
+
+// staleNow reports whether a proposal waiting for approval is stale, for
+// either reason: what the list's stale=1 picks.
+func (l proposalLine) staleNow() bool {
+	return l.State == ledger.StateProposed && (l.Stale || l.StaleWhy != nil)
+}
+
+// linesNow are proposals' lines with what their evidence says now
+// (proposalsNow).
+func (s *Server) linesNow(ctx context.Context, ps []ledger.Proposal) ([]proposalLine, error) {
+	ls, rd, err := s.linesOf(ctx, ps)
+	if err != nil {
+		return nil, err
+	}
+	return ls, s.proposalsNow(ctx, ls, rd)
+}
+
+// judgedSome reports whether a backtest judged some of its firings: one
+// caught an incident, or an incident was caught otherwise, missed or
+// caught later. Its period had a record then, whatever the ledger says of
+// it now (an incident since taken away): one made before it kept no_record
+// isn't taken as having none.
+func (bt *backtest) judgedSome() bool {
+	return bt.Before.White > 0 || bt.After.White > 0 || len(bt.Lost)+len(bt.Gained)+len(bt.Later) > 0
+}
+
+// spanNoRecord reports whether a backtest's period had no record: as the
+// backtest kept it, or, of one made before it kept it and judged none of
+// its firings, as the ledger has the period now. An undo's page reads it
+// of the change it undoes.
+func (s *Server) spanNoRecord(ctx context.Context, bt *backtest) (bool, error) {
+	if bt == nil {
+		return false, nil
+	}
+	if bt.NoRecord != nil {
+		return *bt.NoRecord, nil
+	}
+	if bt.judgedSome() {
+		return false, nil
+	}
+	o, err := s.options(ctx)
+	if err != nil {
+		return false, err
+	}
+	kept, err := s.l.RecordKept(ctx, bt.From, bt.To, o)
+	return !kept, err
+}
+
+// noRecordFewer says, after verdict.NoRecordCompared, what a period with
+// no record means for a change's backtest: in English, in a pull
+// request's description; a proposal's page says both in the reader's
+// language.
+const noRecordFewer = "Fewer firings aren't better, nor more worse: fewer may be events that happened, hidden."
+
+// errUnfinished is a backtest Lapilli ran again itself that didn't finish
+// within --timeout: not kept.
+var errUnfinished = errors.New("the backtest run again didn't finish within --timeout: the one it had is kept")
+
+// errFresh is a proposal backtested again that isn't stale: its backtest
+// is this lapilli's, of its period's record as it is.
+var errFresh = bad("it isn't stale: its backtest replays and judges as this lapilli does, of its period's record as it is, so there is nothing to backtest again")
+
+// errNoBacktest is a proposal backtested again that has no backtest: a
+// change to what a rule says, or retiring it.
+var errNoBacktest = bad("it has no backtest to run again: only a new for or a new threshold is backtested")
+
+// errRuleChanged is a proposal backtested again whose rule changed since
+// it was made, as the rules in effect last recorded have it, or as they
+// are read again: it no longer applies to the rule as it is.
+var errRuleChanged = bad("the rule changed since it was proposed, so the proposal no longer applies to the rule as it is: propose it again from the rule's page")
+
+// errHeld is an approval of a proposal that waits to be backtested again.
+var errHeld = bad("it is stale, so it isn't approved until it is backtested again: backtest it again from its page, then approve it")
+
+// backtestAgain runs a stale proposal's backtest again, with this lapilli,
+// against the rule in effect, over the twelve weeks to now (as proposing
+// it would), for who asks (agent, for an agent acting for them): its
+// evidence, with the new backtest, this version and whether its period had
+// a record, in place of the old, which its history keeps, and the
+// approvals it had taken back. Asked as a proposal is (propose): the
+// reader's tries an hour, their agents' apart, counted once the rule is
+// found in effect, then the rules read again from where they are kept;
+// refused when the rule changed since.
+func (s *Server) backtestAgain(ctx context.Context, id int64, by string, agent bool) error {
+	return s.backtestAgainOf(ctx, id, by, agent, s.cfg.Timeout)
+}
+
+// backtestAgainOf is backtestAgain, its replay given within at most:
+// --timeout for a person or an agent, less for Lapilli's own (autoWithin).
+// None waits for a comparison running while it holds the heavy turn.
+func (s *Server) backtestAgainOf(ctx context.Context, id int64, by string, agent bool, within time.Duration) error {
+	if !s.replaying() {
+		return bad("this lapilli serve reads no rules of its own: there is nothing to change")
+	}
+	p, err := s.l.ProposalByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	ls, err := s.linesNow(ctx, []ledger.Proposal{p})
+	if err != nil {
+		return err
+	}
+	l, ev := ls[0], proposalEvidence(p)
+	switch {
+	case p.State != ledger.StateProposed:
+		return ledger.ErrMoved
+	case !backtested(p.Kind) || ev.Backtest == nil:
+		return errNoBacktest
+	case l.StaleWhy == nil && l.Stale:
+		return errRuleChanged
+	case l.StaleWhy == nil:
+		return errFresh
+	}
+	// Refused without waiting for the heavy turn: the hour's backtests
+	// again, and the proposal's last, as the ledger keeps them; and the
+	// reader's tries, as proposing counts them.
+	if err := s.l.MayBacktestAgain(ctx, id, by, agent); err != nil {
+		return err
+	}
+	if by != ledger.Proposer && !s.tries.may(by, agent, time.Now()) {
+		return errTooManyTries
+	}
+	done, err := s.busy(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
+	f, err := s.current(ctx, p.Rule, false)
+	var b badRequest
+	switch {
+	case errors.As(err, &b):
+		return errRuleChanged // no longer in effect
+	case err != nil:
+		return err
+	}
+	// The rule as it is kept now, read again as proposing reads it, is
+	// what it was made against, or it no longer applies: the rules in
+	// effect last recorded can lag a change Lapilli made through an API.
+	if by != ledger.Proposer && !s.tries.take(by, agent, time.Now()) {
+		return errTooManyTries
+	}
+	if f, err = s.reread(ctx, f); err != nil {
+		return err
+	}
+	if hashOf(p, f.rule) != p.BeforeHash {
+		return errRuleChanged
+	}
+	want, err := proposedRule(p, ev, f.rule)
+	var no refusal
+	if errors.As(err, &no) {
+		return errRuleChanged
+	}
+	// Lapilli's own is counted as it begins, kept or not: a try cut short
+	// (the process gone, its lease lost) is counted all the same.
+	var begun func() error
+	if by == ledger.Proposer {
+		begun = func() error { return s.l.BacktestTried(ctx, p.ID) }
+	}
+	bt, err := s.backtestWithin(ctx, f.name, f.rule, want, false, within, begun)
+	if err != nil {
+		return err
+	}
+	if bt.Unfinished && by == ledger.Proposer {
+		// Lapilli's own keeps what it had, complete, and the approvals
+		// given to it: a person may take a partial one, seeing it so.
+		return errUnfinished
+	}
+	again := ev
+	again.Backtest, again.Semantics, again.Version, again.Outlasts = bt, semantics, s.versionOf(), nil
+	again.EarlierLost = earlierLost(ev)
+	if p.Kind == ledger.KindFor {
+		if w, ok := want.ForOutlasts(); ok {
+			again.Outlasts = &verdict.Outlast{For: want.For, Window: w}
+		}
+	}
+	raw, err := json.Marshal(again)
+	if err != nil {
+		return err
+	}
+	_, _, err = s.l.BacktestAgain(ctx, p.ID, by, agent, p.Evidence, raw,
+		map[string]any{"backtest": ev.Backtest, "version": ev.Version}, map[string]any{"backtest": bt, "version": again.Version})
+	return err
+}
+
+// againARun is how many stale proposals Lapilli backtests again itself in
+// a run of its work, at most, one at a time, each within autoWithin: after
+// verdict.Semantics changes, every one waiting is, a few each run, and
+// ledger.LapilliBacktestsAnHour an hour at most, tried or kept.
+const againARun = 3
+
+// autoWithinMost is how long Lapilli's own backtest run again replays for
+// at most, --timeout when that is shorter: it holds the heavy turn, the one
+// comparison and the work meanwhile. A variable, for tests.
+var autoWithinMost = 10 * time.Minute
+
+// autoMargin is how much longer than its replay one of Lapilli's own may
+// take in all: the rules read again, the record, the write.
+const autoMargin = time.Minute
+
+// againRetry is how long Lapilli leaves a proposal it failed to backtest
+// again itself before it tries again, the first time: doubled each time it
+// fails again, to againRetryMost.
+const (
+	againRetry     = time.Hour
+	againRetryMost = 24 * time.Hour
+)
+
+// againFailed are, by proposal, when Lapilli may next try to backtest one
+// again itself that it failed to, as this replica knows (the next leader
+// tries again: the ledger's count of the hour's bounds them all); and all,
+// when it may next try any, after one didn't finish in time: a history too
+// slow for one is too slow for the rest.
+type againFailed struct {
+	sync.Mutex
+	m   map[int64]againBackoff
+	all againBackoff
+}
+
+// againBackoff is what Lapilli failed to backtest again itself: not
+// before next, after n failures in a row, under the semantics numbers then
+// (this lapilli's, and the evidence's): a change to either starts afresh.
+type againBackoff struct {
+	next       time.Time
+	n          int
+	ours, kept int
+}
+
+// later is b, failed again at now: left againRetry, doubled for each
+// failure in a row before it, againRetryMost at most.
+func (b againBackoff) later(now time.Time, kept int) againBackoff {
+	if b.ours != semantics || b.kept != kept {
+		b = againBackoff{ours: semantics, kept: kept}
+	}
+	b.n++
+	wait := againRetryMost
+	if b.n <= 5 {
+		wait = min(againRetry<<(b.n-1), againRetryMost)
+	}
+	b.next = now.Add(wait)
+	return b
+}
+
+// waiting reports whether b leaves what it is of untried at now.
+func (b againBackoff) waiting(now time.Time, kept int) bool {
+	return b.ours == semantics && b.kept == kept && now.Before(b.next)
+}
+
+// waits reports whether Lapilli leaves a proposal, its evidence's
+// semantics kept, untried now.
+func (a *againFailed) waits(id int64, kept int, now time.Time) bool {
+	a.Lock()
+	defer a.Unlock()
+	return a.m[id].waiting(now, kept)
+}
+
+// failed notes a failure to backtest one again, and gives how long it is
+// left.
+func (a *againFailed) failed(id int64, kept int, now time.Time) time.Duration {
+	a.Lock()
+	defer a.Unlock()
+	if a.m == nil {
+		a.m = map[int64]againBackoff{}
+	}
+	b := a.m[id].later(now, kept)
+	a.m[id] = b
+	return b.next.Sub(now)
+}
+
+// forget starts a proposal afresh once it is backtested again, and every
+// proposal: the history answers in time.
+func (a *againFailed) forget(id int64) {
+	a.Lock()
+	defer a.Unlock()
+	delete(a.m, id)
+	a.all = againBackoff{}
+}
+
+// allWaits reports whether Lapilli leaves every proposal untried now.
+func (a *againFailed) allWaits(now time.Time) bool {
+	a.Lock()
+	defer a.Unlock()
+	return a.all.waiting(now, 0)
+}
+
+// allFailed notes one that didn't finish in time: every one is left, as
+// failed leaves one.
+func (a *againFailed) allFailed(now time.Time) time.Duration {
+	a.Lock()
+	defer a.Unlock()
+	a.all = a.all.later(now, 0)
+	return a.all.next.Sub(now)
+}
+
+// againLate reports whether one of Lapilli's own backtests run again
+// failed for time: unfinished, past its deadline, or its context ended
+// (late) whatever error a read that ran into it gave, as a database driver
+// may give its own.
+func againLate(err error, late bool) bool {
+	return late || errors.Is(err, errUnfinished) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// backtestStale backtests again itself, as Lapilli (ledger.Proposer), the
+// proposals waiting for approval an earlier lapilli backtested (Auto),
+// againARun at most: those an upgrade that changes how a backtest replays
+// or judges left waiting, Lapilli's own among them, which no one would
+// otherwise ask for. Those it never began to backtest again first, the
+// longest unmoved first, then the one it began longest ago, as the ledger
+// says, whichever replica began it. Only on a run of its work, never when
+// a write pokes it, and only with --changes, as Lapilli proposes of itself;
+// ledger.LapilliBacktestsAnHour an hour at most, on every replica together,
+// each counted as it begins (ledger.BacktestTried), kept or not. One whose
+// period's record changed since, or whose rule did, is a person's to
+// backtest again, or propose again: an incident written down and taken
+// away doesn't make Lapilli replay twelve weeks. Each under the heavy turn,
+// as a person's is, within autoWithin, never waiting for a comparison
+// running. One that doesn't finish in time ends the run and leaves every
+// proposal againRetry, doubled each time again, as a history too slow for
+// one is too slow for the rest; one it failed to is left so on its own
+// too; and one backtested again in the last ten minutes isn't either. Any
+// kept starts them afresh. Approvals withdrawn so are told, as any are.
+func (s *Server) backtestStale(ctx context.Context) error {
+	if !s.replaying() || s.cfg.ReadOnly || !s.cfg.Changes {
+		return nil
+	}
+	now := time.Now()
+	if s.againFailed.allWaits(now) {
+		return nil
+	}
+	heads, err := s.l.ProposalList(ctx, ledger.ProposalPick{States: []string{ledger.StateProposed}}, staleMost)
+	if err != nil || len(heads) == 0 {
+		return err
+	}
+	ps := make([]ledger.Proposal, len(heads))
+	for i, h := range heads {
+		ps[i] = h.Proposal
+	}
+	ls, err := s.linesNow(ctx, ps)
+	if err != nil {
+		return err
+	}
+	ls = slices.DeleteFunc(ls, func(l proposalLine) bool {
+		return l.StaleWhy == nil || !l.StaleWhy.Auto || l.Stale || s.againFailed.waits(l.ID, proposalEvidence(l.Proposal).Semantics, now)
+	})
+	if len(ls) == 0 {
+		return nil
+	}
+	began, err := s.l.LastTried(ctx, now.Add(-againRetryMost))
+	if err != nil {
+		return err
+	}
+	slices.SortFunc(ls, func(a, b proposalLine) int {
+		if c := began[a.ID].Compare(began[b.ID]); c != 0 {
+			return c
+		}
+		if c := a.Updated.Compare(b.Updated); c != 0 {
+			return c
+		}
+		return int(a.ID - b.ID)
+	})
+	within := min(s.cfg.Timeout, autoWithinMost)
+	n := 0
+	for _, l := range ls {
+		if n == againARun || !s.still(ctx) {
+			break
+		}
+		actx, cancel := context.WithTimeout(ctx, within+autoMargin)
+		err := s.backtestAgainOf(actx, l.ID, ledger.Proposer, false, within)
+		late := actx.Err() != nil // whatever the error says of it
+		cancel()
+		var b badRequest
+		switch {
+		case err == nil:
+			n++
+			s.againFailed.forget(l.ID)
+		case errors.Is(err, ledger.ErrBacktestedJustNow), errors.Is(err, ledger.ErrMoved), errors.Is(err, errFresh):
+			// Done by someone else meanwhile, or moved on.
+		case errors.Is(err, errBusy), errors.Is(err, ledger.ErrTooManyBacktests), errors.As(err, &b) && b.format == comparingBusy:
+			return nil // a person's heavy request or comparison has the turn, or the hour's are done: the next run
+		case ctx.Err() != nil:
+			return ctx.Err()
+		default:
+			// Nothing kept (counted as it began): left for longer each
+			// time; and, not finished in time, every one, and the run over.
+			n++
+			wait := s.againFailed.failed(l.ID, proposalEvidence(l.Proposal).Semantics, now)
+			if againLate(err, late) {
+				all := s.againFailed.allFailed(now)
+				s.log.Warn("a stale proposal's backtest run again didn't finish in time: none is tried again for a while", "proposal", l.ID, "err", err, "again_in", all)
+				return nil
+			}
+			s.log.Warn("a stale proposal wasn't backtested again", "proposal", l.ID, "err", err, "again_in", wait)
+		}
+	}
+	return nil
+}
+
+// postBacktestAgain is "Backtest again" on a stale proposal's page: an
+// editor's, as proposing is (POST /proposals), from this site.
+func (s *Server) postBacktestAgain(w http.ResponseWriter, r *http.Request) {
+	if err := form(r); err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	id := pathID(r)
+	if err := s.backtestAgain(r.Context(), id, s.user(r), false); err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	back(w, r, fmt.Sprintf("/proposals/%d#backtest", id))
+}
+
+type backtestAgainIn struct {
+	ID int64 `json:"id" jsonschema:"the proposal's number, as rule's proposals give it"`
+}
+
+type backtestAgainOut struct {
+	ID   int64  `json:"id"`
+	Page string `json:"page,omitempty" jsonschema:"its page, where a person approves it"`
+}
+
+// toolBacktestAgain is an agent backtesting a stale proposal again, for
+// the person it acts for, as it proposes (toolPropose): counted against
+// their agents' tries an hour, never their own.
+func (s *Server) toolBacktestAgain(ctx context.Context, _ *mcp.CallToolRequest, in backtestAgainIn) (*mcp.CallToolResult, backtestAgainOut, error) {
+	out := backtestAgainOut{ID: in.ID}
+	by, ok := actsFor(ctx)
+	switch {
+	case !ok:
+		return nil, out, errors.New("who this agent acts for isn't known: nothing is backtested")
+	case by == "anonymous" && s.in != nil:
+		return nil, out, errors.New("who this agent acts for isn't known: nothing is backtested")
+	}
+	if err := s.backtestAgain(ctx, in.ID, by, true); err != nil {
+		return nil, out, err
+	}
+	if s.cfg.ExternalURL != "" {
+		out.Page = fmt.Sprintf("%s/proposals/%d", strings.TrimRight(s.cfg.ExternalURL, "/"), in.ID)
+	}
+	return nil, out, nil
+}
+
+// proposalJSON is a proposal as the API gives it: as kept, with what its
+// evidence says now (proposalsNow).
+type proposalJSON struct {
+	ledger.Proposal
+	// Stale is why it is stale (staleText); "" when it isn't.
+	Stale string `json:"stale,omitempty"`
+	// Outlasts is, of a new for, the for one event can't outlast, as
+	// proposed, and the range its condition counts events over.
+	Outlasts *verdict.Outlast `json:"for_outlasts,omitempty"`
+	// NoRecord says, of one with a backtest, that its period had no
+	// incident written down to judge its firings by.
+	NoRecord *bool `json:"no_record,omitempty"`
+}
+
+func proposalJSONOf(l proposalLine) proposalJSON {
+	out := proposalJSON{Proposal: l.Proposal, Outlasts: l.Outlasts, Stale: l.staleText()}
+	if proposalEvidence(l.Proposal).Backtest != nil {
+		out.NoRecord = &l.NoRecord
+	}
+	return out
+}

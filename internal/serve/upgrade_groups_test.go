@@ -205,15 +205,50 @@ func TestUpgradeGroups(t *testing.T) {
 		if err := s.look(ctx, &raw); err != nil {
 			t.Fatal(err)
 		}
-		if _, body, _ := ui(t, h, http.MethodGet, "/proposals", bo, "", nil); strings.Contains(body, "the rule changed since") {
-			t.Errorf("a proposal is taken as stale:\n%s", body)
+		_, body, _ := ui(t, h, http.MethodGet, "/proposals", bo, "", nil)
+		if strings.Contains(body, "the rule changed since") {
+			t.Error("the proposals list takes #2's rule as changed since it was proposed")
+		}
+		// Backtested by a lapilli that kept no number for how it backtests,
+		// it is stale: held until it is backtested again, by this one.
+		if !strings.Contains(body, "stale: backtest it again") || keyFor(t, h, 2, ana, "approve") != "" {
+			t.Error("#2, backtested by an earlier lapilli, isn't held until it is backtested again")
+		}
+		if code, body, _ := ui(t, h, http.MethodPost, "/proposals/2/backtest", bo, "same-origin", url.Values{}); code != http.StatusSeeOther {
+			t.Fatalf("backtesting it again: %d %s", code, body)
 		}
 		if code, body := approve(t, h, 2, ana); code != http.StatusSeeOther {
 			t.Fatalf("approving: %d %s", code, body)
 		}
 		s.jobs(ctx, false)
 		if p := state(t, s, 2); p.State != ledger.StateReady {
-			t.Errorf("approved before, checked again after: %s (%+v)", p.State, p)
+			t.Errorf("proposed before, backtested again and approved after: checked again, %s, not ready (%+v)", p.State, p)
+		}
+	})
+
+	// Approved before the upgrade, as an approval given then was: it isn't
+	// held, and is checked again, against the backtest it was approved on,
+	// when it is carried out.
+	t.Run("a change approved before", func(t *testing.T) {
+		s, _ := upgraded(t)
+		raw := ""
+		if err := s.look(ctx, &raw); err != nil {
+			t.Fatal(err)
+		}
+		was := state(t, s, 2)
+		if proposalEvidence(was).Backtest == nil {
+			t.Fatalf("#2 has no backtest: %s", was.Evidence)
+		}
+		if _, err := s.l.Approve(ctx, 2, ana, 1, time.Time{}); err != nil {
+			t.Fatal(err)
+		}
+		s.jobs(ctx, false)
+		p := state(t, s, 2)
+		if p.State != ledger.StateReady {
+			t.Errorf("approved before, checked again after: %s, not ready (%+v)", p.State, p)
+		}
+		if string(p.Evidence) != string(was.Evidence) {
+			t.Errorf("its evidence replaced, approved:\n%s\nwas\n%s", p.Evidence, was.Evidence)
 		}
 	})
 

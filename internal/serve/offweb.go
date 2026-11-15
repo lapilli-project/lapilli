@@ -96,6 +96,8 @@ func (s *Server) offs(r *http.Request, p ledger.Proposal, v *proposalView) {
 			v.ApproveOff = off("Approve", "approve-why", "You proposed this: someone else approves it.")
 		case v.Done:
 			v.ApproveOff = off("Approve", "approve-why", "You approved it: it waits for another approver.")
+		case v.StaleWhy != nil && s.approver(r):
+			v.ApproveOff = off("Approve", "approve-why", "Held until it is backtested again: it is stale")
 		default:
 			v.ApproveOff = off("Approve", "approve-why", "Approvers only")
 		}
@@ -119,5 +121,9 @@ func (s *Server) offs(r *http.Request, p ledger.Proposal, v *proposalView) {
 	}
 	if p.TaskID == 0 && s.role(r) < editor {
 		v.TaskOff = off("Make it a task", "task-why", "Editors only")
+	}
+	// Backtesting it again: an editor's, of one that waits for it.
+	if v.StaleWhy != nil && !v.CanAgain {
+		v.AgainOff = off("Backtest again", "again-why", "Editors only")
 	}
 }

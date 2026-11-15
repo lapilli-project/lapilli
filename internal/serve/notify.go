@@ -177,6 +177,10 @@ type proposalNotice struct {
 	Reason string `json:"reason"`
 	MadeBy string `json:"made_by"`
 	Agent  bool   `json:"agent"`
+	// Of one backtested again: whether an agent asked for it, for By, and
+	// whose approvals were withdrawn.
+	ByAgent   bool     `json:"by_agent"`
+	Withdrawn []string `json:"approvals_withdrawn"`
 }
 
 // page is the page a notice is about, under --external-url.
@@ -300,6 +304,17 @@ func (s *Server) line(n notice) string {
 			return tr(l, "lapilli: %s proposed #%d, %s for %s", who, p.ID, kind, p.Rule)
 		case "proposal.approved":
 			return tr(l, "lapilli: %s approved #%d, %s for %s", who, p.ID, kind, p.Rule)
+		case "proposal.backtested":
+			withdrawn := strings.Join(p.Withdrawn, ", ")
+			switch {
+			case p.ByAgent && withdrawn != "":
+				return tr(l, "lapilli: an agent, for %s, backtested #%d, %s for %s, again, and withdrew the approvals of %s", who, p.ID, kind, p.Rule, withdrawn)
+			case p.ByAgent:
+				return tr(l, "lapilli: an agent, for %s, backtested #%d, %s for %s, again", who, p.ID, kind, p.Rule)
+			case withdrawn != "":
+				return tr(l, "lapilli: %s backtested #%d, %s for %s, again, and withdrew the approvals of %s", who, p.ID, kind, p.Rule, withdrawn)
+			}
+			return tr(l, "lapilli: %s backtested #%d, %s for %s, again", who, p.ID, kind, p.Rule)
 		case "change.opened":
 			return tr(l, "lapilli: a pull request is open for #%d, %s for %s: %s", p.ID, kind, p.Rule, p.Link)
 		case "change.applied":

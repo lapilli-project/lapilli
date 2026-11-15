@@ -952,7 +952,7 @@ func errCode(err error) (int, bool) {
 		return http.StatusRequestURITooLong, true
 	case errors.Is(err, ledger.ErrMoved), errors.Is(err, ledger.ErrApproved), errors.Is(err, ledger.ErrProposed):
 		return http.StatusConflict, true
-	case errors.Is(err, ledger.ErrTooManyProposals), errors.Is(err, errTooManyTries):
+	case errors.Is(err, ledger.ErrTooManyProposals), errors.Is(err, errTooManyTries), errors.Is(err, ledger.ErrTooManyBacktests), errors.Is(err, ledger.ErrBacktestedJustNow):
 		// Asked before the rule is read again (MayPropose): the hour's
 		// proposals made, not a fault of the server's.
 		return http.StatusTooManyRequests, true

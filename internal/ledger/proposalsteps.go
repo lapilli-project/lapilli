@@ -49,7 +49,9 @@ func (l *Ledger) ProposalSteps(ctx context.Context, id int64, most int) (steps [
 
 // ProposalHead is a proposal in brief, as the proposals list shows it:
 // none of its documents, its evidence only for an undo (whether it undoes
-// a change to what a rule says), and how many approved it.
+// a change to what a rule says), a new for (whether one event can outlast
+// it, as proposed) and one waiting for approval (whether it waits to be
+// backtested again), and how many approved it.
 type ProposalHead struct {
 	Proposal
 	Approved int
@@ -185,10 +187,10 @@ func (l *Ledger) ProposalList(ctx context.Context, pick ProposalPick, most int) 
 	var out []ProposalHead
 	ranks := map[int64]int{}
 	err := byRules(pick.Rules, func(where string, args []any) error {
-		q := `SELECT p.id, p.rule, p.kind, p.path, p.state, p.made, p.made_by, p.agent, p.before_hash,
-			CASE WHEN p.kind = ? THEN p.evidence ELSE '' END, p.updated, (SELECT count(*) FROM approvals a WHERE a.proposal_id = p.id), ` + rank + `
+		q := `SELECT p.id, p.rule, p.kind, p.path, p.state, p.made, p.made_by, p.agent, p.before_hash, p.after_hash,
+			CASE WHEN p.kind IN (?, ?) OR p.state = ? THEN p.evidence ELSE '' END, p.updated, (SELECT count(*) FROM approvals a WHERE a.proposal_id = p.id), ` + rank + `
 			FROM proposals p WHERE 1 = 1`
-		qargs := append([]any{KindUndo}, rargs...)
+		qargs := append([]any{KindUndo, KindFor, StateProposed}, rargs...)
 		if where != "" {
 			q += " AND p." + where
 			qargs = append(qargs, args...)
@@ -210,7 +212,7 @@ func (l *Ledger) ProposalList(ctx context.Context, pick ProposalPick, most int) 
 			q += " AND " + in
 			qargs = append(qargs, iargs...)
 		}
-		q += " ORDER BY 13, p.updated DESC, p.id DESC LIMIT ?"
+		q += " ORDER BY 14, p.updated DESC, p.id DESC LIMIT ?"
 		rows, err := l.r.QueryContext(ctx, q, append(qargs, most)...)
 		if err != nil {
 			return err
@@ -221,7 +223,7 @@ func (l *Ledger) ProposalList(ctx context.Context, pick ProposalPick, most int) 
 			var made, updated int64
 			var evidence string
 			var rank int
-			if err := rows.Scan(&h.ID, &h.Rule, &h.Kind, &h.Path, &h.State, &made, &h.MadeBy, &h.Agent, &h.BeforeHash, &evidence, &updated, &h.Approved, &rank); err != nil {
+			if err := rows.Scan(&h.ID, &h.Rule, &h.Kind, &h.Path, &h.State, &made, &h.MadeBy, &h.Agent, &h.BeforeHash, &h.AfterHash, &evidence, &updated, &h.Approved, &rank); err != nil {
 				return err
 			}
 			h.Made, h.Updated = unix(made), unix(updated)

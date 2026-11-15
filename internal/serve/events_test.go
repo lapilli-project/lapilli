@@ -82,8 +82,8 @@ func TestForOutlastsShown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(s.prBody(p), proposed) || !strings.Contains(string(p.Evidence), `"for_outlasts":{"for_ns":3600000000000,"window_ns":1800000000000}`) {
-		t.Errorf("its description and evidence: %s\n%s", s.prBody(p), p.Evidence)
+	if !strings.Contains(bodyOf(t, s, p), proposed) || !strings.Contains(string(p.Evidence), `"for_outlasts":{"for_ns":3600000000000,"window_ns":1800000000000}`) {
+		t.Errorf("its description and evidence: %s\n%s", bodyOf(t, s, p), p.Evidence)
 	}
 	_, out, err = s.toolRule(ctx, nil, ruleIn{Name: "RestartsNow"})
 	if err != nil || len(out.Proposals) != 1 || out.Proposals[0].Outlasts != proposed {
