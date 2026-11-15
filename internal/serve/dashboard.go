@@ -186,6 +186,12 @@ type action struct {
 	Said              bool
 }
 
+// Off is the task it would make, disabled, with why: the first disabled
+// for a reason says it, the rest are tied to it.
+func (a action) Off() pageAction {
+	return pageAction{Label: "Make it a task", ID: a.WhyID, Why: a.Why, WhyOf: a.WhyOf, Quiet: true, Again: !a.Said}
+}
+
 type dashboard struct {
 	Empty, Backlog bool
 	Cursor         time.Time

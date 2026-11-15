@@ -247,12 +247,14 @@ func barOf(name string, r *http.Request, c pageCtx) barView {
 // on the page, or, when the reader may not use it, the button disabled
 // with why beside it, never hidden. Where a page has several (a rule's),
 // ID is the id of the why, Said whether this one says it, the first
-// disabled for it; Quiet, one drawn less loudly than the first.
+// disabled for it; Quiet, one drawn less loudly than the first. Again
+// says, of one the off template draws, that another before it, by the
+// same id, said why: it is the button alone, tied to that sentence.
 type pageAction struct {
 	Label, Href, Why, ID string
 	// WhyOf is the name Why says, a team's, when it says one.
-	WhyOf       string
-	Said, Quiet bool
+	WhyOf              string
+	Said, Quiet, Again bool
 }
 
 // mainAction is a page's main action. need is who may: "editor", "admin", a

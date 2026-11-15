@@ -173,8 +173,9 @@ its sides; a run of lines the same left out is a row saying how many. */}}
 {{end}}{{end}}</pre>{{end}}{{end}}{{end}}
 
 {{/* An action the reader may not take: the button, disabled, and why,
-tied to it. */}}
-{{define "off"}}<span class="action-off"><button type="button" disabled aria-describedby="{{.ID}}">{{t .Label}}</button> <span id="{{.ID}}" class="why">{{if .WhyOf}}{{tbdi .Why .WhyOf}}{{else}}{{t .Why}}{{end}}</span></span>{{end}}
+tied to it; the button alone when one before it, by the same id, said why
+(again). Every disabled action is drawn so. */}}
+{{define "off"}}<span class="action-off"><button{{if .Quiet}} class="quiet-button"{{end}} type="button" disabled aria-describedby="{{.ID}}">{{t .Label}}</button>{{if not .Again}} <span id="{{.ID}}" class="why">{{if .WhyOf}}{{tbdi .Why .WhyOf}}{{else}}{{t .Why}}{{end}}</span>{{end}}</span>{{end}}
 
 {{/* A list's facets (the proposals', the tasks'): one GET form, each value
 counted, and a chip for each filter in effect. */}}

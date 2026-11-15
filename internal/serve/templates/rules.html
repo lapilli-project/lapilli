@@ -18,12 +18,11 @@
 {{with .Bulk.Result}}{{template "bulkresult" .}}{{end}}
 {{if .Rows}}<form method="post" action="/rules/bulk" class="bulk">{{$b := .Bulk}}<input type="hidden" name="back" value="{{$b.Back}}">{{template "noenter"}}
 <fieldset class="bulk-bar"><legend>{{t "With the rules picked"}}</legend>
-<button name="do" value="task"{{if not $b.May}} disabled aria-describedby="bulk-why"{{end}}>{{t "Make a task for each"}}</button>
+{{if $b.May}}<button name="do" value="task">{{t "Make a task for each"}}</button>{{else}}{{template "off" (offOf $ "Make a task for each" "editor" "bulk-why")}}{{end}}
 {{$tw := "bulk-why"}}{{if $b.May}}{{$tw = "bulk-team-why"}}{{end}}<span class="bulk-set"><label>{{t "Team"}} <select name="team"{{if not $b.Team}} disabled aria-describedby="{{$tw}}"{{end}}><option value="0">{{t "by the teams' patterns"}}</option>{{range $b.Teams}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
-<button class="quiet-button" name="do" value="team"{{if not $b.Team}} disabled aria-describedby="{{$tw}}"{{end}}>{{t "Set the team"}}</button></span>
+{{if $b.Team}}<button class="quiet-button" name="do" value="team">{{t "Set the team"}}</button>{{else if $b.May}}{{template "off" (quiet (offOf $ "Set the team" "editor" "bulk-team-why"))}}{{else}}{{template "off" (again (quiet (offOf $ "Set the team" "editor" "bulk-why")))}}{{end}}</span>
 <span class="bulk-set"><label>{{t "Disposition"}} <select name="status"{{if not $b.May}} disabled aria-describedby="bulk-why"{{end}}><option value="">{{t "Undecided"}}</option>{{range list "keep" "tune" "retire"}}<option value="{{.}}">{{t .}}</option>{{end}}</select></label>
-<button class="quiet-button" name="do" value="status"{{if not $b.May}} disabled aria-describedby="bulk-why"{{end}}>{{t "Set the disposition"}}</button></span>
-{{if not $b.May}}<span id="bulk-why" class="why">{{t $b.Why}}</span>{{else if not $b.Team}}<span id="bulk-team-why" class="why">{{t $b.TeamWhy}}</span>{{end}}
+{{if $b.May}}<button class="quiet-button" name="do" value="status">{{t "Set the disposition"}}</button>{{else}}{{template "off" (again (quiet (offOf $ "Set the disposition" "editor" "bulk-why")))}}{{end}}</span>
 <p class="quiet">{{t "Each rule picked is changed as its own page would change it, and only if you may: at most %d at a time." 100}}</p>
 </fieldset>
 <div class="scroll"><table>

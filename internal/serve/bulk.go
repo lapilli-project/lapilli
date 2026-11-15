@@ -289,16 +289,16 @@ func (s *Server) bulkReal(w http.ResponseWriter, r *http.Request) {
 }
 
 // bulkView is what a list's bulk form offers the reader: May, whether
-// they may use it at all, and if not, Why; Team, whether they may set a
-// rule's team, and if not, TeamWhy; Teams, the teams to pick from; Result,
-// what the last bulk write did, said once.
+// they may use it at all; Team, whether they may set a rule's team; Teams,
+// the teams to pick from; Result, what the last bulk write did, said once.
+// What they may not do is shown disabled, with why, as offOf says it: the
+// server is read-only, no one is signed in, or editors only.
 type bulkView struct {
-	May          bool
-	Why, TeamWhy string
-	Team         bool
-	Teams        []ledger.Team
-	Result       *bulkResult
-	Back         string
+	May    bool
+	Team   bool
+	Teams  []ledger.Team
+	Result *bulkResult
+	Back   string
 }
 
 // bulkFor is what a bulk form offers the reader of r: all to an editor;
@@ -310,10 +310,7 @@ func (s *Server) bulkFor(r *http.Request, writers string) bulkView {
 	case role >= editor:
 		v.May, v.Team = true, true
 	case writers == "team" && len(s.editsTeams(r)) > 0:
-		v.May, v.TeamWhy = true, "Editors only"
-	default:
-		v.Why = cmpOr(s.why(r), "Editors only")
-		v.TeamWhy = v.Why
+		v.May = true
 	}
 	v.Result = bulkOf(r.URL.Query())
 	return v

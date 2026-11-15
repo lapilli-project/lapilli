@@ -34,6 +34,18 @@ var offFuncs = template.FuncMap{
 		}
 		return a
 	},
+	// again is an action whose why one before it said, by the same id:
+	// the button alone, tied to that sentence (a row's, beside its list's
+	// bar).
+	"again": func(a pageAction) pageAction {
+		a.Again = true
+		return a
+	},
+	// quiet is an action drawn less loudly, as a row's is.
+	"quiet": func(a pageAction) pageAction {
+		a.Quiet = true
+		return a
+	},
 	// offTeam is an action on what is a team's, team (its name, "" for
 	// everyone's): a team's editor of another team is told whose editors
 	// may.

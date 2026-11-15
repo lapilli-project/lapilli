@@ -317,11 +317,13 @@ func TestBulkDisabled(t *testing.T) {
 	s, _, _ := bulkServer(t, nil)
 	h := s.Handler()
 	for who, want := range map[string][]string{
-		"": {`<button name="do" value="task" disabled aria-describedby="bulk-why">`, `<span id="bulk-why" class="why">Read-only: no one is signed in</span>`,
+		"": {`<span class="action-off"><button type="button" disabled aria-describedby="bulk-why">Make a task for each</button> <span id="bulk-why" class="why">Read-only: no one is signed in</span></span>`,
+			`<span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="bulk-why">Set the team</button></span>`,
+			`<span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="bulk-why">Set the disposition</button></span>`,
 			`aria-label="Errors" disabled>`},
-		"vi@example.com": {`<button name="do" value="task" disabled aria-describedby="bulk-why">`, `<span id="bulk-why" class="why">Editors only</span>`},
+		"vi@example.com": {`<button type="button" disabled aria-describedby="bulk-why">Make a task for each</button> <span id="bulk-why" class="why">Editors only</span>`},
 		"pat@example.com": {`<button name="do" value="task">`, `<button class="quiet-button" name="do" value="status">`,
-			`<button class="quiet-button" name="do" value="team" disabled aria-describedby="bulk-team-why">`, `<span id="bulk-team-why" class="why">Editors only</span>`},
+			`<span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="bulk-team-why">Set the team</button> <span id="bulk-team-why" class="why">Editors only</span></span>`},
 		"ed@example.com": {`<button name="do" value="task">`, `<button class="quiet-button" name="do" value="team">`, `aria-label="Errors">`},
 	} {
 		code, body := getAs(t, h, "/rules?weeks=12&perf=ok&perf=noisy", who)
@@ -331,6 +333,12 @@ func TestBulkDisabled(t *testing.T) {
 		for _, w := range want {
 			if !strings.Contains(body, w) {
 				t.Errorf("%q: no %s", who, w)
+			}
+		}
+		// Each reason is said once, by the first disabled for it.
+		for _, id := range []string{"bulk-why", "bulk-team-why"} {
+			if n := strings.Count(body, `id="`+id+`"`); n > 1 {
+				t.Errorf("%q: %s said %d times", who, id, n)
 			}
 		}
 		// But the button Enter presses, which no one sees (TestBulkNoEnter).

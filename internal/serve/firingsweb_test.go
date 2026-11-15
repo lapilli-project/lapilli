@@ -366,11 +366,14 @@ func TestBulkReal(t *testing.T) {
 	// Disabled, with why.
 	for who, want := range map[string]string{"pat@example.com": "Editors only", "": "Read-only: no one is signed in"} {
 		_, body := getAs(t, h, "/firings?day=2026-11-01", who)
-		for _, w := range []string{`<button disabled aria-describedby="real-why">These were real</button>`, `<span id="real-why" class="why">` + want + `</span>`,
-			`<button class="quiet-button" type="button" disabled aria-describedby="real-why">This was real</button>`, `name="firing" value="` + ids[5] + `" aria-label="SearchErrors, 2026-11-01 08:05" disabled>`} {
+		for _, w := range []string{`<span class="action-off"><button type="button" disabled aria-describedby="real-why">These were real</button> <span id="real-why" class="why">` + want + `</span></span>`,
+			`<span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="real-why">This was real</button></span>`, `name="firing" value="` + ids[5] + `" aria-label="SearchErrors, 2026-11-01 08:05" disabled>`} {
 			if !strings.Contains(body, w) {
 				t.Errorf("%q: no %s", who, w)
 			}
+		}
+		if n := strings.Count(body, `id="real-why"`); n != 1 {
+			t.Errorf("%q: why said %d times", who, n)
 		}
 	}
 	_, body = getAs(t, h, "/firings?day=2026-11-01", ed)
