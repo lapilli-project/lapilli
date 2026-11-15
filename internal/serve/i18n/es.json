@@ -1425,5 +1425,6 @@
  "rule tab|Activity": "Actividad",
  "better": "mejor",
  "worse": "peor",
- "Only %s's editors": "Solo los editores de %s"
+ "Only %s's editors": "Solo los editores de %s",
+ "%d more labels": "%d etiquetas más"
 }

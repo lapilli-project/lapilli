@@ -1425,5 +1425,6 @@
  "rule tab|Activity": "アクティビティ",
  "better": "改善",
  "worse": "悪化",
- "Only %s's editors": "%s チームの編集者のみ"
+ "Only %s's editors": "%s チームの編集者のみ",
+ "%d more labels": "ほかのラベル %d 件"
 }

@@ -30,9 +30,9 @@
 <tbody>{{range .Rows}}
 <tr{{if .Noisy}} class="noisy"{{end}}>
   <td class="pick"><input type="checkbox" name="rule" value="{{.Name}}" aria-label="{{.Name}}"{{if not $b.May}} disabled{{end}}></td>
-  <td class="rule"><a href="{{$.Rule .Name}}"><bdi>{{.Name}}</bdi></a> {{template "badges" (on $ .)}}{{with .Suggestion}}<br><span class="hint">{{.}}</span>{{end}}</td>
-  <td>{{or .Team "–"}}</td>
-  <td>{{or .Severity "–"}}</td>
+  <td class="rule"><a href="{{$.Rule .Name}}"><bdi>{{.Name}}</bdi></a> {{template "badges" (on $ .)}}{{with .Suggestion}}<br><span class="hint">{{.}}</span>{{end}}{{if .Chips}}{{template "rulechips" .}}{{end}}</td>
+  <td class="name">{{with .Team}}<bdi>{{.}}</bdi>{{else}}–{{end}}</td>
+  <td class="name">{{with .Severity}}<bdi>{{.}}</bdi>{{else}}–{{end}}</td>
   <td class="n">{{.Firings}}{{if .Notifications}}<br><span class="quiet">{{t "%d notifications, %d repeats" .Notifications .Repeats}}</span>{{end}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}{{if or .AsleepBlack .OffHoursBlack}}<br><span class="quiet">{{t "%d asleep, %d off hours" .AsleepBlack .OffHoursBlack}}</span>{{end}}{{if .Woken}}<br><span class="quiet">{{t "%d notifications for nothing, while people slept" .Woken}}</span>{{end}}</td><td class="n">{{.Precision}}</td><td class="n">{{.Refired}}{{if .Refired}}<br><span class="quiet">{{if .RefiredOf}}{{t "%s of firings, %d of %d whole weeks" .RefiredShare .RefiredWeeks .RefiredOf}}{{else}}{{t "%s of firings" .RefiredShare}}{{end}}</span>{{end}}{{if .Excused}}<br><span class="quiet">{{t "%d excused" .Excused}}</span>{{end}}</td>{{if $.View.Deploys}}<td class="n">{{.Deploys}}{{if .Deploys}}<br><span class="quiet">{{t "precision %s without them" .Without}}</span>{{end}}</td>{{end}}
   <td class="n">{{.Incidents}}{{if and .Incidents (not .SomeRules)}}<br><span class="quiet">{{t "first %d, alone %d" .First .Alone}}</span>{{end}}</td>
   <td>{{template "spark" .Spark}}</td>
@@ -57,6 +57,12 @@ sees it, and no screen reader says it. */}}
 
 {{/* What a bulk write did, said once on the page it went back to. */}}
 {{define "bulkresult"}}<p class="note bulk-done" role="status">{{if .None}}{{t "Nothing was picked: tick the ones to change first."}}{{else if eq .Kind "real"}}{{t "%d written down" .Done}}{{with .Already}}; {{t "%d had caught something already" .}}{{end}}{{with .Refused}}; {{t "%d couldn't be written down" .}}{{end}}{{with .Failed}}; {{t "%d failed: try again" .}}{{end}}{{with .Untried}}; {{t "stopped there: %d not tried" .}}{{end}}{{else}}{{t "%d done" .Done}}{{with .Already}}; {{t "%d had an open task to tune them already" .}}{{end}}{{with .Theirs}}; {{t "%d not your team's" .}}{{end}}{{with .Refused}}; {{t "%d refused" .}}{{end}}{{with .Editors}}; {{t "%d refused: editors only" .}}{{end}}{{with .Failed}}; {{t "%d failed: try again" .}}{{end}}{{with .Untried}}; {{t "stopped there: %d not tried" .}}{{end}}{{end}}</p>{{end}}
+
+{{/* A row's labels, each a chip that picks the rules with it too; one in
+the search already is drawn solid, and isn't a link; past five, the rest
+behind "+N". */}}
+{{define "rulechips"}}<div class="labels">{{range .Chips}}{{template "rulechip" .}}{{end}}{{with .More}}<details class="more-labels"><summary><span aria-hidden="true">+{{len .}}</span><span class="vh">{{t "%d more labels" (len .)}}</span></summary>{{range .}}{{template "rulechip" .}}{{end}}</details>{{end}}</div>{{end}}
+{{define "rulechip"}}{{if .Href}}<a class="chip label" href="{{.Href}}"><span class="vh">{{t "Only those with the label"}} </span><bdi>{{shown .Text}}</bdi></a> {{else}}<span class="chip label{{if .On}} on{{end}}"><bdi>{{shown .Text}}</bdi></span> {{end}}{{end}}
 
 {{/* The facets, the search box and the context, as one form: drawn twice,
 as the panel beside the rules on a wide screen and in a details above them

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"lapilli.dev/internal/ledger"
 )
@@ -39,6 +40,9 @@ type ruleRow struct {
 	// that came while people slept, in the weeks shown, by when each came,
 	// as the overview's "woken for nothing" counts them.
 	Woken int
+	// Chips are the labels label: picks it by, but its severity, which
+	// has a column of its own: rowChips of them, and More, the rest.
+	Chips, More []labelChip
 	// labels are those it fires with, for label:; sev and group, its
 	// severity and group, from them and the rules in effect where the
 	// ledger hasn't them.
@@ -600,6 +604,9 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	if a.week != "" {
 		v.Hidden = append(v.Hidden, field{"week", a.week}) // its chip takes it away
 	}
+	for i := range v.Rows {
+		v.Rows[i].Chips, v.Rows[i].More = a.chipsOf(v.Rows[i].labels)
+	}
 	allTeams := a
 	allTeams.c.Team, allTeams.c.TeamSet = "", true
 	v.Bulk = s.bulkFor(r, "team")
@@ -620,6 +627,61 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		v.Empty = &emptyView{Kind: "notfound", Title: "No rule fired in these weeks."}
 	}
 	return v, nil
+}
+
+// rowChips are how many of its labels a row of the rules list shows: the
+// rest are behind "+N".
+const rowChips = 5
+
+// chipsOf are a row's labels as chips, by name, as label: matches them
+// (textFilter): the labels it fires with, its group's included, as the
+// rules in effect have them, or, of a rule recorded elsewhere, those all
+// its alerts have (ruleMeta); but its severity, which has its column.
+// Each is a link to the list as asked with label:NAME=VALUE in the search
+// too, made from what was asked (rulesAsk), as a chip's link is: a
+// canonical URL, which the page doesn't send on. One in the search
+// already is drawn so, and isn't a link; nor is one the search couldn't
+// take: a value with a quote, which the box can't write, or a search past
+// its words, its length, or a page past its query.
+func (a rulesAsk) chipsOf(labels map[string]string) (shown, more []labelChip) {
+	if len(labels) == 0 {
+		return nil, nil
+	}
+	written := asWritten(a.words)
+	for _, k := range slices.Sorted(maps.Keys(labels)) {
+		val := labels[k]
+		if k == "severity" || val == "" {
+			continue
+		}
+		c := labelChip{Text: k + "=" + val}
+		w := qword{Key: "label", Value: c.Text}
+		switch {
+		case slices.ContainsFunc(a.words, func(t qword) bool { return t.Key == "label" && t.Bad == "" && sameLabel(t.Value, k, val) }):
+			c.On = true
+		case strings.Contains(c.Text, `"`) || len(a.words) >= maxWords ||
+			utf8.RuneCountInString(written)+1+utf8.RuneCountInString(w.String()) > maxSearch:
+		default:
+			b := a
+			b.words = append(slices.Clone(a.words), w)
+			if u := b.url(); len(u) <= maxQuery {
+				c.Href = u
+			}
+		}
+		if len(shown) < rowChips {
+			shown = append(shown, c)
+		} else {
+			more = append(more, c)
+		}
+	}
+	return shown, more
+}
+
+// sameLabel reports whether a label: filter's value, NAME=VALUE, picks the
+// label name=value, as textFilter matches it: the name as it is, the value
+// in any case.
+func sameLabel(filter, name, value string) bool {
+	k, v, _ := strings.Cut(filter, "=")
+	return k == name && strings.EqualFold(v, value)
 }
 
 // row is a rule's line as the list shows it; its badge of what to check
