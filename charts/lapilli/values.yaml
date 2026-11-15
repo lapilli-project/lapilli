@@ -46,6 +46,8 @@ rules:
   # ConfigMaps in this namespace holding alert rules: Prometheus rule files,
   # PrometheusRule resources, Grafana alerting provisioning files, a cloud's
   # rule groups. Each is mounted and every key with rules in it is read.
+  # lapilli serve reads one directory: with several, it has them all in one
+  # (a projected volume), so their keys must not share a name.
   configMaps: []
   # Or the alert rules the API at prometheus.url has loaded
   # (GET /api/v1/rules): Prometheus, Thanos, Mimir, vmalert, Amazon Managed

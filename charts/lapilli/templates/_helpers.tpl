@@ -127,9 +127,6 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if and (not $history) (or (gt (int $from) 0) $r.alarms .Values.impact) }}
 {{- fail "rules and impact are replayed against history: give prometheus.url or gcpProject" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") (gt (len $r.configMaps) 1) }}
-{{- fail "rules.configMaps: serve reads one; put the rules in one ConfigMap" }}
-{{- end }}
 {{- include "lapilli.historyChecks" . }}
 {{- if and (eq .Values.mode "cronjob") (not .Values.incidents) (not .Values.impact) }}
 {{- fail "give incidents, impact, or both" }}
@@ -395,8 +392,13 @@ the rules and the incidents are, and how to judge. */}}
 {{- else if .Values.gcpProject }}
 - {{ printf "--gcp-project=%s" .Values.gcpProject | quote }}
 {{- end }}
+{{- if and (eq .Values.mode "serve") $r.configMaps }}
+{{- /* serve reads one directory: every ConfigMap's keys in it, as one projected volume */}}
+- "--rules=/etc/lapilli/rules/0"
+{{- else }}
 {{- range $i, $_ := $r.configMaps }}
 - {{ printf "--rules=/etc/lapilli/rules/%d" $i | quote }}
+{{- end }}
 {{- end }}
 {{- if $r.loaded }}
 - --loaded-rules
@@ -448,10 +450,16 @@ the rules and the incidents are, and how to judge. */}}
 {{- define "lapilli.mounts" -}}
 {{- $p := .Values.prometheus -}}
 {{- $r := .Values.rules -}}
+{{- if and (eq .Values.mode "serve") $r.configMaps }}
+- name: rules-0
+  mountPath: /etc/lapilli/rules/0
+  readOnly: true
+{{- else }}
 {{- range $i, $_ := $r.configMaps }}
 - name: rules-{{ $i }}
   mountPath: /etc/lapilli/rules/{{ $i }}
   readOnly: true
+{{- end }}
 {{- end }}
 {{- if .Values.incidents }}
 - name: incidents
@@ -488,10 +496,22 @@ the rules and the incidents are, and how to judge. */}}
 {{- define "lapilli.volumes" -}}
 {{- $p := .Values.prometheus -}}
 {{- $r := .Values.rules -}}
+{{- if and (eq .Values.mode "serve") $r.configMaps }}
+{{- /* One directory for serve, which reads one: every ConfigMap's keys,
+which must not share a name, side by side. */}}
+- name: rules-0
+  projected:
+    sources:
+      {{- range $r.configMaps }}
+      - configMap:
+          name: {{ . }}
+      {{- end }}
+{{- else }}
 {{- range $i, $name := $r.configMaps }}
 - name: rules-{{ $i }}
   configMap:
     name: {{ $name }}
+{{- end }}
 {{- end }}
 {{- if .Values.incidents }}
 - name: incidents

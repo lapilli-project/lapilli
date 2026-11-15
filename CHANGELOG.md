@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [0.39.1] - 2026-11-15
+
+The chart's `lapilli serve` takes several rule ConfigMaps. No change to
+`lapilli` itself.
+
+### Fixed
+
+- **The chart refused `rules.configMaps` of more than one in serve mode**
+  ("serve reads one; put the rules in one ConfigMap"), though rules kept
+  in several ConfigMaps (a Grafana's alert rules split by area, a shared
+  set beside a team's) are common, and copying them into one is a second
+  place to keep them. `lapilli serve` reads one directory: the chart now
+  mounts every ConfigMap given as one projected volume, their keys side by
+  side, and passes one `--rules`. Their keys must not share a name. The
+  CronJob keeps a volume and a `--rules` for each, as before.
+
 ## [0.39.0] - 2026-11-15
 
 Many at once, and ways in: the fifth phase of docs/design/ui.md, the last of
