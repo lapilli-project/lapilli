@@ -18,8 +18,8 @@ ledger whose teams' names differ only in letter case included.
   whom, what each holds, where it goes) and `grants` (an editor's role, of
   every team or of one), with the fields the UI's forms take. It is read
   strictly: a key it doesn't know, a value of another kind, a key given
-  twice, a file over 1 MiB, more than the ledger keeps, or an empty file is
-  refused with its line, and changes nothing. Each thing is then checked as
+  twice, a file over 1 MiB, more than the ledger keeps, an empty file, or a
+  key with nothing after it is refused with its line, and changes nothing. Each thing is then checked as
   its form is: one that can't be kept is skipped and kept as it was, and
   the rest is kept. The leader keeps the ledger holding what the file says,
   in one write, at the start of each term it leads and whenever the file's
@@ -38,9 +38,12 @@ ledger whose teams' names differ only in letter case included.
 - **What it no longer declares** is the UI's again, as it was, or, with
   `--config-prune` (`serve.configPrune`), deleted once the same file is
   read twice in a row; a team something still names is given back to the
-  UI instead. A role it no longer gives is taken away, pruned or not.
-  Given back past what the UI keeps, a thing is deleted. Without
-  `--config`, nothing stays declared.
+  UI instead. A role is taken away only when a file that was read twice
+  no longer lists it, pruned or not. Given back past what the UI keeps, a
+  thing is deleted, on the second read too. What the file no longer
+  declares goes before what it adds. A team that can't be kept keeps what
+  names it as it was. Without `--config`, everything is the UI's again,
+  roles included, none taken away, and the Settings page says how many.
 - **`GET /config.yaml`**, an admin's: every team, quiet window, report and
   role the ledger holds, declared and made in the UI alike, as `--config`
   takes them, linked from the Settings page beside `settings.yaml`. Read

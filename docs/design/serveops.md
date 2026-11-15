@@ -539,11 +539,13 @@ YAML 1.1, where a key `on`, unquoted, is `true`.
 **Read strictly, or not at all.** A key it doesn't know, a value of
 another kind, a key given twice, a second document, a file over 1 MiB (a
 ConfigMap's most), more things than the ledger keeps (1,000 teams, 500
-quiet windows, 50 reports, 1,000 roles), or an empty file is refused as a
-whole, with its line, and changes nothing: the ledger keeps what the last
-file declared. An empty or truncated file, read as Kubernetes swaps a
-ConfigMap, would otherwise take away everything declared; to declare
-nothing, `teams: []`. A name, a title, a user, a group or a team given as
+quiet windows, 50 reports, 1,000 roles), an empty file, or a key of the
+four with nothing after it (`grants:` alone, which YAML reads as null) is
+refused as a whole, with its line, and changes nothing: the ledger keeps
+what the last file declared. An empty or truncated file, read as
+Kubernetes swaps a ConfigMap, would otherwise take away everything
+declared; to declare nothing, `teams: []`, and to declare no roles,
+`grants: []`. A name, a title, a user, a group or a team given as
 a boolean or a number (`no`, `0123`, `1.10`), and a label's value given as
 a boolean or a fraction, is refused too: see "Through Helm" below.
 
@@ -558,17 +560,25 @@ whose team isn't there keeps nothing, so no window of another team, or
 everyone's, stays declared, quieting what the file no longer says to; everything else is kept, and what the file no longer
 declares is given back (or deleted) all the same: a file that takes a role
 away and adds a quiet window that can't be kept still takes the role
-away. The costly checks (a cron window's gaps) run before the write.
+away. A team that can't be kept is kept as it was, and so is everything in
+the file that names it, each skipped and said why: the file meant the team
+as it declares it, so a window, a report or a role of it isn't moved onto
+the team the ledger holds under that name. The costly checks (a cron
+window's gaps) run before the write.
 
 **Limits of its own.** What a file declares isn't counted against what the
 UI may make (1,000 teams, 500 quiet windows, 50 reports, 1,000 roles), nor
 the UI's against it: an editor who fills the windows can't keep a file
 from declaring one. Both together are bounded too, at twice each: past
 it, a thing the file would add is skipped, said why. What the file no
-longer declares is given back to the UI only while the UI holds less than
-its own most; past it, it is deleted (the activity log says why), or, a
-team something names, kept declared and said: declared and taken out
-again and again, nothing piles up past what the UI may make.
+longer declares is let go before what it adds is made, so a file that
+swaps one thing for another at that most makes the new one. It is given
+back to the UI only while the UI holds less than its own most; past it, it
+is deleted, but only once the same file has been read twice in a row, as
+a pruned one is (read once, it stays declared), the activity log saying
+why, or, a team something names, kept declared and said: declared and
+taken out again and again, nothing piles up past what the UI may make.
+Without `--config`, everything is given back, whatever the UI holds.
 
 ### Keeping the ledger to it
 
@@ -605,20 +615,31 @@ deleted, once the same file has been read twice in a row, 15 seconds
 apart, with no read that failed between: read once, it is kept as it is
 (a file half written, swapped back at once, deletes nothing).
 
-**A role the file no longer gives is taken away**, pruned or not, one the
-UI made and the file took over included, each noted as a role taken
-(`RoleTaken`, by `config`). **Maintainer's call, 2026-11-16**: for
-permissions, safety first. Declaring a role gives it to the file, as
-Argo CD's RBAC policy owns its roles; given back to the UI, a role no one
-meant to keep would stay. Teams, quiet windows and reports keep being
-given back. A role whose team the file misspells keeps none of the
+**A role is taken away only when a file that was read twice no longer
+lists it**: the same file, by its SHA-256, read twice in a row, 15 seconds
+apart, with no read that failed between, pruned or not. Read once, the
+role stays, declared, as it was. One the UI made and the file took over is
+taken away so too, each noted as a role taken (`RoleTaken`, by `config`,
+with whom it was given to and its team). **Maintainer's call,
+2026-11-16**: for permissions, safety first. Declaring a role gives it to
+the file, as Argo CD's RBAC policy owns its roles; given back to the UI, a
+role no one meant to keep would stay. Teams, quiet windows and reports keep
+being given back. A role whose team the file misspells keeps none of the
 person's roles as they were: one of every team the file gave before is
-taken away with the rest. A declared team something still names (a quiet window, a
+taken away with the rest, once the file is read twice.
+
+**Without `--config`**, there is no file to say a role is gone:
+everything a file declared before is the UI's again, roles included, none
+taken away and nothing deleted, whatever the UI holds, and the Settings
+page says how many. A chart rolled back to before `serve.config`, or one
+that leaves it out, takes no one's role away; to take roles away, keep the
+file and list the rest.
+
+A declared team something still names (a quiet window, a
 report, a role, a task, a rule's note, the UI's or declared) isn't
 deleted, but given back to the UI, the activity log saying why: deleted,
 its windows would quiet nothing and its roles go, and the file put back
-would make a new team, which they wouldn't name. Without `--config`,
-everything declared is the UI's again.
+would make a new team, which they wouldn't name.
 
 **Renaming a team.** By its name alone, a team renamed in the file is
 another: the old one is given back to the UI (or, with prune, deleted

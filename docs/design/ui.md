@@ -850,12 +850,15 @@ none of the buttons. The server refuses the write all the same, every
 path, with 409.
 
 The Settings page has a section, "Declared configuration": where the file
-is, what becomes of what it no longer declares (`--config-prune`), when
+is, what becomes of what it no longer declares (`--config-prune`, and a
+role taken away once the file is read the same twice in a row), when
 the ledger was last kept to it and the start of its hash, and what of the
 file can't be used or kept: to an admin, why, with its line, in the
 reader's language; to anyone else, the line and the kind alone ("line 23:
 a role that can't be kept"), as why can name who holds a role. The Runs
-page says it the same way. Beside `settings.yaml`, `config.yaml` (an
+page says it the same way. Without `--config`, the section says nothing is
+declared, and, when a file declared some before, how many are the UI's
+again, roles included, none taken away. Beside `settings.yaml`, `config.yaml` (an
 admin's) gives everything as `--config` takes it. The Teams page lists
 teams a ledger kept from before whose names differ only in letter case,
 to be renamed.
