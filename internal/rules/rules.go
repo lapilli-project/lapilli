@@ -552,7 +552,7 @@ func parse(b []byte, rec *[]Recording) ([]Rule, error) {
 // (OneInput), its size counted once (counted).
 func parseContext(ctx context.Context, b []byte, rec *[]Recording) ([]Rule, error) {
 	if err := Nodes(b); err != nil {
-		return nil, unread{err, true}
+		return nil, unread{err, textShaped(b)}
 	}
 	ctx = counted(OneInput(ctx), len(b))
 	dec := yaml.NewDecoder(bytes.NewReader(b))
@@ -571,8 +571,13 @@ func parseContext(ctx context.Context, b []byte, rec *[]Recording) ([]Rule, erro
 			return nil, notYAML{err}
 		}
 		doc, err := YAMLValueContext(ctx, &node)
-		if err != nil {
-			return nil, unread{err, rulesShaped(&node)}
+		var dk dupKey
+		switch shaped := err != nil && rulesShaped(&node); {
+		case errors.As(err, &dk) && shaped:
+			// yaml.v3 refuses it too: a rule file that doesn't read.
+			return nil, err
+		case err != nil:
+			return nil, unread{err, shaped}
 		}
 		// A list of documents, as a cloud's CLI lists resources.
 		docs := []any{doc}

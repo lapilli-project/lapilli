@@ -97,6 +97,7 @@ func YAMLValueContext(ctx context.Context, n *yaml.Node) (v any, err error) {
 		b.written += c.written - written
 		b.made += c.made - made
 		b.mu.Unlock()
+		b.aliasedText(c.brought)
 		if e := b.total.add(c.made-made, c.by); e != nil && err == nil {
 			v, err = nil, e
 		}
@@ -120,10 +121,10 @@ type input struct {
 	written, size, made int
 	none                bool
 	// total is what the inputs it is read with have made (Together), nil
-	// for none; values are its ConfigMaps' values read as rule files, by
-	// where their text is, and whether each held rules (once).
-	total  *total
-	values map[*byte]bool
+	// for none; brought, the text of strings aliases brought in
+	// (aliasedText).
+	total   *total
+	brought map[*byte]bool
 }
 
 type inputKey struct{}
@@ -161,8 +162,10 @@ type converting struct {
 	written, made, size int
 	via                 *yaml.Node
 	// made0 is made when it began, and left what the inputs read with it
-	// (Together) might make still then.
+	// (Together) might make still then; brought, the strings it made in an
+	// alias's expansion (aliasedText).
 	made0, left int
+	brought     []string
 	// anchored is how many anchors the node visited is under: one under
 	// none is let go of once decoded, as no alias reads it again.
 	anchored int
@@ -254,6 +257,10 @@ type errNode struct{ msg string }
 
 func (e errNode) Error() string { return "yaml: " + e.msg }
 
+// dupKey is a mapping that has a key twice: yaml.v3 refuses it too, as it
+// decodes into Go values, and Prometheus doesn't load it.
+type dupKey struct{ errNode }
+
 func (c *converting) value(n *yaml.Node, depth int) (any, error) {
 	if depth > MaxDepth {
 		return nil, errNode{fmt.Sprintf("line %d: nested more than %d deep", n.Line, MaxDepth)}
@@ -291,7 +298,11 @@ func (c *converting) value(n *yaml.Node, depth int) (any, error) {
 		if err := c.text(n, c.inAlias > 0); err != nil {
 			return nil, err
 		}
-		return scalar(n)
+		v, err := scalar(n)
+		if s, ok := v.(string); ok && c.inAlias > 0 && len(s) >= 2 {
+			c.brought = append(c.brought, s)
+		}
+		return v, err
 	case yaml.SequenceNode:
 		out := make([]any, 0, len(n.Content))
 		for i, e := range n.Content {
@@ -423,7 +434,7 @@ func (c *converting) fill(n *yaml.Node, m *mapOut, merged map[any]bool, depth in
 		k := n.Content[i]
 		id := keyOf{k.Kind, k.Value}
 		if line, ok := seen[id]; ok {
-			return errNode{fmt.Sprintf("unmarshal errors:\n  line %d: mapping key %#v already defined at line %d", k.Line, k.Value, line)}
+			return dupKey{errNode{fmt.Sprintf("unmarshal errors:\n  line %d: mapping key %#v already defined at line %d", k.Line, k.Value, line)}}
 		}
 		seen[id] = k.Line
 	}

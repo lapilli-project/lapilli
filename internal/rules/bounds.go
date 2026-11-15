@@ -231,35 +231,40 @@ func (b *input) again(m mark) {
 	b.undo(m)
 }
 
-// errReadAgain is a ConfigMap's value read as rules already in the input:
-// only an alias makes one value two keys', which a ConfigMap the API
-// server keeps never holds, and each would be read into rules again.
-var errReadAgain = errors.New("a rule file another key holds already, by a YAML alias, which a ConfigMap the API server keeps holds none of: each would be read again")
+// errAliased is a ConfigMap's value a YAML alias brings in, whatever its
+// tag (!!str, !!binary) or wherever the alias is (the value, the data, the
+// whole ConfigMap): a ConfigMap the API server keeps holds none, and each
+// would be read into rules again, a !!binary one decoded afresh.
+var errAliased = errors.New("a value a YAML alias brings in, which a ConfigMap the API server keeps holds none of: each would be read into rules again")
 
-// once says whether a ConfigMap's value s, by where its text is, was read
-// in the input already, and whether it held rules then: an alias brings
-// in the same text, two values written never share it.
-func (b *input) once(s string) (seen, rules bool) {
-	if len(s) == 0 {
-		return false, false
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	rules, seen = b.values[unsafe.StringData(s)]
-	return seen, rules
-}
-
-// read notes a ConfigMap's value read, and whether it held rules (once).
-func (b *input) read(s string, rules bool) {
-	if len(s) == 0 {
+// aliasedText notes the text of strings YAMLValue made in an alias's
+// expansion, by where it is: an alias of a !!str brings in its anchor's
+// text, so the anchor's own is noted too; one of a !!binary, a string
+// decoded afresh. Strings of fewer than two bytes are passed over: Go
+// keeps one of each single byte, which any value of it shares.
+func (b *input) aliasedText(ss []string) {
+	if len(ss) == 0 {
 		return
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.values == nil {
-		b.values = map[*byte]bool{}
+	if b.brought == nil {
+		b.brought = map[*byte]bool{}
 	}
-	b.values[unsafe.StringData(s)] = rules
+	for _, s := range ss {
+		b.brought[unsafe.StringData(s)] = true
+	}
+}
+
+// broughtIn reports whether s is the text of a string an alias brought
+// in (aliasedText).
+func (b *input) broughtIn(s string) bool {
+	if len(s) < 2 {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.brought[unsafe.StringData(s)]
 }
 
 // labelsCost is what a copy of labels takes: the map, and their text,
