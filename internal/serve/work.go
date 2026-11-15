@@ -190,7 +190,9 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 			}
 		}
 	}
-	if s.replaying() && s.still(ctx) {
+	// On a run alone: a write that pokes the work doesn't make Lapilli
+	// replay twelve weeks again.
+	if run && s.replaying() && s.still(ctx) {
 		if err := s.backtestStale(ctx); err != nil {
 			s.fail("backtesting stale proposals again", err)
 		}

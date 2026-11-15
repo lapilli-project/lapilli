@@ -616,8 +616,9 @@ func (s *Server) backtestAgainOf(ctx context.Context, id int64, by string, agent
 }
 
 // againARun is how many stale proposals Lapilli backtests again itself in
-// a round of its work, at most, one at a time, each within --timeout: after
-// verdict.Semantics changes, every one waiting is, a few each round.
+// a run of its work, at most, one at a time, each within --timeout: after
+// verdict.Semantics changes, every one waiting is, a few each run, and
+// ledger.LapilliBacktestsAnHour an hour at most.
 const againARun = 3
 
 // againRetry is how long Lapilli leaves a proposal it failed to backtest
@@ -632,16 +633,21 @@ type againFailed struct {
 }
 
 // backtestStale backtests again itself, as Lapilli (ledger.Proposer), the
-// proposals waiting for approval that are stale, the longest unmoved
-// first, againARun at most: those an upgrade that changes how a backtest
-// replays or judges left waiting, Lapilli's own among them, which no one
-// would otherwise ask for, and those whose period's record changed since.
-// Each under the heavy turn, as a person's is, waiting for a comparison
-// running; never one whose rule changed since (it is proposed again), one
-// backtested again in the last ten minutes, or one it failed to in the
-// last hour. Approvals withdrawn so are told, as any are.
+// proposals waiting for approval an earlier lapilli backtested (Auto),
+// the longest unmoved first, againARun at most: those an upgrade that
+// changes how a backtest replays or judges left waiting, Lapilli's own
+// among them, which no one would otherwise ask for. Only on a run of its
+// work, never when a write pokes it, and only with --changes, as Lapilli
+// proposes of itself; ledger.LapilliBacktestsAnHour an hour at most, on
+// every replica together. One whose period's record changed since, or
+// whose rule did, is a person's to backtest again, or propose again: an
+// incident written down and taken away doesn't make Lapilli replay twelve
+// weeks. Each under the heavy turn, as a person's is, waiting for a
+// comparison running; never one backtested again in the last ten
+// minutes, or one it failed to in the last hour. Approvals withdrawn so
+// are told, as any are.
 func (s *Server) backtestStale(ctx context.Context) error {
-	if !s.replaying() || s.cfg.ReadOnly {
+	if !s.replaying() || s.cfg.ReadOnly || !s.cfg.Changes {
 		return nil
 	}
 	heads, err := s.l.ProposalList(ctx, ledger.ProposalPick{States: []string{ledger.StateProposed}}, staleMost)
@@ -680,8 +686,8 @@ func (s *Server) backtestStale(ctx context.Context) error {
 			n++
 		case errors.Is(err, ledger.ErrBacktestedJustNow), errors.Is(err, ledger.ErrMoved), errors.Is(err, errFresh):
 			// Done by someone else meanwhile, or moved on.
-		case errors.Is(err, errBusy):
-			return nil // a person's heavy request has the turn: the next round
+		case errors.Is(err, errBusy), errors.Is(err, ledger.ErrTooManyBacktests):
+			return nil // a person's heavy request has the turn, or the hour's are done: the next run
 		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil:
 			return err
 		case errors.As(err, &b), errors.Is(err, errRuleChanged):

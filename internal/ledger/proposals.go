@@ -596,8 +596,12 @@ func (l *Ledger) Move(ctx context.Context, id int64, from []string, to, by strin
 // BacktestsAnHour is how many proposals one person backtests again in an
 // hour at most, and the agents acting for them as many again, apart:
 // counted by the changes the ledger keeps, on every replica alike.
-// Lapilli's own are bounded by its work loop.
 const BacktestsAnHour = 20
+
+// LapilliBacktestsAnHour is how many proposals Lapilli backtests again
+// itself in an hour at most, all its replicas together, counted as a
+// person's are: whatever pokes its work, it backtests no more.
+const LapilliBacktestsAnHour = 12
 
 // BacktestCooldown is how long a proposal backtested again isn't again,
 // by anyone: an incident written down and taken away in its period makes
@@ -631,8 +635,9 @@ func backtestable(ctx context.Context, q interface {
 	if last.Valid && now.Unix()-last.Int64 < int64(BacktestCooldown/time.Second) {
 		return ErrBacktestedJustNow
 	}
+	most := BacktestsAnHour
 	if by == Proposer {
-		return nil
+		most = LapilliBacktestsAnHour
 	}
 	rows, err := q.QueryContext(ctx, "SELECT what, after FROM changes WHERE at > ? AND by = ? AND what LIKE 'proposal #%'",
 		now.Add(-time.Hour).Unix(), by)
@@ -656,7 +661,7 @@ func backtestable(ctx context.Context, q interface {
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	if n >= BacktestsAnHour {
+	if n >= most {
 		return ErrTooManyBacktests
 	}
 	return nil

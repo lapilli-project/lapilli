@@ -218,7 +218,7 @@ func TestProposalListEvidence(t *testing.T) {
 // TestBacktestAgainBounded: a proposal backtested again isn't again for
 // BacktestCooldown, by anyone; a person backtests BacktestsAnHour again in
 // an hour, and the agents acting for them as many apart, counted by the
-// changes the ledger keeps; Lapilli's own aren't counted.
+// changes the ledger keeps; Lapilli's own LapilliBacktestsAnHour, apart.
 func TestBacktestAgainBounded(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
@@ -254,9 +254,14 @@ func TestBacktestAgainBounded(t *testing.T) {
 	if err := again("AgentOver", "bo", true); !errors.Is(err, ErrTooManyBacktests) {
 		t.Errorf("the agents', one past: %v", err)
 	}
-	// Lapilli's own: not counted.
-	if err := again("Own", Proposer, false); err != nil {
-		t.Errorf("Lapilli's own: %v", err)
+	// Lapilli's own: LapilliBacktestsAnHour of them, apart.
+	for i := 0; i < LapilliBacktestsAnHour; i++ {
+		if err := again(fmt.Sprint("Own", i), Proposer, false); err != nil {
+			t.Fatalf("Lapilli's %dth: %v", i+1, err)
+		}
+	}
+	if err := again("OwnOver", Proposer, false); !errors.Is(err, ErrTooManyBacktests) {
+		t.Errorf("Lapilli's, one past: %v", err)
 	}
 	// One proposal, again within the cooldown: no one, Lapilli neither.
 	p := proposal("Twice", KindFor)

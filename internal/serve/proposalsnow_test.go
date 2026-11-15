@@ -960,7 +960,7 @@ func TestLapilliBacktestsStale(t *testing.T) {
 		}
 		return n
 	}
-	s.jobs(ctx, false)
+	s.jobs(ctx, true)
 	if n := backtested(); n != againARun {
 		t.Errorf("one round backtested %d again, want %d", n, againARun)
 	}
@@ -971,7 +971,7 @@ func TestLapilliBacktestsStale(t *testing.T) {
 	if len(steps) == 0 || steps[len(steps)-1].By != ledger.Proposer || !strings.HasSuffix(steps[len(steps)-1].What, "backtested again") {
 		t.Errorf("not as Lapilli: %+v", steps)
 	}
-	s.jobs(ctx, false)
+	s.jobs(ctx, true)
 	if n := backtested(); n != len(ids) {
 		t.Errorf("two rounds backtested %d again, want all %d", n, len(ids))
 	}
@@ -1003,5 +1003,92 @@ func TestNewerSemanticsHeld(t *testing.T) {
 	}
 	if code, body, _ := ui(t, s.Handler(), http.MethodPost, "/proposals/"+itoa(newer)+"/backtest", bo, "same-origin", url.Values{}); code != http.StatusSeeOther {
 		t.Errorf("a person backtesting it again here: %d %s", code, body)
+	}
+}
+
+// staleServer is a changes server whose restart rules, Restarts0 and on, n
+// of them, each have a proposal an earlier lapilli backtested, kept before
+// backtests were numbered: stale, and Lapilli's to backtest again.
+func staleServer(t *testing.T, n int, more func(*Config)) (*Server, []int64) {
+	t.Helper()
+	ctx := context.Background()
+	s, dir := restartsServer(t, more)
+	var b strings.Builder
+	b.WriteString(restartsFile)
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, "      - {alert: Restarts%d, expr: 'increase(restarts[30m]) > 0.5', for: 1m}\n", i)
+	}
+	os.WriteFile(filepath.Join(dir, "restarts.yaml"), []byte(b.String()), 0o644)
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	for i := 0; i < n; i++ {
+		ids = append(ids, keptFor(t, s, fmt.Sprintf("Restarts%d", i), 0, "", unrecordedFrom, unrecordedTo, nil))
+	}
+	return s, ids
+}
+
+// againCount is how many of ids were backtested again.
+func againCount(t *testing.T, s *Server, ids []int64) (n int) {
+	t.Helper()
+	for _, id := range ids {
+		if proposalEvidence(state(t, s, id)).Semantics == semantics {
+			n++
+		}
+	}
+	return n
+}
+
+// TestLapilliBacktestsOnRunsAlone: Lapilli backtests stale proposals again
+// itself on a run of its work, never when a write pokes it (an editor's
+// quiet window or note, over and over), never without --changes, and
+// LapilliBacktestsAnHour an hour at most, however many runs. One whose
+// period's record changed since is a person's: an incident written down
+// and taken away doesn't make Lapilli replay twelve weeks.
+func TestLapilliBacktestsOnRunsAlone(t *testing.T) {
+	ctx := context.Background()
+	s, ids := staleServer(t, 2, nil)
+	yes := true
+	flipped := keptAs(t, s, semantics, "test", unrecordedFrom, unrecordedTo, &yes)
+	if _, err := s.l.Put(ctx, incident.Incident{ID: "INC-FLIP", Title: "Flips the record", Start: unrecordedFrom.Add(30 * 24 * time.Hour),
+		End: unrecordedFrom.Add(30*24*time.Hour + time.Hour)}, "ana", s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	for range 5 {
+		s.jobs(ctx, false) // poked
+	}
+	if n := againCount(t, s, ids); n != 0 {
+		t.Errorf("poked, Lapilli backtested %d again", n)
+	}
+	s.cfg.Changes = false
+	s.jobs(ctx, true)
+	if n := againCount(t, s, ids); n != 0 {
+		t.Errorf("without --changes, Lapilli backtested %d again", n)
+	}
+	s.cfg.Changes = true
+	s.jobs(ctx, true)
+	if n := againCount(t, s, ids); n != len(ids) {
+		t.Errorf("on a run, Lapilli backtested %d again, want %d", n, len(ids))
+	}
+	if steps, _, _ := s.l.ProposalSteps(ctx, flipped, 10); slices.ContainsFunc(steps, func(c ledger.Change) bool { return strings.HasSuffix(c.What, "backtested again") }) {
+		t.Error("Lapilli backtested again one whose record flipped")
+	}
+	// The hour's, on every replica together, as the ledger counts them:
+	// another replica's twelve leave this one none.
+	s2, ids2 := staleServer(t, 1, nil)
+	for i := 0; i < ledger.LapilliBacktestsAnHour; i++ {
+		id, err := s2.l.Propose(ctx, ledger.Proposal{Rule: fmt.Sprint("Elsewhere", i), Kind: ledger.KindFor, Path: ledger.PathNone, MadeBy: ledger.Proposer,
+			Evidence: []byte(`{}`)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := s2.l.BacktestAgain(ctx, id, ledger.Proposer, false, []byte(`{}`), []byte(`{"semantics":1}`), nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s2.jobs(ctx, true)
+	if n := againCount(t, s2, ids2); n != 0 {
+		t.Errorf("past the hour's, Lapilli backtested %d again", n)
 	}
 }
