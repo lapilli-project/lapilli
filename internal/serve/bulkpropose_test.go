@@ -158,7 +158,7 @@ func TestBulkPropose(t *testing.T) {
 		}, "bulk=propose&done=2&already=2&same=1&absent=1"},
 		{"suggested", "the suggested for", url.Values{"propose": {"suggested"}}, func(t *testing.T, h http.Handler, rule string) url.Values {
 			return pageForm(t, h, "/rules/"+rule, ledger.KindFor, true)
-		}, "bulk=propose&done=1&nosuggest=5"},
+		}, "bulk=propose&done=1&absent=1&nosuggest=4"},
 		{"retire", "retiring", url.Values{"propose": {"retire"}}, func(t *testing.T, h http.Handler, rule string) url.Values {
 			for _, k := range []string{ledger.KindDisable, ledger.KindDelete} {
 				if f := pageForm(t, h, "/rules/"+rule+"?tab=proposals", k, false); f != nil {

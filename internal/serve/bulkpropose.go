@@ -145,12 +145,23 @@ func (s *Server) bulkPropose(w http.ResponseWriter, r *http.Request, rules []str
 	}
 	ctx := r.Context()
 	start := time.Now()
-	suggested, spare, err := s.offered(r, what, listWeeks(from))
+	by := s.user(r)
+	// A reader past the hour's twenty, or their tries, is refused every
+	// rule before anything is read for them.
+	switch err := s.mayPropose(ctx, rules[0], by, false); {
+	case errors.Is(err, ledger.ErrTooManyProposals), errors.Is(err, errTooManyTries):
+		s.proposeCount(&res, r, err, len(rules))
+		back(w, r, bulkBack(from, "/rules", "propose", res))
+		return
+	case err != nil && !errors.Is(err, ledger.ErrProposed):
+		s.oops(w, r, err)
+		return
+	}
+	suggested, spare, named, err := s.offered(r, what, listWeeks(from))
 	if err != nil {
 		s.oops(w, r, err)
 		return
 	}
-	by := s.user(r)
 	rc := http.NewResponseController(w)
 	for i, rule := range rules {
 		left := len(rules) - i
@@ -162,6 +173,21 @@ func (s *Server) bulkPropose(w http.ResponseWriter, r *http.Request, rules []str
 		// heavy turn, ending when the time for the request is up, and its
 		// backtest, within --timeout.
 		rc.SetWriteDeadline(time.Now().Add(proposeTime + s.cfg.Timeout + time.Minute))
+		// A name no rule in effect has, or two alike have, is refused as
+		// propose would refuse it, from the rules in effect read once for
+		// the request: each read parses every rule, and a refusal before
+		// the rules are read again costs no try.
+		if named != nil {
+			switch named[rule] {
+			case 0:
+				res.Absent++
+				continue
+			case 1:
+			default:
+				res.Refused++
+				continue
+			}
+		}
 		q := ask{Rule: rule, From: "person"}
 		switch what {
 		case "for":
@@ -225,29 +251,45 @@ func listWeeks(back string) int {
 
 // offered is what each rule's page offers a bulk proposal of what: the for
 // suggested for it, and, to retire it, whether it is spare over the weeks
-// the list showed, as its page opened from the list says. Worked out under
-// a page's turn, as the page is; given back before any proposal waits for
-// the heavy turn.
-func (s *Server) offered(r *http.Request, what string, n int) (suggested map[string]string, spare map[string]bool, err error) {
-	tn, err := s.renderTurn(r.Context())
+// the list showed, as its page opened from the list says; and named, how
+// many rules in effect each name is of, as propose finds them (current),
+// nil before the rules are first read. Worked out under a page's turn, as
+// the page is; given back before any proposal waits for the heavy turn.
+func (s *Server) offered(r *http.Request, what string, n int) (suggested map[string]string, spare map[string]bool, named map[string]int, err error) {
+	ctx := r.Context()
+	tn, err := s.renderTurn(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer tn.give()
-	if suggested, err = s.suggestedFors(r.Context()); err != nil {
-		return nil, nil, err
+	if suggested, err = s.suggestedFors(ctx); err != nil {
+		return nil, nil, nil, err
 	}
 	spare = map[string]bool{}
 	if what == "retire" {
-		names, err := s.spareOver(r.Context(), n)
+		names, err := s.spareOver(ctx, n)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		for _, x := range names {
 			spare[x] = true
 		}
 	}
-	return suggested, spare, nil
+	latest, ok, err := s.l.Latest(ctx)
+	if err != nil || !ok {
+		return suggested, spare, nil, err
+	}
+	_, names, err := s.named(ctx, latest.ID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	named = map[string]int{}
+	for _, x := range names {
+		if x != "" {
+			named[x]++
+		}
+	}
+	return suggested, spare, named, nil
 }
 
 // errTimeUp is a bulk proposal's rule that waited for the heavy turn until

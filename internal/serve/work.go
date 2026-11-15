@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"lapilli.dev/internal/firing"
@@ -694,11 +695,16 @@ func (s *Server) readDataSources(ctx context.Context, rs []rules.Rule) {
 	s.dataSources.Unlock()
 }
 
+// namedReads counts the versions named reads, each a parse of every rule
+// in it, for tests.
+var namedReads atomic.Int64
+
 // named reads a version's rules again, as they were read, and the name
 // each is judged under ("" for one --rule leaves out). Should a newer
 // lapilli read the documents into other rules than the names were given
 // to, the rules are named afresh.
 func (s *Server) named(ctx context.Context, id int64) ([]rules.Rule, []string, error) {
+	namedReads.Add(1)
 	full, err := s.l.VersionByID(ctx, id)
 	if err != nil {
 		return nil, nil, err

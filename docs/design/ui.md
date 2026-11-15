@@ -893,10 +893,15 @@ heavy turn, taken and given back for each as `POST /proposals` takes it;
 one unfinished proposal a rule; twenty an hour a person, counted as one by
 one. Retiring is decided by `propose`, after it has checked the reader may
 propose, from the rule as it reads it again: turned off where it can be
-and isn't, deleted otherwise (`kindRetire`, MCP's `retire` the same); the
-bulk proposal reads no rule of its own for it. What a rule's page reads for
-its forms (the suggestions, the spare rules) is read once, under a page's
-turn, given back before any proposal waits for the heavy turn. At most
+and isn't, deleted otherwise (`kindRetire`, MCP's `retire` the same). What
+a rule's page reads for its forms (the suggestions, the spare rules), and
+the rules in effect, are read once for the request, under a page's turn,
+given back before any proposal waits for the heavy turn: a name no rule in
+effect has is refused as not in effect, and one two alike have as
+`propose` refuses it, without `propose` reading the rules for each (each
+read parses every rule, and a refusal before the rules are read again
+costs no try). A reader past the hour's twenty, or their tries, is refused
+every rule before any of it is read. At most
 twenty rules a request, refused whole past them, 400, as are a `for` that
 isn't one or a kind it doesn't offer; a server with no rules of its own is
 refused whole, and its bar says why; nothing picked says so first, and
@@ -949,7 +954,10 @@ their tries, as they share the twenty. Past them the single form answers
 429, and a bulk proposal counts every rule left so. Lapilli's own are bounded apart. At
 four thousand rules, a bulk retire of twenty by a reader who has made the
 hour's twenty took 504 ms and 641 MB, each rule parsed whole twice; it
-takes 15 ms and 12 MB (`TestBulkProposeAtLimitScale`). A proposal past the
+takes 15 ms and 12 MB; one of twenty names no rule has, by an editor with
+every try left, took 489 ms and 640 MB, and takes 36 ms and 42 MB, the
+rules in effect read once (`TestBulkProposeAtLimitScale`,
+`TestBulkProposeAbsentOneRead`). A proposal past the
 twenty answers 429, whichever check finds it, the ledger's write among
 them.
 

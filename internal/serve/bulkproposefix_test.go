@@ -309,3 +309,30 @@ func TestRetireNotAFormKind(t *testing.T) {
 		t.Errorf("%d proposals, not %d", n, before)
 	}
 }
+
+// TestBulkProposeAbsentOneRead: twenty names no rule in effect has are
+// refused as not in effect from the rules in effect read once for the
+// request, not once a name (each read parses every rule, and a refusal
+// before the rules are read again costs no try, so it was unbounded); two
+// alike are refused as propose refuses them; the rest go through propose.
+func TestBulkProposeAbsentOneRead(t *testing.T) {
+	s := proposeServer(t, nil)
+	h := s.Handler()
+	var absent []string
+	for i := range maxPropose {
+		absent = append(absent, fmt.Sprint("Gone", i))
+	}
+	before := namedReads.Load()
+	_, _, hd := postAs(t, h, "/rules/bulk", url.Values{"do": {"propose"}, "propose": {"retire"}, "rule": absent, "back": {"/rules"}}, bo, "same-origin")
+	if res := bulkOf(mustQuery(t, hd.Get("Location"))); res == nil || res.Absent != maxPropose {
+		t.Errorf("twenty not in effect: %s", hd.Get("Location"))
+	}
+	if n := namedReads.Load() - before; n > 1 {
+		t.Errorf("the rules in effect read %d times for one request", n)
+	}
+	// Among others, they don't keep the rest from being proposed.
+	_, _, hd = postAs(t, h, "/rules/bulk", url.Values{"do": {"propose"}, "propose": {"for"}, "for": {"10m"}, "rule": {"Gone", "BulkD"}, "back": {"/rules"}}, bo, "same-origin")
+	if res := bulkOf(mustQuery(t, hd.Get("Location"))); res == nil || res.Absent != 1 || res.Done != 1 {
+		t.Errorf("one not in effect and one that is: %s", hd.Get("Location"))
+	}
+}
