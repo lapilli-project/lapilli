@@ -1,3 +1,6 @@
+{{/* What --config declares, marked so on every list and page that shows it. */}}
+{{define "declared"}}<span class="badge declared">{{t "declared"}}</span>{{end}}
+
 {{define "who"}}{{if or (eq . "anonymous") (eq . "")}}{{t "anonymous"}}{{else}}{{.}}{{end}}{{end}}
 
 {{define "comments"}}
@@ -36,22 +39,25 @@
 <div class="head"><h1>{{$title}}</h1>{{template "action" (mainAction $ "Add a team" (not $ro) "admin" "")}}</div>
 <p class="lede">{{t "A team owns the rules whose names match its pattern, or whose labels have its values, and the incidents with those values. A rule's own note can name its team instead. The overview, the rules and the tasks can be shown for one team."}}</p>
 {{if $.Status.RolesKept}}<p><a href="{{$.Link "/roles"}}">{{t "Roles: who may change what, and a team's own editors"}}</a></p>{{end}}
+{{range .Alike}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{tbdi "These teams' names differ only in letter case: %s. A new or renamed team's name is unique in any letter case: rename all but one." (join . ", ")}}</p>{{end}}
+{{if .Declared}}<p{{if $ro}} class="quiet"{{else}} id="declared-why" class="why"{{end}}>{{t "Declared in config — change it in values"}}</p>{{end}}
 {{with .Made}}{{template "teamsmade" .}}{{end}}
 {{if .Suggested.Lines}}{{template "teamsuggest" (on $ .Suggested)}}{{end}}
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Rules matching"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "Hours"}}</th><th scope="col" class="n">{{t "Rules owned"}}</th><th scope="col" class="n">{{t "Open tasks"}}</th><td></td></tr></thead>
 <tbody>{{range .Lines}}<tr>
-  <td><a href="{{$.Link "/" "team" .Name}}">{{.Name}}</a>{{with .Note}}<br><span class="quiet">{{.}}</span>{{end}}</td>
+  <td><a href="{{$.Link "/" "team" .Name}}">{{.Name}}</a>{{if .Team.Declared}} {{template "declared"}}{{end}}{{with .Note}}<br><span class="quiet">{{.}}</span>{{end}}</td>
   <td>{{with .Team.Rules}}<code>{{.}}</code>{{else}}–{{end}}</td><td class="labels">{{or .Labels "–"}}</td>
   <td>{{with .Hours}}{{.}}{{else}}<span class="quiet">{{t "the server's"}}</span>{{end}}</td>
   <td class="n"><a href="{{$.Link "/rules" "team" .Name}}">{{.Rules}}</a></td><td class="n"><a href="{{$.Link "/tasks" "team" .Name}}">{{.Open}}</a></td>
-  <td>{{if not $ro}}<a href="{{$.Link "/teams" "edit" .ID}}">{{t "Change"}}</a>{{end}}</td>
+  <td>{{if not $ro}}{{if .Team.Declared}}{{template "off" (again (quiet (offDeclared "Change" "declared-why")))}}{{else}}<a href="{{$.Link "/teams" "edit" .ID}}">{{t "Change"}}</a>{{end}}{{end}}</td>
 </tr>{{else}}<tr><td colspan="7" class="quiet">{{t "No teams yet."}}</td></tr>{{end}}</tbody>
 </table></div>
 {{with .Server}}<p class="quiet">{{t "A team's firings that caught nothing are counted asleep and off hours by its own hours, where it has them; by the server's otherwise: %s." .}}</p>{{end}}
 {{if not $ro}}
 {{with .Edit}}
 <h2>{{t "Change %s" .Name}}</h2>
+{{if .Team.Declared}}<p>{{template "off" (offDeclared "Change it" "team-why")}}</p>{{else}}
 <form method="post" action="/teams" class="grid">
   <input type="hidden" name="id" value="{{.ID}}">
   <label>{{t "Name"}} <input name="name" required maxlength="64" value="{{.Name}}"></label>
@@ -65,6 +71,7 @@
   <button>{{t "Save"}}</button>
 </form>
 <form method="post" action="/teams/{{.ID}}/delete"><button class="quiet-button">{{t "Delete it"}}</button></form>
+{{end}}
 {{else}}
 <h2 id="add">{{t "Add a team"}}</h2>
 <form method="post" action="/teams" class="grid">
@@ -91,7 +98,7 @@
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Window"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "Repeats"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Rules matching"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "By"}}</th></tr></thead>
 <tbody>{{range .Lines}}<tr{{if .Covers $.View.Now}} class="current-window"{{end}}>
-  <td><a href="{{$.Link (printf "/windows/%d" .ID)}}">{{.Title}}</a></td><td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td>
+  <td><a href="{{$.Link (printf "/windows/%d" .ID)}}">{{.Title}}</a>{{if .Declared}} {{template "declared"}}{{end}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td>
   <td>{{template "repeats" (repeats . $loc)}}</td>
   <td>{{template "windowteam" (windowTeam .TeamID $.View.TeamOf)}}</td>
   <td>{{with .Rules}}<code>{{.}}</code>{{else}}{{t "all"}}{{end}}</td><td class="labels">{{range $k, $vs := .Labels}}{{range $vs}}{{$k}}={{.}} {{end}}{{else}}{{t "all"}}{{end}}</td><td>{{template "who" .By}}</td>
@@ -148,13 +155,16 @@ first, so that Enter in a field writes nothing. */}}
 
 {{define "window"}}{{template "top" (titled . .View.Title)}}{{$loc := .Loc}}{{$ro := not (edits .Status .View.TeamID)}}{{with .View}}
 <h1>{{.Title}}</h1>
-<p class="lede">{{at $loc .Start}} → {{at $loc .End}} · {{template "repeats" (repeats .Window $loc)}} · {{template "windowteam" (windowTeam .TeamID (teamMap .TeamID .TeamName))}}{{with .Rules}} · <code>{{.}}</code>{{end}}{{with .Labels}} · {{.}}{{end}}{{with .By}}<br>{{t "Kept by %s, %s." (who .) (at $loc $.View.Updated)}}{{end}}</p>
+<p class="lede">{{if .Declared}}{{template "declared"}} {{end}}{{at $loc .Start}} → {{at $loc .End}} · {{template "repeats" (repeats .Window $loc)}} · {{template "windowteam" (windowTeam .TeamID (teamMap .TeamID .TeamName))}}{{with .Rules}} · <code>{{.}}</code>{{end}}{{with .Labels}} · {{.}}{{end}}{{with .By}}<br>{{t "Kept by %s, %s." (who .) (at $loc $.View.Updated)}}{{end}}</p>
 <h2>{{t "Firings it excused"}}</h2>
 {{if .Excused}}<div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "Labels"}}</th></tr></thead>
 <tbody>{{range .Excused}}<tr><td><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></td><td>{{or .Team "–"}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
 </table></div>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
-{{if not $ro}}
+{{if .Declared}}
+<h2>{{t "Change it"}}</h2>
+<p>{{template "off" (offDeclared "Change it" "window-why")}}</p>
+{{else if not $ro}}
 {{with .Preview}}{{template "windowpreview" (on $ .)}}{{end}}
 <h2>{{t "Change it"}}</h2>
 {{template "windowform" .Draft}}
@@ -227,11 +237,12 @@ first, so that Enter in a field writes nothing. */}}
 <tr><th scope="row">{{t "approver"}}</th><td>{{template "approvers" .Approvers}}</td></tr></tbody>
 </table></div>
 <h2>{{t "Given here"}}</h2>
+{{if .Declared}}<p{{if .Kept}} id="declared-why" class="why"{{else}} class="quiet"{{end}}>{{t "Declared in config — change it in values"}}</p>{{end}}
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Who"}}</th><th scope="col">{{t "Role"}}</th><th scope="col">{{t "Given by"}}</th><td></td></tr></thead>
-<tbody>{{range .Lines}}<tr><td><code>{{.Who}}</code></td><td>{{if .TeamID}}{{t "editor of %s" .Team}}{{else}}{{t "editor of every team"}}{{end}}</td>
+<tbody>{{range .Lines}}<tr><td><code>{{.Who}}</code>{{if .Declared}} {{template "declared"}}{{end}}</td><td>{{if .TeamID}}{{t "editor of %s" .Team}}{{else}}{{t "editor of every team"}}{{end}}</td>
   <td>{{template "who" .By}}, {{at $loc .Created}}</td>
-  <td>{{if $.View.Kept}}<form method="post" action="/roles/{{.ID}}/delete"><button class="quiet-button">{{t "Take it away"}}</button></form>{{end}}</td></tr>
+  <td>{{if $.View.Kept}}{{if .Declared}}{{template "off" (again (quiet (offDeclared "Take it away" "declared-why")))}}{{else}}<form method="post" action="/roles/{{.ID}}/delete"><button class="quiet-button">{{t "Take it away"}}</button></form>{{end}}{{end}}</td></tr>
 {{else}}<tr><td colspan="4" class="quiet">{{t "None yet."}}</td></tr>{{end}}</tbody>
 </table></div>
 {{if .Kept}}

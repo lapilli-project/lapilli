@@ -632,6 +632,8 @@ func (s *Server) backtestAgain(ctx context.Context, id int64, by string, agent b
 // --timeout for a person or an agent, less for Lapilli's own (autoWithin).
 // None waits for a comparison running while it holds the heavy turn.
 func (s *Server) backtestAgainOf(ctx context.Context, id int64, by string, agent bool, within time.Duration) error {
+	// Not closed as expired while it is backtested again here.
+	defer s.backtesting.add(id)()
 	if !s.replaying() {
 		return bad("this lapilli serve reads no rules of its own: there is nothing to change")
 	}
@@ -884,6 +886,10 @@ func (s *Server) backtestStale(ctx context.Context) error {
 	ls = slices.DeleteFunc(ls, func(l proposalLine) bool {
 		return l.StaleWhy == nil || !l.StaleWhy.Auto || l.Stale || s.againFailed.waits(l.ID, proposalEvidence(l.Proposal).Semantics, now)
 	})
+	// Not one past --proposals-expire (someone approved it, or it would be
+	// closed): backtested again, its approvals withdrawn, it would wait
+	// anew, and close as expired once more had passed than anyone meant.
+	ls = slices.DeleteFunc(ls, s.pastExpiry)
 	if len(ls) == 0 {
 		return nil
 	}

@@ -20,6 +20,8 @@ type manageCard struct {
 	Fact, One string
 	N         int
 	At        time.Time
+	// Warn is a text to translate, of something wrong there.
+	Warn string
 }
 
 type manageView struct {
@@ -46,12 +48,20 @@ func (s *Server) managePage(r *http.Request) (any, error) {
 	v := manageView{Loc: s.cfg.Loc, Cards: []manageCard{
 		{Href: "/teams", Name: "Teams", About: "Who owns which rules and incidents, and each team's hours.", Fact: "%d teams", One: "1 team", N: len(o.teams)},
 		{Href: "/roles", Name: "Roles", About: "Who may change what, and a team's own editors."},
-		{Href: "/settings", Name: "Settings", About: "How firings are judged, and whether changes to the rules are paused."},
+		{Href: "/settings", Name: "Settings", About: "How firings are judged, whether changes to the rules are paused, and what --config declares."},
 		{Href: "/runs", Name: "Runs", About: "Each replay and what was copied in, and what failed."},
 		{Href: "/reports", Name: "Reports", About: "Who gets which report, where, and the weekly digest.", Fact: "%d reports", One: "1 report", N: len(reports)},
+		{Href: "/orphans", Name: "Orphans", About: "Notes, tasks, comments and proposals of rules no longer in effect, deleted or renamed: moved to a rule, or deleted."},
 	}}
 	if !cursor.IsZero() {
 		v.Cards[3].Fact, v.Cards[3].At = "Firings are in up to %s.", cursor
+	}
+	switch c := s.shownStatus().Config; {
+	case c == nil || len(c.Problems) == 0:
+	case c.Whole:
+		v.Cards[2].Warn = "The config file can't be used: the ledger keeps what it last declared."
+	default:
+		v.Cards[2].Warn = "Some of what the config file declares can't be kept."
 	}
 	if s.role(r) < admin {
 		v.Cards = append(v.Cards[:1], v.Cards[2:]...) // Roles, for admins alone

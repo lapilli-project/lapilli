@@ -189,6 +189,9 @@ type reportsView struct {
 	// can hold.
 	Dests, Sections, Default []string
 	Most                     int
+	// Declared says some of them --config declares; MayEditDeclared, some
+	// of those the reader could change were they not.
+	Declared, MayEditDeclared bool
 }
 
 // mayEdit reports whether the reader may change a report: an admin any; who
@@ -228,6 +231,12 @@ func (s *Server) reportsPage(r *http.Request) (any, error) {
 					v.Dests = append(v.Dests, d)
 				}
 			}
+		}
+	}
+	for _, l := range v.Lines {
+		if l.Declared && l.SetBy == "" {
+			v.Declared = true
+			v.MayEditDeclared = v.MayEditDeclared || v.mayEdit(l)
 		}
 	}
 	switch edit := r.URL.Query().Get("edit"); {

@@ -3,6 +3,7 @@ package serve
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"lapilli.dev/internal/ledger"
@@ -50,6 +51,8 @@ type rolesView struct {
 	Lines           []roleLine
 	Teams           []ledger.Team
 	Most            int
+	// Declared says some of them --config declares.
+	Declared bool
 }
 
 // roleLines are the roles given in the UI, with their teams' names.
@@ -78,7 +81,7 @@ func (s *Server) rolesPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	return rolesView{Kept: s.rolesKept(), Admins: s.cfg.Admins, Editors: s.cfg.Editors, Approvers: s.approversIn(), Lines: lines, Teams: teams,
-		Most: ledger.MaxGrants}, nil
+		Most: ledger.MaxGrants, Declared: slices.ContainsFunc(lines, func(l roleLine) bool { return l.Declared })}, nil
 }
 
 // grantFrom reads a role to give: who, as user:NAME or group:NAME, and

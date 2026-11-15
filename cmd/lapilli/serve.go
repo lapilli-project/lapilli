@@ -195,6 +195,18 @@ The web UI and API:
                       only behind a proxy that sets it and strips it from
                       callers
   --read-only         take no changes through the UI or API
+  --config FILE       a YAML file declaring teams, quiet windows (windows),
+                      reports and roles (grants), as the UI's forms make
+                      them, which the ledger is kept holding: at start, and
+                      whenever its content changes, read again every 15s.
+                      What it declares the UI shows and doesn't change; GET
+                      /config.yaml gives what the ledger holds in its form.
+                      A file that can't be used changes nothing, a thing it
+                      declares that can't be kept is kept as it was, and the
+                      Settings and Runs pages say why (docs/design/serveops.md)
+  --config-prune      delete what --config no longer declares, once the file
+                      is read the same twice in a row, but a team something
+                      the UI made names; without it, that is the UI's again
   --team-labels LIST  the labels whose values the Teams page suggests as
                       teams, when the rules carry values no team owns by,
                       comma-separated (default team,owner,squad)
@@ -445,6 +457,10 @@ and proposes; docs/design/changes.md):
   --changes-paused FILE
                       while this file is there, nothing is carried out or
                       handed out; an admin can also pause changes in the UI
+  --proposals-expire DURATION
+                      close a proposal no one approved that waited longer
+                      since it was made, such as 30d, as expired, so its rule
+                      takes another; 0, the default, keeps it waiting
 
 Agents, over MCP at /mcp:
   --mcp-compare editors|admins
@@ -682,6 +698,17 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			cfg.UserHeader = val
 		case "--read-only":
 			cfg.ReadOnly = val == "true"
+		case "--config":
+			cfg.Config = val
+		case "--config-prune":
+			cfg.ConfigPrune = val == "true"
+		case "--proposals-expire":
+			// 0, 0s or 0d: off.
+			if d, perr := serve.ParseDuration(val); perr == nil && d == 0 {
+				cfg.ProposalsExpire = 0
+				break
+			}
+			cfg.ProposalsExpire, err = dur(time.Hour)
 		case "--everyone-admin":
 			cfg.EveryoneAdmin = val == "true"
 		case "--editors":
@@ -943,6 +970,14 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--deploy-before and --deploy-after go with --deploys, the file deploys are read from")
 	case cfg.MCPCompare != "" && len(cfg.Editors)+len(cfg.Admins) == 0:
 		err = fmt.Errorf("--mcp-compare needs --editors or --admins: without roles, whoever may change anything is an admin, and anyone who reaches /mcp could run PromQL with lapilli's access")
+	case cfg.ConfigPrune && cfg.Config == "":
+		err = fmt.Errorf("--config-prune deletes what --config no longer declares: give --config")
+	case cfg.Config != "" && cfg.ReadOnly:
+		err = fmt.Errorf("--config is kept in the ledger, and --read-only refuses writes")
+	case cfg.ProposalsExpire > 0 && cfg.ReadOnly:
+		err = fmt.Errorf("--proposals-expire closes proposals in the ledger, and --read-only refuses writes")
+	case cfg.Config != "" && configFlag(cfg.Config) != nil:
+		err = configFlag(cfg.Config)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "lapilli serve: %v\nRun \"lapilli serve -h\" for the options.\n", err)
@@ -1133,4 +1168,15 @@ func thisMachine(host string) bool {
 		return ip.IsLoopback()
 	}
 	return host == "localhost" || strings.HasSuffix(host, ".localhost")
+}
+
+// configFlag refuses a --config file that isn't there, or can't be read: a
+// flag given wrong. One that can't be used is said once serve runs, as when
+// it changes to one: the ledger keeps what it last declared, and a pod
+// restarted on it serves, rather than loop.
+func configFlag(path string) error {
+	if _, err := os.ReadFile(path); err != nil {
+		return fmt.Errorf("--config: %w", err)
+	}
+	return nil
 }

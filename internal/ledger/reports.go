@@ -53,6 +53,13 @@ type Scheduled struct {
 	CreatedBy string    `json:"created_by,omitempty"`
 	Updated   time.Time `json:"updated"`
 	UpdatedBy string    `json:"updated_by,omitempty"`
+	// Declared says --config declares it: the UI and the API don't change
+	// or delete it (docs/design/serveops.md).
+	Declared bool `json:"declared,omitempty"`
+	// GivenBack says a file declared it and a leader without --config gave
+	// it back to the UI: until the UI changes it, the next file that
+	// doesn't declare it again leaves it as one it no longer declares.
+	GivenBack bool `json:"-"`
 }
 
 // When is its schedule, read.
@@ -179,6 +186,9 @@ func (l *Ledger) PutScheduled(ctx context.Context, r Scheduled, by string, at ti
 		// A team's editors keep their team's reports, sent to its own
 		// destination, and only those, before and after.
 		if id != 0 {
+			if err := isDeclared(t, "reports", id); err != nil {
+				return err
+			}
 			if err := ownReport(t, id); err != nil {
 				return err
 			}
@@ -188,7 +198,7 @@ func (l *Ledger) PutScheduled(ctx context.Context, r Scheduled, by string, at ti
 		}
 		if _, limited := scopeOf(t.ctx); limited && id == 0 {
 			var team, all int
-			if err := t.QueryRowContext(t.ctx, "SELECT count(*) FILTER (WHERE team_id = ?), count(*) FROM reports", r.TeamID).Scan(&team, &all); err != nil {
+			if err := t.QueryRowContext(t.ctx, "SELECT count(*) FILTER (WHERE team_id = ?), count(*) FROM reports WHERE declared = 0", r.TeamID).Scan(&team, &all); err != nil {
 				return err
 			}
 			if team >= MaxTeamScheduled {
@@ -211,19 +221,23 @@ func (l *Ledger) PutScheduled(ctx context.Context, r Scheduled, by string, at ti
 		var res sql.Result
 		var err error
 		if id == 0 {
+			// What --config declares has its own most (MaxScheduled a file).
 			var n int
-			if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM reports").Scan(&n); err != nil {
+			if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM reports WHERE declared = 0").Scan(&n); err != nil {
 				return err
 			}
 			if n >= MaxScheduled {
 				return invalid("the ledger keeps %d reports at most", MaxScheduled)
+			}
+			if err := fullOf(t, "reports"); err != nil {
+				return err
 			}
 			err = t.QueryRowContext(t.ctx, `INSERT INTO reports (name, team_id, schedule, span, zone, sections, dests, enabled, created, created_by, updated, updated_by)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
 				r.Name, r.TeamID, r.Schedule, int64(span/time.Second), r.Zone, string(sections), string(dests), r.Enabled, now, by, now, by).Scan(&id)
 		} else {
 			res, err = t.ExecContext(t.ctx, `UPDATE reports SET name = ?, team_id = ?, schedule = ?, span = ?, zone = ?, sections = ?, dests = ?, enabled = ?,
-				updated = ?, updated_by = ? WHERE id = ?`,
+				updated = ?, updated_by = ?, given_back = 0 WHERE id = ?`,
 				r.Name, r.TeamID, r.Schedule, int64(span/time.Second), r.Zone, string(sections), string(dests), r.Enabled, now, by, id)
 		}
 		if err != nil {
@@ -249,6 +263,9 @@ func (l *Ledger) DeleteScheduled(ctx context.Context, id int64, by string) error
 		if err := t.QueryRowContext(t.ctx, "SELECT name FROM reports WHERE id = ?", id).Scan(&name); errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {
+			return err
+		}
+		if err := isDeclared(t, "reports", id); err != nil {
 			return err
 		}
 		if err := ownReport(t, id); err != nil {
@@ -311,14 +328,14 @@ func (l *Ledger) Told(ctx context.Context, key string) (string, error) {
 	return l.meta(ctx, l.r, key)
 }
 
-const reportCols = "id, name, team_id, schedule, span, zone, sections, dests, enabled, created, created_by, updated, updated_by"
+const reportCols = "id, name, team_id, schedule, span, zone, sections, dests, enabled, created, created_by, updated, updated_by, declared, given_back"
 
 func scanScheduled(rows interface{ Scan(...any) error }) (Scheduled, error) {
 	var r Scheduled
 	var span, created, updated int64
 	var sections, dests string
 	if err := rows.Scan(&r.ID, &r.Name, &r.TeamID, &r.Schedule, &span, &r.Zone, &sections, &dests, &r.Enabled,
-		&created, &r.CreatedBy, &updated, &r.UpdatedBy); err != nil {
+		&created, &r.CreatedBy, &updated, &r.UpdatedBy, &r.Declared, &r.GivenBack); err != nil {
 		return r, err
 	}
 	r.Span, r.Created, r.Updated = spanText(time.Duration(span)*time.Second), unix(created), unix(updated)
