@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 
 	"go.yaml.in/yaml/v3"
@@ -78,10 +79,7 @@ func YAMLValue(n *yaml.Node) (any, error) { return YAMLValueContext(context.Back
 // panic: what is read is outside input, and lapilli serve reads it in a
 // loop no panic should end.
 func YAMLValueContext(ctx context.Context, n *yaml.Node) (v any, err error) {
-	b, _ := ctx.Value(inputKey{}).(*input)
-	if b == nil {
-		b = &input{}
-	}
+	b := inputOf(ctx)
 	b.mu.Lock()
 	c := &converting{ctx: ctx, none: b.none, aliases: map[*yaml.Node]bool{}, decoded: b.decoded, aliased: b.aliased, written: b.written, made: b.made,
 		size: b.size}
@@ -97,6 +95,9 @@ func YAMLValueContext(ctx context.Context, n *yaml.Node) (v any, err error) {
 		b.written += c.written - written
 		b.made += c.made - made
 		b.mu.Unlock()
+		if e := b.total.add(c.made-made, c.by); e != nil && err == nil {
+			v, err = nil, e
+		}
 	}()
 	return c.value(n, 0)
 }
@@ -112,10 +113,15 @@ type input struct {
 	decoded, aliased int
 	// written is the text of the scalars its documents' values and keys
 	// are, as written; size its documents' bytes, as counted (counted);
-	// made what it has made beyond them, the text aliases brought in again
+	// made what it has made beyond them, what aliases brought in again
 	// among it (madeLimit).
 	written, size, made int
 	none                bool
+	// total is what the inputs it is read with have made (Together), nil
+	// for none; values are its ConfigMaps' values read as rule files, by
+	// where their text is, and whether each held rules (once).
+	total  *total
+	values map[*byte]bool
 }
 
 type inputKey struct{}
@@ -126,7 +132,7 @@ func OneInput(ctx context.Context) context.Context {
 	if _, ok := ctx.Value(inputKey{}).(*input); ok {
 		return ctx
 	}
-	return context.WithValue(ctx, inputKey{}, &input{})
+	return context.WithValue(ctx, inputKey{}, &input{total: totalOf(ctx)})
 }
 
 // NoAliases is ctx under which a YAML alias (*name) is refused: what a
@@ -134,7 +140,7 @@ func OneInput(ctx context.Context) context.Context {
 // they write YAML or JSON out of what they hold, and one that does is
 // hostile, its aliases expanding a few KB into GBs.
 func NoAliases(ctx context.Context) context.Context {
-	return context.WithValue(ctx, inputKey{}, &input{none: true})
+	return context.WithValue(ctx, inputKey{}, &input{none: true, total: totalOf(ctx)})
 }
 
 type converting struct {
@@ -152,9 +158,6 @@ type converting struct {
 	// outermost.
 	written, made, size int
 	via                 *yaml.Node
-	// again says the keys visited are a mapping's read again, whose text
-	// was counted the first time (fill).
-	again bool
 	// anchored is how many anchors the node visited is under: one under
 	// none is let go of once decoded, as no alias reads it again.
 	anchored int
@@ -171,6 +174,11 @@ func (c *converting) step() error {
 	c.decoded++
 	if c.inAlias > 0 {
 		c.aliased++
+		// What it is held in, made again: a map's entry, a list's, an
+		// interface (aliasValue), with what else the input makes.
+		if err := c.make(aliasValue); err != nil {
+			return err
+		}
 	}
 	if c.aliased > 100 && c.decoded > 1000 && float64(c.aliased)/float64(c.decoded) > aliasRatio(c.decoded) {
 		return errExcessive
@@ -182,31 +190,38 @@ func (c *converting) step() error {
 }
 
 // text counts a scalar's text, the value or key visited, refusing the
-// input once its aliases have brought in more text again than an input of
-// its size may make beyond it (madeLimit), with what else it made: judged
+// input once its aliases have brought in more again than an input of its
+// size may make beyond it (madeLimit), with what else it made: judged
 // against the whole input's size where it is known, else against what was
 // written so far. copied says it came of an alias.
 func (c *converting) text(n *yaml.Node, copied bool) error {
-	switch {
-	case c.again:
-		return nil
-	case !copied:
+	if !copied {
 		c.written += len(n.Value)
 		return nil
 	}
-	c.made += len(n.Value)
+	return c.make(len(n.Value))
+}
+
+// make counts n bytes an alias brought in again (text, step).
+func (c *converting) make(n int) error {
+	c.made += n
 	size := c.size
 	if size == 0 {
 		size = c.written
 	}
 	if limit := madeLimit(size); c.made > limit {
-		anchor, line := "", 0
-		if c.via != nil {
-			anchor, line = c.via.Value, c.via.Line
-		}
-		return &MadeError{By: fmt.Sprintf("line %d: aliases, *%.40s the last, bring in their text again", line, anchor), Made: c.made, Size: size, Limit: limit}
+		return &MadeError{By: c.by(), Made: c.made, Size: size, Limit: limit}
 	}
 	return nil
+}
+
+// by names the alias whose expansion went past the bound.
+func (c *converting) by() string {
+	anchor, line := "", 0
+	if c.via != nil {
+		anchor, line = c.via.Value, c.via.Line
+	}
+	return fmt.Sprintf("line %d: aliases, *%.40s the last, bring in their text and values again", line, anchor)
 }
 
 // into notes an alias whose expansion is read, as text names it.
@@ -403,6 +418,14 @@ func (c *converting) fill(n *yaml.Node, m *mapOut, merged map[any]bool, depth in
 		}
 		seen[id] = k.Line
 	}
+	// A mapping's own keys, which a merge (<<) into it doesn't set, are
+	// kept as they are read: read again, what they count would be counted
+	// again, and one refused then left out, the merge's value set in its
+	// place.
+	var own map[any]bool
+	if merged == nil && slices.ContainsFunc(n.Content, func(k *yaml.Node) bool { return k != nil && isMerge(k) }) {
+		own = map[any]bool{}
+	}
 	var merge *yaml.Node
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		k, v := n.Content[i], n.Content[i+1]
@@ -416,6 +439,9 @@ func (c *converting) fill(n *yaml.Node, m *mapOut, merged map[any]bool, depth in
 		key, err := m.key(k, c, depth)
 		if err != nil {
 			return err
+		}
+		if own != nil {
+			own[key] = true
 		}
 		if merged != nil {
 			if merged[key] {
@@ -434,16 +460,7 @@ func (c *converting) fill(n *yaml.Node, m *mapOut, merged map[any]bool, depth in
 		return nil
 	}
 	if merged == nil {
-		// The keys set already, read again: their text was counted, and
-		// isn't again, so none is left out for the input's bound.
-		merged = map[any]bool{}
-		c.again = true
-		for i := 0; i+1 < len(n.Content); i += 2 {
-			if key, err := m.key(n.Content[i], c, depth); err == nil {
-				merged[key] = true
-			}
-		}
-		c.again = false
+		merged = own
 	}
 	into := func(x *yaml.Node) error {
 		mapping := x
@@ -559,5 +576,5 @@ func UnmarshalYAML(data []byte) (any, error) {
 	if err := yaml.Unmarshal(data, &n); err != nil {
 		return nil, err
 	}
-	return YAMLValue(&n)
+	return YAMLValueContext(counted(OneInput(context.Background()), len(data)), &n)
 }

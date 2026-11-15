@@ -11,15 +11,15 @@ import (
 )
 
 // TestMadeInputWide: what an input makes is bounded for the input, not
-// for each of its documents: 200 documents of 21 KB, each of which alone
-// reads (its group's 2,000 labels on 18 rules, some 3.9 MB made, within
-// the 4 MiB any input may make), are 4 MB together, and refused as one
+// for each of its documents: 200 documents of 18 KB, each of which alone
+// reads (its group's 2,000 labels on 16 rules, some 3.8 MB made, within
+// the 4 MiB any input may make), are 3.6 MB together, and refused as one
 // input, as FromDocs reads a version's documents, and as ReadPicked reads
 // a directory's files, in a directory below the top too. Before: per
 // document, the 200 made 1.9 GB when each rule was hashed.
 func TestMadeInputWide(t *testing.T) {
-	doc := groupBomb(2000, 18, false, false)
-	if rs, err := Parse([]byte(doc)); err != nil || len(rs) != 18 {
+	doc := groupBomb(2000, 16, false, false)
+	if rs, err := Parse([]byte(doc)); err != nil || len(rs) != 16 {
 		t.Fatalf("one document alone: %d, %v", len(rs), err)
 	}
 	var docs []Doc

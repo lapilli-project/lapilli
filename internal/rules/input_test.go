@@ -12,18 +12,22 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// aliased is a YAML document of some 100,000 values, 90% of them what
+// aliased is a YAML document of some 60,000 values, 83% of them what
 // aliases expand to: within yaml.v3's bound on one document (99% of one of
-// 400,000 values at most), and so each of a stream of them.
+// 400,000 values at most), and within what one input may make (some 3.3
+// MB of values brought in again, aliasValue each), and so each of a stream
+// of them.
 func aliased(name string) string {
-	return name + ": &a [" + strings.Repeat("x, ", 9999) + "x]\n" + name + "s: [" + strings.Repeat("*a, ", 8) + "*a]\n"
+	return name + ": &a [" + strings.Repeat("x, ", 9999) + "x]\n" + name + "s: [" + strings.Repeat("*a, ", 4) + "*a]\n"
 }
 
 // What aliases expand to is counted for an input, not for each of its
-// documents: twenty documents of 90% aliases, each of which yaml.v3 reads,
-// are some 2,000,000 values in all, and past some 770,000 a stream may be
-// less than 90% aliases. So too the files of a directory, the pieces a
-// stream is picked in, and the rule files a ConfigMap holds.
+// documents: twenty documents of 83% aliases, each of which yaml.v3 reads,
+// are some 1,200,000 values in all, and past some 770,000 a stream may be
+// less than 79% aliases; they are some 65 MB of values brought in again,
+// past what a stream of 600 KB may make. Either refuses the stream. So too
+// the files of a directory, the pieces a stream is picked in, and the rule
+// files a ConfigMap holds.
 func TestAliasesCountedPerInput(t *testing.T) {
 	var docs []string
 	for i := range 20 {
@@ -39,7 +43,7 @@ func TestAliasesCountedPerInput(t *testing.T) {
 	}
 	excessive := func(what string, err error) {
 		t.Helper()
-		if err == nil || !strings.Contains(err.Error(), "excessive aliasing") {
+		if err == nil || !strings.Contains(err.Error(), "excessive aliasing") && !refused(err) {
 			t.Errorf("%s: %v", what, err)
 		}
 	}
@@ -62,12 +66,14 @@ func TestAliasesCountedPerInput(t *testing.T) {
 	// the rest.
 	ctx := OneInput(context.Background())
 	parseContext(ctx, []byte(cm.String()), nil)
-	if n := ctx.Value(inputKey{}).(*input).decoded; n < 500000 || n > 1500000 {
+	if n := ctx.Value(inputKey{}).(*input).decoded; n <= 60000 || n > 1500000 {
 		t.Errorf("a ConfigMap's rule files: %d values decoded, counted as of the ConfigMap", n)
 	}
-	// A directory's files.
+	// A directory's files of rules; one passed over, holding none, gives
+	// back what it counted.
 	dir := t.TempDir()
 	for i, d := range docs {
+		d += "groups: [{name: g, rules: [{alert: A, expr: up}]}]\n"
 		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%02d.yaml", i)), []byte(d), 0o600); err != nil {
 			t.Fatal(err)
 		}

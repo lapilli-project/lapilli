@@ -33,7 +33,7 @@ func bomb(size, n int) string {
 func TestAliasText(t *testing.T) {
 	var made *MadeError
 	start := time.Now()
-	if _, err := Parse([]byte(bomb(8<<20, 300))); !errors.As(err, &made) || !strings.Contains(err.Error(), "*big the last, bring in their text again") {
+	if _, err := Parse([]byte(bomb(8<<20, 300))); !errors.As(err, &made) || !strings.Contains(err.Error(), "*big the last, bring in their text and values again") {
 		t.Errorf("an 8 MB anchor aliased 300 times: %v", err)
 	}
 	t.Logf("an 8 MB anchor aliased 300 times: refused in %v", time.Since(start))
@@ -96,7 +96,7 @@ func TestAliasTextWholeDocument(t *testing.T) {
 }
 
 // TestMergeKeysCountedOnce: the keys of a mapping with a merge (<<) are
-// read twice, the second time to know which the merge doesn't set, and
+// read once, kept as they are to know which the merge doesn't set, and
 // their text is counted once.
 func TestMergeKeysCountedOnce(t *testing.T) {
 	ctx := OneInput(t.Context())
@@ -109,9 +109,10 @@ func TestMergeKeysCountedOnce(t *testing.T) {
 	}
 	in := ctx.Value(inputKey{}).(*input)
 	// Written: k, kkkk, m, x, 1, b, 2, y, 3, and <<'s key isn't text;
-	// made: *k as a key (4), and the merged x and 1 (2).
-	if in.written != 1+4+1+1+1+1+1+1+1 || in.made != 4+2 {
-		t.Errorf("written %d, made %d; want 12, 6", in.written, in.made)
+	// made: *k as a key (4), and the merged x and 1 (2), each a value
+	// brought in again (aliasValue).
+	if want := 4 + 2 + 2*aliasValue; in.written != 1+4+1+1+1+1+1+1+1 || in.made != want {
+		t.Errorf("written %d, made %d; want 12, %d", in.written, in.made, want)
 	}
 }
 

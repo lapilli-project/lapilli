@@ -56,7 +56,7 @@ func manyLabels(n int, mark bool) string {
 		fmt.Fprintf(&b, "l%04d: v", i)
 	}
 	if mark {
-		b.WriteString(", turn: \"x‎y\"")
+		b.WriteString(", turn: \"x\u200ey\"")
 	}
 	b.WriteString("}")
 	return b.String()
