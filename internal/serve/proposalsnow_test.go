@@ -1239,3 +1239,40 @@ func TestPRBodyIDsAsCode(t *testing.T) {
 		}
 	}
 }
+
+// TestReadTimeFailsSoft: what a proposal says when it is read is shown,
+// not decided by: an older version that won't parse leaves a proposal made
+// against it saying the for_outlasts it kept, the read going on; and when
+// which proposals are stale can't be read at all, carrying out changes
+// goes on without approving any as fewer approvals are needed, those to
+// wait for approval again among them.
+func TestReadTimeFailsSoft(t *testing.T) {
+	ctx := context.Background()
+	s, dir := restartsServer(t, nil)
+	ids := againstVersions(t, s, dir, 1, 2, ledger.StateApproved)
+	p := state(t, s, ids[0])
+	vs, err := s.l.Versions(ctx, p.Made, p.Made, false)
+	if err != nil || len(vs) == 0 {
+		t.Fatal(vs, err)
+	}
+	ledgerExec(t, s, "UPDATE versions SET docs = '{}' WHERE id = ?", vs[len(vs)-1].ID)
+	ls, err := s.linesNow(ctx, []ledger.Proposal{p})
+	if err != nil || ls[0].Outlasts != nil {
+		t.Fatalf("an old version that won't parse: %v %+v", err, ls[0].Outlasts)
+	}
+	// Approved by one, with --approvals raised to two; the rules in effect
+	// unreadable: it waits for approval again all the same.
+	s2, _ := restartsServer(t, nil)
+	id := proposeFor(t, s2.Handler(), "15m")
+	if _, err := s2.l.Approve(ctx, id, ana, 1, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	s2.cfg.Approvals = 2
+	ledgerExec(t, s2, "UPDATE versions SET docs = '{}' WHERE id = (SELECT max(id) FROM versions)")
+	if err := s2.carryOut(ctx); err != nil {
+		t.Errorf("carrying out: %v", err)
+	}
+	if p := state(t, s2, id); p.State != ledger.StateProposed {
+		t.Errorf("approved by fewer than are needed now: %s", p.State)
+	}
+}

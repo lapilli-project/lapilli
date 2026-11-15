@@ -1346,11 +1346,12 @@ func (s *Server) carryOut(ctx context.Context) error {
 	// Approved before --approvals was lowered: moved on, unless it waits
 	// to be backtested again (held); before it was raised, and not yet
 	// carried out or taken by a recipe: approved again.
-	held, err := s.heldPromotable(ctx)
-	if err != nil {
-		return err
-	}
-	if _, err := s.l.Promote(ctx, s.approvals(), held); err != nil {
+	// Which wait to be backtested again is read for what it shows, of the
+	// rules in effect and the record: if that can't be read, none is
+	// approved so this round, and the rest goes on.
+	if held, err := s.heldPromotable(ctx); err != nil {
+		s.log.Warn("no proposal approved as fewer approvals are needed this round: which are stale couldn't be read", "err", err)
+	} else if _, err := s.l.Promote(ctx, s.approvals(), held); err != nil {
 		return err
 	}
 	if _, err := s.l.Demote(ctx, s.approvals()); err != nil {

@@ -291,7 +291,12 @@ func (s *Server) outlastsNow(ctx context.Context, ls []proposalLine, evs []evide
 		l.Outlasts = ev.Outlasts // unless its version is read below
 		vs, err := s.l.Versions(ctx, l.Made, l.Made, false)
 		if err != nil {
-			return err
+			// Shown, not decided by: what it kept, this time.
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			s.log.Debug("a proposal's for_outlasts read as kept", "proposal", l.ID, "err", err)
+			continue
 		}
 		if len(vs) == 0 {
 			s.outlasts.put(k, l.Outlasts)
@@ -312,7 +317,13 @@ func (s *Server) outlastsNow(ctx context.Context, ls []proposalLine, evs []evide
 			return namedRules{all, names}, err
 		})
 		if err != nil {
-			return err
+			// A version that won't parse, or a read that failed: those made
+			// against it say what they kept, this time.
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			s.log.Debug("proposals' for_outlasts read as kept", "version", id, "err", err)
+			continue
 		}
 		for _, i := range older[id] {
 			l := &ls[i]
