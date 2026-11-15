@@ -323,6 +323,9 @@ type Server struct {
 	// proposals were made against.
 	outlasts outlasts
 	parsing  flights[namedRules]
+	// againFailed are the stale proposals Lapilli failed to backtest again
+	// itself (backtestStale).
+	againFailed againFailed
 	// heavy is the one turn there is for a request that takes hundreds of
 	// megabytes: every firing of a month, the settings tried over a week.
 	heavy chan struct{}

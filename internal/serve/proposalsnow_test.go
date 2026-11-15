@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"html"
 	"net/http"
 	"net/http/httptest"
@@ -58,18 +59,24 @@ var (
 // no for_outlasts, as 0.40 didn't.
 func keptAs(t *testing.T, s *Server, semantics int, version string, from, to time.Time, noRecord *bool) int64 {
 	t.Helper()
+	return keptFor(t, s, "RestartsNow", semantics, version, from, to, noRecord)
+}
+
+// keptFor is keptAs of another rule of the pods group, by its name.
+func keptFor(t *testing.T, s *Server, rule string, semantics int, version string, from, to time.Time, noRecord *bool) int64 {
+	t.Helper()
 	ctx := context.Background()
-	f, err := s.current(ctx, "RestartsNow", false)
+	f, err := s.current(ctx, rule, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	hour := time.Hour
 	want := f.rule
 	want.For = hour
-	ev := evidence{From: "suggestion", Edit: &rules.Edit{Name: "RestartsNow", Group: "pods", For: &hour}, For: hour, Semantics: semantics, Version: version,
+	ev := evidence{From: "suggestion", Edit: &rules.Edit{Name: rule, Group: "pods", For: &hour}, For: hour, Semantics: semantics, Version: version,
 		Backtest: &backtest{From: from, To: to, Before: side{Firings: 141}, After: side{Firings: 3}, Lost: []string{}, Gained: []string{}, Later: []string{}, NoRecord: noRecord}}
 	raw, _ := json.Marshal(ev)
-	id, err := s.l.Propose(ctx, ledger.Proposal{Rule: "RestartsNow", Kind: ledger.KindFor, Path: ledger.PathGit, MadeBy: ledger.Proposer,
+	id, err := s.l.Propose(ctx, ledger.Proposal{Rule: rule, Kind: ledger.KindFor, Path: ledger.PathGit, MadeBy: ledger.Proposer,
 		Source: f.doc.Source, DocHash: rules.Hash(f.doc.Data), Before: ruleText(f.rule), BeforeHash: ruleHash(f.rule),
 		After: ruleText(want), AfterHash: ruleHash(want), Diff: rules.Diff("restarts.yaml", []byte(ruleText(f.rule)), []byte(ruleText(want))), Evidence: raw})
 	if err != nil {
@@ -894,5 +901,62 @@ func TestPromoteHoldsStale(t *testing.T) {
 	}
 	if p := state(t, s, fresh); p.State == ledger.StateProposed {
 		t.Errorf("a fresh one not approved as fewer approvals are needed: %s", p.State)
+	}
+}
+
+// TestLapilliBacktestsStale: Lapilli backtests stale proposals waiting for
+// approval again itself, as Lapilli, in its work, a few a round, the
+// longest unmoved first: its own, which no one would ask for, too. One
+// whose rule changed since is left for a person; one it can't is left for
+// an hour.
+func TestLapilliBacktestsStale(t *testing.T) {
+	ctx := context.Background()
+	s, dir := restartsServer(t, nil)
+	var b strings.Builder
+	b.WriteString(restartsFile)
+	for i := 0; i < againARun+2; i++ {
+		fmt.Fprintf(&b, "      - {alert: Restarts%d, expr: 'increase(restarts[30m]) > 0.5', for: 1m}\n", i)
+	}
+	os.WriteFile(filepath.Join(dir, "restarts.yaml"), []byte(b.String()), 0o644)
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	for i := 0; i < againARun+2; i++ {
+		ids = append(ids, keptFor(t, s, fmt.Sprintf("Restarts%d", i), 0, "", unrecordedFrom, unrecordedTo, nil))
+	}
+	// The rule of the first changed since: left for a person.
+	changed := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
+	os.WriteFile(filepath.Join(dir, "restarts.yaml"), []byte(strings.Replace(b.String(), "> 0.5\n        for: 1m", "> 1.5\n        for: 1m", 1)), 0o644)
+	if err := s.look(ctx, new(string)); err != nil {
+		t.Fatal(err)
+	}
+	backtested := func() (n int) {
+		for _, id := range ids {
+			if proposalEvidence(state(t, s, id)).Semantics == verdict.Semantics {
+				n++
+			}
+		}
+		return n
+	}
+	s.jobs(ctx, false)
+	if n := backtested(); n != againARun {
+		t.Errorf("one round backtested %d again, want %d", n, againARun)
+	}
+	if proposalEvidence(state(t, s, changed)).Semantics != 0 {
+		t.Error("one whose rule changed since was backtested again")
+	}
+	steps, _, _ := s.l.ProposalSteps(ctx, ids[0], 10)
+	if len(steps) == 0 || steps[len(steps)-1].By != ledger.Proposer || !strings.HasSuffix(steps[len(steps)-1].What, "backtested again") {
+		t.Errorf("not as Lapilli: %+v", steps)
+	}
+	s.jobs(ctx, false)
+	if n := backtested(); n != len(ids) {
+		t.Errorf("two rounds backtested %d again, want all %d", n, len(ids))
+	}
+	// Not while it reads no rules of its own, nor read-only.
+	s.cfg.ReadOnly = true
+	if err := s.backtestStale(ctx); err != nil {
+		t.Fatal(err)
 	}
 }

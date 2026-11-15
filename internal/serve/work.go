@@ -190,6 +190,11 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 			}
 		}
 	}
+	if s.replaying() && s.still(ctx) {
+		if err := s.backtestStale(ctx); err != nil {
+			s.fail("backtesting stale proposals again", err)
+		}
+	}
 	if !s.still(ctx) {
 		return
 	}

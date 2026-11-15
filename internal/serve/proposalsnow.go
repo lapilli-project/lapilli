@@ -510,6 +510,13 @@ var errHeld = bad("it is stale, so it isn't approved until it is backtested agai
 // found in effect, then the rules read again from where they are kept;
 // refused when the rule changed since.
 func (s *Server) backtestAgain(ctx context.Context, id int64, by string, agent bool) error {
+	return s.backtestAgainOf(ctx, id, by, agent, false)
+}
+
+// backtestAgainOf is backtestAgain, wait saying to wait for a comparison
+// running, as Lapilli's own work does; a person asking is told to try
+// again.
+func (s *Server) backtestAgainOf(ctx context.Context, id int64, by string, agent, wait bool) error {
 	if !s.replaying() {
 		return bad("this lapilli serve reads no rules of its own: there is nothing to change")
 	}
@@ -571,7 +578,7 @@ func (s *Server) backtestAgain(ctx context.Context, id int64, by string, agent b
 	if errors.As(err, &no) {
 		return errRuleChanged
 	}
-	bt, err := s.backtest(ctx, f.name, f.rule, want, false)
+	bt, err := s.backtest(ctx, f.name, f.rule, want, wait)
 	if err != nil {
 		return err
 	}
@@ -590,6 +597,97 @@ func (s *Server) backtestAgain(ctx context.Context, id int64, by string, agent b
 	_, _, err = s.l.BacktestAgain(ctx, p.ID, by, agent, p.Evidence, raw,
 		map[string]any{"backtest": ev.Backtest, "version": ev.Version}, map[string]any{"backtest": bt, "version": again.Version})
 	return err
+}
+
+// againARun is how many stale proposals Lapilli backtests again itself in
+// a round of its work, at most, one at a time, each within --timeout: after
+// verdict.Semantics changes, every one waiting is, a few each round.
+const againARun = 3
+
+// againRetry is how long Lapilli leaves a proposal it failed to backtest
+// again itself before it tries again.
+const againRetry = time.Hour
+
+// againFailed are, by proposal, when Lapilli last failed to backtest one
+// again itself (this replica's: the next leader tries again).
+type againFailed struct {
+	sync.Mutex
+	m map[int64]time.Time
+}
+
+// backtestStale backtests again itself, as Lapilli (ledger.Proposer), the
+// proposals waiting for approval that are stale, the longest unmoved
+// first, againARun at most: those an upgrade that changes how a backtest
+// replays or judges left waiting, Lapilli's own among them, which no one
+// would otherwise ask for, and those whose period's record changed since.
+// Each under the heavy turn, as a person's is, waiting for a comparison
+// running; never one whose rule changed since (it is proposed again), one
+// backtested again in the last ten minutes, or one it failed to in the
+// last hour. Approvals withdrawn so are told, as any are.
+func (s *Server) backtestStale(ctx context.Context) error {
+	if !s.replaying() || s.cfg.ReadOnly {
+		return nil
+	}
+	heads, err := s.l.ProposalList(ctx, ledger.ProposalPick{States: []string{ledger.StateProposed}}, staleMost)
+	if err != nil || len(heads) == 0 {
+		return err
+	}
+	ps := make([]ledger.Proposal, len(heads))
+	for i, h := range heads {
+		ps[i] = h.Proposal
+	}
+	ls, err := s.linesNow(ctx, ps)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	s.againFailed.Lock()
+	ls = slices.DeleteFunc(ls, func(l proposalLine) bool {
+		return l.StaleWhy == nil || l.Stale || now.Sub(s.againFailed.m[l.ID]) < againRetry
+	})
+	s.againFailed.Unlock()
+	slices.SortFunc(ls, func(a, b proposalLine) int {
+		if c := a.Updated.Compare(b.Updated); c != 0 {
+			return c
+		}
+		return int(a.ID - b.ID)
+	})
+	n := 0
+	for _, l := range ls {
+		if n == againARun || !s.still(ctx) {
+			break
+		}
+		err := s.backtestAgainOf(ctx, l.ID, ledger.Proposer, false, true)
+		var b badRequest
+		switch {
+		case err == nil:
+			n++
+		case errors.Is(err, ledger.ErrBacktestedJustNow), errors.Is(err, ledger.ErrMoved), errors.Is(err, errFresh):
+			// Done by someone else meanwhile, or moved on.
+		case errors.Is(err, errBusy):
+			return nil // a person's heavy request has the turn: the next round
+		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil:
+			return err
+		case errors.As(err, &b), errors.Is(err, errRuleChanged):
+			// Its rule changed, or it can't be: left for a person.
+			s.againFailed.Lock()
+			if s.againFailed.m == nil {
+				s.againFailed.m = map[int64]time.Time{}
+			}
+			s.againFailed.m[l.ID] = now
+			s.againFailed.Unlock()
+			n++
+		default:
+			s.againFailed.Lock()
+			if s.againFailed.m == nil {
+				s.againFailed.m = map[int64]time.Time{}
+			}
+			s.againFailed.m[l.ID] = now
+			s.againFailed.Unlock()
+			return err
+		}
+	}
+	return nil
 }
 
 // postBacktestAgain is "Backtest again" on a stale proposal's page: an

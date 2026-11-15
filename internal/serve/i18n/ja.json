@@ -1613,5 +1613,6 @@
  "lapilli: an agent, for %s, backtested #%d, %s for %s, again": "lapilli: エージェントが %[1]s さんの代わりに #%[2]d、%[4]s の %[3]s のバックテストをやり直しました",
  "lapilli: an agent, for %s, backtested #%d, %s for %s, again, and withdrew the approvals of %s": "lapilli: エージェントが %[1]s さんの代わりに #%[2]d、%[4]s の %[3]s のバックテストをやり直し、%[5]s さんの承認が取り消されました",
  "you have backtested as many proposals again in the last hour as anyone may: try again later": "この 1 時間にやり直せるだけのバックテストをやり直しました。後でもう一度試してください",
- "it was backtested again less than ten minutes ago: try again in a few minutes": "10 分以内にバックテストをやり直したばかりです。数分後にもう一度試してください"
+ "it was backtested again less than ten minutes ago: try again in a few minutes": "10 分以内にバックテストをやり直したばかりです。数分後にもう一度試してください",
+ "backtesting stale proposals again": "古い提案のバックテストのやり直し"
 }
