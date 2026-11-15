@@ -970,4 +970,14 @@ func TestGivenBackDeclaredAgain(t *testing.T) {
 	if gb, _ := l.GivenBack(ctx); len(gb) != 0 {
 		t.Errorf("given back still: %+v", gb)
 	}
+	// Given back again, and a file without the report, pruned: deleted.
+	reconcile(t, l, Declared{}, Leave{NoFile: true})
+	d := declaredOf()
+	d.Reports = nil
+	if r, _ := reconcile(t, l, d, Leave{Prune: true}); r != (Reconciled{Adopted: 4, Deleted: 1}) {
+		t.Errorf("without the report: %+v", r)
+	}
+	if rs, _ := l.Scheduleds(ctx); len(rs) != 0 {
+		t.Errorf("reports: %+v", rs)
+	}
 }
