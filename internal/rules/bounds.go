@@ -10,35 +10,44 @@ import (
 
 // What an input of rules may make beyond its own text, however it makes it,
 // counted for the whole input (OneInput: a file, a directory's files, a
-// stream's documents, a ConfigMap's rule files, a ruler's namespaces, a
-// version's documents in the ledger): ExpandMin at least, past it
-// ExpandTimes its size, and MaxMade at most. It is charged where a copy is
-// made, before it is made, so that an input refused never makes what it
-// would have:
+// stream's documents, a ConfigMap's rule files, a ruler's namespace, the
+// documents of one source in a version kept in the ledger): ExpandMin at
+// least, past it ExpandTimes its size, and MaxMade at most; inputs read
+// together (Together: a ruler's namespaces, a version's sources, a
+// directory's files passed over) MaxMade in all. It is charged where a
+// copy is made, before it is made, so that an input refused never makes
+// what it would have:
 //
-//   - the text YAML aliases bring in again (YAMLValue): yaml.v3's bound
-//     counts values, not their text, and one string of 8 MB under an anchor,
-//     aliased by 300 rules' labels, was 2.4 GB of labels;
-//   - a group's labels, on each of its rules (prometheus): each alert rule's
-//     alerts carry them (Rule.AlertLabels, Rule.Whole, the replay's), which
-//     is worked out for each rule wherever its rules are judged, shown or
-//     hashed, and each recording rule has a copy of its own. A group of
-//     9,999 labels on 6,700 recording rules, a file of 286 KB, made 4.2 GB;
+//   - what YAML aliases bring in again (YAMLValue): its text, and the maps
+//     and lists its values are held in (aliasValue); yaml.v3's bound counts
+//     values, not their text, and one string of 8 MB under an anchor,
+//     aliased by 100 rules' labels, made 5.1 GB, parsed and hashed;
+//   - a group's labels and its name, on each of its rules (prometheus,
+//     grafana, azure, fromAPI, a Google policy's): each alert rule's alerts
+//     carry its labels, and its key holds its name (Rule.AlertLabels,
+//     Rule.Key, Rule.Whole, the replay's), worked out for each rule wherever
+//     its rules are judged, shown or hashed, and each recording rule has a
+//     copy of its labels of its own. A group of 9,999 labels on 6,700
+//     recording rules, a file of 286 KB, made 4.2 GB; a name of 1 MiB with
+//     a direction mark on 1,000 rules kept 1.07 GB;
 //   - a Google Rules' namespace, and an Azure rule group's cluster, put into
 //     each selector of each rule's expression (scopeWith): a namespace of
 //     40 KB on 1,000 rules of 16 selectors, a file of 99 KB, made 6.5 GB,
-//     read and hashed.
+//     read and hashed;
+//   - a ruler's namespace or an alarm's, on each of its rules (FromDocs);
+//   - a document picked out of a stream and written afresh, its aliases in
+//     full (written).
 //
 // Real sets are far inside it: their text is what they make, but for the
-// labels a group shares, some hundreds of bytes a rule, and annotations
-// shared by an alias. kube-prometheus-stack's rules four times over, each
-// group with labels of its own, make 1.5 MB of the 100 MB they may; 5,000
-// rules, a group's 300 bytes of labels on each and 800 bytes of
-// annotations shared by an alias, 6.8 MB beyond a file of 1 MB
+// labels and name a group shares, some hundreds of bytes a rule, and what
+// is shared by aliases. kube-prometheus-stack's rules four times over, each
+// group with labels of its own, make 1.8 MB of the 208 MB they may; 5,000
+// rules sharing six labels and three annotations by aliases, 10.4 MB of
+// the 20 MB a file of 648 KB may, at 16 times its size more than it may
 // (TestRealSetsRead).
 const (
 	ExpandMin   = 4 << 20
-	ExpandTimes = 16
+	ExpandTimes = 32
 	MaxMade     = 256 << 20
 )
 

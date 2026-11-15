@@ -79,6 +79,20 @@ func realistic(n int) string {
 	return b.String()
 }
 
+// anchored is n rules as a file written with YAML anchors is: each rule's
+// labels, six, and annotations, three, some 900 bytes, shared by aliases.
+func anchored(n int) string {
+	var b strings.Builder
+	b.WriteString("groups:\n- name: g\n  rules:\n")
+	desc := strings.Repeat("The error budget burns faster than it should; see the runbook. ", 12)
+	fmt.Fprintf(&b, "  - alert: R0\n    expr: up == 0\n    labels: &common {team: payments, env: production, tier: critical, owner: sre, service: api, region: eu-west-1}\n"+
+		"    annotations: &said {summary: \"Errors are high\", description: %q, runbook_url: \"https://runbooks.example.com/errors\"}\n", desc)
+	for i := 1; i < n; i++ {
+		fmt.Fprintf(&b, "  - alert: R%d\n    expr: sum(rate(errors_total{job=\"api-%d\"}[5m])) > 0.05\n    for: 5m\n    labels: *common\n    annotations: *said\n", i, i)
+	}
+	return b.String()
+}
+
 // terse is n rules as tersely as a real file writes them, in flow style,
 // each its severity and no more, in groups of 50 with three labels each.
 func terse(n int) string {
@@ -99,7 +113,8 @@ func terse(n int) string {
 // descriptions written out in full), as a stream, a file read with its
 // recording rules, a directory of its documents and a ConfigMap; 5,000
 // rules sharing a group's 300 bytes of labels and 800 of annotations by an
-// alias; 10,000 written tersely, each group's three labels on each; and
+// alias; 10,000 written tersely, each group's three labels on each; 5,000
+// sharing six labels and three annotations by YAML aliases; and
 // labels past 16 KiB, which Prometheus takes, in a file and from its API,
 // as a version of the rules kept in the ledger before this bound holds
 // them.
@@ -122,6 +137,7 @@ func TestRealSetsRead(t *testing.T) {
 	read("kube-prometheus-stack, four times over", kubeStack(4, false), 140*4*6)
 	read("5,000 rules, a group's labels and annotations shared", realistic(5000), 5000)
 	read("10,000 rules written tersely, a group's labels on each", terse(10000), 10000)
+	read("5,000 rules sharing six labels and three annotations by aliases", anchored(5000), 5000)
 
 	rs, rec, err := readWithRecordings(t, stack)
 	if err != nil || len(rs) != 140*4*6 || len(rec) != 140*4*3 || rec[0].Labels["team"] != "platform-observability-0" {
