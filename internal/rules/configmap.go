@@ -161,7 +161,7 @@ func unescaped(b []byte) []byte {
 		case 'x', 'u', 'U':
 			n := map[byte]int{'x': 2, 'u': 4, 'U': 8}[e]
 			if i+n < len(b) {
-				if v, err := strconv.ParseUint(string(b[i+1:i+1+n]), 16, 32); err == nil {
+				if v, err := strconv.ParseUint(string(b[i+1:i+1+n]), 16, 32); err == nil && v <= utf8.MaxRune {
 					out = utf8.AppendRune(out, rune(v))
 					i += n
 					continue
