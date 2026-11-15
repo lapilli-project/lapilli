@@ -50,7 +50,7 @@ func TestNotifyStatusSent(t *testing.T) {
 		c.NotifyWebhook, c.ReportDests, c.TeamDigests = hook, map[string]string{"ops": hook, "sre": hook}, map[string]string{"payments": hook}
 	})
 	h := s.Handler()
-	for i := range 3 {
+	for i := range 4 {
 		if _, err := s.l.PutTask(ctx, ledger.Task{Title: "t" + itoa(int64(i)), Kind: "tune"}, "ana"); err != nil {
 			t.Fatal(err)
 		}
@@ -60,23 +60,30 @@ func TestNotifyStatusSent(t *testing.T) {
 		t.Errorf("/manage doesn't say nothing was sent yet:\n%s", body)
 	}
 	due, err := s.l.Due(ctx, "webhook", time.Now().Add(time.Minute), 10)
-	if err != nil || len(due) != 3 {
+	if err != nil || len(due) != 4 {
 		t.Fatalf("%d due: %v", len(due), err)
 	}
 	if err := s.l.Sent(ctx, due[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range due[1:] {
+	for _, n := range due[1:3] {
 		if err := s.l.Failed(ctx, n.ID, "503"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// One given up on, after ten tries: said apart.
+	for range ledger.GiveUpAfter {
+		if err := s.l.Failed(ctx, due[3].ID, "503"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Sending is written aside, and empties no page kept: these are
 	// worked out again.
-	for p, failed := range map[string]string{"/manage": "2 notices failed in the last day.",
-		"/settings": "2 notices made in the last day weren&#39;t sent: their last try failed, and the log says why."} {
+	for p, failed := range map[string][2]string{"/manage": {"2 notices failed in the last day.", "1 notice was given up on in the last day."},
+		"/settings": {"2 notices made in the last day weren&#39;t sent: their last try failed, and the log says why.",
+			"1 notice made in the last day was given up on, after ten tries: the log says why."}} {
 		_, body, hd := get(t, h, p)
-		for _, x := range []string{"Last sent from the outbox: ", failed} {
+		for _, x := range []string{"Last sent from the outbox: ", failed[0], failed[1]} {
 			if !strings.Contains(body, x) {
 				t.Errorf("%s lacks %q:\n%s", p, x, body)
 			}
@@ -202,9 +209,9 @@ func TestNotifyStatusTexts(t *testing.T) {
 	for _, n := range names {
 		for day := range 7 {
 			for _, st := range []notifyStatus{
-				{Sends: true, Failed: 3, Backlog: true, Counted: 1000, DigestOn: true, DigestNowhere: true, Posted: &digestPosted{At: now, FailedTo: now, Failed: true}, Loc: time.UTC},
-				{Sends: true, Failed: 1, ReportsNowhere: 1, DigestOn: true, DigestSet: true, DigestNowhere: true, Posted: &digestPosted{}, Loc: time.UTC},
-				{Sends: true, LastSent: now, Failed: 2, ReportsNowhere: 2, DigestOn: true, Posted: &digestPosted{To: now}, Loc: time.UTC},
+				{Sends: true, Failed: 3, Backlog: true, GivenUp: 1000, GivenUpMore: true, Counted: 1000, DigestOn: true, DigestNowhere: true, Posted: &digestPosted{At: now, FailedTo: now, Failed: true}, Loc: time.UTC},
+				{Sends: true, Failed: 1, GivenUp: 1, ReportsNowhere: 1, DigestOn: true, DigestSet: true, DigestNowhere: true, Posted: &digestPosted{}, Loc: time.UTC},
+				{Sends: true, LastSent: now, Failed: 2, GivenUp: 2, ReportsNowhere: 2, DigestOn: true, Posted: &digestPosted{To: now}, Loc: time.UTC},
 			} {
 				st.DigestWhen = weeklyText(n.Code, Weekly{time.Weekday(day), 9, 0})
 				for _, tpl := range []string{"notifystatus", "notifycard"} {

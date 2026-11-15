@@ -39,12 +39,18 @@ type notifyStatus struct {
 	Reports, ReportsNowhere int // reports on, and of them those with nowhere to go
 	Sends                   bool
 	LastSent                time.Time
-	// Failed are the notices made in the last day whose last try failed, of
-	// the latest unsent ledger.FailedCounted a place has; Backlog, that a
-	// place has more unsent than those, which aren't looked through.
-	Failed  int
-	Backlog bool
-	Counted int
+	// Failed are the notices made in the last day whose last try failed and
+	// that wait to be tried again, of the latest ledger.FailedCounted
+	// waiting a place has; Backlog, that a place has more waiting than
+	// those, which aren't looked through. GivenUp are those made in the last
+	// day given up on, after ledger.GiveUpAfter tries, said apart, so that a
+	// place given up on long ago hides none of the day's; GivenUpMore, that
+	// there were more than Counted.
+	Failed      int
+	Backlog     bool
+	GivenUp     int
+	GivenUpMore bool
+	Counted     int
 	// Posted is, when the digest goes to Slack, posted there itself, not
 	// through the outbox, how its posts went, as the ledger has it.
 	Posted *digestPosted
@@ -130,6 +136,7 @@ func (s *Server) notifyStatus(ctx context.Context, lang string) (*notifyStatus, 
 		return nil, err
 	}
 	n.LastSent, n.Failed, n.Backlog, n.Counted = st.LastSent, st.Failed, st.More, ledger.FailedCounted
+	n.GivenUp, n.GivenUpMore = st.GivenUp, st.GivenUpMore
 	return n, nil
 }
 
