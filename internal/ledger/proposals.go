@@ -56,6 +56,10 @@ const (
 	// in review: the rule reads as neither it was nor as proposed, so the
 	// change approved isn't the one in effect.
 	StateAmended = "amended"
+	// StateExpired is a proposal that waited for approval longer than
+	// lapilli serve's --proposals-expire: closed, and its rule free for
+	// another.
+	StateExpired = "expired"
 
 	// Proposer is who the proposals Lapilli makes itself are made by, and
 	// ChangesCopier who a recipe with the changes token acts as. Neither is
@@ -591,6 +595,26 @@ func (l *Ledger) Move(ctx context.Context, id int64, from []string, to, by strin
 		return nil
 	})
 	return p, err
+}
+
+// WaitingSince are the proposals waiting for approval made at cutoff or
+// before, the earliest made first, most at most: those --proposals-expire
+// closes. One being backtested again waits all the same.
+func (l *Ledger) WaitingSince(ctx context.Context, cutoff time.Time, most int) ([]int64, error) {
+	rows, err := l.r.QueryContext(ctx, "SELECT id FROM proposals WHERE state = ? AND made <= ? ORDER BY made, id LIMIT ?", StateProposed, cutoff.Unix(), most)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // BacktestsAnHour is how many proposals one person backtests again in an
