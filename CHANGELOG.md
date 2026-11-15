@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.44.1] - 2026-11-16
+
 A security fix: what a rules input makes beyond its own text is bounded,
 for the input and for the inputs read together, where it is made; and a
 rule file Lapilli refuses is said, never passed over unseen. No ledger
