@@ -47,11 +47,47 @@ func labelledServer(t *testing.T, rulesYAML string, change func(*Config)) *Serve
 	return s
 }
 
+// suggested are the teams suggested, each as key=value, its rules and why
+// it isn't made.
+func suggested(sg teamSuggestions) string {
+	var out []string
+	for _, l := range sg.Lines {
+		out = append(out, fmt.Sprintf("%s=%s %d %s", l.Key, l.Value, l.Rules, l.Why))
+	}
+	return strings.Join(out, "; ")
+}
+
+// withoutFrag is a Location as a browser asks for it, without its fragment.
+func withoutFrag(loc string) string { return strings.SplitN(loc, "#", 2)[0] }
+
+// madeTo is where "Make these teams" went: the made teams' names, as the
+// ids it names are, and the page it went to.
+func madeTo(t *testing.T, s *Server, loc string) []string {
+	t.Helper()
+	u, err := url.Parse(loc)
+	if err != nil || u.Path != "/teams" || u.Fragment != "suggested" {
+		t.Fatalf("making them went to %q", loc)
+	}
+	teams, err := s.l.Teams(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, v := range u.Query()["made"] {
+		for _, tm := range teams {
+			if itoa(tm.ID) == v {
+				names = append(names, tm.Name)
+			}
+		}
+	}
+	return names
+}
+
 // TestTeamsSuggested: with no team, the Teams page suggests the teams the
 // rules' labels name, each with the rules it would own; an admin makes them
-// with one button, each as the team form would, and the result is said
-// once; then nothing is suggested, and a rule's page says its label is why
-// it is its team's.
+// with one button, each as the team form would, and the result names the
+// teams made, once; a value that isn't a plain name is left to make by
+// hand, said so; and a rule's page says its label is why it is its team's.
 func TestTeamsSuggested(t *testing.T) {
 	ctx := context.Background()
 	s := labelledServer(t, labelledRules, nil)
@@ -61,16 +97,8 @@ func TestTeamsSuggested(t *testing.T) {
 		t.Fatal(err)
 	}
 	sg := s.suggestTeams(o)
-	got := map[string]string{}
-	for _, l := range sg.Lines {
-		got[l.Value] = fmt.Sprintf("%s=%s %d", l.Key, l.Value, l.Rules)
-	}
-	want := map[string]string{"payments": "team=payments 3", "search": "team=search 1", "cart": "owner=cart 1"}
-	if fmt.Sprint(got) != fmt.Sprint(want) || sg.Make != 3 || sg.Unnamed != 1 || sg.More != 0 {
-		t.Fatalf("suggested %v (make %d, unnamed %d, more %d), want %v, 3, 1, 0", got, sg.Make, sg.Unnamed, sg.More, want)
-	}
-	if sg.Lines[0].Value != "payments" {
-		t.Errorf("the team with the most rules isn't first: %+v", sg.Lines)
+	if got := suggested(sg); got != "team=payments 3 ; team=a/b 1 hand; owner=cart 1 ; team=search 1 " || sg.Make != 3 || sg.Long != 0 || sg.More != 0 {
+		t.Fatalf("suggested %q (make %d, long %d, more %d)", got, sg.Make, sg.Long, sg.More)
 	}
 
 	// The rules list, with no team, says why its Team column is empty, and
@@ -83,17 +111,20 @@ func TestTeamsSuggested(t *testing.T) {
 	if !strings.Contains(body, "No team owns it. No team&#39;s name pattern or labels match it.") || !strings.Contains(body, `href="/teams#suggested"`) {
 		t.Errorf("a rule no team owns doesn't say why, linking to the teams suggested:\n%s", body)
 	}
+	// Nothing judged yet, the list has no table, and no Team column to say
+	// anything of.
+	empty, _ := server(t, nil)
+	if _, body, _ := get(t, empty.Handler(), "/rules"); !strings.Contains(body, "Nothing judged yet") || strings.Contains(body, "Team column") {
+		t.Errorf("/rules before the first run speaks of its Team column:\n%s", body)
+	}
 
 	_, body, _ = get(t, h, "/teams")
 	for _, x := range []string{`id="suggested"`, "Teams these rules&#39; labels suggest", "<bdi>payments</bdi>", "<code><bdi>owner=cart</bdi></code>",
 		`<form method="post" action="/teams/suggested"><button>Make these teams</button></form>`,
-		"1 label value can&#39;t be a team&#39;s name"} {
+		"<bdi>a/b</bdi><br><span class=\"quiet\">Make it by hand, with the form below: its value isn&#39;t a plain lowercase name"} {
 		if !strings.Contains(body, x) {
 			t.Errorf("/teams lacks %q", x)
 		}
-	}
-	if strings.Contains(body, "a/b") {
-		t.Error("/teams suggests a value that can't be a team's name")
 	}
 
 	// From another site, refused, nothing made.
@@ -104,8 +135,8 @@ func TestTeamsSuggested(t *testing.T) {
 		t.Fatalf("a refused POST made %d teams", len(teams))
 	}
 	code, _, hd := post(t, h, "/teams/suggested", url.Values{}, "same-origin")
-	if code != http.StatusSeeOther || hd.Get("Location") != "/teams?made=3&skipped=0#suggested" {
-		t.Fatalf("making them: %d, to %q", code, hd.Get("Location"))
+	if made := madeTo(t, s, hd.Get("Location")); code != http.StatusSeeOther || strings.Join(made, " ") != "payments cart search" {
+		t.Fatalf("making them: %d, made %v", code, made)
 	}
 	teams, err := s.l.Teams(ctx)
 	if err != nil {
@@ -118,9 +149,15 @@ func TestTeamsSuggested(t *testing.T) {
 	if fmt.Sprint(made) != `[cart owner=cart "" payments team=payments "" search team=search ""]` {
 		t.Errorf("made %v", made)
 	}
-	_, body, _ = get(t, h, "/teams?made=3&skipped=0")
-	if strings.Count(body, "3 teams made from the rules&#39; labels.") != 1 || strings.Contains(body, `id="suggested"`) {
-		t.Errorf("/teams after making them doesn't say so once, or still suggests some:\n%s", body)
+	_, body, _ = get(t, h, withoutFrag(hd.Get("Location")))
+	if strings.Count(body, "3 teams made from the rules&#39; labels: <bdi>payments, cart, search</bdi>.") != 1 || strings.Contains(body, "<bdi>payments</bdi><br>") {
+		t.Errorf("/teams after making them doesn't name them once, or still suggests them:\n%s", body)
+	}
+	// A link can't say more was made than was, by the reader.
+	for _, q := range []string{"made=50&skipped=0", "made=999", "made=" + itoa(teams[0].ID) + "&made=x", "made=-1"} {
+		if _, body, _ := get(t, h, "/teams?"+q); strings.Contains(body, "made from the rules") {
+			t.Errorf("/teams?%s says teams were made", q)
+		}
 	}
 	// Each rule is its team's, by the label, as the page says.
 	o, _ = s.owners(ctx)
@@ -138,29 +175,42 @@ func TestTeamsSuggested(t *testing.T) {
 		t.Error("/rules says no team owns a rule, with teams")
 	}
 	// Asked again, nothing is left to make.
-	if _, _, hd := post(t, h, "/teams/suggested", url.Values{}, "same-origin"); hd.Get("Location") != "/teams?made=0&skipped=0#suggested" {
+	if _, _, hd := post(t, h, "/teams/suggested", url.Values{}, "same-origin"); hd.Get("Location") != "/teams?made=0#suggested" {
 		t.Errorf("making them again went to %q", hd.Get("Location"))
+	}
+	if _, body, _ := get(t, h, "/teams?made=0"); !strings.Contains(body, "No team made from the rules&#39; labels: each one left says why.") {
+		t.Error("/teams?made=0 doesn't say none was made")
 	}
 }
 
-// TestTeamsSuggestedAsOwnersWould: a rule a note or a name pattern gives a
-// team isn't counted for a team its labels suggest, a value a team owns by
-// isn't suggested, one whose name a team has already is said so and not
-// made, and --team-labels names the labels read. Each rule's page says how
-// its team was found, as owners found it.
+// TestTeamsSuggestedAsOwnersWould: only the rules no team owns, by a note,
+// a name pattern or labels, are counted for a team their labels suggest; a
+// value whose name a team has already, in any case, isn't made, and is said
+// what to do as that team owns; one whose label is on rules another team
+// owns isn't made, as it would take them; one that isn't a plain lowercase
+// name (another script's letter, a capital) is left to make by hand; a
+// value longer than a team's name is counted and left out; and
+// --team-labels names the labels read. Each rule's page says how its team
+// was found, as owners found it.
 func TestTeamsSuggestedAsOwnersWould(t *testing.T) {
 	ctx := context.Background()
-	s := labelledServer(t, labelledRules, nil)
+	s := labelledServer(t, labelledRules+`      - {alert: Charge, expr: charge > 1, labels: {team: payments, service: checkout}}
+      - {alert: Web1, expr: web1 > 1, labels: {team: Web}}
+      - {alert: Pay2, expr: pay2 > 1, labels: {team: "pаyments"}}
+      - {alert: Shop1, expr: shop1 > 1, labels: {team: shop}}
+      - {alert: Long1, expr: long1 > 1, labels: {team: `+strings.Repeat("l", 65)+`}}
+`, nil)
 	h := s.Handler()
 	pay, err := s.l.PutTeam(ctx, ledger.Team{Name: "pay", Rules: "^PayE"}, "ana")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "search", Rules: "^Nothing"}, "ana"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "carts", Labels: incident.Labels{"owner": {"cart"}}}, "ana"); err != nil {
-		t.Fatal(err)
+	for _, tm := range []ledger.Team{{Name: "search", Rules: "^Nothing"}, {Name: "carts", Labels: incident.Labels{"owner": {"cart"}}},
+		{Name: "zeta", Labels: incident.Labels{"service": {"checkout"}}}, {Name: "web", Rules: "^Nothing"},
+		{Name: "SHOP", Labels: incident.Labels{"env": {"prod"}}}} {
+		if _, err := s.l.PutTeam(ctx, tm, "ana"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := s.l.PutNote(ctx, ledger.Note{Rule: "PayLatency", TeamID: pay}, "ana"); err != nil {
 		t.Fatal(err)
@@ -170,14 +220,13 @@ func TestTeamsSuggestedAsOwnersWould(t *testing.T) {
 		t.Fatal(err)
 	}
 	sg := s.suggestTeams(o)
-	var got []string
-	for _, l := range sg.Lines {
-		got = append(got, fmt.Sprintf("%s=%s %d %v", l.Key, l.Value, l.Rules, l.Taken != nil))
-	}
 	// payments: Both alone (PayErrors is pay's by its pattern, PayLatency by
-	// its note); search's name is a team's; cart is carts'.
-	if fmt.Sprint(got) != "[team=payments 1 false team=search 1 true]" || sg.Make != 1 {
-		t.Errorf("suggested %v (make %d)", got, sg.Make)
+	// its note, Charge zeta's by its labels), and payments would take Charge
+	// from zeta; search, Web (web's, in another case) and shop (SHOP's) are
+	// teams' names; pаyments and a/b aren't plain names; carts owns cart.
+	if got := suggested(sg); got != "team=Web 1 taken; team=a/b 1 hand; team=payments 1 takes; team=pаyments 1 hand; team=search 1 taken; team=shop 1 taken" ||
+		sg.Make != 0 || sg.Long != 1 {
+		t.Errorf("suggested %q (make %d, long %d)", got, sg.Make, sg.Long)
 	}
 	w := o.walk()
 	for name := range o.ruleLabels {
@@ -200,26 +249,30 @@ func TestTeamsSuggestedAsOwnersWould(t *testing.T) {
 		}
 	}
 	_, body, _ := get(t, h, "/teams")
-	if !strings.Contains(body, "A team called <bdi>search</bdi> is there already") || !strings.Contains(body, `href="/teams?edit=`) {
-		t.Errorf("/teams doesn't say search is a team already, with a way to change it:\n%s", body)
+	for _, x := range []string{
+		"Not made: a team called <bdi>search</bdi> is there already. Give it the label <bdi>team=search</bdi> to own these rules.",
+		"Not made: a team called <bdi>SHOP</bdi> is there already, and owns by other labels; a team owns the rules with all of its labels",
+		"Not made: rules another team owns now have this label, and a team made of it would take them.",
+		"1 rule&#39;s label has a value longer than a team&#39;s name may be (64 bytes)"} {
+		if !strings.Contains(body, x) {
+			t.Errorf("/teams doesn't say %q", x)
+		}
 	}
-	if _, _, hd := post(t, h, "/teams/suggested", url.Values{}, "same-origin"); hd.Get("Location") != "/teams?made=1&skipped=1#suggested" {
+	if !strings.Contains(body, `href="/teams?edit=`) || strings.Contains(body, "Make these teams") {
+		t.Errorf("/teams offers to make what it says it doesn't, or no way to change a team:\n%s", body)
+	}
+	if _, _, hd := post(t, h, "/teams/suggested", url.Values{}, "same-origin"); hd.Get("Location") != "/teams?made=0#suggested" {
 		t.Errorf("making them went to %q", hd.Get("Location"))
 	}
-	_, body, _ = get(t, h, "/teams?made=1&skipped=1")
-	if !strings.Contains(body, "1 team made from the rules&#39; labels. 1 passed over: a team of its name was there already.") {
-		t.Errorf("/teams doesn't say what making them did:\n%s", body)
+	if teams, _ := s.l.Teams(ctx); len(teams) != 6 {
+		t.Errorf("%d teams, after making none", len(teams))
 	}
 
 	// --team-labels: only the labels it names are read.
 	s = labelledServer(t, labelledRules, func(c *Config) { c.TeamLabels = []string{"owner"} })
 	o, _ = s.owners(ctx)
-	got = nil
-	for _, l := range s.suggestTeams(o).Lines {
-		got = append(got, l.Key+"="+l.Value)
-	}
-	if fmt.Sprint(got) != "[owner=cart owner=payments]" {
-		t.Errorf("--team-labels owner: suggested %v", got)
+	if got := suggested(s.suggestTeams(o)); got != "owner=cart 1 ; owner=payments 1 " {
+		t.Errorf("--team-labels owner: suggested %q", got)
 	}
 }
 
@@ -241,8 +294,16 @@ func TestTeamsSuggestedAdminsOnly(t *testing.T) {
 	if teams, _ := s.l.Teams(ctx); len(teams) != 0 {
 		t.Fatalf("an editor made %d teams", len(teams))
 	}
-	if code, _, _ := postAs(t, h, "/teams/suggested", url.Values{}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+	code, _, hd := postAs(t, h, "/teams/suggested", url.Values{}, "ana@example.com", "same-origin")
+	if code != http.StatusSeeOther {
 		t.Errorf("an admin making them: %d", code)
+	}
+	// The result names the teams made to the one who made them alone.
+	if _, body := getAs(t, h, withoutFrag(hd.Get("Location")), "ana@example.com"); !strings.Contains(body, "3 teams made from the rules") {
+		t.Error("the result doesn't name the teams made to their maker")
+	}
+	if _, body := getAs(t, h, withoutFrag(hd.Get("Location")), "bo@example.com"); strings.Contains(body, "made from the rules") {
+		t.Error("the result names teams another made")
 	}
 	if teams, _ := s.l.Teams(ctx); len(teams) != 3 {
 		t.Errorf("an admin made %d teams, want 3", len(teams))
@@ -269,13 +330,20 @@ func TestTeamsSuggestedBounded(t *testing.T) {
 	if len(sg.Lines) != maxSuggested || sg.More != 10 || sg.Make != maxSuggested || sg.Lines[0].Value != fmt.Sprintf("t%02d", maxSuggested+5) {
 		t.Fatalf("%d suggested, %d more, %d made, first %q", len(sg.Lines), sg.More, sg.Make, sg.Lines[0].Value)
 	}
-	if _, _, hd := post(t, s.Handler(), "/teams/suggested", url.Values{}, "same-origin"); hd.Get("Location") != fmt.Sprintf("/teams?made=%d&skipped=0#suggested", maxSuggested) {
+	if _, _, hd := post(t, s.Handler(), "/teams/suggested", url.Values{}, "same-origin"); len(madeTo(t, s, hd.Get("Location"))) != maxSuggested {
 		t.Errorf("making them went to %q", hd.Get("Location"))
 	}
-	for _, q := range []string{"made=51&skipped=0", "made=40&skipped=11", "made=-1&skipped=0", "made=x"} {
-		if v, _ := url.ParseQuery(q); teamsMadeOf(v) != nil {
-			t.Errorf("%s: said", q)
-		}
+	o, _ = s.owners(ctx)
+	ids := url.Values{}
+	for _, tm := range o.teams {
+		ids.Add("made", itoa(tm.ID))
+	}
+	if m := teamsMadeOf(ids, o, "anonymous"); m == nil || len(m.Names) != maxSuggested {
+		t.Errorf("the %d made: %+v", maxSuggested, m)
+	}
+	ids.Add("made", ids["made"][0])
+	if m := teamsMadeOf(ids, o, "anonymous"); m != nil {
+		t.Errorf("past %d made, said %+v", maxSuggested, m)
 	}
 }
 
@@ -314,7 +382,12 @@ func inEachLanguage(t *testing.T, h http.Handler, who string, paths ...string) {
 func TestTeamsSuggestedInEachLanguage(t *testing.T) {
 	ctx := context.Background()
 	var b strings.Builder
-	b.WriteString(labelledRules)
+	b.WriteString(labelledRules + `      - {alert: Charge, expr: charge > 1, labels: {team: payments, service: checkout}}
+      - {alert: Web1, expr: web1 > 1, labels: {team: Web}}
+      - {alert: Shop1, expr: shop1 > 1, labels: {team: shop}}
+      - {alert: Long1, expr: long1 > 1, labels: {team: ` + strings.Repeat("l", 65) + `}}
+      - {alert: Long2, expr: long2 > 1, labels: {team: ` + strings.Repeat("m", 65) + `}}
+`)
 	for i := range maxSuggested + 1 {
 		fmt.Fprintf(&b, "      - {alert: R%02d, expr: r%02d > 1, labels: {squad: s%02d}}\n", i, i, i)
 	}
@@ -322,16 +395,13 @@ func TestTeamsSuggestedInEachLanguage(t *testing.T) {
 		c.UserHeader, c.Admins, c.Editors = "X-Forwarded-Email", []string{"ana@example.com"}, []string{"*"}
 	})
 	h := s.Handler()
-	inEachLanguage(t, h, "ana@example.com", "/teams", "/rules", "/rules/Plain", "/teams?made=1&skipped=1", "/teams?made=3&skipped=2")
+	inEachLanguage(t, h, "ana@example.com", "/teams", "/rules", "/rules/Plain", "/teams?made=0")
 	inEachLanguage(t, h, "bo@example.com", "/teams")
-	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "search", Rules: "^Nothing"}, "ana"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "pay", Rules: "^PayE"}, "ana"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "carts", Labels: incident.Labels{"owner": {"cart"}}}, "ana"); err != nil {
-		t.Fatal(err)
+	for _, tm := range []ledger.Team{{Name: "search", Rules: "^Nothing"}, {Name: "pay", Rules: "^PayE"}, {Name: "carts", Labels: incident.Labels{"owner": {"cart"}}},
+		{Name: "zeta", Labels: incident.Labels{"service": {"checkout"}}}, {Name: "web", Rules: "^Nothing"}, {Name: "SHOP", Labels: incident.Labels{"env": {"prod"}}}} {
+		if _, err := s.l.PutTeam(ctx, tm, "ana@example.com"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	gone, err := s.l.PutTeam(ctx, ledger.Team{Name: "gone", Rules: "^Gone"}, "ana")
 	if err != nil {
@@ -340,7 +410,13 @@ func TestTeamsSuggestedInEachLanguage(t *testing.T) {
 	if err := s.l.PutNote(ctx, ledger.Note{Rule: "Both", TeamID: gone}, "ana"); err != nil {
 		t.Fatal(err)
 	}
-	inEachLanguage(t, h, "ana@example.com", "/teams", "/rules/PayErrors", "/rules/CartSlow", "/rules/Both", "/rules/Plain")
+	inEachLanguage(t, h, "ana@example.com", "/teams", "/rules/PayErrors", "/rules/CartSlow", "/rules/Both", "/rules/Plain", "/teams?made="+itoa(gone-1))
+	inEachLanguage(t, h, "bo@example.com", "/teams")
+	_, _, hd := postAs(t, h, "/teams/suggested", url.Values{}, "ana@example.com", "same-origin")
+	if len(madeTo(t, s, hd.Get("Location"))) < 2 {
+		t.Fatalf("making them went to %q", hd.Get("Location"))
+	}
+	inEachLanguage(t, h, "ana@example.com", withoutFrag(hd.Get("Location")))
 	if err := s.l.DeleteTeam(ctx, gone, "ana"); err != nil {
 		t.Fatal(err)
 	}

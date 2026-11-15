@@ -6,20 +6,23 @@ it is on. */}}
 admin, the button that makes them; disabled, with why, for anyone else. */}}
 {{define "teamsuggest"}}{{$p := .P}}{{with .V}}<section class="card" id="suggested" aria-labelledby="suggested-title">
 <h2 id="suggested-title">{{t "Teams these rules' labels suggest"}}</h2>
-<p>{{t "These rules say whose they are in a label no team owns by yet. Each value can be a team of its own, owning the rules with that label, as the form below would make it."}}</p>
+<p>{{t "No team owns these rules, and they say whose they are in a label. Each value can be a team of its own, owning the rules with that label, as the form below would make it."}}</p>
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Owns the rules with"}}</th><th scope="col" class="n">{{t "Rules it would own"}}</th></tr></thead>
-<tbody>{{range .Lines}}<tr><td class="name"><bdi>{{.Value}}</bdi></td><td class="labels"><code><bdi>{{shown .Key}}={{shown .Value}}</bdi></code></td>
-<td class="n">{{if .Taken}}{{tbdi "A team called %s is there already, owning by something else: give it this label to own these rules." .Value}}{{if $p.Status.Admin}} <a href="{{$p.Link "/teams" "edit" .Taken.ID}}">{{t "Change it"}}</a>{{end}}{{else}}{{.Rules}}{{end}}</td></tr>{{end}}</tbody>
+<tbody>{{range .Lines}}<tr><td class="name"><bdi>{{shown .Value}}</bdi>{{if .Why}}<br><span class="quiet">{{template "suggestwhy" (on $p .)}}</span>{{end}}</td><td class="labels"><code><bdi>{{shown .Key}}={{shown .Value}}</bdi></code></td><td class="n">{{.Rules}}</td></tr>{{end}}</tbody>
 </table></div>
 {{with .More}}<p class="quiet">{{if eq . 1}}{{t "1 more value is left out: those with the most rules are listed and made first, and the rest are suggested once they are."}}{{else}}{{t "%d more values are left out: those with the most rules are listed and made first, and the rest are suggested once they are." .}}{{end}}</p>{{end}}
-{{with .Unnamed}}<p class="quiet">{{if eq . 1}}{{t "1 label value can't be a team's name (letters, digits, spaces and . _ -, up to 64): give its team a name and the label with the form below."}}{{else}}{{t "%d label values can't be a team's name (letters, digits, spaces and . _ -, up to 64): give their teams a name and the label with the form below." .}}{{end}}</p>{{end}}
+{{with .Long}}<p class="quiet">{{if eq . 1}}{{t "1 rule's label has a value longer than a team's name may be (64 bytes): give its team a name and the label with the form below."}}{{else}}{{t "%d rules' labels have a value longer than a team's name may be (64 bytes): give their teams a name and the label with the form below." .}}{{end}}</p>{{end}}
 {{if .Make}}{{if $p.Status.Admin}}<form method="post" action="/teams/suggested"><button>{{t "Make these teams"}}</button></form>{{else}}<p>{{template "off" (offOf $p "Make these teams" "admin" "suggested-why")}}</p>{{end}}
-<p class="quiet">{{t "Each is made as the form below makes a team: named for the value, owning the rules with the label. Change or delete any of them after."}}</p>{{end}}
+<p class="quiet">{{t "Each is made as the form below makes a team: named for the value, owning the rules with the label. Those it doesn't make say why. Change or delete any of them after."}}</p>{{end}}
 </section>{{end}}{{end}}
 
-{{/* What "Make these teams" did, said once on the page it went back to. */}}
-{{define "teamsmade"}}<p class="note" role="status">{{if eq .Made 1}}{{t "1 team made from the rules' labels."}}{{else}}{{t "%d teams made from the rules' labels." .Made}}{{end}}{{if eq .Skipped 1}} {{t "1 passed over: a team of its name was there already."}}{{else if .Skipped}} {{t "%d passed over: teams of their names were there already." .Skipped}}{{end}}</p>{{end}}
+{{/* Why "Make these teams" doesn't make a team the labels suggest. */}}
+{{define "suggestwhy"}}{{$p := .P}}{{with .V}}{{if eq .Why "taken"}}{{if .SameKey}}{{tbdi "Not made: a team called %s is there already. Give it the label %s to own these rules." .Taken.Name (shown (print .Key "=" .Value))}}{{else}}{{tbdi "Not made: a team called %s is there already, and owns by other labels; a team owns the rules with all of its labels, so name it in these rules' notes instead." .Taken.Name}}{{end}}{{if $p.Status.Admin}} <a href="{{$p.Link "/teams" "edit" .Taken.ID}}">{{t "Change it"}}</a>{{end}}{{else if eq .Why "takes"}}{{t "Not made: rules another team owns now have this label, and a team made of it would take them. Make it by hand, by a name pattern, or give these rules notes."}}{{else}}{{t "Make it by hand, with the form below: its value isn't a plain lowercase name, and could read as another team's."}}{{end}}{{end}}{{end}}
+
+{{/* What "Make these teams" did, said once on the page it went back to:
+the teams it made, as they are, made by the reader. */}}
+{{define "teamsmade"}}<p class="note" role="status">{{if .None}}{{t "No team made from the rules' labels: each one left says why."}}{{else if eq (len .Names) 1}}{{tbdi "1 team made from the rules' labels: %s." (index .Names 0)}}{{else}}{{tbdi "%d teams made from the rules' labels: %s." (len .Names) (join .Names ", ")}}{{end}}</p>{{end}}
 
 {{/* Where no team is kept at all: a link to the teams the rules' labels
 suggest, or to the form that adds one. */}}

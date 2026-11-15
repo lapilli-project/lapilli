@@ -117,167 +117,178 @@ func (s *Server) teamlessOf(o *owners) *teamless {
 }
 
 // teamSuggestion is a team the rules' labels suggest: named Value, owning
-// by Key=Value. Rules is how many rules it would own, made with the others;
-// Taken, a team of its name already there, whose labels don't have it,
-// which isn't made: Rules is then how many with it that team doesn't own.
+// by Key=Value; Rules, how many of the rules no team owns it would own. Why
+// says why "Make these teams" doesn't make it, "" when it does: "taken", a
+// team of its name, in any case, is there already (Taken; SameKey, that it
+// owns by Key alone or by no label, so that the label added to it loses it
+// none of its rules); "takes", its label is on rules another team owns now,
+// which a team made of it, first by name, would take; "hand", its value
+// isn't a plain name (plainName).
 type teamSuggestion struct {
 	Key, Value string
 	Rules      int
+	Why        string
 	Taken      *ledger.Team
+	SameKey    bool
 }
+
+// plainName is a value "Make these teams" makes a team of: lowercase ASCII
+// letters, digits and . _ -, as label values that name teams mostly are.
+// One with capitals, or with a letter of another script, can read as
+// another team's name (Web and web; pаyments, its а Cyrillic, and
+// payments): it is made by hand, its name chosen.
+var plainName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
+
+// maxTeamName is the longest a team's name is, in bytes (ledger.TeamNameOK):
+// a label value longer is no team's name, and is passed over before
+// anything is made of it.
+const maxTeamName = 64
 
 // teamSuggestions are the teams the rules' labels suggest, those with the
-// most rules first: Make of them are made by "Make these teams"; More
-// values are past maxSuggested; Unnamed, label values that can't be a
-// team's name, are left out.
+// most rules first: Make of them are made by "Make these teams"; More are
+// past maxSuggested; Long rules have a value longer than a team's name, and
+// are left out.
 type teamSuggestions struct {
-	Lines         []teamSuggestion
-	Make          int
-	More, Unnamed int
+	Lines      []teamSuggestion
+	Make       int
+	More, Long int
 }
 
-// suggestTeams are the teams the rules' labels suggest: of the rules no
-// note or name pattern gives a team, the values of the labels teamLabels
-// names that no team owns by. A value under two of those labels is one
-// team, by the label named first. How many rules each would own is worked
-// out as owners would, with them made: a rule goes to the first team, by
-// name, whose labels it has, a team there already or one made. All from
-// the rules in effect, and those recorded elsewhere, as owners has their
-// labels; nothing kept.
+// suggestTeams are the teams the rules' labels suggest: of the rules no team
+// owns, by a note, a name pattern or labels, the values of the labels
+// teamLabels names. A value under two of those labels is one team, by the
+// label named first. How many rules each would own is worked out as owners
+// would, with those made: a rule goes to the first, by name, whose label it
+// has. All from the rules in effect, and those recorded elsewhere, as owners
+// has their labels; nothing kept.
 func (s *Server) suggestTeams(o *owners) teamSuggestions {
 	var v teamSuggestions
 	keys := s.teamLabels()
 	w := o.walk()
-	var free []string // the rules no note or name pattern gives a team
+	var free []string             // the rules no team owns
+	owned := map[[2]string]bool{} // the labels of rules a team owns by labels
 	for name := range o.ruleLabels {
-		if h := w.how(name); h.By != "note" && h.By != "pattern" {
+		switch w.how(name).By {
+		case "":
 			free = append(free, name)
+		case "labels":
+			for _, k := range keys {
+				if val, ok := o.ruleLabels[name][k]; ok && len(val) <= maxTeamName {
+					owned[[2]string{k, val}] = true
+				}
+			}
 		}
 	}
 	slices.Sort(free)
-	owned := func(k, val string) bool {
-		return slices.ContainsFunc(o.teams, func(t ledger.Team) bool { return slices.Contains(t.Labels[k], val) })
-	}
-	// Each value, by the label named first that has it, and how many rules
-	// have it so.
-	type cand struct {
-		key   int
-		rules int
-	}
-	byValue := map[string]*cand{}
-	unnamed := map[string]bool{}
+	// Each value, by the label named first that has it.
+	key := map[string]int{}
 	for _, name := range free {
 		ls := o.ruleLabels[name]
 		for i, k := range keys {
 			val, ok := ls[k]
 			switch {
-			case !ok || val == "" || owned(k, val):
+			case !ok || val == "":
 				continue
-			case !ledger.TeamNameOK(val):
-				unnamed[k+"="+val] = true
+			case len(val) > maxTeamName: // before anything is made of it
+				v.Long++
 				continue
 			}
-			c := byValue[val]
-			if c == nil {
-				c = &cand{key: i}
-				byValue[val] = c
-			}
-			if i < c.key {
-				c.key, c.rules = i, 0
-			}
-			if i == c.key {
-				c.rules++
+			if j, ok := key[val]; !ok || i < j {
+				key[val] = i
 			}
 		}
 	}
-	values := slices.Collect(maps.Keys(byValue))
-	slices.SortFunc(values, func(a, b string) int { return cmp.Or(byValue[b].rules-byValue[a].rules, strings.Compare(a, b)) })
-	if len(values) > maxSuggested {
-		v.More, values = len(values)-maxSuggested, values[:maxSuggested]
-	}
-	for _, val := range values {
-		l := teamSuggestion{Key: keys[byValue[val].key], Value: val}
-		if t, ok := o.team(val); ok {
-			l.Taken = &t
-		}
-		v.Lines = append(v.Lines, l)
-	}
-	// Who would own each rule with them made: the teams owning by labels
-	// and those made, by name.
-	type labelTeam struct {
-		name   string
-		labels map[string][]string
-		made   *teamSuggestion
-	}
-	var ts []labelTeam
-	for _, t := range o.teams {
-		if len(t.Labels) > 0 {
-			ts = append(ts, labelTeam{t.Name, t.Labels, nil})
+	lines := map[string]*teamSuggestion{}
+	for val, i := range key {
+		l := &teamSuggestion{Key: keys[i], Value: val}
+		lines[val] = l
+		k := [2]string{l.Key, val}
+		if j := slices.IndexFunc(o.teams, func(t ledger.Team) bool { return strings.EqualFold(t.Name, val) }); j >= 0 {
+			t := o.teams[j]
+			l.Why, l.Taken = "taken", &t
+			l.SameKey = len(t.Labels) == 0 || len(t.Labels) == 1 && t.Labels[l.Key] != nil
+		} else if owned[k] {
+			l.Why = "takes"
+		} else if !plainName.MatchString(val) {
+			l.Why = "hand"
 		}
 	}
-	for i, l := range v.Lines {
-		if l.Taken == nil {
-			ts = append(ts, labelTeam{l.Value, map[string][]string{l.Key: {l.Value}}, &v.Lines[i]})
-		}
-	}
-	slices.SortStableFunc(ts, func(a, b labelTeam) int { return strings.Compare(a.name, b.name) })
+	// Who would own each rule with those made: the first, by name, whose
+	// label it has; one not made, how many rules with it no team owns.
 	for _, name := range free {
-		for _, t := range ts {
-			if has(o.ruleLabels[name], t.labels) {
-				if t.made != nil {
-					t.made.Rules++
-				}
-				break
+		ls := o.ruleLabels[name]
+		var first *teamSuggestion
+		for _, k := range keys {
+			l := lines[ls[k]]
+			if l == nil || l.Key != k {
+				continue
+			}
+			if l.Why != "" {
+				l.Rules++
+			} else if first == nil || l.Value < first.Value {
+				first = l
 			}
 		}
-	}
-	// One a team of its name has, how many rules with it that team doesn't
-	// own yet.
-	for i, l := range v.Lines {
-		if l.Taken != nil {
-			for _, name := range free {
-				if o.ruleLabels[name][l.Key] == l.Value && o.teamOf(name) != l.Value {
-					v.Lines[i].Rules++
-				}
-			}
+		if first != nil {
+			first.Rules++
 		}
 	}
-	// One that would own nothing, every rule of its another's first, or
-	// its team's already, isn't suggested: taken away, it changes no other's
-	// count.
-	v.Lines = slices.DeleteFunc(v.Lines, func(l teamSuggestion) bool { return l.Rules == 0 })
+	// One that would own nothing, every rule of its another's first, isn't
+	// suggested: taken away, it changes no other's count. Those with the
+	// most rules first, maxSuggested of them.
+	for _, l := range lines {
+		if l.Rules > 0 {
+			v.Lines = append(v.Lines, *l)
+		}
+	}
+	slices.SortFunc(v.Lines, func(a, b teamSuggestion) int { return cmp.Or(b.Rules-a.Rules, strings.Compare(a.Value, b.Value)) })
+	if len(v.Lines) > maxSuggested {
+		v.More, v.Lines = len(v.Lines)-maxSuggested, v.Lines[:maxSuggested]
+	}
 	for _, l := range v.Lines {
-		if l.Taken == nil {
+		if l.Why == "" {
 			v.Make++
 		}
 	}
-	v.Unnamed = len(unnamed)
 	return v
 }
 
 // teamsMade is what "Make these teams" did, said once on the page it goes
-// back to, from its query: how many were made, and how many were passed
-// over as a team of the name, or owning by the label, was there.
-type teamsMade struct{ Made, Skipped int }
+// back to: the teams it made, by their ids in the query, those alone that
+// are there and were made by the reader, as a bulk proposal's result is,
+// so that a link can't make it say more; None, that it made none.
+type teamsMade struct {
+	Names []string
+	None  bool
+}
 
-func teamsMadeOf(q url.Values) *teamsMade {
-	n := func(k string) (int, bool) {
-		x, err := strconv.Atoi(q.Get(k))
-		return x, err == nil && x >= 0 && x <= maxSuggested
+func teamsMadeOf(q url.Values, o *owners, user string) *teamsMade {
+	vs := q["made"]
+	if len(vs) == 1 && vs[0] == "0" {
+		return &teamsMade{None: true}
 	}
-	made, ok1 := n("made")
-	skipped, ok2 := n("skipped")
-	if !ok1 || !ok2 || made+skipped > maxSuggested {
+	var out teamsMade
+	for i, v := range vs {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || id <= 0 || i == maxSuggested {
+			return nil
+		}
+		if t, ok := o.byID[id]; ok && ledger.FoldName(t.By) == ledger.FoldName(user) && !slices.Contains(out.Names, t.Name) {
+			out.Names = append(out.Names, t.Name)
+		}
+	}
+	if len(out.Names) == 0 {
 		return nil
 	}
-	return &teamsMade{made, skipped}
+	return &out
 }
 
 // postSuggested makes the teams the rules' labels suggest, as worked out
-// now, not as the page that asked showed them: each as the team form makes
-// one (postTeam), its name the value and its labels the label. One a team
-// of the name, or one owning by the label, took meanwhile is passed over.
-// An admin's (the route's), from the same site, as every form.
+// now, not as the page that asked showed them: those it says it makes, each
+// as the team form makes one (postTeam), its name the value and its labels
+// the label. One a team of the name took meanwhile is passed over; those it
+// doesn't make, the page goes on saying why. An admin's (the route's), from
+// the same site, as every form.
 func (s *Server) postSuggested(w http.ResponseWriter, r *http.Request) {
 	if err := form(r); err != nil {
 		s.oops(w, r, err)
@@ -288,23 +299,24 @@ func (s *Server) postSuggested(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	var done teamsMade
 	defer s.poke() // who owns a rule changed: a team's windows are judged again
+	q := url.Values{}
 	for _, l := range s.suggestTeams(o).Lines {
-		if l.Taken != nil {
-			done.Skipped++
+		if l.Why != "" {
 			continue
 		}
-		_, err := s.l.PutTeam(r.Context(), ledger.Team{Name: l.Value, Labels: incident.Labels{l.Key: {l.Value}}}, s.user(r))
+		id, err := s.l.PutTeam(r.Context(), ledger.Team{Name: l.Value, Labels: incident.Labels{l.Key: {l.Value}}}, s.user(r))
 		if code, ok := errCode(err); ok && code == http.StatusBadRequest {
-			done.Skipped++ // a team of the name, made meanwhile
-			continue
+			continue // a team of the name, made meanwhile
 		}
 		if err != nil {
 			s.oops(w, r, err)
 			return
 		}
-		done.Made++
+		q.Add("made", strconv.FormatInt(id, 10))
 	}
-	back(w, r, "/teams?made="+strconv.Itoa(done.Made)+"&skipped="+strconv.Itoa(done.Skipped)+"#suggested")
+	if len(q) == 0 {
+		q.Set("made", "0")
+	}
+	back(w, r, "/teams?"+q.Encode()+"#suggested")
 }

@@ -112,7 +112,7 @@ func (s *Server) teamsPage(r *http.Request) (any, error) {
 	}
 	lg := lang(r)
 	sc := o.schedules(opts.Hours)
-	v := teamsView{Server: hoursLine(lg, opts.Hours), Suggested: s.suggestTeams(o), Made: teamsMadeOf(r.URL.Query())}
+	v := teamsView{Server: hoursLine(lg, opts.Hours), Suggested: s.suggestTeams(o), Made: teamsMadeOf(r.URL.Query(), o, s.user(r))}
 	for _, t := range o.teams {
 		l := teamLine{Team: t, Labels: labelText(t.Labels)}
 		if h := sc.team[t.ID]; h != nil {
