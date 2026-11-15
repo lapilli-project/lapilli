@@ -598,10 +598,12 @@ func (l *Ledger) Move(ctx context.Context, id int64, from []string, to, by strin
 }
 
 // WaitingSince are the proposals waiting for approval made at cutoff or
-// before, the earliest made first, most at most: those --proposals-expire
-// closes. One being backtested again waits all the same.
+// before, that no one approved yet, the earliest made first, most at most:
+// those --proposals-expire closes. One approved by some (one of two, or
+// before --approvals was lowered, which Promote approves) waits on.
 func (l *Ledger) WaitingSince(ctx context.Context, cutoff time.Time, most int) ([]int64, error) {
-	rows, err := l.r.QueryContext(ctx, "SELECT id FROM proposals WHERE state = ? AND made <= ? ORDER BY made, id LIMIT ?", StateProposed, cutoff.Unix(), most)
+	rows, err := l.r.QueryContext(ctx, `SELECT id FROM proposals WHERE state = ? AND made <= ?
+		AND NOT EXISTS (SELECT 1 FROM approvals a WHERE a.proposal_id = proposals.id) ORDER BY made, id LIMIT ?`, StateProposed, cutoff.Unix(), most)
 	if err != nil {
 		return nil, err
 	}

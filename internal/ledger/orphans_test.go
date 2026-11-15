@@ -208,3 +208,19 @@ func TestRuleKeptNames(t *testing.T) {
 		t.Errorf("%d changes noted", after-before)
 	}
 }
+
+// A proposal someone approved waits on, past expiry: one of two
+// approvals, or the approval --approvals asks for once lowered.
+func TestWaitingSinceApproved(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	a, _ := l.Propose(ctx, proposal("A", KindFor))
+	b, _ := l.Propose(ctx, proposal("B", KindFor))
+	if _, err := l.Approve(ctx, a, "ana", 2, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := l.WaitingSince(ctx, time.Now().Add(time.Hour), 10)
+	if err != nil || !slices.Equal(got, []int64{b}) {
+		t.Errorf("waiting since: %v %v, want %d alone", got, err, b)
+	}
+}

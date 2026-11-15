@@ -632,6 +632,8 @@ func (s *Server) backtestAgain(ctx context.Context, id int64, by string, agent b
 // --timeout for a person or an agent, less for Lapilli's own (autoWithin).
 // None waits for a comparison running while it holds the heavy turn.
 func (s *Server) backtestAgainOf(ctx context.Context, id int64, by string, agent bool, within time.Duration) error {
+	// Not closed as expired while it is backtested again here.
+	defer s.backtesting.add(id)()
 	if !s.replaying() {
 		return bad("this lapilli serve reads no rules of its own: there is nothing to change")
 	}

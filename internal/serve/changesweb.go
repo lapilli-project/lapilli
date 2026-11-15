@@ -516,8 +516,9 @@ func (s *Server) proposalPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v := proposalView{proposalLine: lines[0], Evidence: proposalEvidence(p), On: s.cfg.Changes, Paused: s.changesPaused(), Next: len(p.Approvals) + 1}
-	// When it closes, waiting, with --proposals-expire.
-	if p.State == ledger.StateProposed && s.cfg.ProposalsExpire > 0 {
+	// When it closes, waiting with no approval, with --proposals-expire:
+	// counted from when it was made, a backtest again or not.
+	if p.State == ledger.StateProposed && s.cfg.ProposalsExpire > 0 && len(p.Approvals) == 0 {
 		v.Expires = p.Made.Add(s.cfg.ProposalsExpire)
 	}
 	if p.Kind == ledger.KindUndo {

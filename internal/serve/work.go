@@ -190,19 +190,20 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 			}
 		}
 	}
+	// Those that waited too long closed before any is backtested again, so
+	// that no backtest is spent on one about to close. One someone
+	// approved isn't closed: --approvals lowered, carryOut approves it.
+	if s.still(ctx) {
+		if err := s.expireProposals(ctx); err != nil {
+			s.fail("closing the proposals that waited too long", err)
+		}
+	}
 	// On a run alone: a write that pokes the work doesn't make Lapilli
 	// replay twelve weeks again.
 	if run && s.replaying() && s.still(ctx) {
 		if err := s.backtestStale(ctx); err != nil {
 			s.fail("backtesting stale proposals again", err)
 		}
-	}
-	if !s.still(ctx) {
-		return
-	}
-	// Before carrying any out: one that waited too long isn't approved now.
-	if err := s.expireProposals(ctx); err != nil {
-		s.fail("closing the proposals that waited too long", err)
 	}
 	if !s.still(ctx) {
 		return

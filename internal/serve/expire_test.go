@@ -83,3 +83,35 @@ func TestProposalsExpire(t *testing.T) {
 		t.Errorf("the closed ones don't hold it")
 	}
 }
+
+// A proposal someone approved isn't closed as expired: one of two
+// approvals, or, --approvals lowered, the one it now needs, which carrying
+// out approves. Nor is one being backtested again here, until it is done.
+// Its page says when it would expire only while no one approved it.
+func TestProposalsExpireLeaves(t *testing.T) {
+	ctx := context.Background()
+	s, _, _ := rolesServer(t, func(c *Config) { c.ProposalsExpire = 30 * 24 * time.Hour; c.Approvals = 2 })
+	approved := waiting(t, s, "Errors")
+	if _, err := s.l.Approve(ctx, approved, "boss", 2, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	busy := waiting(t, s, "Search")
+	done := s.backtesting.add(busy)
+	s.cfg.Approvals, s.cfg.Changes = 1, true
+	s.wall = func() time.Time { return time.Now().Add(31 * 24 * time.Hour) }
+	s.jobs(ctx, false)
+	if p, _ := s.l.ProposalByID(ctx, approved); p.State == ledger.StateExpired {
+		t.Errorf("approved, and closed as expired: %+v", p)
+	}
+	if p, _ := s.l.ProposalByID(ctx, busy); p.State != ledger.StateProposed {
+		t.Errorf("closed while backtested again: %+v", p)
+	}
+	if _, body := getAs(t, s.Handler(), fmt.Sprintf("/proposals/%d", approved), "ed@example.com"); strings.Contains(body, "closes as expired") {
+		t.Error("an approved one's page says it would expire")
+	}
+	done()
+	s.jobs(ctx, false)
+	if p, _ := s.l.ProposalByID(ctx, busy); p.State != ledger.StateExpired {
+		t.Errorf("once its backtest is done: %+v", p)
+	}
+}

@@ -345,6 +345,9 @@ type Server struct {
 	againFailed againFailed
 	// config is what the leader last made of --config.
 	config configState
+	// backtesting are the proposals being backtested again here, which
+	// expiry leaves.
+	backtesting inFlight
 	// wall is the clock proposals are made and expire by: time.Now but in
 	// tests.
 	wall func() time.Time
