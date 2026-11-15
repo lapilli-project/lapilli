@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
@@ -421,4 +422,43 @@ func TestTeamsSuggestedInEachLanguage(t *testing.T) {
 		t.Fatal(err)
 	}
 	inEachLanguage(t, h, "ana@example.com", "/rules/Both")
+}
+
+// TestTeamsMadeRecentlyAndFresh: what "Make these teams" did is said for
+// the teams the reader made, or changed, in the last few minutes alone, as
+// a team keeps who changed it last and when, not who made it; and making
+// them reads the teams there now, not the owners kept for the ledger's
+// generation, a team of a name in another case made meanwhile passed over.
+func TestTeamsMadeRecentlyAndFresh(t *testing.T) {
+	ctx := context.Background()
+	s := labelledServer(t, labelledRules, nil)
+	h := s.Handler()
+	// The owners as they were, kept, and a team made meanwhile in another
+	// case, as another replica, or request, would.
+	o, err := s.owners(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "Payments", Rules: "^Nothing"}, "bo"); err != nil {
+		t.Fatal(err)
+	}
+	s.own.Lock()
+	s.own.gen, s.own.o = s.l.Gen(), o
+	s.own.Unlock()
+	_, _, hd := post(t, h, "/teams/suggested", url.Values{}, "same-origin")
+	made := madeTo(t, s, hd.Get("Location"))
+	if strings.Join(made, " ") != "cart search" {
+		t.Errorf("made %v, want cart and search, and no payments beside Payments", made)
+	}
+	loc := withoutFrag(hd.Get("Location"))
+	if _, body, _ := get(t, h, loc); !strings.Contains(body, "2 teams made from the rules&#39; labels: <bdi>cart, search</bdi>.") {
+		t.Errorf("the result isn't said:\n%s", body)
+	}
+	// Some time on, the same link says nothing.
+	was := madeWithin
+	madeWithin = -time.Second
+	defer func() { madeWithin = was }()
+	if _, body, _ := get(t, h, loc+"&x=1"); strings.Contains(body, "made from the rules") {
+		t.Error("an old link says the reader made teams")
+	}
 }

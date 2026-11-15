@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
@@ -255,12 +256,18 @@ func (s *Server) suggestTeams(o *owners) teamSuggestions {
 
 // teamsMade is what "Make these teams" did, said once on the page it goes
 // back to: the teams it made, by their ids in the query, those alone that
-// are there and were made by the reader, as a bulk proposal's result is,
-// so that a link can't make it say more; None, that it made none.
+// are there and the reader made, or changed, in the last madeWithin, as a
+// bulk proposal's result is, so that a link can't make it say more; None,
+// that it made none. A team keeps who changed it last, and when, not who
+// made it: one the reader changed a moment ago is said too, which a link
+// of its ids could only say back to them.
 type teamsMade struct {
 	Names []string
 	None  bool
 }
+
+// madeWithin is how long after "Make these teams" its page says what it made.
+var madeWithin = 10 * time.Minute
 
 func teamsMadeOf(q url.Values, o *owners, user string) *teamsMade {
 	vs := q["made"]
@@ -273,7 +280,8 @@ func teamsMadeOf(q url.Values, o *owners, user string) *teamsMade {
 		if err != nil || id <= 0 || i == maxSuggested {
 			return nil
 		}
-		if t, ok := o.byID[id]; ok && ledger.FoldName(t.By) == ledger.FoldName(user) && !slices.Contains(out.Names, t.Name) {
+		// By the wall clock, as PutTeam keeps when a team changed.
+		if t, ok := o.byID[id]; ok && ledger.FoldName(t.By) == ledger.FoldName(user) && time.Since(t.Updated) < madeWithin && !slices.Contains(out.Names, t.Name) {
 			out.Names = append(out.Names, t.Name)
 		}
 	}
@@ -300,9 +308,20 @@ func (s *Server) postSuggested(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.poke() // who owns a rule changed: a team's windows are judged again
+	// The teams there now, read again, not the owners kept for the
+	// ledger's generation: another request, or replica, may have made one
+	// of a name in another case meanwhile, which teams.name's UNIQUE, in
+	// case (SQLite's BINARY, Postgres's COLLATE "C"), lets through. A
+	// unique name in any case is the schema's to hold: bundle 22, which
+	// takes schema 019.
+	teams, err := s.l.Teams(r.Context())
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
 	q := url.Values{}
 	for _, l := range s.suggestTeams(o).Lines {
-		if l.Why != "" {
+		if l.Why != "" || slices.ContainsFunc(teams, func(t ledger.Team) bool { return strings.EqualFold(t.Name, l.Value) }) {
 			continue
 		}
 		id, err := s.l.PutTeam(r.Context(), ledger.Team{Name: l.Value, Labels: incident.Labels{l.Key: {l.Value}}}, s.user(r))
@@ -314,6 +333,7 @@ func (s *Server) postSuggested(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		q.Add("made", strconv.FormatInt(id, 10))
+		teams = append(teams, ledger.Team{Name: l.Value})
 	}
 	if len(q) == 0 {
 		q.Set("made", "0")
