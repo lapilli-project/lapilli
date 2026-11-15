@@ -1325,6 +1325,21 @@ func TestReadTimeFailsSoft(t *testing.T) {
 	if p := state(t, s2, id); p.State != ledger.StateProposed {
 		t.Errorf("approved by fewer than are needed now: %s", p.State)
 	}
+	// --approvals lowered, and which are stale unreadable: a stale one with
+	// the approvals it now needs isn't approved for them.
+	s3, _ := restartsServer(t, func(c *Config) { c.Approvals = 2 })
+	stale := keptAs(t, s3, 0, "", unrecordedFrom, unrecordedTo, nil)
+	if _, err := s3.l.Approve(ctx, stale, ana, 2, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	s3.cfg.Approvals = 1
+	ledgerExec(t, s3, "UPDATE versions SET docs = '{}' WHERE id = (SELECT max(id) FROM versions)")
+	if err := s3.carryOut(ctx); err != nil {
+		t.Errorf("carrying out: %v", err)
+	}
+	if p := state(t, s3, stale); p.State != ledger.StateProposed {
+		t.Errorf("a stale one approved as fewer approvals are needed, which are stale unread: %s", p.State)
+	}
 }
 
 // TestBacktestAgainRace: a person backtesting a proposal again while
