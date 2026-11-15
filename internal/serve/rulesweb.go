@@ -619,8 +619,14 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	default:
 		v.Bulk.Propose = true
 	}
-	if res := v.Bulk.Result; res != nil && len(res.Made) > 0 {
-		res.Href = c.Link(proposalsMade(res.Made))
+	if res := v.Bulk.Result; res != nil && res.Kind == "propose" {
+		// What it says it proposed is what the reader proposed, read
+		// again, not what the address says: a link can't make it say more.
+		if !s.madeBy(r, res) {
+			v.Bulk.Result = nil
+		} else if len(res.Made) > 0 {
+			res.Href = c.Link(proposalsMade(res.Made))
+		}
 	}
 
 	switch {

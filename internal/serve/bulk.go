@@ -42,13 +42,15 @@ var bulkKinds = []string{"task", "team", "status", "real", "propose"}
 // proposal's says, too, how many were refused for the hour's proposals
 // made (Limit), as not replayed (Unreplayed), not in effect (Absent), as
 // having that for already (Same), as having no suggested for (NoSuggest),
-// and which proposals it made (Made), to link to them (Href).
+// and which proposals it made (Made), to link to them (Href); Tries, how
+// many weren't read as the reader had asked for as many as they may in an
+// hour; Late, how many weren't tried as the time for the request was up.
 type bulkResult struct {
 	Kind                                   string
 	Done, Theirs, Refused, Already, Failed int
 	Untried, Editors                       int
 	Limit, Unreplayed, Absent, Same        int
-	NoSuggest                              int
+	NoSuggest, Tries, Late                 int
 	None                                   bool
 	Made                                   []int64
 	Href                                   string
@@ -56,7 +58,7 @@ type bulkResult struct {
 
 // bulkParams are the parameters a bulk write's result is said by.
 var bulkParams = []string{"bulk", "done", "theirs", "refused", "already", "failed", "untried", "editors",
-	"limit", "unreplayed", "absent", "same", "nosuggest", "made"}
+	"limit", "unreplayed", "absent", "same", "nosuggest", "tries", "late", "made"}
 
 // bulkOf is the result a page was sent back with, read within bounds:
 // nil when there is none, or what is there isn't one.
@@ -73,7 +75,7 @@ func bulkOf(q url.Values) *bulkResult {
 		return x, err == nil && x >= 0 && x <= maxBulk
 	}
 	b := bulkResult{Kind: q.Get("bulk")}
-	var ok [12]bool
+	var ok [14]bool
 	b.Done, ok[0] = n("done")
 	b.Theirs, ok[1] = n("theirs")
 	b.Refused, ok[2] = n("refused")
@@ -86,7 +88,9 @@ func bulkOf(q url.Values) *bulkResult {
 	b.Absent, ok[9] = n("absent")
 	b.Same, ok[10] = n("same")
 	b.NoSuggest, ok[11] = n("nosuggest")
-	all := b.Done + b.Theirs + b.Refused + b.Already + b.Failed + b.Untried + b.Editors + b.Limit + b.Unreplayed + b.Absent + b.Same + b.NoSuggest
+	b.Tries, ok[12] = n("tries")
+	b.Late, ok[13] = n("late")
+	all := b.Done + b.Theirs + b.Refused + b.Already + b.Failed + b.Untried + b.Editors + b.Limit + b.Unreplayed + b.Absent + b.Same + b.NoSuggest + b.Tries + b.Late
 	if slices.Contains(ok[:], false) || all > maxBulk {
 		return nil
 	}
@@ -94,7 +98,7 @@ func bulkOf(q url.Values) *bulkResult {
 	// bulk proposal's alone.
 	for _, v := range q["made"] {
 		id, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || id <= 0 || b.Kind != "propose" {
+		if err != nil || id <= 0 || b.Kind != "propose" || len(b.Made) == maxPropose {
 			return nil
 		}
 		if !slices.Contains(b.Made, id) {
@@ -122,7 +126,7 @@ func bulkBack(back, path, kind string, b bulkResult) string {
 	}
 	q.Set("bulk", kind)
 	for k, n := range map[string]int{"done": b.Done, "theirs": b.Theirs, "refused": b.Refused, "already": b.Already, "failed": b.Failed, "untried": b.Untried, "editors": b.Editors,
-		"limit": b.Limit, "unreplayed": b.Unreplayed, "absent": b.Absent, "same": b.Same, "nosuggest": b.NoSuggest} {
+		"limit": b.Limit, "unreplayed": b.Unreplayed, "absent": b.Absent, "same": b.Same, "nosuggest": b.NoSuggest, "tries": b.Tries, "late": b.Late} {
 		if n > 0 {
 			q.Set(k, strconv.Itoa(n))
 		}

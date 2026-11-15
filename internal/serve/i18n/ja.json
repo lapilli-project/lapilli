@@ -1444,5 +1444,8 @@
  "The proposals made, on the proposals list": "作った変更提案を一覧で見る",
  "at most %d rules at a time for proposals: pick fewer": "変更提案は一度にルール %d 件までです。減らしてください",
  "what to propose for the rules picked: a new for, the for suggested for each, or retiring each": "選んだルールに何を提案するか: 新しい for、それぞれに提案された for、廃止のいずれか",
- "what to do with the rules picked: a task, a team, a disposition or a proposal": "選んだルールに何をするか: タスク、チーム、方針、変更提案のいずれか"
+ "what to do with the rules picked: a task, a team, a disposition or a proposal": "選んだルールに何をするか: タスク、チーム、方針、変更提案のいずれか",
+ "you have asked for as many proposals in the last hour as anyone may, made or refused: try again later": "この 1 時間に出せるだけの変更提案を求めました（作られたものも拒否されたものも含む）。しばらくしてからもう一度お試しください",
+ "%d not read: you have asked for as many proposals in the last hour as anyone may, made or refused": "%d 件は読まず: この 1 時間に出せるだけの変更提案を求めた（作られたものも拒否されたものも含む）",
+ "the time for one request was up: %d not tried; pick them again": "1 回のリクエストの時間切れ: %d 件は未実施。もう一度選んでください"
 }

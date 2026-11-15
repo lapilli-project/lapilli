@@ -1444,5 +1444,8 @@
  "The proposals made, on the proposals list": "Las propuestas hechas, en la lista de propuestas",
  "at most %d rules at a time for proposals: pick fewer": "como mucho %d reglas a la vez para proponer: elige menos",
  "what to propose for the rules picked: a new for, the for suggested for each, or retiring each": "qué proponer para las reglas elegidas: un nuevo for, el for sugerido para cada una o retirarlas",
- "what to do with the rules picked: a task, a team, a disposition or a proposal": "qué hacer con las reglas elegidas: una tarea, un equipo, una decisión o una propuesta"
+ "what to do with the rules picked: a task, a team, a disposition or a proposal": "qué hacer con las reglas elegidas: una tarea, un equipo, una decisión o una propuesta",
+ "you have asked for as many proposals in the last hour as anyone may, made or refused: try again later": "has pedido en la última hora tantas propuestas como cualquiera puede, hechas o rechazadas: vuelve a intentarlo más tarde",
+ "%d not read: you have asked for as many proposals in the last hour as anyone may, made or refused": "%d sin leer: has pedido en la última hora tantas propuestas como cualquiera puede, hechas o rechazadas",
+ "the time for one request was up: %d not tried; pick them again": "se acabó el tiempo de una petición: %d sin intentar; elígelas de nuevo"
 }

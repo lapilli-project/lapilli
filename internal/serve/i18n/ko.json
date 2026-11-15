@@ -1444,5 +1444,8 @@
  "The proposals made, on the proposals list": "만든 변경 제안 보기",
  "at most %d rules at a time for proposals: pick fewer": "변경 제안은 한 번에 규칙 %d개까지예요. 더 적게 선택해 주세요",
  "what to propose for the rules picked: a new for, the for suggested for each, or retiring each": "선택한 규칙에 제안할 것을 골라 주세요: 새 for, 각각 제안된 for, 폐기 중 하나",
- "what to do with the rules picked: a task, a team, a disposition or a proposal": "선택한 규칙에 할 일을 골라 주세요: 작업, 팀, 처리 방향, 변경 제안 중 하나"
+ "what to do with the rules picked: a task, a team, a disposition or a proposal": "선택한 규칙에 할 일을 골라 주세요: 작업, 팀, 처리 방향, 변경 제안 중 하나",
+ "you have asked for as many proposals in the last hour as anyone may, made or refused: try again later": "지난 한 시간 동안 낼 수 있는 만큼 변경 제안을 요청했어요(만들어진 것과 거부된 것 모두). 나중에 다시 시도해 주세요",
+ "%d not read: you have asked for as many proposals in the last hour as anyone may, made or refused": "%d건은 읽지 않음: 지난 한 시간 동안 낼 수 있는 만큼 변경 제안을 요청함(만들어진 것과 거부된 것 모두)",
+ "the time for one request was up: %d not tried; pick them again": "요청 한 번의 시간이 다 됨: %d건은 시도하지 않음. 다시 선택해 주세요"
 }

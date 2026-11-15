@@ -1758,12 +1758,16 @@ func (s *Server) digestReport(ctx context.Context, from, to time.Time, o verdict
 
 // spareRules are the rules spare over the twelve weeks kept: a week alone
 // rarely has the incidents to tell.
-func (s *Server) spareRules(ctx context.Context) ([]string, error) {
+func (s *Server) spareRules(ctx context.Context) ([]string, error) { return s.spareOver(ctx, weeks) }
+
+// spareOver are the rules spare over the last n weeks of the twelve kept,
+// as a rule's page over them says (ruleLines).
+func (s *Server) spareOver(ctx context.Context, n int) ([]string, error) {
 	t, err := s.tallies(ctx, weeks)
 	if err != nil {
 		return nil, err
 	}
-	credit, err := s.credit(ctx, t, weeks)
+	credit, err := s.credit(ctx, t, n)
 	if err != nil {
 		return nil, err
 	}

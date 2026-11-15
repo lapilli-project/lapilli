@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	gotoken "go/token"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -391,19 +396,19 @@ func mustQuery(t *testing.T, u string) url.Values {
 	return x.Query()
 }
 
-// TestBulkProposeTurns: each proposal waits for the heavy turn as the
-// single form's does, holding no turn to work out a page: with every page
-// turn taken, it is made; with the heavy turn held past the wait, the first
-// fails and the rest aren't tried, as a bulk write stops on an error of
-// another kind.
+// TestBulkProposeTurns: what a rule's page reads for its forms (the
+// suggestions, the spare rules) a bulk proposal reads under a page's turn,
+// as the page does, waiting for one when every one is taken; and gives it
+// back before any proposal waits for the heavy turn, which it waits for as
+// the single form does: held past the wait, the first fails and the rest
+// aren't tried, as a bulk write stops on an error of another kind.
 func TestBulkProposeTurns(t *testing.T) {
 	s := proposeServer(t, nil)
 	h := s.Handler()
 	was := busyWait
 	defer func() { busyWait = was }()
 	busyWait = 300 * time.Millisecond
-	form := url.Values{"do": {"propose"}, "propose": {"for"}, "for": {"10m"}, "rule": {"BulkA", "BulkB", "BulkD"}, "back": {"/rules"}}
-	// Every page's turn taken: it needs none.
+	form := url.Values{"do": {"propose"}, "propose": {"retire"}, "rule": {"BulkA", "BulkB", "BulkD"}, "back": {"/rules"}}
 	for range pageRenders {
 		s.renders <- struct{}{}
 	}
@@ -413,32 +418,77 @@ func TestBulkProposeTurns(t *testing.T) {
 		_, _, hd := postAs(t, h, "/rules/bulk", form, bo, "same-origin")
 		done <- hd
 	}()
+	time.Sleep(100 * time.Millisecond)
+	if heavyWaiting.Load() != 0 {
+		t.Fatal("it waits for the heavy turn before it has read what the pages read")
+	}
+	<-s.renders // a page's turn given back: it takes it, reads, gives it back
 	for began := time.Now(); heavyWaiting.Load() < 1; time.Sleep(5 * time.Millisecond) {
 		if time.Since(began) > 5*time.Second {
 			t.Fatal("not waiting for the heavy turn")
 		}
 	}
-	if len(s.renders) != pageRenders {
-		t.Errorf("%d page turns while it waits", len(s.renders))
+	if len(s.renders) != pageRenders-1 {
+		t.Errorf("%d page turns while it waits for the heavy one, not the %d others hold", len(s.renders), pageRenders-1)
 	}
 	hd := <-done
 	if res := bulkOf(mustQuery(t, hd.Get("Location"))); res == nil || res.Failed != 1 || res.Untried != 2 || res.Done != 0 {
 		t.Errorf("with the heavy turn held: %s", hd.Get("Location"))
 	}
 	<-s.heavy
-	go func() {
-		_, _, hd := postAs(t, h, "/rules/bulk", form, bo, "same-origin")
-		done <- hd
-	}()
-	hd = <-done
-	if res := bulkOf(mustQuery(t, hd.Get("Location"))); res == nil || res.Done != 3 {
-		t.Errorf("with every page turn taken: %s", hd.Get("Location"))
-	}
-	for range pageRenders {
+	for range pageRenders - 1 {
 		<-s.renders
 	}
-	if len(s.heavy) != 0 {
-		t.Error("the heavy turn isn't given back")
+	_, _, hd = postAs(t, h, "/rules/bulk", form, bo, "same-origin")
+	if res := bulkOf(mustQuery(t, hd.Get("Location"))); res == nil || res.Done != 3 {
+		t.Errorf("with every turn free: %s", hd.Get("Location"))
+	}
+	if len(s.heavy) != 0 || len(s.renders) != 0 {
+		t.Error("a turn isn't given back")
+	}
+}
+
+// TestBulkProposeTimeUp: a bulk proposal starts no rule once the time for
+// its request is up (proposeTime), its wait for the heavy turn ending then
+// too: the rest are "not tried: time's up", the answer comes back within
+// it, and nothing is logged as an error.
+func TestBulkProposeTimeUp(t *testing.T) {
+	s := proposeServer(t, nil)
+	var logs strings.Builder
+	s.log = slog.New(slog.NewTextHandler(&logs, nil))
+	was, wasBusy := proposeTime, busyWait
+	defer func() { proposeTime, busyWait = was, wasBusy }()
+	proposeTime, busyWait = 300*time.Millisecond, 10*time.Second
+	s.heavy <- struct{}{} // another heavy request's, for longer than that
+	form := url.Values{"do": {"propose"}, "propose": {"for"}, "for": {"10m"}, "rule": {"BulkA", "BulkB", "BulkD"}, "back": {"/rules"}}
+	began := time.Now()
+	_, _, hd := postAs(t, s.Handler(), "/rules/bulk", form, bo, "same-origin")
+	took := time.Since(began)
+	<-s.heavy
+	if res := bulkOf(mustQuery(t, hd.Get("Location"))); res == nil || res.Late != 3 || res.Failed != 0 || res.Done != 0 {
+		t.Errorf("time's up: %s", hd.Get("Location"))
+	}
+	if took > 3*time.Second {
+		t.Errorf("answered after %s", took)
+	}
+	if strings.Contains(logs.String(), "level=ERROR") {
+		t.Errorf("logged: %s", logs.String())
+	}
+	// A request ended (a proxy's timeout, the reader gone) is logged.
+	s.heavy <- struct{}{}
+	ctx, cancel := context.WithCancel(context.Background())
+	r := httptest.NewRequestWithContext(ctx, http.MethodPost, "/rules/bulk", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	r.Header.Set("X-Forwarded-Email", bo)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	s.Handler().ServeHTTP(httptest.NewRecorder(), r)
+	<-s.heavy
+	if !strings.Contains(logs.String(), "a proposal for the rules picked stopped: its request ended") {
+		t.Errorf("a request ended isn't logged: %s", logs.String())
 	}
 }
 
@@ -475,23 +525,41 @@ func TestBulkProposeBar(t *testing.T) {
 	}
 }
 
-// TestBulkProposeResult: what a bulk proposal did is read within bounds:
-// the proposals made only a bulk proposal's, as many as were made at most,
-// each a number; and none of the page's links or forms carries it on.
+// TestBulkProposeResult: what a bulk proposal did is read within bounds,
+// and what it says was proposed is what the reader proposed: of the
+// proposals made= names, those that are theirs, counted and linked, not
+// another's nor what the address claims; twenty at most; and none of the
+// page's links or forms carries it on.
 func TestBulkProposeResult(t *testing.T) {
 	s := proposeServer(t, nil)
+	ctx := context.Background()
+	mine := func(rule, by string, agent bool) string {
+		id, err := s.l.Propose(ctx, ledger.Proposal{Rule: rule, Kind: ledger.KindFor, Path: ledger.PathNone, MadeBy: by, Agent: agent})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fmt.Sprint(id)
+	}
+	a, b, other, agent := mine("Mine1", bo, false), mine("Mine2", bo, false), mine("Theirs", cy, false), mine("Agents", bo, true)
 	h := s.Handler()
 	for q, want := range map[string]string{
-		"bulk=propose&done=2&made=7&made=9&already=1&nosuggest=1": `2 proposed; 1 had a proposal not finished with already; 1 had no for suggested for them <a href="/proposals?id=7&amp;id=9&amp;state=all&amp;weeks=12">The proposals made`,
-		"bulk=propose&done=1&absent=1&unreplayed=1&same=1&refused=1&limit=2&failed=1&untried=3": "1 proposed; 1 had that for already; 1 not replayed: what a change would do to them can&#39;t be checked; " +
-			"1 not in effect here: nothing to change; 2 refused: past the 20 proposals an hour anyone may make; 1 refused: propose each from its page to see why; 1 failed: try again; stopped there: 3 not tried</p>",
-		"bulk=propose&done=1&made=7&made=8":   "",
-		"bulk=task&done=1&made=7":             "",
-		"bulk=propose&done=1&made=x":          "",
-		"bulk=propose&done=1&made=-3":         "",
-		"bulk=propose&done=101":               "",
-		"bulk=propose&editors=3":              "0 proposed; 3 refused: editors only</p>",
-		"bulk=propose&done=3&made=7&made=7&q": "3 proposed",
+		"bulk=propose&done=2&made=" + a + "&made=" + b + "&already=1&nosuggest=1": `2 proposed; 1 had a proposal not finished with already; 1 had no for suggested for them <a href="/proposals?id=` + a + `&amp;id=` + b + `&amp;state=all&amp;weeks=12">The proposals made`,
+		// What the address claims, and another's, or an agent's, aren't the reader's.
+		"bulk=propose&done=20&made=" + other:                  "",
+		"bulk=propose&done=20":                                "",
+		"bulk=propose&done=3&same=1&made=" + other:            "0 proposed; 1 had that for already</p>",
+		"bulk=propose&done=2&made=" + a + "&made=" + agent:    `1 proposed <a href="/proposals?id=` + a + `&amp;state=all&amp;weeks=12">`,
+		"bulk=propose&done=3&made=" + a + "&made=" + a + "&q": `1 proposed <a href="/proposals?id=` + a + `&amp;state`,
+		"bulk=propose&absent=1&unreplayed=1&same=1&refused=1&limit=2&tries=1&failed=1&untried=3&late=2": "0 proposed; 1 had that for already; 1 not replayed: what a change would do to them can&#39;t be checked; " +
+			"1 not in effect here: nothing to change; 2 refused: past the 20 proposals an hour anyone may make; 1 refused: propose each from its page to see why; " +
+			"1 not read: you have asked for as many proposals in the last hour as anyone may, made or refused; 1 failed: try again; stopped there: 3 not tried; " +
+			"the time for one request was up: 2 not tried; pick them again</p>",
+		"bulk=propose&done=1&made=7&made=8": "",
+		"bulk=task&done=1&made=7":           "",
+		"bulk=propose&done=1&made=x":        "",
+		"bulk=propose&done=1&made=-3":       "",
+		"bulk=propose&done=101":             "",
+		"bulk=propose&editors=3":            "0 proposed; 3 refused: editors only</p>",
 	} {
 		_, body := getAs(t, h, "/rules?weeks=12&"+q, bo)
 		said := strings.Contains(body, `role="status">`)
@@ -504,49 +572,123 @@ func TestBulkProposeResult(t *testing.T) {
 			}
 		}
 	}
+	// Twenty at most, in code: twenty-one names say nothing.
+	q := url.Values{"bulk": {"propose"}, "done": {"21"}}
+	for i := range maxPropose + 1 {
+		q.Add("made", fmt.Sprint(i+1))
+	}
+	if bulkOf(q) != nil {
+		t.Error("twenty-one made= are read")
+	}
 }
 
-// TestProposeWhyKept: each refusal a bulk proposal counts apart is one
-// propose refuses with, as written: a text changed there would be counted
-// as refused, without why.
+// TestProposeWhyKept: every refusal propose gives, with what it calls,
+// is one proposeWhy classifies, of the rule or stopping the bulk, and every
+// one it classifies is one propose gives: a text added or changed there
+// fails here until it is said which it is. And each is counted by its why.
 func TestProposeWhyKept(t *testing.T) {
-	var src strings.Builder
-	for _, f := range []string{"changes.go", "changesweb.go"} {
-		b, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
+	reached := refusalsOf(t, "propose")
+	for text, in := range reached {
+		if _, ok := proposeWhy[text]; !ok {
+			t.Errorf("propose (%v) refuses with %q, which a bulk proposal doesn't classify: of the rule, or stop", in, text)
 		}
-		src.Write(b)
 	}
 	for text := range proposeWhy {
-		if !strings.Contains(src.String(), "bad("+fmt.Sprintf("%q", text)) {
-			t.Errorf("propose refuses with no %q", text)
+		if _, ok := reached[text]; !ok {
+			t.Errorf("proposeWhy classifies %q, which propose doesn't refuse with", text)
 		}
 	}
-	// And each is counted by its why.
 	s, _ := server(t, nil)
 	r, _ := http.NewRequest(http.MethodPost, "/rules/bulk", nil)
 	for _, c := range []struct {
 		err  error
 		want string
+		stop bool
 	}{
-		{bad("no rule in effect is called %q", "X"), "absent=1"},
-		{bad("it isn't replayed (%s): no backtest could check a change to it", "y"), "unreplayed=1"},
-		{bad("that is its for already"), "same=1"},
-		{ledger.ErrProposed, "already=1"},
-		{ledger.ErrTooManyProposals, "limit=1"},
-		{bad("it has been off since %s: four weeks aren't up", "z"), "refused=1"},
-		{bad("another comparison is running: try again in a minute"), "failed=1"},
-		{errBusy, "failed=1"},
-		{errors.New("disk on fire"), "failed=1"},
+		{bad("no rule in effect is called %q", "X"), "absent=1", false},
+		{bad("it isn't replayed (%s): no backtest could check a change to it", "y"), "unreplayed=1", false},
+		{bad("that is its for already"), "same=1", false},
+		{ledger.ErrProposed, "already=1", false},
+		{bad("it has been off since %s: four weeks aren't up", "z"), "refused=1", false},
+		{bad("a text no one gave"), "refused=1", false},
+		// The reader's: the rest are counted so, not read.
+		{ledger.ErrTooManyProposals, "limit=3", true},
+		{errTooManyTries, "tries=3", true},
+		// The server's or the request's: the rest not tried.
+		{bad("nothing has been replayed yet to backtest it against: try again after the first run"), "failed=1&untried=2", true},
+		{bad("another comparison is running: try again in a minute"), "failed=1&untried=2", true},
+		{errBusy, "failed=1&untried=2", true},
+		{errors.New("disk on fire"), "failed=1&untried=2", true},
 	} {
 		var b bulkResult
-		stop := s.proposeCount(&b, r, c.err)
+		stop := s.proposeCount(&b, r, c.err, 3)
 		got := bulkBack("/rules", "/rules", "propose", b)
-		if !strings.Contains(got, c.want) || stop != strings.Contains(c.want, "failed") {
+		if !strings.Contains(got, c.want) || stop != c.stop {
 			t.Errorf("%v: %s, stop %v", c.err, got, stop)
 		}
 	}
+}
+
+// refusalsOf are the texts bad is called with, as written, in the function
+// or method of this package named root and what it calls of this package,
+// transitively (by name: a method of any type with the name), with where.
+func refusalsOf(t *testing.T, root string) map[string][]string {
+	t.Helper()
+	fset := gotoken.NewFileSet()
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	funcs := map[string][]*ast.FuncDecl{}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		af, err := parser.ParseFile(fset, f, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range af.Decls {
+			if fd, ok := d.(*ast.FuncDecl); ok && fd.Body != nil {
+				funcs[fd.Name.Name] = append(funcs[fd.Name.Name], fd)
+			}
+		}
+	}
+	out := map[string][]string{}
+	seen := map[string]bool{}
+	var walk func(name string)
+	walk = func(name string) {
+		if seen[name] {
+			return
+		}
+		seen[name] = true
+		for _, fd := range funcs[name] {
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				c, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				switch fn := c.Fun.(type) {
+				case *ast.Ident:
+					if fn.Name == "bad" && len(c.Args) > 0 {
+						if lit, ok := c.Args[0].(*ast.BasicLit); ok {
+							text, _ := strconv.Unquote(lit.Value)
+							out[text] = append(out[text], name)
+						}
+					} else if funcs[fn.Name] != nil {
+						walk(fn.Name)
+					}
+				case *ast.SelectorExpr:
+					if funcs[fn.Sel.Name] != nil {
+						walk(fn.Sel.Name)
+					}
+				}
+				return true
+			})
+		}
+	}
+	walk(root)
+	return out
 }
 
 // TestBulkProposeWritesBack: twenty proposals, each waiting for the heavy

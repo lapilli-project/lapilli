@@ -312,6 +312,9 @@ type Server struct {
 	rejudge atomic.Bool
 	// comparing is held while an agent's proposed change is replayed.
 	comparing sync.Mutex
+	// tries are, by reader, the proposals asked for in the last hour that
+	// read the rules again (propose).
+	tries tries
 	// heavy is the one turn there is for a request that takes hundreds of
 	// megabytes: every firing of a month, the settings tried over a week.
 	heavy chan struct{}

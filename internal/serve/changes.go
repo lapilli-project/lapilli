@@ -576,9 +576,16 @@ type ruleRecord struct {
 	Would []string `json:"would,omitempty"`
 }
 
+// kindRetire is a proposal asked for as retiring a rule: propose makes it
+// turning it off where it is kept so that it can be, and not off already,
+// and deleting it otherwise, from the rule as it reads it, after it has
+// checked that the reader may propose. Never kept as a kind.
+const kindRetire = "retire"
+
 // ask is what a proposal is asked for.
 type ask struct {
 	Rule string
+	// Kind is a proposal's kind, or kindRetire.
 	Kind string
 	For  time.Duration // a for's
 	// Bound is which of the condition's numbers, as rules.Bounds counts
@@ -697,11 +704,23 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 	if err := s.l.MayPropose(ctx, q.Rule, by); err != nil {
 		return 0, err
 	}
+	// Reading the rules again, from where they are kept, costs whatever a
+	// proposal is refused for after it: a reader asks for triesAnHour at
+	// most, made or refused. Lapilli's own are bounded apart.
+	if by != ledger.Proposer && !s.tries.take(by, time.Now()) {
+		return 0, errTooManyTries
+	}
 	f, err := s.current(ctx, q.Rule, true)
 	if err != nil {
 		return 0, err
 	}
 	r := f.rule
+	if q.Kind == kindRetire {
+		q.Kind = ledger.KindDelete
+		if s.offable(f) && !isOff(r) {
+			q.Kind = ledger.KindDisable // off first; deleted once off four weeks
+		}
+	}
 	e := rules.Edit{Name: r.Name, Group: r.Group, UID: r.UID, Namespace: r.Namespace}
 	want := r
 	ev := evidence{From: q.From, Incident: q.Incident, Reason: q.Reason}
@@ -897,7 +916,8 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 	case errors.Is(err, ledger.ErrProposed):
 		return 0, bad("this rule has a proposal not yet finished with: one at a time, so that each is seen applied")
 	case errors.Is(err, ledger.ErrTooManyProposals):
-		return 0, bad("you have made %d proposals in the last hour, with your agents, the most anyone may: try again later", ledger.ProposalsAnHour)
+		// Made by another request meanwhile: 429, as MayPropose's.
+		return 0, ledger.ErrTooManyProposals
 	}
 	return id, err
 }
@@ -2027,14 +2047,7 @@ func (s *Server) toolPropose(ctx context.Context, req *mcp.CallToolRequest, in p
 		}
 		q.Kind, q.Bound, q.Value = ledger.KindThreshold, in.Bound, *in.Value
 	case "retire":
-		f, err := s.current(ctx, in.Rule, false)
-		if err != nil {
-			return nil, out, err
-		}
-		q.Kind = ledger.KindDelete
-		if s.offable(f) && !isOff(f.rule) {
-			q.Kind = ledger.KindDisable // off first; deleted once off four weeks
-		}
+		q.Kind = kindRetire // turned off or deleted, as propose finds the rule
 	case "says":
 		q.Kind, q.Annotation, q.Text, q.Unset, q.Check = ledger.KindSays, in.Annotation, in.Text, in.Unset, in.Check
 	default:
