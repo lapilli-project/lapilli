@@ -2,10 +2,12 @@ package serve
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -112,7 +114,8 @@ func TestDeclaredPagesTranslated(t *testing.T) {
 	missing.Unlock()
 	// What --config can be told is wrong with, in each language: every
 	// way ParseConfig and configText say it.
-	for _, f := range configFormats {
+	formats := slices.Concat(configFormats, slices.Collect(maps.Values(briefs)), []string{"the file can't be read as --config", "and %d more"})
+	for _, f := range formats {
 		for lang, c := range catalogs {
 			if _, ok := c[f]; !ok {
 				t.Errorf("%s has no translation for %q", lang, f)

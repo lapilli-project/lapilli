@@ -1678,5 +1678,6 @@ func (s *Server) apiSettings(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
+	v.Config = s.configFor(r)
 	writeJSON(w, v)
 }

@@ -17,7 +17,7 @@
 {{with .Config}}
 <p>{{tbdi "Teams, quiet windows, reports and roles are declared in %s: serve.config in the Helm chart's values. What it declares is changed there alone." .File}} {{if .Prune}}{{t "What it no longer declares is deleted (--config-prune)."}}{{else}}{{t "What it no longer declares is the UI's again; with --config-prune, it is deleted."}}{{end}}</p>
 {{if .Applied.IsZero}}<p class="quiet">{{t "Not kept to it yet."}}</p>{{else}}<p class="quiet">{{t "The ledger is kept to it as of %s, the file's hash beginning %s." (at $loc .Applied) .Hash}}</p>{{end}}
-{{with .ErrText $.Lang}}<p class="warn" role="status"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "The file can't be used, so nothing in it was kept, and the ledger keeps what it last declared: %s" .}}</p>{{end}}
+{{if .Problems}}{{template "configproblems" (on $ .)}}{{end}}
 {{else}}<p>{{t "Nothing is declared: lapilli serve was started without --config, so teams, quiet windows, reports and roles are made here, in the UI."}}</p>{{end}}
 <p>{{if $.Status.Admin}}<a href="/config.yaml">config.yaml</a> {{t "gives them all, declared and made here alike, as --config takes them, to commit."}}{{else}}{{t "An admin can have them all as --config takes them, from config.yaml."}}{{end}}</p>
 
@@ -46,7 +46,7 @@
 {{define "runs"}}{{$title := t "Runs"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
 <h1>{{$title}}</h1>
 <p class="lede">{{t "Firings are in up to %s." (at $loc .Cursor)}}{{with .Took}} {{t "The last run took %s." (dur .)}}{{end}}</p>
-{{with .Config}}{{with .ErrText $.Lang}}<p class="warn" role="status"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "--config can't be used, so the ledger keeps what it last declared: %s" .}} <a href="{{$.Link "/settings#config"}}">{{t "Settings"}}</a></p>{{end}}{{end}}
+{{with .Config}}{{if .Problems}}{{template "configproblems" (on $ .)}}{{end}}{{end}}
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Kind"}}</th><th scope="col">{{t "Started"}}</th><th scope="col">{{t "Period"}}</th><th scope="col" class="n">{{t "Firings"}}</th><th scope="col">{{t "Not replayed"}}</th><th scope="col">{{t "Error"}}</th></tr></thead>
 <tbody>{{range .Runs}}
@@ -76,3 +76,11 @@
 <h2>{{t "Changes made here"}}</h2>
 {{if .Changes}}<ul class="plain">{{range .Changes}}<li>{{at $loc .At}} {{.By}}: {{.What}}</li>{{end}}</ul>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 {{end}}{{template "bottom" .}}{{end}}
+
+{{/* What can't be kept of --config: why, for an admin; each one's line
+and kind, for anyone else, whom why could tell who holds a role. */}}
+{{define "configproblems"}}{{$lang := .P.Lang}}{{with .V}}<div class="warn" role="status">
+<p><span aria-hidden="true">⚠&#xFE0E;</span> {{if .Whole}}{{t "The file can't be used, so nothing in it was kept, and the ledger keeps what it last declared."}}{{else}}{{t "Some of what the file declares can't be kept: each of those is kept as it was, and the rest is kept."}}{{end}}</p>
+<ul>{{range .Problems}}<li>{{.Shown $lang}}</li>{{end}}{{with .More}}<li>{{t "and %d more" .}}</li>{{end}}</ul>
+{{if .Brief}}<p>{{t "An admin sees why each can't be kept, on the Settings page."}}</p>{{end}}
+</div>{{end}}{{end}}

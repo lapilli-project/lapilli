@@ -1609,7 +1609,6 @@ func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
 		}
 		v.Settings = append(v.Settings, x)
 	}
-	v.Config = s.shownStatus().Config
 	cs, err := s.l.Changes(ctx, 100)
 	if err != nil {
 		return v, err
@@ -1627,6 +1626,7 @@ func (s *Server) settingsPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	v.Config = s.configFor(r)
 	if v.Notify, err = s.notifyStatus(r.Context(), lang(r)); err != nil {
 		return nil, err
 	}
@@ -1797,7 +1797,7 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 	}
 	// The leader's, on a replica that follows.
 	st := s.shownStatus()
-	v := runsView{runs, cs, cursor, st.Runs, st.Took, srcs, s.cfg.FiringsToken != "", nil, nil, s.onCallShown(st), st.Config}
+	v := runsView{runs, cs, cursor, st.Runs, st.Took, srcs, s.cfg.FiringsToken != "", nil, nil, s.onCallShown(st), s.configFor(r)}
 	if v.Stopped, err = s.stoppedReports(r.Context()); err != nil {
 		return nil, err
 	}

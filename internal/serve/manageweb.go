@@ -56,8 +56,12 @@ func (s *Server) managePage(r *http.Request) (any, error) {
 	if !cursor.IsZero() {
 		v.Cards[3].Fact, v.Cards[3].At = "Firings are in up to %s.", cursor
 	}
-	if c := s.shownStatus().Config; c.ErrText("en") != "" {
+	switch c := s.shownStatus().Config; {
+	case c == nil || len(c.Problems) == 0:
+	case c.Whole:
 		v.Cards[2].Warn = "The config file can't be used: the ledger keeps what it last declared."
+	default:
+		v.Cards[2].Warn = "Some of what the config file declares can't be kept."
 	}
 	if s.role(r) < admin {
 		v.Cards = append(v.Cards[:1], v.Cards[2:]...) // Roles, for admins alone

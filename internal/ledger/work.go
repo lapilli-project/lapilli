@@ -342,17 +342,41 @@ func (l *Ledger) PutTeam(ctx context.Context, t Team, by string) (int64, error) 
 			if err := isDeclared(tx, "teams", id); err != nil {
 				return err
 			}
+			// Renamed, a team a declared window, report or role names
+			// would leave the file naming one that isn't there.
+			var name string
+			if err := tx.QueryRowContext(tx.ctx, "SELECT name FROM teams WHERE id = ?", id).Scan(&name); err == nil && name != t.Name {
+				if err := namedByDeclared(tx, id); err != nil {
+					return err
+				}
+			}
 		}
 		var err error
-		id, err = l.putTeam(tx, id, t, by, false)
+		id, err = l.putTeam(tx, id, t, by, false, "team "+t.Name+" kept")
 		return err
 	})
 	return id, err
 }
 
+// namedByDeclared refuses, in a write, a change to a team that a quiet
+// window, a report or a role --config declares names: it would leave the
+// file naming a team that isn't there.
+func namedByDeclared(t *txn, id int64) error {
+	var named bool
+	if err := t.QueryRowContext(t.ctx, `SELECT EXISTS (SELECT 1 FROM windows WHERE team_id = ? AND declared = 1)
+		OR EXISTS (SELECT 1 FROM reports WHERE team_id = ? AND declared = 1)
+		OR EXISTS (SELECT 1 FROM grants WHERE team_id = ? AND declared = 1)`, id, id, id).Scan(&named); err != nil {
+		return err
+	}
+	if named {
+		return ErrNamedByDeclared
+	}
+	return nil
+}
+
 // putTeam makes a team (id 0) or changes one, in a write, as PutTeam and
-// --config do, and keeps it declared or not.
-func (l *Ledger) putTeam(tx *txn, id int64, t Team, by string, declared bool) (int64, error) {
+// --config do, keeps it declared or not, and notes it as what.
+func (l *Ledger) putTeam(tx *txn, id int64, t Team, by string, declared bool, what string) (int64, error) {
 	now := time.Now().Unix()
 	// A team made, renamed, or owning by another pattern or labels may
 	// change who owns a rule a team's window quiets.
@@ -400,7 +424,7 @@ func (l *Ledger) putTeam(tx *txn, id int64, t Team, by string, declared bool) (i
 		}
 	}
 	t.ID, t.Declared = id, declared
-	return id, change(tx, by, "team "+t.Name+" kept", nil, t)
+	return id, change(tx, by, what, nil, t)
 }
 
 // DeleteTeam deletes a team; what it owned is no one's. Its reports and
@@ -414,14 +438,8 @@ func (l *Ledger) DeleteTeam(ctx context.Context, id int64, by string) error {
 		if err := isDeclared(t, "teams", id); err != nil {
 			return err
 		}
-		var named bool
-		if err := t.QueryRowContext(t.ctx, `SELECT EXISTS (SELECT 1 FROM windows WHERE team_id = ? AND declared = 1)
-			OR EXISTS (SELECT 1 FROM reports WHERE team_id = ? AND declared = 1)
-			OR EXISTS (SELECT 1 FROM grants WHERE team_id = ? AND declared = 1)`, id, id, id).Scan(&named); err != nil {
+		if err := namedByDeclared(t, id); err != nil {
 			return err
-		}
-		if named {
-			return ErrNamedByDeclared
 		}
 		return l.deleteTeam(t, id, by)
 	})
@@ -442,6 +460,29 @@ func (l *Ledger) deleteTeam(t *txn, id int64, by string) error {
 	}
 	if _, err := t.ExecContext(t.ctx, "DELETE FROM teams WHERE id = ?", id); err != nil {
 		return err
+	}
+	// Its editors go, each noted, as a role taken away is.
+	rows, err := t.QueryContext(t.ctx, "SELECT who FROM grants WHERE team_id = ? ORDER BY id", id)
+	if err != nil {
+		return err
+	}
+	var whos []string
+	for rows.Next() {
+		var who string
+		if err := rows.Scan(&who); err != nil {
+			rows.Close()
+			return err
+		}
+		whos = append(whos, who)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, who := range whos {
+		if err := change(t, by, RoleTaken+who, nil, nil); err != nil {
+			return err
+		}
 	}
 	// What was its stops, and its editors go with it, in this write: a
 	// team made later may be given its id.
@@ -758,7 +799,9 @@ type rowQuerier interface {
 // or by a preview, which then passes only if saving it would.
 func windowsLeft(ctx context.Context, q rowQuerier, team int64) error {
 	var own, all int
-	if err := q.QueryRowContext(ctx, "SELECT count(*) FILTER (WHERE team_id = ?), count(*) FROM windows", team).Scan(&own, &all); err != nil {
+	// What --config declares has its own most (MaxWindows a file): the
+	// UI's can't crowd it out, nor it the UI's.
+	if err := q.QueryRowContext(ctx, "SELECT count(*) FILTER (WHERE team_id = ?), count(*) FROM windows WHERE declared = 0", team).Scan(&own, &all); err != nil {
 		return err
 	}
 	_, limited := scopeOf(ctx)
@@ -781,7 +824,7 @@ func movedLeft(ctx context.Context, q rowQuerier, from, to int64) error {
 		return nil
 	}
 	var own int
-	if err := q.QueryRowContext(ctx, "SELECT count(*) FROM windows WHERE team_id = ?", to).Scan(&own); err != nil {
+	if err := q.QueryRowContext(ctx, "SELECT count(*) FROM windows WHERE team_id = ? AND declared = 0", to).Scan(&own); err != nil {
 		return err
 	}
 	if own >= MaxTeamWindows {
@@ -1079,6 +1122,11 @@ func (l *Ledger) checkWindow(w *Window) error {
 	switch {
 	case w.Title == "":
 		return invalid("a quiet window needs a title")
+	case !plain(w.Title) || Hidden(w.Title):
+		// A line break would end a comment an export writes it in, and a
+		// character that doesn't show, or turns text around, makes it read
+		// as another.
+		return invalid("a quiet window's title is one line, with no character that doesn't show")
 	case w.Start.IsZero() || w.End.IsZero() || !w.End.After(w.Start):
 		return invalid("a quiet window needs a start, and an end after it")
 	case w.End.Sub(w.Start) > maxWindow:

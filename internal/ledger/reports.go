@@ -194,7 +194,7 @@ func (l *Ledger) PutScheduled(ctx context.Context, r Scheduled, by string, at ti
 		}
 		if _, limited := scopeOf(t.ctx); limited && id == 0 {
 			var team, all int
-			if err := t.QueryRowContext(t.ctx, "SELECT count(*) FILTER (WHERE team_id = ?), count(*) FROM reports", r.TeamID).Scan(&team, &all); err != nil {
+			if err := t.QueryRowContext(t.ctx, "SELECT count(*) FILTER (WHERE team_id = ?), count(*) FROM reports WHERE declared = 0", r.TeamID).Scan(&team, &all); err != nil {
 				return err
 			}
 			if team >= MaxTeamScheduled {
@@ -217,8 +217,9 @@ func (l *Ledger) PutScheduled(ctx context.Context, r Scheduled, by string, at ti
 		var res sql.Result
 		var err error
 		if id == 0 {
+			// What --config declares has its own most (MaxScheduled a file).
 			var n int
-			if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM reports").Scan(&n); err != nil {
+			if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM reports WHERE declared = 0").Scan(&n); err != nil {
 				return err
 			}
 			if n >= MaxScheduled {

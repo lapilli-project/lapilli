@@ -334,8 +334,9 @@ func (l *Ledger) PutGrant(ctx context.Context, g Grant, by string) (int64, error
 				return invalid("no such team")
 			}
 		}
+		// What --config declares has its own most (MaxGrants a file).
 		var n int
-		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM grants").Scan(&n); err != nil {
+		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM grants WHERE declared = 0").Scan(&n); err != nil {
 			return err
 		}
 		if n >= MaxGrants {

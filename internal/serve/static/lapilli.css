@@ -503,7 +503,8 @@ p.diffopts { margin: .3rem 0 .5rem; }
 p.proposal-facts { color: var(--dim); margin: 0 0 .8rem; }
 div.proposal-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .4rem 0 1rem; }
 div.proposal-actions form, div.proposal-actions details { margin: 0; }
-p.warn { color: var(--bad); background: var(--card); border: 1px solid var(--bad); border-radius: 10px; padding: .5rem .8rem; }
+p.warn, div.warn { color: var(--bad); background: var(--card); border: 1px solid var(--bad); border-radius: 10px; padding: .5rem .8rem; }
+div.warn p, div.warn ul { margin: .3rem 0; }
 ol.steps { margin: .3rem 0 .8rem; padding-left: 1.4rem; }
 ol.steps li { padding: .25rem 0; }
 ol.steps .t { font-variant-numeric: tabular-nums; color: var(--dim); font-size: .9rem; }

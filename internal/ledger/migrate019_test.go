@@ -3,7 +3,6 @@ package ledger
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -135,10 +134,4 @@ func TestMigrate019(t *testing.T) {
 	if _, err := l2.PutTeam(ctx, Team{Name: "PAYMENTS", Rules: "^Z"}, "ana"); !invalidErr(err) {
 		t.Errorf("a new team called PAYMENTS beside payments: %v", err)
 	}
-}
-
-// invalidErr says err is something written that can't be kept as it is.
-func invalidErr(err error) bool {
-	var inv ErrInvalid
-	return errors.As(err, &inv)
 }

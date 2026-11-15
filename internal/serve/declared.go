@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"slices"
 	"strconv"
@@ -43,7 +44,7 @@ var configEvery = 15 * time.Second
 // the order an export writes them.
 var configKeys = map[string][]string{
 	"":     {"teams", "windows", "reports", "grants"},
-	"team": {"name", "rules", "labels", "note", "work_hours", "sleep_hours", "tz", "shifts"},
+	"team": {"name", "rules", "labels", "note", "work_hours", "sleep_hours", "tz", "shifts", "renamed_from"},
 	// A window's on is repeat_on: YAML 1.1, which Helm reads values by,
 	// takes a key on, unquoted, for true.
 	"window": {"title", "team", "start", "end", "every", "repeat_on", "until", "rules", "labels"},
@@ -75,6 +76,11 @@ var (
 		"labels are a mapping of a label's name to a value, or a list of values", "a label's name is a text", "label %s has no value",
 		"%s %q: want a time like 2026-11-02T09:30, or 2026-11-02T09:30:00+09:00", "a team has a name", "a quiet window has a title",
 		"a report has a name", "enabled is true or false", "a role is given to a user or a group: one of user and group",
+		"the file declares nothing: an empty file would take away all it declared; to declare nothing, give teams: []",
+		"%s is %s, read as a boolean or a number, not a text: quote it, or give serve.config as a text",
+		"label %s's value %s is read as a boolean or a number, not a text: quote it, or give serve.config as a text",
+		"a config declares %d teams at most", "a config declares %d quiet windows at most", "a config declares %d reports at most",
+		"a config declares %d roles at most",
 		unknownIn["team"], unknownIn["window"], unknownIn["report"], unknownIn["grant"],
 		wantA["team"], wantA["window"], wantA["report"], wantA["grant"],
 	}
@@ -140,8 +146,12 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 	var d ledger.Declared
 	var doc yaml.Node
 	dec := yaml.NewDecoder(bytes.NewReader(b))
+	// Nothing is no file: an empty or truncated one, read as a ConfigMap
+	// is swapped, would take away all it declared, and with
+	// --config-prune delete it.
+	empty := bad("the file declares nothing: an empty file would take away all it declared; to declare nothing, give teams: []")
 	if err := dec.Decode(&doc); errors.Is(err, io.EOF) {
-		return d, nil
+		return d, empty
 	} else if err != nil {
 		return d, bad("the file isn't YAML: %s", strings.TrimPrefix(err.Error(), "yaml: "))
 	}
@@ -154,7 +164,7 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 		root = root.Content[0]
 	}
 	if null(root) {
-		return d, nil
+		return d, empty
 	}
 	err := each(root, "", func(key string, v *yaml.Node) error {
 		if null(v) {
@@ -181,6 +191,21 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 		}
 		return nil
 	})
+	if err != nil {
+		return d, err
+	}
+	// As many as the ledger keeps, at most: read here, each is checked
+	// before the write, which no file holds long.
+	switch {
+	case len(d.Teams) > ledger.MaxDeclaredTeams:
+		err = bad("a config declares %d teams at most", ledger.MaxDeclaredTeams)
+	case len(d.Windows) > ledger.MaxWindows:
+		err = bad("a config declares %d quiet windows at most", ledger.MaxWindows)
+	case len(d.Reports) > ledger.MaxScheduled:
+		err = bad("a config declares %d reports at most", ledger.MaxScheduled)
+	case len(d.Grants) > ledger.MaxGrants:
+		err = bad("a config declares %d roles at most", ledger.MaxGrants)
+	}
 	return d, err
 }
 
@@ -230,6 +255,27 @@ func text(key string, v *yaml.Node) (string, error) {
 	return v.Value, nil
 }
 
+// name is a scalar's text that names something (a team, a window, a
+// report, a person or a group): as written, a string. One YAML reads as a
+// boolean or a number is refused, as Helm, reading values as YAML 1.1,
+// gives it as one: no is false, 0123 is 83, 1.10 is 1.1.
+func name(key string, v *yaml.Node) (string, error) {
+	s, err := text(key, v)
+	if err == nil && s != "" && notText(v) {
+		err = badAt(v, "%s is %s, read as a boolean or a number, not a text: quote it, or give serve.config as a text", key, s)
+	}
+	return s, err
+}
+
+// notText says a scalar, unquoted, is read as a boolean or a number.
+func notText(v *yaml.Node) bool {
+	switch v.ShortTag() {
+	case "!!bool", "!!int", "!!float":
+		return v.Style&(yaml.DoubleQuotedStyle|yaml.SingleQuotedStyle) == 0
+	}
+	return false
+}
+
 // texts are a list of scalars' texts; a single one is a list of one.
 func texts(key string, v *yaml.Node) ([]string, error) {
 	if null(v) {
@@ -270,6 +316,13 @@ func labels(v *yaml.Node) (incident.Labels, error) {
 		if err != nil {
 			return nil, err
 		}
+		// A value read as a boolean or a fraction isn't as written: on is
+		// true, 1.10 is 1.1. A whole number is, as a status code is.
+		for _, y := range append([]*yaml.Node{x}, x.Content...) {
+			if y.Kind == yaml.ScalarNode && (y.ShortTag() == "!!bool" || y.ShortTag() == "!!float") && notText(y) {
+				return nil, badAt(y, "label %s's value %s is read as a boolean or a number, not a text: quote it, or give serve.config as a text", k.Value, y.Value)
+			}
+		}
 		if len(vs) == 0 {
 			return nil, badAt(x, "label %s has no value", k.Value)
 		}
@@ -303,7 +356,9 @@ func parseTeam(n *yaml.Node, d *ledger.Declared) error {
 		var err error
 		switch key {
 		case "name":
-			t.Name, err = text(key, v)
+			t.Name, err = name(key, v)
+		case "renamed_from":
+			dt.RenamedFrom, err = name(key, v)
 		case "rules":
 			t.Rules, err = text(key, v)
 			t.Rules = strings.TrimSpace(t.Rules)
@@ -340,9 +395,9 @@ func parseWindow(n *yaml.Node, loc *time.Location, d *ledger.Declared) error {
 		var err error
 		switch key {
 		case "title":
-			w.Title, err = text(key, v)
+			w.Title, err = name(key, v)
 		case "team":
-			dw.Team, err = text(key, v)
+			dw.Team, err = name(key, v)
 		case "start":
 			w.Start, err = when(key, v, loc)
 		case "end":
@@ -402,9 +457,9 @@ func parseReport(n *yaml.Node, d *ledger.Declared) error {
 		var err error
 		switch key {
 		case "name":
-			r.Name, err = text(key, v)
+			r.Name, err = name(key, v)
 		case "team":
-			dr.Team, err = text(key, v)
+			dr.Team, err = name(key, v)
 		case "schedule":
 			r.Schedule, err = text(key, v)
 		case "span":
@@ -443,11 +498,11 @@ func parseGrant(n *yaml.Node, d *ledger.Declared) error {
 		var err error
 		switch key {
 		case "user":
-			user, err = text(key, v)
+			user, err = name(key, v)
 		case "group":
-			group, err = text(key, v)
+			group, err = name(key, v)
 		case "team":
-			dg.Team, err = text(key, v)
+			dg.Team, err = name(key, v)
 		}
 		return err
 	})
@@ -468,58 +523,176 @@ func parseGrant(n *yaml.Node, d *ledger.Declared) error {
 
 // checkDeclared checks what the ledger doesn't of what --config declares,
 // as the UI's forms are checked: each report's destinations, which the
-// flags name, and each team's on-call shifts, which --on-call names.
-func (s *Server) checkDeclared(d ledger.Declared) error {
-	for _, t := range d.Teams {
-		if err := s.checkShifts(t.Shifts); err != nil {
-			return ledger.DeclaredError{Line: t.Line, Name: t.Name, Err: err}
+// flags name, and each team's on-call shifts, which --on-call names. One
+// refused is Bad: skipped, and kept as it was, as one the ledger refuses.
+func (s *Server) checkDeclared(d *ledger.Declared) {
+	for i := range d.Teams {
+		if err := s.checkShifts(d.Teams[i].Shifts); err != nil {
+			d.Teams[i].Bad = err
 		}
 	}
-	for _, r := range d.Reports {
-		if err := s.knowsDests(r.Scheduled); err != nil {
-			return ledger.DeclaredError{Line: r.Line, Name: r.Name, Err: err}
+	for i := range d.Reports {
+		if err := s.knowsDests(d.Reports[i].Scheduled); err != nil {
+			d.Reports[i].Bad = err
 		}
 	}
-	return nil
 }
 
-// configState is what the leader last made of --config: the file's hash it
-// last kept the ledger to (applied), when, and what the last that changed
-// anything did; and, when the file last read couldn't be used, its hash
-// (failed), the ledger's generation then, and why, in each language.
+// configProblem is something wrong with --config: the file as a whole
+// (Kind "file"), or a thing it declares that can't be kept, of a kind
+// (team, window, report, grant), on a line. Text is why, in each language,
+// for admins: it can name a role's holder or a report's destination.
+type configProblem struct {
+	Line int               `json:"line,omitempty"`
+	Kind string            `json:"kind"`
+	Text map[string]string `json:"text,omitempty"`
+}
+
+// briefs are what a problem says to a reader who isn't an admin: its line
+// and kind alone.
+var briefs = map[string]string{
+	"file":            "line %d: the file can't be read as --config",
+	ledger.KindTeam:   "line %d: a team that can't be kept",
+	ledger.KindWindow: "line %d: a quiet window that can't be kept",
+	ledger.KindReport: "line %d: a report that can't be kept",
+	ledger.KindGrant:  "line %d: a role that can't be kept",
+}
+
+// Shown is the problem in a language: why, for an admin; its line and
+// kind, for anyone else.
+func (p configProblem) Shown(lang string) string {
+	if t, ok := p.Text[lang]; ok {
+		return t
+	}
+	if t, ok := p.Text["en"]; ok {
+		return t
+	}
+	if p.Line == 0 && p.Kind == "file" {
+		return tr(lang, "the file can't be read as --config")
+	}
+	return tr(lang, briefs[p.Kind], p.Line)
+}
+
+// problemOf is what is wrong, as a problem.
+func problemOf(err error) configProblem {
+	p := configProblem{Kind: "file", Text: map[string]string{}}
+	var de ledger.DeclaredError
+	var ce configError
+	switch {
+	case errors.As(err, &de):
+		p.Kind, p.Line = de.Kind, de.Line
+	case errors.As(err, &ce):
+		p.Line = ce.line
+	}
+	for _, l := range Langs() {
+		p.Text[l] = configText(l, err)
+	}
+	return p
+}
+
+// configProblemsKept is how many problems are kept to be shown, the first;
+// the rest are counted.
+const configProblemsKept = 50
+
+// configState is what the leader last made of --config, in its term: the
+// file's hash it last kept the ledger to (applied), when, what the last
+// that wrote did, and what of it couldn't be kept; a file that couldn't be
+// used as a whole (failed); one kept with what it no longer declares kept
+// too, to be deleted when it is read again (keptFor); and when to try
+// again a file kept in part, or after an error of the ledger's.
 type configState struct {
 	sync.Mutex
-	applied    string
-	at         time.Time
-	did        ledger.Reconciled
-	failed     string
-	failedGen  int64
-	err        map[string]string
+	applied, failed, keptFor string
+	at                       time.Time
+	did                      ledger.Reconciled
+	// shown are the problems the pages show; kept, those of the file
+	// applied, shown again once a file that failed is put back.
+	shown, kept configProblems
+	// retryHash is tried again from retryAt, after backoff, once the
+	// ledger changed since triedGen.
+	retryHash  string
+	retryAt    time.Time
+	backoff    time.Duration
+	triedGen   int64
 	errAt      time.Time
 	loggedText string
 }
 
-// configShown is what the pages say of --config, as the leader last made
-// of it (sharedStatus): its hash cut short.
-type configShown struct {
-	File    string            `json:"file,omitempty"`
-	Prune   bool              `json:"prune,omitempty"`
-	Hash    string            `json:"hash,omitempty"`
-	Applied time.Time         `json:"applied,omitzero"`
-	Did     ledger.Reconciled `json:"did,omitzero"`
-	Err     map[string]string `json:"err,omitempty"`
-	ErrAt   time.Time         `json:"err_at,omitzero"`
+// configProblems are what is wrong with a file: the first kept, how many
+// more, and whether it couldn't be used at all.
+type configProblems struct {
+	list  []configProblem
+	more  int
+	whole bool
 }
 
-// ErrText is what was wrong with the file, in a language.
+func problemsOf(errs []ledger.DeclaredError) configProblems {
+	var ps configProblems
+	for i, e := range errs {
+		if i >= configProblemsKept {
+			ps.more = len(errs) - i
+			break
+		}
+		ps.list = append(ps.list, problemOf(e))
+	}
+	return ps
+}
+
+// newTerm forgets what an earlier term made of the file: another leader
+// may have kept the ledger to another since, or a failover lost what this
+// one wrote. Kept again to the same file, the ledger writes nothing.
+func (c *configState) newTerm() {
+	c.Lock()
+	defer c.Unlock()
+	c.applied, c.failed, c.keptFor, c.retryHash, c.retryAt, c.backoff = "", "", "", "", time.Time{}, 0
+}
+
+// configShown is what the pages say of --config, as the leader last made
+// of it (sharedStatus): its hash cut short. Brief says Text is left out,
+// for a reader who isn't an admin.
+type configShown struct {
+	File     string            `json:"file,omitempty"`
+	Prune    bool              `json:"prune,omitempty"`
+	Hash     string            `json:"hash,omitempty"`
+	Applied  time.Time         `json:"applied,omitzero"`
+	Did      ledger.Reconciled `json:"did,omitzero"`
+	Whole    bool              `json:"whole,omitempty"`
+	Problems []configProblem   `json:"problems,omitempty"`
+	More     int               `json:"more,omitempty"`
+	ErrAt    time.Time         `json:"err_at,omitzero"`
+	Brief    bool              `json:"brief,omitempty"`
+}
+
+// ErrText is what is wrong, in a language, "" for nothing.
 func (c *configShown) ErrText(lang string) string {
-	if c == nil || len(c.Err) == 0 {
+	if c == nil {
 		return ""
 	}
-	if t, ok := c.Err[lang]; ok {
-		return t
+	var out []string
+	for _, p := range c.Problems {
+		out = append(out, p.Shown(lang))
 	}
-	return c.Err["en"]
+	return strings.Join(out, "; ")
+}
+
+// forReader is c as a reader is shown it: why each problem is, for an
+// admin alone.
+func (c *configShown) forReader(admin bool) *configShown {
+	if c == nil || admin {
+		return c
+	}
+	b := *c
+	b.Brief, b.Problems = true, nil
+	for _, p := range c.Problems {
+		b.Problems = append(b.Problems, configProblem{Line: p.Line, Kind: p.Kind})
+	}
+	return &b
+}
+
+// configFor is what --config came to, as the leader last said it, as the
+// reader is shown it.
+func (s *Server) configFor(r *http.Request) *configShown {
+	return s.shownStatus().Config.forReader(s.role(r) == admin)
 }
 
 // configShown is this replica's: nil without --config.
@@ -529,12 +702,10 @@ func (s *Server) configShown() *configShown {
 	}
 	s.config.Lock()
 	defer s.config.Unlock()
-	c := &configShown{File: s.cfg.Config, Prune: s.cfg.ConfigPrune, Did: s.config.did, ErrAt: s.config.errAt}
-	if c.File != "" && len(s.config.applied) >= 12 {
+	c := &configShown{File: s.cfg.Config, Prune: s.cfg.ConfigPrune, Did: s.config.did, ErrAt: s.config.errAt,
+		Whole: s.config.shown.whole, Problems: s.config.shown.list, More: s.config.shown.more}
+	if len(s.config.applied) >= 12 {
 		c.Hash, c.Applied = s.config.applied[:12], s.config.at
-	}
-	if len(s.config.err) > 0 {
-		c.Err = s.config.err
 	}
 	return c
 }
@@ -542,75 +713,149 @@ func (s *Server) configShown() *configShown {
 // noConfig is the hash kept for no --config: nothing declared.
 const noConfig = "none"
 
+// configBackoffMost is the longest a file kept in part, or the ledger's
+// error, waits to be tried again.
+const configBackoffMost = 10 * time.Minute
+
+// configTerm keeps the ledger to --config as a term of leading begins:
+// whatever an earlier term kept it to.
+func (s *Server) configTerm(ctx context.Context) error {
+	s.config.newTerm()
+	return s.reconcileConfig(ctx)
+}
+
 // reconcileConfig keeps the ledger holding what --config declares, as the
 // file now says it, when it changed since the ledger was last kept to it;
 // without --config, nothing declared, so that what a file declared before
 // is the UI's again. The leader's alone (lead), in one write its lease
 // fences: what replicas read of the file can differ for a minute as
 // Kubernetes updates each one's copy, and two writing by turns would undo
-// each other. A file that can't be used changes nothing, and is said once
-// why; it is tried again as it changes, or the ledger does (a team it names
-// made in the UI). An error of the ledger's own is returned, and the file
-// read again next time.
+// each other.
+//
+// A file that can't be read as --config changes nothing, and is said once
+// why. One read, each thing it declares that can't be kept is skipped, and
+// kept as it was, and the rest is kept; such a file is tried again, as the
+// ledger changes (a team it names made in the UI), from configEvery to
+// configBackoffMost after. With --config-prune, what it no longer declares
+// is kept until the file is read the same twice, then deleted: an empty or
+// half-written file read once deletes nothing. An error of the ledger's is
+// returned, and the file tried again after a while.
 func (s *Server) reconcileConfig(ctx context.Context) error {
 	d, hash := ledger.Declared{}, noConfig
 	var fileErr error
 	if s.cfg.Config != "" {
 		d, hash, fileErr = ReadConfig(s.cfg.Config, s.cfg.Loc)
-		if fileErr == nil {
-			fileErr = s.checkDeclared(d)
-		}
 		if hash == "" { // not read at all
 			hash = "unread"
 		}
 	}
-	gen := s.l.Gen()
-	s.config.Lock()
-	same := hash == s.config.applied || hash == s.config.failed && gen == s.config.failedGen
-	s.config.Unlock()
-	if same {
+	now, gen := s.wall(), s.l.Gen()
+	st := &s.config
+	st.Lock()
+	left := ledger.LeftUndeclare
+	if s.cfg.ConfigPrune {
+		left = ledger.LeftKeep
+		if fileErr == nil && hash == st.keptFor && hash == st.applied {
+			left = ledger.LeftDelete
+		}
+	}
+	switch {
+	case fileErr != nil && hash == st.failed:
+		st.Unlock()
+		return nil
+	case fileErr != nil:
+	case hash == st.applied:
+		if st.failed != "" {
+			// Back to the file the ledger is kept to: what is wrong with it
+			// is what is shown again.
+			st.failed, st.shown, st.loggedText = "", st.kept, ""
+		}
+		retry := len(st.kept.list) > 0 && gen != st.triedGen && !now.Before(st.retryAt)
+		if left != ledger.LeftDelete && !retry {
+			st.Unlock()
+			return nil
+		}
+	case hash == st.retryHash && now.Before(st.retryAt):
+		st.Unlock()
 		return nil
 	}
-	var did ledger.Reconciled
-	if fileErr == nil {
-		o, err := s.options(ctx)
-		if err != nil {
-			return err
-		}
-		var de ledger.DeclaredError
-		var inv ledger.ErrInvalid
-		did, err = s.l.Reconcile(ctx, d, s.cfg.ConfigPrune, o)
-		switch {
-		case err == nil:
-		case errors.As(err, &de), errors.As(err, &inv):
-			fileErr = err
-		default:
-			return err // the ledger's
-		}
-	}
-	s.config.Lock()
-	defer s.config.Unlock()
+	st.Unlock()
 	if fileErr != nil {
-		s.config.failed, s.config.failedGen = hash, s.l.Gen()
-		texts := map[string]string{}
-		for _, l := range Langs() {
-			texts[l] = configText(l, fileErr)
-		}
-		if texts["en"] != s.config.loggedText {
-			s.config.errAt, s.config.loggedText = time.Now(), texts["en"]
-			s.log.Error("--config can't be used; the ledger keeps what it last declared", "file", s.cfg.Config, "err", texts["en"])
-		}
-		s.config.err = texts
+		s.configSaid(configProblems{list: []configProblem{problemOf(fileErr)}, whole: true}, func() { st.failed = hash })
 		return nil
 	}
-	s.config.applied, s.config.at, s.config.failed, s.config.err, s.config.loggedText = hash, time.Now(), "", nil, ""
-	if did.Any() {
-		s.config.did = did
+	s.checkDeclared(&d)
+	o, err := s.options(ctx)
+	if err != nil {
+		return err
+	}
+	r, skipped, err := s.l.Reconcile(ctx, d, left, o)
+	st.Lock()
+	if err != nil {
+		// The ledger's: the file is tried again, after a while.
+		st.retryHash, st.backoff = hash, nextBackoff(st.backoff)
+		st.retryAt = now.Add(st.backoff)
+		st.Unlock()
+		return err
+	}
+	st.applied, st.at, st.failed, st.keptFor = hash, now, "", ""
+	if left == ledger.LeftKeep && r.Kept > 0 {
+		st.keptFor = hash // deleted once it is read the same again
+	}
+	st.triedGen, st.retryHash = s.l.Gen(), hash
+	if len(skipped) > 0 {
+		st.backoff = nextBackoff(st.backoff)
+		st.retryAt = now.Add(st.backoff)
+	} else {
+		st.backoff, st.retryAt = 0, time.Time{}
+	}
+	if r.Any() {
+		st.did = r
+	}
+	st.Unlock()
+	ps := problemsOf(skipped)
+	s.configSaid(ps, func() { st.kept = ps })
+	if r.Any() {
 		s.poke() // the windows changed are judged again
-		s.log.Info("the ledger keeps what --config declares", "file", s.cfg.Config, "made", did.Made, "changed", did.Changed,
-			"taken over", did.Adopted, "given back to the UI", did.Undeclared, "deleted", did.Deleted)
+		s.log.Info("the ledger keeps what --config declares", "file", s.cfg.Config, "made", r.Made, "changed", r.Changed,
+			"taken over", r.Adopted, "given back to the UI", r.Undeclared, "deleted", r.Deleted, "kept to delete when read again", r.Kept)
 	}
 	return nil
+}
+
+// configSaid shows what is wrong with the file, and logs it once, with
+// what else is set beside it.
+func (s *Server) configSaid(ps configProblems, also func()) {
+	st := &s.config
+	st.Lock()
+	defer st.Unlock()
+	also()
+	st.shown = ps
+	var texts []string
+	for _, p := range ps.list {
+		texts = append(texts, p.Shown("en"))
+	}
+	text := strings.Join(texts, "; ")
+	if text == st.loggedText {
+		return
+	}
+	st.loggedText, st.errAt = text, time.Now()
+	switch {
+	case text == "":
+	case ps.whole:
+		s.log.Error("--config can't be used; the ledger keeps what it last declared", "file", s.cfg.Config, "err", text)
+	default:
+		s.log.Warn("--config declares what can't be kept; each is kept as it was", "file", s.cfg.Config, "skipped", len(ps.list)+ps.more, "err", text)
+	}
+}
+
+// nextBackoff is how long a file is left before it is tried again, doubled
+// each time from configEvery.
+func nextBackoff(b time.Duration) time.Duration {
+	if b <= 0 {
+		return configEvery
+	}
+	return min(2*b, configBackoffMost)
 }
 
 // watchConfig reads --config again every configEvery, until ctx is done,

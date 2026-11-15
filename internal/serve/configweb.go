@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -123,7 +124,7 @@ func exportConfig(d ledger.Declaring, loc *time.Location) []byte {
 	for _, w := range d.Windows {
 		team, ok := teamOf(w.TeamID)
 		if !ok {
-			left = append(left, "quiet window "+w.Title)
+			left = append(left, "quiet window "+commented(w.Title))
 			continue
 		}
 		y := yWindow{Title: w.Title, Team: team, Start: w.Start.In(loc).Format(time.RFC3339), End: w.End.In(loc).Format(time.RFC3339),
@@ -140,7 +141,7 @@ func exportConfig(d ledger.Declaring, loc *time.Location) []byte {
 	for _, r := range d.Reports {
 		team, ok := teamOf(r.TeamID)
 		if !ok {
-			left = append(left, "report "+r.Name)
+			left = append(left, "report "+commented(r.Name))
 			continue
 		}
 		y := yReport{Name: r.Name, Team: team, Schedule: r.Schedule, Span: r.Span, Sections: r.Sections, Dests: r.Dests}
@@ -185,7 +186,11 @@ func exportConfig(d ledger.Declaring, loc *time.Location) []byte {
 	}
 	for _, f := range order {
 		if len(alike[f]) > 1 {
-			fmt.Fprintf(&b, "# The teams %s differ only in letter case: rename all but one before declaring them.\n", strings.Join(alike[f], ", "))
+			var names []string
+			for _, n := range alike[f] {
+				names = append(names, commented(n))
+			}
+			fmt.Fprintf(&b, "# The teams %s differ only in letter case: rename all but one before declaring them.\n", strings.Join(names, ", "))
 		}
 	}
 	enc := yaml.NewEncoder(&b)
@@ -194,6 +199,13 @@ func exportConfig(d ledger.Declaring, loc *time.Location) []byte {
 	enc.Close()
 	return b.Bytes()
 }
+
+// commented is a name as a comment of an export writes it: quoted, Go's
+// way, every line break (\n, \r, NEL, U+2028, U+2029), control and format
+// character escaped. A title written before titles were one line, by a
+// team's editor, would otherwise end the comment, and an admin pasting the
+// export into values would declare what follows: a role, for anyone.
+func commented(name string) string { return strconv.Quote(name) }
 
 // configYAML is GET /config.yaml: an admin's.
 func (s *Server) configYAML(w http.ResponseWriter, r *http.Request) {

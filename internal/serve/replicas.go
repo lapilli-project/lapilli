@@ -44,9 +44,9 @@ func (s *Server) lead(ctx context.Context, failed chan<- error) {
 			s.log.Error("reading the on-call turns kept", "err", err)
 		}
 	}
-	// The ledger kept to --config before anything else, and then as the
-	// file changes.
-	if err := s.reconcileConfig(ctx); err != nil && !steppingDown(ctx, err) {
+	// The ledger kept to --config before anything else, whatever an earlier
+	// term kept it to, and then as the file changes.
+	if err := s.configTerm(ctx); err != nil && !steppingDown(ctx, err) {
 		s.fail("keeping the ledger to --config", err)
 	}
 	// The rules are read before the first run, which replays them.
