@@ -28,6 +28,9 @@ type Grant struct {
 	TeamID  int64     `json:"team_id,omitempty"`
 	Created time.Time `json:"created"`
 	By      string    `json:"by,omitempty"`
+	// Declared says --config declares it: the UI and the API don't take it
+	// away (docs/design/serveops.md).
+	Declared bool `json:"declared,omitempty"`
 }
 
 // RoleGiven and RoleTaken begin what the changes say of a role given or
@@ -270,7 +273,7 @@ func grantName(who string) (string, error) {
 	case kind == "group" && strings.Contains(name, ","):
 		return "", invalid("a group's name has no comma: the sign-in proxy separates groups by commas")
 	}
-	if f := FoldName(name); kind == "user" && slices.ContainsFunc([]string{"anonymous", Copier, FiringsCopier, TaskTracker, ChangesCopier, Proposer},
+	if f := FoldName(name); kind == "user" && slices.ContainsFunc([]string{"anonymous", Copier, FiringsCopier, TaskTracker, ChangesCopier, Proposer, ConfigBy},
 		func(n string) bool { return f == FoldName(n) }) {
 		return "", invalid("%s is a name Lapilli keeps for itself", name)
 	}
@@ -279,7 +282,13 @@ func grantName(who string) (string, error) {
 
 // Grants are the roles given in the UI, by whom they are given to.
 func (l *Ledger) Grants(ctx context.Context) ([]Grant, error) {
-	rows, err := l.r.QueryContext(ctx, "SELECT id, who, role, team_id, created, created_by FROM grants ORDER BY who, team_id")
+	return grants(ctx, l.r)
+}
+
+// grants are the roles given in the UI or declared, read with q: the
+// ledger's reader, or a write.
+func grants(ctx context.Context, q queryer) ([]Grant, error) {
+	rows, err := q.QueryContext(ctx, "SELECT id, who, role, team_id, created, created_by, declared FROM grants ORDER BY who, team_id")
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +297,7 @@ func (l *Ledger) Grants(ctx context.Context) ([]Grant, error) {
 	for rows.Next() {
 		var g Grant
 		var at int64
-		if err := rows.Scan(&g.ID, &g.Who, &g.Role, &g.TeamID, &at, &g.By); err != nil {
+		if err := rows.Scan(&g.ID, &g.Who, &g.Role, &g.TeamID, &at, &g.By, &g.Declared); err != nil {
 			return nil, err
 		}
 		g.Created = unix(at)
@@ -356,6 +365,9 @@ func (l *Ledger) DeleteGrant(ctx context.Context, id int64, by string) error {
 		if err := t.QueryRowContext(t.ctx, "SELECT who FROM grants WHERE id = ?", id).Scan(&who); errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {
+			return err
+		}
+		if err := isDeclared(t, "grants", id); err != nil {
 			return err
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM grants WHERE id = ?", id); err != nil {

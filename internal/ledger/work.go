@@ -121,6 +121,9 @@ type Team struct {
 	Shifts  string    `json:"shifts,omitempty"`
 	Updated time.Time `json:"updated"`
 	By      string    `json:"by,omitempty"`
+	// Declared says --config declares it: the UI and the API don't change
+	// or delete it (docs/design/serveops.md).
+	Declared bool `json:"declared,omitempty"`
 }
 
 // Hours are the team's own hours, what it doesn't set taken from server's;
@@ -176,7 +179,13 @@ var teamName = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,63}$`)
 
 // Teams are every team, by name.
 func (l *Ledger) Teams(ctx context.Context) ([]Team, error) {
-	rows, err := l.r.QueryContext(ctx, "SELECT id, name, rules, labels, note, work_hours, sleep_hours, tz, shifts, updated, updated_by FROM teams ORDER BY name")
+	return teams(ctx, l.r)
+}
+
+// teams are every team, by name, read with q: the ledger's reader, or a
+// write.
+func teams(ctx context.Context, q queryer) ([]Team, error) {
+	rows, err := q.QueryContext(ctx, "SELECT id, name, rules, labels, note, work_hours, sleep_hours, tz, shifts, updated, updated_by, declared FROM teams ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +195,7 @@ func (l *Ledger) Teams(ctx context.Context) ([]Team, error) {
 		var t Team
 		var labels string
 		var at int64
-		if err := rows.Scan(&t.ID, &t.Name, &t.Rules, &labels, &t.Note, &t.WorkHours, &t.SleepHours, &t.TZ, &t.Shifts, &at, &t.By); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Rules, &labels, &t.Note, &t.WorkHours, &t.SleepHours, &t.TZ, &t.Shifts, &at, &t.By, &t.Declared); err != nil {
 			return nil, err
 		}
 		if t.Labels, err = readLabels(labels); err != nil {
@@ -198,96 +207,255 @@ func (l *Ledger) Teams(ctx context.Context) ([]Team, error) {
 	return out, rows.Err()
 }
 
-// PutTeam makes a team, or changes the one with t's ID, and returns its ID.
-func (l *Ledger) PutTeam(ctx context.Context, t Team, by string) (int64, error) {
+// checkTeam checks a team as PutTeam keeps it, and puts it as it is kept:
+// its name, pattern, hours and shifts trimmed.
+func checkTeam(t *Team) error {
 	t.Name = strings.TrimSpace(t.Name)
 	if !teamName.MatchString(t.Name) {
-		return 0, invalid("a team's name is letters, digits, spaces and . _ -, up to 64")
+		return invalid("a team's name is letters, digits, spaces and . _ -, up to 64")
 	}
 	if _, err := checkRE(t.Rules); err != nil {
-		return 0, err
+		return err
 	}
 	if err := errors.Join(checkLabels(t.Labels), checkText("a note is %d characters at most", t.Note, 5000)); err != nil {
-		return 0, err
+		return err
 	}
 	if t.Rules == "" && len(t.Labels) == 0 {
-		return 0, invalid("a team owns rules by a name pattern, labels, or both")
+		return invalid("a team owns rules by a name pattern, labels, or both")
 	}
 	t.WorkHours, t.SleepHours, t.TZ, t.Shifts = strings.TrimSpace(t.WorkHours), strings.TrimSpace(t.SleepHours), strings.TrimSpace(t.TZ), strings.TrimSpace(t.Shifts)
-	if _, err := t.Hours(nil); err != nil {
+	_, err := t.Hours(nil)
+	return err
+}
+
+// nameKey is a team's name as its unique index keeps it: ASCII letters in
+// lower case, as SQLite's lower() and Postgres's under COLLATE "C" fold
+// them (schema/019.sql).
+func nameKey(name string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'A' && r <= 'Z' {
+			return r + 'a' - 'A'
+		}
+		return r
+	}, name)
+}
+
+// nameTaken refuses a team's name another team's is in any letter case
+// (FoldName): asked within the write that makes or renames it, which the
+// ledger's writes take one at a time, every replica's too.
+func nameTaken(t *txn, id int64, name string) error {
+	rows, err := t.QueryContext(t.ctx, "SELECT id, name FROM teams")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	f := FoldName(name)
+	for rows.Next() {
+		var other int64
+		var was string
+		if err := rows.Scan(&other, &was); err != nil {
+			return err
+		}
+		if other != id && FoldName(was) == f {
+			return invalid("there is a team called %s already: a team's name is unique in any letter case", was)
+		}
+	}
+	return rows.Err()
+}
+
+// keyNames gives each team without its name's key one, once no other
+// team's name is like its own in letter case: those a ledger held from
+// before names were unique in any case (schema/019.sql), as one of them is
+// renamed or deleted.
+func keyNames(t *txn) error {
+	rows, err := t.QueryContext(t.ctx, "SELECT id, name, name_key FROM teams")
+	if err != nil {
+		return err
+	}
+	type team struct {
+		id   int64
+		name string
+		key  sql.NullString
+	}
+	var all []team
+	for rows.Next() {
+		var x team
+		if err := rows.Scan(&x.id, &x.name, &x.key); err != nil {
+			rows.Close()
+			return err
+		}
+		all = append(all, x)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	n := map[string]int{}
+	for _, x := range all {
+		n[nameKey(x.name)]++
+	}
+	for _, x := range all {
+		if !x.key.Valid && n[nameKey(x.name)] == 1 {
+			if _, err := t.ExecContext(t.ctx, "UPDATE teams SET name_key = ? WHERE id = ?", nameKey(x.name), x.id); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// LikeNames are the teams whose names differ from another's only in letter
+// case, by their folded name: a ledger may hold them from before names
+// were unique in any case (schema/019.sql). None in most ledgers.
+func (l *Ledger) LikeNames(ctx context.Context) ([][]string, error) {
+	ts, err := l.Teams(ctx)
+	if err != nil {
+		return nil, err
+	}
+	by := map[string][]string{}
+	var order []string
+	for _, t := range ts {
+		f := FoldName(t.Name)
+		if len(by[f]) == 0 {
+			order = append(order, f)
+		}
+		by[f] = append(by[f], t.Name)
+	}
+	var out [][]string
+	for _, f := range order {
+		if len(by[f]) > 1 {
+			out = append(out, by[f])
+		}
+	}
+	return out, nil
+}
+
+// PutTeam makes a team, or changes the one with t's ID, and returns its ID.
+// A team --config declares is refused (ErrDeclared).
+func (l *Ledger) PutTeam(ctx context.Context, t Team, by string) (int64, error) {
+	if err := checkTeam(&t); err != nil {
 		return 0, err
 	}
 	id := t.ID
 	err := l.write(ctx, func(tx *txn) error {
-		now := time.Now().Unix()
-		// A team made, renamed, or owning by another pattern or labels may
-		// change who owns a rule a team's window quiets.
-		var name, rules, labels string
 		if id != 0 {
-			if err := tx.QueryRowContext(tx.ctx, "SELECT name, rules, labels FROM teams WHERE id = ?", id).Scan(&name, &rules, &labels); err != nil &&
-				!errors.Is(err, sql.ErrNoRows) {
+			if err := isDeclared(tx, "teams", id); err != nil {
 				return err
 			}
 		}
-		if id == 0 || name != t.Name || rules != t.Rules || labels != labelsText(t.Labels) {
-			if err := l.pendTeamWindows(tx); err != nil {
-				return err
-			}
-		}
-		var res sql.Result
 		var err error
-		if id == 0 {
-			err = tx.QueryRowContext(tx.ctx, "INSERT INTO teams (name, rules, labels, note, work_hours, sleep_hours, tz, shifts, updated, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
-				t.Name, t.Rules, labelsText(t.Labels), t.Note, t.WorkHours, t.SleepHours, t.TZ, t.Shifts, now, by).Scan(&id)
-		} else {
-			res, err = tx.ExecContext(tx.ctx, "UPDATE teams SET name = ?, rules = ?, labels = ?, note = ?, work_hours = ?, sleep_hours = ?, tz = ?, shifts = ?, updated = ?, updated_by = ? WHERE id = ?",
-				t.Name, t.Rules, labelsText(t.Labels), t.Note, t.WorkHours, t.SleepHours, t.TZ, t.Shifts, now, by, id)
-		}
-		if err != nil {
-			if unique(err) {
-				return invalid("there is a team called %s already", t.Name)
-			}
-			return err
-		}
-		if res != nil {
-			if n, _ := res.RowsAffected(); n == 0 {
-				return ErrNotFound
-			}
-		}
-		return change(tx, by, "team "+t.Name+" kept", nil, t)
+		id, err = l.putTeam(tx, id, t, by, false)
+		return err
 	})
 	return id, err
+}
+
+// putTeam makes a team (id 0) or changes one, in a write, as PutTeam and
+// --config do, and keeps it declared or not.
+func (l *Ledger) putTeam(tx *txn, id int64, t Team, by string, declared bool) (int64, error) {
+	now := time.Now().Unix()
+	// A team made, renamed, or owning by another pattern or labels may
+	// change who owns a rule a team's window quiets.
+	var name, rules, labels string
+	if id != 0 {
+		if err := tx.QueryRowContext(tx.ctx, "SELECT name, rules, labels FROM teams WHERE id = ?", id).Scan(&name, &rules, &labels); errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrNotFound
+		} else if err != nil {
+			return 0, err
+		}
+	}
+	// A new name, or a team renamed, is unique in any letter case; a team
+	// a ledger kept from before, like another, can be changed but for its
+	// name.
+	if id == 0 || name != t.Name {
+		if err := nameTaken(tx, id, t.Name); err != nil {
+			return 0, err
+		}
+	}
+	if id == 0 || name != t.Name || rules != t.Rules || labels != labelsText(t.Labels) {
+		if err := l.pendTeamWindows(tx); err != nil {
+			return 0, err
+		}
+	}
+	var err error
+	if id == 0 {
+		err = tx.QueryRowContext(tx.ctx, `INSERT INTO teams (name, rules, labels, note, work_hours, sleep_hours, tz, shifts, updated, updated_by, declared, name_key)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+			t.Name, t.Rules, labelsText(t.Labels), t.Note, t.WorkHours, t.SleepHours, t.TZ, t.Shifts, now, by, declared, nameKey(t.Name)).Scan(&id)
+	} else {
+		_, err = tx.ExecContext(tx.ctx, `UPDATE teams SET name = ?, rules = ?, labels = ?, note = ?, work_hours = ?, sleep_hours = ?, tz = ?, shifts = ?,
+			updated = ?, updated_by = ?, declared = ?, name_key = CASE WHEN name = ? THEN name_key ELSE ? END WHERE id = ?`,
+			t.Name, t.Rules, labelsText(t.Labels), t.Note, t.WorkHours, t.SleepHours, t.TZ, t.Shifts, now, by, declared, t.Name, nameKey(t.Name), id)
+	}
+	if err != nil {
+		if unique(err) {
+			return 0, invalid("there is a team called %s already: a team's name is unique in any letter case", t.Name)
+		}
+		return 0, err
+	}
+	if id != 0 && name != t.Name {
+		// Renamed: the team it was like may be alone now.
+		if err := keyNames(tx); err != nil {
+			return 0, err
+		}
+	}
+	t.ID, t.Declared = id, declared
+	return id, change(tx, by, "team "+t.Name+" kept", nil, t)
 }
 
 // DeleteTeam deletes a team; what it owned is no one's. Its reports and
 // quiet windows stop: they keep its id negated, which no team has, as a team
 // made later may be given its id. Its editors are no longer.
+//
+// A team --config declares is refused (ErrDeclared), and so is one a quiet
+// window, a report or a role it declares names (ErrNamedByDeclared).
 func (l *Ledger) DeleteTeam(ctx context.Context, id int64, by string) error {
 	return l.write(ctx, func(t *txn) error {
-		var name string
-		if err := t.QueryRowContext(t.ctx, "SELECT name FROM teams WHERE id = ?", id).Scan(&name); errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		} else if err != nil {
+		if err := isDeclared(t, "teams", id); err != nil {
 			return err
 		}
-		// Its windows are judged again: they quiet nothing once it is gone,
-		// and the rules it owned may be another team's.
-		if err := l.pendTeamWindows(t); err != nil {
+		var named bool
+		if err := t.QueryRowContext(t.ctx, `SELECT EXISTS (SELECT 1 FROM windows WHERE team_id = ? AND declared = 1)
+			OR EXISTS (SELECT 1 FROM reports WHERE team_id = ? AND declared = 1)
+			OR EXISTS (SELECT 1 FROM grants WHERE team_id = ? AND declared = 1)`, id, id, id).Scan(&named); err != nil {
 			return err
 		}
-		if _, err := t.ExecContext(t.ctx, "DELETE FROM teams WHERE id = ?", id); err != nil {
-			return err
+		if named {
+			return ErrNamedByDeclared
 		}
-		// What was its stops, and its editors go with it, in this write: a
-		// team made later may be given its id.
-		for _, q := range []string{"UPDATE reports SET team_id = -team_id WHERE team_id = ?", "UPDATE windows SET team_id = -team_id WHERE team_id = ?",
-			"DELETE FROM grants WHERE team_id = ?"} {
-			if _, err := t.ExecContext(t.ctx, q, id); err != nil {
-				return err
-			}
-		}
-		return change(t, by, "team "+name+" deleted", nil, nil)
+		return l.deleteTeam(t, id, by)
 	})
+}
+
+// deleteTeam deletes a team in a write, as DeleteTeam and --config-prune do.
+func (l *Ledger) deleteTeam(t *txn, id int64, by string) error {
+	var name string
+	if err := t.QueryRowContext(t.ctx, "SELECT name FROM teams WHERE id = ?", id).Scan(&name); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	// Its windows are judged again: they quiet nothing once it is gone,
+	// and the rules it owned may be another team's.
+	if err := l.pendTeamWindows(t); err != nil {
+		return err
+	}
+	if _, err := t.ExecContext(t.ctx, "DELETE FROM teams WHERE id = ?", id); err != nil {
+		return err
+	}
+	// What was its stops, and its editors go with it, in this write: a
+	// team made later may be given its id.
+	for _, q := range []string{"UPDATE reports SET team_id = -team_id WHERE team_id = ?", "UPDATE windows SET team_id = -team_id WHERE team_id = ?",
+		"DELETE FROM grants WHERE team_id = ?"} {
+		if _, err := t.ExecContext(t.ctx, q, id); err != nil {
+			return err
+		}
+	}
+	// The team it was like may be alone now.
+	if err := keyNames(t); err != nil {
+		return err
+	}
+	return change(t, by, "team "+name+" deleted", nil, nil)
 }
 
 // Note is what people keep about a rule.
@@ -412,11 +580,14 @@ type Window struct {
 	Labels  incident.Labels `json:"labels,omitempty"`
 	Updated time.Time       `json:"updated"`
 	By      string          `json:"by,omitempty"`
-	re      *regexp.Regexp
-	ruled   map[string]bool // whether re matched each rule's name
-	loc     *time.Location
-	sch     *schedule.Schedule // for month and cron
-	own     *ownership         // who owns what, for a team's window
+	// Declared says --config declares it: the UI and the API don't change
+	// or delete it (docs/design/serveops.md).
+	Declared bool `json:"declared,omitempty"`
+	re       *regexp.Regexp
+	ruled    map[string]bool // whether re matched each rule's name
+	loc      *time.Location
+	sch      *schedule.Schedule // for month and cron
+	own      *ownership         // who owns what, for a team's window
 }
 
 // Everies are how often a quiet window can repeat.
@@ -839,7 +1010,7 @@ func (l *Ledger) windowsMeeting(ctx context.Context, q queryer, lo, hi int64) ([
 }
 
 func (l *Ledger) windows(ctx context.Context, q queryer, where string, args ...any) ([]Window, error) {
-	rows, err := q.QueryContext(ctx, "SELECT id, title, start_at, end_at, every, repeat_on, until_at, team_id, rules, labels, updated, updated_by FROM windows "+where, args...)
+	rows, err := q.QueryContext(ctx, "SELECT id, title, start_at, end_at, every, repeat_on, until_at, team_id, rules, labels, updated, updated_by, declared FROM windows "+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -850,7 +1021,7 @@ func (l *Ledger) windows(ctx context.Context, q queryer, where string, args ...a
 		var start, end, at int64
 		var until sql.NullInt64
 		var labels string
-		if err := rows.Scan(&w.ID, &w.Title, &start, &end, &w.Every, &w.On, &until, &w.TeamID, &w.Rules, &labels, &at, &w.By); err != nil {
+		if err := rows.Scan(&w.ID, &w.Title, &start, &end, &w.Every, &w.On, &until, &w.TeamID, &w.Rules, &labels, &at, &w.By, &w.Declared); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -976,24 +1147,15 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 			}
 		}
 		spans := [][2]int64{w.span(time.Now())}
-		now := time.Now().Unix()
 		if id == 0 {
 			if err := windowsLeft(t.ctx, t, w.TeamID); err != nil {
 				return err
 			}
-			if err := t.QueryRowContext(t.ctx, `INSERT INTO windows (title, start_at, end_at, every, repeat_on, until_at, team_id, rules, labels, updated, updated_by)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-				w.Title, w.Start.Unix(), w.End.Unix(), w.Every, w.On, nullable(w.Until), w.TeamID, w.Rules, labelsText(w.Labels), now, by).Scan(&id); err != nil {
+			var err error
+			if id, err = l.insertWindow(t, w, by, false); err != nil {
 				return err
 			}
 			w.ID = id
-			kept, err := l.windows(t.ctx, t, "WHERE id = ?", id)
-			if err != nil || len(kept) == 0 {
-				return errors.Join(err, ErrNotFound)
-			}
-			if err := l.tell(t, "window.kept", by, map[string]any{"window": kept[0]}); err != nil {
-				return err
-			}
 		} else {
 			was, err := l.windows(t.ctx, t, "WHERE id = ?", id)
 			if err != nil {
@@ -1001,6 +1163,9 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 			}
 			if len(was) == 0 {
 				return ErrNotFound
+			}
+			if was[0].Declared {
+				return ErrDeclared
 			}
 			if err := inScope(t, was[0].TeamID); err != nil {
 				return err
@@ -1012,9 +1177,7 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 			if sameStones(was[0], w) { // a new title, say: no stone changes
 				spans = nil
 			}
-			if _, err := t.ExecContext(t.ctx, `UPDATE windows SET title = ?, start_at = ?, end_at = ?, every = ?, repeat_on = ?, until_at = ?, team_id = ?,
-				rules = ?, labels = ?, updated = ?, updated_by = ? WHERE id = ?`,
-				w.Title, w.Start.Unix(), w.End.Unix(), w.Every, w.On, nullable(w.Until), w.TeamID, w.Rules, labelsText(w.Labels), now, by, id); err != nil {
+			if err := updateWindow(t, id, w, by, false); err != nil {
 				return err
 			}
 		}
@@ -1028,6 +1191,31 @@ func (l *Ledger) PutWindow(ctx context.Context, w Window, by string, o verdict.O
 	}
 	l.judgeSoon(ctx, o)
 	return id, nil
+}
+
+// insertWindow makes a quiet window in a write, as PutWindow and --config
+// do, and tells of it.
+func (l *Ledger) insertWindow(t *txn, w Window, by string, declared bool) (int64, error) {
+	var id int64
+	if err := t.QueryRowContext(t.ctx, `INSERT INTO windows (title, start_at, end_at, every, repeat_on, until_at, team_id, rules, labels, updated, updated_by, declared)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+		w.Title, w.Start.Unix(), w.End.Unix(), w.Every, w.On, nullable(w.Until), w.TeamID, w.Rules, labelsText(w.Labels), time.Now().Unix(), by, declared).Scan(&id); err != nil {
+		return 0, err
+	}
+	kept, err := l.windows(t.ctx, t, "WHERE id = ?", id)
+	if err != nil || len(kept) == 0 {
+		return 0, errors.Join(err, ErrNotFound)
+	}
+	return id, l.tell(t, "window.kept", by, map[string]any{"window": kept[0]})
+}
+
+// updateWindow changes a quiet window in a write, as PutWindow and --config
+// do.
+func updateWindow(t *txn, id int64, w Window, by string, declared bool) error {
+	_, err := t.ExecContext(t.ctx, `UPDATE windows SET title = ?, start_at = ?, end_at = ?, every = ?, repeat_on = ?, until_at = ?, team_id = ?,
+		rules = ?, labels = ?, updated = ?, updated_by = ?, declared = ? WHERE id = ?`,
+		w.Title, w.Start.Unix(), w.End.Unix(), w.Every, w.On, nullable(w.Until), w.TeamID, w.Rules, labelsText(w.Labels), time.Now().Unix(), by, declared, id)
+	return err
 }
 
 // judgeBudget is how long a write that leaves spans pending judges them
@@ -1051,6 +1239,9 @@ func (l *Ledger) DeleteWindow(ctx context.Context, id int64, by string, o verdic
 		}
 		if len(was) == 0 {
 			return ErrNotFound
+		}
+		if was[0].Declared {
+			return ErrDeclared
 		}
 		if err := inScope(t, was[0].TeamID); err != nil {
 			return err

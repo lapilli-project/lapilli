@@ -53,6 +53,9 @@ type Scheduled struct {
 	CreatedBy string    `json:"created_by,omitempty"`
 	Updated   time.Time `json:"updated"`
 	UpdatedBy string    `json:"updated_by,omitempty"`
+	// Declared says --config declares it: the UI and the API don't change
+	// or delete it (docs/design/serveops.md).
+	Declared bool `json:"declared,omitempty"`
 }
 
 // When is its schedule, read.
@@ -179,6 +182,9 @@ func (l *Ledger) PutScheduled(ctx context.Context, r Scheduled, by string, at ti
 		// A team's editors keep their team's reports, sent to its own
 		// destination, and only those, before and after.
 		if id != 0 {
+			if err := isDeclared(t, "reports", id); err != nil {
+				return err
+			}
 			if err := ownReport(t, id); err != nil {
 				return err
 			}
@@ -251,6 +257,9 @@ func (l *Ledger) DeleteScheduled(ctx context.Context, id int64, by string) error
 		} else if err != nil {
 			return err
 		}
+		if err := isDeclared(t, "reports", id); err != nil {
+			return err
+		}
 		if err := ownReport(t, id); err != nil {
 			return err
 		}
@@ -311,14 +320,14 @@ func (l *Ledger) Told(ctx context.Context, key string) (string, error) {
 	return l.meta(ctx, l.r, key)
 }
 
-const reportCols = "id, name, team_id, schedule, span, zone, sections, dests, enabled, created, created_by, updated, updated_by"
+const reportCols = "id, name, team_id, schedule, span, zone, sections, dests, enabled, created, created_by, updated, updated_by, declared"
 
 func scanScheduled(rows interface{ Scan(...any) error }) (Scheduled, error) {
 	var r Scheduled
 	var span, created, updated int64
 	var sections, dests string
 	if err := rows.Scan(&r.ID, &r.Name, &r.TeamID, &r.Schedule, &span, &r.Zone, &sections, &dests, &r.Enabled,
-		&created, &r.CreatedBy, &updated, &r.UpdatedBy); err != nil {
+		&created, &r.CreatedBy, &updated, &r.UpdatedBy, &r.Declared); err != nil {
 		return r, err
 	}
 	r.Span, r.Created, r.Updated = spanText(time.Duration(span)*time.Second), unix(created), unix(updated)
