@@ -38,7 +38,9 @@ ledger whose teams' names differ only in letter case included.
 - **What it no longer declares** is the UI's again, as it was, or, with
   `--config-prune` (`serve.configPrune`), deleted once the same file is
   read twice in a row; a team something still names is given back to the
-  UI instead. Without `--config`, nothing stays declared.
+  UI instead. A role it no longer gives is taken away, pruned or not.
+  Given back past what the UI keeps, a thing is deleted. Without
+  `--config`, nothing stays declared.
 - **`GET /config.yaml`**, an admin's: every team, quiet window, report and
   role the ledger holds, declared and made in the UI alike, as `--config`
   takes them, linked from the Settings page beside `settings.yaml`. Read
@@ -50,8 +52,8 @@ ledger whose teams' names differ only in letter case included.
   listed, to be dropped on their pages. At 4,000 rules and 3,000 names
   gone, the page reads the names one at a time.
 - **`--proposals-expire DURATION`** (`serve.proposalsExpire`), off by
-  default: a proposal that waited for approval longer since it was made,
-  and that no one approved, is closed as `expired` by the leader's work,
+  default: a proposal that waited for approval longer since it began to
+  wait (made, or backtested again), and that no one approved, is closed as `expired` by the leader's work,
   noted in its history and the activity log, and its rule takes another;
   its page says when it would.
 
@@ -63,7 +65,8 @@ ledger whose teams' names differ only in letter case included.
   to be renamed; each can be changed but for its name.
 - **A quiet window's title is one line**, with no character that doesn't
   show, as a team's name and a role's holder's are.
-- A team deleted in the UI notes each role it takes away with it.
+- A team deleted in the UI notes each role it takes away with it. The UI
+  keeps 1,000 teams at most.
 - Lapilli doesn't propose again by itself a change that expired.
 
 ## [0.43.0] - 2026-11-16

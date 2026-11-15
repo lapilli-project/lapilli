@@ -552,15 +552,23 @@ the ledger's checks (`checkTeam`, `checkWindow`, a report's `check`,
 `grantName`) and the server's (a report's destinations, a team's
 `on-call=NAME` shifts), and its team must be one the file declares or the
 ledger holds. One that fails is skipped, and what the ledger held of it is
-kept as it was; everything else is kept, and what the file no longer
+kept as it was, when what it is can be told: a quiet window of its title
+and its team, a role of its holder and its team, a team of its name; one
+whose team isn't there keeps nothing, so no window of another team, or
+everyone's, stays declared, quieting what the file no longer says to; everything else is kept, and what the file no longer
 declares is given back (or deleted) all the same: a file that takes a role
 away and adds a quiet window that can't be kept still takes the role
 away. The costly checks (a cron window's gaps) run before the write.
 
 **Limits of its own.** What a file declares isn't counted against what the
-UI may make (500 quiet windows, 50 reports, 1,000 roles), nor the UI's
-against it: an editor who fills the windows can't keep a file from
-declaring one. The ledger can then hold up to twice each.
+UI may make (1,000 teams, 500 quiet windows, 50 reports, 1,000 roles), nor
+the UI's against it: an editor who fills the windows can't keep a file
+from declaring one. Both together are bounded too, at twice each: past
+it, a thing the file would add is skipped, said why. What the file no
+longer declares is given back to the UI only while the UI holds less than
+its own most; past it, it is deleted (the activity log says why), or, a
+team something names, kept declared and said: declared and taken out
+again and again, nothing piles up past what the UI may make.
 
 ### Keeping the ledger to it
 
@@ -568,8 +576,13 @@ declaring one. The ledger can then hold up to twice each.
 Each thing is matched by its name:
 
 - a team by its name, or else in any letter case when one team alone has
-  it (a file's `Payments` renames the ledger's `payments`), or by its
-  `renamed_from`;
+  it (a file's `Payments` renames the ledger's `payments`); every team by
+  its name first, then, of those no team has the name of, by its
+  `renamed_from` (trimmed), so the order the file lists them in changes
+  nothing. A name and a `renamed_from` that are two teams, an old name
+  given twice, or one another team declares by its name, is skipped and
+  said, and the teams it names kept as they were. A rename is noted as one
+  (`team B renamed to C`);
 - a report by its name; a role by whom it is given to and its team;
 - a quiet window by its title: those alike first, then a declared one of
   its team, then a declared one of another team (the file moved it), then
@@ -587,10 +600,20 @@ judged again. A file that says what the ledger holds writes nothing at
 all: the write is taken back, and no page is worked out again.
 
 What is declared and the file no longer names is the UI's again, as it
-was. With `--config-prune` (`serve.configPrune`) it is deleted, once the
-same file has been read twice in a row, 15 seconds apart: read once, it is
-kept as it is (a file half written, swapped back at once, deletes
-nothing). A declared team something still names (a quiet window, a
+was, but a role. With `--config-prune` (`serve.configPrune`) it is
+deleted, once the same file has been read twice in a row, 15 seconds
+apart, with no read that failed between: read once, it is kept as it is
+(a file half written, swapped back at once, deletes nothing).
+
+**A role the file no longer gives is taken away**, pruned or not, one the
+UI made and the file took over included, each noted as a role taken
+(`RoleTaken`, by `config`). **Maintainer's call, 2026-11-16**: for
+permissions, safety first. Declaring a role gives it to the file, as
+Argo CD's RBAC policy owns its roles; given back to the UI, a role no one
+meant to keep would stay. Teams, quiet windows and reports keep being
+given back. A role whose team the file misspells keeps none of the
+person's roles as they were: one of every team the file gave before is
+taken away with the rest. A declared team something still names (a quiet window, a
 report, a role, a task, a rule's note, the UI's or declared) isn't
 deleted, but given back to the UI, the activity log saying why: deleted,
 its windows would quiet nothing and its roles go, and the file put back
@@ -639,8 +662,10 @@ and is said as above: a pod restarted on it serves rather than loop.
 
 ### Through Helm
 
-`serve.config` given as a text, a block scalar, is rendered as written,
-and recommended:
+`serve.config` given as a text, a block scalar, is rendered as written
+(with an indentation indicator, so a first line indented more than the
+rest renders), and recommended; its default is `null`, which neither form
+warns over:
 
 ```yaml
 serve:
@@ -707,14 +732,18 @@ other is keyed. A file can't declare both: it names which to rename.
 
 `--proposals-expire DURATION` (`serve.proposalsExpire`), off by default (0,
 `0s`, `0d`): the leader's work closes as `expired` a proposal that waited
-for approval longer than that since it was made, a backtest again
-notwithstanding, that no one approved: one with an approval waits on (one
+for approval longer than that since it began to wait (it was made, or
+backtested again, its approvals withdrawn, or sent back to wait for more:
+its `updated`, which nothing else moves while it waits), that no one
+approved: one with an approval waits on (one
 of two, or the one `--approvals`, lowered, now asks for, which carrying it
 out approves). A hundred a round, each in a write that moves it only while
 it still waits, noted in its history and the activity log as Lapilli's;
 its rule is free for another, and Lapilli doesn't propose the same again
 by itself. They are closed before Lapilli backtests stale proposals again,
-so no backtest is spent on one about to close; one being backtested again
+so no backtest is spent on one about to close, and Lapilli doesn't
+backtest again one past its expiry, which someone approved: backtested
+again, its approvals withdrawn, it would wait anew; one being backtested again
 on the leader is left until it is done, and one backtested on another
 replica, closed meanwhile, has its backtest refused as moved. A proposal's
 page says when it would expire, while no one approved it.
