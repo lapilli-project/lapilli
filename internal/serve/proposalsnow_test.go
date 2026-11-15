@@ -1002,59 +1002,101 @@ func TestPromoteHoldsStale(t *testing.T) {
 }
 
 // TestLapilliBacktestsStale: Lapilli backtests stale proposals waiting for
-// approval again itself, as Lapilli, in its work, a few a round, the
-// longest unmoved first: its own, which no one would ask for, too. One
-// whose rule changed since is left for a person; one it can't is left for
-// an hour.
+// approval again itself, as Lapilli, on a run of its work, againARun a
+// run, the longest unmoved first, its own too, which no one would ask for;
+// each then fresh, so nothing flips it back and forth, and nothing told of
+// those that withdrew no approval. One whose rule changed since is left
+// for a person; one it failed to isn't tried again for an hour; a person's
+// heavy request having the turn leaves the rest for the next run; and a
+// read-only lapilli backtests none.
 func TestLapilliBacktestsStale(t *testing.T) {
 	ctx := context.Background()
-	s, dir := restartsServer(t, nil)
-	var b strings.Builder
-	b.WriteString(restartsFile)
-	for i := 0; i < againARun+2; i++ {
-		fmt.Fprintf(&b, "      - {alert: Restarts%d, expr: 'increase(restarts[30m]) > 0.5', for: 1m}\n", i)
+	s, ids := staleServer(t, againARun+2, nil)
+	s.l.TellTo([]string{"webhook"})
+	// The last made is the longest unmoved: it goes first.
+	for k, id := range ids {
+		ledgerExec(t, s, "UPDATE proposals SET updated = ? WHERE id = ?", now.Add(-time.Duration(k)*time.Hour).Unix(), id)
 	}
-	os.WriteFile(filepath.Join(dir, "restarts.yaml"), []byte(b.String()), 0o644)
-	if err := s.look(ctx, new(string)); err != nil {
-		t.Fatal(err)
-	}
-	var ids []int64
-	for i := 0; i < againARun+2; i++ {
-		ids = append(ids, keptFor(t, s, fmt.Sprintf("Restarts%d", i), 0, "", unrecordedFrom, unrecordedTo, nil))
-	}
-	// The rule of the first changed since: left for a person.
+	// The rule of another changed since, as the rules in effect say: left
+	// for a person.
 	changed := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
-	os.WriteFile(filepath.Join(dir, "restarts.yaml"), []byte(strings.Replace(b.String(), "> 0.5\n        for: 1m", "> 1.5\n        for: 1m", 1)), 0o644)
+	dir := filepath.Dir(state(t, s, changed).Source)
+	b, _ := os.ReadFile(filepath.Join(dir, "restarts.yaml"))
+	os.WriteFile(filepath.Join(dir, "restarts.yaml"), []byte(strings.Replace(string(b), "> 0.5\n        for: 1m", "> 1.5\n        for: 1m", 1)), 0o644)
 	if err := s.look(ctx, new(string)); err != nil {
 		t.Fatal(err)
-	}
-	backtested := func() (n int) {
-		for _, id := range ids {
-			if proposalEvidence(state(t, s, id)).Semantics == verdict.Semantics {
-				n++
-			}
-		}
-		return n
 	}
 	s.jobs(ctx, true)
-	if n := backtested(); n != againARun {
-		t.Errorf("one round backtested %d again, want %d", n, againARun)
+	for k, id := range ids {
+		got := proposalEvidence(state(t, s, id)).Semantics == semantics
+		if want := k >= len(ids)-againARun; got != want {
+			t.Errorf("#%d, %d hours unmoved: backtested again %v, want %v", id, k, got, want)
+		}
 	}
 	if proposalEvidence(state(t, s, changed)).Semantics != 0 {
 		t.Error("one whose rule changed since was backtested again")
 	}
-	steps, _, _ := s.l.ProposalSteps(ctx, ids[0], 10)
+	steps, _, _ := s.l.ProposalSteps(ctx, ids[len(ids)-1], 10)
 	if len(steps) == 0 || steps[len(steps)-1].By != ledger.Proposer || !strings.HasSuffix(steps[len(steps)-1].What, "backtested again") {
 		t.Errorf("not as Lapilli: %+v", steps)
 	}
-	s.jobs(ctx, true)
-	if n := backtested(); n != len(ids) {
-		t.Errorf("two rounds backtested %d again, want all %d", n, len(ids))
+	// Each fresh now: nothing to take it back and forth.
+	var ps []ledger.Proposal
+	for _, id := range ids[len(ids)-againARun:] {
+		ps = append(ps, state(t, s, id))
 	}
-	// Not while it reads no rules of its own, nor read-only.
+	if ls, err := s.linesNow(ctx, ps); err != nil || slices.ContainsFunc(ls, func(l proposalLine) bool { return l.StaleWhy != nil }) {
+		t.Errorf("stale still once backtested again: %v", err)
+	}
+	// None withdrew an approval: none told.
+	if ns, _ := s.l.Due(ctx, "webhook", time.Now().Add(time.Hour), 100); slices.ContainsFunc(ns, func(n ledger.Notice) bool { return n.Event == "proposal.backtested" }) {
+		t.Error("Lapilli's own, withdrawing nothing, told")
+	}
+	// A person's heavy request has the turn: the next run, nothing written
+	// and nothing left for an hour.
+	defer func(was time.Duration) { busyWait = was }(busyWait)
+	busyWait = 50 * time.Millisecond
+	s.heavy <- struct{}{}
+	s.jobs(ctx, true)
+	<-s.heavy
+	if n := againCount(t, s, ids); n != againARun {
+		t.Errorf("the turn taken, %d backtested again, want %d", n, againARun)
+	}
+	s.againFailed.Lock()
+	failed := len(s.againFailed.m)
+	s.againFailed.Unlock()
+	if failed != 0 {
+		t.Errorf("the turn taken, %d left for an hour", failed)
+	}
+	// One it fails to (its rule changed where it is kept, not yet read) is
+	// left for an hour, then tried again.
+	os.WriteFile(filepath.Join(dir, "restarts.yaml"), []byte(strings.Replace(string(b), "Restarts0, expr: 'increase(restarts[30m]) > 0.5'", "Restarts0, expr: 'increase(restarts[30m]) > 2.5'", 1)), 0o644)
+	s.jobs(ctx, true)
+	s.againFailed.Lock()
+	_, left := s.againFailed.m[ids[0]]
+	s.againFailed.Unlock()
+	if !left || proposalEvidence(state(t, s, ids[0])).Semantics != 0 {
+		t.Fatalf("one it failed to: left for an hour %v", left)
+	}
+	os.WriteFile(filepath.Join(dir, "restarts.yaml"), b, 0o644)
+	s.jobs(ctx, true)
+	if proposalEvidence(state(t, s, ids[0])).Semantics != 0 {
+		t.Error("tried again within the hour")
+	}
+	s.againFailed.Lock()
+	s.againFailed.m[ids[0]] = time.Now().Add(-againRetry)
+	s.againFailed.Unlock()
+	s.jobs(ctx, true)
+	if n := againCount(t, s, ids); n != len(ids) {
+		t.Errorf("an hour on: %d backtested again, want all %d", n, len(ids))
+	}
+	// Read-only: none.
+	s.l.Move(ctx, changed, []string{ledger.StateProposed}, ledger.StateDropped, "ana", ledger.Step{})
+	stale := keptAs(t, s, 0, "", unrecordedFrom, unrecordedTo, nil)
 	s.cfg.ReadOnly = true
-	if err := s.backtestStale(ctx); err != nil {
-		t.Fatal(err)
+	s.jobs(ctx, true)
+	if proposalEvidence(state(t, s, stale)).Semantics != 0 {
+		t.Error("a read-only lapilli backtested one again")
 	}
 }
 
@@ -1274,5 +1316,48 @@ func TestReadTimeFailsSoft(t *testing.T) {
 	}
 	if p := state(t, s2, id); p.State != ledger.StateProposed {
 		t.Errorf("approved by fewer than are needed now: %s", p.State)
+	}
+}
+
+// TestBacktestAgainRace: a person backtesting a proposal again while
+// Lapilli does: both read it stale, wait for the heavy turn, and run; the
+// one second to write is refused (ErrMoved, or backtested just now), never
+// kept over the first's.
+func TestBacktestAgainRace(t *testing.T) {
+	ctx := context.Background()
+	s, ids := staleServer(t, 1, nil)
+	s.heavy <- struct{}{} // taken, so both wait for it
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	for i, run := range []func() error{
+		func() error { return s.backtestAgain(ctx, ids[0], bo, false) },
+		func() error { return s.backtestAgainOf(ctx, ids[0], ledger.Proposer, false, true) },
+	} {
+		wg.Add(1)
+		go func() { defer wg.Done(); errs[i] = run() }()
+	}
+	for waited := time.Now(); heavyWaiting.Load() < 2; time.Sleep(time.Millisecond) {
+		if time.Since(waited) > 10*time.Second {
+			t.Fatal("they never waited for the turn")
+		}
+	}
+	<-s.heavy
+	waitGroup(t, &wg)
+	ok, refused := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			ok++
+		case errors.Is(err, ledger.ErrMoved), errors.Is(err, ledger.ErrBacktestedJustNow):
+			refused++
+		default:
+			t.Errorf("refused otherwise: %v", err)
+		}
+	}
+	if ok != 1 || refused != 1 {
+		t.Errorf("%d kept, %d refused: %v", ok, refused, errs)
+	}
+	if steps, _, _ := s.l.ProposalSteps(ctx, ids[0], 10); len(slices.DeleteFunc(steps, func(c ledger.Change) bool { return !strings.HasSuffix(c.What, "backtested again") })) != 1 {
+		t.Errorf("backtested again twice: %+v", steps)
 	}
 }
