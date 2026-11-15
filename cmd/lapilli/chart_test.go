@@ -628,3 +628,59 @@ func TestChartServeRuleConfigMaps(t *testing.T) {
 		t.Errorf("the CronJob with two ConfigMaps: not a volume and a --rules each\n%s", out)
 	}
 }
+
+// A default the API server writes inside an atomic field (a
+// resourceFieldRef's divisor, a fieldRef's apiVersion in a projected
+// volume's sources) is not in the applied object, so a GitOps tool diffing
+// what it applied (Argo CD's server-side apply and diff) sees the pod spec
+// as changed for as long as it runs. The chart says each.
+func TestChartSaysAtomicDefaults(t *testing.T) {
+	for _, args := range [][]string{
+		{"--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={main}"},
+		{"--set", "mode=serve", "--set", "gcpProject=my-project", "--set", "rules.configMaps={main}"},
+		{"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={main}", "--set", "impact=up"},
+		{"--set", "gcpProject=my-project", "--set", "rules.configMaps={main}", "--set", "impact=up"},
+	} {
+		out, err := helmTemplate(t, args...)
+		if err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+		refs := 0
+		dec := yaml.NewDecoder(strings.NewReader(out))
+		for {
+			var doc any
+			if err := dec.Decode(&doc); err != nil {
+				break
+			}
+			var walk func(v any)
+			walk = func(v any) {
+				switch v := v.(type) {
+				case map[string]any:
+					if r, ok := v["resourceFieldRef"].(map[string]any); ok {
+						refs++
+						if r["divisor"] != "1" {
+							t.Errorf("%v: a resourceFieldRef without its divisor: %v", args, r)
+						}
+					}
+					if r, ok := v["fieldRef"].(map[string]any); ok {
+						refs++
+						if r["apiVersion"] != "v1" {
+							t.Errorf("%v: a fieldRef without its apiVersion: %v", args, r)
+						}
+					}
+					for _, x := range v {
+						walk(x)
+					}
+				case []any:
+					for _, x := range v {
+						walk(x)
+					}
+				}
+			}
+			walk(doc)
+		}
+		if refs == 0 {
+			t.Errorf("%v: no resourceFieldRef or fieldRef rendered", args)
+		}
+	}
+}

@@ -555,6 +555,9 @@ which must not share a name, side by side. */}}
           items:
             - path: namespace
               fieldRef:
+                # Said, as the API server would default it: a GitOps diff of
+                # the applied fields sees a default inside an atomic list.
+                apiVersion: v1
                 fieldPath: metadata.namespace
 {{- end }}
 {{- end -}}

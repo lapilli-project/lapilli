@@ -52,6 +52,10 @@ spec:
                   valueFrom:
                     resourceFieldRef:
                       resource: limits.memory
+                      # Said, not left to the API server's default ("0"): resourceFieldRef
+                      # is atomic, so a GitOps diff of the applied fields sees the default
+                      # as a change. "1" is the same value, in bytes.
+                      divisor: "1"
               securityContext:
                 {{- include "lapilli.containerSecurity" . | nindent 16 }}
               {{- with .Values.resources }}
