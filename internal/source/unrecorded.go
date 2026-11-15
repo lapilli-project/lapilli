@@ -84,6 +84,7 @@ func Unrecorded(ctx context.Context, h replay.History, versions []replay.Version
 					return out, err
 				}
 				if more || slices.ContainsFunc(fs, noData) {
+					u.TooMany = more
 					break // not all events, or not known to be
 				}
 			}
@@ -95,6 +96,7 @@ func Unrecorded(ctx context.Context, h replay.History, versions []replay.Version
 				return out, err
 			}
 			if more {
+				u.TooMany = true
 				break // more than is read: how many went past isn't told
 			}
 			n, bound, err := clearOf(ctx, h, versions, rr.Rule, fs, rep.From, rep.To, step)

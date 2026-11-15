@@ -183,9 +183,10 @@ func (t *tallies) only(o *owners, team ledger.Team) {
 	for w, rows := range t.by {
 		t.everyone[w] = maps.Clone(rows)
 	}
-	// Its weeks judged by the incidents it owns; everyone's, by all.
+	// Its weeks judged by the incidents it owns (teamKeeps); everyone's, by
+	// all.
 	t.keptAll, t.team = t.kept, &team
-	t.keep(func(in ledger.Incident) bool { return o.ownsIncident(team, in) })
+	t.keep(teamKeeps(o, &team))
 	for _, w := range t.weeks {
 		for id := range t.by[w] {
 			if o.rule[t.rules[id].Name] != team.ID {

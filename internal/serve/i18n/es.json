@@ -1467,6 +1467,7 @@
  "All %d went well past its bound (%s), not a flicker at its edge: these happened.": "Los %d pasaron con creces su umbral (%s), no un parpadeo en el borde: ocurrieron.",
  "%d of them went well past its bound (%s), not a flicker at its edge: these happened.": "%d de ellos pasaron con creces su umbral (%s), no un parpadeo en el borde: ocurrieron.",
  "None stayed more than a fifth past its bound (%s) for all of its for.": "Ninguno se mantuvo más de un 20 %% por encima de su umbral (%s) durante todo su for.",
+ "Too many firings to tell how many happened.": "Demasiados disparos para saber cuántos ocurrieron.",
  "%d came during a deploy.": "%d llegaron durante un despliegue.",
  "All came from one alert:": "Todos vinieron de una sola alerta:",
  "Most came from these, of %d alerts:": "La mayoría vino de estas, de %d alertas:",

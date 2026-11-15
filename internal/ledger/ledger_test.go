@@ -51,6 +51,10 @@ func openAt(ctx context.Context, where string, loc *time.Location) (*Ledger, err
 
 var opts = verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour, Match: []string{"service"}}
 
+// keepAll keeps the record of the week from t0, and of the two before it,
+// and catches no firing of world's.
+var keepAll = incident.Incident{ID: "KEEP", Start: t0.Add(-21 * 24 * time.Hour), End: t0.Add(8 * 24 * time.Hour), Labels: incident.Labels{"service": {"none of theirs"}}}
+
 // world makes firings and incidents at random over a week, none of them
 // near its edges, so that the ledger and verdict.Judge see the same.
 func world(seed uint64, n int) ([]firing.Firing, []incident.Incident) {
@@ -97,10 +101,11 @@ func TestSameAsJudge(t *testing.T) {
 	for seed := uint64(1); seed <= 5; seed++ {
 		l := open(t, time.UTC)
 		fs, incs := world(seed, 400)
-		// Still on from a month before, it keeps the record of every firing,
-		// as the ledger judges by week and verdict.Judge by firing, and
-		// catches none.
-		incs = append([]incident.Incident{{ID: "KEEP", Start: t0.Add(-30 * 24 * time.Hour)}}, incs...)
+		// On from three weeks before to past the week's end, it keeps the
+		// record of every firing, as the ledger judges by week and
+		// verdict.Judge by firing, and catches none: its service is no
+		// firing's.
+		incs = append([]incident.Incident{keepAll}, incs...)
 		if _, err := l.SyncFile(ctx, incs, opts); err != nil {
 			t.Fatal(err)
 		}

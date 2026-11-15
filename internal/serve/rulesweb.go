@@ -121,8 +121,10 @@ type rulesList struct {
 // list whose sum each is.
 type ruleSum struct {
 	Firings, White, Black, Refired, Deploys, Excused int
-	AsleepBlack, OffHoursBlack                       int
-	Precision                                        string
+	// Unjudged are those in weeks with no record, in no precision.
+	Unjudged                   int
+	AsleepBlack, OffHoursBlack int
+	Precision                  string
 	// Notified says notifications are kept: Notifications, Repeats; and
 	// Woken, those for firings that caught nothing while people slept,
 	// as the overview counts them (woken). Uncounted says the weeks shown
@@ -508,6 +510,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		x := &v.Sum
 		x.Firings += row.Firings
 		x.White += row.White
+		x.Unjudged += row.Unjudged
 		x.Black += row.Black
 		x.Refired += row.Refired
 		x.Deploys += row.Deploys
@@ -518,7 +521,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		x.Repeats += row.Repeats
 		x.Woken += row.Woken
 	}
-	v.Sum.Precision = pct(v.Sum.White, v.Sum.Firings)
+	v.Sum.Precision = pct(v.Sum.White, v.Sum.Firings-v.Sum.Unjudged)
 	for _, f := range facetsOf {
 		fc := facet{Param: f.param, Name: f.name}
 		values, labels := f.values, f.labels

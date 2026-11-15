@@ -71,9 +71,11 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			rr.DeploysCaught += d.DeployWhite
 			if !t.kept[ledger.Week(d.At)] {
 				rr.Unjudged += d.Firings - d.White
+				rr.DeploysUnjudged += d.Deploy - d.DeployWhite
 			}
 		}
-		rep := &verdict.Report{NoRecord: !t.rec.Kept(s.l.Midnight(today-6), s.now())}
+		// By the weeks the seven days have some of, as their firings are.
+		rep := &verdict.Report{NoRecord: !t.rec.JudgesAny(s.l.Midnight(today-6), s.now())}
 		at := noisyAt(o)
 		for _, rr := range sum {
 			rr.NoRecord = rr.Firings > 0 && rr.Unjudged == rr.Firings

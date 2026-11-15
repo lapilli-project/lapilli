@@ -96,7 +96,7 @@ func TestFiredOnNoLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.jobs(ctx, true)
-	if xs, err := s.firedOnOf(ctx, time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC), now); err != nil || xs != nil {
+	if xs, _, err := s.firedOnOf(ctx, time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC), now); err != nil || xs != nil {
 		t.Errorf("%+v %v", xs, err)
 	}
 }

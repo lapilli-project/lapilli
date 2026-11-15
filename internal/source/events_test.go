@@ -180,8 +180,11 @@ func TestUnrecordedMoreThanRead(t *testing.T) {
 	versions, rep, _ := restartsWeek(t, nil)
 	versions[0].Rules[0].Expr = "level > 0.5"
 	us, err := Unrecorded(context.Background(), restarts{}, versions, rep, more{Judged(rep.Firings)}, time.Minute)
-	if err != nil || len(us) != 1 || us[0].Clear != nil || us[0].Alerts != 3 {
+	if err != nil || len(us) != 1 || us[0].Clear != nil || !us[0].TooMany || us[0].Alerts != 3 {
 		t.Errorf("%+v %v", us, err)
+	}
+	if !strings.Contains(us[0].Text(), "Too many firings to tell how many happened.") {
+		t.Errorf("%q", us[0].Text())
 	}
 }
 
@@ -326,9 +329,9 @@ func TestGrafanaNoData(t *testing.T) {
 	if text := us[0].Text(); strings.Contains(text, "are events") || strings.Contains(text, "would hide") {
 		t.Errorf("%q", text)
 	}
-	// More than are read: not known.
+	// More than are read: not known, and said why.
 	us, err = Unrecorded(context.Background(), h, versions, rep, more{Judged(rep.Firings)}, time.Minute)
-	if err != nil || len(us) != 1 || us[0].Events || us[0].Clear != nil {
+	if err != nil || len(us) != 1 || us[0].Events || us[0].Clear != nil || !us[0].TooMany {
 		t.Fatalf("more: %+v %v", us, err)
 	}
 

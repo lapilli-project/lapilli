@@ -217,10 +217,10 @@ func (s *Server) outcomeRow(l string, x ruleOutcome) outcomeRow {
 // thenNow are the headline numbers, then and now.
 func thenNow(l string, then, now period) []tile {
 	pct := func(p period) (float64, bool) {
-		if p.Firings == 0 {
+		if p.Firings-p.Unjudged <= 0 {
 			return 0, false
 		}
-		return float64(p.White) / float64(p.Firings), true
+		return float64(p.White) / float64(p.Firings-p.Unjudged), true
 	}
 	var out []tile
 	x := tile{Label: tr(l, "Precision"), Value: "–"}

@@ -36,6 +36,9 @@ type Unrecorded struct {
 	// is the bound, as compared: "> 0.5".
 	Clear *int   `json:"clear,omitempty"`
 	Bound string `json:"bound,omitempty"`
+	// TooMany says Clear is nil for there were more firings than are read
+	// to tell.
+	TooMany bool `json:"too_many,omitempty"`
 	// Alerts is how many alerts (label sets) fired; Top, those that fired
 	// most, TopShown at most, each by the labels that tell them apart.
 	Alerts int          `json:"alerts"`
@@ -165,6 +168,8 @@ func (u Unrecorded) text(labels bool) string {
 	switch {
 	case u.Events:
 		fmt.Fprintf(&b, " All %d are events its condition counts (a count that went up): these happened.", u.Firings)
+	case u.Clear == nil && u.TooMany:
+		b.WriteString(" Too many firings to tell how many happened.")
 	case u.Clear == nil:
 	case *u.Clear == u.Firings:
 		fmt.Fprintf(&b, " All %d went well past its bound (%s), not a flicker at its edge: these happened.", *u.Clear, Clean(u.Bound))

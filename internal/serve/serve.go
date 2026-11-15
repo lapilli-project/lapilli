@@ -810,6 +810,8 @@ func (s *Server) options(ctx context.Context) (verdict.Options, error) {
 			return o, err
 		}
 	}
+	// What it replays is judged by the weeks it keeps its stones by.
+	o.RecordWeek = s.l.WeekOf
 	for k, v := range set {
 		if err := apply(&o, k, v.Value); err != nil {
 			s.log.Warn("a setting from the UI doesn't parse; the command line's is used", "setting", k, "err", err)

@@ -11,15 +11,19 @@ import (
 // firings are judged against (written down, or a window --impact found) was
 // on at some time in the two weeks before it, the firing caught one, or an
 // impact signal was read over its time (--impact): what was read, found or
-// not, says whether users were hurt. A firing with no record caught nothing
-// written down, which can't be told from one nobody wrote down: it is
-// counted, among the firings, and not judged: it is in no precision and
-// makes no rule noisy (RuleResult.Unjudged), and a rule none of whose
-// firings is judged has no precision at all (RuleResult.NoRecord).
+// not, says whether users were hurt. An incident with no end is taken to
+// last Options.UnknownLen, as it is when a firing catches it. A firing with
+// no record caught nothing written down, which can't be told from one
+// nobody wrote down: it is counted, among the firings, and not judged: it
+// is in no precision and makes no rule noisy (RuleResult.Unjudged), and a
+// rule none of whose firings is judged has no precision at all
+// (RuleResult.NoRecord).
 //
 // lapilli verdict judges each firing so. lapilli serve keeps its stones by
-// week: a week's firings are judged when the record of the week is kept, an
-// incident on in it or in the two weeks before it.
+// week, and judges by week (Options.RecordWeek): a week's firings are
+// judged when the record of the week is kept, an incident on in it or in
+// the two weeks before it, so that what it replays is judged as what it
+// keeps is.
 
 // RecordLookback is how long before a firing an incident still keeps its
 // record: two weeks, the gap lapilli serve's outcomes page asks about ("No
@@ -31,34 +35,30 @@ const RecordLookback = 14 * 24 * time.Hour
 func RecordFrom(from, to time.Time) time.Time { return from.Add(-RecordLookback) }
 
 // A Record is what keeps the record: when each incident firings are judged
-// against was on, and from when an impact signal was read, all of it.
+// against was on, and from when an impact signal was read, all of it; and,
+// in lapilli serve, the weeks it is judged by (Options.RecordWeek).
 type Record struct {
 	// starts are the incidents' starts, the earliest first; ends, the
-	// latest end of any incident up to each, zero for one still on.
+	// latest end of any incident up to each.
 	starts, ends []time.Time
 	impactFrom   time.Time
+	week         func(time.Time) (time.Time, time.Time)
 }
 
-// RecordOf is the record incidents keep, and an impact signal read from
-// impactFrom on (zero for none). An incident with no end is on still.
-func RecordOf(incs []incident.Incident, impactFrom time.Time) Record {
+// RecordOf is the record incidents keep, by o: one with no end lasting
+// o.UnknownLen, an impact signal read from o.ImpactFrom on (zero for none),
+// and judged by o.RecordWeek's weeks, when it has them.
+func RecordOf(incs []incident.Incident, o Options) Record {
 	sorted := slices.Clone(incs)
 	slices.SortFunc(sorted, func(a, b incident.Incident) int { return a.Start.Compare(b.Start) })
-	r := Record{impactFrom: impactFrom}
-	var open bool
+	r := Record{impactFrom: o.ImpactFrom, week: o.RecordWeek}
 	var end time.Time
 	for _, in := range sorted {
-		if in.End.IsZero() {
-			open = true
-		} else if in.End.After(end) {
-			end = in.End
+		if e := in.EndOr(o.UnknownLen); e.After(end) {
+			end = e
 		}
 		r.starts = append(r.starts, in.Start)
-		if open {
-			r.ends = append(r.ends, time.Time{})
-		} else {
-			r.ends = append(r.ends, end)
-		}
+		r.ends = append(r.ends, end)
 	}
 	return r
 }
@@ -72,11 +72,7 @@ func (r Record) on(lo, at time.Time, before bool) bool {
 			i++
 		}
 	}
-	if i == 0 {
-		return false
-	}
-	end := r.ends[i-1]
-	return end.IsZero() || !end.Before(lo)
+	return i > 0 && !r.ends[i-1].Before(lo)
 }
 
 // Kept reports whether the record of [from, to) is kept, for any time in
@@ -96,6 +92,35 @@ func (r Record) At(t time.Time) bool {
 		return true
 	}
 	return r.on(t.Add(-RecordLookback), t, false)
+}
+
+// Judges reports whether a firing that started at t is judged by the
+// record: kept at its time, or, judged by week, over its week.
+func (r Record) Judges(t time.Time) bool {
+	if r.week == nil {
+		return r.At(t)
+	}
+	from, to := r.week(t)
+	return r.Kept(from, to)
+}
+
+// JudgesAny reports whether any firing in [from, to) would be: the record
+// kept at some time in it, or, judged by week, over one of its weeks.
+func (r Record) JudgesAny(from, to time.Time) bool {
+	if r.week == nil {
+		return r.Kept(from, to)
+	}
+	for at, n := from, 0; n == 0 || at.Before(to); n++ {
+		a, b := r.week(at)
+		if r.Kept(a, b) {
+			return true
+		}
+		if !b.After(at) || n > 1e5 {
+			return false // a week that doesn't end: none further
+		}
+		at = b
+	}
+	return false
 }
 
 // NoRecordText says, for a person, what a period with no record means, and

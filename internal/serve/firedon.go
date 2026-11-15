@@ -27,42 +27,49 @@ type firedOn struct {
 	Team    string `json:"team"`
 	Firings int    `json:"firings"`
 	Of      int    `json:"of"`
+	// Unread are, of Of, the firings of its alerts past the firedOnRead
+	// that fired most, which weren't read: counted as no team's.
+	Unread int `json:"unread,omitempty"`
 }
 
 // firedOnRead is how many of the alerts that fired most in a week are read
 // to count firings by team: those past them are counted as no team's.
-const firedOnRead = 20000
+// Replaced in tests.
+var firedOnRead = 20000
 
 // firedOnOf are the rules most of whose firings in [from, to) came from
 // what another team owns than theirs, by name; none when no team owns by
-// labels.
-func (s *Server) firedOnOf(ctx context.Context, from, to time.Time) ([]firedOn, error) {
+// labels. unread are the firings of the alerts past the firedOnRead that
+// fired most, all told, which weren't read.
+func (s *Server) firedOnOf(ctx context.Context, from, to time.Time) (out []firedOn, unread int, err error) {
 	own, err := s.owners(ctx)
 	if err != nil || !slices.ContainsFunc(own.teams, func(t ledger.Team) bool { return len(t.Labels) > 0 }) {
-		return nil, err
+		return nil, 0, err
 	}
 	counts, all, err := s.l.AlertCounts(ctx, from, to, firedOnRead)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	type tally struct {
-		of int
-		by map[string]int
+		of, read int
+		by       map[string]int
 	}
 	by := map[string]*tally{}
 	for rule, n := range all {
 		by[rule] = &tally{of: n, by: map[string]int{}}
+		unread += n
 	}
 	for _, a := range counts {
 		x := by[a.Rule]
 		if x == nil {
 			continue
 		}
+		x.read += a.Firings
+		unread -= a.Firings
 		if team := own.labelTeam(a.Labels); team != "" {
 			x.by[team] += a.Firings
 		}
 	}
-	var out []firedOn
 	for _, rule := range slices.Sorted(maps.Keys(by)) {
 		x := by[rule]
 		best, n := "", 0
@@ -72,10 +79,10 @@ func (s *Server) firedOnOf(ctx context.Context, from, to time.Time) ([]firedOn, 
 			}
 		}
 		if owner := own.teamOf(rule); best != "" && best != owner && 2*n > x.of {
-			out = append(out, firedOn{Rule: rule, Owner: owner, Team: best, Firings: n, Of: x.of})
+			out = append(out, firedOn{Rule: rule, Owner: owner, Team: best, Firings: n, Of: x.of, Unread: max(x.of-x.read, 0)})
 		}
 	}
-	return out, nil
+	return out, max(unread, 0), nil
 }
 
 // firedOnWeek is what the last digest kept of the rules that fired on what

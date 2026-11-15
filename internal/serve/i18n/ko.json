@@ -1467,6 +1467,7 @@
  "All %d went well past its bound (%s), not a flicker at its edge: these happened.": "%d건 모두 임계값(%s)을 크게 넘었어요. 임계값 근처에서 잠깐 튄 게 아니라 실제로 일어난 일이에요.",
  "%d of them went well past its bound (%s), not a flicker at its edge: these happened.": "그중 %d건은 임계값(%s)을 크게 넘었어요. 임계값 근처에서 잠깐 튄 게 아니라 실제로 일어난 일이에요.",
  "None stayed more than a fifth past its bound (%s) for all of its for.": "임계값(%s)을 20%% 넘게 넘은 채로 for 내내 이어진 발화는 없었어요.",
+ "Too many firings to tell how many happened.": "발화가 너무 많아 몇 건이 실제로 일어났는지 알 수 없어요.",
  "%d came during a deploy.": "%d건은 배포 중에 발화했어요.",
  "All came from one alert:": "모두 알림 하나에서 나왔어요:",
  "Most came from these, of %d alerts:": "알림 %d개 중 대부분이 여기서 나왔어요:",

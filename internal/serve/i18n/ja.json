@@ -1467,6 +1467,7 @@
  "All %d went well past its bound (%s), not a flicker at its edge: these happened.": "%d 件すべてが閾値（%s）を大きく超えました。閾値付近の一時的な揺れではなく、実際に起きたことです。",
  "%d of them went well past its bound (%s), not a flicker at its edge: these happened.": "そのうち %d 件が閾値（%s）を大きく超えました。閾値付近の一時的な揺れではなく、実際に起きたことです。",
  "None stayed more than a fifth past its bound (%s) for all of its for.": "閾値（%s）を 20%% より大きく超えたまま for のあいだ続いた発火はありませんでした。",
+ "Too many firings to tell how many happened.": "発火が多すぎて、何件が実際に起きたかは分かりません。",
  "%d came during a deploy.": "%d 件はデプロイ中に発火しました。",
  "All came from one alert:": "すべて 1 つのアラートからです:",
  "Most came from these, of %d alerts:": "%d 件のアラートのうち、ほとんどがこれらからです:",

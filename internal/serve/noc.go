@@ -485,6 +485,8 @@ type refires struct {
 	Precision        *float64 `json:"precision"`
 	PrecisionWithout *float64 `json:"precision_without"`
 	caught           int
+	judged           int // the firings judged, deploysJudged of them during deploys
+	deploysJudged    int
 	deploysKept      bool
 }
 
@@ -500,12 +502,16 @@ func (s *Server) refiresOf(ctx context.Context, rep *verdict.Report, from, to ti
 		x.Refired += r.Refired
 		x.Deploys += r.DuringDeploys
 		x.DeploysCaught += r.DeploysCaught
+		// Precision of the firings judged alone: a week with no record's
+		// that caught nothing aren't (verdict.RuleResult.Unjudged).
+		x.judged += r.Firings - r.Unjudged
+		x.deploysJudged += r.DuringDeploys - r.DeploysUnjudged
 		if r.Refired > 0 {
 			x.Rules++
 		}
 	}
 	x.Share, x.caught = share(x.Refired, x.Firings), white
-	x.Precision, x.PrecisionWithout = share(white, x.Firings), share(white-x.DeploysCaught, x.Firings-x.Deploys)
+	x.Precision, x.PrecisionWithout = share(white, x.judged), share(white-x.DeploysCaught, x.judged-x.deploysJudged)
 	if x.Refired > 0 {
 		worst, err := s.l.MostRefired(ctx, from, to, 1, func(rule string) bool { return in[rule] })
 		if err != nil {
@@ -550,7 +556,7 @@ func (x *refires) deployLine(l string) string {
 		return ""
 	}
 	return tr(l, "During deploys: %d firings, %d of them catching something; precision %s with them, %s without.",
-		x.Deploys, x.DeploysCaught, pct(x.caught, x.Firings), pct(x.caught-x.DeploysCaught, x.Firings-x.Deploys))
+		x.Deploys, x.DeploysCaught, pct(x.caught, x.judged), pct(x.caught-x.DeploysCaught, x.judged-x.deploysJudged))
 }
 
 // labelsLine is a label set as a person reads it, in braces.

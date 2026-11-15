@@ -41,8 +41,14 @@ type weekView struct {
 	Refired, Deploys, DeploysCaught int
 }
 
-// Without is the week's precision leaving out the firings during deploys.
-func (w weekView) Without() string { return pct(w.White-w.DeploysCaught, w.Firings-w.Deploys) }
+// Without is the week's precision leaving out the firings during deploys;
+// "–" with no record to judge them by.
+func (w weekView) Without() string {
+	if w.NoRecord {
+		return "–"
+	}
+	return pct(w.White-w.DeploysCaught, w.Firings-w.Deploys)
+}
 
 func (w weekView) precision() (float64, bool) {
 	if w.Firings == 0 || w.NoRecord {
@@ -771,22 +777,24 @@ func (s *Server) heat(l string, t *tallies, lines []ruleLine) (rows []heatRow, l
 		}
 		return t.by[w][id].Black()
 	}
-	var ids []int64
-	most := 1
+	// The heatRows with the most black stones judged, whatever they had
+	// besides with no record.
 	for _, l := range lines {
 		left = left || l.Unjudged > 0
-		judged := l.Black - l.Unjudged
-		if judged == 0 || len(rows) == heatRows {
-			continue
+		if judged := l.Black - l.Unjudged; judged > 0 {
+			rows = append(rows, heatRow{Name: l.Name, Black: judged})
 		}
-		id := t.id(l.Name)
-		for _, w := range t.weeks {
-			most = max(most, black(w, id))
-		}
-		rows = append(rows, heatRow{Name: l.Name, Black: judged})
-		ids = append(ids, id)
 	}
 	slices.SortStableFunc(rows, func(a, b heatRow) int { return b.Black - a.Black })
+	rows = rows[:min(len(rows), heatRows)]
+	ids := make([]int64, len(rows))
+	most := 1
+	for i, r := range rows {
+		ids[i] = t.id(r.Name)
+		for _, w := range t.weeks {
+			most = max(most, black(w, ids[i]))
+		}
+	}
 	for i := range rows {
 		for j, w := range t.weeks {
 			x := t.by[w][ids[i]]

@@ -53,6 +53,11 @@ type Options struct {
 	// was read, all of it: a measure of whether users were hurt, found or
 	// not, that keeps the record of every firing from then (Record).
 	ImpactFrom time.Time
+	// RecordWeek, when not nil, is the week a time is in, [from, to), as
+	// lapilli serve aligns its weeks: a firing is judged when the record of
+	// its week is kept, as serve's stones are kept by week. Nil judges each
+	// firing by the record at its own time, as lapilli verdict does.
+	RecordWeek func(t time.Time) (from, to time.Time) `json:"-"`
 }
 
 // The defaults for Options.NoisyFirings and Options.NoisyPrecision.
@@ -144,6 +149,8 @@ type RuleResult struct {
 	// caught something: in Firings and White, and shown apart.
 	DuringDeploys int `json:"during_deploys,omitempty"`
 	DeploysCaught int `json:"during_deploys_caught,omitempty"`
+	// DeploysUnjudged are those of DuringDeploys among Unjudged.
+	DeploysUnjudged int `json:"during_deploys_unjudged,omitempty"`
 }
 
 // Judged is how many of its firings were judged: those with a record at
@@ -284,8 +291,8 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	at := o.noisyAt()
 	rep := &Report{From: o.From, To: o.To, NoisyAt: at, Rules: []RuleResult{}, Incidents: []IncidentResult{}, Firings: []Judged{}, SomeRules: o.SomeRules,
 		Hours: o.Hours.Used()}
-	rec := RecordOf(incs, o.ImpactFrom)
-	rep.NoRecord = !rec.Kept(o.From, o.To)
+	rec := RecordOf(incs, o)
+	rep.NoRecord = !rec.JudgesAny(o.From, o.To)
 	severities := map[string][]string{}
 	addSeverity := func(rule, sev string) {
 		if sev != "" && !slices.Contains(severities[rule], sev) {
@@ -359,7 +366,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			r.White++
 		} else {
 			r.Black++
-			if !rec.At(f.Start) {
+			if !rec.Judges(f.Start) {
 				j.NoRecord = true
 				r.Unjudged++
 				rep.Unjudged++

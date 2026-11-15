@@ -178,3 +178,49 @@ func TestVerdictImpactKeepsRecord(t *testing.T) {
 		t.Errorf("impact asked from %v, want two weeks before the period", asked)
 	}
 }
+
+// ongoingImpact is restartHistory, with an impact signal on from three
+// hours before the period, two days before t0, to t0: users hurt all along.
+type ongoingImpact struct{ restartHistory }
+
+func (h ongoingImpact) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	if expr != "impact" {
+		return h.restartHistory.QueryRange(ctx, expr, start, end, step)
+	}
+	s := prom.Series{Labels: map[string]string{}}
+	for at := start; !at.After(end); at = at.Add(step) {
+		if !at.Before(t0.Add(-2*24*time.Hour-3*time.Hour)) && at.Before(t0) {
+			s.Samples = append(s.Samples, prom.Sample{T: at, V: 1})
+		}
+	}
+	return []prom.Series{s}, nil
+}
+
+// An impact window already on at the period's start starts there, as when
+// the period alone was read: the restarts in it catch it, as they did,
+// though the signal is read from two weeks before for the record.
+func TestVerdictImpactOngoing(t *testing.T) {
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return ongoingImpact{}, nil }
+	now = func() time.Time { return t0 }
+	rulesFile := write(t, "rules.yaml", `groups:
+  - name: pods
+    rules:
+      - alert: Restarts
+        expr: increase(restarts[30m]) > 0.5
+        for: 1m
+`)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"verdict", "--rules", rulesFile, "--prometheus", "http://p", "--impact", "impact", "--since", "2d", "--json"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d\n%s", code, stderr.String())
+	}
+	var rep verdict.Report
+	if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.NoRecord || len(rep.Rules) != 1 || rep.Rules[0].Firings != 12 || rep.Rules[0].White != 12 || rep.Rules[0].Noisy {
+		t.Errorf("%v %+v", rep.NoRecord, rep.Rules)
+	}
+	if len(rep.Incidents) != 1 || !rep.Incidents[0].Start.Equal(t0.Add(-2*24*time.Hour)) {
+		t.Errorf("the window, from the period's start: %+v", rep.Incidents)
+	}
+}

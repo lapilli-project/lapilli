@@ -872,8 +872,8 @@ func (s *Server) reviews(ctx context.Context, rule string, limit int) ([]reviewV
 	var out []reviewView
 	for _, r := range rs {
 		var c verdict.Comparison
-		if err := r.Decode(&c); err != nil {
-			return nil, err
+		if !s.decodeKept(r, &c) {
+			continue
 		}
 		if rule != "" && !slices.ContainsFunc(c.Rules, func(rc verdict.RuleChange) bool { return rc.Rule == rule }) {
 			continue
@@ -1451,8 +1451,8 @@ func (s *Server) nearMisses(ctx context.Context) (map[string][]verdict.NearMiss,
 	seen := map[string]bool{}
 	for _, r := range rs { // the latest week first
 		var nms []verdict.NearMiss
-		if err := r.Decode(&nms); err != nil {
-			return nil, err
+		if !s.decodeKept(r, &nms) {
+			continue
 		}
 		got := map[string]bool{}
 		for _, nm := range nms {
@@ -1681,7 +1681,7 @@ func (s *Server) try(ctx context.Context, o, tried verdict.Options) (*tryView, e
 	for i, f := range fs {
 		plain[i] = f.Firing
 	}
-	incs, err := s.recordBefore(ctx, from, to) // the record kept, as the ledger's
+	incs, err := s.recordAround(ctx, from, to, tried) // the record kept, as the ledger's
 	if err != nil {
 		return nil, err
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -49,7 +50,10 @@ type contentOutput struct {
 
 // readImpact reads the impact signal (--impact) from two weeks before the
 // period to its end, which keeps the record of all of it whatever it finds
-// (verdict.Options.ImpactFrom), and adds the windows it finds to incs.
+// (verdict.Options.ImpactFrom), and adds the windows it finds in the period
+// to incs: from its values in the period alone, as they were when the
+// period alone was read, so that a window already on at its start starts
+// there, and the firings in it are judged against it as they were.
 func (f *verdictFlags) readImpact(ctx context.Context, h history, incs []incident.Incident) ([]incident.Incident, error) {
 	from := verdict.RecordFrom(f.opts.From, f.opts.To)
 	series, err := h.QueryRange(ctx, f.impact, from, f.opts.To, f.step)
@@ -57,7 +61,12 @@ func (f *verdictFlags) readImpact(ctx context.Context, h history, incs []inciden
 		return nil, fmt.Errorf("--impact: %w", err)
 	}
 	f.opts.ImpactFrom = from
-	return incident.Merge(incs, incident.FromImpact(series, f.step, f.impactFor), f.opts.UnknownLen, f.opts.Match), nil
+	in := make([]prom.Series, 0, len(series))
+	for _, s := range series {
+		s.Samples = slices.DeleteFunc(slices.Clone(s.Samples), func(x prom.Sample) bool { return x.T.Before(f.opts.From) })
+		in = append(in, s)
+	}
+	return incident.Merge(incs, incident.FromImpact(in, f.step, f.impactFor), f.opts.UnknownLen, f.opts.Match), nil
 }
 
 // runContent checks what the rules given say when they fire, and how they

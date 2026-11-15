@@ -13,8 +13,9 @@ import (
 )
 
 // A span's record is kept by an incident on at some time from two weeks
-// before it to its end, one with no end still on; or by an impact signal
-// read over all of it. A firing's, by one on in the two weeks before it.
+// before it to its end, one with no end taken to last as long as a firing
+// catches it for (UnknownLen); or by an impact signal read over all of it.
+// A firing's, by one on in the two weeks before it.
 func TestRecordKept(t *testing.T) {
 	day := 24 * time.Hour
 	week := [2]time.Time{t0, t0.Add(7 * day)}
@@ -32,24 +33,26 @@ func TestRecordKept(t *testing.T) {
 		{"two weeks before it, just", week, in(t0.Add(-14*day), t0.Add(-14*day+time.Hour)), true},
 		{"ended before that", week, in(t0.Add(-15*day), t0.Add(-14*day-time.Second)), false},
 		{"started before that, on into it", week, in(t0.Add(-20*day), t0.Add(-13*day)), true},
-		{"started 20 days before, still on", week, in(t0.Add(-20*day), time.Time{}), true},
+		{"started 20 days before, with no end", week, in(t0.Add(-20*day), time.Time{}), false},
+		{"started 15 days before, with no end", week, in(t0.Add(-15*day), time.Time{}), true},
+		{"started 15 days and 2 hours before, with no end", week, in(t0.Add(-15*day-2*time.Hour), time.Time{}), false},
 		{"at its end", week, in(t0.Add(7*day), t0.Add(7*day+time.Hour)), false},
 		{"none", week, nil, false},
 	} {
-		if got := RecordOf(c.incs, time.Time{}).Kept(c.span[0], c.span[1]); got != c.want {
+		if got := RecordOf(c.incs, Options{UnknownLen: day}).Kept(c.span[0], c.span[1]); got != c.want {
 			t.Errorf("%s: %v", c.name, got)
 		}
 	}
 	// An impact signal read from two weeks before keeps all of it, found or
 	// not; read from later, only what it covers.
-	if r := RecordOf(nil, RecordFrom(week[0], week[1])); !r.Kept(week[0], week[1]) || !r.At(t0.Add(day)) {
+	if r := RecordOf(nil, Options{ImpactFrom: RecordFrom(week[0], week[1])}); !r.Kept(week[0], week[1]) || !r.At(t0.Add(day)) {
 		t.Error("impact read over it keeps it")
 	}
-	if r := RecordOf(nil, t0.Add(3*day)); r.Kept(week[0], week[1]) || r.At(t0.Add(day)) || !r.At(t0.Add(4*day)) {
+	if r := RecordOf(nil, Options{ImpactFrom: t0.Add(3 * day)}); r.Kept(week[0], week[1]) || r.At(t0.Add(day)) || !r.At(t0.Add(4*day)) {
 		t.Error("impact read from midweek keeps what it covers")
 	}
 	// A firing: one on in the two weeks before it, not after it.
-	r := RecordOf(in(t0.Add(10*day), t0.Add(10*day+time.Hour)), time.Time{})
+	r := RecordOf(in(t0.Add(10*day), t0.Add(10*day+time.Hour)), Options{})
 	for at, want := range map[time.Duration]bool{9 * day: false, 10 * day: true, 20 * day: true, 25 * day: false} {
 		if r.At(t0.Add(at)) != want {
 			t.Errorf("firing at day %d: %v", at/day, !want)
@@ -232,5 +235,57 @@ func TestJudgeEachFiring(t *testing.T) {
 	rep = Judge(nil, fs, incs, o)
 	if r := rep.Rules[0]; r.Unjudged != 14 || r.Judged() != 14 || !r.Noisy {
 		t.Errorf("an incident before day 0: %+v", r)
+	}
+	// With no end, it lasts UnknownLen (an hour), for its record as for
+	// what catches it: not on for all the 28 days.
+	incs[0].End = time.Time{}
+	rep = Judge(nil, fs, incs, o)
+	if r := rep.Rules[0]; r.Unjudged != 14 || r.Judged() != 14 {
+		t.Errorf("an incident with no end: %+v", r)
+	}
+}
+
+// Judged by week (RecordWeek), as lapilli serve keeps its stones: an
+// incident on in a week or the two before it judges all of the week's
+// firings, one on Monday's too, and none of the next week's past two weeks
+// from it; a period with no week kept has no record.
+func TestJudgeByWeek(t *testing.T) {
+	day := 24 * time.Hour
+	week := func(at time.Time) (time.Time, time.Time) {
+		n := at.Sub(t0) / (7 * day)
+		if at.Before(t0) {
+			n--
+		}
+		from := t0.Add(n * 7 * day)
+		return from, from.Add(7 * day)
+	}
+	o := opts()
+	o.To, o.RecordWeek = t0.Add(28*day), week
+	var fs []firing.Firing
+	for d := range 28 {
+		at := t0.Add(time.Duration(d)*day + 12*time.Hour)
+		fs = append(fs, firing.Firing{Rule: "Daily", Labels: map[string]string{"service": "a"}, Start: at, End: at.Add(time.Minute)})
+	}
+	// On day 20, Saturday of the third week: by firing, days 20 to 27 are
+	// judged; by week, the third and fourth weeks, days 14 to 27.
+	incs := []incident.Incident{{ID: "INC-1", Start: t0.Add(20 * day), End: t0.Add(20*day + time.Hour), Labels: incident.Labels{"service": {"b"}}}}
+	rep := Judge(nil, fs, incs, o)
+	if r := rep.Rules[0]; rep.NoRecord || r.Unjudged != 14 || r.Judged() != 14 || !r.Noisy {
+		t.Errorf("by week: %v %+v", rep.NoRecord, r)
+	}
+	for _, j := range rep.Firings {
+		if want := j.Start.Before(t0.Add(14 * day)); j.NoRecord != want {
+			t.Errorf("%s: no record %v", j.Start, j.NoRecord)
+		}
+	}
+	// None kept: no record, though the period has some of a week.
+	o.From, o.To = t0.Add(2*day), t0.Add(5*day)
+	if rep := Judge(nil, fs[2:5], nil, o); !rep.NoRecord || rep.Unjudged != 3 {
+		t.Errorf("none: %v %d", rep.NoRecord, rep.Unjudged)
+	}
+	// One in the period's week, after the period's end: the week is kept.
+	after := []incident.Incident{{ID: "INC-2", Start: t0.Add(6 * day), End: t0.Add(6*day + time.Hour)}}
+	if rep := Judge(nil, fs[2:5], after, o); rep.NoRecord || rep.Unjudged != 0 || len(rep.Incidents) != 0 {
+		t.Errorf("one later in the week: %v %d %+v", rep.NoRecord, rep.Unjudged, rep.Incidents)
 	}
 }

@@ -568,8 +568,8 @@ func (s *Server) nearKept(ctx context.Context, from, to time.Time) ([]verdict.Ne
 			continue
 		}
 		var nms []verdict.NearMiss
-		if err := r.Decode(&nms); err != nil {
-			return nil, err
+		if !s.decodeKept(r, &nms) {
+			continue
 		}
 		out = append(out, nms...)
 	}

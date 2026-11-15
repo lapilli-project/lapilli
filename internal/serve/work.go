@@ -1233,7 +1233,7 @@ func (s *Server) replayChange(ctx context.Context, gone, came []rules.Rule, same
 	if err != nil {
 		return nil, err
 	}
-	plain, err := s.recordBefore(ctx, from, to) // the record kept, as the ledger's
+	plain, err := s.recordAround(ctx, from, to, o) // the record kept, as the ledger's
 	if err != nil {
 		return nil, err
 	}
@@ -1303,15 +1303,16 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 		var sugg []verdict.Suggestion
 		var near []verdict.NearMiss
 		var unrec []verdict.Unrecorded
+		// The suggestions, the near misses, what firings with no record were
+		// and the firings by team share one --timeout, so the digest holds
+		// the runs up no longer than a run may take.
+		rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+		defer cancel()
 		if s.replaying() {
 			in, err := s.replayInput(ctx, rep, from, to, o)
 			if err != nil {
 				return true, err
 			}
-			// The suggestions and the near misses share one --timeout, so the
-			// digest holds the runs up no longer than a run may take.
-			rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
-			defer cancel()
 			if len(in.versions) == 1 {
 				sugg = source.Suggest(rctx, s.h, in.versions[0].Rules, rep, in.incs, in.o, s.cfg.Step, in.excuse)
 			}
@@ -1329,8 +1330,8 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 					return true, err
 				} else if ok {
 					var kept []verdict.NearMiss
-					if err := prev.Decode(&kept); err != nil {
-						return true, err
+					if !s.decodeKept(prev, &kept) {
+						kept = nil
 					}
 					near, _ = addNew(kept, near, rep)
 				}
@@ -1350,13 +1351,21 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 		if err := s.l.ReplaceResult(ctx, "unrecorded", s.now(), from, to, orNoneOf(unrec)); err != nil {
 			return true, err
 		}
-		// The rules that fired mostly on what another team owns.
-		on, err := s.firedOnOf(ctx, from, to)
-		if err != nil {
+		// The rules that fired mostly on what another team owns: what ran
+		// out of time isn't kept, and says so.
+		on, unread, err := s.firedOnOf(rctx, from, to)
+		switch {
+		case err != nil && rctx.Err() != nil:
+			s.log.Warn("the digest's firings by team weren't counted in its --timeout", "err", err)
+		case err != nil:
 			return true, err
-		}
-		if err := s.l.ReplaceResult(ctx, "fired_on", s.now(), from, to, orNoneOf(on)); err != nil {
-			return true, err
+		default:
+			if unread > 0 {
+				s.log.Warn("the digest counted the firings by team of the alerts that fired most alone", "alerts read", firedOnRead, "firings not read", unread)
+			}
+			if err := s.l.ReplaceResult(ctx, "fired_on", s.now(), from, to, orNoneOf(on)); err != nil {
+				return true, err
+			}
 		}
 		if err := s.keepNear(ctx, from, to, cursor, seen, orNoneOf(near)); err != nil {
 			return true, err
@@ -1398,7 +1407,7 @@ func (s *Server) replayInput(ctx context.Context, rep *verdict.Report, from, to 
 	}
 	// Those that keep the period's record from before it, so that a replay
 	// judged against them has the record the ledger's report has.
-	if in.incs, err = s.recordBefore(ctx, from, to); err != nil {
+	if in.incs, err = s.recordAround(ctx, from, to, o); err != nil {
 		return replayInput{}, err
 	}
 	for _, x := range rep.Incidents {
@@ -1582,8 +1591,8 @@ func (s *Server) nearLater(ctx context.Context, o verdict.Options) error {
 		}
 		var kept []verdict.NearMiss
 		if worked {
-			if err := prev.Decode(&kept); err != nil {
-				return err
+			if !s.decodeKept(prev, &kept) {
+				kept = nil
 			}
 		}
 		if x.Incidents == nil {
@@ -1769,10 +1778,8 @@ func (s *Server) digestReportFor(ctx context.Context, from, to time.Time, o verd
 	if err != nil {
 		return nil, err
 	}
-	if len(rs) > 0 && rs[0].From.Equal(from) && !rep.NoRecord {
-		if err := rs[0].Decode(&rep.Suggestions); err != nil {
-			return nil, err
-		}
+	if len(rs) > 0 && rs[0].From.Equal(from) && !rep.NoRecord && !s.decodeKept(rs[0], &rep.Suggestions) {
+		rep.Suggestions = nil
 	}
 	// The week's near misses, as last worked out: by the digest, or since,
 	// for an incident written down later.
@@ -1780,10 +1787,8 @@ func (s *Server) digestReportFor(ctx context.Context, from, to time.Time, o verd
 	if err != nil {
 		return nil, err
 	}
-	if ok {
-		if err := r.Decode(&rep.NearMisses); err != nil {
-			return nil, err
-		}
+	if ok && !s.decodeKept(r, &rep.NearMisses) {
+		rep.NearMisses = nil
 	}
 	// Only for an incident nothing caught, or only noisy rules did, still:
 	// judged again with other settings, it may have been caught since.

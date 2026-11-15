@@ -16,14 +16,17 @@ import (
 // all of it (verdict.Options.ImpactFrom); else they are counted, not judged.
 // A span of weeks is judged by its weeks, each by its own: what the rules
 // list and a rule's page say of four weeks is the sum of what the overview
-// says of each. With a team picked, by the incidents it owns. The tallies
-// read what keeps the record once, with them, never the firings.
+// says of each. What it replays is judged so too (options sets
+// verdict.Options.RecordWeek), so that it compares like with like. With a
+// team picked, by the incidents it owns; a team with no labels owns none
+// but those its rules caught, and is judged by everyone's (teamKeeps). The
+// tallies read what keeps the record once, with them, never the firings.
 
 // readRecord reads, for t's weeks, what keeps their record: the incidents on
 // from two weeks before the first to the end of the last.
 func (s *Server) readRecord(ctx context.Context, t *tallies) error {
 	first, last := t.weeks[0], t.weeks[len(t.weeks)-1]
-	incs, err := s.l.RecordIncidents(ctx, verdict.RecordFrom(s.l.Midnight(first), s.l.Midnight(last+7)), s.l.Midnight(last+7))
+	incs, err := s.l.RecordIncidents(ctx, verdict.RecordFrom(s.l.Midnight(first), s.l.Midnight(last+7)), s.l.Midnight(last+7), t.o.UnknownLen)
 	if err != nil {
 		return err
 	}
@@ -41,7 +44,7 @@ func (t *tallies) keep(keeps func(ledger.Incident) bool) {
 			plain = append(plain, in.Incident)
 		}
 	}
-	t.rec = verdict.RecordOf(plain, t.o.ImpactFrom)
+	t.rec = verdict.RecordOf(plain, t.o)
 	t.kept = make(map[int64]bool, len(t.weeks))
 	for _, w := range t.weeks {
 		t.kept[w] = t.rec.Kept(t.mid(w), t.mid(w+7))
@@ -58,28 +61,39 @@ func (s *Server) keptWeek(ctx context.Context, t *tallies, from, to time.Time) (
 	return s.spanKept(ctx, from, to, t.team)
 }
 
-// spanKept reports whether the record of [from, to) is kept, for any time
-// in it: by every incident, or, with team, by those it owns.
+// spanKept reports whether the record of one of [from, to)'s weeks is kept:
+// by every incident, or, with team, by those it owns (teamKeeps).
 func (s *Server) spanKept(ctx context.Context, from, to time.Time, team *ledger.Team) (bool, error) {
 	o, err := s.options(ctx)
 	if err != nil {
 		return false, err
 	}
-	if team == nil {
-		return s.l.RecordKept(ctx, from, to, o)
-	}
 	own, err := s.owners(ctx)
 	if err != nil {
 		return false, err
 	}
-	rec, err := s.l.RecordOf(ctx, from, to, o, func(in ledger.Incident) bool { return own.ownsIncident(*team, in) })
-	return rec.Kept(from, to), err
+	keeps := teamKeeps(own, team)
+	if keeps == nil {
+		return s.l.RecordKept(ctx, from, to, o)
+	}
+	rec, err := s.l.RecordOf(ctx, from, to, o, keeps)
+	if err != nil {
+		return false, err
+	}
+	for _, w := range s.l.SpanWeeks(from, to) {
+		if s.l.WeekKept(rec, w) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // teamKeeps is what keeps a team's record: the incidents it owns; nil, for
-// none picked, every one.
+// none picked, every one. A team with no labels owns no incident by them,
+// only those its rules caught, so its rules' firings that caught nothing
+// would never have a record: it is judged by everyone's.
 func teamKeeps(own *owners, team *ledger.Team) func(ledger.Incident) bool {
-	if team == nil {
+	if team == nil || len(team.Labels) == 0 {
 		return nil
 	}
 	return func(in ledger.Incident) bool { return own.ownsIncident(*team, in) }
@@ -99,8 +113,8 @@ func (s *Server) suggestionsNow(ctx context.Context, team *ledger.Team) ([]verdi
 		return nil, time.Time{}, err
 	}
 	var ss []verdict.Suggestion
-	if err := rs[0].Decode(&ss); err != nil {
-		return nil, time.Time{}, err
+	if !s.decodeKept(rs[0], &ss) {
+		return nil, time.Time{}, nil
 	}
 	return ss, rs[0].From, nil
 }
@@ -117,18 +131,26 @@ func (s *Server) suggestionsIn(ctx context.Context, t *tallies) ([]verdict.Sugge
 		return nil, err
 	}
 	var ss []verdict.Suggestion
-	return ss, rs[0].Decode(&ss)
+	if !s.decodeKept(rs[0], &ss) {
+		return nil, nil
+	}
+	return ss, nil
 }
 
-// recordBefore are the incidents that keep the record of [from, to) and
-// started before from: what verdict.Judge is given beside the period's own,
-// so that it says what the ledger's report says. It judges no firing
-// against them.
-func (s *Server) recordBefore(ctx context.Context, from, to time.Time) ([]incident.Incident, error) {
-	before, err := s.l.RecordIncidents(ctx, verdict.RecordFrom(from, to), from)
-	out := make([]incident.Incident, 0, len(before))
-	for _, in := range before {
-		if in.Start.Before(from) {
+// recordAround are the incidents that keep the record of [from, to)'s
+// weeks and didn't start in it: what verdict.Judge is given beside the
+// period's own, so that, judging by the same weeks (o.RecordWeek), it says
+// what the ledger's report says. It judges no firing against them.
+func (s *Server) recordAround(ctx context.Context, from, to time.Time, o verdict.Options) ([]incident.Incident, error) {
+	wf, _ := s.l.WeekOf(from)
+	_, wt := s.l.WeekOf(to.Add(-time.Nanosecond))
+	if !wt.After(wf) {
+		_, wt = s.l.WeekOf(from)
+	}
+	around, err := s.l.RecordIncidents(ctx, verdict.RecordFrom(wf, wt), wt, o.UnknownLen)
+	out := make([]incident.Incident, 0, len(around))
+	for _, in := range around {
+		if in.Start.Before(from) || !in.Start.Before(to) {
 			out = append(out, in.Incident)
 		}
 	}

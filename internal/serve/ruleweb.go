@@ -433,6 +433,19 @@ func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []versi
 	if len(spans) < len(cuts)-1 {
 		spans = append(spans, make([]ledger.Span, len(cuts)-1-len(spans))...) // a rule the ledger hasn't
 	}
+	// Of the span before, those in a week with no record, everyone's (a
+	// rule's page is), are in no precision: each span is of one day.
+	if !v.Before.IsZero() {
+		rec, err := s.l.RecordOf(ctx, v.Before, from, t.o, nil)
+		if err != nil {
+			return err
+		}
+		for i := range spans {
+			if !cuts[i].Before(v.Before) && cuts[i].Before(from) && !s.l.WeekKept(rec, ledger.Week(s.l.Day(cuts[i]))) {
+				spans[i].Unjudged = spans[i].Black()
+			}
+		}
+	}
 	sum := func(lo, hi time.Time) ledger.Span {
 		var x ledger.Span
 		for i, sp := range spans {
@@ -441,6 +454,7 @@ func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []versi
 				x.White += sp.White
 				x.Excused += sp.Excused
 				x.Caught += sp.Caught
+				x.Unjudged += sp.Unjudged
 			}
 		}
 		return x
@@ -457,14 +471,9 @@ func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []versi
 	p := rulePanel{Precision: v.Precision, Firings: v.Firings, Black: v.Black, Excused: v.Excused, Incidents: v.Incidents,
 		Notified: v.Notified, Notifications: v.Notifications, Asleep: v.NotifiedAsleep, OffHours: v.NotifiedOffHours, Backtest: "–"}
 	if !v.Before.IsZero() {
+		// With none judged, now or in the span before, there is no
+		// precision to set beside another.
 		p.PrecisionBy, p.FiringsBy, p.IncidentsBy = besides(v.ruleLine, sum(v.Before, from))
-		// With no record, now or in the span before, there is no precision
-		// to set beside another.
-		then, err := s.spanKept(ctx, v.Before, from, nil)
-		if err != nil {
-			return err
-		}
-		p.PrecisionBy.On = p.PrecisionBy.On && v.Unjudged == 0 && then
 	}
 	if p.Near, err = s.nearOf(ctx, name, from); err != nil {
 		return err
@@ -507,11 +516,11 @@ func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []versi
 }
 
 // besides are a rule's precision, firings and incidents caught over the
-// period beside those of the span before it, was: precision only when it
-// fired in both.
+// period beside those of the span before it, was: precision only when
+// firings were judged in both, of those judged alone.
 func besides(l ruleLine, was ledger.Span) (precision, firings, incidents moved) {
-	now, okNow := sharePct(l.White, l.Firings)
-	then, okThen := sharePct(was.White, was.Firings)
+	now, okNow := sharePct(l.White, l.Firings-l.Unjudged)
+	then, okThen := sharePct(was.White, was.Firings-was.Unjudged)
 	return moved{On: okNow && okThen, By: now - then, Up: true, Pt: true}, moved{On: true, By: l.Firings - was.Firings},
 		moved{On: true, By: l.Incidents - was.Caught, Up: true}
 }
@@ -555,8 +564,8 @@ func (s *Server) nearOf(ctx context.Context, rule string, from time.Time) (int, 
 	seen, n := map[string]bool{}, 0
 	for _, r := range rs { // the latest week first, as nearMisses reads them
 		var nms []verdict.NearMiss
-		if err := r.Decode(&nms); err != nil {
-			return 0, err
+		if !s.decodeKept(r, &nms) {
+			continue
 		}
 		got := map[string]bool{}
 		for _, nm := range nms {

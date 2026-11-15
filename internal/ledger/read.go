@@ -364,6 +364,7 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 				rr.DeploysCaught += deployWhite
 				if !judged {
 					rr.Unjudged += n - white
+					rr.DeploysUnjudged += deploy - deployWhite
 					rep.Unjudged += n - white
 				}
 			}
@@ -378,15 +379,17 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 	if err != nil {
 		return nil, err
 	}
-	rep.NoRecord = !rec.Kept(from, to)
 	// Each week judged by its own record: the span whole when every week of
-	// it is judged alike, or else a week at a time.
+	// it is judged alike, or else a week at a time. With none kept, the span
+	// has no record.
 	weeks := l.spanWeeks(from, to)
 	kept := map[int64]bool{}
 	alike := true
+	rep.NoRecord = true
 	for _, w := range weeks {
 		kept[w] = l.weekKept(rec, w)
 		alike = alike && kept[w] == kept[weeks[0]]
+		rep.NoRecord = rep.NoRecord && !kept[w]
 	}
 	if alike {
 		if err := count(parts, kept[weeks[0]]); err != nil {
@@ -500,24 +503,38 @@ func (l *Ledger) parts(lo, hi int64) []reportPart {
 	return []reportPart{{countFirings, lo, l.midnight(d1)}, {countDays, d1, d2}, {countFirings, l.midnight(d2), hi}}
 }
 
-// RecordIncidents are the incidents firings are judged against (written
-// down, or impact windows that count) on at some time in [from, to):
-// started before to, and ended at from or after it, or not yet; each with
+// recordOn are the incidents firings are judged against (written down, or
+// impact windows that count) on at some time in [?1, ?2): started before
+// the end, and ended at the start or after it; one with no end, taken to
+// last as long as a firing catches it for, started at ?3 (the start less
+// that) or after. Read by the index of when they ended (schema 018), so
+// only those near are: the start's bound has a + before it, so that SQLite
+// doesn't read every incident before the end by the index of starts.
+const recordOn = `i.counts = 1 AND +i.start_at < ?2 AND (i.end_at >= ?1 OR i.end_at IS NULL AND i.start_at >= ?3)`
+
+// RecordIncidents are the incidents on at some time in [from, to) (recordOn),
+// one with no end taken to last unknown, as a firing catches it; each with
 // what caught it, for who owns it.
-func (l *Ledger) RecordIncidents(ctx context.Context, from, to time.Time) ([]Incident, error) {
+func (l *Ledger) RecordIncidents(ctx context.Context, from, to time.Time, unknown time.Duration) ([]Incident, error) {
 	return l.incidents(ctx, `SELECT i.id, i.key, i.origin, i.title, i.start_at, i.end_at, i.labels, i.state, i.counts, i.updated, i.updated_by
-		FROM incidents i WHERE i.counts = 1 AND i.start_at < ? AND (i.end_at IS NULL OR i.end_at >= ?) ORDER BY i.start_at, i.key`, to.Unix(), from.Unix())
+		FROM incidents i WHERE `+recordOn+` ORDER BY i.start_at, i.key`, recordArgs(from, to, unknown)...)
 }
 
-// RecordOf is what keeps the record of [from, to), and of any time in it:
-// the incidents on from two weeks before from to to, of those keeps says
-// keep it (all, when nil), and the impact signal read from o.ImpactFrom.
+func recordArgs(from, to time.Time, unknown time.Duration) []any {
+	return []any{from.Unix(), to.Unix(), from.Unix() - int64(max(unknown, 0)/time.Second)}
+}
+
+// RecordOf is what keeps the record of [from, to)'s weeks, and of any time
+// in them: the incidents on from two weeks before the first to the end of
+// the last, of those keeps says keep it (all, when nil), and the impact
+// signal read from o.ImpactFrom.
 func (l *Ledger) RecordOf(ctx context.Context, from, to time.Time, o verdict.Options, keeps func(Incident) bool) (verdict.Record, error) {
 	return l.record(ctx, from, to, o, keeps)
 }
 
 func (l *Ledger) record(ctx context.Context, from, to time.Time, o verdict.Options, keeps func(Incident) bool) (verdict.Record, error) {
-	incs, err := l.RecordIncidents(ctx, verdict.RecordFrom(from, to), to)
+	wf, wt := l.weeksOf(from, to)
+	incs, err := l.RecordIncidents(ctx, verdict.RecordFrom(wf, wt), wt, o.UnknownLen)
 	if err != nil {
 		return verdict.Record{}, err
 	}
@@ -527,18 +544,35 @@ func (l *Ledger) record(ctx context.Context, from, to time.Time, o verdict.Optio
 			plain = append(plain, in.Incident)
 		}
 	}
-	return verdict.RecordOf(plain, o.ImpactFrom), nil
+	return verdict.RecordOf(plain, o), nil
 }
 
-// RecordKept reports whether the record of [from, to) is kept, for any time
-// in it (verdict.Record.Kept).
+// weeksOf is from the Monday of the first week [from, to) has some of to
+// the end of the last.
+func (l *Ledger) weeksOf(from, to time.Time) (time.Time, time.Time) {
+	ws := l.spanWeeks(from, to)
+	return unix(l.midnight(ws[0])), unix(l.midnight(ws[len(ws)-1] + 7))
+}
+
+// WeekOf is the week t is in, from its Monday to the next, as the ledger
+// keeps weeks: what lapilli serve judges the record by
+// (verdict.Options.RecordWeek).
+func (l *Ledger) WeekOf(t time.Time) (time.Time, time.Time) {
+	w := Week(l.day(t.Unix()))
+	return unix(l.midnight(w)), unix(l.midnight(w + 7))
+}
+
+// RecordKept reports whether the record of one of [from, to)'s weeks is
+// kept (WeekKept): the impact signal read over all of one, or an incident
+// on from two weeks before the first to the end of the last.
 func (l *Ledger) RecordKept(ctx context.Context, from, to time.Time, o verdict.Options) (bool, error) {
-	if !o.ImpactFrom.IsZero() && !o.ImpactFrom.After(from) {
+	wf, wt := l.weeksOf(from, to)
+	if last, _ := l.WeekOf(wt.Add(-time.Second)); !o.ImpactFrom.IsZero() && !o.ImpactFrom.After(last) {
 		return true, nil
 	}
 	var n int
-	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM incidents WHERE counts = 1 AND start_at < ? AND (end_at IS NULL OR end_at >= ?) LIMIT 1) x",
-		to.Unix(), verdict.RecordFrom(from, to).Unix()).Scan(&n)
+	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM incidents i WHERE "+recordOn+" LIMIT 1) x",
+		recordArgs(verdict.RecordFrom(wf, wt), wt, o.UnknownLen)...).Scan(&n)
 	return n > 0, err
 }
 
@@ -550,7 +584,10 @@ func (l *Ledger) weekKept(rec verdict.Record, w int64) bool {
 	return rec.Kept(unix(l.midnight(w)), unix(l.midnight(w+7)))
 }
 
-// spanWeeks are the Mondays of the weeks [from, to) has some of.
+// SpanWeeks are the Mondays of the weeks [from, to) has some of: one at
+// least.
+func (l *Ledger) SpanWeeks(from, to time.Time) []int64 { return l.spanWeeks(from, to) }
+
 func (l *Ledger) spanWeeks(from, to time.Time) []int64 {
 	var out []int64
 	for w := Week(l.day(from.Unix())); l.midnight(w) < to.Unix(); w += 7 {
@@ -566,7 +603,7 @@ func (l *Ledger) spanWeeks(from, to time.Time) []int64 {
 // it, by the runs; zero when it never was.
 func (l *Ledger) ImpactSince(ctx context.Context) (time.Time, error) {
 	v, err := l.meta(ctx, l.r, "impact_since")
-	if err != nil || v == "" {
+	if err != nil || v == "" || v == impactNone {
 		return time.Time{}, err
 	}
 	n, err := strconv.ParseInt(v, 10, 64)

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
@@ -87,7 +88,9 @@ func TestStoredSuggestionsFollowTheRecord(t *testing.T) {
 func TestTeamRecord(t *testing.T) {
 	ctx := context.Background()
 	s := noSource(t, keepRecord)
-	pay, err := s.l.PutTeam(ctx, ledger.Team{Name: "payments", Rules: "^Errors$"}, "ana")
+	// It owns by labels what no incident has: none keeps its record.
+	nobody := incident.Labels{"service": {"nobody's"}}
+	pay, err := s.l.PutTeam(ctx, ledger.Team{Name: "payments", Rules: "^Errors$", Labels: nobody}, "ana")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +112,7 @@ func TestTeamRecord(t *testing.T) {
 		t.Errorf("payments': %+v", e.ruleLine)
 	}
 	o, _ := s.options(ctx)
-	team := ledger.Team{ID: pay, Name: "payments", Rules: "^Errors$"}
+	team := ledger.Team{ID: pay, Name: "payments", Rules: "^Errors$", Labels: nobody}
 	week := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
 	rep, err := s.digestReportFor(ctx, week, week.Add(7*24*time.Hour), o, &team)
 	if err != nil {
@@ -299,16 +302,27 @@ func TestKeptResultsMalformed(t *testing.T) {
 	ctx := context.Background()
 	s := noSource(t, nil)
 	week := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
-	for _, kind := range []string{"unrecorded", "fired_on"} {
+	for _, kind := range []string{"unrecorded", "fired_on", "near_misses"} {
 		if err := s.l.ReplaceResult(ctx, kind, now, week, week.Add(7*24*time.Hour), map[string]any{"not": "a list"}); err != nil {
 			t.Fatal(err)
 		}
 	}
+	// The suggestions too, kept for a week with a record.
+	keepRecordIn(t, s)
+	if err := s.l.AddResult(ctx, "suggestions", now, week, week.Add(7*24*time.Hour), map[string]any{"not": "a list"}); err != nil {
+		t.Fatal(err)
+	}
 	h := s.Handler()
-	for _, path := range []string{"/", "/rules", "/rules/Errors", "/rules?team=payments"} {
+	for _, path := range []string{"/", "/rules", "/rules/Errors", "/rules/Errors?tab=proposals", "/rules?team=payments", "/outcomes", "/incidents"} {
 		if code, _, _ := get(t, h, path); code != http.StatusOK {
 			t.Errorf("%s: %d", path, code)
 		}
+	}
+	if line, _, err := s.suggestionsSection(ctx, week, week.Add(7*24*time.Hour), func(string) bool { return true }, nil); err != nil || strings.Contains(line, "→") {
+		t.Errorf("the report's suggestions: %q %v", line, err)
+	}
+	if _, err := s.suggestedFors(ctx); err != nil {
+		t.Errorf("the suggested fors: %v", err)
 	}
 	if _, _, err := s.toolRules(ctx, nil, rulesIn{Weeks: 4}); err != nil {
 		t.Errorf("MCP rules: %v", err)
