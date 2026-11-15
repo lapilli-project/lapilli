@@ -138,7 +138,7 @@ func TestEventWindowBounded(t *testing.T) {
 // the same PromQL has, and a for one restart can't outlast. Nothing is said
 // of one whose value is changed on its way, or read any other way.
 func TestGrafanaEventWindow(t *testing.T) {
-	const restarts = `sum by (cluster_name, namespace_name, container_name) (increase(kubernetes_io:container_restart_count{namespace_name!~"kube-.*"}[30m]))`
+	const restarts = `sum by (cluster, namespace, container) (increase(kube_pod_container_status_restarts_total{namespace!~"kube-.*"}[30m]))`
 	query := func(ref, expr string, instant bool) string {
 		return `
           - refId: ` + ref + `
