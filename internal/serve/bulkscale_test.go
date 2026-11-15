@@ -76,6 +76,11 @@ func TestManyAtOnceScale(t *testing.T) {
 		}
 	}
 	h := s.Handler()
+	// Once before the budgets, its answer thrown away: what a process does
+	// only the first time it answers is not what a page costs (on Postgres
+	// in CI the first /rules took 1.05 s, the same page by 12 weeks after
+	// it 0.77 s). Each page below is still worked out afresh.
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/rules", nil))
 	budget := time.Duration(float64(time.Second) * slow)
 	for _, path := range []string{"/rules", "/rules?weeks=12", "/rules?week=2026-10-26", "/rules?week=2026-10-26&perf=noisy&team=team3",
 		"/firings?day=2026-11-02", "/firings?day=2026-11-02&label=service%3Ds3", "/firings?day=2026-11-02&label=service%3Ds3&label=pod%3D7",
