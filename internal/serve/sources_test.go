@@ -135,7 +135,8 @@ func TestSourcesReadOrFailing(t *testing.T) {
 // /sources, a tool's job gone quiet, the incidents file failing and the
 // impact signal read; under /intake, a port that nothing came through yet,
 // and nothing written in four weeks; under /nodata, an impact signal one of
-// whose selectors has no data. For TestStatusKinds and TestA11yServe.
+// whose selectors has no data; under /floor, a criterion saved and read by
+// a run, not yet read again. For TestStatusKinds and TestA11yServe.
 func sourcesStates(t *testing.T) map[string]*Server {
 	t.Helper()
 	ctx := context.Background()
@@ -154,5 +155,11 @@ func sourcesStates(t *testing.T) map[string]*Server {
 		t.Fatal(err)
 	}
 	none.jobs(ctx, false)
-	return map[string]*Server{"/sources": quiet, "/intake": criteriaServer(t, false, intake), "/nodata": none}
+	// A criterion saved, its read again failing, and a run reading it: a
+	// floor.
+	floor := criteriaServer(t, false, nil)
+	saveFailing(t, floor, "impact > 1")
+	runDue(floor, 2)
+	floor.jobs(ctx, true)
+	return map[string]*Server{"/sources": quiet, "/intake": criteriaServer(t, false, intake), "/nodata": none, "/floor": floor}
 }
