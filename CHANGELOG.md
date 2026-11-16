@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-11-16
+
 ### Added
 
 - **The steps after the replays say where they are, and can be bounded.**
