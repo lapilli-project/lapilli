@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-11-16
+
+A change to the rules is held to what they are expected to do: how often
+each may fire in a week and while people slept, and the incidents each
+must keep catching, written beside them. A pull request backtest says what
+the change broke, and can fail the job for it; a budget needs no incident
+written down. No ledger schema change; the API and MCP answer as they did.
+
 ### Added
 
 - **Expectations in a pull request backtest.** `lapilli verdict --compare
