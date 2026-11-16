@@ -54,6 +54,39 @@ rules, and `lapilli check` would read as one of them. `lapilli serve
 --dry-run` would read as serve without its writes, the backfill included.
 `preflight` is what happens before a flight, and runs nothing.
 
+## How it runs
+
+1. **The flags**, read by serve's reader, refused as serve refuses them
+   (exit 2), and the ports' addresses read for what they expose, never
+   bound.
+2. **The rules**, read once from where serve would read them.
+3. **Each API once**: the history's probe and its ALERTS count, Grafana's
+   data sources and notification reads, the sign-in's discovery and keys,
+   each on-call feed; each counted as it is asked.
+4. **The files and the ledger**, read as serve reads them, the ledger
+   read-only.
+5. **The estimates**, worked out from what 2 to 4 read, with nothing more
+   asked.
+6. **The report**, as text or JSON, and the exit status.
+
+Each step goes on when one before had a problem, so one run says
+everything that is wrong; an item that needs what couldn't be read (the
+estimates without the rules, say) is unknown, and says what it needed.
+
+## Flags
+
+Every flag of `lapilli serve`, as serve takes it, and three of its own:
+
+| Flag | |
+|---|---|
+| `--json` | the report as JSON (below) |
+| `--fail-unknown` | exit 1 for an unknown, as for a problem |
+| `--preflight-timeout DUR` | the whole of it (default 2m) |
+
+`--timeout` stays serve's (a run's time), read for the estimates, so that
+the flags a Deployment gives serve can be given here unchanged. The chart:
+`serve.preflight.enabled` (below).
+
 ## What it checks
 
 Each item has an id that stays the same between releases (`--json`). An
@@ -164,7 +197,7 @@ margin of seven days, and each run reads eight or nine days of each
 again: some 25 requests a run, a tenth of all, for three rules. That is the kind of thing
 deploying shows a week later, on a quota's graph.
 
-## Output
+## Output, and where it shows
 
 ```
 lapilli preflight: 24 items: 19 ok, 1 problem, 4 unknown; 17 requests asked
@@ -194,7 +227,7 @@ Estimates
   chart's `serve.preflight.enabled`, as a Helm `pre-install,pre-upgrade`
   hook Job with the Deployment's image, flags, service account, volumes and
   resources: a problem fails the hook, and the upgrade stops. Argo CD runs
-  Helm's hooks as its own (PreSync). Its `--timeout` is two minutes.
+  Helm's hooks as its own (PreSync).
 
 ## What it never does
 
@@ -270,7 +303,7 @@ each history, one ALERTS count each, two scrape reads, one read of each
 rule source, 20 data sources at two each, Grafana's three templates reads
 and one permissions read, a discovery document and keys, each on-call feed.
 Each is asked under `--max-rate`, as serve asks, within ten seconds, and the
-whole within `--timeout`. It holds the rules in memory as serve's watcher
+whole within `--preflight-timeout`. It holds the rules in memory as serve's watcher
 does, and nothing else of size.
 
 ## Alternatives
