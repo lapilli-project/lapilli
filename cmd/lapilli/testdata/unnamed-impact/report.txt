@@ -1,0 +1,29 @@
+Lapilli  2026-10-05 00:00 → 2026-10-12 00:00 UTC
+8 firings, 2 incidents written down, 2 more found by --impact
+
+RULE            SEVERITY  FIRED  ○ CAUGHT  ● NOTHING  PRECISION  REFIRED
+ApiErrors       critical  3      2         1          67%        0
+CartSlow        warning   2      1         1          50%        0
+BackendMissing  warning   1      0         1          0%         0
+PayQueue        –         1      0         1          0%         0
+SearchDown      critical  1      1         0          100%       0
+
+Out of hours, in UTC (at work mon-fri 08:00-18:00, asleep 22:00-08:00):
+of the firings that caught nothing, 1 came while people slept, and 1 more off hours.
+RULE      SEVERITY  ● ASLEEP  ● OFF HOURS  ● AT WORK
+CartSlow  warning   1         0            0
+PayQueue  –         0         1            0
+
+What each rule adds: the incidents it caught, those it caught before any other rule, those no other rule caught:
+RULE        INCIDENTS  FIRST  ALONE
+ApiErrors   2          2      1
+CartSlow    1          0      0
+SearchDown  1          1      1
+
+INCIDENT                         START             LASTED  CAUGHT BY
+impact-1 user impact (--impact)  2026-10-06 10:00  1h1m    ApiErrors -10m, CartSlow +30m
+INC-2 Checkout errors            2026-10-07 08:00  30m     ApiErrors +10m
+INC-1 Search down                2026-10-09 03:05  25m     SearchDown +5m
+impact-3 user impact (--impact)  2026-10-10 20:00  16m     ✗ nothing fired
+
+✗ 1 of 4 incidents had no alert.

@@ -1,0 +1,82 @@
+# HELP lapilli_rule_firings Times the rule fired in the period.
+# TYPE lapilli_rule_firings gauge
+lapilli_rule_firings{rule="ApiErrors",severity="critical"} 3
+lapilli_rule_firings{rule="CartSlow",severity="warning"} 2
+lapilli_rule_firings{rule="BackendMissing",severity="warning"} 1
+lapilli_rule_firings{rule="PayQueue"} 1
+lapilli_rule_firings{rule="SearchDown",severity="critical"} 1
+# HELP lapilli_rule_caught Firings that caught an incident (white stones).
+# TYPE lapilli_rule_caught gauge
+lapilli_rule_caught{rule="ApiErrors",severity="critical"} 2
+lapilli_rule_caught{rule="CartSlow",severity="warning"} 1
+lapilli_rule_caught{rule="BackendMissing",severity="warning"} 0
+lapilli_rule_caught{rule="PayQueue"} 0
+lapilli_rule_caught{rule="SearchDown",severity="critical"} 1
+# HELP lapilli_rule_nothing Firings with no incident (black stones).
+# TYPE lapilli_rule_nothing gauge
+lapilli_rule_nothing{rule="ApiErrors",severity="critical"} 1
+lapilli_rule_nothing{rule="CartSlow",severity="warning"} 1
+lapilli_rule_nothing{rule="BackendMissing",severity="warning"} 1
+lapilli_rule_nothing{rule="PayQueue"} 1
+lapilli_rule_nothing{rule="SearchDown",severity="critical"} 0
+# HELP lapilli_rule_refired Firings that came soon after the same alert resolved.
+# TYPE lapilli_rule_refired gauge
+lapilli_rule_refired{rule="ApiErrors",severity="critical"} 0
+lapilli_rule_refired{rule="CartSlow",severity="warning"} 0
+lapilli_rule_refired{rule="BackendMissing",severity="warning"} 0
+lapilli_rule_refired{rule="PayQueue"} 0
+lapilli_rule_refired{rule="SearchDown",severity="critical"} 0
+# HELP lapilli_rule_incidents Incidents the rule caught.
+# TYPE lapilli_rule_incidents gauge
+lapilli_rule_incidents{rule="ApiErrors",severity="critical"} 2
+lapilli_rule_incidents{rule="CartSlow",severity="warning"} 1
+lapilli_rule_incidents{rule="BackendMissing",severity="warning"} 0
+lapilli_rule_incidents{rule="PayQueue"} 0
+lapilli_rule_incidents{rule="SearchDown",severity="critical"} 1
+# HELP lapilli_rule_nothing_by_hours Firings with no incident, by when they came: asleep, off hours or at work.
+# TYPE lapilli_rule_nothing_by_hours gauge
+lapilli_rule_nothing_by_hours{rule="ApiErrors",severity="critical",hours="asleep"} 0
+lapilli_rule_nothing_by_hours{rule="ApiErrors",severity="critical",hours="off_hours"} 0
+lapilli_rule_nothing_by_hours{rule="ApiErrors",severity="critical",hours="at_work"} 1
+lapilli_rule_nothing_by_hours{rule="CartSlow",severity="warning",hours="asleep"} 1
+lapilli_rule_nothing_by_hours{rule="CartSlow",severity="warning",hours="off_hours"} 0
+lapilli_rule_nothing_by_hours{rule="CartSlow",severity="warning",hours="at_work"} 0
+lapilli_rule_nothing_by_hours{rule="BackendMissing",severity="warning",hours="asleep"} 0
+lapilli_rule_nothing_by_hours{rule="BackendMissing",severity="warning",hours="off_hours"} 0
+lapilli_rule_nothing_by_hours{rule="BackendMissing",severity="warning",hours="at_work"} 1
+lapilli_rule_nothing_by_hours{rule="PayQueue",hours="asleep"} 0
+lapilli_rule_nothing_by_hours{rule="PayQueue",hours="off_hours"} 1
+lapilli_rule_nothing_by_hours{rule="PayQueue",hours="at_work"} 0
+lapilli_rule_nothing_by_hours{rule="SearchDown",severity="critical",hours="asleep"} 0
+lapilli_rule_nothing_by_hours{rule="SearchDown",severity="critical",hours="off_hours"} 0
+lapilli_rule_nothing_by_hours{rule="SearchDown",severity="critical",hours="at_work"} 0
+# HELP lapilli_rule_incidents_first Incidents the rule caught before any other rule; a noisy rule's catch doesn't count beside another's.
+# TYPE lapilli_rule_incidents_first gauge
+lapilli_rule_incidents_first{rule="ApiErrors",severity="critical"} 2
+lapilli_rule_incidents_first{rule="CartSlow",severity="warning"} 0
+lapilli_rule_incidents_first{rule="BackendMissing",severity="warning"} 0
+lapilli_rule_incidents_first{rule="PayQueue"} 0
+lapilli_rule_incidents_first{rule="SearchDown",severity="critical"} 1
+# HELP lapilli_rule_incidents_alone Incidents no other rule caught; a noisy rule's catch doesn't count beside another's.
+# TYPE lapilli_rule_incidents_alone gauge
+lapilli_rule_incidents_alone{rule="ApiErrors",severity="critical"} 1
+lapilli_rule_incidents_alone{rule="CartSlow",severity="warning"} 0
+lapilli_rule_incidents_alone{rule="BackendMissing",severity="warning"} 0
+lapilli_rule_incidents_alone{rule="PayQueue"} 0
+lapilli_rule_incidents_alone{rule="SearchDown",severity="critical"} 1
+# HELP lapilli_incidents Incidents in the period: caught, caught only by noisy rules, or missed.
+# TYPE lapilli_incidents gauge
+lapilli_incidents{state="caught",source="written"} 2
+lapilli_incidents{state="caught",source="impact"} 1
+lapilli_incidents{state="noisy_only",source="written"} 0
+lapilli_incidents{state="noisy_only",source="impact"} 0
+lapilli_incidents{state="missed",source="written"} 0
+lapilli_incidents{state="missed",source="impact"} 1
+# HELP lapilli_incident_detection_delay_seconds From an incident's start to the first alert from a rule that isn't noisy; negative when the alert came first.
+# TYPE lapilli_incident_detection_delay_seconds gauge
+lapilli_incident_detection_delay_seconds{incident="impact-1"} -600
+lapilli_incident_detection_delay_seconds{incident="INC-2"} 600
+lapilli_incident_detection_delay_seconds{incident="INC-1"} 300
+# HELP lapilli_last_run_timestamp_seconds When lapilli last ran, in Unix seconds.
+# TYPE lapilli_last_run_timestamp_seconds gauge
+lapilli_last_run_timestamp_seconds 1791849600
