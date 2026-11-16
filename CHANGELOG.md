@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- **A rule with no record was "OK".** A rule none of whose firings was
+  judged, as no incident was written down in their weeks or the two weeks
+  before, and that fired fewer times than a noisy rule does, was listed
+  "○ OK" (since 0.41.0): a verdict no record could give. It is "? No record"
+  now, on the rules list, its page and the facet (`perf=unrecorded`,
+  `is:unrecorded`), as a rule that fired as often already was. The
+  overview's panel of rules that fired often with no record lists the same
+  rules as before. A rule some of whose firings were judged is OK, or
+  noisy, by those, as before.
 - **`--max-samples` says what it bounds.** A replay reads a rule's query a
   day at a time, on days from midnight UTC, and the bound is each read's:
   a day's, some 6,900 series firing all day at a minute by default. The

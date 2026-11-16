@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -53,8 +54,9 @@ func keepRecordIn(t *testing.T, s *Server) {
 }
 
 // TestFacetsNoRecord: with no incident in the weeks shown or the two before
-// them, no rule is noisy: the six that fire as often as a noisy rule are
-// listed as having no record, with no precision, and the list says why
+// them, no rule is noisy, and none is OK: every rule that fired is listed as
+// having no record, with no precision, the six that fire as often as a
+// noisy rule among them (the overview's panel), and the list says why
 // once; so do the overview, first among what to look at, a rule's page,
 // the summary and MCP.
 func TestFacetsNoRecord(t *testing.T) {
@@ -65,15 +67,21 @@ func TestFacetsNoRecord(t *testing.T) {
 	for _, o := range all.Facets[0].Options {
 		perf[o.Value] = o.Count
 	}
-	if want := map[string]int{"noisy": 0, "unrecorded": 6, "ok": 11, "silent": 8, "spare": 0}; !reflect.DeepEqual(perf, want) {
+	if want := map[string]int{"noisy": 0, "unrecorded": 17, "ok": 0, "silent": 8, "spare": 0}; !reflect.DeepEqual(perf, want) {
 		t.Errorf("performance: %v, want %v", perf, want)
 	}
 	if !all.NoRecord {
 		t.Error("the list should say there is no record")
 	}
 	un := rulesFor(t, s, "weeks=4&perf=unrecorded")
-	if len(un.Rows) != 6 || slices.ContainsFunc(un.Rows, func(r ruleRow) bool { return r.Noisy || r.Precision != "–" || !r.NoRecord }) {
-		t.Errorf("perf=unrecorded: %+v", un.Rows)
+	if len(un.Rows) != 17 || slices.ContainsFunc(un.Rows, func(r ruleRow) bool { return r.Noisy || r.Precision != "–" || !r.NoRecord }) {
+		t.Errorf("perf=unrecorded: %d rows", len(un.Rows))
+	}
+	// Of them, the six that fire as often as a noisy rule are what the
+	// overview's panel lists; the rest fired too seldom to be listed there,
+	// and are no more OK for it.
+	if n := len(slices.DeleteFunc(slices.Clone(un.Rows), func(r ruleRow) bool { return !r.Unrecorded })); n != 6 {
+		t.Errorf("fired often with no record: %d, want 6", n)
 	}
 	h := s.Handler()
 	if code, _, hd := get(t, h, "/rules?q=is:unrecorded"); code != http.StatusSeeOther || hd.Get("Location") != "/rules?perf=unrecorded" {
@@ -88,14 +96,17 @@ func TestFacetsNoRecord(t *testing.T) {
 	if strings.Count(body, "No incident was written down in these weeks") != 1 {
 		t.Error("/rules: said more than once")
 	}
-	// No record, no verdict: a rule none of whose firings was judged is
-	// drawn unknown, never ok, though it isn't noisy (its Perf is ok); the
-	// legend above the table says what OK is.
-	if _, rows, _ := strings.Cut(body, "<tbody>"); strings.Contains(rows, `class="badge perf-ok status-ok"`) || !strings.Contains(rows, `class="badge perf-ok status-unknown"`) {
-		t.Error("/rules: a rule with no record is drawn ok")
+	// No record, no verdict: a rule none of whose firings was judged, R06
+	// with two among them, is "No record", drawn unknown, never "OK"; the
+	// legend above the table says what OK is. A disposition a person gave
+	// (keep) is theirs, and keeps its colour.
+	perfOK := regexp.MustCompile(`badge perf-[a-z]+ status-ok|perf-ok`)
+	if _, rows, _ := strings.Cut(body, "<tbody>"); perfOK.MatchString(rows) || !strings.Contains(rows, `class="badge perf-unrecorded status-unknown"`) {
+		t.Error("/rules: a rule with no record is OK")
 	}
-	if _, page, _ := get(t, h, "/rules/R06?weeks=4"); strings.Contains(page, "status-ok") {
-		t.Error("/rules/R06: a rule with no record is drawn ok")
+	if _, page, _ := get(t, h, "/rules/R06?weeks=4"); perfOK.MatchString(page) ||
+		!strings.Contains(html.UnescapeString(page), `<span aria-hidden="true">?</span> No record`) {
+		t.Error("/rules/R06: a rule with no record is OK")
 	}
 
 	d, err := s.overview(httptest.NewRequest(http.MethodGet, "/", nil))

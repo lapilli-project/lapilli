@@ -809,7 +809,10 @@ func rowOf(l ruleLine, facts int) ruleRow {
 		r.Perf = "silent"
 	case l.Noisy:
 		r.Perf = "noisy"
-	case l.Unrecorded:
+	// No record, no verdict: a rule none of whose firings was judged has
+	// no record, however few they were; Unrecorded, firing as often as a
+	// noisy rule, is what the overview's panel lists.
+	case l.Unrecorded || l.NoRecord:
 		r.Perf = "unrecorded"
 	case l.Spare:
 		r.Perf = "spare"
