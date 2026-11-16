@@ -177,8 +177,8 @@ range read's.
 
 **Memory.** From `history.alerts`: an alert name's series in the last day
 are about those a day's read of its rule holds, and a series firing all day
-at a 1-minute step is 1,440 samples, at 64 bytes each (`prom.SampleBytes`),
-the bound a day's read is held to (`--max-samples`). The peak is near the
+at a 1-minute step is 1,440 samples, at 64 bytes each (`prom.SampleBytes`);
+a day's read holds `--max-samples` at most. The peak is near the
 `--parallel` largest at once, beside the cache's 32 MB and what the ledger
 holds open. It says a request and a limit, and, run under a memory limit
 (the cgroup's `memory.max`, as in the chart's hook below), whether that
@@ -194,15 +194,16 @@ requests a run, 12% of `--max-rate 0.5`; the backfill, two reads a rule a
 day, about 11,200, at least six hours at 0.5 a second, each day's 400 in
 some 13 minutes, within `--timeout`. Three rules with `for: 1d` have a
 margin of seven days, and each run reads eight or nine days of each
-again: some 25 requests a run, a tenth of all, for three rules. That is the kind of thing
-deploying shows a week later, on a quota's graph.
+again: some 25 requests a run, a tenth of all, for three rules. That is
+the kind of thing deploying shows a week later, on a quota's graph. The
+output below is of this deployment.
 
 ## Output, and where it shows
 
 ```
 lapilli preflight: 24 items: 19 ok, 1 problem, 4 unknown; 17 requests asked
-ok       rules.read          212 alert rules, 40 recording rules, from /etc/lapilli/rules
-ok       rules.replayable    209 can be replayed; 3 can't (a query Grafana's reduce can't replay: see below)
+ok       rules.read          206 alert rules, 40 recording rules, from /etc/lapilli/rules
+ok       rules.replayable    203 can be replayed; 3 can't, each with why (below)
 ok       history.reach       https://prometheus.example.com answered vector(1) in 41ms, signed for google
 problem  history.alerts      no ALERTS series in the last day: --check-replay has nothing to set the
                              replay beside. Give --check-series, or --check-replay=false
