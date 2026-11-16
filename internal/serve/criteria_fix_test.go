@@ -659,6 +659,22 @@ func TestImpactFloorLeft(t *testing.T) {
 	}
 }
 
+// Of an expression's selectors, one whose look fails doesn't keep the
+// others from being looked for.
+func TestImpactLookForPassesFailing(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).failLong = map[string]bool{"count(a)": true}
+	cursor, _ := s.l.Cursor(ctx)
+	d := &ledger.ImpactData{Criterion: "5m a == 1 or b == 1", From: cursor.Add(-72 * time.Hour), Selectors: []ledger.SelectorData{{Sel: "a"}, {Sel: "b"}}}
+	if err := s.lookFor(ctx, d, cursor); err == nil {
+		t.Error("a's failure isn't said")
+	}
+	if b := d.Selectors[1]; !b.To.Equal(cursor) || b.First.IsZero() {
+		t.Errorf("b isn't looked for: %+v", b)
+	}
+}
+
 // A proposal backtested while a floor stands is labeled with it, a label
 // no criterion kept is: held once the criterion saved is read again.
 func TestImpactHeldInGap(t *testing.T) {

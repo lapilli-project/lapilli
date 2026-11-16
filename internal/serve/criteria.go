@@ -777,11 +777,11 @@ func (s *Server) impactAgain(ctx context.Context, o verdict.Options) (bool, erro
 // keeps it (ledger.SetImpactData), which moves the record's start forward
 // to the first whole week after it: on a first start, after an upgrade,
 // and while a selector has no data yet, a round at a time, each selector
-// from where its last look got to, the selectors looked at so far kept
-// when one fails. Before it is looked for, no record is kept by the
-// signal. Once each had data, it isn't looked for again; nor while a floor
-// stands, which keeps no record whatever the data, until a read again
-// brings its own.
+// from where its last look got to, those it could look at kept when one
+// fails. Before it is looked for, no record is kept by the signal. Once
+// each had data, it isn't looked for again; nor while a floor stands,
+// which keeps no record whatever the data, until a read again brings its
+// own.
 func (s *Server) impactData(ctx context.Context) error {
 	k, err := s.l.ImpactKept(ctx)
 	if err != nil || s.h == nil || k.Since.IsZero() || k.Criterion == "" || !k.Floor.IsZero() {
@@ -802,7 +802,8 @@ func (s *Server) impactData(ctx context.Context) error {
 
 // lookFor looks, of d's selectors, for where the data of those with none
 // found yet begins, each from where its last look got to up to cursor, and
-// keeps what it found, as far as it got.
+// keeps what it found: of each it could look at, a selector that fails
+// passing to the next, and returning the last failure.
 func (s *Server) lookFor(ctx context.Context, d *ledger.ImpactData, cursor time.Time) error {
 	if d.Selectors != nil && d.Complete() || !cursor.After(d.From) {
 		return nil
@@ -837,7 +838,7 @@ func (s *Server) lookFor(ctx context.Context, d *ledger.ImpactData, cursor time.
 		got, err := s.firstSample(ctx, x.Sel, lo, cursor, x.To.IsZero())
 		if err != nil {
 			failed = err
-			break
+			continue
 		}
 		got.To = cursor
 		d.Selectors[i] = got
