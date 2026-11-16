@@ -50,7 +50,9 @@
   start); empty or `off` turns the signal off, and `/settings.yaml` gives
   them as the chart's `impact` and `--impact-for`. One saved is checked
   first: as PromQL as Lapilli reads it, 4,096 characters at most, no range
-  or subquery over a day, `--impact-for` from the step to a day; then read
+  or subquery over a day nor one not written as a duration, no subquery
+  stepping by less than a minute, 32 selectors at most, `--impact-for`
+  from the step to a day; then read
   in full over the last four weeks, by the save or a try within half an
   hour, within 90 seconds and `--max-samples`, or nothing is saved. "Try
   it on the last four weeks" shows, saving nothing, the windows it would
@@ -62,8 +64,8 @@
   backtest; trying the criterion in effect changes nothing. A try is an
   admin's, from the Settings page or typed, reads within 90 seconds and
   `--max-samples`, one heavy request at a time, twelve an admin an hour
-  with the saves that read (in the ledger with replicas), and the page is
-  kept until the ledger changes.
+  with the saves that read and the reads again saves make (in the ledger
+  with replicas), and the page is kept until the ledger changes.
 - **Incident sources.** The Settings page lists where incidents come from,
   and whether each is alive, in the status colours: written in Lapilli;
   each source a tool's job copies in through the incidents port, by its
@@ -75,8 +77,8 @@
   selector's data begins; each with how many incidents in four weeks, and
   the record gone quiet. Not set up is said in no colour, with a link to
   the recipes. No token is shown; the port, the token's file and the
-  incidents file's path, in its error too, to an admin alone. The
-  Incidents page links to it.
+  incidents file's path, in its error and in the status banner too, to an
+  admin alone. The Incidents page links to it.
 
 ### Changed
 
@@ -108,14 +110,18 @@
 - **The impact signal's record is what the ledger holds of it.** The
   criterion read (expression and `--impact-for`) is kept beside
   `impact_since`. A new one, saved in the UI or started with, leaves the
-  record as it was until the replica that leads reads it again over the
-  last four weeks: its windows take the place of those found from then on,
-  the record is kept by it from then, and the weeks are judged again, a
-  week a write. A decision about a window found before holds for a new one
-  it covers half of or more (the one covering most, confirmed before
-  dismissed on a tie), and the tasks and comments on a window no longer
-  there move to the one covering most of it, or are listed on the Cleanup
-  page; a window starting in the same minute as one kept is kept too. The
+  record, its criterion and its data as they were, pending, until the
+  replica that leads reads it again over the last four weeks: its windows
+  take the place of those found from then on, the record is kept by it
+  from then, and the weeks are judged again, a week a write. Meanwhile the
+  weeks the runs read the pending one over keep their record only as far
+  as its data goes. A decision about a window found before holds for a
+  new one it covers half of or more (the one covering most, confirmed
+  before dismissed on a tie); a window keeps the key of one found before
+  only when it is the same one, so nothing kept on one lands on another;
+  the tasks and comments on a window no longer there move to the one
+  covering most of it, sharing labels, or are listed on the Cleanup page;
+  a window starting in the same minute as one kept is kept too. The
   weeks before keep only the windows the one before found, as incidents.
   One that fails to be read again is tried again later, up to a day
   apart. A ledger kept by an earlier lapilli is taken to have been read
@@ -129,7 +135,7 @@
 ### Fixed
 
 - **The impact signal claimed weeks it had no data for.** From 0.41.0 to
-  0.47.0, `lapilli serve --impact` kept the record of every week from
+  0.48.0, `lapilli serve --impact` kept the record of every week from
   where its runs first read the signal, whether the expression's metrics
   had data there or not: a recording rule newer than the alerts judged, a
   metric added later, retention shorter than the span. Firings in those
@@ -141,7 +147,8 @@
   all while one has none. On upgrade, a ledger's `impact_since` moves
   forward to it at the first round that runs, never back; the weeks before
   have no record unless an incident keeps them. This looks for where data
-  begins, per selector, not for gaps after.
+  begins, per selector (with its offset or @), not for gaps after. An
+  expression that reads no selector (`vector(1)`) has data all along.
 
 ## [0.48.0] - 2026-11-16
 

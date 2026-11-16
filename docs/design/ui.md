@@ -1041,7 +1041,8 @@ first, refusing with the field's own sentence: as PromQL as Lapilli reads
 it (`rules.Scope`: strings, selectors, ranges and brackets closed; Lapilli
 has no PromQL parser of its own), 4,096 characters at most as the field
 counts them, no character that doesn't show, no range or subquery over a
-day, `--impact-for` from the step to a day. Then a new criterion (another
+day nor one not written as a duration, no subquery stepping by less than
+a minute, 32 selectors at most, `--impact-for` from the step to a day. Then a new criterion (another
 expression, or another `--impact-for`) is read in full over the span a try
 reads, as a try reads it, unless a try did within half an hour:
 Prometheus's parser has the last word, and what can't be read within 90
@@ -1051,6 +1052,8 @@ that leads reads it again over the last four weeks (`impactAgain`, serve.md
 the ledger's, by the one before, and the page says it waits, or, failed,
 why and when it is tried again: said only when a read again will happen
 (`againPlan`), not of a new ledger whose runs read it from their first.
+A save that changes the criterion counts the read again among the
+saver's reads.
 The section says from when the record is kept, and where the data of each
 selector the criterion reads begins (from a time, since one or before, or
 none): one that begins later than the others is named, as it holds the
@@ -1124,9 +1127,10 @@ it gave in four weeks, and what it is:
   yet, `↻ waiting`; not set up, `? not set up`, with a link to the
   recipes;
 - the incidents file: last read, or `✕ failing` with why, its path an
-  admin's to read;
+  admin's to read, here and in the status banner of every page;
 - the impact signal: last read by a run (or read again), the windows found
-  in four weeks, and where each selector's data begins; `↻ waiting` until
+  in four weeks, and where each selector's data begins, of the criterion
+  in effect (the one pending while it waits to be read again); `↻ waiting` until
   it is read with the criterion in effect, `⚠ quiet` when not read for two
   runs and more, `⚠ no data` when a selector it reads has none (no record
   is kept by it), or failing with Prometheus's error; off,

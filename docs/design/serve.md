@@ -412,21 +412,31 @@ The record by the impact signal is what the ledger holds of it, and no
 more: the weeks the runs read it over, all along, with the criterion in
 effect then, and only those in which every selector it reads had data.
 Kept in meta, with no schema change: `impact_since`, `impact_criterion`
-(the expression and `--impact-for`), `impact_again` and `impact_data`.
+(the expression and `--impact-for`), `impact_again`, `impact_data` and
+`impact_pending`. The record claimed is only what was read, with data, by
+the criterion it is kept by.
 
 - **Read by the runs.** From `impact_since`, all along, the record is
   kept (`verdict.Options.ImpactFrom`, `ledger.ImpactKept.From`). A run
-  that reads another criterion than the runs before keeps `impact_since`
-  as it was (every week since was read, with the criterion in effect
-  then, and its windows are those the stones were given by) and marks a
-  read again due (`impact_again` `-`); so does one that reads it after a
-  run that didn't (turned on again). A window the one before found and on
-  past the run's start ends there.
+  that reads another criterion than the one the record is kept by leaves
+  the record, `impact_criterion` and `impact_data` as they were (its
+  windows before are those the stones were given by, and a backtest made
+  meanwhile is labelled with it): the new one is pending
+  (`impact_pending`, from the run's start), a read again due
+  (`impact_again` `-`). Through the weeks the runs read the pending one
+  over, the record is kept on only as far as its data goes: on, when its
+  data was there from where they began to read it; from where it begins,
+  when later; not at all before it is looked for, or while a selector of
+  it has none. Read after a run that didn't (turned on again), the record
+  is the new one's from the run's start, and a read again is due. A
+  window the one before found and on past the run's start ends there.
 - **Saved.** A new criterion saved in the UI leaves the record as the
   ledger holds it, by the one before, until it is read again; saving it
   needs it read in full over the last four weeks first (by the save, or by
   a try within half an hour), within 90 seconds and `--max-samples`, in
-  the heavy turn, or nothing is saved.
+  the heavy turn, or nothing is saved. The read again it makes the
+  replica that leads do counts among the saver's twelve reads an hour,
+  whether a try read it lately or not.
 - **Read again** (`impactAgain`, before the runs), when `againPlan` says:
   a criterion saved, or started with, since the runs read another, or
   turned on after they read none. Over the last four weeks, from the
@@ -436,11 +446,14 @@ Kept in meta, with no schema change: `impact_since`, `impact_criterion`
   on; a window found before and on at the start ends there; what people
   decided about a window found before holds for a new one it covers half
   of or more, sharing a value of each label both have (of several, the
-  one that covers most, confirmed before dismissed on a tie); the tasks
-  and comments on a window no longer there move to the new one that
-  covers most of it, or stay on its key, listed on the Cleanup page; a
-  window starting in the same minute as one kept gets a key of its own;
-  and `impact_since` is the start, or where the data begins, later. The
+  one that covers most, confirmed before dismissed on a tie); a window
+  found keeps the key of one found before only when it is the same one
+  (the same minute, sharing labels, covering half of it or more), and
+  gets a key no window, task or comment has otherwise; the tasks and
+  comments on a window no longer there move to the new one that covers
+  most of it, sharing labels, or stay on its key, listed on the Cleanup
+  page; and `impact_since` is the start, or where the data begins, later,
+  the criterion no longer pending. The
   span is pended, and judged again a week a write (`JudgePending`), as
   `JudgeAll` does. The weeks before keep the windows the one before
   found, as the incidents they were when read, which keep the record of
@@ -451,23 +464,28 @@ Kept in meta, with no schema change: `impact_since`, `impact_criterion`
 - **Marked as read all along**, with no read again, when the runs read
   the criterion from where a read again would begin, or before, all
   along: a new ledger's runs read it from their first. A ledger a lapilli
-  before 0.47 kept has `impact_since` and no criterion: it is taken to
+  before 0.49 kept has `impact_since` and no criterion: it is taken to
   have been read with the command line's criterion, and only that one is
   marked; another, saved in the UI before the first round, or read by a
   run then (`Found.ImpactAssumed`), is read again.
-- **Where the data begins** (`impactData`, after the runs, and in a read
-  again). For each selector the expression reads (`rules.Selectors`), the
-  first sample of any of its series, as `count(selector)` has it at a
-  step of an hour (coarser over a long span: one request a selector,
-  within `--timeout` and `--max-samples`): a series added late moves
-  nothing. Across selectors, the latest of those: the record starts no
+- **Where the data begins** (`impactData`, after the runs, of the
+  criterion kept and the one pending, and in a read again). For each
+  selector the expression reads (`rules.Selectors`, 32 at most, with the
+  offset and the @ written after it, as they move where its data is read:
+  `count(x offset 1w)`), the first sample of any of its series, as
+  `count(selector)` has it at a step of an hour (coarser over a long span:
+  one request a selector, within `--timeout` and `--max-samples`): a
+  series added late moves nothing. An expression that reads no selector
+  (`vector(1)`) has data all along: the record is kept from
+  `impact_since`. Across selectors, the latest of those: the record starts no
   earlier than the first whole week after it, as only there did every
   selector have data, and not at all while one has none. It moves
   `impact_since` forward, never back, on a first start, after an upgrade
   (from the `impact_since` the ledger has), and once a criterion is read
   again; a selector with data where the look began holds nothing back;
-  one with none yet is looked for again a round at a time, from where the
-  last look got to; once each had data, nothing is looked for again. The
+  one with none yet is looked for again a round at a time, each selector
+  from where its own last look got to, those looked at kept when another
+  fails; once each had data, nothing is looked for again. The
   Settings page, the try and the Incident sources row list each selector
   and where its data begins, and name the one that holds the record back:
   an expression of its own for it would keep the weeks before. This looks
@@ -493,7 +511,7 @@ that read them catch up at the next digest, which the Settings page and
 the try say. A week with no record is shown no suggestion, whatever was
 kept for it.
 
-**An upgrade.** A ledger 0.41 to 0.47 kept, whose `impact_since` is
+**An upgrade.** A ledger 0.41 to 0.48 kept, whose `impact_since` is
 earlier than its expression's data: at the first round of the replica that
 leads after the upgrade, the criterion in effect, when it is the command
 line's and the runs read it from where a read again would begin, is marked
@@ -681,9 +699,11 @@ as instructions.
   provider's to do ([serveops.md](serveops.md), settled 2026-11-12).
 - **The incident criteria read Prometheus.** A try and a save that reads
   run within 90 seconds and `--max-samples`, in the heavy turn, twelve an
-  admin an hour in all (kept in the ledger with replicas, so every replica
-  counts the same; in the process without, begun again when it starts),
-  a range or a subquery over a day refused. A try is an admin's, asked
+  admin an hour in all, the read again a save makes among them (kept in
+  the ledger with replicas, so every replica counts the same; in the
+  process without, begun again when it starts); a range or a subquery
+  over a day refused, one not written as a duration, a subquery stepping
+  by less than a minute, an expression of more than 32 selectors. A try is an admin's, asked
   for from the Settings page in a browser (`Sec-Fetch-Site` same-origin,
   or none for one typed): it shows the labels of the series the expression
   finds, so an admin reads, through it, any series' labels Lapilli's

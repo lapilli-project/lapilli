@@ -52,7 +52,7 @@ type Found struct {
 	// Impact, when there is an impact expression, is what it found from
 	// ImpactSince on, read with ImpactCriterion (the expression and
 	// --impact-for, as lapilli serve keys them; "" for one not told
-	// apart, as before 0.47).
+	// apart, as before 0.49).
 	Impact          []incident.Incident
 	ImpactOn        bool
 	ImpactSince     time.Time
