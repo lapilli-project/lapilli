@@ -10,7 +10,7 @@
   <a href="{{$.Link .Then}}">{{.ThenDay}} <span aria-hidden="true">→</span></a>
 </form>
 {{with .Labels}}<ul class="chips" aria-label="{{t "Filters in effect"}}">{{range .}}<li><a class="chip" href="{{$.Link .Href}}"><span class="vh">{{t "Remove filter:"}} </span>{{t .Group}}: <bdi>{{shown .Value}}</bdi> <span aria-hidden="true">✕</span></a></li>{{end}}</ul>{{end}}
-{{if .More}}<p class="bad">{{t "Five labels at most: the others are left out."}}</p>{{end}}
+{{if .More}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{t "Five labels at most: the others are left out."}}</p>{{end}}
 {{with .Bulk.Result}}{{template "bulkresult" .}}{{end}}
 
 {{with .Strip}}<figure class="strip hours">

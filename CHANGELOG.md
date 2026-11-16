@@ -2,6 +2,82 @@
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-11-16
+
+The web UI says what a state is at a glance: fine, needs a look, broken,
+under way, or not known. The calm palette stays as it was: the olive for
+what can be done, the blue and grey of what caught something and what
+didn't, the lavender of where the noise is. Five status colours are added
+beside it, on small surfaces alone, and each state has the same one on
+every page. No ledger schema change; the API and MCP answer as they did.
+
+### Changed
+
+- **Status colours.** Each state is one of five kinds: ok (a cool green,
+  told apart from the olive), warn (amber), bad (red), info (the blue) and
+  unknown (the dim grey). Each kind is a text colour, a wash and a line,
+  in light and dark. They colour a badge or a pill, a notice's left edge
+  and background, a cell, a word or a sign. They never fill a row or a
+  card.
+- **The same state, the same colour.** "Awaiting approval" and a stale
+  proposal are amber on the proposals list and on the proposal's page
+  alike. They were lavender, olive, amber or red, depending on the page.
+  An approved or applied proposal and a rule that is OK are green. A
+  noisy rule's badge is amber, as the lavender is kept for how much
+  noise. A proposal closed as failed is red; one refused, dropped or
+  changed in review is grey; one that expired is amber. The task page
+  shows a proposal's state as the proposals list does, not as a grey
+  word.
+- **Red only for what failed.** The boxes that were all red say warn or
+  bad by what they mean. A proposal an agent made, a `for` one event
+  can't outlast, a backtest that didn't finish, teams whose names differ
+  only in case and "no one can approve" are amber. A backtest that
+  misses incidents, a run's error, a digest that failed and notices given
+  up on are red. The banners above every page (changes paused, what the
+  server is doing, its error) are boxes of the same kind.
+- **Never green or red for what isn't known.** A rule with no record is
+  grey ("? No record", amber before), as are a backtest with no record
+  and the notes that say no incident was written down. A rule none of
+  whose firings was judged is grey even where its badge says "OK" (it
+  isn't noisy, but nothing says it's fine). A number Lapilli can't judge
+  is "–" in no colour, as before.
+- **Green only for all clear.** The overview's "Nothing to look at now"
+  is green with a ✓. Other empty states, such as "No proposals yet.",
+  have no colour. Outcomes' "all ran" is green only when the runs are up
+  to date; while they are behind, it is blue.
+- **The incidents chart.** Caught, caught only by noisy rules and missed
+  are drawn in the same hues as the status colours, 3:1 on the card in
+  light and dark. Each pair is at least 8.5 apart (ΔE in OKLab, ×100) for
+  readers with protanopia or deuteranopia, and caught and missed differ
+  in lightness as well as hue. Before, the amber was under 3:1 on the
+  cream, and caught and missed were 4.1 apart for deuteranopia.
+
+### Added
+
+- **Words beside colours.** A quiet window in effect now says "active
+  now". An overdue task says "overdue" beside its date. A headline
+  number's change says "better" or "worse", as a rule's panel already
+  did. These were said by colour alone before. The words are in all four
+  languages.
+- **Checks.** `TestContrast` holds every status colour's text on its
+  wash, the card, the background and the panel at 4.5:1, ink, quiet text
+  and links on each wash at 4.5:1, and each line and a link's underline at
+  3:1, in light and dark. `TestStatusKinds` renders the pages the
+  accessibility checks render, a proposal in each of its states and seven
+  more deployments (no record, nothing to look at, rule changes measured,
+  notices sent and failed, changes paused, and others). It finds each of
+  73 states by its words on the pages named for it and holds it to
+  its kind there, so a colour left out fails. It also holds every
+  coloured state to one kind on every page. `TestChartFillsApart` holds
+  the chart's fills apart for colour-blind readers. axe-core finds no
+  violation on the pages it checks, in four languages, light and dark.
+
+### Fixed
+
+- **The incidents list's colour.** A missed incident coloured the Lead
+  column, the last one. The column that says how it was caught is
+  coloured now.
+
 ## [0.44.2] - 2026-11-16
 
 A deployment with no incident written down had its overview read

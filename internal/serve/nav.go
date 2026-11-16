@@ -303,6 +303,10 @@ func (s *Server) why(r *http.Request) string {
 type emptyView struct {
 	Kind, Title, Text string
 	Links             []emptyLink
+	// Clear says all is well, as nothing to look at on the overview: its
+	// title ok, with its sign. Nothing else left to do (no proposals yet)
+	// is said in no colour.
+	Clear bool
 }
 
 // emptyLink is a way out of an empty state; Name is a text to translate.

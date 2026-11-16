@@ -123,7 +123,7 @@ func TestCheckReplay(t *testing.T) {
 	for path, want := range map[string][]string{
 		"/rules/Errors":             {"Over the last week its replay differed"},
 		"/rules/Errors?tab=firings": {"73% alike, of 22 firings; 5 only in the replay, 1 only in what really fired", "only in what really fired", "service=cart"},
-		"/rules":                    {`<span class="badge trust"><span aria-hidden="true">≠</span> Differs</span>`},
+		"/rules":                    {`<span class="badge trust status-warn"><span aria-hidden="true">≠</span> Differs</span>`},
 		"/runs":                     {"Set beside ALERTS", "with no rule given by that name: Watchdog"},
 		"/":                         {"That week, the replay beside what really fired: 93% alike, of 15 firings."},
 	} {

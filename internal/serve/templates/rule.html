@@ -4,7 +4,7 @@
 {{$acts := ruleActions $ .}}<p class="rule-actions">{{range $acts}}{{if .Href}}<a class="button{{if .Quiet}} quiet{{end}}" href="{{.Href}}">{{t .Label}}</a> {{else}}{{template "off" .}} {{end}}{{end}}</p>
 </div>
 {{with .Facts}}<ul class="rule-facts">{{range .}}<li>{{if eq .Key "runbook"}}<a href="{{.Value}}" rel="noopener noreferrer">{{t "Runbook"}}</a>{{else if eq .Key "rulebook"}}<a href="{{.Value}}" rel="noopener noreferrer">{{t "Runbook, from the rule"}}</a>{{with .Host}} <span class="k">(<bdi>{{shown .}}</bdi>)</span>{{end}}{{else}}<span class="k">{{if eq .Key "team"}}{{t "Team"}}{{else if eq .Key "severity"}}{{t "Severity"}}{{else if eq .Key "for"}}{{t "For"}}{{else}}{{t "Group"}}{{end}}</span> <bdi>{{.Value}}</bdi>{{end}}</li>{{end}}</ul>{{end}}
-{{with .Conds}}<details class="checks" id="checks"><summary><span aria-hidden="true">⚠&#xFE0E;</span> {{t "%d to check" (len .)}}</summary>
+{{with .Conds}}<details class="checks" id="checks"><summary class="{{status "has" "facts"}}"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "%d to check" (len .)}}</summary>
 <ul>{{range .}}<li>{{if eq .Kind "facts"}}{{t "What it says has %d problems of fact." .N}} <a href="{{$.Link (print $v.Path "#says")}}">{{t "What it says"}}</a>
 {{- else if eq .Kind "differs"}}{{t "Over the last week its replay differed from how it really fired: %d of %d firings alike. Its stones rest on that replay." $v.LastWeek.Alike $v.LastWeek.Either}} <a href="{{$.Link (print $v.Path "#check") "tab" "firings"}}">{{t "The replay beside what really fired"}}</a>
 {{- else if eq .Kind "unreplayed"}}{{t "Not replayed: %s" .Text}} <a href="{{$.Link (print $v.Path "#versions") "tab" "versions"}}">{{t "Versions"}}</a>
@@ -163,7 +163,7 @@ lands here, and is shown the way to it. */}}
 <section class="card about" id="note">
 <h2>{{t "About this rule"}}</h2>
 <p>{{if .Team}}{{t "Owned by %s." .Team}}{{else}}{{t "No team owns it."}}{{end}} {{template "ownwhy" (on $ .Owned)}}
-{{with .Note.Status}} <span class="pill {{.}}">{{t .}}</span>{{end}}
+{{with .Note.Status}} <span class="pill {{.}} {{status "status" .}}">{{t .}}</span>{{end}}
 {{with .Note.Runbook}} · <a href="{{.}}" rel="noopener noreferrer">{{t "Runbook"}}</a>{{end}}</p>
 {{with .FiredOn}}<p>{{if .Owner}}{{tbdi "Its alerts go to %s; most came from what %s owns (%d of %d), in the week of %s." .Owner .Team .Firings .Of (day $loc .Week)}}{{else}}{{tbdi "Its alerts go to no team; most came from what %s owns (%d of %d), in the week of %s." .Team .Firings .Of (day $loc .Week)}}{{end}}</p>{{end}}
 {{with .Note.Note}}<div class="comment-body">{{.}}</div>{{end}}
@@ -212,4 +212,4 @@ lands here, and is shown the way to it. */}}
 
 {{/* A number's change from as long before, signed, in points for a share,
 and, when it is better or worse, said so in words as well as colour. */}}
-{{define "delta"}}{{if .On}} <span class="delta{{with .Class}} {{.}}{{end}}">{{if .Pt}}{{t "%s pt" .Text}}{{else}}{{.Text}}{{end}}{{if eq .Class "better"}} {{t "better"}}{{else if eq .Class "worse"}} {{t "worse"}}{{end}}</span>{{end}}{{end}}
+{{define "delta"}}{{if .On}} <span class="delta{{with .Class}} {{.}}{{end}}{{if eq .Class "better"}} status-ok{{else if eq .Class "worse"}} status-bad{{end}}">{{if .Pt}}{{t "%s pt" .Text}}{{else}}{{.Text}}{{end}}{{if eq .Class "better"}} {{t "better"}}{{else if eq .Class "worse"}} {{t "worse"}}{{end}}</span>{{end}}{{end}}

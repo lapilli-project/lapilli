@@ -100,7 +100,7 @@ func TestApproversNoOneLeft(t *testing.T) {
 	generic := "No one can approve this yet; an admin sees why on the Roles page."
 	told := func(h http.Handler, id int64, admin, said string) {
 		t.Helper()
-		if p := approval(t, h, id, admin); !strings.Contains(p, said) || !strings.Contains(p, `class="warn"`) {
+		if p := approval(t, h, id, admin); !strings.Contains(p, said) || !strings.Contains(p, `class="notice status-warn"`) {
 			t.Errorf("an admin isn't told %q, as a warning:\n%s", said, p)
 		}
 		for _, who := range []string{bo, ""} {
@@ -141,7 +141,7 @@ func TestApproversNoOneLeft(t *testing.T) {
 		h = s.Handler()
 		id = proposeAs(t, h, cy, "15m")
 		for _, who := range []string{ana, bo} {
-			if p := approval(t, h, id, who); strings.Contains(p, "No one") || strings.Contains(p, "It needs") || strings.Contains(p, `class="warn"`) {
+			if p := approval(t, h, id, who); strings.Contains(p, "No one") || strings.Contains(p, "It needs") || strings.Contains(p, `class="notice status-warn"`) {
 				t.Errorf("--approvers %v, as %s: said to be stuck:\n%s", approvers, who, p)
 			}
 		}

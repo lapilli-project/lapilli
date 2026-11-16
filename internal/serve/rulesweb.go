@@ -151,7 +151,7 @@ type legendItem struct {
 
 // badgeMeans are, by facet and value, each badge's class and sign, as the
 // badges partial draws them, and what it means; a value with none has no
-// badge (Undecided).
+// badge (Undecided). Its status colour is statusKinds', by the same key.
 var badgeMeans = map[string][3]string{
 	"perf/noisy":       {"perf-noisy", "●", "Fired often over the weeks shown, and few of its firings caught something; with weeks, how many weeks running."},
 	"perf/unrecorded":  {"perf-unrecorded", "?", "Fired often over the weeks shown, with no incident written down to judge it by: whether its firings mattered isn't known."},
@@ -176,7 +176,7 @@ func legendOf() []legendGroup {
 		g := legendGroup{Name: f.name}
 		for i, x := range f.values {
 			if m, ok := badgeMeans[f.param+"/"+x]; ok {
-				g.Items = append(g.Items, legendItem{Class: m[0], Sign: m[1], Label: f.labels[i], Means: m[2]})
+				g.Items = append(g.Items, legendItem{Class: m[0] + " " + statusClass(f.param, x), Sign: m[1], Label: f.labels[i], Means: m[2]})
 			}
 		}
 		if len(g.Items) > 0 {
@@ -788,6 +788,16 @@ func (s *Server) checkingOf(r *http.Request) (checking, error) {
 		}
 	}
 	return w, nil
+}
+
+// PerfClass is the status colour of how it did (statusKinds): unknown for
+// a rule none of whose firings was judged (NoRecord), whatever Perf says,
+// as no record gives no verdict, neither ok nor bad.
+func (r ruleRow) PerfClass() string {
+	if r.NoRecord {
+		return "status-unknown"
+	}
+	return statusClass("perf", r.Perf)
 }
 
 // rowOf is a rule's line on each axis, with facts problems of fact in what

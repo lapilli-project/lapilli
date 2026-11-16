@@ -6,11 +6,11 @@
 <thead><tr><th scope="col">{{t "Report"}}</th><th scope="col">{{t "When"}}</th><th scope="col">{{t "For whom"}}</th><th scope="col">{{t "Holds"}}</th><th scope="col">{{t "To"}}</th><th scope="col">{{t "Last sent for"}}</th><td></td></tr></thead>
 <tbody>{{range .Lines}}<tr>
   <td>{{if .SetBy}}<a href="{{$.Link "/reports/digest"}}">{{t .Name}}</a><br><span class="quiet">{{if eq .SetBy "ledger"}}{{t "set in the UI: --digest isn't used"}}{{else}}{{t "set by flags: --digest, --team-digest, --slack-webhook-file"}}{{end}}</span>{{else}}<a href="{{$.Link (printf "/reports/%d" .ID)}}">{{.Name}}</a>{{if .Declared}} {{template "declared"}}{{end}}{{end}}
-  {{if eq .Stopped "off"}}<br><span class="quiet">{{t "off"}}</span>{{else if .Stopped}}<br><strong>{{t "its team was removed: it isn't sent"}}</strong>{{end}}</td>
+  {{if eq .Stopped "off"}}<br><span class="quiet">{{t "off"}}</span>{{else if .Stopped}}<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "its team was removed: it isn't sent"}}</strong>{{end}}</td>
   <td><code>{{.Schedule}}</code>{{with .Span}} · {{.}}{{end}}</td>
   <td>{{if .SetBy}}{{t "everyone, and each team"}}{{else if .TeamName}}{{.TeamName}}{{if eq .Zone "team"}} <span class="quiet">({{t "its zone"}})</span>{{end}}{{else if .TeamID}}–{{else}}{{t "everyone"}}{{end}}</td>
   <td>{{range $i, $x := .Sections}}{{if $i}}, {{end}}{{t $x}}{{end}}</td>
-  <td>{{join .Dests ", "}}{{with .Unknown}}<br><strong>{{t "nothing names %s now" (join . ", ")}}</strong>{{end}}</td>
+  <td>{{join .Dests ", "}}{{with .Unknown}}<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "nothing names %s now" (join . ", ")}}</strong>{{end}}</td>
   <td class="t">{{at $loc .LastSent}}</td>
   <td>{{if .SetBy}}{{if $admin}}<a href="{{$.Link "/reports" "edit" "digest"}}">{{t "Change"}}</a>{{end}}{{else if and .Declared ($.View.MayEdit .)}}{{template "off" (again (quiet (offDeclared "Change" "declared-why")))}}{{else if $.View.MayEdit .}}<a href="{{$.Link "/reports" "edit" .ID}}">{{t "Change"}}</a>{{end}}</td>
 </tr>{{else}}<tr><td colspan="7" class="quiet">{{t "No reports yet."}}</td></tr>{{end}}</tbody>
@@ -60,8 +60,8 @@
 {{define "report"}}{{$title := .View.Name}}{{if .View.SetBy}}{{$title = t .View.Name}}{{end}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := not .Status.Admin}}{{with .View}}
 <h1>{{$title}}</h1>
 <p class="lede">{{if .Declared}}{{template "declared"}} {{end}}<code>{{.Schedule}}</code>{{with .Span}} · {{.}}{{end}} · {{if .TeamName}}{{.TeamName}}{{else if .TeamID}}–{{else}}{{t "everyone"}}{{end}} · {{join .Dests ", "}}
-{{if eq .Stopped "off"}}<br>{{t "off"}}{{else if .Stopped}}<br><strong>{{t "its team was removed: it isn't sent"}}</strong>{{end}}
-{{with .Unknown}}<br><strong>{{t "nothing names %s now" (join . ", ")}}</strong>{{end}}
+{{if eq .Stopped "off"}}<br>{{t "off"}}{{else if .Stopped}}<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "its team was removed: it isn't sent"}}</strong>{{end}}
+{{with .Unknown}}<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "nothing names %s now" (join . ", ")}}</strong>{{end}}
 <br>{{t "Last sent for the span to %s." (at $loc .LastSent)}}{{with .UpdatedBy}} {{t "Kept by %s, %s." (who .) (at $loc $.View.Updated)}}{{end}}</p>
 {{if .SetBy}}<p class="quiet">{{if eq .SetBy "ledger"}}{{t "set in the UI: --digest isn't used"}}{{else}}{{t "set by flags: --digest, --team-digest, --slack-webhook-file"}}{{end}}</p>{{if not $ro}}<p><a href="{{$.Link "/reports#digest" "edit" "digest"}}">{{t "Change"}}</a></p>{{else}}<p>{{template "off" (offOf $ "Change it" "admin" "report-why")}}</p>{{end}}
 {{else if .Declared}}<p>{{template "off" (offDeclared "Change it" "report-why")}}</p>

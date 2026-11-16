@@ -52,7 +52,10 @@ on a phone should be able to judge a rule as anyone else does.
   select, textarea, link and button; alt on every image; every SVG either
   hidden or an image with a name; header cells with scope; no positive
   tabindex. `TestContrast` reads the colour tokens from the CSS and holds
-  text at 4.5:1 and borders and the focus ring at 3:1, light and dark.
+  text at 4.5:1 and borders and the focus ring at 3:1, light and dark;
+  since bundle 28, every status kind's text, wash and line too
+  (ui.md, "Status colours"), and `TestStatusKinds` holds each state to
+  one kind on every page, never colour alone.
   `TestChartsInTables` holds that every week a chart draws is in the table
   below it, a column for each measure, and that each number a chart draws
   is the one in its week's row and its measure's column.

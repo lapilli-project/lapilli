@@ -1,18 +1,18 @@
-{{define "proposalstate"}}<span class="pill {{.}}">{{t .}}</span>{{end}}
+{{define "proposalstate"}}{{template "proposalbadge" (stateBadge .)}}{{end}}
 
 {{define "proposalkind"}}{{t (kindText .)}}{{end}}
 
 {{define "proposalpath"}}{{if eq . "git"}}{{t "a pull request"}}{{else if eq . "grafana"}}{{t "Grafana's API"}}{{else if eq . "ruler"}}{{t "the ruler's API"}}{{else if eq . "alarm"}}{{t "the cloud's API"}}{{else}}{{t "for a person to make"}}{{end}}{{end}}
 
-{{define "changesoff"}}{{if not .On}}<p class="hint">{{t "Changes are off: proposals are kept, and nothing is applied or handed to a recipe. lapilli serve was started without --changes."}}</p>{{else if .Paused}}<p class="hint bad">{{t "Changes are paused: nothing is applied or handed to a recipe until they are resumed."}}</p>{{end}}{{end}}
+{{define "changesoff"}}{{if not .On}}<p class="hint">{{t "Changes are off: proposals are kept, and nothing is applied or handed to a recipe. lapilli serve was started without --changes."}}</p>{{else if .Paused}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "Changes are paused: nothing is applied or handed to a recipe until they are resumed."}}</p>{{end}}{{end}}
 
 {{define "proposalbadge"}}<span class="badge {{.Class}}"><span aria-hidden="true">{{.Sign}}</span> {{t .Word}}</span>{{with .Detail}} <span class="quiet">({{t .}})</span>{{end}}{{end}}
 
 {{define "proposallist"}}{{if .V}}<div class="scroll"><table>
 <thead><tr><th scope="col">#</th><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Change"}}</th><th scope="col">{{t "Way"}}</th><th scope="col">{{t "State"}}</th><th scope="col">{{t "Made"}}</th></tr></thead>
-<tbody>{{range .V}}<tr><td><a href="{{$.P.Link (printf "/proposals/%d" .ID)}}">#{{.ID}}</a></td><td><a href="{{$.P.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a>{{if .Stale}}<br><span class="hint">{{t "the rule changed since"}}</span>{{end}}</td>
-<td>{{template "proposalkind" .Kind}}{{if .Agent}}<br><span class="quiet">{{t "proposed by an agent"}}</span>{{end}}{{if .Outlasts}}<br><span class="hint"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "as proposed, one event alone can't fire it"}}</span>{{end}}</td><td>{{template "proposalpath" .Path}}</td>
-<td>{{template "proposalbadge" .Badge}}{{if eq .State "proposed"}} <span class="quiet">{{t "%d of %d approvals" .Have .Need}}</span>{{end}}{{if .StaleWhy}}<br><span class="badge check"><span aria-hidden="true">⟳</span> {{t "stale: backtest it again"}}</span>{{end}}</td>
+<tbody>{{range .V}}<tr><td><a href="{{$.P.Link (printf "/proposals/%d" .ID)}}">#{{.ID}}</a></td><td><a href="{{$.P.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a>{{if .Stale}}<br><span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "the rule changed since"}}</span>{{end}}</td>
+<td>{{template "proposalkind" .Kind}}{{if .Agent}}<br><span class="status-warn"><span aria-hidden="true">⚙&#xFE0E;</span> {{t "proposed by an agent"}}</span>{{end}}{{if .Outlasts}}<br><span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "as proposed, one event alone can't fire it"}}</span>{{end}}</td><td>{{template "proposalpath" .Path}}</td>
+<td>{{template "proposalbadge" .Badge}}{{if eq .State "proposed"}} <span class="quiet">{{t "%d of %d approvals" .Have .Need}}</span>{{end}}{{if .StaleWhy}}<br><span class="badge check status-warn"><span aria-hidden="true">⟳</span> {{t "stale: backtest it again"}}</span>{{end}}</td>
 <td class="t">{{at .Loc .Made}}<br><span class="quiet">{{who .MadeBy}}</span></td></tr>{{end}}</tbody>
 </table></div>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}{{end}}
 
@@ -31,9 +31,9 @@
 {{end}}{{template "bottom" .}}{{end}}
 
 {{define "proposal"}}{{$head := .View.Head.Text .Lang}}{{template "top" (crumbed . (print "#" .View.ID " " $head) (print "#" .View.ID))}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}{{$v := .}}
-{{if .Agent}}<p class="hint bad">{{t "An agent proposed this, for %s. What it says is its own: check the diff and the backtest, not its words." (who .MadeBy)}}</p>{{end}}
+{{if .Agent}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "An agent proposed this, for %s. What it says is its own: check the diff and the backtest, not its words." (who .MadeBy)}}</p>{{end}}
 <h1>#{{.ID}} {{.Head.HTML $.Lang}}</h1>
-<p class="proposal-facts">{{template "proposalbadge" .Badge}} <span aria-hidden="true">·</span> <a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a> <span aria-hidden="true">·</span> {{if .Agent}}<span class="badge agent"><span aria-hidden="true">⚙&#xFE0E;</span> {{t "an agent"}}</span> {{end}}{{if .ByLapilli}}{{t "made by Lapilli, %s" (at $loc .Made)}}{{else}}{{t "made by %s, %s" (who .MadeBy) (at $loc .Made)}}{{end}} <span aria-hidden="true">·</span> {{template "proposalpath" .Path}}{{with .Evidence.From}} <span aria-hidden="true">·</span> {{t "from %s" (t .)}}{{end}}{{with .Evidence.Incident}} <span aria-hidden="true">·</span> <a href="{{$.Incident .}}"><bdi>{{.}}</bdi></a>{{end}}{{if .Follows}} <span aria-hidden="true">·</span> {{t "after"}} <a href="{{$.Link (printf "/proposals/%d" .Follows)}}">#{{.Follows}}</a>{{end}}</p>
+<p class="proposal-facts">{{template "proposalbadge" .Badge}} <span aria-hidden="true">·</span> <a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a> <span aria-hidden="true">·</span> {{if .Agent}}<span class="badge agent status-warn"><span aria-hidden="true">⚙&#xFE0E;</span> {{t "an agent"}}</span> {{end}}{{if .ByLapilli}}{{t "made by Lapilli, %s" (at $loc .Made)}}{{else}}{{t "made by %s, %s" (who .MadeBy) (at $loc .Made)}}{{end}} <span aria-hidden="true">·</span> {{template "proposalpath" .Path}}{{with .Evidence.From}} <span aria-hidden="true">·</span> {{t "from %s" (t .)}}{{end}}{{with .Evidence.Incident}} <span aria-hidden="true">·</span> <a href="{{$.Incident .}}"><bdi>{{.}}</bdi></a>{{end}}{{if .Follows}} <span aria-hidden="true">·</span> {{t "after"}} <a href="{{$.Link (printf "/proposals/%d" .Follows)}}">#{{.Follows}}</a>{{end}}</p>
 {{with .Undoes}}<p>{{t "It puts back the rule as it was before the change it undoes:"}} <a href="{{$.Link (printf "/proposals/%d" .ID)}}">#{{.ID}}</a>.{{if .Agent}} {{t "An agent proposed #%d, for %s." .ID (who .For)}}{{end}}</p>
 {{if eq $v.Path "grafana"}}<p class="hint">{{t "In Grafana, it puts back the whole rule as it was before #%d, its annotations too: whatever was edited in Grafana since is put back with it." .ID}}</p>{{end}}{{end}}
 {{template "changesoff" .}}
@@ -42,9 +42,9 @@
 {{if .Evidence.OffOnly}}<p class="hint">{{t "Lapilli doesn't replay it, so retiring it stops here, at off: delete it in the console once it has been off a while."}}</p>{{end}}
 {{else}}{{with .Evidence.Edit}}{{if .Namespace}}<p class="quiet">{{tbdi "In the ruler: namespace %s, group %s." (shown .Namespace) (shown .Group)}} <code><bdi>{{shown $.View.Source}}</bdi></code></p>{{end}}{{end}}
 {{with .Evidence.NoPath}}<p class="hint">{{t "Lapilli doesn't change it in the ruler:"}} {{t .}}</p>{{end}}{{end}}
-{{if .Stale}}<p class="hint bad">{{t "The rule in effect isn't the one this was proposed against: it changed since, so this is refused when checked again. Propose it again from the rule's page."}}</p>{{end}}
-{{with .StaleWhy}}<p class="hint bad">{{.Notice $.Lang}} <a href="#backtest">{{t "Backtest it again"}}</a></p>{{end}}
-{{with .Reason}}<p class="bad">{{.}}</p>{{end}}
+{{if .Stale}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "The rule in effect isn't the one this was proposed against: it changed since, so this is refused when checked again. Propose it again from the rule's page."}}</p>{{end}}
+{{with .StaleWhy}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⟳</span> {{.Notice $.Lang}} <a href="#backtest">{{t "Backtest it again"}}</a></p>{{end}}
+{{with .Reason}}<p class="notice {{$v.ReasonClass}}"><span class="sign" aria-hidden="true">{{sign $v.ReasonClass}}</span> {{.}}</p>{{end}}
 {{if not .Expires.IsZero}}<p class="quiet">{{t "Unless someone approves it first, it closes as expired on %s: --proposals-expire after it began to wait, when it was made or last backtested again." (at $loc .Expires)}}</p>{{end}}
 {{with .Link}}<p><a href="{{.}}" rel="noopener noreferrer">{{t "Pull request"}} <span aria-hidden="true">↗</span></a></p>{{end}}
 {{with .Evidence.Reason}}<details open><summary>{{t "What whoever proposed it said"}}</summary><div class="comment-body">{{.}}</div></details>{{end}}
@@ -71,20 +71,20 @@
 
 <section class="card" id="backtest">
 <h2>{{t "Backtest"}}</h2>
-{{with .Outlasts}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "As proposed, its for (%s) is as long as the %s its condition counts over, or longer: one event alone could never fire it; only events that keep coming for %s would." (dur .For) (dur .Window) (dur .For)}}</p>{{end}}
-{{with .Backtest}}{{if .Worse}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if .Undoes}}{{if eq (len .Lost) 1}}{{t "Undone, it misses 1 incident it catches with #%d:" .Undoes}}{{else}}{{t "Undone, it misses %d incidents it catches with #%d:" (len .Lost) .Undoes}}{{end}}{{else if eq (len .Lost) 1}}{{t "As proposed, it misses 1 incident it catches now:"}}{{else}}{{t "As proposed, it misses %d incidents it catches now:" (len .Lost)}}{{end}}{{range $i, $x := .Lost}}{{if $i}},{{end}} <a href="{{$.Incident $x}}"><bdi>{{$x}}</bdi></a>{{end}}.</p>{{end}}
+{{with .Outlasts}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "As proposed, its for (%s) is as long as the %s its condition counts over, or longer: one event alone could never fire it; only events that keep coming for %s would." (dur .For) (dur .Window) (dur .For)}}</p>{{end}}
+{{with .Backtest}}{{if .Worse}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{if .Undoes}}{{if eq (len .Lost) 1}}{{t "Undone, it misses 1 incident it catches with #%d:" .Undoes}}{{else}}{{t "Undone, it misses %d incidents it catches with #%d:" (len .Lost) .Undoes}}{{end}}{{else if eq (len .Lost) 1}}{{t "As proposed, it misses 1 incident it catches now:"}}{{else}}{{t "As proposed, it misses %d incidents it catches now:" (len .Lost)}}{{end}}{{range $i, $x := .Lost}}{{if $i}},{{end}} <a href="{{$.Incident $x}}"><bdi>{{$x}}</bdi></a>{{end}}.</p>{{end}}
 {{if .Undoes}}<p class="quiet">{{t "The backtest of #%d, replayed from %s to %s when it was proposed, read the other way: with it, and as the rule was before it." .Undoes (day $loc .From) (day $loc .To)}}</p>
 {{else}}<p class="quiet">{{t "Replayed from %s to %s, as the rule is now and as proposed." (day $loc .From) (day $loc .To)}}</p>{{end}}
-{{if .NoRecord}}<p class="hint">{{t "No incident was written down, or found by --impact, in the period or the two weeks before it: the firings are counted, not judged. Fewer firings aren't better, nor more worse: fewer may be events that happened, hidden."}}</p>{{end}}
+{{if .NoRecord}}<p class="notice status-unknown"><span class="sign" aria-hidden="true">?</span> {{t "No incident was written down, or found by --impact, in the period or the two weeks before it: the firings are counted, not judged. Fewer firings aren't better, nor more worse: fewer may be events that happened, hidden."}}</p>{{end}}
 <div class="scroll"><table class="backtest">
 <thead><tr><td></td>{{if .Undoes}}<th scope="col" class="n">{{t "With #%d" .Undoes}}</th><th scope="col" class="n">{{t "After undoing it"}}</th>{{else}}<th scope="col" class="n">{{t "Now"}}</th><th scope="col" class="n">{{t "As proposed"}}</th>{{end}}<th scope="col" class="n">{{t "Difference"}}</th></tr></thead>
 <tbody>{{range .Rows}}<tr><th scope="row">{{t .Label}}</th><td class="n">{{.Now}}</td><td class="n">{{.Proposed}}</td><td class="n">{{if and $.View.Backtest.NoRecord (not .By.On)}}–{{else}}{{template "delta" .By}}{{end}}</td></tr>{{end}}</tbody>
 </table></div>
 {{if .Gained}}<p>{{if .Undoes}}{{t "Caught once undone, missed with #%d:" .Undoes}}{{else}}{{t "Caught as proposed, missed as it is:"}}{{end}}{{range $i, $x := .Gained}}{{if $i}},{{end}} <a href="{{$.Incident $x}}"><bdi>{{$x}}</bdi></a>{{end}}.</p>{{end}}
 {{if .Later}}<p>{{t "Caught later as proposed:"}}{{range $i, $x := .Later}}{{if $i}},{{end}} <a href="{{$.Incident $x}}"><bdi>{{$x}}</bdi></a>{{end}}.</p>{{end}}
-{{with $.View.Evidence.EarlierMissed}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "An earlier backtest of it, before it was backtested again, said that as proposed it misses:"}}{{range $i, $x := .}}{{if $i}},{{end}} <a href="{{$.Incident $x}}"><bdi>{{$x}}</bdi></a>{{end}}.</p>{{end}}
+{{with $.View.Evidence.EarlierMissed}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "An earlier backtest of it, before it was backtested again, said that as proposed it misses:"}}{{range $i, $x := .}}{{if $i}},{{end}} <a href="{{$.Incident $x}}"><bdi>{{$x}}</bdi></a>{{end}}.</p>{{end}}
 {{if .Sooner}}<p>{{t "Caught sooner once undone:"}}{{range $i, $x := .Sooner}}{{if $i}},{{end}} <a href="{{$.Incident $x}}"><bdi>{{$x}}</bdi></a>{{end}}.</p>{{end}}
-{{if .Unfinished}}<p class="bad">{{t "The backtest didn't finish within --timeout: its numbers are partial."}}</p>{{end}}{{end}}
+{{if .Unfinished}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "The backtest didn't finish within --timeout: its numbers are partial."}}</p>{{end}}{{end}}
 {{if .CanAgain}}<form method="post" action="/proposals/{{.ID}}/backtest" class="grid">
   <p class="quiet">{{t "Backtesting it again replays the change with this lapilli, against the rule in effect, over the twelve weeks to now. The backtest it replaces is kept in its history, and any approval given to that one is taken back."}}</p>
   <button>{{t "Backtest again"}}</button>
@@ -101,7 +101,7 @@
 <tr><th scope="row">{{t "Of them, that no other rule caught"}}</th><td class="n">{{.Alone}}</td></tr></tbody>
 </table></div>
 <p class="hint">{{t "A rule may wait for a rare incident, and incidents nobody wrote down count against it: retiring it is a person's call."}}</p>
-{{with .Would}}<p class="bad">{{t "While it was off, it would have caught: %s." (join . ", ")}}</p>{{end}}{{end}}
+{{with .Would}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{t "While it was off, it would have caught: %s." (join . ", ")}}</p>{{end}}{{end}}
 {{if and (not .Backtest) (not .Evidence.Record) (ne .Kind "says")}}<p class="quiet">{{t "None was kept with it."}}</p>{{end}}
 </section>
 

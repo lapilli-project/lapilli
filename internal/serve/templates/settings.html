@@ -16,20 +16,20 @@
 <h2 id="config">{{t "Declared configuration"}}</h2>
 {{with .Config}}
 <p>{{tbdi "Teams, quiet windows, reports and roles are declared in %s: serve.config in the Helm chart's values. What it declares is changed there alone." .File}} {{t "A file is kept to once it has been read the same twice in a row, 15 seconds or more apart: a new one, usually within half a minute."}} {{if .Prune}}{{t "What it no longer declares is deleted then (--config-prune), but a team something names, which is the UI's again; a role is taken away."}}{{else}}{{t "What it no longer declares is the UI's again then, but a role, which is taken away, and what is past the UI's most, which is deleted; with --config-prune, the rest is deleted too."}}{{end}}</p>
-{{if not .WriteFailed.IsZero}}<p class="quiet">{{if .Again}}{{t "The ledger couldn't be kept again to the file it is kept to, tried again for what couldn't be kept of it, at %s: it is tried again at %s, and the log says why." (at $loc .WriteFailed) (at $loc .Retry)}}{{else}}{{t "A new file was read twice in a row, but the ledger couldn't be kept to it at %s: it is tried again at %s, and the log says why." (at $loc .WriteFailed) (at $loc .Retry)}}{{end}}</p>{{end}}
+{{if not .WriteFailed.IsZero}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{if .Again}}{{t "The ledger couldn't be kept again to the file it is kept to, tried again for what couldn't be kept of it, at %s: it is tried again at %s, and the log says why." (at $loc .WriteFailed) (at $loc .Retry)}}{{else}}{{t "A new file was read twice in a row, but the ledger couldn't be kept to it at %s: it is tried again at %s, and the log says why." (at $loc .WriteFailed) (at $loc .Retry)}}{{end}}</p>{{end}}
 {{if not .Pending.IsZero}}<p class="quiet">{{t "A new file was read at %s, once: the ledger is kept to it once it is read the same again." (at $loc .Pending)}}</p>{{end}}
 {{if not .PendingSince.IsZero}}<p class="quiet">{{t "Files other than the one the ledger is kept to have been read since %s, none of them the same twice in a row: none is kept to until one is." (at $loc .PendingSince)}}</p>{{end}}
 {{if .Applied.IsZero}}<p class="quiet">{{t "Not kept to it yet."}}</p>{{else}}<p class="quiet">{{t "The ledger is kept to it as of %s, the file's hash beginning %s." (at $loc .Applied) .Hash}}</p>{{end}}
 {{if .Problems}}{{template "configproblems" (on $ .)}}{{end}}
 {{else}}<p>{{t "Nothing is declared: lapilli serve was started without --config, so teams, quiet windows, reports and roles are made here, in the UI."}}</p>{{end}}
-{{if .GivenBackN}}<p>{{t "%d of what a file declared were given back to the UI as lapilli serve ran without --config. Until the UI changes one, the next --config that doesn't declare it again lets it go: a role is taken away, and the rest is the UI's for good, or, with --config-prune, deleted." .GivenBackN}} {{t "To keep one as the UI's, change it, or keep it here. A role can't be changed: keep it here, or delete it on the Roles page and give it again. Given back stays given back: a --config put back long after still lets go of what it doesn't declare."}}</p>
+{{if .GivenBackN}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "%d of what a file declared were given back to the UI as lapilli serve ran without --config. Until the UI changes one, the next --config that doesn't declare it again lets it go: a role is taken away, and the rest is the UI's for good, or, with --config-prune, deleted." .GivenBackN}} {{t "To keep one as the UI's, change it, or keep it here. A role can't be changed: keep it here, or delete it on the Roles page and give it again. Given back stays given back: a --config put back long after still lets go of what it doesn't declare."}}</p>
 {{with .GivenBack}}<ul>{{range .}}<li>{{t .What}}: <code>{{.Name}}</code>{{with .Team}}, {{t "Team"}} <code>{{.}}</code>{{end}}<form class="track" method="post" action="/settings/given-back"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="id" value="{{.ID}}"><button class="quiet-button">{{t "Keep as the UI's"}}</button></form></li>{{end}}</ul>
 <form method="post" action="/settings/given-back"><input type="hidden" name="all" value="1"><button>{{t "Keep them all as the UI's"}}</button></form>{{end}}
 {{if $ro}}<p>{{template "off" (offOf $ "Keep them all as the UI's" "admin" "givenback-why")}}</p>{{end}}{{end}}
 <p>{{if $.Status.Admin}}<a href="/config.yaml">config.yaml</a> {{t "gives them all, declared and made here alike, as --config takes them, to commit."}}{{else}}{{t "An admin can have them all as --config takes them, from config.yaml."}}{{end}}</p>
 
 <h2>{{t "Changes to the rules"}}</h2>
-<p>{{if not $.Status.ChangesOn}}{{t "Off: proposals are kept, and nothing is applied. Turned on with --changes."}}{{else if $.Status.ChangesPaused}}{{t "On, and paused."}}{{else}}{{t "On."}}{{end}} <a href="{{$.Link "/proposals"}}">{{t "Proposals"}}</a></p>
+<p>{{if not $.Status.ChangesOn}}{{t "Off: proposals are kept, and nothing is applied. Turned on with --changes."}}{{else if $.Status.ChangesPaused}}<span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "On, and paused."}}</span>{{else}}{{t "On."}}{{end}} <a href="{{$.Link "/proposals"}}">{{t "Proposals"}}</a></p>
 {{if and $.Status.ChangesOn $.Status.Admin}}<form method="post" action="/settings/changes">{{if $.Status.ChangesPaused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>{{else if $.Status.ChangesOn}}<p>{{if $.Status.ChangesPaused}}{{template "off" (offOf $ "Resume changes" "admin" "pause-why")}}{{else}}{{template "off" (offOf $ "Pause changes" "admin" "pause-why")}}{{end}}</p>{{end}}
 
 {{with .Notify}}{{template "notifystatus" (on $ .)}}{{end}}
@@ -57,8 +57,8 @@
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Kind"}}</th><th scope="col">{{t "Started"}}</th><th scope="col">{{t "Period"}}</th><th scope="col" class="n">{{t "Firings"}}</th><th scope="col">{{t "Not replayed"}}</th><th scope="col">{{t "Error"}}</th></tr></thead>
 <tbody>{{range .Runs}}
-<tr{{if .Error}} class="missed"{{end}}><td>{{t .Kind}}</td><td class="t">{{at $loc .Started}}</td><td class="t">{{at $loc .From}} → {{at $loc .To}}</td><td class="n">{{.Firings}}</td>
-<td>{{range $rule, $why := .Failed}}{{$rule}}: {{$why}}<br>{{end}}</td><td>{{.Error}}</td></tr>{{else}}<tr><td colspan="6" class="quiet">{{t "None yet."}}</td></tr>{{end}}</tbody>
+<tr><td>{{t .Kind}}</td><td class="t">{{at $loc .Started}}</td><td class="t">{{at $loc .From}} → {{at $loc .To}}</td><td class="n">{{.Firings}}</td>
+<td>{{with .Failed}}<span class="status-warn">{{range $rule, $why := .}}{{$rule}}: {{$why}}<br>{{end}}</span>{{end}}</td><td>{{with .Error}}<span class="status-bad"><span aria-hidden="true">✕</span> {{.}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="6" class="quiet">{{t "None yet."}}</td></tr>{{end}}</tbody>
 </table></div>
 {{if or .Sources .Copying}}<h2>{{t "Firings copied in"}}</h2>
 <div class="scroll"><table>
@@ -69,25 +69,25 @@
 {{with .Check}}<h2>{{t "The replay beside what really fired"}}</h2>
 <p>{{if .To.IsZero}}{{t "Not yet: a day is set beside what really fired once the runs won't replay it again."}}{{else}}{{t "Set beside %s up to %s." (join .Series ", ") (at $loc .To)}}{{end}}
 {{with .Alarms}}<br>{{t "For a cloud's own alarms that are replayed, their history copied in under %s stands in: a day is set beside it once its copies reach past it." (join . ", ")}}{{end}}
-{{with .Empty}}<br><strong>{{t "%s held nothing over %s: the rules it is for weren't checked that day. A store may not keep it; --check-series names another." (join . ", ") (day $loc $.View.Check.EmptyDay)}}</strong>{{end}}
+{{with .Empty}}<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "%s held nothing over %s: the rules it is for weren't checked that day. A store may not keep it; --check-series names another." (join . ", ") (day $loc $.View.Check.EmptyDay)}}</strong>{{end}}
 {{with .Elsewhere}}<br>{{t "Really fired over the last week, with no rule given by that name: %s." (join . ", ")}}{{end}}</p>{{end}}
 {{with .OnCall}}<h2>{{t "On-call schedules"}}</h2>
 <div class="scroll"><table><thead><tr><th scope="col">{{t "Schedule"}}</th><th scope="col">{{t "Read"}}</th><th scope="col">{{t "Turns kept"}}</th><th scope="col">{{t "From and to"}}</th></tr></thead>
 <tbody>{{range .}}<tr><td>{{.Name}}</td><td class="t">{{if .OK.IsZero}}{{t "not yet"}}{{else}}{{at $loc .OK}}{{end}}</td><td class="n">{{.Turns}}</td><td class="t">{{if .Turns}}{{at $loc .From}} → {{at $loc .To}}{{end}}</td></tr>
-{{with .Err}}<tr><td colspan="4"><strong>{{t "The last read failed, and the turns kept stay: %s" .}}</strong></td></tr>{{end}}
+{{with .Err}}<tr><td colspan="4"><strong class="status-bad"><span aria-hidden="true">✕</span> {{t "The last read failed, and the turns kept stay: %s" .}}</strong></td></tr>{{end}}
 {{with .Unknown}}<tr><td colspan="4">{{t "Its turns name people --on-call doesn't, whose turns go by the team's hours: %s." (join . ", ")}}</td></tr>{{end}}
 {{with .Notes}}<tr><td colspan="4" class="quiet">{{t "Passed over in its feed: %s" (join . "; ")}}</td></tr>{{end}}{{end}}</tbody>
 </table></div>{{end}}
 {{with .Stopped}}<h2>{{t "Reports stopped"}}</h2>
-<p>{{t "Their team was removed, so they aren't sent until they name another: %s." (join . ", ")}} <a href="{{$.Link "/reports"}}">{{t "Reports"}}</a></p>{{end}}
+<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "Their team was removed, so they aren't sent until they name another: %s." (join . ", ")}} <a href="{{$.Link "/reports"}}">{{t "Reports"}}</a></p>{{end}}
 <h2>{{t "Changes made here"}}</h2>
 {{if .Changes}}<ul class="plain">{{range .Changes}}<li>{{at $loc .At}} {{.By}}: {{.What}}</li>{{end}}</ul>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
 {{/* What can't be kept of --config: why, for an admin; each one's line
 and kind, for anyone else, whom why could tell who holds a role. */}}
-{{define "configproblems"}}{{$lang := .P.Lang}}{{with .V}}<div class="warn" role="status">
-<p><span aria-hidden="true">⚠&#xFE0E;</span> {{if .Whole}}{{t "The file can't be used, so nothing in it was kept, and the ledger keeps what it last declared."}}{{else}}{{t "Some of what the file declares can't be kept: each of those is kept as it was, and the rest is kept."}}{{end}}</p>
+{{define "configproblems"}}{{$lang := .P.Lang}}{{with .V}}<div class="notice {{if .Whole}}status-bad{{else}}status-warn{{end}}" role="status">
+<p>{{if .Whole}}<span class="sign" aria-hidden="true">✕</span>{{else}}<span class="sign" aria-hidden="true">⚠&#xFE0E;</span>{{end}} {{if .Whole}}{{t "The file can't be used, so nothing in it was kept, and the ledger keeps what it last declared."}}{{else}}{{t "Some of what the file declares can't be kept: each of those is kept as it was, and the rest is kept."}}{{end}}</p>
 <ul>{{range .Problems}}<li>{{.Shown $lang}}</li>{{end}}{{with .More}}<li>{{t "and %d more" .}}</li>{{end}}</ul>
 {{if .Brief}}<p>{{t "An admin sees why each can't be kept, on the Settings page."}}</p>{{end}}
 </div>{{end}}{{end}}

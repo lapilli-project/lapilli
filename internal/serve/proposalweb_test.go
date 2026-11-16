@@ -44,7 +44,7 @@ func TestProposalPage(t *testing.T) {
 		`<h1>#` + itoa(id) + ` <bdi>Errors</bdi>&#39;s for, <bdi>2m</bdi> → <bdi>15m</bdi></h1>`,
 		`<title>#` + itoa(id) + ` Errors&#39;s for, 2m → 15m · Lapilli</title>`,
 		`<li>Fix</li><li><a href="/proposals">Proposals</a></li><li><span aria-current="page"><bdi>#` + itoa(id) + `</bdi></span></li>`,
-		`<span class="badge st-wait"><span aria-hidden="true">◷</span> awaiting approval</span>`,
+		`<span class="badge st-wait status-warn"><span aria-hidden="true">◷</span> awaiting approval</span>`,
 		`made by bo@example.com`, `a pull request`,
 		// The diff, unified, its lines alone.
 		`<pre class="diff"><span class="same"> Errors (shop)</span>`, `<span class="del">-for: 2m</span>` + "\n" + `<span class="ins">&#43;for: 15m</span>`,
@@ -52,7 +52,7 @@ func TestProposalPage(t *testing.T) {
 		// The file the pull request changes.
 		`The file as the pull request changes it: <bdi>shop.yaml</bdi>`, `<span class="ins">&#43;        for: 15m</span>`,
 		// The backtest: fired 21 → 1, caught 1 → 1.
-		`<th scope="row">Fired</th><td class="n">21</td><td class="n">1</td><td class="n"> <span class="delta better">−20 better</span></td>`,
+		`<th scope="row">Fired</th><td class="n">21</td><td class="n">1</td><td class="n"> <span class="delta better status-ok">−20 better</span></td>`,
 		`<th scope="row">Caught something</th><td class="n">1</td><td class="n">1</td><td class="n"> <span class="delta">±0</span></td>`,
 		`<th scope="row">Incidents missed that the other catches</th><td class="n">0</td><td class="n">0</td>`,
 	} {
@@ -60,7 +60,7 @@ func TestProposalPage(t *testing.T) {
 			t.Errorf("no %s", want)
 		}
 	}
-	if strings.Contains(body, `class="warn"`) {
+	if strings.Contains(body, `<p class="notice status-bad">`) {
 		t.Error("a warning, missing nothing more")
 	}
 	// Side by side: a table, headed now and as proposed; every line.
@@ -96,12 +96,12 @@ func TestProposalMissesMore(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, body, _ := ui(t, h, http.MethodGet, "/proposals/"+itoa(again), cy, "", nil)
-	warn := strings.Index(body, `<p class="warn">`)
+	warn := strings.Index(body, `<p class="notice status-bad">`)
 	table := strings.Index(body, `<table class="backtest">`)
 	if warn < 0 || table < warn || !strings.Contains(body[warn:table], `As proposed, it misses 1 incident it catches now: <a href="/incidents/INC-1"><bdi>INC-1</bdi></a>.`) {
 		t.Errorf("no warning above the table:\n%s", body[max(0, warn):max(0, table)])
 	}
-	if !strings.Contains(body, `<th scope="row">Incidents missed that the other catches</th><td class="n">0</td><td class="n">1</td><td class="n"> <span class="delta worse">&#43;1 worse</span></td>`) {
+	if !strings.Contains(body, `<th scope="row">Incidents missed that the other catches</th><td class="n">0</td><td class="n">1</td><td class="n"> <span class="delta worse status-bad">&#43;1 worse</span></td>`) {
 		t.Error("the table doesn't say one more is missed")
 	}
 }
@@ -538,7 +538,7 @@ func TestUndoPage(t *testing.T) {
 		`It puts back the rule as it was before the change it undoes: <a href="/proposals/` + n + `">#` + n + `</a>. An agent proposed #` + n + `, for bo@example.com.`,
 		`<th scope="col" class="n">With #` + n + `</th><th scope="col" class="n">After undoing it</th>`,
 		// 1 firing with the change, 21 once it is undone.
-		`<th scope="row">Fired</th><td class="n">1</td><td class="n">21</td><td class="n"> <span class="delta worse">&#43;20 worse</span></td>`,
+		`<th scope="row">Fired</th><td class="n">1</td><td class="n">21</td><td class="n"> <span class="delta worse status-bad">&#43;20 worse</span></td>`,
 		`The backtest of #` + n + `, replayed from`,
 		`Caught sooner once undone: <a href="/incidents/INC-1"><bdi>INC-1</bdi></a>.`,
 	} {
@@ -546,7 +546,7 @@ func TestUndoPage(t *testing.T) {
 			t.Errorf("no %s", want)
 		}
 	}
-	for _, not := range []string{"approve this at once", "What whoever proposed it said", "from agent", `class="warn"`, "Caught later as proposed", "An agent proposed this"} {
+	for _, not := range []string{"approve this at once", "What whoever proposed it said", "from agent", `<p class="notice status-bad">`, "Caught later as proposed", "An agent proposed this"} {
 		if strings.Contains(body, not) {
 			t.Errorf("the undo's page has %q", not)
 		}
@@ -558,14 +558,14 @@ func TestUndoPage(t *testing.T) {
 	ev.Backtest.Lost = []string{"INC-1"}
 	b, _ := json.Marshal(ev)
 	ledgerExec(t, s, "UPDATE proposals SET evidence = ? WHERE id = ?", string(b), id)
-	if body = page(); strings.Contains(body, `class="warn"`) || !strings.Contains(body, `Caught once undone, missed with #`+n+`: <a href="/incidents/INC-1">`) {
+	if body = page(); strings.Contains(body, `<p class="notice status-bad">`) || !strings.Contains(body, `Caught once undone, missed with #`+n+`: <a href="/incidents/INC-1">`) {
 		t.Error("undoing a change that missed an incident warns, or doesn't say it catches it")
 	}
 	ev.Backtest.Gained = []string{"INC-2"}
 	b, _ = json.Marshal(ev)
 	ledgerExec(t, s, "UPDATE proposals SET evidence = ? WHERE id = ?", string(b), id)
 	body = page()
-	warn := strings.Index(body, `<p class="warn">`)
+	warn := strings.Index(body, `<p class="notice status-bad">`)
 	table := strings.Index(body, `<table class="backtest">`)
 	if warn < 0 || table < warn || !strings.Contains(body[warn:table], `Undone, it misses 1 incident it catches with #`+n+`: <a href="/incidents/INC-2"><bdi>INC-2</bdi></a>.`) {
 		t.Errorf("no warning for what undoing misses:\n%s", body[max(0, warn):max(0, table)])

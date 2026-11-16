@@ -177,7 +177,7 @@ func TestRuleChecksCounted(t *testing.T) {
 			}
 			if row.Checks > 0 {
 				_, page, _ := get(t, h, "/rules/"+url.PathEscape(row.Name)+"?"+q)
-				if !strings.Contains(page, fmt.Sprintf(`<details class="checks" id="checks"><summary><span aria-hidden="true">⚠&#xFE0E;</span> %d to check</summary>`, row.Checks)) {
+				if !strings.Contains(page, fmt.Sprintf(`<details class="checks" id="checks"><summary class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> %d to check</summary>`, row.Checks)) {
 					t.Errorf("/rules/%s?%s: no list of %d to check", row.Name, q, row.Checks)
 				}
 			}

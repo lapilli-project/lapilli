@@ -2005,4 +2005,15 @@ var funcs = template.FuncMap{
 			V any
 		}{p, v}
 	},
+	// status is the class that colours a state (statusKinds), and
+	// stateBadge a proposal's state's badge, on any page that shows it.
+	"status":     statusClass,
+	"stateBadge": badgeOf,
+	"sign":       statusSign,
+	// allClear is an empty state that says all is well (ok, with its
+	// sign): nothing to look at. Any other is said in no colour.
+	"allClear": func(e emptyView) emptyView {
+		e.Clear = true
+		return e
+	},
 }

@@ -20,8 +20,9 @@ type manageCard struct {
 	Fact, One string
 	N         int
 	At        time.Time
-	// Warn is a text to translate, of something wrong there.
-	Warn string
+	// Warn is a text to translate, of something wrong there, and Kind
+	// its status: bad when nothing of it can be used, warn otherwise.
+	Warn, Kind string
 }
 
 type manageView struct {
@@ -59,9 +60,9 @@ func (s *Server) managePage(r *http.Request) (any, error) {
 	switch c := s.shownStatus().Config; {
 	case c == nil || len(c.Problems) == 0:
 	case c.Whole:
-		v.Cards[2].Warn = "The config file can't be used: the ledger keeps what it last declared."
+		v.Cards[2].Warn, v.Cards[2].Kind = "The config file can't be used: the ledger keeps what it last declared.", "bad"
 	default:
-		v.Cards[2].Warn = "Some of what the config file declares can't be kept."
+		v.Cards[2].Warn, v.Cards[2].Kind = "Some of what the config file declares can't be kept.", "warn"
 	}
 	if s.role(r) < admin {
 		v.Cards = append(v.Cards[:1], v.Cards[2:]...) // Roles, for admins alone

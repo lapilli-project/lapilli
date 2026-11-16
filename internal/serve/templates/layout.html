@@ -19,8 +19,8 @@
 </header>
 <div class="page">
 {{if or .Status.ChangesPaused .Status.Doing .Status.Err}}<section class="statuses" aria-label="{{t "Status"}}">
-{{if .Status.ChangesPaused}}<p class="status err">{{t "Changes to the rules are paused: nothing is applied or handed to a recipe."}} <a href="{{.Link "/proposals"}}">{{t "Proposals"}}</a></p>{{end}}
-{{with .Status}}{{if .Doing}}<p class="status">{{.Doing}}{{if .Judged}}: {{.Judged}}%{{end}}</p>{{end}}{{if .Err}}<p class="status err">{{.Err}}</p>{{end}}{{end}}
+{{if .Status.ChangesPaused}}<p class="status notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "Changes to the rules are paused: nothing is applied or handed to a recipe."}} <a href="{{.Link "/proposals"}}">{{t "Proposals"}}</a></p>{{end}}
+{{with .Status}}{{if .Doing}}<p class="status notice status-info"><span class="sign" aria-hidden="true">↻</span> {{.Doing}}{{if .Judged}}: {{.Judged}}%{{end}}</p>{{end}}{{if .Err}}<p class="status notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{.Err}}</p>{{end}}{{end}}
 </section>{{end}}
 <main id="main">
 <nav class="crumbs" aria-label="{{t "Breadcrumb"}}"><ol>{{with .Crumb}}{{if .Group}}<li>{{with .GroupHref}}<a href="{{$.Link .}}">{{t $.Crumb.Group}}</a>{{else}}{{t $.Crumb.Group}}{{end}}</li>{{end}}{{if .Name}}<li>{{if .Item}}<a href="{{$.Link .Href}}">{{t .Name}}</a>{{else}}<span aria-current="page">{{t .Name}}</span>{{end}}</li>{{end}}{{if .Item}}<li><span aria-current="page"><bdi>{{or $.Short $.Title}}</bdi></span></li>{{end}}{{end}}</ol></nav>
@@ -48,8 +48,9 @@ screen opens and the sidebar a wide one keeps, and shown one at a time. */}}
 {{define "action"}}{{if .Href}}<a class="button" href="{{.Href}}">{{t .Label}}</a>{{else}}<span class="action-off"><button type="button" disabled aria-describedby="action-why">{{t .Label}}</button> <span id="action-why" class="why">{{t .Why}}</span></span>{{end}}{{end}}
 
 {{/* An empty state: nothing judged yet (first), nothing matching
-(notfound), or nothing left to do (done). */}}
-{{define "empty"}}<div class="empty empty-{{.Kind}}">{{with .Title}}<p class="empty-title">{{t .}}</p>{{end}}{{with .Text}}<p class="quiet">{{t .}}</p>{{end}}{{with .Links}}<p class="row">{{range .}}<a href="{{.Href}}">{{t .Name}}</a>{{end}}</p>{{end}}</div>{{end}}
+(notfound), or nothing left to do (done); all clear (Clear), ok, only where
+nothing stands out on the overview. */}}
+{{define "empty"}}<div class="empty empty-{{.Kind}}{{if .Clear}} empty-clear{{end}}">{{with .Title}}<p class="empty-title">{{if $.Clear}}<span class="status-ok"><span aria-hidden="true">✓</span> {{t .}}</span>{{else}}{{t .}}{{end}}</p>{{end}}{{with .Text}}<p class="quiet">{{t .}}</p>{{end}}{{with .Links}}<p class="row">{{range .}}<a href="{{.Href}}">{{t .Name}}</a>{{end}}</p>{{end}}</div>{{end}}
 
 {{define "bottom"}}
 </main>
