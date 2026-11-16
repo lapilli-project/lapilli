@@ -49,25 +49,34 @@
   settings are set (started with, in effect, changed by, back to the
   start); empty or `off` turns the signal off, and `/settings.yaml` gives
   them as the chart's `impact` and `--impact-for`. One saved is checked
-  first: as PromQL as Lapilli reads it, 4 KB at most, `--impact-for` from
-  the step to a day, then once with Prometheus, whose parser has the last
-  word. "Try it on the last four weeks" shows, saving nothing, the windows
-  it would find and which would count, the verdict in effect and with it
-  (weeks with a record, incidents, firings judged and with no record,
-  precision, noisy rules, incidents missed), and the proposals waiting for
-  approval it would hold for a new backtest. A try reads Prometheus within
-  `--timeout` and `--max-samples`, one heavy request at a time, twelve an
-  admin an hour with saves, and the page is kept until the ledger changes.
+  first: as PromQL as Lapilli reads it, 4,096 characters at most, no range
+  or subquery over a day, `--impact-for` from the step to a day; then read
+  in full over the last four weeks, by the save or a try within half an
+  hour, within 90 seconds and `--max-samples`, or nothing is saved. "Try
+  it on the last four weeks" shows, saving nothing, the windows it would
+  find and which would count, where the data of each selector it reads
+  begins, the verdict in effect and with it (the weeks before the span
+  that would lose their record, weeks with a record, incidents, firings
+  judged and with no record, precision, noisy rules, incidents missed),
+  and the proposals waiting for approval saving it would hold for a new
+  backtest; trying the criterion in effect changes nothing. A try is an
+  admin's, from the Settings page or typed, reads within 90 seconds and
+  `--max-samples`, one heavy request at a time, twelve an admin an hour
+  with the saves that read (in the ledger with replicas), and the page is
+  kept until the ledger changes.
 - **Incident sources.** The Settings page lists where incidents come from,
   and whether each is alive, in the status colours: written in Lapilli;
   each source a tool's job copies in through the incidents port, by its
   ids' prefix (`PD-` PagerDuty, a Jira project's key), with when it last
-  wrote, unchanged or not, quiet after two days with nothing; the
-  incidents file and the impact signal, last read or failing with why;
-  each with how many incidents in four weeks, and the record gone quiet.
-  Not set up is said in no colour, with a link to the recipes. No token is
-  shown; the port, the token's file and the incidents file's path to an
-  admin alone. The Incidents page links to it.
+  wrote, unchanged or not, quiet after two days with nothing, the quiet
+  first; the incidents file, last read or failing with why; the impact
+  signal, last read with the criterion in effect, quiet when not read for
+  two runs, "no data" when a selector it reads has none, with where each
+  selector's data begins; each with how many incidents in four weeks, and
+  the record gone quiet. Not set up is said in no colour, with a link to
+  the recipes. No token is shown; the port, the token's file and the
+  incidents file's path, in its error too, to an admin alone. The
+  Incidents page links to it.
 
 ### Changed
 
@@ -95,6 +104,44 @@
   backtest's weeks flip is held for a new backtest, as with an incident
   written or taken away. The overview's weekly panels the digest works out
   catch up at the next digest.
+
+- **The impact signal's record is what the ledger holds of it.** The
+  criterion read (expression and `--impact-for`) is kept beside
+  `impact_since`. A new one, saved in the UI or started with, leaves the
+  record as it was until the replica that leads reads it again over the
+  last four weeks: its windows take the place of those found from then on,
+  the record is kept by it from then, and the weeks are judged again, a
+  week a write. A decision about a window found before holds for a new one
+  it covers half of or more (the one covering most, confirmed before
+  dismissed on a tie), and the tasks and comments on a window no longer
+  there move to the one covering most of it, or are listed on the Cleanup
+  page; a window starting in the same minute as one kept is kept too. The
+  weeks before keep only the windows the one before found, as incidents.
+  One that fails to be read again is tried again later, up to a day
+  apart. A ledger kept by an earlier lapilli is taken to have been read
+  with the command line's criterion, and another saved is read again. A
+  backtest keeps the criterion whose windows it was judged against, and a
+  proposal waiting for approval is held for a new backtest once another is
+  read in their place. No schema change; `verdict.Semantics` is
+  unchanged. The overview's weekly panels the digest works out catch up at
+  the next digest.
+
+### Fixed
+
+- **The impact signal claimed weeks it had no data for.** From 0.41.0 to
+  0.47.0, `lapilli serve --impact` kept the record of every week from
+  where its runs first read the signal, whether the expression's metrics
+  had data there or not: a recording rule newer than the alerts judged, a
+  metric added later, retention shorter than the span. Firings in those
+  weeks were judged as if no user was hurt, black when no incident was
+  written down, and proposals backtested over them held. Now, for each
+  selector the expression reads, the first sample of any of its series is
+  found; the record starts no earlier than the first whole week after the
+  latest of them, as only there did every selector have data, and not at
+  all while one has none. On upgrade, a ledger's `impact_since` moves
+  forward to it at the first round that runs, never back; the weeks before
+  have no record unless an incident keeps them. This looks for where data
+  begins, per selector, not for gaps after.
 
 ## [0.48.0] - 2026-11-16
 

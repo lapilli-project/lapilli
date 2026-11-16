@@ -142,7 +142,7 @@ rest are written in the template that draws them.
 | Kind | States |
 |---|---|
 | ok | a rule's `○ OK`, of a rule some of whose firings were judged; a proposal `✓ approved`, `● applied`; a task done; a rule to keep (`✓ keep`); a rule change "as predicted"; Outcomes' Runs tile, "all ran", the runs up to date; notifications, "Last sent from the outbox"; an incident caught (its "Caught" cell); the overview's "Nothing to look at now", the one empty state that says all is well (`allClear`); a change "better"; the incidents chart's caught; an incident source working (`✓ working`) |
-| warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Outcomes' tile, the Run history page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Outcomes' tile and note, the overview's line); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted"; an incident source gone quiet (`⚠ quiet`), proposals a try of the incident criteria would hold |
+| warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Outcomes' tile, the Run history page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Outcomes' tile and note, the overview's line); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted"; an incident source gone quiet (`⚠ quiet`), an impact signal a selector of which has no data (`⚠ no data`), proposals a try of the incident criteria would hold |
 | bad | a run's error, and the server's error banner; `--config` that can't be used at all, or that the ledger couldn't be kept to; notices given up on; the digest failed; an on-call schedule's read failed; Outcomes' Runs tile, "n failed"; a task overdue; a proposal closed as failed, and its reason; a backtest that misses incidents; would have caught while it was off; an incident missed (`✗ nothing fired`, "Nothing fired."), the missed count of the table of the weeks; a search not understood; a change "worse"; an incident source failing (`✕ failing`, and why), the incident criteria that failed to be read again, a try that couldn't read them |
 | info | a proposal `↻ being applied`; `✎ Proposed`; a quiet window `● active now`; the server's work (`↻`); catching up on the overview; behind on Outcomes, and its Runs tile ("all ran") while it is; a rule change "measuring", "rule written"; `⇣ Recorded only`; a task open or doing, and the overview's link to one ("task #n"); a rule to tune (`± tune`); the reason of a proposal approved or applied (it waited while its rule fired); an incident source set up and not read yet (`↻ waiting`), the incident criteria waiting to be read again |
 | unknown | `? No record`, the weeks' "no record" tag, the notes of weeks with no record; "–"; a backtest with no record (`no_record`); a rule none of whose firings was judged (`? No record`; `ruleRow.PerfClass`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review, and the reason of one refused; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; a rule change superseded, without a week before it, taken away or replayed again; Outcomes' Runs tile before any run; an incident source not set up (`? not set up`), none written in four weeks; the impact signal with no Prometheus to read it from |
@@ -1039,47 +1039,69 @@ both, `impact:` and `--impact-for` among `extraArgs`, to commit.
 Saving one (`POST /settings/impact`, an admin's, the same site) checks it
 first, refusing with the field's own sentence: as PromQL as Lapilli reads
 it (`rules.Scope`: strings, selectors, ranges and brackets closed; Lapilli
-has no PromQL parser of its own), 4 KB at most, no character that doesn't
-show, `--impact-for` from the step to a day; then, a new expression, once
-with Prometheus, an instant query whose parser has the last word: what it
-refuses, or a Prometheus that can't be asked, saves nothing. Saved, the
-replica that leads reads it again over the last four weeks
-(`impactAgain`, below in serve.md), and judges them again; until then the
-page says it waits, or, failed, why and when it is tried again.
+has no PromQL parser of its own), 4,096 characters at most as the field
+counts them, no character that doesn't show, no range or subquery over a
+day, `--impact-for` from the step to a day. Then a new criterion (another
+expression, or another `--impact-for`) is read in full over the span a try
+reads, as a try reads it, unless a try did within half an hour:
+Prometheus's parser has the last word, and what can't be read within 90
+seconds and `--max-samples` saves nothing, said why. Saved, the replica
+that leads reads it again over the last four weeks (`impactAgain`, serve.md
+"The impact criterion"), and judges them again; until then the record is
+the ledger's, by the one before, and the page says it waits, or, failed,
+why and when it is tried again: said only when a read again will happen
+(`againPlan`), not of a new ledger whose runs read it from their first.
+The section says from when the record is kept, and where the data of each
+selector the criterion reads begins (from a time, since one or before, or
+none): one that begins later than the others is named, as it holds the
+record back; one with none at all keeps no record, said as a warning.
 
 "Try it on the last four weeks" is a GET of the same form
-(`/settings?impact-try=1&impact=…&impact-for=…#impact-tried`), an admin's
-and from this site (`Sec-Fetch-Site` neither `cross-site` nor
-`same-site`), checked as saving is, that writes nothing. Over the span
-saving would read again (from the Monday four weeks before the cursor's
-week, or where the runs began), it shows, below the form as typed:
+(`/settings?impact-try=1&impact=…&impact-for=…#impact-tried`, its query
+long enough for an expression the field takes), an admin's and from this
+site's page or typed (`Sec-Fetch-Site` same-origin or none, as an
+approval is; a client that says nothing is refused), checked as saving
+is, that writes nothing. Over the span saving would read again (from the
+Monday four weeks before the cursor's week, or where the runs began), it
+shows, below the form as typed:
 
 - the windows the expression finds, 50 at most, the rest counted, with
   start, end, length and labels, and whether each would count: not when an
-  incident written down covers it ("no: written down as INC-1"), or what
-  was decided about a window found before over it holds ("no: dismissed
-  before");
+  incident written down covers it ("no: written down as INC-1"), or a
+  decision about a window found before holds for it as reading it again
+  would keep it ("no: dismissed before");
+- where the data of each selector begins over the span, and from when the
+  signal would keep the record: "has data from …; the weeks before it keep
+  no record by it", or, a selector with none, that it would keep none;
 - the verdict in effect and with it, judged alike (`verdict.Judge` over
   the span's firings, quiet windows' aside, with the incidents that keep
-  its record): weeks with a record, incidents judged against and of them
-  impact windows, firings judged and with no record, precision, noisy
-  rules, incidents missed; a measure that changes, in bold;
-- the proposals waiting for approval it would hold until they are
-  backtested again, 10 named, the rest counted: their backtest's weeks
-  would have a record where they had none, or none where they had one
-  (`staleRecorded`, `staleUnrecorded`);
+  its record): the weeks before the span the record is kept of now, which
+  it would keep by incidents alone; weeks with a record, incidents judged
+  against and of them impact windows, firings judged and with no record,
+  precision, noisy rules, incidents missed; a measure that changes, in
+  bold;
+- the proposals waiting for approval saving it would hold until they are
+  backtested again, as proposalsNow will once it is read again, 10 named,
+  the rest counted: judged against the windows of another criterion
+  (`staleImpact`), or their backtest's weeks would have a record where
+  they had none, or none where they had one;
 - that nothing was saved, and that, saved, the overview's weekly panels
   the digest works out (the longer `for`s it suggests, the rules that
   fired as often as a noisy one with no record) catch up at the next
   digest: they are worked out by replaying the rules, and aren't worked
   out again on a save.
 
-What it couldn't read (Prometheus's error, a check's) is said in the
-section, the form kept as typed. A try reads Prometheus over five weeks at
-most, within `--timeout` and `--max-samples`, in the heavy turn (one at a
-time, 100,000 firings at most), twelve an admin an hour with the saves
-that check a new expression (`impactTries`); the page is kept until the
-ledger changes, so asking for it again reads nothing again.
+Tried, the criterion the ledger holds all along (the runs', no read again
+due) changes nothing, and the try says so: the verdict with it is the one
+in effect, and no proposal is held. What it couldn't read (Prometheus's
+error, a check's) is said in the section, the form kept as typed. A try
+reads Prometheus over five weeks at most, within 90 seconds and
+`--max-samples`, in the heavy turn (one at a time, 100,000 firings at
+most, said in its own words past them), twelve an admin an hour with the
+saves that read (in the ledger with replicas); the page is kept until the
+ledger changes, so asking for it again reads nothing again. Its windows'
+labels are those of the series Prometheus gives Lapilli: an admin's to
+read (serve.md, "Security").
 
 ### Incident sources
 
@@ -1095,19 +1117,31 @@ it gave in four weeks, and what it is:
   ids' prefix as the recipes give them (`PD-` PagerDuty, `GH-` GitHub, a
   Jira project's key): when it last wrote, unchanged or not
   (`ledger.NoteReceived`, kept aside once in ten minutes by a replica),
-  `⚠ quiet` after two days with nothing ("is its job still running?");
-  a ledger from before shows when one of its incidents last changed. Set
-  up and with nothing yet, `↻ waiting`; not set up, `? not set up`, with
-  a link to the recipes;
-- the incidents file: last read, or `✕ failing` with why;
+  `⚠ quiet` after two days with nothing ("is its job still running?"),
+  listed first, so that one is never among those past the list (20); past
+  the 64 the ledger keeps, the others together; a ledger from before
+  shows when one of its incidents last changed. Set up and with nothing
+  yet, `↻ waiting`; not set up, `? not set up`, with a link to the
+  recipes;
+- the incidents file: last read, or `✕ failing` with why, its path an
+  admin's to read;
 - the impact signal: last read by a run (or read again), the windows found
-  in four weeks, or failing with Prometheus's error; off, `? not set up`.
+  in four weeks, and where each selector's data begins; `↻ waiting` until
+  it is read with the criterion in effect, `⚠ quiet` when not read for two
+  runs and more, `⚠ no data` when a selector it reads has none (no record
+  is kept by it), or failing with Prometheus's error; off,
+  `? not set up`.
 
 The record gone quiet (no incident written down in two weeks, Outcomes'
 rule) is said above the table, warn. No token is shown; the port and the
 token's file, and the incidents file's path, to an admin alone. The
 Incidents page links to the section. What the replica that leads saw (last
 reads, failures) is in its published status, for the others' pages.
+
+The Cleanup page lists, below the rules' names, the tasks and comments
+kept on impact windows read again that nothing found covers now (a task
+or a comment moves to the window found that covers most of the one it was
+on): each window's key, its tasks linked, its comments counted.
 
 ### The Administration page
 

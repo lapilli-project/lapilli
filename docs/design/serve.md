@@ -408,56 +408,109 @@ with no incident written down. They are kept in `settings` as the others
 are, the UI's over the command line's, `off` for none; settings.yaml gives
 them as the chart's `impact` and `--impact-for` in `extraArgs`.
 
-The record by the impact signal is kept by the criterion read, the
-expression and `--impact-for` (meta `impact_criterion`, beside
-`impact_since`; no schema change), so that a firing is judged by impact
-only where impact was read over its time with the criterion in effect:
+The record by the impact signal is what the ledger holds of it, and no
+more: the weeks the runs read it over, all along, with the criterion in
+effect then, and only those in which every selector it reads had data.
+Kept in meta, with no schema change: `impact_since`, `impact_criterion`
+(the expression and `--impact-for`), `impact_again` and `impact_data`.
 
-- In effect and read by the runs from `impact_since`, all along, it keeps
-  the record from then (`verdict.Options.ImpactFrom`). Another in effect
-  than the one the ledger has (just saved, not read yet) keeps none: the
-  weeks before weren't read with it.
-- Saved, or a new `--impact` the process was started with, the replica
-  that leads reads it again (`impactAgain`, before the runs), over the
-  last four weeks: from the Monday four weeks before the cursor's week, or
-  where the runs began, to the cursor, in one read within `--timeout` and
-  `--max-samples`. In one write (`ledger.ReadAgain`) its windows take the
-  place of the windows found from then on, keeping what people decided
-  about those they overlap, a window found before and on at the start
-  ends there, the stones are given again over the span, and
-  `impact_since` is its start: from then, the record is kept by it. The
-  weeks before keep the windows the one before found, as the incidents
-  they were when they were read, which keep the record of the weeks near
-  them as any incident does (two weeks); the signal read with the one
-  before keeps no more. One that fails is tried again an hour later, then
-  two, four, up to a day; the runs read it meanwhile from where they are,
-  keeping the record from their own start (a run that reads another
-  criterion than the runs before resets `impact_since` to its start, and
-  marks the read again due, `impact_again` `-`).
-- Turned off, the runs set `impact_since` to `none` and forget the
-  criterion, as before: no week is kept by the signal, and the windows
-  found stay, as incidents. Turned on again, it is read again over the
-  last four weeks.
-- A ledger an earlier lapilli kept, with `impact_since` and no criterion,
-  is taken to have been read with the one in effect; a new ledger's runs
-  read it from their first, and need no read again.
+- **Read by the runs.** From `impact_since`, all along, the record is
+  kept (`verdict.Options.ImpactFrom`, `ledger.ImpactKept.From`). A run
+  that reads another criterion than the runs before keeps `impact_since`
+  as it was (every week since was read, with the criterion in effect
+  then, and its windows are those the stones were given by) and marks a
+  read again due (`impact_again` `-`); so does one that reads it after a
+  run that didn't (turned on again). A window the one before found and on
+  past the run's start ends there.
+- **Saved.** A new criterion saved in the UI leaves the record as the
+  ledger holds it, by the one before, until it is read again; saving it
+  needs it read in full over the last four weeks first (by the save, or by
+  a try within half an hour), within 90 seconds and `--max-samples`, in
+  the heavy turn, or nothing is saved.
+- **Read again** (`impactAgain`, before the runs), when `againPlan` says:
+  a criterion saved, or started with, since the runs read another, or
+  turned on after they read none. Over the last four weeks, from the
+  Monday four weeks before the cursor's week, or where the runs began, to
+  the cursor, within `--timeout` and `--max-samples`. In one write
+  (`ledger.ReadAgain`) its windows take the place of those found from then
+  on; a window found before and on at the start ends there; what people
+  decided about a window found before holds for a new one it covers half
+  of or more, sharing a value of each label both have (of several, the
+  one that covers most, confirmed before dismissed on a tie); the tasks
+  and comments on a window no longer there move to the new one that
+  covers most of it, or stay on its key, listed on the Cleanup page; a
+  window starting in the same minute as one kept gets a key of its own;
+  and `impact_since` is the start, or where the data begins, later. The
+  span is pended, and judged again a week a write (`JudgePending`), as
+  `JudgeAll` does. The weeks before keep the windows the one before
+  found, as the incidents they were when read, which keep the record of
+  the weeks near them as any incident does (two weeks); the signal read
+  with the one before keeps no more. One that fails is tried again an
+  hour later, then two, four, up to a day; meanwhile the runs read it
+  from where they are, and the record stays as the ledger holds it.
+- **Marked as read all along**, with no read again, when the runs read
+  the criterion from where a read again would begin, or before, all
+  along: a new ledger's runs read it from their first. A ledger a lapilli
+  before 0.47 kept has `impact_since` and no criterion: it is taken to
+  have been read with the command line's criterion, and only that one is
+  marked; another, saved in the UI before the first round, or read by a
+  run then (`Found.ImpactAssumed`), is read again.
+- **Where the data begins** (`impactData`, after the runs, and in a read
+  again). For each selector the expression reads (`rules.Selectors`), the
+  first sample of any of its series, as `count(selector)` has it at a
+  step of an hour (coarser over a long span: one request a selector,
+  within `--timeout` and `--max-samples`): a series added late moves
+  nothing. Across selectors, the latest of those: the record starts no
+  earlier than the first whole week after it, as only there did every
+  selector have data, and not at all while one has none. It moves
+  `impact_since` forward, never back, on a first start, after an upgrade
+  (from the `impact_since` the ledger has), and once a criterion is read
+  again; a selector with data where the look began holds nothing back;
+  one with none yet is looked for again a round at a time, from where the
+  last look got to; once each had data, nothing is looked for again. The
+  Settings page, the try and the Incident sources row list each selector
+  and where its data begins, and name the one that holds the record back:
+  an expression of its own for it would keep the weeks before. This looks
+  for where data begins, per selector, not for gaps in it after, nor for
+  a selector whose data ended.
+- **Turned off**, the runs set `impact_since` to `none` and forget the
+  criterion and its data: no week is kept by the signal, and the windows
+  found stay, as incidents.
 
 Which weeks are kept is the same rule as before (`verdict.Record`), its
-input changed: `verdict.Semantics` isn't bumped. A proposal waiting for
-approval whose backtest's weeks flip, kept where they weren't or not
-where they were, is held until it is backtested again (`staleRecorded`,
-`staleUnrecorded`), as with an incident written or taken away; the try
-names them. The digest's results kept by week (the suggestions, the rules
-that fired as often as a noisy one with no record) are worked out by
-replaying the rules, and aren't worked out again on a save: the overview's
-weekly panels that read them catch up at the next digest, which the
-Settings page and the try say. A week with no record is shown no
-suggestion, whatever was kept for it.
+input changed: `verdict.Semantics` isn't bumped. Kept or not is worked out
+when a page, a proposal or a report reads it, so a record that moves needs
+no stones given again. A proposal waiting for approval whose backtest's
+weeks flip, kept where they weren't or not where they were, is held until
+it is backtested again (`staleRecorded`, `staleUnrecorded`); one whose
+backtest was judged against the windows of another criterion than the one
+read now (`evidence.Impact`, kept from this release on) is held too (`staleImpact`),
+read again or turned off. The try counts them as saving would. The
+digest's results kept by week (the suggestions, the rules that fired as
+often as a noisy one with no record) are worked out by replaying the
+rules, and aren't worked out again on a save: the overview's weekly panels
+that read them catch up at the next digest, which the Settings page and
+the try say. A week with no record is shown no suggestion, whatever was
+kept for it.
+
+**An upgrade.** A ledger 0.41 to 0.47 kept, whose `impact_since` is
+earlier than its expression's data: at the first round of the replica that
+leads after the upgrade, the criterion in effect, when it is the command
+line's and the runs read it from where a read again would begin, is marked
+as read all along (else it is read again over the last four weeks); after
+the runs, where each selector's data begins is looked for from
+`impact_since` to the cursor, and `impact_since` moves forward to the
+first whole week after the latest first sample. No stone changes; the
+weeks before it have no record unless an incident keeps them, their
+firings counted and not judged, and the proposals whose backtest had a
+record by those weeks alone are held.
 
 **Where incidents come from** is on the Settings page (ui.md, "Incident
 sources"). The incidents port keeps when each source last wrote, unchanged
 or not, by its ids' prefix (`PD-`, a Jira project's key), in meta
-`x.incidents-received` (64 sources at most, the oldest forgotten), once in
+`x.incidents-received` (64 sources at most: past them, one not known is
+kept among the others, `*`, so ids of no source can't push the known
+ones out), once in
 ten minutes by a replica and aside, emptying no page kept: what tells a
 job that stopped from a tool with nothing new. The incidents file's and
 the impact signal's last reads and failures are the leader's, in its
@@ -626,10 +679,19 @@ as instructions.
   change from it and approve it from the first, as two names in
   `--editors` would allow; keeping one person to one name is the identity
   provider's to do ([serveops.md](serveops.md), settled 2026-11-12).
+- **The incident criteria read Prometheus.** A try and a save that reads
+  run within 90 seconds and `--max-samples`, in the heavy turn, twelve an
+  admin an hour in all (kept in the ledger with replicas, so every replica
+  counts the same; in the process without, begun again when it starts),
+  a range or a subquery over a day refused. A try is an admin's, asked
+  for from the Settings page in a browser (`Sec-Fetch-Site` same-origin,
+  or none for one typed): it shows the labels of the series the expression
+  finds, so an admin reads, through it, any series' labels Lapilli's
+  Prometheus credentials can read. That is an admin's to do; it isn't
+  offered to anyone else.
 - **Heavy requests.** A report gives 100,000 firings at most, excused or
   not, and so do the settings tried over a week and the incident criteria
-  tried over the last four (which read Prometheus besides, within
-  `--timeout` and `--max-samples`, twelve an admin an hour). All take one turn at a
+  tried over the last four. All take one turn at a
   time, which the next waits up to 30 seconds for and then gets 503. The
   turn is held until the answer is written, with 30 seconds to write it:
   otherwise a client that doesn't read keeps one answer after another in

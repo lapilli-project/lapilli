@@ -1330,7 +1330,8 @@ changed there and tried on the last week first; so can the impact signal,
 on the last four weeks first: the windows it would find, and how the
 verdict would change. Saved, it is read again over the last four weeks,
 which are judged again, and keeps the record from then on, not of the
-weeks it wasn't read over. Beside it, Incident sources says where
+weeks it wasn't read over, nor of those before every metric it reads had
+data. Beside it, Incident sources says where
 incidents come from (written in Lapilli, each tool a job copies them in
 from, the incidents file, the impact signal) and whether each is alive.
 `/settings.yaml` gives the changes as Helm values to commit. Teams, quiet windows, reports and roles
