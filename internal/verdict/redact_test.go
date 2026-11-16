@@ -53,7 +53,7 @@ func redactedReport(t *testing.T) *Report {
 	r.Suggestions = []Suggestion{{Rule: "PaymentsQueueStuck", For: 0, NewFor: 10 * time.Minute, Before: r.Rules[0], After: r.Rules[0]}}
 	reached := 0.8
 	r.NearMisses = []NearMiss{{Incident: "INC-4712", Rule: "CheckoutApiErrors", Labels: map[string]string{"service": "checkout-svc", "instance": "db-primary-7"},
-		Before: r.Rules[1], Value: &ByValue{Op: ">", Bound: 1, Of: "sum(rate(http_errors_total[5m]))", Reached: &reached, New: 0.8}}}
+		Before: r.Rules[1], After: &r.Rules[1], Value: &ByValue{Op: ">", Bound: 1, Of: "sum(rate(http_errors_total[5m]))", Reached: &reached, New: 0.8}}}
 	clear := 3
 	r.Unrecorded = []Unrecorded{{Rule: "PaymentsQueueStuck", Firings: 12, Clear: &clear, Bound: "> 5", Alerts: 1, Team: "team-orange", Scope: "team-orange",
 		Top: []AlertCount{{Labels: map[string]string{"instance": "db-primary-7"}, Firings: 12, Team: "team-orange"}}}}
@@ -164,6 +164,9 @@ func TestRedactReport(t *testing.T) {
 		if rr.Unsupported != "" && (!rules.ReplayFailed(rr.Unsupported) || !strings.HasSuffix(rr.Unsupported, Redacted)) {
 			t.Errorf("why not replayed: %q", rr.Unsupported)
 		}
+	}
+	if nm := red.NearMisses[0]; nm.After == nil || nm.After.Rule != nm.Rule || nm.After.Group == "shop-alerts" || nm.After == &r.Rules[1] {
+		t.Errorf("a near miss's after: %+v", nm.After)
 	}
 	if len(red.Unreplayed) != 1 || !red.Unreplayed[0].Failed || red.NearMisses[0].Value.Of != Redacted || red.NearMisses[0].Value.New != 0.8 {
 		t.Errorf("unreplayed %+v, near miss %+v", red.Unreplayed, red.NearMisses[0].Value)

@@ -1260,20 +1260,25 @@ in the text, `--json`, `--markdown` and `--metrics`, and in what
 - incidents are `incident-01` on, by when they started, their titles left
   out, and those only what `--expect` holds a rule to names after them;
 - why a rule couldn't be replayed (a query, a host, the history's own
-  words), an expression a near miss quotes, and shifts naming an on-call
-  schedule are `[redacted]`, and a recording rule's name aliased
-  (`record-01`); whether a replay failed, and so the exit status, is as it
-  was.
+  words), an expression a near miss quotes, shifts naming an on-call
+  schedule and the time zones hours were counted in are `[redacted]`, and
+  a recording rule's name aliased (`record-01`); whether a replay failed,
+  and so the exit status, is as it was.
 
-Numbers, severities, durations and times stay. Aliases are the output's
-own, numbered in an order no name decides: run it again and `rule-01` may
-be another rule. With `--redact-key FILE` (16 bytes or more, such as
-`openssl rand -hex 32` writes) a name's alias is a keyed hash of it,
-`rule-3f9a1c04e2`, the same in every output made with the key; without
-the key, it can't be worked back to the name by trying names, as an
-unkeyed hash of a short name can. `lapilli serve` gives the same with
+Numbers, severities and durations stay, and times, in UTC whatever `--tz`
+says: an offset says where a report was made. Each list keeps its order
+(the noisiest rules first, incidents by when they started), and where
+names or a file's order broke a tie, the aliases do. Aliases are the
+output's own, numbered in an order no name decides: run it again and
+`rule-01` may be another rule. With `--redact-key FILE`, a random key in
+hex, 32 digits or more (`openssl rand -hex 32`), a name's alias is a keyed
+hash of it, `rule-3f9a1c04e2`, the same in every output made with the
+key; without the key, it can't be worked back to the name by trying
+names, as an unkeyed hash of a short name can, nor a key a person thought
+of be found by trying keys. `lapilli serve` gives the same with
 `/api/v1/report?from=&to=&redact=true`, its aliases that answer's own.
-What goes to stderr, the job's log, isn't redacted.
+What goes to stderr, the job's log, isn't redacted, which the run says
+there.
 
 ## Incidents kept elsewhere
 

@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -304,15 +305,17 @@ Output:
                       incidents incident-01 on by when they started, their
                       titles left out, teams, groups and sources; why a rule
                       couldn't be replayed and the expressions a near miss
-                      quotes said as [redacted]. Numbers, severities,
-                      durations and times stay. The aliases are this
-                      output's own, numbered in an order no name decides.
+                      quotes, and time zones, said as [redacted]. Numbers,
+                      severities, durations and times, in UTC, stay. The
+                      aliases are this output's own, numbered in an order
+                      no name decides. stderr isn't redacted
                       The text, --json, --markdown and --metrics, and what
                       --push and --slack-webhook-file send
   --redact-key FILE   --redact with aliases that hold across outputs: each a
                       keyed hash (HMAC-SHA256) of the name, with the key in
-                      FILE, 16 bytes or more, never shown. Without the key a
-                      short name can't be found by trying names
+                      FILE, a random one in hex, 32 digits or more (openssl
+                      rand -hex 32), never shown. Without the key a short
+                      name can't be found by trying names
   --tz ZONE           show times in this zone, an IANA name such as
                       Asia/Seoul or UTC (default: the machine's own, as TZ
                       or /etc/localtime says); the header names it, with
@@ -1195,6 +1198,16 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	stderr = &lockedWriter{w: stderr} // the progress line writes to it too
+	// The report is redacted; what is said on the way, here, names what
+	// it reads, for whoever runs it.
+	if f.redact {
+		fmt.Fprintln(stderr, "lapilli verdict: --redact: the report is redacted; what is said here, on stderr, isn't")
+	}
+	// Times in a redacted report are in UTC: a zone says where it was made.
+	shownLoc := f.loc
+	if f.redact {
+		shownLoc = time.UTC
+	}
 	fail := func(err error) int {
 		fmt.Fprintf(stderr, "lapilli verdict: %s\n", verdict.Clean(err.Error()))
 		return 1
@@ -1305,7 +1318,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			case f.json:
 				err = verdict.JSON(stdout, c)
 			case f.markdown:
-				err = verdict.CompareMarkdown(stdout, c, f.loc)
+				err = verdict.CompareMarkdown(stdout, c, shownLoc)
 			default:
 				_, err = fmt.Fprintf(stdout, "Nothing that decides when the %d rules fire has changed: nothing to replay.\n", len(same))
 			}
@@ -1510,18 +1523,18 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	}
 	text := func(w io.Writer) error {
 		if shownCmp != nil {
-			if err := verdict.CompareText(w, shownCmp, f.loc); err != nil {
+			if err := verdict.CompareText(w, shownCmp, shownLoc); err != nil {
 				return err
 			}
 			return verdict.ExpectationsText(w, shownCmp.Expectations)
 		}
-		return verdict.Text(w, shown, f.loc)
+		return verdict.Text(w, shown, shownLoc)
 	}
 	switch {
 	case f.json && cmp != nil:
 		err = verdict.JSON(stdout, shownCmp)
 	case f.markdown:
-		err = verdict.CompareMarkdown(stdout, shownCmp, f.loc)
+		err = verdict.CompareMarkdown(stdout, shownCmp, shownLoc)
 	case f.json:
 		err = verdict.JSON(stdout, shown)
 	case f.csv:
@@ -2114,16 +2127,19 @@ func impactShort(rs []rules.Rule, replayed map[string]bool, impactFor, step time
 	return &out
 }
 
-// readRedactKey reads --redact-key's file: the key, its line's end taken
-// off, 16 bytes or more. What it holds is never said.
+// readRedactKey reads --redact-key's file: a random key, written in hex,
+// 32 digits or more (16 bytes), as openssl rand -hex 32 writes one. Not a
+// passphrase: an alias is 40 bits of a keyed hash, and a key a person
+// thought of could be found by trying keys against names. What the file
+// holds is never said.
 func readRedactKey(path string) ([]byte, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("--redact-key: %v", err)
 	}
-	b = []byte(strings.TrimRight(string(b), "\r\n"))
-	if len(b) < verdict.RedactKeyMin {
-		return nil, fmt.Errorf("--redact-key %s: the key is %d bytes, want %d or more, such as what openssl rand -hex 32 writes", path, len(b), verdict.RedactKeyMin)
+	key, err := hex.DecodeString(strings.TrimSpace(string(b)))
+	if err != nil || len(key) < verdict.RedactKeyMin {
+		return nil, fmt.Errorf("--redact-key %s: want a random key, %d hex digits or more, as openssl rand -hex 32 writes one", path, 2*verdict.RedactKeyMin)
 	}
-	return b, nil
+	return key, nil
 }

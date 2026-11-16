@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Added
+
+- **A report without its names.** `lapilli verdict --redact`, and
+  `/api/v1/report?redact=true`, give every name an alias, to show a
+  report outside: rules `rule-01` on, label values by label
+  (`service-01`), incidents `incident-01` on by when they started with
+  their titles left out, teams, groups, sources, recording rules, and the
+  rules and incidents of what `--expect` held them to. Why a rule
+  couldn't be replayed, an expression a near miss quotes, shifts naming a
+  schedule and the time zones hours were counted in are `[redacted]`.
+  Numbers, severities and durations stay, and times, in UTC; so does
+  whether a replay failed. Each list keeps its order, ties by alias,
+  never by name or a file's order. Aliases are the output's own, in an
+  order no name decides; `--redact-key FILE` (a random key, 32 hex digits
+  or more) makes each a keyed hash (HMAC-SHA256), the same across outputs
+  made with the key, never an unkeyed hash, which a short name would be
+  found from by trying names. The text, `--json`, `--csv`, `--markdown`,
+  `--metrics`, `--push` and `--slack-webhook-file`, and
+  `format=csv&redact=true`, the firings quiet windows excused and the
+  team column among it; stderr isn't redacted, and the run says so
+  there.
+
 ### Fixed
 
 - **CSV cells as a reader sees them.** `--csv` and `format=csv` wrote a

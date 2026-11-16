@@ -43,6 +43,13 @@ func TestVerdictRedact(t *testing.T) {
 			t.Errorf("text:\n%s", out)
 		}
 	}
+	// In UTC, whatever --tz says, and stderr says it isn't redacted.
+	var stdout, stderr bytes.Buffer
+	seoul := append(append([]string{}, base...), "--tz", "Asia/Seoul", "--redact")
+	if code := run(seoul, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "2026-10-26 00:00 UTC") || strings.Contains(stdout.String(), "Seoul") ||
+		strings.Contains(stdout.String(), "+09:00") || !strings.Contains(stderr.String(), "on stderr, isn't") {
+		t.Errorf("--tz Asia/Seoul --redact: exit %d\n%s\n%s", code, stdout.String(), stderr.String())
+	}
 	var rep verdict.Report
 	if err := json.Unmarshal([]byte(run1("--redact", "--json")), &rep); err != nil {
 		t.Fatal(err)
@@ -51,14 +58,16 @@ func TestVerdictRedact(t *testing.T) {
 		t.Errorf("firings %+v", rep.Firings)
 	}
 
-	key := write(t, "key", "a-key-of-thirty-two-bytes-length\n")
+	key := write(t, "key", "4f1c8e2a9b7d3f60c5e1a8b2d9f4c7e03a6b1d8e5f2c9a7b4e1d6f3a8c5b2e90\n")
 	a, b := run1("--redact-key", key, "--json"), run1("--redact-key", key, "--json")
 	if a != b || strings.Contains(a, "BasketLatencyHigh") || !strings.Contains(a, `"rule": "rule-`) {
 		t.Errorf("--redact-key: not the same twice, or not redacted:\n%s", a)
 	}
-	short := write(t, "short", "s3cr3t-short\n")
+	short := write(t, "short", "0a1b2c3d4e5f6a7b8c9d\n")
+	phrase := write(t, "phrase", "correct s3cr3t horse battery staple\n")
 	for args, want := range map[string]string{
-		"--redact-key " + short:                       "the key is 12 bytes, want 16 or more",
+		"--redact-key " + short:                       "want a random key, 32 hex digits or more",
+		"--redact-key " + phrase:                      "want a random key, 32 hex digits or more",
 		"--redact-key /no/such/key":                   "--redact-key:",
 		"--redact --check-content --rules " + firings: "--redact gives a verdict's names aliases",
 	} {
@@ -69,11 +78,13 @@ func TestVerdictRedact(t *testing.T) {
 		} else {
 			argv = append([]string{"verdict"}, argv...)
 		}
-		if code := run(argv, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), want) || strings.Contains(stderr.String(), "s3cr3t") {
+		if code := run(argv, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), want) || strings.Contains(stderr.String(), "s3cr3t") ||
+			strings.Contains(stderr.String(), "0a1b2c3d") {
 			t.Errorf("%s: exit %d, %s", args, code, stderr.String())
 		}
 	}
-	var stdout, stderr bytes.Buffer
+	stdout.Reset()
+	stderr.Reset()
 	if code := run([]string{"serve", "--redact", "--rules", firings, "--prometheus", "http://p"}, &stdout, &stderr); code != 2 ||
 		!strings.Contains(stderr.String(), "lapilli serve doesn't take --redact") {
 		t.Errorf("serve --redact: exit %d, %s", code, stderr.String())

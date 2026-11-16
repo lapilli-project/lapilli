@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/rules"
@@ -328,7 +329,32 @@ func (x *Redactor) incident(in incident.Incident) incident.Incident {
 	in.ID = x.alias("incident", in.ID)
 	in.Title = ""
 	in.Labels = x.incidentLabels(in.Labels)
+	in.Start, in.End = utc(in.Start), utc(in.End)
 	return in
+}
+
+// utc is t in UTC: an offset an incidents file gave says where it was
+// written.
+func utc(t time.Time) time.Time {
+	if t.IsZero() {
+		return t
+	}
+	return t.UTC()
+}
+
+// byStart orders incidents as a report does, by when they started, and at
+// one time by alias: neither a file's order nor an id decides it.
+func byStart(a, b incident.Incident) int {
+	return cmp.Or(a.Start.Compare(b.Start), strings.Compare(a.ID, b.ID))
+}
+
+// labelsText is labels in order, k=v, to break a tie by.
+func labelsText(l map[string]string) string {
+	var b strings.Builder
+	for _, k := range slices.Sorted(maps.Keys(l)) {
+		b.WriteString(k + "=" + l[k] + "\x00")
+	}
+	return b.String()
 }
 
 func (x *Redactor) catches(cs []Catch) []Catch {
@@ -353,11 +379,16 @@ func sortRules(rs []RuleResult) {
 	})
 }
 
+// report is r with every name given its alias. Each list is put in the
+// order r's has, by what it is ordered by, with the alias where a name
+// broke a tie or a file's order stood: a list in r's order would say which
+// names sort first.
 func (x *Redactor) report(r *Report) *Report {
 	if r == nil {
 		return nil
 	}
 	out := *r
+	out.From, out.To = utc(r.From), utc(r.To)
 	out.Rules = make([]RuleResult, len(r.Rules))
 	for i, rr := range r.Rules {
 		out.Rules[i] = x.ruleResult(rr)
@@ -367,19 +398,26 @@ func (x *Redactor) report(r *Report) *Report {
 	for i, in := range r.Incidents {
 		out.Incidents[i] = IncidentResult{Incident: x.incident(in.Incident), CaughtBy: x.catches(in.CaughtBy)}
 	}
+	slices.SortStableFunc(out.Incidents, func(a, b IncidentResult) int { return byStart(a.Incident, b.Incident) })
+	place := map[string]int{} // an incident's place in the list
+	for i, in := range out.Incidents {
+		place[in.ID] = i
+	}
 	out.Firings = make([]Judged, len(r.Firings))
 	for i, f := range r.Firings {
 		f.Rule = x.alias("rule", f.Rule)
 		f.Labels = x.labels(f.Labels)
+		f.Start, f.End = utc(f.Start), utc(f.End)
 		var ids []string
 		for _, id := range f.Incidents {
 			ids = append(ids, x.alias("incident", id))
 		}
+		slices.Sort(ids)
 		f.Incidents = ids
 		out.Firings[i] = f
 	}
 	slices.SortStableFunc(out.Firings, func(a, b Judged) int {
-		return cmp.Or(a.Start.Compare(b.Start), strings.Compare(a.Rule, b.Rule))
+		return cmp.Or(a.Start.Compare(b.Start), strings.Compare(a.Rule, b.Rule), strings.Compare(labelsText(a.Labels), labelsText(b.Labels)))
 	})
 	if r.Suggestions != nil {
 		out.Suggestions = make([]Suggestion, len(r.Suggestions))
@@ -388,6 +426,10 @@ func (x *Redactor) report(r *Report) *Report {
 			s.Before, s.After = x.ruleResult(s.Before), x.ruleResult(s.After)
 			out.Suggestions[i] = s
 		}
+		// As the rules they are of, noisiest first (source.Suggest).
+		slices.SortStableFunc(out.Suggestions, func(a, b Suggestion) int {
+			return cmp.Or(cmp.Compare(b.Before.Black, a.Before.Black), cmp.Compare(b.Before.Firings, a.Before.Firings), strings.Compare(a.Rule, b.Rule))
+		})
 	}
 	if r.NearMisses != nil {
 		out.NearMisses = make([]NearMiss, len(r.NearMisses))
@@ -406,6 +448,11 @@ func (x *Redactor) report(r *Report) *Report {
 			}
 			out.NearMisses[i] = nm
 		}
+		// The incidents' order, then the most of its "for" or number kept,
+		// as source.NearMisses has them.
+		slices.SortStableFunc(out.NearMisses, func(a, b NearMiss) int {
+			return cmp.Or(cmp.Compare(place[a.Incident], place[b.Incident]), cmp.Compare(b.Kept(), a.Kept()), strings.Compare(a.Rule, b.Rule))
+		})
 	}
 	if r.Unrecorded != nil {
 		out.Unrecorded = make([]Unrecorded, len(r.Unrecorded))
@@ -416,27 +463,42 @@ func (x *Redactor) report(r *Report) *Report {
 			for j, a := range u.Top {
 				top[j] = AlertCount{Labels: x.labels(a.Labels), Firings: a.Firings, Team: x.alias("team", a.Team)}
 			}
+			// The most firings first, as source.Unrecorded has them.
+			slices.SortStableFunc(top, func(a, b AlertCount) int {
+				return cmp.Or(cmp.Compare(b.Firings, a.Firings), strings.Compare(labelsText(a.Labels), labelsText(b.Labels)))
+			})
 			u.Top = top
 			out.Unrecorded[i] = u
 		}
+		slices.SortStableFunc(out.Unrecorded, func(a, b Unrecorded) int {
+			return cmp.Or(cmp.Compare(b.Firings, a.Firings), strings.Compare(a.Rule, b.Rule))
+		})
 	}
 	out.Unreplayed = x.unreplayed(r.Unreplayed)
 	if r.Hours != nil {
 		h := *r.Hours
+		// The hours firings came in were counted in the zone given; where
+		// it is says where the team is.
+		h.Zone = Redacted
 		if h.Shifts != "" {
 			h.Shifts = Redacted // an on-call schedule's name, among them
 		}
 		h.Teams = nil
 		for _, t := range r.Hours.Teams {
 			t.Team = x.alias("team", t.Team)
+			t.Zone = Redacted
 			if t.Shifts != "" {
 				t.Shifts = Redacted
 			}
 			h.Teams = append(h.Teams, t)
 		}
+		slices.SortStableFunc(h.Teams, func(a, b TeamHours) int { return strings.Compare(a.Team, b.Team) })
 		out.Hours = &h
 	}
-	out.RulesChanged = slices.Clone(r.RulesChanged)
+	out.RulesChanged = nil
+	for _, t := range r.RulesChanged {
+		out.RulesChanged = append(out.RulesChanged, utc(t))
+	}
 	return &out
 }
 
@@ -464,6 +526,7 @@ func (x *Redactor) Report(r *Report) *Report {
 func (x *Redactor) Comparison(c *Comparison) *Comparison {
 	x.prepare(c, c.Before, c.After)
 	out := *c
+	out.From, out.To = utc(c.From), utc(c.To)
 	out.Before, out.After = x.report(c.Before), x.report(c.After)
 	out.Rules = make([]RuleChange, len(c.Rules))
 	for i, rc := range c.Rules {
@@ -492,6 +555,7 @@ func (x *Redactor) Comparison(c *Comparison) *Comparison {
 	for i, ic := range c.Incidents {
 		out.Incidents[i] = IncidentChange{Incident: x.incident(ic.Incident), Before: x.catches(ic.Before), After: x.catches(ic.After)}
 	}
+	slices.SortStableFunc(out.Incidents, func(a, b IncidentChange) int { return byStart(a.Incident, b.Incident) })
 	if c.Recording != nil {
 		out.Recording = make([]RecordingChange, len(c.Recording))
 		for i, rc := range c.Recording {
@@ -506,8 +570,11 @@ func (x *Redactor) Comparison(c *Comparison) *Comparison {
 		ex.Results = make([]ExpectResult, len(c.Expectations.Results))
 		for i, r := range c.Expectations.Results {
 			r.Rule = x.alias("rule", r.Rule)
-			if id, ok := strings.CutPrefix(r.What, "catches "); ok {
+			switch id, ok := strings.CutPrefix(r.What, "catches "); {
+			case ok:
 				r.What = "catches " + x.alias("incident", id)
+			case r.What != "budget week" && r.What != "budget asleep":
+				r.What = Redacted // none Lapilli writes: not shown as it is
 			}
 			ex.Results[i] = r
 		}
