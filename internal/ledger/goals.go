@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"regexp"
 	"slices"
@@ -330,16 +331,48 @@ func sameGoal(a, b Goal) bool {
 		a.AtMost == b.AtMost && a.NoWorseThan == b.NoWorseThan && a.By == b.By && slices.Equal(a.Critical, b.Critical) && a.Each == b.Each
 }
 
-// keyRange is the WHERE of the meta keys under a prefix: those after it,
-// up to the prefix with its last byte, a dot, raised to a slash. A goal's
-// name holds _, which LIKE would read as any character.
-func forgetGoal(t *txn, name string) error {
-	for _, p := range []string{goalMissedKeyPrefix, goalMadeKeyPrefix} {
-		if _, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key > ? AND key < ?", p+name+".", p+name+"/"); err != nil {
-			return err
+// PruneGoalMarks lets go of what was told of goals, and what tasks were
+// made for, of weeks before Monday before: of goals no longer declared
+// among them. Kept until then, a goal taken out of the file for a while
+// (a ConfigMap rolled back, serve started once without --config) and put
+// back, or given another team, tells no week again, nor makes its task
+// again. The meta keys under a prefix are those after it, up to it with
+// its last byte, a dot, raised to a slash: a goal's name holds _, which
+// LIKE would read as any character.
+func (l *Ledger) PruneGoalMarks(ctx context.Context, before int64) (int, error) {
+	n := 0
+	err := l.writeAside(ctx, func(t *txn) error {
+		n = 0
+		for _, p := range []string{goalMissedKeyPrefix, goalMadeKeyPrefix} {
+			rows, err := t.QueryContext(t.ctx, "SELECT key, value FROM meta WHERE key > ? AND key < ?", p, strings.TrimSuffix(p, ".")+"/")
+			if err != nil {
+				return err
+			}
+			var gone []string
+			for rows.Next() {
+				var k, v string
+				if err := rows.Scan(&k, &v); err != nil {
+					rows.Close()
+					return err
+				}
+				if w, err := strconv.ParseInt(v, 10, 64); err != nil || w < before {
+					gone = append(gone, k)
+				}
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			for _, k := range gone {
+				if _, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key = ?", k); err != nil {
+					return err
+				}
+			}
+			n += len(gone)
 		}
-	}
-	return nil
+		return nil
+	})
+	return n, err
 }
 
 // declareGoals keeps the goals to the file: each matched by its name, made
@@ -347,8 +380,10 @@ func forgetGoal(t *txn, name string) error {
 // the file doesn't declare and the ledger doesn't hold) skipped, said, and
 // kept as it was; and every goal the file no longer declares deleted,
 // pruned or not, as no form in the UI takes one back. Without a file
-// (left.NoFile), there are none. What was told of a goal deleted goes
-// with it; its tasks keep its name, as text.
+// (left.NoFile), there are none. What was told of a goal, and which weeks
+// tasks were made for, are kept by its name and each team's id, deleted or
+// changed, until they are weeks old (PruneGoalMarks); its tasks keep its
+// name, as text.
 func (l *Ledger) declareGoals(t *txn, want []DeclaredGoal, team resolver, r *Reconciled, skip func(string, int, string, error)) error {
 	have, err := goals(t.ctx, t)
 	if err != nil {
@@ -409,9 +444,6 @@ func (l *Ledger) declareGoals(t *txn, want []DeclaredGoal, team resolver, r *Rec
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM goals WHERE id = ?", h.ID); err != nil {
 			return err
 		}
-		if err := forgetGoal(t, h.Name); err != nil {
-			return err
-		}
 		if err := change(t, ConfigBy, "goal "+h.Name+" deleted, as the file no longer declares it", h, nil); err != nil {
 			return err
 		}
@@ -440,12 +472,6 @@ func (l *Ledger) declareGoals(t *txn, want []DeclaredGoal, team resolver, r *Rec
 			critical = ?, each = ?, declared = 1, updated = ? WHERE id = ?`,
 			g.TeamID, g.EveryTeam, g.Measure, g.AtLeast, g.AtMost, g.NoWorseThan, g.By, string(critical), g.Each, now, h.ID); err != nil {
 			return err
-		}
-		if h.TeamID != g.TeamID || h.EveryTeam != g.EveryTeam {
-			// Another team's now: what was told of the one before isn't of it.
-			if err := forgetGoal(t, h.Name); err != nil {
-				return err
-			}
 		}
 		if err := change(t, ConfigBy, "goal "+g.Name+" kept", h, g); err != nil {
 			return err
@@ -500,21 +526,84 @@ func (l *Ledger) GoalMarks(ctx context.Context) (told, made map[string]int64, er
 // its team's id, 0 for everyone's, as a rename keeps it.
 func GoalKey(name string, team int64) string { return goalTeamKey(name, team) }
 
-// GoalMissedTold says whether goal.missed was told for a goal's team (0
-// for everyone's) of week, a Monday's day, or a later one: told once each.
-func (l *Ledger) GoalMissedTold(ctx context.Context, name string, team, week int64) (bool, error) {
-	v, err := l.meta(ctx, l.r, goalMissedKeyPrefix+goalTeamKey(name, team))
-	if err != nil || v == "" {
-		return false, err
-	}
-	n, err := strconv.ParseInt(v, 10, 64)
-	return err == nil && n >= week, nil
+// TellGoalMissed tells goal.missed of a goal for its teams (0 for
+// everyone's), of week, a Monday's day, once each, in one write: told, and
+// each team's mark set to the week, as the outbox's TellOnce keeps one;
+// a team marked for the week, or a later one, already is passed over
+// (its caller leaves it out of told). A goal of each team's tells its
+// teams missed in one notice.
+func (l *Ledger) TellGoalMissed(ctx context.Context, name string, teams []int64, week int64, told []Told) error {
+	return l.writeAside(ctx, func(t *txn) error {
+		now := wallNow()
+		for _, x := range told {
+			about := map[string]any{"event": "goal.missed", "at": now.UTC()}
+			maps.Copy(about, x.About)
+			body, err := json.Marshal(about)
+			if err != nil {
+				return err
+			}
+			if _, err := t.ExecContext(t.ctx, t.d.pick("INSERT INTO outbox (dest, event, body, created, next_at) VALUES (?, ?, ?, ?, ?)", outboxDue),
+				x.Dest, "goal.missed", string(body), now.Unix(), now.Unix()); err != nil {
+				return err
+			}
+		}
+		for _, team := range teams {
+			key := goalMissedKeyPrefix + goalTeamKey(name, team)
+			was, err := l.meta(t.ctx, t, key)
+			if err != nil {
+				return err
+			}
+			if n, _ := strconv.ParseInt(was, 10, 64); n >= week {
+				continue
+			}
+			if err := setMeta(t.ctx, t, key, strconv.FormatInt(week, 10)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
-// TellGoalMissed tells goal.missed for a goal's team of week, once: by the
-// outbox's TellOnce, keyed on them.
-func (l *Ledger) TellGoalMissed(ctx context.Context, name string, team, week int64, told []Told) error {
-	return l.TellOnce(ctx, goalMissedKeyPrefix+goalTeamKey(name, team), strconv.FormatInt(week, 10), "goal.missed", told)
+// OpenGoalTasks are the tasks open or being done about goals, by their
+// goal and team (GoalKey), each the earliest: all of them, a goal and a
+// team at a time each, read through the index of the tasks about goals.
+func (l *Ledger) OpenGoalTasks(ctx context.Context) (map[string]int64, error) {
+	rows, err := l.r.QueryContext(ctx, "SELECT id, goal, coalesce(team_id, 0) FROM tasks WHERE goal != '' AND status IN ('open', 'doing') ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int64{}
+	for rows.Next() {
+		var id, team int64
+		var goal string
+		if err := rows.Scan(&id, &goal, &team); err != nil {
+			return nil, err
+		}
+		if _, ok := out[goalTeamKey(goal, team)]; !ok {
+			out[goalTeamKey(goal, team)] = id
+		}
+	}
+	return out, rows.Err()
+}
+
+// goalsShownKey keeps what the leader worked out of the goals last.
+const goalsShownKey = "goals-shown"
+
+// KeepGoalsShown keeps what the leader worked out of the goals after a
+// round, for the replicas that follow and their /metrics: written aside,
+// as no page of the ledger's changes with it, and only when it changed.
+func (l *Ledger) KeepGoalsShown(ctx context.Context, b []byte) error {
+	return l.writeAside(ctx, func(t *txn) error { return setMeta(t.ctx, t, goalsShownKey, string(b)) })
+}
+
+// GoalsShown is what KeepGoalsShown kept last, nil for nothing.
+func (l *Ledger) GoalsShown(ctx context.Context) ([]byte, error) {
+	v, err := l.meta(ctx, l.r, goalsShownKey)
+	if err != nil || v == "" {
+		return nil, err
+	}
+	return []byte(v), nil
 }
 
 // GoalTaskState is what a goal's task was made for, and what has been said
@@ -539,16 +628,6 @@ func (l *Ledger) GoalTask(ctx context.Context, id int64) (GoalTaskState, bool, e
 	return st, json.Unmarshal([]byte(v), &st) == nil, nil
 }
 
-// GoalMade is the latest week a task was made for, or said missed on, of
-// a goal's team; 0 for none.
-func (l *Ledger) GoalMade(ctx context.Context, name string, team int64) (int64, error) {
-	v, err := l.meta(ctx, l.r, goalMadeKeyPrefix+goalTeamKey(name, team))
-	if err != nil || v == "" {
-		return 0, err
-	}
-	return strconv.ParseInt(v, 10, 64)
-}
-
 // ErrGoalTaskOpen is a task for a goal's team made while one is open.
 var ErrGoalTaskOpen = errors.New("a task for this goal and team is open already")
 
@@ -565,7 +644,7 @@ func (l *Ledger) MakeGoalTask(ctx context.Context, t Task, week int64, by string
 	err := l.write(ctx, func(tx *txn) error {
 		id = 0
 		var open int64
-		err := tx.QueryRowContext(tx.ctx, "SELECT id FROM tasks WHERE goal = ? AND coalesce(team_id, 0) = ? AND status IN ('open', 'doing') ORDER BY id LIMIT 1",
+		err := tx.QueryRowContext(tx.ctx, "SELECT id FROM tasks WHERE goal = ? AND goal != '' AND coalesce(team_id, 0) = ? AND status IN ('open', 'doing') ORDER BY id LIMIT 1",
 			t.Goal, t.TeamID).Scan(&open)
 		switch {
 		case err == nil:

@@ -3,6 +3,9 @@ package serve
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -397,11 +400,30 @@ func goalMeasureText(l, measure string) string { return tr(l, goalMeasureNames[m
 // goalNumber is a goal's number as a page shows it: a share in percent, to
 // a tenth where a whole one would hide a miss; a lead as a time; a count as
 // it is.
-func goalNumber(measure string, v float64) string {
+func goalNumber(measure string, v float64) string { return goalNumberTo(measure, v, 0) }
+
+// goalNumberTo is goalNumber, a share cut to its tenth of a percent toward
+// dir: down (-1), up (+1), or to the nearest (0). A value missed is cut
+// away from its bound, down for at_least and up for at_most, so that it
+// never reads as the bound it missed: 0.7995 of at_least 0.8 is 79.9%, not
+// 80%. A share a hair off a tenth, as a quotient is, is that tenth.
+func goalNumberTo(measure string, v float64, dir int) string {
 	m := ledger.GoalMeasures[measure]
 	switch {
 	case m.Share:
-		return strconv.FormatFloat(math.Round(1000*v)/10, 'f', -1, 64) + "%"
+		r := 1000 * v
+		if math.Abs(r-math.Round(r)) < 1e-6 {
+			r = math.Round(r)
+		}
+		switch {
+		case dir < 0:
+			r = math.Floor(r)
+		case dir > 0:
+			r = math.Ceil(r)
+		default:
+			r = math.Round(r)
+		}
+		return strconv.FormatFloat(r/10, 'f', -1, 64) + "%"
 	case m.Seconds:
 		return verdict.Delay(time.Duration(v) * time.Second)
 	}
@@ -414,6 +436,39 @@ func goalValueText(measure string, v *float64) string {
 		return "–"
 	}
 	return goalNumber(measure, *v)
+}
+
+// missedTo is the way a value missed is cut: away from the bound.
+func missedTo(kind string) int {
+	if kind == "at_most" {
+		return +1
+	}
+	return -1
+}
+
+// goalWeekValue is a week's value as a page shows it, cut away from its
+// bound when the week missed it.
+func goalWeekValue(w summaryGoal) string {
+	if w.Value == nil {
+		return "–"
+	}
+	if w.Result != goalMissed {
+		return goalNumber(w.Measure, *w.Value)
+	}
+	kind := "at_least"
+	if w.AtMost != nil {
+		kind = "at_most"
+	}
+	return goalNumberTo(w.Measure, *w.Value, missedTo(kind))
+}
+
+// goalMissedValue is a value a goal missed, cut away from its bound.
+func goalMissedValue(g ledger.Goal, v *float64) string {
+	if v == nil {
+		return "–"
+	}
+	kind, _ := g.Bound()
+	return goalNumberTo(g.Measure, *v, missedTo(kind))
 }
 
 // goalTarget is a goal's bound, as a person reads it.
@@ -453,10 +508,30 @@ func goalMissedText(l string, g ledger.Goal, team string, week time.Time, v *flo
 	day := week.In(loc).Format("2006-01-02")
 	if team != "" {
 		return tr(l, "Goal %s of %s missed in the week of %s: %s was %s; the goal is %s.", g.Name, verdict.Clean(team), day,
-			goalMeasureText(l, g.Measure), goalValueText(g.Measure, v), goalTarget(l, g))
+			goalMeasureText(l, g.Measure), goalMissedValue(g, v), goalTarget(l, g))
 	}
 	return tr(l, "Goal %s missed in the week of %s: %s was %s; the goal is %s.", g.Name, day,
-		goalMeasureText(l, g.Measure), goalValueText(g.Measure, v), goalTarget(l, g))
+		goalMeasureText(l, g.Measure), goalMissedValue(g, v), goalTarget(l, g))
+}
+
+// goalTeamsNamed is how many teams a notice of a goal of each team's
+// names, those missed first in the order of the teams; the rest are
+// counted.
+const goalTeamsNamed = 50
+
+// goalMissedTeamsText says a goal of each team's was missed in a week by
+// teams: how many, the first ten of them with their values, and its target.
+func goalMissedTeamsText(l string, g ledger.Goal, week time.Time, teams []goalNoticeTeam, more int, loc *time.Location) string {
+	var named []string
+	for _, x := range teams[:min(len(teams), 10)] {
+		named = append(named, tr(l, "%s (%s)", verdict.Clean(x.Team), goalMissedValue(g, x.Value)))
+	}
+	list := strings.Join(named, ", ")
+	if n := len(teams) + more - len(named); n > 0 {
+		list += " " + tr(l, "and %d more", n)
+	}
+	return tr(l, "Goal %s missed in the week of %s by %d teams: %s; the goal is %s.", g.Name, week.In(loc).Format("2006-01-02"), len(teams)+more,
+		list, goalTarget(l, g))
 }
 
 // The leader's work after a round (docs/design/goals.md, "When it is
@@ -477,6 +552,19 @@ type goalsShown struct {
 	Waiting int         `json:"tasks_waiting,omitempty"`
 }
 
+// goalsBrief is what the leader's status says of what it worked out of the
+// goals: which (Gen, a sum of it), the week, how many lines, and the tasks
+// that wait. The rest, up to maxGoalSeries lines, is kept in the ledger
+// when it changes (KeepGoalsShown), not in the status the leader writes
+// every few seconds; a replica that follows reads it from there when Gen
+// moves.
+type goalsBrief struct {
+	Gen     string    `json:"gen"`
+	Week    time.Time `json:"week"`
+	Lines   int       `json:"lines"`
+	Waiting int       `json:"tasks_waiting,omitempty"`
+}
+
 // goalShown is a goal for a team, as the leader last worked it out.
 type goalShown struct {
 	Goal   string   `json:"goal"`
@@ -492,28 +580,88 @@ type goalShown struct {
 const maxGoalSeries = 500
 
 // goalTasksARun is how many tasks for goals missed a run makes at most
-// (--goal-tasks); the rest are made by the runs after. goalSaysARun is how
-// many comments on goals' tasks it writes at most. Variables, for tests.
+// (--goal-tasks), those found open already as it makes them counted; the
+// rest are made by the runs after. goalSaysARun is how many comments on
+// goals' tasks it writes at most. Variables, for tests.
 var (
 	goalTasksARun = 20
-	goalSaysARun  = 100
+	goalSaysARun  = 20
 )
 
 // goalsKept is what the leader worked out last, and of what: the ledger's
 // generation and the week, so that a round that changed neither works
-// nothing out again.
+// nothing out again; the sum of it, and the sum last kept in the ledger;
+// and the week the marks of weeks long past were last let go.
 type goalsKept struct {
 	sync.Mutex
-	key   string
-	shown *goalsShown
+	key, sum, kept string
+	shown          *goalsShown
+	pruned         int64
 }
 
-// goalsShownNow is what this replica's leader worked out last, nil for
-// nothing.
+// goalsShownNow is what this replica worked out last, as the leader, nil
+// for nothing.
 func (s *Server) goalsShownNow() *goalsShown {
 	s.goalsK.Lock()
 	defer s.goalsK.Unlock()
 	return s.goalsK.shown
+}
+
+// goalsBriefNow is what this replica's status says of the goals it worked
+// out, nil for nothing.
+func (s *Server) goalsBriefNow() *goalsBrief {
+	s.goalsK.Lock()
+	defer s.goalsK.Unlock()
+	g := s.goalsK.shown
+	if g == nil {
+		return nil
+	}
+	return &goalsBrief{Gen: s.goalsK.sum, Week: g.Week, Lines: len(g.Lines), Waiting: g.Waiting}
+}
+
+// goalsFollowed is what a replica that follows read of the leader's goals
+// last, and of which Gen.
+type goalsFollowed struct {
+	sync.Mutex
+	gen   string
+	shown *goalsShown
+}
+
+// goalsRead is what the leader worked out of the goals after its last
+// round: this replica's own, leading; else read from the ledger, once for
+// each Gen the leader's status says, and kept.
+func (s *Server) goalsRead(ctx context.Context) *goalsShown {
+	if !s.follows() {
+		return s.goalsShownNow()
+	}
+	b := s.shownStatus().Goals
+	if b == nil {
+		return nil
+	}
+	s.goalsF.Lock()
+	defer s.goalsF.Unlock()
+	if s.goalsF.gen == b.Gen {
+		return s.goalsF.shown
+	}
+	raw, err := s.l.GoalsShown(ctx)
+	if err != nil {
+		return s.goalsF.shown // as last read, until the ledger answers
+	}
+	var g goalsShown
+	if raw == nil || json.Unmarshal(raw, &g) != nil {
+		return nil
+	}
+	s.goalsF.gen, s.goalsF.shown = b.Gen, &g
+	return &g
+}
+
+// goalsSum is a sum of what was worked out of the goals, but when.
+func goalsSum(g *goalsShown) string {
+	x := *g
+	x.At = time.Time{}
+	b, _ := json.Marshal(x)
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:8])
 }
 
 // goalsAfter works the goals out after a round, the leader's: the last
@@ -584,11 +732,39 @@ func (s *Server) goalsAfter(ctx context.Context) error {
 	waiting, err := s.goalTasks(ctx, lines, last)
 	shown.Waiting = waiting
 	errs = append(errs, err, s.sayOnGoalTasks(ctx, lines, this))
+	// What was told and made for of weeks past any worked out, once a
+	// week: of goals no longer declared among them.
+	s.goalsK.Lock()
+	prune := s.goalsK.pruned != this
+	s.goalsK.Unlock()
+	if prune {
+		if _, err := s.l.PruneGoalMarks(ctx, this-13*7); err != nil {
+			errs = append(errs, err)
+		} else {
+			s.goalsK.Lock()
+			s.goalsK.pruned = this
+			s.goalsK.Unlock()
+		}
+	}
+	// Kept in the ledger, for the replicas that follow, only when it
+	// changed.
+	gen := goalsSum(shown)
+	s.goalsK.Lock()
+	kept := s.goalsK.kept
+	s.goalsK.Unlock()
+	if gen != kept {
+		b, _ := json.Marshal(shown)
+		if err := s.l.KeepGoalsShown(ctx, b); err != nil {
+			errs = append(errs, err)
+		} else {
+			kept = gen
+		}
+	}
 	s.goalsK.Lock()
 	// Kept as of the ledger before what this wrote: a task made, or a
 	// comment, is a change, and the next round looks again, finding none
 	// to make. One that failed is tried again then too.
-	s.goalsK.key, s.goalsK.shown = k, shown
+	s.goalsK.key, s.goalsK.shown, s.goalsK.sum, s.goalsK.kept = k, shown, gen, kept
 	if err := errors.Join(errs...); err != nil {
 		s.goalsK.key = ""
 	}
@@ -604,21 +780,36 @@ func teamIDOf(t *ledger.Team) int64 {
 	return t.ID
 }
 
-// goalNotice is what goal.missed tells of a goal missed.
+// goalNotice is what goal.missed tells of a goal missed: of everyone's or a
+// team's (Team), its value; of each team's (Team "*"), the teams that
+// missed it, goalTeamsNamed of them with their values, and how many more.
 type goalNotice struct {
-	Name     string    `json:"name"`
-	Team     string    `json:"team,omitempty"`
-	Measure  string    `json:"measure"`
-	Critical []string  `json:"critical,omitempty"`
-	AtLeast  *float64  `json:"at_least,omitempty"`
-	AtMost   *float64  `json:"at_most,omitempty"`
-	Value    *float64  `json:"value"`
-	From     time.Time `json:"from"`
-	To       time.Time `json:"to"`
+	Name     string           `json:"name"`
+	Team     string           `json:"team,omitempty"`
+	Measure  string           `json:"measure"`
+	Critical []string         `json:"critical,omitempty"`
+	AtLeast  *float64         `json:"at_least,omitempty"`
+	AtMost   *float64         `json:"at_most,omitempty"`
+	Value    *float64         `json:"value"`
+	Teams    []goalNoticeTeam `json:"teams,omitempty"`
+	More     int              `json:"more,omitempty"`
+	From     time.Time        `json:"from"`
+	To       time.Time        `json:"to"`
 }
 
-// tellGoals tells goal.missed for each goal and team whose last whole week
-// was missed, once: to where what happens is told, the webhook and Slack.
+// goalNoticeTeam is a team that missed a goal of each team's, and its
+// value.
+type goalNoticeTeam struct {
+	Team  string   `json:"team"`
+	Value *float64 `json:"value"`
+}
+
+// tellGoals tells goal.missed for each goal whose last whole week was
+// missed, once for each team: to where what happens is told, the webhook
+// and Slack. A goal of each team's is one notice a week, of the teams that
+// missed it and weren't told of, however many: a team marked told for the
+// week, or a later one, as by a leader whose clock was ahead, is passed
+// over.
 func (s *Server) tellGoals(ctx context.Context, lines []goalLine, last int64) error {
 	dests := s.dests()
 	if len(dests) == 0 {
@@ -628,8 +819,13 @@ func (s *Server) tellGoals(ctx context.Context, lines []goalLine, last int64) er
 	if err != nil {
 		return err
 	}
+	type notice struct {
+		about goalNotice
+		teams []int64
+	}
 	from := s.l.Midnight(last)
-	var errs []error
+	var order []*notice
+	byGoal := map[string]*notice{}
 	for _, gl := range lines {
 		w, ok := gl.week(from)
 		if !ok || w.Result != goalMissed {
@@ -639,13 +835,32 @@ func (s *Server) tellGoals(ctx context.Context, lines []goalLine, last int64) er
 		if told0[ledger.GoalKey(gl.Goal.Name, team)] >= last {
 			continue
 		}
-		about := goalNotice{Name: gl.Goal.Name, Team: gl.TeamName(), Measure: gl.Goal.Measure, Critical: gl.Goal.Critical,
-			AtLeast: w.AtLeast, AtMost: w.AtMost, Value: w.Value, From: w.From.UTC(), To: w.To.UTC()}
+		n := byGoal[gl.Goal.Name]
+		if n == nil {
+			n = &notice{about: goalNotice{Name: gl.Goal.Name, Team: gl.TeamName(), Measure: gl.Goal.Measure, Critical: gl.Goal.Critical,
+				AtLeast: w.AtLeast, AtMost: w.AtMost, Value: w.Value, From: w.From.UTC(), To: w.To.UTC()}}
+			if gl.Goal.EveryTeam {
+				n.about.Team, n.about.Value = "*", nil
+			}
+			byGoal[gl.Goal.Name] = n
+			order = append(order, n)
+		}
+		n.teams = append(n.teams, team)
+		if gl.Goal.EveryTeam {
+			if len(n.about.Teams) < goalTeamsNamed {
+				n.about.Teams = append(n.about.Teams, goalNoticeTeam{gl.TeamName(), w.Value})
+			} else {
+				n.about.More++
+			}
+		}
+	}
+	var errs []error
+	for _, n := range order {
 		told := make([]ledger.Told, 0, len(dests))
 		for _, d := range dests {
-			told = append(told, ledger.Told{Dest: d, About: map[string]any{"goal": about}})
+			told = append(told, ledger.Told{Dest: d, About: map[string]any{"goal": n.about}})
 		}
-		errs = append(errs, s.l.TellGoalMissed(ctx, gl.Goal.Name, team, last, told))
+		errs = append(errs, s.l.TellGoalMissed(ctx, n.about.Name, n.teams, last, told))
 	}
 	return errors.Join(errs...)
 }
@@ -682,7 +897,7 @@ func (s *Server) goalTasks(ctx context.Context, lines []goalLine, last int64) (i
 	if err != nil {
 		return 0, err
 	}
-	open, err := s.goalTasksOpen(ctx)
+	open, err := s.l.OpenGoalTasks(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -695,31 +910,34 @@ func (s *Server) goalTasks(ctx context.Context, lines []goalLine, last int64) (i
 			continue
 		}
 		team := teamIDOf(gl.Team)
-		if was[ledger.GoalKey(gl.Goal.Name, team)] >= last || open[[2]string{gl.Goal.Name, fmt.Sprint(team)}] != 0 {
+		if was[ledger.GoalKey(gl.Goal.Name, team)] >= last || open[ledger.GoalKey(gl.Goal.Name, team)] != 0 {
 			continue
 		}
 		if made == goalTasksARun {
 			waiting++
 			continue
 		}
-		// Open past the tasks read at once, the write finds it, and makes none.
-		switch _, err := s.l.MakeGoalTask(ctx, s.goalTaskIn(s.cfg.Lang, gl.Goal, gl.Team, w), last, ledger.GoalTasksBy); {
-		case errors.Is(err, ledger.ErrGoalTaskOpen):
-		case err != nil:
+		// One opened since the tasks were read is found by the write, which
+		// makes none: counted all the same, as a write the turn was taken for.
+		made++
+		if _, err := s.l.MakeGoalTask(ctx, s.goalTaskIn(s.cfg.Lang, gl.Goal, gl.Team, w), last, ledger.GoalTasksBy); err != nil && !errors.Is(err, ledger.ErrGoalTaskOpen) {
 			errs = append(errs, err)
-		default:
-			made++
 		}
 	}
 	return waiting, errors.Join(errs...)
 }
 
-// sayOnGoalTasks says, on each goal's task still open, what became of the
-// weeks since the one it was made for, once each: another missed ("missed
-// again"), one met, and one missed that no longer is (an incident written
-// down later), never closing it. What is kept of one done or dropped is
-// let go.
+// sayOnGoalTasks says, with --goal-tasks, on each goal's task still open,
+// whoever made it, what became of the weeks since the one it was made for,
+// once each: another missed ("missed again"), one met, and one missed that
+// no longer is (an incident written down later), never closing it;
+// goalSaysARun a run at most, the rest said by the runs after. What is kept
+// of one done or dropped is let go. Without --goal-tasks, Lapilli writes
+// on no task, as it makes none.
 func (s *Server) sayOnGoalTasks(ctx context.Context, lines []goalLine, this int64) error {
+	if !s.cfg.GoalTasks {
+		return nil
+	}
 	ids, err := s.l.GoalTasksKept(ctx)
 	if err != nil || len(ids) == 0 {
 		return err
@@ -778,7 +996,7 @@ func (s *Server) sayOnGoalTasks(ctx context.Context, lines []goalLine, this int6
 				if week == st.Week || was == goalMissed || was == goalNoLonger {
 					continue
 				}
-				body, now = tr(l, "Missed again, week of %s: %s.", day, goalValueText(gl.Goal.Measure, w.Value)), goalMissed
+				body, now = tr(l, "Missed again, week of %s: %s.", day, goalMissedValue(gl.Goal, w.Value)), goalMissed
 			case was == goalMissed && w.Result == goalMet:
 				body, now = tr(l, "No longer missed, week of %s: %s.", day, goalValueText(gl.Goal.Measure, w.Value)), goalNoLonger
 			case was == goalMissed:
@@ -802,8 +1020,8 @@ func (s *Server) sayOnGoalTasks(ctx context.Context, lines []goalLine, this int6
 // goalMetrics writes the goals' series, as the leader worked them out after
 // its last round: a scrape works nothing out, and never waits for the
 // heavy turn. Everyone's goals have no team label, a team's have it.
-func (s *Server) goalMetrics(w io.Writer) {
-	g := s.shownStatus().Goals
+func (s *Server) goalMetrics(ctx context.Context, w io.Writer) {
+	g := s.goalsRead(ctx)
 	if g == nil || len(g.Lines) == 0 {
 		return
 	}

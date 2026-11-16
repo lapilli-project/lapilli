@@ -112,9 +112,21 @@ func TestReconcileGoals(t *testing.T) {
 	if r, _ := reconcile(t, l, d, Leave{}); r.Any() {
 		t.Errorf("the same again: %+v", r)
 	}
-	// Payments is named by a declared goal: the UI deletes it no more.
-	if err := l.DeleteTeam(ctx, pay.ID, "ana"); !errors.Is(err, ErrDeclared) && !errors.Is(err, ErrNamedByDeclared) {
-		t.Errorf("deleting a team a goal names: %v", err)
+	// A team the UI made, named by a goal the file declares: the UI
+	// deletes it no more.
+	ui, err := l.PutTeam(ctx, Team{Name: "search", Rules: "^Search"}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Goals = append(d.Goals, DeclaredGoal{Goal: Goal{Name: "search-quiet", Measure: "firings", AtMost: "10"}, Team: "search", Line: 41})
+	reconcile(t, l, d, Leave{})
+	if err := l.DeleteTeam(ctx, ui, "ana"); !errors.Is(err, ErrNamedByDeclared) {
+		t.Errorf("deleting a team of the UI's a goal names: %v", err)
+	}
+	d.Goals = d.Goals[:3]
+	reconcile(t, l, d, Leave{})
+	if err := l.DeleteTeam(ctx, ui, "ana"); err != nil {
+		t.Errorf("deleting it once no goal names it: %v", err)
 	}
 	// Changed, one taken out, one of a team there isn't (kept as it was).
 	d.Goals = []DeclaredGoal{
@@ -172,9 +184,10 @@ func teamNamed(t *testing.T, l *Ledger, name string) Team {
 
 // A goal's task: one open for a goal and team at most; its goal set as it
 // is made and kept through an edit; what is said on it kept with what was
-// said, in one write; what Lapilli made a task for noted, so that one done
-// isn't made again for the same week; and what was told of a goal going
-// with it once the file no longer declares it.
+// said, in one write; the week it was made for noted, so that one done
+// isn't made again for the same week; and what was told of a goal kept
+// though the file no longer declares it, or gives it another team, until
+// it is weeks old.
 func TestGoalTasks(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
@@ -195,11 +208,19 @@ func TestGoalTasks(t *testing.T) {
 	if _, err := l.MakeGoalTask(ctx, Task{Title: "everyone's", Kind: "decide", Goal: "paged"}, week, "ana"); err != nil {
 		t.Errorf("everyone's: %v", err)
 	}
-	if made, err := l.GoalMade(ctx, "paged", tid); err != nil || made != week {
-		t.Errorf("made for: %d %v", made, err)
+	marks := func() (told, made map[string]int64) {
+		t.Helper()
+		told, made, err := l.GoalMarks(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return told, made
 	}
-	if made, _ := l.GoalMade(ctx, "paged", 0); made != week {
-		t.Errorf("made by a person, not noted: %d", made)
+	if _, made := marks(); made[GoalKey("paged", tid)] != week || made[GoalKey("paged", 0)] != week {
+		t.Errorf("made for: %v", made)
+	}
+	if open, err := l.OpenGoalTasks(ctx); err != nil || len(open) != 2 || open[GoalKey("paged", tid)] != id {
+		t.Errorf("open: %v %v", open, err)
 	}
 	st, ok, err := l.GoalTask(ctx, id)
 	if err != nil || !ok || st.Week != week || st.Said[week] != "missed" {
@@ -217,6 +238,11 @@ func TestGoalTasks(t *testing.T) {
 	if x, _ := l.TaskByID(ctx, id); x.Goal != "paged" || x.Title != "renamed" {
 		t.Errorf("edited: %+v", x)
 	}
+	// A goal an edit gives, not a goal's name, is no refusal: it is the
+	// task's own goal that is kept, and checked.
+	if _, err := l.PatchTask(ctx, id, []byte(`{"goal": "Not A Name", "title": "patched"}`), "ana"); err != nil {
+		t.Errorf("a patch giving a goal: %v", err)
+	}
 	if _, err := l.PutTask(ctx, Task{Title: "bad", Goal: "Not A Name"}, "ana"); err == nil {
 		t.Error("a task's goal that is no goal's name")
 	}
@@ -231,8 +257,8 @@ func TestGoalTasks(t *testing.T) {
 	if st, _, _ := l.GoalTask(ctx, id); st.Said[week+7] != "missed" {
 		t.Errorf("what was said, kept: %+v", st)
 	}
-	if made, _ := l.GoalMade(ctx, "paged", tid); made != week+7 {
-		t.Errorf("a week said missed is one a task was made for: %d", made)
+	if _, made := marks(); made[GoalKey("paged", tid)] != week+7 {
+		t.Errorf("a week said missed is one a task was made for: %v", made)
 	}
 	open, err := l.Tasks(ctx, TaskQuery{Status: []string{"open"}, Goal: "paged"})
 	if err != nil || len(open) != 2 {
@@ -247,28 +273,49 @@ func TestGoalTasks(t *testing.T) {
 	if _, ok, _ := l.GoalTask(ctx, id); ok {
 		t.Error("forgotten, still kept")
 	}
-	// Told once a week; and what was told goes with the goal.
-	if err := l.TellGoalMissed(ctx, "paged", tid, week, nil); err != nil {
+	// Told in one write for its teams, each marked; a team marked for a
+	// later week keeps it.
+	other, err := l.PutTeam(ctx, Team{Name: "search", Rules: "^Search"}, "ana")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if told, _ := l.GoalMissedTold(ctx, "paged", tid, week); !told {
-		t.Error("not told")
+	l.TellTo([]string{"webhook"})
+	defer l.TellTo(nil)
+	if err := l.TellGoalMissed(ctx, "paged", []int64{tid, other}, week+7, []Told{{Dest: "webhook", About: map[string]any{"goal": "paged"}}}); err != nil {
+		t.Fatal(err)
 	}
-	if told, _ := l.GoalMissedTold(ctx, "paged", tid, week+7); told {
-		t.Error("the next week, told already")
+	if err := l.TellGoalMissed(ctx, "paged", []int64{tid}, week, nil); err != nil {
+		t.Fatal(err)
 	}
+	if told, _ := marks(); told[GoalKey("paged", tid)] != week+7 || told[GoalKey("paged", other)] != week+7 {
+		t.Errorf("told: %v", told)
+	}
+	if due, _ := l.Due(ctx, "webhook", time.Now().Add(time.Hour), 10); len(due) != 1 || due[0].Event != "goal.missed" {
+		t.Errorf("told once: %+v", due)
+	}
+	// Taken out of the file, put back with another team: what was told and
+	// made for is kept, by each team's id.
 	d := Declared{Teams: []DeclaredTeam{{Team: Team{Name: "payments", Labels: incident.Labels{"team": {"payments"}}}, Line: 1}},
 		Goals: []DeclaredGoal{{Goal: Goal{Name: "paged", Measure: "critical.firings", AtMost: "40"}, Team: "payments", Line: 3}}}
 	reconcile(t, l, d, Leave{})
+	d.Goals[0].Team = "*"
+	reconcile(t, l, d, Leave{})
 	d.Goals = nil
 	reconcile(t, l, d, Leave{})
-	if told, _ := l.GoalMissedTold(ctx, "paged", tid, week); told {
-		t.Error("told, of a goal no longer declared")
+	if told, made := marks(); told[GoalKey("paged", tid)] != week+7 || made[GoalKey("paged", tid)] != week+7 {
+		t.Errorf("of a goal taken out: %v %v", told, made)
 	}
-	if made, _ := l.GoalMade(ctx, "paged", tid); made != 0 {
-		t.Errorf("made for, of a goal no longer declared: %d", made)
-	}
-	if x, _ := l.TaskByID(ctx, id); x.Goal != "paged" {
+	if x, _ := l.TaskByID(ctx, id); x.Goal != "paged" || x.Title != "patched" {
 		t.Errorf("its tasks keep its name: %+v", x)
+	}
+	// Weeks old, let go.
+	if n, err := l.PruneGoalMarks(ctx, week+7); err != nil || n != 1 {
+		t.Errorf("pruned %d: %v", n, err)
+	}
+	if told, made := marks(); len(told) != 2 || made[GoalKey("paged", 0)] != 0 || made[GoalKey("paged", tid)] != week+7 {
+		t.Errorf("after pruning: %v %v", told, made)
+	}
+	if n, _ := l.PruneGoalMarks(ctx, week+14); n != 3 {
+		t.Errorf("pruned %d, want 3", n)
 	}
 }

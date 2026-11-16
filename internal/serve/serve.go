@@ -426,6 +426,7 @@ type Server struct {
 	goalsC   goalsCache
 	goalRows goalRowsCache
 	goalsK   goalsKept
+	goalsF   goalsFollowed
 	outs     outcomesCache
 	// wait keeps the counts the sidebar shows.
 	wait waitingCache

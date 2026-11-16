@@ -1975,5 +1975,7 @@
  "not known: nothing to count it of that week": "desconocido: nada de lo que contarlo esa semana",
  "not known: the ledger holds only part of the week": "desconocido: el registro solo tiene parte de la semana",
  "not known: the team has no labels, so it owns only the incidents its rules caught: give it labels": "desconocido: el equipo no tiene etiquetas, así que solo tiene los incidentes que detectaron sus reglas: dale etiquetas",
- "goals": "objetivos"
+ "goals": "objetivos",
+ "%s (%s)": "%s (%s)",
+ "Goal %s missed in the week of %s by %d teams: %s; the goal is %s.": "Objetivo %s incumplido la semana del %s por %d equipos: %s; el objetivo es %s."
 }

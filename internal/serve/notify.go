@@ -195,7 +195,7 @@ func (s *Server) pageOf(n notice) string {
 		path = "/rules?trust=differs"
 	case n.Goal != nil:
 		path = "/goals"
-		if n.Goal.Team != "" {
+		if n.Goal.Team != "" && n.Goal.Team != "*" {
 			path += "?team=" + url.QueryEscape(n.Goal.Team)
 		}
 		path += "#goal-" + n.Goal.Name
@@ -303,6 +303,9 @@ func (s *Server) line(n notice) string {
 			g.AtLeast = strconv.FormatFloat(*n.Goal.AtLeast, 'f', -1, 64)
 		case n.Goal.AtMost != nil:
 			g.AtMost = strconv.FormatFloat(*n.Goal.AtMost, 'f', -1, 64)
+		}
+		if n.Goal.Team == "*" {
+			return "lapilli: " + goalMissedTeamsText(l, g, n.Goal.From, n.Goal.Teams, n.Goal.More, s.cfg.Loc)
 		}
 		return "lapilli: " + goalMissedText(l, g, n.Goal.Team, n.Goal.From, n.Goal.Value, s.cfg.Loc)
 	case n.Window != nil:

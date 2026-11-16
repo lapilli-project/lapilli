@@ -45,15 +45,24 @@
   whole week and the twelve before it, from one read of thirteen weeks,
   for `/metrics`: `lapilli_goal_met`, `lapilli_goal_known`,
   `lapilli_goal_value` and `lapilli_goal_weeks_met` (`goal`, [`team`]),
-  which a scrape reads and doesn't work out. `goal.missed` is told once
-  for each goal, team and week. `--goal-tasks` (`serve.goalTasks`) makes a
-  task, of kind `decide`, for each goal missed, 20 a run at most, the rest
-  waiting, as the Run history page says; an open one is commented on as
-  later weeks are missed again, met, or no longer missed. Goals over a
-  marked window's occurrences (`each: KIND`, `no_worse_than: before`) are
-  read and refused, saying why, until marked windows are kept. Without
-  `goals:`, nothing changes. Schema 020 adds `goals` and `tasks.goal`;
-  going back takes a copy of the ledger from before.
+  which a scrape reads and doesn't work out; replicas that follow read
+  them from the ledger, where the leader keeps them when they change, not
+  from the status it writes every few seconds. `goal.missed` is told once
+  for each goal, team and week: a goal of each team's in one notice a
+  week, naming the teams that missed it (50, and how many more). A goal
+  taken out of the file and put back, or given another team, tells no
+  week again. `--goal-tasks` (`serve.goalTasks`) makes a task, of kind
+  `decide`, for each goal missed, 20 a run at most, the rest waiting, as
+  the Run history page says; and, with it alone, says on each goal's open
+  task, the button's too, as later weeks are missed again, met, or no
+  longer missed, 20 comments a run at most. A value missed is cut away
+  from its bound (79.9%, not 80%, of a goal of at least 80%). Goals over
+  a marked window's occurrences (`each: KIND`, `no_worse_than: before`)
+  are read and refused, saying why, until marked windows are kept.
+  Without `goals:`, nothing changes. **Ledger schema 020**, after 019:
+  `goals` and `tasks.goal`, with nothing to backfill. A lapilli before
+  0.53 doesn't open a ledger this one has migrated: take a snapshot of
+  its disk, or of its database, before upgrading, to go back to.
 
 - **`lapilli preflight`: what serve will meet, before it is deployed.**
   It takes `lapilli serve`'s flags, read and refused as serve reads them

@@ -1975,5 +1975,7 @@
  "not known: nothing to count it of that week": "알 수 없음: 그 주에는 셀 대상이 없어요",
  "not known: the ledger holds only part of the week": "알 수 없음: 원장에 그 주의 일부만 있어요",
  "not known: the team has no labels, so it owns only the incidents its rules caught: give it labels": "알 수 없음: 팀에 라벨이 없어서 자기 규칙이 잡은 인시던트만 소유해요. 라벨을 주세요",
- "goals": "목표"
+ "goals": "목표",
+ "%s (%s)": "%s (%s)",
+ "Goal %s missed in the week of %s by %d teams: %s; the goal is %s.": "목표 %[1]s 를 %[2]s 주에 %[3]d개 팀이 못 지켰어요: %[4]s. 목표는 %[5]s 예요."
 }

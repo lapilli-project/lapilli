@@ -480,9 +480,33 @@ Small things the design left open, settled as they were built:
 - **The leader's work** reads the twelve whole weeks before this one and
   this one, for everyone and each team a goal is of, after each round in
   which the ledger or the week changed: what `/metrics`' weeks met needs,
-  and within the 13 weeks the design bounds it to. `goal.missed` is told
-  of the last whole week alone, once its cursor has passed, keyed on the
-  goal, its team's id and the week, which only moves on.
+  and within the 13 weeks the design bounds it to. What it works out (500
+  lines at most) is kept in the ledger's meta, written aside, only when it
+  changed; the status the leader writes every few seconds says only a sum
+  of it, the week, how many lines and the tasks waiting, and a replica
+  that follows reads the lines from the ledger when the sum moves, for its
+  `/metrics`. Kept in the status whole, it would be some 50 KB rewritten
+  every two seconds.
+- **`goal.missed`** is told of the last whole week alone, once its cursor
+  has passed, marked by the goal, each team's id (0 for everyone's) and
+  the week, which only moves on: a team marked for a later week, as by a
+  leader whose clock was ahead, isn't told an earlier one. A goal of each
+  team's (`*`) is one notice a week, of the teams that missed it and
+  weren't told of it (`teams`, 50 named with their values, `more` beyond),
+  not one a team. The marks stay when a goal is taken out of the file,
+  or given another team, until they are thirteen weeks old: a goal put
+  back after a ConfigMap rolled back, or a serve started once without
+  `--config`, tells no week again, nor makes its task again.
+- **Comments on a goal's task** are `--goal-tasks`', as its tasks are:
+  without it, Lapilli writes on no task, one a person made with the button
+  among them. With it, a run writes 20 at most, as it makes 20 tasks; the
+  runs after say the rest. A task the runs find open already, made since
+  they read the tasks, counts toward the 20 as one made.
+- **A value missed** is shown cut to a tenth of a percent away from its
+  bound, down for `at_least` and up for `at_most`, so that it never reads
+  as the bound it missed (79.9%, not 80%, of a goal of at least 80%).
+- **The Goals page** takes the heavy turn by the rows it reads, as a
+  summary does: of every team, or more than 53.
 - **A goal's task** keeps, beside it in the ledger's meta, the week it was
   made for and what was said on it since, written in the same write as
   each comment: "Missed again", "Met" and "No longer missed", each once a

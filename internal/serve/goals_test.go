@@ -366,13 +366,18 @@ func TestGoalsAfterRun(t *testing.T) {
 					Goal goalNotice `json:"goal"`
 				}
 				json.Unmarshal(n.Body, &x)
-				out = append(out, x.Goal.Name+"/"+x.Goal.Team+"/"+x.Goal.From.Format("2006-01-02"))
+				teams := ""
+				for _, y := range x.Goal.Teams {
+					teams += "/" + y.Team
+				}
+				out = append(out, x.Goal.Name+"/"+x.Goal.Team+"/"+x.Goal.From.Format("2006-01-02")+teams)
 			}
 		}
 		slices.Sort(out)
 		return out
 	}
-	if got := told(); !slices.Equal(got, []string{"no-refire/search/2026-10-26", "none-missed//2026-10-26"}) {
+	// A goal of each team's, once, with its teams.
+	if got := told(); !slices.Equal(got, []string{"no-refire/*/2026-10-26/search", "none-missed//2026-10-26"}) {
 		t.Errorf("told: %v", got)
 	}
 	// One task a run: no-refire's first, by its name; none-missed's waits.

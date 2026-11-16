@@ -27,7 +27,7 @@ type goalCell struct {
 
 // goalCellOf is a goal's week as a cell.
 func goalCellOf(l string, w goalWeek, loc *time.Location) goalCell {
-	c := goalCell{Value: goalValueText(w.Measure, w.Value)}
+	c := goalCell{Value: goalWeekValue(w.summaryGoal)}
 	day := w.From.In(loc).Format("2006-01-02")
 	switch w.Result {
 	case goalMet:
@@ -85,22 +85,6 @@ type goalsView struct {
 // first.
 const goalTeamsShown = 50
 
-// goalTasksOpen are the open tasks about goals, by goal and team.
-func (s *Server) goalTasksOpen(ctx context.Context) (map[[2]string]int64, error) {
-	ts, err := s.l.Tasks(ctx, ledger.TaskQuery{Status: []string{"open", "doing"}, AnyGoal: true, Limit: 500})
-	if err != nil {
-		return nil, err
-	}
-	out := map[[2]string]int64{}
-	for _, t := range ts {
-		k := [2]string{t.Goal, fmt.Sprint(t.TeamID)}
-		if _, ok := out[k]; !ok {
-			out[k] = t.ID
-		}
-	}
-	return out, nil
-}
-
 func (s *Server) goalsPage(r *http.Request) (any, error) {
 	ctx := r.Context()
 	l := lang(r)
@@ -131,8 +115,9 @@ func (s *Server) goalsPage(r *http.Request) (any, error) {
 		v.NoneFor = true
 		return v, nil
 	}
-	if every {
-		// Every team's rows, as a summary of every team takes them.
+	if every || ((this-w1)/7+1)*int64(len(who)) > summaryMaxWeeks {
+		// Every team's rows, or more than a year's of one, as a summary
+		// of as many takes them: in the heavy turn.
 		done, err := s.busy(ctx)
 		if err != nil {
 			return nil, err
@@ -143,7 +128,7 @@ func (s *Server) goalsPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	open, err := s.goalTasksOpen(ctx)
+	open, err := s.l.OpenGoalTasks(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +159,7 @@ func (s *Server) goalsPage(r *http.Request) (any, error) {
 			shown[g.Name]++
 		}
 		row := goalRowView{Name: g.Name, Team: gl.TeamName(), Measure: goalMeasureText(l, g.Measure), Target: goalTarget(l, g), EveryTeam: g.EveryTeam,
-			Task: open[[2]string{g.Name, fmt.Sprint(teamIDOf(gl.Team))}]}
+			Task: open[ledger.GoalKey(g.Name, teamIDOf(gl.Team))]}
 		if !seen[g.Name] {
 			row.ID, seen[g.Name] = "goal-"+g.Name, true
 		}
@@ -221,7 +206,7 @@ func (s *Server) goalsOverview(ctx context.Context, l string, team *ledger.Team)
 	if err != nil {
 		return nil, nil, err
 	}
-	open, err := s.goalTasksOpen(ctx)
+	open, err := s.l.OpenGoalTasks(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -245,7 +230,7 @@ func (s *Server) goalsOverview(ctx context.Context, l string, team *ledger.Team)
 			}
 			a := action{Text: tr(l, "Goal %s missed last week", gl.Goal.Name), Detail: text, Href: href + "#goal-" + gl.Goal.Name,
 				Kind: "decide", Goal: gl.Goal.Name, GoalTeam: gl.TeamName(), GoalTeamID: teamIDOf(gl.Team), Week: w.From.In(s.cfg.Loc).Format("2006-01-02"),
-				Task: open[[2]string{gl.Goal.Name, fmt.Sprint(teamIDOf(gl.Team))}]}
+				Task: open[ledger.GoalKey(gl.Goal.Name, teamIDOf(gl.Team))]}
 			as = append(as, a)
 		default:
 			c.Unknown++

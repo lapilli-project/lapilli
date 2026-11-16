@@ -1975,5 +1975,7 @@
  "not known: nothing to count it of that week": "不明: その週には数える対象がありません",
  "not known: the ledger holds only part of the week": "不明: 台帳にはその週の一部しかありません",
  "not known: the team has no labels, so it owns only the incidents its rules caught: give it labels": "不明: チームにラベルがないため、自分のルールが検知したインシデントしか持ちません。ラベルを付けてください",
- "goals": "目標"
+ "goals": "目標",
+ "%s (%s)": "%s (%s)",
+ "Goal %s missed in the week of %s by %d teams: %s; the goal is %s.": "目標 %[1]s は %[2]s の週に %[3]d チームで未達でした: %[4]s。目標は %[5]s です。"
 }
