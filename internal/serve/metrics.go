@@ -278,6 +278,9 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", c.ctype)
 	w.Write(c.body)
+	// What lapilli serve asked of the history: counters, not kept with
+	// the pages.
+	s.historyMetrics(w)
 	// When the deploys file was last read and kept: what a dashboard says
 	// a job that writes it stopped by. Not a page's: it changes each run.
 	if s.cfg.Deploys != "" {

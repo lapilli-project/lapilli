@@ -2,10 +2,11 @@
 {{if .Empty}}
 <h1>{{$title}}</h1>
 {{template "empty" (emptyOf "first" "" "The first run replays the rules over the weeks before it started; this page fills in when it has. It can take a few minutes for a busy set of rules.")}}
+{{with .Run}}{{if eq .Kind "held"}}<p class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "The first run waits: %s." .Error}}</p>{{end}}{{end}}
 {{else}}
 <h1>{{$title}}</h1>
 <p class="lede">{{t "Each firing gets a stone: ○ when it caught an incident, ● when nothing was wrong."}} {{t "The numbers are the week of %s, beside the week before." (day $loc .From)}}
-{{with .Run}}{{if .Error}}<span class="status-bad">{{t "Last run %s, failed: %s." (at $loc .Finished) .Error}}</span>{{else}}{{t "Last run %s." (at $loc .Finished)}}{{end}}{{end}}
+{{with .Run}}{{if eq .Kind "held"}}<span class="status-warn">{{t "Last run %s, held: %s." (at $loc .Finished) .Error}}</span>{{else if .Error}}<span class="status-bad">{{t "Last run %s, failed: %s." (at $loc .Finished) .Error}}</span>{{else}}{{t "Last run %s." (at $loc .Finished)}}{{end}}{{end}}
 {{if .Backlog}}<strong class="status-info"><span aria-hidden="true">↻</span> {{t "Catching up: firings are in up to %s." (at $loc .Cursor)}}</strong>{{end}}
 {{with .Check}}<br>{{t "That week, the replay beside what really fired: %d%% alike, of %d firings." .Share .Either}}{{with .Differ}} {{t "Replayed differently:"}}{{range $i, $r := .}}{{if $i}},{{end}} <a href="{{$.Rule $r}}"><bdi>{{$r}}</bdi></a>{{end}}.{{end}}{{end}}</p>
 

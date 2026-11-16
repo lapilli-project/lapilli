@@ -58,7 +58,7 @@
 <thead><tr><th scope="col">{{t "Kind"}}</th><th scope="col">{{t "Started"}}</th><th scope="col">{{t "Period"}}</th><th scope="col" class="n">{{t "Firings"}}</th><th scope="col">{{t "Not replayed"}}</th><th scope="col">{{t "Error"}}</th></tr></thead>
 <tbody>{{range .Runs}}
 <tr><td>{{t .Kind}}</td><td class="t">{{at $loc .Started}}</td><td class="t">{{at $loc .From}} → {{at $loc .To}}</td><td class="n">{{.Firings}}</td>
-<td>{{with .Failed}}<span class="status-warn">{{range $rule, $why := .}}{{$rule}}: {{$why}}<br>{{end}}</span>{{end}}</td><td>{{with .Error}}<span class="status-bad"><span aria-hidden="true">✕</span> {{.}}</span>{{end}}</td></tr>{{else}}<tr><td colspan="6" class="quiet">{{t "None yet."}}</td></tr>{{end}}</tbody>
+<td>{{with .Failed}}<span class="status-warn">{{range $rule, $why := .}}{{$rule}}: {{$why}}<br>{{end}}</span>{{end}}</td><td>{{if eq .Kind "held"}}<span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{.Error}}</span>{{else}}{{with .Error}}<span class="status-bad"><span aria-hidden="true">✕</span> {{.}}</span>{{end}}{{end}}</td></tr>{{else}}<tr><td colspan="6" class="quiet">{{t "None yet."}}</td></tr>{{end}}</tbody>
 </table></div>
 {{if or .Sources .Copying}}<h2>{{t "Firings copied in"}}</h2>
 <div class="scroll"><table>

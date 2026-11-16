@@ -510,6 +510,22 @@ the rest is asked (the configuration 2 MiB at most, the targets 32, as
 each is parsed whole); `lapilli serve` keeps where the groups run as last read
 when it can't be read.
 
+`lapilli serve` pointed at the history the alerts are evaluated against can
+keep off their quota ([docs/design/quota.md](docs/design/quota.md)). Its
+`/metrics` counts what it asks of each API (`prometheus`, `loki`, `grafana`):
+`lapilli_serve_history_requests_total` by the class of the answer, the 429s,
+the requests asked again and the seconds waited, to set beside the
+evaluator's own errors. Each of these is off by default:
+`--yield-on-429` stops a run's requests to an API at its first 429, not
+asked again, and the rules left are replayed by a later run from where they
+were missed (`--yield-for DUR` leaves the API alone longer); `--guard EXPR`
+holds each run, and each day of a catch-up, while a PromQL expression such as
+`rate(prometheus_rule_evaluation_failures_total[5m]) > 0` returns anything;
+`--catch-up-hours 01:00-06:00` keeps a catch-up (the first start's
+`--backfill`, a run after being down) to those hours in `--tz`, at
+`--catch-up-rate N` if given. A run that waits is kept in the run history
+as held, with why.
+
 A run that takes longer than 15 seconds says on stderr, every 30 seconds,
 how it is going; `--progress=false` keeps it quiet. A run the history
 answered HTTP 429 says so at its end either way. stdout has the report

@@ -148,7 +148,9 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		if err := s.keepBegan(ctx); err != nil {
 			s.fail("a run", err)
 		}
-		if s.checking() && s.still(ctx) {
+		// Not while the runs wait, or yielded to the prometheus API: it
+		// asks the same API (docs/design/quota.md).
+		if s.checking() && s.still(ctx) && !s.runsWait() {
 			if err := s.checkReplay(ctx); err != nil {
 				s.fail("setting the replay beside what really fired", err)
 			}
@@ -295,6 +297,11 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		cursor = again
 	}
 	piece := 24 * time.Hour
+	var looked time.Time // where the run was last looked at to wait
+	s.holding.Store(false)
+	if s.yield != nil {
+		s.yield.Begin(s.now())
+	}
 	for cursor.Before(now) && ctx.Err() == nil {
 		s.stepped()
 		from := cursor.Add(-settle).Truncate(s.cfg.Step)
@@ -306,9 +313,19 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		if to.Before(now) || settle == 0 {
 			kind = "backfill"
 		}
+		// Before each run, and between the days of a catch-up, not again
+		// for one tried over less: one that waits is kept, and the next
+		// run tries again.
+		if !cursor.Equal(looked) {
+			looked = cursor
+			if why := s.waits(ctx, cursor, now); why != "" {
+				s.hold(ctx, kind, from, now, why)
+				return
+			}
+		}
 		s.status.set("replaying %s → %s", from.In(s.cfg.Loc).Format("2006-01-02 15:04"), to.In(s.cfg.Loc).Format("2006-01-02 15:04"))
 		began := s.now()
-		found, unfinished, err := s.find(ctx, from, to)
+		found, unfinished, err := s.find(s.asking(ctx, cursor, now), from, to)
 		switch {
 		case unfinished && to.Sub(cursor) > s.cfg.Every:
 			// Too much at once for the time given: half as much.
@@ -348,6 +365,10 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		cursor, settle = to, s.cfg.Settle
 		if !unfinished && piece < 24*time.Hour {
 			piece *= 2
+		}
+		if ys := s.yielded(); len(ys) > 0 {
+			s.log.Warn("the runs yielded to a history API that answered HTTP 429: they stop here, and the rules not replayed are replayed by a later run", "apis", strings.Join(ys, ","))
+			return
 		}
 	}
 }
@@ -1242,7 +1263,7 @@ func (s *Server) reviewChange(ctx context.Context, before, after ledger.Version,
 // over [from, to), within timeout, and sets them side by side, judged
 // against the ledger's incidents; same is how many rules it left alike.
 func (s *Server) replayChange(ctx context.Context, gone, came []rules.Rule, same int, from, to time.Time, timeout time.Duration, o verdict.Options) (*verdict.Comparison, error) {
-	rctx, cancel := context.WithTimeout(ctx, timeout)
+	rctx, cancel := context.WithTimeout(s.askedFor(ctx), timeout)
 	defer cancel()
 	ran, fired := replay.RunEach(rctx, s.h, [][]replay.Version{{{Rules: gone}}, {{Rules: came}}}, from, to, s.cfg.Step, s.cfg.Parallel)
 	incs, err := s.l.Incidents(ctx, from, to, false)

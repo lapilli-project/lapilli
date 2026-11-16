@@ -23,6 +23,31 @@
   is said on stderr by its key, never its title, with a count by why. When
   every issue found is skipped, the script writes nothing and exits 1, so a
   cron job shows it. The ids are still the issues' keys.
+- **`lapilli serve` keeps off the quota of the history it shares with the
+  alerts** ([docs/design/quota.md](docs/design/quota.md)). Each part is off
+  by default, and `--max-rate`, `--max-samples`, `--timeout` and the 429
+  retries are as they were.
+  - `/metrics` counts what serve itself asks of each history API, `api`
+    one of `prometheus`, `loki` and `grafana` (its data source proxy):
+    `lapilli_serve_history_requests_total{api,answer}` by the class of the
+    answer (2xx to 5xx, or none), `lapilli_serve_history_throttled_total`
+    (HTTP 429), `lapilli_serve_history_retries_total`,
+    `lapilli_serve_history_wait_seconds_total{api,reason}` (`api` or
+    `rate`) and `lapilli_serve_history_yields_total`.
+  - `--yield-on-429`: an API's first 429 to a run ends the run's requests
+    to it, not asked again after a wait; the run stops after its piece,
+    and the rules it didn't replay are replayed by a later run from where
+    they were missed. `--yield-for DUR` leaves the API alone that long.
+  - `--guard EXPR`: a PromQL expression asked before each run and each day
+    of a catch-up, such as the rate of the evaluator's own evaluation
+    failures; while it returns anything, or can't be read, the run waits.
+  - `--catch-up-hours HH:MM-HH:MM`: a run more than twice `--every` and
+    `--settle` behind (the first start's `--backfill`, after being down)
+    runs only in those hours, in `--tz`; `--catch-up-rate N` asks each API
+    N requests a second at most while catching up.
+  - A run that waits is kept in the run history as `held`, with why, once
+    for each reason; it isn't counted as failed, and
+    `lapilli_serve_runs_total` counts it as `result="held"`.
 
 ## [0.47.0] - 2026-11-16
 

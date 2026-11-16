@@ -257,10 +257,11 @@ func (l *Ledger) LastIncident(ctx context.Context, at time.Time) (time.Time, err
 	return fromNull(t), err
 }
 
-// FailedRuns are how many runs started since a time failed.
+// FailedRuns are how many runs started since a time failed: not those held,
+// which waited for a later run (docs/design/quota.md).
 func (l *Ledger) FailedRuns(ctx context.Context, since time.Time) (int, error) {
 	var n int
-	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM runs WHERE started >= ? AND error != ''", since.Unix()).Scan(&n)
+	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM runs WHERE started >= ? AND error != '' AND kind != 'held'", since.Unix()).Scan(&n)
 	return n, err
 }
 

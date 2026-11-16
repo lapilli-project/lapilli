@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/serve"
 	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/source"
@@ -113,6 +114,35 @@ The ledger:
   --tz ZONE           the zone days and weeks are counted, and times shown,
                       in (default: local)
   --timeout DUR       give up a run after this long (default 50m)
+
+Sharing the history with the alerts, so that Lapilli never takes their
+quota (docs/design/quota.md). Off by default:
+  --yield-on-429      when a history API (--prometheus, --loki, Grafana's
+                      data source proxy) answers a run's request with HTTP
+                      429, ask it nothing more in the run, not even again
+                      after a wait: the run stops there, the rules it didn't
+                      replay are replayed by a later run from where they
+                      were missed, and the run history says why of each.
+                      Without it, a 429 is asked again, as --max-rate says
+  --yield-for DUR     and ask that API nothing for DUR after the 429 (default
+                      0: the next run asks again). While --prometheus is
+                      left alone, runs wait, held in the run history
+  --guard EXPR        a PromQL expression asked of --prometheus before each
+                      run and between the days of a catch-up, such as how
+                      often the alerts' own evaluations fail
+                      (rate(prometheus_rule_evaluation_failures_total[5m]) >
+                      0): while it returns anything, or can't be read, the
+                      run waits for the next --every, kept in the run history
+                      as held, with why
+  --catch-up-hours HH:MM-HH:MM
+                      catch up only in these hours, in --tz, such as
+                      01:00-06:00, at least --every long: a run more than
+                      twice --every and --settle behind (the first start's
+                      --backfill, one after being down) waits for them, held.
+                      Runs are recorded in order, so the hourly runs resume
+                      once it caught up
+  --catch-up-rate N   while catching up, ask each history API N requests a
+                      second at most, besides --max-rate
   --check-replay=false
                       don't set the replay beside what really fired. It is
                       on with rules to replay: each day the runs won't
@@ -503,6 +533,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	}
 	timeoutSet := false
 	ledgerSet := false
+	yieldForSet := false
 	deployAfter, deployBefore, deployTimes := 10*time.Minute, time.Duration(0), false
 	// The sign-in of lapilli's own, read from the flags that give it.
 	var (
@@ -678,6 +709,27 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 				return true, fmt.Errorf("--check-differs %s: want N/RATIO, such as 5/0.9: at least N firings either way over a week, fewer than RATIO of them alike", val)
 			}
 			cfg.CheckDiffers = d
+		case "--yield-for":
+			cfg.YieldFor, err = dur(0)
+			yieldForSet = true
+		case "--yield-on-429":
+			cfg.Yield = val == "true"
+		case "--guard":
+			if strings.TrimSpace(val) == "" {
+				return true, fmt.Errorf("--guard: want a PromQL expression, such as rate(prometheus_rule_evaluation_failures_total[5m]) > 0")
+			}
+			cfg.Guard = val
+		case "--catch-up-hours":
+			w, werr := serve.ParseWindow(val)
+			if werr != nil {
+				return true, fmt.Errorf("--catch-up-hours %w", werr)
+			}
+			cfg.CatchUpHours = &w
+		case "--catch-up-rate":
+			cfg.CatchUpRate, err = strconv.ParseFloat(val, 64)
+			if err != nil || !(cfg.CatchUpRate >= prom.MinRate) || cfg.CatchUpRate > 10000 {
+				return true, fmt.Errorf("--catch-up-rate %s: want requests a second, from %g, like 5 or 0.5", val, prom.MinRate)
+			}
 		case "--every":
 			cfg.Every, err = dur(time.Minute)
 		case "--settle":
@@ -979,6 +1031,12 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--proposals-expire closes proposals in the ledger, and --read-only refuses writes")
 	case cfg.Config != "" && configFlag(cfg.Config) != nil:
 		err = configFlag(cfg.Config)
+	case yieldForSet && !cfg.Yield:
+		err = fmt.Errorf("--yield-for is how long --yield-on-429 leaves an API alone after a 429: give --yield-on-429")
+	case cfg.Guard != "" && f.promURL == "" && f.gcpProj == "":
+		err = fmt.Errorf("--guard is asked of the history: add --prometheus URL or --gcp-project ID")
+	case cfg.CatchUpHours != nil && cfg.CatchUpHours.Len() < cfg.Every:
+		err = fmt.Errorf("--catch-up-hours %s is shorter than --every %s: a run might never fall in it", cfg.CatchUpHours, time.Duration(cfg.Every))
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "lapilli serve: %v\nRun \"lapilli serve -h\" for the options.\n", err)
