@@ -18,13 +18,16 @@ import (
 // with, the expression and --impact-for as lapilli serve keys them;
 // impact_again, the criterion the weeks before the runs' first read of it
 // were read again with (ReadAgain), or found needing none, againDue while
-// they wait to be; and impact_data, when each selector the criterion reads
-// first had data (ImpactData). A lapilli before 0.47 kept only the first.
+// they wait to be; impact_data, when each selector the criterion reads
+// first had data (ImpactData); and impact_pending, a criterion the runs
+// read since another was kept, until it is read again (ImpactPending). A
+// lapilli before 0.49 kept only the first.
 const (
 	metaImpactSince     = "impact_since"
 	metaImpactCriterion = "impact_criterion"
 	metaImpactAgain     = "impact_again"
 	metaImpactData      = "impact_data"
+	metaImpactPending   = "impact_pending"
 	// againDue is impact_again while the weeks before a new criterion's
 	// first read wait to be read again with it.
 	againDue = "-"
@@ -33,7 +36,7 @@ const (
 // ImpactKept is what keeps the record by the impact signal, as the ledger
 // has it: Since, from when the runs read it, all of it, zero for never, or
 // not since a run that didn't; Criterion, what they read it with, "" when
-// none is kept (never read, or read by a lapilli before 0.47); Again, the
+// none is kept (never read, or read by a lapilli before 0.49); Again, the
 // criterion the weeks before Since were read again with (ReadAgain), or
 // found needing none (MarkAgain), "" for none and "-" while it waits; and
 // Data, where the data of the selectors a criterion reads begins, nil
@@ -43,30 +46,59 @@ type ImpactKept struct {
 	Criterion string
 	Again     string
 	Data      *ImpactData
+	// Pending is a criterion the runs read since the one kept, until it is
+	// read again: the record stays Criterion's, its windows and data, and
+	// keeps the weeks the runs read Pending over only as far as Pending's
+	// data goes (From).
+	Pending *ImpactPending
+}
+
+// ImpactPending is a criterion the runs read from Since on, though the
+// ledger keeps another's record (ImpactKept.Criterion); Data, where the
+// data of its selectors begins from Since, nil before it was looked for.
+type ImpactPending struct {
+	Criterion string      `json:"criterion"`
+	Since     time.Time   `json:"since"`
+	Data      *ImpactData `json:"data,omitempty"`
 }
 
 // AgainDone reports whether the weeks before the runs read criterion were
 // read again with it, or found needing none.
 func (k ImpactKept) AgainDone(criterion string) bool { return k.Again == criterion }
 
-// From is from when the record is kept by the impact signal: Since, but
-// never before where the data of every selector the criterion read begins
-// (ImpactData.Floor), and never when one of them has no data yet. Data of
-// another criterion than the one read says nothing of it: Since was kept
-// to that one's when it was read.
+// From is from when the record is kept by the impact signal: only what was
+// read, with data, by the criterion it is kept by. Since, but never before
+// where the data of every selector the criterion read begins
+// (ImpactData.Floor), and never when one of them has none. Data of another
+// criterion than the one read says nothing of it: Since was kept to that
+// one's when it was read. While the runs read a Pending criterion, the
+// weeks since its Since are read by it: the record is kept on through them
+// only when its data was there from its Since on; from where its data
+// begins, when later; and not at all before its data is looked for, or
+// while a selector of it has none.
 func (k ImpactKept) From() time.Time {
-	if k.Since.IsZero() {
+	base := k.Since
+	if d := k.Data; !base.IsZero() && d != nil && d.Criterion == k.Criterion {
+		switch {
+		case d.NoData:
+			base = time.Time{}
+		case d.Floor.After(base):
+			base = d.Floor
+		}
+	}
+	p := k.Pending
+	if p == nil {
+		return base
+	}
+	switch d := p.Data; {
+	case d == nil || d.Criterion != p.Criterion || d.NoData:
 		return time.Time{}
+	case !d.Floor.IsZero():
+		return later(d.Floor, p.Since)
+	case base.IsZero():
+		return p.Since
 	}
-	if d := k.Data; d != nil && d.Criterion == k.Criterion {
-		if d.NoData {
-			return time.Time{}
-		}
-		if d.Floor.After(k.Since) {
-			return d.Floor
-		}
-	}
-	return k.Since
+	return base
 }
 
 // ImpactData is where the data of the selectors a criterion reads begins,
@@ -85,13 +117,16 @@ type ImpactData struct {
 	NoData    bool           `json:"no_data,omitempty"`
 }
 
-// SelectorData is a selector, as written in the expression, and when its
-// first sample was found: zero for none yet; AtStart, where the look began,
-// so it may have had data before.
+// SelectorData is a selector, as written in the expression with its
+// offset or @, and when its first sample was found: zero for none yet;
+// AtStart, where the look began, so it may have had data before.
 type SelectorData struct {
 	Sel     string    `json:"sel"`
 	First   time.Time `json:"first,omitzero"`
 	AtStart bool      `json:"at_start,omitempty"`
+	// To is how far it was looked for, zero before it was: a look that
+	// stopped part of the way goes on from there.
+	To time.Time `json:"to,omitzero"`
 }
 
 // Complete reports whether every selector had data.
@@ -159,7 +194,7 @@ func (l *Ledger) WeekOnOrAfter(t time.Time) time.Time {
 
 // ImpactKept reads what keeps the record by the impact signal, in one read.
 func (l *Ledger) ImpactKept(ctx context.Context) (ImpactKept, error) {
-	rows, err := l.r.QueryContext(ctx, "SELECT key, value FROM meta WHERE key IN (?, ?, ?, ?)", metaImpactSince, metaImpactCriterion, metaImpactAgain, metaImpactData)
+	rows, err := l.r.QueryContext(ctx, "SELECT key, value FROM meta WHERE key IN (?, ?, ?, ?, ?)", metaImpactSince, metaImpactCriterion, metaImpactAgain, metaImpactData, metaImpactPending)
 	if err != nil {
 		return ImpactKept{}, err
 	}
@@ -184,6 +219,11 @@ func (l *Ledger) ImpactKept(ctx context.Context) (ImpactKept, error) {
 			if json.Unmarshal([]byte(v), &d) == nil {
 				k.Data = &d
 			}
+		case metaImpactPending:
+			var p ImpactPending
+			if json.Unmarshal([]byte(v), &p) == nil && p.Criterion != "" {
+				k.Pending = &p
+			}
 		}
 	}
 	return k, rows.Err()
@@ -202,15 +242,24 @@ func (l *Ledger) impactData(ctx context.Context, q querier) (*ImpactData, error)
 	return &d, nil
 }
 
-// SetImpactData keeps where the data of the criterion the runs read begins,
-// and moves impact_since forward to its Floor: never back. Of another
-// criterion than the one read, it keeps nothing.
+// SetImpactData keeps where the data of the criterion the ledger keeps the
+// record by begins, and moves impact_since forward to its Floor: never
+// back; or, of the criterion pending, where its data begins from its
+// Since. Of another criterion, it keeps nothing.
 func (l *Ledger) SetImpactData(ctx context.Context, d ImpactData) error {
 	l.floor(&d)
 	return l.write(ctx, func(t *txn) error {
 		crit, err := l.meta(t.ctx, t, metaImpactCriterion)
-		if err != nil || crit != d.Criterion {
+		if err != nil {
 			return err
+		}
+		if crit != d.Criterion {
+			p, err := l.pending(t.ctx, t)
+			if err != nil || p == nil || p.Criterion != d.Criterion {
+				return err
+			}
+			p.Data = &d
+			return setPending(t, p)
 		}
 		b, err := json.Marshal(d)
 		if err != nil {
@@ -230,24 +279,65 @@ func (l *Ledger) SetImpactData(ctx context.Context, d ImpactData) error {
 	})
 }
 
+// pending is the criterion pending, nil for none.
+func (l *Ledger) pending(ctx context.Context, q querier) (*ImpactPending, error) {
+	v, err := l.meta(ctx, q, metaImpactPending)
+	if err != nil || v == "" {
+		return nil, err
+	}
+	var p ImpactPending
+	if json.Unmarshal([]byte(v), &p) != nil || p.Criterion == "" {
+		return nil, nil
+	}
+	return &p, nil
+}
+
+func setPending(t *txn, p *ImpactPending) error {
+	b, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	return setMeta(t.ctx, t, metaImpactPending, string(b))
+}
+
 // criterionChanged reports whether a run read the impact signal with
-// another criterion than the runs before it: not when the run says none
-// (one from before 0.47), nor when the runs before didn't read it. A ledger
-// that kept no criterion but was read (an earlier lapilli's) was read with
-// the one the run takes it to (ImpactAssumed).
+// another criterion than the runs before it: the one pending, or else the
+// one the record is kept by; of a ledger that kept none but was read (an
+// earlier lapilli's), the one the run takes it to (ImpactAssumed). Not when
+// the run says none (one from before 0.49), nor when the runs before didn't
+// read it.
 func (l *Ledger) criterionChanged(t *txn, f Found) (bool, error) {
 	if !f.ImpactOn || f.ImpactCriterion == "" {
 		return false, nil
 	}
+	last, err := l.lastRead(t, f)
+	return last != "" && last != f.ImpactCriterion, err
+}
+
+// lastRead is the criterion the runs before f read: the one pending, the
+// one kept, or, of a ledger read that kept none, f.ImpactAssumed; "" when
+// they read none.
+func (l *Ledger) lastRead(t *txn, f Found) (string, error) {
+	p, err := l.pending(t.ctx, t)
+	if err != nil || p != nil {
+		return pendingKey(p), err
+	}
 	was, err := l.meta(t.ctx, t, metaImpactCriterion)
 	if err != nil || was != "" {
-		return was != "" && was != f.ImpactCriterion, err
+		return was, err
 	}
 	since, err := l.meta(t.ctx, t, metaImpactSince)
 	if _, perr := strconv.ParseInt(since, 10, 64); err != nil || perr != nil {
-		return false, err
+		return "", err
 	}
-	return f.ImpactAssumed != f.ImpactCriterion, nil
+	return f.ImpactAssumed, nil
+}
+
+func pendingKey(p *ImpactPending) string {
+	if p == nil {
+		return ""
+	}
+	return p.Criterion
 }
 
 // ImpactRead is the impact signal read again over [From, To], To where the
@@ -270,7 +360,7 @@ var ErrRunsMoved = errors.New("the runs moved on while the impact signal was rea
 // ends a window found before on at r.From there, and pends the span to be
 // judged again a week at a time (JudgePending): from then on, the record
 // is kept by r.Criterion (impact_since r.From, or, later, where its data
-// begins). Before r.From, the windows found before stay, as the incidents
+// begins), no longer pending. Before r.From, the windows found before stay, as the incidents
 // they were when they were read, and keep the record of the weeks near
 // them as an incident does; the signal read with another criterion keeps
 // none.
@@ -301,12 +391,15 @@ func (l *Ledger) ReadAgain(ctx context.Context, r ImpactRead, o verdict.Options)
 				return err
 			}
 		}
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key = ?", metaImpactPending); err != nil {
+			return err
+		}
 		return pend(t, [][2]int64{{min(lo, from) - int64(o.Lead/time.Second), r.To.Unix()}})
 	})
 }
 
 // MarkAgain keeps that the weeks before the runs read criterion need no
-// read again: the runs read it from their first, or a lapilli before 0.47
+// read again: the runs read it from their first, or a lapilli before 0.49
 // read it, which kept no criterion, and it is taken for the one read now.
 func (l *Ledger) MarkAgain(ctx context.Context, criterion string) error {
 	return l.write(ctx, func(t *txn) error {
@@ -493,4 +586,13 @@ func (l *Ledger) OrphanedImpact(ctx context.Context) ([]ImpactOrphan, error) {
 		}
 	}
 	return out, rows.Err()
+}
+
+// DecidedImpact are the impact windows something was decided about that a
+// read from from on would take the place of, or end there, as ReadAgain
+// reads them: on from from on, one that started before it too; for a try,
+// which sets what it finds beside them.
+func (l *Ledger) DecidedImpact(ctx context.Context, from time.Time) ([]Incident, error) {
+	return l.incidents(ctx, `SELECT i.id, i.key, i.origin, i.title, i.start_at, i.end_at, i.labels, i.state, i.counts, i.updated, i.updated_by
+		FROM incidents i WHERE i.origin = 'impact' AND i.state != '' AND (i.start_at >= ? OR i.end_at > ?) ORDER BY i.start_at, i.key`, from.Unix(), from.Unix())
 }

@@ -12,12 +12,15 @@ func TestSelectors(t *testing.T) {
 	for expr, want := range map[string][]string{
 		`sum by (service) (rate(http_requests_total{code=~"5.."}[5m])) / sum by (service) (rate(http_requests_total[5m])) > 0.01`: {
 			`http_requests_total{code=~"5.."}`, `http_requests_total`},
-		`probe_success{job="blackbox"} == 0 or rate(errors_total {svc="a"}[1h] offset 1d) > 1`: {`probe_success{job="blackbox"}`, `errors_total {svc="a"}`},
-		`up == 0 and on (instance) up`: {`up`},
-		`{__name__="x", job="y"} > 0`:  {`{__name__="x", job="y"}`},
-		`absent(up{job="x"})`:          {`up{job="x"}`},
-		`vector(1)`:                    nil,
-		`max_over_time(a[1h:5m]) # a comment with b{c="d"}` + "\n> 2": {`a`},
+		`probe_success{job="blackbox"} == 0 or rate(errors_total {svc="a"}[1h] offset 1d) > 1`: {`probe_success{job="blackbox"}`, `errors_total {svc="a"} offset 1d`},
+		`rate(x[5m]) > 2 * rate(x[5m] offset 1w)`:                                              {`x`, `x offset 1w`},
+		`x @ 1700000000 offset -5m`:                                                            {`x @ 1700000000 offset -5m`},
+		`max(y @ start())`:                                                                     {`y @ start()`},
+		`up == 0 and on (instance) up`:                                                         {`up`},
+		`{__name__="x", job="y"} > 0`:                                                          {`{__name__="x", job="y"}`},
+		`absent(up{job="x"})`:                                                                  {`up{job="x"}`},
+		`vector(1)`:                                                                            nil,
+		`max_over_time(a[1h:5m]) # a comment with b{c="d"}` + "\n> 2":                          {`a`},
 	} {
 		got, err := Selectors(expr)
 		if err != nil || !slices.Equal(got, want) {

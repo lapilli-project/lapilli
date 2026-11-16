@@ -81,21 +81,64 @@ func (o scopeOut) str(s string) {
 
 // Selectors are the series selectors of a PromQL expression, as written,
 // each once, in the order they come: a metric's name with its matchers,
-// or matchers alone (http_requests_total{code=~"5.."}, up, {job="x"});
-// without a range or an offset after them. An expression that doesn't
-// read as Scope reads it is an error.
+// or matchers alone (http_requests_total{code=~"5.."}, up, {job="x"}),
+// with the offset and the @ written after them, past a range
+// (x offset 1w, x @ 1700000000), as they move where the data is read; not
+// the range itself. An expression that doesn't read as Scope reads it is
+// an error.
 func Selectors(expr string) ([]string, error) {
 	var x scanned
 	if _, err := scopeScan(expr, "", nil, &x); err != nil {
 		return nil, err
 	}
 	var out []string
-	for _, s := range x.sels {
+	for i, s := range x.sels {
+		s += selectorModifiers(expr[x.ends[i]:])
 		if !slices.Contains(out, s) {
 			out = append(out, s)
 		}
 	}
 	return out, nil
+}
+
+// selectorModifiers are the offset and the @ a selector's text is followed
+// by in rest, past its range, as " offset 1w @ 1700000000".
+func selectorModifiers(rest string) string {
+	space := func() { rest = strings.TrimLeft(rest, " \t\n\r") }
+	token := func() string {
+		space()
+		j := 0
+		for j < len(rest) && (rest[j] == '-' || rest[j] == '+' || rest[j] == '.' || rest[j] == '_' || rest[j] == '(' || rest[j] == ')' ||
+			rest[j] >= '0' && rest[j] <= '9' || rest[j] >= 'a' && rest[j] <= 'z' || rest[j] >= 'A' && rest[j] <= 'Z') {
+			if rest[j] == ')' && !strings.HasSuffix(rest[:j], "(") {
+				break // the call it is in closes
+			}
+			j++
+		}
+		t := rest[:j]
+		rest = rest[j:]
+		return t
+	}
+	space()
+	if strings.HasPrefix(rest, "[") {
+		if end := strings.IndexByte(rest, ']'); end >= 0 {
+			rest = rest[end+1:]
+		}
+	}
+	var out string
+	for {
+		space()
+		switch {
+		case strings.HasPrefix(strings.ToLower(rest), "offset") && (len(rest) == 6 || !isWordByte(rest[6])):
+			rest = rest[6:]
+			out += " offset " + token()
+		case strings.HasPrefix(rest, "@"):
+			rest = rest[1:]
+			out += " @ " + token()
+		default:
+			return out
+		}
+	}
 }
 
 // Ranges are what is in the brackets of an expression's range selectors and
@@ -106,8 +149,12 @@ func Ranges(expr string) ([]string, error) {
 	return x.ranges, err
 }
 
-// scanned is what scopeScan found: the selectors, and the ranges.
-type scanned struct{ sels, ranges []string }
+// scanned is what scopeScan found: the selectors, where each ends, and the
+// ranges.
+type scanned struct {
+	sels, ranges []string
+	ends         []int
+}
 
 // scopeScan reads expr as Scope does, writing it with matchers added into
 // b, unless b is nil, and says how much they add: the matchers, and the
@@ -191,7 +238,7 @@ func scopeScan(expr, matchers string, b *strings.Builder, found *scanned) (int, 
 				if nameEnd >= 0 && strings.TrimSpace(expr[nameEnd:open]) == "" {
 					from = nameStart
 				}
-				found.sels = append(found.sels, expr[from:i+1])
+				found.sels, found.ends = append(found.sels, expr[from:i+1]), append(found.ends, i+1)
 			}
 			nameEnd = -1
 			// What is in it is copied as written.
@@ -269,7 +316,7 @@ func scopeScan(expr, matchers string, b *strings.Builder, found *scanned) (int, 
 				w.str(matchers)
 				w.byte('}')
 				if found != nil {
-					found.sels = append(found.sels, word)
+					found.sels, found.ends = append(found.sels, word), append(found.ends, i)
 				}
 			default:
 				nameStart, nameEnd = wordStart, i // its matchers come next

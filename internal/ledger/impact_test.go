@@ -29,11 +29,12 @@ func impactWindow(id string, start time.Time, d time.Duration) incident.Incident
 	return incident.Incident{ID: id, Title: "user impact (--impact)", Start: start, End: start.Add(d), Candidate: true}
 }
 
-// A run that reads another criterion than the runs before keeps the record
-// as it was, every week since read with the criterion in effect then, and
-// marks the weeks before as waiting to be read again with it; a window on
-// at its start is its own, not the one before's going on. Turned off, the
-// record ends; turned on again, the weeks before wait to be read again.
+// A run that reads another criterion than the one the record is kept by
+// leaves the record, its criterion and its data as they were: the new one
+// is pending, from the run's start, until it is read again; a window on at
+// its start is its own, not the one before's going on. Turned off, the
+// record ends; turned on again, the record is the new one's from the
+// run's start, and the weeks before wait to be read again.
 func TestImpactCriterionChanged(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
@@ -47,8 +48,9 @@ func TestImpactCriterionChanged(t *testing.T) {
 	at := t0.Add(2 * time.Hour)
 	impactRun(t, l, at, "5m b > 1", impactWindow("w", at.Add(-10*time.Minute), 20*time.Minute))
 	k, err = l.ImpactKept(ctx)
-	if err != nil || !k.Since.Equal(t0.Add(-time.Hour)) || k.Criterion != "5m b > 1" || k.Again != againDue {
-		t.Errorf("read with another: %+v %v", k, err)
+	if err != nil || !k.Since.Equal(t0.Add(-time.Hour)) || k.Criterion != "5m a > 1" || k.Again != againDue ||
+		k.Pending == nil || k.Pending.Criterion != "5m b > 1" || !k.Pending.Since.Equal(at.Add(-time.Hour)) {
+		t.Errorf("read with another: %+v %+v %v", k, k.Pending, err)
 	}
 	ws, err := l.ImpactWindows(ctx, t0, at.Add(time.Hour))
 	if err != nil || len(ws) != 2 || !ws[0].End.Equal(t0.Add(time.Hour)) || !ws[1].Start.Equal(at.Add(-10*time.Minute)) {
@@ -56,12 +58,12 @@ func TestImpactCriterionChanged(t *testing.T) {
 	}
 	// One not read ends it, the criterion forgotten.
 	impactRun(t, l, at.Add(time.Hour), "")
-	if k, err = l.ImpactKept(ctx); err != nil || !k.Since.IsZero() || k.Criterion != "" || k.Again != "" {
+	if k, err = l.ImpactKept(ctx); err != nil || !k.Since.IsZero() || k.Criterion != "" || k.Again != "" || k.Pending != nil {
 		t.Errorf("not read: %+v %v", k, err)
 	}
 	// Read again, from its own start, the weeks before it wait.
 	impactRun(t, l, at.Add(2*time.Hour), "5m b > 1")
-	if k, err = l.ImpactKept(ctx); err != nil || !k.Since.Equal(at.Add(time.Hour)) || k.Again != againDue {
+	if k, err = l.ImpactKept(ctx); err != nil || !k.Since.Equal(at.Add(time.Hour)) || k.Criterion != "5m b > 1" || k.Again != againDue || k.Pending != nil {
 		t.Errorf("turned on again: %+v %v", k, err)
 	}
 }
@@ -236,8 +238,14 @@ func TestImpactDecisions(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		got, err := l.IncidentByID(ctx, "impact-"+c.found.Start.Format("20060102T1504Z"))
-		if err != nil || got.State != c.want {
+		ws, err := l.ImpactWindows(ctx, from, from.Add(4*time.Hour))
+		var got Incident
+		for _, w := range ws {
+			if w.Start.Equal(c.found.Start) {
+				got = w
+			}
+		}
+		if err != nil || got.ID == "" || got.State != c.want {
 			t.Errorf("%s: %q, not %q (%v)", c.name, got.State, c.want, err)
 		}
 	}
@@ -389,5 +397,122 @@ func TestIncidentSources(t *testing.T) {
 	// PD-2 started before, and was written now: changed since.
 	if got.Written != 1 || got.LastWritten == nil || got.LastWritten.ID != "L-2" || got.File != 1 || got.Impact != 1 || len(got.Copied) != 2 {
 		t.Errorf("%+v", got)
+	}
+}
+
+// A task on service=a's window, read again with a criterion that finds, in
+// the same minute, only service=b's: b's window gets a key of its own, so
+// the task doesn't land on it, and is listed for the Cleanup page. Of two
+// windows in a minute, the one found again keeps its key; another found
+// there gets none of theirs.
+func TestImpactKeyOfAnother(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	key := func(at time.Time) string { return "impact-" + at.Format("20060102T1504Z") }
+	labelled := func(id, svc string, at time.Time) incident.Incident {
+		w := impactWindow(id, at, 30*time.Minute)
+		w.Labels = incident.Labels{"service": {svc}}
+		return w
+	}
+	a := t0.Add(70 * time.Minute)
+	f := Found{From: t0, To: t0.Add(4 * time.Hour), ImpactOn: true, ImpactSince: t0, ImpactCriterion: "a",
+		Impact: []incident.Incident{labelled("a", "a", a), labelled("c", "c", a.Add(10*time.Second))},
+		Run:    Run{Kind: "test", Started: t0, Finished: t0, From: t0, To: t0.Add(4 * time.Hour)}}
+	if err := l.Record(ctx, f, opts); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := l.ImpactWindows(ctx, t0, t0.Add(4*time.Hour))
+	if err != nil || len(ws) != 2 {
+		t.Fatalf("%+v %v", ws, err)
+	}
+	keyOf := map[string]string{}
+	for _, w := range ws {
+		keyOf[w.Labels["service"][0]] = w.ID
+	}
+	id, err := l.PutTask(ctx, Task{Title: "checkout is down", Kind: "decide", Incident: keyOf["a"]}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Decide(ctx, keyOf["a"], "confirmed", "", "ana", opts); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.write(ctx, func(tx *txn) error {
+		_, err := l.impact(tx, Found{From: t0.Add(time.Hour), ImpactSince: t0.Add(time.Hour),
+			Impact: []incident.Incident{labelled("b", "b", a), labelled("c", "c", a.Add(10*time.Second))}}, true)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ws, err = l.ImpactWindows(ctx, t0, t0.Add(4*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range ws {
+		switch svc := w.Labels["service"][0]; svc {
+		case "b":
+			if w.ID == keyOf["a"] || w.ID == keyOf["c"] || w.State != "" {
+				t.Errorf("b's window: %s %q", w.ID, w.State)
+			}
+		case "c":
+			if w.ID != keyOf["c"] {
+				t.Errorf("c's window: %s, not %s", w.ID, keyOf["c"])
+			}
+		}
+	}
+	if task, _ := l.TaskByID(ctx, id); task.Incident != key(a) && task.Incident != keyOf["a"] {
+		t.Errorf("the task moved to %s", task.Incident)
+	}
+	orphans, err := l.OrphanedImpact(ctx)
+	if err != nil || len(orphans) != 1 || orphans[0].Key != keyOf["a"] {
+		t.Errorf("orphans: %+v %v", orphans, err)
+	}
+}
+
+// The record while a criterion is pending: the one kept's, on through the
+// weeks the runs read the pending one over only when its data was there
+// from its start; from where its data begins, when later; none before its
+// data is looked for, or while a selector of it has none; and, with none
+// kept before, from the pending one's start.
+func TestImpactPendingFrom(t *testing.T) {
+	since, change := t0.Add(-14*24*time.Hour), t0.Add(30*time.Hour)
+	data := func(floor time.Time, none bool) *ImpactData {
+		return &ImpactData{Criterion: "b", Floor: floor, NoData: none}
+	}
+	for _, c := range []struct {
+		name string
+		k    ImpactKept
+		want time.Time
+	}{
+		{"not looked for", ImpactKept{Since: since, Criterion: "a", Pending: &ImpactPending{Criterion: "b", Since: change}}, time.Time{}},
+		{"no data", ImpactKept{Since: since, Criterion: "a", Pending: &ImpactPending{Criterion: "b", Since: change, Data: data(time.Time{}, true)}}, time.Time{}},
+		{"data later", ImpactKept{Since: since, Criterion: "a", Pending: &ImpactPending{Criterion: "b", Since: change, Data: data(t0.Add(7*24*time.Hour), false)}}, t0.Add(7 * 24 * time.Hour)},
+		{"data all along", ImpactKept{Since: since, Criterion: "a", Pending: &ImpactPending{Criterion: "b", Since: change, Data: data(time.Time{}, false)}}, since},
+		{"none kept before", ImpactKept{Pending: &ImpactPending{Criterion: "b", Since: change, Data: data(time.Time{}, false)}}, change},
+	} {
+		if got := c.k.From(); !got.Equal(c.want) {
+			t.Errorf("%s: %s, not %s", c.name, got, c.want)
+		}
+	}
+}
+
+// What was decided about the windows a read from a time on would replace or
+// end there, as ReadAgain reads them: one on from before it, however long
+// before it started, among them.
+func TestDecidedImpact(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	start := t0.Add(-3 * 24 * time.Hour)
+	f := Found{From: start, To: t0.Add(time.Hour), ImpactOn: true, ImpactSince: start, ImpactCriterion: "a",
+		Impact: []incident.Incident{impactWindow("long", start.Add(time.Hour), 4*24*time.Hour)},
+		Run:    Run{Kind: "test", Started: start, Finished: start, From: start, To: t0.Add(time.Hour)}}
+	if err := l.Record(ctx, f, opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Decide(ctx, "impact-"+start.Add(time.Hour).Format("20060102T1504Z"), "dismissed", "", "ana", opts); err != nil {
+		t.Fatal(err)
+	}
+	got, err := l.DecidedImpact(ctx, t0)
+	if err != nil || len(got) != 1 || got[0].State != "dismissed" {
+		t.Errorf("%+v %v", got, err)
 	}
 }

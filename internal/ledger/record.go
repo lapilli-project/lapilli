@@ -301,7 +301,7 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 			}
 			lo = min(lo, ilo)
 		}
-		if err := l.impactSince(t, f, changed); err != nil {
+		if err := l.impactSince(t, f); err != nil {
 			return err
 		}
 		if err := l.judge(t, lo-int64(o.Lead/time.Second), to, o); err != nil {
@@ -324,62 +324,79 @@ const impactNone = "none"
 // impactSince keeps from when the runs read the impact signal (--impact),
 // all of it, without a run between that didn't: what keeps the record of
 // the firings since (ImpactSince). A run that doesn't read it ends that
-// (impactNone), and forgets the criterion read and its data; the first to
-// read it with none kept, after it or after an upgrade, keeps its own
-// start. An earlier window found isn't taken for one: the runs between may
-// not have read it. Read again after a run that didn't (turned on again),
-// the weeks before its start wait to be read again with it (againDue).
+// (impactNone), and forgets the criterion read, its data and the one
+// pending; the first to read it with none kept (a new ledger's), keeps its
+// own start and its criterion. An earlier window found isn't taken for
+// one: the runs between may not have read it. Read again after a run that
+// didn't (turned on again), it keeps its own start too, and the weeks
+// before wait to be read again (againDue).
 //
-// A run that read another criterion than the runs before (changed) keeps
-// impact_since as it was: every week since was read, with the criterion in
-// effect then, and the windows each found stay until ReadAgain puts the new
-// one's in their place, over the last four weeks, and keeps the record by
-// it from there. It marks that read again as due. A since is never earlier
-// than where the criterion's data begins (ImpactData), when that is known.
-func (l *Ledger) impactSince(t *txn, f Found, changed bool) error {
+// A run that read another criterion than the one the record is kept by
+// leaves the record, its criterion and its data as they were:
+// the new one is pending (ImpactPending, from the run's start) until
+// ReadAgain reads it over the last four weeks and keeps the record by it.
+// A since is never earlier than where the criterion's data begins
+// (ImpactData), when that is known.
+func (l *Ledger) impactSince(t *txn, f Found) error {
 	was, err := l.meta(t.ctx, t, metaImpactSince)
 	if err != nil {
 		return err
 	}
+	crit, err := l.meta(t.ctx, t, metaImpactCriterion)
+	if err != nil {
+		return err
+	}
 	if !f.ImpactOn {
-		crit, err := l.meta(t.ctx, t, metaImpactCriterion)
-		if err != nil {
-			return err
-		}
 		again, err := l.meta(t.ctx, t, metaImpactAgain)
 		if err != nil {
 			return err
 		}
-		if was == impactNone && crit == "" && again == "" {
+		p, err := l.pending(t.ctx, t)
+		if err != nil {
+			return err
+		}
+		if was == impactNone && crit == "" && again == "" && p == nil {
 			return nil
 		}
-		if _, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key IN (?, ?, ?)", metaImpactCriterion, metaImpactAgain, metaImpactData); err != nil {
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key IN (?, ?, ?, ?)", metaImpactCriterion, metaImpactAgain, metaImpactData, metaImpactPending); err != nil {
 			return err
 		}
 		return setMeta(t.ctx, t, metaImpactSince, impactNone)
 	}
-	if f.ImpactCriterion != "" {
-		if err := setMeta(t.ctx, t, metaImpactCriterion, f.ImpactCriterion); err != nil {
+	n, perr := strconv.ParseInt(was, 10, 64)
+	kept := perr == nil // a record is kept, by crit, or of an earlier lapilli's
+	read := f.ImpactCriterion
+	if read != "" && kept && (crit != "" && crit != read || crit == "" && f.ImpactAssumed != read) {
+		// Another than the one kept: pending, from where the runs began to
+		// read it, until it is read again.
+		if err := setMeta(t.ctx, t, metaImpactAgain, againDue); err != nil {
+			return err
+		}
+		p, err := l.pending(t.ctx, t)
+		if err != nil || p != nil && p.Criterion == read {
+			return err
+		}
+		return setPending(t, &ImpactPending{Criterion: read, Since: f.ImpactSince})
+	}
+	if read != "" && crit != read {
+		if err := setMeta(t.ctx, t, metaImpactCriterion, read); err != nil {
 			return err
 		}
 	}
-	if changed || was == impactNone {
+	if was == impactNone && read != "" {
 		if err := setMeta(t.ctx, t, metaImpactAgain, againDue); err != nil {
 			return err
 		}
 	}
-	if changed {
-		return nil
-	}
 	since := f.ImpactSince.Unix()
-	if n, err := strconv.ParseInt(was, 10, 64); err == nil && n <= since {
+	if kept && n <= since {
 		return nil
 	}
 	d, err := l.impactData(t.ctx, t)
 	if err != nil {
 		return err
 	}
-	if d != nil && d.Criterion == f.ImpactCriterion && !d.Floor.IsZero() {
+	if d != nil && d.Criterion == read && !d.Floor.IsZero() {
 		since = max(since, d.Floor.Unix())
 	}
 	return setMeta(t.ctx, t, metaImpactSince, strconv.FormatInt(since, 10))
@@ -513,6 +530,14 @@ func (l *Ledger) impact(t *txn, f Found, fresh bool) (int64, error) {
 	}
 	now := time.Now().Unix()
 	var made []madeWindow
+	// The keys of the windows taken away: each for the window found now
+	// that is the same one, and for no other.
+	taken, reserved := map[string]bool{}, map[string]bool{}
+	for _, o := range before {
+		if o.start >= from {
+			reserved[o.key] = true
+		}
+	}
 	for _, in := range f.Impact {
 		labels, err := json.Marshal(orEmpty(in.Labels))
 		if err != nil {
@@ -540,10 +565,17 @@ func (l *Ledger) impact(t *txn, f Found, fresh bool) (int64, error) {
 		if d := decidedFor(before, in); d != nil {
 			state, updated, by = d.state, d.updated, d.by
 		}
-		key, err := freeKey(t, "impact-"+in.Start.UTC().Format("20060102T1504Z"))
-		if err != nil {
-			return 0, err
+		// The key of the window found before it is, if one is: of the same
+		// minute, sharing a value of each label both have, covering half of
+		// it or more. Else one no window has, nor anything kept on one
+		// (freeKey).
+		key := sameImpact(before, from, taken, in)
+		if key == "" {
+			if key, err = freeKey(t, "impact-"+in.Start.UTC().Format("20060102T1504Z"), reserved); err != nil {
+				return 0, err
+			}
 		}
+		taken[key] = true
 		if _, err := t.ExecContext(t.ctx, `INSERT INTO incidents (key, origin, state, counts, title, start_at, end_at, labels, updated, updated_by)
 			VALUES (?, 'impact', ?, 0, ?, ?, ?, ?, ?, ?)`,
 			key, state, in.Title, in.Start.Unix(), in.End.Unix(), string(labels), updated, by); err != nil {
@@ -591,17 +623,39 @@ func decidedFor(before []oldWindow, in incident.Incident) *oldWindow {
 	return best
 }
 
-// freeKey is base, or, when a window of the ledger has it already (one
-// that started in the same minute), base with -2, -3 … after it.
-func freeKey(t *txn, base string) (string, error) {
+// sameImpact is the key of the window found before from from on that a
+// window found now is: it started in the same minute (its key is the
+// minute's, or that with -2, -3 …), shares a value of each label both have,
+// and covers half of it or more; "" for none, or one taken already.
+func sameImpact(before []oldWindow, from int64, taken map[string]bool, in incident.Incident) string {
+	base := "impact-" + in.Start.UTC().Format("20060102T1504Z")
+	s, e := in.Start.Unix(), in.End.Unix()
+	for _, o := range before {
+		if o.start < from || taken[o.key] || o.key != base && !strings.HasPrefix(o.key, base+"-") {
+			continue
+		}
+		if ov := overlap(o.start, o.end, s, e); e > s && 2*ov >= e-s && share(o.labels, in.Labels) {
+			return o.key
+		}
+	}
+	return ""
+}
+
+// freeKey is base, or, when it is taken, base with -2, -3 … after it: taken
+// by a window of the ledger, a window taken away (reserved), or a task or a
+// comment kept on it, so that what was kept on one window never lands on
+// another.
+func freeKey(t *txn, base string, reserved map[string]bool) (string, error) {
 	key := base
 	for n := 2; ; n++ {
 		var x int
-		err := t.QueryRowContext(t.ctx, "SELECT 1 FROM incidents WHERE key = ?", key).Scan(&x)
-		if errors.Is(err, sql.ErrNoRows) {
+		err := t.QueryRowContext(t.ctx, `SELECT 1 FROM incidents WHERE key = ?1
+			UNION ALL SELECT 1 FROM tasks WHERE incident = ?1
+			UNION ALL SELECT 1 FROM comments WHERE on_kind = 'incident' AND on_key = ?1 LIMIT 1`, key).Scan(&x)
+		if errors.Is(err, sql.ErrNoRows) && !reserved[key] {
 			return key, nil
 		}
-		if err != nil {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return "", err
 		}
 		key = fmt.Sprintf("%s-%d", base, n)
@@ -609,10 +663,12 @@ func freeKey(t *txn, base string) (string, error) {
 }
 
 // remapImpact moves the tasks and comments on a window found before from
-// from on that is no longer there (its key is no new window's) to the
-// window found now that covers most of it, sharing a value of each label
-// both have: the one that took its decision, when it had one. One with
-// none keeps its key, and the Cleanup page lists it (OrphanedImpact).
+// from on that is no longer there (no window found now is the same one,
+// sameImpact) to the window found now that covers most of it, sharing a
+// value of each label both have: by how much it covers, whether or not it
+// took its decision (decidedFor holds a decision to half the new window).
+// One that nothing covers keeps its key, which no window gets again
+// (freeKey), and the Cleanup page lists it (OrphanedImpact).
 func remapImpact(t *txn, before []oldWindow, from int64, made []madeWindow) error {
 	keys := map[string]bool{}
 	for _, m := range made {
