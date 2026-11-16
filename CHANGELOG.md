@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The sidebar names what a page holds.** Its groups were verbs and some
+  pages coined words, so the menu read as a list of commands; they are
+  nouns now, as a console's are. The groups: Monitoring (was See), Improve
+  (Fix), Reporting (Report) and Administration (Manage). The pages:
+  Alert history (Firings), Change requests (Proposals), Impact (Outcomes),
+  Run history (Runs) and Cleanup (Orphans); in Korean 알림 이력, 변경 요청,
+  개선 효과, 실행 이력 and 정리 대상, and the groups 모니터링, 개선,
+  리포트 and 관리. A page's heading, breadcrumb and browser tab say the
+  name the sidebar gives it, and so do the links and lines that name a
+  page (the paused banner's, Settings', a cloud alarm's, the failed
+  digest's, the overview's Impact card and the Administration page's
+  cards). What a page holds keeps its words: proposals, firings, runs, a
+  rule's tabs. The URLs (`/firings`, `/proposals`, `/outcomes`, `/runs`,
+  `/orphans`, `/manage`), the API, MCP and JSON fields are as they were.
+
 ## [0.45.1] - 2026-11-16
 
 A rule nothing could judge, as no incident was written down, could still

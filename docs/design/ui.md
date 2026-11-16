@@ -199,15 +199,43 @@ The pages are in four groups, each named, not a link:
 
 | Group | Pages |
 |---|---|
-| See | Overview `/`, Rules `/rules`, Incidents `/incidents`, Firings `/firings` |
-| Fix | Tasks `/tasks`, Proposals `/proposals`, Quiet windows `/windows` |
-| Report | Reports `/reports`, Outcomes `/outcomes` |
-| Manage | Teams `/teams`, Roles `/roles`, Settings `/settings`, Runs `/runs`, Orphans `/orphans` |
+| Monitoring | Overview `/`, Rules `/rules`, Incidents `/incidents`, Alert history `/firings` |
+| Improve | Tasks `/tasks`, Change requests `/proposals`, Quiet windows `/windows` |
+| Reporting | Reports `/reports`, Impact `/outcomes` |
+| Administration | Teams `/teams`, Roles `/roles`, Settings `/settings`, Run history `/runs`, Cleanup `/orphans` |
+
+Groups and pages are named by nouns, what they hold, as Argo CD's and
+Grafana's sidebars are. They were verbs (See, Fix, Report, Manage) and
+coined words (Firings, Proposals, Outcomes, Runs, Orphans), which read as
+a list of commands. The reports' group is Reporting in English, so that
+its page isn't "Reports › Reports"; the other languages name both alike
+(리포트, レポート, Informes), and the group's name isn't a link. A page is
+called what the sidebar calls it: its `<h1>` and `<title>` start with that
+name, and its breadcrumb is that name (`TestPageNamedAsInTheSidebar`), but
+the overview, headed by what it shows. So is what names a page elsewhere:
+the paused banner's and Settings' link to Change requests, the link to
+the proposals a bulk action made, a cloud alarm's link to Run history, the
+failed digest's "the Run history page says why", the overview's Impact
+card and the Administration page's cards. What a page holds keeps its
+own words: a proposal, a firing, a run, the Runs tile on Impact, a rule's
+Firings and Proposals tabs. The URLs, the API and MCP are as they were.
+
+| Group or page | English | 한국어 | 日本語 | Español |
+|---|---|---|---|---|
+| group | Monitoring | 모니터링 | モニタリング | Supervisión |
+| group | Improve | 개선 | 改善 | Mejora |
+| group | Reporting | 리포트 | レポート | Informes |
+| group, `/manage` | Administration | 관리 | 管理 | Administración |
+| `/firings` | Alert history | 알림 이력 | アラート履歴 | Historial de alertas |
+| `/proposals` | Change requests | 변경 요청 | 変更リクエスト | Solicitudes de cambio |
+| `/outcomes` | Impact | 개선 효과 | 改善効果 | Impacto |
+| `/runs` | Run history | 실행 이력 | 実行履歴 | Historial de ejecuciones |
+| `/orphans` | Cleanup | 정리 대상 | 整理対象 | Limpieza |
 
 Roles is listed for admins, who alone may open it. A group's name isn't a
-link, but Manage's, which goes to `/manage`, the page of its own (below),
-`aria-current` there. Tasks has the open
-tasks beside it, and Proposals those waiting for an approval, each the
+link, but Administration's, which goes to `/manage`, the page of its own
+(below), `aria-current` there. Tasks has the open
+tasks beside it, and Change requests those waiting for an approval, each the
 team's in effect (picked, or the reader's own), as their lists have them,
 or all teams': two counts the ledger gives once each time it changes
 (`Server.waiting`: the open tasks by team, the proposals waiting by
@@ -230,7 +258,7 @@ The skip link is first, as before.
 
 An error page (403, 404, 414, 500, 503), and the page after signing out, are
 shown to whoever asked, a stranger refused too. They are the frame alone:
-no count beside Tasks or Proposals, no team or period on any link, no
+no count beside Tasks or Change requests, no team or period on any link, no
 reader's own team, and no status line or version (a failed run's error
 can name a host inside), so that a stranger reads nothing of the ledger
 or of the server from them, nor whether the team the URL names is there
@@ -956,13 +984,13 @@ nothing.
 
 ### The Manage page
 
-`/manage`: a card for each page of the Manage group and for the reports
-(their recipients and the weekly digest), each with a line on what it is
-for and, where cheap, a fact (how many teams, how many reports, how far
-the firings are in): Teams, Roles (admins only, as in the sidebar),
-Settings, Runs, Reports, Orphans, and where notices go (below, "First
-use"). The sidebar's Manage links to it, and the breadcrumbs of its pages
-start with it. When `--config` can't be used, the Settings card says so.
+`/manage`, Administration: a card for each page of the Administration
+group and for the reports (their recipients and the weekly digest), each
+with a line on what it is for and, where cheap, a fact (how many teams,
+how many reports, how far the firings are in): Teams, Roles (admins only,
+as in the sidebar), Settings, Run history, Reports, Cleanup, and where
+notices go (below, "First use"). The sidebar's Administration links to
+it, and the breadcrumbs of its pages start with it. When `--config` can't be used, the Settings card says so.
 
 ### What `--config` declares
 
@@ -1002,7 +1030,7 @@ to be renamed.
 
 ### Orphans
 
-`/orphans`, under Manage: a rule deleted or renamed leaves its note, its
+`/orphans`, Cleanup, under Administration: a rule deleted or renamed leaves its note, its
 tasks, the comments on it and its proposals not finished with under a
 name no rule in effect has, which no list shows. Argo CD lists resources
 no application owns as orphaned; this lists the names the ledger keeps
