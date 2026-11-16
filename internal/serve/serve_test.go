@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -34,9 +35,16 @@ type history struct {
 	asked int
 	// exprs is how often each expression was asked for.
 	exprs map[string]int
-	// begins is, by selector, when its data begins, as count(selector)
-	// answers: zero for none at all; one not named has data all along.
-	begins map[string]time.Time
+	// begins is, by selector, when each of its series begins, as
+	// count(selector) answers, from the earliest: none for no data at all;
+	// one not named has data all along.
+	begins map[string][]time.Time
+	// failLong are expressions refused when asked over more than six
+	// hours, as a read again is and a run isn't.
+	failLong map[string]bool
+	// within is how long each request had left to run, of those with a
+	// deadline.
+	within []time.Duration
 }
 
 func (h *history) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
@@ -46,7 +54,14 @@ func (h *history) QueryRange(ctx context.Context, expr string, start, end time.T
 		h.exprs = map[string]int{}
 	}
 	h.exprs[expr]++
+	if d, ok := ctx.Deadline(); ok {
+		h.within = append(h.within, time.Until(d))
+	}
+	long := h.failLong[expr] && end.Sub(start) > 6*time.Hour
 	h.Unlock()
+	if long {
+		return nil, &prom.APIError{Status: 422, Msg: "query timed out in expression evaluation"}
+	}
 	run := func(labels map[string]string, from, to time.Time) prom.Series {
 		s := prom.Series{Labels: labels}
 		for t := from; !t.After(to); t = t.Add(step) {
@@ -60,13 +75,14 @@ func (h *history) QueryRange(ctx context.Context, expr string, start, end time.T
 	if sel, ok := strings.CutPrefix(expr, "count("); ok && strings.HasSuffix(sel, ")") {
 		sel = strings.TrimSuffix(sel, ")")
 		h.Lock()
-		first, named := h.begins[sel]
+		starts, named := h.begins[sel]
 		h.Unlock()
-		if !named {
-			first = start
-		}
-		if first.IsZero() {
+		if named && len(starts) == 0 {
 			return nil, nil
+		}
+		first := start
+		if named {
+			first = slices.MinFunc(starts, time.Time.Compare)
 		}
 		at := later(start, first)
 		if s := run(nil, at, end); len(s.Samples) > 0 {

@@ -987,7 +987,10 @@ func (s *Server) judgeTried(ctx context.Context, l string, try *impactTry, c cri
 	}
 	from, to := try.From, try.To
 	o.From, o.To = from, to
-	try.Same = !try.Off && c.key() == k.Criterion && k.AgainDone(c.key())
+	// The criterion the ledger holds the windows of, all along: the runs',
+	// with no read again due; or, of a ledger that kept none, the command
+	// line's.
+	try.Same = !try.Off && k.Again != "-" && (c.key() == k.Criterion || k.Criterion == "" && c.key() == s.assumedKey())
 	with := o
 	with.ImpactFrom = time.Time{}
 	if !try.Off && !data.NoData {
