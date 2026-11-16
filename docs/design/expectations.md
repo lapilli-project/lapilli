@@ -1,8 +1,10 @@
 # Expectations: what a rule was tested to do, kept and held to
 
-Status: proposed. Under [GOVERNANCE.md](../../GOVERNANCE.md) this is a new
-kind of data in the ledger, and a backtest that can fail a pull request,
-so it is designed first, as a pull request. The companion to
+Status: accepted, not built. Under [GOVERNANCE.md](../../GOVERNANCE.md)
+this is a new kind of data in the ledger, and a backtest that can fail a
+pull request, so it was designed first, as a pull request (#81); it was
+merged on 2026-11-16, before its week was out, by the maintainer's
+decision. Its open questions stay open until the step that needs each. The companion to
 [changes.md](changes.md), which applies what a person approves, and to
 [work.md](work.md), whose tasks a broken expectation becomes.
 
