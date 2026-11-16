@@ -745,8 +745,9 @@ func TestBulkProposeWritesBack(t *testing.T) {
 // TestFirstProposeWhileOneWaits: "What to do first" offers the digest's
 // suggested for as "Propose it" until the rule has a proposal not
 // finished with; then, as the ledger takes one a rule at a time, the
-// button is drawn disabled for everyone, with why and a link to the one
-// that waits, in each language, and no form makes another.
+// button is drawn disabled: to an editor with why, to a viewer with why
+// they may not propose at all, each with a link to the one that waits,
+// in each language. Once that one is finished with, the form is back.
 func TestFirstProposeWhileOneWaits(t *testing.T) {
 	// Its week's record kept: a suggestion is shown for a week with one.
 	s := proposeServer(t, nil)
@@ -761,100 +762,140 @@ func TestFirstProposeWhileOneWaits(t *testing.T) {
 		t.Fatalf("proposing BulkA's suggestion: %d", code)
 	}
 	id := strings.TrimPrefix(hd.Get("Location"), "/proposals/")
-	for _, who := range []string{bo, "vi@example.com"} {
+	for who, why := range map[string]string{bo: "this rule has a proposal not yet finished with: one at a time", "vi@example.com": "Editors only"} {
 		for _, n := range names {
-			r := httptest.NewRequest(http.MethodGet, "/rules/BulkA", nil)
-			r.Header.Set("X-Forwarded-Email", who)
-			r.Header.Set("Accept-Language", n.Code)
-			w := httptest.NewRecorder()
-			h.ServeHTTP(w, r)
-			first := firstStep(w.Body.String())
+			first := firstStep(pageIn(t, h, "/rules/BulkA", who, n.Code))
 			off := `<span class="action-off"><button type="button" disabled aria-describedby="first-propose-why">` + tr(n.Code, "Propose it") + `</button> <span id="first-propose-why" class="why">` +
-				tr(n.Code, "this rule has a proposal not yet finished with: one at a time") + `</span></span> <a href="/proposals/` + id + `">#` + id + `</a>`
+				tr(n.Code, why) + `</span></span> <a href="/proposals/` + id + `">#` + id + `</a>`
 			if !strings.Contains(first, off) || strings.Contains(first, `value="suggestion"`) {
 				t.Errorf("%s, %s: with #%s waiting, the first step is\n%s", who, n.Code, id, first)
 			}
 		}
+	}
+	finish(t, s, id)
+	if _, body := getAs(t, h, "/rules/BulkA", bo); !strings.Contains(body, form) || strings.Contains(body, `id="first-propose-why"`) {
+		t.Errorf("with #%s dropped, BulkA's first step isn't its form again:\n%s", id, firstStep(body))
+	}
+}
+
+// pageIn is a page as someone reads it, in a language.
+func pageIn(t *testing.T, h http.Handler, path, who, lang string) string {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodGet, path, nil)
+	r.Header.Set("X-Forwarded-Email", who)
+	r.Header.Set("Accept-Language", lang)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w.Body.String()
+}
+
+// finish drops a proposal waiting for approval, as an approver would.
+func finish(t *testing.T, s *Server, id string) {
+	t.Helper()
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.Move(context.Background(), n, []string{ledger.StateProposed}, ledger.StateDropped, cy, ledger.Step{Reason: "not now"}); err != nil {
+		t.Fatal(err)
 	}
 }
 
 // TestProposeFormsWhileOneWaits: with a proposal for the rule not finished
 // with, every form on its page that would propose another (a new for, a
 // threshold, what it says, retiring it on the Proposals tab; a fix to what
-// it says on the summary) is drawn as it is, its fields and its button
-// disabled, the button tied to why, said once above them with a link to
-// the one that waits: for an editor and a viewer alike, in each language.
+// it says on the summary) is drawn to an editor as it is, its fields and
+// its button disabled, the button tied to why, said once above them with
+// a link to the one that waits; a viewer is told, as before, that editors
+// alone propose, with the link too: in each language. Once that one is
+// dropped, the editor's forms send again.
 func TestProposeFormsWhileOneWaits(t *testing.T) {
 	s := proposeServer(t, func(c *Config) { c.CheckContent = true })
 	h := s.Handler()
-	// Before: an editor's forms send.
-	if _, body := getAs(t, h, "/rules/Errors?tab=proposals", bo); !strings.Contains(body, `<button>Propose it, with its backtest</button>`) || strings.Contains(body, `id="propose-open"`) {
-		t.Fatal("before a proposal, the Proposals tab's forms aren't an editor's to send")
+	sends := func(when string) {
+		if _, body := getAs(t, h, "/rules/Errors?tab=proposals", bo); !strings.Contains(body, `<button>Propose it, with its backtest</button>`) || strings.Contains(body, `id="propose-open"`) {
+			t.Errorf("%s, the Proposals tab's forms aren't an editor's to send", when)
+		}
+		if _, body := getAs(t, h, "/rules/Errors", bo); !strings.Contains(body, `<button>Propose it, for a person to approve</button>`) || strings.Contains(body, `id="says-open"`) {
+			t.Errorf("%s, the summary has no fix to what Errors says to send", when)
+		}
 	}
-	if _, body := getAs(t, h, "/rules/Errors", bo); !strings.Contains(body, `<button>Propose it, for a person to approve</button>`) {
-		t.Fatal("before a proposal, the summary has no fix to what Errors says to send")
-	}
+	sends("before a proposal")
 	id := itoa(proposeFor(t, h, "15m"))
-	for _, who := range []string{bo, "vi@example.com"} {
-		for _, n := range names {
-			why := tr(n.Code, "this rule has a proposal not yet finished with: one at a time")
-			for _, c := range []struct{ path, section, said string }{
-				{"/rules/Errors?tab=proposals", "propose", "propose-open"},
-				{"/rules/Errors", "says", "says-open"},
-			} {
-				r := httptest.NewRequest(http.MethodGet, c.path, nil)
-				r.Header.Set("X-Forwarded-Email", who)
-				r.Header.Set("Accept-Language", n.Code)
-				w := httptest.NewRecorder()
-				h.ServeHTTP(w, r)
-				doc, err := html.Parse(w.Body)
-				if err != nil {
-					t.Fatal(err)
-				}
-				var sec *html.Node
-				for _, x := range allNodes(doc) {
-					if x.DataAtom == atom.Section && nodeAttr(x, "id") == c.section {
-						sec = x
+	cases := []struct{ path, section, said string }{
+		{"/rules/Errors?tab=proposals", "propose", "propose-open"},
+		{"/rules/Errors", "says", "says-open"},
+	}
+	for _, n := range names {
+		why := tr(n.Code, "this rule has a proposal not yet finished with: one at a time")
+		for _, c := range cases {
+			sec := sectionOf(t, pageIn(t, h, c.path, bo, n.Code), c.section)
+			var said string
+			forms, buttons, fields := 0, 0, 0
+			for _, x := range allNodes(sec) {
+				switch {
+				case nodeAttr(x, "id") == c.said:
+					said = nodeText(x)
+					if a := nodeAttr(x.LastChild, "href"); a != "/proposals/"+id {
+						t.Errorf("%s, %s: why links to %q, not #%s", n.Code, c.path, a, id)
+					}
+				case x.DataAtom == atom.Form:
+					forms++
+				case x.DataAtom == atom.Button:
+					buttons++
+					if !hasNodeAttr(x, "disabled") || nodeAttr(x, "aria-describedby") != c.said {
+						t.Errorf("%s, %s: the button %q isn't disabled and tied to why", n.Code, c.path, nodeText(x))
+					}
+				case (x.DataAtom == atom.Input && nodeAttr(x, "type") != "hidden") || x.DataAtom == atom.Select || x.DataAtom == atom.Textarea:
+					fields++
+					if !hasNodeAttr(x, "disabled") {
+						t.Errorf("%s, %s: the field %s isn't disabled", n.Code, c.path, nodeAttr(x, "name"))
 					}
 				}
-				if sec == nil {
-					t.Fatalf("%s, %s, %s: no section #%s", who, n.Code, c.path, c.section)
-				}
-				var said string
-				forms, buttons, fields := 0, 0, 0
-				for _, x := range allNodes(sec) {
-					switch {
-					case nodeAttr(x, "id") == c.said:
-						said = nodeText(x)
-						if a := nodeAttr(x.LastChild, "href"); a != "/proposals/"+id {
-							t.Errorf("%s, %s, %s: why links to %q, not #%s", who, n.Code, c.path, a, id)
-						}
-					case x.DataAtom == atom.Form:
-						forms++
-					case x.DataAtom == atom.Button:
-						buttons++
-						if !hasNodeAttr(x, "disabled") || nodeAttr(x, "aria-describedby") != c.said {
-							t.Errorf("%s, %s, %s: the button %q isn't disabled and tied to why", who, n.Code, c.path, nodeText(x))
-						}
-					case (x.DataAtom == atom.Input && nodeAttr(x, "type") != "hidden") || x.DataAtom == atom.Select || x.DataAtom == atom.Textarea:
-						fields++
-						if !hasNodeAttr(x, "disabled") {
-							t.Errorf("%s, %s, %s: the field %s isn't disabled", who, n.Code, c.path, nodeAttr(x, "name"))
-						}
-					}
-				}
-				if said != why+" #"+id {
-					t.Errorf("%s, %s, %s: why says %q", who, n.Code, c.path, said)
-				}
-				// The tab's forms: a for, a threshold, what it says, and
-				// retiring it; the summary's, a fix for each fact found
-				// (the missing runbook's among them).
-				if want := map[string]int{"propose": 4, "says": 1}[c.section]; buttons < want || fields < want || forms < want-1 {
-					t.Errorf("%s, %s, %s: %d forms, %d buttons, %d fields drawn", who, n.Code, c.path, forms, buttons, fields)
-				}
+			}
+			if said != why+" #"+id {
+				t.Errorf("%s, %s: why says %q", n.Code, c.path, said)
+			}
+			// The tab's forms: a for, a threshold, what it says, and
+			// retiring it; the summary's, a fix for each fact found
+			// (the missing runbook's among them).
+			if want := map[string]int{"propose": 4, "says": 1}[c.section]; buttons < want || fields < want || forms < want-1 {
+				t.Errorf("%s, %s: %d forms, %d buttons, %d fields drawn", n.Code, c.path, forms, buttons, fields)
+			}
+		}
+		// A viewer: editors only, as before, and the one that waits.
+		for _, c := range []struct{ path, section, label, id string }{
+			{"/rules/Errors?tab=proposals", "propose", "Propose a change", "propose-why"},
+			{"/rules/Errors", "says", "Propose a fix", "says-why"},
+		} {
+			sec := sectionOf(t, pageIn(t, h, c.path, "vi@example.com", n.Code), c.section)
+			var b strings.Builder
+			html.Render(&b, sec)
+			want := `<button type="button" disabled="" aria-describedby="` + c.id + `">` + tr(n.Code, c.label) + `</button> <span id="` + c.id + `" class="why">` +
+				tr(n.Code, "Editors only") + `</span></span> <a href="/proposals/` + id + `">#` + id + `</a>`
+			if !strings.Contains(b.String(), want) || strings.Contains(b.String(), "<form") {
+				t.Errorf("a viewer, %s, %s: %s", n.Code, c.path, b.String())
 			}
 		}
 	}
+	finish(t, s, id)
+	sends("with the proposal dropped")
+}
+
+// sectionOf is a page's section by its id.
+func sectionOf(t *testing.T, body, id string) *html.Node {
+	t.Helper()
+	doc, err := html.Parse(strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range allNodes(doc) {
+		if x.DataAtom == atom.Section && nodeAttr(x, "id") == id {
+			return x
+		}
+	}
+	t.Fatalf("no section #%s", id)
+	return nil
 }
 
 // firstStep is a rule page's "What to do first", or the page when it has none.

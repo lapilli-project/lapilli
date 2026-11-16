@@ -146,10 +146,11 @@
 {{template "proposallist" (on $ .Proposals)}}
 </section>
 {{- /* With a proposal not finished with, the ledger takes no other for the
-rule (ledger.ErrProposed): each form is drawn as it is, disabled, for
-everyone, its button tied to why, with a link to the one that waits. */}}
+rule (ledger.ErrProposed): to an editor each form is drawn as it is,
+disabled, its button tied to why, with a link to the one that waits; a
+reader who may propose nothing is told so, as before, with the link. */}}
 {{$open := .OpenProposal}}{{$why := "this rule has a proposal not yet finished with: one at a time"}}
-{{if or (not $ro) $open}}<section class="card" id="propose">
+{{if not $ro}}<section class="card" id="propose">
 <h2>{{t "Propose a change"}}</h2>
 {{with $open}}<p id="propose-open" class="why">{{t "this rule has a proposal not yet finished with: one at a time"}} <a href="{{$.Link (printf "/proposals/%d" .)}}">#{{.}}</a></p>{{end}}
 <form method="post" action="/proposals" class="grid">
@@ -174,7 +175,7 @@ everyone, its button tied to why, with a link to the one that waits. */}}
 {{if $open}}<p>{{template "off" (quiet (again (offWhy $retire "propose-open" $why)))}}</p>{{else}}<form method="post" action="/proposals"><input type="hidden" name="rule" value="{{.Name}}">{{if .Spare}}<input type="hidden" name="from" value="spare">{{end}}<input type="hidden" name="kind" value="{{.RetireKind}}"><button class="quiet-button">{{t $retire}}</button></form>{{end}}
 </section>{{else}}<section class="card" id="propose">
 <h2>{{t "Propose a change"}}</h2>
-<p>{{template "off" (offOf $ "Propose a change" "editor" "propose-why")}}</p>
+<p>{{template "off" (offOf $ "Propose a change" "editor" "propose-why")}}{{with $open}} <a href="{{$.Link (printf "/proposals/%d" .)}}">#{{.}}</a>{{end}}</p>
 </section>{{end}}
 {{end}}{{end}}
 
