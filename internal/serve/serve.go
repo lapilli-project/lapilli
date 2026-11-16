@@ -341,8 +341,14 @@ type Server struct {
 	// comparing is held while an agent's proposed change is replayed.
 	comparing sync.Mutex
 	// tries are, by reader, the proposals asked for in the last hour that
-	// read the rules again (propose).
-	tries tries
+	// read the rules again (propose); impactTries, the incident criteria
+	// tried or saved, which read Prometheus (impactTriesAnHour).
+	tries       tries
+	impactTries tries
+	// tried are the criteria a try read in full, lately (triedFor).
+	tried triedCache
+	// sources is what this replica saw of where incidents come from.
+	sources sourcesState
 	// outlasts are the proposals' for_outlasts, worked out as they are
 	// read (outlastsNow), and parsing the versions of the rules older
 	// proposals were made against.
@@ -525,7 +531,8 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		firingsRate: &limiter{rate: 0.2, burst: 20}, firingsBusy: make(chan struct{}, 1), port: newNotifyPort(),
 		// A tracker job reads a page of tasks, then makes an issue and
 		// writes a link for each: a few a second, a first run's in a burst.
-		tasksRate: &limiter{rate: 5, burst: 100}, tasksBusy: make(chan struct{}, 1), changes: newChanges(ctx, l)}
+		tasksRate: &limiter{rate: 5, burst: 100}, tasksBusy: make(chan struct{}, 1), changes: newChanges(ctx, l),
+		impactTries: tries{limit: impactTriesAnHour}}
 	s.status.runs, s.status.notices, s.status.refused = map[string]int{}, map[string]int{}, map[string]int{}
 	s.life, s.end = context.WithCancel(context.Background())
 	s.parsing.base, s.parsing.log = s.life, log
@@ -888,16 +895,18 @@ func (s *Server) options(ctx context.Context) (verdict.Options, error) {
 	if err != nil {
 		return o, err
 	}
-	// With --impact, the record is kept from when the runs read it, all of
-	// it (verdict.Options.ImpactFrom).
-	if s.cfg.Impact != "" {
-		if o.ImpactFrom, err = s.l.ImpactSince(ctx); err != nil {
-			return o, err
-		}
+	// With an impact signal, the record is kept from when the runs read it,
+	// all of it, with the criterion in effect (verdict.Options.ImpactFrom,
+	// impactFrom).
+	if o.ImpactFrom, err = s.impactFrom(ctx, s.criterionOf(set)); err != nil {
+		return o, err
 	}
 	// What it replays is judged by the weeks it keeps its stones by.
 	o.RecordWeek = s.l.WeekOf
 	for k, v := range set {
+		if slices.ContainsFunc(criteriaSettable, func(c struct{ key, flag string }) bool { return c.key == k }) {
+			continue // the incident criteria's, above
+		}
 		if err := apply(&o, k, v.Value); err != nil {
 			s.log.Warn("a setting from the UI doesn't parse; the command line's is used", "setting", k, "err", err)
 		}

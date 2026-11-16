@@ -60,6 +60,9 @@ const (
 	// in a week the period has some of, or the two weeks before, keeps it.
 	staleRecorded   = "an incident was written down in its period's weeks since it was backtested"
 	staleUnrecorded = "no incident keeps the record of its period's weeks any more"
+	// The impact signal read again with another criterion, or turned off,
+	// since it was backtested: the windows it was judged against are gone.
+	staleImpact = "the incidents found by --impact were read again with another criterion, or turned off, since it was backtested"
 )
 
 // semantics is how this lapilli replays and judges (verdict.Semantics),
@@ -450,6 +453,10 @@ func (s *Server) proposalsNow(ctx context.Context, ls []proposalLine, rd *readin
 	if err := s.outlastsNow(ctx, ls, evs, rd); err != nil {
 		return err
 	}
+	held, err := s.impactHeld(ctx)
+	if err != nil {
+		return err
+	}
 	for i := range ls {
 		l, ev := &ls[i], evs[i]
 		l.read = true
@@ -472,6 +479,8 @@ func (s *Server) proposalsNow(ctx context.Context, ls []proposalLine, rd *readin
 			l.StaleWhy = &staleWhy{Format: staleVersion, Args: []any{cmpOr(ev.Version, "dev")}, Auto: true}
 		case ev.Semantics > semantics:
 			l.StaleWhy = &staleWhy{Format: staleNewer, Args: []any{cmpOr(ev.Version, "dev")}}
+		case ev.Impact != "" && ev.Impact != held:
+			l.StaleWhy = &staleWhy{Format: staleImpact}
 		case bt.NoRecord != nil && *bt.NoRecord && !now:
 			l.StaleWhy = &staleWhy{Format: staleRecorded}
 		case bt.NoRecord != nil && !*bt.NoRecord && now:
@@ -712,6 +721,9 @@ func (s *Server) backtestAgainOf(ctx context.Context, id int64, by string, agent
 	}
 	again := ev
 	again.Backtest, again.Semantics, again.Version, again.Outlasts = bt, semantics, s.versionOf(), nil
+	if again.Impact, err = s.impactHeld(ctx); err != nil {
+		return err
+	}
 	again.EarlierLost = earlierLost(ev)
 	if p.Kind == ledger.KindFor {
 		if w, ok := want.ForOutlasts(); ok {

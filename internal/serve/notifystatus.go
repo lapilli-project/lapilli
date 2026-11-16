@@ -151,8 +151,12 @@ func (s *Server) notifyStatus(ctx context.Context, lang string) (*notifyStatus, 
 // freshPage reports whether a page is worked out for each request, not
 // kept until the ledger changes: what the outbox sent is written aside
 // (ledger.Sent), so that sending empties no page kept, and the pages that
-// say it would say it late. The Manage page, and the Settings page but
-// when it tries settings on the last week, which takes the heavy turn.
+// say it would say it late; so is when a source last wrote through the
+// incidents port (ledger.NoteReceived). The Manage page, and the Settings
+// page but when it tries settings on the last week, or the incident
+// criteria on the last four, which take the heavy turn: such a page is kept
+// as any is, so that asking for it again reads nothing again.
 func freshPage(name string, r *http.Request) bool {
-	return name == "manage" || name == "settings" && r.URL.Query().Get("try") == ""
+	q := r.URL.Query()
+	return name == "manage" || name == "settings" && q.Get("try") == "" && q.Get("impact-try") == ""
 }

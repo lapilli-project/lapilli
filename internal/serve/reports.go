@@ -205,7 +205,7 @@ func (s *Server) reportDue(ctx context.Context, r ledger.Scheduled, team *ledger
 // beside what really fired.
 func (s *Server) ledgerTo(ctx context.Context) (firings, checked time.Time, err error) {
 	firings, err = s.l.Cursor(ctx)
-	if !s.running() && err == nil {
+	if !s.running(ctx) && err == nil {
 		firings, err = s.copiedTo(ctx)
 	}
 	if err != nil || !s.checking() {

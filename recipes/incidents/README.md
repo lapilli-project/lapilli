@@ -192,6 +192,12 @@ hasn't changed writes nothing. New ones aren't told to `--notify-webhook-file` o
 Slack either, since the tool has told people already, and a first copy of months
 of history would go one line at a time.
 
+`lapilli serve`'s Settings page lists each source under Incident sources, by
+its ids' prefix (`PD-` here, `GH-`, `IRM-`, a Jira project's key), with when
+it last wrote, changed or not, and how many incidents it gave in four weeks:
+quiet after two days with nothing, so a job that stopped shows. Give a tool
+of your own a prefix of its own (`OPS-41`, not `41`).
+
 What the token copies in is the tool's, as the incidents file's are the file's:
 it is changed there, and the UI can't change it. The token can change only what
 it copied in, so an id a person used already is refused, and so is one from the

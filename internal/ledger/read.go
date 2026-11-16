@@ -603,7 +603,7 @@ func (l *Ledger) spanWeeks(from, to time.Time) []int64 {
 // ImpactSince is from when the impact signal (--impact) was read, all of
 // it, by the runs; zero when it never was.
 func (l *Ledger) ImpactSince(ctx context.Context) (time.Time, error) {
-	v, err := l.meta(ctx, l.r, "impact_since")
+	v, err := l.meta(ctx, l.r, metaImpactSince)
 	if err != nil || v == "" || v == impactNone {
 		return time.Time{}, err
 	}

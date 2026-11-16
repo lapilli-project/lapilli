@@ -217,6 +217,9 @@ func statusSites(t *testing.T) map[string]statusSite {
 	}
 	p.changes.paused.Store(true)
 	sites["/paused"] = statusSite{p, []string{"/", "/proposals", "/settings"}}
+	for prefix, src := range sourcesStates(t) {
+		sites[prefix] = statusSite{src, []string{"/settings"}}
+	}
 	return sites
 }
 
@@ -316,6 +319,17 @@ var statusWant = []struct {
 	{regexp.MustCompile(`^\? No incident was written down`), "unknown", []string{"/facet/rules?weeks=4", "@proposal:amended"}},
 	{regexp.MustCompile(`^dropped$`), "unknown", []string{"/tasks?status=all", "@task:dropped"}},
 	{regexp.MustCompile(`^rule taken away$`), "unknown", []string{"/outcomes/outcomes"}},
+	// Where incidents come from (sources.go).
+	{regexp.MustCompile(`^✓ working$`), "ok", []string{"/sources/settings"}},
+	{regexp.MustCompile(`^⚠\x{FE0E} quiet$`), "warn", []string{"/sources/settings"}},
+	{regexp.MustCompile(`^⚠\x{FE0E} no data$`), "warn", []string{"/nodata/settings"}},
+	{regexp.MustCompile(`keeps no record: a selector it reads has no data yet`), "warn", []string{"/nodata/settings"}},
+	{regexp.MustCompile(`the impact signal keeps no record until the criterion in effect is read again`), "warn", []string{"/floor/settings"}},
+	{regexp.MustCompile(`^⚠\x{FE0E} no record$`), "warn", []string{"/floor/settings"}},
+	{regexp.MustCompile(`^✕ failing$`), "bad", []string{"/sources/settings"}},
+	{regexp.MustCompile(`^↻ waiting$`), "info", []string{"/intake/settings"}},
+	{regexp.MustCompile(`^\? not set up$`), "unknown", []string{"/settings"}},
+	{regexp.MustCompile(`^– none in four weeks$`), "unknown", []string{"/intake/settings"}},
 	// said in no colour: nothing is left to do, but nothing is well either
 	{regexp.MustCompile(`^No proposals yet\.$`), "none", []string{"/none/proposals", "/clear/proposals"}},
 }
@@ -446,6 +460,7 @@ func TestStatusKinds(t *testing.T) {
 		h := x.s.Handler()
 		for _, p := range x.paths {
 			r := httptest.NewRequest(http.MethodGet, p, nil)
+			r.Header.Set("Sec-Fetch-Site", "none") // a page asked for in a browser, as axe does
 			r.Header.Set("Accept-Language", "en")
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, r)

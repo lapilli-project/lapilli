@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -32,12 +33,35 @@ var now = time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 type history struct {
 	sync.Mutex
 	asked int
+	// exprs is how often each expression was asked for.
+	exprs map[string]int
+	// begins is, by selector, when each of its series begins, as
+	// count(selector) answers, from the earliest: none for no data at all;
+	// one not named has data all along.
+	begins map[string][]time.Time
+	// failLong are expressions refused when asked over more than six
+	// hours, as a read again is and a run isn't.
+	failLong map[string]bool
+	// within is how long each request had left to run, of those with a
+	// deadline.
+	within []time.Duration
 }
 
 func (h *history) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
 	h.Lock()
 	h.asked++
+	if h.exprs == nil {
+		h.exprs = map[string]int{}
+	}
+	h.exprs[expr]++
+	if d, ok := ctx.Deadline(); ok {
+		h.within = append(h.within, time.Until(d))
+	}
+	long := h.failLong[expr] && end.Sub(start) > 6*time.Hour
 	h.Unlock()
+	if long {
+		return nil, &prom.APIError{Status: 422, Msg: "query timed out in expression evaluation"}
+	}
 	run := func(labels map[string]string, from, to time.Time) prom.Series {
 		s := prom.Series{Labels: labels}
 		for t := from; !t.After(to); t = t.Add(step) {
@@ -48,6 +72,24 @@ func (h *history) QueryRange(ctx context.Context, expr string, start, end time.T
 		return s
 	}
 	var out []prom.Series
+	if sel, ok := strings.CutPrefix(expr, "count("); ok && strings.HasSuffix(sel, ")") {
+		sel = strings.TrimSuffix(sel, ")")
+		h.Lock()
+		starts, named := h.begins[sel]
+		h.Unlock()
+		if named && len(starts) == 0 {
+			return nil, nil
+		}
+		first := start
+		if named {
+			first = slices.MinFunc(starts, time.Time.Compare)
+		}
+		at := later(start, first)
+		if s := run(nil, at, end); len(s.Samples) > 0 {
+			return []prom.Series{s}, nil
+		}
+		return nil, nil
+	}
 	switch expr {
 	case "errors > 5", "errors > 1":
 		out = append(out, run(map[string]string{"service": "checkout"}, now.Add(-30*time.Hour), now.Add(-29*time.Hour)))
@@ -70,6 +112,18 @@ func (h *history) QueryRange(ctx context.Context, expr string, start, end time.T
 		return nil, fmt.Errorf("the API said to wait %w, after HTTP 429: slow down", prom.ErrPastDeadline)
 	case "impact":
 		out = append(out, run(map[string]string{"service": "search"}, now.Add(-6*time.Hour), now.Add(-6*time.Hour+10*time.Minute)))
+	case "always":
+		// Users hurt the whole time: one window, on over every run.
+		out = append(out, run(map[string]string{"service": "search"}, start, end))
+	case "impact > 1":
+		// Another criterion: search's window, checkout's over INC-1, and
+		// cart's a day and a half ago.
+		out = append(out, run(map[string]string{"service": "search"}, now.Add(-6*time.Hour), now.Add(-6*time.Hour+10*time.Minute)),
+			run(map[string]string{"service": "checkout"}, now.Add(-30*time.Hour), now.Add(-30*time.Hour+20*time.Minute)),
+			run(map[string]string{"service": "cart"}, now.Add(-40*time.Hour), now.Add(-39*time.Hour)))
+	case "nope(up)":
+		// What Prometheus's parser refuses.
+		return nil, &prom.APIError{Status: 400, Msg: `bad_data: 1:1: parse error: unknown function with name "nope"`}
 	}
 	var kept []prom.Series
 	for _, s := range out {

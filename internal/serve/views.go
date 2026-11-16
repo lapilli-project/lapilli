@@ -1591,6 +1591,10 @@ type settingView struct {
 
 type settingsView struct {
 	Settings []settingView
+	// Criteria are the incident criteria (criteria.go); Sources, where
+	// incidents come from (sources.go), the page's alone.
+	Criteria *criteriaView `json:"criteria,omitempty"`
+	Sources  *sourcesView  `json:"-"`
 	Changes  []ledger.Change
 	Try      *tryView
 	Notify   *notifyStatus `json:"-"` // the page's alone
@@ -1631,6 +1635,9 @@ func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
 		}
 		v.Settings = append(v.Settings, x)
 	}
+	if v.Criteria, err = s.criteriaView(ctx, set); err != nil {
+		return v, err
+	}
 	cs, err := s.l.Changes(ctx, 100)
 	if err != nil {
 		return v, err
@@ -1662,6 +1669,14 @@ func (s *Server) settingsPage(r *http.Request) (any, error) {
 	}
 	if v.Notify, err = s.notifyStatus(r.Context(), lang(r)); err != nil {
 		return nil, err
+	}
+	if v.Sources, err = s.sourcesOf(r.Context(), r); err != nil {
+		return nil, err
+	}
+	if r.URL.Query().Get("impact-try") != "" {
+		if err := s.tryImpact(r, v.Criteria); err != nil {
+			return nil, err
+		}
 	}
 	if r.URL.Query().Get("try") == "" {
 		return v, nil

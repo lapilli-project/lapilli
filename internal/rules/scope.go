@@ -49,7 +49,7 @@ var errNoRoom = errors.New("no room")
 // as much: written as it grew, a builder grows a quarter at a time, five
 // times what it holds made by the end.
 func scopeWith(expr, matchers string, room int) (string, error) {
-	grows, err := scopeScan(expr, matchers, nil)
+	grows, err := scopeScan(expr, matchers, nil, nil)
 	if err != nil {
 		return "", err
 	}
@@ -58,7 +58,7 @@ func scopeWith(expr, matchers string, room int) (string, error) {
 	}
 	var b strings.Builder
 	b.Grow(len(expr) + grows)
-	if _, err := scopeScan(expr, matchers, &b); err != nil {
+	if _, err := scopeScan(expr, matchers, &b, nil); err != nil {
 		return "", err
 	}
 	return b.String(), nil
@@ -79,12 +79,93 @@ func (o scopeOut) str(s string) {
 	}
 }
 
+// Selectors are the series selectors of a PromQL expression, as written,
+// each once, in the order they come: a metric's name with its matchers,
+// or matchers alone (http_requests_total{code=~"5.."}, up, {job="x"}),
+// with the offset and the @ written after them, past a range
+// (x offset 1w, x @ 1700000000), as they move where the data is read; not
+// the range itself. An expression that doesn't read as Scope reads it is
+// an error.
+func Selectors(expr string) ([]string, error) {
+	var x scanned
+	if _, err := scopeScan(expr, "", nil, &x); err != nil {
+		return nil, err
+	}
+	var out []string
+	for i, s := range x.sels {
+		s += selectorModifiers(expr[x.ends[i]:])
+		if !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+// selectorModifiers are the offset and the @ a selector's text is followed
+// by in rest, past its range, as " offset 1w @ 1700000000".
+func selectorModifiers(rest string) string {
+	space := func() { rest = strings.TrimLeft(rest, " \t\n\r") }
+	token := func() string {
+		space()
+		j := 0
+		for j < len(rest) && (rest[j] == '-' || rest[j] == '+' || rest[j] == '.' || rest[j] == '_' || rest[j] == '(' || rest[j] == ')' ||
+			rest[j] >= '0' && rest[j] <= '9' || rest[j] >= 'a' && rest[j] <= 'z' || rest[j] >= 'A' && rest[j] <= 'Z') {
+			if rest[j] == ')' && !strings.HasSuffix(rest[:j], "(") {
+				break // the call it is in closes
+			}
+			j++
+		}
+		t := rest[:j]
+		rest = rest[j:]
+		return t
+	}
+	space()
+	if strings.HasPrefix(rest, "[") {
+		if end := strings.IndexByte(rest, ']'); end >= 0 {
+			rest = rest[end+1:]
+		}
+	}
+	var out string
+	for {
+		space()
+		switch {
+		case strings.HasPrefix(strings.ToLower(rest), "offset") && (len(rest) == 6 || !isWordByte(rest[6])):
+			rest = rest[6:]
+			out += " offset " + token()
+		case strings.HasPrefix(rest, "@"):
+			rest = rest[1:]
+			out += " @ " + token()
+		default:
+			return out
+		}
+	}
+}
+
+// Ranges are what is in the brackets of an expression's range selectors and
+// subqueries, as written: 5m, 1h:5m.
+func Ranges(expr string) ([]string, error) {
+	var x scanned
+	_, err := scopeScan(expr, "", nil, &x)
+	return x.ranges, err
+}
+
+// scanned is what scopeScan found: the selectors, where each ends, and the
+// ranges.
+type scanned struct {
+	sels, ranges []string
+	ends         []int
+}
+
 // scopeScan reads expr as Scope does, writing it with matchers added into
 // b, unless b is nil, and says how much they add: the matchers, and the
-// commas and brackets around them.
-func scopeScan(expr, matchers string, b *strings.Builder) (int, error) {
+// commas and brackets around them. Each selector it adds them to, and each
+// range, is put in found, as written, unless found is nil.
+func scopeScan(expr, matchers string, b *strings.Builder, found *scanned) (int, error) {
 	w := scopeOut{b}
 	added := 0
+	// A metric's name just read, which matchers may follow: where it
+	// starts and ends, nameEnd -1 for none.
+	nameStart, nameEnd := 0, -1
 	var parens []bool // for each open parenthesis, whether it holds label names
 	listNext := false // a label list's parenthesis comes next
 	i := 0
@@ -152,6 +233,14 @@ func scopeScan(expr, matchers string, b *strings.Builder) (int, error) {
 				w.byte(expr[i])
 				i++
 			}
+			if found != nil {
+				from := open
+				if nameEnd >= 0 && strings.TrimSpace(expr[nameEnd:open]) == "" {
+					from = nameStart
+				}
+				found.sels, found.ends = append(found.sels, expr[from:i+1]), append(found.ends, i+1)
+			}
+			nameEnd = -1
 			// What is in it is copied as written.
 			inner := strings.TrimSpace(expr[open+1 : i])
 			added += len(matchers)
@@ -169,6 +258,9 @@ func scopeScan(expr, matchers string, b *strings.Builder) (int, error) {
 				return 0, errors.New("a [ isn't closed")
 			}
 			w.str(expr[i : i+end+1])
+			if found != nil {
+				found.ranges = append(found.ranges, strings.TrimSpace(expr[i+1:i+end]))
+			}
 			i += end + 1
 		case c == '(':
 			parens = append(parens, listNext)
@@ -204,7 +296,7 @@ func scopeScan(expr, matchers string, b *strings.Builder) (int, error) {
 				expr[j] >= 'A' && expr[j] <= 'Z' || expr[j] >= '0' && expr[j] <= '9') {
 				j++
 			}
-			word := expr[i:j]
+			word, wordStart := expr[i:j], i
 			w.str(word)
 			i = j
 			lower := strings.ToLower(word)
@@ -223,6 +315,11 @@ func scopeScan(expr, matchers string, b *strings.Builder) (int, error) {
 				w.byte('{')
 				w.str(matchers)
 				w.byte('}')
+				if found != nil {
+					found.sels, found.ends = append(found.sels, word), append(found.ends, i)
+				}
+			default:
+				nameStart, nameEnd = wordStart, i // its matchers come next
 			}
 		default:
 			w.byte(c)

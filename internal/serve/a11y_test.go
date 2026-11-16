@@ -143,6 +143,12 @@ func TestA11yServe(t *testing.T) {
 	for _, p := range firstPaths {
 		paths = append(paths, "/first"+p)
 	}
+	// The incident sources' other states (sourcesStates).
+	for prefix, src := range sourcesStates(t) {
+		src.cfg.AllowedHosts = append(src.cfg.AllowedHosts, "host.docker.internal")
+		mux.Handle(prefix+"/", http.StripPrefix(prefix, src.Handler()))
+		paths = append(paths, prefix+"/settings")
+	}
 	mux.HandleFunc("GET /a11y-paths", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintln(w, strings.Join(paths, "\n"))
 	})
@@ -159,6 +165,7 @@ func TestPagesAccessible(t *testing.T) {
 	for _, n := range names {
 		for _, p := range paths {
 			r := httptest.NewRequest(http.MethodGet, p, nil)
+			r.Header.Set("Sec-Fetch-Site", "none") // a page asked for in a browser, as axe does
 			r.Header.Set("Accept-Language", n.Code)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, r)
@@ -724,6 +731,7 @@ func pageA11y(t *testing.T, h http.Handler, who string, paths ...string) {
 	for _, n := range names {
 		for _, p := range paths {
 			r := httptest.NewRequest(http.MethodGet, p, nil)
+			r.Header.Set("Sec-Fetch-Site", "none") // a page asked for in a browser, as axe does
 			r.Header.Set("Accept-Language", n.Code)
 			if who != "" {
 				r.Header.Set("X-Forwarded-Email", who)

@@ -212,6 +212,8 @@ type sharedStatus struct {
 	OnCall     map[string]onCallRead `json:"on_call,omitempty"`
 	// Config is what the leader last made of --config.
 	Config *configShown `json:"config,omitempty"`
+	// Sources is what the leader saw of where incidents come from.
+	Sources *sourcesSeen `json:"sources,omitempty"`
 }
 
 // ownStatus is this replica's status, as it would say it.
@@ -230,6 +232,7 @@ func (s *Server) ownStatus() sharedStatus {
 		}
 	}
 	st.Config = s.configShown()
+	st.Sources = s.sourcesNow()
 	return st
 }
 
