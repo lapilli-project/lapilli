@@ -171,8 +171,8 @@ each marked window of a kind ([marked.md](marked.md), #90), not each week:
 - **`each: KIND`**: the goal is checked for each window of that kind that
   ended, and the one on now as it stands.
 - **The value** is the measure inside the window: the firings marked with
-  the kind on the days it covers, and the incidents during it, as design
-  40 counts them.
+  the kind on the days it covers, and the incidents during it, as #90
+  counts them.
 - **`no_worse_than: before`** sets it beside the same measure over the four
   whole weeks before the window's first week, outside the kind, with `by`
   as slack (0 when left out): met when inside is no worse than before by
@@ -185,7 +185,8 @@ each marked window of a kind ([marked.md](marked.md), #90), not each week:
   measure that needs one, or before with nothing to divide.
 
 A goal over a span that is neither a week nor a marked window, such as a
-quarter, is a marked window of a kind written for it. Until #90 is
+month, is a marked window of a kind written for it. A marked window lasts
+31 days at most, so a quarter isn't one ("Open questions"). Until #90 is
 built, `each:` takes `week` alone.
 
 ## Where it shows
@@ -320,8 +321,8 @@ of its disk, or of its database) before it upgrades.
 - **Goals made in the UI** (below, "Open questions").
 - **A measure the summary doesn't give**, such as how fast a page was taken
   on an on-call tool.
-- **Weeks other than the summary's**: months and quarters, but as a marked
-  window of a kind written for them.
+- **Spans other than the summary's weeks**: a month only as a marked window
+  written for it, and no quarter.
 - **Alerting on goals.** `/metrics` gives what a team's own Prometheus needs.
 
 ## Alternatives
@@ -355,7 +356,7 @@ of its disk, or of its database) before it upgrades.
 2. **Goals in the UI**, by admins, or by a team's editors for their team's
    goals, as their quiet windows and reports.
 3. **Months and quarters** as `each:`, without writing a marked window for
-   them.
+   them; a quarter is longer than a marked window may be.
 4. **Weeks in a team's zone.** The summary counts weeks in `--tz`; a team in
    another zone may want its own Monday.
 5. **A team's record.** The summary's `no_record` is everyone's, also in a
