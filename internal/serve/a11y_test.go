@@ -774,19 +774,20 @@ func TestPagesAccessibleInMoreStates(t *testing.T) {
 	})
 }
 
-// TestCheckboxOnItsLine: a label holding a checkbox draws it on the line
-// of its words, before them, in any form (the stylesheet's rule): as a
-// field's label it stood on a line of its own, centred over its words, as
-// "take it out instead" did on a rule's proposals. So every checkbox a
-// page draws in a label is the label's own, before its words, which the
-// rule asks; test/a11y/axe.mjs measures it in a browser (checkbox-line).
+// TestCheckboxOnItsLine: a label holding a checkbox draws it on the first
+// line of its words, before them, on their baseline, in any form (the
+// stylesheet's rule): as a field's label it stood on a line of its own,
+// centred over its words, as "take it out instead" did on a rule's
+// proposals. So every checkbox a page draws in a label is the label's
+// own, before its words, which the rule asks; test/a11y/axe.mjs measures
+// it in a browser (checkbox-line).
 func TestCheckboxOnItsLine(t *testing.T) {
 	b, err := files.ReadFile("static/lapilli.css")
 	if err != nil {
 		t.Fatal(err)
 	}
 	m := regexp.MustCompile(`\nlabel:has\(> input\[type=checkbox\]\) \{([^}]*)\}`).FindSubmatch(b)
-	if m == nil || !strings.Contains(string(m[1]), "display: flex") || !strings.Contains(string(m[1]), "align-items: center") {
+	if m == nil || !strings.Contains(string(m[1]), "display: flex") || !strings.Contains(string(m[1]), "align-items: baseline") {
 		t.Fatalf("no rule draws a checkbox's label on one line: %q", m)
 	}
 	h := pagesServer(t).Handler()
@@ -827,7 +828,10 @@ func nodeTextBefore(n *html.Node) string {
 
 // TestDisabledFieldsLookIt: a field of a form no one may send now (a
 // rule's, while one of its proposals waits) is drawn as a disabled button
-// is: dim words on the panel, a dashed edge; not as a field to fill.
+// is: dim words on the panel, a dashed edge; not as a field to fill. The
+// stylesheet says so here; test/a11y/axe.mjs reads each disabled field's
+// computed style in a browser (disabled-look), which a more specific rule
+// can't pass by.
 func TestDisabledFieldsLookIt(t *testing.T) {
 	b, err := files.ReadFile("static/lapilli.css")
 	if err != nil {
