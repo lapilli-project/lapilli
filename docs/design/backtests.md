@@ -369,6 +369,19 @@ job does today. Under a quota, a backtest through serve is slower than one
 in CI at the job's own rate: that is the price of one quota and no
 credential in CI, and the job's log says where it is in the queue.
 
+## Where it shows
+
+- **On the pull request**, as today: the comment the job posts, whose
+  heading says it was judged by serve's record ("How it relates to
+  `--expect`").
+- **In the job's log**: where the backtest is in the queue, and, while it
+  runs, its requests asked of those counted, every 30 seconds, as
+  `--progress` says a run's.
+- **In serve**: a line of the Run history page for each, and two series in
+  `/metrics` (below). Not on a rule's page, the overview, the digest, the
+  outbox or MCP: a pull request's backtest is a prediction for its
+  reviewers, not a fact of the deployed rules.
+
 ## What is kept
 
 - **A table, `backtests`** (schema 021: 020 is expectations.md's). A row is
