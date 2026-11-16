@@ -108,7 +108,7 @@ func pagesServer(t *testing.T) *Server {
 		t.Fatal(err)
 	}
 	s.jobs(ctx, true)
-	s.checkEmpty([]string{grafanaAlertsSeries}, now.Add(-24*time.Hour))
+	s.checkEmpty([]string{grafanaAlertsSeries}, "", now.Add(-24*time.Hour))
 	o := s.cfg.Options
 	tid, err := s.l.PutTeam(ctx, ledger.Team{Name: "payments", Rules: "Errors"}, "ana")
 	if err != nil {

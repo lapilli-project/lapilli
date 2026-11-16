@@ -92,6 +92,34 @@
   one release's: once the `uses:` line moves, nothing is installed, and
   the comment says so, until it is changed too. The release workflow
   checks that the first release `CHANGELOG.md` names is the one tagged.
+- **What Grafana's rules really fired, from Grafana's own state history.**
+  `lapilli verdict --check-replay` and `lapilli serve`'s daily check read
+  `GRAFANA_ALERTS` for Grafana's rules, which Grafana writes only once its
+  alert state history is sent to Prometheus, not its default. With the
+  Grafana known, they now read what its rules fired from the history it
+  keeps, through its API, with the Viewer's token `--grafana-token-file`
+  already holds: in annotations, Grafana's default, or in Loki, as its
+  frontend settings say. `--grafana` gives the Grafana for the rules it
+  reads; `--check-grafana URL` gives it for Grafana's rules read from files
+  (`--rules`, `--rules-history`). A Grafana keeping its history in
+  Prometheus alone is read as before, from `GRAFANA_ALERTS`, and
+  `--check-series` still names series instead. Measured on Grafana 12.4.14
+  and 13.3.1: every firing read from the history alike with
+  `GRAFANA_ALERTS`, starting and ending at the same evaluation
+  (docs/design/grafanahistory.md). What another system sends is bounded:
+  an answer 32 MiB at most, 256 MiB and 200,000 changes of state a read,
+  an alert's labels 128 and their values 4 KB; a change past them is passed
+  over and counted, with every change of its alert. In `serve`, a day whose
+  history holds nothing, or more than that, doesn't check Grafana's rules
+  that day, and the Run history page says so.
+
+### Fixed
+
+- **A miss of what really fired is kept within bounds.** `serve` kept the
+  labels of a firing found only in what really fired as the store gave
+  them, and showed them on the rule's page: any length, with what turns
+  text around. They are kept as a replayed alert's are, each value 256
+  bytes at most and shown as it reads.
 
 - **The impact signal's record follows one rule: it holds only for weeks
   that were read, with data, by the criterion in effect, and, after a

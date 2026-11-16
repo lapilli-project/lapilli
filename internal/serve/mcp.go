@@ -648,7 +648,7 @@ type ruleDetailOut struct {
 	Latest     []firingOut    `json:"latest_firings" jsonschema:"twenty at most"`
 	Note       noteOut        `json:"note"`
 	Tasks      []taskOut      `json:"tasks"`
-	Check      *checkOut      `json:"replay_check,omitempty" jsonschema:"its replay beside what really fired (ALERTS or GRAFANA_ALERTS) over twelve weeks; not given when that isn't checked"`
+	Check      *checkOut      `json:"replay_check,omitempty" jsonschema:"its replay beside what really fired (ALERTS, GRAFANA_ALERTS or Grafana's own alert state history) over twelve weeks; not given when that isn't checked"`
 	Says       *saysOut       `json:"says,omitempty" jsonschema:"what it says when it fires, as the rules read last have it, and the problems found in it; not given when it isn't among them, or the check is off"`
 	Proposals  []proposalOut  `json:"proposals" jsonschema:"the changes proposed to it, the latest first, twenty at most"`
 }

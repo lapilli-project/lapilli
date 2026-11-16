@@ -200,16 +200,20 @@ func (s *Server) peek(ctx context.Context, raw *string) error {
 // followers' pages: what the status banner, the runs page and the pages'
 // versions are made of.
 type sharedStatus struct {
-	Doing      string                `json:"doing,omitempty"`
-	Args       []string              `json:"args,omitempty"`
-	ErrWhat    string                `json:"err_what,omitempty"`
-	Err        string                `json:"err,omitempty"`
-	Judged     float64               `json:"judged,omitempty"`
-	Took       time.Duration         `json:"took,omitempty"`
-	Runs       map[string]int        `json:"runs,omitempty"`
-	CheckEmpty []string              `json:"check_empty,omitempty"`
-	CheckDay   time.Time             `json:"check_day,omitzero"`
-	OnCall     map[string]onCallRead `json:"on_call,omitempty"`
+	Doing      string         `json:"doing,omitempty"`
+	Args       []string       `json:"args,omitempty"`
+	ErrWhat    string         `json:"err_what,omitempty"`
+	Err        string         `json:"err,omitempty"`
+	Judged     float64        `json:"judged,omitempty"`
+	Took       time.Duration  `json:"took,omitempty"`
+	Runs       map[string]int `json:"runs,omitempty"`
+	CheckEmpty []string       `json:"check_empty,omitempty"`
+	CheckDay   time.Time      `json:"check_day,omitzero"`
+	// CheckHistory and CheckHistoryOff are status.history and
+	// status.historyOff.
+	CheckHistory    string                `json:"check_history,omitempty"`
+	CheckHistoryOff string                `json:"check_history_off,omitempty"`
+	OnCall          map[string]onCallRead `json:"on_call,omitempty"`
 	// Config is what the leader last made of --config.
 	Config *configShown `json:"config,omitempty"`
 	// Sources is what the leader saw of where incidents come from.
@@ -220,7 +224,8 @@ type sharedStatus struct {
 func (s *Server) ownStatus() sharedStatus {
 	s.status.Lock()
 	st := sharedStatus{Doing: s.status.doing, ErrWhat: s.status.errWhat, Err: s.status.err, Judged: s.status.judged, Took: s.status.took,
-		Runs: maps.Clone(s.status.runs), CheckEmpty: slices.Clone(s.status.checkEmpty), CheckDay: s.status.checkDay}
+		Runs: maps.Clone(s.status.runs), CheckEmpty: slices.Clone(s.status.checkEmpty), CheckDay: s.status.checkDay,
+		CheckHistory: s.status.history, CheckHistoryOff: s.status.historyOff}
 	for _, a := range s.status.args {
 		st.Args = append(st.Args, fmt.Sprint(a))
 	}

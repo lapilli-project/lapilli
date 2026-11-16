@@ -1,0 +1,1 @@
+{"unifiedAlerting": {"alertStateHistoryBackend": "loki", "stateHistory": {"backend": "loki", "prometheusMetricName": "GRAFANA_ALERTS"}}}

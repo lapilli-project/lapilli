@@ -7,12 +7,14 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/source"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -67,6 +69,24 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 	// A cloud's own alarms keep no series of what they fired: their history,
 	// from the recipes, stands in.
 	series := checkSeriesFor(f, slices.DeleteFunc(slices.Clone(all), func(r rules.Rule) bool { return r.Cloud != "" }))
+	// With the Grafana known, what its rules really fired is its own
+	// state history, where it serves one (docs/design/grafanahistory.md).
+	var gh source.GrafanaHistory
+	where := ""
+	if f.historyGrafana() != "" && slices.ContainsFunc(all, func(r rules.Rule) bool { return r.Graph != nil }) {
+		gh = f.grafanaHistory()
+		if f.checkGrafana != "" && f.grafanaTk != "" && strings.HasPrefix(f.checkGrafana, "http://") {
+			fmt.Fprintln(stderr, "lapilli: --check-grafana is plain http: the token goes unencrypted")
+		}
+		if where, err = gh.Where(ctx); err != nil {
+			return fail(fmt.Errorf("--check-replay: %w", err))
+		}
+		if where == "" {
+			fmt.Fprintln(stderr, "lapilli verdict: this Grafana keeps its alert state history in Prometheus alone, or keeps none: what its rules really fired is read from GRAFANA_ALERTS.")
+		} else {
+			series = slices.DeleteFunc(series, func(s string) bool { return s == grafanaAlertsSeries })
+		}
+	}
 	var recorded []firing.Firing
 	if f.checkFirings != "" {
 		file, err := os.Open(f.checkFirings)
@@ -110,6 +130,25 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 			real = append(real, firing.FromAlerts(group, at, f.opts.To)...)
 		}
 	}
+	var grafanaErrors map[string]int
+	if where != "" {
+		// From a day before the period, so that what fired since before it
+		// is seen as firing at its start.
+		lead := f.opts.From.Add(-historyLead)
+		ts, read, err := gh.Read(ctx, where, lead, f.opts.To)
+		if err != nil {
+			return fail(fmt.Errorf("--check-replay: %w", err))
+		}
+		if read.Passed > 0 {
+			fmt.Fprintf(stderr, "lapilli verdict: %d changes of state in Grafana's history passed over, past what lapilli reads of one (docs/design/grafanahistory.md).\n", read.Passed)
+		}
+		// What was over by the period's start isn't in it, as a series
+		// read from then doesn't have it.
+		real = append(real, slices.DeleteFunc(firing.FromTransitions(ts, lead), func(x firing.Firing) bool {
+			return !x.End.IsZero() && !x.End.After(f.opts.From)
+		})...)
+		grafanaErrors = historyErrors(ts, lead, f.opts.From, f.opts.To, all)
+	}
 	if f.ruleRE != nil {
 		real = slices.DeleteFunc(real, func(x firing.Firing) bool { return !f.ruleRE.MatchString(x.Rule) })
 	}
@@ -131,6 +170,10 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 	}
 	c := verdict.CheckReplay(ctx, known, fs, real, f.opts.From, f.opts.To, f.step)
 	c.Series = series
+	if where != "" {
+		c.Series = append(c.Series, historyName(where))
+		c.Errors = grafanaErrors
+	}
 	if slices.Contains(series, grafanaAlertsSeries) {
 		// Grafana's error alerts, left out of what really fired: said where
 		// they happened, as a replay can't show them.
@@ -155,7 +198,8 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 	if len(real) == 0 {
 		fmt.Fprintln(stderr, "lapilli verdict: nothing in those series for this period, so the replay has nothing to be checked against.")
 		fmt.Fprintln(stderr, "Either nothing fired, or this API doesn't keep them: Prometheus and Amazon Managed Service for Prometheus keep ALERTS;")
-		fmt.Fprintln(stderr, "Grafana keeps GRAFANA_ALERTS once its alert state history is written to Prometheus. Name another series with --check-series;")
+		fmt.Fprintln(stderr, "for Grafana's rules, its own alert state history is read with --grafana or --check-grafana, or GRAFANA_ALERTS once it writes")
+		fmt.Fprintln(stderr, "its history to Prometheus. Name another series with --check-series;")
 		fmt.Fprintln(stderr, "for a cloud's own alarms, give their history with --check-firings.")
 		return 1
 	}
@@ -163,6 +207,41 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 		return fail(errors.New("some rules didn't finish within --timeout; raise it, or shorten the period"))
 	}
 	return 0
+}
+
+// historyLead is how long before a period Grafana's state history is
+// read from: an alert that fired from before the period, changing state
+// within a day of its start, is seen as firing at its start.
+const historyLead = 24 * time.Hour
+
+// historyName says where Grafana's state history was read from, as a
+// check's series are said.
+func historyName(where string) string {
+	if where == source.HistoryLoki {
+		return "Grafana's alert state history (Loki)"
+	}
+	return "Grafana's alert state history (annotations)"
+}
+
+// historyErrors counts Grafana's error alerts on over [from, to] by rule,
+// of the rules given, read from lead: an alert in the Error state, which
+// is left out of what really fired, as GRAFANA_ALERTS{grafana_alertstate=
+// "error"} is, counted as that series' firings are.
+func historyErrors(ts []firing.Transition, lead, from, to time.Time, given []rules.Rule) map[string]int {
+	errs := make([]firing.Transition, len(ts))
+	as := func(state string) string {
+		if firing.GrafanaBase(state) == "Error" {
+			return "Alerting"
+		}
+		return "Normal"
+	}
+	for i, t := range ts {
+		errs[i] = firing.Transition{Rule: t.Rule, Labels: t.Labels, At: t.At, From: as(t.From), To: as(t.To)}
+	}
+	fs := slices.DeleteFunc(firing.FromTransitions(errs, lead), func(x firing.Firing) bool {
+		return !x.Active(from, to) || !x.End.IsZero() && !x.End.After(from)
+	})
+	return errorsOf(fs, given)
 }
 
 // errorsOf counts error alerts by rule, of the rules given.

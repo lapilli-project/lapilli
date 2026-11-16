@@ -164,7 +164,14 @@ each history API (lapilli_serve_history_*). Off by default:
                       replay again is set beside ALERTS (or GRAFANA_ALERTS),
                       and a rule whose replay differs says so
   --check-series SEL  the series that say what really fired (repeatable;
-                      default ALERTS and GRAFANA_ALERTS, as the rules need)
+                      default ALERTS and GRAFANA_ALERTS, as the rules need).
+                      Without it, with --grafana or --check-grafana, what
+                      Grafana's rules really fired is read from Grafana's
+                      own alert state history instead, where it keeps one it
+                      serves: in annotations, its default, or in Loki
+  --check-grafana URL the Grafana that runs the Grafana rules --rules or
+                      --rules-history gives, whose alert state history says
+                      what they really fired, read with --grafana-token-file
   --check-differs N/RATIO
                       a rule differs when, over a week, it had N firings
                       either way and fewer than RATIO of them were alike
@@ -1085,6 +1092,10 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	cfg.OnCall = f.onCall
 	cfg.Timeout, cfg.Parallel = f.timeout, f.parallel
 	cfg.CheckReplay, cfg.CheckSeries = checkReplayOn(f), f.checkSeries
+	if f.historyGrafana() != "" && cfg.CheckReplay {
+		h := f.grafanaHistory()
+		cfg.History = &h
+	}
 	cfg.CheckContent, cfg.Severities, cfg.ScrapeInterval = checkContentOn(f), f.severities, f.scrapeInterval
 	if ocSet {
 		if !oidcScopesGiven {
@@ -1100,6 +1111,9 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	}
 
 	log := slog.New(slog.NewTextHandler(stderr, nil))
+	if f.checkGrafana != "" && f.grafanaTk != "" && strings.HasPrefix(f.checkGrafana, "http://") {
+		log.Warn("--check-grafana is plain http: the token goes unencrypted")
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	// With firings copied in alone, there may be no history to read.

@@ -18,6 +18,7 @@ import (
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/source"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -1823,6 +1824,10 @@ type runsCheck struct {
 	Empty     []string
 	EmptyDay  time.Time
 	Elsewhere []string
+	// History is where Grafana keeps the alert state history read in
+	// place of GRAFANA_ALERTS ("" for none read), and HistoryOff why it
+	// was of no use over EmptyDay (historyNothing, historyTooMany).
+	History, HistoryOff string
 }
 
 func (s *Server) runsPage(r *http.Request) (any, error) {
@@ -1853,6 +1858,10 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 		c := &runsCheck{Series: s.cfg.CheckSeries}
 		if len(c.Series) == 0 {
 			c.Series = []string{alertsSeries, grafanaAlertsSeries}
+			if s.cfg.History != nil && st.CheckHistory != "" {
+				c.Series = []string{alertsSeries}
+				c.History, c.HistoryOff = historyShown(st.CheckHistory), st.CheckHistoryOff
+			}
 		}
 		for _, a := range s.cfg.Alarms {
 			c.Alarms = append(c.Alarms, a.Source)
@@ -1869,6 +1878,15 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 		v.Check = c
 	}
 	return v, nil
+}
+
+// historyShown says where Grafana keeps its alert state history, as a
+// page shows it.
+func historyShown(where string) string {
+	if where == source.HistoryLoki {
+		return "Loki"
+	}
+	return "annotations"
 }
 
 var funcs = template.FuncMap{

@@ -14,6 +14,7 @@ import (
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/source"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -36,6 +37,14 @@ const (
 	// from whatever the store holds.
 	maxElsewhere     = 100
 	maxElsewhereName = 512
+)
+
+// Why Grafana's alert state history was of no use over a day: it held no
+// change of state, as a Grafana keeping none that far back holds none; or
+// more than is read at once (source.MaxChanges).
+const (
+	historyNothing = "nothing"
+	historyTooMany = "too many"
 )
 
 // Differs is when a rule is said to differ from what really fired: with at
@@ -250,8 +259,25 @@ func (s *Server) checkDay(ctx context.Context, known []rules.Rule, names map[str
 		fired = append(fired, verdict.AlarmHistory(bySource[src], rec)...)
 	}
 	replayed = verdict.Whole(replayed, verdict.WholeAlarms(alarms))
+	series := s.checkSeries(ofSeries)
+	// What Grafana's rules really fired, from its own state history where
+	// it serves one, in place of GRAFANA_ALERTS.
+	where, historyOff := "", ""
+	if s.cfg.History != nil && len(s.cfg.CheckSeries) == 0 && slices.ContainsFunc(ofSeries, func(r rules.Rule) bool { return r.Graph != nil }) {
+		if where, err = s.historyWhere(ctx); err != nil {
+			return err
+		}
+		if where != "" {
+			series = slices.DeleteFunc(series, func(sel string) bool { return sel == grafanaAlertsSeries })
+			fs, off, err := s.readHistory(ctx, where, from, to)
+			if err != nil {
+				return err
+			}
+			fired, historyOff = append(fired, fs...), off
+		}
+	}
 	var empty []string
-	for _, sel := range s.checkSeries(ofSeries) {
+	for _, sel := range series {
 		series, err := s.h.QueryRange(ctx, sel, from, to, s.cfg.Step)
 		if err != nil {
 			return fmt.Errorf("reading %s: %w", sel, err)
@@ -290,6 +316,9 @@ func (s *Server) checkDay(ctx context.Context, known []rules.Rule, names map[str
 			sel = grafanaAlertsSeries
 		}
 		off := len(s.cfg.CheckSeries) == 0 && slices.Contains(empty, sel) && r.Cloud == "" || uncopied[r.Name]
+		if r.Graph != nil && where != "" {
+			off = historyOff != ""
+		}
 		for _, n := range names[r.Name] {
 			off = off || failed[n]
 		}
@@ -298,10 +327,20 @@ func (s *Server) checkDay(ctx context.Context, known []rules.Rule, names map[str
 		}
 		checked = append(checked, r)
 	}
-	s.checkEmpty(empty, a)
+	s.checkEmpty(empty, historyOff, a)
 	c, ok := verdict.CheckSpan(ctx, checked, replayed, fired, a, b, s.cfg.Step)
 	if !ok {
 		return ctx.Err()
+	}
+	// What really fired comes from a store, or from Grafana: a miss of it
+	// is kept, and shown, with its labels as a replayed alert's are, within
+	// their bounds and with nothing that turns text around.
+	for _, r := range c.Rules {
+		for i := range r.Misses {
+			if r.Misses[i].Way == "real" {
+				r.Misses[i].Labels = verdict.KeptLabels(r.Misses[i].Labels)
+			}
+		}
 	}
 	// Alerts no rule is named come from whatever the store holds: only
 	// names that show are kept, a hundred a day at most.
@@ -370,12 +409,59 @@ func (s *Server) held(day int64, hold bool) bool {
 const alarmsWait = 48 * time.Hour
 
 // checkEmpty notes the series that held nothing over the day just checked,
-// for the runs page.
-func (s *Server) checkEmpty(empty []string, day time.Time) {
+// and why Grafana's state history was of no use, for the runs page.
+func (s *Server) checkEmpty(empty []string, historyOff string, day time.Time) {
 	s.status.Lock()
 	defer s.status.Unlock()
 	s.status.checkEmpty = slices.Clone(empty)
+	s.status.historyOff = historyOff
 	s.status.checkDay = day
+}
+
+// historyWhere is where the Grafana of Config.History keeps its alert
+// state history, as it said within the hour: "" for none it serves, when
+// GRAFANA_ALERTS is read as before.
+func (s *Server) historyWhere(ctx context.Context) (string, error) {
+	s.status.Lock()
+	where, at := s.status.history, s.status.historyAt
+	s.status.Unlock()
+	if !at.IsZero() && s.now().Sub(at) < time.Hour {
+		return where, nil
+	}
+	where, err := s.cfg.History.Where(ctx)
+	if err != nil {
+		return "", err
+	}
+	s.status.Lock()
+	s.status.history, s.status.historyAt = where, s.now()
+	s.status.Unlock()
+	return where, nil
+}
+
+// readHistory reads what Grafana's alerts really fired over [from, to]
+// from its state history, kept where: those --rule leaves out passed over.
+// off says why it is of no use, its rules not checked: it held no change
+// of state, or more than is read at once.
+func (s *Server) readHistory(ctx context.Context, where string, from, to time.Time) (fs []firing.Firing, off string, err error) {
+	ts, read, err := s.cfg.History.Read(ctx, where, from, to)
+	switch {
+	case errors.Is(err, source.ErrTooManyChanges):
+		s.log.Warn("Grafana's alert state history wasn't read: its rules aren't checked that day", "err", err)
+		return nil, historyTooMany, nil
+	case err != nil:
+		return nil, "", err
+	case len(ts) == 0:
+		return nil, historyNothing, nil
+	}
+	if read.Passed > 0 {
+		s.log.Warn("changes of state in Grafana's alert state history passed over, past what lapilli reads of one", "changes", read.Passed)
+	}
+	for _, f := range firing.FromTransitions(ts, from) {
+		if s.cfg.RuleRE == nil || s.cfg.RuleRE.MatchString(f.Rule) {
+			fs = append(fs, f)
+		}
+	}
+	return fs, "", nil
 }
 
 // tellDiffers tells of each rule whose replay differs from what really

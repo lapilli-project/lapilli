@@ -1052,6 +1052,14 @@ func (c *Client) get(ctx context.Context, path string) ([]byte, error) {
 	return retried(ctx, func(ctx context.Context) ([]byte, error) { return c.getOnce(ctx, path, true, maxBody) })
 }
 
+// Get asks for path, a path under the client's base with its query, as
+// get does: in its turn by the client's Limiter, asked again as retried
+// says, each time in its turn again; limit bytes of the answer at most
+// (more is ErrTooLarge). A status that isn't 2xx is an APIError.
+func (c *Client) Get(ctx context.Context, path string, limit int64) ([]byte, error) {
+	return retried(ctx, func(ctx context.Context) ([]byte, error) { return c.getOnce(ctx, path, true, limit) })
+}
+
 // getOnce asks for path once, reading limit bytes of the answer at most.
 func (c *Client) getOnce(ctx context.Context, path string, heed bool, limit int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
