@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -320,13 +321,18 @@ const impactNone = "none"
 // impactSince keeps from when the runs read the impact signal (--impact),
 // all of it, without a run between that didn't: what keeps the record of
 // the firings since (ImpactSince). A run that doesn't read it ends that
-// (impactNone), and forgets the criterion read; the first to read it with
-// none kept, after it or after an upgrade, keeps its own start. An earlier
-// window found isn't taken for one: the runs between may not have read
-// it. A run that read another criterion than the runs before (changed)
-// keeps its own start too: the weeks before were read with the one before,
-// not with this one; the weeks before it are read again with it by
-// ReadAgain, whose turn it marks as due (againDue).
+// (impactNone), and forgets the criterion read and its data; the first to
+// read it with none kept, after it or after an upgrade, keeps its own
+// start. An earlier window found isn't taken for one: the runs between may
+// not have read it. Read again after a run that didn't (turned on again),
+// the weeks before its start wait to be read again with it (againDue).
+//
+// A run that read another criterion than the runs before (changed) keeps
+// impact_since as it was: every week since was read, with the criterion in
+// effect then, and the windows each found stay until ReadAgain puts the new
+// one's in their place, over the last four weeks, and keeps the record by
+// it from there. It marks that read again as due. A since is never earlier
+// than where the criterion's data begins (ImpactData), when that is known.
 func (l *Ledger) impactSince(t *txn, f Found, changed bool) error {
 	was, err := l.meta(t.ctx, t, metaImpactSince)
 	if err != nil {
@@ -344,7 +350,7 @@ func (l *Ledger) impactSince(t *txn, f Found, changed bool) error {
 		if was == impactNone && crit == "" && again == "" {
 			return nil
 		}
-		if _, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key IN (?, ?)", metaImpactCriterion, metaImpactAgain); err != nil {
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key IN (?, ?, ?)", metaImpactCriterion, metaImpactAgain, metaImpactData); err != nil {
 			return err
 		}
 		return setMeta(t.ctx, t, metaImpactSince, impactNone)
@@ -354,15 +360,24 @@ func (l *Ledger) impactSince(t *txn, f Found, changed bool) error {
 			return err
 		}
 	}
-	if changed {
+	if changed || was == impactNone {
 		if err := setMeta(t.ctx, t, metaImpactAgain, againDue); err != nil {
 			return err
 		}
-		return setMeta(t.ctx, t, metaImpactSince, strconv.FormatInt(f.ImpactSince.Unix(), 10))
+	}
+	if changed {
+		return nil
 	}
 	since := f.ImpactSince.Unix()
 	if n, err := strconv.ParseInt(was, 10, 64); err == nil && n <= since {
 		return nil
+	}
+	d, err := l.impactData(t.ctx, t)
+	if err != nil {
+		return err
+	}
+	if d != nil && d.Criterion == f.ImpactCriterion && !d.Floor.IsZero() {
+		since = max(since, d.Floor.Unix())
 	}
 	return setMeta(t.ctx, t, metaImpactSince, strconv.FormatInt(since, 10))
 }
@@ -437,29 +452,31 @@ func (l *Ledger) rules(t *txn, rs []Rule) error {
 }
 
 // impact puts the impact windows a run found in place of those found
-// before from From on, keeping what people decided about them: a window
-// that overlaps one confirmed or dismissed is too. A window on at From
-// goes on from the one found before, unless fresh says that one was read
-// with another criterion. It returns the earliest start whose firings'
-// stones may have changed.
+// before from From on, keeping what people decided about them, and the
+// tasks and comments on them (remapImpact). A window on at From goes on
+// from the one found before, unless fresh says that one was read with
+// another criterion: then the one before ends at From. It returns the
+// earliest start whose firings' stones may have changed.
+//
+// A window found takes what was decided about one found before (confirmed
+// or dismissed) that covers half of it or more, sharing a value of each
+// label both have: of several, the one that covers most of it, confirmed
+// before dismissed on a tie, then the earliest. A decision is read from
+// every window on from From on, one that started before it too, as it was
+// before anything was ended there.
 func (l *Ledger) impact(t *txn, f Found, fresh bool) (int64, error) {
 	from := f.From.Unix()
 	lo := from
-	type old struct {
-		start, end, updated int64
-		state, by           string
-		labels              incident.Labels
-	}
-	rows, err := t.QueryContext(t.ctx, `SELECT start_at, end_at, state, labels, updated, updated_by FROM incidents
-		WHERE origin = 'impact' AND start_at >= ? AND state != ''`, from)
+	rows, err := t.QueryContext(t.ctx, `SELECT key, start_at, end_at, state, labels, updated, updated_by FROM incidents
+		WHERE origin = 'impact' AND (start_at >= ? OR end_at > ?) ORDER BY start_at, key`, from, from)
 	if err != nil {
 		return 0, err
 	}
-	var decided []old
+	var before []oldWindow
 	for rows.Next() {
-		var o old
+		var o oldWindow
 		var labels string
-		if err := rows.Scan(&o.start, &o.end, &o.state, &labels, &o.updated, &o.by); err != nil {
+		if err := rows.Scan(&o.key, &o.start, &o.end, &o.state, &labels, &o.updated, &o.by); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -467,11 +484,23 @@ func (l *Ledger) impact(t *txn, f Found, fresh bool) (int64, error) {
 			rows.Close()
 			return 0, err
 		}
-		decided = append(decided, o)
+		before = append(before, o)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return 0, err
+	}
+	if fresh {
+		// Read with another criterion: one found before and on at From
+		// ends there, and judged again from its start.
+		for _, o := range before {
+			if o.start < from {
+				lo = min(lo, o.start)
+			}
+		}
+		if _, err := t.ExecContext(t.ctx, "UPDATE incidents SET end_at = ? WHERE origin = 'impact' AND start_at < ? AND end_at > ?", from, from, from); err != nil {
+			return 0, err
+		}
 	}
 	if _, err := t.ExecContext(t.ctx, "DELETE FROM catches WHERE incident_id IN (SELECT id FROM incidents WHERE origin = 'impact' AND start_at >= ?)", from); err != nil {
 		return 0, err
@@ -480,6 +509,7 @@ func (l *Ledger) impact(t *txn, f Found, fresh bool) (int64, error) {
 		return 0, err
 	}
 	now := time.Now().Unix()
+	var made []madeWindow
 	for _, in := range f.Impact {
 		labels, err := json.Marshal(orEmpty(in.Labels))
 		if err != nil {
@@ -487,35 +517,134 @@ func (l *Ledger) impact(t *txn, f Found, fresh bool) (int64, error) {
 		}
 		if in.Start.Before(f.From) && !fresh {
 			// Still going at the start: the window found before goes on.
-			res, err := t.ExecContext(t.ctx, `UPDATE incidents SET end_at = ? WHERE id = (SELECT id FROM incidents
-				WHERE origin = 'impact' AND start_at < ? AND end_at >= ? ORDER BY start_at DESC LIMIT 1)`,
-				in.End.Unix(), from, f.ImpactSince.Unix())
-			if err != nil {
+			var key string
+			err := t.QueryRowContext(t.ctx, `SELECT key FROM incidents WHERE origin = 'impact' AND start_at < ? AND end_at >= ?
+				ORDER BY start_at DESC LIMIT 1`, from, f.ImpactSince.Unix()).Scan(&key)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return 0, err
 			}
-			if n, _ := res.RowsAffected(); n > 0 {
+			if err == nil {
+				if _, err := t.ExecContext(t.ctx, "UPDATE incidents SET end_at = ? WHERE key = ?", in.End.Unix(), key); err != nil {
+					return 0, err
+				}
 				continue
 			}
 		}
 		if in.Start.Before(f.From) {
 			lo = min(lo, in.Start.Unix())
 		}
-		// What was decided about a window it overlaps, sharing a value of
-		// each label both have, holds for it.
 		state, updated, by := "", now, ""
-		for _, d := range decided {
-			if d.start <= in.End.Unix() && d.end >= in.Start.Unix() && share(d.labels, in.Labels) {
-				state, updated, by = d.state, d.updated, d.by
-			}
+		if d := decidedFor(before, in); d != nil {
+			state, updated, by = d.state, d.updated, d.by
 		}
-		key := "impact-" + in.Start.UTC().Format("20060102T1504Z")
+		key, err := freeKey(t, "impact-"+in.Start.UTC().Format("20060102T1504Z"))
+		if err != nil {
+			return 0, err
+		}
 		if _, err := t.ExecContext(t.ctx, `INSERT INTO incidents (key, origin, state, counts, title, start_at, end_at, labels, updated, updated_by)
-			VALUES (?, 'impact', ?, 0, ?, ?, ?, ?, ?, ?) ON CONFLICT `+t.d.pick("(key)", "(md5(key))")+` DO NOTHING`,
+			VALUES (?, 'impact', ?, 0, ?, ?, ?, ?, ?, ?)`,
 			key, state, in.Title, in.Start.Unix(), in.End.Unix(), string(labels), updated, by); err != nil {
 			return 0, err
 		}
+		made = append(made, madeWindow{key, in})
 	}
-	return lo, nil
+	return lo, remapImpact(t, before, from, made)
+}
+
+// oldWindow is an impact window as it was before a run or a read again
+// put others in its place.
+type oldWindow struct {
+	key                 string
+	start, end, updated int64
+	state, by           string
+	labels              incident.Labels
+}
+
+// madeWindow is a window a run or a read again put in, by its key.
+type madeWindow struct {
+	key string
+	in  incident.Incident
+}
+
+// overlap is how many seconds [a, b] and [c, d] share.
+func overlap(a, b, c, d int64) int64 { return max(0, min(b, d)-max(a, c)) }
+
+// decidedFor is what was decided about the windows found before that holds
+// for a window found now (impact): nil for none.
+func decidedFor(before []oldWindow, in incident.Incident) *oldWindow {
+	s, e := in.Start.Unix(), in.End.Unix()
+	var best *oldWindow
+	var most int64
+	for i := range before {
+		d := &before[i]
+		ov := overlap(d.start, d.end, s, e)
+		if d.state == "" || 2*ov < e-s || e <= s || !share(d.labels, in.Labels) {
+			continue
+		}
+		if best == nil || ov > most || ov == most && d.state == "confirmed" && best.state != "confirmed" {
+			best, most = d, ov
+		}
+	}
+	return best
+}
+
+// freeKey is base, or, when a window of the ledger has it already (one
+// that started in the same minute), base with -2, -3 … after it.
+func freeKey(t *txn, base string) (string, error) {
+	key := base
+	for n := 2; ; n++ {
+		var x int
+		err := t.QueryRowContext(t.ctx, "SELECT 1 FROM incidents WHERE key = ?", key).Scan(&x)
+		if errors.Is(err, sql.ErrNoRows) {
+			return key, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		key = fmt.Sprintf("%s-%d", base, n)
+	}
+}
+
+// remapImpact moves the tasks and comments on a window found before from
+// from on that is no longer there (its key is no new window's) to the
+// window found now that covers most of it, sharing a value of each label
+// both have: the one that took its decision, when it had one. One with
+// none keeps its key, and the Cleanup page lists it (OrphanedImpact).
+func remapImpact(t *txn, before []oldWindow, from int64, made []madeWindow) error {
+	keys := map[string]bool{}
+	for _, m := range made {
+		keys[m.key] = true
+	}
+	for _, o := range before {
+		if o.start < from || keys[o.key] {
+			continue
+		}
+		var n int
+		if err := t.QueryRowContext(t.ctx, `SELECT (SELECT count(*) FROM tasks WHERE incident = ?) +
+			(SELECT count(*) FROM comments WHERE on_kind = 'incident' AND on_key = ?)`, o.key, o.key).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			continue
+		}
+		to, most := "", int64(0)
+		for _, m := range made {
+			ov := overlap(o.start, o.end, m.in.Start.Unix(), m.in.End.Unix())
+			if ov > most && share(o.labels, m.in.Labels) {
+				to, most = m.key, ov
+			}
+		}
+		if to == "" {
+			continue
+		}
+		if _, err := t.ExecContext(t.ctx, "UPDATE tasks SET incident = ? WHERE incident = ?", to, o.key); err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(t.ctx, "UPDATE comments SET on_key = ? WHERE on_kind = 'incident' AND on_key = ?", to, o.key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // share reports whether, for every label both have, they have a value in
