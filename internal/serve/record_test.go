@@ -88,6 +88,15 @@ func TestFacetsNoRecord(t *testing.T) {
 	if strings.Count(body, "No incident was written down in these weeks") != 1 {
 		t.Error("/rules: said more than once")
 	}
+	// No record, no verdict: a rule none of whose firings was judged is
+	// drawn unknown, never ok, though it isn't noisy (its Perf is ok); the
+	// legend above the table says what OK is.
+	if _, rows, _ := strings.Cut(body, "<tbody>"); strings.Contains(rows, `class="badge perf-ok status-ok"`) || !strings.Contains(rows, `class="badge perf-ok status-unknown"`) {
+		t.Error("/rules: a rule with no record is drawn ok")
+	}
+	if _, page, _ := get(t, h, "/rules/R06?weeks=4"); strings.Contains(page, "status-ok") {
+		t.Error("/rules/R06: a rule with no record is drawn ok")
+	}
 
 	d, err := s.overview(httptest.NewRequest(http.MethodGet, "/", nil))
 	if err != nil {

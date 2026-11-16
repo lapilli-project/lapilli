@@ -50,7 +50,7 @@
     <div class="tile-value">{{.Undecided}}</div>
     <div class="tile-of">{{t "%d decided in four weeks" .Decided}}</div><div class="tile-delta"> </div></div>
   <div class="tile"><div class="tile-label">{{t "Runs"}}</div>
-    <div class="tile-value {{if .FailedRuns}}status-bad{{else}}status-ok{{end}}">{{if .FailedRuns}}{{t "%d failed" .FailedRuns}}{{else}}{{t "all ran"}}{{end}}</div>
+    <div class="tile-value {{if .FailedRuns}}status-bad{{else if .Cursor.IsZero}}status-unknown{{else if .Behind}}status-info{{else}}status-ok{{end}}">{{if .FailedRuns}}{{t "%d failed" .FailedRuns}}{{else}}{{t "all ran"}}{{end}}</div>
     <div class="tile-of">{{t "in seven days"}}{{if .Behind}} · <span class="status-info"><span aria-hidden="true">↻</span> {{t "behind: firings are in up to %s" (at $loc .Cursor)}}</span>{{end}}</div><div class="tile-delta"> </div></div>
   <div class="tile"><div class="tile-label">{{t "Rules not replayed"}}</div>
     <div class="tile-value{{if .Unreplayed}} status-warn{{end}}">{{len .Unreplayed}}</div>

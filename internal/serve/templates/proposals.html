@@ -44,7 +44,7 @@
 {{with .Evidence.NoPath}}<p class="hint">{{t "Lapilli doesn't change it in the ruler:"}} {{t .}}</p>{{end}}{{end}}
 {{if .Stale}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "The rule in effect isn't the one this was proposed against: it changed since, so this is refused when checked again. Propose it again from the rule's page."}}</p>{{end}}
 {{with .StaleWhy}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⟳</span> {{.Notice $.Lang}} <a href="#backtest">{{t "Backtest it again"}}</a></p>{{end}}
-{{with .Reason}}<p class="notice {{$v.ReasonClass}}">{{.}}</p>{{end}}
+{{with .Reason}}<p class="notice {{$v.ReasonClass}}"><span class="sign" aria-hidden="true">{{sign $v.ReasonClass}}</span> {{.}}</p>{{end}}
 {{if not .Expires.IsZero}}<p class="quiet">{{t "Unless someone approves it first, it closes as expired on %s: --proposals-expire after it began to wait, when it was made or last backtested again." (at $loc .Expires)}}</p>{{end}}
 {{with .Link}}<p><a href="{{.}}" rel="noopener noreferrer">{{t "Pull request"}} <span aria-hidden="true">↗</span></a></p>{{end}}
 {{with .Evidence.Reason}}<details open><summary>{{t "What whoever proposed it said"}}</summary><div class="comment-body">{{.}}</div></details>{{end}}

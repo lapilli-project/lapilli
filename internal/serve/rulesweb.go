@@ -790,6 +790,16 @@ func (s *Server) checkingOf(r *http.Request) (checking, error) {
 	return w, nil
 }
 
+// PerfClass is the status colour of how it did (statusKinds): unknown for
+// a rule none of whose firings was judged (NoRecord), whatever Perf says,
+// as no record gives no verdict, neither ok nor bad.
+func (r ruleRow) PerfClass() string {
+	if r.NoRecord {
+		return "status-unknown"
+	}
+	return statusClass("perf", r.Perf)
+}
+
 // rowOf is a rule's line on each axis, with facts problems of fact in what
 // it says: the list's row, and the badges of its page.
 func rowOf(l ruleLine, facts int) ruleRow {

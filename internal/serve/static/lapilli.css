@@ -553,5 +553,6 @@ details.badge-legend dd { font-size: .9rem; }
 .notice:is(.status-ok, .status-warn, .status-bad, .status-info, .status-unknown) .sign { color: var(--s); }
 div.notice p, div.notice ul { margin: .3rem 0; }
 .statuses .notice { margin-top: .6rem; }
-/* Nothing left to do: the empty state's title, ok, and its edge. */
-.empty-done { border-color: var(--ok-line); }
+/* All clear, nothing to look at: the empty state's title, ok, and its
+   edge. Nothing else left to do is said in no colour. */
+.empty-clear { border-color: var(--ok-line); }

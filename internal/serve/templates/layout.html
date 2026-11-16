@@ -48,8 +48,9 @@ screen opens and the sidebar a wide one keeps, and shown one at a time. */}}
 {{define "action"}}{{if .Href}}<a class="button" href="{{.Href}}">{{t .Label}}</a>{{else}}<span class="action-off"><button type="button" disabled aria-describedby="action-why">{{t .Label}}</button> <span id="action-why" class="why">{{t .Why}}</span></span>{{end}}{{end}}
 
 {{/* An empty state: nothing judged yet (first), nothing matching
-(notfound), or nothing left to do (done). */}}
-{{define "empty"}}<div class="empty empty-{{.Kind}}">{{with .Title}}<p class="empty-title">{{if eq $.Kind "done"}}<span class="status-ok"><span aria-hidden="true">✓</span> {{t .}}</span>{{else}}{{t .}}{{end}}</p>{{end}}{{with .Text}}<p class="quiet">{{t .}}</p>{{end}}{{with .Links}}<p class="row">{{range .}}<a href="{{.Href}}">{{t .Name}}</a>{{end}}</p>{{end}}</div>{{end}}
+(notfound), or nothing left to do (done); all clear (Clear), ok, only where
+nothing stands out on the overview. */}}
+{{define "empty"}}<div class="empty empty-{{.Kind}}{{if .Clear}} empty-clear{{end}}">{{with .Title}}<p class="empty-title">{{if $.Clear}}<span class="status-ok"><span aria-hidden="true">✓</span> {{t .}}</span>{{else}}{{t .}}{{end}}</p>{{end}}{{with .Text}}<p class="quiet">{{t .}}</p>{{end}}{{with .Links}}<p class="row">{{range .}}<a href="{{.Href}}">{{t .Name}}</a>{{end}}</p>{{end}}</div>{{end}}
 
 {{define "bottom"}}
 </main>

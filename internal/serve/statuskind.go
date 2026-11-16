@@ -48,6 +48,15 @@ var statusKinds = map[string]string{
 	"outcome/unreplayed": "warn",
 }
 
+// statusSigns are each kind's sign, before a notice's sentence: what a
+// notice says, said again for the eye, never its colour alone.
+var statusSigns = map[string]string{
+	"status-ok": "✓", "status-warn": "⚠\uFE0E", "status-bad": "✕", "status-info": "↻", "status-unknown": "?",
+}
+
+// statusSign is a status class's sign.
+func statusSign(class string) string { return statusSigns[class] }
+
 // statusClass is the class that colours a state of what (perf, task,
 // proposal …): status-ok, status-warn, status-bad, status-info or
 // status-unknown.
