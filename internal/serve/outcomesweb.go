@@ -15,7 +15,8 @@ import (
 type outcomeRow struct {
 	ruleOutcome
 	Predicted, Measured, Caught, FewerText string
-	StateText, Class                       string
+	// StateText is how it came out, in words; Class, its status colour.
+	StateText, Class string
 }
 
 type kindCount struct {
@@ -191,19 +192,20 @@ func (s *Server) outcomeRow(l string, x ruleOutcome) outcomeRow {
 	if x.Kind == "added" || ((x.Kind == "changed" || x.Kind == "removed") && x.At.Sub(x.BeforeFrom) >= leastFor) {
 		row.FewerText = strconv.Itoa(x.Fewer)
 	}
+	row.Class = statusClass("outcome", x.State)
 	switch x.State {
 	case "as-predicted":
-		row.StateText, row.Class = tr(l, "as predicted"), "done"
+		row.StateText = tr(l, "as predicted")
 	case "otherwise":
 		row.StateText = tr(l, "not as predicted")
 	case "measuring":
-		row.StateText, row.Class = tr(l, "measuring, %s so far", inDays(l, x.AfterTo.Sub(x.At))), "doing"
+		row.StateText = tr(l, "measuring, %s so far", inDays(l, x.AfterTo.Sub(x.At)))
 	case "superseded":
 		row.StateText = tr(l, "changed again within the week")
 	case "no-baseline":
 		row.StateText = tr(l, "under a week before it to measure against")
 	case "added":
-		row.StateText, row.Class = tr(l, "rule written"), "open"
+		row.StateText = tr(l, "rule written")
 	case "removed":
 		row.StateText = tr(l, "rule taken away")
 	case "unreplayed":

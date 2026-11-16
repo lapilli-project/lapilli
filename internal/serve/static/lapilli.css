@@ -1,8 +1,21 @@
 /* lapilli serve. Calm surfaces: cream, as of river pebbles, a muted olive
    for what can be done, a quiet blue for what caught something, warm grey
-   for what didn't, lavender for where the noise is. Text is 4.5:1 or more
-   on every surface it sits on; the edge of a field, a link's underline and
-   the focus ring, 3:1 (a11y_test.go checks both).
+   for what didn't, lavender for where the noise is (how much, not a
+   status). Text is 4.5:1 or more on every surface it sits on; the edge of a
+   field, a link's underline and the focus ring, 3:1 (a11y_test.go checks
+   both).
+
+   A state's status is one of five kinds, each a text colour, a wash and a
+   line: --ok (fine, done; a cool green, told apart from the olive), --warn
+   (needs a person's look), --bad (failed, missed, overdue), --info (under
+   way, in effect now; the blue) and --unknown (not known: no record, not
+   judged; the dim grey, never green or red). They colour small surfaces
+   alone (a badge, a pill, a notice's left line and wash, a cell, a word,
+   a sign), never a row or a card, and always beside a word or a sign
+   (docs/design/ui.md, "Status colours"). Each text colour is 4.5:1 or more
+   on its wash, the card, the background and the panel, ink 4.5:1 on each
+   wash, and each line 3:1 on the card, the background and its wash
+   (a11y_test.go).
 
    The type is Heebo, as in Argo CD's UI: its Latin, served from here (SIL
    Open Font License 1.1, OFL-Heebo.txt); Korean falls back to the
@@ -18,12 +31,17 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 :root {
-  --ink: #292929; --dim: #6a6a65; --faint: #9e9e99;
+  --ink: #292929; --dim: #6a6a65;
   --bg: #f7f7f2; --card: #fcfcf8; --panel: #eeeee7;
   --line: #56512e1f; --line-strong: #47432a33; --line-ui: #86857d;
   --accent: #5b6f00; --on-accent: #fcfcf8; --accent-wash: #e5eacd; --accent-soft: #f2f6e1;
-  --white: #fcfcf8; --black: #292929; --bad: #a3271b; --warn: #8a5a00;
-  --tint-blue: #e6eef8; --on-blue: #24589a; --tint-lav: #ebe7f5; --on-lav: #564391; --on-green: #006300;
+  --white: #fcfcf8; --black: #292929;
+  --tint-blue: #e6eef8; --on-blue: #24589a;
+  --ok: #1b6a4c; --ok-wash: #e3f1e9; --ok-line: #3f9068;
+  --warn: #8a5a00; --warn-wash: #f8eed5; --warn-line: #ad7f22;
+  --bad: #a3271b; --bad-wash: #f8e3df; --bad-line: #c65b4f;
+  --info: var(--on-blue); --info-wash: var(--tint-blue); --info-line: #6389be;
+  --unknown: var(--dim); --unknown-wash: var(--panel); --unknown-line: var(--line-ui);
   --shadow: 0 1px 2px #2929290a, 0 6px 20px #2929290a;
   --sans: "Heebo", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Noto Sans KR", Helvetica, Arial, sans-serif;
   --mono: ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", Consolas, monospace;
@@ -31,12 +49,16 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --ink: #efeee9; --dim: #acada8; --faint: #818179;
+    --ink: #efeee9; --dim: #acada8;
     --bg: #212121; --card: #292929; --panel: #323231;
     --line: #ffffff14; --line-strong: #ffffff26; --line-ui: #80807a;
     --accent: #b2c248; --on-accent: #212121; --accent-wash: #3a4120; --accent-soft: #2e3220;
-    --white: #efeee9; --black: #5b5b57; --bad: #ef8a7e; --warn: #e6b450;
-    --tint-blue: #22303f; --on-blue: #9cc0ec; --tint-lav: #2d2940; --on-lav: #c9bdf2; --on-green: #c7d36a;
+    --white: #efeee9; --black: #5b5b57;
+    --tint-blue: #22303f; --on-blue: #9cc0ec;
+    --ok: #86d4ac; --ok-wash: #1d332a; --ok-line: #468a6a;
+    --warn: #e6b450; --warn-wash: #3a311d; --warn-line: #a07a2c;
+    --bad: #ef8a7e; --bad-wash: #3d2422; --bad-line: #ba645a;
+    --info-line: #5b7ea8;
     --shadow: 0 1px 2px #00000033;
     color-scheme: dark;
   }
@@ -127,9 +149,9 @@ h2 { font: 500 1.35rem/1.3 var(--sans); margin: 2.2rem 0 .7rem; }
 .lede { color: var(--dim); max-width: 46rem; }
 .quiet { color: var(--dim); font-size: .95rem; }
 .hint { color: var(--accent); font-size: .95rem; }
-.bad { color: var(--bad); }
-.status { max-width: 1132px; margin: .6rem auto 0; padding: .45rem 1rem; background: var(--panel); border-radius: 9999px; font-size: .95rem; color: var(--dim); }
-.status.err { color: var(--bad); }
+/* What the server is doing, or what went wrong with it, above the page:
+   each a notice. */
+.status { max-width: 1132px; margin: .6rem auto 0; font-size: .95rem; }
 .note { background: var(--accent-soft); border: 1px solid var(--line); border-radius: 12px; padding: .8rem 1rem; }
 .tag { font-size: .8rem; border: 1px solid var(--line-strong); border-radius: 9999px; padding: 0 .45rem; color: var(--dim); white-space: nowrap; }
 .tabs a { margin-left: .3rem; padding: .1rem .6rem; border-radius: 9999px; }
@@ -144,7 +166,6 @@ td.n, th.n { text-align: right; white-space: nowrap; font-variant-numeric: tabul
 td.labels { font-family: var(--mono); font-size: .875rem; overflow-wrap: anywhere; }
 tr.current td { color: var(--dim); }
 tr.noisy td:first-child a, tr.missed td:first-child a { font-weight: 600; }
-tr.missed td:last-child { color: var(--bad); }
 tr.covered, tr.dismissed, tr.confirmed { color: var(--dim); }
 pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .875rem; }
 code { font-family: var(--mono); font-size: .85em; background: var(--panel); padding: .1em .4em; border-radius: 6px; }
@@ -197,20 +218,22 @@ table.weeks td.t .d { white-space: nowrap; }
    contrast against the card: caught and nothing separate by ΔE 15 or more,
    in light and dark; nothing is warm grey on purpose, and in dark mode
    under 3:1, so every chart has a legend with icons and the table below
-   it. Status colours are the fixed, validated set, never themed, always
-   with an icon and a label. */
+   it. The incidents' fills, caught, only noisy rules and missed, are the
+   status kinds' hues as chart fills, in light and dark: 3:1 or more on the
+   card, and ΔE 8 or more apart under protanopia and deuteranopia; always
+   with an icon and a label. Better and worse are ok and bad. */
 :root {
   --viz-caught: #2a6db3; --viz-nothing: #8d897c; --viz-ui: #eb6834;
-  --viz-good: #0ca30c; --viz-warn: #fab219; --viz-bad: #d03b3b;
+  --viz-good: #17885f; --viz-warn: #ad8a0a; --viz-bad: #d43f58;
   --viz-grid: #e6e5dd; --viz-base: #c3c2b7; --viz-muted: #6a6a65;
-  --better: #006300; --worse: #b3261e;
+  --better: var(--ok); --worse: var(--bad);
   --h0: #eeede6; --h1: #d9d1f0; --h2: #bbaae6; --h3: #9682cf; --h4: #6f59b0; --h5: #4a3888;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --viz-caught: #4f8fd6; --viz-nothing: #706c62; --viz-ui: #d95926;
+    --viz-good: #2c9a6e; --viz-warn: #b98c1c; --viz-bad: #de5076;
     --viz-grid: #353533; --viz-base: #454542; --viz-muted: #acada8;
-    --better: #1fad1f; --worse: #e66767;
     --h0: #323231; --h1: #3b3360; --h2: #54468c; --h3: #7766bb; --h4: #a191dc; --h5: #d0c5f5;
   }
 }
@@ -220,8 +243,6 @@ table.weeks td.t .d { white-space: nowrap; }
 .tile-value { font: 500 2.3rem/1.2 var(--sans); letter-spacing: -.01em; overflow-wrap: anywhere; margin: .15rem 0; }
 .tile-of { font-size: .875rem; color: var(--dim); min-height: 1.2em; }
 .tile-delta { font-size: .9rem; color: var(--dim); min-height: 1.2em; }
-.tile-delta.better { color: var(--better); }
-.tile-delta.worse { color: var(--worse); }
 .tile-spark { display: block; width: 120px; height: 30px; margin-top: .4rem; }
 .tile-spark path { fill: none; stroke: var(--viz-nothing); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
 .tile-spark circle { fill: var(--viz-caught); }
@@ -247,7 +268,6 @@ tfoot th, tfoot td { border-bottom: 0; border-top: 1px solid var(--line-strong);
 .key.src-file, path.src-file, .key.edits, path.edits { background: var(--viz-caught); fill: var(--viz-caught); }
 .key.src-ui, path.src-ui { background: var(--viz-ui); fill: var(--viz-ui); }
 .key.src-impact, path.src-impact { background: var(--viz-nothing); fill: var(--viz-nothing); }
-.tile-value.bad { color: var(--bad); }
 svg.chart { display: block; width: 100%; height: auto; margin-top: .4rem; }
 svg.chart line.grid { stroke: var(--viz-grid); stroke-width: 1; }
 svg.chart line.base { stroke: var(--viz-base); stroke-width: 1; }
@@ -301,13 +321,10 @@ a.sign { display: inline-block; min-width: 24px; min-height: 24px; text-align: c
   svg.chart text.wk.alt { display: none; }
 }
 
-/* What people keep: tasks, comments, notes. Each status has its own quiet
-   tint, and its name. */
+/* What people keep: tasks, comments, notes. Each status is a pill of its
+   status kind, with its name; one dropped or to retire, struck through. */
 .pill { display: inline-block; font-size: .8rem; padding: .05rem .55rem; border-radius: 9999px; border: 1px solid transparent; background: var(--panel); color: var(--dim); white-space: nowrap; text-decoration: none; }
-.pill.open, .pill.tune { background: var(--tint-blue); color: var(--on-blue); }
-.pill.doing, .pill.decide { background: var(--tint-lav); color: var(--on-lav); }
-.pill.done, .pill.keep { background: var(--accent-soft); color: var(--on-green); border-color: var(--line); }
-.pill.dropped, .pill.retire { color: var(--dim); text-decoration: line-through; }
+.pill.dropped, .pill.retire { text-decoration: line-through; }
 form.track { display: block; margin-top: .35rem; }
 ol.actions .action-off { display: flex; margin-top: .35rem; }
 textarea { width: 100%; padding: .45rem .6rem; }
@@ -321,7 +338,6 @@ section.says dl { display: grid; grid-template-columns: max-content 1fr; gap: .3
 section.says dt { color: var(--dim); }
 section.says dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 p.row { display: flex; flex-wrap: wrap; gap: .5rem; }
-tr.current-window td { background: var(--accent-soft); }
 tr.task-done td, tr.task-dropped td { color: var(--dim); }
 
 /* The rules list: the facets beside it on a screen wide enough for both,
@@ -371,12 +387,6 @@ td.rule { min-width: 10rem; }
 td.rule bdi { overflow-wrap: anywhere; }
 .badges { display: inline; }
 .badge { display: inline-block; font-size: .8rem; line-height: 1.5; padding: 0 .5rem; margin: .1rem 0; border-radius: 9999px; border: 1px solid var(--line-strong); color: var(--dim); background: var(--card); white-space: nowrap; text-decoration: none; font-weight: 400; }
-.badge.perf-noisy { color: var(--on-lav); background: var(--tint-lav); border-color: transparent; }
-.badge.perf-ok { color: var(--on-blue); background: var(--tint-blue); border-color: transparent; }
-.badge.perf-spare { color: var(--ink); background: var(--panel); border-color: transparent; }
-.badge.perf-unrecorded { color: var(--warn); background: var(--panel); border-color: transparent; }
-.badge.trust, .badge.check { color: var(--warn); }
-.badge.prog { color: var(--accent); }
 a.badge:hover { text-decoration: underline; }
 /* Many at once: a bar over a list whose rows are picked by a checkbox,
    what it can do to them, each its own button; and what it did, once. */
@@ -439,7 +449,7 @@ ul.rule-facts { list-style: none; display: flex; flex-wrap: wrap; gap: .1rem 1.1
 ul.rule-facts .k { font-size: .9rem; }
 ul.rule-facts bdi { color: var(--ink); }
 details.checks { margin: .2rem 0 .8rem; }
-details.checks > summary { display: inline-block; color: var(--warn); border: 1px solid var(--line-strong); border-radius: 9999px; padding: 0 .6rem; font-size: .9rem; }
+details.checks > summary { display: inline-block; border: 1px solid var(--warn-line); background: var(--warn-wash); border-radius: 9999px; padding: 0 .6rem; font-size: .9rem; }
 details.checks ul { margin: .5rem 0 0; padding-left: 1.2rem; }
 details.checks li { padding: .2rem 0; }
 p.period { margin: 1rem 0 .4rem; color: var(--dim); font-size: .95rem; }
@@ -454,8 +464,6 @@ details.def > summary::-webkit-details-marker { display: none; }
 details.def .q { display: inline-block; min-width: 1.2rem; text-align: center; border: 1px solid var(--line-ui); border-radius: 9999px; font-size: .75rem; line-height: 1.2rem; margin-left: .2rem; }
 details.def p { margin: .3rem 0 .2rem; font-size: .875rem; color: var(--ink); }
 .delta { font-size: .9rem; font-weight: 400; color: var(--dim); margin-left: .3rem; white-space: nowrap; }
-.delta.better { color: var(--better); }
-.delta.worse { color: var(--worse); }
 figure.strip { margin: 0 0 1.2rem; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: .8rem .95rem; box-shadow: var(--shadow); }
 figure.strip figcaption { font-size: .95rem; color: var(--dim); margin-bottom: .4rem; }
 svg.strip { display: block; width: 100%; height: auto; }
@@ -495,16 +503,11 @@ table.diff-split td.del { color: var(--bad); }
 table.diff-split td.ins { color: var(--better); }
 table.diff-split td.gap { color: var(--dim); font-family: var(--sans); font-style: italic; }
 p.diffopts { margin: .3rem 0 .5rem; }
-/* A proposal's page: its state's badge, a sign and a word; the warning
+/* A proposal's page: its state's badge, a sign and a word; the notice
    above a backtest that misses more; what happened to it, in order. */
-.badge.st-wait { color: var(--on-lav); background: var(--tint-lav); border-color: transparent; }
-.badge.st-ok, .badge.st-doing { color: var(--on-blue); background: var(--tint-blue); border-color: transparent; }
-.badge.st-done { color: var(--on-green); background: var(--accent-soft); border-color: var(--line); }
 p.proposal-facts { color: var(--dim); margin: 0 0 .8rem; }
 div.proposal-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .4rem 0 1rem; }
 div.proposal-actions form, div.proposal-actions details { margin: 0; }
-p.warn, div.warn { color: var(--bad); background: var(--card); border: 1px solid var(--bad); border-radius: 10px; padding: .5rem .8rem; }
-div.warn p, div.warn ul { margin: .3rem 0; }
 ol.steps { margin: .3rem 0 .8rem; padding-left: 1.4rem; }
 ol.steps li { padding: .25rem 0; }
 ol.steps .t { font-variant-numeric: tabular-nums; color: var(--dim); font-size: .9rem; }
@@ -528,3 +531,25 @@ details.badge-legend dl { display: grid; grid-template-columns: max-content minm
 details.badge-legend dl > div { display: contents; }
 details.badge-legend dt, details.badge-legend dd { margin: 0; }
 details.badge-legend dd { font-size: .9rem; }
+
+/* Status colours (docs/design/ui.md): a kind is a class, status-ok,
+   status-warn, status-bad, status-info or status-unknown, which sets its
+   three colours; what it is on draws them. A word, a cell or a sign takes
+   the text colour; a badge or a pill, the text, the wash and the line as
+   its edge; a notice, a box of ink on the wash with the line down its
+   left, its sign (.sign) in the text colour. Last, so that a kind wins
+   over a component's own grey. */
+.status-ok { --s: var(--ok); --s-wash: var(--ok-wash); --s-line: var(--ok-line); }
+.status-warn { --s: var(--warn); --s-wash: var(--warn-wash); --s-line: var(--warn-line); }
+.status-bad { --s: var(--bad); --s-wash: var(--bad-wash); --s-line: var(--bad-line); }
+.status-info { --s: var(--info); --s-wash: var(--info-wash); --s-line: var(--info-line); }
+.status-unknown { --s: var(--unknown); --s-wash: var(--unknown-wash); --s-line: var(--unknown-line); }
+:is(.status-ok, .status-warn, .status-bad, .status-info, .status-unknown) { color: var(--s); }
+:is(.badge, .pill):is(.status-ok, .status-warn, .status-bad, .status-info, .status-unknown) { background: var(--s-wash); border-color: var(--s-line); }
+.notice { color: var(--ink); background: var(--card); border: 1px solid var(--line-strong); border-left: 4px solid var(--line-ui); border-radius: 10px; padding: .5rem .8rem; }
+.notice:is(.status-ok, .status-warn, .status-bad, .status-info, .status-unknown) { color: var(--ink); background: var(--s-wash); border-left-color: var(--s-line); }
+.notice:is(.status-ok, .status-warn, .status-bad, .status-info, .status-unknown) .sign { color: var(--s); }
+div.notice p, div.notice ul { margin: .3rem 0; }
+.statuses .notice { margin-top: .6rem; }
+/* Nothing left to do: the empty state's title, ok, and its edge. */
+.empty-done { border-color: var(--ok-line); }

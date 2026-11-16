@@ -495,7 +495,7 @@ func TestDeclaredRefusedEveryPath(t *testing.T) {
 	// The pages: declared, its actions off, why beside them.
 	for _, p := range []string{"/teams", "/teams?edit=" + itoa(team.ID), "/windows", "/windows/" + w, "/reports", "/reports/" + r, "/roles"} {
 		code, body := callAs(t, h, "GET", p, "boss@example.com", "", "", "")
-		if code != http.StatusOK || !strings.Contains(body, `class="badge declared"`) {
+		if code != http.StatusOK || !strings.Contains(body, `class="badge declared status-unknown"`) {
 			t.Errorf("%s: %d, no declared badge", p, code)
 		}
 		if p != "/teams" && p != "/windows" && p != "/reports" && (!strings.Contains(body, "Declared in config — change it in values") || !strings.Contains(body, " disabled ")) {

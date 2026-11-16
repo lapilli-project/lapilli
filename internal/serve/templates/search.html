@@ -1,7 +1,7 @@
 {{define "search"}}{{$title := t "Search"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
 <h1>{{$title}}</h1>
-{{if .TooLong}}<p class="bad">{{t "The search is too long: 500 characters at most."}}</p>{{end}}
-{{with .Over}}<p class="bad">{{tbdi "Left out: more than 20 words: %s." (shown (join . " "))}}</p>{{end}}
+{{if .TooLong}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{t "The search is too long: 500 characters at most."}}</p>{{end}}
+{{with .Over}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{tbdi "Left out: more than 20 words: %s." (shown (join . " "))}}</p>{{end}}
 {{if not .Q}}<p class="lede">{{t "Rules by name, incidents by id or title, and teams by name. A filter such as is:noisy or severity:critical searches the rules, on the rules page."}}</p>
 {{else if .Empty}}{{template "empty" .Empty}}
 {{else}}<p class="lede">{{tbdi "%d found for “%s”." .Total (shown .Q)}}</p>

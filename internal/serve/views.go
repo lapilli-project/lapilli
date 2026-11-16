@@ -2005,4 +2005,8 @@ var funcs = template.FuncMap{
 			V any
 		}{p, v}
 	},
+	// status is the class that colours a state (statusKinds), and
+	// stateBadge a proposal's state's badge, on any page that shows it.
+	"status":     statusClass,
+	"stateBadge": badgeOf,
 }

@@ -357,7 +357,7 @@ func TestRuleConds(t *testing.T) {
 	s, _ := a11yServer(t)
 	h := s.Handler()
 	_, body, _ := get(t, h, "/rules/Errors")
-	for _, want := range []string{`<summary><span aria-hidden="true">⚠&#xFE0E;</span> 2 to check</summary>`,
+	for _, want := range []string{`<summary class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> 2 to check</summary>`,
 		`What it says has 2 problems of fact. <a href="/rules/Errors#says">What it says</a>`,
 		`Its stones rest on that replay. <a href="/rules/Errors?tab=firings#check">The replay beside what really fired</a>`} {
 		if !strings.Contains(body, want) {
@@ -365,7 +365,7 @@ func TestRuleConds(t *testing.T) {
 		}
 	}
 	// What it says is to check with the rest, not a badge of its own.
-	if strings.Contains(body, `class="badge check"`) {
+	if strings.Contains(body, `class="badge check`) {
 		t.Error("/rules/Errors: a badge of what to check beside the list of it")
 	}
 	if _, body, _ := get(t, h, "/rules/Noise"); strings.Contains(body, `class="checks"`) {

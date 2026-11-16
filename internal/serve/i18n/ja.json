@@ -1754,5 +1754,10 @@
  "%s and renamed_from %s are two teams: take out renamed_from, or rename or delete the team called %s": "%[1]s と renamed_from %[2]s は別のチームです。renamed_from を外すか、%[3]s というチームの名前を変えるか削除してください",
  "the teams %s differ only in letter case: name the one to declare as it is named, or give its name as renamed_from": "%s のチームは大文字小文字だけが違います。宣言するチームを今の名前どおりに書くか、その名前を renamed_from に指定してください",
  "the teams %s differ only in letter case: give renamed_from as the one to rename is named": "%s のチームは大文字小文字だけが違います。renamed_from には名前を変えるチームの今の名前をそのまま書いてください",
- "renamed_from %s is a team the file declares by its name, or keeps as it was: take out renamed_from": "renamed_from %s は、ファイルが名前で宣言しているか元のまま残すチームです。renamed_from を外してください"
+ "renamed_from %s is a team the file declares by its name, or keeps as it was: take out renamed_from": "renamed_from %s は、ファイルが名前で宣言しているか元のまま残すチームです。renamed_from を外してください",
+ "active now": "実施中",
+ "overdue": "期限切れ",
+ "due %s, overdue": "期限 %s（期限切れ）",
+ "%s, better": "%s、改善",
+ "%s, worse": "%s、悪化"
 }

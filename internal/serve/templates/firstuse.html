@@ -44,7 +44,7 @@ panel: to an admin, who may approve a change, but the one it was made by or
 for and those who approved it, and, when fewer are left than it needs, why,
 and how to change it; to anyone else, that an approver approves it, or
 that no one can yet and an admin sees why. */}}
-{{define "mayapprove"}}<p id="may-approve"{{if or .In.No .Stuck}} class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{else}}>{{end}}
+{{define "mayapprove"}}<p id="may-approve"{{if or .In.No .Stuck}} class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{else}}>{{end}}
 {{- if not .Named}}{{if or .In.No .Stuck}}{{t "No one can approve this yet; an admin sees why on the Roles page."}}{{else}}{{t "Who may approve it: an approver other than the one it was made by or for."}}{{end}}
 {{- else if .In.No}}{{if eq .In.No "read-only"}}{{t "No one may approve it: lapilli serve was started with --read-only."}}{{else}}{{t "No one may approve it: without --approvers or --admins, no one approves a change."}}{{end}}
 {{- else if .NoOne}}{{if eq .In.From "admins"}}{{t "No one may approve it: only the admins approve, as --approvers isn't given, and the only admin is the one it was made by or for. Give --approvers to name who else may."}}{{else}}{{t "No one may approve it: --approvers names only the one it was made by or for. Name others in --approvers."}}{{end}}
@@ -67,16 +67,16 @@ page. Counts and kinds, never a URL. */}}
 {{define "notifycard"}}{{$p := .P}}{{with .V}}<li class="card">
   <h2><a href="{{$p.Link "/settings#notifications"}}">{{t "Notifications"}}</a></h2>
   <p>{{t "Where notices, the weekly digest and reports go, and whether they went."}}</p>
-  {{if .DigestNowhere}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "The weekly digest goes nowhere."}}</p>{{end}}
-  {{- with .Posted}}{{if .Failed}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "The weekly digest failed."}}</p>{{end}}{{end}}
-  {{- with .ReportsNowhere}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if eq . 1}}{{t "1 report goes nowhere."}}{{else}}{{t "%d reports go nowhere." .}}{{end}}</p>{{end}}
-  {{- if .Backlog}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "More than %d notices wait to be sent." .Counted}}</p>{{else}}{{with .Failed}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if eq . 1}}{{t "1 notice failed in the last day."}}{{else}}{{t "%d notices failed in the last day." .}}{{end}}</p>{{end}}{{end}}
-  {{- if .GivenUpMore}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "More than %d notices were given up on in the last day." .Counted}}</p>{{else}}{{with .GivenUp}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if eq . 1}}{{t "1 notice was given up on in the last day."}}{{else}}{{t "%d notices were given up on in the last day." .}}{{end}}</p>{{end}}{{end}}
+  {{if .DigestNowhere}}{{template "warnnotice"}}{{t "The weekly digest goes nowhere."}}</p>{{end}}
+  {{- with .Posted}}{{if .Failed}}{{template "badnotice"}}{{t "The weekly digest failed."}}</p>{{end}}{{end}}
+  {{- with .ReportsNowhere}}{{template "warnnotice"}}{{if eq . 1}}{{t "1 report goes nowhere."}}{{else}}{{t "%d reports go nowhere." .}}{{end}}</p>{{end}}
+  {{- if .Backlog}}{{template "warnnotice"}}{{t "More than %d notices wait to be sent." .Counted}}</p>{{else}}{{with .Failed}}{{template "warnnotice"}}{{if eq . 1}}{{t "1 notice failed in the last day."}}{{else}}{{t "%d notices failed in the last day." .}}{{end}}</p>{{end}}{{end}}
+  {{- if .GivenUpMore}}{{template "badnotice"}}{{t "More than %d notices were given up on in the last day." .Counted}}</p>{{else}}{{with .GivenUp}}{{template "badnotice"}}{{if eq . 1}}{{t "1 notice was given up on in the last day."}}{{else}}{{t "%d notices were given up on in the last day." .}}{{end}}</p>{{end}}{{end}}
   <p class="quiet">{{template "notifysent" .}}</p>
 </li>{{end}}{{end}}
 
 {{/* When the outbox last sent a notice. */}}
-{{define "notifysent"}}{{if not .Sends}}{{t "Nothing goes out: no webhook, Slack or place for reports is given."}}{{else if .LastSent.IsZero}}{{t "Nothing sent from the outbox yet."}}{{else}}{{t "Last sent from the outbox: %s." (at .Loc .LastSent)}}{{end}}{{end}}
+{{define "notifysent"}}{{if not .Sends}}{{t "Nothing goes out: no webhook, Slack or place for reports is given."}}{{else if .LastSent.IsZero}}{{t "Nothing sent from the outbox yet."}}{{else}}<span class="status-ok"><span aria-hidden="true">✓</span> {{t "Last sent from the outbox: %s." (at .Loc .LastSent)}}</span>{{end}}{{end}}
 
 {{/* How the weekly digest's posts to Slack went, as the ledger has it:
 the last week posted; or, where the ledger knows only the last week done
@@ -85,8 +85,13 @@ with, posted or passed over, that. */}}
 
 {{/* What is on and goes nowhere, or failed to go: a sentence each, never a
 colour alone. */}}
-{{define "notifywarn"}}{{if .DigestNowhere}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if .DigestSet}}{{t "The weekly digest is worked out %s and goes nowhere: none of the places set for it on the Reports page is there now. Pick another there." .DigestWhen}}{{else}}{{t "The weekly digest is worked out %s and goes nowhere: give lapilli serve --slack-webhook-file, --notify-webhook-file or --team-digest, or set it on the Reports page to go to a place --report-dest names." .DigestWhen}}{{end}}</p>{{end}}
-{{- with .Posted}}{{if .Failed}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "The weekly digest for the week to %s failed, at %s: the Runs page says why." (day $.Loc .FailedTo) (at $.Loc .At)}}</p>{{end}}{{end}}
-{{- with .ReportsNowhere}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if eq . 1}}{{t "1 report is on with nowhere to go: the places it names are gone."}}{{else}}{{t "%d reports are on with nowhere to go: the places they name are gone." .}}{{end}}</p>{{end}}
-{{- if .Backlog}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "More than %d notices wait to be sent, tried and failed or not tried yet: the log says why they don't go." .Counted}}</p>{{else}}{{with .Failed}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if eq . 1}}{{t "1 notice made in the last day wasn't sent: its last try failed, and the log says why."}}{{else}}{{t "%d notices made in the last day weren't sent: their last try failed, and the log says why." .}}{{end}}</p>{{end}}{{end}}
-{{- if .GivenUpMore}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "More than %d notices made in the last day were given up on, after ten tries: the log says why." .Counted}}</p>{{else}}{{with .GivenUp}}<p class="warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{if eq . 1}}{{t "1 notice made in the last day was given up on, after ten tries: the log says why."}}{{else}}{{t "%d notices made in the last day were given up on, after ten tries: the log says why." .}}{{end}}</p>{{end}}{{end}}{{end}}
+{{define "notifywarn"}}{{if .DigestNowhere}}{{template "warnnotice"}}{{if .DigestSet}}{{t "The weekly digest is worked out %s and goes nowhere: none of the places set for it on the Reports page is there now. Pick another there." .DigestWhen}}{{else}}{{t "The weekly digest is worked out %s and goes nowhere: give lapilli serve --slack-webhook-file, --notify-webhook-file or --team-digest, or set it on the Reports page to go to a place --report-dest names." .DigestWhen}}{{end}}</p>{{end}}
+{{- with .Posted}}{{if .Failed}}{{template "badnotice"}}{{t "The weekly digest for the week to %s failed, at %s: the Runs page says why." (day $.Loc .FailedTo) (at $.Loc .At)}}</p>{{end}}{{end}}
+{{- with .ReportsNowhere}}{{template "warnnotice"}}{{if eq . 1}}{{t "1 report is on with nowhere to go: the places it names are gone."}}{{else}}{{t "%d reports are on with nowhere to go: the places they name are gone." .}}{{end}}</p>{{end}}
+{{- if .Backlog}}{{template "warnnotice"}}{{t "More than %d notices wait to be sent, tried and failed or not tried yet: the log says why they don't go." .Counted}}</p>{{else}}{{with .Failed}}{{template "warnnotice"}}{{if eq . 1}}{{t "1 notice made in the last day wasn't sent: its last try failed, and the log says why."}}{{else}}{{t "%d notices made in the last day weren't sent: their last try failed, and the log says why." .}}{{end}}</p>{{end}}{{end}}
+{{- if .GivenUpMore}}{{template "badnotice"}}{{t "More than %d notices made in the last day were given up on, after ten tries: the log says why." .Counted}}</p>{{else}}{{with .GivenUp}}{{template "badnotice"}}{{if eq . 1}}{{t "1 notice made in the last day was given up on, after ten tries: the log says why."}}{{else}}{{t "%d notices made in the last day were given up on, after ten tries: the log says why." .}}{{end}}</p>{{end}}{{end}}{{end}}
+
+{{/* A notice's start: what needs a look (warn), or what failed or was
+given up on (bad), a sign and then its sentence, never a colour alone. */}}
+{{define "warnnotice"}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{end}}
+{{define "badnotice"}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{end}}

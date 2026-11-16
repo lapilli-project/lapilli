@@ -1754,5 +1754,10 @@
  "%s and renamed_from %s are two teams: take out renamed_from, or rename or delete the team called %s": "%s y renamed_from %s son dos equipos: quita renamed_from, o renombra o borra el equipo llamado %s",
  "the teams %s differ only in letter case: name the one to declare as it is named, or give its name as renamed_from": "los equipos %s solo difieren en mayúsculas: nombra el que declaras tal como se llama, o da su nombre como renamed_from",
  "the teams %s differ only in letter case: give renamed_from as the one to rename is named": "los equipos %s solo difieren en mayúsculas: da renamed_from tal como se llama el que renombras",
- "renamed_from %s is a team the file declares by its name, or keeps as it was: take out renamed_from": "renamed_from %s es un equipo que el archivo declara por su nombre, o deja como estaba: quita renamed_from"
+ "renamed_from %s is a team the file declares by its name, or keeps as it was: take out renamed_from": "renamed_from %s es un equipo que el archivo declara por su nombre, o deja como estaba: quita renamed_from",
+ "active now": "activa ahora",
+ "overdue": "vencida",
+ "due %s, overdue": "vence %s (vencida)",
+ "%s, better": "%s, mejor",
+ "%s, worse": "%s, peor"
 }

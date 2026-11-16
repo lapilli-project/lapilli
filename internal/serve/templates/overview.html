@@ -5,8 +5,8 @@
 {{else}}
 <h1>{{$title}}</h1>
 <p class="lede">{{t "Each firing gets a stone: ○ when it caught an incident, ● when nothing was wrong."}} {{t "The numbers are the week of %s, beside the week before." (day $loc .From)}}
-{{with .Run}}{{if .Error}}{{t "Last run %s, failed: %s." (at $loc .Finished) .Error}}{{else}}{{t "Last run %s." (at $loc .Finished)}}{{end}}{{end}}
-{{if .Backlog}}<strong>{{t "Catching up: firings are in up to %s." (at $loc .Cursor)}}</strong>{{end}}
+{{with .Run}}{{if .Error}}<span class="status-bad">{{t "Last run %s, failed: %s." (at $loc .Finished) .Error}}</span>{{else}}{{t "Last run %s." (at $loc .Finished)}}{{end}}{{end}}
+{{if .Backlog}}<strong class="status-info"><span aria-hidden="true">↻</span> {{t "Catching up: firings are in up to %s." (at $loc .Cursor)}}</strong>{{end}}
 {{with .Check}}<br>{{t "That week, the replay beside what really fired: %d%% alike, of %d firings." .Share .Either}}{{with .Differ}} {{t "Replayed differently:"}}{{range $i, $r := .}}{{if $i}},{{end}} <a href="{{$.Rule $r}}"><bdi>{{$r}}</bdi></a>{{end}}.{{end}}{{end}}</p>
 
 <section class="tiles" aria-label="{{t "Last week"}}">
@@ -14,7 +14,7 @@
   <div class="tile-label">{{.Label}}</div>
   <div class="tile-value">{{.Value}}</div>
   <div class="tile-of">{{or .Of " "}}</div>
-  <div class="tile-delta{{if .Better}} better{{else if .Worse}} worse{{end}}">{{or .Delta " "}}</div>
+  {{template "tiledelta" .}}
   {{if .Spark}}<svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="{{t "%s, eleven weeks: %s" .Label .Values}}"><path d="{{.Spark}}"/>{{if .Has}}<circle cx="{{.DotX}}" cy="{{.DotY}}" r="3"/>{{end}}</svg>{{end}}
   {{if .Href}}<a class="tile-more" href="{{$.Link .Href}}">{{t .More}}<span class="vh">: {{.Label}}</span> <span aria-hidden="true">→</span></a>{{end}}
 </div>{{end}}
@@ -71,8 +71,8 @@
 
 <section class="card">
   <h2>{{t "Open tasks"}}</h2>
-  {{if .Tasks}}<ul class="plain">{{range .Tasks}}<li><a href="{{$.Link (printf "/tasks/%d" .ID)}}">#{{.ID}} {{.Title}}</a> <span class="pill {{.Status}}">{{t .Status}}</span><br>
-    <span class="quiet">{{with .Assignee}}{{.}} · {{end}}{{with .Team}}{{.}} · {{end}}{{if .DueText}}<span{{if .Overdue}} class="bad"{{end}}>{{t "due %s" .DueText}}</span>{{else}}{{t "no due date"}}{{end}}</span></li>{{end}}</ul>
+  {{if .Tasks}}<ul class="plain">{{range .Tasks}}<li><a href="{{$.Link (printf "/tasks/%d" .ID)}}">#{{.ID}} {{.Title}}</a> <span class="pill {{.Status}} {{status "task" .Status}}">{{t .Status}}</span><br>
+    <span class="quiet">{{with .Assignee}}{{.}} · {{end}}{{with .Team}}{{.}} · {{end}}{{if .DueText}}{{if .Overdue}}<span class="status-bad">{{t "due %s, overdue" .DueText}}</span>{{else}}{{t "due %s" .DueText}}{{end}}{{else}}{{t "no due date"}}{{end}}</span></li>{{end}}</ul>
   <p><a href="{{$.Link "/tasks"}}">{{t "All tasks"}}</a></p>
   {{else}}<p class="quiet">{{t "None open. A suggestion under What to look at becomes one with a press."}}</p>{{end}}
 </section>
@@ -80,7 +80,7 @@
 <section class="card">
   <h2>{{t "Outcomes"}}</h2>
   {{if .OutcomesAll}}<p class="quiet">{{t "For all teams."}}</p>{{end}}
-  <ul class="plain">{{range .Outcomes}}<li{{if .Bad}} class="bad"{{end}}>{{.Text}}</li>{{end}}</ul>
+  <ul class="plain">{{range .Outcomes}}<li>{{if .Warn}}<span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{.Text}}</span>{{else}}{{.Text}}{{end}}</li>{{end}}</ul>
   <p><a href="{{$.Link "/outcomes"}}">{{t "What the changes did, and whether the record is kept up"}}</a></p>
 </section>
 </div>
@@ -103,9 +103,9 @@
 <thead><tr><th scope="col">{{t "Week of"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th><th scope="col" class="n">{{t "Precision"}}</th><th scope="col" class="n">{{t "Noisy rules"}}</th><th scope="col" class="n">{{t "Refired"}}</th>{{if .Deploys}}<th scope="col" class="n">{{t "During deploys"}}</th>{{end}}<th scope="col" class="n">{{t "Incidents"}}</th><th scope="col" class="n">{{t "✓ Caught"}}</th><th scope="col" class="n">{{t "◐ Noisy only"}}</th><th scope="col" class="n">{{t "✗ Missed"}}</th></tr></thead>
 <tbody>{{range .Weeks}}
 <tr{{if .Current}} class="current"{{end}}>
-  <td class="t"><span class="d">{{day $loc .Start}}</span>{{if .Current}} {{t "(so far)"}}{{end}}{{if .Changed}} <span class="tag" title="{{t "the rules changed this week"}}">{{t "rules changed"}}</span>{{end}}{{if .DeployMark}} <span class="tag">{{t "deploys"}}</span>{{end}}{{if .Quiet}} <span class="tag">{{t "a quiet window"}}</span>{{end}}{{if .NoRecord}} <span class="tag" title="{{t "no incident written down in it or in the two weeks before it: its firings are counted, not judged"}}">{{t "no record"}}</span>{{end}}</td>
+  <td class="t"><span class="d">{{day $loc .Start}}</span>{{if .Current}} {{t "(so far)"}}{{end}}{{if .Changed}} <span class="tag" title="{{t "the rules changed this week"}}">{{t "rules changed"}}</span>{{end}}{{if .DeployMark}} <span class="tag">{{t "deploys"}}</span>{{end}}{{if .Quiet}} <span class="tag">{{t "a quiet window"}}</span>{{end}}{{if .NoRecord}} <span class="tag status-unknown" title="{{t "no incident written down in it or in the two weeks before it: its firings are counted, not judged"}}">{{t "no record"}}</span>{{end}}</td>
   <td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Precision}}</td><td class="n">{{if .NoRecord}}–{{else}}{{.Noisy}}{{end}}</td><td class="n">{{.Refired}}</td>{{if $.View.Deploys}}<td class="n">{{.Deploys}}</td>{{end}}
-  <td class="n">{{.Incidents}}</td><td class="n">{{.Caught}}</td><td class="n">{{.NoisyOnly}}</td><td class="n{{if .Missed}} bad{{end}}">{{.Missed}}</td>
+  <td class="n">{{.Incidents}}</td><td class="n">{{.Caught}}</td><td class="n">{{.NoisyOnly}}</td><td class="n">{{if .Missed}}<span class="status-bad">{{.Missed}}</span>{{else}}{{.Missed}}{{end}}</td>
 </tr>{{end}}</tbody>
 </table></div>
 {{end}}
@@ -117,3 +117,8 @@ dot), firings during deploys (a triangle), a quiet window (a bar). */}}
 
 {{/* The marks a chart has, in its legend. */}}
 {{define "marklegend"}}{{if .Changed}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 8 8" width="8" height="8"><circle class="changed" cx="4" cy="4" r="3.5"/></svg>{{t "rules changed"}}</li>{{end}}{{if .Deploys}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 8" width="10" height="8"><path class="deploy" d="M1 1H9L5 7.5Z"/></svg>{{t "firings during deploys"}}</li>{{end}}{{if .Quiet}}<li><svg class="sym" aria-hidden="true" viewBox="0 0 12 3" width="12" height="3"><rect class="quiet" x="0" y="0" width="12" height="3"/></svg>{{t "a quiet window"}}</li>{{end}}{{end}}
+
+{{/* A headline number's change (from the week before, or then to now):
+better or worse said in words as well as colour, as a rule's page says it;
+neither, as no record leaves it, in neither. */}}
+{{define "tiledelta"}}{{if .Better}}<div class="tile-delta status-ok">{{t "%s, better" .Delta}}</div>{{else if .Worse}}<div class="tile-delta status-bad">{{t "%s, worse" .Delta}}</div>{{else}}<div class="tile-delta">{{or .Delta " "}}</div>{{end}}{{end}}

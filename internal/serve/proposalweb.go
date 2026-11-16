@@ -39,7 +39,8 @@ var stateGroups = map[string]string{
 }
 
 // stateBadge is a proposal's state as its badge shows it: Class, its
-// colour; Sign, for the eye alone; Word, where it is; Detail, the state
+// group's and its status colour (statusKinds: a closed one by why it
+// closed); Sign, for the eye alone; Word, where it is; Detail, the state
 // itself where the word doesn't say it all. Each a text to translate.
 type stateBadge struct {
 	Class, Sign, Word, Detail string
@@ -75,11 +76,22 @@ func badgeOf(state string) stateBadge {
 	default:
 		b.Class, b.Sign, b.Word = "st-closed", "⊘", "closed"
 	}
+	b.Class += " " + statusClass("proposal", state)
 	return b
 }
 
 // Badge is a proposal's badge, for the lists.
 func (l proposalLine) Badge() stateBadge { return badgeOf(l.State) }
+
+// ReasonClass is the status colour of what the move to its state said:
+// its state's, a failure's bad, but info where its state is ok, as an
+// approved change that waits while its rule fires.
+func (l proposalLine) ReasonClass() string {
+	if c := statusClass("proposal", l.State); c != "status-ok" {
+		return c
+	}
+	return "status-info"
+}
 
 // proposalHead is what a proposal changes, in words, as its page's
 // heading says it: a text to translate, and its values.

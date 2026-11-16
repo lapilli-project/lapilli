@@ -1754,5 +1754,10 @@
  "%s and renamed_from %s are two teams: take out renamed_from, or rename or delete the team called %s": "%[1]s 와 renamed_from %[2]s 는 서로 다른 팀이에요. renamed_from 을 빼거나, %[3]s 팀의 이름을 바꾸거나 삭제해 주세요",
  "the teams %s differ only in letter case: name the one to declare as it is named, or give its name as renamed_from": "%s 팀은 대소문자만 달라요. 선언할 팀의 이름을 지금 이름 그대로 쓰거나, 그 이름을 renamed_from 으로 주세요",
  "the teams %s differ only in letter case: give renamed_from as the one to rename is named": "%s 팀은 대소문자만 달라요. renamed_from 에는 이름을 바꿀 팀의 지금 이름을 그대로 써 주세요",
- "renamed_from %s is a team the file declares by its name, or keeps as it was: take out renamed_from": "renamed_from %s 는 파일이 이름으로 선언하거나 원래대로 두는 팀이에요. renamed_from 을 빼 주세요"
+ "renamed_from %s is a team the file declares by its name, or keeps as it was: take out renamed_from": "renamed_from %s 는 파일이 이름으로 선언하거나 원래대로 두는 팀이에요. renamed_from 을 빼 주세요",
+ "active now": "진행 중",
+ "overdue": "기한 지남",
+ "due %s, overdue": "기한 %s (지남)",
+ "%s, better": "%s, 좋아짐",
+ "%s, worse": "%s, 나빠짐"
 }

@@ -237,10 +237,10 @@ type dashboard struct {
 	Deploys bool
 }
 
-// outcomeLine is a line of the outcomes card, Bad when it asks for a look.
+// outcomeLine is a line of the outcomes card, Warn when it asks for a look.
 type outcomeLine struct {
 	Text string
-	Bad  bool
+	Warn bool
 }
 
 func (s *Server) overview(r *http.Request) (any, error) {
@@ -484,7 +484,7 @@ func outcomeLines(l string, out *outcomes) []outcomeLine {
 		lines = append(lines, outcomeLine{Text: tr(l, "%d of %d changes measured came out as predicted", e.AsPredicted, e.Measured)})
 	}
 	if out.Record.Quiet {
-		lines = append(lines, outcomeLine{Text: tr(l, "No incident written down in two weeks or more: are they still being written down?"), Bad: true})
+		lines = append(lines, outcomeLine{Text: tr(l, "No incident written down in two weeks or more: are they still being written down?"), Warn: true})
 	}
 	if u.Suggested > 0 {
 		lines = append(lines, outcomeLine{Text: tr(l, "%d of %d suggestions acted on", u.ActedOn, u.Suggested)})

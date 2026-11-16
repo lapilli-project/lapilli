@@ -584,7 +584,12 @@ func firstOf(a, b string) string {
 func squashed(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // Text is 4.5:1 or more on each surface it sits on, and what shows a
-// control or where the focus is, 3:1, in light and in dark.
+// control or where the focus is, 3:1, in light and in dark; and each status
+// kind (docs/design/ui.md, "Status colours"): its text on its wash, the
+// card, the background and the panel, ink on its wash (a notice's), 4.5:1;
+// its line, a badge's edge and a notice's left, 3:1 on the card, the
+// background and its wash; and the incidents chart's fills of the kinds,
+// 3:1 on the card.
 func TestContrast(t *testing.T) {
 	b, err := files.ReadFile("static/lapilli.css")
 	if err != nil {
@@ -595,19 +600,21 @@ func TestContrast(t *testing.T) {
 		"ink":       {"bg", "card", "panel", "accent-soft", "accent-wash"},
 		"dim":       {"bg", "card", "panel", "accent-soft"},
 		"accent":    {"bg", "card", "panel", "accent-soft"},
-		"bad":       {"bg", "card", "panel"},
-		"warn":      {"bg", "card", "panel"}, // a badge of what to check
 		"better":    {"card"},
 		"worse":     {"card"},
 		"viz-muted": {"card"},
 		"on-accent": {"accent"},
 		"on-blue":   {"tint-blue"},
-		"on-lav":    {"tint-lav"},
-		"on-green":  {"accent-soft"},
 	}
 	ui := map[string][]string{
-		"accent":  {"bg", "card", "panel"}, // the focus ring
-		"line-ui": {"bg", "card", "panel"}, // a field's edge, a link's underline
+		"accent":   {"bg", "card", "panel"}, // the focus ring
+		"line-ui":  {"bg", "card", "panel"}, // a field's edge, a link's underline
+		"viz-good": {"card"}, "viz-warn": {"card"}, "viz-bad": {"card"},
+	}
+	for _, k := range statusKindNames {
+		texts[k] = []string{k + "-wash", "bg", "card", "panel"}
+		texts["ink"] = append(texts["ink"], k+"-wash")
+		ui[k+"-line"] = []string{"bg", "card", k + "-wash"}
 	}
 	for mode, tokens := range map[string]map[string]string{"light": light, "dark": dark} {
 		for least, pairs := range map[float64]map[string][]string{4.5: texts, 3: ui} {
@@ -630,8 +637,13 @@ var (
 	cssTokenRe = regexp.MustCompile(`--([\w-]+):\s*([^;]+);`)
 )
 
+// statusKindNames are the status kinds, each a token of the stylesheet
+// with its -wash and -line.
+var statusKindNames = []string{"ok", "warn", "bad", "info", "unknown"}
+
 // cssTokens are the colour tokens of the stylesheet, in light and in dark,
-// dark falling back on light.
+// dark falling back on light; a token that is another, var(--x), is that
+// one's colour in the same mode.
 func cssTokens(css string) (light, dark map[string]string) {
 	light, dark = map[string]string{}, map[string]string{}
 	for _, m := range cssRootRe.FindAllStringSubmatch(css, -1) {
@@ -646,6 +658,15 @@ func cssTokens(css string) (light, dark map[string]string) {
 	for k, v := range light {
 		if _, ok := dark[k]; !ok {
 			dark[k] = v
+		}
+	}
+	for _, m := range []map[string]string{light, dark} {
+		for k := range m {
+			v := m[k]
+			for i := 0; i < 10 && strings.HasPrefix(v, "var(--") && strings.HasSuffix(v, ")"); i++ {
+				v = m[strings.TrimSuffix(strings.TrimPrefix(v, "var(--"), ")")]
+			}
+			m[k] = v
 		}
 	}
 	return light, dark

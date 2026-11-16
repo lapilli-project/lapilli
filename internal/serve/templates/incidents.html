@@ -12,7 +12,7 @@
   <td><a href="{{$.Incident .ID}}">{{.ID}}</a>{{if .Title}} {{.Title}}{{end}}</td>
   <td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td>
   <td>{{if eq .Origin "file"}}{{t "incidents file"}}{{else if eq .Origin "ui"}}{{t "written here"}}{{else if eq .Origin "copy"}}{{t "copied in"}}{{else}}{{t "found by --impact"}}{{end}}</td>
-  <td>{{if eq .Status "caught"}}○ {{.First}}{{else if eq .Status "noisy"}}◐ {{.First}}, {{t "noisy"}}{{else if eq .Status "missed"}}{{t "✗ nothing fired"}}{{else if eq .Status "covered"}}{{t "covered by one written down"}}{{else}}{{t .Status}}{{end}}{{with .Nearly}}<br><span class="quiet">{{t "nearly caught by %s" .}}</span>{{end}}{{if .NearlyMore}} <span class="quiet">{{t "and %d more" .NearlyMore}}</span>{{end}}</td>
+  <td>{{if eq .Status "caught"}}<span class="{{status "incident" .Status}}">○ {{.First}}</span>{{else if eq .Status "noisy"}}<span class="{{status "incident" .Status}}">◐ {{.First}}, {{t "noisy"}}</span>{{else if eq .Status "missed"}}<span class="{{status "incident" .Status}}">{{t "✗ nothing fired"}}</span>{{else if eq .Status "covered"}}{{t "covered by one written down"}}{{else}}{{t .Status}}{{end}}{{with .Nearly}}<br><span class="quiet">{{t "nearly caught by %s" .}}</span>{{end}}{{if .NearlyMore}} <span class="quiet">{{t "and %d more" .NearlyMore}}</span>{{end}}</td>
   <td>{{or .Lead "–"}}</td>
 </tr>{{else}}<tr><td colspan="6" class="quiet">{{t "None."}}</td></tr>{{end}}</tbody>
 </table></div>
@@ -37,7 +37,7 @@
 
 <h2>{{t "Caught by"}}</h2>
 {{if .CaughtBy}}<ul class="plain">{{range .CaughtBy}}<li><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a> {{delay .Delay}}</li>{{end}}</ul>
-{{else if .Counts}}<p class="bad">{{t "Nothing fired."}}</p>{{else}}<p class="quiet">{{if eq .Status "covered"}}{{t "It isn't judged against: an incident written down covers it."}}{{else}}{{t "It isn't judged against: %s." (t .Status)}}{{end}}</p>{{end}}
+{{else if .Counts}}<p class="{{status "incident" "missed"}}"><span aria-hidden="true">✗</span> {{t "Nothing fired."}}</p>{{else}}<p class="quiet">{{if eq .Status "covered"}}{{t "It isn't judged against: an incident written down covers it."}}{{else}}{{t "It isn't judged against: %s." (t .Status)}}{{end}}</p>{{end}}
 
 {{with .Timeline}}{{if .Rows}}<section class="card timeline" id="timeline">
 <h2>{{t "When the rules fired"}}</h2>

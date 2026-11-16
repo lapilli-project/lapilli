@@ -274,7 +274,7 @@ func TestRulesFilters(t *testing.T) {
 	// The badges: a sign for the eye, a name for everyone.
 	_, body, _ = get(t, h, "/rules?weeks=12")
 	for _, want := range []string{`<span aria-hidden="true">●</span> Noisy`, `<span aria-hidden="true">○</span> OK`, `<span aria-hidden="true">⇣</span> Recorded only`,
-		`<span class="badge pill tune"><span aria-hidden="true">±</span> tune</span>`, `href="/rules/R01?tab=proposals&amp;weeks=12#proposals"><span aria-hidden="true">✎</span> Proposed</a>`} {
+		`<span class="badge pill tune status-info"><span aria-hidden="true">±</span> tune</span>`, `href="/rules/R01?tab=proposals&amp;weeks=12#proposals"><span aria-hidden="true">✎</span> Proposed</a>`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/rules?weeks=12: no %s", want)
 		}
