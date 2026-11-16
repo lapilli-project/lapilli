@@ -626,7 +626,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			continue
 		}
 		if serve != nil && (name == "--read-only" || name == "--notify-slack" || name == "--changes" || name == "--everyone-admin" || name == "--oidc-bearer" ||
-			name == "--config-prune" || name == "--yield-on-429") {
+			name == "--config-prune" || name == "--goal-tasks" || name == "--yield-on-429") {
 			// On by itself; =false turns it off, as --check-content=false does.
 			on := true
 			if hasVal {

@@ -302,6 +302,11 @@ table.heat tbody tr:hover td { background: none; }
 table.heat th.hw { font-size: .85rem; font-weight: 400; text-align: center; min-width: 2.8rem; }
 table.heat th.hn { font-weight: 400; font-size: inherit; white-space: nowrap; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; padding-right: .6rem; }
 table.heat td.hc { height: 1.7rem; border-radius: 5px; }
+/* A goal's weeks (the Goals page): a cell a week, its sign in the week's
+   status colour, its value under it. */
+table.goals th.hw { font-size: .85rem; font-weight: 400; text-align: center; }
+table.goals td.gw { text-align: center; white-space: nowrap; font-size: .85rem; padding: .3rem .25rem; }
+table.goals td.gw .v { display: block; font-variant-numeric: tabular-nums; }
 .h0 { background: var(--h0); } .h1 { background: var(--h1); } .h2 { background: var(--h2); }
 .h3 { background: var(--h3); } .h4 { background: var(--h4); } .h5 { background: var(--h5); }
 .heat-scale { white-space: nowrap; margin-left: .4rem; }

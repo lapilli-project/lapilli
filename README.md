@@ -1557,6 +1557,27 @@ rules, a rule's page, the incidents and the overview show them, the digest
 and reports tell them, and `/api/v1/summary` gives them, in a shape that
 keeps its schema, to dashboards and other tools.
 
+A team holds its alerting to goals, declared in `--config` under `goals:`
+(docs/design/goals.md): each a bound on one of the summary's numbers, for
+everyone, a team, or each team (`team: "*"`):
+
+```yaml
+goals:
+  - {name: critical-caught, measure: critical.share_caught, at_least: 0.8}
+  - {name: none-missed, measure: incidents.missed, at_most: 0}
+  - {name: paged, team: payments, measure: critical.firings, critical: [critical, page], at_most: 40}
+```
+
+Each whole week is met, missed or not known (with why: no record, nothing
+to divide, a week the ledger holds only part of), never met for a week
+nobody wrote anything down. The Goals page shows each goal's twelve weeks;
+the overview, the digest, reports and `/api/v1/summary` (`goals`) the
+results; `/metrics` the last whole week's (`lapilli_goal_met`,
+`lapilli_goal_known`, `lapilli_goal_value`, `lapilli_goal_weeks_met`), for
+a team's own Prometheus to alert on. A goal missed is told
+(`goal.missed`), and becomes a task with one press, or by itself with
+`--goal-tasks`.
+
 The ledger is one SQLite file (`--ledger DIR`), or a Postgres database
 (`--ledger-url-file FILE`, below). It keeps each firing's stones
 and each rule's by day and by week, so reading twelve weeks costs what

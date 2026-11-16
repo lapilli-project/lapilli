@@ -110,6 +110,12 @@ spec:
             {{- end }}
             - --config-prune
             {{- end }}
+            {{- if $s.goalTasks }}
+            {{- if not $s.config }}
+            {{- fail "serve.goalTasks makes tasks for the goals serve.config declares: give serve.config" }}
+            {{- end }}
+            - --goal-tasks
+            {{- end }}
             {{- with $s.proposalsExpire }}
             - {{ printf "--proposals-expire=%s" . | quote }}
             {{- end }}

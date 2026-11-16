@@ -581,13 +581,24 @@ it, which only `lapilli serve` says.
 | `lapilli_serve_deploys_last_timestamp_seconds` | |
 | `lapilli_serve_deploys_read_timestamp_seconds` | |
 | `lapilli_serve_incidents_passed_over` | |
+| `lapilli_goal_met` | `goal`, [`team`] |
+| `lapilli_goal_known` | `goal`, [`team`] |
+| `lapilli_goal_value` | `goal`, [`team`] |
+| `lapilli_goal_weeks_met` | `goal`, [`team`] |
 
 The first eleven are `--metrics`' too. The next two are `--metrics`'
 alone, with named impact signals, which only `lapilli verdict` reads for
 now: each signal's windows by state, and from when it keeps the record
 (none for a signal that doesn't, or whose data a selector has none of);
 `TestVerdictMetricsStable` holds them. The rest are `lapilli serve`'s
-alone. `lapilli_rule_incidents_first` and `lapilli_rule_incidents_alone`
+alone. The goals' four (docs/design/goals.md) are of the last whole week,
+from Monday in `--tz`, for each goal `--config` declares: everyone's
+without `team`, a team's with it, as the leader worked them out after its
+last round; `lapilli_goal_met` and `lapilli_goal_value` have no series for
+a week not known (`lapilli_goal_known` 0), and `lapilli_goal_weeks_met`
+counts of the twelve whole weeks before this one, as
+`lapilli_weeks_counted` does. 500 series of each at most, the goals missed
+first. `lapilli_rule_incidents_first` and `lapilli_rule_incidents_alone`
 are left out of a report of some of the rules (`--rule`), as what a rule
 adds to the others can't be said there.
 

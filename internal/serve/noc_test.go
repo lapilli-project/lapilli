@@ -315,6 +315,15 @@ func TestSummaryAPI(t *testing.T) {
 			t.Errorf("no %s", field)
 		}
 	}
+	// With goals declared, each row's goals, by name: the schema they keep.
+	declare(t, s, "goals:\n  - {name: few, measure: firings, at_most: 0}\n  - {name: precise, measure: precision, at_least: 0.5}\n"+
+		"  - {name: none-missed, team: \"*\", measure: incidents.missed, at_most: 0}\n  - {name: paged, team: search, measure: critical.firings, critical: [critical, page], at_most: 40}\n")
+	_, goals, _ := get(t, s.Handler(), "/api/v1/summary?from=2026-10-26&to=2026-11-02&team=*")
+	for _, field := range []string{`"goals"`, `"name"`, `"measure"`, `"at_least"`, `"at_most"`, `"value"`, `"result"`, `"why"`, `"over"`, `"page"`} {
+		if !strings.Contains(goals, field) {
+			t.Errorf("no %s in the summary's goals", field)
+		}
+	}
 	// Refused: an unknown team, a span too long, to before from, a bad day.
 	for _, q := range []string{"team=nobody", "from=2025-01-01&to=2026-11-02", "from=2026-11-02&to=2026-10-26", "from=yesterday"} {
 		if code, _, _ := get(t, h, "/api/v1/summary?"+q); code != 400 {

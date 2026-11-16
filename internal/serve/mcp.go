@@ -160,7 +160,7 @@ func (s *Server) mcpServer(edit, propose bool) *mcp.Server {
 		Description: `What Lapilli itself came to. Each reviewed change to the rules beside what came of it: firings predicted, firings measured before and after, fewer firings since, and whether it came out as predicted. The weeks before lapilli serve began beside the latest. Whether incidents are still being written down, and whether people use it. Use it after a change is merged to check it did what was predicted.`},
 		guarded(s.toolOutcomes))
 	mcp.AddTool(srv, &mcp.Tool{Name: "summary", Title: "Week by week, for an operations team", Annotations: reads,
-		Description: `What an operations team measures its alerts by, a row for each week (from Monday, in lapilli serve's time zone) and for everyone or a team: firings and precision; critical firings and the share that caught something; by severity; firings that re-fired (started within --refire of the same alert's last resolving), the rules they were of and the alert that re-fired most; firings off hours and while people slept, and those of them that caught nothing; firings during deploys, those of them that caught something, and precision without them; incidents written down and impact windows found by --impact, caught, caught only by noisy rules, or missed, and the median lead of the first alert of a rule that isn't noisy (positive: before the incident's start). The same as GET /api/v1/summary, whose schema it keeps.`},
+		Description: `What an operations team measures its alerts by, a row for each week (from Monday, in lapilli serve's time zone) and for everyone or a team: firings and precision; critical firings and the share that caught something; by severity; firings that re-fired (started within --refire of the same alert's last resolving), the rules they were of and the alert that re-fired most; firings off hours and while people slept, and those of them that caught nothing; firings during deploys, those of them that caught something, and precision without them; incidents written down and impact windows found by --impact, caught, caught only by noisy rules, or missed, and the median lead of the first alert of a rule that isn't noisy (positive: before the incident's start); and, of the goals --config declares, the row's team's, each met, missed, not known (with why) or open, with its value. The same as GET /api/v1/summary, whose schema it keeps.`},
 		guarded(s.toolSummary))
 	if edit {
 		mcp.AddTool(srv, &mcp.Tool{Name: "compare", Title: "Replay a proposed change to the rules", Annotations: reads,
@@ -286,6 +286,9 @@ type overviewOut struct {
 	LookAt    []lookAtOut `json:"look_at" jsonschema:"what to look at first, the most telling first"`
 	OpenTasks []taskOut   `json:"open_tasks" jsonschema:"the latest changed, six at most"`
 	Outcomes  []string    `json:"outcomes" jsonschema:"what Lapilli's changes came to, in short; see outcomes"`
+	// Goals is the Goals card: the last whole week's goals of the team, or
+	// everyone's; left out with none declared of them.
+	Goals *goalsCardOut `json:"goals,omitempty" jsonschema:"the last whole week's goals, as --config declares them: how many met, and each missed"`
 }
 
 func (s *Server) toolOverview(ctx context.Context, _ *mcp.CallToolRequest, in overviewIn) (*mcp.CallToolResult, overviewOut, error) {
@@ -319,6 +322,9 @@ func (s *Server) toolOverview(ctx context.Context, _ *mcp.CallToolRequest, in ov
 	out.OpenTasks = taskOuts(d.Tasks)
 	for _, o := range d.Outcomes {
 		out.Outcomes = append(out.Outcomes, o.Text)
+	}
+	if g := d.Goals; g != nil {
+		out.Goals = &goalsCardOut{Week: g.Week, Met: g.Met, Of: g.Of, Unknown: g.Unknown, Missed: orNoneOf(g.Missed)}
 	}
 	return nil, out, nil
 }

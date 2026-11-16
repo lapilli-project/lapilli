@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -283,4 +284,111 @@ func TestPagesScale(t *testing.T) {
 			t.Errorf("%s: %d in %s, over %s", path, w.Code, took, budget)
 		}
 	}
+	goalsScale(t, s, h)
+}
+
+// goalsScale holds the goals (docs/design/goals.md) of TestPagesScale's
+// ledger by the summary's rows each reads and the heap each takes, the
+// least of three runs: a team's Goals page, its thirteen weeks for the
+// team and everyone; the overview's card, the last whole week; and the
+// leader's work after a run, thirteen weeks for everyone and every team,
+// of a goal of each team's.
+func goalsScale(t *testing.T, s *Server, h http.Handler) {
+	ctx := context.Background()
+	declare(t, s, "goals:\n  - {name: precise, measure: precision, at_least: 0.5}\n  - {name: team3-paged, team: team3, measure: critical.firings, critical: [page], at_most: 40}\n"+
+		"  - {name: no-refire, team: \"*\", measure: refired.firings, at_most: 0}\n")
+	teams, err := s.l.Teams(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	team3 := teamOf(t, s, "team3")
+	afresh := func() {
+		s.cache.Lock()
+		s.cache.gen = ""
+		s.cache.Unlock()
+		s.goalRows.Lock()
+		s.goalRows.by = nil
+		s.goalRows.Unlock()
+		s.goalsK.Lock()
+		s.goalsK.key = ""
+		s.goalsK.Unlock()
+	}
+	for _, c := range []struct {
+		name string
+		rows int
+		most uint64
+		run  func() error
+	}{
+		{"/goals?team=team3", 13 * 2, 32 << 20, func() error {
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/goals?team=team3", nil))
+			if w.Code != 200 {
+				return fmt.Errorf("%d", w.Code)
+			}
+			return nil
+		}},
+		{"the overview's Goals card", 1, 8 << 20, func() error {
+			_, _, err := s.goalsOverview(ctx, "en", &team3)
+			return err
+		}},
+		{"the leader's work after a run", 13 * (1 + len(teams)), 48 << 20, func() error { return s.goalsAfter(ctx) }},
+	} {
+		rows := 0
+		summaryRowSeen = func() { rows++ }
+		var err error
+		peak := leastPeak(func() {
+			afresh()
+			rows = 0
+			err = c.run()
+		})
+		summaryRowSeen = nil
+		t.Logf("%-32s %4d rows, heap +%d MiB (the least of three runs)", c.name, rows, peak>>20)
+		if err != nil || rows != c.rows || peak > c.most {
+			t.Errorf("%s: %d rows, want %d; heap +%d MiB, most %d; %v", c.name, rows, c.rows, peak>>20, c.most>>20, err)
+		}
+	}
+}
+
+// heapAfterGC is the live heap.
+func heapAfterGC() uint64 {
+	runtime.GC()
+	runtime.GC()
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return m.HeapAlloc
+}
+
+// leastPeak runs f three times and gives the least the heap rose above the
+// live heap while it ran, as internal/prom's tests take it (#99): a
+// sampled peak counts garbage the collector hasn't reached yet too.
+func leastPeak(f func()) uint64 {
+	least := ^uint64(0)
+	for range 3 {
+		before := heapAfterGC()
+		least = min(least, max(peakDuring(f), before)-before)
+	}
+	return least
+}
+
+// peakDuring samples the heap every millisecond while f runs.
+func peakDuring(f func()) (peak uint64) {
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var m runtime.MemStats
+		for {
+			runtime.ReadMemStats(&m)
+			peak = max(peak, m.HeapAlloc)
+			select {
+			case <-stop:
+				return
+			case <-time.After(time.Millisecond):
+			}
+		}
+	}()
+	f()
+	close(stop)
+	<-done
+	return peak
 }

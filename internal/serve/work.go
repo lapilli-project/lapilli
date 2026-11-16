@@ -251,6 +251,14 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	if !s.still(ctx) {
 		return
 	}
+	// The goals, once the round has written what it does: the last whole
+	// week, what is told of it and the tasks it makes (docs/design/goals.md).
+	if err := s.goalsAfter(ctx); err != nil {
+		s.fail("working the goals out", err)
+	}
+	if !s.still(ctx) {
+		return
+	}
 	if err := s.prune(ctx); err != nil {
 		s.fail("pruning", err)
 	}
@@ -2007,6 +2015,11 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	if err != nil {
 		return "", err
 	}
+	// The week's goals, of whom the digest is for (docs/design/goals.md).
+	goals, _, err := s.goalsLine(ctx, from, team)
+	if err != nil {
+		return "", err
+	}
 	// Of a team's, the rules of others that fired mostly on what it owns.
 	var onLine string
 	if team != nil {
@@ -2041,7 +2054,7 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	head, rest, _ := strings.Cut(report.String(), "\n\n")
 	var b strings.Builder
 	b.WriteString(head + "\n")
-	for _, x := range []string{onLine, rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
+	for _, x := range []string{goals, onLine, rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
 		if x != "" {
 			b.WriteString("\n" + x + "\n")
 		}
@@ -2215,6 +2228,9 @@ func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh
 			if err := s.aboutMore(ctx, about, rep, from, to, true); err != nil {
 				return err
 			}
+			if err := s.aboutGoals(ctx, about, from, nil); err != nil {
+				return err
+			}
 			told = append(told, ledger.Told{Dest: "webhook", About: about})
 		}
 		for _, name := range named {
@@ -2243,6 +2259,9 @@ func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh
 		}
 		about := digestAbout(part, text, t.Name, mine)
 		if err := s.aboutMore(ctx, about, part, from, to, false); err != nil {
+			return err
+		}
+		if err := s.aboutGoals(ctx, about, from, &t); err != nil {
 			return err
 		}
 		if webhook {

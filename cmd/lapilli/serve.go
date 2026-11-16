@@ -263,7 +263,14 @@ The web UI and API:
                       (docs/design/serveops.md)
   --config-prune      delete what --config no longer declares, once the file
                       is read the same twice in a row, but a team something
-                      the UI made names; without it, that is the UI's again
+                      the UI made names; without it, that is the UI's again.
+                      A goal (goals:) the file no longer declares is deleted
+                      either way
+  --goal-tasks        make a task, of kind decide, for each goal --config
+                      declares that a whole week missed, 20 a run at most;
+                      one open for a goal and team is commented on as weeks
+                      are missed again, met, or no longer missed
+                      (docs/design/goals.md). Off unless turned on
   --team-labels LIST  the labels whose values the Teams page suggests as
                       teams, when the rules carry values no team owns by,
                       comma-separated (default team,owner,squad)
@@ -808,6 +815,8 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 			cfg.Config = val
 		case "--config-prune":
 			cfg.ConfigPrune = val == "true"
+		case "--goal-tasks":
+			cfg.GoalTasks = val == "true"
 		case "--proposals-expire":
 			// 0, 0s or 0d: off.
 			if d, perr := serve.ParseDuration(val); perr == nil && d == 0 {
@@ -1086,6 +1095,8 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 		err = fmt.Errorf("--mcp-compare needs --editors or --admins: without roles, whoever may change anything is an admin, and anyone who reaches /mcp could run PromQL with lapilli's access")
 	case cfg.ConfigPrune && cfg.Config == "":
 		err = fmt.Errorf("--config-prune deletes what --config no longer declares: give --config")
+	case cfg.GoalTasks && cfg.Config == "":
+		err = fmt.Errorf("--goal-tasks makes tasks for the goals --config declares: give --config")
 	case cfg.Config != "" && cfg.ReadOnly:
 		err = fmt.Errorf("--config is kept in the ledger, and --read-only refuses writes")
 	case cfg.ProposalsExpire > 0 && cfg.ReadOnly:

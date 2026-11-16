@@ -93,11 +93,38 @@ type yGrant struct {
 	Team  string `yaml:"team,omitempty"`
 }
 
+type yGoal struct {
+	Name        string   `yaml:"name"`
+	Team        string   `yaml:"team,omitempty"`
+	Measure     string   `yaml:"measure"`
+	AtLeast     yNumber  `yaml:"at_least,omitempty"`
+	AtMost      yNumber  `yaml:"at_most,omitempty"`
+	NoWorseThan string   `yaml:"no_worse_than,omitempty"`
+	By          yNumber  `yaml:"by,omitempty"`
+	Critical    []string `yaml:"critical,flow,omitempty"`
+	Each        string   `yaml:"each,omitempty"`
+}
+
+// yNumber is a goal's number as the file wrote it, written back as a
+// number.
+type yNumber string
+
+func (n yNumber) IsZero() bool { return n == "" }
+
+func (n yNumber) MarshalYAML() (any, error) {
+	tag := "!!int"
+	if strings.ContainsAny(string(n), ".eE") {
+		tag = "!!float"
+	}
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: string(n)}, nil
+}
+
 type yConfig struct {
 	Teams   []yTeam   `yaml:"teams,omitempty"`
 	Windows []yWindow `yaml:"windows,omitempty"`
 	Reports []yReport `yaml:"reports,omitempty"`
 	Grants  []yGrant  `yaml:"grants,omitempty"`
+	Goals   []yGoal   `yaml:"goals,omitempty"`
 }
 
 // exportConfig is what the ledger holds that --config can declare, as a
@@ -167,9 +194,28 @@ func exportConfig(d ledger.Declaring, loc *time.Location) []byte {
 		}
 		c.Grants = append(c.Grants, y)
 	}
+	for _, g := range d.Goals {
+		team, ok := teamOf(g.TeamID)
+		if g.EveryTeam {
+			team, ok = "*", true
+		}
+		if !ok {
+			left = append(left, "goal "+commented(g.Name))
+			continue
+		}
+		y := yGoal{Name: g.Name, Team: team, Measure: g.Measure, AtLeast: yNumber(g.AtLeast), AtMost: yNumber(g.AtMost),
+			NoWorseThan: g.NoWorseThan, By: yNumber(g.By), Critical: g.Critical}
+		if g.Each != "week" {
+			y.Each = g.Each
+		}
+		c.Goals = append(c.Goals, y)
+	}
 	var b bytes.Buffer
 	b.WriteString("# The teams, quiet windows, reports and roles lapilli serve's ledger holds,\n")
 	b.WriteString("# declared in --config and made in the UI alike, as --config takes them.\n")
+	if len(d.Goals) > 0 {
+		b.WriteString("# The goals, which only --config declares.\n")
+	}
 	b.WriteString("# In the Helm chart, put them under serve.config in values.yaml: what\n")
 	b.WriteString("# they declare can then be changed only there.\n")
 	if len(left) > 0 {

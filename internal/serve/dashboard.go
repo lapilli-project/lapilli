@@ -189,10 +189,13 @@ type heatRow struct {
 }
 
 // action is something to look at, and the task it would make, or the
-// one open about it.
+// one open about it. A goal missed (Goal) makes its task through its own
+// form, of its team (GoalTeam, GoalTeamID) and the week of Monday Week.
 type action struct {
 	Text, Detail, Href          string
 	Kind, Rule, Incident, Title string
+	Goal, GoalTeam, Week        string
+	GoalTeamID                  int64
 	Task                        int64
 	// May says the reader may make the task; else Why is why, WhyOf the
 	// team it names, and WhyID the id of the sentence that says it, said
@@ -232,7 +235,10 @@ type dashboard struct {
 	Tasks       []taskLine // open, the latest changed first
 	Outcomes    []outcomeLine
 	OutcomesAll bool // a team is picked, and the outcomes are everyone's
-	ReadOnly    bool
+	// Goals is the last whole week's goals, for the team in effect, or
+	// everyone's; nil with none declared of them.
+	Goals    *goalsCard
+	ReadOnly bool
 	// Deploys says the ledger keeps deploys.
 	Deploys bool
 }
@@ -457,6 +463,16 @@ func (s *Server) overview(r *http.Request) (any, error) {
 				break
 			}
 		}
+	}
+	// The goals missed last week first: what the team holds its alerts to.
+	card, goalActions, err := s.goalsOverview(ctx, l, team)
+	if err != nil {
+		return nil, err
+	}
+	v.Goals = card
+	if len(goalActions) > 0 {
+		v.Actions = append(goalActions, v.Actions...)
+		v.Actions = v.Actions[:min(len(v.Actions), actionsShown)]
 	}
 	s.mayTask(r, o, v.Actions)
 	if len(v.Tasks) > 6 {
@@ -977,12 +993,15 @@ func (s *Server) mayTask(r *http.Request, o *owners, as []action) {
 		if a.Kind == "" || a.Task != 0 {
 			continue
 		}
-		team := o.rule[a.Rule]
+		team, of := o.rule[a.Rule], a.Rule != ""
+		if a.Goal != "" {
+			team, of = a.GoalTeamID, true
+		}
 		switch {
-		case role >= editor, len(teams) > 0 && a.Rule != "" && team > 0 && slices.Contains(teams, team):
+		case role >= editor, len(teams) > 0 && of && team > 0 && slices.Contains(teams, team):
 			a.May = true
 			continue
-		case len(teams) > 0 && a.Rule != "" && team > 0:
+		case len(teams) > 0 && of && team > 0:
 			a.Why, a.WhyOf = "Only %s's editors", o.byID[team].Name
 		case len(teams) > 0:
 			a.Why = "Editors only"

@@ -44,6 +44,10 @@ func (s *Server) lead(ctx context.Context, failed chan<- error) {
 			s.log.Error("reading the on-call turns kept", "err", err)
 		}
 	}
+	// What is kept of the goals: another replica may have led since this
+	// one last did. Let go again as the term ends.
+	s.goalsTerm(ctx, false)
+	defer s.goalsTerm(ctx, true)
 	// --config read before anything else, whatever an earlier term kept the
 	// ledger to: kept to at the next read, once it is read the same twice
 	// in a row (reconcileConfig), and then as the file changes.
@@ -218,6 +222,9 @@ type sharedStatus struct {
 	Config *configShown `json:"config,omitempty"`
 	// Sources is what the leader saw of where incidents come from.
 	Sources *sourcesSeen `json:"sources,omitempty"`
+	// Goals is what the leader worked out of the goals after its last
+	// round (docs/design/goals.md), in brief: the rest is in the ledger.
+	Goals *goalsBrief `json:"goals,omitempty"`
 }
 
 // ownStatus is this replica's status, as it would say it.
@@ -238,6 +245,7 @@ func (s *Server) ownStatus() sharedStatus {
 	}
 	st.Config = s.configShown()
 	st.Sources = s.sourcesNow()
+	st.Goals = s.goalsBriefNow()
 	return st
 }
 

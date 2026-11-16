@@ -30,7 +30,7 @@ var ErrDeclared = errors.New("declared in config — change it in values")
 
 // ErrNamedByDeclared is a team deleted or renamed that something --config
 // declares names: the file would name a team that isn't there.
-var ErrNamedByDeclared = errors.New("a quiet window, a report or a role declared in config names this team: change them in values first")
+var ErrNamedByDeclared = errors.New("a quiet window, a report, a role or a goal declared in config names this team: change them in values first")
 
 // isDeclared refuses, in a write, a change to a row of table that --config
 // declares. A row that isn't there is the caller's to say.
@@ -98,6 +98,9 @@ type Declared struct {
 	Windows []DeclaredWindow
 	Reports []DeclaredReport
 	Grants  []DeclaredGrant
+	// Goals are its goals (docs/design/goals.md), which only a file
+	// declares: one it no longer declares is deleted.
+	Goals []DeclaredGoal
 }
 
 // Kinds of what --config declares, as a DeclaredError names them.
@@ -234,6 +237,8 @@ func (l *Ledger) Reconcile(ctx context.Context, d Declared, left Leave, o verdic
 		return Reconciled{}, nil, invalid("a config declares %d reports at most", MaxScheduled)
 	case len(d.Grants) > MaxGrants:
 		return Reconciled{}, nil, invalid("a config declares %d roles at most", MaxGrants)
+	case len(d.Goals) > MaxGoals:
+		return Reconciled{}, nil, invalid("a config declares %d goals at most", MaxGoals)
 	}
 	// The checks of each that don't read the ledger, before the write.
 	d.Teams, d.Windows = slices.Clone(d.Teams), slices.Clone(d.Windows)
@@ -271,6 +276,9 @@ func (l *Ledger) Reconcile(ctx context.Context, d Declared, left Leave, o verdic
 			return err
 		}
 		if err := l.declareGrants(t, d.Grants, team, left, &r, skip); err != nil {
+			return err
+		}
+		if err := l.declareGoals(t, d.Goals, team, &r, skip); err != nil {
 			return err
 		}
 		// The teams last: what names one the file no longer does is known.
@@ -598,19 +606,23 @@ func (l *Ledger) leaveTeams(t *txn, leftover []DeclaredTeam, left Leave, r *Reco
 			r.Undeclared++
 			continue
 		}
-		var windows, reports, roles, tasks, notes int
+		var windows, reports, roles, tasks, notes, goals int
 		if err := t.QueryRowContext(t.ctx, `SELECT (SELECT count(*) FROM windows WHERE team_id = ?), (SELECT count(*) FROM reports WHERE team_id = ?),
-			(SELECT count(*) FROM grants WHERE team_id = ?), (SELECT count(*) FROM tasks WHERE team_id = ?), (SELECT count(*) FROM notes WHERE team_id = ?)`,
-			x.ID, x.ID, x.ID, x.ID, x.ID).Scan(&windows, &reports, &roles, &tasks, &notes); err != nil {
+			(SELECT count(*) FROM grants WHERE team_id = ?), (SELECT count(*) FROM tasks WHERE team_id = ?), (SELECT count(*) FROM notes WHERE team_id = ?),
+			(SELECT count(*) FROM goals WHERE team_id = ? AND every_team = 0)`,
+			x.ID, x.ID, x.ID, x.ID, x.ID, x.ID).Scan(&windows, &reports, &roles, &tasks, &notes, &goals); err != nil {
 			return err
 		}
-		named := windows+reports+roles+tasks+notes > 0
+		named := windows+reports+roles+tasks+notes+goals > 0
 		switch {
 		case named && ui >= MaxTeams && !x.GivenBack:
 			skip(KindTeam, 0, x.Name, invalid("kept declared, though the file no longer names it: the UI keeps %d teams at most, and what it owns names it", MaxTeams))
 			r.Kept++
 		case named:
 			counts := map[string]int{"quiet windows": windows, "reports": reports, "roles": roles, "tasks": tasks, "notes": notes}
+			if goals > 0 {
+				counts["goals"] = goals
+			}
 			if err := setDeclared(t, "teams", x.ID, false, "team "+x.Name+" no longer declared in config, and not deleted: what it owns names it, so it is the UI's to change", counts); err != nil {
 				return err
 			}
@@ -1188,12 +1200,13 @@ func (l *Ledger) declareGrants(t *txn, want []DeclaredGrant, team resolver, left
 
 // Declaring is what the ledger holds that --config can declare, as an
 // export of it gives it (GET /config.yaml): every team, quiet window,
-// report and role, declared or made in the UI.
+// report and role, declared or made in the UI, and every goal.
 type Declaring struct {
 	Teams   []Team
 	Windows []Window
 	Reports []Scheduled
 	Grants  []Grant
+	Goals   []Goal
 }
 
 // AllDeclarable is every team, quiet window (the earliest made first),
@@ -1227,7 +1240,10 @@ func (l *Ledger) AllDeclarable(ctx context.Context) (Declaring, error) {
 	if err := rows.Err(); err != nil {
 		return d, err
 	}
-	d.Grants, err = grants(ctx, tx)
+	if d.Grants, err = grants(ctx, tx); err != nil {
+		return d, err
+	}
+	d.Goals, err = goals(ctx, tx)
 	return d, err
 }
 

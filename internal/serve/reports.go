@@ -307,6 +307,8 @@ func (s *Server) buildReport(ctx context.Context, r ledger.Scheduled, team *ledg
 		switch sec {
 		case "summary":
 			line, nums, err = s.summarySection(rep, before)
+		case "goals":
+			line, nums, err = s.goalsSection(ctx, from, to, team, loc)
 		case "noise":
 			line, nums, err = s.noiseSection(rep, from, to, loc, of, before)
 		case "missed":

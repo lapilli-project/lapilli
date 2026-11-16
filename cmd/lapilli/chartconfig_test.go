@@ -14,15 +14,16 @@ import (
 
 // serve.config is rendered into a ConfigMap, mounted as a directory (the
 // kubelet updates it in place) and passed as --config, which takes what it
-// holds; serve.configPrune and serve.proposalsExpire are their flags. Left
-// out, nothing of them is rendered, and two renders are byte for byte the
-// same; serve.configPrune without serve.config is refused.
+// holds; serve.configPrune, serve.goalTasks and serve.proposalsExpire are
+// their flags. Left out, nothing of them is rendered, and two renders are
+// byte for byte the same; serve.configPrune or serve.goalTasks without
+// serve.config is refused.
 func TestChartConfig(t *testing.T) {
 	plain, err := helmTemplate(t, serveValues...)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, plain)
 	}
-	for _, not := range []string{"--config", "--proposals-expire", "-config\n", "/etc/lapilli/config"} {
+	for _, not := range []string{"--config", "--proposals-expire", "--goal-tasks", "-config\n", "/etc/lapilli/config"} {
 		if strings.Contains(plain, not) {
 			t.Errorf("by default, %q is rendered", not)
 		}
@@ -30,6 +31,7 @@ func TestChartConfig(t *testing.T) {
 	values := filepath.Join(t.TempDir(), "values.yaml")
 	os.WriteFile(values, []byte(`serve:
   configPrune: true
+  goalTasks: true
   proposalsExpire: 30d
   config:
     teams:
@@ -42,6 +44,9 @@ func TestChartConfig(t *testing.T) {
     grants:
       - {group: payments-oncall, team: payments}
       - {user: ana@example.com}
+    goals:
+      - {name: critical-caught, measure: critical.share_caught, at_least: 0.8}
+      - {name: no-refire, team: "*", measure: refired.firings, at_most: 0}
 `), 0o644)
 	args := append(append([]string{}, serveValues...), "-f", values)
 	out, err := helmTemplate(t, args...)
@@ -55,7 +60,7 @@ func TestChartConfig(t *testing.T) {
 	if strings.Contains(out, "warning") {
 		t.Errorf("a warning, given as a mapping:\n%s", out)
 	}
-	for _, want := range []string{"- --config=/etc/lapilli/config/config.yaml", "- --config-prune", `- "--proposals-expire=30d"`,
+	for _, want := range []string{"- --config=/etc/lapilli/config/config.yaml", "- --config-prune", "- --goal-tasks", `- "--proposals-expire=30d"`,
 		"mountPath: /etc/lapilli/config", "name: ops-lapilli-config"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("no %q in:\n%s", want, out)
@@ -83,12 +88,17 @@ func TestChartConfig(t *testing.T) {
 	// repeat_on, not on: Helm reads values as YAML 1.1, where a key on,
 	// unquoted, is true.
 	if len(d.Teams) != 1 || d.Teams[0].SleepHours != "23:00-07:00" || len(d.Windows) != 2 || d.Windows[0].Until.IsZero() || d.Windows[1].On != "first sat" ||
-		len(d.Reports) != 1 || d.Reports[0].Enabled || len(d.Grants) != 2 {
+		len(d.Reports) != 1 || d.Reports[0].Enabled || len(d.Grants) != 2 ||
+		len(d.Goals) != 2 || d.Goals[0].AtLeast != "0.8" || d.Goals[1].Team != "*" || d.Goals[1].AtMost != "0" {
 		t.Errorf("the rendered file reads as %+v\n%s", d, file)
 	}
 	if out, err := helmTemplate(t, append(append([]string{}, serveValues...), "--set", "serve.configPrune=true")...); err == nil ||
 		!strings.Contains(out, "serve.configPrune deletes what serve.config no longer declares") {
 		t.Errorf("serve.configPrune alone: %v\n%s", err, out)
+	}
+	if out, err := helmTemplate(t, append(append([]string{}, serveValues...), "--set", "serve.goalTasks=true")...); err == nil ||
+		!strings.Contains(out, "serve.goalTasks makes tasks for the goals serve.config declares") {
+		t.Errorf("serve.goalTasks alone: %v\n%s", err, out)
 	}
 	for _, set := range []string{"serve.proposalsExpire=30d", "serve.config=teams: []"} {
 		if out, err := helmTemplate(t, append(append([]string{}, serveValues...), "--set", "serve.readOnly=true", "--set", set)...); err == nil ||
