@@ -54,6 +54,27 @@ func heapAfterGC() uint64 {
 	return m.HeapAlloc
 }
 
+// leastPeak runs f three times and gives the least the heap rose above
+// the live heap while it ran. A sampled peak also counts garbage the
+// collector hasn't reached yet, and that only adds: on a busy CI runner one
+// run in a few read four to eight times what the next did, the same code
+// both times. The least of three is what f itself holds at once, as nearly
+// as sampling can tell, and a change that makes f hold more still raises
+// all three.
+func leastPeak(f func()) uint64 {
+	least := ^uint64(0)
+	for range 3 {
+		before := heapAfterGC()
+		least = min(least, max(peakDuring(f), before)-before)
+	}
+	return least
+}
+
+// grown is how much the live heap grew since before; none when it shrank.
+func grown(before uint64) uint64 {
+	return max(heapAfterGC(), before) - before
+}
+
 // peakDuring samples the heap every millisecond while f runs.
 func peakDuring(f func()) (peak uint64) {
 	stop := make(chan struct{})
@@ -144,17 +165,20 @@ func TestAnswerManySeries(t *testing.T) {
 	before := heapAfterGC()
 	var got []Series
 	var err error
-	peak := peakDuring(func() { got, err = c.QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute) })
-	kept := heapAfterGC() - before
+	rose := leastPeak(func() {
+		wire.Store(0)
+		got, err = c.QueryRange(context.Background(), "up", t0, t0.Add(time.Hour), time.Minute)
+	})
+	kept := grown(before)
 	runtime.KeepAlive(got)
-	ratio := float64(peak-before) / float64(len(body))
-	t.Logf("wire %d B, decoded %d B (%d series), heap peak +%d MiB (%.1fx the decoded body), kept +%d MiB, err %v",
-		wire.Load(), len(body), len(got), (peak-before)>>20, ratio, kept>>20, err)
+	ratio := float64(rose) / float64(len(body))
+	t.Logf("wire %d B, decoded %d B (%d series), heap peak +%d MiB (%.1fx the decoded body, the least of three runs), kept +%d MiB, err %v",
+		wire.Load(), len(body), len(got), rose>>20, ratio, kept>>20, err)
 	if err == nil || !Refused(err) {
 		t.Errorf("an answer of %d series, %d allowed: %v", n, maxAnswerSeries, err)
 	}
 	if ratio > 4 {
 		t.Errorf("a %d MiB answer (%d KiB on the wire) took the heap up %d MiB, %.1f times its size: at the 256 MiB cap that is ~%d GiB a request, and --parallel requests at once",
-			len(body)>>20, wire.Load()>>10, (peak-before)>>20, ratio, int(ratio*256/1024+0.5))
+			len(body)>>20, wire.Load()>>10, rose>>20, ratio, int(ratio*256/1024+0.5))
 	}
 }
