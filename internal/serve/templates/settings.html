@@ -125,13 +125,13 @@ over the last four weeks, and what that would do to the verdict. */}}
 {{with .Err}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{.}}</p>{{else}}
 <p>{{if .Off}}{{t "Turned off, the impact signal finds no window and keeps the record of no week; the windows found before stay, as incidents."}}{{else}}{{t "%d windows found; %d of them would count, the rest covered by an incident written down or decided before." .Found .Counted}}{{end}}</p>
 {{if .Windows}}<div class="scroll"><table>
-<caption class="vh">{{t "Windows found"}}</caption>
+<caption>{{t "Windows found"}}</caption>
 <thead><tr><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "Length"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "Would count"}}</th></tr></thead>
 <tbody>{{range .Windows}}<tr><td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td><td>{{dur .Len}}</td><td class="labels">{{or .Labels "–"}}</td>
 <td>{{if .Written}}{{t "no: written down as %s" (join .Written ", ")}}{{else if .Decided}}{{t "no: %s before" (t .Decided)}}{{else}}{{t "yes"}}{{end}}</td></tr>{{end}}</tbody>
 </table></div>{{with .MoreWindows}}<p class="quiet">{{t "and %d more" .}}</p>{{end}}{{end}}
 <div class="scroll"><table>
-<caption class="vh">{{t "The verdict, in effect and with it"}}</caption>
+<caption>{{t "The verdict, in effect and with it"}}</caption>
 <thead><tr><th scope="col">{{t "Measure"}}</th><th scope="col">{{t "In effect"}}</th><th scope="col">{{t "With it"}}</th></tr></thead>
 <tbody>{{range .Rows}}<tr><th scope="row">{{t .Label}}</th><td>{{.Now}}</td><td>{{if .Changed}}<strong>{{.With}}</strong>{{else}}{{.With}}{{end}}</td></tr>{{end}}</tbody>
 </table></div>
@@ -148,7 +148,7 @@ over the last four weeks, and what that would do to the verdict. */}}
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Source"}}</th><th scope="col">{{t "State"}}</th><th scope="col">{{t "Last"}}</th><th scope="col" class="n">{{t "In four weeks"}}</th><th scope="col">{{t "What it is"}}</th></tr></thead>
 <tbody>{{range .Rows}}<tr><th scope="row">{{if .Raw}}<bdi>{{.Name}}</bdi>{{with .Tool}} ({{.}}){{end}}{{else}}{{t .Name}}{{end}}</th>
-<td><span class="{{status "source" .State}}">{{if eq .State "ok"}}✓ {{t "working"}}{{else if eq .State "quiet"}}⚠&#xFE0E; {{t "quiet"}}{{else if eq .State "failing"}}✕ {{t "failing"}}{{else if eq .State "pending"}}↻ {{t "waiting"}}{{else if eq .State "none"}}– {{t "none in four weeks"}}{{else}}? {{t "not set up"}}{{end}}</span></td>
+<td class="state"><span class="{{status "source" .State}}">{{if eq .State "ok"}}✓ {{t "working"}}{{else if eq .State "quiet"}}⚠&#xFE0E; {{t "quiet"}}{{else if eq .State "failing"}}✕ {{t "failing"}}{{else if eq .State "pending"}}↻ {{t "waiting"}}{{else if eq .State "none"}}– {{t "none in four weeks"}}{{else}}? {{t "not set up"}}{{end}}</span></td>
 <td class="t">{{if .Last.IsZero}}–{{else}}{{t .LastWhat}} {{at $loc .Last}}{{with .LastID}} (<bdi>{{.}}</bdi>){{end}}{{end}}</td>
 <td class="n">{{if .Counts}}{{.N}}{{else}}–{{end}}</td>
 <td>{{t .About}}{{with .Where}}<br><span class="quiet"><bdi>{{.}}</bdi></span>{{end}}{{with .Err}}<br><span class="status-bad"><span aria-hidden="true">✕</span> {{.}}</span>{{end}}</td></tr>{{end}}</tbody>

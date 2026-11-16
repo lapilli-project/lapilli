@@ -1843,5 +1843,6 @@
  "port %s, token in %s": "ポート %s、トークンファイル %s",
  "What a tool's job copies in is told apart by its ids' prefix, as the recipes give them: PD- of PagerDuty, a Jira project's key of Jira.": "ツールのジョブが取り込んだインシデントは、レシピが付ける ID の接頭辞で区別します。PagerDuty は PD-、Jira はプロジェクトキーです。",
  "Copying incidents in from Jira, PagerDuty, incident.io and others": "Jira、PagerDuty、incident.io などからインシデントを取り込む",
- "Where incidents come from, and whether each is alive": "インシデントの出どころと、それぞれが生きているか"
+ "Where incidents come from, and whether each is alive": "インシデントの出どころと、それぞれが生きているか",
+ "Copied in by a tool's job, through the incidents port.": "ツールのジョブがインシデントポート経由で取り込みます。"
 }

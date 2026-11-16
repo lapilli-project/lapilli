@@ -1843,5 +1843,6 @@
  "port %s, token in %s": "puerto %s, token en %s",
  "What a tool's job copies in is told apart by its ids' prefix, as the recipes give them: PD- of PagerDuty, a Jira project's key of Jira.": "Lo que copia el job de una herramienta se distingue por el prefijo de sus ids, como lo dan las recetas: PD- de PagerDuty, la clave de un proyecto de Jira.",
  "Copying incidents in from Jira, PagerDuty, incident.io and others": "Copiar incidentes de Jira, PagerDuty, incident.io y otras",
- "Where incidents come from, and whether each is alive": "De dónde vienen los incidentes, y si cada fuente sigue viva"
+ "Where incidents come from, and whether each is alive": "De dónde vienen los incidentes, y si cada fuente sigue viva",
+ "Copied in by a tool's job, through the incidents port.": "Lo copia el job de una herramienta, por el puerto de incidentes."
 }

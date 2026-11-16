@@ -178,7 +178,8 @@ func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, 
 		}
 		for _, name := range names {
 			x := bySrc[name]
-			row := sourceRow{Name: name + "-", Raw: true, Tool: sourceTools[name], N: x.n, Counts: true, Where: where, State: "ok", LastWhat: "last received", Last: x.last}
+			row := sourceRow{Name: name + "-", Raw: true, Tool: sourceTools[name], N: x.n, Counts: true, Where: where, State: "ok", LastWhat: "last received", Last: x.last,
+				About: "Copied in by a tool's job, through the incidents port."}
 			if name == "" {
 				row.Name, row.Raw = "Ids with no prefix", false
 			}

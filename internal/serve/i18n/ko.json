@@ -1843,5 +1843,6 @@
  "port %s, token in %s": "포트 %s, 토큰 파일 %s",
  "What a tool's job copies in is told apart by its ids' prefix, as the recipes give them: PD- of PagerDuty, a Jira project's key of Jira.": "도구의 잡이 가져온 인시던트는 레시피가 붙이는 ID 접두사로 구분해요. PagerDuty 는 PD-, Jira 는 프로젝트 키예요.",
  "Copying incidents in from Jira, PagerDuty, incident.io and others": "Jira, PagerDuty, incident.io 등에서 인시던트 가져오기",
- "Where incidents come from, and whether each is alive": "인시던트가 어디서 오는지, 각 출처가 살아 있는지"
+ "Where incidents come from, and whether each is alive": "인시던트가 어디서 오는지, 각 출처가 살아 있는지",
+ "Copied in by a tool's job, through the incidents port.": "도구의 잡이 인시던트 포트로 가져와요."
 }
