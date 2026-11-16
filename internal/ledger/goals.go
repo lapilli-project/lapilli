@@ -343,32 +343,17 @@ func (l *Ledger) PruneGoalMarks(ctx context.Context, before int64) (int, error) 
 	n := 0
 	err := l.writeAside(ctx, func(t *txn) error {
 		n = 0
+		// A statement a prefix: each mark is a week's day, a number.
 		for _, p := range []string{goalMissedKeyPrefix, goalMadeKeyPrefix} {
-			rows, err := t.QueryContext(t.ctx, "SELECT key, value FROM meta WHERE key > ? AND key < ?", p, strings.TrimSuffix(p, ".")+"/")
+			res, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key > ? AND key < ? AND CAST(value AS BIGINT) < ?", p, strings.TrimSuffix(p, ".")+"/", before)
 			if err != nil {
 				return err
 			}
-			var gone []string
-			for rows.Next() {
-				var k, v string
-				if err := rows.Scan(&k, &v); err != nil {
-					rows.Close()
-					return err
-				}
-				if w, err := strconv.ParseInt(v, 10, 64); err != nil || w < before {
-					gone = append(gone, k)
-				}
-			}
-			rows.Close()
-			if err := rows.Err(); err != nil {
+			k, err := res.RowsAffected()
+			if err != nil {
 				return err
 			}
-			for _, k := range gone {
-				if _, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key = ?", k); err != nil {
-					return err
-				}
-			}
-			n += len(gone)
+			n += int(k)
 		}
 		return nil
 	})

@@ -268,6 +268,15 @@ func TestGoalValueCut(t *testing.T) {
 	if got := goalWeekValue(summaryGoal{Measure: "precision", AtLeast: f(0.8), Value: f(0.80049), Result: "met"}); got != "80%" {
 		t.Errorf("a week met: %s", got)
 	}
+	// A bound is shown as written, unrounded: a value missed, cut away
+	// from it, never reads as it.
+	fine := ledger.Goal{Measure: "precision", AtLeast: "0.8004"}
+	if got, v := goalTarget("en", fine), goalMissedValue(fine, f(0.8001)); got != "at least 80.04%" || v != "80%" {
+		t.Errorf("a bound of four places: %s, %s", got, v)
+	}
+	if got := goalTarget("en", ledger.Goal{Measure: "refired.share", AtMost: "0.07"}); got != "at most 7%" {
+		t.Errorf("a bound of two places: %s", got)
+	}
 }
 
 // A goal met at its bound exactly is met: at_least is a floor, at_most a
@@ -280,5 +289,126 @@ func TestGoalAtItsBound(t *testing.T) {
 		if g := goalIn(t, sum, "2026-10-26", "", name); g.Result != "met" {
 			t.Errorf("%s at its bound: %+v", name, g)
 		}
+	}
+}
+
+// A goal of each team's missed by more teams than a notice names: one
+// notice, 50 named with their values, how many more counted, and every
+// one of them marked told.
+func TestGoalNoticeNamesFifty(t *testing.T) {
+	s := hooked(t, false)
+	ctx := context.Background()
+	for i := range 55 {
+		if _, err := s.l.PutTeam(ctx, ledger.Team{Name: fmt.Sprintf("quiet%02d", i), Rules: fmt.Sprintf("^NoRule%02d$", i)}, "ana"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// payments and search fired; the 55 others, nothing.
+	declare(t, s, "goals:\n  - {name: some-firing, team: \"*\", measure: firings, at_least: 1}\n")
+	again(t, s)
+	ns := goalNotices(t, s)
+	if len(ns) != 1 || ns[0].Team != "*" || len(ns[0].Teams) != 50 || ns[0].More != 5 || ns[0].Teams[0].Team != "quiet00" || *ns[0].Teams[0].Value != 0 {
+		t.Fatalf("told: %d notices, %+v", len(ns), ns)
+	}
+	if line := s.line(notice{Event: "goal.missed", Goal: &ns[0]}); !strings.Contains(line, "by 55 teams: quiet00 (0), quiet01 (0)") || !strings.HasSuffix(line, "and 45 more; the goal is at least 1.") {
+		t.Errorf("its line: %q", line)
+	}
+	told, _, err := s.l.GoalMarks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marked := 0
+	for k := range told {
+		if strings.HasPrefix(k, "some-firing.") {
+			marked++
+		}
+	}
+	if marked != 55 {
+		t.Errorf("%d teams marked told, want 55", marked)
+	}
+}
+
+// A replica that follows shows what the ledger holds of the goals by the
+// sum the leader's status says: nothing with nothing kept; what it read,
+// unkept, while the ledger holds other than the sum (a write since, or one
+// that failed); kept once it holds what the sum is of; and read again when
+// another leader says another. The status says the sum of what was kept,
+// not of what was worked out and not written.
+func TestGoalsFollowed(t *testing.T) {
+	s := goalServer(t, nil)
+	ctx := context.Background()
+	brief := func(g *goalsShown) *goalsBrief {
+		return &goalsBrief{Gen: goalsSum(g), Week: g.Week, Lines: len(g.Lines)}
+	}
+	keep := func(g *goalsShown) {
+		t.Helper()
+		b, _ := json.Marshal(g)
+		if err := s.l.KeepGoalsShown(ctx, b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := &goalsShown{Week: dayAt("2026-10-26", 0), Lines: []goalShown{{Goal: "a", Result: "met"}}}
+	b := &goalsShown{Week: dayAt("2026-10-26", 0), Lines: []goalShown{{Goal: "a", Result: "missed"}}}
+	c := &goalsShown{Week: dayAt("2026-11-02", 0), Lines: []goalShown{{Goal: "b", Result: "met"}}}
+	if g := s.goalsFollow(ctx, nil); g != nil {
+		t.Errorf("no goals said: %+v", g)
+	}
+	if g := s.goalsFollow(ctx, brief(b)); g != nil {
+		t.Errorf("nothing kept: %+v", g)
+	}
+	// The ledger holds a, the leader says b: a shown, not kept as b.
+	keep(a)
+	if g := s.goalsFollow(ctx, brief(b)); g == nil || g.Lines[0].Result != "met" || s.goalsF.shown != nil {
+		t.Errorf("stale: %+v, kept %+v", g, s.goalsF.shown)
+	}
+	keep(b)
+	if g := s.goalsFollow(ctx, brief(b)); g == nil || g.Lines[0].Result != "missed" || s.goalsF.gen != goalsSum(b) {
+		t.Errorf("written: %+v", g)
+	}
+	// Another leader, another sum.
+	keep(c)
+	if g := s.goalsFollow(ctx, brief(c)); g == nil || g.Lines[0].Goal != "b" {
+		t.Errorf("a leader change: %+v", g)
+	}
+	// Worked out, not written: the status says what was.
+	s.goalsK.Lock()
+	s.goalsK.shown, s.goalsK.sum, s.goalsK.kept = b, goalsSum(b), goalsSum(a)
+	s.goalsK.Unlock()
+	if g := s.goalsBriefNow(); g.Gen != goalsSum(a) {
+		t.Errorf("the status says %s, of what wasn't written", g.Gen)
+	}
+}
+
+// As a term of leading begins, what the ledger holds of the goals is
+// served, and its sum said, until the first round: /metrics keeps its
+// series through a failover, and a first round that works out the same
+// writes nothing. As it ends, what this replica worked out is let go.
+func TestGoalsTerm(t *testing.T) {
+	s := goalServer(t, nil)
+	declare(t, s, theGoals)
+	ctx := context.Background()
+	again(t, s)
+	raw, _ := s.l.GoalsShown(ctx)
+	var was goalsShown
+	json.Unmarshal(raw, &was)
+	s.goalsTerm(ctx, true)
+	if s.goalsShownNow() != nil || s.goalsBriefNow() != nil {
+		t.Fatal("kept past its term")
+	}
+	s.goalsTerm(ctx, false)
+	if g := s.goalsShownNow(); g == nil || len(g.Lines) != 7 || s.goalsBriefNow().Gen != goalsSum(&was) {
+		t.Fatalf("a term begun: %+v", g)
+	}
+	_, metrics, _ := get(t, s.Handler(), "/metrics")
+	if !strings.Contains(metrics, `lapilli_goal_met{goal="none-missed"} 0`+"\n") {
+		t.Error("no series before the term's first round")
+	}
+	s.now = func() time.Time { return now.Add(time.Minute) }
+	again(t, s)
+	raw, _ = s.l.GoalsShown(ctx)
+	var after goalsShown
+	json.Unmarshal(raw, &after)
+	if !after.At.Equal(was.At) {
+		t.Errorf("the first round wrote the same again: %v, then %v", was.At, after.At)
 	}
 }

@@ -486,7 +486,13 @@ Small things the design left open, settled as they were built:
   of it, the week, how many lines and the tasks waiting, and a replica
   that follows reads the lines from the ledger when the sum moves, for its
   `/metrics`. Kept in the status whole, it would be some 50 KB rewritten
-  every two seconds.
+  every two seconds. The sum said is of what the ledger holds, as last
+  written, not of what a write failed to keep; a follower keeps what it
+  read under the sum only when it is what the sum is of. As a term of
+  leading begins, the replica lets go of what it worked out in an earlier
+  one, and serves what the ledger holds, saying its sum, until its first
+  round: the series stay through a failover, and a first round that works
+  out the same writes nothing. As the term ends, it lets go again.
 - **`goal.missed`** is told of the last whole week alone, once its cursor
   has passed, marked by the goal, each team's id (0 for everyone's) and
   the week, which only moves on: a team marked for a later week, as by a
@@ -504,7 +510,8 @@ Small things the design left open, settled as they were built:
   they read the tasks, counts toward the 20 as one made.
 - **A value missed** is shown cut to a tenth of a percent away from its
   bound, down for `at_least` and up for `at_most`, so that it never reads
-  as the bound it missed (79.9%, not 80%, of a goal of at least 80%).
+  as the bound it missed (79.9%, not 80%, of a goal of at least 80%); a
+  share's bound is shown as the file wrote it, unrounded (80.04%).
 - **The Goals page** takes the heavy turn by the rows it reads, as a
   summary does: of every team, or more than 53.
 - **A goal's task** keeps, beside it in the ledger's meta, the week it was

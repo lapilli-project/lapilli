@@ -471,14 +471,20 @@ func goalMissedValue(g ledger.Goal, v *float64) string {
 	return goalNumberTo(g.Measure, *v, missedTo(kind))
 }
 
-// goalTarget is a goal's bound, as a person reads it.
+// goalTarget is a goal's bound, as a person reads it: a share as the
+// file wrote it, in percent, unrounded, so that a value missed, cut away
+// from it, never reads as it.
 func goalTarget(l string, g ledger.Goal) string {
 	kind, n := g.Bound()
+	text := goalNumber(g.Measure, n)
+	if ledger.GoalMeasures[g.Measure].Share {
+		text = strconv.FormatFloat(math.Round(n*1e12)/1e10, 'f', -1, 64) + "%"
+	}
 	switch kind {
 	case "at_least":
-		return tr(l, "at least %s", goalNumber(g.Measure, n))
+		return tr(l, "at least %s", text)
 	case "at_most":
-		return tr(l, "at most %s", goalNumber(g.Measure, n))
+		return tr(l, "at most %s", text)
 	}
 	return tr(l, "no worse than before")
 }
@@ -517,7 +523,7 @@ func goalMissedText(l string, g ledger.Goal, team string, week time.Time, v *flo
 // goalTeamsNamed is how many teams a notice of a goal of each team's
 // names, those missed first in the order of the teams; the rest are
 // counted.
-const goalTeamsNamed = 50
+var goalTeamsNamed = 50
 
 // goalMissedTeamsText says a goal of each team's was missed in a week by
 // teams: how many, the first ten of them with their values, and its target.
@@ -608,7 +614,10 @@ func (s *Server) goalsShownNow() *goalsShown {
 }
 
 // goalsBriefNow is what this replica's status says of the goals it worked
-// out, nil for nothing.
+// out, nil for nothing: as Gen, the sum of what the ledger holds of them,
+// as last written, or read as its term began; not of what it worked out
+// since and failed to write, which a follower would read the ledger's
+// older lines under.
 func (s *Server) goalsBriefNow() *goalsBrief {
 	s.goalsK.Lock()
 	defer s.goalsK.Unlock()
@@ -616,7 +625,37 @@ func (s *Server) goalsBriefNow() *goalsBrief {
 	if g == nil {
 		return nil
 	}
-	return &goalsBrief{Gen: s.goalsK.sum, Week: g.Week, Lines: len(g.Lines), Waiting: g.Waiting}
+	return &goalsBrief{Gen: s.goalsK.kept, Week: g.Week, Lines: len(g.Lines), Waiting: g.Waiting}
+}
+
+// goalsTerm readies what is kept of the goals as a term of leading
+// begins, or ends (lost): whatever this replica worked out in an earlier
+// term is let go, as another may have led since. Beginning, what the
+// ledger holds is served, and its sum said, until its first round works
+// them out again: /metrics keeps its series through a failover, and a
+// round that works out the same writes nothing.
+func (s *Server) goalsTerm(ctx context.Context, lost bool) {
+	s.goalsK.Lock()
+	s.goalsK.key, s.goalsK.sum, s.goalsK.kept, s.goalsK.shown = "", "", "", nil
+	s.goalsK.Unlock()
+	if lost {
+		return
+	}
+	gs, err := s.goalsNow(ctx)
+	if err != nil || !slices.ContainsFunc(gs, func(g ledger.Goal) bool { return g.Each == "week" }) {
+		return
+	}
+	raw, err := s.l.GoalsShown(ctx)
+	var g goalsShown
+	if err != nil || raw == nil || json.Unmarshal(raw, &g) != nil {
+		return
+	}
+	sum := goalsSum(&g)
+	s.goalsK.Lock()
+	if s.goalsK.shown == nil {
+		s.goalsK.sum, s.goalsK.kept, s.goalsK.shown = sum, sum, &g
+	}
+	s.goalsK.Unlock()
 }
 
 // goalsFollowed is what a replica that follows read of the leader's goals
@@ -634,13 +673,21 @@ func (s *Server) goalsRead(ctx context.Context) *goalsShown {
 	if !s.follows() {
 		return s.goalsShownNow()
 	}
-	b := s.shownStatus().Goals
+	return s.goalsFollow(ctx, s.shownStatus().Goals)
+}
+
+// goalsFollow is what a replica that follows shows of the goals, by what
+// the leader's status says of them (b): read from the ledger, and kept
+// under b's Gen only when what it read is what Gen is the sum of. The
+// ledger holding other than the leader said (a write since, or a status
+// not yet said again), it is shown as read, and read again next time.
+func (s *Server) goalsFollow(ctx context.Context, b *goalsBrief) *goalsShown {
 	if b == nil {
 		return nil
 	}
 	s.goalsF.Lock()
 	defer s.goalsF.Unlock()
-	if s.goalsF.gen == b.Gen {
+	if s.goalsF.shown != nil && s.goalsF.gen == b.Gen {
 		return s.goalsF.shown
 	}
 	raw, err := s.l.GoalsShown(ctx)
@@ -651,7 +698,9 @@ func (s *Server) goalsRead(ctx context.Context) *goalsShown {
 	if raw == nil || json.Unmarshal(raw, &g) != nil {
 		return nil
 	}
-	s.goalsF.gen, s.goalsF.shown = b.Gen, &g
+	if goalsSum(&g) == b.Gen {
+		s.goalsF.gen, s.goalsF.shown = b.Gen, &g
+	}
 	return &g
 }
 
