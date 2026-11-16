@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -164,6 +165,8 @@ type notice struct {
 	To       string `json:"to,omitempty"`
 	// A proposal to change a rule, and what became of it.
 	Proposal *proposalNotice `json:"proposal,omitempty"`
+	// A goal missed in a week (docs/design/goals.md).
+	Goal *goalNotice `json:"goal,omitempty"`
 }
 
 // proposalNotice is what a notice says of a proposal.
@@ -190,6 +193,12 @@ func (s *Server) pageOf(n notice) string {
 	case n.Event == "replay.differs":
 		// The rules whose replay differs, this one among them.
 		path = "/rules?trust=differs"
+	case n.Goal != nil:
+		path = "/goals"
+		if n.Goal.Team != "" {
+			path += "?team=" + url.QueryEscape(n.Goal.Team)
+		}
+		path += "#goal-" + n.Goal.Name
 	case n.ReportID != 0:
 		path = fmt.Sprintf("/reports/%d", n.ReportID)
 	case n.Team != "":
@@ -287,6 +296,15 @@ func (s *Server) line(n notice) string {
 		case "task.overdue":
 			return tr(l, "lapilli: task #%d, %q, was due %s", t.ID, t.Title, t.Due.In(s.cfg.Loc).Format("2006-01-02"))
 		}
+	case n.Goal != nil:
+		g := ledger.Goal{Name: n.Goal.Name, Measure: n.Goal.Measure}
+		switch {
+		case n.Goal.AtLeast != nil:
+			g.AtLeast = strconv.FormatFloat(*n.Goal.AtLeast, 'f', -1, 64)
+		case n.Goal.AtMost != nil:
+			g.AtMost = strconv.FormatFloat(*n.Goal.AtMost, 'f', -1, 64)
+		}
+		return "lapilli: " + goalMissedText(l, g, n.Goal.Team, n.Goal.From, n.Goal.Value, s.cfg.Loc)
 	case n.Window != nil:
 		return tr(l, "lapilli: %s kept a quiet window, %q, from %s", who, n.Window.Title, n.Window.Start.In(s.cfg.Loc).Format("2006-01-02 15:04"))
 	case n.Source != nil:

@@ -46,6 +46,9 @@ var statusKinds = map[string]string{
 	// A rule change, predicted and measured.
 	"outcome/as-predicted": "ok", "outcome/otherwise": "warn", "outcome/measuring": "info", "outcome/added": "info",
 	"outcome/unreplayed": "warn",
+	// A goal's week (docs/design/goals.md): met, missed, not known, or, of
+	// the week under way, a count past its bound so far.
+	"goal/met": "ok", "goal/missed": "bad", "goal/unknown": "unknown", "goal/over": "warn",
 	// Where incidents come from (sources.go): alive; quiet, nothing
 	// received, or read, in a while; no data, an impact signal a selector
 	// of which has none; unread, one read by the runs and waiting to be

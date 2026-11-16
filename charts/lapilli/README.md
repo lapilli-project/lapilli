@@ -323,6 +323,25 @@ in place, keeping what names it, give the new `name` with the old as
 `renamed_from`, and change every `team:` that names it, in one change:
 renamed by its name alone, it is another team.
 
+`serve.config` declares goals too (`goals:`, `docs/design/goals.md` in
+the repository): what the alerting is held to, each a bound on one of the
+summary's numbers, for everyone, a team or each team (`team: "*"`), each
+whole week met, missed or not known on the Goals page, the overview, the
+digest, reports and `/metrics`. Only the file declares a goal: one it no
+longer declares is deleted, with or without `serve.configPrune`.
+`serve.goalTasks` makes a task, of kind decide, for each goal a whole week
+missed, 20 a run at most (`--goal-tasks`); it needs `serve.config`.
+
+```yaml
+serve:
+  config: |
+    goals:
+      - {name: critical-caught, measure: critical.share_caught, at_least: 0.8}
+      - {name: none-missed, measure: incidents.missed, at_most: 0}
+      - {name: no-refire, team: "*", measure: refired.firings, at_most: 0}
+  goalTasks: true
+```
+
 `serve.proposalsExpire` closes a proposal that waited for approval longer
 since it began to wait (made, or backtested again), such as `30d`, and
 that no one approved, as expired, so its rule can have another. Empty, the default, keeps it waiting however

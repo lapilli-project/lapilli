@@ -43,13 +43,16 @@ var configEvery = 15 * time.Second
 // configKeys are the keys of a --config file and of each thing in it, in
 // the order an export writes them.
 var configKeys = map[string][]string{
-	"":     {"teams", "windows", "reports", "grants"},
+	"":     {"teams", "windows", "reports", "grants", "goals"},
 	"team": {"name", "rules", "labels", "note", "work_hours", "sleep_hours", "tz", "shifts", "renamed_from"},
 	// A window's on is repeat_on: YAML 1.1, which Helm reads values by,
 	// takes a key on, unquoted, for true.
 	"window": {"title", "team", "start", "end", "every", "repeat_on", "until", "rules", "labels"},
 	"report": {"name", "team", "schedule", "span", "zone", "sections", "dests", "enabled"},
 	"grant":  {"user", "group", "team"},
+	// A goal's bound is one of at_least, at_most and no_worse_than; by goes
+	// with no_worse_than (docs/design/goals.md).
+	"goal": {"name", "team", "measure", "at_least", "at_most", "no_worse_than", "by", "critical", "each"},
 }
 
 // What can be wrong with a --config file, as texts to translate: the
@@ -61,17 +64,19 @@ var (
 		"window": "unknown key %q in a quiet window: want %s",
 		"report": "unknown key %q in a report: want %s",
 		"grant":  "unknown key %q in a role: want %s",
+		"goal":   "unknown key %q in a goal: want %s",
 	}
 	wantA = map[string]string{
 		"team":   "want a team, as a mapping of %s",
 		"window": "want a quiet window, as a mapping of %s",
 		"report": "want a report, as a mapping of %s",
 		"grant":  "want a role, as a mapping of %s",
+		"goal":   "want a goal, as a mapping of %s",
 	}
 	configFormats = []string{
 		"line %d: %s", "line %d (%s): %s", "the file isn't YAML: %s", "the file is more than %d bytes",
-		"one document only: --config is one file of teams, windows, reports and grants",
-		"want a mapping of teams, windows, reports and grants", "unknown key %q: want teams, windows, reports or grants",
+		"one document only: --config is one file of teams, windows, reports, grants and goals",
+		"want a mapping of teams, windows, reports, grants and goals", "unknown key %q: want teams, windows, reports, grants or goals",
 		"%s is given twice, on line %d too", "%s is a list", "%s is a text", "%s is a list of texts",
 		"labels are a mapping of a label's name to a value, or a list of values", "a label's name is a text", "label %s has no value",
 		"%s %q: want a time like 2026-11-02T09:30, or 2026-11-02T09:30:00+09:00", "a team has a name", "a quiet window has a title",
@@ -83,9 +88,11 @@ var (
 		"%s is %s, read as a boolean or a number, not a text: quote it, or give serve.config as a text",
 		"label %s's value %s is read as a boolean or a number, not a text: quote it, or give serve.config as a text",
 		"a config declares %d teams at most", "a config declares %d quiet windows at most", "a config declares %d reports at most",
-		"a config declares %d roles at most",
-		unknownIn["team"], unknownIn["window"], unknownIn["report"], unknownIn["grant"],
-		wantA["team"], wantA["window"], wantA["report"], wantA["grant"],
+		"a config declares %d roles at most", "a config declares %d goals at most", "a goal has a name", "a goal has a measure",
+		"a goal called %s is declared on line %d already: a goal's name is unique, across everyone's and every team's",
+		"%s is a number, such as 0.8 or 40",
+		unknownIn["team"], unknownIn["window"], unknownIn["report"], unknownIn["grant"], unknownIn["goal"],
+		wantA["team"], wantA["window"], wantA["report"], wantA["grant"], wantA["goal"],
 	}
 )
 
@@ -160,7 +167,7 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 	}
 	var more yaml.Node
 	if err := dec.Decode(&more); !errors.Is(err, io.EOF) {
-		return d, badAt(&more, "one document only: --config is one file of teams, windows, reports and grants")
+		return d, badAt(&more, "one document only: --config is one file of teams, windows, reports, grants and goals")
 	}
 	root := &doc
 	if root.Kind == yaml.DocumentNode && len(root.Content) == 1 {
@@ -189,6 +196,8 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 				err = parseReport(item, &d)
 			case "grants":
 				err = parseGrant(item, &d)
+			case "goals":
+				err = parseGoal(item, &d)
 			}
 			if err != nil {
 				return err
@@ -210,6 +219,11 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 		err = bad("a config declares %d reports at most", ledger.MaxScheduled)
 	case len(d.Grants) > ledger.MaxGrants:
 		err = bad("a config declares %d roles at most", ledger.MaxGrants)
+	case len(d.Goals) > ledger.MaxGoals:
+		err = bad("a config declares %d goals at most", ledger.MaxGoals)
+	}
+	if err == nil {
+		err = checkGoals(d.Goals)
 	}
 	return d, err
 }
@@ -225,7 +239,7 @@ func null(n *yaml.Node) bool {
 func each(n *yaml.Node, what string, fn func(key string, v *yaml.Node) error) error {
 	if n.Kind != yaml.MappingNode {
 		if what == "" {
-			return badAt(n, "want a mapping of teams, windows, reports and grants")
+			return badAt(n, "want a mapping of teams, windows, reports, grants and goals")
 		}
 		return badAt(n, wantA[what], strings.Join(configKeys[what], ", "))
 	}
@@ -238,7 +252,7 @@ func each(n *yaml.Node, what string, fn func(key string, v *yaml.Node) error) er
 		seen[k.Value] = k.Line
 		if k.Kind != yaml.ScalarNode || !slices.Contains(configKeys[what], k.Value) {
 			if what == "" {
-				return badAt(k, "unknown key %q: want teams, windows, reports or grants", k.Value)
+				return badAt(k, "unknown key %q: want teams, windows, reports, grants or goals", k.Value)
 			}
 			return badAt(k, unknownIn[what], k.Value, strings.Join(configKeys[what], ", "))
 		}
@@ -258,8 +272,8 @@ func blank(v *yaml.Node) bool {
 }
 
 // broadens says a key of a thing, given as nothing, would make it hold for
-// more: a role's, a quiet window's or a report's team, every team; a quiet
-// window's rules, every rule.
+// more: a role's, a quiet window's, a report's or a goal's team, every
+// team or everyone; a quiet window's rules, every rule.
 func broadens(what, key string) bool {
 	return key == "team" || what == "window" && key == "rules"
 }
@@ -555,6 +569,89 @@ func parseGrant(n *yaml.Node, d *ledger.Declared) error {
 	return nil
 }
 
+// parseGoal reads a goal (docs/design/goals.md). Its numbers are kept as
+// written, and checked with the rest of it once the file is read
+// (checkGoals): a goal that breaks a rule refuses the file, with its line.
+func parseGoal(n *yaml.Node, d *ledger.Declared) error {
+	dg := ledger.DeclaredGoal{Line: n.Line}
+	g := &dg.Goal
+	number := func(key string, v *yaml.Node) (string, error) {
+		s, err := text(key, v)
+		if err == nil && (v.Kind != yaml.ScalarNode || v.ShortTag() == "!!bool") {
+			err = badAt(v, "%s is a number, such as 0.8 or 40", key)
+		}
+		return strings.TrimSpace(s), err
+	}
+	err := each(n, "goal", func(key string, v *yaml.Node) error {
+		var err error
+		switch key {
+		case "name":
+			g.Name, err = name(key, v)
+		case "team":
+			dg.Team, err = name(key, v)
+		case "measure":
+			g.Measure, err = text(key, v)
+		case "at_least":
+			g.AtLeast, err = number(key, v)
+		case "at_most":
+			g.AtMost, err = number(key, v)
+		case "by":
+			g.By, err = number(key, v)
+		case "no_worse_than":
+			g.NoWorseThan, err = text(key, v)
+		case "critical":
+			g.Critical, err = texts(key, v)
+		case "each":
+			g.Each, err = text(key, v)
+		}
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	switch {
+	case strings.TrimSpace(g.Name) == "":
+		return badAt(n, "a goal has a name")
+	case strings.TrimSpace(g.Measure) == "":
+		return badAt(n, "a goal has a measure")
+	}
+	d.Goals = append(d.Goals, dg)
+	return nil
+}
+
+// checkGoals refuses goals that break a rule of the design's, each with its
+// line: on its own (ledger.CheckGoal), a name given twice, or more lists
+// of severities than the goals may count as critical.
+func checkGoals(gs []ledger.DeclaredGoal) error {
+	seen := map[string]int{}
+	var all []ledger.Goal
+	for i := range gs {
+		g := &gs[i]
+		if err := ledger.CheckGoal(&g.Goal); err != nil {
+			return atLine(g.Line, err)
+		}
+		if line, ok := seen[g.Name]; ok {
+			return configError{g.Line, "a goal called %s is declared on line %d already: a goal's name is unique, across everyone's and every team's", []any{g.Name, line}}
+		}
+		seen[g.Name] = g.Line
+		all = append(all, g.Goal)
+		if err := ledger.CheckGoals(all); err != nil {
+			return atLine(g.Line, err)
+		}
+	}
+	return nil
+}
+
+// atLine is the ledger's refusal of something on a line of the file, as
+// the file's own are said.
+func atLine(line int, err error) error {
+	var inv ledger.ErrInvalid
+	if errors.As(err, &inv) {
+		return configError{line, inv.Format, inv.Args}
+	}
+	return err
+}
+
 // checkDeclared checks what the ledger doesn't of what --config declares,
 // as the UI's forms are checked: each report's destinations, which the
 // flags name, and each team's on-call shifts, which --on-call names. One
@@ -590,6 +687,7 @@ var briefs = map[string]string{
 	ledger.KindWindow: "line %d: a quiet window that can't be kept",
 	ledger.KindReport: "line %d: a report that can't be kept",
 	ledger.KindGrant:  "line %d: a role that can't be kept",
+	ledger.KindGoal:   "line %d: a goal that can't be kept",
 }
 
 // Shown is the problem in a language: why, for an admin; its line and

@@ -87,6 +87,19 @@ type summaryRow struct {
 	DuringDeploys summaryDeploys   `json:"during_deploys"`
 	Incidents     summaryIncidents `json:"incidents"`
 	Impacts       summaryIncidents `json:"impacts"`
+	// Goals are the goals --config declares of the row's team (everyone's,
+	// in a row for everyone; the team's own and each team's, in a team's),
+	// each with its value and the week's result (docs/design/goals.md); left
+	// out with none declared.
+	Goals []summaryGoal `json:"goals,omitempty"`
+	// crit are the critical firings by each list of severities a goal
+	// counts as critical (ledger.CriticalKey); whole says the ledger holds
+	// the week whole, after the one its first firing fell in; byCatching,
+	// of a team's row, that the team has no labels, and so owns only the
+	// incidents its rules caught.
+	crit       map[string]summaryCount
+	whole      bool
+	byCatching bool
 }
 
 type summaryCount struct {
@@ -144,6 +157,25 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 	deploys, err := s.l.HasDeploys(ctx)
 	if err != nil {
 		return nil, err
+	}
+	// The goals, each row's checked against those of its team: their lists
+	// of severities counted as critical, four at most, each counted over
+	// the week's rules as critical is; and where the ledger's weeks begin.
+	gs, err := s.goalsNow(ctx)
+	if err != nil {
+		return nil, err
+	}
+	lists := ledger.CriticalLists(gs)
+	var firstWeek int64
+	firstOK := false
+	if len(gs) > 0 {
+		first, _, err := s.l.Bounds(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !first.IsZero() {
+			firstWeek, firstOK = ledger.Week(s.l.Day(first)), true
+		}
 	}
 	at := verdict.NoisyAt{Firings: o.NoisyFirings, Precision: o.NoisyPrecision}
 	if at.Firings == 0 {
@@ -212,6 +244,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 				row.Team = team.Name
 			}
 			var crit summaryCount
+			crits := make([]summaryCount, len(lists))
 			refiredRules := 0
 			for id, x := range t.by[w] {
 				rule := t.rules[id]
@@ -235,6 +268,12 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 				if slices.ContainsFunc(strings.Split(sev, "/"), func(v string) bool { return slices.Contains(critical, v) }) {
 					crit.Firings += x.Firings
 					crit.Caught += x.White
+				}
+				for i, cs := range lists {
+					if slices.ContainsFunc(strings.Split(sev, "/"), func(v string) bool { return slices.Contains(cs, v) }) {
+						crits[i].Firings += x.Firings
+						crits[i].Caught += x.White
+					}
 				}
 			}
 			// With no record, what was caught is no share of anything known.
@@ -298,6 +337,19 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 				}
 			}
 			row.Incidents.MedianLead, row.Impacts.MedianLead = medianSeconds(leads), medianSeconds(impactLeads)
+			if mine := rowGoals(gs, team); len(mine) > 0 {
+				row.crit = make(map[string]summaryCount, len(lists))
+				for i, cs := range lists {
+					c := crits[i]
+					c.Share = judged(c.Caught, c.Firings)
+					row.crit[ledger.CriticalKey(cs)] = c
+				}
+				row.whole = firstOK && w > firstWeek && !row.Partial
+				row.byCatching = team != nil && len(team.Labels) == 0
+				for _, g := range mine {
+					row.Goals = append(row.Goals, goalOn(g, &row))
+				}
+			}
 			out.Rows = append(out.Rows, row)
 		}
 	}

@@ -536,10 +536,19 @@ grants:                           # an editor's role, of every team or of one
 A window's `on` is `repeat_on`, the ledger's column: Helm reads values as
 YAML 1.1, where a key `on`, unquoted, is `true`.
 
+A fifth list, `goals:`, declares what the alerting is held to
+([goals.md](goals.md)): `name`, `team` (left out for everyone's, `"*"`
+for each team's), `measure`, one of `at_least`, `at_most` and
+`no_worse_than`, `by`, `critical` and `each`. Only the file declares a
+goal: one it no longer declares is deleted, with or without
+`--config-prune`, and without `--config` there are none. An export gives
+them back as the file declares them.
+
 **Read strictly, or not at all.** A key it doesn't know, a value of
 another kind, a key given twice, a second document, a file over 1 MiB (a
 ConfigMap's most), more things than the ledger keeps (1,000 teams, 500
-quiet windows, 50 reports, 1,000 roles), an empty file, or a key of the
+quiet windows, 50 reports, 1,000 roles, 50 goals), a goal that breaks a
+rule of [goals.md](goals.md)'s, an empty file, or a key of the
 four with nothing after it (`grants:` alone, which YAML reads as null) is
 refused as a whole, with its line, and changes nothing: the ledger keeps
 what the last file declared. An empty or truncated file, read as

@@ -1,0 +1,23 @@
+{{define "goals"}}{{$title := t "Goals"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
+<h1>{{$title}}</h1>
+<p class="lede">{{t "What the alerts are held to, as --config declares under goals: each whole week met, missed or not known, from the numbers /api/v1/summary gives, as they read now. The week under way is shown as it stands. A goal is changed in values, not here."}}</p>
+{{if .Empty}}{{template "empty" (emptyOf "first" "No goals are declared" "Declare them in --config, under goals: each a bound on one of the summary's numbers, for everyone, for a team, or for each team (docs/design/goals.md).")}}
+{{else if .NoneFor}}{{template "empty" (emptyOf "notfound" "No goal is of this team, or of everyone" "A team's goals are those --config declares for it, and those declared for each team, with team set to *.")}}
+{{else}}
+<p class="quiet">{{t "The last whole week is the week of %s." (day $loc .Last)}} {{t "✓ met, ✕ not met, ? not known, … so far."}}</p>
+{{if .ByCatching}}<p class="notice status-unknown"><span class="sign" aria-hidden="true">?</span> {{t "A goal on incidents isn't known for a team with no labels: it owns only the incidents its rules caught, so it never missed one. Give the team labels on the Teams page."}} <a href="{{$.Link "/teams"}}">{{t "Teams"}}</a></p>{{end}}
+<h2 id="goal-weeks">{{t "Week by week"}}</h2>
+<div class="scroll" tabindex="0" role="region" aria-labelledby="goal-weeks"><table class="goals">
+<thead><tr><th scope="col">{{t "Goal"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Target"}}</th><th scope="col">{{t "Last week"}}</th>{{range .Weeks}}<th scope="col" class="hw">{{if .Current}}{{t "so far"}}{{else}}{{.Label}}{{end}}</th>{{end}}<th scope="col">{{t "Task"}}</th></tr></thead>
+<tbody>{{range .Rows}}<tr{{with .ID}} id="{{.}}"{{end}}>
+  <th scope="row"><code>{{.Name}}</code> {{template "declared"}}</th>
+  <td>{{if .Team}}<bdi>{{.Team}}</bdi>{{if .EveryTeam}} <span class="quiet">{{t "(each team)"}}</span>{{end}}{{else}}{{t "everyone"}}{{end}}</td>
+  <td>{{.Measure}}: {{.Target}}{{with .Critical}}<br><span class="quiet">{{t "counted as critical: %s" .}}</span>{{end}}</td>
+  <td class="{{.Last.Class}}"><span aria-hidden="true">{{.Last.Sign}} {{.Last.Value}}</span><span class="vh">{{.Last.Text}}</span>{{with .LastWhy}}<br><span class="quiet">{{.}}</span>{{end}}</td>
+  {{range .Cells}}<td class="gw {{.Class}}" title="{{.Text}}"><span aria-hidden="true">{{.Sign}}<span class="v">{{.Value}}</span></span><span class="vh">{{.Text}}</span></td>{{end}}
+  <td>{{if .Task}}<a class="pill open {{status "task" "open"}}" href="{{$.Link (printf "/tasks/%d" .Task)}}">{{t "task #%d" .Task}}</a>{{else}}–{{end}}</td>
+</tr>{{end}}</tbody>
+</table></div>
+{{with .More}}<p class="quiet">{{t "And %d more teams' rows of goals of each team: pick a team to see its own." .}}</p>{{end}}
+{{end}}
+{{end}}{{template "bottom" .}}{{end}}

@@ -84,7 +84,9 @@ var pagePaths = []string{"/", "/rules", "/rules?weeks=1", "/rules/Errors", "/inc
 	"/rules?week=2026-10-26&perf=noisy", "/incidents?week=2026-10-26&state=missed", "/?marks=none", "/?marks=deploys",
 	// A rule's page in each tab, and over each period.
 	"/rules/Errors?tab=firings", "/rules/Errors?tab=versions", "/rules/Errors?tab=proposals", "/rules/Errors?tab=activity",
-	"/rules/Flapping?tab=firings", "/rules/Errors?weeks=1", "/rules/Errors?weeks=4&tab=firings", "/rules/Limited?tab=versions"}
+	"/rules/Flapping?tab=firings", "/rules/Errors?weeks=1", "/rules/Errors?weeks=4&tab=firings", "/rules/Limited?tab=versions",
+	// The goals, everyone's and a team's (docs/design/goals.md).
+	"/goals", "/goals?team=payments"}
 
 // pagesServer is a server with something on every page: a team, a note,
 // quiet windows, a task, roles, reports, comments, and a run that failed.
@@ -195,6 +197,9 @@ func pagesServer(t *testing.T) *Server {
 	read.At, read.OK, read.Turns, read.From, read.To = now, now, 3, now.Add(-72*time.Hour), now.Add(72*time.Hour)
 	read.Unknown, read.Notes = []string{"pat"}, []string{"an event with no one in it"}
 	s.onCallRead("secondary").Err = "feed.example.com: 503"
+	// Goals: everyone's, payments's own, and each team's.
+	declare(t, s, "goals:\n  - {name: precise, measure: precision, at_least: 0.5}\n  - {name: paged, team: payments, measure: critical.firings, critical: [critical, page], at_most: 40}\n"+
+		"  - {name: no-refire, team: \"*\", measure: refired.firings, at_most: 0}\n")
 	s.status.set("replaying %s → %s", "a", "b")
 	s.fail("a run", fmt.Errorf("boom"))
 	return s

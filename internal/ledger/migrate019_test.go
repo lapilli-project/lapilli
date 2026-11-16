@@ -40,7 +40,7 @@ func TestMigrate019(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range append(slices.Clone(undo019), "PRAGMA user_version = 18") {
+	for _, q := range append(slices.Concat(undo020, undo019), "PRAGMA user_version = 18") {
 		if _, err := l.w.ExecContext(ctx, q); err != nil {
 			t.Fatal(q, err)
 		}

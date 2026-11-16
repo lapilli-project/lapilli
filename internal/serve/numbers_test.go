@@ -61,6 +61,10 @@ var stableMetrics = []struct {
 	{"lapilli_serve_deploys_last_timestamp_seconds", nil, nil},
 	{"lapilli_serve_deploys_read_timestamp_seconds", nil, nil},
 	{"lapilli_serve_incidents_passed_over", nil, nil},
+	{"lapilli_goal_met", []string{"goal"}, []string{"team"}},
+	{"lapilli_goal_known", []string{"goal"}, []string{"team"}},
+	{"lapilli_goal_value", []string{"goal"}, []string{"team"}},
+	{"lapilli_goal_weeks_met", []string{"goal"}, []string{"team"}},
 }
 
 // The metrics docs/numbers.md lists keep their names and their labels: a
@@ -68,6 +72,12 @@ var stableMetrics = []struct {
 // each with its labels.
 func TestMetricsStable(t *testing.T) {
 	s := nocServer(t)
+	// A goal of everyone's and one of each team's, as the leader worked
+	// them out after its last round (docs/design/goals.md).
+	declare(t, s, "goals:\n  - {name: fired-at-most, measure: firings, at_most: 1000}\n  - {name: none-refired, team: \"*\", measure: refired.firings, at_most: 0}\n")
+	if err := s.goalsAfter(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	_, body, _ := get(t, s.Handler(), "/metrics")
 	doc, err := os.ReadFile("../../docs/numbers.md")
 	if err != nil {

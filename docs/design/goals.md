@@ -1,11 +1,13 @@
 # Goals: what an operations team holds its alerting to
 
-Status: accepted, not built. Under [GOVERNANCE.md](../../GOVERNANCE.md)
+Status: steps 1 and 2 built, for the next release, schema 020; step 3
+waits for marked windows (#90). Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this is a new kind of data in the ledger (the next schema at build time),
 so it was designed first, as a pull request (#91); it was merged on
 2026-11-16, before its week was out, by the maintainer's decision, with the
 review's edits. The decisions taken are in "Open questions"; the rest stay
-open until the step that needs each. It changes no stone and judges no
+open until the step that needs each. What building it made plain is in
+"As built", at the end. It changes no stone and judges no
 firing: a goal is checked against the numbers the summary already gives.
 The companion to [noc.md](noc.md), whose `/api/v1/summary` it reads; to
 [expectations.md](expectations.md) (#81), which holds one rule to what it
@@ -440,7 +442,58 @@ Open:
 
 1. `goals:` in `--config`, the next schema, the Goals page, the summary's
    `goals`, the leader's work after a run, `/metrics`, numbers.md's table
-   and test.
+   and test. Built.
 2. The overview's card and line, tasks (`tasks.goal`, `--goal-tasks`), the
-   digest, reports' `goals` section, `goal.missed`.
-3. Goals over a period (`each: KIND`), once marked windows are built.
+   digest, reports' `goals` section, `goal.missed`. Built, with step 1.
+3. Goals over a period (`each: KIND`), once marked windows are built. Until
+   then `each:` is read, a kind's name checked as [marked.md](marked.md)
+   names one (`[a-z][a-z0-9-]`, 32 bytes at most) and `deploy` refused as
+   above, and a goal of any kind but `week` refused, saying it waits for
+   marked windows; so is `no_worse_than`, which holds over a period alone.
+
+## As built
+
+Small things the design left open, settled as they were built:
+
+- **Not known, and its value.** A week not known gives no value (`value`
+  null), as a value it can't stand by would read as one. A null value of
+  a whole week with the record kept is `no_value`: a share with nothing to
+  divide, a median with nothing caught, asleep or off hours with no hours
+  given. The whys are tried in order: `not_whole`, `team_owns_by_catching`
+  (a team with no labels, for `incidents.missed`, `impacts.missed`,
+  `incidents.noisy_only` and `incidents.median_lead_seconds`), `no_record`
+  (a measure that needs it, in a row whose `no_record` is true), then
+  `no_value`. `not_whole` is a week at or before the one the ledger's first
+  firing fell in, or with none.
+- **The week under way** is `open`, its value so far, and `over: true`
+  for a count whose `at_most` it is past already (a measure lower is
+  better, neither a share nor a time).
+- **A goal's `critical`** is its own: the summary's `critical=` changes the
+  row's `critical`, not a goal's, whose list is `critical` when left out.
+- **In the ledger** (020): `team_id` is 0 for everyone's and for each
+  team's, `every_team` 1 marking the latter; a bound is kept as the file
+  wrote it, as text, in `at_least`, `at_most` or `no_worse_than` (so that
+  SQLite and Postgres keep it alike), and `by` in `slack` (`BY` is a
+  word of SQL's). A team a goal names is named by something declared: the
+  UI deletes or renames it no more, and a file that no longer declares it
+  gives it back to the UI rather than delete it.
+- **The leader's work** reads the twelve whole weeks before this one and
+  this one, for everyone and each team a goal is of, after each round in
+  which the ledger or the week changed: what `/metrics`' weeks met needs,
+  and within the 13 weeks the design bounds it to. `goal.missed` is told
+  of the last whole week alone, once its cursor has passed, keyed on the
+  goal, its team's id and the week, which only moves on.
+- **A goal's task** keeps, beside it in the ledger's meta, the week it was
+  made for and what was said on it since, written in the same write as
+  each comment: "Missed again", "Met" and "No longer missed", each once a
+  week. A week said missed on a task is one a task was made for, so that,
+  once the task is done or dropped, `--goal-tasks` makes the next for a
+  later week missed, not again for that one. The task's goal is set as it
+  is made, and kept through edits.
+- **With one press**, Make it a task posts to `POST /goals/task`, the goal,
+  its team and the week's Monday, and the server works the week out again
+  and writes the title and the text: a week no longer missed is refused, a
+  goal with a task open goes to it, and a team's editor makes their own
+  team's alone.
+- **Words.** A week missed reads "not met" on the Goals page, beside
+  "met" and "not known"; a sentence about a goal still says "missed".

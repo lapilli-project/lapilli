@@ -274,6 +274,10 @@ type Config struct {
 	// ProposalsExpire closes a proposal that waited for approval longer
 	// (docs/design/changes.md): 0 for never.
 	ProposalsExpire time.Duration
+	// GoalTasks makes a task for each goal --config declares that a whole
+	// week missed, 20 a run at most (docs/design/goals.md): off unless
+	// turned on, as Lapilli would make tasks nobody asked for.
+	GoalTasks bool
 }
 
 // AlarmsAt is an --alarms: the source a cloud's alarms are named by, and
@@ -417,7 +421,12 @@ type Server struct {
 	grantsC    grantsCache
 	creds      creditCache
 	hours      hoursCache
-	outs       outcomesCache
+	// goalsC are the goals the ledger holds, goalRows the goals' weeks the
+	// pages read, and goalsK what the leader worked out of them last.
+	goalsC   goalsCache
+	goalRows goalRowsCache
+	goalsK   goalsKept
+	outs     outcomesCache
 	// wait keeps the counts the sidebar shows.
 	wait waitingCache
 	// saidRules are the rules as last read, for what they say.

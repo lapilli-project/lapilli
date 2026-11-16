@@ -32,7 +32,7 @@ type ctxKey struct{}
 // The pages that show one team's, and the pages that show a period of 1,
 // 4 or 12 weeks: the bar offers each only where the page honours it.
 var (
-	teamPages  = map[string]bool{"overview": true, "rules": true, "incidents": true, "tasks": true}
+	teamPages  = map[string]bool{"overview": true, "rules": true, "incidents": true, "tasks": true, "goals": true}
 	weeksPages = map[string]bool{"rules": true, "incidents": true, "rule": true}
 )
 

@@ -21,6 +21,7 @@ func TestServeConfigFlags(t *testing.T) {
 	}{
 		{[]string{"--config", "/no/such/config.yaml"}, "no such file"},
 		{[]string{"--config-prune"}, "--config-prune deletes what --config no longer declares"},
+		{[]string{"--goal-tasks"}, "--goal-tasks makes tasks for the goals --config declares"},
 		{[]string{"--config", good, "--read-only"}, "--read-only refuses writes"},
 		{[]string{"--proposals-expire", "soon"}, "--proposals-expire soon: want a duration"},
 		{[]string{"--proposals-expire", "10m"}, "--proposals-expire 10m: want a duration"},
@@ -37,13 +38,14 @@ func TestServeConfigFlags(t *testing.T) {
 	// What the flags take, given well.
 	for _, args := range [][]string{
 		{"--config", good, "--config-prune", "--proposals-expire", "30d"},
+		{"--config", good, "--goal-tasks"},
 		{"--config", good, "--config-prune=false", "--proposals-expire", "0"},
 		{"--config", good, "--proposals-expire", "0s"},
 		{"--config", good, "--proposals-expire", "0d"},
 	} {
 		args = append([]string{"--rules", rulesFile, "--prometheus", "http://x"}, args...)
 		if _, err := parseFlags(args, func(name, val string) (bool, error) {
-			return name == "--config" || name == "--config-prune" || name == "--proposals-expire", nil
+			return name == "--config" || name == "--config-prune" || name == "--goal-tasks" || name == "--proposals-expire", nil
 		}); err != nil {
 			t.Errorf("%v: %v", args, err)
 		}

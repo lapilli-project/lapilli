@@ -85,6 +85,7 @@
 {{with .Unknown}}<tr><td colspan="4">{{t "Its turns name people --on-call doesn't, whose turns go by the team's hours: %s." (join . ", ")}}</td></tr>{{end}}
 {{with .Notes}}<tr><td colspan="4" class="quiet">{{t "Passed over in its feed: %s" (join . "; ")}}</td></tr>{{end}}{{end}}</tbody>
 </table></div>{{end}}
+{{with .GoalTasksWait}}<p class="notice status-info" role="status"><span class="sign" aria-hidden="true">↻</span> {{t "%d tasks for goals missed wait for the runs after: a run makes 20 at most (--goal-tasks)." .}} <a href="{{$.Link "/goals"}}">{{t "Goals"}}</a></p>{{end}}
 {{with .Stopped}}<h2>{{t "Reports stopped"}}</h2>
 <p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "Their team was removed, so they aren't sent until they name another: %s." (join . ", ")}} <a href="{{$.Link "/reports"}}">{{t "Reports"}}</a></p>{{end}}
 <h2>{{t "Changes made here"}}</h2>

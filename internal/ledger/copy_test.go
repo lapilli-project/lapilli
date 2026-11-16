@@ -96,6 +96,14 @@ func fill(t testing.TB, l *Ledger) {
 	if err := l.SetMeta(ctx, "ledger-id", "0123456789ab"); err != nil {
 		t.Fatal(err)
 	}
+	// A goal --config declares, and a task about it (docs/design/goals.md).
+	if _, skipped, err := l.Reconcile(ctx, Declared{Goals: []DeclaredGoal{{Goal: Goal{Name: "none-missed", Measure: "incidents.missed", AtMost: "0"}, Line: 1}}},
+		Leave{}, opts); err != nil || len(skipped) > 0 {
+		t.Fatal(skipped, err)
+	}
+	if _, err := l.MakeGoalTask(ctx, Task{Title: "Goal none-missed missed", Kind: "decide", Goal: "none-missed"}, Week(l.Day(t0)), "ana"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // A ledger copied into an empty one is the same ledger: every row, read
@@ -129,7 +137,7 @@ func TestCopy(t *testing.T) {
 		rows[tb.Name] = tb.Rows
 	}
 	for _, tb := range []string{"firings", "series", "rules", "incidents", "catches", "days", "weeks", "versions", "docs", "teams", "notes",
-		"windows", "tasks", "comments", "grants", "reports", "notifications", "notified", "sources", "on_call_turns", "results", "outbox", "changes", "meta"} {
+		"windows", "tasks", "comments", "grants", "reports", "notifications", "notified", "sources", "on_call_turns", "results", "outbox", "changes", "meta", "goals"} {
 		if rows[tb] == 0 {
 			t.Errorf("%s: nothing copied", tb)
 		}
@@ -158,6 +166,7 @@ func TestCopy(t *testing.T) {
 	same("the report", func(l *Ledger) (any, error) { return l.Report(ctx, t0, t0.Add(24*time.Hour), opts, true) })
 	same("the weeks", func(l *Ledger) (any, error) { return l.Weeks(ctx, Week(l.Day(t0))-7, Week(l.Day(t0))+7) })
 	same("the tasks", func(l *Ledger) (any, error) { return l.Tasks(ctx, TaskQuery{}) })
+	same("the goals", func(l *Ledger) (any, error) { return l.Goals(ctx) })
 	same("the changes", func(l *Ledger) (any, error) { return l.Changes(ctx, 100) })
 	same("the notifications", func(l *Ledger) (any, error) { return l.Notifications(ctx, t0, t0.Add(24*time.Hour)) })
 	same("the sources", func(l *Ledger) (any, error) { return l.Sources(ctx) })

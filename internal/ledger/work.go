@@ -387,7 +387,8 @@ func namedByDeclared(t *txn, id int64) error {
 	var named bool
 	if err := t.QueryRowContext(t.ctx, `SELECT EXISTS (SELECT 1 FROM windows WHERE team_id = ? AND declared = 1)
 		OR EXISTS (SELECT 1 FROM reports WHERE team_id = ? AND declared = 1)
-		OR EXISTS (SELECT 1 FROM grants WHERE team_id = ? AND declared = 1)`, id, id, id).Scan(&named); err != nil {
+		OR EXISTS (SELECT 1 FROM grants WHERE team_id = ? AND declared = 1)
+		OR EXISTS (SELECT 1 FROM goals WHERE team_id = ? AND every_team = 0)`, id, id, id, id).Scan(&named); err != nil {
 		return err
 	}
 	if named {
@@ -1442,6 +1443,9 @@ type Task struct {
 	Body     string    `json:"body,omitempty"`
 	// Link is the task's issue in a tracker, if it has one.
 	Link string `json:"link,omitempty"`
+	// Goal is the goal it is about, by name (docs/design/goals.md): set as
+	// it is made, and kept as text when the goal is no longer declared.
+	Goal string `json:"goal,omitempty"`
 	// Done is when it was done, while it is.
 	Done      time.Time `json:"done,omitzero"`
 	Created   time.Time `json:"created"`
@@ -1456,12 +1460,15 @@ var (
 	TaskStatuses = []string{"open", "doing", "done", "dropped"}
 )
 
-// TaskQuery picks tasks: of these statuses (any when none), about a rule
-// or an incident, of a team, the latest changed first, Limit of them.
+// TaskQuery picks tasks: of these statuses (any when none), about a rule,
+// an incident or a goal (AnyGoal: any goal), of a team, the latest changed
+// first, Limit of them.
 type TaskQuery struct {
 	Status   []string
 	Rule     string
 	Incident string
+	Goal     string
+	AnyGoal  bool
 	TeamID   int64
 	Limit    int
 }
@@ -1471,12 +1478,12 @@ func scanTask(s scanner) (Task, error) {
 	var due, done sql.NullInt64
 	var created, updated int64
 	err := s.Scan(&t.ID, &t.Title, &t.Kind, &t.Rule, &t.Incident, &t.TeamID, &t.Assignee, &t.Status, &due, &t.Body, &t.Link,
-		&done, &created, &t.CreatedBy, &updated, &t.By)
+		&done, &created, &t.CreatedBy, &updated, &t.By, &t.Goal)
 	t.Due, t.Done, t.Created, t.Updated = fromNull(due), fromNull(done), unix(created), unix(updated)
 	return t, err
 }
 
-const taskColumns = `id, title, kind, rule, incident, coalesce(team_id, 0), assignee, status, due, body, link, done_at, created, created_by, updated, updated_by`
+const taskColumns = `id, title, kind, rule, incident, coalesce(team_id, 0), assignee, status, due, body, link, done_at, created, created_by, updated, updated_by, goal`
 
 // Tasks are the tasks a query picks.
 func (l *Ledger) Tasks(ctx context.Context, q TaskQuery) ([]Task, error) {
@@ -1494,6 +1501,13 @@ func (l *Ledger) Tasks(ctx context.Context, q TaskQuery) ([]Task, error) {
 	if q.Incident != "" {
 		sq += " AND incident = ?"
 		args = append(args, q.Incident)
+	}
+	if q.Goal != "" {
+		sq += " AND goal = ?"
+		args = append(args, q.Goal)
+	}
+	if q.AnyGoal {
+		sq += " AND goal != ''"
 	}
 	if q.TeamID != 0 {
 		sq += " AND team_id = ?"
@@ -1554,7 +1568,18 @@ func (l *Ledger) PatchTask(ctx context.Context, id int64, patch []byte, by strin
 // putTask makes the task edit gives (from a zero Task when id is 0), or
 // changes the task with id to what edit gives from it, in one write.
 func (l *Ledger) putTask(ctx context.Context, id int64, edit func(was Task) (Task, error), by string) (int64, error) {
+	var out int64
 	err := l.write(ctx, func(tx *txn) error {
+		var err error
+		out, err = l.putTaskIn(tx, id, edit, by)
+		return err
+	})
+	return out, err
+}
+
+// putTaskIn is putTask, in a write.
+func (l *Ledger) putTaskIn(tx *txn, id int64, edit func(was Task) (Task, error), by string) (int64, error) {
+	err := func() error {
 		var was Task
 		if id != 0 {
 			var err error
@@ -1573,6 +1598,11 @@ func (l *Ledger) putTask(ctx context.Context, id int64, edit func(was Task) (Tas
 		t, err := edit(was)
 		if err != nil {
 			return err
+		}
+		if was.ID != 0 {
+			// A task's goal is the one it was made for: an edit of its
+			// form, which doesn't carry it, or a patch, doesn't change it.
+			t.Goal = was.Goal
 		}
 		if err := errors.Join(checkTask(&t), inScope(tx, t.TeamID)); err != nil {
 			return err
@@ -1593,8 +1623,8 @@ func (l *Ledger) putTask(ctx context.Context, id int64, edit func(was Task) (Tas
 		what := fmt.Sprintf("task %d changed", id)
 		if id == 0 {
 			if err := tx.QueryRowContext(tx.ctx, `INSERT INTO tasks (title, kind, rule, incident, team_id, assignee, status, due, body, link, done_at,
-				created, created_by, updated, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-				t.Title, t.Kind, t.Rule, t.Incident, team, t.Assignee, t.Status, nullable(t.Due), t.Body, t.Link, done, now, by, now, by).Scan(&id); err != nil {
+				created, created_by, updated, updated_by, goal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+				t.Title, t.Kind, t.Rule, t.Incident, team, t.Assignee, t.Status, nullable(t.Due), t.Body, t.Link, done, now, by, now, by, t.Goal).Scan(&id); err != nil {
 				return err
 			}
 			what = fmt.Sprintf("task %d made", id)
@@ -1627,7 +1657,7 @@ func (l *Ledger) putTask(ctx context.Context, id int64, edit func(was Task) (Tas
 			}
 		}
 		return change(tx, by, what, nil, kept)
-	})
+	}()
 	return id, err
 }
 
@@ -1650,6 +1680,11 @@ func checkTask(t *Task) error {
 	}
 	if strings.ContainsFunc(t.Assignee, unicode.IsControl) {
 		return invalid("an assignee is a name, on one line")
+	}
+	if t.Goal != "" {
+		if err := CheckGoalName(t.Goal); err != nil {
+			return err
+		}
 	}
 	if t.Link != "" {
 		u, err := url.Parse(t.Link)

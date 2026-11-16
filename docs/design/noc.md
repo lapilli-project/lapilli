@@ -221,7 +221,11 @@ share is null with nothing to divide by, and every share caught (`precision`,
 no incident on in it or in the two weeks before it, and no `--impact` read
 over it, says `no_record: true`.
 `off_hours` and `asleep` are null with
-no hours given, a median null with nothing caught. `TestSummaryAPI` holds
+no hours given, a median null with nothing caught. With goals declared in
+`--config` ([goals.md](goals.md)), each row gains `goals`, the goals of its
+team, each with its value and the week's `result` (`met`, `missed`,
+`unknown` with `why`, or `open` in a row that is partial): a field added,
+left out with none declared. `TestSummaryAPI` holds
 the fields by name. [docs/numbers.md](../numbers.md) defines each number and
 counts the week's again from `/api/v1/report` over the same week.
 

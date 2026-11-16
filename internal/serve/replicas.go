@@ -218,6 +218,9 @@ type sharedStatus struct {
 	Config *configShown `json:"config,omitempty"`
 	// Sources is what the leader saw of where incidents come from.
 	Sources *sourcesSeen `json:"sources,omitempty"`
+	// Goals is what the leader worked out of the goals after its last
+	// round (docs/design/goals.md).
+	Goals *goalsShown `json:"goals,omitempty"`
 }
 
 // ownStatus is this replica's status, as it would say it.
@@ -238,6 +241,7 @@ func (s *Server) ownStatus() sharedStatus {
 	}
 	st.Config = s.configShown()
 	st.Sources = s.sourcesNow()
+	st.Goals = s.goalsShownNow()
 	return st
 }
 

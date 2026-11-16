@@ -23,6 +23,37 @@
   `format=csv&redact=true`, the firings quiet windows excused and the
   team column among it; stderr isn't redacted, and the run says so
   there.
+- **Goals: what an operations team holds its alerting to**
+  (docs/design/goals.md, steps 1 and 2). `--config` takes a new key,
+  `goals:`, each a bound on one of `/api/v1/summary`'s numbers, for
+  everyone, a team, or each team (`team: "*"`): `measure:
+  critical.share_caught`, `at_least: 0.8`; `incidents.missed`, `at_most:
+  0`; a team's `critical.firings` with its own `critical` severities. A
+  goal breaking a rule (one bound of `at_least`, `at_most` and
+  `no_worse_than`; `by` with `no_worse_than` alone; `critical` with a
+  `critical.*` measure; a name unique across everyone's and every team's)
+  refuses the file, with its line; one of a team there isn't is skipped
+  and said. Each whole week, from Monday in `--tz`, is met, missed or not
+  known, with why (`no_record`, `no_value`: nothing to divide,
+  `not_whole`, `team_owns_by_catching`); the week under way is `open`, a
+  count past its `at_most` already over so far. They show on a new page,
+  Goals (under Reporting), on the overview (a card, and each goal missed
+  last week first in What to look at, with Make it a task), in the weekly
+  digest and `digest.ready` (`goals`), in reports (a section, `goals`),
+  in each row of `/api/v1/summary` (`goals`; `schema` stays 1) and MCP's
+  `summary` and `overview`. After each round the leader works out the last
+  whole week and the twelve before it, from one read of thirteen weeks,
+  for `/metrics`: `lapilli_goal_met`, `lapilli_goal_known`,
+  `lapilli_goal_value` and `lapilli_goal_weeks_met` (`goal`, [`team`]),
+  which a scrape reads and doesn't work out. `goal.missed` is told once
+  for each goal, team and week. `--goal-tasks` (`serve.goalTasks`) makes a
+  task, of kind `decide`, for each goal missed, 20 a run at most, the rest
+  waiting, as the Run history page says; an open one is commented on as
+  later weeks are missed again, met, or no longer missed. Goals over a
+  marked window's occurrences (`each: KIND`, `no_worse_than: before`) are
+  read and refused, saying why, until marked windows are kept. Without
+  `goals:`, nothing changes. Schema 020 adds `goals` and `tasks.goal`;
+  going back takes a copy of the ledger from before.
 
 - **`lapilli preflight`: what serve will meet, before it is deployed.**
   It takes `lapilli serve`'s flags, read and refused as serve reads them

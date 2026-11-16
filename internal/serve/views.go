@@ -1809,6 +1809,9 @@ type runsView struct {
 	OnCall []onCallRead
 	// Config is what the leader last made of --config.
 	Config *configShown
+	// GoalTasksWait are the tasks for goals missed the leader's last
+	// round left for the runs after (--goal-tasks makes 20 a run).
+	GoalTasksWait int
 }
 
 // runsCheck is how far the replay has been set beside what really fired,
@@ -1851,9 +1854,12 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 	}
 	// The leader's, on a replica that follows.
 	st := s.shownStatus()
-	v := runsView{runs, cs, cursor, st.Runs, st.Took, srcs, s.cfg.FiringsToken != "", nil, nil, s.onCallShown(st), s.configFor(r)}
+	v := runsView{runs, cs, cursor, st.Runs, st.Took, srcs, s.cfg.FiringsToken != "", nil, nil, s.onCallShown(st), s.configFor(r), 0}
 	if v.Stopped, err = s.stoppedReports(r.Context()); err != nil {
 		return nil, err
+	}
+	if st.Goals != nil {
+		v.GoalTasksWait = st.Goals.Waiting
 	}
 	if s.checking() {
 		c := &runsCheck{Series: s.cfg.CheckSeries}
