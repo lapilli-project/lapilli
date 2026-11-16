@@ -21,6 +21,10 @@
 </div>{{end}}
 </section>
 
+{{with .Marked}}<section class="card marked-tile" aria-labelledby="marked-tile-h">
+<h2 id="marked-tile-h">{{if .On}}{{t "On now"}}{{else}}{{t "The latest marked window"}}{{end}}: <a href="{{$.Link (printf "/marked/%d" .M.ID)}}"><bdi>{{.Title}}</bdi></a> <span class="quiet"><bdi>{{.Kind}}</bdi></span></h2>
+<p>{{at $loc .Start}} → {{at $loc .End}}. {{t "Precision inside %s, the four weeks before %s; incidents missed in it: %d." .Inside.Precision .Before.Precision (inMissed .Inside)}} <a href="{{$.Link "/marked"}}">{{t "Marked windows"}} <span aria-hidden="true">→</span></a></p>
+</section>{{end}}
 <p class="tabs marks">{{t "Marked on the charts"}}:{{if .Marks.HasDeploys}} <a href="{{$.Link "/" "marks" .Marks.DeploysTo}}">{{if .Marks.Deploys}}{{t "Hide deploys"}}{{else}}{{t "Show deploys"}}{{end}}</a>{{end}} <a href="{{$.Link "/" "marks" .Marks.WindowsTo}}">{{if .Marks.Windows}}{{t "Hide quiet windows"}}{{else}}{{t "Show quiet windows"}}{{end}}</a></p>
 <div class="cards">
 <figure class="card">

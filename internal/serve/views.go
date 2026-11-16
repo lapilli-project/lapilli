@@ -774,6 +774,12 @@ func (s *Server) rulesOver(r *http.Request, week int64) (rulesData, error) {
 	if team != nil {
 		t.only(o, *team)
 	}
+	// Inside a kind of marked window, or outside it: the rules' counts
+	// are the kind's, or the rest (docs/design/marked.md).
+	in, out := markedAsked(r.URL.Query())
+	if err := s.markedOnly(r.Context(), t, in, out); err != nil {
+		return rulesData{}, err
+	}
 	lines, silent, err := s.ruleLines(r.Context(), lang(r), t, n)
 	if err != nil {
 		return rulesData{}, err
@@ -889,6 +895,9 @@ func (s *Server) reviews(ctx context.Context, rule string, limit int) ([]reviewV
 
 type ruleView struct {
 	ruleLine
+	// Kinds are the kinds of marked window it fired in over the weeks
+	// shown, each inside beside outside.
+	Kinds []ruleKind
 	// Unseen says what its replay can't see (rules.Rule.Unseen).
 	Unseen  []string
 	Changes []change
@@ -1037,6 +1046,11 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 		}
 	}
 	v.Known = v.Known || slices.Contains(silent, name)
+	// Each kind of marked window it fired in over the weeks shown, inside
+	// beside outside (docs/design/marked.md).
+	if v.Kinds, err = s.ruleKinds(ctx, t, id, n, v.ruleLine); err != nil {
+		return ruleView{}, err
+	}
 	var vs []version
 	var last *rules.Rule
 	if s.replaying() {
@@ -1279,6 +1293,8 @@ type incidentLine struct {
 	Lead       string
 	Nearly     string
 	NearlyMore int
+	// Kinds are the kinds of marked window it started during.
+	Kinds []string
 }
 
 // impactTitle is the title an impact window is found with.
@@ -1429,7 +1445,7 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 		v.Lead = leadText(l, time.Duration(*m)*time.Second)
 	}
 	slices.Reverse(v.Lines)
-	return v, nil
+	return v, s.incidentKinds(ctx, v.Lines)
 }
 
 type incidentView struct {
@@ -1537,6 +1553,11 @@ func (s *Server) incidentPage(r *http.Request) (any, error) {
 	if v.Timeline, err = s.timeline(ctx, lang(r), in, t, nms); err != nil {
 		return nil, err
 	}
+	one := []incidentLine{v.incidentLine}
+	if err := s.incidentKinds(ctx, one); err != nil {
+		return nil, err
+	}
+	v.Kinds = one[0].Kinds
 	v.Comments, err = s.commentsView(r, "incident", in.ID)
 	return v, err
 }
@@ -1993,6 +2014,18 @@ var funcs = template.FuncMap{
 		r := struct{ Every, On, Until string }{Every: w.Every, On: w.On}
 		if !w.Until.IsZero() {
 			r.Until = w.Until.In(loc).Format("2006-01-02")
+		}
+		return r
+	},
+	// inMissed are the incidents and impact windows an occurrence of a
+	// marked window missed.
+	"inMissed": func(c markedCount) int { return c.Incidents.Missed + c.Impacts.Missed },
+	// markedRepeats is how a marked window repeats, as "repeats" says a
+	// quiet window's.
+	"markedRepeats": func(m ledger.Marked, loc *time.Location) struct{ Every, On, Until string } {
+		r := struct{ Every, On, Until string }{Every: m.Every, On: m.On}
+		if !m.Until.IsZero() {
+			r.Until = m.Until.In(loc).Format("2006-01-02")
 		}
 		return r
 	},

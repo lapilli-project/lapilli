@@ -65,6 +65,10 @@ var stableMetrics = []struct {
 	{"lapilli_goal_known", []string{"goal"}, []string{"team"}},
 	{"lapilli_goal_value", []string{"goal"}, []string{"team"}},
 	{"lapilli_goal_weeks_met", []string{"goal"}, []string{"team"}},
+	{"lapilli_rule_firings_marked", []string{"rule", "kind"}, []string{"severity", "team"}},
+	{"lapilli_rule_caught_marked", []string{"rule", "kind"}, []string{"severity", "team"}},
+	{"lapilli_marked_on", []string{"kind"}, nil},
+	{"lapilli_serve_marked_read_timestamp_seconds", nil, nil},
 }
 
 // The metrics docs/numbers.md lists keep their names and their labels: a
@@ -271,6 +275,11 @@ func TestNumbersRecountServe(t *testing.T) {
 			}
 			if got != want {
 				t.Errorf("%s: counted again %s, %s %s", again.name, got, has.as, want)
+			}
+			// The fixture's marked windows mark firings: a count of none
+			// would test nothing.
+			if strings.HasPrefix(again.name, "marked") && (want == "[]" || want == "{}") {
+				t.Errorf("%s: %s %s: a test of nothing", again.name, has.as, want)
 			}
 			compared++
 		}

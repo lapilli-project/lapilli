@@ -82,6 +82,11 @@ type Config struct {
 	// ledger's deploys (docs/design/noc.md); Options.DeployAfter is how
 	// long after one a firing still came during it.
 	Deploys string
+	// Marked is the marked file (--marked), read again each run, which
+	// owns the marked windows it holds; Marks are the expressions (--mark)
+	// whose windows are read each run (docs/design/marked.md).
+	Marked string
+	Marks  []Mark
 	// RunbookAnnotations are the annotations a rule's runbook is read
 	// from, the first set: nil for content.RunbookAnnotations. RunbookBase
 	// is an https URL a runbook that is a path in the rules' repository is
@@ -413,6 +418,11 @@ type Server struct {
 	// deploysUnread is set once a ledger keeping deploys with no
 	// --deploys to read was logged.
 	deploysUnread atomic.Bool
+	// markedRead is when the marked file was last read, and kept, in Unix
+	// seconds; forgotMarks, that the keys of expressions no longer given
+	// were let go.
+	markedRead  atomic.Int64
+	forgotMarks atomic.Bool
 	// slackTried is when the worker last tried to post the digest.
 	slackTried time.Time
 	status     status

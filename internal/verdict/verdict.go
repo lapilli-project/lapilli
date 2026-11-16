@@ -108,6 +108,9 @@ type Judged struct {
 	// windows keep its record, and so does reading those of them that keep
 	// the record, from when all of them started.
 	Signals []string `json:"signals,omitempty"`
+	// Marked are, in lapilli serve, the kinds of marked window it came
+	// during (docs/design/marked.md), in order: of its rule's Marked.
+	Marked []string `json:"marked,omitempty"`
 	// Excused is, in lapilli serve's CSV, a firing a quiet window excused:
 	// neither white nor black, and in none of the numbers. A report's
 	// Firings leave such firings out.
@@ -175,6 +178,19 @@ type RuleResult struct {
 	// ImpactRule is, with named impact signals, the rule entry that names
 	// it (Settings.ImpactRules), from 1; 0 for none.
 	ImpactRule int `json:"impact_rule,omitempty"`
+	// Marked are, in lapilli serve, by kind of marked window, the firings
+	// that came during one of the kind (docs/design/marked.md): in
+	// Firings and White as any other, and counted apart.
+	Marked map[string]MarkedCount `json:"marked,omitempty"`
+}
+
+// MarkedCount is a rule's firings during the windows of one kind: those
+// that caught something, re-fired, and weren't judged (of Unjudged).
+type MarkedCount struct {
+	Firings  int `json:"firings"`
+	Caught   int `json:"caught"`
+	Refired  int `json:"refired"`
+	Unjudged int `json:"unjudged,omitempty"`
 }
 
 // Judged is how many of its firings were judged: those with a record at

@@ -336,7 +336,7 @@ func (l *Ledger) zone(ctx context.Context) error {
 				return err
 			}
 		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM days; DELETE FROM weeks"); err != nil {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM days; DELETE FROM weeks; DELETE FROM marked_days; DELETE FROM marked_weeks"); err != nil {
 			return err
 		}
 		var lo, hi sql.NullInt64
@@ -374,6 +374,9 @@ type txn struct {
 	all   bool
 	// versioned are the names the versions of the rules hold, read once.
 	versioned map[string]bool
+	// marking is whether the ledger keeps a kind of marked window: 0 not
+	// read yet, 1 it does, 2 it doesn't (marks).
+	marking int
 }
 
 // versionNames are the names any version of the rules holds, read the

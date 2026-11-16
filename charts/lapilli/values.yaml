@@ -514,6 +514,24 @@ serve:
       key: deploys.yaml
     before: ""  # 0 when empty; a day at most
     after: ""   # 10m when empty; a day at most
+  # Marked windows (docs/design/marked.md): a sale, a launch, a campaign. A
+  # ConfigMap holding --marked's file under key, mounted at
+  # /etc/lapilli/marked/ and read again each run (only when it changed); and
+  # PromQL expressions (--mark), eight at most, each a kind and an
+  # expression that returns something while a window of the kind is on,
+  # with the labels of its series its windows keep (match: none by
+  # default, so each marks every firing). A firing that starts during a
+  # marked window, and agrees with it, is marked with its kind: judged as
+  # ever, never excused, and every count read inside the kind and outside.
+  # Windows can be declared under config's marked: too, or kept in the UI.
+  marked:
+    configMap:
+      name: ""
+      key: marked.yaml
+  mark: []
+  # - kind: sale
+  #   expr: shop_sale_active == 1
+  #   match: [region]
   # On-call schedules read from the iCalendar feeds on-call tools export
   # (see the README's "Shifts from on-call schedules"): --on-call's file, the
   # key of a ConfigMap, and a Secret holding the feeds' URLs and tokens,

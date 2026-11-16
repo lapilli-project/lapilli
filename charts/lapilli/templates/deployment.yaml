@@ -176,6 +176,15 @@ spec:
             - {{ printf "--deploy-after=%s" . | quote }}
             {{- end }}
             {{- end }}
+            {{- if ($s.marked).configMap.name }}
+            - {{ printf "--marked=/etc/lapilli/marked/%s" $s.marked.configMap.key | quote }}
+            {{- end }}
+            {{- range $m := $s.mark }}
+            - {{ printf "--mark=%s=%s" $m.kind $m.expr | quote }}
+            {{- with $m.match }}
+            - {{ printf "--mark-match=%s=%s" $m.kind (join "," .) | quote }}
+            {{- end }}
+            {{- end }}
             {{- if $s.trackers.tokenSecret.name }}
             - {{ printf "--tasks-token-file=/var/run/lapilli/tasks-token/%s" $s.trackers.tokenSecret.key | quote }}
             {{- end }}
@@ -405,6 +414,11 @@ spec:
               mountPath: /etc/lapilli/deploys
               readOnly: true
             {{- end }}
+            {{- if ($s.marked).configMap.name }}
+            - name: marked
+              mountPath: /etc/lapilli/marked
+              readOnly: true
+            {{- end }}
             {{- if $s.onCall.secret }}
             - name: on-call-secrets
               mountPath: /var/run/lapilli/on-call
@@ -525,6 +539,11 @@ spec:
         - name: deploys
           configMap:
             name: {{ $s.deploys.configMap.name }}
+        {{- end }}
+        {{- if ($s.marked).configMap.name }}
+        - name: marked
+          configMap:
+            name: {{ $s.marked.configMap.name }}
         {{- end }}
         {{- if $s.onCall.secret }}
         - name: on-call-secrets

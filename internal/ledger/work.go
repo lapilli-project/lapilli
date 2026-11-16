@@ -388,7 +388,8 @@ func namedByDeclared(t *txn, id int64) error {
 	if err := t.QueryRowContext(t.ctx, `SELECT EXISTS (SELECT 1 FROM windows WHERE team_id = ? AND declared = 1)
 		OR EXISTS (SELECT 1 FROM reports WHERE team_id = ? AND declared = 1)
 		OR EXISTS (SELECT 1 FROM grants WHERE team_id = ? AND declared = 1)
-		OR EXISTS (SELECT 1 FROM goals WHERE team_id = ? AND every_team = 0)`, id, id, id, id).Scan(&named); err != nil {
+		OR EXISTS (SELECT 1 FROM goals WHERE team_id = ? AND every_team = 0)
+		OR EXISTS (SELECT 1 FROM marked WHERE team_id = ? AND declared = 1)`, id, id, id, id, id).Scan(&named); err != nil {
 		return err
 	}
 	if named {
@@ -504,7 +505,7 @@ func (l *Ledger) deleteTeamAs(t *txn, id int64, by, what string) error {
 	// What was its stops, and its editors go with it, in this write: a
 	// team made later may be given its id.
 	for _, q := range []string{"UPDATE reports SET team_id = -team_id WHERE team_id = ?", "UPDATE windows SET team_id = -team_id WHERE team_id = ?",
-		"DELETE FROM grants WHERE team_id = ?"} {
+		"UPDATE marked SET team_id = -team_id WHERE team_id = ?", "DELETE FROM grants WHERE team_id = ?"} {
 		if _, err := t.ExecContext(t.ctx, q, id); err != nil {
 			return err
 		}
@@ -1385,17 +1386,20 @@ func (l *Ledger) JudgePending(ctx context.Context, o verdict.Options) error {
 		var done bool
 		err := l.write(ctx, func(t *txn) error {
 			v, err := l.meta(t.ctx, t, "pending")
-			if err != nil || v == "" || v == "null" || v == "[]" {
-				done = true
+			if err != nil {
 				return err
 			}
 			var spans [][2]int64
-			if err := json.Unmarshal([]byte(v), &spans); err != nil {
-				return err
+			if v != "" {
+				if err := json.Unmarshal([]byte(v), &spans); err != nil {
+					return err
+				}
 			}
 			if len(spans) == 0 {
+				// Nothing left to judge again: the kinds of marked window
+				// nothing names any more mark nothing, and are let go.
 				done = true
-				return nil
+				return l.letGoKinds(t)
 			}
 			judged := int64(0)
 			for n := 0; len(spans) > 0 && judged < week && n < pendingPerWrite; n++ {

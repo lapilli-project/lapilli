@@ -129,6 +129,12 @@ func (h *history) QueryRange(ctx context.Context, expr string, start, end time.T
 			at := now.Add(-10*time.Hour + time.Duration(i)*time.Minute)
 			out = append(out, run(map[string]string{"instance": fmt.Sprintf("api-7f9c-%02d", i), "job": "api"}, at, at.Add(20*time.Minute)))
 		}
+	case "sale_active == 1":
+		// A sale on in two regions at once, from fifty hours ago for four:
+		// two series, two windows, which mark the same firings once.
+		for _, region := range []string{"kr", "us"} {
+			out = append(out, run(map[string]string{"__name__": "sale_active", "region": region, "instance": "shop-1"}, now.Add(-50*time.Hour), now.Add(-46*time.Hour)))
+		}
 	case "nope(up)":
 		// What Prometheus's parser refuses.
 		return nil, &prom.APIError{Status: 400, Msg: `bad_data: 1:1: parse error: unknown function with name "nope"`}

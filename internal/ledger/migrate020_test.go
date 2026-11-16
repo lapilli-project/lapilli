@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ func TestMigrate020(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(undo020, "UPDATE schema_version SET version = 19") {
+		for _, q := range append(slices.Concat(undo021, undo020), "UPDATE schema_version SET version = 19") {
 			if _, err := c.Exec(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}
@@ -69,7 +70,7 @@ func TestMigrate020(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, q := range append(undo020, "PRAGMA user_version = 19") {
+		for _, q := range append(slices.Concat(undo021, undo020), "PRAGMA user_version = 19") {
 			if _, err := l.w.ExecContext(ctx, q); err != nil {
 				t.Fatal(q, err)
 			}

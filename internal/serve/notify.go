@@ -153,7 +153,9 @@ type notice struct {
 	Task     *ledger.Task     `json:"task,omitempty"`
 	Incident *json.RawMessage `json:"incident,omitempty"`
 	Window   *ledger.Window   `json:"window,omitempty"`
-	Comment  *ledger.Comment  `json:"comment,omitempty"`
+	// A marked window kept in the UI (docs/design/marked.md).
+	Marked  *ledger.Marked  `json:"marked,omitempty"`
+	Comment *ledger.Comment `json:"comment,omitempty"`
 	// A source firings are copied in from, gone quiet.
 	Source *ledger.Source `json:"source,omitempty"`
 	// A digest: the team it is for, when it is for one, and the report.
@@ -211,6 +213,8 @@ func (s *Server) pageOf(n notice) string {
 		path = fmt.Sprintf("/tasks/%d", n.Task.ID)
 	case n.Window != nil:
 		path = fmt.Sprintf("/windows/%d", n.Window.ID)
+	case n.Marked != nil:
+		path = fmt.Sprintf("/marked/%d", n.Marked.ID)
 	case n.Comment != nil && n.Comment.On == "task":
 		path = "/tasks/" + url.PathEscape(n.Comment.Key)
 	case n.Comment != nil && n.Comment.On == "rule":
@@ -310,6 +314,8 @@ func (s *Server) line(n notice) string {
 		return "lapilli: " + goalMissedText(l, g, n.Goal.Team, n.Goal.From, n.Goal.Value, s.cfg.Loc)
 	case n.Window != nil:
 		return tr(l, "lapilli: %s kept a quiet window, %q, from %s", who, n.Window.Title, n.Window.Start.In(s.cfg.Loc).Format("2006-01-02 15:04"))
+	case n.Marked != nil:
+		return tr(l, "lapilli: %s kept a marked window of %s, %q, from %s", who, n.Marked.Kind, n.Marked.Title, n.Marked.Start.In(s.cfg.Loc).Format("2006-01-02 15:04"))
 	case n.Source != nil:
 		return tr(l, "lapilli: nothing has been copied in from %s since %s; the job copying its firings may have stopped", n.Source.Name, n.Source.Written.In(s.cfg.Loc).Format("2006-01-02 15:04"))
 	case n.Comment != nil:

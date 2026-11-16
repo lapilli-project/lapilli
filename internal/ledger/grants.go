@@ -190,13 +190,21 @@ func hasLabels(labels map[string]string, want incident.Labels) bool {
 // quiet window: who owns what changed, and with it what they quiet.
 func (l *Ledger) pendTeamWindows(t *txn) error {
 	ws, err := l.windows(t.ctx, t, "WHERE team_id != 0")
-	if err != nil || len(ws) == 0 {
+	if err != nil {
+		return err
+	}
+	// And every team's marked window: what they mark changes too.
+	ms, err := l.markedRows(t.ctx, t, "WHERE m.team_id != 0")
+	if err != nil || len(ws)+len(ms) == 0 {
 		return err
 	}
 	now := time.Now()
-	spans := make([][2]int64, 0, len(ws))
+	spans := make([][2]int64, 0, len(ws)+len(ms))
 	for _, w := range ws {
 		spans = append(spans, w.span(now))
+	}
+	for _, m := range ms {
+		spans = append(spans, m.span(now))
 	}
 	return pend(t, spans)
 }

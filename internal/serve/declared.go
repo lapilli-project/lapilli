@@ -43,7 +43,7 @@ var configEvery = 15 * time.Second
 // configKeys are the keys of a --config file and of each thing in it, in
 // the order an export writes them.
 var configKeys = map[string][]string{
-	"":     {"teams", "windows", "reports", "grants", "goals"},
+	"":     {"teams", "windows", "reports", "grants", "goals", "marked"},
 	"team": {"name", "rules", "labels", "note", "work_hours", "sleep_hours", "tz", "shifts", "renamed_from"},
 	// A window's on is repeat_on: YAML 1.1, which Helm reads values by,
 	// takes a key on, unquoted, for true.
@@ -53,6 +53,9 @@ var configKeys = map[string][]string{
 	// A goal's bound is one of at_least, at_most and no_worse_than; by goes
 	// with no_worse_than (docs/design/goals.md).
 	"goal": {"name", "team", "measure", "at_least", "at_most", "no_worse_than", "by", "critical", "each"},
+	// A marked window (docs/design/marked.md): a kind and a title, its
+	// times as a quiet window's, and labels of one value each.
+	"marked": {"kind", "title", "team", "start", "end", "every", "repeat_on", "until", "labels"},
 }
 
 // What can be wrong with a --config file, as texts to translate: the
@@ -65,6 +68,7 @@ var (
 		"report": "unknown key %q in a report: want %s",
 		"grant":  "unknown key %q in a role: want %s",
 		"goal":   "unknown key %q in a goal: want %s",
+		"marked": "unknown key %q in a marked window: want %s",
 	}
 	wantA = map[string]string{
 		"team":   "want a team, as a mapping of %s",
@@ -72,11 +76,12 @@ var (
 		"report": "want a report, as a mapping of %s",
 		"grant":  "want a role, as a mapping of %s",
 		"goal":   "want a goal, as a mapping of %s",
+		"marked": "want a marked window, as a mapping of %s",
 	}
 	configFormats = []string{
 		"line %d: %s", "line %d (%s): %s", "the file isn't YAML: %s", "the file is more than %d bytes",
-		"one document only: --config is one file of teams, windows, reports, grants and goals",
-		"want a mapping of teams, windows, reports, grants and goals", "unknown key %q: want teams, windows, reports, grants or goals",
+		"one document only: --config is one file of teams, windows, reports, grants, goals and marked",
+		"want a mapping of teams, windows, reports, grants, goals and marked", "unknown key %q: want teams, windows, reports, grants, goals or marked",
 		"%s is given twice, on line %d too", "%s is a list", "%s is a text", "%s is a list of texts",
 		"labels are a mapping of a label's name to a value, or a list of values", "a label's name is a text", "label %s has no value",
 		"%s %q: want a time like 2026-11-02T09:30, or 2026-11-02T09:30:00+09:00", "a team has a name", "a quiet window has a title",
@@ -90,9 +95,10 @@ var (
 		"a config declares %d teams at most", "a config declares %d quiet windows at most", "a config declares %d reports at most",
 		"a config declares %d roles at most", "a config declares %d goals at most", "a goal has a name", "a goal has a measure",
 		"a goal called %s is declared on line %d already: a goal's name is unique, across everyone's and every team's",
-		"%s is a number, such as 0.8 or 40",
-		unknownIn["team"], unknownIn["window"], unknownIn["report"], unknownIn["grant"], unknownIn["goal"],
-		wantA["team"], wantA["window"], wantA["report"], wantA["grant"], wantA["goal"],
+		"%s is a number, such as 0.8 or 40", "a config declares %d marked windows at most", "a marked window has a kind and a title",
+		"label %s of a marked window has one value",
+		unknownIn["team"], unknownIn["window"], unknownIn["report"], unknownIn["grant"], unknownIn["goal"], unknownIn["marked"],
+		wantA["team"], wantA["window"], wantA["report"], wantA["grant"], wantA["goal"], wantA["marked"],
 	}
 )
 
@@ -167,7 +173,7 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 	}
 	var more yaml.Node
 	if err := dec.Decode(&more); !errors.Is(err, io.EOF) {
-		return d, badAt(&more, "one document only: --config is one file of teams, windows, reports, grants and goals")
+		return d, badAt(&more, "one document only: --config is one file of teams, windows, reports, grants, goals and marked")
 	}
 	root := &doc
 	if root.Kind == yaml.DocumentNode && len(root.Content) == 1 {
@@ -198,6 +204,8 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 				err = parseGrant(item, &d)
 			case "goals":
 				err = parseGoal(item, &d)
+			case "marked":
+				err = parseMarkedConfig(item, loc, &d)
 			}
 			if err != nil {
 				return err
@@ -219,6 +227,8 @@ func ParseConfig(b []byte, loc *time.Location) (ledger.Declared, error) {
 		err = bad("a config declares %d reports at most", ledger.MaxScheduled)
 	case len(d.Grants) > ledger.MaxGrants:
 		err = bad("a config declares %d roles at most", ledger.MaxGrants)
+	case len(d.Marked) > ledger.MaxMarkedConfig:
+		err = bad("a config declares %d marked windows at most", ledger.MaxMarkedConfig)
 	case len(d.Goals) > ledger.MaxGoals:
 		err = bad("a config declares %d goals at most", ledger.MaxGoals)
 	}
@@ -239,7 +249,7 @@ func null(n *yaml.Node) bool {
 func each(n *yaml.Node, what string, fn func(key string, v *yaml.Node) error) error {
 	if n.Kind != yaml.MappingNode {
 		if what == "" {
-			return badAt(n, "want a mapping of teams, windows, reports, grants and goals")
+			return badAt(n, "want a mapping of teams, windows, reports, grants, goals and marked")
 		}
 		return badAt(n, wantA[what], strings.Join(configKeys[what], ", "))
 	}
@@ -252,7 +262,7 @@ func each(n *yaml.Node, what string, fn func(key string, v *yaml.Node) error) er
 		seen[k.Value] = k.Line
 		if k.Kind != yaml.ScalarNode || !slices.Contains(configKeys[what], k.Value) {
 			if what == "" {
-				return badAt(k, "unknown key %q: want teams, windows, reports, grants or goals", k.Value)
+				return badAt(k, "unknown key %q: want teams, windows, reports, grants, goals or marked", k.Value)
 			}
 			return badAt(k, unknownIn[what], k.Value, strings.Join(configKeys[what], ", "))
 		}
@@ -482,6 +492,62 @@ func parseWindow(n *yaml.Node, loc *time.Location, d *ledger.Declared) error {
 	return nil
 }
 
+// parseMarkedConfig reads a marked window --config declares, as
+// parseWindow a quiet window: its until a day, or a time; each label of
+// one value.
+func parseMarkedConfig(n *yaml.Node, loc *time.Location, d *ledger.Declared) error {
+	dm := ledger.DeclaredMarked{Line: n.Line}
+	m := &dm.Marked
+	err := each(n, "marked", func(key string, v *yaml.Node) error {
+		var err error
+		switch key {
+		case "kind":
+			m.Kind, err = name(key, v)
+		case "title":
+			m.Title, err = name(key, v)
+		case "team":
+			dm.Team, err = name(key, v)
+		case "start":
+			m.Start, err = when(key, v, loc)
+		case "end":
+			m.End, err = when(key, v, loc)
+		case "every":
+			m.Every, err = text(key, v)
+		case "repeat_on":
+			m.On, err = text(key, v)
+		case "until":
+			var s string
+			if s, err = text(key, v); err == nil && s != "" {
+				if day, derr := time.ParseInLocation("2006-01-02", s, loc); derr == nil {
+					m.Until = midnight(day, loc)
+				} else {
+					m.Until, err = when(key, v, loc)
+				}
+			}
+		case "labels":
+			var ls incident.Labels
+			if ls, err = labels(v); err == nil && len(ls) > 0 {
+				m.Labels = map[string]string{}
+				for k, vs := range ls {
+					if len(vs) != 1 {
+						return badAt(v, "label %s of a marked window has one value", k)
+					}
+					m.Labels[k] = vs[0]
+				}
+			}
+		}
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(m.Kind) == "" || strings.TrimSpace(m.Title) == "" {
+		return badAt(n, "a marked window has a kind and a title")
+	}
+	d.Marked = append(d.Marked, dm)
+	return nil
+}
+
 // midnight is when a day starts in loc, as the ledger's Midnight has it:
 // where the clocks skip midnight, the first hour of the day.
 func midnight(day time.Time, loc *time.Location) time.Time {
@@ -688,6 +754,7 @@ var briefs = map[string]string{
 	ledger.KindReport: "line %d: a report that can't be kept",
 	ledger.KindGrant:  "line %d: a role that can't be kept",
 	ledger.KindGoal:   "line %d: a goal that can't be kept",
+	ledger.KindMarked: "line %d: a marked window that can't be kept",
 }
 
 // Shown is the problem in a language: why, for an admin; its line and

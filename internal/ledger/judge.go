@@ -381,7 +381,8 @@ func (l *Ledger) cover(t *txn, lo, hi int64, o verdict.Options) (int64, int64, e
 
 // stones gives each firing that started in [lo, hi] its stones: white when
 // it catches an incident, refired when it came soon after the same alert
-// last resolved; and marks those that came during a deploy.
+// last resolved; and marks those that came during a deploy, and with the
+// kinds of the marked windows they came during.
 func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options) error {
 	quiet, err := l.windowsMeeting(t.ctx, t, lo, hi)
 	if err != nil {
@@ -393,7 +394,12 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		return err
 	}
 	deploying := during(deployed, o.DeployBefore, o.DeployAfter)
-	rows, err := t.QueryContext(t.ctx, `SELECT f.id, f.series_id, r.name, f.start_at, f.end_at, f.white, f.refired, f.excused, f.deploy, s.labels
+	ms, err := l.markedMeeting(t.ctx, t, lo, hi)
+	if err != nil {
+		return err
+	}
+	marks := marking(ms, unix(lo), unix(hi), func(at int64) int64 { return Week(l.day(at)) })
+	rows, err := t.QueryContext(t.ctx, `SELECT f.id, f.series_id, r.name, f.start_at, f.end_at, f.white, f.refired, f.excused, f.deploy, f.marked, s.labels
 		FROM firings f JOIN series s ON s.id = f.series_id JOIN rules r ON r.id = f.rule_id
 		WHERE f.start_at >= ? AND f.start_at <= ? ORDER BY f.series_id, f.start_at, f.id`, lo, hi)
 	if err != nil {
@@ -403,6 +409,7 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		id, series                    int64
 		f                             firing.Firing
 		white, again, excused, deploy bool
+		marked                        int64
 	}
 	var fs []row
 	for rows.Next() {
@@ -410,7 +417,7 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		var start int64
 		var end sql.NullInt64
 		var text string
-		if err := rows.Scan(&r.id, &r.series, &r.f.Rule, &start, &end, &r.white, &r.again, &r.excused, &r.deploy, &text); err != nil {
+		if err := rows.Scan(&r.id, &r.series, &r.f.Rule, &start, &end, &r.white, &r.again, &r.excused, &r.deploy, &r.marked, &text); err != nil {
 			rows.Close()
 			return err
 		}
@@ -444,7 +451,7 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 			return err
 		}
 	}
-	up, err := t.updating("firings", []string{"white", "refired", "excused", "deploy"})
+	up, err := t.updating("firings", []string{"white", "refired", "excused", "deploy", "marked"})
 	if err != nil {
 		return err
 	}
@@ -466,11 +473,17 @@ func (l *Ledger) stones(t *txn, lo, hi int64, incs []counted, o verdict.Options)
 		excused := !white && excuses(r.f)
 		// During a deploy is a mark beside the stones, of what is judged.
 		deploy := !excused && deploying(r.f)
+		// And the kinds of marked window it came during: marks, which
+		// change nothing else (docs/design/marked.md).
+		var marked int64
+		if !excused {
+			marked = marks(r.f)
+		}
 		last = r.f.End
-		if white == r.white && again == r.again && excused == r.excused && deploy == r.deploy {
+		if white == r.white && again == r.again && excused == r.excused && deploy == r.deploy && marked == r.marked {
 			continue
 		}
-		if err := up.add(white, again, excused, deploy, r.id); err != nil {
+		if err := up.add(white, again, excused, deploy, marked, r.id); err != nil {
 			return err
 		}
 	}
@@ -603,8 +616,11 @@ func (l *Ledger) tally(t *txn, lo, hi int64) error {
 	if _, err := t.ExecContext(t.ctx, "DELETE FROM weeks WHERE week >= ? AND week <= ?", w1, w2); err != nil {
 		return err
 	}
-	_, err := t.ExecContext(t.ctx, `INSERT INTO weeks (week, rule_id, firings, white, refired, excused, deploy, deploy_white)
+	if _, err := t.ExecContext(t.ctx, `INSERT INTO weeks (week, rule_id, firings, white, refired, excused, deploy, deploy_white)
 		SELECT day - (day + 3) % 7, rule_id, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white) FROM days
-		WHERE day >= ? AND day <= ? GROUP BY 1, 2`, w1, w2+6)
-	return err
+		WHERE day >= ? AND day <= ? GROUP BY 1, 2`, w1, w2+6); err != nil {
+		return err
+	}
+	// The firings marked with each kind, in the same tally.
+	return l.tallyMarked(t, d1, d2, w1, w2)
 }

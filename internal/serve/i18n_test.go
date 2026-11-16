@@ -86,7 +86,12 @@ var pagePaths = []string{"/", "/rules", "/rules?weeks=1", "/rules/Errors", "/inc
 	"/rules/Errors?tab=firings", "/rules/Errors?tab=versions", "/rules/Errors?tab=proposals", "/rules/Errors?tab=activity",
 	"/rules/Flapping?tab=firings", "/rules/Errors?weeks=1", "/rules/Errors?weeks=4&tab=firings", "/rules/Limited?tab=versions",
 	// The goals, everyone's and a team's (docs/design/goals.md).
-	"/goals", "/goals?team=payments"}
+	"/goals", "/goals?team=payments",
+
+	// Marked windows: the page, one made here, the file's, a team's;
+	// the firings of a kind.
+	"/marked", "/marked?team=payments", "/marked/1", "/marked/2", "/marked/3", "/firings?day=2026-11-02&kind=sale",
+	"/rules?during=sale", "/rules?outside=sale&weeks=12", "/rules?during=deploy"}
 
 // pagesServer is a server with something on every page: a team, a note,
 // quiet windows, a task, roles, reports, comments, and a run that failed.
@@ -182,6 +187,21 @@ func pagesServer(t *testing.T) *Server {
 	}
 	o.DeployAfter = 10 * time.Minute
 	if _, err := s.l.SyncDeploys(ctx, []ledger.Deploy{{Start: day.Add(10 * time.Hour), Labels: map[string]string{"service": "search"}, Revision: "4f2a9c1"}}, o, ledger.DeploysRead{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.JudgePending(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	// Marked windows: a sale made here over the day's firings, a weekly
+	// launch of search from the marked file, and a team's campaign ahead.
+	if _, err := s.l.PutMarked(ctx, ledger.Marked{Kind: "sale", Title: "Autumn sale", Start: day, End: day.Add(24 * time.Hour)}, "ana", o); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.SyncMarked(ctx, []ledger.Marked{{Kind: "launch", Title: "Search, new ranking", Start: day.Add(-14 * 24 * time.Hour).Add(9 * time.Hour),
+		End: day.Add(-14 * 24 * time.Hour).Add(12 * time.Hour), Every: "week", Labels: map[string]string{"service": "search"}}}, o, ledger.MarkedRead{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.PutMarked(ctx, ledger.Marked{Kind: "campaign", Title: "Newsletter", Start: now.Add(48 * time.Hour), End: now.Add(50 * time.Hour), TeamID: tid}, "ana", o); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.l.JudgePending(ctx, o); err != nil {

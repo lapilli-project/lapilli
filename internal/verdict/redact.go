@@ -64,7 +64,7 @@ func (x *Redactor) mac(kind, name string) string {
 // a team label's value is never taken for a team's alias.
 var labelName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,39}$`)
 
-var kinds = map[string]bool{"rule": true, "group": true, "team": true, "source": true, "record": true, "incident": true, "label": true, "signal": true}
+var kinds = map[string]bool{"rule": true, "group": true, "team": true, "source": true, "record": true, "incident": true, "label": true, "signal": true, "kind": true}
 
 func prefix(kind string) string {
 	if name, ok := strings.CutPrefix(kind, "label:"); ok {
@@ -181,7 +181,9 @@ type names struct {
 	rules, groups, teams, sources map[string]bool
 	labels                        map[string]map[string]bool
 	// signals are the named impact signals' names.
-	signals   map[string]bool
+	signals map[string]bool
+	// kinds are the kinds of marked window, which a team names.
+	kinds     map[string]bool
 	incidents []incident.Incident
 	records   map[string]bool
 	// expected are the incidents expectations name, numbered after those
@@ -204,6 +206,9 @@ func (n *names) rule(rr RuleResult) {
 	n.groups[rr.Group] = true
 	n.teams[rr.Team] = true
 	n.sources[rr.Source] = true
+	for k := range rr.Marked {
+		n.kinds[k] = true
+	}
 }
 
 func (n *names) report(r *Report) {
@@ -250,6 +255,9 @@ func (n *names) report(r *Report) {
 		for k, v := range f.Labels {
 			n.label(k, v)
 		}
+		for _, k := range f.Marked {
+			n.kinds[k] = true
+		}
 	}
 	for _, u := range r.Unrecorded {
 		n.teams[u.Team] = true
@@ -276,7 +284,7 @@ func (n *names) report(r *Report) {
 // prepare numbers every name in the reports and the comparison.
 func (x *Redactor) prepare(c *Comparison, reps ...*Report) {
 	n := &names{rules: map[string]bool{}, groups: map[string]bool{}, teams: map[string]bool{}, sources: map[string]bool{},
-		labels: map[string]map[string]bool{}, records: map[string]bool{}, expected: map[string]bool{}, signals: map[string]bool{}}
+		labels: map[string]map[string]bool{}, records: map[string]bool{}, expected: map[string]bool{}, signals: map[string]bool{}, kinds: map[string]bool{}}
 	for _, r := range reps {
 		n.report(r)
 	}
@@ -317,6 +325,7 @@ func (x *Redactor) prepare(c *Comparison, reps ...*Report) {
 	x.numberAnyhow("team", n.teams)
 	delete(n.sources, "")
 	x.numberAnyhow("source", n.sources)
+	x.numberAnyhow("kind", n.kinds)
 	x.numberAnyhow("record", n.records)
 	delete(n.signals, "")
 	x.numberAnyhow("signal", n.signals)
@@ -343,6 +352,13 @@ func (x *Redactor) ruleResult(rr RuleResult) RuleResult {
 	rr.Source = x.alias("source", rr.Source)
 	rr.Unsupported = reason(rr.Unsupported)
 	rr.Unseen = slices.Clone(rr.Unseen)
+	if rr.Marked != nil {
+		m := make(map[string]MarkedCount, len(rr.Marked))
+		for k, c := range rr.Marked {
+			m[x.alias("kind", k)] = c
+		}
+		rr.Marked = m
+	}
 	return rr
 }
 
@@ -597,6 +613,12 @@ func (x *Redactor) firings(fs []Judged) []Judged {
 		}
 		slices.Sort(ids)
 		f.Incidents = ids
+		var kinds []string
+		for _, k := range f.Marked {
+			kinds = append(kinds, x.alias("kind", k))
+		}
+		slices.Sort(kinds)
+		f.Marked = kinds
 		out[i] = f
 	}
 	slices.SortStableFunc(out, func(a, b Judged) int {

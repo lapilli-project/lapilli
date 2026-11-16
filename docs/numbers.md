@@ -452,6 +452,58 @@ sides.
    caught: map(select(.during_deploy and .white)) | length}]
 ```
 
+## Firings during marked windows (lapilli serve)
+
+A marked window is a span of a named kind, a sale, a launch, a campaign
+(docs/design/marked.md), from `--marked`, `--config`, the UI or an
+expression (`--mark`). A firing came **during a kind** when it started
+during an occurrence of a window of the kind (each repeat of one that
+repeats is one) and agrees with it on every label both have, one at
+least; a window that names no label marks every firing, and a team's
+window only the team's rules. A firing a quiet window excused isn't
+marked. Like a deploy, it is marked, not judged apart: it is in `firings`
+and `white` as any other, and also in its rule's `marked`†, by kind:
+`firings`, `caught`, `refired` and `unjudged`†. A firing may be marked
+with several kinds; `firings[].marked`† names them. Deploys are no kind
+here: they are `during_deploys`†. **Outside a kind** is a count less the
+kind's: precision outside a sale is `(white - marked.sale.caught) /
+(firings - unjudged - marked.sale.firings + marked.sale.unjudged)`.
+
+```jq
+# marked (lapilli serve): as the report has it
+[.rules[] | select(.marked) | {rule, marked: (.marked | map_values({firings, caught, refired}))}] | sort_by(.rule)
+```
+
+```jq
+# marked (lapilli serve): counted again
+[.firings | map(select(.marked)) | group_by(.rule)[]
+ | {rule: .[0].rule,
+    marked: ([.[] | .marked[] as $k | {k: $k, white, refired: (.refired // false)}] | group_by(.k)
+             | map({key: .[0].k, value: {firings: length, caught: map(select(.white)) | length, refired: map(select(.refired)) | length}})
+             | from_entries)}]
+| sort_by(.rule)
+```
+
+`/api/v1/summary`'s `marked` holds, for each week, each kind with an
+occurrence in it: `windows`, the occurrences; the firings marked, those
+that caught something and re-fired, with precision inside the kind and
+outside it; and the incidents and impact windows that started during an
+occurrence of the kind and agree with it, as a firing does, caught,
+caught only by noisy rules or missed, with their median lead. Count a
+week's again from `/api/v1/report` over the same week:
+
+```jq
+# marked in a week: as the summary has it
+first(.rows[] | select(.team == "")) | .marked | map_values({firings, caught, refired}) | with_entries(select(.value.firings > 0))
+```
+
+```jq
+# marked in a week: counted again
+[.firings[] | select(.marked) | .marked[] as $k | {k: $k, white, refired: (.refired // false)}] | group_by(.k)
+| map({key: .[0].k, value: {firings: length, caught: map(select(.white)) | length, refired: map(select(.refired)) | length}})
+| from_entries
+```
+
 ## The firings as CSV
 
 `lapilli verdict --csv`, and `/api/v1/report?from=&to=&format=csv` (31 days
@@ -471,6 +523,7 @@ row each, for a spreadsheet or a script:
 | `refired` | `true` when it re-fired; `false` for an excused firing, which is in no rule's `refired` |
 | `during_deploy` | `true` when it came during a deploy (`lapilli serve`) |
 | `excused` | `true` for a firing a quiet window excused (`lapilli serve`): in none of the numbers |
+| `marked` | the kinds of marked window it came during (`lapilli serve`), a JSON array, `[]` for none |
 
 The firings are in order of their start, then of their rule. The file is
 UTF-8 with no byte order mark: open it in a spreadsheet as UTF-8 (Excel's
@@ -528,10 +581,11 @@ holds them, and this list.
 | `settings` | `lead_ns`, `match`, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `record_by_week`†, `impact_signals`†, `impact_rules`† |
 | `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`† |
 | `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match` |
-| `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`† |
+| `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`† |
+| `rules[].marked.*` | `firings`, `caught`, `refired`, `unjudged`† |
 | `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `candidate`, `caught_by`, `signal`† |
 | `incidents[].caught_by[]` | `rule`, `delay_ns`, `noisy` |
-| `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`† |
+| `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`†, `marked`† |
 
 ### The metrics
 
@@ -585,6 +639,10 @@ it, which only `lapilli serve` says.
 | `lapilli_goal_known` | `goal`, [`team`] |
 | `lapilli_goal_value` | `goal`, [`team`] |
 | `lapilli_goal_weeks_met` | `goal`, [`team`] |
+| `lapilli_rule_firings_marked` | `rule`, [`severity`], [`team`], `kind` |
+| `lapilli_rule_caught_marked` | `rule`, [`severity`], [`team`], `kind` |
+| `lapilli_marked_on` | `kind` |
+| `lapilli_serve_marked_read_timestamp_seconds` | |
 
 The first eleven are `--metrics`' too. The next two are `--metrics`'
 alone, with named impact signals, which only `lapilli verdict` reads for
@@ -605,7 +663,7 @@ adds to the others can't be said there.
 ### The CSV's columns
 
 `rule`, `severity`, `team`, `labels`, `start`, `end`, `stone`, `no_record`,
-`incidents`, `refired`, `during_deploy`, `excused`, in that order.
+`incidents`, `refired`, `during_deploy`, `excused`, `marked`, in that order.
 `TestCSVColumns` holds them.
 
 ### lapilli preflight's report

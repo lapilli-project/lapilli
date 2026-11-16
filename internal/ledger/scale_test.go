@@ -141,6 +141,21 @@ func TestScale(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	// Marked windows of hours: a sale each Friday evening, a launch each
+	// morning, a campaign of three days. Each firing is set beside the
+	// few occurrences that started within the longest before it
+	// (docs/design/marked.md), counted, not timed.
+	fri := time.Date(2026, 8, 7, 18, 0, 0, 0, time.UTC)
+	if _, err := l.SyncMarked(ctx, []Marked{
+		{Kind: "sale", Title: "Friday sale", Start: fri, End: fri.Add(4 * time.Hour), Every: "week"},
+		{Kind: "launch", Title: "Morning launch", Start: fri.Add(-9 * time.Hour), End: fri.Add(-7 * time.Hour), Every: "day"},
+		{Kind: "campaign", Title: "Campaign", Start: t0.Add(-20 * 24 * time.Hour), End: t0.Add(-17 * 24 * time.Hour), Labels: map[string]string{"service": "search"}},
+	}, opts, MarkedRead{}); err != nil {
+		t.Fatal(err)
+	}
+	most, looked := 0, 0
+	markLooked = func(n int) { most, looked = max(most, n), looked+1 }
+	defer func() { markLooked = nil }()
 	budget("judging everything again", time.Duration(60*k)*time.Second, func() {
 		o := opts
 		o.Lead = 10 * time.Minute
@@ -148,6 +163,13 @@ func TestScale(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	t.Logf("marked windows: %d firings set beside %d occurrences at most", looked, most)
+	if looked < total || most > 5 {
+		t.Errorf("marked windows: %d firings set beside occurrences, %d at most; want every firing, beside 5 at most: the three days of the campaign hold three mornings and a Friday", looked, most)
+	}
+	if n, err := l.Firings(ctx, FiringQuery{From: start, To: t0, Kind: "sale", Limit: 10}); err != nil || len(n) == 0 {
+		t.Errorf("no firing marked with the sale: %v", err)
+	}
 	var size int64
 	l.r.QueryRow("SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()").Scan(&size)
 	t.Logf("ledger: %.1f MB, %d bytes a firing", float64(size)/1e6, size/int64(total))
@@ -212,4 +234,39 @@ func TestRecordedScale(t *testing.T) {
 			t.Fatal(got, err)
 		}
 	})
+}
+
+// At the bounds, each firing is set beside the occurrences of its week at
+// most: 256, however long the longest is (a window of 31 days beside 255
+// of an hour, over five weeks).
+func TestMarkedScale(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	start := Week(l.Day(t0)) // a Monday
+	from := l.Midnight(start - 28)
+	var ms []Marked
+	ms = append(ms, Marked{Kind: "sale", Title: "Month of sales", Start: from, End: from.Add(31*24*time.Hour - time.Second)})
+	for w := range 5 {
+		for i := range MarkedWeek - 1 {
+			s := l.Midnight(start - 28 + int64(7*w)).Add(time.Duration(i) * 39 * time.Minute)
+			ms = append(ms, Marked{Kind: fmt.Sprint("k", i%4), Title: fmt.Sprint("w", w, " ", i), Start: s, End: s.Add(time.Hour)})
+		}
+	}
+	if _, err := l.SyncMarked(ctx, ms, opts, MarkedRead{}); err != nil {
+		t.Fatal(err)
+	}
+	r := rand.New(rand.NewPCG(3, 4))
+	var fs []firing.Firing
+	for range 5000 {
+		s := from.Add(time.Duration(r.IntN(35*24*60)) * time.Minute)
+		fs = append(fs, firing.Firing{Rule: fmt.Sprint("Rule", r.IntN(20)), Labels: map[string]string{"service": "checkout"}, Start: s, End: s.Add(time.Minute)})
+	}
+	most, looked := 0, 0
+	markLooked = func(n int) { most, looked = max(most, n), looked+1 }
+	defer func() { markLooked = nil }()
+	record(t, l, from, from.Add(35*24*time.Hour), fs)
+	if looked < len(fs) || most > MarkedWeek {
+		t.Errorf("%d firings set beside occurrences, %d at most; want every firing, beside %d at most", looked, most, MarkedWeek)
+	}
+	t.Logf("%d firings, beside %d occurrences at most", looked, most)
 }

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"lapilli.dev/internal/ledger"
 )
 
 // The rules' search box (docs/design/ui.md): words, each a part of a rule's
@@ -15,7 +17,7 @@ import (
 
 // queryKeys are the keys the search box takes, in the order its help names
 // them.
-var queryKeys = []string{"team", "severity", "is", "status", "has", "label", "group"}
+var queryKeys = []string{"team", "severity", "is", "status", "has", "label", "group", "during", "outside"}
 
 // The facets' values: performance (judged), trust (the backtest), the
 // rule's disposition (its note), and what is under way.
@@ -187,8 +189,18 @@ func keyed(k, v string) qword {
 		if lk, lv, ok := strings.Cut(v, "="); !ok || lk == "" || lv == "" {
 			t.Bad = "value"
 		}
+	case t.Key == "during" && !markedKind(v, true), t.Key == "outside" && !markedKind(v, false):
+		// A kind of marked window (docs/design/marked.md); during:deploy
+		// is the deploys' column, as a filter.
+		t.Bad = "value"
 	}
 	return t
+}
+
+// markedKind reports whether v names a kind of marked window as the search
+// box takes one: a kind's name, or, during, deploy.
+func markedKind(v string, during bool) bool {
+	return during && v == "deploy" || ledger.CheckKind(v) == nil
 }
 
 // filters reports whether a search has filters for the rules in it: what
@@ -237,6 +249,12 @@ func canonical(q url.Values, teams []string) (out url.Values, changed bool) {
 			add(fv[0], fv[1])
 		case "status", "has":
 			add(t.Key, strings.ToLower(t.Value))
+		case "during", "outside":
+			// One kind at a time, inside it or outside: the counts are
+			// its.
+			out.Del("during")
+			out.Del("outside")
+			out.Set(t.Key, t.Value)
 		default:
 			kept = append(kept, t)
 			continue

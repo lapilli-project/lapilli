@@ -205,10 +205,12 @@ func (s *Server) tellQuiet(ctx context.Context) error {
 	return nil
 }
 
-// aboutMore adds to what is told of a digest the sources firings were
-// copied in from (for everyone's) and what the notifications sent came to.
-func (s *Server) aboutMore(ctx context.Context, about map[string]any, rep *verdict.Report, from, to time.Time, everyone bool) error {
-	if everyone {
+// aboutMore adds to what is told of a digest, everyone's (team nil) or a
+// team's, the sources firings were copied in from (for everyone's), what
+// the notifications sent came to, the re-fires, and the marked windows on
+// in the week.
+func (s *Server) aboutMore(ctx context.Context, about map[string]any, rep *verdict.Report, from, to time.Time, team *ledger.Team) error {
+	if team == nil {
 		cs, err := s.copied(ctx, rep)
 		if err != nil {
 			return err
@@ -238,6 +240,12 @@ func (s *Server) aboutMore(ctx context.Context, about map[string]any, rep *verdi
 		return err
 	}
 	about["refired"] = rf
+	// The marked windows on in the week, when one was.
+	if mk, err := s.markedOfReport(ctx, rep, from, to, team, s.cfg.Loc); err != nil {
+		return err
+	} else if mk != nil {
+		about["marked"] = mk
+	}
 	return nil
 }
 
