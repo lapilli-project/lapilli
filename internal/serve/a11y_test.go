@@ -824,3 +824,22 @@ func nodeTextBefore(n *html.Node) string {
 	}
 	return b.String()
 }
+
+// TestDisabledFieldsLookIt: a field of a form no one may send now (a
+// rule's, while one of its proposals waits) is drawn as a disabled button
+// is: dim words on the panel, a dashed edge; not as a field to fill.
+func TestDisabledFieldsLookIt(t *testing.T) {
+	b, err := files.ReadFile("static/lapilli.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`\ninput:disabled, select:disabled, textarea:disabled \{([^}]*)\}`).FindSubmatch(b)
+	if m == nil {
+		t.Fatal("no rule for a disabled field")
+	}
+	for _, want := range []string{"color: var(--dim)", "background: var(--panel)", "border: 1px dashed var(--line-ui)"} {
+		if !strings.Contains(string(m[1]), want) {
+			t.Errorf("a disabled field isn't drawn with %s: %q", want, m[1])
+		}
+	}
+}

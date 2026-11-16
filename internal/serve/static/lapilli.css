@@ -132,6 +132,8 @@ a.button { display: inline-block; font-size: .95rem; font-weight: 500; color: va
 a.button:hover { filter: brightness(1.1); }
 .action-off { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; }
 button:disabled, button:disabled:hover { cursor: not-allowed; filter: none; color: var(--dim); background: var(--panel); border: 1px dashed var(--line-ui); }
+/* A field of a form no one may send now, as a disabled button is drawn. */
+input:disabled, select:disabled, textarea:disabled { cursor: not-allowed; color: var(--dim); background: var(--panel); border: 1px dashed var(--line-ui); }
 .why { font-size: .9rem; color: var(--dim); }
 /* Nothing to show: nothing judged yet, nothing matching, nothing to do. */
 .empty { background: var(--card); border: 1px dashed var(--line-ui); border-radius: 14px; padding: .9rem 1.1rem; margin: 1rem 0; }
