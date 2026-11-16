@@ -64,7 +64,7 @@ func (x *Redactor) mac(kind, name string) string {
 // a team label's value is never taken for a team's alias.
 var labelName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,39}$`)
 
-var kinds = map[string]bool{"rule": true, "group": true, "team": true, "source": true, "record": true, "incident": true, "label": true}
+var kinds = map[string]bool{"rule": true, "group": true, "team": true, "source": true, "record": true, "incident": true, "label": true, "signal": true}
 
 func prefix(kind string) string {
 	if name, ok := strings.CutPrefix(kind, "label:"); ok {
@@ -180,8 +180,10 @@ func reason(s string) string {
 type names struct {
 	rules, groups, teams, sources map[string]bool
 	labels                        map[string]map[string]bool
-	incidents                     []incident.Incident
-	records                       map[string]bool
+	// signals are the named impact signals' names.
+	signals   map[string]bool
+	incidents []incident.Incident
+	records   map[string]bool
 	// expected are the incidents expectations name, numbered after those
 	// of the period.
 	expected map[string]bool
@@ -211,8 +213,24 @@ func (n *names) report(r *Report) {
 	for _, rr := range r.Rules {
 		n.rule(rr)
 	}
+	if r.Settings != nil {
+		for _, sg := range r.Settings.ImpactSignals {
+			n.signals[sg.Name] = true
+		}
+		for _, e := range r.Settings.ImpactRules {
+			for _, sg := range e.Signals {
+				n.signals[sg] = true
+			}
+			for k, vs := range e.Labels {
+				for _, v := range vs {
+					n.label(k, v)
+				}
+			}
+		}
+	}
 	for _, in := range r.Incidents {
 		n.incidents = append(n.incidents, in.Incident)
+		n.signals[in.Signal] = true
 		for k, vs := range in.Labels {
 			for _, v := range vs {
 				n.label(k, v)
@@ -226,6 +244,9 @@ func (n *names) report(r *Report) {
 	}
 	for _, f := range r.Firings {
 		n.rules[f.Rule] = true
+		for _, sg := range f.Signals {
+			n.signals[sg] = true
+		}
 		for k, v := range f.Labels {
 			n.label(k, v)
 		}
@@ -255,7 +276,7 @@ func (n *names) report(r *Report) {
 // prepare numbers every name in the reports and the comparison.
 func (x *Redactor) prepare(c *Comparison, reps ...*Report) {
 	n := &names{rules: map[string]bool{}, groups: map[string]bool{}, teams: map[string]bool{}, sources: map[string]bool{},
-		labels: map[string]map[string]bool{}, records: map[string]bool{}, expected: map[string]bool{}}
+		labels: map[string]map[string]bool{}, records: map[string]bool{}, expected: map[string]bool{}, signals: map[string]bool{}}
 	for _, r := range reps {
 		n.report(r)
 	}
@@ -265,6 +286,7 @@ func (x *Redactor) prepare(c *Comparison, reps ...*Report) {
 		}
 		for _, ic := range c.Incidents {
 			n.incidents = append(n.incidents, ic.Incident)
+			n.signals[ic.Signal] = true
 			for k, vs := range ic.Labels {
 				for _, v := range vs {
 					n.label(k, v)
@@ -296,6 +318,8 @@ func (x *Redactor) prepare(c *Comparison, reps ...*Report) {
 	delete(n.sources, "")
 	x.numberAnyhow("source", n.sources)
 	x.numberAnyhow("record", n.records)
+	delete(n.signals, "")
+	x.numberAnyhow("signal", n.signals)
 	for _, k := range slices.Sorted(maps.Keys(n.labels)) {
 		x.numberAnyhow("label:"+k, n.labels[k])
 	}
@@ -333,6 +357,8 @@ func (x *Redactor) ruleResultPtr(rr *RuleResult) *RuleResult {
 func (x *Redactor) incident(in incident.Incident) incident.Incident {
 	in.ID = x.alias("incident", in.ID)
 	in.Title = ""
+	in.Signal = x.alias("signal", in.Signal)
+	in.Match = slices.Clone(in.Match) // labels' names, which stay
 	in.Labels = x.incidentLabels(in.Labels)
 	in.Start, in.End = utc(in.Start), utc(in.End)
 	if in.Spans != nil {
@@ -409,6 +435,25 @@ func (x *Redactor) report(r *Report) *Report {
 		st := *r.Settings // label names, which stay, and durations
 		st.Match = slices.Clone(r.Settings.Match)
 		st.ImpactFrom = utc(r.Settings.ImpactFrom)
+		st.ImpactSignals = nil
+		for _, sg := range r.Settings.ImpactSignals {
+			sg.Name = x.alias("signal", sg.Name)
+			sg.Match = slices.Clone(sg.Match)
+			sg.Start = utc(sg.Start)
+			st.ImpactSignals = append(st.ImpactSignals, sg)
+		}
+		// A rule entry's pattern names rules: not shown as it is.
+		st.ImpactRules = nil
+		for _, e := range r.Settings.ImpactRules {
+			re := RuleEntry{Labels: x.incidentLabels(e.Labels), Match: slices.Clone(e.Match)}
+			if e.Rules != "" {
+				re.Rules = Redacted
+			}
+			for _, sg := range e.Signals {
+				re.Signals = append(re.Signals, x.alias("signal", sg))
+			}
+			st.ImpactRules = append(st.ImpactRules, re)
+		}
 		out.Settings = &st
 	}
 	// Lapilli's own words, or none: what else may come one day is not shown.
@@ -534,6 +579,13 @@ func (x *Redactor) firings(fs []Judged) []Judged {
 		f.Rule = x.alias("rule", f.Rule)
 		f.Labels = x.labels(f.Labels)
 		f.Start, f.End = utc(f.Start), utc(f.End)
+		if f.Signals != nil {
+			sigs := make([]string, len(f.Signals))
+			for i, sg := range f.Signals {
+				sigs[i] = x.alias("signal", sg)
+			}
+			f.Signals = sigs
+		}
 		var ids []string
 		for _, id := range f.Incidents {
 			ids = append(ids, x.alias("incident", id))

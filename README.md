@@ -1281,6 +1281,8 @@ what `--push` and `--slack-webhook-file` send:
   `severity`'s values, stay;
 - incidents are `incident-01` on, by when they started, their titles left
   out, and those only what `--expect` holds a rule to names after them;
+- named impact signals are `signal-01` on, and a rule entry's pattern of
+  rule names is `[redacted]`;
 - why a rule couldn't be replayed (a query, a host, the history's own
   words), an expression a near miss quotes, shifts naming an on-call
   schedule and the time zones hours were counted in are `[redacted]`, and

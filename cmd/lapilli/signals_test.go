@@ -562,3 +562,25 @@ rules:
 		t.Errorf("before %d caught, after %d; entries %d, %d", caught(c.Before), caught(c.After), c.Before.Rules[0].ImpactRule, c.After.Rules[0].ImpactRule)
 	}
 }
+
+// --redact gives each signal's name an alias, in the report, the text and
+// the metrics, says a rule entry's pattern is redacted, and gives its
+// labels' values aliases: a signal is named for what it measures.
+func TestRedactSignals(t *testing.T) {
+	h, file, args := namedSignals(t)
+	for _, flag := range []string{"--json", "--metrics", ""} {
+		a := append(slices.Clone(args), "--impact-file", file, "--redact")
+		if flag != "" {
+			a = append(a, flag)
+		}
+		out := runSignals(t, h, a...)
+		for _, name := range []string{"errors", "probe", "latency", "payments", "Latency$", "BackendMissing", `"latency"`} {
+			if strings.Contains(out, name) {
+				t.Errorf("%s: %q is there", flag, name)
+			}
+		}
+		if !strings.Contains(out, "signal-") {
+			t.Errorf("%s: no signal's alias\n%s", flag, out)
+		}
+	}
+}

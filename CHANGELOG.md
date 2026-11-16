@@ -41,9 +41,10 @@
   each incident's `signal`, each firing's `signals`, each rule's
   `impact_rule`, and `settings.impact_signals` and `settings.impact_rules`;
   `--metrics`, `lapilli_impact_windows` and
-  `lapilli_impact_signal_start_timestamp_seconds`. One `--impact` with no
-  name judges as before, byte for byte. `lapilli serve` takes one unnamed
-  signal until it keeps named ones.
+  `lapilli_impact_signal_start_timestamp_seconds`. `--redact` gives each
+  signal's name an alias, and a rule entry's pattern is `[redacted]`. One
+  `--impact` with no name judges as before, byte for byte. `lapilli serve`
+  takes one unnamed signal until it keeps named ones.
 
 ### Changed
 

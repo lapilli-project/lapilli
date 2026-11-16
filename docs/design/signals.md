@@ -390,11 +390,12 @@ its `match` labels, the values its series have had, 1,000 a label and 256
 KB a signal at most; past either, it is taken to have returned every
 value of that label. So is a label one of its series returned something
 without: a firing agrees with that series' windows whatever its value
-(`Agree`), so the signal could have seen it. A value seen later ties the firings before it too,
-which then wait for that signal's start: a firing is never judged by a
-signal that couldn't see it, and its record may wait longer than it needs.
-Where each value's data begins, apart from the signal's, is not looked
-for, as v0.49.0 looks per selector, not per series.
+(`Agree`), so the signal could have seen it. A value seen later ties the
+firings before it too, which then wait for that signal's start: a firing
+is never judged by a signal that couldn't see it, and its record may wait
+longer than it needs. Where each value's data begins, apart from the
+signal's, is not looked for, as v0.49.0 looks per selector, not per
+series.
 
 **Changing signals**, per signal:
 
@@ -761,6 +762,8 @@ Open:
 - **A signal that can't be read** fails the run, as `--impact` does: "missed
   for the run" is serve's runs'. The bounds on windows are serve's runs'
   too; a read is held to `--max-samples`.
+- **`--redact`** gives each signal's name an alias (`signal-01`), writes a
+  rule entry's pattern as `[redacted]`, and aliases its labels' values.
 - **`--metrics`** gives `lapilli_impact_windows` and
   `lapilli_impact_signal_start_timestamp_seconds`; the text says each
   signal's windows and its start.
