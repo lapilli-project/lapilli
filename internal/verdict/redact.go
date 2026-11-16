@@ -218,6 +218,11 @@ func (n *names) report(r *Report) {
 				n.label(k, v)
 			}
 		}
+		for _, sp := range in.Spans {
+			for k, v := range sp.Labels {
+				n.label(k, v)
+			}
+		}
 	}
 	for _, f := range r.Firings {
 		n.rules[f.Rule] = true
@@ -330,6 +335,17 @@ func (x *Redactor) incident(in incident.Incident) incident.Incident {
 	in.Title = ""
 	in.Labels = x.incidentLabels(in.Labels)
 	in.Start, in.End = utc(in.Start), utc(in.End)
+	if in.Spans != nil {
+		spans := make([]incident.Span, len(in.Spans))
+		for i, sp := range in.Spans {
+			spans[i] = incident.Span{Labels: x.labels(sp.Labels), Start: utc(sp.Start), End: utc(sp.End)}
+		}
+		// By when each started, at one time by its labels: as found.
+		slices.SortStableFunc(spans, func(a, b incident.Span) int {
+			return cmp.Or(a.Start.Compare(b.Start), strings.Compare(labelsText(a.Labels), labelsText(b.Labels)))
+		})
+		in.Spans = spans
+	}
 	return in
 }
 
@@ -389,6 +405,16 @@ func (x *Redactor) report(r *Report) *Report {
 	}
 	out := *r
 	out.From, out.To = utc(r.From), utc(r.To)
+	if r.Settings != nil {
+		st := *r.Settings // label names, which stay, and durations
+		st.Match = slices.Clone(r.Settings.Match)
+		st.ImpactFrom = utc(r.Settings.ImpactFrom)
+		out.Settings = &st
+	}
+	// Lapilli's own words, or none: what else may come one day is not shown.
+	if out.Extras != "" && out.Extras != "skipped" && out.Extras != "cut" {
+		out.Extras = Redacted
+	}
 	out.Rules = make([]RuleResult, len(r.Rules))
 	for i, rr := range r.Rules {
 		out.Rules[i] = x.ruleResult(rr)
@@ -403,22 +429,7 @@ func (x *Redactor) report(r *Report) *Report {
 	for i, in := range out.Incidents {
 		place[in.ID] = i
 	}
-	out.Firings = make([]Judged, len(r.Firings))
-	for i, f := range r.Firings {
-		f.Rule = x.alias("rule", f.Rule)
-		f.Labels = x.labels(f.Labels)
-		f.Start, f.End = utc(f.Start), utc(f.End)
-		var ids []string
-		for _, id := range f.Incidents {
-			ids = append(ids, x.alias("incident", id))
-		}
-		slices.Sort(ids)
-		f.Incidents = ids
-		out.Firings[i] = f
-	}
-	slices.SortStableFunc(out.Firings, func(a, b Judged) int {
-		return cmp.Or(a.Start.Compare(b.Start), strings.Compare(a.Rule, b.Rule), strings.Compare(labelsText(a.Labels), labelsText(b.Labels)))
-	})
+	out.Firings = x.firings(r.Firings)
 	if r.Suggestions != nil {
 		out.Suggestions = make([]Suggestion, len(r.Suggestions))
 		for i, s := range r.Suggestions {
@@ -515,10 +526,42 @@ func (x *Redactor) unreplayed(us []Unreplayed) []Unreplayed {
 	return failedFirst(out)
 }
 
+// firings are fs with every name given its alias, in order of their
+// start, then rule and labels by alias.
+func (x *Redactor) firings(fs []Judged) []Judged {
+	out := make([]Judged, len(fs))
+	for i, f := range fs {
+		f.Rule = x.alias("rule", f.Rule)
+		f.Labels = x.labels(f.Labels)
+		f.Start, f.End = utc(f.Start), utc(f.End)
+		var ids []string
+		for _, id := range f.Incidents {
+			ids = append(ids, x.alias("incident", id))
+		}
+		slices.Sort(ids)
+		f.Incidents = ids
+		out[i] = f
+	}
+	slices.SortStableFunc(out, func(a, b Judged) int {
+		return cmp.Or(a.Start.Compare(b.Start), strings.Compare(a.Rule, b.Rule), strings.Compare(labelsText(a.Labels), labelsText(b.Labels)))
+	})
+	return out
+}
+
 // Report is r with every name given its alias: a copy, r as it was.
 func (x *Redactor) Report(r *Report) *Report {
-	x.prepare(nil, r)
-	return x.report(r)
+	red, _ := x.ReportWith(r, nil)
+	return red
+}
+
+// ReportWith is Report, and also, firings beside the report's (those
+// quiet windows excused, which lapilli serve's CSV has), with the same
+// aliases: their rules, labels and incidents numbered with the report's.
+func (x *Redactor) ReportWith(r *Report, also []Judged) (*Report, []Judged) {
+	all := *r
+	all.Firings = append(slices.Clone(r.Firings), also...)
+	x.prepare(nil, &all)
+	return x.report(r), x.firings(also)
 }
 
 // Comparison is c with every name given its alias, alike on both sides: a

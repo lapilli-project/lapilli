@@ -441,8 +441,9 @@ whoever wrote them, and are written so a spreadsheet shows them rather
 than runs them, and a reader sees what is there:
 
 - a control or format character (a line break, a tab, a bidirectional
-  override) is written as `\u{...}`, as the text report writes it, in
-  every cell and in the JSON of labels and incidents;
+  override) is written as `\u{...}`, as the text report writes it, and a
+  backslash as `\\`, so no two names are written alike, in every cell and
+  in the JSON of labels and incidents;
 - a cell whose first character, past any spaces, is `=`, `+`, `-` or `@`,
   or one of their full-width forms (`＝`, `＋`, `－`, `＠`), is written with
   `'` before it. Take the `'` off to read the name as it is.

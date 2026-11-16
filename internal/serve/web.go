@@ -1595,14 +1595,15 @@ func (s *Server) apiReport(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	if redact, _ := strconv.ParseBool(r.URL.Query().Get("redact")); redact {
+	redact, _ := strconv.ParseBool(r.URL.Query().Get("redact"))
+	if r.URL.Query().Get("format") == "csv" {
+		s.reportCSV(w, r, rep, redact)
+		return
+	}
+	if redact {
 		// Every name an alias of this answer's own, for a report shown
 		// outside (lapilli verdict --redact).
 		rep = verdict.NewRedactor(nil).Report(rep)
-	}
-	if r.URL.Query().Get("format") == "csv" {
-		s.reportCSV(w, r, rep)
-		return
 	}
 	writeJSON(w, rep)
 }
@@ -1611,7 +1612,11 @@ func (s *Server) apiReport(w http.ResponseWriter, r *http.Request) {
 // firings quiet windows excused, which the report leaves out, and each
 // rule's team. Under the report's turn and bounds: heavyTurn counted the
 // excused firings too.
-func (s *Server) reportCSV(w http.ResponseWriter, r *http.Request, rep *verdict.Report) {
+//
+// With redact, the report, the excused firings and the teams are given
+// their aliases by one Redactor, so a rule, a label's value and a team is
+// the same alias in every row, and none is named.
+func (s *Server) reportCSV(w http.ResponseWriter, r *http.Request, rep *verdict.Report, redact bool) {
 	ctx := r.Context()
 	own, err := s.owners(ctx)
 	if err != nil {
@@ -1627,11 +1632,32 @@ func (s *Server) reportCSV(w http.ResponseWriter, r *http.Request, rep *verdict.
 	for _, f := range fs {
 		excused = append(excused, verdict.Judged{Firing: f.Firing, Refired: f.Refired, DuringDeploy: f.Deploy})
 	}
+	// Each rule's team, on the rules, so a Redactor gives teams aliases
+	// with the rest; an excused firing's rule is among them, its firings
+	// counted in its Excused.
+	withTeams := *rep
+	withTeams.Rules = slices.Clone(rep.Rules)
+	for i := range withTeams.Rules {
+		withTeams.Rules[i].Team = own.teamOf(withTeams.Rules[i].Rule)
+	}
+	shown := &withTeams
+	if redact {
+		shown, excused = verdict.NewRedactor(nil).ReportWith(shown, excused)
+	}
+	team := map[string]string{}
+	for _, rr := range shown.Rules {
+		team[rr.Rule] = rr.Team
+	}
 	// Written as it is made, as the JSON is: what fails past the first
 	// row is a client gone, or the writing's time up.
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="lapilli-firings.csv"`)
-	verdict.CSV(w, rep, excused, own.teamOf)
+	verdict.CSV(w, shown, excused, func(rule string) string {
+		if t, ok := team[rule]; ok || redact {
+			return t // redacted, a rule not among them has no team to say
+		}
+		return own.teamOf(rule)
+	})
 }
 
 // apiIncident is an incident as the API gives and takes it.

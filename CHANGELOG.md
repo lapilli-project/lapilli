@@ -31,7 +31,8 @@
   and put `'` only before a cell whose first byte was `=`, `+`, `-`, `@`,
   a tab or a carriage return. A control or format character (a line
   break, a tab, a bidirectional override) is now written as `\u{...}`, as
-  the text report writes it, in every cell and in the JSON of labels and
+  the text report writes it, and a backslash as `\\`, so no two names
+  are written alike, in every cell and in the JSON of labels and
   incidents; and `'` goes before a cell whose first character past any
   spaces is `=`, `+`, `-` or `@`, or one of their full-width forms. An
   excused firing's row says `refired` false, as it is in no rule's

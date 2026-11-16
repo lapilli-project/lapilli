@@ -180,8 +180,16 @@ func TestCSVCells(t *testing.T) {
 	if rows[4][7] != "true" || rows[4][0] != `\u{9}Tab` || rows[4][1] != `\u{d}CR` {
 		t.Errorf("no record: %q", rows[4])
 	}
+	// Two labels' names Clean alone writes alike stay two keys.
+	var two bytes.Buffer
+	CSV(&two, &Report{Firings: []Judged{{Firing: firing.Firing{Rule: "R", Start: t0, Labels: map[string]string{"a\u202eb": "1", `a\u{202e}b`: "2"}}}}}, nil, nil)
+	twoRows, _ := csv.NewReader(&two).ReadAll()
+	var keys map[string]string
+	if len(twoRows) != 2 || json.Unmarshal([]byte(twoRows[1][3]), &keys) != nil || len(keys) != 2 || keys[`a\u{202e}b`] != "1" || keys[`a\\u{202e}b`] != "2" {
+		t.Errorf("two names written alike: %q", twoRows)
+	}
 	for in, want := range map[string]string{"plain-name": "plain-name", "": "", " =1+1": "' =1+1", "\u00a0@x": "'\u00a0@x", "＝SUM(1)": "'＝SUM(1)",
-		"－1": "'－1", "\n=cmd": `\u{a}=cmd`, "\u202e=cmd": `\u{202e}=cmd`, "a=b": "a=b"} {
+		"－1": "'－1", "\n=cmd": `\u{a}=cmd`, "\u202e=cmd": `\u{202e}=cmd`, "a=b": "a=b", `C:\path`: `C:\\path`, `\u{202e}=cmd`: `\\u{202e}=cmd`} {
 		if got := Cell(in); got != want {
 			t.Errorf("Cell(%q) = %q, want %q", in, got, want)
 		}

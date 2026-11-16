@@ -79,6 +79,7 @@ func firingAt(rule string, at time.Time) firing.Firing { return firing.Firing{Ru
 func TestRedactEveryField(t *testing.T) {
 	stay := map[string]bool{
 		"RuleResult.Severity":      true, // how loud, naming nothing
+		"Settings.Match":           true, // labels' names, which stay
 		"RuleResult.Unseen":        true, // Lapilli's codes
 		"HoursUsed.Work":           true, // hours, as given
 		"HoursUsed.Sleep":          true,

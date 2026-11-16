@@ -1246,8 +1246,8 @@ abbreviations are said, `CEST (+02:00) → CET (+01:00)`.
 
 To show a vendor, a community or a talk what your alerting looked like
 without its names, `--redact` gives every name in the report an alias,
-in the text, `--json`, `--markdown` and `--metrics`, and in what
-`--push` and `--slack-webhook-file` send:
+in the text, `--json`, `--csv`, `--markdown` and `--metrics`, and in
+what `--push` and `--slack-webhook-file` send:
 
 - rules are `rule-01`, `rule-02` and on, and their groups, teams and the
   sources firings were copied from the same way (`group-01`, `team-01`,
@@ -1276,7 +1276,9 @@ hash of it, `rule-3f9a1c04e2`, the same in every output made with the
 key; without the key, it can't be worked back to the name by trying
 names, as an unkeyed hash of a short name can, nor a key a person thought
 of be found by trying keys. `lapilli serve` gives the same with
-`/api/v1/report?from=&to=&redact=true`, its aliases that answer's own.
+`/api/v1/report?from=&to=&redact=true`, its aliases that answer's own,
+and `&format=csv&redact=true` the CSV, the firings quiet windows excused
+and the team column given aliases with the rest.
 What goes to stderr, the job's log, isn't redacted, which the run says
 there.
 

@@ -32,7 +32,7 @@ func TestVerdictRedact(t *testing.T) {
 	if plain := run1(); !strings.Contains(plain, "BasketLatencyHigh") || !strings.Contains(plain, "OPS-31337") {
 		t.Fatalf("unredacted:\n%s", plain)
 	}
-	for _, more := range [][]string{{"--redact"}, {"--redact", "--json"}, {"--redact", "--metrics"}} {
+	for _, more := range [][]string{{"--redact"}, {"--redact", "--json"}, {"--redact", "--metrics"}, {"--redact", "--csv"}} {
 		out := run1(more...)
 		for _, s := range secrets {
 			if strings.Contains(out, s) {

@@ -309,8 +309,8 @@ Output:
                       severities, durations and times, in UTC, stay. The
                       aliases are this output's own, numbered in an order
                       no name decides. stderr isn't redacted
-                      The text, --json, --markdown and --metrics, and what
-                      --push and --slack-webhook-file send
+                      The text, --json, --csv, --markdown and --metrics,
+                      and what --push and --slack-webhook-file send
   --redact-key FILE   --redact with aliases that hold across outputs: each a
                       keyed hash (HMAC-SHA256) of the name, with the key in
                       FILE, a random one in hex, 32 digits or more (openssl
