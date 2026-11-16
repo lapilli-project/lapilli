@@ -7,8 +7,8 @@ checked against the numbers the summary already gives. The companion to
 [noc.md](noc.md), whose `/api/v1/summary` it reads; to
 [expectations.md](expectations.md) (#81), which holds one rule to what it
 was tested to do, and this the level above; to [work.md](work.md), whose
-tasks a missed goal becomes; and to marked windows (design 40, proposed),
-whose kinds a goal over a period is checked by.
+tasks a missed goal becomes; and to [marked windows](marked.md) (#90,
+proposed), whose kinds a goal over a period is checked by.
 
 ## Why
 
@@ -166,7 +166,7 @@ when the week no longer is.
 ## Over a period
 
 "During a sale, the alerts did no worse than the weeks before" is held over
-each marked window of a kind (design 40), not each week:
+each marked window of a kind ([marked.md](marked.md), #90), not each week:
 
 - **`each: KIND`**: the goal is checked for each window of that kind that
   ended, and the one on now as it stands.
@@ -185,7 +185,7 @@ each marked window of a kind (design 40), not each week:
   measure that needs one, or before with nothing to divide.
 
 A goal over a span that is neither a week nor a marked window, such as a
-quarter, is a marked window of a kind written for it. Until design 40 is
+quarter, is a marked window of a kind written for it. Until #90 is
 built, `each:` takes `week` alone.
 
 ## Where it shows
@@ -294,7 +294,7 @@ of its disk, or of its database) before it upgrades.
   twelve rows; [noc.md](noc.md) measured 53 weeks for 57 teams over 200,000
   firings at 0.16 s. A page with `*` goals for every team reads every
   team's rows: in the heavy turn, as a summary of every team is, and kept.
-- **A goal over a period** reads design 40's counts of each window, which
+- **A goal over a period** reads #90's counts of each window, which
   read `marked_days` and four weeks of weekly tallies.
 - **50 goals.** `/metrics` gives each goal for everyone and each named team,
   and a `*` goal for every team, 500 series of each family at most, those
