@@ -496,8 +496,10 @@ Runs at once that share a quota should each take their part of it. This is
 the same for `--prometheus` and every cloud's `--auth`, for `--loki`, its
 ruler included, and Grafana's data source proxy, and for `lapilli serve`,
 which takes `--max-rate` too. `--max-samples N` (default 10,000,000) is the
-most samples the answers to one rule's query over the period may hold in all,
-some 64 bytes each at the peak: past it the rule isn't replayed, and the
+most samples the answers to one read of a rule's query may hold in all, some
+64 bytes each at the peak. A replay reads a day at a time, on days from
+midnight UTC, so the bound is a day's: 1,440 samples a series at a minute,
+some 6,900 series firing all day. Past it the rule isn't replayed, and the
 reason says to read it at a longer `--step`, over a shorter `--since`, or with
 a larger `--max-samples`. What lapilli does without, the configuration
 and the targets Prometheus is asked for, and where a Loki's ruler runs its

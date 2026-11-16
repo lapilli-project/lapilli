@@ -79,10 +79,10 @@ func WithLimiter(l *Limiter) Option {
 	return func(c *Client) { c.limit = l }
 }
 
-// DefaultMaxSamples is how many samples the answers to one range (a
-// rule's query over the period) may hold in all, unless WithMaxSamples
-// says otherwise: a week at a minute of 1,000 series firing all through
-// it, 28 days of 250. Replaced in tests.
+// DefaultMaxSamples is how many samples the answers to one range may hold
+// in all, unless WithMaxSamples says otherwise. A replay reads a rule's
+// query a day at a time, so the bound is a day's: at a minute, some 6,900
+// series firing all day. Replaced in tests.
 var DefaultMaxSamples = 10000000
 
 // SampleBytes is what a sample read takes at the peak, near enough, as

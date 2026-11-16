@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--max-samples` says what it bounds.** A replay reads a rule's query a
+  day at a time, on days from midnight UTC, and the bound is each read's:
+  a day's, some 6,900 series firing all day at a minute by default. The
+  help and the README said a rule's query over the whole period. The
+  test of the bound read the real clock, and failed for the six hours
+  that end between 02:40 and 03:20 UTC, as they are two reads; it reads
+  noon UTC now.
+
 ## [0.45.0] - 2026-11-16
 
 The web UI says what a state is at a glance: fine, needs a look, broken,
