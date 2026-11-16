@@ -19,6 +19,22 @@
   rule's tabs. The URLs (`/firings`, `/outcomes`, `/runs`, `/orphans`,
   `/manage`), the API, MCP and JSON fields are as they were.
 
+### Fixed
+
+- **No change, no "better".** The Impact page said "+0 pt, better" of a
+  precision that read 1% then and now. A change is one between the
+  numbers shown, on the overview's tiles and Impact's then and now: the
+  same number shown is neither better nor worse, with no colour and no
+  word, and two that differ never read "+0 pt", "+0%" or "+0s".
+- **"Propose it" with a proposal waiting.** A rule's "What to do first"
+  offered its suggested `for` while the rule had a proposal not finished
+  with, which is refused: one a rule at a time. The button is disabled
+  then, with why and a link to the one that waits.
+- **A checkbox apart from its words.** In a form of fields a checkbox
+  stood on a line of its own, centred over its words ("take it out
+  instead", a report's sections, places and "On"); it is on their line
+  now, before them.
+
 ## [0.45.1] - 2026-11-16
 
 A rule nothing could judge, as no incident was written down, could still
