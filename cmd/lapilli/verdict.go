@@ -888,6 +888,9 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 	if err := validLoki(f, serve != nil); err != nil {
 		return nil, err
 	}
+	if serve == nil && f.extrasSet && len(f.compare) > 0 {
+		return nil, errors.New("--extras: --compare has no steps after the replays to bound")
+	}
 	if serve != nil {
 		for _, no := range []struct {
 			on   bool
@@ -897,7 +900,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			{f.json, "--json"}, {f.csv, "--csv: ask /api/v1/report?format=csv"}, {f.markdown, "--markdown"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"},
-			{f.progressSet, "--progress"}, {f.failUnreplayed, "--fail-unreplayed"}} {
+			{f.progressSet, "--progress"}, {f.failUnreplayed, "--fail-unreplayed"},
+			{f.extrasSet, "--extras: each run's steps after the replays take what --timeout leaves"}} {
 			if no.on {
 				return nil, fmt.Errorf("lapilli serve doesn't take %s", no.flag)
 			}
@@ -1383,7 +1387,11 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		// Impact shorter than a rule can fire on reads as missed by it: said,
 		// not judged otherwise.
 		if f.impact != "" && len(versions) > 0 {
-			rep.ImpactShort = impactShort(versions[len(versions)-1].Rules, f.impactFor, f.step)
+			replayed := map[string]bool{}
+			for _, rr := range rep.Rules {
+				replayed[rr.Rule] = rr.Replayed && rr.Unsupported == ""
+			}
+			rep.ImpactShort = impactShort(versions[len(versions)-1].Rules, replayed, f.impactFor, f.step)
 		}
 		// A rule taken away during the period covers nothing.
 		if len(versions) > 1 {
@@ -1409,8 +1417,13 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			}
 			brief = true
 		}
+		// Cut is what a step says it didn't finish, as time ran out: not
+		// the time read after it, which may run out after the last one.
+		cut := false
 		if len(versions) == 1 && !brief {
-			rep.Suggestions = source.Suggest(ectx, h, versions[0].Rules, rep, incs, f.opts, f.step, f.parallel, nil)
+			var done bool
+			rep.Suggestions, done = source.Suggest(ectx, h, versions[0].Rules, rep, incs, f.opts, f.step, f.parallel, nil)
+			cut = cut || !done && ectx.Err() != nil
 		}
 		// Each incident nothing caught, against the rules as they stood then.
 		if !brief {
@@ -1418,6 +1431,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			var err error
 			rep.NearMisses, done, err = source.NearMisses(ectx, h, versions, rep, incs, f.opts, f.step, f.parallel, nil)
 			rep.NearMissesCut = !done
+			cut = cut || !done && ectx.Err() != nil
 			if err != nil && ectx.Err() == nil {
 				fmt.Fprintf(stderr, "lapilli verdict: looking for near misses: %v\n", err)
 			}
@@ -1426,11 +1440,13 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		// how many went well past their bound, and from which alerts.
 		if !brief && rep.Unjudged > 0 && len(versions) > 0 {
 			var err error
-			if rep.Unrecorded, err = source.Unrecorded(ectx, h, versions, rep, source.Judged(rep.Firings), f.step); err != nil && ectx.Err() == nil {
+			rep.Unrecorded, err = source.Unrecorded(ectx, h, versions, rep, source.Judged(rep.Firings), f.step)
+			cut = cut || err != nil && ectx.Err() != nil
+			if err != nil && ectx.Err() == nil {
 				fmt.Fprintf(stderr, "lapilli verdict: looking at the firings with no record to judge them by: %v\n", err)
 			}
 		}
-		if !brief && ectx.Err() != nil {
+		if cut {
 			rep.Extras = "cut"
 			if ctx.Err() == nil {
 				fmt.Fprintf(stderr, "lapilli verdict: the steps after the replays stopped at --extras %s: a longer \"for\", near misses and what fired with no record are in part\n", f.extras)
@@ -2020,23 +2036,22 @@ func loadRules(f *verdictFlags, path string) ([]rules.Rule, error) {
 	return kept, nil
 }
 
-// impactShort is, of rs, those whose "for" and one evaluation are longer
-// than impactFor: impact that short, counted as an incident, they can't
-// catch. Nil when there are none.
-func impactShort(rs []rules.Rule, impactFor, step time.Duration) *verdict.ImpactShort {
+// impactShort is, of rs, the rules replayed whose "for" and one evaluation
+// are longer than impactFor: impact that short, counted as an incident,
+// they can't be sure to catch. A rule with no "for" fires on its first
+// evaluation in the impact, so it needs as long as its evaluations are apart.
+// Nil when there are none.
+func impactShort(rs []rules.Rule, replayed map[string]bool, impactFor, step time.Duration) *verdict.ImpactShort {
 	need := map[time.Duration]int{}
 	out := verdict.ImpactShort{For: impactFor}
 	seen := map[string]bool{}
 	for _, r := range rs {
-		if r.Unsupported != "" || seen[r.Name] {
+		if !replayed[r.Name] || seen[r.Name] {
 			continue
 		}
 		seen[r.Name] = true
 		out.Judged++
-		if r.For <= 0 {
-			continue
-		}
-		if d := r.For + replay.Every(r, step); d > impactFor {
+		if d := max(r.For, 0) + replay.Every(r, step); d > impactFor {
 			out.Rules++
 			need[d]++
 		}

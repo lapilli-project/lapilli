@@ -460,9 +460,10 @@ var longerFors = []time.Duration{5 * time.Minute, 10 * time.Minute, 15 * time.Mi
 // could never fire it then (rules.Rule.EventWindow). A name shared by several
 // rules has no one "for" to change, and is passed over. A period with no
 // record has no noisy rule, and nothing suggested. excuse, when not nil, says which firings that
-// caught nothing a quiet window excuses, as the ledger does.
+// caught nothing a quiet window excuses, as the ledger does. Up to parallel
+// rules are replayed at once; done says each was, none cut short.
 func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdict.Report, incs []incident.Incident, o verdict.Options, step time.Duration,
-	parallel int, excuse func(firing.Firing) bool) []verdict.Suggestion {
+	parallel int, excuse func(firing.Firing) bool) (_ []verdict.Suggestion, done bool) {
 	o.SomeRules = true // each is judged alone
 	// caughtBy is when the rule caught each incident it caught.
 	caughtBy := func(r *verdict.Report, rule string) map[string]time.Duration {
@@ -503,58 +504,65 @@ func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdic
 		}
 	}
 	if len(tries) == 0 {
-		return nil
+		return nil, true
 	}
 	// Each is a replay of the whole period again: as many at once as the
-	// replays were, in the order of the rules all the same.
+	// replays were. What each would do is judged after, one at a time, in
+	// the order of the rules: excuse may keep a map of its own, as the
+	// ledger's does, that it writes.
 	st := replay.Begin(ctx, `a longer "for" for the noisy rules`, "rules", len(tries), false)
-	found := make([]*verdict.Suggestion, len(tries))
+	alts := make([]map[time.Duration][]firing.Firing, len(tries))
 	work := make(chan int)
 	var wg sync.WaitGroup
 	for range max(1, parallel) {
 		wg.Go(func() {
 			for n := range work {
 				t := tries[n]
-				if alts, err := replay.WithFor(ctx, h, t.rule, t.fors, o.From, o.To, step); err == nil {
-					caught := caughtBy(rep, t.rr.Rule)
-					for _, d := range t.fors {
-						alt := verdict.Judge(nil, alts[d], incs, o)
-						after := verdict.RuleResult{Rule: t.rr.Rule}
-						if j := slices.IndexFunc(alt.Rules, func(r verdict.RuleResult) bool { return r.Rule == t.rr.Rule }); j >= 0 {
-							after = alt.Rules[j]
-						}
-						Excuse(&after, alt.Firings, excuse)
-						still := caughtBy(alt, t.rr.Rule)
-						kept, later := true, time.Duration(0)
-						for id, was := range caught {
-							now, ok := still[id]
-							kept = kept && ok
-							later = max(later, now-was)
-						}
-						if kept && 2*after.Firings <= t.rr.Firings {
-							found[n] = &verdict.Suggestion{Rule: t.rr.Rule, For: t.rule.For, NewFor: d, Before: t.rr, After: after,
-								Incidents: len(caught), Later: later}
-							break
-						}
-					}
+				if a, err := replay.WithFor(ctx, h, t.rule, t.fors, o.From, o.To, step); err == nil {
+					alts[n] = a
 				}
 				st.Did(1)
 			}
 		})
 	}
+	sent := 0
 	for n := range tries {
 		if ctx.Err() != nil {
 			break
 		}
 		work <- n
+		sent++
 	}
 	close(work)
 	wg.Wait()
 	var out []verdict.Suggestion
-	for _, s := range found {
-		if s != nil {
-			out = append(out, *s)
+	done = sent == len(tries)
+	for n, t := range tries {
+		if alts[n] == nil {
+			done = false
+			continue
+		}
+		caught := caughtBy(rep, t.rr.Rule)
+		for _, d := range t.fors {
+			alt := verdict.Judge(nil, alts[n][d], incs, o)
+			after := verdict.RuleResult{Rule: t.rr.Rule}
+			if j := slices.IndexFunc(alt.Rules, func(r verdict.RuleResult) bool { return r.Rule == t.rr.Rule }); j >= 0 {
+				after = alt.Rules[j]
+			}
+			Excuse(&after, alt.Firings, excuse)
+			still := caughtBy(alt, t.rr.Rule)
+			kept, later := true, time.Duration(0)
+			for id, was := range caught {
+				now, ok := still[id]
+				kept = kept && ok
+				later = max(later, now-was)
+			}
+			if kept && 2*after.Firings <= t.rr.Firings {
+				out = append(out, verdict.Suggestion{Rule: t.rr.Rule, For: t.rule.For, NewFor: d, Before: t.rr, After: after,
+					Incidents: len(caught), Later: later})
+				break
+			}
 		}
 	}
-	return out
+	return out, done
 }

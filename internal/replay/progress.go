@@ -28,7 +28,7 @@ type Step struct {
 func Begin(ctx context.Context, name, unit string, total int, atMost bool) *Step {
 	s := &Step{Name: name, Unit: unit, AtMost: atMost}
 	s.Total.Store(int64(total))
-	if p := progressOf(ctx); p != nil {
+	if p, _ := ctx.Value(stepKey{}).(*Progress); p != nil {
 		p.step.Store(s)
 	}
 	return s
@@ -51,10 +51,19 @@ func (p *Progress) Now() *Step {
 
 type progressKey struct{}
 
+// stepKey keeps the Progress the steps after the replays are said in: a
+// run that stops counting replays (Tracking with nil) still says its steps.
+type stepKey struct{}
+
 // Tracking is ctx with p, which every Run and RunEach asked with it counts
-// its rules into; with p nil, ctx counts into nothing.
+// its rules into; with p nil, ctx counts into nothing, but the steps after
+// the replays are still said in the Progress ctx had.
 func Tracking(ctx context.Context, p *Progress) context.Context {
-	return context.WithValue(ctx, progressKey{}, p)
+	ctx = context.WithValue(ctx, progressKey{}, p)
+	if p != nil {
+		ctx = context.WithValue(ctx, stepKey{}, p)
+	}
+	return ctx
 }
 
 func progressOf(ctx context.Context) *Progress {

@@ -50,13 +50,37 @@ func TestLasted(t *testing.T) {
 			t.Errorf("lacks %q:\n%s", want, out)
 		}
 	}
-	// With no incident found by --impact, nothing is said of it.
-	r.Incidents = r.Incidents[:2]
+	// Series alike but for a name: told apart by their place. A label value
+	// as long as the history likes is cut.
+	r.Incidents[2].Spans = []incident.Span{
+		{Labels: map[string]string{"service": strings.Repeat("x", 200)}, Start: at(6), End: at(11)},
+		{Labels: map[string]string{"service": strings.Repeat("x", 200)}, Start: at(6), End: at(16)},
+		{Labels: map[string]string{"service": "y"}, Start: at(6), End: at(16)},
+	}
 	b.Reset()
 	if err := Text(&b, r, time.UTC); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(b.String(), "--impact-for") || strings.Contains(b.String(), "each series' own window") {
-		t.Errorf("no incident found by --impact:\n%s", b.String())
+	if want := "  impact-1: service=" + strings.Repeat("x", 71) + "… 09:06–09:11 (5m); service=" + strings.Repeat("x", 71) + "… 09:06–09:16 (10m); service=y 09:06–09:16 (10m)\n"; !strings.Contains(b.String(), want) {
+		t.Errorf("long labels: %s", b.String())
+	}
+	r.Incidents[2].Spans = []incident.Span{{Start: at(6), End: at(11)}, {Start: at(6), End: at(16)}}
+	b.Reset()
+	if err := Text(&b, r, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if want := "  impact-1: series 1 09:06–09:11 (5m); series 2 09:06–09:16 (10m)\n"; !strings.Contains(b.String(), want) {
+		t.Errorf("no labels to tell them apart: %s", b.String())
+	}
+	// With no incident found by --impact, nothing is said of it, not even
+	// a line left blank for it.
+	r.Incidents = r.Incidents[:1]
+	b.Reset()
+	if err := Text(&b, r, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(b.String(), "--impact-for") || strings.Contains(b.String(), "each series' own window") ||
+		strings.HasSuffix(b.String(), "\n\n") {
+		t.Errorf("no incident found by --impact:\n%q", b.String())
 	}
 }

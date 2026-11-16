@@ -135,14 +135,15 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		if err := table(w, rows); err != nil {
 			return err
 		}
-		if missed > 0 || noisy > 0 || r.ImpactShort != nil {
+		short := r.ImpactShort != nil && found > 0
+		if missed > 0 || noisy > 0 || short {
 			fmt.Fprintln(w)
 		}
 		if missed > 0 {
 			fmt.Fprintf(w, "✗ %d of %d incidents had no alert.\n", missed, len(r.Incidents))
 			spans(w, r.Incidents, loc)
 		}
-		if s := r.ImpactShort; s != nil && found > 0 {
+		if s := r.ImpactShort; short {
 			fmt.Fprintf(w, "! --impact-for %s counts impact that lasted %s as an incident, but %d of the %d rules judged fire only once\n"+
 				"  their condition held longer, for their \"for\" and one evaluation (%s for %d of them): impact shorter\n"+
 				"  than that they can't catch. --impact-for %s counts only what they can.\n",
@@ -430,8 +431,16 @@ func lasted(in incident.Incident) string {
 }
 
 // spansMost and spansEach bound what spans writes: the incidents, and the
-// series of each.
-const spansMost, spansEach = 20, 5
+// series of each; spanLabel each label of a series, in runes.
+const spansMost, spansEach, spanLabel = 20, 5, 80
+
+// clip is s cut to n runes, an ellipsis ending it when it was longer.
+func clip(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
+}
 
 // spans writes, of the incidents nothing caught that --impact found over
 // several series, each series' own window: none may have lasted as long as
@@ -460,11 +469,15 @@ func spans(w io.Writer, ins []IncidentResult, loc *time.Location) {
 			var by []string
 			for k, v := range sp.Labels {
 				if _, same := common[k]; !same {
-					by = append(by, Clean(k)+"="+Clean(v))
+					by = append(by, clip(Clean(k)+"="+Clean(v), spanLabel))
 				}
 			}
 			slices.Sort(by)
-			each = append(each, fmt.Sprintf("%s %s–%s (%s)", strings.Join(by, ","), sp.Start.In(loc).Format("15:04"),
+			name := strings.Join(by, ",")
+			if name == "" {
+				name = fmt.Sprintf("series %d", i+1) // they differ by nothing kept
+			}
+			each = append(each, fmt.Sprintf("%s %s–%s (%s)", name, sp.Start.In(loc).Format("15:04"),
 				sp.End.In(loc).Format("15:04"), Duration(sp.End.Sub(sp.Start).Round(time.Second))))
 		}
 		lines = append(lines, fmt.Sprintf("  %s: %s", Clean(in.ID), strings.Join(each, "; ")))
