@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-11-16
+
+### Added
+
+- **What Grafana's rules really fired, from Grafana's own state history.**
+  `lapilli verdict --check-replay` and `lapilli serve`'s daily check read
+  `GRAFANA_ALERTS` for Grafana's rules, which Grafana writes only once its
+  alert state history is sent to Prometheus, not its default. With the
+  Grafana known, they now read what its rules fired from the history it
+  keeps, through its API, with the Viewer's token `--grafana-token-file`
+  already holds: in annotations, Grafana's default, from Grafana 12.4 on,
+  or in Loki, as its frontend settings say. `--grafana` gives the Grafana
+  for the rules it reads; `--check-grafana URL` gives it for Grafana's rules
+  read from files (`--rules`, `--rules-history`). A Grafana keeping its
+  history in Prometheus, alone or among several places, is read from
+  `GRAFANA_ALERTS` as before while it holds anything; annotations before
+  12.4, which hold no labels, aren't read; `--check-series` still names
+  series instead. Annotations keep labels as Grafana writes them as tags (a
+  colon an underscore, spaces trimmed, one past 100 characters or past
+  `tags_length` left out): the replay's are set beside them so. Measured on
+  Grafana 12.4.14 and 13.3.1: every firing read from the history alike with
+  `GRAFANA_ALERTS`, starting and ending at the same evaluation
+  (docs/design/grafanahistory.md). A history that can't be read, holds
+  nothing from before the period or the day, or tells a rule's alerts
+  apart by nothing it keeps, leaves those rules not checked, and the
+  others as they were; `serve` goes on to the next day, and the Run
+  history page says why. What another system sends is bounded: an answer
+  16 MiB, a read 5,000 requests, 256 MiB, 200,000 changes of 50,000 alerts
+  and 64 MiB of their labels, each label set kept once.
+
+### Fixed
+
+- **A miss of what really fired is kept within bounds.** `serve` kept the
+  labels of a firing found only in what really fired as the store gave
+  them, and showed them on the rule's page: any length, with what turns
+  text around. They are kept as a replayed alert's are, each value 256
+  bytes at most and shown as it reads; and of a day's misses only the
+  twenty a rule keeps are copied and written, not every one before they
+  were cut to twenty.
+
 ## [0.49.0] - 2026-11-16
 
 ### Added
@@ -92,41 +132,6 @@
   one release's: once the `uses:` line moves, nothing is installed, and
   the comment says so, until it is changed too. The release workflow
   checks that the first release `CHANGELOG.md` names is the one tagged.
-- **What Grafana's rules really fired, from Grafana's own state history.**
-  `lapilli verdict --check-replay` and `lapilli serve`'s daily check read
-  `GRAFANA_ALERTS` for Grafana's rules, which Grafana writes only once its
-  alert state history is sent to Prometheus, not its default. With the
-  Grafana known, they now read what its rules fired from the history it
-  keeps, through its API, with the Viewer's token `--grafana-token-file`
-  already holds: in annotations, Grafana's default, from Grafana 12.4 on,
-  or in Loki, as its frontend settings say. `--grafana` gives the Grafana
-  for the rules it reads; `--check-grafana URL` gives it for Grafana's rules
-  read from files (`--rules`, `--rules-history`). A Grafana keeping its
-  history in Prometheus, alone or among several places, is read from
-  `GRAFANA_ALERTS` as before while it holds anything; annotations before
-  12.4, which hold no labels, aren't read; `--check-series` still names
-  series instead. Annotations keep labels as Grafana writes them as tags (a
-  colon an underscore, spaces trimmed, one past 100 characters or past
-  `tags_length` left out): the replay's are set beside them so. Measured on
-  Grafana 12.4.14 and 13.3.1: every firing read from the history alike with
-  `GRAFANA_ALERTS`, starting and ending at the same evaluation
-  (docs/design/grafanahistory.md). A history that can't be read, holds
-  nothing from before the period or the day, or tells a rule's alerts
-  apart by nothing it keeps, leaves those rules not checked, and the
-  others as they were; `serve` goes on to the next day, and the Run
-  history page says why. What another system sends is bounded: an answer
-  16 MiB, a read 5,000 requests, 256 MiB, 200,000 changes of 50,000 alerts
-  and 64 MiB of their labels, each label set kept once.
-
-### Fixed
-
-- **A miss of what really fired is kept within bounds.** `serve` kept the
-  labels of a firing found only in what really fired as the store gave
-  them, and showed them on the rule's page: any length, with what turns
-  text around. They are kept as a replayed alert's are, each value 256
-  bytes at most and shown as it reads; and of a day's misses only the
-  twenty a rule keeps are copied and written, not every one before they
-  were cut to twenty.
 
 - **The impact signal's record follows one rule: it holds only for weeks
   that were read, with data, by the criterion in effect, and, after a
