@@ -63,11 +63,11 @@ func CSV(w io.Writer, r *Report, excused []Judged, teamOf func(rule string) stri
 		}
 		incidents := []string{}
 		for _, id := range j.Incidents {
-			incidents = append(incidents, Clean(id))
+			incidents = append(incidents, cellText(id))
 		}
 		labels := map[string]string{}
 		for k, v := range j.Labels {
-			labels[Clean(k)] = Clean(v)
+			labels[cellText(k)] = cellText(v)
 		}
 		// An excused firing is in none of the numbers: it re-fired for none.
 		refired := j.Refired && !j.Excused
@@ -83,12 +83,13 @@ func CSV(w io.Writer, r *Report, excused []Judged, teamOf func(rule string) stri
 
 // Cell is text for a cell of CSV as a person reads it and a spreadsheet
 // won't run: control and format characters (a line break, a tab, a bidi
-// override) written as \u{...}, as Clean writes them for a terminal; and
+// override) written as \u{...}, as Clean writes them for a terminal, and
+// a backslash as \\, so no two texts are written alike (cellText); and
 // text whose first character past any spaces is =, +, - or @, or one of
 // their full-width forms, with ' put before it, as OWASP advises. Take it
 // off to read the text as it was.
 func Cell(s string) string {
-	s = Clean(s)
+	s = cellText(s)
 	if t := strings.TrimLeftFunc(s, unicode.IsSpace); t != "" {
 		if r, _ := utf8.DecodeRuneInString(t); strings.ContainsRune("=+-@＝＋－＠", r) {
 			return "'" + s
@@ -96,6 +97,11 @@ func Cell(s string) string {
 	}
 	return s
 }
+
+// cellText is s as Clean writes it, a backslash written \\ first: Clean
+// alone writes U+202E and the text \u{202e} alike, and two labels' names
+// written alike would be one key of the JSON, a value lost.
+func cellText(s string) string { return Clean(strings.ReplaceAll(s, `\`, `\\`)) }
 
 // csvTime is a time in UTC, as RFC 3339 writes it.
 func csvTime(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }

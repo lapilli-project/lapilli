@@ -601,7 +601,9 @@ search) and the rules list's badges and filters are in [ui.md](ui.md).
   (up to 31 days with every firing, a year without: `firings=false`);
   `&format=csv`, its firings a row each, with those quiet windows excused
   and each rule's team, under the same bounds and turn
-  ([docs/numbers.md](../numbers.md)).
+  ([docs/numbers.md](../numbers.md));
+  `&redact=true` gives every name an alias, as `lapilli verdict --redact`
+  does, the aliases that answer's own.
   `/api/v1/incidents` (GET, POST, PUT, DELETE), `/api/v1/rules`, `/runs`,
   `/settings`, `/outcomes`, `/summary` (each week and team, for dashboards
   and other tools: [noc.md](noc.md)).
