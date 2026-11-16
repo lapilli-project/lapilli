@@ -261,8 +261,15 @@ func TestOutcomesQuiet(t *testing.T) {
 		t.Fatalf("no incident written down in twenty days should be quiet, impact windows or not: %v %+v", err, out.Record)
 	}
 	h := s.Handler()
-	if _, body, _ := get(t, h, "/outcomes"); !strings.Contains(body, "No incident written down has started in") {
+	_, body, _ := get(t, h, "/outcomes")
+	if !strings.Contains(body, "No incident written down has started in") {
 		t.Errorf("/outcomes should ask about the incidents:\n%s", body)
+	}
+	// The latest incident written down: none, which is known, so said in
+	// words in the warning's colour; "–" is for what isn't known.
+	if _, tile, _ := strings.Cut(body, "Latest incident written down"); !strings.Contains(tile[:min(len(tile), 300)], `status-warn">none yet<`) ||
+		strings.Contains(tile[:min(len(tile), 300)], ">–<") {
+		t.Errorf("/outcomes: the latest incident's tile: %s", tile[:min(len(tile), 300)])
 	}
 	if _, body, _ := get(t, h, "/"); !strings.Contains(body, "are they still being written down?") {
 		t.Errorf("the overview should ask about the incidents")

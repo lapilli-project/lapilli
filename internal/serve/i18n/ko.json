@@ -983,6 +983,7 @@
  "noisy only": "노이즈만 잡음",
  "noisy, %d wk": "노이즈, %d주",
  "none in %d days": "%d일 동안 없음",
+ "none yet": "아직 없음",
  "not as predicted": "예측과 다름",
  "not matched on: no --match": "라벨로 맞춰 보지 않아요 (--match 없음)",
  "not replayed: %s": "백테스트하지 못함: %s",
