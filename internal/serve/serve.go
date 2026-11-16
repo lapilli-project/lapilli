@@ -508,13 +508,15 @@ type status struct {
 	// the replay was last set beside what really fired.
 	checkEmpty []string
 	checkDay   time.Time
-	// history is where the Grafana of Config.History keeps its alert state
-	// history, as it said at historyAt ("" for none it serves); historyOff
-	// why it was of no use over checkDay, its rules not checked that day:
-	// historyNothing or historyTooMany, or "".
-	history    string
-	historyAt  time.Time
-	historyOff string
+	// historyWhere is where the Grafana of Config.History keeps its alert
+	// state history, as it said at historyAt. checkHistory is where it was
+	// read from for checkDay, "" when it wasn't; historyOff why it was of
+	// no use then, its rules not checked that day: historyFrom,
+	// historyTooMany or historyUnusable, or "".
+	historyWhere source.HistoryWhere
+	historyAt    time.Time
+	checkHistory string
+	historyOff   string
 	// checkHeld are the days whose check waited for a cloud's alarms'
 	// history: once checked, they are told of as a day just checked is.
 	checkHeld map[int64]bool

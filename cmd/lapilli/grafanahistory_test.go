@@ -93,7 +93,7 @@ func TestCheckReplayGrafanaHistory(t *testing.T) {
 	rulesFile := write(t, "grafana.yaml", gErrorsRule+strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(gErrorsRule[strings.Index(gErrorsRule, "      - uid:"):], "gerrors", "stuck"), "GErrors", "Stuck"), "expr: errors", "expr: stuck"))
 	token := write(t, "token", "glsa_viewer\n")
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"verdict", "--rules", rulesFile, "--prometheus", "http://x", "--check-replay", "--check-grafana", srv.URL,
+	code := run([]string{"verdict", "--rules", rulesFile, "--prometheus", "http://x", "--check-replay", "--check-grafana", strings.Replace(srv.URL, "http://", "HTTP://", 1),
 		"--grafana-token-file", token, "--tz", "UTC"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())
@@ -108,9 +108,10 @@ func TestCheckReplayGrafanaHistory(t *testing.T) {
 	if strings.Contains(out, "GRAFANA_ALERTS") {
 		t.Errorf("GRAFANA_ALERTS read:\n%s", out)
 	}
+	// Whether it reaches back past the period; then a week a request at
+	// most: two.
 	from := fmt.Sprint(t0.Add(-8 * 24 * time.Hour).UnixMilli())
-	// A week a request at most: two.
-	if len(asked) != 3 || !strings.Contains(asked[1], "from="+from) || !strings.HasSuffix(asked[1], " Bearer glsa_viewer") {
+	if len(asked) != 4 || !strings.Contains(asked[1], "from=1&") || !strings.Contains(asked[2], "from="+from) || !strings.HasSuffix(asked[2], " Bearer glsa_viewer") {
 		t.Errorf("asked %v", asked)
 	}
 	if !strings.Contains(stderr.String(), "--check-grafana is plain http") {
@@ -164,4 +165,102 @@ func TestCheckGrafanaFlags(t *testing.T) {
 	if f, err := parseFlags([]string{"--grafana", "https://g.example", "--prometheus", "http://x", "--check-replay", "--check-series", "x"}, nil); err != nil || f.historyGrafana() != "" {
 		t.Errorf("--check-series: %v", err)
 	}
+}
+
+// A history that can't be read leaves Grafana's rules unchecked, said
+// why, and the others checked as before: a token that may not read
+// annotations (403), a Grafana whose settings can't be read (then
+// GRAFANA_ALERTS, as before), annotations before Grafana 12.4, which hold
+// no labels, or a history that holds nothing from before the period.
+func TestCheckReplayGrafanaHistoryFails(t *testing.T) {
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
+	now = func() time.Time { return t0 }
+	prometheus := write(t, "rules.yaml", "groups:\n  - name: shop\n    rules:\n      - {alert: CheckoutErrors, expr: errors > 5, for: 5m}\n")
+	grafana := write(t, "grafana.yaml", gErrorsRule)
+	token := write(t, "token", "glsa_viewer")
+	for _, c := range []struct {
+		name               string
+		settings, notes    int
+		body, says, stderr string
+	}{
+		{"refused", 200, 403, "", "GErrors: not checked: Grafana's alert state history can't be used", ""},
+		{"settings refused", 403, 200, "[]", "", "what Grafana's rules really fired is read from GRAFANA_ALERTS"},
+		{"before 12.4", 200, 200, `[{"id":1,"alertName":"GErrors","prevState":"Normal","newState":"Alerting","time":1792900000000}]`, "hold no labels, as Grafana before 12.4 writes them", ""},
+		{"from after", 200, 200, "[]", "holds no change of state from before the period", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/frontend/settings":
+					w.WriteHeader(c.settings)
+					io.WriteString(w, `{"buildInfo":{"version":"12.4.14"},"unifiedAlerting":{"alertStateHistoryBackend":"annotations"}}`)
+				default:
+					w.WriteHeader(c.notes)
+					io.WriteString(w, c.body)
+				}
+			}))
+			defer srv.Close()
+			var stdout, stderr bytes.Buffer
+			code := run([]string{"verdict", "--rules", prometheus, "--rules", grafana, "--prometheus", "http://x", "--check-replay", "--check-grafana", srv.URL,
+				"--grafana-token-file", token, "--tz", "UTC"}, &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("exit %d: %s\n%s", code, stdout.String(), stderr.String())
+			}
+			out := stdout.String()
+			if !strings.Contains(out, "1 firings alike, 0 only in the replay, 0 only in what really fired") {
+				t.Errorf("the Prometheus rule isn't checked as before:\n%s", out)
+			}
+			if c.says != "" && !strings.Contains(out, c.says) {
+				t.Errorf("no %q in:\n%s", c.says, out)
+			}
+			if c.stderr != "" && !strings.Contains(stderr.String(), c.stderr) {
+				t.Errorf("no %q in:\n%s", c.stderr, stderr.String())
+			}
+		})
+	}
+}
+
+// Read from annotations, the replay's labels are set beside them as their
+// tags keep them: an instance's port with an underscore; a rule's title
+// with a colon, by its name there.
+func TestCheckReplayGrafanaHistoryTagged(t *testing.T) {
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return portHistory{}, nil }
+	now = func() time.Time { return t0 }
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/frontend/settings":
+			io.WriteString(w, `{"buildInfo":{"version":"12.4.14"},"unifiedAlerting":{"alertStateHistoryBackend":"annotations"}}`)
+		default:
+			note := func(id int, inst, from, to string, at time.Time) map[string]any {
+				return map[string]any{"id": id, "alertName": "Up: shop", "prevState": from, "newState": to, "time": at.UnixMilli(),
+					"tags": []string{"alertname:Up_ shop", "instance:" + inst}}
+			}
+			json.NewEncoder(w).Encode([]any{
+				note(4, "10.0.0.2_9100", "Alerting", "Normal", t0.Add(-2*time.Hour+time.Minute)),
+				note(3, "10.0.0.1_9100", "Alerting", "Normal", t0.Add(-2*time.Hour+time.Minute)),
+				note(2, "10.0.0.2_9100", "Normal", "Alerting", t0.Add(-3*time.Hour)),
+				note(1, "10.0.0.1_9100", "Normal", "Alerting", t0.Add(-3*time.Hour)),
+			})
+		}
+	}))
+	defer srv.Close()
+	rule := strings.NewReplacer("uid: gerrors", "uid: up", "title: GErrors", `title: "Up: shop"`).Replace(gErrorsRule)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"verdict", "--rules", write(t, "grafana.yaml", rule), "--prometheus", "http://x", "--check-replay", "--check-grafana", srv.URL, "--tz", "UTC"}, &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "2 firings alike, 0 only in the replay, 0 only in what really fired: 100% alike.") {
+		t.Errorf("exit %d:\n%s\n%s", code, stdout.String(), stderr.String())
+	}
+}
+
+// portHistory is errorsHistory with two instances, each with its port.
+type portHistory struct{}
+
+func (portHistory) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	ss, err := errorsHistory{}.QueryRange(ctx, expr, start, end, step)
+	if len(ss) == 0 {
+		return ss, err
+	}
+	a, b := ss[0], prom.Series{Labels: map[string]string{"instance": "10.0.0.2:9100"}, Samples: ss[0].Samples}
+	a.Labels = map[string]string{"instance": "10.0.0.1:9100"}
+	return []prom.Series{a, b}, err
 }

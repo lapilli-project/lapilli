@@ -209,7 +209,7 @@ type sharedStatus struct {
 	Runs       map[string]int `json:"runs,omitempty"`
 	CheckEmpty []string       `json:"check_empty,omitempty"`
 	CheckDay   time.Time      `json:"check_day,omitzero"`
-	// CheckHistory and CheckHistoryOff are status.history and
+	// CheckHistory and CheckHistoryOff are status.checkHistory and
 	// status.historyOff.
 	CheckHistory    string                `json:"check_history,omitempty"`
 	CheckHistoryOff string                `json:"check_history_off,omitempty"`
@@ -225,7 +225,7 @@ func (s *Server) ownStatus() sharedStatus {
 	s.status.Lock()
 	st := sharedStatus{Doing: s.status.doing, ErrWhat: s.status.errWhat, Err: s.status.err, Judged: s.status.judged, Took: s.status.took,
 		Runs: maps.Clone(s.status.runs), CheckEmpty: slices.Clone(s.status.checkEmpty), CheckDay: s.status.checkDay,
-		CheckHistory: s.status.history, CheckHistoryOff: s.status.historyOff}
+		CheckHistory: s.status.checkHistory, CheckHistoryOff: s.status.historyOff}
 	for _, a := range s.status.args {
 		st.Args = append(st.Args, fmt.Sprint(a))
 	}

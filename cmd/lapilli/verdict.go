@@ -196,8 +196,11 @@ Is the replay right?
                       Without it, what Grafana's rules really fired is read
                       from Grafana's own alert state history instead, when
                       --grafana or --check-grafana says which Grafana and it
-                      keeps one it serves: in annotations, its default, or
-                      in Loki; read from a day before the period
+                      keeps one it serves: in annotations, its default, from
+                      Grafana 12.4 on, or in Loki; and GRAFANA_ALERTS first,
+                      while it holds anything, where Grafana may keep it
+                      too. Read from a day before the period; where it can't
+                      be read, Grafana's rules aren't checked, and say why
   --check-grafana URL the Grafana that runs the Grafana rules --rules gives,
                       whose alert state history says what they really fired,
                       read with --grafana-token-file

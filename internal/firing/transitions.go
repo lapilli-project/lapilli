@@ -12,11 +12,15 @@ import (
 // name, its labels but alertname, when it changed, and the states before
 // and after, as Grafana writes them: Normal, Pending, Alerting, Recovering,
 // NoData or Error, with a reason after or not ("Normal (MissingSeries)").
+// Key, when set, tells its alert apart, the same for every change of it;
+// otherwise its rule and labels do. The changes of one alert may share
+// one Labels, which isn't written to.
 type Transition struct {
 	Rule     string
 	Labels   map[string]string
 	At       time.Time
 	From, To string
+	Key      string
 }
 
 // The label a firing in Grafana's NoData state carries, as its series of
@@ -68,25 +72,46 @@ func GrafanaState(state string) bool {
 // firing state was firing at from; one with no change after its last into
 // a firing state is still firing, and has no End. An alert that fired all
 // through what was read changed state in none of it: it isn't seen.
-func FromTransitions(ts []Transition, from time.Time) []Firing {
+//
+// unsure are the rules an alert of which changed from a state it wasn't
+// in, as the change before left it: a firing or not where it wasn't. Grafana
+// writes every change of an alert, from the state the one before left
+// (those it leaves out, Normal to Normal (NoData) and into KeepLast, don't
+// change whether it fires): changes missing, or two alerts the history
+// doesn't tell apart, would make firings that weren't. The firings of an
+// alert share their labels, which aren't written to.
+func FromTransitions(ts []Transition, from time.Time) (fs []Firing, unsure []string) {
 	byAlert := map[string][]Transition{}
+	var keys []string
 	for _, t := range ts {
-		k := t.Rule + "\x00" + labelKey(t.Labels)
+		k := t.Key
+		if k == "" {
+			k = "\x00" + t.Rule + "\x00" + labelKey(t.Labels)
+		}
+		if _, ok := byAlert[k]; !ok {
+			keys = append(keys, k)
+		}
 		byAlert[k] = append(byAlert[k], t)
 	}
-	var out []Firing
-	for _, k := range slices.Sorted(maps.Keys(byAlert)) {
+	slices.Sort(keys)
+	odd := map[string]bool{}
+	for _, k := range keys {
 		seq := byAlert[k]
 		slices.SortStableFunc(seq, func(a, b Transition) int { return a.At.Compare(b.At) })
+		base, nodata := seq[0].Labels, map[string]string(nil)
+		if base == nil {
+			base = map[string]string{}
+		}
 		var open *Firing
 		kind := ""
 		start := func(as string, at time.Time) {
-			l := maps.Clone(seq[0].Labels)
-			if l == nil {
-				l = map[string]string{}
-			}
+			l := base
 			if as == noDataState {
-				l[stateLabel] = noDataState
+				if nodata == nil {
+					nodata = maps.Clone(base)
+					nodata[stateLabel] = noDataState
+				}
+				l = nodata
 			}
 			kind = as
 			open = &Firing{Rule: seq[0].Rule, Labels: l, Start: at}
@@ -95,14 +120,17 @@ func FromTransitions(ts []Transition, from time.Time) []Firing {
 			// One that changed at from was over by then.
 			if open != nil && at.After(open.Start) {
 				open.End = at
-				out = append(out, *open)
+				fs = append(fs, *open)
 			}
 			open, kind = nil, ""
 		}
 		if was := grafanaFiring(seq[0].From); was != "" {
 			start(was, from)
 		}
-		for _, t := range seq {
+		for i, t := range seq {
+			if i > 0 && grafanaFiring(t.From) != kind {
+				odd[t.Rule] = true
+			}
 			is := grafanaFiring(t.To)
 			if is == kind {
 				continue
@@ -113,9 +141,9 @@ func FromTransitions(ts []Transition, from time.Time) []Firing {
 			}
 		}
 		if open != nil {
-			out = append(out, *open)
+			fs = append(fs, *open)
 		}
 	}
-	Sort(out)
-	return out
+	Sort(fs)
+	return fs, slices.Sorted(maps.Keys(odd))
 }

@@ -50,9 +50,24 @@ two service accounts: a Viewer, and one with no basic role.
 | Ask | What it answers | Who may |
 |---|---|---|
 | `GET /api/frontend/settings` | `unifiedAlerting.alertStateHistoryBackend`: `annotations`, `loki`, `prometheus` or `multiple`, and with `multiple`, `alertStateHistoryPrimary`, the one it serves. 13.3.1 and 12.4.14 alike | anyone signed in, the account with no role too |
-| `GET /api/annotations?type=alert&from=MS&to=MS&limit=N` | Every alert annotation of the organisation, from and to in milliseconds, both within, newest first. Each has `id`; `alertId`, the rule's id in Grafana's database, not its uid; `alertName`, its title; `prevState` and `newState`; `time`, the evaluation's, in milliseconds; `text`; `data`, the values; and `tags`, the alert's labels, `NAME:VALUE` each, `alertname` and `grafana_folder` among them, exactly as the labels are (`pod:a, b=c} d`). `limit` is 100 unless given; 100000 answered all of them. `alertUID=UID` keeps one rule's. No cursor | `annotations:read`: a Viewer; the account with no role was refused (403) |
+| `GET /api/annotations?type=alert&from=MS&to=MS&limit=N` | Every alert annotation of the organisation, from and to in milliseconds, both within, newest first; with only one of them given, not by time at all. Each has `id`; `alertId`, the rule's id in Grafana's database, not its uid; `alertName`, the rule's title now, as joined from its rules (empty for one deleted); `prevState` and `newState`; `time`, the evaluation's, in milliseconds; `text`; `data`, the values; and `tags`, the alert's labels, `alertname` and `grafana_folder` among them, as Grafana 12.4 and later write them (below). `limit` is 100 unless given; 100000 answered all of them. `alertUID=UID` keeps one rule's. No cursor, nor an offset | `annotations:read`: a Viewer; the account with no role was refused (403) |
 | `GET /api/v1/rules/history?ruleUID=UID&from=S&to=S`, annotations kept | A data frame of `time`, `text`, `prev`, `next` and `data`. The labels only in the text, `Title {a=b, c=d} - B=1.000000`, which can't be read back once a title or a value has `{`, `}`, `, ` or `=` in it: `Tricky {title}, a=b - c {alertname=Tricky {title}, a=b - c, ..., pod=a, b=c} d} - A=1.000000`. Its times a thousand times too large, the annotation's milliseconds read as seconds: `1794813480000000` for 07:18:00. `ruleUID` needed ("ruleUID is required to query annotations"); `limit` not taken (2 answered 17) | `alert.rules:read`: a Viewer; the account with no role was refused (403) |
 | the same, Loki kept | A data frame of `time`, in milliseconds, `line` and `labels`, each line JSON: `previous`, `current`, `ruleUID`, `ruleTitle`, `fingerprint` and `labels`, as they are. Every rule's without `ruleUID`; newest first across Loki's streams, each stream's lines together (a stream a group); `limit` the newest so many; from and to in seconds | as above |
+
+**The tags are not the labels as they are.** As Grafana's source has it
+(`pkg/services/ngalert/state/historian/annotation.go`,
+`convertLabelsToTags`, from 12.4.0; the tag store's `ParseTagPairs`), and
+as a second recording on 12.4.14 showed: each colon in a name or a value
+is an underscore (`instance:10.0.0.1_9100`, `url:http_//a.example_8080/x`);
+a label whose name or value is then past 100 characters is left out (two
+alerts told apart only by a path of 120 characters were one); so is one
+past `[annotations] tags_length`, 500 by default, counted as JSON in the
+labels' order by name (of nine labels of 60 characters and a short one,
+the eighth long one went, the short one after it stayed); spaces either
+end are trimmed, and a value of spaces leaves the name alone, with no
+colon (`pad`). Grafana before 12.4 (12.3.0's source, and 11.x) writes no
+tags at all: its annotations say nothing of which alert of a rule each
+is of. The first recording had no colon in a value, nor a long one.
 
 The states are Grafana's: `Normal`, `Pending`, `Alerting`, `Recovering`,
 `NoData` and `Error`, with a reason or not: `Normal (MissingSeries)`,
@@ -114,23 +129,41 @@ history alike. `--check-series` still names series instead, and doesn't go
 with `--check-grafana`.
 
 **Where it is kept.** The frontend settings say, read once a run by
-`verdict`, and within the hour by `serve`. Annotations, or `multiple` with
-them first, are read from `/api/annotations`; Loki, or `multiple` with it
-first, from `/api/v1/rules/history`. Anything else (Prometheus alone, none,
-a Grafana before 10 that doesn't say) is read as before, from
-`GRAFANA_ALERTS`, and `verdict` says so.
+`verdict`, and within the hour by `serve`: annotations, from Grafana 12.4
+on (`buildInfo.version`), are read from `/api/annotations`; Loki from
+`/api/v1/rules/history`. Kept in several places (`multiple`), Grafana may
+keep it in Prometheus too, which the settings don't say: then
+`GRAFANA_ALERTS`, as before, while it holds anything for the period or the
+day, and the history where it holds nothing. Anything else (Prometheus
+alone, none, annotations before 12.4, settings that can't be read) is read
+as before, from `GRAFANA_ALERTS`, and `verdict` says so.
 
 **Annotations, not the history API, for annotations.** Their tags hold the
-labels as they are, their times are right, and one read is of every rule's,
-as `GRAFANA_ALERTS` is: alerts no rule given is named are found, as there.
+labels as Grafana keeps them, their times are right, and one read is of
+every rule's, as `GRAFANA_ALERTS` is: alerts no rule given is named are
+found, as there.
+
+**Set beside the tags as they are.** Read from annotations, the replay's
+firings of Grafana's rules are set beside them with their labels as the
+tags hold them (`source.AnnotationLabels`: colons underscores, spaces
+trimmed, those past 100 characters left out), and a rule is known by its
+name there (`AnnotationName`), its tag `alertname`, which is what it was
+called when the change was written, as `GRAFANA_ALERTS`'s is; for a title
+past 100 characters, `alertName`. Labels the tags leave out, past
+`tags_length`, a check passes over, as it passes over labels either side
+hasn't. One annotation with no tags makes the read of no use (Grafana
+before 12.4).
 
 **A page at a time.** Neither has a cursor. Each page asks for the newest
 1,000 changes to a time, the next to the time of the oldest of the page
 before, and the changes at that time are read again and told apart: by id
-for annotations, by when, the rule, the alert's fingerprint and the states
-for Loki, to the second, as that API takes times. A page of changes at one
-time alone is asked again for twice as many, 16,000 at most: none is lost
-where a page ends. A span asked over is a week at most, within Loki's 721h.
+for annotations, by a hash of when, the rule, the alert's fingerprint and
+the states for Loki, to the second, as that API takes times. A page of
+changes at one time alone is asked again for twice as many, 16,000 at
+most, and 5,000 from Loki, its `max_entries_limit_per_query` by default:
+none is lost where a page ends. More than that at one time can't be read,
+and the read is of no use. A span asked over is a week at most, within
+Loki's 721h.
 
 **Into firings** (`firing.FromTransitions`), as `GRAFANA_ALERTS` makes
 them: a firing from a change into `Alerting`, `Recovering` or `NoData`
@@ -139,7 +172,17 @@ Grafana's notifications take them; `NoData` is one of its own, labelled
 `grafana_alertstate="nodata"`, as the series and the replay label it; a
 reason doesn't change the state. `Error` isn't a firing, as
 `grafana_alertstate!="error"` leaves it out, and `--check-replay` says how
-many error alerts each rule had, as it did from the series.
+many error alerts each rule had, as it did from the series. The changes of
+one alert keep its labels once, and its firings share them.
+
+**What doesn't follow on.** Grafana writes every change of an alert from
+the state the change before left (those it leaves out, Normal to Normal
+(NoData) and into KeepLast, don't change whether it fires). A change from
+a state the one before didn't leave, firing or not, says changes are
+missing, or that two alerts are one in the history, as the tags left out
+what told them apart: the rule is unsure, and isn't checked. So is a rule
+some change of which was passed over (below), and two rules whose names
+are one in the tags.
 
 **From before.** Grafana keeps changes of state, not states, so the
 history is read from before the period: a day before for `verdict`, and a
@@ -148,19 +191,33 @@ firings are read. An alert on since then is seen as on at the start, and
 one over by the period's start isn't in it, as a series read from then
 doesn't have it.
 
-**In `serve`,** a day at a time, as with the series. A day whose history
-holds no change at all is taken as one the history doesn't reach, as an
-empty series is: Grafana's rules aren't checked that day, rather than
-every firing replayed looking as if it never happened. Annotations are
-kept for good unless `[unified_alerting.state_history.annotations]
-max_age` or `max_annotations_to_keep` says otherwise, and Loki as long as
-its retention: a first start's 28 days of backfill may reach past them. A
-day with more changes than a read takes isn't checked for them either, and
-the check goes on to the next day, so a busy Grafana can't hold it up. The
-Run history page says which: that Grafana's history stands in, and where it
-is kept, or that it held nothing, or too much, over the day last checked.
-What it reads it reads with Lapilli's own token, as the rules; nothing an
-outsider sends reaches it.
+**What reaches back.** Before a read, one more request asks whether the
+history holds a change at or before the period's start, or the day's: one
+that holds none begins after it, as one kept so far back no more, or
+written only since, does, and says nothing of what fired then. Grafana's
+rules aren't checked then. Annotations are kept for good unless
+`[unified_alerting.state_history.annotations] max_age` or
+`max_annotations_to_keep` says otherwise, and Loki as long as its
+retention: a first start's 28 days of backfill may reach past them. A
+quiet history, which holds an older change, is read as it is.
+
+**What fails, fails Grafana's rules alone.** In `verdict`, a history that
+can't be read, of no use, or not reaching back leaves Grafana's rules not
+checked, and says why beside each; the others are checked as before. In
+`serve`, a day whose history is of no use (`source.ErrUnusable`: refused,
+HTTP 4xx but 429; more than is read at once; an answer that isn't the
+history; changes at one time past what a page grows to) or doesn't reach
+back isn't checked for Grafana's rules, and the check goes on to the next
+day, so neither a busy Grafana nor a token that may not read annotations
+holds it up. A rule unsure isn't checked that day, the others are. Only a
+failure worth asking again, no answer or HTTP 429 or 5xx once the client
+has asked again as it does, fails the round, which asks again the next, as
+a Prometheus that doesn't answer does. Settings that can't be used are
+taken as no history, and `GRAFANA_ALERTS` read. The Run history page says
+which: that Grafana's history stands in, and where it is kept; or that over
+the day last checked it held nothing from before it, too much, or what
+couldn't be used, the log saying why. What it reads it reads with
+Lapilli's own token, as the rules; nothing an outsider sends reaches it.
 
 Nothing new is kept in the ledger: the counts, misses and alerts no rule is
 named are kept as before (schema 010).
@@ -169,32 +226,43 @@ named are kept as before (schema 010).
 
 This reads what another system sends: the Grafana, and through it what
 its data sources answered, labels a scraped target chose among them.
+`serve` reads a day again after a restart, so nothing may grow past these,
+or a hostile answer would bring it down again and again.
 
-- **Answers:** 32 MiB each at most; a page past it is asked again half the
-  size, down to ten changes. A read reads 256 MiB of answers in all, and
-  keeps 200,000 changes, at most: past either it fails, as too many, and
-  `serve` doesn't check the rules that day.
+- **Answers:** 16 MiB each at most; a page past it is asked again half the
+  size, down to ten changes, and past it then, of no use. A read asks 5,000
+  requests and reads 256 MiB of answers at most, and keeps 200,000 changes
+  of 50,000 alerts, their labels 64 MiB as counted (each label its bytes
+  and 64 more, each alert 128 more), and tells 400,000 changes read apart:
+  past any, it fails as too many, and `serve` doesn't check Grafana's rules
+  that day.
+- **What is kept:** of each alert, its rule and labels once, by a hash of
+  them; of each change, its alert, its time and its states, each state's
+  text once; of a change read, to tell it from one read again, its id or a
+  16-byte hash. 40,000 changes of one alert with 128 labels, and its 20,000
+  firings, keep some 5 MiB (`TestGrafanaHistoryMemory`).
 - **A change** is passed over, and counted, when its alert has more than
-  128 labels, a label's name past 256 bytes or its value past 4 KB, a tag
-  with no colon or a name given twice, no rule's name or one past 1 KB, or
-  text that isn't UTF-8; when a state isn't one of Grafana's; or when it is
-  outside the time asked for, by more than a minute. So is every other
-  change of its alert: what was left of it would say it fired when it
-  didn't. `verdict` says how many on stderr, `serve` logs it.
-- **What is kept of a change** to tell it apart from one read again is its
-  id, or a hash.
+  128 labels, a label's name past 256 bytes or its value past 4 KB, or a
+  name given twice; when it names no rule, or one past 1 KB; when a state
+  isn't one of Grafana's, or is past 200 bytes; or when it is outside the
+  time asked for, by more than a minute. So is every other change of its
+  alert: what was left of it would say it fired when it didn't. Its rule,
+  where it has a name, is unsure and isn't checked; past a thousand rules
+  unsure, none are. `verdict` says how many on stderr, `serve` logs it.
 - **Retries** are the history client's, each try in its turn by the
   Grafana's `--max-rate`, the pace and the `--parallel` its data sources
   are asked by. Nothing it sends is followed: no redirect, and no URL in an
-  answer (a line's `dashboardUID`, a link) is read.
+  answer (a line's `dashboardUID`, a link) is read. `http://`, in any case,
+  is said to send the token unencrypted.
 - **Where names go:** an alert no rule given is named goes where one from
   the series went, kept only as a name that shows, 512 bytes at most, a
   hundred a day, and shown cleaned in `verdict`'s text. The labels of a
-  firing found only in what really fired are kept, and shown on the rule's
-  page, as a replayed alert's are: a value 256 bytes at most, with nothing
-  that turns text around (this now holds for the series' too). No rule or
-  label read from the history reaches `/metrics`, Slack or MCP but as the
-  counts of rules Lapilli was given.
+  firing found only in what really fired are kept as a replayed alert's
+  are, a value 256 bytes at most, with nothing that turns text around (this
+  now holds for the series' too), and go where those of the series went:
+  the rule's page, and MCP's `rule`, as `replay_check.misses`. No rule or
+  label read from the history reaches `/metrics` or Slack but as the
+  counts of the rules Lapilli was given.
 
 ## What it can't see
 
@@ -202,8 +270,13 @@ its data sources answered, labels a scraped target chose among them.
   changing state in none of it. `GRAFANA_ALERTS` would have it; the
   history has nothing to say. Its firing started before, and was counted
   on the day it started, when it changed.
-- A history pruned: a day it no longer reaches holds nothing, and isn't
-  checked.
+- A history pruned: a day it no longer reaches isn't checked.
+- What the tags leave out. Labels past 100 characters, or past
+  `tags_length`, aren't set beside the replay's; where they alone told
+  alerts apart, the rule is found unsure and isn't checked, when its
+  alerts' changes cross. Alerts told apart only by them that never fire at
+  once are one alert to the history, and their firings are set beside the
+  replay's as they are, which agree on what is left.
 - Annotations of a rule whose title changed are read under the title they
   were written with, as `GRAFANA_ALERTS`'s `alertname` is.
 

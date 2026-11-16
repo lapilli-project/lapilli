@@ -1825,8 +1825,9 @@ type runsCheck struct {
 	EmptyDay  time.Time
 	Elsewhere []string
 	// History is where Grafana keeps the alert state history read in
-	// place of GRAFANA_ALERTS ("" for none read), and HistoryOff why it
-	// was of no use over EmptyDay (historyNothing, historyTooMany).
+	// place of GRAFANA_ALERTS for EmptyDay ("" for none read), and
+	// HistoryOff why it was of no use then (historyFrom, historyTooMany,
+	// historyUnusable).
 	History, HistoryOff string
 }
 

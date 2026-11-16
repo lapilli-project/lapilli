@@ -14,29 +14,35 @@ func TestFromTransitions(t *testing.T) {
 	t0 := time.Date(2026, 11, 16, 7, 0, 0, 0, time.UTC)
 	at := func(m int) time.Time { return t0.Add(time.Duration(m) * time.Minute) }
 	pod := func(p string) map[string]string { return map[string]string{"pod": p} }
+	ch := func(rule string, l map[string]string, at time.Time, from, to string) Transition {
+		return Transition{Rule: rule, Labels: l, At: at, From: from, To: to}
+	}
 	ts := []Transition{
 		// One that alerts, recovers (keep_firing_for) and resolves: one firing.
-		{"Up", pod("a"), at(1), "Normal", "Pending"},
-		{"Up", pod("a"), at(2), "Pending", "Alerting"},
-		{"Up", pod("a"), at(5), "Alerting", "Recovering"},
-		{"Up", pod("a"), at(6), "Recovering", "Alerting"},
-		{"Up", pod("a"), at(7), "Alerting", "Normal (MissingSeries)"},
+		ch("Up", pod("a"), at(1), "Normal", "Pending"),
+		ch("Up", pod("a"), at(2), "Pending", "Alerting"),
+		ch("Up", pod("a"), at(5), "Alerting", "Recovering"),
+		ch("Up", pod("a"), at(6), "Recovering", "Alerting"),
+		ch("Up", pod("a"), at(7), "Alerting", "Normal (MissingSeries)"),
 		// Another alert of the rule, its labels apart, firing since before
 		// the read and still firing at its end.
-		{"Up", pod("b"), at(3), "Alerting", "Recovering"},
+		ch("Up", pod("b"), at(3), "Alerting", "Recovering"),
 		// No data: a firing of its own, marked so; Alerting (NoData) is
 		// alerting.
-		{"Up", map[string]string{"ref_id": "A"}, at(4), "Normal", "NoData"},
-		{"Up", map[string]string{"ref_id": "A"}, at(8), "NoData", "Alerting (NoData)"},
-		{"Up", map[string]string{"ref_id": "A"}, at(9), "Alerting (NoData)", "Normal"},
+		ch("Up", map[string]string{"ref_id": "A"}, at(4), "Normal", "NoData"),
+		ch("Up", map[string]string{"ref_id": "A"}, at(8), "NoData", "Alerting (NoData)"),
+		ch("Up", map[string]string{"ref_id": "A"}, at(9), "Alerting (NoData)", "Normal"),
 		// An error isn't a firing, and ends one.
-		{"Errs", nil, at(1), "Normal", "Alerting"},
-		{"Errs", nil, at(2), "Alerting", "Error"},
-		{"Errs", nil, at(3), "Error", "Normal"},
+		ch("Errs", nil, at(1), "Normal", "Alerting"),
+		ch("Errs", nil, at(2), "Alerting", "Error"),
+		ch("Errs", nil, at(3), "Error", "Normal"),
 		// Over by the start of the read: no firing of no length.
-		{"Gone", nil, at(0), "Alerting", "Normal"},
+		ch("Gone", nil, at(0), "Alerting", "Normal"),
 	}
-	got := FromTransitions(ts, at(0))
+	got, unsure := FromTransitions(ts, at(0))
+	if len(unsure) != 0 {
+		t.Errorf("unsure: %v", unsure)
+	}
 	var lines []string
 	for _, f := range got {
 		end := "on"
@@ -67,5 +73,50 @@ func TestGrafanaState(t *testing.T) {
 		if GrafanaState(s) != want {
 			t.Errorf("%q: %v", s, !want)
 		}
+	}
+}
+
+// Changes that don't follow on from each other, from a state the one
+// before didn't leave, say the history is missing some, or tells two
+// alerts apart by nothing it keeps: the rule is unsure. Those Grafana
+// leaves out don't change whether an alert fires, and aren't taken so.
+func TestFromTransitionsUnsure(t *testing.T) {
+	t0 := time.Date(2026, 11, 16, 7, 0, 0, 0, time.UTC)
+	at := func(m int) time.Time { return t0.Add(time.Duration(m) * time.Minute) }
+	ch := func(rule string, at time.Time, from, to string) Transition {
+		return Transition{Rule: rule, Labels: map[string]string{"pod": "a"}, At: at, From: from, To: to}
+	}
+	ts := []Transition{
+		// Two pods with one label set: each Normal to Alerting at once.
+		ch("Merged", at(1), "Normal", "Alerting"),
+		ch("Merged", at(1), "Normal", "Alerting"),
+		// A change missing: Normal to Alerting, then Pending to Normal.
+		ch("Gap", at(1), "Normal", "Alerting"),
+		ch("Gap", at(3), "Pending", "Normal"),
+		// What Grafana leaves out: Normal (NoData) to Normal, and into
+		// KeepLast.
+		ch("Fine", at(1), "Normal (NoData)", "Pending"),
+		ch("Fine", at(2), "Pending", "Alerting"),
+		ch("Fine", at(3), "Alerting (KeepLast)", "Recovering"),
+		ch("Fine", at(4), "Recovering", "Normal"),
+	}
+	fs, unsure := FromTransitions(ts, at(0))
+	if strings.Join(unsure, ",") != "Gap,Merged" {
+		t.Errorf("unsure: %v", unsure)
+	}
+	// Firings of one alert share its labels.
+	var fine []Firing
+	for _, f := range fs {
+		if f.Rule == "Fine" {
+			fine = append(fine, f)
+		}
+	}
+	if len(fine) != 1 || !fine[0].Start.Equal(at(2)) || !fine[0].End.Equal(at(4)) {
+		t.Errorf("Fine: %+v", fine)
+	}
+	// Keyed alerts apart, whatever their labels.
+	k := []Transition{{Rule: "K", Key: "1", At: at(1), From: "Normal", To: "Alerting"}, {Rule: "K", Key: "2", At: at(1), From: "Normal", To: "Alerting"}}
+	if fs, unsure := FromTransitions(k, at(0)); len(fs) != 2 || len(unsure) != 0 {
+		t.Errorf("keyed: %+v %v", fs, unsure)
 	}
 }

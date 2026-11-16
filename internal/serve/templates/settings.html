@@ -74,7 +74,8 @@
 {{with .Alarms}}<br>{{t "For a cloud's own alarms that are replayed, their history copied in under %s stands in: a day is set beside it once its copies reach past it." (join . ", ")}}{{end}}
 {{with .Empty}}<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "%s held nothing over %s: the rules it is for weren't checked that day. A store may not keep it; --check-series names another." (join . ", ") (day $loc $.View.Check.EmptyDay)}}</strong>{{end}}
 {{with .History}}<br>{{t "For Grafana's rules, its own alert state history, kept in %s, stands in for GRAFANA_ALERTS." .}}{{end}}
-{{if eq .HistoryOff "nothing"}}<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "Grafana's alert state history held no change of state over %s: its rules weren't checked that day. Grafana may keep none that far back." (day $loc .EmptyDay)}}</strong>{{end}}
+{{if eq .HistoryOff "from"}}<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "Grafana's alert state history holds no change of state from before %s: its rules weren't checked that day. Grafana may keep none that far back." (day $loc .EmptyDay)}}</strong>{{end}}
+{{if eq .HistoryOff "unusable"}}<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "Grafana's alert state history over %s couldn't be used, as it answered: its rules weren't checked that day. The log says why." (day $loc .EmptyDay)}}</strong>{{end}}
 {{if eq .HistoryOff "too many"}}<br><strong class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "Grafana's alert state history held more changes of state over %s than are read at once: its rules weren't checked that day." (day $loc .EmptyDay)}}</strong>{{end}}
 {{with .Elsewhere}}<br>{{t "Really fired over the last week, with no rule given by that name: %s." (join . ", ")}}{{end}}</p>{{end}}
 {{with .OnCall}}<h2>{{t "On-call schedules"}}</h2>

@@ -168,7 +168,11 @@ each history API (lapilli_serve_history_*). Off by default:
                       Without it, with --grafana or --check-grafana, what
                       Grafana's rules really fired is read from Grafana's
                       own alert state history instead, where it keeps one it
-                      serves: in annotations, its default, or in Loki
+                      serves: in annotations, its default, from Grafana 12.4
+                      on, or in Loki; GRAFANA_ALERTS first, while it holds
+                      anything, where Grafana may keep it too. A day it can't
+                      be read for, Grafana's rules aren't checked, and the
+                      check goes on
   --check-grafana URL the Grafana that runs the Grafana rules --rules or
                       --rules-history gives, whose alert state history says
                       what they really fired, read with --grafana-token-file
@@ -1111,7 +1115,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	}
 
 	log := slog.New(slog.NewTextHandler(stderr, nil))
-	if f.checkGrafana != "" && f.grafanaTk != "" && strings.HasPrefix(f.checkGrafana, "http://") {
+	if f.checkGrafana != "" && f.grafanaTk != "" && plainHTTP(f.checkGrafana) {
 		log.Warn("--check-grafana is plain http: the token goes unencrypted")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

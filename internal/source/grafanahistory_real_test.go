@@ -43,6 +43,9 @@ type realHistory struct {
 	// to, which changed state in none of it: the history has nothing to
 	// say of them.
 	unseen int
+	// unsure are the rules whose alerts the history doesn't tell apart, as
+	// its annotations' tags leave out what does.
+	unsure []string
 }
 
 func (c realHistory) file(dir, name string) []byte {
@@ -190,10 +193,10 @@ func TestRealGrafanaHistory(t *testing.T) {
 		t.Run(c.dir, func(t *testing.T) {
 			h := c.recorded(t)
 			where, err := h.Where(context.Background())
-			if err != nil || where != c.where {
-				t.Fatalf("where: %q %v", where, err)
+			if err != nil || where.Serves != c.where {
+				t.Fatalf("where: %+v %v", where, err)
 			}
-			ts, read, err := h.Read(context.Background(), where, c.read, c.to)
+			ts, read, err := h.Read(context.Background(), where.Serves, c.read, c.to)
 			if err != nil || read.Passed != 0 {
 				t.Fatalf("%+v %v", read, err)
 			}
@@ -209,7 +212,27 @@ func TestRealGrafanaHistory(t *testing.T) {
 			if unseen != c.unseen {
 				t.Errorf("%d firings on all through what was read, want %d", unseen, c.unseen)
 			}
-			got, want := within(firing.FromTransitions(ts, c.read), c.from, c.to), within(alerts, c.from, c.to)
+			fs, unsure := firing.FromTransitions(ts, c.read)
+			if len(unsure) != len(c.unsure) || !slices.Equal(unsure, c.unsure) {
+				t.Errorf("unsure: %v, want %v", unsure, c.unsure)
+			}
+			// As the check sets them beside each other: in annotations, as
+			// their tags keep labels; the rules unsure not checked.
+			if c.where == HistoryAnnotations {
+				for i := range alerts {
+					// As Grafana writes them, tags_length (500) too.
+					l := maps.Clone(alerts[i].Labels)
+					l["alertname"] = alerts[i].Rule
+					delete(l, "grafana_rule_uid")
+					kept, _ := tagLabels(grafanaTags(l, 500))
+					alerts[i].Rule = kept["alertname"]
+					delete(kept, "alertname")
+					alerts[i].Labels = kept
+				}
+			}
+			fs = slices.DeleteFunc(fs, func(f firing.Firing) bool { return slices.Contains(c.unsure, f.Rule) })
+			alerts = slices.DeleteFunc(alerts, func(f firing.Firing) bool { return slices.Contains(c.unsure, f.Rule) })
+			got, want := within(fs, c.from, c.to), within(alerts, c.from, c.to)
 			var differ []string
 			for _, l := range got {
 				if !slices.Contains(want, l) {
@@ -229,7 +252,7 @@ func TestRealGrafanaHistory(t *testing.T) {
 			for _, f := range alerts {
 				known = append(known, rules.Rule{Name: f.Rule, Interval: 10 * time.Second, Graph: &rules.Graph{}})
 			}
-			check := verdict.CheckReplay(context.Background(), known, firing.FromTransitions(ts, c.read), alerts, c.from, c.to, 10*time.Second)
+			check := verdict.CheckReplay(context.Background(), known, fs, alerts, c.from, c.to, 10*time.Second)
 			if check.Alike != check.Replayed || check.Alike != check.Real || check.Alike == 0 {
 				t.Errorf("check: %d from the history, %d from GRAFANA_ALERTS, %d alike", check.Replayed, check.Real, check.Alike)
 			} else {

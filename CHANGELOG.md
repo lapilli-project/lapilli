@@ -98,20 +98,25 @@
   alert state history is sent to Prometheus, not its default. With the
   Grafana known, they now read what its rules fired from the history it
   keeps, through its API, with the Viewer's token `--grafana-token-file`
-  already holds: in annotations, Grafana's default, or in Loki, as its
-  frontend settings say. `--grafana` gives the Grafana for the rules it
-  reads; `--check-grafana URL` gives it for Grafana's rules read from files
-  (`--rules`, `--rules-history`). A Grafana keeping its history in
-  Prometheus alone is read as before, from `GRAFANA_ALERTS`, and
-  `--check-series` still names series instead. Measured on Grafana 12.4.14
-  and 13.3.1: every firing read from the history alike with
+  already holds: in annotations, Grafana's default, from Grafana 12.4 on,
+  or in Loki, as its frontend settings say. `--grafana` gives the Grafana
+  for the rules it reads; `--check-grafana URL` gives it for Grafana's rules
+  read from files (`--rules`, `--rules-history`). A Grafana keeping its
+  history in Prometheus, alone or among several places, is read from
+  `GRAFANA_ALERTS` as before while it holds anything; annotations before
+  12.4, which hold no labels, aren't read; `--check-series` still names
+  series instead. Annotations keep labels as Grafana writes them as tags (a
+  colon an underscore, spaces trimmed, one past 100 characters or past
+  `tags_length` left out): the replay's are set beside them so. Measured on
+  Grafana 12.4.14 and 13.3.1: every firing read from the history alike with
   `GRAFANA_ALERTS`, starting and ending at the same evaluation
-  (docs/design/grafanahistory.md). What another system sends is bounded:
-  an answer 32 MiB at most, 256 MiB and 200,000 changes of state a read,
-  an alert's labels 128 and their values 4 KB; a change past them is passed
-  over and counted, with every change of its alert. In `serve`, a day whose
-  history holds nothing, or more than that, doesn't check Grafana's rules
-  that day, and the Run history page says so.
+  (docs/design/grafanahistory.md). A history that can't be read, holds
+  nothing from before the period or the day, or tells a rule's alerts
+  apart by nothing it keeps, leaves those rules not checked, and the
+  others as they were; `serve` goes on to the next day, and the Run
+  history page says why. What another system sends is bounded: an answer
+  16 MiB, a read 5,000 requests, 256 MiB, 200,000 changes of 50,000 alerts
+  and 64 MiB of their labels, each label set kept once.
 
 ### Fixed
 
