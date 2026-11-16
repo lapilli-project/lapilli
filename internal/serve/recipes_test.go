@@ -143,6 +143,9 @@ func TestJiraRecipe(t *testing.T) {
 		if got := r.URL.Query().Get("jql"); got != "project = OPS AND created >= -30d" {
 			t.Errorf("jql = %q", got)
 		}
+		if got := r.URL.Query().Get("fields"); got != "summary,created,resolutiondate,components" {
+			t.Errorf("fields = %q", got)
+		}
 		name := "jira-1.json"
 		if tok := r.URL.Query().Get("nextPageToken"); tok != "" {
 			if tok != "a token/with odd=characters" {
@@ -158,6 +161,253 @@ func TestJiraRecipe(t *testing.T) {
 	wantIncidents(t, got,
 		incident.Incident{ID: "OPS-41", Title: "Checkout errors", Start: utc("2026-10-28T12:01:00+09:00"), End: utc("2026-10-28T12:40:00+09:00"), Labels: incident.Labels{"service": {"checkout", "cart"}}},
 		incident.Incident{ID: "OPS-42", Title: "Search timeouts", Start: utc("2026-10-30T09:15:00-05:00")})
+
+	// jira.jq on its own reads as jira.sh does with nothing set.
+	cmd := exec.Command("sh", "-c", `jq -s '[.[].issues[]]' "$1" "$2" | jq -f "$3"`, "sh",
+		recipes+"testdata/jira-1.json", recipes+"testdata/jira-2.json", recipes+"jira.jq")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	file := filepath.Join(t.TempDir(), "incidents.yaml")
+	os.WriteFile(file, out, 0o600)
+	alone, err := incident.Load(file)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantIncidents(t, alone, got...)
+}
+
+// Where a team keeps an incident's times and services in fields of its own,
+// they are read from there, and only the fields named are asked for. A date
+// is never taken for a time, nor is a time Go wouldn't read: an issue whose
+// start is one is skipped, said by its key, and counted; one whose end is
+// one is kept with no end. With every issue skipped, nothing is written and
+// the script fails.
+func TestJiraRecipeFields(t *testing.T) {
+	needTools(t)
+	var asked []string
+	body := fixture(t, "jira-fields.json")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.URL.Query().Get("fields"))
+		w.Write(body)
+	}))
+	defer srv.Close()
+	run := func(env ...string) (string, string, error) {
+		return runJira(t, srv.URL, env...)
+	}
+	titles := []string{"Payment errors", "Login slow", "Queue backlog", "Postmortem written later", "Ends on a day",
+		"Ends before it starts", "Written by hand", "A key to keep off a terminal", "Times written otherwise",
+		"No such day", "A leap second", "No such zone"}
+	quiet := func(stderr string) {
+		t.Helper()
+		for _, title := range titles {
+			if strings.Contains(stderr, title) {
+				t.Errorf("a title on stderr: %s", stderr)
+			}
+		}
+		if strings.ContainsAny(stderr, "\x1b\x07") {
+			t.Errorf("a key from Jira reached the terminal as it was: %q", stderr)
+		}
+	}
+	says := func(stderr string, want ...string) {
+		t.Helper()
+		for _, w := range want {
+			if !strings.Contains(stderr, w) {
+				t.Errorf("stderr doesn't say %q:\n%s", w, stderr)
+			}
+		}
+	}
+	labels := "JIRA_LABELS=service=customfield_10003, service=labels,team=customfield_10004,owner=customfield_10005,region=customfield_10006,tier=customfield_10008"
+	// An empty option and an empty text give nothing; a number gives its
+	// text; a cascading select its parent.
+	ops51 := incident.Incident{ID: "OPS-51", Title: "Payment errors", Start: utc("2026-11-05T14:30:00+09:00"), End: utc("2026-11-05T15:10:00+09:00"),
+		Labels: incident.Labels{"service": {"payments", "ledger", "api"}, "team": {"payments-team"}, "owner": {"Ana Lee"}, "region": {"eu-west"}, "tier": {"1"}}}
+	ops54 := incident.Incident{ID: "OPS-54", Title: "Search down", Start: utc("2026-11-09T01:00:00-05:00"), Labels: incident.Labels{"owner": {"Bo Kim", "Cy Diaz"}}}
+	ops56 := incident.Incident{ID: "OPS-56", Title: "Ends on a day", Start: utc("2026-11-11T08:00:00+09:00")}
+	ops57 := incident.Incident{ID: "OPS-57", Title: "Ends before it starts", Start: utc("2026-11-11T08:00:00+09:00")}
+	ops60 := incident.Incident{ID: "OPS-60", Title: "Times written otherwise", Start: utc("2026-11-13T09:00:00Z"), End: utc("2026-11-13T18:30:00+09:00")}
+
+	out, stderr, err := run("JIRA_START_FIELD=customfield_10001", "JIRA_END_FIELD=customfield_10002", labels)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, stderr)
+	}
+	if want := "summary,customfield_10001,customfield_10002,customfield_10003,labels,customfield_10004,customfield_10005,customfield_10006,customfield_10008"; len(asked) != 1 || asked[0] != want {
+		t.Errorf("fields = %q, want %q", asked, want)
+	}
+	wantIncidents(t, loadIncidents(t, out), ops51, ops54, ops56, ops57, ops60)
+	says(stderr,
+		`"OPS-52" skipped: the start field customfield_10001 holds a date and no time`+"\n",
+		`"OPS-53" skipped: no start in customfield_10001`+"\n",
+		`"OPS-55" skipped: the start field customfield_10001 holds a date and no time`+"\n",
+		`"OPS-58" skipped: the start field customfield_10001 holds a date and nothing that reads as a time`+"\n",
+		`"OPS-61" skipped: the start field customfield_10001 holds something other than a time`+"\n",
+		`"OPS-62" skipped: the start field customfield_10001 holds a date and nothing that reads as a time`+"\n",
+		`"OPS-63" skipped: the start field customfield_10001 holds a date and nothing that reads as a time`+"\n",
+		`"OPS-56" kept with no end, taken to last an hour: the end field customfield_10002 holds a date and no time`+"\n",
+		`"OPS-57" kept with no end, taken to last an hour: the end field customfield_10002 is before the start field customfield_10001`+"\n",
+		`jira.sh: skipped 8 of 13 issues: `,
+		`the start field customfield_10001 holds a date and no time (3)`,
+		`jira.sh: kept 2 of 13 issues with no end: `)
+	quiet(stderr)
+
+	// created after the field: taken where the field is empty, and where it
+	// holds a date, only on that day; not past a field holding anything
+	// else. A field named twice is asked for once.
+	asked = nil
+	out, stderr, err = run("JIRA_START_FIELD=customfield_10001,created", "JIRA_END_FIELD=customfield_10002", labels+",topic=labels")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, stderr)
+	}
+	if want := "summary,customfield_10001,created,customfield_10002,customfield_10003,labels,customfield_10004,customfield_10005,customfield_10006,customfield_10008"; len(asked) != 1 || asked[0] != want {
+		t.Errorf("fields = %q, want %q", asked, want)
+	}
+	ops51.Labels["topic"] = []string{"payments", "api"}
+	wantIncidents(t, loadIncidents(t, out), ops51,
+		incident.Incident{ID: "OPS-52", Title: "Login slow", Start: utc("2026-11-07T10:20:00+09:00")},
+		incident.Incident{ID: "OPS-53", Title: "Queue backlog", Start: utc("2026-11-08T08:00:00Z")},
+		ops54, ops56, ops57,
+		incident.Incident{ID: "OPS-58", Title: "Written by hand", Start: utc("2026-11-12T11:00:00+09:00")},
+		ops60,
+		incident.Incident{ID: "OPS-62", Title: "A leap second", Start: utc("2026-11-14T10:05:00+09:00")})
+	says(stderr,
+		`"OPS-55" skipped: the start field customfield_10001 holds a date and no time, and created is on another day`+"\n",
+		`"OPS-61" skipped: the start field customfield_10001 holds something other than a time`+"\n",
+		`"OPS-63" skipped: the start field customfield_10001 holds a date and nothing that reads as a time, and created is on another day`+"\n",
+		`jira.sh: skipped 4 of 13 issues: `)
+	quiet(stderr)
+
+	// No labels: components aren't asked for.
+	asked = nil
+	out, stderr, err = run("JIRA_LABELS=")
+	if err != nil || len(asked) != 1 || asked[0] != "summary,created,resolutiondate" || strings.Contains(out, "labels") {
+		t.Errorf("JIRA_LABELS empty: %v, asked %q: %s\n%s", err, asked, out, stderr)
+	}
+
+	// Every issue skipped: a field that none has, or a date picker.
+	if out, stderr, err := run("JIRA_START_FIELD=customfield_10007"); err == nil || out != "" ||
+		!strings.Contains(stderr, "skipped 13 of 13 issues: no start in customfield_10007 (13)") || !strings.Contains(stderr, "every issue found was skipped") {
+		t.Errorf("all skipped: %v, wrote %q\n%s", err, out, stderr)
+	}
+	body = []byte(`{"issues": [{"key": "OPS-71", "fields": {"summary": "x", "customfield_10001": "2026-11-05"}},
+		{"key": "OPS-72", "fields": {"summary": "y", "customfield_10001": "2026-11-06"}}], "isLast": true}`)
+	if out, stderr, err := run("JIRA_START_FIELD=customfield_10001"); err == nil || out != "" || !strings.Contains(stderr, "every issue found was skipped") {
+		t.Errorf("all dates with no time: %v, wrote %q\n%s", err, out, stderr)
+	}
+	// Nothing found isn't everything skipped.
+	body = []byte(`{"issues": [], "isLast": true}`)
+	if out, stderr, err := run("JIRA_START_FIELD=customfield_10001"); err != nil || len(loadIncidents(t, out)) != 0 {
+		t.Errorf("none found: %v, wrote %q\n%s", err, out, stderr)
+	}
+
+	// Settings that aren't fields or labels are refused before Jira is asked,
+	// and so are more labels than an incident has.
+	asked = nil
+	var many []string
+	for i := range 33 {
+		many = append(many, fmt.Sprintf("l%d=labels", i))
+	}
+	for _, env := range []string{"JIRA_START_FIELD=created&jql=x", "JIRA_END_FIELD=a,,b", "JIRA_LABELS=service",
+		"JIRA_LABELS=9x=components", "JIRA_LABELS=service=components;x", "JIRA_START_FIELD=customfield 10001",
+		"JIRA_LABELS=" + strings.Join(many, ",")} {
+		if out, stderr, err := run(env); err == nil || out != "" || !strings.HasPrefix(stderr, "jira.sh: JIRA_") {
+			t.Errorf("%.60s taken: %v, wrote %q\n%s", env, err, out, stderr)
+		}
+	}
+	if len(asked) != 0 {
+		t.Errorf("Jira asked with settings refused: %q", asked)
+	}
+	if _, stderr, err := run("JIRA_LABELS=" + strings.Join(many[:32], ",")); err != nil {
+		t.Errorf("32 labels refused: %v\n%s", err, stderr)
+	}
+}
+
+// One issue edited to hold more than serve takes doesn't have its incident
+// refused: the values past it are left out, and said by the issue's key.
+func TestJiraRecipeLabelBounds(t *testing.T) {
+	needTools(t)
+	value := func(i int, s string) map[string]string {
+		return map[string]string{"value": fmt.Sprintf("%s-%02d", s, i)}
+	}
+	var tags []string
+	for i := range 70 {
+		tags = append(tags, fmt.Sprintf("t%02d", i))
+	}
+	tags = append(tags, strings.Repeat("x", 257))
+	// Go writes U+2028 as \u2028: a value of 80 of them is 240 bytes, and
+	// 480 as serve keeps it.
+	var wide []map[string]string
+	for i := range 30 {
+		wide = append(wide, value(i, strings.Repeat("\u2028", 80)))
+	}
+	issues := map[string]any{"isLast": true, "issues": []any{
+		map[string]any{"key": "OPS-81", "fields": map[string]any{"summary": "Many tags", "created": "2026-11-05T14:30:00.000+0900", "labels": tags}},
+		map[string]any{"key": "OPS-82", "fields": map[string]any{"summary": "Wide options", "created": "2026-11-05T15:30:00.000+0900", "customfield_10003": wide}},
+	}}
+	body, _ := json.Marshal(issues)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(body) }))
+	defer srv.Close()
+	out, stderr, err := runJira(t, srv.URL, "JIRA_LABELS=tag=labels,service=customfield_10003")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, stderr)
+	}
+	for _, want := range []string{
+		`jira.sh: "OPS-81" kept with label values left out: 1 over 256 bytes, 6 past 64 a label` + "\n",
+		`jira.sh: "OPS-82" kept with label values left out: `, ` past 4 KB in all` + "\n",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr doesn't say %q:\n%s", want, stderr)
+		}
+	}
+	if strings.Contains(stderr, "Many tags") || strings.Contains(stderr, "Wide options") {
+		t.Errorf("a title on stderr: %s", stderr)
+	}
+	got := loadIncidents(t, out)
+	if len(got) != 2 || len(got[0].Labels["tag"]) != 64 || len(got[1].Labels["service"]) == 0 {
+		t.Fatalf("labels: %+v", got)
+	}
+
+	// Through put.sh, serve takes both.
+	file := tokenFile(t, "a-token-long-enough")
+	s, _ := server(t, func(c *Config) { c.IncidentsListen, c.IncidentsToken = "127.0.0.1:0", file })
+	port := httptest.NewServer(s.IncidentsHandler())
+	defer port.Close()
+	cmd := exec.Command("sh", recipes+"put.sh", port.URL)
+	cmd.Env = append(os.Environ(), "LAPILLI_TOKEN_FILE="+file)
+	cmd.Stdin = strings.NewReader(out)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("serve refused one: %v\n%s", err, b)
+	}
+	for _, id := range []string{"OPS-81", "OPS-82"} {
+		if _, err := s.l.IncidentByID(context.Background(), id); err != nil {
+			t.Errorf("%s: %v", id, err)
+		}
+	}
+}
+
+// runJira runs jira.sh against a server standing in for Jira, with its
+// stdout and stderr apart.
+func runJira(t *testing.T, url string, env ...string) (string, string, error) {
+	t.Helper()
+	cmd := exec.Command("sh", recipes+"jira.sh")
+	cmd.Env = append(os.Environ(), append([]string{"JIRA_URL=" + url, "JIRA_EMAIL=ana@example.com",
+		"JIRA_TOKEN_FILE=" + tokenFile(t, "jira-secret"), "JIRA_JQL=project = OPS"}, env...)...)
+	var out, errb strings.Builder
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err := cmd.Run()
+	return out.String(), errb.String(), err
+}
+
+// loadIncidents parses what a recipe wrote the way --incidents does.
+func loadIncidents(t *testing.T, out string) []incident.Incident {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "incidents.yaml")
+	os.WriteFile(file, []byte(out), 0o600)
+	incs, err := incident.Load(file)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	return incs
 }
 
 func TestGitHubRecipe(t *testing.T) {

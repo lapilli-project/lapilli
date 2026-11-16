@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Jira's incidents from the fields a team keeps them in.** `jira.sh`
+  reads an incident's start and end from the fields `JIRA_START_FIELD` and
+  `JIRA_END_FIELD` name (`created` and `resolutiondate`, as before, by
+  default), a custom field by its id, several tried in turn; and its labels
+  from the fields `JIRA_LABELS` maps (`service=components` by default):
+  texts, numbers, lists, options (a cascading select's parent), components
+  and users' display names. It asks Jira for those fields alone. A time is
+  one Go reads as RFC 3339, with a real day, hour and zone. A date, alone or
+  with something after it that isn't a time, is never taken for one: an
+  issue whose start is one is skipped, unless a later field in the list
+  holds a time on that day (`customfield_10001,created`), as Jira writes it
+  in the account's time zone. A start holding anything else is skipped too.
+  An end that can't be read, or is before the start, is left out, and the
+  incident taken to last an hour. Label values serve would refuse an
+  incident for are left out: over 256 bytes, past 64 a label, past 4 KB in
+  all; `JIRA_LABELS` names 32 labels at most. Each issue skipped or changed
+  is said on stderr by its key, never its title, with a count by why. When
+  every issue found is skipped, the script writes nothing and exits 1, so a
+  cron job shows it. The ids are still the issues' keys.
+
 ## [0.47.0] - 2026-11-16
 
 A change to the rules is held to what they are expected to do: how often
