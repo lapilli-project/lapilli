@@ -23,8 +23,9 @@ import (
 // each axis.
 type ruleRow struct {
 	ruleLine
-	// Perf is how it did over the weeks shown: noisy, unrecorded (fired as
-	// often as a noisy rule, with no record to judge it by), ok, silent (no
+	// Perf is how it did over the weeks shown: noisy, unrecorded (none of
+	// its firings judged, or as many unjudged as a noisy rule fires: no
+	// record to judge them by), ok (judged, and not noisy), silent (no
 	// firing) or spare (another rule caught what it caught, as soon).
 	Perf string
 	// Trust are what its stones can't be taken for granted for: differs
@@ -791,8 +792,9 @@ func (s *Server) checkingOf(r *http.Request) (checking, error) {
 }
 
 // PerfClass is the status colour of how it did (statusKinds): unknown for
-// a rule none of whose firings was judged (NoRecord), whatever Perf says,
-// as no record gives no verdict, neither ok nor bad.
+// a rule none of whose firings was judged (NoRecord), as no record gives no
+// verdict, neither ok nor bad. Its Perf is "unrecorded" then (rowOf), drawn
+// unknown too; this holds should that change.
 func (r ruleRow) PerfClass() string {
 	if r.NoRecord {
 		return "status-unknown"
@@ -809,7 +811,10 @@ func rowOf(l ruleLine, facts int) ruleRow {
 		r.Perf = "silent"
 	case l.Noisy:
 		r.Perf = "noisy"
-	case l.Unrecorded:
+	// No record, no verdict: a rule none of whose firings was judged has
+	// no record, however few they were; Unrecorded, firing as often as a
+	// noisy rule, is what the overview's panel lists.
+	case l.Unrecorded || l.NoRecord:
 		r.Perf = "unrecorded"
 	case l.Spare:
 		r.Perf = "spare"

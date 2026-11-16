@@ -145,7 +145,7 @@ rest are written in the template that draws them.
 | warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Outcomes' tile, the Runs page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Outcomes' tile and note, the overview's line); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted" |
 | bad | a run's error, and the server's error banner; `--config` that can't be used at all, or that the ledger couldn't be kept to; notices given up on; the digest failed; an on-call schedule's read failed; Outcomes' Runs, "n failed"; a task overdue; a proposal closed as failed, and its reason; a backtest that misses incidents; would have caught while it was off; an incident missed (`✗ nothing fired`, "Nothing fired."), the missed count of the table of the weeks; a search not understood; a change "worse" |
 | info | a proposal `↻ being applied`; `✎ Proposed`; a quiet window `● active now`; the server's work (`↻`); catching up on the overview; behind on Outcomes, and its Runs tile ("all ran") while it is; a rule change "measuring", "rule written"; `⇣ Recorded only`; a task open or doing, and the overview's link to one ("task #n"); a rule to tune (`± tune`); the reason of a proposal approved or applied (it waited while its rule fired) |
-| unknown | `? No record`, the weeks' "no record" tag, the notes of weeks with no record; "–"; a backtest with no record (`no_record`); a rule none of whose firings was judged, whatever its badge says (`○ OK` too: `ruleRow.PerfClass`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review, and the reason of one refused; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; a rule change superseded, without a week before it, taken away or replayed again; Outcomes' Runs before any run |
+| unknown | `? No record`, the weeks' "no record" tag, the notes of weeks with no record; "–"; a backtest with no record (`no_record`); a rule none of whose firings was judged (`? No record`; `ruleRow.PerfClass`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review, and the reason of one refused; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; a rule change superseded, without a week before it, taken away or replayed again; Outcomes' Runs before any run |
 | no colour | what is left to do or not found, but isn't a verdict: "No proposals yet.", "No proposal waiting for approval is stale.", every other empty state; the Orphans page, whose names are neither well nor wrong |
 
 Three were left open, and are so: catching up is info, as Lapilli does it
@@ -160,9 +160,10 @@ would say a state alone.
 - **What Lapilli can't judge is never ok or bad.** No record, no verdict:
   a week, a rule or a backtest with no incident written down to judge its
   firings by is unknown, and a number of it is "–" in no colour. A rule
-  none of whose firings was judged is listed as OK when it isn't noisy
-  (the Performance facet counts it so), but its badge is unknown, and its
-  precision "–" beside it says why in words. A headline number's change is
+  none of whose firings was judged is "? No record", however few they
+  were, in the Performance facet too, and its precision "–" beside it says
+  why in words; seen from a team's pages, a rule of the team's is judged by
+  the incidents the team owns, on its page as on the list. A headline number's change is
   better or worse only when both weeks were judged (`tile.Better`,
   `tile.Worse` stay false otherwise), and a no-record backtest's difference
   is a plain number or "–".
@@ -396,7 +397,7 @@ Each rule has a badge on each of three axes, and what is under way:
 
 | Axis | Badges |
 |---|---|
-| How it did, over the weeks shown (one of) | `● Noisy` ("Noisy, 3 wk" when it has been noisy weeks running), `? No record` (fired as often as a noisy rule in weeks with no record to judge it by: no incident written down, or found by `--impact`, in the week or the two before it, each week judged by its own), `○ OK`, `– Silent` (no firing in the weeks shown), `⧉ Spare` (another rule caught every incident it caught, as soon) |
+| How it did, over the weeks shown (one of) | `● Noisy` ("Noisy, 3 wk" when it has been noisy weeks running), `? No record` (none of its firings judged, or as many unjudged as a noisy rule fires: no incident written down, or found by `--impact`, in the week or the two before it, each week judged by its own; the overview's panel lists only those firing as often as a noisy rule), `○ OK` (judged, and not noisy), `– Silent` (no firing in the weeks shown), `⧉ Spare` (another rule caught every incident it caught, as soon) |
 | Its backtest, only when it can't be taken for granted | `≠ Differs` (its replay differed from what really fired over the last week checked), `◌ Not replayed`, `⇣ Recorded only` (copied in from where it fired; its condition unknown) |
 | What people mean to do (its note's status) | `✓ keep`, `± tune`, `⊘ retire` |
 | Under way | `✎ Proposed` (a change waits for approval), `⚠ n to check` (what its page lists to check, below) |

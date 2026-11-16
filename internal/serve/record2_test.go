@@ -111,6 +111,21 @@ func TestTeamRecord(t *testing.T) {
 	if e := line(mine); e.Noisy || e.Unjudged != 14 || e.Perf != "unrecorded" {
 		t.Errorf("payments': %+v", e.ruleLine)
 	}
+	// The rule's page, picked from either list, says what that list says.
+	h := s.Handler()
+	if _, page, _ := get(t, h, "/rules/Errors?weeks=12"); !strings.Contains(page, "perf-noisy") || strings.Contains(page, "perf-unrecorded") {
+		t.Error("/rules/Errors: not noisy by everyone's record")
+	}
+	if _, page, _ := get(t, h, "/rules/Errors?weeks=12&team=payments"); !strings.Contains(page, "perf-unrecorded") || strings.Contains(page, "perf-noisy") {
+		t.Error("/rules/Errors?team=payments: not by the team's record, as its list")
+	}
+	// A team's that doesn't own the rule changes nothing: everyone's.
+	if _, err := s.l.PutTeam(ctx, ledger.Team{Name: "shop", Rules: "^Slow$"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	if _, page, _ := get(t, h, "/rules/Errors?weeks=12&team=shop"); !strings.Contains(page, "perf-noisy") {
+		t.Error("/rules/Errors?team=shop: another team's record")
+	}
 	o, _ := s.options(ctx)
 	team := ledger.Team{ID: pay, Name: "payments", Rules: "^Errors$", Labels: nobody}
 	week := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
