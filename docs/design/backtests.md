@@ -79,7 +79,7 @@ instead of installing and running Lapilli. Everything around it stays:
    and those that differ (`source.Split`), as `--changed-only` does. A
    request past the bounds is refused ("What the pull request's PromQL can
    do"). Its requests to the history are counted before anything is asked
-   (the planner [preflight.md](preflight.md) proposes, from `chunks` and
+   (the planner [preflight.md](preflight.md) proposes, #92, from `chunks` and
    `queries` in `internal/replay`); one that couldn't finish within
    `--backtest-timeout` at the lane's rate is refused, saying how many
    requests it needs and what period would fit.
