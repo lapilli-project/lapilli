@@ -922,6 +922,54 @@ replayed too, once, so an incident one of them catches is caught on both
 sides: a longer `--since` judges against more incidents, and takes longer.
 In CI, run it on each pull request that changes the rules (below).
 
+### What a rule is expected to do
+
+`--expect FILE` holds the rules that differ to what is expected of them,
+written beside them ([docs/design/expectations.md](docs/design/expectations.md)):
+how many times each may fire in a week, how many of those while people
+slept (`--sleep-hours`, 22:00–08:00 by default), and the incidents it must
+keep catching, within how long. A rule is named, or a group's rules:
+
+```yaml
+expectations:
+  - rule: CheckoutErrors
+    budget:
+      week: 10       # firings in each whole week of the period
+      asleep: 2      # of them, while people slept
+    catches:
+      - incident: INC-43
+        within: 5m
+  - group: payments
+    budget: {week: 20}
+```
+
+A budget is held to each whole week of the period, counted back from its
+end, and the week that fired most is shown; a period shorter than a week
+is scaled to one, and says so. A catch is judged as the verdict judges
+incidents: an incident not in the period, or no incident given, is not
+known, never met or broken; a rule the change takes away catches nothing.
+The report gets a section, each expectation before → after: met, broken
+by this change (met before, or a rule the change adds), broken before too
+(which the change isn't held to), or not known.
+
+```
+Expectations: 1 broken by this change, 0 broken before too, 2 met
+Budgets are held to each of the period's 2 whole weeks, counted back from its end: the most in one is shown.
+RULE            HELD TO                                 BEFORE  AFTER  
+CheckoutErrors  at most 10 a week                       3       41     ✗ broken by this change
+CheckoutErrors  at most 2 a week while people slept     0       1      met
+CheckoutErrors  catches INC-43, within 5m               +2m     +2m    met
+```
+
+`--expect-before FILE` gives the expectations as they were, for the rules
+in place: a budget the change raises is held to its old value before it,
+and the report says it was raised. `--fail-expectations` exits 1 when the
+change breaks one; `--expect-required` when it adds a rule no expectation
+holds. Nothing here needs incidents: a budget holds a rule with none
+written down. The file is read strictly, a key it doesn't know an error,
+and before anything is replayed. The backtest recipes read it from both
+commits (`EXPECT`, below).
+
 ## Pull request backtests in CI
 
 On a pull request that changes alert rules, the backtest can comment its
@@ -1063,6 +1111,10 @@ What a tool reads is stable:
   | `incidents_given` | incidents were given, `--incidents` or `--impact`; when false, nothing was judged: no firing caught anything, and `incidents` is 0. The firings were judged only when it is true and `no_record` false |
   | `incidents`, `incidents_changed` | incidents in the period, and those caught differently |
   | `no_record` | incidents were given, and none was on in the period or the two weeks before it (nor `--impact` read): nothing was judged, as without them |
+  | `expected` | the rules that differ were held to expectations, `--expect` |
+  | `expectations_broken` | expectations the change broke: met by the rules in place (or of a rule it adds), broken by those proposed |
+  | `expectations_already_broken` | expectations broken on both sides, which aren't the change's |
+  | `unexpected` | rules the change adds that no expectation holds |
 
 - When nothing changed, `--markdown` writes that line and exactly:
 
@@ -1076,7 +1128,9 @@ What a tool reads is stable:
   written, whether or not anything changed; 1 when it failed, or a rule's
   replay didn't finish within `--timeout` (the report is still written),
   or, with `--fail-unreplayed`, the history couldn't be read for one or
-  its labels on its series were too many to replay; 2
+  its labels on its series were too many to replay, or, with
+  `--fail-expectations`, the change broke an expectation (and with
+  `--expect-required`, it added a rule none holds); 2
   when the flags are wrong. Nothing changing has no exit status of its
   own: a CI step takes anything but 0 as a failure, and a pull request that
   changes no rule isn't one. Read `nothing_changed`.

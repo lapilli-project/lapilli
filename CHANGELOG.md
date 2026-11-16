@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Expectations in a pull request backtest.** `lapilli verdict --compare
+  --expect FILE` holds the rules that differ to what is expected of them
+  ([docs/design/expectations.md](docs/design/expectations.md), its first
+  step): a budget of firings in each whole week of the period, and of
+  those while people slept, and incidents each must keep catching, within
+  how long. The report says each before → after: met, broken by this
+  change, broken before too, or not known (an incident not in the period;
+  hours of no sleep). `--expect-before` gives them as they were, for the
+  rules in place; `--fail-expectations` exits 1 when the change breaks
+  one, `--expect-required` when it adds a rule none holds. The summary
+  gains `expected`, `expectations_broken`, `expectations_already_broken`
+  and `unexpected`. The backtest recipes take `EXPECT`, read from both
+  commits, and `FAIL_ON_EXPECTATIONS` and `EXPECT_REQUIRED` (the action's
+  `expect`, `fail-on-expectations`, `expect-required`), which fail the job
+  once the comment is posted. A budget needs no incident written down.
+
 ### Fixed
 
 - **"None yet" where there is none.** The changes' page ("Is the record

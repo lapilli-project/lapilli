@@ -63,6 +63,17 @@ And, as wanted:
 - `KEY`, to tell apart the comments of several jobs on one pull request,
   one per Prometheus say (default `default`).
 - `FAIL_ON_ERROR=true`, to fail the job when the backtest fails (below).
+- `EXPECT`, an expectations file in the repository
+  ([docs/design/expectations.md](../../docs/design/expectations.md)): the
+  rules that differ are held to it, the pull request's file for the rules
+  it proposes and the commit it goes into's for those in place
+  (`--expect`, `--expect-before`), and the comment has a table of what the
+  change broke. A pull request may add the file; one that takes it away is
+  said. `FAIL_ON_EXPECTATIONS=true` fails the job when the change breaks
+  an expectation the rules in place meet, and `EXPECT_REQUIRED=true` when
+  it adds a rule no expectation holds, each once the comment is posted.
+  Unlike `FAIL_ON_ERROR`, this isn't a failure of the backtest: the
+  comment shows the report, and a branch rule can require the job.
 
 They need `sh`, `git`, `curl`, `jq` and `tar`, on Linux or macOS.
 
@@ -133,7 +144,8 @@ where `RENDER` could read it. The action's inputs are `version` (required:
 the release the tag is), `sha256`, `paths` or `render` and
 `render-prepare`, `incidents`, `prometheus-url`, `auth`, `gcp-project`,
 `aws-region`, `since` (default `7d`), `args` (more flags, split at spaces
-and never expanded by a shell), `target`, `key`, `fail-on-error`, `token`
+and never expanded by a shell), `target`, `key`, `fail-on-error`, `expect`,
+`fail-on-expectations`, `expect-required`, `token`
 (default the job's own) and `login` (the account a GitHub App's token
 comments as, `NAME[bot]`). For a cloud's managed Prometheus, sign in first
 with the cloud's own action through OpenID Connect (`id-token: write`):

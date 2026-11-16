@@ -48,6 +48,17 @@
 #                    from the commit the pull request goes into, never the
 #                    pull request's own: --incidents. A file in the checkout
 #                    is the pull request's, and isn't taken as an argument
+#   EXPECT           optional: an expectations file in the repository
+#                    (docs/design/expectations.md): the rules that differ
+#                    are held to it, the pull request's file for the rules
+#                    it proposes and the commit it goes into's for those in
+#                    place (--expect, --expect-before), and the comment
+#                    says what the change broke
+#   FAIL_ON_EXPECTATIONS
+#                    true: the job fails when the change breaks an
+#                    expectation the rules in place meet, once the comment
+#                    says which (default false). With EXPECT_REQUIRED=true,
+#                    also when it adds a rule no expectation holds
 #   TARGET           the commit the pull request goes into, as the clone has
 #                    it (default HEAD^1: the merge commit's first parent, as
 #                    GitHub checks a pull request out); the rules compared
@@ -164,6 +175,16 @@ case ${FAIL_ON_ERROR:-false} in
   false | '') strict= ;;
   *) say "FAIL_ON_ERROR $FAIL_ON_ERROR: want true or false"; exit 1 ;;
 esac
+case ${FAIL_ON_EXPECTATIONS:-false} in
+  true) held=1 ;;
+  false | '') held= ;;
+  *) say "FAIL_ON_EXPECTATIONS $FAIL_ON_EXPECTATIONS: want true or false"; exit 1 ;;
+esac
+case ${EXPECT_REQUIRED:-false} in
+  true) required=1 ;;
+  false | '') required= ;;
+  *) say "EXPECT_REQUIRED $EXPECT_REQUIRED: want true or false"; exit 1 ;;
+esac
 repo=${REPO:-.}
 TARGET=${TARGET:-HEAD^1}
 case $TARGET in
@@ -206,6 +227,14 @@ done
 set +f
 if [ -n "${INCIDENTS:-}" ] && ! in_repo "$INCIDENTS"; then
   say "INCIDENTS $INCIDENTS: want a file in the repository"
+  exit 1
+fi
+if [ -n "${EXPECT:-}" ] && ! in_repo "$EXPECT"; then
+  say "EXPECT $EXPECT: want a file in the repository"
+  exit 1
+fi
+if [ -z "${EXPECT:-}" ] && { [ -n "$held" ] || [ -n "$required" ]; }; then
+  say "FAIL_ON_EXPECTATIONS and EXPECT_REQUIRED hold the rules to EXPECT: give EXPECT, the expectations file"
   exit 1
 fi
 if [ -z "${LAPILLI:-}" ]; then
@@ -271,6 +300,10 @@ while [ "$n" -gt 0 ]; do
       say "$a: the recipe fails the job itself, with FAIL_ON_ERROR=true, when a rule that differs couldn't be replayed"
       exit 1
       ;;
+    --expect | --expect=* | --expect-before | --expect-before=* | --fail-expectations* | --expect-required*)
+      say "$a: the recipe reads the expectations from both commits itself: give EXPECT, and FAIL_ON_EXPECTATIONS or EXPECT_REQUIRED"
+      exit 1
+      ;;
     --incidents | --on-call | --bearer-token-file | --grafana-token-file | --ruler-token-file | --loki-token-file | --slack-webhook-file)
       if [ "$n" -gt 0 ] && in_clone "$1"; then
         say "$a $1: a file in the checkout is the pull request's, which it would be judged by: give it from outside the checkout, or INCIDENTS"
@@ -326,6 +359,9 @@ ask_host() {
   fi
 }
 
+# unmet: what the change does to the expectations that fails the job
+# (FAIL_ON_EXPECTATIONS, EXPECT_REQUIRED), said once the comment is posted.
+unmet=
 # trouble WHAT [LOG]: the backtest can't be what the comment shows: WHAT,
 # said in the comment, with LOG's last lines.
 problem=
@@ -519,6 +555,33 @@ incidents() {
   git -C "$repo" cat-file blob "$base:$INCIDENTS" >"$tmp/incidents.yaml"
 }
 
+# expectations: EXPECT, as each commit has it, into
+# $tmp/expect.head.yaml (the pull request's, for the rules it proposes) and
+# $tmp/expect.base.yaml (the commit it goes into's, for the rules in place):
+# files, not links, of 1 MiB at most. The pull request may add the file:
+# then the rules in place are held to its.
+expectations() {
+  [ -n "${EXPECT:-}" ] || return 0
+  for side in head base; do
+    if [ "$side" = head ]; then commit=$head what="the pull request's commit"; else commit=$base what="the commit it goes into"; fi
+    mode=$(git -C "$repo" ls-tree "$commit" -- "$EXPECT" | awk '{ print $1 }')
+    case $mode in
+      100644 | 100755) ;;
+      '')
+        [ "$side" = base ] && continue
+        trouble "EXPECT $EXPECT isn't in $what"
+        return 1
+        ;;
+      *) trouble "EXPECT $EXPECT isn't a file in $what"; return 1 ;;
+    esac
+    if [ "$(git -C "$repo" cat-file -s "$commit:$EXPECT")" -gt 1048576 ]; then
+      trouble "EXPECT $EXPECT is more than 1 MiB in $what"
+      return 1
+    fi
+    git -C "$repo" cat-file blob "$commit:$EXPECT" >"$tmp/expect.$side.yaml"
+  done
+}
+
 # in_tree SIDE COMMAND: RENDER or RENDER_PREPARE, in a commit's files, with
 # a HOME of that commit's own (what Helm caches there is fetched once a
 # commit), without the variables CIs keep tokens in; REPO is the clone. It
@@ -633,6 +696,12 @@ backtest() {
   if [ -n "${INCIDENTS:-}" ]; then
     set -- --incidents "$tmp/incidents.yaml" "$@"
   fi
+  if [ -f "$tmp/expect.head.yaml" ]; then
+    set -- --expect "$tmp/expect.head.yaml" "$@"
+    if [ -f "$tmp/expect.base.yaml" ]; then
+      set -- --expect-before "$tmp/expect.base.yaml" "$@"
+    fi
+  fi
   if [ -n "${RENDER:-}" ]; then
     set -- --rules "$tmp/rules/head" --compare "$tmp/rules/base" "$@"
   else
@@ -673,6 +742,25 @@ backtest() {
   # or a query it refuses as written, which is the pull request's to mend.
   # The summary's unreplayed counts them, as the comment's "Could not
   # replay" lists them.
+  # Held to the expectations, a change that breaks one fails the job, once
+  # the comment says which: the report's own table, not a problem of the
+  # run's.
+  if [ "$verdict" = 0 ] && [ -n "${EXPECT:-}" ] && { [ -n "$held" ] || [ -n "$required" ]; }; then
+    broken=$(summary expectations_broken)
+    unexpected=$(summary unexpected)
+    case $broken$unexpected in
+      '' | *[!0-9]*)
+        trouble "the report doesn't say what became of the expectations: give LAPILLI_VERSION a release with --expect" "$tmp/lapilli.said"
+        ;;
+      *)
+        if [ -n "$held" ] && [ "$broken" -gt 0 ]; then
+          unmet="the change breaks $broken expectations the rules in place meet (FAIL_ON_EXPECTATIONS=true)"
+        elif [ -n "$required" ] && [ "$unexpected" -gt 0 ]; then
+          unmet="the change adds $unexpected rules no expectation holds (EXPECT_REQUIRED=true)"
+        fi
+        ;;
+    esac
+  fi
   if [ "$verdict" = 0 ] && [ -n "$strict" ]; then
     n=$(summary unreplayed)
     case $n in
@@ -745,7 +833,7 @@ main() {
   # The base first, then the pull request's: what the pull request runs
   # comes last.
   if commits && fetch_lapilli && files "$base" "$tmp/base" "the commit it goes into" &&
-    files "$head" "$tmp/head" "the pull request's commit" && incidents; then
+    files "$head" "$tmp/head" "the pull request's commit" && incidents && expectations; then
     if [ -z "${RENDER:-}" ] || { render base "the commit it goes into" && render head "the pull request's commit"; }; then
       backtest "$@"
     fi
@@ -757,6 +845,10 @@ main() {
     exit 0
   fi
   if [ -n "$problem" ] && [ -n "$strict" ]; then
+    exit 1
+  fi
+  if [ -n "$unmet" ]; then
+    say "$unmet"
     exit 1
   fi
   exit 0

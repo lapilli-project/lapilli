@@ -79,6 +79,15 @@ inputs:
   fail-on-error:
     description: true fails the step when the backtest does, or a rule that differs couldn't be replayed, whatever why, once the comment says so.
     default: "false"
+  expect:
+    description: An expectations file in the repository (docs/design/expectations.md), read from both commits; the rules that differ are held to it, and the comment says what the change broke.
+    default: ""
+  fail-on-expectations:
+    description: true fails the step when the change breaks an expectation the rules in place meet, once the comment says which.
+    default: "false"
+  expect-required:
+    description: true fails the step when the change adds a rule no expectation holds.
+    default: "false"
   token:
     description: A token that may comment on the pull request.
     default: ${{ github.token }}
@@ -107,6 +116,9 @@ runs:
         TARGET: ${{ inputs.target }}
         KEY: ${{ inputs.key }}
         FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        EXPECT: ${{ inputs.expect }}
+        FAIL_ON_EXPECTATIONS: ${{ inputs.fail-on-expectations }}
+        EXPECT_REQUIRED: ${{ inputs.expect-required }}
         GITHUB_LOGIN: ${{ inputs.login }}
         PR: ${{ github.event.pull_request.number }}
       run: |

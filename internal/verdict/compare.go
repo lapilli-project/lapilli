@@ -47,6 +47,26 @@ type Comparison struct {
 	// with a side are the rules that differ Summary.Unreplayed counts, each
 	// once.
 	Unreplayed []Unreplayed `json:"unreplayed,omitempty"`
+	// Expectations are the rules the change touches held to what they are
+	// expected to do (--expect): set by Expect.
+	Expectations *Checked `json:"expectations,omitempty"`
+}
+
+// Expect holds the rules the change touches to after's expectations, and
+// the side before to before's when it is given; it counts on the summary
+// what the change broke.
+func (c *Comparison) Expect(after, before *Expectations, hours *Hours) {
+	c.Expectations = CheckExpectations(c, after, before, hours)
+	if c.Summary != nil {
+		c.Summary.Expected = true
+		c.Summary.ExpectationsBroken = c.Expectations.Broken()
+		for _, r := range c.Expectations.Results {
+			if r.AlreadyBroken() {
+				c.Summary.ExpectationsAlreadyBroken++
+			}
+		}
+		c.Summary.Unexpected = len(c.Expectations.Unexpected)
+	}
 }
 
 // RecordingChange is a recording rule that differs between the two sets:
@@ -99,6 +119,15 @@ type Summary struct {
 	// NoRecord says incidents were given, and none keeps the period's
 	// record (Report.NoRecord): nothing was judged, as without them.
 	NoRecord bool `json:"no_record"`
+	// Expected says the rules were held to expectations (--expect).
+	// ExpectationsBroken are those the change broke: met before, or of a
+	// rule it adds, and broken after; ExpectationsAlreadyBroken, those
+	// broken on both sides, which aren't the change's. Unexpected are the
+	// rules it adds that no expectation holds.
+	Expected                  bool `json:"expected"`
+	ExpectationsBroken        int  `json:"expectations_broken"`
+	ExpectationsAlreadyBroken int  `json:"expectations_already_broken"`
+	Unexpected                int  `json:"unexpected"`
 }
 
 // Summarize sets c.Summary from the rest of c; incidents says whether

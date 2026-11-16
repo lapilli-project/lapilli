@@ -1,6 +1,6 @@
 # Expectations: what a rule was tested to do, kept and held to
 
-Status: accepted, not built. Under [GOVERNANCE.md](../../GOVERNANCE.md)
+Status: accepted; its first step built (see "As built" at the end). Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this is a new kind of data in the ledger, and a backtest that can fail a
 pull request, so it was designed first, as a pull request (#81); it was
 merged on 2026-11-16, before its week was out, by the maintainer's
@@ -279,3 +279,30 @@ The first two need no incident written down.
 4. Scenarios: promtool test files, for Prometheus-format rules
    (`--promtool PATH`).
 5. Adding a rule, as a proposal held to its expectations.
+
+## As built
+
+Step 1, in `lapilli verdict --compare` and the backtest recipes:
+
+- **The file.** `expectations:`, each naming a `rule` or a `group` (one of
+  them), with a `budget` (`week`, `asleep`) or `catches` (`incident`,
+  `within`). Read strictly, 1 MiB at most, before anything is replayed.
+  Labels as a selector, re-fires in a budget and `scenarios` aren't read
+  yet: a file with them is refused, rather than passed over.
+- **The weeks.** Whole weeks counted back from the period's end, the most
+  in one reported; a period with none is scaled to a week (`scaled_days`).
+  While people slept is by `--sleep-hours` (and `--shifts`, `--on-call`),
+  as the rest of the verdict counts it; with hours of no sleep, not known.
+- **What a change broke.** Broken after, and met before or a rule the
+  change adds. A rule the change takes away breaks its catches (it catches
+  nothing), not its budget. `--expect-before` holds the side before to the
+  expectations as they were, and the report says what the change raised.
+- **Out.** A section of the text, `--markdown` (right after the totals) and
+  `--json` (`"expectations"`); four summary fields (`expected`,
+  `expectations_broken`, `expectations_already_broken`, `unexpected`).
+  `--fail-expectations` and `--expect-required` exit 1. The recipes take
+  `EXPECT`, read from both commits, and `FAIL_ON_EXPECTATIONS`,
+  `EXPECT_REQUIRED`, which fail the job once the comment is posted, from the
+  summary, not lapilli's exit status: the backtest didn't fail.
+- **Serve** takes none of it yet (step 2).
+
