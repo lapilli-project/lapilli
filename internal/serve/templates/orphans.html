@@ -24,4 +24,7 @@
 {{if $may}}{{with .Rules}}<datalist id="rules-now">{{range .}}<option value="{{.}}"></option>{{end}}</datalist>{{end}}{{end}}
 <p class="row">{{if gt .From 1}}<a href="{{$.Link "/orphans"}}">{{t "The first"}}</a>{{end}}{{with .Next}} <a href="{{$.Link "/orphans" "after" .}}">{{t "The next"}}</a>{{end}}</p>
 {{end}}
+{{with .ImpactNotes}}<h2 id="impact-notes">{{t "Tasks and comments on impact windows read again"}}</h2>
+<p>{{t "The impact signal was read again with another criterion, and nothing it found covers these windows any more: their tasks and comments are kept on them, listed here."}}</p>
+<ul class="plain">{{range .}}<li><code><bdi>{{.Key}}</bdi></code>:{{range .Tasks}} <a href="{{$.Link (printf "/tasks/%d" .)}}">{{t "Task #%d" .}}</a>{{end}}{{with .Comments}} {{t "%d comments" .}}{{end}}</li>{{end}}</ul>{{end}}
 {{end}}{{template "bottom" .}}{{end}}

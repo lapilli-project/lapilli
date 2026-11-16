@@ -125,7 +125,9 @@ func (d *ImpactData) Late() string {
 	return late
 }
 
-// floor works d's Floor and NoData out, by the ledger's weeks.
+// Floor works d's Floor and NoData out, by the ledger's weeks.
+func (l *Ledger) Floor(d *ImpactData) { l.floor(d) }
+
 func (l *Ledger) floor(d *ImpactData) {
 	d.Floor, d.NoData = time.Time{}, !d.Complete()
 	if d.NoData {
@@ -229,14 +231,23 @@ func (l *Ledger) SetImpactData(ctx context.Context, d ImpactData) error {
 }
 
 // criterionChanged reports whether a run read the impact signal with
-// another criterion than the runs before it: not when either is "" (a run
-// or a ledger from before 0.47), nor when the runs before didn't read it.
+// another criterion than the runs before it: not when the run says none
+// (one from before 0.47), nor when the runs before didn't read it. A ledger
+// that kept no criterion but was read (an earlier lapilli's) was read with
+// the one the run takes it to (ImpactAssumed).
 func (l *Ledger) criterionChanged(t *txn, f Found) (bool, error) {
 	if !f.ImpactOn || f.ImpactCriterion == "" {
 		return false, nil
 	}
 	was, err := l.meta(t.ctx, t, metaImpactCriterion)
-	return was != "" && was != f.ImpactCriterion, err
+	if err != nil || was != "" {
+		return was != "" && was != f.ImpactCriterion, err
+	}
+	since, err := l.meta(t.ctx, t, metaImpactSince)
+	if _, perr := strconv.ParseInt(since, 10, 64); err != nil || perr != nil {
+		return false, err
+	}
+	return f.ImpactAssumed != f.ImpactCriterion, nil
 }
 
 // ImpactRead is the impact signal read again over [From, To], To where the

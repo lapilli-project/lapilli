@@ -456,6 +456,7 @@ func TestStatusKinds(t *testing.T) {
 		h := x.s.Handler()
 		for _, p := range x.paths {
 			r := httptest.NewRequest(http.MethodGet, p, nil)
+			r.Header.Set("Sec-Fetch-Site", "none") // a page asked for in a browser, as axe does
 			r.Header.Set("Accept-Language", "en")
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, r)

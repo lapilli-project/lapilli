@@ -345,6 +345,8 @@ type Server struct {
 	// tried or saved, which read Prometheus (impactTriesAnHour).
 	tries       tries
 	impactTries tries
+	// tried are the criteria a try read in full, lately (triedFor).
+	tried triedCache
 	// sources is what this replica saw of where incidents come from.
 	sources sourcesState
 	// outlasts are the proposals' for_outlasts, worked out as they are

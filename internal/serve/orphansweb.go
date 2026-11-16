@@ -43,6 +43,10 @@ type orphansView struct {
 	Rules []string
 	// Moved and Deleted are what the last write did, from the query.
 	Moved, To, Deleted string
+	// ImpactNotes are the impact windows read again with another
+	// criterion, and covered by nothing found now, that tasks or comments
+	// are kept on (ledger.OrphanedImpact).
+	ImpactNotes []ledger.ImpactOrphan
 }
 
 // inEffectNames are the names of the rules in effect, as the latest
@@ -68,6 +72,10 @@ func (s *Server) orphansPage(r *http.Request) (any, error) {
 	ctx := r.Context()
 	q := r.URL.Query()
 	v := orphansView{Moved: q.Get("moved"), To: q.Get("to"), Deleted: q.Get("deleted")}
+	var err error
+	if v.ImpactNotes, err = s.l.OrphanedImpact(ctx); err != nil {
+		return v, err
+	}
 	set, names, ok, err := s.inEffectNames(r)
 	if err != nil || !ok {
 		return v, err

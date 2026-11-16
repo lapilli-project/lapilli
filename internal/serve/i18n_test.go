@@ -210,6 +210,7 @@ func TestPagesInEachLanguage(t *testing.T) {
 	for _, n := range names {
 		for _, p := range pagePaths {
 			r := httptest.NewRequest(http.MethodGet, p, nil)
+			r.Header.Set("Sec-Fetch-Site", "none") // a page asked for in a browser, as axe does
 			r.Header.Set("Accept-Language", n.Code+";q=0.9, de;q=0.5")
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, r)

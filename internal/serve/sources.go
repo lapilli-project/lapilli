@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"lapilli.dev/internal/ledger"
 )
 
 // Incident sources (docs/design/ui.md, "Incident sources"): where the
@@ -23,6 +25,10 @@ const sourcesSpan = 28 * 24 * time.Hour
 // port may go without writing before it is said to be quiet: a job copies
 // its tool's incidents every hour or so, each again, unchanged or not.
 const receivedQuiet = 48 * time.Hour
+
+// impactStale is how long since the impact signal was last read it is
+// said to be read no more: two runs, the hours they settle, and one more.
+func impactStale(c Config) time.Duration { return 2*c.Every + c.Settle + time.Hour }
 
 // receivedEvery is how often a replica keeps that a source wrote through
 // the incidents port: the write it kept stands for those after it, within
@@ -93,6 +99,9 @@ type sourceRow struct {
 	Where    string
 	Err      string
 	Recipes  bool
+	// Data is, of the impact signal, where the data of the selectors it
+	// reads begins.
+	Data *dataView
 }
 
 // sourcesView is the incident sources: the rows, whether no incident was
@@ -167,7 +176,16 @@ func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, 
 			names = append(names, name)
 		}
 		lastOf := func(name string) time.Time { return later(bySrc[name].last, bySrc[name].changed) }
+		quiet := func(name string) bool { return now.Sub(lastOf(name)) > receivedQuiet }
+		// The quiet first, so that one is never among those past the
+		// list; then the latest first.
 		slices.SortFunc(names, func(a, b string) int {
+			if qa, qb := quiet(a), quiet(b); qa != qb {
+				if qa {
+					return -1
+				}
+				return 1
+			}
 			if c := lastOf(b).Compare(lastOf(a)); c != 0 {
 				return c
 			}
@@ -180,8 +198,11 @@ func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, 
 			x := bySrc[name]
 			row := sourceRow{Name: name + "-", Raw: true, Tool: sourceTools[name], N: x.n, Counts: true, Where: where, State: "ok", LastWhat: "last received", Last: x.last,
 				About: "Copied in by a tool's job, through the incidents port."}
-			if name == "" {
+			switch name {
+			case "":
 				row.Name, row.Raw = "Ids with no prefix", false
+			case ledger.OtherSources:
+				row.Name, row.Raw = "Other sources, past the most kept", false
 			}
 			if x.last.IsZero() {
 				// Kept before the ledger kept when each wrote: when one of
@@ -211,6 +232,10 @@ func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, 
 		switch {
 		case seen.FileErr != "" && !seen.FileFailed.Before(seen.FileRead):
 			file.State, file.Err = "failing", seen.FileErr
+			if !adminReads {
+				// Its path is an admin's to read.
+				file.Err = strings.ReplaceAll(file.Err, s.cfg.Incidents, tr(lang(r), "the incidents file"))
+			}
 		case seen.FileRead.IsZero():
 			file.State = "pending"
 		}
@@ -226,11 +251,24 @@ func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, 
 	if c.Expr != "" {
 		imp = sourceRow{Name: "Impact signal", State: "ok", Last: seen.ImpactRead, LastWhat: "last read", N: got.Impact, Counts: true,
 			About: "Each run reads it over the hours it replays; a window counts unless an incident written down covers it."}
+		k, err := s.l.ImpactKept(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if d := k.Data; d != nil && d.Criterion == k.Criterion {
+			imp.Data = dataViewOf(d)
+		}
 		switch {
 		case seen.ImpactErr != "" && !seen.ImpactFailed.Before(seen.ImpactRead):
 			imp.State, imp.Err = "failing", seen.ImpactErr
-		case seen.ImpactRead.IsZero():
-			imp.State = "pending"
+		case seen.ImpactRead.IsZero() || seen.ImpactKey != c.key():
+			// Not yet read with the criterion in effect: its last read was
+			// another's.
+			imp.State, imp.About = "pending", "Not read with the criterion in effect yet."
+		case now.Sub(seen.ImpactRead) > impactStale(s.cfg):
+			imp.State, imp.About = "quiet", "Not read for longer than two runs: are the runs running?"
+		case imp.Data != nil && imp.Data.NoData:
+			imp.State, imp.About = "nodata", "A selector it reads has no data: the impact signal keeps no record until each has some."
 		}
 	}
 	v.Rows = append(v.Rows, imp)

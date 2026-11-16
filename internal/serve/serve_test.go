@@ -34,6 +34,9 @@ type history struct {
 	asked int
 	// exprs is how often each expression was asked for.
 	exprs map[string]int
+	// begins is, by selector, when its data begins, as count(selector)
+	// answers: zero for none at all; one not named has data all along.
+	begins map[string]time.Time
 }
 
 func (h *history) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
@@ -54,6 +57,23 @@ func (h *history) QueryRange(ctx context.Context, expr string, start, end time.T
 		return s
 	}
 	var out []prom.Series
+	if sel, ok := strings.CutPrefix(expr, "count("); ok && strings.HasSuffix(sel, ")") {
+		sel = strings.TrimSuffix(sel, ")")
+		h.Lock()
+		first, named := h.begins[sel]
+		h.Unlock()
+		if !named {
+			first = start
+		}
+		if first.IsZero() {
+			return nil, nil
+		}
+		at := later(start, first)
+		if s := run(nil, at, end); len(s.Samples) > 0 {
+			return []prom.Series{s}, nil
+		}
+		return nil, nil
+	}
 	switch expr {
 	case "errors > 5", "errors > 1":
 		out = append(out, run(map[string]string{"service": "checkout"}, now.Add(-30*time.Hour), now.Add(-29*time.Hour)))

@@ -86,7 +86,7 @@ func (s *Server) Handler() http.Handler {
 		return func(w http.ResponseWriter, r *http.Request) {
 			// A query past maxQuery is refused before anything is read
 			// for it.
-			if len(r.URL.RawQuery) > maxQuery {
+			if len(r.URL.RawQuery) > maxQueryOf(name, r) {
 				s.oops(w, r, errLongQuery)
 				return
 			}

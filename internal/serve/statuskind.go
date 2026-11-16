@@ -47,9 +47,10 @@ var statusKinds = map[string]string{
 	"outcome/as-predicted": "ok", "outcome/otherwise": "warn", "outcome/measuring": "info", "outcome/added": "info",
 	"outcome/unreplayed": "warn",
 	// Where incidents come from (sources.go): alive; quiet, nothing
-	// received in a while; failing, its last read failed; waiting, set up
+	// received, or read, in a while; no data, an impact signal a selector
+	// of which has none; failing, its last read failed; waiting, set up
 	// and not read yet; none written in four weeks, or not set up.
-	"source/ok": "ok", "source/quiet": "warn", "source/failing": "bad", "source/pending": "info",
+	"source/ok": "ok", "source/quiet": "warn", "source/nodata": "warn", "source/failing": "bad", "source/pending": "info",
 	"source/none": "unknown", "source/off": "unknown",
 }
 

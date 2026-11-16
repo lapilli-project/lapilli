@@ -160,6 +160,11 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	// what is copied in is judged as it comes.
 	if run && s.running(ctx) {
 		s.runs(ctx, o)
+		// Where the data of the criterion the runs read begins, once they
+		// read it: the record never starts before it.
+		if err := s.impactData(ctx); err != nil {
+			s.fail("looking for where the impact signal's data begins", err)
+		}
 		if err := s.keepBegan(ctx); err != nil {
 			s.fail("a run", err)
 		}
@@ -466,9 +471,9 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 	if c.Expr != "" {
 		ctx, cancel := context.WithTimeout(parent, s.cfg.Timeout)
 		defer cancel()
-		f.ImpactOn, f.ImpactSince, f.ImpactCriterion = true, from.Add(-time.Hour), c.key()
+		f.ImpactOn, f.ImpactSince, f.ImpactCriterion, f.ImpactAssumed = true, from.Add(-time.Hour), c.key(), s.assumedKey()
 		series, err := s.h.QueryRange(ctx, c.Expr, f.ImpactSince, to, s.cfg.Step)
-		s.readImpact(err)
+		s.readImpact(err, c.key())
 		if err != nil {
 			return slow(ctx, fmt.Errorf("--impact: %w", err))
 		}

@@ -57,7 +57,10 @@ type Found struct {
 	ImpactOn        bool
 	ImpactSince     time.Time
 	ImpactCriterion string
-	Run             Run
+	// ImpactAssumed is the criterion a ledger that kept none (an earlier
+	// lapilli's) is taken to have been read with: the command line's.
+	ImpactAssumed string
+	Run           Run
 }
 
 // from is where a rule's firings are replaced from.

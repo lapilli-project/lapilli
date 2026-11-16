@@ -114,6 +114,7 @@ change and to try on the last four weeks first; everyone else reads it. */}}
 </form>{{else}}</div><p>{{if .NoHistory}}{{template "off" (offWhy "Save, and judge again" "criteria-why" "Needs --prometheus")}}{{else}}{{template "off" (offOf $p "Save, and judge again" "admin" "criteria-why")}}{{end}}</p>{{end}}
 <p class="quiet">{{t "Saving a new one reads it again over the last four weeks, and judges them again; the record is kept by it from then on, and the weeks before keep only the windows the one before found, as incidents. The overview's weekly panels the digest works out, the longer fors it suggests and the rules that fired as often as a noisy one with no record, catch up at the next digest."}}</p>
 {{if not .Since.IsZero}}<p>{{t "The record is kept by the impact signal from %s." (at $loc .Since)}}</p>{{end}}
+{{with .Data}}{{if .NoData}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "The impact signal keeps no record: a selector it reads has no data yet."}}</p>{{end}}{{template "impactdata" (on $p .)}}{{end}}
 {{with .Again}}<p class="notice {{if .Err}}status-bad{{else}}status-info{{end}}">{{if .Err}}<span class="sign" aria-hidden="true">✕</span> {{t "Reading it again over the last four weeks failed at %s: %s. It is tried again at %s; the runs read it meanwhile from where they are." (at $loc .Failed) .Err (at $loc .Next)}}{{else}}<span class="sign" aria-hidden="true">↻</span> {{t "Waiting to be read again over the last four weeks, at the next round of the replica that leads."}}{{end}}</p>{{end}}
 {{with .Tried}}{{template "impacttried" (on $p .)}}{{end}}
 {{end}}{{end}}
@@ -123,7 +124,8 @@ over the last four weeks, and what that would do to the verdict. */}}
 {{define "impacttried"}}{{$loc := .P.Loc}}{{with .V}}<section class="card wide" id="impact-tried" aria-labelledby="impact-tried-h">
 <h3 id="impact-tried-h">{{if .From.IsZero}}{{t "Tried"}}{{else}}{{t "Tried on %s → %s" (at $loc .From) (at $loc .To)}}{{end}}</h3>
 {{with .Err}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{.}}</p>{{else}}
-<p>{{if .Off}}{{t "Turned off, the impact signal finds no window and keeps the record of no week; the windows found before stay, as incidents."}}{{else}}{{t "%d windows found; %d of them would count, the rest covered by an incident written down or decided before." .Found .Counted}}{{end}}</p>
+<p>{{if .Off}}{{t "Turned off, the impact signal finds no window and keeps the record of no week; the windows found before stay, as incidents."}}{{else}}{{t "%d windows found; %d of them would count, the rest covered by an incident written down or decided before." .Found .Counted}}{{end}}{{if .Same}} {{t "It is the criterion in effect, read already: nothing would change."}}{{end}}</p>
+{{with .Data}}{{if .NoData}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "A selector it reads had no data over the four weeks: it would keep the record of no week."}}</p>{{else if not .Floor.IsZero}}<p>{{t "The impact signal has data from %s: the weeks before it keep no record by it." (at $.P.Loc .Floor)}}</p>{{end}}{{template "impactdata" (on $.P .)}}{{end}}
 {{if .Windows}}<div class="scroll" tabindex="0" role="region" aria-label="{{t "Windows found"}}"><table>
 <caption>{{t "Windows found"}}</caption>
 <thead><tr><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "Length"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "Would count"}}</th></tr></thead>
@@ -148,11 +150,16 @@ over the last four weeks, and what that would do to the verdict. */}}
 <div class="scroll" tabindex="0" role="region" aria-label="{{t "Incident sources"}}"><table class="sources">
 <thead><tr><th scope="col">{{t "Source"}}</th><th scope="col">{{t "State"}}</th><th scope="col">{{t "Last"}}</th><th scope="col" class="n">{{t "In four weeks"}}</th><th scope="col">{{t "What it is"}}</th></tr></thead>
 <tbody>{{range .Rows}}<tr><th scope="row">{{if .Raw}}<bdi>{{.Name}}</bdi>{{with .Tool}} ({{.}}){{end}}{{else}}{{t .Name}}{{end}}</th>
-<td class="state"><span class="{{status "source" .State}}">{{if eq .State "ok"}}✓ {{t "working"}}{{else if eq .State "quiet"}}⚠&#xFE0E; {{t "quiet"}}{{else if eq .State "failing"}}✕ {{t "failing"}}{{else if eq .State "pending"}}↻ {{t "waiting"}}{{else if eq .State "none"}}– {{t "none in four weeks"}}{{else}}? {{t "not set up"}}{{end}}</span></td>
+<td class="state"><span class="{{status "source" .State}}">{{if eq .State "ok"}}✓ {{t "working"}}{{else if eq .State "quiet"}}⚠&#xFE0E; {{t "quiet"}}{{else if eq .State "nodata"}}⚠&#xFE0E; {{t "no data"}}{{else if eq .State "failing"}}✕ {{t "failing"}}{{else if eq .State "pending"}}↻ {{t "waiting"}}{{else if eq .State "none"}}– {{t "none in four weeks"}}{{else}}? {{t "not set up"}}{{end}}</span></td>
 <td class="t">{{if .Last.IsZero}}–{{else}}{{t .LastWhat}} {{at $loc .Last}}{{with .LastID}} (<bdi>{{.}}</bdi>){{end}}{{end}}</td>
 <td class="n">{{if .Counts}}{{.N}}{{else}}–{{end}}</td>
-<td>{{t .About}}{{with .Where}}<br><span class="quiet where"><bdi>{{.}}</bdi></span>{{end}}{{with .Err}}<br><span class="status-bad"><span aria-hidden="true">✕</span> {{.}}</span>{{end}}</td></tr>{{end}}</tbody>
+<td>{{t .About}}{{with .Where}}<br><span class="quiet where"><bdi>{{.}}</bdi></span>{{end}}{{with .Err}}<br><span class="status-bad"><span aria-hidden="true">✕</span> {{.}}</span>{{end}}{{with .Data}}{{template "impactdata" (on $.P .)}}{{end}}</td></tr>{{end}}</tbody>
 </table></div>
 {{with .More}}<p class="quiet">{{t "and %d more" .}}</p>{{end}}
 <p class="quiet">{{t "What a tool's job copies in is told apart by its ids' prefix, as the recipes give them: PD- of PagerDuty, a Jira project's key of Jira."}} <a href="{{.Recipes}}">{{t "Copying incidents in from Jira, PagerDuty, incident.io and others"}}</a></p>
 {{end}}{{end}}
+
+{{/* Where the data of an impact criterion's selectors begins, and the one
+that holds the record back. */}}
+{{define "impactdata"}}{{$loc := .P.Loc}}{{with .V}}<ul class="plain impact-data">{{range .Selectors}}<li><code><bdi>{{shown .Sel}}</bdi></code>: {{if .First.IsZero}}{{t "no data since %s" (at $loc $.V.From)}}{{else if .AtStart}}{{t "data since %s or before" (at $loc .First)}}{{else}}{{t "data from %s" (at $loc .First)}}{{end}}</li>{{end}}</ul>
+{{with .Late}}<p class="quiet">{{tbdi "%s begins later than the others and holds the record back: an expression of its own for it would keep the weeks before." .}}</p>{{end}}{{end}}{{end}}

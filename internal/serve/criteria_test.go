@@ -114,8 +114,8 @@ func TestImpactSaveChecked(t *testing.T) {
 	}
 }
 
-// Saved, a new criterion keeps no record until it is read: the weeks the
-// one before kept aren't its. The replica that leads reads it again over
+// Saved, a new criterion leaves the record as the ledger holds it, by the
+// one before, until it is read again: the replica that leads reads it over
 // the weeks the runs replayed (the last four at most), once, its windows in
 // place of the one before's, and from then on the record is kept by it;
 // settings.yaml gives it as Helm values.
@@ -146,8 +146,8 @@ func TestImpactSavedReadAgain(t *testing.T) {
 	if code, body := askAs(t, h, http.MethodPost, "/settings/impact", url.Values{"impact": {"impact > 1"}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
 		t.Fatalf("%d %s", code, body)
 	}
-	if o, k := kept(); !o.ImpactFrom.IsZero() || k {
-		t.Errorf("saved, not read yet: kept by it from %s: %v", o.ImpactFrom, k)
+	if o, k := kept(); !o.ImpactFrom.Equal(began.Add(-time.Hour)) || !k {
+		t.Errorf("saved, not read yet: kept from %s: %v", o.ImpactFrom, k)
 	}
 	s.jobs(ctx, false)
 	if o, k := kept(); !o.ImpactFrom.Equal(began) || !k {
@@ -212,9 +212,10 @@ func TestImpactTry(t *testing.T) {
 	if code, _ := askAs(t, h, http.MethodGet, path, nil, "ana@example.com", "cross-site"); code != 400 {
 		t.Errorf("from another site: %d", code)
 	}
-	asked := s.h.(*history).asked
+	asked, counted := s.h.(*history).asked, s.h.(*history).exprs["count(impact)"]
 	code, body := askAs(t, h, http.MethodGet, path, nil, "ana@example.com", "same-origin")
-	if code != 200 || s.h.(*history).asked != asked+1 {
+	// The expression, and where its one selector's data begins.
+	if code != 200 || s.h.(*history).asked != asked+2 || s.h.(*history).exprs["count(impact)"] != counted+1 {
 		t.Fatalf("%d, %d reads\n%s", code, s.h.(*history).asked-asked, body)
 	}
 	for _, want := range []string{"3 windows found; 2 of them would count", "no: written down as INC-1", "service=cart",

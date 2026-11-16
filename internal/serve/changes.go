@@ -560,6 +560,10 @@ type evidence struct {
 	// (versionOf), shown beside it, and nothing more.
 	Semantics int    `json:"semantics,omitempty"`
 	Version   string `json:"version,omitempty"`
+	// Impact is the impact criterion whose windows its backtest was judged
+	// against (ledger.ImpactKept.Criterion), "" for none: read again with
+	// another since, it is stale (staleImpact).
+	Impact string `json:"impact_criterion,omitempty"`
 }
 
 // backtest is a change replayed, as it is and as proposed.
@@ -765,6 +769,9 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 	ev := evidence{From: q.From, Incident: q.Incident, Reason: q.Reason, Version: s.versionOf()}
 	if q.Kind == ledger.KindFor || q.Kind == ledger.KindThreshold {
 		ev.Semantics = semantics
+		if ev.Impact, err = s.impactHeld(ctx); err != nil {
+			return 0, err
+		}
 	}
 	var b rules.Bound
 	switch q.Kind {
