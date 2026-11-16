@@ -13,9 +13,9 @@
    alone (a badge, a pill, a notice's left line and wash, a cell, a word,
    a sign), never a row or a card, and always beside a word or a sign
    (docs/design/ui.md, "Status colours"). Each text colour is 4.5:1 or more
-   on its wash, the card, the background and the panel, ink 4.5:1 on each
-   wash, and each line 3:1 on the card, the background and its wash
-   (a11y_test.go).
+   on its wash, the card, the background and the panel; ink, dim and the
+   accent (a link in a notice) 4.5:1 on each wash; each line, and a link's
+   underline, 3:1 on the card, the background and its wash (a11y_test.go).
 
    The type is Heebo, as in Argo CD's UI: its Latin, served from here (SIL
    Open Font License 1.1, OFL-Heebo.txt); Korean falls back to the
@@ -39,7 +39,7 @@
   --tint-blue: #e6eef8; --on-blue: #24589a;
   --ok: #1b6a4c; --ok-wash: #e3f1e9; --ok-line: #3f9068;
   --warn: #8a5a00; --warn-wash: #f8eed5; --warn-line: #ad7f22;
-  --bad: #a3271b; --bad-wash: #f8e3df; --bad-line: #c65b4f;
+  --bad: #a3271b; --bad-wash: #fbebe8; --bad-line: #c65b4f;
   --info: var(--on-blue); --info-wash: var(--tint-blue); --info-line: #6389be;
   --unknown: var(--dim); --unknown-wash: var(--panel); --unknown-line: var(--line-ui);
   --shadow: 0 1px 2px #2929290a, 0 6px 20px #2929290a;
@@ -220,11 +220,13 @@ table.weeks td.t .d { white-space: nowrap; }
    under 3:1, so every chart has a legend with icons and the table below
    it. The incidents' fills, caught, only noisy rules and missed, are the
    status kinds' hues as chart fills, in light and dark: 3:1 or more on the
-   card, and ΔE 8 or more apart under protanopia and deuteranopia; always
-   with an icon and a label. Better and worse are ok and bad. */
+   card, and each pair of them 8 or more apart (ΔE in OKLab, ×100) under
+   protanopia and deuteranopia, caught and missed by lightness as well as
+   hue (TestChartFillsApart); always with an icon and a label. Better and
+   worse are ok and bad. */
 :root {
   --viz-caught: #2a6db3; --viz-nothing: #8d897c; --viz-ui: #eb6834;
-  --viz-good: #17885f; --viz-warn: #ad8a0a; --viz-bad: #d43f58;
+  --viz-good: #198f68; --viz-warn: #ae8809; --viz-bad: #bc1523;
   --viz-grid: #e6e5dd; --viz-base: #c3c2b7; --viz-muted: #6a6a65;
   --better: var(--ok); --worse: var(--bad);
   --h0: #eeede6; --h1: #d9d1f0; --h2: #bbaae6; --h3: #9682cf; --h4: #6f59b0; --h5: #4a3888;
@@ -232,7 +234,7 @@ table.weeks td.t .d { white-space: nowrap; }
 @media (prefers-color-scheme: dark) {
   :root {
     --viz-caught: #4f8fd6; --viz-nothing: #706c62; --viz-ui: #d95926;
-    --viz-good: #2c9a6e; --viz-warn: #b98c1c; --viz-bad: #de5076;
+    --viz-good: #2bab81; --viz-warn: #c38822; --viz-bad: #d14747;
     --viz-grid: #353533; --viz-base: #454542; --viz-muted: #acada8;
     --h0: #323231; --h1: #3b3360; --h2: #54468c; --h3: #7766bb; --h4: #a191dc; --h5: #d0c5f5;
   }

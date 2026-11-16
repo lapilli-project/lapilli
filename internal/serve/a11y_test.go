@@ -587,10 +587,11 @@ func squashed(s string) string { return strings.Join(strings.Fields(s), " ") }
 // Text is 4.5:1 or more on each surface it sits on, and what shows a
 // control or where the focus is, 3:1, in light and in dark; and each status
 // kind (docs/design/ui.md, "Status colours"): its text on its wash, the
-// card, the background and the panel, ink on its wash (a notice's), 4.5:1;
-// its line, a badge's edge and a notice's left, 3:1 on the card, the
-// background and its wash; and the incidents chart's fills of the kinds,
-// 3:1 on the card.
+// card, the background and the panel, and ink, dim and the accent (a
+// notice's words, quiet words and links in it) on its wash, 4.5:1; its
+// line, a badge's edge and a notice's left, and a link's underline on its
+// wash, 3:1 on the card, the background and its wash; and the incidents
+// chart's fills of the kinds, 3:1 on the card.
 func TestContrast(t *testing.T) {
 	b, err := files.ReadFile("static/lapilli.css")
 	if err != nil {
@@ -614,8 +615,11 @@ func TestContrast(t *testing.T) {
 	}
 	for _, k := range statusKindNames {
 		texts[k] = []string{k + "-wash", "bg", "card", "panel"}
-		texts["ink"] = append(texts["ink"], k+"-wash")
+		for _, on := range []string{"ink", "dim", "accent"} {
+			texts[on] = append(texts[on], k+"-wash")
+		}
 		ui[k+"-line"] = []string{"bg", "card", k + "-wash"}
+		ui["line-ui"] = append(ui["line-ui"], k+"-wash")
 	}
 	for mode, tokens := range map[string]map[string]string{"light": light, "dark": dark} {
 		for least, pairs := range map[float64]map[string][]string{4.5: texts, 3: ui} {
