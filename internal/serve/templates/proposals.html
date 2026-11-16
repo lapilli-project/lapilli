@@ -16,7 +16,7 @@
 <td class="t">{{at .Loc .Made}}<br><span class="quiet">{{who .MadeBy}}</span></td></tr>{{end}}</tbody>
 </table></div>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}{{end}}
 
-{{define "proposals"}}{{$title := t "Change requests"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
+{{define "proposals"}}{{$title := t "Proposals"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
 <div class="head"><h1>{{$title}}</h1><p class="of">{{if eq .Total 1}}{{t "%d of 1 proposal" .Shown}}{{else}}{{t "%d of %d proposals" .Shown .Total}}{{end}}</p></div>
 <p class="lede">{{t "Changes to the rules Lapilli or a person proposed, each with its backtest. Nothing is changed until a person approves it here: then it is checked again, and opened as a pull request where the rule is kept, or applied through Grafana's, a ruler's or a cloud's API, with what it replaces kept for undo."}}</p>
 {{template "changesoff" .}}

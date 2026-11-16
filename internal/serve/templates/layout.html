@@ -19,7 +19,7 @@
 </header>
 <div class="page">
 {{if or .Status.ChangesPaused .Status.Doing .Status.Err}}<section class="statuses" aria-label="{{t "Status"}}">
-{{if .Status.ChangesPaused}}<p class="status notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "Changes to the rules are paused: nothing is applied or handed to a recipe."}} <a href="{{.Link "/proposals"}}">{{t "Change requests"}}</a></p>{{end}}
+{{if .Status.ChangesPaused}}<p class="status notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "Changes to the rules are paused: nothing is applied or handed to a recipe."}} <a href="{{.Link "/proposals"}}">{{t "Proposals"}}</a></p>{{end}}
 {{with .Status}}{{if .Doing}}<p class="status notice status-info"><span class="sign" aria-hidden="true">↻</span> {{.Doing}}{{if .Judged}}: {{.Judged}}%{{end}}</p>{{end}}{{if .Err}}<p class="status notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{.Err}}</p>{{end}}{{end}}
 </section>{{end}}
 <main id="main">

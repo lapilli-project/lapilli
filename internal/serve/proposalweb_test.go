@@ -43,7 +43,7 @@ func TestProposalPage(t *testing.T) {
 	for _, want := range []string{
 		`<h1>#` + itoa(id) + ` <bdi>Errors</bdi>&#39;s for, <bdi>2m</bdi> → <bdi>15m</bdi></h1>`,
 		`<title>#` + itoa(id) + ` Errors&#39;s for, 2m → 15m · Lapilli</title>`,
-		`<li>Improve</li><li><a href="/proposals">Change requests</a></li><li><span aria-current="page"><bdi>#` + itoa(id) + `</bdi></span></li>`,
+		`<li>Improve</li><li><a href="/proposals">Proposals</a></li><li><span aria-current="page"><bdi>#` + itoa(id) + `</bdi></span></li>`,
 		`<span class="badge st-wait status-warn"><span aria-hidden="true">◷</span> awaiting approval</span>`,
 		`made by bo@example.com`, `a pull request`,
 		// The diff, unified, its lines alone.

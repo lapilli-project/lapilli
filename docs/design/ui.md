@@ -200,23 +200,25 @@ The pages are in four groups, each named, not a link:
 | Group | Pages |
 |---|---|
 | Monitoring | Overview `/`, Rules `/rules`, Incidents `/incidents`, Alert history `/firings` |
-| Improve | Tasks `/tasks`, Change requests `/proposals`, Quiet windows `/windows` |
+| Improve | Tasks `/tasks`, Proposals `/proposals`, Quiet windows `/windows` |
 | Reporting | Reports `/reports`, Impact `/outcomes` |
 | Administration | Teams `/teams`, Roles `/roles`, Settings `/settings`, Run history `/runs`, Cleanup `/orphans` |
 
 Groups and pages are named by nouns, what they hold, as Argo CD's and
 Grafana's sidebars are. They were verbs (See, Fix, Report, Manage) and
-coined words (Firings, Proposals, Outcomes, Runs, Orphans), which read as
-a list of commands. The reports' group is Reporting in English, so that
+coined words (Firings, Outcomes, Runs, Orphans), which read as a list of
+commands. Proposals keeps its name: everything on its page and beside it
+says proposal (a rule's Proposals tab, its "Proposed" badge, "%d of %d
+proposals"), and a page called otherwise read worse beside them than the
+word itself. The reports' group is Reporting in English, so that
 its page isn't "Reports › Reports"; the other languages name both alike
 (리포트, レポート, Informes), and the group's name isn't a link. A page is
 called what the sidebar calls it: its `<h1>` and `<title>` start with that
 name, and its breadcrumb is that name (`TestPageNamedAsInTheSidebar`), but
 the overview, headed by what it shows. So is what names a page elsewhere:
-the paused banner's and Settings' link to Change requests, the link to
-the proposals a bulk action made, a cloud alarm's link to Run history, the
-failed digest's "the Run history page says why", the overview's Impact
-card and the Administration page's cards. What a page holds keeps its
+a cloud alarm's link to Run history, the failed digest's "the Run history
+page says why", the overview's Impact card and the Administration page's
+cards. What a page holds keeps its
 own words: a proposal, a firing, a run, the Runs tile on Impact, a rule's
 Firings and Proposals tabs. The URLs, the API and MCP are as they were.
 
@@ -227,7 +229,6 @@ Firings and Proposals tabs. The URLs, the API and MCP are as they were.
 | group | Reporting | 리포트 | レポート | Informes |
 | group, `/manage` | Administration | 관리 | 管理 | Administración |
 | `/firings` | Alert history | 알림 이력 | アラート履歴 | Historial de alertas |
-| `/proposals` | Change requests | 변경 요청 | 変更リクエスト | Solicitudes de cambio |
 | `/outcomes` | Impact | 개선 효과 | 改善効果 | Impacto |
 | `/runs` | Run history | 실행 이력 | 実行履歴 | Historial de ejecuciones |
 | `/orphans` | Cleanup | 정리 대상 | 整理対象 | Limpieza |
@@ -235,7 +236,7 @@ Firings and Proposals tabs. The URLs, the API and MCP are as they were.
 Roles is listed for admins, who alone may open it. A group's name isn't a
 link, but Administration's, which goes to `/manage`, the page of its own
 (below), `aria-current` there. Tasks has the open
-tasks beside it, and Change requests those waiting for an approval, each the
+tasks beside it, and Proposals those waiting for an approval, each the
 team's in effect (picked, or the reader's own), as their lists have them,
 or all teams': two counts the ledger gives once each time it changes
 (`Server.waiting`: the open tasks by team, the proposals waiting by
@@ -258,7 +259,7 @@ The skip link is first, as before.
 
 An error page (403, 404, 414, 500, 503), and the page after signing out, are
 shown to whoever asked, a stranger refused too. They are the frame alone:
-no count beside Tasks or Change requests, no team or period on any link, no
+no count beside Tasks or Proposals, no team or period on any link, no
 reader's own team, and no status line or version (a failed run's error
 can name a host inside), so that a stranger reads nothing of the ledger
 or of the server from them, nor whether the team the URL names is there

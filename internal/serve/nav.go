@@ -45,7 +45,7 @@ var crumbsOf = map[string]crumbOf{
 	"incidents": {"Monitoring", "Incidents", "/incidents", false}, "incident": {"Monitoring", "Incidents", "/incidents", true},
 	"firings": {"Monitoring", "Alert history", "/firings", false},
 	"tasks":   {"Improve", "Tasks", "/tasks", false}, "task": {"Improve", "Tasks", "/tasks", true},
-	"proposals": {"Improve", "Change requests", "/proposals", false}, "proposal": {"Improve", "Change requests", "/proposals", true},
+	"proposals": {"Improve", "Proposals", "/proposals", false}, "proposal": {"Improve", "Proposals", "/proposals", true},
 	"windows": {"Improve", "Quiet windows", "/windows", false}, "window": {"Improve", "Quiet windows", "/windows", true},
 	"reports": {"Reporting", "Reports", "/reports", false}, "report": {"Reporting", "Reports", "/reports", true},
 	"outcomes": {"Reporting", "Impact", "/outcomes", false},
@@ -83,7 +83,7 @@ var navLayout = []struct {
 	items    []struct{ page, href, name string }
 }{
 	{"see", "Monitoring", []struct{ page, href, name string }{{"overview", "/", "Overview"}, {"rules", "/rules", "Rules"}, {"incidents", "/incidents", "Incidents"}, {"firings", "/firings", "Alert history"}}},
-	{"fix", "Improve", []struct{ page, href, name string }{{"tasks", "/tasks", "Tasks"}, {"proposals", "/proposals", "Change requests"}, {"windows", "/windows", "Quiet windows"}}},
+	{"fix", "Improve", []struct{ page, href, name string }{{"tasks", "/tasks", "Tasks"}, {"proposals", "/proposals", "Proposals"}, {"windows", "/windows", "Quiet windows"}}},
 	{"report", "Reporting", []struct{ page, href, name string }{{"reports", "/reports", "Reports"}, {"outcomes", "/outcomes", "Impact"}}},
 	{"manage", "Administration", []struct{ page, href, name string }{{"teams", "/teams", "Teams"}, {"roles", "/roles", "Roles"}, {"settings", "/settings", "Settings"}, {"runs", "/runs", "Run history"}, {"orphans", "/orphans", "Cleanup"}}},
 }

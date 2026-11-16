@@ -1246,7 +1246,7 @@ Grafana dashboard of them.
 
 The pages are in a sidebar of four groups, named as a console names them
 (Monitoring: Overview, Rules, Incidents, Alert history; Improve: Tasks,
-Change requests, Quiet windows; Reporting: Reports, Impact;
+Proposals, Quiet windows; Reporting: Reports, Impact;
 Administration: Teams, Roles, Settings, Run history, Cleanup), a
 menu on a narrow screen, each with a breadcrumb and a bar to pick the team
 and the period, which every link carries; a reader who edits one team sees
@@ -1877,8 +1877,7 @@ written as where the rule is kept expects it, and its evidence: the change
 backtested over the twelve weeks to now (firings, incidents caught, lost or
 caught later), or, for retiring, what the rule did, with the caveat that a
 rule may wait for a rare incident. People propose from a rule's page too,
-and agents over MCP. Proposals are on Change requests (`/proposals`), on
-each rule's page,
+and agents over MCP. Proposals are on `/proposals`, on each rule's page,
 and marked on the rules list; one can be made into a task. A rule has one
 proposal waiting at a time, and a person, with their agents, makes twenty
 an hour at most.
