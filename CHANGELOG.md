@@ -21,7 +21,7 @@
   and ten, and the one of five is what a rule would have had to catch.
 - **Impact shorter than the rules fire on, said.** With `--impact`, when
   rules judged need their condition to hold longer than `--impact-for` (their
-  `for` and one evaluation), the report says how many, and what
+  `for` and one evaluation; with no `for`, an evaluation), the report says how many, and what
   `--impact-for` they can catch (`impact_short`). The default `--impact-for
   5m` counts, as incidents, bursts a rule with `for: 5m` evaluated every
   minute can't catch: they read as missed. Nothing is judged otherwise.

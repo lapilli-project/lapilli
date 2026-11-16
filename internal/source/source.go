@@ -507,11 +507,16 @@ func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdic
 		return nil, true
 	}
 	// Each is a replay of the whole period again: as many at once as the
-	// replays were. What each would do is judged after, one at a time, in
-	// the order of the rules: excuse may keep a map of its own, as the
-	// ledger's does, that it writes.
+	// replays were. What each would do is judged here, one at a time, in
+	// the order of the rules, as soon as it and those before it are in, and
+	// let go: excuse may keep a map of its own, as the ledger's does, that
+	// it writes, and only so many replays are held at once.
 	st := replay.Begin(ctx, `a longer "for" for the noisy rules`, "rules", len(tries), false)
 	alts := make([]map[time.Duration][]firing.Firing, len(tries))
+	ready := make([]chan struct{}, len(tries))
+	for n := range ready {
+		ready[n] = make(chan struct{})
+	}
 	work := make(chan int)
 	var wg sync.WaitGroup
 	for range max(1, parallel) {
@@ -522,29 +527,45 @@ func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdic
 					alts[n] = a
 				}
 				st.Did(1)
+				close(ready[n])
 			}
 		})
 	}
-	sent := 0
-	for n := range tries {
-		if ctx.Err() != nil {
-			break
+	// Those not sent, the time run out, are ready with nothing.
+	go func() {
+		n := 0
+		for ; n < len(tries) && ctx.Err() == nil; n++ {
+			select {
+			case work <- n:
+			case <-ctx.Done():
+			}
+			if ctx.Err() != nil {
+				break
+			}
 		}
-		work <- n
-		sent++
-	}
-	close(work)
-	wg.Wait()
+		close(work)
+		wg.Wait()
+		for ; n < len(tries); n++ {
+			select {
+			case <-ready[n]:
+			default:
+				close(ready[n])
+			}
+		}
+	}()
 	var out []verdict.Suggestion
-	done = sent == len(tries)
+	done = true
 	for n, t := range tries {
-		if alts[n] == nil {
+		<-ready[n]
+		a := alts[n]
+		alts[n] = nil
+		if a == nil {
 			done = false
 			continue
 		}
 		caught := caughtBy(rep, t.rr.Rule)
 		for _, d := range t.fors {
-			alt := verdict.Judge(nil, alts[n][d], incs, o)
+			alt := verdict.Judge(nil, a[d], incs, o)
 			after := verdict.RuleResult{Rule: t.rr.Rule}
 			if j := slices.IndexFunc(alt.Rules, func(r verdict.RuleResult) bool { return r.Rule == t.rr.Rule }); j >= 0 {
 				after = alt.Rules[j]

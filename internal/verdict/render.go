@@ -145,8 +145,8 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		}
 		if s := r.ImpactShort; short {
 			fmt.Fprintf(w, "! --impact-for %s counts impact that lasted %s as an incident, but %d of the %d rules judged fire only once\n"+
-				"  their condition held longer, for their \"for\" and one evaluation (%s for %d of them): impact shorter\n"+
-				"  than that they can't catch. --impact-for %s counts only what they can.\n",
+				"  their condition held longer: their \"for\" and one evaluation, with no \"for\" an evaluation (%s for %d\n"+
+				"  of them). Impact shorter than that they can't be sure to catch. --impact-for %s counts only what they can.\n",
 				Duration(s.For), Duration(s.For), s.Rules, s.Judged, Duration(s.Need), s.Most, Duration(s.Need))
 		}
 		if noisy > 0 {

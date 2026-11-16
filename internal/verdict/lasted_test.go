@@ -43,8 +43,8 @@ func TestLasted(t *testing.T) {
 			"  Of those --impact found over several series, each series' own window:\n" +
 			"  impact-1: service=cart 09:06–09:11 (5m); service=batch 09:06–09:16 (10m)\n",
 		"! --impact-for 5m counts impact that lasted 5m as an incident, but 3 of the 10 rules judged fire only once\n" +
-			"  their condition held longer, for their \"for\" and one evaluation (6m for 2 of them): impact shorter\n" +
-			"  than that they can't catch. --impact-for 6m counts only what they can.\n",
+			"  their condition held longer: their \"for\" and one evaluation, with no \"for\" an evaluation (6m for 2\n" +
+			"  of them). Impact shorter than that they can't be sure to catch. --impact-for 6m counts only what they can.\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("lacks %q:\n%s", want, out)

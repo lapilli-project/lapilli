@@ -216,8 +216,8 @@ type IncidentResult struct {
 
 // ImpactShort is of the rules judged, those that fire only once their
 // condition held longer than --impact-for (For): Rules of Judged, Need the
-// most common of how long they need, their "for" and one evaluation, and
-// Most how many need that. An incident found by --impact as short as For
+// most common of how long they need, their "for" and one evaluation (with
+// no "for", an evaluation), and Most how many need that. An incident found by --impact as short as For
 // can't be caught by them: shown, it is still judged as any other.
 type ImpactShort struct {
 	For    time.Duration `json:"impact_for"`

@@ -178,9 +178,10 @@ Impact as short as `--impact-for` can be shorter than a rule fires on: a
 rule with `for: 5m` evaluated every minute fires once its condition held for
 six minutes, so a burst of errors under a minute, which `rate(...[5m])` shows
 for exactly five, reads as an incident it missed. When some rules judged
-can't fire on impact as short as `--impact-for`, the report says how many,
-and what `--impact-for` they can catch (`impact_short` in `--json`); the
-incidents are judged as any others.
+can't fire on impact as short as `--impact-for` (their `for` and one
+evaluation; with no `for`, as long as their evaluations are apart), the
+report says how many, and what `--impact-for` they can catch
+(`impact_short` in `--json`); the incidents are judged as any others.
 
 **A firing catches an incident** when it starts between `--lead` (15m) before
 the incident and its end, and agrees with it on any `--match` labels both
