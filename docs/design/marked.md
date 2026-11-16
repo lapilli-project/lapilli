@@ -205,8 +205,9 @@ and judged in neither ([serve.md](serve.md), "No record").
   `lapilli_rule_caught_marked{kind}` over the last seven days, with a rule's
   labels as the rule metrics have them, a series only for a rule and kind
   with firings; `lapilli_marked_on{kind}`, 1 while a window of the kind is
-  on, for a dashboard to shade by; `lapilli_serve_marked_read_timestamp_seconds`,
-  when the file was last read.
+  on, for a dashboard to shade by; and
+  `lapilli_serve_marked_read_timestamp_seconds`, when the file was last
+  read.
 - **MCP**: `firings` gives each firing's kinds, `summary` the `marked` field,
   `overview` the tile.
 - **Notices**: `marked.kept` when a window is kept in the UI, as
