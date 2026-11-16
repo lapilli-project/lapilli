@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/csv"
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,10 +19,13 @@ import (
 // numbersReport writes a report of neutral firings and incidents, as
 // lapilli verdict --json writes it: a rule that re-fires (once at --refire
 // to the second), a catch at --lead to the second, firings with no
-// incident in the two weeks before them, one before the period still on,
-// one still firing, a noisy rule whose catch is an incident's only one, a
-// missed incident, an incident written in another offset, and one that
-// keeps the record from before the period.
+// incident in the two weeks before them, and one two weeks to the second
+// after one ended, judged, one before the period still on, one still
+// firing, a noisy rule whose catch is an incident's only one, a rule at
+// --noisy-precision to the firing (2 of 10), not noisy, whose catch keeps
+// an incident from being only a noisy rule's, a missed incident, an
+// incident written in another offset, and one that keeps the record from
+// before the period.
 func numbersReport(t *testing.T, format string) string {
 	t.Helper()
 	incidents := write(t, "incidents.yaml", `incidents:
@@ -29,6 +34,7 @@ func numbersReport(t *testing.T, format string) string {
   - {id: INC-3, title: Search down, start: 2026-10-22T14:00:00Z, labels: {service: search}}
   - {id: INC-4, title: Payments queue stuck, start: 2026-10-25T03:00:00Z, end: 2026-10-25T03:30:00Z, labels: {service: payments}}
   - {id: INC-5, title: Checkout errors again, start: 2026-10-28T12:00:00Z, end: 2026-10-28T12:20:00Z, labels: {service: checkout}}
+  - {id: INC-6, title: Search slow, start: 2026-10-23T12:05:00Z, end: 2026-10-23T12:30:00Z, labels: {service: search}}
 `)
 	var fs strings.Builder
 	line := func(rule, labels, start, end string) {
@@ -41,6 +47,10 @@ func numbersReport(t *testing.T, format string) string {
 	co := `{"service":"checkout","severity":"critical"}`
 	line("CheckoutErrors", co, "2026-09-30T23:50:00Z", "2026-10-01T00:10:00Z")
 	line("CheckoutErrors", co, "2026-10-02T10:00:00Z", "2026-10-02T10:20:00Z")
+	// INC-1 ended two weeks before, to the second: judged. Thirty seconds
+	// later, no record.
+	line("CheckoutErrors", co, "2026-10-09T11:00:00Z", "2026-10-09T11:00:20Z")
+	line("CheckoutLatency", `{"service":"checkout","severity":"warning"}`, "2026-10-09T11:00:30Z", "2026-10-09T11:05:00Z")
 	line("CheckoutErrors", co, "2026-10-15T08:00:00Z", "2026-10-15T08:10:00Z")
 	line("CheckoutErrors", co, "2026-10-15T08:30:00Z", "2026-10-15T08:40:00Z")
 	line("CheckoutErrors", co, "2026-10-15T09:40:00Z", "2026-10-15T09:50:00Z") // re-fired, at --refire to the second
@@ -55,6 +65,14 @@ func numbersReport(t *testing.T, format string) string {
 		line("NodeFlap", node, "2026-10-"+h+":00:00Z", "2026-10-"+h+":10:00Z")
 	}
 	line("NodeFlap", node, "2026-10-22T13:50:00Z", "2026-10-22T14:05:00Z")
+	// 2 of 10 caught something, at --noisy-precision: not noisy, so INC-3
+	// is caught, not only by a noisy rule's catch.
+	search := `{"service":"search","severity":"warning"}`
+	line("QueueDepth", search, "2026-10-22T13:45:00Z", "2026-10-22T13:46:00Z")
+	line("QueueDepth", search, "2026-10-22T14:50:00Z", "2026-10-22T14:55:00Z")
+	for _, h := range []string{"24T00", "24T06", "24T12", "24T18", "25T00", "25T06", "25T12", "25T18"} {
+		line("QueueDepth", search, "2026-10-"+h+":00:00Z", "2026-10-"+h+":10:00Z")
+	}
 	pay := `{"service":"payments","severity":"critical"}`
 	line("DiskSoon", pay, "2026-10-25T05:00:00Z", "2026-10-25T05:10:00Z")
 	line("DiskSoon", pay, "2026-10-31T23:00:00Z", "")
@@ -148,6 +166,49 @@ func TestNumbersRecount(t *testing.T) {
 	if compared < 10 {
 		t.Errorf("%d numbers counted again, want 10 or more: does docs/numbers.md still mark its jq?", compared)
 	}
+	// What the metrics and the text say of the incidents, as counted again:
+	// caught, caught only by noisy rules, missed, and each one's delay.
+	var missed struct {
+		Missed    []string `json:"missed"`
+		OnlyNoisy []string `json:"only_noisy"`
+	}
+	var leads []struct {
+		ID   string   `json:"id"`
+		Lead *float64 `json:"lead_seconds"`
+	}
+	for _, r := range rs {
+		switch {
+		case r.name == "missed" && r.as == "counted again":
+			json.Unmarshal([]byte(jq(t, r.prog, report)), &missed)
+		case r.name == "lead" && r.as == "counted again":
+			json.Unmarshal([]byte(jq(t, r.prog, report)), &leads)
+		}
+	}
+	if len(missed.Missed) == 0 || len(missed.OnlyNoisy) == 0 || len(leads) != 5 {
+		t.Fatalf("counted again: %+v, %d leads", missed, len(leads))
+	}
+	metrics := numbersReport(t, "--metrics")
+	for state, n := range map[string]int{"caught": len(leads) - len(missed.Missed) - len(missed.OnlyNoisy), "noisy_only": len(missed.OnlyNoisy), "missed": len(missed.Missed)} {
+		if want := fmt.Sprintf(`lapilli_incidents{state="%s",source="written"} %d`, state, n); !strings.Contains(metrics, want+"\n") {
+			t.Errorf("--metrics: no %s", want)
+		}
+	}
+	for _, l := range leads {
+		want := fmt.Sprintf(`lapilli_incident_detection_delay_seconds{incident="%s"}`, l.ID)
+		switch {
+		case l.Lead == nil && strings.Contains(metrics, want):
+			t.Errorf("--metrics: %s, which nothing that isn't noisy caught", want)
+		case l.Lead != nil && !strings.Contains(metrics, fmt.Sprintf("%s %g\n", want, -*l.Lead)):
+			t.Errorf("--metrics: no %s %g", want, -*l.Lead)
+		}
+	}
+	text := numbersReport(t, "--progress=false")
+	for _, want := range []string{fmt.Sprintf("✗ %d of %d incidents had no alert.", len(missed.Missed), len(leads)),
+		fmt.Sprintf("! %d of %d incidents were caught only by noisy rules", len(missed.OnlyNoisy), len(leads))} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the text: no %q", want)
+		}
+	}
 	// Without the incident before the period, the firings early in it have
 	// no record: the count needs it, as the document says.
 	for _, r := range rs {
@@ -169,8 +230,8 @@ func TestVerdictCSV(t *testing.T) {
 	if !slices.Equal(rows[0], verdict.CSVColumns) {
 		t.Fatalf("columns %q", rows[0])
 	}
-	if len(rows) != 26 {
-		t.Fatalf("%d rows, want the 25 firings and the header", len(rows))
+	if len(rows) != 38 {
+		t.Fatalf("%d rows, want the 37 firings and the header", len(rows))
 	}
 	count := map[string]int{}
 	for _, row := range rows[1:] {
@@ -182,12 +243,12 @@ func TestVerdictCSV(t *testing.T) {
 			count["refired"]++
 		}
 	}
-	if count["white"] != 5 || count["black"] != 20 || count["no_record"] != 3 || count["refired"] != 2 {
+	if count["white"] != 8 || count["black"] != 29 || count["no_record"] != 4 || count["refired"] != 2 {
 		t.Errorf("counts %v", count)
 	}
 	// The one still firing has no end; one before the period is first.
-	if rows[1][4] != "2026-09-30T23:50:00Z" || rows[25][5] != "" || rows[1][3] != `{"service":"checkout","severity":"critical"}` {
-		t.Errorf("rows %q ... %q", rows[1], rows[25])
+	if rows[1][4] != "2026-09-30T23:50:00Z" || rows[37][5] != "" || rows[1][3] != `{"service":"checkout","severity":"critical"}` {
+		t.Errorf("rows %q ... %q", rows[1], rows[37])
 	}
 	for args, want := range map[string]string{
 		"--firings f --incidents i --json":               "--csv doesn't go with --json",

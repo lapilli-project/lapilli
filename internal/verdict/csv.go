@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // CSVColumns are the columns of a report's firings as CSV, in this order.
@@ -19,10 +21,10 @@ var CSVColumns = []string{"rule", "severity", "team", "labels", "start", "end", 
 // out, among them by when they started. teamOf, when not nil, names the
 // team that owns a rule.
 //
-// A rule's name, a severity and a team come from whoever wrote them, and a
-// spreadsheet takes a cell that starts with =, +, - or @ for a formula: such
-// a cell is written with ' before it (Cell). Labels and incidents are JSON,
-// which starts with { or [.
+// A rule's name, a severity, a team, labels and incident ids come from
+// whoever wrote them: each is written as Cell writes it, in a cell of its
+// own or in the JSON of labels and incidents, whose cell starts with { or
+// [.
 func CSV(w io.Writer, r *Report, excused []Judged, teamOf func(rule string) string) error {
 	severity := map[string]string{}
 	for _, rr := range r.Rules {
@@ -59,16 +61,18 @@ func CSV(w io.Writer, r *Report, excused []Judged, teamOf func(rule string) stri
 		if !j.End.IsZero() {
 			end = csvTime(j.End)
 		}
-		incidents := j.Incidents
-		if incidents == nil {
-			incidents = []string{}
+		incidents := []string{}
+		for _, id := range j.Incidents {
+			incidents = append(incidents, Clean(id))
 		}
-		labels := j.Labels
-		if labels == nil {
-			labels = map[string]string{}
+		labels := map[string]string{}
+		for k, v := range j.Labels {
+			labels[Clean(k)] = Clean(v)
 		}
+		// An excused firing is in none of the numbers: it re-fired for none.
+		refired := j.Refired && !j.Excused
 		row := []string{Cell(j.Rule), Cell(severity[j.Rule]), Cell(team), csvJSON(labels), csvTime(j.Start), end, stone,
-			csvBool(j.NoRecord && !j.Excused), csvJSON(incidents), csvBool(j.Refired), csvBool(j.DuringDeploy), csvBool(j.Excused)}
+			csvBool(j.NoRecord && !j.Excused), csvJSON(incidents), csvBool(refired), csvBool(j.DuringDeploy), csvBool(j.Excused)}
 		if err := cw.Write(row); err != nil {
 			return err
 		}
@@ -77,13 +81,18 @@ func CSV(w io.Writer, r *Report, excused []Judged, teamOf func(rule string) stri
 	return cw.Error()
 }
 
-// Cell is text for a cell of CSV that a spreadsheet won't take for a
-// formula: one that starts with =, +, -, @, a tab or a carriage return has
-// ' put before it, as OWASP advises. Take it off to read the text as it
-// was.
+// Cell is text for a cell of CSV as a person reads it and a spreadsheet
+// won't run: control and format characters (a line break, a tab, a bidi
+// override) written as \u{...}, as Clean writes them for a terminal; and
+// text whose first character past any spaces is =, +, - or @, or one of
+// their full-width forms, with ' put before it, as OWASP advises. Take it
+// off to read the text as it was.
 func Cell(s string) string {
-	if s != "" && strings.ContainsRune("=+-@\t\r", rune(s[0])) {
-		return "'" + s
+	s = Clean(s)
+	if t := strings.TrimLeftFunc(s, unicode.IsSpace); t != "" {
+		if r, _ := utf8.DecodeRuneInString(t); strings.ContainsRune("=+-@＝＋－＠", r) {
+			return "'" + s
+		}
 	}
 	return s
 }

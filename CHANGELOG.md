@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **CSV cells as a reader sees them.** `--csv` and `format=csv` wrote a
+  rule's name, a severity, a team, labels and incident ids as they came,
+  and put `'` only before a cell whose first byte was `=`, `+`, `-`, `@`,
+  a tab or a carriage return. A control or format character (a line
+  break, a tab, a bidirectional override) is now written as `\u{...}`, as
+  the text report writes it, in every cell and in the JSON of labels and
+  incidents; and `'` goes before a cell whose first character past any
+  spaces is `=`, `+`, `-` or `@`, or one of their full-width forms. An
+  excused firing's row says `refired` false, as it is in no rule's
+  `refired`.
+- **docs/numbers.md** says the CSV has no byte order mark, that a deploy
+  naming no label covers every firing, that `lapilli serve`'s re-fire can
+  follow a firing a quiet window excused, and that
+  `lapilli_rule_incidents_first` and `_alone` are left out with `--rule`.
+  `TestNumbersRecount` now holds the numbers at their edges: a rule at
+  `--noisy-precision` to the firing, a firing two weeks to the second
+  after an incident ended, an incident only a noisy rule caught, each set
+  beside `--metrics` and the text as well as the report.
+
 ## [0.52.0] - 2026-11-16
 
 ### Changed

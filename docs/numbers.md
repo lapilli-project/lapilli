@@ -245,7 +245,10 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
 `lapilli verdict` sees the firings of the period alone. `lapilli serve`
 marks a firing when it records it, against every firing it holds: one
 early in a period may have re-fired after one before it, which a count
-from the period's firings alone can't see.
+from the period's firings alone can't see; and the alert's last firing
+may be one a quiet window excused, which the report's firings leave out
+(the CSV of `lapilli serve` has it). An excused firing re-fires for
+nothing: it is in no rule's `refired`.
 
 `/api/v1/summary`'s `refired` is a week's: the firings that re-fired, and
 their share of the week's firings. Count it again from `/api/v1/report`
@@ -390,7 +393,8 @@ first(.rows[] | select(.team == "")) | .critical
 
 With `--deploys`, a firing came **during a deploy** when it started from
 `--deploy-before` before the deploy's start to `--deploy-after` after its
-end and agrees with the deploy on every label both have, one at least
+end and agrees with the deploy on every label both have, one at least;
+a deploy that names no label is everything's, every firing in its time
 (docs/design/noc.md). It is marked, not judged apart: it is in `firings`
 and `white` as any other, and also in the rule's `during_deploys`† and
 `during_deploys_caught`†. Precision without them leaves them out of both
@@ -423,16 +427,27 @@ row each, for a spreadsheet or a script:
 | `stone` | `white`, `black`, or empty for a firing a quiet window excused |
 | `no_record` | `true` for a black stone not judged (above) |
 | `incidents` | the ids of the incidents it caught, a JSON array |
-| `refired` | `true` when it re-fired |
+| `refired` | `true` when it re-fired; `false` for an excused firing, which is in no rule's `refired` |
 | `during_deploy` | `true` when it came during a deploy (`lapilli serve`) |
 | `excused` | `true` for a firing a quiet window excused (`lapilli serve`): in none of the numbers |
 
-The firings are in order of their start, then of their rule. A rule's
-name, a severity and a team come from whoever wrote them: a cell of them
-that starts with `=`, `+`, `-`, `@`, a tab or a carriage return is written
-with `'` before it, so a spreadsheet shows it rather than runs it. Take
-the `'` off to read the name as it is. Labels and incidents are JSON, and
-start with `{` or `[`.
+The firings are in order of their start, then of their rule. The file is
+UTF-8 with no byte order mark: open it in a spreadsheet as UTF-8 (Excel's
+Data, From Text/CSV), or a name in another script reads as other
+characters.
+
+A rule's name, a severity, a team, labels and incident ids come from
+whoever wrote them, and are written so a spreadsheet shows them rather
+than runs them, and a reader sees what is there:
+
+- a control or format character (a line break, a tab, a bidirectional
+  override) is written as `\u{...}`, as the text report writes it, in
+  every cell and in the JSON of labels and incidents;
+- a cell whose first character, past any spaces, is `=`, `+`, `-` or `@`,
+  or one of their full-width forms (`＝`, `＋`, `－`, `＠`), is written with
+  `'` before it. Take the `'` off to read the name as it is.
+
+Labels and incidents are JSON, and their cells start with `{` or `[`.
 
 ## What stays the same
 
@@ -522,7 +537,9 @@ it, which only `lapilli serve` says.
 | `lapilli_serve_incidents_passed_over` | |
 
 The first eleven are `--metrics`' too; the rest are `lapilli serve`'s
-alone.
+alone. `lapilli_rule_incidents_first` and `lapilli_rule_incidents_alone`
+are left out of a report of some of the rules (`--rule`), as what a rule
+adds to the others can't be said there.
 
 ### The CSV's columns
 
