@@ -265,8 +265,13 @@ func TestCatchUpHours(t *testing.T) {
 	}
 	at = day.Add(12 * time.Hour) // seven hours on: behind
 	s.jobs(ctx, true)
+	at = day.Add(13 * time.Hour) // and an hour later, held once
+	s.jobs(ctx, true)
 	if c, _ := s.l.Cursor(ctx); !c.Equal(day.Add(5 * time.Hour)) {
 		t.Errorf("a catch-up, outside the hours: cursor %s", c)
+	}
+	if runs, _ := s.l.Runs(ctx, 2); runs[0].Kind != heldKind || runs[1].Kind == heldKind {
+		t.Errorf("held twice for the same reason: %+v", runs)
 	}
 }
 

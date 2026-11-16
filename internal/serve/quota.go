@@ -88,7 +88,10 @@ func (s *Server) behind(cursor, now time.Time) bool {
 // in --yield-for); --guard returning anything, or unread.
 func (s *Server) waits(ctx context.Context, cursor, now time.Time) string {
 	if w := s.cfg.CatchUpHours; w != nil && s.behind(cursor, now) && !w.Has(s.now(), s.cfg.Loc) {
-		return fmt.Sprintf("a catch-up of %s waits for --catch-up-hours %s", shownDur(now.Sub(cursor)), w)
+		// How far behind is for the log: the reason stays the same each
+		// hour, so the run history keeps it once.
+		s.log.Info("a catch-up waits for --catch-up-hours", "behind", now.Sub(cursor).Round(time.Minute))
+		return fmt.Sprintf("a catch-up waits for --catch-up-hours %s", w)
 	}
 	if s.yield != nil {
 		if until := s.yield.Until("prometheus"); !until.IsZero() {
