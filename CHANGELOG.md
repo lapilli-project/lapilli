@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-11-16
+
 The web UI says what a state is at a glance: fine, needs a look, broken,
 under way, or not known. The calm palette stays as it was: the olive for
 what can be done, the blue and grey of what caught something and what
