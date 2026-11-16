@@ -111,11 +111,30 @@ too), none only in what really fired, and the error alerts of the rule
 whose query fails left out and said. Against the Loki one: 420 alike, the
 same 2 only in the replay and the 6 it couldn't see.
 
-The four recordings are kept as test data (`internal/source/testdata`,
-`grafana-*-history`), and `TestRealGrafanaHistory` reads them on every
-change through a fake Grafana that pages as the real one does: each
-firing the same as `GRAFANA_ALERTS`'s, starting and ending at the same
-evaluation, as in the table.
+### A second recording, of what the tags keep
+
+The review of the first build found the tags weren't the labels as they
+are (above), which the first recording, with no colon in a value nor a
+long one, hadn't shown. Two more Grafanas 12.4.14 ran from 10:00 UTC, one
+writing both and one on the default, with four rules every 10s: two
+instances with their ports (`10.0.0.1:9100`) and a rule label with a URL;
+two alerts told apart only by a path of 120 characters; a title with a
+colon (`Disk: padded`) and a value of spaces beside one with spaces
+round it; and nine labels of 60 characters beside a short one.
+
+| From 10:05 (10:09 for the replay) to 10:30 | Alike |
+|---|---|
+| The history beside `GRAFANA_ALERTS`, as Grafana writes tags (`TestRealGrafanaHistory`) | 75 of 75; 68 of 68 exactly; the path's rule unsure |
+| The same, the replay's side as `AnnotationLabels` gives it | 75 of 75 |
+| `verdict --check-replay`, the default Grafana's history | 62 of 62; the path's rule not checked |
+| The same, the first build, reading the tags as the labels | 31 of 78 (33%): the instances 0 of 17, the padded rule 0 of 22 and taken for an alert no rule is named, the path's rule 11 of 19; 29 changes passed over |
+| `verdict --check-replay`, the other Grafana, `multiple` | 82 of 82, from `GRAFANA_ALERTS`, read first |
+
+The five recordings are kept as test data (`internal/source/testdata`,
+`grafana-*`), and `TestRealGrafanaHistory` reads them on every change
+through a fake Grafana that pages as the real one does: each firing the
+same as `GRAFANA_ALERTS`'s, set beside the tags as Grafana writes them,
+starting and ending at the same evaluation, as in the tables.
 
 ## What was built
 
@@ -317,4 +336,6 @@ curl "$PROMETHEUS/api/v1/query_range" --data-urlencode 'query=GRAFANA_ALERTS{ale
 ```
 
 from 07:17:00 to 08:30:00 (the Loki one from 07:25:00), with the periods
-in `grafanahistory_real_test.go` set to what was recorded.
+in `grafanahistory_real_test.go` set to what was recorded. The second
+recording's rules are `internal/source/testdata/grafana-12.4.14-tags/rules.json`,
+recorded from 10:00:00 to 10:30:00.

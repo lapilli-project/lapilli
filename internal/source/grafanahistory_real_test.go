@@ -155,9 +155,8 @@ func (c realHistory) alerts(t *testing.T) []firing.Firing {
 	}
 	body := c.file(dir, "alerts.json.gz")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(body) }))
-	start := time.Date(2026, 11, 16, 7, 17, 0, 0, time.UTC) // as recorded
 	defer srv.Close()
-	ss, err := prom.New(srv.URL, "test").QueryRange(context.Background(), `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}`, start, c.to, 10*time.Second)
+	ss, err := prom.New(srv.URL, "test").QueryRange(context.Background(), `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}`, c.read, c.to, 10*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,6 +200,7 @@ func TestRealGrafanaHistory(t *testing.T) {
 				t.Fatalf("%+v %v", read, err)
 			}
 			alerts := c.alerts(t)
+			raw := slices.Clone(alerts)
 			unseen := 0
 			alerts = slices.DeleteFunc(alerts, func(f firing.Firing) bool {
 				all := !f.Start.After(c.read) && (f.End.IsZero() || f.End.After(c.to))
@@ -258,6 +258,22 @@ func TestRealGrafanaHistory(t *testing.T) {
 			} else {
 				t.Logf("%d of %d alike", check.Alike, check.Real)
 			}
+			if c.where != HistoryAnnotations {
+				return
+			}
+			// And as the check sets the replay beside annotations: its
+			// labels as AnnotationLabels gives them, the history's as they
+			// are, without what tags_length left out of them; every one
+			// alike still.
+			raw = slices.DeleteFunc(raw, func(f firing.Firing) bool {
+				return slices.Contains(c.unsure, AnnotationName(f.Rule)) || !f.Start.After(c.read) && (f.End.IsZero() || f.End.After(c.to))
+			})
+			for i := range raw {
+				raw[i].Rule, raw[i].Labels = AnnotationName(raw[i].Rule), AnnotationLabels(raw[i].Labels)
+			}
+			if again := verdict.CheckReplay(context.Background(), known, raw, fs, c.from, c.to, 10*time.Second); again.Alike != check.Alike || again.Alike != again.Real {
+				t.Errorf("as the check sets them: %d of %d alike, %d from the replay's side", again.Alike, again.Real, again.Replayed)
+			}
 		})
 	}
 }
@@ -277,5 +293,13 @@ var realHistories = func() []realHistory {
 		{dir: "grafana-12.4.14-default-history", alertsDir: "grafana-12.4.14-history", where: HistoryAnnotations, read: start, from: from, to: to, firings: 426},
 		{dir: "grafana-13.3.1-history", where: HistoryAnnotations, read: start, from: from, to: to, firings: 426},
 		{dir: "grafana-13.3.1-loki-history", alertsDir: "grafana-13.3.1-history", where: HistoryLoki, read: loki, from: from, to: to, firings: 420, unseen: 6},
+		// Recorded after the review, from 10:00:15 to 10:30, rules whose
+		// labels show what the tags keep of them: an instance's port, a
+		// URL, a title with a colon, a value of spaces, nine labels of 60
+		// characters, the eighth of them past tags_length; and two alerts
+		// told apart only by a path of 120 characters, which the tags leave
+		// out: one alert to the history, its changes crossing, unsure.
+		{dir: "grafana-12.4.14-tags", where: HistoryAnnotations, read: time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC),
+			from: time.Date(2026, 11, 16, 10, 5, 0, 0, time.UTC), to: time.Date(2026, 11, 16, 10, 30, 0, 0, time.UTC), firings: 68, unsure: []string{"Long label"}},
 	}
 }()
