@@ -115,6 +115,9 @@ type rulesList struct {
 	// Sum, the rules shown, all told.
 	Week string
 	Sum  ruleSum
+	// Kinds are the kinds of marked window, each with the list inside it
+	// and outside it (deploys, inside alone).
+	Kinds []kindLink
 	// FiredOn are, with a team picked, the rules of other teams, or of no
 	// team, most of whose firings in the last digest's week came from what
 	// it owns.
@@ -187,6 +190,13 @@ func legendOf() []legendGroup {
 	return out
 }
 
+// kindLink is a kind of marked window, as the rules list picks it: the
+// list during it, and outside it; In and Out, the one shown.
+type kindLink struct {
+	Kind, During, Outside string
+	In, Out               bool
+}
+
 // sortLink is an order of the list: the same page in it.
 type sortLink struct {
 	By, Href string
@@ -204,6 +214,9 @@ type rulesAsk struct {
 	words []qword
 	// week is the week asked for, its Monday's date, or "".
 	week string
+	// during and outside are the kind of marked window asked for, the
+	// counts inside it or outside it (docs/design/marked.md).
+	during, outside string
 }
 
 // url is the rules page for what was asked; what it doesn't take isn't
@@ -221,6 +234,12 @@ func (a rulesAsk) url() string {
 	}
 	if a.week != "" {
 		q.Set("week", a.week)
+	}
+	if a.during != "" {
+		q.Set("during", a.during)
+	}
+	if a.outside != "" {
+		q.Set("outside", a.outside)
 	}
 	for _, f := range facetsOf {
 		if vs := a.picks[f.param]; len(vs) > 0 {
@@ -441,6 +460,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		}
 	}
 	a := rulesAsk{c: c, sort: v.Sort, picks: picks{}, week: v.Week}
+	a.during, a.outside = markedAsked(asked)
 	for _, f := range facetsOf {
 		for _, x := range asked[f.param] {
 			if len(a.picks[f.param]) == maxValues {
@@ -469,7 +489,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	var tf textFilter
 	for _, t := range st.Words {
 		switch {
-		case t.Bad != "" || t.Key == "team" || t.Key == "severity" || t.Key == "is" || t.Key == "status" || t.Key == "has":
+		case t.Bad != "" || t.Key == "team" || t.Key == "severity" || t.Key == "is" || t.Key == "status" || t.Key == "has" || t.Key == "during" || t.Key == "outside":
 			// Understood tokens of these keys are parameters by now: what
 			// is left wasn't understood.
 			v.Bad = append(v.Bad, t.String())
@@ -578,6 +598,32 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		b := a
 		b.week = ""
 		v.Chips = append(v.Chips, chip{Group: "Week of", Value: a.week, Raw: true, Href: b.url()})
+	}
+	// A kind of marked window: the counts inside it, or outside; each kind
+	// a link to its, as a facet's options are.
+	if a.during != "" || a.outside != "" {
+		b := a
+		b.during, b.outside = "", ""
+		g := "During"
+		if a.outside != "" {
+			g = "Outside"
+		}
+		v.Chips = append(v.Chips, chip{Group: g, Value: a.during + a.outside, Raw: true, Href: b.url()})
+	}
+	kinds, err := s.l.MarkedKinds(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, k := range kinds {
+		b, o := a, a
+		b.during, b.outside = k, ""
+		o.during, o.outside = "", k
+		v.Kinds = append(v.Kinds, kindLink{Kind: k, During: b.url(), Outside: o.url(), In: a.during == k, Out: a.outside == k})
+	}
+	if v.Deploys && len(kinds) > 0 {
+		b := a
+		b.during, b.outside = "deploy", ""
+		v.Kinds = append(v.Kinds, kindLink{Kind: "deploy", During: b.url(), In: a.during == "deploy"})
 	}
 	for _, fc := range v.Facets {
 		for _, x := range p[fc.Param] {

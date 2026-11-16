@@ -65,7 +65,7 @@
 <h2>{{t "Latest firings"}}</h2>
 {{if .Latest}}<div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Stone"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col" class="n">{{t "Notified"}}</th><th scope="col">{{t "Labels"}}</th></tr></thead>
-<tbody>{{range .Latest}}<tr><td>{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else}}●{{end}}{{if .Refired}} {{t "refired"}}{{end}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="n">{{template "notified" .}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
+<tbody>{{range .Latest}}<tr><td>{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else}}●{{end}}{{if .Refired}} {{t "refired"}}{{end}}{{range .Kinds}} <span class="badge status-unknown"><bdi>{{.}}</bdi></span>{{end}}</td><td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td><td class="n">{{template "notified" .}}</td><td class="labels">{{.Labels}}</td></tr>{{end}}</tbody>
 </table></div>
 <p><a href="{{$.Link "/firings" "rule" .Name}}">{{t "All its firings, by day"}}</a></p>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 </section>
@@ -95,6 +95,11 @@
 {{if .Deploys}}<section class="card" id="deploys">
 <h2>{{t "During deploys"}}</h2>
 <p>{{t "Of its firings, %d came during a deploy of what they are about, %d of them catching something: precision %s with them, %s without." .Deploys .DeploysCaught .Precision .Without}}</p>
+</section>{{end}}
+
+{{with .Kinds}}<section class="card" id="marked">
+<h2>{{t "During marked windows"}}</h2>
+<ul class="plain">{{range .}}<li><a href="{{$.Link "/marked"}}"><bdi>{{.Kind}}</bdi></a>: {{t "%d firings, %d of them catching something, %d re-fired: precision %s inside, %s outside." .Firings .Caught .Refired .Inside .Outside}}</li>{{end}}</ul>
 </section>{{end}}
 
 {{if or .Check .Differs}}<section class="card" id="check">

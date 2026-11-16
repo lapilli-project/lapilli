@@ -10,7 +10,7 @@
 <thead><tr><th scope="col">{{t "Incident"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "From"}}</th><th scope="col">{{t "Caught"}}</th><th scope="col">{{t "Lead"}}</th></tr></thead>
 <tbody>{{range .Lines}}
 <tr class="{{.Status}}">
-  <td><a href="{{$.Incident .ID}}">{{.ID}}</a>{{if .Title}} {{.Title}}{{end}}</td>
+  <td><a href="{{$.Incident .ID}}">{{.ID}}</a>{{if .Title}} {{.Title}}{{end}}{{range .Kinds}} <span class="badge status-unknown"><bdi>{{.}}</bdi></span>{{end}}</td>
   <td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td>
   <td>{{if eq .Origin "file"}}{{t "incidents file"}}{{else if eq .Origin "ui"}}{{t "written here"}}{{else if eq .Origin "copy"}}{{t "copied in"}}{{else}}{{t "found by --impact"}}{{end}}</td>
   <td>{{if eq .Status "caught"}}<span class="{{status "incident" .Status}}">○ {{.First}}</span>{{else if eq .Status "noisy"}}<span class="{{status "incident" .Status}}">◐ {{.First}}, {{t "noisy"}}</span>{{else if eq .Status "missed"}}<span class="{{status "incident" .Status}}">{{t "✗ nothing fired"}}</span>{{else if eq .Status "covered"}}{{t "covered by one written down"}}{{else}}{{t .Status}}{{end}}{{with .Nearly}}<br><span class="quiet">{{t "nearly caught by %s" .}}</span>{{end}}{{if .NearlyMore}} <span class="quiet">{{t "and %d more" .NearlyMore}}</span>{{end}}</td>
@@ -35,7 +35,7 @@
 <h1>{{$title}}</h1>
 {{/* Its labels summed up: .Labels is the line its form changes, .Incident.Labels each name with its values. */}}{{$labels := labelsum .Incident.Labels}}
 <p class="lede">{{at $loc .Start}} → {{if .End.IsZero}}{{t "no end written down"}}{{else}}{{at $loc .End}}{{end}}{{if $labels.Names}} · {{template "labelnames" $labels}}{{end}}<br>
-{{if eq .Origin "file"}}{{t "From the incidents file, which owns it."}}{{else if eq .Origin "copy"}}{{t "Copied in from the tool it is kept in, %s; it is changed there, not here." (at $loc .Updated)}}{{else if eq .Origin "ui"}}{{if .By}}{{t "Written here by %s, %s." .By (at $loc .Updated)}}{{else}}{{t "Written here, %s." (at $loc .Updated)}}{{end}}{{else}}{{if .State}}{{if .By}}{{t "Found by --impact; %s by %s." (t .State) .By}}{{else}}{{t "Found by --impact; %s." (t .State)}}{{end}}{{else}}{{t "Found by --impact."}}{{end}}{{end}}</p>
+{{with .Kinds}}{{t "During"}}:{{range .}} <span class="badge status-unknown"><bdi>{{.}}</bdi></span>{{end}}<br>{{end}}{{if eq .Origin "file"}}{{t "From the incidents file, which owns it."}}{{else if eq .Origin "copy"}}{{t "Copied in from the tool it is kept in, %s; it is changed there, not here." (at $loc .Updated)}}{{else if eq .Origin "ui"}}{{if .By}}{{t "Written here by %s, %s." .By (at $loc .Updated)}}{{else}}{{t "Written here, %s." (at $loc .Updated)}}{{end}}{{else}}{{if .State}}{{if .By}}{{t "Found by --impact; %s by %s." (t .State) .By}}{{else}}{{t "Found by --impact; %s." (t .State)}}{{end}}{{else}}{{t "Found by --impact."}}{{end}}{{end}}</p>
 {{template "labelsall" $labels}}
 
 <h2>{{t "Caught by"}}</h2>

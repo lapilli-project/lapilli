@@ -44,7 +44,8 @@ var crumbsOf = map[string]crumbOf{
 	"overview": {"Monitoring", "Overview", "/", false}, "rules": {"Monitoring", "Rules", "/rules", false}, "rule": {"Monitoring", "Rules", "/rules", true},
 	"incidents": {"Monitoring", "Incidents", "/incidents", false}, "incident": {"Monitoring", "Incidents", "/incidents", true},
 	"firings": {"Monitoring", "Alert history", "/firings", false},
-	"tasks":   {"Improve", "Tasks", "/tasks", false}, "task": {"Improve", "Tasks", "/tasks", true},
+	"marked":  {"Monitoring", "Marked windows", "/marked", false}, "markedone": {"Monitoring", "Marked windows", "/marked", true},
+	"tasks": {"Improve", "Tasks", "/tasks", false}, "task": {"Improve", "Tasks", "/tasks", true},
 	"proposals": {"Improve", "Proposals", "/proposals", false}, "proposal": {"Improve", "Proposals", "/proposals", true},
 	"windows": {"Improve", "Quiet windows", "/windows", false}, "window": {"Improve", "Quiet windows", "/windows", true},
 	"reports": {"Reporting", "Reports", "/reports", false}, "report": {"Reporting", "Reports", "/reports", true},
@@ -82,7 +83,7 @@ var navLayout = []struct {
 	id, name string
 	items    []struct{ page, href, name string }
 }{
-	{"see", "Monitoring", []struct{ page, href, name string }{{"overview", "/", "Overview"}, {"rules", "/rules", "Rules"}, {"incidents", "/incidents", "Incidents"}, {"firings", "/firings", "Alert history"}}},
+	{"see", "Monitoring", []struct{ page, href, name string }{{"overview", "/", "Overview"}, {"rules", "/rules", "Rules"}, {"incidents", "/incidents", "Incidents"}, {"marked", "/marked", "Marked windows"}, {"firings", "/firings", "Alert history"}}},
 	{"fix", "Improve", []struct{ page, href, name string }{{"tasks", "/tasks", "Tasks"}, {"proposals", "/proposals", "Proposals"}, {"windows", "/windows", "Quiet windows"}}},
 	{"report", "Reporting", []struct{ page, href, name string }{{"reports", "/reports", "Reports"}, {"outcomes", "/outcomes", "Outcomes"}, {"goals", "/goals", "Goals"}}},
 	{"manage", "Administration", []struct{ page, href, name string }{{"teams", "/teams", "Teams"}, {"roles", "/roles", "Roles"}, {"settings", "/settings", "Settings"}, {"runs", "/runs", "Run history"}, {"orphans", "/orphans", "Cleanup"}}},

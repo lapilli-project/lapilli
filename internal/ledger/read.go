@@ -186,6 +186,9 @@ type Firing struct {
 	Excused bool
 	// Deploy is a firing that came during a deploy of what it is about.
 	Deploy bool
+	// Kinds are the kinds of marked window it came during, in order
+	// (docs/design/marked.md).
+	Kinds []string
 }
 
 // FiringQuery picks firings: those that started in [From, To), of one rule
@@ -198,13 +201,16 @@ type FiringQuery struct {
 	Excused  bool // only those a quiet window excused
 	Refired  bool // only those that re-fired
 	Deploy   bool // only those that came during a deploy
-	Before   int64
-	Limit    int
+	// Kind, when given, picks those marked with the kind of marked window
+	// of that name.
+	Kind   string
+	Before int64
+	Limit  int
 }
 
 // Firings are the firings a query picks.
 func (l *Ledger) Firings(ctx context.Context, q FiringQuery) ([]Firing, error) {
-	sq := `SELECT f.id, r.name, s.id, s.labels, f.start_at, f.end_at, f.white, f.refired, f.excused, f.deploy
+	sq := `SELECT f.id, r.name, s.id, s.labels, f.start_at, f.end_at, f.white, f.refired, f.excused, f.deploy, f.marked
 		FROM firings f JOIN series s ON s.id = f.series_id JOIN rules r ON r.id = f.rule_id
 		WHERE f.start_at >= ? AND f.start_at < ?`
 	args := []any{q.From.Unix(), q.To.Unix()}
@@ -224,6 +230,10 @@ func (l *Ledger) Firings(ctx context.Context, q FiringQuery) ([]Firing, error) {
 	if q.Deploy {
 		sq += " AND f.deploy = 1"
 	}
+	if q.Kind != "" {
+		sq += " AND f.marked != 0 AND (f.marked & (" + kindBit + ")) != 0"
+		args = append(args, q.Kind)
+	}
 	if q.Before > 0 {
 		sq += " AND (f.start_at, f.id) < (SELECT start_at, id FROM firings WHERE id = ?)"
 		args = append(args, q.Before)
@@ -239,12 +249,14 @@ func (l *Ledger) Firings(ctx context.Context, q FiringQuery) ([]Firing, error) {
 	}
 	defer rows.Close()
 	var out []Firing
+	var bits []int64
+	marked := false
 	for rows.Next() {
 		var f Firing
-		var sid, start int64
+		var sid, start, b int64
 		var end sql.NullInt64
 		var labels string
-		if err := rows.Scan(&f.ID, &f.Rule, &sid, &labels, &start, &end, &f.White, &f.Refired, &f.Excused, &f.Deploy); err != nil {
+		if err := rows.Scan(&f.ID, &f.Rule, &sid, &labels, &start, &end, &f.White, &f.Refired, &f.Excused, &f.Deploy, &b); err != nil {
 			return nil, err
 		}
 		if f.Labels, err = l.labels(sid, labels); err != nil {
@@ -252,19 +264,36 @@ func (l *Ledger) Firings(ctx context.Context, q FiringQuery) ([]Firing, error) {
 		}
 		f.Start, f.End = unix(start), fromNull(end)
 		out = append(out, f)
+		bits = append(bits, b)
+		marked = marked || b != 0
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil || !marked {
+		return out, err
+	}
+	return out, l.nameKinds(ctx, out, bits)
+}
+
+// nameKinds gives each firing the names of the kinds its bits mark.
+func (l *Ledger) nameKinds(ctx context.Context, fs []Firing, bits []int64) error {
+	kinds, err := l.kinds(ctx, l.r)
+	if err != nil {
+		return err
+	}
+	for i := range fs {
+		fs[i].Kinds = KindsOf(bits[i], kinds)
+	}
+	return nil
 }
 
 // FiringByID is one firing.
 func (l *Ledger) FiringByID(ctx context.Context, id int64) (Firing, error) {
 	var f Firing
-	var sid, start int64
+	var sid, start, bits int64
 	var end sql.NullInt64
 	var labels string
-	err := l.r.QueryRowContext(ctx, `SELECT f.id, r.name, s.id, s.labels, f.start_at, f.end_at, f.white, f.refired, f.excused, f.deploy
+	err := l.r.QueryRowContext(ctx, `SELECT f.id, r.name, s.id, s.labels, f.start_at, f.end_at, f.white, f.refired, f.excused, f.deploy, f.marked
 		FROM firings f JOIN series s ON s.id = f.series_id JOIN rules r ON r.id = f.rule_id WHERE f.id = ?`, id).
-		Scan(&f.ID, &f.Rule, &sid, &labels, &start, &end, &f.White, &f.Refired, &f.Excused, &f.Deploy)
+		Scan(&f.ID, &f.Rule, &sid, &labels, &start, &end, &f.White, &f.Refired, &f.Excused, &f.Deploy, &bits)
 	if err == sql.ErrNoRows {
 		return f, ErrNotFound
 	}
@@ -275,7 +304,12 @@ func (l *Ledger) FiringByID(ctx context.Context, id int64) (Firing, error) {
 		return f, err
 	}
 	f.Start, f.End = unix(start), fromNull(end)
-	return f, nil
+	if bits != 0 {
+		fs := []Firing{f}
+		err = l.nameKinds(ctx, fs, []int64{bits})
+		f = fs[0]
+	}
+	return f, err
 }
 
 // Report is the verdict on [from, to) as the ledger has it, in the form
@@ -338,6 +372,11 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 		}
 	}
 	parts := l.parts(from.Unix(), to.Unix())
+	kinds, err := l.kinds(ctx, l.r)
+	if err != nil {
+		return nil, err
+	}
+	marks := len(kinds) > 0
 	count := func(parts []reportPart, judged bool) error {
 		for _, p := range parts {
 			if p.b <= p.a {
@@ -367,6 +406,43 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 					rr.DeploysUnjudged += deploy - deployWhite
 					rep.Unjudged += n - white
 				}
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			if !marks {
+				continue
+			}
+			// And by kind of marked window, from the same days and hours.
+			q := countMarkedDays
+			if p.q == countFirings {
+				q = countMarkedFirings
+			}
+			rows, err = l.r.QueryContext(ctx, q, p.a, p.b)
+			if err != nil {
+				return err
+			}
+			for rows.Next() {
+				var id int64
+				var kind string
+				var n, white, again int
+				if err := rows.Scan(&id, &kind, &n, &white, &again); err != nil {
+					rows.Close()
+					return err
+				}
+				rr := result(table[id])
+				if rr.Marked == nil {
+					rr.Marked = map[string]verdict.MarkedCount{}
+				}
+				c := rr.Marked[kind]
+				c.Firings += n
+				c.Caught += white
+				c.Refired += again
+				if !judged {
+					c.Unjudged += n - white
+				}
+				rr.Marked[kind] = c
 			}
 			rows.Close()
 			if err := rows.Err(); err != nil {
@@ -468,7 +544,7 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 			continue // counted in the rule's Excused, not judged
 		}
 		j := verdict.Judged{Firing: f.Firing, White: f.White, NoRecord: !f.White && !l.weekKept(rec, Week(l.day(f.Start.Unix()))),
-			Refired: f.Refired, DuringDeploy: f.Deploy}
+			Refired: f.Refired, DuringDeploy: f.Deploy, Marked: f.Kinds}
 		for _, in := range near {
 			if verdict.Catches(f.Firing, in, o) {
 				j.Incidents = append(j.Incidents, in.ID)
@@ -489,6 +565,11 @@ const (
 	countFirings = `SELECT rule_id, count(*) - sum(excused), sum(white), sum(refired * (1 - excused)), sum(excused), sum(deploy), sum(deploy * white) FROM firings
 		WHERE start_at >= ? AND start_at < ? GROUP BY rule_id`
 	countDays = "SELECT rule_id, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white) FROM days WHERE day >= ? AND day < ? GROUP BY rule_id"
+	// By kind of marked window, from the firings and from the days.
+	countMarkedFirings = `SELECT f.rule_id, k.name, count(*), sum(f.white), sum(f.refired) FROM firings f JOIN marked_kinds k ON ` + markedOn + `
+		WHERE f.start_at >= ? AND f.start_at < ? AND f.marked != 0 GROUP BY f.rule_id, k.name`
+	countMarkedDays = `SELECT d.rule_id, k.name, sum(d.firings), sum(d.white), sum(d.refired) FROM marked_days d JOIN marked_kinds k ON k.id = d.kind_id
+		WHERE d.day >= ? AND d.day < ? GROUP BY d.rule_id, k.name`
 )
 
 // parts are the queries of a report's counts over [lo, hi): whole days from

@@ -153,6 +153,28 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		s.status.errWhat, s.status.err = "deploys", errDeploysUnread.Error()
 		s.status.Unlock()
 	}
+	// The marked file, as the deploys file; the expressions (--mark) read
+	// again over the last four weeks once their key is new.
+	if s.cfg.Marked != "" {
+		if err := s.syncMarked(ctx, o); err != nil {
+			s.fail("marked windows", err)
+		} else {
+			s.status.Lock()
+			if s.status.errWhat == "marked windows" {
+				s.status.err, s.status.errWhat = "", ""
+			}
+			s.status.Unlock()
+		}
+	}
+	// The expressions no longer given let go, every one with no --mark.
+	if err := s.forgetMarks(ctx); err != nil {
+		s.fail("reading the marked windows' expressions again", err)
+	}
+	if len(s.cfg.Marks) > 0 && s.still(ctx) {
+		if err := s.marksAgain(ctx, o); err != nil {
+			s.fail("reading the marked windows' expressions again", err)
+		}
+	}
 	if !s.still(ctx) {
 		return
 	}
@@ -375,7 +397,16 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		}
 		s.status.set("replaying %s → %s", from.In(s.cfg.Loc).Format("2006-01-02 15:04"), to.In(s.cfg.Loc).Format("2006-01-02 15:04"))
 		began := s.now()
-		found, unfinished, err := s.find(s.asking(ctx, catchingUp(cursor, ahead, now)), from, to)
+		asking := s.asking(ctx, catchingUp(cursor, ahead, now))
+		// The marked windows' expressions, as the impact signal: over the
+		// run's period and the hour before, each with time of its own,
+		// kept before the run is, so that it marks its own firings.
+		if len(s.cfg.Marks) > 0 {
+			if err := s.keepMarks(asking, s.readMarks(asking, s.cfg.Marks, from.Add(-time.Hour), to, false), o); err != nil {
+				s.fail("keeping the marked windows' expressions", err)
+			}
+		}
+		found, unfinished, err := s.find(asking, from, to)
 		switch {
 		case err != nil && prom.IsYielded(err):
 			// The --impact or ALERTS query yielded: the run waits, as it
@@ -404,7 +435,7 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		s.status.took = s.now().Sub(began)
 		// What is wrong with the incidents or deploys file is for reading
 		// it to clear.
-		if s.status.errWhat != "incidents" && s.status.errWhat != "deploys" {
+		if s.status.errWhat != "incidents" && s.status.errWhat != "deploys" && s.status.errWhat != "marked windows" {
 			s.status.err, s.status.errWhat = "", ""
 		}
 		s.status.Unlock()
@@ -2020,6 +2051,11 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	if err != nil {
 		return "", err
 	}
+	// The marked windows on in the week (docs/design/marked.md).
+	mk, err := s.markedOfReport(ctx, rep, from, to, team, s.cfg.Loc)
+	if err != nil {
+		return "", err
+	}
 	// Of a team's, the rules of others that fired mostly on what it owns.
 	var onLine string
 	if team != nil {
@@ -2054,7 +2090,7 @@ func (s *Server) digestText(ctx context.Context, rep *verdict.Report, spare []st
 	head, rest, _ := strings.Cut(report.String(), "\n\n")
 	var b strings.Builder
 	b.WriteString(head + "\n")
-	for _, x := range []string{goals, onLine, rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
+	for _, x := range []string{goals, onLine, rf.refireLine(s.cfg.Lang), rf.deployLine(s.cfg.Lang), mk.text(), line, sent.text(s.cfg.Lang), copiedLine, checkedLine, tasks, outs} {
 		if x != "" {
 			b.WriteString("\n" + x + "\n")
 		}
@@ -2225,7 +2261,7 @@ func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh
 		}
 		if webhook {
 			about := digestAbout(rep, text, "", spare)
-			if err := s.aboutMore(ctx, about, rep, from, to, true); err != nil {
+			if err := s.aboutMore(ctx, about, rep, from, to, nil); err != nil {
 				return err
 			}
 			if err := s.aboutGoals(ctx, about, from, nil); err != nil {
@@ -2258,7 +2294,7 @@ func (s *Server) tellDigest(ctx context.Context, in digestIn, week string, fresh
 			return err
 		}
 		about := digestAbout(part, text, t.Name, mine)
-		if err := s.aboutMore(ctx, about, part, from, to, false); err != nil {
+		if err := s.aboutMore(ctx, about, part, from, to, &t); err != nil {
 			return err
 		}
 		if err := s.aboutGoals(ctx, about, from, &t); err != nil {

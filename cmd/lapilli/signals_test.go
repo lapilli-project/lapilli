@@ -149,7 +149,8 @@ func unnamedImpact(t *testing.T) (signalHistory, []string) {
 // names: the report, the text, the metrics and the CSV are, byte for byte,
 // what lapilli verdict wrote before (testdata/unnamed-impact, written by
 // the release before named signals; LAPILLI_GOLDEN=update writes them
-// again).
+// again), but for the CSV's marked column, added at its end since
+// (docs/design/marked.md), [] in lapilli verdict.
 func TestUnnamedImpactUnchanged(t *testing.T) {
 	h, args := unnamedImpact(t)
 	var asked []string

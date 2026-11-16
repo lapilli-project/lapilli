@@ -119,12 +119,25 @@ func (n yNumber) MarshalYAML() (any, error) {
 	return &yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: string(n)}, nil
 }
 
+type yMarked struct {
+	Kind   string            `yaml:"kind"`
+	Title  string            `yaml:"title"`
+	Team   string            `yaml:"team,omitempty"`
+	Start  string            `yaml:"start"`
+	End    string            `yaml:"end"`
+	Every  string            `yaml:"every,omitempty"`
+	On     string            `yaml:"repeat_on,omitempty"`
+	Until  string            `yaml:"until,omitempty"`
+	Labels map[string]string `yaml:"labels,omitempty"`
+}
+
 type yConfig struct {
 	Teams   []yTeam   `yaml:"teams,omitempty"`
 	Windows []yWindow `yaml:"windows,omitempty"`
 	Reports []yReport `yaml:"reports,omitempty"`
 	Grants  []yGrant  `yaml:"grants,omitempty"`
 	Goals   []yGoal   `yaml:"goals,omitempty"`
+	Marked  []yMarked `yaml:"marked,omitempty"`
 }
 
 // exportConfig is what the ledger holds that --config can declare, as a
@@ -210,8 +223,25 @@ func exportConfig(d ledger.Declaring, loc *time.Location) []byte {
 		}
 		c.Goals = append(c.Goals, y)
 	}
+	for _, m := range d.Marked {
+		team, ok := teamOf(m.TeamID)
+		if !ok {
+			left = append(left, "marked window "+commented(m.Title))
+			continue
+		}
+		y := yMarked{Kind: m.Kind, Title: m.Title, Team: team, Start: m.Start.In(loc).Format(time.RFC3339), End: m.End.In(loc).Format(time.RFC3339),
+			Every: m.Every, On: m.On, Labels: m.Labels}
+		if !m.Until.IsZero() {
+			if u := m.Until.In(loc); midnight(u, loc).Equal(m.Until) {
+				y.Until = u.Format("2006-01-02")
+			} else {
+				y.Until = u.Format(time.RFC3339)
+			}
+		}
+		c.Marked = append(c.Marked, y)
+	}
 	var b bytes.Buffer
-	b.WriteString("# The teams, quiet windows, reports and roles lapilli serve's ledger holds,\n")
+	b.WriteString("# The teams, quiet windows, reports, roles, goals and marked windows lapilli serve's ledger holds,\n")
 	b.WriteString("# declared in --config and made in the UI alike, as --config takes them.\n")
 	if len(d.Goals) > 0 {
 		b.WriteString("# The goals, which only --config declares.\n")

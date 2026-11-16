@@ -1578,6 +1578,16 @@ a team's own Prometheus to alert on. A goal missed is told
 (`goal.missed`), and becomes a task with one press, or by itself with
 `--goal-tasks`.
 
+Some weeks aren't like the others: a sale, a launch, a campaign. Marked
+windows (docs/design/marked.md) name them, each of a kind a team chooses,
+from a file (`--marked`), `--config`'s `marked:`, the Marked windows page,
+or a PromQL expression that returns something while one is on (`--mark
+sale=shop_sale_active == 1`). A firing that starts during one and agrees
+with it is marked with its kind; nothing is excused, and every count is
+read inside the kind and outside it: precision during sales beside the
+four weeks before, the rules noisiest during them (`during:sale` on the
+rules), and the incidents missed in each.
+
 The ledger is one SQLite file (`--ledger DIR`), or a Postgres database
 (`--ledger-url-file FILE`, below). It keeps each firing's stones
 and each rule's by day and by week, so reading twelve weeks costs what

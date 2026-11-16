@@ -1,11 +1,13 @@
 # Marked windows: a sale, a launch, a campaign, shown and never excused
 
-Status: accepted, not built. Under [GOVERNANCE.md](../../GOVERNANCE.md)
+Status: accepted, built (schema 021, after goals' 020), but for the charts' marks of each
+kind (`marks=`, below). Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this is a new kind of data in the ledger (the next schema at build time),
 so it was designed first, as a pull request (#90); it was merged on
 2026-11-16, before its week was out, by the maintainer's decision, with the
 review's edits. The decisions taken are in "Open questions"; the rest stay
-open until the step that needs each. It changes no stone: a firing is
+open until the step that needs each. What the build settled is in
+"Builder's decisions", at the end. It changes no stone: a firing is
 judged as it is now. The companion to [work.md](work.md) and
 [serveops.md](serveops.md), whose quiet windows it sits beside, to
 [noc.md](noc.md), whose deploys it generalises, and to
@@ -440,3 +442,76 @@ Open:
    in `--config`, the rules list's facet, a rule's lines, the overview's
    tile and chart marks, the `marked` section of reports and the digest.
 3. Expressions: `--mark KIND=PROMQL` and `--mark-match`.
+
+## Builder's decisions
+
+Taken while building, within what is above:
+
+- **Fifteen kinds, and deploy.** "16 kinds in the ledger at most" counts
+  `deploy`: a team names 15 (ids 1 to 15, bits 1 to 15 of
+  `firings.marked`), and `deploy` is `firings.deploy`.
+- **A window's labels have one value each**, as a deploy's: the forms and
+  `--config` refuse two values of one label.
+- **The bounds, counted.** A window that doesn't repeat counts once in
+  each week it meets; one that repeats counts the most of its
+  occurrences any one week meets (over the weeks its schedule takes to
+  come round, a year's for a month or a cron expression), in every week
+  from its first to its last. That can refuse a window a week would in
+  fact take; it never takes one a week can't.
+- **Each firing is set beside its own week's occurrences**, those that
+  started within the longest of them before it, by a search on starts:
+  so 256 at most however long the longest occurrence is (a window of 31
+  days beside 255 of an hour), and, for windows of hours, a few.
+  `TestScale` holds the few, `TestMarkedScale` the 256.
+- **An expression's windows across reads.** A window found before that is
+  on at a read's start goes on in one found from the start (within two
+  steps), each found window going on from one at most, so two series on
+  at once keep two windows; up to 31 days, past which a new window
+  starts; one that ended before the start is let be. One going on is
+  judged again from where it ended to where it ends now, not over all it
+  covers. Its windows are titled by their kind. An expression no longer
+  given (every one, with no `--mark`) has its key forgotten, and its
+  windows are kept as they were found.
+- **A changed expression waits for its read again.** A run's read with
+  another key than its windows were kept with is skipped, its windows and
+  key kept, until the read of the last four weeks succeeds and keeps the
+  new key; a failed read again is tried again each round. A kind's first
+  read, with none found before, starts it.
+- **Pruned once over.** Those made in the UI and those found by an
+  expression are pruned with `--keep`, a repeating one once its last
+  occurrence is over (33 days past its until), so the firings it marked
+  are pruned first and its kind isn't let go while they hold its bit; the
+  file's and `--config`'s are theirs.
+- **Shares of a week.** Of the 256 occurrences a week meets, those made in
+  the UI take 128 at most, and a team's windows 32, so that what a team's
+  editors, or every editor, keep never refuses the marked file,
+  `--config` or an expression below the rest; 64 of a kind still holds
+  for everyone. A team's editors use the kinds there are: the fifteen are
+  taken by an editor or an admin, a file, `--config` or an expression.
+- **The kinds counted from the ledger's**, those of expressions and those
+  not let go yet among them: a `--config` window of a sixteenth kind is
+  skipped and said, the rest of the file kept; an expression's read of
+  one is skipped, the others kept.
+- **A kind is let go** once nothing is left to judge again
+  (`JudgePending` finds nothing pending) and no window or expression
+  names it: the firings it marked are marked no more by then.
+- **Whose a window is.** The file's and an expression's are refused in
+  the UI and the API (409), as `--config`'s are. A window `--config` no
+  longer declares, given back, is the UI's (origin `ui`). A declared one
+  is matched by its kind, title and team.
+- **The page** lists the occurrences of the last twelve weeks and the
+  next four, the latest 100, each kind its own table; "inside" reads the
+  kind's days the occurrence covers, "before" the four whole weeks before
+  its first week, outside the kind, both judged by week as everything is.
+  The overview's tile is a card: the latest occurrence on or ended in the
+  weeks shown. A rule's lines are on its firings tab, beside its deploys.
+- **The rules list's facet** is a row of links, each kind during and
+  outside, as the counts change with it; one kind at a time.
+- **The API** gives a window's occurrences in the period asked with each
+  window (`GET /api/v1/marked?from=&to=`, 400 days at most), and one
+  window at `GET /api/v1/marked/{id}`.
+- **The CSV's `marked`** is a JSON array of kinds, `[]` for none; the
+  report's `rules[].marked` is by kind: `firings`, `caught`, `refired`,
+  `unjudged`†.
+- **Not built yet: the charts' marks of each kind** (`marks=sale`). The
+  overview's charts mark deploys and quiet windows as before.

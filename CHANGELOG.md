@@ -121,6 +121,48 @@
   signal's name an alias, and a rule entry's pattern is `[redacted]`. One
   `--impact` with no name judges as before, byte for byte. `lapilli serve`
   takes one unnamed signal until it keeps named ones.
+- **Marked windows: a sale, a launch, a campaign** (docs/design/marked.md).
+  A span of time of a kind a team names, that marks the firings and
+  incidents during it and changes nothing else: no stone, no excuse, no
+  record. A firing judged that starts during an occurrence of one (each
+  repeat of one that repeats is one) and agrees with it, on every label
+  both have, as a deploy is agreed with, is marked with its kind; one with
+  no labels marks everything, a team's only its team's rules. Every count
+  is read inside each kind and outside it:
+  - from the marked file (`--marked FILE`, the chart's `serve.marked`),
+    read again each run and owning its windows; `--config`'s
+    `marked:`; the Marked windows page under Monitoring and
+    `/api/v1/marked`, by editors and a team's editors; and PromQL
+    expressions (`--mark KIND=PROMQL`, the chart's `serve.mark`), whose
+    windows mark everything unless `--mark-match KIND=LABEL,...` keeps
+    labels of their series, read each run and again over four weeks when
+    the expression changes;
+  - the page lists each occurrence, the latest first, with its firings
+    inside the kind beside the four weeks before outside it, and the
+    incidents in it; the rules list takes `during:sale` and
+    `outside:sale` (`during:deploy`: the rules with firings during
+    deploys); a rule's page, the incidents, Alert history (`kind=`) and
+    the overview show the kinds;
+  - `/api/v1/summary` gives each row's `marked`, by kind, with precision
+    inside and outside and the incidents and impact windows during it with
+    their median lead (`schema` stays 1); `/api/v1/report` each rule's
+    `marked` and each firing's, the CSV a `marked` column at the end;
+    reports a `marked` section, and the digest and `digest.ready` the
+    windows on in the week; `/metrics` `lapilli_rule_firings_marked`,
+    `lapilli_rule_caught_marked`, `lapilli_marked_on` and
+    `lapilli_serve_marked_read_timestamp_seconds`; MCP's firings and
+    summary their kinds; and a notice, `marked.kept`. A redacted report
+    (`redact=true`) gives each kind an alias, `kind-01` on.
+
+  Bounded: 15 kinds, `deploy` and `week` taken, which a team's editors
+  use and don't make; 64 occurrences of a kind meeting a week and 256 in
+  all, of which the UI's windows take 128 and a team's 32, refused where a
+  window is kept and dropped from an expression's read; each firing set
+  beside its week's occurrences alone. An expression changed waits for
+  its read of the last four weeks before its runs' reads are kept. Ledger
+  schema 021 adds `marked_kinds`, `marked`, `firings.marked`,
+  `marked_days` and `marked_weeks`; going back takes the ledger as it
+  was, so keep a copy before upgrading.
 
 ### Changed
 
@@ -128,6 +170,10 @@
   verdict` and `lapilli serve`: the last one given was read, and the others
   dropped without a word. Name each (`--impact errors=...`), or join them
   in one expression.
+- **`lapilli verdict --csv` ends with a `marked` column**, as serve's
+  CSV and `/api/v1/report?format=csv` do: always there, `[]` in `lapilli
+  verdict`, which keeps no marked windows. A reader that counts the
+  columns sees one more.
 - **docs/numbers.md**: "every firing of a week is judged, or none" is now
   "by the signals tied to it", and "windows that overlap are one" is now
   "windows of one signal that overlap are one". With no named signal,

@@ -41,6 +41,8 @@ type firingsAsk struct {
 	black  bool
 	labels [][2]string
 	before int64
+	// kind picks those marked with a kind of marked window.
+	kind string
 }
 
 // url is the firings page for what was asked.
@@ -57,6 +59,9 @@ func (a firingsAsk) url(loc dayLedger) string {
 	}
 	if a.before > 0 {
 		q.Set("before", strconv.FormatInt(a.before, 10))
+	}
+	if a.kind != "" {
+		q.Set("kind", a.kind)
 	}
 	return "/firings?" + q.Encode()
 }
@@ -151,6 +156,9 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 	ctx := r.Context()
 	q := r.URL.Query()
 	a := firingsAsk{day: s.l.Day(s.now()), rule: q.Get("rule"), black: q.Get("black") != ""}
+	if k := q.Get("kind"); k != "" && ledger.CheckKind(k) == nil {
+		a.kind = k
+	}
 	if v := q.Get("day"); v != "" {
 		day, err := dateDay(v)
 		if err != nil {
@@ -172,6 +180,12 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 	dl := s.l
 	v := firingsView{Said: said, Day: s.l.Midnight(a.day).In(s.cfg.Loc).Format("2006-01-02"), Rule: a.rule, Black: a.black, More: more,
 		PrevDay: s.l.Midnight(a.day - 1).In(s.cfg.Loc).Format("2006-01-02"), ThenDay: s.l.Midnight(a.day + 1).In(s.cfg.Loc).Format("2006-01-02")}
+	if a.kind != "" {
+		v.Hidden = append(v.Hidden, field{"kind", a.kind})
+		b := a
+		b.before, b.kind = 0, ""
+		v.Labels = append(v.Labels, chip{Group: "Marked", Value: a.kind, Raw: true, Href: b.url(dl)})
+	}
 	for _, kv := range a.labels {
 		v.Hidden = append(v.Hidden, field{"label", kv[0] + "=" + kv[1]})
 		b := a
@@ -188,7 +202,7 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 		*d.to = b.url(dl)
 	}
 	from, to := s.l.Midnight(a.day), s.l.Midnight(a.day+1)
-	fq := ledger.FiringQuery{From: from, To: to, Rule: a.rule, Black: a.black}
+	fq := ledger.FiringQuery{From: from, To: to, Rule: a.rule, Black: a.black, Kind: a.kind}
 
 	// The firings listed, and those the strip counts: the day's whole.
 	var fs []ledger.Firing

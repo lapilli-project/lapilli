@@ -76,6 +76,21 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       how long before a deploy's start, and after its end, a
                       firing still counts as during it (default 0 and 10m;
                       a day at most each)
+  --marked FILE       marked windows, read again each run: spans of a kind a
+                      team names (a sale, a launch, a campaign), each a kind,
+                      a title, a start and an end, repeating or not, of some
+                      labels or a team's. A firing that starts during one
+                      and agrees with it is marked with its kind: judged as
+                      ever, never excused, and every count read inside the
+                      kind and outside (docs/design/marked.md)
+  --mark KIND=PROMQL  an expression that returns something while a window of
+                      KIND is on, such as shop_sale_active == 1, read each
+                      run as --impact is; its windows mark every firing.
+                      Repeatable, eight at most
+  --mark-match KIND=LABEL,...
+                      the labels of each series of KIND's expression its
+                      windows keep: they mark the firings that agree with
+                      them (none by default)
   --runbook-base URL  an https URL a runbook that is a path in the rules'
                       repository (docs/runbooks/disk.md#full) is a link
                       under, such as
@@ -576,6 +591,7 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 	ledgerSet := false
 	yieldForSet := false
 	deployAfter, deployBefore, deployTimes := 10*time.Minute, time.Duration(0), false
+	var marks, markMatches []string
 	// The sign-in of lapilli's own, read from the flags that give it.
 	var (
 		oc               signin.OIDC
@@ -740,6 +756,12 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 			cfg.SourceQuiet, err = dur(time.Hour)
 		case "--deploys":
 			cfg.Deploys = val
+		case "--marked":
+			cfg.Marked = val
+		case "--mark":
+			marks = append(marks, val)
+		case "--mark-match":
+			markMatches = append(markMatches, val)
 		case "--deploy-after", "--deploy-before":
 			d, derr := dur(0)
 			switch {
@@ -1091,6 +1113,8 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 		err = fmt.Errorf("--notify-listen takes writes, and --read-only refuses them")
 	case deployTimes && cfg.Deploys == "":
 		err = fmt.Errorf("--deploy-before and --deploy-after go with --deploys, the file deploys are read from")
+	case len(marks) > 0 && f.promURL == "" && f.gcpProj == "":
+		err = fmt.Errorf("--mark is asked of the history: add --prometheus URL or --gcp-project ID")
 	case cfg.MCPCompare != "" && len(cfg.Editors)+len(cfg.Admins) == 0:
 		err = fmt.Errorf("--mcp-compare needs --editors or --admins: without roles, whoever may change anything is an admin, and anyone who reaches /mcp could run PromQL with lapilli's access")
 	case cfg.ConfigPrune && cfg.Config == "":
@@ -1109,6 +1133,9 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 		err = fmt.Errorf("--guard is asked of the history: add --prometheus URL or --gcp-project ID")
 	case cfg.CatchUpHours != nil && cfg.CatchUpHours.Len() < cfg.Every:
 		err = fmt.Errorf("--catch-up-hours %s is shorter than --every %s: a run might never fall in it", cfg.CatchUpHours, time.Duration(cfg.Every))
+	}
+	if err == nil {
+		cfg.Marks, err = serve.ParseMarks(marks, markMatches)
 	}
 	if err != nil {
 		return serveSetup{}, err

@@ -249,6 +249,12 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 		// A window --config declares stays while it does: the file would make
 		// it again, and tell of it, each time.
 		"DELETE FROM windows WHERE id IN (SELECT id FROM windows WHERE declared = 0 AND ((every = '' AND end_at < ?1) OR (every != '' AND until_at < ?1)) LIMIT 5000)",
+		// A marked window made in the UI, or found by an expression, once
+		// its last occurrence is over, which a repeat's is up to 33 days
+		// after its until (31 days long, from the end of its day): until
+		// then, its firings are kept, and its kind with them. The marked
+		// file's and --config's are theirs.
+		"DELETE FROM marked WHERE id IN (SELECT id FROM marked WHERE origin IN ('ui', 'expr') AND ((every = '' AND end_at < ?1) OR (every != '' AND until_at + 2851200 < ?1)) LIMIT 5000)",
 		"DELETE FROM outbox WHERE id IN (SELECT id FROM outbox WHERE created < ?1 LIMIT 5000)",
 		// Their alerts go with them.
 		"DELETE FROM notifications WHERE id IN (SELECT id FROM notifications WHERE at < ?1 LIMIT 5000)",
@@ -288,6 +294,12 @@ func (l *Ledger) Prune(ctx context.Context, before time.Time) error {
 			return err
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM weeks WHERE week < ?", Week(l.day(at))); err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM marked_days WHERE day < ?", l.day(at)); err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM marked_weeks WHERE week < ?", Week(l.day(at))); err != nil {
 			return err
 		}
 		for _, q := range []string{"DELETE FROM checked WHERE day < ?", "DELETE FROM check_elsewhere WHERE day < ?"} {

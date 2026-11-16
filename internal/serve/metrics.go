@@ -124,6 +124,10 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			s.oops(w, r, err)
 			return
 		}
+		if err := s.markedMetrics(ctx, &b, rep, today); err != nil {
+			s.oops(w, r, err)
+			return
+		}
 		cursor, err := s.l.Cursor(ctx)
 		if err != nil {
 			s.oops(w, r, err)
@@ -291,6 +295,9 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "# HELP lapilli_serve_deploys_read_timestamp_seconds When the deploys file (--deploys) was last read, and what it held kept, in Unix seconds.\n# TYPE lapilli_serve_deploys_read_timestamp_seconds gauge\nlapilli_serve_deploys_read_timestamp_seconds %d\n", at)
 		}
 	}
+	// Whether each kind of marked window is on, and when the marked file
+	// was last read: they change with the time, not the ledger.
+	w.Write(s.markedOnMetrics(ctx))
 	// Which replica leads: 1 for this one's pod, 0 for the others'. What
 	// the leader's work counts (runs, notices sent, the files read) is in
 	// its pod's metrics alone.

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -30,7 +31,7 @@ var ErrDeclared = errors.New("declared in config — change it in values")
 
 // ErrNamedByDeclared is a team deleted or renamed that something --config
 // declares names: the file would name a team that isn't there.
-var ErrNamedByDeclared = errors.New("a quiet window, a report, a role or a goal declared in config names this team: change them in values first")
+var ErrNamedByDeclared = errors.New("a quiet window, a report, a role, a goal or a marked window declared in config names this team: change them in values first")
 
 // isDeclared refuses, in a write, a change to a row of table that --config
 // declares. A row that isn't there is the caller's to say.
@@ -92,6 +93,15 @@ type DeclaredGrant struct {
 	Bad       error
 }
 
+// DeclaredMarked is a marked window --config declares
+// (docs/design/marked.md): Team is its team's name, "" for everyone's.
+type DeclaredMarked struct {
+	Marked
+	Team string
+	Line int
+	Bad  error
+}
+
 // Declared is what --config declares.
 type Declared struct {
 	Teams   []DeclaredTeam
@@ -100,7 +110,8 @@ type Declared struct {
 	Grants  []DeclaredGrant
 	// Goals are its goals (docs/design/goals.md), which only a file
 	// declares: one it no longer declares is deleted.
-	Goals []DeclaredGoal
+	Goals  []DeclaredGoal
+	Marked []DeclaredMarked
 }
 
 // Kinds of what --config declares, as a DeclaredError names them.
@@ -109,6 +120,7 @@ const (
 	KindWindow = "window"
 	KindReport = "report"
 	KindGrant  = "grant"
+	KindMarked = "marked"
 )
 
 // DeclaredError is what is wrong with something --config declares: its
@@ -239,6 +251,8 @@ func (l *Ledger) Reconcile(ctx context.Context, d Declared, left Leave, o verdic
 		return Reconciled{}, nil, invalid("a config declares %d roles at most", MaxGrants)
 	case len(d.Goals) > MaxGoals:
 		return Reconciled{}, nil, invalid("a config declares %d goals at most", MaxGoals)
+	case len(d.Marked) > MaxMarkedConfig:
+		return Reconciled{}, nil, invalid("a config declares %d marked windows at most", MaxMarkedConfig)
 	}
 	// The checks of each that don't read the ledger, before the write.
 	d.Teams, d.Windows = slices.Clone(d.Teams), slices.Clone(d.Windows)
@@ -251,6 +265,13 @@ func (l *Ledger) Reconcile(ctx context.Context, d Declared, left Leave, o verdic
 		if w := &d.Windows[i]; w.Bad == nil {
 			w.ID, w.TeamID = 0, 0
 			w.Bad = l.checkWindow(&w.Window)
+		}
+	}
+	d.Marked = slices.Clone(d.Marked)
+	for i := range d.Marked {
+		if m := &d.Marked[i]; m.Bad == nil {
+			m.ID, m.TeamID, m.Origin, m.Declared = 0, 0, OriginConfig, true
+			m.Bad = l.checkMarked(&m.Marked, time.Now())
 		}
 	}
 	var r Reconciled
@@ -281,6 +302,11 @@ func (l *Ledger) Reconcile(ctx context.Context, d Declared, left Leave, o verdic
 		if err := l.declareGoals(t, d.Goals, team, &r, skip); err != nil {
 			return err
 		}
+		marked, err := l.declareMarked(t, d.Marked, team, left, &r, skip)
+		if err != nil {
+			return err
+		}
+		spans = append(spans, marked...)
 		// The teams last: what names one the file no longer does is known.
 		if err := l.leaveTeams(t, leftTeams, left, &r, skip); err != nil {
 			return err
@@ -606,20 +632,23 @@ func (l *Ledger) leaveTeams(t *txn, leftover []DeclaredTeam, left Leave, r *Reco
 			r.Undeclared++
 			continue
 		}
-		var windows, reports, roles, tasks, notes, goals int
+		var windows, reports, roles, tasks, notes, goals, marked int
 		if err := t.QueryRowContext(t.ctx, `SELECT (SELECT count(*) FROM windows WHERE team_id = ?), (SELECT count(*) FROM reports WHERE team_id = ?),
 			(SELECT count(*) FROM grants WHERE team_id = ?), (SELECT count(*) FROM tasks WHERE team_id = ?), (SELECT count(*) FROM notes WHERE team_id = ?),
-			(SELECT count(*) FROM goals WHERE team_id = ? AND every_team = 0)`,
-			x.ID, x.ID, x.ID, x.ID, x.ID, x.ID).Scan(&windows, &reports, &roles, &tasks, &notes, &goals); err != nil {
+			(SELECT count(*) FROM goals WHERE team_id = ? AND every_team = 0), (SELECT count(*) FROM marked WHERE team_id = ?)`,
+			x.ID, x.ID, x.ID, x.ID, x.ID, x.ID, x.ID).Scan(&windows, &reports, &roles, &tasks, &notes, &goals, &marked); err != nil {
 			return err
 		}
-		named := windows+reports+roles+tasks+notes+goals > 0
+		named := windows+reports+roles+tasks+notes+goals+marked > 0
 		switch {
 		case named && ui >= MaxTeams && !x.GivenBack:
 			skip(KindTeam, 0, x.Name, invalid("kept declared, though the file no longer names it: the UI keeps %d teams at most, and what it owns names it", MaxTeams))
 			r.Kept++
 		case named:
 			counts := map[string]int{"quiet windows": windows, "reports": reports, "roles": roles, "tasks": tasks, "notes": notes}
+			if marked > 0 {
+				counts["marked windows"] = marked
+			}
 			if goals > 0 {
 				counts["goals"] = goals
 			}
@@ -1207,6 +1236,9 @@ type Declaring struct {
 	Reports []Scheduled
 	Grants  []Grant
 	Goals   []Goal
+	// Marked are the marked windows declared or made in the UI: not the
+	// marked file's, nor an expression's, which are theirs.
+	Marked []Marked
 }
 
 // AllDeclarable is every team, quiet window (the earliest made first),
@@ -1243,7 +1275,10 @@ func (l *Ledger) AllDeclarable(ctx context.Context) (Declaring, error) {
 	if d.Grants, err = grants(ctx, tx); err != nil {
 		return d, err
 	}
-	d.Goals, err = goals(ctx, tx)
+	if d.Goals, err = goals(ctx, tx); err != nil {
+		return d, err
+	}
+	d.Marked, err = l.markedRows(ctx, tx, "WHERE m.origin IN ('ui', 'config') ORDER BY m.id")
 	return d, err
 }
 
@@ -1270,7 +1305,8 @@ func givenBack(ctx context.Context, q queryer) ([]GivenBackRow, error) {
 		UNION ALL SELECT w.id, CAST(? AS TEXT), w.title, COALESCE(t.name, '') FROM windows w LEFT JOIN teams t ON t.id = w.team_id WHERE w.given_back = 1
 		UNION ALL SELECT r.id, CAST(? AS TEXT), r.name, COALESCE(t.name, '') FROM reports r LEFT JOIN teams t ON t.id = r.team_id WHERE r.given_back = 1
 		UNION ALL SELECT g.id, CAST(? AS TEXT), g.who, COALESCE(t.name, '') FROM grants g LEFT JOIN teams t ON t.id = g.team_id WHERE g.given_back = 1
-	) x ORDER BY k, name, team, id`, KindTeam, KindWindow, KindReport, KindGrant)
+		UNION ALL SELECT m.id, CAST(? AS TEXT), m.title, COALESCE(t.name, '') FROM marked m LEFT JOIN teams t ON t.id = m.team_id WHERE m.given_back = 1
+	) x ORDER BY k, name, team, id`, KindTeam, KindWindow, KindReport, KindGrant, KindMarked)
 	if err != nil {
 		return nil, err
 	}
@@ -1287,7 +1323,7 @@ func givenBack(ctx context.Context, q queryer) ([]GivenBackRow, error) {
 }
 
 // givenBackTables are the tables of each kind of what is given back.
-var givenBackTables = map[string]string{KindTeam: "teams", KindWindow: "windows", KindReport: "reports", KindGrant: "grants"}
+var givenBackTables = map[string]string{KindTeam: "teams", KindWindow: "windows", KindReport: "reports", KindGrant: "grants", KindMarked: "marked"}
 
 // KeepGivenBack makes what no --config gave back the UI's for good, as the
 // UI changing it does, so that no file takes it away: the row of kind of
@@ -1295,7 +1331,7 @@ var givenBackTables = map[string]string{KindTeam: "teams", KindWindow: "windows"
 // ErrNotFound when none of them is given back.
 func (l *Ledger) KeepGivenBack(ctx context.Context, kind string, id int64, by string) (int, error) {
 	if _, ok := givenBackTables[kind]; !ok && kind != "" {
-		return 0, invalid("%q is a team, a quiet window, a report or a role", kind)
+		return 0, invalid("%q is a team, a quiet window, a report, a role or a marked window", kind)
 	}
 	var n int
 	err := l.write(ctx, func(t *txn) error {
@@ -1311,7 +1347,7 @@ func (l *Ledger) KeepGivenBack(ctx context.Context, kind string, id int64, by st
 			if _, err := t.ExecContext(t.ctx, "UPDATE "+givenBackTables[g.Kind]+" SET given_back = 0 WHERE id = ?", g.ID); err != nil {
 				return err
 			}
-			what := map[string]string{KindTeam: "team ", KindWindow: "quiet window ", KindReport: "report ", KindGrant: RoleGiven}[g.Kind] + g.Name
+			what := map[string]string{KindTeam: "team ", KindWindow: "quiet window ", KindReport: "report ", KindGrant: RoleGiven, KindMarked: "marked window "}[g.Kind] + g.Name
 			if g.Team != "" {
 				what += " (team " + g.Team + ")"
 			}
@@ -1331,3 +1367,212 @@ func (l *Ledger) KeepGivenBack(ctx context.Context, kind string, id int64, by st
 // keptAsTheUIs is the activity log's words for one given back without
 // --config that an admin keeps.
 const keptAsTheUIs = " kept as the UI's: given back without --config, it is no file's to take away"
+
+// declareMarked makes, changes and takes over the marked windows the file
+// declares, and gives back or deletes those it no longer names, as left
+// says, as declareWindows does quiet windows: each matched by its kind,
+// title and team, one alike first, then the file's, then, taken over, one
+// the UI made. One given back is the UI's to change (origin ui). Those
+// past the bounds on marked windows are skipped, and said. It returns the
+// spans to mark again.
+func (l *Ledger) declareMarked(t *txn, want []DeclaredMarked, team resolver, left Leave, r *Reconciled,
+	skip func(string, int, string, error)) ([][2]int64, error) {
+	ms := make([]Marked, len(want))
+	bad := make([]error, len(want))
+	for i, dm := range want {
+		m := dm.Marked
+		id, known, err := team(dm.Team)
+		if known {
+			m.TeamID = id
+		}
+		ms[i], bad[i] = m, errors.Join(dm.Bad, err)
+	}
+	have, err := l.markedRows(t.ctx, t, "WHERE m.origin IN ('ui', 'config') ORDER BY m.id")
+	if err != nil {
+		return nil, err
+	}
+	file := func(h Marked) bool { return h.Declared || h.GivenBack }
+	matched := make([]bool, len(have))
+	pair := make([]int, len(ms))
+	for i := range pair {
+		pair[i] = -1
+	}
+	same := func(h, m Marked) bool { return h.Kind == m.Kind && h.Title == m.Title && h.TeamID == m.TeamID }
+	for stage := 0; stage < 3; stage++ {
+		for wi, m := range ms {
+			if pair[wi] >= 0 || bad[wi] != nil {
+				continue
+			}
+			for hi, h := range have {
+				if matched[hi] || !same(h, m) {
+					continue
+				}
+				if stage == 0 && file(h) && sameMarks(h, m) || stage == 1 && file(h) || stage == 2 && !file(h) {
+					pair[wi], matched[hi] = hi, true
+					break
+				}
+			}
+		}
+	}
+	// One that can't be kept keeps one of the file's of its title as it
+	// was.
+	for wi, m := range ms {
+		if bad[wi] == nil {
+			continue
+		}
+		skip(KindMarked, want[wi].Line, want[wi].Title, bad[wi])
+		for hi, h := range have {
+			if !matched[hi] && file(h) && h.Title == strings.TrimSpace(m.Title) && h.Kind == m.Kind {
+				matched[hi] = true
+				break
+			}
+		}
+	}
+	now := time.Now()
+	var spans [][2]int64
+	var ui int
+	for _, h := range have {
+		if h.Origin == OriginUI {
+			ui++
+		}
+	}
+	gone := map[int64]bool{}
+	for i, h := range have {
+		if matched[i] || !file(h) {
+			continue
+		}
+		switch left.of(h.GivenBack, ui >= MaxMarkedUI) {
+		case fateStay:
+		case fateMark:
+			if _, err := t.ExecContext(t.ctx, "UPDATE marked SET origin = 'ui', declared = 0, given_back = 1 WHERE id = ?", h.ID); err != nil {
+				return nil, err
+			}
+			if err := change(t, ConfigBy, "marked window "+h.Title+givenBackNow, nil, nil); err != nil {
+				return nil, err
+			}
+			ui++
+			r.Undeclared++
+		case fateDelete:
+			what := "marked window " + h.Title + " deleted"
+			if !left.Prune {
+				what = fmt.Sprintf("marked window %s deleted, as the file no longer declares it and the UI keeps %d at most", h.Title, MaxMarkedUI)
+			}
+			if _, err := t.ExecContext(t.ctx, "DELETE FROM marked WHERE id = ?", h.ID); err != nil {
+				return nil, err
+			}
+			if err := change(t, ConfigBy, what, nil, nil); err != nil {
+				return nil, err
+			}
+			gone[h.ID] = true
+			spans = append(spans, h.span(now))
+			r.Deleted++
+		default:
+			if _, err := t.ExecContext(t.ctx, "UPDATE marked SET origin = 'ui', declared = 0, given_back = 0 WHERE id = ?", h.ID); err != nil {
+				return nil, err
+			}
+			if err := change(t, ConfigBy, "marked window "+h.Title+undeclaredNow, nil, nil); err != nil {
+				return nil, err
+			}
+			if !h.GivenBack {
+				ui++
+			}
+			r.Undeclared++
+		}
+	}
+	// The bounds, with every other window: each declared one fits, or is
+	// skipped.
+	all, err := l.markedRows(t.ctx, t, "ORDER BY m.id")
+	if err != nil {
+		return nil, err
+	}
+	paired := map[int64]bool{}
+	for wi := range ms {
+		if pair[wi] >= 0 {
+			paired[have[pair[wi]].ID] = true
+		}
+	}
+	ld := l.newLoad()
+	for _, m := range all {
+		if !gone[m.ID] && !paired[m.ID] {
+			ld.add(m)
+		}
+	}
+	// The kinds the ledger keeps, of windows, expressions and those not
+	// let go yet: a window of a kind past them is skipped, not the file.
+	held, err := l.kinds(t.ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	kinds := map[string]bool{}
+	for _, k := range held {
+		kinds[k] = true
+	}
+	for wi, m := range ms {
+		if bad[wi] != nil {
+			continue
+		}
+		try := ld.clone()
+		try.add(m)
+		err := try.check()
+		if err == nil && !kinds[m.Kind] && len(kinds) >= MaxKinds {
+			err = invalid("the ledger keeps %d kinds of marked window at most: use one there is, or delete the windows of one no longer needed", MaxKinds)
+		}
+		if err != nil {
+			skip(KindMarked, want[wi].Line, m.Title, err)
+			if pair[wi] >= 0 {
+				ld.add(have[pair[wi]]) // kept as it was
+			}
+			pair[wi], bad[wi] = -2, err
+			continue
+		}
+		ld, kinds[m.Kind] = try, true
+	}
+	for wi, m := range ms {
+		if bad[wi] != nil {
+			continue
+		}
+		if pair[wi] < 0 {
+			if _, err := l.insertMarked(t, m, ConfigBy); err != nil {
+				return nil, err
+			}
+			if err := change(t, ConfigBy, "marked window "+m.Title+" kept", nil, m); err != nil {
+				return nil, err
+			}
+			spans = append(spans, m.span(now))
+			r.Made++
+			continue
+		}
+		h := have[pair[wi]]
+		what, n := "marked window "+m.Title+" kept", &r.Changed
+		if !h.Declared {
+			what, n = "marked window "+m.Title+declaredNow, &r.Adopted
+		}
+		if sameMarks(h, m) && h.Declared && h.Origin == OriginConfig {
+			continue
+		}
+		if _, err := t.ExecContext(t.ctx, "UPDATE marked SET origin = 'config' WHERE id = ?", h.ID); err != nil {
+			return nil, err
+		}
+		if err := l.updateMarked(t, h.ID, m, ConfigBy); err != nil {
+			return nil, err
+		}
+		m.ID = h.ID
+		if err := change(t, ConfigBy, what, nil, m); err != nil {
+			return nil, err
+		}
+		if !sameMarks(h, m) {
+			spans = append(spans, h.span(now), m.span(now))
+		}
+		*n++
+	}
+	return spans, nil
+}
+
+// clone is a copy of the load, to try one more window on.
+func (ld *markedLoad) clone() *markedLoad {
+	c := &markedLoad{l: ld.l, once: make(map[int64]map[string]int, len(ld.once)), repeats: slices.Clone(ld.repeats)}
+	for w, ks := range ld.once {
+		c.once[w] = maps.Clone(ks)
+	}
+	return c
+}

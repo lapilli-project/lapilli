@@ -1,0 +1,82 @@
+{{/* Marked windows (docs/design/marked.md): what was happening, a sale, a
+launch, a campaign, read with the incidents. Kinds and titles come from
+people and files: shown escaped, in <bdi>. */}}
+{{define "marked"}}{{$title := t "Marked windows"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
+<div class="head"><h1>{{$title}}</h1>{{template "action" (mainAction $ "Add a marked window" (editsAny $.Status) "team" "")}}</div>
+<p class="lede">{{t "A sale, a launch, a campaign: what was happening, read with the incidents. A firing that starts during a marked window and agrees with it is marked with its kind, and every count is read inside the kind and outside it. Nothing is excused: that is a quiet window's."}}</p>
+{{range .Kinds}}<h2><bdi>{{.Kind}}</bdi></h2>
+{{template "occurrences" (on $ .Lines)}}
+{{else}}<p class="quiet">{{if .Has}}{{t "No occurrence in the last twelve weeks, or in the next four."}}{{else}}{{t "None yet: keep one below, give --marked a file, or --mark an expression."}}{{end}}</p>{{end}}
+{{if .Cut}}<p class="quiet">{{t "The latest %d occurrences are listed." 100}}</p>{{end}}
+{{with .Windows}}<h2>{{t "Windows"}}</h2>
+<div class="scroll"><table>
+<thead><tr><th scope="col">{{t "Window"}}</th><th scope="col">{{t "Kind"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "Repeats"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "From"}}</th></tr></thead>
+<tbody>{{range .}}<tr>
+  <td><a href="{{$.Link (printf "/marked/%d" .ID)}}"><bdi>{{.Title}}</bdi></a>{{if .Declared}} {{template "declared"}}{{end}}</td><td><bdi>{{.Kind}}</bdi></td>
+  <td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td><td>{{template "repeats" (markedRepeats .Marked $loc)}}</td>
+  <td>{{template "windowteam" (windowTeam .TeamID (teamMap .TeamID .Team))}}</td><td class="labels">{{with .Labels}}<bdi>{{.}}</bdi>{{else}}{{t "all"}}{{end}}</td><td>{{template "markedorigin" .Origin}}</td>
+</tr>{{end}}</tbody>
+</table></div>{{end}}
+{{if editsAny $.Status}}
+<h2 id="add">{{t "Add a marked window"}}</h2>
+{{template "markedform" .Draft}}
+<p class="quiet">{{t "A kind is a name: a letter, then letters, digits and -, such as sale, launch or campaign; deploy and week are taken. A window that repeats does as a quiet window does, each repeat an occurrence of its own. With no labels, it marks every firing while it is on; with service=search, search's alone. A team's window marks only the rules its team owns."}}</p>
+{{end}}
+{{end}}{{template "bottom" .}}{{end}}
+
+{{/* Each occurrence, the latest first: inside its kind, and the four whole
+weeks before it, outside its kind. */}}
+{{define "occurrences"}}{{$loc := .P.Loc}}<div class="scroll"><table>
+<thead><tr><th scope="col">{{t "Occurrence"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col" class="n">{{t "Fired inside"}}</th><th scope="col" class="n">{{t "Precision inside"}}</th><th scope="col" class="n">{{t "Precision before"}}</th><th scope="col" class="n">{{t "Re-fired inside"}}</th><th scope="col" class="n">{{t "Noisy rules inside"}}</th><th scope="col">{{t "Incidents inside"}}</th><th scope="col"><span class="vh">{{t "Alert history"}}</span></th></tr></thead>
+<tbody>{{range .V}}<tr{{if .On}} class="current-window"{{end}}>
+  <td><a href="{{$.P.Link (printf "/marked/%d" .M.ID)}}"><bdi>{{.Title}}</bdi></a>{{if .On}} <span class="badge status-info"><span aria-hidden="true">●</span> {{t "on now"}}</span>{{else if .Ahead}} <span class="badge status-unknown">{{t "ahead"}}</span>{{end}}{{with .Team}}<br><span class="quiet"><bdi>{{.}}</bdi></span>{{end}}{{with .Labels}}<br><span class="quiet labels"><bdi>{{.}}</bdi></span>{{end}}</td>
+  <td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td>
+  {{if .Ahead}}<td class="n">–</td><td class="n">–</td><td class="n">–</td><td class="n">–</td><td class="n">–</td><td>–</td><td></td>{{else}}
+  <td class="n">{{.Inside.Firings}}{{if .Shared}} <span class="quiet" title="{{t "with another of its kind on the same days"}}">*</span>{{end}}</td><td class="n">{{.Inside.Precision}}</td><td class="n">{{.Before.Precision}}</td><td class="n">{{.Inside.Refired}}</td><td class="n">{{.Inside.Noisy}}</td>
+  <td>{{template "markedincidents" .Inside}}</td>
+  <td><a href="{{$.P.Link .Firings}}">{{t "Alert history"}}</a></td>{{end}}
+</tr>{{end}}</tbody>
+</table></div>
+<p class="quiet">{{t "Inside: the firings marked with the kind on the days the occurrence covers; * two of a kind on one day are counted together. Before: the four whole weeks before its first, outside the kind."}}</p>{{end}}
+
+{{define "markedincidents"}}{{with .Incidents}}{{if .Total}}{{t "%d: %d caught, %d only noisy, %d missed" .Total .Caught .NoisyOnly .Missed}}{{with .Lead}}; {{t "median lead %s" .}}{{end}}{{else}}–{{end}}{{end}}{{with .Impacts}}{{if .Total}}<br>{{t "impact %d: %d caught, %d only noisy, %d missed" .Total .Caught .NoisyOnly .Missed}}{{with .Lead}}; {{t "median lead %s" .}}{{end}}{{end}}{{end}}{{end}}
+
+{{define "markedorigin"}}{{if eq . "file"}}{{t "the marked file"}}{{else if eq . "config"}}{{t "config"}}{{else if eq . "expr"}}{{t "an expression (--mark)"}}{{else}}{{t "made here"}}{{end}}{{end}}
+
+{{define "markedform"}}<form method="post" action="/marked" class="grid">
+  {{with .ID}}<input type="hidden" name="id" value="{{.}}">{{end}}
+  <label>{{t "Kind"}} <input name="kind" required maxlength="32" pattern="[a-z][a-z0-9\-]*" value="{{.Kind}}" list="marked-kinds"{{if not .ID}} placeholder="sale"{{end}}></label>
+  <datalist id="marked-kinds">{{range .Kinds}}<option value="{{.}}"></option>{{end}}</datalist>
+  <label>{{t "Title"}} <input name="title" required maxlength="200" value="{{.Title}}"{{if not .ID}} placeholder="{{t "Autumn sale"}}"{{end}}></label>
+  <label>{{t "Start"}} <input name="start" type="datetime-local" required value="{{.Start}}"></label>
+  <label>{{t "End"}} <input name="end" type="datetime-local" required value="{{.End}}"></label>
+  {{template "windowrepeats" (windowForm .Every .On)}}
+  <label>{{t "Until (when it repeats; for good when empty)"}} <input name="until" type="date" value="{{.Until}}"></label>
+  {{template "windowteams" (pickOf .Pick .Team)}}
+  <label>{{t "Of what it is about (all when empty)"}} <input name="labels" value="{{.Labels}}"{{if not .ID}} placeholder="service=search"{{end}}></label>
+  <p class="row"><button>{{if .ID}}{{t "Save"}}{{else}}{{t "Add it"}}{{end}}</button></p>
+</form>{{end}}
+
+{{define "markedone"}}{{template "top" (titled . .View.Title)}}{{$loc := .Loc}}{{$ro := not (edits .Status .View.TeamID)}}{{with .View}}
+<h1><bdi>{{.Title}}</bdi></h1>
+<p class="lede">{{if .Declared}}{{template "declared"}} {{end}}<bdi>{{.Kind}}</bdi> · {{at $loc .Start}} → {{at $loc .End}} · {{template "repeats" (markedRepeats .Marked $loc)}} · {{template "windowteam" (windowTeam .TeamID (teamMap .TeamID .Team))}}{{with .Labels}} · <bdi>{{.}}</bdi>{{end}}<br>
+{{template "markedorigin" .Origin}}{{if and .By (not .Theirs)}}; {{t "kept by %s, %s." (who .By) (at $loc .Updated)}}{{end}}</p>
+<h2>{{t "Its occurrences"}}</h2>
+{{if .Lines}}{{template "occurrences" (on $ .Lines)}}{{if .Cut}}<p class="quiet">{{t "The latest %d occurrences are listed." 100}}</p>{{end}}{{else}}<p class="quiet">{{t "None in the last twelve weeks, or in the next four."}}</p>{{end}}
+<h2>{{t "Incidents during it"}}</h2>
+{{if .Incidents}}<ul class="plain">{{range .Incidents}}<li><a href="{{$.Incident .ID}}"><bdi>{{.ID}}</bdi></a>{{with .Title}} <bdi>{{.}}</bdi>{{end}} <span class="quiet">{{at $loc .Start}}</span></li>{{end}}</ul>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
+{{if .Declared}}
+<h2>{{t "Change it"}}</h2>
+<p>{{template "off" (offDeclared "Change it" "marked-why")}}</p>
+{{else if .Theirs}}
+<h2>{{t "Change it"}}</h2>
+<p class="quiet">{{if eq .Origin "file"}}{{t "The marked file keeps it: change it there."}}{{else}}{{t "An expression (--mark) found it: it is found again as the expression says."}}{{end}}</p>
+{{else if not $ro}}
+<h2>{{t "Change it"}}</h2>
+{{template "markedform" .Draft}}
+<form method="post" action="/marked/{{.ID}}/delete"><button class="quiet-button">{{t "Delete it"}}</button></form>
+{{else}}
+<h2>{{t "Change it"}}</h2>
+<p>{{template "off" (offTeam $ "Change it" "marked-why" .Team)}}</p>
+{{end}}
+{{end}}{{template "bottom" .}}{{end}}

@@ -100,6 +100,26 @@ type summaryRow struct {
 	crit       map[string]summaryCount
 	whole      bool
 	byCatching bool
+	// Marked holds each kind of marked window with an occurrence in the
+	// week (docs/design/marked.md), deploys left out: they are
+	// DuringDeploys. {} in a week with none.
+	Marked map[string]summaryMarked `json:"marked"`
+}
+
+// summaryMarked is a week's firings and incidents during the windows of a
+// kind: Windows, its occurrences in the week; the firings marked with it,
+// those that caught something and re-fired, with precision inside the
+// kind and outside it; and the incidents and impact windows that started
+// during one of its occurrences and agree with it.
+type summaryMarked struct {
+	Windows          int              `json:"windows"`
+	Firings          int              `json:"firings"`
+	Caught           int              `json:"caught"`
+	Precision        *float64         `json:"precision"`
+	PrecisionOutside *float64         `json:"precision_outside"`
+	Refired          int              `json:"refired"`
+	Incidents        summaryIncidents `json:"incidents"`
+	Impacts          summaryIncidents `json:"impacts"`
 }
 
 type summaryCount struct {
@@ -224,6 +244,10 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 	for _, in := range incs {
 		w := ledger.Week(s.l.Day(in.Start))
 		weekOf[w] = append(weekOf[w], in)
+	}
+	marked, err := s.markedWeeks(ctx, w1, w2, own)
+	if err != nil {
+		return nil, err
 	}
 	for _, w := range t.weeks {
 		from, to := s.l.Midnight(w), s.l.Midnight(w+7)
@@ -350,6 +374,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 					row.Goals = append(row.Goals, goalOn(g, &row))
 				}
 			}
+			row.Marked = marked.row(w, team, mine, row, t, weekOf[w], judged)
 			out.Rows = append(out.Rows, row)
 		}
 	}

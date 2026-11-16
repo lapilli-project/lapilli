@@ -241,6 +241,10 @@ type dashboard struct {
 	ReadOnly bool
 	// Deploys says the ledger keeps deploys.
 	Deploys bool
+	// Marked is the latest occurrence of a marked window on, or ended, in
+	// the weeks shown, with its firings inside and the weeks before
+	// (docs/design/marked.md); nil for none.
+	Marked *occLine
 }
 
 // outcomeLine is a line of the outcomes card, Warn when it asks for a look.
@@ -415,6 +419,9 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	}
 	drill(v.Tiles, last.Start.In(s.cfg.Loc).Format("2006-01-02"))
 	if v.Marks, err = s.marksOf(ctx, r.URL.Query(), t, o, team, ws, v.Deploys); err != nil {
+		return nil, err
+	}
+	if v.Marked, err = s.markedTile(ctx, t, team, l); err != nil {
 		return nil, err
 	}
 	v.Stones = stonesChart(l, ws, s.cfg.Loc)

@@ -14,7 +14,7 @@ import (
 
 // CSVColumns are the columns of a report's firings as CSV, in this order.
 // A column is only ever added at the end (docs/numbers.md).
-var CSVColumns = []string{"rule", "severity", "team", "labels", "start", "end", "stone", "no_record", "incidents", "refired", "during_deploy", "excused"}
+var CSVColumns = []string{"rule", "severity", "team", "labels", "start", "end", "stone", "no_record", "incidents", "refired", "during_deploy", "excused", "marked"}
 
 // CSV writes a report's firings, a row each, as CSV (docs/numbers.md):
 // with excused, the firings a quiet window excused, which a report leaves
@@ -71,8 +71,14 @@ func CSV(w io.Writer, r *Report, excused []Judged, teamOf func(rule string) stri
 		}
 		// An excused firing is in none of the numbers: it re-fired for none.
 		refired := j.Refired && !j.Excused
+		// The kinds it was marked with: none for an excused firing, which
+		// no window marks.
+		marked := []string{}
+		if !j.Excused {
+			marked = append(marked, j.Marked...)
+		}
 		row := []string{Cell(j.Rule), Cell(severity[j.Rule]), Cell(team), csvJSON(labels), csvTime(j.Start), end, stone,
-			csvBool(j.NoRecord && !j.Excused), csvJSON(incidents), csvBool(refired), csvBool(j.DuringDeploy), csvBool(j.Excused)}
+			csvBool(j.NoRecord && !j.Excused), csvJSON(incidents), csvBool(refired), csvBool(j.DuringDeploy), csvBool(j.Excused), csvJSON(marked)}
 		if err := cw.Write(row); err != nil {
 			return err
 		}

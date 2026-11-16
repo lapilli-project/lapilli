@@ -21,7 +21,7 @@ type StartCount struct {
 
 // FiringStarts counts the firings q picks by the quarter of an hour, in
 // UTC, each started in, the latest first: by q's span, rule and what it is
-// (Black, Excused, Refired, Deploy), not by Before or Limit. The database
+// (Black, Excused, Refired, Deploy, Kind), not by Before or Limit. The database
 // counts them: a row a quarter, 96 a day, however many fired.
 func (l *Ledger) FiringStarts(ctx context.Context, q FiringQuery) ([]StartCount, error) {
 	const quarter = int64(Quarter / time.Second)
@@ -44,6 +44,10 @@ func (l *Ledger) FiringStarts(ctx context.Context, q FiringQuery) ([]StartCount,
 	}
 	if q.Deploy {
 		sq += " AND f.deploy = 1"
+	}
+	if q.Kind != "" {
+		sq += " AND f.marked != 0 AND (f.marked & (" + kindBit + ")) != 0"
+		args = append(args, q.Kind)
 	}
 	rows, err := l.r.QueryContext(ctx, sq+" GROUP BY q ORDER BY q DESC", args...)
 	if err != nil {

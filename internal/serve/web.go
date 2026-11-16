@@ -132,6 +132,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /search", page("search", s.searchPage))
 	mux.HandleFunc("GET /lang", chooseLang)
 	s.workRoutes(mux, page)
+	s.markedRoutes(mux, page)
 	s.reportRoutes(mux, page)
 	s.rolesRoutes(mux, page)
 	s.orphansRoutes(mux, page)

@@ -325,6 +325,18 @@ func (s *Server) buildReport(ctx context.Context, r ledger.Scheduled, team *ledg
 					}
 				}
 			}
+		case "marked":
+			// Marked windows (docs/design/marked.md): each occurrence on in
+			// the span, and each kind's firings inside beside outside.
+			var mk *markedReport
+			if mk, err = s.markedOfReport(ctx, rep, from, to, team, loc); err == nil {
+				if line = mk.text(); line == "" {
+					line = tr(l, "No marked window was on in the span.")
+				}
+				if mk != nil {
+					nums = mk
+				}
+			}
 		case "notifications":
 			var sent *sentLine
 			if sent, err = s.sent(ctx, rep, from, to); err == nil {

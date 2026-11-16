@@ -84,6 +84,12 @@ const nocRules = `groups:
 // during a deploy of search, that caught an impact window: run once.
 func nocServer(t *testing.T) *Server {
 	t.Helper()
+	return nocServerOf(t, true)
+}
+
+// nocServerOf is nocServer, with its marked file or without any.
+func nocServerOf(t *testing.T, withMarked bool) *Server {
+	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
 	hist := filepath.Join(dir, "search.txt")
@@ -92,8 +98,19 @@ func nocServer(t *testing.T) *Server {
 	os.WriteFile(hist, []byte("4f2a9c1e "+nocBase.Add(55*time.Minute).UTC().Format(time.RFC3339)+"\n"), 0o644)
 	deploys := filepath.Join(dir, "deploys.yaml")
 	os.WriteFile(deploys, []byte("deploys:\n  - labels: {service: search}\n    history: search.txt\n"), 0o644)
+	// A sale over the first two flaps and a noise, and a launch of search
+	// over the third flap and the impact window it caught.
+	marked := filepath.Join(dir, "marked.yaml")
+	os.WriteFile(marked, []byte(fmt.Sprintf(`marked:
+  - {kind: sale, title: Sunday sale, start: %s, end: %s}
+  - {kind: launch, title: "Search, new ranking", start: %s, end: %s, labels: {service: search}}
+`, nocBase.Add(-time.Hour).Format(time.RFC3339), nocBase.Add(45*time.Minute).Format(time.RFC3339),
+		nocBase.Add(50*time.Minute).Format(time.RFC3339), nocBase.Add(80*time.Minute).Format(time.RFC3339))), 0o644)
 	s, rules := server(t, func(c *Config) {
 		c.Deploys = deploys
+		if withMarked {
+			c.Marked = marked
+		}
 		c.Options.DeployAfter = 10 * time.Minute
 		c.Options.Hours = verdict.DefaultHours(time.UTC)
 		c.Backfill = 20 * 24 * time.Hour
@@ -301,6 +318,23 @@ func TestSummaryAPI(t *testing.T) {
 	if team.Firings != 8 || team.BySeverity["warning"].Firings != 0 || team.Impacts.Total != 1 || team.Incidents.Total != 0 {
 		t.Errorf("the search team's: %+v", team)
 	}
+	// Marked windows: the sale over two flaps and a noise, caught nothing;
+	// the launch over the flap that caught the impact window, 5m before.
+	sale, launch := all.Marked["sale"], all.Marked["launch"]
+	if sale.Windows != 1 || sale.Firings != 3 || sale.Caught != 0 || sale.Precision == nil || *sale.Precision != 0 || sale.Impacts.Total != 0 ||
+		sale.PrecisionOutside == nil || *sale.PrecisionOutside != 1/float64(all.Firings-3) {
+		t.Errorf("the sale: %+v", sale)
+	}
+	if launch.Windows != 1 || launch.Firings != 1 || launch.Caught != 1 || launch.Impacts.Total != 1 || launch.Impacts.Caught != 1 ||
+		launch.Impacts.MedianLead == nil || *launch.Impacts.MedianLead != 300 || launch.Incidents.MedianLead != nil || len(all.Marked) != 2 {
+		t.Errorf("the launch: %+v, of %+v", launch, all.Marked)
+	}
+	if ts := team.Marked["sale"]; ts.Firings != 2 || team.Marked["launch"].Firings != 1 {
+		t.Errorf("the search team's marked: %+v", team.Marked)
+	}
+	if w := sum.Rows[2]; w.Marked == nil || len(w.Marked) != 0 {
+		t.Errorf("a week with no marked window: %+v", w.Marked)
+	}
 	if all.OffHours == nil || all.Asleep == nil {
 		t.Errorf("hours: %+v %+v", all.OffHours, all.Asleep)
 	}
@@ -310,7 +344,8 @@ func TestSummaryAPI(t *testing.T) {
 	}
 	// The fields a dashboard reads, by name: the schema they keep.
 	for _, field := range []string{`"schema"`, `"rows"`, `"critical"`, `"share_caught"`, `"by_severity"`, `"refired"`, `"worst"`, `"off_hours"`,
-		`"asleep"`, `"during_deploys"`, `"precision_without"`, `"incidents"`, `"impacts"`, `"median_lead_seconds"`, `"noisy_only"`, `"missed"`, `"partial"`} {
+		`"asleep"`, `"during_deploys"`, `"precision_without"`, `"incidents"`, `"impacts"`, `"median_lead_seconds"`, `"noisy_only"`, `"missed"`, `"partial"`,
+		`"marked"`, `"windows"`, `"precision_outside"`} {
 		if !strings.Contains(body, field) {
 			t.Errorf("no %s", field)
 		}
@@ -367,6 +402,12 @@ func TestNOCMetrics(t *testing.T) {
 		`lapilli_incident_lead_seconds{incident="impact-`,
 		`lapilli_incident_team{incident="INC-1"} 1`,
 		"lapilli_serve_deploys_last_timestamp_seconds " + strconv.FormatInt(nocBase.Add(55*time.Minute).Unix(), 10),
+		`lapilli_rule_firings_marked{rule="Flap",severity="critical",team="search",kind="sale"} 2`,
+		`lapilli_rule_firings_marked{rule="Noise",severity="warning",kind="sale"} 1`,
+		`lapilli_rule_caught_marked{rule="Flap",severity="critical",team="search",kind="launch"} 1`,
+		`lapilli_marked_on{kind="launch"} 0`,
+		`lapilli_marked_on{kind="sale"} 0`,
+		"lapilli_serve_marked_read_timestamp_seconds " + strconv.FormatInt(now.Unix(), 10),
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/metrics: no %q", want)
@@ -379,6 +420,9 @@ func TestNOCMetrics(t *testing.T) {
 	}
 	if strings.Contains(body, "lapilli_rule_refired_weeks{rule=\"Noise\"") {
 		t.Error("/metrics: a rule that never re-fired has weeks with a re-fire")
+	}
+	if strings.Contains(body, `kind="deploy"`) || strings.Contains(body, `lapilli_rule_firings_marked{rule="Noise",severity="warning",kind="launch"}`) {
+		t.Error("/metrics: a series of deploys as a kind, or of a rule and kind with no firings")
 	}
 }
 
@@ -404,7 +448,7 @@ func TestNOCDigest(t *testing.T) {
 		}
 	}
 	about := digestAbout(rep, text, "", nil)
-	if err := s.aboutMore(ctx, about, rep, from, to, true); err != nil {
+	if err := s.aboutMore(ctx, about, rep, from, to, nil); err != nil {
 		t.Fatal(err)
 	}
 	if rf, ok := about["refired"].(*refires); !ok || rf.Refired != 7 || rf.Deploys != 1 || rf.Worst == nil {

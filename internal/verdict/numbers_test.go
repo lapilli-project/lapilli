@@ -23,10 +23,11 @@ var stableFields = map[string][]string{
 	"settings":                  {"lead_ns", "match", "refire_ns", "unknown_length_ns", "record_lookback_ns", "impact_from", "record_by_week", "impact_signals", "impact_rules"},
 	"settings.impact_signals[]": {"name", "for_ns", "match", "record", "start"},
 	"settings.impact_rules[]":   {"rules", "labels", "signals", "match"},
-	"rules[]":                   {"rule", "severity", "firings", "white", "black", "refired", "noisy", "unjudged", "no_record", "replayed", "unsupported", "incidents", "first", "alone", "spare", "off_hours", "off_hours_black", "asleep", "asleep_black", "excused", "during_deploys", "during_deploys_caught", "during_deploys_unjudged", "impact_rule"},
+	"rules[]":                   {"rule", "severity", "firings", "white", "black", "refired", "noisy", "unjudged", "no_record", "replayed", "unsupported", "incidents", "first", "alone", "spare", "off_hours", "off_hours_black", "asleep", "asleep_black", "excused", "during_deploys", "during_deploys_caught", "during_deploys_unjudged", "impact_rule", "marked"},
+	"rules[].marked.*":          {"firings", "caught", "refired", "unjudged"},
 	"incidents[]":               {"id", "title", "start", "end", "labels", "candidate", "caught_by", "signal"},
 	"incidents[].caught_by[]":   {"rule", "delay_ns", "noisy"},
-	"firings[]":                 {"rule", "labels", "start", "end", "white", "incidents", "no_record", "refired", "during_deploy", "signals"},
+	"firings[]":                 {"rule", "labels", "start", "end", "white", "incidents", "no_record", "refired", "during_deploy", "signals", "marked"},
 }
 
 // A report with every field docs/numbers.md promises set, none left out as
@@ -41,11 +42,12 @@ func fullReport() *Report {
 			ImpactRules:   []RuleEntry{{Rules: "^BackendMissing$", Labels: incident.Labels{"team": {"platform"}}, Signals: []string{"probe"}, Match: []string{"backend"}}}},
 		Rules: []RuleResult{{Rule: "ApiErrors", Severity: "critical", Firings: 3, White: 1, Black: 2, Refired: 1, Noisy: true, Unjudged: 1, NoRecord: true,
 			Replayed: true, Unsupported: "x", Incidents: 1, First: 1, Alone: 1, Spare: true, OffHours: 1, OffHoursBlack: 1, Asleep: 1, AsleepBlack: 1,
-			Excused: 1, DuringDeploys: 1, DeploysCaught: 1, DeploysUnjudged: 1, ImpactRule: 1}},
+			Excused: 1, DuringDeploys: 1, DeploysCaught: 1, DeploysUnjudged: 1, ImpactRule: 1,
+			Marked: map[string]MarkedCount{"sale": {Firings: 1, Caught: 1, Refired: 1, Unjudged: 1}}}},
 		Incidents: []IncidentResult{{Incident: incident.Incident{ID: "INC-1", Title: "Errors", Start: t0, End: t0.Add(time.Hour),
 			Labels: incident.Labels{"service": {"api"}}, Candidate: true, Signal: "probe"}, CaughtBy: []Catch{{Rule: "ApiErrors", Delay: time.Minute, Noisy: true}}}},
 		Firings: []Judged{{Firing: firing.Firing{Rule: "ApiErrors", Labels: map[string]string{"service": "api"}, Start: t0, End: t0.Add(time.Hour)},
-			White: true, Incidents: []string{"INC-1"}, NoRecord: true, Refired: true, DuringDeploy: true, Signals: []string{"probe"}}},
+			White: true, Incidents: []string{"INC-1"}, NoRecord: true, Refired: true, DuringDeploy: true, Signals: []string{"probe"}, Marked: []string{"sale"}}},
 	}
 }
 
@@ -67,6 +69,13 @@ func TestReportFieldsStable(t *testing.T) {
 				continue
 			}
 			name, list := strings.CutSuffix(part, "[]")
+			if name == "*" {
+				// A map by name (rules[].marked, by kind): its one value.
+				for _, x := range v.(map[string]any) {
+					v = x
+				}
+				continue
+			}
 			v = v.(map[string]any)[name]
 			if list {
 				v = v.([]any)[0]
@@ -118,7 +127,7 @@ func TestReportFieldsStable(t *testing.T) {
 // The CSV's columns keep their names and order, and the document lists
 // them so.
 func TestCSVColumns(t *testing.T) {
-	want := []string{"rule", "severity", "team", "labels", "start", "end", "stone", "no_record", "incidents", "refired", "during_deploy", "excused"}
+	want := []string{"rule", "severity", "team", "labels", "start", "end", "stone", "no_record", "incidents", "refired", "during_deploy", "excused", "marked"}
 	if !slices.Equal(CSVColumns, want) {
 		t.Errorf("columns %q, want %q: a column is only added at the end", CSVColumns, want)
 	}

@@ -756,6 +756,16 @@ one (agreeing with it on every label both have), from `before` (0) before
 its start to `after` (10m) after its end, is marked, judged as ever, and
 shown apart: a column and an order on the rules, a tile on the overview,
 the digest, `/metrics` and `/api/v1/summary`, with precision both ways.
+`serve.marked` names a ConfigMap holding the file `--marked` reads, and
+`serve.mark` the PromQL expressions (`--mark`), each a `kind`, an `expr`
+that returns something while a window of the kind is on, and the labels of
+its series its windows keep (`match`, none by default): marked windows, a
+sale, a launch, a campaign (docs/design/marked.md). A firing that came
+during one is marked with its kind, judged as ever and never excused, and
+every count is read inside the kind and outside it: the Marked windows
+page, the rules list (`during:sale`), a rule's page, the overview, reports
+and the digest, `/metrics` and `/api/v1/summary`. `serve.config`'s
+`marked:` declares them too.
 `serve.checkContent.runbookAnnotations` names the annotations a runbook is
 read from, the first a rule has; `serve.checkContent.runbookBase`, an https
 URL a runbook that is a path in the rules' repository is a link under.

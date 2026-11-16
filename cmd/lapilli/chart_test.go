@@ -684,3 +684,28 @@ func TestChartSaysAtomicDefaults(t *testing.T) {
 		}
 	}
 }
+
+// serve.marked names the ConfigMap --marked's file is mounted from, and
+// serve.mark the expressions, each with the labels its windows keep: the
+// flags as the command takes them, and none by default.
+func TestChartMarked(t *testing.T) {
+	out, err := helmTemplate(t, serveValues...)
+	if err != nil || strings.Contains(out, "--mark") {
+		t.Fatalf("by default: %v\n%s", err, out)
+	}
+	out, err = helmTemplate(t, append(serveValues, "--set", "serve.marked.configMap.name=sales", "--set", "serve.mark[0].kind=sale",
+		"--set", "serve.mark[0].expr=shop_sale_active == 1", "--set", "serve.mark[0].match={region,country}", "--set", "serve.mark[1].kind=launch",
+		"--set", "serve.mark[1].expr=flag_on > 0")...)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, want := range []string{`- "--marked=/etc/lapilli/marked/marked.yaml"`, `- "--mark=sale=shop_sale_active == 1"`, `- "--mark-match=sale=region,country"`,
+		`- "--mark=launch=flag_on > 0"`, "mountPath: /etc/lapilli/marked", "name: sales"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no %s in\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "--mark-match=launch") {
+		t.Error("a --mark-match for an expression that keeps no labels")
+	}
+}
