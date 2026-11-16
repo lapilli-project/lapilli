@@ -1,6 +1,8 @@
 package rules
 
 import (
+	"errors"
+	"fmt"
 	"maps"
 	"math"
 	"slices"
@@ -309,6 +311,27 @@ const (
 	maxExpr  = 16 << 10
 	maxDepth = 32
 )
+
+// ReadExpr reads an expression as Lapilli reads one, without a PromQL
+// parser of its own: its strings end, its brackets match, 16 KiB and 32
+// levels of brackets at most, as the near misses read their rules. Nil
+// says it reads; not that the history takes it as written.
+func ReadExpr(expr string) error {
+	switch {
+	case strings.TrimSpace(expr) == "":
+		return errors.New("it is empty")
+	case len(expr) > maxExpr:
+		return fmt.Errorf("it is longer than %d KiB", maxExpr>>10)
+	}
+	deepest := 0
+	if !walk(expr, func(_, depth int) { deepest = max(deepest, depth) }) {
+		return errors.New("a string doesn't end, or a bracket isn't matched")
+	}
+	if deepest >= maxDepth {
+		return fmt.Errorf("its brackets are more than %d deep", maxDepth)
+	}
+	return nil
+}
 
 // comparisons are a PromQL expression's comparisons with a number: its
 // own, when it is one, or else each operand's of a set operation, and so on

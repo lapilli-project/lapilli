@@ -56,6 +56,7 @@ type Proxy struct {
 	KeysURL string
 
 	verifier *oidc.IDTokenVerifier
+	keys     *Keys
 	alb      *albKeys
 }
 
@@ -110,11 +111,11 @@ func NewProxy(p Proxy) (*Proxy, error) {
 		if p.KeysURL == "" {
 			p.KeysURL = iapKeys
 		}
-		keys := NewKeys(p.KeysURL, p.Client, []string{"ES256"}, p.Now)
-		p.verifier = oidc.NewVerifier(p.Issuer, keys, &oidc.Config{ClientID: p.Audience, SupportedSigningAlgs: keys.Algs(), Now: p.Now})
+		p.keys = NewKeys(p.KeysURL, p.Client, []string{"ES256"}, p.Now)
+		p.verifier = oidc.NewVerifier(p.Issuer, p.keys, &oidc.Config{ClientID: p.Audience, SupportedSigningAlgs: p.keys.Algs(), Now: p.Now})
 	case JWKS:
-		keys := NewKeys(p.JWKS, p.Client, nil, p.Now)
-		p.verifier = oidc.NewVerifier(p.Issuer, keys, &oidc.Config{ClientID: p.Audience, SupportedSigningAlgs: keys.Algs(), Now: p.Now})
+		p.keys = NewKeys(p.JWKS, p.Client, nil, p.Now)
+		p.verifier = oidc.NewVerifier(p.Issuer, p.keys, &oidc.Config{ClientID: p.Audience, SupportedSigningAlgs: p.keys.Algs(), Now: p.Now})
 	case AWSALB:
 		p.Header = "X-Amzn-Oidc-Data"
 		m := albARN.FindStringSubmatch(p.ALBArn)
@@ -123,6 +124,21 @@ func NewProxy(p Proxy) (*Proxy, error) {
 	}
 	p.Header = http.CanonicalHeaderKey(p.Header)
 	return &p, nil
+}
+
+// ErrKeyPerToken is a sign-in whose keys are fetched one by one, by the
+// key each token names (an AWS load balancer's): there is no set to fetch
+// before a token comes.
+var ErrKeyPerToken = errors.New("its keys are fetched by the key each token names, so none can be fetched before one comes")
+
+// FetchKeys fetches the sign-in's keys once, as the first request would:
+// how many public keys the set holds; ErrKeyPerToken for an AWS load
+// balancer's.
+func (p *Proxy) FetchKeys(ctx context.Context) (int, error) {
+	if p.keys == nil {
+		return 0, ErrKeyPerToken
+	}
+	return p.keys.Fetch(ctx)
 }
 
 // ErrNoHeader is a request without the signed header: one that didn't come

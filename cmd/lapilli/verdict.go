@@ -1617,29 +1617,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 // their hosts, each as a whole word, any IP address with its port, the
 // tenants, and a Google Cloud project.
 func (f *verdictFlags) forComment(c *verdict.Comparison, stderr io.Writer) {
-	type hid struct{ val, as string }
-	var hide []hid
-	for _, w := range []struct{ flag, val string }{{"--prometheus", f.promURL}, {"--loki", f.loki}, {"--grafana", f.grafana},
-		{"--ruler", f.ruler}, {"--gcp-project", f.gcpProj}, {"--ruler-tenant", f.rulerTenant}, {"--loki-tenant", f.lokiTenant}} {
-		if w.val == "" {
-			continue
-		}
-		hide = append(hide, hid{w.val, "[" + w.flag + "]"})
-		if u, err := url.Parse(w.val); err == nil && u.Host != "" {
-			hide = append(hide, hid{u.Host, "[" + w.flag + "]"}, hid{u.Hostname(), "[" + w.flag + "]"})
-			if u.User != nil && u.User.Username() != "" {
-				hide = append(hide, hid{u.User.Username(), "[user]"})
-			}
-		}
-	}
-	slices.SortStableFunc(hide, func(a, b hid) int { return len(b.val) - len(a.val) })
-	scrub := func(s string) string {
-		s = userinfo.ReplaceAllString(s, "$1")
-		for _, h := range hide {
-			s = replaceWord(s, h.val, h.as)
-		}
-		return address.ReplaceAllString(s, "[address]")
-	}
+	scrub := f.scrubber()
 	for _, rep := range []*verdict.Report{c.Before, c.After} {
 		if rep == nil {
 			continue
@@ -1659,6 +1637,38 @@ func (f *verdictFlags) forComment(c *verdict.Comparison, stderr io.Writer) {
 				r.Unsupported = scrub(r.Unsupported)
 			}
 		}
+	}
+}
+
+// scrubber takes where the history is out of a text: the URLs given, the
+// user names in them and their hosts, each as a whole word, any IP
+// address with its port, the tenants, and a Google Cloud project; more,
+// those of more flags (lapilli preflight's).
+func (f *verdictFlags) scrubber(more ...[2]string) func(string) string {
+	type hid struct{ val, as string }
+	var hide []hid
+	given := [][2]string{{"--prometheus", f.promURL}, {"--loki", f.loki}, {"--grafana", f.grafana},
+		{"--ruler", f.ruler}, {"--gcp-project", f.gcpProj}, {"--ruler-tenant", f.rulerTenant}, {"--loki-tenant", f.lokiTenant}}
+	for _, w := range append(given, more...) {
+		flag, val := w[0], w[1]
+		if val == "" {
+			continue
+		}
+		hide = append(hide, hid{val, "[" + flag + "]"})
+		if u, err := url.Parse(val); err == nil && u.Host != "" {
+			hide = append(hide, hid{u.Host, "[" + flag + "]"}, hid{u.Hostname(), "[" + flag + "]"})
+			if u.User != nil && u.User.Username() != "" {
+				hide = append(hide, hid{u.User.Username(), "[user]"})
+			}
+		}
+	}
+	slices.SortStableFunc(hide, func(a, b hid) int { return len(b.val) - len(a.val) })
+	return func(s string) string {
+		s = userinfo.ReplaceAllString(s, "$1")
+		for _, h := range hide {
+			s = replaceWord(s, h.val, h.as)
+		}
+		return address.ReplaceAllString(s, "[address]")
 	}
 }
 

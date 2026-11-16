@@ -547,13 +547,17 @@ during deploys, incidents and impact windows caught and missed, the median
 lead; docs/design/noc.md). MCP: /mcp. Also /metrics, /healthz, /readyz.
 `
 
-func runServe(args []string, stdout, stderr io.Writer) int {
-	for _, a := range args {
-		if a == "-h" || a == "--help" {
-			fmt.Fprint(stdout, serveUsage)
-			return 0
-		}
-	}
+// serveSetup is what lapilli serve's flags say, as serve reads them: its
+// configuration, and the flags it shares with lapilli verdict.
+type serveSetup struct {
+	cfg serve.Config
+	f   *verdictFlags
+}
+
+// readServe reads lapilli serve's flags, and refuses a flag, or a
+// combination of them, that serve refuses: lapilli preflight reads them
+// so too.
+func readServe(args []string) (serveSetup, error) {
 	cfg := serve.Config{
 		Ledger: "lapilli-ledger", Listen: "127.0.0.1:8080", Every: time.Hour, Settle: time.Hour,
 		Backfill: 28 * 24 * time.Hour, Keep: 400 * 24 * time.Hour, Watch: time.Minute,
@@ -1070,8 +1074,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--catch-up-hours %s is shorter than --every %s: a run might never fall in it", cfg.CatchUpHours, time.Duration(cfg.Every))
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "lapilli serve: %v\nRun \"lapilli serve -h\" for the options.\n", err)
-		return 2
+		return serveSetup{}, err
 	}
 	if !timeoutSet {
 		f.timeout = 50 * time.Minute
@@ -1114,7 +1117,22 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		px.Claims = claims
 		cfg.Proxy = &px
 	}
+	return serveSetup{cfg: cfg, f: f}, nil
+}
 
+func runServe(args []string, stdout, stderr io.Writer) int {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			fmt.Fprint(stdout, serveUsage)
+			return 0
+		}
+	}
+	st, err := readServe(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "lapilli serve: %v\nRun \"lapilli serve -h\" for the options.\n", err)
+		return 2
+	}
+	cfg, f := st.cfg, st.f
 	log := slog.New(slog.NewTextHandler(stderr, nil))
 	if f.checkGrafana != "" && f.grafanaTk != "" && plainHTTP(f.checkGrafana) {
 		log.Warn("--check-grafana is plain http: the token goes unencrypted")

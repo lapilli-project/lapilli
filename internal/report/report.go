@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"lapilli.dev/internal/egress"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -143,6 +144,7 @@ func secretURL(file, flag string) (string, error) {
 // client doesn't follow redirects: Go would turn a POST into a GET, and
 // send the webhook's secret URL along as the Referer.
 var client = &http.Client{
+	Transport:     egress.Wrap(nil),
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 

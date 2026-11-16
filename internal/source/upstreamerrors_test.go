@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/egress"
 	"lapilli.dev/internal/rules"
 )
 
@@ -126,7 +127,7 @@ func TestCloudErrorEchoesToken(t *testing.T) {
 // whatever the context: its headers within half a minute, the whole within
 // a minute.
 func TestGrafanaClientGivesUp(t *testing.T) {
-	tr, ok := client.Transport.(*http.Transport)
+	tr, ok := egress.Unwrap(client.Transport).(*http.Transport)
 	if client.Timeout <= 0 || client.Timeout > 2*time.Minute || !ok || tr.ResponseHeaderTimeout <= 0 || tr.ResponseHeaderTimeout > time.Minute {
 		t.Errorf("the client to Grafana waits %v, %v for headers", client.Timeout, tr)
 	}

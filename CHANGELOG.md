@@ -24,6 +24,34 @@
   team column among it; stderr isn't redacted, and the run says so
   there.
 
+- **`lapilli preflight`: what serve will meet, before it is deployed.**
+  It takes `lapilli serve`'s flags, read and refused as serve reads them
+  (exit 2), and says of each item ok, a problem or unknown, with why: the
+  rules read and how many can be replayed; the history answering
+  `vector(1)`, signed as serve signs it, Loki's labels, Grafana's data
+  sources and notifications read with its token; the files, the secrets'
+  files (by path and length), the ledger's schema and what serve would do
+  to it as it starts (an upgrade, after which a release before it can't
+  open it); the sign-in's discovery and keys; who may change what, and
+  each port. It estimates, asking nothing more, the requests of a day of
+  hourly runs and of the backfill, as `replay.Plan` counts what a replay
+  asks (`TestPlanIsRun` holds the two alike), how long they take at
+  `--max-rate` and `--catch-up-rate`, how many nights of
+  `--catch-up-hours` the backfill takes, what is asked beside the runs,
+  and the memory to give the pod, from a day's count of ALERTS, or the
+  caps' bound. It writes nothing and replays nothing: every request goes
+  through an allowlist that refuses any other before it is sent
+  (`internal/egress`, which every client of Lapilli's sends through), the
+  ledger is read through `ledger.Probe` (SQLite `mode=ro`, `query_only`,
+  and `immutable` with no log beside it; Postgres with
+  `default_transaction_read_only`), and no rule, `--impact` nor `--guard`
+  is evaluated. `--json` gives the report, its ids and fields listed in
+  docs/numbers.md; `--offline` asks nothing, for CI; `--fail-unknown`
+  exits 1 for an unknown. Output is redacted as a pull request's backtest
+  comment is. Whether a token or a cloud's identity may write
+  (`--changes`) is unknown in this release: the identity is taken, and
+  nothing written (docs/design/preflight.md, step 1).
+
 ### Fixed
 
 - **CSV cells as a reader sees them.** `--csv` and `format=csv` wrote a

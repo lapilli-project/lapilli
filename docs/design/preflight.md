@@ -1,7 +1,9 @@
 # `lapilli preflight`: what serve will meet, before it is deployed
 
-Status: accepted, not built. Merged on 2026-11-16, before its week was out,
-by the maintainer's decision (#92), after a review whose changes are in it.
+Status: accepted; step 1 built. Merged on 2026-11-16, before its week was
+out, by the maintainer's decision (#92), after a review whose changes are in
+it. What building step 1 found the design said otherwise than the code can
+do is in "As built" below.
 Under [GOVERNANCE.md](../../GOVERNANCE.md) a new command is designed first,
 as a pull request. It adds nothing to the ledger, takes no input from
 outside but the answers of the APIs serve already reads, and changes no
@@ -458,6 +460,59 @@ does, and nothing else of size.
 5. **In serve**: the same items on the Settings page, worked out once a
    day, for a deployment that has drifted (a token rotated without its
    scope)?
+
+## As built (step 1)
+
+Where building it found the design said more, or otherwise, than the code
+can do:
+
+- **vector(1) is a range of one step.** Lapilli's client asks
+  `/api/v1/query_range`, never `/api/v1/query`, so `vector(1)` and the
+  ALERTS count are asked as a range whose start is its end. The allowlist
+  holds that form: the query's text exactly, the start and end within the
+  last ten minutes, a step, nothing else.
+- **SQLite read-only takes `immutable` too.** Opened `mode=ro` alone, SQLite
+  makes a `-wal` and a `-shm` beside a ledger that has none, as a ledger
+  serve closed hasn't (`TestProbeSQLite` fails so). The probe adds
+  `immutable=1` when there is no `-wal`, so nothing is made; with one, a
+  serve has it open, and it is read through it, `mode=ro`.
+- **`history.grafana` asks through the proxy for Loki's data sources
+  alone.** serve replays Grafana's rules of PromQL against `--prometheus`,
+  not through Grafana's data source proxy; only a Loki data source's are
+  asked through it (`source.Logs`). So the item reads each data source
+  (`GET /api/datasources/uid/UID`, twenty at most), and, for each of
+  Loki's kind, its labels over the last five minutes through the proxy;
+  `vector(1)` through the proxy would check a path no replay takes.
+- **Not every credential chain takes a client.** Every client of
+  Lapilli's own goes through the allowlist (`internal/egress`), and so do
+  AWS's configuration, Azure's credentials and Google's token source,
+  which take one while it is set. Three don't: Google's metadata server
+  (GKE's Workload Identity) is asked by `cloud.google.com/go/compute/metadata`,
+  whose client takes no transport; Azure's default credential runs the
+  Azure CLI, a process, where there is one; OCI's instance principal asks
+  its metadata service with the OCI SDK's own client. Each reads a
+  credential and nothing else, outside the allowlist's count.
+- **The allowlist reads rulers and a cloud's alarms by method and path.**
+  Their lists page, so a `GET` under the URL given takes any query; a
+  CloudWatch read is a `POST` whose `X-Amz-Target` is `DescribeAlarms`. A
+  credential endpoint is matched by host and action: STS's `AssumeRole`,
+  `AssumeRoleWithWebIdentity` and `GetCallerIdentity`, Microsoft Entra's
+  token and discovery paths, Google's token endpoints and IAM Credentials'
+  `generateAccessToken`, the instance metadata's credential paths.
+- **`grafana.write` is unknown in step 1.** It isn't asked; step 2 builds
+  it, once OSS is checked.
+- **An AWS load balancer's keys can't be fetched before a request.** They
+  are fetched by the key each token names: `signin` is unknown for
+  `--proxy-jwt aws-alb`.
+- **`verdict.Clean` writes a control or format character as `\u{...}`**,
+  not U+FFFD, in what a server answered.
+- **A write to Postgres is told by its rows.** `pg_stat_user_tables`
+  counts a session's writes when its statistics are flushed, not as it
+  writes, so the tests read a digest of every row before and after
+  (`ledgertest.Digest`), and a write asked on the probe's session is
+  refused by the server.
+- **The memory's limit is twice its request**: Go's collector lets the heap
+  grow to about twice what is live before it collects (`GOGC=100`).
 
 ## Steps
 

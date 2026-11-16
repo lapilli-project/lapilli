@@ -30,6 +30,8 @@ import (
 	"time"
 
 	jose "github.com/go-jose/go-jose/v4"
+
+	"lapilli.dev/internal/egress"
 )
 
 // Asymmetric are the signing algorithms taken: those of a key pair. A
@@ -61,7 +63,7 @@ const (
 // Client is an HTTP client for the identity provider: a time limit, and no
 // redirects, so nothing is fetched from anywhere but the URL given.
 func Client(rt http.RoundTripper) *http.Client {
-	return &http.Client{Transport: rt, Timeout: fetchTimeout, CheckRedirect: func(*http.Request, []*http.Request) error {
+	return &http.Client{Transport: egress.Wrap(rt), Timeout: fetchTimeout, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return errors.New("redirects aren't followed")
 	}}
 }
@@ -207,6 +209,15 @@ func (k *Keys) refetch(ctx context.Context, tried time.Time) ([]jose.JSONWebKey,
 	k.keys, k.at = fresh, now
 	k.mu.Unlock()
 	return fresh, nil
+}
+
+// Fetch fetches the keys at the URL once, as the first token would, and
+// says how many public keys the set holds; it keeps none.
+func (k *Keys) Fetch(ctx context.Context) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	defer cancel()
+	ks, err := k.fetch(ctx)
+	return len(ks), err
 }
 
 // fetch reads the keys at the URL: public keys of a key pair alone.

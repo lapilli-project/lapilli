@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,4 +112,38 @@ func run(t testing.TB, conn, q string) {
 	if _, err := c.Exec(ctx, q); err != nil {
 		t.Fatalf("%s: %v", q, err)
 	}
+}
+
+// Digest is a digest of every row of every table in the schema a
+// connection string's search_path names first: the same while nothing is
+// written to them. Postgres's own counts of rows written
+// (pg_stat_user_tables) are kept when a session's statistics are flushed,
+// not as it writes, so a test of no writes reads the rows.
+func Digest(t testing.TB, conn string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	c, err := pgx.Connect(ctx, conn)
+	if err != nil {
+		t.Fatalf("%s: %v", Env, err)
+	}
+	defer c.Close(ctx)
+	rows, err := c.Query(ctx, `SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' ORDER BY 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tables, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	for _, name := range tables {
+		var sum string
+		q := "SELECT coalesce(md5(string_agg(md5(x::text), '' ORDER BY md5(x::text))), '') FROM " + pgx.Identifier{name}.Sanitize() + " x"
+		if err := c.QueryRow(ctx, q).Scan(&sum); err != nil {
+			t.Fatal(err)
+		}
+		b.WriteString(name + ":" + sum + "\n")
+	}
+	return b.String()
 }

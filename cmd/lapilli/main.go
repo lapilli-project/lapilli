@@ -28,12 +28,14 @@ Usage:
   lapilli serve --rules DIR --prometheus URL
                                      keep judging, every hour, into a
                                      ledger with a web UI
+  lapilli preflight [serve's flags]  what serve will meet before it is
+                                     deployed: reads, writes nothing
   lapilli ledger copy --ledger DIR --to-url-file FILE
                                      copy a ledger into Postgres
   lapilli version
 
-Run "lapilli verdict -h", "lapilli serve -h" or "lapilli ledger -h" for the
-options.
+Run "lapilli verdict -h", "lapilli serve -h", "lapilli preflight -h" or
+"lapilli ledger -h" for the options.
 `
 
 func main() {
@@ -50,6 +52,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runVerdict(rest, stdout, stderr)
 	case "serve":
 		return runServe(rest, stdout, stderr)
+	case "preflight":
+		return runPreflight(rest, stdout, stderr)
 	case "ledger":
 		return runLedger(rest, stdout, stderr)
 	case "version", "--version":
@@ -61,6 +65,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprint(stdout, verdictUsage)
 		case len(rest) > 0 && rest[0] == "serve":
 			fmt.Fprint(stdout, serveUsage)
+		case len(rest) > 0 && rest[0] == "preflight":
+			fmt.Fprint(stdout, preflightUsage)
 		case len(rest) > 0 && rest[0] == "ledger":
 			fmt.Fprint(stdout, ledgerUsage)
 		default:

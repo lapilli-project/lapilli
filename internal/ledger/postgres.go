@@ -494,6 +494,12 @@ func (w *pgWriter) waiter(ctx context.Context, c *pgx.Conn) (*LockWaitError, err
 
 // holder is the session that holds the lock, nil when none does.
 func (w *pgWriter) holder(ctx context.Context, c *pgx.Conn) (*LockedError, error) {
+	return lockHeldBy(ctx, c, w.key)
+}
+
+// lockHeldBy is the session that holds the lock of the ledger whose
+// schema's key is key, nil when none does.
+func lockHeldBy(ctx context.Context, c *pgx.Conn, key int32) (*LockedError, error) {
 	var h LockedError
 	var since *time.Time
 	// One holding it alone first: it is what refuses a replica.
@@ -504,7 +510,7 @@ func (w *pgWriter) holder(ctx context.Context, c *pgx.Conn) (*LockedError, error
 			AND l.classid::bigint = $1 AND l.objid::bigint = $2
 			AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
 		ORDER BY l.mode = 'ExclusiveLock' DESC, a.backend_start
-		LIMIT 1`, int64(lockClass), int64(w.key)).Scan(&h.PID, &h.Role, &h.App, &h.From, &since, &h.Alone)
+		LIMIT 1`, int64(lockClass), int64(key)).Scan(&h.PID, &h.Role, &h.App, &h.From, &since, &h.Alone)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"lapilli.dev/internal/egress"
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
@@ -41,6 +42,7 @@ type Loki struct {
 // nowhere it wasn't sent; and that gives up on a request after five
 // minutes, as prom's does.
 var noRedirects = &http.Client{
+	Transport:     egress.Wrap(nil),
 	Timeout:       5 * time.Minute,
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }

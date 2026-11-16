@@ -24,8 +24,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 
+	"lapilli.dev/internal/egress"
 	"lapilli.dev/internal/prom"
 )
 
@@ -52,13 +54,13 @@ func Auth(ctx context.Context, kind, endpoint, region string) (prom.Option, erro
 	case "aws":
 		return awsAuth(ctx, endpoint, region)
 	case "azure":
-		cred, err := azidentity.NewDefaultAzureCredential(nil)
+		cred, err := azidentity.NewDefaultAzureCredential(azureDefault())
 		if err != nil {
 			return nil, fmt.Errorf("Azure credentials: %w", err)
 		}
 		return azureAuth(cred, endpoint), nil
 	case "google":
-		ts, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/monitoring.read")
+		ts, err := google.DefaultTokenSource(googleContext(ctx), "https://www.googleapis.com/auth/monitoring.read")
 		if err != nil {
 			return nil, fmt.Errorf("Google credentials: %w", err)
 		}
@@ -109,7 +111,7 @@ func awsAuth(ctx context.Context, endpoint, region string) (prom.Option, error) 
 	if region == "" {
 		return nil, errors.New("--auth aws: the URL doesn't say which region; give --aws-region")
 	}
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	cfg, err := config.LoadDefaultConfig(ctx, awsOptions(region)...)
 	if err != nil {
 		return nil, fmt.Errorf("AWS credentials: %w", err)
 	}
@@ -189,7 +191,7 @@ func Request(ctx context.Context, kind, endpoint, as string) (func(*http.Request
 		if service == "aps-workspaces" {
 			service = "aps"
 		}
-		cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+		cfg, err := config.LoadDefaultConfig(ctx, awsOptions(region)...)
 		if err != nil {
 			return nil, fmt.Errorf("AWS credentials: %w", err)
 		}
@@ -203,7 +205,7 @@ func Request(ctx context.Context, kind, endpoint, as string) (func(*http.Request
 		var cred azcore.TokenCredential
 		var err error
 		if as == "" {
-			cred, err = azidentity.NewDefaultAzureCredential(nil)
+			cred, err = azidentity.NewDefaultAzureCredential(azureDefault())
 		} else {
 			cred, err = azureIdentity(as)
 		}
@@ -239,7 +241,7 @@ func AWSAccount(ctx context.Context, endpoint string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("%s isn't an Amazon endpoint", u.Hostname())
 	}
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	cfg, err := config.LoadDefaultConfig(ctx, awsOptions(region)...)
 	if err != nil {
 		return "", fmt.Errorf("AWS credentials: %w", err)
 	}
@@ -255,10 +257,12 @@ func AWSAccount(ctx context.Context, endpoint string) (string, error) {
 // node's managed identity.
 func azureIdentity(clientID string) (azcore.TokenCredential, error) {
 	var chain []azcore.TokenCredential
-	if w, err := azidentity.NewWorkloadIdentityCredential(&azidentity.WorkloadIdentityCredentialOptions{ClientID: clientID}); err == nil {
+	if w, err := azidentity.NewWorkloadIdentityCredential(&azidentity.WorkloadIdentityCredentialOptions{ClientID: clientID,
+		ClientOptions: azureClient()}); err == nil {
 		chain = append(chain, w)
 	}
-	m, err := azidentity.NewManagedIdentityCredential(&azidentity.ManagedIdentityCredentialOptions{ID: azidentity.ClientID(clientID)})
+	m, err := azidentity.NewManagedIdentityCredential(&azidentity.ManagedIdentityCredentialOptions{ID: azidentity.ClientID(clientID),
+		ClientOptions: azureClient()})
 	if err != nil {
 		return nil, err
 	}
@@ -287,4 +291,47 @@ func SignRequest(creds aws.CredentialsProvider, service, region string, now func
 		}
 		return signer.SignHTTP(req.Context(), c, req, hex.EncodeToString(h.Sum(nil)), service, region, now())
 	}
+}
+
+// While a guard is set for the process (egress.Guarded, lapilli
+// preflight's allowlist), a cloud's credential chain asks through it too,
+// with the client egress gives: AWS's configuration and Azure's
+// credentials take one, and Google's token source takes it from its
+// context. Otherwise each SDK's own, as ever. Google's metadata server is
+// asked by its own package's client, which takes none.
+
+// awsOptions are what AWS's configuration is loaded with: the region, and,
+// while guarded, the client.
+func awsOptions(region string) []func(*config.LoadOptions) error {
+	opts := []func(*config.LoadOptions) error{config.WithRegion(region)}
+	if egress.Guarded() {
+		opts = append(opts, config.WithHTTPClient(egress.Client()))
+	}
+	return opts
+}
+
+// azureClient is what Azure's credentials ask with: while guarded, the
+// client; otherwise the SDK's own.
+func azureClient() azcore.ClientOptions {
+	if egress.Guarded() {
+		return azcore.ClientOptions{Transport: egress.Client()}
+	}
+	return azcore.ClientOptions{}
+}
+
+// azureDefault is the default Azure credential's options, with azureClient.
+func azureDefault() *azidentity.DefaultAzureCredentialOptions {
+	if !egress.Guarded() {
+		return nil
+	}
+	return &azidentity.DefaultAzureCredentialOptions{ClientOptions: azureClient()}
+}
+
+// googleContext is ctx for Google's token source: while guarded, holding
+// the client its token requests go by.
+func googleContext(ctx context.Context) context.Context {
+	if egress.Guarded() {
+		return context.WithValue(ctx, oauth2.HTTPClient, egress.Client())
+	}
+	return ctx
 }
