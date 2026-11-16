@@ -325,6 +325,7 @@ var statusWant = []struct {
 	{regexp.MustCompile(`^⚠\x{FE0E} no data$`), "warn", []string{"/nodata/settings"}},
 	{regexp.MustCompile(`keeps no record: a selector it reads has no data yet`), "warn", []string{"/nodata/settings"}},
 	{regexp.MustCompile(`the impact signal keeps no record until the criterion in effect is read again`), "warn", []string{"/floor/settings"}},
+	{regexp.MustCompile(`^⚠\x{FE0E} no record$`), "warn", []string{"/floor/settings"}},
 	{regexp.MustCompile(`^✕ failing$`), "bad", []string{"/sources/settings"}},
 	{regexp.MustCompile(`^↻ waiting$`), "info", []string{"/intake/settings"}},
 	{regexp.MustCompile(`^\? not set up$`), "unknown", []string{"/settings"}},

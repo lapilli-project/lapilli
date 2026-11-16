@@ -274,6 +274,8 @@ func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, 
 			imp.State, imp.About = "pending", "Not read with the criterion in effect yet."
 		case now.Sub(seen.ImpactRead) > impactStale(s.cfg):
 			imp.State, imp.About = "quiet", "Not read for longer than two runs: are the runs running?"
+		case !k.Floor.IsZero():
+			imp.State, imp.About = "unread", "Read, waiting to be read again over the last four weeks: no record is kept by it meanwhile."
 		case imp.Data != nil && imp.Data.NoData:
 			imp.State, imp.About = "nodata", "A selector it reads has no data: the impact signal keeps no record until each has some."
 		}

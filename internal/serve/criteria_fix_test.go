@@ -557,6 +557,12 @@ func TestImpactPendingNoData(t *testing.T) {
 	if !strings.Contains(page, "the impact signal keeps no record until the criterion in effect is read again") || strings.Contains(page, "The record is kept by the impact signal from") {
 		t.Errorf("the page doesn't say so:\n%s", page)
 	}
+	if row := sourceRowOf(page, "Impact signal"); !strings.Contains(row, `status-warn">⚠&#xFE0E; no record`) || !strings.Contains(row, "waiting to be read again") {
+		t.Errorf("the sources row:\n%s", row)
+	}
+	if !strings.Contains(page, "raise --timeout or --max-samples") {
+		t.Errorf("no way past a failing read again:\n%s", page)
+	}
 }
 
 // Two criteria saved one after the other, each read again failing, each
