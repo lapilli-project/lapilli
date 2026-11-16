@@ -111,6 +111,11 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 		}
 	}
 	parts = append(parts, totals)
+	// What the change does to what the rules are expected to do: right
+	// after the totals, as a reviewer's first question.
+	if c.Expectations != nil {
+		parts = append(parts, expectationsPart(c.Expectations))
+	}
 
 	if len(p.shown) > 0 {
 		sev := slices.ContainsFunc(p.shown, func(rc RuleChange) bool {

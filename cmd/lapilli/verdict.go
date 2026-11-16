@@ -125,6 +125,21 @@ Before a change to the rules:
                       that it can't format, link or mention anything. Its
                       first line, and --json's "summary", say whether
                       anything changed, and how much (see the README)
+  --expect FILE       with --compare, hold the rules that differ to what
+                      FILE expects of them: a budget of firings a week and
+                      while people slept, each whole week of the period,
+                      and incidents they must keep catching
+                      (docs/design/expectations.md). The report says, of
+                      each, before → after, and what the change broke
+  --expect-before FILE
+                      the expectations as they were, for the rules in
+                      place: a budget the change raised is held to its old
+                      value before it, and said
+  --fail-expectations exit 1 when the change breaks an expectation that the
+                      rules in place meet (one broken before too fails
+                      nothing)
+  --expect-required   exit 1 when the change adds a rule no expectation
+                      holds
 
 What the rules say:
   --check-content     check what each rule says when it fires, and how it is
@@ -341,19 +356,23 @@ type verdictFlags struct {
 	// alarms are each --alarms, its source and its URL.
 	alarms []alarmsFlag
 
-	compare            []string
-	changedOnly        bool
-	checkReplay        bool
-	checkReplaySet     bool // --check-replay given, true or false
-	checkSeries        []string
-	checkFirings       string
-	checkContent       bool
-	checkContentSet    bool // --check-content given, true or false
-	severities         []string
-	runbooks           []string
-	scrapeInterval     time.Duration
-	alerts             bool
-	firings, incidents string
+	compare     []string
+	changedOnly bool
+	// expect and expectBefore are --expect and --expect-before;
+	// failExpect, --fail-expectations; expectRequired, --expect-required.
+	expect, expectBefore       string
+	failExpect, expectRequired bool
+	checkReplay                bool
+	checkReplaySet             bool // --check-replay given, true or false
+	checkSeries                []string
+	checkFirings               string
+	checkContent               bool
+	checkContentSet            bool // --check-content given, true or false
+	severities                 []string
+	runbooks                   []string
+	scrapeInterval             time.Duration
+	alerts                     bool
+	firings, incidents         string
 	// firingsToken is lapilli serve's --firings-token-file, given: firings
 	// copied in may be all there is.
 	firingsToken        bool
@@ -454,6 +473,12 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		case "--changed-only":
 			f.changedOnly = true
 			continue
+		case "--fail-expectations":
+			f.failExpect = true
+			continue
+		case "--expect-required":
+			f.expectRequired = true
+			continue
 		case "--check-replay":
 			f.checkReplay, f.checkReplaySet = true, true
 			if hasVal {
@@ -552,6 +577,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			}
 		case "--compare":
 			f.compare = append(f.compare, val)
+		case "--expect":
+			f.expect = val
+		case "--expect-before":
+			f.expectBefore = val
 		case "--check-series":
 			f.checkSeries = append(f.checkSeries, val)
 		case "--check-firings":
@@ -813,6 +842,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			on   bool
 			flag string
 		}{{f.firings != "", "--firings"}, {len(f.compare) > 0, "--compare"}, {f.changedOnly, "--changed-only"},
+			{f.expect != "" || f.expectBefore != "" || f.failExpect || f.expectRequired, "--expect, --expect-before, --fail-expectations or --expect-required: they hold a change to the rules, which --compare backtests"},
 			{f.json, "--json"}, {f.markdown, "--markdown"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"},
@@ -889,6 +919,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--compare doesn't go with --metrics or --push")
 	case f.changedOnly && len(f.compare) == 0:
 		return nil, errors.New("--changed-only goes with --compare")
+	case f.expect != "" && len(f.compare) == 0:
+		return nil, errors.New("--expect holds a change to the rules to what they are expected to do: it goes with --compare")
+	case f.expect == "" && (f.expectBefore != "" || f.failExpect || f.expectRequired):
+		return nil, errors.New("--expect-before, --fail-expectations and --expect-required go with --expect")
 	case f.markdown && len(f.compare) == 0:
 		return nil, errors.New("--markdown writes --compare's report, for a pull request: it goes with --compare")
 	case f.markdown && f.json:
@@ -1067,6 +1101,26 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
+	// What the rules are expected to do, read before anything is replayed:
+	// a file that can't be read fails the run at once.
+	var expAfter, expBefore *verdict.Expectations
+	for _, e := range []struct {
+		flag, path string
+		into       **verdict.Expectations
+	}{{"--expect", f.expect, &expAfter}, {"--expect-before", f.expectBefore, &expBefore}} {
+		if e.path == "" {
+			continue
+		}
+		file, err := os.Open(e.path)
+		if err != nil {
+			return fail(fmt.Errorf("%s: %w", e.flag, err))
+		}
+		*e.into, err = verdict.ReadExpectations(file)
+		file.Close()
+		if err != nil {
+			return fail(fmt.Errorf("%s %s: %w", e.flag, e.path, err))
+		}
+	}
 	var recordedIs []rules.Recording
 	if len(f.compare) > 0 {
 		f.sayPicked(stderr, "--rules")
@@ -1199,6 +1253,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		cmp.Recording = recordingChanges(f.recorded, recordedIs)
 		cmp.PassedOver = f.passedOver
 		cmp.Summarize(f.incidents != "" || f.impact != "")
+		if expAfter != nil {
+			cmp.Expect(expAfter, expBefore, f.opts.Hours)
+		}
 	case len(versions) > 0:
 		known, fs = replay.Run(ctx, h, versions, f.opts.From, f.opts.To, f.step, f.parallel)
 	case f.alerts:
@@ -1278,7 +1335,10 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	}
 	text := func(w io.Writer) error {
 		if cmp != nil {
-			return verdict.CompareText(w, cmp, f.loc)
+			if err := verdict.CompareText(w, cmp, f.loc); err != nil {
+				return err
+			}
+			return verdict.ExpectationsText(w, cmp.Expectations)
 		}
 		return verdict.Text(w, rep, f.loc)
 	}
@@ -1345,6 +1405,16 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	if f.failUnreplayed && len(dropped) > 0 {
 		fmt.Fprintf(stderr, "lapilli verdict: %d of %d rules couldn't be replayed, as the history couldn't be read or their labels on their series were too many (--fail-unreplayed)\n", len(dropped), len(all))
 		return 1
+	}
+	if cmp != nil && cmp.Expectations != nil {
+		if n := cmp.Expectations.Broken(); f.failExpect && n > 0 {
+			fmt.Fprintf(stderr, "lapilli verdict: the change breaks %d expectations the rules in place meet (--fail-expectations)\n", n)
+			return 1
+		}
+		if n := len(cmp.Expectations.Unexpected); f.expectRequired && n > 0 {
+			fmt.Fprintf(stderr, "lapilli verdict: the change adds %d rules no expectation holds (--expect-required)\n", n)
+			return 1
+		}
 	}
 	if failed {
 		return 1

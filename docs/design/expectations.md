@@ -1,6 +1,6 @@
 # Expectations: what a rule was tested to do, kept and held to
 
-Status: accepted, not built. Under [GOVERNANCE.md](../../GOVERNANCE.md)
+Status: accepted; its first step built (see "As built" at the end). Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this is a new kind of data in the ledger, and a backtest that can fail a
 pull request, so it was designed first, as a pull request (#81); it was
 merged on 2026-11-16, before its week was out, by the maintainer's
@@ -279,3 +279,48 @@ The first two need no incident written down.
 4. Scenarios: promtool test files, for Prometheus-format rules
    (`--promtool PATH`).
 5. Adding a rule, as a proposal held to its expectations.
+
+## As built
+
+Step 1, in `lapilli verdict --compare` and the backtest recipes:
+
+- **The file.** `expectations:`, each naming a `rule` or a `group` (one of
+  them), with a `budget` (`week`, `asleep`) or `catches` (`incident`,
+  `within`). Read strictly, 1 MiB at most, before anything is replayed.
+  Labels as a selector, re-fires in a budget and `scenarios` aren't read
+  yet: a file with them is refused, rather than passed over.
+- **The weeks.** Whole weeks counted back from the period's end, the most
+  in one reported; a period with none is scaled to a week (`scaled_days`).
+  While people slept is by `--sleep-hours` (and `--shifts`, `--on-call`),
+  as the rest of the verdict counts it; with hours of no sleep, not known.
+- **What a change broke.** Broken after, and met before or a rule the
+  change adds. A rule the change takes away breaks its catches (it catches
+  nothing), not its budget. `--expect-before` holds the side before to the
+  expectations as they were, matched by the same `rule:` or `group:`: one
+  raised is held to its old value before it; one added, on both sides; one
+  taken away (whole, or a field, or a catch) is shown, held to what it
+  was, and fails nothing, as a raised one doesn't.
+- **Names told apart.** Rules sharing a name are named apart in a run
+  (`CheckoutErrors [severity=page]`); `rule: CheckoutErrors` holds each,
+  and so a rule whose own name begins `CheckoutErrors [`. How names are
+  told apart can change as rules are added; a written name told apart is
+  for a rule that will stay so.
+- **Bounds.** 2,000 expectations; each side's firings counted once, by
+  rule and week, whatever the expectations.
+- **Out.** A section of the text, `--markdown` (right after the totals) and
+  `--json` (`"expectations"`); four summary fields (`expected`,
+  `expectations_broken`, `expectations_already_broken`, `unexpected`).
+  `--fail-expectations` and `--expect-required` exit 1. The recipes take
+  `EXPECT`, read from both commits, and `FAIL_ON_EXPECTATIONS`,
+  `EXPECT_REQUIRED`, which fail the job once the comment is posted, from the
+  summary, not lapilli's exit status: the backtest didn't fail. Held to
+  them, a run that can't judge them fails too: the file unreadable, a rule
+  that differs not replayed, no report; and one that broke them whose
+  comment couldn't be posted. A file the pull request takes away is read
+  as holding none.
+- **One rule, one entry.** Entries for the same `rule:` or `group:` are
+  made one when read; the same budget or incident twice is refused. A rule
+  moved out of a group that held it is said: the group's expectation no
+  longer holds it, failing nothing.
+- **Serve** takes none of it yet (step 2).
+

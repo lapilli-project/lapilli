@@ -1592,3 +1592,103 @@ exec '`+real+`' "$@"
 		t.Errorf("%d MiB of a SHA256SUMS read, past 64 KiB", sent>>20)
 	}
 }
+
+// EXPECT holds the rules that differ to the expectations, the pull
+// request's file for the rules it proposes and the base's for those in
+// place; the comment says what the change broke, and FAIL_ON_EXPECTATIONS
+// fails the job for it, once the comment is posted.
+func TestBacktestRecipeExpectations(t *testing.T) {
+	needRecipeTools(t)
+	prom := promStandIn(t)
+	// The rule in place, held 2h, never fires; the pull request's, 5m, once.
+	none := "expectations:\n  - rule: CheckoutErrors\n    budget: {week: 0}\n"
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("2h"), "expect.yaml": none})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	out, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "FAIL_ON_EXPECTATIONS=true"}, "--prometheus", prom.URL, "--tz", "UTC")
+	if err == nil || !strings.Contains(rr.body(), "#### Expectations") || !strings.Contains(rr.body(), "**✗ broken by this change**") ||
+		!strings.Contains(out, "the change breaks 1 expectations the rules in place meet (FAIL_ON_EXPECTATIONS=true)") ||
+		strings.Contains(rr.body(), "### Lapilli backtest failed") {
+		t.Errorf("held to it: %v\n%s\n%s", err, rr.body(), out)
+	}
+	// Not asked to fail: the comment says it, the job passes.
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	if out, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml"}, "--prometheus", prom.URL, "--tz", "UTC"); err != nil ||
+		!strings.Contains(rr.body(), "**✗ broken by this change**") {
+		t.Errorf("not asked to fail: %v\n%s\n%s", err, rr.body(), out)
+	}
+	// The pull request raises the budget with the rule: met, and the
+	// comment says it was 0.
+	repo.git("checkout", "--quiet", "main")
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("5m"), "expect.yaml": strings.Replace(none, "week: 0", "week: 5", 1)})
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	if out, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "FAIL_ON_EXPECTATIONS=true"}, "--prometheus", prom.URL, "--tz", "UTC"); err != nil ||
+		!strings.Contains(rr.body(), "(was 0, in this change)") {
+		t.Errorf("raised: %v\n%s\n%s", err, rr.body(), out)
+	}
+	// A comment that can't be posted doesn't pass a broken expectation.
+	repo.git("checkout", "--quiet", "main")
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	rr.host.set(func(h *commentHost) { h.comments, h.failPost = nil, true })
+	if out, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "FAIL_ON_EXPECTATIONS=true"}, "--prometheus", prom.URL, "--tz", "UTC"); err == nil ||
+		!strings.Contains(out, "the change breaks 1 expectations") {
+		t.Errorf("not posted: %v\n%s", err, out)
+	}
+	rr.host.set(func(h *commentHost) { h.failPost = false })
+	// Taken away in the pull request: as if it held none, what it held is
+	// shown taken away, failing nothing, as a budget raised doesn't.
+	repo.git("checkout", "--quiet", "main")
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("5m"), "expect.yaml": ""})
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	if out, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "FAIL_ON_EXPECTATIONS=true"}, "--prometheus", prom.URL, "--tz", "UTC"); err != nil ||
+		!strings.Contains(rr.body(), "(taken away in this change)") || !strings.Contains(rr.body(), "taken away; the change would break it") {
+		t.Errorf("taken away: %v\n%s\n%s", err, rr.body(), out)
+	}
+	// Unreadable as YAML, held to it: not judged, and the job fails.
+	repo.git("checkout", "--quiet", "main")
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("5m"), "expect.yaml": "expectations: [\n"})
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	if out, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "FAIL_ON_EXPECTATIONS=true"}, "--prometheus", prom.URL); err == nil ||
+		!strings.Contains(out, "the expectations couldn't be judged") {
+		t.Errorf("unreadable, held to it: %v\n%s", err, out)
+	}
+	// The history out of reach: no rule that differs replayed, so none held:
+	// not known isn't met, and the job fails. Not held to them, it passes.
+	repo.git("checkout", "--quiet", "main")
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	if out, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "FAIL_ON_EXPECTATIONS=true"}, "--prometheus", "http://127.0.0.1:1"); err == nil ||
+		!strings.Contains(out, "couldn't be replayed, so their expectations can't be judged") {
+		t.Errorf("out of reach, held to it: %v\n%s", err, out)
+	}
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	if out, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml"}, "--prometheus", "http://127.0.0.1:1"); err != nil {
+		t.Errorf("out of reach, not held: %v\n%s", err, out)
+	}
+	// In neither commit: said.
+	repo.git("checkout", "--quiet", "main")
+	repo.git("rm", "--quiet", "expect.yaml")
+	repo.git("commit", "--quiet", "-m", "no expectations")
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml"}, "--prometheus", prom.URL)
+	failure(t, rr.body(), "EXPECT expect.yaml is in neither the pull request's commit nor the commit it goes into")
+
+	// Wrong settings fail at once.
+	for _, c := range []struct {
+		settings []string
+		args     []string
+		said     string
+	}{
+		{[]string{"PATHS=alerts", "FAIL_ON_EXPECTATIONS=true"}, nil, "FAIL_ON_EXPECTATIONS and EXPECT_REQUIRED hold the rules to EXPECT"},
+		{[]string{"PATHS=alerts", "EXPECT=../expect.yaml"}, nil, "EXPECT ../expect.yaml: want a file in the repository"},
+		{[]string{"PATHS=alerts", "EXPECT=alerts/"}, nil, "EXPECT alerts/: want a file in the repository"},
+		{[]string{"PATHS=alerts", "EXPECT=expect.yaml", "FAIL_ON_EXPECTATIONS=yes"}, nil, "FAIL_ON_EXPECTATIONS yes: want true or false"},
+		{[]string{"PATHS=alerts"}, []string{"--expect", "x.yaml"}, "--expect: the recipe reads the expectations from both commits itself"},
+	} {
+		out, err := rr.run(c.settings, append([]string{"--prometheus", prom.URL}, c.args...)...)
+		if err == nil || !strings.Contains(out, c.said) {
+			t.Errorf("%v %v: %v\n%s", c.settings, c.args, err, out)
+		}
+	}
+}

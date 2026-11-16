@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-11-16
+
+A change to the rules is held to what they are expected to do: how often
+each may fire in a week and while people slept, and the incidents each
+must keep catching, written beside them. A pull request backtest says what
+the change broke, and can fail the job for it; a budget needs no incident
+written down. No ledger schema change; the API and MCP answer as they did.
+
+### Added
+
+- **Expectations in a pull request backtest.** `lapilli verdict --compare
+  --expect FILE` holds the rules that differ to what is expected of them
+  ([docs/design/expectations.md](docs/design/expectations.md), its first
+  step): a budget of firings in each whole week of the period, and of
+  those while people slept, and incidents each must keep catching, within
+  how long. The report says each before → after: met, broken by this
+  change, broken before too, or not known (an incident not in the period;
+  hours of no sleep). `--expect-before` gives them as they were, for the
+  rules in place; `--fail-expectations` exits 1 when the change breaks
+  one, `--expect-required` when it adds a rule none holds. The summary
+  gains `expected`, `expectations_broken`, `expectations_already_broken`
+  and `unexpected`. The backtest recipes take `EXPECT`, read from both
+  commits, and `FAIL_ON_EXPECTATIONS` and `EXPECT_REQUIRED` (the action's
+  `expect`, `fail-on-expectations`, `expect-required`), which fail the job
+  once the comment is posted, and when the expectations can't be judged (a
+  rule that differs not replayed, the file unreadable, no report).
+  A budget needs no incident written down. An expectation the change takes
+  away is still shown, and fails nothing; a name several rules share holds
+  each of them.
+
 ### Fixed
 
 - **"None yet" where there is none.** The changes' page ("Is the record
