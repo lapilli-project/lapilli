@@ -107,8 +107,23 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	if !s.still(ctx) {
 		return
 	}
+	// The criterion in effect, read again over the last four weeks once
+	// it is new; the settings read again after, for the record it keeps.
+	if again, err := s.impactAgain(ctx, o); err != nil {
+		s.fail("reading the impact signal again", err)
+	} else if again {
+		if o, err = s.options(ctx); err != nil {
+			s.fail("settings", err)
+			return
+		}
+	}
+	if !s.still(ctx) {
+		return
+	}
 	if s.cfg.Incidents != "" {
-		if err := s.syncIncidents(ctx, o); err != nil {
+		err := s.syncIncidents(ctx, o)
+		s.readFile(err)
+		if err != nil {
 			s.fail("incidents", err)
 		} else {
 			s.status.Lock()
@@ -143,7 +158,7 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	}
 	// With no rules to replay, there is nothing to run for but --impact:
 	// what is copied in is judged as it comes.
-	if run && s.running() {
+	if run && s.running(ctx) {
 		s.runs(ctx, o)
 		if err := s.keepBegan(ctx); err != nil {
 			s.fail("a run", err)
@@ -444,15 +459,20 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 	}
 	// Impact first, with time of its own: one query, which a replay that
 	// runs out of time shouldn't take along.
-	if s.cfg.Impact != "" {
+	c, err := s.criterion(parent)
+	if err != nil {
+		return f, false, err
+	}
+	if c.Expr != "" {
 		ctx, cancel := context.WithTimeout(parent, s.cfg.Timeout)
 		defer cancel()
-		f.ImpactOn, f.ImpactSince = true, from.Add(-time.Hour)
-		series, err := s.h.QueryRange(ctx, s.cfg.Impact, f.ImpactSince, to, s.cfg.Step)
+		f.ImpactOn, f.ImpactSince, f.ImpactCriterion = true, from.Add(-time.Hour), c.key()
+		series, err := s.h.QueryRange(ctx, c.Expr, f.ImpactSince, to, s.cfg.Step)
+		s.readImpact(err)
 		if err != nil {
 			return slow(ctx, fmt.Errorf("--impact: %w", err))
 		}
-		f.Impact = incident.FromImpact(series, s.cfg.Step, s.cfg.ImpactFor)
+		f.Impact = incident.FromImpact(series, s.cfg.Step, c.For)
 	}
 	ctx, cancel := context.WithTimeout(parent, s.cfg.Timeout)
 	defer cancel()
@@ -1333,7 +1353,7 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 	}
 	week, from, to := s.digestWeek(in.When)
 	cursor, err := s.l.Cursor(ctx)
-	if !s.running() && err == nil {
+	if !s.running(ctx) && err == nil {
 		// No runs: the ledger has what was copied in, up to where each
 		// source that isn't quiet has written. One gone quiet doesn't hold
 		// the digest up: the digest says it is quiet.

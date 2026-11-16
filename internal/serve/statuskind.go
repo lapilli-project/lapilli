@@ -46,6 +46,11 @@ var statusKinds = map[string]string{
 	// A rule change, predicted and measured.
 	"outcome/as-predicted": "ok", "outcome/otherwise": "warn", "outcome/measuring": "info", "outcome/added": "info",
 	"outcome/unreplayed": "warn",
+	// Where incidents come from (sources.go): alive; quiet, nothing
+	// received in a while; failing, its last read failed; waiting, set up
+	// and not read yet; none written in four weeks, or not set up.
+	"source/ok": "ok", "source/quiet": "warn", "source/failing": "bad", "source/pending": "info",
+	"source/none": "unknown", "source/off": "unknown",
 }
 
 // statusSigns are each kind's sign, before a notice's sentence: what a

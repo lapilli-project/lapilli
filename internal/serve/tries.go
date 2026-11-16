@@ -29,6 +29,16 @@ var errTooManyTries = errors.New("you have asked for as many proposals in the la
 type tries struct {
 	sync.Mutex
 	at map[string][]time.Time
+	// limit is how many an hour a reader may: triesAnHour when 0.
+	limit int
+}
+
+// most is how many tries an hour a reader may.
+func (t *tries) most() int {
+	if t.limit > 0 {
+		return t.limit
+	}
+	return triesAnHour
 }
 
 // triesKey is whose tries a try is: who's, or who's agents'.
@@ -54,7 +64,7 @@ func (t *tries) inHour(key string, now time.Time) []time.Time {
 func (t *tries) may(who string, agent bool, now time.Time) bool {
 	t.Lock()
 	defer t.Unlock()
-	return len(t.inHour(triesKey(who, agent), now)) < triesAnHour
+	return len(t.inHour(triesKey(who, agent), now)) < t.most()
 }
 
 // take counts a try of who's (or who's agents') at now, and reports
@@ -68,7 +78,7 @@ func (t *tries) take(who string, agent bool, now time.Time) bool {
 	}
 	key := triesKey(who, agent)
 	kept := t.inHour(key, now)
-	if len(kept) >= triesAnHour {
+	if len(kept) >= t.most() {
 		t.at[key] = kept
 		return false
 	}

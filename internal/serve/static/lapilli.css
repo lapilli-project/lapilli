@@ -336,6 +336,10 @@ a.sign { display: inline-block; min-width: 24px; min-height: 24px; text-align: c
 form.track { display: block; margin-top: .35rem; }
 ol.actions .action-off { display: flex; margin-top: .35rem; }
 textarea { width: 100%; padding: .45rem .6rem; }
+.criteria .field { margin: .8rem 0; max-width: 48rem; }
+.criteria .field > label, .criteria .field-name { display: block; margin: 0 0 .3rem; }
+.criteria .field p { margin: .3rem 0 0; }
+.criteria textarea { font-family: var(--mono); font-size: .9rem; }
 select { padding: .35rem .45rem; }
 .comment-head { font-size: .95rem; }
 .comment-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: .3rem 0; }

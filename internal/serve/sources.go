@@ -1,0 +1,243 @@
+package serve
+
+import (
+	"context"
+	"net/http"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+)
+
+// Incident sources (docs/design/ui.md, "Incident sources"): where the
+// incidents firings are judged against come from, and whether each is
+// alive, on the Settings page: those written in Lapilli; those a tool's job
+// copies in through the incidents port, by source; the incidents file; the
+// impact signal. A source that isn't set up says so, in no colour; tokens
+// are never shown, and only an admin sees which file or port is which.
+
+// sourcesSpan is how far back the sources are counted.
+const sourcesSpan = 28 * 24 * time.Hour
+
+// receivedQuiet is how long a source that wrote through the incidents
+// port may go without writing before it is said to be quiet: a job copies
+// its tool's incidents every hour or so, each again, unchanged or not.
+const receivedQuiet = 48 * time.Hour
+
+// receivedEvery is how often a replica keeps that a source wrote through
+// the incidents port: the write it kept stands for those after it, within
+// this.
+const receivedEvery = 10 * time.Minute
+
+// recipesURL is where the recipes that copy incidents in are told of.
+const recipesURL = "https://github.com/lapilli-project/lapilli/blob/main/recipes/incidents/README.md"
+
+// sourcePrefix is an id's source: what comes before its first -, as the
+// recipes give them (PD-41, GH-7, OPS-12 of a Jira project), a letter and
+// fifteen more letters, digits or _.
+var sourcePrefix = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9_]{0,15})-.`)
+
+// sourceOf is the source an incident's id names, upper case: "" for none.
+func sourceOf(id string) string {
+	if m := sourcePrefix.FindStringSubmatch(id); m != nil {
+		return strings.ToUpper(m[1])
+	}
+	return ""
+}
+
+// sourceTools are the tools whose recipes give their ids a prefix of their
+// own; a Jira project's key, incident.io's INC and another tool's are
+// shown as they are.
+var sourceTools = map[string]string{"PD": "PagerDuty", "GH": "GitHub", "FH": "FireHydrant", "IRM": "Grafana IRM", "CP": "Compass", "RL": "Rootly"}
+
+// noteReceived keeps that the source of an incident's id wrote through the
+// incidents port now: once in receivedEvery by this replica.
+func (s *Server) noteReceived(ctx context.Context, id string) {
+	src, now := sourceOf(id), s.now()
+	s.sources.Lock()
+	if s.sources.noted == nil || len(s.sources.noted) > 4*receivedSources {
+		s.sources.noted = map[string]time.Time{}
+	}
+	last, ok := s.sources.noted[src]
+	if ok && !now.Before(last) && now.Sub(last) < receivedEvery {
+		s.sources.Unlock()
+		return
+	}
+	s.sources.noted[src] = now
+	s.sources.Unlock()
+	if err := s.l.NoteReceived(ctx, src, now); err != nil {
+		s.log.Warn("keeping when a source last wrote through the incidents port", "err", err)
+	}
+}
+
+// receivedSources is how many sources the page lists, the latest first.
+const receivedSources = 20
+
+// sourceRow is a source, as the page lists it: its name (a text to
+// translate, or with Raw a source's own, an id's prefix), its state
+// (statusKinds' source/…), when it last wrote or was read, and what (Last,
+// LastID, the latest incident written), how many incidents it gave in the
+// last four weeks (N, with Counts), what it is (About, to translate), and
+// for an admin where (Where); Err, why it last failed.
+type sourceRow struct {
+	Name     string
+	Raw      bool
+	Tool     string
+	State    string
+	Last     time.Time
+	LastWhat string
+	LastID   string
+	N        int
+	Counts   bool
+	About    string
+	Where    string
+	Err      string
+	Recipes  bool
+}
+
+// sourcesView is the incident sources: the rows, whether no incident was
+// written down in two weeks (Quiet), and the sources past those listed.
+type sourcesView struct {
+	Rows    []sourceRow
+	Quiet   bool
+	More    int
+	Recipes string
+}
+
+// sourcesOf works out the incident sources, for the reader: an admin sees
+// which file and port.
+func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, error) {
+	now := s.now()
+	adminReads := s.role(r) == admin
+	v := &sourcesView{Recipes: recipesURL}
+	got, err := s.l.IncidentSources(ctx, now.Add(-sourcesSpan))
+	if err != nil {
+		return nil, err
+	}
+	seen := s.shownSources()
+
+	// Written in Lapilli.
+	w := sourceRow{Name: "Written in Lapilli", State: "none", N: got.Written, Counts: true, LastWhat: "last written",
+		About: "On the Incidents page, through the API, by confirming an impact window, or by saying a firing was real."}
+	if got.Written > 0 {
+		w.State = "ok"
+	}
+	if got.LastWritten != nil {
+		w.Last, w.LastID = got.LastWritten.Start, got.LastWritten.ID
+	}
+	v.Rows = append(v.Rows, w)
+
+	// Copied in through the incidents port, by source.
+	if s.cfg.IncidentsListen == "" || s.cfg.IncidentsToken == "" {
+		v.Rows = append(v.Rows, sourceRow{Name: "Intake API", State: "off", Recipes: true,
+			About: "Not set up: a job copies a tool's incidents in through --incidents-listen, with the token in --incidents-token-file."})
+	} else {
+		received, err := s.l.Received(ctx)
+		if err != nil {
+			return nil, err
+		}
+		type src struct {
+			last    time.Time
+			changed time.Time
+			n       int
+		}
+		bySrc := map[string]*src{}
+		at := func(name string) *src {
+			if bySrc[name] == nil {
+				bySrc[name] = &src{}
+			}
+			return bySrc[name]
+		}
+		for name, t := range received {
+			at(name).last = t
+		}
+		for _, c := range got.Copied {
+			x := at(sourceOf(c.ID))
+			x.changed = later(x.changed, c.Updated)
+			if !c.Start.Before(now.Add(-sourcesSpan)) {
+				x.n++
+			}
+		}
+		where := ""
+		if adminReads {
+			where = tr(lang(r), "port %s, token in %s", s.cfg.IncidentsListen, s.cfg.IncidentsToken)
+		}
+		names := make([]string, 0, len(bySrc))
+		for name := range bySrc {
+			names = append(names, name)
+		}
+		lastOf := func(name string) time.Time { return later(bySrc[name].last, bySrc[name].changed) }
+		slices.SortFunc(names, func(a, b string) int {
+			if c := lastOf(b).Compare(lastOf(a)); c != 0 {
+				return c
+			}
+			return strings.Compare(a, b)
+		})
+		if len(names) > receivedSources {
+			v.More, names = len(names)-receivedSources, names[:receivedSources]
+		}
+		for _, name := range names {
+			x := bySrc[name]
+			row := sourceRow{Name: name + "-", Raw: true, Tool: sourceTools[name], N: x.n, Counts: true, Where: where, State: "ok", LastWhat: "last received", Last: x.last}
+			if name == "" {
+				row.Name, row.Raw = "Ids with no prefix", false
+			}
+			if x.last.IsZero() {
+				// Kept before the ledger kept when each wrote: when one of
+				// its incidents last changed.
+				row.Last, row.LastWhat = x.changed, "last changed"
+			}
+			if now.Sub(row.Last) > receivedQuiet {
+				row.State = "quiet"
+				row.About = "Nothing received in two days: is its job still running?"
+			}
+			v.Rows = append(v.Rows, row)
+		}
+		if len(names) == 0 {
+			v.Rows = append(v.Rows, sourceRow{Name: "Intake API", State: "pending", Where: where, Recipes: true,
+				About: "Set up, and nothing received yet."})
+		}
+	}
+
+	// The incidents file.
+	file := sourceRow{Name: "Incidents file", State: "off", About: "Not set up: --incidents FILE, read again each run."}
+	if s.cfg.Incidents != "" {
+		file = sourceRow{Name: "Incidents file", State: "ok", Last: seen.FileRead, LastWhat: "last read", N: got.File, Counts: true,
+			About: "Read again each run; the file owns what it holds."}
+		if adminReads {
+			file.Where = s.cfg.Incidents
+		}
+		switch {
+		case seen.FileErr != "" && !seen.FileFailed.Before(seen.FileRead):
+			file.State, file.Err = "failing", seen.FileErr
+		case seen.FileRead.IsZero():
+			file.State = "pending"
+		}
+	}
+	v.Rows = append(v.Rows, file)
+
+	// The impact signal.
+	c, err := s.criterion(ctx)
+	if err != nil {
+		return nil, err
+	}
+	imp := sourceRow{Name: "Impact signal", State: "off", About: "Off: set it under Incident criteria."}
+	if c.Expr != "" {
+		imp = sourceRow{Name: "Impact signal", State: "ok", Last: seen.ImpactRead, LastWhat: "last read", N: got.Impact, Counts: true,
+			About: "Each run reads it over the hours it replays; a window counts unless an incident written down covers it."}
+		switch {
+		case seen.ImpactErr != "" && !seen.ImpactFailed.Before(seen.ImpactRead):
+			imp.State, imp.Err = "failing", seen.ImpactErr
+		case seen.ImpactRead.IsZero():
+			imp.State = "pending"
+		}
+	}
+	v.Rows = append(v.Rows, imp)
+
+	out, err := s.outcomes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v.Quiet = out.Record.Quiet
+	return v, nil
+}

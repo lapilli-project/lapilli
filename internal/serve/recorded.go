@@ -2,6 +2,7 @@ package serve
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -26,9 +27,13 @@ func (s *Server) replaying() bool {
 }
 
 // running reports whether there are runs to make: rules to replay, the
-// ALERTS series, or --impact.
-func (s *Server) running() bool {
-	return s.replaying() || s.cfg.Alerts || s.cfg.Impact != ""
+// ALERTS series, or an impact signal, the command line's or the UI's.
+func (s *Server) running(ctx context.Context) bool {
+	if s.replaying() || s.cfg.Alerts {
+		return true
+	}
+	c, _ := s.criterion(ctx)
+	return c.Expr != ""
 }
 
 // written is what a write of firings did, as the API answers it.

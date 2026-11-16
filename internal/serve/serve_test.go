@@ -32,11 +32,17 @@ var now = time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 type history struct {
 	sync.Mutex
 	asked int
+	// exprs is how often each expression was asked for.
+	exprs map[string]int
 }
 
 func (h *history) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
 	h.Lock()
 	h.asked++
+	if h.exprs == nil {
+		h.exprs = map[string]int{}
+	}
+	h.exprs[expr]++
 	h.Unlock()
 	run := func(labels map[string]string, from, to time.Time) prom.Series {
 		s := prom.Series{Labels: labels}
@@ -70,6 +76,15 @@ func (h *history) QueryRange(ctx context.Context, expr string, start, end time.T
 		return nil, fmt.Errorf("the API said to wait %w, after HTTP 429: slow down", prom.ErrPastDeadline)
 	case "impact":
 		out = append(out, run(map[string]string{"service": "search"}, now.Add(-6*time.Hour), now.Add(-6*time.Hour+10*time.Minute)))
+	case "impact > 1":
+		// Another criterion: search's window, checkout's over INC-1, and
+		// cart's a day and a half ago.
+		out = append(out, run(map[string]string{"service": "search"}, now.Add(-6*time.Hour), now.Add(-6*time.Hour+10*time.Minute)),
+			run(map[string]string{"service": "checkout"}, now.Add(-30*time.Hour), now.Add(-30*time.Hour+20*time.Minute)),
+			run(map[string]string{"service": "cart"}, now.Add(-40*time.Hour), now.Add(-39*time.Hour)))
+	case "nope(up)":
+		// What Prometheus's parser refuses.
+		return nil, &prom.APIError{Status: 400, Msg: `bad_data: 1:1: parse error: unknown function with name "nope"`}
 	}
 	var kept []prom.Series
 	for _, s := range out {

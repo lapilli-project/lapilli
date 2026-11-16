@@ -142,6 +142,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /firings/{id}/real", s.write(s.real))
 	s.bulkRoutes(mux)
 	mux.HandleFunc("POST /settings", s.admin(s.postSettings))
+	mux.HandleFunc("POST /settings/impact", s.admin(s.postImpact))
 	mux.HandleFunc("POST /settings/given-back", s.admin(s.postKeepGivenBack))
 	mux.HandleFunc("GET /api/v1/me", s.me)
 
@@ -1448,6 +1449,15 @@ func (s *Server) settingsYAML(w http.ResponseWriter, r *http.Request) {
 		}
 		args = append(args, fmt.Sprintf("%q", st.flag+"="+show(o, st.key)))
 	}
+	// The incident criteria: the chart's impact, empty for none, and
+	// --impact-for among the flags.
+	c := s.criterionOf(set)
+	if _, ok := set["impact"]; ok {
+		fmt.Fprintf(&b, "impact: %s\n", strconv.Quote(c.Expr))
+	}
+	if _, ok := set["impact-for"]; ok {
+		args = append(args, fmt.Sprintf("%q", "--impact-for="+verdict.Duration(c.For)))
+	}
 	if len(args) > 0 {
 		fmt.Fprintf(&b, "extraArgs: [%s]\n", strings.Join(args, ", "))
 	}
@@ -1667,6 +1677,10 @@ func (s *Server) apiPutIncident(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, wrapBad(err))
 		return
 	}
+	if s.user(r) == tokenUser {
+		// Written, or written again as it was: its job is alive.
+		s.noteReceived(r.Context(), id)
+	}
 	got, err := s.l.IncidentByID(r.Context(), id)
 	if err != nil {
 		s.oops(w, r, err)
@@ -1687,6 +1701,9 @@ func (s *Server) apiDeleteIncident(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.oops(w, r, err)
 		return
+	}
+	if s.user(r) == tokenUser {
+		s.noteReceived(r.Context(), r.PathValue("id"))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

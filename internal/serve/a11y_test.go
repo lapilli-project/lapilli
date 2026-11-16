@@ -143,6 +143,12 @@ func TestA11yServe(t *testing.T) {
 	for _, p := range firstPaths {
 		paths = append(paths, "/first"+p)
 	}
+	// The incident sources' other states (sourcesStates).
+	for prefix, src := range sourcesStates(t) {
+		src.cfg.AllowedHosts = append(src.cfg.AllowedHosts, "host.docker.internal")
+		mux.Handle(prefix+"/", http.StripPrefix(prefix, src.Handler()))
+		paths = append(paths, prefix+"/settings")
+	}
 	mux.HandleFunc("GET /a11y-paths", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintln(w, strings.Join(paths, "\n"))
 	})
