@@ -27,21 +27,31 @@
   precision that read 1% then and now. A change is one between the
   numbers shown, on the overview's tiles and Outcomes' then and now: the
   same number shown is neither better nor worse, with no colour and no
-  word, and two that differ never read "+0 pt", "+0%" or "+0s".
+  word, and two that differ never read "+0 pt", "+0%" or "+0s". Outcomes'
+  firings and ● a week say a change from none ("+4"), and one between the
+  numbers shown (1 then, 3 now is +200%, not the unrounded rates' +86%);
+  the overview's time to catch says its change in the unit its time is
+  shown in (minutes from an hour on, not "+41s" beside 1h5m).
 - **"Propose it" with a proposal waiting.** A rule's "What to do first"
   offered its suggested `for` while the rule had a proposal not finished
   with, which is refused: one a rule at a time. The button is disabled
-  then, with why and a link to the one that waits.
+  then, with why (to a viewer, as before, that editors alone propose) and
+  a link to the one that waits.
 - **The rule's other forms with a proposal waiting.** So are the forms
   that would be refused the same way: on the Proposals tab a new `for`, a
   threshold, what it says and retiring it, and on the summary a fix to
-  what it says. Each stays drawn as it is, its fields and button
-  disabled, with why said once above them and a link to the one that
-  waits, for an editor and a viewer alike.
+  what it says. To an editor each stays drawn as it is, its fields and
+  button disabled, with why said once above them and a link to the one
+  that waits; a viewer is told, as before, that editors alone propose,
+  with the same link. Once it is finished with, the forms are back.
+- **A disabled field looks it.** A field no one may fill now is drawn as a
+  disabled button is: dim words on the panel and a dashed edge. So are the
+  rules list's bar's select and input, disabled for a viewer, which looked
+  like fields to fill.
 - **A checkbox apart from its words.** In a form of fields a checkbox
   stood on a line of its own, centred over its words ("take it out
-  instead", a report's sections, places and "On"); it is on their line
-  now, before them.
+  instead", a report's sections, places and "On"); it is before them now,
+  on their first line's baseline, where words that wrap leave it.
 
 ## [0.45.1] - 2026-11-16
 

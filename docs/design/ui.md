@@ -167,6 +167,18 @@ would say a state alone.
   better or worse only when both weeks were judged (`tile.Better`,
   `tile.Worse` stay false otherwise), and a no-record backtest's difference
   is a plain number or "–".
+- **No change shown, no change said.** A change is one between the numbers
+  as they are shown, on the overview's tiles, Outcomes' then and now and a
+  rule's panel: two that show the same (1.2% and 0.8% both "1%") are "as
+  the week before", or have no change at all, in no colour and with no
+  word. Points are between the whole percents shown, rounded half to even
+  as `%.0f` rounds them (`ptChange`); a share of a number that rounds to
+  nothing, or of none, is said as the change itself (`pctChange`: none to
+  four a week is "+4", one to three "+200%"); a time is in the unit this
+  week's is shown in, whole minutes from an hour on. So two numbers that
+  differ never read "+0 pt", "+0%" or "+0s", nor "+41s" beside "1h5m"
+  (`TestNoChangeIsNeitherBetterNorWorse`). Outcomes' weeks set a change
+  only once then was measured over a span.
 - **Colour never says a state alone.** Each kind has a word or a sign
   beside it: a badge its sign and name, a notice its sign and sentence, a
   cell its words or the column's. A quiet window in effect now says
@@ -339,6 +351,24 @@ said after the last of them; `TestDisabledOneWay` holds every disabled
 button on every page to it. A quiet button disabled looks as any disabled
 one (`TestDisabledLooksDisabled`): until 0.40.1 its own look came after
 the disabled one and drew it as one that could be pressed.
+
+A form no one may send for now, not for who the reader is, is drawn
+whole instead: a rule with a proposal not finished with takes no other
+(`ledger.ErrProposed`), so to an editor its first step's "Propose it", the
+Proposals tab's forms (a new for, a threshold, what it says, retiring it)
+and a fix to what it says are each drawn as they are, their fields and
+buttons disabled, the buttons tied (`again`) to why, said once above them
+in the words the ledger refuses with ("this rule has a proposal not yet
+finished with: one at a time"), with a link to the one that waits; the
+first step's single button says it beside itself. A viewer is told, as
+before, that editors alone propose (`offOf`), with the same link. Once the
+proposal is finished with, the forms are back (`TestFirstProposeWhileOneWaits`,
+`TestProposeFormsWhileOneWaits`). A disabled field looks as a disabled
+button does, dim words on the panel and a dashed edge, not as one to fill
+(`TestDisabledFieldsLookIt`, and in a browser `disabled-look` in
+`test/a11y/axe.mjs`); the rules list's bar, disabled for a viewer, is drawn
+so too. A checkbox stands before its words, on their first line's
+baseline, in any form (`TestCheckboxOnItsLine`, `checkbox-line`).
 
 ### Empty states
 
