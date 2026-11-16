@@ -58,7 +58,7 @@ func TestFiringsLastDay(t *testing.T) {
 	}
 	said := "The last day with firings."
 	_, body, _ := get(t, h, "/firings")
-	if !strings.Contains(body, "<h1>Firings, "+last+"</h1>") || strings.Count(body, said) != 1 {
+	if !strings.Contains(body, "<h1>Alert history, "+last+"</h1>") || strings.Count(body, said) != 1 {
 		t.Errorf("/firings isn't %s, said once:\n%s", last, body)
 	}
 	// Its links name their days, as before.
@@ -66,11 +66,11 @@ func TestFiringsLastDay(t *testing.T) {
 		t.Error("/firings: the days before and after have no day= in their links")
 	}
 	_, body, _ = get(t, h, "/firings?day="+now.Format("2006-01-02"))
-	if !strings.Contains(body, "<h1>Firings, "+now.Format("2006-01-02")+"</h1>") || strings.Contains(body, said) {
+	if !strings.Contains(body, "<h1>Alert history, "+now.Format("2006-01-02")+"</h1>") || strings.Contains(body, said) {
 		t.Errorf("/firings?day= of today isn't today, said nothing of:\n%s", body)
 	}
 	_, body, _ = get(t, h, "/firings?rule=NothingIsCalledThis")
-	if !strings.Contains(body, "<h1>Firings, "+now.Format("2006-01-02")+"</h1>") || !strings.Contains(body, "No firing to show in the last twelve weeks.") {
+	if !strings.Contains(body, "<h1>Alert history, "+now.Format("2006-01-02")+"</h1>") || !strings.Contains(body, "No firing to show in the last twelve weeks.") {
 		t.Errorf("/firings of a rule that never fired isn't today, said so:\n%s", body)
 	}
 }

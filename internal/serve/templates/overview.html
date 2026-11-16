@@ -78,7 +78,7 @@
 </section>
 
 <section class="card">
-  <h2>{{t "Outcomes"}}</h2>
+  <h2>{{t "Impact"}}</h2>
   {{if .OutcomesAll}}<p class="quiet">{{t "For all teams."}}</p>{{end}}
   <ul class="plain">{{range .Outcomes}}<li>{{if .Warn}}<span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{.Text}}</span>{{else}}{{.Text}}{{end}}</li>{{end}}</ul>
   <p><a href="{{$.Link "/outcomes"}}">{{t "What the changes did, and whether the record is kept up"}}</a></p>

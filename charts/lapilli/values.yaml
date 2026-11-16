@@ -340,7 +340,7 @@ serve:
   # a team's in any letter case; what the UI made of the same team under
   # that name is taken over. A file that can't be read changes nothing; a
   # thing in it that can't be kept is kept as it was, and the rest is kept.
-  # The Settings and Runs pages say what can't be, and why to admins.
+  # The Settings and Run history pages say what can't be, and why to admins.
   #
   # Give it as a text, a block scalar, as below: lapilli reads it as it is
   # written. Given as a mapping, Helm reads it first, as YAML 1.1, and

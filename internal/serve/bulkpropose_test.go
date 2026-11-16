@@ -246,7 +246,7 @@ func TestBulkPropose(t *testing.T) {
 			t.Errorf("%s: said %d times", c.kind, n)
 		}
 		if made > 0 {
-			link := regexp.MustCompile(`<a href="(/proposals\?[^"]+)">The proposals made, on the proposals list</a>`).FindStringSubmatch(page)
+			link := regexp.MustCompile(`<a href="(/proposals\?[^"]+)">The proposals made, on Change requests</a>`).FindStringSubmatch(page)
 			if link == nil {
 				t.Fatalf("%s: no link to the proposals made in\n%s", c.kind, page[strings.Index(page, `role="status"`):][:600])
 			}

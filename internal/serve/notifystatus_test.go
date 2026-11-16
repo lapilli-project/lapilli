@@ -198,7 +198,7 @@ func TestNotifyStatusSlackPost(t *testing.T) {
 	}
 	failed := "The weekly digest for the week to " + date(week) + " failed, at "
 	_, body, _ = get(t, h, "/settings")
-	if !strings.Contains(body, failed) || !strings.Contains(body, "the Runs page says why.") || strings.Contains(body, "127.0.0.1") {
+	if !strings.Contains(body, failed) || !strings.Contains(body, "the Run history page says why.") || strings.Contains(body, "127.0.0.1") {
 		t.Errorf("/settings doesn't say the digest failed, or says where:\n%s", body)
 	}
 	if _, body, _ := get(t, h, "/manage"); !strings.Contains(body, "The weekly digest failed.") {

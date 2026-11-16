@@ -1,4 +1,4 @@
-{{define "manage"}}{{$title := t "Manage"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
+{{define "manage"}}{{$title := t "Administration"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
 <h1>{{$title}}</h1>
 <p class="lede">{{t "Who owns what and who may change it, how firings are judged, what Lapilli ran, and the reports it sends."}}</p>
 <ul class="manage-cards">{{range .Cards}}<li class="card">

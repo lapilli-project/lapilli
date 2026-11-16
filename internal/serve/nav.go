@@ -19,7 +19,7 @@ type navItem struct {
 }
 
 // navGroup is a group of pages, named; a link itself only to a page of
-// its own, Href (Manage's), Here when the reader is on it.
+// its own, Href (Administration's), Here when the reader is on it.
 type navGroup struct {
 	ID, Name, Href string
 	Here           bool
@@ -34,25 +34,25 @@ type crumbOf struct {
 }
 
 // groupPages are the groups that have a page of their own, which their
-// name in the sidebar and in the breadcrumbs links to: Manage's.
-var groupPages = map[string]string{"Manage": "/manage"}
+// name in the sidebar and in the breadcrumbs links to: Administration's.
+var groupPages = map[string]string{"Administration": "/manage"}
 
 // GroupHref is the page of a page's group, "" for a group with none.
 func (c crumbOf) GroupHref() string { return groupPages[c.Group] }
 
 var crumbsOf = map[string]crumbOf{
-	"overview": {"See", "Overview", "/", false}, "rules": {"See", "Rules", "/rules", false}, "rule": {"See", "Rules", "/rules", true},
-	"incidents": {"See", "Incidents", "/incidents", false}, "incident": {"See", "Incidents", "/incidents", true},
-	"firings": {"See", "Firings", "/firings", false},
-	"tasks":   {"Fix", "Tasks", "/tasks", false}, "task": {"Fix", "Tasks", "/tasks", true},
-	"proposals": {"Fix", "Proposals", "/proposals", false}, "proposal": {"Fix", "Proposals", "/proposals", true},
-	"windows": {"Fix", "Quiet windows", "/windows", false}, "window": {"Fix", "Quiet windows", "/windows", true},
-	"reports": {"Report", "Reports", "/reports", false}, "report": {"Report", "Reports", "/reports", true},
-	"outcomes": {"Report", "Outcomes", "/outcomes", false},
-	"teams":    {"Manage", "Teams", "/teams", false}, "roles": {"Manage", "Roles", "/roles", false},
-	"settings": {"Manage", "Settings", "/settings", false}, "runs": {"Manage", "Runs", "/runs", false},
-	"orphans": {"Manage", "Orphans", "/orphans", false},
-	"manage":  {"", "Manage", "/manage", false},
+	"overview": {"Monitoring", "Overview", "/", false}, "rules": {"Monitoring", "Rules", "/rules", false}, "rule": {"Monitoring", "Rules", "/rules", true},
+	"incidents": {"Monitoring", "Incidents", "/incidents", false}, "incident": {"Monitoring", "Incidents", "/incidents", true},
+	"firings": {"Monitoring", "Alert history", "/firings", false},
+	"tasks":   {"Improve", "Tasks", "/tasks", false}, "task": {"Improve", "Tasks", "/tasks", true},
+	"proposals": {"Improve", "Change requests", "/proposals", false}, "proposal": {"Improve", "Change requests", "/proposals", true},
+	"windows": {"Improve", "Quiet windows", "/windows", false}, "window": {"Improve", "Quiet windows", "/windows", true},
+	"reports": {"Reporting", "Reports", "/reports", false}, "report": {"Reporting", "Reports", "/reports", true},
+	"outcomes": {"Reporting", "Impact", "/outcomes", false},
+	"teams":    {"Administration", "Teams", "/teams", false}, "roles": {"Administration", "Roles", "/roles", false},
+	"settings": {"Administration", "Settings", "/settings", false}, "runs": {"Administration", "Run history", "/runs", false},
+	"orphans": {"Administration", "Cleanup", "/orphans", false},
+	"manage":  {"", "Administration", "/manage", false},
 	"search":  {"", "Search", "/search", false},
 	"error":   {"", "Overview", "/", true}, "signedout": {"", "", "", true},
 }
@@ -74,15 +74,18 @@ func navPage(name string) (string, string) {
 	return "", ""
 }
 
-// navLayout is the sidebar: See, Fix, Report, Manage.
+// navLayout is the sidebar: Monitoring, Improve, Reporting,
+// Administration. Each group and page is named by a noun, what it holds,
+// as a console's sidebar is, not by what a reader does there; a page's
+// title and breadcrumb are its name here. The URLs are as they were.
 var navLayout = []struct {
 	id, name string
 	items    []struct{ page, href, name string }
 }{
-	{"see", "See", []struct{ page, href, name string }{{"overview", "/", "Overview"}, {"rules", "/rules", "Rules"}, {"incidents", "/incidents", "Incidents"}, {"firings", "/firings", "Firings"}}},
-	{"fix", "Fix", []struct{ page, href, name string }{{"tasks", "/tasks", "Tasks"}, {"proposals", "/proposals", "Proposals"}, {"windows", "/windows", "Quiet windows"}}},
-	{"report", "Report", []struct{ page, href, name string }{{"reports", "/reports", "Reports"}, {"outcomes", "/outcomes", "Outcomes"}}},
-	{"manage", "Manage", []struct{ page, href, name string }{{"teams", "/teams", "Teams"}, {"roles", "/roles", "Roles"}, {"settings", "/settings", "Settings"}, {"runs", "/runs", "Runs"}, {"orphans", "/orphans", "Orphans"}}},
+	{"see", "Monitoring", []struct{ page, href, name string }{{"overview", "/", "Overview"}, {"rules", "/rules", "Rules"}, {"incidents", "/incidents", "Incidents"}, {"firings", "/firings", "Alert history"}}},
+	{"fix", "Improve", []struct{ page, href, name string }{{"tasks", "/tasks", "Tasks"}, {"proposals", "/proposals", "Change requests"}, {"windows", "/windows", "Quiet windows"}}},
+	{"report", "Reporting", []struct{ page, href, name string }{{"reports", "/reports", "Reports"}, {"outcomes", "/outcomes", "Impact"}}},
+	{"manage", "Administration", []struct{ page, href, name string }{{"teams", "/teams", "Teams"}, {"roles", "/roles", "Roles"}, {"settings", "/settings", "Settings"}, {"runs", "/runs", "Run history"}, {"orphans", "/orphans", "Cleanup"}}},
 }
 
 // bare reports whether a page is shown in the frame alone: an error, or

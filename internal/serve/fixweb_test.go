@@ -310,10 +310,11 @@ func TestPreviewAccessible(t *testing.T) {
 	pageA11y(t, mux, "", a11yPreviews(mux, s)...)
 }
 
-// TestManagePage: /manage has a card for each of the Manage group's pages,
-// the reports and the notifications, each with what it is for, Roles for
-// admins alone; the sidebar's Manage links to it, with the page context;
-// and the Manage pages' breadcrumbs start with it.
+// TestManagePage: /manage, Administration, has a card for each of the
+// Administration group's pages, by the names the sidebar gives them, the
+// reports and the notifications, each with what it is for, Roles for
+// admins alone; the sidebar's Administration links to it, with the page
+// context; and the breadcrumbs of the group's pages start with it.
 func TestManagePage(t *testing.T) {
 	s, _, _ := rolesServer(t, nil)
 	h := s.Handler()
@@ -325,27 +326,28 @@ func TestManagePage(t *testing.T) {
 		}
 		return out
 	}
-	if got, want := cards("boss@example.com"), []string{"/teams Teams", "/roles Roles", "/settings Settings", "/runs Runs", "/reports Reports", "/orphans Orphans", "/settings#notifications Notifications"}; !slices.Equal(got, want) {
+	if got, want := cards("boss@example.com"), []string{"/teams Teams", "/roles Roles", "/settings Settings", "/runs Run history", "/reports Reports", "/orphans Cleanup", "/settings#notifications Notifications"}; !slices.Equal(got, want) {
 		t.Errorf("an admin's cards: %q, want %q", got, want)
 	}
-	if got, want := cards("ed@example.com"), []string{"/teams Teams", "/settings Settings", "/runs Runs", "/reports Reports", "/orphans Orphans", "/settings#notifications Notifications"}; !slices.Equal(got, want) {
+	if got, want := cards("ed@example.com"), []string{"/teams Teams", "/settings Settings", "/runs Run history", "/reports Reports", "/orphans Cleanup", "/settings#notifications Notifications"}; !slices.Equal(got, want) {
 		t.Errorf("an editor's cards: %q, want %q", got, want)
 	}
 	_, body := as(t, h, http.MethodGet, "/manage?team=payments", "ed@example.com", "", nil)
-	if !strings.Contains(body, `<p class="nav-group" id="side-manage"><a href="/manage?team=payments" aria-current="page">Manage</a></p>`) ||
+	if !strings.Contains(body, `<p class="nav-group" id="side-manage"><a href="/manage?team=payments" aria-current="page">Administration</a></p>`) ||
 		!strings.Contains(body, `<a href="/teams?team=payments">Teams</a>`) || !strings.Contains(body, "2 teams") {
-		t.Error("the sidebar's Manage doesn't link to it, current, or the cards don't carry the team")
+		t.Error("the sidebar's Administration doesn't link to it, current, or the cards don't carry the team")
 	}
-	if !strings.Contains(body, `<ol><li><span aria-current="page">Manage</span></li></ol>`) {
-		t.Error("the Manage page's breadcrumb")
+	if !strings.Contains(body, `<ol><li><span aria-current="page">Administration</span></li></ol>`) ||
+		!strings.Contains(body, `<title>Administration · Lapilli</title>`) || !strings.Contains(body, `<h1>Administration</h1>`) {
+		t.Error("the Administration page's breadcrumb, title or heading")
 	}
-	for _, p := range []string{"/teams", "/settings", "/runs"} {
+	for _, p := range []string{"/teams", "/settings", "/runs", "/orphans"} {
 		_, body := as(t, h, http.MethodGet, p, "boss@example.com", "", nil)
-		if !strings.Contains(body, `<ol><li><a href="/manage">Manage</a></li>`) || !strings.Contains(body, `<p class="nav-group" id="side-manage"><a href="/manage">Manage</a></p>`) {
-			t.Errorf("%s: its breadcrumb doesn't start with a link to Manage", p)
+		if !strings.Contains(body, `<ol><li><a href="/manage">Administration</a></li>`) || !strings.Contains(body, `<p class="nav-group" id="side-manage"><a href="/manage">Administration</a></p>`) {
+			t.Errorf("%s: its breadcrumb doesn't start with a link to Administration", p)
 		}
 	}
-	if _, body := as(t, h, http.MethodGet, "/rules", "boss@example.com", "", nil); !strings.Contains(body, `<ol><li>See</li>`) || !strings.Contains(body, `<p class="nav-group" id="side-see">See</p>`) {
+	if _, body := as(t, h, http.MethodGet, "/rules", "boss@example.com", "", nil); !strings.Contains(body, `<ol><li>Monitoring</li>`) || !strings.Contains(body, `<p class="nav-group" id="side-see">Monitoring</p>`) {
 		t.Error("a group without a page of its own is a link")
 	}
 }

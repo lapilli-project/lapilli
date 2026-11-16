@@ -10,7 +10,7 @@
 {{- else if eq .Kind "unreplayed"}}{{t "Not replayed: %s" .Text}} <a href="{{$.Link (print $v.Path "#versions") "tab" "versions"}}">{{t "Versions"}}</a>
 {{- else if eq .Kind "unseen"}}{{.Text}} <a href="{{$.Link (print $v.Path "#versions") "tab" "versions"}}">{{t "Versions"}}</a>
 {{- else if eq .Kind "alarm"}}{{t "A cloud's alarm, read with --alarms: its history, copied in under %s from %s on, is its record, as Lapilli doesn't replay it." $v.Tie.Source (day $loc $v.Tie.Since)}} <a href="{{$.Link (print $v.Path "#latest") "tab" "firings"}}">{{t "Latest firings"}}</a>
-{{- else if eq .Kind "untied"}}{{t "A cloud's alarm, read with --alarms, that Lapilli doesn't replay: it has no record, since no history is tied to it."}} {{t .Text}} <a href="{{$.Link "/runs"}}">{{t "Runs"}}</a>
+{{- else if eq .Kind "untied"}}{{t "A cloud's alarm, read with --alarms, that Lapilli doesn't replay: it has no record, since no history is tied to it."}} {{t .Text}} <a href="{{$.Link "/runs"}}">{{t "Run history"}}</a>
 {{- else if eq .Kind "recorded"}}{{t "Recorded in %s and copied in: Lapilli has what it fired, not its condition, so it can't say what a change to it would do." .Text}} <a href="{{$.Link (print $v.Path "#latest") "tab" "firings"}}">{{t "Latest firings"}}</a>
 {{- else}}{{t "%d of its proposals were made against a version of it no longer in effect." .N}} <a href="{{$.Link (print $v.Path "#proposals") "tab" "proposals"}}">{{t "Proposals"}}</a>{{end}}</li>{{end}}</ul>
 </details>{{end}}

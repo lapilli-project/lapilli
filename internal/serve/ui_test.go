@@ -478,10 +478,10 @@ func TestSidebar(t *testing.T) {
 				current = append(current, nodeText(n)+" "+nodeAttr(n, "aria-current"))
 			}
 		}
-		if !slices.Equal(groups, []string{"See", "Fix", "Report", "Manage"}) {
+		if !slices.Equal(groups, []string{"Monitoring", "Improve", "Reporting", "Administration"}) {
 			t.Errorf("%q: groups %q", who, groups)
 		}
-		if !slices.Equal(crumbs, []string{"See", "Rules", "Errors"}) || !strings.Contains(body, `<span aria-current="page"><bdi>Errors</bdi></span>`) {
+		if !slices.Equal(crumbs, []string{"Monitoring", "Rules", "Errors"}) || !strings.Contains(body, `<span aria-current="page"><bdi>Errors</bdi></span>`) {
 			t.Errorf("%q: breadcrumb %q", who, crumbs)
 		}
 		if !slices.Equal(current, []string{"Rules true"}) {
@@ -489,6 +489,54 @@ func TestSidebar(t *testing.T) {
 		}
 		if got := strings.Contains(body, `href="/roles"`); got != roles {
 			t.Errorf("%q: Roles in the sidebar %v, want %v", who, got, roles)
+		}
+	}
+}
+
+// TestPageNamedAsInTheSidebar: a page of the sidebar is called what the
+// sidebar calls it, in each language: its breadcrumb, its heading and the
+// browser's tab start with that name (the firings page's with its day
+// after), so that the menu, the page and the tab agree. The overview alone
+// is headed by what it shows, and named Overview in the sidebar and its
+// breadcrumb.
+func TestPageNamedAsInTheSidebar(t *testing.T) {
+	h := pagesServer(t).Handler()
+	for _, n := range names {
+		for _, g := range navLayout {
+			for _, it := range g.items {
+				r := httptest.NewRequest(http.MethodGet, it.href, nil)
+				r.Header.Set("Accept-Language", n.Code)
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, r)
+				doc, err := html.Parse(w.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				name := tr(n.Code, it.name)
+				var side, crumb, title, h1 string
+				for _, x := range allNodes(doc) {
+					switch {
+					case x.DataAtom == atom.A && nodeAttr(x, "aria-current") == "page" && nodeAttr(x.Parent.Parent.Parent, "class") == "nav-side":
+						// Its name, without the count beside it.
+						side = strings.TrimSpace(x.FirstChild.Data)
+					case x.DataAtom == atom.Span && nodeAttr(x, "aria-current") == "page" && nodeWithin(x, atom.Ol):
+						crumb = nodeText(x)
+					case x.DataAtom == atom.Title && nodeWithin(x, atom.Head):
+						title = nodeText(x)
+					case x.DataAtom == atom.H1 && h1 == "":
+						h1 = nodeText(x)
+					}
+				}
+				if w.Code != http.StatusOK || side != name || crumb != name {
+					t.Errorf("%s %s: %d, the sidebar says %q, the breadcrumb %q, want %q", n.Code, it.href, w.Code, side, crumb, name)
+				}
+				if it.page == "overview" {
+					continue
+				}
+				if !strings.HasPrefix(title, name) || !strings.HasPrefix(h1, name) {
+					t.Errorf("%s %s: titled %q, headed %q, not %q", n.Code, it.href, title, h1, name)
+				}
+			}
 		}
 	}
 }
