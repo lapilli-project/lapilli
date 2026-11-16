@@ -68,7 +68,9 @@ func showProgress(w io.Writer, p *replay.Progress, c *prom.Counts, start time.Ti
 // progressLine says how a run is going: "lapilli verdict: after 2m30s, 23
 // of 61 rules replayed, 412 requests to the history, 37 asked again after a
 // wait, 35 answered HTTP 429". In a comparison, a rule changed is replayed
-// twice, before and after, and the line counts replays.
+// twice, before and after, and the line counts replays. Once the rules are
+// replayed, it says the step after them it is at: "61 of 61 rules
+// replayed, then looking for near misses, 120 of at most 2000 questions,".
 func progressLine(p *replay.Progress, c *prom.Counts, took time.Duration, compared bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "lapilli verdict: after %s,", took.Round(time.Second))
@@ -76,6 +78,18 @@ func progressLine(p *replay.Progress, c *prom.Counts, took time.Duration, compar
 		fmt.Fprintf(&b, " %d of %d replays of the rules before and after done,", p.Done.Load(), total)
 	} else if total > 0 {
 		fmt.Fprintf(&b, " %d of %d rules replayed,", p.Done.Load(), total)
+	}
+	// After the replays, the step it is at: they can take as long again.
+	if s := p.Now(); s != nil {
+		fmt.Fprintf(&b, " then %s", s.Name)
+		if n := s.Total.Load(); n > 0 {
+			of := "of"
+			if s.AtMost {
+				of = "of at most"
+			}
+			fmt.Fprintf(&b, ", %d %s %d %s", min(s.Done.Load(), n), of, n, s.Unit)
+		}
+		b.WriteString(",")
 	}
 	fmt.Fprintf(&b, " %d requests to the history", c.Requests.Load())
 	if n := c.Retries.Load(); n > 0 {

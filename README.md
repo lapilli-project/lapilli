@@ -169,7 +169,18 @@ series is looked at on its own and its windows carry its labels, so with
 that overlap are one incident listing all of them. In `lapilli serve` an
 admin can also set `--impact` and `--impact-for` in the UI, on the Settings
 page's Incident criteria, and try them on the last four weeks first (see
-[Keep judging](#keep-judging)).
+[Keep judging](#keep-judging)). The report says how long
+each incident lasted, and, of those nothing caught that were found over
+several series, each series' own window (`spans` in `--json`): an incident
+that lasted ten minutes may be two services' windows of five and ten.
+
+Impact as short as `--impact-for` can be shorter than a rule fires on: a
+rule with `for: 5m` evaluated every minute fires once its condition held for
+six minutes, so a burst of errors under a minute, which `rate(...[5m])` shows
+for exactly five, reads as an incident it missed. When some rules judged
+can't fire on impact as short as `--impact-for`, the report says how many,
+and what `--impact-for` they can catch (`impact_short` in `--json`); the
+incidents are judged as any others.
 
 **A firing catches an incident** when it starts between `--lead` (15m) before
 the incident and its end, and agrees with it on any `--match` labels both
@@ -342,7 +353,15 @@ with that, and how often for nothing. A noisy rule, or one with a `for` longer
 than a week, or with neither a `for` nor such a number, isn't looked at. It is
 bounded: twenty incidents, five rules for each, 2,000 questions of the
 history, within the period and `--timeout`; the report says when the time ran
-out. A rule whose value never came within a fifth says nothing here: what a
+out.
+
+**The steps after the replays**, a longer `for` for the noisy rules, near
+misses, and what fired with no record, ask the history again, and can take as
+long as the replays did. The progress line says which step a run is at and
+how far it is (`then looking for rules that nearly caught the incidents
+nothing caught, 120 of at most 2000 questions`). `--extras DUR` lets them take
+that long at most, and `--extras 0` skips them; the report says when they
+were skipped or cut short (`extras` in `--json`). A rule whose value never came within a fifth says nothing here: what a
 change further than that would do is for `--compare`.
 
 **Rules that share a name**, in different groups or with different labels

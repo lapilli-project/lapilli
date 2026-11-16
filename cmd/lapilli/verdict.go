@@ -309,6 +309,11 @@ Output:
                       also post the report to the Slack incoming webhook
                       whose URL is in FILE
   --timeout DUR       give up after this long (default 10m)
+  --extras DUR        let the steps after the replays take this long at most:
+                      a longer "for" for the noisy rules, near misses and
+                      what fired with no record, each a replay or questions
+                      of the history again, as long again as the replays at
+                      times; 0 skips them (default: what --timeout leaves)
   --parallel N        replay up to N rules at once against each history
                       API, --prometheus, --loki and each of Grafana's data
                       sources, and ask a Grafana N requests at once at most
@@ -398,23 +403,27 @@ type verdictFlags struct {
 	firings, incidents string
 	// firingsToken is lapilli serve's --firings-token-file, given: firings
 	// copied in may be all there is.
-	firingsToken        bool
-	impact              string
-	impactFor           time.Duration
-	promURL, gcpProj    string
-	auth, awsRegion     string
-	tokenFile           string
-	since               time.Duration
-	from, to            time.Time
-	step                time.Duration
-	opts                verdict.Options
-	ruleRE              *regexp.Regexp
-	late                rules.Lateness
-	json, metrics       bool
-	csv                 bool
-	markdown            bool
-	loc                 *time.Location
-	timeout             time.Duration
+	firingsToken     bool
+	impact           string
+	impactFor        time.Duration
+	promURL, gcpProj string
+	auth, awsRegion  string
+	tokenFile        string
+	since            time.Duration
+	from, to         time.Time
+	step             time.Duration
+	opts             verdict.Options
+	ruleRE           *regexp.Regexp
+	late             rules.Lateness
+	json, metrics    bool
+	csv              bool
+	markdown         bool
+	loc              *time.Location
+	timeout          time.Duration
+	// extras is how long the steps after the replays may take, set by
+	// --extras (extrasSet); 0 skips them.
+	extras              time.Duration
+	extrasSet           bool
 	parallel            int
 	push, slackFile     string
 	work, sleep, shifts string
@@ -777,6 +786,11 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.onCall = c
 		case "--timeout":
 			f.timeout, err = dur(time.Second)
+		case "--extras":
+			f.extrasSet = true
+			if val != "0" {
+				f.extras, err = dur(time.Second)
+			}
 		case "--push":
 			if u, perr := url.Parse(val); perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 				return nil, fmt.Errorf("--push %s: want the Pushgateway's URL, like http://pushgateway:9091", val)
@@ -1366,6 +1380,11 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 				rep.RulesChanged = append(rep.RulesChanged, v.From)
 			}
 		}
+		// Impact shorter than a rule can fire on reads as missed by it: said,
+		// not judged otherwise.
+		if f.impact != "" && len(versions) > 0 {
+			rep.ImpactShort = impactShort(versions[len(versions)-1].Rules, f.impactFor, f.step)
+		}
 		// A rule taken away during the period covers nothing.
 		if len(versions) > 1 {
 			names := map[string]bool{}
@@ -1376,18 +1395,30 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		}
 		// Rules replayed as one version can be replayed again with a
 		// longer "for"; the metrics and the CSV alone don't show
-		// suggestions, near misses or what unrecorded firings were.
+		// suggestions, near misses or what unrecorded firings were. They
+		// take time of their own, as long again as the replays at times:
+		// --extras bounds it, or skips them.
 		brief := f.metrics || f.csv
+		ectx, cancelExtras := ctx, context.CancelFunc(func() {})
+		if f.extrasSet && f.extras > 0 {
+			ectx, cancelExtras = context.WithTimeout(ctx, f.extras)
+		}
+		if f.extrasSet && f.extras == 0 {
+			if !brief {
+				rep.Extras = "skipped"
+			}
+			brief = true
+		}
 		if len(versions) == 1 && !brief {
-			rep.Suggestions = source.Suggest(ctx, h, versions[0].Rules, rep, incs, f.opts, f.step, nil)
+			rep.Suggestions = source.Suggest(ectx, h, versions[0].Rules, rep, incs, f.opts, f.step, f.parallel, nil)
 		}
 		// Each incident nothing caught, against the rules as they stood then.
 		if !brief {
 			var done bool
 			var err error
-			rep.NearMisses, done, err = source.NearMisses(ctx, h, versions, rep, incs, f.opts, f.step, f.parallel, nil)
+			rep.NearMisses, done, err = source.NearMisses(ectx, h, versions, rep, incs, f.opts, f.step, f.parallel, nil)
 			rep.NearMissesCut = !done
-			if err != nil && ctx.Err() == nil {
+			if err != nil && ectx.Err() == nil {
 				fmt.Fprintf(stderr, "lapilli verdict: looking for near misses: %v\n", err)
 			}
 		}
@@ -1395,10 +1426,17 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		// how many went well past their bound, and from which alerts.
 		if !brief && rep.Unjudged > 0 && len(versions) > 0 {
 			var err error
-			if rep.Unrecorded, err = source.Unrecorded(ctx, h, versions, rep, source.Judged(rep.Firings), f.step); err != nil && ctx.Err() == nil {
+			if rep.Unrecorded, err = source.Unrecorded(ectx, h, versions, rep, source.Judged(rep.Firings), f.step); err != nil && ectx.Err() == nil {
 				fmt.Fprintf(stderr, "lapilli verdict: looking at the firings with no record to judge them by: %v\n", err)
 			}
 		}
+		if !brief && ectx.Err() != nil {
+			rep.Extras = "cut"
+			if ctx.Err() == nil {
+				fmt.Fprintf(stderr, "lapilli verdict: the steps after the replays stopped at --extras %s: a longer \"for\", near misses and what fired with no record are in part\n", f.extras)
+			}
+		}
+		cancelExtras()
 		reports = append(reports, rep)
 	}
 	text := func(w io.Writer) error {
@@ -1980,4 +2018,36 @@ func loadRules(f *verdictFlags, path string) ([]rules.Rule, error) {
 		}
 	}
 	return kept, nil
+}
+
+// impactShort is, of rs, those whose "for" and one evaluation are longer
+// than impactFor: impact that short, counted as an incident, they can't
+// catch. Nil when there are none.
+func impactShort(rs []rules.Rule, impactFor, step time.Duration) *verdict.ImpactShort {
+	need := map[time.Duration]int{}
+	out := verdict.ImpactShort{For: impactFor}
+	seen := map[string]bool{}
+	for _, r := range rs {
+		if r.Unsupported != "" || seen[r.Name] {
+			continue
+		}
+		seen[r.Name] = true
+		out.Judged++
+		if r.For <= 0 {
+			continue
+		}
+		if d := r.For + replay.Every(r, step); d > impactFor {
+			out.Rules++
+			need[d]++
+		}
+	}
+	if out.Rules == 0 {
+		return nil
+	}
+	for d, n := range need {
+		if n > out.Most || (n == out.Most && d < out.Need) {
+			out.Need, out.Most = d, n
+		}
+	}
+	return &out
 }

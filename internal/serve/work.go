@@ -1408,7 +1408,7 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 				return true, err
 			}
 			if len(in.versions) == 1 {
-				sugg = source.Suggest(rctx, s.h, in.versions[0].Rules, rep, in.incs, in.o, s.cfg.Step, in.excuse)
+				sugg = source.Suggest(rctx, s.h, in.versions[0].Rules, rep, in.incs, in.o, s.cfg.Step, s.cfg.Parallel, in.excuse)
 			}
 			var done bool
 			near, done, err = source.NearMisses(rctx, s.h, in.versions, rep, in.incs, in.o, s.cfg.Step, s.cfg.Parallel, in.excuse)

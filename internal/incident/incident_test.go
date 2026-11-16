@@ -95,6 +95,16 @@ func TestFromImpact(t *testing.T) {
 	if l := got[0].Labels; !slices.Equal(l["service"], []string{"cart", "checkout"}) || !slices.Equal(l["env"], []string{"prod"}) || l["__name__"] != nil {
 		t.Errorf("labels %v: want both services, env, and no __name__", l)
 	}
+	// Each series' own window is kept: checkout lasted 6m, cart 7m, the
+	// incident from the first's start to the last's end, 10m.
+	sp := got[0].Spans
+	if len(sp) != 2 || sp[0].Labels["service"] != "checkout" || sp[0].End.Sub(sp[0].Start) != 6*time.Minute ||
+		sp[1].Labels["service"] != "cart" || sp[1].End.Sub(sp[1].Start) != 7*time.Minute || sp[0].Labels["__name__"] != "" {
+		t.Errorf("spans %+v", sp)
+	}
+	if len(got[1].Spans) != 1 {
+		t.Errorf("one series, one span: %+v", got[1].Spans)
+	}
 }
 
 func TestMerge(t *testing.T) {

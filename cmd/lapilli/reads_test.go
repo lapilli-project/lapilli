@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -373,6 +374,95 @@ func TestProgressLine(t *testing.T) {
 	}
 }
 
+// TestProgressStep: once the rules are replayed, the line says the step
+// after them it is at, and how far it is.
+func TestProgressStep(t *testing.T) {
+	var p replay.Progress
+	var c prom.Counts
+	p.Total.Store(3)
+	p.Done.Store(3)
+	c.Requests.Store(40)
+	ctx := replay.Tracking(context.Background(), &p)
+	st := replay.Begin(ctx, "looking for rules that nearly caught the incidents nothing caught", "questions", 2000, true)
+	st.Did(120)
+	want := "lapilli verdict: after 1m0s, 3 of 3 rules replayed, then looking for rules that nearly caught the incidents nothing caught, 120 of at most 2000 questions, 40 requests to the history"
+	if got := progressLine(&p, &c, time.Minute, false); got != want {
+		t.Errorf("%q\nwant %q", got, want)
+	}
+	replay.Begin(ctx, "reading what the rules with no record fired", "rules", 0, false)
+	if got := progressLine(&p, &c, time.Minute, false); !strings.Contains(got, "replayed, then reading what the rules with no record fired, 40 requests") {
+		t.Errorf("a step of no count: %q", got)
+	}
+}
+
+// countingHistory is fakeHistory that counts its range queries and, past
+// answer of them (none when negative), waits for the run to end instead.
+type countingHistory struct {
+	fakeHistory
+	calls  *atomic.Int64
+	answer int64
+}
+
+func (h countingHistory) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	if n := h.calls.Add(1); h.answer >= 0 && n > h.answer {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return h.fakeHistory.QueryRange(ctx, expr, start, end, step)
+}
+
+// TestExtras: --extras 0 skips the steps after the replays, a longer "for"
+// and near misses, and the report says so; --extras DUR cuts them short
+// when they take longer, and the report says that.
+func TestExtras(t *testing.T) {
+	now = func() time.Time { return t0 }
+	defer func() { newHistory = realHistory }()
+	rs := write(t, "rules.yaml", `groups:
+  - name: shop
+    rules:
+      - alert: Flappy
+        expr: flappy
+      - alert: Errors
+        expr: errors > 5
+        for: 2h
+      - alert: Quiet
+        expr: never
+`)
+	incidents := write(t, "incidents.yaml", `incidents:
+  - {id: INC-0, title: Before, start: "2026-10-24T00:00:00Z", end: "2026-10-24T00:30:00Z"}
+  - {id: INC-7, title: Checkout down, start: "2026-11-01T21:00:00Z", end: "2026-11-01T22:00:00Z"}
+`)
+	var calls atomic.Int64
+	verdictRun := func(answer int64, args ...string) (int, string, string) {
+		calls.Store(0)
+		newHistory = func(context.Context, *verdictFlags) (history, error) {
+			return countingHistory{calls: &calls, answer: answer}, nil
+		}
+		var stdout, stderr bytes.Buffer
+		code := run(append([]string{"verdict", "--rules", rs, "--prometheus", "http://p", "--incidents", incidents, "--tz", "UTC", "--progress=false"}, args...), &stdout, &stderr)
+		return code, stdout.String(), stderr.String()
+	}
+	code, out, errs := verdictRun(-1, "--extras", "0", "--json")
+	if code != 0 || !strings.Contains(out, `"extras": "skipped"`) || strings.Contains(out, `"suggestions"`) || strings.Contains(out, `"near_misses"`) {
+		t.Fatalf("--extras 0: exit %d\n%s%s", code, out, errs)
+	}
+	replays := calls.Load()
+	if _, all, _ := verdictRun(-1, "--json"); !strings.Contains(all, `"suggestions"`) || strings.Contains(all, `"extras"`) || calls.Load() <= replays {
+		t.Fatalf("without --extras, the steps after the replays ask the history again (%d, %d):\n%s", replays, calls.Load(), all)
+	}
+	if code, out, _ := verdictRun(-1, "--extras", "0"); code != 0 || !strings.Contains(out, `weren't looked for (--extras 0).`) {
+		t.Errorf("--extras 0, the text:\n%s", out)
+	}
+	// The replays answered, the steps after them wait: --extras ends them.
+	code, out, errs = verdictRun(replays, "--extras", "1s", "--json")
+	if code != 0 || !strings.Contains(out, `"extras": "cut"`) || !strings.Contains(errs, "the steps after the replays stopped at --extras 1s") {
+		t.Errorf("--extras 1s: exit %d\n%s%s", code, out, errs)
+	}
+	if code, _, errs := verdictRun(-1, "--extras", "soon"); code != 2 || !strings.Contains(errs, "--extras soon: want a duration") {
+		t.Errorf("--extras soon: exit %d\n%s", code, errs)
+	}
+}
+
 // realHistory is newHistory as lapilli has it, which tests replace.
 var realHistory = newHistory
 
@@ -520,5 +610,72 @@ func TestLokiShared(t *testing.T) {
 	f.lokiInto(&cfg)
 	if l := f.lokiSource().Limit; l == nil || l != f.lokiSource().Limit || cfg.LokiLimit != l || cfg.Loki != f.loki {
 		t.Errorf("serve's Limiter %p, the Loki's %p and %p", cfg.LokiLimit, l, f.lokiSource().Limit)
+	}
+}
+
+// TestImpactShort: the rules whose "for" and one evaluation are longer than
+// --impact-for, of those that could be judged, and the most common of how
+// long they need, the shortest when two are as common.
+func TestImpactShort(t *testing.T) {
+	rs := []rules.Rule{
+		{Name: "Errors", For: 5 * time.Minute, Interval: time.Minute},
+		{Name: "Slow", For: 10 * time.Minute, Interval: time.Minute},
+		{Name: "Restarts", Interval: time.Minute},
+		{Name: "Errors", For: 5 * time.Minute, Interval: time.Minute}, // the same name again
+		{Name: "Odd", For: time.Hour, Unsupported: "an expression it can't replay"},
+	}
+	got := impactShort(rs, 5*time.Minute, 15*time.Second)
+	if got == nil || got.Rules != 2 || got.Judged != 3 || got.Need != 6*time.Minute || got.Most != 1 {
+		t.Fatalf("%+v", got)
+	}
+	if got := impactShort(rs, 6*time.Minute, 15*time.Second); got == nil || got.Rules != 1 || got.Need != 11*time.Minute {
+		t.Errorf("--impact-for 6m: %+v", got)
+	}
+	if got := impactShort(rs, 11*time.Minute, 15*time.Second); got != nil {
+		t.Errorf("--impact-for 11m, every rule can catch it: %+v", got)
+	}
+}
+
+// TestSuggestParallel: a longer "for" for the noisy rules is tried for as
+// many at once as --parallel, and what is suggested, in the rules' order,
+// is the same as one at a time.
+func TestSuggestParallel(t *testing.T) {
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
+	now = func() time.Time { return t0 }
+	rs := write(t, "rules.yaml", `groups:
+  - name: shop
+    rules:
+      - {alert: Flappy, expr: flappy}
+      - {alert: Flappy2, expr: flappy}
+      - {alert: Flappy3, expr: flappy}
+      - {alert: Errors, expr: errors > 5, for: 2h}
+`)
+	incidents := write(t, "incidents.yaml", `incidents:
+  - {id: INC-0, title: Before, start: "2026-10-24T00:00:00Z", end: "2026-10-24T00:30:00Z"}
+  - {id: INC-7, title: Checkout down, start: "2026-11-01T21:00:00Z", end: "2026-11-01T22:00:00Z"}
+`)
+	suggested := func(parallel string) []string {
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"verdict", "--rules", rs, "--prometheus", "http://p", "--incidents", incidents, "--tz", "UTC", "--json", "--progress=false", "--parallel", parallel}, &stdout, &stderr); code != 0 {
+			t.Fatalf("exit %d\n%s", code, stderr.String())
+		}
+		var rep struct {
+			Suggestions []struct {
+				Rule   string `json:"rule"`
+				NewFor string `json:"new_for"`
+			} `json:"suggestions"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, s := range rep.Suggestions {
+			out = append(out, s.Rule+" "+s.NewFor)
+		}
+		return out
+	}
+	one, many := suggested("1"), suggested("8")
+	if len(one) != 3 || !slices.Equal(one, many) {
+		t.Errorf("one at a time %q, eight %q", one, many)
 	}
 }

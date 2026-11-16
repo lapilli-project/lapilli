@@ -85,7 +85,7 @@ func TestSuggestNotPastTheWindow(t *testing.T) {
 	if rep.NoRecord || !rep.Rules[0].Noisy || rep.Rules[0].Firings < 30 {
 		t.Fatalf("the restart rule: %+v", rep.Rules[0])
 	}
-	if got := Suggest(context.Background(), restarts{}, versions[0].Rules, rep, away, o, time.Minute, nil); len(got) != 0 {
+	if got := Suggest(context.Background(), restarts{}, versions[0].Rules, rep, away, o, time.Minute, 1, nil); len(got) != 0 {
 		t.Errorf("suggested %+v", got)
 	}
 	// With nothing written down, nothing is noisy, and nothing suggested.
@@ -93,7 +93,7 @@ func TestSuggestNotPastTheWindow(t *testing.T) {
 	if !rep.NoRecord || rep.Rules[0].Noisy {
 		t.Fatalf("no record: %+v", rep.Rules[0])
 	}
-	if got := Suggest(context.Background(), restarts{}, versions[0].Rules, rep, nil, o, time.Minute, nil); len(got) != 0 {
+	if got := Suggest(context.Background(), restarts{}, versions[0].Rules, rep, nil, o, time.Minute, 1, nil); len(got) != 0 {
 		t.Errorf("suggested with no record %+v", got)
 	}
 }
@@ -292,7 +292,7 @@ func TestGrafanaRestarts(t *testing.T) {
 	if at, ok := alts[30*time.Minute]; err != nil || !ok || len(at) != 0 {
 		t.Fatalf("for 30m: %v %v %d", err, ok, len(at))
 	}
-	if got := Suggest(context.Background(), h, versions[0].Rules, rep, away, o, time.Minute, nil); len(got) != 0 {
+	if got := Suggest(context.Background(), h, versions[0].Rules, rep, away, o, time.Minute, 1, nil); len(got) != 0 {
 		t.Errorf("suggested %+v", got)
 	}
 

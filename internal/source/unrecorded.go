@@ -66,7 +66,9 @@ func Unrecorded(ctx context.Context, h replay.History, versions []replay.Version
 	})
 	var out []verdict.Unrecorded
 	var failed error
+	st := replay.Begin(ctx, "reading what the rules with no record fired", "rules", min(len(rrs), unrecordedMost), false)
 	for _, rr := range rrs[:min(len(rrs), unrecordedMost)] {
+		st.Did(1)
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}

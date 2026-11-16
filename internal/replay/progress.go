@@ -6,9 +6,47 @@ import (
 )
 
 // Progress counts the rules a run replays, as a progress line says them:
-// those to replay, and those replayed.
+// those to replay, and those replayed; and, once they are replayed, the
+// step after them it is at.
 type Progress struct {
 	Total, Done atomic.Int64
+	step        atomic.Pointer[Step]
+}
+
+// Step is one of the steps after the replays, such as looking for near
+// misses, as a progress line says it: what it does, and how far it is, in
+// Unit, of Total, or of at most Total when AtMost.
+type Step struct {
+	Name, Unit  string
+	AtMost      bool
+	Total, Done atomic.Int64
+}
+
+// Begin says the run ctx tracks is now at a step after the replays, of
+// total pieces of work (none: it can't say), and returns it to count them
+// done. With no Progress in ctx, the step is counted, but by nothing.
+func Begin(ctx context.Context, name, unit string, total int, atMost bool) *Step {
+	s := &Step{Name: name, Unit: unit, AtMost: atMost}
+	s.Total.Store(int64(total))
+	if p := progressOf(ctx); p != nil {
+		p.step.Store(s)
+	}
+	return s
+}
+
+// Did counts n of the step's pieces done.
+func (s *Step) Did(n int) {
+	if s != nil {
+		s.Done.Add(int64(n))
+	}
+}
+
+// Now is the step after the replays the run is at, nil until one begins.
+func (p *Progress) Now() *Step {
+	if p == nil {
+		return nil
+	}
+	return p.step.Load()
 }
 
 type progressKey struct{}

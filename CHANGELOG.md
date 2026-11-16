@@ -46,6 +46,28 @@
 
 ### Added
 
+- **The steps after the replays say where they are, and can be bounded.**
+  `lapilli verdict` replays the rules, then tries a longer `for` for the
+  noisy ones, looks for near misses and reads what fired with no record:
+  questions of the history again, as long as the replays at times, while
+  the progress line still said only "61 of 61 rules replayed". It now says
+  the step and how far it is ("then looking for rules that nearly caught the
+  incidents nothing caught, 120 of at most 2000 questions"). `--extras DUR`
+  bounds them, `--extras 0` skips them, and the report says so (`extras`:
+  `skipped` or `cut`). A longer `for` is tried for `--parallel` rules at
+  once, as the replays are, in `lapilli serve` too.
+- **How long an incident lasted.** The incidents table has `LASTED`. Of
+  those nothing caught that `--impact` found over several series, each
+  series' own window is written under them, and kept as `spans` in
+  `--json`: an incident of ten minutes may be two services' windows of five
+  and ten, and the one of five is what a rule would have had to catch.
+- **Impact shorter than the rules fire on, said.** With `--impact`, when
+  rules judged need their condition to hold longer than `--impact-for` (their
+  `for` and one evaluation), the report says how many, and what
+  `--impact-for` they can catch (`impact_short`). The default `--impact-for
+  5m` counts, as incidents, bursts a rule with `for: 5m` evaluated every
+  minute can't catch: they read as missed. Nothing is judged otherwise.
+
 - **User impact in a pull request backtest.** The backtest recipes take
   `IMPACT`, a PromQL expression that returns something while users are
   hurt, given to `lapilli verdict --impact` as one argument, as it is;
