@@ -961,13 +961,18 @@ CheckoutErrors  at most 2 a week while people slept     0       1      met
 CheckoutErrors  catches INC-43, within 5m               +2m     +2m    met
 ```
 
-`--expect-before FILE` gives the expectations as they were, for the rules
-in place: a budget the change raises is held to its old value before it,
-and the report says it was raised. `--fail-expectations` exits 1 when the
+A name several rules share is told apart in a run (`CheckoutErrors
+[severity=page]`): `rule: CheckoutErrors` holds each of them, and the name
+told apart one. `--expect-before FILE` gives the expectations as they were,
+for the rules in place: a budget the change raises is held to its old value
+before it, and the report says it was raised; one it adds is held on both
+sides and said new; one it takes away, whole or a field of it, is still
+shown, held to what it was, and fails nothing, as a budget raised doesn't:
+loosening is for the reviewer to see. `--fail-expectations` exits 1 when the
 change breaks one; `--expect-required` when it adds a rule no expectation
 holds. Nothing here needs incidents: a budget holds a rule with none
 written down. The file is read strictly, a key it doesn't know an error,
-and before anything is replayed. The backtest recipes read it from both
+1 MiB and 2,000 expectations at most, and before anything is replayed. The backtest recipes read it from both
 commits (`EXPECT`, below).
 
 ## Pull request backtests in CI

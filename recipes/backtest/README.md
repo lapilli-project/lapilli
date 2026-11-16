@@ -73,7 +73,9 @@ And, as wanted:
   an expectation the rules in place meet, and `EXPECT_REQUIRED=true` when
   it adds a rule no expectation holds, each once the comment is posted.
   Unlike `FAIL_ON_ERROR`, this isn't a failure of the backtest: the
-  comment shows the report, and a branch rule can require the job.
+  comment shows the report, and a branch rule can require the job. Held to
+  them, a run that can't judge them fails the job too: the file taken away
+  or unreadable, the history out of reach, the comment not posted.
 
 They need `sh`, `git`, `curl`, `jq` and `tar`, on Linux or macOS.
 

@@ -296,13 +296,22 @@ Step 1, in `lapilli verdict --compare` and the backtest recipes:
 - **What a change broke.** Broken after, and met before or a rule the
   change adds. A rule the change takes away breaks its catches (it catches
   nothing), not its budget. `--expect-before` holds the side before to the
-  expectations as they were, and the report says what the change raised.
+  expectations as they were, matched by the same `rule:` or `group:`: one
+  raised is held to its old value before it; one added, on both sides; one
+  taken away (whole, or a field, or a catch) is shown, held to what it
+  was, and fails nothing, as a raised one doesn't.
+- **Names told apart.** Rules sharing a name are named apart in a run
+  (`CheckoutErrors [severity=page]`); `rule: CheckoutErrors` holds each.
+- **Bounds.** 2,000 expectations; each side's firings counted once, by
+  rule and week, whatever the expectations.
 - **Out.** A section of the text, `--markdown` (right after the totals) and
   `--json` (`"expectations"`); four summary fields (`expected`,
   `expectations_broken`, `expectations_already_broken`, `unexpected`).
   `--fail-expectations` and `--expect-required` exit 1. The recipes take
   `EXPECT`, read from both commits, and `FAIL_ON_EXPECTATIONS`,
   `EXPECT_REQUIRED`, which fail the job once the comment is posted, from the
-  summary, not lapilli's exit status: the backtest didn't fail.
+  summary, not lapilli's exit status: the backtest didn't fail. Held to
+  them, a run that can't judge them fails too (the file gone or
+  unreadable, the history out of reach, the comment not posted).
 - **Serve** takes none of it yet (step 2).
 

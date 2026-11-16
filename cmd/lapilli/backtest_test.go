@@ -1626,12 +1626,35 @@ func TestBacktestRecipeExpectations(t *testing.T) {
 		!strings.Contains(rr.body(), "(was 0, in this change)") {
 		t.Errorf("raised: %v\n%s\n%s", err, rr.body(), out)
 	}
-	// Taken away in the pull request: said.
+	// A comment that can't be posted doesn't pass a broken expectation.
+	repo.git("checkout", "--quiet", "main")
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	rr.host.set(func(h *commentHost) { h.comments, h.failPost = nil, true })
+	if out, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "FAIL_ON_EXPECTATIONS=true"}, "--prometheus", prom.URL, "--tz", "UTC"); err == nil ||
+		!strings.Contains(out, "the change breaks 1 expectations") {
+		t.Errorf("not posted: %v\n%s", err, out)
+	}
+	rr.host.set(func(h *commentHost) { h.failPost = false })
+	// Taken away in the pull request: said, and, held to it, the job fails:
+	// a gate that can't judge doesn't pass.
 	repo.git("checkout", "--quiet", "main")
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("5m"), "expect.yaml": ""})
 	rr.host.set(func(h *commentHost) { h.comments = nil })
-	rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml"}, "--prometheus", prom.URL)
+	if _, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml"}, "--prometheus", prom.URL); err != nil {
+		t.Errorf("taken away, not held: %v", err)
+	}
 	failure(t, rr.body(), "EXPECT expect.yaml isn't in the pull request's commit")
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	if _, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "FAIL_ON_EXPECTATIONS=true"}, "--prometheus", prom.URL); err == nil {
+		t.Error("taken away, held to it: the job passed")
+	}
+	// Unreadable as YAML: the same.
+	repo.git("checkout", "--quiet", "main")
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("5m"), "expect.yaml": "expectations: [\n"})
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	if _, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "FAIL_ON_EXPECTATIONS=true"}, "--prometheus", prom.URL); err == nil {
+		t.Error("unreadable, held to it: the job passed")
+	}
 
 	// Wrong settings fail at once.
 	for _, c := range []struct {
@@ -1641,6 +1664,7 @@ func TestBacktestRecipeExpectations(t *testing.T) {
 	}{
 		{[]string{"PATHS=alerts", "FAIL_ON_EXPECTATIONS=true"}, nil, "FAIL_ON_EXPECTATIONS and EXPECT_REQUIRED hold the rules to EXPECT"},
 		{[]string{"PATHS=alerts", "EXPECT=../expect.yaml"}, nil, "EXPECT ../expect.yaml: want a file in the repository"},
+		{[]string{"PATHS=alerts", "EXPECT=alerts/"}, nil, "EXPECT alerts/: want a file in the repository"},
 		{[]string{"PATHS=alerts", "EXPECT=expect.yaml", "FAIL_ON_EXPECTATIONS=yes"}, nil, "FAIL_ON_EXPECTATIONS yes: want true or false"},
 		{[]string{"PATHS=alerts"}, []string{"--expect", "x.yaml"}, "--expect: the recipe reads the expectations from both commits itself"},
 	} {

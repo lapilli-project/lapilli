@@ -63,6 +63,10 @@ func (d Within) MarshalText() ([]byte, error) { return []byte(time.Duration(d).S
 // serve's declared configuration is.
 const MaxExpectations = 1 << 20
 
+// MaxExpectationEntries is the most expectations a file may hold: each is
+// held against every rule a change touches.
+const MaxExpectationEntries = 2000
+
 // ReadExpectations reads an expectations file strictly: a key it doesn't
 // know, a value of another kind, an expectation naming no rule or group,
 // or a budget below nothing is an error, with its line.
@@ -79,6 +83,9 @@ func ReadExpectations(r io.Reader) (*Expectations, error) {
 	dec.KnownFields(true)
 	if err := dec.Decode(&e); err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
+	}
+	if len(e.Expectations) > MaxExpectationEntries {
+		return nil, fmt.Errorf("%d expectations: at most %d", len(e.Expectations), MaxExpectationEntries)
 	}
 	for i, x := range e.Expectations {
 		at := fmt.Sprintf("expectation %d", i+1)
@@ -108,13 +115,19 @@ func (x Expectation) name() string {
 	return "group " + x.Group
 }
 
-// For says whether it holds a rule of that name and group.
+// For says whether it holds a rule of that name and group. A name several
+// rules share is told apart in a run (CheckoutErrors [severity=page]):
+// rule: CheckoutErrors holds each of them; the name told apart, one.
 func (x Expectation) For(rule, group string) bool {
 	if x.Rule != "" {
-		return x.Rule == rule
+		return x.Rule == rule || strings.HasPrefix(rule, x.Rule+" [")
 	}
 	return x.Group == group
 }
+
+// same says two expectations name the same rule or group: the one is the
+// other, as a change may have made it.
+func (x Expectation) same(y Expectation) bool { return x.Rule == y.Rule && x.Group == y.Group }
 
 // Expect states, of an expectation on one side of a change.
 const (
@@ -136,21 +149,26 @@ type ExpectResult struct {
 	After       string `json:"after"`
 	BeforeState string `json:"before_state"`
 	AfterState  string `json:"after_state"`
-	// Changed says the expectation itself changed in the change, from
-	// WasLimit (--expect-before).
+	// Changed says the change changed the expectation itself
+	// (--expect-before): new in it when WasLimit is empty; else from
+	// WasLimit, which the side before is held to. Removed says the change
+	// took it away: both sides are held to what it was, and nothing it
+	// finds fails the change, as a budget raised doesn't.
 	Changed  bool   `json:"changed,omitempty"`
 	WasLimit string `json:"was_limit,omitempty"`
+	Removed  bool   `json:"removed,omitempty"`
 }
 
 // BrokenByChange says the change broke it: broken after, and met before
-// or a rule the change adds. One broken before too isn't the change's.
+// or a rule the change adds. One broken before too isn't the change's, nor
+// one the change took away.
 func (r ExpectResult) BrokenByChange() bool {
-	return r.AfterState == ExpectBroken && (r.BeforeState == ExpectMet || r.BeforeState == ExpectAbsent)
+	return !r.Removed && r.AfterState == ExpectBroken && (r.BeforeState == ExpectMet || r.BeforeState == ExpectAbsent)
 }
 
 // AlreadyBroken says it was broken before the change, and still is.
 func (r ExpectResult) AlreadyBroken() bool {
-	return r.AfterState == ExpectBroken && r.BeforeState == ExpectBroken
+	return !r.Removed && r.AfterState == ExpectBroken && r.BeforeState == ExpectBroken
 }
 
 // Checked are a comparison's expectations: of the rules the change
@@ -180,39 +198,150 @@ func (c *Checked) Broken() int {
 	return n
 }
 
-// CheckExpectations holds the rules a comparison's change touches to what
-// after says of them (before, to what before says, when it is given: the
-// expectations as they were). hours count the firings while people slept.
-func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours) *Checked {
-	if before == nil {
-		before = after
+// item is one thing an expectation holds a rule to: a budget's limit, or a
+// catch, by what it is.
+type item struct {
+	what   string
+	limit  *int         // a budget's
+	catch  *ExpectCatch // a catch's
+	asleep bool
+}
+
+func (x *Expectation) items() []item {
+	var out []item
+	if x == nil {
+		return nil
 	}
+	if b := x.Budget; b != nil {
+		if b.Week != nil {
+			out = append(out, item{what: "budget week", limit: b.Week})
+		}
+		if b.Asleep != nil {
+			out = append(out, item{what: "budget asleep", limit: b.Asleep, asleep: true})
+		}
+	}
+	for i := range x.Catches {
+		out = append(out, item{what: "catches " + x.Catches[i].Incident, catch: &x.Catches[i]})
+	}
+	return out
+}
+
+func (it item) limitText() string {
+	if it.catch == nil {
+		return fmt.Sprint(*it.limit)
+	}
+	if it.catch.Within > 0 {
+		return "within " + strings.TrimPrefix(Delay(time.Duration(it.catch.Within)), "+")
+	}
+	return "caught"
+}
+
+// weekCounts are, of one side's firings, by rule, each whole week's and
+// how many came while people slept, counted once.
+type weekCounts map[string][]struct{ all, asleep int }
+
+// CheckExpectations holds the rules a comparison's change touches to what
+// after says of them; with before (--expect-before), the side before to
+// what was expected then, and what the change did to the expectations is
+// said. hours count the firings while people slept.
+func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours) *Checked {
 	out := &Checked{Results: []ExpectResult{}}
 	span := c.To.Sub(c.From)
 	out.Weeks = int(span / (7 * 24 * time.Hour))
 	if out.Weeks == 0 {
 		out.Scaled = span.Hours() / 24
 	}
+	countsB, countsA := out.count(c.Before, c.From, c.To, hours), out.count(c.After, c.From, c.To, hours)
+	sleeps := hours != nil && hours.Sleeps()
 	for _, rc := range c.Rules {
-		var b, a *RuleResult = rc.Before, rc.After
+		b, a := rc.Before, rc.After
 		group := ""
 		if a != nil {
 			group = a.Group
 		} else if b != nil {
 			group = b.Group
 		}
-		bGroup := group
-		if b != nil {
-			bGroup = b.Group
-		}
 		held := false
-		for _, x := range after.Expectations {
+		judge := func(it item, beforeLimit item, r ExpectResult) ExpectResult {
+			if it.catch != nil {
+				r.Before, r.BeforeState = catchState(c.Before, b, rc.Rule, *beforeLimit.catch)
+				r.After, r.AfterState = catchState(c.After, a, rc.Rule, *it.catch)
+				// A rule taken away catches nothing: the expectation that
+				// it does, still in the file, is broken.
+				if a == nil {
+					r.After, r.AfterState = "taken away", ExpectBroken
+				}
+				return r
+			}
+			wb, sb := out.most(countsB, rc.Rule)
+			wa, sa := out.most(countsA, rc.Rule)
+			nb, na := wb, wa
+			if it.asleep {
+				nb, na = sb, sa
+			}
+			counted := !it.asleep || sleeps
+			r.Before, r.BeforeState = budgetState(b, nb, beforeLimit.limit, counted)
+			r.After, r.AfterState = budgetState(a, na, it.limit, counted)
+			return r
+		}
+		for i := range after.Expectations {
+			x := &after.Expectations[i]
 			if !x.For(rc.Rule, group) {
 				continue
 			}
 			held = true
-			was := matching(before, rc.Rule, bGroup)
-			out.Results = append(out.Results, check(c, rc.Rule, x, was, b, a, hours, out)...)
+			// What was expected of it before, by the same rule or group:
+			// the same file's own, without --expect-before.
+			var was *Expectation
+			if before == nil {
+				was = x
+			} else {
+				for j := range before.Expectations {
+					if before.Expectations[j].same(*x) {
+						was = &before.Expectations[j]
+						break
+					}
+				}
+			}
+			old := map[string]item{}
+			for _, it := range was.items() {
+				old[it.what] = it
+			}
+			for _, it := range x.items() {
+				r := ExpectResult{Rule: rc.Rule, What: it.what, Limit: it.limitText()}
+				beforeLimit, ok := old[it.what]
+				switch {
+				case !ok:
+					// New in the change: the side before is held to it too,
+					// so a change is failed only for what it breaks.
+					beforeLimit = it
+					r.Changed = before != nil
+				case beforeLimit.limitText() != it.limitText():
+					r.Changed, r.WasLimit = true, beforeLimit.limitText()
+				}
+				delete(old, it.what)
+				out.Results = append(out.Results, judge(it, beforeLimit, r))
+			}
+			// What the change took away of it: shown, held to what it was.
+			for _, it := range was.items() {
+				if _, gone := old[it.what]; gone && before != nil {
+					r := ExpectResult{Rule: rc.Rule, What: it.what, Limit: it.limitText(), Removed: true}
+					out.Results = append(out.Results, judge(it, it, r))
+				}
+			}
+		}
+		// Expectations the change took away whole.
+		if before != nil {
+			for j := range before.Expectations {
+				y := &before.Expectations[j]
+				if !y.For(rc.Rule, group) || slices.ContainsFunc(after.Expectations, func(x Expectation) bool { return x.same(*y) }) {
+					continue
+				}
+				for _, it := range y.items() {
+					r := ExpectResult{Rule: rc.Rule, What: it.what, Limit: it.limitText(), Removed: true}
+					out.Results = append(out.Results, judge(it, it, r))
+				}
+			}
 		}
 		if !held && b == nil && a != nil {
 			out.Unexpected = append(out.Unexpected, rc.Rule)
@@ -221,119 +350,50 @@ func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours)
 	return out
 }
 
-// matching is the first expectation of a set that holds the rule.
-func matching(set *Expectations, rule, group string) *Expectation {
-	for i, x := range set.Expectations {
-		if x.For(rule, group) {
-			return &set.Expectations[i]
-		}
-	}
-	return nil
-}
-
-func check(c *Comparison, rule string, x Expectation, was *Expectation, b, a *RuleResult, hours *Hours, out *Checked) []ExpectResult {
-	var rs []ExpectResult
-	if x.Budget != nil {
-		weekB, asleepB := mostInAWeek(c.Before, rule, c.From, c.To, hours, out)
-		weekA, asleepA := mostInAWeek(c.After, rule, c.From, c.To, hours, out)
-		limits := []struct {
-			what       string
-			limit, old *int
-			before     int
-			after      int
-			counted    bool
-		}{
-			{"budget week", x.Budget.Week, oldLimit(was, func(b *Budget) *int { return b.Week }), weekB, weekA, true},
-			{"budget asleep", x.Budget.Asleep, oldLimit(was, func(b *Budget) *int { return b.Asleep }), asleepB, asleepA, hours != nil && hours.Sleeps()},
-		}
-		for _, l := range limits {
-			if l.limit == nil {
-				continue
-			}
-			r := ExpectResult{Rule: rule, What: l.what, Limit: fmt.Sprint(*l.limit)}
-			// The side before is held to what was expected then.
-			beforeLimit := l.limit
-			if was != nil {
-				beforeLimit = l.old
-			}
-			r.Before, r.BeforeState = budgetState(b, l.before, beforeLimit, l.counted)
-			r.After, r.AfterState = budgetState(a, l.after, l.limit, l.counted)
-			if beforeLimit == nil || *beforeLimit != *l.limit {
-				r.Changed = true
-				if beforeLimit != nil {
-					r.WasLimit = fmt.Sprint(*beforeLimit)
-				}
-			}
-			rs = append(rs, r)
-		}
-	}
-	for _, k := range x.Catches {
-		r := ExpectResult{Rule: rule, What: "catches " + k.Incident, Limit: "caught"}
-		if k.Within > 0 {
-			r.Limit = "within " + strings.TrimPrefix(Delay(time.Duration(k.Within)), "+")
-		}
-		r.Before, r.BeforeState = catchState(c.Before, b, rule, k)
-		r.After, r.AfterState = catchState(c.After, a, rule, k)
-		// A rule taken away catches nothing: the expectation that it
-		// does, still in the file, is broken, unless the change takes it
-		// away too.
-		if a == nil {
-			r.After, r.AfterState = "taken away", ExpectBroken
-		}
-		if was != nil && !slices.ContainsFunc(was.Catches, func(o ExpectCatch) bool { return o == k }) {
-			r.Changed = true
-		}
-		rs = append(rs, r)
-	}
-	return rs
-}
-
-func oldLimit(was *Expectation, f func(*Budget) *int) *int {
-	if was == nil || was.Budget == nil {
-		return nil
-	}
-	return f(was.Budget)
-}
-
-// mostInAWeek is the most a rule fired in a whole week of [from, to),
-// counted back from to, and the most while people slept; with no whole
-// week, the period's, scaled to a week.
-func mostInAWeek(r *Report, rule string, from, to time.Time, hours *Hours, out *Checked) (int, int) {
+// count counts a side's firings by rule and whole week, counted back from
+// to, the weeks closed at their start, so a firing at from is in the
+// first; with no whole week, the period's, as one.
+func (k *Checked) count(r *Report, from, to time.Time, hours *Hours) weekCounts {
+	out := weekCounts{}
 	if r == nil {
-		return 0, 0
+		return out
 	}
 	const week = 7 * 24 * time.Hour
-	type n struct{ all, asleep int }
-	if out.Weeks == 0 {
-		var t n
-		for _, f := range r.Firings {
-			if f.Rule == rule && !f.Start.Before(from) && f.Start.Before(to) {
-				t.all++
-				if hours != nil && hours.Of(f.Start) == Asleep {
-					t.asleep++
-				}
-			}
-		}
-		scale := 7 / max(out.Scaled, 1.0/24)
-		return int(float64(t.all)*scale + 0.5), int(float64(t.asleep)*scale + 0.5)
-	}
-	weeks := make([]n, out.Weeks)
+	n := max(k.Weeks, 1)
 	for _, f := range r.Firings {
-		if f.Rule != rule || !f.Start.Before(to) {
+		if f.Start.Before(from) || !f.Start.Before(to) {
 			continue
 		}
-		i := int(to.Sub(f.Start) / week)
-		if i >= out.Weeks || f.Start.Before(from) {
+		i := 0
+		if k.Weeks > 0 {
+			i = int((to.Sub(f.Start) - 1) / week)
+		}
+		if i >= n {
 			continue
 		}
-		weeks[i].all++
+		ws := out[f.Rule]
+		if ws == nil {
+			ws = make([]struct{ all, asleep int }, n)
+			out[f.Rule] = ws
+		}
+		ws[i].all++
 		if hours != nil && hours.Of(f.Start) == Asleep {
-			weeks[i].asleep++
+			ws[i].asleep++
 		}
 	}
+	return out
+}
+
+// most is the most a rule fired in a week, and while people slept; with
+// no whole week, the period's, scaled to a week.
+func (k *Checked) most(counts weekCounts, rule string) (int, int) {
 	most, asleep := 0, 0
-	for _, w := range weeks {
+	for _, w := range counts[rule] {
 		most, asleep = max(most, w.all), max(asleep, w.asleep)
+	}
+	if k.Weeks == 0 {
+		scale := 7 / max(k.Scaled, 1.0/24)
+		return int(float64(most)*scale + 0.5), int(float64(asleep)*scale + 0.5)
 	}
 	return most, asleep
 }
@@ -392,6 +452,8 @@ func (r ExpectResult) heldTo(name func(string) string) string {
 		s = r.What + " " + r.Limit
 	}
 	switch {
+	case r.Removed:
+		s += " (taken away in this change)"
 	case r.Changed && r.WasLimit != "":
 		s += " (was " + r.WasLimit + ", in this change)"
 	case r.Changed:
@@ -403,6 +465,10 @@ func (r ExpectResult) heldTo(name func(string) string) string {
 // verdictOf says what became of an expectation, for a person.
 func (r ExpectResult) verdictOf() string {
 	switch {
+	case r.Removed && r.AfterState == ExpectBroken && r.BeforeState != ExpectBroken:
+		return "taken away; the change would break it"
+	case r.Removed:
+		return "taken away"
 	case r.BrokenByChange():
 		return "✗ broken by this change"
 	case r.AlreadyBroken():
@@ -423,12 +489,14 @@ func (k *Checked) ordered() []ExpectResult {
 		switch {
 		case r.BrokenByChange():
 			return 0
-		case r.AlreadyBroken():
+		case r.Removed && r.AfterState == ExpectBroken:
 			return 1
-		case r.AfterState == ExpectUnknown:
+		case r.AlreadyBroken():
 			return 2
+		case r.AfterState == ExpectUnknown || r.Removed:
+			return 3
 		}
-		return 3
+		return 4
 	}
 	out := slices.Clone(k.Results)
 	slices.SortStableFunc(out, func(a, b ExpectResult) int { return rank(a) - rank(b) })
@@ -444,7 +512,7 @@ func (k *Checked) counts() string {
 			broken++
 		case r.AlreadyBroken():
 			already++
-		case r.AfterState == ExpectMet:
+		case r.AfterState == ExpectMet && !r.Removed:
 			met++
 		}
 	}

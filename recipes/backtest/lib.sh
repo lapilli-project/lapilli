@@ -225,11 +225,13 @@ for p in ${PATHS:-}; do
   in_repo "$p" || { say "PATHS: $p isn't a path in the repository"; exit 1; }
 done
 set +f
-if [ -n "${INCIDENTS:-}" ] && ! in_repo "$INCIDENTS"; then
+# A file, not a directory: a path ending in / is refused, as git would
+# take it for the one file a directory holds.
+if [ -n "${INCIDENTS:-}" ] && { ! in_repo "$INCIDENTS" || [ "${INCIDENTS%/}" != "$INCIDENTS" ]; }; then
   say "INCIDENTS $INCIDENTS: want a file in the repository"
   exit 1
 fi
-if [ -n "${EXPECT:-}" ] && ! in_repo "$EXPECT"; then
+if [ -n "${EXPECT:-}" ] && { ! in_repo "$EXPECT" || [ "${EXPECT%/}" != "$EXPECT" ]; }; then
   say "EXPECT $EXPECT: want a file in the repository"
   exit 1
 fi
@@ -552,7 +554,8 @@ incidents() {
     trouble "INCIDENTS $INCIDENTS is more than 8 MiB"
     return 1
   fi
-  git -C "$repo" cat-file blob "$base:$INCIDENTS" >"$tmp/incidents.yaml"
+  git -C "$repo" cat-file blob "$base:$INCIDENTS" >"$tmp/incidents.yaml" ||
+    { trouble "INCIDENTS $INCIDENTS couldn't be read from the commit the pull request goes into"; return 1; }
 }
 
 # expectations: EXPECT, as each commit has it, into
@@ -578,7 +581,8 @@ expectations() {
       trouble "EXPECT $EXPECT is more than 1 MiB in $what"
       return 1
     fi
-    git -C "$repo" cat-file blob "$commit:$EXPECT" >"$tmp/expect.$side.yaml"
+    git -C "$repo" cat-file blob "$commit:$EXPECT" >"$tmp/expect.$side.yaml" ||
+      { trouble "EXPECT $EXPECT couldn't be read from $what"; return 1; }
   done
 }
 
@@ -727,7 +731,9 @@ backtest() {
     0) ;;
     1) trouble "the backtest failed, or didn't finish (lapilli exited 1)" "$tmp/lapilli.said" ;;
     2)
-      if grep -q -e '--markdown needs a value' -e 'unknown flag --markdown' "$tmp/lapilli.log" && [ -n "${LAPILLI:-}" ]; then
+      if grep -q -e 'unknown flag --expect' "$tmp/lapilli.log"; then
+        trouble "the lapilli run has no --expect: give LAPILLI_VERSION (or LAPILLI) a release with it" "$tmp/lapilli.said"
+      elif grep -q -e '--markdown needs a value' -e 'unknown flag --markdown' "$tmp/lapilli.log" && [ -n "${LAPILLI:-}" ]; then
         trouble "the lapilli LAPILLI names has no --markdown: give a later release" "$tmp/lapilli.said"
       elif grep -q -e '--markdown needs a value' -e 'unknown flag --markdown' "$tmp/lapilli.log"; then
         trouble "Lapilli $LAPILLI_VERSION has no --markdown: give LAPILLI_VERSION a later release" "$tmp/lapilli.said"
@@ -839,12 +845,17 @@ main() {
     fi
   fi
   compose
+  # Held to the expectations, a run that couldn't hold them (the file
+  # taken away or unreadable, the history out of reach, the comment not
+  # posted) fails the job: a gate that can't judge doesn't pass.
+  gate=$strict$held$required
   if ! post; then
     say "the comment couldn't be posted"
-    [ -z "$strict" ] || exit 1
+    [ -z "$unmet" ] || say "$unmet"
+    [ -z "$gate" ] || exit 1
     exit 0
   fi
-  if [ -n "$problem" ] && [ -n "$strict" ]; then
+  if [ -n "$problem" ] && [ -n "$gate" ]; then
     exit 1
   fi
   if [ -n "$unmet" ]; then
