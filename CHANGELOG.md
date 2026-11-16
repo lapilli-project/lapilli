@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Added
+
+- **User impact in a pull request backtest.** The backtest recipes take
+  `IMPACT`, a PromQL expression that returns something while users are
+  hurt, given to `lapilli verdict --impact` as one argument, as it is;
+  `IMPACT_FOR` (`--impact-for`); and `MATCH`, labels comma-separated, a
+  `--match` each: the action's `impact`, `impact-for` and `match`, and
+  every host's script alike. The expression's windows are incidents the
+  rules that differ are judged by, so the comment says what a change would
+  have caught or missed with no incident written down. The action's
+  `args`, split at spaces, couldn't hold such an expression.
+
+### Changed
+
+- **The action installs the release it is at.** Its `version` is
+  optional: without it, the action installs the first release the
+  `CHANGELOG.md` of its own commit names, read offline, so that Dependabot
+  or Renovate moving the `uses:` line moves the binary too. At a commit
+  between two releases, that is the one before it. A `sha256` pinned is
+  one release's: once the `uses:` line moves, nothing is installed, and
+  the comment says so, until it is changed too. The release workflow
+  checks that the first release `CHANGELOG.md` names is the one tagged.
+
 ## [0.48.0] - 2026-11-16
 
 ### Added
