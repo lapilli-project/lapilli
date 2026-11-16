@@ -262,7 +262,10 @@ The first two need no incident written down.
    process to run. Neither is in the first steps.
 2. **A team's budget.** How many times a team is paged in a week, over all
    its rules, is what on-call people feel. It is a budget of a team, not a
-   rule. It could be a fourth kind, checked the same way.
+   rule. It could be a fourth kind, checked the same way. Answered by
+   [goals.md](goals.md) (#91): a team's budget is a goal of the team's
+   (`critical.firings` or `firings`, `at_most`), not a fourth kind of
+   expectation.
 3. **Default budgets.** Whether a team may set a budget every rule of it is
    held to unless the rule says otherwise, or every rule must say its own.
 4. **The week.** Whole weeks as the ledger's (Monday, in `--tz`), or a
