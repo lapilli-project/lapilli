@@ -3,8 +3,9 @@
 // scrolls sideways at 320 CSS px (WCAG 1.4.10); that the rules list's
 // table, with rules named as long as a real set's (longNamed), and the
 // overview's table of the weeks fit their boxes on a laptop's screen, 1280
-// CSS px and wider; and that a checkbox is on the line of its words, at
-// 320, 1280, 1440 and 1920 CSS px. Run by axe.sh.
+// CSS px and wider; that a checkbox is on the line of its words, at 320,
+// 1280, 1440 and 1920 CSS px; and that a disabled field looks it, in light
+// and in dark. Run by axe.sh.
 //
 // BASE is where the pages are served. Prints the violations by rule, and
 // writes them all as JSON to OUT when it is set. Exits 1 when there are any.
@@ -31,6 +32,27 @@ async function check(lang, scheme) {
     for (const v of violations) {
       found.push({ rule: v.id, impact: v.impact, path, lang, scheme, nodes: v.nodes.length,
         targets: v.nodes.slice(0, 3).map((n) => n.target.join(' ')), help: v.help });
+    }
+    // A disabled field is drawn as a disabled button is, whatever rule
+    // is more specific: dim words on the panel, a dashed edge.
+    const plain = await page.evaluate(() => {
+      const probe = document.createElement('div');
+      probe.style.color = 'var(--dim)';
+      probe.style.backgroundColor = 'var(--panel)';
+      document.body.append(probe);
+      const { color, backgroundColor } = getComputedStyle(probe);
+      probe.remove();
+      return [...document.querySelectorAll('input:disabled, select:disabled, textarea:disabled')]
+        .filter((x) => x.offsetParent && !['checkbox', 'radio', 'hidden'].includes(x.type))
+        .filter((x) => {
+          const s = getComputedStyle(x);
+          return s.borderTopStyle !== 'dashed' || s.backgroundColor !== backgroundColor || s.color !== color;
+        })
+        .map((x) => x.name || x.id || x.tagName);
+    });
+    if (plain.length) {
+      found.push({ rule: 'disabled-look', impact: 'moderate', path, lang, scheme, nodes: plain.length, targets: plain.slice(0, 3),
+        help: 'A disabled field is drawn as one to fill' });
     }
   }
   await context.close();
