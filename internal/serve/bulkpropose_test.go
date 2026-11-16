@@ -475,7 +475,11 @@ func TestBulkProposeTimeUp(t *testing.T) {
 	if strings.Contains(logs.String(), "level=ERROR") {
 		t.Errorf("logged: %s", logs.String())
 	}
-	// A request ended (a proxy's timeout, the reader gone) is logged.
+	// A request ended (a proxy's timeout, the reader gone) is logged. It
+	// ends once it waits for the heavy turn, with a minute left, so that
+	// only its end stops it however slow the machine: ended after a sleep,
+	// with 300ms left, a busy runner had the time run out first.
+	proposeTime = time.Minute
 	s.heavy <- struct{}{}
 	ctx, cancel := context.WithCancel(context.Background())
 	r := httptest.NewRequestWithContext(ctx, http.MethodPost, "/rules/bulk", strings.NewReader(form.Encode()))
@@ -483,7 +487,9 @@ func TestBulkProposeTimeUp(t *testing.T) {
 	r.Header.Set("Sec-Fetch-Site", "same-origin")
 	r.Header.Set("X-Forwarded-Email", bo)
 	go func() {
-		time.Sleep(100 * time.Millisecond)
+		for i := 0; heavyWaiting.Load() < 1 && i < 30000; i++ {
+			time.Sleep(time.Millisecond)
+		}
 		cancel()
 	}()
 	s.Handler().ServeHTTP(httptest.NewRecorder(), r)
