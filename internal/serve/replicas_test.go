@@ -624,6 +624,37 @@ func TestReplicasShowTheLeadersStatus(t *testing.T) {
 	}
 }
 
+// A replica that follows says of the incidents file what the leader, which
+// reads it, saw; and a replica of a shared ledger that knows of no leader
+// says what it saw itself.
+func TestReplicasShowTheLeadersSources(t *testing.T) {
+	f := sharedLedger(t)
+	quickReplicas(t)
+	rc := newSink(t)
+	gone := func(c *Config) { c.Incidents = filepath.Join(t.TempDir(), "incidents.gone") }
+	a, b := replica(t, f, rc, gone), replica(t, f, rc, gone)
+	a.sources.Lock()
+	a.sources.fileFailed, a.sources.fileErr = now, "the incidents file can't be read"
+	a.sources.Unlock()
+	if row := sourceRowOf(readPage(t, a, "/settings"), "Incidents file"); !strings.Contains(row, "failing") {
+		t.Errorf("no replica leads; its own failure isn't said:\n%s", row)
+	}
+	running(t, a)
+	until(t, 30*time.Second, "a leads", func() bool { return a.l.Leading() })
+	running(t, b)
+	until(t, 30*time.Second, "the first jobs done", func() bool { return a.ready.Load() })
+	until(t, 10*time.Second, "the follower says the leader's failure", func() bool {
+		return strings.Contains(sourceRowOf(readPage(t, b, "/settings"), "Incidents file"), "failing")
+	})
+}
+
+// readPage is a page as anyone reads it.
+func readPage(t *testing.T, s *Server, path string) string {
+	t.Helper()
+	_, body, _ := get(t, s.Handler(), path)
+	return body
+}
+
 // A replica that can't reach the ledger's database isn't ready, so that the
 // others answer for it; while it can, its readiness says who leads.
 func TestReplicasReadyNeedsTheDatabase(t *testing.T) {

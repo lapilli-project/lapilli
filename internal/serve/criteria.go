@@ -875,18 +875,18 @@ func (s *Server) sourcesNow() *sourcesSeen {
 	return x
 }
 
-// shownSources is what the pages say was seen of the sources: the
-// leader's, as it last said it, on a replica that doesn't lead.
+// shownSources is what the pages say was seen of the sources: as the
+// status is (shownStatus), the leader's, as it last said it, on a replica
+// that follows one; else this replica's own, as with a shared ledger and
+// no replica known to lead.
 func (s *Server) shownSources() sourcesSeen {
-	if s.l.Shared() && !s.l.Leading() {
-		s.leaderSaid.Lock()
-		defer s.leaderSaid.Unlock()
-		if x := s.leaderSaid.st.Sources; x != nil {
-			return *x
-		}
-		return sourcesSeen{}
+	if !s.follows() {
+		return *s.sourcesNow()
 	}
-	return *s.sourcesNow()
+	if x := s.shownStatus().Sources; x != nil {
+		return *x
+	}
+	return sourcesSeen{}
 }
 
 // readImpact notes how a read of the impact signal with the criterion key
