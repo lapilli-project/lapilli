@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/cloud"
+	"lapilli.dev/internal/egress"
 	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/prom"
@@ -104,7 +105,7 @@ func Loaded(ctx context.Context, h replay.History) ([]rules.Rule, rules.Doc, err
 // grafanaHeaders, the whole within grafanaTimeout, whatever the context.
 var client = &http.Client{
 	Timeout:       grafanaTimeout,
-	Transport:     withHeaderTimeout(grafanaHeaders),
+	Transport:     egress.Wrap(withHeaderTimeout(grafanaHeaders)),
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 

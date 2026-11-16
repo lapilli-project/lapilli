@@ -22,6 +22,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"lapilli.dev/internal/cloud"
+	"lapilli.dev/internal/egress"
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
@@ -225,7 +226,7 @@ func (e endpoint) call(ctx context.Context, method, target string, body []byte, 
 			return 0, nil, nil, err
 		}
 	}
-	client := &http.Client{Timeout: rulerTimeout, Transport: e.transport,
+	client := &http.Client{Timeout: rulerTimeout, Transport: egress.Wrap(e.transport),
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
 	if err != nil {

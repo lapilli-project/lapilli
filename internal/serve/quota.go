@@ -80,6 +80,9 @@ const guardTime = time.Minute
 // so that a run back after a short outage, hours behind, runs at once.
 const catchUpAfter = 24 * time.Hour
 
+// CatchUpAfter is how far behind a run is a catch-up.
+const CatchUpAfter = catchUpAfter
+
 // heldReasons are why a run waits, as /metrics says it
 // (lapilli_serve_runs_held).
 var heldReasons = []string{"catch_up_hours", "guard", "yield"}

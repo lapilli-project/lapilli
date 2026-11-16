@@ -7,6 +7,8 @@ import (
 	"net/netip"
 	"syscall"
 	"time"
+
+	"lapilli.dev/internal/egress"
 )
 
 // What the notifications port fetches, an SNS certificate or a subscription's
@@ -65,12 +67,12 @@ func dialPublic(_, address string, _ syscall.RawConn) error {
 // the environment names a proxy for it, it goes through the proxy, which
 // reaches the host; else it connects only to a public address.
 func fetcher(req *http.Request) *http.Client {
-	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	c := &http.Client{Transport: egress.Wrap(nil), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	if p, err := http.ProxyFromEnvironment(req); err == nil && p != nil {
 		return c
 	}
 	d := &net.Dialer{Timeout: 10 * time.Second, Control: dialPublic}
 	// Fetched a few times an hour at most: no connection is kept open.
-	c.Transport = &http.Transport{DialContext: d.DialContext, TLSHandshakeTimeout: 10 * time.Second, ForceAttemptHTTP2: true, DisableKeepAlives: true}
+	c.Transport = egress.Wrap(&http.Transport{DialContext: d.DialContext, TLSHandshakeTimeout: 10 * time.Second, ForceAttemptHTTP2: true, DisableKeepAlives: true})
 	return c
 }

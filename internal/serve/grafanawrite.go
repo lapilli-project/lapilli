@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"lapilli.dev/internal/egress"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/rules"
@@ -32,7 +33,7 @@ var grafanaUID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
 
 // grafanaClient follows no redirect: a write goes where it was told, or
 // nowhere.
-var grafanaClient = &http.Client{Timeout: 30 * time.Second,
+var grafanaClient = &http.Client{Timeout: 30 * time.Second, Transport: egress.Wrap(nil),
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 // grafanaCall asks Grafana's provisioning API.

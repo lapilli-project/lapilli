@@ -39,6 +39,13 @@ const (
 	maxElsewhereName = 512
 )
 
+// AlertsSeries and GrafanaAlertsSeries are the series of what really
+// fired, as the check reads them: lapilli preflight counts a day of them.
+const (
+	AlertsSeries        = alertsSeries
+	GrafanaAlertsSeries = grafanaAlertsSeries
+)
+
 // Why Grafana's alert state history was of no use over a day: it held no
 // change of state from before the day, as a Grafana keeping none that far
 // back holds none; more than is read at once (source.ErrTooManyChanges);

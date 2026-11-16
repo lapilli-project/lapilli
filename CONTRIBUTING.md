@@ -90,7 +90,12 @@ tests, so a change that slows a run or a page fails.
 - `internal/replay` runs rules against history.
 - `internal/prom` talks to Prometheus-compatible APIs, and to Loki's, which
   answers the same way. `internal/cloud` signs requests for AWS, Azure and
-  Google Cloud.
+  Google Cloud. Every HTTP client goes out through `internal/egress`, so
+  that a guard the process sets sees each request before it is sent: a new
+  client is made with `egress.Wrap`.
+- `internal/preflight` is `lapilli preflight`: what serve will meet before
+  it is deployed, read through an allowlist, the ledger through
+  `ledger.Probe` (docs/design/preflight.md).
 - `internal/source` reads the history and the rules for both commands.
 - `internal/incident` reads incidents. `recipes/incidents` copies them from
   the tools they are kept in; `internal/serve/recipes_test.go` runs each

@@ -10,6 +10,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"lapilli.dev/internal/egress"
 )
 
 // Client is how feeds are fetched: thirty seconds, no redirect followed.
@@ -17,6 +19,7 @@ import (
 // http-to-https redirect drops its path: neither is the feed.
 func Client() *http.Client {
 	return &http.Client{
+		Transport:     egress.Wrap(nil),
 		Timeout:       30 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}

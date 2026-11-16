@@ -1753,6 +1753,67 @@ helm install lapilli oci://ghcr.io/lapilli-project/charts/lapilli -n monitoring 
 kubectl -n monitoring port-forward svc/lapilli 8080
 ```
 
+### Before it is deployed
+
+`lapilli preflight` takes serve's flags, as serve reads them, and says
+what serve will meet, before it is deployed: whether it reads the rules
+and how many it can replay, whether it reaches the history and signs in to
+it, whether Grafana's token reads what serve reads, what the files and the
+tokens hold, the ledger it would open, and how many requests an hourly
+run, the backfill and what is asked beside them will make, how long they
+take under `--max-rate`, over how many nights of `--catch-up-hours`, and
+how much memory to give the pod (docs/design/preflight.md). Each item is
+ok, a problem or unknown, with why, and for a problem what to change:
+
+```sh
+lapilli preflight --rules alert-rules/ --prometheus http://prometheus:9090 \
+  --max-rate 0.5 --catch-up-hours 01:00-06:00 --catch-up-rate 0.5
+```
+
+```
+lapilli preflight: 12 items: 10 ok, 0 problems, 2 unknown; 4 requests asked
+ok       rules.read          203 alert rules (Prometheus), 40 recording rules, from --rules
+ok       rules.replayable    203 can be replayed
+ok       history.reach       [--prometheus] answered vector(1) in 38ms, with no credentials
+unknown  history.alerts      no firing alert in the last day, or no ALERTS kept: memory is the caps'
+                             bound
+...
+ok       ledger.sqlite       a new ledger: serve makes it, at schema 019
+Estimates
+ok       hourly run          about 253 requests a run, the most 430, 6,054 a day: at --max-rate 0.5
+                             a run takes 8m at least, the most 14m; once caught up, with what is
+                             asked beside them, 14% of --max-rate
+ok       backfill            12,040 requests over 28d, 28 pieces of a day at most, the most 430: at
+                             least 6h41m at 0.5 a second
+                             why: each day's in 14m at most, within --timeout 50m
+ok       nights              2 nights at least, in 01:00-06:00 at 0.5 a second, 9,000 of the
+                             backfill's requests a night
+ok       memory              no firing read: the caps' bound, 5.2 GB (8 x 10,000,000 x 64 bytes,
+                             beside 64 MB of caches): a request of 5.2 GB, a limit of 10.5 GB
+```
+
+It writes nothing and replays nothing, held by the code: every request it
+sends goes through an allowlist that refuses any other before it is sent
+(the history's `vector(1)` and a day's count of ALERTS; the rules, the data
+sources and the notifications Grafana is read for; the sign-in's discovery
+and keys; the clouds' credentials), the ledger is read through a probe that
+opens SQLite read-only and Postgres in read-only transactions, and no rule,
+`--impact` nor `--guard` is evaluated. What the clouds' credential chains
+do of their own is outside the allowlist: Google's metadata server (and
+whether it is there, off Google Cloud), the Azure CLI (which may write its
+token cache), OCI's instance and resource principals and OKE's workload
+identity (its auth service's POST among them), and the processes AWS's
+`credential_process` and Google's executable credentials start. What it prints is redacted as a
+pull request's backtest comment is. It exits 0 with no problem, 1 with
+one (or an unknown, with `--fail-unknown`), 2 when the flags are wrong;
+`--json` gives the report with ids and fields that stay the same
+(docs/numbers.md). Run it where serve runs, with its service account and
+volume, as a Job or `kubectl run` of the image; in CI, `--offline` asks
+nothing, reads no secret's file nor `--ledger-url-file`, and works out what
+needs no credential: the flags, the rule files, `--config` and the
+estimates of requests and time. Whether a token
+may write (`--changes`) isn't asked yet: it says unknown.
+
 ### The ledger in Postgres
 
 A SQLite file is one disk's. To keep the ledger where you keep the rest, with

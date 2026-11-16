@@ -26,6 +26,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"lapilli.dev/internal/egress"
 )
 
 // Client queries one API.
@@ -126,6 +128,7 @@ func (c *Client) MaxSamples() int { return c.maxSamples }
 // gives up on a request after five minutes, past the two Prometheus gives a
 // query.
 var client = &http.Client{
+	Transport:     egress.Wrap(nil),
 	Timeout:       5 * time.Minute,
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }

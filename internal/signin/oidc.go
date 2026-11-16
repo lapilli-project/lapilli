@@ -50,6 +50,7 @@ type OIDC struct {
 type provider struct {
 	endpoint oauth2.Endpoint
 	verifier *oidc.IDTokenVerifier
+	keys     *Keys
 }
 
 // discoverRetry is how soon discovery is tried again after it failed.
@@ -95,6 +96,26 @@ func (o *OIDC) Discover(ctx context.Context) error {
 	return err
 }
 
+// KeysURL discovers the provider, as Discover does, and says where its
+// keys are, as its configuration names them.
+func (o *OIDC) KeysURL(ctx context.Context) (string, error) {
+	p, err := o.provider(ctx)
+	if err != nil {
+		return "", err
+	}
+	return p.keys.url, nil
+}
+
+// FetchKeys discovers the provider, as Discover does, and fetches its keys
+// once, as the first token would: how many public keys its set holds.
+func (o *OIDC) FetchKeys(ctx context.Context) (int, error) {
+	p, err := o.provider(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return p.keys.Fetch(ctx)
+}
+
 // discover reads the provider's configuration: its issuer must be the one
 // given, to the byte, and what it names gets the code, the secret and the
 // keys, so must be as safe to reach as the issuer.
@@ -128,7 +149,7 @@ func (o *OIDC) discover(ctx context.Context) (*provider, error) {
 	}
 	keys := NewKeys(doc.JWKS, o.Client, doc.Algs, o.Now)
 	return &provider{endpoint: oauth2.Endpoint{AuthURL: doc.Auth, TokenURL: doc.Token}, verifier: oidc.NewVerifier(o.Issuer, keys,
-		&oidc.Config{ClientID: o.ClientID, SupportedSigningAlgs: keys.Algs(), Now: o.Now})}, nil
+		&oidc.Config{ClientID: o.ClientID, SupportedSigningAlgs: keys.Algs(), Now: o.Now}), keys: keys}, nil
 }
 
 func (o *OIDC) now() time.Time {

@@ -19,6 +19,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 
+	"lapilli.dev/internal/egress"
 	"lapilli.dev/internal/prom"
 )
 
@@ -41,7 +42,7 @@ var IAMCredentials = "https://iamcredentials.googleapis.com"
 // googleSource is Application Default Credentials' token source, of a
 // scope; tests replace it.
 var googleSource = func(ctx context.Context, scope string) (oauth2.TokenSource, error) {
-	return google.DefaultTokenSource(ctx, scope)
+	return google.DefaultTokenSource(googleContext(ctx), scope)
 }
 
 // googleRequest sends a token for Cloud Monitoring: the pod's own, from
@@ -82,7 +83,7 @@ type impersonated struct {
 	scope string
 }
 
-var iamClient = &http.Client{Timeout: 30 * time.Second,
+var iamClient = &http.Client{Timeout: 30 * time.Second, Transport: egress.Wrap(nil),
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 func (i *impersonated) Token() (*oauth2.Token, error) {

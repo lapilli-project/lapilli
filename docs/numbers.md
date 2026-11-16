@@ -547,3 +547,35 @@ adds to the others can't be said there.
 `rule`, `severity`, `team`, `labels`, `start`, `end`, `stone`, `no_record`,
 `incidents`, `refired`, `during_deploy`, `excused`, in that order.
 `TestCSVColumns` holds them.
+
+### lapilli preflight's report
+
+`lapilli preflight --json` (docs/design/preflight.md). Its items' ids, their
+states and the fields below keep their names; a new check is a new id.
+`TestPreflightStable` holds them, and this list. A field marked † is left
+out when it is zero or empty, as in the report.
+
+| Where | Fields |
+|---|---|
+| the report | `version`, `lapilli`, `items`, `estimates`, `left_out`, `asked` |
+| `items[]` | `id`, `state` (`ok`, `problem`, `unknown`), `what`, `why`†, `fix`† |
+| `asked` | `requests`, `by`, `refused` |
+| `estimates` | `hourly`†, `backfill`†, `nights`†, `beside`†, `memory`† |
+| `estimates.hourly` | `runs`, `requests`, `most`, `day`, `by`, `guard`, `impact`, `seconds`†, `share`† |
+| `estimates.backfill` | `pieces`, `requests`, `most`, `by`, `guard`, `impact`, `rate`†, `seconds`†, `piece_hours`† |
+| `estimates.nights` | `hours`, `nights` (`-1`: never, the catch-up falls further behind), `per_night` |
+| `estimates.beside` | `day`, `by` |
+| `estimates.memory` | `from` (`alerts`, `caps`), `peak_bytes`, `request_bytes`, `limit_bytes`, `cgroup_bytes`† |
+
+The ids: `rules.read`, `rules.replayable`, `rules.history`, `expressions`,
+`history.reach`, `history.loki`, `history.grafana`, `history.alerts`,
+`history.intervals`, `grafana.notifications`, `grafana.write`,
+`changes.cloud`, `changes.ruler`, `inputs.files`, `secrets.files`,
+`ledger.sqlite`, `ledger.postgres`, `signin`, `access`, `estimate.hourly`,
+`estimate.backfill`, `estimate.nights`, `estimate.beside`,
+`estimate.memory`. The keys of `asked.by` and of the estimates' `by` are the
+APIs asked (`prometheus`, `loki`, `grafana`, `ruler`, `alarms:SOURCE`,
+`signin`, `on-call`, `credentials`); of `estimates.beside.by`, what asks
+(`rules`, `loki_rules`, `alarms`, `check_replay`, `scrape_intervals`,
+`grafana_notifications`, `grafana_data_sources`, `on_call`). The texts of
+`what`, `why` and `fix` may change in any release.

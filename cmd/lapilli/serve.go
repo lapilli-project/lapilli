@@ -547,13 +547,19 @@ during deploys, incidents and impact windows caught and missed, the median
 lead; docs/design/noc.md). MCP: /mcp. Also /metrics, /healthz, /readyz.
 `
 
-func runServe(args []string, stdout, stderr io.Writer) int {
-	for _, a := range args {
-		if a == "-h" || a == "--help" {
-			fmt.Fprint(stdout, serveUsage)
-			return 0
-		}
-	}
+// serveSetup is what lapilli serve's flags say, as serve reads them: its
+// configuration, and the flags it shares with lapilli verdict.
+type serveSetup struct {
+	cfg serve.Config
+	f   *verdictFlags
+}
+
+// readServe reads lapilli serve's flags, and refuses a flag, or a
+// combination of them, that serve refuses: lapilli preflight reads them
+// so too. With secretsLater (lapilli preflight --offline, run where serve's
+// secrets aren't), the files of secrets are taken as given, unread: a
+// token, a key, a webhook's URL, the ledger's connection string.
+func readServe(args []string, secretsLater bool) (serveSetup, error) {
 	cfg := serve.Config{
 		Ledger: "lapilli-ledger", Listen: "127.0.0.1:8080", Every: time.Hour, Settle: time.Hour,
 		Backfill: 28 * 24 * time.Hour, Keep: 400 * 24 * time.Hour, Watch: time.Minute,
@@ -574,6 +580,22 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		oidcScopesGiven  bool
 		externalURLLocal bool
 	)
+	// secret reads a secret's file, there reports whether a file is: each
+	// as given, with secretsLater.
+	secret := func(path string, least int) ([]byte, error) {
+		if secretsLater {
+			return []byte(strings.Repeat("x", max(least, 1))), nil
+		}
+		return os.ReadFile(path)
+	}
+	there := func(path string) error {
+		if secretsLater {
+			return nil
+		}
+		_, err := os.Stat(path)
+		return err
+	}
+	var slackLater string
 	takes := func(name, val string) (bool, error) {
 		dur := func(min time.Duration) (time.Duration, error) {
 			d, err := serve.ParseDuration(val)
@@ -589,7 +611,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		case "--ledger-url-file":
 			// Read once here, to say at once what is wrong; serve reads it
 			// again, and keeps only the file's name.
-			b, err := os.ReadFile(val)
+			b, err := secret(val, 1)
 			if err != nil {
 				return true, fmt.Errorf("%s: %v", name, err)
 			}
@@ -607,7 +629,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			cfg.IncidentsListen = val
 		case "--incidents-token-file", "--firings-token-file", "--tasks-token-file", "--changes-token-file", "--changes-grafana-token-file",
 			"--changes-ruler-token-file":
-			b, err := os.ReadFile(val)
+			b, err := secret(val, 16)
 			if err != nil {
 				return true, fmt.Errorf("%s: %v", name, err)
 			}
@@ -676,7 +698,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			}
 			cfg.ChangesGoogleServiceAccount = val
 		case "--changes-oci-config":
-			if _, err := os.Stat(val); err != nil {
+			if err := there(val); err != nil {
 				return true, fmt.Errorf("--changes-oci-config: %v", err)
 			}
 			cfg.ChangesOCIConfig = val
@@ -688,7 +710,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		case "--notify-listen":
 			cfg.NotifyListen = val
 		case "--notify-token-file", "--notify-grafana-secret-file":
-			b, err := os.ReadFile(val)
+			b, err := secret(val, 16)
 			if err != nil {
 				return true, fmt.Errorf("%s: %v", name, err)
 			}
@@ -802,7 +824,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		case "--groups-header":
 			cfg.GroupsHeader = val
 		case "--notify-webhook-file":
-			if _, err := os.Stat(val); err != nil {
+			if err := there(val); err != nil {
 				return true, fmt.Errorf("--notify-webhook-file: %v", err)
 			}
 			cfg.NotifyWebhook = val
@@ -829,7 +851,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			}
 			oc.ClientID, ocSet = val, true
 		case "--oidc-client-secret-file":
-			b, err := os.ReadFile(val)
+			b, err := secret(val, 1)
 			if err != nil {
 				return true, fmt.Errorf("--oidc-client-secret-file: %v", err)
 			}
@@ -867,7 +889,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			}
 			cfg.SessionMaxAge, sessionSet = d, true
 		case "--session-key-file":
-			b, err := os.ReadFile(val)
+			b, err := secret(val, 32)
 			if err != nil {
 				return true, fmt.Errorf("--session-key-file: %v", err)
 			}
@@ -905,7 +927,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			if !ok || team == "" || file == "" {
 				return true, fmt.Errorf("--team-digest %s: want a team and a file, like payments=/run/secrets/payments", val)
 			}
-			if _, err := os.Stat(file); err != nil {
+			if err := there(file); err != nil {
 				return true, fmt.Errorf("--team-digest: %v", err)
 			}
 			if cfg.TeamDigests == nil {
@@ -917,7 +939,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 			if !ok || file == "" || !ledger.ValidDest(name) || name == "slack" || name == "webhook" || strings.HasPrefix(name, "team:") {
 				return true, fmt.Errorf("--report-dest %s: want a name (lowercase letters, digits and . _ -, not slack, webhook or team:) and a file, like ops-daily=/run/secrets/ops-daily", val)
 			}
-			if _, err := os.Stat(file); err != nil {
+			if err := there(file); err != nil {
 				return true, fmt.Errorf("--report-dest: %v", err)
 			}
 			if cfg.ReportDests == nil {
@@ -932,12 +954,20 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		case "--timeout":
 			timeoutSet = true
 			return false, nil
+		case "--slack-webhook-file":
+			if !secretsLater {
+				return false, nil // verdict's, as for verdict
+			}
+			slackLater = val
 		default:
 			return false, nil
 		}
 		return true, err
 	}
 	f, err := parseFlags(args, takes)
+	if err == nil && slackLater != "" {
+		f.slackFile = slackLater
+	}
 	signIns := 0
 	for _, on := range []bool{cfg.UserHeader != "", ocSet, pxSet} {
 		if on {
@@ -1070,8 +1100,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		err = fmt.Errorf("--catch-up-hours %s is shorter than --every %s: a run might never fall in it", cfg.CatchUpHours, time.Duration(cfg.Every))
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "lapilli serve: %v\nRun \"lapilli serve -h\" for the options.\n", err)
-		return 2
+		return serveSetup{}, err
 	}
 	if !timeoutSet {
 		f.timeout = 50 * time.Minute
@@ -1114,7 +1143,22 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		px.Claims = claims
 		cfg.Proxy = &px
 	}
+	return serveSetup{cfg: cfg, f: f}, nil
+}
 
+func runServe(args []string, stdout, stderr io.Writer) int {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			fmt.Fprint(stdout, serveUsage)
+			return 0
+		}
+	}
+	st, err := readServe(args, false)
+	if err != nil {
+		fmt.Fprintf(stderr, "lapilli serve: %v\nRun \"lapilli serve -h\" for the options.\n", err)
+		return 2
+	}
+	cfg, f := st.cfg, st.f
 	log := slog.New(slog.NewTextHandler(stderr, nil))
 	if f.checkGrafana != "" && f.grafanaTk != "" && plainHTTP(f.checkGrafana) {
 		log.Warn("--check-grafana is plain http: the token goes unencrypted")

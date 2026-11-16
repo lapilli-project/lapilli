@@ -436,6 +436,11 @@ func (s *Server) count(kind, result string) {
 // requests.
 var margins = []time.Duration{15 * time.Minute, time.Hour, 6 * time.Hour, 24 * time.Hour, 7 * 24 * time.Hour}
 
+// Margin is how far before its period a run's replay of r starts: its
+// "for", keep_firing_for and group interval, rounded up to 15m, 1h, 6h,
+// 1d or 7d.
+func Margin(r rules.Rule, step time.Duration) time.Duration { return margin(r, step) }
+
 func margin(r rules.Rule, step time.Duration) time.Duration {
 	need := r.For + r.KeepFiringFor + r.Interval + step
 	for _, m := range margins {

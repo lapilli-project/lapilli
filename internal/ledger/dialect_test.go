@@ -18,8 +18,9 @@ var sqliteOnly = regexp.MustCompile(`json_each|json_extract|json_valid|json_type
 	`INSERT OR |UPDATE OR |REPLACE INTO|\binstr\(|\bifnull\(|\biif\(|group_concat|sqlite_|AUTOINCREMENT|WITHOUT ROWID|strftime|julianday|` +
 	`unixepoch|typeof\(|\btotal\(|randomblob|zeroblob`)
 
-// sqliteFuncs are the functions that run on SQLite alone.
-var sqliteFuncs = map[string]bool{"migrate": true}
+// sqliteFuncs are the functions that run on SQLite alone: its migrations,
+// and its probe (ProbePostgres is Postgres's).
+var sqliteFuncs = map[string]bool{"migrate": true, "Probe": true}
 
 // Every statement Postgres takes otherwise than SQLite goes through the
 // dialect (dialect.go): SQLite's words appear in a pick's first argument,
