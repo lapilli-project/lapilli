@@ -1767,5 +1767,7 @@
  "overdue": "期限切れ",
  "due %s, overdue": "期限 %s（期限切れ）",
  "%s, better": "%s、改善",
- "%s, worse": "%s、悪化"
+ "%s, worse": "%s、悪化",
+ "format %q: want json or csv": "format %q: json か csv を指定してください",
+ "format=csv is a row for each firing: it doesn't go with firings=false": "format=csv は発火ごとに 1 行です: firings=false とは併用できません"
 }

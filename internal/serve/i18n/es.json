@@ -1767,5 +1767,7 @@
  "overdue": "vencida",
  "due %s, overdue": "vence %s (vencida)",
  "%s, better": "%s, mejor",
- "%s, worse": "%s, peor"
+ "%s, worse": "%s, peor",
+ "format %q: want json or csv": "format %q: se espera json o csv",
+ "format=csv is a row for each firing: it doesn't go with firings=false": "format=csv es una fila por cada disparo: no va con firings=false"
 }
