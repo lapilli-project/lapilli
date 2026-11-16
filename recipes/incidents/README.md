@@ -8,7 +8,7 @@ form `--incidents` takes:
 |---|---|---|
 | `pagerduty.sh` | PagerDuty | `PAGERDUTY_TOKEN_FILE`; `SINCE`, `UNTIL` |
 | `incident-io.sh` | incident.io | `INCIDENT_IO_TOKEN_FILE`; `SINCE` |
-| `jira.sh` | Jira Cloud, Jira Service Management | `JIRA_URL`, `JIRA_EMAIL`, `JIRA_TOKEN_FILE`, `JIRA_JQL` |
+| `jira.sh` | Jira Cloud, Jira Service Management | `JIRA_URL`, `JIRA_EMAIL`, `JIRA_TOKEN_FILE`, `JIRA_JQL`; `JIRA_START_FIELD`, `JIRA_END_FIELD`, `JIRA_LABELS` |
 | `github.sh` | GitHub issues | `gh`, signed in; `GITHUB_REPO`; `GITHUB_LABEL`, `LIMIT` |
 | `compass.sh` | Compass alerts | `COMPASS_CLOUD_ID`, `COMPASS_EMAIL`, `COMPASS_TOKEN_FILE`; `SINCE`, `COMPASS_QUERY`, `MAX_LOGS` |
 | `grafana-irm.sh` | Grafana IRM | `GRAFANA_URL`, `GRAFANA_IRM_TOKEN_FILE`; `SINCE` |
@@ -26,18 +26,92 @@ the `.jq` file beside it, for you to change:
   so are Grafana IRM's drills, Rootly's tests, examples, scheduled
   maintenance and incidents in triage or cancelled, and FireHydrant's
   archived incidents. Compass's alerts of priority P1 and P2 count.
-- **When it started.** PagerDuty's and Jira's times are when the incident was
-  opened, which can be later than when it began. incident.io's `Impact started`
-  is used when there is one, and so are Grafana IRM's incident start, Rootly's
-  `started_at` and FireHydrant's `started_at`. An incident ends when Grafana
-  IRM's incident end says, or it was closed; at Rootly's resolved, mitigated
-  or closed; at FireHydrant's resolved milestone, or else its mitigated one.
+- **When it started.** PagerDuty's times are when the incident was opened,
+  which can be later than when it began, and so are Jira's unless
+  `JIRA_START_FIELD` names the field yours keep it in (below).
+  incident.io's `Impact started` is used when there is one, and so are
+  Grafana IRM's incident start, Rootly's `started_at` and FireHydrant's
+  `started_at`. An incident ends when Grafana IRM's incident end says, or it
+  was closed; at Rootly's resolved, mitigated or closed; at FireHydrant's
+  resolved milestone, or else its mitigated one.
 - **Where.** A service becomes the label `service`, for `--match service`:
-  PagerDuty's service, Jira's components, incident.io's custom field
-  `Affected services`, GitHub's labels like `service:checkout`, Grafana IRM's
-  labels whose key is `service`, Rootly's and FireHydrant's services, and the
-  `service` an alert in Compass carries among its extra properties, as
-  Alertmanager sends its labels. Rename them to what your alerts' labels say.
+  PagerDuty's service, Jira's components or the fields `JIRA_LABELS`
+  names, incident.io's custom field `Affected services`, GitHub's labels
+  like `service:checkout`, Grafana IRM's labels whose key is `service`,
+  Rootly's and FireHydrant's services, and the `service` an alert in Compass
+  carries among its extra properties, as Alertmanager sends its labels.
+  Rename them to what your alerts' labels say.
+
+### Jira's fields
+
+Teams often keep an incident's times and services in fields of their own.
+An issue is created when someone gets to it, hours or days after the
+incident began; its resolution date can be empty though its status says
+resolved; components go unused. Three settings say where `jira.sh` looks:
+
+- `JIRA_START_FIELD`: the field an incident starts at, `created` by default.
+  A custom field is named by its id, such as `customfield_10001`. Several,
+  comma-separated, are tried in turn, and the first holding a time is the
+  start: with `customfield_10001,created`, an issue whose field is empty
+  starts when it was created.
+- `JIRA_END_FIELD`: the same for its end, `resolutiondate` by default. An
+  issue none of them gives an end to has none, and is taken to last an hour.
+- `JIRA_LABELS`: labels from fields, `service=components` by default, such
+  as `service=components,team=customfield_10004`; 32 labels at most. Two
+  fields can give the same label. A field gives what Jira gives: a text, a
+  number, a list of them, an option's value (each of a multi-select's, and
+  a cascading select's parent), a component's name and a user's display
+  name. Empty ones are left out. Empty, there are no labels.
+
+`GET /rest/api/3/field` lists the fields' ids and names. One whose
+`schema.type` is `date` holds a day and no time, such as `2026-11-05`; one
+whose type is `datetime` holds a time.
+
+**A day is never taken for a time.** As midnight, or as the whole day, it
+would have every firing that day catch the incident. A time is RFC 3339, as
+Jira writes a date-time field's, with a real day, an hour to 23 and a zone
+to 23:59; `2026-02-30T10:00:00Z` and `2026-11-14T10:00:60+09:00` aren't
+times. A date, alone or with something after it that isn't a time (as a
+text field's `2026-11-05 10:30`), still says the day. So in the list, a
+later field's time is taken only if it is on that day, as Jira writes the
+time: in the time zone of the profile of the account the script signs in
+as. With `customfield_10001,created`, an issue created that day starts when
+it was created, and one created on another day doesn't, since `created`
+would start it late by days. A field holding anything else ends the list
+there. The end's list works the same way.
+
+What can't be read:
+
+- **A start**, or none at all: the issue is skipped.
+- **An end**, or one before the start: the incident is kept with no end,
+  and taken to last an hour.
+- **A label value** serve would refuse the incident for: over 256 bytes,
+  past 64 a label, past 4 KB of labels in all. It is left out, and the
+  incident kept.
+
+Each is said on stderr by the issue's key, never its title, with a line
+counting them by why:
+
+```
+jira.sh: "OPS-52" skipped: the start field customfield_10001 holds a date and no time
+jira.sh: "OPS-56" kept with no end, taken to last an hour: the end field customfield_10002 holds a date and no time
+jira.sh: skipped 3 of 40 issues: no start in customfield_10001 (1); the start field customfield_10001 holds a date and no time (2)
+jira.sh: kept 1 of 40 issues with no end: the end field customfield_10002 holds a date and no time (1)
+```
+
+When every issue the search found is skipped, the script writes nothing
+and exits 1, so a cron job fails: a field holding dates only, or one named
+wrong, shows there instead of as no incidents. A search that finds nothing
+writes none, and succeeds. If your team fills the start field in later, a
+run whose issues are all still unfilled fails too, and says `no start in`
+the field for each: nothing is wrong but the wait. Add `created` after the
+field, so an issue starts when it was created until the field is filled
+in and then moves, or narrow `JIRA_JQL` to issues with the field set
+(`AND cf[10001] is not EMPTY`), so a run with none of them finds nothing
+and succeeds.
+
+The ids are the issues' keys, `OPS-41`, whatever the settings: change
+them, and the incidents copied in before are the same incidents.
 
 ### Compass, and Opsgenie's users
 
