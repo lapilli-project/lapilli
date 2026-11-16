@@ -18,7 +18,8 @@
   and `unexpected`. The backtest recipes take `EXPECT`, read from both
   commits, and `FAIL_ON_EXPECTATIONS` and `EXPECT_REQUIRED` (the action's
   `expect`, `fail-on-expectations`, `expect-required`), which fail the job
-  once the comment is posted, and when the expectations can't be judged.
+  once the comment is posted, and when the expectations can't be judged (a
+  rule that differs not replayed, the file unreadable, no report).
   A budget needs no incident written down. An expectation the change takes
   away is still shown, and fails nothing; a name several rules share holds
   each of them.

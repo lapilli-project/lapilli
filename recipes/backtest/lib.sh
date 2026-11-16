@@ -364,6 +364,7 @@ ask_host() {
 # unmet: what the change does to the expectations that fails the job
 # (FAIL_ON_EXPECTATIONS, EXPECT_REQUIRED), said once the comment is posted.
 unmet=
+judged=
 # trouble WHAT [LOG]: the backtest can't be what the comment shows: WHAT,
 # said in the comment, with LOG's last lines.
 problem=
@@ -561,8 +562,9 @@ incidents() {
 # expectations: EXPECT, as each commit has it, into
 # $tmp/expect.head.yaml (the pull request's, for the rules it proposes) and
 # $tmp/expect.base.yaml (the commit it goes into's, for the rules in place):
-# files, not links, of 1 MiB at most. The pull request may add the file:
-# then the rules in place are held to its.
+# files, not links, of 1 MiB at most. The pull request may add the file,
+# and the rules in place are held to its; or take it away, as if it held
+# none: what it held is shown, taken away. In neither commit, it is said.
 expectations() {
   [ -n "${EXPECT:-}" ] || return 0
   for side in head base; do
@@ -570,11 +572,7 @@ expectations() {
     mode=$(git -C "$repo" ls-tree "$commit" -- "$EXPECT" | awk '{ print $1 }')
     case $mode in
       100644 | 100755) ;;
-      '')
-        [ "$side" = base ] && continue
-        trouble "EXPECT $EXPECT isn't in $what"
-        return 1
-        ;;
+      '') continue ;;
       *) trouble "EXPECT $EXPECT isn't a file in $what"; return 1 ;;
     esac
     if [ "$(git -C "$repo" cat-file -s "$commit:$EXPECT")" -gt 1048576 ]; then
@@ -584,6 +582,11 @@ expectations() {
     git -C "$repo" cat-file blob "$commit:$EXPECT" >"$tmp/expect.$side.yaml" ||
       { trouble "EXPECT $EXPECT couldn't be read from $what"; return 1; }
   done
+  if [ ! -f "$tmp/expect.head.yaml" ] && [ ! -f "$tmp/expect.base.yaml" ]; then
+    trouble "EXPECT $EXPECT is in neither the pull request's commit nor the commit it goes into"
+    return 1
+  fi
+  [ -f "$tmp/expect.head.yaml" ] || printf 'expectations: []\n' >"$tmp/expect.head.yaml"
 }
 
 # in_tree SIDE COMMAND: RENDER or RENDER_PREPARE, in a commit's files, with
@@ -751,11 +754,20 @@ backtest() {
   # Held to the expectations, a change that breaks one fails the job, once
   # the comment says which: the report's own table, not a problem of the
   # run's.
-  if [ "$verdict" = 0 ] && [ -n "${EXPECT:-}" ] && { [ -n "$held" ] || [ -n "$required" ]; }; then
+  # judged: the report says what became of the expectations, or that
+  # nothing changed. Held to them, a run that doesn't fails the job.
+  if [ "$verdict" = 0 ] && [ -n "${EXPECT:-}" ]; then
+    case $(summary nothing_changed)/$(summary expected) in
+      true/* | */true) judged=1 ;;
+    esac
+  fi
+  if [ -n "$judged" ] && [ "$(summary nothing_changed)" != true ] && { [ -n "$held" ] || [ -n "$required" ]; }; then
     broken=$(summary expectations_broken)
     unexpected=$(summary unexpected)
-    case $broken$unexpected in
+    unreplayed=$(summary unreplayed)
+    case $broken$unexpected$unreplayed in
       '' | *[!0-9]*)
+        judged=
         trouble "the report doesn't say what became of the expectations: give LAPILLI_VERSION a release with --expect" "$tmp/lapilli.said"
         ;;
       *)
@@ -763,6 +775,9 @@ backtest() {
           unmet="the change breaks $broken expectations the rules in place meet (FAIL_ON_EXPECTATIONS=true)"
         elif [ -n "$required" ] && [ "$unexpected" -gt 0 ]; then
           unmet="the change adds $unexpected rules no expectation holds (EXPECT_REQUIRED=true)"
+        elif [ "$unreplayed" -gt 0 ]; then
+          # A rule that couldn't be replayed can't be held: not known isn't met.
+          unmet="$unreplayed of the rules that differ couldn't be replayed, so their expectations can't be judged"
         fi
         ;;
     esac
@@ -845,17 +860,22 @@ main() {
     fi
   fi
   compose
-  # Held to the expectations, a run that couldn't hold them (the file
-  # taken away or unreadable, the history out of reach, the comment not
-  # posted) fails the job: a gate that can't judge doesn't pass.
-  gate=$strict$held$required
+  # Held to the expectations, a run that couldn't judge them (the file
+  # unreadable, a rule that differs not replayed, no report) fails the
+  # job, as does one that broke them whose comment couldn't be posted: a
+  # gate that can't judge doesn't pass. What else goes wrong fails it only
+  # with FAIL_ON_ERROR, as before.
+  gate=$held$required
   if ! post; then
     say "the comment couldn't be posted"
     [ -z "$unmet" ] || say "$unmet"
-    [ -z "$gate" ] || exit 1
-    exit 0
+    [ -z "$strict$unmet" ] || exit 1
   fi
-  if [ -n "$problem" ] && [ -n "$gate" ]; then
+  if [ -n "$problem" ] && [ -n "$strict" ]; then
+    exit 1
+  fi
+  if [ -n "$gate" ] && [ -z "$judged" ]; then
+    say "the expectations couldn't be judged (FAIL_ON_EXPECTATIONS or EXPECT_REQUIRED)"
     exit 1
   fi
   if [ -n "$unmet" ]; then

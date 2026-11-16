@@ -69,13 +69,16 @@ And, as wanted:
   it proposes and the commit it goes into's for those in place
   (`--expect`, `--expect-before`), and the comment has a table of what the
   change broke. A pull request may add the file; one that takes it away is
-  said. `FAIL_ON_EXPECTATIONS=true` fails the job when the change breaks
+  read as holding none, what it held shown taken away. `FAIL_ON_EXPECTATIONS=true` fails the job when the change breaks
   an expectation the rules in place meet, and `EXPECT_REQUIRED=true` when
   it adds a rule no expectation holds, each once the comment is posted.
   Unlike `FAIL_ON_ERROR`, this isn't a failure of the backtest: the
   comment shows the report, and a branch rule can require the job. Held to
-  them, a run that can't judge them fails the job too: the file taken away
-  or unreadable, the history out of reach, the comment not posted.
+  them, a run that can't judge them fails the job too: the file
+  unreadable, a rule that differs not replayed (the history out of
+  reach), no report at all; and one that broke them whose comment couldn't
+  be posted. Anything else that goes wrong fails it only with
+  `FAIL_ON_ERROR`, as before.
 
 They need `sh`, `git`, `curl`, `jq` and `tar`, on Linux or macOS.
 

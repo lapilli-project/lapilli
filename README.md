@@ -961,9 +961,11 @@ CheckoutErrors  at most 2 a week while people slept     0       1      met
 CheckoutErrors  catches INC-43, within 5m               +2m     +2m    met
 ```
 
-A name several rules share is told apart in a run (`CheckoutErrors
-[severity=page]`): `rule: CheckoutErrors` holds each of them, and the name
-told apart one. `--expect-before FILE` gives the expectations as they were,
+Entries for the same rule or group are made one when read, and the same
+budget or incident given twice is refused. A name several rules share is
+told apart in a run (`CheckoutErrors [severity=page]`): `rule:
+CheckoutErrors` holds each of them, and the name told apart one. A rule a
+change moves out of a group that held it is said. `--expect-before FILE` gives the expectations as they were,
 for the rules in place: a budget the change raises is held to its old value
 before it, and the report says it was raised; one it adds is held on both
 sides and said new; one it takes away, whole or a field of it, is still

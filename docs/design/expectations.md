@@ -301,7 +301,10 @@ Step 1, in `lapilli verdict --compare` and the backtest recipes:
   taken away (whole, or a field, or a catch) is shown, held to what it
   was, and fails nothing, as a raised one doesn't.
 - **Names told apart.** Rules sharing a name are named apart in a run
-  (`CheckoutErrors [severity=page]`); `rule: CheckoutErrors` holds each.
+  (`CheckoutErrors [severity=page]`); `rule: CheckoutErrors` holds each,
+  and so a rule whose own name begins `CheckoutErrors [`. How names are
+  told apart can change as rules are added; a written name told apart is
+  for a rule that will stay so.
 - **Bounds.** 2,000 expectations; each side's firings counted once, by
   rule and week, whatever the expectations.
 - **Out.** A section of the text, `--markdown` (right after the totals) and
@@ -311,7 +314,13 @@ Step 1, in `lapilli verdict --compare` and the backtest recipes:
   `EXPECT`, read from both commits, and `FAIL_ON_EXPECTATIONS`,
   `EXPECT_REQUIRED`, which fail the job once the comment is posted, from the
   summary, not lapilli's exit status: the backtest didn't fail. Held to
-  them, a run that can't judge them fails too (the file gone or
-  unreadable, the history out of reach, the comment not posted).
+  them, a run that can't judge them fails too: the file unreadable, a rule
+  that differs not replayed, no report; and one that broke them whose
+  comment couldn't be posted. A file the pull request takes away is read
+  as holding none.
+- **One rule, one entry.** Entries for the same `rule:` or `group:` are
+  made one when read; the same budget or incident twice is refused. A rule
+  moved out of a group that held it is said: the group's expectation no
+  longer holds it, failing nothing.
 - **Serve** takes none of it yet (step 2).
 

@@ -305,3 +305,40 @@ func TestCheckExpectationsReview(t *testing.T) {
 		t.Errorf("too many: %v", err)
 	}
 }
+
+// The second review's cases.
+func TestCheckExpectationsReviewAgain(t *testing.T) {
+	to := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
+	from := to.Add(-7 * 24 * time.Hour)
+	// One rule's entries, given apart, are one: an unchanged file says
+	// nothing new or taken away.
+	split := readExpect(t, "expectations:\n  - rule: R\n    budget: {week: 5}\n  - rule: R\n    catches: [{incident: INC-1}]\n")
+	if len(split.Expectations) != 1 || split.Expectations[0].Budget == nil || len(split.Expectations[0].Catches) != 1 {
+		t.Fatalf("merged: %+v", split.Expectations)
+	}
+	b := &Report{Rules: []RuleResult{{Rule: "R", Group: "G1"}}}
+	a := &Report{Rules: []RuleResult{{Rule: "R", Group: "G1", Firings: 1}}, Firings: firingsAt("R", to.Add(-time.Hour))}
+	c := &Comparison{From: from, To: to, Before: b, After: a, Rules: []RuleChange{{Rule: "R", Before: &b.Rules[0], After: &a.Rules[0]}}}
+	if k := CheckExpectations(c, split, split, nil); slices.ContainsFunc(k.Results, func(r ExpectResult) bool { return r.Changed || r.Removed }) {
+		t.Errorf("unchanged, split: %+v", k.Results)
+	}
+	// The same thing twice for one rule is refused: which holds isn't for
+	// the order to decide.
+	for _, s := range []string{
+		"expectations:\n  - rule: R\n    budget: {week: 5}\n  - rule: R\n    budget: {week: 9}\n",
+		"expectations:\n  - rule: R\n    catches: [{incident: INC-1, within: 5m}, {incident: INC-1, within: 30m}]\n",
+	} {
+		if _, err := ReadExpectations(strings.NewReader(s)); err == nil || !strings.Contains(err.Error(), "given twice") {
+			t.Errorf("%q: %v", s, err)
+		}
+	}
+	// A rule the change moves out of the group that held it: said, held to
+	// what the group's expectation was, and failing nothing.
+	moved := &Report{Rules: []RuleResult{{Rule: "R", Group: "G2", Firings: 40}}, Firings: firingsAt("R", to.Add(-time.Hour), to.Add(-2*time.Hour))}
+	c = &Comparison{From: from, To: to, Before: b, After: moved, Rules: []RuleChange{{Rule: "R", Before: &b.Rules[0], After: &moved.Rules[0]}}}
+	k := CheckExpectations(c, readExpect(t, "expectations:\n  - group: G1\n    budget: {week: 1}\n"), nil, nil)
+	if len(k.Results) != 1 || !k.Results[0].Moved || !k.Results[0].Removed || k.Broken() != 0 || k.Results[0].After != "2" ||
+		!strings.Contains(k.Results[0].heldTo(Clean), "no longer holds it") {
+		t.Errorf("moved out of the group: %+v", k.Results)
+	}
+}

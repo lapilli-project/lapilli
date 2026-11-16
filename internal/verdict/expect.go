@@ -105,7 +105,51 @@ func ReadExpectations(r io.Reader) (*Expectations, error) {
 			}
 		}
 	}
-	return &e, nil
+	return e.merged()
+}
+
+// merged is the file with each rule's, and each group's, entries made one:
+// what is held is then compared item by item. The same budget, or the same
+// incident, given twice for one rule or group is refused: which holds isn't
+// for the order to decide.
+func (e *Expectations) merged() (*Expectations, error) {
+	out := &Expectations{Expectations: []Expectation{}}
+	at := map[[2]string]int{}
+	for _, x := range e.Expectations {
+		key := [2]string{x.Rule, x.Group}
+		i, seen := at[key]
+		if !seen {
+			at[key] = len(out.Expectations)
+			y := Expectation{Rule: x.Rule, Group: x.Group}
+			out.Expectations = append(out.Expectations, y)
+			i = at[key]
+		}
+		y := &out.Expectations[i]
+		if x.Budget != nil {
+			if y.Budget == nil {
+				y.Budget = &Budget{}
+			}
+			if x.Budget.Week != nil {
+				if y.Budget.Week != nil {
+					return nil, fmt.Errorf("%s: a budget for a week given twice", x.name())
+				}
+				y.Budget.Week = x.Budget.Week
+			}
+			if x.Budget.Asleep != nil {
+				if y.Budget.Asleep != nil {
+					return nil, fmt.Errorf("%s: a budget while people slept given twice", x.name())
+				}
+				y.Budget.Asleep = x.Budget.Asleep
+			}
+		}
+		for _, c := range x.Catches {
+			if slices.ContainsFunc(y.Catches, func(o ExpectCatch) bool { return o.Incident == c.Incident }) {
+				return nil, fmt.Errorf("%s: incident %s given twice", x.name(), c.Incident)
+			}
+			y.Catches = append(y.Catches, c)
+		}
+	}
+	return out, nil
 }
 
 func (x Expectation) name() string {
@@ -157,6 +201,9 @@ type ExpectResult struct {
 	Changed  bool   `json:"changed,omitempty"`
 	WasLimit string `json:"was_limit,omitempty"`
 	Removed  bool   `json:"removed,omitempty"`
+	// Moved says it was taken away as the rule left the group that held
+	// it: the expectation is there still, and no longer holds this rule.
+	Moved bool `json:"moved,omitempty"`
 }
 
 // BrokenByChange says the change broke it: broken after, and met before
@@ -330,17 +377,26 @@ func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours)
 				}
 			}
 		}
-		// Expectations the change took away whole.
-		if before != nil {
-			for j := range before.Expectations {
-				y := &before.Expectations[j]
-				if !y.For(rc.Rule, group) || slices.ContainsFunc(after.Expectations, func(x Expectation) bool { return x.same(*y) }) {
-					continue
-				}
-				for _, it := range y.items() {
-					r := ExpectResult{Rule: rc.Rule, What: it.what, Limit: it.limitText(), Removed: true}
-					out.Results = append(out.Results, judge(it, it, r))
-				}
+		// What held the rule before and holds it no more: an expectation
+		// the change took away whole, or one by group of a rule the change
+		// moved out of the group. The rule's group before decides.
+		bGroup := group
+		if b != nil {
+			bGroup = b.Group
+		}
+		ys := before
+		if ys == nil {
+			ys = after
+		}
+		for j := range ys.Expectations {
+			y := &ys.Expectations[j]
+			if !y.For(rc.Rule, bGroup) || slices.ContainsFunc(after.Expectations, func(x Expectation) bool { return x.same(*y) && x.For(rc.Rule, group) }) {
+				continue
+			}
+			moved := slices.ContainsFunc(after.Expectations, func(x Expectation) bool { return x.same(*y) })
+			for _, it := range y.items() {
+				r := ExpectResult{Rule: rc.Rule, What: it.what, Limit: it.limitText(), Removed: true, Moved: moved}
+				out.Results = append(out.Results, judge(it, it, r))
 			}
 		}
 		if !held && b == nil && a != nil {
@@ -452,6 +508,8 @@ func (r ExpectResult) heldTo(name func(string) string) string {
 		s = r.What + " " + r.Limit
 	}
 	switch {
+	case r.Moved:
+		s += " (no longer holds it: the change moved it out of the group)"
 	case r.Removed:
 		s += " (taken away in this change)"
 	case r.Changed && r.WasLimit != "":

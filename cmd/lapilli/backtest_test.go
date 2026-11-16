@@ -1635,26 +1635,44 @@ func TestBacktestRecipeExpectations(t *testing.T) {
 		t.Errorf("not posted: %v\n%s", err, out)
 	}
 	rr.host.set(func(h *commentHost) { h.failPost = false })
-	// Taken away in the pull request: said, and, held to it, the job fails:
-	// a gate that can't judge doesn't pass.
+	// Taken away in the pull request: as if it held none, what it held is
+	// shown taken away, failing nothing, as a budget raised doesn't.
 	repo.git("checkout", "--quiet", "main")
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("5m"), "expect.yaml": ""})
 	rr.host.set(func(h *commentHost) { h.comments = nil })
-	if _, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml"}, "--prometheus", prom.URL); err != nil {
-		t.Errorf("taken away, not held: %v", err)
+	if out, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "FAIL_ON_EXPECTATIONS=true"}, "--prometheus", prom.URL, "--tz", "UTC"); err != nil ||
+		!strings.Contains(rr.body(), "(taken away in this change)") || !strings.Contains(rr.body(), "taken away; the change would break it") {
+		t.Errorf("taken away: %v\n%s\n%s", err, rr.body(), out)
 	}
-	failure(t, rr.body(), "EXPECT expect.yaml isn't in the pull request's commit")
-	rr.host.set(func(h *commentHost) { h.comments = nil })
-	if _, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "FAIL_ON_EXPECTATIONS=true"}, "--prometheus", prom.URL); err == nil {
-		t.Error("taken away, held to it: the job passed")
-	}
-	// Unreadable as YAML: the same.
+	// Unreadable as YAML, held to it: not judged, and the job fails.
 	repo.git("checkout", "--quiet", "main")
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("5m"), "expect.yaml": "expectations: [\n"})
 	rr.host.set(func(h *commentHost) { h.comments = nil })
-	if _, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "FAIL_ON_EXPECTATIONS=true"}, "--prometheus", prom.URL); err == nil {
-		t.Error("unreadable, held to it: the job passed")
+	if out, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "FAIL_ON_EXPECTATIONS=true"}, "--prometheus", prom.URL); err == nil ||
+		!strings.Contains(out, "the expectations couldn't be judged") {
+		t.Errorf("unreadable, held to it: %v\n%s", err, out)
 	}
+	// The history out of reach: no rule that differs replayed, so none held:
+	// not known isn't met, and the job fails. Not held to them, it passes.
+	repo.git("checkout", "--quiet", "main")
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	if out, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "FAIL_ON_EXPECTATIONS=true"}, "--prometheus", "http://127.0.0.1:1"); err == nil ||
+		!strings.Contains(out, "couldn't be replayed, so their expectations can't be judged") {
+		t.Errorf("out of reach, held to it: %v\n%s", err, out)
+	}
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	if out, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml"}, "--prometheus", "http://127.0.0.1:1"); err != nil {
+		t.Errorf("out of reach, not held: %v\n%s", err, out)
+	}
+	// In neither commit: said.
+	repo.git("checkout", "--quiet", "main")
+	repo.git("rm", "--quiet", "expect.yaml")
+	repo.git("commit", "--quiet", "-m", "no expectations")
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml"}, "--prometheus", prom.URL)
+	failure(t, rr.body(), "EXPECT expect.yaml is in neither the pull request's commit nor the commit it goes into")
 
 	// Wrong settings fail at once.
 	for _, c := range []struct {
