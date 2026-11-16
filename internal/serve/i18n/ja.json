@@ -983,6 +983,7 @@
  "noisy only": "ノイズのみ検知",
  "noisy, %d wk": "ノイズ、%d 週",
  "none in %d days": "%d 日間なし",
+ "none yet": "まだなし",
  "not as predicted": "予測と異なる",
  "not matched on: no --match": "ラベル照合なし（--match なし）",
  "not replayed: %s": "バックテスト不可: %s",

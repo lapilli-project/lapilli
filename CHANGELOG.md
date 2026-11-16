@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **"None yet" where there is none.** The changes' page ("Is the record
+  kept up?") showed the latest incident written down as "–" when there was
+  none, in the warning's colour once two weeks had gone by: "–" is what
+  Lapilli shows where it can't know, and here it knows there is none. It
+  says "none yet" now, with how many days, as before.
+
 ## [0.46.0] - 2026-11-16
 
 ### Changed

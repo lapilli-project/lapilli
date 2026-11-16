@@ -983,6 +983,7 @@
  "noisy only": "solo ruidosas",
  "noisy, %d wk": "ruidosa, %d sem",
  "none in %d days": "ninguno en %d días",
+ "none yet": "ninguno aún",
  "not as predicted": "no según lo previsto",
  "not matched on: no --match": "sin coincidencia por etiquetas: no hay --match",
  "not replayed: %s": "sin backtest: %s",

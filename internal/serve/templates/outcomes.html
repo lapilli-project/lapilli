@@ -44,7 +44,7 @@
 {{with .Record}}
 <section class="tiles" aria-label="{{t "The record"}}">
   <div class="tile"><div class="tile-label">{{t "Latest incident written down"}}</div>
-    <div class="tile-value{{if .Quiet}} status-warn{{end}}">{{if .LastIncident.IsZero}}–{{else}}{{day $loc .LastIncident}}{{end}}</div>
+    <div class="tile-value{{if .Quiet}} status-warn{{end}}">{{if .LastIncident.IsZero}}{{t "none yet"}}{{else}}{{day $loc .LastIncident}}{{end}}</div>
     <div class="tile-of">{{if .Quiet}}{{t "none in %d days" $.View.QuietDays}}{{else}}{{t "started"}}{{end}}</div><div class="tile-delta"> </div></div>
   <div class="tile"><div class="tile-label">{{t "Impact windows to decide, four weeks"}}</div>
     <div class="tile-value">{{.Undecided}}</div>
