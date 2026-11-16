@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-11-16
+
 ### Changed
 
 - **The sidebar names what a page holds.** Its groups were verbs and some
