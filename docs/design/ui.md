@@ -5,12 +5,14 @@ phase 4, the way to change things, in v0.38.0; phase 5, many at once and
 ways in, in v0.39.0; the two items left after it (a proposal for the rules
 picked, a rule's labels as chips on the list), with the rules table made to
 fit a laptop's screen, in v0.40.0; first use (bundle 20), built,
-unreleased. This is how the pages are put together: the frame every page
-has, the team and period carried from page to page, the search, the rules
-list and its filters, a rule's page, the way to change things (a
-proposal's page, the lists' facets, a quiet window's preview, the Manage
-page), what can be done to many at once and the ways from a number to what
-makes it, what a first-time reader would get stuck on, and what is left.
+unreleased; status colours (bundle 28), built, unreleased. This is how the
+pages are put together: the status colours every page uses, the frame
+every page has, the team and period carried from page to page, the
+search, the rules list and its filters, a rule's page, the way to change
+things (a proposal's page, the lists' facets, a quiet window's preview,
+the Manage page), what can be done to many at once and the ways from a
+number to what makes it, what a first-time reader would get stuck on, and
+what is left.
 [serve.md](serve.md) says what each page shows;
 [access.md](access.md) how the pages meet WCAG 2.2 AA.
 
@@ -60,6 +62,110 @@ makes it, what a first-time reader would get stuck on, and what is left.
   checks, the metrics and the ports that take notifications and copies
   don't. Forty-eight `/rules` at once, at two
   thousand rules, went from a peak of 1.4 GB of heap to 550 MB.
+
+## Status colours
+
+What a state is reads at a glance, as it does in Argo CD: fine, needs a
+look, broken, under way, or not known. Each state the UI draws is one of
+five kinds, and the same kind on every page.
+
+### The tokens
+
+Each kind is three tokens of the stylesheet, in light and in dark: its
+text colour (`--ok`), a wash (`--ok-wash`) and a line (`--ok-line`).
+
+| Kind | What it means | Light: text, wash, line | Dark: text, wash, line | Sign |
+|---|---|---|---|---|
+| `ok` | fine, done, as predicted | `#1b6a4c`, `#e3f1e9`, `#3f9068` | `#86d4ac`, `#1d332a`, `#468a6a` | ✓ |
+| `warn` | needs a person's look: noisy, stale, waiting for approval, going nowhere | `#8a5a00`, `#f8eed5`, `#ad7f22` | `#e6b450`, `#3a311d`, `#a07a2c` | ⚠︎ |
+| `bad` | failed, missed, overdue, given up | `#a3271b`, `#f8e3df`, `#c65b4f` | `#ef8a7e`, `#3d2422`, `#ba645a` | ✕ (✗ for missed, as before) |
+| `info` | under way, or in effect now | `--on-blue`, `--tint-blue`, `#6389be` | `--on-blue`, `--tint-blue`, `#5b7ea8` | ↻ under way, ● in effect |
+| `unknown` | not known: no record, not judged | `--dim`, `--panel`, `--line-ui` | the same | ? or – |
+
+The ok green is a cool one, a teal-green as Argo CD's, told apart from
+the olive of the accent. Each text colour is 4.5:1 or more on its wash,
+the card, the background and the panel; ink is 4.5:1 or more on each wash,
+as a notice's body is ink; each line is 3:1 or more on the card, the
+background and its wash. `TestContrast` holds every one of these pairs, in
+light and dark, and resolves a token that names another (`var(--x)`), so
+a change to the palette that breaks one fails.
+
+`--better` and `--worse` are `--ok` and `--bad`, by those names still (a
+diff's `+` and `−` lines are them). The incidents chart's fills
+(`--viz-good`, `--viz-warn`, `--viz-bad`: caught, only noisy rules,
+missed) are the kinds' hues as chart fills, dark mode its own: 3:1 or more
+on the card, and 8 or more apart (ΔE, OKLab) under protanopia and
+deuteranopia, checked with the dataviz validator; the legend and the table
+below the chart say them too.
+
+### Where a kind is drawn
+
+On small surfaces alone; never a row, a card or a page filled. A kind is a
+class, `status-ok`, `status-warn`, `status-bad`, `status-info` or
+`status-unknown`, which sets the kind's three colours on the element; what
+it is on draws them:
+
+- **A word, a cell, a sign**: the text colour (an overdue date, a run's
+  error, the missed count in the table of the weeks, an incident's "Caught"
+  cell, a tile's number).
+- **A badge or a pill** (`.badge`, `.pill`): the text, the wash, and the
+  line as its edge, its sign in its text. The shape is the badges' as
+  before.
+- **A notice** (`.notice`): a box of ink on the wash, a line of the kind
+  4px wide down its left, its sign (`.sign`) first, in the text colour.
+  What was a red box (`p.warn`, `div.warn`) is a notice of warn or bad, by
+  what it says; the banners above every page (changes paused, the
+  server's work, its error) are notices too.
+
+The olive accent keeps what can be done (links, buttons, the focus ring,
+the page a reader is on, a hint that suggests an action, "rules changed"
+marks); the blue and the warm grey of the charts keep what caught
+something and what didn't (stones, strips, timelines); the lavender ramp
+keeps where the noise is, how much, not a status, with the quiet windows'
+marks. The Noisy badge, which was lavender, is warn.
+
+### The mapping
+
+`statusKinds` (`internal/serve/statuskind.go`) is the kind of each state a
+page draws from the ledger, by what it is a state of and its value; the
+templates ask it (`status`), and a state it doesn't list is unknown. The
+rest are written in the template that draws them.
+
+| Kind | States |
+|---|---|
+| ok | a rule's `○ OK`; a proposal `✓ approved`, `● applied`; a task done; a rule to keep (`✓ keep`); a rule change "as predicted"; Outcomes' Runs, "all ran"; notifications, "Last sent from the outbox"; an incident caught (its "Caught" cell); the overview's "Nothing to look at now"; a change "better"; the incidents chart's caught |
+| warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Outcomes' tile, the Runs page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Outcomes' tile and note, the overview's line); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted" |
+| bad | a run's error, and the server's error banner; `--config` that can't be used at all, or that the ledger couldn't be kept to; notices given up on; the digest failed; an on-call schedule's read failed; Outcomes' Runs, "n failed"; a task overdue; a proposal closed as failed, and its reason; a backtest that misses incidents; would have caught while it was off; an incident missed (`✗ nothing fired`, "Nothing fired."), the missed count of the table of the weeks; a search not understood; a change "worse" |
+| info | a proposal `↻ being applied`; `✎ Proposed`; a quiet window `● active now`; the server's work (`↻`); catching up, and behind, on Outcomes; a rule change "measuring", "rule written"; `⇣ Recorded only`; a task open or doing; a rule to tune (`± tune`); an approved proposal's reason (it waits while its rule fires) |
+| unknown | `? No record`, the weeks' "no record" tag, the notes of weeks with no record; "–"; a backtest with no record (`no_record`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; orphans; a rule change superseded, without a week before it, taken away or replayed again |
+
+Three were left open, and are so: catching up is info, as Lapilli does it
+by itself and nothing is for a person to do (behind, on Outcomes, the
+same); a task doing is info with open, both under way, as lavender was the
+noise's; and the sidebar's counts have no colour, as each is a number whose
+word ("to approve", "open") is read out but not shown, so a colour there
+would say a state alone.
+
+### Two rules
+
+- **What Lapilli can't judge is never ok or bad.** No record, no verdict:
+  a week, a rule or a backtest with no incident written down to judge its
+  firings by is unknown, and a number of it is "–" in no colour. A
+  headline number's change is better or worse only when both weeks were
+  judged (`tile.Better`, `tile.Worse` stay false otherwise), and a no-record
+  backtest's difference is a plain number or "–".
+- **Colour never says a state alone.** Each kind has a word or a sign
+  beside it: a badge its sign and name, a notice its sign and sentence, a
+  cell its words or the column's. A quiet window in effect now says
+  "active now"; an overdue task "overdue" (기한 지남); a headline number's
+  change "better" or "worse", as a rule's panel says it.
+
+`TestStatusKinds` renders the pages the accessibility checks do, with the
+states they lack added (`statusStates`), and holds each state, by its
+words, to its kind on every page that colours it, a table of them: a page
+that draws one another way fails, and "–" or no record drawn ok or bad
+fails. `TestA11yServe` serves the same states, so that axe checks each
+kind's contrast in a browser, in light and dark.
 
 ## The frame
 
@@ -1351,7 +1457,8 @@ run's error, `ledger.LastFailed`), are read from the ledger, the same on
 every replica and after a restart (`digestPosted`). Counts and kinds,
 never a URL. The weekly digest on with nowhere to go, its last post
 to Slack failed, a report on whose places are all gone, and failures are
-each a sentence with a sign (`p.warn`), never a colour alone: in full on
+each a sentence with a sign (a notice, warn; bad for a digest that failed
+and notices given up on), never a colour alone: in full on
 the Settings page, with the way out (for a digest the flags set, the
 flags or the Reports page, as it never goes to a `--report-dest` by
 itself; for one set there, another place there); in a line on the card
