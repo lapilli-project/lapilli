@@ -151,7 +151,7 @@ over the last four weeks, and what that would do to the verdict. */}}
 <td class="state"><span class="{{status "source" .State}}">{{if eq .State "ok"}}✓ {{t "working"}}{{else if eq .State "quiet"}}⚠&#xFE0E; {{t "quiet"}}{{else if eq .State "failing"}}✕ {{t "failing"}}{{else if eq .State "pending"}}↻ {{t "waiting"}}{{else if eq .State "none"}}– {{t "none in four weeks"}}{{else}}? {{t "not set up"}}{{end}}</span></td>
 <td class="t">{{if .Last.IsZero}}–{{else}}{{t .LastWhat}} {{at $loc .Last}}{{with .LastID}} (<bdi>{{.}}</bdi>){{end}}{{end}}</td>
 <td class="n">{{if .Counts}}{{.N}}{{else}}–{{end}}</td>
-<td>{{t .About}}{{with .Where}}<br><span class="quiet"><bdi>{{.}}</bdi></span>{{end}}{{with .Err}}<br><span class="status-bad"><span aria-hidden="true">✕</span> {{.}}</span>{{end}}</td></tr>{{end}}</tbody>
+<td>{{t .About}}{{with .Where}}<br><span class="quiet where"><bdi>{{.}}</bdi></span>{{end}}{{with .Err}}<br><span class="status-bad"><span aria-hidden="true">✕</span> {{.}}</span>{{end}}</td></tr>{{end}}</tbody>
 </table></div>
 {{with .More}}<p class="quiet">{{t "and %d more" .}}</p>{{end}}
 <p class="quiet">{{t "What a tool's job copies in is told apart by its ids' prefix, as the recipes give them: PD- of PagerDuty, a Jira project's key of Jira."}} <a href="{{.Recipes}}">{{t "Copying incidents in from Jira, PagerDuty, incident.io and others"}}</a></p>
