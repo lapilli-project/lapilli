@@ -336,7 +336,8 @@ have caught, or missed. `INCIDENTS` gives the incidents written down;
 returns something while they are, whose windows become incidents too
 (`lapilli verdict --impact`), so a thin incident log still works.
 `IMPACT_FOR` is how long a window must last (`--impact-for`, default
-`5m`), and `MATCH` the labels a firing and an incident must agree on when
+`5m`; a second or more, as lapilli reads it: `10m`, `1.5h`, `1d12h`, but
+not a bare number nor `ms`), and `MATCH` the labels a firing and an incident must agree on when
 both have them, comma-separated (a `--match` each). By service, each
 window carries the service hit, and a firing of one service doesn't catch
 another's:
@@ -366,7 +367,8 @@ value unless it has `expand: false`. `--impact` among the arguments works
 too, but not beside `IMPACT`, nor `--impact-for` beside `IMPACT_FOR`:
 lapilli would take the last. `--match` among the arguments adds to
 `MATCH`. `MATCH` without `IMPACT`, `INCIDENTS` or an argument giving
-either, and `IMPACT_FOR` without `IMPACT`, fail the job at once.
+either, and `IMPACT_FOR` without `IMPACT` or that lapilli wouldn't take,
+fail the job at once.
 
 ## The release the action installs
 
@@ -391,7 +393,12 @@ updates:
 With the workflow's own file among the paths it runs on (`paths:
 ['alerts/**', '.github/workflows/backtest.yml']`), the pull request that
 moves the commit runs the job too: the new release is installed and run,
-and as no rule changed, nothing is posted.
+and as no rule changed, nothing is posted. Dependabot's pull requests run
+with Dependabot's secrets, not the repository's Actions secrets, and with
+`impact` set its query runs even when no rule changed: if reading the
+history takes a secret (a token for `--bearer-token-file`, say), each
+such run's backtest fails, and says so. Put the same values in
+Dependabot's secrets, or expect those runs to fail.
 
 At a commit between two releases (a branch, or a commit no tag names),
 the scripts are that commit's and the binary is the release before it,
@@ -401,7 +408,12 @@ arguments. Pin the commit of a release's tag.
 
 A `version` given is installed whatever commit the action is at; the
 job's log says when it isn't the release the action is at. The action of
-v0.47.0 or before needs `version`.
+v0.48.0 or before needs `version`, and so does a copy of the action kept
+in another repository (`uses: ./ci/backtest`): the release is read from
+Lapilli's own files, two directories above the action's, only when
+Lapilli's `go.mod` (`module lapilli.dev`) is there. Without it, or with a
+`CHANGELOG.md` that names no release, the step fails at once, asking for
+`version`.
 
 `sha256` pins one release's archive. Once the `uses:` line moves to
 another release, whose archive has another sum, the step installs nothing

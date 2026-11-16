@@ -34,7 +34,7 @@ branding:
   color: gray-dark
 inputs:
   version:
-    description: The Lapilli release to install, such as v0.47.0, checked against its SHA256SUMS. Default, the release this action is at, the first its own CHANGELOG.md names, so that the commit on the uses line pins the binary too.
+    description: The Lapilli release to install, such as v0.48.0, checked against its SHA256SUMS. Default, the release this action is at, the first its own CHANGELOG.md names, so that the commit on the uses line pins the binary too.
     default: ""
   sha256:
     description: The sha256 of the release's archive for the runner (lapilli-VERSION-linux-amd64.tar.gz), pinned, which a release replaced can't match. SHA256SUMS is checked either way. It is one release's; with the uses line moved to another release, nothing is installed until it is changed too.

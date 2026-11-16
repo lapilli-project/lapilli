@@ -1759,10 +1759,11 @@ func flagValues(args []string, flag string) []string {
 }
 
 // hostileImpact is an impact expression holding what a shell would split
-// or expand: spaces, both quotes, $, *, and commands, which touch pwned.
+// or expand, or a parser take for a flag: a leading -, spaces, a line
+// break, both quotes, $, *, and commands, which touch pwned.
 func hostileImpact(pwned string) string {
-	return `sum by (service) (rate(http_requests_total{code=~"5..",path!~'/health.*'}[5m])) * 100` +
-		` / sum by (service) (rate(http_requests_total[5m])) > $THRESHOLD $(touch ` + pwned + `) ` + "`touch " + pwned + "`"
+	return `-sum by (service) (rate(http_requests_total{code=~"5..",path!~'/health.*'}[5m])) * 100` + "\n" +
+		`  / sum by (service) (rate(http_requests_total[5m])) < -$THRESHOLD $(touch ` + pwned + `) ` + "`touch " + pwned + "`"
 }
 
 // checkImpactArgs checks lapilli was given impact as one argument, as it
@@ -1864,6 +1865,39 @@ func TestBacktestRecipeImpact(t *testing.T) {
 	}
 	if len(rr.host.comments) != 0 {
 		t.Errorf("commented: %+v", rr.host.comments)
+	}
+}
+
+// IMPACT_FOR is taken as lapilli's --impact-for takes it, a second or
+// more: one the recipe passes, lapilli doesn't refuse, and one lapilli
+// would refuse fails at once. Sub-second units and a sign are refused,
+// though lapilli takes 1500ms and +5m.
+func TestBacktestRecipeImpactFor(t *testing.T) {
+	needRecipeTools(t)
+	prom := promAnswering(t, map[string]string{"errors > 5": "checkout", "search_errors > 0": "search"})
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	refusedOnly := []string{"1500ms", "+5m"}
+	for _, v := range []string{"10m", "1.5h", "1d", "1d12h", "90s", "1s", "0d5m", "5.h", ".5h", "1m30s",
+		"5", "0", "10ms", "0.5s", "0m", "07d", "1.5d", "1d1d", "12h1d", "-5m", "5x", "m", "1500ms", "+5m"} {
+		d, err := parseDuration(v)
+		takes := err == nil && d >= time.Second
+		rr.host.set(func(h *commentHost) { h.comments = nil })
+		out, rerr := rr.run([]string{"PATHS=alerts", "IMPACT=search_errors > 0", "IMPACT_FOR=" + v}, "--prometheus", prom.URL)
+		refused := rerr != nil && strings.Contains(out, "IMPACT_FOR "+v+": want a duration of a second or more")
+		switch {
+		case slices.Contains(refusedOnly, v):
+			if !takes || !refused {
+				t.Errorf("%s: lapilli takes it %v, the recipe refuses it %v\n%s", v, takes, refused, out)
+			}
+		case takes:
+			if rerr != nil || len(rr.host.mine()) != 1 || strings.Contains(rr.body(), "### Lapilli backtest failed") {
+				t.Errorf("%s, which lapilli takes: %v\n%s", v, rerr, out)
+			}
+		case !refused:
+			t.Errorf("%s, which lapilli refuses, passed: %v\n%s", v, rerr, out)
+		}
 	}
 }
 

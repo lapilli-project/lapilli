@@ -55,7 +55,8 @@
 #                    one argument, as it is: never split at spaces, nor
 #                    expanded
 #   IMPACT_FOR       optional: how long impact must last in a series to be
-#                    an incident (--impact-for; lapilli's default 5m)
+#                    an incident (--impact-for; lapilli's default 5m), a
+#                    second or more, as lapilli reads it: 10m, 1.5h, 1d12h
 #   MATCH            optional: the labels a firing and an incident must
 #                    agree on when both have them, comma-separated, such
 #                    as service or service,cluster: a --match each, beside
@@ -247,11 +248,28 @@ if [ -n "${IMPACT:-}" ] && [ -z "$(printf '%s' "$IMPACT" | tr -d ' \t\n')" ]; th
   say "IMPACT: want a PromQL expression that returns something while users are hurt"
   exit 1
 fi
-# A duration as lapilli reads it, which says more if it isn't one.
-case ${IMPACT_FOR:-} in
-  '') ;;
-  [!0-9]* | *[!0-9dhms]*) say "IMPACT_FOR $IMPACT_FOR: want a duration, such as 10m"; exit 1 ;;
-esac
+# duration DUR: whether lapilli's --impact-for takes DUR, a second or more,
+# as it reads one: whole days first, if any (1d, 1d12h), then numbers each
+# with its unit, h, m or s, a fraction allowed (90s, 1.5h, 1h30m). Not a
+# bare number, nor ms, nor a sign.
+duration() {
+  case $1 in '' | *[!0-9dhms.]*) return 1 ;; esac
+  printf '%s\n' "$1" | awk '{
+    s = $0; total = 0
+    if (match(s, /^(0|[1-9][0-9]*)d/)) { total = substr(s, 1, RLENGTH - 1) * 86400; s = substr(s, RLENGTH + 1) }
+    while (s != "") {
+      if (!match(s, /^([0-9]+(\.[0-9]*)?|\.[0-9]+)[hms]/)) exit 1
+      u = substr(s, RLENGTH, 1)
+      total += substr(s, 1, RLENGTH - 1) * (u == "h" ? 3600 : u == "m" ? 60 : 1)
+      s = substr(s, RLENGTH + 1)
+    }
+    exit !(total >= 1)
+  }'
+}
+if [ -n "${IMPACT_FOR:-}" ] && ! duration "$IMPACT_FOR"; then
+  say "IMPACT_FOR $IMPACT_FOR: want a duration of a second or more, such as 10m, 1.5h or 1d"
+  exit 1
+fi
 if [ -n "${IMPACT_FOR:-}" ] && [ -z "${IMPACT:-}" ]; then
   say "IMPACT_FOR is how long IMPACT must last: give IMPACT too"
   exit 1
