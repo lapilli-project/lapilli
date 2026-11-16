@@ -324,17 +324,24 @@ const impactNone = "none"
 // impactSince keeps from when the runs read the impact signal (--impact),
 // all of it, without a run between that didn't: what keeps the record of
 // the firings since (ImpactSince). A run that doesn't read it ends that
-// (impactNone), and forgets the criterion read, its data and the one
-// pending; the first to read it with none kept (a new ledger's), keeps its
+// (impactNone), and forgets the criteria kept and read, the data and the
+// floor; the first to read it with none kept (a new ledger's), keeps its
 // own start and its criterion. An earlier window found isn't taken for
 // one: the runs between may not have read it. Read again after a run that
 // didn't (turned on again), it keeps its own start too, and the weeks
-// before wait to be read again (againDue).
+// before wait to be read again (againDue). A ledger an earlier lapilli
+// kept, which kept no criterion, is taken to have been read with
+// ImpactAssumed.
 //
 // A run that read another criterion than the one the record is kept by
-// leaves the record, its criterion and its data as they were:
-// the new one is pending (ImpactPending, from the run's start) until
-// ReadAgain reads it over the last four weeks and keeps the record by it.
+// leaves the record's start, its criterion and its data as they were, and
+// keeps a floor at its start (impact_floor): from there the windows are
+// another's, and no record is kept until the criterion in effect is read
+// again (ReadAgain). More such runs, of the same criterion or others, or
+// of the one kept again, leave it where it is, or move it earlier, to the
+// start of one that replays from before it. impact_read is what each run
+// read.
+//
 // A since is never earlier than where the criterion's data begins
 // (ImpactData), when that is known.
 func (l *Ledger) impactSince(t *txn, f Found) error {
@@ -342,41 +349,49 @@ func (l *Ledger) impactSince(t *txn, f Found) error {
 	if err != nil {
 		return err
 	}
-	crit, err := l.meta(t.ctx, t, metaImpactCriterion)
-	if err != nil {
-		return err
-	}
 	if !f.ImpactOn {
-		again, err := l.meta(t.ctx, t, metaImpactAgain)
-		if err != nil {
+		var n int
+		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM meta WHERE key IN (?, ?, ?, ?, ?)",
+			metaImpactCriterion, metaImpactAgain, metaImpactData, metaImpactRead, metaImpactFloor).Scan(&n); err != nil {
 			return err
 		}
-		p, err := l.pending(t.ctx, t)
-		if err != nil {
-			return err
-		}
-		if was == impactNone && crit == "" && again == "" && p == nil {
+		if was == impactNone && n == 0 {
 			return nil
 		}
-		if _, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key IN (?, ?, ?, ?)", metaImpactCriterion, metaImpactAgain, metaImpactData, metaImpactPending); err != nil {
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key IN (?, ?, ?, ?, ?)",
+			metaImpactCriterion, metaImpactAgain, metaImpactData, metaImpactRead, metaImpactFloor); err != nil {
 			return err
 		}
 		return setMeta(t.ctx, t, metaImpactSince, impactNone)
 	}
+	crit, err := l.meta(t.ctx, t, metaImpactCriterion)
+	if err != nil {
+		return err
+	}
 	n, perr := strconv.ParseInt(was, 10, 64)
 	kept := perr == nil // a record is kept, by crit, or of an earlier lapilli's
+	if kept && crit == "" && f.ImpactAssumed != "" {
+		crit = f.ImpactAssumed
+		if err := setMeta(t.ctx, t, metaImpactCriterion, crit); err != nil {
+			return err
+		}
+	}
 	read := f.ImpactCriterion
-	if read != "" && kept && (crit != "" && crit != read || crit == "" && f.ImpactAssumed != read) {
-		// Another than the one kept: pending, from where the runs began to
-		// read it, until it is read again.
-		if err := setMeta(t.ctx, t, metaImpactAgain, againDue); err != nil {
+	if read == "" {
+		read = crit // a run from before 0.49, which doesn't say
+	}
+	if err := l.setMetaIf(t, metaImpactRead, read); err != nil {
+		return err
+	}
+	if read != "" && kept && crit != read {
+		floor, err := l.meta(t.ctx, t, metaImpactFloor)
+		if err != nil {
 			return err
 		}
-		p, err := l.pending(t.ctx, t)
-		if err != nil || p != nil && p.Criterion == read {
-			return err
+		if at, err := strconv.ParseInt(floor, 10, 64); err == nil && at <= f.From.Unix() {
+			return nil
 		}
-		return setPending(t, &ImpactPending{Criterion: read, Since: f.ImpactSince})
+		return setMeta(t.ctx, t, metaImpactFloor, strconv.FormatInt(f.From.Unix(), 10))
 	}
 	if read != "" && crit != read {
 		if err := setMeta(t.ctx, t, metaImpactCriterion, read); err != nil {
@@ -400,6 +415,19 @@ func (l *Ledger) impactSince(t *txn, f Found) error {
 		since = max(since, d.Floor.Unix())
 	}
 	return setMeta(t.ctx, t, metaImpactSince, strconv.FormatInt(since, 10))
+}
+
+// setMetaIf sets a meta key to v, when it isn't already: a run that reads
+// what the one before read writes nothing more.
+func (l *Ledger) setMetaIf(t *txn, key, v string) error {
+	if v == "" {
+		return nil
+	}
+	was, err := l.meta(t.ctx, t, key)
+	if err != nil || was == v {
+		return err
+	}
+	return setMeta(t.ctx, t, key, v)
 }
 
 // miss keeps, for the next run, where each rule this run couldn't replay

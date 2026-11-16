@@ -112,6 +112,9 @@ func (h *history) QueryRange(ctx context.Context, expr string, start, end time.T
 		return nil, fmt.Errorf("the API said to wait %w, after HTTP 429: slow down", prom.ErrPastDeadline)
 	case "impact":
 		out = append(out, run(map[string]string{"service": "search"}, now.Add(-6*time.Hour), now.Add(-6*time.Hour+10*time.Minute)))
+	case "always":
+		// Users hurt the whole time: one window, on over every run.
+		out = append(out, run(map[string]string{"service": "search"}, start, end))
 	case "impact > 1":
 		// Another criterion: search's window, checkout's over INC-1, and
 		// cart's a day and a half ago.

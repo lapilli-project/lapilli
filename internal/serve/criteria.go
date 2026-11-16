@@ -30,12 +30,15 @@ import (
 // is started, or by an admin on the Settings page, as the other judging
 // settings are, and tried on the last four weeks first.
 //
-// The record the signal keeps is what the ledger holds of it: from when
-// the runs read it, all along, with the criterion in effect then, and not
-// before where the data of every selector it reads begins (impactData).
-// Saving another reads it again over the last four weeks (impactAgain),
-// which puts its windows in place of the one before's and keeps the record
-// by it from there; until then, the ledger's windows and its record stay.
+// The record the signal keeps follows one rule: it holds only for weeks
+// that were read, with data, by the criterion in effect, and, after a
+// change, replaced by a successful read of that criterion: from when the
+// runs read it, all along, and not before where the data of every
+// selector it reads begins (impactData). Saving another reads it again
+// over the last four weeks (impactAgain), which puts its windows in place
+// of the one before's and keeps the record by it from there; until then,
+// the ledger's windows stay, and once a run reads the new one, no record
+// is kept by the signal (ledger.ImpactKept.Floor).
 
 // criterion is what makes an impact window: the expression, "" for none,
 // and how long a series must return something for.
@@ -143,7 +146,7 @@ func (s *Server) assumedKey() string { return s.criterionOf(nil).key() }
 // read it, all along, with the criterion in effect then, and where the
 // data of the selectors it reads begins (ledger.ImpactKept.From). A
 // criterion saved and not yet read again keeps the record of the one
-// before until it is: its windows are those the stones were given by.
+// before until a run reads it, and then none until it is read again.
 // Turned off, none.
 func (s *Server) impactFrom(ctx context.Context, c criterion) (time.Time, error) {
 	if c.Expr == "" {
@@ -163,18 +166,32 @@ func maxQueryOf(page string, r *http.Request) int {
 }
 
 // impactHeld is the criterion whose windows the ledger holds, as a
-// backtest is judged against them (evidence.Impact): the runs', "" with
-// the signal off.
+// backtest is judged against them (evidence.Impact): the one kept, "" with
+// the signal off. While a floor stands, the windows are the one kept's
+// before it and those the runs read since after it: a label of its own,
+// which no criterion kept is (heldPending), so that a backtest judged
+// against them is held once the criterion in effect is read again, the
+// one kept among them.
 func (s *Server) impactHeld(ctx context.Context) (string, error) {
 	c, err := s.criterion(ctx)
 	if err != nil || c.Expr == "" {
 		return "", err
 	}
 	k, err := s.l.ImpactKept(ctx)
-	if k.Criterion == "" && !k.Since.IsZero() {
+	switch {
+	case !k.Floor.IsZero():
+		return heldPending(k), err
+	case k.Criterion == "" && !k.Since.IsZero():
 		return s.assumedKey(), err // a ledger an earlier lapilli kept
 	}
 	return k.Criterion, err
+}
+
+// heldPending is the label of the windows a ledger holds while a floor
+// stands: when it began, the criterion kept and the one the runs last
+// read. A criterion's key begins with its --impact-for, so none is it.
+func heldPending(k ledger.ImpactKept) string {
+	return fmt.Sprintf("pending %d %q %q", k.Floor.Unix(), k.Criterion, k.Read)
 }
 
 // checkImpact is what the UI refuses of an impact expression before
@@ -362,6 +379,10 @@ type criteriaView struct {
 	Expr, For string        `json:"-"`
 	NoHistory bool          `json:"no_history,omitempty"`
 	Since     time.Time     `json:"kept_since,omitzero"`
+	// Floor is from when the runs read another criterion than the one the
+	// record is kept by, which keeps no record until the one in effect is
+	// read again (ledger.ImpactKept.Floor).
+	Floor time.Time `json:"floor,omitzero"`
 	// Data is where the data of the selectors the criterion the ledger
 	// holds begins, when it was looked for.
 	Data *dataView `json:"data,omitempty"`
@@ -390,12 +411,9 @@ type dataView struct {
 }
 
 // dataOf is where the data of a criterion's selectors begins, as the
-// ledger keeps it: of the one pending, or of the one kept; nil for
-// another, or before it was looked for.
+// ledger keeps it: of the one kept; nil for another, or before it was
+// looked for.
 func dataOf(k ledger.ImpactKept, key string) *ledger.ImpactData {
-	if p := k.Pending; p != nil && p.Criterion == key && p.Data != nil && p.Data.Criterion == key {
-		return p.Data
-	}
 	if d := k.Data; d != nil && d.Criterion == key && key == k.Criterion {
 		return d
 	}
@@ -445,7 +463,7 @@ func (s *Server) criteriaView(ctx context.Context, set map[string]ledger.Setting
 	if err != nil {
 		return nil, err
 	}
-	v.Since = k.From()
+	v.Since, v.Floor = k.From(), k.Floor
 	v.Data = dataViewOf(dataOf(k, c.key()))
 	if plan == againRead {
 		v.Again = &againView{}
@@ -634,8 +652,11 @@ const (
 )
 
 // againPlan works out what the replica that leads does about c, with what
-// the ledger keeps of the impact signal. Nothing: c is read again already,
-// or there is no run yet, whose first reads it from its start. Mark it:
+// the ledger keeps of the impact signal. Read it again, while a floor
+// stands (ledger.ImpactKept.Floor): whatever was read since, and whatever
+// impact_again says, as an older leader may have left it, only that lifts
+// it. Nothing: c is read again already, or there is no run yet, whose
+// first reads it from its start. Mark it:
 // the runs read c from where a read again would begin, or before, all
 // along (a ledger whose runs read it from their first; a lapilli before
 // 0.49's, which kept no criterion, when c is the command line's, as that
@@ -644,8 +665,13 @@ const (
 // read none.
 func (s *Server) againPlan(ctx context.Context, c criterion) (againPlan, ledger.ImpactKept, error) {
 	k, err := s.l.ImpactKept(ctx)
-	if err != nil || c.Expr == "" || k.AgainDone(c.key()) {
+	switch {
+	case err != nil || c.Expr == "":
 		return againNone, k, err
+	case !k.Floor.IsZero():
+		return againRead, k, nil // only a read again lifts it, whatever was read since
+	case k.AgainDone(c.key()):
+		return againNone, k, nil
 	}
 	cursor, err := s.l.Cursor(ctx)
 	if err != nil || cursor.IsZero() {
@@ -679,8 +705,8 @@ type againState struct {
 // then on (ledger.ReadAgain), the weeks are judged again, a week a write,
 // and the record is kept by it from then on, never before its data. One
 // that fails is tried again later, a while after, and the runs read the
-// criterion meanwhile from where they are, the record kept as the ledger
-// holds it. It reports whether it read it again.
+// criterion meanwhile from where they are, under a floor: no record by the
+// signal until it is read. It reports whether it read it again.
 func (s *Server) impactAgain(ctx context.Context, o verdict.Options) (bool, error) {
 	c, err := s.criterion(ctx)
 	if err != nil || c.Expr == "" {
@@ -748,15 +774,17 @@ func (s *Server) impactAgain(ctx context.Context, o verdict.Options) (bool, erro
 
 // impactData looks for where the data of the selectors of the criterion
 // the ledger keeps the record by begins, from where the record starts, and
-// of the one pending, from where the runs began to read it; and keeps it
-// (ledger.SetImpactData), which moves the record's start forward to the
-// first whole week after it: on a first start, after an upgrade, after a
-// change and while a selector has no data yet, a round at a time, each
-// selector from where its last look got to, the selectors looked at so far
-// kept when one fails. Once each had data, it isn't looked for again.
+// keeps it (ledger.SetImpactData), which moves the record's start forward
+// to the first whole week after it: on a first start, after an upgrade,
+// and while a selector has no data yet, a round at a time, each selector
+// from where its last look got to, the selectors looked at so far kept
+// when one fails. Before it is looked for, no record is kept by the
+// signal. Once each had data, it isn't looked for again; nor while a floor
+// stands, which keeps no record whatever the data, until a read again
+// brings its own.
 func (s *Server) impactData(ctx context.Context) error {
 	k, err := s.l.ImpactKept(ctx)
-	if err != nil || s.h == nil {
+	if err != nil || s.h == nil || k.Since.IsZero() || k.Criterion == "" || !k.Floor.IsZero() {
 		return err
 	}
 	cursor, err := s.l.Cursor(ctx)
@@ -765,25 +793,11 @@ func (s *Server) impactData(ctx context.Context) error {
 	}
 	rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 	defer cancel()
-	if !k.Since.IsZero() && k.Criterion != "" {
-		d := k.Data
-		if d == nil || d.Criterion != k.Criterion {
-			d = &ledger.ImpactData{Criterion: k.Criterion, From: k.Since}
-		}
-		if err := s.lookFor(rctx, d, cursor); err != nil {
-			return err
-		}
+	d := k.Data
+	if d == nil || d.Criterion != k.Criterion {
+		d = &ledger.ImpactData{Criterion: k.Criterion, From: k.Since}
 	}
-	if p := k.Pending; p != nil {
-		d := p.Data
-		if d == nil || d.Criterion != p.Criterion {
-			d = &ledger.ImpactData{Criterion: p.Criterion, From: p.Since}
-		}
-		if err := s.lookFor(rctx, d, cursor); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.lookFor(rctx, d, cursor)
 }
 
 // lookFor looks, of d's selectors, for where the data of those with none

@@ -25,16 +25,28 @@ func impactRun(t *testing.T, l *Ledger, from time.Time, crit string, windows ...
 	}
 }
 
+// impactRunOver records a run of [from, from+long] that read the impact
+// signal with crit, finding windows.
+func impactRunOver(t *testing.T, l *Ledger, from time.Time, long time.Duration, crit string, windows ...incident.Incident) {
+	t.Helper()
+	f := Found{From: from, To: from.Add(long), ImpactOn: true, ImpactSince: from, ImpactCriterion: crit, Impact: windows,
+		Run: Run{Kind: "test", Started: from, Finished: from, From: from, To: from.Add(long)}}
+	if err := l.Record(context.Background(), f, opts); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func impactWindow(id string, start time.Time, d time.Duration) incident.Incident {
 	return incident.Incident{ID: id, Title: "user impact (--impact)", Start: start, End: start.Add(d), Candidate: true}
 }
 
 // A run that reads another criterion than the one the record is kept by
-// leaves the record, its criterion and its data as they were: the new one
-// is pending, from the run's start, until it is read again; a window on at
-// its start is its own, not the one before's going on. Turned off, the
-// record ends; turned on again, the record is the new one's from the
-// run's start, and the weeks before wait to be read again.
+// leaves the record's start, its criterion and its data as they were, and
+// keeps a floor at its start, until the one in effect is read again; a
+// window on at its start is its own, not the one before's going on.
+// Turned off, the record ends, the floor with it; turned on again, the
+// record is the new one's from the run's start, and the weeks before wait
+// to be read again.
 func TestImpactCriterionChanged(t *testing.T) {
 	ctx := context.Background()
 	l := open(t, time.UTC)
@@ -48,9 +60,8 @@ func TestImpactCriterionChanged(t *testing.T) {
 	at := t0.Add(2 * time.Hour)
 	impactRun(t, l, at, "5m b > 1", impactWindow("w", at.Add(-10*time.Minute), 20*time.Minute))
 	k, err = l.ImpactKept(ctx)
-	if err != nil || !k.Since.Equal(t0.Add(-time.Hour)) || k.Criterion != "5m a > 1" || k.Again != againDue ||
-		k.Pending == nil || k.Pending.Criterion != "5m b > 1" || !k.Pending.Since.Equal(at.Add(-time.Hour)) {
-		t.Errorf("read with another: %+v %+v %v", k, k.Pending, err)
+	if err != nil || !k.Since.Equal(t0.Add(-time.Hour)) || k.Criterion != "5m a > 1" || k.Read != "5m b > 1" || !k.Floor.Equal(at) || !k.From().IsZero() {
+		t.Errorf("read with another: %+v %v", k, err)
 	}
 	ws, err := l.ImpactWindows(ctx, t0, at.Add(time.Hour))
 	if err != nil || len(ws) != 2 || !ws[0].End.Equal(t0.Add(time.Hour)) || !ws[1].Start.Equal(at.Add(-10*time.Minute)) {
@@ -58,12 +69,12 @@ func TestImpactCriterionChanged(t *testing.T) {
 	}
 	// One not read ends it, the criterion forgotten.
 	impactRun(t, l, at.Add(time.Hour), "")
-	if k, err = l.ImpactKept(ctx); err != nil || !k.Since.IsZero() || k.Criterion != "" || k.Again != "" || k.Pending != nil {
+	if k, err = l.ImpactKept(ctx); err != nil || !k.Since.IsZero() || k.Criterion != "" || k.Again != "" || k.Read != "" || !k.Floor.IsZero() {
 		t.Errorf("not read: %+v %v", k, err)
 	}
 	// Read again, from its own start, the weeks before it wait.
 	impactRun(t, l, at.Add(2*time.Hour), "5m b > 1")
-	if k, err = l.ImpactKept(ctx); err != nil || !k.Since.Equal(at.Add(time.Hour)) || k.Criterion != "5m b > 1" || k.Again != againDue || k.Pending != nil {
+	if k, err = l.ImpactKept(ctx); err != nil || !k.Since.Equal(at.Add(time.Hour)) || k.Criterion != "5m b > 1" || k.Again != againDue || !k.Floor.IsZero() {
 		t.Errorf("turned on again: %+v %v", k, err)
 	}
 }
@@ -468,30 +479,93 @@ func TestImpactKeyOfAnother(t *testing.T) {
 	}
 }
 
-// The record while a criterion is pending: the one kept's, on through the
-// weeks the runs read the pending one over only when its data was there
-// from its start; from where its data begins, when later; none before its
-// data is looked for, or while a selector of it has none; and, with none
-// kept before, from the pending one's start.
-func TestImpactPendingFrom(t *testing.T) {
-	since, change := t0.Add(-14*24*time.Hour), t0.Add(30*time.Hour)
-	data := func(floor time.Time, none bool) *ImpactData {
-		return &ImpactData{Criterion: "b", Floor: floor, NoData: none}
+// The record by the signal, by the one rule: from Since, or where the
+// data of the criterion kept begins, when later; none before that data is
+// looked for, while a selector has none, of data of another criterion, and
+// while a floor stands.
+func TestImpactFrom(t *testing.T) {
+	since, floor := t0.Add(-14*24*time.Hour), t0.Add(30*time.Hour)
+	data := func(crit string, at time.Time, none bool) *ImpactData {
+		return &ImpactData{Criterion: crit, Floor: at, NoData: none}
 	}
 	for _, c := range []struct {
 		name string
 		k    ImpactKept
 		want time.Time
 	}{
-		{"not looked for", ImpactKept{Since: since, Criterion: "a", Pending: &ImpactPending{Criterion: "b", Since: change}}, time.Time{}},
-		{"no data", ImpactKept{Since: since, Criterion: "a", Pending: &ImpactPending{Criterion: "b", Since: change, Data: data(time.Time{}, true)}}, time.Time{}},
-		{"data later", ImpactKept{Since: since, Criterion: "a", Pending: &ImpactPending{Criterion: "b", Since: change, Data: data(t0.Add(7*24*time.Hour), false)}}, t0.Add(7 * 24 * time.Hour)},
-		{"data all along", ImpactKept{Since: since, Criterion: "a", Pending: &ImpactPending{Criterion: "b", Since: change, Data: data(time.Time{}, false)}}, since},
-		{"none kept before", ImpactKept{Pending: &ImpactPending{Criterion: "b", Since: change, Data: data(time.Time{}, false)}}, change},
+		{"data all along", ImpactKept{Since: since, Criterion: "a", Data: data("a", time.Time{}, false)}, since},
+		{"data later", ImpactKept{Since: since, Criterion: "a", Data: data("a", t0, false)}, t0},
+		{"not looked for", ImpactKept{Since: since, Criterion: "a"}, time.Time{}},
+		{"another's data", ImpactKept{Since: since, Criterion: "a", Data: data("b", time.Time{}, false)}, time.Time{}},
+		{"no data", ImpactKept{Since: since, Criterion: "a", Data: data("a", time.Time{}, true)}, time.Time{}},
+		{"a floor", ImpactKept{Since: since, Criterion: "a", Data: data("a", time.Time{}, false), Read: "b", Floor: floor}, time.Time{}},
+		{"a floor, the one kept read again", ImpactKept{Since: since, Criterion: "a", Data: data("a", time.Time{}, false), Read: "a", Floor: floor}, time.Time{}},
+		{"not read", ImpactKept{Criterion: "a", Data: data("a", time.Time{}, false)}, time.Time{}},
 	} {
 		if got := c.k.From(); !got.Equal(c.want) {
 			t.Errorf("%s: %s, not %s", c.name, got, c.want)
 		}
+	}
+}
+
+// The floor is the start of the earliest run since the last read again
+// that read another criterion than the one kept: more such runs, of it or
+// of a third, or of the one kept again, leave it there; one that replays
+// from before it moves it there; a read again lifts it, and its criterion
+// is the one read from then on, though no run read it yet.
+func TestImpactFloor(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	impactRun(t, l, t0, "a")
+	at := t0.Add(3 * time.Hour)
+	floorOf := func(name string, want time.Time, read string) {
+		t.Helper()
+		k, err := l.ImpactKept(ctx)
+		if err != nil || !k.Floor.Equal(want) || k.Read != read || k.Criterion != "a" {
+			t.Errorf("%s: floor %s read %q kept %q, not %s %q (%v)", name, k.Floor, k.Read, k.Criterion, want, read, err)
+		}
+	}
+	impactRun(t, l, at, "b")
+	floorOf("b read", at, "b")
+	impactRun(t, l, at.Add(time.Hour), "c")
+	floorOf("c read", at, "c")
+	impactRun(t, l, at.Add(2*time.Hour), "a")
+	floorOf("a read again", at, "a")
+	impactRun(t, l, t0.Add(time.Hour), "c") // replays from before it
+	floorOf("c from before", t0.Add(time.Hour), "c")
+	cur, err := l.Cursor(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.ReadAgain(ctx, ImpactRead{From: t0, To: cur, Criterion: "d"}, opts); err != nil {
+		t.Fatal(err)
+	}
+	k, err := l.ImpactKept(ctx)
+	if err != nil || !k.Floor.IsZero() || k.Criterion != "d" || k.Read != "d" || !k.From().Equal(t0) {
+		t.Errorf("read again: %+v %v", k, err)
+	}
+	// A run of d after it: d's window on at its start goes on.
+	changed := true
+	if err := l.write(ctx, func(tx *txn) (err error) {
+		changed, err = l.criterionChanged(tx, Found{ImpactOn: true, ImpactCriterion: "d"})
+		return err
+	}); err != nil || changed {
+		t.Errorf("d read after its read again is taken for a change (%v)", err)
+	}
+}
+
+// While a floor stands, a window of the criterion the runs read goes on
+// from one run to the next, as one of the criterion kept does.
+func TestImpactFloorWindowGoesOn(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	impactRun(t, l, t0, "a")
+	at := t0.Add(2 * time.Hour)
+	impactRun(t, l, at, "b", impactWindow("w", at.Add(30*time.Minute), 30*time.Minute))
+	impactRun(t, l, at.Add(time.Hour), "b", impactWindow("w", at.Add(30*time.Minute), 70*time.Minute))
+	ws, err := l.ImpactWindows(ctx, t0, at.Add(2*time.Hour))
+	if err != nil || len(ws) != 1 || !ws[0].End.Equal(at.Add(100*time.Minute)) {
+		t.Errorf("b's window: %+v %v", ws, err)
 	}
 }
 

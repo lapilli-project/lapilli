@@ -153,8 +153,8 @@ func TestImpactUpgradeSavedFirst(t *testing.T) {
 }
 
 // The same, the read again failing, and the runs reading the new criterion
-// meanwhile: they take the ledger's for the command line's, so the read
-// again is still due.
+// meanwhile: they take the ledger's for the command line's, which is kept,
+// the new one read from a floor on, and the read again is still due.
 func TestImpactUpgradeRunFirst(t *testing.T) {
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
@@ -167,7 +167,7 @@ func TestImpactUpgradeRunFirst(t *testing.T) {
 	runDue(s, 2)
 	s.jobs(ctx, true)
 	k, err := s.l.ImpactKept(ctx)
-	if err != nil || k.Criterion != "" || k.Again != "-" || k.Pending == nil || k.Pending.Criterion != "5m impact > 1" {
+	if err != nil || k.Criterion != "5m impact" || k.Read != "5m impact > 1" || k.Floor.IsZero() || !k.From().IsZero() {
 		t.Fatalf("%+v %v", k, err)
 	}
 	if plan, _, err := s.againPlan(ctx, criterion{"impact > 1", 5 * time.Minute}); err != nil || plan != againRead {
@@ -286,7 +286,6 @@ func TestImpactTryEarlierWeeks(t *testing.T) {
 	s := criteriaServer(t, false, nil)
 	monday := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC) // three weeks before
 	ledgerExec(t, s, "UPDATE meta SET value = ? WHERE key = 'impact_since'", strconv.FormatInt(monday.Unix(), 10))
-	ledgerExec(t, s, "DELETE FROM meta WHERE key = 'impact_data'")
 	_, body := askAs(t, s.Handler(), http.MethodGet, "/settings?impact-try=1&impact=impact+%3E+1", nil, "ana@example.com", "same-origin")
 	if !strings.Contains(body, `<th scope="row">Weeks before them with a record</th><td>2 of 2</td><td><strong>0 of 2</strong></td>`) {
 		t.Errorf("no weeks before:\n%s", body)
@@ -511,11 +510,110 @@ func TestOrphansImpactNotes(t *testing.T) {
 	}
 }
 
-// A criterion saved, its read again failing, a run reading it: pending,
-// the record is kept on through the weeks it read only as far as its data
-// goes. Its selector with no data: none at all, as the one before's had
-// none either.
+// saveFailing saves a criterion whose read again fails, as the replica
+// that leads reads it: "" saves the command line's back.
+func saveFailing(t *testing.T, s *Server, expr string) {
+	t.Helper()
+	if err := s.l.SetSettings(context.Background(), map[string]string{"impact": expr}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if expr == "" {
+		expr = s.cfg.Impact
+	}
+	h := hist(s)
+	h.Lock()
+	if h.failLong == nil {
+		h.failLong = map[string]bool{}
+	}
+	h.failLong[expr] = true
+	h.Unlock()
+}
+
+// readsAgain lets each read again of an expression through.
+func readsAgain(s *Server) {
+	h := hist(s)
+	h.Lock()
+	h.failLong = nil
+	h.Unlock()
+}
+
+// A criterion saved, its read again failing, a run reading it: a floor,
+// no record at all, though the one kept had data all along; its selector
+// with no data says nothing more.
 func TestImpactPendingNoData(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).begins = map[string][]time.Time{"gone": {}}
+	if from := options(t, s); from.IsZero() {
+		t.Fatal("the one kept, with data, keeps no record")
+	}
+	saveFailing(t, s, "gone > 1")
+	runDue(s, 2)
+	s.jobs(ctx, true)
+	if from := options(t, s); !from.IsZero() {
+		t.Errorf("a floor, its selector with no data: kept from %s", from)
+	}
+	_, page := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
+	if !strings.Contains(page, "the impact signal keeps no record until the criterion in effect is read again") || strings.Contains(page, "The record is kept by the impact signal from") {
+		t.Errorf("the page doesn't say so:\n%s", page)
+	}
+}
+
+// Two criteria saved one after the other, each read again failing, each
+// read by a run: no record from the first one's first read on, the second
+// with data all along, the first with none.
+func TestImpactTwoSavesPending(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).begins = map[string][]time.Time{"gone": {}}
+	saveFailing(t, s, "gone > 1")
+	runDue(s, 2)
+	s.jobs(ctx, true)
+	saveFailing(t, s, "impact > 1")
+	runDue(s, 3)
+	s.jobs(ctx, true)
+	if hist(s).exprs["impact > 1"] < 2 {
+		t.Fatalf("the second isn't read: %v", hist(s).exprs)
+	}
+	if from := options(t, s); !from.IsZero() {
+		t.Errorf("after two saves: kept from %s", from)
+	}
+}
+
+// A criterion saved and read by runs, then the one kept saved back, its
+// read again failing: its window isn't split at each run's start, and no
+// record is kept until it is read again.
+func TestImpactRevertPendingNoSplit(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, func(c *Config) { c.Impact = "always" })
+	saveFailing(t, s, "impact > 1")
+	runDue(s, 2)
+	s.jobs(ctx, true)
+	saveFailing(t, s, "")
+	for hours := 3; hours <= 6; hours++ {
+		runDue(s, hours)
+		s.jobs(ctx, true)
+		if from := options(t, s); !from.IsZero() {
+			t.Errorf("saved back, %dh: kept from %s", hours, from)
+		}
+	}
+	cursor, _ := s.l.Cursor(ctx)
+	ws, err := s.l.ImpactWindows(ctx, now.Add(-30*24*time.Hour), cursor)
+	if err != nil || len(ws) != 2 || ws[1].End.Before(cursor) {
+		t.Errorf("%d windows, not the one kept's and its own on to %s: %+v %v", len(ws), cursor, ws, err)
+	}
+	readsAgain(s)
+	runDue(s, 24)
+	s.jobs(ctx, true)
+	if k, _ := s.l.ImpactKept(ctx); !k.Floor.IsZero() || options(t, s).IsZero() {
+		t.Errorf("read again: %+v, kept from %s", k, options(t, s))
+	}
+}
+
+// The one kept with no data, another with data read by a run, then the
+// one kept saved back and read by a run: no record, the data of the other
+// saying nothing of it.
+func TestImpactRevertPendingNoData(t *testing.T) {
 	ctx := context.Background()
 	s, _ := server(t, func(c *Config) { c.Incidents = "" })
 	hist(s).begins = map[string][]time.Time{"impact": {}}
@@ -527,60 +625,82 @@ func TestImpactPendingNoData(t *testing.T) {
 	if from := options(t, s); !from.IsZero() {
 		t.Fatalf("no data: kept from %s", from)
 	}
-	if err := s.l.SetSettings(ctx, map[string]string{"impact": "impact > 1"}, "ana@example.com"); err != nil {
-		t.Fatal(err)
-	}
-	hist(s).failLong = map[string]bool{"impact > 1": true}
+	saveFailing(t, s, "probe == 1")
 	runDue(s, 2)
 	s.jobs(ctx, true)
+	saveFailing(t, s, "")
+	runDue(s, 3)
+	s.jobs(ctx, true)
 	if from := options(t, s); !from.IsZero() {
-		t.Errorf("pending, its selector with no data: kept from %s", from)
+		t.Errorf("saved back: kept from %s", from)
 	}
 }
 
-// Pending, its read again failing, a selector of it whose data begins
-// after the runs began to read it: the record is kept from where its data
-// begins, not from where the one before's was.
-func TestImpactPendingDataLooked(t *testing.T) {
+// A floor that an older leader left with impact_again saying the one kept
+// needs no read again, and the runs reading it: read again all the same,
+// which lifts it.
+func TestImpactFloorLeft(t *testing.T) {
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
-	hist(s).begins = map[string][]time.Time{"late": {now.Add(2 * time.Hour)}}
-	hist(s).failLong = map[string]bool{"impact or late == 1": true}
-	if err := s.l.SetSettings(ctx, map[string]string{"impact": "impact or late == 1"}, "ana@example.com"); err != nil {
-		t.Fatal(err)
-	}
-	runDue(s, 4) // a run of five hours, which the read again's four weeks aren't
-	s.jobs(ctx, true)
+	s.jobs(ctx, false) // marked: read from the runs' first
 	k, err := s.l.ImpactKept(ctx)
-	if err != nil || k.Pending == nil || k.Pending.Data == nil {
+	if err != nil || !k.AgainDone("5m impact") {
 		t.Fatalf("%+v %v", k, err)
 	}
-	monday := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
-	if from := options(t, s); !from.Equal(monday) {
-		t.Errorf("kept from %s, not %s", from, monday)
+	cursor, _ := s.l.Cursor(ctx)
+	ledgerExec(t, s, "INSERT INTO meta (key, value) VALUES ('impact_floor', ?)", strconv.FormatInt(cursor.Add(-time.Hour).Unix(), 10))
+	ledgerExec(t, s, "INSERT INTO meta (key, value) VALUES ('impact_read', '5m impact') ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+	if plan, _, err := s.againPlan(ctx, criterion{"impact", 5 * time.Minute}); err != nil || plan != againRead {
+		t.Fatalf("plan %d %v", plan, err)
+	}
+	s.jobs(ctx, false)
+	if k, err := s.l.ImpactKept(ctx); err != nil || !k.Floor.IsZero() || options(t, s).IsZero() {
+		t.Errorf("not lifted: %+v %v", k, err)
 	}
 }
 
-// A proposal backtested while a criterion is pending is judged against
-// the windows of the one kept, and is labeled so: held once the pending
-// one's are read in their place.
+// A proposal backtested while a floor stands is labeled with it, a label
+// no criterion kept is: held once the criterion saved is read again.
 func TestImpactHeldInGap(t *testing.T) {
 	ctx := context.Background()
 	s := criteriaServer(t, true, nil)
-	if err := s.l.SetSettings(ctx, map[string]string{"impact": "impact > 1"}, "ana@example.com"); err != nil {
-		t.Fatal(err)
-	}
-	hist(s).failLong = map[string]bool{"impact > 1": true}
+	saveFailing(t, s, "impact > 1")
 	runDue(s, 2)
 	s.jobs(ctx, true)
 	held, err := s.impactHeld(ctx)
-	if err != nil || held != "5m impact" {
+	if err != nil || !strings.HasPrefix(held, "pending ") {
 		t.Fatalf("held %q %v", held, err)
 	}
 	id := impactProposed(t, s, held)
-	hist(s).failLong = nil
+	readsAgain(s)
 	runDue(s, 4) // past the hour the failed read again waits
 	s.jobs(ctx, false)
+	if w := staleOf(t, s, id); w == nil || w.Format != staleImpact {
+		t.Errorf("not held once read again: %+v", w)
+	}
+}
+
+// The same, the one kept saved back: held once it is read again.
+func TestImpactHeldAfterRevert(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, true, nil)
+	saveFailing(t, s, "impact > 1")
+	runDue(s, 2)
+	s.jobs(ctx, true)
+	saveFailing(t, s, "")
+	runDue(s, 3)
+	s.jobs(ctx, true)
+	held, err := s.impactHeld(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := impactProposed(t, s, held)
+	readsAgain(s)
+	runDue(s, 24)
+	s.jobs(ctx, false)
+	if k, _ := s.l.ImpactKept(ctx); !k.Floor.IsZero() {
+		t.Fatalf("not read again: %+v", k)
+	}
 	if w := staleOf(t, s, id); w == nil || w.Format != staleImpact {
 		t.Errorf("not held once read again: %+v", w)
 	}
