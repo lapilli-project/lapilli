@@ -506,12 +506,17 @@ func (l *Ledger) rules(t *txn, rs []Rule) error {
 // another criterion: then the one before ends at From. It returns the
 // earliest start whose firings' stones may have changed.
 //
-// A window found takes what was decided about one found before (confirmed
-// or dismissed) that covers half of it or more, sharing a value of each
-// label both have: of several, the one that covers most of it, confirmed
-// before dismissed on a tie, then the earliest. A decision is read from
-// every window on from From on, one that started before it too, as it was
-// before anything was ended there.
+// Two rules, of how much a window found now and one found before share:
+// a decision carries over at half of the new window (decidedFor), so that
+// a window split, or found shorter, keeps what people said of it; a key,
+// and the tasks and comments on it, at half of both (sameImpact,
+// remapImpact), so that what was written about one window never lands on
+// one mostly elsewhere. A window found takes what was decided about one
+// found before (confirmed or dismissed) that covers half of it or more,
+// sharing a value of each label both have: of several, the one that
+// covers most of it, confirmed before dismissed on a tie, then the
+// earliest. A decision is read from every window on from From on, one that
+// started before it too, as it was before anything was ended there.
 func (l *Ledger) impact(t *txn, f Found, fresh bool) (int64, error) {
 	from := f.From.Unix()
 	lo := from
@@ -594,8 +599,8 @@ func (l *Ledger) impact(t *txn, f Found, fresh bool) (int64, error) {
 			state, updated, by = d.state, d.updated, d.by
 		}
 		// The key of the window found before it is, if one is: of the same
-		// minute, sharing a value of each label both have, covering half of
-		// it or more. Else one no window has, nor anything kept on one
+		// minute, sharing a value of each label both have, the two sharing
+		// half of each. Else one no window has, nor anything kept on one
 		// (freeKey).
 		key := sameImpact(before, from, taken, in)
 		if key == "" {
@@ -632,6 +637,14 @@ type madeWindow struct {
 // overlap is how many seconds [a, b] and [c, d] share.
 func overlap(a, b, c, d int64) int64 { return max(0, min(b, d)-max(a, c)) }
 
+// halfOfBoth reports whether [a, b] and [c, d] share half of each, or
+// more: what a key, and the tasks and comments on it, need to pass from a
+// window to another.
+func halfOfBoth(a, b, c, d int64) bool {
+	ov := overlap(a, b, c, d)
+	return b > a && d > c && 2*ov >= b-a && 2*ov >= d-c
+}
+
 // decidedFor is what was decided about the windows found before that holds
 // for a window found now (impact): nil for none.
 func decidedFor(before []oldWindow, in incident.Incident) *oldWindow {
@@ -654,7 +667,8 @@ func decidedFor(before []oldWindow, in incident.Incident) *oldWindow {
 // sameImpact is the key of the window found before from from on that a
 // window found now is: it started in the same minute (its key is the
 // minute's, or that with -2, -3 …), shares a value of each label both have,
-// and covers half of it or more; "" for none, or one taken already.
+// and the two share half of each (halfOfBoth); "" for none, or one taken
+// already.
 func sameImpact(before []oldWindow, from int64, taken map[string]bool, in incident.Incident) string {
 	base := "impact-" + in.Start.UTC().Format("20060102T1504Z")
 	s, e := in.Start.Unix(), in.End.Unix()
@@ -662,7 +676,7 @@ func sameImpact(before []oldWindow, from int64, taken map[string]bool, in incide
 		if o.start < from || taken[o.key] || o.key != base && !strings.HasPrefix(o.key, base+"-") {
 			continue
 		}
-		if ov := overlap(o.start, o.end, s, e); e > s && 2*ov >= e-s && share(o.labels, in.Labels) {
+		if halfOfBoth(o.start, o.end, s, e) && share(o.labels, in.Labels) {
 			return o.key
 		}
 	}
@@ -693,10 +707,11 @@ func freeKey(t *txn, base string, reserved map[string]bool) (string, error) {
 // remapImpact moves the tasks and comments on a window found before from
 // from on that is no longer there (no window found now is the same one,
 // sameImpact) to the window found now that covers most of it, sharing a
-// value of each label both have: by how much it covers, whether or not it
-// took its decision (decidedFor holds a decision to half the new window).
-// One that nothing covers keeps its key, which no window gets again
-// (freeKey), and the Cleanup page lists it (OrphanedImpact).
+// value of each label both have, the two sharing half of each
+// (halfOfBoth), whether or not it took its decision (decidedFor holds a
+// decision to half the new window alone). One that none is so near keeps
+// its key, which no window gets again (freeKey), and the Cleanup page
+// lists it (OrphanedImpact).
 func remapImpact(t *txn, before []oldWindow, from int64, made []madeWindow) error {
 	keys := map[string]bool{}
 	for _, m := range made {
@@ -717,7 +732,7 @@ func remapImpact(t *txn, before []oldWindow, from int64, made []madeWindow) erro
 		to, most := "", int64(0)
 		for _, m := range made {
 			ov := overlap(o.start, o.end, m.in.Start.Unix(), m.in.End.Unix())
-			if ov > most && share(o.labels, m.in.Labels) {
+			if ov > most && share(o.labels, m.in.Labels) && halfOfBoth(o.start, o.end, m.in.Start.Unix(), m.in.End.Unix()) {
 				to, most = m.key, ov
 			}
 		}

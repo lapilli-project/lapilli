@@ -569,6 +569,41 @@ func TestImpactFloorWindowGoesOn(t *testing.T) {
 	}
 }
 
+// A key, and the tasks and comments on it, pass from a window found before
+// to one found now only when the two share half of each; a decision at
+// half of the new one: a short window found under a long one takes the
+// long one's decision, and neither its key nor its task.
+func TestImpactKeyHalfOfBoth(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	at := t0.Add(70 * time.Minute)
+	key := "impact-" + at.Format("20060102T1504Z")
+	impactRunOver(t, l, t0, 6*time.Hour, "a", impactWindow("long", at, 4*time.Hour))
+	id, err := l.PutTask(ctx, Task{Title: "look", Kind: "decide", Incident: key}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Decide(ctx, key, "confirmed", "", "ana", opts); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.write(ctx, func(tx *txn) error {
+		_, err := l.impact(tx, Found{From: t0, ImpactSince: t0, Impact: []incident.Incident{impactWindow("short", at, 30*time.Minute)}}, true)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := l.ImpactWindows(ctx, t0, t0.Add(6*time.Hour))
+	if err != nil || len(ws) != 1 || ws[0].ID == key || ws[0].State != "confirmed" {
+		t.Fatalf("the short one: %+v %v", ws, err)
+	}
+	if task, _ := l.TaskByID(ctx, id); task.Incident != key {
+		t.Errorf("the task moved to %s", task.Incident)
+	}
+	if orphans, err := l.OrphanedImpact(ctx); err != nil || len(orphans) != 1 || orphans[0].Key != key {
+		t.Errorf("orphans: %+v %v", orphans, err)
+	}
+}
+
 // What was decided about the windows a read from a time on would replace or
 // end there, as ReadAgain reads them: one on from before it, however long
 // before it started, among them.
