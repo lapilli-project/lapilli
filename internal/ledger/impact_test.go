@@ -554,6 +554,46 @@ func TestImpactFloor(t *testing.T) {
 	}
 }
 
+// A run that replays from before where a read again began, of the same
+// criterion, claims no week whose data wasn't looked at: the data is
+// looked for again from the run's start, and no record is kept until it
+// is.
+func TestImpactSinceBeforeData(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	week := 7 * 24 * time.Hour
+	impactRun(t, l, t0, "c")
+	cur, err := l.Cursor(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := t0.Add(-4 * week)
+	if err := l.ReadAgain(ctx, ImpactRead{From: from, To: cur, Criterion: "c",
+		Data: ImpactData{From: from, CheckedTo: cur, Selectors: []SelectorData{{Sel: "x", First: from, AtStart: true, To: cur}}}}, opts); err != nil {
+		t.Fatal(err)
+	}
+	if k, _ := l.ImpactKept(ctx); !k.From().Equal(from) {
+		t.Fatalf("read again: from %s", k.From())
+	}
+	earlier := from.Add(-2 * week)
+	impactRun(t, l, earlier, "c")
+	k, err := l.ImpactKept(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := k.From(); !got.IsZero() && got.Before(from) {
+		t.Errorf("from %s, before the data looked for from %s", got, from)
+	}
+	// Looked for again from the new start, with data all along: kept from
+	// there.
+	if err := l.SetImpactData(ctx, ImpactData{Criterion: "c", From: k.Since, CheckedTo: cur, Selectors: []SelectorData{{Sel: "x", First: k.Since, AtStart: true, To: cur}}}); err != nil {
+		t.Fatal(err)
+	}
+	if k, _ := l.ImpactKept(ctx); !k.From().Equal(earlier.Add(-time.Hour)) {
+		t.Errorf("looked for again: from %s, not %s", k.From(), earlier.Add(-time.Hour))
+	}
+}
+
 // While a floor stands, a window of the criterion the runs read goes on
 // from one run to the next, as one of the criterion kept does.
 func TestImpactFloorWindowGoesOn(t *testing.T) {

@@ -343,7 +343,8 @@ const impactNone = "none"
 // read.
 //
 // A since is never earlier than where the criterion's data begins
-// (ImpactData), when that is known.
+// (ImpactData), when that is known; one earlier than where it was looked
+// for from forgets the data, to be looked for again from there.
 func (l *Ledger) impactSince(t *txn, f Found) error {
 	was, err := l.meta(t.ctx, t, metaImpactSince)
 	if err != nil {
@@ -411,7 +412,17 @@ func (l *Ledger) impactSince(t *txn, f Found) error {
 	if err != nil {
 		return err
 	}
-	if d != nil && d.Criterion == read && !d.Floor.IsZero() {
+	switch {
+	case d == nil || d.Criterion != read:
+	case since < d.From.Unix():
+		// Read from before where its data was looked for (a run that
+		// replays from further back than a read again began): nothing is
+		// known of the weeks between, so it is looked for again from the
+		// new start, and no record is kept until it is (ImpactKept.From).
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key = ?", metaImpactData); err != nil {
+			return err
+		}
+	case !d.Floor.IsZero():
 		since = max(since, d.Floor.Unix())
 	}
 	return setMeta(t.ctx, t, metaImpactSince, strconv.FormatInt(since, 10))
