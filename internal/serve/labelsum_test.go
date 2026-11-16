@@ -120,9 +120,9 @@ func TestLabelSumShown(t *testing.T) {
 		t.Errorf("one value: %s", one)
 	}
 	few := labelsHTML(t, "en", incident.Labels{"service": {"cart", "search"}})
-	if !strings.Contains(few, `<code><bdi>service</bdi></code> <span class="labelcount">2 values:</span> <span class="labelvalue"><code><bdi>cart</bdi></code>,</span> `+
+	if !strings.Contains(few, `<code><bdi>service</bdi></code><span class="labelcount">:</span> <span class="labelvalue"><code><bdi>cart</bdi></code>,</span> `+
 		`<span class="labelvalue"><code><bdi>search</bdi></code></span></span>`) ||
-		strings.Contains(few, "…") || strings.Contains(few, "<details") {
+		strings.Contains(few, "…") || strings.Contains(few, "values") || strings.Contains(few, "<details") {
 		t.Errorf("two values, both shown: %s", few)
 	}
 	many := labelsHTML(t, "en", incident.Labels{"instance": instances(manyInstances), "job": {"api"}})
@@ -211,6 +211,23 @@ func TestLabelSumNarrow(t *testing.T) {
 		`details\.labels-all li \{[^}]*overflow-wrap: anywhere`, `\.labelsum code \{[^}]*display: inline-block[^}]*overflow-wrap: anywhere`, `\.labelvalue \{[^}]*white-space: nowrap`} {
 		if !regexp.MustCompile(rule).Match(b) {
 			t.Errorf("no %s", rule)
+		}
+	}
+}
+
+// A name or a value that would turn the text around it (U+202E) is shown
+// with the turn taken out, inline and listed, as a rule's labels are.
+func TestLabelSumTurnsShown(t *testing.T) {
+	turned := "evil\u202Eexe.txt"
+	for _, l := range []incident.Labels{
+		{"instance": {turned}},
+		{"instance": append(instances(manyInstances), turned)},
+		{"x\u202Ey": {"a", "b"}},
+		{"instance": {turned, "zz"}},
+	} {
+		got := labelsHTML(t, "en", l)
+		if strings.Contains(got, "\u202E") {
+			t.Errorf("a turn shown as is: %q", got)
 		}
 	}
 }

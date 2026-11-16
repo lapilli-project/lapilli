@@ -10,8 +10,10 @@
   incident's page, its labels ran on as one line of `name=value` for each
   series, forty `instance=` in a row for forty instances down. Each name is
   now a line in the try's table, one after another in the incident's
-  sentence: a name with one value as `name=value`, one with more as how
-  many it has and the first three, sorted. When any is cut, a details
+  sentence: a name with one value as `name=value`, one with more as its
+  values, sorted, and past three how many it has and the first three. A
+  name or a value is shown as a rule's labels are, a character that would
+  turn the text around it taken out. When any is cut, a details
   lists every `name=value`, one a line, the first 200 and how many more.
   The cell stays narrow and wraps. The incident's form still changes its
   labels as one line; how windows are found, merged and matched, the API

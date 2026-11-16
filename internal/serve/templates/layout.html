@@ -78,7 +78,8 @@ nothing stands out on the overview. */}}
 {{/* A window's or an incident's labels summed up (labelsum.go): in a
 cell, "labelsum"; in a sentence, "labelnames" in it and "labelsall" after
 it, a details being no part of a sentence. Each name=value is set apart:
-the labels are the series' own. */}}
+the labels are the series' own, shown as text (shown). How many a name
+has is said only when not all are shown. */}}
 {{define "labelsum"}}{{if .Names}}{{template "labelnames" .}}{{template "labelsall" .}}{{else}}–{{end}}{{end}}
-{{define "labelnames"}}<span class="labelsum">{{range .Names}}<span class="labelname">{{if eq .N 1}}<code><bdi>{{.Name}}={{index .Shown 0}}</bdi></code>{{else}}<code><bdi>{{.Name}}</bdi></code> <span class="labelcount">{{t "%d values" .N}}:</span>{{range .Values}} <span class="labelvalue"><code><bdi>{{.V}}</bdi></code>{{.After}}</span>{{end}}{{end}}</span> {{end}}</span>{{end}}
-{{define "labelsall"}}{{if .Cut}}<details class="labels-all"><summary>{{t "all %d labels" .Total}}</summary><ul>{{range .All}}<li><bdi>{{.}}</bdi></li>{{end}}{{with .More}}<li>{{t "and %d more" .}}</li>{{end}}</ul></details>{{end}}{{end}}
+{{define "labelnames"}}<span class="labelsum">{{range .Names}}<span class="labelname">{{if eq .N 1}}<code><bdi>{{shown .Name}}={{shown (index .Shown 0)}}</bdi></code>{{else}}<code><bdi>{{shown .Name}}</bdi></code>{{if gt .N (len .Shown)}} <span class="labelcount">{{t "%d values" .N}}:</span>{{else}}<span class="labelcount">:</span>{{end}}{{range .Values}} <span class="labelvalue"><code><bdi>{{shown .V}}</bdi></code>{{.After}}</span>{{end}}{{end}}</span> {{end}}</span>{{end}}
+{{define "labelsall"}}{{if .Cut}}<details class="labels-all"><summary>{{t "all %d labels" .Total}}</summary><ul>{{range .All}}<li><bdi>{{shown .}}</bdi></li>{{end}}{{with .More}}<li>{{t "and %d more" .}}</li>{{end}}</ul></details>{{end}}{{end}}
