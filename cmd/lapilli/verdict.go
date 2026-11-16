@@ -299,6 +299,20 @@ Output:
                       defines each column and number
   --metrics           Prometheus metrics, for node_exporter's textfile
                       collector or Pushgateway
+  --redact            give every name an alias, to show the report outside:
+                      rules rule-01 on, label values by label (service-01),
+                      incidents incident-01 on by when they started, their
+                      titles left out, teams, groups and sources; why a rule
+                      couldn't be replayed and the expressions a near miss
+                      quotes said as [redacted]. Numbers, severities,
+                      durations and times stay. The aliases are this
+                      output's own, numbered in an order no name decides.
+                      The text, --json, --markdown and --metrics, and what
+                      --push and --slack-webhook-file send
+  --redact-key FILE   --redact with aliases that hold across outputs: each a
+                      keyed hash (HMAC-SHA256) of the name, with the key in
+                      FILE, 16 bytes or more, never shown. Without the key a
+                      short name can't be found by trying names
   --tz ZONE           show times in this zone, an IANA name such as
                       Asia/Seoul or UTC (default: the machine's own, as TZ
                       or /etc/localtime says); the header names it, with
@@ -462,6 +476,10 @@ type verdictFlags struct {
 	// by together, made once (grafanaLimits).
 	grafanaPace *prom.Pace
 	grafanaCap  *prom.Limiter
+
+	// redact is --redact, and redactKey --redact-key's key, read.
+	redact    bool
+	redactKey []byte
 }
 
 // alarmsFlag is an --alarms SOURCE=URL.
@@ -507,6 +525,9 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			continue
 		case "--markdown":
 			f.markdown = true
+			continue
+		case "--redact":
+			f.redact = true
 			continue
 		case "--metrics":
 			f.metrics = true
@@ -701,6 +722,12 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.rulerTenant = val
 		case "--firings":
 			f.firings = val
+		case "--redact-key":
+			key, rerr := readRedactKey(val)
+			if rerr != nil {
+				return nil, rerr
+			}
+			f.redact, f.redactKey = true, key
 		case "--incidents":
 			f.incidents = val
 		case "--impact":
@@ -897,7 +924,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			flag string
 		}{{f.firings != "", "--firings"}, {len(f.compare) > 0, "--compare"}, {f.changedOnly, "--changed-only"},
 			{f.expect != "" || f.expectBefore != "" || f.failExpect || f.expectRequired, "--expect, --expect-before, --fail-expectations or --expect-required: they hold a change to the rules, which --compare backtests"},
-			{f.json, "--json"}, {f.csv, "--csv: ask /api/v1/report?format=csv"}, {f.markdown, "--markdown"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
+			{f.json, "--json"}, {f.csv, "--csv: ask /api/v1/report?format=csv"}, {f.redact, "--redact: ask /api/v1/report?redact=true"}, {f.markdown, "--markdown"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"},
 			{f.progressSet, "--progress"}, {f.failUnreplayed, "--fail-unreplayed"},
@@ -970,6 +997,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--check-replay sets a replay beside what really fired: give the rules, with --rules, --loaded-rules, --grafana or --ruler")
 	case f.checkReplay && len(f.compare) > 0:
 		return nil, errors.New("--check-replay doesn't go with --compare")
+	case f.checkReplay && f.redact:
+		return nil, errors.New("--redact gives a verdict's names aliases: it doesn't go with --check-replay")
 	case f.checkReplay && (f.metrics || f.push != "" || f.slackFile != ""):
 		return nil, errors.New("--check-replay is for you to read, or --json: it doesn't go with --metrics, --push or --slack-webhook-file")
 	case f.checkReplay && (f.incidents != "" || f.impact != ""):
@@ -1057,6 +1086,8 @@ func validContent(f *verdictFlags, sources int) error {
 		return errors.New("--markdown writes --compare's report, for a pull request: it doesn't go with --check-content")
 	case f.csv:
 		return errors.New("--csv writes a verdict's firings: it doesn't go with --check-content")
+	case f.redact:
+		return errors.New("--redact gives a verdict's names aliases: it doesn't go with --check-content")
 	case f.metrics || f.push != "" || f.slackFile != "":
 		return errors.New("--check-content is for you to read, or --json: it doesn't go with --metrics, --push or --slack-webhook-file")
 	case f.grafanaTk != "" && f.grafana == "":
@@ -1267,6 +1298,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			c := &verdict.Comparison{From: f.opts.From, To: f.opts.To, Same: len(same), ChangedOnly: f.changedOnly,
 				Rules: []verdict.RuleChange{}, Incidents: []verdict.IncidentChange{}, PassedOver: f.passedOver}
 			c.Summarize(f.incidents != "" || f.impact != "")
+			if f.redact {
+				c = verdict.NewRedactor(f.redactKey).Comparison(c)
+			}
 			switch {
 			case f.json:
 				err = verdict.JSON(stdout, c)
@@ -1455,32 +1489,45 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		cancelExtras()
 		reports = append(reports, rep)
 	}
-	text := func(w io.Writer) error {
-		if cmp != nil {
-			if err := verdict.CompareText(w, cmp, f.loc); err != nil {
-				return err
-			}
-			return verdict.ExpectationsText(w, cmp.Expectations)
-		}
-		return verdict.Text(w, rep, f.loc)
-	}
 	if cmp != nil {
 		cmp.Unreplayed = cmp.UnreplayedRules()
 	} else {
 		rep.Unreplayed = rep.UnreplayedRules()
 	}
+	if f.markdown {
+		f.forComment(cmp, stderr)
+	}
+	// What is shown and sent: with --redact, a copy with every name given
+	// its alias; the reports as they are decide the exit status below.
+	shown, shownCmp := rep, cmp
+	if f.redact {
+		x := verdict.NewRedactor(f.redactKey)
+		if cmp != nil {
+			shownCmp = x.Comparison(cmp)
+		} else {
+			shown = x.Report(rep)
+		}
+	}
+	text := func(w io.Writer) error {
+		if shownCmp != nil {
+			if err := verdict.CompareText(w, shownCmp, f.loc); err != nil {
+				return err
+			}
+			return verdict.ExpectationsText(w, shownCmp.Expectations)
+		}
+		return verdict.Text(w, shown, f.loc)
+	}
 	switch {
 	case f.json && cmp != nil:
-		err = verdict.JSON(stdout, cmp)
+		err = verdict.JSON(stdout, shownCmp)
 	case f.markdown:
-		f.forComment(cmp, stderr)
-		err = verdict.CompareMarkdown(stdout, cmp, f.loc)
+		err = verdict.CompareMarkdown(stdout, shownCmp, f.loc)
 	case f.json:
-		err = verdict.JSON(stdout, rep)
+		err = verdict.JSON(stdout, shown)
 	case f.csv:
-		err = verdict.CSV(stdout, rep, nil, nil)
+		err = verdict.CSV(stdout, shown, nil, nil)
 	case f.metrics:
-		err = verdict.Prometheus(stdout, rep, now())
+		err = verdict.Prometheus(stdout, shown, now())
 	default:
 		err = text(stdout)
 	}
@@ -1499,7 +1546,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	if f.push != "" {
-		sendTo(func(ctx context.Context) error { return report.Push(ctx, f.push, rep, now()) })
+		sendTo(func(ctx context.Context) error { return report.Push(ctx, f.push, shown, now()) })
 	}
 	if f.slackFile != "" {
 		var b strings.Builder
@@ -2065,4 +2112,18 @@ func impactShort(rs []rules.Rule, replayed map[string]bool, impactFor, step time
 		}
 	}
 	return &out
+}
+
+// readRedactKey reads --redact-key's file: the key, its line's end taken
+// off, 16 bytes or more. What it holds is never said.
+func readRedactKey(path string) ([]byte, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("--redact-key: %v", err)
+	}
+	b = []byte(strings.TrimRight(string(b), "\r\n"))
+	if len(b) < verdict.RedactKeyMin {
+		return nil, fmt.Errorf("--redact-key %s: the key is %d bytes, want %d or more, such as what openssl rand -hex 32 writes", path, len(b), verdict.RedactKeyMin)
+	}
+	return b, nil
 }

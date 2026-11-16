@@ -1595,6 +1595,11 @@ func (s *Server) apiReport(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
+	if redact, _ := strconv.ParseBool(r.URL.Query().Get("redact")); redact {
+		// Every name an alias of this answer's own, for a report shown
+		// outside (lapilli verdict --redact).
+		rep = verdict.NewRedactor(nil).Report(rep)
+	}
 	if r.URL.Query().Get("format") == "csv" {
 		s.reportCSV(w, r, rep)
 		return

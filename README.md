@@ -1242,6 +1242,39 @@ it, the machine's own is named as `TZ` or `/etc/localtime` says, through
 every link. A zone file copied rather than linked has no name: its
 abbreviations are said, `CEST (+02:00) → CET (+01:00)`.
 
+## Showing a report outside
+
+To show a vendor, a community or a talk what your alerting looked like
+without its names, `--redact` gives every name in the report an alias,
+in the text, `--json`, `--markdown` and `--metrics`, and in what
+`--push` and `--slack-webhook-file` send:
+
+- rules are `rule-01`, `rule-02` and on, and their groups, teams and the
+  sources firings were copied from the same way (`group-01`, `team-01`,
+  `source-01`);
+- a label's values are aliased by the label, `service-01`, `instance-02`
+  (`label-team-01` for a label named `team`, so it isn't taken for a
+  team's alias), the same value the same alias on firings and incidents,
+  so what `--match` agreed on still agrees; label names, and
+  `severity`'s values, stay;
+- incidents are `incident-01` on, by when they started, their titles left
+  out, and those only what `--expect` holds a rule to names after them;
+- why a rule couldn't be replayed (a query, a host, the history's own
+  words), an expression a near miss quotes, and shifts naming an on-call
+  schedule are `[redacted]`, and a recording rule's name aliased
+  (`record-01`); whether a replay failed, and so the exit status, is as it
+  was.
+
+Numbers, severities, durations and times stay. Aliases are the output's
+own, numbered in an order no name decides: run it again and `rule-01` may
+be another rule. With `--redact-key FILE` (16 bytes or more, such as
+`openssl rand -hex 32` writes) a name's alias is a keyed hash of it,
+`rule-3f9a1c04e2`, the same in every output made with the key; without
+the key, it can't be worked back to the name by trying names, as an
+unkeyed hash of a short name can. `lapilli serve` gives the same with
+`/api/v1/report?from=&to=&redact=true`, its aliases that answer's own.
+What goes to stderr, the job's log, isn't redacted.
+
 ## Incidents kept elsewhere
 
 The thinner the incident log, the worse every verdict, so copy it from where

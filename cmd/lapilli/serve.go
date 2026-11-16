@@ -536,7 +536,8 @@ Agents, over MCP at /mcp:
 
 Pages: / (overview), /rules, /incidents, /firings, /settings, /runs, /teams,
 /windows, /tasks, /proposals, /outcomes. API: /api/v1/report?from=&to=
-(&format=csv: the firings a row each; docs/numbers.md),
+(&format=csv: the firings a row each, docs/numbers.md; &redact=true: every
+name an alias, as lapilli verdict --redact gives),
 /api/v1/incidents, /api/v1/rules, /api/v1/runs, /api/v1/settings,
 /api/v1/teams, /api/v1/notes, /api/v1/windows, /api/v1/tasks,
 /api/v1/comments, /api/v1/proposals, /api/v1/me, /api/v1/outcomes,
