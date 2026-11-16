@@ -102,7 +102,8 @@ rules:
 #   - {id: INC-41, title: Checkout errors, start: "2026-10-28T12:01:00+09:00", labels: {service: checkout}}
 incidents: []
 # An expression that returns something while users are hurt; its windows
-# become incidents too.
+# become incidents too. In serve mode an admin can change it in the UI too
+# (Settings, Incident criteria), and /settings.yaml gives it back as this.
 impact: ""
 # Labels a firing and an incident must agree on, such as [service].
 match: []

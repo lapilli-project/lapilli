@@ -42,6 +42,33 @@
   in `lapilli serve`, came during a deploy (`during_deploy`): enough to
   count the numbers again from the report alone.
 
+- **Incident criteria on the Settings page.** The impact signal
+  (`--impact`, a PromQL expression that returns something while users are
+  hurt) and `--impact-for` could be set only where serve started. An admin
+  sets them in the UI now, in a section of their own, as the judging
+  settings are set (started with, in effect, changed by, back to the
+  start); empty or `off` turns the signal off, and `/settings.yaml` gives
+  them as the chart's `impact` and `--impact-for`. One saved is checked
+  first: as PromQL as Lapilli reads it, 4 KB at most, `--impact-for` from
+  the step to a day, then once with Prometheus, whose parser has the last
+  word. "Try it on the last four weeks" shows, saving nothing, the windows
+  it would find and which would count, the verdict in effect and with it
+  (weeks with a record, incidents, firings judged and with no record,
+  precision, noisy rules, incidents missed), and the proposals waiting for
+  approval it would hold for a new backtest. A try reads Prometheus within
+  `--timeout` and `--max-samples`, one heavy request at a time, twelve an
+  admin an hour with saves, and the page is kept until the ledger changes.
+- **Incident sources.** The Settings page lists where incidents come from,
+  and whether each is alive, in the status colours: written in Lapilli;
+  each source a tool's job copies in through the incidents port, by its
+  ids' prefix (`PD-` PagerDuty, a Jira project's key), with when it last
+  wrote, unchanged or not, quiet after two days with nothing; the
+  incidents file and the impact signal, last read or failing with why;
+  each with how many incidents in four weeks, and the record gone quiet.
+  Not set up is said in no colour, with a link to the recipes. No token is
+  shown; the port, the token's file and the incidents file's path to an
+  admin alone. The Incidents page links to it.
+
 ### Changed
 
 - **The action installs the release it is at.** Its `version` is
@@ -52,6 +79,22 @@
   one release's: once the `uses:` line moves, nothing is installed, and
   the comment says so, until it is changed too. The release workflow
   checks that the first release `CHANGELOG.md` names is the one tagged.
+
+- **The impact signal keeps the record by the criterion it was read
+  with.** `impact_since` kept from when the runs read `--impact`, whatever
+  they read it with, so an expression changed between restarts kept the
+  record of weeks the one before read. The criterion (expression and
+  `--impact-for`) is kept beside it now: another in effect keeps no record
+  until it is read. A new one, saved in the UI or started with, is read
+  again over the last four weeks by the replica that leads, its windows in
+  place of those found from then on (decisions about them kept), those
+  weeks judged again, and the record kept by it from then; the weeks
+  before keep only the windows the one before found, as incidents. One
+  that fails to be read again is tried again later, up to a day apart. No
+  schema change; `verdict.Semantics` is unchanged. A proposal whose
+  backtest's weeks flip is held for a new backtest, as with an incident
+  written or taken away. The overview's weekly panels the digest works out
+  catch up at the next digest.
 
 ## [0.48.0] - 2026-11-16
 

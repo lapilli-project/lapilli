@@ -83,7 +83,7 @@ transaction to replace a period's firings in).
 | `catches` | each rule's first firing that caught an incident |
 | `days`, `weeks` | each rule's stones by the day and the week its firings started |
 | `runs`, `results` | what each run did; what needed Prometheus: suggestions, change reviews |
-| `settings`, `changes` | judging settings changed in the UI; who changed what, when |
+| `settings`, `changes` | judging settings and incident criteria changed in the UI; who changed what, when |
 
 Times are Unix seconds. Days and weeks are counted in `--tz`; opened in
 another zone, the ledger counts them again. The schema changes through
@@ -124,7 +124,8 @@ Every `--every` (default 1h) a run replays from the end of the last run, less
 replay starts earlier by its `for`, `keep_firing_for` and group interval,
 rounded up to 15m, 1h, 6h, 1d or 7d, so a firing's pending time is seen;
 rules that start alike are replayed together and share their requests, the
-latest first. The `--impact` query goes before them, with time of its own.
+latest first. The impact query (the criterion in effect, `--impact` or
+the UI's) goes before them, with time of its own.
 The run then, in one transaction:
 
 1. ends the alerts the ledger has as still firing that the replay saw end,
@@ -252,7 +253,8 @@ before it, one with no end taken to last an hour, as it is caught for; or the im
 in `meta`, the earliest a run read `--impact` from, with no run since that
 didn't: a run without it sets it to `none`; after an upgrade it starts
 with the first run that reads it, from that run's start, as an earlier
-lapilli kept no word of when its runs did: `verdict.Options.ImpactFrom`). A span that isn't whole weeks
+lapilli kept no word of when its runs did: `verdict.Options.ImpactFrom`;
+"The impact criterion", below). A span that isn't whole weeks
 is judged by its weeks' records, whole, and has no record only when none
 of its weeks has. What `serve` replays (a change's backtest, the try page,
 the digest's suggestions and near misses) is judged by the same weeks
@@ -398,6 +400,68 @@ the ledger again can also be changed in the UI**: `--lead`, `--match`,
 `--refire`, `--noisy-firings`, `--noisy-precision`. A change is kept with who
 made it, can be tried on the last week before it is saved, and
 `/settings.yaml` gives the changes as Helm values to commit.
+
+**The impact criterion.** `--impact` and `--impact-for` can be changed in
+the UI too, by an admin (ui.md, "Incident criteria"), though they read
+Prometheus: they decide what an incident is, the cheapest way to verdicts
+with no incident written down. They are kept in `settings` as the others
+are, the UI's over the command line's, `off` for none; settings.yaml gives
+them as the chart's `impact` and `--impact-for` in `extraArgs`.
+
+The record by the impact signal is kept by the criterion read, the
+expression and `--impact-for` (meta `impact_criterion`, beside
+`impact_since`; no schema change), so that a firing is judged by impact
+only where impact was read over its time with the criterion in effect:
+
+- In effect and read by the runs from `impact_since`, all along, it keeps
+  the record from then (`verdict.Options.ImpactFrom`). Another in effect
+  than the one the ledger has (just saved, not read yet) keeps none: the
+  weeks before weren't read with it.
+- Saved, or a new `--impact` the process was started with, the replica
+  that leads reads it again (`impactAgain`, before the runs), over the
+  last four weeks: from the Monday four weeks before the cursor's week, or
+  where the runs began, to the cursor, in one read within `--timeout` and
+  `--max-samples`. In one write (`ledger.ReadAgain`) its windows take the
+  place of the windows found from then on, keeping what people decided
+  about those they overlap, a window found before and on at the start
+  ends there, the stones are given again over the span, and
+  `impact_since` is its start: from then, the record is kept by it. The
+  weeks before keep the windows the one before found, as the incidents
+  they were when they were read, which keep the record of the weeks near
+  them as any incident does (two weeks); the signal read with the one
+  before keeps no more. One that fails is tried again an hour later, then
+  two, four, up to a day; the runs read it meanwhile from where they are,
+  keeping the record from their own start (a run that reads another
+  criterion than the runs before resets `impact_since` to its start, and
+  marks the read again due, `impact_again` `-`).
+- Turned off, the runs set `impact_since` to `none` and forget the
+  criterion, as before: no week is kept by the signal, and the windows
+  found stay, as incidents. Turned on again, it is read again over the
+  last four weeks.
+- A ledger an earlier lapilli kept, with `impact_since` and no criterion,
+  is taken to have been read with the one in effect; a new ledger's runs
+  read it from their first, and need no read again.
+
+Which weeks are kept is the same rule as before (`verdict.Record`), its
+input changed: `verdict.Semantics` isn't bumped. A proposal waiting for
+approval whose backtest's weeks flip, kept where they weren't or not
+where they were, is held until it is backtested again (`staleRecorded`,
+`staleUnrecorded`), as with an incident written or taken away; the try
+names them. The digest's results kept by week (the suggestions, the rules
+that fired as often as a noisy one with no record) are worked out by
+replaying the rules, and aren't worked out again on a save: the overview's
+weekly panels that read them catch up at the next digest, which the
+Settings page and the try say. A week with no record is shown no
+suggestion, whatever was kept for it.
+
+**Where incidents come from** is on the Settings page (ui.md, "Incident
+sources"). The incidents port keeps when each source last wrote, unchanged
+or not, by its ids' prefix (`PD-`, a Jira project's key), in meta
+`x.incidents-received` (64 sources at most, the oldest forgotten), once in
+ten minutes by a replica and aside, emptying no page kept: what tells a
+job that stopped from a tool with nothing new. The incidents file's and
+the impact signal's last reads and failures are the leader's, in its
+published status.
 
 ## Web UI, API, metrics
 
@@ -563,7 +627,9 @@ as instructions.
   `--editors` would allow; keeping one person to one name is the identity
   provider's to do ([serveops.md](serveops.md), settled 2026-11-12).
 - **Heavy requests.** A report gives 100,000 firings at most, excused or
-  not, and so do the settings tried over a week. Both take one turn at a
+  not, and so do the settings tried over a week and the incident criteria
+  tried over the last four (which read Prometheus besides, within
+  `--timeout` and `--max-samples`, twelve an admin an hour). All take one turn at a
   time, which the next waits up to 30 seconds for and then gets 503. The
   turn is held until the answer is written, with 30 seconds to write it:
   otherwise a client that doesn't read keeps one answer after another in

@@ -166,7 +166,10 @@ for at least `--impact-for` (5m), into an incident too. An error-rate SLI works
 well: the incidents nobody wrote down are often the ones no alert caught. Each
 series is looked at on its own and its windows carry its labels, so with
 `sum by (service) (...)` an incident says which services were hit; windows
-that overlap are one incident listing all of them.
+that overlap are one incident listing all of them. In `lapilli serve` an
+admin can also set `--impact` and `--impact-for` in the UI, on the Settings
+page's Incident criteria, and try them on the last four weeks first (see
+[Keep judging](#keep-judging)).
 
 **A firing catches an incident** when it starts between `--lead` (15m) before
 the incident and its end, and agrees with it on any `--match` labels both
@@ -1322,8 +1325,15 @@ write incidents down there, confirm or dismiss the windows `--impact` found,
 or say a black stone was real; the stones are given again at once, for the
 whole ledger, without asking Prometheus. The settings that only judge the
 ledger again (`--lead`, `--match`, `--refire`, the noisy thresholds) can be
-changed there and tried on the last week first; `/settings.yaml` gives the
-changes as Helm values to commit. Teams, quiet windows, reports and roles
+changed there and tried on the last week first; so can the impact signal,
+`--impact` and `--impact-for`, by an admin, under Incident criteria, tried
+on the last four weeks first: the windows it would find, and how the
+verdict would change. Saved, it is read again over the last four weeks,
+which are judged again, and keeps the record from then on, not of the
+weeks it wasn't read over. Beside it, Incident sources says where
+incidents come from (written in Lapilli, each tool a job copies them in
+from, the incidents file, the impact signal) and whether each is alive.
+`/settings.yaml` gives the changes as Helm values to commit. Teams, quiet windows, reports and roles
 can be declared in Git instead: `--config FILE` (`serve.config` in the
 chart) is YAML of them, as the UI's forms make them, which the ledger is
 kept holding as the file changes, without a restart; what it declares is

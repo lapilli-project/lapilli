@@ -141,11 +141,11 @@ rest are written in the template that draws them.
 
 | Kind | States |
 |---|---|
-| ok | a rule's `○ OK`, of a rule some of whose firings were judged; a proposal `✓ approved`, `● applied`; a task done; a rule to keep (`✓ keep`); a rule change "as predicted"; Outcomes' Runs tile, "all ran", the runs up to date; notifications, "Last sent from the outbox"; an incident caught (its "Caught" cell); the overview's "Nothing to look at now", the one empty state that says all is well (`allClear`); a change "better"; the incidents chart's caught |
-| warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Outcomes' tile, the Run history page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Outcomes' tile and note, the overview's line); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted" |
-| bad | a run's error, and the server's error banner; `--config` that can't be used at all, or that the ledger couldn't be kept to; notices given up on; the digest failed; an on-call schedule's read failed; Outcomes' Runs tile, "n failed"; a task overdue; a proposal closed as failed, and its reason; a backtest that misses incidents; would have caught while it was off; an incident missed (`✗ nothing fired`, "Nothing fired."), the missed count of the table of the weeks; a search not understood; a change "worse" |
-| info | a proposal `↻ being applied`; `✎ Proposed`; a quiet window `● active now`; the server's work (`↻`); catching up on the overview; behind on Outcomes, and its Runs tile ("all ran") while it is; a rule change "measuring", "rule written"; `⇣ Recorded only`; a task open or doing, and the overview's link to one ("task #n"); a rule to tune (`± tune`); the reason of a proposal approved or applied (it waited while its rule fired) |
-| unknown | `? No record`, the weeks' "no record" tag, the notes of weeks with no record; "–"; a backtest with no record (`no_record`); a rule none of whose firings was judged (`? No record`; `ruleRow.PerfClass`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review, and the reason of one refused; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; a rule change superseded, without a week before it, taken away or replayed again; Outcomes' Runs tile before any run |
+| ok | a rule's `○ OK`, of a rule some of whose firings were judged; a proposal `✓ approved`, `● applied`; a task done; a rule to keep (`✓ keep`); a rule change "as predicted"; Outcomes' Runs tile, "all ran", the runs up to date; notifications, "Last sent from the outbox"; an incident caught (its "Caught" cell); the overview's "Nothing to look at now", the one empty state that says all is well (`allClear`); a change "better"; the incidents chart's caught; an incident source working (`✓ working`) |
+| warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Outcomes' tile, the Run history page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Outcomes' tile and note, the overview's line); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted"; an incident source gone quiet (`⚠ quiet`), proposals a try of the incident criteria would hold |
+| bad | a run's error, and the server's error banner; `--config` that can't be used at all, or that the ledger couldn't be kept to; notices given up on; the digest failed; an on-call schedule's read failed; Outcomes' Runs tile, "n failed"; a task overdue; a proposal closed as failed, and its reason; a backtest that misses incidents; would have caught while it was off; an incident missed (`✗ nothing fired`, "Nothing fired."), the missed count of the table of the weeks; a search not understood; a change "worse"; an incident source failing (`✕ failing`, and why), the incident criteria that failed to be read again, a try that couldn't read them |
+| info | a proposal `↻ being applied`; `✎ Proposed`; a quiet window `● active now`; the server's work (`↻`); catching up on the overview; behind on Outcomes, and its Runs tile ("all ran") while it is; a rule change "measuring", "rule written"; `⇣ Recorded only`; a task open or doing, and the overview's link to one ("task #n"); a rule to tune (`± tune`); the reason of a proposal approved or applied (it waited while its rule fired); an incident source set up and not read yet (`↻ waiting`), the incident criteria waiting to be read again |
+| unknown | `? No record`, the weeks' "no record" tag, the notes of weeks with no record; "–"; a backtest with no record (`no_record`); a rule none of whose firings was judged (`? No record`; `ruleRow.PerfClass`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review, and the reason of one refused; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; a rule change superseded, without a week before it, taken away or replayed again; Outcomes' Runs tile before any run; an incident source not set up (`? not set up`), none written in four weeks; the impact signal with no Prometheus to read it from |
 | no colour | what is left to do or not found, but isn't a verdict: "No proposals yet.", "No proposal waiting for approval is stale.", every other empty state; the Cleanup page, whose names are neither well nor wrong |
 
 Three were left open, and are so: catching up is info, as Lapilli does it
@@ -1018,6 +1018,97 @@ window would be kept (what was typed put in again, escaped) and, above it:
 Preview is the form's first button, so that Enter in a field writes
 nothing.
 
+### Incident criteria
+
+A firing is judged by whether it caught an incident: one written down,
+copied in from a tool, read from the incidents file, or a window where the
+impact signal (`--impact`, a PromQL expression that returns something
+while users are hurt) returned something for at least `--impact-for`. The
+impact signal is the cheapest way to verdicts with no incident written
+down by hand, so an admin sets it on the Settings page, in a section of its
+own, "Incident criteria" (인시던트 기준), below the judging settings: the
+expression in a text area (영향 지표, the impact signal) and `--impact-for`,
+each with what serve was started with, who changed it and when, and "back
+to the start", as the judging settings are (`criteriaSettable`, kept in
+the same `settings` table). Empty, or `off`, turns it off; with no
+`--prometheus`, there is nothing to read it from, and the section says so,
+its save drawn off. The UI may change what the command line or the chart's
+`impact` value gave, as it may the judging settings: `settings.yaml` gives
+both, `impact:` and `--impact-for` among `extraArgs`, to commit.
+
+Saving one (`POST /settings/impact`, an admin's, the same site) checks it
+first, refusing with the field's own sentence: as PromQL as Lapilli reads
+it (`rules.Scope`: strings, selectors, ranges and brackets closed; Lapilli
+has no PromQL parser of its own), 4 KB at most, no character that doesn't
+show, `--impact-for` from the step to a day; then, a new expression, once
+with Prometheus, an instant query whose parser has the last word: what it
+refuses, or a Prometheus that can't be asked, saves nothing. Saved, the
+replica that leads reads it again over the last four weeks
+(`impactAgain`, below in serve.md), and judges them again; until then the
+page says it waits, or, failed, why and when it is tried again.
+
+"Try it on the last four weeks" is a GET of the same form
+(`/settings?impact-try=1&impact=…&impact-for=…#impact-tried`), an admin's
+and from this site (`Sec-Fetch-Site` neither `cross-site` nor
+`same-site`), checked as saving is, that writes nothing. Over the span
+saving would read again (from the Monday four weeks before the cursor's
+week, or where the runs began), it shows, below the form as typed:
+
+- the windows the expression finds, 50 at most, the rest counted, with
+  start, end, length and labels, and whether each would count: not when an
+  incident written down covers it ("no: written down as INC-1"), or what
+  was decided about a window found before over it holds ("no: dismissed
+  before");
+- the verdict in effect and with it, judged alike (`verdict.Judge` over
+  the span's firings, quiet windows' aside, with the incidents that keep
+  its record): weeks with a record, incidents judged against and of them
+  impact windows, firings judged and with no record, precision, noisy
+  rules, incidents missed; a measure that changes, in bold;
+- the proposals waiting for approval it would hold until they are
+  backtested again, 10 named, the rest counted: their backtest's weeks
+  would have a record where they had none, or none where they had one
+  (`staleRecorded`, `staleUnrecorded`);
+- that nothing was saved, and that, saved, the overview's weekly panels
+  the digest works out (the longer `for`s it suggests, the rules that
+  fired as often as a noisy one with no record) catch up at the next
+  digest: they are worked out by replaying the rules, and aren't worked
+  out again on a save.
+
+What it couldn't read (Prometheus's error, a check's) is said in the
+section, the form kept as typed. A try reads Prometheus over five weeks at
+most, within `--timeout` and `--max-samples`, in the heavy turn (one at a
+time, 100,000 firings at most), twelve an admin an hour with the saves
+that check a new expression (`impactTries`); the page is kept until the
+ledger changes, so asking for it again reads nothing again.
+
+### Incident sources
+
+Below it, "Incident sources" (인시던트 출처): where the incidents firings
+are judged against come from, a row each, with its state in the status
+colours (and its word), when it last wrote or was read, how many incidents
+it gave in four weeks, and what it is:
+
+- Written in Lapilli: on the Incidents page, through the API, an impact
+  window confirmed, a firing said to be real; the latest, by its start;
+  `– none in four weeks` (unknown) when none;
+- each source a tool's job copies in through the incidents port, by its
+  ids' prefix as the recipes give them (`PD-` PagerDuty, `GH-` GitHub, a
+  Jira project's key): when it last wrote, unchanged or not
+  (`ledger.NoteReceived`, kept aside once in ten minutes by a replica),
+  `⚠ quiet` after two days with nothing ("is its job still running?");
+  a ledger from before shows when one of its incidents last changed. Set
+  up and with nothing yet, `↻ waiting`; not set up, `? not set up`, with
+  a link to the recipes;
+- the incidents file: last read, or `✕ failing` with why;
+- the impact signal: last read by a run (or read again), the windows found
+  in four weeks, or failing with Prometheus's error; off, `? not set up`.
+
+The record gone quiet (no incident written down in two weeks, Outcomes'
+rule) is said above the table, warn. No token is shown; the port and the
+token's file, and the incidents file's path, to an admin alone. The
+Incidents page links to the section. What the replica that leads saw (last
+reads, failures) is in its published status, for the others' pages.
+
 ### The Administration page
 
 `/manage`, Administration: a card for each page of the Administration
@@ -1563,7 +1654,9 @@ the next try alone, Postgres read and sorted them all), nothing kept for
 it. A notice sent is written
 aside, emptying no page kept, so these two
 pages are worked out for each request (`freshPage`, `Cache-Control:
-no-store`), the Settings page but when it tries settings on the last week.
+no-store`), the Settings page but when it tries settings on the last week,
+or the incident criteria on the last four: a try is kept as any page is,
+so that asking for it again reads Prometheus no more.
 
 ### The firings, a day with some
 
