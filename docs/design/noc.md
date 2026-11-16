@@ -222,7 +222,8 @@ no incident on in it or in the two weeks before it, and no `--impact` read
 over it, says `no_record: true`.
 `off_hours` and `asleep` are null with
 no hours given, a median null with nothing caught. `TestSummaryAPI` holds
-the fields by name.
+the fields by name. [docs/numbers.md](../numbers.md) defines each number and
+counts the week's again from `/api/v1/report` over the same week.
 
 **Cost.** It reads the weekly tallies, the hours each week came to (kept
 per week as the pages keep them), the weeks' incidents, each set apart by

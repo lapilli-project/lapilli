@@ -1767,5 +1767,7 @@
  "overdue": "기한 지남",
  "due %s, overdue": "기한 %s (지남)",
  "%s, better": "%s, 좋아짐",
- "%s, worse": "%s, 나빠짐"
+ "%s, worse": "%s, 나빠짐",
+ "format %q: want json or csv": "format %q: json이나 csv를 넣어 주세요",
+ "format=csv is a row for each firing: it doesn't go with firings=false": "format=csv는 발화마다 한 줄이에요: firings=false와 함께 쓸 수 없어요"
 }

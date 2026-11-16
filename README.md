@@ -85,6 +85,9 @@ week and the stones are counted.
 
 ## How it judges
 
+Each number below is defined as the code counts it, with how to count it
+again yourself from the report, in [docs/numbers.md](docs/numbers.md).
+
 **Firings** come from one of three places:
 
 - `--rules FILE`: replay alert rules against history, so it works on rules you
@@ -444,8 +447,13 @@ lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 --i
   --metrics > lapilli.prom.tmp && mv lapilli.prom.tmp lapilli.prom
 ```
 
-`--json` gives the whole report, every firing and its stone included.
-`--metrics` gives `lapilli_rule_firings`, `lapilli_rule_caught`,
+`--json` gives the whole report, every firing and its stone included;
+`--csv` the firings alone, a row each (rule, severity, labels, start, end,
+stone, the incidents it caught, re-fired), for a spreadsheet, a cell that
+starts with `=`, `+`, `-` or `@` written with `'` before it so it isn't
+run. [docs/numbers.md](docs/numbers.md) defines every number, says how to
+count each again from `--json` with jq, and lists the fields, columns and
+metrics that keep their names. `--metrics` gives `lapilli_rule_firings`, `lapilli_rule_caught`,
 `lapilli_rule_nothing`, `lapilli_rule_refired`, `lapilli_rule_incidents`,
 `lapilli_rule_incidents_first`, `lapilli_rule_incidents_alone` (by `rule`),
 `lapilli_rule_nothing_by_hours` (by `rule` and `hours`: `asleep`,
@@ -1125,6 +1133,11 @@ the tenants and a `--gcp-project`.
 
 What a tool reads is stable:
 
+- The report of `--json` and `/api/v1/report`, the columns of `--csv`, and
+  the names and labels of `--metrics` and `/metrics`: those
+  [docs/numbers.md](docs/numbers.md) lists keep their names and meaning; a
+  minor release that must change one says so in the changelog and writes
+  the old beside the new for a release first.
 - The first line of `--markdown` is a link reference definition, which no
   host shows, holding the summary as JSON; `--json` gives the same object
   as `"summary"`, beside the rest of the report, whose fields are as they
@@ -1323,7 +1336,9 @@ in a row, so one read half written changes nothing. An admin's
 tasks,
 comments and proposals of rules deleted or renamed, to move to the rule as
 it is named now, or delete. The API gives `lapilli verdict --json`'s
-report for any period (`/api/v1/report?from=&to=`) and takes incidents
+report for any period (`/api/v1/report?from=&to=`), its firings as CSV
+(`&format=csv`, those quiet windows excused and each rule's team among
+them), and takes incidents
 (`/api/v1/incidents`); `/metrics` gives `--metrics` over the last seven days,
 so Prometheus scrapes it instead of a Pushgateway, and the chart has a
 Grafana dashboard of them.

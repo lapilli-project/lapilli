@@ -91,6 +91,16 @@ type Judged struct {
 	White     bool     `json:"white"`
 	Incidents []string `json:"incidents,omitempty"`
 	NoRecord  bool     `json:"no_record,omitempty"`
+	// Refired says it came within Options.RefireWithin of the same alert
+	// last resolving: one of its rule's Refired.
+	Refired bool `json:"refired,omitempty"`
+	// DuringDeploy says, in lapilli serve, it came during a deploy of what
+	// it is about: one of its rule's DuringDeploys.
+	DuringDeploy bool `json:"during_deploy,omitempty"`
+	// Excused is, in lapilli serve's CSV, a firing a quiet window excused:
+	// neither white nor black, and in none of the numbers. A report's
+	// Firings leave such firings out.
+	Excused bool `json:"-"`
 }
 
 // RuleResult is one rule's stones.
@@ -263,12 +273,48 @@ type Report struct {
 	// replayed that fired as often as a noisy rule, and what their firings
 	// were: the most firings first.
 	Unrecorded []Unrecorded `json:"unrecorded,omitempty"`
+	// Settings are what judged it, for anyone counting its numbers again
+	// (docs/numbers.md).
+	Settings *Settings `json:"settings,omitempty"`
 	// Unreplayed are the rules that couldn't be replayed, as
 	// UnreplayedRules gives them, set by the run that replayed them: in
 	// lapilli verdict's --json, and named at the top of its text. A report
 	// read back from lapilli serve's ledger has none: its numbers keep
 	// what a rule fired before its last replay failed.
 	Unreplayed []Unreplayed `json:"unreplayed,omitempty"`
+}
+
+// Settings are what a report's firings were judged by, as Options has
+// them: enough to judge them again from the report alone
+// (docs/numbers.md).
+type Settings struct {
+	// Lead is how long before an incident a firing still catches it.
+	Lead time.Duration `json:"lead_ns"`
+	// Match are the labels a firing and an incident must agree on.
+	Match []string `json:"match"`
+	// Refire is how soon after the same alert resolved a firing re-fired.
+	Refire time.Duration `json:"refire_ns"`
+	// UnknownLength is how long an incident with no end is taken to last.
+	UnknownLength time.Duration `json:"unknown_length_ns"`
+	// RecordLookback is how long before a firing an incident keeps its
+	// record (RecordLookback).
+	RecordLookback time.Duration `json:"record_lookback_ns"`
+	// ImpactFrom is from when an impact signal was read, all of it: a
+	// firing from then has a record. Zero for none.
+	ImpactFrom time.Time `json:"impact_from,omitzero"`
+	// ByWeek says a firing's record is its week's (lapilli serve), not its
+	// own time's.
+	ByWeek bool `json:"record_by_week,omitempty"`
+}
+
+// Settings are what o judges by, as a report says them.
+func (o Options) Settings() *Settings {
+	match := o.Match
+	if match == nil {
+		match = []string{}
+	}
+	return &Settings{Lead: o.Lead, Match: match, Refire: o.RefireWithin, UnknownLength: o.UnknownLen,
+		RecordLookback: RecordLookback, ImpactFrom: o.ImpactFrom, ByWeek: o.RecordWeek != nil}
 }
 
 // Suggestion is a noisy rule replayed with a longer "for": it would have
@@ -290,7 +336,7 @@ type Suggestion struct {
 func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o Options) *Report {
 	at := o.noisyAt()
 	rep := &Report{From: o.From, To: o.To, NoisyAt: at, Rules: []RuleResult{}, Incidents: []IncidentResult{}, Firings: []Judged{}, SomeRules: o.SomeRules,
-		Hours: o.Hours.Used()}
+		Hours: o.Hours.Used(), Settings: o.Settings()}
 	rec := RecordOf(incs, o)
 	rep.NoRecord = !rec.JudgesAny(o.From, o.To)
 	severities := map[string][]string{}
@@ -376,6 +422,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		k := f.Rule + "\x00" + labelKey(f.Labels)
 		if Refired(last[k], f.Start, o) {
 			r.Refired++
+			j.Refired = true
 		}
 		last[k] = f.End
 		rep.Firings = append(rep.Firings, j)

@@ -278,6 +278,12 @@ Judging:
 
 Output:
   --json              the whole report, every firing included
+  --csv               the report's firings, a row each, as CSV: rule,
+                      severity, labels, start, end, stone, the incidents
+                      it caught, re-fired. A rule's name or severity that
+                      starts with =, +, - or @ is written with ' before
+                      it, so a spreadsheet doesn't run it. docs/numbers.md
+                      defines each column and number
   --metrics           Prometheus metrics, for node_exporter's textfile
                       collector or Pushgateway
   --tz ZONE           show times in this zone, an IANA name such as
@@ -388,6 +394,7 @@ type verdictFlags struct {
 	ruleRE              *regexp.Regexp
 	late                rules.Lateness
 	json, metrics       bool
+	csv                 bool
 	markdown            bool
 	loc                 *time.Location
 	timeout             time.Duration
@@ -463,6 +470,9 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			continue
 		case "--json":
 			f.json = true
+			continue
+		case "--csv":
+			f.csv = true
 			continue
 		case "--markdown":
 			f.markdown = true
@@ -843,7 +853,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			flag string
 		}{{f.firings != "", "--firings"}, {len(f.compare) > 0, "--compare"}, {f.changedOnly, "--changed-only"},
 			{f.expect != "" || f.expectBefore != "" || f.failExpect || f.expectRequired, "--expect, --expect-before, --fail-expectations or --expect-required: they hold a change to the rules, which --compare backtests"},
-			{f.json, "--json"}, {f.markdown, "--markdown"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
+			{f.json, "--json"}, {f.csv, "--csv: ask /api/v1/report?format=csv"}, {f.markdown, "--markdown"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"},
 			{f.progressSet, "--progress"}, {f.failUnreplayed, "--fail-unreplayed"}} {
@@ -899,6 +909,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, validRuler(f)
 	case f.json && f.metrics:
 		return nil, errors.New("--json and --metrics don't go together")
+	case f.csv && (f.json || f.metrics || f.markdown):
+		return nil, errors.New("--csv doesn't go with --json, --metrics or --markdown: give one")
+	case f.csv && (len(f.compare) > 0 || f.checkReplay):
+		return nil, errors.New("--csv writes a verdict's firings: it doesn't go with --compare or --check-replay")
 	case len(f.checkSeries) > 0 && !f.checkReplay:
 		return nil, errors.New("--check-series goes with --check-replay")
 	case f.checkFirings != "" && !f.checkReplay:
@@ -973,6 +987,8 @@ func validContent(f *verdictFlags, sources int) error {
 		return errors.New("--check-content checks the rules given: leave out --compare")
 	case f.markdown:
 		return errors.New("--markdown writes --compare's report, for a pull request: it doesn't go with --check-content")
+	case f.csv:
+		return errors.New("--csv writes a verdict's firings: it doesn't go with --check-content")
 	case f.metrics || f.push != "" || f.slackFile != "":
 		return errors.New("--check-content is for you to read, or --json: it doesn't go with --metrics, --push or --slack-webhook-file")
 	case f.grafanaTk != "" && f.grafana == "":
@@ -1309,12 +1325,14 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			rep.Credit(func(rule string) bool { return names[rule] })
 		}
 		// Rules replayed as one version can be replayed again with a
-		// longer "for"; the metrics alone don't show suggestions.
-		if len(versions) == 1 && !f.metrics {
+		// longer "for"; the metrics and the CSV alone don't show
+		// suggestions, near misses or what unrecorded firings were.
+		brief := f.metrics || f.csv
+		if len(versions) == 1 && !brief {
 			rep.Suggestions = source.Suggest(ctx, h, versions[0].Rules, rep, incs, f.opts, f.step, nil)
 		}
 		// Each incident nothing caught, against the rules as they stood then.
-		if !f.metrics {
+		if !brief {
 			var done bool
 			var err error
 			rep.NearMisses, done, err = source.NearMisses(ctx, h, versions, rep, incs, f.opts, f.step, f.parallel, nil)
@@ -1325,7 +1343,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		}
 		// With no record, what the firings of the rules that fired most were:
 		// how many went well past their bound, and from which alerts.
-		if !f.metrics && rep.Unjudged > 0 && len(versions) > 0 {
+		if !brief && rep.Unjudged > 0 && len(versions) > 0 {
 			var err error
 			if rep.Unrecorded, err = source.Unrecorded(ctx, h, versions, rep, source.Judged(rep.Firings), f.step); err != nil && ctx.Err() == nil {
 				fmt.Fprintf(stderr, "lapilli verdict: looking at the firings with no record to judge them by: %v\n", err)
@@ -1355,6 +1373,8 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		err = verdict.CompareMarkdown(stdout, cmp, f.loc)
 	case f.json:
 		err = verdict.JSON(stdout, rep)
+	case f.csv:
+		err = verdict.CSV(stdout, rep, nil, nil)
 	case f.metrics:
 		err = verdict.Prometheus(stdout, rep, now())
 	default:

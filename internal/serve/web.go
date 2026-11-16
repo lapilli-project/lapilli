@@ -1503,6 +1503,14 @@ func (s *Server) period(r *http.Request, longest time.Duration) (time.Time, time
 // doesn't read can't keep one answer after another in memory. It isn't
 // kept with the pages: it is too big to.
 func (s *Server) report(w http.ResponseWriter, r *http.Request) {
+	switch format := r.URL.Query().Get("format"); {
+	case format != "" && format != "json" && format != "csv":
+		s.oops(w, r, bad("format %q: want json or csv", format))
+		return
+	case format == "csv" && r.URL.Query().Get("firings") == "false":
+		s.oops(w, r, bad("format=csv is a row for each firing: it doesn't go with firings=false"))
+		return
+	}
 	if r.URL.Query().Get("firings") == "false" {
 		// Up to 31 days, the firings are read again to count them by the
 		// hours they came in: one such report at a time, as with firings.
@@ -1573,7 +1581,38 @@ func (s *Server) apiReport(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
+	if r.URL.Query().Get("format") == "csv" {
+		s.reportCSV(w, r, rep)
+		return
+	}
 	writeJSON(w, rep)
+}
+
+// reportCSV writes a report's firings as CSV (docs/numbers.md): with the
+// firings quiet windows excused, which the report leaves out, and each
+// rule's team. Under the report's turn and bounds: heavyTurn counted the
+// excused firings too.
+func (s *Server) reportCSV(w http.ResponseWriter, r *http.Request, rep *verdict.Report) {
+	ctx := r.Context()
+	own, err := s.owners(ctx)
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	fs, err := s.l.Firings(ctx, ledger.FiringQuery{From: rep.From, To: rep.To, Excused: true})
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	excused := make([]verdict.Judged, 0, len(fs))
+	for _, f := range fs {
+		excused = append(excused, verdict.Judged{Firing: f.Firing, Refired: f.Refired, DuringDeploy: f.Deploy})
+	}
+	// Written as it is made, as the JSON is: what fails past the first
+	// row is a client gone, or the writing's time up.
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="lapilli-firings.csv"`)
+	verdict.CSV(w, rep, excused, own.teamOf)
 }
 
 // apiIncident is an incident as the API gives and takes it.

@@ -104,8 +104,15 @@ func (s *Server) ledgerReportFor(ctx context.Context, from, to time.Time, o verd
 	sc := own.schedules(o.Hours)
 	o.Hours = nil // counted below
 	rep, err := s.l.ReportFor(ctx, from, to, o, firings, teamKeeps(own, team))
-	if err != nil || sc.none() || to.Sub(from) > ledger.HoursLongest {
-		return rep, err
+	if err != nil {
+		return nil, err
+	}
+	// What judged it, for a reader counting it again (docs/numbers.md): by
+	// the ledger's weeks.
+	rep.Settings = o.Settings()
+	rep.Settings.ByWeek = true
+	if sc.none() || to.Sub(from) > ledger.HoursLongest {
+		return rep, nil
 	}
 	if err := s.l.CountHours(ctx, rep.Rules, from, to, sc.of); err != nil {
 		return nil, err

@@ -14,6 +14,34 @@
   have caught or missed with no incident written down. The action's
   `args`, split at spaces, couldn't hold such an expression.
 
+- **The numbers, defined, and counted again.** docs/numbers.md says what
+  each number is as the code counts it (a stone, no record and its two
+  weeks, precision, noisy, re-fired, an incident missed or caught only by
+  noisy rules, impact windows, lead, the critical share caught, firings
+  during deploys), and gives jq that counts each again from `lapilli
+  verdict --json` or `/api/v1/report`, and `/api/v1/summary`'s from the
+  report of its week. A test runs every one of them on a report and holds
+  it to the report's own numbers.
+- **What keeps its name.** docs/numbers.md lists the report's fields, the
+  CSV's columns and the metrics, with their labels, that keep their names
+  and meaning, and how one is changed when it must be: in a minor release,
+  said here, the old written beside the new for a release first. Tests
+  hold each (`TestReportFieldsStable`, `TestMetricsStable`,
+  `TestCSVColumns`).
+- **`lapilli verdict --csv` and `/api/v1/report?format=csv`.** The firings
+  a row each: rule, severity, team, labels, start, end, stone, no record,
+  the incidents caught, re-fired, during a deploy, excused (the CSV of
+  `lapilli serve` has the firings quiet windows excused, which the JSON
+  leaves out). A cell from a rule's name, a severity or a team that starts
+  with `=`, `+`, `-`, `@`, a tab or a carriage return is written with `'`
+  before it, so a spreadsheet doesn't run it. The API's bounds hold: 31
+  days, one such report at a time.
+- **The report says what judged it.** `settings` (`lead_ns`, `match`,
+  `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`,
+  `record_by_week`), and each firing whether it re-fired (`refired`) and,
+  in `lapilli serve`, came during a deploy (`during_deploy`): enough to
+  count the numbers again from the report alone.
+
 ### Changed
 
 - **The action installs the release it is at.** Its `version` is

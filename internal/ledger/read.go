@@ -467,7 +467,8 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 		if f.Excused {
 			continue // counted in the rule's Excused, not judged
 		}
-		j := verdict.Judged{Firing: f.Firing, White: f.White, NoRecord: !f.White && !l.weekKept(rec, Week(l.day(f.Start.Unix())))}
+		j := verdict.Judged{Firing: f.Firing, White: f.White, NoRecord: !f.White && !l.weekKept(rec, Week(l.day(f.Start.Unix()))),
+			Refired: f.Refired, DuringDeploy: f.Deploy}
 		for _, in := range near {
 			if verdict.Catches(f.Firing, in, o) {
 				j.Incidents = append(j.Incidents, in.ID)
