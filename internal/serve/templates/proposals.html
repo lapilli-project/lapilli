@@ -145,27 +145,33 @@
 <h2>{{t "Proposals"}}</h2>
 {{template "proposallist" (on $ .Proposals)}}
 </section>
-{{if not $ro}}<section class="card" id="propose">
+{{- /* With a proposal not finished with, the ledger takes no other for the
+rule (ledger.ErrProposed): each form is drawn as it is, disabled, for
+everyone, its button tied to why, with a link to the one that waits. */}}
+{{$open := .OpenProposal}}{{$why := "this rule has a proposal not yet finished with: one at a time"}}
+{{if or (not $ro) $open}}<section class="card" id="propose">
 <h2>{{t "Propose a change"}}</h2>
+{{with $open}}<p id="propose-open" class="why">{{t "this rule has a proposal not yet finished with: one at a time"}} <a href="{{$.Link (printf "/proposals/%d" .)}}">#{{.}}</a></p>{{end}}
 <form method="post" action="/proposals" class="grid">
   <input type="hidden" name="rule" value="{{.Name}}"><input type="hidden" name="kind" value="for">{{with .SuggestedFor}}<input type="hidden" name="from" value="suggestion">{{end}}
-  <label>{{t "A new for"}} <input name="for" required maxlength="20" value="{{.SuggestedFor}}" placeholder="15m"{{if .EventWindow}} aria-describedby="for-window"{{end}}></label>
+  <label>{{t "A new for"}} <input name="for" required maxlength="20" value="{{.SuggestedFor}}" placeholder="15m"{{if .EventWindow}} aria-describedby="for-window"{{end}}{{if $open}} disabled{{end}}></label>
   {{with .EventWindow}}<p class="quiet" id="for-window">{{t "Its condition counts events over %s: with a for that long or longer, one event alone can never fire it." .}}</p>{{end}}
-  <button>{{t "Propose it, with its backtest"}}</button>
+  {{if $open}}{{template "off" (again (offWhy "Propose it, with its backtest" "propose-open" $why))}}{{else}}<button>{{t "Propose it, with its backtest"}}</button>{{end}}
 </form>
 {{range .Thresholds}}<form method="post" action="/proposals" class="grid">
   <input type="hidden" name="rule" value="{{$.View.Name}}"><input type="hidden" name="kind" value="threshold"><input type="hidden" name="bound" value="{{.At}}">{{with .Incident}}<input type="hidden" name="from" value="near miss"><input type="hidden" name="incident" value="{{.}}">{{end}}
-  <label>{{t "Threshold %s %s, instead" .Op .Now}} <input name="value" required maxlength="40" value="{{.Suggested}}"></label>
-  <button>{{t "Propose it, with its backtest"}}</button>
+  <label>{{t "Threshold %s %s, instead" .Op .Now}} <input name="value" required maxlength="40" value="{{.Suggested}}"{{if $open}} disabled{{end}}></label>
+  {{if $open}}{{template "off" (again (offWhy "Propose it, with its backtest" "propose-open" $why))}}{{else}}<button>{{t "Propose it, with its backtest"}}</button>{{end}}
 </form>{{end}}
 {{if .SaysKeys}}<form method="post" action="/proposals" class="grid">
   <input type="hidden" name="rule" value="{{.Name}}"><input type="hidden" name="kind" value="says">
-  <label>{{t "What it says"}} <select name="annotation">{{range .SaysKeys}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
-  <label>{{t "Written as"}} <textarea name="text" rows="3" maxlength="4096"></textarea></label>
-  <label><input type="checkbox" name="unset" value="1"> {{t "take it out instead"}}</label>
-  <button>{{t "Propose it, for a person to approve"}}</button>
+  <label>{{t "What it says"}} <select name="annotation"{{if $open}} disabled{{end}}>{{range .SaysKeys}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+  <label>{{t "Written as"}} <textarea name="text" rows="3" maxlength="4096"{{if $open}} disabled{{end}}></textarea></label>
+  <label><input type="checkbox" name="unset" value="1"{{if $open}} disabled{{end}}> {{t "take it out instead"}}</label>
+  {{if $open}}{{template "off" (again (offWhy "Propose it, for a person to approve" "propose-open" $why))}}{{else}}<button>{{t "Propose it, for a person to approve"}}</button>{{end}}
 </form>{{end}}
-<form method="post" action="/proposals"><input type="hidden" name="rule" value="{{.Name}}">{{if .Spare}}<input type="hidden" name="from" value="spare">{{end}}<input type="hidden" name="kind" value="{{.RetireKind}}"><button class="quiet-button">{{if eq .RetireKind "disable"}}{{t "Propose turning it off (deleted four weeks later, approved again)"}}{{else}}{{t "Propose deleting it"}}{{end}}</button></form>
+{{$retire := "Propose deleting it"}}{{if eq .RetireKind "disable"}}{{$retire = "Propose turning it off (deleted four weeks later, approved again)"}}{{end}}
+{{if $open}}<p>{{template "off" (quiet (again (offWhy $retire "propose-open" $why)))}}</p>{{else}}<form method="post" action="/proposals"><input type="hidden" name="rule" value="{{.Name}}">{{if .Spare}}<input type="hidden" name="from" value="spare">{{end}}<input type="hidden" name="kind" value="{{.RetireKind}}"><button class="quiet-button">{{t $retire}}</button></form>{{end}}
 </section>{{else}}<section class="card" id="propose">
 <h2>{{t "Propose a change"}}</h2>
 <p>{{template "off" (offOf $ "Propose a change" "editor" "propose-why")}}</p>

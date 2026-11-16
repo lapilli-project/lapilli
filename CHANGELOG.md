@@ -30,6 +30,12 @@
   offered its suggested `for` while the rule had a proposal not finished
   with, which is refused: one a rule at a time. The button is disabled
   then, with why and a link to the one that waits.
+- **The rule's other forms with a proposal waiting.** So are the forms
+  that would be refused the same way: on the Proposals tab a new `for`, a
+  threshold, what it says and retiring it, and on the summary a fix to
+  what it says. Each stays drawn as it is, its fields and button
+  disabled, with why said once above them and a link to the one that
+  waits, for an editor and a viewer alike.
 - **A checkbox apart from its words.** In a form of fields a checkbox
   stood on a line of its own, centred over its words ("take it out
   instead", a report's sections, places and "On"); it is on their line

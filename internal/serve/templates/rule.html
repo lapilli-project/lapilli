@@ -199,10 +199,10 @@ lands here, and is shown the way to it. */}}
 </dl>{{end}}
 {{if .Problems}}<ul>{{range .Problems}}<li>{{with .Outlasts}}{{t "Its for (%s) is as long as the %s its condition counts over, or longer: one event alone can never fire it; only events that keep coming for %s will." (dur .For) (dur .Window) (dur .For)}}{{else}}{{t .Key}}{{with .Detail}}: <code>{{.}}</code>{{end}}{{end}}{{if eq .Class "measured"}} <span class="quiet">({{t "from what it fired"}})</span>{{end}}</li>{{end}}</ul>
 {{else}}<p>{{t "Nothing to fix in what it says, as far as can be told."}}</p>{{end}}
-{{if not $.Status.ReadOnly}}{{range $v.SaysForms}}<form method="post" action="/proposals" class="grid">
+{{$open := $v.OpenProposal}}{{if and $v.SaysForms (or (not $.Status.ReadOnly) $open)}}{{with $open}}<p id="says-open" class="why">{{t "this rule has a proposal not yet finished with: one at a time"}} <a href="{{$.Link (printf "/proposals/%d" .)}}">#{{.}}</a></p>{{end}}{{range $v.SaysForms}}<form method="post" action="/proposals" class="grid">
   <input type="hidden" name="rule" value="{{$v.Name}}"><input type="hidden" name="kind" value="says"><input type="hidden" name="annotation" value="{{.Annotation}}"><input type="hidden" name="check" value="{{.Check}}">
-  <label>{{t .Label}} <input name="text" required maxlength="{{if eq .Annotation "summary"}}4096{{else}}2048{{end}}"{{if ne .Annotation "summary"}} type="url" placeholder="https://"{{end}}></label>
-  <button>{{t "Propose it, for a person to approve"}}</button>
+  <label>{{t .Label}} <input name="text" required maxlength="{{if eq .Annotation "summary"}}4096{{else}}2048{{end}}"{{if ne .Annotation "summary"}} type="url" placeholder="https://"{{end}}{{if $open}} disabled{{end}}></label>
+  {{if $open}}{{template "off" (again (offWhy "Propose it, for a person to approve" "says-open" "this rule has a proposal not yet finished with: one at a time"))}}{{else}}<button>{{t "Propose it, for a person to approve"}}</button>{{end}}
 </form>{{end}}{{else if $v.SaysForms}}<p>{{template "off" (offOf $ "Propose a fix" "editor" "says-why")}}</p>{{end}}
 {{with .Unchecked}}<p class="quiet">{{t "Its notification templates weren't checked: %s." (t .)}}</p>{{end}}
 {{if .Guesses}}<p class="quiet">{{t "Guesses, which may be wrong:"}}</p>
