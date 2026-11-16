@@ -78,25 +78,33 @@ text colour (`--ok`), a wash (`--ok-wash`) and a line (`--ok-line`).
 |---|---|---|---|---|
 | `ok` | fine, done, as predicted | `#1b6a4c`, `#e3f1e9`, `#3f9068` | `#86d4ac`, `#1d332a`, `#468a6a` | ✓ |
 | `warn` | needs a person's look: noisy, stale, waiting for approval, going nowhere | `#8a5a00`, `#f8eed5`, `#ad7f22` | `#e6b450`, `#3a311d`, `#a07a2c` | ⚠︎ |
-| `bad` | failed, missed, overdue, given up | `#a3271b`, `#f8e3df`, `#c65b4f` | `#ef8a7e`, `#3d2422`, `#ba645a` | ✕ (✗ for missed, as before) |
+| `bad` | failed, missed, overdue, given up | `#a3271b`, `#fbebe8`, `#c65b4f` | `#ef8a7e`, `#3d2422`, `#ba645a` | ✕ (✗ for missed, as before) |
 | `info` | under way, or in effect now | `--on-blue`, `--tint-blue`, `#6389be` | `--on-blue`, `--tint-blue`, `#5b7ea8` | ↻ under way, ● in effect |
 | `unknown` | not known: no record, not judged | `--dim`, `--panel`, `--line-ui` | the same | ? or – |
 
 The ok green is a cool one, a teal-green as Argo CD's, told apart from
 the olive of the accent. Each text colour is 4.5:1 or more on its wash,
-the card, the background and the panel; ink is 4.5:1 or more on each wash,
-as a notice's body is ink; each line is 3:1 or more on the card, the
-background and its wash. `TestContrast` holds every one of these pairs, in
-light and dark, and resolves a token that names another (`var(--x)`), so
-a change to the palette that breaks one fails.
+the card, the background and the panel; ink, dim and the accent are 4.5:1
+or more on each wash, as a notice's body is ink, its quiet words dim and
+its links olive; each line, and a link's underline (`--line-ui`), is 3:1
+or more on the card, the background and the wash. `TestContrast` holds
+every one of these pairs, in light and dark, and resolves a token that
+names another (`var(--x)`), so a change to the palette that breaks one
+fails.
 
 `--better` and `--worse` are `--ok` and `--bad`, by those names still (a
 diff's `+` and `−` lines are them). The incidents chart's fills
 (`--viz-good`, `--viz-warn`, `--viz-bad`: caught, only noisy rules,
-missed) are the kinds' hues as chart fills, dark mode its own: 3:1 or more
-on the card, and 8 or more apart (ΔE, OKLab) under protanopia and
-deuteranopia, checked with the dataviz validator; the legend and the table
-below the chart say them too.
+missed) are the kinds' hues as chart fills, dark mode its own: light
+`#198f68`, `#ae8809`, `#bc1523`, 3.95, 3.23 and 6.24:1 on the card; dark
+`#2bab81`, `#c38822`, `#d14747`, 5.02, 4.76 and 3.26:1. Every pair of them
+is 8 or more apart (ΔE in OKLab, ×100) under protanopia and deuteranopia
+as Machado, Oliveira and Fernandes (2009) simulate them at full severity,
+the closest 8.5 in each mode; caught and missed are apart in lightness
+too (OKLab L 0.58 and 0.51 in light, 0.66 and 0.59 in dark), so that they
+differ for those who see neither red nor green. `TestChartFillsApart`
+works these out from the stylesheet, as the dataviz validator does; the
+legend and the table below the chart say them too.
 
 ### Where a kind is drawn
 
@@ -107,7 +115,7 @@ it is on draws them:
 
 - **A word, a cell, a sign**: the text colour (an overdue date, a run's
   error, the missed count in the table of the weeks, an incident's "Caught"
-  cell, a tile's number).
+  cell, a tile's number, the overview's "Nothing to look at now").
 - **A badge or a pill** (`.badge`, `.pill`): the text, the wash, and the
   line as its edge, its sign in its text. The shape is the badges' as
   before.
@@ -133,11 +141,12 @@ rest are written in the template that draws them.
 
 | Kind | States |
 |---|---|
-| ok | a rule's `○ OK`; a proposal `✓ approved`, `● applied`; a task done; a rule to keep (`✓ keep`); a rule change "as predicted"; Outcomes' Runs, "all ran"; notifications, "Last sent from the outbox"; an incident caught (its "Caught" cell); the overview's "Nothing to look at now"; a change "better"; the incidents chart's caught |
+| ok | a rule's `○ OK`, of a rule some of whose firings were judged; a proposal `✓ approved`, `● applied`; a task done; a rule to keep (`✓ keep`); a rule change "as predicted"; Outcomes' Runs, "all ran", the runs up to date; notifications, "Last sent from the outbox"; an incident caught (its "Caught" cell); the overview's "Nothing to look at now", the one empty state that says all is well (`allClear`); a change "better"; the incidents chart's caught |
 | warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Outcomes' tile, the Runs page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Outcomes' tile and note, the overview's line); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted" |
 | bad | a run's error, and the server's error banner; `--config` that can't be used at all, or that the ledger couldn't be kept to; notices given up on; the digest failed; an on-call schedule's read failed; Outcomes' Runs, "n failed"; a task overdue; a proposal closed as failed, and its reason; a backtest that misses incidents; would have caught while it was off; an incident missed (`✗ nothing fired`, "Nothing fired."), the missed count of the table of the weeks; a search not understood; a change "worse" |
-| info | a proposal `↻ being applied`; `✎ Proposed`; a quiet window `● active now`; the server's work (`↻`); catching up, and behind, on Outcomes; a rule change "measuring", "rule written"; `⇣ Recorded only`; a task open or doing; a rule to tune (`± tune`); an approved proposal's reason (it waits while its rule fires) |
-| unknown | `? No record`, the weeks' "no record" tag, the notes of weeks with no record; "–"; a backtest with no record (`no_record`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; orphans; a rule change superseded, without a week before it, taken away or replayed again |
+| info | a proposal `↻ being applied`; `✎ Proposed`; a quiet window `● active now`; the server's work (`↻`); catching up on the overview; behind on Outcomes, and its Runs tile ("all ran") while it is; a rule change "measuring", "rule written"; `⇣ Recorded only`; a task open or doing, and the overview's link to one ("task #n"); a rule to tune (`± tune`); the reason of a proposal approved or applied (it waited while its rule fired) |
+| unknown | `? No record`, the weeks' "no record" tag, the notes of weeks with no record; "–"; a backtest with no record (`no_record`); a rule none of whose firings was judged, whatever its badge says (`○ OK` too: `ruleRow.PerfClass`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review, and the reason of one refused; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; a rule change superseded, without a week before it, taken away or replayed again; Outcomes' Runs before any run |
+| no colour | what is left to do or not found, but isn't a verdict: "No proposals yet.", "No proposal waiting for approval is stale.", every other empty state; the Orphans page, whose names are neither well nor wrong |
 
 Three were left open, and are so: catching up is info, as Lapilli does it
 by itself and nothing is for a person to do (behind, on Outcomes, the
@@ -150,21 +159,35 @@ would say a state alone.
 
 - **What Lapilli can't judge is never ok or bad.** No record, no verdict:
   a week, a rule or a backtest with no incident written down to judge its
-  firings by is unknown, and a number of it is "–" in no colour. A
-  headline number's change is better or worse only when both weeks were
-  judged (`tile.Better`, `tile.Worse` stay false otherwise), and a no-record
-  backtest's difference is a plain number or "–".
+  firings by is unknown, and a number of it is "–" in no colour. A rule
+  none of whose firings was judged is listed as OK when it isn't noisy
+  (the Performance facet counts it so), but its badge is unknown, and its
+  precision "–" beside it says why in words. A headline number's change is
+  better or worse only when both weeks were judged (`tile.Better`,
+  `tile.Worse` stay false otherwise), and a no-record backtest's difference
+  is a plain number or "–".
 - **Colour never says a state alone.** Each kind has a word or a sign
   beside it: a badge its sign and name, a notice its sign and sentence, a
   cell its words or the column's. A quiet window in effect now says
   "active now"; an overdue task "overdue" (기한 지남); a headline number's
   change "better" or "worse", as a rule's panel says it.
 
-`TestStatusKinds` renders the pages the accessibility checks do, with the
-states they lack added (`statusStates`), and holds each state, by its
-words, to its kind on every page that colours it, a table of them: a page
-that draws one another way fails, and "–" or no record drawn ok or bad
-fails. `TestA11yServe` serves the same states, so that axe checks each
+`TestStatusKinds` renders the pages the accessibility checks do, with a
+proposal in every state and the other states they lack added
+(`statusStates`), and seven deployments beside them (nothing judged yet,
+no record, nothing to look at, an incident only a noisy rule caught, rule
+changes measured, notices sent and failed, changes paused:
+`statusSites`). Each state of its table (`statusWant`) is named with the
+pages it is on. On those pages it is found by its words, and every
+element that says it is drawn in its kind, by its own class or the one
+around it, so that a class left out fails as a kind changed does, and a
+state not found fails; on every page, an element coloured that says it is
+of its kind (`○ OK` of a rule with nothing judged, and "all ran" behind,
+excepted, `statusAlso`). Every notice starts with its sign; "–" or no
+record drawn ok or bad fails, and so does a rule none of whose firings was
+judged drawn ok or bad, on the list or its page. `TestOutcomesRunsKind`
+holds the Runs tile to ok, info and bad; `TestChartFillsApart` the chart's
+fills. `TestA11yServe` serves `statusStates` too, so that axe checks each
 kind's contrast in a browser, in light and dark.
 
 ## The frame
@@ -292,7 +315,8 @@ One partial, `empty`, in three kinds, as Grafana has them:
   ways out: clear the filters; with a team picked, the same filters in all
   teams. The rules, and the search.
 - `done`: nothing left to do. The overview's "What to look at": "Nothing to
-  look at now."
+  look at now.", the one that says all is well too, ok with its sign
+  (`allClear`); the others ("No proposals yet.") in no colour.
 
 ## The page context
 
