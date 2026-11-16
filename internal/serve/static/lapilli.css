@@ -342,6 +342,7 @@ textarea { width: 100%; padding: .45rem .6rem; }
 .criteria textarea { font-family: var(--mono); font-size: .9rem; }
 #impact-tried caption { caption-side: top; text-align: start; font-weight: 600; padding: .9rem 0 .4rem; }
 td.state { white-space: nowrap; }
+table.sources td { overflow-wrap: anywhere; }
 select { padding: .35rem .45rem; }
 .comment-head { font-size: .95rem; }
 .comment-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: .3rem 0; }
