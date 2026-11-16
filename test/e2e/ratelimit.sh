@@ -5,7 +5,9 @@
 # verdict --compare` runs at once, as CI runs them on several pull
 # requests, must each replay every rule: asked again after a wait, fewer at
 # once. Then the same where each 429 says Retry-After. Then with --max-rate,
-# the runs' rates adding up to under RATE: nginx turns nothing away.
+# the runs' rates adding up to under RATE: nginx turns nothing away. Then
+# lapilli serve with --yield-on-429: its run's first 429 ends its requests,
+# the run history says so, and /metrics counts them.
 #
 # OLD=path/to/lapilli runs an earlier lapilli the first two ways too, and
 # says how many rules it couldn't replay.
@@ -25,7 +27,9 @@ runs=${RUNS:-3}
 rules=${RULES:-12}
 
 work=$(mktemp -d)
+spid=
 cleanup() {
+  [ -z "$spid" ] || kill "$spid" 2>/dev/null || true
   if [ -n "${KEEP:-}" ]; then
     echo "kept: $work, containers $p-*"
     return
@@ -60,9 +64,9 @@ rulesOf 100000 >"$work/now.yaml"
 rulesOf 200000 >"$work/proposed.yaml"
 printf 'incidents:\n  - {id: INC-1, title: load, start: "%s"}\n' "$(date -u +%Y-%m-%dT%H:00:00Z)" >"$work/incidents.yaml"
 
-# Five doors to one Prometheus, each a quota of its own and a log of what
-# it answered: 429 alone; 429 with Retry-After; one for --max-rate; and for
-# OLD, 429 alone and with Retry-After.
+# Six doors to one Prometheus, each a quota of its own and a log of what
+# it answered: 429 alone; 429 with Retry-After; one for --max-rate; one for
+# lapilli serve; and for OLD, 429 alone and with Retry-After.
 server() { # port, zone, log, more
   cat <<NGINX
   server {
@@ -78,13 +82,14 @@ NGINX
 }
 {
   printf 'events {}\nhttp {\n  log_format brief "$msec $status";\n  limit_req_status 429;\n'
-  for z in plain told rated old oldtold; do
+  for z in plain told rated yield old oldtold; do
     printf '  limit_req_zone $server_port zone=%s:1m rate=%sr/s;\n' "$z" "$rate"
   done
   server 9090 plain plain ''
   server 9091 told told 'error_page 429 = @told;
     location @told { add_header Retry-After 3 always; return 429 "too many requests\n"; }'
   server 9092 rated rated ''
+  server 9095 yield yield ''
   server 9093 old old ''
   server 9094 oldtold oldtold 'error_page 429 = @told;
     location @told { add_header Retry-After 3 always; return 429 "too many requests\n"; }'
@@ -93,7 +98,7 @@ NGINX
 
 docker network create "$p" >/dev/null
 docker run -d --name "$p-prom" --network "$p" "$prom" --config.file=/etc/prometheus/prometheus.yml >/dev/null
-docker run -d --name "$p-nginx" --network "$p" -p 127.0.0.1::9090 -p 127.0.0.1::9091 -p 127.0.0.1::9092 -p 127.0.0.1::9093 -p 127.0.0.1::9094 \
+docker run -d --name "$p-nginx" --network "$p" -p 127.0.0.1::9090 -p 127.0.0.1::9091 -p 127.0.0.1::9092 -p 127.0.0.1::9093 -p 127.0.0.1::9094 -p 127.0.0.1::9095 \
   -v "$work/nginx.conf:/etc/nginx/nginx.conf:ro" "$nginx" >/dev/null
 port() { docker port "$p-nginx" "$1/tcp" | head -1; }
 # Asked from inside, so that no quota is spent on it.
@@ -180,6 +185,27 @@ done && echo 1)"
 # The busiest second nginx saw, of all the runs together.
 busiest=$(docker exec "$p-nginx" sh -c 'cat /var/log/nginx/rated.log' | awk '{ n[int($1)]++ } END { m = 0; for (s in n) if (n[s] > m) m = n[s]; print m }')
 echo "--max-rate: at most $busiest requests in one second, of $rate a second and $burst more at once"
+
+# lapilli serve, yielding: twelve rules over two days, eight at once, into a
+# quota of $burst at once. Its first 429 ends the run's requests: only those
+# already sent are answered 429 (and the configuration, read once, as
+# lapilli does without it).
+"$work/lapilli" serve --rules "$work/now.yaml" --prometheus "http://$(port 9095)" --ledger "$work/ledger" --listen 127.0.0.1:0 \
+  --backfill 2d --parallel 8 --yield-on-429 --check-replay=false --check-content=false >"$work/serve.out" 2>"$work/serve.err" &
+spid=$!
+until_true 60 grep -q 'msg=serving' "$work/serve.err"
+addr=$(sed -n 's/.*msg=serving listen=\([^ ]*\).*/\1/p' "$work/serve.err" | head -1)
+until_true 120 sh -c "curl -sf http://$addr/api/v1/runs | jq -e '[.[] | select(.Kind == \"backfill\")] | length > 0'"
+curl -sf "http://$addr/api/v1/runs" >"$work/runs.json"
+curl -sf "http://$addr/metrics" >"$work/metrics.txt"
+kill "$spid" && wait "$spid" 2>/dev/null || true
+spid=
+echo "serve --yield-on-429: $(answered yield 200) answers of 200, $(answered yield 429) of 429"
+grep '^lapilli_serve_history_' "$work/metrics.txt" | grep -v ' 0$' || true
+check "serve --yield-on-429: the quota was hit, and yielded to once" "$([ "$(answered yield 429)" -gt 0 ] && grep -q '^lapilli_serve_history_yields_total{api="prometheus"} 1$' "$work/metrics.txt" && echo 1)"
+check "serve --yield-on-429: nothing asked again after the 429" "$([ "$(answered yield 429)" -le 9 ] && grep -q '^lapilli_serve_history_retries_total{api="prometheus"} 0$' "$work/metrics.txt" && echo 1)"
+check "serve --yield-on-429: /metrics counts the 429s nginx answered the run" "$(n=$(sed -n 's/^lapilli_serve_history_throttled_total{api="prometheus"} //p' "$work/metrics.txt"); [ -n "$n" ] && [ "$n" -ge 1 ] && [ "$n" -le "$(answered yield 429)" ] && echo 1)"
+check "serve --yield-on-429: the run history says which rules waited, and why" "$(jq -e '[.[] | select(.Kind == "backfill") | .Failed // {} | to_entries[] | select(.value | contains("yielded"))] | length > 0' "$work/runs.json" >/dev/null && echo 1)"
 
 if [ "$fail" != 0 ]; then
   for f in "$work"/*.code.*; do

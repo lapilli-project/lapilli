@@ -117,6 +117,20 @@ type Config struct {
 	Slack        string // a file holding a Slack incoming webhook's URL
 	Timeout      time.Duration
 	Parallel     int
+	// Yield yields to a history API that answers a run's request with HTTP
+	// 429 (--yield-on-429): the run asks it nothing more and stops there,
+	// and the rules it didn't replay are missed, replayed by a later run;
+	// no run asks it for YieldFor after (--yield-for). Guard is a PromQL
+	// expression asked before each run and between the days of a
+	// catch-up: while it returns anything, runs wait (--guard). A catch-up
+	// runs only within CatchUpHours, nil for any, and asks each API
+	// CatchUpRate requests a second at most, 0 for --max-rate alone
+	// (docs/design/quota.md).
+	Yield        bool
+	YieldFor     time.Duration
+	Guard        string
+	CatchUpHours *Window
+	CatchUpRate  float64
 
 	Listen string
 	// MetricsListen, when set, is where the health checks and the metrics
@@ -448,6 +462,19 @@ type Server struct {
 	stepAt, rounded, moved atomic.Int64
 	asked                  prom.Counts
 	replayed               replay.Progress
+	// othersAsked counts what people and agents asked of the history (a
+	// proposal's backtest, MCP's compare), apart from asked, which tells
+	// the leader's progress. yield is what the runs yield to, nil without
+	// --yield-on-429; holding is set while this round's run waits, or
+	// yielded to the prometheus API (docs/design/quota.md).
+	othersAsked prom.Counts
+	yield       *prom.Yield
+	holding     atomic.Bool
+	// heldFor is why this round's run waited, one of heldReasons, "" for
+	// none; catchUpPace paces every catch-up (--catch-up-rate), nil for
+	// none.
+	heldFor     atomic.Value
+	catchUpPace *prom.Paces
 }
 
 // status is what the worker is doing, for the UI: a text to be shown in
@@ -536,6 +563,10 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 	}
 	l.TellTo(s.dests())
 	s.shareLimits()
+	if cfg.Yield {
+		s.yield = &prom.Yield{For: cfg.YieldFor, Now: func() time.Time { return s.now() }}
+	}
+	s.catchUpPace = prom.NewPaces(cfg.CatchUpRate)
 	return s, nil
 }
 

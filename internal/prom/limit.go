@@ -303,6 +303,7 @@ func (l *Limiter) take(ctx context.Context) error {
 			l.release(0, 0) // the place given back
 			return err
 		}
+		countWait(ctx, at.Sub(now), paced)
 	}
 }
 
@@ -494,6 +495,8 @@ func pushedBack(status int) bool {
 // (HTTP 429 or 5xx), and answers of HTTP 429.
 type Counts struct {
 	Requests, Retries, TooMany atomic.Int64
+	// apis are the same and more by the kind of API asked (Of).
+	apis [nAPIs]apiCounts
 }
 
 type countsKey struct{}

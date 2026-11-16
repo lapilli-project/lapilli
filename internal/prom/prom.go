@@ -44,6 +44,8 @@ type Client struct {
 	// maxSamples is the most samples the answers to one range may hold in
 	// all (WithMaxSamples, --max-samples).
 	maxSamples int
+	// api is which of APIs its requests are counted under (CountedAs).
+	api string
 }
 
 // Option configures a Client.
@@ -164,6 +166,7 @@ func (c *Client) QueryRange(ctx context.Context, expr string, start, end time.Ti
 	if step <= 0 {
 		return nil, errors.New("step must be positive")
 	}
+	ctx = c.asking(ctx)
 	byKey := map[string]*Series{}
 	t := &tally{keys: map[string]bool{}, maxSamples: c.maxSamples}
 	chunk := step * maxPoints
@@ -609,9 +612,11 @@ func retried[T any](ctx context.Context, ask func(context.Context) (T, error)) (
 		if n := countsOf(ctx); n != nil {
 			n.Retries.Add(1)
 		}
+		countRetry(ctx)
 		if sleep(ctx, wait) != nil {
 			return got, err
 		}
+		countWait(ctx, wait, false)
 	}
 }
 
@@ -964,8 +969,18 @@ func (e errTooLarge) Error() string {
 // send is do, the answer's body given to read, while the request holds its
 // turn: what read fails with is the request's error.
 func (c *Client) send(ctx context.Context, req *http.Request, heed bool, read func(io.Reader) error) (*http.Response, error) {
-	if err := c.limit.take(ctx); err != nil {
+	// Within a run that yields to the API (Yielding), the wait for a turn
+	// ends once it is yielded to; a catch-up's rate (Pacing) comes first.
+	turn, gotTurn, err := yieldOf(ctx).turn(ctx, c.kind())
+	if err != nil {
 		return nil, err
+	}
+	defer gotTurn()
+	if err := paced(turn, c.kind()); err != nil {
+		return nil, held(ctx, c.kind(), err)
+	}
+	if err := c.limit.take(turn); err != nil {
+		return nil, held(ctx, c.kind(), err)
 	}
 	status, wait := 0, time.Duration(0)
 	defer func() {
@@ -995,6 +1010,7 @@ func (c *Client) send(ctx context.Context, req *http.Request, heed bool, read fu
 		n.Requests.Add(1)
 	}
 	resp, err := c.http.Do(req)
+	countAnswer(ctx, c.kind(), resp)
 	if err != nil {
 		if dropped(err) {
 			// As an API shedding load does, by closing connections: as a
@@ -1015,6 +1031,13 @@ func (c *Client) send(ctx context.Context, req *http.Request, heed bool, read fu
 		// asked fewer at once after it.
 		n.TooMany.Add(1)
 	}
+	if y := yieldOf(ctx); y != nil && status == http.StatusTooManyRequests {
+		// Not asked again: the run yields to the API (--yield-on-429).
+		if a := apiCountsOf(ctx); y.yield(c.kind()) && a != nil {
+			a.yields.Add(1)
+		}
+		return nil, &Yielded{API: c.kind()}
+	}
 	err = read(resp.Body)
 	if err != nil && dropped(err) {
 		status = http.StatusServiceUnavailable
@@ -1025,6 +1048,7 @@ func (c *Client) send(ctx context.Context, req *http.Request, heed bool, read fu
 // get asks for path, asking again as retried does, and gives the answer,
 // or an APIError for a status that isn't 2xx.
 func (c *Client) get(ctx context.Context, path string) ([]byte, error) {
+	ctx = c.asking(ctx)
 	return retried(ctx, func(ctx context.Context) ([]byte, error) { return c.getOnce(ctx, path, true, maxBody) })
 }
 
@@ -1057,7 +1081,7 @@ var bestEffortTime = 30 * time.Second
 // What it reads is limit bytes at most: an answer longer is refused before
 // it is parsed, as what is read of it is parsed whole.
 func (c *Client) bestEffort(ctx context.Context, path string, limit int64) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.WithValue(ctx, noPauseKey{}, true), bestEffortTime)
+	ctx, cancel := context.WithTimeout(context.WithValue(c.asking(ctx), noPauseKey{}, true), bestEffortTime)
 	defer cancel()
 	return c.getOnce(ctx, path, false, limit)
 }
