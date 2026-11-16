@@ -541,7 +541,10 @@ true when its replay failed for the run and another run may replay it; in a
 comparison, each with its side, `before` or `after`, but a rule alike in
 both, replayed once for both, which has none. The exit stays 0, since what
 was replayed holds; `--fail-unreplayed` exits 1 instead, for a check that a
-run that couldn't read the history shouldn't pass. It doesn't count a query
+run that couldn't read the history shouldn't pass; so too for a rule whose
+labels on each of its series are more than `--max-samples` lets a replay
+hold (`too many labels on its series to replay`), which a rule's writer
+could do to keep it out of a backtest unseen. It doesn't count a query
 refused as written, which fails every run until the rule changes, nor a
 Grafana rule replayed whose query outside its condition failed, which the
 report notes below its table. A run cut short by `--timeout` exits 1 either
@@ -1068,7 +1071,8 @@ What a tool reads is stable:
 - The exit status is `lapilli verdict`'s, as it was: 0 when the report is
   written, whether or not anything changed; 1 when it failed, or a rule's
   replay didn't finish within `--timeout` (the report is still written),
-  or, with `--fail-unreplayed`, the history couldn't be read for one; 2
+  or, with `--fail-unreplayed`, the history couldn't be read for one or
+  its labels on its series were too many to replay; 2
   when the flags are wrong. Nothing changing has no exit status of its
   own: a CI step takes anything but 0 as a failure, and a pull request that
   changes no rule isn't one. Read `nothing_changed`.

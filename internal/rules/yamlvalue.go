@@ -3,9 +3,12 @@ package rules
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"slices"
+	"strings"
 	"sync"
 
 	"go.yaml.in/yaml/v3"
@@ -61,7 +64,8 @@ func Nodes(b []byte) error {
 }
 
 // YAMLValue is a YAML node as yaml.v3 decodes one into an any: a mapping
-// as map[string]any (map[any]any when a key isn't a string), a sequence as
+// as map[string]any (map[any]any when a key isn't a string, unless its
+// keys are read as text: keysAsText), a sequence as
 // []any, a scalar as yaml.v3 resolves it; merges (<<), aliases, and a key
 // given twice refused, as yaml.v3 does. What aliases expand to is bounded
 // as yaml.v3 bounds it, each value and each key visited counted, the keys
@@ -78,14 +82,14 @@ func YAMLValue(n *yaml.Node) (any, error) { return YAMLValueContext(context.Back
 // panic: what is read is outside input, and lapilli serve reads it in a
 // loop no panic should end.
 func YAMLValueContext(ctx context.Context, n *yaml.Node) (v any, err error) {
-	b, _ := ctx.Value(inputKey{}).(*input)
-	if b == nil {
-		b = &input{}
-	}
+	b := inputOf(ctx)
 	b.mu.Lock()
-	c := &converting{ctx: ctx, none: b.none, aliases: map[*yaml.Node]bool{}, decoded: b.decoded, aliased: b.aliased}
+	c := &converting{ctx: ctx, in: b, none: b.none, textKeys: ctx.Value(textKeysKey{}) != nil, aliases: map[*yaml.Node]bool{}, decoded: b.decoded, aliased: b.aliased,
+		written: b.written, made: b.made, size: b.size}
 	b.mu.Unlock()
-	decoded, aliased := c.decoded, c.aliased
+	c.left = b.total.left()
+	decoded, aliased, written, made := c.decoded, c.aliased, c.written, c.made
+	c.made0 = made
 	defer func() {
 		if p := recover(); p != nil {
 			v, err = nil, errNode{fmt.Sprintf("a document lapilli failed to read (%v), which is a fault of lapilli's", p)}
@@ -93,7 +97,13 @@ func YAMLValueContext(ctx context.Context, n *yaml.Node) (v any, err error) {
 		b.mu.Lock()
 		b.decoded += c.decoded - decoded
 		b.aliased += c.aliased - aliased
+		b.written += c.written - written
+		b.made += c.made - made
 		b.mu.Unlock()
+		b.aliasedText(c.brought)
+		if e := b.total.add(b, c.made-made, c.by); e != nil && err == nil {
+			v, err = nil, e
+		}
 	}()
 	return c.value(n, 0)
 }
@@ -107,7 +117,21 @@ func YAMLValueContext(ctx context.Context, n *yaml.Node) (v any, err error) {
 type input struct {
 	mu               sync.Mutex
 	decoded, aliased int
-	none             bool
+	// written is the text of the scalars its documents' values and keys
+	// are, as written; size its documents' bytes, as counted (counted);
+	// made what it has made beyond them, what aliases brought in again
+	// among it (madeLimit).
+	written, size, made int
+	none                bool
+	// total is what the inputs it is read with have made (Together), nil
+	// for none; brought, the text of strings aliases brought in
+	// (aliasedText).
+	total   *total
+	brought map[*byte]bool
+	// name is what it is read from, as what the inputs read with it made
+	// names it (total.most): the source of a document of a namespace (a
+	// ruler's, an alarm's: FromDocsContext). Other inputs have none.
+	name string
 }
 
 type inputKey struct{}
@@ -118,7 +142,7 @@ func OneInput(ctx context.Context) context.Context {
 	if _, ok := ctx.Value(inputKey{}).(*input); ok {
 		return ctx
 	}
-	return context.WithValue(ctx, inputKey{}, &input{})
+	return context.WithValue(ctx, inputKey{}, &input{total: totalOf(ctx)})
 }
 
 // NoAliases is ctx under which a YAML alias (*name) is refused: what a
@@ -126,17 +150,32 @@ func OneInput(ctx context.Context) context.Context {
 // they write YAML or JSON out of what they hold, and one that does is
 // hostile, its aliases expanding a few KB into GBs.
 func NoAliases(ctx context.Context) context.Context {
-	return context.WithValue(ctx, inputKey{}, &input{none: true})
+	return context.WithValue(ctx, inputKey{}, &input{none: true, total: totalOf(ctx)})
 }
 
 type converting struct {
 	ctx context.Context
-	// none says an alias is refused (NoAliases).
-	none    bool
-	aliases map[*yaml.Node]bool
+	// none says an alias is refused (NoAliases); textKeys that a mapping's
+	// keys are read as text (keysAsText).
+	none, textKeys bool
+	aliases        map[*yaml.Node]bool
 	// decoded and aliased count the values and keys visited, and those
 	// visited in an alias's expansion, as yaml.v3 counts them.
 	decoded, aliased, inAlias int
+	// written is the text of the scalars visited as written in the input;
+	// made, the input's made so far, the text an alias brought in again
+	// among it, judged against size, the input's bytes, when it is known
+	// (madeLimit); via is the alias whose expansion is being read, the
+	// outermost.
+	written, made, size int
+	via                 *yaml.Node
+	// made0 is made when it began, and left what the inputs read with it
+	// (Together) might make still then; brought, the strings it made in an
+	// alias's expansion (aliasedText).
+	made0, left int
+	brought     []string
+	// in is the input it is of, which counts what it made once it ends.
+	in *input
 	// anchored is how many anchors the node visited is under: one under
 	// none is let go of once decoded, as no alias reads it again.
 	anchored int
@@ -153,6 +192,11 @@ func (c *converting) step() error {
 	c.decoded++
 	if c.inAlias > 0 {
 		c.aliased++
+		// What it is held in, made again: a map's entry, a list's, an
+		// interface (aliasValue), with what else the input makes.
+		if err := c.make(aliasValue); err != nil {
+			return err
+		}
 	}
 	if c.aliased > 100 && c.decoded > 1000 && float64(c.aliased)/float64(c.decoded) > aliasRatio(c.decoded) {
 		return errExcessive
@@ -161,6 +205,55 @@ func (c *converting) step() error {
 		return c.ctx.Err()
 	}
 	return nil
+}
+
+// text counts a scalar's text, the value or key visited, refusing the
+// input once its aliases have brought in more again than an input of its
+// size may make beyond it (madeLimit), with what else it made: judged
+// against the whole input's size where it is known, else against what was
+// written so far. copied says it came of an alias.
+func (c *converting) text(n *yaml.Node, copied bool) error {
+	if !copied {
+		c.written += len(n.Value)
+		return nil
+	}
+	return c.make(len(n.Value))
+}
+
+// make counts n bytes an alias brought in again (text, step).
+// A charge refused isn't counted, as it isn't made.
+func (c *converting) make(n int) error {
+	size := c.size
+	if size == 0 {
+		size = c.written
+	}
+	switch {
+	case c.made+n > madeLimit(size):
+		return &MadeError{By: c.by(), Made: c.made + n, Size: size, Limit: madeLimit(size)}
+	case c.made+n-c.made0 > c.left:
+		e := &MadeError{By: c.by(), Made: MaxMade - c.left + c.made + n - c.made0, Limit: MaxMade, Together: true}
+		e.Most, e.MostMade = c.in.total.most(c.in.name, c.made-c.made0)
+		return e
+	}
+	c.made += n
+	return nil
+}
+
+// by names the alias whose expansion went past the bound.
+func (c *converting) by() string {
+	anchor, line := "", 0
+	if c.via != nil {
+		anchor, line = c.via.Value, c.via.Line
+	}
+	return fmt.Sprintf("line %d: aliases, *%.40s the last, bring in their text and values again", line, anchor)
+}
+
+// into notes an alias whose expansion is read, as text names it.
+func (c *converting) into(n *yaml.Node) {
+	if c.inAlias == 0 {
+		c.via = n
+	}
+	c.inAlias++
 }
 
 // alias refuses an alias where none is read (NoAliases).
@@ -175,6 +268,10 @@ func (c *converting) alias(n *yaml.Node) error {
 type errNode struct{ msg string }
 
 func (e errNode) Error() string { return "yaml: " + e.msg }
+
+// dupKey is a mapping that has a key twice: yaml.v3 refuses it too, as it
+// decodes into Go values, and Prometheus doesn't load it.
+type dupKey struct{ errNode }
 
 func (c *converting) value(n *yaml.Node, depth int) (any, error) {
 	if depth > MaxDepth {
@@ -204,13 +301,20 @@ func (c *converting) value(n *yaml.Node, depth int) (any, error) {
 			return nil, errNode{fmt.Sprintf("unknown anchor '%s' referenced", n.Value)}
 		}
 		c.aliases[n] = true
-		c.inAlias++
+		c.into(n)
 		v, err := c.value(n.Alias, depth+1)
 		c.inAlias--
 		delete(c.aliases, n)
 		return v, err
 	case yaml.ScalarNode:
-		return scalar(n)
+		if err := c.text(n, c.inAlias > 0); err != nil {
+			return nil, err
+		}
+		v, err := scalar(n)
+		if s, ok := v.(string); ok && c.inAlias > 0 && len(s) >= 2 {
+			c.brought = append(c.brought, s)
+		}
+		return v, err
 	case yaml.SequenceNode:
 		out := make([]any, 0, len(n.Content))
 		for i, e := range n.Content {
@@ -264,7 +368,7 @@ func (c *converting) mapping(n *yaml.Node, depth int) (any, error) {
 		return nil, errNode{fmt.Sprintf("line %d: a mapping of more than %d keys", n.Line, MaxKeys)}
 	}
 	strs := true
-	for i := 0; i+1 < len(n.Content); i += 2 {
+	for i := 0; i+1 < len(n.Content) && !c.textKeys; i += 2 {
 		if t := n.Content[i].ShortTag(); t != "!!str" && t != "!!merge" {
 			strs = false
 			break
@@ -305,12 +409,71 @@ func (m *mapOut) key(k *yaml.Node, c *converting, depth int) (any, error) {
 		target = target.Alias
 	}
 	if target.Kind != yaml.ScalarNode {
-		return nil, errNode{fmt.Sprintf("line %d: invalid map key", k.Line)}
+		return nil, errNode{fmt.Sprintf("line %d: invalid map key: a key that isn't a scalar, which isn't read", k.Line)}
 	}
 	if m.s != nil {
+		if k.Kind == yaml.AliasNode && c.inAlias == 0 {
+			c.via = k
+		}
+		if err := c.text(target, c.inAlias > 0 || k.Kind == yaml.AliasNode); err != nil {
+			return nil, err
+		}
+		if c.textKeys {
+			return keyText(target, k.Line)
+		}
 		return target.Value, nil
 	}
 	return c.value(k, depth+1)
+}
+
+// textKeysKey is on a ctx under which YAMLValue reads a mapping's keys as
+// text (keysAsText).
+type textKeysKey struct{}
+
+// keysAsText is ctx under which YAMLValue reads every mapping's keys as
+// text, as Prometheus decodes a rule file's keys into its strings, rather
+// than as yaml.v3 decodes them into an any: a key 0, true, 1.5 or a date
+// as it is written, a !!binary one as the text it decodes to. A key that
+// isn't a scalar, a null one (which Prometheus passes over and Kubernetes
+// refuses), one of any other tag (a local !x), and two keys of one text (a
+// !!binary key and the text it decodes to) are refused, naming the line.
+// The rules readers read so: a mapping one of whose keys wasn't a string
+// was a map[any]any, which no rule is read from, so a ConfigMap's data
+// with a key 0 hid every rule file in it, a rule file whose groups key was
+// !!binary hid its rules, and labels with a key true lost every label,
+// unsaid. YAMLValue without it decodes as yaml.v3 does.
+func keysAsText(ctx context.Context) context.Context {
+	return context.WithValue(ctx, textKeysKey{}, true)
+}
+
+// keyText is a scalar key's text, as keysAsText reads it, line the key's.
+func keyText(n *yaml.Node, line int) (string, error) {
+	if t, ok := scalarText(n); ok {
+		return t, nil
+	}
+	switch n.ShortTag() {
+	case "!!null":
+		return "", errNode{fmt.Sprintf("line %d: a key that is null, which Prometheus passes over and Kubernetes refuses", line)}
+	case "!!binary":
+		return "", errNode{fmt.Sprintf("line %d: a !!binary key that isn't base64", line)}
+	}
+	return "", errNode{fmt.Sprintf("line %d: a key tagged %.40s, which isn't read: a key is read as text, untagged or of YAML's own tags", line, n.Tag)}
+}
+
+// scalarText is a scalar's text as Prometheus decodes a key into a
+// string: as written, for one untagged or tagged as YAML's own (!!str,
+// !!int, !!bool, !!float, !!timestamp); a !!binary one, the text it
+// decodes to. ok is false for a null, any other tag, or a !!binary that
+// isn't base64.
+func scalarText(n *yaml.Node) (string, bool) {
+	switch n.ShortTag() {
+	case "!!str", "!!int", "!!bool", "!!float", "!!timestamp":
+		return n.Value, true
+	case "!!binary":
+		b, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(n.Value), ""))
+		return string(b), err == nil
+	}
+	return "", false
 }
 
 func (m *mapOut) set(k, v any) {
@@ -336,9 +499,17 @@ func (c *converting) fill(n *yaml.Node, m *mapOut, merged map[any]bool, depth in
 		k := n.Content[i]
 		id := keyOf{k.Kind, k.Value}
 		if line, ok := seen[id]; ok {
-			return errNode{fmt.Sprintf("unmarshal errors:\n  line %d: mapping key %#v already defined at line %d", k.Line, k.Value, line)}
+			return dupKey{errNode{fmt.Sprintf("unmarshal errors:\n  line %d: mapping key %#v already defined at line %d", k.Line, k.Value, line)}}
 		}
 		seen[id] = k.Line
+	}
+	// A mapping's own keys, which a merge (<<) into it doesn't set, are
+	// kept as they are read: read again, what they count would be counted
+	// again, and one refused then left out, the merge's value set in its
+	// place.
+	var own map[any]bool
+	if merged == nil && slices.ContainsFunc(n.Content, func(k *yaml.Node) bool { return k != nil && isMerge(k) }) {
+		own = map[any]bool{}
 	}
 	var merge *yaml.Node
 	for i := 0; i+1 < len(n.Content); i += 2 {
@@ -353,6 +524,20 @@ func (c *converting) fill(n *yaml.Node, m *mapOut, merged map[any]bool, depth in
 		key, err := m.key(k, c, depth)
 		if err != nil {
 			return err
+		}
+		if c.textKeys && merged == nil {
+			// Two keys written apart, one text: an alias of a key and the
+			// key, a !!binary key and what it decodes to. yaml.v3 tells
+			// keys apart as written, so Prometheus loads it, the last one
+			// set: refused as Lapilli's own reader refuses (unread), said,
+			// not a key given twice, a file that doesn't read. Only the
+			// mapping's own keys are set so far.
+			if _, twice := m.s[key.(string)]; twice {
+				return errNode{fmt.Sprintf("line %d: mapping key %.80q already defined, by a key written otherwise (an alias, !!binary), which isn't read", k.Line, key)}
+			}
+		}
+		if own != nil {
+			own[key] = true
 		}
 		if merged != nil {
 			if merged[key] {
@@ -371,12 +556,7 @@ func (c *converting) fill(n *yaml.Node, m *mapOut, merged map[any]bool, depth in
 		return nil
 	}
 	if merged == nil {
-		merged = map[any]bool{}
-		for i := 0; i+1 < len(n.Content); i += 2 {
-			if key, err := m.key(n.Content[i], c, depth); err == nil {
-				merged[key] = true
-			}
-		}
+		merged = own
 	}
 	into := func(x *yaml.Node) error {
 		mapping := x
@@ -394,7 +574,7 @@ func (c *converting) fill(n *yaml.Node, m *mapOut, merged map[any]bool, depth in
 				return errNode{fmt.Sprintf("anchor '%s' value contains itself", x.Value)}
 			}
 			c.aliases[x] = true
-			c.inAlias++
+			c.into(x)
 			defer func() { c.inAlias--; delete(c.aliases, x) }()
 		}
 		// A merge's mapping written in place under an anchor (<<: &m
@@ -459,7 +639,7 @@ func DecodeYAML(ctx context.Context, data []byte) ([]any, error) {
 	if err := Nodes(data); err != nil {
 		return nil, err
 	}
-	ctx = OneInput(ctx)
+	ctx = counted(OneInput(ctx), len(data))
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var out []any
 	for {
@@ -492,5 +672,5 @@ func UnmarshalYAML(data []byte) (any, error) {
 	if err := yaml.Unmarshal(data, &n); err != nil {
 		return nil, err
 	}
-	return YAMLValue(&n)
+	return YAMLValueContext(counted(OneInput(context.Background()), len(data)), &n)
 }

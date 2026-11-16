@@ -1,6 +1,8 @@
 package rules
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -109,7 +111,20 @@ func FuzzScope(f *testing.F) {
 		f.Add(e, "namespace", "shop")
 	}
 	f.Fuzz(func(t *testing.T, expr, k, v string) {
-		Scope(expr, map[string]string{k: v})
+		l := map[string]string{k: v}
+		out, err := Scope(expr, l)
+		if err != nil {
+			return
+		}
+		// Given the room it grows by, it is as Scope writes it; a byte
+		// less, given up.
+		grew := len(out) - len(expr)
+		if got, err := scopeWith(expr, matchersOf(l), grew); err != nil || got != out {
+			t.Fatalf("room %d: %q, %v; Scope wrote %q", grew, got, err, out)
+		}
+		if _, err := scopeWith(expr, matchersOf(l), grew-1); grew > 0 && !errors.Is(err, errNoRoom) {
+			t.Fatalf("room %d, a byte short: %v", grew-1, err)
+		}
 	})
 }
 
@@ -131,8 +146,9 @@ func FuzzPick(f *testing.F) {
 			return
 		}
 		// What is kept is documents of rules alone, those selected: no
-		// other object (a Secret) is left in it.
-		docs, err := decodeAll(kept)
+		// other object (a Secret) is left in it, read as the rules
+		// readers read it, its keys as text.
+		docs, err := decodeRules(context.Background(), kept)
 		if err != nil {
 			t.Fatalf("kept doesn't read: %v\n%q", err, kept)
 		}

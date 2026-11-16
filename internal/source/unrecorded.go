@@ -249,7 +249,7 @@ func clearOf(ctx context.Context, h replay.History, versions []replay.Version, r
 	}
 	ran, clear := replay.Run(ctx, h, vs, from, to, step, 1)
 	if i := slices.IndexFunc(ran, func(r rules.Rule) bool { return r.Unsupported != "" }); i >= 0 {
-		if u := ran[i].Unsupported; u == replay.Unfinished || strings.HasPrefix(u, "query failed") {
+		if u := ran[i].Unsupported; rules.Unanswered(u) {
 			return 0, "", errors.New(u)
 		}
 		return 0, "", nil

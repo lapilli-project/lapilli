@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -334,7 +333,7 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 		if i := slices.IndexFunc(ran, func(r rules.Rule) bool { return r.Unsupported != "" }); i >= 0 {
 			// A question failed, or time ran out; or, paused or turned off
 			// for part of the period, the rule has no cost to tell.
-			if u := ran[i].Unsupported; failed == nil && (u == replay.Unfinished || strings.HasPrefix(u, "query failed")) {
+			if u := ran[i].Unsupported; failed == nil && rules.Unanswered(u) {
 				failed = errors.New(u)
 			}
 			continue

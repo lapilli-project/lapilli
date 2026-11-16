@@ -306,16 +306,19 @@ func (r *Ruler) NameOK(name string, namespace bool) error {
 // What a ruler's API writes holds no YAML alias, and one that does isn't
 // read (rules.NoAliases): its aliases would expand a few KB into GBs, each
 // namespace a document of its own. An Amazon namespace holds the rule file
-// someone wrote, which may have them: what they expand to is counted for
-// every namespace together (rules.OneInput). Past MaxRules as read, none
-// is.
+// someone wrote, which may have them. Each namespace is an input of its
+// own, what it may make beyond its text its own (rules.FromDocsContext), so
+// that one can't use up what another may make and have it passed over in
+// its place; what they all make, refused ones' too, is bounded together
+// (rules.Together), past which the read fails whole and the version in
+// effect stays. Past MaxRules as read, none is.
 func (r *Ruler) Read(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
 	var docs []rules.Doc
 	var passed []string
 	var err error
-	read := rules.NoAliases(ctx)
+	read := rules.NoAliases(rules.Together(ctx))
 	if r.Kind == RulerAmazon {
-		read = rules.OneInput(ctx)
+		read = rules.OneInput(rules.Together(ctx))
 	}
 	switch r.Kind {
 	case RulerConfig:
@@ -336,6 +339,9 @@ func (r *Ruler) Read(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
 		x, err := rules.FromDocsContext(read, []rules.Doc{d})
 		if ctx.Err() != nil {
 			return nil, nil, fmt.Errorf("%s: %w", r.flag(), ctx.Err())
+		}
+		if rules.OverTotal(err) {
+			return nil, nil, fmt.Errorf("%s: %w", r.flag(), err)
 		}
 		if err != nil {
 			passed = append(passed, fmt.Sprintf("%s: %s can't be read, and is passed over: %s", r.flag(), clipURL(d.Source), clipErr(err)))

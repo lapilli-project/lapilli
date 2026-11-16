@@ -240,12 +240,18 @@ func WithFor(ctx context.Context, h History, r rules.Rule, fors []time.Duration,
 			if err != nil {
 				return nil, err
 			}
+			if err := wide(h, rd, series); err != nil {
+				return nil, err
+			}
 			out[d] = fire(rd, series, step, firing.For(0), to)
 		}
 		return out, nil
 	}
 	series, err := Condition(ctx, h, r, from.Add(-slices.Max(fors)), to, step)
 	if err != nil {
+		return nil, err
+	}
+	if err := wide(h, r, series); err != nil {
 		return nil, err
 	}
 	for _, d := range fors {
@@ -273,6 +279,9 @@ func Held(ctx context.Context, h History, r rules.Rule, from, to time.Time, step
 	r.For, r.KeepFiringFor = 0, 0
 	series, err := Condition(ctx, h, r, from, to, step)
 	if err != nil {
+		return nil, err
+	}
+	if err := wide(h, r, series); err != nil {
 		return nil, err
 	}
 	fs := fire(r, series, step, firing.For(0), to)
@@ -440,6 +449,9 @@ func replayRun(ctx context.Context, h History, run []stint, to time.Time, step t
 		series = append(series, *merged[k])
 	}
 	last := run[len(run)-1]
+	if err := wide(h, last.Rule, series); err != nil {
+		return nil, err.Error(), nil
+	}
 	fs := fire(last.Rule, series, step, fireAt(run), to)
 	if !last.hi.After(to) {
 		// Taken away or started afresh: its alerts resolved then, whatever
@@ -488,7 +500,8 @@ func noteFailed(ctx context.Context, ref string) {
 //
 // A Grafana rule's series are already of the evaluations its alerts were
 // firing at, Grafana's states with its "for" and keep_firing_for worked
-// out: they fire as they are.
+// out: they fire as they are. Each series' firings carry a copy of the
+// rule's labels with the series' own (wide).
 func fire(r rules.Rule, series []prom.Series, step time.Duration, fireAt func(time.Time) time.Time, end time.Time) []firing.Firing {
 	keep := r.KeepFiringFor
 	if r.Graph != nil {
@@ -583,6 +596,9 @@ func Fired(ctx context.Context, h History, r rules.Rule, from, to time.Time, ste
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := wide(h, r, series); err != nil {
+		return nil, nil, err
+	}
 	every := Every(r, step)
 	thin, _ := evaluated(r, series, step, every)
 	keep := r.KeepFiringFor
@@ -590,6 +606,38 @@ func Fired(ctx context.Context, h History, r rules.Rule, from, to time.Time, ste
 		keep = 0
 	}
 	return fire(r, series, step, firing.For(r.For), to), fire(r, firing.After(thin, from, every, keep), step, firing.For(r.For), to), nil
+}
+
+// firingLabel is what a label of a replayed firing takes: an entry of the
+// map each series' firings share, its text the rule's or the series'.
+const firingLabel = 96
+
+// wide refuses a rule's replay whose firings would carry its labels, its
+// group's and its own, on each of its series past what the history's
+// samples are held to (--max-samples, prom.SampleBytes each), saying so
+// (rules.TooWide), which --fail-unreplayed counts: the rule's
+// labels come from whoever writes rules, its series from the history, and
+// each series' firings have a copy of them. A rule of 9,999 labels on
+// 1,000 series made 1.3 GB; real ones, a dozen labels on 50,000 series,
+// some 100 MB at most.
+func wide(h History, r rules.Rule, series []prom.Series) error {
+	most := prom.DefaultMaxSamples
+	if a, ok := h.(*asker); ok {
+		h = a.h
+	}
+	if m, ok := Base(h).(interface{ MaxSamples() int }); ok && m.MaxSamples() > 0 {
+		most = m.MaxSamples()
+	}
+	room := most * prom.SampleBytes
+	own := len(r.Labels) + len(r.GroupLabels)
+	n := 0
+	for _, s := range series {
+		if n += (len(s.Labels) + own) * firingLabel; n > room {
+			return fmt.Errorf("%sits alerts would carry its %d labels with each of its %d series' own, past the %d MB a range's samples are held to (--max-samples %d)",
+				rules.TooWide, own, len(series), room>>20, most)
+		}
+	}
+	return nil
 }
 
 // fireAt is when a label set pending since a time fires: once it has been

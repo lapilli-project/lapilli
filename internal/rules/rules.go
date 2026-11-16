@@ -267,6 +267,32 @@ const (
 	HistoryUnread = QueryFailed + "the history couldn't be read: "
 )
 
+// TooWide begins the Unsupported of a rule whose replay was refused as its
+// alerts would carry its labels on each of its series past what a range's
+// samples are held to (--max-samples): a reason of the rule, as another
+// run refuses it too, but not one a run passes over as it does a query
+// refused as written: labels written so a rule can't be replayed would
+// keep it out of a backtest unseen (Unreplayable).
+const TooWide = "too many labels on its series to replay: "
+
+// Unanswered says a rule with this Unsupported was replayed and the
+// replay gave no answer: it didn't finish (Unfinished), its query failed
+// (QueryFailed, HistoryUnread among them), or its labels on its series
+// were too many (TooWide). Its firings as kept stand, and the run says it
+// failed; a rule that can't be replayed (paused, a cloud's alarm in its own
+// terms) isn't one.
+func Unanswered(unsupported string) bool {
+	return unsupported == Unfinished || strings.HasPrefix(unsupported, QueryFailed) || strings.HasPrefix(unsupported, TooWide)
+}
+
+// Unreplayable says a run should count a rule with this Unsupported as
+// one it couldn't replay (--fail-unreplayed): its replay failed for a
+// reason of the run (ReplayFailed), or its labels on its series were too
+// many (TooWide).
+func Unreplayable(unsupported string) bool {
+	return ReplayFailed(unsupported) || strings.HasPrefix(unsupported, TooWide)
+}
+
 // ReplayFailed says a rule with this Unsupported was replayed and its replay
 // failed for a reason of the run (the history couldn't be read, the time
 // ran out), not one of the rule's: another run, or this one with its
@@ -436,7 +462,9 @@ var errNoRules = errors.New("no alert rules: want a Prometheus rule file, a Prom
 // those below it, such as a ConfigMap mounted in a pod. In a directory,
 // hidden files and directories, files without alert rules, and files below
 // the top that don't parse are passed over; links are followed to files but
-// not to directories below.
+// not to directories below. A file below the top in the shape of rules that
+// Lapilli's own reader refuses, which Prometheus may load, or that makes
+// past what the directory may (MadeError), is an error, as at the top.
 func Load(path string) ([]Rule, error) {
 	rs, _, err := Read(path)
 	return rs, err
@@ -463,21 +491,54 @@ type Doc struct {
 func FromDocs(docs []Doc) ([]Rule, error) { return FromDocsContext(context.Background(), docs) }
 
 // FromDocsContext is FromDocs, given up when ctx ends: between documents,
-// and between the YAML documents of one. What aliases expand to is counted
-// for the documents together, as of one input (OneInput).
+// and between the YAML documents of one. Documents are read in the inputs
+// they were read in (OneInput): each a ruler's namespace or an alarm's (a
+// Namespace) on its own, and the rest, by the source they came from (a
+// Loki's, an API's, files'), together; each input what it may make beyond
+// its text (madeLimit), and all of them MaxMade at most (Together), as a
+// version of the rules kept in the ledger, read again, was read. Aliases
+// are refused where ctx's input refuses them (NoAliases). A rule file a
+// ConfigMap holds that Lapilli can't read, or that makes past its bound, is
+// an error, not passed over as one that doesn't read may be.
 func FromDocsContext(ctx context.Context, docs []Doc) ([]Rule, error) {
-	ctx = OneInput(ctx)
+	ctx = Together(ctx)
+	none := false
+	if b, ok := ctx.Value(inputKey{}).(*input); ok {
+		none = b.none
+	}
+	inputs := map[string]context.Context{}
 	var out []Rule
 	for _, d := range docs {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		unit := fmt.Sprintf("%t %q", d.API, d.Logs)
+		if d.Namespace != "" {
+			unit += fmt.Sprintf(" %q %q", d.Namespace, d.Source)
+		}
+		in, ok := inputs[unit]
+		if !ok {
+			// A namespace's input is named by its document, as what the
+			// inputs together made names the one that made most.
+			name := ""
+			if d.Namespace != "" {
+				name = d.Source
+			}
+			in = context.WithValue(ctx, inputKey{}, &input{none: none, total: totalOf(ctx), name: name})
+			inputs[unit] = in
+		}
 		var rs []Rule
 		var err error
 		if d.API {
-			rs, err = FromAPI(d.Data)
+			rs, err = fromAPI(in, d.Data)
 		} else {
-			rs, err = parseContext(ctx, d.Data, nil)
+			rs, err = parseContext(in, d.Data, nil)
+		}
+		if err == nil && d.Namespace != "" {
+			// Each rule's, in its key and on its pages.
+			err = inputOf(in).charge(len(d.Namespace)*len(rs), func() string {
+				return fmt.Sprintf("its namespace, %d bytes, on each of its %d rules", len(d.Namespace), len(rs))
+			})
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", d.Source, err)
@@ -519,14 +580,15 @@ func parse(b []byte, rec *[]Recording) ([]Rule, error) {
 // parseContext is parse, given up when ctx ends, between YAML documents.
 // Each is decoded to its nodes, then to Go values (YAMLValue): yaml.v3
 // decoding a mapping straight to Go values takes time that grows with the
-// square of its keys. What aliases expand to is counted for them all, and
-// the rule files a ConfigMap or an Amazon namespace holds, as of one input
-// (OneInput).
+// square of its keys. What aliases expand to, and what the rules make
+// beyond their text (madeLimit), is counted for them all, and the rule
+// files a ConfigMap or an Amazon namespace holds, as of one input
+// (OneInput), its size counted once (counted).
 func parseContext(ctx context.Context, b []byte, rec *[]Recording) ([]Rule, error) {
 	if err := Nodes(b); err != nil {
-		return nil, err
+		return nil, unread{err, textShaped(b)}
 	}
-	ctx = OneInput(ctx)
+	ctx = keysAsText(counted(OneInput(ctx), len(b)))
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	var out []Rule
 	found := false
@@ -540,11 +602,11 @@ func parseContext(ctx context.Context, b []byte, rec *[]Recording) ([]Rule, erro
 			break
 		}
 		if err != nil {
-			return nil, err
+			return nil, notYAML{err}
 		}
 		doc, err := YAMLValueContext(ctx, &node)
 		if err != nil {
-			return nil, err
+			return nil, unreadAs(err, &node, b)
 		}
 		// A list of documents, as a cloud's CLI lists resources.
 		docs := []any{doc}
@@ -565,6 +627,81 @@ func parseContext(ctx context.Context, b []byte, rec *[]Recording) ([]Rule, erro
 		return nil, errNoRules
 	}
 	return shownRules(out), nil
+}
+
+// unreadAs is what YAMLValue refusing a document's node, err, is as the
+// rules readers take it: a key given twice in a document in the shape of
+// rules, which yaml.v3 refuses too, a rule file that doesn't read, as it
+// is; any other refusal unread, saying whether it is in the shape of rules,
+// which is said, never passed over. The shape is the document's
+// (rulesShaped) or, as the refused document need not be the one of rules,
+// the whole input's, b, by its text (textShaped): a Deployment's tagged key
+// in a stream with a PrometheusRule refuses the stream, whose rules
+// mustn't be left out unsaid where a file that doesn't read would be.
+func unreadAs(err error, n *yaml.Node, b []byte) error {
+	var dk dupKey
+	switch shaped := rulesShaped(n) || textShaped(b); {
+	case errors.As(err, &dk) && shaped:
+		return err
+	default:
+		return unread{err, shaped}
+	}
+}
+
+// decodeRules is DecodeYAML as parseContext reads a document, its keys as
+// text (keysAsText) and what it refuses told apart as there: what yaml.v3
+// can't decode isn't YAML (notYAML), and what Lapilli's own reader refuses
+// is unread, in the shape of rules or not (unreadAs), so that where a
+// stream is picked, one in the shape of rules is said, not passed over.
+func decodeRules(ctx context.Context, data []byte) ([]any, error) {
+	if err := Nodes(data); err != nil {
+		return nil, unread{err, textShaped(data)}
+	}
+	ctx = keysAsText(counted(OneInput(ctx), len(data)))
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	var out []any
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var n yaml.Node
+		err := dec.Decode(&n)
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, notYAML{err}
+		}
+		v, err := YAMLValueContext(ctx, &n)
+		if err != nil {
+			return nil, unreadAs(err, &n, data)
+		}
+		out = append(out, v)
+	}
+}
+
+// policyCharged charges what a Google Cloud alerting policy's rules make
+// of its name, each of its conditions' rules having it as its group, and
+// as its name, but for its own (googlePolicy).
+func policyCharged(ctx context.Context, doc map[string]any) error {
+	display := str(doc["displayName"])
+	if display == "" {
+		display = str(doc["name"])
+	}
+	n := len(list(doc["conditions"]))
+	return inputOf(ctx).charge(2*len(display)*n, func() string {
+		return fmt.Sprintf("alerting policy %.80q puts its name, %d bytes, on each of its %d conditions", display, len(display), n)
+	})
+}
+
+// groupCharged charges a group's name, n bytes, on a rule of it: each
+// rule's, in its key, on its pages and in what a replay carries alerts over
+// by (Key, Whole); what says it worked out once for the group.
+func groupCharged(in *input, group string, n int) func() error {
+	by := func() string {
+		return fmt.Sprintf("group %.80q puts its name, %d bytes, on each of its rules", group, n)
+	}
+	return func() error { return in.charge(n, by) }
 }
 
 func parseDoc(doc map[string]any) ([]Rule, bool, error) {
@@ -596,45 +733,39 @@ func parseDocRec(ctx context.Context, doc map[string]any, rec *[]Recording) ([]R
 		// else it has: a Secret with a top-level groups is a Secret.
 		return nil, false, nil
 	case doc["kind"] == "ConfigMap":
-		var out []Rule
-		found := false
-		data, _ := doc["data"].(map[string]any)
-		for _, k := range sortedKeys(data) {
-			s, _ := data[k].(string)
-			var more []Recording
-			rs, err := parseContext(ctx, []byte(s), &more)
-			if err != nil {
-				continue // not every key holds rules
-			}
-			if rec != nil {
-				*rec = append(*rec, more...)
-			}
-			found = true
-			out = append(out, rs...)
+		rs, found, _, err := configMapRules(ctx, doc, rec)
+		if err != nil {
+			return nil, true, err
 		}
-		return out, found, nil
+		return rs, found, nil
 	case doc["kind"] == "PrometheusRule":
 		spec, _ := doc["spec"].(map[string]any)
-		rs, err := prometheus(spec, rec)
+		rs, err := prometheus(ctx, spec, rec)
 		return rs, true, err
 	case strings.HasPrefix(str(doc["apiVersion"]), "monitoring.googleapis.com/") &&
 		(doc["kind"] == "Rules" || doc["kind"] == "ClusterRules" || doc["kind"] == "GlobalRules"):
 		// Google Cloud Managed Service for Prometheus: spec.groups as
 		// Prometheus writes them. Rules see only their namespace's data.
 		spec, _ := doc["spec"].(map[string]any)
-		rs, err := prometheus(spec, rec)
+		rs, err := prometheus(ctx, spec, rec)
+		if err != nil {
+			return nil, true, err
+		}
 		meta, _ := doc["metadata"].(map[string]any)
 		if ns := str(meta["namespace"]); doc["kind"] == "Rules" && ns != "" {
+			s := scoping{in: inputOf(ctx), matchers: matchersOf(map[string]string{"namespace": ns}), what: "namespace", value: ns}
 			for i := range rs {
-				if rs[i].Expr, err = Scope(rs[i].Expr, map[string]string{"namespace": ns}); err != nil {
+				var err error
+				if rs[i].Expr, err = s.scope(rs[i].Expr); refused(err) {
+					return nil, true, err
+				} else if err != nil {
 					rs[i].Unsupported = err.Error()
 				}
 			}
-			err = nil
 		}
-		return rs, true, err
+		return rs, true, nil
 	case strings.EqualFold(str(doc["type"]), azureRuleGroup):
-		rs, err := azure(doc, rec)
+		rs, err := azure(ctx, doc, rec)
 		return rs, true, err
 	case azureAlertKinds[strings.ToLower(str(doc["type"]))] != "":
 		// az monitor metrics alert list, scheduled-query list,
@@ -656,7 +787,7 @@ func parseDocRec(ctx context.Context, doc map[string]any, rec *[]Recording) ([]R
 		for _, r := range list(doc["resources"]) {
 			m, _ := r.(map[string]any)
 			if strings.EqualFold(str(m["type"]), azureRuleGroup) {
-				rs, err := azure(m, rec)
+				rs, err := azure(ctx, m, rec)
 				if err != nil {
 					return nil, true, err
 				}
@@ -669,10 +800,16 @@ func parseDocRec(ctx context.Context, doc map[string]any, rec *[]Recording) ([]R
 		var out []Rule
 		for _, p := range list(doc["alertPolicies"]) {
 			m, _ := p.(map[string]any)
+			if err := policyCharged(ctx, m); err != nil {
+				return nil, true, err
+			}
 			out = append(out, googlePolicy(m)...)
 		}
 		return out, true, nil
 	case isGooglePolicy(doc) && doc["groups"] == nil:
+		if err := policyCharged(ctx, doc); err != nil {
+			return nil, true, err
+		}
 		return googlePolicy(doc), true, nil
 	case (doc["MetricAlarms"] != nil || doc["CompositeAlarms"] != nil) && doc["groups"] == nil:
 		// aws cloudwatch describe-alarms
@@ -682,6 +819,11 @@ func parseDocRec(ctx context.Context, doc map[string]any, rec *[]Recording) ([]R
 		// Amazon Managed Service for Prometheus: the rule file a rule
 		// groups namespace holds, base64 in the AWS CLI's answer.
 		ns, _ := doc["ruleGroupsNamespace"].(map[string]any)
+		if inputOf(ctx).broughtIn(str(ns["data"])) {
+			// Decoded and read into rules again for each namespace that
+			// aliases it; the AWS CLI writes none.
+			return nil, true, fmt.Errorf("rule groups namespace %q: %w", str(ns["name"]), unread{errAliased, true})
+		}
 		b, err := base64.StdEncoding.DecodeString(str(ns["data"]))
 		if err != nil {
 			return nil, true, fmt.Errorf("rule groups namespace %q: %w", str(ns["name"]), err)
@@ -692,10 +834,10 @@ func parseDocRec(ctx context.Context, doc map[string]any, rec *[]Recording) ([]R
 		}
 		return rs, true, nil
 	case doc["apiVersion"] != nil && hasGrafanaRules(doc):
-		rs, err := grafana(doc, rec)
+		rs, err := grafana(ctx, doc, rec)
 		return rs, true, err
 	case doc["groups"] != nil:
-		rs, err := prometheus(doc, rec)
+		rs, err := prometheus(ctx, doc, rec)
 		return rs, true, err
 	}
 	return nil, false, nil
@@ -704,8 +846,12 @@ func parseDocRec(ctx context.Context, doc map[string]any, rec *[]Recording) ([]R
 // prometheus reads groups of Prometheus rules: each alert rule with its
 // group's labels and limit (GroupLabels, Limit). Recording rules are added
 // to rec, when not nil, with their group's labels under their own, as
-// Prometheus 3 records them; otherwise passed over.
-func prometheus(doc map[string]any, rec *[]Recording) ([]Rule, error) {
+// Prometheus 3 records them; otherwise passed over. A group's labels are
+// charged to the input (ctx) on each of its rules, before any is made: an
+// alert rule's alerts carry them, worked out for each rule wherever it is
+// judged, shown or hashed, and a recording rule has a copy of its own.
+func prometheus(ctx context.Context, doc map[string]any, rec *[]Recording) ([]Rule, error) {
+	in := inputOf(ctx)
 	var out []Rule
 	for _, g := range list(doc["groups"]) {
 		gm, _ := g.(map[string]any)
@@ -726,23 +872,53 @@ func prometheus(doc map[string]any, rec *[]Recording) ([]Rule, error) {
 		if len(groupLabels) == 0 {
 			groupLabels = nil
 		}
-		withGroup := func(own any) map[string]string {
-			l := maps.Clone(groupLabels)
-			if l == nil {
-				l = map[string]string{}
+		// What its labels are on each rule, worked out once for the group.
+		each := 0
+		if groupLabels != nil {
+			each = labelsCost(groupLabels)
+		}
+		by := func(what string) func() string {
+			return func() string {
+				return fmt.Sprintf("group %.80q puts its %d labels, %d bytes with what holds them, on each of its %s", group, len(groupLabels), each, what)
 			}
-			maps.Copy(l, labels(own))
-			return l
+		}
+		byAlerts, byRecordings := by("alert rules"), by("recording rules")
+		named := groupCharged(in, group, len(group))
+		withGroup := func(own map[string]string) (map[string]string, error) {
+			if groupLabels == nil {
+				return own, nil
+			}
+			if err := in.charge(each+labelEntry*len(own), byRecordings); err != nil {
+				return nil, err
+			}
+			l := maps.Clone(groupLabels)
+			maps.Copy(l, own)
+			return l, nil
 		}
 		for _, r := range list(gm["rules"]) {
 			rm, _ := r.(map[string]any)
 			name := str(rm["alert"])
 			if name == "" {
 				if record, _ := rm["record"].(string); record != "" && rec != nil {
+					if err := named(); err != nil {
+						return nil, err
+					}
+					l, err := withGroup(labels(rm["labels"]))
+					if err != nil {
+						return nil, err
+					}
 					*rec = append(*rec, Recording{Record: record, Group: group, Expr: strings.TrimSpace(str(rm["expr"])),
-						Labels: withGroup(rm["labels"]), Interval: interval, QueryOffset: offset, Limit: limit})
+						Labels: l, Interval: interval, QueryOffset: offset, Limit: limit})
 				}
 				continue
+			}
+			if err := named(); err != nil {
+				return nil, err
+			}
+			if groupLabels != nil {
+				if err := in.charge(each, byAlerts); err != nil {
+					return nil, err
+				}
 			}
 			rule := Rule{Name: name, Group: group, Expr: strings.TrimSpace(str(rm["expr"])), Labels: labels(rm["labels"]), GroupLabels: groupLabels,
 				Interval: interval, QueryOffset: offset, Limit: limit, Says: annotated(rm["annotations"], TemplatePrometheus)}
@@ -793,7 +969,7 @@ const azureRuleGroup = "Microsoft.AlertsManagement/prometheusRuleGroups"
 // A rule's severity, 0 to 4, becomes the label severity=Sev0 to Sev4 unless
 // it has one; its resolve configuration's timeToResolve is taken as how
 // long it stays firing once its condition stops holding.
-func azure(doc map[string]any, rec *[]Recording) ([]Rule, error) {
+func azure(ctx context.Context, doc map[string]any, rec *[]Recording) ([]Rule, error) {
 	props, _ := doc["properties"].(map[string]any)
 	group := str(doc["name"])
 	interval, err := isoDuration(props["interval"])
@@ -801,16 +977,26 @@ func azure(doc map[string]any, rec *[]Recording) ([]Rule, error) {
 		return nil, fmt.Errorf("rule group %q: %w", group, err)
 	}
 	groupOff := props["enabled"] == false
+	cluster := str(props["clusterName"])
+	s := scoping{in: inputOf(ctx), matchers: matchersOf(map[string]string{"cluster": cluster}), what: "cluster", value: cluster}
+	named := groupCharged(inputOf(ctx), group, len(group))
 	var out []Rule
 	for _, r := range list(props["rules"]) {
 		rm, _ := r.(map[string]any)
+		if err := named(); err != nil {
+			return nil, err
+		}
 		name := str(rm["alert"])
 		if name == "" {
 			if record, _ := rm["record"].(string); record != "" && rec != nil {
 				x := Recording{Record: record, Group: group, Expr: strings.TrimSpace(str(rm["expression"])), Labels: labels(rm["labels"]),
 					Interval: interval, Off: groupOff || rm["enabled"] == false}
-				if c := str(props["clusterName"]); c != "" {
-					if scoped, err := Scope(x.Expr, map[string]string{"cluster": c}); err == nil {
+				if cluster != "" {
+					scoped, err := s.scope(x.Expr)
+					switch {
+					case refused(err):
+						return nil, err
+					case err == nil:
 						x.Expr = scoped
 					}
 				}
@@ -831,8 +1017,10 @@ func azure(doc map[string]any, rec *[]Recording) ([]Rule, error) {
 				rule.KeepFiringFor = never // resolved by hand, if at all
 			}
 		}
-		if c := str(props["clusterName"]); c != "" && rule.Unsupported == "" {
-			if rule.Expr, err = Scope(rule.Expr, map[string]string{"cluster": c}); err != nil {
+		if cluster != "" && rule.Unsupported == "" {
+			if rule.Expr, err = s.scope(rule.Expr); refused(err) {
+				return nil, err
+			} else if err != nil {
 				rule.Unsupported = err.Error()
 			}
 		}
@@ -1250,6 +1438,14 @@ func isoDuration(v any) (time.Duration, error) {
 // GET /api/v1/rules answers: Prometheus, Thanos, Mimir, VictoriaMetrics'
 // vmalert, Amazon Managed Service for Prometheus.
 func FromAPI(b []byte) ([]Rule, error) {
+	return fromAPI(context.Background(), b)
+}
+
+// fromAPI is FromAPI, a group's name on each of its rules charged to the
+// input ctx says it is of (OneInput), the answer its size.
+func fromAPI(ctx context.Context, b []byte) ([]Rule, error) {
+	ctx = counted(OneInput(ctx), len(b))
+	in := inputOf(ctx)
 	var r struct {
 		Status string `json:"status"`
 		Error  string `json:"error"`
@@ -1294,6 +1490,7 @@ func FromAPI(b []byte) ([]Rule, error) {
 	}
 	var out []Rule
 	for _, g := range r.Data.Groups {
+		charge := groupCharged(in, g.Name, len(g.Name))
 		// Where the group falls in its interval, from when it last ran: an
 		// evaluation starts just after its time, so this is to the second
 		// below. Before its first evaluation, Prometheus says year 1.
@@ -1305,6 +1502,9 @@ func FromAPI(b []byte) ([]Rule, error) {
 		for _, x := range g.Rules {
 			if x.Type != "alerting" {
 				continue
+			}
+			if err := charge(); err != nil {
+				return nil, err
 			}
 			l := x.Labels
 			if l == nil {
@@ -1351,21 +1551,30 @@ func grafanaRecord(rm map[string]any) map[string]any {
 
 // grafana reads a Grafana alerting provisioning file: its alert rules, and
 // its recording rules into rec, when not nil, which are no alert rules.
-func grafana(doc map[string]any, rec *[]Recording) ([]Rule, error) {
+func grafana(ctx context.Context, doc map[string]any, rec *[]Recording) ([]Rule, error) {
+	in := inputOf(ctx)
 	var out []Rule
 	for _, g := range list(doc["groups"]) {
 		gm, _ := g.(map[string]any)
-		group := provisioned(gm["name"])
+		name := provisioned(gm["name"])
+		group := name
 		folder := provisioned(gm["folder"])
 		if folder != "" {
 			group = folder + "/" + group
 		}
+		// Each rule's group and folder, worked out once for the group, as
+		// what its fingerprint is of.
+		named := groupCharged(in, group, len(group)+len(folder))
+		place := fmt.Sprintf("%x", sha256.Sum256([]byte(name+"\x00"+folder)))
 		interval, err := duration(provisioned(gm["interval"]))
 		if err != nil {
 			return nil, fmt.Errorf("group %q: %w", group, err)
 		}
 		for _, r := range list(gm["rules"]) {
 			written, _ := r.(map[string]any)
+			if err := named(); err != nil {
+				return nil, err
+			}
 			rm := provisionedRule(written)
 			if record := grafanaRecord(written); record != nil {
 				if rec != nil {
@@ -1391,7 +1600,7 @@ func grafana(doc map[string]any, rec *[]Recording) ([]Rule, error) {
 			if rule.For, err = duration(rm["for"]); err != nil {
 				return nil, fmt.Errorf("rule %q: %w", rule.Name, err)
 			}
-			rule.Fingerprint = fingerprint(rm, provisioned(gm["name"]), folder, rule.For)
+			rule.Fingerprint = fingerprint(rm, place, rule.For)
 			if rule.KeepFiringFor, err = duration(rm["keepFiringFor"]); err != nil {
 				return nil, fmt.Errorf("rule %q: %w", rule.Name, err)
 			}
@@ -1414,9 +1623,11 @@ func grafana(doc map[string]any, rec *[]Recording) ([]Rule, error) {
 // group, labels, condition, queries, pause, notification settings, for,
 // dashboard and panel, and no data and error states; not its
 // annotations, keepFiringFor, missing_series_evals_to_resolve or its
-// group's interval, which it carries its alerts across.
-func fingerprint(rm map[string]any, group, folder string, forDur time.Duration) string {
-	keep := map[string]any{"group": group, "folder": folder, "for": forDur}
+// group's interval, which it carries its alerts across. place is a hash of
+// its group's name and folder, worked out once for the group: printed for
+// each rule, a long name was copied for each.
+func fingerprint(rm map[string]any, place string, forDur time.Duration) string {
+	keep := map[string]any{"place": place, "for": forDur}
 	for _, k := range []string{"uid", "title", "labels", "condition", "data", "isPaused", "notification_settings", "dashboardUid", "panelId", "noDataState", "execErrState", "record"} {
 		if v, ok := rm[k]; ok {
 			keep[k] = v
@@ -2216,12 +2427,14 @@ func duration(v any) (time.Duration, error) {
 			}
 			return d, nil
 		}
-		// Prometheus also takes days and weeks.
-		if n, err := strconv.Atoi(strings.TrimSuffix(x, "d")); err == nil && strings.HasSuffix(x, "d") {
-			if n < 0 || n > int(never/(24*time.Hour)) {
+		// As Prometheus writes one (model.ParseDuration): years, weeks,
+		// days, hours, minutes, seconds and milliseconds, in that order,
+		// 1w or 1d12h, as PromQL writes a range (readRange).
+		if d, ok := readRange(x); ok {
+			if d > never {
 				return 0, fmt.Errorf("duration %q out of range", x)
 			}
-			return time.Duration(n) * 24 * time.Hour, nil
+			return d, nil
 		}
 		return 0, fmt.Errorf("unreadable duration %q", x)
 	}

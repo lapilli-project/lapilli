@@ -2,6 +2,206 @@
 
 ## [Unreleased]
 
+## [0.44.1] - 2026-11-16
+
+A security fix: what a rules input makes beyond its own text is bounded,
+for the input and for the inputs read together, where it is made; and a
+rule file Lapilli refuses is said, never passed over unseen. No ledger
+schema change; the API and MCP answer as they did. Read "Changed" before
+you upgrade: some rule sets passed over unsaid before are an error now.
+
+### Security
+
+- **A small rules input could make gigabytes** (affected: every release
+  from 0.1.0). Copies were made for each rule before anything looked at
+  them, from whatever a rule's writer put in one place:
+  - the text YAML aliases bring in again, which yaml.v3 bounds by how many
+    values it is, not their text (from 0.1.0): an 8 MB string aliased by
+    100 rules' labels made 5.1 GB, parsed and hashed; and the maps an
+    aliased mapping makes, counted by their text alone: 4,000 short keys
+    aliased by 40 rules, 41 KB, made 72 MB;
+  - a Google Rules' namespace, and an Azure rule group's cluster, put into
+    each selector of each rule's expression (from 0.5.0): a namespace of
+    40 KB on 1,000 rules of 16 selectors, 99 KB, made 6.5 GB, parsed and
+    hashed, an Azure rule group as much; and each number of such an
+    expression lowered the rest of it, 431 MB for 20,000 numbers, 6 s of
+    CPU for 100,000;
+  - a group's labels, on each of its rules (from 0.32.0): 9,999 labels on
+    6,700 recording rules, 286 KB, made 4.2 GB; on 6,700 alert rules, one
+    label with a direction mark (from 0.34.1), 4.2 GB; on 3,000 recording
+    rules in a ConfigMap, 193 KB, 1.9 GB; on 1,000 alert rules, 123 KB, 2.3
+    GB hashed; on 60,000 alert rules, 1.8 MB, 11.7 s to read;
+  - a group's name, on each of its rules, in each rule's key (from 0.4.0)
+    and copied for each to be shown when it has a character that doesn't
+    show (from 0.34.1): a name of 1 MiB with a direction mark on 1,000
+    rules kept 1.07 GB, and one pass of their keys made more than 2.2 GB;
+    a Grafana group's name of 1 MiB on 300 rules made 964 MB;
+  - a ConfigMap's value that an alias makes another key's, read into rules
+    again for each key (from 0.1.0): 10,000 rules by 16 keys, 250 KB, made
+    1.2 GB, and past 2.2 GB through `--rules`; as `!!binary`, decoded
+    afresh for each alias, 320 KB made 1.22 GB;
+  - a List some of whose items are left out, written afresh with its
+    aliases in full and kept so in the ledger (from 0.29.0): 69 KB was
+    kept as 3.9 MB; 820 KB, bytes that aren't UTF-8 under 190 mappings
+    aliased ten times, as 109 MB, having allocated 861 MB.
+
+  What an input makes beyond its own text is charged now where it is
+  made, before it is made: the larger of 4 MiB and 32 times its size, 256
+  MiB at most, for the whole input (a file, a directory's files, a stream,
+  a ConfigMap's files, a ruler's namespace, the documents of one source in
+  a version kept in the ledger). Each input above is refused having
+  allocated 1 to 121 MB, its YAML read among it, within 0.11 s; the
+  expression of 20,000 numbers is scoped having allocated under 1 MB; the
+  ConfigMap's recording rules are made only when asked for, and it reads
+  having allocated 13 MB. A value in the shape of rules a YAML alias
+  brings in is refused in a ConfigMap's `data`, naming its key, whatever its tag
+  (`!!str`, `!!binary`, read as the text it decodes to) and wherever the
+  alias is (the value, the data, a merge into it, the whole ConfigMap): a
+  ConfigMap the API server keeps holds none, and `binaryData` isn't read
+  for rules. One that isn't, by its text (an env-style value aliased by
+  another key), is passed over unread, as before. So is an Amazon rule
+  groups namespace's `data` an alias brings in refused before it is
+  decoded, naming the namespace: each namespace aliasing it was decoded
+  and read into rules again, and the AWS CLI writes none. A document
+  written afresh is written into the room the input has left and charged
+  what it is written in, not estimated; what is kept so, where it is read
+  in the file's place (`--rules-select` leaving an item out, `lapilli
+  serve` keeping only the documents of rules), is read as the file it is
+  of, what it may make judged by the file's size and what the copy holds
+  beyond the file charged as made, and is 16 MiB at most, as a file is
+  (read as a file of its own, its size, aliases written out, set what it
+  might make: a List of 41 KB written out to 1.5 MB, read with its
+  recording rules, made past what the file may). A file read as it is
+  isn't held to what its copy would be. A ConfigMap whose `data` an alias
+  brings in is refused there too: counted broken and kept, it was written
+  afresh with each alias in full and read so, a rule file again for each
+  key. No label and no name is capped: Prometheus takes them of any
+  length. Real sets are far inside the bound:
+  kube-prometheus-stack's rules four times over, each group with labels of
+  its own, make 1.8 MB of the 208 MB they may; 5,000 rules sharing six
+  labels and three annotations by aliases, 10.4 MB of 20 MB.
+- **A ruler's namespace could have another team's rules passed over.** From
+  0.34.1 an Amazon ruler's namespaces counted their YAML aliases as one
+  input, so one namespace's aliases could have a later one refused for
+  excessive aliasing, passed over in its place; with the bound above
+  counted the same way (as it was before its review), a namespace that
+  made much within it (11 KB making 4.18 MB) did the same to any ruler's,
+  the warning naming the innocent one, and a namespace refused gave back
+  what it counted, so twenty refused in a row allocated 2 GB a read. Each
+  namespace is an input of its own now, refused and passed over alone,
+  named; what all of them make, refused ones' among it (what each made
+  before it was refused, not the charge refused, which isn't made) and
+  never given back, is 256 MiB at most, past which the read fails whole,
+  naming the namespace whose making took it past, in whatever order they
+  are read, and the one that had made the most, which may be another (what
+  one makes in reading counted before it is done), and the version in
+  effect stays. Twenty refused namespaces allocate 4 MB.
+- **A rule file Lapilli couldn't read was passed over unsaid** (from 0.1.0).
+  In a ConfigMap, a rule file that yaml.v3 decodes, as Prometheus loads
+  it, but Lapilli's reader refuses (a rule of 10,001 labels, merges counted
+  stricter than yaml.v3, aliases past its bounds) was taken for a value
+  that isn't YAML and left out, so a pull request's rule could miss the
+  backtest unseen; so was one refused for what it makes, through FromDocs,
+  as serve reads a version from the ledger, and a ConfigMap holding only
+  that file was "no alert rules". Only a value yaml.v3 can't decode isn't
+  YAML now: one Lapilli refuses, in the shape of rules, is an error naming
+  its key, and broken where a stream is picked. So is a file below a
+  directory's top in that shape, as at the top: it was passed over as one
+  that doesn't read is, though the document refused may be another of the
+  file (a stream whose Deployment has a key Lapilli refuses, beside its
+  PrometheusRule). In the shape of rules is a mapping with `groups` (a key
+  as written, whatever its tag, or as its text is read, below), a `spec`
+  with `groups` (a PrometheusRule, a Google `Rules`), or a merge, or a
+  list one of whose items is a mapping with `groups` or a `kind`; and a
+  document whose nodes don't tell (past `Nodes`, brought in by an alias,
+  or another document refused in the same file) by its text: `groups`
+  written, or written by double-quoted escapes (`gr\x6fups`), or
+  `Z3JvdXBz`, the base64 a `!!binary` key `groups` is written in, however
+  its tag is written (`!!bin%61ry`, a `%TAG` directive) and across
+  whatever spaces and line breaks. A backslash or `binary` alone in a file
+  of data or an env-style value isn't. A value not in that shape is passed
+  over, whatever Lapilli's reader says of it (a file_sd list whose labels have a
+  key twice, a list 250 deep), and a rule file with a key twice, which
+  yaml.v3 refuses too, is broken, as before. A refusal for what an input
+  makes is said wherever it is read: `lapilli verdict --rules` and
+  `lapilli serve`'s "reading the rules" (its log and status; the version in
+  effect stays) fail with it, as does reading a version in the ledger
+  again, and a ruler's namespace is passed over with it, named.
+- **A mapping's keys that weren't strings hid what was under them**
+  (affected: every release from 0.1.0; a rule file's own keys from
+  0.34.1). A mapping one of whose keys wasn't a string was read as yaml.v3
+  decodes it into Go, a map no rule is read from: a ConfigMap's `data`
+  with a key `0` hid every rule file in it, a rule file with a `!!binary`
+  `groups` key (or any key `1`) hid its rules, and labels with a key `true`
+  lost every label, unsaid. Keys are read as text now, as Prometheus
+  decodes a rule file's: plain scalars as written (`0`, `true`, `1.5`, a
+  date), a `!!binary` key as the text it decodes to; a key that isn't a
+  scalar (as before), a null one (which Prometheus passes over and
+  Kubernetes refuses), one of another tag (`!x`), and two keys of one text
+  (an alias of a key beside the key, a `!!binary` key beside what it
+  decodes to, which Prometheus loads, the last one set) are refused,
+  naming the line, said as Lapilli's own refusals are, never passed over
+  as a file that doesn't read.
+- **A replay copied a rule's labels for each of its series** (from 0.1.0):
+  a rule of 9,999 labels on 1,000 series made 1.3 GB in one replay. The
+  copies are counted before they are made now, against what a range's
+  samples are held to (`--max-samples`, 640 MB by default); past it the
+  rule isn't replayed, saying so in its own words (`too many labels on
+  its series to replay`), which `--fail-unreplayed` counts: a rule's
+  writer could otherwise keep a rule out of a backtest unseen. So too
+  wherever a replay's answer is kept or used: `lapilli serve` keeps such a
+  rule's firings as they were and lists its run as failed, as for a query
+  that failed (taken for a rule that can't be replayed, its firings were
+  dropped and the window recorded as replayed empty, never tried again),
+  and a near miss's cost and an unrecorded firing's clearance are an error
+  (`rules.Unanswered`). A dozen
+  labels on 50,000 series take some 100 MB.
+- **What is still multiplied.** Each bound is per input: lapilli serve
+  holds every version of the rules in a window at once, and keeps the
+  rules of up to 128 versions read, so what one version may make is
+  multiplied by how many versions there are; and each request that works
+  out a rule's labels for each of its rules, at once with others, makes it
+  again. Each is a version's or a request's own, bounded as above.
+
+### Changed
+
+- **Errors once passed over are said**, and a rule set that read before may
+  be refused now, with why: a ConfigMap's rule file Lapilli can't read, a
+  file below a directory's top past what the directory may make (the whole
+  directory is refused) or in the shape of rules that Lapilli's reader
+  refuses, a namespaced Google `Rules` whose rules don't read (before, the
+  document gave no rules and no error), a ConfigMap whose `data` holds a
+  value in the shape of rules a YAML alias brings in (one that isn't is
+  passed over, as before), wherever a stream is picked too, and an Amazon
+  rule groups namespace's `data` a YAML alias brings in.
+- **A mapping's keys are read as text** in rules inputs, as Prometheus
+  reads them: what was under a key `0`, `true`, `1.5` or `!!binary` (a
+  ConfigMap's rule files, a rule file's groups, labels) was left out, and
+  is read now. A null key, a key tagged other than YAML's own (`!x`), and
+  two keys of one text (an alias of a key beside the key, which Prometheus
+  loads) are refused, naming the line: in a ConfigMap's rule file, an
+  error naming its key; below a directory's top, an error, as at it.
+- **What a stream keeps, written afresh, is read as the file it came
+  from** (a List some of whose items `--rules-select` leaves out, or
+  `lapilli serve` keeps only the documents of rules of): what it may make is
+  judged by the file's size, its aliases written out charged to it, and
+  what is kept is 16 MiB at most. A rule set with many aliases, read with
+  its recording rules (`--compare`), may be refused now where it read
+  before.
+- **`--fail-unreplayed` counts a rule too wide to replay** (its labels on
+  each of its series past what `--max-samples` lets a replay hold), as it
+  counts one whose history couldn't be read; its message says so.
+- **Durations are read as Prometheus writes them**, years, weeks and days
+  with the rest (`1w`, `1y`, `1d12h`), for every source; before, only a
+  number of days was, and a namespaced Google `Rules` of `for: 1w` was
+  refused. What Go reads is read as before (`1.5h`, `1m1h`, `1us`, which
+  Prometheus doesn't), and a duration past 100 years is refused (`101y`,
+  which Prometheus takes).
+- **A version kept in the ledger is read again in the inputs its sources
+  were read in**: `--rules`'s files together, each ruler's namespace and
+  alarm on its own, a Loki's apart; two documents each read alone were
+  refused read again as one.
+
 ## [0.44.0] - 2026-11-16
 
 Teams, quiet windows, reports and the editor roles admins give were the

@@ -706,3 +706,50 @@ func TestTellApartOwnName(t *testing.T) {
 		t.Errorf("alert names %q %q", rs[0].AlertName(), rs[1].AlertName())
 	}
 }
+
+// namespace is a Mimir namespace's groups, as its configuration API lists
+// them: one group of n labels on rules alert rules.
+func namespace(ns string, labels, rules int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s:\n    - name: g\n      labels:\n", ns)
+	for i := range labels {
+		fmt.Fprintf(&b, "        l%04d: v\n", i)
+	}
+	b.WriteString("      rules:\n")
+	for i := range rules {
+		fmt.Fprintf(&b, "        - alert: A%d\n          expr: up == 0\n", i)
+	}
+	return b.String()
+}
+
+// TestReadNamespacesApart: a ruler's namespaces are each read as an input
+// of its own: one making much within its own bound (aaa) doesn't have an
+// innocent one after it (team-b) refused and passed over in its place, as
+// one bound shared by them all did, the warning naming team-b; one past
+// its own bound (bomb) is passed over, named. Past what they may make
+// together, refused ones' among it, the read fails whole, and the version
+// in effect stays.
+func TestReadNamespacesApart(t *testing.T) {
+	ctx := context.Background()
+	var body atomic.Value
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, body.Load().(string))
+	}))
+	defer ts.Close()
+	r, _ := NewRuler(ts.URL+"/rules", "test")
+	var told []string
+	r.Warn = func(s string) { told = append(told, s) }
+	body.Store(namespace("aaa", 1000, 33) + namespace("bomb", 9999, 30) + namespace("team-b", 1, 1))
+	rs, docs, err := r.Read(ctx)
+	if err != nil || len(rs) != 34 || len(docs) != 2 || len(told) != 1 || !strings.Contains(told[0], "/rules/bomb") {
+		t.Errorf("read %d rules, %d documents, told %q: %v", len(rs), len(docs), told, err)
+	}
+	var many strings.Builder
+	for i := range 100 {
+		many.WriteString(namespace(fmt.Sprintf("ns%03d", i), 1000, 33))
+	}
+	body.Store(many.String())
+	if rs, _, err := r.Read(ctx); !rules.OverTotal(err) {
+		t.Errorf("100 namespaces of some 3.9 MB made each: %d rules, %v", len(rs), err)
+	}
+}
