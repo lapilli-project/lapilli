@@ -48,6 +48,18 @@
 #                    from the commit the pull request goes into, never the
 #                    pull request's own: --incidents. A file in the checkout
 #                    is the pull request's, and isn't taken as an argument
+#   IMPACT           optional: a PromQL expression that returns something
+#                    while users are hurt, such as a 5xx ratio above 1%
+#                    (--impact): its windows are incidents too, which the
+#                    rules that differ are judged by. Given to lapilli as
+#                    one argument, as it is: never split at spaces, nor
+#                    expanded
+#   IMPACT_FOR       optional: how long impact must last in a series to be
+#                    an incident (--impact-for; lapilli's default 5m)
+#   MATCH            optional: the labels a firing and an incident must
+#                    agree on when both have them, comma-separated, such
+#                    as service or service,cluster: a --match each, beside
+#                    any among the arguments
 #   EXPECT           optional: an expectations file in the repository
 #                    (docs/design/expectations.md): the rules that differ
 #                    are held to it, the pull request's file for the rules
@@ -231,6 +243,25 @@ if [ -n "${INCIDENTS:-}" ] && { ! in_repo "$INCIDENTS" || [ "${INCIDENTS%/}" != 
   say "INCIDENTS $INCIDENTS: want a file in the repository"
   exit 1
 fi
+if [ -n "${IMPACT:-}" ] && [ -z "$(printf '%s' "$IMPACT" | tr -d ' \t\n')" ]; then
+  say "IMPACT: want a PromQL expression that returns something while users are hurt"
+  exit 1
+fi
+# A duration as lapilli reads it, which says more if it isn't one.
+case ${IMPACT_FOR:-} in
+  '') ;;
+  [!0-9]* | *[!0-9dhms]*) say "IMPACT_FOR $IMPACT_FOR: want a duration, such as 10m"; exit 1 ;;
+esac
+if [ -n "${IMPACT_FOR:-}" ] && [ -z "${IMPACT:-}" ]; then
+  say "IMPACT_FOR is how long IMPACT must last: give IMPACT too"
+  exit 1
+fi
+# MATCH's labels, a comma apart; spaces beside a comma passed over.
+match=$(printf '%s' "${MATCH:-}" | sed 's/^ *//; s/ *$//; s/ *, */,/g')
+case $match in
+  '') ;;
+  ,* | *, | *,,* | *[!A-Za-z0-9_.,]*) say "MATCH $MATCH: want label names, comma-separated, such as service or service,cluster"; exit 1 ;;
+esac
 if [ -n "${EXPECT:-}" ] && { ! in_repo "$EXPECT" || [ "${EXPECT%/}" != "$EXPECT" ]; }; then
   say "EXPECT $EXPECT: want a file in the repository"
   exit 1
@@ -287,11 +318,30 @@ in_clone() {
   return 1
 }
 # Each argument in turn, to the end and around: the same, in order, after.
+# incidents_given: an argument gives incidents, or impact.
+incidents_given=
 n=$#
 while [ "$n" -gt 0 ]; do
   a=$1
   shift
   n=$((n - 1))
+  case $a in
+    --incidents | --incidents=* | --impact | --impact=*) incidents_given=1 ;;
+  esac
+  case $a in
+    --impact | --impact=*)
+      if [ -n "${IMPACT:-}" ]; then
+        say "$a: IMPACT says already when users were hurt: give one of them"
+        exit 1
+      fi
+      ;;
+    --impact-for | --impact-for=*)
+      if [ -n "${IMPACT_FOR:-}" ]; then
+        say "$a: IMPACT_FOR says already how long impact must last: give one of them"
+        exit 1
+      fi
+      ;;
+  esac
   case $a in
     --rules | --rules=* | --compare | --compare=* | --rules-history | --rules-history=* | --changed-only | --markdown | \
       --json | --metrics | --check-replay* | --check-content*)
@@ -321,6 +371,10 @@ while [ "$n" -gt 0 ]; do
   esac
   set -- "$@" "$a"
 done
+if [ -n "$match" ] && [ -z "${INCIDENTS:-}${IMPACT:-}$incidents_given" ]; then
+  say "MATCH is what a firing and an incident must agree on: give IMPACT or INCIDENTS too"
+  exit 1
+fi
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -700,6 +754,19 @@ summary() {
 # $verdict.
 verdict=
 backtest() {
+  # MATCH's labels, the last first, so that each lands in its order.
+  rest=$match
+  while [ -n "$rest" ]; do
+    set -- --match "${rest##*,}" "$@"
+    case $rest in *,*) rest=${rest%,*} ;; *) rest= ;; esac
+  done
+  if [ -n "${IMPACT_FOR:-}" ]; then
+    set -- --impact-for "$IMPACT_FOR" "$@"
+  fi
+  # One argument, as it is.
+  if [ -n "${IMPACT:-}" ]; then
+    set -- --impact "$IMPACT" "$@"
+  fi
   if [ -n "${INCIDENTS:-}" ]; then
     set -- --incidents "$tmp/incidents.yaml" "$@"
   fi

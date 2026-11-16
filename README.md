@@ -1021,21 +1021,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 2, persist-credentials: false}
-      # Pinned by the commit of the release's tag, which a tag moved can't change.
-      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-v0.33.0-TAG # v0.33.0
+      # Pinned by the commit of the release's tag, which a tag moved can't
+      # change; the action installs that release of lapilli.
+      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-vX.Y.Z-TAG # vX.Y.Z
         with:
-          version: v0.33.0
-          sha256: SHA256-OF-lapilli-v0.33.0-linux-amd64.tar.gz # as its SHA256SUMS says
           paths: alerts
           prometheus-url: ${{ vars.PROMETHEUS_URL }}
           since: 14d
 ```
 
-Each installs a pinned release, checked against its `SHA256SUMS`; reads the
+Each installs a pinned release, checked against its `SHA256SUMS` (the
+action, the release it is at, which Dependabot keeps up to date with the
+`uses:` line); reads the
 rules of the pull request and of the commit it goes into, as files
 (`paths`) or as a command renders them in each (`render: helm template
 monitoring charts/monitoring`), and the incidents from the commit it goes
-into, never the pull request's (`incidents`); runs `lapilli verdict
+into, never the pull request's (`incidents`), and the times a PromQL
+expression says users were hurt (`impact`, `match: service`); runs `lapilli verdict
 --compare --changed-only --markdown`; and posts one comment, found again by
 a hidden first line. When nothing that decides when a rule fires changed
 and there is no comment yet, it posts none. When something fails, the comment says

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -41,7 +42,12 @@ import (
 const backtestRecipes = "../../recipes/backtest/"
 
 func TestMain(m *testing.M) {
-	// Run by a recipe, as lapilli.
+	// Run by a recipe, as lapilli: its arguments, as it was given them,
+	// written down when asked.
+	if f := os.Getenv("LAPILLI_TEST_ARGS"); f != "" && os.Getenv("LAPILLI_TEST_AS_CLI") == "1" {
+		b, _ := json.Marshal(os.Args[1:])
+		os.WriteFile(f, b, 0o600)
+	}
 	if os.Getenv("LAPILLI_TEST_AS_CLI") == "1" {
 		os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 	}
@@ -62,6 +68,14 @@ func needRecipeTools(t *testing.T) {
 // two, and nothing else.
 func promStandIn(t *testing.T) *httptest.Server {
 	t.Helper()
+	return promAnswering(t, map[string]string{"errors > 5": "checkout"})
+}
+
+// promAnswering is a Prometheus that has each query in answers from three
+// hours ago to two, one series whose service is the one it maps to, and
+// nothing else: a query not written exactly so has nothing.
+func promAnswering(t *testing.T, answers map[string]string) *httptest.Server {
+	t.Helper()
 	now := time.Now()
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/query_range" {
@@ -73,7 +87,7 @@ func promStandIn(t *testing.T) *httptest.Server {
 		end, _ := strconv.ParseInt(r.Form.Get("end"), 10, 64)
 		step, _ := strconv.ParseFloat(r.Form.Get("step"), 64)
 		result := []any{}
-		if r.Form.Get("query") == "errors > 5" && step > 0 {
+		if service, ok := answers[r.Form.Get("query")]; ok && step > 0 {
 			var values [][]any
 			from, to := now.Add(-3*time.Hour).Unix(), now.Add(-2*time.Hour).Unix()
 			for at := start; at <= end; at += int64(step) {
@@ -82,7 +96,7 @@ func promStandIn(t *testing.T) *httptest.Server {
 				}
 			}
 			if len(values) > 0 {
-				result = append(result, map[string]any{"metric": map[string]string{"service": "checkout"}, "values": values})
+				result = append(result, map[string]any{"metric": map[string]string{"service": service}, "values": values})
 			}
 		}
 		json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]any{"resultType": "matrix", "result": result}})
@@ -132,7 +146,7 @@ func withoutCI(env []string) []string {
 			}
 		}
 		switch k {
-		case "CI", "TF_BUILD", "PR", "PATHS", "INCIDENTS", "KEY", "REPO", "TARGET", "TARGET_BRANCH", "FAIL_ON_ERROR":
+		case "CI", "TF_BUILD", "PR", "PATHS", "INCIDENTS", "KEY", "REPO", "TARGET", "TARGET_BRANCH", "FAIL_ON_ERROR", "IMPACT", "IMPACT_FOR", "MATCH":
 			ci = true
 		}
 		if !ci {
@@ -1002,37 +1016,98 @@ func TestBacktestRecipeInstall(t *testing.T) {
 	}
 }
 
-// action.yml runs github.sh with its inputs, as GitHub Actions runs a
-// composite action: each input reaches the script as a variable, never in
-// its text; args are split at spaces and never expanded; the token is in a
-// file only while the step runs.
-func TestBacktestAction(t *testing.T) {
-	needRecipeTools(t)
+// backtestAction is action.yml as it is read.
+type backtestAction struct {
+	Inputs map[string]struct {
+		Required bool   `yaml:"required"`
+		Default  string `yaml:"default"`
+	} `yaml:"inputs"`
+	Runs struct {
+		Using string `yaml:"using"`
+		Steps []struct {
+			Shell string            `yaml:"shell"`
+			Env   map[string]string `yaml:"env"`
+			Run   string            `yaml:"run"`
+		} `yaml:"steps"`
+	} `yaml:"runs"`
+}
+
+func readBacktestAction(t *testing.T) backtestAction {
+	t.Helper()
 	b, err := os.ReadFile(backtestRecipes + "action.yml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var action struct {
-		Inputs map[string]struct {
-			Required bool   `yaml:"required"`
-			Default  string `yaml:"default"`
-		} `yaml:"inputs"`
-		Runs struct {
-			Using string `yaml:"using"`
-			Steps []struct {
-				Shell string            `yaml:"shell"`
-				Env   map[string]string `yaml:"env"`
-				Run   string            `yaml:"run"`
-			} `yaml:"steps"`
-		} `yaml:"runs"`
-	}
+	var action backtestAction
 	if err := yaml.Unmarshal(b, &action); err != nil {
 		t.Fatal(err)
 	}
 	if action.Runs.Using != "composite" || len(action.Runs.Steps) != 1 || action.Runs.Steps[0].Shell != "sh" {
 		t.Fatalf("runs: %+v", action.Runs)
 	}
+	return action
+}
+
+// runAction runs action.yml's step for rr's pull request, as GitHub
+// Actions runs a composite action: each input, given or its default,
+// reaching the script as a variable; env adds to the job's variables, or
+// takes the place of one. It gives what the step said, and whether it
+// succeeded.
+func runAction(t *testing.T, rr *recipeRun, inputs map[string]string, env ...string) (string, error) {
+	t.Helper()
+	action := readBacktestAction(t)
 	step := action.Runs.Steps[0]
+	temp := t.TempDir()
+	vars := []string{"GITHUB_ACTION_PATH=" + must(filepath.Abs(backtestRecipes)), "RUNNER_TEMP=" + temp, "GITHUB_ACTIONS=true",
+		"GITHUB_API_URL=" + rr.host.url, "GITHUB_REPOSITORY=o/r", "LAPILLI_TEST_AS_CLI=1", "LAPILLI=" + must(os.Executable())}
+	for name, val := range step.Env {
+		switch {
+		case val == "${{ github.event.pull_request.number }}":
+			val = "7"
+		case strings.HasPrefix(val, "${{ inputs.") && strings.HasSuffix(val, " }}"):
+			in := strings.TrimSuffix(strings.TrimPrefix(val, "${{ inputs."), " }}")
+			def, ok := action.Inputs[in]
+			if !ok {
+				t.Fatalf("%s: no input %s", name, in)
+			}
+			val = def.Default
+			if v, ok := inputs[in]; ok {
+				val = v
+			} else if def.Required {
+				t.Fatalf("input %s is required", in)
+			}
+			if val == "${{ github.token }}" {
+				val = "host-token-0123456789"
+			}
+		default:
+			t.Fatalf("%s: %s", name, val)
+		}
+		vars = append(vars, name+"="+val)
+	}
+	for in := range inputs {
+		if _, ok := action.Inputs[in]; !ok {
+			t.Fatalf("no input %s", in)
+		}
+	}
+	cmd := exec.Command("sh", "-c", step.Run)
+	cmd.Dir = rr.repo.dir
+	cmd.Env = append(append(append([]string{}, rr.repo.env...), vars...), env...)
+	rr.host.set(func(*commentHost) {}) // as rr.run orders them
+	out, err := cmd.CombinedOutput()
+	rr.host.set(func(*commentHost) {})
+	if left, _ := os.ReadDir(temp); len(left) != 0 {
+		t.Errorf("left in RUNNER_TEMP: %v", left)
+	}
+	return string(out), err
+}
+
+// action.yml runs github.sh with its inputs, as GitHub Actions runs a
+// composite action: each input reaches the script as a variable, never in
+// its text; args are split at spaces and never expanded; the token is in a
+// file only while the step runs.
+func TestBacktestAction(t *testing.T) {
+	needRecipeTools(t)
+	step := readBacktestAction(t).Runs.Steps[0]
 	if strings.Contains(step.Run, "${{") {
 		t.Errorf("an expression in the script's text, where an input could write shell: %s", step.Run)
 	}
@@ -1040,49 +1115,14 @@ func TestBacktestAction(t *testing.T) {
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
 	rr := newRecipeRun(t, backtestHosts[0], repo)
-	temp := t.TempDir()
-	pwned := filepath.Join(temp, "pwned")
+	pwned := filepath.Join(t.TempDir(), "pwned")
 	run := func(inputs map[string]string) string {
 		t.Helper()
-		env := []string{"GITHUB_ACTION_PATH=" + must(filepath.Abs(backtestRecipes)), "RUNNER_TEMP=" + temp, "GITHUB_ACTIONS=true",
-			"GITHUB_API_URL=" + rr.host.url, "GITHUB_REPOSITORY=o/r", "LAPILLI_TEST_AS_CLI=1", "LAPILLI=" + must(os.Executable())}
-		for name, val := range step.Env {
-			switch {
-			case val == "${{ github.event.pull_request.number }}":
-				val = "7"
-			case strings.HasPrefix(val, "${{ inputs.") && strings.HasSuffix(val, " }}"):
-				in := strings.TrimSuffix(strings.TrimPrefix(val, "${{ inputs."), " }}")
-				def, ok := action.Inputs[in]
-				if !ok {
-					t.Fatalf("%s: no input %s", name, in)
-				}
-				val = def.Default
-				if v, ok := inputs[in]; ok {
-					val = v
-				} else if def.Required {
-					t.Fatalf("input %s is required", in)
-				}
-				if val == "${{ github.token }}" {
-					val = "host-token-0123456789"
-				}
-			default:
-				t.Fatalf("%s: %s", name, val)
-			}
-			env = append(env, name+"="+val)
-		}
-		cmd := exec.Command("sh", "-c", step.Run)
-		cmd.Dir = repo.dir
-		cmd.Env = append(append([]string{}, repo.env...), env...)
-		rr.host.set(func(*commentHost) {}) // as rr.run orders them
-		out, err := cmd.CombinedOutput()
-		rr.host.set(func(*commentHost) {})
+		out, err := runAction(t, rr, inputs)
 		if err != nil {
 			t.Fatalf("%v\n%s", err, out)
 		}
-		if left, _ := os.ReadDir(temp); len(left) != 0 {
-			t.Errorf("left in RUNNER_TEMP: %v", left)
-		}
-		return string(out)
+		return out
 	}
 	out := run(map[string]string{"version": "v0.32.0", "paths": "alerts", "prometheus-url": prom.URL, "since": "2d", "args": "--tz  UTC"})
 	mine := rr.host.mine()
@@ -1689,6 +1729,345 @@ func TestBacktestRecipeExpectations(t *testing.T) {
 		out, err := rr.run(c.settings, append([]string{"--prometheus", prom.URL}, c.args...)...)
 		if err == nil || !strings.Contains(out, c.said) {
 			t.Errorf("%v %v: %v\n%s", c.settings, c.args, err, out)
+		}
+	}
+}
+
+// argsGiven is what a recipe gave lapilli, as LAPILLI_TEST_ARGS wrote it.
+func argsGiven(t *testing.T, file string) []string {
+	t.Helper()
+	b, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("lapilli didn't run: %v", err)
+	}
+	var args []string
+	if err := json.Unmarshal(b, &args); err != nil {
+		t.Fatal(err)
+	}
+	return args
+}
+
+// flagValues are the values flag is given among args, in order.
+func flagValues(args []string, flag string) []string {
+	var vals []string
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			vals = append(vals, args[i+1])
+		}
+	}
+	return vals
+}
+
+// hostileImpact is an impact expression holding what a shell would split
+// or expand: spaces, both quotes, $, *, and commands, which touch pwned.
+func hostileImpact(pwned string) string {
+	return `sum by (service) (rate(http_requests_total{code=~"5..",path!~'/health.*'}[5m])) * 100` +
+		` / sum by (service) (rate(http_requests_total[5m])) > $THRESHOLD $(touch ` + pwned + `) ` + "`touch " + pwned + "`"
+}
+
+// checkImpactArgs checks lapilli was given impact as one argument, as it
+// is, IMPACT_FOR's 10m, and the labels service and cluster to match on.
+func checkImpactArgs(t *testing.T, args []string, impact string) {
+	t.Helper()
+	if got := flagValues(args, "--impact"); len(got) != 1 || got[0] != impact {
+		t.Errorf("--impact %q, want only %q", got, impact)
+	}
+	if got := flagValues(args, "--impact-for"); !slices.Equal(got, []string{"10m"}) {
+		t.Errorf("--impact-for %q", got)
+	}
+	if got := flagValues(args, "--match"); !slices.Equal(got, []string{"service", "cluster"}) {
+		t.Errorf("--match %q, want service then cluster", got)
+	}
+}
+
+// IMPACT gives the times users were hurt as incidents the rules that
+// differ are judged by, and MATCH the labels a firing and an incident must
+// agree on, on every host: the expression reaches lapilli as one argument,
+// as it is, whatever it holds, and the history as it is written.
+func TestBacktestRecipeImpact(t *testing.T) {
+	needRecipeTools(t)
+	pwned := filepath.Join(t.TempDir(), "pwned")
+	impact := hostileImpact(pwned)
+	// The history has the expression only as it is written.
+	prom := promAnswering(t, map[string]string{"errors > 5": "checkout", impact: "checkout"})
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	argsFile := filepath.Join(t.TempDir(), "args")
+	for _, h := range backtestHosts {
+		t.Run(h.kind, func(t *testing.T) {
+			rr := newRecipeRun(t, h, repo)
+			os.Remove(argsFile)
+			out, err := rr.run([]string{"PATHS=alerts", "LAPILLI_TEST_ARGS=" + argsFile, "IMPACT=" + impact, "IMPACT_FOR=10m", "MATCH= service , cluster"},
+				"--prometheus", prom.URL, "--tz", "UTC")
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			checkImpactArgs(t, argsGiven(t, argsFile), impact)
+			// The rule in place, waiting 5m, caught the hour of impact; the
+			// pull request's, waiting 2h, misses it.
+			if body := rr.body(); !strings.Contains(body, "| `CheckoutErrors` | `page` | 1 → 0 | 1 → 0 | 0 → 0 |") ||
+				!regexp.MustCompile("\n\\| `impact-1` `user impact \\(--impact\\)` \\| [0-9-]+ [0-9:]+ \\| `CheckoutErrors` \\+5m \\| no changed rule fired \\|\n").MatchString(body) {
+				t.Errorf("the comment:\n%s\n%s", body, out)
+			}
+		})
+	}
+	if _, err := os.Stat(pwned); err == nil {
+		t.Error("IMPACT ran a command")
+	}
+
+	// Users hurt on another service: caught by a firing of checkout's, but
+	// for MATCH, which keeps one service's firing from catching another's.
+	other := promAnswering(t, map[string]string{"errors > 5": "checkout", "search_errors > 0": "search"})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	if out, err := rr.run([]string{"PATHS=alerts", "IMPACT=search_errors > 0"}, "--prometheus", other.URL); err != nil ||
+		!strings.Contains(rr.body(), "| `CheckoutErrors` | `page` | 1 → 0 | 1 → 0 | 0 → 0 |") || !strings.Contains(rr.body(), "#### Incidents caught differently") {
+		t.Errorf("without MATCH: %v\n%s\n%s", err, rr.body(), out)
+	}
+	if out, err := rr.run([]string{"PATHS=alerts", "IMPACT=search_errors > 0", "MATCH=service"}, "--prometheus", other.URL); err != nil ||
+		!strings.Contains(rr.body(), "| `CheckoutErrors` | `page` | 1 → 0 | 0 → 0 | 1 → 0 |") || !strings.Contains(rr.body(), "Every incident is caught as it was.") {
+		t.Errorf("MATCH=service: %v\n%s\n%s", err, rr.body(), out)
+	}
+	// --match among the arguments adds to MATCH, and --impact there gives
+	// MATCH its incidents.
+	os.Remove(argsFile)
+	if out, err := rr.run([]string{"PATHS=alerts", "MATCH=service", "LAPILLI_TEST_ARGS=" + argsFile}, "--prometheus", other.URL,
+		"--impact", "search_errors > 0", "--match", "cluster"); err != nil {
+		t.Errorf("--impact and --match among the arguments: %v\n%s", err, out)
+	} else if got := flagValues(argsGiven(t, argsFile), "--match"); !slices.Equal(got, []string{"service", "cluster"}) {
+		t.Errorf("--match %q", got)
+	}
+
+	// Wrong settings fail at once.
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	for _, c := range []struct {
+		settings []string
+		args     []string
+		said     string
+	}{
+		{[]string{"IMPACT_FOR=10m"}, nil, "IMPACT_FOR is how long IMPACT must last: give IMPACT too"},
+		{[]string{"IMPACT=up == 0", "IMPACT_FOR=ten"}, nil, "IMPACT_FOR ten: want a duration"},
+		{[]string{"IMPACT=up == 0", "IMPACT_FOR=-5m"}, nil, "IMPACT_FOR -5m: want a duration"},
+		{[]string{"IMPACT= \t "}, nil, "IMPACT: want a PromQL expression"},
+		{[]string{"MATCH=service"}, nil, "MATCH is what a firing and an incident must agree on: give IMPACT or INCIDENTS too"},
+		{[]string{"IMPACT=up == 0", "MATCH=service,,cluster"}, nil, "want label names"},
+		{[]string{"IMPACT=up == 0", "MATCH=service,"}, nil, "want label names"},
+		{[]string{"IMPACT=up == 0", "MATCH=ser vice"}, nil, "want label names"},
+		{[]string{"IMPACT=up == 0", "MATCH=service;touch"}, nil, "want label names"},
+		{[]string{"IMPACT=up == 0"}, []string{"--impact", "down == 1"}, "--impact: IMPACT says already when users were hurt: give one of them"},
+		{[]string{"IMPACT=up == 0"}, []string{"--impact=down"}, "--impact=down: IMPACT says already"},
+		{[]string{"IMPACT=up == 0", "IMPACT_FOR=5m"}, []string{"--impact-for", "10m"}, "--impact-for: IMPACT_FOR says already how long impact must last"},
+	} {
+		out, err := rr.run(append([]string{"PATHS=alerts"}, c.settings...), append([]string{"--prometheus", other.URL}, c.args...)...)
+		if err == nil || !strings.Contains(out, c.said) {
+			t.Errorf("%v %v: %v, want it to fail saying %q\n%s", c.settings, c.args, err, c.said, out)
+		}
+	}
+	if len(rr.host.comments) != 0 {
+		t.Errorf("commented: %+v", rr.host.comments)
+	}
+}
+
+// The action's impact, impact-for and match reach lapilli as IMPACT,
+// IMPACT_FOR and MATCH do: the expression one argument, as it is, which
+// args, split at spaces, couldn't give.
+func TestBacktestActionImpact(t *testing.T) {
+	needRecipeTools(t)
+	pwned := filepath.Join(t.TempDir(), "pwned")
+	impact := hostileImpact(pwned)
+	prom := promAnswering(t, map[string]string{"errors > 5": "checkout", impact: "checkout"})
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	argsFile := filepath.Join(t.TempDir(), "args")
+	out, err := runAction(t, rr, map[string]string{"paths": "alerts", "prometheus-url": prom.URL, "args": "--tz UTC",
+		"impact": impact, "impact-for": "10m", "match": "service,cluster"}, "LAPILLI_TEST_ARGS="+argsFile)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	checkImpactArgs(t, argsGiven(t, argsFile), impact)
+	if body := rr.body(); !strings.Contains(body, "#### Incidents caught differently") {
+		t.Errorf("the comment:\n%s\n%s", body, out)
+	}
+	if _, err := os.Stat(pwned); err == nil {
+		t.Error("impact ran a command")
+	}
+}
+
+// Without version, the action installs the release it is at: the first
+// release its own CHANGELOG.md names, read offline, so that moving the uses
+// line moves the binary. A sha256 pinned is one release's: once the uses
+// line moves on, nothing is installed, and the comment says so.
+func TestBacktestActionVersion(t *testing.T) {
+	needRecipeTools(t)
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("releases are for Linux and macOS")
+	}
+	// This repository's own: the release its CHANGELOG.md names first.
+	b, err := os.ReadFile("../../CHANGELOG.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := regexp.MustCompile(`(?m)^## \[([0-9]+\.[0-9]+\.[0-9]+)\]`).FindSubmatch(b)
+	if first == nil {
+		t.Fatal("CHANGELOG.md names no release")
+	}
+	prom := promStandIn(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	inputs := map[string]string{"paths": "alerts", "prometheus-url": prom.URL}
+	out, err := runAction(t, rr, inputs)
+	if err != nil || !strings.Contains(out, "action.yml: Lapilli v"+string(first[1])+", the release this action is at\n") {
+		t.Errorf("this repository's: %v\n%s", err, out)
+	}
+
+	// Releases v9.9.8 and v9.9.9: this test binary, as lapilli, saying it
+	// ran.
+	self := must(os.Executable())
+	ran := filepath.Join(t.TempDir(), "ran")
+	files, sums := map[string]string{}, map[string]string{}
+	for _, v := range []string{"v9.9.8", "v9.9.9"} {
+		name := "lapilli-" + v + "-" + runtime.GOOS + "-" + runtime.GOARCH
+		script := fmt.Sprintf("#!/bin/sh\ntouch %q\nLAPILLI_TEST_AS_CLI=1 exec %q \"$@\"\n", ran, self)
+		var archive strings.Builder
+		gz := gzip.NewWriter(&archive)
+		tw := tar.NewWriter(gz)
+		tw.WriteHeader(&tar.Header{Name: name + "/lapilli", Mode: 0o755, Size: int64(len(script)), Typeflag: tar.TypeReg})
+		io.WriteString(tw, script)
+		tw.Close()
+		gz.Close()
+		sum := sha256.Sum256([]byte(archive.String()))
+		sums[v] = hex.EncodeToString(sum[:])
+		files["/"+v+"/"+name+".tar.gz"] = archive.String()
+		files["/"+v+"/SHA256SUMS"] = sums[v] + "  " + name + ".tar.gz\n"
+	}
+	releases := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f, ok := files[r.URL.Path]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		io.WriteString(w, f)
+	}))
+	defer releases.Close()
+
+	// The action's files as GitHub fetches them for the uses line: the
+	// repository's tree at a commit.
+	tree := t.TempDir()
+	dir := filepath.Join(tree, "recipes", "backtest")
+	os.MkdirAll(dir, 0o755)
+	for _, f := range []string{"action.yml", "lib.sh", "github.sh"} {
+		os.WriteFile(filepath.Join(dir, f), must(os.ReadFile(backtestRecipes+f)), 0o644)
+	}
+	at := func(gomod, changelog string) {
+		os.WriteFile(filepath.Join(tree, "go.mod"), []byte(gomod), 0o644)
+		os.WriteFile(filepath.Join(tree, "CHANGELOG.md"), []byte(changelog), 0o644)
+	}
+	const lapilliMod = "module lapilli.dev\n\ngo 1.26\n"
+	env := []string{"GITHUB_ACTION_PATH=" + dir, "LAPILLI=", "LAPILLI_RELEASES=" + releases.URL}
+	with := func(more ...string) map[string]string {
+		in := maps.Clone(inputs)
+		for i := 0; i+1 < len(more); i += 2 {
+			in[more[i]] = more[i+1]
+		}
+		return in
+	}
+	installs := func(what, version string, out string, err error) {
+		t.Helper()
+		_, rerr := os.Stat(ran)
+		if err != nil || rerr != nil || !strings.Contains(out, "installed Lapilli "+version+" (") || !strings.Contains(rr.body(), "`CheckoutErrors`") {
+			t.Errorf("%s: %v, ran: %v\n%s\n%s", what, err, rerr, rr.body(), out)
+		}
+		os.Remove(ran)
+	}
+
+	// A commit between two releases: the one before it.
+	at(lapilliMod, "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- **Something.** See [the notes](docs/x.md).\n\n## [9.9.8] - 2026-10-01\n\n## [9.9.7] - 2026-09-01\n")
+	out, err = runAction(t, rr, with("sha256", sums["v9.9.8"]), env...)
+	if !strings.Contains(out, "action.yml: Lapilli v9.9.8, the release this action is at\n") {
+		t.Errorf("between releases:\n%s", out)
+	}
+	installs("between releases", "v9.9.8", out, err)
+
+	// The uses line moved to v9.9.9's commit, the sha256 left as it was:
+	// nothing is installed, the comment says why, and the job fails when
+	// asked to.
+	at(lapilliMod, "# Changelog\n\n## [Unreleased]\n\n## [9.9.9] - 2026-11-01\n\n## [9.9.8] - 2026-10-01\n")
+	for _, fail := range []string{"false", "true"} {
+		out, err = runAction(t, rr, with("sha256", sums["v9.9.8"], "fail-on-error", fail), env...)
+		if _, rerr := os.Stat(ran); rerr == nil || (err != nil) != (fail == "true") ||
+			!strings.Contains(rr.body(), "LAPILLI_SHA256 isn't the sum Lapilli v9.9.9's SHA256SUMS gives lapilli-v9.9.9-"+runtime.GOOS+"-"+runtime.GOARCH+".tar.gz ("+sums["v9.9.9"]+"): not run") {
+			t.Errorf("a sha256 pinned before, fail-on-error %s: %v\n%s\n%s", fail, err, rr.body(), out)
+		}
+	}
+	// Changed with it: installed.
+	out, err = runAction(t, rr, with("sha256", sums["v9.9.9"]), env...)
+	installs("the sha256 changed too", "v9.9.9", out, err)
+	// A version given is installed, saying it isn't the action's.
+	out, err = runAction(t, rr, with("version", "v9.9.8", "sha256", sums["v9.9.8"]), env...)
+	if !strings.Contains(out, "action.yml: version isn't v9.9.9, the release this action is at") {
+		t.Errorf("a version given:\n%s", out)
+	}
+	installs("a version given", "v9.9.8", out, err)
+
+	// Files that aren't Lapilli's, a copy of the action in another
+	// repository say, or a CHANGELOG.md with no release: version is needed.
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	for what, c := range map[string][2]string{
+		"another module": {"module example.com/monitoring\n", "## [Unreleased]\n\n## [2.3.0] - 2026-11-01\n"},
+		"no go.mod":      {"", "## [9.9.9] - 2026-11-01\n"},
+		"no release":     {lapilliMod, "# Changelog\n\n## [Unreleased]\n\n## [9.9.9-rc.1]\n"},
+	} {
+		at(c[0], c[1])
+		out, err := runAction(t, rr, with("sha256", sums["v9.9.9"]), env...)
+		if err == nil || !strings.Contains(out, "action.yml: give version, the Lapilli release to install") {
+			t.Errorf("%s: %v\n%s", what, err, out)
+		}
+	}
+	if _, err := os.Stat(ran); err == nil || len(rr.host.comments) != 0 {
+		t.Errorf("ran %v, commented %+v", err, rr.host.comments)
+	}
+}
+
+// The release workflow refuses a version CHANGELOG.md doesn't name first:
+// the action installs the release it is at as CHANGELOG.md says.
+func TestReleaseChangelogFirst(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("no bash")
+	}
+	b, err := os.ReadFile("../../.github/workflows/release.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wf struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Name string `yaml:"name"`
+				Run  string `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(b, &wf); err != nil {
+		t.Fatal(err)
+	}
+	var run string
+	for _, s := range wf.Jobs["build"].Steps {
+		if s.Name == "Release notes from CHANGELOG.md" {
+			run = s.Run
+		}
+	}
+	if run == "" {
+		t.Fatal("no step Release notes from CHANGELOG.md in build")
+	}
+	dir := t.TempDir()
+	os.Mkdir(filepath.Join(dir, "dist"), 0o755)
+	os.WriteFile(filepath.Join(dir, "CHANGELOG.md"), []byte("# Changelog\n\n## [Unreleased]\n\n## [9.9.9] - 2026-11-01\n\nNew.\n\n## [9.9.8] - 2026-10-01\n\nOld.\n"), 0o644)
+	for version, want := range map[string]string{"v9.9.9": "", "v9.9.8": "CHANGELOG.md names [9.9.9] first, not [9.9.8]", "v9.9.6": "no section [9.9.6]"} {
+		cmd := exec.Command("bash", "-c", run)
+		cmd.Dir, cmd.Env = dir, append(os.Environ(), "VERSION="+version)
+		out, err := cmd.CombinedOutput()
+		if (err == nil) != (want == "") || !strings.Contains(string(out), want) {
+			t.Errorf("%s: %v\n%s", version, err, out)
 		}
 	}
 }

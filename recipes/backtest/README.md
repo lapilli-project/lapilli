@@ -20,7 +20,9 @@ them). An API is asked over https, or plain http to the machine itself
 only: the token goes with each request. Each also needs:
 
 - `LAPILLI_VERSION`, the Lapilli release to install, such as `v0.33.0` (one
-  with `--markdown`). The archive for the machine is downloaded from the
+  with `--markdown`); the action's `version`, which is the release the
+  action is at unless given ([below](#the-release-the-action-installs)).
+  The archive for the machine is downloaded from the
   release and checked against the release's `SHA256SUMS` before it is
   unpacked; `LAPILLI_SHA256` pins its sum too, which a release replaced
   later can't match. `LAPILLI_RELEASES` downloads from a mirror holding the
@@ -51,6 +53,11 @@ And, as wanted:
   link, of 8 MiB at most. Or `--incidents` with a file from outside the
   checkout, such as one an earlier step wrote from your incident tool
   ([recipes/incidents](../incidents)).
+- `IMPACT`, a PromQL expression that returns something while users are
+  hurt, whose windows are incidents too (`--impact`); `IMPACT_FOR`, how
+  long it must last (`--impact-for`, default `5m`); and `MATCH`, the
+  labels a firing and an incident must agree on, comma-separated
+  (`--match` each). See [Judged by user impact](#judged-by-user-impact).
 - `TARGET`, the commit the pull request goes into (default `HEAD^1`, the
   merge commit's first parent, as GitHub checks a pull request out); or
   `TARGET_BRANCH`, a branch: the clone's `origin/BRANCH` when the checkout
@@ -132,11 +139,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 2, persist-credentials: false}
-      # The commit the release's tag names, which no tag moved changes.
-      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-v0.33.0-TAG # v0.33.0
+      # The commit a release's tag names, which no tag moved changes; it
+      # pins the release of lapilli installed too (below).
+      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-vX.Y.Z-TAG # vX.Y.Z
         with:
-          version: v0.33.0
-          sha256: SHA256-OF-lapilli-v0.33.0-linux-amd64.tar.gz # as its SHA256SUMS says
           paths: alerts
           incidents: incidents.yaml
           prometheus-url: ${{ vars.PROMETHEUS_URL }}
@@ -145,14 +151,15 @@ jobs:
 
 `fetch-depth: 2` fetches the merge commit's parents; `persist-credentials:
 false` keeps the job's token out of the checkout's git configuration,
-where `RENDER` could read it. The action's inputs are `version` (required:
-the release the tag is), `sha256`, `paths` or `render` and
-`render-prepare`, `incidents`, `prometheus-url`, `auth`, `gcp-project`,
-`aws-region`, `since` (default `7d`), `args` (more flags, split at spaces
-and never expanded by a shell), `target`, `key`, `fail-on-error`, `expect`,
-`fail-on-expectations`, `expect-required`, `token`
-(default the job's own) and `login` (the account a GitHub App's token
-comments as, `NAME[bot]`). For a cloud's managed Prometheus, sign in first
+where `RENDER` could read it. The action's inputs are `version` (default:
+the release the action is at), `sha256`, `paths` or `render` and
+`render-prepare`, `incidents`, `impact`, `impact-for`, `match`,
+`prometheus-url`, `auth`, `gcp-project`, `aws-region`, `since` (default
+`7d`), `args` (more flags, split at spaces and never expanded by a shell),
+`target`, `key`, `fail-on-error`, `expect`, `fail-on-expectations`,
+`expect-required`, `token` (default the job's own) and `login` (the
+account a GitHub App's token comments as, `NAME[bot]`). For a cloud's
+managed Prometheus, sign in first
 with the cloud's own action through OpenID Connect (`id-token: write`):
 `aws-actions/configure-aws-credentials`, `azure/login` or
 `google-github-actions/auth`, and give `auth`.
@@ -288,9 +295,8 @@ with the same values files and flags, so that only the pull request
 differs:
 
 ```yaml
-      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-v0.33.0-TAG # v0.33.0
+      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-vX.Y.Z-TAG # vX.Y.Z
         with:
-          version: v0.33.0
           render: helm template monitoring charts/monitoring -f charts/monitoring/values-prod.yaml
           render-prepare: helm dependency build charts/monitoring >&2
           prometheus-url: ${{ vars.PROMETHEUS_URL }}
@@ -320,6 +326,93 @@ secret you export) that the list above can't know; and it can change what
 the job does next. Helm's `template` runs no code of the chart's; a
 Kustomize plugin, or a `RENDER` that runs the repository's scripts, does.
 That is one reason forks are kept out.
+
+## Judged by user impact
+
+Without incidents, the comment counts firings: what fired before the
+change and what fires after. It can't say what a rule that differs would
+have caught, or missed. `INCIDENTS` gives the incidents written down;
+`IMPACT` gives the times users were hurt, as a PromQL expression that
+returns something while they are, whose windows become incidents too
+(`lapilli verdict --impact`), so a thin incident log still works.
+`IMPACT_FOR` is how long a window must last (`--impact-for`, default
+`5m`), and `MATCH` the labels a firing and an incident must agree on when
+both have them, comma-separated (a `--match` each). By service, each
+window carries the service hit, and a firing of one service doesn't catch
+another's:
+
+```yaml
+      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-vX.Y.Z-TAG # vX.Y.Z
+        with:
+          paths: alerts
+          prometheus-url: ${{ vars.PROMETHEUS_URL }}
+          since: 14d
+          # The share of requests that fail, by service, above 1%.
+          impact: >-
+            sum by (service) (rate(http_requests_total{code=~"5.."}[5m]))
+            / sum by (service) (rate(http_requests_total[5m])) > 0.01
+          impact-for: 10m
+          match: service
+```
+
+The comment then counts, for each rule that differs, its firings that
+caught an incident and those that caught nothing, before and after, and
+lists each incident caught differently: which rule caught it, how long
+after it began, and what the other side did. `impact` reaches `lapilli`
+as one argument, as it is: never split at spaces, nor expanded by a shell
+(`args`, split at spaces, can't hold an expression). In the other CIs, set `IMPACT`,
+`IMPACT_FOR` and `MATCH` as variables; GitLab expands `$` in a variable's
+value unless it has `expand: false`. `--impact` among the arguments works
+too, but not beside `IMPACT`, nor `--impact-for` beside `IMPACT_FOR`:
+lapilli would take the last. `--match` among the arguments adds to
+`MATCH`. `MATCH` without `IMPACT`, `INCIDENTS` or an argument giving
+either, and `IMPACT_FOR` without `IMPACT`, fail the job at once.
+
+## The release the action installs
+
+Without `version`, the action installs the release it is at: the first
+`## [X.Y.Z]` heading in the `CHANGELOG.md` of the commit it is at,
+read offline from the files GitHub fetched for the `uses:` line. At the
+commit a release's tag names, that is the release (each release's workflow
+checks it). Dependabot and Renovate move the commit and its `# vX.Y.Z`
+comment together, and so the binary with them; nothing else in the
+workflow names a release to fall behind:
+
+```yaml
+# .github/dependabot.yml
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+```
+
+With the workflow's own file among the paths it runs on (`paths:
+['alerts/**', '.github/workflows/backtest.yml']`), the pull request that
+moves the commit runs the job too: the new release is installed and run,
+and as no rule changed, nothing is posted.
+
+At a commit between two releases (a branch, or a commit no tag names),
+the scripts are that commit's and the binary is the release before it,
+the first heading below `## [Unreleased]`. A flag the scripts give that
+the release hasn't is refused, and the comment says lapilli refused its
+arguments. Pin the commit of a release's tag.
+
+A `version` given is installed whatever commit the action is at; the
+job's log says when it isn't the release the action is at. The action of
+v0.47.0 or before needs `version`.
+
+`sha256` pins one release's archive. Once the `uses:` line moves to
+another release, whose archive has another sum, the step installs nothing
+and says so in the comment: `LAPILLI_SHA256 isn't the sum Lapilli vX.Y.Z's
+SHA256SUMS gives lapilli-vX.Y.Z-linux-amd64.tar.gz (...): not run`; with
+`fail-on-error: true`, the job fails. Nothing unpinned runs, but nothing
+runs: neither Dependabot nor Renovate changes `sha256`. Put the new
+release's sum in the same pull request, from its `SHA256SUMS`; or leave
+`sha256` out, and the commit pins the release, whose archive is checked
+against its `SHA256SUMS` all the same. Only a pinned sum holds against a
+release whose files were replaced later.
 
 ## The comment
 
@@ -387,6 +480,21 @@ runner inside your network:
   so, and register runners that reach your Prometheus to repositories that
   don't take forks' workflows.
 
+Who sets what the job is given: the pull request. Each host runs the
+pipeline a pull request holds (GitHub's `pull_request` workflow,
+`.gitlab-ci.yml`, `bitbucket-pipelines.yml`, ...), so every input and
+variable written there (`impact`, `match`, `incidents`, `version`, the
+`uses:` line) is the pull request's to change, as is whether the job runs
+at all. `INCIDENTS` is read from the commit the pull request goes into so
+that a pull request that changes only that file can't take out the
+incident its change misses; one that changes what it is judged by
+(`impact`, `match`) changes the pipeline, in its diff beside the rules.
+To keep that from passing unreviewed, have a code owner review the
+pipeline's file (`CODEOWNERS` on `.github/workflows/`, say) as well as the
+rules. `IMPACT` is a query sent with the job's credentials, as the pull
+request's rules are: it reaches nothing they can't. These are more
+reasons forks are kept out.
+
 ## Safety
 
 - What the pull request holds is untrusted, and the comment is read by
@@ -409,6 +517,11 @@ runner inside your network:
   failed: `, which begins every reason a query gives, `HTTP 403: ...`,
   `dial tcp`, a TLS error), nor a progress line: those are in the job's log
   alone, as the rules that couldn't be replayed are in the report. The path of a link refused is said only in the job's log.
+- Of the settings, only `RENDER` and `RENDER_PREPARE` are run as shell
+  commands. The others are quoted wherever they are used, and those that
+  stand for flags reach `lapilli` as their arguments: `IMPACT` as one
+  argument, as it is; `PATHS` split at spaces, never expanded. The
+  action's inputs reach its script as variables, never in its text.
 - What the recipe copies to the job's log is each line after a `| `,
   control characters taken out and Azure's `##vso[` made inert: GitHub's
   and Gitea's `::` commands are read only at a line's start, so none of it
