@@ -143,7 +143,7 @@ come twice (taken by a receiver that answered too late) and, once one has
 been tried again, out of order: the webhook's `id`, also its
 `Idempotency-Key` header, is the same each time it is sent, and `at` is
 when it happened. Sending changes nothing a page kept shows, so it doesn't
-empty the cache: the Manage and Settings pages, which say where notices go,
+empty the cache: the Administration and Settings pages, which say where notices go,
 when the outbox last sent and how many of the last day's failed, are worked
 out for each request instead ([ui.md](ui.md), "First use"). `/metrics` gives `lapilli_serve_notices_total{to,result}` and
 `lapilli_serve_notices_unsent`. The webhook's and Slack's URLs are read

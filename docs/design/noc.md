@@ -129,7 +129,7 @@ a day long at most, starting no later than an hour after the file is read,
 16 labels, 4 KB of them, and 8 MB of labels in all, counted for each
 deploy; a revision and a source 200 bytes each; a history's lines only
 `HEX TIME` as the recipes write them. What breaks a bound refuses the whole
-file and the ledger keeps what it had, the status and the runs page saying
+file and the ledger keeps what it had, the status and the Run history page saying
 why. Deploys aren't pruned with `--keep`: the file owns them, and would
 bring them back.
 

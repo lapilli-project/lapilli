@@ -10,7 +10,7 @@ pages are put together: the status colours every page uses, the frame
 every page has, the team and period carried from page to page, the
 search, the rules list and its filters, a rule's page, the way to change
 things (a proposal's page, the lists' facets, a quiet window's preview,
-the Manage page), what can be done to many at once and the ways from a
+the Administration page), what can be done to many at once and the ways from a
 number to what makes it, what a first-time reader would get stuck on, and
 what is left.
 [serve.md](serve.md) says what each page shows;
@@ -141,15 +141,15 @@ rest are written in the template that draws them.
 
 | Kind | States |
 |---|---|
-| ok | a rule's `○ OK`, of a rule some of whose firings were judged; a proposal `✓ approved`, `● applied`; a task done; a rule to keep (`✓ keep`); a rule change "as predicted"; Outcomes' Runs, "all ran", the runs up to date; notifications, "Last sent from the outbox"; an incident caught (its "Caught" cell); the overview's "Nothing to look at now", the one empty state that says all is well (`allClear`); a change "better"; the incidents chart's caught |
-| warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Outcomes' tile, the Runs page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Outcomes' tile and note, the overview's line); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted" |
-| bad | a run's error, and the server's error banner; `--config` that can't be used at all, or that the ledger couldn't be kept to; notices given up on; the digest failed; an on-call schedule's read failed; Outcomes' Runs, "n failed"; a task overdue; a proposal closed as failed, and its reason; a backtest that misses incidents; would have caught while it was off; an incident missed (`✗ nothing fired`, "Nothing fired."), the missed count of the table of the weeks; a search not understood; a change "worse" |
-| info | a proposal `↻ being applied`; `✎ Proposed`; a quiet window `● active now`; the server's work (`↻`); catching up on the overview; behind on Outcomes, and its Runs tile ("all ran") while it is; a rule change "measuring", "rule written"; `⇣ Recorded only`; a task open or doing, and the overview's link to one ("task #n"); a rule to tune (`± tune`); the reason of a proposal approved or applied (it waited while its rule fired) |
-| unknown | `? No record`, the weeks' "no record" tag, the notes of weeks with no record; "–"; a backtest with no record (`no_record`); a rule none of whose firings was judged (`? No record`; `ruleRow.PerfClass`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review, and the reason of one refused; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; a rule change superseded, without a week before it, taken away or replayed again; Outcomes' Runs before any run |
-| no colour | what is left to do or not found, but isn't a verdict: "No proposals yet.", "No proposal waiting for approval is stale.", every other empty state; the Orphans page, whose names are neither well nor wrong |
+| ok | a rule's `○ OK`, of a rule some of whose firings were judged; a proposal `✓ approved`, `● applied`; a task done; a rule to keep (`✓ keep`); a rule change "as predicted"; Impact's Runs tile, "all ran", the runs up to date; notifications, "Last sent from the outbox"; an incident caught (its "Caught" cell); the overview's "Nothing to look at now", the one empty state that says all is well (`allClear`); a change "better"; the incidents chart's caught |
+| warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Impact's tile, the Run history page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Impact's tile and note, the overview's line); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted" |
+| bad | a run's error, and the server's error banner; `--config` that can't be used at all, or that the ledger couldn't be kept to; notices given up on; the digest failed; an on-call schedule's read failed; Impact's Runs tile, "n failed"; a task overdue; a proposal closed as failed, and its reason; a backtest that misses incidents; would have caught while it was off; an incident missed (`✗ nothing fired`, "Nothing fired."), the missed count of the table of the weeks; a search not understood; a change "worse" |
+| info | a proposal `↻ being applied`; `✎ Proposed`; a quiet window `● active now`; the server's work (`↻`); catching up on the overview; behind on Impact, and its Runs tile ("all ran") while it is; a rule change "measuring", "rule written"; `⇣ Recorded only`; a task open or doing, and the overview's link to one ("task #n"); a rule to tune (`± tune`); the reason of a proposal approved or applied (it waited while its rule fired) |
+| unknown | `? No record`, the weeks' "no record" tag, the notes of weeks with no record; "–"; a backtest with no record (`no_record`); a rule none of whose firings was judged (`? No record`; `ruleRow.PerfClass`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review, and the reason of one refused; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; a rule change superseded, without a week before it, taken away or replayed again; Impact's Runs tile before any run |
+| no colour | what is left to do or not found, but isn't a verdict: "No proposals yet.", "No proposal waiting for approval is stale.", every other empty state; the Cleanup page, whose names are neither well nor wrong |
 
 Three were left open, and are so: catching up is info, as Lapilli does it
-by itself and nothing is for a person to do (behind, on Outcomes, the
+by itself and nothing is for a person to do (behind, on Impact, the
 same); a task doing is info with open, both under way, as lavender was the
 noise's; and the sidebar's counts have no colour, as each is a number whose
 word ("to approve", "open") is read out but not shown, so a colour there
@@ -272,9 +272,9 @@ past 4096: past that, the page without its query.
 ### Breadcrumbs
 
 Every page starts with `<nav aria-label="Breadcrumb"><ol>`: the group, the
-page, and the item, the last with `aria-current="page"`: See › Rules ›
-LatencyP99; Fix › Proposals › #12. The group isn't a link, but Manage,
-whose page lists its pages (Manage › Teams); the page is, with the page
+page, and the item, the last with `aria-current="page"`: Monitoring ›
+Rules › LatencyP99; Improve › Proposals › #12. The group isn't a link, but
+Administration, whose page lists its pages (Administration › Teams); the page is, with the page
 context. A proposal's item is its `#id` alone, the page's title its whole
 heading (`crumbed`).
 
@@ -583,7 +583,7 @@ never an error page.
 
 ### The header
 
-- The breadcrumb, See › Rules › NAME; the name, in `<bdi>`, as the `h1`,
+- The breadcrumb, Monitoring › Rules › NAME; the name, in `<bdi>`, as the `h1`,
   and the badges as the list has them, but "to check", which the header
   says in full.
 - A line of what is known of it, each only when known: its team, its
@@ -606,7 +606,7 @@ never an error page.
   firings tab's replay check), why it isn't replayed, or is in part (to
   its versions), that its record is copied in, a cloud's alarm's history
   or from elsewhere (to its latest firings), that an alarm has none (to
-  Runs), and proposals made against a version of it no longer in effect
+  Run history), and proposals made against a version of it no longer in effect
   (to its proposals). With none, there is no `<details>`. The rules
   list's badge counts the same (`condsOf`).
 
@@ -746,7 +746,7 @@ stops the server and removes what it made.
 ## The way to change things
 
 Phase 4: a proposal's page, the lists' facets beside the rules', a quiet
-window's preview, and the Manage page.
+window's preview, and the Administration page.
 
 ### A diff in its options
 
@@ -785,7 +785,7 @@ dry run, its history), with the backtest in the dry run's place:
   ● applied, ↶ undone, ⊘ closed (refused, failed, dropped, changed in
   review); its rule; who made it, an agent marked so; its way (a pull
   request; Grafana's, a ruler's or a cloud's API; or for a person to
-  make); when. Breadcrumb Fix › Proposals › #id.
+  make); when. Breadcrumb Improve › Proposals › #id.
 - **The change**: the rule as it is and as proposed, in the diff's
   options, a side past 400 lines shown whole, after the other, and said
   so, as the versions tab does; for the git path, the file as the pull request changes it, in a
@@ -983,7 +983,7 @@ window would be kept (what was typed put in again, escaped) and, above it:
 Preview is the form's first button, so that Enter in a field writes
 nothing.
 
-### The Manage page
+### The Administration page
 
 `/manage`, Administration: a card for each page of the Administration
 group and for the reports (their recipients and the weekly digest), each
@@ -1016,7 +1016,7 @@ away), when a new file was read once and waits for its second read, when
 the ledger was last kept to it and the start of its hash, and what of the
 file can't be used or kept: to an admin, why, with its line, in the
 reader's language; to anyone else, the line and the kind alone ("line 23:
-a role that can't be kept"), as why can name who holds a role. The Runs
+a role that can't be kept"), as why can name who holds a role. The Run history
 page says it the same way. Without `--config`, the section says nothing is
 declared. What a leader without `--config` gave back of what a file
 declared, which the next file lets go unless it declares it again, is
@@ -1029,7 +1029,7 @@ admin's) gives everything as `--config` takes it. The Teams page lists
 teams a ledger kept from before whose names differ only in letter case,
 to be renamed.
 
-### Orphans
+### Cleanup
 
 `/orphans`, Cleanup, under Administration: a rule deleted or renamed leaves its note, its
 tasks, the comments on it and its proposals not finished with under a
@@ -1069,7 +1069,7 @@ At two thousand rules, four weeks of their firings (84,000) and a thousand
 proposals (`TestChangePagesScale`), worked out afresh: the proposals list
 takes 20 to 45 ms, a proposal's page 15 to 25 ms (one whose rule is 600
 lines a side, shown whole, too), a quiet window's preview 35 to 80 ms
-(every day, once over the four weeks, by cron), the tasks and the Manage
+(every day, once over the four weeks, by cron), the tasks and the Administration
 page about a millisecond.
 
 What a proposal says when it is read costs, at a thousand rules that count
@@ -1489,7 +1489,7 @@ more is said. Who may approve is as it was (`approver`).
 
 ### Where notices go
 
-The Manage page has a Notifications card, and the Settings page a section
+The Administration page has a Notifications card, and the Settings page a section
 of that name (`#notifications`): where what happens is told (the webhook,
 Slack, or nowhere), how many places reports can go to by name and how many
 teams have a digest of their own, when the weekly digest goes ("Mondays

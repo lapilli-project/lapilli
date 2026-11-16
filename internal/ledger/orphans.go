@@ -8,9 +8,9 @@ import (
 	"fmt"
 )
 
-// What the ledger keeps of a rule by its name (docs/design/ui.md, Orphans):
+// What the ledger keeps of a rule by its name (docs/design/ui.md, Cleanup):
 // a note, tasks, comments and proposals. A rule deleted or renamed leaves
-// them under a name no rule in effect has; the Orphans page lists those
+// them under a name no rule in effect has; the Cleanup page lists those
 // names, and moves what they keep to a rule in effect (a rename), or
 // deletes it.
 

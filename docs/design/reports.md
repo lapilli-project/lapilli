@@ -157,7 +157,7 @@ every write is.
 
 At most 50 reports, and none more often than hourly: a cron expression that
 fires more often is refused. A report whose team is removed stops, and
-the runs page says why.
+the Run history page says why.
 
 ## Roles and the UI
 
@@ -247,7 +247,7 @@ What was built differs from the above, or settles it, here:
   names when the report is saved; one that is gone later is skipped, and the
   pages say so.
 - **A report whose team is removed** stops; the Reports page, the report's
-  page and the runs page say why, and its preview is refused. It stops in
+  page and the Run history page say why, and its preview is refused. It stops in
   the write that removes the team: its `team_id` is the team's negated,
   which no team has, as a team made later may be given the removed one's
   id. It sends again once an admin names another team, or everyone.

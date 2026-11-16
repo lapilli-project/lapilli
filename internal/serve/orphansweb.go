@@ -8,7 +8,7 @@ import (
 	"lapilli.dev/internal/ledger"
 )
 
-// The Cleanup page, /orphans (docs/design/ui.md, Orphans), under
+// The Cleanup page, /orphans (docs/design/ui.md, Cleanup), under
 // Administration: the rule names no rule in effect has any more, a rule
 // deleted or renamed, that the ledger still keeps a note, tasks, comments
 // or open proposals of, which no other list shows. An editor moves what one kept to a rule in effect (for a
