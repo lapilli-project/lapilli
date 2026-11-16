@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-11-17
+
 ### Added
 
 - **A report without its names.** `lapilli verdict --redact`, and
@@ -165,6 +167,11 @@
   was, so keep a copy before upgrading.
 
 ### Changed
+
+- **A pull request backtest's comment hides a cut host too.** `--markdown`
+  took the URLs, hosts and tenants out of what the history said word by
+  word, after cutting it to length, so a host cut in the middle could be
+  left; what is cut is now taken out as well, as `lapilli preflight` does.
 
 - **`--impact` given twice without a name is refused**, by `lapilli
   verdict` and `lapilli serve`: the last one given was read, and the others
