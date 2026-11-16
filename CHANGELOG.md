@@ -122,15 +122,39 @@
   the tasks and comments on a window no longer there move to the one
   covering most of it, sharing labels, or are listed on the Cleanup page;
   a window starting in the same minute as one kept is kept too. The
+
+- **The impact signal's record follows one rule: it holds only for weeks
+  that were read, with data, by the criterion in effect, and, after a
+  change, replaced by a successful read of that criterion.** The
+  criterion the record is kept by (expression and `--impact-for`) is kept
+  beside `impact_since`, with what the last run read. A new one, saved in
+  the UI or started with, is read again over the last four weeks by the
+  replica that leads: its windows take the place of those found from then
+  on, the record is kept by it from then, and the weeks are judged again,
+  a week a write. Until that read succeeds, a run that reads it keeps a
+  floor at its start, and no record is kept by the signal at all, before
+  the floor either (the record has one start, and the rule judging weeks
+  is unchanged): more saves meanwhile leave the floor where it is, and
+  saving the one kept back still needs it read again. No record is kept
+  by the signal before where its data begins is looked for. A decision
+  about a window found before carries over to a new one it covers half of
+  or more, of the new one (the one covering most, confirmed before
+  dismissed on a tie); a key, and the tasks and comments on it, need half
+  of both windows: a window keeps the key of one found before only when it
+  is the same one, so nothing kept on one lands on another, and the tasks
+  and comments on a window no longer there move to the one covering most
+  of it, sharing labels and half of each, or are listed on the Cleanup
+  page; a window starting in the same minute as one kept is kept too. The
   weeks before keep only the windows the one before found, as incidents.
   One that fails to be read again is tried again later, up to a day
   apart. A ledger kept by an earlier lapilli is taken to have been read
   with the command line's criterion, and another saved is read again. A
-  backtest keeps the criterion whose windows it was judged against, and a
-  proposal waiting for approval is held for a new backtest once another is
-  read in their place. No schema change; `verdict.Semantics` is
-  unchanged. The overview's weekly panels the digest works out catch up at
-  the next digest.
+  backtest keeps the criterion whose windows it was judged against, a
+  label of its own while a floor stands, and a proposal waiting for
+  approval is held for a new backtest once another is read in their
+  place. No schema change; `verdict.Semantics` is unchanged. The
+  overview's weekly panels the digest works out catch up at the next
+  digest.
 
 ### Fixed
 
@@ -145,8 +169,9 @@
   found; the record starts no earlier than the first whole week after the
   latest of them, as only there did every selector have data, and not at
   all while one has none. On upgrade, a ledger's `impact_since` moves
-  forward to it at the first round that runs, never back; the weeks before
-  have no record unless an incident keeps them. This looks for where data
+  forward to it at the first round that runs, never back, and no record
+  is kept by the signal until it is looked for; the weeks before have no
+  record unless an incident keeps them. This looks for where data
   begins, per selector (with its offset or @), not for gaps after. An
   expression that reads no selector (`vector(1)`) has data all along.
 

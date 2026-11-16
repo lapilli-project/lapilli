@@ -1130,7 +1130,7 @@ it gave in four weeks, and what it is:
   admin's to read, here and in the status banner of every page;
 - the impact signal: last read by a run (or read again), the windows found
   in four weeks, and where each selector's data begins, of the criterion
-  in effect (the one pending while it waits to be read again); `↻ waiting` until
+  the record is kept by, when it is the one in effect; `↻ waiting` until
   it is read with the criterion in effect, `⚠ quiet` when not read for two
   runs and more, `⚠ no data` when a selector it reads has none (no record
   is kept by it), or failing with Prometheus's error; off,
