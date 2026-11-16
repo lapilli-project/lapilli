@@ -134,7 +134,8 @@ func TestSourcesReadOrFailing(t *testing.T) {
 // besides those of a11yServer's, which has no incidents port: under
 // /sources, a tool's job gone quiet, the incidents file failing and the
 // impact signal read; under /intake, a port that nothing came through yet,
-// and nothing written in four weeks. For TestStatusKinds and TestA11yServe.
+// and nothing written in four weeks; under /nodata, an impact signal one of
+// whose selectors has no data. For TestStatusKinds and TestA11yServe.
 func sourcesStates(t *testing.T) map[string]*Server {
 	t.Helper()
 	ctx := context.Background()
@@ -146,5 +147,12 @@ func sourcesStates(t *testing.T) map[string]*Server {
 	os.WriteFile(quiet.cfg.Incidents, []byte("not: [incidents"), 0o644)
 	quiet.now = func() time.Time { return now.Add(2 * time.Hour) }
 	quiet.jobs(ctx, true)
-	return map[string]*Server{"/sources": quiet, "/intake": criteriaServer(t, false, intake)}
+	// An impact signal one of whose selectors has no data.
+	none := criteriaServer(t, false, nil)
+	hist(none).begins = map[string][]time.Time{"probe_failed": {}}
+	if err := none.l.SetSettings(ctx, map[string]string{"impact": "impact or probe_failed == 1"}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	none.jobs(ctx, false)
+	return map[string]*Server{"/sources": quiet, "/intake": criteriaServer(t, false, intake), "/nodata": none}
 }

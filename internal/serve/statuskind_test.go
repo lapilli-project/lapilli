@@ -322,6 +322,8 @@ var statusWant = []struct {
 	// Where incidents come from (sources.go).
 	{regexp.MustCompile(`^✓ working$`), "ok", []string{"/sources/settings"}},
 	{regexp.MustCompile(`^⚠\x{FE0E} quiet$`), "warn", []string{"/sources/settings"}},
+	{regexp.MustCompile(`^⚠\x{FE0E} no data$`), "warn", []string{"/nodata/settings"}},
+	{regexp.MustCompile(`keeps no record: a selector it reads has no data yet`), "warn", []string{"/nodata/settings"}},
 	{regexp.MustCompile(`^✕ failing$`), "bad", []string{"/sources/settings"}},
 	{regexp.MustCompile(`^↻ waiting$`), "info", []string{"/intake/settings"}},
 	{regexp.MustCompile(`^\? not set up$`), "unknown", []string{"/settings"}},
