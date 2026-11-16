@@ -1,0 +1,328 @@
+{
+  "from": "2026-10-05T00:00:00Z",
+  "to": "2026-10-12T00:00:00Z",
+  "noisy_at": {
+    "firings": 10,
+    "precision": 0.2
+  },
+  "rules": [
+    {
+      "rule": "ApiErrors",
+      "severity": "critical",
+      "firings": 3,
+      "white": 2,
+      "black": 1,
+      "refired": 0,
+      "replayed": false,
+      "noisy": false,
+      "incidents": 2,
+      "first": 2,
+      "alone": 1,
+      "spare": false,
+      "off_hours": 0,
+      "off_hours_black": 0,
+      "asleep": 0,
+      "asleep_black": 0
+    },
+    {
+      "rule": "CartSlow",
+      "severity": "warning",
+      "firings": 2,
+      "white": 1,
+      "black": 1,
+      "refired": 0,
+      "replayed": false,
+      "noisy": false,
+      "incidents": 1,
+      "first": 0,
+      "alone": 0,
+      "spare": false,
+      "off_hours": 0,
+      "off_hours_black": 0,
+      "asleep": 1,
+      "asleep_black": 1
+    },
+    {
+      "rule": "BackendMissing",
+      "severity": "warning",
+      "firings": 1,
+      "white": 0,
+      "black": 1,
+      "refired": 0,
+      "replayed": false,
+      "noisy": false,
+      "incidents": 0,
+      "first": 0,
+      "alone": 0,
+      "spare": false,
+      "off_hours": 0,
+      "off_hours_black": 0,
+      "asleep": 0,
+      "asleep_black": 0
+    },
+    {
+      "rule": "PayQueue",
+      "firings": 1,
+      "white": 0,
+      "black": 1,
+      "refired": 0,
+      "replayed": false,
+      "noisy": false,
+      "incidents": 0,
+      "first": 0,
+      "alone": 0,
+      "spare": false,
+      "off_hours": 1,
+      "off_hours_black": 1,
+      "asleep": 0,
+      "asleep_black": 0
+    },
+    {
+      "rule": "SearchDown",
+      "severity": "critical",
+      "firings": 1,
+      "white": 1,
+      "black": 0,
+      "refired": 0,
+      "replayed": false,
+      "noisy": false,
+      "incidents": 1,
+      "first": 1,
+      "alone": 1,
+      "spare": false,
+      "off_hours": 0,
+      "off_hours_black": 0,
+      "asleep": 1,
+      "asleep_black": 0
+    }
+  ],
+  "incidents": [
+    {
+      "id": "impact-1",
+      "title": "user impact (--impact)",
+      "start": "2026-10-06T10:00:00Z",
+      "end": "2026-10-06T11:01:00Z",
+      "labels": {
+        "service": [
+          "cart",
+          "checkout"
+        ],
+        "team": [
+          "shop"
+        ]
+      },
+      "candidate": true,
+      "spans": [
+        {
+          "labels": {
+            "service": "checkout",
+            "team": "shop"
+          },
+          "start": "2026-10-06T10:00:00Z",
+          "end": "2026-10-06T10:31:00Z"
+        },
+        {
+          "labels": {
+            "service": "cart",
+            "team": "shop"
+          },
+          "start": "2026-10-06T10:20:00Z",
+          "end": "2026-10-06T11:01:00Z"
+        }
+      ],
+      "caught_by": [
+        {
+          "rule": "ApiErrors",
+          "delay_ns": -600000000000,
+          "noisy": false
+        },
+        {
+          "rule": "CartSlow",
+          "delay_ns": 1800000000000,
+          "noisy": false
+        }
+      ]
+    },
+    {
+      "id": "INC-2",
+      "title": "Checkout errors",
+      "start": "2026-10-07T08:00:00Z",
+      "end": "2026-10-07T08:30:00Z",
+      "labels": {
+        "service": [
+          "checkout"
+        ]
+      },
+      "candidate": false,
+      "caught_by": [
+        {
+          "rule": "ApiErrors",
+          "delay_ns": 600000000000,
+          "noisy": false
+        }
+      ]
+    },
+    {
+      "id": "INC-1",
+      "title": "Search down",
+      "start": "2026-10-09T03:05:00Z",
+      "end": "2026-10-09T03:30:00Z",
+      "labels": {
+        "service": [
+          "search"
+        ]
+      },
+      "candidate": false,
+      "caught_by": [
+        {
+          "rule": "SearchDown",
+          "delay_ns": 300000000000,
+          "noisy": false
+        }
+      ]
+    },
+    {
+      "id": "impact-3",
+      "title": "user impact (--impact)",
+      "start": "2026-10-10T20:00:00Z",
+      "end": "2026-10-10T20:16:00Z",
+      "labels": {
+        "service": [
+          "payments"
+        ],
+        "team": [
+          "pay"
+        ]
+      },
+      "candidate": true,
+      "spans": [
+        {
+          "labels": {
+            "service": "payments",
+            "team": "pay"
+          },
+          "start": "2026-10-10T20:00:00Z",
+          "end": "2026-10-10T20:16:00Z"
+        }
+      ],
+      "caught_by": []
+    }
+  ],
+  "firings": [
+    {
+      "rule": "ApiErrors",
+      "labels": {
+        "service": "checkout",
+        "severity": "critical",
+        "team": "shop"
+      },
+      "start": "2026-10-06T09:50:00Z",
+      "end": "2026-10-06T10:40:00Z",
+      "white": true,
+      "incidents": [
+        "impact-1"
+      ]
+    },
+    {
+      "rule": "BackendMissing",
+      "labels": {
+        "backend": "checkout",
+        "severity": "warning",
+        "team": "platform"
+      },
+      "start": "2026-10-06T10:05:00Z",
+      "end": "2026-10-06T10:20:00Z",
+      "white": false
+    },
+    {
+      "rule": "CartSlow",
+      "labels": {
+        "service": "cart",
+        "severity": "warning",
+        "team": "shop"
+      },
+      "start": "2026-10-06T10:30:00Z",
+      "end": "2026-10-06T10:50:00Z",
+      "white": true,
+      "incidents": [
+        "impact-1"
+      ]
+    },
+    {
+      "rule": "ApiErrors",
+      "labels": {
+        "service": "checkout",
+        "severity": "critical",
+        "team": "shop"
+      },
+      "start": "2026-10-07T08:10:00Z",
+      "end": "2026-10-07T08:20:00Z",
+      "white": true,
+      "incidents": [
+        "INC-2"
+      ]
+    },
+    {
+      "rule": "ApiErrors",
+      "labels": {
+        "service": "checkout",
+        "severity": "critical",
+        "team": "shop"
+      },
+      "start": "2026-10-08T12:00:00Z",
+      "end": "2026-10-08T12:05:00Z",
+      "white": false
+    },
+    {
+      "rule": "SearchDown",
+      "labels": {
+        "service": "search",
+        "severity": "critical",
+        "team": "find"
+      },
+      "start": "2026-10-09T03:10:00Z",
+      "end": "2026-10-09T03:30:00Z",
+      "white": true,
+      "incidents": [
+        "INC-1"
+      ]
+    },
+    {
+      "rule": "CartSlow",
+      "labels": {
+        "service": "cart",
+        "severity": "warning",
+        "team": "shop"
+      },
+      "start": "2026-10-09T05:00:00Z",
+      "end": "2026-10-09T05:10:00Z",
+      "white": false
+    },
+    {
+      "rule": "PayQueue",
+      "labels": {
+        "service": "payments",
+        "team": "pay"
+      },
+      "start": "2026-10-10T21:00:00Z",
+      "end": "2026-10-10T21:05:00Z",
+      "white": false
+    }
+  ],
+  "hours": {
+    "zone": "UTC",
+    "work": "mon-fri@08:00-18:00",
+    "sleep": "22:00-08:00"
+  },
+  "settings": {
+    "lead_ns": 900000000000,
+    "match": [
+      "service",
+      "team"
+    ],
+    "refire_ns": 3600000000000,
+    "unknown_length_ns": 3600000000000,
+    "record_lookback_ns": 1209600000000000,
+    "impact_from": "2026-09-21T00:00:00Z"
+  }
+}

@@ -18,13 +18,15 @@ import (
 // stableFields are the report's fields docs/numbers.md promises keep their
 // names, by where they are: renaming one fails here first.
 var stableFields = map[string][]string{
-	"":                        {"from", "to", "noisy_at", "no_record", "unjudged", "some_rules", "rules", "incidents", "firings", "settings"},
-	"noisy_at":                {"firings", "precision"},
-	"settings":                {"lead_ns", "match", "refire_ns", "unknown_length_ns", "record_lookback_ns", "impact_from", "record_by_week"},
-	"rules[]":                 {"rule", "severity", "firings", "white", "black", "refired", "noisy", "unjudged", "no_record", "replayed", "unsupported", "incidents", "first", "alone", "spare", "off_hours", "off_hours_black", "asleep", "asleep_black", "excused", "during_deploys", "during_deploys_caught", "during_deploys_unjudged"},
-	"incidents[]":             {"id", "title", "start", "end", "labels", "candidate", "caught_by"},
-	"incidents[].caught_by[]": {"rule", "delay_ns", "noisy"},
-	"firings[]":               {"rule", "labels", "start", "end", "white", "incidents", "no_record", "refired", "during_deploy"},
+	"":                          {"from", "to", "noisy_at", "no_record", "unjudged", "some_rules", "rules", "incidents", "firings", "settings"},
+	"noisy_at":                  {"firings", "precision"},
+	"settings":                  {"lead_ns", "match", "refire_ns", "unknown_length_ns", "record_lookback_ns", "impact_from", "record_by_week", "impact_signals", "impact_rules"},
+	"settings.impact_signals[]": {"name", "for_ns", "match", "record", "start"},
+	"settings.impact_rules[]":   {"rules", "labels", "signals", "match"},
+	"rules[]":                   {"rule", "severity", "firings", "white", "black", "refired", "noisy", "unjudged", "no_record", "replayed", "unsupported", "incidents", "first", "alone", "spare", "off_hours", "off_hours_black", "asleep", "asleep_black", "excused", "during_deploys", "during_deploys_caught", "during_deploys_unjudged", "impact_rule"},
+	"incidents[]":               {"id", "title", "start", "end", "labels", "candidate", "caught_by", "signal"},
+	"incidents[].caught_by[]":   {"rule", "delay_ns", "noisy"},
+	"firings[]":                 {"rule", "labels", "start", "end", "white", "incidents", "no_record", "refired", "during_deploy", "signals"},
 }
 
 // A report with every field docs/numbers.md promises set, none left out as
@@ -34,14 +36,16 @@ func fullReport() *Report {
 	return &Report{
 		From: t0, To: t0.Add(7 * 24 * time.Hour), NoisyAt: NoisyAt{Firings: 10, Precision: 0.2}, NoRecord: true, Unjudged: 1, SomeRules: true,
 		Settings: &Settings{Lead: time.Minute, Match: []string{"service"}, Refire: time.Hour, UnknownLength: time.Hour, RecordLookback: RecordLookback,
-			ImpactFrom: t0, ByWeek: true},
+			ImpactFrom: t0, ByWeek: true,
+			ImpactSignals: []Signal{{Name: "probe", For: 2 * time.Minute, Match: []string{"service"}, Record: true, Start: t0}},
+			ImpactRules:   []RuleEntry{{Rules: "^BackendMissing$", Labels: incident.Labels{"team": {"platform"}}, Signals: []string{"probe"}, Match: []string{"backend"}}}},
 		Rules: []RuleResult{{Rule: "ApiErrors", Severity: "critical", Firings: 3, White: 1, Black: 2, Refired: 1, Noisy: true, Unjudged: 1, NoRecord: true,
 			Replayed: true, Unsupported: "x", Incidents: 1, First: 1, Alone: 1, Spare: true, OffHours: 1, OffHoursBlack: 1, Asleep: 1, AsleepBlack: 1,
-			Excused: 1, DuringDeploys: 1, DeploysCaught: 1, DeploysUnjudged: 1}},
+			Excused: 1, DuringDeploys: 1, DeploysCaught: 1, DeploysUnjudged: 1, ImpactRule: 1}},
 		Incidents: []IncidentResult{{Incident: incident.Incident{ID: "INC-1", Title: "Errors", Start: t0, End: t0.Add(time.Hour),
-			Labels: incident.Labels{"service": {"api"}}, Candidate: true}, CaughtBy: []Catch{{Rule: "ApiErrors", Delay: time.Minute, Noisy: true}}}},
+			Labels: incident.Labels{"service": {"api"}}, Candidate: true, Signal: "probe"}, CaughtBy: []Catch{{Rule: "ApiErrors", Delay: time.Minute, Noisy: true}}}},
 		Firings: []Judged{{Firing: firing.Firing{Rule: "ApiErrors", Labels: map[string]string{"service": "api"}, Start: t0, End: t0.Add(time.Hour)},
-			White: true, Incidents: []string{"INC-1"}, NoRecord: true, Refired: true, DuringDeploy: true}},
+			White: true, Incidents: []string{"INC-1"}, NoRecord: true, Refired: true, DuringDeploy: true, Signals: []string{"probe"}}},
 	}
 }
 
@@ -192,6 +196,79 @@ func TestCSVCells(t *testing.T) {
 		"－1": "'－1", "\n=cmd": `\u{a}=cmd`, "\u202e=cmd": `\u{202e}=cmd`, "a=b": "a=b", `C:\path`: `C:\\path`, `\u{202e}=cmd`: `\\u{202e}=cmd`} {
 		if got := Cell(in); got != want {
 			t.Errorf("Cell(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// verdictMetrics are the metrics docs/numbers.md lists that only lapilli
+// verdict's --metrics gives for now, with named impact signals, each with
+// its labels: TestMetricsStable holds lapilli serve's.
+var verdictMetrics = []struct {
+	name   string
+	labels []string
+}{
+	{"lapilli_impact_windows", []string{"signal", "state"}},
+	{"lapilli_impact_signal_start_timestamp_seconds", []string{"signal"}},
+}
+
+// The metrics of named signals keep their names and labels, and the
+// document lists each with them.
+func TestVerdictMetricsStable(t *testing.T) {
+	t0 := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
+	r := fullReport()
+	var b bytes.Buffer
+	if err := Prometheus(&b, r, t0); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := os.ReadFile("../../docs/numbers.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, table, _ := strings.Cut(string(doc), "### The metrics")
+	table, _, _ = strings.Cut(table, "\n### ")
+	sample := regexp.MustCompile(`^([a-z_]+)(?:\{(.*)\})? `)
+	label := regexp.MustCompile(`([a-z_]+)="`)
+	for _, m := range verdictMetrics {
+		row := ""
+		for _, l := range strings.Split(table, "\n") {
+			if strings.HasPrefix(l, "| `"+m.name+"` |") {
+				row = l
+			}
+		}
+		if row == "" {
+			t.Errorf("docs/numbers.md doesn't list %s", m.name)
+		}
+		series := 0
+		for _, line := range strings.Split(b.String(), "\n") {
+			x := sample.FindStringSubmatch(line)
+			if x == nil || x[1] != m.name {
+				continue
+			}
+			series++
+			var names []string
+			for _, l := range label.FindAllStringSubmatch(x[2], -1) {
+				names = append(names, l[1])
+			}
+			if !slices.Equal(names, m.labels) {
+				t.Errorf("%s: labels %v, want %v", line, names, m.labels)
+			}
+		}
+		for _, l := range m.labels {
+			if !strings.Contains(row, "`"+l+"`") {
+				t.Errorf("docs/numbers.md: %s's %s isn't listed", m.name, l)
+			}
+		}
+		if series == 0 {
+			t.Errorf("%s: no series", m.name)
+		}
+	}
+	// With no named signal, neither.
+	r.Settings.ImpactSignals = nil
+	b.Reset()
+	Prometheus(&b, r, t0)
+	for _, m := range verdictMetrics {
+		if strings.Contains(b.String(), m.name) {
+			t.Errorf("no named signal, and %s", m.name)
 		}
 	}
 }

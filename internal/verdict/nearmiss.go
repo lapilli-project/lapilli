@@ -106,7 +106,7 @@ func Nearly(in incident.Incident, held []firing.Firing, ruleFor, every time.Dura
 	// The longest "for" short of the rule's own, in whole evaluations.
 	longest := (ruleFor - 1) / every * every
 	for _, f := range held {
-		if f.End.IsZero() || !in.Labels.Agree(f.Labels, o.Match) {
+		if f.End.IsZero() || !o.Agrees(f.Rule, f.Labels, in) {
 			continue
 		}
 		// With a "for" of d it fires at Start+d, if it still held then, and
@@ -162,7 +162,7 @@ func NearlyBy(in incident.Incident, series []prom.Series, r rules.Rule, b rules.
 		maps.Copy(l, r.AlertLabels())
 		// A value that isn't a number doesn't hold: it breaks a stretch.
 		smp := slices.DeleteFunc(slices.Clone(s.Samples), func(x prom.Sample) bool { return math.IsNaN(x.V) })
-		if len(smp) == 0 || !in.Labels.Agree(l, o.Match) {
+		if len(smp) == 0 || !o.Agrees(r.Name, l, in) {
 			continue
 		}
 		// For a range, a value its other end alone decides is as near holding,
@@ -262,7 +262,7 @@ func NearlyAt(in incident.Incident, fired []firing.Firing, r rules.Rule, b rules
 func FiringDuring(in incident.Incident, fired []firing.Firing, o Options) bool {
 	from, to := in.Start.Add(-o.Lead), in.EndOr(o.UnknownLen)
 	for _, f := range fired {
-		if !f.Start.After(to) && (f.End.IsZero() || f.End.After(from)) && in.Labels.Agree(f.Labels, o.Match) {
+		if !f.Start.After(to) && (f.End.IsZero() || f.End.After(from)) && o.Agrees(f.Rule, f.Labels, in) {
 			return true
 		}
 	}

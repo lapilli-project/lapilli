@@ -50,6 +50,11 @@ func checkText(tooLong, s string, most int) error {
 	return nil
 }
 
+// CheckRE compiles a rule pattern as a team's or a quiet window's is, and
+// refuses one as they are refused: over 200 bytes, or one that would take
+// long to match. --impact-file's rule entries are checked so.
+func CheckRE(s string) (*regexp.Regexp, error) { return checkRE(s) }
+
 // checkRE compiles a rule pattern, and refuses one that would take long to
 // match: Go's are linear in what they match, but can be long programs.
 func checkRE(s string) (*regexp.Regexp, error) {

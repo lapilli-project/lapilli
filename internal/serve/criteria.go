@@ -20,6 +20,7 @@ import (
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/rules"
+	"lapilli.dev/internal/source"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -326,48 +327,20 @@ func promText(err error) string {
 }
 
 // firstSamples are, of each selector expr reads, when it first had data in
-// [lo, hi]: the earliest sample of any of its series, so that a series
-// added late moves nothing (count over all of them, at a step of an hour,
-// or coarser over a long span: one request a selector). atStart says lo is
-// where the look begins: a selector with data there may have had it
-// before (AtStart). Within ctx's time and --max-samples.
+// [lo, hi], as source.FirstSamples looks for it. Within ctx's time and
+// --max-samples.
 func (s *Server) firstSamples(ctx context.Context, expr string, lo, hi time.Time, atStart bool) ([]ledger.SelectorData, error) {
-	sels, err := rules.Selectors(expr)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]ledger.SelectorData, 0, len(sels))
-	for _, sel := range sels {
-		x, err := s.firstSample(ctx, sel, lo, hi, atStart)
-		if err != nil {
-			return nil, err
-		}
-		x.To = hi
-		out = append(out, x)
-	}
-	return out, nil
+	return source.FirstSamples(ctx, s.h, expr, lo, hi, atStart)
 }
 
 func (s *Server) firstSample(ctx context.Context, sel string, lo, hi time.Time, atStart bool) (ledger.SelectorData, error) {
-	x := ledger.SelectorData{Sel: sel}
-	if !hi.After(lo) {
-		return x, nil
-	}
-	step := max(time.Hour, (hi.Sub(lo)/1000).Truncate(time.Minute)+time.Minute)
-	series, err := s.h.QueryRange(ctx, "count("+sel+")", lo, hi, step)
-	if err != nil {
-		return x, err
-	}
-	for _, se := range series {
-		for _, smp := range se.Samples {
-			if x.First.IsZero() || smp.T.Before(x.First) {
-				x.First = smp.T
-			}
-		}
-	}
-	x.AtStart = atStart && !x.First.IsZero() && !x.First.After(lo)
-	return x, nil
+	return source.FirstSample(ctx, s.h, sel, lo, hi, atStart)
 }
+
+// CheckImpact is what an impact expression is refused for before anything
+// is read for it, as the Settings page refuses it (checkImpact): for
+// lapilli verdict's named signals, and --impact-file's.
+func CheckImpact(expr string) error { return checkImpact(expr) }
 
 // criteriaView is the incident criteria, as the Settings page shows them:
 // each setting, the form's values (as typed when tried, else in effect),

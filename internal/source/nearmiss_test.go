@@ -122,3 +122,32 @@ func TestNearMisses(t *testing.T) {
 		t.Errorf("cancelled: %+v", nms)
 	}
 }
+
+// A rule an entry keeps from a signal's windows is never looked at for a
+// near miss of one: not proposed, and nothing asked about it.
+func TestNearMissesSignals(t *testing.T) {
+	o := verdict.Options{From: t0, To: t0.Add(7 * 24 * time.Hour), Lead: 15 * time.Minute, Match: []string{"service"},
+		RefireWithin: time.Hour, UnknownLen: time.Hour}
+	o.Signals = verdict.NewSignals([]verdict.Signal{{Name: "errors", Record: true}, {Name: "latency", Record: true}},
+		[]verdict.RuleEntry{{Rules: "^Slow$", Signals: []string{"latency"}}}).Index(map[string]map[string]string{"Errors": {}, "Slow": {}})
+	tue := t0.Add(24 * time.Hour)
+	incs := []incident.Incident{{ID: "impact-errors-1", Signal: "errors", Candidate: true, Start: tue.Add(10 * time.Hour),
+		End: tue.Add(10*time.Hour + 30*time.Minute), Labels: incident.Labels{"service": {"checkout"}}}}
+	asked := func(rs []rules.Rule) ([]verdict.NearMiss, int64) {
+		h := &held{}
+		versions := []replay.Version{{Rules: rs}}
+		_, fs := replay.Run(context.Background(), h, versions, o.From, o.To, time.Minute, 4)
+		rep := verdict.Judge(rs, fs, incs, o)
+		h.asked.Store(0)
+		nms, _, _ := NearMisses(context.Background(), h, versions, rep, incs, o, time.Minute, 4, nil)
+		return nms, h.asked.Load()
+	}
+	errs := rules.Rule{Name: "Errors", Expr: "errors", For: 5 * time.Minute}
+	nms, with := asked([]rules.Rule{errs, {Name: "Slow", Expr: "slow", For: time.Hour}})
+	if len(nms) != 1 || nms[0].Rule != "Errors" {
+		t.Fatalf("near misses %+v", nms)
+	}
+	if _, without := asked([]rules.Rule{errs}); with != without {
+		t.Errorf("asked %d questions, %d without Slow: Slow was looked at", with, without)
+	}
+}

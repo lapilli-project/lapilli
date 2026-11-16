@@ -121,7 +121,7 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 			case r.For < 0, r.For > nearFor,
 				r.Unsupported != "" || !ok || rr.Noisy || rr.Unsupported != "" || named[r.Name] > 1,
 				slices.ContainsFunc(ir.CaughtBy, func(c verdict.Catch) bool { return c.Rule == r.Name }),
-				!ir.Labels.Agree(r.Labels, o.Match),
+				!o.Agrees(r.Name, r.Labels, ir.Incident),
 				r.For == 0 && !numbers(r):
 				continue
 			}

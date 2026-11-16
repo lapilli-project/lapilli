@@ -80,6 +80,9 @@ func TestRedactEveryField(t *testing.T) {
 	stay := map[string]bool{
 		"RuleResult.Severity":      true, // how loud, naming nothing
 		"Settings.Match":           true, // labels' names, which stay
+		"Signal.Match":             true,
+		"RuleEntry.Match":          true,
+		"Incident.Match":           true,
 		"RuleResult.Unseen":        true, // Lapilli's codes
 		"HoursUsed.Work":           true, // hours, as given
 		"HoursUsed.Sleep":          true,

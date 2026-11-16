@@ -1,6 +1,7 @@
 # Impact signals: several, each named, with its own `for`, `match` and start
 
-Status: accepted, not built. Under [GOVERNANCE.md](../../GOVERNANCE.md)
+Status: accepted; step 1 built (`lapilli verdict`, "Step 1, as built"
+below), steps 2 and 3 not. Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this changes how a firing is judged (an incident, and a rule beside a
 signal, get labels of their own to be matched on, and a rule can be judged
 against some signals only) and adds a new kind of data to the ledger (the
@@ -219,9 +220,10 @@ What an entry changes, for the rules it names:
 - **What keeps its record:** the entry's signals that keep the record, and
   no other signal (below). An entry whose signals are none of those in
   effect (a `latency` signal not yet added, removed, or `record: false`)
-  leaves the rule with no record by impact: its firings that caught
+  leaves the rule with no record by reading: its firings that caught
   nothing are counted, not judged, "no record", unless an incident written
-  down keeps their week, as for any rule.
+  down keeps their week, as for any rule, or a window of one of the
+  entry's signals does.
 
 **The default, for a rule no entry names:** judged against every signal's
 windows, each with the signal's own `match` (or the match in effect); its
@@ -348,8 +350,9 @@ firing, among those that keep the record, had started by the week's start
 (judged by week, as `serve` judges). Which signals are tied to a firing:
 
 1. **A rule entry**: its signals, and no others. One with none in effect
-   that keeps the record ties none, and the firing has no record by impact
-   (above).
+   that keeps the record ties none that it waits for, and the firing has
+   no record by reading (above); the windows of the entry's signals that
+   don't keep the record still keep the record near them, as below.
 2. **Else, by match, label by label.** A signal is tied when, for each
    label of its `match` the firing carries, the firing's value is one the
    signal's series have had for that label (`seen`, below). A label the
@@ -360,7 +363,12 @@ firing, among those that keep the record, had started by the week's start
    probe's start.
 3. **Else, nothing ties it** (its values are none any signal has had): it
    falls back to every signal that keeps the record, and waits for the
-   latest start of all, as one expression's record does now.
+   latest start of all, as one expression's record does now. So it does
+   when what 2 ties it to keeps no record: a signal matched on no label
+   ties every firing, and one with `record: false` (payments) would
+   otherwise leave a firing of a service no other signal has returned
+   never judged by reading. The signals 2 tied stay tied, and their
+   windows keep its record.
 
 **Or an incident keeps the week**, as now, on in the week or the two before
 it (`verdict.RecordLookback`):
@@ -380,11 +388,14 @@ of the firings tied to it, as any window does, and no more.
 **What a signal has returned** (`seen`) is kept as it is read: for each of
 its `match` labels, the values its series have had, 1,000 a label and 256
 KB a signal at most; past either, it is taken to have returned every
-value of that label. A value seen later ties the firings before it too,
-which then wait for that signal's start: a firing is never judged by a
-signal that couldn't see it, and its record may wait longer than it needs.
-Where each value's data begins, apart from the signal's, is not looked
-for, as v0.49.0 looks per selector, not per series.
+value of that label. So is a label one of its series returned something
+without: a firing agrees with that series' windows whatever its value
+(`Agree`), so the signal could have seen it. A value seen later ties the
+firings before it too, which then wait for that signal's start: a firing
+is never judged by a signal that couldn't see it, and its record may wait
+longer than it needs. Where each value's data begins, apart from the
+signal's, is not looked for, as v0.49.0 looks per selector, not per
+series.
 
 **Changing signals**, per signal:
 
@@ -516,6 +527,14 @@ pull request, as it says:
   `lapilli_impact_signal_start_timestamp_seconds` (`signal`), and
   `[signal]` on `lapilli_incident_state` and `lapilli_incident_lead_seconds`.
   Its recount blocks count `unjudged` by firing, as the report has it.
+- **So that the report's numbers can still be counted again from it**
+  (found building step 1): `settings.impact_rules`† (the entries, as the
+  summary's settings give them), `rules[].impact_rule`† (the place of the
+  entry that names the rule, from 1) and `firings[].signals`† (the signals
+  tied to the firing). Without the entries, a catch by a rule an entry
+  names can't be counted again; without the ties, which follow from what
+  each signal returned over the read, which the report doesn't hold, nor
+  can a firing's record.
 
 ## In the ledger
 
@@ -716,6 +735,58 @@ Open:
    holds a rule to catching an incident by its id. An impact window's key
    can change when its signal is read again; an expectation should name the
    incident its confirmation writes.
+6. **`seen` from what a signal reads, not what it returns** (found in the
+   review of step 1; to settle before step 2 keeps `seen` in the ledger).
+   `seen` holds the values a signal returned. A signal with a threshold
+   (`> 0.05`) returns something only while users are hurt, so a service it
+   measured all month, never hurt, is a value it never returned: that
+   service's firings are tied to no signal that keeps the record, fall
+   back, and wait for the latest start of all, the youngest signal's,
+   which is what "One start" (above) set out to end. Errors with a month
+   of data that returned nothing, and a probe from Thursday that failed
+   only for `checkout`, leave a Monday firing of `service: search` with no
+   record. Whether `seen` should come from what the signal reads instead:
+   its selectors counted by its `match` labels over the read
+   (`count by (service) (http_requests_total)`), one request a selector,
+   as where its data begins is looked for; and what to do of a label its
+   selectors don't have, which the expression makes (`label_replace`, a
+   relabelled probe target).
+
+## Step 1, as built
+
+`lapilli verdict` with named signals, and what building it settled:
+
+- **Flags.** `--impact NAME=PROMQL` (8 at most); `--impact-for NAME=DUR`;
+  `--impact-match NAME=LABEL,LABEL`, comma-separated, `NAME=` for none;
+  `--impact-record NAME=yes|no`. Each given once a name. `--impact-file`
+  takes the place of all of them but `--impact-for DUR`, the "for" of a
+  signal the file gives none: with `--impact` or a flag by name, it is
+  refused. The file holds `signals` and `rules` at its top, or under
+  `impact:`, as the chart's values will. A rule entry names its rules
+  (`rules`, `labels` or both) and 1 to 8 signals.
+- **`lapilli serve`** refuses named signals, the flags by name and
+  `--impact-file` until step 2 keeps them; two `--impact` without a name
+  are refused by both commands.
+- **Windows.** A named signal's ids are `impact-NAME-1`, `impact-NAME-2`,
+  its title `user impact (NAME)`; the unnamed signal's are as they were.
+- **Each signal's start.** Where it is first read, two weeks before the
+  period, or, of a selector with no data there, where its data begins, by
+  v0.49.0's rule (`ledger.FloorBy`); `lapilli verdict` judges each firing
+  by its own time, so the start is that time itself, not the first whole
+  week after it. A selector with no data at all: no start, the signal
+  never keeps the record.
+- **A signal that can't be read** fails the run, as `--impact` does: "missed
+  for the run" is serve's runs'. The bounds on windows are serve's runs'
+  too; a read is held to `--max-samples`.
+- **`--redact`** gives each signal's name an alias (`signal-01`), writes a
+  rule entry's pattern as `[redacted]`, and aliases its labels' values.
+- **`--metrics`** gives `lapilli_impact_windows` and
+  `lapilli_impact_signal_start_timestamp_seconds`; the text says each
+  signal's windows and its start.
+- **Not in step 1**: the summary's `impacts.by_signal` and `unjudged`,
+  `settings.impact_signals` and `settings.impact_rules` in
+  `/api/v1/summary`, and `[signal]` on serve's metrics, which are
+  serve's (step 2).
 
 ## Steps
 

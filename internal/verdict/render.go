@@ -41,8 +41,12 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 	fmt.Fprintf(w, "%d firings, %d incidents written down", firings, written)
 	if found > 0 {
 		fmt.Fprintf(w, ", %d more found by --impact", found)
+		if by := bySignal(r); by != "" {
+			fmt.Fprintf(w, " (%s)", by)
+		}
 	}
 	fmt.Fprintln(w)
+	signalsKept(w, r, loc)
 	if len(r.RulesChanged) > 0 {
 		var at []string
 		for _, t := range r.RulesChanged {
@@ -54,6 +58,8 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 	switch {
 	case r.NoRecord && firings > 0:
 		fmt.Fprintln(w, NoRecordText)
+	case r.Unjudged > 0 && len(signals(r)) > 0:
+		fmt.Fprintf(w, SomeUnjudgedSignalsText+"\n", r.Unjudged, firings)
 	case r.Unjudged > 0:
 		fmt.Fprintf(w, SomeUnjudgedText+"\n", r.Unjudged, firings)
 	}
@@ -144,10 +150,16 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			spans(w, r.Incidents, loc)
 		}
 		if s := r.ImpactShort; short {
-			fmt.Fprintf(w, "! --impact-for %s counts impact that lasted %s as an incident, but %d of the %d rules judged fire only once\n"+
+			// With named signals, the one with the shortest "for", by name:
+			// --impact-for alone sets none of theirs.
+			flag := "--impact-for "
+			if s.Signal != "" {
+				flag += Clean(s.Signal) + "="
+			}
+			fmt.Fprintf(w, "! %s%s counts impact that lasted %s as an incident, but %d of the %d rules judged fire only once\n"+
 				"  their condition held longer: their \"for\" and one evaluation, with no \"for\" an evaluation (%s for %d\n"+
-				"  of them). Impact shorter than that they can't be sure to catch. --impact-for %s counts only what they can.\n",
-				Duration(s.For), Duration(s.For), s.Rules, s.Judged, Duration(s.Need), s.Most, Duration(s.Need))
+				"  of them). Impact shorter than that they can't be sure to catch. %s%s counts only what they can.\n",
+				flag, Duration(s.For), Duration(s.For), s.Rules, s.Judged, Duration(s.Need), s.Most, flag, Duration(s.Need))
 		}
 		if noisy > 0 {
 			fmt.Fprintf(w, "! %d of %d incidents were caught only by noisy rules, which fire whatever happens\n"+
@@ -168,6 +180,55 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		fmt.Fprintln(w, "\nA longer \"for\" for the noisy rules, near misses and what fired with no record are in part: the steps after the replays ran out of time (--extras, or --timeout).")
 	}
 	return nil
+}
+
+// signals are the named impact signals a report was judged by, none for an
+// impact signal with no name.
+func signals(r *Report) []Signal {
+	if r.Settings == nil {
+		return nil
+	}
+	return r.Settings.ImpactSignals
+}
+
+// bySignal is how many windows each named signal found, of those that
+// found any: "errors 2, probe 1".
+func bySignal(r *Report) string {
+	n := map[string]int{}
+	for _, in := range r.Incidents {
+		if in.Candidate && in.Signal != "" {
+			n[in.Signal]++
+		}
+	}
+	var parts []string
+	for _, s := range signals(r) {
+		if n[s.Name] > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d", s.Name, n[s.Name]))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// signalsKept writes, of named impact signals, from when each keeps the
+// record: where it was first read with data, a firing it could have seen
+// judged from then on.
+func signalsKept(w io.Writer, r *Report, loc *time.Location) {
+	ss := signals(r)
+	if len(ss) == 0 {
+		return
+	}
+	var parts []string
+	for _, s := range ss {
+		switch {
+		case !s.Record:
+			parts = append(parts, s.Name+" doesn't (record: no)")
+		case s.Start.IsZero():
+			parts = append(parts, s.Name+" never: a selector it reads has no data")
+		default:
+			parts = append(parts, s.Name+" from "+s.Start.In(loc).Format("2006-01-02 15:04"))
+		}
+	}
+	fmt.Fprintf(w, "Impact signals keep the record of the firings they could have seen: %s\n", strings.Join(parts, ", "))
 }
 
 // outlasting writes the rules replayed whose "for" one event can't
@@ -630,6 +691,9 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 				escape(in.ID), first.Delay.Seconds()))
 		}
 		counts[[2]string{state, src}]++
+		if in.Signal != "" {
+			counts[[2]string{state, "signal " + in.Signal}]++
+		}
 	}
 	var incs []string
 	for _, state := range []string{"caught", "noisy_only", "missed"} {
@@ -639,6 +703,21 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 	}
 	family("lapilli_incidents", "Incidents in the period: caught, caught only by noisy rules, or missed.", incs)
 	family("lapilli_incident_detection_delay_seconds", "From an incident's start to the first alert from a rule that isn't noisy; negative when the alert came first.", delays)
+	// Named impact signals: each one's windows, by state, and from when it
+	// keeps the record.
+	if ss := signals(r); len(ss) > 0 {
+		var windows, starts []string
+		for _, sg := range ss {
+			for _, state := range []string{"caught", "noisy_only", "missed"} {
+				windows = append(windows, fmt.Sprintf(`lapilli_impact_windows{signal="%s",state="%s"} %d`, escape(sg.Name), state, counts[[2]string{state, "signal " + sg.Name}]))
+			}
+			if !sg.Start.IsZero() && sg.Record {
+				starts = append(starts, fmt.Sprintf(`lapilli_impact_signal_start_timestamp_seconds{signal="%s"} %d`, escape(sg.Name), sg.Start.Unix()))
+			}
+		}
+		family("lapilli_impact_windows", "Impact windows in the period, by the named signal that found them: caught, caught only by noisy rules, or missed.", windows)
+		family("lapilli_impact_signal_start_timestamp_seconds", "From when each named impact signal keeps the record of the firings it could have seen, in Unix seconds.", starts)
+	}
 	// Not run yet, it has no time to give: a dashboard shows none, not
 	// the year 1.
 	if !now.IsZero() {

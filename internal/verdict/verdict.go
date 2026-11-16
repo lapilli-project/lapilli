@@ -58,6 +58,12 @@ type Options struct {
 	// its week is kept, as serve's stones are kept by week. Nil judges each
 	// firing by the record at its own time, as lapilli verdict does.
 	RecordWeek func(t time.Time) (from, to time.Time) `json:"-"`
+	// Signals, when named, are the impact signals and the rule entries
+	// firings are judged by (docs/design/signals.md): each window matched
+	// on its signal's labels, each firing judged by the signals that could
+	// have seen it, from each one's start. ImpactFrom is then zero: it is
+	// the start of an impact signal with no name.
+	Signals *Signals `json:"-"`
 }
 
 // The defaults for Options.NoisyFirings and Options.NoisyPrecision.
@@ -97,6 +103,11 @@ type Judged struct {
 	// DuringDeploy says, in lapilli serve, it came during a deploy of what
 	// it is about: one of its rule's DuringDeploys.
 	DuringDeploy bool `json:"during_deploy,omitempty"`
+	// Signals are, with named impact signals, those tied to it: those that
+	// could have seen the incident it would catch (Signals.Ties). Their
+	// windows keep its record, and so does reading those of them that keep
+	// the record, from when all of them started.
+	Signals []string `json:"signals,omitempty"`
 	// Excused is, in lapilli serve's CSV, a firing a quiet window excused:
 	// neither white nor black, and in none of the numbers. A report's
 	// Firings leave such firings out.
@@ -161,6 +172,9 @@ type RuleResult struct {
 	DeploysCaught int `json:"during_deploys_caught,omitempty"`
 	// DeploysUnjudged are those of DuringDeploys among Unjudged.
 	DeploysUnjudged int `json:"during_deploys_unjudged,omitempty"`
+	// ImpactRule is, with named impact signals, the rule entry that names
+	// it (Settings.ImpactRules), from 1; 0 for none.
+	ImpactRule int `json:"impact_rule,omitempty"`
 }
 
 // Judged is how many of its firings were judged: those with a record at
@@ -218,9 +232,12 @@ type IncidentResult struct {
 // condition held longer than --impact-for (For): Rules of Judged, Need the
 // most common of how long they need, their "for" and one evaluation (with
 // no "for", an evaluation), and Most how many need that. An incident found by --impact as short as For
-// can't be caught by them: shown, it is still judged as any other.
+// can't be caught by them: shown, it is still judged as any other. With
+// named signals, Signal is the one whose "for" is shortest, and the rules
+// judged are those judged against its windows.
 type ImpactShort struct {
 	For    time.Duration `json:"impact_for"`
+	Signal string        `json:"signal,omitempty"`
 	Rules  int           `json:"rules"`
 	Judged int           `json:"judged"`
 	Need   time.Duration `json:"need"`
@@ -327,6 +344,12 @@ type Settings struct {
 	// ByWeek says a firing's record is its week's (lapilli serve), not its
 	// own time's.
 	ByWeek bool `json:"record_by_week,omitempty"`
+	// ImpactSignals are the named impact signals, each with its "for", its
+	// match (null for the match in effect), whether it keeps the record,
+	// and from when it does; ImpactRules the rule entries, in order. None
+	// with an impact signal that has no name.
+	ImpactSignals []Signal    `json:"impact_signals,omitempty"`
+	ImpactRules   []RuleEntry `json:"impact_rules,omitempty"`
 }
 
 // Settings are what o judges by, as a report says them.
@@ -335,8 +358,12 @@ func (o Options) Settings() *Settings {
 	if match == nil {
 		match = []string{}
 	}
-	return &Settings{Lead: o.Lead, Match: match, Refire: o.RefireWithin, UnknownLength: o.UnknownLen,
+	s := &Settings{Lead: o.Lead, Match: match, Refire: o.RefireWithin, UnknownLength: o.UnknownLen,
 		RecordLookback: RecordLookback, ImpactFrom: o.ImpactFrom, ByWeek: o.RecordWeek != nil}
+	if o.Signals.Named() {
+		s.ImpactSignals, s.ImpactRules = slices.Clone(o.Signals.List), slices.Clone(o.Signals.Entries)
+	}
+	return s
 }
 
 // Suggestion is a noisy rule replayed with a longer "for": it would have
@@ -372,10 +399,11 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		if r, ok := byRule[name]; ok {
 			return r
 		}
-		r := &RuleResult{Rule: name, Group: group}
+		r := &RuleResult{Rule: name, Group: group, ImpactRule: o.Signals.EntryNumber(name)}
 		byRule[name] = r
 		return r
 	}
+	named := o.Signals.Named()
 	for _, k := range known {
 		// A name can stand for several rules, or a rule as it was at
 		// several times; if any of them couldn't be replayed, say so.
@@ -415,6 +443,11 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			continue
 		}
 		j := Judged{Firing: f}
+		var ties []int
+		if named {
+			ties = o.Signals.Ties(f.Rule, f.Labels, o.Match)
+			j.Signals = o.Signals.Names(ties)
+		}
 		for i, in := range inPeriod {
 			if Catches(f, in, o) {
 				j.White = true
@@ -434,7 +467,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			r.White++
 		} else {
 			r.Black++
-			if !rec.Judges(f.Start) {
+			if named && !rec.JudgesTied(f.Start, ties) || !named && !rec.Judges(f.Start) {
 				j.NoRecord = true
 				r.Unjudged++
 				rep.Unjudged++
@@ -489,14 +522,16 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 }
 
 // Catches reports whether a firing catches an incident: it started between
-// Lead before the incident and its end, and their labels agree on Match.
-// One already firing before that caught nothing: it was on anyway.
+// Lead before the incident and its end, and their labels agree on the
+// labels it is matched on (Options.Agrees: Match, or a signal's or a rule
+// entry's). One already firing before that caught nothing: it was on
+// anyway.
 func Catches(f firing.Firing, in incident.Incident, o Options) bool {
 	from, to := in.Start.Add(-o.Lead), in.EndOr(o.UnknownLen)
 	if f.Start.Before(from) || f.Start.After(to) {
 		return false
 	}
-	return in.Labels.Agree(f.Labels, o.Match)
+	return o.Agrees(f.Rule, f.Labels, in)
 }
 
 // Refired reports whether a firing that started at start came within
