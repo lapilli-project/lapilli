@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-11-16
+
 ### Added
 
 - **User impact in a pull request backtest.** The backtest recipes take
@@ -90,38 +92,6 @@
   one release's: once the `uses:` line moves, nothing is installed, and
   the comment says so, until it is changed too. The release workflow
   checks that the first release `CHANGELOG.md` names is the one tagged.
-
-- **The impact signal keeps the record by the criterion it was read
-  with.** `impact_since` kept from when the runs read `--impact`, whatever
-  they read it with, so an expression changed between restarts kept the
-  record of weeks the one before read. The criterion (expression and
-  `--impact-for`) is kept beside it now: another in effect keeps no record
-  until it is read. A new one, saved in the UI or started with, is read
-  again over the last four weeks by the replica that leads, its windows in
-  place of those found from then on (decisions about them kept), those
-  weeks judged again, and the record kept by it from then; the weeks
-  before keep only the windows the one before found, as incidents. One
-  that fails to be read again is tried again later, up to a day apart. No
-  schema change; `verdict.Semantics` is unchanged. A proposal whose
-  backtest's weeks flip is held for a new backtest, as with an incident
-  written or taken away. The overview's weekly panels the digest works out
-  catch up at the next digest.
-
-- **The impact signal's record is what the ledger holds of it.** The
-  criterion read (expression and `--impact-for`) is kept beside
-  `impact_since`. A new one, saved in the UI or started with, leaves the
-  record, its criterion and its data as they were, pending, until the
-  replica that leads reads it again over the last four weeks: its windows
-  take the place of those found from then on, the record is kept by it
-  from then, and the weeks are judged again, a week a write. Meanwhile the
-  weeks the runs read the pending one over keep their record only as far
-  as its data goes. A decision about a window found before holds for a
-  new one it covers half of or more (the one covering most, confirmed
-  before dismissed on a tie); a window keeps the key of one found before
-  only when it is the same one, so nothing kept on one lands on another;
-  the tasks and comments on a window no longer there move to the one
-  covering most of it, sharing labels, or are listed on the Cleanup page;
-  a window starting in the same minute as one kept is kept too. The
 
 - **The impact signal's record follows one rule: it holds only for weeks
   that were read, with data, by the criterion in effect, and, after a
