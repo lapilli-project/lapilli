@@ -214,6 +214,19 @@ type IncidentResult struct {
 	CaughtBy []Catch `json:"caught_by"`
 }
 
+// ImpactShort is of the rules judged, those that fire only once their
+// condition held longer than --impact-for (For): Rules of Judged, Need the
+// most common of how long they need, their "for" and one evaluation (with
+// no "for", an evaluation), and Most how many need that. An incident found by --impact as short as For
+// can't be caught by them: shown, it is still judged as any other.
+type ImpactShort struct {
+	For    time.Duration `json:"impact_for"`
+	Rules  int           `json:"rules"`
+	Judged int           `json:"judged"`
+	Need   time.Duration `json:"need"`
+	Most   int           `json:"need_rules"`
+}
+
 // Missed reports whether no rule caught the incident.
 func (i IncidentResult) Missed() bool { return len(i.CaughtBy) == 0 }
 
@@ -269,6 +282,15 @@ type Report struct {
 	// NearMissesCut says the time ran out before every incident was looked
 	// at for near misses.
 	NearMissesCut bool `json:"near_misses_cut,omitempty"`
+	// ImpactShort, with --impact, says how many of the rules judged can't
+	// fire on impact as short as --impact-for counts as an incident: their
+	// condition must hold for their "for" and one evaluation more.
+	ImpactShort *ImpactShort `json:"impact_short,omitempty"`
+	// Extras says the steps after the replays (a longer "for" for the noisy
+	// rules, near misses, what fired with no record) were "skipped", by
+	// --extras 0, or "cut" short, by --extras or --timeout: what they find
+	// is then none, or in part. Empty, they ran to their end.
+	Extras string `json:"extras,omitempty"`
 	// Unrecorded are, of a period with no record (NoRecord), the rules
 	// replayed that fired as often as a noisy rule, and what their firings
 	// were: the most firings first.

@@ -85,7 +85,7 @@ func TestSuggestNotPastTheWindow(t *testing.T) {
 	if rep.NoRecord || !rep.Rules[0].Noisy || rep.Rules[0].Firings < 30 {
 		t.Fatalf("the restart rule: %+v", rep.Rules[0])
 	}
-	if got := Suggest(context.Background(), restarts{}, versions[0].Rules, rep, away, o, time.Minute, nil); len(got) != 0 {
+	if got, _ := Suggest(context.Background(), restarts{}, versions[0].Rules, rep, away, o, time.Minute, 1, nil); len(got) != 0 {
 		t.Errorf("suggested %+v", got)
 	}
 	// With nothing written down, nothing is noisy, and nothing suggested.
@@ -93,7 +93,7 @@ func TestSuggestNotPastTheWindow(t *testing.T) {
 	if !rep.NoRecord || rep.Rules[0].Noisy {
 		t.Fatalf("no record: %+v", rep.Rules[0])
 	}
-	if got := Suggest(context.Background(), restarts{}, versions[0].Rules, rep, nil, o, time.Minute, nil); len(got) != 0 {
+	if got, _ := Suggest(context.Background(), restarts{}, versions[0].Rules, rep, nil, o, time.Minute, 1, nil); len(got) != 0 {
 		t.Errorf("suggested with no record %+v", got)
 	}
 }
@@ -292,7 +292,7 @@ func TestGrafanaRestarts(t *testing.T) {
 	if at, ok := alts[30*time.Minute]; err != nil || !ok || len(at) != 0 {
 		t.Fatalf("for 30m: %v %v %d", err, ok, len(at))
 	}
-	if got := Suggest(context.Background(), h, versions[0].Rules, rep, away, o, time.Minute, nil); len(got) != 0 {
+	if got, _ := Suggest(context.Background(), h, versions[0].Rules, rep, away, o, time.Minute, 1, nil); len(got) != 0 {
 		t.Errorf("suggested %+v", got)
 	}
 
@@ -345,5 +345,39 @@ func TestGrafanaNoData(t *testing.T) {
 	us, err = Unrecorded(context.Background(), h, versions, rep, Judged(rep.Firings), time.Minute)
 	if err != nil || len(us) != 1 || us[0].Events || us[0].Clear == nil || *us[0].Clear != 36 || us[0].Firings <= 37 || us[0].Bound != "> 0.5" {
 		t.Fatalf("a level: %+v %v", us, err)
+	}
+}
+
+// TestSuggestExcuseOneAtATime: with several noisy rules replayed at once,
+// excuse is still asked one at a time, as the ledger's keeps a map it
+// writes (go test -race); and done says every rule was tried.
+func TestSuggestExcuseOneAtATime(t *testing.T) {
+	r := grafanaRule(t, `sum by (pod) (increase(restarts[30m]))`)
+	h := grafanaRestarts{}
+	var rs []rules.Rule
+	for _, name := range []string{"A", "B", "C", "D"} {
+		x := r
+		x.Name = name
+		rs = append(rs, x)
+	}
+	o := verdict.Options{From: t0, To: t0.Add(7 * 24 * time.Hour), Lead: 15 * time.Minute, Match: []string{"service"},
+		RefireWithin: time.Hour, UnknownLen: time.Hour}
+	away := []incident.Incident{{ID: "INC-1", Start: t0.Add(-24 * time.Hour), End: t0.Add(-23 * time.Hour), Labels: incident.Labels{"service": {"x"}}}}
+	versions := []replay.Version{{Rules: rs}}
+	known, fs := replay.Run(context.Background(), h, versions, o.From, o.To, time.Minute, 4)
+	rep := verdict.Judge(known, fs, away, o)
+	asked := map[string]int{} // written with no lock, as the ledger's is
+	_, done := Suggest(context.Background(), h, rs, rep, away, o, time.Minute, 4, func(f firing.Firing) bool {
+		asked[f.Rule]++
+		return false
+	})
+	if !done || len(asked) != 4 {
+		t.Errorf("done %v, excuse asked for %v", done, asked)
+	}
+	// Cut short, it isn't done.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, done := Suggest(ctx, h, rs, rep, away, o, time.Minute, 4, nil); done {
+		t.Error("cancelled, and done")
 	}
 }

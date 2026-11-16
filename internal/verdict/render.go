@@ -128,18 +128,26 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 
 	if len(r.Incidents) > 0 {
 		fmt.Fprintln(w)
-		rows := [][]string{{"INCIDENT", "START", "CAUGHT BY"}}
+		rows := [][]string{{"INCIDENT", "START", "LASTED", "CAUGHT BY"}}
 		for _, in := range r.Incidents {
-			rows = append(rows, []string{incidentName(in.Incident), in.Start.In(loc).Format(stamp), caughtBy(in.CaughtBy)})
+			rows = append(rows, []string{incidentName(in.Incident), in.Start.In(loc).Format(stamp), lasted(in.Incident), caughtBy(in.CaughtBy)})
 		}
 		if err := table(w, rows); err != nil {
 			return err
 		}
-		if missed > 0 || noisy > 0 {
+		short := r.ImpactShort != nil && found > 0
+		if missed > 0 || noisy > 0 || short {
 			fmt.Fprintln(w)
 		}
 		if missed > 0 {
 			fmt.Fprintf(w, "✗ %d of %d incidents had no alert.\n", missed, len(r.Incidents))
+			spans(w, r.Incidents, loc)
+		}
+		if s := r.ImpactShort; short {
+			fmt.Fprintf(w, "! --impact-for %s counts impact that lasted %s as an incident, but %d of the %d rules judged fire only once\n"+
+				"  their condition held longer: their \"for\" and one evaluation, with no \"for\" an evaluation (%s for %d\n"+
+				"  of them). Impact shorter than that they can't be sure to catch. --impact-for %s counts only what they can.\n",
+				Duration(s.For), Duration(s.For), s.Rules, s.Judged, Duration(s.Need), s.Most, Duration(s.Need))
 		}
 		if noisy > 0 {
 			fmt.Fprintf(w, "! %d of %d incidents were caught only by noisy rules, which fire whatever happens\n"+
@@ -152,6 +160,12 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		if r.NearMissesCut {
 			fmt.Fprintln(w, "Not every incident was looked at for rules that nearly caught it: the time or the bounds ran out, or a question of the history failed.")
 		}
+	}
+	switch r.Extras {
+	case "skipped":
+		fmt.Fprintln(w, "\nA longer \"for\" for the noisy rules, near misses and what fired with no record weren't looked for (--extras 0).")
+	case "cut":
+		fmt.Fprintln(w, "\nA longer \"for\" for the noisy rules, near misses and what fired with no record are in part: the steps after the replays ran out of time (--extras, or --timeout).")
 	}
 	return nil
 }
@@ -406,6 +420,81 @@ func textWidth(s string) int {
 }
 
 // incidentName is an incident's id and title.
+// lasted is how long an incident lasted, "–" when its end wasn't written
+// down; of one found by --impact over several series, from the first one's
+// start to the last one's end.
+func lasted(in incident.Incident) string {
+	if in.End.IsZero() {
+		return "–"
+	}
+	return Duration(in.End.Sub(in.Start).Round(time.Second))
+}
+
+// spansMost and spansEach bound what spans writes: the incidents, and the
+// series of each; spanLabel each label of a series, in runes.
+const spansMost, spansEach, spanLabel = 20, 5, 80
+
+// clip is s cut to n runes, an ellipsis ending it when it was longer.
+func clip(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
+}
+
+// spans writes, of the incidents nothing caught that --impact found over
+// several series, each series' own window: none may have lasted as long as
+// the incident.
+func spans(w io.Writer, ins []IncidentResult, loc *time.Location) {
+	var lines []string
+	for _, in := range ins {
+		if !in.Missed() || len(in.Spans) < 2 {
+			continue
+		}
+		// The labels the series differ by name each.
+		common := maps.Clone(in.Spans[0].Labels)
+		for _, sp := range in.Spans[1:] {
+			for k, v := range common {
+				if sp.Labels[k] != v {
+					delete(common, k)
+				}
+			}
+		}
+		var each []string
+		for i, sp := range in.Spans {
+			if i == spansEach {
+				each = append(each, fmt.Sprintf("%d more", len(in.Spans)-spansEach))
+				break
+			}
+			var by []string
+			for k, v := range sp.Labels {
+				if _, same := common[k]; !same {
+					by = append(by, clip(Clean(k)+"="+Clean(v), spanLabel))
+				}
+			}
+			slices.Sort(by)
+			name := strings.Join(by, ",")
+			if name == "" {
+				name = fmt.Sprintf("series %d", i+1) // they differ by nothing kept
+			}
+			each = append(each, fmt.Sprintf("%s %s–%s (%s)", name, sp.Start.In(loc).Format("15:04"),
+				sp.End.In(loc).Format("15:04"), Duration(sp.End.Sub(sp.Start).Round(time.Second))))
+		}
+		lines = append(lines, fmt.Sprintf("  %s: %s", Clean(in.ID), strings.Join(each, "; ")))
+	}
+	if len(lines) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "  Of those --impact found over several series, each series' own window:")
+	for i, l := range lines {
+		if i == spansMost {
+			fmt.Fprintf(w, "  and %d more\n", len(lines)-spansMost)
+			break
+		}
+		fmt.Fprintln(w, l)
+	}
+}
+
 func incidentName(in incident.Incident) string {
 	name := Clean(in.ID)
 	if in.Title != "" {

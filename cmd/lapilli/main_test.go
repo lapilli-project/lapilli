@@ -204,14 +204,14 @@ func TestRun(t *testing.T) {
 		{args: "verdict --rules x@2026-10-12 --prometheus http://p --incidents y", code: 2, stderr: "want FILE, or FILE@TIME"},
 
 		{args: "verdict --rules " + rulesFile + " --prometheus http://p --incidents " + incidents + " --tz UTC",
-			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00  CheckoutErrors +5m"},
+			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00  1h      CheckoutErrors +5m"},
 		{args: "verdict --rules " + googlePolicy + " --prometheus http://p --incidents " + incidents + " --tz UTC",
-			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00  CheckoutErrors +5m"},
+			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00  1h      CheckoutErrors +5m"},
 		// Closed by the evaluation at least 270s after the errors last held.
 		{args: "verdict --rules " + googlePolicy + " --prometheus http://p --incidents " + incidents + " --json",
 			code: 0, stdout: `"end": "2026-11-01T22:05:00Z"`},
 		{args: "verdict --rules " + cloudWatch + " --prometheus http://p --incidents " + incidents + " --tz UTC",
-			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00  CheckoutErrors +5m"},
+			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00  1h      CheckoutErrors +5m"},
 		// Back to OK after ten minutes of not breaching; the metric alarm
 		// can't be replayed.
 		{args: "verdict --rules " + cloudWatch + " --prometheus http://p --incidents " + incidents + " --json",
@@ -306,7 +306,7 @@ func TestRun(t *testing.T) {
 		{args: "serve --rules " + rulesFile + " --prometheus http://p --markdown", code: 2, stderr: "lapilli serve doesn't take --markdown"},
 		{args: "verdict --rules x --noisy-precision 120% --prometheus http://p --incidents y", code: 2, stderr: "want a share like 20% or 0.2"},
 		{args: "verdict --loaded-rules --prometheus http://p --incidents " + incidents + " --tz UTC",
-			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00  CheckoutErrors +5m"},
+			code: 0, stdout: "INC-7 Checkout down  2026-11-01 21:00  1h      CheckoutErrors +5m"},
 		{args: "verdict --grafana-token-file t --alerts --prometheus http://p --incidents y", code: 2, stderr: "--grafana-token-file goes with --grafana"},
 		{args: "verdict --grafana ftp://g --incidents y", code: 2, stderr: "want Grafana's URL"},
 		{args: "verdict --alerts --compare x --prometheus http://p --incidents y", code: 2, stderr: "--compare goes with --rules"},
@@ -463,7 +463,7 @@ groups:
 	incidents := write(t, "incidents.yaml", "incidents:\n  - {id: INC-7, title: Checkout down, start: 2026-11-01T21:00:00Z, end: 2026-11-01T22:00:00Z}\n")
 	var stdout, stderr bytes.Buffer
 	args := []string{"verdict", "--grafana", srv.URL, "--grafana-token-file", token, "--prometheus", "http://p", "--incidents", incidents, "--tz", "UTC"}
-	if code := run(args, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "INC-7 Checkout down  2026-11-01 21:00  CheckoutErrors +5m") {
+	if code := run(args, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "INC-7 Checkout down  2026-11-01 21:00  1h      CheckoutErrors +5m") {
 		t.Fatalf("exit %d\n%s%s", code, stdout.String(), stderr.String())
 	}
 	if auth != "Bearer glsa_secret" {

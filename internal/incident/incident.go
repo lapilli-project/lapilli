@@ -27,6 +27,17 @@ type Incident struct {
 	// Candidate is a window found in the impact signal, not one a person
 	// wrote down.
 	Candidate bool `yaml:"-" json:"candidate"`
+	// Spans are, of a candidate, each series' own window: an incident of
+	// several series lasts from the first one's start to the last one's
+	// end, which none of them may have lasted.
+	Spans []Span `yaml:"-" json:"spans,omitempty"`
+}
+
+// Span is one series' window of impact, by its labels.
+type Span struct {
+	Labels map[string]string `json:"labels,omitempty"`
+	Start  time.Time         `json:"start"`
+	End    time.Time         `json:"end"`
 }
 
 // Labels are an incident's labels. A label can have several values: an
@@ -128,7 +139,8 @@ func Load(path string) ([]Incident, error) {
 // series is looked at on its own, and its windows carry its labels, so an
 // expression by service finds which services were hit. Windows that overlap
 // are one incident, with every value of the labels they all have. Gaps
-// shorter than two steps don't split a window.
+// shorter than two steps don't split a window. Each keeps its series' own
+// windows, as Spans.
 func FromImpact(series []prom.Series, step, minLen time.Duration) []Incident {
 	type window struct {
 		start, end time.Time
@@ -163,10 +175,12 @@ func FromImpact(series []prom.Series, step, minLen time.Duration) []Incident {
 		for k, v := range ws[i].labels {
 			in.Labels[k] = []string{v}
 		}
+		in.Spans = []Span{{Labels: ws[i].labels, Start: ws[i].start, End: ws[i].end}}
 		for i++; i < len(ws) && !ws[i].start.After(in.End); i++ {
 			if ws[i].end.After(in.End) {
 				in.End = ws[i].end
 			}
+			in.Spans = append(in.Spans, Span{Labels: ws[i].labels, Start: ws[i].start, End: ws[i].end})
 			for k, vs := range in.Labels {
 				v, ok := ws[i].labels[k]
 				switch {

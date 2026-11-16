@@ -150,7 +150,10 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 		}
 		mu.Unlock()
 	}
-	var asked atomic.Int64
+	// The questions asked count the step done: the line can say how far it
+	// is, of at most nearAsks.
+	st := replay.Begin(ctx, "looking for rules that nearly caught the incidents nothing caught", "questions", nearAsks, true)
+	asked := &st.Done
 	work := make(chan *job)
 	var wg sync.WaitGroup
 	for range max(1, parallel) {
@@ -231,7 +234,7 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 					if len(bounds) == 0 || len(left) == 0 {
 						continue
 					}
-					stop := !byValue(ctx, h, j.rule, bounds, w, left, step, every, o, &asked, fail, keep)
+					stop := !byValue(ctx, h, j.rule, bounds, w, left, step, every, o, asked, fail, keep)
 					if stop {
 						break
 					}
@@ -288,6 +291,9 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 	found = slices.DeleteFunc(found, func(f find) bool { each[f.Incident]++; return each[f.Incident] > nearEach })
 	out = make([]verdict.NearMiss, len(found))
 	tried := 0
+	// What each would cost is a replay of the whole period again, for the
+	// first nearCosts.
+	costing := replay.Begin(ctx, `what a shorter "for", or a number, would cost`, "rules", min(len(found), nearCosts), true)
 	for i, f := range found {
 		out[i] = f.NearMiss
 		nm := &out[i]
@@ -303,6 +309,7 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 			continue
 		}
 		tried++
+		costing.Did(1)
 		// The rule as it stood in each version, none of them waiting longer
 		// than the shorter "for", or, by value, none with a number short of
 		// the new one.

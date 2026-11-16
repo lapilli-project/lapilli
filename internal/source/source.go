@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"lapilli.dev/internal/cloud"
@@ -459,10 +460,10 @@ var longerFors = []time.Duration{5 * time.Minute, 10 * time.Minute, 15 * time.Mi
 // could never fire it then (rules.Rule.EventWindow). A name shared by several
 // rules has no one "for" to change, and is passed over. A period with no
 // record has no noisy rule, and nothing suggested. excuse, when not nil, says which firings that
-// caught nothing a quiet window excuses, as the ledger does.
+// caught nothing a quiet window excuses, as the ledger does. Up to parallel
+// rules are replayed at once; done says each was, none cut short.
 func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdict.Report, incs []incident.Incident, o verdict.Options, step time.Duration,
-	excuse func(firing.Firing) bool) []verdict.Suggestion {
-	var out []verdict.Suggestion
+	parallel int, excuse func(firing.Firing) bool) (_ []verdict.Suggestion, done bool) {
 	o.SomeRules = true // each is judged alone
 	// caughtBy is when the rule caught each incident it caught.
 	caughtBy := func(r *verdict.Report, rule string) map[string]time.Duration {
@@ -476,6 +477,13 @@ func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdic
 		}
 		return at
 	}
+	// The work: each noisy rule, with the longer "for"s to try.
+	type try struct {
+		rr   verdict.RuleResult
+		rule rules.Rule
+		fors []time.Duration
+	}
+	var tries []try
 	for _, rr := range rep.Rules {
 		if !rr.Noisy || !rr.Replayed {
 			continue
@@ -491,34 +499,91 @@ func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdic
 				fors = append(fors, d)
 			}
 		}
-		if len(fors) == 0 {
+		if len(fors) > 0 {
+			tries = append(tries, try{rr, rs[i], fors})
+		}
+	}
+	if len(tries) == 0 {
+		return nil, true
+	}
+	// Each is a replay of the whole period again: as many at once as the
+	// replays were. What each would do is judged here, one at a time, in
+	// the order of the rules, as soon as it and those before it are in, and
+	// let go: excuse may keep a map of its own, as the ledger's does, that
+	// it writes, and only so many replays are held at once.
+	st := replay.Begin(ctx, `a longer "for" for the noisy rules`, "rules", len(tries), false)
+	alts := make([]map[time.Duration][]firing.Firing, len(tries))
+	ready := make([]chan struct{}, len(tries))
+	for n := range ready {
+		ready[n] = make(chan struct{})
+	}
+	work := make(chan int)
+	var wg sync.WaitGroup
+	for range max(1, parallel) {
+		wg.Go(func() {
+			for n := range work {
+				t := tries[n]
+				if a, err := replay.WithFor(ctx, h, t.rule, t.fors, o.From, o.To, step); err == nil {
+					alts[n] = a
+				}
+				st.Did(1)
+				close(ready[n])
+			}
+		})
+	}
+	// Those not sent, the time run out, are ready with nothing.
+	go func() {
+		n := 0
+		for ; n < len(tries) && ctx.Err() == nil; n++ {
+			select {
+			case work <- n:
+			case <-ctx.Done():
+			}
+			if ctx.Err() != nil {
+				break
+			}
+		}
+		close(work)
+		wg.Wait()
+		for ; n < len(tries); n++ {
+			select {
+			case <-ready[n]:
+			default:
+				close(ready[n])
+			}
+		}
+	}()
+	var out []verdict.Suggestion
+	done = true
+	for n, t := range tries {
+		<-ready[n]
+		a := alts[n]
+		alts[n] = nil
+		if a == nil {
+			done = false
 			continue
 		}
-		alts, err := replay.WithFor(ctx, h, rs[i], fors, o.From, o.To, step)
-		if err != nil {
-			continue
-		}
-		caught := caughtBy(rep, rr.Rule)
-		for _, d := range fors {
-			alt := verdict.Judge(nil, alts[d], incs, o)
-			after := verdict.RuleResult{Rule: rr.Rule}
-			if j := slices.IndexFunc(alt.Rules, func(r verdict.RuleResult) bool { return r.Rule == rr.Rule }); j >= 0 {
+		caught := caughtBy(rep, t.rr.Rule)
+		for _, d := range t.fors {
+			alt := verdict.Judge(nil, a[d], incs, o)
+			after := verdict.RuleResult{Rule: t.rr.Rule}
+			if j := slices.IndexFunc(alt.Rules, func(r verdict.RuleResult) bool { return r.Rule == t.rr.Rule }); j >= 0 {
 				after = alt.Rules[j]
 			}
 			Excuse(&after, alt.Firings, excuse)
-			still := caughtBy(alt, rr.Rule)
+			still := caughtBy(alt, t.rr.Rule)
 			kept, later := true, time.Duration(0)
 			for id, was := range caught {
 				now, ok := still[id]
 				kept = kept && ok
 				later = max(later, now-was)
 			}
-			if kept && 2*after.Firings <= rr.Firings {
-				out = append(out, verdict.Suggestion{Rule: rr.Rule, For: rs[i].For, NewFor: d, Before: rr, After: after,
+			if kept && 2*after.Firings <= t.rr.Firings {
+				out = append(out, verdict.Suggestion{Rule: t.rr.Rule, For: t.rule.For, NewFor: d, Before: t.rr, After: after,
 					Incidents: len(caught), Later: later})
 				break
 			}
 		}
 	}
-	return out
+	return out, done
 }
