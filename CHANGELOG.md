@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-11-16
+
 ### Added
 
 - **Jira's incidents from the fields a team keeps them in.** `jira.sh`
