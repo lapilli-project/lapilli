@@ -87,16 +87,16 @@ during a probe window catches it.)
 
 **Reading `NAME=PROMQL`.** A signal is named when `--impact`'s value starts
 with a name (`[a-z][a-z0-9_-]`, 32 bytes at most) and a `=` that isn't
-followed by `=` or `~`. No PromQL expression starts so: a `=` on its own
-is an operator only inside a selector's braces, after a label's name,
-never after a metric's; `up==0` and `up>=1` read as the expressions they
-are, and `errors=rate(x[5m]) > 1` as the signal `errors`. `--impact PROMQL` with no name stays what it is
-today: one signal, its windows keyed, titled and keeping the record as
-now. Named and unnamed aren't mixed; serve refuses them together and says
-to name each. `--impact-for` takes `DUR` (every signal's default, as now)
-or `NAME=DUR`; `--impact-match` and `--impact-record` take `NAME=...` and
-are refused for a name no `--impact` gives. `lapilli verdict` takes the
-same flags.
+followed by `=` or `~`. No PromQL expression starts so: a lone `=` is
+PromQL only inside a selector's braces, after a label's name, never after
+a metric's; `up==0` and `up>=1` read as the expressions they are, and
+`errors=rate(x[5m]) > 1` as the signal `errors`. `--impact PROMQL` with no
+name stays what it is today: one signal, its windows keyed, titled and
+keeping the record as now. Named and unnamed aren't mixed; serve refuses
+them together and says to name each. `--impact-for` takes `DUR` (every
+signal's default, as now) or `NAME=DUR`; `--impact-match` and
+`--impact-record` take `NAME=...` and are refused for a name no `--impact`
+gives. `lapilli verdict` takes the same flags.
 
 **In the chart**, `impact` stays a string, or becomes a list:
 
