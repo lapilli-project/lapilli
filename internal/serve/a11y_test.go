@@ -131,6 +131,7 @@ func TestA11yServe(t *testing.T) {
 	addr := serveAddr(t, "LAPILLI_A11Y_SERVE")
 	s, paths := a11yServer(t)
 	longNamed(t, s)
+	paths = append(paths, statusStates(t, s)...) // each status kind drawn
 	s.cfg.AllowedHosts = append(s.cfg.AllowedHosts, "host.docker.internal")
 	mux := http.NewServeMux()
 	paths = append(paths, a11yPreviews(mux, s)...)
