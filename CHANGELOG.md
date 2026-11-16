@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **A window's or an incident's labels are summed up, by name.** A window
+  found in the impact signal merges every series it overlaps, with every
+  value of each label they all have: tried on the Settings page, or on its
+  incident's page, its labels ran on as one line of `name=value` for each
+  series, forty `instance=` in a row for forty instances down. Each name is
+  now a line in the try's table, one after another in the incident's
+  sentence: a name with one value as `name=value`, one with more as how
+  many it has and the first three, sorted. When any is cut, a details
+  lists every `name=value`, one a line, the first 200 and how many more.
+  The cell stays narrow and wraps. The incident's form still changes its
+  labels as one line; how windows are found, merged and matched, the API
+  and what is kept are as they were. A firing's and a rule's labels, each
+  a series', are shown as before.
+
 ## [0.51.0] - 2026-11-16
 
 ### Added

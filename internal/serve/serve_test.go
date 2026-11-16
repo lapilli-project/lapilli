@@ -29,7 +29,8 @@ var now = time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 
 // history answers "errors > 5" with a checkout series true for an hour
 // from 30h ago, and a search series true for ten minutes in each of the
-// twenty hours before that; "impact" with ten minutes 6h ago.
+// twenty hours before that; "impact" with ten minutes 6h ago; "up == 0"
+// with manyInstances series 10h ago, one window as an impact criterion.
 type history struct {
 	sync.Mutex
 	asked int
@@ -121,6 +122,13 @@ func (h *history) QueryRange(ctx context.Context, expr string, start, end time.T
 		out = append(out, run(map[string]string{"service": "search"}, now.Add(-6*time.Hour), now.Add(-6*time.Hour+10*time.Minute)),
 			run(map[string]string{"service": "checkout"}, now.Add(-30*time.Hour), now.Add(-30*time.Hour+20*time.Minute)),
 			run(map[string]string{"service": "cart"}, now.Add(-40*time.Hour), now.Add(-39*time.Hour)))
+	case "up == 0":
+		// Forty instances of one job down one after another, ten hours
+		// ago: as an impact criterion, one window merging them all.
+		for i := range manyInstances {
+			at := now.Add(-10*time.Hour + time.Duration(i)*time.Minute)
+			out = append(out, run(map[string]string{"instance": fmt.Sprintf("api-7f9c-%02d", i), "job": "api"}, at, at.Add(20*time.Minute)))
+		}
 	case "nope(up)":
 		// What Prometheus's parser refuses.
 		return nil, &prom.APIError{Status: 400, Msg: `bad_data: 1:1: parse error: unknown function with name "nope"`}

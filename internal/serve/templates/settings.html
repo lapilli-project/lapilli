@@ -134,7 +134,7 @@ over the last four weeks, and what that would do to the verdict. */}}
 {{if .Windows}}<div class="scroll" tabindex="0" role="region" aria-label="{{t "Windows found"}}"><table>
 <caption>{{t "Windows found"}}</caption>
 <thead><tr><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "Length"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "Would count"}}</th></tr></thead>
-<tbody>{{range .Windows}}<tr><td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td><td>{{dur .Len}}</td><td class="labels">{{or .Labels "–"}}</td>
+<tbody>{{range .Windows}}<tr><td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td><td>{{dur .Len}}</td><td class="labels">{{template "labelsum" (labelsum .Labels)}}</td>
 <td>{{if .Written}}{{t "no: written down as %s" (join .Written ", ")}}{{else if .Decided}}{{t "no: %s before" (t .Decided)}}{{else}}{{t "yes"}}{{end}}</td></tr>{{end}}</tbody>
 </table></div>{{with .MoreWindows}}<p class="quiet">{{t "and %d more" .}}</p>{{end}}{{end}}
 <div class="scroll" tabindex="0" role="region" aria-label="{{t "The verdict, in effect and with it"}}"><table>

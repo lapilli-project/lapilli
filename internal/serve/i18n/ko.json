@@ -1880,5 +1880,7 @@
  "%d comments": "댓글 %d개",
  "the impact expression reads a range of %s: Lapilli reads a range as a duration like 5m or 1d": "영향 지표 식이 %s 범위를 읽어요. Lapilli 는 범위를 5m 이나 1d 같은 기간으로만 읽어요",
  "the impact expression's subquery %s steps by less than %s, or not by a duration": "영향 지표 식의 서브쿼리 %s 의 스텝이 %s 보다 짧거나 기간이 아니에요",
- "the impact expression reads %d selectors: %d at most, as where each one's data begins is looked for apart": "영향 지표 식이 셀렉터 %d개를 읽어요. 셀렉터마다 데이터 시작점을 따로 찾기 때문에 %d개까지예요"
+ "the impact expression reads %d selectors: %d at most, as where each one's data begins is looked for apart": "영향 지표 식이 셀렉터 %d개를 읽어요. 셀렉터마다 데이터 시작점을 따로 찾기 때문에 %d개까지예요",
+ "%d values": "값 %d개",
+ "all %d labels": "라벨 %d개 모두 보기"
 }

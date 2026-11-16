@@ -1880,5 +1880,7 @@
  "%d comments": "%d comentarios",
  "the impact expression reads a range of %s: Lapilli reads a range as a duration like 5m or 1d": "la expresión de impacto lee un rango de %s: Lapilli lee un rango como una duración como 5m o 1d",
  "the impact expression's subquery %s steps by less than %s, or not by a duration": "la subconsulta %s de la expresión de impacto avanza en menos de %s, o no en una duración",
- "the impact expression reads %d selectors: %d at most, as where each one's data begins is looked for apart": "la expresión de impacto lee %d selectores: %d como máximo, pues dónde empiezan los datos de cada uno se busca aparte"
+ "the impact expression reads %d selectors: %d at most, as where each one's data begins is looked for apart": "la expresión de impacto lee %d selectores: %d como máximo, pues dónde empiezan los datos de cada uno se busca aparte",
+ "%d values": "%d valores",
+ "all %d labels": "Ver las %d etiquetas"
 }

@@ -74,3 +74,11 @@ nothing stands out on the overview. */}}
 {{template "bottom" .}}{{end}}
 
 {{define "spark"}}<svg class="spark" width="72" height="18" viewBox="0 0 72 18" role="img" aria-label="{{t "Stones by week: %s" (sparkText .)}}">{{range .}}<g><title>{{.Title}}</title><rect class="w" x="{{.X}}" y="{{.WhiteY}}" width="5" height="{{.WhiteH}}"/><rect class="b" x="{{.X}}" y="{{.BlackY}}" width="5" height="{{.BlackH}}"/></g>{{end}}</svg>{{end}}
+
+{{/* A window's or an incident's labels summed up (labelsum.go): in a
+cell, "labelsum"; in a sentence, "labelnames" in it and "labelsall" after
+it, a details being no part of a sentence. Each name=value is set apart:
+the labels are the series' own. */}}
+{{define "labelsum"}}{{if .Names}}{{template "labelnames" .}}{{template "labelsall" .}}{{else}}–{{end}}{{end}}
+{{define "labelnames"}}<span class="labelsum">{{range .Names}}<span class="labelname">{{if eq .N 1}}<code><bdi>{{.Name}}={{index .Shown 0}}</bdi></code>{{else}}<code><bdi>{{.Name}}</bdi></code> <span class="labelcount">{{t "%d values" .N}}:</span>{{range .Values}} <span class="labelvalue"><code><bdi>{{.V}}</bdi></code>{{.After}}</span>{{end}}{{end}}</span> {{end}}</span>{{end}}
+{{define "labelsall"}}{{if .Cut}}<details class="labels-all"><summary>{{t "all %d labels" .Total}}</summary><ul>{{range .All}}<li><bdi>{{.}}</bdi></li>{{end}}{{with .More}}<li>{{t "and %d more" .}}</li>{{end}}</ul></details>{{end}}{{end}}

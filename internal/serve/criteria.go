@@ -961,13 +961,14 @@ type impactTry struct {
 	StaleN      int
 }
 
-// triedWindow is a window a try found: when, how long, its labels, and,
-// when it wouldn't count, the incidents written down over it, or what was
-// decided about a window found before over it.
+// triedWindow is a window a try found: when, how long, its labels (the
+// page sums them up: labelsum), and, when it wouldn't count, the incidents
+// written down over it, or what was decided about a window found before
+// over it.
 type triedWindow struct {
 	Start, End time.Time
 	Len        time.Duration
-	Labels     string
+	Labels     incident.Labels
 	Written    []string
 	Decided    string
 }
@@ -1114,7 +1115,7 @@ func (s *Server) judgeTried(ctx context.Context, l string, try *impactTry, c cri
 	var counting []incident.Incident
 	try.Found = len(windows)
 	for _, w := range windows {
-		tw := triedWindow{Start: w.Start, End: w.End, Len: w.End.Sub(w.Start), Labels: incidentLabelsText(w.Labels)}
+		tw := triedWindow{Start: w.Start, End: w.End, Len: w.End.Sub(w.Start), Labels: w.Labels}
 		tw.Decided = decidedOver(found, from, w)
 		for _, x := range written {
 			if len(incident.Merge([]incident.Incident{x}, []incident.Incident{w}, o.UnknownLen, o.Match)) == 1 {
@@ -1343,18 +1344,6 @@ func (s *Server) triedStale(ctx context.Context, try *impactTry, c criterion, wi
 		}
 	}
 	return nil
-}
-
-// incidentLabelsText is an incident's labels as a line: name=value, sorted.
-func incidentLabelsText(ls incident.Labels) string {
-	var out []string
-	for k, vs := range ls {
-		for _, v := range vs {
-			out = append(out, k+"="+v)
-		}
-	}
-	slices.Sort(out)
-	return strings.Join(out, " ")
 }
 
 // shareLabels reports whether, for every label both have, they have a

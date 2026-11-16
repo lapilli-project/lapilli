@@ -1903,6 +1903,9 @@ var funcs = template.FuncMap{
 	"delay": verdict.Delay,
 	"path":  url.PathEscape,
 	"join":  strings.Join,
+	// labelsum is a window's or an incident's labels summed up, for the
+	// "labelsum" template.
+	"labelsum": labelsum,
 	"at": func(loc *time.Location, t time.Time) string {
 		if t.IsZero() {
 			return "–"

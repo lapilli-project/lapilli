@@ -423,6 +423,21 @@ details.more-labels { display: inline; margin: 0; }
 details.more-labels > summary { display: inline-block; list-style: none; font-size: .8rem; padding: 0 .5rem; margin: .1rem 0; border: 1px dashed var(--line-ui); border-radius: 9999px; color: var(--ink); }
 details.more-labels > summary::-webkit-details-marker { display: none; }
 details.more-labels[open] > summary { margin-right: .3rem; }
+/* A window's or an incident's labels summed up (labelsum.go): in a cell,
+   a name a line in a narrow box; in a sentence, one after another; a
+   name=value or a value broken only when it is wider than its box, and a
+   value kept with the comma after it. All of
+   them behind a details, one a line, as narrow. */
+.labelsum code { display: inline-block; max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
+.labelvalue { white-space: nowrap; }
+.labelname { margin-right: .5rem; }
+td.labels .labelsum { display: block; max-width: 24rem; }
+td.labels .labelname { display: block; margin: 0 0 .25rem; }
+.labelcount { font-family: var(--sans); font-size: .875rem; color: var(--dim); }
+details.labels-all { margin: .25rem 0 0; max-width: 24rem; }
+details.labels-all > summary { font-family: var(--sans); font-size: .875rem; }
+details.labels-all ul { list-style: none; margin: .3rem 0 0; padding: 0; font-family: var(--mono); font-size: .8rem; }
+details.labels-all li { overflow-wrap: anywhere; padding: .1rem 0; }
 span.chip { display: inline-block; border: 1px solid var(--line-ui); border-radius: 9999px; color: var(--ink); background: var(--card); }
 span.chip.on { border: 2px solid var(--accent); background: var(--accent-soft); }
 span.chip.on::before { content: "✓ "; content: "✓ " / ""; }
