@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -263,4 +264,91 @@ func (portHistory) QueryRange(ctx context.Context, expr string, start, end time.
 	a, b := ss[0], prom.Series{Labels: map[string]string{"instance": "10.0.0.2:9100"}, Samples: ss[0].Samples}
 	a.Labels = map[string]string{"instance": "10.0.0.1:9100"}
 	return []prom.Series{a, b}, err
+}
+
+// A rule some change of which Grafana's history passed over, or whose
+// changes don't follow on, isn't checked, and says why; the others are.
+// Kept in several places, GRAFANA_ALERTS is read first while it holds
+// anything, and the history isn't asked.
+func TestCheckReplayGrafanaHistoryUnsureAndSeries(t *testing.T) {
+	now = func() time.Time { return t0 }
+	settings := `{"buildInfo":{"version":"12.4.14"},"unifiedAlerting":{"alertStateHistoryBackend":"annotations"}}`
+	var asked []string
+	many := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.URL.Path)
+		if r.URL.Path == "/api/frontend/settings" {
+			io.WriteString(w, settings)
+			return
+		}
+		note := func(id int, rule, from, to string, at time.Time) map[string]any {
+			return map[string]any{"id": id, "alertName": rule, "prevState": from, "newState": to, "time": at.UnixMilli(), "tags": []string{"alertname:" + rule, "service:checkout"}}
+		}
+		notes := []any{
+			note(4, "Stuck", "Normal", "Firing", t0.Add(-time.Hour)),
+			note(3, "GErrors", "Alerting", "Normal", t0.Add(-2*time.Hour+time.Minute)),
+			note(2, "GErrors", "Normal", "Alerting", t0.Add(-3*time.Hour)),
+			note(1, "Old", "Normal", "Pending", t0.Add(-9*24*time.Hour)),
+		}
+		for i := range 1001 {
+			if many {
+				notes = append(notes, note(10+i, fmt.Sprint("Odd", i), "Normal", "Firing", t0.Add(-time.Hour)))
+			}
+		}
+		json.NewEncoder(w).Encode(notes)
+	}))
+	defer srv.Close()
+	stuck := strings.NewReplacer("uid: gerrors", "uid: stuck", "title: GErrors", "title: Stuck", "name: shop", "name: other", "expr: errors", "expr: stuck").Replace(gErrorsRule)
+	args := []string{"verdict", "--rules", write(t, "a.yaml", gErrorsRule), "--rules", write(t, "b.yaml", stuck), "--prometheus", "http://x", "--check-replay",
+		"--check-grafana", srv.URL, "--tz", "UTC"}
+
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return errorsHistory{}, nil }
+	var stdout, stderr bytes.Buffer
+	if code := run(args, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s\n%s", code, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{"1 firings alike, 0 only in the replay", "Stuck: not checked: Grafana's state history passed over changes of it"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("no %q in:\n%s", want, stdout.String())
+		}
+	}
+
+	// Past a thousand rules unsure, none is checked.
+	many = true
+	stdout.Reset()
+	run(args, &stdout, &stderr)
+	if !strings.Contains(stdout.String(), "GErrors: not checked: changes of state of more than 1000 rules were passed over") {
+		t.Errorf("past a thousand unsure:\n%s", stdout.String())
+	}
+	many = false
+
+	settings = `{"buildInfo":{"version":"12.4.14"},"unifiedAlerting":{"alertStateHistoryBackend":"multiple","alertStateHistoryPrimary":"annotations"}}`
+	asked = nil
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return grafanaAlertsHistory{}, nil }
+	stdout.Reset()
+	if code := run(args, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s\n%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `Replay beside GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}`) ||
+		!strings.Contains(stdout.String(), "1 firings alike, 0 only in the replay") {
+		t.Errorf("GRAFANA_ALERTS not read first:\n%s", stdout.String())
+	}
+	if slices.Contains(asked, "/api/annotations") {
+		t.Errorf("the history asked while GRAFANA_ALERTS held what fired: %v", asked)
+	}
+}
+
+// grafanaAlertsHistory is errorsHistory, with GErrors in GRAFANA_ALERTS as
+// it fired.
+type grafanaAlertsHistory struct{}
+
+func (grafanaAlertsHistory) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	if expr != `GRAFANA_ALERTS{alertstate="firing",grafana_alertstate!="error"}` {
+		return errorsHistory{}.QueryRange(ctx, expr, start, end, step)
+	}
+	ss, err := errorsHistory{}.QueryRange(ctx, "errors", start, end, step)
+	for i := range ss {
+		ss[i].Labels["alertname"], ss[i].Labels["alertstate"] = "GErrors", "firing"
+	}
+	return ss, err
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,11 +13,14 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/source"
+	"lapilli.dev/internal/verdict"
 )
 
 // grafanaRule is a Grafana rule replayed against grafanaHistory: errors
@@ -94,16 +98,23 @@ func (h *grafanaHistory) QueryRange(ctx context.Context, expr string, start, end
 // 403 to every annotation; with sameTime, every page full of changes at
 // the time asked to, as a big Grafana's one tick can give.
 type stateHistory struct {
-	mu                          sync.Mutex
-	settings                    string
-	none, odd, refuse, sameTime bool
-	asked                       []string
+	mu                                   sync.Mutex
+	settings                             string
+	none, odd, refuse, sameTime, manyOdd bool
+	// status, when set, is what every request is answered with: 401 for a
+	// token not let in, 403 for the settings too.
+	status int
+	asked  []string
 }
 
 func (g *stateHistory) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.asked = append(g.asked, r.URL.Path+" "+r.Header.Get("Authorization"))
+	if g.status != 0 {
+		http.Error(w, `{"message":"no"}`, g.status)
+		return
+	}
 	if r.URL.Path == "/api/frontend/settings" {
 		fmt.Fprint(w, g.settings)
 		return
@@ -149,6 +160,12 @@ func (g *stateHistory) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fired("Watch‮dog", nil, now.Add(-44*time.Hour), now.Add(-44*time.Hour+5*time.Minute))
 		// A change long before, so the history reaches back past each day.
 		all = append(all, note{int64(len(all) + 1), "Old", "Normal", "Pending", now.Add(-100 * time.Hour).UnixMilli(), []string{"alertname:Old"}})
+		if g.manyOdd {
+			// More rules with a change passed over than a read names.
+			for i := range 1001 {
+				all = append(all, note{int64(len(all) + 1), "", "Normal", "Firing", now.Add(-40 * time.Hour).UnixMilli(), []string{fmt.Sprintf("alertname:Odd%d", i)}})
+			}
+		}
 		if g.odd {
 			all = append(all, note{int64(len(all) + 1), gErrors, "Normal", "Firing", now.Add(-72 * time.Hour).UnixMilli(), []string{"alertname:" + gErrorsTagged}})
 		}
@@ -171,7 +188,7 @@ const annotationsSettings = `{"buildInfo":{"version":"12.4.14"},"unifiedAlerting
 
 // historyServer is a server checking grafanaRule, beside the Prometheus
 // rule Errors when prometheus, against the Grafana g.
-func historyServer(t *testing.T, g *stateHistory, prometheus bool, change func(*Config)) (*Server, *grafanaHistory) {
+func historyServer(t *testing.T, g *stateHistory, prometheus bool, change func(*Config), more ...string) (*Server, *grafanaHistory) {
 	t.Helper()
 	srv := httptest.NewServer(g)
 	t.Cleanup(srv.Close)
@@ -187,8 +204,10 @@ func historyServer(t *testing.T, g *stateHistory, prometheus bool, change func(*
 	if !prometheus {
 		os.Remove(filepath.Join(rules, "shop.yaml"))
 	}
-	if err := os.WriteFile(filepath.Join(rules, "grafana.yaml"), []byte(grafanaRule), 0o644); err != nil {
-		t.Fatal(err)
+	for i, r := range append([]string{grafanaRule}, more...) {
+		if err := os.WriteFile(filepath.Join(rules, fmt.Sprintf("grafana%d.yaml", i)), []byte(r), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	h := &grafanaHistory{}
 	s.h = h
@@ -376,6 +395,7 @@ func TestCheckReplayGrafanaHistoryUnusable(t *testing.T) {
 		"403":       {settings: annotationsSettings, refuse: true},
 		"same time": {settings: annotationsSettings, sameTime: true},
 		"odd":       {settings: annotationsSettings, odd: true},
+		"many odd":  {settings: annotationsSettings, manyOdd: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, _ := historyServer(t, g, true, nil)
@@ -453,4 +473,147 @@ func TestCheckReplayGrafanaHistoryTooMany(t *testing.T) {
 		t.Errorf("%s has no translation for %q", lang, msg)
 	}
 	missing.Unlock()
+}
+
+// flipping is a Grafana 12.4 whose history holds, over two hours of
+// 2 November, an alert of GErrors with 128 labels, one with a mark that
+// turns text around, between Alerting and NoData every 500ms: thousands
+// of firings, each only in what really fired, within every bound of a
+// read. A change of another rule before keeps the history reaching back.
+type flipping struct{ settings string }
+
+func (g *flipping) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/frontend/settings" {
+		fmt.Fprint(w, g.settings)
+		return
+	}
+	var from, to, limit int64
+	fmt.Sscan(r.URL.Query().Get("from"), &from)
+	fmt.Sscan(r.URL.Query().Get("to"), &to)
+	fmt.Sscan(r.URL.Query().Get("limit"), &limit)
+	start := time.Date(2026, 11, 2, 2, 0, 0, 0, time.UTC).UnixMilli()
+	end := start + 2*3600*1000
+	tags := `"alertname:` + gErrorsTagged + `","note:a` + "‮" + `b"`
+	for i := range 126 {
+		tags += fmt.Sprintf(`,"l%d:v"`, i)
+	}
+	var b strings.Builder
+	b.WriteByte('[')
+	n := int64(0)
+	for at := min(to, end) - (min(to, end)-start)%500; n < limit && at >= start && at >= from; at -= 500 {
+		i := (at - start) / 500
+		st := `"prevState":"NoData","newState":"Alerting"`
+		switch {
+		case i == 0:
+			st = `"prevState":"Normal","newState":"Alerting"`
+		case i%2 == 1:
+			st = `"prevState":"Alerting","newState":"NoData"`
+		}
+		if n > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `{"id":%d,"time":%d,%s,"tags":[%s]}`, i+10, at, st, tags)
+		n++
+	}
+	if early := start - 3*3600*1000; n < limit && early >= from && early <= to {
+		if n > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `{"id":1,"time":%d,"prevState":"Normal","newState":"Pending","tags":["alertname:Other"]}`, early)
+	}
+	b.WriteByte(']')
+	io.WriteString(w, b.String())
+}
+
+// Of an alert's firings found only in what really fired, as many as there
+// are, only those the ledger keeps, the newest twenty, have their labels
+// kept and are written: a copy of 128 labels for each of thousands is what
+// a hostile, or a flapping, Grafana would bring serve down with.
+func TestCheckReplayGrafanaHistoryMisses(t *testing.T) {
+	g := &stateHistory{settings: annotationsSettings}
+	s, _ := historyServer(t, g, false, nil)
+	f := httptest.NewServer(&flipping{settings: annotationsSettings})
+	defer f.Close()
+	h := *s.cfg.History
+	h.URL = f.URL
+	s.cfg.History = &h
+	var copies atomic.Int64
+	defer func(k func(map[string]string) map[string]string) { keptLabels = k }(keptLabels)
+	keptLabels = func(l map[string]string) map[string]string {
+		copies.Add(1)
+		return verdict.KeptLabels(l)
+	}
+	ctx := context.Background()
+	s.jobs(ctx, true)
+	checkedToToday(t, s)
+	cs, _ := s.l.Checks(ctx, now.Add(-7*24*time.Hour), now)
+	if c := cs[gErrors]; c.Real < 7000 {
+		t.Fatalf("GErrors: %+v; want thousands only in what really fired", c)
+	}
+	if n := copies.Load(); n > 2*ledger.MaxMisses {
+		t.Errorf("%d misses' labels kept, want %d a day checked at most", n, ledger.MaxMisses)
+	}
+	misses, err := s.l.CheckMisses(ctx, gErrors)
+	if err != nil || len(misses) != ledger.MaxMisses {
+		t.Fatalf("%d misses, %v", len(misses), err)
+	}
+	for _, m := range misses {
+		if strings.Contains(m.Labels["note"], "‮") {
+			t.Errorf("kept %q", m.Labels["note"])
+		}
+	}
+}
+
+// A token not let in (401), expired or not yet rotated in, fails the
+// round, to be asked again, rather than leaving the days it meets
+// unchecked for good: once it is let in, they are checked. Settings
+// refused for good (403) are taken as no history, GRAFANA_ALERTS read as
+// before, and the check goes on.
+func TestCheckReplayGrafanaHistoryToken(t *testing.T) {
+	g := &stateHistory{settings: annotationsSettings, status: http.StatusUnauthorized}
+	s, _ := historyServer(t, g, false, nil)
+	ctx := context.Background()
+	s.jobs(ctx, true)
+	if to, _ := s.l.CheckedTo(ctx); !to.IsZero() {
+		t.Fatalf("checked to %s with the token not let in", to)
+	}
+	g.mu.Lock()
+	g.status = 0
+	g.mu.Unlock()
+	s.status.Lock()
+	s.status.historyAt = time.Time{}
+	s.status.Unlock()
+	s.jobs(ctx, true)
+	checkedToToday(t, s)
+	if cs, _ := s.l.Checks(ctx, now.Add(-7*24*time.Hour), now); cs[gErrors].Alike != 16 {
+		t.Errorf("GErrors once let in: %+v", cs[gErrors])
+	}
+
+	g = &stateHistory{status: http.StatusForbidden}
+	s, _ = historyServer(t, g, false, nil)
+	s.jobs(ctx, true)
+	checkedToToday(t, s)
+	s.status.Lock()
+	empty, err := s.status.checkEmpty, s.status.err
+	s.status.Unlock()
+	if len(empty) != 1 || empty[0] != grafanaAlertsSeries || err != "" {
+		t.Errorf("settings refused: empty %v, err %q", empty, err)
+	}
+}
+
+// Two rules whose names are one in an annotation's tags, as a colon and
+// an underscore are, can't be told apart there: neither is checked.
+func TestCheckReplayGrafanaHistoryNames(t *testing.T) {
+	g := &stateHistory{settings: annotationsSettings}
+	other := strings.NewReplacer("uid: gerrors", "uid: gerrors2", `title: "GErrors: shop"`, `title: "GErrors_ shop"`, "name: shop", "name: shop2").Replace(grafanaRule)
+	s, _ := historyServer(t, g, false, nil, other)
+	ctx := context.Background()
+	s.jobs(ctx, true)
+	checkedToToday(t, s)
+	cs, _ := s.l.Checks(ctx, now.Add(-7*24*time.Hour), now)
+	for _, n := range []string{gErrors, gErrorsTagged} {
+		if c := cs[n]; c.Either() != 0 {
+			t.Errorf("%s checked: %+v", n, c)
+		}
+	}
 }

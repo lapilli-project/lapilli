@@ -339,13 +339,16 @@ func (s *Server) checkDay(ctx context.Context, known []rules.Rule, names map[str
 	if !ok {
 		return ctx.Err()
 	}
-	// What really fired comes from a store, or from Grafana: a miss of it
-	// is kept, and shown, with its labels as a replayed alert's are, within
-	// their bounds and with nothing that turns text around.
+	// Of the misses, only those the ledger keeps, the newest, go on: an
+	// alert that flips all day can make hundreds of thousands. What really
+	// fired comes from a store, or from Grafana: a miss of it is kept, and
+	// shown, with its labels as a replayed alert's are, within their bounds
+	// and with nothing that turns text around.
 	for _, r := range c.Rules {
+		r.Misses = slices.Clone(ledger.NewestMisses(r.Misses, ledger.MaxMisses))
 		for i := range r.Misses {
 			if r.Misses[i].Way == "real" {
-				r.Misses[i].Labels = verdict.KeptLabels(r.Misses[i].Labels)
+				r.Misses[i].Labels = keptLabels(r.Misses[i].Labels)
 			}
 		}
 	}
@@ -369,6 +372,9 @@ func (s *Server) checkDay(ctx context.Context, known []rules.Rule, names map[str
 	}
 	return s.tellDiffers(context.WithoutCancel(ctx), b)
 }
+
+// keptLabels is verdict.KeptLabels; replaced in tests, to count.
+var keptLabels = verdict.KeptLabels
 
 // alarmsBehind reports whether the history of a cloud's alarm among known,
 // whose source has been copied in, doesn't reach to yet, while that is

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 	"net/url"
 	"slices"
 	"strconv"
@@ -77,9 +78,11 @@ var (
 
 // ErrUnusable is in the error of a read of a Grafana's state history whose
 // answers can't be used, and won't be on asking again: refused (HTTP 4xx
-// but 429), more than is read, not what was asked for, or annotations
-// written before Grafana 12.4, which hold no labels. What isn't is
-// worth asking again: no answer, or HTTP 429 or 5xx, once retried.
+// but 401 and 429), more than is read, not what was asked for, or
+// annotations written before Grafana 12.4, which hold no labels. What
+// isn't is worth asking again: no answer, HTTP 429 or 5xx once retried,
+// or 401, a token expired or not yet rotated in, which a later ask may
+// have right: a day not checked for it would be lost for good.
 var ErrUnusable = errors.New("Grafana's alert state history can't be used")
 
 // ErrTooManyChanges is in the error of a read past its bounds; it is
@@ -96,7 +99,7 @@ func unusable(what string, err error) error {
 	case errors.Is(err, ErrUnusable):
 		return err
 	case errors.Is(err, prom.ErrTooLarge),
-		errors.As(err, &ae) && ae.Status >= 400 && ae.Status < 500 && ae.Status != 429:
+		errors.As(err, &ae) && ae.Status >= 400 && ae.Status < 500 && ae.Status != http.StatusUnauthorized && ae.Status != http.StatusTooManyRequests:
 		return fmt.Errorf("%w: reading %s: %v", ErrUnusable, what, err)
 	}
 	return fmt.Errorf("reading %s: %w", what, err)

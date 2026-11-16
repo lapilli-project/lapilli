@@ -224,14 +224,16 @@ quiet history, which holds an older change, is read as it is.
 can't be read, of no use, or not reaching back leaves Grafana's rules not
 checked, and says why beside each; the others are checked as before. In
 `serve`, a day whose history is of no use (`source.ErrUnusable`: refused,
-HTTP 4xx but 429; more than is read at once; an answer that isn't the
+HTTP 4xx but 401 and 429; more than is read at once; an answer that isn't the
 history; changes at one time past what a page grows to) or doesn't reach
 back isn't checked for Grafana's rules, and the check goes on to the next
 day, so neither a busy Grafana nor a token that may not read annotations
 holds it up. A rule unsure isn't checked that day, the others are. Only a
 failure worth asking again, no answer or HTTP 429 or 5xx once the client
 has asked again as it does, fails the round, which asks again the next, as
-a Prometheus that doesn't answer does. Settings that can't be used are
+a Prometheus that doesn't answer does; so does HTTP 401, a token expired
+or not yet rotated in, which would otherwise leave the days it met
+unchecked for good once it is put right. Settings that can't be used are
 taken as no history, and `GRAFANA_ALERTS` read. The Run history page says
 which: that Grafana's history stands in, and where it is kept; or that over
 the day last checked it held nothing from before it, too much, or what
@@ -273,6 +275,13 @@ or a hostile answer would bring it down again and again.
   are asked by. Nothing it sends is followed: no redirect, and no URL in an
   answer (a line's `dashboardUID`, a link) is read. `http://`, in any case,
   is said to send the token unencrypted.
+- **Misses:** a day can have hundreds of thousands of firings found only
+  one way (an alert flipping between Alerting and NoData every 500ms, all
+  day, is within every bound above). Only those the ledger keeps, the
+  newest twenty of a rule, have their labels kept and are written
+  (`ledger.NewestMisses`): copying 128 labels for each of 172,793 took
+  serve's heap past 3 GiB (`TestCheckReplayGrafanaHistoryMisses` counts the
+  copies).
 - **Where names go:** an alert no rule given is named goes where one from
   the series went, kept only as a name that shows, 512 bytes at most, a
   hundred a day, and shown cleaned in `verdict`'s text. The labels of a

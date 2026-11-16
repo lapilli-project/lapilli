@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -592,5 +593,90 @@ func TestGrafanaHistoryLokiBounds(t *testing.T) {
 	ts, read, err := h.Read(context.Background(), HistoryLoki, min_(0), min_(10))
 	if err != nil || len(ts) != 1 || read.Passed != 3 || strings.Join(read.Unsure, ",") != "LongName,LongValue,Many" {
 		t.Errorf("%d kept, %+v, %v", len(ts), read, err)
+	}
+}
+
+// Refused for good (403) is of no use; a token not let in (401), expired
+// or not yet rotated in, is worth asking again, as a later ask may have it
+// right.
+func TestGrafanaHistoryRefused(t *testing.T) {
+	for status, unusable := range map[int]bool{http.StatusForbidden: true, http.StatusUnauthorized: false, http.StatusNotFound: true} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "no", status) }))
+		h := GrafanaHistory{URL: srv.URL}
+		if _, _, err := h.Read(context.Background(), HistoryAnnotations, min_(0), min_(10)); err == nil || errors.Is(err, ErrUnusable) != unusable {
+			t.Errorf("read, %d: %v", status, err)
+		}
+		if _, err := h.Reaches(context.Background(), HistoryLoki, min_(0)); err == nil || errors.Is(err, ErrUnusable) != unusable {
+			t.Errorf("reaches, %d: %v", status, err)
+		}
+		srv.Close()
+	}
+}
+
+// Past the alerts a read keeps, however small their labels, it fails as
+// too many.
+func TestGrafanaHistoryAlertsBound(t *testing.T) {
+	defer func(n int) { historyAlerts = n }(historyAlerts)
+	historyAlerts = 3
+	g := &fakeGrafana{}
+	for i := range 4 {
+		g.notes = append(g.notes, note(int64(i+1), min_(i), "Up", "Normal", "Alerting", "pod", fmt.Sprint(i)))
+	}
+	h, _ := g.start(t)
+	if _, _, err := h.Read(context.Background(), HistoryAnnotations, min_(0), min_(10)); !errors.Is(err, ErrTooManyChanges) || !strings.Contains(err.Error(), "alerts") {
+		t.Errorf("%v", err)
+	}
+	g.notes = g.notes[:3]
+	if ts, _, err := h.Read(context.Background(), HistoryAnnotations, min_(0), min_(10)); err != nil || len(ts) != 3 {
+		t.Errorf("%d, %v", len(ts), err)
+	}
+}
+
+// A page of changes at one time alone grows to 16,000 from annotations,
+// and to 5,000 from Loki, its max_entries_limit_per_query by default,
+// which Loki refuses past.
+func TestGrafanaHistoryGrowth(t *testing.T) {
+	for where, most := range map[string]int{HistoryAnnotations: 16000, HistoryLoki: 5000} {
+		asked := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			n, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+			asked = max(asked, n)
+			var b strings.Builder
+			if where == HistoryLoki {
+				times, lines := make([]string, n), make([]string, n)
+				for i := range n {
+					times[i], lines[i] = fmt.Sprint(min_(5).UnixMilli()), fmt.Sprintf(`{"previous":"Normal","current":"Alerting","fingerprint":"%d","labels":{"alertname":"Up","pod":"%d"}}`, i, i)
+				}
+				fmt.Fprintf(&b, `{"schema":{"fields":[{"name":"time"},{"name":"line"}]},"data":{"values":[[%s],[%s]]}}`, strings.Join(times, ","), strings.Join(lines, ","))
+			} else {
+				b.WriteByte('[')
+				for i := range n {
+					if i > 0 {
+						b.WriteByte(',')
+					}
+					fmt.Fprintf(&b, `{"id":%d,"time":%d,"prevState":"Normal","newState":"Alerting","tags":["alertname:Up","pod:%d"]}`, i+1, min_(5).UnixMilli(), i)
+				}
+				b.WriteByte(']')
+			}
+			io.WriteString(w, b.String())
+		}))
+		_, _, err := GrafanaHistory{URL: srv.URL}.Read(context.Background(), where, min_(0), min_(10))
+		srv.Close()
+		if !errors.Is(err, ErrUnusable) || asked != most {
+			t.Errorf("%s: asked %d at most, want %d; %v", where, asked, most, err)
+		}
+	}
+}
+
+// Past a thousand rules unsure, a read says so, and names a thousand.
+func TestGrafanaHistoryUnsureMore(t *testing.T) {
+	g := &fakeGrafana{}
+	for i := range maxUnsure + 1 {
+		g.notes = append(g.notes, note(int64(i+1), min_(1), fmt.Sprint("R", i), "Normal", "Firing"))
+	}
+	h, _ := g.start(t)
+	_, read, err := h.Read(context.Background(), HistoryAnnotations, min_(0), min_(10))
+	if err != nil || !read.UnsureMore || len(read.Unsure) != maxUnsure {
+		t.Errorf("%d unsure, more %v, %v", len(read.Unsure), read.UnsureMore, err)
 	}
 }

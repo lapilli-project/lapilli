@@ -124,7 +124,9 @@
   labels of a firing found only in what really fired as the store gave
   them, and showed them on the rule's page: any length, with what turns
   text around. They are kept as a replayed alert's are, each value 256
-  bytes at most and shown as it reads.
+  bytes at most and shown as it reads; and of a day's misses only the
+  twenty a rule keeps are copied and written, not every one before they
+  were cut to twenty.
 
 - **The impact signal's record follows one rule: it holds only for weeks
   that were read, with data, by the criterion in effect, and, after a
