@@ -289,3 +289,35 @@ func TestRound(t *testing.T) {
 		}
 	}
 }
+
+// A rule an entry keeps from a signal's windows nearly catches none of
+// them: neither by a shorter "for", nor by a number, nor firing during
+// one; a rule no entry names does.
+func TestNearMissSignals(t *testing.T) {
+	o := opts()
+	o.Signals = NewSignals([]Signal{{Name: "errors", Record: true}, {Name: "latency", Record: true}},
+		[]RuleEntry{{Rules: "^Slow$", Signals: []string{"latency"}}}).Index(map[string]map[string]string{"Slow": {}, "R": {}})
+	in := incident.Incident{ID: "impact-errors-1", Signal: "errors", Candidate: true, Start: m(100), End: m(130),
+		Labels: incident.Labels{"service": {"checkout"}}}
+	s := prom.Series{Labels: map[string]string{"service": "checkout"}}
+	for i := 0; i <= 200; i++ {
+		v := 0.1
+		if i >= 100 && i < 110 {
+			v = 0.88
+		}
+		s.Samples = append(s.Samples, prom.Sample{T: m(i), V: v})
+	}
+	for _, rule := range []string{"R", "Slow"} {
+		want := rule == "R"
+		held := []firing.Firing{{Rule: rule, Labels: map[string]string{"service": "checkout"}, Start: m(102), End: m(105)}}
+		if _, ok := Nearly(in, held, 5*time.Minute, time.Minute, o); ok != want {
+			t.Errorf("%s: nearly by its for %v, want %v", rule, ok, want)
+		}
+		if got := FiringDuring(in, held, o); got != want {
+			t.Errorf("%s: firing during it %v, want %v", rule, got, want)
+		}
+		if _, ok := NearlyBy(in, []prom.Series{s}, rules.Rule{Name: rule, For: 5 * time.Minute}, rules.Bound{Op: ">", Value: 0.9}, time.Time{}, time.Minute, o); ok != want {
+			t.Errorf("%s: nearly by its number %v, want %v", rule, ok, want)
+		}
+	}
+}

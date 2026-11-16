@@ -150,10 +150,16 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			spans(w, r.Incidents, loc)
 		}
 		if s := r.ImpactShort; short {
-			fmt.Fprintf(w, "! --impact-for %s counts impact that lasted %s as an incident, but %d of the %d rules judged fire only once\n"+
+			// With named signals, the one with the shortest "for", by name:
+			// --impact-for alone sets none of theirs.
+			flag := "--impact-for "
+			if s.Signal != "" {
+				flag += Clean(s.Signal) + "="
+			}
+			fmt.Fprintf(w, "! %s%s counts impact that lasted %s as an incident, but %d of the %d rules judged fire only once\n"+
 				"  their condition held longer: their \"for\" and one evaluation, with no \"for\" an evaluation (%s for %d\n"+
-				"  of them). Impact shorter than that they can't be sure to catch. --impact-for %s counts only what they can.\n",
-				Duration(s.For), Duration(s.For), s.Rules, s.Judged, Duration(s.Need), s.Most, Duration(s.Need))
+				"  of them). Impact shorter than that they can't be sure to catch. %s%s counts only what they can.\n",
+				flag, Duration(s.For), Duration(s.For), s.Rules, s.Judged, Duration(s.Need), s.Most, flag, Duration(s.Need))
 		}
 		if noisy > 0 {
 			fmt.Fprintf(w, "! %d of %d incidents were caught only by noisy rules, which fire whatever happens\n"+

@@ -190,6 +190,9 @@ func (f *verdictFlags) impactFlag(name, val string) (ok bool, err error) {
 		}
 		s.record = &b
 	case "--impact-file":
+		if f.impactFile != "" {
+			return true, errors.New("--impact-file is given twice: give every signal in one file")
+		}
 		f.impactFile = val
 	default:
 		return false, nil
@@ -316,6 +319,11 @@ func readImpactFile(path string) ([]impactSignal, []verdict.RuleEntry, error) {
 			return nil, nil, errors.New("empty: want signals:, with a list of them under it")
 		}
 		return nil, nil, err
+	}
+	// One document: what comes after a --- would be read by nothing.
+	var more yaml.Node
+	if err := dec.Decode(&more); !errors.Is(err, io.EOF) {
+		return nil, nil, errors.New("more than one YAML document: give the signals and the rules in one")
 	}
 	if doc.Impact != nil {
 		if len(doc.Signals) > 0 || len(doc.Rules) > 0 || doc.Impact.Impact != nil {
@@ -478,15 +486,39 @@ func indexRules(s *verdict.Signals, rs []rules.Rule, fs []firing.Firing) *verdic
 	return indexSignals(s, []replay.Version{{Rules: rs}}, fs)
 }
 
-// shortestFor is the shortest "for" of the impact signals read: the
-// shortest impact that counts as an incident.
-func (f *verdictFlags) shortestFor() time.Duration {
+// shortestSignal is, of named signals, the one whose "for" is shortest,
+// the first of those as short: the shortest impact that counts as an
+// incident.
+func (f *verdictFlags) shortestSignal() (verdict.Signal, bool) {
 	if !f.opts.Signals.Named() {
-		return f.impactFor
+		return verdict.Signal{}, false
 	}
-	d := f.opts.Signals.List[0].For
-	for _, s := range f.opts.Signals.List[1:] {
-		d = min(d, s.For)
+	s := f.opts.Signals.List[0]
+	for _, x := range f.opts.Signals.List[1:] {
+		if x.For < s.For {
+			s = x
+		}
 	}
-	return d
+	return s, true
+}
+
+// shortestFor is the shortest "for" of the impact signals read: --impact-for
+// with none named.
+func (f *verdictFlags) shortestFor() time.Duration {
+	if s, ok := f.shortestSignal(); ok {
+		return s.For
+	}
+	return f.impactFor
+}
+
+// judgedAgainst reports whether a rule is judged against the windows of
+// the signal with the shortest "for": no rule entry names it, or its
+// entry names that signal. With no named signal, every rule is.
+func (f *verdictFlags) judgedAgainst(rule string) bool {
+	s, ok := f.shortestSignal()
+	if !ok {
+		return true
+	}
+	e := f.opts.Signals.Entry(rule)
+	return e == nil || slices.Contains(e.Signals, s.Name)
 }

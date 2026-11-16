@@ -14,7 +14,11 @@ import (
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/firing"
+	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/replay"
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -209,6 +213,9 @@ func namedSignals(t *testing.T) (signalHistory, string, []string) {
 				{lbl("service", "checkout", "team", "shop", "backend", "checkout-v2"), at(1, 10, 0), at(1, 10, 30)},
 				{lbl("service", "search", "team", "find", "backend", "search-v1"), at(4, 3, 0), at(4, 3, 20)},
 				{lbl("service", "checkout", "team", "shop", "backend", "checkout-v2"), at(4, 9, 0), at(4, 9, 20)},
+				// In the two weeks before the period alone: no window, but cart
+				// is a value it returned.
+				{lbl("service", "cart", "team", "shop", "backend", "cart-v1"), at(-5, 10, 0), at(-5, 10, 20)},
 			},
 			probeExpr: {
 				{lbl("service", "checkout", "team", "probers", "instance", "https://checkout.example", "job", "blackbox"), at(4, 9, 2), at(4, 9, 6)},
@@ -240,6 +247,7 @@ rules:
 	firings := firingsFile(t, [][4]string{
 		{"ApiErrors", co, ts(at(0, 12, 0)), ts(at(0, 12, 5))},                                    // tied to probe too: waits for it
 		{"SearchSlow", `{"service":"search","team":"find"}`, ts(at(0, 13, 0)), ts(at(0, 13, 5))}, // errors alone: judged
+		{"CartSlow", `{"service":"cart","team":"shop"}`, ts(at(0, 14, 0)), ts(at(0, 14, 5))},     // errors returned cart before the period
 		{"NightPage", `{"service":"web","team":"edge"}`, ts(at(1, 0, 0)), ts(at(1, 0, 5))},       // no signal had web: waits for them all
 		{"ApiErrors", co, ts(at(1, 9, 55)), ts(at(1, 10, 40))},
 		{"BackendMissing", `{"backend":"checkout-v2","team":"platform"}`, ts(at(4, 8, 50)), ts(at(4, 9, 30))},
@@ -311,7 +319,7 @@ func TestNamedSignals(t *testing.T) {
 		judged[f.Rule] = append(judged[f.Rule], !f.NoRecord)
 	}
 	for rule, want := range map[string][]bool{
-		"ApiErrors": {false, true, true}, "SearchSlow": {true}, "NightPage": {false}, "BackendMissing": {true},
+		"ApiErrors": {false, true, true}, "SearchSlow": {true}, "CartSlow": {true}, "NightPage": {false}, "BackendMissing": {true},
 		"CheckoutLatency": {true}, "CheckoutP99": {true, true}, "QueueLatency": {false, true}, "PayQueue": {true},
 	} {
 		if !slices.Equal(judged[rule], want) {
@@ -358,7 +366,7 @@ func TestNamedSignals(t *testing.T) {
 	text := runSignals(t, h, append(args, "--impact-file", file)...)
 	for _, want := range []string{"5 more found by --impact (errors 3, probe 1, payments 1)",
 		"Impact signals keep the record of the firings they could have seen: errors from 2026-09-21 00:00, probe from 2026-10-08 07:00, latency from 2026-09-21 00:00, payments doesn't (record: no)",
-		"impact-probe-1 user impact (probe)", fmt.Sprintf(verdict.SomeUnjudgedSignalsText, 3, 12)} {
+		"impact-probe-1 user impact (probe)", fmt.Sprintf(verdict.SomeUnjudgedSignalsText, 3, 13)} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the text has no %q\n%s", want, text)
 		}
@@ -438,6 +446,9 @@ func TestSignalFlagsRefused(t *testing.T) {
 		{[]string{"--impact-file", file(nine)}, "9 signals: 8 at most"},
 		{[]string{"--impact-file", big}, "more than 1 MiB"},
 		{[]string{"--impact-file", file("rules: []")}, "no signals"},
+		{[]string{"--impact-file", file("signals: [{name: a, expr: up}]\n---\nsignals: [{name: b, expr: up}]\n")}, "more than one YAML document"},
+		{[]string{"--impact-file", file("signals: [{name: a, expr: up}]\n---\n")}, "more than one YAML document"},
+		{[]string{"--impact-file", file("signals: [{name: a, expr: up}]"), "--impact-file", file("signals: [{name: b, expr: up}]")}, "--impact-file is given twice"},
 		{[]string{"--impact-file", file("signals: [{name: a, expr: up}]"), "--impact", "b=up"}, "--impact-file gives the impact signals"},
 		{[]string{"--impact-file", file("signals: [{name: a, expr: up}]"), "--impact-record", "a=no"}, "leave out --impact-for NAME=DUR"},
 	} {
@@ -581,6 +592,77 @@ func TestRedactSignals(t *testing.T) {
 		}
 		if !strings.Contains(out, "signal-") {
 			t.Errorf("%s: no signal's alias\n%s", flag, out)
+		}
+	}
+}
+
+// Impact as short as a named signal's "for" is said of that signal, by
+// name, and of the rules judged against its windows alone: --impact-for
+// with no name sets no named signal's.
+func TestImpactShortSignal(t *testing.T) {
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
+	now = func() time.Time { return t0 }
+	rulesFile := write(t, "rules.yaml", `groups:
+  - name: shop
+    rules:
+      - alert: CheckoutErrors
+        expr: errors > 5
+        for: 5m
+      - alert: Flappy
+        expr: flappy
+        for: 5m
+`)
+	file := write(t, "impact.yaml", `signals:
+  - {name: errors, expr: "errors > 5", for: 10m}
+  - {name: probe, expr: impact, for: 2m}
+rules:
+  - {rules: ^Flappy$, signals: [errors]}
+`)
+	args := []string{"verdict", "--rules", rulesFile, "--prometheus", "http://p", "--impact-file", file, "--since", "12h", "--tz", "UTC"}
+	var stdout, stderr bytes.Buffer
+	if code := run(append(slices.Clone(args), "--json"), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d\n%s", code, stderr.String())
+	}
+	var rep verdict.Report
+	if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if s := rep.ImpactShort; s == nil || s.Signal != "probe" || s.For != 2*time.Minute || s.Rules != 1 || s.Judged != 1 || s.Need != 6*time.Minute {
+		t.Fatalf("impact short %+v", rep.ImpactShort)
+	}
+	stdout.Reset()
+	if code := run(args, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d\n%s", code, stderr.String())
+	}
+	for _, want := range []string{"! --impact-for probe=2m counts impact that lasted 2m as an incident, but 1 of the 1 rules judged",
+		"--impact-for probe=6m counts only what they can."} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("no %q in\n%s", want, stdout.String())
+		}
+	}
+}
+
+// A rule's entry by labels is found by the newest version of the rules
+// that has it; a rule with none, by the labels all its firings have.
+func TestIndexSignals(t *testing.T) {
+	sig := verdict.NewSignals([]verdict.Signal{{Name: "latency", Record: true}},
+		[]verdict.RuleEntry{{Labels: incident.Labels{"kind": {"latency"}}, Signals: []string{"latency"}}})
+	versions := []replay.Version{
+		{Rules: []rules.Rule{{Name: "Slow", Labels: map[string]string{"kind": "queue"}}, {Name: "Gone", Labels: map[string]string{"kind": "latency"}}}},
+		{From: sigBase, Rules: []rules.Rule{{Name: "Slow", Labels: map[string]string{"kind": "latency"}}}},
+	}
+	fs := []firing.Firing{
+		{Rule: "Recorded", Labels: map[string]string{"kind": "latency", "pod": "a"}},
+		{Rule: "Recorded", Labels: map[string]string{"kind": "latency", "pod": "b"}},
+		{Rule: "Mixed", Labels: map[string]string{"kind": "latency"}},
+		{Rule: "Mixed", Labels: map[string]string{"kind": "queue"}},
+		{Rule: "Half", Labels: map[string]string{"kind": "latency"}},
+		{Rule: "Half", Labels: map[string]string{}},
+	}
+	s := indexSignals(sig, versions, fs)
+	for rule, want := range map[string]int{"Slow": 1, "Gone": 1, "Recorded": 1, "Mixed": 0, "Half": 0} {
+		if got := s.EntryNumber(rule); got != want {
+			t.Errorf("%s's entry %d, want %d", rule, got, want)
 		}
 	}
 }

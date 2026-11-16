@@ -735,6 +735,22 @@ Open:
    holds a rule to catching an incident by its id. An impact window's key
    can change when its signal is read again; an expectation should name the
    incident its confirmation writes.
+6. **`seen` from what a signal reads, not what it returns** (found in the
+   review of step 1; to settle before step 2 keeps `seen` in the ledger).
+   `seen` holds the values a signal returned. A signal with a threshold
+   (`> 0.05`) returns something only while users are hurt, so a service it
+   measured all month, never hurt, is a value it never returned: that
+   service's firings are tied to no signal that keeps the record, fall
+   back, and wait for the latest start of all, the youngest signal's,
+   which is what "One start" (above) set out to end. Errors with a month
+   of data that returned nothing, and a probe from Thursday that failed
+   only for `checkout`, leave a Monday firing of `service: search` with no
+   record. Whether `seen` should come from what the signal reads instead:
+   its selectors counted by its `match` labels over the read
+   (`count by (service) (http_requests_total)`), one request a selector,
+   as where its data begins is looked for; and what to do of a label its
+   selectors don't have, which the expression makes (`label_replace`, a
+   relabelled probe target).
 
 ## Step 1, as built
 

@@ -187,9 +187,12 @@ lapilli verdict --rules alerts/ --prometheus http://prometheus:9090 --match serv
 
 A probe's window and a 5xx window at the same time are two incidents, each
 matched on its own labels, not one that keeps only the labels both have.
-Each signal keeps the record of the firings it could have seen from where
-the data it reads begins, so a probe added last Thursday holds back only
-the firings of the services it probes. `--impact-file` says the same in a
+Each signal keeps the record of the firings it could have seen, those of
+the values it returned over the read, from where the data it reads begins:
+a probe added last Thursday holds back the firings of the services the
+probe returned, and those no signal returned, which wait for the latest
+start of all. A signal that returns something only while users are hurt
+has returned only the services that were. `--impact-file` says the same in a
 file, and which rules are judged against which signals: the latency rules
 against a latency signal alone, a load balancer's "no backend" rule
 matched on `backend` alone (see `lapilli verdict -h`). Named and unnamed

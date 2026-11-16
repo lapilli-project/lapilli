@@ -1489,7 +1489,13 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			for _, rr := range rep.Rules {
 				replayed[rr.Rule] = rr.Replayed && rr.Unsupported == ""
 			}
+			for r, ok := range replayed {
+				replayed[r] = ok && f.judgedAgainst(r)
+			}
 			rep.ImpactShort = impactShort(versions[len(versions)-1].Rules, replayed, f.shortestFor(), f.step)
+			if s, ok := f.shortestSignal(); ok && rep.ImpactShort != nil {
+				rep.ImpactShort.Signal = s.Name
+			}
 		}
 		// A rule taken away during the period covers nothing.
 		if len(versions) > 1 {

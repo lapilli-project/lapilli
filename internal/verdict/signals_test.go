@@ -100,12 +100,17 @@ func TestRuleEntries(t *testing.T) {
 		RuleEntry{Rules: "Slow$|Latency", Signals: []string{"errors"}, Match: []string{"service"}},
 		RuleEntry{Rules: "^BackendMissing$", Signals: []string{"errors", "probe"}, Match: []string{"backend"}},
 		RuleEntry{Labels: incident.Labels{"kind": {"latency"}}, Signals: []string{"probe"}},
+		RuleEntry{Labels: incident.Labels{"kind": {"queue"}, "tier": {"front"}}, Signals: []string{"errors"}},
 	)
 	o.Signals = o.Signals.Index(map[string]map[string]string{
 		"CheckoutSlow": {"kind": "latency"}, "BackendMissing": {}, "ApiErrors": {}, "QueueLatency": {"kind": "queue"}, "Tagged": {"kind": "latency"},
+		"QueueDepth": {"kind": "queue"}, "FrontQueue": {"kind": "queue", "tier": "front"},
 	})
 	errs := window("errors", nil, 10, 10.5, incident.Labels{"service": {"checkout"}, "team": {"shop"}, "backend": {"checkout-v2"}})
 	probe := window("probe", []string{"service"}, 20, 20.5, incident.Labels{"service": {"checkout"}})
+	// A probe's window, its team the probers': matched on service alone, as
+	// the probe is, by a rule whose entry gives no match of its own.
+	probers := window("probe", []string{"service"}, 25, 25.5, incident.Labels{"service": {"checkout"}, "team": {"probers"}})
 	written := incident.Incident{ID: "INC-1", Start: sigAt(30), End: sigAt(31), Labels: incident.Labels{"service": {"checkout"}, "team": {"shop"}}}
 	for _, c := range []struct {
 		f    firing.Firing
@@ -118,6 +123,7 @@ func TestRuleEntries(t *testing.T) {
 		// By labels, the rule's: the third entry, probe's alone.
 		{fire("Tagged", 10, "service", "checkout", "team", "shop"), errs, false},
 		{fire("Tagged", 20, "service", "checkout"), probe, true},
+		{fire("Tagged", 25, "service", "checkout", "team", "shop", "kind", "latency"), probers, true},
 		{fire("BackendMissing", 10, "backend", "checkout-v2", "team", "platform"), errs, true},
 		{fire("BackendMissing", 10, "backend", "cart-v1", "team", "shop"), errs, false},
 		{fire("BackendMissing", 20, "backend", "checkout-v2"), probe, true},
@@ -129,7 +135,9 @@ func TestRuleEntries(t *testing.T) {
 			t.Errorf("%s %v catches %s: %v, want %v", c.f.Rule, c.f.Labels, c.in.ID, got, c.want)
 		}
 	}
-	for rule, want := range map[string]int{"CheckoutSlow": 1, "QueueLatency": 1, "BackendMissing": 2, "Tagged": 3, "ApiErrors": 0, "NeverSeen": 0} {
+	// By labels, every label of the entry's: one of two is none.
+	for rule, want := range map[string]int{"CheckoutSlow": 1, "QueueLatency": 1, "BackendMissing": 2, "Tagged": 3, "ApiErrors": 0, "NeverSeen": 0,
+		"QueueDepth": 0, "FrontQueue": 4} {
 		if got := o.Signals.EntryNumber(rule); got != want {
 			t.Errorf("%s's entry: %d, want %d", rule, got, want)
 		}
@@ -207,6 +215,12 @@ func TestTies(t *testing.T) {
 		t.Errorf("a payments signal with no labels, that keeps the record: tied to %v", got)
 	}
 	o.Signals.List[2].Record = false
+	// A signal matched on a label --match hasn't: tied by its own labels.
+	region := Signal{Name: "region", Match: []string{"region"}, Record: true, Start: sigT0, Seen: seen([]string{"region"}, map[string]string{"region": "eu"})}
+	rs := NewSignals([]Signal{region, o.Signals.List[0]}, nil)
+	if got := rs.Names(rs.Ties("ApiErrors", map[string]string{"service": "search", "team": "find", "region": "us"}, o.Match)); !slices.Equal(got, []string{"errors"}) {
+		t.Errorf("a firing in a region the signal never returned: tied to %v", got)
+	}
 	o.Signals.List[2].Seen = seen(o.Match, map[string]string{"service": "payments", "team": "pay"})
 	if got := names(fire("ApiErrors", 1, "service", "cart", "team", "shop")); !slices.Equal(got, []string{"errors", "probe"}) {
 		t.Errorf("none tying it: %v, want the two that keep the record", got)
@@ -305,6 +319,11 @@ func TestNoRecordBySignal(t *testing.T) {
 	fs := []firing.Firing{fire("ApiErrors", 10, "service", "search", "team", "find")}
 	if rep := Judge(nil, fs, nil, o); !rep.NoRecord || rep.Unjudged != 1 {
 		t.Errorf("never started: no record %v, %d unjudged", rep.NoRecord, rep.Unjudged)
+	}
+	// payments read all along keeps no record: still none.
+	o.Signals.List[2].Start = sigT0.Add(-14 * 24 * time.Hour)
+	if rep := Judge(nil, fs, nil, o); !rep.NoRecord {
+		t.Error("a signal that doesn't keep the record, started: the period has a record")
 	}
 	o.Signals.List[1].Start = sigAt(150)
 	if rep := Judge(nil, fs, nil, o); rep.NoRecord || rep.Unjudged != 1 {

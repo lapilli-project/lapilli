@@ -232,9 +232,12 @@ type IncidentResult struct {
 // condition held longer than --impact-for (For): Rules of Judged, Need the
 // most common of how long they need, their "for" and one evaluation (with
 // no "for", an evaluation), and Most how many need that. An incident found by --impact as short as For
-// can't be caught by them: shown, it is still judged as any other.
+// can't be caught by them: shown, it is still judged as any other. With
+// named signals, Signal is the one whose "for" is shortest, and the rules
+// judged are those judged against its windows.
 type ImpactShort struct {
 	For    time.Duration `json:"impact_for"`
+	Signal string        `json:"signal,omitempty"`
 	Rules  int           `json:"rules"`
 	Judged int           `json:"judged"`
 	Need   time.Duration `json:"need"`

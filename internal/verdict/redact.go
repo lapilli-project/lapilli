@@ -530,6 +530,11 @@ func (x *Redactor) report(r *Report) *Report {
 			return cmp.Or(cmp.Compare(b.Firings, a.Firings), strings.Compare(a.Rule, b.Rule))
 		})
 	}
+	if r.ImpactShort != nil {
+		s := *r.ImpactShort
+		s.Signal = x.alias("signal", s.Signal)
+		out.ImpactShort = &s
+	}
 	out.Unreplayed = x.unreplayed(r.Unreplayed)
 	if r.Hours != nil {
 		h := *r.Hours
