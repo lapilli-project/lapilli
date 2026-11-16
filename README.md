@@ -301,8 +301,9 @@ said. A feed's URL holds its secret, so it is read from its file, never
 shown or logged, fetched over https only, with no redirect followed, 8 MB
 and 30 seconds at most. `lapilli serve` reads each feed every `every` (30
 minutes by default) and keeps the turns in its ledger past what the feed
-looks back (PagerDuty a month, Grafana OnCall 15 days), and its runs page
-says when each was last read and whom its turns name that the file
+looks back (PagerDuty a month, Grafana OnCall 15 days), and its Run
+history page says when each was last read and whom its turns name that the
+file
 doesn't. A person's hours changed in the file count for every turn they
 had.
 
@@ -766,7 +767,8 @@ fired, and lists the last of those; the rules list and the dashboard mark a
 rule whose replay differed over the last week (five firings either way, fewer
 than nine in ten alike, unless `--check-differs N/RATIO` says otherwise), and
 `replay.differs` tells the webhook and Slack once a week while it does. The
-runs page says how far it has got, which series held nothing (a store may not
+Run history page says how far it has got, which series held nothing (a
+store may not
 keep `ALERTS`; `--check-series` names another), and what really fired with no
 rule given by that name. `/metrics` has `lapilli_rule_replay_check{rule,
 way}` over seven days, MCP's `rules` and `rule` carry it, and the weekly
@@ -1233,7 +1235,8 @@ declares is the UI's again, or deleted with `--config-prune`, but a role,
 taken away. A file is kept to only once it has been read the same twice
 in a row, so one read half written changes nothing. An admin's
 `/config.yaml` gives everything the ledger holds in that form, to commit
-(docs/design/serveops.md). The Orphans page lists the notes, tasks,
+(docs/design/serveops.md). The Cleanup page (`/orphans`) lists the notes,
+tasks,
 comments and proposals of rules deleted or renamed, to move to the rule as
 it is named now, or delete. The API gives `lapilli verdict --json`'s
 report for any period (`/api/v1/report?from=&to=`) and takes incidents
@@ -1241,7 +1244,10 @@ report for any period (`/api/v1/report?from=&to=`) and takes incidents
 so Prometheus scrapes it instead of a Pushgateway, and the chart has a
 Grafana dashboard of them.
 
-The pages are in a sidebar of four groups (See, Fix, Report, Manage), a
+The pages are in a sidebar of four groups, named as a console names them
+(Monitoring: Overview, Rules, Incidents, Alert history; Improve: Tasks,
+Proposals, Quiet windows; Reporting: Reports, Outcomes;
+Administration: Teams, Roles, Settings, Run history, Cleanup), a
 menu on a narrow screen, each with a breadcrumb and a bar to pick the team
 and the period, which every link carries; a reader who edits one team sees
 it first. The bar's search finds rules, incidents and teams, and opens the
@@ -1278,8 +1284,9 @@ the changes log. Up to twenty rules picked can each be proposed a change
 its own page would make, with its backtest, waiting for a person to
 approve it. Each of the overview's numbers opens the list that makes
 it, over the same week and team (the noisy rules, the incidents missed);
-its weekly charts mark deploys and quiet windows. A day's firings are
-counted by the hour, and each firing's labels are chips that pick the
+its weekly charts mark deploys and quiet windows. A day's firings, on
+Alert history (`/firings`), are counted by the hour, and each firing's
+labels are chips that pick the
 firings with them; an incident's page draws when each rule fired around
 it.
 
@@ -1302,8 +1309,9 @@ lines around it or the whole rule), its backtest as a table, now beside as
 proposed, the approval, and what happened to it; the proposals and the
 tasks have counted facets, as the rules do; a quiet window can be
 previewed before it is saved (the rules it applies to, the firings of the
-last four weeks it would have excused, when it falls next); `/manage`
-gathers the pages that set Lapilli up; and an action a reader may not take
+last four weeks it would have excused, when it falls next); `/manage`,
+Administration, gathers the pages that set Lapilli up; and an action a
+reader may not take
 is shown disabled, with why.
 
 What an operations team measures its alerts by is there too, week by week
@@ -1414,7 +1422,8 @@ with `--tasks-token-file` (below). Notices are written in the
 same transaction as what they tell of and sent after, so a receiver that
 is down holds nothing up and misses nothing it comes back for.
 
-Whether Lapilli itself earns its keep is on the outcomes page, worked out
+Whether Lapilli itself earns its keep is on the Outcomes page (`/outcomes`),
+worked out
 from the same ledger. Each change to the rules it reviewed is measured: the
 replay of the week before was its prediction, and the four weeks either
 side are what came of it, as firings a week, incidents caught, firings
@@ -1636,7 +1645,8 @@ replayed rules: stones, precision, what it adds, incidents written down
 later, teams, hours, quiet windows, tasks, the digests, `/metrics` and the
 agent's reading tools. What needs a rule's condition stays with the
 replayed ones: change reviews, longer `for`s, near misses, `compare`. Its
-page says where it was recorded and why. The runs page lists the sources,
+page says where it was recorded and why. The Run history page lists the
+sources,
 `/api/v1/sources` has them, and `/metrics` has
 `lapilli_serve_source_last_timestamp_seconds{source}`, so an alert can say
 when a job stopped copying. Lapilli says so itself, too: a source nothing has

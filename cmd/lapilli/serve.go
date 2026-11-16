@@ -203,7 +203,8 @@ The web UI and API:
                       /config.yaml gives what the ledger holds in its form.
                       A file that can't be used changes nothing, a thing it
                       declares that can't be kept is kept as it was, and the
-                      Settings and Runs pages say why (docs/design/serveops.md)
+                      Settings and Run history pages say why
+                      (docs/design/serveops.md)
   --config-prune      delete what --config no longer declares, once the file
                       is read the same twice in a row, but a team something
                       the UI made names; without it, that is the UI's again

@@ -1,4 +1,4 @@
-{{define "orphans"}}{{$title := t "Orphans"}}{{template "top" (titled . $title)}}{{$may := not .Status.ReadOnly}}{{with .View}}
+{{define "orphans"}}{{$title := t "Cleanup"}}{{template "top" (titled . $title)}}{{$may := not .Status.ReadOnly}}{{with .View}}
 <h1>{{$title}}</h1>
 <p class="lede">{{t "What the ledger keeps of rules no longer in effect, deleted or renamed: notes, tasks, comments and proposals not finished with, which no other list shows. For a rule renamed, move what its old name kept to the rule as it is named now; for one deleted, delete it. Its proposals stay: each was made against the rule as it was, and is dropped on its own page."}}</p>
 {{with .Moved}}<p class="note" role="status">{{tbdi "What %s kept was moved to %s." . $.View.To}}</p>{{end}}

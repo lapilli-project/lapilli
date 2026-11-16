@@ -424,7 +424,7 @@ found is fixed, each with a test that fails without the fix:
   the windows a span meets dropped the last day of a 31-day repeat that
   starts late on its Until's day. A window whose team was removed was given
   to everyone when its form was saved as shown.
-- **Who holds a role** showed on the runs page, everyone's: only admins see
+- **Who holds a role** showed on the Run history page, everyone's: only admins see
   those changes there.
 - **The reports** could be filled by editors, ten a team: the last ten are
   an admin's.
@@ -720,7 +720,7 @@ leader that takes over after another kept the ledger to the same file
 writes nothing.
 
 **What is wrong** is logged once, and shown on the Settings page (under
-"Declared configuration") and the Runs page, and the Manage page's
+"Declared configuration") and the Run history page, and the Administration page's
 Settings card says so; the leader says it to the other replicas with its
 status. An admin is shown why, with the line; anyone else, the line and
 the kind alone ("line 23: a role that can't be kept"), as why can name who

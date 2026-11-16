@@ -10,7 +10,7 @@ pages are put together: the status colours every page uses, the frame
 every page has, the team and period carried from page to page, the
 search, the rules list and its filters, a rule's page, the way to change
 things (a proposal's page, the lists' facets, a quiet window's preview,
-the Manage page), what can be done to many at once and the ways from a
+the Administration page), what can be done to many at once and the ways from a
 number to what makes it, what a first-time reader would get stuck on, and
 what is left.
 [serve.md](serve.md) says what each page shows;
@@ -141,12 +141,12 @@ rest are written in the template that draws them.
 
 | Kind | States |
 |---|---|
-| ok | a rule's `○ OK`, of a rule some of whose firings were judged; a proposal `✓ approved`, `● applied`; a task done; a rule to keep (`✓ keep`); a rule change "as predicted"; Outcomes' Runs, "all ran", the runs up to date; notifications, "Last sent from the outbox"; an incident caught (its "Caught" cell); the overview's "Nothing to look at now", the one empty state that says all is well (`allClear`); a change "better"; the incidents chart's caught |
-| warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Outcomes' tile, the Runs page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Outcomes' tile and note, the overview's line); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted" |
-| bad | a run's error, and the server's error banner; `--config` that can't be used at all, or that the ledger couldn't be kept to; notices given up on; the digest failed; an on-call schedule's read failed; Outcomes' Runs, "n failed"; a task overdue; a proposal closed as failed, and its reason; a backtest that misses incidents; would have caught while it was off; an incident missed (`✗ nothing fired`, "Nothing fired."), the missed count of the table of the weeks; a search not understood; a change "worse" |
+| ok | a rule's `○ OK`, of a rule some of whose firings were judged; a proposal `✓ approved`, `● applied`; a task done; a rule to keep (`✓ keep`); a rule change "as predicted"; Outcomes' Runs tile, "all ran", the runs up to date; notifications, "Last sent from the outbox"; an incident caught (its "Caught" cell); the overview's "Nothing to look at now", the one empty state that says all is well (`allClear`); a change "better"; the incidents chart's caught |
+| warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Outcomes' tile, the Run history page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Outcomes' tile and note, the overview's line); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted" |
+| bad | a run's error, and the server's error banner; `--config` that can't be used at all, or that the ledger couldn't be kept to; notices given up on; the digest failed; an on-call schedule's read failed; Outcomes' Runs tile, "n failed"; a task overdue; a proposal closed as failed, and its reason; a backtest that misses incidents; would have caught while it was off; an incident missed (`✗ nothing fired`, "Nothing fired."), the missed count of the table of the weeks; a search not understood; a change "worse" |
 | info | a proposal `↻ being applied`; `✎ Proposed`; a quiet window `● active now`; the server's work (`↻`); catching up on the overview; behind on Outcomes, and its Runs tile ("all ran") while it is; a rule change "measuring", "rule written"; `⇣ Recorded only`; a task open or doing, and the overview's link to one ("task #n"); a rule to tune (`± tune`); the reason of a proposal approved or applied (it waited while its rule fired) |
-| unknown | `? No record`, the weeks' "no record" tag, the notes of weeks with no record; "–"; a backtest with no record (`no_record`); a rule none of whose firings was judged (`? No record`; `ruleRow.PerfClass`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review, and the reason of one refused; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; a rule change superseded, without a week before it, taken away or replayed again; Outcomes' Runs before any run |
-| no colour | what is left to do or not found, but isn't a verdict: "No proposals yet.", "No proposal waiting for approval is stale.", every other empty state; the Orphans page, whose names are neither well nor wrong |
+| unknown | `? No record`, the weeks' "no record" tag, the notes of weeks with no record; "–"; a backtest with no record (`no_record`); a rule none of whose firings was judged (`? No record`; `ruleRow.PerfClass`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review, and the reason of one refused; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; a rule change superseded, without a week before it, taken away or replayed again; Outcomes' Runs tile before any run |
+| no colour | what is left to do or not found, but isn't a verdict: "No proposals yet.", "No proposal waiting for approval is stale.", every other empty state; the Cleanup page, whose names are neither well nor wrong |
 
 Three were left open, and are so: catching up is info, as Lapilli does it
 by itself and nothing is for a person to do (behind, on Outcomes, the
@@ -167,6 +167,18 @@ would say a state alone.
   better or worse only when both weeks were judged (`tile.Better`,
   `tile.Worse` stay false otherwise), and a no-record backtest's difference
   is a plain number or "–".
+- **No change shown, no change said.** A change is one between the numbers
+  as they are shown, on the overview's tiles, Outcomes' then and now and a
+  rule's panel: two that show the same (1.2% and 0.8% both "1%") are "as
+  the week before", or have no change at all, in no colour and with no
+  word. Points are between the whole percents shown, rounded half to even
+  as `%.0f` rounds them (`ptChange`); a share of a number that rounds to
+  nothing, or of none, is said as the change itself (`pctChange`: none to
+  four a week is "+4", one to three "+200%"); a time is in the unit this
+  week's is shown in, whole minutes from an hour on. So two numbers that
+  differ never read "+0 pt", "+0%" or "+0s", nor "+41s" beside "1h5m"
+  (`TestNoChangeIsNeitherBetterNorWorse`). Outcomes' weeks set a change
+  only once then was measured over a span.
 - **Colour never says a state alone.** Each kind has a word or a sign
   beside it: a badge its sign and name, a notice its sign and sentence, a
   cell its words or the column's. A quiet window in effect now says
@@ -199,14 +211,48 @@ The pages are in four groups, each named, not a link:
 
 | Group | Pages |
 |---|---|
-| See | Overview `/`, Rules `/rules`, Incidents `/incidents`, Firings `/firings` |
-| Fix | Tasks `/tasks`, Proposals `/proposals`, Quiet windows `/windows` |
-| Report | Reports `/reports`, Outcomes `/outcomes` |
-| Manage | Teams `/teams`, Roles `/roles`, Settings `/settings`, Runs `/runs`, Orphans `/orphans` |
+| Monitoring | Overview `/`, Rules `/rules`, Incidents `/incidents`, Alert history `/firings` |
+| Improve | Tasks `/tasks`, Proposals `/proposals`, Quiet windows `/windows` |
+| Reporting | Reports `/reports`, Outcomes `/outcomes` |
+| Administration | Teams `/teams`, Roles `/roles`, Settings `/settings`, Run history `/runs`, Cleanup `/orphans` |
+
+Groups and pages are named by nouns, what they hold, as Argo CD's and
+Grafana's sidebars are. They were verbs (See, Fix, Report, Manage) and
+coined words (Firings, Runs, Orphans), which read as a list of commands.
+Proposals keeps its name: everything on its page and beside it says
+proposal (a rule's Proposals tab, its "Proposed" badge, "%d of %d
+proposals"), and a page called otherwise read worse beside them than the
+word itself. Outcomes keeps its English name, as "Impact" stood beside
+the impact windows on the same page; in Korean it is 변경 효과, beside
+변경 제안, not 개선 효과 under a group of its own called 개선. Alert
+history is 발화 이력 in Korean, as 알림 is what Lapilli sends there. The
+reports' group is Reporting in English, so that
+its page isn't "Reports › Reports"; the other languages name both alike
+(리포트, レポート, Informes), and the group's name isn't a link. A page is
+called what the sidebar calls it: its `<h1>` and `<title>` start with that
+name, and its breadcrumb is that name (`TestPageNamedAsInTheSidebar`), but
+the overview, headed by what it shows; Outcomes before anything is judged
+is "Outcomes: nothing judged yet". So is what names a page elsewhere:
+a cloud alarm's link to Run history, the failed digest's "the Run history
+page says why", the overview's Outcomes card and the Administration page's
+cards. What a page holds keeps its
+own words: a proposal, a firing, a run, the Runs tile on Outcomes, a rule's
+Firings and Proposals tabs. The URLs, the API and MCP are as they were.
+
+| Group or page | English | 한국어 | 日本語 | Español |
+|---|---|---|---|---|
+| group | Monitoring | 모니터링 | モニタリング | Supervisión |
+| group | Improve | 개선 | 改善 | Mejoras |
+| group | Reporting | 리포트 | レポート | Informes |
+| group, `/manage` | Administration | 관리 | 管理 | Administración |
+| `/firings` | Alert history | 발화 이력 | アラート履歴 | Historial de alertas |
+| `/outcomes` | Outcomes | 변경 효과 | 変更の効果 | Resultados |
+| `/runs` | Run history | 실행 이력 | 実行履歴 | Historial de ejecuciones |
+| `/orphans` | Cleanup | 정리 대상 | 整理対象 | Limpieza |
 
 Roles is listed for admins, who alone may open it. A group's name isn't a
-link, but Manage's, which goes to `/manage`, the page of its own (below),
-`aria-current` there. Tasks has the open
+link, but Administration's, which goes to `/manage`, the page of its own
+(below), `aria-current` there. Tasks has the open
 tasks beside it, and Proposals those waiting for an approval, each the
 team's in effect (picked, or the reader's own), as their lists have them,
 or all teams': two counts the ledger gives once each time it changes
@@ -243,9 +289,9 @@ past 4096: past that, the page without its query.
 ### Breadcrumbs
 
 Every page starts with `<nav aria-label="Breadcrumb"><ol>`: the group, the
-page, and the item, the last with `aria-current="page"`: See › Rules ›
-LatencyP99; Fix › Proposals › #12. The group isn't a link, but Manage,
-whose page lists its pages (Manage › Teams); the page is, with the page
+page, and the item, the last with `aria-current="page"`: Monitoring ›
+Rules › LatencyP99; Improve › Proposals › #12. The group isn't a link, but
+Administration, whose page lists its pages (Administration › Teams); the page is, with the page
 context. A proposal's item is its `#id` alone, the page's title its whole
 heading (`crumbed`).
 
@@ -305,6 +351,24 @@ said after the last of them; `TestDisabledOneWay` holds every disabled
 button on every page to it. A quiet button disabled looks as any disabled
 one (`TestDisabledLooksDisabled`): until 0.40.1 its own look came after
 the disabled one and drew it as one that could be pressed.
+
+A form no one may send for now, not for who the reader is, is drawn
+whole instead: a rule with a proposal not finished with takes no other
+(`ledger.ErrProposed`), so to an editor its first step's "Propose it", the
+Proposals tab's forms (a new for, a threshold, what it says, retiring it)
+and a fix to what it says are each drawn as they are, their fields and
+buttons disabled, the buttons tied (`again`) to why, said once above them
+in the words the ledger refuses with ("this rule has a proposal not yet
+finished with: one at a time"), with a link to the one that waits; the
+first step's single button says it beside itself. A viewer is told, as
+before, that editors alone propose (`offOf`), with the same link. Once the
+proposal is finished with, the forms are back (`TestFirstProposeWhileOneWaits`,
+`TestProposeFormsWhileOneWaits`). A disabled field looks as a disabled
+button does, dim words on the panel and a dashed edge, not as one to fill
+(`TestDisabledFieldsLookIt`, and in a browser `disabled-look` in
+`test/a11y/axe.mjs`); the rules list's bar, disabled for a viewer, is drawn
+so too. A checkbox stands before its words, on their first line's
+baseline, in any form (`TestCheckboxOnItsLine`, `checkbox-line`).
 
 ### Empty states
 
@@ -554,7 +618,7 @@ never an error page.
 
 ### The header
 
-- The breadcrumb, See › Rules › NAME; the name, in `<bdi>`, as the `h1`,
+- The breadcrumb, Monitoring › Rules › NAME; the name, in `<bdi>`, as the `h1`,
   and the badges as the list has them, but "to check", which the header
   says in full.
 - A line of what is known of it, each only when known: its team, its
@@ -577,7 +641,7 @@ never an error page.
   firings tab's replay check), why it isn't replayed, or is in part (to
   its versions), that its record is copied in, a cloud's alarm's history
   or from elsewhere (to its latest firings), that an alarm has none (to
-  Runs), and proposals made against a version of it no longer in effect
+  Run history), and proposals made against a version of it no longer in effect
   (to its proposals). With none, there is no `<details>`. The rules
   list's badge counts the same (`condsOf`).
 
@@ -717,7 +781,7 @@ stops the server and removes what it made.
 ## The way to change things
 
 Phase 4: a proposal's page, the lists' facets beside the rules', a quiet
-window's preview, and the Manage page.
+window's preview, and the Administration page.
 
 ### A diff in its options
 
@@ -756,7 +820,7 @@ dry run, its history), with the backtest in the dry run's place:
   ● applied, ↶ undone, ⊘ closed (refused, failed, dropped, changed in
   review); its rule; who made it, an agent marked so; its way (a pull
   request; Grafana's, a ruler's or a cloud's API; or for a person to
-  make); when. Breadcrumb Fix › Proposals › #id.
+  make); when. Breadcrumb Improve › Proposals › #id.
 - **The change**: the rule as it is and as proposed, in the diff's
   options, a side past 400 lines shown whole, after the other, and said
   so, as the versions tab does; for the git path, the file as the pull request changes it, in a
@@ -954,15 +1018,15 @@ window would be kept (what was typed put in again, escaped) and, above it:
 Preview is the form's first button, so that Enter in a field writes
 nothing.
 
-### The Manage page
+### The Administration page
 
-`/manage`: a card for each page of the Manage group and for the reports
-(their recipients and the weekly digest), each with a line on what it is
-for and, where cheap, a fact (how many teams, how many reports, how far
-the firings are in): Teams, Roles (admins only, as in the sidebar),
-Settings, Runs, Reports, Orphans, and where notices go (below, "First
-use"). The sidebar's Manage links to it, and the breadcrumbs of its pages
-start with it. When `--config` can't be used, the Settings card says so.
+`/manage`, Administration: a card for each page of the Administration
+group and for the reports (their recipients and the weekly digest), each
+with a line on what it is for and, where cheap, a fact (how many teams,
+how many reports, how far the firings are in): Teams, Roles (admins only,
+as in the sidebar), Settings, Run history, Reports, Cleanup, and where
+notices go (below, "First use"). The sidebar's Administration links to
+it, and the breadcrumbs of its pages start with it. When `--config` can't be used, the Settings card says so.
 
 ### What `--config` declares
 
@@ -987,7 +1051,7 @@ away), when a new file was read once and waits for its second read, when
 the ledger was last kept to it and the start of its hash, and what of the
 file can't be used or kept: to an admin, why, with its line, in the
 reader's language; to anyone else, the line and the kind alone ("line 23:
-a role that can't be kept"), as why can name who holds a role. The Runs
+a role that can't be kept"), as why can name who holds a role. The Run history
 page says it the same way. Without `--config`, the section says nothing is
 declared. What a leader without `--config` gave back of what a file
 declared, which the next file lets go unless it declares it again, is
@@ -1000,9 +1064,9 @@ admin's) gives everything as `--config` takes it. The Teams page lists
 teams a ledger kept from before whose names differ only in letter case,
 to be renamed.
 
-### Orphans
+### Cleanup
 
-`/orphans`, under Manage: a rule deleted or renamed leaves its note, its
+`/orphans`, Cleanup, under Administration: a rule deleted or renamed leaves its note, its
 tasks, the comments on it and its proposals not finished with under a
 name no rule in effect has, which no list shows. Argo CD lists resources
 no application owns as orphaned; this lists the names the ledger keeps
@@ -1040,7 +1104,7 @@ At two thousand rules, four weeks of their firings (84,000) and a thousand
 proposals (`TestChangePagesScale`), worked out afresh: the proposals list
 takes 20 to 45 ms, a proposal's page 15 to 25 ms (one whose rule is 600
 lines a side, shown whole, too), a quiet window's preview 35 to 80 ms
-(every day, once over the four weeks, by cron), the tasks and the Manage
+(every day, once over the four weeks, by cron), the tasks and the Administration
 page about a millisecond.
 
 What a proposal says when it is read costs, at a thousand rules that count
@@ -1460,7 +1524,7 @@ more is said. Who may approve is as it was (`approver`).
 
 ### Where notices go
 
-The Manage page has a Notifications card, and the Settings page a section
+The Administration page has a Notifications card, and the Settings page a section
 of that name (`#notifications`): where what happens is told (the webhook,
 Slack, or nowhere), how many places reports can go to by name and how many
 teams have a digest of their own, when the weekly digest goes ("Mondays

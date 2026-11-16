@@ -1,4 +1,4 @@
-{{define "outcomes"}}{{$title := t "Outcomes"}}{{if .View.Empty}}{{$title = t "Nothing judged yet"}}{{end}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
+{{define "outcomes"}}{{$title := t "Outcomes"}}{{if .View.Empty}}{{$title = t "Outcomes: nothing judged yet"}}{{end}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
 {{if .Empty}}
 <section class="note">
   <h1>{{$title}}</h1>

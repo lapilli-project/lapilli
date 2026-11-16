@@ -51,7 +51,7 @@ What each run does:
 1. Asks Lapilli for its changes. Those ready get a pull request; those with
    one open are looked at, and Lapilli is told when one was merged or
    closed. A merge isn't the change applied: it is applied when Lapilli
-   reads the rules with it, as a new version, and the outcomes page measures
+   reads the rules with it, as a new version, and the Outcomes page measures
    it from then.
 2. Finds the file the change was made against: the tracked file under
    `RULES_PATHS` whose sha256 is the hash of the document Lapilli read.

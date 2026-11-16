@@ -98,11 +98,11 @@ already keeps a rule a replay no longer has.
 
 - **A rule's page:** "The replay beside what really fired": over twelve
   weeks, alike as a share of both, and the counts each way; the start
-  differences; the last misses, each linked to the firings page at its time.
+  differences; the last misses, each linked to the Alert history page at its time.
   When the rule differs, a line above its stones says so.
 - **The rules list:** a mark on rules that differ.
 - **The dashboard:** the share alike over the last week, beside precision.
-- **The runs page:** which series are read, how far the check has got,
+- **The Run history page:** which series are read, how far the check has got,
   a series that held nothing, and alerts that fired with no rule given.
 - **`/metrics`:** `lapilli_rule_replay_check{rule, way="alike|replayed|real"}`
   over seven days, so an alert can say a replay has started to differ.
@@ -135,7 +135,7 @@ and only the series named; nothing an outsider sends reaches it.
 - `--check-differs N/RATIO`, the threshold above, `5/0.9` by default.
 
 A store that holds nothing in a series is checked again an hour later, then
-once a day while it still holds nothing, and the runs page says so.
+once a day while it still holds nothing, and the Run history page says so.
 
 ## Alternatives
 
@@ -153,9 +153,9 @@ once a day while it still holds nothing, and the runs page says so.
   twice a week would never be said to differ; one that fires a hundred
   times would at eleven misses.
 - Should a rule that differs have its stones set apart in the digest and
-  the outcomes page, not only marked?
+  the Outcomes page, not only marked?
 - Thanos, Mimir and the managed Prometheus services may or may not keep
-  `ALERTS`. Checking is how to find out; the runs page saying so is the
+  `ALERTS`. Checking is how to find out; the Run history page saying so is the
   way to tell the user.
 
 ## As built

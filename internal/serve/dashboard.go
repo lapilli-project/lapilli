@@ -504,7 +504,9 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 		x := tile{Label: tr(l, label), Value: "–", Of: of, key: label}
 		if a, ok := val(last); ok {
 			x.Value = show(a)
-			if b, ok := val(before); ok && a != b {
+			// A change is one between the numbers shown: two that show
+			// the same are "as the week before", neither better nor worse.
+			if b, ok := val(before); ok && show(a) != show(b) {
 				x.Delta = tr(l, "%s on the week before", delta(a, b))
 				x.Better = better != 0 && (a-b)*float64(better) > 0
 				x.Worse = better != 0 && (a-b)*float64(better) < 0
@@ -538,18 +540,13 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 		unjudged = caught
 	}
 	add("Precision", func(w *weekView) (float64, bool) { return w.precision() }, pct,
-		func(a, b float64) string { return fmt.Sprintf("%+.0f pt", 100*(a-b)) }, +1, caught)
+		func(a, b float64) string { return ptChange(a, b) }, +1, caught)
 	excused := ""
 	if last.Excused > 0 {
 		excused = tr(l, "%d more excused by quiet windows", last.Excused)
 	}
 	add("Firings", func(w *weekView) (float64, bool) { return float64(w.Firings), true }, count,
-		func(a, b float64) string {
-			if b == 0 {
-				return fmt.Sprintf("%+d", int(a-b))
-			}
-			return fmt.Sprintf("%+.0f%%", 100*(a-b)/b)
-		}, 0, excused)
+		func(a, b float64) string { return pctChange(a, b) }, 0, excused)
 	add("Incidents missed", func(w *weekView) (float64, bool) { return float64(w.Missed), true }, count,
 		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, tr(l, "of %d", last.Incidents))
 	add("Time to catch", func(w *weekView) (float64, bool) {
@@ -557,7 +554,15 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 		return d.Seconds(), ok
 	}, func(f float64) string { return verdict.Delay(time.Duration(f) * time.Second) },
 		func(a, b float64) string {
-			return verdict.Delay(time.Duration(a-b) * time.Second)
+			// Of the times as shown, in the unit this week's is shown in:
+			// whole minutes from an hour on (verdict.Delay), else whole
+			// seconds; never "+41s" beside "1h5m".
+			unit := time.Second
+			if time.Duration(a)*time.Second >= time.Hour {
+				unit = time.Minute
+			}
+			shown := func(f float64) time.Duration { return (time.Duration(f) * time.Second).Truncate(unit) }
+			return verdict.Delay(shown(a) - shown(b))
 		}, -1, tr(l, "median, by a rule that isn't noisy"))
 	add("Noisy rules", func(w *weekView) (float64, bool) { return float64(w.Noisy), !w.NoRecord }, count,
 		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, unjudged)
@@ -593,6 +598,26 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 			func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, 0, tr(l, "firings; precision %s without them", last.Without()))
 	}
 	return out
+}
+
+// ptChange is how far a share went, in points, from b to a: of the whole
+// percents shown ("%.0f%%" rounds half to even), so the change is that
+// between the two shares as they read, never "+0 pt" between two that
+// differ.
+func ptChange(a, b float64) string {
+	return fmt.Sprintf("%+.0f pt", math.RoundToEven(100*a)-math.RoundToEven(100*b))
+}
+
+// pctChange is how far a number went from b to a, as a share of b; the
+// change itself where b is none, or the share rounds to nothing, so that
+// two numbers that differ never read "+0%".
+func pctChange(a, b float64) string {
+	if b != 0 {
+		if p := math.RoundToEven(100 * (a - b) / b); p != 0 {
+			return fmt.Sprintf("%+.0f%%", p)
+		}
+	}
+	return fmt.Sprintf("%+.0f", math.RoundToEven(a)-math.RoundToEven(b))
 }
 
 // sparkline draws the values that are there as a line, and where it ends.

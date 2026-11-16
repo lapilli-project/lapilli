@@ -230,7 +230,7 @@ people:
   `RRULE` with `FREQ=DAILY` or `WEEKLY`, `INTERVAL`, `COUNT` or `UNTIL`, and
   `BYDAY` for weekly; `EXDATE`; and `RECURRENCE-ID` replacing one
   occurrence. Others (monthly, yearly, `BYSETPOS`) are passed over, said
-  on the runs page with the event's summary. Repeats are expanded only
+  on the Run history page with the event's summary. Repeats are expanded only
   over the 400 days before now and the 60 after.
 - **A zone that isn't one**, such as Outlook's `Korea Standard Time`, or a
   `VTIMEZONE` of the feed's own: the event is passed over and said.
@@ -371,7 +371,7 @@ have them, starts within two evaluations).
   is on. Google Cloud's and Azure's alerts carry their series' labels, and
   are compared series by series. OCI has no PromQL alarms.
 - **Shown as today**: on the rule's page, the rules list, `/metrics`, MCP
-  and `replay.differs`; the runs page says which sources stand in.
+  and `replay.differs`; the Run history page says which sources stand in.
 - **The replay checked is the one judged** (after 0.26's fidelity): `serve`
   checks the replayed firings the ledger keeps, and `verdict` replays the
   rules as it judges them, with `--late` and the scrape intervals alike. An

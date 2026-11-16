@@ -305,7 +305,7 @@ the other replicas' writes through the ledger:
   (`replica_signals`), which no write's turn holds: one asked during the
   leader's own write is read at its next refresh.
 
-**What the leader is doing** (the status line, the runs page's counts, the
+**What the leader is doing** (the status line, the Run history page's counts, the
 check of the replay's empty series, the on-call feeds' last reads) is the
 leader's process's: it says it every `beatEvery` (2 s) in its row of
 `replica_members`, and a follower shows that.

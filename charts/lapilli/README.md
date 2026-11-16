@@ -296,7 +296,7 @@ with nothing after it: leave a key out for every team) changes nothing,
 and is said at once; a thing in it that can't be kept (a report to a
 destination nothing names, a team that isn't there) is kept as it was, and
 the rest is kept. A team that can't be kept keeps what names it in the
-file as it was too. The Settings and Runs
+file as it was too. The Settings and Run history
 pages say what can't, and to an admin why, with the line. An admin's
 `/config.yaml` gives everything the ledger holds in this form, declared
 and made in the UI alike, to paste under `serve.config`.

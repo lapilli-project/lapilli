@@ -50,7 +50,7 @@
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
-{{define "runs"}}{{$title := t "Runs"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
+{{define "runs"}}{{$title := t "Run history"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
 <h1>{{$title}}</h1>
 <p class="lede">{{t "Firings are in up to %s." (at $loc .Cursor)}}{{with .Took}} {{t "The last run took %s." (dur .)}}{{end}}</p>
 {{with .Config}}{{if .Problems}}{{template "configproblems" (on $ .)}}{{end}}{{end}}

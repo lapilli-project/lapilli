@@ -167,7 +167,7 @@ answers 404 (`group does not exist`), a missing namespace `{}`.
 
 A `202` means the group is stored. The ruler loads it at its next poll
 (`-ruler.poll-interval`, a minute by default); Lapilli sees it then as a new
-version, and the outcomes page measures it from there. Mimir checks a
+version, and the Outcomes page measures it from there. Mimir checks a
 group when it is posted and answers `400` with why for one it won't take
 (an expression or a template that doesn't parse, more rules than the
 tenant may have); the change fails with that reason.

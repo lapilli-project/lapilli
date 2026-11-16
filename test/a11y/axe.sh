@@ -2,7 +2,8 @@
 # Checks the web UI of lapilli serve against WCAG 2.2 AA with axe-core, in a
 # headless Chromium in Docker: every page TestA11yServe serves (those the
 # i18n test renders, with data), in each language, in light and in dark,
-# and that none scrolls sideways at 320 CSS px. Needs Go and Docker.
+# that none scrolls sideways at 320 CSS px, and that a checkbox is on the
+# line of its words. Needs Go and Docker.
 #
 # PORT is the port to serve on (8399); OUT, a file to write every violation
 # to as JSON. Exits 1 when there is a violation.

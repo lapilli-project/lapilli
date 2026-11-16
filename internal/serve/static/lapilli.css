@@ -132,6 +132,8 @@ a.button { display: inline-block; font-size: .95rem; font-weight: 500; color: va
 a.button:hover { filter: brightness(1.1); }
 .action-off { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; }
 button:disabled, button:disabled:hover { cursor: not-allowed; filter: none; color: var(--dim); background: var(--panel); border: 1px dashed var(--line-ui); }
+/* A field of a form no one may send now, as a disabled button is drawn. */
+input:disabled, select:disabled, textarea:disabled { cursor: not-allowed; color: var(--dim); background: var(--panel); border: 1px dashed var(--line-ui); }
 .why { font-size: .9rem; color: var(--dim); }
 /* Nothing to show: nothing judged yet, nothing matching, nothing to do. */
 .empty { background: var(--card); border: 1px dashed var(--line-ui); border-radius: 14px; padding: .9rem 1.1rem; margin: 1rem 0; }
@@ -187,7 +189,11 @@ form.row { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: end; ma
    them, within the page's width: a team's long name doesn't push the page
    sideways at 320 CSS px. */
 label { display: grid; grid-template-columns: minmax(0, 1fr); gap: .25rem; font-size: .95rem; min-width: 0; max-width: 100%; }
-form.row label:has(input[type=checkbox]) { display: flex; gap: .3rem; align-items: center; }
+/* A checkbox's label keeps the box on its words' first line, before them,
+   in any form: as a field's label it would stand on a line of its own,
+   centred; on the baseline, words that wrap leave it on their first line. */
+label:has(> input[type=checkbox]) { display: flex; gap: .3rem; align-items: baseline; justify-self: start; }
+label:has(> input[type=checkbox]) > input { flex: none; }
 input, select, textarea {
   font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line-ui); border-radius: 10px;
   padding: .35rem .55rem; max-width: 100%;

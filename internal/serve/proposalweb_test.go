@@ -33,7 +33,7 @@ func withProposal(t *testing.T, more func(*Config)) (*Server, http.Handler, int6
 
 // TestProposalPage: a proposal's page has its id and what it changes in
 // words, its state as a sign and a word, who made it, its way and when;
-// the breadcrumb Fix › Proposals › #id; the change as a diff in the
+// the breadcrumb Improve › Proposals › #id; the change as a diff in the
 // options asked, the file a pull request changes beside it; and the
 // backtest as a table, now beside as proposed.
 func TestProposalPage(t *testing.T) {
@@ -43,7 +43,7 @@ func TestProposalPage(t *testing.T) {
 	for _, want := range []string{
 		`<h1>#` + itoa(id) + ` <bdi>Errors</bdi>&#39;s for, <bdi>2m</bdi> → <bdi>15m</bdi></h1>`,
 		`<title>#` + itoa(id) + ` Errors&#39;s for, 2m → 15m · Lapilli</title>`,
-		`<li>Fix</li><li><a href="/proposals">Proposals</a></li><li><span aria-current="page"><bdi>#` + itoa(id) + `</bdi></span></li>`,
+		`<li>Improve</li><li><a href="/proposals">Proposals</a></li><li><span aria-current="page"><bdi>#` + itoa(id) + `</bdi></span></li>`,
 		`<span class="badge st-wait status-warn"><span aria-hidden="true">◷</span> awaiting approval</span>`,
 		`made by bo@example.com`, `a pull request`,
 		// The diff, unified, its lines alone.
