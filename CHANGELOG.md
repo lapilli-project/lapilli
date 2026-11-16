@@ -170,8 +170,9 @@
   latest of them, as only there did every selector have data, and not at
   all while one has none. On upgrade, a ledger's `impact_since` moves
   forward to it at the first round that runs, never back, and no record
-  is kept by the signal until it is looked for; the weeks before have no
-  record unless an incident keeps them. This looks for where data
+  is kept by the signal until it is looked for; a run that replays from
+  before where it was looked for has it looked for again from there; the
+  weeks before have no record unless an incident keeps them. This looks for where data
   begins, per selector (with its offset or @), not for gaps after. An
   expression that reads no selector (`vector(1)`) has data all along.
 

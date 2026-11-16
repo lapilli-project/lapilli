@@ -495,7 +495,10 @@ read) and `impact_floor`.
   selector have data, and not at all while one has none. It moves
   `impact_since` forward, never back, on a first start, after an upgrade
   (from the `impact_since` the ledger has), and once a criterion is read
-  again; a selector with data where the look began holds nothing back;
+  again; a run that moves `impact_since` back before where the data was
+  looked for from (one replaying from further back than a read again
+  began) forgets it, to be looked for again from there, no record kept
+  until it is; a selector with data where the look began holds nothing back;
   one with none yet is looked for again a round at a time, each selector
   from where its own last look got to, one that fails passing to the
   next, those it could look at kept; once each had data, nothing is

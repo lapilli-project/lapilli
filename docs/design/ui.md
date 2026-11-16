@@ -142,7 +142,7 @@ rest are written in the template that draws them.
 | Kind | States |
 |---|---|
 | ok | a rule's `○ OK`, of a rule some of whose firings were judged; a proposal `✓ approved`, `● applied`; a task done; a rule to keep (`✓ keep`); a rule change "as predicted"; Outcomes' Runs tile, "all ran", the runs up to date; notifications, "Last sent from the outbox"; an incident caught (its "Caught" cell); the overview's "Nothing to look at now", the one empty state that says all is well (`allClear`); a change "better"; the incidents chart's caught; an incident source working (`✓ working`) |
-| warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Outcomes' tile, the Run history page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Outcomes' tile and note, the overview's line); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted"; an incident source gone quiet (`⚠ quiet`), an impact signal a selector of which has no data (`⚠ no data`), proposals a try of the incident criteria would hold |
+| warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Outcomes' tile, the Run history page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Outcomes' tile and note, the overview's line); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted"; an incident source gone quiet (`⚠ quiet`), an impact signal a selector of which has no data (`⚠ no data`), or read and waiting to be read again (`⚠ no record`, and the criteria's notice), proposals a try of the incident criteria would hold |
 | bad | a run's error, and the server's error banner; `--config` that can't be used at all, or that the ledger couldn't be kept to; notices given up on; the digest failed; an on-call schedule's read failed; Outcomes' Runs tile, "n failed"; a task overdue; a proposal closed as failed, and its reason; a backtest that misses incidents; would have caught while it was off; an incident missed (`✗ nothing fired`, "Nothing fired."), the missed count of the table of the weeks; a search not understood; a change "worse"; an incident source failing (`✕ failing`, and why), the incident criteria that failed to be read again, a try that couldn't read them |
 | info | a proposal `↻ being applied`; `✎ Proposed`; a quiet window `● active now`; the server's work (`↻`); catching up on the overview; behind on Outcomes, and its Runs tile ("all ran") while it is; a rule change "measuring", "rule written"; `⇣ Recorded only`; a task open or doing, and the overview's link to one ("task #n"); a rule to tune (`± tune`); the reason of a proposal approved or applied (it waited while its rule fired); an incident source set up and not read yet (`↻ waiting`), the incident criteria waiting to be read again |
 | unknown | `? No record`, the weeks' "no record" tag, the notes of weeks with no record; "–"; a backtest with no record (`no_record`); a rule none of whose firings was judged (`? No record`; `ruleRow.PerfClass`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review, and the reason of one refused; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; a rule change superseded, without a week before it, taken away or replayed again; Outcomes' Runs tile before any run; an incident source not set up (`? not set up`), none written in four weeks; the impact signal with no Prometheus to read it from |
@@ -1049,9 +1049,13 @@ Prometheus's parser has the last word, and what can't be read within 90
 seconds and `--max-samples` saves nothing, said why. Saved, the replica
 that leads reads it again over the last four weeks (`impactAgain`, serve.md
 "The impact criterion"), and judges them again; until then the record is
-the ledger's, by the one before, and the page says it waits, or, failed,
-why and when it is tried again: said only when a read again will happen
-(`againPlan`), not of a new ledger whose runs read it from their first.
+the ledger's, by the one before, and none once a run reads the new one
+(a floor, which the section says, warn), and the page says it waits, or,
+failed, why and when it is tried again, and the ways past it (a higher
+`--timeout` or `--max-samples`, a narrower expression, or the signal off
+for a run and on again, which keeps a record from that run on): said
+only when a read again will happen (`againPlan`), not of a new ledger
+whose runs read it from their first.
 A save that changes the criterion counts the read again among the
 saver's reads.
 The section says from when the record is kept, and where the data of each
@@ -1133,7 +1137,8 @@ it gave in four weeks, and what it is:
   the record is kept by, when it is the one in effect; `↻ waiting` until
   it is read with the criterion in effect, `⚠ quiet` when not read for two
   runs and more, `⚠ no data` when a selector it reads has none (no record
-  is kept by it), or failing with Prometheus's error; off,
+  is kept by it), `⚠ no record` when the runs read it and it waits to be
+  read again (a floor), or failing with Prometheus's error; off,
   `? not set up`.
 
 The record gone quiet (no incident written down in two weeks, Outcomes'
