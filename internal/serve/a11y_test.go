@@ -133,6 +133,7 @@ func TestA11yServe(t *testing.T) {
 	longNamed(t, s)
 	more, _ := statusStates(t, s) // each status kind drawn
 	paths = append(paths, more...)
+	paths = append(paths, manyLabelled(t, s)) // an incident's labels summed up, behind a details
 	s.cfg.AllowedHosts = append(s.cfg.AllowedHosts, "host.docker.internal")
 	mux := http.NewServeMux()
 	paths = append(paths, a11yPreviews(mux, s)...)

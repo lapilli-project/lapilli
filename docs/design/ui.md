@@ -1073,7 +1073,13 @@ Monday four weeks before the cursor's week, or where the runs began), it
 shows, below the form as typed:
 
 - the windows the expression finds, 50 at most, the rest counted, with
-  start, end, length and labels, and whether each would count: not when an
+  start, end, length and labels, and whether each would count. A window
+  merges every series it overlaps, with every value of the labels they all
+  have: its labels are summed up by name (`labelsum`), as on an incident's
+  page, a name with one value as `name=value`, one with more as how many
+  and the first three, and, when any is cut, every `name=value` behind a
+  details, one a line, 200 at most and how many more. Whether it would
+  count: not when an
   incident written down covers it ("no: written down as INC-1"), or a
   decision about a window found before holds for it as reading it again
   would keep it ("no: dismissed before");
