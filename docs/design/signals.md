@@ -1,19 +1,23 @@
 # Impact signals: several, each named, with its own `for`, `match` and start
 
-Status: proposed. Under [GOVERNANCE.md](../../GOVERNANCE.md) this changes
-how a firing is judged (an incident, and a rule beside a signal, get labels
-of their own to be matched on, and a rule can be judged against some
-signals only) and adds a new kind of data to the ledger (schema 025), so it
-is designed first, as its own pull request. It builds on #98 (bundle 31,
-branch `b31-incident-criteria`), not merged as this is written, which puts
-the impact signal on the Settings page: the "Incident criteria" section,
-its try on the last four weeks, the one rule the record by the signal is
-kept by (read, with data, by the criterion in effect), where the data of
-each selector it reads begins, and the "Incident sources" panel (its
-changes to [serve.md](serve.md) and [ui.md](ui.md),
-`internal/ledger/impact.go`, `internal/serve/criteria.go` and
-`rules.Selectors`). Where this note says "the criterion", "read again",
-"the try" or "where the data begins", it means that work's.
+Status: accepted, not built. Under [GOVERNANCE.md](../../GOVERNANCE.md)
+this changes how a firing is judged (an incident, and a rule beside a
+signal, get labels of their own to be matched on, and a rule can be judged
+against some signals only) and adds a new kind of data to the ledger (the
+next schema at build time), so it was designed first, as a pull request
+(#88); it was merged on 2026-11-16, before its week was out, by the
+maintainer's decision, with the review's edits. The decisions taken are in
+"Open questions"; the rest stay open until the step that needs each.
+
+It builds on v0.49.0 (#98), which put the impact signal on the Settings
+page: the "Incident criteria" section, its try on the last four weeks, the
+one rule the record by the signal is kept by (read, with data, by the
+criterion in effect), where the data of each selector it reads begins
+(`rules.Selectors`), and the "Incident sources" panel, all kept in `meta`
+with no schema change ([serve.md](serve.md), "The impact criterion";
+[ui.md](ui.md); `internal/ledger/impact.go`,
+`internal/serve/criteria.go`). Where this note says "the criterion", "read
+again", "the try" or "where the data begins", it means that work's.
 
 ## Why
 
@@ -52,12 +56,12 @@ which it was. That finds windows of all of them, and stops there:
   window (`instance`, `job`) and a 5xx window (`service`) on at once become
   one incident labelled `signal: [errors, probe]` and nothing else: with
   `--match service`, a firing of any service catches it.
-- **One start.** #98 keeps the record by the signal from the first whole
-  week after the latest first sample of any selector the expression reads.
-  Joined, the youngest signal decides for all: a probe whose data begins
-  on a Thursday takes away the record of every week before, though the
-  5xx share beside it has a month of data and said, all that month, that
-  nothing hurt the services it measures.
+- **One start.** v0.49.0 keeps the record by the signal from the first
+  whole week after the latest first sample of any selector the expression
+  reads. Joined, the youngest signal decides for all: a probe whose data
+  begins on a Thursday takes away the record of every week before, though
+  the 5xx share beside it has a month of data and said, all that month,
+  that nothing hurt the services it measures.
 - **One `--match` for every incident.** `verdict.Catches` holds every
   incident to the same `--match` (`in.Labels.Agree(f.Labels, o.Match)`). A
   probe's `job` and `instance` name the prober and the URL it fetched,
@@ -88,8 +92,14 @@ its own:
 |---|---|---|
 | `expr` | PromQL that returns something while users are hurt | (required) |
 | `for` | how long a series returns something before it is a window | `--impact-for` |
-| `match` | the labels a firing must agree with its windows on | `--match` |
+| `match` | the labels a firing must agree with its windows on | the match in effect |
 | `record` | whether reading it all of a week keeps that week's record | yes |
+
+**The match in effect** is the Settings page's, when an admin set one, else
+`--match`, as for every incident now. A signal's `match` not given (nil)
+follows it, and changes when it changes; one given empty
+(`--impact-match probe=`, `match: []`) matches on no label, so any firing
+during one of its windows catches it. The two are kept apart.
 
 Given where `serve` starts:
 
@@ -104,9 +114,7 @@ lapilli serve \
   --impact-for payments=1m --impact-record payments=no
 ```
 
-(The probe's targets here are relabelled with the `service` they probe;
-without that, `--impact-match probe=` matches on nothing, and any firing
-during a probe window catches it.)
+(The probe's targets here are relabelled with the `service` they probe.)
 
 **Reading `NAME=PROMQL`.** A signal is named when `--impact`'s value starts
 with a name (`[a-z][a-z0-9_-]`, 32 bytes at most) and a `=` that isn't
@@ -115,11 +123,12 @@ PromQL only inside a selector's braces, after a label's name, never after
 a metric's; `up==0` and `up>=1` read as the expressions they are, and
 `errors=rate(x[5m]) > 1` as the signal `errors`. `--impact PROMQL` with no
 name stays what it is today: one signal, its windows keyed, titled and
-keeping the record as now. Named and unnamed aren't mixed; serve refuses
-them together and says to name each. `--impact-for` takes `DUR` (every
-signal's default, as now) or `NAME=DUR`; `--impact-match` and
-`--impact-record` take `NAME=...` and are refused for a name no `--impact`
-gives. `lapilli verdict` takes the same flags.
+keeping the record as now. Two `--impact` without a name are refused from
+this change on; today the last one given wins (`verdict.go`, where
+`--impact` sets `f.impact`), which the changelog says under Changed.
+`--impact-for` takes `DUR` (every signal's default, as now) or `NAME=DUR`;
+`--impact-match` and `--impact-record` take `NAME=...` and are refused for
+a name no `--impact` gives. `lapilli verdict` takes the same flags.
 
 **A file**, `--impact-file FILE`, says the same as the flags, and what they
 can't: which rules are judged against which signals (below). The chart
@@ -135,7 +144,7 @@ impact:
     - {name: payments, expr: "...", for: 1m, record: false}
   rules:                            # which signals a rule is judged against
     - rules: Slow$|Latency          # rules whose names match, or
-      labels: {kind: latency}       # whose alerts carry these values
+      labels: {kind: latency}       # whose labels have these values
       signals: [latency]
     - rules: ^BackendMissing$       # a load balancer's "no backend" rule
       signals: [errors, probe]
@@ -146,23 +155,32 @@ Read strictly, as `--config` is: an unknown key, a signal named twice, a
 rule entry naming a signal the file doesn't declare, or a file over 1 MiB
 refuses the whole file, and the ledger keeps what the last good one said.
 
-**In the UI**, #98's Incident criteria section lists the signals, a row
-each, with what serve was started with, who changed it and when, and
+**`--impact-file` is the command line, not `--config`.** It says what the
+flags say, in a file, so the UI's settings are kept over it as over the
+flags', with "back to the start", as `--lead` and `--match` are. What
+`--config` declares is what the UI makes (teams, quiet windows, reports,
+grants), and is read-only in the UI. Signals and rule entries are judging
+settings, which an admin tries and saves on the Settings page; a team that
+wants them only in Git leaves the Settings page's untouched, and
+`/settings.yaml` says when one differs.
+
+**In the UI**, v0.49.0's Incident criteria section lists the signals, a
+row each, with what serve was started with, who changed it and when, and
 "back to the start", as the section does for its one expression; and the
 rule entries below them, as one list. An admin adds a signal, changes one
-or removes one; the UI's is kept over the command line's of the same name,
-as the judging settings are. The rule entries, saved in the UI, take the
-place of the file's as a whole, and "back to the start" gives the file's
-back. `/settings.yaml` gives both as the chart's `impact`. A signal's name
-can be changed in place, which renames its windows with it (below).
+or removes one; the UI's is kept over the command line's of the same name.
+The rule entries, saved in the UI, take the place of the file's as a
+whole, and "back to the start" gives the file's back. `/settings.yaml`
+gives both as the chart's `impact`. A signal's name can be changed in
+place, which renames its windows with it (below).
 
-**Bounds.** Eight signals at most. The expression as #98 checks it: 4 KB,
-read as Lapilli reads PromQL (`rules.Scope`), then once by Prometheus,
-whose parser has the last word; `for` from the step to a day; `match` 16
-label names at most, each a Prometheus label name. Rule entries: 64 at
-most, each a pattern as a team's or a quiet window's is (a Go regular
-expression of 200 bytes, refused when it compiles to a long program), 16
-labels, 8 signals.
+**Bounds.** Eight signals at most. The expression as v0.49.0 checks it:
+4 KB, read as Lapilli reads PromQL (`rules.Scope`), then once by
+Prometheus, whose parser has the last word; `for` from the step to a day;
+`match` 16 label names at most, each a Prometheus label name. Rule
+entries: 64 at most, each a pattern as a team's or a quiet window's is (a
+Go regular expression of 200 bytes, refused when it compiles to a long
+program), 16 labels, 8 signals.
 
 ## Which rules a signal judges
 
@@ -182,19 +200,22 @@ do, of two kinds the default gets wrong:
   no others. A slow-request rule firing while the 5xx share is up neither
   catches the 5xx window nor is black for missing it.
 
-What an entry changes, for the rules it names (the first entry, in order,
-whose pattern matches the rule's name or whose labels its alerts carry
-with one of their values, as a team owns a rule by its pattern or labels;
-an entry is found for each alert, so the rule's page says which entries,
-or none):
+**Which entry is a rule's** is found once per rule, as a team is
+(`owners`): the first entry, in order, whose pattern matches the rule's
+name; else the first whose labels the rule has, as the latest version of
+the rules gives them. The name decides before any label, as it does for
+teams. The rule's page says which entry, or none.
+
+What an entry changes, for the rules it names:
 
 - **Which windows it can catch:** those of the entry's signals alone. A
   window of another signal is, to this rule's firings, as if it weren't
   there: not caught by them, and not missed by them either.
 - **The labels it is matched on**, against those windows: the entry's
-  `match` when it gives one; else the signal's; else `--match`. Against
-  written incidents, nothing changes: they are matched on `--match`, or on
-  the labels a confirmation carried (below), for every rule alike.
+  `match` when it gives one; else the signal's; else the match in effect.
+  Against written incidents nothing changes: they are matched on the match
+  in effect, or on the labels a confirmation carried (below), for every
+  rule alike.
 - **What keeps its record:** the entry's signals that keep the record, and
   no other signal (below). An entry whose signals are none of those in
   effect (a `latency` signal not yet added, removed, or `record: false`)
@@ -203,15 +224,15 @@ or none):
   down keeps their week, as for any rule.
 
 **The default, for a rule no entry names:** judged against every signal's
-windows, each with the signal's own `match` (or `--match`); its record
-waits for the signals tied to it by those labels (below). A ledger with
-no rule entries, and one with no named signals, judge as they do now.
+windows, each with the signal's own `match` (or the match in effect); its
+record waits for the signals tied to it by those labels (below). A ledger
+with no rule entries, and one with no named signals, judge as they do now.
 
 **Written incidents are anyone's.** An incident written down, copied in or
 read from the incidents file has no signal, and every rule is judged
-against it by `--match`, whatever the entries say: a person wrote it, of
-whatever kind it was. An entry is about signals, which measure one kind of
-harm each.
+against it by the match in effect, whatever the entries say: a person
+wrote it, of whatever kind it was. An entry is about signals, which
+measure one kind of harm each.
 
 ## Windows: each signal's own
 
@@ -239,34 +260,37 @@ So one outage two signals saw is two windows, shown together:
   windows at the time, each with what caught it.
 - **Confirming one** writes down an incident, as now (an `L-` id, origin
   `ui`), with the window's labels, and carrying its signal and the
-  signal's `match`: it is judged as the window was, rule entries included,
-  so that confirming changes no rule's verdict. That incident covers each
-  other signal's window it overlaps when they agree on that window's own
-  `match` labels, as a written incident covers a window now
-  (`incident.Merge`, in `cover`): confirmed once, the outage is one
-  incident, and the other windows no longer count. "This was real" on a
-  black stone writes an incident as now, from the firing's labels on
-  `--match`, with no signal: a person's, as any written incident.
+  signal's `match`: it is caught as the window was, rule entries included,
+  so that confirming changes no rule's catch. It keeps them while its
+  labels are those it was confirmed with: a title, a time or a note
+  changed keeps them; its labels changed make it a person's like any
+  other, matched on the match in effect, which the form says before it is
+  saved. That incident covers each other signal's window it overlaps when
+  they agree on that window's own `match` labels, as a written incident
+  covers a window now (`incident.Merge`, in `cover`): confirmed once, the
+  outage is one incident, and the other windows no longer count. "This was
+  real" on a black stone writes an incident as now, from the firing's
+  labels on the match in effect, with no signal: a person's.
 - **Dismissing** is of one window. The page offers to dismiss the windows
   at that time together, one press, each noted in the activity log on its
   own.
 
-**Keys.** On main, an impact window's key is `impact-` and its start's
-minute (`impact-20261110T1404Z`), and a second window with the same key is
-dropped (`ON CONFLICT ... DO NOTHING` in `ledger.impact`); #98 gives a
-window whose key is taken another, `-2`, `-3` after it (`freeKey`), and
-keeps a key with a window found again only when it is the same one
-(`sameImpact`). A named signal's windows are keyed by its name too
-(`impact-probe-20261110T1404Z`), so that two signals' windows of one
-minute are never taken for one another, nor one take the other's key. The
-unnamed signal keeps today's keys.
+**Keys.** A window's key is `impact-` and its start's minute
+(`impact-20261110T1404Z`); one whose key is taken gets `-2`, `-3` after it
+(`freeKey` in `internal/ledger/record.go`), and a window found again keeps
+its key only when it is the same one (`sameImpact`). A named signal's
+windows are keyed by its name too (`impact-probe-20261110T1404Z`), so that
+two signals' windows of one minute are never taken for one another, nor
+one take the other's key. The unnamed signal keeps today's keys.
 
 **Within a signal, as now.** What was decided about a window holds for a
-window found later that covers it (`share` on main, and #98's "half or
-more"), and a window on at a run's start goes on from the window found
-before (the `UPDATE` in `ledger.impact`, which takes the latest impact
-window still on). Both look only at windows of the same signal: as
-written, the second would stretch a 5xx window with a probe window's end.
+window found later that covers half of it or more (`decidedFor`), and a
+window on at a run's start goes on from the window found before (the
+`UPDATE` in `ledger.impact`, which takes the latest impact window still
+on). Both look only at windows of the same signal: as written, the second
+would stretch a 5xx window with a probe window's end. So do `sameImpact`
+and `remapImpact`, which move tasks and comments only between windows of
+one signal.
 
 **A signal renamed** with its expression and `for` unchanged is the same
 criterion: its windows are renamed in one write (their signal, and their
@@ -275,39 +299,48 @@ name changed with either is a signal removed and another added.
 
 ## Judged by its own match
 
-An incident gains `Match`, the labels it is matched on, nil for `--match`,
-and `Signal`, the signal it came from:
+An incident gains `Match`, the labels it is matched on, nil for the match
+in effect, and `Signal`, the signal it came from:
 
 - an impact window carries its signal's;
-- the incident a confirmation writes carries the window's, so it is judged
-  as the window was;
+- the incident a confirmation writes carries the window's (above);
 - every other incident (written down, copied in, from the incidents file)
-  carries none, and is judged by `--match` as now.
+  carries none, and is matched on the match in effect, as now.
 
-`verdict.Catches(f, in, o)` takes, in order: a rule entry naming `f.Rule`,
+`verdict.Catches(f, in, o)` takes, in order: a rule entry for `f.Rule`,
 when `in` has a signal (the entry's signals must hold it, or the firing
 doesn't catch it; then the entry's `match`, if it gives one); else
-`in.Match`; else `o.Match`. So do the ledger's `catches`, the backtests,
-the try and the digest's near misses, which judge with the same function.
-Whether a written incident covers a window (`incident.Merge`, in `cover`)
-is between two incidents, no rule's, and takes the window's `Match`. A
-ledger with no named signal and no rule entry judges as before, and
-`verdict.Semantics` isn't bumped. Changing a signal's `match`, or the rule
-entries, gives the firings near the windows it changes their stones again,
-from `--lead` before each window's start to its end, a week at a time, as
-a change to `--match` does for every firing.
+`in.Match`; else `o.Match`. The ledger's `catches` builds each firing with
+its labels and its start alone (`firing.Firing{Labels: labels, Start:
+unix(start)}` in `internal/ledger/judge.go`), so it must fill `Rule` too,
+from the row it reads; so must every caller that judges with an entry.
+The backtests, the try and the digest's near misses judge with the same
+function. Whether a written incident covers a window (`incident.Merge`, in
+`cover`) is between two incidents, no rule's, and takes the window's
+`Match`. A ledger with no named signal and no rule entry judges as before,
+and `verdict.Semantics` isn't bumped. Changing a signal's `match`, or the
+rule entries, gives the firings near the windows it changes their stones
+again, from `--lead` before each window's start to its end, a week at a
+time, as a change to `--match` does for every firing.
+
+**Proposals.** A proposal's backtest keeps the criterion it was judged by
+(`evidence.Impact`), and one waiting for approval is stale when it isn't
+the one held now (`staleImpact`, checked in
+`internal/serve/proposalsnow.go`).
+That key becomes one digest over every signal's criterion, the rule
+entries and the match in effect, so a change to any of them holds the
+proposals it could change, as a new criterion does now.
 
 ## The record, signal by signal
 
-#98 keeps, in `meta`, what the record by the signal is kept by:
+v0.49.0 keeps, in `meta`, what the record by the signal is kept by:
 `impact_since`, `impact_criterion`, `impact_again`, `impact_data` (where
 the data of each selector begins, and the floor after the latest),
 `impact_read` and `impact_floor`, and from them one start
-(`ImpactKept.From`). Here each signal keeps its own six, in
-`impact_signals` (below), and so **its own start**: from when the runs
-read it with data, by #98's one rule, signal by signal. A probe whose data
-begins on a Thursday starts the probe's record the next week, and moves no
-other signal's.
+(`ImpactKept.From`). Here each signal keeps its own six (below), and so
+**its own start**: from when the runs read it with data, by v0.49.0's one
+rule, signal by signal. A probe whose data begins on a Thursday starts the
+probe's record the next week, and moves no other signal's.
 
 A firing's week is kept by impact when **every signal that could have seen
 the incident it would catch was alive** then: each signal tied to the
@@ -317,43 +350,52 @@ firing, among those that keep the record, had started by the week's start
 1. **A rule entry**: its signals, and no others. One with none in effect
    that keeps the record ties none, and the firing has no record by impact
    (above).
-2. **Else, by match.** The signals whose windows the firing could catch: for
-   each, it agrees, on the signal's `match`, with some series the signal
-   has returned (a label the firing hasn't agrees, as in `Agree`). A
-   firing of `service: search` is tied to `errors`, which has returned
-   `search`, and not to `probe`, which probes only `checkout` and `cart`;
-   a firing of `checkout` is tied to both, and waits for the probe's start.
-   A signal with no `match`, and one whose `match` the firing carries none
-   of, could have seen anything, and is tied.
-3. **Else, nothing ties it** (its labels agree with no signal's series): it
+2. **Else, by match, label by label.** A signal is tied when, for each
+   label of its `match` the firing carries, the firing's value is one the
+   signal's series have had for that label (`seen`, below). A label the
+   firing hasn't ties it, as in `Agree`; so does a signal whose `match` is
+   empty. A firing of `service: search` is tied to `errors`, which has
+   returned `search`, and not to `probe`, which probes only `checkout` and
+   `cart`; a firing of `checkout` is tied to both, and waits for the
+   probe's start.
+3. **Else, nothing ties it** (its values are none any signal has had): it
    falls back to every signal that keeps the record, and waits for the
    latest start of all, as one expression's record does now.
 
-Or an incident keeps the week, as now: one written down, or a window that
-counts, on in the week or the two before it (`verdict.RecordLookback`),
-for everyone, or for a team by the incidents it owns. A signal with
-`record: false` makes windows that keep the record as any incident does,
-and no more: the payments signal read all week says payments weren't
-hurt, not that nothing was. It is never waited for.
+**Or an incident keeps the week**, as now, on in the week or the two before
+it (`verdict.RecordLookback`):
 
-**What a signal has returned** is kept as it is read: for each of its
-`match` labels, the values its series have had (1,000 a label at most;
-past that, it is taken to have returned every value, and is tied to every
-firing that carries the label). A value seen later ties the firings
-before it too, which then wait for that signal's start: a firing is never
-judged by a signal that couldn't see it, and its record may wait longer
-than it needs. Where each value's data begins, apart from the signal's, is
-not looked for, as #98 looks per selector, not per series.
+- **a window keeps the record only of the firings tied to its own signal**:
+  a 5xx window keeps no latency rule's week, so a latency rule with no
+  latency signal stays "no record", not black, however many 5xx windows
+  there were;
+- **an incident written down, copied in, read from the incidents file or
+  written by a confirmation keeps everyone's**, as now, and a team's by the
+  incidents it owns, as now.
+
+A signal with `record: false` is never waited for: reading it all week says
+payments weren't hurt, not that nothing was. Its windows keep the record
+of the firings tied to it, as any window does, and no more.
+
+**What a signal has returned** (`seen`) is kept as it is read: for each of
+its `match` labels, the values its series have had, 1,000 a label and 256
+KB a signal at most; past either, it is taken to have returned every
+value of that label. A value seen later ties the firings before it too,
+which then wait for that signal's start: a firing is never judged by a
+signal that couldn't see it, and its record may wait longer than it needs.
+Where each value's data begins, apart from the signal's, is not looked
+for, as v0.49.0 looks per selector, not per series.
 
 **Changing signals**, per signal:
 
 - **added, or its expression or `for` changed:** read again alone over the
-  last four weeks (#98's `impactAgain` and `ledger.ReadAgain`, by the
-  signal's name), its windows in place of its own from then, decisions
-  kept as #98 keeps them, and where its data begins looked for again. The
-  other signals aren't read, and keep their starts.
-- **removed:** turned off, as #98 turns off its one: its windows stay, as
-  incidents, it no longer keeps the record, and no firing waits for it.
+  last four weeks (v0.49.0's `impactAgain` and `ledger.ReadAgain`, by the
+  signal's name), its windows in place of its own from then, decisions,
+  keys, tasks and comments kept as v0.49.0 keeps them, and where its data
+  begins looked for again. The other signals aren't read, and keep their
+  starts.
+- **removed:** turned off, as v0.49.0 turns off its one: its windows stay,
+  as incidents, it no longer keeps the record, and no firing waits for it.
 - **`match`, `record` or the rule entries changed:** nothing is read.
   `match` and the entries judge their windows' spans again (above); which
   firings are tied to which signals is worked out again, a week at a time
@@ -363,12 +405,11 @@ not looked for, as #98 looks per selector, not per series.
   expression would stop the ledger. A signal that fails is missed instead,
   from the run's start, as a rule whose queries failed is (`Found.Missed`):
   the run records, later runs read the signal from where it was missed,
-  for up to a week, and past a week it is as one #98 turns on again: its
-  record starts with the run that reads it, and a read again is due. While
-  it is missed, its start stands, so its
-  weeks are kept before its windows are in, and judged again when it
-  catches up, as a rule's late firings are. The Incident sources panel
-  says it is failing, and why.
+  for up to a week, and past a week it is as one v0.49.0 turns on again:
+  its record starts with the run that reads it, and a read again is due.
+  While it is missed, its start stands, so its weeks are kept before its
+  windows are in, and judged again when it catches up, as a rule's late
+  firings are. The Incident sources panel says it is failing, and why.
 
 ## Where it shows
 
@@ -391,20 +432,22 @@ not looked for, as #98 looks per selector, not per series.
   `summary`'s line of impact windows says each signal's, when there are
   several.
 - **`/api/v1/summary`**: `impacts.by_signal`, `unjudged` in each row, and
-  `settings.impact_signals` (below).
+  `settings.impact_signals` and `settings.impact_rules` (below).
 - **`/metrics`**: `lapilli_incident_state` and `lapilli_incident_lead_seconds`
-  gain `signal` on a named signal's windows (one incident has one signal,
-  so no series changes as it goes); `lapilli_impact_windows{signal,state}`,
-  the last seven days' windows by signal and state;
-  `lapilli_impact_signal_start_timestamp_seconds{signal}`, from when each
-  keeps the record. `lapilli_incidents{state,source}` stays as it is, all
-  signals summed.
+  gain `[signal]`, on a named signal's windows (one incident has one
+  signal, so no series changes as it goes); `lapilli_impact_windows`
+  (`signal`, `state`), the last seven days' windows by signal and state;
+  `lapilli_impact_signal_start_timestamp_seconds` (`signal`), from when
+  each keeps the record. `lapilli_incidents` (`state`, `source`) stays as
+  it is, all signals summed.
 - **MCP**: `incidents` gives each window's `signal`; `rule` gives its entry,
   its signals and what its record waits for; `summary` gives `by_signal`.
-- **`lapilli verdict`**: `--json` gives each incident's `signal`; `--metrics`
-  gives `lapilli_impact_windows`. It reads each signal over the period and
-  the two weeks before, as it reads `--impact` now, and ties firings to
+- **`lapilli verdict`**: `--json` gives each incident's `signal`, and each
+  firing's `no_record` as now, by its own ties; `--metrics` gives
+  `lapilli_impact_windows`. It reads each signal over the period and the
+  two weeks before, as it reads `--impact` now, and ties firings to
   signals as `serve` does, each signal's start where its data begins.
+- **i18n**: every new text in the four languages, as every page's.
 
 ## How they are counted
 
@@ -438,88 +481,138 @@ is kept from is missed. In each summary row:
   label, and the platform team's too once the platform team's rule caught
   it, on `backend`: caught, in both rows. Each firing of a team's rules is
   judged or not by its own ties, so a row's precision is of the firings
-  judged.
-- **`no_record` and `unjudged`.** A row's `no_record` is true when none of
-  its firings is judged, which, with no named signal, is what it says now
-  (no incident on in the week or the two before, no signal read over it).
-  `unjudged`, a field added, is how many of the row's firings were counted
-  and not judged: with signals of their own starts and entries, part of a
-  week can be judged and part not, as `verdict.SomeUnjudgedText` says of a
-  report now.
+  judged; the record written incidents keep is everyone's, also in a
+  team's row, as today.
+- **`no_record`** means no firing of the row was judged: what it means today,
+  where a week's firings are judged all or none, and so the same answer
+  for a ledger with no named signal and no rule entry. **`unjudged`**, a
+  field added, is how many of the row's firings were counted and not
+  judged: with signals of their own starts and entries, part of a week can
+  be judged and part not, as `verdict.SomeUnjudgedText` says of a report
+  now.
 - `settings.impact_signals` gives names, `for`, `match`, `record` and each
-  start, not the expressions: the summary is for any tool that reads the
-  API, and an expression can name what isn't everyone's to read.
-  `settings.impact_rules` gives the entries.
+  start, and `settings.impact_rules` the entries; not the expressions,
+  which are up to 4 KB each and no count of the summary's, and which the
+  Settings page and `/settings.yaml` give.
 
-`schema` stays 1: these are fields added, and `no_record` means what it
-did wherever it could be said before (open question 6).
+`schema` stays 1: these are fields added, and `no_record` keeps its
+meaning.
+
+## What stays the same, and what changes
+
+[numbers.md](../numbers.md) lists what keeps its name and its meaning. The
+pull request that builds a step changes it with the code, in the same
+pull request, as it says:
+
+- **Two invariants change** and are written again there, under Changed in
+  the changelog: "every firing of a week is judged, or none" becomes "by
+  the signals tied to it", and "windows that overlap are one" becomes
+  "windows of one signal that overlap are one".
+- **Added to its tables**, and to `TestReportFieldsStable` and
+  `TestMetricsStable`: the report's `incidents[].signal`† and
+  `settings.impact_signals`† (each signal's name, `for`, `match`, `record`
+  and start, beside `impact_from`, which stays the start of the unnamed
+  signal); the metrics `lapilli_impact_windows` (`signal`, `state`) and
+  `lapilli_impact_signal_start_timestamp_seconds` (`signal`), and
+  `[signal]` on `lapilli_incident_state` and `lapilli_incident_lead_seconds`.
+  Its recount blocks count `unjudged` by firing, as the report has it.
 
 ## In the ledger
 
-Schema 025:
+The next schema at build time adds:
 
 - `impact_signals`: `name` (unique; empty for the unnamed signal), `expr`,
-  `for`, `match` (a JSON list, NULL for `--match`), `record`, who set it in
-  the UI and when (none for the command line's or the file's); #98's six
-  (`since`, `criterion`, `again`, `data`, `read`, `floor`), per signal; and
-  `seen`, the values of its `match` labels its series have returned.
+  `for`, `match` (a JSON list; NULL for the match in effect, `[]` for
+  none), `record`, who set it in the UI and when (none for the command
+  line's or the file's); v0.49.0's six (`since`, `criterion`, `again`,
+  `data`, `read`, `floor`), per signal; and `seen`.
 - `impact_rules`: the rule entries in effect, in order: `rules`, `labels`,
   `signals`, `match`, and whether the UI set them.
-- `incidents.signal` (empty for none) and `incidents.match` (NULL for
-  `--match`).
+- `incidents.signal` (empty for none) and `incidents.match` (NULL for the
+  match in effect).
 - `series.signals`: the signals each alert is tied to (a bit each, eight at
   most, and one for "falls back to all"), worked out from its labels, its
-  rule's entry and what each signal has returned; and in `days` and
-  `weeks`, `signals` beside `rule_id`, so a rule's firings are counted
-  apart by the signals they wait for. Most rules have one such set, so
-  the tallies grow by the few rules whose alerts span services that
-  different signals see.
+  rule's entry and what each signal has returned.
+- `days` and `weeks` with `signals` in their key, so a rule's firings are
+  counted apart by the signals they wait for.
 
-Upgrading moves #98's six from `meta`, and the UI's `impact` and
+**Rewriting `days` and `weeks`.** They are `PRIMARY KEY (day, rule_id)
+WITHOUT ROWID` and `PRIMARY KEY (week, rule_id) WITHOUT ROWID`
+(`schema/001.sql`), and SQLite can't change a key in place. The migration
+makes each again keyed `(day, rule_id, signals)`, copies every row in with
+the one signal set every alert has before signals are named, drops the
+old and renames the new, in the schema's one transaction; Postgres drops
+and adds the key. It reads and writes each row once: the days and weeks
+`--keep` holds, by the rules that fired in each, which 400 rules over 84
+days make some 34,000 rows of `days`. Every read sums over `signals` along
+the same key, which still leads with the day or the week; most rules have
+one set, so the tallies grow by the few rules whose alerts span services
+that different signals see.
+
+**What follows judged-ness.** Hours (`byHours`, asleep and off hours) read
+the firings they already read with their alert's `signals`, and count as
+black only the judged ones. Marked windows ([marked.md](marked.md), #90)
+key their `marked_days` and `marked_weeks` by `signals` too, so precision
+inside a kind is of the firings judged.
+
+Upgrading moves v0.49.0's six from `meta`, and the UI's `impact` and
 `impact-for` settings, into the unnamed signal's row; gives existing
 windows no signal (they are the unnamed signal's, keyed as they are); and
-ties every alert to that one signal, so the tallies are as they were.
+ties every alert to that one signal, so the tallies say what they said.
 Going back takes the ledger as it was before, so a deployment keeps a copy
 of it (a snapshot of its disk, or of its database) before it upgrades, as
 with every schema change.
 
+**Schema numbers.** A schema change is the next numbered file when it is
+built: `migrate` numbers the ledger's schema by how many files there are
+(`internal/ledger/ledger.go`), and Postgres refuses a ledger whose last
+file's number isn't SQLite's (`migratePostgres`), so a number can't be
+held for a design. Of the designs accepted and not built, expectations
+(#81), impact signals (#88), marked windows (#90) and goals (#91),
+whichever is built first takes the next number, and the rest follow in
+the order they are built. One order matters: #88 adds `signals` to the
+key of `days` and `weeks`, and #90's `marked_days` and `marked_weeks` take
+the same key, in #90's own schema if it is built after #88, or in #88's if
+before.
+
 ## Cost and bounds
 
-- **Reading.** Each signal is one range query a run, over the run's period
-  and the hour before, as the impact query is now. They are read in turn,
-  the one missed longest first, within the time the impact query has
-  (`--timeout`); one left unread when it runs out is missed for that run.
-  A run asks Prometheus for no more time than it does now. Where each
-  signal's data begins is looked for as #98 looks for its one's, a
-  selector at a time, 32 selectors a signal at most.
-- **Reading again.** Only the signals added or changed, each over five
-  weeks at most, within `--timeout` and `--max-samples`; each counts as one
-  of the twelve reads an admin may ask for in an hour (#98's tries and
-  saves).
-- **Windows.** A signal's read keeps 1,000 windows at most; past that the
-  signal is missed for the run, and the sources panel says it finds too
-  many (an expression by pod, not by service). Each window's labels are
-  bounded as an incident's are (4 KB, as kept).
-- **Ties.** An alert's signals are worked out when its series is first kept,
-  and again when a signal's `match`, what it has returned, or the entries
-  change: those alerts' firings are counted again, a week at a time, by
-  the worker, as a change to `--match` judges every firing again. A value
-  first returned is rare after the first weeks, and ties only the alerts
-  that carry it.
-- **Judging.** `verdict.Catches` looks up the rule's entry once per rule
-  (the entries are compiled once per change) and reads a list of names per
-  incident rather than one for all; the incidents meeting a span are read
-  once a judge, as now.
-- **Pages** read the tallies as now, summing a rule's sets, and each set's
-  record from the signals' starts: no firing is read to say whether it was
-  judged. Held to `TestPagesScale`, and tying again to `TestScale`.
+As counts and bytes, which the tests hold, not times:
+
+- **Queries a run**: one range query a signal, eight at most, over the
+  run's period and the hour before, as the impact query is now, read in
+  turn, the one missed longest first, within the time the impact query
+  has (`--timeout`); one left unread is missed for that run. Where each
+  signal's data begins: one request a selector, 32 a signal at most, until
+  it is found, as v0.49.0 looks for its one's.
+- **Reading again**: only the signals added or changed, each one query over
+  five weeks at most, within `--max-samples`; each counts as one of the
+  twelve reads an admin may ask for in an hour.
+- **Windows**: 1,000 a signal's read keeps at most, and 2,000 a signal's in
+  a week; past either the signal is missed for the run, and the sources
+  panel says it finds too many (an expression by pod, not by service).
+  Each window's labels are bounded as an incident's are (4 KB, as kept).
+- **Judging**: per firing and incident, one entry looked up from a map by
+  rule, made once a change, and one list of names; the incidents meeting
+  a span are read once a judge, as now. Held by a counter of entries
+  looked up, one a rule a judge.
+- **Ties**: worked out per alert when its series is first kept, and again
+  for the alerts a change touches (a value first seen, a `match`, the
+  entries): each is a lookup of at most 8 signals × 16 labels in `seen`.
+  The firings of those alerts are counted again, a week at a time, by the
+  worker.
+- **Pages** read the tallies as now, summed over `signals`: the rows they
+  read grow by the extra signal sets, and no firing is read to say whether
+  it was judged. `TestPagesScale` holds the rows each page reads and its
+  heap peak, the least of three runs, as `TestAnswerManySeries` takes its
+  (#99); `TestScale` holds tying again by the rows it writes.
 - **`/metrics`**: `signal` takes eight values at most.
 
 ## Security
 
 - **Who.** Signals and rule entries are set where `serve` starts, or by an
-  admin on the Settings page, as #98 sets its one. An expression runs with
-  Lapilli's access to Prometheus, so it can learn, a count at a time,
+  admin on the Settings page, as v0.49.0 sets its one. An expression runs
+  with Lapilli's access to Prometheus, so it can learn, a count at a time,
   whatever that access reads, as MCP's `compare` can ([serve.md](serve.md),
   "MCP"); that is why it is an admin's. An entry decides which windows a
   rule's firings are judged against, which can make a rule look better
@@ -527,10 +620,10 @@ with every schema change.
   and each change noted in the activity log with its before and after.
 - **What comes in.** A name of 32 bytes from a small alphabet, so it is safe
   in a key, a URL and a label value, and still escaped in each; label names
-  checked as Prometheus's; the expression checked as #98 checks it; rule
-  patterns checked as a team's are. The series' labels become windows'
-  labels, kept as an incident's are, and shown escaped; the values a
-  signal has returned are bounded as above.
+  checked as Prometheus's; the expression checked as v0.49.0 checks it;
+  rule patterns checked as a team's are. The series' labels become
+  windows' labels, kept as an incident's are, and shown escaped; what a
+  signal has returned is bounded as above.
 - **Where names go.** Into incidents' keys and pages, the summary,
   `/metrics` labels (escaped, eight values at most), the digest and
   reports, as text a receiver escapes, as it does `digest.ready`'s.
@@ -546,8 +639,7 @@ with every schema change.
 - **Written incidents of a kind.** A rule entry keeps a rule from other
   signals' windows, not from incidents people wrote down.
 - **Windows merged across signals** (above).
-- **Signals declared in `--config`.** They are judging settings, set as the
-  others are: the command line, `--impact-file` and the Settings page.
+- **Signals declared in `--config`** (above).
 
 ## Alternatives
 
@@ -563,17 +655,17 @@ with every schema change.
   rule catch, and every other rule then catches another team's windows of
   the same service, which is what `team` was in `--match` to stop.
 - **A job that evaluates each signal and copies its windows in** through the
-  incidents port, each with a prefix of its own (`PROBE-41`), which #98's
-  sources panel shows apart. They would be written incidents: never to
-  decide, judged by `--match` for every rule, keeping the record only near
-  them, never read again when the expression changes, and the job's to
-  keep running.
+  incidents port, each with a prefix of its own (`PROBE-41`), which
+  v0.49.0's sources panel shows apart. They would be written incidents:
+  never to decide, judged by the match in effect for every rule, keeping
+  everyone's record, never read again when the expression changes, and
+  the job's to keep running.
 - **Merging windows across signals with the union of their labels.** A
   firing would have to agree with labels of both signals, which no alert
   does (a probe's URL and a service's name); and which `for` and `match`
   would judge it is still not answered.
-- **One start for all, the latest** (#98's rule, over the signals). Simple,
-  and the youngest signal takes every rule's record away (above).
+- **One start for all, the latest** (v0.49.0's rule, over the signals).
+  Simple, and the youngest signal takes every rule's record away (above).
 - **Ties by rule, not by alert.** A rule tied to every signal any of its
   alerts could have seen needs no change to the tallies, and holds a rule
   over many services to the youngest signal of any of them. Proposed by
@@ -595,6 +687,18 @@ here; should they ever be shown or counted as one outage (open question
 
 ## Open questions
 
+Decided on 2026-11-16, by the maintainer:
+
+- **Named and unnamed signals mixed.** Refused in steps 1 and 2. In the UI,
+  the first named signal saved renames the unnamed one `impact`, which
+  keeps its windows and their keys.
+- **`no_record` in a team's row.** It means no firing of that row was
+  judged, the same as today with no named signal and no rule entry;
+  `unjudged` is added. The record a written incident keeps for a team's
+  row stays everyone's, as today. Settled before step 2.
+
+Open:
+
 1. **An outage counted once.** Whether `impacts` should also give how many
    times any signal had a window, windows of several signals that overlap
    counted once (`impacts.outages`), for a team that reports incidents,
@@ -608,28 +712,21 @@ here; should they ever be shown or counted as one outage (open question
 4. **`--lead` by signal.** A probe fails before users write in; an error
    share rises with them. Whether alerts may come earlier before one than
    the other.
-5. **Mixing named and unnamed.** Refused here, so that the unnamed one keeps
-   today's keys and nothing else. An alternative is to call it `impact`.
-6. **`no_record` in a team's row.** It is everyone's today, also in a team's
-   row (`summaryOf` reads the record once, for everyone), while a team's
-   pages read the team's (`teamKeeps`). With ties it is the row's own
-   firings'. Whether that is a field changed in meaning, which `schema: 1`
-   promises not to do, or the meaning it always had.
-7. **Expectations naming an impact window.** [expectations.md](expectations.md)
+5. **Expectations naming an impact window.** [expectations.md](expectations.md)
    holds a rule to catching an incident by its id. An impact window's key
-   is its start, which can change when its signal is read again; an
-   expectation should name the incident its confirmation writes.
+   can change when its signal is read again; an expectation should name the
+   incident its confirmation writes.
 
 ## Steps
 
 1. `lapilli verdict`: an incident's own `match` and signal,
    `--impact NAME=PROMQL`, `--impact-for NAME=DUR`, `--impact-match`,
    `--impact-record`, `--impact-file` with rule entries, ties and each
-   signal's start, and each incident's `signal` in `--json`. No schema
-   change.
-2. `serve`: schema 025; the runs read each signal, missed on its own; each
-   signal's start; ties by alert, and the tallies by them; keys and
+   signal's start, each incident's `signal` in `--json`, and numbers.md's
+   tables and tests. No schema change.
+2. `serve`: the next schema; the runs read each signal, missed on its own;
+   each signal's start; ties by alert, and the tallies by them; keys and
    decisions by signal; the Incidents page, a rule's page, the summary,
-   `/metrics`, MCP.
-3. #98's section by signal: the list and the rule entries, the try, reading
-   again a signal alone, a row a signal in the sources panel.
+   `/metrics`, MCP; numbers.md's invariants.
+3. v0.49.0's section by signal: the list and the rule entries, the try,
+   reading again a signal alone, a row a signal in the sources panel.
