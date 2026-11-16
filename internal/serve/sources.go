@@ -26,6 +26,16 @@ const sourcesSpan = 28 * 24 * time.Hour
 // its tool's incidents every hour or so, each again, unchanged or not.
 const receivedQuiet = 48 * time.Hour
 
+// redactPaths is a text without the incidents file's path, which an
+// admin alone reads: an error reading it says it, on the Settings page and
+// in the status banner of every page.
+func (s *Server) redactPaths(text, l string) string {
+	if s.cfg.Incidents == "" || text == "" {
+		return text
+	}
+	return strings.ReplaceAll(text, s.cfg.Incidents, tr(l, "the incidents file"))
+}
+
 // impactStale is how long since the impact signal was last read it is
 // said to be read no more: two runs, the hours they settle, and one more.
 func impactStale(c Config) time.Duration { return 2*c.Every + c.Settle + time.Hour }
@@ -233,8 +243,7 @@ func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, 
 		case seen.FileErr != "" && !seen.FileFailed.Before(seen.FileRead):
 			file.State, file.Err = "failing", seen.FileErr
 			if !adminReads {
-				// Its path is an admin's to read.
-				file.Err = strings.ReplaceAll(file.Err, s.cfg.Incidents, tr(lang(r), "the incidents file"))
+				file.Err = s.redactPaths(file.Err, lang(r))
 			}
 		case seen.FileRead.IsZero():
 			file.State = "pending"
@@ -255,9 +264,7 @@ func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, 
 		if err != nil {
 			return nil, err
 		}
-		if d := k.Data; d != nil && d.Criterion == k.Criterion {
-			imp.Data = dataViewOf(d)
-		}
+		imp.Data = dataViewOf(dataOf(k, c.key()))
 		switch {
 		case seen.ImpactErr != "" && !seen.ImpactFailed.Before(seen.ImpactRead):
 			imp.State, imp.Err = "failing", seen.ImpactErr

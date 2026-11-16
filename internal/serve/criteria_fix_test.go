@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/rules"
 )
 
@@ -20,9 +22,9 @@ import (
 
 func hist(s *Server) *history { return s.h.(*history) }
 
-// asBefore047 leaves a server's ledger as a lapilli before 0.47 left it:
+// asBefore049 leaves a server's ledger as a lapilli before 0.49 left it:
 // impact_since alone, at since.
-func asBefore047(t *testing.T, s *Server, since time.Time) {
+func asBefore049(t *testing.T, s *Server, since time.Time) {
 	t.Helper()
 	ledgerExec(t, s, "DELETE FROM meta WHERE key IN ('impact_criterion', 'impact_again', 'impact_data')")
 	ledgerExec(t, s, "UPDATE meta SET value = ? WHERE key = 'impact_since'", strconv.FormatInt(since.Unix(), 10))
@@ -58,13 +60,13 @@ func TestImpactDataFirstStart(t *testing.T) {
 	}
 }
 
-// An existing ledger, kept by a lapilli before 0.47, whose impact_since is
+// An existing ledger, kept by a lapilli before 0.49, whose impact_since is
 // before its selector's data: moved forward, at the first round that runs.
 func TestImpactDataUpgrade(t *testing.T) {
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	old := now.Add(-20 * 24 * time.Hour)
-	asBefore047(t, s, old)
+	asBefore049(t, s, old)
 	hist(s).begins = map[string][]time.Time{"impact": {now.Add(-10 * 24 * time.Hour)}} // Saturday 24
 	runDue(s, 2)
 	s.jobs(ctx, true)
@@ -130,14 +132,14 @@ func TestImpactDataSelectors(t *testing.T) {
 	}
 }
 
-// A ledger before 0.47, with no criterion kept, and a criterion saved
+// A ledger before 0.49, with no criterion kept, and a criterion saved
 // before the leader's first round that isn't the command line's: read
 // again over the last four weeks, not taken as read all along.
 func TestImpactUpgradeSavedFirst(t *testing.T) {
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	began, _ := s.l.RunsFrom(ctx)
-	asBefore047(t, s, began.Add(-time.Hour))
+	asBefore049(t, s, began.Add(-time.Hour))
 	if err := s.l.SetSettings(ctx, map[string]string{"impact": "impact > 1"}, "ana@example.com"); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +159,7 @@ func TestImpactUpgradeRunFirst(t *testing.T) {
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	began, _ := s.l.RunsFrom(ctx)
-	asBefore047(t, s, began.Add(-time.Hour))
+	asBefore049(t, s, began.Add(-time.Hour))
 	hist(s).failLong = map[string]bool{"impact > 1": true}
 	if err := s.l.SetSettings(ctx, map[string]string{"impact": "impact > 1"}, "ana@example.com"); err != nil {
 		t.Fatal(err)
@@ -165,7 +167,7 @@ func TestImpactUpgradeRunFirst(t *testing.T) {
 	runDue(s, 2)
 	s.jobs(ctx, true)
 	k, err := s.l.ImpactKept(ctx)
-	if err != nil || k.Criterion != "5m impact > 1" || k.Again != "-" {
+	if err != nil || k.Criterion != "" || k.Again != "-" || k.Pending == nil || k.Pending.Criterion != "5m impact > 1" {
 		t.Fatalf("%+v %v", k, err)
 	}
 	if plan, _, err := s.againPlan(ctx, criterion{"impact > 1", 5 * time.Minute}); err != nil || plan != againRead {
@@ -173,12 +175,12 @@ func TestImpactUpgradeRunFirst(t *testing.T) {
 	}
 }
 
-// Of a ledger before 0.47 whose runs began to read the signal within the
+// Of a ledger before 0.49 whose runs began to read the signal within the
 // last four weeks, the weeks before are read again, not taken as read.
 func TestImpactUpgradeLateStart(t *testing.T) {
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
-	asBefore047(t, s, now.Add(-2*time.Hour))
+	asBefore049(t, s, now.Add(-2*time.Hour))
 	if plan, _, err := s.againPlan(ctx, criterion{"impact", 5 * time.Minute}); err != nil || plan != againRead {
 		t.Errorf("plan %d %v", plan, err)
 	}
@@ -364,11 +366,31 @@ func TestImpactChecks(t *testing.T) {
 		`rate(x[25h]) > 1`:             false,
 		`max_over_time(x[5m:1m]) > 1`:  true,
 		`max_over_time(x[2d:1h]) > 1`:  false,
+		`max_over_time(x[1h:]) > 1`:    true,
+		// Past a day however it is written, or stepping by less than a
+		// minute.
+		`max_over_time(up[201y]) > 1`:  false,
+		`rate(up[90000]) > 1`:          false,
+		`max_over_time(up[1d:1s]) > 1`: false,
+		manySelectors(33):              false,
+		manySelectors(32):              true,
 	} {
 		if err := checkImpact(expr); (err == nil) != ok {
 			t.Errorf("%.30q: %v", expr, err)
 		}
 	}
+}
+
+// manySelectors is an expression that reads n selectors.
+func manySelectors(n int) string {
+	var b strings.Builder
+	for i := range n {
+		if i > 0 {
+			b.WriteString(" + ")
+		}
+		fmt.Fprintf(&b, "m%d", i)
+	}
+	return b.String() + " > 1"
 }
 
 // A try's query may carry an expression its field takes.
@@ -456,6 +478,16 @@ func TestSourcesFileErrorPath(t *testing.T) {
 	if !strings.Contains(row, "failing") || strings.Contains(row, s.cfg.Incidents) || !strings.Contains(row, "the incidents file") {
 		t.Errorf("%s", row)
 	}
+	// Nor in the status banner of every page.
+	for _, p := range []string{"/settings", "/"} {
+		if _, body := askAs(t, s.Handler(), http.MethodGet, p, nil, "bo@example.com", "same-origin"); strings.Contains(body, s.cfg.Incidents) {
+			i := strings.Index(body, s.cfg.Incidents)
+			t.Errorf("%s: the path is on the page: %s", p, body[max(0, i-200):min(len(body), i+120)])
+		}
+	}
+	if _, body := askAs(t, s.Handler(), http.MethodGet, "/", nil, "ana@example.com", "same-origin"); !strings.Contains(body, s.cfg.Incidents) {
+		t.Error("an admin doesn't read the path")
+	}
 }
 
 // The Cleanup page lists the tasks kept on an impact window read again
@@ -477,4 +509,166 @@ func TestOrphansImpactNotes(t *testing.T) {
 	if !strings.Contains(body, key) || !strings.Contains(body, fmt.Sprintf("/tasks/%d", id)) {
 		t.Errorf("not listed:\n%s", body)
 	}
+}
+
+// A criterion saved, its read again failing, a run reading it: pending,
+// the record is kept on through the weeks it read only as far as its data
+// goes. Its selector with no data: none at all, as the one before's had
+// none either.
+func TestImpactPendingNoData(t *testing.T) {
+	ctx := context.Background()
+	s, _ := server(t, func(c *Config) { c.Incidents = "" })
+	hist(s).begins = map[string][]time.Time{"impact": {}}
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	s.jobs(ctx, true)
+	if from := options(t, s); !from.IsZero() {
+		t.Fatalf("no data: kept from %s", from)
+	}
+	if err := s.l.SetSettings(ctx, map[string]string{"impact": "impact > 1"}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	hist(s).failLong = map[string]bool{"impact > 1": true}
+	runDue(s, 2)
+	s.jobs(ctx, true)
+	if from := options(t, s); !from.IsZero() {
+		t.Errorf("pending, its selector with no data: kept from %s", from)
+	}
+}
+
+// Pending, its read again failing, a selector of it whose data begins
+// after the runs began to read it: the record is kept from where its data
+// begins, not from where the one before's was.
+func TestImpactPendingDataLooked(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).begins = map[string][]time.Time{"late": {now.Add(2 * time.Hour)}}
+	hist(s).failLong = map[string]bool{"impact or late == 1": true}
+	if err := s.l.SetSettings(ctx, map[string]string{"impact": "impact or late == 1"}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	runDue(s, 4) // a run of five hours, which the read again's four weeks aren't
+	s.jobs(ctx, true)
+	k, err := s.l.ImpactKept(ctx)
+	if err != nil || k.Pending == nil || k.Pending.Data == nil {
+		t.Fatalf("%+v %v", k, err)
+	}
+	monday := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
+	if from := options(t, s); !from.Equal(monday) {
+		t.Errorf("kept from %s, not %s", from, monday)
+	}
+}
+
+// A proposal backtested while a criterion is pending is judged against
+// the windows of the one kept, and is labeled so: held once the pending
+// one's are read in their place.
+func TestImpactHeldInGap(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, true, nil)
+	if err := s.l.SetSettings(ctx, map[string]string{"impact": "impact > 1"}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	hist(s).failLong = map[string]bool{"impact > 1": true}
+	runDue(s, 2)
+	s.jobs(ctx, true)
+	held, err := s.impactHeld(ctx)
+	if err != nil || held != "5m impact" {
+		t.Fatalf("held %q %v", held, err)
+	}
+	id := impactProposed(t, s, held)
+	hist(s).failLong = nil
+	runDue(s, 4) // past the hour the failed read again waits
+	s.jobs(ctx, false)
+	if w := staleOf(t, s, id); w == nil || w.Format != staleImpact {
+		t.Errorf("not held once read again: %+v", w)
+	}
+}
+
+// An offset moves where a selector's data is read: its data begins an
+// offset after its metric's.
+func TestImpactDataOffset(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).begins = map[string][]time.Time{"x": {now.Add(-80 * time.Hour)}, "x offset 1w": {now.Add(-30 * time.Hour)}}
+	if code, body := askAs(t, s.Handler(), http.MethodPost, "/settings/impact", url.Values{"impact": {"rate(x[5m]) > 2 * rate(x[5m] offset 1w)"}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	s.jobs(ctx, false)
+	monday := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
+	if from := options(t, s); !from.Equal(monday) {
+		t.Errorf("kept from %s, not %s", from, monday)
+	}
+}
+
+// Saving a criterion counts the replica that leads reading it again among
+// the saver's reads, a try lately or not: saving back and forth is held to
+// the same twelve an hour.
+func TestImpactSavesCounted(t *testing.T) {
+	s := criteriaServer(t, false, nil)
+	h := s.Handler()
+	for _, e := range []string{"impact+%3E+1", "impact+%3E+2"} {
+		if code, _ := askAs(t, h, http.MethodGet, "/settings?impact-try=1&impact="+e, nil, "ana@example.com", "same-origin"); code != 200 {
+			t.Fatal(code)
+		}
+	}
+	refused := false
+	for i := range impactTriesAnHour {
+		e := []string{"impact > 1", "impact > 2"}[i%2]
+		code, body := askAs(t, h, http.MethodPost, "/settings/impact", url.Values{"impact": {e}}, "ana@example.com", "same-origin")
+		if code != http.StatusSeeOther {
+			refused = code == 400 && strings.Contains(body, "as many incident criteria")
+			break
+		}
+	}
+	if !refused {
+		t.Error("saved back and forth past the hour's reads")
+	}
+}
+
+// A try holds what was decided about a window found before that a read
+// again would hold, one on from before the span however long before it
+// started.
+func TestImpactTryLongDecided(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	began, _ := s.l.RunsFrom(ctx)
+	// The runs' window, from 30 hours before the span to 6 hours into it,
+	// dismissed.
+	start := began.Add(-30 * time.Hour)
+	if err := s.l.Record(ctx, ledger.Found{From: start, To: began.Add(6 * time.Hour), ImpactOn: true, ImpactSince: start, ImpactCriterion: "5m impact",
+		Impact: []incident.Incident{{ID: "w", Start: start, End: began.Add(6 * time.Hour), Candidate: true}},
+		Run:    ledger.Run{Kind: "test", Started: start, Finished: start, From: start, To: began.Add(6 * time.Hour)}}, s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.l.Decide(ctx, "impact-"+start.Format("20060102T1504Z"), "dismissed", "", "ana", s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	hist(s).begins = nil
+	s.h = &spanHistory{history: hist(s), at: began.Add(time.Hour), long: 4 * time.Hour}
+	_, body := askAs(t, s.Handler(), http.MethodGet, "/settings?impact-try=1&impact=span", nil, "ana@example.com", "same-origin")
+	if !strings.Contains(body, "no: dismissed before") {
+		t.Errorf("the decision isn't held:\n%s", body)
+	}
+}
+
+// spanHistory answers "span" with one series true from at for long.
+type spanHistory struct {
+	*history
+	at   time.Time
+	long time.Duration
+}
+
+func (h *spanHistory) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	if expr != "span" {
+		return h.history.QueryRange(ctx, expr, start, end, step)
+	}
+	se := prom.Series{Labels: map[string]string{}}
+	for t := h.at; t.Before(h.at.Add(h.long)); t = t.Add(step) {
+		if !t.Before(start) && !t.After(end) {
+			se.Samples = append(se.Samples, prom.Sample{T: t, V: 1})
+		}
+	}
+	return []prom.Series{se}, nil
 }

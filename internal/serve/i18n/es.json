@@ -1870,5 +1870,8 @@
  "looking for where the impact signal's data begins": "buscar dónde empiezan los datos de la señal de impacto",
  "Tasks and comments on impact windows read again": "Tareas y comentarios de ventanas de impacto leídas de nuevo",
  "The impact signal was read again with another criterion, and nothing it found covers these windows any more: their tasks and comments are kept on them, listed here.": "La señal de impacto se volvió a leer con otro criterio, y nada de lo que encontró cubre ya estas ventanas: sus tareas y comentarios se conservan en ellas, listados aquí.",
- "%d comments": "%d comentarios"
+ "%d comments": "%d comentarios",
+ "the impact expression reads a range of %s: Lapilli reads a range as a duration like 5m or 1d": "la expresión de impacto lee un rango de %s: Lapilli lee un rango como una duración como 5m o 1d",
+ "the impact expression's subquery %s steps by less than %s, or not by a duration": "la subconsulta %s de la expresión de impacto avanza en menos de %s, o no en una duración",
+ "the impact expression reads %d selectors: %d at most, as where each one's data begins is looked for apart": "la expresión de impacto lee %d selectores: %d como máximo, pues dónde empiezan los datos de cada uno se busca aparte"
 }

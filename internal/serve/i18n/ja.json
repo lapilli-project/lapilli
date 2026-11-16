@@ -1870,5 +1870,8 @@
  "looking for where the impact signal's data begins": "影響指標のデータの開始点を探す",
  "Tasks and comments on impact windows read again": "読み直した影響区間に付いたタスクとコメント",
  "The impact signal was read again with another criterion, and nothing it found covers these windows any more: their tasks and comments are kept on them, listed here.": "影響指標を別の基準で読み直し、新しく見つけた区間はこれらの区間を覆っていません。付いていたタスクとコメントはそのまま残り、ここに表示されます。",
- "%d comments": "コメント %d 件"
+ "%d comments": "コメント %d 件",
+ "the impact expression reads a range of %s: Lapilli reads a range as a duration like 5m or 1d": "影響指標の式が %s の範囲を読んでいます。Lapilli は範囲を 5m や 1d のような期間としてだけ読みます",
+ "the impact expression's subquery %s steps by less than %s, or not by a duration": "影響指標の式のサブクエリ %s のステップが %s より短いか、期間ではありません",
+ "the impact expression reads %d selectors: %d at most, as where each one's data begins is looked for apart": "影響指標の式がセレクタを %d 個読んでいます。セレクタごとにデータの開始点を別々に探すため、最大 %d 個です"
 }
