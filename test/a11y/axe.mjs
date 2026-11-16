@@ -1,9 +1,10 @@
 // Checks every page lapilli serve gives TestA11yServe with axe-core, against
 // WCAG 2.2 AA, in each language, in light and in dark; that no page
-// scrolls sideways at 320 CSS px (WCAG 1.4.10); and that the rules list's
+// scrolls sideways at 320 CSS px (WCAG 1.4.10); that the rules list's
 // table, with rules named as long as a real set's (longNamed), and the
 // overview's table of the weeks fit their boxes on a laptop's screen, 1280
-// CSS px and wider. Run by axe.sh.
+// CSS px and wider; and that a checkbox is on the line of its words, at
+// 320, 1280, 1440 and 1920 CSS px. Run by axe.sh.
 //
 // BASE is where the pages are served. Prints the violations by rule, and
 // writes them all as JSON to OUT when it is set. Exits 1 when there are any.
@@ -83,7 +84,41 @@ async function fit(lang) {
   }
 }
 
-await Promise.all(langs.flatMap((l) => [...schemes.map((s) => check(l, s)), reflow(l), fit(l)]));
+// boxed is what has a checkbox apart from its words: a label holding one
+// draws it on the line of its words, before them (the stylesheet's
+// label:has(> input[type=checkbox])), at a phone's width and a laptop's
+// and wider. As a field's label it stood on a line of its own, centred.
+async function boxed(lang) {
+  for (const width of [320, 1280, 1440, 1920]) {
+    const context = await browser.newContext({ viewport: { width, height: 900 }, extraHTTPHeaders: { 'Accept-Language': lang } });
+    const page = await context.newPage();
+    for (const path of paths) {
+      await page.goto(base + path);
+      const apart = await page.evaluate(() => [...document.querySelectorAll('label')]
+        .filter((l) => l.offsetParent && l.querySelector(':scope > input[type=checkbox]'))
+        .filter((l) => {
+          const box = l.querySelector(':scope > input[type=checkbox]').getBoundingClientRect();
+          const words = [...l.childNodes].filter((n) => n.nodeName !== 'INPUT' && n.textContent.trim());
+          if (!words.length) {
+            return false;
+          }
+          const r = document.createRange();
+          r.setStartBefore(words[0]);
+          r.setEndAfter(words[words.length - 1]);
+          const first = [...r.getClientRects()].find((x) => x.width > 0);
+          return !first || box.right > first.left + 1 || box.bottom <= first.top || box.top >= first.bottom;
+        })
+        .map((l) => l.textContent.trim().slice(0, 40)));
+      if (apart.length) {
+        found.push({ rule: 'checkbox-line', impact: 'moderate', path, lang, scheme: `${width}px`, nodes: apart.length,
+          targets: apart, help: 'A checkbox stands apart from its words' });
+      }
+    }
+    await context.close();
+  }
+}
+
+await Promise.all(langs.flatMap((l) => [...schemes.map((s) => check(l, s)), reflow(l), fit(l), boxed(l)]));
 await browser.close();
 
 const rules = new Map();

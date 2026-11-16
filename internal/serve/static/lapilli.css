@@ -187,7 +187,10 @@ form.row { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: end; ma
    them, within the page's width: a team's long name doesn't push the page
    sideways at 320 CSS px. */
 label { display: grid; grid-template-columns: minmax(0, 1fr); gap: .25rem; font-size: .95rem; min-width: 0; max-width: 100%; }
-form.row label:has(input[type=checkbox]) { display: flex; gap: .3rem; align-items: center; }
+/* A checkbox's label keeps the box on its words' line, before them, in any
+   form: as a field's label it would stand on a line of its own, centred. */
+label:has(> input[type=checkbox]) { display: flex; gap: .3rem; align-items: center; justify-self: start; }
+label:has(> input[type=checkbox]) > input { flex: none; }
 input, select, textarea {
   font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line-ui); border-radius: 10px;
   padding: .35rem .55rem; max-width: 100%;

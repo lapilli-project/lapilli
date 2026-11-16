@@ -773,3 +773,54 @@ func TestPagesAccessibleInMoreStates(t *testing.T) {
 		pageA11y(t, h, ana, "/proposals/1")
 	})
 }
+
+// TestCheckboxOnItsLine: a label holding a checkbox draws it on the line
+// of its words, before them, in any form (the stylesheet's rule): as a
+// field's label it stood on a line of its own, centred over its words, as
+// "take it out instead" did on a rule's proposals. So every checkbox a
+// page draws in a label is the label's own, before its words, which the
+// rule asks; test/a11y/axe.mjs measures it in a browser (checkbox-line).
+func TestCheckboxOnItsLine(t *testing.T) {
+	b, err := files.ReadFile("static/lapilli.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`\nlabel:has\(> input\[type=checkbox\]\) \{([^}]*)\}`).FindSubmatch(b)
+	if m == nil || !strings.Contains(string(m[1]), "display: flex") || !strings.Contains(string(m[1]), "align-items: center") {
+		t.Fatalf("no rule draws a checkbox's label on one line: %q", m)
+	}
+	h := pagesServer(t).Handler()
+	seen := 0
+	for _, p := range pagePaths {
+		_, body, _ := get(t, h, p)
+		doc, err := html.Parse(strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, n := range allNodes(doc) {
+			if n.DataAtom != atom.Input || nodeAttr(n, "type") != "checkbox" || !nodeWithin(n, atom.Label) {
+				continue
+			}
+			seen++
+			if n.Parent.DataAtom != atom.Label || strings.TrimSpace(nodeTextBefore(n)) != "" {
+				t.Errorf("%s: the checkbox %s isn't its label's own, before its words: %q", p, nodeAttr(n, "name"), nodeText(n.Parent))
+			}
+		}
+	}
+	if seen == 0 {
+		t.Error("no page drew a checkbox in a label")
+	}
+}
+
+// nodeTextBefore is what an element's parent says before it.
+func nodeTextBefore(n *html.Node) string {
+	var b strings.Builder
+	for c := n.Parent.FirstChild; c != nil && c != n; c = c.NextSibling {
+		if c.Type == html.TextNode {
+			b.WriteString(c.Data)
+		} else {
+			b.WriteString(nodeText(c))
+		}
+	}
+	return b.String()
+}
