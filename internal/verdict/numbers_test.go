@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -73,18 +74,40 @@ func TestReportFieldsStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The document's table, row by row: where, then the fields there.
 	_, section, _ := strings.Cut(string(numbers), "### The report's fields")
 	section, _, _ = strings.Cut(section, "\n### ")
+	rows := map[string][]string{}
+	name := regexp.MustCompile("`([^`]+)`")
+	for _, line := range strings.Split(section, "\n") {
+		cells := strings.Split(line, "|")
+		if len(cells) < 4 || strings.HasPrefix(strings.TrimSpace(cells[1]), "---") {
+			continue
+		}
+		where := strings.Trim(strings.TrimSpace(cells[1]), "`")
+		if where == "the report" {
+			where = ""
+		}
+		for _, m := range name.FindAllStringSubmatch(cells[2], -1) {
+			rows[where] = append(rows[where], m[1])
+		}
+	}
 	for where, fields := range stableFields {
 		obj := at(where)
 		for _, f := range fields {
 			if _, ok := obj[f]; !ok {
 				t.Errorf("%s: no %q in the JSON", where, f)
 			}
-			if !strings.Contains(section, "`"+f+"`") {
-				t.Errorf("docs/numbers.md's report's fields don't name %s's %s", where, f)
+			if !slices.Contains(rows[where], f) {
+				t.Errorf("docs/numbers.md's report's fields, the row of %q, don't name %s", where, f)
 			}
 		}
+		if len(rows[where]) != len(fields) {
+			t.Errorf("docs/numbers.md's row of %q names %v, the test holds %v", where, rows[where], fields)
+		}
+	}
+	if len(rows) != len(stableFields) {
+		t.Errorf("docs/numbers.md's report's fields have %d rows, the test %d", len(rows), len(stableFields))
 	}
 }
 
@@ -110,19 +133,21 @@ func TestCSVColumns(t *testing.T) {
 }
 
 // A cell from a rule's name, a severity or a team that a spreadsheet would
-// run is written as text; labels and incidents are JSON, whatever they
-// hold; an excused firing has no stone.
+// run is written as text, after spaces and in full-width forms too; a
+// control or format character is written as \u{...}, there and in labels
+// and incidents, which are JSON, whatever they hold; an excused firing has
+// no stone, and re-fired for none.
 func TestCSVCells(t *testing.T) {
 	t0 := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
 	r := &Report{
 		Rules: []RuleResult{{Rule: "=HYPERLINK(\"http://example.com\")", Severity: "+1"}, {Rule: "@SUM(A1)", Severity: "-2"}, {Rule: "\tTab", Severity: "\rCR"}},
 		Firings: []Judged{
-			{Firing: firing.Firing{Rule: "=HYPERLINK(\"http://example.com\")", Labels: map[string]string{"x": "=1+1", "y": "a,b\n\"c\""}, Start: t0}},
-			{Firing: firing.Firing{Rule: "@SUM(A1)", Start: t0.Add(time.Minute), End: t0.Add(2 * time.Minute)}, White: true, Incidents: []string{"-INC"}},
+			{Firing: firing.Firing{Rule: "=HYPERLINK(\"http://example.com\")", Labels: map[string]string{"x": "=1+1", "y": "a,b\n\"c\"", "z": "\u202egnp.exe"}, Start: t0}},
+			{Firing: firing.Firing{Rule: "@SUM(A1)", Start: t0.Add(time.Minute), End: t0.Add(2 * time.Minute)}, White: true, Incidents: []string{"-INC", "INC\u202e1"}},
 			{Firing: firing.Firing{Rule: "\tTab", Start: t0.Add(3 * time.Minute)}, NoRecord: true},
 		},
 	}
-	excused := []Judged{{Firing: firing.Firing{Rule: "@SUM(A1)", Start: t0.Add(2 * time.Minute)}, NoRecord: true}}
+	excused := []Judged{{Firing: firing.Firing{Rule: "@SUM(A1)", Start: t0.Add(2 * time.Minute)}, NoRecord: true, Refired: true}}
 	var b bytes.Buffer
 	if err := CSV(&b, r, excused, func(rule string) string { return "-team" }); err != nil {
 		t.Fatal(err)
@@ -136,26 +161,29 @@ func TestCSVCells(t *testing.T) {
 	}
 	for _, row := range rows[1:] {
 		for i, cell := range row {
-			if cell != "" && strings.ContainsRune("=+-@\t\r", rune(cell[0])) {
-				t.Errorf("column %s: %q, which a spreadsheet would run", CSVColumns[i], cell)
+			if strings.ContainsAny(cell, "\t\r\n\u202e") || cell != "" && strings.ContainsRune("=+-@", rune(cell[0])) {
+				t.Errorf("column %s: %q, which a spreadsheet would run or a reader misread", CSVColumns[i], cell)
 			}
 		}
 	}
 	first, excusedRow := rows[1], rows[3]
 	if first[0] != `'=HYPERLINK("http://example.com")` || first[1] != "'+1" || first[2] != "'-team" ||
-		first[3] != `{"x":"=1+1","y":"a,b\n\"c\""}` || first[6] != "black" || first[8] != "[]" {
+		first[3] != `{"x":"=1+1","y":"a,b\\u{a}\"c\"","z":"\\u{202e}gnp.exe"}` || first[6] != "black" || first[8] != "[]" {
 		t.Errorf("first row %q", first)
 	}
-	if rows[2][8] != `["-INC"]` || rows[2][6] != "white" || rows[2][5] != "2026-11-02T09:02:00Z" {
+	if rows[2][8] != `["-INC","INC\\u{202e}1"]` || rows[2][6] != "white" || rows[2][5] != "2026-11-02T09:02:00Z" {
 		t.Errorf("second row %q", rows[2])
 	}
-	if excusedRow[6] != "" || excusedRow[11] != "true" || excusedRow[7] != "false" || excusedRow[0] != "'@SUM(A1)" {
+	if excusedRow[6] != "" || excusedRow[11] != "true" || excusedRow[7] != "false" || excusedRow[9] != "false" || excusedRow[0] != "'@SUM(A1)" {
 		t.Errorf("an excused firing: %q", excusedRow)
 	}
-	if rows[4][7] != "true" || rows[4][0] != "'\tTab" {
+	if rows[4][7] != "true" || rows[4][0] != `\u{9}Tab` || rows[4][1] != `\u{d}CR` {
 		t.Errorf("no record: %q", rows[4])
 	}
-	if Cell("plain-name") != "plain-name" || Cell("") != "" {
-		t.Error("a cell that needs nothing was changed")
+	for in, want := range map[string]string{"plain-name": "plain-name", "": "", " =1+1": "' =1+1", "\u00a0@x": "'\u00a0@x", "＝SUM(1)": "'＝SUM(1)",
+		"－1": "'－1", "\n=cmd": `\u{a}=cmd`, "\u202e=cmd": `\u{202e}=cmd`, "a=b": "a=b"} {
+		if got := Cell(in); got != want {
+			t.Errorf("Cell(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
