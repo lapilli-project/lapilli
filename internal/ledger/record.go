@@ -49,11 +49,14 @@ type Found struct {
 	// before From and were still on at it.
 	Firings []firing.Firing
 	// Impact, when there is an impact expression, is what it found from
-	// ImpactSince on.
-	Impact      []incident.Incident
-	ImpactOn    bool
-	ImpactSince time.Time
-	Run         Run
+	// ImpactSince on, read with ImpactCriterion (the expression and
+	// --impact-for, as lapilli serve keys them; "" for one not told
+	// apart, as before 0.47).
+	Impact          []incident.Incident
+	ImpactOn        bool
+	ImpactSince     time.Time
+	ImpactCriterion string
+	Run             Run
 }
 
 // from is where a rule's firings are replaced from.
@@ -281,14 +284,20 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 			return err
 		}
 
+		changed, err := l.criterionChanged(t, f)
+		if err != nil {
+			return err
+		}
 		if f.ImpactOn {
-			ilo, err := l.impact(t, f)
+			// Read with another criterion than the runs before, a window
+			// on at the start is this one's own, not one of theirs going on.
+			ilo, err := l.impact(t, f, changed)
 			if err != nil {
 				return err
 			}
 			lo = min(lo, ilo)
 		}
-		if err := l.impactSince(t, f); err != nil {
+		if err := l.impactSince(t, f, changed); err != nil {
 			return err
 		}
 		if err := l.judge(t, lo-int64(o.Lead/time.Second), to, o); err != nil {
@@ -311,25 +320,51 @@ const impactNone = "none"
 // impactSince keeps from when the runs read the impact signal (--impact),
 // all of it, without a run between that didn't: what keeps the record of
 // the firings since (ImpactSince). A run that doesn't read it ends that
-// (impactNone); the first to read it with none kept, after it or after an
-// upgrade, keeps its own start. An earlier window found isn't taken for
-// one: the runs between may not have read it.
-func (l *Ledger) impactSince(t *txn, f Found) error {
-	was, err := l.meta(t.ctx, t, "impact_since")
+// (impactNone), and forgets the criterion read; the first to read it with
+// none kept, after it or after an upgrade, keeps its own start. An earlier
+// window found isn't taken for one: the runs between may not have read
+// it. A run that read another criterion than the runs before (changed)
+// keeps its own start too: the weeks before were read with the one before,
+// not with this one; the weeks before it are read again with it by
+// ReadAgain, whose turn it marks as due (againDue).
+func (l *Ledger) impactSince(t *txn, f Found, changed bool) error {
+	was, err := l.meta(t.ctx, t, metaImpactSince)
 	if err != nil {
 		return err
 	}
 	if !f.ImpactOn {
-		if was == impactNone {
+		crit, err := l.meta(t.ctx, t, metaImpactCriterion)
+		if err != nil {
+			return err
+		}
+		again, err := l.meta(t.ctx, t, metaImpactAgain)
+		if err != nil {
+			return err
+		}
+		if was == impactNone && crit == "" && again == "" {
 			return nil
 		}
-		return setMeta(t.ctx, t, "impact_since", impactNone)
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key IN (?, ?)", metaImpactCriterion, metaImpactAgain); err != nil {
+			return err
+		}
+		return setMeta(t.ctx, t, metaImpactSince, impactNone)
+	}
+	if f.ImpactCriterion != "" {
+		if err := setMeta(t.ctx, t, metaImpactCriterion, f.ImpactCriterion); err != nil {
+			return err
+		}
+	}
+	if changed {
+		if err := setMeta(t.ctx, t, metaImpactAgain, againDue); err != nil {
+			return err
+		}
+		return setMeta(t.ctx, t, metaImpactSince, strconv.FormatInt(f.ImpactSince.Unix(), 10))
 	}
 	since := f.ImpactSince.Unix()
 	if n, err := strconv.ParseInt(was, 10, 64); err == nil && n <= since {
 		return nil
 	}
-	return setMeta(t.ctx, t, "impact_since", strconv.FormatInt(since, 10))
+	return setMeta(t.ctx, t, metaImpactSince, strconv.FormatInt(since, 10))
 }
 
 // miss keeps, for the next run, where each rule this run couldn't replay
@@ -403,9 +438,11 @@ func (l *Ledger) rules(t *txn, rs []Rule) error {
 
 // impact puts the impact windows a run found in place of those found
 // before from From on, keeping what people decided about them: a window
-// that overlaps one confirmed or dismissed is too. It returns the earliest
-// start whose firings' stones may have changed.
-func (l *Ledger) impact(t *txn, f Found) (int64, error) {
+// that overlaps one confirmed or dismissed is too. A window on at From
+// goes on from the one found before, unless fresh says that one was read
+// with another criterion. It returns the earliest start whose firings'
+// stones may have changed.
+func (l *Ledger) impact(t *txn, f Found, fresh bool) (int64, error) {
 	from := f.From.Unix()
 	lo := from
 	type old struct {
@@ -448,7 +485,7 @@ func (l *Ledger) impact(t *txn, f Found) (int64, error) {
 		if err != nil {
 			return 0, err
 		}
-		if in.Start.Before(f.From) {
+		if in.Start.Before(f.From) && !fresh {
 			// Still going at the start: the window found before goes on.
 			res, err := t.ExecContext(t.ctx, `UPDATE incidents SET end_at = ? WHERE id = (SELECT id FROM incidents
 				WHERE origin = 'impact' AND start_at < ? AND end_at >= ? ORDER BY start_at DESC LIMIT 1)`,
@@ -459,6 +496,8 @@ func (l *Ledger) impact(t *txn, f Found) (int64, error) {
 			if n, _ := res.RowsAffected(); n > 0 {
 				continue
 			}
+		}
+		if in.Start.Before(f.From) {
 			lo = min(lo, in.Start.Unix())
 		}
 		// What was decided about a window it overlaps, sharing a value of
