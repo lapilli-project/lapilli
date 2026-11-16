@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+## [0.44.2] - 2026-11-16
+
+A deployment with no incident written down had its overview read
+"Woken for nothing: 21": a judgement, in a tile's number, of firings no
+record could judge. Precision and noisy rules there said "not known"; the
+tile beside them did not, nor did the rules list it leads to, a report's
+woken section or the digest's notifications line.
+
+### Fixed
+
+- **Woken for nothing, with no record.** A week with no incident written
+  down in it or the two weeks before (no record), in which anything came
+  while people slept, has no number in the overview's "Woken for
+  nothing", as it has no precision: the tile says "not known", and how
+  many firings came while people slept that week, or, once notifications
+  are counted, how many notifications. A week of notifications alone, for
+  a firing begun before it, is judged by its record too. Its line of weeks
+  leaves such weeks out. A week before the first notification still shows
+  "–" for that reason, as before.
+- **The rules that week.** The rules list, where the tile leads, counts a
+  rule's notifications while people slept in weeks with no record apart:
+  "notifications while people slept, with no incident written down to
+  judge their firings by", not "for nothing".
+- **Reports and the digest.** A report's woken section says "Firings (or
+  Notifications) that came while people slept, with no incident written
+  down to judge them by" over a span with no record, and, over a span with
+  some firings judged and some not, "for nothing, or … with no incident
+  written down", as the command line does; its numbers carry `no_record`
+  and `unjudged`. The notifications line, in the digest and a report's
+  notifications section, says the same of its notifications and names the
+  rules that sent the most "for those firings", not "for nothing"
+  (`no_record`, `unjudged` in its numbers; `for_nothing` and
+  `most_for_nothing` keep their names).
+- **Korean.** These lines no longer say 오탐 or 헛알림 of firings with no
+  record, and a rule's page says its notifications were "for firings that
+  caught nothing" (아무것도 못 잡은 발화), not 오탐 발화. The ● stone keeps
+  its name, 오탐, as the tile keeps its own, "괜히 깨운 발화".
+
 ## [0.44.1] - 2026-11-16
 
 A security fix: what a rules input makes beyond its own text is bounded,

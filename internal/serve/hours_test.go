@@ -45,10 +45,13 @@ func TestHours(t *testing.T) {
 	if _, body, _ := get(t, h, "/rules/Errors?tab=firings"); !strings.Contains(body, "8 came while people slept, and 12 more off hours") {
 		t.Errorf("rule: %s", body)
 	}
-	// The last whole week has the two on Sunday night.
+	// The last whole week has the two on Sunday night. With no incident
+	// written down, whether they woke people for nothing isn't known: no
+	// number, as precision has none, and how many came then.
 	_, body, _ = get(t, h, "/")
 	i := strings.Index(body, "Woken for nothing")
-	if i < 0 || !strings.Contains(body[i:min(len(body), i+400)], ">2<") || !strings.Contains(body, "firings that caught nothing, 22:00–08:00") {
+	if i < 0 || !strings.Contains(body[i:min(len(body), i+400)], ">–<") || strings.Contains(body[i:min(len(body), i+400)], ">2<") ||
+		!strings.Contains(body, "not known: no incident written down to judge them by; 2 came while people slept (firings that caught nothing, 22:00–08:00)") {
 		t.Errorf("overview: %s", body)
 	}
 	// An incident written down at 22:00 that Sunday turns the firing then
@@ -58,6 +61,13 @@ func TestHours(t *testing.T) {
 	}
 	if _, body, _ := get(t, h, "/rules"); !strings.Contains(body, "7 asleep, 12 off hours") {
 		t.Errorf("rules after an incident: %s", body)
+	}
+	// The week has a record now: the other one woke people for nothing.
+	_, body, _ = get(t, h, "/")
+	i = strings.Index(body, "Woken for nothing")
+	if i < 0 || !strings.Contains(body[i:min(len(body), i+400)], ">1<") || strings.Contains(body, "came while people slept (") ||
+		!strings.Contains(body, "firings that caught nothing, 22:00–08:00") {
+		t.Errorf("overview after an incident: %s", body)
 	}
 	if _, body, _ := get(t, s.MetricsHandler(), "/metrics"); !strings.Contains(body, `lapilli_rule_nothing_by_hours{rule="Errors",severity="page",hours="asleep"}`) {
 		t.Errorf("metrics: %s", body)

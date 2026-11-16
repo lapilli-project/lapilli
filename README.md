@@ -1786,7 +1786,10 @@ Each rule's page then says how many notifications it sent over twelve weeks,
 how many were repeats, how many came while people slept, how many were for
 firings that caught nothing, and to which receivers; each firing, how many
 told of it, or that it paged no one. The dashboard's "Woken for nothing"
-counts notifications instead of firings, and says so. `/metrics` has
+counts notifications instead of firings, and says so. With no incident
+written down to judge them by, it shows no number, as precision doesn't,
+and says how many came while people slept; the report's and the digest's
+lines say the same, not "for nothing". `/metrics` has
 `lapilli_rule_notifications{rule, receiver, reason}` over seven days; MCP's
 `rules` and `rule` carry the same, and the weekly digest, to Slack and the
 webhook, a line of it: how many were sent, repeats, those while people
