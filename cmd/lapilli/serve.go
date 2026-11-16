@@ -116,33 +116,48 @@ The ledger:
   --timeout DUR       give up a run after this long (default 50m)
 
 Sharing the history with the alerts, so that Lapilli never takes their
-quota (docs/design/quota.md). Off by default:
+quota (docs/design/quota.md). /metrics counts what this process asks of
+each history API (lapilli_serve_history_*). Off by default:
   --yield-on-429      when a history API (--prometheus, --loki, Grafana's
                       data source proxy) answers a run's request with HTTP
                       429, ask it nothing more in the run, not even again
-                      after a wait: the run stops there, the rules it didn't
-                      replay are replayed by a later run from where they
-                      were missed, and the run history says why of each.
-                      Without it, a 429 is asked again, as --max-rate says
-  --yield-for DUR     and ask that API nothing for DUR after the 429 (default
-                      0: the next run asks again). While --prometheus is
-                      left alone, runs wait, held in the run history
+                      after a wait. The run stops there, and so does what
+                      reads the history after it that round (reviews of
+                      changes, the digest and what follows it, backtests
+                      again, changes carried out, the replay set beside what
+                      really fired), for a later round. The rules it didn't
+                      replay are replayed first by a later run, from where
+                      they were missed, and the runs go no further than a
+                      week past the oldest of them, so none is given up; the
+                      run history says why of each. Without it, a 429 is
+                      asked again, as --max-rate says
+  --yield-for DUR     and ask that API nothing for DUR after the 429, a day
+                      at most (default 0: the next run asks again). While
+                      --prometheus is left alone, runs wait, held in the run
+                      history. What was yielded to is this process's: a new
+                      leader asks afresh
   --guard EXPR        a PromQL expression asked of --prometheus before each
                       run and between the days of a catch-up, such as how
                       often the alerts' own evaluations fail
                       (rate(prometheus_rule_evaluation_failures_total[5m]) >
                       0): while it returns anything, or can't be read, the
-                      run waits for the next --every, kept in the run history
-                      as held, with why
+                      run waits for the next --every, and so does what reads
+                      the history after it, held in the run history. One the
+                      history refuses as written fails the run, each time
   --catch-up-hours HH:MM-HH:MM
                       catch up only in these hours, in --tz, such as
-                      01:00-06:00, at least --every long: a run more than
-                      twice --every and --settle behind (the first start's
-                      --backfill, one after being down) waits for them, held.
-                      Runs are recorded in order, so the hourly runs resume
-                      once it caught up
-  --catch-up-rate N   while catching up, ask each history API N requests a
-                      second at most, besides --max-rate
+                      01:00-06:00, at least --every long (twice is better): a
+                      run more than a day behind where the ledger's firings
+                      are up to (the first start's --backfill, one after
+                      being down a day or more; not one replaying again from
+                      when a version of the rules took effect) waits for
+                      them, held. Runs are recorded in order, so the hourly
+                      runs resume once it caught up; a run less behind runs
+                      at any hour. Hours a change of clocks skips (02:00-03:00
+                      on the night it does) don't come that day
+  --catch-up-rate N   while catching up (more than a day behind), ask each
+                      history API N requests a second at most, besides
+                      --max-rate
   --check-replay=false
                       don't set the replay beside what really fired. It is
                       on with rules to replay: each day the runs won't
@@ -712,6 +727,9 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		case "--yield-for":
 			cfg.YieldFor, err = dur(0)
 			yieldForSet = true
+			if err == nil && cfg.YieldFor > 24*time.Hour {
+				err = fmt.Errorf("--yield-for %s: a day at most, well within the week a rule missed is replayed for", val)
+			}
 		case "--yield-on-429":
 			cfg.Yield = val == "true"
 		case "--guard":

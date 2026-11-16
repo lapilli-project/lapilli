@@ -123,8 +123,17 @@ func TestYield(t *testing.T) {
 
 // TestYieldEndsWaits: a request waiting for its turn (here by a rate of
 // one every 1,000 seconds) gives up at once when another of its run is
-// answered 429, and isn't asked.
+// answered 429, and isn't asked. The wait is seen begun before the 429 is
+// answered.
 func TestYieldEndsWaits(t *testing.T) {
+	waiting := make(chan struct{})
+	old := sleep
+	sleep = func(ctx context.Context, d time.Duration) error {
+		close(waiting) // the second request, waiting for its turn
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	t.Cleanup(func() { sleep = old })
 	sent, answer := make(chan struct{}), make(chan struct{})
 	srv, asked := answers(t, func(w http.ResponseWriter, r *http.Request) {
 		close(sent)
@@ -138,6 +147,7 @@ func TestYieldEndsWaits(t *testing.T) {
 	<-sent
 	second := make(chan error)
 	go func() { second <- askWith(ctx, c) }()
+	<-waiting
 	close(answer)
 	if err := <-first; !IsYielded(err) {
 		t.Errorf("the one answered 429: %v", err)
@@ -148,6 +158,40 @@ func TestYieldEndsWaits(t *testing.T) {
 	if asked.Load() != 1 {
 		t.Errorf("asked %d times", asked.Load())
 	}
+	if !IsYieldedReason("query failed: the history couldn't be read: "+(&Yielded{API: "loki"}).Error()) || IsYieldedReason("query failed: HTTP 429: slow down") {
+		t.Error("IsYieldedReason")
+	}
+}
+
+// TestLimiterWaitsCounted: a turn waited for by --max-rate is counted as
+// the rate's, and a wait the API asked for (Retry-After) as the API's.
+func TestLimiterWaitsCounted(t *testing.T) {
+	fakeTime(t)
+	quick(t, 0)
+	srv, _ := answers(t, ok)
+	var n Counts
+	ctx := Counting(context.Background(), &n)
+	c := New(srv.URL, "test", WithLimiter(NewLimiter(1)))
+	for range 3 {
+		if err := askWith(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p := n.Of("prometheus"); p.Paced != 2*time.Second || p.Waited != 0 {
+		t.Errorf("--max-rate: paced %s, waited %s", p.Paced, p.Waited)
+	}
+	// A 429 saying Retry-After 5: the request asked again after it.
+	told, _ := answers(t, refuse(429, "5"), ok, ok)
+	var m Counts
+	mctx := Counting(context.Background(), &m)
+	l := NewLimiter(0)
+	tc := New(told.URL, "test", WithLimiter(l))
+	if err := askWith(mctx, tc); err != nil {
+		t.Fatal(err)
+	}
+	if p := m.Of("prometheus"); p.Waited != 5*time.Second || p.Paced != 0 {
+		t.Errorf("Retry-After: waited %s, paced %s", p.Waited, p.Paced)
+	}
 }
 
 // TestPacing: a catch-up's rate spaces each API's requests, apart from
@@ -157,7 +201,7 @@ func TestPacing(t *testing.T) {
 	clk := fakeTime(t)
 	srv, asked := answers(t, ok)
 	var n Counts
-	ctx := Pacing(Counting(context.Background(), &n), 1)
+	ctx := Pacing(Counting(context.Background(), &n), NewPaces(1))
 	c := New(srv.URL, "test")
 	for range 3 {
 		if err := askWith(ctx, c); err != nil {
@@ -177,7 +221,7 @@ func TestPacing(t *testing.T) {
 	if err := askWith(dctx, c); !errors.Is(err, ErrPastDeadline) || asked.Load() != 3 {
 		t.Errorf("past the deadline: %v, asked %d", err, asked.Load())
 	}
-	if ctx := Pacing(context.Background(), 0); ctx.Value(pacesKey{}) != nil {
+	if ctx := Pacing(context.Background(), NewPaces(0)); ctx.Value(pacesKey{}) != nil {
 		t.Error("a rate of 0 paces")
 	}
 }

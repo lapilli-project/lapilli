@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -41,8 +42,15 @@ type Yielded struct {
 }
 
 func (e *Yielded) Error() string {
-	return "the " + e.API + " API answered HTTP 429, too many requests: lapilli yielded to it, and asks it again in a later run (--yield-on-429)"
+	return "the " + e.API + " API answered HTTP 429, too many requests: lapilli yielded to it, and asks it again in a later run " + yieldedMark
 }
+
+// yieldedMark ends what a *Yielded says.
+const yieldedMark = "(--yield-on-429)"
+
+// IsYieldedReason reports whether a reason a rule couldn't be replayed, as
+// a ledger keeps it, is a *Yielded's.
+func IsYieldedReason(reason string) bool { return strings.Contains(reason, yieldedMark) }
 
 // IsYielded reports whether err is a request's that its run yielded.
 func IsYielded(err error) bool {
@@ -160,23 +168,33 @@ func held(ctx context.Context, api string, err error) error {
 	return err
 }
 
-// paces are a Pace for each kind of API (Pacing).
-type paces [nAPIs]*Pace
+// Paces are a Pace for each kind of API (Pacing).
+type Paces [nAPIs]*Pace
 
-type pacesKey struct{}
-
-// Pacing is ctx whose requests ask each kind of API (APIs) rate requests a
-// second at most, spaced evenly, besides any Limiter's rate: lapilli
-// serve's catch-up (--catch-up-rate). ctx itself for a rate of 0 or less.
-func Pacing(ctx context.Context, rate float64) context.Context {
+// NewPaces are Paces of rate requests a second at most each; nil for a
+// rate of 0 or less, which is none.
+func NewPaces(rate float64) *Paces {
 	if !(rate > 0) {
-		return ctx
+		return nil
 	}
-	var p paces
+	var p Paces
 	for i := range p {
 		p[i] = NewPace(rate)
 	}
-	return context.WithValue(ctx, pacesKey{}, &p)
+	return &p
+}
+
+type pacesKey struct{}
+
+// Pacing is ctx whose requests ask each kind of API (APIs) at p's rate at
+// most, spaced evenly, besides any Limiter's rate: lapilli serve's
+// catch-up (--catch-up-rate), one p for all its runs. ctx itself for p
+// nil.
+func Pacing(ctx context.Context, p *Paces) context.Context {
+	if p == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, pacesKey{}, p)
 }
 
 // catchUpPast is a request given up as its turn by the catch-up's rate
@@ -187,7 +205,7 @@ const catchUpPast = "its turn by the catch-up's rate (--catch-up-rate) would com
 // one whose turn would come past ctx's deadline is given up then
 // (ErrPastDeadline), as the run would end first.
 func paced(ctx context.Context, api string) error {
-	p, _ := ctx.Value(pacesKey{}).(*paces)
+	p, _ := ctx.Value(pacesKey{}).(*Paces)
 	i := slices.Index(APIs, api)
 	if p == nil || i < 0 {
 		return nil

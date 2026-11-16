@@ -27,7 +27,7 @@
   alerts** ([docs/design/quota.md](docs/design/quota.md)). Each part is off
   by default, and `--max-rate`, `--max-samples`, `--timeout` and the 429
   retries are as they were.
-  - `/metrics` counts what serve itself asks of each history API, `api`
+  - `/metrics` counts what each serve process asks of each history API, `api`
     one of `prometheus`, `loki` and `grafana` (its data source proxy):
     `lapilli_serve_history_requests_total{api,answer}` by the class of the
     answer (2xx to 5xx, or none), `lapilli_serve_history_throttled_total`
@@ -36,18 +36,28 @@
     `rate`) and `lapilli_serve_history_yields_total`.
   - `--yield-on-429`: an API's first 429 to a run ends the run's requests
     to it, not asked again after a wait; the run stops after its piece,
-    and the rules it didn't replay are replayed by a later run from where
-    they were missed. `--yield-for DUR` leaves the API alone that long.
+    and what reads the history after it that round (reviews of changes,
+    the digest and what follows it, backtests again, changes carried out,
+    the replay check) waits for a later round. The rules it didn't replay
+    are replayed first by a later run, from where they were missed, and the
+    runs go no further than a week past the oldest of them, so none is
+    given up. A 429 to `--impact` or `--alerts` holds the run, not fails
+    it. `--yield-for DUR`, a day at most, leaves the API alone that long.
   - `--guard EXPR`: a PromQL expression asked before each run and each day
     of a catch-up, such as the rate of the evaluator's own evaluation
-    failures; while it returns anything, or can't be read, the run waits.
-  - `--catch-up-hours HH:MM-HH:MM`: a run more than twice `--every` and
-    `--settle` behind (the first start's `--backfill`, after being down)
-    runs only in those hours, in `--tz`; `--catch-up-rate N` asks each API
-    N requests a second at most while catching up.
+    failures; while it returns anything, or can't be read, the run waits,
+    and what reads the history after it. One refused as written fails the
+    run, each time.
+  - `--catch-up-hours HH:MM-HH:MM`: a run more than a day behind where the
+    ledger's firings are up to (the first start's `--backfill`, after being
+    down that long) runs only in those hours, in `--tz`; a run hours behind,
+    or replaying again from when a version of the rules took effect, runs
+    at once. `--catch-up-rate N` asks each API N requests a second at most
+    while catching up.
   - A run that waits is kept in the run history as `held`, with why, once
-    for each reason; it isn't counted as failed, and
-    `lapilli_serve_runs_total` counts it as `result="held"`.
+    for each reason, logged at Warn; it isn't counted as failed,
+    `lapilli_serve_runs_total` counts it as `result="held"`, and
+    `lapilli_serve_runs_held{reason}` says why the last run waited.
 
 ## [0.47.0] - 2026-11-16
 

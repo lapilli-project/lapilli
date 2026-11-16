@@ -16,6 +16,7 @@ func TestServeQuotaFlags(t *testing.T) {
 		{[]string{"--yield-for", "1h"}, "give --yield-on-429"},
 		{[]string{"--yield-on-429=maybe"}, "want true or false"},
 		{[]string{"--yield-on-429", "--yield-for", "soon"}, "--yield-for soon"},
+		{[]string{"--yield-on-429", "--yield-for", "25h"}, "a day at most"},
 		{[]string{"--catch-up-hours", "01:00"}, "--catch-up-hours"},
 		{[]string{"--catch-up-hours", "01:00-01:30"}, "shorter than --every"},
 		{[]string{"--catch-up-hours", "01:00-02:00", "--every", "2h"}, "shorter than --every"},

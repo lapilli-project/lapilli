@@ -470,6 +470,11 @@ type Server struct {
 	othersAsked prom.Counts
 	yield       *prom.Yield
 	holding     atomic.Bool
+	// heldFor is why this round's run waited, one of heldReasons, "" for
+	// none; catchUpPace paces every catch-up (--catch-up-rate), nil for
+	// none.
+	heldFor     atomic.Value
+	catchUpPace *prom.Paces
 }
 
 // status is what the worker is doing, for the UI: a text to be shown in
@@ -561,6 +566,7 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 	if cfg.Yield {
 		s.yield = &prom.Yield{For: cfg.YieldFor, Now: func() time.Time { return s.now() }}
 	}
+	s.catchUpPace = prom.NewPaces(cfg.CatchUpRate)
 	return s, nil
 }
 

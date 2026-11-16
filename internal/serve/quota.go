@@ -2,9 +2,9 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -75,42 +75,77 @@ const heldKind = "held"
 // guardTime is how long --guard is waited for.
 const guardTime = time.Minute
 
-// behind reports whether a run from cursor to now catches up: more than
-// two runs behind, as the overview's backlog says. The first start's
-// --backfill is one, and a run after being down, or replaying again from
-// when a version of the rules recorded since took effect.
-func (s *Server) behind(cursor, now time.Time) bool {
-	return now.Sub(cursor) > 2*s.cfg.Every+s.cfg.Settle
+// catchUpAfter is how far behind a run is a catch-up, which
+// --catch-up-hours keeps to its hours and --catch-up-rate paces: a day,
+// so that a run back after a short outage, hours behind, runs at once.
+const catchUpAfter = 24 * time.Hour
+
+// heldReasons are why a run waits, as /metrics says it
+// (lapilli_serve_runs_held).
+var heldReasons = []string{"catch_up_hours", "guard", "yield"}
+
+// catchingUp reports whether a run from cursor to now catches up: more
+// than catchUpAfter behind where the ledger's firings were up to (ahead),
+// which a run replaying again from when a version of the rules recorded
+// since took effect goes back from, and isn't a catch-up for.
+func catchingUp(cursor, ahead, now time.Time) bool {
+	if ahead.After(cursor) {
+		cursor = ahead
+	}
+	return now.Sub(cursor) > catchUpAfter
 }
 
-// waits says why the run from cursor to now waits for a later one, "" for
-// none: a catch-up outside --catch-up-hours; the history yielded to (still
-// in --yield-for); --guard returning anything, or unread.
-func (s *Server) waits(ctx context.Context, cursor, now time.Time) string {
-	if w := s.cfg.CatchUpHours; w != nil && s.behind(cursor, now) && !w.Has(s.now(), s.cfg.Loc) {
-		// How far behind is for the log: the reason stays the same each
-		// hour, so the run history keeps it once.
-		s.log.Info("a catch-up waits for --catch-up-hours", "behind", now.Sub(cursor).Round(time.Minute))
-		return fmt.Sprintf("a catch-up waits for --catch-up-hours %s", w)
+// wait is why a run waits for a later one: a text for the run history,
+// the same each time for the same reason, and which of heldReasons. A
+// guard refused as written isn't a wait: the run fails (refused).
+type wait struct {
+	why, reason string
+	refused     error
+}
+
+// yieldedWait is the wait of a run whose request err was yielded.
+func yieldedWait(err error) wait {
+	api := "prometheus"
+	var y *prom.Yielded
+	if errors.As(err, &y) {
+		api = y.API
+	}
+	return wait{why: "the " + api + " API answered HTTP 429, so the run waits for a later one (--yield-on-429)", reason: "yield"}
+}
+
+// waits says why the run from cursor to now waits, a zero wait for none: a
+// catch-up outside --catch-up-hours; the prometheus API yielded to, still
+// in --yield-for; --guard returning anything, or unread.
+func (s *Server) waits(ctx context.Context, cursor, ahead, now time.Time) wait {
+	catchUp := catchingUp(cursor, ahead, now)
+	if w := s.cfg.CatchUpHours; w != nil && catchUp && !w.Has(s.now(), s.cfg.Loc) {
+		s.log.Warn("a catch-up waits for --catch-up-hours", "hours", w.String(), "behind", now.Sub(cursor).Round(time.Minute))
+		return wait{why: fmt.Sprintf("a catch-up waits for --catch-up-hours %s", w), reason: "catch_up_hours"}
 	}
 	if s.yield != nil {
 		if until := s.yield.Until("prometheus"); !until.IsZero() {
-			return fmt.Sprintf("the prometheus API answered HTTP 429, and isn't asked until %s (--yield-for)", until.In(s.cfg.Loc).Format("2006-01-02 15:04"))
+			return wait{why: fmt.Sprintf("the prometheus API answered HTTP 429, and isn't asked until %s (--yield-for)", until.In(s.cfg.Loc).Format("2006-01-02 15:04")), reason: "yield"}
 		}
 	}
 	if s.cfg.Guard == "" || s.h == nil {
-		return ""
+		return wait{}
 	}
 	// Asked as the run asks: a 429 yields, with --yield-on-429.
-	gctx, cancel := context.WithTimeout(s.asking(ctx, cursor, now), guardTime)
+	gctx, cancel := context.WithTimeout(s.asking(ctx, catchUp), guardTime)
 	defer cancel()
 	at := s.now().Truncate(time.Second)
 	series, err := s.h.QueryRange(gctx, s.cfg.Guard, at, at, s.cfg.Step)
 	switch {
 	case err != nil && ctx.Err() != nil:
-		return "" // stopping: not a reason to keep
+		return wait{} // stopping: not a reason to keep
+	case err != nil && prom.IsYielded(err):
+		return yieldedWait(err)
+	case err != nil && prom.Refused(err):
+		// A typo isn't a reason to wait quietly: it is mended.
+		return wait{refused: fmt.Errorf("--guard was refused as written, and the runs wait until it is mended: %s", prom.Steady(err.Error()))}
 	case err != nil:
-		return "--guard couldn't be read, so the run waits: " + prom.Steady(err.Error())
+		s.log.Warn("--guard couldn't be read: the run waits", "err", err)
+		return wait{why: "--guard couldn't be read, so the run waits", reason: "guard"}
 	}
 	n := 0
 	for _, x := range series {
@@ -119,39 +154,50 @@ func (s *Server) waits(ctx context.Context, cursor, now time.Time) string {
 		}
 	}
 	if n > 0 {
-		s.log.Info("--guard returned series: the run waits", "series", n)
-		return "--guard returned series, so the run waits"
+		s.log.Warn("--guard returned series: the run waits", "series", n)
+		return wait{why: "--guard returned series, so the run waits", reason: "guard"}
 	}
-	return ""
+	return wait{}
 }
 
-// hold keeps a run held, of kind (hourly, backfill) over [from, to], in
-// the run history with why: once while the last run kept is held for the
-// same reason. It says so in the status and the log.
-func (s *Server) hold(ctx context.Context, kind string, from, to time.Time, why string) {
+// hold keeps a run that waits, of kind (hourly, backfill) over [from, to],
+// in the run history with why: once while the last run kept is held for
+// the same reason. A guard refused as written is kept as a run that
+// failed, each time. Either way the runs wait, and what reads the history
+// after them (runsWait).
+func (s *Server) hold(ctx context.Context, kind string, from, to time.Time, w wait) {
 	s.holding.Store(true)
-	s.count(kind, heldKind)
-	s.log.Info("a run waits", "kind", kind, "why", why)
-	if runs, err := s.l.Runs(ctx, 1); err == nil && len(runs) > 0 && runs[0].Kind == heldKind && runs[0].Error == why {
+	at := s.now()
+	if w.refused != nil {
+		s.count(kind, "failed")
+		s.fail("a run", w.refused)
+		if err := s.l.AddRun(context.WithoutCancel(ctx), ledger.Run{Kind: kind, Started: at, Finished: at, From: from, To: to, Error: w.refused.Error()}); err != nil {
+			s.fail("a run", err)
+		}
 		return
 	}
-	at := s.now()
-	if err := s.l.AddRun(context.WithoutCancel(ctx), ledger.Run{Kind: heldKind, Started: at, Finished: at, From: from, To: to, Error: why}); err != nil {
+	s.heldFor.Store(w.reason)
+	s.count(kind, heldKind)
+	s.log.Warn("a run waits", "kind", kind, "why", w.why)
+	if runs, err := s.l.Runs(ctx, 1); err == nil && len(runs) > 0 && runs[0].Kind == heldKind && runs[0].Error == w.why {
+		return
+	}
+	if err := s.l.AddRun(context.WithoutCancel(ctx), ledger.Run{Kind: heldKind, Started: at, Finished: at, From: from, To: to, Error: w.why}); err != nil {
 		s.fail("a run", err)
 	}
 }
 
-// asking is ctx for a run's requests from cursor to now: yielding, with
-// --yield-on-429, and at --catch-up-rate while catching up.
-func (s *Server) asking(ctx context.Context, cursor, now time.Time) context.Context {
+// asking is ctx for a run's requests: yielding, with --yield-on-429, and,
+// for a catch-up, at --catch-up-rate, one pace for all the runs.
+func (s *Server) asking(ctx context.Context, catchUp bool) context.Context {
 	if prom.CountsOf(ctx) == nil {
 		ctx = prom.Counting(ctx, &s.asked) // as the leader's work is
 	}
 	if s.yield != nil {
 		ctx = prom.Yielding(ctx, s.yield)
 	}
-	if s.cfg.CatchUpRate > 0 && s.behind(cursor, now) {
-		ctx = prom.Pacing(ctx, s.cfg.CatchUpRate)
+	if catchUp {
+		ctx = prom.Pacing(ctx, s.catchUpPace)
 	}
 	return ctx
 }
@@ -166,10 +212,50 @@ func (s *Server) yielded() []string {
 	return s.yield.Yielded()
 }
 
-// runsWait reports whether this round's run waited, or yielded to the
-// prometheus API, which what follows a run asks too.
+// runsWait reports whether this round's run waited, or yielded to an API:
+// what reads the history after the runs waits for a later round then.
 func (s *Server) runsWait() bool {
-	return s.holding.Load() || slices.Contains(s.yielded(), "prometheus")
+	return s.holding.Load() || len(s.yielded()) > 0
+}
+
+// missedEnd is where a run's piece from cursor ends, to at most: with
+// --yield-on-429, no later than ledger.MissedFor after the earliest a rule
+// was left missed from by a yield, so that a run that misses it again
+// doesn't give it up. At cursor itself, the piece moves the cursor
+// nowhere: it replays the rules missed, and the next pieces wait for them.
+func (s *Server) missedEnd(ctx context.Context, to time.Time) (time.Time, error) {
+	if s.yield == nil {
+		return to, nil
+	}
+	missed, err := s.l.Missed(ctx)
+	if err != nil || len(missed) == 0 {
+		return to, err
+	}
+	table, err := s.l.RuleTable(ctx)
+	if err != nil {
+		return to, err
+	}
+	var oldest time.Time
+	for _, r := range table {
+		if at, ok := missed[r.Name]; ok && r.Source == "" && prom.IsYieldedReason(r.Unsupported) && (oldest.IsZero() || at.Before(oldest)) {
+			oldest = at
+		}
+	}
+	if end := oldest.Add(ledger.MissedFor).Truncate(s.cfg.Step); !oldest.IsZero() && end.Before(to) {
+		return end, nil
+	}
+	return to, nil
+}
+
+// replayOrder is the order a run replays its rules in, by where each
+// starts: the latest first, so that one far behind doesn't keep the rest
+// from their turn; with --yield-on-429, the earliest first, so that a
+// rule a 429 left missed is asked before a later one cuts the run short.
+func (s *Server) replayOrder(a, b time.Time) int {
+	if s.yield != nil {
+		return a.Compare(b)
+	}
+	return b.Compare(a)
 }
 
 // askedFor counts, into s.askedFor, a replay asked for by a person or an
@@ -181,8 +267,10 @@ func (s *Server) askedFor(ctx context.Context) context.Context {
 	return prom.Counting(ctx, &s.othersAsked)
 }
 
-// historyMetrics writes what lapilli serve asked of each history API since
-// it started: the leader's work, and what people and agents asked for.
+// historyMetrics writes what this lapilli serve process asked of each
+// history API since it started: the leader's work, and what people and
+// agents asked for; and why its last run waited. prometheus is always
+// read once there is a history: serve replays only with --prometheus.
 func (s *Server) historyMetrics(w io.Writer) {
 	if s.h == nil {
 		return // firings copied in alone: no history is asked
@@ -230,6 +318,17 @@ func (s *Server) historyMetrics(w io.Writer) {
 	b.WriteString("# HELP lapilli_serve_history_yields_total Times the runs yielded to each history API, as it answered HTTP 429 (--yield-on-429), since lapilli serve started.\n# TYPE lapilli_serve_history_yields_total counter\n")
 	for _, api := range apis {
 		fmt.Fprintf(&b, "lapilli_serve_history_yields_total{api=%q} %d\n", api, loads[api].Yields)
+	}
+	if s.yield != nil || s.cfg.Guard != "" || s.cfg.CatchUpHours != nil {
+		held, _ := s.heldFor.Load().(string)
+		b.WriteString("# HELP lapilli_serve_runs_held Whether the last run waited for a later one, by why: 1 for the reason it waited for (catch_up_hours, guard or yield, docs/design/quota.md), 0 for the others.\n# TYPE lapilli_serve_runs_held gauge\n")
+		for _, r := range heldReasons {
+			n := 0
+			if r == held {
+				n = 1
+			}
+			fmt.Fprintf(&b, "lapilli_serve_runs_held{reason=%q} %d\n", r, n)
+		}
 	}
 	io.WriteString(w, b.String())
 }

@@ -167,7 +167,12 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 			s.fail("notifying", err)
 		}
 	}
-	if s.replaying() && s.still(ctx) {
+	// While the runs wait (--guard, --catch-up-hours, a 429 yielded to),
+	// what reads the history waits with them, for a later round: reviews
+	// of changes, the digest and what follows it, backtests again, and
+	// changes carried out (docs/design/quota.md).
+	waiting := s.runsWait()
+	if s.replaying() && s.still(ctx) && !waiting {
 		if err := s.reviewChanges(ctx, o); err != nil {
 			s.fail("reviewing a change to the rules", err)
 		}
@@ -175,14 +180,16 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	if !s.still(ctx) {
 		return
 	}
-	fresh, err := s.digest(ctx, o)
-	if err != nil {
-		s.fail("the weekly digest", err)
+	var fresh bool
+	if !waiting {
+		if fresh, err = s.digest(ctx, o); err != nil {
+			s.fail("the weekly digest", err)
+		}
 	}
 	// After a digest worked out afresh, the next round: the digest holds the
 	// runs up for --timeout and firedOnWithin at most, and the two together
 	// not for twice --timeout.
-	if s.replaying() && !fresh && s.still(ctx) {
+	if s.replaying() && !fresh && s.still(ctx) && !waiting {
 		if err := s.nearLater(ctx, o); err != nil {
 			s.fail("near misses", err)
 		}
@@ -202,7 +209,7 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	}
 	// On a run alone: a write that pokes the work doesn't make Lapilli
 	// replay twelve weeks again.
-	if run && s.replaying() && s.still(ctx) {
+	if run && s.replaying() && s.still(ctx) && !waiting {
 		if err := s.backtestStale(ctx); err != nil {
 			s.fail("backtesting stale proposals again", err)
 		}
@@ -210,8 +217,10 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	if !s.still(ctx) {
 		return
 	}
-	if err := s.carryOut(ctx); err != nil {
-		s.fail("changing the rules", err)
+	if !waiting {
+		if err := s.carryOut(ctx); err != nil {
+			s.fail("changing the rules", err)
+		}
 	}
 	if !s.still(ctx) {
 		return
@@ -285,6 +294,9 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 	if cursor.IsZero() {
 		cursor, settle = now.Add(-s.cfg.Backfill), 0
 	}
+	// Where the ledger's firings are up to: replaying again from further
+	// back isn't a catch-up (docs/design/quota.md).
+	ahead := cursor
 	// A version of the rules recorded since the hours it was in effect were
 	// replayed: replayed again from there.
 	again, seq, err := s.l.AgainFrom(ctx)
@@ -299,6 +311,7 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 	piece := 24 * time.Hour
 	var looked time.Time // where the run was last looked at to wait
 	s.holding.Store(false)
+	s.heldFor.Store("")
 	if s.yield != nil {
 		s.yield.Begin(s.now())
 	}
@@ -309,6 +322,15 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		if to.After(now) {
 			to = now
 		}
+		// Not so far that a rule a 429 left missed would be given up: at
+		// cursor, the piece replays what was missed, and goes no further.
+		if end, err := s.missedEnd(ctx, to); err != nil {
+			s.fail("the ledger", err)
+			return
+		} else if to = end; !to.After(cursor) {
+			to = cursor
+		}
+		stay := to.Equal(cursor)
 		kind := "hourly"
 		if to.Before(now) || settle == 0 {
 			kind = "backfill"
@@ -318,15 +340,20 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		// run tries again.
 		if !cursor.Equal(looked) {
 			looked = cursor
-			if why := s.waits(ctx, cursor, now); why != "" {
-				s.hold(ctx, kind, from, now, why)
+			if w := s.waits(ctx, cursor, ahead, now); w.why != "" || w.refused != nil {
+				s.hold(ctx, kind, from, now, w)
 				return
 			}
 		}
 		s.status.set("replaying %s → %s", from.In(s.cfg.Loc).Format("2006-01-02 15:04"), to.In(s.cfg.Loc).Format("2006-01-02 15:04"))
 		began := s.now()
-		found, unfinished, err := s.find(s.asking(ctx, cursor, now), from, to)
+		found, unfinished, err := s.find(s.asking(ctx, catchingUp(cursor, ahead, now)), from, to)
 		switch {
+		case err != nil && prom.IsYielded(err):
+			// The --impact or ALERTS query yielded: the run waits, as it
+			// failed for nothing of its own.
+			s.hold(ctx, kind, from, now, yieldedWait(err))
+			return
 		case unfinished && to.Sub(cursor) > s.cfg.Every:
 			// Too much at once for the time given: half as much.
 			piece = to.Sub(cursor) / 2
@@ -368,6 +395,10 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 		}
 		if ys := s.yielded(); len(ys) > 0 {
 			s.log.Warn("the runs yielded to a history API that answered HTTP 429: they stop here, and the rules not replayed are replayed by a later run", "apis", strings.Join(ys, ","))
+			return
+		}
+		if stay {
+			s.log.Warn("the runs go no further until the rules a 429 left missed are replayed: one missed longer than a week would be given up", "to", to)
 			return
 		}
 	}
@@ -486,8 +517,9 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 	meta := map[string]*ledger.Rule{}
 	var order []string
 	// The latest first: the rules the run is for, then those catching up,
-	// so one rule far behind doesn't keep the rest from their turn.
-	for _, since := range slices.SortedFunc(maps.Keys(groups), func(a, b time.Time) int { return b.Compare(a) }) {
+	// so one rule far behind doesn't keep the rest from their turn; with
+	// --yield-on-429, the earliest first (replayOrder).
+	for _, since := range slices.SortedFunc(maps.Keys(groups), s.replayOrder) {
 		vs, err := s.versions(ctx, since, to)
 		if err != nil && ctx.Err() == nil {
 			return f, false, err
