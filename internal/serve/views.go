@@ -1005,6 +1005,16 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 	if err != nil {
 		return ruleView{}, err
 	}
+	// Seen from a team's pages (?team=), a rule of that team is judged by
+	// the incidents the team owns, as the rules list it was picked from
+	// judges it: the same badge on both.
+	o, err := s.owners(ctx)
+	if err != nil {
+		return ruleView{}, err
+	}
+	if team, ok := o.team(q.Get("team")); ok && o.rule[name] == team.ID {
+		t.only(o, team)
+	}
 	lines, silent, err := s.ruleLines(ctx, lang(r), t, n)
 	if err != nil {
 		return ruleView{}, err
@@ -1135,10 +1145,6 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 		v.Latest = append(v.Latest, s.firingLine(f))
 	}
 	if err := s.notifiedFirings(ctx, v.Latest); err != nil {
-		return ruleView{}, err
-	}
-	o, err := s.owners(ctx)
-	if err != nil {
 		return ruleView{}, err
 	}
 	v.Team, v.TeamID, v.Note, v.Teams, v.Statuses = o.teamOf(name), o.rule[name], o.notes[name], o.teams, ledger.Statuses

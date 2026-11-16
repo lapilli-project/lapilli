@@ -77,9 +77,10 @@ func TestFacetsNoRecord(t *testing.T) {
 	if len(un.Rows) != 17 || slices.ContainsFunc(un.Rows, func(r ruleRow) bool { return r.Noisy || r.Precision != "–" || !r.NoRecord }) {
 		t.Errorf("perf=unrecorded: %d rows", len(un.Rows))
 	}
-	// Of them, the six that fire as often as a noisy rule are what the
-	// overview's panel lists; the rest fired too seldom to be listed there,
-	// and are no more OK for it.
+	// Of them, the six with as many unjudged as a noisy rule fires are
+	// Unrecorded, as before (the kind the overview's panel, from the
+	// digest's week, lists); the rest fired too seldom for that, and are no
+	// more OK for it.
 	if n := len(slices.DeleteFunc(slices.Clone(un.Rows), func(r ruleRow) bool { return !r.Unrecorded })); n != 6 {
 		t.Errorf("fired often with no record: %d, want 6", n)
 	}

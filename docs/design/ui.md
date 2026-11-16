@@ -160,9 +160,10 @@ would say a state alone.
 - **What Lapilli can't judge is never ok or bad.** No record, no verdict:
   a week, a rule or a backtest with no incident written down to judge its
   firings by is unknown, and a number of it is "–" in no colour. A rule
-  none of whose firings was judged is listed as OK when it isn't noisy
-  (the Performance facet counts it so), but its badge is unknown, and its
-  precision "–" beside it says why in words. A headline number's change is
+  none of whose firings was judged is "? No record", however few they
+  were, in the Performance facet too, and its precision "–" beside it says
+  why in words; seen from a team's pages, a rule of the team's is judged by
+  the incidents the team owns, on its page as on the list. A headline number's change is
   better or worse only when both weeks were judged (`tile.Better`,
   `tile.Worse` stay false otherwise), and a no-record backtest's difference
   is a plain number or "–".

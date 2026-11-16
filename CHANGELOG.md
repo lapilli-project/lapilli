@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.45.1] - 2026-11-16
+
+A rule nothing could judge, as no incident was written down, could still
+read "○ OK" on the rules list; a rule's page, picked from a team's list,
+could say otherwise than the list did. No ledger schema change; the API and
+MCP answer as they did.
+
 ### Fixed
 
 - **A rule with no record was "OK".** A rule none of whose firings was
@@ -11,8 +18,14 @@
   now, on the rules list, its page and the facet (`perf=unrecorded`,
   `is:unrecorded`), as a rule that fired as often already was. The
   overview's panel of rules that fired often with no record lists the same
-  rules as before. A rule some of whose firings were judged is OK, or
-  noisy, by those, as before.
+  rules as before. A rule some of whose firings were judged is judged by
+  those, as before.
+- **A rule's page, seen from a team's.** Picked from a team's rules list
+  (`?team=`), a rule of that team's was judged on its page by everyone's
+  incidents, and on the list by the team's: the list could say "? No
+  record" and the page "● Noisy". Its page is judged by the team's
+  incidents too now, as the list is; from another team's, or none,
+  by everyone's.
 - **`--max-samples` says what it bounds.** A replay reads a rule's query a
   day at a time, on days from midnight UTC, and the bound is each read's:
   a day's, some 6,900 series firing all day at a minute by default. The
