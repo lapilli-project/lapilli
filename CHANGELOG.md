@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.52.0] - 2026-11-16
+
 ### Changed
 
 - **A window's or an incident's labels are summed up, by name.** A window
