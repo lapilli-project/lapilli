@@ -286,13 +286,14 @@ Output:
                       HTTP 429 is asked fewer at once, and the request asked
                       again after the wait it says (Retry-After), or after
                       waits of up to three minutes in all
-  --max-samples N     read the answers to one range, a rule's query over the
-                      period, to N samples in all at most (default 10000000,
-                      some 600 MB at the peak, 64 bytes a sample): past it,
-                      the rule isn't replayed, as one whose query failed. A
-                      week at a minute holds 10,080 samples a series firing
-                      all through it, 28 days 40,320: a longer --step, or a
-                      shorter --since, holds fewer
+  --max-samples N     read the answers to one read of a rule's query to N
+                      samples in all at most (default 10000000, some 600 MB
+                      at the peak, 64 bytes a sample): past it, the rule
+                      isn't replayed, as one whose query failed. A replay
+                      reads a day at a time, on days from midnight UTC: a day
+                      at a minute holds 1,440 samples a series firing all
+                      through it, so the default is some 6,900 such series;
+                      a longer --step holds fewer
   --progress=false    don't say on stderr how a run is going: past 15s, every
                       30s, the rules replayed, the requests, those asked
                       again and those answered HTTP 429. A run the history

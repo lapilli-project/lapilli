@@ -17,11 +17,11 @@ import (
 	"lapilli.dev/internal/prom"
 )
 
-// The answers to one range, a rule's query over the period, are held to
-// --max-samples in all (prom.DefaultMaxSamples, 10,000,000 as built; 2,000
-// here, as a run of some 3,600 is past it): past it, the rule isn't replayed,
-// said with the bound and how to read it all the same; with a larger
-// --max-samples, the same run reads.
+// The answers to one read of a rule's query, a day of it in a replay, are
+// held to --max-samples in all (prom.DefaultMaxSamples, 10,000,000 as
+// built; 2,000 here, as a run of some 3,600 is past it): past it, the rule
+// isn't replayed, said with the bound and how to read it all the same; with
+// a larger --max-samples, the same run reads.
 func TestMaxSamples(t *testing.T) {
 	was, wasHistory, wasNow := prom.DefaultMaxSamples, newHistory, now
 	prom.DefaultMaxSamples = 2000
@@ -29,7 +29,11 @@ func TestMaxSamples(t *testing.T) {
 	newHistory = func(ctx context.Context, f *verdictFlags) (history, error) {
 		return f.prometheus().History(ctx, "lapilli/test")
 	}
-	now = time.Now
+	// A replay reads a day at a time, on days from midnight UTC, and the
+	// bound is a read's: six hours that end between 02:40 and 03:20 UTC are
+	// two reads of under 2,000 samples each, which the bound lets by. Noon
+	// UTC keeps the six hours in one day, as the run this test means.
+	now = func() time.Time { return time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC) }
 	t.Cleanup(func() { prom.DefaultMaxSamples, newHistory, now = was, wasHistory, wasNow })
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/query_range" {
