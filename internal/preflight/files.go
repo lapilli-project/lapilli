@@ -51,6 +51,7 @@ func (p *run) files(ctx context.Context) {
 					continue
 				} else {
 					p.allowURL("on-call", raw)
+					p.hide(flag, raw)
 				}
 			}
 			each, cancel := context.WithTimeout(ctx, eachTime)
@@ -136,6 +137,10 @@ func (p *run) secrets() {
 		add("--report-dest "+name, s.ReportDests[name], 0, true)
 	}
 	if len(all) == 0 {
+		return
+	}
+	if p.c.Offline {
+		p.offline("secrets.files", plural(len(all), "secret file")+" not read: they are where serve runs")
 		return
 	}
 	var said, bad []string

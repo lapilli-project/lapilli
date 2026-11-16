@@ -206,6 +206,9 @@ func (p *run) hourly(rs []rules.Rule) {
 	day := p.now.Truncate(24 * time.Hour)
 	n := max(int(24*time.Hour/s.Every), 1)
 	h := &Hourly{Runs: n, By: map[string]int{}}
+	// How long each run takes at --max-rate, at least: each API is paced
+	// of its own.
+	var took, longest time.Duration
 	for k := 1; k <= n; k++ {
 		to := day.Add(time.Duration(k) * s.Every).Truncate(s.Step)
 		from := to.Add(-s.Every - s.Settle).Truncate(s.Step)
@@ -218,6 +221,11 @@ func (p *run) hourly(rs []rules.Rule) {
 			h.By[k] += v
 		}
 		h.Most = max(h.Most, sum(by))
+		if p.c.MaxRate > 0 {
+			t := floor(by, p.c.MaxRate)
+			took += t
+			longest = max(longest, t)
+		}
 	}
 	h.Day = sum(h.By)
 	h.Requests = (h.Day + n - 1) / n
@@ -235,11 +243,9 @@ func (p *run) hourly(rs []rules.Rule) {
 	}
 	it := Item{ID: "estimate.hourly", State: OK, What: what}
 	if p.c.MaxRate > 0 {
-		most := floor(map[string]int{"": h.Most}, p.c.MaxRate)
-		h.Seconds = most.Seconds()
-		it.What += fmt.Sprintf(": at --max-rate %s a run takes %s at least, the most %s", rate(p.c.MaxRate),
-			dur(floor(map[string]int{"": h.Requests}, p.c.MaxRate)), dur(most))
-		if most > s.Every {
+		h.Seconds = longest.Seconds()
+		it.What += fmt.Sprintf(": at --max-rate %s a run takes %s at least, the most %s", rate(p.c.MaxRate), dur(took/time.Duration(n)), dur(longest))
+		if longest > s.Every {
 			it.State = Problem
 			it.Why = fmt.Sprintf("a run's requests at --max-rate take longer than --every %s: the runs fall behind, and never catch up", dur(s.Every))
 			it.Fix = "raise --max-rate, or --every, or give fewer rules to replay (--rule)"
@@ -262,6 +268,7 @@ func (p *run) backfill(rs []rules.Rule) {
 	cursor, settle := now.Add(-s.Backfill), time.Duration(0)
 	b := &Backfill{By: map[string]int{}}
 	var catchUp []map[string]int // the pieces more than a day behind
+	rest := map[string]int{}     // the requests of the others, by API
 	var mostBy map[string]int
 	for cursor.Before(now) {
 		from := cursor.Add(-settle).Truncate(s.Step)
@@ -282,6 +289,10 @@ func (p *run) backfill(rs []rules.Rule) {
 		}
 		if now.Sub(cursor) > serve.CatchUpAfter {
 			catchUp = append(catchUp, by)
+		} else {
+			for k, v := range by {
+				rest[k] += v
+			}
 		}
 		b.Pieces++
 		cursor, settle = to, s.Settle
@@ -300,11 +311,15 @@ func (p *run) backfill(rs []rules.Rule) {
 		p.nights(nil, 0)
 		return
 	}
+	// A catch-up's pieces at the lower of the rates; the rest, less than a
+	// day behind, at --max-rate, or, without it, no sooner than at once.
 	total := time.Duration(0)
 	for _, by := range catchUp {
 		total += floor(by, r)
 	}
-	total += floor(map[string]int{"": b.Requests - sumAll(catchUp)}, max(p.c.MaxRate, r))
+	if p.c.MaxRate > 0 {
+		total += floor(rest, p.c.MaxRate)
+	}
 	b.Rate, b.Seconds = r, total.Seconds()
 	day := floor(mostBy, r)
 	it.What += fmt.Sprintf(": at least %s at %s a second", dur(total), rate(r))
@@ -323,17 +338,13 @@ func (p *run) backfill(rs []rules.Rule) {
 	p.nights(catchUp, r)
 }
 
-func sumAll(ms []map[string]int) int {
-	n := 0
-	for _, m := range ms {
-		n += sum(m)
-	}
-	return n
-}
-
-// nights counts the nights of --catch-up-hours the backfill takes: a day
-// of it begins only while the hours last, and one they end in is the last
-// of that night, from the first run in the hours on, at rate.
+// nights counts the nights of --catch-up-hours the backfill takes, at
+// rate: a day of it begins only while the hours last, and one they end in
+// is the last of that night, from the first run in the hours on. Outside
+// them the catch-up waits, its cursor where it was, and the day that
+// passes is a day more to catch up (docs/design/quota.md, 4): one of the
+// catch-up's days, on average. A night that holds no more than a day of
+// it never catches up.
 func (p *run) nights(catchUp []map[string]int, at float64) {
 	w := p.c.Serve.CatchUpHours
 	if w == nil {
@@ -344,16 +355,39 @@ func (p *run) nights(catchUp []map[string]int, at float64) {
 		return
 	}
 	n := &Nights{Hours: w.String(), PerNight: int(w.Len().Seconds() * at)}
-	for i := 0; i < len(catchUp); {
+	p.r.Estimates.Nights = n
+	if len(catchUp) == 0 {
+		p.add(Item{ID: "estimate.nights", State: OK, What: "none: the backfill is less than a day behind, and runs at any hour"})
+		return
+	}
+	var left []time.Duration
+	var all time.Duration
+	for _, by := range catchUp {
+		t := floor(by, at)
+		left, all = append(left, t), all+t
+	}
+	day := all / time.Duration(len(left))
+	if day >= w.Len() {
+		n.Nights = -1
+		p.add(Item{ID: "estimate.nights", State: Problem, What: fmt.Sprintf("never: a night of %s at %s a second holds %s requests, no more than a day of the catch-up asks",
+			w, rate(at), num(n.PerNight)),
+			Why: "the catch-up waits outside its hours, and each day it waits is a day more to catch up: the ledger falls further behind",
+			Fix: "give --catch-up-hours longer, or --catch-up-rate more, or a shorter --backfill"})
+		return
+	}
+	const most = 3650
+	for len(left) > 0 && n.Nights < most {
 		n.Nights++
-		for t := time.Duration(0); i < len(catchUp) && t < w.Len(); i++ {
-			t += floor(catchUp[i], at)
+		for t := time.Duration(0); len(left) > 0 && t < w.Len(); left = left[1:] {
+			t += left[0]
+		}
+		if len(left) > 0 {
+			left = append(left, day) // the day that passed
 		}
 	}
-	p.r.Estimates.Nights = n
 	p.add(Item{ID: "estimate.nights", State: OK, What: fmt.Sprintf("%s at least, in %s at %s a second, %s of the backfill's requests a night",
 		plural(n.Nights, "night"), w, rate(at), num(n.PerNight)),
-		Why: "each 429 with --yield-on-429, or each time the guard holds the runs, makes it longer; nothing newer is recorded meanwhile, so the pages show the ledger days behind until it is done"})
+		Why: "each day the catch-up waits outside its hours is a day more to catch up, counted; each 429 with --yield-on-429, or each time the guard holds the runs, makes it longer; nothing newer is recorded meanwhile, so the pages show the ledger days behind until it is done"})
 }
 
 // beside counts what serve asks a day beside the runs.

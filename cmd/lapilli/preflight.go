@@ -20,7 +20,12 @@ replay, whether it reaches the history and signs in to it, what its tokens,
 files and ledger hold, and how many requests, how long, how many nights and
 how much memory its runs will take. It writes nothing, replays nothing, and
 sends no request but the reads it makes, which an allowlist holds it to
-(docs/design/preflight.md).
+(docs/design/preflight.md). What the clouds' credential chains do of their
+own is outside it: Google's metadata server (and whether it is there, off
+Google Cloud), the Azure CLI (which may write its token cache), OCI's
+instance and resource principals and OKE's workload identity (its auth
+service's POST among them), and the processes AWS's credential_process and
+Google's executable credentials start.
 
 Usage:
   lapilli preflight [serve's flags] [--json] [--fail-unknown] [--offline]
@@ -33,7 +38,8 @@ serve refuses, it refuses, and exits 2. Its own:
   --offline           ask nothing: the items that need a request are
                       unknown; the flags, the rule files, the other files
                       and the estimates of requests and time are worked out.
-                      For CI, against what a pull request changes
+                      The files of secrets and --ledger-url-file aren't
+                      read. For CI, against what a pull request changes
   --preflight-timeout DUR
                       the whole of it (default 2m); --timeout stays serve's,
                       a run's, read for the estimates
@@ -99,7 +105,7 @@ func runPreflight(args []string, stdout, stderr io.Writer) int {
 		}
 		rest = append(rest, a)
 	}
-	st, err := readServe(rest)
+	st, err := readServe(rest, offline)
 	if err != nil {
 		return refuse(err)
 	}
@@ -112,14 +118,7 @@ func runPreflight(args []string, stdout, stderr io.Writer) int {
 	if f.loki != "" {
 		c.Loki = f.lokiSource()
 	}
-	more := [][2]string{{"--check-grafana", f.checkGrafana}}
-	for _, a := range f.alarms {
-		more = append(more, [2]string{"--alarms " + a.source, a.url})
-	}
-	if c.Serve.OIDC != nil {
-		more = append(more, [2]string{"--oidc-issuer", c.Serve.OIDC.Issuer})
-	}
-	c.Scrub = f.scrubber(more...)
+	c.Scrubber = func(learned ...[2]string) func(string) string { return f.scrubber(append(redacted(st), learned...)...) }
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	rep := preflight.Run(ctx, c)
@@ -133,4 +132,21 @@ func runPreflight(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return rep.Exit(failUnknown)
+}
+
+// redacted are the values, beside where the history is, that what a
+// preflight prints never says, by flag: the other URLs serve is given.
+func redacted(st serveSetup) [][2]string {
+	f, c := st.f, st.cfg
+	more := [][2]string{{"--check-grafana", f.checkGrafana}}
+	for _, a := range f.alarms {
+		more = append(more, [2]string{"--alarms " + a.source, a.url})
+	}
+	if c.OIDC != nil {
+		more = append(more, [2]string{"--oidc-issuer", c.OIDC.Issuer})
+	}
+	if c.Proxy != nil {
+		more = append(more, [2]string{"--proxy-jwt-jwks", c.Proxy.JWKS}, [2]string{"--proxy-jwt-issuer", c.Proxy.Issuer})
+	}
+	return more
 }

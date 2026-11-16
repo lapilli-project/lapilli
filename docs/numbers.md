@@ -563,7 +563,7 @@ out when it is zero or empty, as in the report.
 | `estimates` | `hourly`†, `backfill`†, `nights`†, `beside`†, `memory`† |
 | `estimates.hourly` | `runs`, `requests`, `most`, `day`, `by`, `guard`, `impact`, `seconds`†, `share`† |
 | `estimates.backfill` | `pieces`, `requests`, `most`, `by`, `guard`, `impact`, `rate`†, `seconds`†, `piece_hours`† |
-| `estimates.nights` | `hours`, `nights`, `per_night` |
+| `estimates.nights` | `hours`, `nights` (`-1`: never, the catch-up falls further behind), `per_night` |
 | `estimates.beside` | `day`, `by` |
 | `estimates.memory` | `from` (`alerts`, `caps`), `peak_bytes`, `request_bytes`, `limit_bytes`, `cgroup_bytes`† |
 

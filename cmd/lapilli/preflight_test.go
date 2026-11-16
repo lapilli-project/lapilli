@@ -429,3 +429,168 @@ func TestPreflightRedacted(t *testing.T) {
 		}
 	}
 }
+
+// Every source of rules serve reads is read through the allowlist with
+// nothing refused: a refusal is a bug of lapilli's, never the setup's.
+func TestPreflightEverySource(t *testing.T) {
+	was := now
+	now = time.Now
+	t.Cleanup(func() { now = was })
+	api := newFake(t, "the APIs", func(w http.ResponseWriter, r *http.Request, form url.Values) bool {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/api/v1/query_range":
+			matrix(w, fmt.Sprintf(`{"metric":{},"values":[[%s,"1"]]}`, form.Get("start")))
+		case r.Method == "GET" && r.URL.Path == "/api/v1/rules":
+			fmt.Fprint(w, `{"status":"success","data":{"groups":[{"name":"g","file":"f","interval":60,"rules":[{"type":"alerting","name":"Down","query":"up == 0","duration":0,"labels":{},"annotations":{}}]}]}}`)
+		case r.Method == "GET" && r.URL.Path == "/prometheus/config/v1/rules":
+			fmt.Fprint(w, "shop:\n  - name: g\n    rules:\n      - alert: Down\n        expr: up == 0\n")
+		case r.Method == "GET" && r.URL.Path == "/loki/api/v1/labels":
+			fmt.Fprint(w, `{"status":"success","data":["app"]}`)
+		case r.Method == "GET" && r.URL.Path == "/loki/api/v1/rules":
+			fmt.Fprint(w, "shop:\n  - name: logs\n    rules:\n      - alert: LogErrors\n        expr: sum(count_over_time({app=\"checkout\"} |= \"error\" [5m])) > 10\n")
+		case r.Method == "GET" && r.URL.Path == "/prometheus/api/v1/rules":
+			fmt.Fprint(w, `{"status":"success","data":{"groups":[]}}`)
+		case r.Method == "GET" && r.URL.Path == "/api/v1/provisioning/alert-rules/export":
+			fmt.Fprint(w, pfGrafanaExport)
+		case r.Method == "GET" && r.URL.Path == "/api/datasources/uid/prom":
+			fmt.Fprint(w, `{"type":"prometheus"}`)
+		case r.Method == "GET" && r.URL.Path == "/api/datasources/uid/logs":
+			fmt.Fprint(w, `{"type":"loki"}`)
+		case r.Method == "GET" && r.URL.Path == "/api/datasources/proxy/uid/logs/loki/api/v1/labels":
+			fmt.Fprint(w, `{"status":"success","data":["app"]}`)
+		default:
+			return false
+		}
+		return true
+	})
+	srv := httptest.NewServer(api)
+	t.Cleanup(srv.Close)
+	cw := alarmtest.NewCloudWatch("eu-west-1")
+	cw.Add(map[string]any{"AlarmName": "QueueDepth", "Namespace": "AWS/SQS", "MetricName": "ApproximateNumberOfMessagesVisible",
+		"Statistic": "Average", "Period": 60, "EvaluationPeriods": 5, "Threshold": 1000, "ComparisonOperator": "GreaterThanThreshold"}, "OK", nil)
+	before := http.DefaultTransport
+	http.DefaultTransport = &routed{next: before, hosts: map[string]http.Handler{"monitoring.eu-west-1.amazonaws.com": cw}}
+	t.Cleanup(func() { http.DefaultTransport = before })
+	dir := t.TempDir()
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLEEXAMPLE")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "example-secret")
+	t.Setenv("AWS_CONFIG_FILE", filepath.Join(dir, "none"))
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(dir, "none"))
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	rules := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - alert: Down\n        expr: up == 0\n")
+	history := t.TempDir()
+	os.MkdirAll(filepath.Join(history, "2026-10-01T00:00:00Z"), 0o750)
+	os.WriteFile(filepath.Join(history, "2026-10-01T00:00:00Z", "rules.yaml"), []byte("groups:\n  - name: g\n    rules:\n      - alert: Down\n        expr: up == 0\n"), 0o600)
+	lokiRules := write(t, "loki.yaml", "groups:\n  - name: logs\n    rules:\n      - alert: LogErrors\n        expr: sum(count_over_time({app=\"checkout\"} |= \"error\" [5m])) > 10\n")
+	for _, args := range [][]string{
+		{"--rules", rules, "--prometheus", srv.URL},
+		{"--rules-history", history, "--prometheus", srv.URL},
+		{"--loaded-rules", "--prometheus", srv.URL},
+		{"--grafana", srv.URL, "--prometheus", srv.URL},
+		{"--ruler", srv.URL + "/prometheus/config/v1/rules", "--prometheus", srv.URL},
+		{"--loki-rules", lokiRules, "--loki", srv.URL, "--prometheus", srv.URL},
+		{"--loki-loaded-rules", "--loki", srv.URL, "--prometheus", srv.URL},
+		{"--alarms", "cw=https://monitoring.eu-west-1.amazonaws.com", "--rules", rules, "--prometheus", srv.URL},
+		{"--firings-token-file", write(t, "firings", "firings-token-0123456789"), "--incidents-listen", "127.0.0.1:9091"},
+	} {
+		rep, code, out := pfReport(t, append(args, "--ledger", t.TempDir(), "--check-content=false", "--check-replay=false")...)
+		asked := rep["asked"].(map[string]any)
+		if asked["refused"].(float64) != 0 || code != 0 {
+			t.Errorf("%s: exit %d, asked %v:\n%s", args[0], code, asked, out)
+		}
+		if it := pfItems(rep)["rules.read"]; it != nil && it["state"] != "ok" || it == nil && args[0] != "--firings-token-file" {
+			t.Errorf("%s: %v", args[0], it)
+		}
+	}
+	if len(cw.Errs) > 0 {
+		t.Errorf("CloudWatch: %v", cw.Errs)
+	}
+}
+
+// --offline reads no secret's file and no --ledger-url-file, which CI
+// doesn't hold: it says so, and goes on.
+func TestPreflightOfflineSecrets(t *testing.T) {
+	rules := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - alert: Down\n        expr: up == 0\n")
+	gone := filepath.Join(t.TempDir(), "not-here")
+	args := []string{"--rules", rules, "--prometheus", "http://prometheus:9090", "--ledger-url-file", gone,
+		"--incidents-listen", ":9091", "--incidents-token-file", gone, "--slack-webhook-file", gone + "-slack"}
+	var errOut bytes.Buffer
+	if code := run(append([]string{"preflight"}, args...), io.Discard, &errOut); code != 2 {
+		t.Errorf("not --offline: exit %d, %s", code, errOut.String())
+	}
+	rep, code, _ := pfReport(t, append(args, "--offline")...)
+	items := pfItems(rep)
+	if code != 0 || items["secrets.files"]["state"] != "unknown" || items["ledger.postgres"]["state"] != "unknown" {
+		t.Errorf("exit %d: %v %v", code, items["secrets.files"], items["ledger.postgres"])
+	}
+}
+
+// What a server answered is redacted whole before it is cut: a host cut
+// in two at 200 bytes is redacted all the same. And so is what serve's
+// files name: a cloud's alarms, the sign-in, the ledger's server, an
+// on-call feed's host.
+func TestPreflightRedactedEverywhere(t *testing.T) {
+	was := now
+	now = time.Now
+	t.Cleanup(func() { now = was })
+	long := "internal-k8s-monitoring-prometheus-0123456789abcdef.eu-west-1.elb.amazonaws.example.com" // 87 characters
+	refuse := func(name, body string) *fake {
+		return newFake(t, name, func(w http.ResponseWriter, r *http.Request, _ url.Values) bool {
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, body)
+			return true
+		})
+	}
+	before := http.DefaultTransport
+	http.DefaultTransport = &routed{next: before, hosts: map[string]http.Handler{
+		long + ":9090":                       refuse("Prometheus", strings.Repeat("x", 100)+" at "+long),
+		"monitoring.eu-west-1.amazonaws.com": refuse("CloudWatch", `{"__type":"AccessDenied","message":"not at monitoring.eu-west-1.amazonaws.com"}`),
+		"idp.internal.example":               refuse("the identity provider", "idp.internal.example refuses"),
+		"calendar.internal.example":          refuse("the feed", "no"),
+	}}
+	t.Cleanup(func() { http.DefaultTransport = before })
+	dir := t.TempDir()
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLEEXAMPLE")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "example-secret")
+	t.Setenv("AWS_CONFIG_FILE", filepath.Join(dir, "none"))
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(dir, "none"))
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	rules := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - alert: Down\n        expr: up == 0\n")
+	feed := write(t, "feed-url", "https://calendar.internal.example/feeds/0123456789abcdef.ics\n")
+	onCall := write(t, "on-call.yaml", "schedules:\n  - {name: primary, url_file: "+feed+"}\n")
+	var out bytes.Buffer
+	run([]string{"preflight", "--rules", rules, "--prometheus", "http://" + long + ":9090", "--alarms", "cw=https://monitoring.eu-west-1.amazonaws.com",
+		"--oidc-issuer", "https://idp.internal.example", "--oidc-client-id", "lapilli", "--external-url", "https://lapilli.example.com", "--viewers", "*@example.com",
+		"--ledger-url-file", write(t, "ledger-url", "postgres://lapilli@localhost:1/lapilli?connect_timeout=2\n"), "--on-call", onCall,
+		"--check-content=false", "--check-replay=false"}, &out, io.Discard)
+	text := out.String()
+	for _, why := range []string{"history.reach", "rules.read", "signin", "ledger.postgres", "inputs.files"} {
+		if !strings.Contains(text, "problem  "+why) {
+			t.Errorf("no problem %s:\n%s", why, text)
+		}
+	}
+	for _, hidden := range []string{long[:30], long[30:60], long[57:], "monitoring.eu-west-1", "idp.internal.example", "localhost", "calendar.internal.example", "0123456789abcdef"} {
+		if strings.Contains(text, hidden) {
+			t.Errorf("the report says %q:\n%s", hidden, text)
+		}
+	}
+}
+
+// What is left of a value to redact where a server's answer was cut, its
+// start before an ellipsis, is redacted too; a word that only begins as
+// it does isn't.
+func TestScrubberCut(t *testing.T) {
+	f := &verdictFlags{promURL: "http://prometheus-0123456789.monitoring.example.com:9090"}
+	scrub := f.scrubber()
+	for in, want := range map[string]string{
+		"refused at prometheus-01234…":         "refused at [--prometheus]…",
+		"refused at prometheus-0123456789.mo…": "refused at [--prometheus]…",
+		"the pro… was cut":                     "the [--prometheus]… was cut",
+		"see myprometheus-0123…":               "see myprometheus-0123…",
+		"pr…":                                  "pr…",
+	} {
+		if got := scrub(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+}

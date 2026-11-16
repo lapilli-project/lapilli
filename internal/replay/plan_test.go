@@ -87,6 +87,14 @@ func TestPlanIsRun(t *testing.T) {
 				later[0].For += time.Minute
 			}
 			versions = append(versions, Version{From: at, Rules: later})
+			// A rule that couldn't be replayed before the version, and can
+			// after it: Run gives up on its run at the first stint, and asks
+			// nothing of it.
+			first := append([]rules.Rule{}, versions[0].Rules...)
+			if k := len(all) / 3; k < len(first) {
+				first[k].Unsupported = "not replayed"
+			}
+			versions[0].Rules = first
 		}
 		mu := &sync.Mutex{}
 		prometheus := &tallied{mu: mu, name: "", by: map[string]int{}, asks: map[request]int{}}

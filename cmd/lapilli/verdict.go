@@ -1668,7 +1668,38 @@ func (f *verdictFlags) scrubber(more ...[2]string) func(string) string {
 		for _, h := range hide {
 			s = replaceWord(s, h.val, h.as)
 		}
+		for _, h := range hide {
+			s = replaceCut(s, h.val, h.as)
+		}
 		return address.ReplaceAllString(s, "[address]")
+	}
+}
+
+// replaceCut replaces in s what is left of old where a text was cut in it,
+// before an ellipsis, as a server's answer is cut before it is said: the
+// start of old, three characters at least, as the start of a word.
+func replaceCut(s, old, with string) string {
+	const mark = "…"
+	var b strings.Builder
+	for {
+		i := strings.Index(s, mark)
+		if i < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		head := s[:i]
+		for k := min(len(old)-1, len(head)); k >= 3; k-- {
+			if !strings.HasSuffix(head, old[:k]) {
+				continue
+			}
+			before, _ := utf8.DecodeLastRuneInString(head[:len(head)-k])
+			if len(head) == k || !(before == '.' || before == '-' || before == '_' || unicode.IsLetter(before) || unicode.IsDigit(before)) {
+				head = head[:len(head)-k] + with
+				break
+			}
+		}
+		b.WriteString(head + mark)
+		s = s[i+len(mark):]
 	}
 }
 

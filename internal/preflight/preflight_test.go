@@ -127,7 +127,8 @@ func req(t *testing.T, method, raw, form string) *http.Request {
 // and exact query, and refuses everything else before it is sent, counted.
 func TestAllowlist(t *testing.T) {
 	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
-	c := Config{Serve: serve.Config{Grafana: "https://grafana.example.com/sub", Loki: "http://loki:3100", Ruler: "http://mimir:8080/prometheus/config/v1/rules"},
+	c := Config{Serve: serve.Config{Grafana: "https://grafana.example.com/sub", Loki: "http://loki:3100", Ruler: "http://mimir:8080/prometheus/config/v1/rules",
+		Loaded: true, CheckContent: true},
 		History: source.Prometheus{URL: "http://prometheus:9090"}}
 	p := &run{c: c, al: newAllowlist(func() time.Time { return now }), now: now}
 	p.allowAll()
@@ -362,7 +363,7 @@ func TestReportJSON(t *testing.T) {
 // What a server answered is said as text, 200 bytes at most, whatever it
 // held.
 func TestSaid(t *testing.T) {
-	s := said(fmt.Errorf("HTTP 500: \x1b[31m%s‮", strings.Repeat("é", 300)))
+	s := cutSaid(said(fmt.Errorf("HTTP 500: \x1b[31m%s‮", strings.Repeat("é", 300))))
 	if len(s) > 200 || strings.ContainsAny(s, "\x1b‮") {
 		t.Errorf("%q", s)
 	}
@@ -600,4 +601,132 @@ func TestChangesIdentity(t *testing.T) {
 
 func ledgerProbed(there bool, version, knows int) ledger.Probed {
 	return ledger.Probed{There: there, Version: version, Knows: knows}
+}
+
+// oneRule is a rule of PromQL with no for, evaluated every minute: its
+// replay starts 15 minutes before its period (serve.Margin).
+func oneRule() []rules.Rule {
+	return []rules.Rule{{Name: "Down", Expr: `up{job="api"} == 0`, Interval: time.Minute}}
+}
+
+// A run replays from the last one's end less --settle: an hour more of
+// settle is one more run a day whose replay crosses midnight, a request
+// more. Each run asks --guard once, and each day of the backfill once.
+func TestEstimateSettleAndGuard(t *testing.T) {
+	day := func(settle time.Duration) *Hourly {
+		c := config()
+		c.Serve.Settle, c.Serve.Guard = settle, "x > 0"
+		p := newRun(c)
+		p.hourly(oneRule())
+		return p.r.Estimates.Hourly
+	}
+	with, without := day(time.Hour), day(0)
+	if with.Day-without.Day != 1 || with.Guard != 24 || without.Guard != 24 {
+		t.Errorf("settle 1h: %+v; none: %+v", with, without)
+	}
+	c := config()
+	c.Serve.Settle, c.Serve.Guard, c.Serve.Backfill = 0, "x > 0", 3*24*time.Hour
+	p := newRun(c)
+	p.backfill(oneRule())
+	if b := p.r.Estimates.Backfill; b.Pieces != 3 || b.Guard != 3 {
+		t.Errorf("%+v", b)
+	}
+}
+
+// --impact is read over a run's period and the hour before it: a day's
+// piece, 25 hours of minutes, is two requests of 1,441 steps.
+func TestEstimateImpact(t *testing.T) {
+	c := config()
+	c.Serve.Settle, c.Serve.Impact, c.Serve.Backfill = 0, "x > 1", 3*24*time.Hour
+	p := newRun(c)
+	p.backfill(oneRule())
+	if b := p.r.Estimates.Backfill; b.Impact != 6 {
+		t.Errorf("%+v", b)
+	}
+}
+
+// The backfill's days more than a day behind are a catch-up, at the lower
+// of --max-rate and --catch-up-rate; the rest at --max-rate, or, without
+// it, at no rate the estimate can say: no more than the catch-up's time.
+func TestEstimateCatchUp(t *testing.T) {
+	at := func(maxRate, catchUp float64) *Backfill {
+		c := config()
+		c.Serve.Settle, c.Serve.Backfill, c.Serve.CatchUpRate, c.MaxRate = 0, 3*24*time.Hour, catchUp, maxRate
+		p := newRun(c)
+		p.backfill(oneRule()) // each day two requests: it crosses midnight
+		return p.r.Estimates.Backfill
+	}
+	if b := at(0, 1); b.Requests != 6 || b.Rate != 1 || b.Seconds != 4 {
+		t.Errorf("no --max-rate: %+v", b)
+	}
+	if b := at(2, 0.5); b.Rate != 0.5 || b.Seconds != 2*2/0.5+2/2.0 {
+		t.Errorf("--catch-up-rate the lower: %+v", b)
+	}
+	if b := at(0.5, 2); b.Rate != 0.5 || b.Seconds != 6/0.5 {
+		t.Errorf("--max-rate the lower: %+v", b)
+	}
+}
+
+// While the catch-up waits outside its hours, a day more is behind each
+// day: 27 days of 4,000 requests at 0.5 a second, three a night of five
+// hours, take 13 nights, not 9. A night that holds no more than a day
+// never catches up, and is a problem.
+func TestEstimateNights(t *testing.T) {
+	w, _ := serve.ParseWindow("01:00-06:00")
+	nights := func(per int) (*Nights, *Item) {
+		c := config()
+		c.Serve.CatchUpHours = &w
+		p := newRun(c)
+		var days []map[string]int
+		for range 27 {
+			days = append(days, map[string]int{"prometheus": per})
+		}
+		p.nights(days, 0.5)
+		return p.r.Estimates.Nights, itemOf(p, "estimate.nights")
+	}
+	if n, it := nights(4000); n.Nights != 13 || it.State != OK {
+		t.Errorf("%+v %+v", n, it)
+	}
+	for _, per := range []int{9000, 10000} {
+		if n, it := nights(per); n.Nights != -1 || it.State != Problem {
+			t.Errorf("%d a day: %+v %+v", per, n, it)
+		}
+	}
+}
+
+// Each API is paced of its own: a run asking Prometheus and Loki as much
+// takes as long as the one asked most takes, not both together.
+func TestEstimateEachAPI(t *testing.T) {
+	var rs []rules.Rule
+	for i := range 100 {
+		rs = append(rs, rules.Rule{Name: fmt.Sprintf("P%d", i), Expr: fmt.Sprintf(`up{job="p%d"} == 0`, i), Interval: time.Minute},
+			rules.Rule{Name: fmt.Sprintf("L%d", i), Expr: fmt.Sprintf(`sum(rate({app="l%d"} |= "error" [5m])) > 1`, i), Interval: time.Minute,
+				Logs: rules.LokiRuler})
+	}
+	c := config()
+	c.Serve.Loki = "http://loki:3100"
+	c.MaxRate = 0.07 // a run crossing midnight: 200 to each, 2,857s; 400 together, 5,714s
+	p := newRun(c)
+	p.hourly(rs)
+	h, it := p.r.Estimates.Hourly, itemOf(p, "estimate.hourly")
+	if h.By["loki"] == 0 || h.By["prometheus"] == 0 || it.State != OK || h.Seconds > 3600 {
+		t.Errorf("%+v %+v", h, it)
+	}
+}
+
+// What a server said is redacted whole, then cut: a host that the cut at
+// 200 bytes would leave in two is redacted all the same.
+func TestRedactThenCut(t *testing.T) {
+	host := "internal-k8s-monitoring-prometheus-0123456789abcdef.eu-west-1.elb.amazonaws.example.com"
+	c := config()
+	c.Scrubber = func(...[2]string) func(string) string {
+		return func(s string) string { return strings.ReplaceAll(s, host, "[--prometheus]") }
+	}
+	p := newRun(c)
+	p.add(Item{ID: "history.reach", State: Problem, What: "x", Why: "not let in: " + said(fmt.Errorf("HTTP 403: %s at %s", strings.Repeat("x", 150), host))})
+	p.redact()
+	why := p.r.Items[0].Why
+	if strings.Contains(why, host[:20]) || !strings.Contains(why, "[--prometheus]") && !strings.HasSuffix(why, "…") || len(why) > 250 {
+		t.Errorf("%q", why)
+	}
 }

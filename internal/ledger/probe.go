@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -58,14 +59,8 @@ func Probe(ctx context.Context, dir string) (Probed, error) {
 		return p, fmt.Errorf("%s isn't a file", abs)
 	}
 	p.There = true
-	u := fileURI(abs)
-	q := "mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(10000)"
-	if _, err := os.Stat(abs + "-wal"); errors.Is(err, os.ErrNotExist) {
-		// Nothing writes it now, or it would have a log: all of it is in
-		// the file.
-		q += "&immutable=1"
-	}
-	db, err := sql.Open("sqlite", u.String()+"?"+q)
+	_, err = os.Stat(abs + "-wal")
+	db, err := openProbe(abs, errors.Is(err, os.ErrNotExist))
 	if err != nil {
 		return p, err
 	}
@@ -77,11 +72,31 @@ func Probe(ctx context.Context, dir string) (Probed, error) {
 	return p, nil
 }
 
+// probeQuery is the query of the URI a probe opens a SQLite ledger with:
+// read-only, its connection taking no write, and, with no write-ahead log
+// beside it (immutable), as nothing writes it now, or it would have one:
+// all of it is in the file, and SQLite makes nothing beside it.
+func probeQuery(immutable bool) string {
+	q := "mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(10000)"
+	if immutable {
+		q += "&immutable=1"
+	}
+	return q
+}
+
+// openProbe opens the SQLite file at abs as a probe does.
+func openProbe(abs string, immutable bool) (*sql.DB, error) {
+	u := fileURI(abs)
+	return sql.Open("sqlite", u.String()+"?"+probeQuery(immutable))
+}
+
 // ProbePostgres reads the Postgres ledger a connection string names, as
 // serve would connect to it, on a session whose every transaction is
-// read-only (default_transaction_read_only, set as it connects), so that
-// a write fails at the server, whatever asked it. It takes no lock. No
-// error it gives holds the connection string.
+// read-only (SET SESSION CHARACTERISTICS, once it is connected, as serve's
+// readers set theirs: a pooler in session mode refuses the setting among
+// a connection's startup parameters), so that a write fails at the server,
+// whatever asked it. It takes no lock. No error it gives holds the
+// connection string.
 func ProbePostgres(ctx context.Context, conn string) (Probed, error) {
 	p := Probed{}
 	n, err := sqliteFiles()
@@ -89,7 +104,7 @@ func ProbePostgres(ctx context.Context, conn string) (Probed, error) {
 		return p, err
 	}
 	p.Knows = n
-	cfg, warn, err := probeConfig(conn)
+	cfg, warn, err := pgConfig(conn)
 	if err != nil {
 		return p, err
 	}
@@ -97,7 +112,7 @@ func ProbePostgres(ctx context.Context, conn string) (Probed, error) {
 	secrets := secretsOf(conn, cfg)
 	ctx, cancel := context.WithTimeout(ctx, cfg.ConnectTimeout+connectWithin)
 	defer cancel()
-	c, err := pgx.ConnectConfig(ctx, cfg)
+	c, err := probeConnect(ctx, cfg)
 	if err != nil {
 		return p, connectError(err, secrets, ctx.Err())
 	}
@@ -129,13 +144,30 @@ func ProbePostgres(ctx context.Context, conn string) (Probed, error) {
 	return p, nil
 }
 
-// probeConfig is how a probe connects: as serve would, each transaction of
-// the session read-only, set as it connects.
-func probeConfig(conn string) (*pgx.ConnConfig, string, error) {
-	cfg, warn, err := pgConfig(conn)
+// probeConnect connects as a probe does: as serve would, each transaction
+// of the session read-only from its first statement on.
+func probeConnect(ctx context.Context, cfg *pgx.ConnConfig) (*pgx.Conn, error) {
+	c, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	cfg.RuntimeParams["default_transaction_read_only"] = "on"
-	return cfg, warn, nil
+	if _, err := c.Exec(ctx, "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"); err != nil {
+		c.Close(context.WithoutCancel(ctx))
+		return nil, err
+	}
+	return c, nil
+}
+
+// Hosts are the hosts a connection string may connect to, which no output
+// should say, as its password isn't; none for one that doesn't read.
+func Hosts(conn string) []string {
+	cfg, err := pgx.ParseConfig(strings.TrimSpace(conn))
+	if err != nil {
+		return nil
+	}
+	out := []string{cfg.Host}
+	for _, f := range cfg.Fallbacks {
+		out = append(out, f.Host)
+	}
+	return out
 }

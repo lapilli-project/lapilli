@@ -43,10 +43,16 @@
   through an allowlist that refuses any other before it is sent
   (`internal/egress`, which every client of Lapilli's sends through), the
   ledger is read through `ledger.Probe` (SQLite `mode=ro`, `query_only`,
-  and `immutable` with no log beside it; Postgres with
-  `default_transaction_read_only`), and no rule, `--impact` nor `--guard`
-  is evaluated. `--json` gives the report, its ids and fields listed in
-  docs/numbers.md; `--offline` asks nothing, for CI; `--fail-unknown`
+  and `immutable` with no log beside it; Postgres with every transaction
+  read-only), and no rule, `--impact` nor `--guard` is evaluated. Outside
+  the allowlist is what the clouds' credential chains do of their own:
+  Google's metadata server (and whether it is there, off Google Cloud),
+  the Azure CLI (which may write its token cache), OCI's instance and
+  resource principals and OKE's workload identity (its auth service's
+  POST among them), and the processes AWS's `credential_process` and
+  Google's executable credentials start. `--json` gives the report, its
+  ids and fields listed in docs/numbers.md; `--offline` asks nothing and
+  reads no secret's file, for CI; `--fail-unknown`
   exits 1 for an unknown. Output is redacted as a pull request's backtest
   comment is. Whether a token or a cloud's identity may write
   (`--changes`) is unknown in this release: the identity is taken, and

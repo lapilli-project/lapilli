@@ -83,10 +83,12 @@ type Config struct {
 	// Version is lapilli's; Now the time it is.
 	Version string
 	Now     func() time.Time
-	// Scrub takes out of what is printed what is redacted: the URLs given,
-	// their hosts and users, addresses, tenants, a Google Cloud project
-	// (as a pull request's comment, cmd/lapilli forComment).
-	Scrub func(string) string
+	// Scrubber is what takes out of what is printed what is redacted: the
+	// URLs given, their hosts and users, addresses, tenants, a Google Cloud
+	// project (as a pull request's comment, cmd/lapilli forComment); and
+	// more, each a flag and a value, as the run learns them (a sign-in's
+	// keys, an on-call feed, the ledger's server).
+	Scrubber func(more ...[2]string) func(string) string
 	// CgroupMemory is where the memory limit of the process is read, by
 	// tests; "" for the cgroup's own files.
 	CgroupMemory string
@@ -102,8 +104,8 @@ func Run(ctx context.Context, c Config) *Report {
 	if c.Now == nil {
 		c.Now = time.Now
 	}
-	if c.Scrub == nil {
-		c.Scrub = func(s string) string { return s }
+	if c.Scrubber == nil {
+		c.Scrubber = func(...[2]string) func(string) string { return func(s string) string { return s } }
 	}
 	if c.Timeout <= 0 {
 		c.Timeout = 2 * time.Minute
@@ -146,6 +148,15 @@ type run struct {
 	h    *prom.Client
 	hErr error
 	ds   rules.DataSources
+	// hidden are what the run learned is to be redacted, by flag.
+	hidden [][2]string
+}
+
+// hide has what is printed redact value, as of flag.
+func (p *run) hide(flag, value string) {
+	if value != "" {
+		p.hidden = append(p.hidden, [2]string{flag, value})
+	}
 }
 
 func (p *run) add(it Item) { p.r.Items = append(p.r.Items, it) }
@@ -155,25 +166,58 @@ func (p *run) offline(id, what string) {
 	p.add(Item{ID: id, State: Unknown, What: what, Why: "--offline: nothing is asked"})
 }
 
-// redact takes what isn't to be printed out of every text.
+// redact takes what isn't to be printed out of every text: the whole
+// text first, then what a server said cut, so that nothing to be
+// redacted is cut in two before it is looked for.
 func (p *run) redact() {
+	scrub := p.c.Scrubber(p.hidden...)
+	done := func(s string) string { return cutSaid(scrub(s)) }
 	for i := range p.r.Items {
 		it := &p.r.Items[i]
-		it.What, it.Why, it.Fix = p.c.Scrub(it.What), p.c.Scrub(it.Why), p.c.Scrub(it.Fix)
+		it.What, it.Why, it.Fix = done(it.What), done(it.Why), done(it.Fix)
 	}
 	for i := range p.r.LeftOut {
-		p.r.LeftOut[i] = p.c.Scrub(p.r.LeftOut[i])
+		p.r.LeftOut[i] = done(p.r.LeftOut[i])
 	}
 }
 
-// said is what an error, or a server's answer in it, says, as printed:
-// what turns text around or acts on a terminal shown as text
-// (verdict.Clean), 200 bytes at most.
+// What a server said is marked in a text until it is redacted, then cut
+// (cutSaid). No text holds the marks: verdict.Clean shows a NUL as text.
+const (
+	saidFrom = "\x00\x01"
+	saidTo   = "\x00\x02"
+	saidMost = 200
+)
+
+// said is what an error, or a server's answer in it, says: what turns
+// text around or acts on a terminal shown as text (verdict.Clean), on one
+// line; once redacted, saidMost bytes of it at most.
 func said(err error) string {
 	if err == nil {
 		return ""
 	}
-	return clip(verdict.Clean(strings.ReplaceAll(strings.TrimSpace(err.Error()), "\n", "; ")), 200)
+	return saidFrom + verdict.Clean(strings.ReplaceAll(strings.TrimSpace(err.Error()), "\n", "; ")) + saidTo
+}
+
+// cutSaid cuts each part of s said marks to saidMost bytes, and takes the
+// marks out.
+func cutSaid(s string) string {
+	var b strings.Builder
+	for {
+		i := strings.Index(s, saidFrom)
+		if i < 0 {
+			b.WriteString(strings.ReplaceAll(s, saidTo, ""))
+			return b.String()
+		}
+		b.WriteString(strings.ReplaceAll(s[:i], saidTo, ""))
+		s = s[i+len(saidFrom):]
+		j := strings.Index(s, saidTo)
+		if j < 0 {
+			j = len(s)
+		}
+		b.WriteString(clip(strings.ReplaceAll(s[:j], saidFrom, ""), saidMost))
+		s = s[min(j+len(saidTo), len(s)):]
+	}
 }
 
 // clip cuts s to n bytes at most, on a character's edge.
@@ -213,14 +257,21 @@ func (r *Report) Exit(failUnknown bool) int {
 	return 0
 }
 
-// names lists a few names, and how many more.
+// names lists a few names, shown as they read (verdict.Clean), and how
+// many more.
 func names(ns []string, most int) string {
 	ns = slices.Clone(ns)
-	slices.Sort(ns)
-	ns = slices.Compact(ns)
 	for i := range ns {
 		ns[i] = verdict.Clean(ns[i])
 	}
+	return listed(ns, most)
+}
+
+// listed lists a few texts already shown as they read, and how many more.
+func listed(ns []string, most int) string {
+	ns = slices.Clone(ns)
+	slices.Sort(ns)
+	ns = slices.Compact(ns)
 	if len(ns) <= most {
 		return strings.Join(ns, ", ")
 	}

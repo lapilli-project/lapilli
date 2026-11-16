@@ -18,6 +18,7 @@ import (
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/serve"
 	"lapilli.dev/internal/source"
+	"lapilli.dev/internal/verdict"
 )
 
 // expressions reads --impact and --guard as Lapilli reads an expression,
@@ -192,7 +193,7 @@ func (p *run) grafanaSources(ctx context.Context, rd *read) {
 	var bad, lokis []string
 	for _, uid := range slices.Sorted(maps.Keys(rd.dataSources)) {
 		if why := rd.dataSources[uid]; why != "" {
-			bad = append(bad, uid+" ("+why+")")
+			bad = append(bad, verdict.Clean(uid)+" ("+why+")")
 			continue
 		}
 		if rd.kinds[uid] == "loki" {
@@ -208,7 +209,7 @@ func (p *run) grafanaSources(ctx context.Context, rd *read) {
 		cancel()
 		if err != nil {
 			why, _ := unreached(err, "--grafana", "")
-			proxied = append(proxied, uid+" ("+why+")")
+			proxied = append(proxied, verdict.Clean(uid)+" ("+why+")")
 		}
 	}
 	it := Item{ID: "history.grafana", State: OK, What: fmt.Sprintf("%s read", plural(len(rd.dataSources)-len(bad), "data source"))}
@@ -217,10 +218,10 @@ func (p *run) grafanaSources(ctx context.Context, rd *read) {
 	}
 	switch {
 	case len(bad) > 0:
-		it.State, it.Why = Problem, "the token can't read "+names(bad, 5)
+		it.State, it.Why = Problem, "the token can't read "+listed(bad, 5)
 		it.Fix = "their queries are taken as PromQL, and $__rate_interval put in with 15s: give the token Viewer, or a role that reads data sources"
 	case len(proxied) > 0:
-		it.State, it.Why = Problem, "the token can't query "+names(proxied, 5)+" through Grafana's data source proxy"
+		it.State, it.Why = Problem, "the token can't query "+listed(proxied, 5)+" through Grafana's data source proxy"
 		it.Fix = "their rules aren't replayed: give the token a role that queries the data source"
 	}
 	p.add(it)

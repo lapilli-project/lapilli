@@ -191,14 +191,23 @@ func (p *run) allowAll() {
 			for _, expr := range []string{vectorOne, alertsCount(serve.AlertsSeries), alertsCount(serve.GrafanaAlertsSeries)} {
 				a.add(allow{api: "prometheus", method: http.MethodPost, host: host, path: path + "/api/v1/query_range", form: a.promQuery(expr)})
 			}
-			a.add(allow{api: "prometheus", method: http.MethodGet, host: host, path: path + "/api/v1/rules", query: exactly("type", "alert")})
-			a.add(allow{api: "prometheus", method: http.MethodGet, host: host, path: path + "/api/v1/status/config"})
-			a.add(allow{api: "prometheus", method: http.MethodGet, host: host, path: path + "/api/v1/targets", query: exactly("state", "active")})
+			if c.Serve.Loaded {
+				a.add(allow{api: "prometheus", method: http.MethodGet, host: host, path: path + "/api/v1/rules", query: exactly("type", "alert")})
+			}
+			if c.Serve.CheckContent && c.Serve.ScrapeInterval == 0 {
+				a.add(allow{api: "prometheus", method: http.MethodGet, host: host, path: path + "/api/v1/status/config"})
+				a.add(allow{api: "prometheus", method: http.MethodGet, host: host, path: path + "/api/v1/targets", query: exactly("state", "active")})
+			}
 		}
 	}
 	if host, path, ok := at(c.Serve.Loki); ok {
 		a.add(allow{api: "loki", method: http.MethodGet, host: host, path: path + "/loki/api/v1/labels", query: a.lokiRecent})
-		a.add(allow{api: "loki", method: http.MethodGet, host: host, path: path + "/prometheus/api/v1/rules", query: exactly("type", "alert")})
+		if c.Serve.LokiLoaded {
+			// Its ruler's rules as written, and where it runs each group
+			// (source.LokiLoaded).
+			a.add(allow{api: "loki", method: http.MethodGet, host: host, path: path + "/loki/api/v1/rules"})
+			a.add(allow{api: "loki", method: http.MethodGet, host: host, path: path + "/prometheus/api/v1/rules", query: exactly("type", "alert")})
+		}
 	}
 	if host, path, ok := at(c.Serve.Grafana); ok {
 		a.add(allow{api: "grafana", method: http.MethodGet, host: host, path: path + "/api/v1/provisioning/alert-rules/export", query: exactly("format", "yaml")})

@@ -85,6 +85,12 @@ func (p *run) postgres(ctx context.Context) {
 		p.add(Item{ID: "ledger.postgres", State: Problem, What: "--ledger-url-file can't be read", Why: said(err)})
 		return
 	}
+	// The server's name, and the user's, are the file's as much as its
+	// password is: said in neither what the server answers nor the TLS
+	// warning.
+	for _, h := range ledger.Hosts(string(b)) {
+		p.hide("--ledger-url-file", h)
+	}
 	pr, err := ledger.ProbePostgres(ctx, string(b))
 	if err != nil {
 		p.add(Item{ID: "ledger.postgres", State: Problem, What: "the ledger's database can't be read", Why: said(err),
@@ -134,6 +140,7 @@ func (p *run) signin(ctx context.Context) {
 			return
 		}
 		p.allowURL("signin", keys)
+		p.hide("--oidc-issuer's keys", keys)
 		n, err := o.FetchKeys(each)
 		if err != nil {
 			p.add(Item{ID: "signin", State: Problem, What: "--oidc-issuer's keys can't be fetched", Why: said(err)})
@@ -147,6 +154,8 @@ func (p *run) signin(ctx context.Context) {
 		}
 		px := *s.Proxy
 		px.Client = signin.Client(nil)
+		p.hide("--proxy-jwt-jwks", px.JWKS)
+		p.hide("--proxy-jwt-issuer", px.Issuer)
 		pp, err := signin.NewProxy(px)
 		if err != nil {
 			p.add(Item{ID: "signin", State: Problem, What: "--proxy-jwt won't do", Why: said(err)})

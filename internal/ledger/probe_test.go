@@ -8,10 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 
 	"lapilli.dev/internal/ledger/ledgertest"
 )
@@ -138,16 +137,54 @@ func TestProbePostgres(t *testing.T) {
 		t.Errorf("a row of the ledger changed:\n%s\n%s", was, now)
 	}
 	// Its session takes no write, whatever is asked on it.
-	cfg, _, err := probeConfig(where)
+	cfg, _, err := pgConfig(where)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := pgx.ConnectConfig(ctx, cfg)
+	if _, ok := cfg.RuntimeParams["default_transaction_read_only"]; ok {
+		t.Error("a startup parameter a pooler in session mode refuses")
+	}
+	c, err := probeConnect(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close(ctx)
 	if _, err := c.Exec(ctx, "CREATE TABLE preflight_wrote (x int)"); err == nil {
 		t.Error("a read-only session made a table")
+	}
+}
+
+// The probe's connection takes no write, with a log beside the ledger or
+// not; and each of what holds it to that holds it alone: read-only, and
+// query_only.
+func TestProbeSQLiteRefusesWrites(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	abs := filepath.Join(dir, "ledger.db")
+	l, err := Open(ctx, abs, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+	for _, immutable := range []bool{true, false} {
+		for _, without := range []string{"", "mode=ro&", "&_pragma=query_only(1)"} {
+			q := strings.Replace(probeQuery(immutable), without, "", 1)
+			if without != "" && q == probeQuery(immutable) {
+				t.Fatalf("%q isn't in the probe's query %q", without, q)
+			}
+			db, err := sql.Open("sqlite", "file:"+abs+"?"+q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, w := range []string{"CREATE TABLE preflight_wrote (x)", "PRAGMA user_version = 7", "INSERT INTO meta (k, v) VALUES ('x', 'y')"} {
+				if _, err := db.ExecContext(ctx, w); err == nil {
+					t.Errorf("immutable %v, without %q: %s was taken", immutable, without, w)
+				}
+			}
+			db.Close()
+		}
+	}
+	if p, err := Probe(ctx, dir); err != nil || p.Version != p.Knows {
+		t.Fatalf("%+v %v", p, err)
 	}
 }

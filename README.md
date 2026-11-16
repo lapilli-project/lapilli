@@ -1798,14 +1798,20 @@ sends goes through an allowlist that refuses any other before it is sent
 sources and the notifications Grafana is read for; the sign-in's discovery
 and keys; the clouds' credentials), the ledger is read through a probe that
 opens SQLite read-only and Postgres in read-only transactions, and no rule,
-`--impact` nor `--guard` is evaluated. What it prints is redacted as a
+`--impact` nor `--guard` is evaluated. What the clouds' credential chains
+do of their own is outside the allowlist: Google's metadata server (and
+whether it is there, off Google Cloud), the Azure CLI (which may write its
+token cache), OCI's instance and resource principals and OKE's workload
+identity (its auth service's POST among them), and the processes AWS's
+`credential_process` and Google's executable credentials start. What it prints is redacted as a
 pull request's backtest comment is. It exits 0 with no problem, 1 with
 one (or an unknown, with `--fail-unknown`), 2 when the flags are wrong;
 `--json` gives the report with ids and fields that stay the same
 (docs/numbers.md). Run it where serve runs, with its service account and
 volume, as a Job or `kubectl run` of the image; in CI, `--offline` asks
-nothing, and works out what needs no credential: the flags, the rule
-files, `--config` and the estimates of requests and time. Whether a token
+nothing, reads no secret's file nor `--ledger-url-file`, and works out what
+needs no credential: the flags, the rule files, `--config` and the
+estimates of requests and time. Whether a token
 may write (`--changes`) isn't asked yet: it says unknown.
 
 ### The ledger in Postgres

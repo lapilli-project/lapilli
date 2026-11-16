@@ -484,14 +484,38 @@ can do:
   Loki's kind, its labels over the last five minutes through the proxy;
   `vector(1)` through the proxy would check a path no replay takes.
 - **Not every credential chain takes a client.** Every client of
-  Lapilli's own goes through the allowlist (`internal/egress`), and so do
-  AWS's configuration, Azure's credentials and Google's token source,
-  which take one while it is set. Three don't: Google's metadata server
-  (GKE's Workload Identity) is asked by `cloud.google.com/go/compute/metadata`,
-  whose client takes no transport; Azure's default credential runs the
-  Azure CLI, a process, where there is one; OCI's instance principal asks
-  its metadata service with the OCI SDK's own client. Each reads a
-  credential and nothing else, outside the allowlist's count.
+  Lapilli's own goes through the allowlist (`internal/egress`,
+  `TestEveryClientWrapped` reading the source), and so do AWS's
+  configuration, Azure's credentials and Google's token source, which take
+  one while it is set (`TestGoogleThroughGuard`, `TestAzureThroughGuard`).
+  What the chains do of their own doesn't: Google's metadata server (GKE's
+  Workload Identity), and whether it is there at all off Google Cloud,
+  asked by `cloud.google.com/go/compute/metadata`, whose client takes no
+  transport; the Azure CLI, a process, which may write its token cache;
+  OCI's instance and resource principals and OKE's workload identity,
+  which ask with the OCI SDK's own client, the auth service's POST among
+  them; and AWS's `credential_process` and Google's executable credentials,
+  which start a process. Each reads a credential, outside the allowlist's
+  count; the help, the README and the changelog say so.
+- **The Postgres probe sets its session read-only once connected**
+  (`SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`), as serve's
+  readers do: a pooler in session mode refuses
+  `default_transaction_read_only` among a connection's startup parameters.
+- **What a server answered is redacted whole, then cut** at 200 bytes, so
+  that a host cut in two is still found; and what the run learns is
+  redacted too: the ledger's server, an on-call feed's URL, the keys a
+  sign-in's discovery names.
+- **The nights count the days a catch-up waits.** Outside its hours its
+  cursor stands, and each day is a day more to catch up (quota.md, 4): a
+  catch-up day, on average, is added for each day that passes, and a night
+  that holds no more than a day of it never catches up, a problem.
+- **Each API is timed of its own.** `--max-rate` is each API's: a run's or
+  a day's floor is the longest of its APIs' at their rate. Without
+  `--max-rate`, the days a catch-up doesn't pace aren't timed: the floor
+  is the catch-up's.
+- **`--offline` reads no secret.** The files of tokens, keys and webhooks,
+  and `--ledger-url-file`, which serve's flags read at start, are taken as
+  given: CI doesn't hold them. `secrets.files` is unknown.
 - **The allowlist reads rulers and a cloud's alarms by method and path.**
   Their lists page, so a `GET` under the URL given takes any query; a
   CloudWatch read is a `POST` whose `X-Amz-Target` is `DescribeAlarms`. A
