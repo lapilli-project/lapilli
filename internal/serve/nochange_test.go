@@ -44,6 +44,12 @@ func TestNoChangeIsNeitherBetterNorWorse(t *testing.T) {
 		{"time to catch the same as shown", week(9, 3, 10200*time.Millisecond), week(9, 3, 10700*time.Millisecond), "Time to catch", "as the week before", false, false},
 		// 11.2s reads 11s, 10.9s 10s: a second, worse; not "+0s".
 		{"time to catch a second apart as shown", week(9, 3, 11200*time.Millisecond), week(9, 3, 10900*time.Millisecond), "Time to catch", "+1s on the week before", false, true},
+		// 1h5m1s reads 1h5m, 1h4m20s 1h4m: a minute, in the minutes
+		// shown, not "+41s".
+		{"time to catch past an hour", week(9, 3, 3901*time.Second), week(9, 3, 3860*time.Second), "Time to catch", "+1m on the week before", false, true},
+		// 1h0m10s reads 1h0m, 59m50s as it is: a minute, in this week's
+		// minutes.
+		{"time to catch across the hour", week(9, 3, 3610*time.Second), week(9, 3, 3590*time.Second), "Time to catch", "+1m on the week before", false, true},
 	} {
 		x := tileOf(overview(c.last, c.before), c.label)
 		if x.Delta != c.delta || x.Better != c.better || x.Worse != c.wrse {
@@ -76,6 +82,14 @@ func TestNoChangeIsNeitherBetterNorWorse(t *testing.T) {
 		{"a week, the same as shown", span(2, 3, 0, 0, 0), span(2, 5, 0, 0, 0), "Firings a week", "", false, false},
 		// 1001 ● beside 1000: one more, worse; not "+0%".
 		{"● a week a hair apart", span(1, 1000, 0, 0, 0), span(1, 1001, 0, 0, 0), "● a week", "+1", false, true},
+		// None a week then, four now: four more, not hidden for none then.
+		{"a week, from none", span(1, 0, 0, 0, 0), span(1, 4, 0, 0, 0), "Firings a week", "+4", false, false},
+		{"● a week, from none", span(1, 0, 0, 0, 0), span(1, 4, 0, 0, 0), "● a week", "+4", false, true},
+		// 1.4 a week reads 1, 2.6 reads 3: three times, +200%, not the
+		// unrounded rates' +86%.
+		{"a week, of the numbers shown", span(5, 7, 0, 0, 0), span(5, 13, 0, 0, 0), "Firings a week", "+200%", false, false},
+		// Then not measured, over no span: nothing to set beside.
+		{"a week, then not measured", period{From: from, To: from}, span(1, 4, 0, 0, 0), "Firings a week", "", false, false},
 		{"incidents missed, the same share", span(1, 9, 3, 3, 1), span(1, 9, 3, 3, 1), "Incidents missed", "", false, false},
 		{"incidents missed, fewer", span(1, 9, 3, 4, 1), span(1, 9, 3, 5, 1), "Incidents missed", "-5 pt", true, false},
 	} {

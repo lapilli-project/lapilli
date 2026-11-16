@@ -554,8 +554,15 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 		return d.Seconds(), ok
 	}, func(f float64) string { return verdict.Delay(time.Duration(f) * time.Second) },
 		func(a, b float64) string {
-			// Of the whole seconds shown.
-			return verdict.Delay((time.Duration(a) - time.Duration(b)) * time.Second)
+			// Of the times as shown, in the unit this week's is shown in:
+			// whole minutes from an hour on (verdict.Delay), else whole
+			// seconds; never "+41s" beside "1h5m".
+			unit := time.Second
+			if time.Duration(a)*time.Second >= time.Hour {
+				unit = time.Minute
+			}
+			shown := func(f float64) time.Duration { return (time.Duration(f) * time.Second).Truncate(unit) }
+			return verdict.Delay(shown(a) - shown(b))
 		}, -1, tr(l, "median, by a rule that isn't noisy"))
 	add("Noisy rules", func(w *weekView) (float64, bool) { return float64(w.Noisy), !w.NoRecord }, count,
 		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, unjudged)

@@ -241,8 +241,11 @@ func thenNow(l string, then, now period) []tile {
 	weekly := func(label string, n func(period) int, better int) {
 		a, b := now.perWeek(n(now)), then.perWeek(n(then))
 		x := tile{Label: tr(l, label), Value: fmt.Sprintf("%.0f", a), Of: tr(l, "then %s", fmt.Sprintf("%.0f", b))}
-		if ra, rb := math.RoundToEven(a), math.RoundToEven(b); b > 0 && ra != rb {
-			x.Delta = pctChange(a, b)
+		// A change between the numbers shown, as "%.0f" rounds them, then
+		// measured over a span: none to four a week is four more, and one
+		// to three is three times one, not what the unrounded rates were.
+		if ra, rb := math.RoundToEven(a), math.RoundToEven(b); then.To.After(then.From) && ra != rb {
+			x.Delta = pctChange(ra, rb)
 			x.Better, x.Worse = better != 0 && (ra-rb)*float64(better) > 0, better != 0 && (ra-rb)*float64(better) < 0
 		}
 		out = append(out, x)
