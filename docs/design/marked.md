@@ -115,10 +115,11 @@ incidents and `--config` its teams:
   (`incident.FromImpact`'s rule, with no minimum length). Kept from the
   run's start on in place of the windows it found before, as impact windows
   are. Added, or its expression changed, it is read again over the last
-  four weeks, as bundle 31 reads a new impact criterion again. `KIND=` is
-  read as [signals.md](signals.md) reads `NAME=PROMQL`. An expression can't
-  say what is ahead: a sale planned for Friday is written in the file, the
-  config or the UI.
+  four weeks, as bundle 31 (branch `b31-incident-criteria`, not merged)
+  reads a new impact criterion again. `KIND=` is read as
+  [signals.md](signals.md) (#88, proposed) reads `NAME=PROMQL`. An
+  expression can't say what is ahead: a sale planned for Friday is written
+  in the file, the config or the UI.
 
 ## Deploys are a kind
 
@@ -310,7 +311,7 @@ disk, or of its database) before it upgrades.
 - **`lapilli verdict`**, which takes no deploys either, takes no marked
   windows.
 - **Goals over a kind**, such as "during a sale, no worse than the weeks
-  before": [goals.md](goals.md).
+  before": [goals.md](goals.md) (#91, proposed).
 
 ## Alternatives
 
