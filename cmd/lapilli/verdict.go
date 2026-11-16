@@ -217,7 +217,27 @@ What went wrong (with --compare, if you have them):
                       hurt, such as a 5xx ratio above 1%; its windows become
                       incidents too, so a thin incident log still works. By
                       service, they carry the services hit, for --match
-  --impact-for DUR    how long impact must last in a series (default 5m)
+  --impact NAME=PROMQL
+                      one of several signals of user impact, each named
+                      (repeatable, 8 at most): a probe failing, the 5xx
+                      share. Each signal's windows are its own, never
+                      merged with another's, and each keeps the record of
+                      the firings it could have seen from where the data it
+                      reads begins. A name is a lowercase letter, then
+                      letters, digits, - and _; named and unnamed don't go
+                      together (docs/design/signals.md)
+  --impact-for DUR    how long impact must last in a series (default 5m);
+                      NAME=DUR for one signal's
+  --impact-match NAME=LABELS
+                      the labels, comma-separated, a firing must agree with
+                      a signal's windows on, in place of --match; NAME= for
+                      none: any firing in time catches them
+  --impact-record NAME=no
+                      reading the signal over a time doesn't keep its record:
+                      it says users weren't hurt in one way, not that nothing
+                      was. Its windows still keep the record near them
+  --impact-file FILE  the named signals in a file, and which rules are judged
+                      against which (see below), in place of the flags above
 
 Where the history is (needed for --rules, --alerts and --impact):
   --prometheus URL    a Prometheus-compatible API: Prometheus, Thanos, Mimir,
@@ -375,6 +395,21 @@ The incidents file:
       end: 2026-10-30T17:40:00+09:00      # optional; 1h when missing
       labels: {service: [checkout, cart]} # optional, for --match
 
+The impact file:
+
+  signals:
+    - {name: errors, expr: "...", for: 5m, match: [service, team]}
+    - {name: probe, expr: "probe_success == 0", for: 2m, match: [service]}
+    - {name: latency, expr: "...", for: 10m}
+    - {name: payments, expr: "...", for: 1m, record: false}
+  rules:                          # optional: a rule's first entry decides
+    - rules: Slow$|Latency        # rules whose names match, or else
+      labels: {kind: latency}     # whose labels have these values,
+      signals: [latency]          # judged against these signals' windows alone
+    - rules: ^BackendMissing$
+      signals: [errors, probe]
+      match: [backend]            # and matched on these labels alone
+
 lapilli only reads history and files. It sends the report nowhere but to
 --push and --slack-webhook-file.
 `
@@ -420,9 +455,15 @@ type verdictFlags struct {
 	firings, incidents string
 	// firingsToken is lapilli serve's --firings-token-file, given: firings
 	// copied in may be all there is.
-	firingsToken     bool
+	firingsToken bool
+	// impact is --impact with no name; signals, each --impact NAME=PROMQL,
+	// or --impact-file's (docs/design/signals.md), and impactSets what the
+	// flags said of each by name, until all are read.
 	impact           string
 	impactFor        time.Duration
+	signals          []impactSignal
+	impactSets       map[string]*impactSet
+	impactFile       string
 	promURL, gcpProj string
 	auth, awsRegion  string
 	tokenFile        string
@@ -733,10 +774,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.redact, f.redactKey = true, key
 		case "--incidents":
 			f.incidents = val
-		case "--impact":
-			f.impact = val
-		case "--impact-for":
-			f.impactFor, err = dur(time.Second)
+		case "--impact", "--impact-for", "--impact-match", "--impact-record", "--impact-file":
+			_, err = f.impactFlag(name, val)
 		case "--prometheus":
 			f.promURL = val
 		case "--gcp-project":
@@ -853,6 +892,11 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			return nil, err
 		}
 	}
+	// The named impact signals, once --step and --match are known, wherever
+	// they came.
+	if err := f.signalsRead(serve != nil); err != nil {
+		return nil, err
+	}
 	// The hours are read once the zone is known, wherever --tz came.
 	f.opts.Hours = verdict.DefaultHours(f.loc)
 	if f.work != "" {
@@ -911,7 +955,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			sources++
 		}
 	}
-	needsHistory := len(f.rules) > 0 || following || f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) > 0 || f.alerts || f.impact != "" ||
+	needsHistory := len(f.rules) > 0 || following || f.loadedRules || f.grafana != "" || f.ruler != "" || len(f.alarms) > 0 || f.alerts || f.anyImpact() ||
 		f.checkReplay && f.checkReplaySet
 	lokiToo := len(f.lokiRules) > 0 || f.lokiLoaded
 	rulesToo := sources > 0 || len(f.alarms) > 0 || lokiToo
@@ -959,7 +1003,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			return nil, validRuler(f)
 		case f.promURL == "" && f.gcpProj == "" && rulesToo:
 			return nil, errors.New("say where the history is: --prometheus URL or --gcp-project ID")
-		case f.promURL == "" && f.gcpProj == "" && f.impact != "":
+		case f.promURL == "" && f.gcpProj == "" && f.anyImpact():
 			return nil, errors.New("--impact reads history: add --prometheus URL or --gcp-project ID")
 		}
 		return f, validHistory(f)
@@ -1004,7 +1048,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--redact gives a verdict's names aliases: it doesn't go with --check-replay")
 	case f.checkReplay && (f.metrics || f.push != "" || f.slackFile != ""):
 		return nil, errors.New("--check-replay is for you to read, or --json: it doesn't go with --metrics, --push or --slack-webhook-file")
-	case f.checkReplay && (f.incidents != "" || f.impact != ""):
+	case f.checkReplay && (f.incidents != "" || f.anyImpact()):
 		return nil, errors.New("--check-replay judges nothing against incidents: leave out --incidents and --impact")
 	case len(f.compare) > 0 && len(f.rules) == 0:
 		return nil, errors.New("--compare goes with --rules: the rules proposed, to set beside those in place")
@@ -1030,7 +1074,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--from and --to go together")
 	case !f.from.IsZero() && !f.to.After(f.from):
 		return nil, errors.New("--to must be after --from")
-	case f.incidents == "" && f.impact == "" && !f.checkReplay && len(f.compare) == 0:
+	case f.incidents == "" && !f.anyImpact() && !f.checkReplay && len(f.compare) == 0:
 		// --compare counts the firings on each side even with nothing to
 		// judge them against: what a change to the rules does to how often
 		// they fire is worth knowing alone.
@@ -1099,7 +1143,7 @@ func validContent(f *verdictFlags, sources int) error {
 		return validRuler(f)
 	case f.loadedRules && f.promURL == "" && f.gcpProj == "":
 		return errors.New("--loaded-rules reads the rules from the API: add --prometheus URL or --gcp-project ID")
-	case f.impact != "" && f.promURL == "" && f.gcpProj == "":
+	case f.anyImpact() && f.promURL == "" && f.gcpProj == "":
 		return errors.New("--impact reads history: add --prometheus URL or --gcp-project ID")
 	case f.from.IsZero() != f.to.IsZero():
 		return errors.New("--from and --to go together")
@@ -1310,7 +1354,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		if len(before)+len(after) == 0 && len(recs) == 0 {
 			c := &verdict.Comparison{From: f.opts.From, To: f.opts.To, Same: len(same), ChangedOnly: f.changedOnly,
 				Rules: []verdict.RuleChange{}, Incidents: []verdict.IncidentChange{}, PassedOver: f.passedOver}
-			c.Summarize(f.incidents != "" || f.impact != "")
+			c.Summarize(f.incidents != "" || f.anyImpact())
 			if f.redact {
 				c = verdict.NewRedactor(f.redactKey).Comparison(c)
 			}
@@ -1330,7 +1374,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	}
 
 	var h history
-	if len(f.rules) > 0 || readsAPI(f) || f.alerts || f.impact != "" {
+	if len(f.rules) > 0 || readsAPI(f) || f.alerts || f.anyImpact() {
 		if f.promURL != "" || f.gcpProj != "" {
 			if h, err = newHistory(ctx, f); err != nil {
 				return fail(err)
@@ -1352,7 +1396,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 
 	// Impact first: it is one query, and a replay that runs out of time
 	// should still be judged against it.
-	if f.impact != "" {
+	if f.anyImpact() {
 		var err error
 		if incs, err = f.readImpact(ctx, h, incs); err != nil {
 			return fail(err)
@@ -1376,14 +1420,18 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		}
 		o := f.opts
 		o.SomeRules = o.SomeRules || f.changedOnly
+		// Each side's rule entries are found by its own rules' labels.
+		ob, oa := o, o
+		ob.Signals = indexRules(o.Signals, slices.Concat(same, before), slices.Concat(fired[0], fired[1]))
+		oa.Signals = indexRules(o.Signals, slices.Concat(same, after), slices.Concat(fired[0], fired[2]))
 		cmp = verdict.Compare(
-			verdict.Judge(slices.Concat(ran[0], ran[1]), slices.Concat(fired[0], fired[1]), incs, o),
-			verdict.Judge(slices.Concat(ran[0], ran[2]), slices.Concat(fired[0], fired[2]), incs, o),
+			verdict.Judge(slices.Concat(ran[0], ran[1]), slices.Concat(fired[0], fired[1]), incs, ob),
+			verdict.Judge(slices.Concat(ran[0], ran[2]), slices.Concat(fired[0], fired[2]), incs, oa),
 			changed, len(was)-len(before))
 		cmp.ChangedOnly = f.changedOnly
 		cmp.Recording = recordingChanges(f.recorded, recordedIs)
 		cmp.PassedOver = f.passedOver
-		cmp.Summarize(f.incidents != "" || f.impact != "")
+		cmp.Summarize(f.incidents != "" || f.anyImpact())
 		if expAfter != nil {
 			cmp.Expect(expAfter, expBefore, f.opts.Hours)
 		}
@@ -1425,6 +1473,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	if cmp != nil {
 		reports = append(reports, cmp.Before, cmp.After)
 	} else {
+		// Each rule's entry, found once, by the rules' labels or its
+		// firings'.
+		f.opts.Signals = indexSignals(f.opts.Signals, versions, fs)
 		rep = verdict.Judge(known, fs, incs, f.opts)
 		for _, v := range versions {
 			if v.From.After(f.opts.From) && v.From.Before(f.opts.To) {
@@ -1433,12 +1484,12 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		}
 		// Impact shorter than a rule can fire on reads as missed by it: said,
 		// not judged otherwise.
-		if f.impact != "" && len(versions) > 0 {
+		if f.anyImpact() && len(versions) > 0 {
 			replayed := map[string]bool{}
 			for _, rr := range rep.Rules {
 				replayed[rr.Rule] = rr.Replayed && rr.Unsupported == ""
 			}
-			rep.ImpactShort = impactShort(versions[len(versions)-1].Rules, replayed, f.impactFor, f.step)
+			rep.ImpactShort = impactShort(versions[len(versions)-1].Rules, replayed, f.shortestFor(), f.step)
 		}
 		// A rule taken away during the period covers nothing.
 		if len(versions) > 1 {

@@ -162,3 +162,31 @@ func TestLoadTooBig(t *testing.T) {
 		t.Errorf("a file of %d bytes: %v", MaxFile+15, err)
 	}
 }
+
+// A named signal's windows carry its name and its match, and ids of their
+// own; whether an incident written down is the same one is by the
+// window's match, when it has one.
+func TestFromSignal(t *testing.T) {
+	t0 := time.Date(2026, 10, 6, 10, 0, 0, 0, time.UTC)
+	var s prom.Series
+	s.Labels = map[string]string{"service": "checkout", "instance": "https://checkout.example"}
+	for i := range 10 {
+		s.Samples = append(s.Samples, prom.Sample{T: t0.Add(time.Duration(i) * time.Minute), V: 1})
+	}
+	ws := FromSignal([]prom.Series{s}, time.Minute, 2*time.Minute, "probe", []string{"service"})
+	if len(ws) != 1 || ws[0].ID != "impact-probe-1" || ws[0].Signal != "probe" || !slices.Equal(ws[0].Match, []string{"service"}) ||
+		ws[0].Title != "user impact (probe)" || !ws[0].Candidate {
+		t.Fatalf("%+v", ws)
+	}
+	written := []Incident{{ID: "INC-1", Start: t0, End: t0.Add(time.Hour), Labels: Labels{"service": {"checkout"}, "instance": {"node-1"}}}}
+	// By --match service,instance, a probe's URL isn't the node's: two.
+	plain := ws[0]
+	plain.Match = nil
+	if got := Merge(written, []Incident{plain}, time.Hour, []string{"service", "instance"}); len(got) != 2 {
+		t.Errorf("on --match: %d incidents", len(got))
+	}
+	// By its own, service alone: the incident written down.
+	if got := Merge(written, ws, time.Hour, []string{"service", "instance"}); len(got) != 1 || got[0].ID != "INC-1" {
+		t.Errorf("on its own match: %+v", got)
+	}
+}

@@ -143,14 +143,21 @@ func (d *ImpactData) Late() string {
 // Floor works d's Floor and NoData out, by the ledger's weeks.
 func (l *Ledger) Floor(d *ImpactData) { l.floor(d) }
 
-func (l *Ledger) floor(d *ImpactData) {
+func (l *Ledger) floor(d *ImpactData) { FloorBy(d, l.WeekOnOrAfter) }
+
+// FloorBy works d's Floor and NoData out, by the one rule: NoData when a
+// selector had no data at all; else the latest of when each selector that
+// had none at d.From first had some, each moved to onOrAfter it (the
+// ledger's first whole week then, or, judging each firing by its own time,
+// that time itself); zero when each had data at From.
+func FloorBy(d *ImpactData, onOrAfter func(time.Time) time.Time) {
 	d.Floor, d.NoData = time.Time{}, !d.Complete()
 	if d.NoData {
 		return
 	}
 	for _, x := range d.Selectors {
 		if !x.AtStart {
-			d.Floor = later(d.Floor, l.WeekOnOrAfter(x.First))
+			d.Floor = later(d.Floor, onOrAfter(x.First))
 		}
 	}
 }

@@ -55,6 +55,9 @@ type contentOutput struct {
 // period alone was read, so that a window already on at its start starts
 // there, and the firings in it are judged against it as they were.
 func (f *verdictFlags) readImpact(ctx context.Context, h history, incs []incident.Incident) ([]incident.Incident, error) {
+	if f.opts.Signals.Named() {
+		return f.readSignals(ctx, h, incs)
+	}
 	from := verdict.RecordFrom(f.opts.From, f.opts.To)
 	series, err := h.QueryRange(ctx, f.impact, from, f.opts.To, f.step)
 	if err != nil {
@@ -138,18 +141,19 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 			return m, ok
 		}
 		rep.From, rep.To, rep.Measured = f.opts.From, f.opts.To, true
-		if f.incidents != "" || f.impact != "" {
+		if f.incidents != "" || f.anyImpact() {
 			var incs []incident.Incident
 			if f.incidents != "" {
 				if incs, err = incident.Load(f.incidents); err != nil {
 					return fail(err)
 				}
 			}
-			if f.impact != "" {
+			if f.anyImpact() {
 				if incs, err = f.readImpact(ctx, h, incs); err != nil {
 					return fail(err)
 				}
 			}
+			f.opts.Signals = indexRules(f.opts.Signals, rs, fs)
 			judged := verdict.Judge(known, fs, incs, f.opts)
 			noisy := map[string]bool{}
 			for _, r := range judged.Rules {

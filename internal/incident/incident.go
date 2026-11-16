@@ -31,6 +31,14 @@ type Incident struct {
 	// several series lasts from the first one's start to the last one's
 	// end, which none of them may have lasted.
 	Spans []Span `yaml:"-" json:"spans,omitempty"`
+	// Signal is, of a window a named impact signal found, the signal's name
+	// (docs/design/signals.md): "" for any other incident, the windows of
+	// an impact signal with no name among them.
+	Signal string `yaml:"-" json:"signal,omitempty"`
+	// Match are the labels a firing must agree with it on, of a named
+	// signal's window: its signal's. Nil for the match in effect
+	// (verdict.Options.Match), as for every other incident; empty for none.
+	Match []string `yaml:"-" json:"-"`
 }
 
 // Span is one series' window of impact, by its labels.
@@ -202,15 +210,34 @@ func FromImpact(series []prom.Series, step, minLen time.Duration) []Incident {
 	return out
 }
 
+// FromSignal finds the windows of a named impact signal, as FromImpact
+// finds them: of its series alone, never merged with another signal's,
+// each carrying the signal's name and its match (nil for the match in
+// effect), its id impact-NAME-1, impact-NAME-2 and so on.
+func FromSignal(series []prom.Series, step, minLen time.Duration, name string, match []string) []Incident {
+	out := FromImpact(series, step, minLen)
+	for i := range out {
+		out[i].ID = fmt.Sprintf("impact-%s-%d", name, i+1)
+		out[i].Title = "user impact (" + name + ")"
+		out[i].Signal, out[i].Match = name, match
+	}
+	return out
+}
+
 // Merge adds candidates that don't overlap an incident already written
 // down. With labels to match on, a candidate is the same incident only if
-// their values for those labels have one in common.
+// their values for those labels have one in common: a candidate's own
+// Match, when it has one, else match.
 func Merge(written, candidates []Incident, unknownLen time.Duration, match []string) []Incident {
 	out := append([]Incident(nil), written...)
 	for _, c := range candidates {
 		dup := false
+		on := match
+		if c.Match != nil {
+			on = c.Match
+		}
 		for _, w := range written {
-			if !c.Start.After(w.EndOr(unknownLen)) && !c.End.Before(w.Start) && overlap(c.Labels, w.Labels, match) {
+			if !c.Start.After(w.EndOr(unknownLen)) && !c.End.Before(w.Start) && overlap(c.Labels, w.Labels, on) {
 				dup = true
 				break
 			}

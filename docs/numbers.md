@@ -41,8 +41,9 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
 
 `settings` says what the firings were judged by (`lead_ns`, `match`,
 `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†,
-`record_by_week`†): the flags, or in `lapilli serve` the settings page.
-Durations are in nanoseconds, as everywhere in the report.
+`record_by_week`†, `impact_signals`†, `impact_rules`†): the flags, or in
+`lapilli serve` the settings page. Durations are in nanoseconds, as
+everywhere in the report.
 
 ## Which firings and incidents a report holds
 
@@ -68,6 +69,16 @@ constraint. A firing that caught an incident is a **white stone**
 (`white: true`); one that caught none is a **black stone**. A firing
 already on before `lead` caught nothing: it was on anyway.
 
+With named impact signals (`--impact NAME=PROMQL`, `--impact-file`;
+[design/signals.md](design/signals.md)), a window has its `signal`†, and
+is matched on that signal's `match` in `settings.impact_signals`† in place
+of `match` (`null` for `match` itself, `[]` for no label). A rule named by
+a rule entry (`rules[].impact_rule`†, its place in `settings.impact_rules`†
+from 1) catches only the windows of the entry's `signals`, on the entry's
+`match` when it gives one: another signal's windows are, to it, as if they
+weren't there. An incident written down has no signal, and every rule is
+matched against it on `match`.
+
 ```jq
 # incidents caught: as the report has it
 [.firings[] | .incidents // []]
@@ -79,12 +90,18 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
   | (.t + "Z" | fromdateiso8601) + ((.f // "0") | tonumber)
     - (if .z == "Z" then 0 else (if .z[0:1] == "-" then -1 else 1 end) * ((.z[1:3] | tonumber) * 3600 + (.z[4:6] | tonumber) * 60) end);
 .settings as $s
+| (($s.impact_signals // []) | map({key: .name, value: .}) | from_entries) as $sig
+| ([.rules[] | select(.impact_rule) | {key: .rule, value: $s.impact_rules[.impact_rule - 1]}] | from_entries) as $entry
 | .incidents as $incs
-| [.firings[] | . as $f | ($f.start | epoch) as $at
+| [.firings[] | . as $f | ($f.start | epoch) as $at | $entry[$f.rule] as $e
    | [$incs[] | . as $in
-       | select($at >= ($in.start | epoch) - $s.lead_ns / 1e9
+       | (if $in.signal == null then $s.match
+          elif $e != null and $e.match != null then $e.match
+          else $sig[$in.signal].match // $s.match end) as $match
+       | select(($in.signal == null or $e == null or any($e.signals[]; . == $in.signal))
+         and $at >= ($in.start | epoch) - $s.lead_ns / 1e9
          and $at <= (if $in.end then $in.end | epoch else ($in.start | epoch) + $s.unknown_length_ns / 1e9 end)
-         and all($s.match[]; ($f.labels // {})[.] as $v | ($in.labels // {})[.] as $vs
+         and all($match[]; ($f.labels // {})[.] as $v | ($in.labels // {})[.] as $vs
                | $v == null or $vs == null or any($vs[]; . == $v)))
        | .id]]
 ```
@@ -120,6 +137,22 @@ precision, and it makes no rule noisy. A rule none of whose firings is
 judged has `no_record: true`†; a report none of whose firings could be,
 too.
 
+With named impact signals, a firing's record is kept by what could have
+seen the incident it would catch: its `signals`†. They are its rule
+entry's; else each signal that, for every label of the signal's `match`
+the firing has, has returned the firing's value of it over the read (a
+series that returned something without that label, or more than 1,000
+values of it, or 256 KB of values in all, has returned every value); and,
+when none of those keeps
+the record (`record`), every signal that does too. Such a firing is judged
+when an incident written down was on in the two weeks before it, or a
+window of one of its `signals` was, or it caught an incident, or the
+signals among its `signals` that keep the record, one at least, had each
+started by its time: `settings.impact_signals[].start`†, where the signal
+was first read, or later, where the data of every selector it reads
+begins (none for a selector with no data). `impact_from` is then missing:
+it is the start of an impact signal with no name.
+
 `lapilli verdict` judges each firing by its own time:
 
 ```jq
@@ -133,12 +166,16 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
   | (.t + "Z" | fromdateiso8601) + ((.f // "0") | tonumber)
     - (if .z == "Z" then 0 else (if .z[0:1] == "-" then -1 else 1 end) * ((.z[1:3] | tonumber) * 3600 + (.z[4:6] | tonumber) * 60) end);
 .settings as $s
+| (($s.impact_signals // []) | map({key: .name, value: .}) | from_entries) as $sig
 | (.incidents + ($ARGS.named.earlier // [])) as $incs
-| [.firings[] | (.start | epoch) as $at
+| [.firings[] | (.start | epoch) as $at | (.signals // []) as $ties
+   | [$ties[] | $sig[.] | select(.record)] as $waits
    | (.white | not)
      and ($s.impact_from == null or ($s.impact_from | epoch) > $at)
+     and ($waits == [] or any($waits[]; .start == null or (.start | epoch) > $at))
      and (any($incs[];
-            (.start | epoch) <= $at
+            (.signal == null or (.signal as $x | any($ties[]; . == $x)))
+            and (.start | epoch) <= $at
             and (if .end then .end | epoch else (.start | epoch) + $s.unknown_length_ns / 1e9 end)
                 >= $at - $s.record_lookback_ns / 1e9)
           | not)]
@@ -152,9 +189,11 @@ the two weeks before it as `--argjson earlier '[{"start": "...", "end":
 `lapilli serve` (`record_by_week: true`) judges a firing by its week, from
 Monday in its `--tz`, as it keeps its stones: a week is judged when an
 incident was on at some time from two weeks before the week's Monday to
-the week's end, or the impact signal was read over all of the week. Every
-firing of a week is judged, or none. `/api/v1/summary` gives each week's
-span and `no_record`.
+the week's end, or the impact signal was read over all of the week. The
+firings of a week are judged by the signals tied to them: every firing of
+a week tied to the same signals is judged, or none; with no named signal,
+which `lapilli serve` reads one of for now, every firing of the week.
+`/api/v1/summary` gives each week's span and `no_record`.
 
 ## Precision
 
@@ -302,11 +341,13 @@ are hurt. Each series is read on its own, from two weeks before the period
 (which keeps the record, above); its samples from the period's start,
 `--step` apart, gaps of two steps or less not splitting them, make a
 window from the first to a step after the last, kept when it lasts
-`--impact-for` (5m) or longer, with the series' labels. Windows that
-overlap are one, with every value of the labels they all have. One that
-overlaps an incident written down, agreeing on `match`, is that incident,
-and isn't added. The rest are incidents with `candidate: true`, ids
-`impact-1`, `impact-2` and so on, judged against as any incident is.
+`--impact-for` (5m) or longer, with the series' labels. Windows of one
+signal that overlap are one, with every value of the labels they all
+have; windows of two named signals never are, however they overlap. One
+that overlaps an incident written down, agreeing on its `match`, is that
+incident, and isn't added. The rest are incidents with `candidate: true`,
+ids `impact-1`, `impact-2` and so on, or a named signal's
+`impact-NAME-1`, with its `signal`†, judged against as any incident is.
 `lapilli serve` keeps them, and a person confirms or dismisses each.
 `[.incidents[] | select(.candidate)]` are a report's impact windows, and
 `[.incidents[] | select(.candidate | not)]` its incidents written down.
@@ -484,11 +525,13 @@ holds them, and this list.
 |---|---|
 | the report | `from`, `to`, `noisy_at`, `no_record`†, `unjudged`†, `some_rules`†, `rules`, `incidents`, `firings`, `settings` |
 | `noisy_at` | `firings`, `precision` |
-| `settings` | `lead_ns`, `match`, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `record_by_week`† |
-| `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`† |
-| `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `candidate`, `caught_by` |
+| `settings` | `lead_ns`, `match`, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `record_by_week`†, `impact_signals`†, `impact_rules`† |
+| `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`† |
+| `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match` |
+| `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`† |
+| `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `candidate`, `caught_by`, `signal`† |
 | `incidents[].caught_by[]` | `rule`, `delay_ns`, `noisy` |
-| `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`† |
+| `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`† |
 
 ### The metrics
 
@@ -511,6 +554,8 @@ it, which only `lapilli serve` says.
 | `lapilli_incidents` | `state` (`caught`, `noisy_only`, `missed`), `source` (`written`, `impact`) |
 | `lapilli_incident_detection_delay_seconds` | `incident` |
 | `lapilli_last_run_timestamp_seconds` | |
+| `lapilli_impact_windows` | `signal`, `state` (`caught`, `noisy_only`, `missed`) |
+| `lapilli_impact_signal_start_timestamp_seconds` | `signal` |
 | `lapilli_rule_firings_during_deploys` | `rule`, [`severity`], [`team`] |
 | `lapilli_rule_caught_during_deploys` | `rule`, [`severity`], [`team`] |
 | `lapilli_rule_refired_weeks` | `rule`, [`severity`], [`team`] |
@@ -537,7 +582,11 @@ it, which only `lapilli serve` says.
 | `lapilli_serve_deploys_read_timestamp_seconds` | |
 | `lapilli_serve_incidents_passed_over` | |
 
-The first eleven are `--metrics`' too; the rest are `lapilli serve`'s
+The first eleven are `--metrics`' too. The next two are `--metrics`'
+alone, with named impact signals, which only `lapilli verdict` reads for
+now: each signal's windows by state, and from when it keeps the record
+(none for a signal that doesn't, or whose data a selector has none of);
+`TestVerdictMetricsStable` holds them. The rest are `lapilli serve`'s
 alone. `lapilli_rule_incidents_first` and `lapilli_rule_incidents_alone`
 are left out of a report of some of the rules (`--rule`), as what a rule
 adds to the others can't be said there.

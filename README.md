@@ -174,6 +174,28 @@ each incident lasted, and, of those nothing caught that were found over
 several series, each series' own window (`spans` in `--json`): an incident
 that lasted ten minutes may be two services' windows of five and ten.
 
+A team rarely has one signal of user harm. `lapilli verdict` takes several,
+each named, with its own `for`, the labels its windows are matched on, and
+whether reading it keeps the record (docs/design/signals.md):
+
+```sh
+lapilli verdict --rules alerts/ --prometheus http://prometheus:9090 --match service --match team \
+  --impact 'errors=sum by (service, team) (rate(http_requests_total{code=~"5.."}[5m])) / sum by (service, team) (rate(http_requests_total[5m])) > 0.05' \
+  --impact 'probe=probe_success == 0' --impact-for probe=2m --impact-match probe=service \
+  --impact 'payments=sum(rate(payments_succeeded_total[5m])) == 0' --impact-for payments=1m --impact-record payments=no
+```
+
+A probe's window and a 5xx window at the same time are two incidents, each
+matched on its own labels, not one that keeps only the labels both have.
+Each signal keeps the record of the firings it could have seen from where
+the data it reads begins, so a probe added last Thursday holds back only
+the firings of the services it probes. `--impact-file` says the same in a
+file, and which rules are judged against which signals: the latency rules
+against a latency signal alone, a load balancer's "no backend" rule
+matched on `backend` alone (see `lapilli verdict -h`). Named and unnamed
+`--impact` don't go together; `lapilli serve` takes one unnamed signal for
+now.
+
 Impact as short as `--impact-for` can be shorter than a rule fires on: a
 rule with `for: 5m` evaluated every minute fires once its condition held for
 six minutes, so a burst of errors under a minute, which `rate(...[5m])` shows

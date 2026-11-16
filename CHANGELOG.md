@@ -23,6 +23,40 @@
   `format=csv&redact=true`, the firings quiet windows excused and the
   team column among it; stderr isn't redacted, and the run says so
   there.
+- **Named impact signals, in `lapilli verdict`** (docs/design/signals.md,
+  step 1). `--impact NAME=PROMQL`, up to eight, each with its own
+  `--impact-for NAME=DUR`, `--impact-match NAME=LABELS` (the labels its
+  windows are matched on, in place of `--match`; `NAME=` for none) and
+  `--impact-record NAME=no` (reading it doesn't keep the record: payments
+  failing says only that users weren't hurt that way). Or all of them in
+  `--impact-file`, with rule entries: the rules whose names match, or whose
+  labels have given values, are judged against the windows of the signals
+  the entry names alone, on its own labels when it gives them; a "no
+  backend" rule the platform team owns can catch the service teams'
+  windows by `backend`. A signal's windows are its own, never merged with
+  another's at the same time, ids `impact-NAME-1`. A firing is judged by
+  the signals that could have seen it, from each one's start: where the
+  data of every selector it reads begins, so a probe added on Thursday
+  holds back only the firings of the services it probes. `--json` gives
+  each incident's `signal`, each firing's `signals`, each rule's
+  `impact_rule`, and `settings.impact_signals` and `settings.impact_rules`;
+  `--metrics`, `lapilli_impact_windows` and
+  `lapilli_impact_signal_start_timestamp_seconds`. One `--impact` with no
+  name judges as before, byte for byte. `lapilli serve` takes one unnamed
+  signal until it keeps named ones.
+
+### Changed
+
+- **`--impact` given twice without a name is refused**, by `lapilli
+  verdict` and `lapilli serve`: the last one given was read, and the others
+  dropped without a word. Name each (`--impact errors=...`), or join them
+  in one expression.
+- **docs/numbers.md**: "every firing of a week is judged, or none" is now
+  "by the signals tied to it", and "windows that overlap are one" is now
+  "windows of one signal that overlap are one". With no named signal,
+  nothing is counted otherwise. The recount of catches and of no record
+  reads the signals' own match, the rule entries and each firing's
+  signals.
 
 - **`lapilli preflight`: what serve will meet, before it is deployed.**
   It takes `lapilli serve`'s flags, read and refused as serve reads them
