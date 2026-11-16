@@ -153,7 +153,7 @@ once a day while it still holds nothing, and the Run history page says so.
   twice a week would never be said to differ; one that fires a hundred
   times would at eleven misses.
 - Should a rule that differs have its stones set apart in the digest and
-  the Impact page, not only marked?
+  the Outcomes page, not only marked?
 - Thanos, Mimir and the managed Prometheus services may or may not keep
   `ALERTS`. Checking is how to find out; the Run history page saying so is the
   way to tell the user.

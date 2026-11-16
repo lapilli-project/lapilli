@@ -141,15 +141,15 @@ rest are written in the template that draws them.
 
 | Kind | States |
 |---|---|
-| ok | a rule's `○ OK`, of a rule some of whose firings were judged; a proposal `✓ approved`, `● applied`; a task done; a rule to keep (`✓ keep`); a rule change "as predicted"; Impact's Runs tile, "all ran", the runs up to date; notifications, "Last sent from the outbox"; an incident caught (its "Caught" cell); the overview's "Nothing to look at now", the one empty state that says all is well (`allClear`); a change "better"; the incidents chart's caught |
-| warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Impact's tile, the Run history page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Impact's tile and note, the overview's line); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted" |
-| bad | a run's error, and the server's error banner; `--config` that can't be used at all, or that the ledger couldn't be kept to; notices given up on; the digest failed; an on-call schedule's read failed; Impact's Runs tile, "n failed"; a task overdue; a proposal closed as failed, and its reason; a backtest that misses incidents; would have caught while it was off; an incident missed (`✗ nothing fired`, "Nothing fired."), the missed count of the table of the weeks; a search not understood; a change "worse" |
-| info | a proposal `↻ being applied`; `✎ Proposed`; a quiet window `● active now`; the server's work (`↻`); catching up on the overview; behind on Impact, and its Runs tile ("all ran") while it is; a rule change "measuring", "rule written"; `⇣ Recorded only`; a task open or doing, and the overview's link to one ("task #n"); a rule to tune (`± tune`); the reason of a proposal approved or applied (it waited while its rule fired) |
-| unknown | `? No record`, the weeks' "no record" tag, the notes of weeks with no record; "–"; a backtest with no record (`no_record`); a rule none of whose firings was judged (`? No record`; `ruleRow.PerfClass`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review, and the reason of one refused; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; a rule change superseded, without a week before it, taken away or replayed again; Impact's Runs tile before any run |
+| ok | a rule's `○ OK`, of a rule some of whose firings were judged; a proposal `✓ approved`, `● applied`; a task done; a rule to keep (`✓ keep`); a rule change "as predicted"; Outcomes' Runs tile, "all ran", the runs up to date; notifications, "Last sent from the outbox"; an incident caught (its "Caught" cell); the overview's "Nothing to look at now", the one empty state that says all is well (`allClear`); a change "better"; the incidents chart's caught |
+| warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Outcomes' tile, the Run history page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Outcomes' tile and note, the overview's line); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted" |
+| bad | a run's error, and the server's error banner; `--config` that can't be used at all, or that the ledger couldn't be kept to; notices given up on; the digest failed; an on-call schedule's read failed; Outcomes' Runs tile, "n failed"; a task overdue; a proposal closed as failed, and its reason; a backtest that misses incidents; would have caught while it was off; an incident missed (`✗ nothing fired`, "Nothing fired."), the missed count of the table of the weeks; a search not understood; a change "worse" |
+| info | a proposal `↻ being applied`; `✎ Proposed`; a quiet window `● active now`; the server's work (`↻`); catching up on the overview; behind on Outcomes, and its Runs tile ("all ran") while it is; a rule change "measuring", "rule written"; `⇣ Recorded only`; a task open or doing, and the overview's link to one ("task #n"); a rule to tune (`± tune`); the reason of a proposal approved or applied (it waited while its rule fired) |
+| unknown | `? No record`, the weeks' "no record" tag, the notes of weeks with no record; "–"; a backtest with no record (`no_record`); a rule none of whose firings was judged (`? No record`; `ruleRow.PerfClass`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review, and the reason of one refused; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; a rule change superseded, without a week before it, taken away or replayed again; Outcomes' Runs tile before any run |
 | no colour | what is left to do or not found, but isn't a verdict: "No proposals yet.", "No proposal waiting for approval is stale.", every other empty state; the Cleanup page, whose names are neither well nor wrong |
 
 Three were left open, and are so: catching up is info, as Lapilli does it
-by itself and nothing is for a person to do (behind, on Impact, the
+by itself and nothing is for a person to do (behind, on Outcomes, the
 same); a task doing is info with open, both under way, as lavender was the
 noise's; and the sidebar's counts have no colour, as each is a number whose
 word ("to approve", "open") is read out but not shown, so a colour there
@@ -201,35 +201,40 @@ The pages are in four groups, each named, not a link:
 |---|---|
 | Monitoring | Overview `/`, Rules `/rules`, Incidents `/incidents`, Alert history `/firings` |
 | Improve | Tasks `/tasks`, Proposals `/proposals`, Quiet windows `/windows` |
-| Reporting | Reports `/reports`, Impact `/outcomes` |
+| Reporting | Reports `/reports`, Outcomes `/outcomes` |
 | Administration | Teams `/teams`, Roles `/roles`, Settings `/settings`, Run history `/runs`, Cleanup `/orphans` |
 
 Groups and pages are named by nouns, what they hold, as Argo CD's and
 Grafana's sidebars are. They were verbs (See, Fix, Report, Manage) and
-coined words (Firings, Outcomes, Runs, Orphans), which read as a list of
-commands. Proposals keeps its name: everything on its page and beside it
-says proposal (a rule's Proposals tab, its "Proposed" badge, "%d of %d
+coined words (Firings, Runs, Orphans), which read as a list of commands.
+Proposals keeps its name: everything on its page and beside it says
+proposal (a rule's Proposals tab, its "Proposed" badge, "%d of %d
 proposals"), and a page called otherwise read worse beside them than the
-word itself. The reports' group is Reporting in English, so that
+word itself. Outcomes keeps its English name, as "Impact" stood beside
+the impact windows on the same page; in Korean it is 변경 효과, beside
+변경 제안, not 개선 효과 under a group of its own called 개선. Alert
+history is 발화 이력 in Korean, as 알림 is what Lapilli sends there. The
+reports' group is Reporting in English, so that
 its page isn't "Reports › Reports"; the other languages name both alike
 (리포트, レポート, Informes), and the group's name isn't a link. A page is
 called what the sidebar calls it: its `<h1>` and `<title>` start with that
 name, and its breadcrumb is that name (`TestPageNamedAsInTheSidebar`), but
-the overview, headed by what it shows. So is what names a page elsewhere:
+the overview, headed by what it shows; Outcomes before anything is judged
+is "Outcomes: nothing judged yet". So is what names a page elsewhere:
 a cloud alarm's link to Run history, the failed digest's "the Run history
-page says why", the overview's Impact card and the Administration page's
+page says why", the overview's Outcomes card and the Administration page's
 cards. What a page holds keeps its
-own words: a proposal, a firing, a run, the Runs tile on Impact, a rule's
+own words: a proposal, a firing, a run, the Runs tile on Outcomes, a rule's
 Firings and Proposals tabs. The URLs, the API and MCP are as they were.
 
 | Group or page | English | 한국어 | 日本語 | Español |
 |---|---|---|---|---|
 | group | Monitoring | 모니터링 | モニタリング | Supervisión |
-| group | Improve | 개선 | 改善 | Mejora |
+| group | Improve | 개선 | 改善 | Mejoras |
 | group | Reporting | 리포트 | レポート | Informes |
 | group, `/manage` | Administration | 관리 | 管理 | Administración |
-| `/firings` | Alert history | 알림 이력 | アラート履歴 | Historial de alertas |
-| `/outcomes` | Impact | 개선 효과 | 改善効果 | Impacto |
+| `/firings` | Alert history | 발화 이력 | アラート履歴 | Historial de alertas |
+| `/outcomes` | Outcomes | 변경 효과 | 変更の効果 | Resultados |
 | `/runs` | Run history | 실행 이력 | 実行履歴 | Historial de ejecuciones |
 | `/orphans` | Cleanup | 정리 대상 | 整理対象 | Limpieza |
 

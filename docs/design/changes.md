@@ -21,7 +21,7 @@ companion to [work.md](work.md), about the tasks people keep, and to
 Lapilli says which rules to change and by how much: a longer `for` for a
 noisy rule, the threshold that would have caught an incident nothing caught,
 a rule another always beat. It checks the change before anyone makes it
-(`--compare`, MCP's `compare`) and measures it after (the Impact page).
+(`--compare`, MCP's `compare`) and measures it after (the Outcomes page).
 Between the two, a person opens the rule file, writes the change, opens a
 pull request, waits for a review, and comes back. Most suggestions die
 there: not because anyone disagreed, but because nobody had the half hour.
@@ -136,7 +136,7 @@ credentials already are (a CI job, a CronJob), and:
    then "opened", and its task carries the link);
 4. tells Lapilli when the pull request is merged or closed. A merge isn't
    "applied": the change is applied when Lapilli reads the rules with it,
-   as a new version, and the Impact page measures it from then.
+   as a new version, and the Outcomes page measures it from then.
 
 **What Lapilli writes.** The change is made in the document as it was read,
 by editing the YAML's tree (`yaml.v3` nodes), not by writing it out afresh,
@@ -243,7 +243,7 @@ Always a person, in the UI.
 - **Undo.** Every applied change can be undone from its page, by an
   approver, for as long as `--keep`.
 - **Measured.** A change applied is a new version of the rules, and the
-  Impact page sets what it did beside what was predicted, as it does for
+  Outcomes page sets what it did beside what was predicted, as it does for
   any change today.
 
 ## Security

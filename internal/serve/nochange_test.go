@@ -8,7 +8,7 @@ import (
 
 // TestNoChangeIsNeitherBetterNorWorse: a change is one between the numbers
 // shown. Two that show the same are neither better nor worse, with no
-// colour and no word, on the overview's tiles, the Impact page's then and
+// colour and no word, on the overview's tiles, the Outcomes page's then and
 // now, and a rule's page; two that differ never read "+0 pt", "+0%" or
 // "+0s".
 func TestNoChangeIsNeitherBetterNorWorse(t *testing.T) {
@@ -51,7 +51,7 @@ func TestNoChangeIsNeitherBetterNorWorse(t *testing.T) {
 		}
 	}
 
-	// Impact's then and now.
+	// Outcomes' then and now.
 	from := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
 	span := func(weeks, f, w, inc, missed int) period {
 		return period{From: from, To: from.Add(time.Duration(weeks) * weekLen), Firings: f, White: w, Incidents: inc, Missed: missed}
@@ -81,7 +81,7 @@ func TestNoChangeIsNeitherBetterNorWorse(t *testing.T) {
 	} {
 		x := impact(c.then, c.now)[c.label]
 		if x.Delta != c.delta || x.Better != c.better || x.Worse != c.wrse {
-			t.Errorf("Impact, %s: %q better %v worse %v, want %q %v %v", c.name, x.Delta, x.Better, x.Worse, c.delta, c.better, c.wrse)
+			t.Errorf("Outcomes, %s: %q better %v worse %v, want %q %v %v", c.name, x.Delta, x.Better, x.Worse, c.delta, c.better, c.wrse)
 		}
 	}
 

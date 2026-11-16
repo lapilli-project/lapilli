@@ -8,22 +8,24 @@
   pages coined words, so the menu read as a list of commands; they are
   nouns now, as a console's are. The groups: Monitoring (was See), Improve
   (Fix), Reporting (Report) and Administration (Manage). The pages:
-  Alert history (Firings), Impact (Outcomes), Run history (Runs) and
-  Cleanup (Orphans); in Korean 알림 이력, 개선 효과, 실행 이력 and 정리
-  대상, and the groups 모니터링, 개선, 리포트 and 관리. Proposals keeps
-  its name, as everything on and beside its page says proposal. A page's
+  Alert history (Firings), Run history (Runs) and Cleanup (Orphans); in
+  Korean 발화 이력, 실행 이력 and 정리 대상, with Outcomes 변경 효과 (was
+  효용) and in Japanese 変更の効果, and the groups 모니터링, 개선, 리포트
+  and 관리. Proposals keeps its name, as everything on and beside its page
+  says proposal, and Outcomes its English one: "Impact" would have stood
+  beside the impact windows on the same page. A page's
   heading, breadcrumb and browser tab say the name the sidebar gives it,
   and so do the links and lines that name a page (a cloud alarm's, the
-  failed digest's, the overview's Impact card and the Administration
+  failed digest's, the overview's Outcomes card and the Administration
   page's cards). What a page holds keeps its words: firings, runs, a
   rule's tabs. The URLs (`/firings`, `/outcomes`, `/runs`, `/orphans`,
   `/manage`), the API, MCP and JSON fields are as they were.
 
 ### Fixed
 
-- **No change, no "better".** The Impact page said "+0 pt, better" of a
+- **No change, no "better".** The Outcomes page said "+0 pt, better" of a
   precision that read 1% then and now. A change is one between the
-  numbers shown, on the overview's tiles and Impact's then and now: the
+  numbers shown, on the overview's tiles and Outcomes' then and now: the
   same number shown is neither better nor worse, with no colour and no
   word, and two that differ never read "+0 pt", "+0%" or "+0s".
 - **"Propose it" with a proposal waiting.** A rule's "What to do first"

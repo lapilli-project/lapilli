@@ -1246,7 +1246,7 @@ Grafana dashboard of them.
 
 The pages are in a sidebar of four groups, named as a console names them
 (Monitoring: Overview, Rules, Incidents, Alert history; Improve: Tasks,
-Proposals, Quiet windows; Reporting: Reports, Impact;
+Proposals, Quiet windows; Reporting: Reports, Outcomes;
 Administration: Teams, Roles, Settings, Run history, Cleanup), a
 menu on a narrow screen, each with a breadcrumb and a bar to pick the team
 and the period, which every link carries; a reader who edits one team sees
@@ -1422,7 +1422,7 @@ with `--tasks-token-file` (below). Notices are written in the
 same transaction as what they tell of and sent after, so a receiver that
 is down holds nothing up and misses nothing it comes back for.
 
-Whether Lapilli itself earns its keep is on the Impact page (`/outcomes`),
+Whether Lapilli itself earns its keep is on the Outcomes page (`/outcomes`),
 worked out
 from the same ledger. Each change to the rules it reviewed is measured: the
 replay of the week before was its prediction, and the four weeks either

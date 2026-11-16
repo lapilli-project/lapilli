@@ -496,9 +496,9 @@ func TestSidebar(t *testing.T) {
 // TestPageNamedAsInTheSidebar: a page of the sidebar is called what the
 // sidebar calls it, in each language: its breadcrumb, its heading and the
 // browser's tab start with that name (the firings page's with its day
-// after), so that the menu, the page and the tab agree. The overview alone
-// is headed by what it shows, and named Overview in the sidebar and its
-// breadcrumb.
+// after, Outcomes' with "nothing judged yet" before anything is), so that
+// the menu, the page and the tab agree. The overview alone is headed by
+// what it shows, and named Overview in the sidebar and its breadcrumb.
 func TestPageNamedAsInTheSidebar(t *testing.T) {
 	h := pagesServer(t).Handler()
 	for _, n := range names {
@@ -537,6 +537,18 @@ func TestPageNamedAsInTheSidebar(t *testing.T) {
 					t.Errorf("%s %s: titled %q, headed %q, not %q", n.Code, it.href, title, h1, name)
 				}
 			}
+		}
+	}
+	// Outcomes before anything is judged: still Outcomes first.
+	empty, _ := server(t, nil)
+	for _, n := range names {
+		r := httptest.NewRequest(http.MethodGet, "/outcomes", nil)
+		r.Header.Set("Accept-Language", n.Code)
+		w := httptest.NewRecorder()
+		empty.Handler().ServeHTTP(w, r)
+		body, name := w.Body.String(), tr(n.Code, "Outcomes")
+		if want := tr(n.Code, "Outcomes: nothing judged yet"); !strings.HasPrefix(want, name) || !strings.Contains(body, "<title>"+want+" · Lapilli</title>") || !strings.Contains(body, "<h1>"+want+"</h1>") {
+			t.Errorf("%s: Outcomes with nothing judged isn't titled and headed %q", n.Code, want)
 		}
 	}
 }
