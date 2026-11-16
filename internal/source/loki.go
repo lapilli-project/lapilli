@@ -81,9 +81,10 @@ func tokenFrom(file string) func(context.Context) (string, error) {
 // when not nil, is the data source's own Limiter: Grafana passes on what
 // each data source answers, Retry-After included, so each pushes back of
 // its own; the data sources of a Grafana share a Pace (--max-rate). more
-// are options besides (prom.WithMaxSamples).
+// are options besides (prom.WithMaxSamples). Its requests are counted as
+// Grafana's.
 func GrafanaLoki(base, tokenFile, agent, uid string, limit *prom.Limiter, more ...prom.Option) *prom.Client {
-	opts := append([]prom.Option{prom.Loki(), prom.WithHTTPClient(noRedirects)}, more...)
+	opts := append([]prom.Option{prom.Loki(), prom.CountedAs("grafana"), prom.WithHTTPClient(noRedirects)}, more...)
 	if limit != nil {
 		opts = append(opts, prom.WithLimiter(limit))
 	}
