@@ -156,7 +156,8 @@ lands here, and is shown the way to it. */}}
 </section>{{else}}{{with .Suggestion}}<section class="card todo" id="first">
 <h2>{{t "What to do first"}}</h2>
 <p class="hint">{{.}}</p>
-<div class="row">{{if and $v.SuggestedFor (not $.Status.ReadOnly)}}<form method="post" action="/proposals"><input type="hidden" name="rule" value="{{$v.Name}}"><input type="hidden" name="kind" value="for"><input type="hidden" name="from" value="suggestion"><input type="hidden" name="for" value="{{$v.SuggestedFor}}"><button>{{t "Propose it"}}</button></form>{{else if $v.SuggestedFor}}{{template "off" (offOf $ "Propose it" "editor" "first-propose-why")}}{{end}}
+<div class="row">{{if and $v.SuggestedFor $v.OpenProposal}}{{template "off" (offWhy "Propose it" "first-propose-why" "this rule has a proposal not yet finished with: one at a time")}} <a href="{{$.Link (printf "/proposals/%d" $v.OpenProposal)}}">#{{$v.OpenProposal}}</a>
+{{- else if and $v.SuggestedFor (not $.Status.ReadOnly)}}<form method="post" action="/proposals"><input type="hidden" name="rule" value="{{$v.Name}}"><input type="hidden" name="kind" value="for"><input type="hidden" name="from" value="suggestion"><input type="hidden" name="for" value="{{$v.SuggestedFor}}"><button>{{t "Propose it"}}</button></form>{{else if $v.SuggestedFor}}{{template "off" (offOf $ "Propose it" "editor" "first-propose-why")}}{{end}}
 {{if edits $.Status $v.TeamID}}<form method="post" action="/tasks"><input type="hidden" name="title" value="{{t "Quiet %s" $v.Name}}: {{.}}"><input type="hidden" name="kind" value="tune"><input type="hidden" name="rule" value="{{$v.Name}}"><input type="hidden" name="back" value="{{$.Link $v.Path "tab" "activity"}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>{{else}}{{template "off" (offTeam $ "Make it a task" "first-task-why" $v.Team)}}{{end}}</div>
 </section>{{end}}{{end}}
 

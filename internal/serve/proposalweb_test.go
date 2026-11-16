@@ -33,7 +33,7 @@ func withProposal(t *testing.T, more func(*Config)) (*Server, http.Handler, int6
 
 // TestProposalPage: a proposal's page has its id and what it changes in
 // words, its state as a sign and a word, who made it, its way and when;
-// the breadcrumb Fix › Proposals › #id; the change as a diff in the
+// the breadcrumb Improve › Proposals › #id; the change as a diff in the
 // options asked, the file a pull request changes beside it; and the
 // backtest as a table, now beside as proposed.
 func TestProposalPage(t *testing.T) {

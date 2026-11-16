@@ -741,3 +741,49 @@ func TestBulkProposeWritesBack(t *testing.T) {
 		t.Errorf("%d %s", resp.StatusCode, resp.Header.Get("Location"))
 	}
 }
+
+// TestFirstProposeWhileOneWaits: "What to do first" offers the digest's
+// suggested for as "Propose it" until the rule has a proposal not
+// finished with; then, as the ledger takes one a rule at a time, the
+// button is drawn disabled for everyone, with why and a link to the one
+// that waits, in each language, and no form makes another.
+func TestFirstProposeWhileOneWaits(t *testing.T) {
+	// Its week's record kept: a suggestion is shown for a week with one.
+	s := proposeServer(t, nil)
+	keepRecordIn(t, s)
+	h := s.Handler()
+	form := `<input type="hidden" name="from" value="suggestion"><input type="hidden" name="for" value="30m"><button>Propose it</button>`
+	if _, body := getAs(t, h, "/rules/BulkA", bo); !strings.Contains(body, form) || strings.Contains(body, `id="first-propose-why"`) {
+		t.Fatalf("before a proposal, BulkA's first step isn't its form:\n%s", firstStep(body))
+	}
+	code, _, hd := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"BulkA"}, "kind": {"for"}, "for": {"30m"}, "from": {"suggestion"}})
+	if code != http.StatusSeeOther {
+		t.Fatalf("proposing BulkA's suggestion: %d", code)
+	}
+	id := strings.TrimPrefix(hd.Get("Location"), "/proposals/")
+	for _, who := range []string{bo, "vi@example.com"} {
+		for _, n := range names {
+			r := httptest.NewRequest(http.MethodGet, "/rules/BulkA", nil)
+			r.Header.Set("X-Forwarded-Email", who)
+			r.Header.Set("Accept-Language", n.Code)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			first := firstStep(w.Body.String())
+			off := `<span class="action-off"><button type="button" disabled aria-describedby="first-propose-why">` + tr(n.Code, "Propose it") + `</button> <span id="first-propose-why" class="why">` +
+				tr(n.Code, "this rule has a proposal not yet finished with: one at a time") + `</span></span> <a href="/proposals/` + id + `">#` + id + `</a>`
+			if !strings.Contains(first, off) || strings.Contains(first, `value="suggestion"`) {
+				t.Errorf("%s, %s: with #%s waiting, the first step is\n%s", who, n.Code, id, first)
+			}
+		}
+	}
+}
+
+// firstStep is a rule page's "What to do first", or the page when it has none.
+func firstStep(body string) string {
+	i := strings.Index(body, `id="first"`)
+	if i < 0 {
+		return body
+	}
+	j := strings.Index(body[i:], "</section>")
+	return body[i : i+j]
+}

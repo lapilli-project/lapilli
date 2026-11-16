@@ -1317,6 +1317,19 @@ type ruleChanges struct {
 	DiffLinks [2][]diffLink
 }
 
+// OpenProposal is the rule's proposal not finished with, its id; 0 with
+// none. The ledger takes one a rule at a time (ledger.ErrProposed), so a
+// form that would make another is drawn disabled, with why and a link to
+// it, rather than refused once sent.
+func (c ruleChanges) OpenProposal() int64 {
+	for _, p := range c.Proposals {
+		if p.Open() {
+			return p.ID
+		}
+	}
+	return 0
+}
+
 // Shaped is a version beside the one before it, as the versions tab shows
 // it.
 func (c ruleChanges) Shaped(v change) diffShown {
