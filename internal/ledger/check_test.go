@@ -3,6 +3,8 @@ package ledger
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,7 +38,7 @@ func TestPutCheck(t *testing.T) {
 		t.Errorf("A: %+v", a)
 	}
 	ms, err := l.CheckMisses(ctx, "A")
-	if err != nil || len(ms) != maxMisses || !ms[0].Start.Equal(day.Add(24*time.Minute)) {
+	if err != nil || len(ms) != MaxMisses || !ms[0].Start.Equal(day.Add(24*time.Minute)) {
 		t.Errorf("misses: %d %v, the latest %v", len(ms), err, ms[0].Start)
 	}
 	if el, _ := l.CheckElsewhere(ctx, day, day.Add(24*time.Hour)); el["Watchdog"] != 3 {
@@ -143,5 +145,49 @@ func TestCheckShared(t *testing.T) {
 	}
 	if all, err := l.CheckTotal(ctx, t0, next.Add(24*time.Hour), func(name string) bool { return name != "Disk" }); err != nil || all.Replayed != 11 {
 		t.Errorf("over both days: %+v %v; want 4 + 7 replayed", all, err)
+	}
+}
+
+// Of a check's misses, those kept are the newest by start, as they came,
+// of those that start at once the later, as the ledger keeps them when it
+// cuts them: and only those are written.
+func TestNewestMisses(t *testing.T) {
+	day := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	var ms []verdict.Miss
+	for i := range 6 {
+		ms = append(ms, verdict.Miss{Way: fmt.Sprint(i), Firing: firing.Firing{Start: day.Add(time.Duration(i%3) * time.Minute)}})
+	}
+	var got []string
+	for _, m := range NewestMisses(ms, 3) {
+		got = append(got, m.Way)
+	}
+	// Starts 0,1,2,0,1,2 minutes: the two at 2 and the later at 1, as they
+	// came.
+	if strings.Join(got, ",") != "2,4,5" {
+		t.Errorf("kept %v", got)
+	}
+	if len(NewestMisses(ms, 10)) != 6 {
+		t.Error("cut what fits")
+	}
+	// Written, the same are kept as when all were, and cut.
+	l := open(t, time.UTC)
+	ctx := context.Background()
+	c := &verdict.SpanCheck{Rules: map[string]*verdict.SpanRule{"A": {Misses: ms}}}
+	all := slices.Clone(ms)
+	for range 30 {
+		all = append(all, verdict.Miss{Way: "old", Firing: firing.Firing{Start: day.Add(-time.Hour)}})
+	}
+	c.Rules["A"].Misses = all
+	if err := l.PutCheck(ctx, day, c, nil, day.Add(24*time.Hour), 0); err != nil {
+		t.Fatal(err)
+	}
+	// Each row written takes the next id: twenty written, not 36.
+	var top int64
+	if err := l.r.QueryRowContext(ctx, "SELECT max(id) FROM check_misses").Scan(&top); err != nil || top > MaxMisses {
+		t.Errorf("wrote %d misses' rows, %v", top, err)
+	}
+	kept, err := l.CheckMisses(ctx, "A")
+	if err != nil || len(kept) != MaxMisses || kept[0].Way != "5" || kept[1].Way != "2" || kept[5].Way != "0" {
+		t.Errorf("%d kept, %v: %+v", len(kept), err, kept[:min(len(kept), 6)])
 	}
 }

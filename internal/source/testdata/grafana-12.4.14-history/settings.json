@@ -1,0 +1,1 @@
+{"unifiedAlerting": {"alertStateHistoryBackend": "multiple", "alertStateHistoryPrimary": "annotations", "stateHistory": {"backend": "multiple", "primary": "annotations", "prometheusTargetDatasourceUID": "prom", "prometheusMetricName": "GRAFANA_ALERTS"}}}

@@ -69,7 +69,9 @@ Where the firings come from (pick one):
                       each data source says it has is read too, which
                       Grafana puts $__rate_interval in with
   --grafana-token-file FILE
-                      a Grafana service account token, to read them with
+                      a Grafana service account token, to read them with,
+                      and, for --check-replay, its alert state history: a
+                      Viewer's reads both
   --ruler URL         replay the alert rules a managed Prometheus ruler
                       holds, as written, from the API that writes them:
                         Mimir     http://mimir:8080/prometheus/config/v1/rules
@@ -190,7 +192,18 @@ Is the replay right?
                       ALERTS{alertstate="firing"}, and for Grafana's rules
                       GRAFANA_ALERTS{alertstate="firing",
                       grafana_alertstate!="error"}: a query that failed
-                      can't be replayed, so its error alerts are left out)
+                      can't be replayed, so its error alerts are left out).
+                      Without it, what Grafana's rules really fired is read
+                      from Grafana's own alert state history instead, when
+                      --grafana or --check-grafana says which Grafana and it
+                      keeps one it serves: in annotations, its default, from
+                      Grafana 12.4 on, or in Loki; and GRAFANA_ALERTS first,
+                      while it holds anything, where Grafana may keep it
+                      too. Read from a day before the period; where it can't
+                      be read, Grafana's rules aren't checked, and say why
+  --check-grafana URL the Grafana that runs the Grafana rules --rules gives,
+                      whose alert state history says what they really fired,
+                      read with --grafana-token-file
   --check-firings FILE
                       what a cloud's own alarms really fired, as
                       recipes/firings writes it, for the PromQL alarms
@@ -372,13 +385,17 @@ type verdictFlags struct {
 	checkReplaySet             bool // --check-replay given, true or false
 	checkSeries                []string
 	checkFirings               string
-	checkContent               bool
-	checkContentSet            bool // --check-content given, true or false
-	severities                 []string
-	runbooks                   []string
-	scrapeInterval             time.Duration
-	alerts                     bool
-	firings, incidents         string
+	// checkGrafana is --check-grafana: the Grafana that runs the Grafana
+	// rules --rules gives, whose alert state history says what they
+	// really fired.
+	checkGrafana       string
+	checkContent       bool
+	checkContentSet    bool // --check-content given, true or false
+	severities         []string
+	runbooks           []string
+	scrapeInterval     time.Duration
+	alerts             bool
+	firings, incidents string
 	// firingsToken is lapilli serve's --firings-token-file, given: firings
 	// copied in may be all there is.
 	firingsToken        bool
@@ -431,6 +448,11 @@ type verdictFlags struct {
 	// lokiLimit is the Limiter every client of --loki shares, made once
 	// (lokiSource).
 	lokiLimit *prom.Limiter
+	// grafanaPace and grafanaCap are the Grafana's --max-rate and
+	// --parallel, which its data sources and its state history are asked
+	// by together, made once (grafanaLimits).
+	grafanaPace *prom.Pace
+	grafanaCap  *prom.Limiter
 }
 
 // alarmsFlag is an --alarms SOURCE=URL.
@@ -595,6 +617,11 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			f.checkSeries = append(f.checkSeries, val)
 		case "--check-firings":
 			f.checkFirings = val
+		case "--check-grafana":
+			if u, perr := url.Parse(val); perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+				return nil, fmt.Errorf("--check-grafana %s: want Grafana's URL, like https://grafana.example.com", val)
+			}
+			f.checkGrafana = strings.TrimRight(val, "/")
 		case "--severities":
 			for _, sev := range strings.Split(val, ",") {
 				if sev = strings.TrimSpace(sev); sev != "" && !slices.Contains(f.severities, sev) {
@@ -872,12 +899,14 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 			return nil, errors.New("--check-replay sets the rules' replay beside what really fired: give the rules, with --rules, --loaded-rules, --grafana or --ruler")
 		case len(f.checkSeries) > 0 && f.checkReplaySet && !f.checkReplay:
 			return nil, errors.New("--check-series goes with the replay set beside what really fired, which --check-replay=false turns off")
+		case validCheckGrafana(f, f.checkReplaySet && !f.checkReplay) != nil:
+			return nil, validCheckGrafana(f, f.checkReplaySet && !f.checkReplay)
 		case f.checkContent && f.checkContentSet && (f.alerts || !rulesToo):
 			return nil, errors.New("--check-content checks what the rules say: give the rules, with --rules, --loaded-rules, --grafana or --ruler")
 		case len(f.severities) > 0 && f.checkContentSet && !f.checkContent:
 			return nil, errors.New("--severities goes with the content check, which --check-content=false turns off")
-		case f.grafanaTk != "" && f.grafana == "":
-			return nil, errors.New("--grafana-token-file goes with --grafana")
+		case f.grafanaTk != "" && f.grafana == "" && f.checkGrafana == "":
+			return nil, errors.New("--grafana-token-file goes with --grafana or --check-grafana")
 		case validRuler(f) != nil:
 			return nil, validRuler(f)
 		case f.promURL == "" && f.gcpProj == "" && rulesToo:
@@ -903,8 +932,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--alarms reads a cloud's alarms to replay or list beside the rules: it doesn't go with --alerts or --firings")
 	case len(f.alarms) > 0 && len(f.compare) > 0:
 		return nil, errors.New("--compare sets two sets of rule files side by side: leave out --alarms")
-	case f.grafanaTk != "" && f.grafana == "":
-		return nil, errors.New("--grafana-token-file goes with --grafana")
+	case f.grafanaTk != "" && f.grafana == "" && f.checkGrafana == "":
+		return nil, errors.New("--grafana-token-file goes with --grafana or --check-grafana")
 	case validRuler(f) != nil:
 		return nil, validRuler(f)
 	case f.json && f.metrics:
@@ -917,6 +946,8 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		return nil, errors.New("--check-series goes with --check-replay")
 	case f.checkFirings != "" && !f.checkReplay:
 		return nil, errors.New("--check-firings goes with --check-replay: what a cloud's alarms really fired, to set their replay beside")
+	case validCheckGrafana(f, !f.checkReplay) != nil:
+		return nil, validCheckGrafana(f, !f.checkReplay)
 	case f.checkReplay && (f.alerts || f.firings != ""):
 		return nil, errors.New("--check-replay sets a replay beside what really fired: give the rules, with --rules, --loaded-rules, --grafana or --ruler")
 	case f.checkReplay && len(f.compare) > 0:
@@ -958,6 +989,25 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 	return f, nil
 }
 
+// validCheckGrafana checks --check-grafana: the Grafana running the
+// Grafana rules in files, whose state history is read; off says the check
+// is.
+func validCheckGrafana(f *verdictFlags, off bool) error {
+	switch {
+	case f.checkGrafana == "":
+		return nil
+	case off:
+		return errors.New("--check-grafana goes with --check-replay: what Grafana's rules really fired, to set their replay beside")
+	case f.grafana != "":
+		return errors.New("--check-grafana is for Grafana's rules read from files: with --grafana, that Grafana's own state history is read")
+	case len(f.checkSeries) > 0:
+		return errors.New("--check-grafana reads what Grafana's rules really fired from its state history, and --check-series from series: give one")
+	case len(f.rules) == 0 && f.rulesHistory == "":
+		return errors.New("--check-grafana is for Grafana's rules read from files, with --rules or --rules-history")
+	}
+	return nil
+}
+
 // validLoki checks the flags of a Loki: its rules, read with it.
 func validLoki(f *verdictFlags, serve bool) error {
 	switch {
@@ -981,7 +1031,7 @@ func validContent(f *verdictFlags, sources int) error {
 	switch {
 	case !f.checkContentSet || sources > 1 || sources == 0 && len(f.alarms) == 0 && !lokiToo || f.alerts || f.firings != "":
 		return errors.New("--check-content checks what the rules say: give them with one of --rules, --loaded-rules, --grafana, --ruler, --alarms or --loki-rules")
-	case f.checkReplay || len(f.checkSeries) > 0:
+	case f.checkReplay || len(f.checkSeries) > 0 || f.checkGrafana != "":
 		return errors.New("--check-content doesn't go with --check-replay")
 	case len(f.compare) > 0 || f.changedOnly:
 		return errors.New("--check-content checks the rules given: leave out --compare")
@@ -1601,12 +1651,40 @@ func (f *verdictFlags) logs(warn io.Writer) *source.Logs {
 		// at once for all, as one Grafana answers them all, and holds
 		// each answer while it does. Logs.For makes one history a data
 		// source.
-		pace, most := prom.NewPace(f.maxRate), prom.NewCap(f.parallel)
+		pace, most := f.grafanaLimits()
 		l.Grafana = func(uid string) replay.History {
 			return newGrafanaLoki(f, uid, prom.NewLimiterPaced(pace).Within(most))
 		}
 	}
 	return l
+}
+
+// grafanaLimits are the Grafana's Pace, of --max-rate, and its cap, of
+// --parallel, which everything it is asked shares: its data sources' and
+// its state history's.
+func (f *verdictFlags) grafanaLimits() (*prom.Pace, *prom.Limiter) {
+	if f.grafanaCap == nil {
+		f.grafanaPace, f.grafanaCap = prom.NewPace(f.maxRate), prom.NewCap(f.parallel)
+	}
+	return f.grafanaPace, f.grafanaCap
+}
+
+// historyGrafana is the Grafana whose state history says what Grafana's
+// rules really fired: --check-grafana's, or --grafana's; "" for none, or
+// with --check-series, which names series instead.
+func (f *verdictFlags) historyGrafana() string {
+	if len(f.checkSeries) > 0 {
+		return ""
+	}
+	return cmp.Or(f.checkGrafana, f.grafana)
+}
+
+// grafanaHistory reads the state history of historyGrafana, asked by a
+// Limiter of its own, within the Grafana's pace and cap.
+func (f *verdictFlags) grafanaHistory() source.GrafanaHistory {
+	pace, most := f.grafanaLimits()
+	return source.GrafanaHistory{URL: f.historyGrafana(), TokenFile: f.grafanaTk, Agent: "lapilli/" + buildVersion(),
+		Limit: prom.NewLimiterPaced(pace).Within(most)}
 }
 
 // noPrometheus is the history when there is no --prometheus: only rules

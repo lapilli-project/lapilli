@@ -55,6 +55,9 @@ What it reads:
 - **What really fired:** the series, read over the same span, `ALERTS` for
   rules Prometheus evaluates and `GRAFANA_ALERTS` for Grafana's, as
   `verdict` chooses them; `--check-series` names others, as it does there.
+  For Grafana's rules, with the Grafana known (`--grafana`,
+  `--check-grafana`), its own alert state history instead, where it keeps
+  one it serves: [grafanahistory.md](grafanahistory.md).
 
 When it reads: after a run, over the span the runs won't replay again,
 everything before the last run's end less `--settle`. It checks a span

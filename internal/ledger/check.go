@@ -17,8 +17,35 @@ import (
 // lapilli serve checks a day once its firings are settled, and keeps what it
 // found, by rule and day.
 
-// maxMisses is how many firings found only one way are kept for each rule.
-const maxMisses = 20
+// MaxMisses is how many firings found only one way are kept for each rule.
+const MaxMisses = 20
+
+// NewestMisses are the misses of ms the ledger keeps, the newest n by
+// their start, as they come: of misses that start at once, the later. A
+// check can find far more of them than are kept, and each is written, and
+// its labels kept, only once it is one of these.
+func NewestMisses(ms []verdict.Miss, n int) []verdict.Miss {
+	if len(ms) <= n {
+		return ms
+	}
+	idx := make([]int, len(ms))
+	for i := range idx {
+		idx[i] = i
+	}
+	slices.SortStableFunc(idx, func(a, b int) int {
+		if c := ms[b].Start.Compare(ms[a].Start); c != 0 {
+			return c
+		}
+		return b - a
+	})
+	idx = idx[:n]
+	slices.Sort(idx)
+	out := make([]verdict.Miss, 0, n)
+	for _, i := range idx {
+		out = append(out, ms[i])
+	}
+	return out
+}
 
 // Check is a rule's replay beside what really fired over some days.
 type Check struct {
@@ -179,7 +206,7 @@ func (l *Ledger) PutCheck(ctx context.Context, midnight time.Time, c *verdict.Sp
 				if len(r.Misses) == 0 {
 					continue
 				}
-				for _, m := range r.Misses {
+				for _, m := range NewestMisses(r.Misses, MaxMisses) {
 					labels, err := json.Marshal(orEmptyMap(m.Labels))
 					if err != nil {
 						return err
@@ -188,7 +215,7 @@ func (l *Ledger) PutCheck(ctx context.Context, midnight time.Time, c *verdict.Sp
 						return err
 					}
 				}
-				if _, err := trim.ExecContext(t.ctx, name, maxMisses); err != nil {
+				if _, err := trim.ExecContext(t.ctx, name, MaxMisses); err != nil {
 					return err
 				}
 			}

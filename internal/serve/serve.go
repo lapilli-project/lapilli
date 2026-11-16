@@ -108,15 +108,20 @@ type Config struct {
 	CheckReplay  bool
 	CheckSeries  []string
 	CheckDiffers Differs
-	Every        time.Duration
-	Settle       time.Duration
-	Backfill     time.Duration
-	Keep         time.Duration // 0 keeps everything
-	Watch        time.Duration
-	Digest       Weekly
-	Slack        string // a file holding a Slack incoming webhook's URL
-	Timeout      time.Duration
-	Parallel     int
+	// History is the Grafana whose alert state history says what its
+	// rules really fired, read in place of GRAFANA_ALERTS where it keeps
+	// one it serves (docs/design/grafanahistory.md): --check-grafana's, or
+	// --grafana's without --check-series; nil for none.
+	History  *source.GrafanaHistory
+	Every    time.Duration
+	Settle   time.Duration
+	Backfill time.Duration
+	Keep     time.Duration // 0 keeps everything
+	Watch    time.Duration
+	Digest   Weekly
+	Slack    string // a file holding a Slack incoming webhook's URL
+	Timeout  time.Duration
+	Parallel int
 	// Yield yields to a history API that answers a run's request with HTTP
 	// 429 (--yield-on-429): the run asks it nothing more and stops there,
 	// and the rules it didn't replay are missed, replayed by a later run;
@@ -503,6 +508,15 @@ type status struct {
 	// the replay was last set beside what really fired.
 	checkEmpty []string
 	checkDay   time.Time
+	// historyWhere is where the Grafana of Config.History keeps its alert
+	// state history, as it said at historyAt. checkHistory is where it was
+	// read from for checkDay, "" when it wasn't; historyOff why it was of
+	// no use then, its rules not checked that day: historyFrom,
+	// historyTooMany or historyUnusable, or "".
+	historyWhere source.HistoryWhere
+	historyAt    time.Time
+	checkHistory string
+	historyOff   string
 	// checkHeld are the days whose check waited for a cloud's alarms'
 	// history: once checked, they are told of as a day just checked is.
 	checkHeld map[int64]bool

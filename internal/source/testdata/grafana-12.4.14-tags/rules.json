@@ -1,0 +1,227 @@
+{
+ "apiVersion": 1,
+ "groups": [
+  {
+   "orgId": 1,
+   "name": "tags",
+   "folder": "lapilli",
+   "interval": "10s",
+   "rules": [
+    {
+     "uid": "inst",
+     "title": "Instance up",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "label_replace(vector(time() % 120 < bool 60), \"instance\", \"10.0.0.1:9100\", \"\", \"\") or label_replace(vector(time() % 180 < bool 90), \"instance\", \"10.0.0.2:9100\", \"\", \"\")",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "tags",
+      "url": "http://a.example:8080/x"
+     },
+     "annotations": {
+      "summary": "Instance up"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "long",
+     "title": "Long label",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "label_replace(vector(time() % 120 < bool 60), \"path\", \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"\", \"\") or label_replace(vector(time() % 150 < bool 50), \"path\", \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"\", \"\")",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "tags"
+     },
+     "annotations": {
+      "summary": "Long label"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "pad",
+     "title": "Disk: padded",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "label_replace(vector(time() % 100 < bool 50), \"pad\", \"  \", \"\", \"\") or label_replace(vector(time() % 140 < bool 70), \"pad\", \" mid \", \"\", \"\")",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "tags"
+     },
+     "annotations": {
+      "summary": "Disk: padded"
+     },
+     "isPaused": false
+    },
+    {
+     "uid": "wide",
+     "title": "Wide labels",
+     "condition": "B",
+     "data": [
+      {
+       "refId": "A",
+       "relativeTimeRange": {
+        "from": 600,
+        "to": 0
+       },
+       "datasourceUid": "prom",
+       "model": {
+        "refId": "A",
+        "expr": "label_replace(vector(time() % 120 < bool 60), \"zz\", \"one\", \"\", \"\") or label_replace(vector(time() % 150 < bool 50), \"zz\", \"two\", \"\", \"\")",
+        "intervalMs": 1000,
+        "maxDataPoints": 43200,
+        "instant": true
+       }
+      },
+      {
+       "refId": "B",
+       "datasourceUid": "__expr__",
+       "model": {
+        "refId": "B",
+        "type": "threshold",
+        "expression": "A",
+        "conditions": [
+         {
+          "evaluator": {
+           "type": "gt",
+           "params": [
+            0
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ],
+     "noDataState": "OK",
+     "execErrState": "Error",
+     "for": "0s",
+     "labels": {
+      "exp": "tags",
+      "w0": "v0-v0-v0-v0-v0-v0-v0-v0-v0-v0-v0-v0-v0-v0-v0-",
+      "w1": "v1-v1-v1-v1-v1-v1-v1-v1-v1-v1-v1-v1-v1-v1-v1-",
+      "w2": "v2-v2-v2-v2-v2-v2-v2-v2-v2-v2-v2-v2-v2-v2-v2-",
+      "w3": "v3-v3-v3-v3-v3-v3-v3-v3-v3-v3-v3-v3-v3-v3-v3-",
+      "w4": "v4-v4-v4-v4-v4-v4-v4-v4-v4-v4-v4-v4-v4-v4-v4-",
+      "w5": "v5-v5-v5-v5-v5-v5-v5-v5-v5-v5-v5-v5-v5-v5-v5-",
+      "w6": "v6-v6-v6-v6-v6-v6-v6-v6-v6-v6-v6-v6-v6-v6-v6-",
+      "w7": "v7-v7-v7-v7-v7-v7-v7-v7-v7-v7-v7-v7-v7-v7-v7-",
+      "w8": "v8-v8-v8-v8-v8-v8-v8-v8-v8-v8-v8-v8-v8-v8-v8-"
+     },
+     "annotations": {
+      "summary": "Wide labels"
+     },
+     "isPaused": false
+    }
+   ]
+  }
+ ]
+}
