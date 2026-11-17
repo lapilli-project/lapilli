@@ -37,15 +37,34 @@
   0.53.0: for each selector the expression reads, the first sample of
   any of its series, the latest of those across selectors; from there
   on, each firing judged by its own time. A selector with no data keeps
-  no record. Before its start, a firing that caught nothing is counted,
-  not judged. The text says from when it keeps the record, when that
-  isn't where it was first read, or that it keeps none;
-  `settings.impact_from` is that start, and a new
-  `settings.impact_no_data` says a selector had no data, with
-  `impact_from` missing. With data all along, as most expressions have,
-  the report is what it was. A record that starts within the period
-  leaves `no_record` false, its later firings judged. Each run asks one
-  more query a selector, a `count()` an hour apart or more.
+  no record (below). Before its start, a firing that caught nothing is
+  counted, not judged. The text says from when it keeps the record, when
+  that is within the period, or that it keeps none, and so does a period
+  with no record, with what to do, in the text, `--check-content` and a
+  backtest's comment; `settings.impact_from` is that start, and a new
+  `settings.impact_no_data` (and `--check-content --json`'s
+  `impact_no_data`) says a selector had no data, with `impact_from`
+  missing. When its data begins before the period, every firing is
+  judged as before, and only `impact_from` moves. A record that starts
+  within the period leaves `no_record` false, its later firings judged.
+  Each run asks one more query a selector, a `count()` an hour apart or
+  more.
+- **An impact signal whose selector only narrows another kept no record
+  for a service that was never hurt.** Since 0.49.0 in `lapilli serve`,
+  and 0.53.0 of named signals, a selector with no data at all kept no
+  record, and one whose data began later held the record back: so
+  `http_requests_total{code=~"5.."}`, whose series a client library
+  makes at the first 5xx, kept a service that served no 5xx from any
+  record, and one whose first 5xx came late from the weeks before it. A
+  selector with no data, or with later data, that only narrows another
+  with data (the same offset and @, and each of that one's matchers, its
+  metric's name among them, one of its own) now takes that one's start:
+  it had nothing to match, not nothing to read. The settings page says
+  of it "nothing matched since", with the one it narrows, in the place
+  of "no data since". In `lapilli serve`, a ledger that kept no record
+  by such a selector keeps one at the next round, from its
+  `impact_since`; one whose `impact_since` a late first 5xx already
+  moved forward keeps it there, as it only moves forward.
 
 ## [0.53.0] - 2026-11-17
 

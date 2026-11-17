@@ -262,12 +262,26 @@ func TestVerdictImpactDataBegins(t *testing.T) {
 		t.Errorf("all along, said:\n%s", text)
 	}
 
+	// Beginning before the period, after where it was first read: every
+	// firing judged, and nothing said but impact_from.
+	early := t0.Add(-3 * 24 * time.Hour)
+	rep, _ = verdictOf(impactHistory{begins: early}, "--json")
+	if !rep.Settings.ImpactFrom.Equal(early) || rep.Unjudged != 0 || rep.NoRecord {
+		t.Errorf("before the period: impact_from %v, %d unjudged, no record %v", rep.Settings.ImpactFrom, rep.Unjudged, rep.NoRecord)
+	}
+	if _, text := verdictOf(impactHistory{begins: early}, ""); strings.Contains(text, "--impact keeps") {
+		t.Errorf("before the period, said:\n%s", text)
+	}
+
 	rep, _ = verdictOf(impactHistory{noData: true}, "--json")
 	if !rep.Settings.ImpactFrom.IsZero() || !rep.Settings.ImpactNoData || !rep.NoRecord || rep.Unjudged != len(rep.Firings) || len(rep.Firings) == 0 {
 		t.Errorf("no data: impact_from %v, no data %v, no record %v, %d of %d unjudged",
 			rep.Settings.ImpactFrom, rep.Settings.ImpactNoData, rep.NoRecord, rep.Unjudged, len(rep.Firings))
 	}
-	if _, text := verdictOf(impactHistory{noData: true}, ""); !strings.Contains(text, "--impact keeps no record: a selector it reads has no data") {
+	if _, text := verdictOf(impactHistory{noData: true}, "--check-content"); !strings.Contains(text, verdict.NoRecordNoDataText) {
+		t.Errorf("no data, --check-content:\n%s", text)
+	}
+	if _, text := verdictOf(impactHistory{noData: true}, ""); !strings.Contains(text, verdict.NoRecordNoDataText) || strings.Contains(text, verdict.NoRecordText) {
 		t.Errorf("no data, text:\n%s", text)
 	}
 }

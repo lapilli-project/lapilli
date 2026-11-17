@@ -1856,6 +1856,7 @@
  "data from %s": "%s 부터 데이터 있음",
  "data since %s or before": "%s 또는 그 전부터 데이터 있음",
  "no data since %s": "%s 이후 데이터 없음",
+ "nothing matched since %s: %s, which it narrows, has data": "%s 이후 맞는 시계열 없음: 이 selector 가 좁히는 %s 에는 데이터가 있음",
  "no data": "데이터 없음",
  "It is the criterion in effect, read already: nothing would change.": "이미 읽은, 적용 중인 기준이에요. 바뀌는 것이 없어요.",
  "The impact signal has data from %s: the weeks before it keep no record by it.": "영향 지표의 데이터는 %s 부터 있어요. 그 전 주들은 영향 지표로 기록을 유지하지 않아요.",

@@ -160,6 +160,14 @@ func (c *Comparison) noRecord() bool {
 	return (c.Summary == nil || c.Summary.IncidentsGiven) && c.Before != nil && c.Before.NoRecord
 }
 
+// noRecordText is NoRecordCompared, and why when --impact had no data.
+func (c *Comparison) noRecordText() string {
+	if c.Before != nil && c.Before.Settings != nil && c.Before.Settings.ImpactNoData {
+		return NoRecordCompared + " --impact keeps no record: a selector it reads has no data."
+	}
+	return NoRecordCompared
+}
+
 // NoRecordCompared says a comparison of a period with no record counts its
 // firings and doesn't judge them.
 const NoRecordCompared = "No incident was written down, or found by --impact, in the period or the two weeks before it: the firings are counted, not judged."
@@ -314,7 +322,7 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 		fmt.Fprintf(w, "%d of the rules that differ are in a group with a limit, which the replay doesn't hold them to: past it, Prometheus drops all of a rule's alerts.\n", n)
 	}
 	if c.noRecord() {
-		fmt.Fprintln(w, NoRecordCompared)
+		fmt.Fprintln(w, c.noRecordText())
 	}
 	if c.ChangedOnly {
 		fmt.Fprintf(w, "Firings of the changed rules %d → %d\n", len(c.Before.Firings), len(c.After.Firings))

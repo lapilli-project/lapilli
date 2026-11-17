@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -87,7 +88,8 @@ func (k ImpactKept) From() time.Time {
 // after the latest of them, of a selector that had none at From: the
 // record is kept by the signal from there at the earliest, as only there
 // did every selector it reads have data. Zero when each had data at From.
-// NoData says one had none at all: the record isn't kept by it.
+// NoData says one had none at all, nor a selector covering it
+// (Effective): the record isn't kept by it.
 type ImpactData struct {
 	Criterion string         `json:"criterion"`
 	Selectors []SelectorData `json:"selectors"`
@@ -116,10 +118,14 @@ func (d *ImpactData) Complete() bool {
 
 // Late is the selector whose data begins the latest, after the look began,
 // and the others': what holds the record back, when more than one selector
-// is read and they don't begin together. "" for none.
+// is read and they don't begin together. "" for none. A selector covered
+// by another (Effective) is left out: what covers it begins with it.
 func (d *ImpactData) Late() string {
 	late, at, earlier := "", time.Time{}, false
-	for _, x := range d.Selectors {
+	for i, x := range d.Effective() {
+		if !x.First.Equal(d.Selectors[i].First) {
+			continue // covered: what covers it is said instead
+		}
 		switch {
 		case x.First.IsZero():
 			return ""
@@ -145,21 +151,56 @@ func (l *Ledger) Floor(d *ImpactData) { l.floor(d) }
 
 func (l *Ledger) floor(d *ImpactData) { FloorBy(d, l.WeekOnOrAfter) }
 
-// FloorBy works d's Floor and NoData out, by the one rule: NoData when a
-// selector had no data at all; else the latest of when each selector that
-// had none at d.From first had some, each moved to onOrAfter it (the
-// ledger's first whole week then, or, judging each firing by its own time,
-// that time itself); zero when each had data at From.
+// FloorBy works d's Floor and NoData out, by the one rule, of its
+// selectors as they keep the record (Effective): NoData when a selector
+// had no data at all; else the latest of when each selector that had none
+// at d.From first had some, each moved to onOrAfter it (the ledger's first
+// whole week then, or, judging each firing by its own time, that time
+// itself); zero when each had data at From.
 func FloorBy(d *ImpactData, onOrAfter func(time.Time) time.Time) {
-	d.Floor, d.NoData = time.Time{}, !d.Complete()
+	sels := d.Effective()
+	d.Floor = time.Time{}
+	d.NoData = slices.ContainsFunc(sels, func(x SelectorData) bool { return x.First.IsZero() })
 	if d.NoData {
 		return
 	}
-	for _, x := range d.Selectors {
+	for _, x := range sels {
 		if !x.AtStart {
 			d.Floor = later(d.Floor, onOrAfter(x.First))
 		}
 	}
+}
+
+// Effective are d's selectors as they keep the record: each covered by
+// one with data that began earlier (rules.Covers), or by one with data
+// while it has none, given that one's start, as the series it reads were
+// there, none of them matching it yet: the 5xx requests of a service that
+// served none, beside all of its requests. A selector's own data, found
+// later, doesn't move it.
+func (d *ImpactData) Effective() []SelectorData {
+	out := slices.Clone(d.Selectors)
+	for i, b := range d.Selectors {
+		for _, a := range d.Selectors {
+			if a.Sel == b.Sel || a.First.IsZero() || !rules.Covers(a.Sel, b.Sel) {
+				continue
+			}
+			if out[i].First.IsZero() || a.First.Before(out[i].First) {
+				out[i].First, out[i].AtStart = a.First, a.AtStart
+			}
+		}
+	}
+	return out
+}
+
+// CoveredBy is, of a selector of d with no data, the one with data that
+// covers it (Effective), the first so; "" for none.
+func (d *ImpactData) CoveredBy(sel string) string {
+	for _, a := range d.Selectors {
+		if a.Sel != sel && !a.First.IsZero() && rules.Covers(a.Sel, sel) {
+			return a.Sel
+		}
+	}
+	return ""
 }
 
 func later(a, b time.Time) time.Time {

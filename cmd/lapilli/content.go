@@ -29,9 +29,12 @@ type contentReport struct {
 	Noisy    bool `json:"noisy_measured"`
 	// NoRecord says incidents were given, and none keeps the period's
 	// record: which rules are noisy can't be said.
-	NoRecord bool          `json:"no_record,omitempty"`
-	Scrape   string        `json:"scrape_interval,omitempty" jsonschema:"the one the range check counted with; none when not known"`
-	Rules    []contentRule `json:"rules"`
+	NoRecord bool `json:"no_record,omitempty"`
+	// ImpactNoData says --impact was read, and keeps no record: a selector
+	// it reads had no data.
+	ImpactNoData bool          `json:"impact_no_data,omitempty"`
+	Scrape       string        `json:"scrape_interval,omitempty" jsonschema:"the one the range check counted with; none when not known"`
+	Rules        []contentRule `json:"rules"`
 }
 
 type contentRule struct {
@@ -167,7 +170,7 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 			}
 			o.Noisy = func(rule string) bool { return noisy[rule] }
 			// With no record, which rules are noisy wasn't measured.
-			rep.Noisy, rep.NoRecord = !judged.NoRecord, judged.NoRecord
+			rep.Noisy, rep.NoRecord, rep.ImpactNoData = !judged.NoRecord, judged.NoRecord, f.opts.ImpactNoData
 		}
 	} else if f.incidents != "" {
 		fmt.Fprintln(stderr, "lapilli verdict: --incidents tells which rules are noisy only with a replay: add --prometheus")
@@ -219,7 +222,7 @@ func contentText(w io.Writer, rep contentReport) error {
 	case !rep.Measured:
 		fmt.Fprintln(w, "Not measured: give --prometheus to replay the rules, for the labels their alerts have, and --incidents for which are noisy.")
 	case rep.NoRecord:
-		fmt.Fprintln(w, verdict.NoRecordText)
+		fmt.Fprintln(w, verdict.NoRecordTextFor(rep.ImpactNoData))
 	case !rep.Noisy:
 		fmt.Fprintf(w, "Measured over %s to %s; give --incidents or --impact for which rules are noisy.\n", rep.From.Format(time.RFC3339), rep.To.Format(time.RFC3339))
 	default:

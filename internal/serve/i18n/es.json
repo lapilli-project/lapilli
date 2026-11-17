@@ -1856,6 +1856,7 @@
  "data from %s": "datos desde %s",
  "data since %s or before": "datos desde %s o antes",
  "no data since %s": "sin datos desde %s",
+ "nothing matched since %s: %s, which it narrows, has data": "nada coincidió desde %s: %s, que esta acota, tiene datos",
  "no data": "sin datos",
  "It is the criterion in effect, read already: nothing would change.": "Es el criterio en vigor, ya leído: no cambiaría nada.",
  "The impact signal has data from %s: the weeks before it keep no record by it.": "La señal de impacto tiene datos desde %s: las semanas anteriores no mantienen registro por ella.",

@@ -373,14 +373,20 @@ type againView struct {
 
 // dataView is where the data of a criterion's selectors begins, as a page
 // says it: each selector (when it first had data, from before From, or
-// none since From), the one that holds the record back (Late), and whether
-// one has none at all.
+// none since From, and then the one with data that covers it, if any:
+// nothing it reads matched it), the one that holds the record back
+// (Late), and whether one has none at all.
 type dataView struct {
-	From      time.Time             `json:"from"`
-	Selectors []ledger.SelectorData `json:"selectors"`
-	Late      string                `json:"late,omitempty"`
-	NoData    bool                  `json:"no_data,omitempty"`
-	Floor     time.Time             `json:"floor,omitzero"`
+	From      time.Time      `json:"from"`
+	Selectors []selectorView `json:"selectors"`
+	Late      string         `json:"late,omitempty"`
+	NoData    bool           `json:"no_data,omitempty"`
+	Floor     time.Time      `json:"floor,omitzero"`
+}
+
+type selectorView struct {
+	ledger.SelectorData
+	CoveredBy string `json:"covered_by,omitempty"`
 }
 
 // dataOf is where the data of a criterion's selectors begins, as the
@@ -397,7 +403,15 @@ func dataViewOf(d *ledger.ImpactData) *dataView {
 	if d == nil {
 		return nil
 	}
-	return &dataView{From: d.From, Selectors: d.Selectors, Late: d.Late(), NoData: d.NoData, Floor: d.Floor}
+	v := &dataView{From: d.From, Selectors: []selectorView{}, Late: d.Late(), NoData: d.NoData, Floor: d.Floor}
+	for _, x := range d.Selectors {
+		sv := selectorView{SelectorData: x}
+		if x.First.IsZero() {
+			sv.CoveredBy = d.CoveredBy(x.Sel)
+		}
+		v.Selectors = append(v.Selectors, sv)
+	}
+	return v
 }
 
 // showCriterion is a criteria setting as it is in c, as text: off for no

@@ -134,7 +134,10 @@ over its time (`impact_from`† at or before it), or it caught an incident.
 `impact_from` is where the signal was first read, or later, where the
 data of every selector it reads begins, as a named signal's `start`
 (below); it is missing, with `impact_no_data: true`†, when a selector it
-reads has no data, which keeps no record.
+reads has no data, which keeps no record. A selector with no data that
+only narrows another with data, as `http_requests_total{code=~"5.."}`
+does `http_requests_total`, had nothing to match: it begins with that
+one.
 The incidents that keep the record are all those given, from before the
 period too. Any other firing is black, with `no_record: true`†: counted,
 in `firings` and `black`, and in its rule's `unjudged`†, but in no

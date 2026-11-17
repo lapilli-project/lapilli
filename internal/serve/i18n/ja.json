@@ -1856,6 +1856,7 @@
  "data from %s": "%s からデータあり",
  "data since %s or before": "%s かそれ以前からデータあり",
  "no data since %s": "%s 以降データなし",
+ "nothing matched since %s: %s, which it narrows, has data": "%s 以降一致する系列なし: このセレクタが絞り込む %s にはデータあり",
  "no data": "データなし",
  "It is the criterion in effect, read already: nothing would change.": "読み込み済みの、適用中の基準です。何も変わりません。",
  "The impact signal has data from %s: the weeks before it keep no record by it.": "影響指標のデータは %s からあります。それより前の週は影響指標で記録を保ちません。",

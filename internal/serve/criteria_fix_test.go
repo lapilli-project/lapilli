@@ -132,6 +132,33 @@ func TestImpactDataSelectors(t *testing.T) {
 	}
 }
 
+// A selector with no data that only narrows one with data had nothing to
+// match: the 5xx of a service that served none, beside all its requests.
+// It holds nothing back, and the page says why, not that there is no
+// record.
+func TestImpactDataNarrowed(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {}}
+	expr := `sum(probe_failed{code="5"}) / sum(probe_failed) > 0.5`
+	code, body := askAs(t, s.Handler(), http.MethodPost, "/settings/impact", url.Values{"impact": {expr}}, "ana@example.com", "same-origin")
+	if code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	s.jobs(ctx, false)
+	k, err := s.l.ImpactKept(ctx)
+	if err != nil || !k.AgainDone("5m "+expr) || k.Data == nil || k.Data.NoData {
+		t.Fatalf("%+v %v", k, err)
+	}
+	if began, _ := s.l.RunsFrom(ctx); !options(t, s).Equal(began) {
+		t.Errorf("kept from %s, not %s", options(t, s), began)
+	}
+	_, page := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
+	if !strings.Contains(page, "nothing matched since") || !strings.Contains(page, "<bdi>probe_failed</bdi>, which it narrows, has data") || strings.Contains(page, "keeps no record") {
+		t.Errorf("the page doesn't say why:\n%s", page)
+	}
+}
+
 // A ledger before 0.49, with no criterion kept, and a criterion saved
 // before the leader's first round that isn't the command line's: read
 // again over the last four weeks, not taken as read all along.

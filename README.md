@@ -234,7 +234,9 @@ signal is read from two weeks before the period, and keeps the record
 from where the data of every selector it reads begins, whatever it finds:
 it says whether users were hurt; the firings are judged against the
 windows it finds in the period, as they were. A selector with no data
-keeps none; the report says from when it keeps the record, when later.
+keeps none, unless it only narrows one with data (the 5xx of a service
+that served none, beside all its requests); the report says from when it
+keeps the record, when that is within the period.
 Any other firing can't be told from one nobody wrote down: it is counted
 (in FIRED and ● NOTHING), and not judged: it is in no precision, and makes
 no rule noisy. A rule none of whose firings is judged has a precision of

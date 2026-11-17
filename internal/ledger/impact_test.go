@@ -665,3 +665,43 @@ func TestDecidedImpact(t *testing.T) {
 		t.Errorf("%+v %v", got, err)
 	}
 }
+
+// A selector with no data that only narrows one with data had nothing to
+// match, not nothing to read: it holds nothing back, nor does its own data
+// found later; one that narrows none still keeps no record.
+func TestFloorByCovered(t *testing.T) {
+	lo := t0.Add(-14 * 24 * time.Hour)
+	all := SelectorData{Sel: `http_requests_total`, First: lo, AtStart: true}
+	five := SelectorData{Sel: `http_requests_total{code=~"5.."}`}
+	probe := SelectorData{Sel: `probe_success{job="x"}`, First: t0.Add(-3 * 24 * time.Hour)}
+	same := func(t time.Time) time.Time { return t }
+	for _, c := range []struct {
+		name   string
+		sels   []SelectorData
+		floor  time.Time
+		noData bool
+		late   string
+	}{
+		{"none matched", []SelectorData{five, all}, time.Time{}, false, ""},
+		{"matched later", []SelectorData{{Sel: five.Sel, First: t0.Add(-time.Hour)}, all}, time.Time{}, false, ""},
+		{"with a later selector", []SelectorData{five, all, probe}, probe.First, false, probe.Sel},
+		{"the metric later", []SelectorData{five, {Sel: all.Sel, First: t0.Add(-2 * 24 * time.Hour)}}, t0.Add(-2 * 24 * time.Hour), false, ""},
+		{"narrowing none", []SelectorData{five, {Sel: `grpc_requests_total`, First: lo, AtStart: true}}, time.Time{}, true, ""},
+		{"alone", []SelectorData{five}, time.Time{}, true, ""},
+		{"wider with no data", []SelectorData{{Sel: all.Sel}, {Sel: five.Sel, First: lo, AtStart: true}}, time.Time{}, true, ""},
+	} {
+		d := ImpactData{From: lo, CheckedTo: t0, Selectors: c.sels}
+		FloorBy(&d, same)
+		if !d.Floor.Equal(c.floor) || d.NoData != c.noData || d.Late() != c.late {
+			t.Errorf("%s: floor %s, no data %v, late %q", c.name, d.Floor, d.NoData, d.Late())
+		}
+		// Of the 5xx with no data, what covers it: all requests, with data.
+		want := ""
+		if len(c.sels) > 1 && c.sels[0].First.IsZero() && c.sels[1].Sel == all.Sel && !c.sels[1].First.IsZero() {
+			want = all.Sel
+		}
+		if got := d.CoveredBy(c.sels[0].Sel); c.sels[0].Sel == five.Sel && c.sels[0].First.IsZero() && got != want {
+			t.Errorf("%s: covered by %q, not %q", c.name, got, want)
+		}
+	}
+}

@@ -669,3 +669,44 @@ func TestIndexSignals(t *testing.T) {
 		}
 	}
 }
+
+// An --impact with no name keeps the record by the one rule a named
+// signal does: from the latest of where its selectors' data begins; a
+// selector with no data that only narrows one with data (the 5xx, of a
+// service that served none) holding nothing back.
+func TestUnnamedImpactSelectors(t *testing.T) {
+	const ratio = `sum(rate(http_requests_total{code=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05`
+	never := sigBase.Add(365 * 24 * time.Hour)
+	readFrom := sigBase.Add(-verdict.RecordLookback)
+	for _, c := range []struct {
+		name, expr string
+		begins     map[string]time.Time
+		from       time.Time // zero: no data
+	}{
+		{"no 5xx", ratio, map[string]time.Time{`http_requests_total{code=~"5.."}`: never}, readFrom},
+		{"and a probe from Thursday", ratio + ` or probe_success == 0`, map[string]time.Time{`http_requests_total{code=~"5.."}`: never, "probe_success": at(3, 7, 0)}, at(3, 7, 0)},
+		{"requests from Tuesday", ratio, map[string]time.Time{`http_requests_total{code=~"5.."}`: never, "http_requests_total": at(1, 0, 0)}, at(1, 0, 0)},
+		{"5xx alone, none", `sum(rate(http_requests_total{code=~"5.."}[5m])) > 1`, map[string]time.Time{`http_requests_total{code=~"5.."}`: never}, time.Time{}},
+	} {
+		h := signalHistory{series: map[string][]on{c.expr: {}}, begins: c.begins}
+		_, args := unnamedImpact(t)
+		for i, a := range args {
+			if a == "--impact" {
+				args[i+1] = c.expr
+			}
+		}
+		newHistory = func(context.Context, *verdictFlags) (history, error) { return h, nil }
+		now = func() time.Time { return sigBase.Add(8 * 24 * time.Hour) }
+		var stdout, stderr bytes.Buffer
+		if code := run(append(args, "--json"), &stdout, &stderr); code != 0 {
+			t.Fatalf("%s: exit %d\n%s", c.name, code, stderr.String())
+		}
+		var rep verdict.Report
+		if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+			t.Fatal(err)
+		}
+		if !rep.Settings.ImpactFrom.Equal(c.from) || rep.Settings.ImpactNoData != c.from.IsZero() {
+			t.Errorf("%s: impact_from %v, no data %v; want %v", c.name, rep.Settings.ImpactFrom, rep.Settings.ImpactNoData, c.from)
+		}
+	}
+}

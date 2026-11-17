@@ -1396,8 +1396,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	// Impact first: it is one query, and a replay that runs out of time
-	// should still be judged against it.
+	// Impact first: a query, and one a selector for where its data
+	// begins, and a replay that runs out of time should still be judged
+	// against it.
 	if f.anyImpact() {
 		var err error
 		if incs, err = f.readImpact(ctx, h, incs); err != nil {

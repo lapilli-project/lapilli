@@ -51,6 +51,23 @@ func TestRecordKept(t *testing.T) {
 	if r := RecordOf(nil, Options{ImpactFrom: t0.Add(3 * day)}); r.Kept(week[0], week[1]) || r.At(t0.Add(day)) || !r.At(t0.Add(4*day)) {
 		t.Error("impact read from midweek keeps what it covers")
 	}
+	// Judging each firing by its own time, read from midweek on, some of
+	// the week's firings are judged; from its end, or not read, none; by
+	// week, none of a week it wasn't read all of.
+	for _, c := range []struct {
+		name string
+		o    Options
+		want bool
+	}{
+		{"from midweek", Options{ImpactFrom: t0.Add(3 * day)}, true},
+		{"from its end", Options{ImpactFrom: week[1]}, false},
+		{"not read", Options{}, false},
+		{"from midweek, by week", Options{ImpactFrom: t0.Add(3 * day), RecordWeek: func(time.Time) (time.Time, time.Time) { return week[0], week[1] }}, false},
+	} {
+		if got := RecordOf(nil, c.o).JudgesAny(week[0], week[1]); got != c.want {
+			t.Errorf("judges any, %s: %v", c.name, got)
+		}
+	}
 	// A firing: one on in the two weeks before it, not after it.
 	r := RecordOf(in(t0.Add(10*day), t0.Add(10*day+time.Hour)), Options{})
 	for at, want := range map[time.Duration]bool{9 * day: false, 10 * day: true, 20 * day: true, 25 * day: false} {

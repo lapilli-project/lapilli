@@ -492,7 +492,14 @@ read) and `impact_floor`.
   (`vector(1)`) has data all along: the record is kept from
   `impact_since`. Across selectors, the latest of those: the record starts no
   earlier than the first whole week after it, as only there did every
-  selector have data, and not at all while one has none. It moves
+  selector have data, and not at all while one has none. A selector with
+  no data, or with later data, that only narrows another with data
+  (`rules.Covers`: the same offset and @, each of the other's matchers,
+  its metric's name among them, one of its own) takes that one's start:
+  `http_requests_total{code=~"5.."}` beside `http_requests_total`, as a
+  client library makes a 5xx series at the first 5xx, so a service that
+  served none had nothing to match, not nothing to read. The settings
+  page says so of it ("nothing matched since"). It moves
   `impact_since` forward, never back, on a first start, after an upgrade
   (from the `impact_since` the ledger has), and once a criterion is read
   again; a run that moves `impact_since` back before where the data was

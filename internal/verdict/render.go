@@ -57,7 +57,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 	partial(w, r.Unreplayed, len(r.Rules), true)
 	switch {
 	case r.NoRecord && firings > 0:
-		fmt.Fprintln(w, NoRecordText)
+		fmt.Fprintln(w, NoRecordTextFor(r.Settings != nil && r.Settings.ImpactNoData))
 	case r.Unjudged > 0 && len(signals(r)) > 0:
 		fmt.Fprintf(w, SomeUnjudgedSignalsText+"\n", r.Unjudged, firings)
 	case r.Unjudged > 0:
@@ -233,16 +233,19 @@ func signalsKept(w io.Writer, r *Report, loc *time.Location) {
 }
 
 // impactKept writes, of an impact signal with no name, from when it keeps
-// the record, when that isn't where it was first read: where the data of
-// every selector it reads begins, or never, a selector it reads having no
-// data. Nothing when it was read from the first, nor in lapilli serve's
+// the record, when that is within the period: where the data of every
+// selector it reads begins; or that it keeps none, a selector it reads
+// having no data, unless the period's no record says so below. Nothing
+// when it keeps the record of all of the period, nor in lapilli serve's
 // digest (ByWeek), whose record by it starts where its ledger says.
 func impactKept(w io.Writer, r *Report, loc *time.Location) {
 	switch s := r.Settings; {
 	case s == nil, s.ByWeek:
 	case s.ImpactNoData:
-		fmt.Fprintln(w, "--impact keeps no record: a selector it reads has no data")
-	case s.ImpactFrom.After(r.From.Add(-s.RecordLookback)):
+		if !r.NoRecord {
+			fmt.Fprintln(w, "--impact keeps no record: a selector it reads has no data")
+		}
+	case s.ImpactFrom.After(r.From):
 		fmt.Fprintf(w, "--impact keeps the record from %s, where the data of every selector it reads begins\n", s.ImpactFrom.In(loc).Format("2006-01-02 15:04"))
 	}
 }
