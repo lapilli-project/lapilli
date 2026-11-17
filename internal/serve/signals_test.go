@@ -1073,3 +1073,17 @@ func TestSignalsMatchIsLabelNames(t *testing.T) {
 		}
 	}
 }
+
+// A rule no entry names that hasn't fired: what its record waits for comes
+// with its alerts, as MCP says it, not that no signal keeps the record.
+func TestSignalRuleNeverFired(t *testing.T) {
+	s := signalServer(t, shopHistory(), nil)
+	o, _ := s.options(context.Background())
+	rs, err := s.ruleSignalsOf(context.Background(), o, "Quiet")
+	if err != nil || rs == nil || !rs.NoAlert || len(rs.Waits) != 0 || len(rs.Against) != 2 {
+		t.Errorf("a rule with no alert: %+v %v", rs, err)
+	}
+	if rs, _ := s.ruleSignalsOf(context.Background(), o, "Errors"); rs.NoAlert {
+		t.Error("a rule that fired has no alert")
+	}
+}

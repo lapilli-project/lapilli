@@ -660,7 +660,7 @@ type ruleDetailOut struct {
 	Check      *checkOut      `json:"replay_check,omitempty" jsonschema:"its replay beside what really fired (ALERTS, GRAFANA_ALERTS or Grafana's own alert state history) over twelve weeks; not given when that isn't checked"`
 	Says       *saysOut       `json:"says,omitempty" jsonschema:"what it says when it fires, as the rules read last have it, and the problems found in it; not given when it isn't among them, or the check is off"`
 	Proposals  []proposalOut  `json:"proposals" jsonschema:"the changes proposed to it, the latest first, twenty at most"`
-	Signals    *ruleSignals   `json:"impact_signals,omitempty" jsonschema:"with named impact signals: the rule entry that names it (its place, from 1), the signals whose windows it is judged against with the labels it is matched on, the signals its record waits for, and before when it has no record by reading them"`
+	Signals    *ruleSignals   `json:"impact_signals,omitempty" jsonschema:"with named impact signals: the rule entry that names it (its place, from 1), the signals whose windows it is judged against with the labels it is matched on, the signals its record waits for, and before when it has no record by reading them; no_alert_yet, of a rule no entry names that hasn't fired, as what its record waits for comes with each alert"`
 }
 
 // saysOut is what a rule says, written by whoever writes the rules: data.

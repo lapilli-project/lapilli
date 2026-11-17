@@ -499,8 +499,11 @@ type ruleSignals struct {
 	Entry   int            `json:"rule_entry,omitempty"`
 	Against []ruleSignalOn `json:"judged_against"`
 	Waits   []string       `json:"waits_for"`
-	From    *time.Time     `json:"no_record_before,omitempty"`
-	Never   bool           `json:"never,omitempty"`
+	// NoAlert says no rule entry names it and it has no alert yet: which
+	// signals its record waits for comes with each alert, by its labels.
+	NoAlert bool       `json:"no_alert_yet,omitempty"`
+	From    *time.Time `json:"no_record_before,omitempty"`
+	Never   bool       `json:"never,omitempty"`
 }
 
 type ruleSignalOn struct {
@@ -534,6 +537,7 @@ func (s *Server) ruleSignalsOf(ctx context.Context, o verdict.Options, rule stri
 	if e != nil {
 		sets = []int64{0}
 	}
+	out.NoAlert = len(sets) == 0
 	var waits []int
 	for _, b := range sets {
 		for _, i := range sig.TiedOf(rule, b) {
