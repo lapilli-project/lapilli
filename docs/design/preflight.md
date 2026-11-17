@@ -533,6 +533,9 @@ can do:
   the user it runs as), which a Postgres that refuses the connection
   names; and the session that holds the ledger's lock is said by its
   number and when it connected, not its role, its name or its address.
+  The ledger's schema is said as the server's answer is, so it is
+  redacted alike: the search_path's first, `"$user"`, makes a schema
+  named after the user the ledger's (`TestPostgresSchemaSaid`).
 - **Every text of every item is shown as it reads, in one place.** Not
   only what a server answered: why a rule can't be replayed, in a rule
   file's own words (a classic condition's value), is outside text too, and

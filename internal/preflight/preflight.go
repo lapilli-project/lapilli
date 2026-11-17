@@ -236,7 +236,14 @@ func said(err error) string {
 	if err == nil {
 		return ""
 	}
-	return saidFrom + verdict.Clean(strings.ReplaceAll(strings.TrimSpace(err.Error()), "\n", "; ")) + saidTo
+	return saidText(err.Error())
+}
+
+// saidText is a text a server gave, a name it answered with, as said has
+// it: shown as it reads, on one line, and redacted as what a server said
+// is (hideSaid).
+func saidText(s string) string {
+	return saidFrom + verdict.Clean(strings.ReplaceAll(strings.TrimSpace(s), "\n", "; ")) + saidTo
 }
 
 // inSaid is s with f applied to each part of it said marks, and to

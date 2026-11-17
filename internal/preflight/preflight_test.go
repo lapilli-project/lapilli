@@ -1028,3 +1028,36 @@ func TestHiddenInSaidOnly(t *testing.T) {
 		t.Errorf("%q\n%q\n%q", it.What, it.Why, it.Fix)
 	}
 }
+
+// A Postgres ledger's schema is said as the server said it: a schema named
+// after the user, which the search_path ("$user") makes the ledger's, is
+// redacted as the user's name is in the rest of what the server said, and
+// the report's own words are left. Another schema is named.
+func TestPostgresSchemaSaid(t *testing.T) {
+	c := config()
+	c.Scrubber = func(more ...[2]string) func(string) string {
+		return func(s string) string {
+			for _, m := range more {
+				s = strings.ReplaceAll(s, m[1], "["+m[0]+"]")
+			}
+			return s
+		}
+	}
+	for _, x := range []struct {
+		pr        ledger.Probed
+		what, fix string
+	}{
+		{ledger.Probed{There: true, Version: 18, Knows: 19, Schema: "lapilli"}, `in schema "[user]"`, `may not create in schema "[user]",`},
+		{ledger.Probed{There: true, Version: 20, Knows: 19, Schema: "lapilli", Create: true}, `in schema "[user]"`, "a ledger a newer lapilli wrote"},
+		{ledger.Probed{There: true, Version: 19, Knows: 19, Schema: "ledger"}, `in schema "ledger"`, ""},
+	} {
+		p := newRun(c)
+		p.hideSaid("user", "lapilli")
+		p.postgresProbed(x.pr)
+		p.redact()
+		it := itemOf(p, "ledger.postgres")
+		if it == nil || !strings.HasSuffix(it.What, x.what) || !strings.Contains(it.Fix, x.fix) || strings.Contains(it.What, `"lapilli"`) {
+			t.Errorf("%+v: %+v", x.pr, it)
+		}
+	}
+}
