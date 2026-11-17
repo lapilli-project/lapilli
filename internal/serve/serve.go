@@ -370,6 +370,9 @@ type Server struct {
 	tried triedCache
 	// sources is what this replica saw of where incidents come from.
 	sources sourcesState
+	// turns are how each named signal's asks went, that each round shares
+	// --timeout by (inTurn).
+	turns turns
 	// outlasts are the proposals' for_outlasts, worked out as they are
 	// read (outlastsNow), and parsing the versions of the rules older
 	// proposals were made against.

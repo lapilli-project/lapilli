@@ -130,8 +130,8 @@ func (s *Server) syncSignals(ctx context.Context) (bool, error) {
 
 // signalsRead reads each named signal for a run over [from, to] (Found's
 // Signals): from the hour before from, or from where a run before missed
-// it, within a week, the one missed longest first, all within --timeout,
-// apart from the replay's. One that fails, finds more than
+// it, within a week, each in turn within --timeout (inTurn), apart from
+// the replay's. One that fails, finds more than
 // maxSignalWindows windows, or is left unread when the time runs out, is
 // missed for the run, which records the rest; one Prometheus turned away
 // (a 429 yielded to) holds the run, as the unnamed signal's does.
@@ -164,38 +164,32 @@ func (s *Server) signalsRead(parent context.Context, from, to time.Time, f *ledg
 		}
 		return 0
 	})
-	// Each in turn, with its share of what is left of --timeout: one that
-	// hangs runs out its own share, and leaves the rest theirs.
-	deadline := time.Now().Add(s.cfg.Timeout)
+	// Each in turn, within --timeout (inTurn): one that hangs runs out its
+	// own share, and leaves the rest theirs; one that needs more than its
+	// share is read on its turn.
+	reads := make([]ledger.SignalRead, len(order))
+	asks := make([]turnAsk, len(order))
+	var fatal error
 	for i, d := range order {
 		start := from
-		if at, ok := missed[d.Name]; ok {
+		at, behind := missed[d.Name]
+		if behind {
 			start = at
 		}
-		r := ledger.SignalRead{Name: d.Name, Criterion: signalCriterion(d).key(), Match: d.Match, Since: start.Add(-time.Hour), From: start}
-		share := time.Until(deadline) / time.Duration(len(order)-i)
-		if share <= 0 || parent.Err() != nil {
-			r.Missed = true
-			s.readSignal(d.Name, context.DeadlineExceeded)
-			f.Signals = append(f.Signals, r)
-			continue
-		}
-		ctx, cancel := context.WithTimeout(parent, share)
-		series, err := s.h.QueryRange(ctx, d.Expr, r.Since, to, s.cfg.Step)
-		cancel()
-		switch {
-		case err != nil && prom.IsYielded(err):
-			return fmt.Errorf("--impact %s: %w", d.Name, err)
-		case err != nil:
-			r.Missed = true
-			s.readSignal(d.Name, err)
-		default:
+		reads[i] = ledger.SignalRead{Name: d.Name, Criterion: signalCriterion(d).key(), Match: d.Match, Since: start.Add(-time.Hour), From: start}
+		asks[i] = turnAsk{name: d.Name, behind: behind, ask: func(ctx context.Context) error {
+			r := &reads[i]
+			series, err := s.h.QueryRange(ctx, d.Expr, r.Since, to, s.cfg.Step)
+			if err != nil {
+				return err
+			}
 			r.Windows = incident.FromSignal(series, s.cfg.Step, d.For, d.Name, d.Match)
 			// Those of its week kept before its read, which it doesn't put
 			// in place of.
 			week, _ := s.l.WeekOf(r.From)
 			before, err := s.l.SignalWindowsBetween(parent, d.Name, week, r.From)
 			if err != nil {
+				fatal = err
 				return err
 			}
 			// Of its own, those it puts in place from where it reads: the
@@ -207,9 +201,7 @@ func (s *Server) signalsRead(parent context.Context, from, to time.Time, f *ledg
 				}
 			}
 			if len(r.Windows) > maxSignalWindows || before+fresh > maxSignalWeek {
-				r.Windows, r.Missed = nil, true
-				s.readSignal(d.Name, errTooManyWindows)
-				break
+				return errTooManyWindows
 			}
 			r.Seen = verdict.NewSeen(d.MatchOr(match))
 			for _, se := range series {
@@ -217,7 +209,23 @@ func (s *Server) signalsRead(parent context.Context, from, to time.Time, f *ledg
 					r.Seen.Add(se.Labels)
 				}
 			}
-			s.readSignal(d.Name, nil)
+			return nil
+		}}
+	}
+	errs := s.inTurn(parent, "read", asks, func(err error) bool { return prom.IsYielded(err) || fatal != nil })
+	if fatal != nil {
+		return fatal
+	}
+	for i, err := range errs {
+		r := reads[i]
+		switch {
+		case err != nil && prom.IsYielded(err):
+			return fmt.Errorf("--impact %s: %w", r.Name, err)
+		case err != nil:
+			r.Windows, r.Seen, r.Missed = nil, nil, true
+			s.readSignal(r.Name, err)
+		default:
+			s.readSignal(r.Name, nil)
 		}
 		f.Signals = append(f.Signals, r)
 	}
@@ -251,23 +259,28 @@ func (s *Server) readSignal(name string, err error) {
 
 // signalsData looks, of each named signal, for where the data of the
 // selectors of the criterion it keeps the record by begins, as impactData
-// does of the unnamed one, all within --timeout: one that fails passing
-// to the next, the last failure returned.
+// does of the unnamed one, each in turn within --timeout (inTurn): one
+// that fails passing to the next, the last failure returned.
 func (s *Server) signalsData(ctx context.Context) error {
 	rows, err := s.l.SignalRows(ctx)
 	if err != nil {
 		return err
 	}
-	rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
-	defer cancel()
-	var failed error
+	// Each in turn, within --timeout (inTurn), as a run reads them.
+	var asks []turnAsk
 	for _, r := range rows {
 		if r.Name == "" || !slices.ContainsFunc(s.cfg.Signals, func(d ledger.SignalDef) bool { return d.Name == r.Name }) {
 			continue
 		}
-		k := r.Kept
-		if err := s.impactDataOf(rctx, r.Name, &k); err != nil {
-			failed = fmt.Errorf("%s: %w", r.Name, err)
+		asks = append(asks, turnAsk{name: r.Name, ask: func(ctx context.Context) error {
+			k := r.Kept
+			return s.impactDataOf(ctx, r.Name, &k)
+		}})
+	}
+	var failed error
+	for i, err := range s.inTurn(ctx, "data", asks, nil) {
+		if err != nil {
+			failed = fmt.Errorf("%s: %w", asks[i].name, err)
 		}
 	}
 	return failed
@@ -378,14 +391,18 @@ func (s *Server) signalAgain(ctx context.Context, d ledger.SignalDef, c criterio
 	return true, s.l.JudgePending(ctx, o)
 }
 
+// errLookCut is a look at what a signal reads that some of its selectors
+// didn't answer.
+var errLookCut = errors.New("some of the selectors it reads didn't answer")
+
 // signalsSeen reads, for each named signal, what it reads, by the labels
 // it is matched on (docs/design/signals.md, "The record, signal by
 // signal"), from how far it was read for it to where the runs have got
-// to, all within --timeout: each selector of its expression counted by
-// those labels, one request a selector (seenFrom), and kept beside what it
-// returned (ledger.AddSeen), which has the alerts it may tie otherwise
-// worked out again. One that fails passes to the next, the last failure
-// returned.
+// to, each in turn within --timeout (inTurn): each selector of its
+// expression counted by those labels, one request a selector (seenFrom),
+// and kept beside what it returned (ledger.AddSeen), which has the alerts
+// it may tie otherwise worked out again. One that fails passes to the
+// next, the last failure returned.
 func (s *Server) signalsSeen(ctx context.Context, o verdict.Options) error {
 	if !s.namedSignals() || s.h == nil {
 		return nil
@@ -402,10 +419,9 @@ func (s *Server) signalsSeen(ctx context.Context, o verdict.Options) error {
 	if err != nil {
 		return err
 	}
-	rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
-	defer cancel()
 	more, to := map[string]*verdict.Seen{}, map[string]time.Time{}
-	var failed error
+	var mu sync.Mutex
+	var asks []turnAsk
 	for _, d := range s.cfg.Signals {
 		i := slices.IndexFunc(rows, func(r ledger.SignalRow) bool { return r.Name == d.Name })
 		if i < 0 || rows[i].Kept.Since.IsZero() {
@@ -424,16 +440,30 @@ func (s *Server) signalsSeen(ctx context.Context, o verdict.Options) error {
 		if !cursor.After(lo) {
 			continue
 		}
-		seen, complete, err := source.SeenFrom(rctx, s.h, d.Expr, d.MatchOr(o.Match), lo, cursor)
-		if seen != nil {
-			more[d.Name] = seen // what the selectors that answered read
-		}
-		if err != nil || !complete {
+		// Each in turn, within --timeout (inTurn): one whose count hangs
+		// leaves the others' looks theirs.
+		asks = append(asks, turnAsk{name: d.Name, ask: func(ctx context.Context) error {
+			seen, complete, err := source.SeenFrom(ctx, s.h, d.Expr, d.MatchOr(o.Match), lo, cursor)
+			mu.Lock()
+			defer mu.Unlock()
+			if seen != nil {
+				more[d.Name] = seen // what the selectors that answered read
+			}
+			if err == nil && !complete {
+				err = errLookCut
+			}
+			if err == nil {
+				to[d.Name] = cursor
+			}
+			return err
+		}})
+	}
+	var failed error
+	for i, err := range s.inTurn(ctx, "seen", asks, nil) {
+		if err != nil {
 			// Looked at again from the same place next round.
-			failed = fmt.Errorf("%s: %w", d.Name, err)
-			continue
+			failed = fmt.Errorf("%s: %w", asks[i].name, err)
 		}
-		to[d.Name] = cursor
 	}
 	if len(more) > 0 || len(to) > 0 {
 		if err := s.l.AddSeen(context.WithoutCancel(ctx), o.Match, more, to); err != nil {

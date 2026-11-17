@@ -11,25 +11,26 @@
   `--impact-record` and `--impact-file` with rule entries, as `lapilli
   verdict` does since 0.53.0; the chart's `impact`, as a mapping of
   `signals` and `rules`, is that file. The runs read each signal on its
-  own, each within its share of what is left of `--timeout` (one that
-  hangs leaves the others theirs), the one missed longest first: one that
-  fails, or finds more than 1,000 windows in a read or 2,000 in a week, is
-  missed for the run, which records the rest, and a later run reads it
-  from where it was missed, within a week. Each signal's windows are its
-  own, keyed by its name (`impact-probe-20261110T1404Z`), with what was
-  decided of them, their tasks and comments carried over among its own;
-  each keeps the record from its own start, where the data it reads
-  begins, read again alone over the last four weeks when its expression or
-  `for` changes. A firing is judged by the signals tied to its alert: its
-  rule's entry's, or else those that could have seen it, by what each has
-  seen. Confirming a window writes down an incident carrying its signal
-  and match, caught as the window was, until its labels change.
-  `/api/v1/report` gives `settings.impact_signals`,
-  `settings.impact_rules`, `rules[].impact_rule`, `firings[].signals` and
-  `incidents[].signal`; `/api/v1/summary` gives each row's `unjudged`,
-  `impacts.by_signal` (`{}` with no named signal) and, with named signals,
-  `settings.impact_signals` and `settings.impact_rules` (`schema` stays
-  1); `/metrics` gives `lapilli_impact_windows` (`signal`, `state`) and
+  own, in turn within `--timeout`: one that hangs leaves the others their
+  time, and one that fits in `--timeout` alone, though not beside the
+  others, is read on its turn; one that fails, or finds more than 1,000
+  windows in a read or 2,000 in a week, is missed for the run, which
+  records the rest, and a later run reads it from where it was missed,
+  within a week. Each signal's windows are its own, keyed by its name
+  (`impact-probe-20261110T1404Z`), with what was decided of them, their
+  tasks and comments carried over among its own; each keeps the record
+  from its own start, where the data it reads begins, read again alone
+  over the last four weeks when its expression or `for` changes. A firing
+  is judged by the signals tied to its alert: its rule's entry's, or else
+  those that could have seen it, by what each has seen. Confirming a
+  window writes down an incident carrying its signal and match, caught as
+  the window was, until its labels change. `/api/v1/report` gives
+  `settings.impact_signals`, `settings.impact_rules`,
+  `rules[].impact_rule`, `firings[].signals` and `incidents[].signal`;
+  `/api/v1/summary` gives each row's `unjudged`, `impacts.by_signal` (`{}`
+  with no named signal) and, with named signals, `settings.impact_signals`
+  and `settings.impact_rules` (`schema` stays 1); `/metrics` gives
+  `lapilli_impact_windows` (`signal`, `state`) and
   `lapilli_impact_signal_start_timestamp_seconds` (`signal`), and `signal`
   on `lapilli_incident_state` and `lapilli_incident_lead_seconds` of a
   named signal's windows; MCP's `incidents` each incident's `signal`, its

@@ -635,14 +635,20 @@ As counts and bytes, which the tests hold, not times:
 
 - **Queries a run**: one range query a signal, eight at most, over the
   run's period and the hour before, as the impact query is now, read in
-  turn, the one missed longest first, each within its share of what is
-  left of the time the impact query has (`--timeout`): one that hangs runs
-  out its own share, not the others'. One left unread is missed for that
-  run. After a round's runs, what each reads, by its match labels: one
-  request a selector it counts, none for a signal matched on no label.
-  Where each
-  signal's data begins: one request a selector, 32 a signal at most, until
-  it is found, as v0.49.0 looks for its one's.
+  turn within the time the impact query has (`--timeout`). Those read
+  last time first, the quickest before first, each with its share of
+  what is left, counting the one whose turn it is: one that hangs runs
+  out its own share, not the others'; one that took more than its share
+  before is left to a later round. Then, of those missed, the one given
+  all that was left longest ago: all that is left. So one that hangs has
+  all that is left only after the others, and one that fits in
+  `--timeout` alone, though not beside the others, is read on its turn,
+  which comes round to each one missed. One left unread is missed for
+  that run. After a round's runs, what each reads, by its match labels:
+  one request a selector it counts, none for a signal matched on no
+  label; and where each signal's data begins: one request a selector, 32
+  a signal at most, until it is found, as v0.49.0 looks for its one's;
+  each look in turn as the reads are.
 - **Reading again**: only the signals added or changed, each one query over
   five weeks at most, within `--max-samples`; each counts as one of the
   twelve reads an admin may ask for in an hour.
@@ -861,9 +867,8 @@ What building the first settled:
   record changed, or the entries, judges every firing again, as `--match`
   does. A signal renamed on the command line is one taken away and one
   added, read again; renaming in place is step 3's, in the UI.
-- **The runs.** Each named signal is read on its own, within its share of
-  what is left of `--timeout`, the one missed longest first. One that
-  fails, or finds more than 1,000
+- **The runs.** Each named signal is read on its own, in turn within
+  `--timeout` (see "Cost"). One that fails, or finds more than 1,000
   windows in a read or 2,000 in its week, is missed: the run records the
   rest, the signal's row keeps where it was first missed, and a later run
   reads it from there, within a week; past a week it begins again, as one

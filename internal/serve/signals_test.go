@@ -983,14 +983,13 @@ func TestSignalsSettingsYAML(t *testing.T) {
 }
 
 // A signal that hangs runs out its own share of --timeout, not the
-// others': each signal is asked each round, the slow one alone missed.
+// others': each signal is asked each round, the slow one alone missed,
+// from the round it first hangs, first in turn.
 func TestSlowSignalStarvesNone(t *testing.T) {
 	ctx := context.Background()
 	h := shopHistory()
-	s := signalServer(t, h, func(c *Config) {
-		c.Timeout = 2 * time.Second
-		c.Signals[0].Expr = "slow" // waits until its context is done
-	})
+	s := signalServer(t, h, func(c *Config) { c.Timeout = 2 * time.Second })
+	s.h = &slowly{sigHistory: h, slow: map[string]time.Duration{"http_requests_total > 1e9": 0}}
 	for k := 1; k <= 3; k++ {
 		h.mu.Lock()
 		h.asked = nil
@@ -1299,5 +1298,135 @@ func TestSignalsMatchChangeJudgedOnce(t *testing.T) {
 	s.jobs(ctx, false)
 	if n != 1 {
 		t.Errorf("a lead changed: judged all %d times", n)
+	}
+}
+
+// slowly answers the expressions in slow after their time, or, at 0,
+// never: each waits until its context is done.
+type slowly struct {
+	*sigHistory
+	slow map[string]time.Duration
+}
+
+func (h *slowly) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	if d, ok := h.slow[expr]; ok {
+		var after <-chan time.Time
+		if d > 0 {
+			after = time.After(d)
+		}
+		select {
+		case <-after:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return h.sigHistory.QueryRange(ctx, expr, start, end, step)
+}
+
+// readRounds runs rounds of s and says, round by round, which signals the
+// round missed.
+func readRounds(t *testing.T, s *Server, rounds int) []map[string]bool {
+	t.Helper()
+	var out []map[string]bool
+	for k := 1; k <= rounds; k++ {
+		runDue(s, k)
+		s.jobs(context.Background(), true)
+		rows, err := s.l.SignalRows(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := map[string]bool{}
+		for _, r := range rows {
+			if r.Name != "" {
+				m[r.Name] = !r.Missed.IsZero()
+			}
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// A signal that fits in --timeout alone, but not in its share, is read: a
+// heavy one beside a quick one each round, the quick one before it handing
+// on what it leaves; two heavy ones, too heavy for both to fit, in turn,
+// neither missed two rounds running; a heavy one beside one that hangs,
+// on its turn, which the one that hangs doesn't keep.
+func TestHeavySignalsTakeTurns(t *testing.T) {
+	const timeout, heavy, hangs = time.Second, 600 * time.Millisecond, time.Duration(0)
+	for _, c := range []struct {
+		name          string
+		errors, probe time.Duration
+		both          bool // time for both each round
+	}{{"one heavy", heavy, -1, true}, {"two heavy", heavy, heavy, false}, {"one heavy, one hanging", hangs, heavy, false}} {
+		t.Run(c.name, func(t *testing.T) {
+			h := shopHistory()
+			s := signalServer(t, h, func(c *Config) { c.Timeout = timeout })
+			sl := &slowly{sigHistory: h, slow: map[string]time.Duration{}}
+			for e, d := range map[string]time.Duration{"http_requests_total > 1e9": c.errors, "probe_success == 0": c.probe} {
+				if d >= 0 {
+					sl.slow[e] = d
+				}
+			}
+			s.h = sl
+			rounds := readRounds(t, s, 5)
+			names := []string{"errors", "probe"}
+			if c.errors == hangs {
+				names = names[1:]
+			}
+			for k := 1; k < len(rounds); k++ {
+				for _, name := range names {
+					if c.both && rounds[k][name] {
+						t.Errorf("round %d: %s missed, with time for both", k+1, name)
+					}
+					if k > 1 && rounds[k][name] && rounds[k-1][name] {
+						t.Errorf("rounds %d and %d: %s missed in both: %v", k, k+1, name, rounds)
+					}
+				}
+			}
+		})
+	}
+}
+
+// The look at what each signal reads, and the look for where each one's
+// data begins, are each in turn too: one that hangs leaves the others
+// their looks, round after round.
+func TestSignalLooksTakeTurns(t *testing.T) {
+	ctx := context.Background()
+	h := shopHistory()
+	s := signalServer(t, h, func(c *Config) { c.Timeout = 300 * time.Millisecond })
+	was, _ := s.l.SeenOf(ctx, s.cfg.Options.Match)
+	s.h = &slowly{sigHistory: h, slow: map[string]time.Duration{"count by (service) (http_requests_total)": 0}}
+	for k := 1; k <= 3; k++ {
+		runDue(s, k)
+		s.jobs(ctx, true)
+		st, _ := s.l.SeenOf(ctx, s.cfg.Options.Match)
+		cursor, _ := s.l.Cursor(ctx)
+		if !st["probe"].To.Equal(cursor) || !st["probe"].To.After(was["probe"].To) {
+			t.Errorf("round %d: the probe looked at to %s, the runs at %s", k, st["probe"].To, cursor)
+		}
+	}
+}
+
+// The look for where each signal's data begins is in turn: with the
+// errors' look hanging, from the round it first does, first in turn, the
+// probe's is made, and its data found.
+func TestSignalDataLooksTakeTurns(t *testing.T) {
+	ctx := context.Background()
+	h := shopHistory()
+	// No data yet of either: each look answers, and is made again.
+	none := []prom.Series{}
+	h.windows = map[string][]prom.Series{"count(http_requests_total)": none, "count(probe_success)": none}
+	s := signalServer(t, h, func(c *Config) { c.Timeout = 300 * time.Millisecond })
+	if k, _ := s.l.SignalKept(ctx, "probe"); k.Data == nil || k.Data.Complete() {
+		t.Fatalf("the probe's data, with none yet: %+v", k.Data)
+	}
+	h.mu.Lock()
+	h.windows = nil
+	h.mu.Unlock()
+	s.h = &slowly{sigHistory: h, slow: map[string]time.Duration{"count(http_requests_total)": 0}}
+	runDue(s, 1)
+	s.jobs(ctx, true)
+	if k, _ := s.l.SignalKept(ctx, "probe"); k.Data == nil || !k.Data.Complete() {
+		t.Errorf("the probe's data not found beside the errors' hanging look: %+v", k.Data)
 	}
 }
