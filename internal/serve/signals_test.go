@@ -1883,10 +1883,33 @@ func TestSignalPagesSayIt(t *testing.T) {
 		t.Errorf("a rule with no alert: %s", between(body, "Judged against", "</p>"))
 	}
 	_, body = askAs(t, h, http.MethodGet, "/incidents/impact-probe-20261102T0600Z", nil, "ana@example.com", "same-origin")
-	if others := between(body, "Other signals&#39; windows at the time", "</ul>"); !strings.Contains(others, `<span class="status-ok"><span aria-hidden="true">✓</span> caught by Errors</span>`) {
-		t.Errorf("the other windows, without a state's class: %s", others)
+	others := func() string {
+		t.Helper()
+		_, body := askAs(t, h, http.MethodGet, "/incidents/impact-probe-20261102T0600Z", nil, "ana@example.com", "same-origin")
+		return between(body, "Other signals&#39; windows at the time", "</ul>")
+	}
+	// As the Incidents page draws each: caught ok, caught only by noisy
+	// rules warn, covered by one written down with no colour.
+	if o := others(); !strings.Contains(o, `<span class="status-ok"><span aria-hidden="true">○</span> caught by Errors</span>`) {
+		t.Errorf("the other window caught: %s", o)
+	}
+	if err := s.l.SetSettings(ctx, map[string]string{"noisy-firings": "1", "noisy-precision": "1"}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if o := others(); !strings.Contains(o, `<span class="status-warn"><span aria-hidden="true">◐</span> caught by Errors, noisy</span>`) {
+		t.Errorf("the other window caught by a noisy rule alone: %s", o)
+	}
+	if err := s.l.SetSettings(ctx, map[string]string{"noisy-firings": "", "noisy-precision": ""}, "ana@example.com"); err != nil {
+		t.Fatal(err)
 	}
 	o, _ := s.options(ctx)
+	at := time.Date(2026, 11, 2, 5, 55, 0, 0, time.UTC)
+	if _, err := s.l.Put(ctx, incident.Incident{ID: "INC-9", Title: "checkout down", Start: at, End: at.Add(30 * time.Minute), Labels: incident.Labels{"service": {"checkout"}}}, "ana@example.com", o); err != nil {
+		t.Fatal(err)
+	}
+	if o := others(); !strings.Contains(o, "covered by one written down") || strings.Contains(o, "status-") {
+		t.Errorf("the other window covered by one written down: %s", o)
+	}
 	made, err := s.l.Decide(ctx, "impact-probe-20261102T0600Z", "confirmed", "", "bo@example.com", o)
 	if err != nil {
 		t.Fatal(err)

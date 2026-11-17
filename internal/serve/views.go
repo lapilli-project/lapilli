@@ -1330,6 +1330,10 @@ type withWindow struct {
 	Start, End time.Time
 	State      string
 	Caught     []string
+	// Status is, on its page, as the Incidents page says a window's:
+	// caught, noisy, missed, covered (by one written down), or what was
+	// decided of it.
+	Status string
 }
 
 // withMost is how many other signals' windows a line names; the rest are
@@ -1781,7 +1785,7 @@ func (s *Server) incidentPage(r *http.Request) (any, error) {
 	}
 	v.Kinds = one[0].Kinds
 	if in.Signal != "" {
-		if v.Signal, err = s.signalOf(ctx, t.o, in); err != nil {
+		if v.Signal, err = s.signalOf(ctx, t, in); err != nil {
 			return nil, err
 		}
 	}
@@ -1791,7 +1795,8 @@ func (s *Server) incidentPage(r *http.Request) (any, error) {
 
 // signalOf is the named signal of a window, or of what a confirmation of
 // one wrote, as its page says it.
-func (s *Server) signalOf(ctx context.Context, o verdict.Options, in ledger.Incident) (*signalOfView, error) {
+func (s *Server) signalOf(ctx context.Context, t *tallies, in ledger.Incident) (*signalOfView, error) {
+	o := t.o
 	v := &signalOfView{Name: in.Signal, Match: strings.Join(in.Match, ", "), Gone: true}
 	if in.Match == nil {
 		v.Match = strings.Join(o.Match, ", ")
@@ -1827,6 +1832,7 @@ func (s *Server) signalOf(ctx context.Context, o verdict.Options, in ledger.Inci
 		for _, c := range w.CaughtBy {
 			x.Caught = append(x.Caught, c.Rule)
 		}
+		x.Status = s.incidentLine("en", w, t.state(w, ledger.Week(s.l.Day(w.Start)))).Status
 		v.With = append(v.With, x)
 		v.Together = v.Together || w.State == "" && in.State == ""
 	}
