@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -162,4 +163,63 @@ func sourcesStates(t *testing.T) map[string]*Server {
 	runDue(floor, 2)
 	floor.jobs(ctx, true)
 	return map[string]*Server{"/sources": quiet, "/intake": criteriaServer(t, false, intake), "/nodata": none, "/floor": floor}
+}
+
+// What is wrong with the deploys file or the marked file is said without
+// its path to a reader who isn't an admin, in the status banner of every
+// page, as the incidents file's is: by what it is.
+func TestFilePathsInBannerAnAdminsAlone(t *testing.T) {
+	ctx := context.Background()
+	for _, which := range []string{"deploys", "marked"} {
+		t.Run(which, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "private-mount", which+".yaml")
+			s := criteriaServer(t, true, func(c *Config) {
+				switch which {
+				case "deploys":
+					c.Deploys = path
+				case "marked":
+					c.Marked = path
+				}
+			})
+			runDue(s, 2)
+			s.jobs(ctx, true)
+			h := s.Handler()
+			for _, who := range []string{"carl@example.com", "bo@example.com"} {
+				for _, p := range []string{"/", "/settings"} {
+					code, body := askAs(t, h, http.MethodGet, p, nil, who, "same-origin")
+					if i := strings.Index(body, filepath.Dir(path)); code != http.StatusOK || i >= 0 {
+						t.Errorf("%s, %s: %d, the path on the page: %s", who, p, code, body[max(0, i-120):min(len(body), max(0, i)+120)])
+					}
+					if !strings.Contains(body, "the "+which+" file") {
+						t.Errorf("%s, %s: the banner doesn't say which file", who, p)
+					}
+				}
+			}
+			if _, body := askAs(t, h, http.MethodGet, "/", nil, "ana@example.com", "same-origin"); !strings.Contains(body, path) {
+				t.Error("an admin doesn't read the path")
+			}
+		})
+	}
+}
+
+// The paths taken out are those of every file serve was started with,
+// the longest first, as given and as a path joined under one says it; a
+// bare name is left in the sentences it is a word of.
+func TestRedactPaths(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := server(t, func(c *Config) {
+		c.RulesPath, c.Config = dir+"/rules/", dir+"/rules/config.yaml"
+		c.Slack, c.ReportDests = dir+"/hooks/slack", map[string]string{"ops": dir + "/hooks/ops"}
+		c.ChangesPaused = "ledger"
+	})
+	for in, want := range map[string]string{
+		"keeping the ledger to --config: open " + dir + "/rules/config.yaml: permission denied": "keeping the ledger to --config: open the config file: permission denied",
+		"reading the rules: " + dir + "/rules/shop.yaml: line 3":                                "reading the rules: the path given to --rules/shop.yaml: line 3",
+		"notifying: --report-dest: open " + dir + "/hooks/ops: no such file":                    "notifying: --report-dest: open the path given to --report-dest: no such file",
+		"the ledger: disk full": "the ledger: disk full",
+	} {
+		if got := s.redactPaths(in, "en"); got != want {
+			t.Errorf("%q\n became %q,\n want %q", in, got, want)
+		}
+	}
 }

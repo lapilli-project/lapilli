@@ -1052,7 +1052,8 @@ func (s *Server) page(r *http.Request, name string, v any) page {
 		p.Status.Why = s.why(r)
 	}
 	if role != admin {
-		// The incidents file's path is an admin's to read (sources.go).
+		// The paths of the files serve was started with are an admin's to
+		// read (sources.go).
 		p.Status.Err = s.redactPaths(p.Status.Err, l)
 	}
 	// A page that refuses or finds nothing, or says one has signed out, is

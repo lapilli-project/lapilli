@@ -1316,3 +1316,24 @@ func TestConfigRetryFailureShown(t *testing.T) {
 		t.Error("settings doesn't say the file kept to failed again")
 	}
 }
+
+// --config's path, which says how serve is run as the other files' do, is
+// an admin's to read: on the Settings page and in its API, a reader who
+// isn't one is told of --config by its flag.
+func TestConfigFileAnAdminsAlone(t *testing.T) {
+	s, path := configServer(t, configFile, nil)
+	h := s.Handler()
+	for _, who := range []string{"ed@example.com", "viewer@example.com"} {
+		if _, body := callAs(t, h, http.MethodGet, "/settings", who, "", "", "same-origin"); strings.Contains(body, path) || !strings.Contains(body, "declared in <bdi>--config</bdi>") {
+			t.Errorf("%s, the Settings page: the path shown %v", who, strings.Contains(body, path))
+		}
+		if _, body := callAs(t, h, http.MethodGet, "/api/v1/settings", who, "", "", "same-origin"); strings.Contains(body, path) {
+			t.Errorf("%s, /api/v1/settings: %s", who, body)
+		}
+	}
+	for _, p := range []string{"/settings", "/api/v1/settings"} {
+		if _, body := callAs(t, h, http.MethodGet, p, "boss@example.com", "", "", "same-origin"); !strings.Contains(body, path) {
+			t.Errorf("an admin doesn't read the path on %s", p)
+		}
+	}
+}

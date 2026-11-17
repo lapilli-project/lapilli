@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -26,14 +27,81 @@ const sourcesSpan = 28 * 24 * time.Hour
 // its tool's incidents every hour or so, each again, unchanged or not.
 const receivedQuiet = 48 * time.Hour
 
-// redactPaths is a text without the incidents file's path, which an
-// admin alone reads: an error reading it says it, on the Settings page and
-// in the status banner of every page.
+// redactPaths is a text without the paths of the files and directories
+// serve was started with (filePaths), which an admin alone reads: where
+// the data, a token or a webhook is kept says how serve is run, and an
+// error reading one says it, on the Settings page and in the status banner
+// of every page. Each is said by its flag in their place.
 func (s *Server) redactPaths(text, l string) string {
-	if s.cfg.Incidents == "" || text == "" {
+	if text == "" {
 		return text
 	}
-	return strings.ReplaceAll(text, s.cfg.Incidents, tr(l, "the incidents file"))
+	for _, p := range s.filePaths() {
+		if !strings.Contains(text, p.path) {
+			continue
+		}
+		name := tr(l, "the path given to %s", p.flag)
+		switch p.flag {
+		case "--incidents":
+			name = tr(l, "the incidents file")
+		case "--deploys":
+			name = tr(l, "the deploys file")
+		case "--marked":
+			name = tr(l, "the marked file")
+		case "--config":
+			name = tr(l, "the config file")
+		}
+		text = strings.ReplaceAll(text, p.path, name)
+	}
+	return text
+}
+
+// filePath is a path serve was started with, and the flag that gave it.
+type filePath struct{ path, flag string }
+
+// filePaths are the paths of the files and directories serve was started
+// with, by the flag that gave each: as given, with no separator at its
+// end, and cleaned, as a path joined under a directory says it
+// (filepath.Join); the longest first, so that one inside another is taken
+// out before it. A value that doesn't read as a path (pathLike) is left,
+// so that a bare name, --rules rules, doesn't take its word out of every
+// sentence. --impact-file and --on-call aren't among them: they are read
+// once, as serve starts, and a failure stops it.
+func (s *Server) filePaths() []filePath {
+	c := s.cfg
+	given := []filePath{{c.Incidents, "--incidents"}, {c.Deploys, "--deploys"}, {c.Marked, "--marked"}, {c.Config, "--config"},
+		{c.RulesPath, "--rules"}, {c.RulesHistory, "--rules-history"}, {c.LokiRules, "--loki-rules"},
+		{c.Ledger, "--ledger"}, {c.LedgerURLFile, "--ledger-url-file"},
+		{c.GrafanaToken, "--grafana-token-file"}, {c.LokiToken, "--loki-token-file"}, {c.RulerToken, "--ruler-token-file"},
+		{c.Slack, "--slack-webhook-file"}, {c.NotifyWebhook, "--notify-webhook-file"}, {c.SessionKey, "--session-key-file"},
+		{c.IncidentsToken, "--incidents-token-file"}, {c.FiringsToken, "--firings-token-file"}, {c.TasksToken, "--tasks-token-file"},
+		{c.NotifyToken, "--notify-token-file"}, {c.NotifyGrafanaSecret, "--notify-grafana-secret-file"},
+		{c.ChangesToken, "--changes-token-file"}, {c.ChangesGrafanaToken, "--changes-grafana-token-file"},
+		{c.ChangesRulerToken, "--changes-ruler-token-file"}, {c.ChangesPaused, "--changes-paused"}, {c.ChangesOCIConfig, "--changes-oci-config"}}
+	for _, f := range c.TeamDigests {
+		given = append(given, filePath{f, "--team-digest"})
+	}
+	for _, f := range c.ReportDests {
+		given = append(given, filePath{f, "--report-dest"})
+	}
+	var out []filePath
+	for _, p := range given {
+		if !pathLike(p.path) {
+			continue
+		}
+		out = append(out, filePath{strings.TrimRight(p.path, `/\`), p.flag})
+		if clean := filepath.Clean(p.path); clean != out[len(out)-1].path && pathLike(clean) {
+			out = append(out, filePath{clean, p.flag})
+		}
+	}
+	slices.SortStableFunc(out, func(a, b filePath) int { return len(b.path) - len(a.path) })
+	return out
+}
+
+// pathLike reports whether a flag's value reads as a path where a text
+// says it: with a separator or a dot, and more than separators and dots.
+func pathLike(p string) bool {
+	return strings.ContainsAny(p, `/\.`) && strings.Trim(p, `/\.`) != ""
 }
 
 // impactStale is how long since the impact signal was last read it is

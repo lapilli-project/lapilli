@@ -2145,5 +2145,8 @@
  "a try of the settings judges the last week again, so it is asked for from the Settings page, in a browser, on this site": "설정 시험은 지난 일주일을 다시 판정하기 때문에 이 사이트의 설정 페이지에서, 브라우저로만 요청할 수 있어요",
  "you have tried the settings on the last week as many times in the last hour as anyone may: each judges a week of firings again; try again later": "지난 한 시간 동안 지난 일주일로 설정을 시험할 수 있는 횟수를 다 썼어요. 매번 일주일 치 알림을 다시 판정하기 때문이에요. 나중에 다시 해 주세요",
  "the marked windows of kind %s made in the UI would have %d occurrences in the week of %s; they have %d of a kind a week at most, the rest kept for the marked file, --config and the expressions": "UI 에서 만든 %[1]s 종류의 이벤트 구간이 %[3]s 주에 %[2]d개가 돼요. UI 몫은 한 종류당 한 주에 %[4]d개까지이고, 나머지는 이벤트 구간 파일·--config·표현식 몫이에요",
- "the marked windows made in the UI would take %d kinds, counting those no window names any more until their firings are judged again; they take %d at most, the rest kept for the marked file, --config and the expressions: use a kind there is": "UI 에서 만든 이벤트 구간이 종류 %d개를 쓰게 돼요. 더는 어느 구간도 쓰지 않는 종류도 그 알림을 다시 판정할 때까지 세요. UI 몫은 %d개까지이고, 나머지는 이벤트 구간 파일·--config·표현식 몫이에요. 있는 종류를 써 주세요"
+ "the marked windows made in the UI would take %d kinds, counting those no window names any more until their firings are judged again; they take %d at most, the rest kept for the marked file, --config and the expressions: use a kind there is": "UI 에서 만든 이벤트 구간이 종류 %d개를 쓰게 돼요. 더는 어느 구간도 쓰지 않는 종류도 그 알림을 다시 판정할 때까지 세요. UI 몫은 %d개까지이고, 나머지는 이벤트 구간 파일·--config·표현식 몫이에요. 있는 종류를 써 주세요",
+ "the deploys file": "배포 파일",
+ "the config file": "config 파일",
+ "the path given to %s": "%s 에 준 경로"
 }
