@@ -738,6 +738,21 @@ func TestChartImpactSignals(t *testing.T) {
 	if strings.Contains(out, `"--impact=`) {
 		t.Error("--impact beside --impact-file")
 	}
+	// The file is read as serve starts: a change to the mapping changes the
+	// pod's checksum, which starts it again with the file.
+	checksum := func(out string) string {
+		_, after, _ := strings.Cut(out, "checksum/impact: ")
+		v, _, _ := strings.Cut(after, "\n")
+		return v
+	}
+	sum := checksum(out)
+	changed := filepath.Join(t.TempDir(), "values.yaml")
+	b, _ := os.ReadFile(values)
+	os.WriteFile(changed, []byte(strings.Replace(string(b), "for: 2m", "for: 3m", 1)), 0o644)
+	again, err := helmTemplate(t, append(serveValues, "-f", changed)...)
+	if err != nil || sum == "" || checksum(again) == "" || checksum(again) == sum {
+		t.Errorf("the pod's impact checksum: %q, then %q (%v)", sum, checksum(again), err)
+	}
 	// What the ConfigMap holds is a file --impact-file reads.
 	_, data, _ := strings.Cut(out, "impact.yaml: |\n")
 	var file []string

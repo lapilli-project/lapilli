@@ -676,6 +676,11 @@ labels:
   {{ $k }}: {{ $v | toString | quote }}
   {{- end }}
 {{- $a := deepCopy (.Values.podAnnotations | default dict) }}
+{{- /* --impact-file is read as serve starts: a change to the impact
+mapping changes the pod, which starts it again with the file. */ -}}
+{{- if kindIs "map" .Values.impact }}
+{{- $_ := set $a "checksum/impact" (toYaml .Values.impact | sha256sum) }}
+{{- end }}
 {{- if and (eq .Values.mode "serve") .Values.serve.rulesHistory.repository }}
 {{- /* The rules history's containers run git, and RENDER, on what a
 repository holds: EKS's webhook (IRSA, Pod Identity) and Azure's give them
