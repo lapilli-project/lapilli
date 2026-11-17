@@ -491,7 +491,9 @@ Taken while building, within what is above:
   editors, or every editor, keep never refuses the marked file,
   `--config` or an expression below the rest. A write in the UI that would
   take more kinds than the UI's share is refused, unless it takes no more
-  than the UI's already take (a new title, a window given back). A team's
+  than the UI's already take (a new title, a window given back); one past
+  a share of a week is refused only in a week it makes busier, so a new
+  title or a shorter window is let be, past a share kept from before. A team's
   editors use the kinds there are: the fifteen are taken by an editor or
   an admin, a file, `--config` or an expression.
 - **The kinds counted from the ledger's**, those of expressions and those

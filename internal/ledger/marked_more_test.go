@@ -535,3 +535,106 @@ func TestMarkedUIKinds(t *testing.T) {
 		t.Errorf("an expression of the last kind: %+v %v", said, err)
 	}
 }
+
+// Past a share of the UI's, as a ledger kept before the shares can be or
+// --config can give windows back, a write is refused only in a week it
+// makes busier: a new title, or a shorter window, is let be, and so is a
+// window in a week with room, while one more in the week past the share
+// is refused. So for a kind's week, for every kind's, and for a team's.
+func TestMarkedSharesPastThemLetLessBe(t *testing.T) {
+	ctx := context.Background()
+	monday := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, 7)
+	for monday.Weekday() != time.Monday {
+		monday = monday.AddDate(0, 0, 1)
+	}
+	hourly := func(n int, kinds ...string) []Marked {
+		var ws []Marked
+		for i := range n {
+			s := monday.Add(time.Duration(i) * time.Hour)
+			ws = append(ws, Marked{Kind: kinds[i%len(kinds)], Title: fmt.Sprint("job ", i), Start: s, End: s.Add(20 * time.Minute)})
+		}
+		return ws
+	}
+	// What the marked file kept, as made in the UI, of a team.
+	kept := func(t *testing.T, l *Ledger, ws []Marked, team int64) []Marked {
+		if _, err := l.SyncMarked(ctx, ws, opts, MarkedRead{Sum: "x"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.write(ctx, func(t *txn) error {
+			_, err := t.ExecContext(t.ctx, "UPDATE marked SET origin = 'ui', team_id = ?", team)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		have, err := l.markedRows(ctx, l.r, "ORDER BY m.id")
+		if err != nil || len(have) != len(ws) {
+			t.Fatal(len(have), err)
+		}
+		return have
+	}
+	try := func(t *testing.T, l *Ledger, have []Marked, kind string) {
+		t.Helper()
+		var inv ErrInvalid
+		renamed := have[0]
+		renamed.Title = "renamed"
+		if _, err := l.PutMarked(ctx, renamed, "ed", opts); err != nil {
+			t.Errorf("a new title: %v", err)
+		}
+		shorter := have[1]
+		shorter.End = shorter.End.Add(-10 * time.Minute)
+		if _, err := l.PutMarked(ctx, shorter, "ed", opts); err != nil {
+			t.Errorf("a shorter window: %v", err)
+		}
+		more := Marked{Kind: kind, Title: "more", Start: monday.Add(150 * time.Hour), End: monday.Add(151 * time.Hour), TeamID: have[0].TeamID}
+		if _, err := l.PutMarked(ctx, more, "ed", opts); !errors.As(err, &inv) {
+			t.Errorf("one more in the week past the share: %v", err)
+		}
+		moved := have[2]
+		moved.Start, moved.End = more.Start, more.End
+		if _, err := l.PutMarked(ctx, moved, "ed", opts); err != nil {
+			t.Errorf("one moved within the week: %v", err)
+		}
+		more.Start, more.End = more.Start.AddDate(0, 0, 7), more.End.AddDate(0, 0, 7)
+		if _, err := l.PutMarked(ctx, more, "ed", opts); err != nil {
+			t.Errorf("one in the week after, with room: %v", err)
+		}
+	}
+	t.Run("kind and team", func(t *testing.T) {
+		l := open(t, time.UTC)
+		team, err := l.PutTeam(ctx, Team{Name: "payments", Rules: "Errors"}, "ana")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// 40 of a kind, a team's: past the UI's 32 of a kind and a team's 32.
+		try(t, l, kept(t, l, hourly(40, "batch"), team), "batch")
+	})
+	t.Run("every kind", func(t *testing.T) {
+		l := open(t, time.UTC)
+		// 130 of three kinds: past the UI's 128 a week, each kind within
+		// the 64 of a kind.
+		try(t, l, kept(t, l, hourly(130, "a", "b", "c"), 0), "d")
+	})
+	t.Run("a repeat made longer", func(t *testing.T) {
+		l := open(t, time.UTC)
+		// Five daily windows of a kind, 35 a week, past the UI's 32; one
+		// of them until a day, after which the week has 28.
+		var ws []Marked
+		for i := range 5 {
+			s := monday.Add(time.Duration(i) * time.Hour)
+			ws = append(ws, Marked{Kind: "nightly", Title: fmt.Sprint("batch ", i), Start: s, End: s.Add(30 * time.Minute), Every: "day"})
+		}
+		ws[4].Until = monday.AddDate(0, 0, 14)
+		have := kept(t, l, ws, 0)
+		var inv ErrInvalid
+		longer := have[4]
+		longer.Until = longer.Until.AddDate(0, 0, 28)
+		if _, err := l.PutMarked(ctx, longer, "ed", opts); !errors.As(err, &inv) {
+			t.Errorf("past the share in the weeks it is made longer into: %v", err)
+		}
+		shorter := have[4]
+		shorter.Until = shorter.Until.AddDate(0, 0, -7)
+		if _, err := l.PutMarked(ctx, shorter, "ed", opts); err != nil {
+			t.Errorf("made shorter: %v", err)
+		}
+	})
+}

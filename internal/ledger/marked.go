@@ -788,27 +788,37 @@ func (l *Ledger) shareFits(t *txn, id int64, m Marked) error {
 	if err != nil {
 		return err
 	}
-	ui, team := l.newLoad(), l.newLoad()
+	// The shares' loads as they are, and with m in place of the window id.
+	was, ui, wasTeam, team := l.newLoad(), l.newLoad(), l.newLoad(), l.newLoad()
 	for _, h := range have {
+		ours := m.TeamID > 0 && h.TeamID == m.TeamID
+		was.add(h)
+		if ours {
+			wasTeam.add(h)
+		}
 		if h.ID == id {
 			continue
 		}
 		ui.add(h)
-		if m.TeamID > 0 && h.TeamID == m.TeamID {
+		if ours {
 			team.add(h)
 		}
 	}
 	ui.add(m)
 	team.add(m)
-	if w, n := ui.busiest(""); n > MarkedUIWeek {
+	// Past a share, as windows --config gave back can be, or those kept
+	// before there were shares, a write is refused in a week it makes
+	// busier, so that one that adds nothing, a new title or a shorter
+	// window, is let be.
+	if w, n := ui.busier(was, "", MarkedUIWeek); n > 0 {
 		return invalid("the marked windows made in the UI would have %d occurrences in the week of %s; they have %d a week at most, the rest kept for the marked file, --config and the expressions",
 			n, l.Midnight(w).Format("2006-01-02"), MarkedUIWeek)
 	}
-	if w, n := ui.busiest(m.Kind); n > MarkedUIKindWeek {
+	if w, n := ui.busier(was, m.Kind, MarkedUIKindWeek); n > 0 {
 		return invalid("the marked windows of kind %s made in the UI would have %d occurrences in the week of %s; they have %d of a kind a week at most, the rest kept for the marked file, --config and the expressions",
 			m.Kind, n, l.Midnight(w).Format("2006-01-02"), MarkedUIKindWeek)
 	}
-	if w, n := team.busiest(""); m.TeamID > 0 && n > MarkedTeamWeek {
+	if w, n := team.busier(wasTeam, "", MarkedTeamWeek); m.TeamID > 0 && n > 0 {
 		return invalid("a team's marked windows would have %d occurrences in the week of %s; a team's have %d a week at most", n, l.Midnight(w).Format("2006-01-02"), MarkedTeamWeek)
 	}
 	// Past their share of the kinds, as windows --config gave back can
@@ -892,19 +902,45 @@ func (l *Ledger) uiKinds(t *txn, ui []Marked, id int64, m Marked) (now, after in
 	return len(was), len(will), nil
 }
 
-// busiest is the week with the most occurrences, of kind or, "", of every
-// kind, and how many.
-func (ld *markedLoad) busiest(kind string) (week int64, n int) {
-	for _, w := range ld.rises() {
-		all, kinds := ld.at(w)
-		if kind != "" {
-			all = kinds[kind]
-		}
-		if all > n {
-			week, n = w, all
+// busier is the first week where ld meets more than share occurrences, of
+// kind or, "", of every kind, and more than before does, and how many; 0
+// for none. Each week either load changes in is looked at (turns), so
+// none between them can be.
+func (ld *markedLoad) busier(before *markedLoad, kind string, share int) (week int64, n int) {
+	weeks := append(ld.turns(), before.turns()...)
+	slices.Sort(weeks)
+	for _, w := range slices.Compact(weeks) {
+		if now := ld.of(w, kind); now > share && now > before.of(w, kind) {
+			return w, now
 		}
 	}
-	return week, n
+	return 0, 0
+}
+
+// turns are the weeks where the load may change: where it rises (rises),
+// and the week after an occurrence of one that doesn't repeat, or after
+// the last of one that repeats until a day.
+func (ld *markedLoad) turns() []int64 {
+	at := ld.rises()
+	for w := range ld.once {
+		at = append(at, w+7)
+	}
+	for _, r := range ld.repeats {
+		if r.to != math.MaxInt64 {
+			at = append(at, r.to+7)
+		}
+	}
+	return at
+}
+
+// of is how many occurrences meet the week w, of kind or, "", of every
+// kind.
+func (ld *markedLoad) of(w int64, kind string) int {
+	all, kinds := ld.at(w)
+	if kind != "" {
+		return kinds[kind]
+	}
+	return all
 }
 
 // insertMarked keeps a window in a write.
