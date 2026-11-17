@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -223,6 +224,156 @@ func TestProbeSQLiteBeside(t *testing.T) {
 		t.Errorf("held by a serve: %+v %v", p, err)
 	}
 	unchanged(t, held, before)
+}
+
+// stamp is what a file is as a probe must leave it: its size, its mode
+// and when it was last written.
+type stamp struct {
+	size  int64
+	mode  os.FileMode
+	mtime time.Time
+}
+
+// untouched dates each file in dirs an hour back, so that a write is seen
+// by its time however soon it comes, and gives a check that fails the
+// test on a file made or removed in them since, or one whose size, mode
+// or time changed. A link is taken as itself, not as what it leads to.
+func untouched(t *testing.T, dirs ...string) func(what string) {
+	t.Helper()
+	stamps := func(dir string) map[string]stamp {
+		es, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]stamp{}
+		for _, e := range es {
+			fi, err := os.Lstat(filepath.Join(dir, e.Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			out[e.Name()] = stamp{fi.Size(), fi.Mode(), fi.ModTime()}
+		}
+		return out
+	}
+	back := time.Now().Add(-time.Hour).Truncate(time.Second)
+	before := map[string]map[string]stamp{}
+	for _, dir := range dirs {
+		es, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range es {
+			if e.Type().IsRegular() {
+				if err := os.Chtimes(filepath.Join(dir, e.Name()), back, back); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		before[dir] = stamps(dir)
+	}
+	return func(what string) {
+		t.Helper()
+		for _, dir := range dirs {
+			was, now := before[dir], stamps(dir)
+			for name, s := range now {
+				if w, ok := was[name]; !ok {
+					t.Errorf("%s: %s was made (%d bytes)", what, name, s.size)
+				} else if w != s {
+					t.Errorf("%s: %s changed: %+v, then %+v", what, name, w, s)
+				}
+			}
+			for name := range was {
+				if _, ok := now[name]; !ok {
+					t.Errorf("%s: %s was removed", what, name)
+				}
+			}
+		}
+	}
+}
+
+// A ledger whose file is shorter than a page, a write-ahead log beside
+// it, isn't opened: SQLite would take it for an empty database and delete
+// the log, which holds the ledger. The probe says it is cut short, and
+// every file is left as it was. A short file alone is opened as before, a
+// new database to SQLite.
+func TestProbeSQLiteCutShort(t *testing.T) {
+	ctx := context.Background()
+	src := t.TempDir()
+	db := logged(t, src)
+	defer db.Close()
+	whole, err := os.ReadFile(filepath.Join(src, "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, size := range []int{0, 100, smallestPage - 1} {
+		for _, beside := range [][]string{{"ledger.db-wal"}, {"ledger.db-wal", "ledger.db-shm"}} {
+			what := fmt.Sprintf("%d bytes, %v", size, beside)
+			dir := t.TempDir()
+			copied(t, src, dir, beside...)
+			if err := os.WriteFile(filepath.Join(dir, "ledger.db"), whole[:size], 0o600); err != nil {
+				t.Fatal(err)
+			}
+			check := untouched(t, dir)
+			if p, err := Probe(ctx, dir); !errors.Is(err, ErrCutShort) || !p.There {
+				t.Errorf("%s: %+v %v", what, p, err)
+			}
+			check(what)
+		}
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ledger.db"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check := untouched(t, dir)
+	if p, err := Probe(ctx, dir); err != nil || !p.There || p.Version != 0 {
+		t.Errorf("an empty file alone: %+v %v", p, err)
+	}
+	check("an empty file alone")
+}
+
+// A ledger.db that is a link to a file elsewhere is read where it leads,
+// as SQLite reads it: its log beside the file it leads to, and its index
+// or none, are read through as they would be there, the schema the log's,
+// and nothing made or changed beside the link or the file. One that leads
+// to a file cut short is refused as that file is.
+func TestProbeSQLiteLink(t *testing.T) {
+	ctx := context.Background()
+	src := t.TempDir()
+	db := logged(t, src)
+	defer db.Close()
+	linked := func(t *testing.T, names ...string) (real, link string) {
+		real, link = t.TempDir(), t.TempDir()
+		copied(t, src, real, names...)
+		if err := os.Symlink(filepath.Join(real, "ledger.db"), filepath.Join(link, "ledger.db")); err != nil {
+			t.Skip("no symbolic links here:", err)
+		}
+		return real, link
+	}
+	for name, names := range map[string][]string{
+		"a log, no index":     {"ledger.db", "ledger.db-wal"},
+		"a log and its index": {"ledger.db", "ledger.db-wal", "ledger.db-shm"},
+		"no log":              {"ledger.db"},
+	} {
+		real, link := linked(t, names...)
+		want := 23
+		if len(names) == 1 {
+			want = 19 // all of it in the file
+		}
+		check := untouched(t, real, link)
+		if p, err := Probe(ctx, link); err != nil || !p.There || p.Version != want {
+			t.Errorf("%s: %+v %v, want schema %d", name, p, err, want)
+		}
+		check(name)
+	}
+	real, link := linked(t, "ledger.db-wal", "ledger.db-shm")
+	if err := os.WriteFile(filepath.Join(real, "ledger.db"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check := untouched(t, real, link)
+	if _, err := Probe(ctx, link); !errors.Is(err, ErrCutShort) {
+		t.Errorf("a link to a file cut short: %v", err)
+	}
+	check("a link to a file cut short")
 }
 
 // A ledger at an older schema says so, as serve would migrate it.

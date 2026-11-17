@@ -67,6 +67,13 @@ func (p *run) sqlite(ctx context.Context) {
 		notes = append(notes, fmt.Sprintf("%s free", bytesOf(free)))
 	}
 	pr, err := ledger.Probe(ctx, dir)
+	if errors.Is(err, ledger.ErrCutShort) {
+		p.add(Item{ID: "ledger.sqlite", State: Problem, What: "--ledger " + dir + ": the ledger's file is cut short",
+			Why: "ledger.db is shorter than a page of SQLite's, with a write-ahead log (-wal) beside it, which holds the ledger: " +
+				"SQLite, opening the file, takes it for an empty database and deletes the log. The probe didn't open it",
+			Fix: "keep a copy of the directory, and put ledger.db back from a copy before serve starts: serve would open it, and the log would be lost"})
+		return
+	}
 	if err != nil {
 		p.add(Item{ID: "ledger.sqlite", State: Problem, What: "--ledger " + dir + ": the ledger can't be read", Why: said(err)})
 		return

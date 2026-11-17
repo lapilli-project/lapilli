@@ -493,7 +493,13 @@ can do:
   memory (`locking_mode=EXCLUSIVE`). Each reads what the `-wal` holds, a
   migration not yet checkpointed among it; 0.53.0 to 0.55.0 made the
   `-shm` in the third case, 32 KiB, which a serve run as another user
-  might not then open.
+  might not then open. A `ledger.db` that is a link is read where it
+  leads, and what is beside it looked for there, as SQLite looks
+  (`TestProbeSQLiteLink`): looked for beside the link, a `-wal` was
+  missed, and the file read without it. A file shorter than a page with a
+  `-wal` beside it isn't opened at all, and the item says it is cut short
+  (`TestProbeSQLiteCutShort`): SQLite takes it for an empty database, and,
+  opening it in a directory it may write, deletes the `-wal`.
 - **`history.grafana` asks through the proxy for Loki's data sources
   alone.** serve replays Grafana's rules of PromQL against `--prometheus`,
   not through Grafana's data source proxy; only a Loki data source's are

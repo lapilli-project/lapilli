@@ -781,6 +781,31 @@ func TestSchemaSays(t *testing.T) {
 	}
 }
 
+// A SQLite ledger whose file is cut short, a write-ahead log beside it, is
+// a problem the item names as such, and its log is left as it was: SQLite
+// would delete it, opening the file.
+func TestLedgerCutShort(t *testing.T) {
+	c := config()
+	c.Serve.Ledger = t.TempDir()
+	wal := filepath.Join(c.Serve.Ledger, "ledger.db-wal")
+	log := bytes.Repeat([]byte("w"), 4096)
+	if err := os.WriteFile(filepath.Join(c.Serve.Ledger, "ledger.db"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wal, log, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := newRun(c)
+	p.ledger(context.Background())
+	it := itemOf(p, "ledger.sqlite")
+	if it == nil || it.State != Problem || !strings.Contains(it.What, "the ledger's file is cut short") || !strings.Contains(it.Why, "deletes the log") {
+		t.Fatalf("%+v", it)
+	}
+	if b, err := os.ReadFile(wal); err != nil || !bytes.Equal(b, log) {
+		t.Errorf("the log: %d bytes, %v", len(b), err)
+	}
+}
+
 // An identity serve writes as that can't be taken is a problem; written
 // to, nothing.
 func TestChangesIdentity(t *testing.T) {

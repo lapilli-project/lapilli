@@ -40,7 +40,8 @@ type Probed struct {
 // connection read-only (mode=ro) and taking no write (PRAGMA query_only),
 // and opened so that SQLite neither makes nor changes a file beside it,
 // whatever is there (beside). A ledger that isn't there is a new one:
-// There false, and nothing made.
+// There false, and nothing made. A ledger.db that is a link is read where
+// it leads, as SQLite reads it, and what is beside it is looked for there.
 func Probe(ctx context.Context, dir string) (Probed, error) {
 	p := Probed{}
 	n, err := sqliteFiles()
@@ -61,6 +62,12 @@ func Probe(ctx context.Context, dir string) (Probed, error) {
 		return p, fmt.Errorf("%s isn't a file", abs)
 	}
 	p.There = true
+	// SQLite opens what a link leads to, and looks for its log beside
+	// that: looked for beside the link, a log there would be missed, and
+	// the file opened as immutable, read without it.
+	if abs, err = filepath.EvalSymlinks(abs); err != nil {
+		return p, err
+	}
 	how, err := beside(abs)
 	if err != nil {
 		return p, err
@@ -102,7 +109,20 @@ const (
 	unindexed
 )
 
-// beside says how a probe opens the SQLite file at abs, by what is beside it.
+// ErrCutShort is a SQLite ledger whose file is shorter than a page with a
+// write-ahead log beside it. SQLite takes such a file for an empty
+// database, and, opening it, deletes the log beside it, which holds the
+// ledger: a probe doesn't open it.
+var ErrCutShort = errors.New("the ledger's file is cut short: it is shorter than a page of SQLite's, with a write-ahead log (-wal) beside it, which opening it would delete")
+
+// smallestPage is the smallest page SQLite writes, in bytes. A ledger with
+// a write-ahead log has a page in its file at least: SQLite writes the
+// first as it turns the log on.
+const smallestPage = 512
+
+// beside says how a probe opens the SQLite file at abs, by what is beside
+// it; ErrCutShort for a file shorter than a page with a log beside it,
+// which isn't opened at all.
 func beside(abs string) (probing, error) {
 	there := func(name string) (bool, error) {
 		_, err := os.Stat(name)
@@ -114,6 +134,13 @@ func beside(abs string) (probing, error) {
 	wal, err := there(abs + "-wal")
 	if err != nil || !wal {
 		return alone, err
+	}
+	fi, err := os.Stat(abs)
+	if err != nil {
+		return alone, err
+	}
+	if fi.Size() < smallestPage {
+		return alone, ErrCutShort
 	}
 	shm, err := there(abs + "-shm")
 	if err != nil {
