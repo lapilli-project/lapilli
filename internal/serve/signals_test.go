@@ -1189,3 +1189,42 @@ func TestSignalReplaceOneOfEight(t *testing.T) {
 		}
 	}
 }
+
+// The unnamed signal's windows keep their labels as every release before
+// kept them: a window of a ledger an earlier release wrote, with a value
+// longer than an alert's is kept, found again (a read again of a new
+// expression) is known by them, and keeps its key and what was decided.
+func TestUnnamedWindowLongLabelKeepsKey(t *testing.T) {
+	ctx := context.Background()
+	h := shopHistory()
+	at := now.Add(-5 * time.Hour)
+	long := strings.Repeat("x", 300)
+	w := []prom.Series{minutes(map[string]string{"service": "checkout", "instance": long}, at, at.Add(10*time.Minute))}
+	h.windows = map[string][]prom.Series{"impact > 1": w, "(impact > 1)": w}
+	s := signalServer(t, h, func(c *Config) { c.Signals, c.Impact = nil, "impact > 1" })
+	window := func() ledger.Incident {
+		t.Helper()
+		ws, err := s.l.ImpactWindows(ctx, at.Add(-time.Hour), at.Add(time.Hour))
+		if err != nil || len(ws) != 1 {
+			t.Fatalf("%+v %v", ws, err)
+		}
+		return ws[0]
+	}
+	first := window()
+	o, _ := s.options(ctx)
+	if _, err := s.l.Decide(ctx, first.ID, "dismissed", "", "ana@example.com", o); err != nil {
+		t.Fatal(err)
+	}
+	// As an earlier release kept it, labels and all.
+	b, _ := json.Marshal(map[string][]string{"instance": {long}, "service": {"checkout"}})
+	ledgerExec(t, s, "UPDATE incidents SET labels = ? WHERE key = ?", string(b), first.ID)
+	if code, body := askAs(t, s.Handler(), http.MethodPost, "/settings/impact", url.Values{"impact": {"(impact > 1)"}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Fatalf("%d %.300s", code, body)
+	}
+	runDue(s, 1)
+	s.jobs(ctx, true)
+	again := window()
+	if again.ID != first.ID || again.State != "dismissed" || again.Labels["instance"][0] != long {
+		t.Errorf("found again: %s %q, instance of %d bytes; was %s", again.ID, again.State, len(again.Labels["instance"][0]), first.ID)
+	}
+}

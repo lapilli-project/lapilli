@@ -701,7 +701,12 @@ func (l *Ledger) impact(t *txn, r signalRun, found []incident.Incident, fresh bo
 		}
 	}
 	for _, in := range found {
-		in.Labels = keptWindowLabels(in.Labels)
+		if r.name != "" {
+			// A named signal's, bounded; the unnamed signal's as every
+			// release before kept them, so that a window found again is
+			// known by its labels, and keeps its key and what was decided.
+			in.Labels = keptWindowLabels(in.Labels)
+		}
 		labels, err := json.Marshal(orEmpty(in.Labels))
 		if err != nil {
 			return 0, err
@@ -749,12 +754,13 @@ func (l *Ledger) impact(t *txn, r signalRun, found []incident.Incident, fresh bo
 	return lo, remapImpact(t, before, from, made)
 }
 
-// keptWindowLabels are a window's labels as the ledger keeps them, bounded
-// as an incident's are (maxLabelBytes in all, as JSON): each name and
-// value cut as an alert's are (verdict.KeptName, KeptValue), 64 values a
-// label, and, past 4 KB, the labels that don't fit left out, the rest kept
-// in order: a label left out constrains nothing, so the window is caught
-// by more, never by fewer. Within the bounds, as they are.
+// keptWindowLabels are a named signal's window's labels as the ledger
+// keeps them, bounded as an incident's are (maxLabelBytes in all, as
+// JSON): each name and value cut as an alert's are (verdict.KeptName,
+// KeptValue), 64 values a label, and, past 4 KB, the labels that don't fit
+// left out, the rest kept in order: a label left out constrains nothing,
+// so the window is caught by more, never by fewer. Within the bounds, as
+// they are.
 func keptWindowLabels(l incident.Labels) incident.Labels {
 	if b, err := json.Marshal(orEmpty(l)); err == nil && len(b) <= maxLabelBytes {
 		within := true
