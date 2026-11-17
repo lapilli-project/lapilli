@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-11-18
+
 ### Changed
 
 - **The pages say a firing with no record "not judged", as the report
