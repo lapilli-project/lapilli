@@ -100,6 +100,10 @@ type signalRun struct {
 	from      time.Time
 	criterion string
 	assumed   string
+	// lead is the lead firings are judged with (verdict.Options): of a
+	// named signal's window going on with other labels, its firings before
+	// from are pended to be judged again from its start less it.
+	lead time.Duration
 }
 
 // unnamed is the unnamed signal as f read it.
@@ -521,7 +525,7 @@ func (l *Ledger) signalRecord(t *txn, f Found, r SignalRead, o verdict.Options) 
 		}
 		return f.From.Unix(), nil
 	}
-	run := signalRun{name: r.Name, match: r.Match, on: true, since: r.Since, from: r.From, criterion: r.Criterion}
+	run := signalRun{name: r.Name, match: r.Match, on: true, since: r.Since, from: r.From, criterion: r.Criterion, lead: o.Lead}
 	if missed != 0 && r.From.Unix() > missed {
 		// Given up on: turned off, and on again by this read.
 		if err := l.impactSince(t, signalRun{name: r.Name}); err != nil {
@@ -746,7 +750,16 @@ func (l *Ledger) impact(t *txn, r signalRun, found []incident.Incident, fresh bo
 					if _, err := t.ExecContext(t.ctx, "UPDATE incidents SET end_at = ?, labels = ? WHERE key = ?", max(in.End.Unix(), end), string(merged), key); err != nil {
 						return 0, err
 					}
-					lo = min(lo, start) // its firings judged again
+				}
+				// A later end changes no stone before from, and the run
+				// judges from from on. Other labels change those of its
+				// firings before from too: judged again a week a write
+				// (JudgePending), not in this one, which a window on for
+				// weeks would hold.
+				if string(merged) != string(before) && start-int64(r.lead/time.Second) < from {
+					if err := pend(t, [][2]int64{{start - int64(r.lead/time.Second), from}}); err != nil {
+						return 0, err
+					}
 				}
 				continue
 			}
@@ -880,12 +893,17 @@ func keptWindowLabels(l incident.Labels) incident.Labels {
 		if _, taken := out[kk]; taken {
 			continue
 		}
+		// Each value cut, then the first 64 in order: the same 64 whether
+		// a window's values came at once or a piece at a time
+		// (mergeLabels).
 		var vs []string
-		for _, v := range l[k][:min(len(l[k]), 64)] {
+		for _, v := range l[k] {
 			if v = verdict.KeptValue(v); !slices.Contains(vs, v) {
 				vs = append(vs, v)
 			}
 		}
+		slices.Sort(vs)
+		vs = vs[:min(len(vs), 64)]
 		b, _ := json.Marshal(map[string][]string{kk: vs})
 		if size+len(b)-1 > maxLabelBytes {
 			continue

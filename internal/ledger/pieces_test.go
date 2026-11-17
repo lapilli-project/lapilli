@@ -142,6 +142,13 @@ func TestPiecesEqualWhole(t *testing.T) {
 			resume := PieceResume(E, c.for_, c.settle, time.Minute)
 			run(pieces, r2, r3, SignalRead{From: T, To: resume, Windows: read(T, E)})
 			run(pieces, r3, end, SignalRead{From: resume, Windows: read(resume, end)})
+			// What a window going on with other labels pended, judged again
+			// a week a write, as serve does after each round.
+			for _, l := range []*Ledger{whole, pieces} {
+				if err := l.JudgePending(ctx, opts); err != nil {
+					t.Fatal(err)
+				}
+			}
 
 			show := func(l *Ledger) string {
 				var out []string
@@ -193,5 +200,141 @@ func TestPiecesEqualWhole(t *testing.T) {
 				t.Errorf("in pieces:\n%s\nread whole:\n%s", b, a)
 			}
 		})
+	}
+}
+
+// longOn records, for signal errors, one window from t0 with labels and a
+// cart firing two days in, its day tallied, the window then on ten days
+// as many runs left it; it returns the ledger, the firing's day and when
+// the window's ten days end.
+func longOn(t *testing.T, labels incident.Labels) (*Ledger, int64, time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+		t.Fatal(err)
+	}
+	win := incident.Incident{ID: "impact-errors-1", Start: t0, End: t0.Add(time.Hour), Signal: "errors", Candidate: true, Labels: labels}
+	run := func(from, to time.Time, fs []firing.Firing, ws []incident.Incident) {
+		t.Helper()
+		f := Found{From: from, To: to, Firings: fs, Run: Run{Kind: "test", Started: from, Finished: to, From: from, To: to},
+			Signals: []SignalRead{{Name: "errors", Criterion: "c", Since: from.Add(-time.Hour), From: from, Windows: ws, Seen: seenOfValues([]string{"service"}, "cart", "checkout")}}}
+		if err := l.Record(ctx, f, opts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run(t0, t0.Add(time.Hour), nil, []incident.Incident{win})
+	at := t0.Add(48 * time.Hour)
+	// On since, as the runs between left it.
+	if _, err := l.w.ExecContext(ctx, "UPDATE incidents SET end_at = ? WHERE origin = 'impact' AND signal = 'errors'", at.Unix()); err != nil {
+		t.Fatal(err)
+	}
+	on := win
+	on.Start, on.End = at.Add(-time.Hour), at.Add(time.Hour)
+	run(at, at.Add(time.Hour), []firing.Firing{{Rule: "Errors", Labels: map[string]string{"service": "cart"}, Start: at.Add(time.Minute), End: at.Add(5 * time.Minute)}},
+		[]incident.Incident{on})
+	until := t0.Add(10 * 24 * time.Hour)
+	if _, err := l.w.ExecContext(ctx, "UPDATE incidents SET end_at = ? WHERE origin = 'impact' AND signal = 'errors'", until.Unix()); err != nil {
+		t.Fatal(err)
+	}
+	return l, l.Day(at), until
+}
+
+// hourly is the run of the hour from from, the window found again from the
+// hour before with labels.
+func hourly(t *testing.T, l *Ledger, from time.Time, labels incident.Labels) {
+	t.Helper()
+	w := incident.Incident{ID: "impact-errors-1", Start: from.Add(-time.Hour), End: from.Add(time.Hour), Signal: "errors", Candidate: true, Labels: labels}
+	f := Found{From: from, To: from.Add(time.Hour), Run: Run{Kind: "test", Started: from, Finished: from, From: from, To: from.Add(time.Hour)},
+		Signals: []SignalRead{{Name: "errors", Criterion: "c", Since: from.Add(-time.Hour), From: from, Windows: []incident.Incident{w}, Seen: seenOfValues([]string{"service"}, "cart", "checkout")}}}
+	if err := l.Record(context.Background(), f, opts); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// dayAndPending are a day's firings tallied, and what is pending.
+func dayAndPending(t *testing.T, l *Ledger, day int64) (int, string) {
+	t.Helper()
+	var n int
+	var pending string
+	if err := l.r.QueryRowContext(context.Background(), "SELECT coalesce(sum(firings), 0) FROM days WHERE day = ?", day).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.r.QueryRowContext(context.Background(), "SELECT coalesce((SELECT value FROM meta WHERE key = 'pending'), '')").Scan(&pending); err != nil {
+		t.Fatal(err)
+	}
+	return n, pending
+}
+
+// A named signal's window on for days, found again by each hourly run
+// with its labels the same: only its end later, which changes no stone
+// before the run's from. A run judges from its from, touching no day
+// before it, and pends nothing.
+func TestWindowGoingOnJudgedFromFrom(t *testing.T) {
+	l, day, until := longOn(t, incident.Labels{"service": {"cart"}})
+	for i := range 2 {
+		if _, err := l.w.ExecContext(context.Background(), "UPDATE days SET firings = 999 WHERE day = ?", day); err != nil {
+			t.Fatal(err)
+		}
+		hourly(t, l, until.Add(time.Duration(i)*time.Hour), incident.Labels{"service": {"cart"}})
+		if n, pending := dayAndPending(t, l, day); n != 999 || pending != "" && pending != "[]" && pending != "null" {
+			t.Errorf("hourly run %d: the day eight days back judged again (%d firings, 999 untouched), pending %q", i+1, n, pending)
+		}
+	}
+}
+
+// A named signal's window on for days that goes on with other labels
+// (another series it overlaps): its firings before the run's from are
+// pended, not judged in the run's write, and, judged again a week a write,
+// their stones are as the window read whole with both values leaves them.
+func TestWindowGoingOnWithOtherLabelsPended(t *testing.T) {
+	ctx := context.Background()
+	l, day, until := longOn(t, incident.Labels{"service": {"checkout"}})
+	if _, err := l.w.ExecContext(ctx, "UPDATE days SET firings = 999 WHERE day = ?", day); err != nil {
+		t.Fatal(err)
+	}
+	hourly(t, l, until, incident.Labels{"service": {"cart", "checkout"}})
+	if n, pending := dayAndPending(t, l, day); n != 999 || pending == "" || pending == "[]" {
+		t.Fatalf("the day eight days back: %d firings (999 untouched, as not judged in the run's write), pending %q", n, pending)
+	}
+	if err := l.JudgePending(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	whole, _, _ := longOn(t, incident.Labels{"service": {"cart", "checkout"}})
+	hourly(t, whole, until, incident.Labels{"service": {"cart", "checkout"}})
+	stones := func(l *Ledger) string {
+		rep, err := l.Report(ctx, t0, until.Add(time.Hour), opts, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, f := range rep.Firings {
+			out = append(out, fmt.Sprintf("%s %s white %v %v", f.Labels["service"], f.Start.Format("01-02 15:04"), f.White, f.Incidents))
+		}
+		weeks, err := l.WeeksBy(ctx, 0, 1<<40)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(out, "; ") + fmt.Sprint(weeks)
+	}
+	if a, b := stones(whole), stones(l); a != b || !strings.Contains(a, "white true") {
+		t.Errorf("judged again:\n%s\nread whole:\n%s", b, a)
+	}
+}
+
+// A named signal's window with more than 64 values of a label keeps the
+// same 64 whether its values came at once or a piece at a time: the first
+// in order.
+func TestWindowValuesKeptAlike(t *testing.T) {
+	var all []string
+	for i := range 100 {
+		all = append(all, fmt.Sprintf("svc-%03d", 99-i))
+	}
+	whole := keptWindowLabels(incident.Labels{"service": slices.Clone(all)})
+	first := keptWindowLabels(incident.Labels{"service": slices.Clone(all[:50])})
+	rest := keptWindowLabels(incident.Labels{"service": slices.Clone(all[50:])})
+	pieces := keptWindowLabels(mergeLabels(first, rest))
+	if !slices.Equal(whole["service"], pieces["service"]) || len(whole["service"]) != 64 {
+		t.Errorf("at once %v\na piece at a time %v", whole["service"], pieces["service"])
 	}
 }
