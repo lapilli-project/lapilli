@@ -170,19 +170,29 @@ func TestMarkedShares(t *testing.T) {
 	if _, err := l.PutMarked(ed, six, "ed", opts); !errors.As(err, &inv) {
 		t.Errorf("a team's 56 a week: %v", err)
 	}
-	// Every three hours: 56 a week; the UI's 128 at most.
+	// Every three hours: 56 a week of a kind; the UI's 32 of a kind at
+	// most.
 	three := Marked{Kind: "k1", Title: "x", Start: start, End: start.Add(time.Hour), Every: "cron", On: "0 */3 * * *"}
-	if _, err := l.PutMarked(ctx, three, "ed", opts); err != nil {
-		t.Fatalf("the UI's 84 a week: %v", err)
-	}
-	three.Kind = "k2"
 	if _, err := l.PutMarked(ctx, three, "ed", opts); !errors.As(err, &inv) {
-		t.Errorf("the UI's 140 a week: %v", err)
+		t.Errorf("the UI's 56 of a kind a week: %v", err)
 	}
-	// The file takes what is left, a week of 160, beside the UI's 84.
+	// Every six hours, of three kinds more: 112 a week; the UI's 128 at
+	// most.
+	for _, k := range []string{"k1", "k2", "k3", "k4"} {
+		every := six
+		every.Kind, every.TeamID = k, 0
+		_, err := l.PutMarked(ctx, every, "ed", opts)
+		switch {
+		case k != "k4" && err != nil:
+			t.Fatalf("the UI's %s every six hours: %v", k, err)
+		case k == "k4" && !errors.As(err, &inv):
+			t.Errorf("the UI's 140 a week: %v", err)
+		}
+	}
+	// The file takes what is left, a week of 144, beside the UI's 112.
 	var file []Marked
 	next := start.Add(7 * 24 * time.Hour)
-	for i := range 160 {
+	for i := range 144 {
 		s := next.Add(time.Duration(i) * time.Hour)
 		file = append(file, Marked{Kind: fmt.Sprint("sale-", i%3), Title: fmt.Sprint("sale ", i), Start: s, End: s.Add(30 * time.Minute)})
 	}
@@ -209,10 +219,12 @@ func TestMarkedSixteenthKind(t *testing.T) {
 	if _, err := l.KeepMarks(ctx, []MarkRead{{Kind: "flag", Key: "k", Since: start.Add(-time.Hour), To: start, Step: time.Minute}}, opts); err != nil {
 		t.Fatal(err)
 	}
+	var file []Marked
 	for i := range MaxKinds - 1 {
-		if _, err := l.PutMarked(ctx, Marked{Kind: fmt.Sprint("k", i), Title: "x", Start: start, End: start.Add(time.Hour)}, "ana", opts); err != nil {
-			t.Fatal(i, err)
-		}
+		file = append(file, Marked{Kind: fmt.Sprint("k", i), Title: "x", Start: start, End: start.Add(time.Hour)})
+	}
+	if _, err := l.SyncMarked(ctx, file, opts, MarkedRead{}); err != nil {
+		t.Fatal(err)
 	}
 	d := declaredOf()
 	d.Marked = []DeclaredMarked{{Marked: Marked{Kind: "sale", Title: "Autumn sale", Start: start, End: start.Add(time.Hour)}, Line: 30}}
@@ -433,11 +445,13 @@ func TestMarkedGoingOnDroppedKeepsOld(t *testing.T) {
 	record(t, l, t0, next.Add(24*time.Hour), []firing.Firing{
 		{Rule: "Errors", Labels: map[string]string{"service": "checkout"}, Start: next.Add(-3 * time.Hour), End: next.Add(-3*time.Hour + time.Minute)}})
 	// The week after holds the 64 occurrences of sale a week meets.
+	var flash []Marked
 	for i := 0; i < MarkedKindWeek; i++ {
 		s := next.Add(time.Duration(i+2) * time.Hour)
-		if _, err := l.PutMarked(ctx, Marked{Kind: "sale", Title: fmt.Sprintf("Flash %d", i), Start: s, End: s.Add(30 * time.Minute)}, "ana", opts); err != nil {
-			t.Fatal(i, err)
-		}
+		flash = append(flash, Marked{Kind: "sale", Title: fmt.Sprintf("Flash %d", i), Start: s, End: s.Add(30 * time.Minute)})
+	}
+	if _, err := l.SyncMarked(ctx, flash, opts, MarkedRead{}); err != nil {
+		t.Fatal(err)
 	}
 	step := time.Minute
 	old := Marked{Start: next.Add(-4 * time.Hour), End: next.Add(-30 * time.Minute)}
@@ -469,5 +483,55 @@ func TestMarkedGoingOnDroppedKeepsOld(t *testing.T) {
 	fs, err := l.Firings(ctx, FiringQuery{From: t0, To: next, Kind: "sale"})
 	if err != nil || len(fs) != 1 {
 		t.Errorf("%d firings marked, %v; want the one in the window before", len(fs), err)
+	}
+}
+
+// The windows made in the UI take MarkedUIKinds of the kinds at most,
+// counting a kind no window names any more that isn't let go yet, whoever
+// let go of it; a write that takes no more of them than they take is let
+// be. The marked file and an expression have the rest of the kinds.
+func TestMarkedUIKinds(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	start := time.Now().UTC().Truncate(time.Hour)
+	var ids []int64
+	for i := range MarkedUIKinds - 1 {
+		id, err := l.PutMarked(ctx, Marked{Kind: fmt.Sprint("ui-", i), Title: "x", Start: start, End: start.Add(time.Hour)}, "ed", opts)
+		if err != nil {
+			t.Fatal(i, err)
+		}
+		ids = append(ids, id)
+	}
+	// A kind nothing names, not let go yet.
+	if err := l.write(ctx, func(t *txn) error {
+		_, err := t.ExecContext(t.ctx, "INSERT INTO marked_kinds (id, name) VALUES (?, ?)", MaxKinds, "gone")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var inv ErrInvalid
+	if _, err := l.PutMarked(ctx, Marked{Kind: "ui-new", Title: "x", Start: start, End: start.Add(time.Hour)}, "ed", opts); !errors.As(err, &inv) {
+		t.Errorf("a kind past the UI's share, one not let go yet among them: %v", err)
+	}
+	if _, err := l.PutMarked(ctx, Marked{ID: ids[0], Kind: "ui-new", Title: "x", Start: start, End: start.Add(time.Hour)}, "ed", opts); !errors.As(err, &inv) {
+		t.Errorf("a window changed to a new kind, its own not let go yet: %v", err)
+	}
+	if _, err := l.PutMarked(ctx, Marked{ID: ids[0], Kind: "ui-0", Title: "renamed", Start: start, End: start.Add(time.Hour)}, "ed", opts); err != nil {
+		t.Errorf("a new title: %v", err)
+	}
+	if _, err := l.PutMarked(ctx, Marked{Kind: "ui-1", Title: "another", Start: start, End: start.Add(time.Hour)}, "ed", opts); err != nil {
+		t.Errorf("another window of a kind the UI's take: %v", err)
+	}
+	var file []Marked
+	for i := range MaxKinds - MarkedUIKinds - 1 {
+		file = append(file, Marked{Kind: fmt.Sprint("file-", i), Title: "x", Start: start, End: start.Add(time.Hour)})
+	}
+	if _, err := l.SyncMarked(ctx, file, opts, MarkedRead{Sum: "f"}); err != nil {
+		t.Errorf("the marked file, with the rest of the kinds but one: %v", err)
+	}
+	said, err := l.KeepMarksSaid(ctx, []MarkRead{{Kind: "flag", Key: "k", Since: start.Add(-time.Hour), To: start, Step: time.Minute,
+		Windows: []Marked{{Start: start.Add(-time.Hour), End: start}}}}, opts)
+	if err != nil || len(said.Kinds) != 0 || said.Dropped != 0 {
+		t.Errorf("an expression of the last kind: %+v %v", said, err)
 	}
 }

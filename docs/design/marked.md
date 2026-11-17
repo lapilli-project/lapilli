@@ -482,12 +482,18 @@ Taken while building, within what is above:
   occurrence is over (33 days past its until), so the firings it marked
   are pruned first and its kind isn't let go while they hold its bit; the
   file's and `--config`'s are theirs.
-- **Shares of a week.** Of the 256 occurrences a week meets, those made in
-  the UI take 128 at most, and a team's windows 32, so that what a team's
+- **Shares of a week, and of the kinds.** Of the 256 occurrences a week
+  meets, those made in the UI take 128 at most, and a team's windows 32;
+  of the 64 of a kind, those made in the UI take 32; of the fifteen
+  kinds, those made in the UI take seven, counting a kind no window names
+  any more until it is let go, so that making and deleting windows faster
+  than their kinds are let go takes none of the rest. So what a team's
   editors, or every editor, keep never refuses the marked file,
-  `--config` or an expression below the rest; 64 of a kind still holds
-  for everyone. A team's editors use the kinds there are: the fifteen are
-  taken by an editor or an admin, a file, `--config` or an expression.
+  `--config` or an expression below the rest. A write in the UI that would
+  take more kinds than the UI's share is refused, unless it takes no more
+  than the UI's already take (a new title, a window given back). A team's
+  editors use the kinds there are: the fifteen are taken by an editor or
+  an admin, a file, `--config` or an expression.
 - **The kinds counted from the ledger's**, those of expressions and those
   not let go yet among them: a `--config` window of a sixteenth kind is
   skipped and said, the rest of the file kept; an expression's read of

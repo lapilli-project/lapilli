@@ -401,11 +401,13 @@ func TestMarkedBounds(t *testing.T) {
 	}
 	// Fifteen kinds, and no sixteenth.
 	l3 := open(t, time.UTC)
+	ms = nil
 	for i := range MaxKinds {
 		s := start.Add(time.Duration(i) * 24 * time.Hour * 7)
-		if _, err := l3.PutMarked(ctx, Marked{Kind: fmt.Sprint("kind-", i), Title: "x", Start: s, End: s.Add(time.Hour)}, "ana", opts); err != nil {
-			t.Fatal(i, err)
-		}
+		ms = append(ms, Marked{Kind: fmt.Sprint("kind-", i), Title: "x", Start: s, End: s.Add(time.Hour)})
+	}
+	if _, err := l3.SyncMarked(ctx, ms, opts, MarkedRead{}); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := l3.PutMarked(ctx, Marked{Kind: "kind-15", Title: "x", Start: start, End: start.Add(time.Hour)}, "ana", opts); !errors.As(err, &inv) {
 		t.Errorf("a sixteenth kind: %v", err)

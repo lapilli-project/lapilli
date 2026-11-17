@@ -92,11 +92,15 @@ const (
 	// MaxTeamMarked is how many of a team's its editors may keep.
 	MaxTeamMarked = 20
 	// MarkedUIWeek is the share of MarkedWeek the windows made in the UI
-	// may take, and MarkedTeamWeek a team's windows: the rest is the
+	// may take, MarkedUIKindWeek their share of each kind's
+	// MarkedKindWeek, MarkedUIKinds their share of MaxKinds, and
+	// MarkedTeamWeek a team's windows' share of MarkedWeek: the rest is the
 	// marked file's, --config's and the expressions', so that what a
 	// team's editors keep, or every editor's, never refuses them.
-	MarkedUIWeek   = MarkedWeek / 2
-	MarkedTeamWeek = MarkedWeek / 8
+	MarkedUIWeek     = MarkedWeek / 2
+	MarkedUIKindWeek = MarkedKindWeek / 2
+	MarkedUIKinds    = MaxKinds / 2
+	MarkedTeamWeek   = MarkedWeek / 8
 	// MaxMarkedExpr is how many windows an expression keeps from a read;
 	// MaxMarkExprs, how many expressions there are at most.
 	MaxMarkedExpr = 1000
@@ -707,10 +711,10 @@ func (ld *markedLoad) fits(kind string, a, b time.Time) bool {
 	return true
 }
 
-// check refuses a load past the bounds, saying the first week past them:
-// the load only changes at a week with an occurrence of one that doesn't
-// repeat, or where one that repeats starts or ends.
-func (ld *markedLoad) check() error {
+// rises are the weeks where the load may rise, in order: a week with an
+// occurrence of one that doesn't repeat, or where one that repeats
+// starts. The most a load holds is in one of them.
+func (ld *markedLoad) rises() []int64 {
 	var at []int64
 	for w := range ld.once {
 		at = append(at, w)
@@ -719,7 +723,12 @@ func (ld *markedLoad) check() error {
 		at = append(at, r.from)
 	}
 	slices.Sort(at)
-	for _, w := range slices.Compact(at) {
+	return slices.Compact(at)
+}
+
+// check refuses a load past the bounds, saying the first week past them.
+func (ld *markedLoad) check() error {
+	for _, w := range ld.rises() {
 		all, kinds := ld.at(w)
 		for _, k := range slices.Sorted(maps.Keys(kinds)) {
 			if kinds[k] > MarkedKindWeek {
@@ -769,17 +778,19 @@ func (l *Ledger) fitsAll(t *txn, keep func(Marked) bool, add []Marked) error {
 	return ld.check()
 }
 
-// shareFits refuses a window made in the UI past the UI's share of the
-// occurrences a week meets (MarkedUIWeek), or, of a team's, its team's
-// (MarkedTeamWeek): those kept that keep says stay, with m.
-func (l *Ledger) shareFits(t *txn, keep func(Marked) bool, m Marked) error {
+// shareFits refuses a window made in the UI, m in place of the window id
+// (0 for none), past the UI's shares: of the occurrences a week meets
+// (MarkedUIWeek), of those of m's kind (MarkedUIKindWeek), and of the
+// kinds (MarkedUIKinds); or, of a team's, past its team's share of a
+// week's (MarkedTeamWeek).
+func (l *Ledger) shareFits(t *txn, id int64, m Marked) error {
 	have, err := l.markedRows(t.ctx, t, "WHERE m.origin = 'ui' ORDER BY m.id")
 	if err != nil {
 		return err
 	}
 	ui, team := l.newLoad(), l.newLoad()
 	for _, h := range have {
-		if !keep(h) {
+		if h.ID == id {
 			continue
 		}
 		ui.add(h)
@@ -789,28 +800,107 @@ func (l *Ledger) shareFits(t *txn, keep func(Marked) bool, m Marked) error {
 	}
 	ui.add(m)
 	team.add(m)
-	if w, n := ui.busiest(); n > MarkedUIWeek {
+	if w, n := ui.busiest(""); n > MarkedUIWeek {
 		return invalid("the marked windows made in the UI would have %d occurrences in the week of %s; they have %d a week at most, the rest kept for the marked file, --config and the expressions",
 			n, l.Midnight(w).Format("2006-01-02"), MarkedUIWeek)
 	}
-	if w, n := team.busiest(); m.TeamID > 0 && n > MarkedTeamWeek {
+	if w, n := ui.busiest(m.Kind); n > MarkedUIKindWeek {
+		return invalid("the marked windows of kind %s made in the UI would have %d occurrences in the week of %s; they have %d of a kind a week at most, the rest kept for the marked file, --config and the expressions",
+			m.Kind, n, l.Midnight(w).Format("2006-01-02"), MarkedUIKindWeek)
+	}
+	if w, n := team.busiest(""); m.TeamID > 0 && n > MarkedTeamWeek {
 		return invalid("a team's marked windows would have %d occurrences in the week of %s; a team's have %d a week at most", n, l.Midnight(w).Format("2006-01-02"), MarkedTeamWeek)
+	}
+	// Past their share of the kinds, as windows --config gave back can
+	// take them, a write that takes no more than they take already, such
+	// as a new title, is let be.
+	now, after, err := l.uiKinds(t, have, id, m)
+	if err != nil {
+		return err
+	}
+	if after > MarkedUIKinds && after > now {
+		return invalid("the marked windows made in the UI would take %d kinds, counting those no window names any more until their firings are judged again; they take %d at most, the rest kept for the marked file, --config and the expressions: use a kind there is",
+			after, MarkedUIKinds)
 	}
 	return nil
 }
 
-// busiest is the week with the most occurrences, and how many.
-func (ld *markedLoad) busiest() (week int64, n int) {
-	var at []int64
-	for w := range ld.once {
-		at = append(at, w)
+// uiKinds are how many kinds the windows made in the UI, ui, take, now and
+// with m in place of the window id (0 for none): the kinds they name, and
+// those no window or expression names that aren't let go yet
+// (letGoKinds). Those count among the UI's, whoever let go of them, so
+// that windows made and deleted, or changed from kind to kind, faster than
+// their kinds are let go take none of the kinds left to the rest.
+func (l *Ledger) uiKinds(t *txn, ui []Marked, id int64, m Marked) (now, after int, err error) {
+	held, err := l.kinds(t.ctx, t)
+	if err != nil {
+		return 0, 0, err
 	}
-	for _, r := range ld.repeats {
-		at = append(at, r.from)
+	// Of each kind a window names, how many do, and the least id: whether
+	// one but the window id does.
+	type naming struct{ n, least int64 }
+	named := map[string]naming{}
+	rows, err := t.QueryContext(t.ctx, "SELECT k.name, count(*), min(m.id) FROM marked m JOIN marked_kinds k ON k.id = m.kind_id GROUP BY k.name")
+	if err != nil {
+		return 0, 0, err
 	}
-	slices.Sort(at)
-	for _, w := range slices.Compact(at) {
-		if all, _ := ld.at(w); all > n {
+	for rows.Next() {
+		var k string
+		var x naming
+		if err := rows.Scan(&k, &x.n, &x.least); err != nil {
+			rows.Close()
+			return 0, 0, err
+		}
+		named[k] = x
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return 0, 0, err
+	}
+	exprs := map[string]bool{}
+	rows, err = t.QueryContext(t.ctx, "SELECT key FROM meta WHERE key > 'marked-expr.' AND key < 'marked-expr/'")
+	if err != nil {
+		return 0, 0, err
+	}
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			rows.Close()
+			return 0, 0, err
+		}
+		exprs[strings.TrimPrefix(key, "marked-expr.")] = true
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return 0, 0, err
+	}
+	was, will := map[string]bool{}, map[string]bool{m.Kind: true}
+	for _, h := range ui {
+		was[h.Kind] = true
+		if h.ID != id {
+			will[h.Kind] = true
+		}
+	}
+	for _, k := range held {
+		x, ok := named[k]
+		switch {
+		case exprs[k]:
+		case !ok:
+			was[k], will[k] = true, true
+		case x.n == 1 && x.least == id:
+			will[k] = true // the window id alone names it, which m takes the place of
+		}
+	}
+	return len(was), len(will), nil
+}
+
+// busiest is the week with the most occurrences, of kind or, "", of every
+// kind, and how many.
+func (ld *markedLoad) busiest(kind string) (week int64, n int) {
+	for _, w := range ld.rises() {
+		all, kinds := ld.at(w)
+		if kind != "" {
+			all = kinds[kind]
+		}
+		if all > n {
 			week, n = w, all
 		}
 	}
@@ -930,7 +1020,7 @@ func (l *Ledger) PutMarked(ctx context.Context, m Marked, by string, o verdict.O
 		if err := l.fitsAll(t, func(h Marked) bool { return h.ID != id }, []Marked{m}); err != nil {
 			return err
 		}
-		if err := l.shareFits(t, func(h Marked) bool { return h.ID != id }, m); err != nil {
+		if err := l.shareFits(t, id, m); err != nil {
 			return err
 		}
 		// A team's editors use the kinds there are: the ledger's fifteen

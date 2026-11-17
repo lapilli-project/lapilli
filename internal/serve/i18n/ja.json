@@ -2143,5 +2143,7 @@
  "A firing that caught nothing but was a real problem nobody wrote down: say so, and it is written down as an incident, from the firing's start and end.": "何も検知しなかったものの、実際には誰も記録していない問題だった発火があれば、そう指定してください。その発火の開始と終了でインシデントとして記録します。",
  "no record to judge it by: counted, not judged": "判定する記録がない: 数えるだけで判定しない",
  "a try of the settings judges the last week again, so it is asked for from the Settings page, in a browser, on this site": "設定を試すと直近 1 週間を判定し直すため、このサイトの設定ページから、ブラウザでだけ依頼できます",
- "you have tried the settings on the last week as many times in the last hour as anyone may: each judges a week of firings again; try again later": "直近 1 時間に直近 1 週間で設定を試せる回数を使い切りました。毎回 1 週間分の発火を判定し直すためです。後でもう一度試してください"
+ "you have tried the settings on the last week as many times in the last hour as anyone may: each judges a week of firings again; try again later": "直近 1 時間に直近 1 週間で設定を試せる回数を使い切りました。毎回 1 週間分の発火を判定し直すためです。後でもう一度試してください",
+ "the marked windows of kind %s made in the UI would have %d occurrences in the week of %s; they have %d of a kind a week at most, the rest kept for the marked file, --config and the expressions": "UI で作った種類 %[1]s のイベント期間が %[3]s の週に %[2]d 件になります。UI の分は 1 種類につき 1 週間に最大 %[4]d 件で、残りはイベント期間ファイル・--config・式の分です",
+ "the marked windows made in the UI would take %d kinds, counting those no window names any more until their firings are judged again; they take %d at most, the rest kept for the marked file, --config and the expressions: use a kind there is": "UI で作ったイベント期間が %d 種類を使うことになります。どの期間も使わなくなった種類も、その発火を判定し直すまで数えます。UI の分は最大 %d 種類で、残りはイベント期間ファイル・--config・式の分です。既存の種類を使ってください"
 }
