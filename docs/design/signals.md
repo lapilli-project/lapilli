@@ -408,14 +408,20 @@ labels, `seen` holds the values of:
   something, as each run reads it.
 
 1,000 values a label and 256 KB a signal at most; past either, it is taken
-to have seen every value of that label. So is a label one of the series
-counted, or returned, came without: one none of its selectors carries,
-which the expression makes (`label_replace`, a relabelled probe target),
-counts as every series lacking it, and a firing agrees with such a
-signal's windows whatever its value (`Agree`), so the signal could have
-seen it; and so is every label of an expression that reads no selector
-(`vector(1)`). A look that finds no series at all (a selector with no data
-over the span) learns nothing: a signal with no data saw nothing. A
+to have seen every value of that label. Label by label, of what it reads:
+the values its selectors' series have; a selector whose series lack the
+label adds nothing for it (a gate, `and on() (sum(up{job="api"}) > 0)`);
+and when none of its selectors' series carries the label, one the
+expression makes (`label_replace`, a relabelled probe target), it is
+taken to have every value of it, as it is of every label of an
+expression that reads no selector (`vector(1)`) and of a name PromQL
+can't count by. Of what it returned, a series that came without a label
+takes it to have every value: a firing agrees with that series' windows
+whatever its value (`Agree`), so the signal could have seen it. A look
+that finds no series at all (its selectors with no data over the span)
+learns nothing: a signal with no data saw nothing. A selector that fails
+adds nothing, the others' counts kept, and the look is tried again from
+the same place. A
 firing so tied waits for that signal's start: never judged by a signal
 that couldn't see it. A value seen later ties the firings before it too,
 which then wait for that signal's start, and its record may wait longer
@@ -755,7 +761,9 @@ Decided on 2026-11-17, by the maintainer:
   joined with what the expression returned. A `match` label none of the
   signal's selectors carries is taken to have every value, as past the
   1,000-value cap: a firing is then tied, and waits for that signal's
-  start. Built in step 2 ("The record, signal by signal").
+  start. A selector whose series lack the label, beside others that carry
+  it, adds nothing for it. Built in step 2 ("The record, signal by
+  signal").
 
 Open:
 
@@ -862,10 +870,15 @@ What building the first settled:
 - **`seen`** as decided (open question 6): what it returned, kept by each
   run; what it reads, looked at after each round's runs from `seen_to`, a
   request a selector (`source.SeenFrom`, which `lapilli verdict` now reads
-  too). Two things the note left open: a look that finds no series at all
-  learns nothing, so a signal with no data ties nothing by reading; and the
-  look begins at the signal's first read, not at its start, which moves
-  forward with its data.
+  too), a narrowing selector through the selector its stand-in is made of
+  when that one is counted itself. What the note left open: a look that
+  finds no series at all learns nothing, so a signal with no data ties
+  nothing by reading; a selector that fails adds nothing, and the look is
+  tried again from the same place (`lapilli verdict` says so and goes
+  on); the look begins at the signal's first read, not at its start, which
+  moves forward with its data; and what it has seen begins again, every
+  alert it tied tied again, when its expression is read again, its own
+  match changes, or the match in effect does for one that follows it.
 - **Ties.** An alert made in a write is tied in it, before its tallies are
   counted (`series.signals` -1 until then), by its labels and what each
   signal has seen. A rule's entry is applied when the tallies are read, by

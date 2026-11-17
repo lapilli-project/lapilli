@@ -417,6 +417,9 @@ lapilli only reads history and files. It sends the report nowhere but to
 `
 
 type verdictFlags struct {
+	// warn is where what a run says on its way goes, stderr: nil for
+	// nowhere.
+	warn         io.Writer
 	rules        []ruleFile
 	rulesHistory string
 	rulesSelect  rules.Selector
@@ -1244,6 +1247,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	stderr = &lockedWriter{w: stderr} // the progress line writes to it too
+	f.warn = stderr
 	// The report is redacted; what is said on the way, here, names what
 	// it reads, for whoever runs it.
 	if f.redact {

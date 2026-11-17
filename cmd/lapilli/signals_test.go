@@ -379,15 +379,16 @@ func TestNamedSignals(t *testing.T) {
 			t.Errorf("asked %q %d times", q, count[q])
 		}
 	}
-	// What each reads, by its match labels, one request a selector, the
-	// 5xx one through its stand-in: none of payments', matched on none.
-	for _, q := range []string{`count by (service, team) (http_requests_total{code!=""})`, "count by (service, team) (http_requests_total)",
+	// What each reads, by its match labels, one request a selector: the
+	// 5xx one through the requests it narrows, which hold its stand-in's
+	// series, counted once; none of payments', matched on none.
+	for _, q := range []string{"count by (service, team) (http_requests_total)",
 		"count by (service) (probe_success)", "count by (service, team) (http_request_duration_seconds_bucket)"} {
 		if count[q] != 1 {
 			t.Errorf("asked %q %d times", q, count[q])
 		}
 	}
-	if len(asked) != 15 || count[`count by (service, team) (http_requests_total{code=~"5.."})`] != 0 {
+	if len(asked) != 14 || count[`count by (service, team) (http_requests_total{code=~"5.."})`] != 0 || count[`count by (service, team) (http_requests_total{code!=""})`] != 0 {
 		t.Errorf("%d questions: %q", len(asked), asked)
 	}
 

@@ -410,14 +410,18 @@ func (s *Server) signalsSeen(ctx context.Context, o verdict.Options) error {
 		if !cursor.After(lo) {
 			continue
 		}
-		seen, err := source.SeenFrom(rctx, s.h, d.Expr, d.MatchOr(o.Match), lo, cursor)
-		if err != nil {
+		seen, complete, err := source.SeenFrom(rctx, s.h, d.Expr, d.MatchOr(o.Match), lo, cursor)
+		if seen != nil {
+			more[d.Name] = seen // what the selectors that answered read
+		}
+		if err != nil || !complete {
+			// Looked at again from the same place next round.
 			failed = fmt.Errorf("%s: %w", d.Name, err)
 			continue
 		}
-		more[d.Name], to[d.Name] = seen, cursor
+		to[d.Name] = cursor
 	}
-	if len(to) > 0 {
+	if len(more) > 0 || len(to) > 0 {
 		if err := s.l.AddSeen(context.WithoutCancel(ctx), o.Match, more, to); err != nil {
 			return err
 		}

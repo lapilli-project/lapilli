@@ -280,6 +280,14 @@ func (f *verdictFlags) signalDefs() ([]ledger.SignalDef, []verdict.RuleEntry) {
 	return out, slices.Clone(f.opts.Signals.Entries)
 }
 
+// warnTo is where what a run says on its way goes: stderr, or nowhere.
+func (f *verdictFlags) warnTo() io.Writer {
+	if f.warn == nil {
+		return io.Discard
+	}
+	return f.warn
+}
+
 // maxImpactFile is the most of --impact-file read: more is refused.
 const maxImpactFile = 1 << 20
 
@@ -440,9 +448,11 @@ func (f *verdictFlags) readSignals(ctx context.Context, h history, incs []incide
 		}
 		// And what it reads, by the same labels: a service it measured all
 		// along, never hurt, is one it could have seen hurt.
-		read, err := source.SeenFrom(ctx, h, s.expr, x.MatchOr(f.opts.Match), from, f.opts.To)
+		// A selector that fails adds nothing: the others' counts are kept,
+		// and the run says so rather than failing.
+		read, _, err := source.SeenFrom(ctx, h, s.expr, x.MatchOr(f.opts.Match), from, f.opts.To)
 		if err != nil {
-			return nil, fmt.Errorf("--impact %s: reading what it reads: %w", s.name, err)
+			fmt.Fprintf(f.warnTo(), "lapilli verdict: --impact %s: reading what it reads, by its match labels, a selector failed: %v; what it returned, and what the others read, tie its firings\n", s.name, err)
 		}
 		seen.Merge(read)
 		x.Seen = seen

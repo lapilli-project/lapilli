@@ -86,6 +86,9 @@ func (f *verdictFlags) readImpact(ctx context.Context, h history, incs []inciden
 // with --prometheus, the labels their alerts had over the period, from a
 // replay; with incidents too, which were noisy.
 func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version, stdout, stderr io.Writer) int {
+	if f.warn == nil {
+		f.warn = stderr
+	}
 	fail := func(err error) int {
 		fmt.Fprintf(stderr, "lapilli verdict: %v\n", err)
 		return 1

@@ -159,11 +159,12 @@ seen the incident it would catch: its `signals`†. They are its rule
 entry's; else each signal that, for every label of the signal's `match`
 the firing has, has seen the firing's value of it: one the series its
 expression reads have had over the read (each selector counted by those
-labels, one that only narrows another through its stand-in, as below), or
-one it returned (a series counted or returned without that label, or more
-than 1,000 values of it, or 256 KB of values in all, and every label of an
-expression that reads no selector, has every value seen); and, when none
-of those keeps the record (`record`), every signal that does too. Such a firing is judged
+labels, one that only narrows another through the selector it narrows; a
+label none of them carries, and every label of an expression that reads
+no selector, has every value seen), or one it returned (a series returned
+without that label has every value seen); more than 1,000 values of a
+label, or 256 KB in all, has every value seen; and, when none of those
+keeps the record (`record`), every signal that does too. Such a firing is judged
 when an incident written down was on in the two weeks before it, or a
 window of one of its `signals` was, or it caught an incident, or the
 signals among its `signals` that keep the record, one at least, had each
