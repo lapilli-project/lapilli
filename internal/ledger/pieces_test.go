@@ -37,6 +37,14 @@ func TestPiecesEqualWhole(t *testing.T) {
 		return firing.Firing{Rule: "Errors", Labels: map[string]string{"service": service}, Start: start, End: start.Add(8 * time.Minute)}
 	}
 	E := T.Add(time.Hour) // where the first turn's pieces end, but for the last
+	// n series of services named prefix-000 on, on from from to to.
+	services := func(prefix string, n int, from, to time.Time) []prom.Series {
+		var out []prom.Series
+		for i := range n {
+			out = append(out, minutes(fmt.Sprintf("%s-%03d", prefix, i), from, to))
+		}
+		return out
+	}
 	for _, c := range []struct {
 		name    string
 		for_    time.Duration
@@ -69,6 +77,16 @@ func TestPiecesEqualWhole(t *testing.T) {
 			// The first cart firing long before where the next turn reads,
 			// in the window: judged again with its labels.
 			[]firing.Firing{alert("cart", E.Add(-25*time.Minute)), alert("cart", E.Add(10*time.Minute)), alert("checkout", E.Add(12*time.Minute))}, time.Time{}},
+		// 40 services long before the boundary, 40 more after it, one on
+		// from the first to the last: one window of 81 values of service,
+		// which it leaves out read whole; in pieces, the next turn's read
+		// (from the hour before where it reads) doesn't see the first 40,
+		// and the window it finds, of 41, goes on from the one found
+		// before, of 41: 81 when they are one, and left out.
+		{"a window across the boundary of more than 64 values of a label, in two pieces", 5 * time.Minute, time.Hour,
+			append(append(services("a", 40, E.Add(-100*time.Minute), E.Add(-70*time.Minute)), minutes("bridge", E.Add(-72*time.Minute), E.Add(10*time.Minute))),
+				services("b", 40, E.Add(5*time.Minute), E.Add(20*time.Minute))...),
+			[]firing.Firing{alert("a-000", E.Add(-95*time.Minute)), alert("b-039", E.Add(10*time.Minute))}, time.Time{}},
 		// The next turn reads on the step's grid, as a range is evaluated
 		// a step at a time from its start: off it, the window would start
 		// half a step late, past the lead of a firing before it.
