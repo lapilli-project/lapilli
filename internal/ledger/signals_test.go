@@ -218,3 +218,51 @@ func TestReadAgainWithNoRowKeepsNothing(t *testing.T) {
 		t.Errorf("ghost's since kept: %q %v", v, err)
 	}
 }
+
+// A read catching up after a miss, a piece at a time, keeps its windows
+// to where it stopped, and the signal missed from there; the read that
+// gets to the run's end is caught up.
+func TestSignalReadInPieces(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+		t.Fatal(err)
+	}
+	run := func(from, to time.Time, r SignalRead) {
+		t.Helper()
+		f := Found{From: from, To: to, Run: Run{Kind: "test", Started: from, Finished: to}, Signals: []SignalRead{r}}
+		if err := l.Record(ctx, f, opts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	missedAt := func() time.Time {
+		t.Helper()
+		rows, err := l.SignalRows(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range rows {
+			if r.Name == "probe" {
+				return r.Missed
+			}
+		}
+		return time.Time{}
+	}
+	run(t0, t0.Add(time.Hour), SignalRead{Name: "probe", Criterion: "c", From: t0, Since: t0.Add(-time.Hour), Missed: true})
+	if !missedAt().Equal(t0) {
+		t.Fatalf("missed at %s", missedAt())
+	}
+	at := t0.Add(20 * time.Minute)
+	run(t0.Add(2*time.Hour), t0.Add(3*time.Hour), SignalRead{Name: "probe", Criterion: "c", From: t0, To: t0.Add(2 * time.Hour), Since: t0.Add(-time.Hour),
+		Windows: []incident.Incident{{ID: "impact-probe-x", Signal: "probe", Start: at, End: at.Add(5 * time.Minute)}}})
+	if got := missedAt(); !got.Equal(t0.Add(2 * time.Hour)) {
+		t.Errorf("after a piece to %s, missed at %s", t0.Add(2*time.Hour), got)
+	}
+	if ws, err := l.ImpactWindows(ctx, t0, t0.Add(3*time.Hour)); err != nil || len(ws) != 1 {
+		t.Errorf("the piece's windows: %+v %v", ws, err)
+	}
+	run(t0.Add(3*time.Hour), t0.Add(4*time.Hour), SignalRead{Name: "probe", Criterion: "c", From: t0.Add(2 * time.Hour), Since: t0.Add(time.Hour)})
+	if got := missedAt(); !got.IsZero() {
+		t.Errorf("caught up, missed at %s", got)
+	}
+}

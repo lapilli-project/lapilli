@@ -1323,25 +1323,35 @@ func (h *slowly) QueryRange(ctx context.Context, expr string, start, end time.Ti
 	return h.sigHistory.QueryRange(ctx, expr, start, end, step)
 }
 
-// readRounds runs rounds of s and says, round by round, which signals the
-// round missed.
-func readRounds(t *testing.T, s *Server, rounds int) []map[string]bool {
+// round is how a round went for each signal: whether it was read
+// (answered, whole or a piece), and whether it is behind after it (the
+// ledger's missed_at).
+type round struct{ read, behind map[string]bool }
+
+// readRounds runs rounds of s and says, round by round, which signals
+// were read and which are behind, of names.
+func readRounds(t *testing.T, s *Server, from, rounds int) []round {
 	t.Helper()
-	var out []map[string]bool
-	for k := 1; k <= rounds; k++ {
+	var out []round
+	for k := from; k < from+rounds; k++ {
 		runDue(s, k)
 		s.jobs(context.Background(), true)
 		rows, err := s.l.SignalRows(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
-		m := map[string]bool{}
-		for _, r := range rows {
-			if r.Name != "" {
-				m[r.Name] = !r.Missed.IsZero()
+		r := round{read: map[string]bool{}, behind: map[string]bool{}}
+		for _, x := range rows {
+			if x.Name != "" {
+				r.behind[x.Name] = !x.Missed.IsZero()
 			}
 		}
-		out = append(out, m)
+		s.sources.Lock()
+		for name, x := range s.sources.signals {
+			r.read[name] = x.Read.Equal(s.now())
+		}
+		s.sources.Unlock()
+		out = append(out, r)
 	}
 	return out
 }
@@ -1349,15 +1359,21 @@ func readRounds(t *testing.T, s *Server, rounds int) []map[string]bool {
 // A signal that fits in --timeout alone, but not in its share, is read: a
 // heavy one beside a quick one each round, the quick one before it handing
 // on what it leaves; two heavy ones, too heavy for both to fit, in turn,
-// neither missed two rounds running; a heavy one beside one that hangs,
-// on its turn, which the one that hangs doesn't keep.
+// neither unread two rounds running; a heavy one beside one that hangs,
+// on its turn, which the one that hangs doesn't keep, until it has caught
+// up; a heavy one beside one that fits in its share, on its turn, for
+// which what it took before is kept.
 func TestHeavySignalsTakeTurns(t *testing.T) {
 	const timeout, heavy, hangs = time.Second, 600 * time.Millisecond, time.Duration(0)
 	for _, c := range []struct {
 		name          string
 		errors, probe time.Duration
 		both          bool // time for both each round
-	}{{"one heavy", heavy, -1, true}, {"two heavy", heavy, heavy, false}, {"one heavy, one hanging", hangs, heavy, false}} {
+	}{{"one heavy", heavy, -1, true}, {"two heavy", heavy, heavy, false}, {"one heavy, one hanging", hangs, heavy, false},
+		// The one that took 450ms fits in its share beside the heavy one's
+		// turn, and would leave it 550ms of the 600ms it needs, but for
+		// what is kept for its turn.
+		{"one heavy, one in its share", heavy, 450 * time.Millisecond, false}} {
 		t.Run(c.name, func(t *testing.T) {
 			h := shopHistory()
 			s := signalServer(t, h, func(c *Config) { c.Timeout = timeout })
@@ -1368,20 +1384,110 @@ func TestHeavySignalsTakeTurns(t *testing.T) {
 				}
 			}
 			s.h = sl
-			rounds := readRounds(t, s, 5)
+			rounds := readRounds(t, s, 1, 6)
 			names := []string{"errors", "probe"}
 			if c.errors == hangs {
 				names = names[1:]
 			}
 			for k := 1; k < len(rounds); k++ {
 				for _, name := range names {
-					if c.both && rounds[k][name] {
-						t.Errorf("round %d: %s missed, with time for both", k+1, name)
+					if c.both && !rounds[k].read[name] {
+						t.Errorf("round %d: %s unread, with time for both", k+1, name)
 					}
-					if k > 1 && rounds[k][name] && rounds[k-1][name] {
-						t.Errorf("rounds %d and %d: %s missed in both: %v", k, k+1, name, rounds)
+					if k > 1 && !rounds[k].read[name] && !rounds[k-1].read[name] {
+						t.Errorf("rounds %d and %d: %s unread in both", k, k+1, name)
 					}
 				}
+			}
+			if last := rounds[len(rounds)-1]; c.errors == hangs && last.behind["probe"] || c.both && (last.behind["errors"] || last.behind["probe"]) {
+				t.Errorf("behind at the end: %v", last.behind)
+			}
+		})
+	}
+}
+
+// costly answers each expression in cost after its cost an hour of what
+// it is asked over, and those in hang never: each waits until its context
+// is done.
+type costly struct {
+	*sigHistory
+	cost map[string]time.Duration
+	hang map[string]bool
+	mu   sync.Mutex
+	most time.Duration // the most hours one of cost was asked over
+	hung int           // how often one of hang was asked
+}
+
+func (h *costly) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	var wait <-chan time.Time
+	if c, ok := h.cost[expr]; ok {
+		h.mu.Lock()
+		h.most = max(h.most, end.Sub(start))
+		h.mu.Unlock()
+		wait = time.After(time.Duration(float64(c) * end.Sub(start).Hours()))
+	}
+	if h.hang[expr] {
+		h.mu.Lock()
+		h.hung++
+		h.mu.Unlock()
+		wait = nil
+	}
+	if wait != nil || h.hang[expr] {
+		select {
+		case <-wait:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return h.sigHistory.QueryRange(ctx, expr, start, end, step)
+}
+
+// A signal whose run read fits in --timeout alone is read, and catches
+// up, beside any number of signals that hang: its read after a miss a
+// piece at a time, no more than a run's at once; it, having answered its
+// last turn, before those that ran out on theirs; and those asked again
+// only after a round, then two, four, up to a day of rounds, their turns
+// keeping nothing back from it until then. So too after a restart, when
+// this process knows nothing of how the last turns went, but the ledger
+// keeps where each was missed.
+func TestHeavyCatchesUpBesideHung(t *testing.T) {
+	const timeout, perHour, rounds = 300 * time.Millisecond, 70 * time.Millisecond, 30 // a run's 3h read: 210ms
+	for _, hung := range []int{2, 3} {
+		t.Run(fmt.Sprintf("%d hung", hung), func(t *testing.T) {
+			h := shopHistory()
+			s := signalServer(t, h, func(c *Config) {
+				c.Timeout = timeout
+				for i := 2; i <= hung; i++ {
+					c.Signals = append(c.Signals, ledger.SignalDef{Name: fmt.Sprintf("s%d", i), Expr: fmt.Sprintf("m%d > 1", i), For: 5 * time.Minute, Record: true})
+				}
+			})
+			c := &costly{sigHistory: h, cost: map[string]time.Duration{"http_requests_total > 1e9": perHour}, hang: map[string]bool{"probe_success == 0": true}}
+			for i := 2; i <= hung; i++ {
+				c.hang[fmt.Sprintf("m%d > 1", i)] = true
+			}
+			s.h = c
+			got := readRounds(t, s, 1, rounds)
+			unread := 0
+			for _, r := range got[rounds/2:] {
+				if !r.read["errors"] {
+					unread++
+				}
+			}
+			if last := got[len(got)-1]; last.behind["errors"] || unread > 2 {
+				t.Errorf("errors behind after %d rounds %v, unread in %d of the last %d", rounds, last.behind["errors"], unread, rounds-rounds/2)
+			}
+			c.mu.Lock()
+			if c.most > 3*time.Hour || c.hung > hung*rounds/3 {
+				t.Errorf("errors asked over %s at once (a run's: 3h); those that hang asked %d times in %d rounds", c.most, c.hung, rounds)
+			}
+			c.mu.Unlock()
+			// Started again: nothing known of the turns; the ledger keeps
+			// errors missed six hours back, the others still hang.
+			s.turns = turns{}
+			ledgerExec(t, s, "UPDATE impact_signals SET missed_at = ? WHERE name = ?", now.Add(time.Duration(rounds-6)*time.Hour).Unix(), "errors")
+			got = readRounds(t, s, rounds+1, 16)
+			if last := got[len(got)-1]; last.behind["errors"] {
+				t.Errorf("errors behind 16 rounds after a restart")
 			}
 		})
 	}

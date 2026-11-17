@@ -73,12 +73,15 @@ type Found struct {
 // its windows from From on, the run's From or where a run before missed
 // it, within a week. Missed says it couldn't be read: a later run reads it
 // from the earliest From it was missed at, and meanwhile its windows, and
-// the record it keeps, stand. Seen is what its series returned, of the
-// labels it is matched on.
+// the record it keeps, stand. To, when it isn't zero and is before the
+// run's To, is where a read catching up after a miss stopped, a piece at a
+// time: its windows are kept to there, and a later run reads it from
+// there, as from where it was missed. Seen is what its series returned,
+// of the labels it is matched on.
 type SignalRead struct {
 	Name, Criterion string
 	Match           []string
-	Since, From     time.Time
+	Since, From, To time.Time
 	Windows         []incident.Incident
 	Missed          bool
 	Seen            *verdict.Seen
@@ -548,6 +551,12 @@ func (l *Ledger) signalRecord(t *txn, f Found, r SignalRead, o verdict.Options) 
 	}
 	if r.Seen != nil {
 		if err := l.addSeen(t, o.Match, map[string]*verdict.Seen{r.Name: r.Seen}); err != nil {
+			return 0, err
+		}
+	}
+	if !r.To.IsZero() && r.To.Before(f.To) {
+		// Caught up to there, a piece at a time: read from there next.
+		if _, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET missed_at = ? WHERE name = ?", r.To.Unix(), r.Name); err != nil {
 			return 0, err
 		}
 	}

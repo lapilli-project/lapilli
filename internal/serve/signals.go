@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -146,10 +147,15 @@ func (s *Server) signalsRead(parent context.Context, from, to time.Time, f *ledg
 	}
 	missed := map[string]time.Time{}
 	for _, r := range rows {
+		// Within a week. Where a piece caught up to past from, the run's
+		// own read, from from, covers what is left.
 		if !r.Missed.IsZero() && r.Missed.Before(from) && to.Sub(r.Missed) <= 7*24*time.Hour {
 			missed[r.Name] = r.Missed
 		}
 	}
+	// A run's own span: what a read of one behind covers at most at once,
+	// a piece at a time from where it was missed, as a run's read does.
+	span := to.Sub(from)
 	// A signal the ledger doesn't keep yet (its row, with its own bit, is
 	// SyncSignals'), or no longer, isn't read: nothing of it would be kept.
 	order := slices.DeleteFunc(slices.Clone(s.cfg.Signals), func(d ledger.SignalDef) bool {
@@ -183,9 +189,13 @@ func (s *Server) signalsRead(parent context.Context, from, to time.Time, f *ledg
 		reads[i] = ledger.SignalRead{Name: d.Name, Criterion: signalCriterion(d).key(), Match: d.Match, Since: start.Add(-time.Hour), From: start}
 		asks[i] = turnAsk{name: d.Name, behind: behind, ask: func(ctx context.Context) error {
 			r := &reads[i]
-			series, err := s.h.QueryRange(ctx, d.Expr, r.Since, to, s.cfg.Step)
+			series, end, piece, err := s.readPieces(ctx, d.Expr, r.From, to, span, behind)
 			if err != nil {
 				return err
+			}
+			asks[i].took = piece
+			if end.Before(to) {
+				r.To = end // behind still, from there
 			}
 			r.Windows = incident.FromSignal(series, s.cfg.Step, d.For, d.Name, d.Match)
 			// Those of its week kept before its read, which it doesn't put
@@ -234,6 +244,88 @@ func (s *Server) signalsRead(parent context.Context, from, to time.Time, f *ledg
 		f.Signals = append(f.Signals, r)
 	}
 	return nil
+}
+
+// readPieces reads expr for a run over [from, to], from the hour before
+// from. One behind (from where it was missed) is read a piece at a time:
+// each over a run's span at most, as much as a run's own read asks, so
+// that catching up after a miss never asks more than a run does at once;
+// another piece while what is left of ctx's time would hold one more,
+// as long as the last took. It returns the series of every piece, one
+// series a set of labels, where the pieces got to (to, or short of it, for
+// the next turn to go on from) and the longest a piece took. A piece that
+// fails after one that answered ends the pieces, those read kept.
+func (s *Server) readPieces(ctx context.Context, expr string, from, to time.Time, span time.Duration, behind bool) ([]prom.Series, time.Time, time.Duration, error) {
+	if !behind || span <= 0 {
+		series, err := s.h.QueryRange(ctx, expr, from.Add(-time.Hour), to, s.cfg.Step)
+		return series, to, 0, err
+	}
+	var out []prom.Series
+	var longest time.Duration
+	at := from
+	for {
+		end := to
+		if at.Add(span).Before(to) {
+			end = at.Add(span)
+		}
+		start := time.Now()
+		series, err := s.h.QueryRange(ctx, expr, at.Add(-time.Hour), end, s.cfg.Step)
+		if err != nil {
+			if at.Equal(from) {
+				return nil, from, 0, err
+			}
+			return out, at, longest, nil
+		}
+		out = mergeSeries(out, series)
+		at = end
+		took := time.Since(start)
+		longest = max(longest, took)
+		if !at.Before(to) {
+			return out, at, longest, nil
+		}
+		if dl, ok := ctx.Deadline(); !ok || time.Until(dl) < took+took/2 {
+			return out, at, longest, nil
+		}
+	}
+}
+
+// mergeSeries adds b's series to a's: one series a set of labels, its
+// samples in time, each time once, as pieces that overlap by the hour
+// before each read them.
+func mergeSeries(a, b []prom.Series) []prom.Series {
+	key := func(l map[string]string) string {
+		ks := slices.Sorted(maps.Keys(l))
+		var sb strings.Builder
+		for _, k := range ks {
+			sb.WriteString(k)
+			sb.WriteByte(0)
+			sb.WriteString(l[k])
+			sb.WriteByte(0)
+		}
+		return sb.String()
+	}
+	at := map[string]int{}
+	for i, x := range a {
+		at[key(x.Labels)] = i
+	}
+	for _, x := range b {
+		i, ok := at[key(x.Labels)]
+		if !ok {
+			at[key(x.Labels)] = len(a)
+			a = append(a, prom.Series{Labels: x.Labels, Samples: slices.Clone(x.Samples)})
+			continue
+		}
+		last := time.Time{}
+		if n := len(a[i].Samples); n > 0 {
+			last = a[i].Samples[n-1].T
+		}
+		for _, p := range x.Samples {
+			if p.T.After(last) {
+				a[i].Samples = append(a[i].Samples, p)
+			}
+		}
+	}
+	return a
 }
 
 // signalSeen is how the last read of a named signal went, as the sources

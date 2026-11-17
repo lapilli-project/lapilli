@@ -635,20 +635,34 @@ As counts and bytes, which the tests hold, not times:
 
 - **Queries a run**: one range query a signal, eight at most, over the
   run's period and the hour before, as the impact query is now, read in
-  turn within the time the impact query has (`--timeout`). Those read
-  last time first, the quickest before first, each with its share of
-  what is left, counting the one whose turn it is: one that hangs runs
-  out its own share, not the others'; one that took more than its share
-  before is left to a later round. Then, of those missed, the one given
-  all that was left longest ago: all that is left. So one that hangs has
-  all that is left only after the others, and one that fits in
-  `--timeout` alone, though not beside the others, is read on its turn,
-  which comes round to each one missed. One left unread is missed for
-  that run. After a round's runs, what each reads, by its match labels:
-  one request a selector it counts, none for a signal matched on no
-  label; and where each signal's data begins: one request a selector, 32
-  a signal at most, until it is found, as v0.49.0 looks for its one's;
-  each look in turn as the reads are.
+  turn within the time the impact query has (`--timeout`):
+  - those read last time first, the quickest before first, each with its
+    share of what is left once the one whose turn it is has what it took
+    before; one that took more than its share before is left to a later
+    round, rather than run out its share for nothing;
+  - then those missed: those that didn't run out on their last turn
+    before those that did, each group the one longest without a turn
+    first (the one missed longest first, when no turn is known, as after
+    a restart). The first has its turn, all that is left; the others what
+    is still left.
+
+  One missed is read from where it was missed a piece at a time, each
+  over a run's period and the hour before at most, as much as a run
+  asks: on its turn, as many pieces as the time left holds, the rest on
+  its next. One that runs out of time on its turn has twice as much kept
+  for its next, up to `--timeout`; one that runs out with all of it, or
+  near it, doesn't fit, or hangs, and is asked again a round later, then
+  two, four, up to a day of rounds, nothing kept for its turns from the
+  others' shares until it waits that long, and as before once it
+  answers. So any number that hang cost the others a round each, the
+  one in which each is found not to fit, and then one in a day; and one
+  whose run read fits in `--timeout` alone is read on its turn, which
+  comes round to each one missed, and catches up. One left unread is
+  missed for that run. After a round's runs, what each reads, by its
+  match labels: one request a selector it counts, none for a signal
+  matched on no label; and where each signal's data begins: one request
+  a selector, 32 a signal at most, until it is found, as v0.49.0 looks
+  for its one's; each look in turn as the reads are.
 - **Reading again**: only the signals added or changed, each one query over
   five weeks at most, within `--max-samples`; each counts as one of the
   twelve reads an admin may ask for in an hour.

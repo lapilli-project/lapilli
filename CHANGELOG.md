@@ -11,12 +11,14 @@
   `--impact-record` and `--impact-file` with rule entries, as `lapilli
   verdict` does since 0.53.0; the chart's `impact`, as a mapping of
   `signals` and `rules`, is that file. The runs read each signal on its
-  own, in turn within `--timeout`: one that hangs leaves the others their
-  time, and one that fits in `--timeout` alone, though not beside the
-  others, is read on its turn; one that fails, or finds more than 1,000
+  own, in turn within `--timeout`: any number that hang leave the others
+  their time, asked again after a round, then two, four, up to a day of
+  rounds; and one that fits in `--timeout` alone, though not beside the
+  others, is read on its turn. One that fails, or finds more than 1,000
   windows in a read or 2,000 in a week, is missed for the run, which
   records the rest, and a later run reads it from where it was missed,
-  within a week. Each signal's windows are its own, keyed by its name
+  within a week, a piece at a time, no more at once than a run reads. Each
+  signal's windows are its own, keyed by its name
   (`impact-probe-20261110T1404Z`), with what was decided of them, their
   tasks and comments carried over among its own; each keeps the record
   from its own start, where the data it reads begins, read again alone
