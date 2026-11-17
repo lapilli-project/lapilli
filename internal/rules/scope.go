@@ -92,9 +92,11 @@ func Selectors(expr string) ([]string, error) {
 		return nil, err
 	}
 	var out []string
+	seen := map[string]bool{}
 	for i, s := range x.sels {
 		s += selectorModifiers(expr[x.ends[i]:])
-		if !slices.Contains(out, s) {
+		if !seen[s] {
+			seen[s] = true
 			out = append(out, s)
 		}
 	}
@@ -125,18 +127,20 @@ func selectorModifiers(rest string) string {
 			rest = rest[end+1:]
 		}
 	}
-	var out string
+	// Looked at no further than each modifier, and written once, so that
+	// an expression's selectors are read in time linear in its length.
+	var out strings.Builder
 	for {
 		space()
 		switch {
-		case strings.HasPrefix(strings.ToLower(rest), "offset") && (len(rest) == 6 || !isWordByte(rest[6])):
+		case len(rest) >= 6 && strings.EqualFold(rest[:6], "offset") && (len(rest) == 6 || !isWordByte(rest[6])):
 			rest = rest[6:]
-			out += " offset " + token()
+			out.WriteString(" offset " + token())
 		case strings.HasPrefix(rest, "@"):
 			rest = rest[1:]
-			out += " @ " + token()
+			out.WriteString(" @ " + token())
 		default:
-			return out
+			return out.String()
 		}
 	}
 }

@@ -1,6 +1,13 @@
 package rules
 
-import "testing"
+import (
+	"fmt"
+	"math/rand/v2"
+	"regexp"
+	"runtime"
+	"strings"
+	"testing"
+)
 
 // A selector covers another that only narrows it: the same metric, offset
 // and @, and each of its matchers among the other's, written any way.
@@ -81,5 +88,80 @@ func TestStandIns(t *testing.T) {
 				t.Errorf("%s: %v, not %v", c.expr, got, c.want)
 			}
 		}
+	}
+}
+
+// What opens a parenthesis as absent() or absent_over_time() is told as the
+// expression `(?:^|[^a-zA-Z0-9_:])(absent|absent_over_time)\s*$` tells it,
+// over what comes before the parenthesis, which it was until it was found
+// to read the whole of that at each parenthesis.
+func TestAbsentBefore(t *testing.T) {
+	re := regexp.MustCompile(`(?:^|[^a-zA-Z0-9_:])(absent|absent_over_time)\s*$`)
+	cases := []string{"", "absent", " absent", "absent ", "absent \t\n\f\r ", "absent\v", "xabsent", "_absent", ":absent", "9absent",
+		"(absent", "+absent_over_time", "absent_over_time", "absent_over_times", "xabsent_over_time", "absent_over", "a(absent", "absent#",
+		`"absent`, "sum by (x) absent", "sum by (x) absent_over_time  ", "absentabsent", "absent_absent_over_time"}
+	// And many made of the pieces such a text is made of, the same each run.
+	pieces := []string{"absent", "_over_time", "absent_over_time", "x", "_", ":", "9", " ", "\t", "\n", "\v", "(", ")", "{", "#", `"`, "é"}
+	r := rand.New(rand.NewPCG(1, 2))
+	for range 20000 {
+		var b strings.Builder
+		for range r.IntN(6) {
+			b.WriteString(pieces[r.IntN(len(pieces))])
+		}
+		cases = append(cases, b.String())
+	}
+	for _, s := range cases {
+		if got, want := absentBefore(s), re.MatchString(s); got != want {
+			t.Errorf("absentBefore(%q) = %v, want %v", s, got, want)
+		}
+	}
+}
+
+// An expression of 1 MiB, of 200,000 parentheses and as many selectors,
+// is read in time linear in its length: each parenthesis looked back from
+// over what is before it since the last, never over all of it, and what
+// follows each selector looked at for its offset and @ no further than
+// they go. As it was, the first took most of an hour, and the second,
+// lowering all that followed each selector to find an offset, allocated
+// as much again at each: some 100 GB. Within absent() at any depth as
+// before.
+func TestStandInsLongExpression(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("absent(")
+	for b.Len() < 1<<20 {
+		b.WriteString("(Up)+")
+	}
+	expr := b.String() + "Up) or rate(x{code=~\"5..\"}[5m]) / rate(x[5m])"
+	var m0, m1 runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&m0)
+	got, err := StandIns(expr)
+	runtime.ReadMemStats(&m1)
+	if err != nil || len(got) != 1 || got[0] != (StandIn{`x{code!=""}`, `x{code=~"5.."}`, `x`}) {
+		t.Errorf("%v, %v", got, err)
+	}
+	if a := m1.TotalAlloc - m0.TotalAlloc; a > 64<<20 {
+		t.Errorf("%d MiB allocated for an expression of %d KiB", a>>20, len(expr)>>10)
+	}
+	if in := inAbsent(expr); !in[len("absent(")] || !in[len(expr)-len(") or rate(x{code=~\"5..\"}[5m]) / rate(x[5m])")-1] || in[len(expr)-5] {
+		t.Error("within absent() told wrong")
+	}
+}
+
+// An expression's stand-ins are looked for among 256 selectors at most,
+// each held against each other: past them, it is refused.
+func TestStandInsSelectorsBounded(t *testing.T) {
+	sels := func(n int) string {
+		var parts []string
+		for i := range n {
+			parts = append(parts, fmt.Sprintf(`m{a="1",b%d="1"}`, i))
+		}
+		return strings.Join(parts, " + ")
+	}
+	if got, err := StandIns(sels(maxStandInSelectors-1) + ` + m{a="1"}`); err != nil || len(got) != MaxStandIns {
+		t.Errorf("%d selectors: %d stand-ins, %v", maxStandInSelectors, len(got), err)
+	}
+	if _, err := StandIns(sels(maxStandInSelectors) + ` + m{a="1"}`); err == nil || !strings.Contains(err.Error(), "257 selectors: stand-ins are looked for among 256 at most") {
+		t.Errorf("%d selectors: %v", maxStandInSelectors+1, err)
 	}
 }

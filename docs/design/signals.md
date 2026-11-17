@@ -707,7 +707,8 @@ As counts and bytes, which the tests hold, not times:
   and each change noted in the activity log with its before and after.
 - **What comes in.** A name of 32 bytes from a small alphabet, so it is safe
   in a key, a URL and a label value, and still escaped in each; label names
-  checked as Prometheus's; the expression checked as v0.49.0 checks it;
+  checked as Prometheus's; the expression checked as v0.49.0 checks it,
+  as is one with no name, given to `--impact`;
   rule patterns checked as a team's are. The series' labels become
   windows' labels, 64 values a label, the first in order, however many
   series a window merges (an expression not summed up, over a label a

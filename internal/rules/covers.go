@@ -1,6 +1,8 @@
 package rules
 
 import (
+	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -11,22 +13,7 @@ import (
 // series selector b does: the same offset and @, and each of a's matchers,
 // its metric's name among them, one of b's, so that b only narrows a. A
 // selector that doesn't read as one is covered by none.
-func Covers(a, b string) bool {
-	ma, oa, ok := selectorParts(a)
-	if !ok || len(ma) == 0 {
-		return false
-	}
-	mb, ob, ok := selectorParts(b)
-	if !ok || oa != ob {
-		return false
-	}
-	for _, m := range ma {
-		if !slices.Contains(mb, m) {
-			return false
-		}
-	}
-	return true
-}
+func Covers(a, b string) bool { return readSel(a).covers(readSel(b)) }
 
 // selectorParts are a selector's matchers, its metric's name as
 // __name__="name", each written one way, and what follows it: its offset
@@ -44,12 +31,18 @@ func selectorParts(sel string) (matchers []string, mods string, ok bool) {
 		if name != "" {
 			matchers = append(matchers, `__name__="`+name+`"`)
 		}
+		// Each once, looked up in a set: a selector can hold thousands.
+		seen := map[string]bool{}
+		for _, m := range matchers {
+			seen[m] = true
+		}
 		for _, m := range splitMatchers(sel[i+1 : end]) {
 			norm, ok := matcher(m)
 			if !ok {
 				return nil, "", false
 			}
-			if norm != "" && !slices.Contains(matchers, norm) {
+			if norm != "" && !seen[norm] {
+				seen[norm] = true
 				matchers = append(matchers, norm)
 			}
 		}
@@ -155,6 +148,11 @@ func matcher(m string) (string, bool) {
 // MaxStandIns is how many stand-ins an expression has at most (StandIns).
 const MaxStandIns = 32
 
+// maxStandInSelectors is how many selectors an expression's stand-ins are
+// looked for among at most: each is held against each other, and an impact
+// expression reads 32 at most (serve.CheckImpact).
+const maxStandInSelectors = 256
+
 // A StandIn is a selector read for another's sake (For), which only
 // narrows one (Covers): of the series that one reads, those with each
 // label For narrows them by with a matcher the empty value doesn't match,
@@ -177,21 +175,43 @@ type StandIn struct {
 // those, and they see what it would. In the order they come, MaxStandIns
 // at most; not of one an absent() or absent_over_time() reads, at any
 // depth, which says users are hurt while it has no data.
+//
+// Each selector is read once, and whether it is of the widest once: the
+// time it takes grows with the expression's length, and with the square
+// of its selectors, of which more than maxStandInSelectors are refused.
 func StandIns(expr string) ([]StandIn, error) {
 	sels, absent, err := selectorsRead(expr)
 	if err != nil {
 		return nil, err
 	}
+	if len(sels) > maxStandInSelectors {
+		return nil, fmt.Errorf("%d selectors: stand-ins are looked for among %d at most", len(sels), maxStandInSelectors)
+	}
+	parts := make([]selParts, len(sels))
+	for i, s := range sels {
+		parts[i] = readSel(s)
+	}
+	// Of the widest: no other covers it without being covered by it.
+	wide := make([]bool, len(sels))
+	for a := range sels {
+		wide[a] = true
+		for c := range sels {
+			if c != a && parts[c].covers(parts[a]) && !parts[a].covers(parts[c]) {
+				wide[a] = false
+				break
+			}
+		}
+	}
 	var out []StandIn
-	for _, b := range sels {
+	for j, b := range sels {
 		if absent[b] {
 			continue
 		}
-		for _, a := range sels {
-			if a == b || !Covers(a, b) || !widest(a, sels) {
+		for i, a := range sels {
+			if i == j || !wide[i] || !parts[i].covers(parts[j]) {
 				continue
 			}
-			sel, ok := standIn(a, b)
+			sel, ok := standIn(parts[i], parts[j])
 			if !ok {
 				continue
 			}
@@ -207,10 +227,36 @@ func StandIns(expr string) ([]StandIn, error) {
 	return out, nil
 }
 
-// widest reports whether no other of sels is wider than a: covers it, and
-// isn't covered by it.
-func widest(a string, sels []string) bool {
-	return !slices.ContainsFunc(sels, func(c string) bool { return c != a && Covers(c, a) && !Covers(a, c) })
+// selParts is a selector as selectorParts reads it, read once, with its
+// matchers to look each one up in.
+type selParts struct {
+	matchers []string
+	has      map[string]bool
+	mods     string
+	ok       bool
+}
+
+func readSel(s string) selParts {
+	var p selParts
+	p.matchers, p.mods, p.ok = selectorParts(s)
+	p.has = make(map[string]bool, len(p.matchers))
+	for _, m := range p.matchers {
+		p.has[m] = true
+	}
+	return p
+}
+
+// covers is Covers of two selectors read.
+func (a selParts) covers(b selParts) bool {
+	if !a.ok || len(a.matchers) == 0 || !b.ok || a.mods != b.mods {
+		return false
+	}
+	for _, m := range a.matchers {
+		if !b.has[m] {
+			return false
+		}
+	}
+	return true
 }
 
 // selectorsRead are expr's selectors, as Selectors gives them, and those
@@ -222,11 +268,12 @@ func selectorsRead(expr string) ([]string, map[string]bool, error) {
 	}
 	in := inAbsent(expr)
 	var out []string
-	absent := map[string]bool{}
+	absent, seen := map[string]bool{}, map[string]bool{}
 	for i, s := range x.sels {
 		start := x.ends[i] - len(s)
 		s += selectorModifiers(expr[x.ends[i]:])
-		if !slices.Contains(out, s) {
+		if !seen[s] {
+			seen[s] = true
 			out = append(out, s)
 		}
 		if start >= 0 && start < len(in) && in[start] {
@@ -236,7 +283,25 @@ func selectorsRead(expr string) ([]string, map[string]bool, error) {
 	return out, absent, nil
 }
 
-var absentName = regexp.MustCompile(`(?:^|[^a-zA-Z0-9_:])(absent|absent_over_time)\s*$`)
+// absentBefore reports whether s ends in absent or absent_over_time, a
+// name of its own, not the end of a longer one, then spaces: what opens
+// the parenthesis after it. It looks back over those alone, never over
+// all of s, so that an expression is read in time linear in its length
+// however many parentheses it opens.
+func absentBefore(s string) bool {
+	s = strings.TrimRight(s, " \t\n\f\r")
+	j := len(s)
+	for j > 0 && len(s)-j <= len("absent_over_time") && nameByte(s[j-1]) {
+		j--
+	}
+	name := s[j:]
+	return (name == "absent" || name == "absent_over_time") && (j == 0 || !nameByte(s[j-1]))
+}
+
+// nameByte reports whether c is of a metric's or a function's name.
+func nameByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == ':'
+}
 
 // inAbsent says, of each byte of expr, whether it is within the
 // parentheses of an absent() or absent_over_time(), at any depth; quoted
@@ -266,7 +331,7 @@ func inAbsent(expr string) []bool {
 				i++
 			}
 		case c == '(':
-			a := absentName.MatchString(expr[:i])
+			a := absentBefore(expr[:i])
 			stack = append(stack, a)
 			if a {
 				depth++
@@ -284,18 +349,13 @@ func inAbsent(expr string) []bool {
 // standIn is the stand-in a gives for b, which only narrows it: a's
 // matchers, b's metric's name, and label!="" of each other label b
 // narrows by with a matcher the empty value doesn't match.
-func standIn(a, b string) (string, bool) {
-	ma, mods, ok := selectorParts(a)
-	if !ok {
+func standIn(a, b selParts) (string, bool) {
+	if !a.ok || !b.ok {
 		return "", false
 	}
-	mb, _, ok := selectorParts(b)
-	if !ok {
-		return "", false
-	}
-	out := slices.Clone(ma)
-	for _, m := range mb {
-		if slices.Contains(ma, m) {
+	out, in := slices.Clone(a.matchers), maps.Clone(a.has)
+	for _, m := range b.matchers {
+		if a.has[m] {
 			continue
 		}
 		label, op, value, ok := splitMatcher(m)
@@ -307,11 +367,11 @@ func standIn(a, b string) (string, bool) {
 			out = append(out, m)
 			continue
 		}
-		if has := label + `!=""`; !slices.Contains(out, has) {
-			out = append(out, has)
+		if has := label + `!=""`; !in[has] {
+			out, in[has] = append(out, has), true
 		}
 	}
-	return renderSelector(out, mods), true
+	return renderSelector(out, a.mods), true
 }
 
 // splitMatcher is a matcher as matcher writes it, in its parts.

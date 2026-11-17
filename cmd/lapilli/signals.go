@@ -204,11 +204,13 @@ func (f *verdictFlags) impactFlag(name, val string) (ok bool, err error) {
 // named ones.
 func (f *verdictFlags) anyImpact() bool { return f.impact != "" || len(f.signals) > 0 }
 
-// signalsRead checks the named signals once every flag is read, reads
-// --impact-file, and sets what judges by them (Options.Signals): their
-// names, "for"s, matches and records, and the rule entries. Where each
-// signal's data begins, and what it returned, a read of them says
-// (readSignals); lapilli serve's runs, of serve's (signalDefs).
+// signalsRead checks the impact signals once every flag is read, the one
+// with no name as the named ones are (serve.CheckImpact, as the Settings
+// page checks one), reads --impact-file, and sets what judges by the
+// named ones (Options.Signals): their names, "for"s, matches and records,
+// and the rule entries. Where each signal's data begins, and what it
+// returned, a read of them says (readSignals); lapilli serve's runs, of
+// serve's (signalDefs).
 func (f *verdictFlags) signalsRead() error {
 	perName := len(f.impactSets) > 0
 	switch {
@@ -218,6 +220,11 @@ func (f *verdictFlags) signalsRead() error {
 		return errors.New("--impact-file says each signal's for, match and record: leave out --impact-for NAME=DUR, --impact-match and --impact-record")
 	case len(f.signals) > 0 && f.impact != "":
 		return errors.New("--impact: give every impact signal a name, --impact NAME=PROMQL, or give one alone without: a signal with no name and named ones don't go together")
+	}
+	if f.impact != "" {
+		if err := serve.CheckImpact(f.impact); err != nil {
+			return fmt.Errorf("--impact: %w", err)
+		}
 	}
 	var entries []verdict.RuleEntry
 	if f.impactFile != "" {

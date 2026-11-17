@@ -456,6 +456,14 @@ func TestSignalFlagsRefused(t *testing.T) {
 		nine += fmt.Sprintf("  - {name: s%d, expr: up}\n", i)
 	}
 	base := []string{"verdict", "--firings", write(t, "f.jsonl", ""), "--prometheus", "http://p"}
+	// An expression of 16 KiB, its parentheses each a stand-in's look
+	// back, and one of 33 selectors.
+	long := strings.Repeat("(up)+", 16<<10/5) + "up"
+	var sels []string
+	for i := range 33 {
+		sels = append(sels, fmt.Sprintf("m%d", i))
+	}
+	wide := strings.Join(sels, " + ")
 	for _, c := range []struct {
 		args []string
 		want string
@@ -473,6 +481,12 @@ func TestSignalFlagsRefused(t *testing.T) {
 		{[]string{"--impact", "errors=up", "--impact-match", "errors=service,9team"}, `"9team" isn't a label's name`},
 		{[]string{"--impact", "errors=up", "--impact-match", "errors=a", "--impact-match", "errors=b"}, "given twice"},
 		{[]string{"--impact", "errors=sum(rate(x[5m]"}, "--impact errors: the impact expression doesn't read as PromQL"},
+		// With no name, as with one: the Settings page's bounds.
+		{[]string{"--impact", "sum(rate(x[5m]"}, "--impact: the impact expression doesn't read as PromQL"},
+		{[]string{"--impact", long}, "--impact: an impact expression is 4096 characters at most"},
+		{[]string{"--impact", "rate(x[2d]) > 0"}, "--impact: the impact expression reads a range of 2d: a range or a subquery is 24h at most"},
+		{[]string{"--impact", "max_over_time(up[1h:10s]) == 0"}, "--impact: the impact expression's subquery 1h:10s steps by less than 1m"},
+		{[]string{"--impact", wide}, "--impact: the impact expression reads 33 selectors: 32 at most"},
 		{[]string{"--impact-match", "service"}, "want NAME=..."},
 		{[]string{"--impact-file", file("signals: [{name: a, expr: up, colour: red}]")}, "field colour not found"},
 		{[]string{"--impact-file", file("signals: [{name: a, expr: up}, {name: a, expr: down}]")}, "a is named twice"},
@@ -522,6 +536,8 @@ func TestSignalFlagsRefused(t *testing.T) {
 		{[]string{"--impact", "up", "--impact", "errors=up"}, "a signal with no name and named ones don't go together"},
 		{[]string{"--impact", "up", "--impact", "down"}, "--impact is given twice without a name"},
 		{[]string{"--impact", "up", "--impact-for", "a=2m"}, "which no --impact NAME=PROMQL gives"},
+		{[]string{"--impact", long}, "--impact: an impact expression is 4096 characters at most"},
+		{[]string{"--impact", "rate(x[2d]) > 0"}, "a range or a subquery is 24h at most"},
 	} {
 		if err := serving(c.args...); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("serve %q: %v, want %q", c.args, err, c.want)
