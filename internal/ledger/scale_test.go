@@ -175,15 +175,20 @@ func TestScale(t *testing.T) {
 	t.Logf("ledger: %.1f MB, %d bytes a firing", float64(size)/1e6, size/int64(total))
 }
 
-// TestRecordedScale holds copying in a week of a busy source to the budget
-// the design gives: 100,000 firings written in under 5 s, and sent again
-// unchanged in under 1 s.
+// TestRecordedScale holds copying in a week of a busy source, 100,000
+// firings, to what the design asks of it (docs/design/recorded.md), by
+// what the write does rather than how long it takes on the machine it
+// runs on: written, each firing its row, its alert's and its stones once,
+// judged over the period once; sent again unchanged, nothing written but
+// the source's own rows, and nothing judged. Postgres counts the
+// statements too: a thousand rows at a time, and none for each firing.
+// How long each took is logged.
 func TestRecordedScale(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short")
 	}
 	if race {
-		// Some thirty times slower here: no budget says anything. The
+		// Some thirty times slower here, and counted the same: the
 		// recorded tests run under it all the same.
 		t.Skip("the race detector")
 	}
@@ -214,26 +219,79 @@ func TestRecordedScale(t *testing.T) {
 	if _, err := l.SyncFile(ctx, incs, opts); err != nil {
 		t.Fatal(err)
 	}
-	budget := func(what string, d time.Duration, f func()) {
-		t.Helper()
-		began := time.Now()
-		f()
-		took := time.Since(began)
-		t.Logf("%s: %s", what, took.Round(time.Millisecond))
-		if took > time.Duration(float64(d)*slow) {
-			t.Errorf("%s took %s, over %s", what, took, d)
+	var spans [][2]int64
+	judging = func(lo, hi int64) { spans = append(spans, [2]int64{lo, hi}) }
+	defer func() { judging = nil }()
+	// What a write did: the rows it wrote, as SQLite counts them on its one
+	// writer's connection, and the statements sent to Postgres.
+	type did struct{ rows, statements int64 }
+	doing := func() did {
+		if l.d == postgres {
+			return did{statements: sent.Load()}
 		}
+		var n int64
+		if err := l.w.QueryRowContext(ctx, "SELECT total_changes()").Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return did{rows: n}
 	}
-	budget("a week of 100,000 firings", 5*time.Second, func() {
-		if got, err := l.PutFirings(ctx, "busy", t0, t0.Add(week), fs, FiringsCopier, opts); err != nil || got.Added == 0 {
-			t.Fatal(got, err)
+	put := func(what string) (Recorded, did) {
+		t.Helper()
+		spans = nil
+		was, began := doing(), time.Now()
+		got, err := l.PutFirings(ctx, "busy", t0, t0.Add(week), fs, FiringsCopier, opts)
+		took, is := time.Since(began), doing()
+		if err != nil {
+			t.Fatal(err)
 		}
-	})
-	budget("the same again", time.Second, func() {
-		if got, err := l.PutFirings(ctx, "busy", t0, t0.Add(week), fs, FiringsCopier, opts); err != nil || got.Changed() {
-			t.Fatal(got, err)
-		}
-	})
+		d := did{is.rows - was.rows, is.statements - was.statements}
+		t.Logf("%s: %d added, %d rows written, %d statements, judged %d times, in %s", what, got.Added, d.rows, d.statements, len(spans), took.Round(time.Millisecond))
+		return got, d
+	}
+
+	got, d := put("a week of 100,000 firings")
+	if got.Added == 0 || got.Removed != 0 {
+		t.Fatalf("written: %+v, want the firings added", got)
+	}
+	// Judged once, over the period: from a lead before it to as far as a
+	// firing reached, and no further than a period past it.
+	if lo, hi := t0.Add(-opts.Lead), t0.Add(week+MaxRecordedPeriod+opts.RefireWithin); len(spans) != 1 || spans[0][0] < lo.Unix() || spans[0][1] > hi.Unix() {
+		t.Errorf("judged %v, want once, within [%d, %d]", spans, lo.Unix(), hi.Unix())
+	}
+	// Each firing its row, its alert's when it is new (nearly every one
+	// here: 300 rules on 2,000 instances), and its stones once; each rule
+	// its row, and its days and weeks counted again, deleted and written
+	// (16 at most). Writing the firings twice, or judging them twice, is
+	// past it.
+	rules := map[string]bool{}
+	for _, f := range fs {
+		rules[f.Rule] = true
+	}
+	if most := 3*int64(got.Added) + 16*int64(len(rules)); l.d != postgres && d.rows > most {
+		t.Errorf("written: %d rows, want %d at most", d.rows, most)
+	}
+	// In Postgres, a few statements for each rule made (looked up, its name
+	// checked, made: 4), and the firings, their alerts and stones a
+	// thousand rows a statement. One for each firing is past it.
+	if most := 4*int64(len(rules)) + 4*int64(got.Added)/1000 + 50; l.d == postgres && d.statements > most {
+		t.Errorf("written: %d statements, want %d at most: a few for each rule, a thousand rows each", d.statements, most)
+	}
+
+	got, d = put("the same again")
+	if got.Changed() {
+		t.Fatalf("sent again: %+v, want nothing changed", got)
+	}
+	if len(spans) != 0 {
+		t.Errorf("sent again: judged %v, want nothing judged", spans)
+	}
+	// The source's row, and its spans of copies (copied); nothing of its
+	// firings. In Postgres, each rule looked up once, and a few.
+	if l.d != postgres && d.rows > 4 {
+		t.Errorf("sent again: %d rows written, want the source's own at most (4)", d.rows)
+	}
+	if most := int64(len(rules)) + 20; l.d == postgres && d.statements > most {
+		t.Errorf("sent again: %d statements, want %d at most: one for each rule, none for each firing", d.statements, most)
+	}
 }
 
 // At the bounds, each firing is set beside the occurrences of its week at
