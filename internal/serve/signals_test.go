@@ -623,3 +623,73 @@ func TestSignalRemoved(t *testing.T) {
 		}
 	}
 }
+
+// A signal serve was started with that the ledger doesn't keep yet (a
+// replica that follows a leader started without it, a rolling update that
+// adds it, or before the leader's first round) has no bit: every page
+// that judges reads it as tied to no alert, and says so, rather than
+// failing.
+func TestSignalWithNoRowYet(t *testing.T) {
+	s := signalServer(t, signalWindowsHistory(), nil)
+	s.cfg.Signals = append(s.cfg.Signals, ledger.SignalDef{Name: "latency", Expr: "latency_seconds > 1", For: 5 * time.Minute, Record: true})
+	s.sigs.Lock()
+	s.sigs.sig = nil
+	s.sigs.Unlock()
+	for _, p := range []string{"/api/v1/report?from=2026-11-02T00:00:00Z&to=2026-11-03T12:00:00Z", "/api/v1/summary", "/rules/Errors", "/", "/metrics", "/incidents"} {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("%s: panic: %v", p, r)
+				}
+			}()
+			if code, body := askAs(t, s.Handler(), http.MethodGet, p, nil, "ana@example.com", "same-origin"); code != http.StatusOK {
+				t.Errorf("%s: %d %.300s", p, code, body)
+			}
+		}()
+	}
+	for _, f := range reportOf(t, s).Firings {
+		if slices.Contains(f.Signals, "latency") {
+			t.Errorf("%v tied to a signal the ledger doesn't keep yet", f.Labels)
+		}
+	}
+}
+
+// Started with named signals, the pages are served before the leader's
+// first round keeps them in the ledger.
+func TestSignalPagesBeforeFirstSync(t *testing.T) {
+	dir := t.TempDir()
+	rulesDir := filepath.Join(dir, "rules")
+	os.MkdirAll(rulesDir, 0o755)
+	os.WriteFile(filepath.Join(rulesDir, "shop.yaml"), []byte(ruleFile), 0o644)
+	cfg := Config{
+		RulesPath: rulesDir,
+		Options:   verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour, Match: []string{"service"}},
+		Step:      time.Minute, Loc: time.UTC, Ledger: filepath.Join(dir, "ledger"), LedgerURLFile: ledgertest.File(t),
+		Every: time.Hour, Settle: time.Hour, Backfill: 3 * 24 * time.Hour, Watch: time.Minute,
+		Digest: Weekly{time.Monday, 9, 0}, Timeout: time.Minute, Parallel: 4, Listen: "127.0.0.1:0", Version: "test",
+		AllowedHosts: []string{"example.com"},
+		Signals:      []ledger.SignalDef{{Name: "errors", Expr: "x > 1", For: 5 * time.Minute, Record: true}},
+	}
+	s, err := New(context.Background(), cfg, shopHistory(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	s.ready.Store(true)
+	for _, p := range []string{"/", "/api/v1/summary", "/rules", "/incidents", "/metrics"} {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("%s: panic: %v", p, r)
+				}
+			}()
+			h := s.Handler()
+			if p == "/metrics" {
+				h = s.MetricsHandler()
+			}
+			if code, _, _ := get(t, h, p); code != http.StatusOK {
+				t.Errorf("%s: %d", p, code)
+			}
+		}()
+	}
+}

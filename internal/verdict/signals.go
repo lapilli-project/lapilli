@@ -498,11 +498,14 @@ const (
 	FellBackBit  = int64(1) << 8
 )
 
-// Bits are the signals at the indexes given, as bits (SignalBits).
+// Bits are the signals at the indexes given, as bits (SignalBits): one
+// with no bit yet (lapilli serve's, before the ledger keeps it) is none.
 func (s *Signals) Bits(idx []int, fellBack bool) int64 {
 	var out int64
 	for _, i := range idx {
-		out |= 1 << s.List[i].Bit
+		if b := s.List[i].Bit; b >= 0 && b <= MaxSignalBit {
+			out |= 1 << b
+		}
 	}
 	if fellBack {
 		out |= FellBackBit
@@ -511,14 +514,17 @@ func (s *Signals) Bits(idx []int, fellBack bool) int64 {
 }
 
 // FromBits are the signals of bits (SignalBits), as indexes in List: a
-// bit no signal of List has is none's.
+// bit no signal of List has is none's, and a signal with no bit yet (one
+// lapilli serve was started with that the ledger doesn't keep yet: a
+// replica that follows a leader started without it, or before the
+// leader's first round) is tied to no alert.
 func (s *Signals) FromBits(bits int64) []int {
 	if !s.Named() {
 		return nil
 	}
 	var out []int
 	for i, x := range s.List {
-		if bits&(1<<x.Bit) != 0 {
+		if x.Bit >= 0 && x.Bit <= MaxSignalBit && bits&(1<<x.Bit) != 0 {
 			out = append(out, i)
 		}
 	}
