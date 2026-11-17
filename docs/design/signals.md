@@ -1,7 +1,7 @@
 # Impact signals: several, each named, with its own `for`, `match` and start
 
 Status: accepted; steps 1 (`lapilli verdict`, 0.53.0, "Step 1, as built"
-below) and 2 (`lapilli serve`, schema 022, 0.54.0, "Step 2, as built")
+below) and 2 (`lapilli serve`, schema 022, 0.55.0, "Step 2, as built")
 built, step 3 not. Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this changes how a firing is judged (an incident, and a rule beside a
 signal, get labels of their own to be matched on, and a rule can be judged

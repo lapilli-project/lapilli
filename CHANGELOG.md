@@ -68,7 +68,7 @@
   `marked_days` and `marked_weeks` keyed by `signals` too, every row
   copied in once. A ledger with one impact signal with no name upgrades
   with its windows, keys, decisions, tasks, comments and start unchanged,
-  and judges as it did. A lapilli before 0.54 doesn't open a ledger this
+  and judges as it did. A lapilli before 0.55 doesn't open a ledger this
   one has migrated: take a snapshot of its disk, or of its database,
   before upgrading, to go back to.
 
