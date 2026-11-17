@@ -144,19 +144,20 @@ func Load(path string) ([]Incident, error) {
 }
 
 // MaxWindowValues is how many values of a label a window found in an
-// impact signal keeps: the first in order, as the ledger keeps a named
-// signal's (64 a label). A window that merged more series than that keeps
-// the first of their values, which a page shows as a label with more than
-// it shows, and a firing agrees with it by those it keeps, as with the
-// window the ledger keeps.
+// impact signal keeps, as the ledger keeps a named signal's (64 a label).
+// A window that merged more series than that, each with a value of its
+// own, keeps none of that label: as a label not all its series have, it
+// constrains nothing, so the window is caught by more firings, never by
+// fewer; one kept with some of its values only would be agreed with by
+// those alone.
 const MaxWindowValues = 64
 
 // FromImpact finds the windows where an impact expression returned
 // something for at least minLen: candidate incidents nobody wrote down. Each
 // series is looked at on its own, and its windows carry its labels, so an
 // expression by service finds which services were hit. Windows that overlap
-// are one incident, with every value of the labels they all have, up to
-// MaxWindowValues a label. Gaps shorter than two steps don't split a
+// are one incident, with every value of the labels they all have, a label
+// of more than MaxWindowValues values left out. Gaps shorter than two steps don't split a
 // window. Each keeps its series' own windows, as Spans. It stops when ctx
 // is done: an expression that isn't summed up can return 100,000 series.
 func FromImpact(ctx context.Context, series []prom.Series, step, minLen time.Duration) ([]Incident, error) {
@@ -211,7 +212,11 @@ func FromImpact(ctx context.Context, series []prom.Series, step, minLen time.Dur
 					delete(in.Labels, k) // not all have it: no constraint
 					continue
 				}
-				in.Labels[k] = KeepValue(vs, v)
+				if vs, ok := KeepValue(vs, v); ok {
+					in.Labels[k] = vs
+				} else {
+					delete(in.Labels, k) // too many to keep: no constraint
+				}
 			}
 		}
 		if len(in.Labels) == 0 {
@@ -223,19 +228,20 @@ func FromImpact(ctx context.Context, series []prom.Series, step, minLen time.Dur
 }
 
 // KeepValue is vs, a label's values as a window keeps them, with v: each
-// once, in order, the first MaxWindowValues of them. v is looked for among
+// once, in order; false when v would be one more than MaxWindowValues,
+// and the label is to be left out (MaxWindowValues). v is looked for among
 // those kept, never among every value before it, so that a window of
 // 100,000 series, each with a value of its own, is merged in time linear
 // in them; the ledger keeps a window's values so too.
-func KeepValue(vs []string, v string) []string {
+func KeepValue(vs []string, v string) ([]string, bool) {
 	i, found := slices.BinarySearch(vs, v)
 	switch {
-	case found || i == MaxWindowValues:
-		return vs
-	case len(vs) == MaxWindowValues:
-		vs = vs[:MaxWindowValues-1] // the last in order makes way
+	case found:
+		return vs, true
+	case len(vs) >= MaxWindowValues:
+		return nil, false
 	}
-	return slices.Insert(vs, i, v)
+	return slices.Insert(vs, i, v), true
 }
 
 // FromSignal finds the windows of a named impact signal, as FromImpact

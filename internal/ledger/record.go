@@ -872,12 +872,13 @@ func PieceResume(end time.Time, signalFor, settle, step time.Duration) time.Time
 // keptWindowLabels are a named signal's window's labels as the ledger
 // keeps them, bounded as an incident's are (maxLabelBytes in all, as
 // JSON): each name and value cut as an alert's are (verdict.KeptName,
-// KeptValue), 64 values a label (incident.MaxWindowValues, as a window is
-// found with), and, past 4 KB, the labels that don't fit left out, the
-// rest kept in order: a label left out constrains nothing, so the window
-// is caught by more, never by fewer. Within the bounds, as they are. A
-// label's values are kept as a window's are found (incident.KeepValue):
-// each looked for among the 64 kept, never among all of them.
+// KeptValue), a label of more than 64 values left out
+// (incident.MaxWindowValues, as a window is found with), and, past 4 KB,
+// the labels that don't fit left out, the rest kept in order: a label left
+// out constrains nothing, so the window is caught by more, never by fewer.
+// Within the bounds, as they are. A label's values are kept as a window's
+// are found (incident.KeepValue): each looked for among the 64 kept, never
+// among all of them.
 func keptWindowLabels(l incident.Labels) incident.Labels {
 	within := true
 	for k, vs := range l {
@@ -895,12 +896,17 @@ func keptWindowLabels(l incident.Labels) incident.Labels {
 		if _, taken := out[kk]; taken {
 			continue
 		}
-		// Each value cut, then the first 64 in order: the same 64 whether
-		// a window's values came at once or a piece at a time
-		// (mergeLabels).
+		// Each value cut, in order; past 64 none: the same whether a
+		// window's values came at once or a piece at a time (mergeLabels).
 		var vs []string
+		ok := true
 		for _, v := range l[k] {
-			vs = incident.KeepValue(vs, verdict.KeptValue(v))
+			if vs, ok = incident.KeepValue(vs, verdict.KeptValue(v)); !ok {
+				break
+			}
+		}
+		if !ok {
+			continue
 		}
 		b, _ := json.Marshal(map[string][]string{kk: vs})
 		if size+len(b)-1 > maxLabelBytes {

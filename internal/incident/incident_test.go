@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -200,51 +201,60 @@ func TestFromSignal(t *testing.T) {
 // An expression that isn't summed up, over a metric whose labels a
 // workload sets (a path, a client's id), returns as many series as one
 // range is read with (100,000), each with values of its own, all in the
-// same minute: one window. It keeps the first MaxWindowValues values of
-// each label in order, as the ledger keeps a window's, each value looked
-// for among those: a window of all 800,000 took minutes to merge, each
-// looked for among all before it.
+// same minute: one window. A label of more values than MaxWindowValues is
+// left out, as a label not all of them have, each value looked for among
+// those kept until then: a window of all 800,000 took minutes to merge,
+// each looked for among all before it. A label they share stays.
 func TestFromSignalAtTheSeriesCap(t *testing.T) {
 	const n, labels = 100000, 8
 	series := make([]prom.Series, n)
 	for i := range series {
-		l := map[string]string{}
+		l := map[string]string{"job": "api"}
 		for k := range labels {
 			l[fmt.Sprintf("l%d", k)] = fmt.Sprintf("value-%06d", n-1-i)
 		}
 		series[i] = prom.Series{Labels: l, Samples: []prom.Sample{{T: t0, V: 1}}}
 	}
 	ws, err := FromSignal(context.Background(), series, time.Minute, time.Minute, "errors", nil)
-	if err != nil || len(ws) != 1 || len(ws[0].Spans) != n || len(ws[0].Labels) != labels {
+	if err != nil || len(ws) != 1 || len(ws[0].Spans) != n {
 		t.Fatalf("%d windows, %v", len(ws), err)
 	}
-	var first []string
-	for i := range MaxWindowValues {
-		first = append(first, fmt.Sprintf("value-%06d", i))
+	if want := (Labels{"job": {"api"}}); !reflect.DeepEqual(ws[0].Labels, want) {
+		t.Errorf("labels %v, want %v", ws[0].Labels, want)
 	}
-	for k, vs := range ws[0].Labels {
-		if !slices.Equal(vs, first) {
-			t.Errorf("%s: %d values, from %v: want the first %d in order", k, len(vs), vs[:min(len(vs), 3)], MaxWindowValues)
-		}
+	// A firing of any of the series agrees with the window, the last one
+	// merged too: none is left out of it by a value it didn't keep.
+	if !ws[0].Labels.Agree(map[string]string{"job": "api", "l0": "value-000000"}, []string{"job", "l0"}) {
+		t.Error("a firing of the last series doesn't agree with the window")
 	}
 }
 
-// KeepValue keeps each value once, the first MaxWindowValues in order, and
-// never holds more than those: a value is looked for among them alone.
+// KeepValue keeps each value once, in order, MaxWindowValues of them at
+// most: one more says the label is to be left out.
 func TestKeepValue(t *testing.T) {
 	var vs []string
-	for i := 1000; i > 0; i-- {
-		vs = KeepValue(vs, fmt.Sprintf("v%04d", i))
-		vs = KeepValue(vs, fmt.Sprintf("v%04d", i)) // the same again
-		if len(vs) > MaxWindowValues || !slices.IsSorted(vs) {
+	ok := true
+	for i := MaxWindowValues; i > 0; i-- {
+		if vs, ok = KeepValue(vs, fmt.Sprintf("v%04d", i)); !ok {
+			t.Fatalf("v%04d: refused", i)
+		}
+		if vs, ok = KeepValue(vs, fmt.Sprintf("v%04d", i)); !ok || !slices.IsSorted(vs) { // the same again
 			t.Fatalf("after v%04d: %d values, sorted %v", i, len(vs), slices.IsSorted(vs))
 		}
 	}
-	if len(vs) != MaxWindowValues || vs[0] != "v0001" || vs[MaxWindowValues-1] != fmt.Sprintf("v%04d", MaxWindowValues) {
-		t.Errorf("%d values, %s to %s", len(vs), vs[0], vs[len(vs)-1])
+	if len(vs) != MaxWindowValues || vs[0] != "v0001" {
+		t.Errorf("%d values, from %s", len(vs), vs[0])
+	}
+	if _, ok := KeepValue(vs, "v0001"); !ok {
+		t.Error("a value kept already is refused")
+	}
+	if _, ok := KeepValue(vs, "v9999"); ok {
+		t.Errorf("a value past %d is kept", MaxWindowValues)
 	}
 	// Within the bound, every value, in order, as before.
-	if got := KeepValue(KeepValue(KeepValue(nil, "search"), "cart"), "search"); !slices.Equal(got, []string{"cart", "search"}) {
+	got, _ := KeepValue(nil, "search")
+	got, _ = KeepValue(got, "cart")
+	if got, _ = KeepValue(got, "search"); !slices.Equal(got, []string{"cart", "search"}) {
 		t.Errorf("%v", got)
 	}
 }

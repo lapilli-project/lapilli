@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -327,26 +328,42 @@ func TestWindowGoingOnWithOtherLabelsPended(t *testing.T) {
 	}
 }
 
-// A named signal's window with more than 64 values of a label keeps the
-// same 64 whether its values came at once or a piece at a time: the first
-// in order.
+// A named signal's window with more than 64 values of a label leaves the
+// label out whether its values came at once or a piece at a time, and keeps
+// one of 64 alike: a label left out constrains nothing, so the window is
+// caught by more firings, never by fewer.
 func TestWindowValuesKeptAlike(t *testing.T) {
-	var all []string
-	for i := range 100 {
-		all = append(all, fmt.Sprintf("svc-%03d", 99-i))
-	}
-	whole := keptWindowLabels(incident.Labels{"service": slices.Clone(all)})
-	first := keptWindowLabels(incident.Labels{"service": slices.Clone(all[:50])})
-	rest := keptWindowLabels(incident.Labels{"service": slices.Clone(all[50:])})
-	pieces := keptWindowLabels(mergeLabels(first, rest))
-	if !slices.Equal(whole["service"], pieces["service"]) || len(whole["service"]) != 64 {
-		t.Errorf("at once %v\na piece at a time %v", whole["service"], pieces["service"])
+	for _, n := range []int{64, 100} {
+		var all []string
+		for i := range n {
+			all = append(all, fmt.Sprintf("svc-%03d", n-1-i))
+		}
+		half := n / 2
+		labels := func(vs []string) incident.Labels {
+			return incident.Labels{"service": slices.Clone(vs), "job": {"api"}}
+		}
+		// The same values, each label's in order: within the bounds a
+		// window's are kept in the order they came.
+		sorted := func(l incident.Labels) incident.Labels {
+			for k := range l {
+				slices.Sort(l[k])
+			}
+			return l
+		}
+		whole := sorted(keptWindowLabels(labels(all)))
+		pieces := sorted(keptWindowLabels(mergeLabels(keptWindowLabels(labels(all[:half])), keptWindowLabels(labels(all[half:])))))
+		if !reflect.DeepEqual(whole, pieces) || !slices.Equal(whole["job"], []string{"api"}) {
+			t.Errorf("%d values: at once %v\na piece at a time %v", n, whole, pieces)
+		}
+		if _, kept := whole["service"]; kept != (n <= 64) {
+			t.Errorf("%d values: service kept %v", n, kept)
+		}
 	}
 }
 
 // A window's label of 100,000 values, each first in order as it comes (the
-// most an insertion can move), keeps the first 64 in order, each looked for
-// among those kept: never all of them held, nor written out to be
+// most an insertion can move), is left out, each looked for among those
+// kept until then: never all of them held, nor written out to be
 // measured. All of them were, each looked for among all before it.
 func TestWindowValuesKeptOfMany(t *testing.T) {
 	const n = 100000
@@ -360,8 +377,8 @@ func TestWindowValuesKeptOfMany(t *testing.T) {
 	runtime.ReadMemStats(&m0)
 	got := keptWindowLabels(l)
 	runtime.ReadMemStats(&m1)
-	if p := got["path"]; len(p) != 64 || p[0] != "path-000000" || p[63] != "path-000063" || !slices.Equal(got["service"], []string{"checkout"}) {
-		t.Errorf("%d values of path, %v", len(p), got["service"])
+	if want := (incident.Labels{"service": {"checkout"}}); !reflect.DeepEqual(got, want) {
+		t.Errorf("%v, want %v", got, want)
 	}
 	if a := m1.TotalAlloc - m0.TotalAlloc; a > 256<<10 {
 		t.Errorf("%d KiB allocated for 64 values kept of %d", a>>10, n)

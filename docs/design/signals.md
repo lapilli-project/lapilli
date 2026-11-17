@@ -710,10 +710,14 @@ As counts and bytes, which the tests hold, not times:
   checked as Prometheus's; the expression checked as v0.49.0 checks it,
   as is one with no name, given to `--impact`;
   rule patterns checked as a team's are. The series' labels become
-  windows' labels, 64 values a label, the first in order, however many
-  series a window merges (an expression not summed up, over a label a
-  workload sets, returns as many as there are values), kept as an
-  incident's are, and shown escaped; what a signal has returned is
+  windows' labels, 64 values a label, however many series a window
+  merges (an expression not summed up, over a label a workload sets,
+  returns as many as there are values): a label of more is left out, as
+  one not all the series have, so that it constrains nothing and the
+  window is caught by more firings, never by fewer (as built in 0.56.1;
+  0.55.0 and 0.56.0 kept the first 64 in order, which a firing of another
+  value didn't agree with). They are kept as an incident's are, and shown
+  escaped; what a signal has returned is
   bounded as above.
 - **Where names go.** Into incidents' keys and pages, the summary,
   `/metrics` labels (escaped, eight values at most), the digest and
