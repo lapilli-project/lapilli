@@ -1693,6 +1693,11 @@ func (s *Server) settingsPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	if r.URL.Query().Get("impact-try") != "" {
+		// With named signals, there is no one criterion to try: an admin's
+		// tries aren't spent on what the page wouldn't show.
+		if s.namedSignals() {
+			return nil, bad("serve reads named impact signals, set where it starts (--impact NAME=PROMQL, --impact-file): one with no name doesn't go beside them, and changing them here comes in a later release")
+		}
 		if err := s.tryImpact(r, v.Criteria); err != nil {
 			return nil, err
 		}

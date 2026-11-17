@@ -2078,6 +2078,6 @@
  "Keeps the record": "Mantiene el registro",
  "the match in effect": "las etiquetas en vigor",
  "no label": "ninguna etiqueta",
- "keeps it from %s": "desde %s",
- "no": "no"
+ "no": "no",
+ "yes, since %s": "sí, desde %s"
 }

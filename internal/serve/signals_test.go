@@ -1106,3 +1106,23 @@ func TestSignalWindowLabelsBounded(t *testing.T) {
 		t.Errorf("window %s kept with %d bytes of labels: %.200s", ws[0].ID, len(b), b)
 	}
 }
+
+// With named signals, the Settings page's try is refused, and asks
+// nothing: there is no one criterion to try beside them.
+func TestSignalsTryRefused(t *testing.T) {
+	h := shopHistory()
+	s := signalServer(t, h, nil)
+	h.mu.Lock()
+	h.asked = nil
+	h.mu.Unlock()
+	code, _ := askAs(t, s.Handler(), http.MethodGet, "/settings?impact-try=1&impact="+url.QueryEscape("tried_expr > 1"), nil, "ana@example.com", "same-origin")
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if code == http.StatusOK || slices.ContainsFunc(h.asked, func(q string) bool { return strings.Contains(q, "tried_expr") }) {
+		t.Errorf("a try beside named signals: %d, asked %q", code, h.asked)
+	}
+	_, body := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
+	if !strings.Contains(body, "yes, since ") {
+		t.Errorf("the signals' list doesn't say from when each keeps the record")
+	}
+}

@@ -2078,6 +2078,6 @@
  "Keeps the record": "記録を残すか",
  "the match in effect": "有効な照合ラベル",
  "no label": "ラベルなし",
- "keeps it from %s": "%s から",
- "no": "いいえ"
+ "no": "いいえ",
+ "yes, since %s": "はい、%s から"
 }

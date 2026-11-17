@@ -111,7 +111,7 @@ change and to try on the last four weeks first; everyone else reads it. */}}
 <caption>{{t "Impact signals"}}</caption>
 <thead><tr><th scope="col">{{t "Signal"}}</th><th scope="col">{{t "How long it must last"}}</th><th scope="col">{{t "Matched on"}}</th><th scope="col">{{t "Keeps the record"}}</th></tr></thead>
 <tbody>{{range .}}<tr><th scope="row"><code><bdi>{{.Name}}</bdi></code></th><td>{{.For}}</td><td>{{if .Follows}}{{t "the match in effect"}}{{else if .Match}}<code><bdi>{{join .Match ", "}}</bdi></code>{{else}}{{t "no label"}}{{end}}</td>
-<td>{{if not .Record}}{{t "no"}}{{else if .Start.IsZero}}{{t "not yet"}}{{else}}{{t "keeps it from %s" (at $loc .Start)}}{{end}}</td></tr>{{end}}</tbody>
+<td>{{if not .Record}}{{t "no"}}{{else if .Start.IsZero}}{{t "not yet"}}{{else}}{{t "yes, since %s" (at $loc .Start)}}{{end}}</td></tr>{{end}}</tbody>
 </table></div>{{else}}{{if $edit}}<form method="post" action="/settings/impact" class="criteria">{{range $p.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{else}}<div class="criteria">{{end}}
 {{range .Settings}}<div class="field">
 {{if $edit}}<label for="criterion-{{.Key}}">{{else}}<p class="field-name">{{end}}<code>{{.Flag}}</code> {{if eq .Key "impact"}}{{t "Impact signal (PromQL)"}}{{else}}{{t "How long it must last"}}{{end}}{{if $edit}}</label>{{else}}</p>{{end}}

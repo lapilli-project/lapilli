@@ -2078,6 +2078,6 @@
  "Keeps the record": "기록 유지",
  "the match in effect": "적용 중인 라벨",
  "no label": "라벨 없음",
- "keeps it from %s": "%s 부터",
- "no": "아니요"
+ "no": "아니요",
+ "yes, since %s": "예, %s 부터"
 }
