@@ -837,7 +837,7 @@ func TestTokenOneAtATimeAndPassedOver(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.jobs(ctx, true)
-	if st := s.statusView("en"); !strings.Contains(st.Err, "INC-2") {
+	if st := s.statusView("en", true); !strings.Contains(st.Err, "INC-2") {
 		t.Errorf("the status after a run: %+v", st)
 	}
 	_, body, _ := get(t, h, "/metrics")
@@ -846,7 +846,7 @@ func TestTokenOneAtATimeAndPassedOver(t *testing.T) {
 	}
 	os.WriteFile(s.cfg.Incidents, []byte("incidents:\n  - {id: INC-1, start: 2026-11-02T06:01:00Z}\n"), 0o644)
 	s.jobs(ctx, true)
-	if st := s.statusView("en"); st.Err != "" {
+	if st := s.statusView("en", true); st.Err != "" {
 		t.Errorf("read cleanly, the status still says: %+v", st)
 	}
 	_, body, _ = get(t, h, "/metrics")

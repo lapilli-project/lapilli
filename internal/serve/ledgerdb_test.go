@@ -5,11 +5,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"html"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -239,5 +243,52 @@ func TestSendDueHoldsTheLedger(t *testing.T) {
 	}
 	if n := sent.Load(); n != 0 {
 		t.Errorf("a process whose lock another took sent %d notices", n)
+	}
+}
+
+// Why the ledger's Postgres can't be reached says where it is and, as its
+// server answers, as whom serve connects to which database: an admin reads
+// it, in the status banner and on a page that failed for it; anyone else,
+// that it can't be reached.
+func TestLedgerUnreachedAnAdminsToRead(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	// A port nothing listens on, on this machine: refused at once.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	_, refused := ledger.OpenPostgres(ctx, "postgres://svc-user@"+addr+"/store-db?sslmode=disable&connect_timeout=5", time.UTC)
+	if !errors.Is(refused, ledger.ErrConnect) || !strings.Contains(refused.Error(), addr) {
+		t.Fatalf("not refused as it should be: %v", refused)
+	}
+	// As a server answers that refuses who connects, which names them.
+	answered := fmt.Errorf("recording a run: %w", fmt.Errorf(`%w: the server says: no pg_hba.conf entry for host "10.1.2.3", user "svc-user", database "store-db" (SQLSTATE 28000)`, ledger.ErrConnect))
+	s := criteriaServer(t, false, nil)
+	h := s.Handler()
+	for _, err := range []error{refused, answered} {
+		s.fail("the ledger", err)
+		said := []string{addr, "10.1.2.3", "svc-user", "store-db"}
+		for _, who := range []string{"carl@example.com", "bo@example.com", "ana@example.com"} {
+			_, body := askAs(t, h, http.MethodGet, "/", nil, who, "same-origin")
+			admin := who == "ana@example.com"
+			if shown := slices.ContainsFunc(said, func(x string) bool { return strings.Contains(body, x) }); shown != admin {
+				t.Errorf("%s, %v: the banner says where and as whom: %v", who, err, shown)
+			}
+			if strings.Contains(body, html.EscapeString(unreachedText)) == admin {
+				t.Errorf("%s, %v: the banner doesn't say it as it should", who, err)
+			}
+			for _, p := range []string{"/rules", "/api/v1/runs"} {
+				r := httptest.NewRequest(http.MethodGet, p, nil)
+				r.Header.Set("X-Forwarded-Email", who)
+				w := httptest.NewRecorder()
+				s.oops(w, r, err)
+				if shown := slices.ContainsFunc(said, func(x string) bool { return strings.Contains(w.Body.String(), x) }); shown != admin {
+					t.Errorf("%s, %s, %v: the page that failed says where and as whom: %v", who, p, err, shown)
+				}
+			}
+		}
 	}
 }

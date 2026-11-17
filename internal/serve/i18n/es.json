@@ -2148,5 +2148,6 @@
  "the marked windows made in the UI would take %d kinds, counting those no window names any more until their firings are judged again; they take %d at most, the rest kept for the marked file, --config and the expressions: use a kind there is": "las ventanas marcadas creadas en la interfaz ocuparían %d tipos, contando los que ya no nombra ninguna ventana hasta que sus disparos se vuelvan a juzgar; ocupan %d como máximo, el resto queda para el archivo de ventanas marcadas, --config y las expresiones: usa un tipo que exista",
  "the deploys file": "el archivo de despliegues",
  "the config file": "el archivo de config",
- "the path given to %s": "la ruta dada a %s"
+ "the path given to %s": "la ruta dada a %s",
+ "can't reach the ledger's database; an admin sees why": "no se puede conectar con la base de datos del registro; un administrador ve por qué"
 }

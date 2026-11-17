@@ -2148,5 +2148,6 @@
  "the marked windows made in the UI would take %d kinds, counting those no window names any more until their firings are judged again; they take %d at most, the rest kept for the marked file, --config and the expressions: use a kind there is": "UI 에서 만든 이벤트 구간이 종류 %d개를 쓰게 돼요. 더는 어느 구간도 쓰지 않는 종류도 그 알림을 다시 판정할 때까지 세요. UI 몫은 %d개까지이고, 나머지는 이벤트 구간 파일·--config·표현식 몫이에요. 있는 종류를 써 주세요",
  "the deploys file": "배포 파일",
  "the config file": "config 파일",
- "the path given to %s": "%s 에 준 경로"
+ "the path given to %s": "%s 에 준 경로",
+ "can't reach the ledger's database; an admin sees why": "원장 데이터베이스에 연결할 수 없어요. 이유는 관리자가 볼 수 있어요"
 }

@@ -2148,5 +2148,6 @@
  "the marked windows made in the UI would take %d kinds, counting those no window names any more until their firings are judged again; they take %d at most, the rest kept for the marked file, --config and the expressions: use a kind there is": "UI で作ったイベント期間が %d 種類を使うことになります。どの期間も使わなくなった種類も、その発火を判定し直すまで数えます。UI の分は最大 %d 種類で、残りはイベント期間ファイル・--config・式の分です。既存の種類を使ってください",
  "the deploys file": "デプロイファイル",
  "the config file": "config ファイル",
- "the path given to %s": "%s に渡したパス"
+ "the path given to %s": "%s に渡したパス",
+ "can't reach the ledger's database; an admin sees why": "台帳のデータベースに接続できません。理由は管理者が確認できます"
 }

@@ -1169,7 +1169,10 @@ file), and where it leads, should it be a link: an error reading one says
 it by what it is to anyone else, in the status banner, here, and the run
 history (`/runs`, `/api/v1/runs`, the Overview's last run), where it is
 said whole, never inside a word, and the Settings page and
-`/api/v1/settings` name `--config` by its flag. The
+`/api/v1/settings` name `--config` by its flag. Why the ledger's Postgres
+can't be reached says where it is and, as its server answers, the user
+and the database: anyone but an admin reads that it can't be reached, in
+the banner and on a page that failed for it. The
 Incidents page links to the section. What the replica that leads saw (last
 reads, failures) is in its published status, for the others' pages.
 

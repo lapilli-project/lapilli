@@ -1035,9 +1035,9 @@ type langLink struct {
 
 func (s *Server) page(r *http.Request, name string, v any) page {
 	l := lang(r)
-	p := page{Page: name, View: v, Status: s.statusView(l), Path: r.URL.Path, Loc: s.cfg.Loc, Lang: l}
 	// What the page offers to change is what the reader may.
 	role := s.role(r)
+	p := page{Page: name, View: v, Status: s.statusView(l, role == admin), Path: r.URL.Path, Loc: s.cfg.Loc, Lang: l}
 	p.Status.ReadOnly = role < editor
 	p.Status.Admin = role == admin
 	p.Status.Teams = s.editsTeams(r)
@@ -1050,11 +1050,6 @@ func (s *Server) page(r *http.Request, name string, v any) page {
 	}
 	if role < editor {
 		p.Status.Why = s.why(r)
-	}
-	if role != admin {
-		// The paths of the files serve was started with are an admin's to
-		// read (sources.go).
-		p.Status.Err = s.redactPaths(p.Status.Err, l)
 	}
 	// A page that refuses or finds nothing, or says one has signed out, is
 	// shown to whoever asked, a stranger too: nothing of the ledger, nor
@@ -1131,7 +1126,9 @@ type statusView struct {
 	Why string
 }
 
-func (s *Server) statusView(l string) statusView {
+// statusView is the status banner in language l, as an admin reads it or
+// anyone else.
+func (s *Server) statusView(l string, adminReads bool) statusView {
 	// The leader's, on a replica that follows.
 	st := s.shownStatus()
 	v := statusView{Judged: int(100 * st.Judged), ReadOnly: s.cfg.ReadOnly, Version: s.cfg.Version, Zone: s.cfg.Loc.String(),
@@ -1141,10 +1138,31 @@ func (s *Server) statusView(l string) statusView {
 		v.Doing = tr(l, st.Doing, st.args()...)
 	}
 	if st.Err != "" {
-		v.Err = tr(l, st.ErrWhat) + ": " + st.Err
+		why := st.Err
+		switch {
+		case adminReads:
+		case unreached(st.Err):
+			// Why the ledger's database can't be reached says where it is
+			// and as whom serve connects: the server's address, and what
+			// it answered, which can name the user and the database.
+			why = tr(l, unreachedText)
+		default:
+			// The paths of the files serve was started with (sources.go).
+			why = s.redactPaths(why, l)
+		}
+		v.Err = tr(l, st.ErrWhat) + ": " + why
 	}
 	return v
 }
+
+// unreachedText is why the ledger's database can't be reached, as it is
+// said to anyone but an admin.
+const unreachedText = "can't reach the ledger's database; an admin sees why"
+
+// unreached reports whether a status error is that the ledger's database
+// couldn't be reached (ledger.ErrConnect): told by its text, as the leader
+// shares its status with the other replicas.
+func unreached(err string) bool { return strings.Contains(err, ledger.ErrConnect.Error()) }
 
 // oops answers with an error, as a page or as JSON.
 func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
@@ -1174,6 +1192,11 @@ func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
 	text := func(lang string) string { return message(lang, err) }
 	if errors.As(err, new(notLetIn)) {
 		text = func(lang string) string { return tr(lang, notLetInText, s.user(r)) }
+	}
+	if errors.Is(err, ledger.ErrConnect) && s.role(r) != admin {
+		// Where the ledger's database is, and as whom serve connects, are
+		// an admin's to read, as in the status banner.
+		text = func(lang string) string { return tr(lang, unreachedText) }
 	}
 	if errors.Is(err, errPagesBusy) {
 		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(renderWait/time.Second))))
