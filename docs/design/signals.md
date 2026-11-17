@@ -2,7 +2,7 @@
 
 Status: accepted; steps 1 (`lapilli verdict`, 0.53.0, "Step 1, as built"
 below), 2 (`lapilli serve`, schema 022, 0.55.0, "Step 2, as built") and 3
-(the Settings page by signal, no schema change, "Step 3, as built")
+(the Settings page by signal, no schema change, 0.58.0, "Step 3, as built")
 built. Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this changes how a firing is judged (an incident, and a rule beside a
 signal, get labels of their own to be matched on, and a rule can be judged

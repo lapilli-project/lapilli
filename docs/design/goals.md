@@ -1,7 +1,7 @@
 # Goals: what an operations team holds its alerting to
 
 Status: built. Steps 1 and 2 in 0.53.0, schema 020; step 3, goals over a
-period, for the next release, over marked windows' schema 021 (#90), with
+period, in 0.57.0, over marked windows' schema 021 (#90), with
 no schema of its own. Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this is a new kind of data in the ledger (the next schema at build time),
 so it was designed first, as a pull request (#91); it was merged on
