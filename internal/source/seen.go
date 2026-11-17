@@ -95,6 +95,11 @@ func SeenFrom(ctx context.Context, h replay.History, expr string, labels []strin
 // labelName is what PromQL counts by unquoted.
 var labelName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
+// SeenSelectors are the selectors an expression's series are counted by
+// for what it reads (SeenFrom), a request each: as lapilli preflight
+// counts them.
+func SeenSelectors(expr string) ([]string, error) { return seenSelectors(expr) }
+
 // seenSelectors are the selectors an expression's series are counted by
 // for what it reads (SeenFrom): those it reads, each that only narrows
 // another in place of its stand-ins, but for a stand-in made of a selector

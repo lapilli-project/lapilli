@@ -663,6 +663,33 @@ func TestEstimateImpact(t *testing.T) {
 	}
 }
 
+// Named signals are each read as --impact is, over each run; beside the
+// runs, each round looks at what each reads, a request a selector it
+// counts (the 5xx selector through the requests it narrows, once), and a
+// first start looks for where the data of each selector, and stand-in,
+// begins.
+func TestEstimateSignals(t *testing.T) {
+	c := config()
+	c.Serve.Settle, c.Serve.Backfill = 0, 3*24*time.Hour
+	c.Serve.Options.Match = []string{"service"}
+	c.Serve.Signals = []ledger.SignalDef{
+		{Name: "errors", Expr: `sum by (service) (rate(http_requests_total{code=~"5.."}[5m])) / sum by (service) (rate(http_requests_total[5m])) > 0.05`, For: 5 * time.Minute, Record: true},
+		{Name: "payments", Expr: "sum(rate(payments_succeeded_total[5m])) == 0", For: time.Minute, Match: []string{}},
+	}
+	p := newRun(c)
+	p.backfill(oneRule())
+	// Each day's piece two requests a signal; once, the errors' three data
+	// looks (two selectors and a stand-in) and payments' one, and the
+	// errors' one look at what it reads (payments is matched on none).
+	if b := p.r.Estimates.Backfill; b.Impact != 2*6+3+1+1 {
+		t.Errorf("backfill: %+v", b)
+	}
+	p.hourly(oneRule())
+	if h := p.r.Estimates.Hourly; h.Impact != h.Runs*(2+1) {
+		t.Errorf("hourly: %d runs, %d impact requests; want a read of each signal and a look at errors' a run", h.Runs, h.Impact)
+	}
+}
+
 // The backfill's days more than a day behind are a catch-up, at the lower
 // of --max-rate and --catch-up-rate; the rest at --max-rate, or, without
 // it, at no rate the estimate can say: no more than the catch-up's time.

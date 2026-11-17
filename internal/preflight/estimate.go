@@ -10,10 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/serve"
+	"lapilli.dev/internal/source"
 )
 
 // Estimates are the numbers the estimate items say, worked out from what
@@ -169,20 +171,56 @@ func promRequests(from, to time.Time, step time.Duration) int {
 }
 
 // asides are the --impact read and the --guard query of a run over [from,
-// to], to --prometheus.
-func (p *run) asides(from, to time.Time) (impact, guard int) {
+// to], to --prometheus; with round, the look at what each named signal
+// reads that follows a round's runs, a round a run once caught up.
+func (p *run) asides(from, to time.Time, round bool) (impact, guard int) {
 	s := p.c.Serve
 	if s.Impact != "" {
 		impact = promRequests(from.Add(-time.Hour), to, s.Step)
 	}
-	// Each named signal is read on its own (docs/design/signals.md).
-	for range s.Signals {
+	// Each named signal is read on its own (docs/design/signals.md); and,
+	// after the round's runs, what it reads, by its match labels, a
+	// request a selector it counts.
+	for _, d := range s.Signals {
 		impact += promRequests(from.Add(-time.Hour), to, s.Step)
+		if round {
+			impact += seenLooks(d, s.Options.Match)
+		}
 	}
 	if s.Guard != "" {
 		guard = 1
 	}
 	return impact, guard
+}
+
+// seenLooks are the requests a round's look at what a named signal reads
+// asks: one a selector it counts, none matched on no label.
+func seenLooks(d ledger.SignalDef, match []string) int {
+	if len(d.MatchOr(match)) == 0 {
+		return 0
+	}
+	sels, err := source.SeenSelectors(d.Expr)
+	if err != nil {
+		return 0
+	}
+	return len(sels)
+}
+
+// signalsOnce are the requests a first start asks of named signals once,
+// beside its runs: where the data of each selector, and stand-in, each
+// reads begins (until it is found, a request each, a round at a time).
+// A read again (a signal added, or its expression or for changed, on a
+// ledger with runs: one query over five weeks at most) and the catch-up
+// of a signal missed (read again from where it was, within a week, as a
+// run reads it) come later, and only then.
+func signalsOnce(s serve.Config) int {
+	n := 0
+	for _, d := range s.Signals {
+		if sels, err := ledger.SelectorsOf(d.Expr); err == nil {
+			n += len(sels)
+		}
+	}
+	return n
 }
 
 func sum(m map[string]int) int {
@@ -217,7 +255,7 @@ func (p *run) hourly(rs []rules.Rule) {
 		to := day.Add(time.Duration(k) * s.Every).Truncate(s.Step)
 		from := to.Add(-s.Every - s.Settle).Truncate(s.Step)
 		by := p.piece(rs, from, to)
-		impact, guard := p.asides(from, to)
+		impact, guard := p.asides(from, to, true)
 		by["prometheus"] += impact + guard
 		h.Impact += impact
 		h.Guard += guard
@@ -281,7 +319,7 @@ func (p *run) backfill(rs []rules.Rule) {
 			to = now
 		}
 		by := p.piece(rs, from, to)
-		impact, guard := p.asides(from, to)
+		impact, guard := p.asides(from, to, false)
 		by["prometheus"] += impact + guard
 		b.Impact += impact
 		b.Guard += guard
@@ -300,6 +338,16 @@ func (p *run) backfill(rs []rules.Rule) {
 		}
 		b.Pieces++
 		cursor, settle = to, s.Settle
+	}
+	// And of named signals, once: where the data each reads begins, and
+	// the look at what each reads after the backfill's round.
+	if len(s.Signals) > 0 {
+		once := signalsOnce(s)
+		for _, d := range s.Signals {
+			once += seenLooks(d, s.Options.Match)
+		}
+		b.By["prometheus"] += once
+		b.Impact += once
 	}
 	b.Requests = sum(b.By)
 	p.r.Estimates.Backfill = b
