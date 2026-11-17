@@ -517,12 +517,12 @@ read) and `impact_floor`.
   the label, so a selector that can never match keeps the record. Not a
   selector an `absent()` or `absent_over_time()` reads, at any depth. A
   stand-in made of a selector with no data of its own says nothing, and
-  isn't looked for; while one isn't looked for yet, a selector with data
-  keeps its own start, and `impact_since` isn't moved by it. A ledger kept
-  before stand-ins looks for them at the next round, and gives back their
-  `for` to entries a lapilli before them wrote back. The settings page
-  says of such a selector "nothing matched since" or "kept from", with its
-  stand-in.
+  isn't looked for; while one isn't looked for yet as far as the first
+  sample of a selector with data, that selector keeps its own start, and
+  `impact_since` isn't moved by it. A ledger kept before stand-ins looks
+  for them at the next round, and gives back their `for` to entries a
+  lapilli before them wrote back. The settings page says of such a
+  selector "nothing matched since" or "kept from", with its stand-in.
   It moves
   `impact_since` forward, never back, on a first start, after an upgrade
   (from the `impact_since` the ledger has), and once a criterion is read

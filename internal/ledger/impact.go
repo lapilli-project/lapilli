@@ -220,8 +220,8 @@ func (d *ImpactData) Effective() []SelectorData {
 }
 
 // Pending reports whether a selector of d with data of its own has a
-// stand-in not looked for yet, which may begin it earlier: its start
-// holds for now, but moves impact_since nowhere.
+// stand-in not looked for yet as far as that data, which may begin it
+// earlier: its start holds for now, but moves impact_since nowhere.
 func (d *ImpactData) Pending() bool {
 	for _, b := range d.read() {
 		if _, _, unknown := d.stoodIn(b.Sel); unknown && !b.First.IsZero() {
@@ -245,16 +245,22 @@ func (d *ImpactData) read() []SelectorData {
 // stoodIn is, of sel's stand-ins made of a selector with data of its own,
 // the one whose data begins the latest, when every one had data: each
 // reads more series than sel does, the latest the fewest. Unknown, when
-// one of them wasn't looked for yet: none, till it is. A stand-in made of
-// a selector with no data, which has none either, says nothing of sel's
-// labels.
+// one of them with no data found wasn't looked for yet, or not as far as
+// sel's own first sample: none, till it is. A stand-in made of a selector
+// with no data, which has none either, says nothing of sel's labels.
 func (d *ImpactData) stoodIn(sel string) (x SelectorData, ok, unknown bool) {
+	var own time.Time
+	for _, b := range d.read() {
+		if b.Sel == sel {
+			own = b.First
+		}
+	}
 	for _, s := range d.Selectors {
 		if s.For != sel || !d.HasData(s.Of) {
 			continue
 		}
 		switch {
-		case s.To.IsZero() && s.First.IsZero():
+		case s.First.IsZero() && (s.To.IsZero() || !own.IsZero() && s.To.Before(own)):
 			return SelectorData{}, false, true
 		case s.First.IsZero():
 			return SelectorData{}, false, false

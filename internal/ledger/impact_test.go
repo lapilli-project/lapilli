@@ -770,4 +770,22 @@ func TestImpactDataPending(t *testing.T) {
 	if k, err = l.ImpactKept(ctx); err != nil || !k.Since.Equal(was.Since) || !k.From().Equal(was.Since) {
 		t.Errorf("looked for: since %s, from %s (%v)", k.Since, k.From(), err)
 	}
+	// Looked for, with nothing found, only as far as before the selector's
+	// own first sample (a look that failed after): pending still.
+	d.Selectors[2].First, d.Selectors[2].AtStart, d.Selectors[2].To = time.Time{}, false, start.Add(5*24*time.Hour)
+	if err := l.SetImpactData(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	if k, err = l.ImpactKept(ctx); err != nil || !k.Since.Equal(was.Since) || !k.Data.Pending() {
+		t.Errorf("looked for part of the way: since %s, pending %v (%v)", k.Since, k.Data.Pending(), err)
+	}
+	// Looked for past it, with nothing found: the code label came with the
+	// 5xx; its own start.
+	d.Selectors[2].To = t0
+	if err := l.SetImpactData(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	if k, err = l.ImpactKept(ctx); err != nil || k.Data.Pending() || !k.Since.After(was.Since) {
+		t.Errorf("looked for past it: since %s, pending %v (%v)", k.Since, k.Data.Pending(), err)
+	}
 }
