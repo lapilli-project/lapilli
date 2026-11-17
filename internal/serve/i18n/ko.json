@@ -2066,5 +2066,18 @@
  "marked": "이벤트 구간",
  "the marked windows made in the UI would have %d occurrences in the week of %s; they have %d a week at most, the rest kept for the marked file, --config and the expressions": "UI 에서 만든 이벤트 구간이 %[2]s 주에 %[1]d개가 돼요. UI 몫은 한 주에 %[3]d개까지이고, 나머지는 이벤트 구간 파일·--config·표현식 몫이에요",
  "a team's marked windows would have %d occurrences in the week of %s; a team's have %d a week at most": "팀의 이벤트 구간이 %[2]s 주에 %[1]d개가 돼요. 한 팀의 구간은 한 주에 %[3]d개까지예요",
- "a team's editors use the kinds of marked window there are; an editor or an admin can make %s": "팀 편집자는 이미 있는 이벤트 구간 종류만 쓸 수 있어요. %s 는 편집자나 관리자가 만들 수 있어요"
+ "a team's editors use the kinds of marked window there are; an editor or an admin can make %s": "팀 편집자는 이미 있는 이벤트 구간 종류만 쓸 수 있어요. %s 는 편집자나 관리자가 만들 수 있어요",
+ "keeping the impact signals": "영향 지표 저장",
+ "reading the impact signal %s again over the last four weeks": "지난 4주 영향 지표 %s 다시 읽는 중",
+ "reading what the impact signals read": "영향 지표가 읽는 데이터 읽기",
+ "serve reads named impact signals, set where it starts (--impact NAME=PROMQL, --impact-file): one with no name doesn't go beside them, and changing them here comes in a later release": "serve 는 시작할 때 준 이름 있는 영향 지표 (--impact NAME=PROMQL, --impact-file) 를 읽어요. 이름 없는 지표는 함께 쓸 수 없고, 여기서 바꾸는 기능은 다음 릴리스에서 나와요",
+ "Named impact signals, set where serve starts (--impact NAME=PROMQL, --impact-file): each read, started and judged on its own. Changing them here comes in a later release.": "이름 있는 영향 지표는 serve 를 시작할 때 정해요 (--impact NAME=PROMQL, --impact-file). 지표마다 따로 읽고, 따로 시작하고, 따로 판정해요. 여기서 바꾸는 기능은 다음 릴리스에서 나와요.",
+ "Impact signals": "영향 지표",
+ "Signal": "지표",
+ "Matched on": "맞춰 보는 라벨",
+ "Keeps the record": "기록 유지",
+ "the match in effect": "적용 중인 라벨",
+ "no label": "라벨 없음",
+ "keeps it from %s": "%s 부터",
+ "no": "아니요"
 }

@@ -157,11 +157,13 @@ too.
 With named impact signals, a firing's record is kept by what could have
 seen the incident it would catch: its `signals`†. They are its rule
 entry's; else each signal that, for every label of the signal's `match`
-the firing has, has returned the firing's value of it over the read (a
-series that returned something without that label, or more than 1,000
-values of it, or 256 KB of values in all, has returned every value); and,
-when none of those keeps
-the record (`record`), every signal that does too. Such a firing is judged
+the firing has, has seen the firing's value of it: one the series its
+expression reads have had over the read (each selector counted by those
+labels, one that only narrows another through its stand-in, as below), or
+one it returned (a series counted or returned without that label, or more
+than 1,000 values of it, or 256 KB of values in all, and every label of an
+expression that reads no selector, has every value seen); and, when none
+of those keeps the record (`record`), every signal that does too. Such a firing is judged
 when an incident written down was on in the two weeks before it, or a
 window of one of its `signals` was, or it caught an incident, or the
 signals among its `signals` that keep the record, one at least, had each
@@ -209,9 +211,59 @@ Monday in its `--tz`, as it keeps its stones: a week is judged when an
 incident was on at some time from two weeks before the week's Monday to
 the week's end, or the impact signal was read over all of the week. The
 firings of a week are judged by the signals tied to them: every firing of
-a week tied to the same signals is judged, or none; with no named signal,
-which `lapilli serve` reads one of for now, every firing of the week.
-`/api/v1/summary` gives each week's span and `no_record`.
+a week tied to the same signals, of a rule no entry names, or of the same
+rule entry, is judged, or none; with no named signal, every firing of the
+week. A window keeps the record of the firings tied to its signal alone;
+an incident written down, or written by confirming a window, keeps
+everyone's. With named signals, a signal's start is the first whole week
+after where its data begins (`settings.impact_signals[].start`), and a
+firing is read as judged when each of its `signals` that keeps the record
+had started by its week's Monday. Give the time zone's offset from UTC, in
+seconds, as `--argjson offset`, and the incidents of the two weeks before
+the period as `earlier` (above):
+
+```jq
+# no record (lapilli serve): as the report has it
+[.firings[] | .no_record // false]
+```
+
+```jq
+# no record (lapilli serve): counted again
+def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
+  | (.t + "Z" | fromdateiso8601) + ((.f // "0") | tonumber)
+    - (if .z == "Z" then 0 else (if .z[0:1] == "-" then -1 else 1 end) * ((.z[1:3] | tonumber) * 3600 + (.z[4:6] | tonumber) * 60) end);
+.settings as $s
+| (($s.impact_signals // []) | map({key: .name, value: .}) | from_entries) as $sig
+| (.incidents + ($ARGS.named.earlier // [])) as $incs
+| ($ARGS.named.offset // 0) as $off
+| [.firings[] | (.start | epoch) as $at
+   | ((($at + $off) / 86400 | floor) as $d | ($d - ($d + 3) % 7) * 86400 - $off) as $w
+   | (.signals // []) as $ties
+   | [$ties[] | $sig[.] | select(.record)] as $waits
+   | (.white | not)
+     and ($s.impact_from == null or ($s.impact_from | epoch) > $w)
+     and ($waits == [] or any($waits[]; .start == null or (.start | epoch) > $w))
+     and (any($incs[];
+            (.candidate != true or .signal == null or (.signal as $x | any($ties[]; . == $x)))
+            and (.start | epoch) < $w + 7 * 86400
+            and (if .end then .end | epoch else (.start | epoch) + $s.unknown_length_ns / 1e9 end)
+                >= $w - $s.record_lookback_ns / 1e9)
+          | not)]
+```
+
+`/api/v1/summary` gives each week's span, `no_record` (no firing of the
+row was judged; with no named signal, the week had no record) and
+`unjudged`, its firings counted and not judged, as the report counts them:
+
+```jq
+# unjudged in a week: as the summary has it
+first(.rows[] | select(.team == "")) | .unjudged
+```
+
+```jq
+# unjudged in a week: counted again
+[.firings[] | select(.no_record)] | length
+```
 
 ## Precision
 
@@ -635,8 +687,8 @@ it, which only `lapilli serve` says.
 | `lapilli_rule_refired_weeks` | `rule`, [`severity`], [`team`] |
 | `lapilli_refired_weeks` | [`team`] |
 | `lapilli_weeks_counted` | |
-| `lapilli_incident_state` | `incident`, `source`, `state` |
-| `lapilli_incident_lead_seconds` | `incident`, `source` |
+| `lapilli_incident_state` | `incident`, `source`, [`signal`], `state` |
+| `lapilli_incident_lead_seconds` | `incident`, `source`, [`signal`] |
 | `lapilli_incident_team` | `incident`, [`team`] |
 | `lapilli_rule_notifications` | `rule`, `receiver`, `reason` |
 | `lapilli_serve_cursor_timestamp_seconds` | |
@@ -664,12 +716,14 @@ it, which only `lapilli serve` says.
 | `lapilli_marked_on` | `kind` |
 | `lapilli_serve_marked_read_timestamp_seconds` | |
 
-The first eleven are `--metrics`' too. The next two are `--metrics`'
-alone, with named impact signals, which only `lapilli verdict` reads for
-now: each signal's windows by state, and from when it keeps the record
-(none for a signal that doesn't, or whose data a selector has none of);
-`TestVerdictMetricsStable` holds them. The rest are `lapilli serve`'s
-alone. The goals' four (docs/design/goals.md) are of the last whole week,
+The first eleven are `--metrics`' too. The next two are there with named
+impact signals, in `--metrics` and in `lapilli serve`'s `/metrics` (over
+its last seven days): each signal's windows by state, and from when it
+keeps the record (none for a signal that doesn't, or whose data a
+selector has none of); `TestVerdictMetricsStable` and
+`TestSignalMetricsStable` hold them. The rest are `lapilli serve`'s
+alone; `lapilli_incident_state` and `lapilli_incident_lead_seconds` have
+`signal` on a named signal's windows, one incident having one signal. The goals' four (docs/design/goals.md) are of the last whole week,
 from Monday in `--tz`, for each goal `--config` declares: everyone's
 without `team`, a team's with it, as the leader worked them out after its
 last round; `lapilli_goal_met` and `lapilli_goal_value` have no series for

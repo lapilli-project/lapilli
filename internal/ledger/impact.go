@@ -310,47 +310,13 @@ func (l *Ledger) WeekOnOrAfter(t time.Time) time.Time {
 	return unix(l.midnight(w + 7))
 }
 
-// ImpactKept reads what keeps the record by the impact signal, in one read.
-func (l *Ledger) ImpactKept(ctx context.Context) (ImpactKept, error) {
-	rows, err := l.r.QueryContext(ctx, "SELECT key, value FROM meta WHERE key IN (?, ?, ?, ?, ?, ?)", metaImpactSince, metaImpactCriterion, metaImpactAgain, metaImpactData, metaImpactRead, metaImpactFloor)
-	if err != nil {
-		return ImpactKept{}, err
-	}
-	defer rows.Close()
-	var k ImpactKept
-	for rows.Next() {
-		var key, v string
-		if err := rows.Scan(&key, &v); err != nil {
-			return ImpactKept{}, err
-		}
-		switch key {
-		case metaImpactSince:
-			if n, err := strconv.ParseInt(v, 10, 64); err == nil && v != impactNone {
-				k.Since = unix(n)
-			}
-		case metaImpactCriterion:
-			k.Criterion = v
-		case metaImpactAgain:
-			k.Again = v
-		case metaImpactData:
-			var d ImpactData
-			if json.Unmarshal([]byte(v), &d) == nil {
-				k.Data = &d
-			}
-		case metaImpactRead:
-			k.Read = v
-		case metaImpactFloor:
-			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-				k.Floor = unix(n)
-			}
-		}
-	}
-	return k, rows.Err()
-}
+// ImpactKept reads what keeps the record by the impact signal with no
+// name, in one read (SignalKept).
+func (l *Ledger) ImpactKept(ctx context.Context) (ImpactKept, error) { return l.SignalKept(ctx, "") }
 
-// impactData is the ImpactData kept, nil for none.
-func (l *Ledger) impactData(ctx context.Context, q querier) (*ImpactData, error) {
-	v, err := l.meta(ctx, q, metaImpactData)
+// impactData is the ImpactData kept of a signal, nil for none.
+func (l *Ledger) impactData(ctx context.Context, q querier, name string) (*ImpactData, error) {
+	v, err := sigMeta(ctx, q, name, metaImpactData)
 	if err != nil || v == "" {
 		return nil, err
 	}
@@ -362,12 +328,18 @@ func (l *Ledger) impactData(ctx context.Context, q querier) (*ImpactData, error)
 }
 
 // SetImpactData keeps where the data of the criterion the ledger keeps the
-// record by begins, and moves impact_since forward to its Floor: never
-// back. Of another criterion, it keeps nothing.
+// record by the unnamed signal begins (SetSignalData).
 func (l *Ledger) SetImpactData(ctx context.Context, d ImpactData) error {
+	return l.SetSignalData(ctx, "", d)
+}
+
+// SetSignalData keeps where the data of the criterion the ledger keeps the
+// record by a signal begins, and moves its since forward to its Floor:
+// never back. Of another criterion, it keeps nothing.
+func (l *Ledger) SetSignalData(ctx context.Context, name string, d ImpactData) error {
 	l.floor(&d)
 	return l.write(ctx, func(t *txn) error {
-		crit, err := l.meta(t.ctx, t, metaImpactCriterion)
+		crit, err := sigMeta(t.ctx, t, name, metaImpactCriterion)
 		if err != nil || crit != d.Criterion {
 			return err
 		}
@@ -375,57 +347,62 @@ func (l *Ledger) SetImpactData(ctx context.Context, d ImpactData) error {
 		if err != nil {
 			return err
 		}
-		if err := setMeta(t.ctx, t, metaImpactData, string(b)); err != nil {
+		if err := setSigMeta(t, name, metaImpactData, string(b)); err != nil {
 			return err
 		}
-		was, err := l.meta(t.ctx, t, metaImpactSince)
+		was, err := sigMeta(t.ctx, t, name, metaImpactSince)
 		if err != nil {
 			return err
 		}
 		if n, err := strconv.ParseInt(was, 10, 64); err == nil && !d.Floor.IsZero() && n < d.Floor.Unix() && !d.Pending() {
-			return setMeta(t.ctx, t, metaImpactSince, strconv.FormatInt(d.Floor.Unix(), 10))
+			return setSigMeta(t, name, metaImpactSince, strconv.FormatInt(d.Floor.Unix(), 10))
 		}
 		return nil
 	})
 }
 
-// criterionChanged reports whether a run read the impact signal with
-// another criterion than the run before it (lastRead), so that a window on
-// at its start is its own, not one of theirs going on. Not when the run
-// says none (one from before 0.49), nor when the runs before didn't read
-// it.
-func (l *Ledger) criterionChanged(t *txn, f Found) (bool, error) {
-	if !f.ImpactOn || f.ImpactCriterion == "" {
+// criterionChanged reports whether a run read a signal with another
+// criterion than the run before it (lastRead), so that a window on at its
+// start is its own, not one of theirs going on. Not when the run says
+// none (one from before 0.49), nor when the runs before didn't read it.
+func (l *Ledger) criterionChanged(t *txn, r signalRun) (bool, error) {
+	if !r.on || r.criterion == "" {
 		return false, nil
 	}
-	last, err := l.lastRead(t, f)
-	return last != "" && last != f.ImpactCriterion, err
+	last, err := l.lastRead(t, r)
+	return last != "" && last != r.criterion, err
 }
 
-// lastRead is the criterion the run before f read (impact_read); of a
+// lastRead is the criterion the run before r read (impact_read); of a
 // ledger whose runs didn't say, the one kept, or, of one read that kept
-// none, f.ImpactAssumed; "" when they read none.
-func (l *Ledger) lastRead(t *txn, f Found) (string, error) {
+// none, r.assumed; "" when they read none.
+func (l *Ledger) lastRead(t *txn, r signalRun) (string, error) {
 	for _, key := range []string{metaImpactRead, metaImpactCriterion} {
-		if v, err := l.meta(t.ctx, t, key); err != nil || v != "" {
+		if v, err := sigMeta(t.ctx, t, r.name, key); err != nil || v != "" {
 			return v, err
 		}
 	}
-	since, err := l.meta(t.ctx, t, metaImpactSince)
+	since, err := sigMeta(t.ctx, t, r.name, metaImpactSince)
 	if _, perr := strconv.ParseInt(since, 10, 64); err != nil || perr != nil {
 		return "", err
 	}
-	return f.ImpactAssumed, nil
+	return r.assumed, nil
 }
 
-// ImpactRead is the impact signal read again over [From, To], To where the
+// ImpactRead is an impact signal read again over [From, To], To where the
 // runs have got to (the cursor), with Criterion: the windows it found, and
 // where the data of the selectors it reads begins over the span (Data).
+// Signal is its name, "" for the unnamed signal; Match, a named signal's
+// match, nil for the match in effect; Seen, what its series returned, of
+// the labels it is matched on.
 type ImpactRead struct {
 	From, To  time.Time
 	Criterion string
 	Windows   []incident.Incident
 	Data      ImpactData
+	Signal    string
+	Match     []string
+	Seen      *verdict.Seen
 }
 
 // ErrRunsMoved is an ImpactRead the runs went past while it was read: it is
@@ -455,7 +432,7 @@ func (l *Ledger) ReadAgain(ctx context.Context, r ImpactRead, o verdict.Options)
 			return ErrRunsMoved
 		}
 		from := r.From.Unix()
-		lo, err := l.impact(t, Found{From: r.From, ImpactSince: r.From, Impact: r.Windows}, true)
+		lo, err := l.impact(t, signalRun{name: r.Signal, match: r.Match, from: r.From, since: r.From, on: true}, r.Windows, true)
 		if err != nil {
 			return err
 		}
@@ -464,28 +441,49 @@ func (l *Ledger) ReadAgain(ctx context.Context, r ImpactRead, o verdict.Options)
 		if err != nil {
 			return err
 		}
-		for k, v := range map[string]string{metaImpactSince: strconv.FormatInt(since.Unix(), 10), metaImpactCriterion: r.Criterion,
-			metaImpactAgain: r.Criterion, metaImpactData: string(b), metaImpactRead: r.Criterion} {
-			if err := setMeta(t.ctx, t, k, v); err != nil {
+		for _, k := range []string{metaImpactSince, metaImpactCriterion, metaImpactAgain, metaImpactData, metaImpactRead} {
+			v := map[string]string{metaImpactSince: strconv.FormatInt(since.Unix(), 10), metaImpactCriterion: r.Criterion,
+				metaImpactAgain: r.Criterion, metaImpactData: string(b), metaImpactRead: r.Criterion}[k]
+			if err := setSigMeta(t, r.Signal, k, v); err != nil {
 				return err
 			}
 		}
-		if _, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key = ?", metaImpactFloor); err != nil {
+		if err := delSigMeta(t, r.Signal, metaImpactFloor); err != nil {
 			return err
+		}
+		if r.Signal != "" {
+			// What it has seen is of the expression read now: read again
+			// from the start of this read (AddSeen), what its windows
+			// returned beside it.
+			if _, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET seen = '', seen_to = ?, missed_at = 0 WHERE name = ?", r.From.Unix(), r.Signal); err != nil {
+				return err
+			}
+			if r.Seen != nil {
+				if err := l.addSeen(t, o.Match, map[string]*verdict.Seen{r.Signal: r.Seen}); err != nil {
+					return err
+				}
+			}
 		}
 		return pend(t, [][2]int64{{min(lo, from) - int64(o.Lead/time.Second), r.To.Unix()}})
 	})
 }
 
-// MarkAgain keeps that the weeks before the runs read criterion need no
-// read again: the runs read it from their first, or a lapilli before 0.49
-// read it, which kept no criterion, and it is taken for the one read now.
+// MarkAgain keeps that the weeks before the runs read criterion, of the
+// unnamed signal, need no read again (MarkAgainOf).
 func (l *Ledger) MarkAgain(ctx context.Context, criterion string) error {
+	return l.MarkAgainOf(ctx, "", criterion)
+}
+
+// MarkAgainOf keeps that the weeks before the runs read a signal's
+// criterion need no read again: the runs read it from their first, or a
+// lapilli before 0.49 read it, which kept no criterion, and it is taken
+// for the one read now.
+func (l *Ledger) MarkAgainOf(ctx context.Context, name, criterion string) error {
 	return l.write(ctx, func(t *txn) error {
-		if err := setMeta(t.ctx, t, metaImpactCriterion, criterion); err != nil {
+		if err := setSigMeta(t, name, metaImpactCriterion, criterion); err != nil {
 			return err
 		}
-		return setMeta(t.ctx, t, metaImpactAgain, criterion)
+		return setSigMeta(t, name, metaImpactAgain, criterion)
 	})
 }
 
@@ -592,7 +590,7 @@ func (l *Ledger) IncidentSources(ctx context.Context, since time.Time) (Sources,
 	if err := rows.Err(); err != nil {
 		return out, err
 	}
-	last, err := l.incidents(ctx, `SELECT i.id, i.key, i.origin, i.title, i.start_at, i.end_at, i.labels, i.state, i.counts, i.updated, i.updated_by
+	last, err := l.incidents(ctx, `SELECT `+incidentCols+`
 		FROM incidents i WHERE i.origin = 'ui' ORDER BY i.start_at DESC, i.key LIMIT 1`)
 	if err != nil {
 		return out, err
@@ -672,6 +670,6 @@ func (l *Ledger) OrphanedImpact(ctx context.Context) ([]ImpactOrphan, error) {
 // reads them: on from from on, one that started before it too; for a try,
 // which sets what it finds beside them.
 func (l *Ledger) DecidedImpact(ctx context.Context, from time.Time) ([]Incident, error) {
-	return l.incidents(ctx, `SELECT i.id, i.key, i.origin, i.title, i.start_at, i.end_at, i.labels, i.state, i.counts, i.updated, i.updated_by
-		FROM incidents i WHERE i.origin = 'impact' AND i.state != '' AND (i.start_at >= ? OR i.end_at > ?) ORDER BY i.start_at, i.key`, from.Unix(), from.Unix())
+	return l.incidents(ctx, `SELECT `+incidentCols+`
+		FROM incidents i WHERE i.origin = 'impact' AND i.signal = '' AND i.state != '' AND (i.start_at >= ? OR i.end_at > ?) ORDER BY i.start_at, i.key`, from.Unix(), from.Unix())
 }

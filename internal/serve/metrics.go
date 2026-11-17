@@ -29,7 +29,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		today := s.l.Day(s.now())
-		days, err := s.l.Days(ctx, today-6, today)
+		days, err := s.l.DaysBy(ctx, today-6, today)
 		if err != nil {
 			s.oops(w, r, err)
 			return
@@ -69,7 +69,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			rr.Refired += d.Refired
 			rr.DuringDeploys += d.Deploy
 			rr.DeploysCaught += d.DeployWhite
-			if !t.kept[ledger.Week(d.At)] {
+			if !t.judgedPart(ledger.Week(d.At), d.Rule, d.Signals) {
 				rr.Unjudged += d.Firings - d.White
 				rr.DeploysUnjudged += d.Deploy - d.DeployWhite
 			}
@@ -106,6 +106,11 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			rep.Incidents = append(rep.Incidents, ir)
 		}
 		rep.SomeRules = o.SomeRules
+		if o.Signals.Named() {
+			// Each named signal's windows by state, and its start
+			// (lapilli_impact_windows, lapilli_impact_signal_start_timestamp_seconds).
+			rep.Settings = o.Settings()
+		}
 		var inEffect func(string) bool
 		if latest, ok, err := s.l.Latest(ctx); err == nil && ok {
 			inEffect = func(rule string) bool { return slices.Contains(latest.Names, rule) }

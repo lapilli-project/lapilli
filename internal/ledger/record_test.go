@@ -156,7 +156,7 @@ func TestImpactSinceUpgraded(t *testing.T) {
 		t.Fatal(err)
 	}
 	// As an earlier lapilli left it: the windows, no impact_since.
-	if _, err := l.w.ExecContext(ctx, "DELETE FROM meta WHERE key = 'impact_since'"); err != nil {
+	if _, err := l.w.ExecContext(ctx, "UPDATE impact_signals SET since = '' WHERE name = ''"); err != nil {
 		t.Fatal(err)
 	}
 	f = Found{From: t0, To: t0.Add(time.Hour), ImpactOn: true, ImpactSince: t0, Run: Run{Kind: "test", Started: t0, Finished: t0, From: t0, To: t0.Add(time.Hour)}}

@@ -175,6 +175,10 @@ func (p *run) asides(from, to time.Time) (impact, guard int) {
 	if s.Impact != "" {
 		impact = promRequests(from.Add(-time.Hour), to, s.Step)
 	}
+	// Each named signal is read on its own (docs/design/signals.md).
+	for range s.Signals {
+		impact += promRequests(from.Add(-time.Hour), to, s.Step)
+	}
 	if s.Guard != "" {
 		guard = 1
 	}

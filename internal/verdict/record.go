@@ -68,9 +68,14 @@ func RecordOf(incs []incident.Incident, o Options) Record {
 	var written []incident.Incident
 	by := make([][]incident.Incident, len(o.Signals.List))
 	for _, in := range incs {
-		if in.Signal == "" {
+		// A window confirmed is written down, with its signal: it keeps
+		// everyone's record, as an incident written down does; so does a
+		// window of a signal no longer read, which stays as an incident
+		// (lapilli serve).
+		i := o.Signals.signal(in.Signal)
+		if in.Signal == "" || !in.Candidate || i < 0 {
 			written = append(written, in)
-		} else if i := o.Signals.signal(in.Signal); i >= 0 {
+		} else {
 			by[i] = append(by[i], in)
 		}
 	}

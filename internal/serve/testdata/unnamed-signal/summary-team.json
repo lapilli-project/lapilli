@@ -1,0 +1,278 @@
+{
+  "schema": 1,
+  "from": "2026-10-05T00:00:00Z",
+  "to": "2026-11-09T00:00:00Z",
+  "zone": "UTC",
+  "settings": {
+    "lead": "15m",
+    "refire": "1h",
+    "deploy_before": "0s",
+    "deploy_after": "0s",
+    "match": [
+      "service"
+    ],
+    "noisy_at": {
+      "firings": 10,
+      "precision": 0.2
+    },
+    "critical": [
+      "critical"
+    ],
+    "hours": false,
+    "deploys": false
+  },
+  "ledger_to": "2026-11-03T12:00:00Z",
+  "rows": [
+    {
+      "from": "2026-10-05T00:00:00Z",
+      "to": "2026-10-12T00:00:00Z",
+      "partial": false,
+      "team": "",
+      "firings": 0,
+      "caught": 0,
+      "precision": null,
+      "no_record": true,
+      "excused": 0,
+      "critical": {
+        "firings": 0,
+        "caught": 0,
+        "share_caught": null
+      },
+      "by_severity": {},
+      "refired": {
+        "firings": 0,
+        "share": null,
+        "rules": 0,
+        "worst": null
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": null
+      },
+      "incidents": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "marked": {}
+    },
+    {
+      "from": "2026-10-12T00:00:00Z",
+      "to": "2026-10-19T00:00:00Z",
+      "partial": false,
+      "team": "",
+      "firings": 0,
+      "caught": 0,
+      "precision": null,
+      "no_record": true,
+      "excused": 0,
+      "critical": {
+        "firings": 0,
+        "caught": 0,
+        "share_caught": null
+      },
+      "by_severity": {},
+      "refired": {
+        "firings": 0,
+        "share": null,
+        "rules": 0,
+        "worst": null
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": null
+      },
+      "incidents": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "marked": {}
+    },
+    {
+      "from": "2026-10-19T00:00:00Z",
+      "to": "2026-10-26T00:00:00Z",
+      "partial": false,
+      "team": "",
+      "firings": 0,
+      "caught": 0,
+      "precision": null,
+      "no_record": true,
+      "excused": 0,
+      "critical": {
+        "firings": 0,
+        "caught": 0,
+        "share_caught": null
+      },
+      "by_severity": {},
+      "refired": {
+        "firings": 0,
+        "share": null,
+        "rules": 0,
+        "worst": null
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": null
+      },
+      "incidents": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "marked": {}
+    },
+    {
+      "from": "2026-10-26T00:00:00Z",
+      "to": "2026-11-02T00:00:00Z",
+      "partial": false,
+      "team": "",
+      "firings": 14,
+      "caught": 0,
+      "precision": null,
+      "no_record": true,
+      "excused": 0,
+      "critical": {
+        "firings": 0,
+        "caught": 0,
+        "share_caught": null
+      },
+      "by_severity": {
+        "page": {
+          "firings": 14,
+          "caught": 0,
+          "share_caught": null
+        }
+      },
+      "refired": {
+        "firings": 13,
+        "share": 0.9285714285714286,
+        "rules": 1,
+        "worst": {
+          "rule": "Errors",
+          "labels": {
+            "service": "search",
+            "severity": "page"
+          },
+          "refired": 13
+        }
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": null
+      },
+      "incidents": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "marked": {}
+    },
+    {
+      "from": "2026-11-02T00:00:00Z",
+      "to": "2026-11-09T00:00:00Z",
+      "partial": true,
+      "team": "",
+      "firings": 7,
+      "caught": 1,
+      "precision": 0.14285714285714285,
+      "no_record": false,
+      "excused": 0,
+      "critical": {
+        "firings": 0,
+        "caught": 0,
+        "share_caught": null
+      },
+      "by_severity": {
+        "page": {
+          "firings": 7,
+          "caught": 1,
+          "share_caught": 0.14285714285714285
+        }
+      },
+      "refired": {
+        "firings": 6,
+        "share": 0.8571428571428571,
+        "rules": 1,
+        "worst": {
+          "rule": "Errors",
+          "labels": {
+            "service": "search",
+            "severity": "page"
+          },
+          "refired": 6
+        }
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": 0.14285714285714285
+      },
+      "incidents": {
+        "total": 1,
+        "caught": 1,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": -60
+      },
+      "impacts": {
+        "total": 1,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 1,
+        "median_lead_seconds": null
+      },
+      "marked": {}
+    }
+  ]
+}

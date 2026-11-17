@@ -31,6 +31,9 @@ type markedSpan struct {
 	own   *owners
 	ms    []ledger.Marked
 	tally map[int64]map[int64]map[string]ledger.MarkedTally
+	// parts are the tallies apart by the signals the firings' alerts are
+	// tied to, which judge them (tallies.judgedPart).
+	parts []ledger.MarkedTally
 }
 
 // markedWeeks reads the marked windows meeting the weeks from Monday w1 to
@@ -42,10 +45,11 @@ func (s *Server) markedWeeks(ctx context.Context, w1, w2 int64, own *owners) (*m
 		return x, err
 	}
 	x.ms = ms
-	ts, err := s.l.MarkedWeeks(ctx, w1, w2)
+	ts, err := s.l.MarkedWeeksBy(ctx, w1, w2)
 	if err != nil {
 		return nil, err
 	}
+	x.parts = ts
 	for _, m := range ts {
 		if x.tally[m.At] == nil {
 			x.tally[m.At] = map[int64]map[string]ledger.MarkedTally{}
@@ -53,9 +57,27 @@ func (s *Server) markedWeeks(ctx context.Context, w1, w2 int64, own *owners) (*m
 		if x.tally[m.At][m.Rule] == nil {
 			x.tally[m.At][m.Rule] = map[string]ledger.MarkedTally{}
 		}
-		x.tally[m.At][m.Rule][m.Kind] = m
+		k := x.tally[m.At][m.Rule][m.Kind]
+		k.At, k.Rule, k.Kind = m.At, m.Rule, m.Kind
+		k.Firings += m.Firings
+		k.White += m.White
+		k.Refired += m.Refired
+		x.tally[m.At][m.Rule][m.Kind] = k
 	}
 	return x, nil
+}
+
+// unjudged are, of the firings of kind in week w of the rules mine says,
+// those that caught nothing and had no record by the signals tied to them
+// (tallies.judgedPart).
+func (x *markedSpan) unjudged(w int64, kind string, mine func(string) bool, t *tallies) int {
+	n := 0
+	for _, m := range x.parts {
+		if m.At == w && m.Kind == kind && mine(t.rules[m.Rule].Name) && !t.judgedPart(w, m.Rule, m.Signals) {
+			n += m.Firings - m.White
+		}
+	}
+	return n
 }
 
 // applies reports whether a window is everyone's or team's: for everyone
@@ -105,7 +127,7 @@ func (x *markedSpan) during(in ledger.Incident, os []markedOcc) bool {
 // worked out, for precision outside each kind; incs, the week's incidents;
 // judged, a share caught or nil with no record.
 func (x *markedSpan) row(w int64, team *ledger.Team, mine func(string) bool, row summaryRow, t *tallies, incs []ledger.Incident,
-	judged func(n, of int) *float64) map[string]summaryMarked {
+	judged func(n, of, unjudged int) *float64) map[string]summaryMarked {
 	out := map[string]summaryMarked{}
 	if len(x.ms) == 0 {
 		return out
@@ -122,8 +144,9 @@ func (x *markedSpan) row(w int64, team *ledger.Team, mine func(string) bool, row
 			c.Caught += k.White
 			c.Refired += k.Refired
 		}
-		c.Precision = judged(c.Caught, c.Firings)
-		c.PrecisionOutside = judged(row.Caught-c.Caught, row.Firings-c.Firings)
+		u := x.unjudged(w, kind, mine, t)
+		c.Precision = judged(c.Caught, c.Firings, u)
+		c.PrecisionOutside = judged(row.Caught-c.Caught, row.Firings-c.Firings, row.Unjudged-u)
 		var leads, impactLeads []time.Duration
 		for _, in := range incs {
 			if team != nil && !x.own.ownsIncident(*team, in) || !x.during(in, os) {
@@ -366,7 +389,7 @@ func (s *Server) ruleKinds(ctx context.Context, t *tallies, id int64, n int, l r
 		return nil, nil
 	}
 	recent := t.weeks[len(t.weeks)-n:]
-	ms, err := s.l.MarkedWeeks(ctx, recent[0], recent[len(recent)-1])
+	ms, err := s.l.MarkedWeeksBy(ctx, recent[0], recent[len(recent)-1])
 	if err != nil {
 		return nil, err
 	}
@@ -384,7 +407,7 @@ func (s *Server) ruleKinds(ctx context.Context, t *tallies, id int64, n int, l r
 		k.Firings += m.Firings
 		k.Caught += m.White
 		k.Refired += m.Refired
-		if t.kept[m.At] {
+		if t.judgedPart(m.At, m.Rule, m.Signals) {
 			judged[m.Kind] += m.Firings
 		} else {
 			judged[m.Kind] += m.White

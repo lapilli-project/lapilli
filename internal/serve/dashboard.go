@@ -42,6 +42,11 @@ type weekView struct {
 	// Refired are its firings that re-fired; Deploys those that came
 	// during a deploy, DeploysCaught those of them that caught something.
 	Refired, Deploys, DeploysCaught int
+	// Unjudged are, with named impact signals, its firings that caught
+	// nothing and had no record by the signals tied to them: counted, not
+	// judged (docs/design/signals.md); deploysUnjudged, those of them
+	// during deploys. With none named, a week is judged whole, or not.
+	Unjudged, deploysUnjudged int
 }
 
 // Without is the week's precision leaving out the firings during deploys;
@@ -50,14 +55,14 @@ func (w weekView) Without() string {
 	if w.NoRecord {
 		return "–"
 	}
-	return pct(w.White-w.DeploysCaught, w.Firings-w.Deploys)
+	return pct(w.White-w.DeploysCaught, w.Firings-w.Unjudged-w.Deploys+w.deploysUnjudged)
 }
 
 func (w weekView) precision() (float64, bool) {
-	if w.Firings == 0 || w.NoRecord {
+	if w.Firings == 0 || w.NoRecord || w.Firings == w.Unjudged {
 		return 0, false
 	}
-	return float64(w.White) / float64(w.Firings), true
+	return float64(w.White) / float64(w.Firings-w.Unjudged), true
 }
 
 // Precision is the week's precision for the table, as the precision chart
@@ -313,10 +318,21 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			if t.noisy(w, id) {
 				wv.Noisy++
 			}
+			if t.o.Signals.Named() {
+				u := t.unjudged(w, id)
+				wv.Unjudged += u.Firings - u.White
+				wv.deploysUnjudged += u.Deploy - u.DeployWhite
+			}
 		}
 		wv.Black = wv.Firings - wv.White
 		wv.Kept = t.kept[w]
 		wv.NoRecord = wv.Firings > 0 && !wv.Kept
+		if t.o.Signals.Named() {
+			// Judged by the signals tied to each firing: no record only
+			// when none of them was judged.
+			wv.Kept = t.keptAny(w)
+			wv.NoRecord = wv.Firings > 0 && wv.Unjudged == wv.Firings
+		}
 		byWeek[w] = wv
 		ws = append(ws, wv)
 	}
@@ -836,12 +852,7 @@ func (s *Server) heat(l string, t *tallies, lines []ruleLine) (rows []heatRow, l
 	for _, w := range t.weeks {
 		labels = append(labels, s.l.Midnight(w).In(s.cfg.Loc).Format("01-02"))
 	}
-	black := func(w, id int64) int {
-		if !t.kept[w] {
-			return 0
-		}
-		return t.by[w][id].Black()
-	}
+	black := func(w, id int64) int { return t.judged(w, id).Black() }
 	// The heatRows with the most black stones judged, whatever they had
 	// besides with no record.
 	for _, l := range lines {
@@ -863,10 +874,12 @@ func (s *Server) heat(l string, t *tallies, lines []ruleLine) (rows []heatRow, l
 	for i := range rows {
 		for j, w := range t.weeks {
 			x := t.by[w][ids[i]]
-			if !t.kept[w] && x.Firings > 0 {
+			if jx := t.judged(w, ids[i]); jx.Firings == 0 && x.Firings > 0 {
 				rows[i].Cells = append(rows[i].Cells, heatCell{"h0",
 					tr(l, "%s, week of %s: %d fired with no incident written down to judge them by", rows[i].Name, labels[j], x.Firings), 0})
 				continue
+			} else if t.o.Signals.Named() {
+				x = jx // of a week judged in part, its judged firings
 			}
 			class := "h0"
 			if n := x.Black(); n > 0 {

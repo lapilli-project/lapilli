@@ -410,11 +410,16 @@ them as the chart's `impact` and `--impact-for` in `extraArgs`.
 
 The record by the impact signal follows one rule: **it holds only for
 weeks that were read, with data, by the criterion in effect, and, after a
-change, replaced by a successful read of that criterion.** Kept in meta,
-with no schema change: `impact_since`, `impact_criterion` (the criterion
-the record is kept by, the expression and `--impact-for`), `impact_again`,
-`impact_data` (where its data begins), `impact_read` (what the last run
-read) and `impact_floor`.
+change, replaced by a successful read of that criterion.** Kept in meta
+from 0.49 to 0.53, and since schema 022 in the signal's row of
+`impact_signals` ('' for the impact signal with no name, the same six for
+each named one, [signals.md](signals.md)): `impact_since`, `impact_criterion`
+(the criterion the record is kept by, the expression and `--impact-for`),
+`impact_again`, `impact_data` (where its data begins), `impact_read` (what
+the last run read) and `impact_floor`. Named signals follow the same rule,
+each on its own, as signals.md says; what follows is of one, the unnamed
+signal, and of each named one alike but for the UI, which changes the
+unnamed one alone for now.
 
 - **Read by the runs.** From `impact_since`, all along, the record is
   kept (`verdict.Options.ImpactFrom`, `ledger.ImpactKept.From`), never

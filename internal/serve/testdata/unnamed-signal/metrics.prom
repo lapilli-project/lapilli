@@ -1,0 +1,51 @@
+# HELP lapilli_rule_firings Times the rule fired in the period.
+# TYPE lapilli_rule_firings gauge
+lapilli_rule_firings{rule="Errors",severity="page"} 21
+# HELP lapilli_rule_caught Firings that caught an incident (white stones).
+# TYPE lapilli_rule_caught gauge
+lapilli_rule_caught{rule="Errors",severity="page"} 1
+# HELP lapilli_rule_nothing Firings with no incident (black stones).
+# TYPE lapilli_rule_nothing gauge
+lapilli_rule_nothing{rule="Errors",severity="page"} 20
+# HELP lapilli_rule_refired Firings that came soon after the same alert resolved.
+# TYPE lapilli_rule_refired gauge
+lapilli_rule_refired{rule="Errors",severity="page"} 19
+# HELP lapilli_rule_incidents Incidents the rule caught.
+# TYPE lapilli_rule_incidents gauge
+lapilli_rule_incidents{rule="Errors",severity="page"} 1
+# HELP lapilli_rule_incidents_first Incidents the rule caught before any other rule; a noisy rule's catch doesn't count beside another's.
+# TYPE lapilli_rule_incidents_first gauge
+lapilli_rule_incidents_first{rule="Errors",severity="page"} 1
+# HELP lapilli_rule_incidents_alone Incidents no other rule caught; a noisy rule's catch doesn't count beside another's.
+# TYPE lapilli_rule_incidents_alone gauge
+lapilli_rule_incidents_alone{rule="Errors",severity="page"} 1
+# HELP lapilli_incidents Incidents in the period: caught, caught only by noisy rules, or missed.
+# TYPE lapilli_incidents gauge
+lapilli_incidents{state="caught",source="written"} 1
+lapilli_incidents{state="caught",source="impact"} 0
+lapilli_incidents{state="noisy_only",source="written"} 0
+lapilli_incidents{state="noisy_only",source="impact"} 0
+lapilli_incidents{state="missed",source="written"} 0
+lapilli_incidents{state="missed",source="impact"} 1
+# HELP lapilli_incident_detection_delay_seconds From an incident's start to the first alert from a rule that isn't noisy; negative when the alert came first.
+# TYPE lapilli_incident_detection_delay_seconds gauge
+lapilli_incident_detection_delay_seconds{incident="INC-1"} 60
+# HELP lapilli_weeks_counted Whole weeks, of the twelve before this one, the ledger has all of (not the one its first firing fell in): what lapilli_refired_weeks and lapilli_rule_refired_weeks count of.
+# TYPE lapilli_weeks_counted gauge
+lapilli_weeks_counted 0
+# HELP lapilli_refired_weeks Whole weeks, of lapilli_weeks_counted, in which a firing re-fired: everyone's without a team label, and each team's rules'.
+# TYPE lapilli_refired_weeks gauge
+lapilli_refired_weeks 0
+# HELP lapilli_rule_refired_weeks Whole weeks, of lapilli_weeks_counted, in which a firing of the rule re-fired.
+# TYPE lapilli_rule_refired_weeks gauge
+# HELP lapilli_incident_state Each incident of the last seven days, written down or an impact window found by --impact, as caught, caught only by noisy rules, or missed, by the rules' stones in its week: 1. The latest 500 at most.
+# TYPE lapilli_incident_state gauge
+lapilli_incident_state{incident="impact-20261103T0600Z",source="impact",state="missed"} 1
+lapilli_incident_state{incident="INC-1",source="written",state="caught"} 1
+# HELP lapilli_incident_lead_seconds How long before each caught incident's start the first alert from a rule that isn't noisy came: negative when it came after.
+# TYPE lapilli_incident_lead_seconds gauge
+lapilli_incident_lead_seconds{incident="INC-1",source="written"} -60
+# HELP lapilli_incident_team Each team that owns an incident of lapilli_incident_state (one of its rules caught it, or it has a value of a label the team owns by): 1, without a team label for an incident no team owns. 500 series at most, the latest incidents first.
+# TYPE lapilli_incident_team gauge
+lapilli_incident_team{incident="impact-20261103T0600Z"} 1
+lapilli_incident_team{incident="INC-1"} 1

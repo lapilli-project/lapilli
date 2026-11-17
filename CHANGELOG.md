@@ -2,6 +2,91 @@
 
 ## [Unreleased]
 
+
+### Added
+
+- **Named impact signals, in `lapilli serve`** (docs/design/signals.md,
+  step 2, but for the pages). `lapilli serve` takes `--impact NAME=PROMQL`,
+  up to eight, `--impact-for NAME=DUR`, `--impact-match`, `--impact-record`
+  and `--impact-file` with rule entries, as `lapilli verdict` does since
+  0.53.0; the chart's `impact`, as a mapping of `signals` and `rules`, is
+  that file. The runs read each signal on its own, within `--timeout`, the
+  one missed longest first: one that fails, or finds more than 1,000
+  windows in a read or 2,000 in a week, is missed for the run, which
+  records the rest, and a later run reads it from where it was missed,
+  within a week. Each signal's windows are its own, keyed by its name
+  (`impact-probe-20261110T1404Z`), with what was decided of them, their
+  tasks and comments carried over among its own; each keeps the record
+  from its own start, where the data it reads begins, read again alone
+  over the last four weeks when its expression or `for` changes. A firing
+  is judged by the signals tied to its alert: its rule's entry's, or else
+  those that could have seen it, by what each has seen. Confirming a
+  window writes down an incident carrying its signal and match, caught as
+  the window was, until its labels change. `/api/v1/report` gives
+  `settings.impact_signals`, `settings.impact_rules`, `rules[].impact_rule`,
+  `firings[].signals` and `incidents[].signal`; `/api/v1/summary` gives
+  each row's `unjudged`, `impacts.by_signal` (`{}` with no named signal)
+  and, with named signals, `settings.impact_signals` and
+  `settings.impact_rules` (`schema` stays 1); `/metrics` gives
+  `lapilli_impact_windows` (`signal`, `state`) and
+  `lapilli_impact_signal_start_timestamp_seconds` (`signal`), and `signal`
+  on `lapilli_incident_state` and `lapilli_incident_lead_seconds` of a
+  named signal's windows; MCP's `incidents` each incident's `signal`, its
+  `rule` the rule's `impact_signals` (its entry, the signals it is judged
+  against, what its record waits for), and `summary` `by_signal`. A
+  proposal waiting is held when any signal's criterion, its match or
+  record, the rule entries or the match in effect change. The Settings
+  page lists the signals as serve was started with them; changing them
+  there, and the Incidents page and a rule's page by signal, come in a
+  later release. `lapilli preflight` reads and counts each signal. Each
+  run asks, of each signal, one query; after the runs, one a selector, for
+  what it reads (below). **Ledger schema 022**, after 021: `impact_signals`
+  (what meta kept of the impact signal, moved to its row, and a row a named
+  one), `impact_rules`, `incidents.signal` and `incidents.match_labels`,
+  `series.signals`, and `days`, `weeks`, `marked_days` and `marked_weeks`
+  keyed by `signals` too, every row copied in once. A ledger with one
+  impact signal with no name upgrades with its windows, keys, decisions,
+  tasks, comments and start unchanged, and judges as it did. A lapilli
+  before 0.54 doesn't open a ledger this one has migrated: take a snapshot
+  of its disk, or of its database, before upgrading, to go back to.
+
+### Changed
+
+- **A named signal is tied to what it reads, not only to what it
+  returned** (docs/design/signals.md, open question 6, decided
+  2026-11-17). Since 0.53.0, `lapilli verdict` tied a firing to a named
+  signal that had returned the firing's value of a match label: a 5xx
+  share over a threshold returns something only while a service is hurt,
+  so a service it measured all along, never hurt, was tied to no signal,
+  fell back, and waited for the latest start of all. Now each selector the
+  signal reads is counted by its match labels over the read (`count by
+  (service) (http_requests_total)`), one request a selector, as where its
+  data begins is looked for; one that only narrows another is counted
+  through its stand-in (`http_requests_total{code!=""}` for
+  `http_requests_total{code=~"5.."}`); and that is joined with what it
+  returned. A label none of its selectors carries (one `label_replace`
+  makes, a probe target relabelled) has every value, so a firing is tied,
+  and waits for that signal's start. `lapilli verdict` asks one more query
+  a selector of each named signal.
+- **`/api/v1/summary`'s rows say `unjudged`, and `impacts.by_signal`**,
+  for every ledger: the firings that caught nothing counted and not
+  judged, as the report counts them, and each named signal's windows
+  apart, `{}` with none. With named signals, a week's firings are judged by
+  the signals tied to each, so `no_record` means none of a row's firings
+  was judged, and each share is of those judged; with no named signal,
+  nothing else changes.
+- **In `lapilli serve`, a week's firings are judged by the signals tied to
+  them, not all or none** (docs/numbers.md): with named signals, every
+  firing of a week tied to the same signals is judged, or none; with no
+  named signal, every firing of the week, as before. And windows of one
+  signal that overlap are one, never two signals' windows: a team that
+  splits one `or` expression into signals sees `impacts.total` rise where
+  windows of different series overlapped, which were one incident before.
+  The field means what it did, the impact windows judged against.
+- **The chart's `impact` defaults to `null`**, so that a mapping can be
+  given in its place without Helm saying it skipped one. An empty string
+  still gives no `--impact`.
+
 ## [0.54.0] - 2026-11-17
 
 ### Added

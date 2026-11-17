@@ -1370,6 +1370,7 @@ func pend(t *txn, spans [][2]int64) error {
 			return err
 		}
 	}
+	t.pended = append(t.pended, spans...)
 	b, err := json.Marshal(merge(append(have, spans...)))
 	if err != nil {
 		return err
@@ -1415,7 +1416,9 @@ func (l *Ledger) JudgePending(ctx context.Context, o verdict.Options) error {
 					spans[0][0] = hi + 1
 				}
 			}
-			b, err := json.Marshal(spans)
+			// What judging pended in turn (judge, of the alerts it tied)
+			// is judged after.
+			b, err := json.Marshal(merge(append(spans, t.pended...)))
 			if err != nil {
 				return err
 			}

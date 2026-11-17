@@ -57,6 +57,22 @@ type summarySettings struct {
 	// ledger keeps deploys.
 	Hours   bool `json:"hours"`
 	Deploys bool `json:"deploys"`
+	// ImpactSignals are the named impact signals, each with its "for",
+	// its match (null for the match in effect), whether it keeps the
+	// record and from when it does; ImpactRules the rule entries, in
+	// order (docs/design/signals.md). None with no named signal.
+	ImpactSignals []summarySignal     `json:"impact_signals,omitempty"`
+	ImpactRules   []verdict.RuleEntry `json:"impact_rules,omitempty"`
+}
+
+// summarySignal is a named impact signal, as the summary says it: not its
+// expression, which the Settings page and /settings.yaml give.
+type summarySignal struct {
+	Name   string     `json:"name"`
+	For    string     `json:"for"`
+	Match  []string   `json:"match"`
+	Record bool       `json:"record"`
+	Start  *time.Time `json:"start"`
 }
 
 // summaryRow is a week, for everyone (Team "") or for one team: its rules'
@@ -74,8 +90,13 @@ type summaryRow struct {
 	Precision *float64 `json:"precision"`
 	// NoRecord says no incident was on in the week, or in the two weeks
 	// before it, and no impact signal was read over it: its firings are
-	// counted, not judged.
+	// counted, not judged. With named impact signals, none of its firings
+	// was judged, by the signals tied to them.
 	NoRecord bool `json:"no_record"`
+	// Unjudged are its firings that caught nothing and had no record:
+	// counted, not judged, and in no precision, as the report counts them
+	// (docs/design/signals.md, "How they are counted").
+	Unjudged int `json:"unjudged"`
 	// Excused are firings quiet windows excused, in none of the others.
 	Excused    int                     `json:"excused"`
 	Critical   summaryCount            `json:"critical"`
@@ -86,7 +107,7 @@ type summaryRow struct {
 	Asleep        *summaryHours    `json:"asleep"`
 	DuringDeploys summaryDeploys   `json:"during_deploys"`
 	Incidents     summaryIncidents `json:"incidents"`
-	Impacts       summaryIncidents `json:"impacts"`
+	Impacts       summaryImpacts   `json:"impacts"`
 	// Goals are the goals --config declares of the row's team (everyone's,
 	// in a row for everyone; the team's own and each team's, in a team's),
 	// each with its value and the week's result (docs/design/goals.md); left
@@ -159,6 +180,14 @@ type summaryIncidents struct {
 	MedianLead *int64 `json:"median_lead_seconds"`
 }
 
+// summaryImpacts are the impact windows of a week, all signals' counted
+// together, and each named signal's apart (BySignal, {} with none named):
+// a window of a signal since removed under its name, as it is kept.
+type summaryImpacts struct {
+	summaryIncidents
+	BySignal map[string]summaryIncidents `json:"by_signal"`
+}
+
 // summaryOf works the summary out for the weeks from Monday w1 to Monday w2,
 // a row a week for each of who: a team, or nil for everyone.
 func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team, critical []string) (*summary, error) {
@@ -212,17 +241,24 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 		Settings: summarySettings{Lead: verdict.Duration(o.Lead), Refire: verdict.Duration(o.RefireWithin),
 			DeployBefore: verdict.Duration(o.DeployBefore), DeployAfter: verdict.Duration(o.DeployAfter),
 			Match: match, NoisyAt: at, Critical: critical, Deploys: deploys}, Rows: []summaryRow{}}
+	if o.Signals.Named() {
+		for _, x := range o.Signals.List {
+			sg := summarySignal{Name: x.Name, For: verdict.Duration(x.For), Match: x.Match, Record: x.Record}
+			if !x.Start.IsZero() {
+				at := x.Start.UTC()
+				sg.Start = &at
+			}
+			out.Settings.ImpactSignals = append(out.Settings.ImpactSignals, sg)
+		}
+		out.Settings.ImpactRules = o.Signals.Entries
+	}
 	t := &tallies{by: map[int64]map[int64]ledger.Tally{}, o: o}
 	for w := w1; w <= w2; w += 7 {
 		t.weeks = append(t.weeks, w)
 		t.by[w] = map[int64]ledger.Tally{}
 	}
-	rows, err := s.l.Weeks(ctx, w1, w2)
-	if err != nil {
+	if err := s.fillTallies(ctx, t, w1, w2); err != nil {
 		return nil, err
-	}
-	for _, r := range rows {
-		t.by[r.At][r.Rule] = r
 	}
 	if t.rules, err = s.l.RuleTable(ctx); err != nil {
 		return nil, err
@@ -263,20 +299,32 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 				return nil, err
 			}
 			mine := func(rule string) bool { return team == nil || own.rule[rule] == team.ID }
-			row := summaryRow{From: from, To: to, Partial: cursor.Before(to), BySeverity: map[string]summaryCount{}}
+			row := summaryRow{From: from, To: to, Partial: cursor.Before(to), BySeverity: map[string]summaryCount{},
+				Impacts: summaryImpacts{BySignal: map[string]summaryIncidents{}}}
 			if team != nil {
 				row.Team = team.Name
 			}
 			var crit summaryCount
 			crits := make([]summaryCount, len(lists))
 			refiredRules := 0
+			// The firings that caught nothing and had no record (counted,
+			// not judged), of the row and of each of its counts, as the
+			// report counts unjudged: none in a week with a record and no
+			// named signal.
+			var unjudgedDeploys, unjudgedCrit int
+			unjudgedSev := map[string]int{}
+			unjudgedCrits := make([]int, len(lists))
 			for id, x := range t.by[w] {
 				rule := t.rules[id]
 				if !mine(rule.Name) {
 					continue
 				}
+				u := t.unjudged(w, id)
+				ub := u.Firings - u.White
 				row.Firings += x.Firings
 				row.Caught += x.White
+				row.Unjudged += ub
+				unjudgedDeploys += u.Deploy - u.DeployWhite
 				row.Excused += x.Excused
 				row.Refired.Firings += x.Refired
 				row.DuringDeploys.Firings += x.Deploy
@@ -289,32 +337,41 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 				c.Firings += x.Firings
 				c.Caught += x.White
 				row.BySeverity[sev] = c
+				unjudgedSev[sev] += ub
 				if slices.ContainsFunc(strings.Split(sev, "/"), func(v string) bool { return slices.Contains(critical, v) }) {
 					crit.Firings += x.Firings
 					crit.Caught += x.White
+					unjudgedCrit += ub
 				}
 				for i, cs := range lists {
 					if slices.ContainsFunc(strings.Split(sev, "/"), func(v string) bool { return slices.Contains(cs, v) }) {
 						crits[i].Firings += x.Firings
 						crits[i].Caught += x.White
+						unjudgedCrits[i] += ub
 					}
 				}
 			}
-			// With no record, what was caught is no share of anything known.
+			// With no record, what was caught is no share of anything known:
+			// no firing of the row judged (docs/design/signals.md, "How
+			// they are counted"), all or none of a week's with no named
+			// signal.
 			row.NoRecord = !t.kept[w]
-			judged := func(n, of int) *float64 {
+			if t.o.Signals.Named() {
+				row.NoRecord = row.Firings > 0 && row.Unjudged == row.Firings || row.Firings == 0 && !t.keptAny(w)
+			}
+			judged := func(n, of, unjudged int) *float64 {
 				if row.NoRecord {
 					return nil
 				}
-				return share(n, of)
+				return share(n, of-unjudged)
 			}
 			for sev, c := range row.BySeverity {
-				c.Share = judged(c.Caught, c.Firings)
+				c.Share = judged(c.Caught, c.Firings, unjudgedSev[sev])
 				row.BySeverity[sev] = c
 			}
-			crit.Share = judged(crit.Caught, crit.Firings)
+			crit.Share = judged(crit.Caught, crit.Firings, unjudgedCrit)
 			row.Critical = crit
-			row.Precision = judged(row.Caught, row.Firings)
+			row.Precision = judged(row.Caught, row.Firings, row.Unjudged)
 			row.Refired.Share, row.Refired.Rules = share(row.Refired.Firings, row.Firings), refiredRules
 			for i, x := range refired {
 				if mine(x.Rule) {
@@ -322,7 +379,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 					break
 				}
 			}
-			row.DuringDeploys.PrecisionWithout = judged(row.Caught-row.DuringDeploys.Caught, row.Firings-row.DuringDeploys.Firings)
+			row.DuringDeploys.PrecisionWithout = judged(row.Caught-row.DuringDeploys.Caught, row.Firings-row.DuringDeploys.Firings, row.Unjudged-unjudgedDeploys)
 			if hours != nil {
 				row.OffHours, row.Asleep = &summaryHours{}, &summaryHours{}
 				for id, x := range hours[w] {
@@ -336,36 +393,61 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 				}
 			}
 			var leads, impactLeads []time.Duration
+			bySignal := map[string][]time.Duration{}
+			sigs := map[string]*summaryIncidents{}
 			for _, in := range weekOf[w] {
 				if team != nil && !own.ownsIncident(*team, in) {
 					continue
 				}
 				sum, ls := &row.Incidents, &leads
 				if in.Origin == "impact" {
-					sum, ls = &row.Impacts, &impactLeads
+					sum, ls = &row.Impacts.summaryIncidents, &impactLeads
 				}
-				sum.Total++
-				switch t.state(in, w) {
-				case "caught":
-					sum.Caught++
+				// And a named signal's window, under its signal.
+				var sig *summaryIncidents
+				if in.Origin == "impact" && in.Signal != "" {
+					if sig = sigs[in.Signal]; sig == nil {
+						sig = &summaryIncidents{}
+						sigs[in.Signal] = sig
+					}
+				}
+				state := t.state(in, w)
+				for _, c := range []*summaryIncidents{sum, sig} {
+					if c == nil {
+						continue
+					}
+					c.Total++
+					switch state {
+					case "caught":
+						c.Caught++
+					case "noisy":
+						c.NoisyOnly++
+					default:
+						c.Missed++
+					}
+				}
+				if state == "caught" {
 					for _, c := range in.CaughtBy {
 						if !t.noisy(w, t.id(c.Rule)) {
 							*ls = append(*ls, -c.Delay)
+							if sig != nil {
+								bySignal[in.Signal] = append(bySignal[in.Signal], -c.Delay)
+							}
 							break
 						}
 					}
-				case "noisy":
-					sum.NoisyOnly++
-				default:
-					sum.Missed++
 				}
 			}
 			row.Incidents.MedianLead, row.Impacts.MedianLead = medianSeconds(leads), medianSeconds(impactLeads)
+			for name, c := range sigs {
+				c.MedianLead = medianSeconds(bySignal[name])
+				row.Impacts.BySignal[name] = *c
+			}
 			if mine := rowGoals(gs, team); len(mine) > 0 {
 				row.crit = make(map[string]summaryCount, len(lists))
 				for i, cs := range lists {
 					c := crits[i]
-					c.Share = judged(c.Caught, c.Firings)
+					c.Share = judged(c.Caught, c.Firings, unjudgedCrits[i])
 					row.crit[ledger.CriticalKey(cs)] = c
 				}
 				row.whole = firstOK && w > firstWeek && !row.Partial

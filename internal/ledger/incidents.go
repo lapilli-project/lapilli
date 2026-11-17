@@ -66,7 +66,7 @@ func (l *Ledger) SyncFile(ctx context.Context, incs []incident.Incident, o verdi
 	err := l.write(ctx, func(t *txn) error {
 		taken = nil
 		have := map[string]incidentRow{}
-		rows, err := t.QueryContext(t.ctx, "SELECT id, key, origin, title, start_at, end_at, labels FROM incidents WHERE origin = 'file'")
+		rows, err := t.QueryContext(t.ctx, "SELECT id, key, origin, title, start_at, end_at, labels, signal, match_labels FROM incidents WHERE origin = 'file'")
 		if err != nil {
 			return err
 		}
@@ -175,17 +175,23 @@ func marshal(v any) ([]byte, error) {
 	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
 }
 
-// put writes an incident, in place of the one with its id.
+// put writes an incident, in place of the one with its id: with the
+// signal and match it carries, of a window confirmed (Decide), none for
+// any other.
 func put(t *txn, in incident.Incident, origin, by string, now int64) error {
 	labels, err := marshal(orEmpty(in.Labels))
 	if err != nil {
 		return err
 	}
-	_, err = t.ExecContext(t.ctx, `INSERT INTO incidents (key, origin, counts, title, start_at, end_at, labels, updated, updated_by)
-		VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
+	var match any
+	if in.Signal != "" {
+		match = matchText(in.Match)
+	}
+	_, err = t.ExecContext(t.ctx, `INSERT INTO incidents (key, origin, counts, title, start_at, end_at, labels, updated, updated_by, signal, match_labels)
+		VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT `+t.d.pick("(key)", "(md5(key))")+` DO UPDATE SET title = excluded.title, start_at = excluded.start_at, end_at = excluded.end_at,
-			labels = excluded.labels, updated = excluded.updated, updated_by = excluded.updated_by`,
-		in.ID, origin, in.Title, in.Start.Unix(), nullable(in.End), string(labels), now, by)
+			labels = excluded.labels, updated = excluded.updated, updated_by = excluded.updated_by, signal = excluded.signal, match_labels = excluded.match_labels`,
+		in.ID, origin, in.Title, in.Start.Unix(), nullable(in.End), string(labels), now, by, in.Signal, match)
 	return err
 }
 
@@ -308,6 +314,13 @@ func (l *Ledger) putIn(t *txn, in *incident.Incident, origin, by string, o verdi
 	case old.origin != origin:
 		return ErrNotYours
 	}
+	// A window confirmed keeps its signal and match while its labels are
+	// those it was confirmed with: its labels changed, it is a person's,
+	// matched on the match in effect (docs/design/signals.md).
+	in.Signal, in.Match = "", nil
+	if err == nil && old.Signal != "" && sameLabels(old.Incident, *in) {
+		in.Signal, in.Match = old.Signal, old.Match
+	}
 	if err := put(t, *in, origin, by, time.Now().Unix()); err != nil {
 		return err
 	}
@@ -361,6 +374,13 @@ func originOf(by string) string {
 	return "ui"
 }
 
+// sameLabels reports whether two incidents have the same labels, as kept.
+func sameLabels(a, b incident.Incident) bool {
+	x, _ := json.Marshal(orEmpty(a.Labels))
+	y, _ := json.Marshal(orEmpty(b.Labels))
+	return string(x) == string(y)
+}
+
 // sameWhereWhen reports whether two incidents have the same times and labels,
 // all their stones hang on.
 func sameWhereWhen(d dialect, a, b incident.Incident) bool {
@@ -376,7 +396,7 @@ func oldOrNil(err error, old incidentRow) any {
 }
 
 func (l *Ledger) get(t *txn, key string) (incidentRow, error) {
-	r, err := scanIncident(t.QueryRowContext(t.ctx, "SELECT id, key, origin, title, start_at, end_at, labels FROM incidents WHERE key = ?", key))
+	r, err := scanIncident(t.QueryRowContext(t.ctx, "SELECT id, key, origin, title, start_at, end_at, labels, signal, match_labels FROM incidents WHERE key = ?", key))
 	if errors.Is(err, sql.ErrNoRows) {
 		return r, ErrNotFound
 	}

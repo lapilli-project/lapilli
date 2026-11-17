@@ -709,3 +709,48 @@ func TestChartMarked(t *testing.T) {
 		t.Error("a --mark-match for an expression that keeps no labels")
 	}
 }
+
+// impact as a string is --impact, as it was; as a mapping, the named
+// signals and the rule entries, written to a ConfigMap as --impact-file
+// reads them (docs/design/signals.md), which serve and verdict take.
+func TestChartImpactSignals(t *testing.T) {
+	out, err := helmTemplate(t, append(serveValues, "--set", "impact=up == 0")...)
+	if err != nil || !strings.Contains(out, `- "--impact=up == 0"`) || strings.Contains(out, "--impact-file") {
+		t.Fatalf("a string: %v\n%s", err, out)
+	}
+	values := filepath.Join(t.TempDir(), "values.yaml")
+	os.WriteFile(values, []byte(`impact:
+  signals:
+    - {name: errors, expr: "sum by (service) (rate(http_requests_total{code=~\"5..\"}[5m])) > 1", for: 5m}
+    - {name: probe, expr: "probe_success == 0", for: 2m, match: [service]}
+  rules:
+    - {rules: "^BackendMissing$", signals: [errors, probe], match: [backend]}
+`), 0o644)
+	out, err = helmTemplate(t, append(serveValues, "-f", values)...)
+	if err != nil || strings.Contains(out, "warning") {
+		t.Fatalf("a mapping: %v\n%s", err, out)
+	}
+	for _, want := range []string{"- --impact-file=/etc/lapilli/impact/impact.yaml", "mountPath: /etc/lapilli/impact", "name: ops-lapilli-impact", "impact.yaml: |"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no %s in\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, `"--impact=`) {
+		t.Error("--impact beside --impact-file")
+	}
+	// What the ConfigMap holds is a file --impact-file reads.
+	_, data, _ := strings.Cut(out, "impact.yaml: |\n")
+	var file []string
+	for _, l := range strings.Split(data, "\n") {
+		if !strings.HasPrefix(l, "    ") {
+			break
+		}
+		file = append(file, strings.TrimPrefix(l, "    "))
+	}
+	p := filepath.Join(t.TempDir(), "impact.yaml")
+	os.WriteFile(p, []byte(strings.Join(file, "\n")), 0o644)
+	signals, entries, err := readImpactFile(p)
+	if err != nil || len(signals) != 2 || len(entries) != 1 || entries[0].Match[0] != "backend" {
+		t.Errorf("the file: %+v %+v %v\n%s", signals, entries, err, strings.Join(file, "\n"))
+	}
+}

@@ -896,7 +896,7 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 	}
 	// The named impact signals, once --step and --match are known, wherever
 	// they came.
-	if err := f.signalsRead(serve != nil); err != nil {
+	if err := f.signalsRead(); err != nil {
 		return nil, err
 	}
 	// The hours are read once the zone is known, wherever --tz came.

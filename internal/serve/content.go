@@ -331,10 +331,8 @@ func (s *Server) checkContent(ctx context.Context, rs []rules.Rule, scrape conte
 	sums := map[int64][2]int{}
 	for _, w := range t.weeks {
 		for id, x := range t.by[w] {
-			c, judged := sums[id], x.Firings
-			if !t.kept[w] {
-				judged = x.White
-			}
+			u := t.unjudged(w, id)
+			c, judged := sums[id], x.Firings-(u.Firings-u.White)
 			sums[id] = [2]int{c[0] + judged, c[1] + x.White}
 		}
 	}

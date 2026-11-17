@@ -63,6 +63,13 @@ type tallies struct {
 	team          *ledger.Team
 	mid           func(int64) time.Time
 	at            time.Time
+	// parts are the tallies apart by the signals the firings' alerts are
+	// tied to (ledger.WeeksBy), as read, nil when by was read summed; jby
+	// is by of the firings judged (keep), and jeveryone everyone's, before
+	// only kept one team's.
+	parts     []ledger.Tally
+	jby       map[int64]map[int64]ledger.Tally
+	jeveryone map[int64]map[int64]ledger.Tally
 }
 
 // whole are, of the weeks ws, those the ledger has whole: not the week
@@ -115,12 +122,8 @@ func (s *Server) talliesTo(ctx context.Context, n int, last int64) (*tallies, er
 		t.weeks = append(t.weeks, w)
 		t.by[w] = map[int64]ledger.Tally{}
 	}
-	rows, err := s.l.Weeks(ctx, t.weeks[0], now)
-	if err != nil {
+	if err := s.fillTallies(ctx, t, t.weeks[0], now); err != nil {
 		return nil, err
-	}
-	for _, r := range rows {
-		t.by[r.At][r.Rule] = r
 	}
 	if t.rules, err = s.l.RuleTable(ctx); err != nil {
 		return nil, err
@@ -166,8 +169,8 @@ func (t *tallies) id(name string) int64 {
 // noisy reports whether a rule was noisy in a week: never in a week whose
 // record isn't kept.
 func (t *tallies) noisy(week, rule int64) bool {
-	x := t.by[week][rule]
-	return t.kept[week] && noisy(x.Firings, x.White, t.o)
+	x := t.judged(week, rule)
+	return noisy(x.Firings, x.White, t.o)
 }
 
 // noisyAll reports whether a rule was noisy in a week, as everyone's rules
@@ -177,8 +180,8 @@ func (t *tallies) noisyAll(week, rule int64) bool {
 	if t.everyone == nil {
 		return t.noisy(week, rule)
 	}
-	x := t.everyone[week][rule]
-	return t.keptAll[week] && noisy(x.Firings, x.White, t.o)
+	x := t.jeveryone[week][rule]
+	return noisy(x.Firings, x.White, t.o)
 }
 
 // stateAll is state, judged against everyone's rules: as the incidents
@@ -446,10 +449,6 @@ func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]
 		by = t.everyone
 	}
 	recent := t.weeks[len(t.weeks)-n:]
-	kept := t.kept
-	if t.everyone != nil {
-		kept = t.keptAll
-	}
 	sums := map[int64]*verdict.RuleResult{}
 	for _, w := range recent {
 		for id, x := range by[w] {
@@ -461,9 +460,8 @@ func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]
 			}
 			r.Firings += x.Firings
 			r.White += x.White
-			if !kept[w] {
-				r.Unjudged += x.Firings - x.White
-			}
+			u := t.unjudgedAll(w, id)
+			r.Unjudged += u.Firings - u.White
 		}
 	}
 	rs := make([]verdict.RuleResult, 0, len(sums))
@@ -542,11 +540,10 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 			l.Excused += x.Excused
 			l.Deploys += x.Deploy
 			l.DeploysCaught += x.DeployWhite
-			// A week with no record: counted, not judged.
-			if !t.kept[w] {
-				l.Unjudged += x.Firings - x.White
-				l.deploysUnjudged += x.Deploy - x.DeployWhite
-			}
+			// Firings with no record: counted, not judged.
+			u := t.unjudged(w, id)
+			l.Unjudged += u.Firings - u.White
+			l.deploysUnjudged += u.Deploy - u.DeployWhite
 		}
 	}
 	credit, err := s.credit(ctx, t, n)
@@ -820,7 +817,7 @@ func (s *Server) rulesOver(r *http.Request, week int64) (rulesData, error) {
 	}
 	v := rulesView{Weeks: n, Team: f, Lines: lines, Silent: silent, Facts: facts, Deploys: deploys, Sorts: []string{"", "refired"}}
 	for _, w := range t.weeks[len(t.weeks)-n:] {
-		if !t.kept[w] && slices.ContainsFunc(slices.Collect(maps.Values(t.by[w])), func(x ledger.Tally) bool { return x.Firings > 0 }) {
+		if t.someUnjudged(w) {
 			v.Unkept++
 		}
 	}

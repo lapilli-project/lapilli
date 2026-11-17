@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"time"
 
 	"lapilli.dev/internal/incident"
@@ -36,7 +37,11 @@ func (s *Server) readRecord(ctx context.Context, t *tallies) error {
 }
 
 // keep judges t's weeks by the incidents keeps says keep their record,
-// every one when nil.
+// every one when nil: each week, and, of each rule's firings in it, those
+// judged (jby). With named signals (docs/design/signals.md), a week's
+// firings are judged by the signals tied to them, so part of a rule's
+// week may be judged and part not: kept says only that an incident
+// written down keeps the week's record.
 func (t *tallies) keep(keeps func(ledger.Incident) bool) {
 	var plain []incident.Incident
 	for _, in := range t.recs {
@@ -49,14 +54,120 @@ func (t *tallies) keep(keeps func(ledger.Incident) bool) {
 	for _, w := range t.weeks {
 		t.kept[w] = t.rec.Kept(t.mid(w), t.mid(w+7))
 	}
+	t.jby = make(map[int64]map[int64]ledger.Tally, len(t.weeks))
+	for _, w := range t.weeks {
+		t.jby[w] = map[int64]ledger.Tally{}
+	}
+	if t.parts == nil {
+		// Read whole, as before tallies were kept by signals: a week's
+		// all judged, or none.
+		for w, rows := range t.by {
+			if t.kept[w] {
+				t.jby[w] = maps.Clone(rows)
+			}
+		}
+		return
+	}
+	for _, x := range t.parts {
+		if m := t.jby[x.At]; m != nil && t.judgedPart(x.At, x.Rule, x.Signals) {
+			j := m[x.Rule].Add(x)
+			j.At, j.Rule, j.Signals = x.At, x.Rule, 0
+			m[x.Rule] = j
+		}
+	}
+}
+
+// judgedPart reports whether the firings of rule id in week w, their
+// alerts tied to signals (ledger.Tally.Signals), are judged: by the week
+// with no named signal; else by the signals tied to them, the rule's
+// entry's or else its alerts' (verdict.Record.JudgesTied).
+func (t *tallies) judgedPart(w, id int64, signals int64) bool {
+	if !t.o.Signals.Named() {
+		return t.kept[w]
+	}
+	return t.rec.JudgesTied(t.mid(w), t.o.Signals.TiedOf(t.rules[id].Name, signals))
+}
+
+// judged are, of rule id's firings in week w, those judged; unjudged, the
+// rest (counted, not judged), as t has them after only kept one team's.
+func (t *tallies) judged(w, id int64) ledger.Tally { return t.jby[w][id] }
+
+func (t *tallies) unjudged(w, id int64) ledger.Tally { return minus(t.by[w][id], t.jby[w][id]) }
+
+// unjudgedAll is unjudged, as everyone's rules were tallied, before only
+// kept one team's.
+func (t *tallies) unjudgedAll(w, id int64) ledger.Tally {
+	if t.everyone == nil {
+		return t.unjudged(w, id)
+	}
+	return minus(t.everyone[w][id], t.jeveryone[w][id])
+}
+
+// minus is a's counts less b's.
+func minus(a, b ledger.Tally) ledger.Tally {
+	a.Firings -= b.Firings
+	a.White -= b.White
+	a.Refired -= b.Refired
+	a.Excused -= b.Excused
+	a.Deploy -= b.Deploy
+	a.DeployWhite -= b.DeployWhite
+	return a
+}
+
+// keptAny reports whether any firing of week w would be judged: an
+// incident written down keeps its record, or, with named signals, a
+// window of one does, or one that keeps the record had started by its
+// start. With no named signal, kept.
+func (t *tallies) keptAny(w int64) bool {
+	if t.kept[w] || !t.o.Signals.Named() {
+		return t.kept[w]
+	}
+	for i := range t.o.Signals.List {
+		if t.rec.JudgesTied(t.mid(w), []int{i}) {
+			return true
+		}
+	}
+	return false
+}
+
+// someUnjudged reports whether a firing of week w, of the rules t holds,
+// was counted and not judged.
+func (t *tallies) someUnjudged(w int64) bool {
+	for id := range t.by[w] {
+		if t.unjudged(w, id).Firings > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// fillTallies reads into t each rule's stones in each of its weeks, from
+// w1 to w2: by, summed over the signals the firings' alerts are tied to,
+// and parts, apart by them, which judge them (keep).
+func (s *Server) fillTallies(ctx context.Context, t *tallies, w1, w2 int64) error {
+	rows, err := s.l.WeeksBy(ctx, w1, w2)
+	if err != nil {
+		return err
+	}
+	t.parts = rows
+	for _, r := range rows {
+		m := t.by[r.At]
+		if m == nil {
+			continue
+		}
+		x := m[r.Rule].Add(r)
+		x.At, x.Rule, x.Signals = r.At, r.Rule, 0
+		m[r.Rule] = x
+	}
+	return nil
 }
 
 // keptWeek reports whether the record of the week of from is kept, as the
 // tallies have it when they hold that week, or else as the ledger does,
 // for everyone or the team t's are kept to.
 func (s *Server) keptWeek(ctx context.Context, t *tallies, from, to time.Time) (bool, error) {
-	if kept, ok := t.kept[ledger.Week(s.l.Day(from))]; ok {
-		return kept, nil
+	if _, ok := t.kept[ledger.Week(s.l.Day(from))]; ok {
+		return t.keptAny(ledger.Week(s.l.Day(from))), nil
 	}
 	return s.spanKept(ctx, from, to, t.team)
 }

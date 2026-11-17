@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rules · Lapilli</title>
+<link rel="icon" href="/static/icon.svg?v=4d8cd2be2c2b" type="image/svg+xml">
+<link rel="stylesheet" href="/static/lapilli.css?v=4d8cd2be2c2b">
+</head>
+<body>
+<a class="skip" href="#main">Skip to the page</a>
+<header class="side">
+  <a class="brand" href="/"><img src="/static/icon.svg?v=4d8cd2be2c2b" alt="" width="24" height="24">Lapilli</a>
+  <details class="menu"><summary>Menu<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>Rules</span></summary>
+  <nav class="nav-menu" aria-label="Menu">
+  <p class="nav-group" id="menu-see">Monitoring</p>
+  <ul aria-labelledby="menu-see"><li><a href="/">Overview</a></li><li><a href="/rules" aria-current="page">Rules</a></li><li><a href="/incidents">Incidents</a></li><li><a href="/marked">Marked windows</a></li><li><a href="/firings">Alert history</a></li></ul>
+  <p class="nav-group" id="menu-fix">Improve</p>
+  <ul aria-labelledby="menu-fix"><li><a href="/tasks">Tasks <span class="count" aria-hidden="true">1</span><span class="vh">, 1 open</span></a></li><li><a href="/proposals">Proposals</a></li><li><a href="/windows">Quiet windows</a></li></ul>
+  <p class="nav-group" id="menu-report">Reporting</p>
+  <ul aria-labelledby="menu-report"><li><a href="/reports">Reports</a></li><li><a href="/outcomes">Outcomes</a></li><li><a href="/goals">Goals</a></li></ul>
+  <p class="nav-group" id="menu-manage"><a href="/manage">Administration</a></p>
+  <ul aria-labelledby="menu-manage"><li><a href="/teams">Teams</a></li><li><a href="/settings">Settings</a></li><li><a href="/runs">Run history</a></li><li><a href="/orphans">Cleanup</a></li></ul>
+</nav>
+  </details>
+  <nav class="nav-side" aria-label="Pages">
+  <p class="nav-group" id="side-see">Monitoring</p>
+  <ul aria-labelledby="side-see"><li><a href="/">Overview</a></li><li><a href="/rules" aria-current="page">Rules</a></li><li><a href="/incidents">Incidents</a></li><li><a href="/marked">Marked windows</a></li><li><a href="/firings">Alert history</a></li></ul>
+  <p class="nav-group" id="side-fix">Improve</p>
+  <ul aria-labelledby="side-fix"><li><a href="/tasks">Tasks <span class="count" aria-hidden="true">1</span><span class="vh">, 1 open</span></a></li><li><a href="/proposals">Proposals</a></li><li><a href="/windows">Quiet windows</a></li></ul>
+  <p class="nav-group" id="side-report">Reporting</p>
+  <ul aria-labelledby="side-report"><li><a href="/reports">Reports</a></li><li><a href="/outcomes">Outcomes</a></li><li><a href="/goals">Goals</a></li></ul>
+  <p class="nav-group" id="side-manage"><a href="/manage">Administration</a></p>
+  <ul aria-labelledby="side-manage"><li><a href="/teams">Teams</a></li><li><a href="/settings">Settings</a></li><li><a href="/runs">Run history</a></li><li><a href="/orphans">Cleanup</a></li></ul>
+</nav>
+  <nav class="langs" aria-label="Language"><strong lang="en" aria-current="true">English</strong><span aria-hidden="true"> · </span><a href="/lang?to=es&amp;back=%2Frules" lang="es" hreflang="es">Español</a><span aria-hidden="true"> · </span><a href="/lang?to=ja&amp;back=%2Frules" lang="ja" hreflang="ja">日本語</a><span aria-hidden="true"> · </span><a href="/lang?to=ko&amp;back=%2Frules" lang="ko" hreflang="ko">한국어</a></nav>
+</header>
+<div class="page">
+<section class="statuses" aria-label="Status">
+
+<p class="status notice status-info"><span class="sign" aria-hidden="true">↻</span> near misses of incidents written down since</p>
+</section>
+<main id="main">
+<nav class="crumbs" aria-label="Breadcrumb"><ol><li>Monitoring</li><li><span aria-current="page">Rules</span></li></ol></nav>
+<div class="bar">
+<form method="get" action="/rules" class="ctx" aria-label="Period">
+  
+  <label>Period <select name="weeks"><option value="1">1 week</option><option value="4" selected>4 weeks</option><option value="12">12 weeks</option></select></label>
+  <button class="quiet-button">Show</button>
+</form>
+<form method="get" action="/search" role="search" class="find" aria-label="Search"><input type="hidden" name="weeks" value="4">
+  <label>Search <input type="search" name="q" value="" maxlength="500" placeholder="Rules, incidents, teams"></label>
+  <button class="quiet-button">Search</button>
+</form>
+</div>
+
+<div class="head"><h1>Rules</h1><p class="of">1 of 1 rules</p></div>
+<p class="lede">Each rule&#39;s stones over the last 4 weeks, the noisiest first.</p>
+<p class="note">No team owns a rule yet, so the Team column is empty. <a href="/teams#add">Add a team</a></p>
+
+<div class="rules-body">
+<aside class="facets-side" aria-label="Filters"><form method="get" action="/rules" class="facets">
+<label>Search the rules <input type="search" name="q" value="" maxlength="500" placeholder="is:noisy severity:critical"></label>
+<p class="row"><button>Apply</button></p>
+<p class="quiet keys"><code>team:</code> <code>severity:</code> <code>is:</code> <code>status:</code> <code>has:</code> <code>label:k=v</code> <code>group:</code></p>
+<fieldset><legend>Performance</legend>
+  <label class="opt zero"><input type="checkbox" name="perf" value="noisy"> <span>Noisy</span> <span class="n">0</span></label>
+  <label class="opt"><input type="checkbox" name="perf" value="unrecorded"> <span>No record</span> <span class="n">1</span></label>
+  <label class="opt zero"><input type="checkbox" name="perf" value="ok"> <span>OK</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="perf" value="silent"> <span>Silent</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="perf" value="spare"> <span>Spare</span> <span class="n">0</span></label></fieldset><fieldset><legend>Severity</legend>
+  <label class="opt"><input type="checkbox" name="severity" value="page"> <span><bdi>page</bdi></span> <span class="n">1</span></label></fieldset><fieldset><legend>Trust</legend>
+  <label class="opt zero"><input type="checkbox" name="trust" value="differs"> <span>Differs</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="trust" value="unreplayed"> <span>Not replayed</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="trust" value="recorded"> <span>Recorded only</span> <span class="n">0</span></label></fieldset><fieldset><legend>Disposition</legend>
+  <label class="opt zero"><input type="checkbox" name="status" value="keep"> <span>keep</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="status" value="tune"> <span>tune</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="status" value="retire"> <span>retire</span> <span class="n">0</span></label>
+  <label class="opt"><input type="checkbox" name="status" value="none"> <span>Undecided</span> <span class="n">1</span></label></fieldset><fieldset><legend>Progress</legend>
+  <label class="opt zero"><input type="checkbox" name="has" value="proposal"> <span>Proposed</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="has" value="facts"> <span>Problems to check</span> <span class="n">0</span></label></fieldset>
+<p class="row"><button>Apply</button> <a href="/rules">Clear filters</a></p>
+</form></aside>
+<div class="rules-main">
+<details class="facets-menu"><summary>Filters</summary><form method="get" action="/rules" class="facets">
+<label>Search the rules <input type="search" name="q" value="" maxlength="500" placeholder="is:noisy severity:critical"></label>
+<p class="row"><button>Apply</button></p>
+<p class="quiet keys"><code>team:</code> <code>severity:</code> <code>is:</code> <code>status:</code> <code>has:</code> <code>label:k=v</code> <code>group:</code></p>
+<fieldset><legend>Performance</legend>
+  <label class="opt zero"><input type="checkbox" name="perf" value="noisy"> <span>Noisy</span> <span class="n">0</span></label>
+  <label class="opt"><input type="checkbox" name="perf" value="unrecorded"> <span>No record</span> <span class="n">1</span></label>
+  <label class="opt zero"><input type="checkbox" name="perf" value="ok"> <span>OK</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="perf" value="silent"> <span>Silent</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="perf" value="spare"> <span>Spare</span> <span class="n">0</span></label></fieldset><fieldset><legend>Severity</legend>
+  <label class="opt"><input type="checkbox" name="severity" value="page"> <span><bdi>page</bdi></span> <span class="n">1</span></label></fieldset><fieldset><legend>Trust</legend>
+  <label class="opt zero"><input type="checkbox" name="trust" value="differs"> <span>Differs</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="trust" value="unreplayed"> <span>Not replayed</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="trust" value="recorded"> <span>Recorded only</span> <span class="n">0</span></label></fieldset><fieldset><legend>Disposition</legend>
+  <label class="opt zero"><input type="checkbox" name="status" value="keep"> <span>keep</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="status" value="tune"> <span>tune</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="status" value="retire"> <span>retire</span> <span class="n">0</span></label>
+  <label class="opt"><input type="checkbox" name="status" value="none"> <span>Undecided</span> <span class="n">1</span></label></fieldset><fieldset><legend>Progress</legend>
+  <label class="opt zero"><input type="checkbox" name="has" value="proposal"> <span>Proposed</span> <span class="n">0</span></label>
+  <label class="opt zero"><input type="checkbox" name="has" value="facts"> <span>Problems to check</span> <span class="n">0</span></label></fieldset>
+<p class="row"><button>Apply</button> <a href="/rules">Clear filters</a></p>
+</form></details>
+<details class="badge-legend"><summary>What the badges mean</summary>
+<p class="axis">Performance</p>
+<dl><div><dt><span class="badge perf-noisy status-warn"><span aria-hidden="true">●</span> Noisy</span></dt><dd>Fired often over the weeks shown, and few of its firings caught something; with weeks, how many weeks running.</dd></div><div><dt><span class="badge perf-unrecorded status-unknown"><span aria-hidden="true">?</span> No record</span></dt><dd>Fired often over the weeks shown, with no incident written down to judge it by: whether its firings mattered isn&#39;t known.</dd></div><div><dt><span class="badge perf-ok status-ok"><span aria-hidden="true">○</span> OK</span></dt><dd>Fired over the weeks shown, and isn&#39;t noisy.</dd></div><div><dt><span class="badge perf-silent status-unknown"><span aria-hidden="true">–</span> Silent</span></dt><dd>No firing in the weeks shown.</dd></div><div><dt><span class="badge perf-spare status-unknown"><span aria-hidden="true">⧉</span> Spare</span></dt><dd>Another rule caught every incident it caught, as soon, at the same severity or above.</dd></div></dl><p class="axis">Trust</p>
+<dl><div><dt><span class="badge trust status-warn"><span aria-hidden="true">≠</span> Differs</span></dt><dd>Over the last week checked, its replay differed from what really fired.</dd></div><div><dt><span class="badge trust status-warn"><span aria-hidden="true">◌</span> Not replayed</span></dt><dd>Lapilli can&#39;t replay it; its page says why.</dd></div><div><dt><span class="badge trust status-info"><span aria-hidden="true">⇣</span> Recorded only</span></dt><dd>Copied in from where it fired: what it fired is known, not its condition.</dd></div></dl><p class="axis">Disposition</p>
+<dl><div><dt><span class="badge pill keep status-ok"><span aria-hidden="true">✓</span> keep</span></dt><dd>Its note says to keep it as it is.</dd></div><div><dt><span class="badge pill tune status-info"><span aria-hidden="true">±</span> tune</span></dt><dd>Its note says to tune it.</dd></div><div><dt><span class="badge pill retire status-unknown"><span aria-hidden="true">⊘</span> retire</span></dt><dd>Its note says to retire it.</dd></div></dl><p class="axis">Progress</p>
+<dl><div><dt><span class="badge prog status-info"><span aria-hidden="true">✎</span> Proposed</span></dt><dd>A change to it is proposed and not finished with.</dd></div><div><dt><span class="badge check status-warn"><span aria-hidden="true">⚠︎</span> Problems to check</span></dt><dd>What it says when it fires has problems of fact; the badge, “n to check”, counts them with whatever else its page lists to check.</dd></div></dl>
+</details>
+
+
+
+
+
+<p class="tabs">In order of: <a href="/rules" aria-current="page">caught nothing, the most first</a> <a href="/rules?sort=refired">re-fired, the most first</a></p>
+
+<p class="notice status-unknown"><span class="sign" aria-hidden="true">?</span> 1 of the 4 weeks shown had no incident written down in them or the two weeks before them: their firings are counted, not judged, and are in no precision. <a href="/incidents">Write incidents down</a></p>
+<form method="post" action="/rules/bulk" class="bulk"><input type="hidden" name="back" value="/rules"><button type="submit" disabled hidden></button>
+<fieldset class="bulk-bar"><legend>With the rules picked</legend>
+<span class="action-off"><button type="button" disabled aria-describedby="bulk-why">Make a task for each</button> <span id="bulk-why" class="why">Editors only</span></span>
+<span class="bulk-set"><label>Team <select name="team" disabled aria-describedby="bulk-why"><option value="0">by the teams&#39; patterns</option></select></label>
+<span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="bulk-why">Set the team</button></span></span>
+<span class="bulk-set"><label>Disposition <select name="status" disabled aria-describedby="bulk-why"><option value="">Undecided</option><option value="keep">keep</option><option value="tune">tune</option><option value="retire">retire</option></select></label>
+<span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="bulk-why">Set the disposition</button></span></span>
+<span class="bulk-set"><label>Propose for each <select name="propose" disabled aria-describedby="bulk-why"><option value="for">a new for</option><option value="suggested">the for suggested for it</option><option value="retire">retiring it</option></select></label>
+<label>A new for <input name="for" maxlength="20" size="8" placeholder="15m" disabled aria-describedby="bulk-why"></label>
+<span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="bulk-why">Propose</button></span></span>
+<p class="quiet">Each rule picked is changed as its own page would change it, and only if you may: at most 100 at a time. A proposal for each is the one its page would make, with its backtest, for a person to approve: at most 20 at a time.</p>
+</fieldset>
+<div class="scroll"><table>
+<thead><tr><th scope="col" class="pick"><span class="vh">Pick</span></th><th scope="col">Rule</th><th scope="col">Team</th><th scope="col">Severity</th><th scope="col" class="n">Fired</th><th scope="col" class="n">○ Caught</th><th scope="col" class="n">● Nothing</th><th scope="col" class="n">Precision</th><th scope="col" class="n">Refired</th><th scope="col" class="n">Incidents</th><th scope="col">12 weeks</th></tr></thead>
+<tbody>
+<tr>
+  <td class="pick"><input type="checkbox" name="rule" value="Errors" aria-label="Errors" disabled></td>
+  <td class="rule"><a href="/rules/Errors?weeks=4"><bdi>Errors</bdi></a> <span class="badges"><span class="badge perf-unrecorded status-unknown"><span aria-hidden="true">?</span> No record</span></span></td>
+  <td class="name">–</td>
+  <td class="name"><bdi>page</bdi></td>
+  <td class="n">21</td><td class="n">1</td><td class="n">20</td><td class="n">14%</td><td class="n">19<br><span class="quiet">90% of firings</span></td>
+  <td class="n">1<br><span class="quiet">first 1, alone 1</span></td>
+  <td><svg class="spark" width="72" height="18" viewBox="0 0 72 18" role="img" aria-label="Stones by week: 08-17: 0 ○ 0 ●; 08-24: 0 ○ 0 ●; 08-31: 0 ○ 0 ●; 09-07: 0 ○ 0 ●; 09-14: 0 ○ 0 ●; 09-21: 0 ○ 0 ●; 09-28: 0 ○ 0 ●; 10-05: 0 ○ 0 ●; 10-12: 0 ○ 0 ●; 10-19: 0 ○ 0 ●; 10-26: 0 ○ 14 ●; 11-02: 1 ○ 6 ●"><g><title>08-17: 0 ○ 0 ●</title><rect class="w" x="0" y="18" width="5" height="0"/><rect class="b" x="0" y="18" width="5" height="0"/></g><g><title>08-24: 0 ○ 0 ●</title><rect class="w" x="6" y="18" width="5" height="0"/><rect class="b" x="6" y="18" width="5" height="0"/></g><g><title>08-31: 0 ○ 0 ●</title><rect class="w" x="12" y="18" width="5" height="0"/><rect class="b" x="12" y="18" width="5" height="0"/></g><g><title>09-07: 0 ○ 0 ●</title><rect class="w" x="18" y="18" width="5" height="0"/><rect class="b" x="18" y="18" width="5" height="0"/></g><g><title>09-14: 0 ○ 0 ●</title><rect class="w" x="24" y="18" width="5" height="0"/><rect class="b" x="24" y="18" width="5" height="0"/></g><g><title>09-21: 0 ○ 0 ●</title><rect class="w" x="30" y="18" width="5" height="0"/><rect class="b" x="30" y="18" width="5" height="0"/></g><g><title>09-28: 0 ○ 0 ●</title><rect class="w" x="36" y="18" width="5" height="0"/><rect class="b" x="36" y="18" width="5" height="0"/></g><g><title>10-05: 0 ○ 0 ●</title><rect class="w" x="42" y="18" width="5" height="0"/><rect class="b" x="42" y="18" width="5" height="0"/></g><g><title>10-12: 0 ○ 0 ●</title><rect class="w" x="48" y="18" width="5" height="0"/><rect class="b" x="48" y="18" width="5" height="0"/></g><g><title>10-19: 0 ○ 0 ●</title><rect class="w" x="54" y="18" width="5" height="0"/><rect class="b" x="54" y="18" width="5" height="0"/></g><g><title>10-26: 0 ○ 14 ●</title><rect class="w" x="60" y="18" width="5" height="0"/><rect class="b" x="60" y="0" width="5" height="18"/></g><g><title>11-02: 1 ○ 6 ●</title><rect class="w" x="66" y="16.714285714285715" width="5" height="1.2857142857142858"/><rect class="b" x="66" y="9" width="5" height="7.714285714285714"/></g></svg></td>
+</tr></tbody>
+<tfoot><tr><th scope="row" colspan="4">The rule shown</th>
+  <td class="n">21</td><td class="n">1</td><td class="n">20</td><td class="n">14%</td><td class="n">19</td><td></td><td></td></tr></tfoot>
+</table></div></form>
+
+
+
+</div>
+</div>
+
+
+</main>
+<footer>lapilli test · times in UTC · you are viewer@example.com, viewer</footer>
+</div>
+</body>
+</html>

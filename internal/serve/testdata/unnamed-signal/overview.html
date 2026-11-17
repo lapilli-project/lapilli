@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your alerts, the last twelve weeks · Lapilli</title>
+<link rel="icon" href="/static/icon.svg?v=4d8cd2be2c2b" type="image/svg+xml">
+<link rel="stylesheet" href="/static/lapilli.css?v=4d8cd2be2c2b">
+</head>
+<body>
+<a class="skip" href="#main">Skip to the page</a>
+<header class="side">
+  <a class="brand" href="/"><img src="/static/icon.svg?v=4d8cd2be2c2b" alt="" width="24" height="24">Lapilli</a>
+  <details class="menu"><summary>Menu<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>Overview</span></summary>
+  <nav class="nav-menu" aria-label="Menu">
+  <p class="nav-group" id="menu-see">Monitoring</p>
+  <ul aria-labelledby="menu-see"><li><a href="/" aria-current="page">Overview</a></li><li><a href="/rules">Rules</a></li><li><a href="/incidents">Incidents</a></li><li><a href="/marked">Marked windows</a></li><li><a href="/firings">Alert history</a></li></ul>
+  <p class="nav-group" id="menu-fix">Improve</p>
+  <ul aria-labelledby="menu-fix"><li><a href="/tasks">Tasks <span class="count" aria-hidden="true">1</span><span class="vh">, 1 open</span></a></li><li><a href="/proposals">Proposals</a></li><li><a href="/windows">Quiet windows</a></li></ul>
+  <p class="nav-group" id="menu-report">Reporting</p>
+  <ul aria-labelledby="menu-report"><li><a href="/reports">Reports</a></li><li><a href="/outcomes">Outcomes</a></li><li><a href="/goals">Goals</a></li></ul>
+  <p class="nav-group" id="menu-manage"><a href="/manage">Administration</a></p>
+  <ul aria-labelledby="menu-manage"><li><a href="/teams">Teams</a></li><li><a href="/settings">Settings</a></li><li><a href="/runs">Run history</a></li><li><a href="/orphans">Cleanup</a></li></ul>
+</nav>
+  </details>
+  <nav class="nav-side" aria-label="Pages">
+  <p class="nav-group" id="side-see">Monitoring</p>
+  <ul aria-labelledby="side-see"><li><a href="/" aria-current="page">Overview</a></li><li><a href="/rules">Rules</a></li><li><a href="/incidents">Incidents</a></li><li><a href="/marked">Marked windows</a></li><li><a href="/firings">Alert history</a></li></ul>
+  <p class="nav-group" id="side-fix">Improve</p>
+  <ul aria-labelledby="side-fix"><li><a href="/tasks">Tasks <span class="count" aria-hidden="true">1</span><span class="vh">, 1 open</span></a></li><li><a href="/proposals">Proposals</a></li><li><a href="/windows">Quiet windows</a></li></ul>
+  <p class="nav-group" id="side-report">Reporting</p>
+  <ul aria-labelledby="side-report"><li><a href="/reports">Reports</a></li><li><a href="/outcomes">Outcomes</a></li><li><a href="/goals">Goals</a></li></ul>
+  <p class="nav-group" id="side-manage"><a href="/manage">Administration</a></p>
+  <ul aria-labelledby="side-manage"><li><a href="/teams">Teams</a></li><li><a href="/settings">Settings</a></li><li><a href="/runs">Run history</a></li><li><a href="/orphans">Cleanup</a></li></ul>
+</nav>
+  <nav class="langs" aria-label="Language"><strong lang="en" aria-current="true">English</strong><span aria-hidden="true"> · </span><a href="/lang?to=es&amp;back=%2F" lang="es" hreflang="es">Español</a><span aria-hidden="true"> · </span><a href="/lang?to=ja&amp;back=%2F" lang="ja" hreflang="ja">日本語</a><span aria-hidden="true"> · </span><a href="/lang?to=ko&amp;back=%2F" lang="ko" hreflang="ko">한국어</a></nav>
+</header>
+<div class="page">
+<section class="statuses" aria-label="Status">
+
+<p class="status notice status-info"><span class="sign" aria-hidden="true">↻</span> near misses of incidents written down since</p>
+</section>
+<main id="main">
+<nav class="crumbs" aria-label="Breadcrumb"><ol><li>Monitoring</li><li><span aria-current="page">Overview</span></li></ol></nav>
+<div class="bar">
+
+<form method="get" action="/search" role="search" class="find" aria-label="Search">
+  <label>Search <input type="search" name="q" value="" maxlength="500" placeholder="Rules, incidents, teams"></label>
+  <button class="quiet-button">Search</button>
+</form>
+</div>
+
+
+<h1>Your alerts, the last twelve weeks</h1>
+<p class="lede">Each firing gets a stone: ○ when it caught an incident, ● when nothing was wrong. The numbers are the week of 2026-10-26, beside the week before.
+Last run 2026-11-03 12:00.
+
+</p>
+
+<section class="tiles" aria-label="Last week">
+<div class="tile">
+  <div class="tile-label">Precision</div>
+  <div class="tile-value">–</div>
+  <div class="tile-of">not known: no incident written down to judge the firings by</div>
+  <div class="tile-delta"> </div>
+  
+  <a class="tile-more" href="/rules?week=2026-10-26">The rules that week<span class="vh">: Precision</span> <span aria-hidden="true">→</span></a>
+</div><div class="tile">
+  <div class="tile-label">Firings</div>
+  <div class="tile-value">14</div>
+  <div class="tile-of"> </div>
+  <div class="tile-delta">&#43;14 on the week before</div>
+  <svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="Firings, eleven weeks: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 14"><path d="M2.0 22.0 L11.2 22.0 L20.4 22.0 L29.6 22.0 L38.8 22.0 L48.0 22.0 L57.2 22.0 L66.4 22.0 L75.6 22.0 L84.8 22.0 L94.0 2.0"/><circle cx="94" cy="2" r="3"/></svg>
+  <a class="tile-more" href="/rules?week=2026-10-26">The rules that week<span class="vh">: Firings</span> <span aria-hidden="true">→</span></a>
+</div><div class="tile">
+  <div class="tile-label">Incidents missed</div>
+  <div class="tile-value">0</div>
+  <div class="tile-of">of 0</div>
+  <div class="tile-delta">as the week before</div>
+  <svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="Incidents missed, eleven weeks: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0"><path d="M2.0 12.0 L11.2 12.0 L20.4 12.0 L29.6 12.0 L38.8 12.0 L48.0 12.0 L57.2 12.0 L66.4 12.0 L75.6 12.0 L84.8 12.0 L94.0 12.0"/><circle cx="94" cy="12" r="3"/></svg>
+  <a class="tile-more" href="/incidents?state=missed&amp;week=2026-10-26">The incidents missed<span class="vh">: Incidents missed</span> <span aria-hidden="true">→</span></a>
+</div><div class="tile">
+  <div class="tile-label">Time to catch</div>
+  <div class="tile-value">–</div>
+  <div class="tile-of">median, by a rule that isn&#39;t noisy</div>
+  <div class="tile-delta"> </div>
+  
+  <a class="tile-more" href="/incidents?state=caught&amp;week=2026-10-26">The incidents caught<span class="vh">: Time to catch</span> <span aria-hidden="true">→</span></a>
+</div><div class="tile">
+  <div class="tile-label">Noisy rules</div>
+  <div class="tile-value">–</div>
+  <div class="tile-of">not known: no incident written down to judge the firings by</div>
+  <div class="tile-delta"> </div>
+  <svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="Noisy rules, eleven weeks: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, –"><path d="M2.0 12.0 L11.2 12.0 L20.4 12.0 L29.6 12.0 L38.8 12.0 L48.0 12.0 L57.2 12.0 L66.4 12.0 L75.6 12.0 L84.8 12.0"/></svg>
+  <a class="tile-more" href="/rules?perf=noisy&amp;week=2026-10-26">The noisy rules<span class="vh">: Noisy rules</span> <span aria-hidden="true">→</span></a>
+</div><div class="tile">
+  <div class="tile-label">Refired</div>
+  <div class="tile-value">13</div>
+  <div class="tile-of"> </div>
+  <div class="tile-delta status-bad">&#43;13 on the week before, worse</div>
+  <svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="Refired, eleven weeks: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 13"><path d="M2.0 22.0 L11.2 22.0 L20.4 22.0 L29.6 22.0 L38.8 22.0 L48.0 22.0 L57.2 22.0 L66.4 22.0 L75.6 22.0 L84.8 22.0 L94.0 2.0"/><circle cx="94" cy="2" r="3"/></svg>
+  <a class="tile-more" href="/rules?sort=refired&amp;week=2026-10-26">The rules, the most re-fired first<span class="vh">: Refired</span> <span aria-hidden="true">→</span></a>
+</div>
+</section>
+
+
+<p class="tabs marks">Marked on the charts: <a href="/?marks=deploys">Hide quiet windows</a></p>
+<div class="cards">
+<figure class="card">
+  <figcaption><h2>Firings by week</h2>
+    <ul class="legend"><li><span class="key caught"></span>caught something</li><li><span class="key nothing"></span>caught nothing</li></ul></figcaption>
+  <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="Firings by week, caught something and caught nothing; the same numbers are in the table below">
+    <line class="grid" x1="44" x2="550" y1="172" y2="172"/><text class="tick" x="38" y="172" dy="4">0</text><line class="grid" x1="44" x2="550" y1="118.66666666666666" y2="118.66666666666666"/><text class="tick" x="38" y="118.66666666666666" dy="4">5</text><line class="grid" x1="44" x2="550" y1="65.33333333333333" y2="65.33333333333333"/><text class="tick" x="38" y="65.33333333333333" dy="4">10</text><line class="grid" x1="44" x2="550" y1="12" y2="12"/><text class="tick" x="38" y="12" dy="4">15</text>
+    <g>
+      <text class="wk alt" x="65.08333333333333" y="192">08-17</text>
+      </g><g>
+      <text class="wk" x="107.24999999999999" y="192">08-24</text>
+      </g><g>
+      <text class="wk alt" x="149.41666666666666" y="192">08-31</text>
+      </g><g>
+      <text class="wk" x="191.58333333333334" y="192">09-07</text>
+      </g><g>
+      <text class="wk alt" x="233.75" y="192">09-14</text>
+      </g><g>
+      <text class="wk" x="275.91666666666663" y="192">09-21</text>
+      </g><g>
+      <text class="wk alt" x="318.0833333333333" y="192">09-28</text>
+      </g><g>
+      <text class="wk" x="360.24999999999994" y="192">10-05</text>
+      </g><g>
+      <text class="wk alt" x="402.41666666666663" y="192">10-12</text>
+      </g><g>
+      <text class="wk" x="444.5833333333333" y="192">10-19</text>
+      </g><g><path class="nothing" d="M474.7 172.0V26.7Q474.7 22.7 478.7 22.7H494.7Q498.7 22.7 498.7 26.7V172.0Z"><title>week of 2026-10-26: 14 caught nothing</title></path>
+      <text class="wk alt" x="486.74999999999994" y="192">10-26</text>
+      </g><g><path class="caught" d="M516.9 172.0V161.3H540.9V172.0Z"><title>week of 2026-11-02: 1 caught something</title></path><path class="nothing" d="M516.9 159.3V101.3Q516.9 97.3 520.9 97.3H536.9Q540.9 97.3 540.9 101.3V159.3Z"><title>week of 2026-11-02: 6 caught nothing</title></path>
+      <text class="wk now" x="528.9166666666666" y="192">so far</text>
+      </g>
+    <line class="base" x1="44" x2="550" y1="172" y2="172"/>
+  </svg>
+</figure>
+
+<figure class="card">
+  <figcaption><h2>Precision by week</h2><p class="quiet">The share of firings that caught something.</p></figcaption>
+  <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="Precision by week; the same numbers are in the table below">
+    <line class="grid" x1="44" x2="550" y1="172" y2="172"/><text class="tick" x="38" y="172" dy="4">0%</text><line class="grid" x1="44" x2="550" y1="118.66666666666666" y2="118.66666666666666"/><text class="tick" x="38" y="118.66666666666666" dy="4">5%</text><line class="grid" x1="44" x2="550" y1="65.33333333333333" y2="65.33333333333333"/><text class="tick" x="38" y="65.33333333333333" dy="4">10%</text><line class="grid" x1="44" x2="550" y1="12" y2="12"/><text class="tick" x="38" y="12" dy="4">15%</text>
+    <line class="base" x1="44" x2="550" y1="172" y2="172"/>
+    <text class="wk alt" x="65.08333333333333" y="192">08-17</text><text class="wk" x="107.24999999999999" y="192">08-24</text><text class="wk alt" x="149.41666666666666" y="192">08-31</text><text class="wk" x="191.58333333333334" y="192">09-07</text><text class="wk alt" x="233.75" y="192">09-14</text><text class="wk" x="275.91666666666663" y="192">09-21</text><text class="wk alt" x="318.0833333333333" y="192">09-28</text><text class="wk" x="360.24999999999994" y="192">10-05</text><text class="wk alt" x="402.41666666666663" y="192">10-12</text><text class="wk" x="444.5833333333333" y="192">10-19</text><text class="wk alt" x="486.74999999999994" y="192">10-26</text><text class="wk now" x="528.9166666666666" y="192">so far</text>
+    <path class="line" d="M528.9 19.6"/>
+    <circle class="pt" cx="528.9166666666666" cy="19.61904761904762" r="4.5"><title>week of 2026-11-02: 14% of 7 firings caught something (so far)</title></circle>
+    <text class="end" x="528.9166666666666" y="19.61904761904762" dy="-11">14%</text>
+  </svg>
+</figure>
+
+<figure class="card">
+  <figcaption><h2>Incidents by week</h2>
+    <ul class="legend"><li><span class="key good"></span>✓ caught</li><li><span class="key warn"></span>◐ only noisy rules caught it</li><li><span class="key bad"></span>✗ missed</li></ul></figcaption>
+  <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="Incidents by week: caught, caught only by noisy rules, missed; the same numbers are in the table below">
+    <line class="grid" x1="44" x2="550" y1="172" y2="172"/><text class="tick" x="38" y="172" dy="4">0</text><line class="grid" x1="44" x2="550" y1="92" y2="92"/><text class="tick" x="38" y="92" dy="4">1</text><line class="grid" x1="44" x2="550" y1="12" y2="12"/><text class="tick" x="38" y="12" dy="4">2</text>
+    <g>
+      <text class="wk alt" x="65.08333333333333" y="192">08-17</text>
+      </g><g>
+      <text class="wk" x="107.24999999999999" y="192">08-24</text>
+      </g><g>
+      <text class="wk alt" x="149.41666666666666" y="192">08-31</text>
+      </g><g>
+      <text class="wk" x="191.58333333333334" y="192">09-07</text>
+      </g><g>
+      <text class="wk alt" x="233.75" y="192">09-14</text>
+      </g><g>
+      <text class="wk" x="275.91666666666663" y="192">09-21</text>
+      </g><g>
+      <text class="wk alt" x="318.0833333333333" y="192">09-28</text>
+      </g><g>
+      <text class="wk" x="360.24999999999994" y="192">10-05</text>
+      </g><g>
+      <text class="wk alt" x="402.41666666666663" y="192">10-12</text>
+      </g><g>
+      <text class="wk" x="444.5833333333333" y="192">10-19</text>
+      </g><g>
+      <text class="wk alt" x="486.74999999999994" y="192">10-26</text>
+      </g><g><path class="good" d="M516.9 172.0V92.0H540.9V172.0Z"><title>week of 2026-11-02: 1 caught</title></path><path class="bad" d="M516.9 90.0V16.0Q516.9 12.0 520.9 12.0H536.9Q540.9 12.0 540.9 16.0V90.0Z"><title>week of 2026-11-02: 1 missed</title></path>
+      <text class="wk now" x="528.9166666666666" y="192">so far</text>
+      </g>
+    <line class="base" x1="44" x2="550" y1="172" y2="172"/>
+  </svg>
+</figure>
+
+<section class="card">
+  <h2>What to look at</h2>
+  <ol class="actions"><li><a href="/incidents/impact-20261103T0600Z"><bdi>No alert caught impact-20261103T0600Z user impact (--impact)</bdi></a><br><span class="quiet">2026-11-03 06:00: a rule for it, or a lower threshold?</span>
+    <br><a class="pill open status-info" href="/tasks/1">task #1</a>
+    </li><li><a href="/incidents"><bdi>Decide on 1 impact windows</bdi></a><br><span class="quiet">confirm the real ones, dismiss the rest: the verdict sharpens either way</span>
+    </li></ol>
+  
+  
+</section>
+
+<section class="card">
+  <h2>Open tasks</h2>
+  <ul class="plain"><li><a href="/tasks/1">#1 Look at the search window</a> <span class="pill open status-info">open</span><br>
+    <span class="quiet">no due date</span></li></ul>
+  <p><a href="/tasks">All tasks</a></p>
+  
+</section>
+
+
+
+<section class="card">
+  <h2>Outcomes</h2>
+  
+  <ul class="plain"><li>0 of 1 suggestions acted on</li><li>0 edits in four weeks</li></ul>
+  <p><a href="/outcomes">What the changes did, and whether the record is kept up</a></p>
+</section>
+</div>
+
+
+<section class="card wide">
+  <h2>Where the noise is</h2>
+  <p class="quiet">The rules with the most ● in the last four weeks, week by week: the darker, the more firings that caught nothing.
+  <span class="heat-scale" aria-hidden="true">fewer <i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i><i class="h5"></i> more</span></p>
+  <p class="quiet">Weeks with no incident written down to judge them by are left out: what fired then caught nothing written down, which is no noise known.</p>
+  <div class="scroll"><table class="heat">
+    <thead><tr><th scope="col">Rule</th><th scope="col" class="hw">08-17</th><th scope="col" class="hw">08-24</th><th scope="col" class="hw">08-31</th><th scope="col" class="hw">09-07</th><th scope="col" class="hw">09-14</th><th scope="col" class="hw">09-21</th><th scope="col" class="hw">09-28</th><th scope="col" class="hw">10-05</th><th scope="col" class="hw">10-12</th><th scope="col" class="hw">10-19</th><th scope="col" class="hw">10-26</th><th scope="col" class="hw">11-02</th><th scope="col" class="n">● 4 weeks</th></tr></thead>
+    <tbody><tr><th scope="row" class="hn"><a href="/rules/Errors" title="Errors"><bdi>Errors</bdi></a></th><td class="hc h0" title="Errors, week of 08-17: 0 caught nothing, 0 caught something"><span class="vh">0</span></td><td class="hc h0" title="Errors, week of 08-24: 0 caught nothing, 0 caught something"><span class="vh">0</span></td><td class="hc h0" title="Errors, week of 08-31: 0 caught nothing, 0 caught something"><span class="vh">0</span></td><td class="hc h0" title="Errors, week of 09-07: 0 caught nothing, 0 caught something"><span class="vh">0</span></td><td class="hc h0" title="Errors, week of 09-14: 0 caught nothing, 0 caught something"><span class="vh">0</span></td><td class="hc h0" title="Errors, week of 09-21: 0 caught nothing, 0 caught something"><span class="vh">0</span></td><td class="hc h0" title="Errors, week of 09-28: 0 caught nothing, 0 caught something"><span class="vh">0</span></td><td class="hc h0" title="Errors, week of 10-05: 0 caught nothing, 0 caught something"><span class="vh">0</span></td><td class="hc h0" title="Errors, week of 10-12: 0 caught nothing, 0 caught something"><span class="vh">0</span></td><td class="hc h0" title="Errors, week of 10-19: 0 caught nothing, 0 caught something"><span class="vh">0</span></td><td class="hc h0" title="Errors, week of 10-26: 14 fired with no incident written down to judge them by"><span class="vh">0</span></td><td class="hc h5" title="Errors, week of 11-02: 6 caught nothing, 1 caught something"><span class="vh">6</span></td><td class="n">6</td></tr></tbody>
+  </table></div>
+</section>
+
+
+<h2 id="by-week">By week</h2>
+<div class="scroll" tabindex="0" role="region" aria-labelledby="by-week"><table class="weeks">
+<thead><tr><th scope="col">Week of</th><th scope="col" class="n">Fired</th><th scope="col" class="n">○ Caught</th><th scope="col" class="n">● Nothing</th><th scope="col" class="n">Precision</th><th scope="col" class="n">Noisy rules</th><th scope="col" class="n">Refired</th><th scope="col" class="n">Incidents</th><th scope="col" class="n">✓ Caught</th><th scope="col" class="n">◐ Noisy only</th><th scope="col" class="n">✗ Missed</th></tr></thead>
+<tbody>
+<tr class="current">
+  <td class="t"><span class="d">2026-11-02</span> (so far)</td>
+  <td class="n">7</td><td class="n">1</td><td class="n">6</td><td class="n">14%</td><td class="n">0</td><td class="n">6</td>
+  <td class="n">2</td><td class="n">1</td><td class="n">0</td><td class="n"><span class="status-bad">1</span></td>
+</tr>
+<tr>
+  <td class="t"><span class="d">2026-10-26</span> <span class="tag status-unknown" title="no incident written down in it or in the two weeks before it: its firings are counted, not judged">no record</span></td>
+  <td class="n">14</td><td class="n">0</td><td class="n">14</td><td class="n">–</td><td class="n">–</td><td class="n">13</td>
+  <td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td>
+</tr></tbody>
+</table></div>
+
+
+</main>
+<footer>lapilli test · times in UTC · you are viewer@example.com, viewer</footer>
+</div>
+</body>
+</html>

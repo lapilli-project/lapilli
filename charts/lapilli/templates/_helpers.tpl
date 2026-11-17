@@ -424,8 +424,10 @@ the rules and the incidents are, and how to judge. */}}
 {{- if .Values.incidents }}
 - --incidents=/etc/lapilli/incidents/incidents.yaml
 {{- end }}
-{{- with .Values.impact }}
-- {{ printf "--impact=%s" . | quote }}
+{{- if kindIs "map" .Values.impact }}
+- --impact-file=/etc/lapilli/impact/impact.yaml
+{{- else if .Values.impact }}
+- {{ printf "--impact=%s" .Values.impact | quote }}
 {{- end }}
 {{- range .Values.match }}
 - {{ printf "--match=%s" . | quote }}
@@ -464,6 +466,11 @@ the rules and the incidents are, and how to judge. */}}
 {{- if .Values.incidents }}
 - name: incidents
   mountPath: /etc/lapilli/incidents
+  readOnly: true
+{{- end }}
+{{- if kindIs "map" .Values.impact }}
+- name: impact
+  mountPath: /etc/lapilli/impact
   readOnly: true
 {{- end }}
 {{- if $p.tokenSecret.name }}
@@ -517,6 +524,11 @@ which must not share a name, side by side. */}}
 - name: incidents
   configMap:
     name: {{ include "lapilli.fullname" . }}-incidents
+{{- end }}
+{{- if kindIs "map" .Values.impact }}
+- name: impact
+  configMap:
+    name: {{ include "lapilli.fullname" . }}-impact
 {{- end }}
 {{- if $p.tokenSecret.name }}
 - name: token
