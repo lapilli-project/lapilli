@@ -1269,3 +1269,35 @@ func TestSignalSeenAgainFromSince(t *testing.T) {
 		t.Errorf("looked at again from %s (asked %v); its reads began %s", at, ok, k.Since)
 	}
 }
+
+// With named signals, a match changed on the Settings page is judged
+// once: the signals' change pends every firing, judged with the new match,
+// and nothing judges them all again after; a lead changed alone still is.
+func TestSignalsMatchChangeJudgedOnce(t *testing.T) {
+	ctx := context.Background()
+	s := signalServer(t, signalWindowsHistory(), nil)
+	n := 0
+	was := judgeAll
+	judgeAll = func(l *ledger.Ledger, ctx context.Context, o verdict.Options, done func(float64)) error {
+		n++
+		return was(l, ctx, o, done)
+	}
+	t.Cleanup(func() { judgeAll = was })
+	if code, _ := askAs(t, s.Handler(), http.MethodPost, "/settings", url.Values{"match": {"service,team"}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Fatal(code)
+	}
+	s.jobs(ctx, false)
+	if n != 0 {
+		t.Errorf("every firing judged %d more times", n)
+	}
+	if p, err := s.l.Meta(ctx, "pending"); err != nil || (p != "" && p != "[]" && p != "null") {
+		t.Errorf("left to judge: %q %v", p, err)
+	}
+	if code, _ := askAs(t, s.Handler(), http.MethodPost, "/settings", url.Values{"lead": {"20m"}, "match": {"service,team"}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Fatal(code)
+	}
+	s.jobs(ctx, false)
+	if n != 1 {
+		t.Errorf("a lead changed: judged all %d times", n)
+	}
+}

@@ -449,10 +449,12 @@ func freeBit(used map[int]bool, carried int64) int {
 	return -1
 }
 
-// pendAll pends every firing's span, to be judged again a week at a time.
+// pendAll pends the span of every firing and incident, to be judged again
+// a week at a time: what JudgeAll judges, so that, done, it needn't be.
 func pendAll(t *txn) error {
 	var lo, hi sql.NullInt64
-	if err := t.QueryRowContext(t.ctx, "SELECT min(start_at), max(start_at) FROM firings").Scan(&lo, &hi); err != nil || !lo.Valid {
+	if err := t.QueryRowContext(t.ctx, `SELECT min(t), max(t) FROM (SELECT start_at AS t FROM firings
+		UNION ALL SELECT start_at FROM incidents) AS starts`).Scan(&lo, &hi); err != nil || !lo.Valid {
 		return err
 	}
 	return pend(t, [][2]int64{{lo.Int64, hi.Int64}})

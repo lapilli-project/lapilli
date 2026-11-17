@@ -56,6 +56,10 @@ func (s *Server) work(ctx context.Context) {
 	}
 }
 
+// judgeAll judges every firing again: a variable, so that a test can
+// count how often.
+var judgeAll = (*ledger.Ledger).JudgeAll
+
 // jobs does each job in turn, each only while this replica still leads
 // (still): one whose lease ended starts none of them.
 func (s *Server) jobs(ctx context.Context, run bool) {
@@ -65,7 +69,8 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	// The named impact signals and the rule entries serve was started
 	// with, kept: a change to which there are, or what they match, pends
 	// every firing to be judged again, in the ledger (JudgePending, below).
-	if _, err := s.syncSignals(ctx); err != nil {
+	pended, err := s.syncSignals(ctx)
+	if err != nil {
 		s.fail("keeping the impact signals", err)
 	}
 	// Taken before the settings are read, so a change saved in between is
@@ -87,10 +92,21 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	}
 	if err := s.l.JudgePending(ctx, o); err != nil {
 		s.fail("judging again", err)
+		pended = false
 	}
-	if rejudge && s.still(ctx) {
+	switch {
+	case rejudge && pended && s.still(ctx):
+		// The signals' change pended every firing, judged just now with
+		// these settings: what was asked (a match changed, with named
+		// signals) is done, once.
+		if s.l.Shared() {
+			if err := s.l.SetMeta(ctx, "rejudged", fmt.Sprint(asked)); err != nil {
+				s.fail("judging again", err)
+			}
+		}
+	case rejudge && s.still(ctx):
 		s.status.set("judging every firing again with the new settings")
-		err := s.l.JudgeAll(ctx, o, func(done float64) {
+		err := judgeAll(s.l, ctx, o, func(done float64) {
 			s.status.Lock()
 			s.status.judged = done
 			s.status.Unlock()
@@ -107,7 +123,7 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 				s.fail("judging again", err)
 			}
 		}
-	} else if rejudge {
+	case rejudge:
 		s.rejudge.Store(true)
 	}
 	if !s.still(ctx) {
