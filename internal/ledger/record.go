@@ -74,9 +74,9 @@ type Found struct {
 // it, within a week. Missed says it couldn't be read: a later run reads it
 // from the earliest From it was missed at, and meanwhile its windows, and
 // the record it keeps, stand. To, when it isn't zero and is before the
-// run's To, is where a read catching up after a miss stopped, a piece at a
-// time: its windows are kept to there, and a later run reads it from
-// there, as from where it was missed. Seen is what its series returned,
+// run's To, is where a read catching up after a miss, a piece at a time,
+// goes on from (PieceResume, a little before where its last piece ended):
+// a later run reads it from there, as from where it was missed. Seen is what its series returned,
 // of the labels it is matched on.
 type SignalRead struct {
 	Name, Criterion string
@@ -555,7 +555,8 @@ func (l *Ledger) signalRecord(t *txn, f Found, r SignalRead, o verdict.Options) 
 		}
 	}
 	if !r.To.IsZero() && r.To.Before(f.To) {
-		// Caught up to there, a piece at a time: read from there next.
+		// Caught up to there, a piece at a time: read from there next
+		// (PieceResume).
 		if _, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET missed_at = ? WHERE name = ?", r.To.Unix(), r.Name); err != nil {
 			return 0, err
 		}
@@ -720,7 +721,25 @@ func (l *Ledger) impact(t *txn, r signalRun, found []incident.Incident, fresh bo
 		if err != nil {
 			return 0, err
 		}
-		if in.Start.Before(r.from) && !fresh {
+		if in.Start.Before(r.from) && !fresh && r.name != "" {
+			// A named signal's, found from before where it reads: the
+			// window found before with its labels that it meets goes on, to
+			// the later end of the two (the same one, found again in the
+			// hour before); one of none such, which began too late to be
+			// found then (not yet on for its for), is put in as new.
+			key, end, err := goesOn(t, r, from, in)
+			if err != nil {
+				return 0, err
+			}
+			if key != "" {
+				if in.End.Unix() > end {
+					if _, err := t.ExecContext(t.ctx, "UPDATE incidents SET end_at = ? WHERE key = ?", in.End.Unix(), key); err != nil {
+						return 0, err
+					}
+				}
+				continue
+			}
+		} else if in.Start.Before(r.from) && !fresh {
 			// Still going at the start: the window found before goes on.
 			var key string
 			err := t.QueryRowContext(t.ctx, `SELECT key FROM incidents WHERE origin = 'impact' AND signal = ? AND start_at < ? AND end_at >= ?
@@ -761,6 +780,45 @@ func (l *Ledger) impact(t *txn, r signalRun, found []incident.Incident, fresh bo
 		made = append(made, madeWindow{key, in})
 	}
 	return lo, remapImpact(t, before, from, made)
+}
+
+// goesOn is the window of r's signal, begun before from, that in, found
+// from before from too, is: with labels in shares a value of each of
+// (share), and on at some time in it (its end at in's start or later, its
+// start by in's end), the latest begun of several; its key and end, or ""
+// for none.
+func goesOn(t *txn, r signalRun, from int64, in incident.Incident) (string, int64, error) {
+	rows, err := t.QueryContext(t.ctx, `SELECT key, end_at, labels FROM incidents WHERE origin = 'impact' AND signal = ? AND start_at < ? AND end_at >= ? AND start_at <= ?
+		ORDER BY start_at DESC, key`, r.name, from, in.Start.Unix(), in.End.Unix())
+	if err != nil {
+		return "", 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key, labels string
+		var end int64
+		if err := rows.Scan(&key, &end, &labels); err != nil {
+			return "", 0, err
+		}
+		var l incident.Labels
+		if err := json.Unmarshal([]byte(labels), &l); err != nil {
+			return "", 0, err
+		}
+		if share(l, in.Labels) {
+			return key, end, nil
+		}
+	}
+	return "", 0, rows.Err()
+}
+
+// PieceResume is where a read of a named signal catching up after a miss,
+// in pieces, goes on from after a turn's last piece ended at end: before
+// it by the signal's for and a step, so that a window begun within it,
+// not yet on for its for at end, is found whole by the next, as a run's
+// read is after the run before; by settle at most, as runs overlap, so
+// that each turn gets further.
+func PieceResume(end time.Time, signalFor, settle, step time.Duration) time.Time {
+	return end.Add(-min(signalFor+step, max(settle, 0)))
 }
 
 // keptWindowLabels are a named signal's window's labels as the ledger
