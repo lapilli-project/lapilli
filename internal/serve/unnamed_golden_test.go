@@ -10,10 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/ledger/ledgertest"
 )
 
 // updateUnnamed writes the golden files of TestUnnamedSignalUnchanged
@@ -95,6 +98,46 @@ func TestUnnamedSignalUnchanged(t *testing.T) {
 		ledgerExec(t, s, "VACUUM INTO ?", keep)
 	}
 
+	t.Run("a ledger made by this release", func(t *testing.T) { unnamedUnchanged(t, s, key, false) })
+	if *updateUnnamed {
+		return
+	}
+	// The same ledger taken back to 021, as 0.53 left it, and opened again:
+	// migrated, it says the same.
+	undo, version := ledgertest.Undo022SQLite, "PRAGMA user_version = 21"
+	if s.cfg.LedgerURLFile != "" {
+		undo, version = ledgertest.Undo022Postgres, "UPDATE schema_version SET version = 21"
+	}
+	for _, q := range append(slices.Clone(undo), version) {
+		ledgerExec(t, s, q)
+	}
+	db := ledgerDB(t, s)
+	var since int
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM meta WHERE key = 'impact_since'").Scan(&since); err != nil || since != 1 {
+		t.Fatalf("taken back to 021, impact_since in meta: %d %v", since, err)
+	}
+	db.Close()
+	s.Close()
+	again, _ := server(t, func(c *Config) {
+		c.UserHeader, c.Admins, c.Editors = "X-Forwarded-Email", []string{"ana@example.com"}, []string{"bo@example.com"}
+		c.Impact = "impact > 1"
+		c.Ledger, c.LedgerURLFile = s.cfg.Ledger, s.cfg.LedgerURLFile
+	})
+	again.jobs(ctx, false)
+	again.ready.Store(true)
+	if k, err := again.l.ImpactKept(ctx); err != nil || k.From().IsZero() {
+		t.Fatalf("upgraded, what keeps the record: %+v %v", k, err)
+	}
+	t.Run("a ledger upgraded from 021", func(t *testing.T) { unnamedUnchanged(t, again, key, true) })
+}
+
+// unnamedUnchanged holds what s gives to the golden files of
+// TestUnnamedSignalUnchanged, or writes them with -update-unnamed; the
+// summary's unjudged, which the release before didn't give, held to the
+// report's of each week. Of a server started again on the ledger
+// (restarted), the status line of what this process did, which a page
+// shows, isn't the ledger's, and is left out.
+func unnamedUnchanged(t *testing.T, s *Server, key string, restarted bool) {
 	got := map[string]string{}
 	h := s.Handler()
 	for name, path := range map[string]string{
@@ -138,14 +181,32 @@ func TestUnnamedSignalUnchanged(t *testing.T) {
 		}
 		got[name] = string(out)
 	}
+	// Each week's unjudged, as the report of that week counts it.
+	var sum struct {
+		Rows []struct {
+			From, To time.Time
+			Team     string
+			Unjudged int
+		}
+	}
+	if err := json.Unmarshal([]byte(got["summary.json"]), &sum); err != nil || len(sum.Rows) == 0 {
+		t.Fatalf("summary: %v", err)
+	}
+	for _, row := range sum.Rows {
+		code, body, _ := get(t, h, "/api/v1/report?from="+row.From.UTC().Format(time.RFC3339)+"&to="+row.To.UTC().Format(time.RFC3339))
+		var rep struct{ Unjudged int }
+		if code != http.StatusOK || json.Unmarshal([]byte(body), &rep) != nil || rep.Unjudged != row.Unjudged {
+			t.Errorf("the week of %s: unjudged %d, the report's %d (%d)", row.From.Format("2006-01-02"), row.Unjudged, rep.Unjudged, code)
+		}
+	}
 
 	dir := filepath.Join("testdata", "unnamed-signal")
 	for name, body := range got {
 		body = unnamedNormal(body)
 		if !*updateUnnamed && strings.Contains(name, "summary") {
 			// What docs/design/signals.md adds to the summary, beside what
-			// it said before, for every ledger: each row's unjudged, and
-			// impacts.by_signal, {} with no named signal.
+			// it said before, for every ledger: each row's unjudged, held
+			// above, and impacts.by_signal, {} with no named signal.
 			body = addedToSummary(body)
 		}
 		path := filepath.Join(dir, name)
@@ -162,10 +223,25 @@ func TestUnnamedSignalUnchanged(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if body != string(want) {
-			t.Errorf("%s differs from the release before named signals:\n%s", name, firstDiff(string(want), body))
+		wantS := string(want)
+		if restarted && strings.HasSuffix(name, ".html") {
+			body, wantS = withoutStatus(body), withoutStatus(wantS)
+		}
+		if body != wantS {
+			t.Errorf("%s differs from the release before named signals:\n%s", name, firstDiff(wantS, body))
 		}
 	}
+}
+
+// withoutStatus is a page without its status lines, which say what this
+// process did, not what the ledger holds.
+func withoutStatus(x string) string {
+	if i := strings.Index(x, `<section class="statuses"`); i >= 0 {
+		if j := strings.Index(x[i:], "</section>\n"); j >= 0 {
+			x = x[:i] + x[i+j+len("</section>\n"):]
+		}
+	}
+	return strings.ReplaceAll(x, "\n\n", "\n")
 }
 
 // addedToSummary takes out of a summary the fields named signals add to it
