@@ -134,10 +134,16 @@ over its time (`impact_from`† at or before it), or it caught an incident.
 `impact_from` is where the signal was first read, or later, where the
 data of every selector it reads begins, as a named signal's `start`
 (below); it is missing, with `impact_no_data: true`†, when a selector it
-reads has no data, which keeps no record. A selector with no data that
-only narrows another with data, as `http_requests_total{code=~"5.."}`
-does `http_requests_total`, had nothing to match: it begins with that
-one.
+reads has no data, which keeps no record. A selector with no data, or later data, that only narrows another (the
+same offset and @, and each of the other's matchers, its metric's name
+among them, one of its own) begins where its stand-in's data does: the
+other's series that have each label it narrows them by, any value, as
+`http_requests_total{code!=""}` for `http_requests_total{code=~"5.."}`
+beside `http_requests_total`. A client library makes a 5xx series at the
+first 5xx, so a service that served none had nothing to match, not
+nothing to read; and a code label that came later (a relabelling, a
+rename) holds the record back to where it came. Not a selector an
+`absent()` or `absent_over_time()` reads.
 The incidents that keep the record are all those given, from before the
 period too. Any other firing is black, with `no_record: true`†: counted,
 in `firings` and `black`, and in its rule's `unjudged`†, but in no
@@ -158,7 +164,8 @@ window of one of its `signals` was, or it caught an incident, or the
 signals among its `signals` that keep the record, one at least, had each
 started by its time: `settings.impact_signals[].start`†, where the signal
 was first read, or later, where the data of every selector it reads
-begins (none for a selector with no data). `impact_from` is then missing:
+begins (none for a selector with no data, as above, but by its stand-in).
+`impact_from` is then missing:
 it is the start of an impact signal with no name.
 
 `lapilli verdict` judges each firing by its own time:

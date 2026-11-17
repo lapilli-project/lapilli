@@ -235,14 +235,15 @@ func signalsKept(w io.Writer, r *Report, loc *time.Location) {
 // impactKept writes, of an impact signal with no name, from when it keeps
 // the record, when that is within the period: where the data of every
 // selector it reads begins; or that it keeps none, a selector it reads
-// having no data, unless the period's no record says so below. Nothing
+// having no data, unless the period's no record says so below, as it does
+// when anything fired. Nothing
 // when it keeps the record of all of the period, nor in lapilli serve's
 // digest (ByWeek), whose record by it starts where its ledger says.
 func impactKept(w io.Writer, r *Report, loc *time.Location) {
 	switch s := r.Settings; {
 	case s == nil, s.ByWeek:
 	case s.ImpactNoData:
-		if !r.NoRecord {
+		if !r.NoRecord || !slices.ContainsFunc(r.Rules, func(rr RuleResult) bool { return rr.Firings > 0 }) {
 			fmt.Fprintln(w, "--impact keeps no record: a selector it reads has no data")
 		}
 	case s.ImpactFrom.After(r.From):

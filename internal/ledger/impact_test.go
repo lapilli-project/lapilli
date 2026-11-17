@@ -666,42 +666,47 @@ func TestDecidedImpact(t *testing.T) {
 	}
 }
 
-// A selector with no data that only narrows one with data had nothing to
-// match, not nothing to read: it holds nothing back, nor does its own data
-// found later; one that narrows none still keeps no record.
-func TestFloorByCovered(t *testing.T) {
+// A selector with no data, or later data, whose stand-ins all had data,
+// begins where the latest of them does: nothing it matches had happened,
+// though what it would read was there; one with a stand-in with no data,
+// or with none, by its own.
+func TestFloorByStandIn(t *testing.T) {
 	lo := t0.Add(-14 * 24 * time.Hour)
 	all := SelectorData{Sel: `http_requests_total`, First: lo, AtStart: true}
 	five := SelectorData{Sel: `http_requests_total{code=~"5.."}`}
+	coded := SelectorData{Sel: `http_requests_total{code!=""}`, For: five.Sel, First: lo, AtStart: true}
 	probe := SelectorData{Sel: `probe_success{job="x"}`, First: t0.Add(-3 * 24 * time.Hour)}
-	same := func(t time.Time) time.Time { return t }
+	at := func(x SelectorData, first time.Time, atStart bool) SelectorData {
+		x.First, x.AtStart = first, atStart
+		return x
+	}
 	for _, c := range []struct {
-		name   string
-		sels   []SelectorData
-		floor  time.Time
-		noData bool
-		late   string
+		name    string
+		sels    []SelectorData
+		floor   time.Time
+		noData  bool
+		late    string
+		standIn string
 	}{
-		{"none matched", []SelectorData{five, all}, time.Time{}, false, ""},
-		{"matched later", []SelectorData{{Sel: five.Sel, First: t0.Add(-time.Hour)}, all}, time.Time{}, false, ""},
-		{"with a later selector", []SelectorData{five, all, probe}, probe.First, false, probe.Sel},
-		{"the metric later", []SelectorData{five, {Sel: all.Sel, First: t0.Add(-2 * 24 * time.Hour)}}, t0.Add(-2 * 24 * time.Hour), false, ""},
-		{"narrowing none", []SelectorData{five, {Sel: `grpc_requests_total`, First: lo, AtStart: true}}, time.Time{}, true, ""},
-		{"alone", []SelectorData{five}, time.Time{}, true, ""},
-		{"wider with no data", []SelectorData{{Sel: all.Sel}, {Sel: five.Sel, First: lo, AtStart: true}}, time.Time{}, true, ""},
+		{"none matched", []SelectorData{five, all, coded}, time.Time{}, false, "", coded.Sel},
+		{"matched later", []SelectorData{at(five, t0.Add(-time.Hour), false), all, coded}, time.Time{}, false, "", ""},
+		{"with a later selector", []SelectorData{five, all, probe, coded}, probe.First, false, probe.Sel, coded.Sel},
+		{"the code label later", []SelectorData{five, all, at(coded, t0.Add(-2*24*time.Hour), false)}, t0.Add(-2 * 24 * time.Hour), false, five.Sel, coded.Sel},
+		{"the metric later", []SelectorData{five, at(all, t0.Add(-2*24*time.Hour), false), at(coded, t0.Add(-2*24*time.Hour), false)}, t0.Add(-2 * 24 * time.Hour), false, "", coded.Sel},
+		{"a stand-in with no data", []SelectorData{five, all, at(coded, time.Time{}, false)}, time.Time{}, true, "", ""},
+		// Of two stand-ins, the narrower with no data: the service had no
+		// series with a code at all.
+		{"one of two stand-ins with no data", []SelectorData{five, all, coded, {Sel: `http_requests_total{service!="",code!=""}`, For: five.Sel}}, time.Time{}, true, "", ""},
+		{"no stand-in", []SelectorData{five, all}, time.Time{}, true, "", ""},
+		{"alone", []SelectorData{five}, time.Time{}, true, "", ""},
 	} {
 		d := ImpactData{From: lo, CheckedTo: t0, Selectors: c.sels}
-		FloorBy(&d, same)
+		FloorBy(&d, func(t time.Time) time.Time { return t })
 		if !d.Floor.Equal(c.floor) || d.NoData != c.noData || d.Late() != c.late {
 			t.Errorf("%s: floor %s, no data %v, late %q", c.name, d.Floor, d.NoData, d.Late())
 		}
-		// Of the 5xx with no data, what covers it: all requests, with data.
-		want := ""
-		if len(c.sels) > 1 && c.sels[0].First.IsZero() && c.sels[1].Sel == all.Sel && !c.sels[1].First.IsZero() {
-			want = all.Sel
-		}
-		if got := d.CoveredBy(c.sels[0].Sel); c.sels[0].Sel == five.Sel && c.sels[0].First.IsZero() && got != want {
-			t.Errorf("%s: covered by %q, not %q", c.name, got, want)
+		if got := d.StandInOf(five.Sel); got != c.standIn {
+			t.Errorf("%s: stood in by %q, not %q", c.name, got, c.standIn)
 		}
 	}
 }

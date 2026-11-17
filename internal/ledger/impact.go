@@ -88,8 +88,8 @@ func (k ImpactKept) From() time.Time {
 // after the latest of them, of a selector that had none at From: the
 // record is kept by the signal from there at the earliest, as only there
 // did every selector it reads have data. Zero when each had data at From.
-// NoData says one had none at all, nor a selector covering it
-// (Effective): the record isn't kept by it.
+// NoData says one had none at all, nor its stand-ins, each (Effective):
+// the record isn't kept by it.
 type ImpactData struct {
 	Criterion string         `json:"criterion"`
 	Selectors []SelectorData `json:"selectors"`
@@ -101,9 +101,11 @@ type ImpactData struct {
 
 // SelectorData is a selector, as written in the expression with its
 // offset or @, and when its first sample was found: zero for none yet;
-// AtStart, where the look began, so it may have had data before.
+// AtStart, where the look began, so it may have had data before. With For,
+// it is a stand-in, read for that selector's sake (rules.StandIns).
 type SelectorData struct {
 	Sel     string    `json:"sel"`
+	For     string    `json:"for,omitempty"`
 	First   time.Time `json:"first,omitzero"`
 	AtStart bool      `json:"at_start,omitempty"`
 	// To is how far it was looked for, zero before it was: a look that
@@ -111,33 +113,59 @@ type SelectorData struct {
 	To time.Time `json:"to,omitzero"`
 }
 
-// Complete reports whether every selector had data.
+// SelectorsOf are the selectors whose data an impact signal's expression
+// is kept by: those it reads (rules.Selectors), then their stand-ins
+// (rules.StandIns), none found yet.
+func SelectorsOf(expr string) ([]SelectorData, error) {
+	sels, err := rules.Selectors(expr)
+	if err != nil {
+		return nil, err
+	}
+	stands, err := rules.StandIns(expr)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SelectorData, 0, len(sels)+len(stands))
+	for _, sel := range sels {
+		out = append(out, SelectorData{Sel: sel})
+	}
+	for _, x := range stands {
+		out = append(out, SelectorData{Sel: x.Sel, For: x.For})
+	}
+	return out, nil
+}
+
+// Complete reports whether every selector, and stand-in, had data.
 func (d *ImpactData) Complete() bool {
 	return !slices.ContainsFunc(d.Selectors, func(x SelectorData) bool { return x.First.IsZero() })
 }
 
 // Late is the selector whose data begins the latest, after the look began,
-// and the others': what holds the record back, when more than one selector
-// is read and they don't begin together. "" for none. A selector covered
-// by another (Effective) is left out: what covers it begins with it.
+// and the others' earlier: what holds the record back, when more than one
+// selector is read and they don't begin together; the first of those that
+// begin the latest. "" for none. A selector with stand-ins begins where
+// they say (Effective).
 func (d *ImpactData) Late() string {
-	late, at, earlier := "", time.Time{}, false
-	for i, x := range d.Effective() {
-		if !x.First.Equal(d.Selectors[i].First) {
-			continue // covered: what covers it is said instead
-		}
-		switch {
-		case x.First.IsZero():
+	sels := d.Effective()
+	var latest time.Time
+	for _, x := range sels {
+		if x.First.IsZero() {
 			return ""
-		case x.First.After(at):
-			if late != "" || x.AtStart {
-				earlier = true
-			}
-			if !x.AtStart {
-				late, at = x.Sel, x.First
-			}
-		default:
+		}
+		if !x.AtStart && x.First.After(latest) {
+			latest = x.First
+		}
+	}
+	if latest.IsZero() {
+		return ""
+	}
+	late, earlier := "", false
+	for _, x := range sels {
+		switch {
+		case x.AtStart || x.First.Before(latest):
 			earlier = true
+		case late == "":
+			late = x.Sel
 		}
 	}
 	if !earlier {
@@ -171,36 +199,61 @@ func FloorBy(d *ImpactData, onOrAfter func(time.Time) time.Time) {
 	}
 }
 
-// Effective are d's selectors as they keep the record: each covered by
-// one with data that began earlier (rules.Covers), or by one with data
-// while it has none, given that one's start, as the series it reads were
-// there, none of them matching it yet: the 5xx requests of a service that
-// served none, beside all of its requests. A selector's own data, found
-// later, doesn't move it.
+// Effective are d's selectors as they keep the record, its stand-ins left
+// out: each with stand-ins (SelectorData.For) that all had data, from the
+// latest of them, when that is before its own; had nothing it matches
+// happened yet, where its data would have begun. One a stand-in has no
+// data for, as its own.
 func (d *ImpactData) Effective() []SelectorData {
-	out := slices.Clone(d.Selectors)
-	for i, b := range d.Selectors {
-		for _, a := range d.Selectors {
-			if a.Sel == b.Sel || a.First.IsZero() || !rules.Covers(a.Sel, b.Sel) {
-				continue
-			}
-			if out[i].First.IsZero() || a.First.Before(out[i].First) {
-				out[i].First, out[i].AtStart = a.First, a.AtStart
-			}
+	out := d.read()
+	for i, b := range out {
+		if x, ok := d.stoodIn(b.Sel); ok && (b.First.IsZero() || x.First.Before(b.First)) {
+			out[i].First, out[i].AtStart = x.First, x.AtStart
 		}
 	}
 	return out
 }
 
-// CoveredBy is, of a selector of d with no data, the one with data that
-// covers it (Effective), the first so; "" for none.
-func (d *ImpactData) CoveredBy(sel string) string {
-	for _, a := range d.Selectors {
-		if a.Sel != sel && !a.First.IsZero() && rules.Covers(a.Sel, sel) {
-			return a.Sel
+// read are d's selectors, its stand-ins left out.
+func (d *ImpactData) read() []SelectorData {
+	var out []SelectorData
+	for _, x := range d.Selectors {
+		if x.For == "" {
+			out = append(out, x)
 		}
 	}
-	return ""
+	return out
+}
+
+// stoodIn is, of sel's stand-ins, the one whose data begins the latest,
+// when every one had data: each reads more series than sel does, the
+// latest the fewest.
+func (d *ImpactData) stoodIn(sel string) (SelectorData, bool) {
+	var x SelectorData
+	found := false
+	for _, s := range d.Selectors {
+		if s.For != sel {
+			continue
+		}
+		if s.First.IsZero() {
+			return SelectorData{}, false
+		}
+		if !found || s.First.After(x.First) {
+			x, found = s, true
+		}
+	}
+	return x, found
+}
+
+// StandInOf is, of a selector of d with no data, the stand-in its record
+// is kept by (Effective): nothing it matches happened, though what it
+// would read was there; "" for none.
+func (d *ImpactData) StandInOf(sel string) string {
+	if slices.ContainsFunc(d.Selectors, func(x SelectorData) bool { return x.Sel == sel && x.For == "" && !x.First.IsZero() }) {
+		return ""
+	}
+	x, _ := d.stoodIn(sel)
+	return x.Sel
 }
 
 func later(a, b time.Time) time.Time {

@@ -355,12 +355,13 @@ func TestNamedSignals(t *testing.T) {
 	for _, q := range asked {
 		count[q]++
 	}
-	for _, q := range []string{errorsExpr, probeExpr, latencyExpr, paymentsExpr, "count(probe_success)", `count(http_requests_total{code=~"5.."})`} {
+	// And the errors' 5xx selector's stand-in: the requests with a code.
+	for _, q := range []string{errorsExpr, probeExpr, latencyExpr, paymentsExpr, "count(probe_success)", `count(http_requests_total{code=~"5.."})`, `count(http_requests_total{code!=""})`} {
 		if count[q] != 1 {
 			t.Errorf("asked %q %d times", q, count[q])
 		}
 	}
-	if len(asked) != 10 {
+	if len(asked) != 11 {
 		t.Errorf("%d questions: %q", len(asked), asked)
 	}
 
@@ -673,7 +674,8 @@ func TestIndexSignals(t *testing.T) {
 // An --impact with no name keeps the record by the one rule a named
 // signal does: from the latest of where its selectors' data begins; a
 // selector with no data that only narrows one with data (the 5xx, of a
-// service that served none) holding nothing back.
+// service that served none) from where its stand-in's does, the series
+// with the label it narrows by; not one an absent() reads.
 func TestUnnamedImpactSelectors(t *testing.T) {
 	const ratio = `sum(rate(http_requests_total{code=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05`
 	never := sigBase.Add(365 * 24 * time.Hour)
@@ -687,6 +689,10 @@ func TestUnnamedImpactSelectors(t *testing.T) {
 		{"and a probe from Thursday", ratio + ` or probe_success == 0`, map[string]time.Time{`http_requests_total{code=~"5.."}`: never, "probe_success": at(3, 7, 0)}, at(3, 7, 0)},
 		{"requests from Tuesday", ratio, map[string]time.Time{`http_requests_total{code=~"5.."}`: never, "http_requests_total": at(1, 0, 0)}, at(1, 0, 0)},
 		{"5xx alone, none", `sum(rate(http_requests_total{code=~"5.."}[5m])) > 1`, map[string]time.Time{`http_requests_total{code=~"5.."}`: never}, time.Time{}},
+		// The code label from Wednesday on (a relabelling): nothing could
+		// be matched before.
+		{"the code label later", ratio, map[string]time.Time{`http_requests_total{code=~"5.."}`: never, `http_requests_total{code!=""}`: at(2, 0, 0)}, at(2, 0, 0)},
+		{"absent", `absent(up{job="new"}) and on() count(up) > 0`, map[string]time.Time{`up{job="new"}`: never}, time.Time{}},
 	} {
 		h := signalHistory{series: map[string][]on{c.expr: {}}, begins: c.begins}
 		_, args := unnamedImpact(t)

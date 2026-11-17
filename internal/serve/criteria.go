@@ -372,9 +372,9 @@ type againView struct {
 }
 
 // dataView is where the data of a criterion's selectors begins, as a page
-// says it: each selector (when it first had data, from before From, or
-// none since From, and then the one with data that covers it, if any:
-// nothing it reads matched it), the one that holds the record back
+// says it: each selector it reads (when it first had data, from before
+// From, or none since From, and then the stand-in its record is kept by,
+// if any: nothing it matches happened), the one that holds the record back
 // (Late), and whether one has none at all.
 type dataView struct {
 	From      time.Time      `json:"from"`
@@ -386,7 +386,7 @@ type dataView struct {
 
 type selectorView struct {
 	ledger.SelectorData
-	CoveredBy string `json:"covered_by,omitempty"`
+	StandIn string `json:"stand_in,omitempty"`
 }
 
 // dataOf is where the data of a criterion's selectors begins, as the
@@ -405,9 +405,12 @@ func dataViewOf(d *ledger.ImpactData) *dataView {
 	}
 	v := &dataView{From: d.From, Selectors: []selectorView{}, Late: d.Late(), NoData: d.NoData, Floor: d.Floor}
 	for _, x := range d.Selectors {
+		if x.For != "" {
+			continue // a stand-in: said of the selector it stands in for
+		}
 		sv := selectorView{SelectorData: x}
 		if x.First.IsZero() {
-			sv.CoveredBy = d.CoveredBy(x.Sel)
+			sv.StandIn = d.StandInOf(x.Sel)
 		}
 		v.Selectors = append(v.Selectors, sv)
 	}
@@ -792,18 +795,27 @@ func (s *Server) impactData(ctx context.Context) error {
 // keeps what it found: of each it could look at, a selector that fails
 // passing to the next, and returning the last failure.
 func (s *Server) lookFor(ctx context.Context, d *ledger.ImpactData, cursor time.Time) error {
+	if d.Selectors != nil {
+		// Kept by a lapilli before stand-ins: they are looked for too.
+		want, err := ledger.SelectorsOf(exprOfKey(d.Criterion))
+		if err != nil {
+			return err
+		}
+		for _, w := range want {
+			if w.For != "" && !slices.ContainsFunc(d.Selectors, func(x ledger.SelectorData) bool { return x.Sel == w.Sel && x.For == w.For }) {
+				d.Selectors = append(d.Selectors, w)
+			}
+		}
+	}
 	if d.Selectors != nil && d.Complete() || !cursor.After(d.From) {
 		return nil
 	}
 	if d.Selectors == nil {
-		sels, err := rules.Selectors(exprOfKey(d.Criterion))
+		sels, err := ledger.SelectorsOf(exprOfKey(d.Criterion))
 		if err != nil {
 			return err
 		}
-		d.Selectors = []ledger.SelectorData{}
-		for _, sel := range sels {
-			d.Selectors = append(d.Selectors, ledger.SelectorData{Sel: sel})
-		}
+		d.Selectors = append([]ledger.SelectorData{}, sels...)
 		if len(sels) == 0 {
 			// Reading no selector (vector(1)), it has data all along.
 			d.CheckedTo = cursor
@@ -827,7 +839,7 @@ func (s *Server) lookFor(ctx context.Context, d *ledger.ImpactData, cursor time.
 			failed = err
 			continue
 		}
-		got.To = cursor
+		got.For, got.To = x.For, cursor
 		d.Selectors[i] = got
 	}
 	d.CheckedTo = cursor

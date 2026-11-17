@@ -56,15 +56,25 @@
   `http_requests_total{code=~"5.."}`, whose series a client library
   makes at the first 5xx, kept a service that served no 5xx from any
   record, and one whose first 5xx came late from the weeks before it. A
-  selector with no data, or with later data, that only narrows another
-  with data (the same offset and @, and each of that one's matchers, its
-  metric's name among them, one of its own) now takes that one's start:
-  it had nothing to match, not nothing to read. The settings page says
-  of it "nothing matched since", with the one it narrows, in the place
-  of "no data since". In `lapilli serve`, a ledger that kept no record
-  by such a selector keeps one at the next round, from its
+  selector with no data, or later data, that only narrows another (the
+  same offset and @, and each of that one's matchers, its metric's name
+  among them, one of its own) now begins where its stand-in's data does:
+  that one's series with each label it narrows them by, any value, as
+  `http_requests_total{code!=""}`. A service that served no 5xx had
+  nothing to match, not nothing to read; a code label that came later,
+  by a relabelling or a rename, still holds the record back to where it
+  came. Not a selector an `absent()` or `absent_over_time()` reads. Each
+  stand-in is one more query where the data begins is looked for, 32 at
+  most. The settings page says of such a selector "nothing matched
+  since", with its stand-in, in the place of "no data since". In
+  `lapilli serve`, a ledger that kept no record by such a selector looks
+  for its stand-in at the next round, and keeps the record from its
   `impact_since`; one whose `impact_since` a late first 5xx already
   moved forward keeps it there, as it only moves forward.
+- **Which selector holds the record back, when two begin together.** The
+  settings page named the first of selectors that began at the same time
+  as beginning later than the others; it names one only when another
+  began earlier.
 
 ## [0.53.0] - 2026-11-17
 

@@ -32,3 +32,38 @@ func TestCovers(t *testing.T) {
 		}
 	}
 }
+
+// A selector that only narrows another stands in by that one's series with
+// the labels it narrows them by; not one an absent() reads.
+func TestStandIns(t *testing.T) {
+	for _, c := range []struct {
+		expr string
+		want []StandIn
+	}{
+		{`sum(rate(http_requests_total{code=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05`,
+			[]StandIn{{`http_requests_total{code!=""}`, `http_requests_total{code=~"5.."}`}}},
+		{`sum(rate(x{service="api",code=~"5.."}[5m])) / sum(rate(x{service="api"}[5m]))`,
+			[]StandIn{{`x{service="api",code!=""}`, `x{service="api",code=~"5.."}`}}},
+		{`x{code!="200"} / x`, []StandIn{{`x`, `x{code!="200"}`}}},
+		{`x{code=~".*"} / x`, []StandIn{{`x`, `x{code=~".*"}`}}},
+		{`x{code!~"5.."} offset 1w / x offset 1w`, []StandIn{{`x offset 1w`, `x{code!~"5.."} offset 1w`}}},
+		{`absent(up{job="new"}) and on() up`, nil},
+		{`absent_over_time(up{job="new"}[5m]) or up{job="new"} == 0 and on() count(up) > 0`, nil},
+		{`probe_success{job=~"fan-.+"} == 0`, nil},
+		{`{__name__="x",code="500"} / x`, []StandIn{{`x{code!=""}`, `{__name__="x",code="500"}`}}},
+	} {
+		got, err := StandIns(c.expr)
+		if err != nil {
+			t.Fatalf("%s: %v", c.expr, err)
+		}
+		if len(got) != len(c.want) {
+			t.Errorf("%s: %v, not %v", c.expr, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("%s: %v, not %v", c.expr, got, c.want)
+			}
+		}
+	}
+}

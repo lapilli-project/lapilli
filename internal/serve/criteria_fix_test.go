@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -154,8 +155,71 @@ func TestImpactDataNarrowed(t *testing.T) {
 		t.Errorf("kept from %s, not %s", options(t, s), began)
 	}
 	_, page := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
-	if !strings.Contains(page, "nothing matched since") || !strings.Contains(page, "<bdi>probe_failed</bdi>, which it narrows, has data") || strings.Contains(page, "keeps no record") {
+	if !strings.Contains(page, "nothing matched since") || !strings.Contains(page, "<bdi>probe_failed{code!=&#34;&#34;}</bdi> has data") || strings.Contains(page, "keeps no record") {
 		t.Errorf("the page doesn't say why:\n%s", page)
+	}
+}
+
+// A selector that narrows another by a label the series got later (a
+// rename, a relabelling) had nothing it could match before: its stand-in,
+// the series with that label, holds the record back to where it begins.
+func TestImpactDataLabelLater(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {}, `probe_failed{code!=""}`: {now.Add(-30 * time.Hour)}}
+	expr := `sum(probe_failed{code="5"}) / sum(probe_failed) > 0.5`
+	if code, body := askAs(t, s.Handler(), http.MethodPost, "/settings/impact", url.Values{"impact": {expr}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	s.jobs(ctx, false)
+	k, err := s.l.ImpactKept(ctx)
+	if err != nil || k.Data == nil || k.Data.NoData || k.Data.Late() != `probe_failed{code="5"}` {
+		t.Fatalf("%+v %v", k.Data, err)
+	}
+	if want := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC); !options(t, s).Equal(want) {
+		t.Errorf("kept from %s, not %s", options(t, s), want)
+	}
+}
+
+// A ledger whose impact data a lapilli before stand-ins kept, no record by
+// a selector that only narrows another: at the next round its stand-in is
+// looked for, and the record is kept from impact_since; the sources panel
+// no longer says no data.
+func TestImpactDataStandInUpgrade(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {}}
+	expr := `sum(probe_failed{code="5"}) / sum(probe_failed) > 0.5`
+	if code, body := askAs(t, s.Handler(), http.MethodPost, "/settings/impact", url.Values{"impact": {expr}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	s.jobs(ctx, false)
+	k, err := s.l.ImpactKept(ctx)
+	if err != nil || k.Data == nil {
+		t.Fatal(k, err)
+	}
+	// As the release before kept it: the selectors read, no stand-in.
+	old := *k.Data
+	old.Selectors = slices.DeleteFunc(slices.Clone(old.Selectors), func(x ledger.SelectorData) bool { return x.For != "" })
+	if err := s.l.SetImpactData(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	if k, _ := s.l.ImpactKept(ctx); !k.Data.NoData || !k.From().IsZero() {
+		t.Fatalf("as before: no data %v, from %s", k.Data.NoData, k.From())
+	}
+	_, page := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
+	if !strings.Contains(sourceRowOf(page, "Impact signal"), "no data") {
+		t.Fatalf("as before, the sources row:\n%s", sourceRowOf(page, "Impact signal"))
+	}
+	runDue(s, 2)
+	s.jobs(ctx, true)
+	k, err = s.l.ImpactKept(ctx)
+	if err != nil || k.Data.NoData || !k.From().Equal(k.Since) {
+		t.Fatalf("at the next round: no data %v, from %s, since %s (%v)", k.Data.NoData, k.From(), k.Since, err)
+	}
+	_, page = askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
+	if strings.Contains(sourceRowOf(page, "Impact signal"), "no data") {
+		t.Errorf("the sources row still says no data:\n%s", sourceRowOf(page, "Impact signal"))
 	}
 }
 

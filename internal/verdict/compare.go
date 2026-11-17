@@ -163,7 +163,7 @@ func (c *Comparison) noRecord() bool {
 // noRecordText is NoRecordCompared, and why when --impact had no data.
 func (c *Comparison) noRecordText() string {
 	if c.Before != nil && c.Before.Settings != nil && c.Before.Settings.ImpactNoData {
-		return NoRecordCompared + " --impact keeps no record: a selector it reads has no data."
+		return NoRecordCompared + " --impact keeps no record: a selector it reads has no data; give one whose metrics have data over the period."
 	}
 	return NoRecordCompared
 }

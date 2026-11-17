@@ -493,13 +493,21 @@ read) and `impact_floor`.
   `impact_since`. Across selectors, the latest of those: the record starts no
   earlier than the first whole week after it, as only there did every
   selector have data, and not at all while one has none. A selector with
-  no data, or with later data, that only narrows another with data
-  (`rules.Covers`: the same offset and @, each of the other's matchers,
-  its metric's name among them, one of its own) takes that one's start:
-  `http_requests_total{code=~"5.."}` beside `http_requests_total`, as a
-  client library makes a 5xx series at the first 5xx, so a service that
-  served none had nothing to match, not nothing to read. The settings
-  page says so of it ("nothing matched since"). It moves
+  no data, or later data, that only narrows another (`rules.Covers`: the
+  same offset and @, each of the other's matchers, its metric's name among
+  them, one of its own) begins where its stand-in's data does
+  (`rules.StandIns`, 32 at most, looked for as the selectors are, kept in
+  `impact_data` with `for`): the other's series with each label it narrows
+  them by with a matcher the empty value doesn't match, any value, as
+  `http_requests_total{code!=""}` for `http_requests_total{code=~"5.."}`
+  beside `http_requests_total`. A client library makes a 5xx series at the
+  first 5xx, so a service that served none had nothing to match, not
+  nothing to read; a code label that came later, by a relabelling or a
+  rename, holds the record back to where it came. Not a selector an
+  `absent()` or `absent_over_time()` reads. A ledger kept before stand-ins
+  looks for them at the next round. The settings page says of such a
+  selector "nothing matched since", with its stand-in.
+  It moves
   `impact_since` forward, never back, on a first start, after an upgrade
   (from the `impact_since` the ledger has), and once a criterion is read
   again; a run that moves `impact_since` back before where the data was
