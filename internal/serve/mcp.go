@@ -564,6 +564,7 @@ type incidentOut struct {
 	Origin   string              `json:"origin" jsonschema:"file (the incidents file), ui (written in Lapilli or its API), copy (copied in from an incident tool through --incidents-listen) or impact (found by --impact)"`
 	Status   string              `json:"status" jsonschema:"caught, noisy (caught only by noisy rules) or missed; for an impact window that doesn't count, covered, confirmed or dismissed"`
 	ToDecide bool                `json:"to_decide,omitempty" jsonschema:"an impact window nobody has confirmed or dismissed"`
+	Signal   string              `json:"signal,omitempty" jsonschema:"of an impact window a named impact signal found, the signal's name; of an incident written down by confirming one, the window's"`
 	CaughtBy []catchOut          `json:"caught_by"`
 	Nearly   []nearOut           `json:"nearly_caught_by,omitempty" jsonschema:"rules whose condition held about then, but not for their for, or whose value came close to their threshold; worked out with the weekly digest, and when an incident is written down later"`
 }
@@ -601,7 +602,7 @@ func nearOutOf(nm verdict.NearMiss) nearOut {
 
 func incidentOutOf(l incidentLine) incidentOut {
 	x := incidentOut{ID: l.ID, Title: l.Title, Start: l.Start, End: l.End, Labels: l.Labels, Origin: l.Origin, Status: l.Status,
-		ToDecide: l.Origin == "impact" && l.State == "" && l.Counts, CaughtBy: []catchOut{}}
+		ToDecide: l.Origin == "impact" && l.State == "" && l.Counts, Signal: l.Signal, CaughtBy: []catchOut{}}
 	for _, c := range l.CaughtBy {
 		x.CaughtBy = append(x.CaughtBy, catchOut{Rule: c.Rule, Delay: c.Delay.Seconds(), Noisy: c.Noisy})
 	}
@@ -659,6 +660,7 @@ type ruleDetailOut struct {
 	Check      *checkOut      `json:"replay_check,omitempty" jsonschema:"its replay beside what really fired (ALERTS, GRAFANA_ALERTS or Grafana's own alert state history) over twelve weeks; not given when that isn't checked"`
 	Says       *saysOut       `json:"says,omitempty" jsonschema:"what it says when it fires, as the rules read last have it, and the problems found in it; not given when it isn't among them, or the check is off"`
 	Proposals  []proposalOut  `json:"proposals" jsonschema:"the changes proposed to it, the latest first, twenty at most"`
+	Signals    *ruleSignals   `json:"impact_signals,omitempty" jsonschema:"with named impact signals: the rule entry that names it (its place, from 1), the signals whose windows it is judged against with the labels it is matched on, the signals its record waits for, and before when it has no record by reading them; no_alert_yet, of a rule no entry names that hasn't fired, as what its record waits for comes with each alert"`
 }
 
 // saysOut is what a rule says, written by whoever writes the rules: data.
@@ -815,6 +817,9 @@ func (s *Server) toolRule(ctx context.Context, _ *mcp.CallToolRequest, in ruleIn
 	for _, w := range t.weeks {
 		x := t.by[w][id]
 		out.Weeks = append(out.Weeks, ruleWeekOut{Week: s.l.Midnight(w), Firings: x.Firings, White: x.White, Excused: x.Excused})
+	}
+	if out.Signals, err = s.ruleSignalsOf(ctx, t.o, in.Name); err != nil {
+		return nil, out, err
 	}
 	for _, c := range rv.Changes {
 		out.Versions = append(out.Versions, versionOut{Since: c.Since, Gone: c.Gone, Expr: c.Expr, For: c.For, KeepFiringFor: c.Keep, Labels: c.Labels})

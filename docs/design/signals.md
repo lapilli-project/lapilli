@@ -1,7 +1,8 @@
 # Impact signals: several, each named, with its own `for`, `match` and start
 
 Status: accepted; step 1 built (`lapilli verdict`, "Step 1, as built"
-below), steps 2 and 3 not. Under [GOVERNANCE.md](../../GOVERNANCE.md)
+below), step 2 (`lapilli serve`, "Step 2, as built") built but for its
+pages, step 3 not. Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this changes how a firing is judged (an incident, and a rule beside a
 signal, get labels of their own to be matched on, and a rule can be judged
 against some signals only) and adds a new kind of data to the ledger (the
@@ -355,11 +356,12 @@ firing, among those that keep the record, had started by the week's start
    don't keep the record still keep the record near them, as below.
 2. **Else, by match, label by label.** A signal is tied when, for each
    label of its `match` the firing carries, the firing's value is one the
-   signal's series have had for that label (`seen`, below). A label the
-   firing hasn't ties it, as in `Agree`; so does a signal whose `match` is
-   empty. A firing of `service: search` is tied to `errors`, which has
-   returned `search`, and not to `probe`, which probes only `checkout` and
-   `cart`; a firing of `checkout` is tied to both, and waits for the
+   signal has seen for that label (`seen`, below): one the series it reads
+   have had, or one it returned. A label the firing hasn't ties it, as in
+   `Agree`; so does a signal whose `match` is empty. A firing of `service:
+   search` is tied to `errors`, which reads every service's requests,
+   `search`'s among them, and not to `probe`, which probes only `checkout`
+   and `cart`; a firing of `checkout` is tied to both, and waits for the
    probe's start.
 3. **Else, nothing ties it** (its values are none any signal has had): it
    falls back to every signal that keeps the record, and waits for the
@@ -385,17 +387,50 @@ A signal with `record: false` is never waited for: reading it all week says
 payments weren't hurt, not that nothing was. Its windows keep the record
 of the firings tied to it, as any window does, and no more.
 
-**What a signal has returned** (`seen`) is kept as it is read: for each of
-its `match` labels, the values its series have had, 1,000 a label and 256
-KB a signal at most; past either, it is taken to have returned every
-value of that label. So is a label one of its series returned something
-without: a firing agrees with that series' windows whatever its value
-(`Agree`), so the signal could have seen it. A value seen later ties the
-firings before it too, which then wait for that signal's start: a firing
-is never judged by a signal that couldn't see it, and its record may wait
-longer than it needs. Where each value's data begins, apart from the
-signal's, is not looked for, as v0.49.0 looks per selector, not per
-series.
+**What a signal has seen** (`seen`) comes from what it reads, not only
+from what it returns (open question 6, decided below). A signal with a
+threshold (`> 0.05`) returns something only while users are hurt: a
+service it measured all month, never hurt, is a value it never returned,
+yet it could have seen that service hurt. So, for each of its `match`
+labels, `seen` holds the values of:
+
+- **what it reads**: each selector its expression reads (`rules.Selectors`)
+  counted by its `match` labels over the span the runs read it
+  (`count by (service) (http_requests_total)`), one request a selector, as
+  where its data begins is looked for (a step of an hour, or coarser over
+  a long span, within `--max-samples` and the request caps), from where
+  the last look got to, after each round's runs. A selector that only
+  narrows another of the expression is counted through its stand-in
+  (`rules.StandIns`: `http_requests_total{code!=""}` for
+  `http_requests_total{code=~"5.."}`), as counting the 5xx would see only
+  the services that had one, which is the problem itself;
+- **what it returned**: the labels of each of its series that returned
+  something, as each run reads it.
+
+1,000 values a label and 256 KB a signal at most; past either, it is taken
+to have seen every value of that label. Label by label, of what it reads:
+the values its selectors' series have; a selector whose series lack the
+label adds nothing for it (a gate, `and on() (sum(up{job="api"}) > 0)`);
+and when none of its selectors' series carries the label, one the
+expression makes (`label_replace`, a relabelled probe target), it is
+taken to have every value of it, as it is of every label of an
+expression that reads no selector (`vector(1)`) and of a name PromQL
+can't count by. Of what it returned, a series that came without a label
+takes it to have every value: a firing agrees with that series' windows
+whatever its value (`Agree`), so the signal could have seen it. A look
+that finds no series at all (its selectors with no data over the span)
+learns nothing: a signal with no data saw nothing. A selector that fails
+adds nothing, the others' counts kept, and the look is tried again from
+the same place. A
+firing so tied waits for that signal's start: never judged by a signal
+that couldn't see it. A value seen later ties the firings before it too,
+which then wait for that signal's start, and its record may wait longer
+than it needs. Where each value's data begins, apart from the signal's,
+is not looked for, as v0.49.0 looks per selector, not per series. What a
+signal has seen is kept of its `match` labels in effect: one given anew,
+or the match in effect changed for a signal that follows it, begins it
+again, looked at from where its reads began, and so does a read again,
+from the span it reads.
 
 **Changing signals**, per signal:
 
@@ -600,15 +635,48 @@ As counts and bytes, which the tests hold, not times:
 
 - **Queries a run**: one range query a signal, eight at most, over the
   run's period and the hour before, as the impact query is now, read in
-  turn, the one missed longest first, within the time the impact query
-  has (`--timeout`); one left unread is missed for that run. Where each
-  signal's data begins: one request a selector, 32 a signal at most, until
-  it is found, as v0.49.0 looks for its one's.
+  turn within the time the impact query has (`--timeout`):
+  - those read last time first, the quickest before first, each with its
+    share of what is left once the one whose turn it is has what it took
+    before; one that took more than its share before is left to a later
+    round, rather than run out its share for nothing;
+  - then those missed: those that didn't run out on their last turn
+    before those that did, each group the one longest without a turn
+    first (the one missed longest first, when no turn is known, as after
+    a restart). The first has its turn, all that is left; the others what
+    is still left.
+
+  One missed is read from where it was missed a piece at a time, each over
+  a run's period and the hour before at most, as much as a run asks: on
+  its turn, as many pieces as the time left holds and as one range may
+  hold together (`--max-samples`, its series and labels as one range's),
+  the rest on its next, which goes on before where the last piece ended by
+  the signal's `for` and a step, `--settle` at most, as runs overlap: a
+  window begun there, not yet on for its `for`, is found whole. What is
+  left at the end of a round goes to those left to a later round for what
+  they took before, the one longest without a turn first. One that runs
+  out of time on its turn has twice as much kept for its next, up to
+  `--timeout`; one that runs out with all of it, or near it, doesn't fit,
+  or hangs, and is asked again a round later, then two, four, up to a day
+  of rounds, nothing kept for its turns from the others' shares until it
+  waits that long, and as before once it answers. So any number that hang
+  cost the others a round each, the one in which each is found not to fit,
+  and then one in a day, in each process: how the turns went isn't kept
+  across a restart, nor by another replica that leads; and one whose run
+  read fits in `--timeout` alone is read on its turn, which comes round to
+  each one missed, and catches up. One left unread is missed for that run.
+  After a round's runs, what each reads, by its match labels: one request
+  a selector it counts, none for a signal matched on no label; and where
+  each signal's data begins: one request a selector, 32 a signal at most,
+  until it is found, as v0.49.0 looks for its one's; each look in turn as
+  the reads are.
 - **Reading again**: only the signals added or changed, each one query over
   five weeks at most, within `--max-samples`; each counts as one of the
   twelve reads an admin may ask for in an hour.
 - **Windows**: 1,000 a signal's read keeps at most, and 2,000 a signal's in
-  a week; past either the signal is missed for the run, and the sources
+  a week: those kept before the read began, and the read's own from where
+  it reads (the hour before, read to carry a window on, isn't counted
+  again); past either the signal is missed for the run, and the sources
   panel says it finds too many (an expression by pod, not by service).
   Each window's labels are bounded as an incident's are (4 KB, as kept).
 - **Judging**: per firing and incident, one entry looked up from a map by
@@ -716,6 +784,21 @@ Decided on 2026-11-16, by the maintainer:
   `unjudged` is added. The record a written incident keeps for a team's
   row stays everyone's, as today. Settled before step 2.
 
+Decided on 2026-11-17, by the maintainer:
+
+- **`seen` from what a signal reads, not only what it returns** (open
+  question 6, found in the review of step 1). For each selector of the
+  signal, its series are counted by the signal's `match` labels over the
+  read, one request a selector, the same way and within the same bounds as
+  the search for where its data begins. A selector that only narrows
+  another of the expression is counted through its stand-in. That is
+  joined with what the expression returned. A `match` label none of the
+  signal's selectors carries is taken to have every value, as past the
+  1,000-value cap: a firing is then tied, and waits for that signal's
+  start. A selector whose series lack the label, beside others that carry
+  it, adds nothing for it. Built in step 2 ("The record, signal by
+  signal").
+
 Open:
 
 1. **An outage counted once.** Whether `impacts` should also give how many
@@ -735,22 +818,6 @@ Open:
    holds a rule to catching an incident by its id. An impact window's key
    can change when its signal is read again; an expectation should name the
    incident its confirmation writes.
-6. **`seen` from what a signal reads, not what it returns** (found in the
-   review of step 1; to settle before step 2 keeps `seen` in the ledger).
-   `seen` holds the values a signal returned. A signal with a threshold
-   (`> 0.05`) returns something only while users are hurt, so a service it
-   measured all month, never hurt, is a value it never returned: that
-   service's firings are tied to no signal that keeps the record, fall
-   back, and wait for the latest start of all, the youngest signal's,
-   which is what "One start" (above) set out to end. Errors with a month
-   of data that returned nothing, and a probe from Thursday that failed
-   only for `checkout`, leave a Monday firing of `service: search` with no
-   record. Whether `seen` should come from what the signal reads instead:
-   its selectors counted by its `match` labels over the read
-   (`count by (service) (http_requests_total)`), one request a selector,
-   as where its data begins is looked for; and what to do of a label its
-   selectors don't have, which the expression makes (`label_replace`, a
-   relabelled probe target).
 
 ## Step 1, as built
 
@@ -792,6 +859,105 @@ Open:
   `/api/v1/summary`, and `[signal]` on serve's metrics, which are
   serve's (step 2).
 
+## Step 2, as built
+
+`lapilli serve` with named signals, in two pull requests: the ledger, the
+runs, judging, the summary, `/metrics` and MCP first; the pages after it.
+What building the first settled:
+
+- **Flags and the chart.** `lapilli serve` takes the flags and the file of
+  step 1, and the chart's `impact` as a mapping is that file, mounted and
+  given as `--impact-file`; a string is `--impact`, as before. Refused, as
+  in step 1: named and unnamed signals together, two `--impact` with no
+  name, a flag by name no `--impact` gives.
+- **Schema 022.** `impact_signals`, a row a signal ('' for the unnamed
+  one), holds what v0.49.0 kept in meta (moved there by the migration, so
+  an unnamed signal upgrades with its start, criterion, data and floor as
+  they were), its bit, what it has seen (`seen`, and `seen_to`, how far its
+  selectors were read for it) and from when a run missed it (`missed_at`).
+  `impact_rules` holds the entries; `incidents.signal` and
+  `incidents.match_labels`, a window's signal and match; `series.signals`,
+  each alert's ties; `days`, `weeks`, `marked_days` and `marked_weeks` are
+  keyed by `signals` too, every row copied in with 0. Some columns are
+  named apart from this note's words, where a word is SQL's (`for_ns`,
+  `match_labels`, `keeps_record`, `last_read`, `floor_at`, `pattern`).
+- **Kept as started.** The leader keeps the signals and entries it was
+  started with each round (`ledger.SyncSignals`), writing only when they
+  differ: a signal added gets the lowest bit no signal has and no alert
+  or tally carries, or, with none such (eight, one replaced), the lowest
+  no signal has, every alert tied again and every firing judged again in
+  the same write; no two signals ever share one (a unique index). One
+  taken away is turned off, its row gone and its windows kept, with its
+  name; one whose match or record changed, or the entries, judges every
+  firing again, as `--match` does. A signal renamed on the command line is
+  one taken away and one added, read again; renaming in place is step 3's,
+  in the UI. Only this keeps a named signal's row: a run, or a read
+  again, of a signal it doesn't keep (keeping them failed, or a replica
+  started with another set than the leader) reads it not, and keeps
+  nothing of it.
+- **The runs.** Each named signal is read on its own, in turn within
+  `--timeout` (see "Cost"). A window a read finds begun before where it
+  reads goes on from the one found before with its labels that it meets,
+  to the later end of the two; with none such (begun too late to be found
+  then), it is new. (The unnamed signal's goes on from the last found
+  before, as ever.) One that fails, or finds more than 1,000
+  windows in a read or 2,000 in its week, is missed: the run records the
+  rest, the signal's row keeps where it was first missed, and a later run
+  reads it from there, within a week; past a week it begins again, as one
+  turned on again, a read again due. Prometheus turning a signal away (a
+  429 yielded to) holds the run, as it does the unnamed one, which still
+  fails the run as before.
+- **Each signal's own.** Its windows are put in place of its own alone,
+  keyed by its name; its decisions, keys, tasks and comments carried over
+  among its own; its record kept by v0.49.0's rule on its own row; read
+  again alone when its criterion changes or it is added, failing and tried
+  again on its own; where its data begins looked for on its own.
+- **`seen`** as decided (open question 6): what it returned, kept by each
+  run; what it reads, looked at after each round's runs from `seen_to`, a
+  request a selector (`source.SeenFrom`, which `lapilli verdict` now reads
+  too), a narrowing selector through the selector its stand-in is made of
+  when that one is counted itself. What the note left open: a look that
+  finds no series at all learns nothing, so a signal with no data ties
+  nothing by reading; a selector that fails adds nothing, and the look is
+  tried again from the same place (`lapilli verdict` says so and goes
+  on); the look begins at the signal's first read, not at its start, which
+  moves forward with its data; and what it has seen begins again, every
+  alert it tied tied again, when its expression is read again, its own
+  match changes, or the match in effect does for one that follows it.
+- **Ties.** An alert made in a write is tied in it, before its tallies are
+  counted (`series.signals` -1 until then), by its labels and what each
+  signal has seen. A rule's entry is applied when the tallies are read, by
+  rule, and isn't in `series.signals`: an entry is a rule's, found by the
+  rules' labels, which a write doesn't read, and a change to the entries
+  then rewrites no alert. A value first seen ties again only the alerts
+  with that value, or that fell back (`verdict.FellBackBit`), writing
+  those whose ties change, and their firings are counted again in the same
+  round.
+- **Judging.** A catch reads the firing's rule, so an entry keeps it from
+  other signals' windows; a window is covered by an incident written down
+  on its own match; a confirmation carries its window's signal and match
+  until its labels change, and keeps everyone's record, as an incident
+  written down does. Pages, the summary, the report and `/metrics` judge
+  each rule's firings of a week apart by the signals they are tied to
+  (`verdict.Record.JudgesTied`, of the week); a replay judged in memory (a
+  backtest, the digest) ties each firing by what each signal has seen, as
+  the ledger ties its alert.
+- **Shown.** The report gives `settings.impact_signals` with each start,
+  `settings.impact_rules`, `rules[].impact_rule`, `firings[].signals` and
+  `incidents[].signal`; the summary `unjudged`, `impacts.by_signal` and
+  the settings; `/metrics` `[signal]` on a named signal's windows,
+  `lapilli_impact_windows` and each signal's start; MCP each incident's
+  `signal`, a rule's `impact_signals` (its entry, what it is judged
+  against, what its record waits for and before when) and the summary's
+  `by_signal`. A proposal waiting is held when any signal's criterion
+  held, its match or record, the entries or the match in effect change.
+  The Settings page lists the signals as started, with no form for one
+  with no name beside them, until step 3.
+- **Not built here.** The UI's `impact` and `impact-for` stay in
+  `settings`, the unnamed signal's, until step 3 makes the section by
+  signal. Hours (asleep, off hours) count black stones by firing as
+  before, judged or not, as they did of weeks with no record.
+
 ## Steps
 
 1. `lapilli verdict`: an incident's own `match` and signal,
@@ -802,6 +968,7 @@ Open:
 2. `serve`: the next schema; the runs read each signal, missed on its own;
    each signal's start; ties by alert, and the tallies by them; keys and
    decisions by signal; the Incidents page, a rule's page, the summary,
-   `/metrics`, MCP; numbers.md's invariants.
+   `/metrics`, MCP; numbers.md's invariants. (Built but for the pages,
+   which follow in their own pull request: "Step 2, as built".)
 3. v0.49.0's section by signal: the list and the rule entries, the try,
    reading again a signal alone, a row a signal in the sources panel.

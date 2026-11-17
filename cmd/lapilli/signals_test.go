@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -46,12 +47,35 @@ type signalHistory struct {
 	series map[string][]on
 	// begins is where each selector's data begins.
 	begins map[string]time.Time
-	asked  *[]string
+	// counted are, by selector, the label sets of its series, all along,
+	// as count by (LABELS) (SELECTOR) answers: none for one not named.
+	counted map[string][]map[string]string
+	// failing are the selectors a count of fails.
+	failing map[string]bool
+	asked   *[]string
 }
 
 func (h signalHistory) QueryRange(_ context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
 	if h.asked != nil {
 		*h.asked = append(*h.asked, expr)
+	}
+	if rest, ok := strings.CutPrefix(expr, "count by ("); ok {
+		by, sel, _ := strings.Cut(rest, ") (")
+		sel = strings.TrimSuffix(sel, ")")
+		if h.failing[sel] {
+			return nil, errors.New("query timed out")
+		}
+		var out []prom.Series
+		for _, l := range h.counted[sel] {
+			kept := map[string]string{}
+			for _, k := range strings.Split(by, ", ") {
+				if v, ok := l[k]; ok {
+					kept[k] = v
+				}
+			}
+			out = append(out, prom.Series{Labels: kept, Samples: []prom.Sample{{T: start, V: 1}}})
+		}
+		return out, nil
 	}
 	if sel, ok := strings.CutPrefix(expr, "count("); ok {
 		sel = strings.TrimSuffix(sel, ")")
@@ -361,7 +385,16 @@ func TestNamedSignals(t *testing.T) {
 			t.Errorf("asked %q %d times", q, count[q])
 		}
 	}
-	if len(asked) != 11 {
+	// What each reads, by its match labels, one request a selector: the
+	// 5xx one through the requests it narrows, which hold its stand-in's
+	// series, counted once; none of payments', matched on none.
+	for _, q := range []string{"count by (service, team) (http_requests_total)",
+		"count by (service) (probe_success)", "count by (service, team) (http_request_duration_seconds_bucket)"} {
+		if count[q] != 1 {
+			t.Errorf("asked %q %d times", q, count[q])
+		}
+	}
+	if len(asked) != 14 || count[`count by (service, team) (http_requests_total{code=~"5.."})`] != 0 || count[`count by (service, team) (http_requests_total{code!=""})`] != 0 {
 		t.Errorf("%d questions: %q", len(asked), asked)
 	}
 
@@ -470,11 +503,28 @@ func TestSignalFlagsRefused(t *testing.T) {
 	if name, e, err := splitSignal("errors=rate(x[5m]) > 1"); err != nil || name != "errors" || e != "rate(x[5m]) > 1" {
 		t.Errorf("errors=...: %q %q %v", name, e, err)
 	}
-	// lapilli serve reads one unnamed signal until it keeps them.
-	for _, args := range [][]string{{"--impact", "errors=up"}, {"--impact-file", file("signals: [{name: a, expr: up}]")}, {"--impact", "up", "--impact-for", "a=2m"}} {
+	// lapilli serve takes named signals as lapilli verdict does
+	// (docs/design/signals.md, step 2), and refuses what it refuses: named
+	// and unnamed ones together, two with no name, a flag naming none.
+	serving := func(args ...string) error {
 		_, err := parseFlags(append([]string{"--rules", "x.yaml", "--prometheus", "http://p"}, args...), func(string, string) (bool, error) { return false, nil })
-		if err == nil || !strings.Contains(err.Error(), "lapilli serve reads one --impact, without a name, for now") {
+		return err
+	}
+	for _, args := range [][]string{{"--impact", "errors=up"}, {"--impact-file", file("signals: [{name: a, expr: up}]")}, {"--impact", "a=up", "--impact-for", "a=2m"}} {
+		if err := serving(args...); err != nil {
 			t.Errorf("serve %q: %v", args, err)
+		}
+	}
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--impact", "up", "--impact", "errors=up"}, "a signal with no name and named ones don't go together"},
+		{[]string{"--impact", "up", "--impact", "down"}, "--impact is given twice without a name"},
+		{[]string{"--impact", "up", "--impact-for", "a=2m"}, "which no --impact NAME=PROMQL gives"},
+	} {
+		if err := serving(c.args...); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("serve %q: %v, want %q", c.args, err, c.want)
 		}
 	}
 }
@@ -729,6 +779,84 @@ func TestUnnamedImpactSelectors(t *testing.T) {
 		}
 		if !rep.Settings.ImpactFrom.Equal(c.from) || rep.Settings.ImpactNoData != c.from.IsZero() {
 			t.Errorf("%s: impact_from %v, no data %v; want %v", c.name, rep.Settings.ImpactFrom, rep.Settings.ImpactNoData, c.from)
+		}
+	}
+}
+
+// What a signal reads ties a firing to it, as what it returned does
+// (docs/design/signals.md, "The record, signal by signal"): errors reads
+// web's requests, which it never returned, as nothing hurt web, so a firing
+// of web is tied to it, and judged from its start, not held back to the
+// latest start of all; a selector that only narrows another is counted
+// through its stand-in, so a 5xx it never saw ties nothing apart.
+func TestNamedSignalsSeenFromReads(t *testing.T) {
+	night := func(h signalHistory, file string, args []string) verdict.Judged {
+		t.Helper()
+		var rep verdict.Report
+		if err := json.Unmarshal([]byte(runSignals(t, h, append(args, "--impact-file", file, "--json")...)), &rep); err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range rep.Firings {
+			if f.Rule == "NightPage" {
+				return f
+			}
+		}
+		t.Fatal("no NightPage firing")
+		return verdict.Judged{}
+	}
+	h, file, args := namedSignals(t)
+	// Payments, matched on no label, ties every firing, and keeps no
+	// record: by it alone, web falls back to every signal that does.
+	all := []string{"errors", "probe", "latency", "payments"}
+	if f := night(h, file, args); !f.NoRecord || !slices.Equal(f.Signals, all) {
+		t.Fatalf("returned alone: no record %v, tied to %v; want waiting for them all", f.NoRecord, f.Signals)
+	}
+	h.counted = map[string][]map[string]string{"http_requests_total": {{"service": "web", "team": "edge"}}}
+	if f := night(h, file, args); f.NoRecord || !slices.Equal(f.Signals, []string{"errors", "payments"}) {
+		t.Errorf("read: no record %v, tied to %v; want judged, by errors", f.NoRecord, f.Signals)
+	}
+	// Counted through the 5xx selector alone, web would be a service that
+	// had a 5xx: the stand-in is what is counted, not it.
+	h.counted = map[string][]map[string]string{`http_requests_total{code=~"5.."}`: {{"service": "web", "team": "edge"}}}
+	if f := night(h, file, args); !slices.Equal(f.Signals, all) {
+		t.Errorf("by the 5xx selector: tied to %v; it isn't counted", f.Signals)
+	}
+}
+
+// --match takes any name, as it always has: an OpenTelemetry name with
+// dots is no label PromQL names, and a named signal never puts it in a
+// query (source.SeenFrom takes it to have seen every value).
+func TestMatchTakesAnyName(t *testing.T) {
+	for _, v := range []string{"service.name", "9lives"} {
+		f, err := parseFlags([]string{"--rules", "x.yaml", "--prometheus", "http://p", "--match", v}, func(string, string) (bool, error) { return false, nil })
+		if err != nil || !slices.Equal(f.opts.Match, []string{v}) {
+			t.Errorf("--match %q: %v", v, err)
+		}
+	}
+}
+
+// A selector of what a signal reads whose count fails adds nothing: the
+// run goes on, says so on stderr, and the others' counts still tie.
+func TestNamedSignalsSeenFails(t *testing.T) {
+	h, file, args := namedSignals(t)
+	h.counted = map[string][]map[string]string{"http_requests_total": {{"service": "web", "team": "edge"}}}
+	h.failing = map[string]bool{"probe_success": true}
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return h, nil }
+	now = func() time.Time { return sigBase.Add(8 * 24 * time.Hour) }
+	var stdout, stderr bytes.Buffer
+	if code := run(append(args, "--impact-file", file, "--json"), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d\n%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "a selector failed: ") {
+		t.Errorf("stderr: %s", stderr.String())
+	}
+	var rep verdict.Report
+	if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range rep.Firings {
+		if f.Rule == "NightPage" && (f.NoRecord || !slices.Equal(f.Signals, []string{"errors", "payments"})) {
+			t.Errorf("with one count failed: no record %v, tied to %v; want judged, by errors", f.NoRecord, f.Signals)
 		}
 	}
 }

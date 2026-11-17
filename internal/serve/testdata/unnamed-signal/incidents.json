@@ -1,0 +1,70 @@
+[
+  {
+    "id": "impact-20261101T2000Z",
+    "title": "user impact (--impact)",
+    "start": "2026-11-01T20:00:00Z",
+    "end": "2026-11-01T21:01:00Z",
+    "labels": {
+      "service": [
+        "cart"
+      ]
+    },
+    "origin": "impact",
+    "state": "dismissed",
+    "counts": false,
+    "updated": "<clock>",
+    "by": "ana@example.com",
+    "caught_by": []
+  },
+  {
+    "id": "impact-20261102T0600Z",
+    "title": "user impact (--impact)",
+    "start": "2026-11-02T06:00:00Z",
+    "end": "2026-11-02T06:21:00Z",
+    "labels": {
+      "service": [
+        "checkout"
+      ]
+    },
+    "origin": "impact",
+    "counts": false,
+    "updated": "<clock>",
+    "caught_by": []
+  },
+  {
+    "id": "INC-1",
+    "title": "Checkout down",
+    "start": "2026-11-02T06:01:00Z",
+    "end": "2026-11-02T06:40:00Z",
+    "labels": {
+      "service": [
+        "checkout"
+      ]
+    },
+    "origin": "file",
+    "counts": true,
+    "updated": "<clock>",
+    "caught_by": [
+      {
+        "rule": "Errors",
+        "delay_ns": 60000000000,
+        "noisy": false
+      }
+    ]
+  },
+  {
+    "id": "impact-20261103T0600Z",
+    "title": "user impact (--impact)",
+    "start": "2026-11-03T06:00:00Z",
+    "end": "2026-11-03T06:11:00Z",
+    "labels": {
+      "service": [
+        "search"
+      ]
+    },
+    "origin": "impact",
+    "counts": true,
+    "updated": "<clock>",
+    "caught_by": []
+  }
+]

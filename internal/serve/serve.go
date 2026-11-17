@@ -78,6 +78,13 @@ type Config struct {
 	Incidents string // the incidents file, read again each run
 	Impact    string
 	ImpactFor time.Duration
+	// Signals are the named impact signals (docs/design/signals.md), from
+	// --impact NAME=PROMQL or --impact-file, each "for" given: with them,
+	// Impact is "", and no impact signal has no name. ImpactRules are the
+	// rule entries: which rules are judged against which signals' windows,
+	// and on which labels.
+	Signals     []ledger.SignalDef
+	ImpactRules []verdict.RuleEntry
 	// Deploys is the deploys file, read again each run, which owns the
 	// ledger's deploys (docs/design/noc.md); Options.DeployAfter is how
 	// long after one a firing still came during it.
@@ -363,6 +370,9 @@ type Server struct {
 	tried triedCache
 	// sources is what this replica saw of where incidents come from.
 	sources sourcesState
+	// turns are how each named signal's asks went, that each round shares
+	// --timeout by (inTurn).
+	turns turns
 	// outlasts are the proposals' for_outlasts, worked out as they are
 	// read (outlastsNow), and parsing the versions of the rules older
 	// proposals were made against.
@@ -428,6 +438,7 @@ type Server struct {
 	status     status
 	cache      cache
 	own        ownersCache
+	sigs       signalsCache
 	grantsC    grantsCache
 	creds      creditCache
 	hours      hoursCache
@@ -931,7 +942,8 @@ func (s *Server) options(ctx context.Context) (verdict.Options, error) {
 	}
 	// With an impact signal, the record is kept from when the runs read it,
 	// all of it, with the criterion in effect (verdict.Options.ImpactFrom,
-	// impactFrom).
+	// impactFrom); with named ones, each from its own start, a firing by
+	// the signals tied to it (signalsOf).
 	if o.ImpactFrom, err = s.impactFrom(ctx, s.criterionOf(set)); err != nil {
 		return o, err
 	}
@@ -943,6 +955,11 @@ func (s *Server) options(ctx context.Context) (verdict.Options, error) {
 		}
 		if err := apply(&o, k, v.Value); err != nil {
 			s.log.Warn("a setting from the UI doesn't parse; the command line's is used", "setting", k, "err", err)
+		}
+	}
+	if s.namedSignals() {
+		if o.Signals, err = s.signalsOf(ctx, o.Match); err != nil {
+			return o, err
 		}
 	}
 	return o, nil
@@ -961,6 +978,8 @@ func apply(o *verdict.Options, key, v string) error {
 		// line's.
 		o.Match = nil
 		for _, m := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == ' ' }) {
+			// Any name, as ever: one that isn't a label's name is never
+			// put in a query (source.SeenFrom).
 			if m != "none" {
 				o.Match = append(o.Match, m)
 			}

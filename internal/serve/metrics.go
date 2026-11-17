@@ -29,7 +29,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		today := s.l.Day(s.now())
-		days, err := s.l.Days(ctx, today-6, today)
+		days, err := s.l.DaysBy(ctx, today-6, today)
 		if err != nil {
 			s.oops(w, r, err)
 			return
@@ -69,7 +69,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			rr.Refired += d.Refired
 			rr.DuringDeploys += d.Deploy
 			rr.DeploysCaught += d.DeployWhite
-			if !t.kept[ledger.Week(d.At)] {
+			if !t.judgedPart(ledger.Week(d.At), d.Rule, d.Signals) {
 				rr.Unjudged += d.Firings - d.White
 				rr.DeploysUnjudged += d.Deploy - d.DeployWhite
 			}
@@ -77,11 +77,17 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		// By the weeks the seven days have some of, as their firings are.
 		rep := &verdict.Report{NoRecord: !t.rec.JudgesAny(s.l.Midnight(today-6), s.now())}
 		at := noisyAt(o)
+		total := 0
 		for _, rr := range sum {
 			rr.NoRecord = rr.Firings > 0 && rr.Unjudged == rr.Firings
 			rr.Noisy = verdict.IsNoisy(rr.Firings-rr.Unjudged, rr.White, at)
 			rep.Unjudged += rr.Unjudged
 			rep.Rules = append(rep.Rules, *rr)
+			total += rr.Firings
+		}
+		if o.Signals.Named() {
+			whole := rep.NoRecord
+			rep.NoRecord = verdict.NoRecordOf(total, rep.Unjudged, func() bool { return whole })
 		}
 		// Each rule's by its team's hours, or the server's.
 		if sc := own.schedules(o.Hours); !sc.none() {
@@ -106,6 +112,11 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			rep.Incidents = append(rep.Incidents, ir)
 		}
 		rep.SomeRules = o.SomeRules
+		if o.Signals.Named() {
+			// Each named signal's windows by state, and its start
+			// (lapilli_impact_windows, lapilli_impact_signal_start_timestamp_seconds).
+			rep.Settings = o.Settings()
+		}
 		var inEffect func(string) bool
 		if latest, ok, err := s.l.Latest(ctx); err == nil && ok {
 			inEffect = func(rule string) bool { return slices.Contains(latest.Names, rule) }

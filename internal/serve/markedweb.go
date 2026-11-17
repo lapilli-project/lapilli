@@ -121,7 +121,7 @@ func (s *Server) markedLines(ctx context.Context, ms []ledger.Marked, from, to t
 		t.only(own, *team)
 	}
 	mine := func(id int64) bool { return team == nil || own.rule[t.rules[id].Name] == team.ID }
-	days, err := s.l.MarkedDays(ctx, d1, d2)
+	days, err := s.l.MarkedDaysBy(ctx, d1, d2)
 	if err != nil {
 		return nil, false, err
 	}
@@ -129,19 +129,30 @@ func (s *Server) markedLines(ctx context.Context, ms []ledger.Marked, from, to t
 	for _, d := range days {
 		byDay[d.At] = append(byDay[d.At], d)
 	}
-	weeks, err := s.l.MarkedWeeks(ctx, w1, w2)
+	weeks, err := s.l.MarkedWeeksBy(ctx, w1, w2)
 	if err != nil {
 		return nil, false, err
 	}
+	// Each rule's firings of a kind in a week, and, of them, those that
+	// caught nothing and had no record by the signals tied to them.
 	byWeek := map[int64]map[int64]map[string]ledger.MarkedTally{}
+	unjudged := map[int64]map[int64]map[string]int{}
 	for _, m := range weeks {
 		if byWeek[m.At] == nil {
-			byWeek[m.At] = map[int64]map[string]ledger.MarkedTally{}
+			byWeek[m.At], unjudged[m.At] = map[int64]map[string]ledger.MarkedTally{}, map[int64]map[string]int{}
 		}
 		if byWeek[m.At][m.Rule] == nil {
-			byWeek[m.At][m.Rule] = map[string]ledger.MarkedTally{}
+			byWeek[m.At][m.Rule], unjudged[m.At][m.Rule] = map[string]ledger.MarkedTally{}, map[string]int{}
 		}
-		byWeek[m.At][m.Rule][m.Kind] = m
+		k := byWeek[m.At][m.Rule][m.Kind]
+		k.At, k.Rule, k.Kind = m.At, m.Rule, m.Kind
+		k.Firings += m.Firings
+		k.White += m.White
+		k.Refired += m.Refired
+		byWeek[m.At][m.Rule][m.Kind] = k
+		if !t.judgedPart(m.At, m.Rule, m.Signals) {
+			unjudged[m.At][m.Rule][m.Kind] += m.Firings - m.White
+		}
 	}
 	incs, err := s.l.Incidents(ctx, s.l.Midnight(w1), s.l.Midnight(w2+7), false)
 	if err != nil {
@@ -174,7 +185,7 @@ func (s *Server) markedLines(ctx context.Context, ms []ledger.Marked, from, to t
 				}
 				c := inRules[m.Rule]
 				inRules[m.Rule] = [3]int{c[0] + m.Firings, c[1] + m.White, c[2] + m.Refired}
-				if t.kept[ledger.Week(d)] {
+				if t.judgedPart(ledger.Week(d), m.Rule, m.Signals) {
 					judged += m.Firings
 				} else {
 					judged += m.White
@@ -201,11 +212,10 @@ func (s *Server) markedLines(ctx context.Context, ms []ledger.Marked, from, to t
 				n, white := x.Firings-m.Firings, x.White-m.White
 				c := beRules[id]
 				beRules[id] = [3]int{c[0] + n, c[1] + white, c[2] + x.Refired - m.Refired}
-				if t.kept[w] {
-					judged += n
-				} else {
-					judged += white
-				}
+				// Outside its kind: the rule's firings judged, less those
+				// of the kind.
+				u := t.unjudged(w, id)
+				judged += n - (u.Firings - u.White - unjudged[w][id][o.M.Kind])
 			}
 		}
 		l.Before = markedTotals(beRules, judged, at)
@@ -294,12 +304,8 @@ func (s *Server) talliesOver(ctx context.Context, w1, w2 int64) (*tallies, error
 		t.weeks = append(t.weeks, w)
 		t.by[w] = map[int64]ledger.Tally{}
 	}
-	rows, err := s.l.Weeks(ctx, w1, w2)
-	if err != nil {
+	if err := s.fillTallies(ctx, t, w1, w2); err != nil {
 		return nil, err
-	}
-	for _, r := range rows {
-		t.by[r.At][r.Rule] = r
 	}
 	if t.rules, err = s.l.RuleTable(ctx); err != nil {
 		return nil, err

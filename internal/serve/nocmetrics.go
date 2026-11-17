@@ -116,6 +116,11 @@ func (s *Server) nocMetrics(ctx context.Context, b *bytes.Buffer, rep *verdict.R
 			state = "noisy_only"
 		}
 		l := fmt.Sprintf(`incident="%s",source="%s"`, labelValue(in.ID), src)
+		if in.Candidate && in.Signal != "" {
+			// A named signal's window, by its signal: one incident has
+			// one, so no series changes as it goes.
+			l += fmt.Sprintf(`,signal="%s"`, labelValue(in.Signal))
+		}
 		states = append(states, fmt.Sprintf(`lapilli_incident_state{%s,state="%s"} 1`, l, state))
 		if c, caught := in.First(); caught {
 			leads = append(leads, fmt.Sprintf("lapilli_incident_lead_seconds{%s} %g", l, -c.Delay.Seconds()))

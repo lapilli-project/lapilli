@@ -106,7 +106,13 @@ change and to try on the last four weeks first; everyone else reads it. */}}
 <h2 id="incident-criteria">{{t "Incident criteria"}}</h2>
 <p>{{t "A firing is judged by whether it caught an incident: one written down in Lapilli, copied in from a tool, read from the incidents file, or a window where the impact signal returned something for at least --impact-for. The impact signal is a PromQL expression that returns something while users are hurt, such as an error-rate SLI or a probe failing: verdicts with no incident written down by hand."}}</p>
 {{if .NoHistory}}<p class="notice status-unknown"><span class="sign" aria-hidden="true">?</span> {{t "Off: the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --gcp-project."}}</p>{{end}}
-{{if $edit}}<form method="post" action="/settings/impact" class="criteria">{{range $p.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{else}}<div class="criteria">{{end}}
+{{with .Named}}<p class="notice status-info"><span class="sign" aria-hidden="true">i</span> {{t "Named impact signals, set where serve starts (--impact NAME=PROMQL, --impact-file): each read, started and judged on its own. Changing them here comes in a later release."}}</p>
+<div class="scroll" tabindex="0" role="region" aria-label="{{t "Impact signals"}}"><table>
+<caption>{{t "Impact signals"}}</caption>
+<thead><tr><th scope="col">{{t "Signal"}}</th><th scope="col">{{t "How long it must last"}}</th><th scope="col">{{t "Matched on"}}</th><th scope="col">{{t "Keeps the record"}}</th></tr></thead>
+<tbody>{{range .}}<tr><th scope="row"><code><bdi>{{.Name}}</bdi></code></th><td>{{.For}}</td><td>{{if .Follows}}{{t "the match in effect"}}{{else if .Match}}<code><bdi>{{join .Match ", "}}</bdi></code>{{else}}{{t "no label"}}{{end}}</td>
+<td>{{if not .Record}}{{t "no"}}{{else if .Start.IsZero}}{{t "not yet"}}{{else}}{{t "yes, since %s" (at $loc .Start)}}{{end}}</td></tr>{{end}}</tbody>
+</table></div>{{else}}{{if $edit}}<form method="post" action="/settings/impact" class="criteria">{{range $p.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{else}}<div class="criteria">{{end}}
 {{range .Settings}}<div class="field">
 {{if $edit}}<label for="criterion-{{.Key}}">{{else}}<p class="field-name">{{end}}<code>{{.Flag}}</code> {{if eq .Key "impact"}}{{t "Impact signal (PromQL)"}}{{else}}{{t "How long it must last"}}{{end}}{{if $edit}}</label>{{else}}</p>{{end}}
 {{if eq .Key "impact"}}{{if $edit}}<textarea id="criterion-impact" name="impact" rows="3" maxlength="4096" spellcheck="false" aria-describedby="criterion-impact-at criteria-help">{{$.V.Expr}}</textarea>{{else}}<p id="criterion-impact">{{if eq .Value "off"}}{{t "off"}}{{else}}<code><bdi>{{shown .Value}}</bdi></code>{{end}}</p>{{end}}
@@ -123,7 +129,7 @@ change and to try on the last four weeks first; everyone else reads it. */}}
 {{with .Data}}{{if .NoData}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "The impact signal keeps no record: a selector it reads has no data yet."}}</p>{{end}}{{template "impactdata" (on $p .)}}{{end}}
 {{with .Again}}<p class="notice {{if .Err}}status-bad{{else}}status-info{{end}}">{{if .Err}}<span class="sign" aria-hidden="true">✕</span> {{t "Reading it again over the last four weeks failed at %s: %s. It is tried again at %s; the runs read it meanwhile from where they are." (at $loc .Failed) .Err (at $loc .Next)}} {{t "To get past it: raise --timeout or --max-samples where lapilli serve is started, or narrow the expression so that four weeks of it read within them. Turned off until a run has gone by, then on again, it keeps a record from that run on, the weeks before still to be read again."}}{{else}}<span class="sign" aria-hidden="true">↻</span> {{t "Waiting to be read again over the last four weeks, at the next round of the replica that leads."}}{{end}}</p>{{end}}
 {{with .Tried}}{{template "impacttried" (on $p .)}}{{end}}
-{{end}}{{end}}
+{{end}}{{end}}{{end}}
 
 {{/* A try of the incident criteria: what they would make incidents of
 over the last four weeks, and what that would do to the verdict. */}}

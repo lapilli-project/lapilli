@@ -177,10 +177,14 @@ func normal(s string) string {
 
 // key is an index's key in words both databases give alike: a text kept
 // by its md5, or its first 500 characters, which a btree holds where it
-// can't hold the text (017.sql), stands for the text.
+// can't hold the text (017.sql), stands for the text; a column Postgres
+// quotes, a word it keeps (bit), as SQLite names it.
 func key(s string) string {
 	for _, re := range stoodFor {
 		s = re.ReplaceAllString(s, "$1")
+	}
+	if len(s) > 1 && s[0] == '"' && s[len(s)-1] == '"' {
+		s = s[1 : len(s)-1]
 	}
 	return normal(s)
 }

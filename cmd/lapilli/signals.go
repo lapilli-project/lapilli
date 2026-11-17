@@ -208,12 +208,10 @@ func (f *verdictFlags) anyImpact() bool { return f.impact != "" || len(f.signals
 // --impact-file, and sets what judges by them (Options.Signals): their
 // names, "for"s, matches and records, and the rule entries. Where each
 // signal's data begins, and what it returned, a read of them says
-// (readSignals).
-func (f *verdictFlags) signalsRead(serving bool) error {
+// (readSignals); lapilli serve's runs, of serve's (signalDefs).
+func (f *verdictFlags) signalsRead() error {
 	perName := len(f.impactSets) > 0
 	switch {
-	case serving && (len(f.signals) > 0 || f.impactFile != "" || perName):
-		return errors.New("lapilli serve reads one --impact, without a name, for now: named signals, --impact-for NAME=DUR, --impact-match, --impact-record and --impact-file are lapilli verdict's (docs/design/signals.md)")
 	case f.impactFile != "" && f.anyImpact():
 		return errors.New("--impact-file gives the impact signals: leave out --impact")
 	case f.impactFile != "" && perName:
@@ -267,6 +265,27 @@ func (f *verdictFlags) signalsRead(serving bool) error {
 	}
 	f.opts.Signals = verdict.NewSignals(list, entries)
 	return nil
+}
+
+// signalDefs are the named signals as lapilli serve keeps them, each with
+// its "for", --impact-for's when it gives none; and the rule entries.
+func (f *verdictFlags) signalDefs() ([]ledger.SignalDef, []verdict.RuleEntry) {
+	if !f.opts.Signals.Named() {
+		return nil, nil
+	}
+	var out []ledger.SignalDef
+	for i, s := range f.signals {
+		out = append(out, ledger.SignalDef{Name: s.name, Expr: s.expr, For: f.opts.Signals.List[i].For, Match: s.match, Record: s.record})
+	}
+	return out, slices.Clone(f.opts.Signals.Entries)
+}
+
+// warnTo is where what a run says on its way goes: stderr, or nowhere.
+func (f *verdictFlags) warnTo() io.Writer {
+	if f.warn == nil {
+		return io.Discard
+	}
+	return f.warn
 }
 
 // maxImpactFile is the most of --impact-file read: more is refused.
@@ -402,8 +421,9 @@ func readImpactFile(path string) ([]impactSignal, []verdict.RuleEntry, error) {
 // readSignals reads each named impact signal over the period and the two
 // weeks before it, as an impact signal with no name is read (readImpact):
 // its windows in the period, of its series alone, matched on its labels;
-// what its series returned, for the firings it could have seen
-// (verdict.Seen); and where the data of each selector it reads begins, by
+// what its series returned, and what it reads (source.SeenFrom), for the
+// firings it could have seen (verdict.Seen); and where the data of each
+// selector it reads begins, by
 // the one rule (ledger.FloorBy, each firing judged by its own time): from
 // there on, it keeps the record. Its windows join incs as an unnamed
 // signal's do, each one that is an incident written down left out.
@@ -426,6 +446,15 @@ func (f *verdictFlags) readSignals(ctx context.Context, h history, incs []incide
 			se.Samples = slices.DeleteFunc(slices.Clone(se.Samples), func(p prom.Sample) bool { return p.T.Before(f.opts.From) })
 			in = append(in, se)
 		}
+		// And what it reads, by the same labels: a service it measured all
+		// along, never hurt, is one it could have seen hurt.
+		// A selector that fails adds nothing: the others' counts are kept,
+		// and the run says so rather than failing.
+		read, _, err := source.SeenFrom(ctx, h, s.expr, x.MatchOr(f.opts.Match), from, f.opts.To)
+		if err != nil {
+			fmt.Fprintf(f.warnTo(), "lapilli verdict: --impact %s: reading what it reads, by its match labels, a selector failed: %v; what it returned, and what the others read, tie its firings\n", s.name, err)
+		}
+		seen.Merge(read)
 		x.Seen = seen
 		found = append(found, incident.FromSignal(in, f.step, x.For, x.Name, x.Match)...)
 		if x.Start, err = f.recordStart(ctx, h, s.expr, from); err != nil {

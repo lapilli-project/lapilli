@@ -9,6 +9,21 @@ data:
   incidents.yaml: |
     {{- dict "incidents" .Values.incidents | toYaml | nindent 4 }}
 {{- end }}
+{{- if kindIs "map" .Values.impact }}
+---
+# The named impact signals and the rule entries (docs/design/signals.md),
+# as --impact-file reads them: impact given as a mapping, with signals and
+# rules under it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lapilli.fullname" . }}-impact
+  labels:
+    {{- include "lapilli.labels" . | nindent 4 }}
+data:
+  impact.yaml: |
+    {{- dict "impact" .Values.impact | toYaml | nindent 4 }}
+{{- end }}
 {{- if and (eq .Values.mode "serve") .Values.serve.rulesHistory.repository }}
 ---
 apiVersion: v1

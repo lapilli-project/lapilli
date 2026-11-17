@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -60,7 +61,54 @@ type Found struct {
 	// ImpactAssumed is the criterion a ledger that kept none (an earlier
 	// lapilli's) is taken to have been read with: the command line's.
 	ImpactAssumed string
-	Run           Run
+	// Signals are the named impact signals the run read, each on its own
+	// (docs/design/signals.md): with them, the unnamed signal isn't read,
+	// and the run turns it off.
+	Signals []SignalRead
+	Run     Run
+}
+
+// SignalRead is a named impact signal as a run read it, with Criterion
+// (its "for" and expression, as lapilli serve keys them): from Since on,
+// its windows from From on, the run's From or where a run before missed
+// it, within a week. Missed says it couldn't be read: a later run reads it
+// from the earliest From it was missed at, and meanwhile its windows, and
+// the record it keeps, stand. To, when it isn't zero and is before the
+// run's To, is where a read catching up after a miss, a piece at a time,
+// goes on from (PieceResume, a little before where its last piece ended):
+// a later run reads it from there, as from where it was missed. Seen is what its series returned,
+// of the labels it is matched on.
+type SignalRead struct {
+	Name, Criterion string
+	Match           []string
+	Since, From, To time.Time
+	Windows         []incident.Incident
+	Missed          bool
+	Seen            *verdict.Seen
+}
+
+// signalRun is a signal as a run, or a read again, read it: its name, ""
+// for the unnamed signal, and match; whether it was read; from when
+// (since), its windows replacing those found before from from on; the
+// criterion it was read with, and, of a ledger an earlier lapilli kept,
+// the one taken to have been read before.
+type signalRun struct {
+	name      string
+	match     []string
+	on        bool
+	since     time.Time
+	from      time.Time
+	criterion string
+	assumed   string
+	// lead is the lead firings are judged with (verdict.Options): of a
+	// named signal's window going on with other labels, its firings before
+	// from are pended to be judged again from its start less it.
+	lead time.Duration
+}
+
+// unnamed is the unnamed signal as f read it.
+func (f Found) unnamed() signalRun {
+	return signalRun{on: f.ImpactOn, since: f.ImpactSince, from: f.From, criterion: f.ImpactCriterion, assumed: f.ImpactAssumed}
 }
 
 // from is where a rule's firings are replaced from.
@@ -288,21 +336,28 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 			return err
 		}
 
-		changed, err := l.criterionChanged(t, f)
+		changed, err := l.criterionChanged(t, f.unnamed())
 		if err != nil {
 			return err
 		}
 		if f.ImpactOn {
 			// Read with another criterion than the runs before, a window
 			// on at the start is this one's own, not one of theirs going on.
-			ilo, err := l.impact(t, f, changed)
+			ilo, err := l.impact(t, f.unnamed(), f.Impact, changed)
 			if err != nil {
 				return err
 			}
 			lo = min(lo, ilo)
 		}
-		if err := l.impactSince(t, f); err != nil {
+		if err := l.impactSince(t, f.unnamed()); err != nil {
 			return err
+		}
+		for _, r := range f.Signals {
+			ilo, err := l.signalRecord(t, f, r, o)
+			if err != nil {
+				return err
+			}
+			lo = min(lo, ilo)
 		}
 		if err := l.judge(t, lo-int64(o.Lead/time.Second), to, o); err != nil {
 			return err
@@ -345,70 +400,72 @@ const impactNone = "none"
 // A since is never earlier than where the criterion's data begins
 // (ImpactData), when that is known; one earlier than where it was looked
 // for from forgets the data, to be looked for again from there.
-func (l *Ledger) impactSince(t *txn, f Found) error {
-	was, err := l.meta(t.ctx, t, metaImpactSince)
+//
+// Each signal keeps its own, in its row of impact_signals: the unnamed
+// signal's, as meta kept it before schema 022, and each named one's.
+func (l *Ledger) impactSince(t *txn, r signalRun) error {
+	was, err := sigMeta(t.ctx, t, r.name, metaImpactSince)
 	if err != nil {
 		return err
 	}
-	if !f.ImpactOn {
-		var n int
-		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM meta WHERE key IN (?, ?, ?, ?, ?)",
-			metaImpactCriterion, metaImpactAgain, metaImpactData, metaImpactRead, metaImpactFloor).Scan(&n); err != nil {
+	others := []string{metaImpactCriterion, metaImpactAgain, metaImpactData, metaImpactRead, metaImpactFloor}
+	if !r.on {
+		n, err := sigMetaSet(t, r.name, others...)
+		if err != nil {
 			return err
 		}
 		if was == impactNone && n == 0 {
 			return nil
 		}
-		if _, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key IN (?, ?, ?, ?, ?)",
-			metaImpactCriterion, metaImpactAgain, metaImpactData, metaImpactRead, metaImpactFloor); err != nil {
+		if err := delSigMeta(t, r.name, others...); err != nil {
 			return err
 		}
-		return setMeta(t.ctx, t, metaImpactSince, impactNone)
+		return setSigMeta(t, r.name, metaImpactSince, impactNone)
 	}
-	crit, err := l.meta(t.ctx, t, metaImpactCriterion)
+	crit, err := sigMeta(t.ctx, t, r.name, metaImpactCriterion)
 	if err != nil {
 		return err
 	}
 	n, perr := strconv.ParseInt(was, 10, 64)
 	kept := perr == nil // a record is kept, by crit, or of an earlier lapilli's
-	if kept && crit == "" && f.ImpactAssumed != "" {
-		crit = f.ImpactAssumed
-		if err := setMeta(t.ctx, t, metaImpactCriterion, crit); err != nil {
+	if kept && crit == "" && r.assumed != "" {
+		crit = r.assumed
+		if err := setSigMeta(t, r.name, metaImpactCriterion, crit); err != nil {
 			return err
 		}
 	}
-	read := f.ImpactCriterion
+	read := r.criterion
 	if read == "" {
 		read = crit // a run from before 0.49, which doesn't say
 	}
-	if err := l.setMetaIf(t, metaImpactRead, read); err != nil {
+	if err := l.setSigMetaIf(t, r.name, metaImpactRead, read); err != nil {
 		return err
 	}
 	if read != "" && kept && crit != read {
-		floor, err := l.meta(t.ctx, t, metaImpactFloor)
+		floor, err := sigMeta(t.ctx, t, r.name, metaImpactFloor)
 		if err != nil {
 			return err
 		}
-		if at, err := strconv.ParseInt(floor, 10, 64); err == nil && at <= f.From.Unix() {
+		if at, err := strconv.ParseInt(floor, 10, 64); err == nil && at <= r.from.Unix() {
 			return nil
 		}
-		return setMeta(t.ctx, t, metaImpactFloor, strconv.FormatInt(f.From.Unix(), 10))
+		return setSigMeta(t, r.name, metaImpactFloor, strconv.FormatInt(r.from.Unix(), 10))
 	}
 	if read != "" && crit != read {
-		if err := setMeta(t.ctx, t, metaImpactCriterion, read); err != nil {
+		if err := setSigMeta(t, r.name, metaImpactCriterion, read); err != nil {
 			return err
 		}
 	}
 	if was == impactNone && read != "" {
-		if err := setMeta(t.ctx, t, metaImpactAgain, againDue); err != nil {
+		if err := setSigMeta(t, r.name, metaImpactAgain, againDue); err != nil {
 			return err
 		}
 	}
-	since := f.ImpactSince.Unix()
+	since := r.since.Unix()
 	if kept && n <= since {
 		return nil
 	}
-	d, err := l.impactData(t.ctx, t)
+	d, err := l.impactData(t.ctx, t, r.name)
 	if err != nil {
 		return err
 	}
@@ -419,26 +476,96 @@ func (l *Ledger) impactSince(t *txn, f Found) error {
 		// replays from further back than a read again began): nothing is
 		// known of the weeks between, so it is looked for again from the
 		// new start, and no record is kept until it is (ImpactKept.From).
-		if _, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key = ?", metaImpactData); err != nil {
+		if err := delSigMeta(t, r.name, metaImpactData); err != nil {
 			return err
 		}
 	case !d.Floor.IsZero():
 		since = max(since, d.Floor.Unix())
 	}
-	return setMeta(t.ctx, t, metaImpactSince, strconv.FormatInt(since, 10))
+	return setSigMeta(t, r.name, metaImpactSince, strconv.FormatInt(since, 10))
 }
 
-// setMetaIf sets a meta key to v, when it isn't already: a run that reads
-// what the one before read writes nothing more.
-func (l *Ledger) setMetaIf(t *txn, key, v string) error {
+// setSigMetaIf sets what a signal's row keeps under a meta key to v, when
+// it isn't already: a run that reads what the one before read writes
+// nothing more.
+func (l *Ledger) setSigMetaIf(t *txn, name, key, v string) error {
 	if v == "" {
 		return nil
 	}
-	was, err := l.meta(t.ctx, t, key)
+	was, err := sigMeta(t.ctx, t, name, key)
 	if err != nil || was == v {
 		return err
 	}
-	return setMeta(t.ctx, t, key, v)
+	return setSigMeta(t, name, key, v)
+}
+
+// signalRecord keeps what a run read of a named signal (SignalRead): its
+// windows in place of its own from where it read them, what keeps the
+// record by it, and what its series returned. One missed is kept from
+// where it was first missed, its windows and record standing; one read
+// from later than it was missed was given up on, past a week, and begins
+// again as one turned on again: its record from this read, and a read
+// again due. It returns the earliest start whose firings' stones may have
+// changed.
+func (l *Ledger) signalRecord(t *txn, f Found, r SignalRead, o verdict.Options) (int64, error) {
+	var missed int64
+	if err := t.QueryRowContext(t.ctx, "SELECT missed_at FROM impact_signals WHERE name = ?", r.Name).Scan(&missed); errors.Is(err, sql.ErrNoRows) {
+		// A signal the ledger doesn't keep (SyncSignals hasn't made its
+		// row, with its own bit): nothing of it is kept, its windows nor
+		// its record, until it does.
+		return f.From.Unix(), nil
+	} else if err != nil {
+		return 0, err
+	}
+	if r.Missed {
+		if missed == 0 || r.From.Unix() < missed {
+			if _, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET missed_at = ? WHERE name = ?", r.From.Unix(), r.Name); err != nil {
+				return 0, err
+			}
+		}
+		return f.From.Unix(), nil
+	}
+	run := signalRun{name: r.Name, match: r.Match, on: true, since: r.Since, from: r.From, criterion: r.Criterion, lead: o.Lead}
+	if missed != 0 && r.From.Unix() > missed {
+		// Given up on: turned off, and on again by this read.
+		if err := l.impactSince(t, signalRun{name: r.Name}); err != nil {
+			return 0, err
+		}
+	}
+	if missed != 0 {
+		if _, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET missed_at = 0 WHERE name = ?", r.Name); err != nil {
+			return 0, err
+		}
+	}
+	// What it reads is read for what it has seen from its first read on
+	// (AddSeen), whenever the record by it begins.
+	if _, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET seen_to = ? WHERE name = ? AND seen_to = 0", r.Since.Unix(), r.Name); err != nil {
+		return 0, err
+	}
+	changed, err := l.criterionChanged(t, run)
+	if err != nil {
+		return 0, err
+	}
+	lo, err := l.impact(t, run, r.Windows, changed)
+	if err != nil {
+		return 0, err
+	}
+	if err := l.impactSince(t, run); err != nil {
+		return 0, err
+	}
+	if r.Seen != nil {
+		if err := l.addSeen(t, o.Match, map[string]*verdict.Seen{r.Name: r.Seen}); err != nil {
+			return 0, err
+		}
+	}
+	if !r.To.IsZero() && r.To.Before(f.To) {
+		// Caught up to there, a piece at a time: read from there next
+		// (PieceResume).
+		if _, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET missed_at = ? WHERE name = ?", r.To.Unix(), r.Name); err != nil {
+			return 0, err
+		}
+	}
+	return lo, nil
 }
 
 // miss keeps, for the next run, where each rule this run couldn't replay
@@ -528,11 +655,16 @@ func (l *Ledger) rules(t *txn, rs []Rule) error {
 // covers most of it, confirmed before dismissed on a tie, then the
 // earliest. A decision is read from every window on from From on, one that
 // started before it too, as it was before anything was ended there.
-func (l *Ledger) impact(t *txn, f Found, fresh bool) (int64, error) {
-	from := f.From.Unix()
+//
+// A signal's windows are its own (docs/design/signals.md, "Windows: each
+// signal's own"): only those of r's signal are put in place of, ended,
+// carried on, or have their decisions, keys, tasks and comments taken, and
+// a named signal's keys carry its name.
+func (l *Ledger) impact(t *txn, r signalRun, found []incident.Incident, fresh bool) (int64, error) {
+	from := r.from.Unix()
 	lo := from
 	rows, err := t.QueryContext(t.ctx, `SELECT key, start_at, end_at, state, labels, updated, updated_by FROM incidents
-		WHERE origin = 'impact' AND (start_at >= ? OR end_at > ?) ORDER BY start_at, key`, from, from)
+		WHERE origin = 'impact' AND signal = ? AND (start_at >= ? OR end_at > ?) ORDER BY start_at, key`, r.name, from, from)
 	if err != nil {
 		return 0, err
 	}
@@ -562,14 +694,14 @@ func (l *Ledger) impact(t *txn, f Found, fresh bool) (int64, error) {
 				lo = min(lo, o.start)
 			}
 		}
-		if _, err := t.ExecContext(t.ctx, "UPDATE incidents SET end_at = ? WHERE origin = 'impact' AND start_at < ? AND end_at > ?", from, from, from); err != nil {
+		if _, err := t.ExecContext(t.ctx, "UPDATE incidents SET end_at = ? WHERE origin = 'impact' AND signal = ? AND start_at < ? AND end_at > ?", from, r.name, from, from); err != nil {
 			return 0, err
 		}
 	}
-	if _, err := t.ExecContext(t.ctx, "DELETE FROM catches WHERE incident_id IN (SELECT id FROM incidents WHERE origin = 'impact' AND start_at >= ?)", from); err != nil {
+	if _, err := t.ExecContext(t.ctx, "DELETE FROM catches WHERE incident_id IN (SELECT id FROM incidents WHERE origin = 'impact' AND signal = ? AND start_at >= ?)", r.name, from); err != nil {
 		return 0, err
 	}
-	if _, err := t.ExecContext(t.ctx, "DELETE FROM incidents WHERE origin = 'impact' AND start_at >= ?", from); err != nil {
+	if _, err := t.ExecContext(t.ctx, "DELETE FROM incidents WHERE origin = 'impact' AND signal = ? AND start_at >= ?", r.name, from); err != nil {
 		return 0, err
 	}
 	now := time.Now().Unix()
@@ -582,16 +714,60 @@ func (l *Ledger) impact(t *txn, f Found, fresh bool) (int64, error) {
 			reserved[o.key] = true
 		}
 	}
-	for _, in := range f.Impact {
+	for _, in := range found {
+		if r.name != "" {
+			// A named signal's, bounded; the unnamed signal's as every
+			// release before kept them, so that a window found again is
+			// known by its labels, and keeps its key and what was decided.
+			in.Labels = keptWindowLabels(in.Labels)
+		}
 		labels, err := json.Marshal(orEmpty(in.Labels))
 		if err != nil {
 			return 0, err
 		}
-		if in.Start.Before(f.From) && !fresh {
+		if in.Start.Before(r.from) && !fresh && r.name != "" {
+			// A named signal's, found from before where it reads: the
+			// window found before with its labels that it meets goes on, to
+			// the later end of the two (the same one, found again in the
+			// hour before); one of none such, which began too late to be
+			// found then (not yet on for its for), is put in as new.
+			key, start, end, was, err := goesOn(t, r, from, in)
+			if err != nil {
+				return 0, err
+			}
+			if key != "" {
+				// With every value of the labels both have, as windows
+				// found together that overlap are one (incident.FromImpact).
+				merged, err := json.Marshal(orEmpty(keptWindowLabels(mergeLabels(was, in.Labels))))
+				if err != nil {
+					return 0, err
+				}
+				before, err := json.Marshal(orEmpty(was))
+				if err != nil {
+					return 0, err
+				}
+				if in.End.Unix() > end || string(merged) != string(before) {
+					if _, err := t.ExecContext(t.ctx, "UPDATE incidents SET end_at = ?, labels = ? WHERE key = ?", max(in.End.Unix(), end), string(merged), key); err != nil {
+						return 0, err
+					}
+				}
+				// A later end changes no stone before from, and the run
+				// judges from from on. Other labels change those of its
+				// firings before from too: judged again a week a write
+				// (JudgePending), not in this one, which a window on for
+				// weeks would hold.
+				if string(merged) != string(before) && start-int64(r.lead/time.Second) < from {
+					if err := pend(t, [][2]int64{{start - int64(r.lead/time.Second), from}}); err != nil {
+						return 0, err
+					}
+				}
+				continue
+			}
+		} else if in.Start.Before(r.from) && !fresh {
 			// Still going at the start: the window found before goes on.
 			var key string
-			err := t.QueryRowContext(t.ctx, `SELECT key FROM incidents WHERE origin = 'impact' AND start_at < ? AND end_at >= ?
-				ORDER BY start_at DESC LIMIT 1`, from, f.ImpactSince.Unix()).Scan(&key)
+			err := t.QueryRowContext(t.ctx, `SELECT key FROM incidents WHERE origin = 'impact' AND signal = ? AND start_at < ? AND end_at >= ?
+				ORDER BY start_at DESC LIMIT 1`, r.name, from, r.since.Unix()).Scan(&key)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return 0, err
 			}
@@ -602,7 +778,7 @@ func (l *Ledger) impact(t *txn, f Found, fresh bool) (int64, error) {
 				continue
 			}
 		}
-		if in.Start.Before(f.From) {
+		if in.Start.Before(r.from) {
 			lo = min(lo, in.Start.Unix())
 		}
 		state, updated, by := "", now, ""
@@ -613,21 +789,141 @@ func (l *Ledger) impact(t *txn, f Found, fresh bool) (int64, error) {
 		// minute, sharing a value of each label both have, the two sharing
 		// half of each. Else one no window has, nor anything kept on one
 		// (freeKey).
-		key := sameImpact(before, from, taken, in)
+		key := sameImpact(before, from, taken, r.name, in)
 		if key == "" {
-			if key, err = freeKey(t, "impact-"+in.Start.UTC().Format("20060102T1504Z"), reserved); err != nil {
+			if key, err = freeKey(t, windowKeyBase(r.name, in), reserved); err != nil {
 				return 0, err
 			}
 		}
 		taken[key] = true
-		if _, err := t.ExecContext(t.ctx, `INSERT INTO incidents (key, origin, state, counts, title, start_at, end_at, labels, updated, updated_by)
-			VALUES (?, 'impact', ?, 0, ?, ?, ?, ?, ?, ?)`,
-			key, state, in.Title, in.Start.Unix(), in.End.Unix(), string(labels), updated, by); err != nil {
+		if _, err := t.ExecContext(t.ctx, `INSERT INTO incidents (key, origin, state, counts, title, start_at, end_at, labels, updated, updated_by, signal, match_labels)
+			VALUES (?, 'impact', ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			key, state, in.Title, in.Start.Unix(), in.End.Unix(), string(labels), updated, by, r.name, signalMatch(r)); err != nil {
 			return 0, err
 		}
 		made = append(made, madeWindow{key, in})
 	}
 	return lo, remapImpact(t, before, from, made)
+}
+
+// goesOn is the window of r's signal, begun before from, that in, found
+// from before from too, is: with labels in shares a value of each of
+// (share), and on at some time in it (its end at in's start or later, its
+// start by in's end), the latest begun of several; its key, start, end
+// and labels, or "" for none.
+func goesOn(t *txn, r signalRun, from int64, in incident.Incident) (string, int64, int64, incident.Labels, error) {
+	rows, err := t.QueryContext(t.ctx, `SELECT key, start_at, end_at, labels FROM incidents WHERE origin = 'impact' AND signal = ? AND start_at < ? AND end_at >= ? AND start_at <= ?
+		ORDER BY start_at DESC, key`, r.name, from, in.Start.Unix(), in.End.Unix())
+	if err != nil {
+		return "", 0, 0, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key, labels string
+		var start, end int64
+		if err := rows.Scan(&key, &start, &end, &labels); err != nil {
+			return "", 0, 0, nil, err
+		}
+		var l incident.Labels
+		if err := json.Unmarshal([]byte(labels), &l); err != nil {
+			return "", 0, 0, nil, err
+		}
+		if share(l, in.Labels) {
+			return key, start, end, l, nil
+		}
+	}
+	return "", 0, 0, nil, rows.Err()
+}
+
+// mergeLabels are a and b as one window's, as incident.FromImpact merges
+// windows that overlap: the labels both have, with every value of each,
+// in order.
+func mergeLabels(a, b incident.Labels) incident.Labels {
+	out := incident.Labels{}
+	for k, va := range a {
+		vb, ok := b[k]
+		if !ok {
+			continue
+		}
+		vs := slices.Clone(va)
+		for _, v := range vb {
+			if !slices.Contains(vs, v) {
+				vs = append(vs, v)
+			}
+		}
+		slices.Sort(vs)
+		out[k] = vs
+	}
+	return out
+}
+
+// PieceResume is where a read of a named signal catching up after a miss,
+// in pieces, goes on from after a turn's last piece ended at end: before
+// it by the signal's for and a step, so that a window begun within it,
+// not yet on for its for at end, is found whole by the next, as a run's
+// read is after the run before; by settle at most, as runs overlap, so
+// that each turn gets further; on the step's grid.
+func PieceResume(end time.Time, signalFor, settle, step time.Duration) time.Time {
+	// On the step's grid, as a run's from is, the overlap only longer: a
+	// range is evaluated at its start, and a step on from it.
+	return end.Add(-min(signalFor+step, max(settle, 0))).Truncate(step)
+}
+
+// keptWindowLabels are a named signal's window's labels as the ledger
+// keeps them, bounded as an incident's are (maxLabelBytes in all, as
+// JSON): each name and value cut as an alert's are (verdict.KeptName,
+// KeptValue), 64 values a label, and, past 4 KB, the labels that don't fit
+// left out, the rest kept in order: a label left out constrains nothing,
+// so the window is caught by more, never by fewer. Within the bounds, as
+// they are.
+func keptWindowLabels(l incident.Labels) incident.Labels {
+	if b, err := json.Marshal(orEmpty(l)); err == nil && len(b) <= maxLabelBytes {
+		within := true
+		for k, vs := range l {
+			within = within && verdict.KeptName(k) == k && len(vs) <= 64 && !slices.ContainsFunc(vs, func(v string) bool { return verdict.KeptValue(v) != v })
+		}
+		if within {
+			return l
+		}
+	}
+	out := incident.Labels{}
+	size := 2
+	for _, k := range slices.Sorted(maps.Keys(l)) {
+		kk := verdict.KeptName(k)
+		if _, taken := out[kk]; taken {
+			continue
+		}
+		// Each value cut, then the first 64 in order: the same 64 whether
+		// a window's values came at once or a piece at a time
+		// (mergeLabels).
+		var vs []string
+		for _, v := range l[k] {
+			if v = verdict.KeptValue(v); !slices.Contains(vs, v) {
+				vs = append(vs, v)
+			}
+		}
+		slices.Sort(vs)
+		vs = vs[:min(len(vs), 64)]
+		b, _ := json.Marshal(map[string][]string{kk: vs})
+		if size+len(b)-1 > maxLabelBytes {
+			continue
+		}
+		out[kk], size = vs, size+len(b)-1
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// signalMatch is the labels a signal's windows are matched on, as a column
+// keeps them: NULL for the unnamed signal's, and a named one's with none
+// of its own, which follow the match in effect.
+func signalMatch(r signalRun) any {
+	if r.name == "" {
+		return nil
+	}
+	return matchText(r.match)
 }
 
 // oldWindow is an impact window as it was before a run or a read again
@@ -680,8 +976,8 @@ func decidedFor(before []oldWindow, in incident.Incident) *oldWindow {
 // minute's, or that with -2, -3 …), shares a value of each label both have,
 // and the two share half of each (halfOfBoth); "" for none, or one taken
 // already.
-func sameImpact(before []oldWindow, from int64, taken map[string]bool, in incident.Incident) string {
-	base := "impact-" + in.Start.UTC().Format("20060102T1504Z")
+func sameImpact(before []oldWindow, from int64, taken map[string]bool, name string, in incident.Incident) string {
+	base := windowKeyBase(name, in)
 	s, e := in.Start.Unix(), in.End.Unix()
 	for _, o := range before {
 		if o.start < from || taken[o.key] || o.key != base && !strings.HasPrefix(o.key, base+"-") {

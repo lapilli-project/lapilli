@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -57,7 +58,10 @@ func (l *Ledger) seriesID(t *txn, rule int64, labels map[string]string) (int64, 
 	err = t.QueryRowContext(t.ctx, t.d.pick("SELECT id FROM series WHERE rule_id = ? AND labels = ?",
 		"SELECT id FROM series WHERE rule_id = ?1 AND md5(labels) = md5(?2) AND labels = ?2"), rule, k.labels).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		err = t.QueryRowContext(t.ctx, "INSERT INTO series (rule_id, labels) VALUES (?, ?) RETURNING id", rule, k.labels).Scan(&id)
+		var untied int64
+		if untied, err = t.untied(); err == nil {
+			err = t.QueryRowContext(t.ctx, "INSERT INTO series (rule_id, labels, signals) VALUES (?, ?, ?) RETURNING id", rule, k.labels, untied).Scan(&id)
+		}
 	}
 	if err != nil {
 		return 0, err
@@ -147,15 +151,19 @@ func keyOf(d dialect, rule int64, labels map[string]string) (seriesKey, error) {
 // in Postgres, many a statement.
 func (l *Ledger) makeSeries(t *txn, ks []seriesKey) ([]int64, error) {
 	ids := make([]int64, 0, len(ks))
+	untied, err := t.untied()
+	if err != nil {
+		return nil, err
+	}
 	if t.d != postgres {
-		st, err := t.PrepareContext(t.ctx, "INSERT INTO series (rule_id, labels) VALUES (?, ?) RETURNING id")
+		st, err := t.PrepareContext(t.ctx, "INSERT INTO series (rule_id, labels, signals) VALUES (?, ?, ?) RETURNING id")
 		if err != nil {
 			return nil, err
 		}
 		defer st.Close()
 		for _, k := range ks {
 			var id int64
-			if err := st.QueryRowContext(t.ctx, k.rule, k.labels).Scan(&id); err != nil {
+			if err := st.QueryRowContext(t.ctx, k.rule, k.labels, untied).Scan(&id); err != nil {
 				return nil, err
 			}
 			ids = append(ids, id)
@@ -169,8 +177,8 @@ func (l *Ledger) makeSeries(t *txn, ks []seriesKey) ([]int64, error) {
 		for _, k := range part {
 			args = append(args, k.rule, k.labels)
 		}
-		rows, err := t.QueryContext(t.ctx, "INSERT INTO series (rule_id, labels) VALUES "+
-			strings.TrimSuffix(strings.Repeat("(CAST(? AS BIGINT), CAST(? AS TEXT)), ", len(part)), ", ")+" RETURNING id, rule_id, labels", args...)
+		rows, err := t.QueryContext(t.ctx, "INSERT INTO series (rule_id, labels, signals) VALUES "+
+			strings.TrimSuffix(strings.Repeat(fmt.Sprintf("(CAST(? AS BIGINT), CAST(? AS TEXT), %d), ", untied), len(part)), ", ")+" RETURNING id, rule_id, labels", args...)
 		if err != nil {
 			return nil, err
 		}
@@ -245,7 +253,7 @@ type queryer interface {
 
 func (l *Ledger) incidentsMeeting(ctx context.Context, q queryer, lo, hi int64, o verdict.Options, where string) ([]counted, error) {
 	lead, unknown := int64(o.Lead/time.Second), int64(o.UnknownLen/time.Second)
-	rows, err := q.QueryContext(ctx, `SELECT id, key, origin, title, start_at, end_at, labels FROM incidents
+	rows, err := q.QueryContext(ctx, `SELECT id, key, origin, title, start_at, end_at, labels, signal, match_labels FROM incidents
 		WHERE `+where+` AND start_at <= ? AND coalesce(end_at, start_at + ?) >= ? ORDER BY start_at, key`,
 		hi+lead, unknown, lo)
 	if err != nil {
@@ -276,10 +284,11 @@ func scanIncident(s scanner) (incidentRow, error) {
 	var start int64
 	var end sql.NullInt64
 	var labels string
-	if err := s.Scan(&r.row, &r.ID, &r.origin, &r.Title, &start, &end, &labels); err != nil {
+	var match sql.NullString
+	if err := s.Scan(&r.row, &r.ID, &r.origin, &r.Title, &start, &end, &labels, &r.Signal, &match); err != nil {
 		return r, err
 	}
-	r.Start, r.End = unix(start), fromNull(end)
+	r.Start, r.End, r.Match = unix(start), fromNull(end), matchOf(match)
 	r.Candidate = r.origin == "impact"
 	if err := json.Unmarshal([]byte(labels), &r.Labels); err != nil {
 		return r, err
@@ -313,6 +322,11 @@ func (l *Ledger) judge(t *txn, lo, hi int64, o verdict.Options) error {
 		return err
 	}
 	if err := l.catches(t, lo, hi, incs, o); err != nil {
+		return err
+	}
+	// The alerts new since, tied to the signals that could have seen
+	// them, before their firings are counted.
+	if err := l.tieUntied(t, o); err != nil {
 		return err
 	}
 	return l.tally(t, lo, hi)
@@ -533,8 +547,8 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 		WHERE counts = 0 AND start_at <= ? AND coalesce(end_at, start_at + ?) >= ?)`, hi+lead, unknown, lo); err != nil {
 		return err
 	}
-	q, err := t.PrepareContext(t.ctx, `SELECT f.rule_id, f.series_id, f.start_at, s.labels FROM firings f JOIN series s ON s.id = f.series_id
-		WHERE f.start_at >= ? AND f.start_at <= ?`)
+	q, err := t.PrepareContext(t.ctx, `SELECT f.rule_id, f.series_id, f.start_at, s.labels, r.name FROM firings f JOIN series s ON s.id = f.series_id
+		JOIN rules r ON r.id = f.rule_id WHERE f.start_at >= ? AND f.start_at <= ?`)
 	if err != nil {
 		return err
 	}
@@ -558,8 +572,8 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 		first := map[int64]int64{}
 		for rows.Next() {
 			var rule, sid, start int64
-			var text string
-			if err := rows.Scan(&rule, &sid, &start, &text); err != nil {
+			var text, name string
+			if err := rows.Scan(&rule, &sid, &start, &text, &name); err != nil {
 				rows.Close()
 				return err
 			}
@@ -568,7 +582,9 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 				rows.Close()
 				return err
 			}
-			if !verdict.Catches(firing.Firing{Labels: labels, Start: unix(start)}, in.Incident, o) {
+			// With its rule, whose entry may keep it from a signal's
+			// windows (docs/design/signals.md, "Judged by its own match").
+			if !verdict.Catches(firing.Firing{Rule: name, Labels: labels, Start: unix(start)}, in.Incident, o) {
 				continue
 			}
 			d := start - in.Start.Unix()
@@ -599,10 +615,13 @@ func (l *Ledger) tally(t *txn, lo, hi int64) error {
 	if _, err := t.ExecContext(t.ctx, "DELETE FROM days WHERE day >= ? AND day <= ?", d1, d2); err != nil {
 		return err
 	}
-	// An excused firing is counted apart: neither white nor black.
-	if _, err := t.ExecContext(t.ctx, `INSERT INTO days (day, rule_id, firings, white, refired, excused, deploy, deploy_white)
-		SELECT day, rule_id, count(*) - sum(excused), sum(white), sum(refired * (1 - excused)), sum(excused), sum(deploy), sum(deploy * white) FROM firings
-		WHERE start_at >= ? AND start_at < ? GROUP BY day, rule_id`, l.midnight(d1), l.midnight(d2+1)); err != nil {
+	// An excused firing is counted apart: neither white nor black. By
+	// the signals its alert is tied to, too, so that a rule's firings are
+	// judged by them apart (docs/design/signals.md, "In the ledger").
+	if _, err := t.ExecContext(t.ctx, `INSERT INTO days (day, rule_id, signals, firings, white, refired, excused, deploy, deploy_white)
+		SELECT f.day, f.rule_id, s.signals, count(*) - sum(f.excused), sum(f.white), sum(f.refired * (1 - f.excused)), sum(f.excused), sum(f.deploy), sum(f.deploy * f.white)
+		FROM firings f JOIN series s ON s.id = f.series_id
+		WHERE f.start_at >= ? AND f.start_at < ? GROUP BY f.day, f.rule_id, s.signals`, l.midnight(d1), l.midnight(d2+1)); err != nil {
 		return err
 	}
 	w1, w2 := Week(d1), Week(d2)
@@ -616,9 +635,9 @@ func (l *Ledger) tally(t *txn, lo, hi int64) error {
 	if _, err := t.ExecContext(t.ctx, "DELETE FROM weeks WHERE week >= ? AND week <= ?", w1, w2); err != nil {
 		return err
 	}
-	if _, err := t.ExecContext(t.ctx, `INSERT INTO weeks (week, rule_id, firings, white, refired, excused, deploy, deploy_white)
-		SELECT day - (day + 3) % 7, rule_id, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white) FROM days
-		WHERE day >= ? AND day <= ? GROUP BY 1, 2`, w1, w2+6); err != nil {
+	if _, err := t.ExecContext(t.ctx, `INSERT INTO weeks (week, rule_id, signals, firings, white, refired, excused, deploy, deploy_white)
+		SELECT day - (day + 3) % 7, rule_id, signals, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white) FROM days
+		WHERE day >= ? AND day <= ? GROUP BY 1, 2, 3`, w1, w2+6); err != nil {
 		return err
 	}
 	// The firings marked with each kind, in the same tally.

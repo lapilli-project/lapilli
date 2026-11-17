@@ -377,6 +377,11 @@ type txn struct {
 	// marking is whether the ledger keeps a kind of marked window: 0 not
 	// read yet, 1 it does, 2 it doesn't (marks).
 	marking int
+	// pended are the spans pend kept in it, to be judged again.
+	pended [][2]int64
+	// naming is whether the ledger keeps a named impact signal: 0 not read
+	// yet, 1 it does, 2 it doesn't (untied).
+	naming int
 }
 
 // versionNames are the names any version of the rules holds, read the

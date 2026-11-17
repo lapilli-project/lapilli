@@ -1,0 +1,70 @@
+package ledgertest
+
+import "slices"
+
+// Undo022SQLite takes back what schema 022 made, in SQLite, for the tests
+// of the migrations before it, and of a ledger upgraded from 021: the
+// unnamed signal's row back in meta, the tallies keyed by rule and day or
+// week alone, summed over the signals.
+var Undo022SQLite = slices.Concat(undo022meta, []string{
+	"DROP TABLE impact_signals",
+	"DROP TABLE impact_rules",
+	"ALTER TABLE incidents DROP COLUMN match_labels",
+	"ALTER TABLE incidents DROP COLUMN signal",
+	"DROP INDEX series_untied",
+	"ALTER TABLE series DROP COLUMN signals",
+	`CREATE TABLE days_021 (day INTEGER NOT NULL, rule_id INTEGER NOT NULL, firings INTEGER NOT NULL, white INTEGER NOT NULL, refired INTEGER NOT NULL,
+		excused INTEGER NOT NULL DEFAULT 0, deploy INTEGER NOT NULL DEFAULT 0, deploy_white INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, rule_id)) WITHOUT ROWID`,
+	`INSERT INTO days_021 SELECT day, rule_id, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white) FROM days GROUP BY day, rule_id`,
+	"DROP TABLE days",
+	"ALTER TABLE days_021 RENAME TO days",
+	"CREATE INDEX days_rule ON days (rule_id, day)",
+	`CREATE TABLE weeks_021 (week INTEGER NOT NULL, rule_id INTEGER NOT NULL, firings INTEGER NOT NULL, white INTEGER NOT NULL, refired INTEGER NOT NULL,
+		excused INTEGER NOT NULL DEFAULT 0, deploy INTEGER NOT NULL DEFAULT 0, deploy_white INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (week, rule_id)) WITHOUT ROWID`,
+	`INSERT INTO weeks_021 SELECT week, rule_id, sum(firings), sum(white), sum(refired), sum(excused), sum(deploy), sum(deploy_white) FROM weeks GROUP BY week, rule_id`,
+	"DROP TABLE weeks",
+	"ALTER TABLE weeks_021 RENAME TO weeks",
+	`CREATE TABLE marked_days_021 (day INTEGER NOT NULL, rule_id INTEGER NOT NULL, kind_id INTEGER NOT NULL, firings INTEGER NOT NULL, white INTEGER NOT NULL,
+		refired INTEGER NOT NULL, PRIMARY KEY (day, rule_id, kind_id))`,
+	`INSERT INTO marked_days_021 SELECT day, rule_id, kind_id, sum(firings), sum(white), sum(refired) FROM marked_days GROUP BY day, rule_id, kind_id`,
+	"DROP TABLE marked_days",
+	"ALTER TABLE marked_days_021 RENAME TO marked_days",
+	`CREATE TABLE marked_weeks_021 (week INTEGER NOT NULL, rule_id INTEGER NOT NULL, kind_id INTEGER NOT NULL, firings INTEGER NOT NULL, white INTEGER NOT NULL,
+		refired INTEGER NOT NULL, PRIMARY KEY (week, rule_id, kind_id))`,
+	`INSERT INTO marked_weeks_021 SELECT week, rule_id, kind_id, sum(firings), sum(white), sum(refired) FROM marked_weeks GROUP BY week, rule_id, kind_id`,
+	"DROP TABLE marked_weeks",
+	"ALTER TABLE marked_weeks_021 RENAME TO marked_weeks",
+})
+
+// undo022meta puts what the unnamed signal's row keeps back in meta, under
+// the keys 0.49 to 0.53 kept it by.
+var undo022meta = []string{
+	"INSERT INTO meta (key, value) SELECT 'impact_since', since FROM impact_signals WHERE name = '' AND since != ''",
+	"INSERT INTO meta (key, value) SELECT 'impact_criterion', criterion FROM impact_signals WHERE name = '' AND criterion != ''",
+	"INSERT INTO meta (key, value) SELECT 'impact_again', again FROM impact_signals WHERE name = '' AND again != ''",
+	"INSERT INTO meta (key, value) SELECT 'impact_data', data FROM impact_signals WHERE name = '' AND data != ''",
+	"INSERT INTO meta (key, value) SELECT 'impact_read', last_read FROM impact_signals WHERE name = '' AND last_read != ''",
+	"INSERT INTO meta (key, value) SELECT 'impact_floor', floor_at FROM impact_signals WHERE name = '' AND floor_at != ''",
+}
+
+// Undo022Postgres is Undo022SQLite in Postgres, which changes a key in
+// place.
+var Undo022Postgres = slices.Concat(undo022meta, []string{
+	"DROP TABLE impact_signals",
+	"DROP TABLE impact_rules",
+	"ALTER TABLE incidents DROP COLUMN match_labels",
+	"ALTER TABLE incidents DROP COLUMN signal",
+	"ALTER TABLE series DROP COLUMN signals",
+	"ALTER TABLE days DROP CONSTRAINT days_pkey",
+	"ALTER TABLE days DROP COLUMN signals",
+	"ALTER TABLE days ADD PRIMARY KEY (day, rule_id)",
+	"ALTER TABLE weeks DROP CONSTRAINT weeks_pkey",
+	"ALTER TABLE weeks DROP COLUMN signals",
+	"ALTER TABLE weeks ADD PRIMARY KEY (week, rule_id)",
+	"ALTER TABLE marked_days DROP CONSTRAINT marked_days_pkey",
+	"ALTER TABLE marked_days DROP COLUMN signals",
+	"ALTER TABLE marked_days ADD PRIMARY KEY (day, rule_id, kind_id)",
+	"ALTER TABLE marked_weeks DROP CONSTRAINT marked_weeks_pkey",
+	"ALTER TABLE marked_weeks DROP COLUMN signals",
+	"ALTER TABLE marked_weeks ADD PRIMARY KEY (week, rule_id, kind_id)",
+})

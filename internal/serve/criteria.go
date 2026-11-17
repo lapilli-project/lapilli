@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -122,8 +123,10 @@ func (s *Server) criterionOf(set map[string]ledger.Setting) criterion {
 			c.For = d
 		}
 	}
-	if s.h == nil {
-		c.Expr = "" // read from Prometheus, which there is none of
+	if s.h == nil || s.namedSignals() {
+		// Read from Prometheus, which there is none of; or, with named
+		// signals, none has no name: one the UI kept stands aside.
+		c.Expr = ""
 	}
 	return c
 }
@@ -174,6 +177,9 @@ func maxQueryOf(page string, r *http.Request) int {
 // against them is held once the criterion in effect is read again, the
 // one kept among them.
 func (s *Server) impactHeld(ctx context.Context) (string, error) {
+	if s.namedSignals() {
+		return s.signalsHeld(ctx)
+	}
 	c, err := s.criterion(ctx)
 	if err != nil || c.Expr == "" {
 		return "", err
@@ -363,6 +369,22 @@ type criteriaView struct {
 	// last four weeks: when it last failed, why, and when it is tried again.
 	Again *againView `json:"read_again,omitempty"`
 	Tried *impactTry `json:"-"`
+	// Named are the named impact signals serve was started with
+	// (docs/design/signals.md), shown as they are: set where serve starts,
+	// for now.
+	Named []namedView `json:"named,omitempty"`
+}
+
+// namedView is a named impact signal as the Settings page lists it: its
+// "for", the labels it is matched on (Follows, the match in effect), and
+// whether it keeps the record, and from when.
+type namedView struct {
+	Name    string    `json:"name"`
+	For     string    `json:"for"`
+	Match   []string  `json:"match"`
+	Follows bool      `json:"follows,omitempty"`
+	Record  bool      `json:"record"`
+	Start   time.Time `json:"start,omitzero"`
 }
 
 type againView struct {
@@ -437,6 +459,20 @@ func (s *Server) criteriaView(ctx context.Context, set map[string]ledger.Setting
 	c := s.criterionOf(set)
 	started := criterion{s.cfg.Impact, s.cfg.ImpactFor}
 	v := &criteriaView{NoHistory: s.h == nil, Expr: c.Expr, For: verdict.Duration(c.For)}
+	if s.namedSignals() {
+		rows, err := s.l.SignalRows(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, d := range s.cfg.Signals {
+			x := namedView{Name: d.Name, For: verdict.Duration(d.For), Match: d.Match, Follows: d.Match == nil, Record: d.Record}
+			if i := slices.IndexFunc(rows, func(r ledger.SignalRow) bool { return r.Name == d.Name }); i >= 0 {
+				x.Start = rows[i].Kept.From()
+			}
+			v.Named = append(v.Named, x)
+		}
+		return v, nil
+	}
 	for _, st := range criteriaSettable {
 		x := settingView{Key: st.key, Flag: st.flag, CommandLine: showCriterion(started, st.key), Value: showCriterion(c, st.key)}
 		if st.key == "impact" && started.Expr == "" {
@@ -497,6 +533,10 @@ func (s *Server) postImpact(w http.ResponseWriter, r *http.Request) {
 	set, err := s.l.Settings(ctx)
 	if err != nil {
 		s.oops(w, r, err)
+		return
+	}
+	if s.namedSignals() {
+		s.oops(w, r, bad("serve reads named impact signals, set where it starts (--impact NAME=PROMQL, --impact-file): one with no name doesn't go beside them, and changing them here comes in a later release"))
 		return
 	}
 	values := map[string]string{}
@@ -655,7 +695,14 @@ const (
 // started with, since the runs read another, or turned on after they
 // read none.
 func (s *Server) againPlan(ctx context.Context, c criterion) (againPlan, ledger.ImpactKept, error) {
-	k, err := s.l.ImpactKept(ctx)
+	return s.againPlanOf(ctx, "", c, s.assumedKey())
+}
+
+// againPlanOf is againPlan of a signal by name, "" for the unnamed one;
+// assumed is the criterion a ledger that kept none is taken to have been
+// read with, "" for a named signal, which no lapilli before 0.49 read.
+func (s *Server) againPlanOf(ctx context.Context, name string, c criterion, assumed string) (againPlan, ledger.ImpactKept, error) {
+	k, err := s.l.SignalKept(ctx, name)
 	switch {
 	case err != nil || c.Expr == "":
 		return againNone, k, err
@@ -673,7 +720,7 @@ func (s *Server) againPlan(ctx context.Context, c criterion) (againPlan, ledger.
 		return againNone, k, err
 	}
 	if k.Again == "" && !k.Since.IsZero() && !k.Since.After(from) &&
-		(k.Criterion == c.key() || k.Criterion == "" && c.key() == s.assumedKey()) {
+		(k.Criterion == c.key() || k.Criterion == "" && assumed != "" && c.key() == assumed) {
 		return againMark, k, nil
 	}
 	return againRead, k, nil
@@ -699,6 +746,9 @@ type againState struct {
 // criterion meanwhile from where they are, under a floor: no record by the
 // signal until it is read. It reports whether it read it again.
 func (s *Server) impactAgain(ctx context.Context, o verdict.Options) (bool, error) {
+	if s.namedSignals() {
+		return s.signalsAgain(ctx, o)
+	}
 	c, err := s.criterion(ctx)
 	if err != nil || c.Expr == "" {
 		return false, err
@@ -774,28 +824,48 @@ func (s *Server) impactAgain(ctx context.Context, o verdict.Options) (bool, erro
 // which keeps no record whatever the data, until a read again brings its
 // own.
 func (s *Server) impactData(ctx context.Context) error {
-	k, err := s.l.ImpactKept(ctx)
-	if err != nil || s.h == nil || k.Since.IsZero() || k.Criterion == "" || !k.Floor.IsZero() {
+	if len(s.cfg.Signals) > 0 {
+		return s.signalsData(ctx)
+	}
+	return s.impactDataOf(ctx, "", nil)
+}
+
+// impactDataOf is impactData of one signal, by name, "" for the unnamed
+// one, within --timeout; of a named one (kept given), within the time ctx
+// has, which the signals share.
+func (s *Server) impactDataOf(ctx context.Context, name string, kept *ledger.ImpactKept) error {
+	var k ledger.ImpactKept
+	var err error
+	if kept != nil {
+		k = *kept
+	} else if k, err = s.l.SignalKept(ctx, name); err != nil {
 		return err
+	}
+	if s.h == nil || k.Since.IsZero() || k.Criterion == "" || !k.Floor.IsZero() {
+		return nil
 	}
 	cursor, err := s.l.Cursor(ctx)
 	if err != nil {
 		return err
 	}
-	rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
-	defer cancel()
+	rctx := ctx
+	if kept == nil {
+		var cancel context.CancelFunc
+		rctx, cancel = context.WithTimeout(ctx, s.cfg.Timeout)
+		defer cancel()
+	}
 	d := k.Data
 	if d == nil || d.Criterion != k.Criterion {
 		d = &ledger.ImpactData{Criterion: k.Criterion, From: k.Since}
 	}
-	return s.lookFor(rctx, d, cursor)
+	return s.lookFor(rctx, name, d, cursor)
 }
 
 // lookFor looks, of d's selectors, for where the data of those with none
 // found yet begins, each from where its last look got to up to cursor, and
 // keeps what it found: of each it could look at, a selector that fails
 // passing to the next, and returning the last failure.
-func (s *Server) lookFor(ctx context.Context, d *ledger.ImpactData, cursor time.Time) error {
+func (s *Server) lookFor(ctx context.Context, name string, d *ledger.ImpactData, cursor time.Time) error {
 	if d.Selectors != nil {
 		if err := withStandIns(d); err != nil {
 			return err
@@ -813,7 +883,7 @@ func (s *Server) lookFor(ctx context.Context, d *ledger.ImpactData, cursor time.
 		if len(sels) == 0 {
 			// Reading no selector (vector(1)), it has data all along.
 			d.CheckedTo = cursor
-			return s.l.SetImpactData(ctx, *d)
+			return s.l.SetSignalData(ctx, name, *d)
 		}
 	}
 	var failed error
@@ -837,7 +907,7 @@ func (s *Server) lookFor(ctx context.Context, d *ledger.ImpactData, cursor time.
 		d.Selectors[i] = got
 	}
 	d.CheckedTo = cursor
-	if err := s.l.SetImpactData(context.WithoutCancel(ctx), *d); err != nil {
+	if err := s.l.SetSignalData(context.WithoutCancel(ctx), name, *d); err != nil {
 		return err
 	}
 	return failed
@@ -888,6 +958,10 @@ type sourcesSeen struct {
 	FileFailed   time.Time   `json:"file_failed,omitzero"`
 	FileErr      string      `json:"file_error,omitempty"`
 	Again        *againState `json:"again,omitempty"`
+	// Signals are how the last read of each named signal went, and
+	// AgainBy how reading each again goes, by name.
+	Signals map[string]signalSeen `json:"signals,omitempty"`
+	AgainBy map[string]againState `json:"again_by,omitempty"`
 }
 
 // sourcesState is sourcesSeen as this replica keeps it, and when it last
@@ -900,6 +974,8 @@ type sourcesState struct {
 	fileErr                  string
 	again                    againState
 	noted                    map[string]time.Time
+	signals                  map[string]signalSeen
+	againBy                  map[string]againState
 }
 
 // sourcesNow is this replica's sourcesSeen.
@@ -911,6 +987,12 @@ func (s *Server) sourcesNow() *sourcesSeen {
 	if s.sources.again.Key != "" {
 		a := s.sources.again
 		x.Again = &a
+	}
+	if len(s.sources.signals) > 0 {
+		x.Signals = maps.Clone(s.sources.signals)
+	}
+	if len(s.sources.againBy) > 0 {
+		x.AgainBy = maps.Clone(s.sources.againBy)
 	}
 	return x
 }

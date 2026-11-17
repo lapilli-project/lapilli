@@ -1159,6 +1159,10 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 	}
 	cfg.RuleRE, cfg.Incidents, cfg.Impact, cfg.ImpactFor = f.ruleRE, f.incidents, f.impact, f.impactFor
 	cfg.Options, cfg.Step, cfg.Loc, cfg.Slack = f.opts, f.step, f.loc, f.slackFile
+	// The named impact signals, which serve keeps in its ledger, each with
+	// its own start: what judges by them is worked out from there.
+	cfg.Signals, cfg.ImpactRules = f.signalDefs()
+	cfg.Options.Signals = nil
 	cfg.Options.DeployBefore, cfg.Options.DeployAfter, cfg.RunbookAnnotations = deployBefore, deployAfter, f.runbooks
 	cfg.Late = f.late
 	cfg.OnCall = f.onCall

@@ -244,7 +244,7 @@ func TestImpactDecisions(t *testing.T) {
 		}
 		from := t0.Add(c.from)
 		if err := l.write(ctx, func(tx *txn) error {
-			_, err := l.impact(tx, Found{From: from, ImpactSince: from, Impact: []incident.Incident{c.found}}, true)
+			_, err := impactFound(l, tx, Found{From: from, ImpactSince: from, Impact: []incident.Incident{c.found}}, true)
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -290,7 +290,7 @@ func TestImpactTasksMove(t *testing.T) {
 	// Read again: a window from five minutes earlier over a, none over b.
 	moved := a.Add(-5 * time.Minute)
 	if err := l.write(ctx, func(tx *txn) error {
-		_, err := l.impact(tx, Found{From: t0.Add(time.Hour), ImpactSince: t0.Add(time.Hour), Impact: []incident.Incident{impactWindow("x", moved, 30*time.Minute)}}, true)
+		_, err := impactFound(l, tx, Found{From: t0.Add(time.Hour), ImpactSince: t0.Add(time.Hour), Impact: []incident.Incident{impactWindow("x", moved, 30*time.Minute)}}, true)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -448,7 +448,7 @@ func TestImpactKeyOfAnother(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := l.write(ctx, func(tx *txn) error {
-		_, err := l.impact(tx, Found{From: t0.Add(time.Hour), ImpactSince: t0.Add(time.Hour),
+		_, err := impactFound(l, tx, Found{From: t0.Add(time.Hour), ImpactSince: t0.Add(time.Hour),
 			Impact: []incident.Incident{labelled("b", "b", a), labelled("c", "c", a.Add(10*time.Second))}}, true)
 		return err
 	}); err != nil {
@@ -547,7 +547,7 @@ func TestImpactFloor(t *testing.T) {
 	// A run of d after it: d's window on at its start goes on.
 	changed := true
 	if err := l.write(ctx, func(tx *txn) (err error) {
-		changed, err = l.criterionChanged(tx, Found{ImpactOn: true, ImpactCriterion: "d"})
+		changed, err = l.criterionChanged(tx, Found{ImpactOn: true, ImpactCriterion: "d"}.unnamed())
 		return err
 	}); err != nil || changed {
 		t.Errorf("d read after its read again is taken for a change (%v)", err)
@@ -627,7 +627,7 @@ func TestImpactKeyHalfOfBoth(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := l.write(ctx, func(tx *txn) error {
-		_, err := l.impact(tx, Found{From: t0, ImpactSince: t0, Impact: []incident.Incident{impactWindow("short", at, 30*time.Minute)}}, true)
+		_, err := impactFound(l, tx, Found{From: t0, ImpactSince: t0, Impact: []incident.Incident{impactWindow("short", at, 30*time.Minute)}}, true)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -788,4 +788,10 @@ func TestImpactDataPending(t *testing.T) {
 	if k, err = l.ImpactKept(ctx); err != nil || k.Data.Pending() || !k.Since.After(was.Since) {
 		t.Errorf("looked for past it: since %s, pending %v (%v)", k.Since, k.Data.Pending(), err)
 	}
+}
+
+// impactFound puts the unnamed signal's windows f found in place, as a run
+// does (Record).
+func impactFound(l *Ledger, tx *txn, f Found, fresh bool) (int64, error) {
+	return l.impact(tx, f.unnamed(), f.Impact, fresh)
 }

@@ -2066,5 +2066,18 @@
  "marked": "イベント期間",
  "the marked windows made in the UI would have %d occurrences in the week of %s; they have %d a week at most, the rest kept for the marked file, --config and the expressions": "UI で作ったイベント期間が %[2]s の週に %[1]d 件になります。UI の分は 1 週間に最大 %[3]d 件で、残りはイベント期間ファイル・--config・式の分です",
  "a team's marked windows would have %d occurrences in the week of %s; a team's have %d a week at most": "チームのイベント期間が %[2]s の週に %[1]d 件になります。1 チームの期間は 1 週間に最大 %[3]d 件です",
- "a team's editors use the kinds of marked window there are; an editor or an admin can make %s": "チームの編集者は既存のイベント期間の種類だけを使えます。%s は編集者か管理者が作れます"
+ "a team's editors use the kinds of marked window there are; an editor or an admin can make %s": "チームの編集者は既存のイベント期間の種類だけを使えます。%s は編集者か管理者が作れます",
+ "keeping the impact signals": "影響指標の保存",
+ "reading the impact signal %s again over the last four weeks": "直近 4 週間の影響指標 %s を読み直し中",
+ "reading what the impact signals read": "影響指標が読むものを読む",
+ "serve reads named impact signals, set where it starts (--impact NAME=PROMQL, --impact-file): one with no name doesn't go beside them, and changing them here comes in a later release": "serve は起動時に指定した名前付きの影響指標 (--impact NAME=PROMQL, --impact-file) を読みます。名前のない指標は一緒に使えず、ここでの変更は今後のリリースで対応します",
+ "Named impact signals, set where serve starts (--impact NAME=PROMQL, --impact-file): each read, started and judged on its own. Changing them here comes in a later release.": "名前付きの影響指標は serve の起動時に指定します (--impact NAME=PROMQL, --impact-file)。それぞれ別に読み、開始し、判定します。ここでの変更は今後のリリースで対応します。",
+ "Impact signals": "影響指標",
+ "Signal": "指標",
+ "Matched on": "照合するラベル",
+ "Keeps the record": "記録を残すか",
+ "the match in effect": "有効な照合ラベル",
+ "no label": "ラベルなし",
+ "no": "いいえ",
+ "yes, since %s": "はい、%s から"
 }

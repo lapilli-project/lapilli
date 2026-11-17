@@ -96,7 +96,7 @@ func (l *Ledger) firingIn(t *txn, id int64) (Firing, error) {
 // writtenFrom reports whether an incident written here is in as a firing
 // writes it down: its title, times and labels.
 func (l *Ledger) writtenFrom(t *txn, in incident.Incident) (bool, error) {
-	rows, err := t.QueryContext(t.ctx, "SELECT id, key, origin, title, start_at, end_at, labels FROM incidents WHERE start_at = ? AND origin = 'ui'", in.Start.Unix())
+	rows, err := t.QueryContext(t.ctx, "SELECT id, key, origin, title, start_at, end_at, labels, signal, match_labels FROM incidents WHERE start_at = ? AND origin = 'ui'", in.Start.Unix())
 	if err != nil {
 		return false, err
 	}

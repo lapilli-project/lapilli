@@ -14,8 +14,8 @@ import (
 // days from first to last came during a deploy of what they are about, as
 // each was judged (Deploy.During); the days with none are left out.
 func (l *Ledger) RuleDeploys(ctx context.Context, rule string, first, last int64) (map[int64]int, error) {
-	rows, err := l.r.QueryContext(ctx, `SELECT d.day, d.deploy FROM days d JOIN rules r ON r.id = d.rule_id
-		WHERE r.name = ? AND d.day >= ? AND d.day <= ? AND d.deploy > 0`, rule, first, last)
+	rows, err := l.r.QueryContext(ctx, `SELECT d.day, sum(d.deploy) FROM days d JOIN rules r ON r.id = d.rule_id
+		WHERE r.name = ? AND d.day >= ? AND d.day <= ? AND d.deploy > 0 GROUP BY d.day`, rule, first, last)
 	if err != nil {
 		return nil, err
 	}

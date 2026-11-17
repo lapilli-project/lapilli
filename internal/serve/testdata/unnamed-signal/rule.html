@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Errors · Lapilli</title>
+<link rel="icon" href="/static/icon.svg?v=4d8cd2be2c2b" type="image/svg+xml">
+<link rel="stylesheet" href="/static/lapilli.css?v=4d8cd2be2c2b">
+</head>
+<body>
+<a class="skip" href="#main">Skip to the page</a>
+<header class="side">
+  <a class="brand" href="/"><img src="/static/icon.svg?v=4d8cd2be2c2b" alt="" width="24" height="24">Lapilli</a>
+  <details class="menu"><summary>Menu<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>Rules</span></summary>
+  <nav class="nav-menu" aria-label="Menu">
+  <p class="nav-group" id="menu-see">Monitoring</p>
+  <ul aria-labelledby="menu-see"><li><a href="/">Overview</a></li><li><a href="/rules" aria-current="true">Rules</a></li><li><a href="/incidents">Incidents</a></li><li><a href="/marked">Marked windows</a></li><li><a href="/firings">Alert history</a></li></ul>
+  <p class="nav-group" id="menu-fix">Improve</p>
+  <ul aria-labelledby="menu-fix"><li><a href="/tasks">Tasks <span class="count" aria-hidden="true">1</span><span class="vh">, 1 open</span></a></li><li><a href="/proposals">Proposals</a></li><li><a href="/windows">Quiet windows</a></li></ul>
+  <p class="nav-group" id="menu-report">Reporting</p>
+  <ul aria-labelledby="menu-report"><li><a href="/reports">Reports</a></li><li><a href="/outcomes">Outcomes</a></li><li><a href="/goals">Goals</a></li></ul>
+  <p class="nav-group" id="menu-manage"><a href="/manage">Administration</a></p>
+  <ul aria-labelledby="menu-manage"><li><a href="/teams">Teams</a></li><li><a href="/settings">Settings</a></li><li><a href="/runs">Run history</a></li><li><a href="/orphans">Cleanup</a></li></ul>
+</nav>
+  </details>
+  <nav class="nav-side" aria-label="Pages">
+  <p class="nav-group" id="side-see">Monitoring</p>
+  <ul aria-labelledby="side-see"><li><a href="/">Overview</a></li><li><a href="/rules" aria-current="true">Rules</a></li><li><a href="/incidents">Incidents</a></li><li><a href="/marked">Marked windows</a></li><li><a href="/firings">Alert history</a></li></ul>
+  <p class="nav-group" id="side-fix">Improve</p>
+  <ul aria-labelledby="side-fix"><li><a href="/tasks">Tasks <span class="count" aria-hidden="true">1</span><span class="vh">, 1 open</span></a></li><li><a href="/proposals">Proposals</a></li><li><a href="/windows">Quiet windows</a></li></ul>
+  <p class="nav-group" id="side-report">Reporting</p>
+  <ul aria-labelledby="side-report"><li><a href="/reports">Reports</a></li><li><a href="/outcomes">Outcomes</a></li><li><a href="/goals">Goals</a></li></ul>
+  <p class="nav-group" id="side-manage"><a href="/manage">Administration</a></p>
+  <ul aria-labelledby="side-manage"><li><a href="/teams">Teams</a></li><li><a href="/settings">Settings</a></li><li><a href="/runs">Run history</a></li><li><a href="/orphans">Cleanup</a></li></ul>
+</nav>
+  <nav class="langs" aria-label="Language"><strong lang="en" aria-current="true">English</strong><span aria-hidden="true"> · </span><a href="/lang?to=es&amp;back=%2Frules%2FErrors" lang="es" hreflang="es">Español</a><span aria-hidden="true"> · </span><a href="/lang?to=ja&amp;back=%2Frules%2FErrors" lang="ja" hreflang="ja">日本語</a><span aria-hidden="true"> · </span><a href="/lang?to=ko&amp;back=%2Frules%2FErrors" lang="ko" hreflang="ko">한국어</a></nav>
+</header>
+<div class="page">
+<section class="statuses" aria-label="Status">
+
+<p class="status notice status-info"><span class="sign" aria-hidden="true">↻</span> near misses of incidents written down since</p>
+</section>
+<main id="main">
+<nav class="crumbs" aria-label="Breadcrumb"><ol><li>Monitoring</li><li><a href="/rules">Rules</a></li><li><span aria-current="page"><bdi>Errors</bdi></span></li></ol></nav>
+<div class="bar">
+<form method="get" action="/rules/Errors" class="ctx" aria-label="Period">
+  
+  <label>Period <select name="weeks"><option value="1">1 week</option><option value="4">4 weeks</option><option value="12" selected>12 weeks</option></select></label>
+  <button class="quiet-button">Show</button>
+</form>
+<form method="get" action="/search" role="search" class="find" aria-label="Search">
+  <label>Search <input type="search" name="q" value="" maxlength="500" placeholder="Rules, incidents, teams"></label>
+  <button class="quiet-button">Search</button>
+</form>
+</div>
+
+<div class="rule-head">
+<div class="rule-name"><h1><bdi>Errors</bdi></h1> <span class="badges"><span class="badge perf-unrecorded status-unknown"><span aria-hidden="true">?</span> No record</span></span></div>
+<p class="rule-actions"><span class="action-off"><button type="button" disabled aria-describedby="rule-why-1">Propose a change</button></span> <span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="rule-why-1">Add a task</button></span> <span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="rule-why-1">Edit the note</button> <span id="rule-why-1" class="why">Editors only</span></span> </p>
+</div>
+<ul class="rule-facts"><li><span class="k">Severity</span> <bdi>page</bdi></li><li><span class="k">For</span> <bdi>2m</bdi></li><li><span class="k">Group</span> <bdi>shop</bdi></li></ul>
+
+
+<p class="period">The last 12 weeks, from 2026-08-17.</p>
+<dl class="panel">
+<div><dt><details class="def"><summary>Precision <span class="q" aria-hidden="true">?</span></summary><p>Firings that caught an incident, of all its firings.</p></details></dt>
+<dd class="big">14%</dd>
+<dd>1 of 21 caught something</dd></div>
+<div><dt><details class="def"><summary>Firings <span class="q" aria-hidden="true">?</span></summary><p>The times it fired and was judged; those a quiet window excused are counted apart.</p></details></dt>
+<dd class="big">21</dd>
+<dd>20 caught nothing, 0 excused</dd></div>
+<div><dt><details class="def"><summary>Incidents caught <span class="q" aria-hidden="true">?</span></summary><p>Incidents it fired for, as they began; nearly caught, those it would have caught with a for or a threshold a little different.</p></details></dt>
+<dd class="big">1</dd>
+<dd>0 nearly caught</dd></div>
+<div><dt><details class="def"><summary>Human cost <span class="q" aria-hidden="true">?</span></summary><p>Notifications sent for it, as the alert manager sent them, and of them those that came while people slept and off hours.</p></details></dt>
+<dd class="big">–</dd>
+<dd>no notification kept</dd></div>
+<div><dt><details class="def"><summary>Backtest <span class="q" aria-hidden="true">?</span></summary><p>Of its firings, the share alike in its replay and in what really fired: how far its stones can be taken as they are.</p></details></dt>
+<dd class="big">–</dd>
+<dd>not set beside what really fired</dd></div>
+</dl>
+
+<figure class="strip">
+<figcaption>The last 84 days</figcaption>
+<svg class="strip" viewBox="0 0 840 40" role="img" aria-label="Its last 84 days, a cell a day; the same numbers are in the table below">
+<g><title>2026-08-12: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="1" y="36" width="8" height="4"/></g>
+<g><title>2026-08-13: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="11" y="36" width="8" height="4"/></g>
+<g><title>2026-08-14: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="21" y="36" width="8" height="4"/></g>
+<g><title>2026-08-15: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="31" y="36" width="8" height="4"/></g>
+<g><title>2026-08-16: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="41" y="36" width="8" height="4"/></g>
+<g><title>2026-08-17: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="51" y="36" width="8" height="4"/></g>
+<g><title>2026-08-18: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="61" y="36" width="8" height="4"/></g>
+<g><title>2026-08-19: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="71" y="36" width="8" height="4"/></g>
+<g><title>2026-08-20: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="81" y="36" width="8" height="4"/></g>
+<g><title>2026-08-21: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="91" y="36" width="8" height="4"/></g>
+<g><title>2026-08-22: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="101" y="36" width="8" height="4"/></g>
+<g><title>2026-08-23: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="111" y="36" width="8" height="4"/></g>
+<g><title>2026-08-24: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="121" y="36" width="8" height="4"/></g>
+<g><title>2026-08-25: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="131" y="36" width="8" height="4"/></g>
+<g><title>2026-08-26: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="141" y="36" width="8" height="4"/></g>
+<g><title>2026-08-27: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="151" y="36" width="8" height="4"/></g>
+<g><title>2026-08-28: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="161" y="36" width="8" height="4"/></g>
+<g><title>2026-08-29: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="171" y="36" width="8" height="4"/></g>
+<g><title>2026-08-30: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="181" y="36" width="8" height="4"/></g>
+<g><title>2026-08-31: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="191" y="36" width="8" height="4"/></g>
+<g><title>2026-09-01: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="201" y="36" width="8" height="4"/></g>
+<g><title>2026-09-02: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="211" y="36" width="8" height="4"/></g>
+<g><title>2026-09-03: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="221" y="36" width="8" height="4"/></g>
+<g><title>2026-09-04: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="231" y="36" width="8" height="4"/></g>
+<g><title>2026-09-05: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="241" y="36" width="8" height="4"/></g>
+<g><title>2026-09-06: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="251" y="36" width="8" height="4"/></g>
+<g><title>2026-09-07: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="261" y="36" width="8" height="4"/></g>
+<g><title>2026-09-08: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="271" y="36" width="8" height="4"/></g>
+<g><title>2026-09-09: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="281" y="36" width="8" height="4"/></g>
+<g><title>2026-09-10: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="291" y="36" width="8" height="4"/></g>
+<g><title>2026-09-11: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="301" y="36" width="8" height="4"/></g>
+<g><title>2026-09-12: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="311" y="36" width="8" height="4"/></g>
+<g><title>2026-09-13: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="321" y="36" width="8" height="4"/></g>
+<g><title>2026-09-14: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="331" y="36" width="8" height="4"/></g>
+<g><title>2026-09-15: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="341" y="36" width="8" height="4"/></g>
+<g><title>2026-09-16: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="351" y="36" width="8" height="4"/></g>
+<g><title>2026-09-17: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="361" y="36" width="8" height="4"/></g>
+<g><title>2026-09-18: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="371" y="36" width="8" height="4"/></g>
+<g><title>2026-09-19: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="381" y="36" width="8" height="4"/></g>
+<g><title>2026-09-20: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="391" y="36" width="8" height="4"/></g>
+<g><title>2026-09-21: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="401" y="36" width="8" height="4"/></g>
+<g><title>2026-09-22: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="411" y="36" width="8" height="4"/></g>
+<g><title>2026-09-23: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="421" y="36" width="8" height="4"/></g>
+<g><title>2026-09-24: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="431" y="36" width="8" height="4"/></g>
+<g><title>2026-09-25: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="441" y="36" width="8" height="4"/></g>
+<g><title>2026-09-26: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="451" y="36" width="8" height="4"/></g>
+<g><title>2026-09-27: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="461" y="36" width="8" height="4"/></g>
+<g><title>2026-09-28: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="471" y="36" width="8" height="4"/></g>
+<g><title>2026-09-29: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="481" y="36" width="8" height="4"/></g>
+<g><title>2026-09-30: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="491" y="36" width="8" height="4"/></g>
+<g><title>2026-10-01: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="501" y="36" width="8" height="4"/></g>
+<g><title>2026-10-02: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="511" y="36" width="8" height="4"/></g>
+<g><title>2026-10-03: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="521" y="36" width="8" height="4"/></g>
+<g><title>2026-10-04: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="531" y="36" width="8" height="4"/></g>
+<g><title>2026-10-05: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="541" y="36" width="8" height="4"/></g>
+<g><title>2026-10-06: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="551" y="36" width="8" height="4"/></g>
+<g><title>2026-10-07: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="561" y="36" width="8" height="4"/></g>
+<g><title>2026-10-08: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="571" y="36" width="8" height="4"/></g>
+<g><title>2026-10-09: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="581" y="36" width="8" height="4"/></g>
+<g><title>2026-10-10: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="591" y="36" width="8" height="4"/></g>
+<g><title>2026-10-11: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="601" y="36" width="8" height="4"/></g>
+<g><title>2026-10-12: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="611" y="36" width="8" height="4"/></g>
+<g><title>2026-10-13: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="621" y="36" width="8" height="4"/></g>
+<g><title>2026-10-14: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="631" y="36" width="8" height="4"/></g>
+<g><title>2026-10-15: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="641" y="36" width="8" height="4"/></g>
+<g><title>2026-10-16: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="651" y="36" width="8" height="4"/></g>
+<g><title>2026-10-17: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="661" y="36" width="8" height="4"/></g>
+<g><title>2026-10-18: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="671" y="36" width="8" height="4"/></g>
+<g><title>2026-10-19: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="681" y="36" width="8" height="4"/></g>
+<g><title>2026-10-20: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="691" y="36" width="8" height="4"/></g>
+<g><title>2026-10-21: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="701" y="36" width="8" height="4"/></g>
+<g><title>2026-10-22: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="711" y="36" width="8" height="4"/></g>
+<g><title>2026-10-23: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="721" y="36" width="8" height="4"/></g>
+<g><title>2026-10-24: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="731" y="36" width="8" height="4"/></g>
+<g><title>2026-10-25: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="741" y="36" width="8" height="4"/></g>
+<g><title>2026-10-26: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="751" y="36" width="8" height="4"/></g>
+<g><title>2026-10-27: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="761" y="36" width="8" height="4"/></g>
+<g><title>2026-10-28: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="771" y="36" width="8" height="4"/></g>
+<g><title>2026-10-29: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="781" y="36" width="8" height="4"/></g>
+<g><title>2026-10-30: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="791" y="36" width="8" height="4"/></g>
+<g><title>2026-10-31: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="801" y="36" width="8" height="4"/></g>
+<g><title>2026-11-01: 14 fired, 0 caught something, 14 caught nothing, 0 excused</title><rect class="nothing" x="811" y="21" width="8" height="19"/></g>
+<g><title>2026-11-02: 7 fired, 1 caught something, 6 caught nothing, 0 excused</title><rect class="caught" x="821" y="21" width="8" height="19"/><circle class="hole" cx="825" cy="30.5" r="2.2"/></g>
+<g><title>2026-11-03: 0 fired, 0 caught something, 0 caught nothing, 0 excused</title><rect class="none" x="831" y="36" width="8" height="4"/></g>
+</svg>
+<p class="strip-ends"><span>2026-08-12</span> <span>today</span></p>
+<ul class="legend">
+<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 12" width="10" height="12"><rect class="caught" x="1" y="0" width="8" height="12"/><circle class="hole" cx="5" cy="6" r="2.2"/></svg>caught something</li>
+<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 12" width="10" height="12"><rect class="nothing" x="1" y="0" width="8" height="12"/></svg>caught nothing only</li>
+<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 12" width="10" height="12"><rect class="excused" x="1.5" y="0.5" width="7" height="11"/></svg>excused only</li>
+<li><svg class="sym" aria-hidden="true" viewBox="0 0 10 12" width="10" height="12"><rect class="none" x="1" y="8" width="8" height="4"/></svg>no firing</li>
+
+
+
+</ul>
+<details class="days"><summary>The 84 days, as a table</summary>
+<div class="scroll" tabindex="0" role="region" aria-label="The 84 days, as a table"><table>
+<thead><tr><th scope="col">Day</th><th scope="col" class="n">Fired</th><th scope="col" class="n">○ Caught</th><th scope="col" class="n">● Nothing</th><th scope="col" class="n">Excused</th><th scope="col" class="n">Incidents</th><th scope="col">Marks</th></tr></thead>
+<tbody><tr><th scope="row">2026-11-03</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-11-02</th><td class="n">7</td><td class="n">1</td><td class="n">6</td><td class="n">0</td><td class="n">1</td><td>–</td></tr><tr><th scope="row">2026-11-01</th><td class="n">14</td><td class="n">0</td><td class="n">14</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-31</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-30</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-29</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-28</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-27</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-26</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-25</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-24</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-23</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-22</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-21</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-20</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-19</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-18</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-17</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-16</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-15</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-14</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-13</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-12</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-11</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-10</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-09</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-08</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-07</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-06</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-05</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-04</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-03</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-02</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-10-01</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-30</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-29</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-28</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-27</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-26</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-25</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-24</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-23</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-22</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-21</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-20</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-19</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-18</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-17</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-16</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-15</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-14</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-13</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-12</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-11</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-10</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-09</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-08</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-07</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-06</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-05</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-04</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-03</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-02</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-09-01</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-31</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-30</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-29</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-28</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-27</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-26</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-25</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-24</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-23</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-22</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-21</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-20</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-19</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-18</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-17</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-16</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-15</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-14</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-13</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr><tr><th scope="row">2026-08-12</th><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>–</td></tr></tbody>
+</table></div></details>
+</figure>
+
+<nav class="ruletabs" aria-label="This rule"><ul><li><a href="/rules/Errors" aria-current="page">Summary</a></li><li><a href="/rules/Errors?tab=firings">Firings <span class="count">21</span></a></li><li><a href="/rules/Errors?tab=versions">Versions <span class="count">1</span></a></li><li><a href="/rules/Errors?tab=proposals">Proposals <span class="count">0</span></a></li><li><a href="/rules/Errors?tab=activity">Activity <span class="count">0</span></a></li></ul></nav>
+
+
+
+<p id="proposals" class="moved"><a href="/rules/Errors?tab=proposals#proposals">Its proposals are on the Proposals tab.</a></p>
+<p id="refired" class="moved"><a href="/rules/Errors?tab=firings#refired">Its re-fires are on the Firings tab.</a></p>
+
+
+
+<section class="card about" id="note">
+<h2>About this rule</h2>
+<p>No team owns it. No team&#39;s name pattern or labels match it. <a href="/teams#add">Add a team</a>
+
+</p>
+
+
+<p><span class="action-off"><button type="button" disabled aria-describedby="note-why">Change it</button> <span id="note-why" class="why">Editors only</span></span></p>
+</section>
+
+<section class="card" id="caught">
+<h2>Incidents it caught</h2>
+<p>It caught 1 incidents: 1 before any other rule, 1 that no other rule caught (a noisy rule&#39;s catch doesn&#39;t count beside another&#39;s).</p>
+
+<div class="scroll"><table>
+<thead><tr><th scope="col">Incident</th><th scope="col">Start</th><th scope="col">First caught by</th></tr></thead>
+<tbody><tr><td><a href="/incidents/INC-1">INC-1</a> Checkout down</td><td class="t">2026-11-02 06:01</td><td>Errors &#43;1m</td></tr></tbody>
+</table></div>
+</section>
+
+
+
+
+</main>
+<footer>lapilli test · times in UTC · you are viewer@example.com, viewer</footer>
+</div>
+</body>
+</html>

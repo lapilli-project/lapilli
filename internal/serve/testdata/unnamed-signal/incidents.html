@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Incidents · Lapilli</title>
+<link rel="icon" href="/static/icon.svg?v=4d8cd2be2c2b" type="image/svg+xml">
+<link rel="stylesheet" href="/static/lapilli.css?v=4d8cd2be2c2b">
+</head>
+<body>
+<a class="skip" href="#main">Skip to the page</a>
+<header class="side">
+  <a class="brand" href="/"><img src="/static/icon.svg?v=4d8cd2be2c2b" alt="" width="24" height="24">Lapilli</a>
+  <details class="menu"><summary>Menu<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>Incidents</span></summary>
+  <nav class="nav-menu" aria-label="Menu">
+  <p class="nav-group" id="menu-see">Monitoring</p>
+  <ul aria-labelledby="menu-see"><li><a href="/">Overview</a></li><li><a href="/rules">Rules</a></li><li><a href="/incidents" aria-current="page">Incidents</a></li><li><a href="/marked">Marked windows</a></li><li><a href="/firings">Alert history</a></li></ul>
+  <p class="nav-group" id="menu-fix">Improve</p>
+  <ul aria-labelledby="menu-fix"><li><a href="/tasks">Tasks <span class="count" aria-hidden="true">1</span><span class="vh">, 1 open</span></a></li><li><a href="/proposals">Proposals</a></li><li><a href="/windows">Quiet windows</a></li></ul>
+  <p class="nav-group" id="menu-report">Reporting</p>
+  <ul aria-labelledby="menu-report"><li><a href="/reports">Reports</a></li><li><a href="/outcomes">Outcomes</a></li><li><a href="/goals">Goals</a></li></ul>
+  <p class="nav-group" id="menu-manage"><a href="/manage">Administration</a></p>
+  <ul aria-labelledby="menu-manage"><li><a href="/teams">Teams</a></li><li><a href="/settings">Settings</a></li><li><a href="/runs">Run history</a></li><li><a href="/orphans">Cleanup</a></li></ul>
+</nav>
+  </details>
+  <nav class="nav-side" aria-label="Pages">
+  <p class="nav-group" id="side-see">Monitoring</p>
+  <ul aria-labelledby="side-see"><li><a href="/">Overview</a></li><li><a href="/rules">Rules</a></li><li><a href="/incidents" aria-current="page">Incidents</a></li><li><a href="/marked">Marked windows</a></li><li><a href="/firings">Alert history</a></li></ul>
+  <p class="nav-group" id="side-fix">Improve</p>
+  <ul aria-labelledby="side-fix"><li><a href="/tasks">Tasks <span class="count" aria-hidden="true">1</span><span class="vh">, 1 open</span></a></li><li><a href="/proposals">Proposals</a></li><li><a href="/windows">Quiet windows</a></li></ul>
+  <p class="nav-group" id="side-report">Reporting</p>
+  <ul aria-labelledby="side-report"><li><a href="/reports">Reports</a></li><li><a href="/outcomes">Outcomes</a></li><li><a href="/goals">Goals</a></li></ul>
+  <p class="nav-group" id="side-manage"><a href="/manage">Administration</a></p>
+  <ul aria-labelledby="side-manage"><li><a href="/teams">Teams</a></li><li><a href="/settings">Settings</a></li><li><a href="/runs">Run history</a></li><li><a href="/orphans">Cleanup</a></li></ul>
+</nav>
+  <nav class="langs" aria-label="Language"><strong lang="en" aria-current="true">English</strong><span aria-hidden="true"> · </span><a href="/lang?to=es&amp;back=%2Fincidents" lang="es" hreflang="es">Español</a><span aria-hidden="true"> · </span><a href="/lang?to=ja&amp;back=%2Fincidents" lang="ja" hreflang="ja">日本語</a><span aria-hidden="true"> · </span><a href="/lang?to=ko&amp;back=%2Fincidents" lang="ko" hreflang="ko">한국어</a></nav>
+</header>
+<div class="page">
+<section class="statuses" aria-label="Status">
+
+<p class="status notice status-info"><span class="sign" aria-hidden="true">↻</span> near misses of incidents written down since</p>
+</section>
+<main id="main">
+<nav class="crumbs" aria-label="Breadcrumb"><ol><li>Monitoring</li><li><span aria-current="page">Incidents</span></li></ol></nav>
+<div class="bar">
+<form method="get" action="/incidents" class="ctx" aria-label="Period">
+  
+  <label>Period <select name="weeks"><option value="1">1 week</option><option value="4" selected>4 weeks</option><option value="12">12 weeks</option></select></label>
+  <button class="quiet-button">Show</button>
+</form>
+<form method="get" action="/search" role="search" class="find" aria-label="Search"><input type="hidden" name="weeks" value="4">
+  <label>Search <input type="search" name="q" value="" maxlength="500" placeholder="Rules, incidents, teams"></label>
+  <button class="quiet-button">Search</button>
+</form>
+</div>
+
+<div class="head"><h1>Incidents</h1><span class="action-off"><button type="button" disabled aria-describedby="action-why">Write one down</button> <span id="action-why" class="why">Editors only</span></span></div>
+<p class="lede">What went wrong in the last 4 weeks, and what caught it. <span class="tabs"><a href="/incidents?weeks=1">1 week</a> <a href="/incidents?weeks=4" aria-current="page">4 weeks</a> <a href="/incidents?weeks=12">12 weeks</a></span></p>
+
+<p class="tabs">Of: <a href="/incidents?weeks=4" aria-current="page">all</a> <a href="/incidents?source=written&amp;weeks=4">written down</a> <a href="/incidents?source=impact&amp;weeks=4">user impact (--impact)</a></p>
+<p class="quiet"><a href="/settings#incident-sources">Where incidents come from, and whether each is alive</a></p>
+<p class="tabs">How they were caught: <a href="/incidents?weeks=4" aria-current="page">all <span class="quiet">(2)</span></a> <a href="/incidents?state=caught&amp;weeks=4">✓ caught <span class="quiet">(1)</span></a> <a href="/incidents?state=noisy&amp;weeks=4">◐ only noisy rules caught it <span class="quiet">(0)</span></a> <a href="/incidents?state=missed&amp;weeks=4">✗ missed <span class="quiet">(1)</span></a></p>
+<p>Of the 2 judged against: 1 caught, 0 caught only by noisy rules, 1 missed. The first alert of a rule that isn&#39;t noisy came, at the median, 1m after.</p>
+<div class="scroll"><table>
+<thead><tr><th scope="col">Incident</th><th scope="col">Start</th><th scope="col">End</th><th scope="col">From</th><th scope="col">Caught</th><th scope="col">Lead</th></tr></thead>
+<tbody>
+<tr class="missed">
+  <td><a href="/incidents/impact-20261103T0600Z">impact-20261103T0600Z</a> user impact (--impact)</td>
+  <td class="t">2026-11-03 06:00</td><td class="t">2026-11-03 06:11</td>
+  <td>found by --impact</td>
+  <td><span class="status-bad">✗ nothing fired</span></td>
+  <td>–</td>
+</tr>
+<tr class="caught">
+  <td><a href="/incidents/INC-1">INC-1</a> Checkout down</td>
+  <td class="t">2026-11-02 06:01</td><td class="t">2026-11-02 06:40</td>
+  <td>incidents file</td>
+  <td><span class="status-ok">○ Errors &#43;1m</span></td>
+  <td>1m after</td>
+</tr>
+<tr class="covered">
+  <td><a href="/incidents/impact-20261102T0600Z">impact-20261102T0600Z</a> user impact (--impact)</td>
+  <td class="t">2026-11-02 06:00</td><td class="t">2026-11-02 06:21</td>
+  <td>found by --impact</td>
+  <td>covered by one written down</td>
+  <td>–</td>
+</tr>
+<tr class="dismissed">
+  <td><a href="/incidents/impact-20261101T2000Z">impact-20261101T2000Z</a> user impact (--impact)</td>
+  <td class="t">2026-11-01 20:00</td><td class="t">2026-11-01 21:01</td>
+  <td>found by --impact</td>
+  <td>dismissed</td>
+  <td>–</td>
+</tr></tbody>
+</table></div>
+
+
+
+</main>
+<footer>lapilli test · times in UTC · you are viewer@example.com, viewer</footer>
+</div>
+</body>
+</html>

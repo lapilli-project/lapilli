@@ -1,0 +1,324 @@
+{
+  "from": "2026-10-27T00:00:00Z",
+  "to": "2026-11-03T12:00:00Z",
+  "noisy_at": {
+    "firings": 10,
+    "precision": 0.2
+  },
+  "unjudged": 14,
+  "rules": [
+    {
+      "rule": "Errors",
+      "group": "shop",
+      "severity": "page",
+      "firings": 21,
+      "white": 1,
+      "black": 20,
+      "refired": 19,
+      "replayed": true,
+      "noisy": false,
+      "unjudged": 14,
+      "incidents": 1,
+      "first": 1,
+      "alone": 1,
+      "spare": false,
+      "off_hours": 0,
+      "off_hours_black": 0,
+      "asleep": 0,
+      "asleep_black": 0
+    }
+  ],
+  "incidents": [
+    {
+      "id": "INC-1",
+      "title": "Checkout down",
+      "start": "2026-11-02T06:01:00Z",
+      "end": "2026-11-02T06:40:00Z",
+      "labels": {
+        "service": [
+          "checkout"
+        ]
+      },
+      "candidate": false,
+      "caught_by": [
+        {
+          "rule": "Errors",
+          "delay_ns": 60000000000,
+          "noisy": false
+        }
+      ]
+    },
+    {
+      "id": "impact-20261103T0600Z",
+      "title": "user impact (--impact)",
+      "start": "2026-11-03T06:00:00Z",
+      "end": "2026-11-03T06:11:00Z",
+      "labels": {
+        "service": [
+          "search"
+        ]
+      },
+      "candidate": true,
+      "caught_by": []
+    }
+  ],
+  "firings": [
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-01T10:02:00Z",
+      "end": "2026-11-01T10:11:00Z",
+      "white": false,
+      "no_record": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-01T11:02:00Z",
+      "end": "2026-11-01T11:11:00Z",
+      "white": false,
+      "no_record": true,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-01T12:02:00Z",
+      "end": "2026-11-01T12:11:00Z",
+      "white": false,
+      "no_record": true,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-01T13:02:00Z",
+      "end": "2026-11-01T13:11:00Z",
+      "white": false,
+      "no_record": true,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-01T14:02:00Z",
+      "end": "2026-11-01T14:11:00Z",
+      "white": false,
+      "no_record": true,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-01T15:02:00Z",
+      "end": "2026-11-01T15:11:00Z",
+      "white": false,
+      "no_record": true,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-01T16:02:00Z",
+      "end": "2026-11-01T16:11:00Z",
+      "white": false,
+      "no_record": true,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-01T17:02:00Z",
+      "end": "2026-11-01T17:11:00Z",
+      "white": false,
+      "no_record": true,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-01T18:02:00Z",
+      "end": "2026-11-01T18:11:00Z",
+      "white": false,
+      "no_record": true,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-01T19:02:00Z",
+      "end": "2026-11-01T19:11:00Z",
+      "white": false,
+      "no_record": true,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-01T20:02:00Z",
+      "end": "2026-11-01T20:11:00Z",
+      "white": false,
+      "no_record": true,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-01T21:02:00Z",
+      "end": "2026-11-01T21:11:00Z",
+      "white": false,
+      "no_record": true,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-01T22:02:00Z",
+      "end": "2026-11-01T22:11:00Z",
+      "white": false,
+      "no_record": true,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-01T23:02:00Z",
+      "end": "2026-11-01T23:11:00Z",
+      "white": false,
+      "no_record": true,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-02T00:02:00Z",
+      "end": "2026-11-02T00:11:00Z",
+      "white": false,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-02T01:02:00Z",
+      "end": "2026-11-02T01:11:00Z",
+      "white": false,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-02T02:02:00Z",
+      "end": "2026-11-02T02:11:00Z",
+      "white": false,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-02T03:02:00Z",
+      "end": "2026-11-02T03:11:00Z",
+      "white": false,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-02T04:02:00Z",
+      "end": "2026-11-02T04:11:00Z",
+      "white": false,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "search",
+        "severity": "page"
+      },
+      "start": "2026-11-02T05:02:00Z",
+      "end": "2026-11-02T05:11:00Z",
+      "white": false,
+      "refired": true
+    },
+    {
+      "rule": "Errors",
+      "labels": {
+        "service": "checkout",
+        "severity": "page"
+      },
+      "start": "2026-11-02T06:02:00Z",
+      "end": "2026-11-02T07:01:00Z",
+      "white": true,
+      "incidents": [
+        "INC-1"
+      ]
+    }
+  ],
+  "settings": {
+    "lead_ns": 900000000000,
+    "match": [
+      "service"
+    ],
+    "refire_ns": 3600000000000,
+    "unknown_length_ns": 3600000000000,
+    "record_lookback_ns": 1209600000000000,
+    "impact_from": "2026-10-31T11:00:00Z",
+    "record_by_week": true
+  }
+}

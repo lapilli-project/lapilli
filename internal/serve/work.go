@@ -56,11 +56,22 @@ func (s *Server) work(ctx context.Context) {
 	}
 }
 
+// judgeAll judges every firing again: a variable, so that a test can
+// count how often.
+var judgeAll = (*ledger.Ledger).JudgeAll
+
 // jobs does each job in turn, each only while this replica still leads
 // (still): one whose lease ended starts none of them.
 func (s *Server) jobs(ctx context.Context, run bool) {
 	if !s.still(ctx) {
 		return
+	}
+	// The named impact signals and the rule entries serve was started
+	// with, kept: a change to which there are, or what they match, pends
+	// every firing to be judged again, in the ledger (JudgePending, below).
+	pended, err := s.syncSignals(ctx)
+	if err != nil {
+		s.fail("keeping the impact signals", err)
 	}
 	// Taken before the settings are read, so a change saved in between is
 	// judged with: here, or, asked on another replica, in the ledger.
@@ -81,10 +92,21 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	}
 	if err := s.l.JudgePending(ctx, o); err != nil {
 		s.fail("judging again", err)
+		pended = false
 	}
-	if rejudge && s.still(ctx) {
+	switch {
+	case rejudge && pended && s.still(ctx):
+		// The signals' change pended every firing, judged just now with
+		// these settings: what was asked (a match changed, with named
+		// signals) is done, once.
+		if s.l.Shared() {
+			if err := s.l.SetMeta(ctx, "rejudged", fmt.Sprint(asked)); err != nil {
+				s.fail("judging again", err)
+			}
+		}
+	case rejudge && s.still(ctx):
 		s.status.set("judging every firing again with the new settings")
-		err := s.l.JudgeAll(ctx, o, func(done float64) {
+		err := judgeAll(s.l, ctx, o, func(done float64) {
 			s.status.Lock()
 			s.status.judged = done
 			s.status.Unlock()
@@ -101,7 +123,7 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 				s.fail("judging again", err)
 			}
 		}
-	} else if rejudge {
+	case rejudge:
 		s.rejudge.Store(true)
 	}
 	if !s.still(ctx) {
@@ -186,6 +208,17 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		// read it: the record never starts before it.
 		if err := s.impactData(ctx); err != nil {
 			s.fail("looking for where the impact signal's data begins", err)
+		}
+		// What each named signal reads, by its match labels: which
+		// alerts it could have seen.
+		if err := s.signalsSeen(ctx, o); err != nil {
+			s.fail("reading what the impact signals read", err)
+		}
+		// The firings of the alerts it ties otherwise counted again.
+		if s.namedSignals() {
+			if err := s.l.JudgePending(ctx, o); err != nil {
+				s.fail("judging again", err)
+			}
 		}
 		if err := s.keepBegan(ctx); err != nil {
 			s.fail("a run", err)
@@ -511,6 +544,11 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 	c, err := s.criterion(parent)
 	if err != nil {
 		return f, false, err
+	}
+	if s.namedSignals() {
+		if err := s.signalsRead(parent, from, to, &f); err != nil {
+			return f, false, err
+		}
 	}
 	if c.Expr != "" {
 		ctx, cancel := context.WithTimeout(parent, s.cfg.Timeout)

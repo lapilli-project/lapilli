@@ -176,9 +176,10 @@ each incident lasted, and, of those nothing caught that were found over
 several series, each series' own window (`spans` in `--json`): an incident
 that lasted ten minutes may be two services' windows of five and ten.
 
-A team rarely has one signal of user harm. `lapilli verdict` takes several,
-each named, with its own `for`, the labels its windows are matched on, and
-whether reading it keeps the record (docs/design/signals.md):
+A team rarely has one signal of user harm. `lapilli verdict` and `lapilli
+serve` take several, each named, with its own `for`, the labels its windows
+are matched on, and whether reading it keeps the record
+(docs/design/signals.md):
 
 ```sh
 lapilli verdict --rules alerts/ --prometheus http://prometheus:9090 --match service --match team \
@@ -190,16 +191,23 @@ lapilli verdict --rules alerts/ --prometheus http://prometheus:9090 --match serv
 A probe's window and a 5xx window at the same time are two incidents, each
 matched on its own labels, not one that keeps only the labels both have.
 Each signal keeps the record of the firings it could have seen, those of
-the values it returned over the read, from where the data it reads begins:
-a probe added last Thursday holds back the firings of the services the
-probe returned, and those no signal returned, which wait for the latest
-start of all. A signal that returns something only while users are hurt
-has returned only the services that were. `--impact-file` says the same in a
-file, and which rules are judged against which signals: the latency rules
-against a latency signal alone, a load balancer's "no backend" rule
-matched on `backend` alone (see `lapilli verdict -h`). Named and unnamed
-`--impact` don't go together; `lapilli serve` takes one unnamed signal for
-now.
+the values it has seen over the read, from where the data it reads begins:
+what its selectors' series have had (each counted by its match labels, one
+request a selector, a 5xx selector through the requests with any code),
+and what it returned. So a 5xx share that returns something only while
+users are hurt still sees every service it measured, and a probe added
+last Thursday holds back the firings of the services it probes alone; a
+firing no signal could have seen waits for the latest start of all.
+`--impact-file` says the same in a file, and which rules are judged
+against which signals: the latency rules against a latency signal alone,
+a load balancer's "no backend" rule matched on `backend` alone (see
+`lapilli verdict -h`). Named and unnamed `--impact` don't go together. In
+`lapilli serve`, the runs read each signal on its own, one that fails
+missed and read from there by a later run; each keeps its own start in
+the ledger, a firing is judged by the signals tied to its alert, and the
+summary, `/metrics` and MCP say each signal's windows apart. The chart's
+`impact` takes the file's `signals` and `rules` as a mapping. The Settings
+page lists them; changing them there comes in a later release.
 
 Impact as short as `--impact-for` can be shorter than a rule fires on: a
 rule with `for: 5m` evaluated every minute fires once its condition held for

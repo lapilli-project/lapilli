@@ -1,6 +1,8 @@
 package verdict
 
 import (
+	"encoding/json"
+	"maps"
 	"regexp"
 	"slices"
 	"sync/atomic"
@@ -56,6 +58,9 @@ type Signal struct {
 	Start time.Time `json:"start,omitzero"`
 	// Seen is what its series returned, for the labels it is matched on.
 	Seen *Seen `json:"-"`
+	// Bit is, in lapilli serve, its bit in the signals an alert is tied
+	// to, as the ledger keeps them (SignalBits): from 0 to 7.
+	Bit int `json:"-"`
 }
 
 // matchOr is the labels it is matched on: its own, or else those in effect.
@@ -92,22 +97,24 @@ func NewSeen(labels []string) *Seen {
 }
 
 // Add keeps what a series that returned something had, of the labels
-// named.
-func (s *Seen) Add(labels map[string]string) {
-	for l, vs := range s.values {
+// named; it reports whether s changed.
+func (s *Seen) Add(labels map[string]string) bool {
+	changed := false
+	for _, l := range slices.Sorted(maps.Keys(s.values)) {
 		if s.all[l] {
 			continue
 		}
 		v, ok := labels[l]
 		switch {
-		case vs[v]:
-		case !ok, len(vs) >= MaxSeenValues || s.bytes+len(l)+len(v) > MaxSeenBytes:
+		case s.values[l][v]:
+		case !ok:
 			s.every(l)
+			changed = true
 		default:
-			vs[v] = true
-			s.bytes += len(l) + len(v)
+			changed = s.add(l, v) || changed
 		}
 	}
+	return changed
 }
 
 // every takes the signal to have returned every value of a label, and lets
@@ -147,6 +154,144 @@ func (s *Seen) Ties(labels map[string]string, names []string) bool {
 
 // Bytes is how much of what it returned is kept, as MaxSeenBytes counts it.
 func (s *Seen) Bytes() int { return s.bytes }
+
+// seenJSON is a Seen as lapilli serve keeps it: each label's values, the
+// labels taken to have every value apart.
+type seenJSON struct {
+	Values map[string][]string `json:"values"`
+	All    []string            `json:"all,omitempty"`
+}
+
+// MarshalJSON keeps what a signal has returned, its values in order.
+func (s *Seen) MarshalJSON() ([]byte, error) {
+	out := seenJSON{Values: map[string][]string{}}
+	for l, vs := range s.values {
+		if s.all[l] {
+			out.All = append(out.All, l)
+			continue
+		}
+		out.Values[l] = append([]string{}, slices.Sorted(maps.Keys(vs))...)
+	}
+	slices.Sort(out.All)
+	return json.Marshal(out)
+}
+
+// UnmarshalJSON reads what MarshalJSON kept, held to the same bounds.
+func (s *Seen) UnmarshalJSON(b []byte) error {
+	var in seenJSON
+	if err := json.Unmarshal(b, &in); err != nil {
+		return err
+	}
+	labels := slices.Concat(slices.Collect(maps.Keys(in.Values)), in.All)
+	*s = *NewSeen(labels)
+	for _, l := range in.All {
+		s.every(l)
+	}
+	for l, vs := range in.Values {
+		for _, v := range vs {
+			s.add(l, v)
+		}
+	}
+	return nil
+}
+
+// Labels are the labels a Seen keeps values of, in order.
+func (s *Seen) Labels() []string { return slices.Sorted(maps.Keys(s.values)) }
+
+// For reports whether s is kept of the labels named, and of no others.
+func (s *Seen) For(labels []string) bool {
+	if s == nil || len(s.values) != len(labels) {
+		return false
+	}
+	for _, l := range labels {
+		if _, ok := s.values[l]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// AddValue keeps one value of a label s is kept of.
+func (s *Seen) AddValue(l, v string) bool { return s.add(l, v) }
+
+// Every takes s to have every value of a label it is kept of, as a label a
+// series came without, or one no selector it reads carries. It reports
+// whether that is new.
+func (s *Seen) Every(l string) bool {
+	if _, ok := s.values[l]; !ok || s.all[l] {
+		return false
+	}
+	s.every(l)
+	return true
+}
+
+// add keeps a value of l, or every value once past the bounds; it reports
+// whether s changed.
+func (s *Seen) add(l, v string) bool {
+	vs, ok := s.values[l]
+	switch {
+	case !ok || s.all[l] || vs[v]:
+		return false
+	case len(vs) >= MaxSeenValues || s.bytes+len(l)+len(v) > MaxSeenBytes:
+		s.every(l)
+	default:
+		vs[v] = true
+		s.bytes += len(l) + len(v)
+	}
+	return true
+}
+
+// Merge keeps what other has seen beside what s has, of the labels s is
+// kept of: it reports whether s changed.
+func (s *Seen) Merge(other *Seen) bool {
+	if other == nil {
+		return false
+	}
+	changed := false
+	for l := range s.values {
+		if other.all[l] {
+			changed = s.Every(l) || changed
+			continue
+		}
+		for _, v := range slices.Sorted(maps.Keys(other.values[l])) {
+			changed = s.add(l, v) || changed
+		}
+	}
+	return changed
+}
+
+// Gained is what s has seen that was hasn't: by label, the values added,
+// and the labels it now takes to have every value. A label s isn't kept
+// of gains nothing.
+func (s *Seen) Gained(was *Seen) (values map[string][]string, every []string) {
+	values = map[string][]string{}
+	for _, l := range slices.Sorted(maps.Keys(s.values)) {
+		if s.all[l] {
+			if was == nil || !was.all[l] {
+				every = append(every, l)
+			}
+			continue
+		}
+		for _, v := range slices.Sorted(maps.Keys(s.values[l])) {
+			if was == nil || !was.values[l][v] {
+				values[l] = append(values[l], v)
+			}
+		}
+	}
+	return values, every
+}
+
+// Clone is a copy of s, which changes apart from it.
+func (s *Seen) Clone() *Seen {
+	if s == nil {
+		return nil
+	}
+	out := &Seen{values: make(map[string]map[string]bool, len(s.values)), all: maps.Clone(s.all), bytes: s.bytes}
+	for l, vs := range s.values {
+		out.values[l] = maps.Clone(vs)
+	}
+	return out
+}
 
 // RuleEntry says which signals' windows the rules it names are judged
 // against, and on which labels (docs/design/signals.md, "Which rules a
@@ -317,6 +462,85 @@ func (s *Signals) Ties(rule string, labels map[string]string, inEffect []string)
 	return out
 }
 
+// TiesByLabels are the signals that could have seen a firing with labels,
+// by what each has seen alone, no rule entry asked (Ties without one), as
+// indexes in List; and whether none of those keeps the record, so that
+// every signal that does is among them too (FellBack): the signals lapilli
+// serve ties an alert to, a rule's entry looked for when it is read.
+func (s *Signals) TiesByLabels(labels map[string]string, inEffect []string) (ties []int, fellBack bool) {
+	if !s.Named() {
+		return nil, false
+	}
+	keeps := false
+	for i, x := range s.List {
+		if x.Seen.Ties(labels, x.matchOr(inEffect)) {
+			ties = append(ties, i)
+			keeps = keeps || x.Record
+		}
+	}
+	if keeps {
+		return ties, false
+	}
+	for i, x := range s.List {
+		if x.Record && !slices.Contains(ties, i) {
+			ties = append(ties, i)
+		}
+	}
+	slices.Sort(ties)
+	return ties, true
+}
+
+// SignalBits are how lapilli serve keeps the signals an alert is tied to:
+// a bit each, by Signal.Bit, and FellBackBit when none it was tied to by
+// its labels keeps the record, so every signal that does was taken too.
+const (
+	MaxSignalBit = 7
+	FellBackBit  = int64(1) << 8
+)
+
+// Bits are the signals at the indexes given, as bits (SignalBits): one
+// with no bit yet (lapilli serve's, before the ledger keeps it) is none.
+func (s *Signals) Bits(idx []int, fellBack bool) int64 {
+	var out int64
+	for _, i := range idx {
+		if b := s.List[i].Bit; b >= 0 && b <= MaxSignalBit {
+			out |= 1 << b
+		}
+	}
+	if fellBack {
+		out |= FellBackBit
+	}
+	return out
+}
+
+// FromBits are the signals of bits (SignalBits), as indexes in List: a
+// bit no signal of List has is none's, and a signal with no bit yet (one
+// lapilli serve was started with that the ledger doesn't keep yet: a
+// replica that follows a leader started without it, or before the
+// leader's first round) is tied to no alert.
+func (s *Signals) FromBits(bits int64) []int {
+	if !s.Named() {
+		return nil
+	}
+	var out []int
+	for i, x := range s.List {
+		if x.Bit >= 0 && x.Bit <= MaxSignalBit && bits&(1<<x.Bit) != 0 {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// TiedOf are the signals a firing of rule, tied by its labels to bits, is
+// tied to, as indexes in List: its rule entry's, when it has one, else
+// those of bits.
+func (s *Signals) TiedOf(rule string, bits int64) []int {
+	if e := s.Entry(rule); e != nil {
+		return e.idx
+	}
+	return s.FromBits(bits)
+}
+
 // Names are the names of the signals at the indexes given.
 func (s *Signals) Names(idx []int) []string {
 	out := make([]string, 0, len(idx))
@@ -338,7 +562,10 @@ func (o Options) Agrees(rule string, labels map[string]string, in incident.Incid
 	if in.Match != nil {
 		match = in.Match
 	}
-	if in.Signal != "" && o.Signals.Named() {
+	// A rule entry keeps its rules from the windows of signals in use; a
+	// window of a signal no longer read is an incident, as the record
+	// takes it, anyone's to catch.
+	if in.Signal != "" && o.Signals.Named() && o.Signals.signal(in.Signal) >= 0 {
 		if e := o.Signals.Entry(rule); e != nil {
 			if !slices.Contains(e.Signals, in.Signal) {
 				return false

@@ -424,8 +424,10 @@ the rules and the incidents are, and how to judge. */}}
 {{- if .Values.incidents }}
 - --incidents=/etc/lapilli/incidents/incidents.yaml
 {{- end }}
-{{- with .Values.impact }}
-- {{ printf "--impact=%s" . | quote }}
+{{- if kindIs "map" .Values.impact }}
+- --impact-file=/etc/lapilli/impact/impact.yaml
+{{- else if .Values.impact }}
+- {{ printf "--impact=%s" .Values.impact | quote }}
 {{- end }}
 {{- range .Values.match }}
 - {{ printf "--match=%s" . | quote }}
@@ -464,6 +466,11 @@ the rules and the incidents are, and how to judge. */}}
 {{- if .Values.incidents }}
 - name: incidents
   mountPath: /etc/lapilli/incidents
+  readOnly: true
+{{- end }}
+{{- if kindIs "map" .Values.impact }}
+- name: impact
+  mountPath: /etc/lapilli/impact
   readOnly: true
 {{- end }}
 {{- if $p.tokenSecret.name }}
@@ -517,6 +524,11 @@ which must not share a name, side by side. */}}
 - name: incidents
   configMap:
     name: {{ include "lapilli.fullname" . }}-incidents
+{{- end }}
+{{- if kindIs "map" .Values.impact }}
+- name: impact
+  configMap:
+    name: {{ include "lapilli.fullname" . }}-impact
 {{- end }}
 {{- if $p.tokenSecret.name }}
 - name: token
@@ -664,6 +676,11 @@ labels:
   {{ $k }}: {{ $v | toString | quote }}
   {{- end }}
 {{- $a := deepCopy (.Values.podAnnotations | default dict) }}
+{{- /* --impact-file is read as serve starts: a change to the impact
+mapping changes the pod, which starts it again with the file. */ -}}
+{{- if kindIs "map" .Values.impact }}
+{{- $_ := set $a "checksum/impact" (toYaml .Values.impact | sha256sum) }}
+{{- end }}
 {{- if and (eq .Values.mode "serve") .Values.serve.rulesHistory.repository }}
 {{- /* The rules history's containers run git, and RENDER, on what a
 repository holds: EKS's webhook (IRSA, Pod Identity) and Azure's give them

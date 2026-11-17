@@ -2066,5 +2066,18 @@
  "marked": "ventanas marcadas",
  "the marked windows made in the UI would have %d occurrences in the week of %s; they have %d a week at most, the rest kept for the marked file, --config and the expressions": "las ventanas marcadas creadas en la interfaz tendrían %d apariciones en la semana del %s; tienen %d por semana como máximo, el resto queda para el archivo de ventanas marcadas, --config y las expresiones",
  "a team's marked windows would have %d occurrences in the week of %s; a team's have %d a week at most": "las ventanas marcadas de un equipo tendrían %d apariciones en la semana del %s; las de un equipo tienen %d por semana como máximo",
- "a team's editors use the kinds of marked window there are; an editor or an admin can make %s": "los editores de un equipo usan los tipos de ventana marcada que ya existen; un editor o un administrador puede crear %s"
+ "a team's editors use the kinds of marked window there are; an editor or an admin can make %s": "los editores de un equipo usan los tipos de ventana marcada que ya existen; un editor o un administrador puede crear %s",
+ "keeping the impact signals": "guardando las señales de impacto",
+ "reading the impact signal %s again over the last four weeks": "volviendo a leer la señal de impacto %s en las últimas cuatro semanas",
+ "reading what the impact signals read": "leyendo lo que leen las señales de impacto",
+ "serve reads named impact signals, set where it starts (--impact NAME=PROMQL, --impact-file): one with no name doesn't go beside them, and changing them here comes in a later release": "serve lee señales de impacto con nombre, dadas al arrancar (--impact NOMBRE=PROMQL, --impact-file): una sin nombre no va junto a ellas, y cambiarlas aquí llegará en una versión posterior",
+ "Named impact signals, set where serve starts (--impact NAME=PROMQL, --impact-file): each read, started and judged on its own. Changing them here comes in a later release.": "Señales de impacto con nombre, dadas al arrancar serve (--impact NOMBRE=PROMQL, --impact-file): cada una se lee, empieza y juzga por su cuenta. Cambiarlas aquí llegará en una versión posterior.",
+ "Impact signals": "Señales de impacto",
+ "Signal": "Señal",
+ "Matched on": "Se compara por",
+ "Keeps the record": "Mantiene el registro",
+ "the match in effect": "las etiquetas en vigor",
+ "no label": "ninguna etiqueta",
+ "no": "no",
+ "yes, since %s": "sí, desde %s"
 }

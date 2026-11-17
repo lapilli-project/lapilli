@@ -26,7 +26,11 @@ import (
 func (p *run) expressions() {
 	s := p.c.Serve
 	var read, bad []string
-	for _, x := range []struct{ flag, expr string }{{"--impact", s.Impact}, {"--guard", s.Guard}} {
+	exprs := []struct{ flag, expr string }{{"--impact", s.Impact}, {"--guard", s.Guard}}
+	for _, sg := range s.Signals {
+		exprs = append(exprs, struct{ flag, expr string }{"--impact " + sg.Name, sg.Expr})
+	}
+	for _, x := range exprs {
 		if x.expr == "" {
 			continue
 		}

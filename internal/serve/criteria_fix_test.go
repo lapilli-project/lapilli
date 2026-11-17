@@ -27,8 +27,8 @@ func hist(s *Server) *history { return s.h.(*history) }
 // impact_since alone, at since.
 func asBefore049(t *testing.T, s *Server, since time.Time) {
 	t.Helper()
-	ledgerExec(t, s, "DELETE FROM meta WHERE key IN ('impact_criterion', 'impact_again', 'impact_data')")
-	ledgerExec(t, s, "UPDATE meta SET value = ? WHERE key = 'impact_since'", strconv.FormatInt(since.Unix(), 10))
+	ledgerExec(t, s, "UPDATE impact_signals SET criterion = '', again = '', data = '' WHERE name = ''")
+	ledgerExec(t, s, "UPDATE impact_signals SET since = ? WHERE name = ''", strconv.FormatInt(since.Unix(), 10))
 }
 
 // a run due: an hour on, the cursor an hour behind it.
@@ -443,8 +443,8 @@ func TestImpactTrySame(t *testing.T) {
 	s := criteriaServer(t, false, nil)
 	impactProposed(t, s, "5m impact")
 	// Kept from a Monday three weeks before the runs began.
-	ledgerExec(t, s, "UPDATE meta SET value = ? WHERE key = 'impact_since'", strconv.FormatInt(time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC).Unix(), 10))
-	ledgerExec(t, s, "DELETE FROM meta WHERE key = 'impact_data'")
+	ledgerExec(t, s, "UPDATE impact_signals SET since = ? WHERE name = ''", strconv.FormatInt(time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC).Unix(), 10))
+	ledgerExec(t, s, "UPDATE impact_signals SET data = '' WHERE name = ''")
 	code, body := askAs(t, s.Handler(), http.MethodGet, "/settings?impact-try=1&impact=impact&impact-for=5m", nil, "ana@example.com", "same-origin")
 	if code != 200 || !strings.Contains(body, "nothing would change") || strings.Contains(body, "<strong>") || strings.Contains(body, "waiting proposals would need") {
 		t.Errorf("%d\n%s", code, body)
@@ -456,7 +456,7 @@ func TestImpactTrySame(t *testing.T) {
 func TestImpactTryEarlierWeeks(t *testing.T) {
 	s := criteriaServer(t, false, nil)
 	monday := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC) // three weeks before
-	ledgerExec(t, s, "UPDATE meta SET value = ? WHERE key = 'impact_since'", strconv.FormatInt(monday.Unix(), 10))
+	ledgerExec(t, s, "UPDATE impact_signals SET since = ? WHERE name = ''", strconv.FormatInt(monday.Unix(), 10))
 	_, body := askAs(t, s.Handler(), http.MethodGet, "/settings?impact-try=1&impact=impact+%3E+1", nil, "ana@example.com", "same-origin")
 	if !strings.Contains(body, `<th scope="row">Weeks before them with a record</th><td>2 of 2</td><td><strong>0 of 2</strong></td>`) {
 		t.Errorf("no weeks before:\n%s", body)
@@ -825,8 +825,8 @@ func TestImpactFloorLeft(t *testing.T) {
 		t.Fatalf("%+v %v", k, err)
 	}
 	cursor, _ := s.l.Cursor(ctx)
-	ledgerExec(t, s, "INSERT INTO meta (key, value) VALUES ('impact_floor', ?)", strconv.FormatInt(cursor.Add(-time.Hour).Unix(), 10))
-	ledgerExec(t, s, "INSERT INTO meta (key, value) VALUES ('impact_read', '5m impact') ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+	ledgerExec(t, s, "UPDATE impact_signals SET floor_at = ? WHERE name = ''", strconv.FormatInt(cursor.Add(-time.Hour).Unix(), 10))
+	ledgerExec(t, s, "UPDATE impact_signals SET last_read = '5m impact' WHERE name = ''")
 	if plan, _, err := s.againPlan(ctx, criterion{"impact", 5 * time.Minute}); err != nil || plan != againRead {
 		t.Fatalf("plan %d %v", plan, err)
 	}
@@ -844,7 +844,7 @@ func TestImpactLookForPassesFailing(t *testing.T) {
 	hist(s).failLong = map[string]bool{"count(a)": true}
 	cursor, _ := s.l.Cursor(ctx)
 	d := &ledger.ImpactData{Criterion: "5m a == 1 or b == 1", From: cursor.Add(-72 * time.Hour), Selectors: []ledger.SelectorData{{Sel: "a"}, {Sel: "b"}}}
-	if err := s.lookFor(ctx, d, cursor); err == nil {
+	if err := s.lookFor(ctx, "", d, cursor); err == nil {
 		t.Error("a's failure isn't said")
 	}
 	if b := d.Selectors[1]; !b.To.Equal(cursor) || b.First.IsZero() {

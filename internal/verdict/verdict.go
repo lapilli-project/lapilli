@@ -401,6 +401,17 @@ type Settings struct {
 	ImpactRules   []RuleEntry `json:"impact_rules,omitempty"`
 }
 
+// NoRecordOf is, with named signals, whether a period, or a row, has no
+// record: none of its firings was judged, of firings with unjudged of them
+// counted and not judged; with none, by none, whether nothing in it could
+// be judged at all.
+func NoRecordOf(firings, unjudged int, none func() bool) bool {
+	if firings > 0 {
+		return unjudged == firings
+	}
+	return none()
+}
+
 // Settings are what o judges by, as a report says them.
 func (o Options) Settings() *Settings {
 	match := o.Match
@@ -551,6 +562,12 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		rep.Firings = append(rep.Firings, j)
 	}
 
+	// With named signals, a period has no record when none of its firings
+	// was judged, as each rule's and each row of lapilli serve's summary:
+	// part of it may be, and part not (NoRecordOf).
+	if named {
+		rep.NoRecord = NoRecordOf(len(rep.Firings), rep.Unjudged, func() bool { return !rec.JudgesAny(o.From, o.To) })
+	}
 	for name, r := range byRule {
 		r.NoRecord = r.Firings > 0 && r.Unjudged == r.Firings
 		r.Noisy = r.noisy(at)
