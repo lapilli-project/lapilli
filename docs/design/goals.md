@@ -615,11 +615,16 @@ Settled as step 3 was built, over [marked.md](marked.md)'s occurrences:
   first found missed: one that turns missed late (an incident written
   down a day after), after a later one was told of, is told then, as a
   week turned missed while it is the last whole week is. Each is marked
-  by a key of its own, the goal, the team's id and the occurrence's key
-  (`goal-occ-missed.sale-none-missed.0.7@2026-11-06T11:00Z`), its value
-  the occurrence's end, under a prefix of its own, so that two
-  occurrences ending at once are two, and a goal changed from each week
-  to each kind, or back, takes neither's marks for the other's; the keys
+  by a key of its own, the goal, the team's id and what the occurrence
+  is, not its window's row: its kind, its window's team and labels, its
+  start and its end, hashed (`goal-occ-missed.sale-none-missed.0.h…`),
+  its value the occurrence's end, under a prefix of its own. So a window
+  an expression finds again, which `KeepMarks` keeps as a row anew with
+  another id (and so another `occurrence` key), is the same occurrence,
+  told once; one a person renames is the same, and one whose start or
+  end a person changes is another, told once more; two occurrences
+  ending at once are two; and a goal changed from each week to each
+  kind, or back, takes neither's marks for the other's; the keys
   are let go 13 weeks after the occurrence ended, as a week's are, so
   there are as many as the occurrences told of in 13 weeks. 20 a run at
   most, the earliest ended first, the rest told by the runs after, as 20
@@ -630,11 +635,13 @@ Settled as step 3 was built, over [marked.md](marked.md)'s occurrences:
   occurrence's.
 - **Tasks.** `--goal-tasks` makes one for the earliest occurrence missed
   that ended since the last whole week began, that no task was made for
-  nor said missed on (`goal-occ-made.`, a key an occurrence, as above),
+  nor said missed on (`goal-occ-made.`, a key an occurrence, by what it
+  is, as above),
   titled with the occurrence ("Goal sale-none-missed missed during sale
   Autumn sale, 2026-10-27", its window's title cut to fit). What is said
   on it is kept by each occurrence's key, with its end: of those that
-  ended since the last whole week began as it was made, another missed
+  ended since the last whole week began as it was made, held by what
+  each is as above, another missed
   ("missed again"), the one it was made for or one said missed that no
   longer is ("no longer missed"), whenever each turns so, one ending
   before the one it was made for among them; and one met that ended after

@@ -446,7 +446,8 @@ func TestGoalsPeriodAfterRun(t *testing.T) {
 	// week's mark, and the weekly goal's none of an occurrence's.
 	toldW, madeW, _ := s.l.GoalMarks(ctx)
 	toldP, madeP, _ := s.l.PeriodGoalMarks(ctx)
-	autumnKey, weekKey := ledger.GoalOccKey("sale-none-missed", 0, "3@2026-10-27T00:00Z"), ledger.GoalOccKey("sale-none-missed", 0, "5@2026-11-02T00:00Z")
+	autumnKey := ledger.GoalOccKey("sale-none-missed", 0, heldOf(t, s, "sale-none-missed", "Autumn sale"))
+	weekKey := ledger.GoalOccKey("sale-none-missed", 0, heldOf(t, s, "sale-none-missed", "Week sale"))
 	if _, ok := toldW["sale-none-missed.0"]; ok || madeW["sale-none-missed.0"] != 0 || toldP[autumnKey] != dayAt("2026-10-29", 0).Unix() ||
 		toldP[weekKey] != dayAt("2026-11-05", 0).Unix() || madeP[autumnKey] != dayAt("2026-10-29", 0).Unix() || madeP[weekKey] != dayAt("2026-11-05", 0).Unix() {
 		t.Errorf("marks: %v %v %v %v", toldW, madeW, toldP, madeP)
@@ -469,6 +470,26 @@ func TestGoalsPeriodAfterRun(t *testing.T) {
 }
 
 func ptr(v float64) *float64 { return &v }
+
+// heldOf is what is kept of everyone's goal over a period of an occurrence
+// is keyed by, of the window titled title, as the leader works it out.
+func heldOf(t *testing.T, s *Server, goal, title string) string {
+	t.Helper()
+	this := ledger.Week(s.l.Day(s.now()))
+	lines, err := s.goalTable(context.Background(), this-12*7, this, []*ledger.Team{nil})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, gl := range lines {
+		for _, w := range gl.Occs {
+			if gl.Goal.Name == goal && w.Title == title && w.held != "" {
+				return w.held
+			}
+		}
+	}
+	t.Fatalf("no occurrence of %s titled %s", goal, title)
+	return ""
+}
 
 // /metrics gives maxGoalSeries lines of each family at most, those missed
 // first, goals over a period among them.
@@ -989,5 +1010,115 @@ func TestGoalPeriodSlackText(t *testing.T) {
 	g = ledger.Goal{Name: "g", Measure: "precision", NoWorseThan: "before", By: "0.05", Each: "sale"}
 	if got := goalTarget("en", g); got != "no worse than before, by 5%" {
 		t.Errorf("%q", got)
+	}
+}
+
+// A window an expression (--mark) finds again is kept as a row anew, with
+// another id, and so another key (id@start), but is the same occurrence:
+// what was told of it, the task made for it and what was said on it hold.
+// Read again three times, a window made in the UI between the reads, its
+// miss is told once, said on its task once (as made), and, the task done,
+// no task is made for it again.
+func TestGoalsPeriodExpressionReadAgain(t *testing.T) {
+	hook := filepath.Join(t.TempDir(), "hook")
+	os.WriteFile(hook, []byte("https://hooks.example/x\n"), 0o600)
+	s := goalServer(t, func(c *Config) { c.NotifyWebhook, c.GoalTasks = hook, true })
+	ctx := context.Background()
+	o := s.cfg.Options
+	// Over INC-C, on cart, missed.
+	w := ledger.Marked{Kind: "flash", Start: dayAt("2026-10-28", 9).Add(30 * time.Minute), End: dayAt("2026-10-28", 10).Add(30 * time.Minute)}
+	declare(t, s, "goals:\n  - {name: flash-missed, each: flash, measure: incidents.missed, at_most: 0}\n")
+	var keys []string
+	read := func(since time.Time) {
+		t.Helper()
+		if _, err := s.l.KeepMarks(ctx, []ledger.MarkRead{{Kind: "flash", Key: "k", Since: since, To: since.Add(2 * time.Hour), Step: time.Minute,
+			Windows: []ledger.Marked{w}}}, o); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.l.JudgePending(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+		again(t, s)
+		g := periodIn(t, summaryOfGoals(t, s), "2026-10-26", "", "flash-missed", "flash")
+		if g.Result != goalMissed {
+			t.Fatalf("the flash window: %+v", g)
+		}
+		keys = append(keys, g.Occurrence)
+	}
+	for i, since := range []time.Time{dayAt("2026-10-28", 9), dayAt("2026-10-28", 9).Add(15 * time.Minute), dayAt("2026-10-28", 9).Add(20 * time.Minute)} {
+		read(since)
+		if i == 0 {
+			if _, err := s.l.PutMarked(ctx, ledger.Marked{Kind: "launch", Title: "Launch", Start: dayAt("2026-10-30", 9), End: dayAt("2026-10-30", 10)}, "ana", o); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if keys[0] == keys[len(keys)-1] {
+		t.Fatalf("the window kept with its id: %v", keys)
+	}
+	told := 0
+	for _, n := range goalNotices(t, s) {
+		if n.Name == "flash-missed" {
+			told++
+		}
+	}
+	ts, _ := s.l.Tasks(ctx, ledger.TaskQuery{Goal: "flash-missed"})
+	if told != 1 || len(ts) != 1 || len(commentsOn(t, s, ts[0].ID)) != 0 {
+		t.Fatalf("keys %v: told %d times, %d tasks, said %q", keys, told, len(ts), commentsOn(t, s, ts[0].ID))
+	}
+	if _, err := s.l.PatchTask(ctx, ts[0].ID, []byte(`{"status": "done"}`), "ana"); err != nil {
+		t.Fatal(err)
+	}
+	read(dayAt("2026-10-28", 9).Add(25 * time.Minute))
+	if ts, _ := s.l.Tasks(ctx, ledger.TaskQuery{Goal: "flash-missed"}); len(ts) != 1 {
+		t.Errorf("made again, read again: %+v", ts)
+	}
+}
+
+// An occurrence is held by what it is, not by its window's row: a window
+// renamed is the same occurrence, and its miss isn't told again; one whose
+// end a person changes is another, and is told once more.
+func TestGoalsPeriodHeldByContent(t *testing.T) {
+	hook := filepath.Join(t.TempDir(), "hook")
+	os.WriteFile(hook, []byte("https://hooks.example/x\n"), 0o600)
+	s := periodServer(t, func(c *Config) { c.NotifyWebhook = hook })
+	ctx := context.Background()
+	told := func() int {
+		n := 0
+		for _, x := range goalNotices(t, s) {
+			if x.Name == "sale-none-missed" {
+				n++
+			}
+		}
+		return n
+	}
+	again(t, s)
+	if n := told(); n != 1 {
+		t.Fatalf("told %d", n)
+	}
+	ms, err := s.l.MarkedMeeting(ctx, dayAt("2026-10-27", 0), dayAt("2026-10-28", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(ms, func(m ledger.Marked) bool { return m.Title == "Autumn sale" })
+	autumn := ms[i]
+	for _, c := range []struct {
+		change func(*ledger.Marked)
+		told   int
+	}{
+		{func(m *ledger.Marked) { m.Title = "Autumn sale, renamed" }, 1},
+		{func(m *ledger.Marked) { m.End = m.End.Add(time.Hour) }, 2},
+	} {
+		c.change(&autumn)
+		if _, err := s.l.PutMarked(ctx, autumn, "ana", s.cfg.Options); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.l.JudgePending(ctx, s.cfg.Options); err != nil {
+			t.Fatal(err)
+		}
+		again(t, s)
+		if n := told(); n != c.told {
+			t.Errorf("%+v: told %d, want %d", autumn, n, c.told)
+		}
 	}
 }

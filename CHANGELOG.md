@@ -38,7 +38,9 @@
   an occurrence, the incidents during an occurrence of its kind of a
   window they didn't list: a window's page lists that window alone, and
   the others the windows meeting their weeks, not the four before. They
-  now read every window meeting the weeks they count.
+  now read every window meeting the weeks they count. So a window's page,
+  too, now marks with `*` an occurrence counted together with another of
+  its kind on one of its days, as the Marked windows page did.
 
 ## [0.56.0] - 2026-11-18
 

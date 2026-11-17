@@ -507,8 +507,11 @@ func (l *Ledger) GoalMarks(ctx context.Context) (told, made map[string]int64, er
 }
 
 // GoalOccKey is what is kept of a goal over a period, for a team, of one of
-// its occurrences is keyed on: GoalKey and the occurrence's key
-// (OccurrenceKey), so that two occurrences ending at once are two.
+// its occurrences is keyed on: GoalKey and occ, what the occurrence is held
+// by, a short text of its own (serve keys it by the occurrence's content,
+// hashed, so that a window an expression finds again, kept anew with
+// another id, is the same), so that two occurrences ending at once are
+// two.
 func GoalOccKey(name string, team int64, occ string) string {
 	return goalTeamKey(name, team) + "." + occ
 }

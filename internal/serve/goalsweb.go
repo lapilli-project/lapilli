@@ -478,7 +478,7 @@ func (s *Server) postPeriodGoalTask(w http.ResponseWriter, r *http.Request, g le
 		return
 	}
 	since := s.l.Midnight(ledger.Week(s.l.Day(s.now())) - 7).Unix()
-	id, err := s.l.MakePeriodGoalTask(ctx, s.periodTaskIn(lang(r), g, team, gw), key, goalOccEnd(gw), min(since, goalOccEnd(gw)), s.user(r))
+	id, err := s.l.MakePeriodGoalTask(ctx, s.periodTaskIn(lang(r), g, team, gw), gw.held, goalOccEnd(gw), min(since, goalOccEnd(gw)), s.user(r))
 	if errors.Is(err, ledger.ErrGoalTaskOpen) {
 		back(w, r, urlContext(r.URL.Query()).Link(fmt.Sprintf("/tasks/%d", id)))
 		return

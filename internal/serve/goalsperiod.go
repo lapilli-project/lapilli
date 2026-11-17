@@ -3,7 +3,11 @@ package serve
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"maps"
 	"math"
 	"net/url"
 	"slices"
@@ -133,7 +137,7 @@ type occWhen struct {
 func periodOn(g ledger.Goal, byCatching bool, o markedOcc, in, before markedCount, when occWhen) summaryGoal {
 	m := ledger.GoalMeasures[g.Measure]
 	from, to := o.Start.UTC(), o.End.UTC()
-	out := summaryGoal{Name: g.Name, Measure: g.Measure, Each: g.Each, Occurrence: o.Key(), Title: o.M.Title, Start: &from, End: &to}
+	out := summaryGoal{Name: g.Name, Measure: g.Measure, Each: g.Each, Occurrence: o.Key(), Title: o.M.Title, Start: &from, End: &to, held: occurrenceHeld(o)}
 	kind, target := g.Bound()
 	by := goalBy(g)
 	switch kind {
@@ -175,6 +179,24 @@ func periodOn(g ledger.Goal, byCatching bool, o markedOcc, in, before markedCoun
 		out.Result = goalMissed
 	}
 	return out
+}
+
+// occurrenceHeld is what is kept of an occurrence's goal (what was told of
+// it, the task made for it, what was said on it) is keyed by: its content,
+// its kind, its window's team and labels, its start and its end, hashed,
+// not its window's row (OccurrenceKey). A window an expression finds again
+// is kept as a row anew, with another id, but is the same occurrence, and
+// isn't told again; one whose start or end a person changes is another,
+// and is. Two windows alike in all of it are one occurrence here, as they
+// mark the same firings.
+func occurrenceHeld(o markedOcc) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%s\x00%d\x00", o.M.Kind, o.M.TeamID)
+	for _, k := range slices.Sorted(maps.Keys(o.M.Labels)) {
+		fmt.Fprintf(h, "%s=%s\x00", k, o.M.Labels[k])
+	}
+	fmt.Fprintf(h, "\x00%d\x00%d", o.Start.Unix(), o.End.Unix())
+	return "h" + hex.EncodeToString(h.Sum(nil)[:8])
 }
 
 // periodAt is where an occurrence's goal is in the summary: the week of
@@ -452,6 +474,7 @@ func (s *Server) tellPeriodGoals(ctx context.Context, lines []goalLine, last int
 		about goalNotice
 		teams []int64
 		end   int64
+		held  string
 	}
 	since := s.l.Midnight(last)
 	var order []*notice
@@ -462,13 +485,13 @@ func (s *Server) tellPeriodGoals(ctx context.Context, lines []goalLine, last int
 		}
 		team := teamIDOf(gl.Team)
 		for _, w := range gl.endedSince(since) {
-			if w.Result != goalMissed || told0[ledger.GoalOccKey(gl.Goal.Name, team, w.Occurrence)] != 0 {
+			if w.Result != goalMissed || told0[ledger.GoalOccKey(gl.Goal.Name, team, w.held)] != 0 {
 				continue
 			}
-			k := gl.Goal.Name + "\x00" + w.Occurrence
+			k := gl.Goal.Name + "\x00" + w.held
 			n := byOcc[k]
 			if n == nil {
-				n = &notice{end: goalOccEnd(w), about: goalNotice{Name: gl.Goal.Name, Team: gl.TeamName(), Measure: gl.Goal.Measure, AtLeast: w.AtLeast, AtMost: w.AtMost,
+				n = &notice{end: goalOccEnd(w), held: w.held, about: goalNotice{Name: gl.Goal.Name, Team: gl.TeamName(), Measure: gl.Goal.Measure, AtLeast: w.AtLeast, AtMost: w.AtMost,
 					Value: w.Value, From: w.From.UTC(), To: w.To.UTC(), Each: w.Each, Occurrence: w.Occurrence, Title: w.Title, NoWorseThan: w.NoWorseThan,
 					By: w.By, Before: w.Before}}
 				if gl.Goal.EveryTeam {
@@ -490,7 +513,7 @@ func (s *Server) tellPeriodGoals(ctx context.Context, lines []goalLine, last int
 	// The earliest ended first: they are the first to pass the last whole
 	// week's start, after which none is told.
 	slices.SortStableFunc(order, func(a, b *notice) int {
-		return cmp.Or(cmp.Compare(a.end, b.end), strings.Compare(a.about.Name, b.about.Name), strings.Compare(a.about.Occurrence, b.about.Occurrence))
+		return cmp.Or(cmp.Compare(a.end, b.end), strings.Compare(a.about.Name, b.about.Name), strings.Compare(a.held, b.held))
 	})
 	if n := len(order) - goalToldARun; n > 0 {
 		s.log.Info("goal.missed of occurrences of goals over a period wait for the runs after", "waiting", n, "a run", goalToldARun)
@@ -502,7 +525,7 @@ func (s *Server) tellPeriodGoals(ctx context.Context, lines []goalLine, last int
 		for _, d := range dests {
 			told = append(told, ledger.Told{Dest: d, About: map[string]any{"goal": n.about}})
 		}
-		errs = append(errs, s.l.TellPeriodGoalMissed(ctx, n.about.Name, n.teams, n.about.Occurrence, n.end, told))
+		errs = append(errs, s.l.TellPeriodGoalMissed(ctx, n.about.Name, n.teams, n.held, n.end, told))
 	}
 	return errors.Join(errs...)
 }
@@ -558,7 +581,7 @@ func (s *Server) sayOnPeriodTask(ctx context.Context, id int64, gl goalLine, st 
 		}
 		occ := occText(l, w.summaryGoal, s.cfg.Loc)
 		var body, now string
-		switch was := st.Occs[w.Occurrence].Said; {
+		switch was := st.Occs[w.held].Said; {
 		case w.Result == goalMissed:
 			// Once an occurrence: the one it was made for is said already.
 			if was == goalMissed || was == goalNoLonger {
@@ -574,7 +597,7 @@ func (s *Server) sayOnPeriodTask(ctx context.Context, id int64, gl goalLine, st 
 		default:
 			continue
 		}
-		st.Occs[w.Occurrence] = ledger.GoalOccSaid{End: at, Said: now}
+		st.Occs[w.held] = ledger.GoalOccSaid{End: at, Said: now}
 		if err := s.l.SayOnGoalTask(ctx, id, body, st, ledger.GoalTasksBy); err != nil {
 			return said, err
 		}

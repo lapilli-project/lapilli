@@ -81,6 +81,9 @@ type summaryGoal struct {
 	Title       string     `json:"title,omitempty"`
 	Start       *time.Time `json:"from,omitempty"`
 	End         *time.Time `json:"to,omitempty"`
+	// held is what is kept of an occurrence's goal is keyed by
+	// (occurrenceHeld): its content, not its window's row.
+	held string
 }
 
 // rowGoals are the goals a row is checked against: everyone's, in a row
@@ -1040,7 +1043,7 @@ func (s *Server) goalTasks(ctx context.Context, lines []goalLine, last int64) (i
 				continue
 			}
 			i := slices.IndexFunc(gl.endedSince(from), func(w goalWeek) bool {
-				return w.Result == goalMissed && wasP[ledger.GoalOccKey(gl.Goal.Name, team, w.Occurrence)] == 0
+				return w.Result == goalMissed && wasP[ledger.GoalOccKey(gl.Goal.Name, team, w.held)] == 0
 			})
 			if i < 0 {
 				continue
@@ -1051,7 +1054,7 @@ func (s *Server) goalTasks(ctx context.Context, lines []goalLine, last int64) (i
 			}
 			made++
 			w := gl.endedSince(from)[i]
-			if _, err := s.l.MakePeriodGoalTask(ctx, s.periodTaskIn(s.cfg.Lang, gl.Goal, gl.Team, w), w.Occurrence, goalOccEnd(w), from.Unix(),
+			if _, err := s.l.MakePeriodGoalTask(ctx, s.periodTaskIn(s.cfg.Lang, gl.Goal, gl.Team, w), w.held, goalOccEnd(w), from.Unix(),
 				ledger.GoalTasksBy); err != nil && !errors.Is(err, ledger.ErrGoalTaskOpen) {
 				errs = append(errs, err)
 			}
