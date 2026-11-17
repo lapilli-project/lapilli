@@ -64,10 +64,24 @@
   data begins is looked for; one that only narrows another is counted
   through its stand-in (`http_requests_total{code!=""}` for
   `http_requests_total{code=~"5.."}`); and that is joined with what it
-  returned. A label none of its selectors carries (one `label_replace`
-  makes, a probe target relabelled) has every value, so a firing is tied,
-  and waits for that signal's start. `lapilli verdict` asks one more query
-  a selector of each named signal.
+  returned. Label by label: a selector whose series lack a label (a gate,
+  `and on() (sum(up{job="api"}) > 0)`) adds nothing for it, and a label
+  none of its selectors carries (one `label_replace` makes, a probe
+  target relabelled) has every value, so a firing is tied, and waits for
+  that signal's start. A selector that narrows another is counted through
+  that one, once. `lapilli verdict` asks one more query a selector it
+  counts of each named signal; one that fails adds nothing, and the run
+  says so on stderr and goes on.
+- **With named signals, `no_record` means none of the firings was
+  judged**, in `lapilli verdict`'s report as in `lapilli serve`'s report,
+  `/metrics` and each summary row: since 0.53.0 a report said it had a
+  record once any signal had started within it, though none of its
+  firings was judged.
+- **`--match` takes label names** (letters, digits and `_`, not starting
+  with a digit), as does the Settings page's match: each named signal
+  counts what it reads by them, in PromQL. Another value is refused; one
+  the Settings page kept before is passed over for the command line's, as
+  a setting that doesn't parse is.
 - **`/api/v1/summary`'s rows say `unjudged`, and `impacts.by_signal`**,
   for every ledger: the firings that caught nothing counted and not
   judged, as the report counts them, and each named signal's windows
@@ -85,7 +99,9 @@
   The field means what it did, the impact windows judged against.
 - **The chart's `impact` defaults to `null`**, so that a mapping can be
   given in its place without Helm saying it skipped one. An empty string
-  still gives no `--impact`.
+  still gives no `--impact`. As a mapping, a checksum of it is on the
+  pod (`checksum/impact`), so that a change to it starts serve again with
+  the file it reads as it starts.
 
 ## [0.54.0] - 2026-11-17
 
