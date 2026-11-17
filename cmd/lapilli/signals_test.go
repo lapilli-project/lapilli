@@ -816,3 +816,14 @@ func TestNamedSignalsSeenFromReads(t *testing.T) {
 		t.Errorf("by the 5xx selector: tied to %v; it isn't counted", f.Signals)
 	}
 }
+
+// --match names labels, which each named signal counts what it reads by:
+// what isn't a label's name is refused.
+func TestMatchIsLabelNames(t *testing.T) {
+	for _, v := range []string{"service.name", "a) or vector(1)", "9lives"} {
+		_, err := parseFlags([]string{"--rules", "x.yaml", "--prometheus", "http://p", "--match", v}, func(string, string) (bool, error) { return false, nil })
+		if err == nil || !strings.Contains(err.Error(), "want a label's name") {
+			t.Errorf("--match %q: %v", v, err)
+		}
+	}
+}

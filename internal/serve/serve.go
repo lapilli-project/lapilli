@@ -975,7 +975,12 @@ func apply(o *verdict.Options, key, v string) error {
 		// line's.
 		o.Match = nil
 		for _, m := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == ' ' }) {
-			if m != "none" {
+			switch {
+			case m == "none":
+			case !labelName.MatchString(m) || len(m) > 128:
+				// Counted by in PromQL, by each named signal.
+				return fmt.Errorf("%q isn't a label's name: letters, digits and _, not starting with a digit", m)
+			default:
 				o.Match = append(o.Match, m)
 			}
 		}

@@ -1042,3 +1042,34 @@ func TestSignalWeekBoundCountsOnce(t *testing.T) {
 		t.Errorf("%d windows kept", got)
 	}
 }
+
+// The match in effect is a list of label names: each named signal counts
+// what it reads by them, in PromQL, so the Settings page refuses what
+// isn't one, and nothing of it is asked.
+func TestSignalsMatchIsLabelNames(t *testing.T) {
+	ctx := context.Background()
+	h := shopHistory()
+	s := signalServer(t, h, nil)
+	for _, v := range []string{"a)\t(up)\tor\tvector(1)\tor\tcount\tby\t(b", "service.name"} {
+		if code, body := askAs(t, s.Handler(), http.MethodPost, "/settings", url.Values{"match": {v}}, "ana@example.com", "same-origin"); code == http.StatusSeeOther {
+			t.Errorf("match %q saved: %d %.200s", v, code, body)
+		}
+	}
+	// One a release before kept: the command line's in its place, and
+	// nothing of it asked.
+	if err := s.l.SetSettings(ctx, map[string]string{"match": "a)\t(up)\tor\tvector(1)\tor\tcount\tby\t(b"}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	h.mu.Lock()
+	h.asked = nil
+	h.mu.Unlock()
+	runDue(s, 1)
+	s.jobs(ctx, true)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, q := range h.asked {
+		if strings.Contains(q, "vector(1)") {
+			t.Errorf("asked %q", q)
+		}
+	}
+}
