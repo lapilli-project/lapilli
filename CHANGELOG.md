@@ -17,16 +17,20 @@
   others, is read on its turn. One that fails, or finds more than 1,000
   windows in a read or 2,000 in a week, is missed for the run, which
   records the rest, and a later run reads it from where it was missed,
-  within a week, a piece at a time, no more at once than a run reads. Each
-  signal's windows are its own, keyed by its name
-  (`impact-probe-20261110T1404Z`), with what was decided of them, their
-  tasks and comments carried over among its own; each keeps the record
-  from its own start, where the data it reads begins, read again alone
-  over the last four weeks when its expression or `for` changes. A firing
-  is judged by the signals tied to its alert: its rule's entry's, or else
-  those that could have seen it, by what each has seen. Confirming a
-  window writes down an incident carrying its signal and match, caught as
-  the window was, until its labels change. `/api/v1/report` gives
+  within a week, a piece at a time, no more at once than a run reads, the
+  pieces of a turn held together to `--max-samples` as one range is, each
+  turn going on a little before where the last ended, as runs overlap; a
+  window found begun before where a read reads goes on from the one with
+  its labels, or is new. What is left of a round goes to those left over
+  for what they took before. Each signal's windows are its own, keyed by
+  its name (`impact-probe-20261110T1404Z`), with what was decided of them,
+  their tasks and comments carried over among its own; each keeps the
+  record from its own start, where the data it reads begins, read again
+  alone over the last four weeks when its expression or `for` changes. A
+  firing is judged by the signals tied to its alert: its rule's entry's,
+  or else those that could have seen it, by what each has seen. Confirming
+  a window writes down an incident carrying its signal and match, caught
+  as the window was, until its labels change. `/api/v1/report` gives
   `settings.impact_signals`, `settings.impact_rules`,
   `rules[].impact_rule`, `firings[].signals` and `incidents[].signal`;
   `/api/v1/summary` gives each row's `unjudged`, `impacts.by_signal` (`{}`

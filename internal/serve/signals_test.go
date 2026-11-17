@@ -1466,7 +1466,11 @@ func TestHeavyCatchesUpBesideHung(t *testing.T) {
 				c.hang[fmt.Sprintf("m%d > 1", i)] = true
 			}
 			s.h = c
-			got := readRounds(t, s, 1, rounds)
+			got := readRounds(t, s, 1, rounds/2)
+			c.mu.Lock()
+			c.hung = 0 // those that hang, asked in the rounds after they were found to
+			c.mu.Unlock()
+			got = append(got, readRounds(t, s, rounds/2+1, rounds-rounds/2)...)
 			unread := 0
 			for _, r := range got[rounds/2:] {
 				if !r.read["errors"] {
@@ -1477,8 +1481,8 @@ func TestHeavyCatchesUpBesideHung(t *testing.T) {
 				t.Errorf("errors behind after %d rounds %v, unread in %d of the last %d", rounds, last.behind["errors"], unread, rounds-rounds/2)
 			}
 			c.mu.Lock()
-			if c.most > 3*time.Hour || c.hung > hung*rounds/3 {
-				t.Errorf("errors asked over %s at once (a run's: 3h); those that hang asked %d times in %d rounds", c.most, c.hung, rounds)
+			if c.most > 3*time.Hour || c.hung > 3*hung {
+				t.Errorf("errors asked over %s at once (a run's: 3h); those that hang asked %d times in the last %d rounds", c.most, c.hung, rounds-rounds/2)
 			}
 			c.mu.Unlock()
 			// Started again: nothing known of the turns; the ledger keeps
@@ -1562,6 +1566,145 @@ func TestSignalsNotKeptNotRead(t *testing.T) {
 	for _, r := range rows {
 		if strings.HasPrefix(r.Name, "s") {
 			t.Errorf("a row made for %s, at bit %d", r.Name, r.Bit)
+		}
+	}
+}
+
+// wide answers each range of wideExpr with per series, a sample a step,
+// labels new to each answer; its answers held to most samples a range,
+// as a prom.Client's are (MaxSamples).
+type wide struct {
+	*sigHistory
+	per, most, asked int
+	// then, if not 0, is per after the first answer; answered, the samples
+	// answered in all.
+	then, answered int
+}
+
+const wideExpr = "pods_down > 1"
+
+func (h *wide) MaxSamples() int { return h.most }
+
+func (h *wide) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	if expr != wideExpr {
+		return h.sigHistory.QueryRange(ctx, expr, start, end, step)
+	}
+	h.asked++
+	per := h.per
+	if h.then > 0 && h.asked > 1 {
+		per = h.then
+	}
+	var out []prom.Series
+	for i := range per {
+		se := prom.Series{Labels: map[string]string{"pod": fmt.Sprintf("p%d-%d", h.asked, i)}}
+		for at := start; !at.After(end); at = at.Add(step) {
+			se.Samples = append(se.Samples, prom.Sample{T: at, V: 1})
+		}
+		h.answered += len(se.Samples)
+		out = append(out, se)
+	}
+	return out, nil
+}
+
+// A read catching up a day behind, a piece at a time, holds no more in
+// all than one range may (--max-samples): pieces alike, it doesn't ask the
+// one past it, and catches up over turns, each going on a little before
+// where the last ended (ledger.PieceResume); a piece larger than the one
+// before, past it, is let go.
+func TestPiecesHeldToMaxSamples(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		per, then int
+	}{{"pieces alike", 50, 0}, {"a piece larger than the one before", 20, 400}} {
+		t.Run(c.name, func(t *testing.T) {
+			h := shopHistory()
+			s := signalServer(t, h, nil)
+			w := &wide{sigHistory: h, per: c.per, then: c.then, most: 20000} // a piece of 3h: 181 samples a series
+			s.h = w
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			to := now
+			from := to.Add(-24 * time.Hour)
+			turns := 0
+			for ; from.Before(to) && turns < 40; turns++ {
+				w.answered = 0
+				series, end, _, err := s.readPieces(ctx, wideExpr, from, to, 2*time.Hour, true)
+				if err != nil {
+					t.Fatal(err)
+				}
+				n := 0
+				for _, se := range series {
+					n += len(se.Samples)
+				}
+				if n > w.most || !end.After(from) || c.then == 0 && w.answered > w.most {
+					t.Fatalf("turn %d from %s: %d samples held, %d answered, to %s", turns+1, from, n, w.answered, end)
+				}
+				if c.then > 0 {
+					return // the larger pieces' own turns are another's
+				}
+				if !end.Before(to) {
+					from = end
+					break
+				}
+				from = ledger.PieceResume(end, 5*time.Minute, s.cfg.Settle, s.cfg.Step)
+			}
+			if from.Before(to) {
+				t.Errorf("not caught up after %d turns: at %s", turns, from)
+			}
+		})
+	}
+}
+
+// oddHangs hangs its signals' reads of hang on odd rounds, and answers at
+// once on even ones; cost as costly's.
+type oddHangs struct {
+	*sigHistory
+	cost  map[string]time.Duration
+	hang  string
+	mu    sync.Mutex
+	round int
+}
+
+func (h *oddHangs) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	h.mu.Lock()
+	odd := h.round%2 == 1
+	h.mu.Unlock()
+	var wait <-chan time.Time
+	switch {
+	case expr == h.hang && odd:
+		<-ctx.Done()
+		return nil, ctx.Err()
+	case h.cost[expr] > 0:
+		wait = time.After(time.Duration(float64(h.cost[expr]) * end.Sub(start).Hours()))
+	}
+	if wait != nil {
+		select {
+		case <-wait:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return h.sigHistory.QueryRange(ctx, expr, start, end, step)
+}
+
+// A quick signal that hangs on odd rounds, beside a heavy one that holds
+// the turn on even ones: what the heavy one leaves goes to it, though it
+// took its share before, and it is read on the rounds it answers.
+func TestQuickSignalReadWithWhatIsLeft(t *testing.T) {
+	h := shopHistory()
+	s := signalServer(t, h, func(c *Config) { c.Timeout = 600 * time.Millisecond })
+	f := &oddHangs{sigHistory: h, cost: map[string]time.Duration{"http_requests_total > 1e9": 140 * time.Millisecond}, hang: "probe_success == 0"}
+	s.h = f
+	var got []round
+	for k := 1; k <= 16; k++ {
+		f.mu.Lock()
+		f.round = k
+		f.mu.Unlock()
+		got = append(got, readRounds(t, s, k, 1)...)
+	}
+	for k := 4; k <= len(got); k += 2 {
+		if !got[k-1].read["probe"] {
+			t.Errorf("round %d, which the probe answers at once in: unread", k)
 		}
 	}
 }

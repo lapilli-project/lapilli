@@ -646,23 +646,30 @@ As counts and bytes, which the tests hold, not times:
     a restart). The first has its turn, all that is left; the others what
     is still left.
 
-  One missed is read from where it was missed a piece at a time, each
-  over a run's period and the hour before at most, as much as a run
-  asks: on its turn, as many pieces as the time left holds, the rest on
-  its next. One that runs out of time on its turn has twice as much kept
-  for its next, up to `--timeout`; one that runs out with all of it, or
-  near it, doesn't fit, or hangs, and is asked again a round later, then
-  two, four, up to a day of rounds, nothing kept for its turns from the
-  others' shares until it waits that long, and as before once it
-  answers. So any number that hang cost the others a round each, the
-  one in which each is found not to fit, and then one in a day; and one
-  whose run read fits in `--timeout` alone is read on its turn, which
-  comes round to each one missed, and catches up. One left unread is
-  missed for that run. After a round's runs, what each reads, by its
-  match labels: one request a selector it counts, none for a signal
-  matched on no label; and where each signal's data begins: one request
-  a selector, 32 a signal at most, until it is found, as v0.49.0 looks
-  for its one's; each look in turn as the reads are.
+  One missed is read from where it was missed a piece at a time, each over
+  a run's period and the hour before at most, as much as a run asks: on
+  its turn, as many pieces as the time left holds and as one range may
+  hold together (`--max-samples`, its series and labels as one range's),
+  the rest on its next, which goes on before where the last piece ended by
+  the signal's `for` and a step, `--settle` at most, as runs overlap: a
+  window begun there, not yet on for its `for`, is found whole. What is
+  left at the end of a round goes to those left to a later round for what
+  they took before, the one longest without a turn first. One that runs
+  out of time on its turn has twice as much kept for its next, up to
+  `--timeout`; one that runs out with all of it, or near it, doesn't fit,
+  or hangs, and is asked again a round later, then two, four, up to a day
+  of rounds, nothing kept for its turns from the others' shares until it
+  waits that long, and as before once it answers. So any number that hang
+  cost the others a round each, the one in which each is found not to fit,
+  and then one in a day, in each process: how the turns went isn't kept
+  across a restart, nor by another replica that leads; and one whose run
+  read fits in `--timeout` alone is read on its turn, which comes round to
+  each one missed, and catches up. One left unread is missed for that run.
+  After a round's runs, what each reads, by its match labels: one request
+  a selector it counts, none for a signal matched on no label; and where
+  each signal's data begins: one request a selector, 32 a signal at most,
+  until it is found, as v0.49.0 looks for its one's; each look in turn as
+  the reads are.
 - **Reading again**: only the signals added or changed, each one query over
   five weeks at most, within `--max-samples`; each counts as one of the
   twelve reads an admin may ask for in an hour.
@@ -889,7 +896,11 @@ What building the first settled:
   started with another set than the leader) reads it not, and keeps
   nothing of it.
 - **The runs.** Each named signal is read on its own, in turn within
-  `--timeout` (see "Cost"). One that fails, or finds more than 1,000
+  `--timeout` (see "Cost"). A window a read finds begun before where it
+  reads goes on from the one found before with its labels that it meets,
+  to the later end of the two; with none such (begun too late to be found
+  then), it is new. (The unnamed signal's goes on from the last found
+  before, as ever.) One that fails, or finds more than 1,000
   windows in a read or 2,000 in its week, is missed: the run records the
   rest, the signal's row keeps where it was first missed, and a later run
   reads it from there, within a week; past a week it begins again, as one

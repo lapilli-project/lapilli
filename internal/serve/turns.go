@@ -72,7 +72,9 @@ func (e errWaiting) Error() string {
 //     first. The first has its turn: all that is left. The others have
 //     what is still left.
 //
-// One that runs out of time on its turn is asked again a round later,
+// What is left at the end goes to those left to a later round for what
+// they took before. One that runs out of time on its turn is asked again a
+// round later,
 // then two, four, up to maxTurnWait, and as before once it answers; until
 // it waits maxTurnWait, what is kept for its turn is only what the others
 // leave. stop, of an ask's error, asks no more.
@@ -130,7 +132,7 @@ func (s *Server) inTurn(parent context.Context, kind string, asks []turnAsk, sto
 
 	deadline := time.Now().Add(s.cfg.Timeout)
 	stopped := false
-	ask := func(i int, share time.Duration, turn bool) {
+	ask := func(i int, share time.Duration, turn, spare bool) {
 		a := &asks[i]
 		k := key(a.name)
 		tu.Lock()
@@ -140,9 +142,9 @@ func (s *Server) inTurn(parent context.Context, kind string, asks []turnAsk, sto
 		switch {
 		case stopped || parent.Err() != nil || share <= 0:
 			errs[i] = context.DeadlineExceeded
-		case known && took > share && !turn:
-			// Its turn is asked whatever it took before: what hung may
-			// answer now.
+		case known && took > share && !turn && !spare:
+			// Its turn, and what is left at the end, are asked whatever it
+			// took before: what hung may answer now.
 			errs[i] = errNoTurn
 		default:
 			ctx, cancel := context.WithTimeout(parent, share)
@@ -199,10 +201,27 @@ func (s *Server) inTurn(parent context.Context, kind string, asks []turnAsk, sto
 		default:
 			share = left / time.Duration(len(ahead)-n+1)
 		}
-		ask(i, share, false)
+		ask(i, share, false, false)
 	}
 	for n, i := range behind {
-		ask(i, time.Until(deadline), n == 0)
+		ask(i, time.Until(deadline), n == 0, false)
+	}
+	// What is left, which nothing else would use, to those left to a later
+	// round for what they took before, the one longest without a turn
+	// first: one that took long once, and answers at once now, isn't left
+	// for good to rounds it hangs in.
+	var skipped []int
+	for i, err := range errs {
+		if errors.Is(err, errNoTurn) {
+			skipped = append(skipped, i)
+		}
+	}
+	tu.Lock()
+	slices.SortStableFunc(skipped, byTurn)
+	tu.Unlock()
+	for _, i := range skipped {
+		errs[i] = nil
+		ask(i, time.Until(deadline), false, true)
 	}
 	return errs
 }

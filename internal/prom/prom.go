@@ -653,6 +653,21 @@ func (c *Client) fetch(ctx context.Context, expr string, start, end time.Time, s
 	return got, nil
 }
 
+// Tally counts what the answers to several ranges, read one after
+// another and held together, hold in all, as the answers to one range are
+// counted (maxRangeSeries, maxSamples, maxRangeLabels): so that pieces
+// held at once are held to what one range may hold.
+type Tally struct{ t tally }
+
+// NewTally is a Tally held to maxSamples samples (a Client's MaxSamples).
+func NewTally(maxSamples int) *Tally {
+	return &Tally{t: tally{keys: map[string]bool{}, maxSamples: maxSamples}}
+}
+
+// Add counts part's series with those before, and says when they come to
+// more than one range may hold.
+func (t *Tally) Add(part []Series) error { return t.t.add(part) }
+
 // tally is what the answers to one range have held so far: its series,
 // told apart by their labels, their samples and what their labels take;
 // maxSamples the most samples they may hold (the Client's).

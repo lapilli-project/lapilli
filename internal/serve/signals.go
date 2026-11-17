@@ -17,6 +17,7 @@ import (
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/source"
 	"lapilli.dev/internal/verdict"
 )
@@ -195,7 +196,8 @@ func (s *Server) signalsRead(parent context.Context, from, to time.Time, f *ledg
 			}
 			asks[i].took = piece
 			if end.Before(to) {
-				r.To = end // behind still, from there
+				// Behind still: from a little before there.
+				r.To = ledger.PieceResume(end, d.For, s.cfg.Settle, s.cfg.Step)
 			}
 			r.Windows = incident.FromSignal(series, s.cfg.Step, d.For, d.Name, d.Match)
 			// Those of its week kept before its read, which it doesn't put
@@ -251,10 +253,13 @@ func (s *Server) signalsRead(parent context.Context, from, to time.Time, f *ledg
 // each over a run's span at most, as much as a run's own read asks, so
 // that catching up after a miss never asks more than a run does at once;
 // another piece while what is left of ctx's time would hold one more,
-// as long as the last took. It returns the series of every piece, one
-// series a set of labels, where the pieces got to (to, or short of it, for
-// the next turn to go on from) and the longest a piece took. A piece that
-// fails after one that answered ends the pieces, those read kept.
+// as long as the last took, and while what they hold together is within
+// what one range may hold (prom.Tally, --max-samples): the piece past it
+// is let go, and the next turn reads it. It returns the series of every
+// piece, one series a set of labels, where the pieces got to (to, or short
+// of it, for the next turn to go on from, a little before: PieceResume)
+// and the longest a piece took. A piece that fails after one that
+// answered ends the pieces, those read kept.
 func (s *Server) readPieces(ctx context.Context, expr string, from, to time.Time, span time.Duration, behind bool) ([]prom.Series, time.Time, time.Duration, error) {
 	if !behind || span <= 0 {
 		series, err := s.h.QueryRange(ctx, expr, from.Add(-time.Hour), to, s.cfg.Step)
@@ -262,6 +267,12 @@ func (s *Server) readPieces(ctx context.Context, expr string, from, to time.Time
 	}
 	var out []prom.Series
 	var longest time.Duration
+	most := prom.DefaultMaxSamples
+	if m, ok := replay.Base(s.h).(interface{ MaxSamples() int }); ok && m.MaxSamples() > 0 {
+		most = m.MaxSamples()
+	}
+	held := prom.NewTally(most)
+	samples, last := 0, 0 // held in all, and of the last piece
 	at := from
 	for {
 		end := to
@@ -276,6 +287,17 @@ func (s *Server) readPieces(ctx context.Context, expr string, from, to time.Time
 			}
 			return out, at, longest, nil
 		}
+		if err := held.Add(series); err != nil {
+			if at.Equal(from) {
+				return nil, from, 0, err
+			}
+			return out, at, longest, nil
+		}
+		last = 0
+		for _, x := range series {
+			last += len(x.Samples)
+		}
+		samples += last
 		out = mergeSeries(out, series)
 		at = end
 		took := time.Since(start)
@@ -284,6 +306,10 @@ func (s *Server) readPieces(ctx context.Context, expr string, from, to time.Time
 			return out, at, longest, nil
 		}
 		if dl, ok := ctx.Deadline(); !ok || time.Until(dl) < took+took/2 {
+			return out, at, longest, nil
+		}
+		// Nor one that, as large as the last, would hold more in all.
+		if samples+last > most {
 			return out, at, longest, nil
 		}
 	}
