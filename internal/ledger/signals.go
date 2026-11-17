@@ -353,7 +353,7 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 			}
 			if !slices.Equal(r.Match, d.Match) || (r.Match == nil) != (d.Match == nil) {
 				// Of other labels, what it has seen begins again.
-				if _, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET seen = '', seen_to = 0 WHERE name = ?", d.Name); err != nil {
+				if err := seenAgain(t, r); err != nil {
 					return err
 				}
 			}
@@ -391,8 +391,12 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 		if named := slices.ContainsFunc(defs, func(d SignalDef) bool { return d.Name != "" }); named && was2 != matchKey(match) {
 			if was2 != "" {
 				out.Set = true
-				if _, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET seen = '', seen_to = 0 WHERE name != '' AND match_labels IS NULL"); err != nil {
-					return err
+				for _, d := range defs {
+					if r, ok := byName[d.Name]; ok && d.Name != "" && d.Match == nil {
+						if err := seenAgain(t, r); err != nil {
+							return err
+						}
+					}
 				}
 			}
 			if err := setMeta(t.ctx, t, metaSignalsMatch, matchKey(match)); err != nil {
@@ -417,6 +421,19 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 		return nil
 	})
 	return out, err
+}
+
+// seenAgain begins again what a signal has seen, of other labels: looked
+// at again from where its reads began (its since), so that a value it
+// read only in the weeks before is learned again; from its next read, for
+// one with no since yet.
+func seenAgain(t *txn, r SignalRow) error {
+	var from int64
+	if !r.Kept.Since.IsZero() {
+		from = r.Kept.Since.Unix()
+	}
+	_, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET seen = '', seen_to = ? WHERE name = ?", from, r.Name)
+	return err
 }
 
 // freeBit is the lowest bit no signal has and no alert or tally carries;

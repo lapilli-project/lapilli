@@ -429,7 +429,8 @@ than it needs. Where each value's data begins, apart from the signal's,
 is not looked for, as v0.49.0 looks per selector, not per series. What a
 signal has seen is kept of its `match` labels in effect: one given anew,
 or the match in effect changed for a signal that follows it, begins it
-again, and so does a read again, from the span it reads.
+again, looked at from where its reads began, and so does a read again,
+from the span it reads.
 
 **Changing signals**, per signal:
 

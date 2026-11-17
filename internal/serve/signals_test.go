@@ -1227,3 +1227,45 @@ func TestUnnamedWindowLongLabelKeepsKey(t *testing.T) {
 		t.Errorf("found again: %s %q, instance of %d bytes; was %s", again.ID, again.State, len(again.Labels["instance"][0]), first.ID)
 	}
 }
+
+// lookStarts notes where each look at what a signal reads starts.
+type lookStarts struct {
+	*sigHistory
+	starts map[string]time.Time
+}
+
+func (h *lookStarts) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	if strings.HasPrefix(expr, "count by (") {
+		h.mu.Lock()
+		if h.starts == nil {
+			h.starts = map[string]time.Time{}
+		}
+		h.starts[expr] = start
+		h.mu.Unlock()
+	}
+	return h.sigHistory.QueryRange(ctx, expr, start, end, step)
+}
+
+// With the match in effect changed, what a signal reads is looked at
+// again from where its reads began, its since: a value read only in the
+// weeks before is learned again, not only from the next run on.
+func TestSignalSeenAgainFromSince(t *testing.T) {
+	ctx := context.Background()
+	h := shopHistory()
+	s := signalServer(t, h, nil)
+	k, err := s.l.SignalKept(ctx, "errors")
+	if err != nil || k.Since.IsZero() {
+		t.Fatalf("%+v %v", k, err)
+	}
+	w := &lookStarts{sigHistory: h}
+	s.h = w
+	if err := s.l.SetSettings(ctx, map[string]string{"match": "service,team"}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	runDue(s, 1)
+	s.jobs(ctx, true)
+	at, ok := w.starts["count by (service, team) (http_requests_total)"]
+	if !ok || at.After(k.Since) {
+		t.Errorf("looked at again from %s (asked %v); its reads began %s", at, ok, k.Since)
+	}
+}
