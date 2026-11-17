@@ -727,15 +727,26 @@ func (l *Ledger) impact(t *txn, r signalRun, found []incident.Incident, fresh bo
 			// the later end of the two (the same one, found again in the
 			// hour before); one of none such, which began too late to be
 			// found then (not yet on for its for), is put in as new.
-			key, end, err := goesOn(t, r, from, in)
+			key, start, end, was, err := goesOn(t, r, from, in)
 			if err != nil {
 				return 0, err
 			}
 			if key != "" {
-				if in.End.Unix() > end {
-					if _, err := t.ExecContext(t.ctx, "UPDATE incidents SET end_at = ? WHERE key = ?", in.End.Unix(), key); err != nil {
+				// With every value of the labels both have, as windows
+				// found together that overlap are one (incident.FromImpact).
+				merged, err := json.Marshal(orEmpty(keptWindowLabels(mergeLabels(was, in.Labels))))
+				if err != nil {
+					return 0, err
+				}
+				before, err := json.Marshal(orEmpty(was))
+				if err != nil {
+					return 0, err
+				}
+				if in.End.Unix() > end || string(merged) != string(before) {
+					if _, err := t.ExecContext(t.ctx, "UPDATE incidents SET end_at = ?, labels = ? WHERE key = ?", max(in.End.Unix(), end), string(merged), key); err != nil {
 						return 0, err
 					}
+					lo = min(lo, start) // its firings judged again
 				}
 				continue
 			}
@@ -785,30 +796,52 @@ func (l *Ledger) impact(t *txn, r signalRun, found []incident.Incident, fresh bo
 // goesOn is the window of r's signal, begun before from, that in, found
 // from before from too, is: with labels in shares a value of each of
 // (share), and on at some time in it (its end at in's start or later, its
-// start by in's end), the latest begun of several; its key and end, or ""
-// for none.
-func goesOn(t *txn, r signalRun, from int64, in incident.Incident) (string, int64, error) {
-	rows, err := t.QueryContext(t.ctx, `SELECT key, end_at, labels FROM incidents WHERE origin = 'impact' AND signal = ? AND start_at < ? AND end_at >= ? AND start_at <= ?
+// start by in's end), the latest begun of several; its key, start, end
+// and labels, or "" for none.
+func goesOn(t *txn, r signalRun, from int64, in incident.Incident) (string, int64, int64, incident.Labels, error) {
+	rows, err := t.QueryContext(t.ctx, `SELECT key, start_at, end_at, labels FROM incidents WHERE origin = 'impact' AND signal = ? AND start_at < ? AND end_at >= ? AND start_at <= ?
 		ORDER BY start_at DESC, key`, r.name, from, in.Start.Unix(), in.End.Unix())
 	if err != nil {
-		return "", 0, err
+		return "", 0, 0, nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var key, labels string
-		var end int64
-		if err := rows.Scan(&key, &end, &labels); err != nil {
-			return "", 0, err
+		var start, end int64
+		if err := rows.Scan(&key, &start, &end, &labels); err != nil {
+			return "", 0, 0, nil, err
 		}
 		var l incident.Labels
 		if err := json.Unmarshal([]byte(labels), &l); err != nil {
-			return "", 0, err
+			return "", 0, 0, nil, err
 		}
 		if share(l, in.Labels) {
-			return key, end, nil
+			return key, start, end, l, nil
 		}
 	}
-	return "", 0, rows.Err()
+	return "", 0, 0, nil, rows.Err()
+}
+
+// mergeLabels are a and b as one window's, as incident.FromImpact merges
+// windows that overlap: the labels both have, with every value of each,
+// in order.
+func mergeLabels(a, b incident.Labels) incident.Labels {
+	out := incident.Labels{}
+	for k, va := range a {
+		vb, ok := b[k]
+		if !ok {
+			continue
+		}
+		vs := slices.Clone(va)
+		for _, v := range vb {
+			if !slices.Contains(vs, v) {
+				vs = append(vs, v)
+			}
+		}
+		slices.Sort(vs)
+		out[k] = vs
+	}
+	return out
 }
 
 // PieceResume is where a read of a named signal catching up after a miss,
@@ -816,9 +849,11 @@ func goesOn(t *txn, r signalRun, from int64, in incident.Incident) (string, int6
 // it by the signal's for and a step, so that a window begun within it,
 // not yet on for its for at end, is found whole by the next, as a run's
 // read is after the run before; by settle at most, as runs overlap, so
-// that each turn gets further.
+// that each turn gets further; on the step's grid.
 func PieceResume(end time.Time, signalFor, settle, step time.Duration) time.Time {
-	return end.Add(-min(signalFor+step, max(settle, 0)))
+	// On the step's grid, as a run's from is, the overlap only longer: a
+	// range is evaluated at its start, and a step on from it.
+	return end.Add(-min(signalFor+step, max(settle, 0))).Truncate(step)
 }
 
 // keptWindowLabels are a named signal's window's labels as the ledger

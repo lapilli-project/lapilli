@@ -17,8 +17,10 @@ import (
 // A named signal caught up after a miss a piece at a time, as lapilli
 // serve reads it (a turn's pieces to E, the next turn on from PieceResume
 // before E), leaves the ledger as one read over the whole gap at once:
-// the same windows, keys and bounds, the same firings tied to the same
-// signals, the same stones and the same weeks.
+// the same windows, keys, bounds and labels, the same firings tied to the
+// same signals, the same stones and the same weeks. (A window found short
+// in one piece and much longer in the next can take a key of its own,
+// "-2", as at runs' boundaries: no case here is one.)
 func TestPiecesEqualWhole(t *testing.T) {
 	ctx := context.Background()
 	T := t0.Add(6 * time.Hour) // where it was missed from
@@ -58,6 +60,19 @@ func TestPiecesEqualWhole(t *testing.T) {
 		{"a for longer than the hour before, within --settle, not yet on at the boundary", 90 * time.Minute, 2 * time.Hour,
 			[]prom.Series{minutes("cart", E.Add(-80*time.Minute), E.Add(40*time.Minute))},
 			[]firing.Firing{alert("cart", E.Add(15*time.Minute))}, time.Time{}},
+		// Read whole, the two overlap and are one window, with both values;
+		// in pieces, the one found before goes on with the other's too.
+		{"a window on across the boundary, another series begun after it", 5 * time.Minute, time.Hour,
+			[]prom.Series{minutes("checkout", E.Add(-30*time.Minute), E.Add(30*time.Minute)), minutes("cart", E.Add(5*time.Minute), E.Add(20*time.Minute))},
+			// The first cart firing long before where the next turn reads,
+			// in the window: judged again with its labels.
+			[]firing.Firing{alert("cart", E.Add(-25*time.Minute)), alert("cart", E.Add(10*time.Minute)), alert("checkout", E.Add(12*time.Minute))}, time.Time{}},
+		// The next turn reads on the step's grid, as a range is evaluated
+		// a step at a time from its start: off it, the window would start
+		// half a step late, past the lead of a firing before it.
+		{"a for not a multiple of the step", 90 * time.Second, time.Hour,
+			[]prom.Series{minutes("cart", E.Add(5*time.Minute), E.Add(20*time.Minute))},
+			[]firing.Firing{alert("cart", E.Add(-10*time.Minute))}, time.Time{}},
 		// A for longer than --settle: the overlap is --settle, and a window
 		// not yet on at the boundary begins before where the next turn
 		// reads, in the hour before it, with another ended there: put in as
@@ -72,13 +87,16 @@ func TestPiecesEqualWhole(t *testing.T) {
 				E = c.e
 			}
 			end := E.Add(4 * time.Hour)
+			// What a range over [lo, hi] answers: each series, while on, at
+			// lo, lo+step, …, as Prometheus evaluates a range.
 			slice := func(lo, hi time.Time) []prom.Series {
 				var out []prom.Series
 				for _, s := range c.series {
+					on, off := s.Samples[0].T, s.Samples[len(s.Samples)-1].T
 					x := prom.Series{Labels: s.Labels}
-					for _, p := range s.Samples {
-						if !p.T.Before(lo) && !p.T.After(hi) {
-							x.Samples = append(x.Samples, p)
+					for at := lo; !at.After(hi); at = at.Add(time.Minute) {
+						if !at.Before(on) && !at.After(off) {
+							x.Samples = append(x.Samples, prom.Sample{T: at, V: 1})
 						}
 					}
 					if len(x.Samples) > 0 {
