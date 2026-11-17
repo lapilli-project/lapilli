@@ -100,8 +100,8 @@ func (p filePath) name(l string) string {
 // filePaths are the paths of the files and directories serve was started
 // with, by the flag that gave each: as given, with no separator at its
 // end, and cleaned, as a path joined under a directory says it
-// (filepath.Join); the longest first, so that one inside another is taken
-// out before it. A value that doesn't read as a path once its separators
+// (filepath.Join), and where it leads; the longest first, so that one
+// inside another is taken out before it. A value that doesn't read as a path once its separators
 // at the end are let go (pathLike) is left, so that a bare name, --rules
 // rules or --rules rules/, doesn't take its word out of every sentence.
 // --impact-file and --on-call aren't among them: they are read once, as
@@ -130,9 +130,17 @@ func (s *Server) filePaths() []filePath {
 		}
 	}
 	for _, p := range given {
-		if p.path != "" {
-			add(p.path, p.flag)
-			add(filepath.Clean(p.path), p.flag)
+		if p.path == "" {
+			continue
+		}
+		add(p.path, p.flag)
+		add(filepath.Clean(p.path), p.flag)
+		// And where it leads, should it be a link or under one: what is
+		// walked behind one is said there, as a history a git-sync or a
+		// mounted volume keeps behind a link is (rules.History). As it
+		// leads now, where it can be told.
+		if real, err := filepath.EvalSymlinks(p.path); err == nil {
+			add(real, p.flag)
 		}
 	}
 	slices.SortStableFunc(out, func(a, b filePath) int { return len(b.path) - len(a.path) })

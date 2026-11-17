@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"lapilli.dev/internal/rules"
 )
 
 // putAs writes an incident through the incidents port, with the token.
@@ -263,5 +265,37 @@ func TestRedactPathsWhole(t *testing.T) {
 	ps := []filePath{{"x/y", "--rules"}, {"given", "--ledger"}}
 	if got, want := hidePaths("open x/y: given up", ps, "en"), "open the path given to --rules: the path given to --ledger up"; got != want {
 		t.Errorf("became %q, want %q", got, want)
+	}
+}
+
+// A history behind a link, as a git-sync or a mounted volume keeps one, is
+// walked where the link leads (rules.History), and what fails there says
+// that path: it is taken out too, as the path given is.
+func TestRedactPathsLinkTarget(t *testing.T) {
+	base := t.TempDir()
+	real := filepath.Join(base, "store", "rev-1")
+	team := filepath.Join(real, "2026-11-01T00:00:00Z", "team")
+	if err := os.MkdirAll(team, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(team, "r.yaml"), []byte("groups: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "versions")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(team, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(team, 0o755) })
+	_, err := rules.History(link)
+	if err == nil {
+		t.Skip("the version was walked: this user reads what it may not")
+	}
+	s := &Server{cfg: Config{RulesHistory: link}}
+	got := s.redactPaths("reading the rules: --rules-history: "+err.Error(), "en")
+	if strings.Contains(got, "store") || !strings.Contains(got, "the path given to --rules-history/2026-11-01T00:00:00Z/team") {
+		t.Errorf("%v\n became %q", err, got)
 	}
 }
