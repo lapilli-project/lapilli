@@ -399,7 +399,10 @@ they are compared. The port is off unless both flags are given.
 the ledger again can also be changed in the UI**: `--lead`, `--match`,
 `--refire`, `--noisy-firings`, `--noisy-precision`. A change is kept with who
 made it, can be tried on the last week before it is saved, and
-`/settings.yaml` gives the changes as Helm values to commit.
+`/settings.yaml` gives the changes as Helm values to commit. A try judges
+seven days again in the heavy turn, so it is an admin's, as saving is,
+asked for from the Settings page on this site, twelve an hour a person,
+counted apart from the tries of the impact criterion.
 
 **The impact criterion.** `--impact` and `--impact-for` can be changed in
 the UI too, by an admin (ui.md, "Incident criteria"), though they read

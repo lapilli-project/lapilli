@@ -2141,5 +2141,7 @@
  "not known: no record; %d came while people slept (%s)": "不明: 記録なし。人が寝ている時間に %d 件 (%s)",
  "Pick rules in the list to make a task for each, set their team or disposition, or propose a change for each.": "一覧でルールを選ぶと、それぞれにタスクを作る、チームや対応方針を設定する、変更を提案する、ができます。",
  "A firing that caught nothing but was a real problem nobody wrote down: say so, and it is written down as an incident, from the firing's start and end.": "何も検知しなかったものの、実際には誰も記録していない問題だった発火があれば、そう指定してください。その発火の開始と終了でインシデントとして記録します。",
- "no record to judge it by: counted, not judged": "判定する記録がない: 数えるだけで判定しない"
+ "no record to judge it by: counted, not judged": "判定する記録がない: 数えるだけで判定しない",
+ "a try of the settings judges the last week again, so it is asked for from the Settings page, in a browser, on this site": "設定を試すと直近 1 週間を判定し直すため、このサイトの設定ページから、ブラウザでだけ依頼できます",
+ "you have tried the settings on the last week as many times in the last hour as anyone may: each judges a week of firings again; try again later": "直近 1 時間に直近 1 週間で設定を試せる回数を使い切りました。毎回 1 週間分の発火を判定し直すためです。後でもう一度試してください"
 }

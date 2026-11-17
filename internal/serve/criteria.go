@@ -283,13 +283,20 @@ func fromHere(r *http.Request) bool {
 // reporting whether they may: in the ledger the replicas share, or this
 // process's.
 func (s *Server) takeTry(ctx context.Context, who string) bool {
+	return s.takeOf(ctx, &s.impactTries, "impact-tries/", impactTriesAnHour, who)
+}
+
+// takeOf counts one of who's tries in t, most of them an hour, reporting
+// whether they may: in the ledger the replicas share, in a bucket named
+// by prefix and who, or else in t, this process's.
+func (s *Server) takeOf(ctx context.Context, t *tries, prefix string, most int, who string) bool {
 	if !s.l.Shared() {
-		return s.impactTries.take(who, false, time.Now())
+		return t.take(who, false, time.Now())
 	}
 	sum := sha256.Sum256([]byte(ledger.FoldName(who)))
-	ok, err := s.l.Take(ctx, "impact-tries/"+hex.EncodeToString(sum[:8]), impactTriesAnHour/3600.0, impactTriesAnHour, 1)
+	ok, err := s.l.Take(ctx, prefix+hex.EncodeToString(sum[:8]), float64(most)/3600, float64(most), 1)
 	if err != nil {
-		s.log.Warn("the shared limit on tries of the incident criteria couldn't be read: refused", "err", err)
+		s.log.Warn("a shared limit on tries couldn't be read: refused", "limit", strings.TrimSuffix(prefix, "/"), "err", err)
 	}
 	return ok && err == nil
 }

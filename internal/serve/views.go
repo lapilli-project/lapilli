@@ -2000,6 +2000,24 @@ func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
 	return v, nil
 }
 
+// settingsTriesAnHour are the tries of the settings on the last week a
+// person may ask for in an hour: each judges seven days of firings again
+// in the heavy turn, which reports, goals and the tries of the incident
+// criteria wait for. Kept as those tries are (takeOf), in the ledger for
+// every replica when replicas share it, but apart from them: a try of the
+// incident criteria reads Prometheus, whose reads impactTriesAnHour is
+// for, and this one reads the ledger alone, so trying a lead or a refire
+// spends none of them, nor is refused for reading Prometheus too often.
+const settingsTriesAnHour = 12
+
+// errSettingsNotFromHere is a try of the settings not asked for from the
+// Settings page, in a browser, on this site: a link from another site
+// would hold the heavy turn for whoever follows it.
+var errSettingsNotFromHere = bad("a try of the settings judges the last week again, so it is asked for from the Settings page, in a browser, on this site")
+
+// errSettingsTries is a try of the settings past settingsTriesAnHour.
+var errSettingsTries = bad("you have tried the settings on the last week as many times in the last hour as anyone may: each judges a week of firings again; try again later")
+
 func (s *Server) settingsPage(r *http.Request) (any, error) {
 	v, err := s.settingsView(r.Context())
 	if err != nil {
@@ -2036,6 +2054,15 @@ func (s *Server) settingsPage(r *http.Request) (any, error) {
 	if r.URL.Query().Get("try") == "" {
 		return v, nil
 	}
+	// A try judges the last seven days again, in the heavy turn: asked by
+	// whoever may save the settings it tries, an admin, from the Settings
+	// page on this site, settingsTriesAnHour a person.
+	if s.role(r) != admin {
+		return nil, s.forbidden(admin)
+	}
+	if !fromHere(r) {
+		return nil, errSettingsNotFromHere
+	}
 	o, err := s.options(r.Context())
 	if err != nil {
 		return nil, err
@@ -2047,6 +2074,9 @@ func (s *Server) settingsPage(r *http.Request) (any, error) {
 				return nil, bad("%s %s: %v", st.flag, val, err)
 			}
 		}
+	}
+	if !s.takeOf(r.Context(), &s.settingsTries, "settings-tries/", settingsTriesAnHour, s.user(r)) {
+		return nil, errSettingsTries
 	}
 	to := s.now()
 	done, err := s.heavyTurn(r.Context(), to.Add(-7*24*time.Hour), to)

@@ -94,7 +94,7 @@ func TestHeavyHoldsNoTurn(t *testing.T) {
 	codes := make(chan int, pageRenders+1)
 	for range pageRenders + 1 {
 		go func() {
-			code, _, _ := get(t, h, "/settings?try=1&lead=1h")
+			code, _ := askAs(t, h, http.MethodGet, "/settings?try=1&lead=1h", nil, "", "same-origin")
 			codes <- code
 		}()
 	}
