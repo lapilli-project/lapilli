@@ -208,13 +208,25 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 	from, to := s.l.Midnight(a.day), s.l.Midnight(a.day+1)
 	fq := ledger.FiringQuery{From: from, To: to, Rule: a.rule, Black: a.black, Kind: a.kind}
 	// A firing that caught nothing is judged, or only counted, as the
-	// report says it: by everyone's incidents (the page has no team), its
-	// week's record or the signals tied to it.
+	// report says it: its week's record or the signals tied to it, by
+	// everyone's incidents; or, one rule's firings come to from its page
+	// seen from its team's (?team=), by the incidents the team owns, as
+	// that page judged them.
 	o, err := s.options(ctx)
 	if err != nil {
 		return nil, err
 	}
-	judge, err := s.judgeOver(ctx, from, to, o, nil)
+	var keeps func(ledger.Incident) bool
+	if a.rule != "" && q.Get("team") != "" {
+		own, err := s.owners(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if team, ok := own.team(q.Get("team")); ok && own.rule[a.rule] == team.ID {
+			keeps = teamKeeps(own, &team)
+		}
+	}
+	judge, err := s.judgeOver(ctx, from, to, o, keeps)
 	if err != nil {
 		return nil, err
 	}

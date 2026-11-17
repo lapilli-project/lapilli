@@ -84,7 +84,6 @@ func TestNotJudgedAlike(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		s    func(*testing.T) *Server
-		from string
 	}{
 		{"no record, no named signal", func(t *testing.T) *Server {
 			s, _ := server(t, nil)
@@ -94,13 +93,14 @@ func TestNotJudgedAlike(t *testing.T) {
 			}
 			s.jobs(ctx, true)
 			return s
-		}, "2026-10-26T00:00:00Z"},
-		{"named signals, one waiting", func(t *testing.T) *Server { return signalServer(t, shopHistory(), nil) }, "2026-11-02T00:00:00Z"},
+		}},
+		{"named signals, one waiting", func(t *testing.T) *Server { return signalServer(t, shopHistory(), nil) }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s := c.s(t)
 			h := s.Handler()
-			code, body, _ := get(t, h, "/api/v1/report?from="+c.from+"&to=2026-11-03T12:00:00Z")
+			// Every firing the ledger has, as the report judges each.
+			code, body, _ := get(t, h, "/api/v1/report?from=2026-10-05T00:00:00Z&to=2026-11-04T00:00:00Z")
 			if code != http.StatusOK {
 				t.Fatalf("report: %d %s", code, body)
 			}
@@ -120,9 +120,18 @@ func TestNotJudgedAlike(t *testing.T) {
 					if want.unjudged > 0 && (len(cells) < 4 || cells[2] != want.black || cells[3] != want.unjudged) {
 						t.Errorf("%s, %s: the rule's strip has %v; the report, %d black and %d not judged", rule, day, cells, want.black, want.unjudged)
 					}
-					// Its latest firings, one by one.
-					if _, tab, _ := get(t, h, "/rules/"+rule+"?tab=firings"); want.unjudged > 0 && !strings.Contains(tab, "? not judged</span>") {
-						t.Errorf("%s: its latest firings call none not judged", rule)
+					// Its latest firings, one by one: as many not judged as
+					// the report has of the rule (fewer than a page of them).
+					ruleUnjudged := 0
+					for _, d := range days {
+						ruleUnjudged += d.unjudged
+					}
+					if _, tab, _ := get(t, h, "/rules/"+rule+"?tab=firings"); strings.Count(tab, "? not judged</span>") != ruleUnjudged {
+						t.Errorf("%s: its latest firings call %d not judged, the report %d", rule, strings.Count(tab, "? not judged</span>"), ruleUnjudged)
+					}
+					// The rules list's spark, week by week, says them apart.
+					if _, list, _ := get(t, h, "/rules?weeks=12"); !strings.Contains(list, "not judged</title>") {
+						t.Errorf("%s: the rules list's spark says none not judged", rule)
 					}
 					// The day's firings by the hour, all rules.
 					_, fp, _ := get(t, h, "/firings?day="+day)
@@ -146,7 +155,56 @@ func TestNotJudgedAlike(t *testing.T) {
 			if unjudged == 0 {
 				t.Fatal("no firing that isn't judged: the case tests nothing")
 			}
+			// The overview's weeks: ● and not judged, as the report of
+			// each week counts them.
+			_, ov, _ := get(t, h, "/")
+			row := regexp.MustCompile(`(?s)<span class="d">(\d{4}-\d{2}-\d{2})</span>.*?</td>\s*<td class="n">(\d+)</td><td class="n">(\d+)</td><td class="n">(\d+)</td><td class="n">(\d+)</td>`)
+			weeks := 0
+			for _, m := range row.FindAllStringSubmatch(ov, -1) {
+				monday, err := time.ParseInLocation("2006-01-02", m[1], s.cfg.Loc)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var wk verdict.Report
+				_, wb, _ := get(t, h, "/api/v1/report?from="+monday.UTC().Format(time.RFC3339)+"&to="+monday.AddDate(0, 0, 7).UTC().Format(time.RFC3339))
+				if err := json.Unmarshal([]byte(wb), &wk); err != nil {
+					t.Fatal(err)
+				}
+				black, un := 0, 0
+				for _, f := range wk.Firings {
+					switch {
+					case f.White:
+					case f.NoRecord:
+						un++
+					default:
+						black++
+					}
+				}
+				if got := m[4] + " " + m[5]; got != strconv.Itoa(black)+" "+strconv.Itoa(un) {
+					t.Errorf("the overview's week of %s: ● and not judged %s; the report, %d %d", m[1], got, black, un)
+				}
+				weeks++
+			}
+			if weeks == 0 {
+				t.Error("the overview's weeks table has no column of the not judged")
+			}
 		})
+	}
+}
+
+// A week's firings not judged are in the chart's legend and the table's
+// column however few of them are drawn: a sliver too thin to draw beside a
+// tall week still has its column.
+func TestStonesChartUnjudgedTooThinToDraw(t *testing.T) {
+	ws := []*weekView{
+		{Start: now.AddDate(0, 0, -14), Firings: 600, Black: 600, Kept: true},
+		{Start: now.AddDate(0, 0, -7), Firings: 30, White: 10, Black: 20, Kept: true, Unjudged: 1},
+	}
+	if c := stonesChart("en", ws, time.UTC); !c.Unjudged {
+		t.Error("one firing not judged beside 600: no legend, no column")
+	}
+	if c := stonesChart("en", ws[:1], time.UTC); c.Unjudged {
+		t.Error("none not judged, and the legend names them")
 	}
 }
 

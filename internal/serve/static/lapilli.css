@@ -185,6 +185,7 @@ rect.w { fill: var(--white); stroke: var(--ink); stroke-width: .8; }
 rect.b { fill: var(--black); }
 .spark { vertical-align: middle; }
 .spark rect.w { stroke-width: .5; }
+.spark rect.u { fill: var(--viz-unjudged); stroke: var(--viz-nothing); stroke-width: .5; }
 .w-dot, .b-dot { font-weight: 600; }
 form.grid { display: grid; gap: .7rem; max-width: 34rem; }
 form.row { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: end; margin-bottom: 1rem; }
@@ -443,7 +444,10 @@ fieldset.bulk-bar p { margin: 0; flex-basis: 100%; }
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; margin: 0; max-height: 45vh; overflow-y: auto;
     border-radius: 12px 12px 0 0; box-shadow: 0 -6px 18px rgb(0 0 0 / .16);
   }
-  main:has(form.bulk .bulk-hint):has(input[name=rule]:checked) { padding-bottom: 18rem; }
+  /* What takes the focus, or is scrolled to, stops above the bar; and the
+     list's last rows can be scrolled clear of it, however tall it is. */
+  html:has(form.bulk .bulk-hint):has(form.bulk input[name=rule]:checked) { scroll-padding-bottom: calc(45vh + 1rem); }
+  main:has(form.bulk .bulk-hint):has(input[name=rule]:checked) { padding-bottom: calc(45vh + 1rem); }
 }
 .bulk-set { display: inline-flex; flex-wrap: wrap; align-items: end; gap: .4rem; min-width: 0; max-width: 100%; }
 td.pick, th.pick, .rules-main table .pick { width: 2rem; padding-right: 0; }

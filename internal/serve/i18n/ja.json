@@ -2103,10 +2103,10 @@
  "%d caught nothing, %d not judged, %d excused": "検知なし %d 件、判定なし %d 件、免除 %d 件",
  "%d fired, %d caught something, %d caught nothing, %d not judged, %d excused": "発火 %d 件、検知 %d 件、検知なし %d 件、判定なし %d 件、免除 %d 件",
  "only those that caught nothing": "何も検知しなかったもののみ",
- "no incident written down in its week or the two weeks before it: counted, not judged": "その週にも、その前の 2 週間にも記録されたインシデントがない: 数えるだけで判定しない",
  "not known: no record": "不明: 記録なし",
  "not known: no record; %d notifications came while people slept that week (counted since %s)": "不明: 記録なし。その週、人が寝ている時間に通知が %d 件届いた (%s から数えている)",
  "not known: no record; %d came while people slept (%s)": "不明: 記録なし。人が寝ている時間に %d 件 (%s)",
  "Pick rules in the list to make a task for each, set their team or disposition, or propose a change for each.": "一覧でルールを選ぶと、それぞれにタスクを作る、チームや対応方針を設定する、変更を提案する、ができます。",
- "A firing that caught nothing but was a real problem nobody wrote down: say so, and it is written down as an incident, from the firing's start and end.": "何も検知しなかったものの、実際には誰も記録していない問題だった発火があれば、そう指定してください。その発火の開始と終了でインシデントとして記録します。"
+ "A firing that caught nothing but was a real problem nobody wrote down: say so, and it is written down as an incident, from the firing's start and end.": "何も検知しなかったものの、実際には誰も記録していない問題だった発火があれば、そう指定してください。その発火の開始と終了でインシデントとして記録します。",
+ "no record to judge it by: counted, not judged": "判定する記録がない: 数えるだけで判定しない"
 }

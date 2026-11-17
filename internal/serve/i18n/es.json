@@ -2103,10 +2103,10 @@
  "%d caught nothing, %d not judged, %d excused": "%d no detectaron nada, %d sin juzgar, %d eximidos",
  "%d fired, %d caught something, %d caught nothing, %d not judged, %d excused": "%d disparos, %d detectaron algo, %d no detectaron nada, %d sin juzgar, %d eximidos",
  "only those that caught nothing": "solo los que no detectaron nada",
- "no incident written down in its week or the two weeks before it: counted, not judged": "ningún incidente registrado en su semana ni en las dos anteriores: se cuenta, no se juzga",
  "not known: no record": "no se sabe: sin registro",
  "not known: no record; %d notifications came while people slept that week (counted since %s)": "no se sabe: sin registro; %d notificaciones llegaron mientras la gente dormía esa semana (contadas desde %s)",
  "not known: no record; %d came while people slept (%s)": "no se sabe: sin registro; %d llegaron mientras la gente dormía (%s)",
  "Pick rules in the list to make a task for each, set their team or disposition, or propose a change for each.": "Elige reglas en la lista para crear una tarea para cada una, fijar su equipo o su disposición, o proponer un cambio para cada una.",
- "A firing that caught nothing but was a real problem nobody wrote down: say so, and it is written down as an incident, from the firing's start and end.": "Un disparo que no detectó nada pero fue un problema real que nadie registró: indícalo y se registra como incidente, con el inicio y el fin del disparo."
+ "A firing that caught nothing but was a real problem nobody wrote down: say so, and it is written down as an incident, from the firing's start and end.": "Un disparo que no detectó nada pero fue un problema real que nadie registró: indícalo y se registra como incidente, con el inicio y el fin del disparo.",
+ "no record to judge it by: counted, not judged": "sin registro con que juzgarlo: se cuenta, no se juzga"
 }

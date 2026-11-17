@@ -2,7 +2,6 @@ package serve
 
 import (
 	"context"
-	"fmt"
 	"maps"
 	"net/http"
 	"net/url"
@@ -899,17 +898,7 @@ func (s *Server) quietLine(name string, d rulesData, meta map[string]ruleMeta) r
 	if rr, ok := t.rules[id]; ok && id != 0 {
 		l.Severity, l.Group, l.Unsupported, l.Source = rr.Severity, rr.Group, rr.Unsupported, rr.Source
 	}
-	most := 1
-	for _, w := range t.weeks {
-		most = max(most, t.by[w][id].Firings)
-	}
-	for i, w := range t.weeks {
-		x := t.by[w][id]
-		const h = 18.0
-		wh, bh := h*float64(x.White)/float64(most), h*float64(x.Black())/float64(most)
-		l.Spark = append(l.Spark, spark{X: float64(i) * 6, WhiteY: h - wh, WhiteH: wh, BlackY: h - wh - bh, BlackH: bh,
-			Title: fmt.Sprintf("%s: %d ○ %d ●", s.l.Midnight(w).In(s.cfg.Loc).Format("01-02"), x.White, x.Black())})
-	}
+	l.Spark = s.sparkOf(d.lang, t, id)
 	l.Severity, l.Group = cmpOr(l.Severity, meta[name].labels["severity"]), cmpOr(l.Group, meta[name].group)
 	l.Team, l.Status = d.own.teamOf(name), d.own.notes[name].Status
 	l.Proposed = d.proposed[name]

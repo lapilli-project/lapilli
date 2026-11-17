@@ -786,6 +786,9 @@ func stacked(l string, ws []*weekView, loc *time.Location, parts func(*weekView)
 			if n == 0 {
 				continue
 			}
+			// Some week has firings not judged: the legend names them, and
+			// the table has their column, however little of them is drawn.
+			c.Unjudged = c.Unjudged || classes[j] == "unjudged"
 			h := plotH * float64(n) / end
 			lo := y
 			if y < base {
@@ -795,7 +798,6 @@ func stacked(l string, ws []*weekView, loc *time.Location, parts func(*weekView)
 			if p := columnPath(x, cw, lo, hi, j == top); p != "" {
 				col.Segments = append(col.Segments, segment{classes[j], p,
 					tr(l, "week of %s: %d %s", w.Start.In(loc).Format("2006-01-02"), n, tr(l, names[j]))})
-				c.Unjudged = c.Unjudged || classes[j] == "unjudged"
 			}
 			y = hi
 		}

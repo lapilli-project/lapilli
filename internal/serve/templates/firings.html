@@ -64,6 +64,6 @@ to say. */}}
 {{/* A firing's stone: ○ caught something, ● caught nothing, judged; one
 that caught nothing with no record to judge it by is neither, as the
 weeks and the summary count it. */}}
-{{define "stone"}}{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else if .Unjudged}}<span class="unjudged" title="{{t "no incident written down in its week or the two weeks before it: counted, not judged"}}">? {{t "not judged"}}</span>{{else}}●{{end}}{{end}}
+{{define "stone"}}{{if .White}}○{{else if .Excused}}◌ {{t "excused"}}{{else if .Unjudged}}<span class="unjudged" title="{{t "no record to judge it by: counted, not judged"}}">? {{t "not judged"}}</span>{{else}}●{{end}}{{end}}
 
 {{define "notified"}}{{if .Notified}}{{.Notified}}{{else if .Counted}}<span class="quiet">{{t "paged no one"}}</span>{{else}}<span class="quiet">–</span>{{end}}{{end}}

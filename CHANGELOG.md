@@ -15,8 +15,12 @@
   list's ● column, counted them with the black. Each now has them apart,
   "? not judged", in a pale cell in the outline of caught nothing, with a
   legend and a table column only when there are some: the overview's
-  chart and table, the rules list's ● column, a rule's numbers, strip, days
-  table and latest firings, and the alert history's hours and firings.
+  chart and table, the rules list's ● column and its twelve weeks' spark,
+  a rule's numbers, strip, days table and latest firings, and the alert
+  history's hours and firings. The rules list is in order of the ● it
+  shows, then of all that caught nothing. One team's rule, seen from its
+  page in the team's pages and on to its firings, is judged by the
+  incidents the team owns there too.
   Each firing is asked as the report asks it, by its week's record, or by
   the signals tied to it (`ledger.Ledger.FiringJudged`,
   `RuleSpansJudged`, `FiringStartsBy`), and a test holds every page's
@@ -30,7 +34,8 @@
 - **The rules list starts near the top.** For one who may use them, the
   controls for the rules picked are shown once a rule is picked, at the
   foot of the window, over the page, so that nothing in the list moves
-  under the pointer; until then one line says what picking does.
+  under the pointer, and what takes the focus stops above them; until
+  then one line says what picking does.
 - **Lighter empty pages.** The tasks page with no task shows no 0 · 0 · 0
   filters; a page with no team or period to pick has its search alone,
   with no card around it. The alert history's "only ● nothing" is "only

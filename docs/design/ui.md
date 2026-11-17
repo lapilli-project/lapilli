@@ -1291,7 +1291,9 @@ for each, a team and Set the team, a disposition and Set the disposition,
 each its own button (`do=task|team|status`). For one who may use it, a line
 over the table says what picking does, and the bar is shown once a rule
 is picked, at the foot of the window, over the page (`:has`), so that the
-list starts near the top and nothing in it moves under the pointer; one
+list starts near the top and nothing in it moves under the pointer; the
+page is scrolled, and padded at its foot, by the bar's tallest, so that
+what takes the focus is never under it (WCAG 2.4.11); one
 who may not sees the bar where it was, disabled, with why, and so does a
 browser without `:has`. There is
 no "pick every row": that takes a script. The firings have the same for
