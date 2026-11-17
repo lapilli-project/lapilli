@@ -94,11 +94,23 @@ func TestPageSaidSecrets(t *testing.T) {
 		{"<html><body>signed in as &#115;3cret-tok", true},
 		{"<html><body>signed in as " + secret[:10] + "\nen", true},
 		{"<html><title>signed in as " + secret[:10], true},
+		{"<html><body>Authorization: Bearer " + half + "\n" + secret[13:] + "</body></html>", false},
+		{"<html><body>Authorization: Bearer s3cret-\ntoken-\n0123456789</body></html>", false},
+		{"<html><title>Bearer " + half + "\n" + secret[13:] + "</title></html>", false},
 	} {
 		got, ok := pageSaid(c.text, c.cut, signed())
 		if !ok || leaks(got) {
 			t.Errorf("%.70q, cut %v: %q", c.text, c.cut, got)
 		}
+	}
+	// A bearer token the request didn't carry, split by a line, is taken
+	// out whole, as serverText takes it of any text.
+	if got, _ := pageSaid("<html><body>Bearer abcdefghijkl-\nmnopqrstuvwx</body></html>", false, nil); strings.Contains(got, "mnop") || strings.Contains(got, "abcd") {
+		t.Errorf("a bearer token not sent: %q", got)
+	}
+	// With nothing to take out, the text is said as its words.
+	if got, _ := pageSaid("<html><title>Not\nFound</title></html>", false, signed()); got != `an HTML page, "Not Found"` {
+		t.Errorf("words a line apart: %q", got)
 	}
 	// Cut, the text before the one it ends in is said.
 	if got, _ := pageSaid("<html><title>Sign in</title><body>as "+secret[:10], true, signed()); got != `an HTML page, "Sign in"` {

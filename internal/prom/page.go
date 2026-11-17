@@ -91,17 +91,18 @@ func pageSaid(text string, cut bool, req *http.Request) (string, bool) {
 }
 
 // pageText is a page's text as pageSaid says it: each run of white space
-// one space, without what doesn't show or what req carried to sign in; and,
-// when one of those is hidden in two by white space or a character that
-// doesn't show, with those taken out before it is looked for, as
-// serverText does, so that it is found (quotedText's way).
+// one space, without what doesn't show or what req carried to sign in.
+// What doesn't show, white space among it, is taken out before a secret
+// is looked for, as serverText does of any text, so that one split in two
+// by it is found; and looked for again once the white space is folded. If
+// that finds anything, it is said so, though two words a line apart run
+// together; with nothing found, the text is said as its words.
 func pageText(raw string, req *http.Request) string {
-	spaced := serverText(strings.Join(strings.Fields(raw), " "), req)
-	joined := strings.Join(strings.Fields(serverText(raw, req)), " ")
-	if strings.Count(joined, "[redacted]") > strings.Count(spaced, "[redacted]") {
+	joined := serverText(strings.Join(strings.Fields(serverText(raw, req)), " "), req)
+	if strings.Contains(joined, "[redacted]") {
 		return joined
 	}
-	return spaced
+	return serverText(strings.Join(strings.Fields(raw), " "), req)
 }
 
 // pageStart and pageElement are how a page begins, and the elements one
