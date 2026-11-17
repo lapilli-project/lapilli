@@ -237,7 +237,9 @@ request and a limit, and, run under a memory limit (the cgroup's
 would pass `--max-samples` is named: serve won't replay it, and says why.
 With no ALERTS to read, it says the bound the caps give, as a bound:
 `--parallel` times `--max-samples` times 64 bytes, some 5 GB at the
-defaults.
+defaults. A memory limit under that bound is **unknown**, not a problem:
+what a run holds can't be told from nothing read, and the bound is reached
+only when every read at once holds `--max-samples`.
 
 **What it finds, say.** 200 Prometheus rules, a `for` of 5 minutes or less,
 the defaults: an hourly run replays each from 2h15m back (settle, every,

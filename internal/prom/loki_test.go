@@ -448,8 +448,8 @@ func TestLokiErrorText(t *testing.T) {
 		kind, body, want string
 	}{
 		{"text/plain; charset=utf-8", "parse error : syntax error: unexpected IDENTIFIER", "HTTP 400: parse error : syntax error: unexpected IDENTIFIER"},
-		{"text/html", "<html><address>Server at loki-0.corp.example Port 3100</address></html>", "HTTP 400: not a Loki API response: <html>"},
-		{"text/plain", "<html>Bad Request</html>", "HTTP 400: not a Loki API response: <html>"},
+		{"text/html", "<html><address>Server at loki-0.corp.example Port 3100</address></html>", "HTTP 400: not a Loki API response: an HTML page"},
+		{"text/plain", "<html>Bad Request</html>", "HTTP 400: not a Loki API response: an HTML page"},
 	} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", c.kind)

@@ -309,7 +309,8 @@ func TestEstimateTooSlow(t *testing.T) {
 // Memory from what fired: a rule's samples at its group's interval, read
 // at --step, the --parallel largest at once; a rule past --max-samples is
 // named. With nothing read, the caps' bound. Under a cgroup's limit below
-// it, a problem.
+// the estimate, a problem; below the caps' bound, unknown: it is a bound,
+// not what a run holds.
 func TestEstimateMemory(t *testing.T) {
 	c := config()
 	c.Serve.Parallel = 2
@@ -329,8 +330,25 @@ func TestEstimateMemory(t *testing.T) {
 	os.WriteFile(c.CgroupMemory, []byte("1000000\n"), 0o600)
 	p = &run{c: c, r: &Report{}}
 	p.memory(rs)
-	if m := p.r.Estimates.Memory; m.From != "caps" || m.PeakBytes != 2*1000*64+cacheBytes || m.CgroupBytes != 1000000 || p.r.Items[0].State != Problem {
-		t.Errorf("%+v %+v", m, p.r.Items[0])
+	if m, it := p.r.Estimates.Memory, p.r.Items[0]; m.From != "caps" || m.PeakBytes != 2*1000*64+cacheBytes || m.CgroupBytes != 1000000 ||
+		it.State != Unknown || !strings.Contains(it.Why, "under the caps' bound") || !strings.Contains(it.Why, "2 reads at once") || it.Fix == "" {
+		t.Errorf("the caps' bound over the limit: %+v %+v", m, it)
+	}
+	// What fired, over the same limit, is a problem still.
+	p = &run{c: c, r: &Report{}, alerts: map[string]float64{"Errors0": 100, "Errors1": 300, "Errors2": 5000}}
+	p.memory(rs)
+	if m, it := p.r.Estimates.Memory, p.r.Items[0]; m.From != "alerts" || m.PeakBytes <= 1000000 || it.State != Problem ||
+		!strings.Contains(it.Why, "under the estimate") || !strings.Contains(it.Why, "Errors2") {
+		t.Errorf("the estimate over the limit: %+v %+v", m, it)
+	}
+	// Over the limit, the caps' bound and the estimate are ok.
+	os.WriteFile(c.CgroupMemory, []byte("1000000000\n"), 0o600)
+	for _, alerts := range []map[string]float64{nil, {"Errors0": 100}} {
+		p = &run{c: c, r: &Report{}, alerts: alerts}
+		p.memory(rs)
+		if it := p.r.Items[0]; it.State != OK {
+			t.Errorf("%v under the limit: %+v", alerts, it)
+		}
 	}
 }
 
