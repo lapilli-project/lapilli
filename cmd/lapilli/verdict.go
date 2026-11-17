@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/signal"
@@ -1717,10 +1718,16 @@ func (f *verdictFlags) forComment(c *verdict.Comparison, stderr io.Writer) {
 
 // scrubber takes where the history is out of a text: the URLs given, the
 // user names in them and their hosts, each as a whole word, any IP
-// address with its port, the tenants, and a Google Cloud project; more,
-// those of more flags (lapilli preflight's).
+// address with its port, an IPv6 one written without brackets among them,
+// the tenants, and a Google Cloud project, a whole word or a domain's
+// first label, as Google names a service account
+// (writer@PROJECT.iam.gserviceaccount.com); more, those of more flags
+// (lapilli preflight's).
 func (f *verdictFlags) scrubber(more ...[2]string) func(string) string {
-	type hid struct{ val, as string }
+	type hid struct {
+		val, as string
+		label   bool // a domain's first label too
+	}
 	var hide []hid
 	given := [][2]string{{"--prometheus", f.promURL}, {"--loki", f.loki}, {"--grafana", f.grafana},
 		{"--ruler", f.ruler}, {"--gcp-project", f.gcpProj}, {"--ruler-tenant", f.rulerTenant}, {"--loki-tenant", f.lokiTenant}}
@@ -1729,11 +1736,11 @@ func (f *verdictFlags) scrubber(more ...[2]string) func(string) string {
 		if val == "" {
 			continue
 		}
-		hide = append(hide, hid{val, "[" + flag + "]"})
+		hide = append(hide, hid{val, "[" + flag + "]", flag == "--gcp-project"})
 		if u, err := url.Parse(val); err == nil && u.Host != "" {
-			hide = append(hide, hid{u.Host, "[" + flag + "]"}, hid{u.Hostname(), "[" + flag + "]"})
+			hide = append(hide, hid{u.Host, "[" + flag + "]", false}, hid{u.Hostname(), "[" + flag + "]", false})
 			if u.User != nil && u.User.Username() != "" {
-				hide = append(hide, hid{u.User.Username(), "[user]"})
+				hide = append(hide, hid{u.User.Username(), "[user]", false})
 			}
 		}
 	}
@@ -1741,13 +1748,56 @@ func (f *verdictFlags) scrubber(more ...[2]string) func(string) string {
 	return func(s string) string {
 		s = userinfo.ReplaceAllString(s, "$1")
 		for _, h := range hide {
-			s = replaceWord(s, h.val, h.as)
+			s = replaceName(s, h.val, h.as, h.label)
 		}
 		for _, h := range hide {
 			s = replaceCut(s, h.val, h.as)
 		}
-		return address.ReplaceAllString(s, "[address]")
+		return address.ReplaceAllString(addresses6(s, "[address]"), "[address]")
 	}
+}
+
+// addresses6 replaces in s each IPv6 address written without brackets, as
+// x509 ("valid for fd12:3456:789a::17") and Postgres (host "2001:db8::5")
+// write one, with with: a run of hex digits and colons, a dotted IPv4 at
+// its end or a zone or not, that no letter, digit or underscore touches,
+// that reads as an IPv6 address (net/netip) once a colon or a dot that
+// ends it, as a sentence's, is left out. A time (12:30:45) or a MAC
+// address doesn't read as one, nor does "::" alone, which holds no digit;
+// one in brackets is address's, with its port.
+func addresses6(s, with string) string {
+	word := func(r rune) bool { return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) }
+	reads := func(x string) bool {
+		a, err := netip.ParseAddr(x)
+		return err == nil && a.Is6() && strings.ContainsAny(x, "0123456789abcdefABCDEF")
+	}
+	var b strings.Builder
+	last := 0
+	for _, m := range address6.FindAllStringIndex(s, -1) {
+		i, j := m[0], m[1]
+		after, _ := utf8.DecodeRuneInString(s[j:])
+		if j < len(s) && word(after) {
+			continue
+		}
+		// A colon that only joins it to what is before (host:fd12::17).
+		if strings.HasPrefix(s[i:j], ":") && !strings.HasPrefix(s[i:j], "::") {
+			i++
+		}
+		before, _ := utf8.DecodeLastRuneInString(s[:i])
+		if i > 0 && (word(before) || before == '[') {
+			continue
+		}
+		for j > i && !reads(s[i:j]) && strings.ContainsAny(s[j-1:j], ".:") {
+			j--
+		}
+		if !reads(s[i:j]) {
+			continue
+		}
+		b.WriteString(s[last:i] + with)
+		last = j
+	}
+	b.WriteString(s[last:])
+	return b.String()
 }
 
 // replaceCut replaces in s what is left of old where a text was cut in it,
@@ -1787,6 +1837,9 @@ var (
 	userinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s"']*@`)
 	// address is an IP address, with its port if it has one.
 	address = regexp.MustCompile(`\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*\](:[0-9]+)?|\b([0-9]{1,3}\.){3}[0-9]{1,3}(:[0-9]+)?\b`)
+	// address6 is what may be an IPv6 address without brackets: addresses6
+	// says which is one.
+	address6 = regexp.MustCompile(`[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(%[0-9A-Za-z_.-]*[0-9A-Za-z_-])?`)
 )
 
 // replaceWord replaces in s each old that is a whole word, with with: no
@@ -1794,7 +1847,14 @@ var (
 // after it, a full stop, which no letter, digit, dash or underscore
 // follows. A host "prom" isn't taken out of "prometheus" or "prom.example",
 // but is out of "failed at prom.": as recipes/backtest/lib.sh takes it out.
-func replaceWord(s, old, with string) string {
+func replaceWord(s, old, with string) string { return replaceName(s, old, with, false) }
+
+// replaceName is replaceWord, and, with label, old as a domain's first
+// label as well, which a dot and a letter or a digit may follow: a Google
+// Cloud project, in a service account's email
+// (writer@PROJECT.iam.gserviceaccount.com) or a workload identity pool
+// (PROJECT.svc.id.goog).
+func replaceName(s, old, with string, label bool) string {
 	if old == "" {
 		return s
 	}
@@ -1810,7 +1870,7 @@ func replaceWord(s, old, with string) string {
 		rest := s[i+len(old):]
 		after, n := utf8.DecodeRuneInString(rest)
 		next, _ := utf8.DecodeRuneInString(rest[n:])
-		whole := (i == 0 || !(before == '.' || alnum(before))) && (rest == "" || !(alnum(after) || after == '.' && alnum(next)))
+		whole := (i == 0 || !(before == '.' || alnum(before))) && (rest == "" || !(alnum(after) || after == '.' && alnum(next) && !label))
 		b.WriteString(s[:i])
 		if whole {
 			b.WriteString(with)

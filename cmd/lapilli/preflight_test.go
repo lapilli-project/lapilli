@@ -599,6 +599,40 @@ func TestScrubberCut(t *testing.T) {
 	}
 }
 
+// An IPv6 address written without brackets, as x509 and Postgres write
+// one, is an address too, as is one with a zone, or an IPv4 one inside
+// it; and --gcp-project is taken out of a domain it is the first label
+// of, as Google names a service account. A time, a MAC address, a "::"
+// in other text, or a word that only holds the project, isn't.
+func TestScrubberAddressesAndProject(t *testing.T) {
+	f := &verdictFlags{promURL: "https://prom.example.invalid", gcpProj: "sample-proj-123"}
+	scrub := f.scrubber()
+	for in, want := range map[string]string{
+		"x509: certificate is valid for 10.1.2.3, fd12:3456:789a::17, not prom.example.invalid": "x509: certificate is valid for [address], [address], not [--prometheus]",
+		`no pg_hba.conf entry for host "2001:db8:42::5", user "u"`:                              `no pg_hba.conf entry for host "[address]", user "u"`,
+		"dial tcp [2001:db8::9]:5432: connect: connection refused":                              "dial tcp [address]: connect: connection refused",
+		"dial tcp 10.1.2.3:5432: refused":                                                       "dial tcp [address]: refused",
+		"from 2001:0db8:0000:0000:0000:ff00:0042:8329 and fe80::1%eth0.":                        "from [address] and [address].",
+		"mapped ::ffff:10.1.2.3, loopback ::1, at host:fd12::17: refused":                       "mapped [address], loopback [address], at host:[address]: refused",
+		"denied on projects/-/serviceAccounts/writer@sample-proj-123.iam.gserviceaccount.com":   "denied on projects/-/serviceAccounts/writer@[--gcp-project].iam.gserviceaccount.com",
+		"pool sample-proj-123.svc.id.goog, projects/sample-proj-123/topics/x":                   "pool [--gcp-project].svc.id.goog, projects/[--gcp-project]/topics/x",
+		// What isn't an address, nor the project.
+		"at 12:30:45, 2026-11-16T12:00:00Z, in 01:00-06:00, after 1h30m, 5m:": "at 12:30:45, 2026-11-16T12:00:00Z, in 01:00-06:00, after 1h30m, 5m:",
+		"a :: b, std::string, Foo::Bar, key:: and ::":                         "a :: b, std::string, Foo::Bar, key:: and ::",
+		"mac aa:bb:cc:dd:ee:ff, fingerprint AB:CD:EF:01:23:45:67:89:AB:CD":    "mac aa:bb:cc:dd:ee:ff, fingerprint AB:CD:EF:01:23:45:67:89:AB:CD",
+		"sample-proj-1234, xsample-proj-123, sample-proj-123x.iam":            "sample-proj-1234, xsample-proj-123, sample-proj-123x.iam",
+	} {
+		if got := scrub(in); got != want {
+			t.Errorf("%q:\n got %q\nwant %q", in, got, want)
+		}
+	}
+	// A host is still a whole word: not the first label of another.
+	f = &verdictFlags{promURL: "http://prom:9090"}
+	if got := f.scrubber()("prom.example and prom"); got != "prom.example and [--prometheus]" {
+		t.Errorf("%q", got)
+	}
+}
+
 // refusingPostgres answers every connection as a Postgres whose
 // pg_hba.conf doesn't let it in does: a FATAL that names the client's
 // address, and the user and the database the client asked for, the
