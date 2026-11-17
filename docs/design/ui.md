@@ -166,7 +166,17 @@ would say a state alone.
   the incidents the team owns, on its page as on the list. A headline number's change is
   better or worse only when both weeks were judged (`tile.Better`,
   `tile.Worse` stay false otherwise), and a no-record backtest's difference
-  is a plain number or "–".
+  is a plain number or "–". A firing that caught nothing with no record to
+  judge it by is never ● either, nor "caught nothing" as one judged:
+  counted, not judged, it is "? not judged" wherever firings are drawn,
+  counted or listed (the overview's weeks, chart and table, the rules
+  list's ● column, a rule's numbers, strip and latest firings, a day's
+  firings by the hour and one by one), each asked as the report asks it
+  (`ledger.Ledger.FiringJudged`: its week's record, or the signals tied to
+  it), so that no page calls black what the summary counts unjudged. The
+  overview says why once, in a notice above its tiles when the last whole
+  week has no record, with where incidents come from and where to write
+  one down; the tiles it leaves unknown say only "not known: no record".
 - **No change shown, no change said.** A change is one between the numbers
   as they are shown, on the overview's tiles, Outcomes' then and now and a
   rule's panel: two that show the same (1.2% and 0.8% both "1%") are "as
@@ -683,8 +693,11 @@ only when one is set beside.
 
 The last 84 days, a cell a day, drawn on the server as an SVG, each day
 with a `<title>` of its numbers: caught something (a cell with a hole, as
-○), caught nothing only (solid, as ●), excused only (dashed), no firing
-(low). Above the cells, marks: a diamond where the rule changed (a new
+○), caught nothing, judged (solid, as ●), caught nothing with no record to
+judge it by and none judged (pale, in the outline of nothing: "not judged:
+no record", named in the legend only when a day has it), excused only
+(dashed), no firing (low). The table of the days has the not judged apart
+from ● Nothing when some day has one (`ledger.Ledger.RuleSpansJudged`). Above the cells, marks: a diamond where the rule changed (a new
 version of it, or it taken away or put back); a triangle on a day it fired
 during a deploy of what it is about, as the ledger judged each of its
 firings (the days' tally, `ledger.RuleDeploys`: no deploy is read or
@@ -1273,9 +1286,16 @@ to what makes their numbers, and an incident's timeline.
 
 The rules list's table is a POST form to `/rules/bulk` (the facets are a
 GET form of their own, beside it, not around it): a checkbox a row, its
-accessible name the rule's, and a bar over the table, "With the rules
-picked": Make a task for each, a team and Set the team, a disposition and
-Set the disposition, each its own button (`do=task|team|status`). There is
+accessible name the rule's, and a bar, "With the rules picked": Make a task
+for each, a team and Set the team, a disposition and Set the disposition,
+each its own button (`do=task|team|status`). For one who may use it, a line
+over the table says what picking does, and the bar is shown once a rule
+is picked, at the foot of the window, over the page (`:has`), so that the
+list starts near the top and nothing in it moves under the pointer; the
+page is scrolled, and padded at its foot, by the bar's tallest, so that
+what takes the focus is never under it (WCAG 2.4.11); one
+who may not sees the bar where it was, disabled, with why, and so does a
+browser without `:has`. There is
 no "pick every row": that takes a script. The firings have the same for
 what caught nothing, "These were real", a form of its own above the table
 whose checkboxes join it by `form=`, so that each row's own "This was

@@ -47,11 +47,13 @@ func TestHours(t *testing.T) {
 	}
 	// The last whole week has the two on Sunday night. With no incident
 	// written down, whether they woke people for nothing isn't known: no
-	// number, as precision has none, and how many came then.
+	// number, as precision has none, and how many came then; why, the
+	// notice above the tiles says, once.
 	_, body, _ = get(t, h, "/")
 	i := strings.Index(body, "Woken for nothing")
 	if i < 0 || !strings.Contains(body[i:min(len(body), i+400)], ">–<") || strings.Contains(body[i:min(len(body), i+400)], ">2<") ||
-		!strings.Contains(body, "not known: no incident written down to judge them by; 2 came while people slept (firings that caught nothing, 22:00–08:00)") {
+		!strings.Contains(body, "not known: no record; 2 came while people slept (firings that caught nothing, 22:00–08:00)") ||
+		strings.Count(body, "No incident was written down in the week of") != 1 || strings.Contains(body, "not known: no incident written down") {
 		t.Errorf("overview: %s", body)
 	}
 	// An incident written down at 22:00 that Sunday turns the firing then

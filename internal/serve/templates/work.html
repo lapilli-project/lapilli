@@ -195,8 +195,8 @@ first, so that Enter in a field writes nothing. */}}
 {{define "tasks"}}{{$title := t "Tasks"}}{{template "top" (titled . $title)}}{{$ro := .Status.ReadOnly}}{{with .View}}
 <div class="head"><h1>{{$title}}</h1>{{template "action" (mainAction $ "Add a task" (editsAny $.Status) "team" "")}}</div>
 <p class="lede">{{t "What is to be done about a rule or an incident: tune it, write one, retire one, decide on something. A task made from the overview remembers what it is about."}}</p>
-{{template "pickfacets" .Pick}}
-<p class="quiet">{{if eq .Total 1}}{{t "%d of 1 task" (len .Lines)}}{{else}}{{t "%d of %d tasks" (len .Lines) .Total}}{{end}}</p>
+{{if .Total}}{{template "pickfacets" .Pick}}
+<p class="quiet">{{if eq .Total 1}}{{t "%d of 1 task" (len .Lines)}}{{else}}{{t "%d of %d tasks" (len .Lines) .Total}}{{end}}</p>{{end}}
 {{template "tasklist" (on $ .Lines)}}
 {{if editsAny $.Status}}
 <h2 id="add">{{t "Add a task"}}</h2>

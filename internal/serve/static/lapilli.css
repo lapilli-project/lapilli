@@ -124,6 +124,9 @@ nav.crumbs [aria-current] { color: var(--ink); }
   .bar form.find { margin-left: auto; }
 }
 .find input[type=search] { width: min(18rem, 100%); }
+/* With no team or period to look at a page with, the search alone: no
+   card around it, at the right. */
+.bar:not(:has(form.ctx)) { background: none; border: 0; padding: 0; justify-content: flex-end; }
 /* A page's header, with its main action; one the reader may not use is
    shown disabled, with why. */
 .head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .4rem 1rem; margin-bottom: .6rem; }
@@ -182,6 +185,7 @@ rect.w { fill: var(--white); stroke: var(--ink); stroke-width: .8; }
 rect.b { fill: var(--black); }
 .spark { vertical-align: middle; }
 .spark rect.w { stroke-width: .5; }
+.spark rect.u { fill: var(--viz-unjudged); stroke: var(--viz-nothing); stroke-width: .5; }
 .w-dot, .b-dot { font-weight: 600; }
 form.grid { display: grid; gap: .7rem; max-width: 34rem; }
 form.row { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: end; margin-bottom: 1rem; }
@@ -232,6 +236,7 @@ table.weeks td.t .d { white-space: nowrap; }
    worse are ok and bad. */
 :root {
   --viz-caught: #2a6db3; --viz-nothing: #8d897c; --viz-ui: #eb6834;
+  --viz-unjudged: #dedbd1;
   --viz-good: #198f68; --viz-warn: #ae8809; --viz-bad: #bc1523;
   --viz-grid: #e6e5dd; --viz-base: #c3c2b7; --viz-muted: #6a6a65;
   --better: var(--ok); --worse: var(--bad);
@@ -240,12 +245,17 @@ table.weeks td.t .d { white-space: nowrap; }
 @media (prefers-color-scheme: dark) {
   :root {
     --viz-caught: #4f8fd6; --viz-nothing: #706c62; --viz-ui: #d95926;
+    --viz-unjudged: #3a3935;
     --viz-good: #2bab81; --viz-warn: #c38822; --viz-bad: #d14747;
     --viz-grid: #353533; --viz-base: #454542; --viz-muted: #acada8;
     --h0: #323231; --h1: #3b3360; --h2: #54468c; --h3: #7766bb; --h4: #a191dc; --h5: #d0c5f5;
   }
 }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr)); gap: .9rem; margin: 1.4rem 0; }
+/* Seven or eight tiles in rows of four, never six and one alone. */
+@media (min-width: 56rem) {
+  .tiles-7, .tiles-8 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
 .tile { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: .9rem 1rem; min-width: 0; box-shadow: var(--shadow); }
 .tile-label { font-size: .95rem; color: var(--dim); }
 .tile-value { font: 500 2.3rem/1.2 var(--sans); letter-spacing: -.01em; overflow-wrap: anywhere; margin: .15rem 0; }
@@ -268,6 +278,13 @@ tfoot th, tfoot td { border-bottom: 0; border-top: 1px solid var(--line-strong);
 .key { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
 .key.caught, path.caught { background: var(--viz-caught); fill: var(--viz-caught); }
 .key.nothing, path.nothing { background: var(--viz-nothing); fill: var(--viz-nothing); }
+/* Caught nothing with no record to judge it by: counted, not judged, so
+   neither caught nor nothing. A pale fill inside the outline of nothing:
+   apart from nothing (solid) and from excused (dashed, no fill), and,
+   like them, always with a legend and the numbers in a table. */
+.key.unjudged, path.unjudged { background: var(--viz-unjudged); fill: var(--viz-unjudged); stroke: var(--viz-nothing); stroke-width: 1; }
+.key.unjudged { box-shadow: inset 0 0 0 1px var(--viz-nothing); }
+td span.unjudged { color: var(--dim); white-space: nowrap; }
 .key.good, path.good { background: var(--viz-good); fill: var(--viz-good); }
 .key.warn, path.warn { background: var(--viz-warn); fill: var(--viz-warn); }
 .key.bad, path.bad { background: var(--viz-bad); fill: var(--viz-bad); }
@@ -413,6 +430,25 @@ a.badge:hover { text-decoration: underline; }
 fieldset.bulk-bar { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem .9rem; margin: 0 0 .8rem; padding: .6rem .8rem; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--card); min-width: 0; }
 fieldset.bulk-bar legend { padding: 0 .3rem; font-size: .9rem; font-weight: 600; color: var(--dim); }
 fieldset.bulk-bar p { margin: 0; flex-basis: 100%; }
+/* The rules list's controls for the rules picked, once one is: until then
+   a line says what they do, so the list starts near the top; then they
+   rise at the foot of the window, over the page, and nothing in the list
+   moves under the pointer. One who may not change them sees them, disabled,
+   with why; a browser without :has shows them all where they are, as
+   before. */
+.bulk-hint { display: none; margin: 0 0 .8rem; }
+@supports selector(:has(*)) {
+  form.bulk:has(.bulk-hint) .bulk-hint { display: block; }
+  form.bulk:has(.bulk-hint):not(:has(input[name=rule]:checked)) fieldset.bulk-bar { display: none; }
+  form.bulk:has(.bulk-hint):has(input[name=rule]:checked) fieldset.bulk-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; margin: 0; max-height: 45vh; overflow-y: auto;
+    border-radius: 12px 12px 0 0; box-shadow: 0 -6px 18px rgb(0 0 0 / .16);
+  }
+  /* What takes the focus, or is scrolled to, stops above the bar; and the
+     list's last rows can be scrolled clear of it, however tall it is. */
+  html:has(form.bulk .bulk-hint):has(form.bulk input[name=rule]:checked) { scroll-padding-bottom: calc(45vh + 1rem); }
+  main:has(form.bulk .bulk-hint):has(input[name=rule]:checked) { padding-bottom: calc(45vh + 1rem); }
+}
 .bulk-set { display: inline-flex; flex-wrap: wrap; align-items: end; gap: .4rem; min-width: 0; max-width: 100%; }
 td.pick, th.pick, .rules-main table .pick { width: 2rem; padding-right: 0; }
 td.pick input { width: 1.1rem; height: 1.1rem; margin: .2rem 0 0; }
@@ -505,6 +541,7 @@ svg.strip { display: block; width: 100%; height: auto; }
 svg.strip rect.caught, svg.sym rect.caught { fill: var(--viz-caught); }
 svg.strip circle.hole, svg.sym circle.hole { fill: var(--card); }
 svg.strip rect.nothing, svg.sym rect.nothing { fill: var(--viz-nothing); }
+svg.strip rect.unjudged, svg.sym rect.unjudged { fill: var(--viz-unjudged); stroke: var(--viz-nothing); stroke-width: 1; }
 svg.strip rect.excused, svg.sym rect.excused { fill: none; stroke: var(--viz-nothing); stroke-width: 1; stroke-dasharray: 2 1.5; }
 svg.strip rect.none, svg.sym rect.none { fill: var(--viz-base); }
 svg.strip path.changed, svg.sym path.changed { fill: var(--accent); }

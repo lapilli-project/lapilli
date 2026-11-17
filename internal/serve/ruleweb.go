@@ -308,10 +308,11 @@ func sharePct(n, all int) (int, bool) {
 type rulePanel struct {
 	Precision   string
 	PrecisionBy moved // in points
-	// Firings are those judged; Black of them caught nothing; Excused, more,
-	// a quiet window excused.
-	Firings, Black, Excused int
-	FiringsBy               moved
+	// Firings are those judged; Black of them caught nothing, Unjudged of
+	// those with no record to judge them by; Excused, more, a quiet window
+	// excused.
+	Firings, Black, Unjudged, Excused int
+	FiringsBy                         moved
 	// Incidents it caught, and Near, those it nearly caught.
 	Incidents, Near int
 	IncidentsBy     moved
@@ -330,9 +331,14 @@ type rulePanel struct {
 // stripDays is how many days a rule's strip shows: twelve weeks.
 const stripDays = 84
 
+// Nothing are, of Black, those judged: black stones.
+func (p rulePanel) Nothing() int { return p.Black - p.Unjudged }
+
 // stripDay is a day of a rule's strip: its stones, which Kind sums up
-// (caught: one caught something; nothing: only some that caught nothing;
-// excused: only some a quiet window excused; none: no firing), whether the
+// (caught: one caught something; nothing: some caught nothing, judged;
+// unjudged: some caught nothing with no record to judge them by, and none
+// judged; excused: only some a quiet window excused; none: no firing),
+// whether the
 // rule changed, how many of its firings came during a deploy of what it is
 // about, and whether a quiet window was over it. X is where it is drawn.
 type stripDay struct {
@@ -350,8 +356,10 @@ func dayKind(sp ledger.Span) string {
 	switch {
 	case sp.White > 0:
 		return "caught"
-	case sp.Firings > 0:
+	case sp.Black() > sp.Unjudged:
 		return "nothing"
+	case sp.Unjudged > 0:
+		return "unjudged"
 	case sp.Excused > 0:
 		return "excused"
 	}
@@ -380,9 +388,10 @@ func (d stripDay) Deploy() string {
 type ruleStrip struct {
 	Days []stripDay
 	// Width is the drawing's; Changed, Deploys and Quiet say some day has
-	// that mark, which the legend then names.
-	Width                   int
-	Changed, Deploys, Quiet bool
+	// that mark, which the legend then names; Unjudged, some day's
+	// firings were counted, not judged.
+	Width                             int
+	Changed, Deploys, Quiet, Unjudged bool
 }
 
 // Latest are the days, the latest first, as the table lists them.
@@ -436,26 +445,21 @@ func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []versi
 			}
 		}
 	}
-	spans, err := s.l.RuleSpans(ctx, name, cuts)
+	// Of each span, those that caught nothing with no record to judge
+	// them by are counted, not judged, as the rule's numbers count them:
+	// by the incidents that keep its page's record, each firing by its
+	// week, or by the signals tied to it. A day's are drawn apart, and the
+	// span before's are in no precision.
+	judge, err := s.judgeOver(ctx, cuts[0], now, t.o, t.keeps)
+	if err != nil {
+		return err
+	}
+	spans, err := s.l.RuleSpansJudged(ctx, name, cuts, judge.spansOf(name))
 	if err != nil {
 		return err
 	}
 	if len(spans) < len(cuts)-1 {
 		spans = append(spans, make([]ledger.Span, len(cuts)-1-len(spans))...) // a rule the ledger hasn't
-	}
-	// Of the span before, those in a week with no record, everyone's (a
-	// rule's page is), are in no precision: each span is of one day, or
-	// of one week at most.
-	if !v.Before.IsZero() {
-		rec, err := s.l.RecordOf(ctx, v.Before, from, t.o, nil)
-		if err != nil {
-			return err
-		}
-		for i := range spans {
-			if !cuts[i].Before(v.Before) && cuts[i].Before(from) && !s.l.WeekKept(rec, ledger.Week(s.l.Day(cuts[i]))) {
-				spans[i].Unjudged = spans[i].Black()
-			}
-		}
 	}
 	sum := func(lo, hi time.Time) ledger.Span {
 		var x ledger.Span
@@ -476,10 +480,11 @@ func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []versi
 		sp := sum(s.l.Midnight(day), s.l.Midnight(day+1))
 		strip.Days = append(strip.Days, stripDay{Day: s.l.Midnight(day).In(s.cfg.Loc).Format("2006-01-02"),
 			Kind: dayKind(sp), Span: sp, X: i * stripStep})
+		strip.Unjudged = strip.Unjudged || sp.Unjudged > 0
 	}
 	v.Strip = strip
 
-	p := rulePanel{Precision: v.Precision, Firings: v.Firings, Black: v.Black, Excused: v.Excused, Incidents: v.Incidents,
+	p := rulePanel{Precision: v.Precision, Firings: v.Firings, Black: v.Black, Unjudged: v.Unjudged, Excused: v.Excused, Incidents: v.Incidents,
 		Notified: v.Notified, Notifications: v.Notifications, Asleep: v.NotifiedAsleep, OffHours: v.NotifiedOffHours, Backtest: "–"}
 	if !v.Before.IsZero() {
 		// With none judged, now or in the span before, there is no

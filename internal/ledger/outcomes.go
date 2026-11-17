@@ -31,12 +31,23 @@ type Span struct {
 // Black is how many firings caught nothing.
 func (s Span) Black() int { return s.Firings - s.White }
 
+// Nothing are, of Black, those judged: black stones, not Unjudged.
+func (s Span) Nothing() int { return s.Black() - s.Unjudged }
+
 // RuleSpans are a rule's stones between each of the times given, which
 // are in order, and the next: whole days from the daily tallies, the days a
 // time falls inside of from the firings themselves. A rule the ledger has
 // never seen has none. It reads the rule's days, the firings of the days
 // cut and its catches once each, however many times are given.
 func (l *Ledger) RuleSpans(ctx context.Context, rule string, at []time.Time) ([]Span, error) {
+	return l.RuleSpansJudged(ctx, rule, at, nil)
+}
+
+// RuleSpansJudged are RuleSpans, each with its Unjudged: of its firings
+// that caught nothing, those judged says aren't, by when each started and
+// the signals its alert is tied to (FiringJudged), a day at a time from
+// the daily tallies, kept apart by signals. With judged nil, none.
+func (l *Ledger) RuleSpansJudged(ctx context.Context, rule string, at []time.Time, judged func(start time.Time, signals int64) bool) ([]Span, error) {
 	if len(at) < 2 {
 		return nil, nil
 	}
@@ -68,15 +79,15 @@ func (l *Ledger) RuleSpans(ctx context.Context, rule string, at []time.Time) ([]
 			cutDays[d] = true
 		}
 	}
-	rows, err := l.r.QueryContext(ctx, "SELECT day, firings, white, excused FROM days WHERE rule_id = ? AND day >= ? AND day <= ?",
+	rows, err := l.r.QueryContext(ctx, "SELECT day, firings, white, excused, signals FROM days WHERE rule_id = ? AND day >= ? AND day <= ?",
 		id, l.day(lo), l.day(hi))
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
-		var d int64
+		var d, signals int64
 		var n, white, excused int
-		if err := rows.Scan(&d, &n, &white, &excused); err != nil {
+		if err := rows.Scan(&d, &n, &white, &excused, &signals); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -85,6 +96,9 @@ func (l *Ledger) RuleSpans(ctx context.Context, rule string, at []time.Time) ([]
 			out[i].Firings += n
 			out[i].White += white
 			out[i].Excused += excused
+			if judged != nil && n > white && !judged(unix(l.midnight(d)), signals) {
+				out[i].Unjudged += n - white
+			}
 		}
 	}
 	rows.Close()
@@ -94,9 +108,9 @@ func (l *Ledger) RuleSpans(ctx context.Context, rule string, at []time.Time) ([]
 	// The days a time falls inside of, firing by firing.
 	for _, d := range slices.Sorted(maps.Keys(cutDays)) {
 		if err := l.eachRow(ctx, func(s scanner) error {
-			var at int64
+			var at, signals int64
 			var white, excused bool
-			if err := s.Scan(&at, &white, &excused); err != nil {
+			if err := s.Scan(&at, &white, &excused, &signals); err != nil {
 				return err
 			}
 			if i := in(at); i >= 0 {
@@ -108,10 +122,13 @@ func (l *Ledger) RuleSpans(ctx context.Context, rule string, at []time.Time) ([]
 					out[i].White++
 				default:
 					out[i].Firings++
+					if judged != nil && !judged(unix(at), signals) {
+						out[i].Unjudged++
+					}
 				}
 			}
 			return nil
-		}, "SELECT start_at, white, excused FROM firings WHERE rule_id = ? AND start_at >= ? AND start_at < ?",
+		}, "SELECT f.start_at, f.white, f.excused, s.signals FROM firings f JOIN series s ON s.id = f.series_id WHERE f.rule_id = ? AND f.start_at >= ? AND f.start_at < ?",
 			id, l.midnight(d), l.midnight(d+1)); err != nil {
 			return nil, err
 		}

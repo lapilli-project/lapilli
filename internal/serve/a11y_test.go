@@ -301,7 +301,7 @@ var (
 	chartPrecision = regexp.MustCompile(`^(\d+)% of (\d+) firings caught something`)
 	chartCount     = regexp.MustCompile(`^(\d+) (.+)$`)
 	chartColumns   = map[string]string{
-		"caught something": "○ Caught", "caught nothing": "● Nothing",
+		"caught something": "○ Caught", "caught nothing": "● Nothing", "not judged: no record": "? Not judged",
 		"caught": "✓ Caught", "caught only by noisy rules": "◐ Noisy only", "missed": "✗ Missed",
 		"from the incidents file or a tool": "From the file", "written in Lapilli": "Written in Lapilli",
 		"impact windows to decide": "Impact windows to decide", "edits": "Edits",

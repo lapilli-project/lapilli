@@ -62,8 +62,11 @@ type tallies struct {
 	recs          []ledger.Incident
 	rec           verdict.Record
 	team          *ledger.Team
-	mid           func(int64) time.Time
-	at            time.Time
+	// keeps is which of the incidents keep the record, nil for all: a
+	// team's, by what it owns (keep).
+	keeps func(ledger.Incident) bool
+	mid   func(int64) time.Time
+	at    time.Time
 	// parts are the tallies apart by the signals the firings' alerts are
 	// tied to (ledger.WeeksBy), as read, nil when by was read summed; jby
 	// is by of the firings judged (keep), and jeveryone everyone's, before
@@ -215,7 +218,34 @@ func (t *tallies) state(in ledger.Incident, week int64) string {
 
 type spark struct {
 	X, WhiteY, WhiteH, BlackY, BlackH float64
+	UnjudgedY, UnjudgedH              float64
 	Title                             string
+}
+
+// sparkOf is rule id's stones by week, over t's weeks, as its spark draws
+// and says them: what caught something, what caught nothing, judged, and,
+// apart, what was counted, not judged, as its numbers count them
+// (tallies.unjudged).
+func (s *Server) sparkOf(l string, t *tallies, id int64) []spark {
+	most := 1
+	for _, w := range t.weeks {
+		most = max(most, t.by[w][id].Firings)
+	}
+	out := make([]spark, 0, len(t.weeks))
+	for i, w := range t.weeks {
+		x := t.by[w][id]
+		u := t.unjudged(w, id)
+		un := u.Firings - u.White
+		const h = 18.0
+		wh, bh, uh := h*float64(x.White)/float64(most), h*float64(x.Black()-un)/float64(most), h*float64(un)/float64(most)
+		title := fmt.Sprintf("%s: %d ○ %d ●", s.l.Midnight(w).In(s.cfg.Loc).Format("01-02"), x.White, x.Black()-un)
+		if un > 0 {
+			title += ", " + tr(l, "%d not judged", un)
+		}
+		out = append(out, spark{X: float64(i) * 6, WhiteY: h - wh, WhiteH: wh, BlackY: h - wh - bh, BlackH: bh,
+			UnjudgedY: h - wh - bh - uh, UnjudgedH: uh, Title: title})
+	}
+	return out
 }
 
 type ruleLine struct {
@@ -274,6 +304,9 @@ type ruleLine struct {
 	Deploys, DeploysCaught int
 	Without                string
 }
+
+// Nothing are, of Black, those judged: black stones, not Unjudged.
+func (l ruleLine) Nothing() int { return l.Black - l.Unjudged }
 
 // pct is a share as a page shows it: "–" for none.
 func pct(n, of int) string {
@@ -513,6 +546,7 @@ func (s *Server) workCredit(ctx context.Context, t *tallies, n int) (map[string]
 // ruleLines are each rule's stones over the last n weeks, the noisiest
 // first, and the rules that never fired.
 func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]ruleLine, []string, error) {
+	reader := l // l is each rule's line below
 	sugg, err := s.suggestions(ctx, l, t)
 	if err != nil {
 		return nil, nil, err
@@ -588,17 +622,7 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 		for i := len(t.weeks) - 2 + t.last(); i >= 0 && t.noisy(t.weeks[i], id); i-- {
 			l.Streak++
 		}
-		most := 1
-		for _, w := range t.weeks {
-			most = max(most, t.by[w][id].Firings)
-		}
-		for i, w := range t.weeks {
-			x := t.by[w][id]
-			const h = 18.0
-			wh, bh := h*float64(x.White)/float64(most), h*float64(x.Black())/float64(most)
-			l.Spark = append(l.Spark, spark{X: float64(i) * 6, WhiteY: h - wh, WhiteH: wh, BlackY: h - wh - bh, BlackH: bh,
-				Title: fmt.Sprintf("%s: %d ○ %d ●", s.l.Midnight(w).In(s.cfg.Loc).Format("01-02"), x.White, x.Black())})
-		}
+		l.Spark = s.sparkOf(reader, t, id)
 		l.Suggestion = sugg[l.Name]
 		if u, ok := unrec[l.Name]; ok {
 			l.Unrecord = unrecordedViewOf(u, unrecWeek)
@@ -610,6 +634,11 @@ func (s *Server) ruleLines(ctx context.Context, l string, t *tallies, n int) ([]
 	}
 	sort.Slice(out, func(a, b int) bool {
 		x, y := out[a], out[b]
+		// Caught nothing as the ● column shows it, judged, then with those
+		// not judged: with no record, by all that caught nothing, as before.
+		if x.Nothing() != y.Nothing() {
+			return x.Nothing() > y.Nothing()
+		}
 		if x.Black != y.Black {
 			return x.Black > y.Black
 		}
@@ -729,8 +758,9 @@ type rulesData struct {
 	proposed map[string]bool
 	checks   map[string]ledger.Check
 	differs  Differs
-	// team is the team the rules are of, nil for all.
+	// team is the team the rules are of, nil for all; lang, the reader's.
 	team *ledger.Team
+	lang string
 }
 
 func (s *Server) rulesPage(r *http.Request) (any, error) {
@@ -834,7 +864,7 @@ func (s *Server) rulesOver(r *http.Request, week int64) (rulesData, error) {
 		v.Sort = by
 	}
 	sortRules(v.Lines, v.Sort)
-	return rulesData{v, t, o, proposed, cw, d, team}, nil
+	return rulesData{v, t, o, proposed, cw, d, team, lang(r)}, nil
 }
 
 // annotate gives rule lines their teams and what is to become of them.
@@ -1164,6 +1194,15 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 	}
 	for _, f := range fs {
 		v.Latest = append(v.Latest, s.firingLine(f))
+	}
+	if n := len(fs); n > 0 {
+		// Judged as the rule's numbers are: by the incidents that keep its
+		// page's record, the team's when it is seen from the team's.
+		j, err := s.judgeOver(ctx, fs[n-1].Start, s.now(), t.o, t.keeps)
+		if err != nil {
+			return ruleView{}, err
+		}
+		judged(v.Latest, j)
 	}
 	if err := s.notifiedFirings(ctx, v.Latest); err != nil {
 		return ruleView{}, err
@@ -1857,6 +1896,18 @@ type firingLine struct {
 	// it paged no one.
 	Notified int
 	Counted  bool
+	// Unjudged says it caught nothing in a week with no record to judge it
+	// by: counted, not judged, neither ○ nor ● (judged).
+	Unjudged bool
+}
+
+// judged marks, of lines, those that caught nothing and that j doesn't
+// judge.
+func judged(lines []firingLine, j firingJudge) {
+	for i := range lines {
+		f := &lines[i]
+		f.Unjudged = !f.White && !f.Excused && !j(f.Rule, f.Start, f.Signals)
+	}
 }
 
 func (s *Server) firingLine(f ledger.Firing) firingLine {

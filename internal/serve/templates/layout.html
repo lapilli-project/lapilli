@@ -73,7 +73,7 @@ nothing stands out on the overview. */}}
 <p><a href="/auth/login">{{t "Sign in again"}}</a></p>
 {{template "bottom" .}}{{end}}
 
-{{define "spark"}}<svg class="spark" width="72" height="18" viewBox="0 0 72 18" role="img" aria-label="{{t "Stones by week: %s" (sparkText .)}}">{{range .}}<g><title>{{.Title}}</title><rect class="w" x="{{.X}}" y="{{.WhiteY}}" width="5" height="{{.WhiteH}}"/><rect class="b" x="{{.X}}" y="{{.BlackY}}" width="5" height="{{.BlackH}}"/></g>{{end}}</svg>{{end}}
+{{define "spark"}}<svg class="spark" width="72" height="18" viewBox="0 0 72 18" role="img" aria-label="{{t "Stones by week: %s" (sparkText .)}}">{{range .}}<g><title>{{.Title}}</title><rect class="w" x="{{.X}}" y="{{.WhiteY}}" width="5" height="{{.WhiteH}}"/><rect class="b" x="{{.X}}" y="{{.BlackY}}" width="5" height="{{.BlackH}}"/>{{if .UnjudgedH}}<rect class="u" x="{{.X}}" y="{{.UnjudgedY}}" width="5" height="{{.UnjudgedH}}"/>{{end}}</g>{{end}}</svg>{{end}}
 
 {{/* A window's or an incident's labels summed up (labelsum.go): in a
 cell, "labelsum"; in a sentence, "labelnames" in it and "labelsall" after
