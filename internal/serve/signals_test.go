@@ -1087,3 +1087,22 @@ func TestSignalRuleNeverFired(t *testing.T) {
 		t.Error("a rule that fired has no alert")
 	}
 }
+
+// A window's labels, from what Prometheus answered, are kept as an
+// incident's are: 4 KB at most in all, each value cut as an alert's.
+func TestSignalWindowLabelsBounded(t *testing.T) {
+	ctx := context.Background()
+	h := shopHistory()
+	at := time.Date(2026, 11, 2, 6, 0, 0, 0, time.UTC)
+	big := strings.Repeat("x", 100<<10)
+	h.windows = map[string][]prom.Series{"probe_success == 0": {minutes(map[string]string{"service": "checkout", "instance": big}, at, at.Add(10*time.Minute))}}
+	s := signalServer(t, h, nil)
+	ws, err := s.l.ImpactWindows(ctx, at.Add(-time.Hour), at.Add(time.Hour))
+	if err != nil || len(ws) != 1 {
+		t.Fatalf("%+v %v", ws, err)
+	}
+	b, _ := json.Marshal(ws[0].Labels)
+	if len(b) > 4<<10 || ws[0].Labels["service"][0] != "checkout" {
+		t.Errorf("window %s kept with %d bytes of labels: %.200s", ws[0].ID, len(b), b)
+	}
+}

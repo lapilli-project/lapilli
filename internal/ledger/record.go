@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -695,6 +696,7 @@ func (l *Ledger) impact(t *txn, r signalRun, found []incident.Incident, fresh bo
 		}
 	}
 	for _, in := range found {
+		in.Labels = keptWindowLabels(in.Labels)
 		labels, err := json.Marshal(orEmpty(in.Labels))
 		if err != nil {
 			return 0, err
@@ -740,6 +742,47 @@ func (l *Ledger) impact(t *txn, r signalRun, found []incident.Incident, fresh bo
 		made = append(made, madeWindow{key, in})
 	}
 	return lo, remapImpact(t, before, from, made)
+}
+
+// keptWindowLabels are a window's labels as the ledger keeps them, bounded
+// as an incident's are (maxLabelBytes in all, as JSON): each name and
+// value cut as an alert's are (verdict.KeptName, KeptValue), 64 values a
+// label, and, past 4 KB, the labels that don't fit left out, the rest kept
+// in order: a label left out constrains nothing, so the window is caught
+// by more, never by fewer. Within the bounds, as they are.
+func keptWindowLabels(l incident.Labels) incident.Labels {
+	if b, err := json.Marshal(orEmpty(l)); err == nil && len(b) <= maxLabelBytes {
+		within := true
+		for k, vs := range l {
+			within = within && verdict.KeptName(k) == k && len(vs) <= 64 && !slices.ContainsFunc(vs, func(v string) bool { return verdict.KeptValue(v) != v })
+		}
+		if within {
+			return l
+		}
+	}
+	out := incident.Labels{}
+	size := 2
+	for _, k := range slices.Sorted(maps.Keys(l)) {
+		kk := verdict.KeptName(k)
+		if _, taken := out[kk]; taken {
+			continue
+		}
+		var vs []string
+		for _, v := range l[k][:min(len(l[k]), 64)] {
+			if v = verdict.KeptValue(v); !slices.Contains(vs, v) {
+				vs = append(vs, v)
+			}
+		}
+		b, _ := json.Marshal(map[string][]string{kk: vs})
+		if size+len(b)-1 > maxLabelBytes {
+			continue
+		}
+		out[kk], size = vs, size+len(b)-1
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // signalMatch is the labels a signal's windows are matched on, as a column
