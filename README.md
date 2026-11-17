@@ -207,7 +207,8 @@ six minutes, so a burst of errors under a minute, which `rate(...[5m])` shows
 for exactly five, reads as an incident it missed. When some rules judged
 can't fire on impact as short as `--impact-for` (their `for` and one
 evaluation; with no `for`, as long as their evaluations are apart; and how
-late their metrics arrive, by `--late` or a group's `query_offset`), the
+late their metrics arrive, by `--late`, a group's `query_offset` or a
+Grafana query's time range), the
 report says how many, and what `--impact-for` they can catch
 (`impact_short` in `--json`); the incidents are judged as any others.
 
@@ -375,7 +376,8 @@ period: a rule with no `for`, on time, held only once it fired. It is worked
 out from the rules replayed, with no step after the replays, so `--extras`
 doesn't cut it. A firing says when its condition held (`held_from`), so a
 report's firings, read back with `--firings`, say the same; firings from
-elsewhere, with no `held_from`, came after nothing. `lapilli serve` doesn't
+elsewhere, with no `held_from`, came after nothing, and a `held_from` after
+its firing's start is read as none. `lapilli serve` doesn't
 say it yet.
 
 **What nearly caught it.** For an incident nothing caught, or only noisy rules

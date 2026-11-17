@@ -346,7 +346,12 @@ func NearMisses(ctx context.Context, h replay.History, versions []replay.Version
 			continue
 		}
 		after := &verdict.RuleResult{Rule: nm.Rule}
-		alt := verdict.Judge(nil, fs, incs, alone)
+		shorter := alone
+		shorter.Versions = nil
+		for _, v := range vs {
+			shorter.Versions = append(shorter.Versions, v.Rules...)
+		}
+		alt := verdict.Judge(nil, fs, incs, shorter)
 		if j := slices.IndexFunc(alt.Rules, func(r verdict.RuleResult) bool { return r.Rule == nm.Rule }); j >= 0 {
 			*after = alt.Rules[j]
 		}

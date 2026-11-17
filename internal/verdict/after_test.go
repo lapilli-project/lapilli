@@ -143,8 +143,9 @@ func TestFiredAfterReadBack(t *testing.T) {
 	if got := Judge(nil, bare, incs, opts()); len(got.Incidents[0].FiredAfter) != 0 {
 		t.Errorf("a firing with no held_from: %+v", got.Incidents[0])
 	}
-	if _, err := firing.ReadJSONL(strings.NewReader(`{"rule":"LB5xx","start":"2026-10-26T01:49:00Z","held_from":"2026-10-26T01:50:00Z"}`)); err == nil {
-		t.Error("held_from after start: want it refused")
+	odd, err := firing.ReadJSONL(strings.NewReader(`{"rule":"LB5xx","labels":{"service":"api"},"start":"2026-10-26T01:49:00Z","held_from":"2026-10-26T01:50:00Z"}`))
+	if err != nil || !odd[0].Held.IsZero() {
+		t.Errorf("held_from after start: %v, %+v; want it read as none", err, odd)
 	}
 }
 
@@ -186,7 +187,7 @@ func TestImpactShortLateText(t *testing.T) {
 	if err := Text(&b, r, time.UTC); err != nil {
 		t.Fatal(err)
 	}
-	want := "--impact-for 7m counts only what they can.\n  Of them, 1 read metrics that arrive late (--late, query_offset), and need that much longer too.\n"
+	want := "--impact-for 7m counts only what they can.\n  Of them, 1 read metrics that arrive late (--late, query_offset, a Grafana query's time range): what they\n  need counts it.\n"
 	if !strings.Contains(b.String(), want) {
 		t.Errorf("lacks %q:\n%s", want, b.String())
 	}

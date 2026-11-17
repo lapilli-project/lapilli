@@ -28,7 +28,8 @@ type Firing struct {
 	// read, its condition held before it fired: its start, less its rule's
 	// "for" and how late the rule's metrics arrive, as a report judged it
 	// (verdict.Judge). Zero is its start. Read back with the rest, a
-	// report's firings judged again say what the report said.
+	// report's firings judged again say what the report said; one after
+	// its start is not believed, and read as none.
 	Held time.Time `json:"held_from,omitzero"`
 }
 
@@ -56,7 +57,7 @@ func ReadJSONL(r io.Reader) ([]Firing, error) {
 			return nil, fmt.Errorf("line %d: a firing needs rule and start", n)
 		}
 		if f.Held.After(f.Start) {
-			return nil, fmt.Errorf("line %d: held_from is after start: its condition held before it fired", n)
+			f.Held = time.Time{} // a condition holds before it fires: not believed
 		}
 		out = append(out, f)
 	}

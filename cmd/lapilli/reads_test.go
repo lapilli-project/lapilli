@@ -672,6 +672,11 @@ func TestImpactShortLate(t *testing.T) {
 	if got := impactShort(rs, replayed, 6*time.Minute, 15*time.Second); got != nil {
 		t.Errorf("on time, 4m is within 6m: %+v", got)
 	}
+	// A Grafana query whose time range ends 3m before now reads as late.
+	rs[0].Graph = &rules.Graph{Shift: map[string]time.Duration{"A": 3 * time.Minute, "B": 0}}
+	if got := impactShort(rs, replayed, 6*time.Minute, 15*time.Second); got == nil || got.Need != 7*time.Minute || got.Lagged != 1 {
+		t.Errorf("a Grafana query 3m back: %+v", got)
+	}
 }
 
 // TestSuggestParallel: a longer "for" for the noisy rules is tried for as

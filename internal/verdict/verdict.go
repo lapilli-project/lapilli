@@ -63,6 +63,12 @@ type Options struct {
 	// its week is kept, as serve's stones are kept by week. Nil judges each
 	// firing by the record at its own time, as lapilli verdict does.
 	RecordWeek func(t time.Time) (from, to time.Time) `json:"-"`
+	// Versions are, when the rules replayed stood as several versions over
+	// the period (a rules history), every one of them: from when a
+	// firing's condition held (Judged.After) is its start less the least
+	// "for" and lag of its rule among known and these, so it is said to
+	// have held in an incident only when every version would have.
+	Versions []rules.Rule `json:"-"`
 	// Signals, when named, are the impact signals and the rule entries
 	// firings are judged by (docs/design/signals.md): each window matched
 	// on its signal's labels, each firing judged by the signals that could
@@ -138,9 +144,10 @@ type RuleResult struct {
 	White    int    `json:"white"`
 	Black    int    `json:"black"`
 	Refired  int    `json:"refired"` // firings that came within RefireWithin of the last one resolving
-	// Late are of its black firings those that came after an incident was
-	// over, its condition having held in it (Judged.After): black all the
-	// same, as nothing came in time.
+	// Late are of its black firings (its unjudged among them, as Black
+	// counts them) those that came after an incident was over, its
+	// condition having held in it (Judged.After): black all the same, as
+	// nothing came in time.
 	Late     int  `json:"late,omitempty"`
 	Replayed bool `json:"replayed"`
 	// Noisy says the rule fires whatever happens: see Options.
@@ -267,7 +274,7 @@ type IncidentResult struct {
 // most common of how long they need, their "for" and one evaluation (with
 // no "for", an evaluation), and how late their metrics arrive, and Most
 // how many need that. Lagged are of Rules those whose metrics arrive late
-// (--late, query_offset). An incident found by --impact as short as For
+// (--late, query_offset, a Grafana query's time range). An incident found by --impact as short as For
 // can't be caught by them: shown, it is still judged as any other. With
 // named signals, Signal is the one whose "for" is shortest, and the rules
 // judged are those judged against its windows.
@@ -448,10 +455,9 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	named := o.Signals.Named()
 	// How long before a firing its rule's condition held, by the time of
 	// the history it read: its "for" and how late its metrics arrive, of
-	// a rule as it was at several times the least, so a firing is said to
-	// have held in an incident only when every version would have.
+	// a rule as it was at several times the least (Options.Versions).
 	held := map[string]time.Duration{}
-	for _, k := range known {
+	for _, k := range slices.Concat(known, o.Versions) {
 		if d, ok := held[k.Name]; !ok || max(k.For, 0)+k.Lag() < d {
 			held[k.Name] = max(k.For, 0) + k.Lag()
 		}

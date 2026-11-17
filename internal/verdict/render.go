@@ -91,7 +91,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		if err := table(w, rows); err != nil {
 			return err
 		}
-		late(w, fired)
+		late(w, r.Rules)
 	}
 	if len(r.Unrecorded) > 0 {
 		fmt.Fprintf(w, "\nRules that fired as often as a noisy rule, with no record to judge them by:\n")
@@ -170,7 +170,8 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 				"  of them). Impact shorter than that they can't be sure to catch. %s%s counts only what they can.\n",
 				flag, Duration(s.For), Duration(s.For), s.Rules, s.Judged, Duration(s.Need), s.Most, flag, Duration(s.Need))
 			if s.Lagged > 0 {
-				fmt.Fprintf(w, "  Of them, %d read metrics that arrive late (--late, query_offset), and need that much longer too.\n", s.Lagged)
+				fmt.Fprintf(w, "  Of them, %d read metrics that arrive late (--late, query_offset, a Grafana query's time range): what they\n"+
+					"  need counts it.\n", s.Lagged)
 			}
 		}
 		if noisy > 0 {
