@@ -43,7 +43,9 @@ refuses posts from other sites, and with `--read-only` takes no changes. It send
 redirects. Whoever can write its ledger, as a Postgres user or in the
 SQLite file, can make it query the history and the rule sources with its
 tokens (the impact signal set in the UI, the versions of the rules and the
-proposals are kept there), so guard the ledger as you guard the tokens. Of
+proposals are kept there), carry out with `--changes` a change the ledger
+holds as approved, and send the notices it holds: so guard the ledger as
+you guard the tokens. Of
 particular interest besides the above:
 
 - a way for a page to run script, or for a rule, label or incident to
