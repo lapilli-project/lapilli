@@ -67,6 +67,17 @@ const MaxExpectations = 1 << 20
 // held against every rule a change touches.
 const MaxExpectationEntries = 2000
 
+// MaxExpectationCatches is the most catches a file may hold, in all its
+// expectations, as many as it may hold expectations: each is held against
+// every rule its expectation holds that a change touches.
+const MaxExpectationCatches = 2000
+
+// MaxExpectResults is the most a comparison holds the rules that differ
+// to: each rule to each budget and catch that holds it, before and after.
+// A group's 2,000 catches held against every rule of the group a change
+// touches would be millions, each kept and shown.
+const MaxExpectResults = 100000
+
 // ReadExpectations reads an expectations file strictly: a key it doesn't
 // know, a value of another kind, an expectation naming no rule or group,
 // or a budget below nothing is an error, with its line.
@@ -86,6 +97,13 @@ func ReadExpectations(r io.Reader) (*Expectations, error) {
 	}
 	if len(e.Expectations) > MaxExpectationEntries {
 		return nil, fmt.Errorf("%d expectations: at most %d", len(e.Expectations), MaxExpectationEntries)
+	}
+	catches := 0
+	for _, x := range e.Expectations {
+		catches += len(x.Catches)
+	}
+	if catches > MaxExpectationCatches {
+		return nil, fmt.Errorf("%d catches: at most %d in all", catches, MaxExpectationCatches)
 	}
 	for i, x := range e.Expectations {
 		at := fmt.Sprintf("expectation %d", i+1)
@@ -111,10 +129,12 @@ func ReadExpectations(r io.Reader) (*Expectations, error) {
 // merged is the file with each rule's, and each group's, entries made one:
 // what is held is then compared item by item. The same budget, or the same
 // incident, given twice for one rule or group is refused: which holds isn't
-// for the order to decide.
+// for the order to decide. Each incident is looked for among those of its
+// rule or group in a set.
 func (e *Expectations) merged() (*Expectations, error) {
 	out := &Expectations{Expectations: []Expectation{}}
 	at := map[[2]string]int{}
+	caught := map[[3]string]bool{}
 	for _, x := range e.Expectations {
 		key := [2]string{x.Rule, x.Group}
 		i, seen := at[key]
@@ -143,9 +163,11 @@ func (e *Expectations) merged() (*Expectations, error) {
 			}
 		}
 		for _, c := range x.Catches {
-			if slices.ContainsFunc(y.Catches, func(o ExpectCatch) bool { return o.Incident == c.Incident }) {
+			k := [3]string{x.Rule, x.Group, c.Incident}
+			if caught[k] {
 				return nil, fmt.Errorf("%s: incident %s given twice", x.name(), c.Incident)
 			}
+			caught[k] = true
 			y.Catches = append(y.Catches, c)
 		}
 	}
@@ -290,8 +312,9 @@ type weekCounts map[string][]struct{ all, asleep int }
 // CheckExpectations holds the rules a comparison's change touches to what
 // after says of them; with before (--expect-before), the side before to
 // what was expected then, and what the change did to the expectations is
-// said. hours count the firings while people slept.
-func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours) *Checked {
+// said. hours count the firings while people slept. Past MaxExpectResults
+// it stops, and says what to do.
+func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours) (*Checked, error) {
 	out := &Checked{Results: []ExpectResult{}}
 	span := c.To.Sub(c.From)
 	out.Weeks = int(span / (7 * 24 * time.Hour))
@@ -299,8 +322,14 @@ func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours)
 		out.Scaled = span.Hours() / 24
 	}
 	countsB, countsA := out.count(c.Before, c.From, c.To, hours), out.count(c.After, c.From, c.To, hours)
+	incsB, incsA := incidentsByID(c.Before), incidentsByID(c.After)
 	sleeps := hours != nil && hours.Sleeps()
 	for _, rc := range c.Rules {
+		// Checked as each rule's are added: one rule adds a few
+		// expectations' items at most, each file's 2,000 catches at most.
+		if len(out.Results) > MaxExpectResults {
+			return nil, errHeldTooMuch
+		}
 		b, a := rc.Before, rc.After
 		group := ""
 		if a != nil {
@@ -311,8 +340,8 @@ func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours)
 		held := false
 		judge := func(it item, beforeLimit item, r ExpectResult) ExpectResult {
 			if it.catch != nil {
-				r.Before, r.BeforeState = catchState(c.Before, b, rc.Rule, *beforeLimit.catch)
-				r.After, r.AfterState = catchState(c.After, a, rc.Rule, *it.catch)
+				r.Before, r.BeforeState = catchState(c.Before, incsB, b, rc.Rule, *beforeLimit.catch)
+				r.After, r.AfterState = catchState(c.After, incsA, a, rc.Rule, *it.catch)
 				// A rule taken away catches nothing: the expectation that
 				// it does, still in the file, is broken.
 				if a == nil {
@@ -403,6 +432,28 @@ func CheckExpectations(c *Comparison, after, before *Expectations, hours *Hours)
 			out.Unexpected = append(out.Unexpected, rc.Rule)
 		}
 	}
+	if len(out.Results) > MaxExpectResults {
+		return nil, errHeldTooMuch
+	}
+	return out, nil
+}
+
+// errHeldTooMuch is what CheckExpectations says past MaxExpectResults.
+var errHeldTooMuch = fmt.Errorf("the rules that differ are held to more than %d expectations, each rule to each budget and catch that holds it: "+
+	"give a catch to the rule it is for (rule:, not group:), or compare fewer rules at once", MaxExpectResults)
+
+// incidentsByID are where each incident of a report is, by its id: the
+// first of an id, as a catch is looked for, each looked up once.
+func incidentsByID(rep *Report) map[string]int {
+	if rep == nil {
+		return nil
+	}
+	out := make(map[string]int, len(rep.Incidents))
+	for i, ir := range rep.Incidents {
+		if _, ok := out[ir.ID]; !ok {
+			out[ir.ID] = i
+		}
+	}
 	return out
 }
 
@@ -472,15 +523,16 @@ func budgetState(r *RuleResult, n int, limit *int, counted bool) (string, string
 
 // catchState is whether a rule caught an incident, as a report judged it:
 // not known when the incident isn't in the period's or no record keeps it.
-func catchState(rep *Report, r *RuleResult, rule string, k ExpectCatch) (string, string) {
+// at is where each of the report's incidents is (incidentsByID).
+func catchState(rep *Report, at map[string]int, r *RuleResult, rule string, k ExpectCatch) (string, string) {
 	if r == nil {
 		return "–", ExpectAbsent
 	}
 	if rep == nil || r.Unsupported != "" {
 		return "–", ExpectUnknown
 	}
-	i := slices.IndexFunc(rep.Incidents, func(ir IncidentResult) bool { return ir.ID == k.Incident })
-	if i < 0 {
+	i, ok := at[k.Incident]
+	if !ok {
 		return "–", ExpectUnknown
 	}
 	for _, c := range rep.Incidents[i].CaughtBy {

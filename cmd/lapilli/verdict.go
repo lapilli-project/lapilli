@@ -1445,7 +1445,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		cmp.PassedOver = f.passedOver
 		cmp.Summarize(f.incidents != "" || f.anyImpact())
 		if expAfter != nil {
-			cmp.Expect(expAfter, expBefore, f.opts.Hours)
+			if err := cmp.Expect(expAfter, expBefore, f.opts.Hours); err != nil {
+				return fail(fmt.Errorf("--expect %s: %w", f.expect, err))
+			}
 		}
 	case len(versions) > 0:
 		known, fs = replay.Run(ctx, h, versions, f.opts.From, f.opts.To, f.step, f.parallel)

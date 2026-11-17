@@ -1124,8 +1124,11 @@ loosening is for the reviewer to see. `--fail-expectations` exits 1 when the
 change breaks one; `--expect-required` when it adds a rule no expectation
 holds. Nothing here needs incidents: a budget holds a rule with none
 written down. The file is read strictly, a key it doesn't know an error,
-1 MiB and 2,000 expectations at most, and before anything is replayed. The backtest recipes read it from both
-commits (`EXPECT`, below).
+1 MiB, 2,000 expectations and 2,000 catches at most, and before anything is replayed. The backtest recipes read it from both
+commits (`EXPECT`, below). The rules that differ are held to 100,000
+expectations at most, each rule to each budget and catch that holds it (a
+group's catch holds every rule of the group the change touches); past that,
+the run fails and says so.
 
 ## Pull request backtests in CI
 
