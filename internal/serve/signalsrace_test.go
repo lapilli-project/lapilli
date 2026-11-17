@@ -660,3 +660,25 @@ func TestSignalsFollowerOptionsOfTheGeneration(t *testing.T) {
 		t.Error("after the leader's round: the search firing is still black, the entry not judged with")
 	}
 }
+
+// A signal set on the Settings page has where its data begins looked for
+// by its expression in effect, as one serve was started with: it keeps
+// the record from its start.
+func TestSignalSetHereLooksForItsData(t *testing.T) {
+	ctx := context.Background()
+	h := shopHistory()
+	// Its data begins after it is read again: looked for, it is found later.
+	h.begins["latency_p99"] = []time.Time{now.Add(90 * time.Minute)}
+	s := signalServer(t, h, nil)
+	if code, body := adminPost(t, s, "/settings/signals", signalPost("", "latency", "latency_p99 > 1", "10m", "service", true), "ana@example.com"); code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	for k := 1; k <= 4; k++ {
+		runDue(s, k)
+		s.jobs(ctx, true)
+	}
+	r, ok := signalRow(t, s, "latency")
+	if !ok || r.Kept.Data == nil || r.Kept.From().IsZero() {
+		t.Errorf("latency's record: %+v", r.Kept)
+	}
+}
