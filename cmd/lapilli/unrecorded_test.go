@@ -129,16 +129,31 @@ func TestVerdictNoRecord(t *testing.T) {
 }
 
 // impactHistory is restartHistory, with an impact signal that found nothing,
-// and the times it was asked over.
+// and the times it was asked over; its data, the series it reads, begins
+// at begins (zero: all along), or nowhere (noData).
 type impactHistory struct {
 	restartHistory
-	asked *[]time.Time
+	asked  *[]time.Time
+	begins time.Time
+	noData bool
 }
 
 func (h impactHistory) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
-	if expr == "impact" {
+	switch expr {
+	case "impact":
 		*h.asked = append(*h.asked, start)
 		return nil, nil
+	case "count(impact)":
+		s := prom.Series{Labels: map[string]string{}}
+		for at := start; !at.After(end) && !h.noData; at = at.Add(step) {
+			if !at.Before(h.begins) {
+				s.Samples = append(s.Samples, prom.Sample{T: at, V: 1})
+			}
+		}
+		if len(s.Samples) == 0 {
+			return nil, nil
+		}
+		return []prom.Series{s}, nil
 	}
 	return h.restartHistory.QueryRange(ctx, expr, start, end, step)
 }
@@ -176,6 +191,84 @@ func TestVerdictImpactKeepsRecord(t *testing.T) {
 	}
 	if len(asked) == 0 || !asked[0].Equal(t0.Add(-2*24*time.Hour-verdict.RecordLookback)) {
 		t.Errorf("impact asked from %v, want two weeks before the period", asked)
+	}
+}
+
+// An impact signal keeps the record from where the data it reads begins,
+// as lapilli serve's does, not from where it was first read: before, a
+// restart that caught nothing can't be told from one nobody saw, and is
+// counted, not judged; and with no data, it keeps none.
+func TestVerdictImpactDataBegins(t *testing.T) {
+	rulesFile := write(t, "rules.yaml", `groups:
+  - name: pods
+    rules:
+      - alert: Restarts
+        expr: increase(restarts[30m]) > 0.5
+        for: 1m
+`)
+	now = func() time.Time { return t0 }
+	verdictOf := func(h impactHistory, flag string) (verdict.Report, string) {
+		t.Helper()
+		var asked []time.Time
+		h.asked = &asked
+		newHistory = func(context.Context, *verdictFlags) (history, error) { return h, nil }
+		var stdout, stderr bytes.Buffer
+		args := []string{"verdict", "--rules", rulesFile, "--prometheus", "http://p", "--impact", "impact", "--since", "2d", "--tz", "UTC"}
+		if flag != "" {
+			args = append(args, flag)
+		}
+		if code := run(args, &stdout, &stderr); code != 0 {
+			t.Fatalf("exit %d\n%s", code, stderr.String())
+		}
+		var rep verdict.Report
+		if flag == "--json" {
+			if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return rep, stdout.String()
+	}
+
+	begins := t0.Add(-12 * time.Hour) // the restarts are from a day before t0, two hours apart
+	rep, _ := verdictOf(impactHistory{begins: begins}, "--json")
+	if !rep.Settings.ImpactFrom.Equal(begins) || rep.Settings.ImpactNoData {
+		t.Errorf("impact_from %v, no data %v, want %v", rep.Settings.ImpactFrom, rep.Settings.ImpactNoData, begins)
+	}
+	var before, after int
+	for _, f := range rep.Firings {
+		switch {
+		case f.Start.Before(begins) && f.NoRecord:
+			before++
+		case !f.Start.Before(begins) && !f.NoRecord:
+			after++
+		default:
+			t.Errorf("firing at %v: no record %v, the data beginning at %v", f.Start, f.NoRecord, begins)
+		}
+	}
+	if before == 0 || after == 0 || rep.Unjudged != before || rep.NoRecord {
+		t.Errorf("%d unjudged before, %d judged after, %d unjudged, no record %v", before, after, rep.Unjudged, rep.NoRecord)
+	}
+	if _, text := verdictOf(impactHistory{begins: begins}, ""); !strings.Contains(text, "--impact keeps the record from 2026-11-01 12:00, where the data of every selector it reads begins") {
+		t.Errorf("text:\n%s", text)
+	}
+
+	// Data all along: the record from where it was first read, and nothing
+	// said of it, as before.
+	rep, _ = verdictOf(impactHistory{}, "--json")
+	if !rep.Settings.ImpactFrom.Equal(t0.Add(-2*24*time.Hour-verdict.RecordLookback)) || rep.Unjudged != 0 {
+		t.Errorf("all along: impact_from %v, %d unjudged", rep.Settings.ImpactFrom, rep.Unjudged)
+	}
+	if _, text := verdictOf(impactHistory{}, ""); strings.Contains(text, "--impact keeps") {
+		t.Errorf("all along, said:\n%s", text)
+	}
+
+	rep, _ = verdictOf(impactHistory{noData: true}, "--json")
+	if !rep.Settings.ImpactFrom.IsZero() || !rep.Settings.ImpactNoData || !rep.NoRecord || rep.Unjudged != len(rep.Firings) || len(rep.Firings) == 0 {
+		t.Errorf("no data: impact_from %v, no data %v, no record %v, %d of %d unjudged",
+			rep.Settings.ImpactFrom, rep.Settings.ImpactNoData, rep.NoRecord, rep.Unjudged, len(rep.Firings))
+	}
+	if _, text := verdictOf(impactHistory{noData: true}, ""); !strings.Contains(text, "--impact keeps no record: a selector it reads has no data") {
+		t.Errorf("no data, text:\n%s", text)
 	}
 }
 

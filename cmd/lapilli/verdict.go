@@ -216,7 +216,9 @@ What went wrong (with --compare, if you have them):
   --impact PROMQL     an expression that returns something while users are
                       hurt, such as a 5xx ratio above 1%; its windows become
                       incidents too, so a thin incident log still works. By
-                      service, they carry the services hit, for --match
+                      service, they carry the services hit, for --match.
+                      It keeps the record from where the data it reads
+                      begins, none for a selector with no data
   --impact NAME=PROMQL
                       one of several signals of user impact, each named
                       (repeatable, 8 at most): a probe failing, the 5xx

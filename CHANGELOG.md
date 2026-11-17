@@ -26,6 +26,26 @@
   preflight`'s `history.intervals`, and in the errors serve's runs and
   `lapilli verdict` say of a page. How an answer is taken (a page, too
   large, asked again, Loki's own text) is as it was.
+- **`lapilli verdict --impact` claimed time it had no data for.** From
+  0.41.0 to 0.53.0, an impact signal with no name kept the record from
+  two weeks before the period, whether the expression's metrics had data
+  there or not: a recording rule newer than the alerts judged, a metric
+  added later, retention shorter than the span. Firings there that
+  caught nothing written down were judged as if no user was hurt, black,
+  and could make a rule noisy. It now keeps the record by the rule
+  `lapilli serve` keeps it by since 0.49.0, and named signals since
+  0.53.0: for each selector the expression reads, the first sample of
+  any of its series, the latest of those across selectors; from there
+  on, each firing judged by its own time. A selector with no data keeps
+  no record. Before its start, a firing that caught nothing is counted,
+  not judged. The text says from when it keeps the record, when that
+  isn't where it was first read, or that it keeps none;
+  `settings.impact_from` is that start, and a new
+  `settings.impact_no_data` says a selector had no data, with
+  `impact_from` missing. With data all along, as most expressions have,
+  the report is what it was. A record that starts within the period
+  leaves `no_record` false, its later firings judged. Each run asks one
+  more query a selector, a `count()` an hour apart or more.
 
 ## [0.53.0] - 2026-11-17
 

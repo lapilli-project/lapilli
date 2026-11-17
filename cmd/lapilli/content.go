@@ -49,11 +49,13 @@ type contentOutput struct {
 }
 
 // readImpact reads the impact signal (--impact) from two weeks before the
-// period to its end, which keeps the record of all of it whatever it finds
-// (verdict.Options.ImpactFrom), and adds the windows it finds in the period
-// to incs: from its values in the period alone, as they were when the
-// period alone was read, so that a window already on at its start starts
-// there, and the firings in it are judged against it as they were.
+// period to its end, which keeps the record from where the data of every
+// selector it reads begins, as a named signal's does (recordStart), none
+// for a selector with no data (verdict.Options.ImpactFrom and
+// ImpactNoData), and adds the windows it finds in the period to incs: from
+// its values in the period alone, as they were when the period alone was
+// read, so that a window already on at its start starts there, and the
+// firings in it are judged against it as they were.
 func (f *verdictFlags) readImpact(ctx context.Context, h history, incs []incident.Incident) ([]incident.Incident, error) {
 	if f.opts.Signals.Named() {
 		return f.readSignals(ctx, h, incs)
@@ -63,7 +65,11 @@ func (f *verdictFlags) readImpact(ctx context.Context, h history, incs []inciden
 	if err != nil {
 		return nil, fmt.Errorf("--impact: %w", err)
 	}
-	f.opts.ImpactFrom = from
+	start, err := f.recordStart(ctx, h, f.impact, from)
+	if err != nil {
+		return nil, fmt.Errorf("--impact: looking for where the data it reads begins: %w", err)
+	}
+	f.opts.ImpactFrom, f.opts.ImpactNoData = start, start.IsZero()
 	in := make([]prom.Series, 0, len(series))
 	for _, s := range series {
 		s.Samples = slices.DeleteFunc(slices.Clone(s.Samples), func(x prom.Sample) bool { return x.T.Before(f.opts.From) })

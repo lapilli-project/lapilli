@@ -215,6 +215,7 @@ func bySignal(r *Report) string {
 func signalsKept(w io.Writer, r *Report, loc *time.Location) {
 	ss := signals(r)
 	if len(ss) == 0 {
+		impactKept(w, r, loc)
 		return
 	}
 	var parts []string
@@ -229,6 +230,21 @@ func signalsKept(w io.Writer, r *Report, loc *time.Location) {
 		}
 	}
 	fmt.Fprintf(w, "Impact signals keep the record of the firings they could have seen: %s\n", strings.Join(parts, ", "))
+}
+
+// impactKept writes, of an impact signal with no name, from when it keeps
+// the record, when that isn't where it was first read: where the data of
+// every selector it reads begins, or never, a selector it reads having no
+// data. Nothing when it was read from the first, nor in lapilli serve's
+// digest (ByWeek), whose record by it starts where its ledger says.
+func impactKept(w io.Writer, r *Report, loc *time.Location) {
+	switch s := r.Settings; {
+	case s == nil, s.ByWeek:
+	case s.ImpactNoData:
+		fmt.Fprintln(w, "--impact keeps no record: a selector it reads has no data")
+	case s.ImpactFrom.After(r.From.Add(-s.RecordLookback)):
+		fmt.Fprintf(w, "--impact keeps the record from %s, where the data of every selector it reads begins\n", s.ImpactFrom.In(loc).Format("2006-01-02 15:04"))
+	}
 }
 
 // outlasting writes the rules replayed whose "for" one event can't

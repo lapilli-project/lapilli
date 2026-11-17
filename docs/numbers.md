@@ -41,7 +41,8 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
 
 `settings` says what the firings were judged by (`lead_ns`, `match`,
 `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†,
-`record_by_week`†, `impact_signals`†, `impact_rules`†): the flags, or in
+`impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`†):
+the flags, or in
 `lapilli serve` the settings page. Durations are in nanoseconds, as
 everywhere in the report.
 
@@ -130,6 +131,10 @@ writing down what went wrong. A firing is **judged** when the record was
 kept at its time: an incident was on at some time in the two weeks
 (`record_lookback`) before it, or an impact signal (`--impact`) was read
 over its time (`impact_from`† at or before it), or it caught an incident.
+`impact_from` is where the signal was first read, or later, where the
+data of every selector it reads begins, as a named signal's `start`
+(below); it is missing, with `impact_no_data: true`†, when a selector it
+reads has no data, which keeps no record.
 The incidents that keep the record are all those given, from before the
 period too. Any other firing is black, with `no_record: true`†: counted,
 in `firings` and `black`, and in its rule's `unjudged`†, but in no
@@ -578,7 +583,7 @@ holds them, and this list.
 |---|---|
 | the report | `from`, `to`, `noisy_at`, `no_record`†, `unjudged`†, `some_rules`†, `rules`, `incidents`, `firings`, `settings` |
 | `noisy_at` | `firings`, `precision` |
-| `settings` | `lead_ns`, `match`, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `record_by_week`†, `impact_signals`†, `impact_rules`† |
+| `settings` | `lead_ns`, `match`, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`† |
 | `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`† |
 | `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match` |
 | `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`† |

@@ -20,7 +20,7 @@ import (
 var stableFields = map[string][]string{
 	"":                          {"from", "to", "noisy_at", "no_record", "unjudged", "some_rules", "rules", "incidents", "firings", "settings"},
 	"noisy_at":                  {"firings", "precision"},
-	"settings":                  {"lead_ns", "match", "refire_ns", "unknown_length_ns", "record_lookback_ns", "impact_from", "record_by_week", "impact_signals", "impact_rules"},
+	"settings":                  {"lead_ns", "match", "refire_ns", "unknown_length_ns", "record_lookback_ns", "impact_from", "impact_no_data", "record_by_week", "impact_signals", "impact_rules"},
 	"settings.impact_signals[]": {"name", "for_ns", "match", "record", "start"},
 	"settings.impact_rules[]":   {"rules", "labels", "signals", "match"},
 	"rules[]":                   {"rule", "severity", "firings", "white", "black", "refired", "noisy", "unjudged", "no_record", "replayed", "unsupported", "incidents", "first", "alone", "spare", "off_hours", "off_hours_black", "asleep", "asleep_black", "excused", "during_deploys", "during_deploys_caught", "during_deploys_unjudged", "impact_rule", "marked"},
@@ -37,7 +37,7 @@ func fullReport() *Report {
 	return &Report{
 		From: t0, To: t0.Add(7 * 24 * time.Hour), NoisyAt: NoisyAt{Firings: 10, Precision: 0.2}, NoRecord: true, Unjudged: 1, SomeRules: true,
 		Settings: &Settings{Lead: time.Minute, Match: []string{"service"}, Refire: time.Hour, UnknownLength: time.Hour, RecordLookback: RecordLookback,
-			ImpactFrom: t0, ByWeek: true,
+			ImpactFrom: t0, ImpactNoData: true, ByWeek: true, // every field, though no data leaves impact_from out
 			ImpactSignals: []Signal{{Name: "probe", For: 2 * time.Minute, Match: []string{"service"}, Record: true, Start: t0}},
 			ImpactRules:   []RuleEntry{{Rules: "^BackendMissing$", Labels: incident.Labels{"team": {"platform"}}, Signals: []string{"probe"}, Match: []string{"backend"}}}},
 		Rules: []RuleResult{{Rule: "ApiErrors", Severity: "critical", Firings: 3, White: 1, Black: 2, Refired: 1, Noisy: true, Unjudged: 1, NoRecord: true,

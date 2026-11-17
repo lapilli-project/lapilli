@@ -145,8 +145,9 @@ func unnamedImpact(t *testing.T) (signalHistory, []string) {
 		"--from", ts(sigBase), "--to", ts(sigBase.Add(7 * 24 * time.Hour)), "--match", "service", "--match", "team", "--tz", "UTC"}
 }
 
-// A single --impact with no name judges as it did before signals had
-// names: the report, the text, the metrics and the CSV are, byte for byte,
+// A single --impact with no name, whose data is there all along, judges
+// as it did before signals had names: the report, the text, the metrics
+// and the CSV are, byte for byte,
 // what lapilli verdict wrote before (testdata/unnamed-impact, written by
 // the release before named signals; LAPILLI_GOLDEN=update writes them
 // again), but for the CSV's marked column, added at its end since
@@ -182,14 +183,15 @@ func TestUnnamedImpactUnchanged(t *testing.T) {
 			t.Errorf("%s differs from what an unnamed --impact gave before:\n%s\nwant\n%s", out.file, got, want)
 		}
 	}
-	// One question of the signal a run, and none of where its data begins.
-	for _, q := range asked {
-		if q != "impact" {
-			t.Errorf("asked %q", q)
+	// One question of the signal a run, and one of where its data begins,
+	// all along here: the record from where it was first read, as before.
+	for i, q := range asked {
+		if want := []string{"impact", "count(impact)"}[i%2]; q != want {
+			t.Errorf("asked %q, want %q", q, want)
 		}
 	}
-	if len(asked) != 4 {
-		t.Errorf("asked %d times, want once a run", len(asked))
+	if len(asked) != 8 {
+		t.Errorf("asked %d times, want twice a run", len(asked))
 	}
 }
 

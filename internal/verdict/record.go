@@ -202,7 +202,9 @@ func (r Record) JudgesAny(from, to time.Time) bool {
 
 func (r Record) judgesAny(from, to time.Time) bool {
 	if r.week == nil {
-		return r.Kept(from, to)
+		// The impact signal read from some time in it on, where its data
+		// begins (lapilli verdict), keeps the record of the rest.
+		return r.Kept(from, to) || !r.impactFrom.IsZero() && r.impactFrom.Before(to)
 	}
 	for at, n := from, 0; n == 0 || at.Before(to); n++ {
 		a, b := r.week(at)

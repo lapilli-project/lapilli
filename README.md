@@ -230,9 +230,11 @@ written down. It is judged only when the record was kept at its time: an
 incident (written down, or a window `--impact` found) was on at some time
 in the two weeks before it, or it caught one. One with no end is taken to
 last an hour, as long as it is caught for. Given `--impact`, the
-signal is read from two weeks before the period, and keeps the record of
-all of it whatever it finds: it says whether users were hurt; the firings
-are judged against the windows it finds in the period, as they were.
+signal is read from two weeks before the period, and keeps the record
+from where the data of every selector it reads begins, whatever it finds:
+it says whether users were hurt; the firings are judged against the
+windows it finds in the period, as they were. A selector with no data
+keeps none; the report says from when it keeps the record, when later.
 Any other firing can't be told from one nobody wrote down: it is counted
 (in FIRED and ● NOTHING), and not judged: it is in no precision, and makes
 no rule noisy. A rule none of whose firings is judged has a precision of
