@@ -386,8 +386,10 @@ type dataView struct {
 
 type selectorView struct {
 	ledger.SelectorData
-	// StandIn is the stand-in it begins by, with no data of its own.
-	StandIn string `json:"stand_in,omitempty"`
+	// StandIn is the stand-in it begins by, from Kept, with no data of its
+	// own or before it.
+	StandIn string    `json:"stand_in,omitempty"`
+	Kept    time.Time `json:"kept_from,omitzero"`
 }
 
 // dataOf is where the data of a criterion's selectors begins, as the
@@ -410,9 +412,7 @@ func dataViewOf(d *ledger.ImpactData) *dataView {
 			continue // a stand-in: said of the selector it stands in for
 		}
 		sv := selectorView{SelectorData: x}
-		if x.First.IsZero() {
-			sv.StandIn = d.StandInOf(x.Sel)
-		}
+		sv.StandIn, sv.Kept = d.StandInOf(x.Sel)
 		v.Selectors = append(v.Selectors, sv)
 	}
 	return v
@@ -818,10 +818,8 @@ func (s *Server) lookFor(ctx context.Context, d *ledger.ImpactData, cursor time.
 	}
 	var failed error
 	for i, x := range d.Selectors {
-		if !x.First.IsZero() || x.For != "" && (!d.HasData(x.Of) || d.HasData(x.For)) {
-			// A stand-in of a selector with no data has none either; one
-			// for a selector with data of its own isn't asked.
-			continue
+		if !x.First.IsZero() || x.For != "" && !d.HasData(x.Of) {
+			continue // a stand-in of a selector with no data has none either
 		}
 		lo := x.To
 		if lo.IsZero() {

@@ -172,9 +172,11 @@ type StandIn struct {
 }
 
 // StandIns are, of expr's selectors, the stand-ins of each that only
-// narrows another (Covers), in the order they come, MaxStandIns at most;
-// not of one an absent() or absent_over_time() reads, at any depth, which
-// says users are hurt while it has no data.
+// narrows another (Covers), made of the widest of those it narrows, the
+// ones no other selector of expr is wider than: the expression reads
+// those, and they see what it would. In the order they come, MaxStandIns
+// at most; not of one an absent() or absent_over_time() reads, at any
+// depth, which says users are hurt while it has no data.
 func StandIns(expr string) ([]StandIn, error) {
 	sels, absent, err := selectorsRead(expr)
 	if err != nil {
@@ -186,7 +188,7 @@ func StandIns(expr string) ([]StandIn, error) {
 			continue
 		}
 		for _, a := range sels {
-			if a == b || !Covers(a, b) {
+			if a == b || !Covers(a, b) || !widest(a, sels) {
 				continue
 			}
 			sel, ok := standIn(a, b)
@@ -203,6 +205,12 @@ func StandIns(expr string) ([]StandIn, error) {
 		}
 	}
 	return out, nil
+}
+
+// widest reports whether no other of sels is wider than a: covers it, and
+// isn't covered by it.
+func widest(a string, sels []string) bool {
+	return !slices.ContainsFunc(sels, func(c string) bool { return c != a && Covers(c, a) && !Covers(a, c) })
 }
 
 // selectorsRead are expr's selectors, as Selectors gives them, and those

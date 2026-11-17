@@ -682,6 +682,7 @@ func TestUnnamedImpactSelectors(t *testing.T) {
 	// with data only once a 5xx came.
 	const payFive, allFive, allFiveRouted = `x{code=~"5..",route="/pay"}`, `x{code=~"5.."}`, `x{code=~"5..",route!=""}`
 	const payAndAll = `sum(rate(x{code=~"5..",route="/pay"}[5m])) / sum(rate(x{route="/pay"}[5m])) > 0.1 or sum(rate(x{code=~"5.."}[5m])) / sum(rate(x[5m])) > 0.05`
+	const payAlone = `sum(rate(x{code=~"5..",route="/pay"}[5m])) / sum(rate(x{route="/pay"}[5m])) > 0.1`
 	never := sigBase.Add(365 * 24 * time.Hour)
 	readFrom := sigBase.Add(-verdict.RecordLookback)
 	for _, c := range []struct {
@@ -700,12 +701,14 @@ func TestUnnamedImpactSelectors(t *testing.T) {
 		// A route's 5xx and everyone's, with none anywhere: kept from the
 		// first, though everyone's 5xx stand-in for the route's has none.
 		{"a route's and everyone's, no 5xx", payAndAll, map[string]time.Time{payFive: never, allFive: never, allFiveRouted: never}, readFrom},
-		// Everyone's first 5xx on Wednesday, of another route: everyone's
-		// 5xx holds the record back to it, its own data beginning then.
-		{"a route's and everyone's, a 5xx Wednesday", payAndAll, map[string]time.Time{payFive: never, allFive: at(2, 0, 0), allFiveRouted: at(2, 0, 0)}, at(2, 0, 0)},
-		// The route from Tuesday on: from then, not from where everyone's
-		// requests begin.
-		{"a route from Tuesday", payAndAll, map[string]time.Time{payFive: never, allFive: never, allFiveRouted: never, `x{route="/pay"}`: at(1, 0, 0), `x{route="/pay",code!=""}`: at(1, 0, 0)}, at(1, 0, 0)},
+		// Everyone's first 5xx on Wednesday, of another route: kept from
+		// the first, as everyone's requests were read with their codes.
+		{"a route's and everyone's, a 5xx Wednesday", payAndAll, map[string]time.Time{payFive: never, allFive: at(2, 0, 0), allFiveRouted: at(2, 0, 0)}, readFrom},
+		// The route from Tuesday on, read beside everyone's requests: kept
+		// from the first, as everyone's were read.
+		{"a route from Tuesday, beside everyone's", payAndAll, map[string]time.Time{payFive: never, allFive: never, allFiveRouted: never, `x{route="/pay"}`: at(1, 0, 0), `x{route="/pay",code!=""}`: at(1, 0, 0)}, readFrom},
+		// Read alone: from Tuesday, where the route's requests begin.
+		{"a route alone from Tuesday", payAlone, map[string]time.Time{payFive: never, `x{route="/pay"}`: at(1, 0, 0), `x{route="/pay",code!=""}`: at(1, 0, 0)}, at(1, 0, 0)},
 	} {
 		h := signalHistory{series: map[string][]on{c.expr: {}}, begins: c.begins}
 		_, args := unnamedImpact(t)

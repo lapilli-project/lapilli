@@ -202,23 +202,33 @@ func FloorBy(d *ImpactData, onOrAfter func(time.Time) time.Time) {
 }
 
 // Effective are d's selectors as they keep the record, its stand-ins left
-// out: each with no data of its own whose stand-ins (SelectorData.For),
-// of those made of a selector with data of its own, all had data, from
-// the latest of them: nothing it matches happened, though what it would
-// read was there. One whose own data begins later keeps that start, as
-// what it matches may have been there, unread, before: a job that came
-// later, not only a first 5xx.
+// out: each whose stand-ins (SelectorData.For), of those made of a
+// selector with data of its own, all had data, from the latest of them,
+// when that is before its own data or it has none. The expression reads
+// the selectors they are made of, which see what it would, so long as the
+// labels it narrows by were there: nothing it matches happened, as a 5xx
+// of a service that served none. One whose stand-ins weren't all looked
+// for yet keeps its own (Pending).
 func (d *ImpactData) Effective() []SelectorData {
 	out := d.read()
 	for i, b := range out {
-		if !b.First.IsZero() {
-			continue
-		}
-		if x, ok, _ := d.stoodIn(b.Sel); ok {
+		if x, ok, _ := d.stoodIn(b.Sel); ok && (b.First.IsZero() || x.First.Before(b.First)) {
 			out[i].First, out[i].AtStart = x.First, x.AtStart
 		}
 	}
 	return out
+}
+
+// Pending reports whether a selector of d with data of its own has a
+// stand-in not looked for yet, which may begin it earlier: its start
+// holds for now, but moves impact_since nowhere.
+func (d *ImpactData) Pending() bool {
+	for _, b := range d.read() {
+		if _, _, unknown := d.stoodIn(b.Sel); unknown && !b.First.IsZero() {
+			return true
+		}
+	}
+	return false
 }
 
 // read are d's selectors, its stand-ins left out.
@@ -261,15 +271,20 @@ func (d *ImpactData) HasData(sel string) bool {
 	return sel == "" || slices.ContainsFunc(d.Selectors, func(x SelectorData) bool { return x.Sel == sel && x.For == "" && !x.First.IsZero() })
 }
 
-// StandInOf is, of a selector of d with no data of its own, the stand-in
-// it begins by (Effective): nothing it matches happened, though what it
-// would read was there; "" for none.
-func (d *ImpactData) StandInOf(sel string) string {
+// StandInOf is, of a selector of d, the stand-in it begins by
+// (Effective), and from when: nothing it matches happened, though what it
+// would read was there; "" for none, it beginning by its own data.
+func (d *ImpactData) StandInOf(sel string) (string, time.Time) {
 	x, ok, _ := d.stoodIn(sel)
-	if !ok || d.HasData(sel) {
-		return ""
+	if !ok {
+		return "", time.Time{}
 	}
-	return x.Sel
+	for _, b := range d.read() {
+		if b.Sel == sel && !b.First.IsZero() && !x.First.Before(b.First) {
+			return "", time.Time{}
+		}
+	}
+	return x.Sel, x.First
 }
 
 func later(a, b time.Time) time.Time {
@@ -361,7 +376,7 @@ func (l *Ledger) SetImpactData(ctx context.Context, d ImpactData) error {
 		if err != nil {
 			return err
 		}
-		if n, err := strconv.ParseInt(was, 10, 64); err == nil && !d.Floor.IsZero() && n < d.Floor.Unix() {
+		if n, err := strconv.ParseInt(was, 10, 64); err == nil && !d.Floor.IsZero() && n < d.Floor.Unix() && !d.Pending() {
 			return setMeta(t.ctx, t, metaImpactSince, strconv.FormatInt(d.Floor.Unix(), 10))
 		}
 		return nil

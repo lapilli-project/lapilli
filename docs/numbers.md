@@ -134,17 +134,19 @@ over its time (`impact_from`† at or before it), or it caught an incident.
 `impact_from` is where the signal was first read, or later, where the
 data of every selector it reads begins, as a named signal's `start`
 (below); it is missing, with `impact_no_data: true`†, when a selector it
-reads has no data, which keeps no record. A selector with no data of its
-own that only narrows another (the same offset and @, and each of the
-other's matchers, its metric's name among them, one of its own) begins
-where its stand-ins' data does: the other's series with its metric's
-name and each label it narrows them by, any value, as
-`http_requests_total{code!=""}` for `http_requests_total{code=~"5.."}`
-beside `http_requests_total`. A client library makes a 5xx series at the
-first 5xx, so a service that served none had nothing to match, not
-nothing to read; and a code label that came later (a relabelling, a
-rename) holds the record back to where it came. Not a selector an
-`absent()` or `absent_over_time()` reads, at any depth.
+reads has no data, which keeps no record. But a selector that only
+narrows another the expression reads (the same offset and @, and each of
+the other's matchers, its metric's name among them, one of its own) is
+read whenever the widest of those is, so long as the labels it narrows
+by are there: it begins where that one's series with its metric's name
+and each label it narrows them by, any value, begin, when that is before
+its own data or it has none, as `http_requests_total{code!=""}` for
+`http_requests_total{code=~"5.."}` beside `http_requests_total`. A
+client library makes a 5xx series at the first 5xx, so a service that
+served none had nothing to match, not nothing to read; and a code label
+that came later (a relabelling, a rename) holds the record back to where
+it came. One read with nothing wider beside it keeps its own start. Not
+a selector an `absent()` or `absent_over_time()` reads, at any depth.
 The incidents that keep the record are all those given, from before the
 period too. Any other firing is black, with `no_record: true`†: counted,
 in `firings` and `black`, and in its rule's `unjudged`†, but in no

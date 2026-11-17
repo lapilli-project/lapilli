@@ -57,15 +57,16 @@ func TestStandIns(t *testing.T) {
 		{`{__name__="x",code="500"} / x`, []StandIn{{`x{code!=""}`, `{__name__="x",code="500"}`, `x`}}},
 		// Narrowed by its metric's name: that name, as it is.
 		{`http_errors_total{job="api"} / {job="api"}`, []StandIn{{`http_errors_total{job="api"}`, `http_errors_total{job="api"}`, `{job="api"}`}}},
-		// A route's and everyone's: one stand-in of each wider selector.
+		// A route's and everyone's: of the widest, everyone's requests.
 		{`sum(rate(x{code=~"5..",route="/pay"}[5m])) / sum(rate(x{route="/pay"}[5m])) > 0.1 or sum(rate(x{code=~"5.."}[5m])) / sum(rate(x[5m])) > 0.05`,
 			[]StandIn{
-				{`x{route="/pay",code!=""}`, `x{code=~"5..",route="/pay"}`, `x{route="/pay"}`},
-				{`x{code=~"5..",route!=""}`, `x{code=~"5..",route="/pay"}`, `x{code=~"5.."}`},
 				{`x{code!="",route!=""}`, `x{code=~"5..",route="/pay"}`, `x`},
 				{`x{route!=""}`, `x{route="/pay"}`, `x`},
 				{`x{code!=""}`, `x{code=~"5.."}`, `x`},
 			}},
+		// A route's alone: of its requests.
+		{`sum(rate(x{code=~"5..",route="/pay"}[5m])) / sum(rate(x{route="/pay"}[5m])) > 0.1`,
+			[]StandIn{{`x{route="/pay",code!=""}`, `x{code=~"5..",route="/pay"}`, `x{route="/pay"}`}}},
 	} {
 		got, err := StandIns(c.expr)
 		if err != nil {

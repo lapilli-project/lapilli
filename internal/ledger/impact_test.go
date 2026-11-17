@@ -666,10 +666,10 @@ func TestDecidedImpact(t *testing.T) {
 	}
 }
 
-// A selector with no data of its own whose stand-ins all had data begins
-// where the latest of them does: nothing it matches had happened, though
-// what it would read was there; one with a stand-in with no data, or with
-// none, has none; one with data of its own, by its own.
+// A selector whose stand-ins all had data begins where the latest of them
+// does, when that is before its own data or it has none: nothing it
+// matches had happened, though what it would read was there; one with a
+// stand-in with no data, or with none, by its own.
 func TestFloorByStandIn(t *testing.T) {
 	lo := t0.Add(-14 * 24 * time.Hour)
 	all := SelectorData{Sel: `http_requests_total`, First: lo, AtStart: true}
@@ -689,9 +689,11 @@ func TestFloorByStandIn(t *testing.T) {
 		standIn string
 	}{
 		{"none matched", []SelectorData{five, all, coded}, time.Time{}, false, "", coded.Sel},
-		// Its own data later: its own start, as what it matches may have
-		// been there unread before (a job that came later).
-		{"matched later", []SelectorData{at(five, t0.Add(-time.Hour), false), all, coded}, t0.Add(-time.Hour), false, five.Sel, ""},
+		// Its own data later, a first 5xx: from its stand-in's.
+		{"matched later", []SelectorData{at(five, t0.Add(-time.Hour), false), all, coded}, time.Time{}, false, "", coded.Sel},
+		// Its own data later, its stand-in not looked for yet: its own, for
+		// now (Pending).
+		{"matched later, a stand-in not looked for yet", []SelectorData{at(five, t0.Add(-time.Hour), false), all, {Sel: coded.Sel, For: five.Sel, Of: all.Sel}}, t0.Add(-time.Hour), false, five.Sel, ""},
 		{"with a later selector", []SelectorData{five, all, probe, coded}, probe.First, false, probe.Sel, coded.Sel},
 		{"the code label later", []SelectorData{five, all, at(coded, t0.Add(-2*24*time.Hour), false)}, t0.Add(-2 * 24 * time.Hour), false, five.Sel, coded.Sel},
 		{"the metric later", []SelectorData{five, at(all, t0.Add(-2*24*time.Hour), false), at(coded, t0.Add(-2*24*time.Hour), false)}, t0.Add(-2 * 24 * time.Hour), false, "", coded.Sel},
@@ -710,7 +712,7 @@ func TestFloorByStandIn(t *testing.T) {
 		if !d.Floor.Equal(c.floor) || d.NoData != c.noData || d.Late() != c.late {
 			t.Errorf("%s: floor %s, no data %v, late %q", c.name, d.Floor, d.NoData, d.Late())
 		}
-		if got := d.StandInOf(five.Sel); got != c.standIn {
+		if got, _ := d.StandInOf(five.Sel); got != c.standIn {
 			t.Errorf("%s: stood in by %q, not %q", c.name, got, c.standIn)
 		}
 	}
@@ -734,5 +736,38 @@ func TestFloorByStandInOf(t *testing.T) {
 	FloorBy(&d, func(t time.Time) time.Time { return t })
 	if d.NoData || !d.Floor.IsZero() {
 		t.Errorf("no data %v, floor %s", d.NoData, d.Floor)
+	}
+}
+
+// While a stand-in that may begin a selector with data earlier isn't looked
+// for yet, its later start moves impact_since nowhere: once looked for,
+// the record is kept from where it was.
+func TestImpactDataPending(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	start := t0.Add(-3 * 7 * 24 * time.Hour)
+	impactRun(t, l, start, "c")
+	was, err := l.ImpactKept(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	five, all := `x{code=~"5.."}`, `x`
+	d := ImpactData{Criterion: "c", From: start, CheckedTo: t0, Selectors: []SelectorData{
+		{Sel: five, First: start.Add(10 * 24 * time.Hour), To: t0}, {Sel: all, First: start, AtStart: true, To: t0},
+		{Sel: `x{code!=""}`, For: five, Of: all},
+	}}
+	if err := l.SetImpactData(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	k, err := l.ImpactKept(ctx)
+	if err != nil || !k.Since.Equal(was.Since) || !k.Data.Pending() {
+		t.Fatalf("pending: since %s, pending %v (%v)", k.Since, k.Data.Pending(), err)
+	}
+	d.Selectors[2].First, d.Selectors[2].AtStart, d.Selectors[2].To = start, true, t0
+	if err := l.SetImpactData(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	if k, err = l.ImpactKept(ctx); err != nil || !k.Since.Equal(was.Since) || !k.From().Equal(was.Since) {
+		t.Errorf("looked for: since %s, from %s (%v)", k.Since, k.From(), err)
 	}
 }

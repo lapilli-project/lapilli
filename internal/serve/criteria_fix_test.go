@@ -259,10 +259,9 @@ func TestImpactDataStandInDowngraded(t *testing.T) {
 	}
 }
 
-// A selector whose own data begins later than its stand-in's keeps its own
-// start: what it matches may have been there, unread, before it. The page
-// says its data, and nothing of a stand-in.
-func TestImpactDataOwnLater(t *testing.T) {
+// A selector whose own data begins later than its stand-in's, a first 5xx,
+// begins by its stand-in: the page says from when, and by what.
+func TestImpactDataStandInEarlier(t *testing.T) {
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
 	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {now.Add(-30 * time.Hour)}}
@@ -271,12 +270,36 @@ func TestImpactDataOwnLater(t *testing.T) {
 		t.Fatalf("%d %s", code, body)
 	}
 	s.jobs(ctx, false)
-	if want := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC); !options(t, s).Equal(want) {
-		t.Errorf("kept from %s, not %s", options(t, s), want)
+	if began, _ := s.l.RunsFrom(ctx); !options(t, s).Equal(began) {
+		t.Errorf("kept from %s, not %s", options(t, s), began)
 	}
 	_, page := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
-	if strings.Contains(page, "nothing matched") || !strings.Contains(page, "probe_failed{code=&#34;5&#34;}</bdi></code>: data from") {
-		t.Errorf("the page:\n%s", page)
+	if !strings.Contains(page, "kept from") || !strings.Contains(page, "<bdi>probe_failed{code!=&#34;&#34;}</bdi> begins") {
+		t.Errorf("the page doesn't say by what:\n%s", page)
+	}
+}
+
+// A record a stand-in kept stays when the selector's own first sample
+// comes: a first 5xx moves impact_since nowhere.
+func TestImpactDataFirstMatchKeeps(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {}}
+	expr := `sum(probe_failed{code="5"}) / sum(probe_failed) > 0.5`
+	if code, body := askAs(t, s.Handler(), http.MethodPost, "/settings/impact", url.Values{"impact": {expr}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	s.jobs(ctx, false)
+	k, err := s.l.ImpactKept(ctx)
+	if err != nil || k.From().IsZero() {
+		t.Fatalf("kept from %s (%v)", k.From(), err)
+	}
+	since, from := k.Since, k.From()
+	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {now.Add(time.Hour)}}
+	runDue(s, 3)
+	s.jobs(ctx, true)
+	if k, err = s.l.ImpactKept(ctx); err != nil || !k.Since.Equal(since) || !k.From().Equal(from) || k.Data.Selectors[0].First.IsZero() {
+		t.Errorf("after the first 5xx: since %s, from %s, its first %s; not %s, %s (%v)", k.Since, k.From(), k.Data.Selectors[0].First, since, from, err)
 	}
 }
 
