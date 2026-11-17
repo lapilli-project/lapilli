@@ -2,15 +2,19 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/user"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -592,5 +596,103 @@ func TestScrubberCut(t *testing.T) {
 		if got := scrub(in); got != want {
 			t.Errorf("%q: %q, want %q", in, got, want)
 		}
+	}
+}
+
+// refusingPostgres answers every connection as a Postgres whose
+// pg_hba.conf doesn't let it in does: a FATAL that names the client's
+// address, and the user and the database the client asked for, the
+// user's name for a database it didn't. Its address.
+func refusingPostgres(t *testing.T) string {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	packet := func(c net.Conn) ([]byte, bool) {
+		var n int32
+		if binary.Read(c, binary.BigEndian, &n) != nil || n < 8 || n > 1<<16 {
+			return nil, false
+		}
+		b := make([]byte, n-4)
+		_, err := io.ReadFull(c, b)
+		return b, err == nil
+	}
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				b, ok := packet(c)
+				if ok && binary.BigEndian.Uint32(b[:4]) == 80877103 { // SSLRequest: no TLS here
+					c.Write([]byte{'N'})
+					b, ok = packet(c)
+				}
+				if !ok {
+					return
+				}
+				params := map[string]string{}
+				kv := strings.Split(string(b[4:]), "\x00")
+				for i := 0; i+1 < len(kv); i += 2 {
+					params[kv[i]] = kv[i+1]
+				}
+				db := cmp.Or(params["database"], params["user"])
+				msg := fmt.Sprintf(`no pg_hba.conf entry for host "10.20.30.40", user "%s", database "%s", no encryption`, params["user"], db)
+				body := "SFATAL\x00VFATAL\x00C28000\x00M" + msg + "\x00\x00"
+				var out bytes.Buffer
+				out.WriteByte('E')
+				binary.Write(&out, binary.BigEndian, int32(len(body)+4))
+				out.WriteString(body)
+				c.Write(out.Bytes())
+			}(c)
+		}
+	}()
+	return ln.Addr().String()
+}
+
+// A Postgres that refuses the connection names the user and the database
+// in what it answers: the report says neither, as it says no host, nor
+// the password. Named in the string, or taken from PGUSER and PGDATABASE,
+// or the user this process runs as.
+func TestPreflightPostgresNames(t *testing.T) {
+	addr := refusingPostgres(t)
+	me, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		conn, pgUser, pgDatabase string
+		hidden                   []string
+	}{
+		"in the string": {conn: "postgres://ledger_reader_x:pw-0123456789@" + addr + "/ledger_db_x?sslmode=disable&connect_timeout=5",
+			hidden: []string{"ledger_reader_x", "ledger_db_x", "pw-0123456789"}},
+		"from the environment": {conn: "postgres://" + addr + "/?sslmode=disable&connect_timeout=5", pgUser: "env_reader_x", pgDatabase: "env_db_x",
+			hidden: []string{"env_reader_x", "env_db_x"}},
+		// The user's name may be a word the report says otherwise ("user"):
+		// as the server quotes it.
+		"this process's user": {conn: "postgres://" + addr + "/?sslmode=disable&connect_timeout=5",
+			hidden: []string{`"` + me.Username + `"`}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("PGUSER", c.pgUser)
+			t.Setenv("PGDATABASE", c.pgDatabase)
+			t.Setenv("PGSERVICE", "")
+			f := write(t, "ledger-url", c.conn)
+			var out bytes.Buffer
+			code := runPreflight([]string{"--ledger-url-file", f, "--alerts", "--prometheus", "http://prom.invalid:9090", "--preflight-timeout", "20s"}, &out, io.Discard)
+			text := out.String()
+			if flat := strings.Join(strings.Fields(text), " "); code != 1 || !strings.Contains(flat, "problem ledger.postgres") ||
+				!strings.Contains(flat, `user "[--ledger-url-file's user]"`) || !strings.Contains(flat, "no pg_hba.conf entry") {
+				t.Fatalf("exit %d:\n%s", code, text)
+			}
+			for _, s := range append(c.hidden, "127.0.0.1", "10.20.30.40") {
+				if strings.Contains(text, s) {
+					t.Errorf("the report says %q:\n%s", s, text)
+				}
+			}
+		})
 	}
 }

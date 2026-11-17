@@ -506,7 +506,11 @@ can do:
 - **What a server answered is redacted whole, then cut** at 200 bytes, so
   that a host cut in two is still found; and what the run learns is
   redacted too: the ledger's server, an on-call feed's URL, the keys a
-  sign-in's discovery names.
+  sign-in's discovery names. So are the ledger's user and database, as
+  pgx reads them (the string, a service file, `PGUSER` and `PGDATABASE`,
+  the user it runs as), which a Postgres that refuses the connection
+  names; and the session that holds the ledger's lock is said by its
+  number and when it connected, not its role, its name or its address.
 - **Every text of every item is shown as it reads, in one place.** Not
   only what a server answered: why a rule can't be replayed, in a rule
   file's own words (a classic condition's value), is outside text too, and

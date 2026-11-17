@@ -171,3 +171,18 @@ func Hosts(conn string) []string {
 	}
 	return out
 }
+
+// Names are the user a connection string connects as and the database it
+// connects to, which a server names when it refuses a connection ("no
+// pg_hba.conf entry for host ..., user ..., database ..."): no output that
+// hides the hosts should say them either. They are as pgx reads them, from
+// the string, a service file, PGUSER and PGDATABASE, or the user this
+// process runs as, in that order; a database not named is the user's.
+// None for a string that doesn't read.
+func Names(conn string) (user, database string) {
+	cfg, err := pgx.ParseConfig(strings.TrimSpace(conn))
+	if err != nil {
+		return "", ""
+	}
+	return cfg.User, cfg.Database
+}

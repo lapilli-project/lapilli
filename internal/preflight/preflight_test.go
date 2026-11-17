@@ -890,3 +890,23 @@ func TestRedactThenCut(t *testing.T) {
 		t.Errorf("%q", why)
 	}
 }
+
+// The session that holds a Postgres ledger's lock is said by its number
+// and when it connected: never the role it connected as, the name it gave
+// itself or its address.
+func TestHeldBy(t *testing.T) {
+	h := &ledger.LockedError{PID: 4242, Role: "ledger_writer_x", App: "copy-job-x", From: "10.9.8.7", Alone: true,
+		Since: time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)}
+	s := cutSaid(heldBy(h))
+	if !strings.Contains(s, "session 4242") || !strings.Contains(s, "2026-11-16T12:00:00Z") || !strings.Contains(s, "alone") {
+		t.Errorf("%q", s)
+	}
+	for _, hidden := range []string{"ledger_writer_x", "copy-job-x", "10.9.8.7"} {
+		if strings.Contains(s, hidden) {
+			t.Errorf("%q says %q", s, hidden)
+		}
+	}
+	if h.Role == "" {
+		t.Error("the holder given was changed")
+	}
+}
