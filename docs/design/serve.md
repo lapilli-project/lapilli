@@ -762,9 +762,7 @@ as instructions.
   the ledger with replicas, so every replica counts the same; in the
   process without, begun again when it starts); a range or a subquery
   over a day refused, one not written as a duration, a subquery stepping
-  by less than a minute, an expression of more than 32 selectors or 4,096
-  characters; `--impact` is refused for the same where serve starts, with
-  a name or without. A try is an admin's, asked
+  by less than a minute, an expression of more than 32 selectors. A try is an admin's, asked
   for from the Settings page in a browser (`Sec-Fetch-Site` same-origin,
   or none for one typed): it shows the labels of the series the expression
   finds, so an admin reads, through it, any series' labels Lapilli's
