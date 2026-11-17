@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -107,6 +108,18 @@ func TestPageSaidSecrets(t *testing.T) {
 	// out whole, as serverText takes it of any text.
 	if got, _ := pageSaid("<html><body>Bearer abcdefghijkl-\nmnopqrstuvwx</body></html>", false, nil); strings.Contains(got, "mnop") || strings.Contains(got, "abcd") {
 		t.Errorf("a bearer token not sent: %q", got)
+	}
+	// A password the request carried, said back as it was sent: the &s and
+	// <s in it, which an entity or a tag would change, don't keep it from
+	// being taken out.
+	pw := httptest.NewRequest(http.MethodGet, "http://u:x@prom.example/api/v1/targets", nil)
+	for _, password := range []string{"pa&notss1234", "pa&copyss1234", "pa<b>ss1234", "pa&amp;ss1234", "pass&lt;1234"} {
+		pw.URL.User = url.UserPassword("u", password)
+		for _, page := range []string{"<html><body>login failed for u:" + password + "</body></html>", "<html><title>u:" + password + "</title></html>"} {
+			if got, ok := pageSaid(page, false, pw); !ok || strings.Contains(got, "ss1234") || strings.Contains(got, "1234") {
+				t.Errorf("%q: %q", page, got)
+			}
+		}
 	}
 	// With nothing to take out, the text is said as its words.
 	if got, _ := pageSaid("<html><title>Not\nFound</title></html>", false, signed()); got != `an HTML page, "Not Found"` {

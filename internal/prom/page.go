@@ -26,7 +26,9 @@ const pageSaidMost = 120
 // answer went on past text.
 //
 // What it keeps is the server's text still, so what req carried to sign in
-// is taken out of it (pageText) after its entities are read, so that a
+// is taken out of it: of the page as it is, as serverText takes it out of
+// any text, so that nothing it would take out is said; then, the page
+// read, of its text (pageText) after its entities are read, so that a
 // token written as &#115;... is found, and before it is cut, so that no
 // start of one is left. Of a text cut short, here or before, the text it
 // ends in is left out: what a secret's start, cut, would be in.
@@ -37,6 +39,13 @@ func pageSaid(text string, cut bool, req *http.Request) (string, bool) {
 	}
 	if len(t) > pageRead {
 		t, cut = t[:pageRead], true
+	}
+	if m := serverText(t, req); strings.Contains(m, "[redacted]") {
+		// What serverText takes out of the page as it is, markup and all,
+		// is taken out before the page is read: a password with an & or a
+		// < in it that an entity or a tag would change, or one split by
+		// what doesn't show. Its words a line apart run together then.
+		t = m
 	}
 	z := html.NewTokenizer(strings.NewReader(t))
 	var title, body []string
