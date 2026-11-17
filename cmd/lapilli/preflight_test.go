@@ -725,6 +725,10 @@ func TestPreflightPostgresNames(t *testing.T) {
 			hidden: []string{"ledger_reader_x", "ledger_db_x", "pw-0123456789"}},
 		"from the environment": {conn: "postgres://" + addr + "/?sslmode=disable&connect_timeout=5", pgUser: "env_reader_x", pgDatabase: "env_db_x",
 			hidden: []string{"env_reader_x", "env_db_x"}},
+		// Names that are words of the report's own (its item ledger.postgres,
+		// lapilli): taken out of what the server said, and of nothing else.
+		"words of its own": {conn: "postgres://" + addr + "/?sslmode=disable&connect_timeout=5", pgUser: "lapilli", pgDatabase: "postgres",
+			hidden: []string{`"lapilli"`, `"postgres"`}},
 		// The user's name may be a word the report says otherwise ("user"):
 		// as the server quotes it.
 		"this process's user": {conn: "postgres://" + addr + "/?sslmode=disable&connect_timeout=5",

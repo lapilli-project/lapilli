@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -974,5 +975,31 @@ func TestHeldBy(t *testing.T) {
 	}
 	if h.Role == "" {
 		t.Error("the holder given was changed")
+	}
+}
+
+// TestHiddenInSaidOnly: what is to be kept out of what a server said only
+// (hideSaid: a Postgres user's or database's name, which may be lapilli or
+// postgres) is taken out of what the server said, and left in the report's
+// own words.
+func TestHiddenInSaidOnly(t *testing.T) {
+	c := config()
+	c.Scrubber = func(more ...[2]string) func(string) string {
+		return func(s string) string {
+			for _, m := range more {
+				s = strings.ReplaceAll(s, m[1], "["+m[0]+"]")
+			}
+			return s
+		}
+	}
+	p := newRun(c)
+	p.hideSaid("user", "lapilli")
+	p.add(Item{ID: "ledger.postgres", State: Problem, What: "lapilli serve can't read the ledger",
+		Why: "it said: " + said(errors.New(`password authentication failed for user "lapilli"`)), Fix: "start lapilli serve again"})
+	p.redact()
+	it := p.r.Items[0]
+	if it.What != "lapilli serve can't read the ledger" || it.Fix != "start lapilli serve again" ||
+		it.Why != `it said: password authentication failed for user "[user]"` {
+		t.Errorf("%q\n%q\n%q", it.What, it.Why, it.Fix)
 	}
 }

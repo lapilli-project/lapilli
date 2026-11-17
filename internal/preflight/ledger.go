@@ -93,8 +93,8 @@ func (p *run) postgres(ctx context.Context) {
 		p.hide("--ledger-url-file", h)
 	}
 	user, database := ledger.Names(string(b))
-	p.hide("--ledger-url-file's user", user)
-	p.hide("--ledger-url-file's database", database)
+	p.hideSaid("--ledger-url-file's user", user)
+	p.hideSaid("--ledger-url-file's database", database)
 	pr, err := ledger.ProbePostgres(ctx, string(b))
 	if err != nil {
 		p.add(Item{ID: "ledger.postgres", State: Problem, What: "the ledger's database can't be read", Why: said(err),

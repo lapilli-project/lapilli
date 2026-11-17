@@ -149,14 +149,25 @@ type run struct {
 	h    *prom.Client
 	hErr error
 	ds   rules.DataSources
-	// hidden are what the run learned is to be redacted, by flag.
-	hidden [][2]string
+	// hidden are what the run learned is to be redacted, by flag;
+	// hiddenSaid what is to be redacted of what a server said only.
+	hidden, hiddenSaid [][2]string
 }
 
 // hide has what is printed redact value, as of flag.
 func (p *run) hide(flag, value string) {
 	if value != "" {
 		p.hidden = append(p.hidden, [2]string{flag, value})
+	}
+}
+
+// hideSaid has what a server said redact value, as of flag, and nothing
+// else: a name a server's answer repeats, as Postgres' refusal does the
+// user's and the database's, which may well be a word of Lapilli's own
+// (lapilli, postgres) that the rest of the report says.
+func (p *run) hideSaid(flag, value string) {
+	if value != "" {
+		p.hiddenSaid = append(p.hiddenSaid, [2]string{flag, value})
 	}
 }
 
@@ -175,8 +186,8 @@ func (p *run) offline(id, what string) {
 // so that nothing to be redacted is cut in two before it is looked for.
 // The text and the JSON are both written from what it leaves.
 func (p *run) redact() {
-	scrub := p.c.Scrubber(p.hidden...)
-	done := func(s string) string { return cutSaid(scrub(shown(s))) }
+	scrub, scrubSaid := p.c.Scrubber(p.hidden...), p.c.Scrubber(p.hiddenSaid...)
+	done := func(s string) string { return cutSaid(inSaid(scrub(shown(s)), scrubSaid)) }
 	for i := range p.r.Items {
 		it := &p.r.Items[i]
 		it.What, it.Why, it.Fix = done(it.What), done(it.Why), done(it.Fix)
@@ -226,6 +237,27 @@ func said(err error) string {
 		return ""
 	}
 	return saidFrom + verdict.Clean(strings.ReplaceAll(strings.TrimSpace(err.Error()), "\n", "; ")) + saidTo
+}
+
+// inSaid is s with f applied to each part of it said marks, and to
+// nothing else; the marks are kept.
+func inSaid(s string, f func(string) string) string {
+	var b strings.Builder
+	for {
+		i := strings.Index(s, saidFrom)
+		if i < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		b.WriteString(s[:i+len(saidFrom)])
+		s = s[i+len(saidFrom):]
+		j := strings.Index(s, saidTo)
+		if j < 0 {
+			j = len(s)
+		}
+		b.WriteString(f(s[:j]))
+		s = s[j:]
+	}
 }
 
 // cutSaid cuts each part of s said marks to saidMost bytes, and takes the
