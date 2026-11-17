@@ -2223,6 +2223,7 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	runs = s.runsFor(runs, s.role(r) == admin, lang(r))
 	cs, err := s.l.Changes(r.Context(), 100)
 	if err != nil {
 		return nil, err

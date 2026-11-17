@@ -1165,9 +1165,11 @@ rule) is said above the table, warn. No token is shown; the port and the
 token's file, and the incidents file's path, to an admin alone. So is the
 path of every file and directory serve was started with (`--deploys`,
 `--marked`, `--config`, `--rules`, the ledger, each token's and webhook's
-file): an error reading one says it by what it is to anyone else, in the
-status banner and here, and the Settings page and `/api/v1/settings` name
-`--config` by its flag. The
+file), and where it leads, should it be a link: an error reading one says
+it by what it is to anyone else, in the status banner, here, and the run
+history (`/runs`, `/api/v1/runs`, the Overview's last run), where it is
+said whole, never inside a word, and the Settings page and
+`/api/v1/settings` name `--config` by its flag. The
 Incidents page links to the section. What the replica that leads saw (last
 reads, failures) is in its published status, for the others' pages.
 

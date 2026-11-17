@@ -1806,7 +1806,7 @@ func (s *Server) apiRuns(w http.ResponseWriter, r *http.Request) {
 	if runs == nil {
 		runs = []ledger.Run{}
 	}
-	writeJSON(w, runs)
+	writeJSON(w, s.runsFor(runs, s.role(r) == admin, "en"))
 }
 
 func (s *Server) apiSettings(w http.ResponseWriter, r *http.Request) {

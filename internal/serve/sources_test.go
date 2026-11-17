@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/report"
 	"lapilli.dev/internal/rules"
 )
 
@@ -297,5 +299,48 @@ func TestRedactPathsLinkTarget(t *testing.T) {
 	got := s.redactPaths("reading the rules: --rules-history: "+err.Error(), "en")
 	if strings.Contains(got, "store") || !strings.Contains(got, "the path given to --rules-history/2026-11-01T00:00:00Z/team") {
 		t.Errorf("%v\n became %q", err, got)
+	}
+}
+
+// Why a run failed, and why a rule couldn't be replayed, are said without
+// the paths of the files serve was started with to a reader who isn't an
+// admin, as the banner says them: on the run history, in /api/v1/runs and
+// in the overview's last run. The digest's webhook file that can't be read
+// is one.
+func TestRunsFailedPathsAnAdminsAlone(t *testing.T) {
+	ctx := context.Background()
+	hook := filepath.Join(t.TempDir(), "private-mount", "slack-hook")
+	s := criteriaServer(t, true, func(c *Config) { c.Slack = hook })
+	err := report.Slack(ctx, s.cfg.Slack, "x")
+	if err == nil || !strings.Contains(err.Error(), hook) {
+		t.Fatalf("the digest's error doesn't say the file: %v", err)
+	}
+	if err := s.l.AddRun(ctx, ledger.Run{Kind: "hourly", Started: s.now(), Finished: s.now(), From: s.now().Add(-time.Hour), To: s.now(),
+		Failed: map[string]string{"SomeRule": "reading " + hook + ".d/extra: no such file"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.AddRun(ctx, ledger.Run{Kind: "digest", Started: s.now(), Finished: s.now(), From: s.now().Add(-7 * 24 * time.Hour), To: s.now(), Error: err.Error()}); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	for _, p := range []string{"/runs", "/api/v1/runs", "/"} {
+		for _, who := range []string{"carl@example.com", "bo@example.com"} {
+			code, body := askAs(t, h, http.MethodGet, p, nil, who, "same-origin")
+			if i := strings.Index(body, filepath.Dir(hook)); code != http.StatusOK || i >= 0 {
+				t.Errorf("%s, %s: %d, the path is shown: %s", who, p, code, body[max(0, i-80):min(len(body), max(0, i)+80)])
+			}
+			if !strings.Contains(body, "the path given to --slack-webhook-file") {
+				t.Errorf("%s, %s: the run doesn't say which file", who, p)
+			}
+		}
+		if _, body := askAs(t, h, http.MethodGet, p, nil, "ana@example.com", "same-origin"); !strings.Contains(body, hook) {
+			t.Errorf("%s: an admin doesn't read the path", p)
+		}
+	}
+	for _, who := range []string{"carl@example.com", "ana@example.com"} {
+		_, body := askAs(t, h, http.MethodGet, "/runs", nil, who, "same-origin")
+		if strings.Contains(body, hook+".d") == (who == "carl@example.com") || !strings.Contains(body, "SomeRule") {
+			t.Errorf("%s: why a rule couldn't be replayed, as shown: the path there %v", who, strings.Contains(body, hook+".d"))
+		}
 	}
 }

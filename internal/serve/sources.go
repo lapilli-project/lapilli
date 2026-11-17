@@ -39,6 +39,29 @@ func (s *Server) redactPaths(text, l string) string {
 	return hidePaths(text, s.filePaths(), l)
 }
 
+// runsFor are runs as they are shown to a reader, an admin or not, in
+// language l: why a run failed, and why a rule couldn't be replayed, can
+// name a file serve was started with (a webhook's that can't be read, the
+// rules'), and are said without its path to anyone but an admin, as the
+// status banner says them (redactPaths).
+func (s *Server) runsFor(runs []ledger.Run, adminReads bool, l string) []ledger.Run {
+	if adminReads || !slices.ContainsFunc(runs, func(r ledger.Run) bool { return r.Error != "" || len(r.Failed) > 0 }) {
+		return runs
+	}
+	ps := s.filePaths()
+	out := slices.Clone(runs)
+	for i, r := range out {
+		out[i].Error = hidePaths(r.Error, ps, l)
+		if len(r.Failed) > 0 {
+			out[i].Failed = make(map[string]string, len(r.Failed))
+			for rule, why := range r.Failed {
+				out[i].Failed[rule] = hidePaths(why, ps, l)
+			}
+		}
+	}
+	return out
+}
+
 // hidePaths is text with each of ps it says whole said by what it is
 // (filePath.name), in one pass: at each place a path may begin, the
 // longest of ps there is taken, and what is put in its place is never
