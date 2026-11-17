@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.54.0] - 2026-11-17
+
 ### Added
 
 - **An alert that came after its incident is said, not only counted
