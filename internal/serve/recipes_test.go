@@ -1165,7 +1165,10 @@ func TestNewRecipesFailLoudly(t *testing.T) {
 // argument): one in the job's HOME could send what it asks, and the token
 // it is given, through a proxy of its choosing.
 func TestRecipesCurlReadsNoCurlrc(t *testing.T) {
-	call := regexp.MustCompile(`(?:^|[|;&(]|\$\()\s*curl(\s+\S+)?`)
+	// curl as a word followed by a flag, wherever it is in a line: after
+	// a pipe, $(, {, if, !, command, env, timeout N or a backtick alike;
+	// prose ("curl isn't installed", "command -v curl") gives it none.
+	call := regexp.MustCompile(`(?:^|[^A-Za-z0-9_./$-])curl\s+(-\S*)`)
 	n := 0
 	for _, dir := range []string{"../../recipes", "../../charts/lapilli/files"} {
 		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
