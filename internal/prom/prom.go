@@ -840,19 +840,32 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 	if c.loki {
 		what = "a Loki"
 	}
-	said := func() string {
+	cut := func() bool { return h.n > int64(h.buf.Len()) }
+	raw := func() string {
 		text := h.buf.String()
-		if h.n > int64(len(text)) {
+		if cut() {
 			text = cutEnd(text, sent(req))
 		}
-		return clip(serverText(strings.TrimSpace(text), req), 200)
+		return strings.TrimSpace(text)
 	}
-	notAPI := func() error { return pageError(req, resp, "not "+what+" API response: "+said()) }
+	notAPI := func() error {
+		text := raw()
+		said := clip(serverText(text, req), 200)
+		s, page := pageSaid(text, cut(), req)
+		if !page {
+			return pageError(req, resp, "not "+what+" API response: "+said)
+		}
+		// An HTML page is said by its title, not its markup; whether it
+		// says the answer was too large is read as before.
+		e := pageError(req, resp, "not "+what+" API response: "+s)
+		e.big = tooBigText(said)
+		return e
+	}
 	if h.n > maxBody {
 		return nil, &APIError{Status: resp.StatusCode, Msg: fmt.Sprintf("the answer is over %d MiB", maxBody>>20), big: true}
 	}
 	if bad != nil {
-		if msg := said(); c.loki && resp.StatusCode/100 != 2 && lokiText(resp, msg) {
+		if msg := clip(serverText(raw(), req), 200); c.loki && resp.StatusCode/100 != 2 && lokiText(resp, msg) {
 			// Loki says what went wrong in plain text; a page, from a
 			// proxy before it, isn't Loki's.
 			return nil, failed(msg)
@@ -1074,7 +1087,18 @@ func (c *Client) getOnce(ctx context.Context, path string, heed bool, limit int6
 		return nil, err
 	}
 	if resp.StatusCode/100 != 2 {
-		return nil, apiError(req, resp, clip(serverText(strings.TrimSpace(string(body)), req), 200))
+		text := strings.TrimSpace(string(body))
+		said := clip(serverText(text, req), 200)
+		if s, ok := pageSaid(text, false, req); ok {
+			// An HTML page, as a managed service's frontend answers a path
+			// it doesn't serve: said by its title, not its markup. A title
+			// that says the answer was too large says so, as the start of
+			// the page always did.
+			e := apiError(req, resp, s)
+			e.big = tooBigText(said)
+			return nil, e
+		}
+		return nil, apiError(req, resp, said)
 	}
 	return body, nil
 }

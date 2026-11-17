@@ -455,7 +455,7 @@ func TestPastDeadlineGivesTheLastAnswer(t *testing.T) {
 	_, err := c.QueryRange(ctx, "up", t0, t0.Add(time.Hour), time.Minute)
 	var ae *APIError
 	if !errors.Is(err, ErrPastDeadline) || !errors.As(err, &ae) || ae.Status != 502 || n.Load() != 1 || time.Since(start) > 10*time.Second ||
-		err.Error() != "the API said to wait past the deadline, after HTTP 502: not a Prometheus API response: <html><body><h1>502 Bad Gateway</h1></body></html>" {
+		err.Error() != `the API said to wait past the deadline, after HTTP 502: not a Prometheus API response: an HTML page, "502 Bad Gateway"` {
 		t.Errorf("%v after %d requests and %s: want the 502, past the deadline", err, n.Load(), time.Since(start))
 	}
 }

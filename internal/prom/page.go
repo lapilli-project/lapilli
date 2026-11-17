@@ -1,0 +1,132 @@
+package prom
+
+import (
+	"net/http"
+	"regexp"
+	"strings"
+
+	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
+)
+
+// pageRead is how much of an answer pageSaid reads: a page's title is
+// near its start, and what follows isn't said.
+const pageRead = 16 << 10
+
+// pageSaidMost is how much of a page's title, or of its text, pageSaid
+// keeps.
+const pageSaidMost = 120
+
+// pageSaid is what an answer's text, from the API's address, says when it
+// is an HTML page, as a frontend's, a proxy's or a sign-in's is: "an HTML
+// page" and its title (or, with none, the start of its text, without what
+// its scripts and styles hold), rather than its markup, which says nothing
+// in a line a person reads and pushes the rest of a report out of it. ok is
+// false for text that isn't a page, which is said as it was. cut says the
+// answer went on past text.
+//
+// What it keeps is the server's text still, so what req carried to sign in
+// is taken out of it: of the page as it is, as serverText takes it out of
+// any text, so that nothing it would take out is said; then, the page
+// read, of its text (pageText) after its entities are read, so that a
+// token written as &#115;... is found, and before it is cut, so that no
+// start of one is left. Of a text cut short, here or before, the text it
+// ends in is left out: what a secret's start, cut, would be in.
+func pageSaid(text string, cut bool, req *http.Request) (string, bool) {
+	t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), "\ufeff"))
+	if !isPage(t) {
+		return "", false
+	}
+	if len(t) > pageRead {
+		t, cut = t[:pageRead], true
+	}
+	if m := serverText(t, req); strings.Contains(m, "[redacted]") {
+		// What serverText takes out of the page as it is, markup and all,
+		// is taken out before the page is read: a password with an & or a
+		// < in it that an entity or a tag would change, or one split by
+		// what doesn't show. Its words a line apart run together then.
+		t = m
+	}
+	z := html.NewTokenizer(strings.NewReader(t))
+	var title, body []string
+	var last *[]string // the text the last token was, if it was
+	read := 0
+	var in atom.Atom // the element whose raw text the tokenizer gives
+	for {
+		tt := z.Next()
+		if tt == html.ErrorToken {
+			if cut && last != nil {
+				*last = (*last)[:len(*last)-1]
+			}
+			break
+		}
+		last = nil
+		switch tt {
+		case html.StartTagToken:
+			name, _ := z.TagName()
+			switch a := atom.Lookup(name); a {
+			case atom.Title, atom.Script, atom.Style, atom.Noscript, atom.Template, atom.Plaintext:
+				in = a
+			}
+		case html.EndTagToken:
+			name, _ := z.TagName()
+			if a := atom.Lookup(name); a == in && a != atom.Plaintext {
+				in = 0
+			}
+		case html.TextToken:
+			switch in {
+			case atom.Title:
+				title = append(title, string(z.Text()))
+				last = &title
+			case 0:
+				if read < pageRead {
+					s := string(z.Text())
+					read += len(s)
+					body = append(body, s)
+					last = &body
+				}
+			}
+		}
+	}
+	said := pageText(strings.Join(title, " "), req)
+	if said == "" {
+		said = pageText(strings.Join(body, " "), req)
+	}
+	said = clip(said, pageSaidMost)
+	if said == "" {
+		return "an HTML page", true
+	}
+	return `an HTML page, "` + said + `"`, true
+}
+
+// pageText is a page's text as pageSaid says it: each run of white space
+// one space, without what doesn't show or what req carried to sign in.
+// What doesn't show, white space among it, is taken out before a secret
+// is looked for, as serverText does of any text, so that one split in two
+// by it is found; and looked for again once the white space is folded. If
+// that finds anything, it is said so, though two words a line apart run
+// together; with nothing found, the text is said as its words.
+func pageText(raw string, req *http.Request) string {
+	joined := serverText(strings.Join(strings.Fields(serverText(raw, req)), " "), req)
+	if strings.Contains(joined, "[redacted]") {
+		return joined
+	}
+	return serverText(strings.Join(strings.Fields(raw), " "), req)
+}
+
+// pageStart and pageElement are how a page begins, and the elements one
+// has near its start.
+var (
+	pageStart   = regexp.MustCompile(`(?i)^<(?:!doctype\s+html|html[\s>/])`)
+	pageElement = regexp.MustCompile(`(?i)<(?:html|head|body|title)[\s>/]`)
+)
+
+// isPage reports whether t, trimmed, is an HTML page: a doctype or an html
+// element first, or markup first with one of a page's elements soon after.
+func isPage(t string) bool {
+	if !strings.HasPrefix(t, "<") {
+		return false
+	}
+	s := t[:min(len(t), 512)]
+	return pageStart.MatchString(s) || pageElement.MatchString(s)
+}

@@ -99,7 +99,7 @@ func TestAnswerBounds(t *testing.T) {
 func TestAnswerNotTheAPIs(t *testing.T) {
 	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	for body, want := range map[string]string{
-		`<html>sign in</html>`: "not a Prometheus API response: <html>sign in</html>",
+		`<html>sign in</html>`: `not a Prometheus API response: an HTML page, "sign in"`,
 		`{"status":"success","data":{"resultType":"matrix","result":[]}} x`:                                         "not a Prometheus API response",
 		`{"status":"success","data":{"resultType":"matrix","result":{}}}`:                                           "not a Prometheus API response",
 		`{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"a":1}}]}}`:                         "not a Prometheus API response",

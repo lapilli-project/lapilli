@@ -543,7 +543,16 @@ func (p *run) memory(rs []rules.Rule) {
 	}
 	if limit, ok := cgroupLimit(p.c.CgroupMemory); ok {
 		m.CgroupBytes = limit
-		if limit < m.PeakBytes {
+		switch {
+		case limit >= m.PeakBytes:
+		case m.From == "caps":
+			// With nothing read of what fired, the bound is what the caps
+			// allow, not what a run holds: under it is unknown, never a
+			// problem, as history.alerts is.
+			it.State = Unknown
+			it.Why = fmt.Sprintf("this process runs under a memory limit of %s, under the caps' bound: with no firing read, what a run holds can't be told, and the bound is reached only when %d reads at once each hold --max-samples", bytesOf(uint64(limit)), s.Parallel)
+			it.Fix = "to be held under the limit whatever a run reads, give the pod the request and the limit above, or lower --parallel or --max-samples"
+		default:
 			it.State = Problem
 			it.Why = strings.TrimPrefix(it.Why+fmt.Sprintf("; this process runs under a memory limit of %s, under the estimate", bytesOf(uint64(limit))), "; ")
 			it.Fix = "give the pod the request and the limit above, or lower --parallel or --max-samples"

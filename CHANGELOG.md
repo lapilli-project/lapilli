@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`lapilli preflight` no longer calls the caps' bound a problem.** With
+  no firing read in the last day (a quiet day, or a history that keeps no
+  `ALERTS`), `estimate.memory` gives the bound the caps allow, `--parallel`
+  times `--max-samples` times 64 bytes, some 5 GB at the defaults; a pod's
+  memory limit under that bound was a problem, though a run holds that
+  much only when every read at once holds `--max-samples`. It is now
+  unknown, saying the limit and the bound, and what to change to be held
+  under the limit whatever a run reads. An estimate from what fired, over
+  the limit, is a problem still, and `--fail-unknown` exits 1 for either.
+- **An HTML page in an error is said by its title.** Where the history's
+  API answers with a page, as a managed service's frontend does for a path
+  it doesn't serve (`/api/v1/status/config`, `/api/v1/targets`), or as a
+  proxy or a sign-in does, an error said the page's markup cut to 200
+  bytes: a doctype, a style sheet. It now says `an HTML page` and the
+  page's title, or with none the start of its text, without its scripts
+  and styles. What the request carried to sign in is taken out after the
+  page's entities are read, though white space or a character that
+  doesn't show split it, and before the text is cut; of a page longer
+  than is read, the text it is cut in isn't said. So in `lapilli
+  preflight`'s `history.intervals`, and in the errors serve's runs and
+  `lapilli verdict` say of a page. How an answer is taken (a page, too
+  large, asked again, Loki's own text) is as it was.
+
 ## [0.53.0] - 2026-11-17
 
 ### Added
