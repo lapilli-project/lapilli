@@ -71,7 +71,7 @@ while :; do
   url="$api/v3/projects/$GOOGLE_CLOUD_PROJECT/alerts?pageSize=1000&filter=$filter"
   [ -z "$next" ] || url="$url&pageToken=$(printf '%s' "$next" | jq -sRr @uri)"
   # The token goes on stdin, not the command line, where ps would show it.
-  page=$(printf 'Authorization: Bearer %s\n' "$token" | curl -fsS --max-time 30 -H @- "$url")
+  page=$(printf 'Authorization: Bearer %s\n' "$token" | curl -q -fsS --max-time 30 -H @- "$url")
   printf '%s' "$page" | jq -c '.alerts // [] | .[]' >>"$all"
   last=$next
   next=$(printf '%s' "$page" | jq -r '.nextPageToken // empty')

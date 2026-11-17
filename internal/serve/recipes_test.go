@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -1155,5 +1157,43 @@ func TestNewRecipesFailLoudly(t *testing.T) {
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err == nil || stdout.Len() != 0 || !strings.Contains(stderr.String(), "permission denied") || strings.ContainsAny(stderr.String(), "\x1b\x07") {
 		t.Errorf("Grafana IRM's error: %v, wrote %q, said %q", err, stdout.String(), stderr.String())
+	}
+}
+
+// TestRecipesCurlReadsNoCurlrc: every curl a recipe, or a script the chart
+// ships, runs reads no .curlrc (-q, which counts only as curl's first
+// argument): one in the job's HOME could send what it asks, and the token
+// it is given, through a proxy of its choosing.
+func TestRecipesCurlReadsNoCurlrc(t *testing.T) {
+	call := regexp.MustCompile(`(?:^|[|;&(]|\$\()\s*curl(\s+\S+)?`)
+	n := 0
+	for _, dir := range []string{"../../recipes", "../../charts/lapilli/files"} {
+		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".sh") {
+				return err
+			}
+			b, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for i, line := range strings.Split(string(b), "\n") {
+				if strings.HasPrefix(strings.TrimSpace(line), "#") {
+					continue
+				}
+				for _, m := range call.FindAllStringSubmatch(line, -1) {
+					n++
+					if strings.TrimSpace(m[1]) != "-q" {
+						t.Errorf("%s:%d: curl without -q first: %s", path, i+1, strings.TrimSpace(line))
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n < 20 {
+		t.Errorf("found %d curls: the pattern finds too few", n)
 	}
 }

@@ -39,7 +39,7 @@ while :; do
   fi
   url="$api/v1/incidents?page=$number&per_page=200"
   [ -z "$since" ] || url="$url&start_date=$(printf '%s' "$since" | jq -sRr @uri)"
-  page=$(printf 'Authorization: Bearer %s\n' "$token" | curl -fsS --max-time 30 -H @- -H 'Accept: application/json' "$url")
+  page=$(printf 'Authorization: Bearer %s\n' "$token" | curl -q -fsS --max-time 30 -H @- -H 'Accept: application/json' "$url")
   printf '%s' "$page" | jq -c '(.data // [])[]' >>"$all"
   next=$(printf '%s' "$page" | jq -r '.pagination.next // empty')
   [ -n "$next" ] || break

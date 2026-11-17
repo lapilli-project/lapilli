@@ -192,7 +192,7 @@ lapilli_tasks() {
       exit 1
     fi
     if ! printf 'Authorization: Bearer %s\n' "$lapilli_token" |
-      curl -fsS --max-time 30 --retry 3 -H @- -o "$work/page" "$lapilli/api/v1/tasks?$1&after=$after"; then
+      curl -q -fsS --max-time 30 --retry 3 -H @- -o "$work/page" "$lapilli/api/v1/tasks?$1&after=$after"; then
       say "Lapilli didn't give the tasks"
       exit 1
     fi
@@ -215,14 +215,14 @@ lapilli_tasks() {
 # lapilli_patch ID JSON: set a task's link or status.
 lapilli_patch() {
   printf 'Authorization: Bearer %s\n' "$lapilli_token" |
-    curl -fsS --max-time 30 --retry 3 -X PATCH -H @- -H 'Content-Type: application/json' \
+    curl -q -fsS --max-time 30 --retry 3 -X PATCH -H @- -H 'Content-Type: application/json' \
       --data-binary "$2" -o /dev/null "$lapilli/api/v1/tasks/$1"
 }
 
 # lapilli_comments ID FILE: a task's comments, as Lapilli has them.
 lapilli_comments() {
   if ! printf 'Authorization: Bearer %s\n' "$lapilli_token" |
-    curl -fsS --max-time 30 --retry 3 -H @- -o "$2" "$lapilli/api/v1/tasks/$1/comments"; then
+    curl -q -fsS --max-time 30 --retry 3 -H @- -o "$2" "$lapilli/api/v1/tasks/$1/comments"; then
     return 1
   fi
   jq -e '.comments | type == "array"' "$2" >/dev/null 2>&1
@@ -243,7 +243,7 @@ lapilli_copy() {
 # the task's issue as REF, so it is never posted again.
 lapilli_mark() {
   printf 'Authorization: Bearer %s\n' "$lapilli_token" |
-    curl -fsS --max-time 30 --retry 3 -X PATCH -H @- -H 'Content-Type: application/json' \
+    curl -q -fsS --max-time 30 --retry 3 -X PATCH -H @- -H 'Content-Type: application/json' \
       --data-binary "$(jq -cn --arg r "$3" '{posted: $r}')" -o /dev/null "$lapilli/api/v1/tasks/$1/comments/$2"
 }
 

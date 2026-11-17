@@ -34,7 +34,7 @@ while :; do
   [ -z "${UNTIL:-}" ] || url="$url&until=$(printf '%s' "$UNTIL" | jq -sRr @uri)"
   # The token goes on stdin, not the command line, where ps would show it.
   page=$(printf 'Authorization: Token token=%s\n' "$token" |
-    curl -fsS --max-time 30 -H @- -H 'Accept: application/vnd.pagerduty+json;version=2' "$url")
+    curl -q -fsS --max-time 30 -H @- -H 'Accept: application/vnd.pagerduty+json;version=2' "$url")
   printf '%s' "$page" | jq -c '.incidents[]' >>"$all"
   [ "$(printf '%s' "$page" | jq -r '.more')" = true ] || break
   offset=$((offset + 100))
