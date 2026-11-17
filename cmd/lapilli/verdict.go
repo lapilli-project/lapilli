@@ -1847,9 +1847,10 @@ var (
 
 // googleNames are what follows a Google Cloud project in the names Google
 // gives under it, the project their first label: a service account's
-// email (writer@PROJECT.iam.gserviceaccount.com) and a workload identity
-// pool (PROJECT.svc.id.goog).
-var googleNames = []string{".iam.gserviceaccount.com", ".svc.id.goog"}
+// email (writer@PROJECT.iam.gserviceaccount.com), a workload identity
+// pool (PROJECT.svc.id.goog), and an App Engine or Firebase app's host
+// (PROJECT.appspot.com, PROJECT.firebaseapp.com, PROJECT.web.app).
+var googleNames = []string{".iam.gserviceaccount.com", ".svc.id.goog", ".appspot.com", ".firebaseapp.com", ".web.app"}
 
 // replaceWord replaces in s each old that is a whole word, with with: no
 // letter, digit, dot, dash or underscore before it, and none but a dot

@@ -662,13 +662,14 @@ func TestScrubberZoneAndGoogleNames(t *testing.T) {
 	f := &verdictFlags{promURL: "https://prom.example.invalid", gcpProj: "monitoring"}
 	scrub := f.scrubber()
 	for in, want := range map[string]string{
-		"dial tcp [fe80::1%en0]:5432: connect: connection refused":  "dial tcp [address]: connect: connection refused",
-		"dial tcp [fe80::1%25en0]:5432: x":                          "dial tcp [address]: x",
-		"at [fd12::17%eth0-1], then [2001:db8::9]":                  "at [address], then [address]",
-		"monitoring.googleapis.com said 403 for project monitoring": "monitoring.googleapis.com said 403 for project [--gcp-project]",
-		"writer@monitoring.iam.gserviceaccount.com may not":         "writer@[--gcp-project].iam.gserviceaccount.com may not",
-		"pool monitoring.svc.id.goog, at monitoring.example.com":    "pool [--gcp-project].svc.id.goog, at monitoring.example.com",
-		"https://monitoring.example.com/x and monitoring-2.iam":     "https://monitoring.example.com/x and monitoring-2.iam",
+		"dial tcp [fe80::1%en0]:5432: connect: connection refused":               "dial tcp [address]: connect: connection refused",
+		"dial tcp [fe80::1%25en0]:5432: x":                                       "dial tcp [address]: x",
+		"at [fd12::17%eth0-1], then [2001:db8::9]":                               "at [address], then [address]",
+		"monitoring.googleapis.com said 403 for project monitoring":              "monitoring.googleapis.com said 403 for project [--gcp-project]",
+		"writer@monitoring.iam.gserviceaccount.com may not":                      "writer@[--gcp-project].iam.gserviceaccount.com may not",
+		"pool monitoring.svc.id.goog, at monitoring.example.com":                 "pool [--gcp-project].svc.id.goog, at monitoring.example.com",
+		"monitoring.appspot.com, monitoring.firebaseapp.com, monitoring.web.app": "[--gcp-project].appspot.com, [--gcp-project].firebaseapp.com, [--gcp-project].web.app",
+		"https://monitoring.example.com/x and monitoring-2.iam":                  "https://monitoring.example.com/x and monitoring-2.iam",
 	} {
 		if got := scrub(in); got != want {
 			t.Errorf("%q:\n got %q\nwant %q", in, got, want)
