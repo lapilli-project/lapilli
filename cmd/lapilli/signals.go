@@ -452,7 +452,7 @@ func (f *verdictFlags) readSignals(ctx context.Context, h history, incs []incide
 		// and the run says so rather than failing.
 		read, _, err := source.SeenFrom(ctx, h, s.expr, x.MatchOr(f.opts.Match), from, f.opts.To)
 		if err != nil {
-			fmt.Fprintf(f.warnTo(), "lapilli verdict: --impact %s: reading what it reads, by its match labels, a selector failed: %v; what it returned, and what the others read, tie its firings\n", s.name, err)
+			fmt.Fprintf(f.warnTo(), "lapilli verdict: --impact %s: reading what it reads, by its match labels, a selector failed: %s; what it returned, and what the others read, tie its firings\n", verdict.Clean(s.name), verdict.Clean(err.Error()))
 		}
 		seen.Merge(read)
 		x.Seen = seen

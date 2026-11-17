@@ -153,3 +153,45 @@ func TestSlowDataSourceDoesntStarveTheRest(t *testing.T) {
 		t.Errorf("the healthy data source waited %s for the slow one's places", took.Round(time.Millisecond))
 	}
 }
+
+// hostile is what an error or a warning can carry from a server, a cloud
+// or a file: an OSC that retitles the terminal, a clear, a colour, a
+// carriage return that writes over the line, and a line of its own that
+// a CI system could read as a command.
+const hostile = "\x1b]0;title\x07\x1b[2J\x1b[31m\rFAKE ok\x1b[0m\n::set-output name=x::y"
+
+// acts says whether s, but for the line breaks the command writes itself,
+// holds what acts on a terminal: an escape, BEL, a carriage return, or a
+// line that starts with what hostile put there.
+func acts(s string) bool {
+	return strings.ContainsAny(s, "\x1b\x07\r") || strings.Contains(s, "\n::set-output")
+}
+
+// What a server answers in an error, and what a cloud, a ruler or a Loki
+// says a reader passed over, is printed as text, on the line it is on:
+// the errors of --check-replay, --check-content and serve's start, and
+// the readers' warnings.
+func TestErrorsAndWarningsShown(t *testing.T) {
+	was := newHistory
+	t.Cleanup(func() { newHistory = was })
+	newHistory = func(context.Context, *verdictFlags) (history, error) {
+		return nil, fmt.Errorf("HTTP 502: %s", hostile)
+	}
+	rules := write(t, "rules.yaml", "groups:\n  - name: shop\n    rules:\n      - alert: Errors\n        expr: errors > 7\n        for: 5m\n")
+	for name, args := range map[string][]string{
+		"--check-replay":  {"verdict", "--rules", rules, "--prometheus", "http://p", "--check-replay"},
+		"--check-content": {"verdict", "--rules", rules, "--prometheus", "http://p", "--check-content"},
+		"serve":           {"serve", "--rules", rules, "--prometheus", "http://p", "--ledger", t.TempDir()},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := run(args, &stdout, &stderr)
+		if code == 0 || !strings.Contains(stderr.String(), `\u{1b}]0;title\u{7}`) || acts(stdout.String()+stderr.String()) {
+			t.Errorf("%s: exit %d\n%q\n%q", name, code, stdout.String(), stderr.String())
+		}
+	}
+	var b bytes.Buffer
+	warnLine(&b)("--alarms cloudwatch-prod: arn:aws:cloudwatch:eu-west-1:000000000000:alarm:" + hostile + " can't be read, and is passed over")
+	if s := b.String(); acts(s) || strings.Count(s, "\n") != 1 || !strings.Contains(s, `\u{d}FAKE ok`) {
+		t.Errorf("a reader's warning: %q", s)
+	}
+}

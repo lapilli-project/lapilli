@@ -90,7 +90,7 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 		f.warn = stderr
 	}
 	fail := func(err error) int {
-		fmt.Fprintf(stderr, "lapilli verdict: %v\n", err)
+		fmt.Fprintf(stderr, "lapilli verdict: %s\n", verdict.Clean(err.Error()))
 		return 1
 	}
 	var h history
@@ -118,7 +118,7 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 	}
 	source.TellApart(rs)
 	o := content.Options{Runbooks: f.runbooks, Severities: f.severities, Scrape: f.scrapeInterval, Failed: func(rule string, err error) {
-		fmt.Fprintf(stderr, "lapilli verdict: the content check failed on %s, which has no findings: %v\n", rule, err)
+		fmt.Fprintf(stderr, "lapilli verdict: the content check failed on %s, which has no findings: %s\n", verdict.Clean(rule), verdict.Clean(err.Error()))
 	}}
 	// With --grafana, what its notification templates show
 	// (docs/design/serveops.md); refused, the check goes on without them.
@@ -128,7 +128,7 @@ func runContent(ctx context.Context, f *verdictFlags, versions []replay.Version,
 			o.Notify, _, err = content.ReadNotifications(ts, cps, ps)
 		}
 		if err != nil {
-			fmt.Fprintf(stderr, "lapilli verdict: Grafana's notification templates weren't read, and aren't checked: %v\n", err)
+			fmt.Fprintf(stderr, "lapilli verdict: Grafana's notification templates weren't read, and aren't checked: %s\n", verdict.Clean(err.Error()))
 		}
 	}
 	rep := contentReport{Rules: []contentRule{}}
@@ -300,7 +300,7 @@ func (f *verdictFlags) askScrapes(ctx context.Context, h history, stderr io.Writ
 	}
 	cfg, err := sc.StatusConfig(ctx)
 	if errors.Is(err, prom.ErrTooLarge) && stderr != nil {
-		fmt.Fprintf(stderr, "lapilli verdict: Prometheus's configuration is larger than is read of it (%v): the range check is off; give --scrape-interval\n", err)
+		fmt.Fprintf(stderr, "lapilli verdict: Prometheus's configuration is larger than is read of it (%s): the range check is off; give --scrape-interval\n", verdict.Clean(err.Error()))
 	}
 	if err != nil {
 		return
@@ -315,7 +315,7 @@ func (f *verdictFlags) askScrapes(ctx context.Context, h history, stderr io.Writ
 		if b, err := ta.Targets(ctx); err == nil {
 			scrapes.Targets(b)
 		} else if errors.Is(err, prom.ErrTooLarge) && stderr != nil {
-			fmt.Fprintf(stderr, "lapilli verdict: Prometheus's active targets are more than is read of them (%v): a job is known by its name\n", err)
+			fmt.Fprintf(stderr, "lapilli verdict: Prometheus's active targets are more than is read of them (%s): a job is known by its name\n", verdict.Clean(err.Error()))
 		}
 	}
 	f.scrapes = &scrapes

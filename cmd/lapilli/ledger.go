@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/verdict"
 )
 
 const ledgerUsage = `lapilli ledger copy copies a ledger into another, empty one: a SQLite
@@ -97,13 +98,13 @@ func runLedger(args []string, stdout, stderr io.Writer) int {
 	defer stop()
 	src, err := openForCopy(ctx, from, fromURL, true)
 	if err != nil {
-		fmt.Fprintf(stderr, "lapilli ledger copy: the ledger to copy: %v\n", err)
+		fmt.Fprintf(stderr, "lapilli ledger copy: the ledger to copy: %s\n", verdict.Clean(err.Error()))
 		return 1
 	}
 	defer src.Close()
 	dst, err := openForCopy(ctx, to, toURL, false)
 	if err != nil {
-		fmt.Fprintf(stderr, "lapilli ledger copy: the ledger to copy into: %v\n", err)
+		fmt.Fprintf(stderr, "lapilli ledger copy: the ledger to copy into: %s\n", verdict.Clean(err.Error()))
 		return 1
 	}
 	defer dst.Close()
@@ -116,7 +117,7 @@ func runLedger(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "copied %s: %d rows\n", table, rows)
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "lapilli ledger copy: %v\n", err)
+		fmt.Fprintf(stderr, "lapilli ledger copy: %s\n", verdict.Clean(err.Error()))
 		return 1
 	}
 	var rows int64

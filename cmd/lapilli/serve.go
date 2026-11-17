@@ -21,6 +21,7 @@ import (
 	"lapilli.dev/internal/serve"
 	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/source"
+	"lapilli.dev/internal/verdict"
 )
 
 const serveUsage = `lapilli serve keeps judging: every hour it replays the rules over the hours
@@ -1199,7 +1200,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	}
 	st, err := readServe(args, false)
 	if err != nil {
-		fmt.Fprintf(stderr, "lapilli serve: %v\nRun \"lapilli serve -h\" for the options.\n", err)
+		fmt.Fprintf(stderr, "lapilli serve: %s\nRun \"lapilli serve -h\" for the options.\n", verdict.Clean(err.Error()))
 		return 2
 	}
 	cfg, f := st.cfg, st.f
@@ -1213,14 +1214,14 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	var h history
 	if f.promURL != "" || f.gcpProj != "" {
 		if h, err = newHistory(ctx, f); err != nil {
-			fmt.Fprintf(stderr, "lapilli serve: %v\n", err)
+			fmt.Fprintf(stderr, "lapilli serve: %s\n", verdict.Clean(err.Error()))
 			return 1
 		}
 		h = f.withLogs(h, stderr)
 	}
 	s, err := serve.New(ctx, cfg, h, log)
 	if err != nil {
-		fmt.Fprintf(stderr, "lapilli serve: %v\n", err)
+		fmt.Fprintf(stderr, "lapilli serve: %s\n", verdict.Clean(err.Error()))
 		return 1
 	}
 	defer s.Close()
@@ -1233,7 +1234,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	if err := s.Run(ctx); err != nil {
-		fmt.Fprintf(stderr, "lapilli serve: %v\n", err)
+		fmt.Fprintf(stderr, "lapilli serve: %s\n", verdict.Clean(err.Error()))
 		return 1
 	}
 	return 0

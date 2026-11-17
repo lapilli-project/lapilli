@@ -507,6 +507,14 @@ can do:
   that a host cut in two is still found; and what the run learns is
   redacted too: the ledger's server, an on-call feed's URL, the keys a
   sign-in's discovery names.
+- **Every text of every item is shown as it reads, in one place.** Not
+  only what a server answered: why a rule can't be replayed, in a rule
+  file's own words (a classic condition's value), is outside text too, and
+  was printed as it came in 0.53.0 to 0.55.0. The report's redaction runs
+  `verdict.Clean` over every text of every item and what is left out,
+  before it redacts and cuts, for the text and the JSON alike; the marks
+  that say where a server's answer is hold a text drawn at random as the
+  process starts, so a file can't forge one.
 - **The nights count the days a catch-up waits.** Outside its hours its
   cursor stands, and each day is a day more to catch up (quota.md, 4): a
   catch-up day, on average, is added for each day that passes, and a night

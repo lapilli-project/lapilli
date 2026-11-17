@@ -1318,7 +1318,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 				return fail(fmt.Errorf("--on-call: schedule %s: %w", sc.Name, err))
 			}
 			for _, n := range feed.Notes {
-				fmt.Fprintf(stderr, "lapilli verdict: --on-call: schedule %s: passed over %s\n", sc.Name, verdict.Clean(n))
+				fmt.Fprintf(stderr, "lapilli verdict: --on-call: schedule %s: passed over %s\n", verdict.Clean(sc.Name), verdict.Clean(n))
 			}
 			verdict.OnCallNamed(sc.Name).Set(verdict.NewRota(feed.Turns, f.onCall.HoursOf()))
 		}
@@ -1555,7 +1555,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			rep.NearMissesCut = !done
 			cut = cut || !done && ectx.Err() != nil
 			if err != nil && ectx.Err() == nil {
-				fmt.Fprintf(stderr, "lapilli verdict: looking for near misses: %v\n", err)
+				fmt.Fprintf(stderr, "lapilli verdict: looking for near misses: %s\n", verdict.Clean(err.Error()))
 			}
 		}
 		// With no record, what the firings of the rules that fired most were:
@@ -1565,7 +1565,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			rep.Unrecorded, err = source.Unrecorded(ectx, h, versions, rep, source.Judged(rep.Firings), f.step)
 			cut = cut || err != nil && ectx.Err() != nil
 			if err != nil && ectx.Err() == nil {
-				fmt.Fprintf(stderr, "lapilli verdict: looking at the firings with no record to judge them by: %v\n", err)
+				fmt.Fprintf(stderr, "lapilli verdict: looking at the firings with no record to judge them by: %s\n", verdict.Clean(err.Error()))
 			}
 		}
 		if cut {
@@ -1629,7 +1629,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		if err := send(ctx); err != nil {
-			fmt.Fprintf(stderr, "lapilli verdict: %v\n", err)
+			fmt.Fprintf(stderr, "lapilli verdict: %s\n", verdict.Clean(err.Error()))
 			failed = true
 		}
 	}
@@ -1949,7 +1949,7 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 		if err != nil {
 			return nil, err
 		}
-		a.Warn = func(what string) { fmt.Fprintf(stderr, "lapilli verdict: %s\n", what) }
+		a.Warn = warnLine(stderr)
 		more, _, err := a.Read(ctx)
 		if err != nil {
 			return nil, err
@@ -1965,8 +1965,7 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 	// A Loki's rules, beside the rest.
 	switch {
 	case f.lokiLoaded:
-		more, _, places, err := source.LokiLoaded(ctx, f.lokiSource(), "lapilli/"+buildVersion(),
-			func(what string) { fmt.Fprintf(stderr, "lapilli verdict: %s\n", what) })
+		more, _, places, err := source.LokiLoaded(ctx, f.lokiSource(), "lapilli/"+buildVersion(), warnLine(stderr))
 		if err != nil {
 			return nil, err
 		}
@@ -1979,7 +1978,7 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 				return nil, err
 			}
 			for _, n := range notes {
-				fmt.Fprintf(stderr, "lapilli verdict: %s\n", n)
+				warnLine(stderr)(n)
 			}
 			kept = appendMatching(kept, more, f.ruleRE)
 		}
@@ -2033,7 +2032,7 @@ func grafanaDataSources(ctx context.Context, f *verdictFlags, rs []rules.Rule, s
 			with = f.scrapeInterval.String() + ", --scrape-interval's"
 		}
 		fmt.Fprintf(stderr, "lapilli verdict: Grafana's data sources %s weren't read: their $__rate_interval is put in with a scrape interval of %s, and their queries are taken as PromQL\n",
-			strings.Join(missed, ", "), with)
+			verdict.Clean(strings.Join(missed, ", ")), with)
 	}
 	return ds, kinds
 }
@@ -2057,6 +2056,14 @@ func withRead(versions []replay.Version, read []rules.Rule) []replay.Version {
 	return out
 }
 
+// warnLine is a reader's Warn, and what it notes: each on a line of its
+// own, shown as it reads (verdict.Clean), as it names what a cloud, a
+// ruler or a Loki answered, an alarm's ID or a group's name, which may
+// hold an escape sequence or a line break.
+func warnLine(w io.Writer) func(string) {
+	return func(what string) { fmt.Fprintf(w, "lapilli verdict: %s\n", verdict.Clean(what)) }
+}
+
 // newAlarms is the reader of an --alarms, with its cloud's credentials;
 // tests replace it.
 var newAlarms = func(ctx context.Context, at alarmsFlag) (*source.Alarms, error) {
@@ -2077,7 +2084,7 @@ var newRuler = func(ctx context.Context, f *verdictFlags, stderr io.Writer) (*so
 	if err != nil {
 		return nil, err
 	}
-	r.Warn = func(what string) { fmt.Fprintf(stderr, "lapilli verdict: %s\n", what) }
+	r.Warn = warnLine(stderr)
 	r.Tenant, r.Reads.TokenFile = f.rulerTenant, f.rulerTk
 	if r.Kind != source.RulerConfig {
 		if r.Reads.Sign, err = cloud.Request(ctx, f.auth, f.ruler, ""); err != nil {

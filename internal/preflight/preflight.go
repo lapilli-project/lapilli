@@ -11,6 +11,7 @@ package preflight
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"slices"
@@ -166,12 +167,16 @@ func (p *run) offline(id, what string) {
 	p.add(Item{ID: id, State: Unknown, What: what, Why: "--offline: nothing is asked"})
 }
 
-// redact takes what isn't to be printed out of every text: the whole
-// text first, then what a server said cut, so that nothing to be
-// redacted is cut in two before it is looked for.
+// redact readies every text of the report to be printed, here and only
+// here, so that a check that puts a text from outside into an item
+// without readying it (a rule's reason, a name, a note) can't print it as
+// it came: each is shown as it reads first (shown), then what isn't to be
+// printed is taken out of the whole text, then what a server said is cut,
+// so that nothing to be redacted is cut in two before it is looked for.
+// The text and the JSON are both written from what it leaves.
 func (p *run) redact() {
 	scrub := p.c.Scrubber(p.hidden...)
-	done := func(s string) string { return cutSaid(scrub(s)) }
+	done := func(s string) string { return cutSaid(scrub(shown(s))) }
 	for i := range p.r.Items {
 		it := &p.r.Items[i]
 		it.What, it.Why, it.Fix = done(it.What), done(it.Why), done(it.Fix)
@@ -182,12 +187,36 @@ func (p *run) redact() {
 }
 
 // What a server said is marked in a text until it is redacted, then cut
-// (cutSaid). No text holds the marks: verdict.Clean shows a NUL as text.
-const (
-	saidFrom = "\x00\x01"
-	saidTo   = "\x00\x02"
-	saidMost = 200
-)
+// (cutSaid). The marks hold a text drawn at random as the process starts,
+// which nothing from outside can know: a mark a rule file or a server's
+// answer holds is no mark, and is shown as text (shown), as any control
+// character is.
+var saidFrom, saidTo = marks()
+
+// saidMost is how much of what a server said is printed, in bytes.
+const saidMost = 200
+
+func marks() (string, string) {
+	n := rand.Text()
+	return "\x00" + n + "\x01", "\x00" + n + "\x02"
+}
+
+// shown has every part of s but the marks shown as it reads
+// (verdict.Clean): what turns text around or acts on a terminal, an
+// escape sequence, a direction mark, a NUL, is written as text. What a
+// server said was shown so as it was marked (said), and is the same shown
+// again.
+func shown(s string) string {
+	from := strings.Split(s, saidFrom)
+	for i, part := range from {
+		to := strings.Split(part, saidTo)
+		for j := range to {
+			to[j] = verdict.Clean(to[j])
+		}
+		from[i] = strings.Join(to, saidTo)
+	}
+	return strings.Join(from, saidFrom)
+}
 
 // said is what an error, or a server's answer in it, says: what turns
 // text around or acts on a terminal shown as text (verdict.Clean), on one

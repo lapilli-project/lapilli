@@ -12,11 +12,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"lapilli.dev/internal/egress"
 	"lapilli.dev/internal/ledger"
@@ -384,6 +386,119 @@ func TestSaid(t *testing.T) {
 	s := cutSaid(said(fmt.Errorf("HTTP 500: \x1b[31m%s‮", strings.Repeat("é", 300))))
 	if len(s) > 200 || strings.ContainsAny(s, "\x1b‮") {
 		t.Errorf("%q", s)
+	}
+}
+
+// controls are what a text from outside may hold to act on a terminal: an
+// OSC that retitles it, a clear and a colour, BEL, a direction mark, and
+// the marks a preflight's own were before they held a random text.
+const controls = "\x1b]0;title\x07\x1b[2J\x1b[31mFAKE ok\x1b[0m‮\x00\x01"
+
+// acting says whether s holds a character that acts on a terminal or
+// turns text around.
+func acting(s string) bool {
+	return strings.ContainsFunc(s, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) })
+}
+
+// A rule file a pull request changes, read with --offline in CI, says
+// why a rule can't be replayed in its own words: they are printed as
+// text, in the text and in the JSON, never as escape sequences.
+func TestRuleReasonShown(t *testing.T) {
+	esc := strings.NewReplacer("\x1b", `\e`, "\x07", `\a`, "‮", `‮`, "\x00", `\0`, "\x01", `\x01`).Replace(controls)
+	file := `apiVersion: 1
+groups:
+  - orgId: 1
+    name: g
+    folder: f
+    interval: 1m
+    rules:
+      - uid: u1
+        title: Plain
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prom
+            model: {expr: up, refId: A}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: classic_conditions
+              refId: C
+              conditions:
+                - {evaluator: {type: gt, params: ["` + esc + `"]}, operator: {type: and}, query: {params: [A]}, reducer: {type: avg}}
+        for: 5m
+`
+	path := filepath.Join(t.TempDir(), "rules.yaml")
+	if err := os.WriteFile(path, []byte(file), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := config()
+	c.Offline = true
+	c.Serve.RulesPath = path
+	rep := Run(context.Background(), c)
+	var text, js bytes.Buffer
+	if err := rep.Text(&text); err != nil {
+		t.Fatal(err)
+	}
+	if err := rep.JSON(&js); err != nil {
+		t.Fatal(err)
+	}
+	if acting(strings.ReplaceAll(text.String(), "\n", "")) {
+		t.Errorf("the text acts on a terminal:\n%q", text.String())
+	}
+	if !strings.Contains(text.String(), `\u{1b}]0;title\u{7}`) {
+		t.Errorf("the reason isn't shown as text:\n%s", text.String())
+	}
+	var doc Report
+	if err := json.Unmarshal(js.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range doc.Items {
+		if acting(it.What + it.Why + it.Fix) {
+			t.Errorf("the JSON's %s acts on a terminal: %q", it.ID, it.Why)
+		}
+	}
+}
+
+// Every text of an item a check fills is shown as it reads in one place,
+// redact, so that a field added to Item, or a check that puts a name in
+// one as it came, can't print it otherwise. A mark a text holds of its
+// own is text, and cuts nothing.
+func TestRedactShowsEveryText(t *testing.T) {
+	c := config()
+	c.Scrubber = func(...[2]string) func(string) string { return func(s string) string { return s } }
+	p := newRun(c)
+	it := Item{ID: "rules.read", State: OK}
+	v := reflect.ValueOf(&it).Elem()
+	var filled []string
+	for i := range v.NumField() {
+		f := v.Type().Field(i)
+		if f.Type.Kind() != reflect.String || f.Name == "ID" || f.Name == "State" {
+			continue // the id and the state are the code's own
+		}
+		v.Field(i).SetString(f.Name + controls + strings.Repeat("x", 300) + "\x00\x02 end")
+		filled = append(filled, f.Name)
+	}
+	p.add(it)
+	p.r.LeftOut = []string{"left" + controls}
+	p.redact()
+	got := reflect.ValueOf(p.r.Items[0])
+	for _, name := range filled {
+		s := got.FieldByName(name).String()
+		if acting(s) || !strings.HasSuffix(s, " end") || !strings.Contains(s, `\u{0}\u{1}`) {
+			t.Errorf("%s: %q", name, s)
+		}
+	}
+	if s := p.r.LeftOut[0]; acting(s) {
+		t.Errorf("left out: %q", s)
+	}
+	// What a server said is shown and cut as it was.
+	p = newRun(c)
+	p.add(Item{ID: "history.reach", State: Problem, What: "x", Why: "not let in: " + said(fmt.Errorf("HTTP 403: %s%s", controls, strings.Repeat("y", 300)))})
+	p.redact()
+	if why := p.r.Items[0].Why; acting(why) || len(why) > 250 || !strings.HasSuffix(why, "…") {
+		t.Errorf("what a server said: %q", why)
 	}
 }
 
