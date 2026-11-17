@@ -267,6 +267,7 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 	}
 	err := l.write(ctx, func(t *txn) error {
 		out = SignalsSynced{}
+		t.naming = 0 // read again after this write's own
 		have, err := l.signalRows(t.ctx, t)
 		if err != nil {
 			return err
@@ -351,7 +352,7 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 			if _, err := t.ExecContext(t.ctx, "UPDATE series SET signals = -1"); err != nil {
 				return err
 			}
-			if _, _, err := l.tieUntied(t, verdict.Options{Match: match}); err != nil {
+			if err := l.tieUntied(t, verdict.Options{Match: match}); err != nil {
 				return err
 			}
 		}
@@ -461,59 +462,77 @@ func tieSignals(t *txn, match []string) (*verdict.Signals, error) {
 
 // tieUntied works out which signals each alert waiting for it is tied to
 // (series.signals -1), by its labels and what each named signal has seen,
-// on the match in effect o.Match: 0, none, with no signal named. It
-// returns the span of their firings, whose tallies it changes, lo > hi for
-// none.
-func (l *Ledger) tieUntied(t *txn, o verdict.Options) (int64, int64, error) {
-	rows, err := t.QueryContext(t.ctx, "SELECT id, labels FROM series WHERE signals < 0")
-	if err != nil {
-		return 1, 0, err
-	}
-	type untied struct {
-		id     int64
-		labels string
-	}
-	var us []untied
-	for rows.Next() {
-		var u untied
-		if err := rows.Scan(&u.id, &u.labels); err != nil {
-			rows.Close()
-			return 1, 0, err
-		}
-		us = append(us, u)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil || len(us) == 0 {
-		return 1, 0, err
-	}
+// on the match in effect o.Match: 0, none, with no signal named, in one
+// statement. An alert waits only from the write that made it, or the one
+// that changed the signals, until it is judged in it, before its tallies:
+// its firings are all within what that write judges, and none was
+// counted under -1.
+func (l *Ledger) tieUntied(t *txn, o verdict.Options) error {
 	sig, err := tieSignals(t, o.Match)
 	if err != nil {
-		return 1, 0, err
+		return err
 	}
-	up, err := t.updating("series", []string{"signals"})
+	if !sig.Named() {
+		_, err := t.ExecContext(t.ctx, "UPDATE series SET signals = 0 WHERE signals < 0")
+		return err
+	}
+	rows, err := t.QueryContext(t.ctx, "SELECT id, labels FROM series WHERE signals < 0")
 	if err != nil {
-		return 1, 0, err
+		return err
 	}
-	defer up.close()
-	ids := make([]int64, 0, len(us))
-	for _, u := range us {
-		var bits int64
-		if sig.Named() {
-			labels, err := l.labels(u.id, u.labels)
+	by := map[int64][]int64{} // signals to the alerts tied to them
+	for rows.Next() {
+		var id int64
+		var text string
+		if err := rows.Scan(&id, &text); err != nil {
+			rows.Close()
+			return err
+		}
+		labels, err := l.labels(id, text)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		bits := sig.Bits(sig.TiesByLabels(labels, o.Match))
+		by[bits] = append(by[bits], id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	// A statement for each set of signals, which most alerts share.
+	for _, bits := range slices.Sorted(maps.Keys(by)) {
+		for part := range slices.Chunk(by[bits], pgRows) {
+			b, err := json.Marshal(part)
 			if err != nil {
-				return 1, 0, err
+				return err
 			}
-			bits = sig.Bits(sig.TiesByLabels(labels, o.Match))
+			if _, err := t.ExecContext(t.ctx, "UPDATE series SET signals = ? WHERE id IN ("+t.d.ints("?")+")", bits, string(b)); err != nil {
+				return err
+			}
 		}
-		if err := up.add(bits, u.id); err != nil {
-			return 1, 0, err
+	}
+	return nil
+}
+
+// untied is what a new alert's signals are as it is made: -1, to be tied in
+// the same write (tieUntied), while a named signal is kept; else 0, none,
+// every alert's with no signal named, which then needs no more writing.
+func (t *txn) untied() (int64, error) {
+	if t.naming == 0 {
+		var n int
+		if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM (SELECT 1 FROM impact_signals WHERE name != '' LIMIT 1) AS one").Scan(&n); err != nil {
+			return 0, err
 		}
-		ids = append(ids, u.id)
+		t.naming = 2
+		if n > 0 {
+			t.naming = 1
+		}
 	}
-	if err := up.close(); err != nil {
-		return 1, 0, err
+	if t.naming == 1 {
+		return -1, nil
 	}
-	return seriesSpan(t, ids)
+	return 0, nil
 }
 
 // seriesSpan is the span of the firings of the alerts ids, lo > hi for

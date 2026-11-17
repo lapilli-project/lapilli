@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -57,7 +58,10 @@ func (l *Ledger) seriesID(t *txn, rule int64, labels map[string]string) (int64, 
 	err = t.QueryRowContext(t.ctx, t.d.pick("SELECT id FROM series WHERE rule_id = ? AND labels = ?",
 		"SELECT id FROM series WHERE rule_id = ?1 AND md5(labels) = md5(?2) AND labels = ?2"), rule, k.labels).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		err = t.QueryRowContext(t.ctx, "INSERT INTO series (rule_id, labels, signals) VALUES (?, ?, -1) RETURNING id", rule, k.labels).Scan(&id)
+		var untied int64
+		if untied, err = t.untied(); err == nil {
+			err = t.QueryRowContext(t.ctx, "INSERT INTO series (rule_id, labels, signals) VALUES (?, ?, ?) RETURNING id", rule, k.labels, untied).Scan(&id)
+		}
 	}
 	if err != nil {
 		return 0, err
@@ -147,15 +151,19 @@ func keyOf(d dialect, rule int64, labels map[string]string) (seriesKey, error) {
 // in Postgres, many a statement.
 func (l *Ledger) makeSeries(t *txn, ks []seriesKey) ([]int64, error) {
 	ids := make([]int64, 0, len(ks))
+	untied, err := t.untied()
+	if err != nil {
+		return nil, err
+	}
 	if t.d != postgres {
-		st, err := t.PrepareContext(t.ctx, "INSERT INTO series (rule_id, labels, signals) VALUES (?, ?, -1) RETURNING id")
+		st, err := t.PrepareContext(t.ctx, "INSERT INTO series (rule_id, labels, signals) VALUES (?, ?, ?) RETURNING id")
 		if err != nil {
 			return nil, err
 		}
 		defer st.Close()
 		for _, k := range ks {
 			var id int64
-			if err := st.QueryRowContext(t.ctx, k.rule, k.labels).Scan(&id); err != nil {
+			if err := st.QueryRowContext(t.ctx, k.rule, k.labels, untied).Scan(&id); err != nil {
 				return nil, err
 			}
 			ids = append(ids, id)
@@ -170,7 +178,7 @@ func (l *Ledger) makeSeries(t *txn, ks []seriesKey) ([]int64, error) {
 			args = append(args, k.rule, k.labels)
 		}
 		rows, err := t.QueryContext(t.ctx, "INSERT INTO series (rule_id, labels, signals) VALUES "+
-			strings.TrimSuffix(strings.Repeat("(CAST(? AS BIGINT), CAST(? AS TEXT), -1), ", len(part)), ", ")+" RETURNING id, rule_id, labels", args...)
+			strings.TrimSuffix(strings.Repeat(fmt.Sprintf("(CAST(? AS BIGINT), CAST(? AS TEXT), %d), ", untied), len(part)), ", ")+" RETURNING id, rule_id, labels", args...)
 		if err != nil {
 			return nil, err
 		}
@@ -317,23 +325,9 @@ func (l *Ledger) judge(t *txn, lo, hi int64, o verdict.Options) error {
 		return err
 	}
 	// The alerts new since, tied to the signals that could have seen
-	// them: their firings' days are counted again here, or, outside the
-	// span, pended (JudgePending), a week at a time.
-	tlo, thi, err := l.tieUntied(t, o)
-	if err != nil {
+	// them, before their firings are counted.
+	if err := l.tieUntied(t, o); err != nil {
 		return err
-	}
-	if tlo <= thi {
-		var out [][2]int64
-		if tlo < lo {
-			out = append(out, [2]int64{tlo, lo - 1})
-		}
-		if thi > hi {
-			out = append(out, [2]int64{hi + 1, thi})
-		}
-		if err := pend(t, out); err != nil {
-			return err
-		}
 	}
 	return l.tally(t, lo, hi)
 }
