@@ -963,3 +963,20 @@ func TestSignalsJudgedHoldsWhite(t *testing.T) {
 		t.Errorf("judged %d, the report's %d", j.Firings, rr.Judged())
 	}
 }
+
+// With named signals, /settings.yaml doesn't give an impact the Settings
+// page kept for one with no name: committed to the chart's values, it
+// would take the place of the impact mapping, and every named signal with
+// it.
+func TestSignalsSettingsYAML(t *testing.T) {
+	s := signalServer(t, shopHistory(), nil)
+	if err := s.l.SetSettings(context.Background(), map[string]string{"impact": "errors > 5", "impact-for": "10m"}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	_, body := askAs(t, s.Handler(), http.MethodGet, "/settings.yaml", nil, "ana@example.com", "same-origin")
+	for _, l := range strings.Split(body, "\n") {
+		if strings.HasPrefix(l, "impact:") || strings.Contains(l, "--impact-for") {
+			t.Errorf("/settings.yaml gives %q beside named signals:\n%s", l, body)
+		}
+	}
+}

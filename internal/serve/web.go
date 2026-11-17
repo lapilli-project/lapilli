@@ -1459,11 +1459,21 @@ func (s *Server) settingsYAML(w http.ResponseWriter, r *http.Request) {
 	// The incident criteria: the chart's impact, empty for none, and
 	// --impact-for among the flags.
 	c := s.criterionOf(set)
-	if _, ok := set["impact"]; ok {
-		fmt.Fprintf(&b, "impact: %s\n", strconv.Quote(c.Expr))
-	}
-	if _, ok := set["impact-for"]; ok {
-		args = append(args, fmt.Sprintf("%q", "--impact-for="+verdict.Duration(c.For)))
+	switch {
+	case s.namedSignals():
+		// The named signals are the chart's impact mapping, set where
+		// serve starts: an impact the UI kept for one with no name stands
+		// aside, and is no value to commit, which would take their place.
+		if _, ok := set["impact"]; ok {
+			b.WriteString("# impact: the named impact signals are the chart's impact mapping; the impact the Settings page kept for one with no name is ignored beside them, and not given here\n")
+		}
+	default:
+		if _, ok := set["impact"]; ok {
+			fmt.Fprintf(&b, "impact: %s\n", strconv.Quote(c.Expr))
+		}
+		if _, ok := set["impact-for"]; ok {
+			args = append(args, fmt.Sprintf("%q", "--impact-for="+verdict.Duration(c.For)))
+		}
 	}
 	if len(args) > 0 {
 		fmt.Fprintf(&b, "extraArgs: [%s]\n", strings.Join(args, ", "))
