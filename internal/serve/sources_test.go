@@ -223,3 +223,45 @@ func TestRedactPaths(t *testing.T) {
 		}
 	}
 }
+
+// A path is taken out where a text says it whole, never inside a word:
+// a directory given with a separator at its end, as a shell completes one,
+// is a bare name once it is let go, and stays in the sentences it is a
+// word of; a path is taken out where a separator follows it, and kept in
+// a longer name; and what is put in place of one isn't looked in again.
+func TestRedactPathsWhole(t *testing.T) {
+	sentences := []string{
+		"reading the rules: a rule's expression didn't parse",
+		"the ledger: database or disk is full; data kept as it was",
+		"replaying again from the history of rule versions",
+		"reading the rules: open rules.d: the history is read again.",
+	}
+	for _, c := range []Config{
+		{RulesPath: "rules/", Ledger: "data/", RulesHistory: "history/"},
+		{RulesPath: "rules", Ledger: "data", RulesHistory: "history"},
+		{RulesPath: ".", Ledger: "./", RulesHistory: "../"},
+	} {
+		s := &Server{cfg: c}
+		for _, in := range sentences {
+			if got := s.redactPaths(in, "en"); got != in {
+				t.Errorf("%+v: %q\n became %q", c, in, got)
+			}
+		}
+	}
+	s := &Server{cfg: Config{RulesPath: "./x", Ledger: "data/", Marked: "./x/marked.yaml"}}
+	for in, want := range map[string]string{
+		"open ./x/shop.yaml: permission denied":  "open the path given to --rules/shop.yaml: permission denied",
+		`reading "./x/marked.yaml": line 2`:      `reading "the marked file": line 2`,
+		"open ./xy/shop.yaml and ../x/shop.yaml": "open ./xy/shop.yaml and ../x/shop.yaml",
+		"the rules in ./x.":                      "the rules in the path given to --rules.",
+	} {
+		if got := s.redactPaths(in, "en"); got != want {
+			t.Errorf("%q\n became %q,\n want %q", in, got, want)
+		}
+	}
+	// "given" in what takes the place of x/y is the replacement's.
+	ps := []filePath{{"x/y", "--rules"}, {"given", "--ledger"}}
+	if got, want := hidePaths("open x/y: given up", ps, "en"), "open the path given to --rules: the path given to --ledger up"; got != want {
+		t.Errorf("became %q, want %q", got, want)
+	}
+}

@@ -36,37 +36,76 @@ func (s *Server) redactPaths(text, l string) string {
 	if text == "" {
 		return text
 	}
-	for _, p := range s.filePaths() {
-		if !strings.Contains(text, p.path) {
+	return hidePaths(text, s.filePaths(), l)
+}
+
+// hidePaths is text with each of ps it says whole said by what it is
+// (filePath.name), in one pass: at each place a path may begin, the
+// longest of ps there is taken, and what is put in its place is never
+// looked in again, for another. A path is there whole when no letter,
+// digit, _, -, . or separator is before it, and no letter, digit or _
+// after it: it begins the text or follows a space, a quote, a colon or the
+// like, and ends the text, or a word, or a separator follows it, as it
+// does a path joined under it. So a word that holds one as letters keeps
+// them.
+func hidePaths(text string, ps []filePath, l string) string {
+	var b strings.Builder
+	last := 0
+	for i := 0; i < len(text); i++ {
+		if i > 0 && (wordByte(text[i-1]) || strings.IndexByte(`-./\`, text[i-1]) >= 0) {
 			continue
 		}
-		name := tr(l, "the path given to %s", p.flag)
-		switch p.flag {
-		case "--incidents":
-			name = tr(l, "the incidents file")
-		case "--deploys":
-			name = tr(l, "the deploys file")
-		case "--marked":
-			name = tr(l, "the marked file")
-		case "--config":
-			name = tr(l, "the config file")
+		for _, p := range ps {
+			end := i + len(p.path)
+			if strings.HasPrefix(text[i:], p.path) && (end == len(text) || !wordByte(text[end])) {
+				b.WriteString(text[last:i])
+				b.WriteString(p.name(l))
+				last, i = end, end-1
+				break
+			}
 		}
-		text = strings.ReplaceAll(text, p.path, name)
 	}
-	return text
+	if last == 0 {
+		return text
+	}
+	b.WriteString(text[last:])
+	return b.String()
+}
+
+// wordByte reports whether c is of a word, where a path that ends at it
+// would end inside one: a letter, a digit or _.
+func wordByte(c byte) bool {
+	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '_'
 }
 
 // filePath is a path serve was started with, and the flag that gave it.
 type filePath struct{ path, flag string }
 
+// name is what a path is said as in its place, in language l: by what it
+// is, or the flag that gave it.
+func (p filePath) name(l string) string {
+	switch p.flag {
+	case "--incidents":
+		return tr(l, "the incidents file")
+	case "--deploys":
+		return tr(l, "the deploys file")
+	case "--marked":
+		return tr(l, "the marked file")
+	case "--config":
+		return tr(l, "the config file")
+	}
+	return tr(l, "the path given to %s", p.flag)
+}
+
 // filePaths are the paths of the files and directories serve was started
 // with, by the flag that gave each: as given, with no separator at its
 // end, and cleaned, as a path joined under a directory says it
 // (filepath.Join); the longest first, so that one inside another is taken
-// out before it. A value that doesn't read as a path (pathLike) is left,
-// so that a bare name, --rules rules, doesn't take its word out of every
-// sentence. --impact-file and --on-call aren't among them: they are read
-// once, as serve starts, and a failure stops it.
+// out before it. A value that doesn't read as a path once its separators
+// at the end are let go (pathLike) is left, so that a bare name, --rules
+// rules or --rules rules/, doesn't take its word out of every sentence.
+// --impact-file and --on-call aren't among them: they are read once, as
+// serve starts, and a failure stops it.
 func (s *Server) filePaths() []filePath {
 	c := s.cfg
 	given := []filePath{{c.Incidents, "--incidents"}, {c.Deploys, "--deploys"}, {c.Marked, "--marked"}, {c.Config, "--config"},
@@ -85,13 +124,15 @@ func (s *Server) filePaths() []filePath {
 		given = append(given, filePath{f, "--report-dest"})
 	}
 	var out []filePath
-	for _, p := range given {
-		if !pathLike(p.path) {
-			continue
+	add := func(path, flag string) {
+		if p := (filePath{strings.TrimRight(path, `/\`), flag}); pathLike(p.path) && !slices.Contains(out, p) {
+			out = append(out, p)
 		}
-		out = append(out, filePath{strings.TrimRight(p.path, `/\`), p.flag})
-		if clean := filepath.Clean(p.path); clean != out[len(out)-1].path && pathLike(clean) {
-			out = append(out, filePath{clean, p.flag})
+	}
+	for _, p := range given {
+		if p.path != "" {
+			add(p.path, p.flag)
+			add(filepath.Clean(p.path), p.flag)
 		}
 	}
 	slices.SortStableFunc(out, func(a, b filePath) int { return len(b.path) - len(a.path) })
