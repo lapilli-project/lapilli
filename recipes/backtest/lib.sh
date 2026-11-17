@@ -113,7 +113,8 @@
 # couldn't be replayed, nor what a server or the network answered, nor how
 # the run went (its progress lines), which the job's log alone has. What is
 # copied to the job's log, lapilli's stderr as it comes, is each line after
-# a "| ", and Azure's ##vso[ made inert, so none of it is a CI's command. A
+# a "| ", and Azure's ##vso[ and GitHub's older ##[ made inert, so none of
+# it is a CI's command. A
 # commit
 # holding a symbolic link where the rules are read, or anywhere with RENDER,
 # isn't read: a link could lead to any file the job can read. The host's
@@ -128,9 +129,10 @@
 
 set -eu
 # inert: text as a CI's log can take it: no control character but the tab
-# and the line break, and Azure Pipelines' ##vso[, which it reads anywhere
-# in a line, made inert.
-inert() { tr -d '\000-\010\013-\037\177' | sed 's/##\([vV][sS][oO]\)\[/##\1(/g'; }
+# and the line break, and Azure Pipelines' ##vso[ and GitHub's older ##[
+# (##[error], ##[add-matcher]), which each reads anywhere in a line, made
+# inert.
+inert() { tr -d '\000-\010\013-\037\177' | sed 's/##\([vV][sS][oO]\)\[/##\1(/g; s/##\[/##(/g'; }
 say() { printf '%s: %s\n' "${recipe:-lib.sh}" "$(printf '%s' "$*" | tr '\n\t' '  ' | inert)" >&2; }
 # logged FILE: FILE in the job's log, each line after a "| ": GitHub's and
 # Gitea's ::commands are read only at a line's start.
