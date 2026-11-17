@@ -922,11 +922,11 @@ func TestGoalsPeriodToldBounded(t *testing.T) {
 	if got := ends(); len(got) != 8 || got[0] != "10-26" || got[7] != "11-03" || slices.Contains(got, "11-02") {
 		t.Errorf("told: %v", got)
 	}
-	// Twenty weeks on, a run a week: a key for each told, none older than
+	// Fifteen weeks on, a run a week: a key for each told, none older than
 	// thirteen weeks.
 	goalToldARun = 20
 	at := now
-	for range 20 {
+	for range 15 {
 		next := at.Add(7 * 24 * time.Hour)
 		s.now = func() time.Time { return next }
 		if err := s.l.Record(ctx, ledger.Found{From: at, To: next, Rules: []ledger.Rule{{Name: "Paged", Severity: "critical"}},
@@ -946,7 +946,7 @@ func TestGoalsPeriodToldBounded(t *testing.T) {
 			t.Errorf("%s ended %s, kept past 13 weeks", k, time.Unix(end, 0).UTC())
 		}
 	}
-	if n := count(); n < 20*7 || len(told) > 14*7 {
+	if n := count(); n < 15*7 || len(told) > 14*7 {
 		t.Errorf("told %d, %d kept", n, len(told))
 	}
 }

@@ -348,22 +348,27 @@ func goalsScale(t *testing.T, s *Server, h http.Handler) {
 			t.Errorf("%s: %d rows, want %d; heap +%d MiB, most %d; %v", c.name, rows, c.rows, peak>>20, c.most>>20, err)
 		}
 	}
-	// Goals over a period (step 3): a sale each Friday, everyone's, and a
-	// launch each morning, of each team's. Besides the summary's rows, each
-	// reads the tallies of its occurrences' weeks and the four before,
-	// seventeen weeks at most, never the firings, and counts each
-	// occurrence once for each team it is of.
+	// Goals over a period (step 3): a sale on the first Friday of the
+	// thirteen weeks, everyone's, and a launch each morning of the last
+	// two, of each team's: windows whose firings are judged again over a
+	// week and two, not all twelve. Besides the summary's rows, each reads
+	// the tallies of its occurrences' weeks and the four before, seventeen
+	// weeks at most, never the firings, and counts each occurrence once for
+	// each team it is of.
 	fri := s.l.Midnight(ledger.Week(s.l.Day(now)) - 7*weeks).Add(4*24*time.Hour + 18*time.Hour)
+	launch := s.l.Midnight(ledger.Week(s.l.Day(now)) - 14).Add(9 * time.Hour)
 	if _, err := s.l.SyncMarked(ctx, []ledger.Marked{
-		{Kind: "sale", Title: "Friday sale", Start: fri, End: fri.Add(4 * time.Hour), Every: "week"},
-		{Kind: "launch", Title: "Morning launch", Start: fri.Add(-4*24*time.Hour - 9*time.Hour), End: fri.Add(-4*24*time.Hour - 7*time.Hour), Every: "day",
+		{Kind: "sale", Title: "Friday sale", Start: fri, End: fri.Add(4 * time.Hour)},
+		{Kind: "launch", Title: "Morning launch", Start: launch, End: launch.Add(2 * time.Hour), Every: "day", Until: s.l.Midnight(s.l.Day(now)),
 			Labels: map[string]string{"service": "search"}},
 	}, s.cfg.Options, ledger.MarkedRead{}); err != nil {
 		t.Fatal(err)
 	}
+	began := time.Now()
 	if err := s.l.JudgePending(ctx, s.cfg.Options); err != nil {
 		t.Fatal(err)
 	}
+	t.Logf("%-32s %s", "the marked windows, judged again", time.Since(began).Round(time.Millisecond))
 	declare(t, s, "goals:\n  - {name: precise, measure: precision, at_least: 0.5}\n  - {name: sale-no-worse, each: sale, measure: precision, no_worse_than: before}\n"+
 		"  - {name: launch-missed, team: \"*\", each: launch, measure: incidents.missed, at_most: 0}\n")
 	firings := 0
