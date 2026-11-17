@@ -190,6 +190,10 @@ func (r Record) read(t time.Time, ties []int) bool {
 // named signals, as can be told without the firings: an incident keeps the
 // record of some time in it, or a signal that keeps the record started
 // before its end.
+//
+// Judged by week (lapilli serve), a signal is read over a week only from
+// the week its start is on or before the Monday of: one that started in
+// the middle of the span's last week judges nothing of it.
 func (r Record) JudgesAny(from, to time.Time) bool {
 	if r.sig != nil {
 		if r.judgesAny(from, to) {
@@ -200,10 +204,18 @@ func (r Record) JudgesAny(from, to time.Time) bool {
 				return true
 			}
 		}
-		return slices.ContainsFunc(r.sig.List, func(s Signal) bool { return s.Record && !s.Start.IsZero() && s.Start.Before(to) })
+		by := to
+		if r.week != nil {
+			by, _ = r.week(to.Add(-time.Nanosecond))
+			by = by.Add(time.Nanosecond) // on the last week's Monday, or before it
+		}
+		return slices.ContainsFunc(r.sig.List, func(s Signal) bool { return s.Record && !s.Start.IsZero() && s.Start.Before(by) })
 	}
 	return r.judgesAny(from, to)
 }
+
+// Named reports whether r judges by named signals.
+func (r Record) Named() bool { return r.sig != nil }
 
 func (r Record) judgesAny(from, to time.Time) bool {
 	if r.week == nil {

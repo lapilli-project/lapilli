@@ -713,7 +713,19 @@ func (l *Ledger) WeekOf(t time.Time) (time.Time, time.Time) {
 // RecordKept reports whether the record of one of [from, to)'s weeks is
 // kept (WeekKept): the impact signal read over all of one, or an incident
 // on from two weeks before the first to the end of the last.
+//
+// With named signals, a week's firings are judged by the signals tied to
+// them: one of the weeks is kept when any firing of it would be judged
+// (verdict.Record.JudgesAny), a window of a signal or a signal read by
+// its Monday among what keeps it.
 func (l *Ledger) RecordKept(ctx context.Context, from, to time.Time, o verdict.Options) (bool, error) {
+	if o.Signals.Named() {
+		rec, err := l.record(ctx, from, to, o, nil)
+		if err != nil {
+			return false, err
+		}
+		return slices.ContainsFunc(l.spanWeeks(from, to), func(w int64) bool { return l.weekKept(rec, w) }), nil
+	}
 	wf, wt := l.weeksOf(from, to)
 	if last, _ := l.WeekOf(wt.Add(-time.Second)); !o.ImpactFrom.IsZero() && !o.ImpactFrom.After(last) {
 		return true, nil
@@ -729,6 +741,9 @@ func (l *Ledger) RecordKept(ctx context.Context, from, to time.Time, o verdict.O
 func (l *Ledger) WeekKept(rec verdict.Record, w int64) bool { return l.weekKept(rec, w) }
 
 func (l *Ledger) weekKept(rec verdict.Record, w int64) bool {
+	if rec.Named() {
+		return rec.JudgesAny(unix(l.midnight(w)), unix(l.midnight(w+7)))
+	}
 	return rec.Kept(unix(l.midnight(w)), unix(l.midnight(w+7)))
 }
 

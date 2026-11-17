@@ -21,6 +21,7 @@ import (
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/ledger/ledgertest"
 	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -826,5 +827,54 @@ func TestSignalsChangeRejudgeDurable(t *testing.T) {
 		if names := o.Signals.Names(o.Signals.FromBits(r.Signals)); slices.Contains(names, "latency") || r.Signals&2 != 0 {
 			t.Errorf("a week's tally is still keyed by the probe's bit, or read as latency's: %b %v", r.Signals, names)
 		}
+	}
+}
+
+// With named signals, a backtest's no record and a proposal's hold know
+// them: a week the signals judge has a record to a backtest, and a week
+// only a named signal's window keeps doesn't hold a proposal backtested
+// just now with a record.
+func TestSignalsBacktestRecord(t *testing.T) {
+	ctx := context.Background()
+	from, to := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC), time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	// No windows: the week of 2 November is judged by errors' start alone.
+	s := signalServer(t, shopHistory(), nil)
+	o, err := s.options(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	judged := 0
+	for _, f := range reportOf(t, s).Firings {
+		if !f.NoRecord && !f.White {
+			judged++
+		}
+	}
+	if kept, err := s.l.RecordKept(ctx, from, to, o); err != nil || judged == 0 || !kept {
+		t.Errorf("the report judges %d of the week's firings; a backtest's record: %v %v", judged, kept, err)
+	}
+	// A week only a named signal's window keeps.
+	s2 := signalServer(t, signalWindowsHistory(), func(c *Config) { c.Signals[0].Record = false })
+	o2, _ := s2.options(ctx)
+	kept2, err := s2.l.RecordKept(ctx, from, to, o2)
+	if err != nil || !kept2 {
+		t.Fatalf("a week the probe's window keeps: %v %v", kept2, err)
+	}
+	five, no := 5*time.Minute, !kept2
+	ev, _ := json.Marshal(evidence{From: "person", Edit: &rules.Edit{Name: "Errors", For: &five}, Semantics: semantics, Version: "test",
+		Backtest: &backtest{From: from, To: to, Before: side{Firings: 7}, After: side{Firings: 2}, NoRecord: &no}})
+	if _, err := s2.l.Propose(ctx, ledger.Proposal{Rule: "Errors", Kind: ledger.KindFor, Path: ledger.PathGit, MadeBy: "bo",
+		Before: "Errors ()\nfor: 2m\n", After: "Errors ()\nfor: 5m\n", Evidence: ev}); err != nil {
+		t.Fatal(err)
+	}
+	ps, err := s2.l.Proposals(ctx, ledger.ProposalQuery{States: []string{ledger.StateProposed}})
+	if err != nil || len(ps) != 1 {
+		t.Fatal(ps, err)
+	}
+	ls, err := s2.linesNow(ctx, ps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ls[0].StaleWhy != nil && ls[0].StaleWhy.Format == staleUnrecorded {
+		t.Errorf("a proposal backtested just now, with a record by a named signal's window, is held: %s", ls[0].StaleWhy.Format)
 	}
 }
