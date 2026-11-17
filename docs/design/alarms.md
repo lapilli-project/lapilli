@@ -1138,6 +1138,10 @@ test failed):
 - A CloudWatch alarm is written only in its own account: the role's
   (`--changes-aws-role`), or the pod's own, as STS `GetCallerIdentity`
   says; CloudWatch names an alarm by its name, in the caller's account.
+  And only where its `AlarmName` is the name its ARN ends in: `--changes-in`
+  is matched against the one, and the writes name the other, so an answer
+  that names them apart is passed over as it is read, and refused read
+  again (`TestAlarmsCloudWatchNamedApart`, `TestAlarmCloudWatchNamedApart`).
 - A saved Azure answer read from a file keeps the key it had (no
   resource group), so no ledger gains a version for it on upgrade.
 - The chart takes an OCI URL with `compartmentId` anywhere in its query.

@@ -300,6 +300,48 @@ func TestAlarmCloudWatchChecksAgain(t *testing.T) {
 	})
 }
 
+// CloudWatch's writes name an alarm by the name its ARN ends in, and
+// --changes-in is matched against its AlarmName: an answer whose ARN names
+// one alarm and whose AlarmName another, one --changes-in names, isn't
+// written to. Answered so from the first, the alarm isn't read, and turning
+// it off can't be proposed; answered so once a change was approved, the
+// change is refused, saying why. Nothing is sent either way.
+func TestAlarmCloudWatchNamedApart(t *testing.T) {
+	ctx := context.Background()
+	t.Run("from the first", func(t *testing.T) {
+		cw := cloudWatchAlarms()
+		cw.Add(cwPromQL("payments-down", "payments > 5"), "OK", nil)
+		cw.Metric["payments-down"]["AlarmName"] = "checkout-decoy" // --changes-in names checkout-*, not payments-*
+		s := cwServer(t, cw, nil)
+		h := s.Handler()
+		code, _, hd := ui(t, h, http.MethodPost, "/proposals", bo, "same-origin", url.Values{"rule": {"checkout-decoy"}, "kind": {"disable"}})
+		if code == http.StatusSeeOther {
+			id := locID(hd)
+			approve(t, h, id, ana)
+			s.jobs(ctx, false)
+			p := state(t, s, id)
+			t.Errorf("proposed: %s %q", p.State, p.Reason)
+		}
+		if len(cw.Took()) != 0 {
+			t.Errorf("written: %v", cw.Took())
+		}
+	})
+	t.Run("once approved", func(t *testing.T) {
+		cw := cloudWatchAlarms()
+		s := cwServer(t, cw, nil)
+		h := s.Handler()
+		id := proposeRule(t, h, "checkout-5xx", "disable", nil)
+		approve(t, h, id, ana)
+		cw.Lock()
+		cw.Metric["checkout-5xx"]["AlarmName"] = "checkout-other"
+		cw.Unlock()
+		s.jobs(ctx, false)
+		if p := state(t, s, id); p.State != ledger.StateRefused || !strings.Contains(p.Reason, "isn't the name its ARN ends in") || len(cw.Took()) != 0 {
+			t.Errorf("%s %q, written %v", p.State, p.Reason, cw.Took())
+		}
+	})
+}
+
 // After the write: one that can't be read back stays applying, read again
 // each round and never sent again; one the cloud took but reads as it was
 // is read again for two minutes by the clock, however soon the rounds come,
