@@ -154,9 +154,10 @@ func (s *Server) notifyStatus(ctx context.Context, lang string) (*notifyStatus, 
 // say it would say it late; so is when a source last wrote through the
 // incidents port (ledger.NoteReceived). The Manage page, and the Settings
 // page but when it tries settings on the last week, or the incident
-// criteria on the last four, which take the heavy turn: such a page is kept
-// as any is, so that asking for it again reads nothing again.
+// criteria on the last four (one with no name, a named signal, or the rule
+// entries), which take the heavy turn: such a page is kept as any is, so
+// that asking for it again reads nothing again.
 func freshPage(name string, r *http.Request) bool {
 	q := r.URL.Query()
-	return name == "manage" || name == "settings" && q.Get("try") == "" && q.Get("impact-try") == ""
+	return name == "manage" || name == "settings" && q.Get("try") == "" && q.Get("impact-try") == "" && q.Get("signal-try") == "" && q.Get("rules-try") == ""
 }

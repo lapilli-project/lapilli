@@ -1129,6 +1129,27 @@ ledger changes, so asking for it again reads nothing again. Its windows'
 labels are those of the series Prometheus gives Lapilli: an admin's to
 read (serve.md, "Security").
 
+With named impact signals ([signals.md](signals.md), "Step 3, as
+built"), the section is by signal: a row each (영향 지표), with its
+`for`, the labels it is matched on, from when it keeps the record, and
+what serve was started with of its name, or that it was added here, who
+changed it and when; those serve was started with that an admin took
+away, each to give back. Below the table, each signal's expression, what
+serve was started with when it differs, where the data of its selectors
+begins and whether a read again waits; for an admin, its form (to change
+it or rename it in place, `POST /settings/signals`), "Read it again over
+the last four weeks" (`POST /settings/signals/again`), "Take it away" and
+"back to the start"; "Add a named impact signal"; and the rule entries
+(규칙 항목) as one list, the UI's in place of the start's as a whole, a
+YAML text area as `--impact-file`'s `rules` (`POST /settings/impact-rules`).
+Each form's try (`/settings?signal-try=1&…#signals-tried`, or
+`rules-try=1&rules=…`) is the incident criteria's, by signal: each
+signal's windows in effect and with the change, those it reads listed,
+and the verdict in effect and with all of them. With no named signal, the
+form for the one with no name is as above, and an admin sees "Add a named
+impact signal" below it: the first one saved makes the one with no name
+the signal `impact`.
+
 ### Incident sources
 
 Below it, "Incident sources" (인시던트 출처): where the incidents firings
@@ -1158,7 +1179,9 @@ it gave in four weeks, and what it is:
   runs and more, `⚠ no data` when a selector it reads has none (no record
   is kept by it), `⚠ no record` when the runs read it and it waits to be
   read again (a floor), or failing with Prometheus's error; off,
-  `? not set up`.
+  `? not set up`. With named signals, a row each in its place, the same
+  states, `✕ failing` too when a run missed it, and from when each keeps
+  the record ([signals.md](signals.md), "Step 3, as built").
 
 The record gone quiet (no incident written down in two weeks, Outcomes'
 rule) is said above the table, warn. No token is shown; the port and the

@@ -75,6 +75,12 @@ type Options struct {
 	// have seen it, from each one's start. ImpactFrom is then zero: it is
 	// the start of an impact signal with no name.
 	Signals *Signals `json:"-"`
+	// SignalsGen is, in lapilli serve, the ledger's generation of the named
+	// signals these options were read at (ledger.SignalsGen): the ledger
+	// judges what it pended with options read before the signals last
+	// changed no more (docs/design/signals.md, "Step 3, as built"). Zero,
+	// not said: then Signals are held to what the ledger keeps.
+	SignalsGen int64 `json:"-"`
 }
 
 // The defaults for Options.NoisyFirings and Options.NoisyPrecision.

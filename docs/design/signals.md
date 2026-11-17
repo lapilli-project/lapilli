@@ -1,8 +1,9 @@
 # Impact signals: several, each named, with its own `for`, `match` and start
 
 Status: accepted; steps 1 (`lapilli verdict`, 0.53.0, "Step 1, as built"
-below) and 2 (`lapilli serve`, schema 022, 0.55.0, "Step 2, as built")
-built, step 3 not. Under [GOVERNANCE.md](../../GOVERNANCE.md)
+below), 2 (`lapilli serve`, schema 022, 0.55.0, "Step 2, as built") and 3
+(the Settings page by signal, no schema change, "Step 3, as built")
+built. Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this changes how a firing is judged (an incident, and a rule beside a
 signal, get labels of their own to be matched on, and a rule can be judged
 against some signals only) and adds a new kind of data to the ledger (the
@@ -978,6 +979,199 @@ What building the first settled:
   signal. Hours (asleep, off hours) count black stones by firing as
   before, judged or not, as they did of weeks with no record.
 
+## Step 3, as built
+
+The Settings page by signal, with no schema change. What building it
+settled:
+
+- **Where the UI's are kept.** In `settings`, as the other judging
+  settings are, and as v0.49.0 keeps the UI's `impact` and `impact-for`:
+  a signal under `impact-signal/NAME` (its expression, `for`, `match`,
+  `null` for the match in effect, and `record`, as JSON), or `off` for one
+  the command line gives that an admin took away; the rule entries under
+  `impact-rules`, a JSON list, `[]` for none. Who changed each and when are
+  the setting's; back to the start deletes it. The command line's copy, for
+  "back to the start" and the page's "Started with", is what serve was
+  started with, which every replica has; nothing of it is kept in the
+  ledger. Schema 022's `impact_signals.set_by` and `set_at`, and
+  `impact_rules.ui`, are kept beside the signals in effect, from the
+  settings, changing no judging; no page reads them.
+- **The signals in effect** are the command line's, in their order, each
+  the UI's in its place when the UI set one of its name, none when it says
+  `off`; then the UI's own, the earliest set first. Eight at most: a
+  change that adds a ninth, or gives one back to the start past eight, is
+  refused; a start with more signals than before leaves the UI's newest
+  aside, and the page says which. The leader keeps them each round
+  (`ledger.SyncSignalSet`), as it kept the command line's.
+- **One write a change, worked out in it.** A change is kept with the
+  signals in effect after it in one write (`ledger.ChangeSignals`): the
+  settings, a rename, the activity log, and the bits, ties and judging
+  again of `SyncSignals`, so a leader's round never reads half of one.
+  The signals in effect are worked out from the settings as that write
+  reads them (`ledger.SignalsFrom`), the leader's each round too
+  (`SyncSignalSet`): a set read before another write is never kept over
+  it, which would undo a rename (its row, record and what it has seen) or
+  let two admins together pass eight. A change is saved only on the
+  settings it was worked out from: one saved meanwhile, by another admin
+  or on another replica, refuses it (409), to be looked at again. Each
+  change is noted with its before and after (`setting impact signal
+  NAME`, `setting impact rule entries`, as the signal or the entries were
+  and became).
+- **Judged by options read after it.** A change that judges every firing
+  again counts a generation of the signals in the ledger
+  (`signals_gen`), which options are read with (`verdict.Options.
+  SignalsGen`, before the settings): pended spans are judged only by
+  options of the generation in effect (`JudgePending` leaves them, and the
+  round after judges them), and a write that judges with options read
+  before (a run under way) pends what it judged, to be judged again. A
+  change saved on another replica, or mid-round, is so judged by options
+  read after it, whatever process saved it and across restarts. Options
+  are of one view: the signals they carry are read after their
+  generation, kept by a replica only for that generation and those very
+  settings, never by its own writes alone; and the ledger holds them, of
+  the generation in effect too, to the signals and entries it keeps.
+- **A match changed judges its windows** (since 0.55.0, a fix): a signal's
+  windows keep the labels they are matched on (`incidents.match_labels`),
+  set from its `match` when found; changed, its windows' are changed in
+  the same write, as the firings near them are judged again. A
+  confirmation's incident keeps the labels it was confirmed with. The
+  signal with no name's windows follow the match in effect, kept as none,
+  and are left so.
+- **Saved, read first.** The form posts a signal's expression back
+  whatever was changed: the one serve was started with isn't the UI's to
+  check, and only one an admin changed is checked. A signal added, or
+  given another expression or `for`, or given back to a start of another
+  criterion, is read over the last four weeks before it is saved, as
+  v0.49.0's criterion is, counted among the admin's twelve reads an hour;
+  what can't be read within `--timeout` (90 seconds at most) and
+  `--max-samples` isn't saved. Its match, `record` or the rule entries
+  changed read nothing.
+- **Renamed in place.** A name changed with the expression and `for` as
+  they were: the signal's row keeps its bit, what keeps its record and what
+  it has seen; its windows' keys become `impact-NEW-` and the minute
+  (another `-2`, `-3` should one be taken), their tasks and comments with
+  them, what was decided of them kept; a confirmation's incident carries
+  the new name; the rule entries that name it name it so, as the UI's,
+  noted; and what this process keeps of it by name (how its last read
+  went, how a read again goes, its turns) goes with it. It is read from
+  where the runs had got to, as one missed: a run under way, which read it
+  by its old name, keeps nothing of it (no row of that name), and the next
+  catches up. With either changed, it is taken away, its windows kept with
+  its name, and another added, the entries naming it renamed alike.
+- **What the page refuses**, before anything is read or written: a signal
+  the rule entries name, taken away (saying which entries), so that no
+  rule is left judged against none, nor `/settings.yaml` gives entries
+  naming a signal it doesn't declare, which `--impact-file` refuses; the
+  start's entries given back while they name a signal not in effect; a
+  name the ledger keeps the windows of (a signal taken away), for a signal
+  added (but one given back as serve was started with it) or renamed,
+  whose read again would take their place; a name set here and left
+  aside; a ninth signal. Rule entries are held as `--impact-file`'s
+  are, and their labels as a team's (64 values of 256 bytes a label);
+  their YAML is read as written, an anchor or an alias refused, so that
+  32 KB of text is never kept as megabytes, and a tag other than a
+  string's, a list's or a mapping's (`!!binary`, bytes, not text); their
+  labels, as a team's and a quiet window's now, are valid UTF-8 with no
+  control character; kept, 128 KB at most. Saving them, or renaming a
+  signal in place (which renames its windows, judges every firing again,
+  and notes the entries naming it before and after), counts among the
+  admin's twelve reads and saves an hour: what the activity log keeps of
+  them is 3 MB an hour an admin at most, pruned with `--keep`. The
+  entries the ledger keeps are compared with the start's as it keeps
+  them (`ledger.SameEntries`), so that none a round keeps is written
+  again, and every firing judged again, each round.
+- **The first named signal in effect** (one added, or one serve was
+  started with given back) beside an impact signal with no name in effect
+  makes that one the signal `impact` (`impact-2`, `-3` …, when the ledger
+  keeps windows of an `impact` or one is in effect), its row given the
+  lowest bit free, what keeps its record and its windows' keys as they
+  were: the runs and a read again know a key with no name in it as one of
+  its windows (`sameImpact`). It is read from where the runs had got to,
+  as one missed; a run, or a read again, of the one with no name under
+  way then keeps nothing, beside named signals. The one added can't be
+  named `impact` then. **The last named signal taken away**, the one with
+  no name in effect again with its criterion, gives it back its row and
+  windows, its record standing: nothing read again, no week lost, no
+  window twice. The windows found while it was named are keyed as the one
+  with no name keys them, their tasks and comments with them; a
+  confirmation's incident keeps the labels it was confirmed with. A run
+  of named signals under way then, which read it by name, is the one with
+  no name's read, not a run that didn't read it; one it had missed, behind
+  the runs, keeps no record from where it was missed until it is read
+  again. Of another criterion, the one with no name is read again, as one
+  turned on.
+- **Reading one again**, an admin's: the request reads it over the last
+  four weeks, in the heavy turn, within `--timeout` (90 seconds at most)
+  and `--max-samples`, counted among the twelve reads an hour, and puts
+  its windows in place of its own (`ledger.ReadAgain`), noted in the
+  activity log (`setting impact signal NAME read again`); the replica that
+  leads judges the weeks it pended at its next round. The runs moving on
+  meanwhile is said, to ask again. One that fails is said to the admin,
+  and is no run's failure in the sources panel.
+- **The try.** It reads each signal the change gives a new criterion (its
+  windows, where the data of its selectors begins, what it returned and
+  what it reads by its match labels), by the read the criterion with no
+  name's try reads by (`readSpan`), and counts its windows by the same
+  helper (`windowsTried`), which stops when the page's time is up; read
+  in full, it stands for saving it within half an hour. It reads what a
+  signal given a new match, or the one with no name made a named one,
+  reads by its labels; the others' windows are the ledger's, each matched
+  on its signal's labels with the change. Past the windows a read again
+  keeps in a week (2,000), it says so, and shows none. Judged in memory, as a backtest is, it
+  gives each signal's windows in effect and with the change, and from when
+  each keeps the record with it; the verdict in effect and with all of
+  them; and the proposals it would hold, by the digest the change would
+  give. An admin's, from this site, in the heavy turn, and one of the
+  twelve reads an admin may ask for in an hour, the entries' too, which
+  read nothing. The weeks before the four keep no row of
+  their own, as each signal's start says what they lose.
+- **The sources panel** gives a row a signal in effect in place of the
+  impact signal's: when it was last read, its windows in four weeks,
+  failing with Prometheus's error (or missed by a run, when this replica
+  hasn't the error), waiting to be read with the criterion in effect, not
+  read for two runs, waiting to be read again, or with a selector with no
+  data, each selector and where its data begins, and from when it keeps
+  the record.
+- **`/settings.yaml`**, once the Settings page changed a named signal or
+  the entries, gives the signals in effect and the entries as the chart's
+  `impact`, a mapping, to commit; once it took every named one away, the
+  chart's `impact` string in effect.
+- **Proposals** are held by the digest of step 2, now of the signals in
+  effect: a change here holds the proposals it could change, as one on the
+  command line does. A rename holds them too: the digest names the
+  signals.
+- **No named signal**: the form for the one with no name is as it was, and
+  `/settings.yaml` as it was; an admin sees "Add a named impact signal"
+  below it, which nothing reads until it is saved.
+
+**Known.**
+
+- The signal with no name is given back its own only when the named one
+  made of it is the last taken away. Taken away while others stay, its row
+  goes as any signal's; when the last named one goes, the one with no name
+  is read again over the last four weeks as one turned on: it keeps the
+  record from where that read begins (the runs' first, when later), the
+  weeks before it kept only by incidents and windows, and the windows
+  `impact` found in those weeks stay beside those read again, an outage
+  two windows until one is dismissed.
+- A rename changes its windows' keys: a link to one under its old key, and
+  a near miss the digest kept naming it, go nowhere until the next digest.
+- What another replica keeps of a signal by name (its last read, a read
+  again's tries, its turns) follows a rename made elsewhere at its next
+  read of it.
+- The signals in effect are worked out with the start of the process that
+  writes: a replica started with other flags than the leader's writes its
+  own, which the leader's next round keeps to its own again.
+- Saving a signal and reading one again are POSTs, held by the
+  cross-origin protection every form has, not to `Sec-Fetch-Site` as the
+  try is, as the criterion with no name's save is. A match, or whether it
+  keeps the record, changed reads nothing, and isn't counted, as `--match`
+  on the same page isn't.
+- The rule entries are written as YAML on the page, as `--impact-file`'s,
+  not a form a field each.
+- The try's bound on windows (2,000 a week) is held once the read is in
+  memory, which `--max-samples` bounds, as a read again's is.
+
 ## Steps
 
 1. `lapilli verdict`: an incident's own `match` and signal,
@@ -992,3 +1186,4 @@ What building the first settled:
    requests: "Step 2, as built".)
 3. v0.49.0's section by signal: the list and the rule entries, the try,
    reading again a signal alone, a row a signal in the sources panel.
+   (Built: "Step 3, as built".)

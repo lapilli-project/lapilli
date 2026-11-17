@@ -2041,13 +2041,19 @@ func (s *Server) settingsPage(r *http.Request) (any, error) {
 	if v.Sources, err = s.sourcesOf(r.Context(), r); err != nil {
 		return nil, err
 	}
-	if r.URL.Query().Get("impact-try") != "" {
-		// With named signals, there is no one criterion to try: an admin's
-		// tries aren't spent on what the page wouldn't show.
-		if s.namedSignals() {
-			return nil, bad("serve reads named impact signals, set where it starts (--impact NAME=PROMQL, --impact-file): one with no name doesn't go beside them, and changing them here comes in a later release")
+	switch q := r.URL.Query(); {
+	case q.Get("impact-try") != "":
+		// With named signals, there is no one criterion with no name to
+		// try: an admin's tries aren't spent on what the page wouldn't
+		// show.
+		if len(v.Criteria.Named) > 0 {
+			return nil, errBesideNamed
 		}
 		if err := s.tryImpact(r, v.Criteria); err != nil {
+			return nil, err
+		}
+	case q.Get("signal-try") != "" || q.Get("rules-try") != "":
+		if err := s.trySignals(r, v.Criteria); err != nil {
 			return nil, err
 		}
 	}

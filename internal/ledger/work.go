@@ -78,6 +78,13 @@ func checkRE(s string) (*regexp.Regexp, error) {
 	return re, nil
 }
 
+// CheckLabels refuses labels as a team's or a quiet window's are refused:
+// 16 labels at most, each a name of up to 128 bytes with up to 64 values
+// of up to 256, each text (valid UTF-8, no control character), as a
+// label's value is in Prometheus, and kept as JSON as it is. A rule
+// entry's are held to it too.
+func CheckLabels(l incident.Labels) error { return checkLabels(l) }
+
 func checkLabels(l incident.Labels) error {
 	if len(l) > 16 {
 		return invalid("16 labels at most")
@@ -86,8 +93,16 @@ func checkLabels(l incident.Labels) error {
 		if k == "" || len(k) > 128 || len(vs) > 64 || slices.ContainsFunc(vs, func(v string) bool { return v == "" || len(v) > 256 }) {
 			return invalid("a label is a name of up to 128 bytes, with up to 64 values of up to 256")
 		}
+		if !plainText(k) || slices.ContainsFunc(vs, func(v string) bool { return !plainText(v) }) {
+			return invalid("a label's name and values are text: valid UTF-8, with no control character")
+		}
 	}
 	return nil
+}
+
+// plainText reports whether s is valid UTF-8 with no control character.
+func plainText(s string) bool {
+	return utf8.ValidString(s) && strings.IndexFunc(s, unicode.IsControl) < 0
 }
 
 func labelsText(l incident.Labels) string {
@@ -1381,11 +1396,19 @@ func pend(t *txn, spans [][2]int64) error {
 // JudgePending gives stones again over the spans pended, a week's worth at
 // a time: one long span a week at a time, or many short ones, up to
 // pendingPerWrite, in one write, the list left written back once.
+//
+// Options read before the named signals last changed (staleSignals) judge
+// nothing: what is pended is left, and ErrSignalsMoved said, for options
+// read again to judge it.
 func (l *Ledger) JudgePending(ctx context.Context, o verdict.Options) error {
 	const week = 7 * 86400
 	for {
-		var done bool
+		var done, moved bool
 		err := l.write(ctx, func(t *txn) error {
+			if stale, err := l.staleSignals(t, o); err != nil || stale {
+				done, moved = true, stale
+				return err
+			}
 			v, err := l.meta(t.ctx, t, "pending")
 			if err != nil {
 				return err
@@ -1424,6 +1447,9 @@ func (l *Ledger) JudgePending(ctx context.Context, o verdict.Options) error {
 			}
 			return setMeta(t.ctx, t, "pending", string(b))
 		})
+		if moved && err == nil {
+			return ErrSignalsMoved
+		}
 		if err != nil || done {
 			return err
 		}

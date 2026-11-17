@@ -302,6 +302,10 @@ func scanIncident(s scanner) (incidentRow, error) {
 // judge gives stones again to the firings that started in [lo, hi], and to
 // the incidents they can catch, then counts the days and weeks again. Every
 // write calls it over what it changed.
+//
+// With options read before the named signals last changed (staleSignals),
+// what it judges is pended too, to be judged again with options read anew
+// (JudgePending): the stones it gives stand till then.
 func (l *Ledger) judge(t *txn, lo, hi int64, o verdict.Options) error {
 	if hi < lo {
 		return nil
@@ -314,6 +318,13 @@ func (l *Ledger) judge(t *txn, lo, hi int64, o verdict.Options) error {
 		return err
 	}
 	lo, hi = min(lo, flo), max(hi, fhi)
+	if stale, err := l.staleSignals(t, o); err != nil {
+		return err
+	} else if stale {
+		if err := pend(t, [][2]int64{{lo, hi}}); err != nil {
+			return err
+		}
+	}
 	incs, err := l.counting(t.ctx, t, lo, hi, o)
 	if err != nil {
 		return err

@@ -106,13 +106,7 @@ change and to try on the last four weeks first; everyone else reads it. */}}
 <h2 id="incident-criteria">{{t "Incident criteria"}}</h2>
 <p>{{t "A firing is judged by whether it caught an incident: one written down in Lapilli, copied in from a tool, read from the incidents file, or a window where the impact signal returned something for at least --impact-for. The impact signal is a PromQL expression that returns something while users are hurt, such as an error-rate SLI or a probe failing: verdicts with no incident written down by hand."}}</p>
 {{if .NoHistory}}<p class="notice status-unknown"><span class="sign" aria-hidden="true">?</span> {{t "Off: the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --gcp-project."}}</p>{{end}}
-{{with .Named}}<p class="notice status-info"><span class="sign" aria-hidden="true">i</span> {{t "Named impact signals, set where serve starts (--impact NAME=PROMQL, --impact-file): each read, started and judged on its own. Changing them here comes in a later release."}}</p>
-<div class="scroll" tabindex="0" role="region" aria-label="{{t "Impact signals"}}"><table>
-<caption>{{t "Impact signals"}}</caption>
-<thead><tr><th scope="col">{{t "Signal"}}</th><th scope="col">{{t "How long it must last"}}</th><th scope="col">{{t "Matched on"}}</th><th scope="col">{{t "Keeps the record"}}</th></tr></thead>
-<tbody>{{range .}}<tr><th scope="row"><code><bdi>{{.Name}}</bdi></code></th><td>{{.For}}</td><td>{{if .Follows}}{{t "the match in effect"}}{{else if .Match}}<code><bdi>{{join .Match ", "}}</bdi></code>{{else}}{{t "no label"}}{{end}}</td>
-<td>{{if not .Record}}{{t "no"}}{{else if .Start.IsZero}}{{t "not yet"}}{{else}}{{t "yes, since %s" (at $loc .Start)}}{{end}}</td></tr>{{end}}</tbody>
-</table></div>{{else}}{{if $edit}}<form method="post" action="/settings/impact" class="criteria">{{range $p.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{else}}<div class="criteria">{{end}}
+{{if .Named}}{{template "namedcriteria" (on $p .)}}{{else}}{{if $edit}}<form method="post" action="/settings/impact" class="criteria">{{range $p.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{else}}<div class="criteria">{{end}}
 {{range .Settings}}<div class="field">
 {{if $edit}}<label for="criterion-{{.Key}}">{{else}}<p class="field-name">{{end}}<code>{{.Flag}}</code> {{if eq .Key "impact"}}{{t "Impact signal (PromQL)"}}{{else}}{{t "How long it must last"}}{{end}}{{if $edit}}</label>{{else}}</p>{{end}}
 {{if eq .Key "impact"}}{{if $edit}}<textarea id="criterion-impact" name="impact" rows="3" maxlength="4096" spellcheck="false" aria-describedby="criterion-impact-at criteria-help">{{$.V.Expr}}</textarea>{{else}}<p id="criterion-impact">{{if eq .Value "off"}}{{t "off"}}{{else}}<code><bdi>{{shown .Value}}</bdi></code>{{end}}</p>{{end}}
@@ -129,7 +123,110 @@ change and to try on the last four weeks first; everyone else reads it. */}}
 {{with .Data}}{{if .NoData}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "The impact signal keeps no record: a selector it reads has no data yet."}}</p>{{end}}{{template "impactdata" (on $p .)}}{{end}}
 {{with .Again}}<p class="notice {{if .Err}}status-bad{{else}}status-info{{end}}">{{if .Err}}<span class="sign" aria-hidden="true">✕</span> {{t "Reading it again over the last four weeks failed at %s: %s. It is tried again at %s; the runs read it meanwhile from where they are." (at $loc .Failed) .Err (at $loc .Next)}} {{t "To get past it: raise --timeout or --max-samples where lapilli serve is started, or narrow the expression so that four weeks of it read within them. Turned off until a run has gone by, then on again, it keeps a record from that run on, the weeks before still to be read again."}}{{else}}<span class="sign" aria-hidden="true">↻</span> {{t "Waiting to be read again over the last four weeks, at the next round of the replica that leads."}}{{end}}</p>{{end}}
 {{with .Tried}}{{template "impacttried" (on $p .)}}{{end}}
+{{if $edit}}{{template "addsignal" (on $p .)}}{{end}}{{with .SignalsTried}}{{template "signalstried" (on $p .)}}{{end}}
 {{end}}{{end}}{{end}}
+
+{{/* The named impact signals (signalsweb.go): a row each, what serve was
+started with and who changed it here; an admin's to add, change, rename,
+take away, give back to the start, try and read again; and the rule
+entries. */}}
+{{define "namedcriteria"}}{{$p := .P}}{{$loc := .P.Loc}}{{$edit := and .P.Status.Admin (not .V.NoHistory)}}{{with .V}}
+<p class="notice status-info"><span class="sign" aria-hidden="true">i</span> {{t "Named impact signals, each read, started and judged on its own: set where serve starts (--impact NAME=PROMQL, --impact-file, the chart's impact), or here by an admin. What is set here is kept over what serve was started with of the same name; back to the start gives that back."}}</p>
+<div class="scroll" tabindex="0" role="region" aria-label="{{t "Impact signals"}}"><table id="impact-signals">
+<caption>{{t "Impact signals"}}</caption>
+<thead><tr><th scope="col">{{t "Signal"}}</th><th scope="col">{{t "How long it must last"}}</th><th scope="col">{{t "Matched on"}}</th><th scope="col">{{t "Keeps the record"}}</th><th scope="col">{{t "Started with"}}</th></tr></thead>
+<tbody>{{range .Named}}<tr id="signal-{{.Name}}"><th scope="row"><a href="#signal-{{.Name}}-h"><code><bdi>{{.Name}}</bdi></code></a></th><td>{{.For}}</td><td>{{if .Follows}}{{t "the match in effect"}}{{else if .Match}}<code><bdi>{{join .Match ", "}}</bdi></code>{{else}}{{t "no label"}}{{end}}</td>
+<td>{{if not .Record}}{{t "no"}}{{else if .Start.IsZero}}{{t "not yet"}}{{else}}{{t "yes, since %s" (at $loc .Start)}}{{end}}</td>
+<td>{{if not .Started}}{{t "not started with: added here"}}{{else if .Changed}}{{t "changed here"}}{{else}}{{t "as in effect"}}{{end}}{{if .Changed}}<br><span class="quiet">{{t "changed by %s, %s" (who .By) (at $loc .Updated)}}</span>{{end}}</td></tr>{{end}}
+{{range .Removed}}<tr id="signal-{{.Name}}"><th scope="row"><code><bdi>{{.Name}}</bdi></code></th><td colspan="3">{{t "taken away here"}}</td><td>{{t "changed by %s, %s" (who .By) (at $loc .Updated)}}</td></tr>{{end}}</tbody>
+</table></div>
+{{with .Aside}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "Set here and left aside, past the eight signals at most beside those serve was started with: %s. Take one away to have them read." (join . ", ")}}</p>{{end}}
+{{range .Named}}<section class="card wide" aria-labelledby="signal-{{.Name}}-h">
+<h3 id="signal-{{.Name}}-h">{{t "Impact signal"}} <code><bdi>{{.Name}}</bdi></code></h3>
+<p><code><bdi>{{shown .Expr}}</bdi></code></p>
+{{if and .Changed .Started}}{{with .Started}}<p class="quiet">{{t "Started with"}}: <code><bdi>{{shown .Expr}}</bdi></code>; {{.For}}; {{if .Follows}}{{t "the match in effect"}}{{else if .Match}}<code><bdi>{{join .Match ", "}}</bdi></code>{{else}}{{t "no label"}}{{end}}; {{if .Record}}{{t "keeps the record"}}{{else}}{{t "keeps no record"}}{{end}}</p>{{end}}{{end}}
+{{if not .Floor.IsZero}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "Since %s the runs have read another criterion of it than the one the record is kept by: it keeps no record until it is read again." (at $loc .Floor)}}</p>{{end}}
+{{with .Data}}{{if .NoData}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "It keeps no record: a selector it reads has no data yet."}}</p>{{end}}{{template "impactdata" (on $p .)}}{{end}}
+{{with .Again}}<p class="notice {{if .Err}}status-bad{{else}}status-info{{end}}">{{if .Err}}<span class="sign" aria-hidden="true">✕</span> {{t "Reading it again over the last four weeks failed at %s: %s. It is tried again at %s; the runs read it meanwhile from where they are." (at $loc .Failed) .Err (at $loc .Next)}}{{else}}<span class="sign" aria-hidden="true">↻</span> {{t "Waiting to be read again over the last four weeks, at the next round of the replica that leads."}}{{end}}</p>{{end}}
+{{if $edit}}<details{{if .Open}} open{{end}}><summary>{{t "Change it, or rename it"}}</summary>
+<form method="post" action="/settings/signals" class="criteria">{{range $p.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}<input type="hidden" name="was" value="{{.Name}}">
+{{template "signalfields" .Form}}
+<p class="quiet">{{t "Renamed with its expression and how long it must last unchanged, its windows are renamed with it, with what was decided of them and their tasks and comments; renamed with either changed, it is taken away, its windows kept with its name, and another added."}}</p>
+<p><button>{{t "Save, and judge again"}}</button> <button formmethod="get" formaction="/settings#signals-tried" name="signal-try" value="1" class="quiet-button">{{t "Try it on the last four weeks"}}</button></p>
+</form></details>
+<form method="post" action="/settings/signals/again" class="track"><input type="hidden" name="name" value="{{.Name}}"><button class="quiet-button">{{t "Read it again over the last four weeks"}}</button></form>
+<form method="post" action="/settings/signals" class="track"><input type="hidden" name="was" value="{{.Name}}"><button name="remove" value="1" class="quiet-button">{{t "Take it away"}}</button>{{if .Changed}} <button name="reset" value="1" class="quiet-button">{{t "back to the start"}}</button>{{end}}</form>
+{{end}}</section>{{end}}
+{{if $edit}}{{range .Removed}}<form method="post" action="/settings/signals" class="track"><input type="hidden" name="was" value="{{.Name}}"><button name="reset" value="1" class="quiet-button">{{t "Give %s back, as serve was started with it" .Name}}</button></form>{{end}}{{end}}
+{{if $edit}}{{template "addsignal" (on $p .)}}{{else}}<p>{{if .NoHistory}}{{template "off" (offWhy "Save, and judge again" "criteria-why" "Needs --prometheus")}}{{else}}{{template "off" (offOf $p "Save, and judge again" "admin" "criteria-why")}}{{end}}</p>{{end}}
+<p class="quiet">{{t "Saving a signal with a new expression, or a new one, reads it over the last four weeks first; saved, the replica that leads reads it again over them, alone, and judges them again. A match, whether it keeps the record, or the rule entries changed judge every firing again, reading nothing."}}</p>
+{{with .Entries}}<h3 id="impact-rule-entries">{{t "Rule entries"}}</h3>
+<p>{{t "Which rules are judged against which signals' windows, and on which labels: a rule's entry is the first whose pattern matches its name, else the first whose labels it has. A rule no entry names is judged against every signal, each on its own match."}}</p>
+{{if .List}}<div class="scroll" tabindex="0" role="region" aria-label="{{t "Rule entries"}}"><table>
+<thead><tr><th scope="col" class="n">#</th><th scope="col">{{t "Rules"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "Signals"}}</th><th scope="col">{{t "Matched on"}}</th></tr></thead>
+<tbody>{{range .List}}<tr><td class="n">{{.N}}</td><td>{{with .Rules}}<code><bdi>{{.}}</bdi></code>{{else}}–{{end}}</td><td>{{range $k, $vs := .Labels}}<code><bdi>{{$k}}={{join $vs "|"}}</bdi></code> {{else}}–{{end}}</td><td><code><bdi>{{join .Signals ", "}}</bdi></code></td><td>{{if .Follows}}{{t "each signal's own"}}{{else if .Match}}<code><bdi>{{join .Match ", "}}</bdi></code>{{else}}{{t "no label"}}{{end}}</td></tr>{{end}}</tbody>
+</table></div>{{else}}<p class="quiet">{{t "None: every rule is judged against every signal."}}</p>{{end}}
+<p class="quiet">{{if .Changed}}{{t "Set here in place of the %d serve was started with, changed by %s, %s." .Started (who .By) (at $loc .Updated)}}{{else}}{{t "As serve was started with them."}}{{end}}</p>
+{{if $edit}}<details{{if .Open}} open{{end}}><summary>{{t "Change them"}}</summary>
+<form method="post" action="/settings/impact-rules" class="criteria">{{range $p.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+<div class="field"><label for="impact-rules-text">{{t "Rule entries, as --impact-file's rules: a YAML list, each with rules or labels, signals, and match if not each signal's own"}}</label>
+<textarea id="impact-rules-text" name="rules" rows="8" spellcheck="false" maxlength="32768">{{.Text}}</textarea></div>
+<p><button>{{t "Save, and judge again"}}</button> <button formmethod="get" formaction="/settings#signals-tried" name="rules-try" value="1" class="quiet-button">{{t "Try them on the last four weeks"}}</button>{{if .Changed}} <button name="reset" value="1" class="quiet-button">{{t "back to the start"}}</button>{{end}}</p>
+</form></details>{{end}}{{end}}
+{{with .SignalsTried}}{{template "signalstried" (on $p .)}}{{end}}
+{{end}}{{end}}
+
+{{/* A named signal's fields, as its form gives them (signalForm). */}}
+{{define "signalfields"}}{{$f := .}}<div class="field"><label for="signal-{{.Was}}-name">{{t "Name"}}</label> <input id="signal-{{.Was}}-name" name="name" value="{{.Name}}" size="20" maxlength="32" required></div>
+<div class="field"><label for="signal-{{.Was}}-expr">{{t "Impact signal (PromQL)"}}</label>
+<textarea id="signal-{{.Was}}-expr" name="expr" rows="3" maxlength="4096" spellcheck="false" required>{{$f.Expr}}</textarea></div>
+<div class="field"><label for="signal-{{.Was}}-for">{{t "How long it must last"}}</label> <input id="signal-{{.Was}}-for" name="for" value="{{.For}}" size="10"></div>
+<fieldset class="field"><legend>{{t "Matched on"}}</legend>
+<label class="check"><input type="radio" name="match-mode" value="effect"{{if .Follows}} checked{{end}}> {{t "the match in effect"}}</label>
+<label class="check"><input type="radio" name="match-mode" value="labels"{{if not .Follows}} checked{{end}}> {{t "these labels, comma-separated, none for no label"}}</label>
+<input name="match" value="{{.Match}}" size="30" aria-label="{{t "Labels to match on"}}"></fieldset>
+<label class="check"><input type="checkbox" name="record" value="1"{{if .Record}} checked{{end}}> {{t "Keeps the record: read all of a week, it says nothing it measures was hurt"}}</label>{{end}}
+
+{{/* Adding a named signal, an admin's: with one with no name in effect,
+the first makes it a named one. */}}
+{{define "addsignal"}}{{$p := .P}}{{with .V}}<details id="add-signal"{{if .AddOpen}} open{{end}}><summary>{{t "Add a named impact signal"}}</summary>
+<form method="post" action="/settings/signals" class="criteria">{{range $p.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}<input type="hidden" name="was" value="">
+{{template "signalfields" .Add}}
+{{if .Renames}}<p class="quiet">{{t "Named signals and one with no name don't go together: the impact signal with no name in effect becomes the signal impact beside this one, its windows and their keys kept."}}</p>{{end}}
+<p><button>{{t "Save, and judge again"}}</button> <button formmethod="get" formaction="/settings#signals-tried" name="signal-try" value="1" class="quiet-button">{{t "Try it on the last four weeks"}}</button></p>
+</form></details>{{end}}{{end}}
+
+{{/* A try of a change to the named signals: each signal's windows in
+effect and with it, and the verdict in effect and with all of them. */}}
+{{define "signalstried"}}{{$loc := .P.Loc}}{{with .V}}<section class="card wide" id="signals-tried" aria-labelledby="signals-tried-h">
+<h3 id="signals-tried-h">{{if .From.IsZero}}{{t "Tried"}}{{else}}{{t "Tried on %s → %s" (at $loc .From) (at $loc .To)}}{{end}}</h3>
+{{with .Err}}<p class="notice status-bad"><span class="sign" aria-hidden="true">✕</span> {{.}}</p>{{else}}
+{{if .Same}}<p>{{t "It is what is in effect: nothing would change."}}</p>{{end}}
+<div class="scroll" tabindex="0" role="region" aria-label="{{t "Impact signals, in effect and with it"}}"><table>
+<caption>{{t "Impact signals, in effect and with it"}}</caption>
+<thead><tr><th scope="col">{{t "Signal"}}</th><th scope="col" class="n">{{t "Windows in effect"}}</th><th scope="col" class="n">{{t "With it"}}</th><th scope="col">{{t "Keeps the record"}}</th><th scope="col">{{t "What changes"}}</th></tr></thead>
+<tbody>{{range .Signals}}<tr><th scope="row"><code><bdi>{{.Name}}</bdi></code></th><td class="n">{{.Now}}</td><td class="n">{{if ne .Now .With}}<strong>{{.With}}</strong>{{else}}{{.With}}{{end}}</td>
+<td>{{if .NoRecord}}{{t "no"}}{{else if .StartWith.IsZero}}{{t "not yet"}}{{else}}{{t "yes, since %s" (at $loc .StartWith)}}{{end}}</td>
+<td>{{if .Added}}{{t "added: read over the four weeks"}}{{else if .Renamed}}{{if .Was}}{{tbdi "renamed from %s" (code .Was)}}{{else}}{{t "the impact signal with no name, named"}}{{end}}{{else if .Read}}{{t "a new criterion: read over the four weeks"}}{{else if .Seen}}{{t "a new match: what it reads looked at by its labels"}}{{else}}–{{end}}</td></tr>{{end}}</tbody>
+</table></div>
+{{range .Signals}}{{if .Read}}<h4><code><bdi>{{.Name}}</bdi></code></h4>
+<p>{{t "%d windows found; %d of them would count, the rest covered by an incident written down or decided before." .Found .With}}</p>
+{{with .Data}}{{if .NoData}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "A selector it reads had no data over the four weeks: it would keep the record of no week."}}</p>{{else if not .Floor.IsZero}}<p>{{t "The impact signal has data from %s: the weeks before it keep no record by it." (at $loc .Floor)}}</p>{{end}}{{template "impactdata" (on $.P .)}}{{end}}
+{{if .Windows}}<div class="scroll" tabindex="0" role="region" aria-label="{{t "Windows found"}}"><table>
+<caption>{{t "Windows found"}}</caption>
+<thead><tr><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col">{{t "Length"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "Would count"}}</th></tr></thead>
+<tbody>{{range .Windows}}<tr><td class="t">{{at $loc .Start}}</td><td class="t">{{at $loc .End}}</td><td>{{dur .Len}}</td><td class="labels">{{template "labelsum" (labelsum .Labels)}}</td>
+<td>{{if .Written}}{{t "no: written down as %s" (join .Written ", ")}}{{else if .Decided}}{{t "no: %s before" (t .Decided)}}{{else}}{{t "yes"}}{{end}}</td></tr>{{end}}</tbody>
+</table></div>{{with .MoreWindows}}<p class="quiet">{{t "and %d more" .}}</p>{{end}}{{end}}{{end}}{{end}}
+<div class="scroll" tabindex="0" role="region" aria-label="{{t "The verdict, in effect and with it"}}"><table>
+<caption>{{t "The verdict, in effect and with it"}}</caption>
+<thead><tr><th scope="col">{{t "Measure"}}</th><th scope="col">{{t "In effect"}}</th><th scope="col">{{t "With it"}}</th></tr></thead>
+<tbody>{{range .Rows}}<tr><th scope="row">{{t .Label}}</th><td>{{.Now}}</td><td>{{if .Changed}}<strong>{{.With}}</strong>{{else}}{{.With}}{{end}}</td></tr>{{end}}</tbody>
+</table></div>
+{{if .Stale}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "%d waiting proposals would need a new backtest before they are approved: their backtest's weeks would have a record where they had none, or none where they had one." .StaleN}}</p>
+<ul class="plain">{{range .Stale}}<li><a href="{{$.P.Link (printf "/proposals/%d" .ID)}}">#{{.ID}}</a> <bdi>{{.Rule}}</bdi></li>{{end}}{{with .StaleMore}}<li>{{t "and %d more" .}}</li>{{end}}</ul>{{end}}
+<p class="quiet">{{t "Nothing was saved. Saved, the overview's weekly panels the digest works out catch up at the next digest."}}</p>
+{{end}}</section>{{end}}{{end}}
 
 {{/* A try of the incident criteria: what they would make incidents of
 over the last four weeks, and what that would do to the verdict. */}}
@@ -161,11 +258,11 @@ over the last four weeks, and what that would do to the verdict. */}}
 {{if .Quiet}}<p class="notice status-warn"><span class="sign" aria-hidden="true">⚠&#xFE0E;</span> {{t "No incident written down in two weeks or more: are they still being written down?"}}</p>{{end}}
 <div class="scroll" tabindex="0" role="region" aria-label="{{t "Incident sources"}}"><table class="sources">
 <thead><tr><th scope="col">{{t "Source"}}</th><th scope="col">{{t "State"}}</th><th scope="col">{{t "Last"}}</th><th scope="col" class="n">{{t "In four weeks"}}</th><th scope="col">{{t "What it is"}}</th></tr></thead>
-<tbody>{{range .Rows}}<tr><th scope="row">{{if .Raw}}<bdi>{{.Name}}</bdi>{{with .Tool}} ({{.}}){{end}}{{else}}{{t .Name}}{{end}}</th>
+<tbody>{{range .Rows}}<tr><th scope="row">{{if .Raw}}<bdi>{{.Name}}</bdi>{{with .Tool}} ({{.}}){{end}}{{else}}{{t .Name}}{{end}}{{with .Signal}} <code><bdi>{{.}}</bdi></code>{{end}}</th>
 <td class="state"><span class="{{status "source" .State}}">{{if eq .State "ok"}}✓ {{t "working"}}{{else if eq .State "quiet"}}⚠&#xFE0E; {{t "quiet"}}{{else if eq .State "nodata"}}⚠&#xFE0E; {{t "no data"}}{{else if eq .State "unread"}}⚠&#xFE0E; {{t "no record"}}{{else if eq .State "failing"}}✕ {{t "failing"}}{{else if eq .State "pending"}}↻ {{t "waiting"}}{{else if eq .State "none"}}– {{t "none in four weeks"}}{{else}}? {{t "not set up"}}{{end}}</span></td>
 <td class="t">{{if .Last.IsZero}}–{{else}}{{t .LastWhat}} {{at $loc .Last}}{{with .LastID}} (<bdi>{{.}}</bdi>){{end}}{{end}}</td>
 <td class="n">{{if .Counts}}{{.N}}{{else}}–{{end}}</td>
-<td>{{t .About}}{{with .Where}}<br><span class="quiet where"><bdi>{{.}}</bdi></span>{{end}}{{with .Err}}<br><span class="status-bad"><span aria-hidden="true">✕</span> {{.}}</span>{{end}}{{with .Data}}{{template "impactdata" (on $.P .)}}{{end}}</td></tr>{{end}}</tbody>
+<td>{{t .About}}{{with .Where}}<br><span class="quiet where"><bdi>{{.}}</bdi></span>{{end}}{{with .Err}}<br><span class="status-bad"><span aria-hidden="true">✕</span> {{.}}</span>{{end}}{{if .Signal}}<br>{{if .NoRecord}}{{t "It keeps no record: record is no."}}{{else if .Since.IsZero}}{{t "It keeps no record yet."}}{{else}}{{t "It keeps the record from %s." (at $loc .Since)}}{{end}}{{end}}{{with .Data}}{{template "impactdata" (on $.P .)}}{{end}}</td></tr>{{end}}</tbody>
 </table></div>
 {{with .More}}<p class="quiet">{{t "and %d more" .}}</p>{{end}}
 <p class="quiet">{{t "What a tool's job copies in is told apart by its ids' prefix, as the recipes give them: PD- of PagerDuty, a Jira project's key of Jira."}} <a href="{{.Recipes}}">{{t "Copying incidents in from Jira, PagerDuty, incident.io and others"}}</a></p>

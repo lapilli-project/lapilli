@@ -939,10 +939,18 @@ var settable = []struct{ key, flag string }{
 // those changed in the UI.
 func (s *Server) options(ctx context.Context) (verdict.Options, error) {
 	o := s.cfg.Options
+	// The named signals' generation, read before the settings: options
+	// read before a change to them judge nothing it pended
+	// (ledger.SignalsGen).
+	gen, err := s.l.SignalsGen(ctx)
+	if err != nil {
+		return o, err
+	}
 	set, err := s.l.Settings(ctx)
 	if err != nil {
 		return o, err
 	}
+	o.SignalsGen = gen
 	// With an impact signal, the record is kept from when the runs read it,
 	// all of it, with the criterion in effect (verdict.Options.ImpactFrom,
 	// impactFrom); with named ones, each from its own start, a firing by
@@ -953,15 +961,15 @@ func (s *Server) options(ctx context.Context) (verdict.Options, error) {
 	// What it replays is judged by the weeks it keeps its stones by.
 	o.RecordWeek = s.l.WeekOf
 	for k, v := range set {
-		if slices.ContainsFunc(criteriaSettable, func(c struct{ key, flag string }) bool { return c.key == k }) {
-			continue // the incident criteria's, above
+		if slices.ContainsFunc(criteriaSettable, func(c struct{ key, flag string }) bool { return c.key == k }) || signalSetting(k) {
+			continue // the incident criteria's, above and below
 		}
 		if err := apply(&o, k, v.Value); err != nil {
 			s.log.Warn("a setting from the UI doesn't parse; the command line's is used", "setting", k, "err", err)
 		}
 	}
-	if s.namedSignals() {
-		if o.Signals, err = s.signalsOf(ctx, o.Match); err != nil {
+	if n := s.signalsIn(set); n.named() {
+		if o.Signals, err = s.signalsOf(ctx, o.Match, n, gen); err != nil {
 			return o, err
 		}
 	}

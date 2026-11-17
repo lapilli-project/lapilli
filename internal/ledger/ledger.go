@@ -382,6 +382,10 @@ type txn struct {
 	// naming is whether the ledger keeps a named impact signal: 0 not read
 	// yet, 1 it does, 2 it doesn't (untied).
 	naming int
+	// stale is whether the options it judges with were read before the
+	// named signals last changed: 0 not read yet, 1 they were, 2 not
+	// (staleSignals).
+	stale int
 }
 
 // versionNames are the names any version of the rules holds, read the

@@ -43,9 +43,6 @@ var maxSignalWeek = 2000
 // maxSignalWindows windows, or past maxSignalWeek in its week.
 var errTooManyWindows = fmt.Errorf("more than %d windows in one read: an expression by pod, not by service, finds too many", maxSignalWindows)
 
-// namedSignals says serve reads named impact signals.
-func (s *Server) namedSignals() bool { return len(s.cfg.Signals) > 0 }
-
 // signalCriterion is what makes a named signal's windows: its expression
 // and its "for", keyed as the unnamed signal's criterion is.
 func signalCriterion(d ledger.SignalDef) criterion { return criterion{d.Expr, d.For} }
@@ -59,16 +56,22 @@ type signalsCache struct {
 	sig   *verdict.Signals
 }
 
-// signalsOf are the named signals in effect, as they judge (o.Signals):
-// each with its bit, its start and what it has seen, on match (the match
-// in effect), as the ledger keeps them, and the rule entries, each rule's
-// found once by its name or labels (owners); what replays judge in memory
-// ties a firing as the ledger ties its alert. Nil with none named.
-func (s *Server) signalsOf(ctx context.Context, match []string) (*verdict.Signals, error) {
-	if !s.namedSignals() {
+// signalsOf are the named signals in effect, n, as they judge
+// (o.Signals): each with its bit, its start and what it has seen, on match
+// (the match in effect), as the ledger keeps them, and the rule entries,
+// each rule's found once by its name or labels (owners); what replays
+// judge in memory ties a firing as the ledger ties its alert. Nil with
+// none named. Kept while the ledger is as it was: of this replica's
+// generation, of the signals' generation sgen (ledger.SignalsGen, read
+// before), and of the signals and entries n itself, so that options that
+// claim a generation never carry the signals of one before, a change
+// another replica saved among them, whatever this one refreshed.
+func (s *Server) signalsOf(ctx context.Context, match []string, n signalsNow, sgen int64) (*verdict.Signals, error) {
+	if !n.named() {
 		return nil, nil
 	}
-	gen, key := s.l.Gen(), strings.Join(match, "\x00")
+	of, _ := json.Marshal(n.set())
+	gen, key := s.l.Gen(), fmt.Sprintf("%d\x00%s\x00%s", sgen, strings.Join(match, "\x00"), of)
 	s.sigs.Lock()
 	if s.sigs.sig != nil && s.sigs.gen == gen && s.sigs.match == key {
 		sig := s.sigs.sig
@@ -84,8 +87,8 @@ func (s *Server) signalsOf(ctx context.Context, match []string) (*verdict.Signal
 	if err != nil {
 		return nil, err
 	}
-	list := make([]verdict.Signal, 0, len(s.cfg.Signals))
-	for _, d := range s.cfg.Signals {
+	list := make([]verdict.Signal, 0, len(n.Defs))
+	for _, d := range n.Defs {
 		x := verdict.Signal{Name: d.Name, For: d.For, Match: d.Match, Record: d.Record, Bit: -1}
 		if i := slices.IndexFunc(rows, func(r ledger.SignalRow) bool { return r.Name == d.Name }); i >= 0 {
 			x.Bit, x.Start = rows[i].Bit, rows[i].Kept.From()
@@ -97,8 +100,8 @@ func (s *Server) signalsOf(ctx context.Context, match []string) (*verdict.Signal
 		}
 		list = append(list, x)
 	}
-	sig := verdict.NewSignals(list, s.cfg.ImpactRules)
-	if len(s.cfg.ImpactRules) > 0 {
+	sig := verdict.NewSignals(list, n.Entries)
+	if len(n.Entries) > 0 {
 		own, err := s.owners(ctx)
 		if err != nil {
 			return nil, err
@@ -111,23 +114,21 @@ func (s *Server) signalsOf(ctx context.Context, match []string) (*verdict.Signal
 	return sig, nil
 }
 
-// syncSignals keeps the named signals serve was started with, and the rule
-// entries, in the ledger (ledger.SyncSignals): when a signal was added or
-// taken away, or its match or record changed, or the entries, every firing
-// is judged again, as a change to --match judges it.
+// syncSignals keeps the named signals in effect, those serve was started
+// with and those an admin set on the Settings page, and the rule entries,
+// in the ledger (ledger.SyncSignalSet): when a signal was added or taken
+// away, or its match or record changed, or the entries, every firing is
+// judged again, as a change to --match judges it.
 func (s *Server) syncSignals(ctx context.Context) (bool, error) {
-	set, err := s.l.Settings(ctx)
-	if err != nil {
-		return false, err
-	}
-	o := s.cfg.Options
-	if v, ok := set["match"]; ok {
-		if err := apply(&o, "match", v.Value); err != nil {
-			o.Match = s.cfg.Options.Match
-		}
-	}
-	synced, err := s.l.SyncSignals(ctx, s.cfg.Signals, s.cfg.ImpactRules, o.Match)
+	synced, err := s.l.SyncSignalSet(ctx, s.signalsFrom)
 	return synced.Set || synced.Entries, err
+}
+
+// signalsFrom are the named signals in effect, the rule entries and the
+// match in effect, of the settings as the ledger's write reads them
+// (ledger.SignalsFrom).
+func (s *Server) signalsFrom(set map[string]ledger.Setting) (ledger.SignalSet, []string) {
+	return s.signalsIn(set).set(), s.matchOf(set)
 }
 
 // signalsRead reads each named signal for a run over [from, to] (Found's
@@ -137,7 +138,7 @@ func (s *Server) syncSignals(ctx context.Context) (bool, error) {
 // maxSignalWindows windows, or is left unread when the time runs out, is
 // missed for the run, which records the rest; one Prometheus turned away
 // (a 429 yielded to) holds the run, as the unnamed signal's does.
-func (s *Server) signalsRead(parent context.Context, from, to time.Time, f *ledger.Found) error {
+func (s *Server) signalsRead(parent context.Context, from, to time.Time, f *ledger.Found, n signalsNow) error {
 	rows, err := s.l.SignalRows(parent)
 	if err != nil {
 		return err
@@ -159,7 +160,7 @@ func (s *Server) signalsRead(parent context.Context, from, to time.Time, f *ledg
 	span := to.Sub(from)
 	// A signal the ledger doesn't keep yet (its row, with its own bit, is
 	// SyncSignals'), or no longer, isn't read: nothing of it would be kept.
-	order := slices.DeleteFunc(slices.Clone(s.cfg.Signals), func(d ledger.SignalDef) bool {
+	order := slices.DeleteFunc(slices.Clone(n.Defs), func(d ledger.SignalDef) bool {
 		return !slices.ContainsFunc(rows, func(r ledger.SignalRow) bool { return r.Name == d.Name })
 	})
 	slices.SortStableFunc(order, func(a, b ledger.SignalDef) int {
@@ -385,7 +386,7 @@ func (s *Server) readSignal(name string, err error) {
 // selectors of the criterion it keeps the record by begins, as impactData
 // does of the unnamed one, each in turn within --timeout (inTurn): one
 // that fails passing to the next, the last failure returned.
-func (s *Server) signalsData(ctx context.Context) error {
+func (s *Server) signalsData(ctx context.Context, n signalsNow) error {
 	rows, err := s.l.SignalRows(ctx)
 	if err != nil {
 		return err
@@ -393,7 +394,7 @@ func (s *Server) signalsData(ctx context.Context) error {
 	// Each in turn, within --timeout (inTurn), as a run reads them.
 	var asks []turnAsk
 	for _, r := range rows {
-		if r.Name == "" || !slices.ContainsFunc(s.cfg.Signals, func(d ledger.SignalDef) bool { return d.Name == r.Name }) {
+		if _, ok := n.def(r.Name); r.Name == "" || !ok {
 			continue
 		}
 		asks = append(asks, turnAsk{name: r.Name, ask: func(ctx context.Context) error {
@@ -417,14 +418,14 @@ func (s *Server) signalsData(ctx context.Context) error {
 // where its data begins, and what it returned. One that fails is tried
 // again later, an hour, then two, four, up to a day, while the others go
 // on. It reports whether it read one again.
-func (s *Server) signalsAgain(ctx context.Context, o verdict.Options) (bool, error) {
+func (s *Server) signalsAgain(ctx context.Context, o verdict.Options, n signalsNow) (bool, error) {
 	var any bool
 	var failed error
 	rows, err := s.l.SignalRows(ctx)
 	if err != nil {
 		return false, err
 	}
-	for _, d := range s.cfg.Signals {
+	for _, d := range n.Defs {
 		if !slices.ContainsFunc(rows, func(r ledger.SignalRow) bool { return r.Name == d.Name }) {
 			continue // not kept by the ledger: nothing of it would be
 		}
@@ -476,8 +477,35 @@ func (s *Server) signalsAgain(ctx context.Context, o verdict.Options) (bool, err
 }
 
 // signalAgain reads one named signal again over the last four weeks, and
-// puts what it found in the ledger (ledger.ReadAgain), within --timeout.
+// puts what it found in the ledger (ledger.ReadAgain), within --timeout;
+// the weeks it pends are judged then.
 func (s *Server) signalAgain(ctx context.Context, d ledger.SignalDef, c criterion, o verdict.Options) (bool, error) {
+	read, err := s.readSignalAgain(ctx, d, o, s.cfg.Timeout, "")
+	if err != nil || !read {
+		return false, err
+	}
+	return true, s.judgePending(ctx, o)
+}
+
+// judgePending judges what is pended (ledger.JudgePending); with options
+// read before the named signals last changed, it leaves it, and asks for
+// another round, whose options are read anew.
+func (s *Server) judgePending(ctx context.Context, o verdict.Options) error {
+	err := s.l.JudgePending(ctx, o)
+	if errors.Is(err, ledger.ErrSignalsMoved) {
+		s.poke()
+		return nil
+	}
+	return err
+}
+
+// readSignalAgain reads one named signal again over the last four weeks,
+// within within, and puts what it found in the ledger (ledger.ReadAgain):
+// for the replica that leads (by ""), or asked for by an admin on the
+// Settings page (by), which the activity log notes. It reports whether it
+// read it: not when the runs moved on meanwhile.
+func (s *Server) readSignalAgain(ctx context.Context, d ledger.SignalDef, o verdict.Options, within time.Duration, by string) (bool, error) {
+	c := signalCriterion(d)
 	cursor, err := s.l.Cursor(ctx)
 	if err != nil {
 		return false, err
@@ -486,26 +514,35 @@ func (s *Server) signalAgain(ctx context.Context, d ledger.SignalDef, c criterio
 	if err != nil {
 		return false, err
 	}
-	s.status.set("reading the impact signal %s again over the last four weeks", d.Name)
-	rctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+	if by == "" {
+		s.status.set("reading the impact signal %s again over the last four weeks", d.Name)
+	}
+	rctx, cancel := context.WithTimeout(ctx, within)
 	defer cancel()
 	series, err := s.h.QueryRange(rctx, d.Expr, from, cursor, s.cfg.Step)
 	var sels []ledger.SelectorData
 	if err == nil {
 		sels, err = s.firstSamples(rctx, d.Expr, from, cursor, true)
 	}
+	// Of the runs' read again, a failure is the signal's, which the
+	// sources panel says; of an admin's, theirs, said to them alone.
+	noted := func(err error) {
+		if by == "" {
+			s.readSignal(d.Name, err)
+		}
+	}
 	if err != nil {
-		s.readSignal(d.Name, err)
+		noted(err)
 		return false, err
 	}
 	windows, err := incident.FromSignal(rctx, series, s.cfg.Step, d.For, d.Name, d.Match)
 	if err != nil {
-		s.readSignal(d.Name, err)
+		noted(err)
 		return false, err
 	}
 	if most := maxSignalWeek * (int(cursor.Sub(from)/(7*24*time.Hour)) + 1); len(windows) > most {
 		err := fmt.Errorf("more than %d windows a week: an expression by pod, not by service, finds too many", maxSignalWeek)
-		s.readSignal(d.Name, err)
+		noted(err)
 		return false, err
 	}
 	seen := verdict.NewSeen(d.MatchOr(o.Match))
@@ -515,7 +552,7 @@ func (s *Server) signalAgain(ctx context.Context, d ledger.SignalDef, c criterio
 		}
 	}
 	err = s.l.ReadAgain(ctx, ledger.ImpactRead{From: from, To: cursor, Criterion: c.key(), Windows: windows, Signal: d.Name, Match: d.Match, Seen: seen,
-		Data: ledger.ImpactData{From: from, CheckedTo: cursor, Selectors: sels}}, o)
+		Data: ledger.ImpactData{From: from, CheckedTo: cursor, Selectors: sels}, By: by}, o)
 	if errors.Is(err, ledger.ErrRunsMoved) {
 		return false, nil // read again at the next round, to where they are
 	}
@@ -523,7 +560,7 @@ func (s *Server) signalAgain(ctx context.Context, d ledger.SignalDef, c criterio
 		return false, err
 	}
 	s.readSignal(d.Name, nil)
-	return true, s.l.JudgePending(ctx, o)
+	return true, nil
 }
 
 // errLookCut is a look at what a signal reads that some of its selectors
@@ -539,8 +576,9 @@ var errLookCut = errors.New("some of the selectors it reads didn't answer")
 // it may tie otherwise worked out again. One that fails passes to the
 // next, the last failure returned.
 func (s *Server) signalsSeen(ctx context.Context, o verdict.Options) error {
-	if !s.namedSignals() || s.h == nil {
-		return nil
+	n, _, err := s.signalsNowOf(ctx)
+	if err != nil || !n.named() || s.h == nil {
+		return err
 	}
 	cursor, err := s.l.Cursor(ctx)
 	if err != nil || cursor.IsZero() {
@@ -557,7 +595,7 @@ func (s *Server) signalsSeen(ctx context.Context, o verdict.Options) error {
 	more, to := map[string]*verdict.Seen{}, map[string]time.Time{}
 	var mu sync.Mutex
 	var asks []turnAsk
-	for _, d := range s.cfg.Signals {
+	for _, d := range n.Defs {
 		i := slices.IndexFunc(rows, func(r ledger.SignalRow) bool { return r.Name == d.Name })
 		if i < 0 || rows[i].Kept.Since.IsZero() {
 			continue // not read yet
@@ -614,7 +652,7 @@ func (s *Server) signalsSeen(ctx context.Context, o verdict.Options) error {
 // of a floor standing, heldPending), its match and whether it keeps the
 // record, the rule entries, and the match in effect, so that a change to
 // any of them holds the proposals it could change.
-func (s *Server) signalsHeld(ctx context.Context) (string, error) {
+func (s *Server) signalsHeld(ctx context.Context, n signalsNow) (string, error) {
 	rows, err := s.l.SignalRows(ctx)
 	if err != nil {
 		return "", err
@@ -623,34 +661,37 @@ func (s *Server) signalsHeld(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	type held struct {
+	held := map[string]string{}
+	for _, r := range rows {
+		held[r.Name] = r.Kept.Criterion
+		if !r.Kept.Floor.IsZero() {
+			held[r.Name] = heldPending(r.Kept)
+		}
+	}
+	return heldDigest(n.Defs, n.Entries, held, o.Match), nil
+}
+
+// heldDigest is signalsHeld of signals defs, the criterion each holds
+// (held, by name: "" for none yet), the rule entries and the match in
+// effect: what a try works out of a change, as it will be once read.
+func heldDigest(defs []ledger.SignalDef, entries []verdict.RuleEntry, held map[string]string, match []string) string {
+	type kept struct {
 		Name, Held string
 		Match      []string
 		Record     bool
 	}
-	var hs []held
-	for _, d := range s.cfg.Signals {
-		h := held{Name: d.Name, Match: d.Match, Record: d.Record}
-		if i := slices.IndexFunc(rows, func(r ledger.SignalRow) bool { return r.Name == d.Name }); i >= 0 {
-			k := rows[i].Kept
-			h.Held = k.Criterion
-			if !k.Floor.IsZero() {
-				h.Held = heldPending(k)
-			}
-		}
-		hs = append(hs, h)
+	var hs []kept
+	for _, d := range defs {
+		hs = append(hs, kept{Name: d.Name, Held: held[d.Name], Match: d.Match, Record: d.Record})
 	}
-	slices.SortFunc(hs, func(a, b held) int { return cmp.Compare(a.Name, b.Name) })
-	b, err := json.Marshal(struct {
-		Signals []held
+	slices.SortFunc(hs, func(a, b kept) int { return cmp.Compare(a.Name, b.Name) })
+	b, _ := json.Marshal(struct {
+		Signals []kept
 		Rules   []verdict.RuleEntry
 		Match   []string
-	}{hs, s.cfg.ImpactRules, o.Match})
-	if err != nil {
-		return "", err
-	}
+	}{hs, entries, match})
 	sum := sha256.Sum256(b)
-	return "signals " + hex.EncodeToString(sum[:12]), nil
+	return "signals " + hex.EncodeToString(sum[:12])
 }
 
 // ruleSignals is what a rule is judged against, with named signals

@@ -151,6 +151,41 @@ you upgrade".
   `/metrics` (the latest occurrence that ended, within its 500 series)
   and MCP's `summary` and `overview` say them. No schema change. Goals of
   each week read as they did, byte for byte (`TestGoalsWeeklyUnchanged`).
+- **Named impact signals on the Settings page** (docs/design/signals.md,
+  step 3). Incident criteria lists the signals in effect, a row each, with
+  what `lapilli serve` was started with of its name, who changed it and
+  when, and "back to the start"; an admin adds a signal, changes one,
+  renames one in place (its windows, their keys, what was decided of them
+  and their tasks and comments renamed with it, the rule entries that name
+  it too) or takes one away, eight at most, each bounded as the command
+  line's is. The UI's signal is kept over the command line's of the same
+  name. The rule entries are one list, saved as YAML in place of the
+  start's as a whole, 64 at most. A signal added or given a new expression
+  or `for` is read over the last four weeks before it is saved; every
+  change is kept with the same bits, ties and judging again as the command
+  line's, in one write, and noted in the activity log with its before and
+  after. "Try it on the last four weeks" reads only the signals the change
+  gives a new criterion, and what one given a new match reads by its
+  labels, and shows each signal's windows in effect and with it, and the
+  verdict in effect and with all of them, saving nothing. "Read it again
+  over the last four weeks" reads one signal alone, counted among an
+  admin's twelve reads an hour. The Incident sources panel gives a row a
+  signal: when it was last read, its windows in four weeks, failing with
+  Prometheus's error, where each selector's data begins, and from when it
+  keeps the record. `/settings.yaml` gives the signals and the entries as
+  the chart's `impact` mapping once the Settings page changed any.
+  Waiting proposals are held by a change here as by one on the command
+  line. No schema change: what the UI sets is kept in `settings`, as the
+  impact signal with no name's is.
+
+### Changed
+
+- **The first named signal saved in the UI**, beside an impact signal with
+  no name in effect, makes that one the named signal `impact`, its windows
+  and their keys kept (docs/design/signals.md, "Open questions"); the
+  last taken away gives it back, its record standing. A deployment with
+  no named signal reads, judges and shows everything as before; its
+  admins see "Add a named impact signal" on the Settings page.
 
 ### Fixed
 
@@ -164,6 +199,26 @@ you upgrade".
   now read every window meeting the weeks they count. So a window's page,
   too, now marks with `*` an occurrence counted together with another of
   its kind on one of its days, as the Marked windows page did.
+- **A named signal's `match` changed now judges its windows on it**
+  (since 0.55.0). Each window kept the labels it was found with, which
+  judging read before the signal's, so a change of `--impact-match` or
+  the chart's `match` judged every firing again and changed nothing. The
+  windows' are now changed with it, in the same write; a confirmation's
+  incident keeps the labels it was confirmed with.
+- **A change of `--impact-for` alone on the Settings page is saved**
+  whatever the UI's checks make of the `--impact` serve was started with
+  (since 0.49.0): the form posts the expression back, and one the checks
+  refuse (a range over a day) refused the change with it. Only an
+  expression an admin changed is checked, of a named signal's form too.
+- **`--impact-file` is read as written**: a YAML anchor or alias is
+  refused, as it could repeat a value far past the file's 1 MiB, and so
+  is a tag other than a string's, a list's or a mapping's (`!!binary`
+  gave bytes, not text); a rule entry's labels are held as a team's are
+  (64 values of up to 256 bytes a label).
+- **A label's name and values are text** in a team, a quiet window and a
+  rule entry: valid UTF-8, with no control character, as Prometheus's
+  are. One that isn't is refused when it is written, in the UI, the API
+  or `--config`, where it was kept as JSON with U+FFFD in its place.
 
 ### Before you upgrade
 

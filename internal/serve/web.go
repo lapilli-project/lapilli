@@ -146,6 +146,9 @@ func (s *Server) Handler() http.Handler {
 	s.bulkRoutes(mux)
 	mux.HandleFunc("POST /settings", s.admin(s.postSettings))
 	mux.HandleFunc("POST /settings/impact", s.admin(s.postImpact))
+	mux.HandleFunc("POST /settings/signals", s.admin(s.postSignal))
+	mux.HandleFunc("POST /settings/signals/again", s.admin(s.postSignalAgain))
+	mux.HandleFunc("POST /settings/impact-rules", s.admin(s.postEntries))
 	mux.HandleFunc("POST /settings/given-back", s.admin(s.postKeepGivenBack))
 	mux.HandleFunc("GET /api/v1/me", s.me)
 
@@ -1181,7 +1184,7 @@ func (s *Server) oops(w http.ResponseWriter, r *http.Request, err error) {
 		code = http.StatusBadRequest
 	case errors.Is(err, ledger.ErrNotFound):
 		code = http.StatusNotFound
-	case errors.Is(err, ledger.ErrNotYours), errors.Is(err, ledger.ErrTaken), errors.Is(err, ledger.ErrTooMany):
+	case errors.Is(err, ledger.ErrNotYours), errors.Is(err, ledger.ErrTaken), errors.Is(err, ledger.ErrTooMany), errors.Is(err, ledger.ErrSignalsChanged):
 		code = http.StatusConflict
 	case errors.Is(err, context.Canceled):
 		return
@@ -1512,18 +1515,26 @@ func (s *Server) settingsYAML(w http.ResponseWriter, r *http.Request) {
 		args = append(args, fmt.Sprintf("%q", st.flag+"="+show(o, st.key)))
 	}
 	// The incident criteria: the chart's impact, empty for none, and
-	// --impact-for among the flags.
+	// --impact-for among the flags; with named signals, the chart's impact
+	// as a mapping of them and the rule entries, when the Settings page
+	// changed any (docs/design/signals.md, step 3).
 	c := s.criterionOf(set)
+	n := s.signalsIn(set)
+	changed := len(n.UI) > 0 || n.EntriesUI != nil
 	switch {
-	case s.namedSignals():
-		// The named signals are the chart's impact mapping, set where
-		// serve starts: an impact the UI kept for one with no name stands
-		// aside, and is no value to commit, which would take their place.
+	case n.named():
+		// An impact the UI kept for one with no name stands aside, and is
+		// no value to commit, which would take their place.
 		if _, ok := set["impact"]; ok {
 			b.WriteString("# impact: the named impact signals are the chart's impact mapping; the impact the Settings page kept for one with no name is ignored beside them, and not given here\n")
 		}
+		if changed {
+			b.WriteString(impactYAML(n))
+		}
 	default:
-		if _, ok := set["impact"]; ok {
+		if _, ok := set["impact"]; ok || changed {
+			// The named signals taken away here, the one with no name in
+			// effect, or none.
 			fmt.Fprintf(&b, "impact: %s\n", strconv.Quote(c.Expr))
 		}
 		if _, ok := set["impact-for"]; ok {
