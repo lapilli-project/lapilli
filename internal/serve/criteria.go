@@ -522,7 +522,8 @@ func (s *Server) readOver(ctx context.Context, c criterion, from, to time.Time) 
 	if d.Selectors, err = s.firstSamples(ctx, c.Expr, from, to, true); err != nil {
 		return nil, d, err
 	}
-	return incident.FromImpact(series, s.cfg.Step, c.For), d, nil
+	ws, err := incident.FromImpact(ctx, series, s.cfg.Step, c.For)
+	return ws, d, err
 }
 
 // postImpact saves the incident criteria, an admin's: an expression that
@@ -790,8 +791,12 @@ func (s *Server) impactAgain(ctx context.Context, o verdict.Options) (bool, erro
 	if err == nil {
 		sels, err = s.firstSamples(rctx, c.Expr, from, cursor, true)
 	}
+	var windows []incident.Incident
 	if err == nil {
-		err = s.l.ReadAgain(ctx, ledger.ImpactRead{From: from, To: cursor, Criterion: c.key(), Windows: incident.FromImpact(series, s.cfg.Step, c.For),
+		windows, err = incident.FromImpact(rctx, series, s.cfg.Step, c.For)
+	}
+	if err == nil {
+		err = s.l.ReadAgain(ctx, ledger.ImpactRead{From: from, To: cursor, Criterion: c.key(), Windows: windows,
 			Data: ledger.ImpactData{From: from, CheckedTo: cursor, Selectors: sels}}, o)
 		if errors.Is(err, ledger.ErrRunsMoved) {
 			return false, nil // read again at the next round, to where they are

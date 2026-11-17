@@ -1,6 +1,9 @@
 package incident
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -70,7 +73,10 @@ func TestFromImpact(t *testing.T) {
 		{Samples: min(40, 41)},                 // too short at 5m
 		{Samples: min(50, 51, 52, 53, 54, 55)}, // long enough
 	}
-	got := FromImpact(series, time.Minute, 5*time.Minute)
+	got, err := FromImpact(context.Background(), series, time.Minute, 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 {
 		t.Fatalf("got %+v", got)
 	}
@@ -83,7 +89,7 @@ func TestFromImpact(t *testing.T) {
 	svc := func(name string, ms ...int) prom.Series {
 		return prom.Series{Labels: map[string]string{"__name__": "x", "service": name, "env": "prod"}, Samples: min(ms...)}
 	}
-	got = FromImpact([]prom.Series{
+	got, _ = FromImpact(context.Background(), []prom.Series{
 		svc("checkout", 10, 11, 12, 13, 14, 15),
 		svc("cart", 13, 14, 15, 16, 17, 18, 19),
 		svc("search", 40, 41, 42, 43, 44),
@@ -173,7 +179,7 @@ func TestFromSignal(t *testing.T) {
 	for i := range 10 {
 		s.Samples = append(s.Samples, prom.Sample{T: t0.Add(time.Duration(i) * time.Minute), V: 1})
 	}
-	ws := FromSignal([]prom.Series{s}, time.Minute, 2*time.Minute, "probe", []string{"service"})
+	ws, _ := FromSignal(context.Background(), []prom.Series{s}, time.Minute, 2*time.Minute, "probe", []string{"service"})
 	if len(ws) != 1 || ws[0].ID != "impact-probe-1" || ws[0].Signal != "probe" || !slices.Equal(ws[0].Match, []string{"service"}) ||
 		ws[0].Title != "user impact (probe)" || !ws[0].Candidate {
 		t.Fatalf("%+v", ws)
@@ -188,5 +194,67 @@ func TestFromSignal(t *testing.T) {
 	// By its own, service alone: the incident written down.
 	if got := Merge(written, ws, time.Hour, []string{"service", "instance"}); len(got) != 1 || got[0].ID != "INC-1" {
 		t.Errorf("on its own match: %+v", got)
+	}
+}
+
+// An expression that isn't summed up, over a metric whose labels a
+// workload sets (a path, a client's id), returns as many series as one
+// range is read with (100,000), each with values of its own, all in the
+// same minute: one window. It keeps the first MaxWindowValues values of
+// each label in order, as the ledger keeps a window's, each value looked
+// for among those: a window of all 800,000 took minutes to merge, each
+// looked for among all before it.
+func TestFromSignalAtTheSeriesCap(t *testing.T) {
+	const n, labels = 100000, 8
+	series := make([]prom.Series, n)
+	for i := range series {
+		l := map[string]string{}
+		for k := range labels {
+			l[fmt.Sprintf("l%d", k)] = fmt.Sprintf("value-%06d", n-1-i)
+		}
+		series[i] = prom.Series{Labels: l, Samples: []prom.Sample{{T: t0, V: 1}}}
+	}
+	ws, err := FromSignal(context.Background(), series, time.Minute, time.Minute, "errors", nil)
+	if err != nil || len(ws) != 1 || len(ws[0].Spans) != n || len(ws[0].Labels) != labels {
+		t.Fatalf("%d windows, %v", len(ws), err)
+	}
+	var first []string
+	for i := range MaxWindowValues {
+		first = append(first, fmt.Sprintf("value-%06d", i))
+	}
+	for k, vs := range ws[0].Labels {
+		if !slices.Equal(vs, first) {
+			t.Errorf("%s: %d values, from %v: want the first %d in order", k, len(vs), vs[:min(len(vs), 3)], MaxWindowValues)
+		}
+	}
+}
+
+// KeepValue keeps each value once, the first MaxWindowValues in order, and
+// never holds more than those: a value is looked for among them alone.
+func TestKeepValue(t *testing.T) {
+	var vs []string
+	for i := 1000; i > 0; i-- {
+		vs = KeepValue(vs, fmt.Sprintf("v%04d", i))
+		vs = KeepValue(vs, fmt.Sprintf("v%04d", i)) // the same again
+		if len(vs) > MaxWindowValues || !slices.IsSorted(vs) {
+			t.Fatalf("after v%04d: %d values, sorted %v", i, len(vs), slices.IsSorted(vs))
+		}
+	}
+	if len(vs) != MaxWindowValues || vs[0] != "v0001" || vs[MaxWindowValues-1] != fmt.Sprintf("v%04d", MaxWindowValues) {
+		t.Errorf("%d values, %s to %s", len(vs), vs[0], vs[len(vs)-1])
+	}
+	// Within the bound, every value, in order, as before.
+	if got := KeepValue(KeepValue(KeepValue(nil, "search"), "cart"), "search"); !slices.Equal(got, []string{"cart", "search"}) {
+		t.Errorf("%v", got)
+	}
+}
+
+// Windows are found within ctx: one that is done stops it.
+func TestFromImpactStopsWhenDone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	series := []prom.Series{{Samples: []prom.Sample{{T: t0, V: 1}}}}
+	if ws, err := FromImpact(ctx, series, time.Minute, time.Minute); !errors.Is(err, context.Canceled) || ws != nil {
+		t.Errorf("%d windows, %v", len(ws), err)
 	}
 }

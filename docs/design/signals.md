@@ -709,8 +709,11 @@ As counts and bytes, which the tests hold, not times:
   in a key, a URL and a label value, and still escaped in each; label names
   checked as Prometheus's; the expression checked as v0.49.0 checks it;
   rule patterns checked as a team's are. The series' labels become
-  windows' labels, kept as an incident's are, and shown escaped; what a
-  signal has returned is bounded as above.
+  windows' labels, 64 values a label, the first in order, however many
+  series a window merges (an expression not summed up, over a label a
+  workload sets, returns as many as there are values), kept as an
+  incident's are, and shown escaped; what a signal has returned is
+  bounded as above.
 - **Where names go.** Into incidents' keys and pages, the summary,
   `/metrics` labels (escaped, eight values at most), the digest and
   reports, as text a receiver escapes, as it does `digest.ready`'s.

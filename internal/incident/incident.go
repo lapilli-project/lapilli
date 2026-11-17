@@ -3,6 +3,7 @@
 package incident
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"maps"
@@ -142,20 +143,32 @@ func Load(path string) ([]Incident, error) {
 	return doc.Incidents, nil
 }
 
+// MaxWindowValues is how many values of a label a window found in an
+// impact signal keeps: the first in order, as the ledger keeps a named
+// signal's (64 a label). A window that merged more series than that keeps
+// the first of their values, which a page shows as a label with more than
+// it shows, and a firing agrees with it by those it keeps, as with the
+// window the ledger keeps.
+const MaxWindowValues = 64
+
 // FromImpact finds the windows where an impact expression returned
 // something for at least minLen: candidate incidents nobody wrote down. Each
 // series is looked at on its own, and its windows carry its labels, so an
 // expression by service finds which services were hit. Windows that overlap
-// are one incident, with every value of the labels they all have. Gaps
-// shorter than two steps don't split a window. Each keeps its series' own
-// windows, as Spans.
-func FromImpact(series []prom.Series, step, minLen time.Duration) []Incident {
+// are one incident, with every value of the labels they all have, up to
+// MaxWindowValues a label. Gaps shorter than two steps don't split a
+// window. Each keeps its series' own windows, as Spans. It stops when ctx
+// is done: an expression that isn't summed up can return 100,000 series.
+func FromImpact(ctx context.Context, series []prom.Series, step, minLen time.Duration) ([]Incident, error) {
 	type window struct {
 		start, end time.Time
 		labels     map[string]string
 	}
 	var ws []window
-	for _, s := range series {
+	for n, s := range series {
+		if n%1024 == 0 && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		ts := make([]time.Time, 0, len(s.Samples))
 		for _, smp := range s.Samples {
 			ts = append(ts, smp.T)
@@ -185,43 +198,61 @@ func FromImpact(series []prom.Series, step, minLen time.Duration) []Incident {
 		}
 		in.Spans = []Span{{Labels: ws[i].labels, Start: ws[i].start, End: ws[i].end}}
 		for i++; i < len(ws) && !ws[i].start.After(in.End); i++ {
+			if i%1024 == 0 && ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			if ws[i].end.After(in.End) {
 				in.End = ws[i].end
 			}
 			in.Spans = append(in.Spans, Span{Labels: ws[i].labels, Start: ws[i].start, End: ws[i].end})
 			for k, vs := range in.Labels {
 				v, ok := ws[i].labels[k]
-				switch {
-				case !ok:
+				if !ok {
 					delete(in.Labels, k) // not all have it: no constraint
-				case !slices.Contains(vs, v):
-					in.Labels[k] = append(vs, v)
+					continue
 				}
+				in.Labels[k] = KeepValue(vs, v)
 			}
-		}
-		for _, vs := range in.Labels {
-			slices.Sort(vs)
 		}
 		if len(in.Labels) == 0 {
 			in.Labels = nil
 		}
 		out = append(out, in)
 	}
-	return out
+	return out, nil
+}
+
+// KeepValue is vs, a label's values as a window keeps them, with v: each
+// once, in order, the first MaxWindowValues of them. v is looked for among
+// those kept, never among every value before it, so that a window of
+// 100,000 series, each with a value of its own, is merged in time linear
+// in them; the ledger keeps a window's values so too.
+func KeepValue(vs []string, v string) []string {
+	i, found := slices.BinarySearch(vs, v)
+	switch {
+	case found || i == MaxWindowValues:
+		return vs
+	case len(vs) == MaxWindowValues:
+		vs = vs[:MaxWindowValues-1] // the last in order makes way
+	}
+	return slices.Insert(vs, i, v)
 }
 
 // FromSignal finds the windows of a named impact signal, as FromImpact
 // finds them: of its series alone, never merged with another signal's,
 // each carrying the signal's name and its match (nil for the match in
 // effect), its id impact-NAME-1, impact-NAME-2 and so on.
-func FromSignal(series []prom.Series, step, minLen time.Duration, name string, match []string) []Incident {
-	out := FromImpact(series, step, minLen)
+func FromSignal(ctx context.Context, series []prom.Series, step, minLen time.Duration, name string, match []string) ([]Incident, error) {
+	out, err := FromImpact(ctx, series, step, minLen)
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
 		out[i].ID = fmt.Sprintf("impact-%s-%d", name, i+1)
 		out[i].Title = "user impact (" + name + ")"
 		out[i].Signal, out[i].Match = name, match
 	}
-	return out
+	return out, nil
 }
 
 // Merge adds candidates that don't overlap an incident already written

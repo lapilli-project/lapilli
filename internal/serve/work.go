@@ -559,7 +559,9 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 		if err != nil {
 			return slow(ctx, fmt.Errorf("--impact: %w", err))
 		}
-		f.Impact = incident.FromImpact(series, s.cfg.Step, c.For)
+		if f.Impact, err = incident.FromImpact(ctx, series, s.cfg.Step, c.For); err != nil {
+			return slow(ctx, fmt.Errorf("--impact: %w", err))
+		}
 	}
 	ctx, cancel := context.WithTimeout(parent, s.cfg.Timeout)
 	defer cancel()

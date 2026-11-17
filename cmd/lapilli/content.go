@@ -78,7 +78,11 @@ func (f *verdictFlags) readImpact(ctx context.Context, h history, incs []inciden
 		s.Samples = slices.DeleteFunc(slices.Clone(s.Samples), func(x prom.Sample) bool { return x.T.Before(f.opts.From) })
 		in = append(in, s)
 	}
-	return incident.Merge(incs, incident.FromImpact(in, f.step, f.impactFor), f.opts.UnknownLen, f.opts.Match), nil
+	ws, err := incident.FromImpact(ctx, in, f.step, f.impactFor)
+	if err != nil {
+		return nil, fmt.Errorf("--impact: %w", err)
+	}
+	return incident.Merge(incs, ws, f.opts.UnknownLen, f.opts.Match), nil
 }
 
 // runContent checks what the rules given say when they fire, and how they

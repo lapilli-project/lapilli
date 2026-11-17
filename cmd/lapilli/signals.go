@@ -456,7 +456,11 @@ func (f *verdictFlags) readSignals(ctx context.Context, h history, incs []incide
 		}
 		seen.Merge(read)
 		x.Seen = seen
-		found = append(found, incident.FromSignal(in, f.step, x.For, x.Name, x.Match)...)
+		ws, err := incident.FromSignal(ctx, in, f.step, x.For, x.Name, x.Match)
+		if err != nil {
+			return nil, fmt.Errorf("--impact %s: %w", s.name, err)
+		}
+		found = append(found, ws...)
 		if x.Start, err = f.recordStart(ctx, h, s.expr, from); err != nil {
 			return nil, fmt.Errorf("--impact %s: looking for where the data it reads begins: %w", s.name, err)
 		}

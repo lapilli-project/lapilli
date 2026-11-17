@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -108,7 +109,11 @@ func TestPiecesEqualWhole(t *testing.T) {
 			// As a read of the signal over [from, to] finds its windows:
 			// from the hour before from.
 			read := func(from, to time.Time) []incident.Incident {
-				return incident.FromSignal(slice(from.Add(-time.Hour), to), time.Minute, c.for_, "errors", nil)
+				ws, err := incident.FromSignal(context.Background(), slice(from.Add(-time.Hour), to), time.Minute, c.for_, "errors", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return ws
 			}
 			seen := seenOfValues([]string{"service"}, "checkout", "cart", "search")
 			setup := func() *Ledger {
@@ -336,5 +341,29 @@ func TestWindowValuesKeptAlike(t *testing.T) {
 	pieces := keptWindowLabels(mergeLabels(first, rest))
 	if !slices.Equal(whole["service"], pieces["service"]) || len(whole["service"]) != 64 {
 		t.Errorf("at once %v\na piece at a time %v", whole["service"], pieces["service"])
+	}
+}
+
+// A window's label of 100,000 values, each first in order as it comes (the
+// most an insertion can move), keeps the first 64 in order, each looked for
+// among those kept: never all of them held, nor written out to be
+// measured. All of them were, each looked for among all before it.
+func TestWindowValuesKeptOfMany(t *testing.T) {
+	const n = 100000
+	vs := make([]string, n)
+	for i := range vs {
+		vs[i] = fmt.Sprintf("path-%06d", n-1-i)
+	}
+	l := incident.Labels{"path": vs, "service": {"checkout"}}
+	var m0, m1 runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&m0)
+	got := keptWindowLabels(l)
+	runtime.ReadMemStats(&m1)
+	if p := got["path"]; len(p) != 64 || p[0] != "path-000000" || p[63] != "path-000063" || !slices.Equal(got["service"], []string{"checkout"}) {
+		t.Errorf("%d values of path, %v", len(p), got["service"])
+	}
+	if a := m1.TotalAlloc - m0.TotalAlloc; a > 256<<10 {
+		t.Errorf("%d KiB allocated for 64 values kept of %d", a>>10, n)
 	}
 }
