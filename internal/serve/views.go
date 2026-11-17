@@ -1925,6 +1925,9 @@ var funcs = template.FuncMap{
 	// shown is a text as a page shows what it can't change: an expression,
 	// a ruler's namespace, with what turns text around as U+FFFD.
 	"shown": rules.Shown,
+	// code is an argument tbdi sets as code, as the page sets the
+	// selector or expression beside it.
+	"code":  func(s string) asCode { return asCode(s) },
 	"who":   func(by string) string { return by }, // likewise
 	"dur":   shownDur,
 	"delay": verdict.Delay,
