@@ -150,7 +150,11 @@ func (s *Server) signalsRead(parent context.Context, from, to time.Time, f *ledg
 			missed[r.Name] = r.Missed
 		}
 	}
-	order := slices.Clone(s.cfg.Signals)
+	// A signal the ledger doesn't keep yet (its row, with its own bit, is
+	// SyncSignals'), or no longer, isn't read: nothing of it would be kept.
+	order := slices.DeleteFunc(slices.Clone(s.cfg.Signals), func(d ledger.SignalDef) bool {
+		return !slices.ContainsFunc(rows, func(r ledger.SignalRow) bool { return r.Name == d.Name })
+	})
 	slices.SortStableFunc(order, func(a, b ledger.SignalDef) int {
 		x, okx := missed[a.Name]
 		y, oky := missed[b.Name]
@@ -296,7 +300,14 @@ func (s *Server) signalsData(ctx context.Context) error {
 func (s *Server) signalsAgain(ctx context.Context, o verdict.Options) (bool, error) {
 	var any bool
 	var failed error
+	rows, err := s.l.SignalRows(ctx)
+	if err != nil {
+		return false, err
+	}
 	for _, d := range s.cfg.Signals {
+		if !slices.ContainsFunc(rows, func(r ledger.SignalRow) bool { return r.Name == d.Name }) {
+			continue // not kept by the ledger: nothing of it would be
+		}
 		c := signalCriterion(d)
 		plan, _, err := s.againPlanOf(ctx, d.Name, c, "")
 		switch {

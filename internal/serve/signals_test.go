@@ -1430,3 +1430,32 @@ func TestSignalDataLooksTakeTurns(t *testing.T) {
 		t.Errorf("the probe's data not found beside the errors' hanging look: %+v", k.Data)
 	}
 }
+
+// Signals the ledger doesn't keep (keeping them failed: here, nine) aren't
+// read, and no run makes their rows, nor gives them a bit another has.
+func TestSignalsNotKeptNotRead(t *testing.T) {
+	ctx := context.Background()
+	h := shopHistory()
+	s := signalServer(t, h, nil)
+	for i := 2; i < 9; i++ {
+		s.cfg.Signals = append(s.cfg.Signals, ledger.SignalDef{Name: fmt.Sprintf("s%d", i), Expr: fmt.Sprintf("m%d > 1", i), For: 5 * time.Minute, Record: true})
+	}
+	h.mu.Lock()
+	h.asked = nil
+	h.mu.Unlock()
+	runDue(s, 1)
+	s.jobs(ctx, true)
+	h.mu.Lock()
+	for _, q := range h.asked {
+		if strings.HasPrefix(q, "m") {
+			t.Errorf("asked %q of a signal the ledger doesn't keep", q)
+		}
+	}
+	h.mu.Unlock()
+	rows, _ := s.l.SignalRows(ctx)
+	for _, r := range rows {
+		if strings.HasPrefix(r.Name, "s") {
+			t.Errorf("a row made for %s, at bit %d", r.Name, r.Bit)
+		}
+	}
+}

@@ -195,3 +195,26 @@ func TestSignalWithNoRowKeepsNothing(t *testing.T) {
 		t.Error("two named signals on one bit")
 	}
 }
+
+// A read again of a named signal the ledger doesn't keep keeps nothing:
+// no row made, no window.
+func TestReadAgainWithNoRowKeepsNothing(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+		t.Fatal(err)
+	}
+	record(t, l, t0, t0.Add(time.Hour), nil)
+	at := t0.Add(10 * time.Minute)
+	err := l.ReadAgain(ctx, ImpactRead{Signal: "ghost", Criterion: "ghost > 1", From: t0, To: t0.Add(time.Hour),
+		Windows: []incident.Incident{{ID: "impact-ghost-x", Signal: "ghost", Start: at, End: at.Add(5 * time.Minute)}}}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ws, err := l.ImpactWindows(ctx, t0.Add(-time.Hour), t0.Add(2*time.Hour)); err != nil || len(ws) != 0 {
+		t.Errorf("windows kept of a signal the ledger doesn't keep: %+v %v", ws, err)
+	}
+	if v, err := sigMeta(ctx, l.r, "ghost", metaImpactSince); err != nil || v != "" {
+		t.Errorf("ghost's since kept: %q %v", v, err)
+	}
+}

@@ -431,6 +431,14 @@ func (l *Ledger) ReadAgain(ctx context.Context, r ImpactRead, o verdict.Options)
 		if cur != strconv.FormatInt(r.To.Unix(), 10) {
 			return ErrRunsMoved
 		}
+		if r.Signal != "" {
+			// A named signal the ledger doesn't keep (SyncSignals makes its
+			// row) keeps nothing, as a run's read of it doesn't.
+			var n int
+			if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM impact_signals WHERE name = ?", r.Signal).Scan(&n); err != nil || n == 0 {
+				return err
+			}
+		}
 		from := r.From.Unix()
 		lo, err := l.impact(t, signalRun{name: r.Signal, match: r.Match, from: r.From, since: r.From, on: true}, r.Windows, true)
 		if err != nil {
