@@ -1,0 +1,24 @@
+{
+ "Card": {
+  "Week": "2026-10-26T00:00:00Z",
+  "Met": 0,
+  "Of": 2,
+  "Unknown": 1,
+  "Missed": [
+   "Goal no-refire of search missed in the week of 2026-10-26: firings that re-fired was 1; the goal is at most 0."
+  ]
+ },
+ "Actions": [
+  {
+   "Text": "Goal no-refire missed last week",
+   "Detail": "Goal no-refire of search missed in the week of 2026-10-26: firings that re-fired was 1; the goal is at most 0.",
+   "Href": "/goals?team=search#goal-no-refire",
+   "Kind": "decide",
+   "Goal": "no-refire",
+   "GoalTeam": "search",
+   "Week": "2026-10-26",
+   "GoalTeamID": 2,
+   "Task": 0
+  }
+ ]
+}

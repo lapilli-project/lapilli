@@ -641,9 +641,10 @@ func TestGoalsDigestAndReports(t *testing.T) {
 }
 
 // goals: in --config is read strictly: what breaks a rule refuses the
-// file, with its line; a goal over a period refused, saying why, until
-// marked windows are kept; a goal of a team there isn't skipped and said;
-// and an export gives them back as the file declares them.
+// file, with its line, a goal over a period of a measure marked windows
+// don't count inside an occurrence among them; a goal of a team there
+// isn't skipped and said; and an export gives them back as the file
+// declares them.
 func TestParseConfigGoals(t *testing.T) {
 	d, err := ParseConfig([]byte("teams:\n  - name: payments\n"+theGoals), time.UTC)
 	if err != nil {
@@ -660,8 +661,9 @@ func TestParseConfigGoals(t *testing.T) {
 		{g + "    measure: precision\n    at_least: 0.8\n    by: 0.05\n", "line 2: by is the slack of no_worse_than"},
 		{g + "    measure: firings\n    critical: [page]\n    at_most: 4\n", "line 2: critical is the severities a critical.* measure counts"},
 		{g + "    measure: firings\n    at_most: 4\n    each: deploy\n", "line 2: each: deploy: deploys are counted by during_deploys"},
-		{g + "    measure: precision\n    no_worse_than: before\n    by: 0.05\n    each: sale\n", "line 2: each: sale is a goal over a kind of marked window, which this lapilli doesn't keep yet"},
-		{g + "    measure: incidents.missed\n    at_most: 0\n    each: sale\n", "doesn't keep yet: each takes week alone for now"},
+		{g + "    measure: refired.share\n    at_most: 0.1\n    each: sale\n", "line 2: refired.share isn't counted inside a marked window"},
+		{g + "    measure: firings\n    no_worse_than: before\n    each: sale\n", "line 2: no_worse_than sets firings beside the weeks before"},
+		{g + "    measure: precision\n    no_worse_than: before\n", "line 2: no_worse_than holds over a period"},
 		{g + "    measure: precision\n    at_least: 80\n", "line 2: at_least of precision is a share, from 0 to 1"},
 		{g + "    measure: precision\n    at_least: true\n", "line 4: at_least is a number"},
 		{g + "    measure: precision\n    at_least: 0.8\n    colour: red\n", `line 5: unknown key "colour" in a goal`},

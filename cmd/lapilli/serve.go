@@ -282,10 +282,12 @@ The web UI and API:
                       A goal (goals:) the file no longer declares is deleted
                       either way
   --goal-tasks        make a task, of kind decide, for each goal --config
-                      declares that a whole week missed, 20 a run at most;
-                      one open for a goal and team is commented on as weeks
-                      are missed again, met, or no longer missed
-                      (docs/design/goals.md). Off unless turned on
+                      declares that a whole week missed, or an occurrence
+                      of a goal over a period (each: KIND), 20 a run at
+                      most; one open for a goal and team is commented on
+                      as weeks (occurrences) are missed again, met, or no
+                      longer missed (docs/design/goals.md). Off unless
+                      turned on
   --team-labels LIST  the labels whose values the Teams page suggests as
                       teams, when the rules carry values no team owns by,
                       comma-separated (default team,owner,squad)

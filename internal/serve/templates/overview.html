@@ -68,7 +68,7 @@
   <h2>{{t "What to look at"}}</h2>
   {{if .Actions}}<ol class="actions">{{range .Actions}}<li><a href="{{$.Link .Href}}"><bdi>{{.Text}}</bdi></a><br><span class="quiet">{{.Detail}}</span>
     {{if .Task}}<br><a class="pill open {{status "task" "open"}}" href="{{$.Link (printf "/tasks/%d" .Task)}}">{{t "task #%d" .Task}}</a>
-    {{else if and .May .Goal}}<form method="post" action="/goals/task" class="track"><input type="hidden" name="goal" value="{{.Goal}}"><input type="hidden" name="team" value="{{.GoalTeam}}"><input type="hidden" name="week" value="{{.Week}}"><input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
+    {{else if and .May .Goal}}<form method="post" action="/goals/task" class="track"><input type="hidden" name="goal" value="{{.Goal}}"><input type="hidden" name="team" value="{{.GoalTeam}}"><input type="hidden" name="week" value="{{.Week}}">{{with .Occurrence}}<input type="hidden" name="occurrence" value="{{.}}">{{end}}<input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
     {{else if .May}}<form method="post" action="/tasks" class="track"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="rule" value="{{.Rule}}"><input type="hidden" name="incident" value="{{.Incident}}"><input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
     {{else if .Kind}}{{template "off" .Off}}{{end}}</li>{{end}}</ol>
   {{else}}{{template "empty" (allClear (emptyOf "done" "Nothing to look at now." "Nothing stands out: no noisy rules, no incident missed."))}}{{end}}
@@ -86,7 +86,9 @@
 
 {{with .Goals}}<section class="card">
   <h2>{{t "Goals"}}</h2>
-  <p>{{if .Of}}<strong class="{{if .Missed}}status-bad{{else if eq .Met .Of}}status-ok{{else}}status-unknown{{end}}">{{t "%d of %d goals met" .Met .Of}}</strong>{{if .Unknown}}, {{t "%d not known" .Unknown}}{{end}} · {{t "the week of %s" (day $loc .Week)}}{{else}}{{t "No goal was worked out for the week of %s." (day $loc .Week)}}{{end}}</p>
+  {{if not .PeriodsOnly}}<p>{{if .Of}}<strong class="{{if .WMissed}}status-bad{{else if eq .Met .Of}}status-ok{{else}}status-unknown{{end}}">{{t "%d of %d goals met" .Met .Of}}</strong>{{if .Unknown}}, {{t "%d not known" .Unknown}}{{end}} · {{t "the week of %s" (day $loc .Week)}}{{else}}{{t "No goal was worked out for the week of %s." (day $loc .Week)}}{{end}}</p>{{end}}{{if .POf}}
+  <p><strong class="{{if .PMissed}}status-bad{{else if eq .PMet .POf}}status-ok{{else}}status-unknown{{end}}">{{t "%d of %d occurrences met" .PMet .POf}}</strong>{{if .PUnknown}}, {{t "%d not known" .PUnknown}}{{end}} · {{t "of the goals over a period, those that ended since %s" (day $loc .Week)}}</p>{{else if .PeriodsOnly}}
+  <p>{{t "No occurrence of a goal over a period ended since %s." (day $loc .Week)}}</p>{{end}}
   {{with .Missed}}<ul class="plain">{{range .}}<li><span class="status-bad"><span aria-hidden="true">✕</span> {{.}}</span></li>{{end}}</ul>{{end}}
   <p><a href="{{$.Link "/goals"}}">{{t "All goals, week by week"}}</a></p>
 </section>{{end}}

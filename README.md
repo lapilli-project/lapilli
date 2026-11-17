@@ -1615,7 +1615,15 @@ results; `/metrics` the last whole week's (`lapilli_goal_met`,
 `lapilli_goal_known`, `lapilli_goal_value`, `lapilli_goal_weeks_met`), for
 a team's own Prometheus to alert on. A goal missed is told
 (`goal.missed`), and becomes a task with one press, or by itself with
-`--goal-tasks`.
+`--goal-tasks`. A goal of `each: sale` is checked for each sale instead
+(a marked window's kind, below), and `no_worse_than: before` sets a
+sale's precision or median lead beside the four weeks before it:
+
+```yaml
+goals:
+  - {name: sale-no-worse, each: sale, measure: precision, no_worse_than: before, by: 0.05}
+  - {name: sale-none-missed, each: sale, measure: incidents.missed, at_most: 0}
+```
 
 Some weeks aren't like the others: a sale, a launch, a campaign. Marked
 windows (docs/design/marked.md) name them, each of a kind a team chooses,

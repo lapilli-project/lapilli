@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Goals over a period, in `lapilli serve`** (docs/design/goals.md, step
+  3). A goal in `--config` takes `each: KIND`, a kind of marked window
+  (`sale`, `launch`), and is checked for each occurrence of it that
+  ended, and for the one on now as it stands, not each week: its value is
+  the measure inside the occurrence, as the Marked windows page counts
+  it. `no_worse_than: before`, with `by` as slack, sets it beside the same
+  measure over the four whole weeks before the occurrence's first week,
+  outside the kind, of `precision` and `incidents.median_lead_seconds`;
+  `at_least` and `at_most` hold inside it alone. Of `firings`,
+  `precision`, `refired.firings`, `incidents.missed`, `impacts.missed`,
+  `incidents.noisy_only` and `incidents.median_lead_seconds`; any other
+  measure with `each: KIND` refuses the file with its line, as before.
+  Not known as a week is, with `no_before` when the weeks before have
+  nothing to divide. `/api/v1/summary` gives each occurrence in the row of
+  the week it ended in, with `each`, `occurrence`, `title`, `from`, `to`
+  and, of `no_worse_than`, `by` and `before` (`schema` stays 1); the
+  Goals page has a table of them, occurrence by occurrence; the
+  overview's card counts those that ended since the last whole week
+  began, and Make it a task makes the task of one missed; the digest,
+  `digest.ready`, a report's `goals` section, `goal.missed` (once for
+  each goal, team and occurrence), `--goal-tasks` and their comments,
+  `/metrics` (the latest occurrence that ended, within its 500 series)
+  and MCP's `summary` and `overview` say them. No schema change. Goals of
+  each week read as they did, byte for byte (`TestGoalsWeeklyUnchanged`).
+
+### Fixed
+
+- **An occurrence's four weeks before leave out the incidents during any
+  occurrence of its kind** (docs/design/marked.md, since 0.53.0). The
+  Marked windows page, a window's page, the overview's tile, and the
+  `marked` section of reports and the digest counted, in the weeks before
+  an occurrence, the incidents during an occurrence of its kind of a
+  window they didn't list: a window's page lists that window alone, and
+  the others the windows meeting their weeks, not the four before. They
+  now read every window meeting the weeks they count. So a window's page,
+  too, now marks with `*` an occurrence counted together with another of
+  its kind on one of its days, as the Marked windows page did.
+
 ## [0.56.0] - 2026-11-18
 
 ### Changed

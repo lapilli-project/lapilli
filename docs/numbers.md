@@ -568,6 +568,14 @@ week's again from `/api/v1/report` over the same week:
 first(.rows[] | select(.team == "")) | .marked | map_values({firings, caught, refired}) | with_entries(select(.value.firings > 0))
 ```
 
+A row's `goals` (docs/design/goals.md) hold, besides each goal of each
+week, a goal over a period once for each occurrence of its kind that
+ended in the week, or is on now in this one: with `each`, `occurrence`,
+`title`, `from` and `to`, and, of `no_worse_than`, `by` and `before`. Its
+`value` is the measure inside the occurrence, as the Marked windows page
+counts it, which `marked` doesn't give apart when two occurrences of a
+kind meet one week.
+
 ```jq
 # marked in a week: counted again
 [.firings[] | select(.marked) | .marked[] as $k | {k: $k, white, refired: (.refired // false)}] | group_by(.k)
@@ -730,8 +738,11 @@ without `team`, a team's with it, as the leader worked them out after its
 last round; `lapilli_goal_met` and `lapilli_goal_value` have no series for
 a week not known (`lapilli_goal_known` 0), and `lapilli_goal_weeks_met`
 counts of the twelve whole weeks before this one, as
-`lapilli_weeks_counted` does. 500 series of each at most, the goals missed
-first. `lapilli_rule_incidents_first` and `lapilli_rule_incidents_alone`
+`lapilli_weeks_counted` does. A goal over a period (`each: KIND`) is of
+its latest occurrence that ended, and `lapilli_goal_weeks_met` counts its
+occurrences met that ended in those twelve weeks, so, of a kind more often
+than weekly, it can be over `lapilli_weeks_counted`. 500 series of each at
+most, the goals missed first, goals over a period among them. `lapilli_rule_incidents_first` and `lapilli_rule_incidents_alone`
 are left out of a report of some of the rules (`--rule`), as what a rule
 adds to the others can't be said there.
 

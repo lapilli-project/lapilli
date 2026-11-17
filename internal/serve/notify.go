@@ -308,6 +308,20 @@ func (s *Server) line(n notice) string {
 		case n.Goal.AtMost != nil:
 			g.AtMost = strconv.FormatFloat(*n.Goal.AtMost, 'f', -1, 64)
 		}
+		if n.Goal.Each != "" {
+			// A goal over a period, missed during an occurrence.
+			g.Each, g.NoWorseThan = n.Goal.Each, n.Goal.NoWorseThan
+			if n.Goal.By != nil {
+				g.By = strconv.FormatFloat(*n.Goal.By, 'f', -1, 64)
+			}
+			from, to := n.Goal.From, n.Goal.To
+			w := summaryGoal{Measure: g.Measure, Each: g.Each, Title: n.Goal.Title, Start: &from, End: &to, Value: n.Goal.Value, Before: n.Goal.Before,
+				NoWorseThan: g.NoWorseThan}
+			if n.Goal.Team == "*" {
+				return "lapilli: " + periodMissedTeamsText(l, g, w, n.Goal.Teams, n.Goal.More, s.cfg.Loc)
+			}
+			return "lapilli: " + periodMissedText(l, g, n.Goal.Team, w, s.cfg.Loc)
+		}
 		if n.Goal.Team == "*" {
 			return "lapilli: " + goalMissedTeamsText(l, g, n.Goal.From, n.Goal.Teams, n.Goal.More, s.cfg.Loc)
 		}

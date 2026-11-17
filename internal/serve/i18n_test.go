@@ -217,9 +217,12 @@ func pagesServer(t *testing.T) *Server {
 	read.At, read.OK, read.Turns, read.From, read.To = now, now, 3, now.Add(-72*time.Hour), now.Add(72*time.Hour)
 	read.Unknown, read.Notes = []string{"pat"}, []string{"an event with no one in it"}
 	s.onCallRead("secondary").Err = "feed.example.com: 503"
-	// Goals: everyone's, payments's own, and each team's.
+	// Goals: everyone's, payments's own, and each team's; and over a
+	// period, everyone's of the sale and each team's of the launch.
 	declare(t, s, "goals:\n  - {name: precise, measure: precision, at_least: 0.5}\n  - {name: paged, team: payments, measure: critical.firings, critical: [critical, page], at_most: 40}\n"+
-		"  - {name: no-refire, team: \"*\", measure: refired.firings, at_most: 0}\n")
+		"  - {name: no-refire, team: \"*\", measure: refired.firings, at_most: 0}\n"+
+		"  - {name: sale-no-worse, each: sale, measure: precision, no_worse_than: before, by: 0.05}\n"+
+		"  - {name: launch-missed, team: \"*\", each: launch, measure: incidents.missed, at_most: 0}\n")
 	s.status.set("replaying %s → %s", "a", "b")
 	s.fail("a run", fmt.Errorf("boom"))
 	return s
