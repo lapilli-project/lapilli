@@ -1,6 +1,7 @@
 package verdict
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -90,6 +91,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		if err := table(w, rows); err != nil {
 			return err
 		}
+		late(w, fired)
 	}
 	if len(r.Unrecorded) > 0 {
 		fmt.Fprintf(w, "\nRules that fired as often as a noisy rule, with no record to judge them by:\n")
@@ -135,8 +137,12 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 	if len(r.Incidents) > 0 {
 		fmt.Fprintln(w)
 		rows := [][]string{{"INCIDENT", "START", "LASTED", "CAUGHT BY"}}
+		var unknownLen time.Duration
+		if r.Settings != nil {
+			unknownLen = r.Settings.UnknownLength
+		}
 		for _, in := range r.Incidents {
-			rows = append(rows, []string{incidentName(in.Incident), in.Start.In(loc).Format(stamp), lasted(in.Incident), caughtBy(in.CaughtBy)})
+			rows = append(rows, []string{incidentName(in.Incident), in.Start.In(loc).Format(stamp), lasted(in.Incident), caughtBy(in, unknownLen)})
 		}
 		if err := table(w, rows); err != nil {
 			return err
@@ -147,6 +153,9 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		}
 		if missed > 0 {
 			fmt.Fprintf(w, "✗ %d of %d incidents had no alert.\n", missed, len(r.Incidents))
+			if n := lateFor(r.Incidents); n > 0 {
+				fmt.Fprintf(w, "  %d of them had one only once they were over (\"after its end\" above).\n", n)
+			}
 			spans(w, r.Incidents, loc)
 		}
 		if s := r.ImpactShort; short {
@@ -160,6 +169,9 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 				"  their condition held longer: their \"for\" and one evaluation, with no \"for\" an evaluation (%s for %d\n"+
 				"  of them). Impact shorter than that they can't be sure to catch. %s%s counts only what they can.\n",
 				flag, Duration(s.For), Duration(s.For), s.Rules, s.Judged, Duration(s.Need), s.Most, flag, Duration(s.Need))
+			if s.Lagged > 0 {
+				fmt.Fprintf(w, "  Of them, %d read metrics that arrive late (--late, query_offset), and need that much longer too.\n", s.Lagged)
+			}
 		}
 		if noisy > 0 {
 			fmt.Fprintf(w, "! %d of %d incidents were caught only by noisy rules, which fire whatever happens\n"+
@@ -585,12 +597,28 @@ func incidentName(in incident.Incident) string {
 }
 
 // caughtBy lists the rules that caught an incident, with how long each took.
-func caughtBy(cs []Catch) string {
-	if len(cs) == 0 {
+// caughtBy is what caught an incident, or, when nothing did, what fired
+// once it was over, by how long after its end: with none written, after
+// unknownLen, as it was judged.
+func caughtBy(in IncidentResult, unknownLen time.Duration) string {
+	if len(in.CaughtBy) == 0 && len(in.FiredAfter) > 0 {
+		// Missed, but not for want of an alert: one came once it was over.
+		end := in.EndOr(unknownLen).Sub(in.Start)
+		var parts []string
+		for i, c := range in.FiredAfter {
+			if i == lateEach {
+				parts = append(parts, fmt.Sprintf("%d more", len(in.FiredAfter)-lateEach))
+				break
+			}
+			parts = append(parts, fmt.Sprintf("%s %s", Clean(c.Rule), Delay(c.Delay-end)))
+		}
+		return "✗ nothing in time; after its end: " + strings.Join(parts, ", ")
+	}
+	if len(in.CaughtBy) == 0 {
 		return "✗ nothing fired"
 	}
 	var parts []string
-	for _, c := range cs {
+	for _, c := range in.CaughtBy {
 		part := fmt.Sprintf("%s %s", Clean(c.Rule), Delay(c.Delay))
 		if c.Noisy {
 			part += " (noisy)"
@@ -598,6 +626,50 @@ func caughtBy(cs []Catch) string {
 		parts = append(parts, part)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// lateEach is how many of the rules that fired after an incident was over
+// the text names, of the incident and of the rules' black firings.
+const lateEach = 3
+
+// lateFor is how many of the incidents nothing caught had an alert once
+// they were over.
+func lateFor(ins []IncidentResult) int {
+	n := 0
+	for _, in := range ins {
+		if in.Missed() && len(in.FiredAfter) > 0 {
+			n++
+		}
+	}
+	return n
+}
+
+// late says how many of the rules' black firings came after an incident
+// was over, their condition having held in it: an alert too late, not
+// one for nothing, though black all the same.
+func late(w io.Writer, rs []RuleResult) {
+	var by []RuleResult
+	n := 0
+	for _, rr := range rs {
+		if rr.Late > 0 {
+			by = append(by, rr)
+			n += rr.Late
+		}
+	}
+	if n == 0 {
+		return
+	}
+	slices.SortStableFunc(by, func(a, b RuleResult) int { return cmp.Or(b.Late-a.Late, strings.Compare(a.Rule, b.Rule)) })
+	var names []string
+	for i, rr := range by {
+		if i == lateEach {
+			names = append(names, fmt.Sprintf("%d more rules", len(by)-lateEach))
+			break
+		}
+		names = append(names, fmt.Sprintf("%s %d", Clean(rr.Rule), rr.Late))
+	}
+	fmt.Fprintf(w, "! %d of the black firings came after an incident they agree with was over (%s): their condition\n"+
+		"  held in it, but their \"for\" and how late their metrics arrive ran past its end. Black all the same.\n", n, strings.Join(names, ", "))
 }
 
 // Clean makes text from rule files, incident files and the API safe for a

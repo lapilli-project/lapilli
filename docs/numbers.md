@@ -580,7 +580,9 @@ and when one does:
 A field, a column (at the end), a metric or a label may be added in a
 minor release, said in the changelog. A patch release changes none of
 them. What isn't listed (`near_misses`, `suggestions`, `unrecorded`,
-`unreplayed`, `hours`, a rule's `unseen` and `for_outlasts`, and the
+`unreplayed`, `hours`, `impact_short`, a rule's `unseen`, `for_outlasts`
+and `late`, an incident's `fired_after`, a firing's `after` and
+`held_from`, and the
 metrics of `lapilli serve` about itself that aren't below) may change in a
 minor release, said in the changelog.
 

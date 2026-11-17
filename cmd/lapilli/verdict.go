@@ -2201,7 +2201,9 @@ func loadRules(f *verdictFlags, path string) ([]rules.Rule, error) {
 // are longer than impactFor: impact that short, counted as an incident,
 // they can't be sure to catch. A rule with no "for" fires on its first
 // evaluation in the impact, so it needs as long as its evaluations are apart.
-// Nil when there are none.
+// A rule whose metrics arrive late (--late, or its query_offset: its Lag)
+// sees the impact that much later, and needs that much longer. Nil when
+// there are none.
 func impactShort(rs []rules.Rule, replayed map[string]bool, impactFor, step time.Duration) *verdict.ImpactShort {
 	need := map[time.Duration]int{}
 	out := verdict.ImpactShort{For: impactFor}
@@ -2212,9 +2214,12 @@ func impactShort(rs []rules.Rule, replayed map[string]bool, impactFor, step time
 		}
 		seen[r.Name] = true
 		out.Judged++
-		if d := max(r.For, 0) + replay.Every(r, step); d > impactFor {
+		if d := max(r.For, 0) + replay.Every(r, step) + r.Lag(); d > impactFor {
 			out.Rules++
 			need[d]++
+			if r.Lag() > 0 {
+				out.Lagged++
+			}
 		}
 	}
 	if out.Rules == 0 {

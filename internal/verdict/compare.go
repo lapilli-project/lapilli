@@ -409,7 +409,7 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 		if len(cs) == 0 && c.ChangedOnly {
 			return "no changed rule fired"
 		}
-		return caughtBy(cs)
+		return caughtBy(IncidentResult{CaughtBy: cs}, 0)
 	}
 	var b strings.Builder
 	b.WriteString(pad("INCIDENT") + "START\n")
