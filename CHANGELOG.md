@@ -65,9 +65,9 @@ you upgrade".
   page. Paths, and where a link among them leads, are now said only to
   admins, a path taken out only where a text says it whole; others read
   "the deploys file" and the like. So are why a run failed (`/runs`, the
-  overview), which could name a webhook's file, and why the ledger's
-  database can't be reached, which could name its server, user and
-  database. The `--config` file's path in `/api/v1/settings` is an
+  overview, a tool's error to an agent), which could name a webhook's
+  file, and why the ledger's database can't be reached, which could name
+  its server, user and database, wherever it is said. The `--config` file's path in `/api/v1/settings` is an
   admin's too.
 - **An expectations file could take gigabytes** (affected: from 0.47.0).
   `--expect` held at most 2,000 entries, but an entry any number of
@@ -89,15 +89,17 @@ you upgrade".
   IPv6 address written without brackets, as TLS and Postgres errors write
   it, one in brackets with its zone, as Go writes it (`[fe80::1%en0]`),
   and `--gcp-project` inside a service account's email. The project is
-  taken out of Google's own names only, never another domain's.
+  taken out of Google's own names only (a service account's, a workload
+  identity pool's, an App Engine or Firebase app's), never another
+  domain's.
 - **The "read-only" ledger probe could write a file** (affected: 0.53.0 to
   0.56.0). With a SQLite ledger's log left without its index (a serve that
   stopped hard, a copied volume), the probe made a 32 KiB `-shm` beside
   it, which, made by another user, could leave serve unable to open the
-  ledger; and with a ledger cut short (under a page) and a log beside it,
-  SQLite deleted the log. It now writes nothing in any state, reads the
-  log, opens no ledger cut short, and reads a linked ledger where the link
-  leads.
+  ledger; and with an empty ledger file and a log beside it, SQLite
+  deleted the log. It now writes nothing in any state, reads the log,
+  opens no ledger shorter than a page with a log beside it, and reads a
+  linked ledger where the link leads.
 - **The backtest recipe let GitHub's older `##[` commands into the job's
   log** (affected: from 0.32.0). GitHub's runner reads `##[error]`,
   `##[add-matcher]` and the like anywhere in a line, as Azure reads
@@ -115,7 +117,8 @@ you upgrade".
 - **Hardening.** Serve looks for where an impact signal's data begins only
   with the selectors of the expression it runs, never a selector kept
   beside a window in the ledger, and SECURITY.md says that whoever can write the ledger can make
-  serve query the history and the rule sources with its tokens. A
+  serve query the history and the rule sources with its tokens, carry out
+  a change it holds as approved, and send the notices it holds. A
   CloudWatch alarm whose name isn't its ARN's is neither read nor
   written: the name a change is checked by is the one it acts on. Every
   `curl` the recipes and the chart's scripts run reads
