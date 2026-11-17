@@ -1,0 +1,2 @@
+Goals: 3 of 3 met, 0 missed, 0 not known.
+[{"name":"every-missed","measure":"incidents.missed","at_most":0,"value":0,"result":"met"},{"name":"no-refire","measure":"refired.firings","at_most":0,"value":0,"result":"met"},{"name":"paged","measure":"critical.firings","critical":["critical","page"],"at_most":40,"value":2,"result":"met"}]

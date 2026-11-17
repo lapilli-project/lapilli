@@ -1,0 +1,28 @@
+#1 open decide team 2 goal no-refire by lapilli
+Goal no-refire of search missed, week of 2026-10-26
+Goal no-refire missed in the week of 2026-10-26: firings that re-fired was 1; the goal is at most 0.
+
+Tune the rules, write the incidents down, or change the goal in values. The goal: /goals?team=search#goal-no-refire
+  said: Met, week of 2026-11-02: 0.
+  kept: true {"week":20752,"said":{"20752":"missed","20759":"met"}}
+#2 open decide team 0 goal none-missed by lapilli
+Goal none-missed missed, week of 2026-10-26
+Goal none-missed missed in the week of 2026-10-26: incidents missed was 1; the goal is at most 0.
+
+Tune the rules, write the incidents down, or change the goal in values. The goal: /goals#goal-none-missed
+  said: Missed again, week of 2026-11-02: 1.
+  said: No longer missed, week of 2026-10-26: 0.
+  kept: true {"week":20752,"said":{"20752":"no_longer","20759":"missed"}}
+#3 open decide team 0 goal critical-caught by lapilli
+Goal critical-caught missed, week of 2026-11-02
+Goal critical-caught missed in the week of 2026-11-02: critical firings that caught something was 0%; the goal is at least 80%.
+
+Tune the rules, write the incidents down, or change the goal in values. The goal: /goals#goal-critical-caught
+  kept: true {"week":20759,"said":{"20759":"missed"}}
+#4 open decide team 1 goal paged by lapilli
+Goal paged of payments missed, week of 2026-11-02
+Goal paged missed in the week of 2026-11-02: critical firings was 41; the goal is at most 40.
+
+Tune the rules, write the incidents down, or change the goal in values. The goal: /goals?team=payments#goal-paged
+  kept: true {"week":20759,"said":{"20759":"missed"}}
+marks: [{"critical-caught.0":20759,"no-refire.2":20752,"none-missed.0":20759,"paged.1":20759},{"critical-caught.0":20759,"no-refire.2":20752,"none-missed.0":20759,"paged.1":20759}]

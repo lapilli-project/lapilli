@@ -1,0 +1,2 @@
+Goals: 1 of 2 met, 1 missed, 0 not known. Goal none-missed missed in the week of 2026-10-26: incidents missed was 1; the goal is at most 0.
+[{"name":"critical-caught","measure":"critical.share_caught","at_least":0.8,"value":1,"result":"met"},{"name":"none-missed","measure":"incidents.missed","at_most":0,"value":1,"result":"missed"}]

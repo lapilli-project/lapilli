@@ -1,0 +1,2 @@
+Goals: 0 of 2 met, 1 missed, 1 not known. Goal no-refire missed in the week of 2026-10-26: firings that re-fired was 1; the goal is at most 0.
+[{"name":"every-missed","measure":"incidents.missed","at_most":0,"value":null,"result":"unknown","why":"team_owns_by_catching"},{"name":"no-refire","measure":"refired.firings","at_most":0,"value":1,"result":"missed"}]

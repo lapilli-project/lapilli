@@ -1,0 +1,1124 @@
+{
+  "schema": 1,
+  "from": "2026-10-05T00:00:00Z",
+  "to": "2026-11-09T00:00:00Z",
+  "zone": "UTC",
+  "settings": {
+    "lead": "15m",
+    "refire": "1h",
+    "deploy_before": "0s",
+    "deploy_after": "0s",
+    "match": [
+      "service"
+    ],
+    "noisy_at": {
+      "firings": 10,
+      "precision": 0.2
+    },
+    "critical": [
+      "critical"
+    ],
+    "hours": false,
+    "deploys": false
+  },
+  "ledger_to": "2026-11-03T11:00:00Z",
+  "rows": [
+    {
+      "from": "2026-10-05T00:00:00Z",
+      "to": "2026-10-12T00:00:00Z",
+      "partial": false,
+      "team": "",
+      "firings": 1,
+      "caught": 0,
+      "precision": null,
+      "no_record": true,
+      "unjudged": 1,
+      "excused": 0,
+      "critical": {
+        "firings": 1,
+        "caught": 0,
+        "share_caught": null
+      },
+      "by_severity": {
+        "critical": {
+          "firings": 1,
+          "caught": 0,
+          "share_caught": null
+        }
+      },
+      "refired": {
+        "firings": 0,
+        "share": 0,
+        "rules": 0,
+        "worst": null
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": null
+      },
+      "incidents": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null,
+        "by_signal": {}
+      },
+      "goals": [
+        {
+          "name": "critical-caught",
+          "measure": "critical.share_caught",
+          "at_least": 0.8,
+          "value": null,
+          "result": "unknown",
+          "why": "not_whole"
+        },
+        {
+          "name": "none-missed",
+          "measure": "incidents.missed",
+          "at_most": 0,
+          "value": null,
+          "result": "unknown",
+          "why": "not_whole"
+        }
+      ],
+      "marked": {}
+    },
+    {
+      "from": "2026-10-05T00:00:00Z",
+      "to": "2026-10-12T00:00:00Z",
+      "partial": false,
+      "team": "payments",
+      "firings": 1,
+      "caught": 0,
+      "precision": null,
+      "no_record": true,
+      "unjudged": 1,
+      "excused": 0,
+      "critical": {
+        "firings": 1,
+        "caught": 0,
+        "share_caught": null
+      },
+      "by_severity": {
+        "critical": {
+          "firings": 1,
+          "caught": 0,
+          "share_caught": null
+        }
+      },
+      "refired": {
+        "firings": 0,
+        "share": 0,
+        "rules": 0,
+        "worst": null
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": null
+      },
+      "incidents": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null,
+        "by_signal": {}
+      },
+      "goals": [
+        {
+          "name": "every-missed",
+          "measure": "incidents.missed",
+          "at_most": 0,
+          "value": null,
+          "result": "unknown",
+          "why": "not_whole"
+        },
+        {
+          "name": "no-refire",
+          "measure": "refired.firings",
+          "at_most": 0,
+          "value": null,
+          "result": "unknown",
+          "why": "not_whole"
+        },
+        {
+          "name": "paged",
+          "measure": "critical.firings",
+          "critical": [
+            "critical",
+            "page"
+          ],
+          "at_most": 40,
+          "value": null,
+          "result": "unknown",
+          "why": "not_whole"
+        }
+      ],
+      "marked": {}
+    },
+    {
+      "from": "2026-10-05T00:00:00Z",
+      "to": "2026-10-12T00:00:00Z",
+      "partial": false,
+      "team": "search",
+      "firings": 0,
+      "caught": 0,
+      "precision": null,
+      "no_record": true,
+      "unjudged": 0,
+      "excused": 0,
+      "critical": {
+        "firings": 0,
+        "caught": 0,
+        "share_caught": null
+      },
+      "by_severity": {},
+      "refired": {
+        "firings": 0,
+        "share": null,
+        "rules": 0,
+        "worst": null
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": null
+      },
+      "incidents": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null,
+        "by_signal": {}
+      },
+      "goals": [
+        {
+          "name": "every-missed",
+          "measure": "incidents.missed",
+          "at_most": 0,
+          "value": null,
+          "result": "unknown",
+          "why": "not_whole"
+        },
+        {
+          "name": "no-refire",
+          "measure": "refired.firings",
+          "at_most": 0,
+          "value": null,
+          "result": "unknown",
+          "why": "not_whole"
+        }
+      ],
+      "marked": {}
+    },
+    {
+      "from": "2026-10-12T00:00:00Z",
+      "to": "2026-10-19T00:00:00Z",
+      "partial": false,
+      "team": "",
+      "firings": 2,
+      "caught": 0,
+      "precision": null,
+      "no_record": true,
+      "unjudged": 2,
+      "excused": 0,
+      "critical": {
+        "firings": 2,
+        "caught": 0,
+        "share_caught": null
+      },
+      "by_severity": {
+        "critical": {
+          "firings": 2,
+          "caught": 0,
+          "share_caught": null
+        }
+      },
+      "refired": {
+        "firings": 0,
+        "share": 0,
+        "rules": 0,
+        "worst": null
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": null
+      },
+      "incidents": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null,
+        "by_signal": {}
+      },
+      "goals": [
+        {
+          "name": "critical-caught",
+          "measure": "critical.share_caught",
+          "at_least": 0.8,
+          "value": null,
+          "result": "unknown",
+          "why": "no_record"
+        },
+        {
+          "name": "none-missed",
+          "measure": "incidents.missed",
+          "at_most": 0,
+          "value": null,
+          "result": "unknown",
+          "why": "no_record"
+        }
+      ],
+      "marked": {}
+    },
+    {
+      "from": "2026-10-12T00:00:00Z",
+      "to": "2026-10-19T00:00:00Z",
+      "partial": false,
+      "team": "payments",
+      "firings": 2,
+      "caught": 0,
+      "precision": null,
+      "no_record": true,
+      "unjudged": 2,
+      "excused": 0,
+      "critical": {
+        "firings": 2,
+        "caught": 0,
+        "share_caught": null
+      },
+      "by_severity": {
+        "critical": {
+          "firings": 2,
+          "caught": 0,
+          "share_caught": null
+        }
+      },
+      "refired": {
+        "firings": 0,
+        "share": 0,
+        "rules": 0,
+        "worst": null
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": null
+      },
+      "incidents": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null,
+        "by_signal": {}
+      },
+      "goals": [
+        {
+          "name": "every-missed",
+          "measure": "incidents.missed",
+          "at_most": 0,
+          "value": null,
+          "result": "unknown",
+          "why": "no_record"
+        },
+        {
+          "name": "no-refire",
+          "measure": "refired.firings",
+          "at_most": 0,
+          "value": 0,
+          "result": "met"
+        },
+        {
+          "name": "paged",
+          "measure": "critical.firings",
+          "critical": [
+            "critical",
+            "page"
+          ],
+          "at_most": 40,
+          "value": 2,
+          "result": "met"
+        }
+      ],
+      "marked": {}
+    },
+    {
+      "from": "2026-10-12T00:00:00Z",
+      "to": "2026-10-19T00:00:00Z",
+      "partial": false,
+      "team": "search",
+      "firings": 0,
+      "caught": 0,
+      "precision": null,
+      "no_record": true,
+      "unjudged": 0,
+      "excused": 0,
+      "critical": {
+        "firings": 0,
+        "caught": 0,
+        "share_caught": null
+      },
+      "by_severity": {},
+      "refired": {
+        "firings": 0,
+        "share": null,
+        "rules": 0,
+        "worst": null
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": null
+      },
+      "incidents": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null,
+        "by_signal": {}
+      },
+      "goals": [
+        {
+          "name": "every-missed",
+          "measure": "incidents.missed",
+          "at_most": 0,
+          "value": null,
+          "result": "unknown",
+          "why": "team_owns_by_catching"
+        },
+        {
+          "name": "no-refire",
+          "measure": "refired.firings",
+          "at_most": 0,
+          "value": 0,
+          "result": "met"
+        }
+      ],
+      "marked": {}
+    },
+    {
+      "from": "2026-10-19T00:00:00Z",
+      "to": "2026-10-26T00:00:00Z",
+      "partial": false,
+      "team": "",
+      "firings": 5,
+      "caught": 1,
+      "precision": 0.2,
+      "no_record": false,
+      "unjudged": 0,
+      "excused": 0,
+      "critical": {
+        "firings": 5,
+        "caught": 1,
+        "share_caught": 0.2
+      },
+      "by_severity": {
+        "critical": {
+          "firings": 5,
+          "caught": 1,
+          "share_caught": 0.2
+        }
+      },
+      "refired": {
+        "firings": 0,
+        "share": 0,
+        "rules": 0,
+        "worst": null
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": 0.2
+      },
+      "incidents": {
+        "total": 1,
+        "caught": 1,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": 0
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null,
+        "by_signal": {}
+      },
+      "goals": [
+        {
+          "name": "critical-caught",
+          "measure": "critical.share_caught",
+          "at_least": 0.8,
+          "value": 0.2,
+          "result": "missed"
+        },
+        {
+          "name": "none-missed",
+          "measure": "incidents.missed",
+          "at_most": 0,
+          "value": 0,
+          "result": "met"
+        }
+      ],
+      "marked": {}
+    },
+    {
+      "from": "2026-10-19T00:00:00Z",
+      "to": "2026-10-26T00:00:00Z",
+      "partial": false,
+      "team": "payments",
+      "firings": 5,
+      "caught": 1,
+      "precision": 0.2,
+      "no_record": false,
+      "unjudged": 0,
+      "excused": 0,
+      "critical": {
+        "firings": 5,
+        "caught": 1,
+        "share_caught": 0.2
+      },
+      "by_severity": {
+        "critical": {
+          "firings": 5,
+          "caught": 1,
+          "share_caught": 0.2
+        }
+      },
+      "refired": {
+        "firings": 0,
+        "share": 0,
+        "rules": 0,
+        "worst": null
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": 0.2
+      },
+      "incidents": {
+        "total": 1,
+        "caught": 1,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": 0
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null,
+        "by_signal": {}
+      },
+      "goals": [
+        {
+          "name": "every-missed",
+          "measure": "incidents.missed",
+          "at_most": 0,
+          "value": 0,
+          "result": "met"
+        },
+        {
+          "name": "no-refire",
+          "measure": "refired.firings",
+          "at_most": 0,
+          "value": 0,
+          "result": "met"
+        },
+        {
+          "name": "paged",
+          "measure": "critical.firings",
+          "critical": [
+            "critical",
+            "page"
+          ],
+          "at_most": 40,
+          "value": 5,
+          "result": "met"
+        }
+      ],
+      "marked": {}
+    },
+    {
+      "from": "2026-10-19T00:00:00Z",
+      "to": "2026-10-26T00:00:00Z",
+      "partial": false,
+      "team": "search",
+      "firings": 0,
+      "caught": 0,
+      "precision": null,
+      "no_record": false,
+      "unjudged": 0,
+      "excused": 0,
+      "critical": {
+        "firings": 0,
+        "caught": 0,
+        "share_caught": null
+      },
+      "by_severity": {},
+      "refired": {
+        "firings": 0,
+        "share": null,
+        "rules": 0,
+        "worst": null
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": null
+      },
+      "incidents": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null,
+        "by_signal": {}
+      },
+      "goals": [
+        {
+          "name": "every-missed",
+          "measure": "incidents.missed",
+          "at_most": 0,
+          "value": null,
+          "result": "unknown",
+          "why": "team_owns_by_catching"
+        },
+        {
+          "name": "no-refire",
+          "measure": "refired.firings",
+          "at_most": 0,
+          "value": 0,
+          "result": "met"
+        }
+      ],
+      "marked": {}
+    },
+    {
+      "from": "2026-10-26T00:00:00Z",
+      "to": "2026-11-02T00:00:00Z",
+      "partial": false,
+      "team": "",
+      "firings": 4,
+      "caught": 2,
+      "precision": 0.5,
+      "no_record": false,
+      "unjudged": 0,
+      "excused": 0,
+      "critical": {
+        "firings": 2,
+        "caught": 2,
+        "share_caught": 1
+      },
+      "by_severity": {
+        "critical": {
+          "firings": 2,
+          "caught": 2,
+          "share_caught": 1
+        },
+        "warning": {
+          "firings": 2,
+          "caught": 0,
+          "share_caught": 0
+        }
+      },
+      "refired": {
+        "firings": 1,
+        "share": 0.25,
+        "rules": 1,
+        "worst": {
+          "rule": "Noise",
+          "labels": {
+            "service": "search"
+          },
+          "refired": 1
+        }
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": 0.5
+      },
+      "incidents": {
+        "total": 2,
+        "caught": 1,
+        "noisy_only": 0,
+        "missed": 1,
+        "median_lead_seconds": 0
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null,
+        "by_signal": {}
+      },
+      "goals": [
+        {
+          "name": "critical-caught",
+          "measure": "critical.share_caught",
+          "at_least": 0.8,
+          "value": 1,
+          "result": "met"
+        },
+        {
+          "name": "none-missed",
+          "measure": "incidents.missed",
+          "at_most": 0,
+          "value": 1,
+          "result": "missed"
+        }
+      ],
+      "marked": {}
+    },
+    {
+      "from": "2026-10-26T00:00:00Z",
+      "to": "2026-11-02T00:00:00Z",
+      "partial": false,
+      "team": "payments",
+      "firings": 2,
+      "caught": 2,
+      "precision": 1,
+      "no_record": false,
+      "unjudged": 0,
+      "excused": 0,
+      "critical": {
+        "firings": 2,
+        "caught": 2,
+        "share_caught": 1
+      },
+      "by_severity": {
+        "critical": {
+          "firings": 2,
+          "caught": 2,
+          "share_caught": 1
+        }
+      },
+      "refired": {
+        "firings": 0,
+        "share": 0,
+        "rules": 0,
+        "worst": null
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": 1
+      },
+      "incidents": {
+        "total": 1,
+        "caught": 1,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": 0
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null,
+        "by_signal": {}
+      },
+      "goals": [
+        {
+          "name": "every-missed",
+          "measure": "incidents.missed",
+          "at_most": 0,
+          "value": 0,
+          "result": "met"
+        },
+        {
+          "name": "no-refire",
+          "measure": "refired.firings",
+          "at_most": 0,
+          "value": 0,
+          "result": "met"
+        },
+        {
+          "name": "paged",
+          "measure": "critical.firings",
+          "critical": [
+            "critical",
+            "page"
+          ],
+          "at_most": 40,
+          "value": 2,
+          "result": "met"
+        }
+      ],
+      "marked": {}
+    },
+    {
+      "from": "2026-10-26T00:00:00Z",
+      "to": "2026-11-02T00:00:00Z",
+      "partial": false,
+      "team": "search",
+      "firings": 2,
+      "caught": 0,
+      "precision": 0,
+      "no_record": false,
+      "unjudged": 0,
+      "excused": 0,
+      "critical": {
+        "firings": 0,
+        "caught": 0,
+        "share_caught": null
+      },
+      "by_severity": {
+        "warning": {
+          "firings": 2,
+          "caught": 0,
+          "share_caught": 0
+        }
+      },
+      "refired": {
+        "firings": 1,
+        "share": 0.5,
+        "rules": 1,
+        "worst": {
+          "rule": "Noise",
+          "labels": {
+            "service": "search"
+          },
+          "refired": 1
+        }
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": 0
+      },
+      "incidents": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null,
+        "by_signal": {}
+      },
+      "goals": [
+        {
+          "name": "every-missed",
+          "measure": "incidents.missed",
+          "at_most": 0,
+          "value": null,
+          "result": "unknown",
+          "why": "team_owns_by_catching"
+        },
+        {
+          "name": "no-refire",
+          "measure": "refired.firings",
+          "at_most": 0,
+          "value": 1,
+          "result": "missed"
+        }
+      ],
+      "marked": {}
+    },
+    {
+      "from": "2026-11-02T00:00:00Z",
+      "to": "2026-11-09T00:00:00Z",
+      "partial": true,
+      "team": "",
+      "firings": 41,
+      "caught": 0,
+      "precision": 0,
+      "no_record": false,
+      "unjudged": 0,
+      "excused": 0,
+      "critical": {
+        "firings": 41,
+        "caught": 0,
+        "share_caught": 0
+      },
+      "by_severity": {
+        "critical": {
+          "firings": 41,
+          "caught": 0,
+          "share_caught": 0
+        }
+      },
+      "refired": {
+        "firings": 0,
+        "share": 0,
+        "rules": 0,
+        "worst": null
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": 0
+      },
+      "incidents": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null,
+        "by_signal": {}
+      },
+      "goals": [
+        {
+          "name": "critical-caught",
+          "measure": "critical.share_caught",
+          "at_least": 0.8,
+          "value": 0,
+          "result": "open"
+        },
+        {
+          "name": "none-missed",
+          "measure": "incidents.missed",
+          "at_most": 0,
+          "value": 0,
+          "result": "open"
+        }
+      ],
+      "marked": {}
+    },
+    {
+      "from": "2026-11-02T00:00:00Z",
+      "to": "2026-11-09T00:00:00Z",
+      "partial": true,
+      "team": "payments",
+      "firings": 41,
+      "caught": 0,
+      "precision": 0,
+      "no_record": false,
+      "unjudged": 0,
+      "excused": 0,
+      "critical": {
+        "firings": 41,
+        "caught": 0,
+        "share_caught": 0
+      },
+      "by_severity": {
+        "critical": {
+          "firings": 41,
+          "caught": 0,
+          "share_caught": 0
+        }
+      },
+      "refired": {
+        "firings": 0,
+        "share": 0,
+        "rules": 0,
+        "worst": null
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": 0
+      },
+      "incidents": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null,
+        "by_signal": {}
+      },
+      "goals": [
+        {
+          "name": "every-missed",
+          "measure": "incidents.missed",
+          "at_most": 0,
+          "value": 0,
+          "result": "open"
+        },
+        {
+          "name": "no-refire",
+          "measure": "refired.firings",
+          "at_most": 0,
+          "value": 0,
+          "result": "open"
+        },
+        {
+          "name": "paged",
+          "measure": "critical.firings",
+          "critical": [
+            "critical",
+            "page"
+          ],
+          "at_most": 40,
+          "value": 41,
+          "result": "open",
+          "over": true
+        }
+      ],
+      "marked": {}
+    },
+    {
+      "from": "2026-11-02T00:00:00Z",
+      "to": "2026-11-09T00:00:00Z",
+      "partial": true,
+      "team": "search",
+      "firings": 0,
+      "caught": 0,
+      "precision": null,
+      "no_record": false,
+      "unjudged": 0,
+      "excused": 0,
+      "critical": {
+        "firings": 0,
+        "caught": 0,
+        "share_caught": null
+      },
+      "by_severity": {},
+      "refired": {
+        "firings": 0,
+        "share": null,
+        "rules": 0,
+        "worst": null
+      },
+      "off_hours": null,
+      "asleep": null,
+      "during_deploys": {
+        "firings": 0,
+        "caught": 0,
+        "precision_without": null
+      },
+      "incidents": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null
+      },
+      "impacts": {
+        "total": 0,
+        "caught": 0,
+        "noisy_only": 0,
+        "missed": 0,
+        "median_lead_seconds": null,
+        "by_signal": {}
+      },
+      "goals": [
+        {
+          "name": "every-missed",
+          "measure": "incidents.missed",
+          "at_most": 0,
+          "value": 0,
+          "result": "open"
+        },
+        {
+          "name": "no-refire",
+          "measure": "refired.firings",
+          "at_most": 0,
+          "value": 0,
+          "result": "open"
+        }
+      ],
+      "marked": {}
+    }
+  ]
+}

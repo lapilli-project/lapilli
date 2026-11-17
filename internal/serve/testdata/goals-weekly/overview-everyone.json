@@ -1,0 +1,24 @@
+{
+ "Card": {
+  "Week": "2026-10-26T00:00:00Z",
+  "Met": 1,
+  "Of": 2,
+  "Unknown": 0,
+  "Missed": [
+   "Goal none-missed missed in the week of 2026-10-26: incidents missed was 1; the goal is at most 0."
+  ]
+ },
+ "Actions": [
+  {
+   "Text": "Goal none-missed missed last week",
+   "Detail": "Goal none-missed missed in the week of 2026-10-26: incidents missed was 1; the goal is at most 0.",
+   "Href": "/goals#goal-none-missed",
+   "Kind": "decide",
+   "Goal": "none-missed",
+   "GoalTeam": "",
+   "Week": "2026-10-26",
+   "GoalTeamID": 0,
+   "Task": 0
+  }
+ ]
+}

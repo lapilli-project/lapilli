@@ -1,0 +1,14 @@
+{"event":"goal.missed","goal":{"at_most":0,"from":"2026-10-26T00:00:00Z","measure":"refired.firings","name":"no-refire","team":"*","teams":[{"team":"search","value":1}],"to":"2026-11-02T00:00:00Z","value":null}}
+lapilli: Goal no-refire missed in the week of 2026-10-26 by 1 teams: search (1); the goal is at most 0.
+
+{"event":"goal.missed","goal":{"at_most":0,"from":"2026-10-26T00:00:00Z","measure":"incidents.missed","name":"none-missed","to":"2026-11-02T00:00:00Z","value":1}}
+lapilli: Goal none-missed missed in the week of 2026-10-26: incidents missed was 1; the goal is at most 0.
+
+{"event":"goal.missed","goal":{"at_least":0.8,"from":"2026-11-02T00:00:00Z","measure":"critical.share_caught","name":"critical-caught","to":"2026-11-09T00:00:00Z","value":0}}
+lapilli: Goal critical-caught missed in the week of 2026-11-02: critical firings that caught something was 0%; the goal is at least 80%.
+
+{"event":"goal.missed","goal":{"at_most":0,"from":"2026-11-02T00:00:00Z","measure":"incidents.missed","name":"none-missed","to":"2026-11-09T00:00:00Z","value":1}}
+lapilli: Goal none-missed missed in the week of 2026-11-02: incidents missed was 1; the goal is at most 0.
+
+{"event":"goal.missed","goal":{"at_most":40,"critical":["critical","page"],"from":"2026-11-02T00:00:00Z","measure":"critical.firings","name":"paged","team":"payments","to":"2026-11-09T00:00:00Z","value":41}}
+lapilli: Goal paged of payments missed in the week of 2026-11-02: critical firings was 41; the goal is at most 40.
