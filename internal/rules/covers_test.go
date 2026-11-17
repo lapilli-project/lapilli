@@ -34,23 +34,38 @@ func TestCovers(t *testing.T) {
 }
 
 // A selector that only narrows another stands in by that one's series with
-// the labels it narrows them by; not one an absent() reads.
+// the labels it narrows them by; not one an absent() reads, at any depth.
 func TestStandIns(t *testing.T) {
+	five := `http_requests_total{code=~"5.."}`
 	for _, c := range []struct {
 		expr string
 		want []StandIn
 	}{
 		{`sum(rate(http_requests_total{code=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05`,
-			[]StandIn{{`http_requests_total{code!=""}`, `http_requests_total{code=~"5.."}`}}},
+			[]StandIn{{`http_requests_total{code!=""}`, five, `http_requests_total`}}},
 		{`sum(rate(x{service="api",code=~"5.."}[5m])) / sum(rate(x{service="api"}[5m]))`,
-			[]StandIn{{`x{service="api",code!=""}`, `x{service="api",code=~"5.."}`}}},
-		{`x{code!="200"} / x`, []StandIn{{`x`, `x{code!="200"}`}}},
-		{`x{code=~".*"} / x`, []StandIn{{`x`, `x{code=~".*"}`}}},
-		{`x{code!~"5.."} offset 1w / x offset 1w`, []StandIn{{`x offset 1w`, `x{code!~"5.."} offset 1w`}}},
+			[]StandIn{{`x{service="api",code!=""}`, `x{service="api",code=~"5.."}`, `x{service="api"}`}}},
+		{`x{code!="200"} / x`, []StandIn{{`x`, `x{code!="200"}`, `x`}}},
+		{`x{code=~".*"} / x`, []StandIn{{`x`, `x{code=~".*"}`, `x`}}},
+		{`x{code!~"5.."} offset 1w / x offset 1w`, []StandIn{{`x offset 1w`, `x{code!~"5.."} offset 1w`, `x offset 1w`}}},
 		{`absent(up{job="new"}) and on() up`, nil},
 		{`absent_over_time(up{job="new"}[5m]) or up{job="new"} == 0 and on() count(up) > 0`, nil},
+		{`absent(rate(x{code="200"}[5m])) and on() x`, nil},
+		{`absent((x{code="200"})) and on() x`, nil},
+		{`absent(x{l="a)"}) or x{code="5"} / x`, []StandIn{{`x{code!=""}`, `x{code="5"}`, `x`}}},
 		{`probe_success{job=~"fan-.+"} == 0`, nil},
-		{`{__name__="x",code="500"} / x`, []StandIn{{`x{code!=""}`, `{__name__="x",code="500"}`}}},
+		{`{__name__="x",code="500"} / x`, []StandIn{{`x{code!=""}`, `{__name__="x",code="500"}`, `x`}}},
+		// Narrowed by its metric's name: that name, as it is.
+		{`http_errors_total{job="api"} / {job="api"}`, []StandIn{{`http_errors_total{job="api"}`, `http_errors_total{job="api"}`, `{job="api"}`}}},
+		// A route's and everyone's: one stand-in of each wider selector.
+		{`sum(rate(x{code=~"5..",route="/pay"}[5m])) / sum(rate(x{route="/pay"}[5m])) > 0.1 or sum(rate(x{code=~"5.."}[5m])) / sum(rate(x[5m])) > 0.05`,
+			[]StandIn{
+				{`x{route="/pay",code!=""}`, `x{code=~"5..",route="/pay"}`, `x{route="/pay"}`},
+				{`x{code=~"5..",route!=""}`, `x{code=~"5..",route="/pay"}`, `x{code=~"5.."}`},
+				{`x{code!="",route!=""}`, `x{code=~"5..",route="/pay"}`, `x`},
+				{`x{route!=""}`, `x{route="/pay"}`, `x`},
+				{`x{code!=""}`, `x{code=~"5.."}`, `x`},
+			}},
 	} {
 		got, err := StandIns(c.expr)
 		if err != nil {

@@ -102,10 +102,12 @@ type ImpactData struct {
 // SelectorData is a selector, as written in the expression with its
 // offset or @, and when its first sample was found: zero for none yet;
 // AtStart, where the look began, so it may have had data before. With For,
-// it is a stand-in, read for that selector's sake (rules.StandIns).
+// it is a stand-in, read for that selector's sake, made of Of
+// (rules.StandIns).
 type SelectorData struct {
 	Sel     string    `json:"sel"`
 	For     string    `json:"for,omitempty"`
+	Of      string    `json:"of,omitempty"`
 	First   time.Time `json:"first,omitzero"`
 	AtStart bool      `json:"at_start,omitempty"`
 	// To is how far it was looked for, zero before it was: a look that
@@ -130,7 +132,7 @@ func SelectorsOf(expr string) ([]SelectorData, error) {
 		out = append(out, SelectorData{Sel: sel})
 	}
 	for _, x := range stands {
-		out = append(out, SelectorData{Sel: x.Sel, For: x.For})
+		out = append(out, SelectorData{Sel: x.Sel, For: x.For, Of: x.Of})
 	}
 	return out, nil
 }
@@ -200,14 +202,19 @@ func FloorBy(d *ImpactData, onOrAfter func(time.Time) time.Time) {
 }
 
 // Effective are d's selectors as they keep the record, its stand-ins left
-// out: each with stand-ins (SelectorData.For) that all had data, from the
-// latest of them, when that is before its own; had nothing it matches
-// happened yet, where its data would have begun. One a stand-in has no
-// data for, as its own.
+// out: each with stand-ins (SelectorData.For) that all had data, of those
+// made of a selector with data of its own, from the latest of them, when
+// that is before its own; had nothing it matches happened yet, where its
+// data would have begun. One a stand-in has no data for, as its own; one
+// a stand-in wasn't looked for yet, as having none, till it is.
 func (d *ImpactData) Effective() []SelectorData {
 	out := d.read()
 	for i, b := range out {
-		if x, ok := d.stoodIn(b.Sel); ok && (b.First.IsZero() || x.First.Before(b.First)) {
+		x, ok, unknown := d.stoodIn(b.Sel)
+		switch {
+		case unknown:
+			out[i].First, out[i].AtStart = time.Time{}, false
+		case ok && (b.First.IsZero() || x.First.Before(b.First)):
 			out[i].First, out[i].AtStart = x.First, x.AtStart
 		}
 	}
@@ -225,34 +232,42 @@ func (d *ImpactData) read() []SelectorData {
 	return out
 }
 
-// stoodIn is, of sel's stand-ins, the one whose data begins the latest,
-// when every one had data: each reads more series than sel does, the
-// latest the fewest.
-func (d *ImpactData) stoodIn(sel string) (SelectorData, bool) {
-	var x SelectorData
-	found := false
+// stoodIn is, of sel's stand-ins made of a selector with data of its own,
+// the one whose data begins the latest, when every one had data: each
+// reads more series than sel does, the latest the fewest. Unknown, when
+// one of them wasn't looked for yet. A stand-in made of a selector with no
+// data, which has none either, says nothing of sel's labels.
+func (d *ImpactData) stoodIn(sel string) (x SelectorData, ok, unknown bool) {
 	for _, s := range d.Selectors {
-		if s.For != sel {
+		if s.For != sel || !d.HasData(s.Of) {
 			continue
 		}
-		if s.First.IsZero() {
-			return SelectorData{}, false
-		}
-		if !found || s.First.After(x.First) {
-			x, found = s, true
+		switch {
+		case s.To.IsZero() && s.First.IsZero():
+			return SelectorData{}, false, true
+		case s.First.IsZero():
+			return SelectorData{}, false, false
+		case !ok || s.First.After(x.First):
+			x, ok = s, true
 		}
 	}
-	return x, found
+	return x, ok, false
 }
 
-// StandInOf is, of a selector of d with no data, the stand-in its record
-// is kept by (Effective): nothing it matches happened, though what it
-// would read was there; "" for none.
+// HasData reports whether d's selector sel had data of its own; "" as
+// had.
+func (d *ImpactData) HasData(sel string) bool {
+	return sel == "" || slices.ContainsFunc(d.Selectors, func(x SelectorData) bool { return x.Sel == sel && x.For == "" && !x.First.IsZero() })
+}
+
+// StandInOf is, of a selector of d, the stand-in it begins by
+// (Effective): nothing it matches happened, though what it would read was
+// there; "" for none.
 func (d *ImpactData) StandInOf(sel string) string {
-	if slices.ContainsFunc(d.Selectors, func(x SelectorData) bool { return x.Sel == sel && x.For == "" && !x.First.IsZero() }) {
+	x, ok, _ := d.stoodIn(sel)
+	if !ok {
 		return ""
 	}
-	x, _ := d.stoodIn(sel)
 	return x.Sel
 }
 

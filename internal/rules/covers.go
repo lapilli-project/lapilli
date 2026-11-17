@@ -166,12 +166,15 @@ const MaxStandIns = 32
 // relabelling, a library's upgrade: nothing could be matched before it.
 type StandIn struct {
 	Sel, For string
+	// Of is the selector For narrows it was made of: one with no data of
+	// its own says nothing of For's labels.
+	Of string
 }
 
 // StandIns are, of expr's selectors, the stand-ins of each that only
 // narrows another (Covers), in the order they come, MaxStandIns at most;
-// not of one an absent() or absent_over_time() reads, which says users are
-// hurt while it has no data.
+// not of one an absent() or absent_over_time() reads, at any depth, which
+// says users are hurt while it has no data.
 func StandIns(expr string) ([]StandIn, error) {
 	sels, absent, err := selectorsRead(expr)
 	if err != nil {
@@ -190,7 +193,7 @@ func StandIns(expr string) ([]StandIn, error) {
 			if !ok {
 				continue
 			}
-			x := StandIn{Sel: sel, For: b}
+			x := StandIn{Sel: sel, For: b, Of: a}
 			if !slices.Contains(out, x) {
 				out = append(out, x)
 			}
@@ -209,6 +212,7 @@ func selectorsRead(expr string) ([]string, map[string]bool, error) {
 	if _, err := scopeScan(expr, "", nil, &x); err != nil {
 		return nil, nil, err
 	}
+	in := inAbsent(expr)
 	var out []string
 	absent := map[string]bool{}
 	for i, s := range x.sels {
@@ -217,22 +221,61 @@ func selectorsRead(expr string) ([]string, map[string]bool, error) {
 		if !slices.Contains(out, s) {
 			out = append(out, s)
 		}
-		if start >= 0 && absentOf(expr[:start]) {
+		if start >= 0 && start < len(in) && in[start] {
 			absent[s] = true
 		}
 	}
 	return out, absent, nil
 }
 
-var absentCall = regexp.MustCompile(`\babsent(_over_time)?\s*\(\s*$`)
+var absentName = regexp.MustCompile(`(?:^|[^a-zA-Z0-9_:])(absent|absent_over_time)\s*$`)
 
-// absentOf reports whether what comes before a selector opens an absent()
-// or absent_over_time() it is the first thing in.
-func absentOf(before string) bool { return absentCall.MatchString(before) }
+// inAbsent says, of each byte of expr, whether it is within the
+// parentheses of an absent() or absent_over_time(), at any depth; quoted
+// strings are passed over.
+func inAbsent(expr string) []bool {
+	out := make([]bool, len(expr))
+	var stack []bool // of each open parenthesis, whether an absent opened it
+	depth := 0       // how many of them did
+	var quote byte
+	for i := 0; i < len(expr); i++ {
+		c := expr[i]
+		out[i] = depth > 0
+		switch {
+		case quote != 0 && c == '\\' && quote != '`':
+			i++
+			if i < len(expr) {
+				out[i] = depth > 0
+			}
+		case quote != 0 && c == quote:
+			quote = 0
+		case quote != 0:
+		case c == '"' || c == '\'' || c == '`':
+			quote = c
+		case c == '#':
+			for i < len(expr) && expr[i] != '\n' { // a comment, to its line's end
+				out[i] = depth > 0
+				i++
+			}
+		case c == '(':
+			a := absentName.MatchString(expr[:i])
+			stack = append(stack, a)
+			if a {
+				depth++
+			}
+		case c == ')' && len(stack) > 0:
+			if stack[len(stack)-1] {
+				depth--
+			}
+			stack = stack[:len(stack)-1]
+		}
+	}
+	return out
+}
 
 // standIn is the stand-in a gives for b, which only narrows it: a's
-// matchers, and label!="" of each label b narrows by with a matcher the
-// empty value doesn't match.
+// matchers, b's metric's name, and label!="" of each other label b
+// narrows by with a matcher the empty value doesn't match.
 func standIn(a, b string) (string, bool) {
 	ma, mods, ok := selectorParts(a)
 	if !ok {
@@ -248,7 +291,12 @@ func standIn(a, b string) (string, bool) {
 			continue
 		}
 		label, op, value, ok := splitMatcher(m)
-		if !ok || label == "__name__" || matchesEmpty(op, value) {
+		if !ok || matchesEmpty(op, value) {
+			continue
+		}
+		if label == "__name__" {
+			// Its metric, as it is: a name doesn't come later.
+			out = append(out, m)
 			continue
 		}
 		if has := label + `!=""`; !slices.Contains(out, has) {

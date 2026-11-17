@@ -223,6 +223,62 @@ func TestImpactDataStandInUpgrade(t *testing.T) {
 	}
 }
 
+// A ledger a lapilli before stand-ins wrote back, a stand-in's "for" and
+// "of" let go: given back at the next round, not taken for a selector the
+// expression reads, nor looked for twice.
+func TestImpactDataStandInDowngraded(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {}}
+	expr := `sum(probe_failed{code="5"}) / sum(probe_failed) > 0.5`
+	if code, body := askAs(t, s.Handler(), http.MethodPost, "/settings/impact", url.Values{"impact": {expr}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	s.jobs(ctx, false)
+	k, err := s.l.ImpactKept(ctx)
+	if err != nil || k.Data == nil {
+		t.Fatal(k, err)
+	}
+	old := *k.Data
+	old.Selectors = slices.Clone(old.Selectors)
+	for i := range old.Selectors {
+		old.Selectors[i].For, old.Selectors[i].Of = "", ""
+	}
+	if err := s.l.SetImpactData(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	runDue(s, 2)
+	s.jobs(ctx, true)
+	k, err = s.l.ImpactKept(ctx)
+	if err != nil || k.Data.NoData || len(k.Data.Selectors) != 3 || k.Data.Selectors[2].For != `probe_failed{code="5"}` || k.Data.Selectors[2].Of != "probe_failed" {
+		t.Fatalf("at the next round: %+v %v", k.Data, err)
+	}
+	_, page := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
+	if strings.Contains(page, "<bdi>probe_failed{code!=&#34;&#34;}</bdi></code>:") {
+		t.Errorf("the stand-in listed as a selector:\n%s", page)
+	}
+}
+
+// A selector whose own data begins later than its stand-in's: the page
+// says from when it keeps the record, and by what.
+func TestImpactDataStandInEarlier(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {now.Add(-20 * time.Hour)}}
+	expr := `sum(probe_failed{code="5"}) / sum(probe_failed) > 0.5`
+	if code, body := askAs(t, s.Handler(), http.MethodPost, "/settings/impact", url.Values{"impact": {expr}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	s.jobs(ctx, false)
+	if began, _ := s.l.RunsFrom(ctx); !options(t, s).Equal(began) {
+		t.Errorf("kept from %s, not %s", options(t, s), began)
+	}
+	_, page := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
+	if !strings.Contains(page, "kept from") || !strings.Contains(page, "<bdi>probe_failed{code!=&#34;&#34;}</bdi> begins") {
+		t.Errorf("the page doesn't say by what:\n%s", page)
+	}
+}
+
 // A ledger before 0.49, with no criterion kept, and a criterion saved
 // before the leader's first round that isn't the command line's: read
 // again over the last four weeks, not taken as read all along.

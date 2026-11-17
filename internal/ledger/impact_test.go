@@ -689,7 +689,7 @@ func TestFloorByStandIn(t *testing.T) {
 		standIn string
 	}{
 		{"none matched", []SelectorData{five, all, coded}, time.Time{}, false, "", coded.Sel},
-		{"matched later", []SelectorData{at(five, t0.Add(-time.Hour), false), all, coded}, time.Time{}, false, "", ""},
+		{"matched later", []SelectorData{at(five, t0.Add(-time.Hour), false), all, coded}, time.Time{}, false, "", coded.Sel},
 		{"with a later selector", []SelectorData{five, all, probe, coded}, probe.First, false, probe.Sel, coded.Sel},
 		{"the code label later", []SelectorData{five, all, at(coded, t0.Add(-2*24*time.Hour), false)}, t0.Add(-2 * 24 * time.Hour), false, five.Sel, coded.Sel},
 		{"the metric later", []SelectorData{five, at(all, t0.Add(-2*24*time.Hour), false), at(coded, t0.Add(-2*24*time.Hour), false)}, t0.Add(-2 * 24 * time.Hour), false, "", coded.Sel},
@@ -699,6 +699,9 @@ func TestFloorByStandIn(t *testing.T) {
 		{"one of two stand-ins with no data", []SelectorData{five, all, coded, {Sel: `http_requests_total{service!="",code!=""}`, For: five.Sel}}, time.Time{}, true, "", ""},
 		{"no stand-in", []SelectorData{five, all}, time.Time{}, true, "", ""},
 		{"alone", []SelectorData{five}, time.Time{}, true, "", ""},
+		// Not looked for yet (an upgrade, a look that failed): no record
+		// this round, not the later start of its own.
+		{"a stand-in not looked for yet", []SelectorData{at(five, t0.Add(-time.Hour), false), all, {Sel: coded.Sel, For: five.Sel, Of: all.Sel}}, time.Time{}, true, "", ""},
 	} {
 		d := ImpactData{From: lo, CheckedTo: t0, Selectors: c.sels}
 		FloorBy(&d, func(t time.Time) time.Time { return t })
@@ -708,5 +711,26 @@ func TestFloorByStandIn(t *testing.T) {
 		if got := d.StandInOf(five.Sel); got != c.standIn {
 			t.Errorf("%s: stood in by %q, not %q", c.name, got, c.standIn)
 		}
+	}
+}
+
+// A route's 5xx and everyone's, with no 5xx at all: the stand-in made of
+// everyone's 5xx, which has no data of its own, says nothing; the others
+// keep the record.
+func TestFloorByStandInOf(t *testing.T) {
+	lo := t0.Add(-14 * 24 * time.Hour)
+	on := func(sel, for_, of string) SelectorData {
+		return SelectorData{Sel: sel, For: for_, Of: of, First: lo, AtStart: true, To: t0}
+	}
+	none := func(sel, for_, of string) SelectorData { return SelectorData{Sel: sel, For: for_, Of: of, To: t0} }
+	payFive, pay, five, all := `x{code=~"5..",route="/pay"}`, `x{route="/pay"}`, `x{code=~"5.."}`, `x`
+	d := ImpactData{From: lo, CheckedTo: t0, Selectors: []SelectorData{
+		none(payFive, "", ""), on(pay, "", ""), none(five, "", ""), on(all, "", ""),
+		on(`x{route="/pay",code!=""}`, payFive, pay), none(`x{code=~"5..",route!=""}`, payFive, five),
+		on(`x{code!="",route!=""}`, payFive, all), on(`x{route!=""}`, pay, all), on(`x{code!=""}`, five, all),
+	}}
+	FloorBy(&d, func(t time.Time) time.Time { return t })
+	if d.NoData || !d.Floor.IsZero() {
+		t.Errorf("no data %v, floor %s", d.NoData, d.Floor)
 	}
 }

@@ -495,18 +495,27 @@ read) and `impact_floor`.
   selector have data, and not at all while one has none. A selector with
   no data, or later data, that only narrows another (`rules.Covers`: the
   same offset and @, each of the other's matchers, its metric's name among
-  them, one of its own) begins where its stand-in's data does
+  them, one of its own) begins where its stand-ins' data does
   (`rules.StandIns`, 32 at most, looked for as the selectors are, kept in
-  `impact_data` with `for`): the other's series with each label it narrows
-  them by with a matcher the empty value doesn't match, any value, as
+  `impact_data` with `for` and `of`): of each selector it narrows, that
+  one's series with its metric's name and each other label it narrows them
+  by with a matcher the empty value doesn't match, any value, as
   `http_requests_total{code!=""}` for `http_requests_total{code=~"5.."}`
-  beside `http_requests_total`. A client library makes a 5xx series at the
-  first 5xx, so a service that served none had nothing to match, not
-  nothing to read; a code label that came later, by a relabelling or a
-  rename, holds the record back to where it came. Not a selector an
-  `absent()` or `absent_over_time()` reads. A ledger kept before stand-ins
-  looks for them at the next round. The settings page says of such a
-  selector "nothing matched since", with its stand-in.
+  beside `http_requests_total`; every stand-in made of a selector with
+  data of its own having data, the latest of them. A client library makes
+  a 5xx series at the first 5xx, so a service that served none had nothing
+  to match, not nothing to read; a code label that came later, by a
+  relabelling or a rename, holds the record back to where it came. A
+  stand-in made of a selector with no data of its own says nothing, and
+  isn't looked for; one not looked for yet keeps no record that round,
+  rather than the later start of the selector's own. Not a selector an
+  `absent()` or `absent_over_time()` reads, at any depth. What it can't
+  tell: values of another form (`Internal` where `5..` is matched) have
+  the label, so a selector that can never match keeps the record. A ledger
+  kept before stand-ins looks for them at the next round, and gives back
+  their `for` to entries a lapilli before them wrote back. The settings
+  page says of such a selector "nothing matched since", or "kept from",
+  with its stand-in.
   It moves
   `impact_since` forward, never back, on a first start, after an upgrade
   (from the `impact_since` the ledger has), and once a criterion is read
