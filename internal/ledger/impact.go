@@ -463,6 +463,11 @@ func (l *Ledger) ReadAgain(ctx context.Context, r ImpactRead, o verdict.Options)
 					return err
 				}
 			}
+			// The alerts tied to it by what it saw before, or that fell
+			// back, tied again by what it sees now.
+			if err := l.retieSignal(t, r.Signal, o.Match); err != nil {
+				return err
+			}
 		}
 		return pend(t, [][2]int64{{min(lo, from) - int64(o.Lead/time.Second), r.To.Unix()}})
 	})

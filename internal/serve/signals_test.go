@@ -693,3 +693,138 @@ func TestSignalPagesBeforeFirstSync(t *testing.T) {
 		}()
 	}
 }
+
+// reportSearch are a report's firings of search.
+func reportSearch(rep verdict.Report) []verdict.Judged {
+	var out []verdict.Judged
+	for _, f := range rep.Firings {
+		if f.Labels["service"] == "search" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// What a signal has seen begins again when its expression changes (a read
+// again): the alerts tied to it by what it saw before are tied again by
+// what it sees now, and their firings judged again, as one started with
+// the new expression ties them.
+func TestSignalExprChangedTiesAgain(t *testing.T) {
+	ctx := context.Background()
+	narrow := `http_requests_total{service="checkout"}`
+	hist := func() *sigHistory {
+		h := shopHistory()
+		h.counted[narrow] = []map[string]string{{"service": "checkout"}}
+		return h
+	}
+	s := signalServer(t, hist(), nil)
+	if b := reportSearch(reportOf(t, s)); len(b) == 0 || !slices.Equal(b[0].Signals, []string{"errors"}) || b[0].NoRecord {
+		t.Fatalf("before: %+v", b)
+	}
+	s.cfg.Signals[0].Expr = narrow + " > 1e9" // started again with it
+	for k := 1; k <= 3; k++ {
+		runDue(s, k)
+		s.jobs(ctx, true)
+	}
+	got := reportSearch(reportOf(t, s))
+	for _, f := range got {
+		if slices.Contains(f.Signals, "errors") && !f.NoRecord {
+			t.Errorf("a search firing is judged by errors, which no longer reads search: tied to %v", f.Signals)
+		}
+	}
+	fresh := signalServer(t, hist(), func(c *Config) { c.Signals[0].Expr = narrow + " > 1e9" })
+	want := reportSearch(reportOf(t, fresh))
+	if len(got) != len(want) {
+		t.Fatalf("%d search firings, %d started with it", len(got), len(want))
+	}
+	for i := range got {
+		if got[i].NoRecord != want[i].NoRecord || !slices.Equal(got[i].Signals, want[i].Signals) {
+			t.Errorf("%s: no record %v, tied %v; started with it: %v, %v", got[i].Start.Format(time.RFC3339), got[i].NoRecord, got[i].Signals, want[i].NoRecord, want[i].Signals)
+		}
+	}
+}
+
+// The match in effect changed (the Settings page, or --match between
+// restarts): what the signals that follow it have seen begins again, every
+// alert is tied again on it, and every firing judged again, as one started
+// on it ties and judges them.
+func TestSignalMatchChangedTiesAgain(t *testing.T) {
+	ctx := context.Background()
+	t.Run("following signals", func(t *testing.T) {
+		s := signalServer(t, shopHistory(), func(c *Config) { c.Signals[1].Match = nil })
+		if err := s.l.SetSettings(ctx, map[string]string{"match": "team"}, "ana@example.com"); err != nil {
+			t.Fatal(err)
+		}
+		s.askRejudge(ctx)
+		for k := 1; k <= 2; k++ {
+			runDue(s, k)
+			s.jobs(ctx, true)
+		}
+		o, _ := s.options(ctx)
+		want := o.Signals.Names(o.Signals.Ties("Errors", map[string]string{"service": "search"}, o.Match))
+		for _, f := range reportSearch(reportOf(t, s)) {
+			if !slices.Equal(f.Signals, want) {
+				t.Errorf("a search firing is tied to %v as the ledger keeps it, %v on the match in effect %v", f.Signals, want, o.Match)
+			}
+		}
+	})
+	t.Run("started on another", func(t *testing.T) {
+		hist := func() *sigHistory {
+			h := shopHistory()
+			h.counted = map[string][]map[string]string{"http_requests_total": {{"service": "checkout"}}, "probe_success": {{"service": "checkout"}}}
+			return h
+		}
+		s := signalServer(t, hist(), func(c *Config) { c.Options.Match = []string{"team"} })
+		code, body := askAs(t, s.Handler(), http.MethodPost, "/settings", url.Values{"match": {"service"}}, "ana@example.com", "same-origin")
+		if code != http.StatusSeeOther {
+			t.Fatalf("settings: %d %s", code, body)
+		}
+		for k := 1; k <= 3; k++ {
+			runDue(s, k)
+			s.jobs(ctx, true)
+		}
+		for _, f := range reportSearch(reportOf(t, s)) {
+			if !f.NoRecord || !slices.Equal(f.Signals, []string{"errors", "probe"}) {
+				t.Errorf("%s: no record %v, tied %v; one started on service: no record, tied to errors, probe", f.Start.Format(time.RFC3339), f.NoRecord, f.Signals)
+			}
+		}
+	})
+}
+
+// A change to the signals pends every firing to be judged again in the
+// write that keeps it, so a restart, or another replica taking the lead,
+// judges them; and a bit a tally still carries isn't given to a signal
+// added in place of the one that had it.
+func TestSignalsChangeRejudgeDurable(t *testing.T) {
+	ctx := context.Background()
+	h := signalWindowsHistory()
+	s := signalServer(t, h, nil)
+	h.mu.Lock()
+	h.fail = map[string]bool{"latency_seconds > 1": true}
+	h.mu.Unlock()
+	// Started again without the probe, with latency.
+	s.cfg.Signals = []ledger.SignalDef{s.cfg.Signals[0], {Name: "latency", Expr: "latency_seconds > 1", For: 10 * time.Minute, Record: true}}
+	if _, err := s.syncSignals(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := s.l.SignalRows(ctx)
+	for _, r := range rows {
+		if r.Name == "latency" && r.Bit == 1 {
+			t.Errorf("latency was given the probe's bit while tallies still carry it")
+		}
+	}
+	// The process ends here: another, or the next leader, takes it up.
+	s.rejudge.Store(false)
+	s.sigs.Lock()
+	s.sigs.sig = nil
+	s.sigs.Unlock()
+	s.jobs(ctx, false)
+	o, _ := s.options(ctx)
+	w := ledger.Week(s.l.Day(time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)))
+	tallied, _ := s.l.WeeksBy(ctx, w-7, w)
+	for _, r := range tallied {
+		if names := o.Signals.Names(o.Signals.FromBits(r.Signals)); slices.Contains(names, "latency") || r.Signals&2 != 0 {
+			t.Errorf("a week's tally is still keyed by the probe's bit, or read as latency's: %b %v", r.Signals, names)
+		}
+	}
+}

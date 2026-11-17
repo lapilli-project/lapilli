@@ -63,12 +63,10 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		return
 	}
 	// The named impact signals and the rule entries serve was started
-	// with, kept: a change to which there are, or what they match, judges
-	// every firing again.
-	if changed, err := s.syncSignals(ctx); err != nil {
+	// with, kept: a change to which there are, or what they match, pends
+	// every firing to be judged again, in the ledger (JudgePending, below).
+	if _, err := s.syncSignals(ctx); err != nil {
 		s.fail("keeping the impact signals", err)
-	} else if changed {
-		s.rejudge.Store(true)
 	}
 	// Taken before the settings are read, so a change saved in between is
 	// judged with: here, or, asked on another replica, in the ledger.

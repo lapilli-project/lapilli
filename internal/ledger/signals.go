@@ -242,10 +242,26 @@ func ruleEntries(ctx context.Context, q reader) ([]verdict.RuleEntry, error) {
 
 // SignalsSynced is what keeping the signals serve was started with
 // changed: Set, a signal added or removed, or its match or whether it
-// keeps the record; Entries, the rule entries. Either judges every firing
-// again, and works out again which signals each alert is tied to.
+// keeps the record, or the match in effect, which those with no match of
+// their own follow; Entries, the rule entries. Either judges every firing
+// again (pended, in the same write: whichever replica leads next judges
+// them), and Set works out again which signals each alert is tied to.
 type SignalsSynced struct {
 	Set, Entries bool
+}
+
+// metaSignalsMatch is the match in effect alerts were last tied on, as
+// JSON: a change to it ties every alert again, and what the signals that
+// follow it have seen begins again.
+const metaSignalsMatch = "signals_match"
+
+// matchKey is a match as metaSignalsMatch keeps it.
+func matchKey(m []string) string {
+	if m == nil {
+		m = []string{}
+	}
+	b, _ := json.Marshal(m)
+	return string(b)
 }
 
 // SyncSignals keeps the named signals in effect and the rule entries, as
@@ -262,7 +278,7 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 	var out SignalsSynced
 	// Read first: a round that changes nothing writes nothing, and keeps
 	// every page kept for the ledger's generation.
-	if same, err := l.signalsAre(ctx, defs, entries); err != nil || same {
+	if same, err := l.signalsAre(ctx, defs, entries, match); err != nil || same {
 		return out, err
 	}
 	err := l.write(ctx, func(t *txn) error {
@@ -279,6 +295,13 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 			if r.Name != "" {
 				used[r.Bit] = true
 			}
+		}
+		// A bit an alert or a tally still carries is given to no new
+		// signal until they are tied, and counted, again: so no tally of a
+		// signal taken away is read as one added in its place.
+		carried, err := carriedBits(t)
+		if err != nil {
+			return err
 		}
 		for _, r := range have {
 			if r.Name == "" || slices.ContainsFunc(defs, func(d SignalDef) bool { return d.Name == r.Name }) {
@@ -297,7 +320,7 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 			r, ok := byName[d.Name]
 			if !ok {
 				bit := 0
-				for used[bit] {
+				for used[bit] || carried&(1<<bit) != 0 {
 					bit++
 				}
 				if bit > verdict.MaxSignalBit {
@@ -320,6 +343,12 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 			if _, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET expr = ?, for_ns = ?, match_labels = ?, keeps_record = ? WHERE name = ?",
 				d.Expr, int64(d.For), matchText(d.Match), d.Record, d.Name); err != nil {
 				return err
+			}
+			if !slices.Equal(r.Match, d.Match) || (r.Match == nil) != (d.Match == nil) {
+				// Of other labels, what it has seen begins again.
+				if _, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET seen = '', seen_to = 0 WHERE name = ?", d.Name); err != nil {
+					return err
+				}
 			}
 		}
 		was, err := ruleEntries(t.ctx, t)
@@ -346,6 +375,23 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 				}
 			}
 		}
+		// The match in effect, which the signals with none of their own
+		// follow: changed, what they have seen begins again.
+		was2, err := l.meta(t.ctx, t, metaSignalsMatch)
+		if err != nil {
+			return err
+		}
+		if named := slices.ContainsFunc(defs, func(d SignalDef) bool { return d.Name != "" }); named && was2 != matchKey(match) {
+			if was2 != "" {
+				out.Set = true
+				if _, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET seen = '', seen_to = 0 WHERE name != '' AND match_labels IS NULL"); err != nil {
+					return err
+				}
+			}
+			if err := setMeta(t.ctx, t, metaSignalsMatch, matchKey(match)); err != nil {
+				return err
+			}
+		}
 		if out.Set {
 			// Which signals each alert is tied to, worked out again from
 			// the signals now in effect.
@@ -356,14 +402,101 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 				return err
 			}
 		}
+		if out.Set || out.Entries {
+			// Every firing judged again, a week at a time (JudgePending):
+			// pended here, so that a restart or another leader takes it up.
+			return pendAll(t)
+		}
 		return nil
 	})
 	return out, err
 }
 
+// pendAll pends every firing's span, to be judged again a week at a time.
+func pendAll(t *txn) error {
+	var lo, hi sql.NullInt64
+	if err := t.QueryRowContext(t.ctx, "SELECT min(start_at), max(start_at) FROM firings").Scan(&lo, &hi); err != nil || !lo.Valid {
+		return err
+	}
+	return pend(t, [][2]int64{{lo.Int64, hi.Int64}})
+}
+
+// carriedBits are the signals' bits an alert or a tally carries, as one
+// set of bits.
+func carriedBits(t *txn) (int64, error) {
+	var out int64
+	for bit := 0; bit <= verdict.MaxSignalBit; bit++ {
+		b := int64(1) << bit
+		for _, table := range []string{"series", "days", "weeks", "marked_days", "marked_weeks"} {
+			var n int
+			if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM (SELECT 1 FROM "+table+" WHERE signals > 0 AND (signals & CAST(? AS BIGINT)) != 0 LIMIT 1) AS one", b).Scan(&n); err != nil {
+				return 0, err
+			}
+			if n > 0 {
+				out |= b
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+// retieSignal works out again which signals the alerts tied to a named
+// signal, or that fell back to every one, are tied to, as what it has
+// seen begins again (a read again of a new expression): the span of their
+// firings is pended, to be counted again.
+func (l *Ledger) retieSignal(t *txn, name string, match []string) error {
+	var bit int
+	if err := t.QueryRowContext(t.ctx, "SELECT bit FROM impact_signals WHERE name = ?", name).Scan(&bit); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	rows, err := t.QueryContext(t.ctx, "SELECT id FROM series WHERE signals > 0 AND (signals & CAST(? AS BIGINT)) != 0", int64(1)<<bit|verdict.FellBackBit)
+	if err != nil {
+		return err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil || len(ids) == 0 {
+		return err
+	}
+	for part := range slices.Chunk(ids, pgRows) {
+		b, err := json.Marshal(part)
+		if err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(t.ctx, "UPDATE series SET signals = -1 WHERE id IN ("+t.d.ints("?")+")", string(b)); err != nil {
+			return err
+		}
+	}
+	if err := l.tieUntied(t, verdict.Options{Match: match}); err != nil {
+		return err
+	}
+	lo, hi, err := seriesSpan(t, ids)
+	if err != nil || lo > hi {
+		return err
+	}
+	return pend(t, [][2]int64{{lo, hi}})
+}
+
 // signalsAre reports whether the ledger keeps the named signals and rule
 // entries given, as given.
-func (l *Ledger) signalsAre(ctx context.Context, defs []SignalDef, entries []verdict.RuleEntry) (bool, error) {
+func (l *Ledger) signalsAre(ctx context.Context, defs []SignalDef, entries []verdict.RuleEntry, match []string) (bool, error) {
+	if slices.ContainsFunc(defs, func(d SignalDef) bool { return d.Name != "" }) {
+		if was, err := l.meta(ctx, l.r, metaSignalsMatch); err != nil || was != matchKey(match) {
+			return false, err
+		}
+	}
 	rows, err := l.signalRows(ctx, l.r)
 	if err != nil {
 		return false, err
@@ -468,6 +601,12 @@ func tieSignals(t *txn, match []string) (*verdict.Signals, error) {
 // its firings are all within what that write judges, and none was
 // counted under -1.
 func (l *Ledger) tieUntied(t *txn, o verdict.Options) error {
+	// Most writes make no alert: what each signal has seen is read only
+	// when one waits (series_untied).
+	var n int
+	if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM (SELECT 1 FROM series WHERE signals < 0 LIMIT 1) AS one").Scan(&n); err != nil || n == 0 {
+		return err
+	}
 	sig, err := tieSignals(t, o.Match)
 	if err != nil {
 		return err
