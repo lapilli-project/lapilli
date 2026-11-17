@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"html/template"
@@ -1336,24 +1337,155 @@ type withWindow struct {
 const withMost = 3
 
 // windowsWith gives each named window of lines the other signals' windows
-// of ws on at some time in it, withMost named and the rest counted.
+// of ws on at some time in it, withMost named, the first to start, and the
+// rest counted. By signal, each one's windows sorted once: how many are on
+// in a span is two binary searches, and the first ones on found down a
+// tree of the latest each range of them lasts to, so that a page of many
+// windows over many weeks isn't each line against each window.
 func windowsWith(lines []incidentLine, ws []ledger.Incident) {
+	by := map[string][]ledger.Incident{}
+	var names []string
+	for _, w := range ws {
+		if w.Signal == "" {
+			continue
+		}
+		if _, ok := by[w.Signal]; !ok {
+			names = append(names, w.Signal)
+		}
+		by[w.Signal] = append(by[w.Signal], w)
+	}
+	slices.Sort(names)
+	idx := make(map[string]*spans, len(names))
+	for _, n := range names {
+		idx[n] = newSpans(by[n])
+	}
 	for i := range lines {
 		in := &lines[i]
 		if in.Origin != "impact" || in.Signal == "" {
 			continue
 		}
-		for _, w := range ws {
-			if w.Signal == "" || w.Signal == in.Signal || w.Start.After(in.End) || w.End.Before(in.Start) {
+		var first []ledger.Incident
+		total := 0
+		for _, n := range names {
+			if n == in.Signal {
 				continue
 			}
-			if len(in.With) < withMost {
-				in.With = append(in.With, withWindow{ID: w.ID, Signal: w.Signal, Start: w.Start, End: w.End, State: w.State})
-			} else {
-				in.WithMore++
-			}
+			sp := idx[n]
+			total += sp.count(in.Start, in.End)
+			first = append(first, sp.first(in.Start, in.End, withMost)...)
+		}
+		slices.SortFunc(first, byStart)
+		for _, w := range first[:min(len(first), withMost)] {
+			in.With = append(in.With, withWindow{ID: w.ID, Signal: w.Signal, Start: w.Start, End: w.End, State: w.State})
+		}
+		in.WithMore = total - len(in.With)
+	}
+}
+
+func byStart(x, y ledger.Incident) int {
+	return cmp.Or(x.Start.Compare(y.Start), strings.Compare(x.ID, y.ID))
+}
+
+// spans are one signal's windows, to say which are on at some time in [a,
+// b]: those that start by b and end at a or later. A window that ends
+// before it starts, which the ledger doesn't keep, is looked at of its own.
+type spans struct {
+	ws   []ledger.Incident // by start
+	ends []time.Time       // sorted
+	// last is a tree over ws: last[1] the latest any ends, last[size+i]
+	// ws[i]'s end, each node the later of its two.
+	last []time.Time
+	size int
+	odd  []ledger.Incident
+}
+
+func newSpans(ws []ledger.Incident) *spans {
+	sp := &spans{}
+	for _, w := range ws {
+		if w.End.Before(w.Start) {
+			sp.odd = append(sp.odd, w)
+		} else {
+			sp.ws = append(sp.ws, w)
 		}
 	}
+	slices.SortFunc(sp.ws, byStart)
+	sp.size = 1
+	for sp.size < len(sp.ws) {
+		sp.size *= 2
+	}
+	sp.last = make([]time.Time, 2*sp.size)
+	for i, w := range sp.ws {
+		sp.ends = append(sp.ends, w.End)
+		sp.last[sp.size+i] = w.End
+	}
+	slices.SortFunc(sp.ends, time.Time.Compare)
+	for i := sp.size - 1; i >= 1; i-- {
+		sp.last[i] = sp.last[2*i]
+		if sp.last[2*i+1].After(sp.last[i]) {
+			sp.last[i] = sp.last[2*i+1]
+		}
+	}
+	return sp
+}
+
+func on(w ledger.Incident, a, b time.Time) bool { return !w.Start.After(b) && !w.End.Before(a) }
+
+// by is how many windows start by b.
+func (sp *spans) by(b time.Time) int {
+	return sort.Search(len(sp.ws), func(i int) bool { return sp.ws[i].Start.After(b) })
+}
+
+// count is how many are on in [a, b]: those that start by b, less those
+// that end before a, each of which starts before a, so by b.
+func (sp *spans) count(a, b time.Time) int {
+	n := 0
+	if !b.Before(a) {
+		n = sp.by(b) - sort.Search(len(sp.ends), func(i int) bool { return !sp.ends[i].Before(a) })
+	}
+	for _, w := range sp.odd {
+		if on(w, a, b) {
+			n++
+		}
+	}
+	return n
+}
+
+// first are the most first to start of those on in [a, b].
+func (sp *spans) first(a, b time.Time, most int) []ledger.Incident {
+	var out []ledger.Incident
+	if !b.Before(a) {
+		j := sp.by(b)
+		for lo := 0; len(out) < most; {
+			i := sp.from(1, 0, sp.size, lo, j, a)
+			if i < 0 {
+				break
+			}
+			out = append(out, sp.ws[i])
+			lo = i + 1
+		}
+	}
+	for _, w := range sp.odd {
+		if on(w, a, b) {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// from is the first i in [lo, hi) whose window ends at a or later, or -1,
+// looked for under node, which holds [nlo, nhi).
+func (sp *spans) from(node, nlo, nhi, lo, hi int, a time.Time) int {
+	if nhi <= lo || nlo >= hi || sp.last[node].Before(a) {
+		return -1
+	}
+	if nhi-nlo == 1 {
+		return nlo
+	}
+	mid := (nlo + nhi) / 2
+	if i := sp.from(2*node, nlo, mid, lo, hi, a); i >= 0 {
+		return i
+	}
+	return sp.from(2*node+1, mid, nhi, lo, hi, a)
 }
 
 func (s *Server) incidentLine(lang string, in ledger.Incident, state string) incidentLine {

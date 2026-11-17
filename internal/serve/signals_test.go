@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -20,6 +22,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/firing"
+	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/ledger/ledgertest"
 	"lapilli.dev/internal/prom"
@@ -1790,5 +1793,51 @@ func TestSignalRulePageEntry(t *testing.T) {
 	_, body = askAs(t, s.Handler(), http.MethodGet, "/incidents", nil, "ana@example.com", "same-origin")
 	if strings.Contains(body, "Signal</") {
 		t.Error("signal tabs with no source picked")
+	}
+}
+
+// windowsWith, by sorted spans, names and counts the same windows as each
+// line against each window would: the first withMost to start, the rest
+// counted.
+func TestWindowsWithAsEachAgainstEach(t *testing.T) {
+	rnd := rand.New(rand.NewPCG(1, 2))
+	base := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	at := func() time.Time { return base.Add(time.Duration(rnd.IntN(600)) * time.Minute) }
+	signals := []string{"errors", "probe", "latency", ""}
+	for round := range 200 {
+		var ws []ledger.Incident
+		for i := range rnd.IntN(40) {
+			a := at()
+			b := a.Add(time.Duration(rnd.IntN(120)) * time.Minute)
+			if rnd.IntN(30) == 0 {
+				b = a.Add(-time.Minute) // one that ends before it starts
+			}
+			ws = append(ws, ledger.Incident{Incident: incident.Incident{ID: fmt.Sprintf("w%02d", i), Signal: signals[rnd.IntN(len(signals))], Start: a, End: b}, Origin: "impact"})
+		}
+		var lines, naive []incidentLine
+		for i := range rnd.IntN(20) {
+			a := at()
+			in := ledger.Incident{Incident: incident.Incident{ID: fmt.Sprintf("l%02d", i), Signal: signals[rnd.IntN(3)], Start: a, End: a.Add(time.Duration(rnd.IntN(90)) * time.Minute)}, Origin: "impact"}
+			lines, naive = append(lines, incidentLine{Incident: in}), append(naive, incidentLine{Incident: in})
+		}
+		windowsWith(lines, slices.Clone(ws))
+		sorted := slices.Clone(ws)
+		slices.SortFunc(sorted, byStart)
+		for i := range naive {
+			in := &naive[i]
+			for _, w := range sorted {
+				if w.Signal == "" || w.Signal == in.Signal || w.Start.After(in.End) || w.End.Before(in.Start) {
+					continue
+				}
+				if len(in.With) < withMost {
+					in.With = append(in.With, withWindow{ID: w.ID, Signal: w.Signal, Start: w.Start, End: w.End})
+				} else {
+					in.WithMore++
+				}
+			}
+		}
+		if !reflect.DeepEqual(lines, naive) {
+			t.Fatalf("round %d:\n got %+v\nwant %+v", round, lines, naive)
+		}
 	}
 }
