@@ -616,7 +616,7 @@ func TestReplicasShowTheLeadersStatus(t *testing.T) {
 	a.status.set("replaying %s → %s", "2026-11-03 10:00", "2026-11-03 11:00")
 	a.fail("a run", fmt.Errorf("prometheus said no"))
 	until(t, 5*time.Second, "the follower shows the leader's status", func() bool {
-		v := b.statusView("en")
+		v := b.statusView("en", true)
 		return v.Doing == "replaying 2026-11-03 10:00 → 2026-11-03 11:00" && strings.Contains(v.Err, "prometheus said no")
 	})
 	if _, body, _ := get(t, b.Handler(), "/runs"); !strings.Contains(body, "prometheus said no") {

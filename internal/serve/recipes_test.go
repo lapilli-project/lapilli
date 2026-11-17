@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -835,7 +837,7 @@ func TestTokenOneAtATimeAndPassedOver(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.jobs(ctx, true)
-	if st := s.statusView("en"); !strings.Contains(st.Err, "INC-2") {
+	if st := s.statusView("en", true); !strings.Contains(st.Err, "INC-2") {
 		t.Errorf("the status after a run: %+v", st)
 	}
 	_, body, _ := get(t, h, "/metrics")
@@ -844,7 +846,7 @@ func TestTokenOneAtATimeAndPassedOver(t *testing.T) {
 	}
 	os.WriteFile(s.cfg.Incidents, []byte("incidents:\n  - {id: INC-1, start: 2026-11-02T06:01:00Z}\n"), 0o644)
 	s.jobs(ctx, true)
-	if st := s.statusView("en"); st.Err != "" {
+	if st := s.statusView("en", true); st.Err != "" {
 		t.Errorf("read cleanly, the status still says: %+v", st)
 	}
 	_, body, _ = get(t, h, "/metrics")
@@ -1155,5 +1157,46 @@ func TestNewRecipesFailLoudly(t *testing.T) {
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err == nil || stdout.Len() != 0 || !strings.Contains(stderr.String(), "permission denied") || strings.ContainsAny(stderr.String(), "\x1b\x07") {
 		t.Errorf("Grafana IRM's error: %v, wrote %q, said %q", err, stdout.String(), stderr.String())
+	}
+}
+
+// TestRecipesCurlReadsNoCurlrc: every curl a recipe, or a script the chart
+// ships, runs reads no .curlrc (-q, which counts only as curl's first
+// argument): one in the job's HOME could send what it asks, and the token
+// it is given, through a proxy of its choosing.
+func TestRecipesCurlReadsNoCurlrc(t *testing.T) {
+	// curl as a word followed by a flag, wherever it is in a line: after
+	// a pipe, $(, {, if, !, command, env, timeout N or a backtick alike;
+	// prose ("curl isn't installed", "command -v curl") gives it none.
+	call := regexp.MustCompile(`(?:^|[^A-Za-z0-9_./$-])curl\s+(-\S*)`)
+	n := 0
+	for _, dir := range []string{"../../recipes", "../../charts/lapilli/files"} {
+		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".sh") {
+				return err
+			}
+			b, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for i, line := range strings.Split(string(b), "\n") {
+				if strings.HasPrefix(strings.TrimSpace(line), "#") {
+					continue
+				}
+				for _, m := range call.FindAllStringSubmatch(line, -1) {
+					n++
+					if strings.TrimSpace(m[1]) != "-q" {
+						t.Errorf("%s:%d: curl without -q first: %s", path, i+1, strings.TrimSpace(line))
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n < 20 {
+		t.Errorf("found %d curls: the pattern finds too few", n)
 	}
 }

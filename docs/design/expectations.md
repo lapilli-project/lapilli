@@ -308,8 +308,11 @@ Step 1, in `lapilli verdict --compare` and the backtest recipes:
   and so a rule whose own name begins `CheckoutErrors [`. How names are
   told apart can change as rules are added; a written name told apart is
   for a rule that will stay so.
-- **Bounds.** 2,000 expectations; each side's firings counted once, by
-  rule and week, whatever the expectations.
+- **Bounds.** 2,000 expectations and 2,000 catches in a file; the rules
+  that differ held to 100,000 at most, each rule to each budget and catch
+  that holds it, past which the run fails, saying what to do (a catch by
+  `rule:`, not `group:`; fewer rules compared at once); each side's
+  firings counted once, by rule and week, whatever the expectations.
 - **Out.** A section of the text, `--markdown` (right after the totals) and
   `--json` (`"expectations"`); four summary fields (`expected`,
   `expectations_broken`, `expectations_already_broken`, `unexpected`).

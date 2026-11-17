@@ -452,11 +452,15 @@ func (f *verdictFlags) readSignals(ctx context.Context, h history, incs []incide
 		// and the run says so rather than failing.
 		read, _, err := source.SeenFrom(ctx, h, s.expr, x.MatchOr(f.opts.Match), from, f.opts.To)
 		if err != nil {
-			fmt.Fprintf(f.warnTo(), "lapilli verdict: --impact %s: reading what it reads, by its match labels, a selector failed: %v; what it returned, and what the others read, tie its firings\n", s.name, err)
+			fmt.Fprintf(f.warnTo(), "lapilli verdict: --impact %s: reading what it reads, by its match labels, a selector failed: %s; what it returned, and what the others read, tie its firings\n", verdict.Clean(s.name), verdict.Clean(err.Error()))
 		}
 		seen.Merge(read)
 		x.Seen = seen
-		found = append(found, incident.FromSignal(in, f.step, x.For, x.Name, x.Match)...)
+		ws, err := incident.FromSignal(ctx, in, f.step, x.For, x.Name, x.Match)
+		if err != nil {
+			return nil, fmt.Errorf("--impact %s: %w", s.name, err)
+		}
+		found = append(found, ws...)
 		if x.Start, err = f.recordStart(ctx, h, s.expr, from); err != nil {
 			return nil, fmt.Errorf("--impact %s: looking for where the data it reads begins: %w", s.name, err)
 		}

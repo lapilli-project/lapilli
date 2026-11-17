@@ -31,7 +31,7 @@ get() {
   waits=0
   while :; do
     code=$(printf 'Authorization: Bearer %s\n' "$token" |
-      curl -sS --max-time 30 -H @- -H 'Accept: application/vnd.api+json' -D "$heads" -o "$got" -w '%{http_code}' "$1") || return 1
+      curl -q -sS --max-time 30 -H @- -H 'Accept: application/vnd.api+json' -D "$heads" -o "$got" -w '%{http_code}' "$1") || return 1
     case $code in
       2??)
         cat "$got"

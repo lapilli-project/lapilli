@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/signal"
@@ -1318,7 +1319,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 				return fail(fmt.Errorf("--on-call: schedule %s: %w", sc.Name, err))
 			}
 			for _, n := range feed.Notes {
-				fmt.Fprintf(stderr, "lapilli verdict: --on-call: schedule %s: passed over %s\n", sc.Name, verdict.Clean(n))
+				fmt.Fprintf(stderr, "lapilli verdict: --on-call: schedule %s: passed over %s\n", verdict.Clean(sc.Name), verdict.Clean(n))
 			}
 			verdict.OnCallNamed(sc.Name).Set(verdict.NewRota(feed.Turns, f.onCall.HoursOf()))
 		}
@@ -1444,7 +1445,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		cmp.PassedOver = f.passedOver
 		cmp.Summarize(f.incidents != "" || f.anyImpact())
 		if expAfter != nil {
-			cmp.Expect(expAfter, expBefore, f.opts.Hours)
+			if err := cmp.Expect(expAfter, expBefore, f.opts.Hours); err != nil {
+				return fail(fmt.Errorf("--expect %s: %w", f.expect, err))
+			}
 		}
 	case len(versions) > 0:
 		known, fs = replay.Run(ctx, h, versions, f.opts.From, f.opts.To, f.step, f.parallel)
@@ -1555,7 +1558,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			rep.NearMissesCut = !done
 			cut = cut || !done && ectx.Err() != nil
 			if err != nil && ectx.Err() == nil {
-				fmt.Fprintf(stderr, "lapilli verdict: looking for near misses: %v\n", err)
+				fmt.Fprintf(stderr, "lapilli verdict: looking for near misses: %s\n", verdict.Clean(err.Error()))
 			}
 		}
 		// With no record, what the firings of the rules that fired most were:
@@ -1565,7 +1568,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			rep.Unrecorded, err = source.Unrecorded(ectx, h, versions, rep, source.Judged(rep.Firings), f.step)
 			cut = cut || err != nil && ectx.Err() != nil
 			if err != nil && ectx.Err() == nil {
-				fmt.Fprintf(stderr, "lapilli verdict: looking at the firings with no record to judge them by: %v\n", err)
+				fmt.Fprintf(stderr, "lapilli verdict: looking at the firings with no record to judge them by: %s\n", verdict.Clean(err.Error()))
 			}
 		}
 		if cut {
@@ -1629,7 +1632,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		if err := send(ctx); err != nil {
-			fmt.Fprintf(stderr, "lapilli verdict: %v\n", err)
+			fmt.Fprintf(stderr, "lapilli verdict: %s\n", verdict.Clean(err.Error()))
 			failed = true
 		}
 	}
@@ -1717,10 +1720,15 @@ func (f *verdictFlags) forComment(c *verdict.Comparison, stderr io.Writer) {
 
 // scrubber takes where the history is out of a text: the URLs given, the
 // user names in them and their hosts, each as a whole word, any IP
-// address with its port, the tenants, and a Google Cloud project; more,
-// those of more flags (lapilli preflight's).
+// address with its port, an IPv6 one written without brackets among them,
+// the tenants, and a Google Cloud project, a whole word or the first label
+// of a name Google gives under it (googleNames); more, those of more flags
+// (lapilli preflight's).
 func (f *verdictFlags) scrubber(more ...[2]string) func(string) string {
-	type hid struct{ val, as string }
+	type hid struct {
+		val, as string
+		google  bool // the first label of a name Google gives under a project too
+	}
 	var hide []hid
 	given := [][2]string{{"--prometheus", f.promURL}, {"--loki", f.loki}, {"--grafana", f.grafana},
 		{"--ruler", f.ruler}, {"--gcp-project", f.gcpProj}, {"--ruler-tenant", f.rulerTenant}, {"--loki-tenant", f.lokiTenant}}
@@ -1729,11 +1737,11 @@ func (f *verdictFlags) scrubber(more ...[2]string) func(string) string {
 		if val == "" {
 			continue
 		}
-		hide = append(hide, hid{val, "[" + flag + "]"})
+		hide = append(hide, hid{val, "[" + flag + "]", flag == "--gcp-project"})
 		if u, err := url.Parse(val); err == nil && u.Host != "" {
-			hide = append(hide, hid{u.Host, "[" + flag + "]"}, hid{u.Hostname(), "[" + flag + "]"})
+			hide = append(hide, hid{u.Host, "[" + flag + "]", false}, hid{u.Hostname(), "[" + flag + "]", false})
 			if u.User != nil && u.User.Username() != "" {
-				hide = append(hide, hid{u.User.Username(), "[user]"})
+				hide = append(hide, hid{u.User.Username(), "[user]", false})
 			}
 		}
 	}
@@ -1741,13 +1749,56 @@ func (f *verdictFlags) scrubber(more ...[2]string) func(string) string {
 	return func(s string) string {
 		s = userinfo.ReplaceAllString(s, "$1")
 		for _, h := range hide {
-			s = replaceWord(s, h.val, h.as)
+			s = replaceName(s, h.val, h.as, h.google)
 		}
 		for _, h := range hide {
 			s = replaceCut(s, h.val, h.as)
 		}
-		return address.ReplaceAllString(s, "[address]")
+		return address.ReplaceAllString(addresses6(s, "[address]"), "[address]")
 	}
+}
+
+// addresses6 replaces in s each IPv6 address written without brackets, as
+// x509 ("valid for fd12:3456:789a::17") and Postgres (host "2001:db8::5")
+// write one, with with: a run of hex digits and colons, a dotted IPv4 at
+// its end or a zone or not, that no letter, digit or underscore touches,
+// that reads as an IPv6 address (net/netip) once a colon or a dot that
+// ends it, as a sentence's, is left out. A time (12:30:45) or a MAC
+// address doesn't read as one, nor does "::" alone, which holds no digit;
+// one in brackets is address's, with its port.
+func addresses6(s, with string) string {
+	word := func(r rune) bool { return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) }
+	reads := func(x string) bool {
+		a, err := netip.ParseAddr(x)
+		return err == nil && a.Is6() && strings.ContainsAny(x, "0123456789abcdefABCDEF")
+	}
+	var b strings.Builder
+	last := 0
+	for _, m := range address6.FindAllStringIndex(s, -1) {
+		i, j := m[0], m[1]
+		after, _ := utf8.DecodeRuneInString(s[j:])
+		if j < len(s) && word(after) {
+			continue
+		}
+		// A colon that only joins it to what is before (host:fd12::17).
+		if strings.HasPrefix(s[i:j], ":") && !strings.HasPrefix(s[i:j], "::") {
+			i++
+		}
+		before, _ := utf8.DecodeLastRuneInString(s[:i])
+		if i > 0 && (word(before) || before == '[') {
+			continue
+		}
+		for j > i && !reads(s[i:j]) && strings.ContainsAny(s[j-1:j], ".:") {
+			j--
+		}
+		if !reads(s[i:j]) {
+			continue
+		}
+		b.WriteString(s[last:i] + with)
+		last = j
+	}
+	b.WriteString(s[last:])
+	return b.String()
 }
 
 // replaceCut replaces in s what is left of old where a text was cut in it,
@@ -1785,16 +1836,34 @@ const UnreadHistory = "query failed: the history couldn't be read; the job's log
 var (
 	// userinfo is a URL's user and password.
 	userinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s"']*@`)
-	// address is an IP address, with its port if it has one.
-	address = regexp.MustCompile(`\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*\](:[0-9]+)?|\b([0-9]{1,3}\.){3}[0-9]{1,3}(:[0-9]+)?\b`)
+	// address is an IP address, with its port if it has one; in brackets,
+	// with its zone if it has one, as Go writes one ([fe80::1%en0]:5432)
+	// and a URL ([fe80::1%25en0]).
+	address = regexp.MustCompile(`\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(%[^\]\s]*)?\](:[0-9]+)?|\b([0-9]{1,3}\.){3}[0-9]{1,3}(:[0-9]+)?\b`)
+	// address6 is what may be an IPv6 address without brackets: addresses6
+	// says which is one.
+	address6 = regexp.MustCompile(`[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(%[0-9A-Za-z_.-]*[0-9A-Za-z_-])?`)
 )
+
+// googleNames are what follows a Google Cloud project in the names Google
+// gives under it, the project their first label: a service account's
+// email (writer@PROJECT.iam.gserviceaccount.com), a workload identity
+// pool (PROJECT.svc.id.goog), and an App Engine or Firebase app's host
+// (PROJECT.appspot.com, PROJECT.firebaseapp.com, PROJECT.web.app).
+var googleNames = []string{".iam.gserviceaccount.com", ".svc.id.goog", ".appspot.com", ".firebaseapp.com", ".web.app"}
 
 // replaceWord replaces in s each old that is a whole word, with with: no
 // letter, digit, dot, dash or underscore before it, and none but a dot
 // after it, a full stop, which no letter, digit, dash or underscore
 // follows. A host "prom" isn't taken out of "prometheus" or "prom.example",
 // but is out of "failed at prom.": as recipes/backtest/lib.sh takes it out.
-func replaceWord(s, old, with string) string {
+func replaceWord(s, old, with string) string { return replaceName(s, old, with, false) }
+
+// replaceName is replaceWord, and, with google, old as the first label of
+// a name Google gives under a Cloud project as well (googleNames). As the
+// first label of any other domain it is left: a project named monitoring
+// isn't taken out of monitoring.googleapis.com.
+func replaceName(s, old, with string, google bool) string {
 	if old == "" {
 		return s
 	}
@@ -1810,7 +1879,10 @@ func replaceWord(s, old, with string) string {
 		rest := s[i+len(old):]
 		after, n := utf8.DecodeRuneInString(rest)
 		next, _ := utf8.DecodeRuneInString(rest[n:])
-		whole := (i == 0 || !(before == '.' || alnum(before))) && (rest == "" || !(alnum(after) || after == '.' && alnum(next)))
+		under := google && slices.ContainsFunc(googleNames, func(name string) bool {
+			return len(rest) >= len(name) && strings.EqualFold(rest[:len(name)], name)
+		})
+		whole := (i == 0 || !(before == '.' || alnum(before))) && (rest == "" || under || !(alnum(after) || after == '.' && alnum(next)))
 		b.WriteString(s[:i])
 		if whole {
 			b.WriteString(with)
@@ -1949,7 +2021,7 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 		if err != nil {
 			return nil, err
 		}
-		a.Warn = func(what string) { fmt.Fprintf(stderr, "lapilli verdict: %s\n", what) }
+		a.Warn = warnLine(stderr)
 		more, _, err := a.Read(ctx)
 		if err != nil {
 			return nil, err
@@ -1965,8 +2037,7 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 	// A Loki's rules, beside the rest.
 	switch {
 	case f.lokiLoaded:
-		more, _, places, err := source.LokiLoaded(ctx, f.lokiSource(), "lapilli/"+buildVersion(),
-			func(what string) { fmt.Fprintf(stderr, "lapilli verdict: %s\n", what) })
+		more, _, places, err := source.LokiLoaded(ctx, f.lokiSource(), "lapilli/"+buildVersion(), warnLine(stderr))
 		if err != nil {
 			return nil, err
 		}
@@ -1979,7 +2050,7 @@ func readRules(ctx context.Context, f *verdictFlags, h history, stderr io.Writer
 				return nil, err
 			}
 			for _, n := range notes {
-				fmt.Fprintf(stderr, "lapilli verdict: %s\n", n)
+				warnLine(stderr)(n)
 			}
 			kept = appendMatching(kept, more, f.ruleRE)
 		}
@@ -2033,7 +2104,7 @@ func grafanaDataSources(ctx context.Context, f *verdictFlags, rs []rules.Rule, s
 			with = f.scrapeInterval.String() + ", --scrape-interval's"
 		}
 		fmt.Fprintf(stderr, "lapilli verdict: Grafana's data sources %s weren't read: their $__rate_interval is put in with a scrape interval of %s, and their queries are taken as PromQL\n",
-			strings.Join(missed, ", "), with)
+			verdict.Clean(strings.Join(missed, ", ")), with)
 	}
 	return ds, kinds
 }
@@ -2057,6 +2128,14 @@ func withRead(versions []replay.Version, read []rules.Rule) []replay.Version {
 	return out
 }
 
+// warnLine is a reader's Warn, and what it notes: each on a line of its
+// own, shown as it reads (verdict.Clean), as it names what a cloud, a
+// ruler or a Loki answered, an alarm's ID or a group's name, which may
+// hold an escape sequence or a line break.
+func warnLine(w io.Writer) func(string) {
+	return func(what string) { fmt.Fprintf(w, "lapilli verdict: %s\n", verdict.Clean(what)) }
+}
+
 // newAlarms is the reader of an --alarms, with its cloud's credentials;
 // tests replace it.
 var newAlarms = func(ctx context.Context, at alarmsFlag) (*source.Alarms, error) {
@@ -2077,7 +2156,7 @@ var newRuler = func(ctx context.Context, f *verdictFlags, stderr io.Writer) (*so
 	if err != nil {
 		return nil, err
 	}
-	r.Warn = func(what string) { fmt.Fprintf(stderr, "lapilli verdict: %s\n", what) }
+	r.Warn = warnLine(stderr)
 	r.Tenant, r.Reads.TokenFile = f.rulerTenant, f.rulerTk
 	if r.Kind != source.RulerConfig {
 		if r.Reads.Sign, err = cloud.Request(ctx, f.auth, f.ruler, ""); err != nil {

@@ -259,6 +259,55 @@ func TestImpactDataStandInDowngraded(t *testing.T) {
 	}
 }
 
+// A selector the ledger keeps that the expression serve holds doesn't read
+// is never asked for, though it has no data yet, nor are those of a
+// criterion the ledger names that serve doesn't hold: whoever can write
+// the ledger, a database's user with no token for Prometheus, makes serve
+// run no PromQL of theirs. The expression's own are looked for all the
+// same.
+func TestImpactDataOnlyHeldSelectors(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {}}
+	expr := `sum(probe_failed{code="5"}) / sum(probe_failed) > 0.5`
+	if code, body := askAs(t, s.Handler(), http.MethodPost, "/settings/impact", url.Values{"impact": {expr}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	s.jobs(ctx, false)
+	k, err := s.l.ImpactKept(ctx)
+	if err != nil || k.Data == nil {
+		t.Fatal(k, err)
+	}
+	written := *k.Data
+	written.Selectors = append(slices.Clone(written.Selectors), ledger.SelectorData{Sel: `secret_total{job="x"}`}, ledger.SelectorData{Sel: `up`, For: `probe_failed{code="5"}`, Of: "probe_failed"})
+	if err := s.l.SetImpactData(ctx, written); err != nil {
+		t.Fatal(err)
+	}
+	own := `count(probe_failed{code="5"})`
+	before := hist(s).exprs[own]
+	runDue(s, 2)
+	s.jobs(ctx, true)
+	for _, x := range []string{`count(secret_total{job="x"})`, `count(up)`} {
+		if n := hist(s).exprs[x]; n != 0 {
+			t.Errorf("%s asked %d times", x, n)
+		}
+	}
+	if hist(s).exprs[own] == before {
+		t.Errorf("%s, the expression's own, wasn't looked for again", own)
+	}
+	// Nor is a criterion the ledger names that serve doesn't hold.
+	ledgerExec(t, s, "UPDATE impact_signals SET criterion = ?, data = '' WHERE name = ''", "5m secret_total > 0")
+	if k, err := s.l.ImpactKept(ctx); err != nil || k.Criterion != "5m secret_total > 0" || k.Since.IsZero() || !k.Floor.IsZero() {
+		t.Fatalf("the record as written: %+v %v", k, err)
+	}
+	if err := s.impactData(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := hist(s).exprs["count(secret_total)"]; n != 0 {
+		t.Errorf("count(secret_total), of a criterion serve doesn't hold, asked %d times", n)
+	}
+}
+
 // A selector whose own data begins later than its stand-in's, a first 5xx,
 // begins by its stand-in: the page says from when, and by what.
 func TestImpactDataStandInEarlier(t *testing.T) {
@@ -844,7 +893,7 @@ func TestImpactLookForPassesFailing(t *testing.T) {
 	hist(s).failLong = map[string]bool{"count(a)": true}
 	cursor, _ := s.l.Cursor(ctx)
 	d := &ledger.ImpactData{Criterion: "5m a == 1 or b == 1", From: cursor.Add(-72 * time.Hour), Selectors: []ledger.SelectorData{{Sel: "a"}, {Sel: "b"}}}
-	if err := s.lookFor(ctx, "", d, cursor); err == nil {
+	if err := s.lookFor(ctx, "", d, cursor, "a == 1 or b == 1"); err == nil {
 		t.Error("a's failure isn't said")
 	}
 	if b := d.Selectors[1]; !b.To.Equal(cursor) || b.First.IsZero() {

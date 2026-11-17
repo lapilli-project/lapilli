@@ -1295,6 +1295,32 @@ func TestPRBodyIDsAsCode(t *testing.T) {
 	}
 }
 
+// TestPRBodyNamesAsCode: the rule's name, and a finding's detail, come
+// from whoever writes the rule's source: in the pull request's description,
+// and the task made of it, each is a code span, so a mention, an image or a
+// link in one notifies no one and shows nothing but its text.
+func TestPRBodyNamesAsCode(t *testing.T) {
+	s, _ := restartsServer(t, nil)
+	rule := "Errors @example-org/everyone <img src=https://evil.example/p.png> [approve](https://evil.example/x)"
+	detail := "runbook_url `https://evil.example` @example-org/everyone ![i](https://evil.example/i.png)"
+	ev := evidence{Finding: &contentFinding{Kind: "no_runbook", Key: "has no runbook", Detail: detail}}
+	raw, _ := json.Marshal(ev)
+	pr := s.prBody(proposalLine{Proposal: ledger.Proposal{ID: 1, Rule: rule, Kind: ledger.KindSays, Path: ledger.PathGit, Evidence: raw, Diff: "-a\n+b\n"}})
+	for _, want := range []string{"for the rule `" + rule + "`.",
+		"It answers the content check's no_runbook: has no runbook (`runbook_url 'https://evil.example' @example-org/everyone ![i](https://evil.example/i.png)`)."} {
+		if !strings.Contains(pr, want) {
+			t.Errorf("its description doesn't say %q:\n%s", want, pr)
+		}
+	}
+	// Outside its code spans and its diff, nothing of the names is left.
+	text, _, _ := strings.Cut(pr, "```diff")
+	for i, part := range strings.Split(text, "`") {
+		if i%2 == 0 && (strings.Contains(part, "@") || strings.Contains(part, "<img") || strings.Contains(part, "](")) {
+			t.Errorf("a name is read as Markdown: %q in\n%s", part, pr)
+		}
+	}
+}
+
 // TestReadTimeFailsSoft: what a proposal says when it is read is shown,
 // not decided by: an older version that won't parse leaves a proposal made
 // against it saying the for_outlasts it kept, the read going on; and when
@@ -1866,5 +1892,37 @@ func TestCloseOnce(t *testing.T) {
 	s.Close()
 	if n.Load() != 1 {
 		t.Errorf("the ledger closed %d times", n.Load())
+	}
+}
+
+// TestBodyCutClosed: a description cut to fit (a task's 10,000 bytes, a
+// host's limit) is cut at a line's end, so no code span is cut open and a
+// long name's mentions, images and links read as Markdown after it; a
+// fenced block cut open is closed. A name is cut before it is a span.
+func TestBodyCutClosed(t *testing.T) {
+	s, _ := restartsServer(t, nil)
+	evil := " @example-org/everyone ![i](https://evil.example/i.png) [x](https://evil.example/x)"
+	rule := "Errors" + strings.Repeat(evil, 120)
+	diff := strings.Repeat("-for: 1m\n+for: 5m\n", 1000)
+	pr := s.prBody(proposalLine{Proposal: ledger.Proposal{ID: 1, Rule: rule, Kind: ledger.KindFor, Path: ledger.PathGit, Diff: diff}})
+	for _, n := range []int{200, 400, 2000, 10000} {
+		got := mdCut(pr, n)
+		if len(got) > n {
+			t.Errorf("cut to %d: %d bytes", n, len(got))
+		}
+		open := false
+		for line := range strings.Lines(got) {
+			if strings.HasPrefix(line, "```") {
+				open = !open
+			} else if !open && strings.Count(line, "`")%2 != 0 {
+				t.Errorf("cut to %d: a span left open: %q", n, line)
+			}
+		}
+		if open {
+			t.Errorf("cut to %d: a fenced block left open:\n%s", n, got)
+		}
+	}
+	if line, _, _ := strings.Cut(pr, "\n"); len(line) > 2*mdMost {
+		t.Errorf("the first line is %d bytes", len(line))
 	}
 }

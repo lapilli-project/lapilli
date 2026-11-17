@@ -315,7 +315,8 @@ Each is held by the code and a test, not only said:
   of the last ten minutes. The credential endpoints are matched by host
   and action, `AssumeRole` among them.
 - **No write to the ledger.** SQLite is opened `mode=ro`, with `PRAGMA
-  query_only = ON`. Postgres is connected with
+  query_only = ON`, and so that nothing is made or written beside it (As
+  built, below). Postgres is connected with
   `default_transaction_read_only = on`, so a write fails at the server,
   whatever asked it.
 - **No call that opens the ledger for serve.** `internal/preflight` reads
@@ -399,8 +400,12 @@ rule source, 20 data sources at two each, Grafana's three templates reads
 and one permissions read, a discovery document and keys, a credential from
 each cloud's chain, each on-call feed. Each is asked under `--max-rate`,
 as serve asks, within ten seconds, and the whole within
-`--preflight-timeout`. It holds the rules in memory as serve's watcher
-does, and nothing else of size.
+`--preflight-timeout`. So are the estimates, which ask nothing but count
+a run's requests a run at a time over a day of runs, and the backfill's a
+day at a time: a pull request's flags and rules (a run every minute, ten
+years of backfill, `--backfill`'s most, thousands of rules) make that
+seconds, and what isn't counted once the time is up is unknown. It holds
+the rules in memory as serve's watcher does, and nothing else of size.
 
 ## Alternatives
 
@@ -473,11 +478,28 @@ can do:
   ALERTS count are asked as a range whose start is its end. The allowlist
   holds that form: the query's text exactly, the start and end within the
   last ten minutes, a step, nothing else.
-- **SQLite read-only takes `immutable` too.** Opened `mode=ro` alone, SQLite
-  makes a `-wal` and a `-shm` beside a ledger that has none, as a ledger
-  serve closed hasn't (`TestProbeSQLite` fails so). The probe adds
-  `immutable=1` when there is no `-wal`, so nothing is made; with one, a
-  serve has it open, and it is read through it, `mode=ro`.
+- **SQLite read-only takes `immutable` too, or more.** Opened `mode=ro`
+  alone, SQLite makes a `-wal` and a `-shm` beside a ledger that has none,
+  as a ledger serve closed hasn't (`TestProbeSQLite` fails so); makes the
+  `-shm` beside a `-wal` that has none (a serve that stopped hard and its
+  `-shm` cleared, a copy of the two files); and writes in a `-shm` that is
+  there, a reader's mark, or the whole index where it finds it stale. So
+  the probe opens it by what is beside it (`ledger.Probe`,
+  `TestProbeSQLiteBeside`): with no `-wal`, `immutable=1`; with a `-wal`
+  and a `-shm`, a serve's or one left, `readonly_shm=1`, so that SQLite
+  reads the index without writing it, or, where no serve holds it, builds
+  one of its own in memory; with a `-wal` and no `-shm`, through a file
+  system that has no write (`modernc.org/sqlite/vfs`), the index kept in
+  memory (`locking_mode=EXCLUSIVE`). Each reads what the `-wal` holds, a
+  migration not yet checkpointed among it; 0.53.0 to 0.55.0 made the
+  `-shm` in the third case, 32 KiB, which a serve run as another user
+  might not then open. A `ledger.db` that is a link is read where it
+  leads, and what is beside it looked for there, as SQLite looks
+  (`TestProbeSQLiteLink`): looked for beside the link, a `-wal` was
+  missed, and the file read without it. A file shorter than a page with a
+  `-wal` beside it isn't opened at all, and the item says it is cut short
+  (`TestProbeSQLiteCutShort`): SQLite takes it for an empty database, and,
+  opening it in a directory it may write, deletes the `-wal`.
 - **`history.grafana` asks through the proxy for Loki's data sources
   alone.** serve replays Grafana's rules of PromQL against `--prometheus`,
   not through Grafana's data source proxy; only a Loki data source's are
@@ -506,7 +528,22 @@ can do:
 - **What a server answered is redacted whole, then cut** at 200 bytes, so
   that a host cut in two is still found; and what the run learns is
   redacted too: the ledger's server, an on-call feed's URL, the keys a
-  sign-in's discovery names.
+  sign-in's discovery names. So are the ledger's user and database, as
+  pgx reads them (the string, a service file, `PGUSER` and `PGDATABASE`,
+  the user it runs as), which a Postgres that refuses the connection
+  names; and the session that holds the ledger's lock is said by its
+  number and when it connected, not its role, its name or its address.
+  The ledger's schema is said as the server's answer is, so it is
+  redacted alike: the search_path's first, `"$user"`, makes a schema
+  named after the user the ledger's (`TestPostgresSchemaSaid`).
+- **Every text of every item is shown as it reads, in one place.** Not
+  only what a server answered: why a rule can't be replayed, in a rule
+  file's own words (a classic condition's value), is outside text too, and
+  was printed as it came in 0.53.0 to 0.55.0. The report's redaction runs
+  `verdict.Clean` over every text of every item and what is left out,
+  before it redacts and cuts, for the text and the JSON alike; the marks
+  that say where a server's answer is hold a text drawn at random as the
+  process starts, so a file can't forge one.
 - **The nights count the days a catch-up waits.** Outside its hours its
   cursor stands, and each day is a day more to catch up (quota.md, 4): a
   catch-up day, on average, is added for each day that passes, and a night

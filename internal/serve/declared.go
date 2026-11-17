@@ -914,14 +914,15 @@ func (c *configShown) ErrText(lang string) string {
 	return strings.Join(out, "; ")
 }
 
-// forReader is c as a reader is shown it: why each problem is, for an
-// admin alone.
+// forReader is c as a reader is shown it: why each problem is, and the
+// file's path, which says how serve is run, as the other files' paths do
+// (redactPaths), for an admin alone.
 func (c *configShown) forReader(admin bool) *configShown {
 	if c == nil || admin {
 		return c
 	}
 	b := *c
-	b.Brief, b.Problems = true, nil
+	b.File, b.Brief, b.Problems = "", true, nil
 	for _, p := range c.Problems {
 		b.Problems = append(b.Problems, configProblem{Line: p.Line, Kind: p.Kind})
 	}

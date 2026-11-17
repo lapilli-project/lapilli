@@ -293,7 +293,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	if runs, err := s.l.Runs(ctx, 1); err != nil {
 		return nil, err
 	} else if len(runs) > 0 {
-		v.Run = &runs[0]
+		v.Run = &s.runsFor(runs, s.role(r) == admin, l)[0]
 	}
 	if v.Empty {
 		return v, nil

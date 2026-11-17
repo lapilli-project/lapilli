@@ -11,6 +11,7 @@ package preflight
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"slices"
@@ -127,7 +128,7 @@ func Run(ctx context.Context, c Config) *Report {
 	p.ledger(ctx)
 	p.signin(ctx)
 	p.access()
-	p.estimate(read)
+	p.estimate(ctx, read)
 	p.r.Asked = al.asked()
 	p.redact()
 	return p.r
@@ -148,14 +149,25 @@ type run struct {
 	h    *prom.Client
 	hErr error
 	ds   rules.DataSources
-	// hidden are what the run learned is to be redacted, by flag.
-	hidden [][2]string
+	// hidden are what the run learned is to be redacted, by flag;
+	// hiddenSaid what is to be redacted of what a server said only.
+	hidden, hiddenSaid [][2]string
 }
 
 // hide has what is printed redact value, as of flag.
 func (p *run) hide(flag, value string) {
 	if value != "" {
 		p.hidden = append(p.hidden, [2]string{flag, value})
+	}
+}
+
+// hideSaid has what a server said redact value, as of flag, and nothing
+// else: a name a server's answer repeats, as Postgres' refusal does the
+// user's and the database's, which may well be a word of Lapilli's own
+// (lapilli, postgres) that the rest of the report says.
+func (p *run) hideSaid(flag, value string) {
+	if value != "" {
+		p.hiddenSaid = append(p.hiddenSaid, [2]string{flag, value})
 	}
 }
 
@@ -166,12 +178,16 @@ func (p *run) offline(id, what string) {
 	p.add(Item{ID: id, State: Unknown, What: what, Why: "--offline: nothing is asked"})
 }
 
-// redact takes what isn't to be printed out of every text: the whole
-// text first, then what a server said cut, so that nothing to be
-// redacted is cut in two before it is looked for.
+// redact readies every text of the report to be printed, here and only
+// here, so that a check that puts a text from outside into an item
+// without readying it (a rule's reason, a name, a note) can't print it as
+// it came: each is shown as it reads first (shown), then what isn't to be
+// printed is taken out of the whole text, then what a server said is cut,
+// so that nothing to be redacted is cut in two before it is looked for.
+// The text and the JSON are both written from what it leaves.
 func (p *run) redact() {
-	scrub := p.c.Scrubber(p.hidden...)
-	done := func(s string) string { return cutSaid(scrub(s)) }
+	scrub, scrubSaid := p.c.Scrubber(p.hidden...), p.c.Scrubber(p.hiddenSaid...)
+	done := func(s string) string { return cutSaid(inSaid(scrub(shown(s)), scrubSaid)) }
 	for i := range p.r.Items {
 		it := &p.r.Items[i]
 		it.What, it.Why, it.Fix = done(it.What), done(it.Why), done(it.Fix)
@@ -182,12 +198,36 @@ func (p *run) redact() {
 }
 
 // What a server said is marked in a text until it is redacted, then cut
-// (cutSaid). No text holds the marks: verdict.Clean shows a NUL as text.
-const (
-	saidFrom = "\x00\x01"
-	saidTo   = "\x00\x02"
-	saidMost = 200
-)
+// (cutSaid). The marks hold a text drawn at random as the process starts,
+// which nothing from outside can know: a mark a rule file or a server's
+// answer holds is no mark, and is shown as text (shown), as any control
+// character is.
+var saidFrom, saidTo = marks()
+
+// saidMost is how much of what a server said is printed, in bytes.
+const saidMost = 200
+
+func marks() (string, string) {
+	n := rand.Text()
+	return "\x00" + n + "\x01", "\x00" + n + "\x02"
+}
+
+// shown has every part of s but the marks shown as it reads
+// (verdict.Clean): what turns text around or acts on a terminal, an
+// escape sequence, a direction mark, a NUL, is written as text. What a
+// server said was shown so as it was marked (said), and is the same shown
+// again.
+func shown(s string) string {
+	from := strings.Split(s, saidFrom)
+	for i, part := range from {
+		to := strings.Split(part, saidTo)
+		for j := range to {
+			to[j] = verdict.Clean(to[j])
+		}
+		from[i] = strings.Join(to, saidTo)
+	}
+	return strings.Join(from, saidFrom)
+}
 
 // said is what an error, or a server's answer in it, says: what turns
 // text around or acts on a terminal shown as text (verdict.Clean), on one
@@ -196,7 +236,35 @@ func said(err error) string {
 	if err == nil {
 		return ""
 	}
-	return saidFrom + verdict.Clean(strings.ReplaceAll(strings.TrimSpace(err.Error()), "\n", "; ")) + saidTo
+	return saidText(err.Error())
+}
+
+// saidText is a text a server gave, a name it answered with, as said has
+// it: shown as it reads, on one line, and redacted as what a server said
+// is (hideSaid).
+func saidText(s string) string {
+	return saidFrom + verdict.Clean(strings.ReplaceAll(strings.TrimSpace(s), "\n", "; ")) + saidTo
+}
+
+// inSaid is s with f applied to each part of it said marks, and to
+// nothing else; the marks are kept.
+func inSaid(s string, f func(string) string) string {
+	var b strings.Builder
+	for {
+		i := strings.Index(s, saidFrom)
+		if i < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		b.WriteString(s[:i+len(saidFrom)])
+		s = s[i+len(saidFrom):]
+		j := strings.Index(s, saidTo)
+		if j < 0 {
+			j = len(s)
+		}
+		b.WriteString(f(s[:j]))
+		s = s[j:]
+	}
 }
 
 // cutSaid cuts each part of s said marks to saidMost bytes, and takes the

@@ -3,9 +3,11 @@ package source
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -158,6 +160,51 @@ func TestAlarmsCloudWatch(t *testing.T) {
 				t.Errorf("the unit hashes apart from its document")
 			}
 		}
+	}
+}
+
+// A CloudWatch alarm whose AlarmName isn't the name its ARN ends in, which
+// CloudWatch never answers, is passed over as it is read, and said why;
+// read again alone, it is refused, so nothing checked as one alarm is
+// written as another. A metric alarm and a composite alike, and one with
+// no name.
+func TestAlarmsCloudWatchNamedApart(t *testing.T) {
+	ctx := context.Background()
+	cw := alarmtest.NewCloudWatch("eu-west-1")
+	promql := func(name string) map[string]any {
+		return map[string]any{"AlarmName": name, "EvaluationInterval": 60,
+			"EvaluationCriteria": map[string]any{"PromQLCriteria": map[string]any{"Query": "errors > 5"}}}
+	}
+	cw.Add(promql("checkout-5xx"), "OK", nil)
+	cw.Add(promql("payments-down"), "OK", nil)
+	cw.Add(promql("unnamed"), "OK", nil)
+	cw.AddComposite("shop-down", "ALARM(checkout-5xx)")
+	cw.Metric["payments-down"]["AlarmName"] = "checkout-decoy"
+	delete(cw.Metric["unnamed"], "AlarmName")
+	cw.Composite["shop-down"]["AlarmName"] = "checkout-composite"
+	a, _ := reader(t, "cloudwatch-prod", "https://monitoring.eu-west-1.amazonaws.com", cw)
+	var told []string
+	a.Warn = func(m string) { told = append(told, m) }
+	rs, docs, err := a.Read(ctx)
+	errs(t, &cw.Common)
+	if err != nil || len(docs) != 1 || len(rs) != 1 || rs[0].Name != "checkout-5xx" {
+		t.Fatalf("%d docs, %+v, %v", len(docs), rs, err)
+	}
+	if len(told) != 3 {
+		t.Fatalf("told %q", told)
+	}
+	for _, name := range []string{"payments-down", "unnamed", "shop-down"} {
+		if !slices.ContainsFunc(told, func(m string) bool {
+			return strings.Contains(m, cw.ARN(name)+" can't be read, and is passed over") && strings.Contains(m, "isn't the name its ARN ends in")
+		}) {
+			t.Errorf("%s not told: %q", name, told)
+		}
+		if u, err := a.Unit(ctx, cw.ARN(name), a.Reads); !errors.Is(err, ErrNamedApart) || u.Hash != "" {
+			t.Errorf("%s read again: %+v %v", name, u, err)
+		}
+	}
+	if u, err := a.Unit(ctx, cw.ARN("checkout-5xx"), a.Reads); err != nil || u.Gone {
+		t.Errorf("one named as its ARN: %+v %v", u, err)
 	}
 }
 

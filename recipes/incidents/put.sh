@@ -36,7 +36,7 @@ jq -c '.incidents[]' "$input" | while IFS= read -r one; do
   fi
   path=$(printf '%s' "$id" | jq -sRr @uri)
   code=$(printf 'Authorization: Bearer %s\n' "$token" |
-    curl -sS --max-time 30 --retry 5 --retry-max-time 120 -X PUT -H @- -H 'Content-Type: application/json' \
+    curl -q -sS --max-time 30 --retry 5 --retry-max-time 120 -X PUT -H @- -H 'Content-Type: application/json' \
       --data-binary "$one" -o /dev/null -w '%{http_code}' "$url/api/v1/incidents/$path") || code=failed
   case $code in
     2??) ;;

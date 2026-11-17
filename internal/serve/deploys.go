@@ -108,7 +108,10 @@ func readDeploys(path string) (*deploysFile, error) {
 		}
 		if root == nil {
 			if root, err = os.OpenRoot(filepath.Dir(path)); err != nil {
-				return nil, err
+				// Said by the file's path, as every error reading it is,
+				// which is taken out for whoever isn't an admin: not by its
+				// directory's.
+				return nil, unrooted(path, err)
 			}
 		}
 		hb, err := readInRoot(root, e.History)

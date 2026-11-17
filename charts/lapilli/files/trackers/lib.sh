@@ -128,13 +128,17 @@ epoch='def epoch: sub("\\.[0-9]+"; "") |
 
 # issue_text: the task on stdin as an issue's text, in Markdown, ending with
 # the marker its issue is found again by: a line of its own, always after
-# the task's text, so nothing in that text comes after it.
+# the task's text, so nothing in that text comes after it. The rule's, the
+# incident's, the team's and the assignee's names are each a code span: a
+# name chosen by whoever writes a rule's source, or an incident's, mentions
+# no one and shows no link or image in the issue.
 issue_text() {
-  jq -r '[.body // empty, "",
-    (if .rule then "Rule: \(.rule)" else empty end),
-    (if .incident then "Incident: \(.incident)" else empty end),
-    (if .team then "Team: \(.team)" else empty end),
-    (if .assignee then "Assignee: \(.assignee)" else empty end),
+  jq -r 'def code: gsub("`"; "'"'"'") | gsub("[\r\n]"; " ") | "`" + . + "`";
+    [.body // empty, "",
+    (if .rule then "Rule: \(.rule | code)" else empty end),
+    (if .incident then "Incident: \(.incident | code)" else empty end),
+    (if .team then "Team: \(.team | code)" else empty end),
+    (if .assignee then "Assignee: \(.assignee | code)" else empty end),
     (if .due then "Due: \(.due[0:10])" else empty end),
     (if .url then "In Lapilli: \(.url)" else empty end),
     "", "Kept in step with Lapilli: lapilli-task-\(.id)"] | join("\n")'
@@ -154,7 +158,7 @@ kept='def kept($m): [. // "" | split("\n")[] | rtrimstr("\r") | select(startswit
 # for gone.
 fetch() {
   : >"$work/answer"
-  if ! code=$(curl -sS --max-time 30 --retry 3 -o "$work/answer" -w '%{http_code}' "$@"); then
+  if ! code=$(curl -q -sS --max-time 30 --retry 3 -o "$work/answer" -w '%{http_code}' "$@"); then
     code=000
   fi
   printf '%s\n' "$code" >"$work/status"
@@ -188,7 +192,7 @@ lapilli_tasks() {
       exit 1
     fi
     if ! printf 'Authorization: Bearer %s\n' "$lapilli_token" |
-      curl -fsS --max-time 30 --retry 3 -H @- -o "$work/page" "$lapilli/api/v1/tasks?$1&after=$after"; then
+      curl -q -fsS --max-time 30 --retry 3 -H @- -o "$work/page" "$lapilli/api/v1/tasks?$1&after=$after"; then
       say "Lapilli didn't give the tasks"
       exit 1
     fi
@@ -211,14 +215,14 @@ lapilli_tasks() {
 # lapilli_patch ID JSON: set a task's link or status.
 lapilli_patch() {
   printf 'Authorization: Bearer %s\n' "$lapilli_token" |
-    curl -fsS --max-time 30 --retry 3 -X PATCH -H @- -H 'Content-Type: application/json' \
+    curl -q -fsS --max-time 30 --retry 3 -X PATCH -H @- -H 'Content-Type: application/json' \
       --data-binary "$2" -o /dev/null "$lapilli/api/v1/tasks/$1"
 }
 
 # lapilli_comments ID FILE: a task's comments, as Lapilli has them.
 lapilli_comments() {
   if ! printf 'Authorization: Bearer %s\n' "$lapilli_token" |
-    curl -fsS --max-time 30 --retry 3 -H @- -o "$2" "$lapilli/api/v1/tasks/$1/comments"; then
+    curl -q -fsS --max-time 30 --retry 3 -H @- -o "$2" "$lapilli/api/v1/tasks/$1/comments"; then
     return 1
   fi
   jq -e '.comments | type == "array"' "$2" >/dev/null 2>&1
@@ -231,7 +235,7 @@ lapilli_comments() {
 lapilli_copy() {
   : >"$work/copied"
   printf 'Authorization: Bearer %s\n' "$lapilli_token" |
-    curl -sS --max-time 30 --retry 3 -X POST -H @- -H 'Content-Type: application/json' \
+    curl -q -sS --max-time 30 --retry 3 -X POST -H @- -H 'Content-Type: application/json' \
       --data-binary "$2" -o "$work/copied" -w '%{http_code}' "$lapilli/api/v1/tasks/$1/comments" || printf '000'
 }
 
@@ -239,7 +243,7 @@ lapilli_copy() {
 # the task's issue as REF, so it is never posted again.
 lapilli_mark() {
   printf 'Authorization: Bearer %s\n' "$lapilli_token" |
-    curl -fsS --max-time 30 --retry 3 -X PATCH -H @- -H 'Content-Type: application/json' \
+    curl -q -fsS --max-time 30 --retry 3 -X PATCH -H @- -H 'Content-Type: application/json' \
       --data-binary "$(jq -cn --arg r "$3" '{posted: $r}')" -o /dev/null "$lapilli/api/v1/tasks/$1/comments/$2"
 }
 

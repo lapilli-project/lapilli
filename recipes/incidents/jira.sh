@@ -58,7 +58,7 @@ while :; do
   fi
   url="$JIRA_URL/rest/api/3/search/jql?jql=$jql&maxResults=100&fields=$fields"
   [ -z "$next" ] || url="$url&nextPageToken=$(printf '%s' "$next" | jq -sRr @uri)"
-  page=$(printf 'Authorization: Basic %s\n' "$auth" | curl -fsS --max-time 30 -H @- -H 'Accept: application/json' "$url")
+  page=$(printf 'Authorization: Basic %s\n' "$auth" | curl -q -fsS --max-time 30 -H @- -H 'Accept: application/json' "$url")
   printf '%s' "$page" | jq -c '.issues[]' >>"$all"
   was=$next
   next=$(printf '%s' "$page" | jq -r 'if .isLast then empty else .nextPageToken // empty end')

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/preflight"
+	"lapilli.dev/internal/verdict"
 )
 
 const preflightUsage = `lapilli preflight says what lapilli serve will meet before it is deployed,
@@ -60,7 +61,7 @@ func runPreflight(args []string, stdout, stderr io.Writer) int {
 	timeout := 2 * time.Minute
 	var rest []string
 	refuse := func(err error) int {
-		fmt.Fprintf(stderr, "lapilli preflight: %v\nRun \"lapilli preflight -h\" for the options.\n", err)
+		fmt.Fprintf(stderr, "lapilli preflight: %s\nRun \"lapilli preflight -h\" for the options.\n", verdict.Clean(err.Error()))
 		return 2
 	}
 	for i := 0; i < len(args); i++ {

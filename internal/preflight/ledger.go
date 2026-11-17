@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"lapilli.dev/internal/ledger"
@@ -67,6 +68,13 @@ func (p *run) sqlite(ctx context.Context) {
 		notes = append(notes, fmt.Sprintf("%s free", bytesOf(free)))
 	}
 	pr, err := ledger.Probe(ctx, dir)
+	if errors.Is(err, ledger.ErrCutShort) {
+		p.add(Item{ID: "ledger.sqlite", State: Problem, What: "--ledger " + dir + ": the ledger's file is cut short",
+			Why: "ledger.db is shorter than a page of SQLite's, with a write-ahead log (-wal) beside it, which holds the ledger: " +
+				"SQLite, opening the file, takes it for an empty database and deletes the log. The probe didn't open it",
+			Fix: "keep a copy of the directory, and put ledger.db back from a copy before serve starts: serve would open it, and the log would be lost"})
+		return
+	}
 	if err != nil {
 		p.add(Item{ID: "ledger.sqlite", State: Problem, What: "--ledger " + dir + ": the ledger can't be read", Why: said(err)})
 		return
@@ -85,19 +93,33 @@ func (p *run) postgres(ctx context.Context) {
 		p.add(Item{ID: "ledger.postgres", State: Problem, What: "--ledger-url-file can't be read", Why: said(err)})
 		return
 	}
-	// The server's name, and the user's, are the file's as much as its
-	// password is: said in neither what the server answers nor the TLS
-	// warning.
+	// The server's name, the user's and the database's are the file's as
+	// much as its password is: said in neither what the server answers (a
+	// refusal names the user and the database) nor the TLS warning. The
+	// lock's holder is said by its session, never its role or its name.
 	for _, h := range ledger.Hosts(string(b)) {
 		p.hide("--ledger-url-file", h)
 	}
+	user, database := ledger.Names(string(b))
+	p.hideSaid("--ledger-url-file's user", user)
+	p.hideSaid("--ledger-url-file's database", database)
 	pr, err := ledger.ProbePostgres(ctx, string(b))
 	if err != nil {
 		p.add(Item{ID: "ledger.postgres", State: Problem, What: "the ledger's database can't be read", Why: said(err),
 			Fix: "check the connection string, the server's address and TLS, and the user"})
 		return
 	}
+	p.postgresProbed(pr)
+}
+
+// postgresProbed is the item of a Postgres ledger, as its probe read it.
+// The schema is said as what the server said is (saidText): it is the
+// server's answer, and the search_path's first ("$user") makes a schema
+// named after the user the ledger's, whose name the rest of what the
+// server said doesn't say.
+func (p *run) postgresProbed(pr ledger.Probed) {
 	state, what, fix := schemaSays(pr)
+	schema := saidText(strconv.Quote(pr.Schema))
 	var notes []string
 	if pr.Warning != "" {
 		notes = append(notes, pr.Warning)
@@ -105,14 +127,24 @@ func (p *run) postgres(ctx context.Context) {
 	needsCreate := !pr.There || pr.Version < pr.Knows
 	switch {
 	case needsCreate && !pr.Create:
-		state, fix = Problem, fmt.Sprintf("the user may not create in schema %q, which making or upgrading the ledger needs: grant CREATE on it, or run the first start as its owner", pr.Schema)
+		state, fix = Problem, "the user may not create in schema "+schema+", which making or upgrading the ledger needs: grant CREATE on it, or run the first start as its owner"
 	case pr.Holder != nil && pr.Holder.Alone:
 		state, fix = Problem, "a process holds the ledger alone, as a copy does: serve is refused until it is done"
-		notes = append(notes, said(pr.Holder))
+		notes = append(notes, heldBy(pr.Holder))
 	case pr.Holder != nil:
 		notes = append(notes, fmt.Sprintf("a serve holds the ledger's lock now (Postgres session %d): replicas share it, and the probe took none", pr.Holder.PID))
 	}
-	p.add(Item{ID: "ledger.postgres", State: state, What: what + fmt.Sprintf(", in schema %q", pr.Schema), Why: strings.Join(notes, "; "), Fix: fix})
+	p.add(Item{ID: "ledger.postgres", State: state, What: what + ", in schema " + schema, Why: strings.Join(notes, "; "), Fix: fix})
+}
+
+// heldBy says the session that holds the ledger's lock by its number and
+// when it connected: not by the role it connected as, nor the name it
+// gave itself, nor where it came from, which are a database's user, a
+// process's choosing and an address.
+func heldBy(h *ledger.LockedError) string {
+	shown := *h
+	shown.Role, shown.App, shown.From = "", "", ""
+	return said(&shown)
 }
 
 // signin asks the sign-in what serve would at start: --oidc-issuer's

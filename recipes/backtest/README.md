@@ -535,9 +535,10 @@ reasons forks are kept out.
   argument, as it is; `PATHS` split at spaces, never expanded. The
   action's inputs reach its script as variables, never in its text.
 - What the recipe copies to the job's log is each line after a `| `,
-  control characters taken out and Azure's `##vso[` made inert: GitHub's
-  and Gitea's `::` commands are read only at a line's start, so none of it
-  is a command, an annotation or a mask.
+  control characters taken out, and Azure's `##vso[` and GitHub's older
+  `##[` (both read anywhere in a line) made inert: GitHub's and Gitea's
+  `::` commands are read only at a line's start, so none of it is a
+  command, an annotation or a mask.
 - The token is read from a file and given to `curl` on stdin, never on a
   command line, which `ps` shows. `curl` reads no `.curlrc`, speaks only
   HTTP and HTTPS, follows no redirect from a host's API, and a release's

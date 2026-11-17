@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -1030,7 +1032,7 @@ func TestTrackerRecipes(t *testing.T) {
 				t.Errorf("said:\n%s", out)
 			}
 			i := f.copyOf(2)
-			for _, want := range []string{"Too loud at night.", "Rule: Errors", "Team: payments", "Assignee: bo", "In Lapilli: https://lapilli.example.com/tasks/1", "lapilli-task-1"} {
+			for _, want := range []string{"Too loud at night.", "Rule: `Errors`", "Team: `payments`", "Assignee: `bo`", "In Lapilli: https://lapilli.example.com/tasks/1", "lapilli-task-1"} {
 				if !strings.Contains(i.body, want) {
 					t.Errorf("the issue's text has no %q:\n%s", want, i.body)
 				}
@@ -1163,6 +1165,40 @@ func TestTrackerRecipes(t *testing.T) {
 // task to any issue: only an issue the job's own account made, for that
 // task (and labelled lapilli, in its team), is taken for the task's,
 // followed, or closed.
+// TestTrackerIssueTextNamesAsCode: a rule's, an incident's, a team's and
+// an assignee's name in an issue's text are each a code span, so a name
+// chosen by whoever writes a rule's source mentions no one and shows no
+// link or image in the tracker; a backtick or a line break in one can't
+// end it.
+func TestTrackerIssueTextNamesAsCode(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("no jq")
+	}
+	lib, err := os.ReadFile(filepath.Join("..", "..", "recipes", "trackers", "lib.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The function alone: the rest of lib.sh reads a recipe's settings.
+	start := bytes.Index(lib, []byte("issue_text() {"))
+	end := bytes.Index(lib[start:], []byte("\n}\n"))
+	if start < 0 || end < 0 {
+		t.Fatal("no issue_text in lib.sh")
+	}
+	evil := "Errors @example-org/everyone ![i](https://evil.example/i.png) `x`\nnext"
+	task, _ := json.Marshal(map[string]any{"id": 7, "rule": evil, "incident": evil, "team": evil, "assignee": evil})
+	cmd := exec.Command("sh", "-c", string(lib[start:start+end+3])+"issue_text")
+	cmd.Stdin = bytes.NewReader(task)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"Rule", "Incident", "Team", "Assignee"} {
+		if want := field + ": `Errors @example-org/everyone ![i](https://evil.example/i.png) 'x' next`\n"; !strings.Contains(string(out), want) {
+			t.Errorf("the issue's text has no %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestTrackerRecipesOnlyTheirOwn(t *testing.T) {
 	needTools(t)
 	for name := range trackerAPIs {

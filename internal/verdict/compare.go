@@ -54,9 +54,14 @@ type Comparison struct {
 
 // Expect holds the rules the change touches to after's expectations, and
 // the side before to before's when it is given; it counts on the summary
-// what the change broke.
-func (c *Comparison) Expect(after, before *Expectations, hours *Hours) {
-	c.Expectations = CheckExpectations(c, after, before, hours)
+// what the change broke. Held to more than MaxExpectResults, it holds
+// nothing, and says why.
+func (c *Comparison) Expect(after, before *Expectations, hours *Hours) error {
+	k, err := CheckExpectations(c, after, before, hours)
+	if err != nil {
+		return err
+	}
+	c.Expectations = k
 	if c.Summary != nil {
 		c.Summary.Expected = true
 		c.Summary.ExpectationsBroken = c.Expectations.Broken()
@@ -67,6 +72,7 @@ func (c *Comparison) Expect(after, before *Expectations, hours *Hours) {
 		}
 		c.Summary.Unexpected = len(c.Expectations.Unexpected)
 	}
+	return nil
 }
 
 // RecordingChange is a recording rule that differs between the two sets:

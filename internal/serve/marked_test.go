@@ -774,3 +774,95 @@ func TestDigestGoalsFailStill(t *testing.T) {
 		t.Error("a digest whose goals can't be read went out")
 	}
 }
+
+// The windows an editor makes in the UI take the UI's share of the kinds
+// and no more: the marked file, which names the rest of the kinds and one
+// of the editor's, is kept whole.
+func TestMarkedUIKindsLeaveTheFiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "marked.yaml")
+	os.WriteFile(path, []byte("marked: []\n"), 0o644)
+	s, _, _ := rolesServer(t, func(c *Config) { c.Marked = path })
+	h := s.Handler()
+	ctx := context.Background()
+	const ed = "ed@example.com"
+	for i := range ledger.MaxKinds {
+		body := fmt.Sprintf(`{"kind": "k%c", "title": "w%d", "start": "2026-11-02T00:00:00Z", "end": "2026-11-02T01:00:00Z"}`, 'a'+i, i)
+		code, out := callAs(t, h, "POST", "/api/v1/marked", ed, "", body, "same-origin")
+		switch {
+		case i < ledger.MarkedUIKinds && code != http.StatusCreated:
+			t.Fatalf("the editor's window %d: %d %s", i+1, code, out)
+		case i >= ledger.MarkedUIKinds && (code != http.StatusBadRequest || !strings.Contains(out, "made in the UI would take")):
+			t.Fatalf("the editor's window %d, of a kind past the UI's share: %d %s", i+1, code, out)
+		}
+	}
+	var b strings.Builder
+	b.WriteString("marked:\n  - {kind: ka, title: Also the UI's kind, start: 2026-11-09T00:00:00Z, end: 2026-11-09T01:00:00Z}\n")
+	for i := range ledger.MaxKinds - ledger.MarkedUIKinds {
+		fmt.Fprintf(&b, "  - {kind: sale-%d, title: Sale %d, start: 2026-11-07T00:00:00Z, end: 2026-11-08T00:00:00Z}\n", i, i)
+	}
+	os.WriteFile(path, []byte(b.String()), 0o644)
+	if err := s.syncMarked(ctx, s.cfg.Options); err != nil {
+		t.Fatalf("the marked file, after an editor made all the kinds they could: %v", err)
+	}
+	ms, err := s.l.AllMarked(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := 0
+	for _, m := range ms {
+		if m.Origin == ledger.OriginFile {
+			file++
+		}
+	}
+	if want := ledger.MaxKinds - ledger.MarkedUIKinds + 1; file != want {
+		t.Errorf("%d of the file's windows kept, want %d", file, want)
+	}
+}
+
+// The windows an editor makes in the UI take the UI's share of a kind's
+// week and no more: the marked file's windows of that kind in that week,
+// the rest of the week's, are kept, with its others.
+func TestMarkedUIKindWeekLeavesTheFiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "marked.yaml")
+	os.WriteFile(path, []byte("marked: []\n"), 0o644)
+	s, _, _ := rolesServer(t, func(c *Config) { c.Marked = path })
+	h := s.Handler()
+	ctx := context.Background()
+	const ed = "ed@example.com"
+	start := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC) // a Monday
+	for i := range ledger.MarkedUIKindWeek + 1 {
+		a := start.Add(time.Duration(i) * time.Hour)
+		body := fmt.Sprintf(`{"kind": "sale", "title": "w%d", "start": %q, "end": %q}`, i, a.Format(time.RFC3339), a.Add(30*time.Minute).Format(time.RFC3339))
+		code, out := callAs(t, h, "POST", "/api/v1/marked", ed, "", body, "same-origin")
+		switch {
+		case i < ledger.MarkedUIKindWeek && code != http.StatusCreated:
+			t.Fatalf("the editor's window %d: %d %s", i+1, code, out)
+		case i == ledger.MarkedUIKindWeek && (code != http.StatusBadRequest || !strings.Contains(out, "of kind sale made in the UI")):
+			t.Fatalf("the editor's window %d, past the UI's share of the week: %d %s", i+1, code, out)
+		}
+	}
+	var b strings.Builder
+	b.WriteString("marked:\n  - {kind: launch, title: Another kind, start: 2026-12-01T00:00:00Z, end: 2026-12-01T01:00:00Z}\n")
+	thu := start.Add(3 * 24 * time.Hour)
+	for i := range ledger.MarkedKindWeek - ledger.MarkedUIKindWeek {
+		a := thu.Add(time.Duration(i) * time.Hour)
+		fmt.Fprintf(&b, "  - {kind: sale, title: Sale %d, start: %s, end: %s}\n", i, a.Format(time.RFC3339), a.Add(30*time.Minute).Format(time.RFC3339))
+	}
+	os.WriteFile(path, []byte(b.String()), 0o644)
+	if err := s.syncMarked(ctx, s.cfg.Options); err != nil {
+		t.Fatalf("the marked file, after an editor filled their share of the week: %v", err)
+	}
+	ms, err := s.l.AllMarked(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := 0
+	for _, m := range ms {
+		if m.Origin == ledger.OriginFile {
+			file++
+		}
+	}
+	if want := ledger.MarkedKindWeek - ledger.MarkedUIKindWeek + 1; file != want {
+		t.Errorf("%d of the file's windows kept, want %d", file, want)
+	}
+}

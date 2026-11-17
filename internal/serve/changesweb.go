@@ -627,7 +627,10 @@ func (s *Server) prBody(l proposalLine) string {
 	p := l.Proposal
 	ev := proposalEvidence(p)
 	var b strings.Builder
-	fmt.Fprintf(&b, "Lapilli proposal #%d: %s, for the rule %s.\n\n", p.ID, kindText(p.Kind), p.Rule)
+	// The rule's name, as every name and text from a rule's source here, as
+	// code: one chosen by whoever writes that source mentions no one, and
+	// shows no image or link, in the pull request or the task made of it.
+	fmt.Fprintf(&b, "Lapilli proposal #%d: %s, for the rule %s.\n\n", p.ID, kindText(p.Kind), mdCode(p.Rule))
 	if p.Kind == ledger.KindUndo {
 		// Nothing of why the change was made, nor its backtest, which says
 		// what it did: an undo made before kept them.
@@ -667,7 +670,7 @@ func (s *Server) prBody(l proposalLine) string {
 	if f := ev.Finding; f != nil {
 		fmt.Fprintf(&b, "It answers the content check's %s: %s", f.Kind, f.Key)
 		if f.Detail != "" {
-			fmt.Fprintf(&b, " (%s)", strings.ReplaceAll(f.Detail, "`", "'"))
+			fmt.Fprintf(&b, " (%s)", mdCode(clip(f.Detail, 300)))
 		}
 		b.WriteString(".\n\n")
 	}
@@ -699,13 +702,52 @@ var mdID = strings.NewReplacer("`", "'", "\r", " ", "\n", " ")
 func mdIDs(ids []string) string {
 	out := make([]string, len(ids))
 	for i, id := range ids {
-		if x := mdID.Replace(id); strings.TrimSpace(x) == "" {
-			out[i] = "(none)"
-		} else {
-			out[i] = "`" + x + "`"
-		}
+		out[i] = mdCode(id)
 	}
 	return strings.Join(out, ", ")
+}
+
+// mdCode is a name or a text from outside as one code span (mdID), so
+// that nothing in it (a mention, a link, an image, HTML) is read as
+// Markdown; one with nothing in it is "(none)". It is cut to mdMost bytes
+// first, so that the span is a line's part, never a line cut in two.
+func mdCode(s string) string {
+	if len(s) > mdMost {
+		s = clip(s, mdMost) + "…"
+	}
+	if x := mdID.Replace(s); strings.TrimSpace(x) != "" {
+		return "`" + x + "`"
+	}
+	return "(none)"
+}
+
+// mdMost is how much of a name or a text from outside a pull request's
+// description, or a task's, holds: more than a rule's name is.
+const mdMost = 512
+
+// mdCut is a description in Markdown cut to n bytes at most at a line's
+// end, never within one, so that no code span is cut open and what it
+// holds read as Markdown after it; a fenced block cut open is closed.
+func mdCut(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	s = s[:n-len("```\n")]
+	if i := strings.LastIndexByte(s, '\n'); i >= 0 {
+		s = s[:i+1]
+	} else {
+		s = ""
+	}
+	open := false
+	for line := range strings.Lines(s) {
+		if strings.HasPrefix(line, "```") {
+			open = !open
+		}
+	}
+	if open {
+		s += "```\n"
+	}
+	return s
 }
 
 // kindText is what a kind of proposal does, in English.
@@ -1048,7 +1090,7 @@ func (s *Server) postProposalTask(w http.ResponseWriter, r *http.Request) {
 	// tracker job opens for a task without one. Its page shows the
 	// proposal's pull request, through the proposal.
 	t := ledger.Task{Title: clip(fmt.Sprintf("Proposal #%d: %s, %s", p.ID, kindText(p.Kind), p.Rule), 200), Kind: kind, Rule: p.Rule,
-		Body: clip(s.prBody(ls[0]), 10000)}
+		Body: mdCut(s.prBody(ls[0]), 10000)}
 	id, err := s.l.PutTask(ctx, t, s.user(r))
 	if err != nil {
 		s.oops(w, r, err)

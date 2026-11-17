@@ -283,13 +283,20 @@ func fromHere(r *http.Request) bool {
 // reporting whether they may: in the ledger the replicas share, or this
 // process's.
 func (s *Server) takeTry(ctx context.Context, who string) bool {
+	return s.takeOf(ctx, &s.impactTries, "impact-tries/", impactTriesAnHour, who)
+}
+
+// takeOf counts one of who's tries in t, most of them an hour, reporting
+// whether they may: in the ledger the replicas share, in a bucket named
+// by prefix and who, or else in t, this process's.
+func (s *Server) takeOf(ctx context.Context, t *tries, prefix string, most int, who string) bool {
 	if !s.l.Shared() {
-		return s.impactTries.take(who, false, time.Now())
+		return t.take(who, false, time.Now())
 	}
 	sum := sha256.Sum256([]byte(ledger.FoldName(who)))
-	ok, err := s.l.Take(ctx, "impact-tries/"+hex.EncodeToString(sum[:8]), impactTriesAnHour/3600.0, impactTriesAnHour, 1)
+	ok, err := s.l.Take(ctx, prefix+hex.EncodeToString(sum[:8]), float64(most)/3600, float64(most), 1)
 	if err != nil {
-		s.log.Warn("the shared limit on tries of the incident criteria couldn't be read: refused", "err", err)
+		s.log.Warn("a shared limit on tries couldn't be read: refused", "limit", strings.TrimSuffix(prefix, "/"), "err", err)
 	}
 	return ok && err == nil
 }
@@ -515,7 +522,8 @@ func (s *Server) readOver(ctx context.Context, c criterion, from, to time.Time) 
 	if d.Selectors, err = s.firstSamples(ctx, c.Expr, from, to, true); err != nil {
 		return nil, d, err
 	}
-	return incident.FromImpact(series, s.cfg.Step, c.For), d, nil
+	ws, err := incident.FromImpact(ctx, series, s.cfg.Step, c.For)
+	return ws, d, err
 }
 
 // postImpact saves the incident criteria, an admin's: an expression that
@@ -783,8 +791,12 @@ func (s *Server) impactAgain(ctx context.Context, o verdict.Options) (bool, erro
 	if err == nil {
 		sels, err = s.firstSamples(rctx, c.Expr, from, cursor, true)
 	}
+	var windows []incident.Incident
 	if err == nil {
-		err = s.l.ReadAgain(ctx, ledger.ImpactRead{From: from, To: cursor, Criterion: c.key(), Windows: incident.FromImpact(series, s.cfg.Step, c.For),
+		windows, err = incident.FromImpact(rctx, series, s.cfg.Step, c.For)
+	}
+	if err == nil {
+		err = s.l.ReadAgain(ctx, ledger.ImpactRead{From: from, To: cursor, Criterion: c.key(), Windows: windows,
 			Data: ledger.ImpactData{From: from, CheckedTo: cursor, Selectors: sels}}, o)
 		if errors.Is(err, ledger.ErrRunsMoved) {
 			return false, nil // read again at the next round, to where they are
@@ -854,18 +866,56 @@ func (s *Server) impactDataOf(ctx context.Context, name string, kept *ledger.Imp
 		rctx, cancel = context.WithTimeout(ctx, s.cfg.Timeout)
 		defer cancel()
 	}
+	// What is looked for is of the expression serve runs, not of the one
+	// the record names: a record kept by another, until it is read again,
+	// has nothing of it looked for.
+	expr, err := s.heldExpr(ctx, name)
+	if err != nil {
+		return err
+	}
+	if expr == "" || exprOfKey(k.Criterion) != expr {
+		return nil
+	}
 	d := k.Data
 	if d == nil || d.Criterion != k.Criterion {
 		d = &ledger.ImpactData{Criterion: k.Criterion, From: k.Since}
 	}
-	return s.lookFor(rctx, name, d, cursor)
+	return s.lookFor(rctx, name, d, cursor, expr)
+}
+
+// heldExpr is the expression serve runs for a signal, by name, "" for the
+// unnamed one: a named one's as serve was started (--impact NAME=PROMQL,
+// --impact-file), and the unnamed one's, the criterion in effect, which
+// the runs read; "" for none. The criterion in effect is the one the
+// Settings page keeps in the ledger, when it keeps one (criterionOf), so
+// the unnamed signal's can be what whoever can write the ledger wrote
+// there: the ledger is guarded as serve's tokens are (SECURITY.md).
+func (s *Server) heldExpr(ctx context.Context, name string) (string, error) {
+	if name != "" {
+		for _, d := range s.cfg.Signals {
+			if d.Name == name {
+				return d.Expr, nil
+			}
+		}
+		return "", nil
+	}
+	c, err := s.criterion(ctx)
+	return c.Expr, err
 }
 
 // lookFor looks, of d's selectors, for where the data of those with none
 // found yet begins, each from where its last look got to up to cursor, and
 // keeps what it found: of each it could look at, a selector that fails
-// passing to the next, and returning the last failure.
-func (s *Server) lookFor(ctx context.Context, name string, d *ledger.ImpactData, cursor time.Time) error {
+// passing to the next, and returning the last failure. Only the selectors
+// expr, the expression serve runs (heldExpr), reads (ledger.SelectorsOf)
+// are asked for: a selector kept beside the record, in d, is asked for
+// when it is one of them, never one outside the expression serve runs.
+// That is all this guards: it doesn't say who wrote expr.
+func (s *Server) lookFor(ctx context.Context, name string, d *ledger.ImpactData, cursor time.Time, expr string) error {
+	want, err := ledger.SelectorsOf(expr)
+	if err != nil {
+		return err
+	}
 	if d.Selectors != nil {
 		if err := withStandIns(d); err != nil {
 			return err
@@ -875,12 +925,8 @@ func (s *Server) lookFor(ctx context.Context, name string, d *ledger.ImpactData,
 		return nil
 	}
 	if d.Selectors == nil {
-		sels, err := ledger.SelectorsOf(exprOfKey(d.Criterion))
-		if err != nil {
-			return err
-		}
-		d.Selectors = append([]ledger.SelectorData{}, sels...)
-		if len(sels) == 0 {
+		d.Selectors = append([]ledger.SelectorData{}, want...)
+		if len(want) == 0 {
 			// Reading no selector (vector(1)), it has data all along.
 			d.CheckedTo = cursor
 			return s.l.SetSignalData(ctx, name, *d)
@@ -890,6 +936,9 @@ func (s *Server) lookFor(ctx context.Context, name string, d *ledger.ImpactData,
 	for i, x := range d.Selectors {
 		if !x.First.IsZero() || x.For != "" && !d.HasData(x.Of) {
 			continue // a stand-in of a selector with no data has none either
+		}
+		if !slices.ContainsFunc(want, func(w ledger.SelectorData) bool { return w.Sel == x.Sel }) {
+			continue // not one expr reads
 		}
 		lo := x.To
 		if lo.IsZero() {

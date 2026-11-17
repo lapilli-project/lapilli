@@ -1,6 +1,7 @@
 package preflight
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"math"
@@ -98,8 +99,11 @@ type Memory struct {
 const cacheBytes = 64 << 20
 
 // estimate works out the requests, the time, the nights and the memory
-// serve's runs will take, from the rules read.
-func (p *run) estimate(rd *read) {
+// serve's runs will take, from the rules read, within the preflight's
+// time (ctx): what a pull request's flags and rules make it count, a day
+// of runs every minute and ten years of backfill over thousands of rules,
+// is unknown once --preflight-timeout is up, not counted on.
+func (p *run) estimate(ctx context.Context, rd *read) {
 	s := p.c.Serve
 	p.r.LeftOut = []string{"change reviews, a week of each new version of the rules", "the weekly digest's backtests",
 		"what people and agents ask for (a proposal's backtest, MCP's compare, the settings tried)"}
@@ -117,8 +121,8 @@ func (p *run) estimate(rd *read) {
 		}
 	case len(rs) == 0:
 	default:
-		p.hourly(rs)
-		p.backfill(rs)
+		p.hourly(ctx, rs)
+		p.backfill(ctx, rs)
 	}
 	p.beside(rd)
 	p.memory(rs)
@@ -137,8 +141,9 @@ func (p *run) apiOf(planned string) string {
 
 // piece counts the requests of one of serve's runs over [from, to]: each
 // rule's replay started earlier by its margin, the rules starting alike
-// replayed together (serve's find), as replay.Plan counts them.
-func (p *run) piece(rs []rules.Rule, from, to time.Time) map[string]int {
+// replayed together (serve's find), as replay.Plan counts them. Once ctx
+// is done, what is left isn't counted: the caller looks at ctx after.
+func (p *run) piece(ctx context.Context, rs []rules.Rule, from, to time.Time) map[string]int {
 	step := p.c.Serve.Step
 	groups := map[time.Time][]rules.Rule{}
 	need := map[string]time.Duration{}
@@ -152,6 +157,9 @@ func (p *run) piece(rs []rules.Rule, from, to time.Time) map[string]int {
 	out := map[string]int{}
 	h := p.planned()
 	for _, since := range slices.SortedFunc(maps.Keys(groups), func(a, b time.Time) int { return a.Compare(b) }) {
+		if ctx.Err() != nil {
+			break
+		}
 		plan := replay.Plan(h, []replay.Version{{Rules: groups[since]}}, since, to, step)
 		for k, n := range plan.By {
 			out[p.apiOf(k)] += n
@@ -241,9 +249,15 @@ func floor(by map[string]int, rate float64) time.Duration {
 	return time.Duration(float64(most) / rate * float64(time.Second))
 }
 
+// unworked is the item of an estimate the preflight's time ran out in.
+func (p *run) unworked(id string) {
+	p.add(Item{ID: id, State: Unknown, What: "not worked out within --preflight-timeout",
+		Fix: "give --preflight-timeout longer, or fewer rules to replay (--rule)"})
+}
+
 // hourly counts a day of hourly runs once caught up: each from the last
 // run's end less --settle, every --every.
-func (p *run) hourly(rs []rules.Rule) {
+func (p *run) hourly(ctx context.Context, rs []rules.Rule) {
 	s := p.c.Serve
 	day := p.now.Truncate(24 * time.Hour)
 	n := max(int(24*time.Hour/s.Every), 1)
@@ -254,7 +268,11 @@ func (p *run) hourly(rs []rules.Rule) {
 	for k := 1; k <= n; k++ {
 		to := day.Add(time.Duration(k) * s.Every).Truncate(s.Step)
 		from := to.Add(-s.Every - s.Settle).Truncate(s.Step)
-		by := p.piece(rs, from, to)
+		by := p.piece(ctx, rs, from, to)
+		if ctx.Err() != nil {
+			p.unworked("estimate.hourly")
+			return
+		}
 		impact, guard := p.asides(from, to, true)
 		by["prometheus"] += impact + guard
 		h.Impact += impact
@@ -304,7 +322,7 @@ func (p *run) hourly(rs []rules.Rule) {
 // backfill counts a first start's backfill: a day at a time from
 // --backfill before now, the first with no settle, a guard query before
 // each day.
-func (p *run) backfill(rs []rules.Rule) {
+func (p *run) backfill(ctx context.Context, rs []rules.Rule) {
 	s := p.c.Serve
 	now := p.now.Truncate(s.Step)
 	cursor, settle := now.Add(-s.Backfill), time.Duration(0)
@@ -318,7 +336,14 @@ func (p *run) backfill(rs []rules.Rule) {
 		if to.After(now) {
 			to = now
 		}
-		by := p.piece(rs, from, to)
+		by := p.piece(ctx, rs, from, to)
+		if ctx.Err() != nil {
+			p.unworked("estimate.backfill")
+			if s.CatchUpHours != nil {
+				p.unworked("estimate.nights")
+			}
+			return
+		}
 		impact, guard := p.asides(from, to, false)
 		by["prometheus"] += impact + guard
 		b.Impact += impact

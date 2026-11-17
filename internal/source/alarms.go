@@ -239,10 +239,11 @@ func (a *Alarms) Docs(ctx context.Context, every time.Duration) ([]rules.Doc, er
 // source.
 func (a *Alarms) Read(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
 	var docs []rules.Doc
+	var passed []string
 	var err error
 	switch a.Kind {
 	case AlarmsAWS:
-		docs, err = a.readAWS(ctx)
+		docs, passed, err = a.readAWS(ctx)
 	case AlarmsAzure:
 		docs, err = a.readAzure(ctx)
 	case AlarmsGoogle:
@@ -259,7 +260,6 @@ func (a *Alarms) Read(ctx context.Context) ([]rules.Rule, []rules.Doc, error) {
 	// mustn't blind Lapilli to every other. Each is told to Warn, once
 	// while it lasts.
 	var rs []rules.Rule
-	var passed []string
 	kept := docs[:0]
 	for _, d := range docs {
 		// A cloud writes JSON, which holds no YAML alias.
@@ -399,13 +399,14 @@ func ReadAWSAlarms(b []byte) (AWSAlarms, error) {
 	return out, nil
 }
 
-func (a *Alarms) readAWS(ctx context.Context) ([]rules.Doc, error) {
-	var docs []rules.Doc
+// readAWS reads every CloudWatch alarm of --alarms's, a page at a time;
+// passed, of those it passes over, why each is.
+func (a *Alarms) readAWS(ctx context.Context) (docs []rules.Doc, passed []string, err error) {
 	token := ""
 	seen := map[string]bool{}
 	for pages := 0; ; pages++ {
 		if pages >= 1000 {
-			return nil, errors.New("DescribeAlarms gave more than a thousand pages")
+			return nil, nil, errors.New("DescribeAlarms gave more than a thousand pages")
 		}
 		in := map[string]any{"AlarmTypes": []string{"MetricAlarm", "CompositeAlarm"}, "MaxRecords": 100}
 		if token != "" {
@@ -413,14 +414,14 @@ func (a *Alarms) readAWS(ctx context.Context) ([]rules.Doc, error) {
 		}
 		code, body, err := a.AWSCall(ctx, "DescribeAlarms", in, a.Reads, ListLimit)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if code != http.StatusOK {
-			return nil, CloudFailed(code, body)
+			return nil, nil, CloudFailed(code, body)
 		}
 		page, err := ReadAWSAlarms(body)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, x := range []struct {
 			key string
@@ -432,9 +433,13 @@ func (a *Alarms) readAWS(ctx context.Context) ([]rules.Doc, error) {
 					continue // not one of --alarms's: not read
 				}
 				seen[arn] = true
+				if err := namedAsARN(m, arn); err != nil {
+					passed = append(passed, fmt.Sprintf("--alarms %s: %s can't be read, and is passed over: %s", a.Source, arn, err))
+					continue
+				}
 				d, err := a.doc(arn, map[string]any{x.key: []any{Definition(AlarmsAWS, m)}})
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				docs = append(docs, d)
 			}
@@ -444,7 +449,23 @@ func (a *Alarms) readAWS(ctx context.Context) ([]rules.Doc, error) {
 		}
 		token = page.NextToken
 	}
-	return docs, nil
+	return docs, passed, nil
+}
+
+// ErrNamedApart is a CloudWatch alarm whose AlarmName isn't the name its
+// ARN ends in, which CloudWatch never answers. --changes-in is matched
+// against the alarm's AlarmName, and its writes (DisableAlarmActions,
+// EnableAlarmActions, DeleteAlarms) name it by the name its ARN ends in:
+// one named apart would be checked as one alarm and written as another.
+var ErrNamedApart = errors.New("CloudWatch answered with an alarm whose AlarmName isn't the name its ARN ends in: Lapilli neither reads it nor writes to it")
+
+// namedAsARN checks a CloudWatch alarm as answered is named as its ARN
+// ends (ErrNamedApart).
+func namedAsARN(m map[string]any, arn string) error {
+	if name, _ := m["AlarmName"].(string); name == "" || name != AlarmName(AlarmsAWS, arn) {
+		return ErrNamedApart
+	}
+	return nil
 }
 
 // azureScope is an Azure --alarms URL's subscription, and its resource
@@ -884,6 +905,9 @@ func (a *Alarms) Unit(ctx context.Context, id string, c Creds) (AlarmUnit, error
 		if m == nil {
 			u.Gone = true
 			return u, nil
+		}
+		if err := namedAsARN(m, id); err != nil {
+			return u, fmt.Errorf("%s: %w", clipURL(id), err)
 		}
 		u.Firing = m["StateValue"] == "ALARM"
 		u.Version = fmt.Sprint(m["AlarmConfigurationUpdatedTimestamp"])

@@ -54,7 +54,7 @@ n=$(jq -s length "$input")
 from=$(printf '%s' "$SINCE" | jq -sRr @uri)
 to=$(printf '%s' "$UNTIL" | jq -sRr @uri)
 code=$(printf 'Authorization: Bearer %s\n' "$token" |
-  curl -sS --max-time 120 --retry 5 --retry-max-time 300 -X PUT -H @- -H 'Content-Type: application/x-ndjson' \
+  curl -q -sS --max-time 120 --retry 5 --retry-max-time 300 -X PUT -H @- -H 'Content-Type: application/x-ndjson' \
     --data-binary "@$input" -o "$answer" -w '%{http_code}' "$url/api/v1/firings/$source?from=$from&to=$to") || code=failed
 case $code in
   2??)

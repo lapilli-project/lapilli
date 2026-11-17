@@ -2,15 +2,19 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/user"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -365,6 +369,26 @@ func TestPreflightAgainstFakes(t *testing.T) {
 	}
 }
 
+// --backfill is ten years at most, for serve and for lapilli preflight,
+// which counts it a day at a time; ten years is taken.
+func TestBackfillAtMost(t *testing.T) {
+	rules := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - alert: Down\n        expr: up == 0\n")
+	// Its --ledger is a file, so that a serve that took the flag stops
+	// at once, and makes no ledger.
+	for _, args := range [][]string{{"serve"}, {"preflight", "--offline"}} {
+		var out, errOut bytes.Buffer
+		code := run(append(args, "--rules", rules, "--prometheus", "http://prometheus:9090", "--backfill", "3651d", "--keep", "0", "--ledger", rules), &out, &errOut)
+		if code != 2 || !strings.Contains(errOut.String(), "--backfill 3651d: at most 3650d") {
+			t.Errorf("%s: exit %d\n%s%s", args[0], code, out.String(), errOut.String())
+		}
+	}
+	var out, errOut bytes.Buffer
+	if code := run([]string{"preflight", "--rules", rules, "--prometheus", "http://prometheus:9090", "--offline", "--json", "--backfill", "3650d", "--keep", "0"}, &out, &errOut); code != 0 ||
+		!strings.Contains(out.String(), `"estimate.backfill"`) {
+		t.Errorf("3650d: exit %d\n%s%s", code, out.String(), errOut.String())
+	}
+}
+
 // Its own flags are taken out before serve's reader, which refuses what
 // serve refuses, and it exits 2 then; -h says its options.
 func TestPreflightFlags(t *testing.T) {
@@ -592,5 +616,165 @@ func TestScrubberCut(t *testing.T) {
 		if got := scrub(in); got != want {
 			t.Errorf("%q: %q, want %q", in, got, want)
 		}
+	}
+}
+
+// An IPv6 address written without brackets, as x509 and Postgres write
+// one, is an address too, as is one with a zone, or an IPv4 one inside
+// it; and --gcp-project is taken out of a service account's email and a
+// workload identity pool, as Google names them. A time, a MAC address, a
+// "::" in other text, or a word that only holds the project, isn't.
+func TestScrubberAddressesAndProject(t *testing.T) {
+	f := &verdictFlags{promURL: "https://prom.example.invalid", gcpProj: "sample-proj-123"}
+	scrub := f.scrubber()
+	for in, want := range map[string]string{
+		"x509: certificate is valid for 10.1.2.3, fd12:3456:789a::17, not prom.example.invalid": "x509: certificate is valid for [address], [address], not [--prometheus]",
+		`no pg_hba.conf entry for host "2001:db8:42::5", user "u"`:                              `no pg_hba.conf entry for host "[address]", user "u"`,
+		"dial tcp [2001:db8::9]:5432: connect: connection refused":                              "dial tcp [address]: connect: connection refused",
+		"dial tcp 10.1.2.3:5432: refused":                                                       "dial tcp [address]: refused",
+		"from 2001:0db8:0000:0000:0000:ff00:0042:8329 and fe80::1%eth0.":                        "from [address] and [address].",
+		"mapped ::ffff:10.1.2.3, loopback ::1, at host:fd12::17: refused":                       "mapped [address], loopback [address], at host:[address]: refused",
+		"denied on projects/-/serviceAccounts/writer@sample-proj-123.iam.gserviceaccount.com":   "denied on projects/-/serviceAccounts/writer@[--gcp-project].iam.gserviceaccount.com",
+		"pool sample-proj-123.svc.id.goog, projects/sample-proj-123/topics/x":                   "pool [--gcp-project].svc.id.goog, projects/[--gcp-project]/topics/x",
+		// What isn't an address, nor the project.
+		"at 12:30:45, 2026-11-16T12:00:00Z, in 01:00-06:00, after 1h30m, 5m:": "at 12:30:45, 2026-11-16T12:00:00Z, in 01:00-06:00, after 1h30m, 5m:",
+		"a :: b, std::string, Foo::Bar, key:: and ::":                         "a :: b, std::string, Foo::Bar, key:: and ::",
+		"mac aa:bb:cc:dd:ee:ff, fingerprint AB:CD:EF:01:23:45:67:89:AB:CD":    "mac aa:bb:cc:dd:ee:ff, fingerprint AB:CD:EF:01:23:45:67:89:AB:CD",
+		"sample-proj-1234, xsample-proj-123, sample-proj-123x.iam":            "sample-proj-1234, xsample-proj-123, sample-proj-123x.iam",
+	} {
+		if got := scrub(in); got != want {
+			t.Errorf("%q:\n got %q\nwant %q", in, got, want)
+		}
+	}
+	// A host is still a whole word: not the first label of another.
+	f = &verdictFlags{promURL: "http://prom:9090"}
+	if got := f.scrubber()("prom.example and prom"); got != "prom.example and [--prometheus]" {
+		t.Errorf("%q", got)
+	}
+}
+
+// An IPv6 address in brackets with a zone, as Go writes one dialing it
+// ([fe80::1%en0]:5432) and a URL holds one (%25), is an address with its
+// port. A project is taken out as the first label of the names Google
+// gives under it, and of no other domain: a project named monitoring
+// leaves monitoring.googleapis.com as it is.
+func TestScrubberZoneAndGoogleNames(t *testing.T) {
+	f := &verdictFlags{promURL: "https://prom.example.invalid", gcpProj: "monitoring"}
+	scrub := f.scrubber()
+	for in, want := range map[string]string{
+		"dial tcp [fe80::1%en0]:5432: connect: connection refused":               "dial tcp [address]: connect: connection refused",
+		"dial tcp [fe80::1%25en0]:5432: x":                                       "dial tcp [address]: x",
+		"at [fd12::17%eth0-1], then [2001:db8::9]":                               "at [address], then [address]",
+		"monitoring.googleapis.com said 403 for project monitoring":              "monitoring.googleapis.com said 403 for project [--gcp-project]",
+		"writer@monitoring.iam.gserviceaccount.com may not":                      "writer@[--gcp-project].iam.gserviceaccount.com may not",
+		"pool monitoring.svc.id.goog, at monitoring.example.com":                 "pool [--gcp-project].svc.id.goog, at monitoring.example.com",
+		"monitoring.appspot.com, monitoring.firebaseapp.com, monitoring.web.app": "[--gcp-project].appspot.com, [--gcp-project].firebaseapp.com, [--gcp-project].web.app",
+		"https://monitoring.example.com/x and monitoring-2.iam":                  "https://monitoring.example.com/x and monitoring-2.iam",
+	} {
+		if got := scrub(in); got != want {
+			t.Errorf("%q:\n got %q\nwant %q", in, got, want)
+		}
+	}
+}
+
+// refusingPostgres answers every connection as a Postgres whose
+// pg_hba.conf doesn't let it in does: a FATAL that names the client's
+// address, and the user and the database the client asked for, the
+// user's name for a database it didn't. Its address.
+func refusingPostgres(t *testing.T) string {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	packet := func(c net.Conn) ([]byte, bool) {
+		var n int32
+		if binary.Read(c, binary.BigEndian, &n) != nil || n < 8 || n > 1<<16 {
+			return nil, false
+		}
+		b := make([]byte, n-4)
+		_, err := io.ReadFull(c, b)
+		return b, err == nil
+	}
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				b, ok := packet(c)
+				if ok && binary.BigEndian.Uint32(b[:4]) == 80877103 { // SSLRequest: no TLS here
+					c.Write([]byte{'N'})
+					b, ok = packet(c)
+				}
+				if !ok {
+					return
+				}
+				params := map[string]string{}
+				kv := strings.Split(string(b[4:]), "\x00")
+				for i := 0; i+1 < len(kv); i += 2 {
+					params[kv[i]] = kv[i+1]
+				}
+				db := cmp.Or(params["database"], params["user"])
+				msg := fmt.Sprintf(`no pg_hba.conf entry for host "10.20.30.40", user "%s", database "%s", no encryption`, params["user"], db)
+				body := "SFATAL\x00VFATAL\x00C28000\x00M" + msg + "\x00\x00"
+				var out bytes.Buffer
+				out.WriteByte('E')
+				binary.Write(&out, binary.BigEndian, int32(len(body)+4))
+				out.WriteString(body)
+				c.Write(out.Bytes())
+			}(c)
+		}
+	}()
+	return ln.Addr().String()
+}
+
+// A Postgres that refuses the connection names the user and the database
+// in what it answers: the report says neither, as it says no host, nor
+// the password. Named in the string, or taken from PGUSER and PGDATABASE,
+// or the user this process runs as.
+func TestPreflightPostgresNames(t *testing.T) {
+	addr := refusingPostgres(t)
+	me, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		conn, pgUser, pgDatabase string
+		hidden                   []string
+	}{
+		"in the string": {conn: "postgres://ledger_reader_x:pw-0123456789@" + addr + "/ledger_db_x?sslmode=disable&connect_timeout=5",
+			hidden: []string{"ledger_reader_x", "ledger_db_x", "pw-0123456789"}},
+		"from the environment": {conn: "postgres://" + addr + "/?sslmode=disable&connect_timeout=5", pgUser: "env_reader_x", pgDatabase: "env_db_x",
+			hidden: []string{"env_reader_x", "env_db_x"}},
+		// Names that are words of the report's own (its item ledger.postgres,
+		// lapilli): taken out of what the server said, and of nothing else.
+		"words of its own": {conn: "postgres://" + addr + "/?sslmode=disable&connect_timeout=5", pgUser: "lapilli", pgDatabase: "postgres",
+			hidden: []string{`"lapilli"`, `"postgres"`}},
+		// The user's name may be a word the report says otherwise ("user"):
+		// as the server quotes it.
+		"this process's user": {conn: "postgres://" + addr + "/?sslmode=disable&connect_timeout=5",
+			hidden: []string{`"` + me.Username + `"`}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("PGUSER", c.pgUser)
+			t.Setenv("PGDATABASE", c.pgDatabase)
+			t.Setenv("PGSERVICE", "")
+			f := write(t, "ledger-url", c.conn)
+			var out bytes.Buffer
+			code := runPreflight([]string{"--ledger-url-file", f, "--alerts", "--prometheus", "http://prom.invalid:9090", "--preflight-timeout", "20s"}, &out, io.Discard)
+			text := out.String()
+			if flat := strings.Join(strings.Fields(text), " "); code != 1 || !strings.Contains(flat, "problem ledger.postgres") ||
+				!strings.Contains(flat, `user "[--ledger-url-file's user]"`) || !strings.Contains(flat, "no pg_hba.conf entry") {
+				t.Fatalf("exit %d:\n%s", code, text)
+			}
+			for _, s := range append(c.hidden, "127.0.0.1", "10.20.30.40") {
+				if strings.Contains(text, s) {
+					t.Errorf("the report says %q:\n%s", s, text)
+				}
+			}
+		})
 	}
 }

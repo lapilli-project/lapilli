@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -12,11 +13,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"lapilli.dev/internal/egress"
 	"lapilli.dev/internal/ledger"
@@ -267,7 +270,7 @@ func TestEstimateRequests(t *testing.T) {
 	c.Serve.CatchUpHours = &w
 	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
 	p := &run{c: c, al: newAllowlist(time.Now), r: &Report{}, now: now}
-	p.estimate(&read{all: rulesOf(t, 200, 0)})
+	p.estimate(context.Background(), &read{all: rulesOf(t, 200, 0)})
 	h, b, n := p.r.Estimates.Hourly, p.r.Estimates.Backfill, p.r.Estimates.Nights
 	// Each run replays from 2h15m back (settle, every, a 15m margin) and
 	// 5m more: some 10% of runs cross midnight.
@@ -283,9 +286,75 @@ func TestEstimateRequests(t *testing.T) {
 	// Three rules for a day have a margin of seven days: each run reads
 	// eight or nine days of each again.
 	p = &run{c: c, al: newAllowlist(time.Now), r: &Report{}, now: now}
-	p.estimate(&read{all: rulesOf(t, 200, 3)})
+	p.estimate(context.Background(), &read{all: rulesOf(t, 200, 3)})
 	if more := p.r.Estimates.Hourly.Requests - h.Requests; more < 24 || more > 30 {
 		t.Errorf("three rules for a day add %d requests a run", more)
+	}
+}
+
+// timeUp is a context whose time is up once Err has been asked n times:
+// the preflight's time running out where a test says, by count, not by a
+// clock.
+type timeUp struct {
+	context.Context
+	n, asked int
+}
+
+func (c *timeUp) Err() error {
+	c.asked++
+	if c.asked > c.n {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+// The estimates are worked out within the preflight's time: once it is up,
+// what isn't counted yet is unknown, and no more is counted, whatever a
+// pull request's flags and rules ask (ten years of backfill, a run every
+// minute). Each run and each day of backfill looks at the time.
+func TestEstimateWithinTime(t *testing.T) {
+	c := config()
+	c.MaxRate, c.Serve.CatchUpRate = 0.5, 0.5
+	w, _ := serve.ParseWindow("01:00-06:00")
+	c.Serve.CatchUpHours = &w
+	rs := rulesOf(t, 200, 0)
+	states := func(p *run) map[string]State {
+		out := map[string]State{}
+		for _, it := range p.r.Items {
+			out[it.ID] = it.State
+			if it.State == Unknown && strings.HasPrefix(it.ID, "estimate.") && it.ID != "estimate.memory" && !strings.Contains(it.What, "--preflight-timeout") {
+				t.Errorf("%s: %q", it.ID, it.What)
+			}
+		}
+		return out
+	}
+	// Up from the start: nothing counted, ten years of runs every minute
+	// or not; the hourly runs and the backfill each look once in their
+	// first piece and once after it.
+	big := c
+	big.Serve.Backfill, big.Serve.Every = serve.MaxBackfill, time.Minute
+	for _, c := range []Config{c, big} {
+		ctx := &timeUp{Context: context.Background()}
+		p := newRun(c)
+		p.estimate(ctx, &read{all: rs})
+		if s := states(p); s["estimate.hourly"] != Unknown || s["estimate.backfill"] != Unknown || s["estimate.nights"] != Unknown ||
+			p.r.Estimates.Hourly != nil || p.r.Estimates.Backfill != nil || ctx.asked > 4 {
+			t.Errorf("up from the start: %v %+v, Err asked %d times", s, p.r.Estimates, ctx.asked)
+		}
+	}
+	// Up in the backfill: the hourly runs are counted (a day of them, one
+	// rule's group each: two looks a run), the backfill stops at once.
+	ctx := &timeUp{Context: context.Background(), n: 2*24 + 10}
+	p := newRun(c)
+	p.estimate(ctx, &read{all: rs})
+	if s := states(p); s["estimate.hourly"] != OK || s["estimate.backfill"] != Unknown || s["estimate.nights"] != Unknown || ctx.asked > ctx.n+2 {
+		t.Errorf("up in the backfill: %v, Err asked %d times of %d", s, ctx.asked, ctx.n)
+	}
+	// With time enough, all of it.
+	p = newRun(c)
+	p.estimate(context.Background(), &read{all: rs})
+	if s := states(p); s["estimate.hourly"] != OK || s["estimate.backfill"] != OK || s["estimate.nights"] != OK {
+		t.Errorf("with time enough: %v", s)
 	}
 }
 
@@ -296,7 +365,7 @@ func TestEstimateTooSlow(t *testing.T) {
 	c := config()
 	c.MaxRate = 0.05
 	p := &run{c: c, al: newAllowlist(time.Now), r: &Report{}, now: time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)}
-	p.estimate(&read{all: rulesOf(t, 200, 0)})
+	p.estimate(context.Background(), &read{all: rulesOf(t, 200, 0)})
 	states := map[string]State{}
 	for _, it := range p.r.Items {
 		states[it.ID] = it.State
@@ -384,6 +453,119 @@ func TestSaid(t *testing.T) {
 	s := cutSaid(said(fmt.Errorf("HTTP 500: \x1b[31m%s‮", strings.Repeat("é", 300))))
 	if len(s) > 200 || strings.ContainsAny(s, "\x1b‮") {
 		t.Errorf("%q", s)
+	}
+}
+
+// controls are what a text from outside may hold to act on a terminal: an
+// OSC that retitles it, a clear and a colour, BEL, a direction mark, and
+// the marks a preflight's own were before they held a random text.
+const controls = "\x1b]0;title\x07\x1b[2J\x1b[31mFAKE ok\x1b[0m‮\x00\x01"
+
+// acting says whether s holds a character that acts on a terminal or
+// turns text around.
+func acting(s string) bool {
+	return strings.ContainsFunc(s, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) })
+}
+
+// A rule file a pull request changes, read with --offline in CI, says
+// why a rule can't be replayed in its own words: they are printed as
+// text, in the text and in the JSON, never as escape sequences.
+func TestRuleReasonShown(t *testing.T) {
+	esc := strings.NewReplacer("\x1b", `\e`, "\x07", `\a`, "‮", `‮`, "\x00", `\0`, "\x01", `\x01`).Replace(controls)
+	file := `apiVersion: 1
+groups:
+  - orgId: 1
+    name: g
+    folder: f
+    interval: 1m
+    rules:
+      - uid: u1
+        title: Plain
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prom
+            model: {expr: up, refId: A}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: classic_conditions
+              refId: C
+              conditions:
+                - {evaluator: {type: gt, params: ["` + esc + `"]}, operator: {type: and}, query: {params: [A]}, reducer: {type: avg}}
+        for: 5m
+`
+	path := filepath.Join(t.TempDir(), "rules.yaml")
+	if err := os.WriteFile(path, []byte(file), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := config()
+	c.Offline = true
+	c.Serve.RulesPath = path
+	rep := Run(context.Background(), c)
+	var text, js bytes.Buffer
+	if err := rep.Text(&text); err != nil {
+		t.Fatal(err)
+	}
+	if err := rep.JSON(&js); err != nil {
+		t.Fatal(err)
+	}
+	if acting(strings.ReplaceAll(text.String(), "\n", "")) {
+		t.Errorf("the text acts on a terminal:\n%q", text.String())
+	}
+	if !strings.Contains(text.String(), `\u{1b}]0;title\u{7}`) {
+		t.Errorf("the reason isn't shown as text:\n%s", text.String())
+	}
+	var doc Report
+	if err := json.Unmarshal(js.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range doc.Items {
+		if acting(it.What + it.Why + it.Fix) {
+			t.Errorf("the JSON's %s acts on a terminal: %q", it.ID, it.Why)
+		}
+	}
+}
+
+// Every text of an item a check fills is shown as it reads in one place,
+// redact, so that a field added to Item, or a check that puts a name in
+// one as it came, can't print it otherwise. A mark a text holds of its
+// own is text, and cuts nothing.
+func TestRedactShowsEveryText(t *testing.T) {
+	c := config()
+	c.Scrubber = func(...[2]string) func(string) string { return func(s string) string { return s } }
+	p := newRun(c)
+	it := Item{ID: "rules.read", State: OK}
+	v := reflect.ValueOf(&it).Elem()
+	var filled []string
+	for i := range v.NumField() {
+		f := v.Type().Field(i)
+		if f.Type.Kind() != reflect.String || f.Name == "ID" || f.Name == "State" {
+			continue // the id and the state are the code's own
+		}
+		v.Field(i).SetString(f.Name + controls + strings.Repeat("x", 300) + "\x00\x02 end")
+		filled = append(filled, f.Name)
+	}
+	p.add(it)
+	p.r.LeftOut = []string{"left" + controls}
+	p.redact()
+	got := reflect.ValueOf(p.r.Items[0])
+	for _, name := range filled {
+		s := got.FieldByName(name).String()
+		if acting(s) || !strings.HasSuffix(s, " end") || !strings.Contains(s, `\u{0}\u{1}`) {
+			t.Errorf("%s: %q", name, s)
+		}
+	}
+	if s := p.r.LeftOut[0]; acting(s) {
+		t.Errorf("left out: %q", s)
+	}
+	// What a server said is shown and cut as it was.
+	p = newRun(c)
+	p.add(Item{ID: "history.reach", State: Problem, What: "x", Why: "not let in: " + said(fmt.Errorf("HTTP 403: %s%s", controls, strings.Repeat("y", 300)))})
+	p.redact()
+	if why := p.r.Items[0].Why; acting(why) || len(why) > 250 || !strings.HasSuffix(why, "…") {
+		t.Errorf("what a server said: %q", why)
 	}
 }
 
@@ -599,6 +781,31 @@ func TestSchemaSays(t *testing.T) {
 	}
 }
 
+// A SQLite ledger whose file is cut short, a write-ahead log beside it, is
+// a problem the item names as such, and its log is left as it was: SQLite
+// would delete it, opening the file.
+func TestLedgerCutShort(t *testing.T) {
+	c := config()
+	c.Serve.Ledger = t.TempDir()
+	wal := filepath.Join(c.Serve.Ledger, "ledger.db-wal")
+	log := bytes.Repeat([]byte("w"), 4096)
+	if err := os.WriteFile(filepath.Join(c.Serve.Ledger, "ledger.db"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wal, log, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := newRun(c)
+	p.ledger(context.Background())
+	it := itemOf(p, "ledger.sqlite")
+	if it == nil || it.State != Problem || !strings.Contains(it.What, "the ledger's file is cut short") || !strings.Contains(it.Why, "deletes the log") {
+		t.Fatalf("%+v", it)
+	}
+	if b, err := os.ReadFile(wal); err != nil || !bytes.Equal(b, log) {
+		t.Errorf("the log: %d bytes, %v", len(b), err)
+	}
+}
+
 // An identity serve writes as that can't be taken is a problem; written
 // to, nothing.
 func TestChangesIdentity(t *testing.T) {
@@ -635,7 +842,7 @@ func TestEstimateSettleAndGuard(t *testing.T) {
 		c := config()
 		c.Serve.Settle, c.Serve.Guard = settle, "x > 0"
 		p := newRun(c)
-		p.hourly(oneRule())
+		p.hourly(context.Background(), oneRule())
 		return p.r.Estimates.Hourly
 	}
 	with, without := day(time.Hour), day(0)
@@ -645,7 +852,7 @@ func TestEstimateSettleAndGuard(t *testing.T) {
 	c := config()
 	c.Serve.Settle, c.Serve.Guard, c.Serve.Backfill = 0, "x > 0", 3*24*time.Hour
 	p := newRun(c)
-	p.backfill(oneRule())
+	p.backfill(context.Background(), oneRule())
 	if b := p.r.Estimates.Backfill; b.Pieces != 3 || b.Guard != 3 {
 		t.Errorf("%+v", b)
 	}
@@ -657,7 +864,7 @@ func TestEstimateImpact(t *testing.T) {
 	c := config()
 	c.Serve.Settle, c.Serve.Impact, c.Serve.Backfill = 0, "x > 1", 3*24*time.Hour
 	p := newRun(c)
-	p.backfill(oneRule())
+	p.backfill(context.Background(), oneRule())
 	if b := p.r.Estimates.Backfill; b.Impact != 6 {
 		t.Errorf("%+v", b)
 	}
@@ -677,14 +884,14 @@ func TestEstimateSignals(t *testing.T) {
 		{Name: "payments", Expr: "sum(rate(payments_succeeded_total[5m])) == 0", For: time.Minute, Match: []string{}},
 	}
 	p := newRun(c)
-	p.backfill(oneRule())
+	p.backfill(context.Background(), oneRule())
 	// Each day's piece two requests a signal; once, the errors' three data
 	// looks (two selectors and a stand-in) and payments' one, and the
 	// errors' one look at what it reads (payments is matched on none).
 	if b := p.r.Estimates.Backfill; b.Impact != 2*6+3+1+1 {
 		t.Errorf("backfill: %+v", b)
 	}
-	p.hourly(oneRule())
+	p.hourly(context.Background(), oneRule())
 	if h := p.r.Estimates.Hourly; h.Impact != h.Runs*(2+1) {
 		t.Errorf("hourly: %d runs, %d impact requests; want a read of each signal and a look at errors' a run", h.Runs, h.Impact)
 	}
@@ -698,7 +905,7 @@ func TestEstimateCatchUp(t *testing.T) {
 		c := config()
 		c.Serve.Settle, c.Serve.Backfill, c.Serve.CatchUpRate, c.MaxRate = 0, 3*24*time.Hour, catchUp, maxRate
 		p := newRun(c)
-		p.backfill(oneRule()) // each day two requests: it crosses midnight
+		p.backfill(context.Background(), oneRule()) // each day two requests: it crosses midnight
 		return p.r.Estimates.Backfill
 	}
 	if b := at(0, 1); b.Requests != 6 || b.Rate != 1 || b.Seconds != 4 {
@@ -752,7 +959,7 @@ func TestEstimateEachAPI(t *testing.T) {
 	c.Serve.Loki = "http://loki:3100"
 	c.MaxRate = 0.07 // a run crossing midnight: 200 to each, 2,857s; 400 together, 5,714s
 	p := newRun(c)
-	p.hourly(rs)
+	p.hourly(context.Background(), rs)
 	h, it := p.r.Estimates.Hourly, itemOf(p, "estimate.hourly")
 	if h.By["loki"] == 0 || h.By["prometheus"] == 0 || it.State != OK || h.Seconds > 3600 {
 		t.Errorf("%+v %+v", h, it)
@@ -773,5 +980,84 @@ func TestRedactThenCut(t *testing.T) {
 	why := p.r.Items[0].Why
 	if strings.Contains(why, host[:20]) || !strings.Contains(why, "[--prometheus]") && !strings.HasSuffix(why, "…") || len(why) > 250 {
 		t.Errorf("%q", why)
+	}
+}
+
+// The session that holds a Postgres ledger's lock is said by its number
+// and when it connected: never the role it connected as, the name it gave
+// itself or its address.
+func TestHeldBy(t *testing.T) {
+	h := &ledger.LockedError{PID: 4242, Role: "ledger_writer_x", App: "copy-job-x", From: "10.9.8.7", Alone: true,
+		Since: time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)}
+	s := cutSaid(heldBy(h))
+	if !strings.Contains(s, "session 4242") || !strings.Contains(s, "2026-11-16T12:00:00Z") || !strings.Contains(s, "alone") {
+		t.Errorf("%q", s)
+	}
+	for _, hidden := range []string{"ledger_writer_x", "copy-job-x", "10.9.8.7"} {
+		if strings.Contains(s, hidden) {
+			t.Errorf("%q says %q", s, hidden)
+		}
+	}
+	if h.Role == "" {
+		t.Error("the holder given was changed")
+	}
+}
+
+// TestHiddenInSaidOnly: what is to be kept out of what a server said only
+// (hideSaid: a Postgres user's or database's name, which may be lapilli or
+// postgres) is taken out of what the server said, and left in the report's
+// own words.
+func TestHiddenInSaidOnly(t *testing.T) {
+	c := config()
+	c.Scrubber = func(more ...[2]string) func(string) string {
+		return func(s string) string {
+			for _, m := range more {
+				s = strings.ReplaceAll(s, m[1], "["+m[0]+"]")
+			}
+			return s
+		}
+	}
+	p := newRun(c)
+	p.hideSaid("user", "lapilli")
+	p.add(Item{ID: "ledger.postgres", State: Problem, What: "lapilli serve can't read the ledger",
+		Why: "it said: " + said(errors.New(`password authentication failed for user "lapilli"`)), Fix: "start lapilli serve again"})
+	p.redact()
+	it := p.r.Items[0]
+	if it.What != "lapilli serve can't read the ledger" || it.Fix != "start lapilli serve again" ||
+		it.Why != `it said: password authentication failed for user "[user]"` {
+		t.Errorf("%q\n%q\n%q", it.What, it.Why, it.Fix)
+	}
+}
+
+// A Postgres ledger's schema is said as the server said it: a schema named
+// after the user, which the search_path ("$user") makes the ledger's, is
+// redacted as the user's name is in the rest of what the server said, and
+// the report's own words are left. Another schema is named.
+func TestPostgresSchemaSaid(t *testing.T) {
+	c := config()
+	c.Scrubber = func(more ...[2]string) func(string) string {
+		return func(s string) string {
+			for _, m := range more {
+				s = strings.ReplaceAll(s, m[1], "["+m[0]+"]")
+			}
+			return s
+		}
+	}
+	for _, x := range []struct {
+		pr        ledger.Probed
+		what, fix string
+	}{
+		{ledger.Probed{There: true, Version: 18, Knows: 19, Schema: "lapilli"}, `in schema "[user]"`, `may not create in schema "[user]",`},
+		{ledger.Probed{There: true, Version: 20, Knows: 19, Schema: "lapilli", Create: true}, `in schema "[user]"`, "a ledger a newer lapilli wrote"},
+		{ledger.Probed{There: true, Version: 19, Knows: 19, Schema: "ledger"}, `in schema "ledger"`, ""},
+	} {
+		p := newRun(c)
+		p.hideSaid("user", "lapilli")
+		p.postgresProbed(x.pr)
+		p.redact()
+		it := itemOf(p, "ledger.postgres")
+		if it == nil || !strings.HasSuffix(it.What, x.what) || !strings.Contains(it.Fix, x.fix) || strings.Contains(it.What, `"lapilli"`) {
+			t.Errorf("%+v: %+v", x.pr, it)
+		}
 	}
 }

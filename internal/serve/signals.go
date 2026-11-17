@@ -199,7 +199,9 @@ func (s *Server) signalsRead(parent context.Context, from, to time.Time, f *ledg
 				// Behind still: from a little before there.
 				r.To = ledger.PieceResume(end, d.For, s.cfg.Settle, s.cfg.Step)
 			}
-			r.Windows = incident.FromSignal(series, s.cfg.Step, d.For, d.Name, d.Match)
+			if r.Windows, err = incident.FromSignal(ctx, series, s.cfg.Step, d.For, d.Name, d.Match); err != nil {
+				return err
+			}
 			// Those of its week kept before its read, which it doesn't put
 			// in place of.
 			week, _ := s.l.WeekOf(r.From)
@@ -496,7 +498,11 @@ func (s *Server) signalAgain(ctx context.Context, d ledger.SignalDef, c criterio
 		s.readSignal(d.Name, err)
 		return false, err
 	}
-	windows := incident.FromSignal(series, s.cfg.Step, d.For, d.Name, d.Match)
+	windows, err := incident.FromSignal(rctx, series, s.cfg.Step, d.For, d.Name, d.Match)
+	if err != nil {
+		s.readSignal(d.Name, err)
+		return false, err
+	}
 	if most := maxSignalWeek * (int(cursor.Sub(from)/(7*24*time.Hour)) + 1); len(windows) > most {
 		err := fmt.Errorf("more than %d windows a week: an expression by pod, not by service, finds too many", maxSignalWeek)
 		s.readSignal(d.Name, err)

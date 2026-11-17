@@ -2,12 +2,19 @@ package serve
 
 import (
 	"context"
+	"fmt"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/report"
+	"lapilli.dev/internal/rules"
 )
 
 // putAs writes an incident through the incidents port, with the token.
@@ -162,4 +169,218 @@ func sourcesStates(t *testing.T) map[string]*Server {
 	runDue(floor, 2)
 	floor.jobs(ctx, true)
 	return map[string]*Server{"/sources": quiet, "/intake": criteriaServer(t, false, intake), "/nodata": none, "/floor": floor}
+}
+
+// What is wrong with the deploys file or the marked file is said without
+// its path to a reader who isn't an admin, in the status banner of every
+// page, as the incidents file's is: by what it is.
+func TestFilePathsInBannerAnAdminsAlone(t *testing.T) {
+	ctx := context.Background()
+	for _, which := range []string{"deploys", "marked"} {
+		t.Run(which, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "private-mount", which+".yaml")
+			s := criteriaServer(t, true, func(c *Config) {
+				switch which {
+				case "deploys":
+					c.Deploys = path
+				case "marked":
+					c.Marked = path
+				}
+			})
+			runDue(s, 2)
+			s.jobs(ctx, true)
+			h := s.Handler()
+			for _, who := range []string{"carl@example.com", "bo@example.com"} {
+				for _, p := range []string{"/", "/settings"} {
+					code, body := askAs(t, h, http.MethodGet, p, nil, who, "same-origin")
+					if i := strings.Index(body, filepath.Dir(path)); code != http.StatusOK || i >= 0 {
+						t.Errorf("%s, %s: %d, the path on the page: %s", who, p, code, body[max(0, i-120):min(len(body), max(0, i)+120)])
+					}
+					if !strings.Contains(body, "the "+which+" file") {
+						t.Errorf("%s, %s: the banner doesn't say which file", who, p)
+					}
+				}
+			}
+			if _, body := askAs(t, h, http.MethodGet, "/", nil, "ana@example.com", "same-origin"); !strings.Contains(body, path) {
+				t.Error("an admin doesn't read the path")
+			}
+		})
+	}
+}
+
+// The paths taken out are those of every file serve was started with,
+// the longest first, as given and as a path joined under one says it; a
+// bare name is left in the sentences it is a word of.
+func TestRedactPaths(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := server(t, func(c *Config) {
+		c.RulesPath, c.Config = dir+"/rules/", dir+"/rules/config.yaml"
+		c.Slack, c.ReportDests = dir+"/hooks/slack", map[string]string{"ops": dir + "/hooks/ops"}
+		c.ChangesPaused = "ledger"
+	})
+	for in, want := range map[string]string{
+		"keeping the ledger to --config: open " + dir + "/rules/config.yaml: permission denied": "keeping the ledger to --config: open the config file: permission denied",
+		"reading the rules: " + dir + "/rules/shop.yaml: line 3":                                "reading the rules: the path given to --rules/shop.yaml: line 3",
+		"notifying: --report-dest: open " + dir + "/hooks/ops: no such file":                    "notifying: --report-dest: open the path given to --report-dest: no such file",
+		"the ledger: disk full": "the ledger: disk full",
+	} {
+		if got := s.redactPaths(in, "en"); got != want {
+			t.Errorf("%q\n became %q,\n want %q", in, got, want)
+		}
+	}
+}
+
+// A path is taken out where a text says it whole, never inside a word:
+// a directory given with a separator at its end, as a shell completes one,
+// is a bare name once it is let go, and stays in the sentences it is a
+// word of; a path is taken out where a separator follows it, and kept in
+// a longer name; and what is put in place of one isn't looked in again.
+func TestRedactPathsWhole(t *testing.T) {
+	sentences := []string{
+		"reading the rules: a rule's expression didn't parse",
+		"the ledger: database or disk is full; data kept as it was",
+		"replaying again from the history of rule versions",
+		"reading the rules: open rules.d: the history is read again.",
+	}
+	for _, c := range []Config{
+		{RulesPath: "rules/", Ledger: "data/", RulesHistory: "history/"},
+		{RulesPath: "rules", Ledger: "data", RulesHistory: "history"},
+		{RulesPath: ".", Ledger: "./", RulesHistory: "../"},
+	} {
+		s := &Server{cfg: c}
+		for _, in := range sentences {
+			if got := s.redactPaths(in, "en"); got != in {
+				t.Errorf("%+v: %q\n became %q", c, in, got)
+			}
+		}
+	}
+	s := &Server{cfg: Config{RulesPath: "./x", Ledger: "data/", Marked: "./x/marked.yaml"}}
+	for in, want := range map[string]string{
+		"open ./x/shop.yaml: permission denied":  "open the path given to --rules/shop.yaml: permission denied",
+		`reading "./x/marked.yaml": line 2`:      `reading "the marked file": line 2`,
+		"open ./xy/shop.yaml and ../x/shop.yaml": "open ./xy/shop.yaml and ../x/shop.yaml",
+		"the rules in ./x.":                      "the rules in the path given to --rules.",
+	} {
+		if got := s.redactPaths(in, "en"); got != want {
+			t.Errorf("%q\n became %q,\n want %q", in, got, want)
+		}
+	}
+	// "given" in what takes the place of x/y is the replacement's.
+	ps := []filePath{{"x/y", "--rules"}, {"given", "--ledger"}}
+	if got, want := hidePaths("open x/y: given up", ps, "en"), "open the path given to --rules: the path given to --ledger up"; got != want {
+		t.Errorf("became %q, want %q", got, want)
+	}
+}
+
+// A history behind a link, as a git-sync or a mounted volume keeps one, is
+// walked where the link leads (rules.History), and what fails there says
+// that path: it is taken out too, as the path given is.
+func TestRedactPathsLinkTarget(t *testing.T) {
+	base := t.TempDir()
+	real := filepath.Join(base, "store", "rev-1")
+	team := filepath.Join(real, "2026-11-01T00:00:00Z", "team")
+	if err := os.MkdirAll(team, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(team, "r.yaml"), []byte("groups: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "versions")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(team, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(team, 0o755) })
+	_, err := rules.History(link)
+	if err == nil {
+		t.Skip("the version was walked: this user reads what it may not")
+	}
+	s := &Server{cfg: Config{RulesHistory: link}}
+	got := s.redactPaths("reading the rules: --rules-history: "+err.Error(), "en")
+	if strings.Contains(got, "store") || !strings.Contains(got, "the path given to --rules-history/2026-11-01T00:00:00Z/team") {
+		t.Errorf("%v\n became %q", err, got)
+	}
+}
+
+// Why a run failed, and why a rule couldn't be replayed, are said without
+// the paths of the files serve was started with to a reader who isn't an
+// admin, as the banner says them: on the run history, in /api/v1/runs and
+// in the overview's last run. The digest's webhook file that can't be read
+// is one.
+func TestRunsFailedPathsAnAdminsAlone(t *testing.T) {
+	ctx := context.Background()
+	hook := filepath.Join(t.TempDir(), "private-mount", "slack-hook")
+	s := criteriaServer(t, true, func(c *Config) { c.Slack = hook })
+	err := report.Slack(ctx, s.cfg.Slack, "x")
+	if err == nil || !strings.Contains(err.Error(), hook) {
+		t.Fatalf("the digest's error doesn't say the file: %v", err)
+	}
+	if err := s.l.AddRun(ctx, ledger.Run{Kind: "hourly", Started: s.now(), Finished: s.now(), From: s.now().Add(-time.Hour), To: s.now(),
+		Failed: map[string]string{"SomeRule": "reading " + hook + ".d/extra: no such file"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.AddRun(ctx, ledger.Run{Kind: "digest", Started: s.now(), Finished: s.now(), From: s.now().Add(-7 * 24 * time.Hour), To: s.now(), Error: err.Error()}); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	for _, p := range []string{"/runs", "/api/v1/runs", "/"} {
+		for _, who := range []string{"carl@example.com", "bo@example.com"} {
+			code, body := askAs(t, h, http.MethodGet, p, nil, who, "same-origin")
+			if i := strings.Index(body, filepath.Dir(hook)); code != http.StatusOK || i >= 0 {
+				t.Errorf("%s, %s: %d, the path is shown: %s", who, p, code, body[max(0, i-80):min(len(body), max(0, i)+80)])
+			}
+			if !strings.Contains(body, "the path given to --slack-webhook-file") {
+				t.Errorf("%s, %s: the run doesn't say which file", who, p)
+			}
+		}
+		if _, body := askAs(t, h, http.MethodGet, p, nil, "ana@example.com", "same-origin"); !strings.Contains(body, hook) {
+			t.Errorf("%s: an admin doesn't read the path", p)
+		}
+	}
+	for _, who := range []string{"carl@example.com", "ana@example.com"} {
+		_, body := askAs(t, h, http.MethodGet, "/runs", nil, who, "same-origin")
+		if strings.Contains(body, hook+".d") == (who == "carl@example.com") || !strings.Contains(body, "SomeRule") {
+			t.Errorf("%s: why a rule couldn't be replayed, as shown: the path there %v", who, strings.Contains(body, hook+".d"))
+		}
+	}
+}
+
+// TestRunsUnreachedAnAdminsToRead: a run that failed because the ledger's
+// database couldn't be reached says why (its server, its user, its
+// database) to an admin alone, on the runs' page, their API and the
+// overview, as the status banner does; and so does a tool's error to an
+// agent acting for anyone else.
+func TestRunsUnreachedAnAdminsToRead(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, true, nil)
+	why := fmt.Errorf(`the ledger: %w: the server says: password authentication failed for user "svc-user", database "store-db" at 10.1.2.3`, ledger.ErrConnect)
+	if err := s.l.AddRun(ctx, ledger.Run{Kind: "hourly", Started: s.now(), Finished: s.now(), From: s.now().Add(-time.Hour), To: s.now(), Error: why.Error(),
+		Failed: map[string]string{"SomeRule": why.Error()}}); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	for _, p := range []string{"/runs", "/api/v1/runs", "/"} {
+		for _, who := range []string{"carl@example.com", "bo@example.com"} {
+			_, body := askAs(t, h, http.MethodGet, p, nil, who, "same-origin")
+			for _, name := range []string{"svc-user", "store-db", "10.1.2.3"} {
+				if strings.Contains(body, name) {
+					t.Errorf("%s, %s: says %s", who, p, name)
+				}
+			}
+		}
+		if _, body := askAs(t, h, http.MethodGet, p, nil, "ana@example.com", "same-origin"); !strings.Contains(body, "store-db") {
+			t.Errorf("%s: an admin doesn't read why", p)
+		}
+	}
+	tool := guarded(func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+		return nil, nil, why
+	})
+	for admin, want := range map[bool]bool{false: false, true: true} {
+		c := context.WithValue(ctx, agentErrors{}, s.errorsFor(admin))
+		if _, _, err := tool(c, nil, struct{}{}); err == nil || strings.Contains(err.Error(), "store-db") != want {
+			t.Errorf("an agent for an admin %v: %v", admin, err)
+		}
+	}
 }

@@ -59,7 +59,7 @@ else
   fi
   # The token on stdin, never on a command line; no redirect followed.
   printf 'Authorization: Bearer %s\n' "$(cat "$ARGOCD_TOKEN_FILE")" |
-    curl -fsS --proto =https --max-time 30 --max-filesize 4194304 -H @- -H 'Accept: application/json' \
+    curl -q -fsS --proto =https --max-time 30 --max-filesize 4194304 -H @- -H 'Accept: application/json' \
       "${ARGOCD_URL%/}/api/v1/applications/$ARGOCD_APP$q" >"$tmp/app"
 fi
 if [ "$(wc -c <"$tmp/app")" -gt 4194304 ]; then

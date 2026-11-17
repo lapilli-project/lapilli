@@ -2,6 +2,129 @@
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-11-18
+
+A security release, after three reviews of 0.55.0 from an attacker's point
+of view: of what comes in to `lapilli serve` over HTTP and MCP; of the
+ledger, `lapilli preflight` and what lapilli reads from files and other
+systems; and of what goes out, the recipes and the supply chain. Two more
+reviews of the fixes followed, whose findings are fixed in what is
+described here. Each fix comes with a test that failed before it. It also
+holds goals over a period (Added). No ledger schema change. Read "Before
+you upgrade".
+
+### Fixed (security)
+
+- **A rule file could put escape sequences into `lapilli preflight`'s
+  report** (affected: 0.53.0 to 0.56.0). Why a rule can't be replayed was
+  printed as the rule had it: a Grafana rule whose evaluator held ESC and
+  OSC could clear the screen, retitle the terminal or print a false "ok"
+  line in a CI run of `preflight --offline` on a pull request's files.
+  Every text of the report is now shown as it reads, in one place, so a
+  new field can't miss it; the marks around what a server said hold a
+  value drawn as the process starts, which no file can forge. The CLI's
+  errors and warnings that carry what a server or a file said (`check`,
+  `content`, cloud alarm, ruler and Loki warnings, `ledger copy`, serve's
+  start) are shown the same way.
+- **One impact window could take minutes to build, past `--timeout`**
+  (affected: from 0.2.0). Overlapping windows were merged by looking for
+  each label value among those kept: an impact expression that isn't
+  aggregated, over a metric whose label values a workload sets (a path, a
+  client), made one window of 100,000 values a label in 3 min 16 s, and
+  nothing checked the time. Building one now stops when the run's time is
+  up, and a label of more than 64 values is left out of the window, each
+  value looked for among the 64 kept until then: 100,000 series of 8
+  labels take 51 ms.
+- **A rule's name in a pull request or an issue was Markdown** (affected:
+  from 0.22.0). The pull request a change recipe opens, the task made
+  from a proposal and the tracker issue made from a task wrote the rule's
+  name, and a content finding's detail, as they came: a name chosen by
+  whoever writes the rule's source could mention a team, show an image,
+  or put a link in a description the repository's own bot wrote. Each is
+  now a code span, as incident IDs were already, and so are the incident,
+  team and assignee in an issue's text. A description cut to fit (a
+  task's 10,000 bytes, Azure DevOps' 4,000 characters) is cut at a line's
+  end, so that no span is cut open, and a name is cut to 512 bytes before
+  it is one.
+- **A viewer could make serve judge the last week again, as often as they
+  liked** (affected: from 0.6.0). `/settings?try=` asked no role, no
+  same-site request and no limit, and each try held the one turn heavy
+  work takes, so a viewer, or a link from another site, could keep
+  admins' tries, reports and goals waiting. A try is now an admin's, from
+  this site, twelve an hour a person, as the impact criterion's are.
+- **An editor's marked windows could make the `--marked` file be refused
+  whole** (affected: 0.53.0 to 0.56.0). The kinds and each kind's week
+  were counted for the file, `--config`, `--mark` and the UI together: an
+  editor making 15 kinds, or 64 windows of one kind in a week, made the
+  next file that added one be refused, its other windows with it, and the
+  `--mark` expressions fail. What the UI and the API make now has its own
+  share, seven kinds and 32 of a kind a week, and the rest is the file's.
+- **Every reader saw the paths of the files serve was started with**
+  (affected: from 0.31.0). A file that couldn't be read (`--deploys`,
+  `--marked` and the others) put its path in the status line of every
+  page. Paths, and where a link among them leads, are now said only to
+  admins, a path taken out only where a text says it whole; others read
+  "the deploys file" and the like. So are why a run failed (`/runs`, the
+  overview, a tool's error to an agent), which could name a webhook's
+  file, and why the ledger's database can't be reached, which could name
+  its server, user and database, wherever it is said. The `--config` file's path in `/api/v1/settings` is an
+  admin's too.
+- **An expectations file could take gigabytes** (affected: from 0.47.0).
+  `--expect` held at most 2,000 entries, but an entry any number of
+  catches: one of 54,000 made 10.8 million results, 4.3 GiB, in a
+  comparison of 200 rules. A file now holds 2,000 catches, and a
+  comparison 100,000 expectations.
+- **A long impact expression's stand-ins took time quadratic in its
+  length** (affected: from 0.53.1). `--impact` with no name isn't held to
+  the bounds named signals are (4,096 characters, 32 selectors), and
+  reading its stand-ins took 11 s for 64 KiB. They are now read in time
+  linear in the expression: 64 KiB in about a millisecond.
+- **`lapilli preflight` named the ledger's Postgres user and database**
+  (affected: 0.53.0 to 0.56.0), as the server's refusal does, and the lock
+  holder's role and application name, though it hid the server's name.
+  They are now taken out of what the server said, and the schema, which a
+  user's name can be, said as the server said it; the holder is said by
+  its session and when it connected.
+- **The scrubber missed three forms** (affected: 0.53.0 to 0.56.0): an
+  IPv6 address written without brackets, as TLS and Postgres errors write
+  it, one in brackets with its zone, as Go writes it (`[fe80::1%en0]`),
+  and `--gcp-project` inside a service account's email. The project is
+  taken out of Google's own names only (a service account's, a workload
+  identity pool's, an App Engine or Firebase app's), never another
+  domain's.
+- **The "read-only" ledger probe could write a file** (affected: 0.53.0 to
+  0.56.0). With a SQLite ledger's log left without its index (a serve that
+  stopped hard, a copied volume), the probe made a 32 KiB `-shm` beside
+  it, which, made by another user, could leave serve unable to open the
+  ledger; and with an empty ledger file and a log beside it, SQLite
+  deleted the log. It now writes nothing in any state, reads the log,
+  opens no ledger shorter than a page with a log beside it, and reads a
+  linked ledger where the link leads.
+- **The backtest recipe let GitHub's older `##[` commands into the job's
+  log** (affected: from 0.32.0). GitHub's runner reads `##[error]`,
+  `##[add-matcher]` and the like anywhere in a line, as Azure reads
+  `##vso[`: a rule name in a pull request, said when the history couldn't
+  be read, could add annotations or load a problem matcher. They are
+  inert now.
+- **A firing of an impact window's 65th value didn't agree with it**
+  (affected: 0.55.0 to 0.56.0). The ledger kept a named signal's window
+  with the first 64 values of a label in order, and a firing of another
+  value, in the same impact, didn't catch it. A label of more values is
+  now left out, as one not all the window's series have: it constrains
+  nothing, and the window is caught by more firings, never by fewer, read
+  whole or a piece at a time. A window's key, and the decisions on it,
+  don't change.
+- **Hardening.** Serve looks for where an impact signal's data begins only
+  with the selectors of the expression it runs, never a selector kept
+  beside a window in the ledger, and SECURITY.md says that whoever can write the ledger can make
+  serve query the history and the rule sources with its tokens, carry out
+  a change it holds as approved, and send the notices it holds. A
+  CloudWatch alarm whose name isn't its ARN's is neither read nor
+  written: the name a change is checked by is the one it acts on. Every
+  `curl` the recipes and the chart's scripts run reads
+  no `.curlrc` (`-q`), as the backtest recipe's did. The preflight
+  estimate keeps to `--preflight-timeout`.
+
 ### Added
 
 - **Goals over a period, in `lapilli serve`** (docs/design/goals.md, step
@@ -41,6 +164,25 @@
   now read every window meeting the weeks they count. So a window's page,
   too, now marks with `*` an occurrence counted together with another of
   its kind on one of its days, as the Marked windows page did.
+
+### Before you upgrade
+
+- **`/settings?try=` is an admin's**, asked from the Settings page in a
+  browser: a script that calls it gets 403, or 400 without
+  `Sec-Fetch-Site`. With `--read-only` there are no tries, as there are no
+  tries of the impact criterion.
+- **Marked windows made in the UI or the API**: seven kinds, and 32 of a
+  kind a week. A ledger already past either keeps what it has; a write
+  that makes a week busier past them is refused with 400, and renaming or
+  shortening one isn't.
+- **An impact window's label of more than 64 values is left out**, in
+  `lapilli verdict` and in serve: a firing of any value of it agrees with
+  the window. Before, `verdict` and serve's unnamed signal kept every
+  value, and serve's named signals the first 64. A window already in the
+  ledger keeps the labels it was kept with until it is read again.
+- **`--backfill` is ten years (3650d) at most**, in `serve` and
+  `preflight`.
+- **An expectations file with more than 2,000 catches** is refused.
 
 ## [0.56.0] - 2026-11-18
 

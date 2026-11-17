@@ -46,7 +46,7 @@ func checkSeriesFor(f *verdictFlags, rs []rules.Rule) []string {
 // alert.
 func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, stdout, stderr io.Writer) int {
 	fail := func(err error) int {
-		fmt.Fprintf(stderr, "lapilli verdict: %v\n", err)
+		fmt.Fprintf(stderr, "lapilli verdict: %s\n", verdict.Clean(err.Error()))
 		return 1
 	}
 	h, err := newHistory(ctx, f)
@@ -80,7 +80,7 @@ func runCheck(ctx context.Context, f *verdictFlags, versions []replay.Version, s
 			fmt.Fprintln(stderr, "lapilli: --check-grafana is plain http: the token goes unencrypted")
 		}
 		if hw, err = gh.Where(ctx); err != nil {
-			fmt.Fprintf(stderr, "lapilli verdict: %v: what Grafana's rules really fired is read from GRAFANA_ALERTS.\n", err)
+			fmt.Fprintf(stderr, "lapilli verdict: %s: what Grafana's rules really fired is read from GRAFANA_ALERTS.\n", verdict.Clean(err.Error()))
 		} else if hw.Serves == "" {
 			fmt.Fprintln(stderr, "lapilli verdict: this Grafana keeps its alert state history where Lapilli can't read it (in Prometheus alone, none, or annotations before Grafana 12.4): what its rules really fired is read from GRAFANA_ALERTS.")
 		}

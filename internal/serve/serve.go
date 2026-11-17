@@ -127,7 +127,7 @@ type Config struct {
 	History  *source.GrafanaHistory
 	Every    time.Duration
 	Settle   time.Duration
-	Backfill time.Duration
+	Backfill time.Duration // MaxBackfill at most
 	Keep     time.Duration // 0 keeps everything
 	Watch    time.Duration
 	Digest   Weekly
@@ -363,9 +363,12 @@ type Server struct {
 	comparing sync.Mutex
 	// tries are, by reader, the proposals asked for in the last hour that
 	// read the rules again (propose); impactTries, the incident criteria
-	// tried or saved, which read Prometheus (impactTriesAnHour).
-	tries       tries
-	impactTries tries
+	// tried or saved, which read Prometheus (impactTriesAnHour);
+	// settingsTries, the settings tried on the last week
+	// (settingsTriesAnHour).
+	tries         tries
+	impactTries   tries
+	settingsTries tries
 	// tried are the criteria a try read in full, lately (triedFor).
 	tried triedCache
 	// sources is what this replica saw of where incidents come from.
@@ -577,7 +580,7 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		// A tracker job reads a page of tasks, then makes an issue and
 		// writes a link for each: a few a second, a first run's in a burst.
 		tasksRate: &limiter{rate: 5, burst: 100}, tasksBusy: make(chan struct{}, 1), changes: newChanges(ctx, l),
-		impactTries: tries{limit: impactTriesAnHour}}
+		impactTries: tries{limit: impactTriesAnHour}, settingsTries: tries{limit: settingsTriesAnHour}}
 	s.status.runs, s.status.notices, s.status.refused = map[string]int{}, map[string]int{}, map[string]int{}
 	s.life, s.end = context.WithCancel(context.Background())
 	s.parsing.base, s.parsing.log = s.life, log
@@ -1032,6 +1035,12 @@ func show(o verdict.Options, key string) string {
 	}
 	return ""
 }
+
+// MaxBackfill is the longest --backfill: ten years. A first start replays
+// it a day at a time, and lapilli preflight counts its requests a day at a
+// time, both as long as it is; a longer one is a typing error more often
+// than a history that keeps more.
+const MaxBackfill = 3650 * 24 * time.Hour
 
 // ParseDuration takes Go durations and, as Prometheus does, days: 7d, 1d12h.
 func ParseDuration(s string) (time.Duration, error) {

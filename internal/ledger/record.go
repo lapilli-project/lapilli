@@ -872,17 +872,20 @@ func PieceResume(end time.Time, signalFor, settle, step time.Duration) time.Time
 // keptWindowLabels are a named signal's window's labels as the ledger
 // keeps them, bounded as an incident's are (maxLabelBytes in all, as
 // JSON): each name and value cut as an alert's are (verdict.KeptName,
-// KeptValue), 64 values a label, and, past 4 KB, the labels that don't fit
-// left out, the rest kept in order: a label left out constrains nothing,
-// so the window is caught by more, never by fewer. Within the bounds, as
-// they are.
+// KeptValue), a label of more than 64 values left out
+// (incident.MaxWindowValues, as a window is found with), and, past 4 KB,
+// the labels that don't fit left out, the rest kept in order: a label left
+// out constrains nothing, so the window is caught by more, never by fewer.
+// Within the bounds, as they are. A label's values are kept as a window's
+// are found (incident.KeepValue): each looked for among the 64 kept, never
+// among all of them.
 func keptWindowLabels(l incident.Labels) incident.Labels {
-	if b, err := json.Marshal(orEmpty(l)); err == nil && len(b) <= maxLabelBytes {
-		within := true
-		for k, vs := range l {
-			within = within && verdict.KeptName(k) == k && len(vs) <= 64 && !slices.ContainsFunc(vs, func(v string) bool { return verdict.KeptValue(v) != v })
-		}
-		if within {
+	within := true
+	for k, vs := range l {
+		within = within && verdict.KeptName(k) == k && len(vs) <= incident.MaxWindowValues && !slices.ContainsFunc(vs, func(v string) bool { return verdict.KeptValue(v) != v })
+	}
+	if within {
+		if b, err := json.Marshal(orEmpty(l)); err == nil && len(b) <= maxLabelBytes {
 			return l
 		}
 	}
@@ -893,17 +896,18 @@ func keptWindowLabels(l incident.Labels) incident.Labels {
 		if _, taken := out[kk]; taken {
 			continue
 		}
-		// Each value cut, then the first 64 in order: the same 64 whether
-		// a window's values came at once or a piece at a time
-		// (mergeLabels).
+		// Each value cut, in order; past 64 none: the same whether a
+		// window's values came at once or a piece at a time (mergeLabels).
 		var vs []string
+		ok := true
 		for _, v := range l[k] {
-			if v = verdict.KeptValue(v); !slices.Contains(vs, v) {
-				vs = append(vs, v)
+			if vs, ok = incident.KeepValue(vs, verdict.KeptValue(v)); !ok {
+				break
 			}
 		}
-		slices.Sort(vs)
-		vs = vs[:min(len(vs), 64)]
+		if !ok {
+			continue
+		}
 		b, _ := json.Marshal(map[string][]string{kk: vs})
 		if size+len(b)-1 > maxLabelBytes {
 			continue

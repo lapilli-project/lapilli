@@ -510,7 +510,18 @@ func TestSignalFlagsRefused(t *testing.T) {
 		_, err := parseFlags(append([]string{"--rules", "x.yaml", "--prometheus", "http://p"}, args...), func(string, string) (bool, error) { return false, nil })
 		return err
 	}
-	for _, args := range [][]string{{"--impact", "errors=up"}, {"--impact-file", file("signals: [{name: a, expr: up}]")}, {"--impact", "a=up", "--impact-for", "a=2m"}} {
+	// The one with no name takes what it took before named signals came:
+	// a burn rate over days, a subquery by 30s, many selectors, a long
+	// expression. Reading its stand-ins is linear in it (rules.StandIns).
+	var many []string
+	for i := range 40 {
+		many = append(many, fmt.Sprintf("rate(errors_total{job=\"j%02d\"}[5m])", i))
+	}
+	for _, args := range [][]string{{"--impact", "errors=up"}, {"--impact-file", file("signals: [{name: a, expr: up}]")}, {"--impact", "a=up", "--impact-for", "a=2m"},
+		{"--impact", "sum(rate(errors_total[3d])) / sum(rate(requests_total[3d])) > 0.01"},
+		{"--impact", "max_over_time(up[1h:30s]) == 0"},
+		{"--impact", strings.Join(many, " + ") + " > 0"},
+		{"--impact", strings.Repeat("(", 2000) + "up" + strings.Repeat(")", 2000) + " == 0"}} {
 		if err := serving(args...); err != nil {
 			t.Errorf("serve %q: %v", args, err)
 		}

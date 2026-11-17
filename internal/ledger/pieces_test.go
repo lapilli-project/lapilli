@@ -3,6 +3,8 @@ package ledger
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -35,6 +37,14 @@ func TestPiecesEqualWhole(t *testing.T) {
 		return firing.Firing{Rule: "Errors", Labels: map[string]string{"service": service}, Start: start, End: start.Add(8 * time.Minute)}
 	}
 	E := T.Add(time.Hour) // where the first turn's pieces end, but for the last
+	// n series of services named prefix-000 on, on from from to to.
+	services := func(prefix string, n int, from, to time.Time) []prom.Series {
+		var out []prom.Series
+		for i := range n {
+			out = append(out, minutes(fmt.Sprintf("%s-%03d", prefix, i), from, to))
+		}
+		return out
+	}
 	for _, c := range []struct {
 		name    string
 		for_    time.Duration
@@ -67,6 +77,16 @@ func TestPiecesEqualWhole(t *testing.T) {
 			// The first cart firing long before where the next turn reads,
 			// in the window: judged again with its labels.
 			[]firing.Firing{alert("cart", E.Add(-25*time.Minute)), alert("cart", E.Add(10*time.Minute)), alert("checkout", E.Add(12*time.Minute))}, time.Time{}},
+		// 40 services long before the boundary, 40 more after it, one on
+		// from the first to the last: one window of 81 values of service,
+		// which it leaves out read whole; in pieces, the next turn's read
+		// (from the hour before where it reads) doesn't see the first 40,
+		// and the window it finds, of 41, goes on from the one found
+		// before, of 41: 81 when they are one, and left out.
+		{"a window across the boundary of more than 64 values of a label, in two pieces", 5 * time.Minute, time.Hour,
+			append(append(services("a", 40, E.Add(-100*time.Minute), E.Add(-70*time.Minute)), minutes("bridge", E.Add(-72*time.Minute), E.Add(10*time.Minute))),
+				services("b", 40, E.Add(5*time.Minute), E.Add(20*time.Minute))...),
+			[]firing.Firing{alert("a-000", E.Add(-95*time.Minute)), alert("b-039", E.Add(10*time.Minute))}, time.Time{}},
 		// The next turn reads on the step's grid, as a range is evaluated
 		// a step at a time from its start: off it, the window would start
 		// half a step late, past the lead of a firing before it.
@@ -108,7 +128,11 @@ func TestPiecesEqualWhole(t *testing.T) {
 			// As a read of the signal over [from, to] finds its windows:
 			// from the hour before from.
 			read := func(from, to time.Time) []incident.Incident {
-				return incident.FromSignal(slice(from.Add(-time.Hour), to), time.Minute, c.for_, "errors", nil)
+				ws, err := incident.FromSignal(context.Background(), slice(from.Add(-time.Hour), to), time.Minute, c.for_, "errors", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return ws
 			}
 			seen := seenOfValues([]string{"service"}, "checkout", "cart", "search")
 			setup := func() *Ledger {
@@ -322,19 +346,59 @@ func TestWindowGoingOnWithOtherLabelsPended(t *testing.T) {
 	}
 }
 
-// A named signal's window with more than 64 values of a label keeps the
-// same 64 whether its values came at once or a piece at a time: the first
-// in order.
+// A named signal's window with more than 64 values of a label leaves the
+// label out whether its values came at once or a piece at a time, and keeps
+// one of 64 alike: a label left out constrains nothing, so the window is
+// caught by more firings, never by fewer.
 func TestWindowValuesKeptAlike(t *testing.T) {
-	var all []string
-	for i := range 100 {
-		all = append(all, fmt.Sprintf("svc-%03d", 99-i))
+	for _, n := range []int{64, 100} {
+		var all []string
+		for i := range n {
+			all = append(all, fmt.Sprintf("svc-%03d", n-1-i))
+		}
+		half := n / 2
+		labels := func(vs []string) incident.Labels {
+			return incident.Labels{"service": slices.Clone(vs), "job": {"api"}}
+		}
+		// The same values, each label's in order: within the bounds a
+		// window's are kept in the order they came.
+		sorted := func(l incident.Labels) incident.Labels {
+			for k := range l {
+				slices.Sort(l[k])
+			}
+			return l
+		}
+		whole := sorted(keptWindowLabels(labels(all)))
+		pieces := sorted(keptWindowLabels(mergeLabels(keptWindowLabels(labels(all[:half])), keptWindowLabels(labels(all[half:])))))
+		if !reflect.DeepEqual(whole, pieces) || !slices.Equal(whole["job"], []string{"api"}) {
+			t.Errorf("%d values: at once %v\na piece at a time %v", n, whole, pieces)
+		}
+		if _, kept := whole["service"]; kept != (n <= 64) {
+			t.Errorf("%d values: service kept %v", n, kept)
+		}
 	}
-	whole := keptWindowLabels(incident.Labels{"service": slices.Clone(all)})
-	first := keptWindowLabels(incident.Labels{"service": slices.Clone(all[:50])})
-	rest := keptWindowLabels(incident.Labels{"service": slices.Clone(all[50:])})
-	pieces := keptWindowLabels(mergeLabels(first, rest))
-	if !slices.Equal(whole["service"], pieces["service"]) || len(whole["service"]) != 64 {
-		t.Errorf("at once %v\na piece at a time %v", whole["service"], pieces["service"])
+}
+
+// A window's label of 100,000 values, each first in order as it comes (the
+// most an insertion can move), is left out, each looked for among those
+// kept until then: never all of them held, nor written out to be
+// measured. All of them were, each looked for among all before it.
+func TestWindowValuesKeptOfMany(t *testing.T) {
+	const n = 100000
+	vs := make([]string, n)
+	for i := range vs {
+		vs[i] = fmt.Sprintf("path-%06d", n-1-i)
+	}
+	l := incident.Labels{"path": vs, "service": {"checkout"}}
+	var m0, m1 runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&m0)
+	got := keptWindowLabels(l)
+	runtime.ReadMemStats(&m1)
+	if want := (incident.Labels{"service": {"checkout"}}); !reflect.DeepEqual(got, want) {
+		t.Errorf("%v, want %v", got, want)
+	}
+	if a := m1.TotalAlloc - m0.TotalAlloc; a > 256<<10 {
+		t.Errorf("%d KiB allocated for 64 values kept of %d", a>>10, n)
 	}
 }

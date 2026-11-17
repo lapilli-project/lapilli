@@ -235,7 +235,7 @@ func (s *Server) apiApply(ctx context.Context, tg target, p ledger.Proposal, ste
 		return errWaits
 	}
 	u, err := tg.unit(ctx, p.Source, e)
-	if errors.Is(err, source.ErrElsewhere) || errors.Is(err, source.ErrAlarmElsewhere) {
+	if errors.Is(err, source.ErrElsewhere) || errors.Is(err, source.ErrAlarmElsewhere) || errors.Is(err, source.ErrNamedApart) {
 		return refusal{fmt.Sprintf("%s answered with another's: %v", tg.where(), err)}
 	}
 	if errors.Is(err, source.ErrUnreadable) {

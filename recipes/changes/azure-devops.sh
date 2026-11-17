@@ -55,8 +55,9 @@ find_pr() {
 }
 
 create_pr() {
-  # Azure takes a description of 4,000 characters at most.
-  jq --arg head "refs/heads/$1" --arg base "refs/heads/$BASE" '{title, description: .body[0:3900], sourceRefName: $head, targetRefName: $base}' "$2" >"$tmp/body"
+  # Azure takes a description of 4,000 characters at most (mdcut).
+  jq --arg head "refs/heads/$1" --arg base "refs/heads/$BASE" "$mdcut"'
+    {title, description: (.body | cut(3900)), sourceRefName: $head, targetRefName: $base}' "$2" >"$tmp/body"
   code=$(host POST "$base_api/pullrequests?api-version=7.1" "$tmp/body")
   case $code in 2??) ;; *) say "Azure DevOps didn't open a pull request ($code): $(shown "$out")"; return 1 ;; esac
   n=$(jq -r '.pullRequestId // ""' "$out")

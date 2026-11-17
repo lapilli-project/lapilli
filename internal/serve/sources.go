@@ -2,7 +2,9 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -26,14 +28,182 @@ const sourcesSpan = 28 * 24 * time.Hour
 // its tool's incidents every hour or so, each again, unchanged or not.
 const receivedQuiet = 48 * time.Hour
 
-// redactPaths is a text without the incidents file's path, which an
-// admin alone reads: an error reading it says it, on the Settings page and
-// in the status banner of every page.
+// redactPaths is a text without the paths of the files and directories
+// serve was started with (filePaths), which an admin alone reads: where
+// the data, a token or a webhook is kept says how serve is run, and an
+// error reading one says it, on the Settings page and in the status banner
+// of every page. Each is said by its flag in their place.
 func (s *Server) redactPaths(text, l string) string {
-	if s.cfg.Incidents == "" || text == "" {
+	if text == "" {
 		return text
 	}
-	return strings.ReplaceAll(text, s.cfg.Incidents, tr(l, "the incidents file"))
+	return hidePaths(text, s.filePaths(), l)
+}
+
+// runsFor are runs as they are shown to a reader, an admin or not, in
+// language l: why a run failed, and why a rule couldn't be replayed, can
+// name a file serve was started with (a webhook's that can't be read, the
+// rules'), and are said without its path to anyone but an admin, as the
+// status banner says them (redactPaths).
+func (s *Server) runsFor(runs []ledger.Run, adminReads bool, l string) []ledger.Run {
+	if adminReads || !slices.ContainsFunc(runs, func(r ledger.Run) bool { return r.Error != "" || len(r.Failed) > 0 }) {
+		return runs
+	}
+	ps := s.filePaths()
+	// Why the ledger's database couldn't be reached names its server, its
+	// user and its database: said as the status banner says it.
+	hide := func(text string) string {
+		if unreached(text) {
+			return tr(l, unreachedText)
+		}
+		return hidePaths(text, ps, l)
+	}
+	out := slices.Clone(runs)
+	for i, r := range out {
+		out[i].Error = hide(r.Error)
+		if len(r.Failed) > 0 {
+			out[i].Failed = make(map[string]string, len(r.Failed))
+			for rule, why := range r.Failed {
+				out[i].Failed[rule] = hide(why)
+			}
+		}
+	}
+	return out
+}
+
+// errorsFor is how a tool's error is said to an agent acting for a
+// reader, an admin or not: as runs are (runsFor), without a path serve
+// was started with, nor why the ledger's database couldn't be reached,
+// but to an admin.
+func (s *Server) errorsFor(adminReads bool) func(error) error {
+	if adminReads {
+		return func(err error) error { return err }
+	}
+	return func(err error) error {
+		if err == nil {
+			return nil
+		}
+		if t := err.Error(); unreached(t) {
+			return errors.New(unreachedText)
+		} else if hidden := s.redactPaths(t, ""); hidden != t {
+			return errors.New(hidden)
+		}
+		return err
+	}
+}
+
+// hidePaths is text with each of ps it says whole said by what it is
+// (filePath.name), in one pass: at each place a path may begin, the
+// longest of ps there is taken, and what is put in its place is never
+// looked in again, for another. A path is there whole when no letter,
+// digit, _, -, . or separator is before it, and no letter, digit or _
+// after it: it begins the text or follows a space, a quote, a colon or the
+// like, and ends the text, or a word, or a separator follows it, as it
+// does a path joined under it. So a word that holds one as letters keeps
+// them.
+func hidePaths(text string, ps []filePath, l string) string {
+	var b strings.Builder
+	last := 0
+	for i := 0; i < len(text); i++ {
+		if i > 0 && (wordByte(text[i-1]) || strings.IndexByte(`-./\`, text[i-1]) >= 0) {
+			continue
+		}
+		for _, p := range ps {
+			end := i + len(p.path)
+			if strings.HasPrefix(text[i:], p.path) && (end == len(text) || !wordByte(text[end])) {
+				b.WriteString(text[last:i])
+				b.WriteString(p.name(l))
+				last, i = end, end-1
+				break
+			}
+		}
+	}
+	if last == 0 {
+		return text
+	}
+	b.WriteString(text[last:])
+	return b.String()
+}
+
+// wordByte reports whether c is of a word, where a path that ends at it
+// would end inside one: a letter, a digit or _.
+func wordByte(c byte) bool {
+	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '_'
+}
+
+// filePath is a path serve was started with, and the flag that gave it.
+type filePath struct{ path, flag string }
+
+// name is what a path is said as in its place, in language l: by what it
+// is, or the flag that gave it.
+func (p filePath) name(l string) string {
+	switch p.flag {
+	case "--incidents":
+		return tr(l, "the incidents file")
+	case "--deploys":
+		return tr(l, "the deploys file")
+	case "--marked":
+		return tr(l, "the marked file")
+	case "--config":
+		return tr(l, "the config file")
+	}
+	return tr(l, "the path given to %s", p.flag)
+}
+
+// filePaths are the paths of the files and directories serve was started
+// with, by the flag that gave each: as given, with no separator at its
+// end, and cleaned, as a path joined under a directory says it
+// (filepath.Join), and where it leads; the longest first, so that one
+// inside another is taken out before it. A value that doesn't read as a path once its separators
+// at the end are let go (pathLike) is left, so that a bare name, --rules
+// rules or --rules rules/, doesn't take its word out of every sentence.
+// --impact-file and --on-call aren't among them: they are read once, as
+// serve starts, and a failure stops it.
+func (s *Server) filePaths() []filePath {
+	c := s.cfg
+	given := []filePath{{c.Incidents, "--incidents"}, {c.Deploys, "--deploys"}, {c.Marked, "--marked"}, {c.Config, "--config"},
+		{c.RulesPath, "--rules"}, {c.RulesHistory, "--rules-history"}, {c.LokiRules, "--loki-rules"},
+		{c.Ledger, "--ledger"}, {c.LedgerURLFile, "--ledger-url-file"},
+		{c.GrafanaToken, "--grafana-token-file"}, {c.LokiToken, "--loki-token-file"}, {c.RulerToken, "--ruler-token-file"},
+		{c.Slack, "--slack-webhook-file"}, {c.NotifyWebhook, "--notify-webhook-file"}, {c.SessionKey, "--session-key-file"},
+		{c.IncidentsToken, "--incidents-token-file"}, {c.FiringsToken, "--firings-token-file"}, {c.TasksToken, "--tasks-token-file"},
+		{c.NotifyToken, "--notify-token-file"}, {c.NotifyGrafanaSecret, "--notify-grafana-secret-file"},
+		{c.ChangesToken, "--changes-token-file"}, {c.ChangesGrafanaToken, "--changes-grafana-token-file"},
+		{c.ChangesRulerToken, "--changes-ruler-token-file"}, {c.ChangesPaused, "--changes-paused"}, {c.ChangesOCIConfig, "--changes-oci-config"}}
+	for _, f := range c.TeamDigests {
+		given = append(given, filePath{f, "--team-digest"})
+	}
+	for _, f := range c.ReportDests {
+		given = append(given, filePath{f, "--report-dest"})
+	}
+	var out []filePath
+	add := func(path, flag string) {
+		if p := (filePath{strings.TrimRight(path, `/\`), flag}); pathLike(p.path) && !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	for _, p := range given {
+		if p.path == "" {
+			continue
+		}
+		add(p.path, p.flag)
+		add(filepath.Clean(p.path), p.flag)
+		// And where it leads, should it be a link or under one: what is
+		// walked behind one is said there, as a history a git-sync or a
+		// mounted volume keeps behind a link is (rules.History). As it
+		// leads now, where it can be told.
+		if real, err := filepath.EvalSymlinks(p.path); err == nil {
+			add(real, p.flag)
+		}
+	}
+	slices.SortStableFunc(out, func(a, b filePath) int { return len(b.path) - len(a.path) })
+	return out
+}
+
+// pathLike reports whether a flag's value reads as a path where a text
+// says it: with a separator or a dot, and more than separators and dots.
+func pathLike(p string) bool {
+	return strings.ContainsAny(p, `/\.`) && strings.Trim(p, `/\.`) != ""
 }
 
 // impactStale is how long since the impact signal was last read it is

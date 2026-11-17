@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -13,9 +14,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"lapilli.dev/internal/ledger"
 )
@@ -26,12 +30,14 @@ import (
 const changeRecipes = "../../recipes/changes/"
 
 // gitEnv is git with none of this machine's own settings: no signing, no
-// hooks, no credentials.
+// hooks, no credentials. Its HOME holds a .curlrc that sends everything
+// nowhere: the recipes' curl reads none (-q), or nothing they ask arrives.
 func gitEnv(t *testing.T) []string {
 	t.Helper()
 	home := t.TempDir()
 	empty := filepath.Join(home, "gitconfig")
 	os.WriteFile(empty, nil, 0o600)
+	os.WriteFile(filepath.Join(home, ".curlrc"), []byte("proxy = \"http://127.0.0.1:9\"\n"), 0o600)
 	return append(os.Environ(), "HOME="+home, "GIT_CONFIG_GLOBAL="+empty, "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0")
 }
 
@@ -270,6 +276,48 @@ var recipeHosts = []recipeHost{
 			return []string{"AZURE_DEVOPS_ORG_URL=" + u + "/org", "AZURE_DEVOPS_PROJECT=my project", "AZURE_DEVOPS_REPO=rules", "AZURE_DEVOPS_TOKEN_FILE=" + tok}
 		},
 		func(u string) string { return u + "/org/my%20project/_git/rules/pullrequest/7" }},
+}
+
+// TestChangeRecipesCutClosed: the description a host takes a limit of
+// (Azure's 4,000 characters) is cut as mdCut cuts a task's: at a line's
+// end, no code span cut open, a fenced block cut open closed.
+func TestChangeRecipesCutClosed(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("no jq")
+	}
+	lib, err := os.ReadFile(changeRecipes + "lib.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?s)\nmdcut='([^']*)'`).FindSubmatch(lib)
+	if m == nil {
+		t.Fatal("no mdcut in lib.sh")
+	}
+	body := "Lapilli proposal #1: a new for, for the rule `Errors" + strings.Repeat(" @example-org/everyone [x](https://evil.example)", 100) + "`.\n\n```diff\n" + strings.Repeat("-for: 1m\n+for: 5m\n", 400) + "```\n"
+	in, _ := json.Marshal(map[string]string{"body": body})
+	for _, n := range []int{100, 3900} {
+		cmd := exec.Command("jq", "-r", string(m[1])+" .body | cut("+strconv.Itoa(n)+")")
+		cmd.Stdin = bytes.NewReader(in)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := strings.TrimSuffix(string(out), "\n") // jq -r's own
+		if utf8.RuneCountInString(got) > n {
+			t.Errorf("cut to %d: %d characters", n, utf8.RuneCountInString(got))
+		}
+		open := false
+		for line := range strings.Lines(got) {
+			if strings.HasPrefix(line, "```") {
+				open = !open
+			} else if !open && strings.Count(line, "`")%2 != 0 {
+				t.Errorf("cut to %d: a span left open: %q", n, line)
+			}
+		}
+		if open {
+			t.Errorf("cut to %d: a fenced block left open", n)
+		}
+	}
 }
 
 func TestChangeRecipes(t *testing.T) {

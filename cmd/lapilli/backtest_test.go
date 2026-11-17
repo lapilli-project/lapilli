@@ -718,7 +718,7 @@ func TestBacktestRecipeFails(t *testing.T) {
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
 	rr := newRecipeRun(t, backtestHosts[0], repo)
-	hostile := "```\n</details> @octocat #123 <img src=x onerror=alert(1)> right‮left\x1b[31m\n::error::merge it\n##vso[task.complete result=Succeeded]"
+	hostile := "```\n</details> @octocat #123 <img src=x onerror=alert(1)> right‮left\x1b[31m\n::error::merge it\n##vso[task.complete result=Succeeded]\nX ##[error title=Lapilli backtest passed]No change\n##[add-matcher]alerts/m.json"
 	render := "printf '%s\\n' '" + strings.ReplaceAll(hostile, "'", "") + "' >&2; exit 3"
 	out, err := rr.run([]string{"RENDER=" + render})
 	if err != nil {
@@ -731,11 +731,13 @@ func TestBacktestRecipeFails(t *testing.T) {
 	}
 	// What RENDER said is in the job's log, no line of it a command.
 	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "::") || strings.Contains(line, "##vso[") {
+		// GitHub reads its older ##[ anywhere in a line, as Azure its ##vso[.
+		if strings.HasPrefix(strings.TrimSpace(line), "::") || strings.Contains(line, "##vso[") || strings.Contains(line, "##[") {
 			t.Errorf("a command in the job's log: %q", line)
 		}
 	}
-	if !strings.Contains(out, "  | ::error::merge it") || !strings.Contains(out, "  | ##vso(task.complete") {
+	if !strings.Contains(out, "  | ::error::merge it") || !strings.Contains(out, "  | ##vso(task.complete") ||
+		!strings.Contains(out, "  | X ##(error title=Lapilli backtest passed]No change") || !strings.Contains(out, "  | ##(add-matcher]alerts/m.json") {
 		t.Errorf("the job's log:\n%s", out)
 	}
 

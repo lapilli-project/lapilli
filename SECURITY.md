@@ -40,7 +40,13 @@ tokens; or the JWT a sign-in in front signs (`--proxy-jwt`), checked against
 that sign-in's keys. It gives them the role `--editors` and `--admins` do,
 refuses posts from other sites, and with `--read-only` takes no changes. It sends notices to the URLs in
 `--notify-webhook-file` and `--slack-webhook-file`, and follows no
-redirects. Of particular interest besides the above:
+redirects. Whoever can write its ledger, as a Postgres user or in the
+SQLite file, can make it query the history and the rule sources with its
+tokens (the impact signal set in the UI, the versions of the rules and the
+proposals are kept there), carry out with `--changes` a change the ledger
+holds as approved, and send the notices it holds: so guard the ledger as
+you guard the tokens. Of
+particular interest besides the above:
 
 - a way for a page to run script, or for a rule, label or incident to
   change what a page shows beyond its own text;

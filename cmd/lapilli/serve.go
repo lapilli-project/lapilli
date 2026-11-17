@@ -21,6 +21,7 @@ import (
 	"lapilli.dev/internal/serve"
 	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/source"
+	"lapilli.dev/internal/verdict"
 )
 
 const serveUsage = `lapilli serve keeps judging: every hour it replays the rules over the hours
@@ -113,7 +114,8 @@ The ledger:
   --every DUR         run this often (default 1h)
   --settle DUR        and replay the last DUR before the last run's end
                       again, for points that arrived late (default 1h)
-  --backfill DUR      on first start, replay this far back (default 28d)
+  --backfill DUR      on first start, replay this far back (default 28d, at
+                      most 3650d)
   --keep DUR          drop firings older than this (default 400d; 0 keeps
                       everything)
   --watch DUR         read the rules this often (default 1m)
@@ -820,6 +822,9 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 			cfg.Settle, err = dur(0)
 		case "--backfill":
 			cfg.Backfill, err = dur(time.Hour)
+			if err == nil && cfg.Backfill > serve.MaxBackfill {
+				err = fmt.Errorf("--backfill %s: at most 3650d, ten years", val)
+			}
 		case "--keep":
 			cfg.Keep, err = dur(0)
 		case "--watch":
@@ -1199,7 +1204,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	}
 	st, err := readServe(args, false)
 	if err != nil {
-		fmt.Fprintf(stderr, "lapilli serve: %v\nRun \"lapilli serve -h\" for the options.\n", err)
+		fmt.Fprintf(stderr, "lapilli serve: %s\nRun \"lapilli serve -h\" for the options.\n", verdict.Clean(err.Error()))
 		return 2
 	}
 	cfg, f := st.cfg, st.f
@@ -1213,14 +1218,14 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	var h history
 	if f.promURL != "" || f.gcpProj != "" {
 		if h, err = newHistory(ctx, f); err != nil {
-			fmt.Fprintf(stderr, "lapilli serve: %v\n", err)
+			fmt.Fprintf(stderr, "lapilli serve: %s\n", verdict.Clean(err.Error()))
 			return 1
 		}
 		h = f.withLogs(h, stderr)
 	}
 	s, err := serve.New(ctx, cfg, h, log)
 	if err != nil {
-		fmt.Fprintf(stderr, "lapilli serve: %v\n", err)
+		fmt.Fprintf(stderr, "lapilli serve: %s\n", verdict.Clean(err.Error()))
 		return 1
 	}
 	defer s.Close()
@@ -1233,7 +1238,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	if err := s.Run(ctx); err != nil {
-		fmt.Fprintf(stderr, "lapilli serve: %v\n", err)
+		fmt.Fprintf(stderr, "lapilli serve: %s\n", verdict.Clean(err.Error()))
 		return 1
 	}
 	return 0
