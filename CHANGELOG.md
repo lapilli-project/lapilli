@@ -2,7 +2,6 @@
 
 ## [Unreleased]
 
-
 ### Added
 
 - **Named impact signals, in `lapilli serve`** (docs/design/signals.md,
