@@ -19,10 +19,13 @@
   proxy or a sign-in does, an error said the page's markup cut to 200
   bytes: a doctype, a style sheet. It now says `an HTML page` and the
   page's title, or with none the start of its text, without its scripts
-  and styles; what the request carried to sign in is taken out after the
-  page's entities are read, and before it is cut. So in `lapilli
+  and styles. What the request carried to sign in is taken out after the
+  page's entities are read, though white space or a character that
+  doesn't show split it, and before the text is cut; of a page longer
+  than is read, the text it is cut in isn't said. So in `lapilli
   preflight`'s `history.intervals`, and in the errors serve's runs and
-  `lapilli verdict` say of a page.
+  `lapilli verdict` say of a page. How an answer is taken (a page, too
+  large, asked again, Loki's own text) is as it was.
 
 ## [0.53.0] - 2026-11-17
 

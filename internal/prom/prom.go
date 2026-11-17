@@ -840,9 +840,10 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 	if c.loki {
 		what = "a Loki"
 	}
+	cut := func() bool { return h.n > int64(h.buf.Len()) }
 	raw := func() string {
 		text := h.buf.String()
-		if h.n > int64(len(text)) {
+		if cut() {
 			text = cutEnd(text, sent(req))
 		}
 		return strings.TrimSpace(text)
@@ -850,7 +851,7 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 	notAPI := func() error {
 		text := raw()
 		said := clip(serverText(text, req), 200)
-		s, page := pageSaid(text, req)
+		s, page := pageSaid(text, cut(), req)
 		if !page {
 			return pageError(req, resp, "not "+what+" API response: "+said)
 		}
@@ -864,10 +865,10 @@ func (c *Client) queryRange(ctx context.Context, expr string, start, end time.Ti
 		return nil, &APIError{Status: resp.StatusCode, Msg: fmt.Sprintf("the answer is over %d MiB", maxBody>>20), big: true}
 	}
 	if bad != nil {
-		if text := raw(); c.loki && resp.StatusCode/100 != 2 && lokiText(resp, text) {
+		if msg := clip(serverText(raw(), req), 200); c.loki && resp.StatusCode/100 != 2 && lokiText(resp, msg) {
 			// Loki says what went wrong in plain text; a page, from a
 			// proxy before it, isn't Loki's.
-			return nil, failed(clip(serverText(text, req), 200))
+			return nil, failed(msg)
 		}
 		return nil, notAPI()
 	}
@@ -1088,9 +1089,11 @@ func (c *Client) getOnce(ctx context.Context, path string, heed bool, limit int6
 	if resp.StatusCode/100 != 2 {
 		text := strings.TrimSpace(string(body))
 		said := clip(serverText(text, req), 200)
-		if s, ok := pageSaid(text, req); ok {
+		if s, ok := pageSaid(text, false, req); ok {
 			// An HTML page, as a managed service's frontend answers a path
-			// it doesn't serve: said by its title, not its markup.
+			// it doesn't serve: said by its title, not its markup. A title
+			// that says the answer was too large says so, as the start of
+			// the page always did.
 			e := apiError(req, resp, s)
 			e.big = tooBigText(said)
 			return nil, e
