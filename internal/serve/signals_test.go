@@ -1126,3 +1126,66 @@ func TestSignalsTryRefused(t *testing.T) {
 		t.Errorf("the signals' list doesn't say from when each keeps the record")
 	}
 }
+
+// Eight signals, one replaced (the probe renamed on the command line): its
+// bit, which alerts and tallies still carry, is the only one free, and the
+// new signal has it, its own; no two share one, and each firing is tied as
+// it was, by the probe's new name.
+func TestSignalReplaceOneOfEight(t *testing.T) {
+	ctx := context.Background()
+	s := signalServer(t, signalWindowsHistory(), func(c *Config) {
+		for i := 2; i < 8; i++ {
+			c.Signals = append(c.Signals, ledger.SignalDef{Name: fmt.Sprintf("s%d", i), Expr: fmt.Sprintf("m%d > 1", i), For: 5 * time.Minute, Record: true})
+		}
+	})
+	ties := func() map[string][]string {
+		out := map[string][]string{}
+		for _, f := range reportOf(t, s).Firings {
+			out[f.Labels["service"]] = f.Signals
+		}
+		return out
+	}
+	before := ties()
+	s.cfg.Signals[1].Name = "probe2"
+	s.sigs.Lock()
+	s.sigs.sig = nil
+	s.sigs.Unlock()
+	for k := 1; k <= 2; k++ {
+		runDue(s, k)
+		s.jobs(ctx, true)
+	}
+	rows, err := s.l.SignalRows(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bits := map[int]string{}
+	names := map[string]bool{}
+	for _, r := range rows {
+		if r.Name == "" {
+			continue
+		}
+		names[r.Name] = true
+		if other, ok := bits[r.Bit]; ok {
+			t.Errorf("%s and %s share bit %d", other, r.Name, r.Bit)
+		}
+		bits[r.Bit] = r.Name
+	}
+	if !names["probe2"] || names["probe"] || len(names) != 8 {
+		t.Errorf("the signals kept: %v", names)
+	}
+	after := ties()
+	for svc, was := range before {
+		want := slices.Clone(was)
+		for i, n := range want {
+			if n == "probe" {
+				want[i] = "probe2"
+			}
+		}
+		slices.Sort(want)
+		got := slices.Clone(after[svc])
+		slices.Sort(got)
+		if !slices.Equal(got, want) {
+			t.Errorf("%s's firing tied to %v; before, %v", svc, after[svc], was)
+		}
+	}
+}

@@ -20,6 +20,9 @@ CREATE TABLE impact_signals (
 	missed_at BIGINT NOT NULL DEFAULT 0
 );
 
+-- No two named signals share a bit: a series' bits are each one's alone.
+CREATE UNIQUE INDEX impact_signals_bit ON impact_signals (bit) WHERE name != '';
+
 INSERT INTO impact_signals (name, since, criterion, again, data, last_read, floor_at)
 SELECT '',
 	coalesce((SELECT value FROM meta WHERE key = 'impact_since'), ''),

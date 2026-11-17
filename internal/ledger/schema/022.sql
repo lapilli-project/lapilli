@@ -3,7 +3,8 @@
 --
 -- impact_signals are the signals the runs read: name, unique, '' for the
 -- unnamed signal (--impact PROMQL); bit, its bit in series.signals, 0 to
--- 7, unused of the unnamed signal, which ties no alert; expr, for_ns,
+-- 7, each named signal's its own (impact_signals_bit), unused of the
+-- unnamed signal, which ties no alert; expr, for_ns,
 -- match_labels (a JSON list, NULL for the match in effect, [] for none)
 -- and keeps_record as they were started with; set_by and set_at, who set
 -- it in the UI and when (none for the command line's or the file's). Then
@@ -31,6 +32,9 @@ CREATE TABLE impact_signals (
 	seen_to INTEGER NOT NULL DEFAULT 0,
 	missed_at INTEGER NOT NULL DEFAULT 0
 ) WITHOUT ROWID;
+
+-- No two named signals share a bit: a series' bits are each one's alone.
+CREATE UNIQUE INDEX impact_signals_bit ON impact_signals (bit) WHERE name != '';
 
 -- The one signal before names: what meta kept of it, moved to its row.
 INSERT INTO impact_signals (name, since, criterion, again, data, last_read, floor_at)

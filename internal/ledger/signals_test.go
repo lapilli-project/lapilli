@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/firing"
+	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -147,5 +148,50 @@ func TestSignalTies(t *testing.T) {
 	}
 	if sets[2] != 1 || sets[1] != 2 || !slices.Contains([]int{n - 3}, sets[3|verdict.FellBackBit]) {
 		t.Errorf("days by signals after: %v", sets)
+	}
+}
+
+// A run's read of a named signal the ledger doesn't keep (no row from
+// SyncSignals, with its own bit) keeps nothing: no row made, at bit 0, a
+// bit another signal has. And no two named signals can share a bit.
+func TestSignalWithNoRowKeepsNothing(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	if _, err := l.SyncSignals(ctx, signalDefs, nil, opts.Match); err != nil {
+		t.Fatal(err)
+	}
+	at := t0.Add(10 * time.Minute)
+	f := Found{From: t0, To: t0.Add(time.Hour), Run: Run{Kind: "test", Started: t0, Finished: t0}, Signals: []SignalRead{{
+		Name: "ghost", Criterion: "ghost > 1", Since: t0.Add(-time.Hour), From: t0,
+		Windows: []incident.Incident{{ID: "impact-ghost-x", Signal: "ghost", Start: at, End: at.Add(5 * time.Minute)}},
+	}}}
+	if err := l.Record(ctx, f, opts); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := l.SignalRows(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if r.Name == "ghost" {
+			t.Errorf("a row made for a signal the ledger doesn't keep, at bit %d", r.Bit)
+		}
+	}
+	if ws, err := l.ImpactWindows(ctx, t0.Add(-time.Hour), t0.Add(2*time.Hour)); err != nil || len(ws) != 0 {
+		t.Errorf("windows kept of a signal the ledger doesn't keep: %+v %v", ws, err)
+	}
+	// Nor does what keeps its record make one.
+	if err := l.write(ctx, func(t *txn) error { return setSigMeta(t, "ghost", metaImpactSince, "1") }); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := sigMeta(ctx, l.r, "ghost", metaImpactSince); err != nil || v != "" {
+		t.Errorf("ghost's since kept: %q %v", v, err)
+	}
+	err = l.write(ctx, func(t *txn) error {
+		_, err := t.ExecContext(t.ctx, "INSERT INTO impact_signals (name, bit) VALUES ('twin', (SELECT bit FROM impact_signals WHERE name = 'errors'))")
+		return err
+	})
+	if err == nil {
+		t.Error("two named signals on one bit")
 	}
 }

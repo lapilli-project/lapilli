@@ -47,12 +47,19 @@ func sigMeta(ctx context.Context, q querier, name, key string) (string, error) {
 	return v, err
 }
 
-// setSigMeta keeps v under a meta key of v0.49.0's, in a signal's row,
-// made when there is none.
+// setSigMeta keeps v under a meta key of v0.49.0's, in a signal's row:
+// the unnamed signal's made when there is none, as meta's key was; a
+// named one's only when SyncSignals made it, with its own bit, and none
+// for one it hasn't (a replica that follows a leader started without it,
+// or a sync that failed), which keeps nothing.
 func setSigMeta(t *txn, name, key, v string) error {
 	col, ok := sigColumn[key]
 	if !ok {
 		return fmt.Errorf("no column for %s", key)
+	}
+	if name != "" {
+		_, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET "+col+" = ? WHERE name = ?", v, name)
+		return err
 	}
 	_, err := t.ExecContext(t.ctx, "INSERT INTO impact_signals (name, "+col+") VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET "+col+" = excluded."+col, name, v)
 	return err
@@ -296,9 +303,12 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 				used[r.Bit] = true
 			}
 		}
-		// A bit an alert or a tally still carries is given to no new
-		// signal until they are tied, and counted, again: so no tally of a
-		// signal taken away is read as one added in its place.
+		// A bit an alert or a tally still carries is given to a new signal
+		// only when no other is free: until every firing is judged again
+		// (pendAll, below, in this write), a tally of a signal taken away
+		// would be read as the one added in its place. With eight, one
+		// replaced, there is none other: its tallies are counted again
+		// before long, and its alerts are tied again here.
 		carried, err := carriedBits(t)
 		if err != nil {
 			return err
@@ -319,11 +329,8 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 			}
 			r, ok := byName[d.Name]
 			if !ok {
-				bit := 0
-				for used[bit] || carried&(1<<bit) != 0 {
-					bit++
-				}
-				if bit > verdict.MaxSignalBit {
+				bit := freeBit(used, carried)
+				if bit < 0 {
 					return fmt.Errorf("more than %d named signals", verdict.MaxSignals)
 				}
 				used[bit] = true
@@ -410,6 +417,19 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 		return nil
 	})
 	return out, err
+}
+
+// freeBit is the lowest bit no signal has and no alert or tally carries;
+// else the lowest no signal has; else -1, all eight had.
+func freeBit(used map[int]bool, carried int64) int {
+	for _, uncarried := range []bool{true, false} {
+		for bit := 0; bit <= verdict.MaxSignalBit; bit++ {
+			if !used[bit] && (!uncarried || carried&(1<<bit) == 0) {
+				return bit
+			}
+		}
+	}
+	return -1
 }
 
 // pendAll pends every firing's span, to be judged again a week at a time.

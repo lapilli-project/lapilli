@@ -502,7 +502,12 @@ func (l *Ledger) setSigMetaIf(t *txn, name, key, v string) error {
 // changed.
 func (l *Ledger) signalRecord(t *txn, f Found, r SignalRead, o verdict.Options) (int64, error) {
 	var missed int64
-	if err := t.QueryRowContext(t.ctx, "SELECT missed_at FROM impact_signals WHERE name = ?", r.Name).Scan(&missed); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := t.QueryRowContext(t.ctx, "SELECT missed_at FROM impact_signals WHERE name = ?", r.Name).Scan(&missed); errors.Is(err, sql.ErrNoRows) {
+		// A signal the ledger doesn't keep (SyncSignals hasn't made its
+		// row, with its own bit): nothing of it is kept, its windows nor
+		// its record, until it does.
+		return f.From.Unix(), nil
+	} else if err != nil {
 		return 0, err
 	}
 	if r.Missed {
