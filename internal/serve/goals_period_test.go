@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/verdict"
@@ -441,13 +442,19 @@ func TestGoalsPeriodAfterRun(t *testing.T) {
 	if ts := tasks("sale-none-missed"); len(ts) != 1 {
 		t.Errorf("made again for an occurrence a task was made for: %+v", ts)
 	}
-	// What is kept of them is of their own: no week's mark, and the
-	// weekly goal's none of an occurrence's.
+	// What is kept of them is of their own, an occurrence at a time: no
+	// week's mark, and the weekly goal's none of an occurrence's.
 	toldW, madeW, _ := s.l.GoalMarks(ctx)
 	toldP, madeP, _ := s.l.PeriodGoalMarks(ctx)
-	if _, ok := toldW["sale-none-missed.0"]; ok || madeW["sale-none-missed.0"] != 0 || toldP["sale-none-missed.0"] != dayAt("2026-11-05", 0).Unix() ||
-		madeP["sale-none-missed.0"] != dayAt("2026-11-05", 0).Unix() || toldP["none-missed.0"] != 0 {
+	autumnKey, weekKey := ledger.GoalOccKey("sale-none-missed", 0, "3@2026-10-27T00:00Z"), ledger.GoalOccKey("sale-none-missed", 0, "5@2026-11-02T00:00Z")
+	if _, ok := toldW["sale-none-missed.0"]; ok || madeW["sale-none-missed.0"] != 0 || toldP[autumnKey] != dayAt("2026-10-29", 0).Unix() ||
+		toldP[weekKey] != dayAt("2026-11-05", 0).Unix() || madeP[autumnKey] != dayAt("2026-10-29", 0).Unix() || madeP[weekKey] != dayAt("2026-11-05", 0).Unix() {
 		t.Errorf("marks: %v %v %v %v", toldW, madeW, toldP, madeP)
+	}
+	for k := range toldP {
+		if strings.HasPrefix(k, "none-missed.") {
+			t.Errorf("a weekly goal's mark among the occurrences': %s", k)
+		}
 	}
 	// Slack's line of an occurrence's notice.
 	n := notice{Goal: &goalNotice{Name: "launch-no-worse", Measure: "precision", Each: "launch", Title: "Search, new ranking", From: dayAt("2026-10-28", 12),
@@ -693,5 +700,294 @@ func TestGoalsPeriodPageBounded(t *testing.T) {
 		!strings.Contains(body, `title="standup Stand-up, 2026-11-01 09:00 → 2026-11-01 09:15: met, 0"`) || strings.Contains(body, `title="standup Stand-up, 2026-10-19 09:00`) ||
 		strings.Contains(body, `<h2 id="goal-weeks">`) {
 		t.Errorf("%d cells, or no word of those left out:\n%s", n, body)
+	}
+}
+
+// An occurrence's goal reads alike whatever span of weeks it is read in:
+// the four weeks before it leave out the incidents during any occurrence
+// of its kind, those of windows the read's own weeks don't meet among
+// them. A sale's median lead beside an earlier sale's, read over thirteen
+// weeks (the Goals page, /metrics, the leader) and over its own week (the
+// digest, a report, Make it a task), and the Marked windows page of the
+// sale alone, which lists one window.
+func TestGoalsPeriodBeforeAnySpan(t *testing.T) {
+	s, _ := server(t, func(c *Config) { c.Incidents, c.Impact = "", "" })
+	ctx := context.Background()
+	o := s.cfg.Options
+	fire := func(at time.Time) firing.Firing {
+		return firing.Firing{Rule: "Sharp", Labels: map[string]string{"service": "checkout"}, Start: at, End: at.Add(10 * time.Minute)}
+	}
+	if err := s.l.Record(ctx, ledger.Found{From: dayAt("2026-10-05", 0), To: now.Add(-time.Hour),
+		Firings: []firing.Firing{fire(dayAt("2026-10-06", 3)), fire(dayAt("2026-10-07", 10).Add(-5 * time.Minute)), fire(dayAt("2026-10-21", 10).Add(-time.Minute))},
+		Rules:   []ledger.Rule{{Name: "Sharp", Severity: "critical"}}, Run: ledger.Run{Kind: "backfill", Started: now, Finished: now}}, o); err != nil {
+		t.Fatal(err)
+	}
+	// INC-1 during the early sale, caught five minutes ahead; INC-2 during
+	// the main sale, a minute ahead.
+	if _, err := s.l.SyncFile(ctx, []incident.Incident{
+		{ID: "INC-1", Start: dayAt("2026-10-07", 10), End: dayAt("2026-10-07", 11), Labels: incident.Labels{"service": {"checkout"}}},
+		{ID: "INC-2", Start: dayAt("2026-10-21", 10), End: dayAt("2026-10-21", 11), Labels: incident.Labels{"service": {"checkout"}}},
+	}, o); err != nil {
+		t.Fatal(err)
+	}
+	var main ledger.Marked
+	for _, m := range []ledger.Marked{
+		{Kind: "sale", Title: "Early sale", Start: dayAt("2026-10-07", 9), End: dayAt("2026-10-07", 11)},
+		{Kind: "sale", Title: "Main sale", Start: dayAt("2026-10-21", 9), End: dayAt("2026-10-21", 11)},
+	} {
+		id, err := s.l.PutMarked(ctx, m, "ana", o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		main, main.ID = m, id
+	}
+	if err := s.l.JudgePending(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	declare(t, s, "goals:\n  - {name: sale-lead, each: sale, measure: incidents.median_lead_seconds, no_worse_than: before}\n")
+	read := func(from, to string) summaryGoal {
+		_, body, _ := get(t, s.Handler(), "/api/v1/summary?from="+from+"&to="+to)
+		var sum summary
+		if err := json.Unmarshal([]byte(body), &sum); err != nil {
+			t.Fatal(err)
+		}
+		return periodIn(t, sum, "2026-10-19", "", "sale-lead", "Main sale")
+	}
+	for _, g := range []summaryGoal{read("2026-08-10", "2026-11-02"), read("2026-10-19", "2026-10-19")} {
+		if g.Result != goalUnknown || g.Why != whyNoBefore || g.Before != nil {
+			t.Errorf("the main sale's lead, beside weeks whose one incident was during a sale: %+v", g)
+		}
+	}
+	if line, _, err := s.goalsLine(ctx, dayAt("2026-10-19", 0), nil); err != nil || line != "Goals: 0 of 1 met, 0 missed, 1 not known." {
+		t.Errorf("the digest of the sale's week: %q %v", line, err)
+	}
+	// The Marked windows page of the main sale alone, and of the weeks
+	// that don't reach back to the early sale.
+	m, err := s.l.MarkedByID(ctx, main.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ms := range [][]ledger.Marked{{m}} {
+		lines, _, err := s.markedLines(ctx, ms, dayAt("2026-10-20", 0), dayAt("2026-10-22", 0), nil, "en")
+		if err != nil || len(lines) != 1 || lines[0].Before.Incidents.Total != 0 || lines[0].Inside.Incidents.Total != 1 {
+			t.Errorf("the main sale's page: %+v %v", lines, err)
+		}
+	}
+	_, body, _ := get(t, s.Handler(), fmt.Sprintf("/marked/%d", main.ID))
+	if !strings.Contains(body, "Main sale") {
+		t.Error("the main sale's page")
+	}
+}
+
+// An occurrence met when the leader first finds it ended, and missed once
+// an incident during it is written down a day later, is told then, once,
+// though a later occurrence was told of already; and said on the goal's
+// open task, missed again.
+func TestGoalsPeriodToldWhenMissedLate(t *testing.T) {
+	hook := filepath.Join(t.TempDir(), "hook")
+	os.WriteFile(hook, []byte("https://hooks.example/x\n"), 0o600)
+	s := periodServer(t, func(c *Config) { c.NotifyWebhook, c.GoalTasks = hook, true })
+	ctx := context.Background()
+	if _, err := s.l.PutMarked(ctx, ledger.Marked{Kind: "sale", Title: "Monday sale", Start: dayAt("2026-10-26", 9), End: dayAt("2026-10-26", 10)}, "ana", s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.JudgePending(ctx, s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	told := func() []string {
+		var out []string
+		for _, n := range goalNotices(t, s) {
+			if n.Name == "sale-none-missed" {
+				out = append(out, n.Title)
+			}
+		}
+		slices.Sort(out)
+		return out
+	}
+	again(t, s)
+	if got := told(); !slices.Equal(got, []string{"Autumn sale"}) {
+		t.Fatalf("first: %v", got)
+	}
+	// INC-M, on cart, during the Monday sale, written down a day later.
+	if _, err := s.l.SyncFile(ctx, append(slices.Clone(goalIncidents),
+		incident.Incident{ID: "INC-M", Start: dayAt("2026-10-26", 9).Add(30 * time.Minute), End: dayAt("2026-10-26", 10), Labels: incident.Labels{"service": {"cart"}}}), s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	again(t, s)
+	again(t, s)
+	if got := told(); !slices.Equal(got, []string{"Autumn sale", "Monday sale"}) {
+		t.Errorf("told: %v", got)
+	}
+	ts, _ := s.l.Tasks(ctx, ledger.TaskQuery{Goal: "sale-none-missed"})
+	if len(ts) != 1 || !slices.Equal(commentsOn(t, s, ts[0].ID), []string{"Missed again, sale Monday sale, 2026-10-26 09:00 → 2026-10-26 10:00: 1."}) {
+		t.Errorf("said: %+v %q", ts, commentsOn(t, s, ts[0].ID))
+	}
+}
+
+// Two occurrences of a kind ending at the same moment are two, told and
+// said on apart: the autumn sale, missed, which the task is made for; a
+// cart sale with it, missed too, told and said missed again; and a search
+// sale with them, met, of which nothing is said that isn't so.
+func TestGoalsPeriodSameEnd(t *testing.T) {
+	hook := filepath.Join(t.TempDir(), "hook")
+	os.WriteFile(hook, []byte("https://hooks.example/x\n"), 0o600)
+	s := periodServer(t, func(c *Config) { c.NotifyWebhook, c.GoalTasks = hook, true })
+	ctx := context.Background()
+	for _, m := range []ledger.Marked{
+		{Kind: "sale", Title: "Search sale", Start: dayAt("2026-10-28", 0), End: dayAt("2026-10-29", 0), Labels: map[string]string{"service": "search"}},
+		{Kind: "sale", Title: "Cart sale", Start: dayAt("2026-10-28", 0), End: dayAt("2026-10-29", 0), Labels: map[string]string{"service": "cart"}},
+	} {
+		if _, err := s.l.PutMarked(ctx, m, "ana", s.cfg.Options); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.l.JudgePending(ctx, s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	sum := summaryOfGoals(t, s)
+	for title, want := range map[string]string{"Autumn sale": goalMissed, "Cart sale": goalMissed, "Search sale": goalMet} {
+		if g := periodIn(t, sum, "2026-10-26", "", "sale-none-missed", title); g.Result != want || !g.End.Equal(dayAt("2026-10-29", 0)) {
+			t.Errorf("%s: %+v", title, g)
+		}
+	}
+	again(t, s)
+	again(t, s)
+	var told []string
+	for _, n := range goalNotices(t, s) {
+		if n.Name == "sale-none-missed" {
+			told = append(told, n.Title)
+		}
+	}
+	slices.Sort(told)
+	if !slices.Equal(told, []string{"Autumn sale", "Cart sale"}) {
+		t.Errorf("told: %v", told)
+	}
+	ts, _ := s.l.Tasks(ctx, ledger.TaskQuery{Goal: "sale-none-missed"})
+	if len(ts) != 1 || ts[0].Title != "Goal sale-none-missed missed during sale Autumn sale, 2026-10-27" ||
+		!slices.Equal(commentsOn(t, s, ts[0].ID), []string{"Missed again, sale Cart sale, 2026-10-28 00:00 → 2026-10-29 00:00: 1."}) {
+		t.Errorf("the task: %+v, said %q", ts, commentsOn(t, s, ts[0].ID))
+	}
+}
+
+// goal.missed of goals over a period is told goalToldARun times a run at
+// most, the earliest ended first, the rest by the runs after; and what is
+// kept of what was told, a key an occurrence, is let go 13 weeks after it
+// ended, so that over many occurrences there are as many keys as the
+// occurrences told of in 13 weeks.
+func TestGoalsPeriodToldBounded(t *testing.T) {
+	hook := filepath.Join(t.TempDir(), "hook")
+	os.WriteFile(hook, []byte("https://hooks.example/x\n"), 0o600)
+	s := goalServer(t, func(c *Config) { c.NotifyWebhook = hook })
+	ctx := context.Background()
+	// A stand-up each day from 10-12, over no firing: each missed.
+	if _, err := s.l.PutMarked(ctx, ledger.Marked{Kind: "standup", Title: "Stand-up", Start: dayAt("2026-10-12", 9), End: dayAt("2026-10-12", 9).Add(15 * time.Minute),
+		Every: "day"}, "ana", s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.JudgePending(ctx, s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	declare(t, s, "goals:\n  - {name: standup-busy, each: standup, measure: firings, at_least: 1}\n")
+	was := goalToldARun
+	goalToldARun = 3
+	defer func() { goalToldARun = was }()
+	count := func() int {
+		n := 0
+		for _, x := range goalNotices(t, s) {
+			if x.Name == "standup-busy" {
+				n++
+			}
+		}
+		return n
+	}
+	// Ended since 10-26: the stand-ups of 10-26 to 11-03, but 11-02's,
+	// over one of Paged's firings: eight.
+	ends := func() []string {
+		var out []string
+		for _, x := range goalNotices(t, s) {
+			out = append(out, x.To.Format("01-02"))
+		}
+		slices.Sort(out)
+		return out
+	}
+	for i, want := range []int{3, 6, 8, 8} {
+		again(t, s)
+		if n := count(); n != want {
+			t.Fatalf("round %d: told %d, want %d", i+1, n, want)
+		}
+		if got := ends(); i == 0 && !slices.Equal(got, []string{"10-26", "10-27", "10-28"}) {
+			t.Errorf("the first round told %v, not the earliest", got)
+		}
+	}
+	if got := ends(); len(got) != 8 || got[0] != "10-26" || got[7] != "11-03" || slices.Contains(got, "11-02") {
+		t.Errorf("told: %v", got)
+	}
+	// Twenty weeks on, a run a week: a key for each told, none older than
+	// thirteen weeks.
+	goalToldARun = 20
+	at := now
+	for range 20 {
+		next := at.Add(7 * 24 * time.Hour)
+		s.now = func() time.Time { return next }
+		if err := s.l.Record(ctx, ledger.Found{From: at, To: next, Rules: []ledger.Rule{{Name: "Paged", Severity: "critical"}},
+			Run: ledger.Run{Kind: "hourly", Started: next, Finished: next}}, s.cfg.Options); err != nil {
+			t.Fatal(err)
+		}
+		at = next
+		again(t, s)
+	}
+	told, _, err := s.l.PeriodGoalMarks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldest := s.l.Midnight(ledger.Week(s.l.Day(at)) - 13*7).Unix()
+	for k, end := range told {
+		if end < oldest {
+			t.Errorf("%s ended %s, kept past 13 weeks", k, time.Unix(end, 0).UTC())
+		}
+	}
+	if n := count(); n < 20*7 || len(told) > 14*7 {
+		t.Errorf("told %d, %d kept", n, len(told))
+	}
+}
+
+// With no team picked, a goal of each team's over a period shows its
+// teams missed first, then those not known, a team none of whose
+// occurrences ended among them, and met last.
+func TestGoalsPeriodPageSort(t *testing.T) {
+	s := periodServer(t, nil)
+	ctx := context.Background()
+	id, err := s.l.PutTeam(ctx, ledger.Team{Name: "web-cart", Rules: "^Cart$", Labels: incident.Labels{"service": {"cart"}}}, "ana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A promotion of web-cart's alone, during INC-C, on cart, missed.
+	if _, err := s.l.PutMarked(ctx, ledger.Marked{Kind: "promo", Title: "Cart promotion", Start: dayAt("2026-10-28", 9), End: dayAt("2026-10-28", 11), TeamID: id}, "ana", s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.JudgePending(ctx, s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	declare(t, s, "goals:\n  - {name: promo-missed, team: \"*\", each: promo, measure: incidents.missed, at_most: 0}\n")
+	_, body, _ := get(t, s.Handler(), "/goals")
+	cart, pay, search := strings.Index(body, "<bdi>web-cart</bdi>"), strings.Index(body, "<bdi>payments</bdi>"), strings.Index(body, "<bdi>search</bdi>")
+	if cart < 0 || pay < 0 || search < 0 || cart > pay || cart > search || !strings.Contains(body, "None ended in the weeks shown.") {
+		t.Errorf("web-cart, missed, at %d; payments at %d, search at %d, with none ended", cart, pay, search)
+	}
+}
+
+// A slack reads unsigned, a lead's as a time: by 1m, not by +1m.
+func TestGoalPeriodSlackText(t *testing.T) {
+	g := ledger.Goal{Name: "g", Measure: "incidents.median_lead_seconds", NoWorseThan: "before", By: "60", Each: "sale"}
+	before := 300.0
+	if got := goalTarget("en", g); got != "no worse than before, by 1m" {
+		t.Errorf("%q", got)
+	}
+	if got := periodTarget("en", g, &before); got != "no worse than the four weeks before, +5m, by 1m" {
+		t.Errorf("%q", got)
+	}
+	g = ledger.Goal{Name: "g", Measure: "precision", NoWorseThan: "before", By: "0.05", Each: "sale"}
+	if got := goalTarget("en", g); got != "no worse than before, by 5%" {
+		t.Errorf("%q", got)
 	}
 }

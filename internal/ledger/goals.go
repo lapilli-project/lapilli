@@ -119,9 +119,10 @@ const (
 	goalMadeKeyPrefix   = "goal-made."
 	goalTaskKeyPrefix   = "goal-task."
 	// What was told of a goal over a period, and what tasks were made for:
-	// by the end of the occurrence, in Unix seconds, under prefixes of their
-	// own, so that a goal changed from each week to each kind, or back,
-	// takes neither's marks for the other's.
+	// a key for each goal, team and occurrence (GoalOccKey), its value the
+	// end of the occurrence, in Unix seconds, by which it is let go, under
+	// prefixes of their own, so that a goal changed from each week to each
+	// kind, or back, takes neither's marks for the other's.
 	goalOccMissedKeyPrefix = "goal-occ-missed."
 	goalOccMadeKeyPrefix   = "goal-occ-made."
 )
@@ -505,9 +506,18 @@ func (l *Ledger) GoalMarks(ctx context.Context) (told, made map[string]int64, er
 	return l.goalMarks(ctx, goalMissedKeyPrefix, goalMadeKeyPrefix)
 }
 
-// PeriodGoalMarks are GoalMarks of the goals over a period, by GoalKey: the
-// end of the latest occurrence goal.missed was told of (told), and of the
-// latest a task was made for or said missed on (made), in Unix seconds.
+// GoalOccKey is what is kept of a goal over a period, for a team, of one of
+// its occurrences is keyed on: GoalKey and the occurrence's key
+// (OccurrenceKey), so that two occurrences ending at once are two.
+func GoalOccKey(name string, team int64, occ string) string {
+	return goalTeamKey(name, team) + "." + occ
+}
+
+// PeriodGoalMarks are GoalMarks of the goals over a period, by GoalOccKey:
+// each occurrence goal.missed was told of (told), and each a task was made
+// for or said missed on (made), with when it ended, in Unix seconds. They
+// are let go 13 weeks after it ended (PrunePeriodGoalMarks), so there are
+// as many as the occurrences told of in 13 weeks, and no more.
 func (l *Ledger) PeriodGoalMarks(ctx context.Context) (told, made map[string]int64, err error) {
 	return l.goalMarks(ctx, goalOccMissedKeyPrefix, goalOccMadeKeyPrefix)
 }
@@ -549,17 +559,19 @@ func GoalKey(name string, team int64) string { return goalTeamKey(name, team) }
 // (its caller leaves it out of told). A goal of each team's tells its
 // teams missed in one notice.
 func (l *Ledger) TellGoalMissed(ctx context.Context, name string, teams []int64, week int64, told []Told) error {
-	return l.tellGoalMissed(ctx, goalMissedKeyPrefix, name, teams, week, told)
+	return l.tellGoalMissed(ctx, func(team int64) string { return goalMissedKeyPrefix + goalTeamKey(name, team) }, teams, week, told)
 }
 
-// TellPeriodGoalMissed is TellGoalMissed of a goal over a period, of the
-// occurrence that ended at end, in Unix seconds: each team's mark set to
-// it, a team marked for it, or a later end, passed over.
-func (l *Ledger) TellPeriodGoalMissed(ctx context.Context, name string, teams []int64, end int64, told []Told) error {
-	return l.tellGoalMissed(ctx, goalOccMissedKeyPrefix, name, teams, end, told)
+// TellPeriodGoalMissed is TellGoalMissed of a goal over a period, of its
+// occurrence occ, which ended at end, in Unix seconds: once for each goal,
+// team and occurrence, as the outbox's TellOnce keeps one, each team
+// marked told of it by its own key; an occurrence that turns missed late,
+// after a later one was told of, is told all the same.
+func (l *Ledger) TellPeriodGoalMissed(ctx context.Context, name string, teams []int64, occ string, end int64, told []Told) error {
+	return l.tellGoalMissed(ctx, func(team int64) string { return goalOccMissedKeyPrefix + GoalOccKey(name, team, occ) }, teams, end, told)
 }
 
-func (l *Ledger) tellGoalMissed(ctx context.Context, prefix, name string, teams []int64, week int64, told []Told) error {
+func (l *Ledger) tellGoalMissed(ctx context.Context, keyOf func(int64) string, teams []int64, week int64, told []Told) error {
 	return l.writeAside(ctx, func(t *txn) error {
 		now := wallNow()
 		for _, x := range told {
@@ -575,7 +587,7 @@ func (l *Ledger) tellGoalMissed(ctx context.Context, prefix, name string, teams 
 			}
 		}
 		for _, team := range teams {
-			key := prefix + goalTeamKey(name, team)
+			key := keyOf(team)
 			was, err := l.meta(t.ctx, t, key)
 			if err != nil {
 				return err
@@ -637,12 +649,26 @@ func (l *Ledger) GoalsShown(ctx context.Context) ([]byte, error) {
 // on it since, week by week (Mondays, as days): "missed" for a week said
 // missed (the one it was made for, or missed again), "met" for one said
 // met, "no_longer" for one missed and said no longer missed. Of a goal
-// over a period (Period), occurrence by occurrence instead, each by its
-// end, in Unix seconds.
+// over a period (Period), occurrence by occurrence instead: Week is the
+// end of the occurrence it was made for (Occurrence), in Unix seconds;
+// Since, the start of the last whole week as it was made, from when the
+// occurrences that ended are said on; and Occs, what was said of each, by
+// its key, with its end.
 type GoalTaskState struct {
 	Week   int64            `json:"week"`
 	Said   map[int64]string `json:"said,omitempty"`
 	Period bool             `json:"period,omitempty"`
+
+	Occurrence string                 `json:"occurrence,omitempty"`
+	Since      int64                  `json:"since,omitempty"`
+	Occs       map[string]GoalOccSaid `json:"occurrences,omitempty"`
+}
+
+// GoalOccSaid is what was said of an occurrence on a goal's task, and when
+// it ended, in Unix seconds.
+type GoalOccSaid struct {
+	End  int64  `json:"end"`
+	Said string `json:"said"`
 }
 
 func goalTaskKey(id int64) string { return goalTaskKeyPrefix + strconv.FormatInt(id, 10) }
@@ -667,18 +693,21 @@ var ErrGoalTaskOpen = errors.New("a task for this goal and team is open already"
 // make another for it once this one is done or dropped. A task about the
 // goal and team open already is refused (ErrGoalTaskOpen), with its id.
 func (l *Ledger) MakeGoalTask(ctx context.Context, t Task, week int64, by string) (int64, error) {
-	return l.makeGoalTask(ctx, t, week, false, by)
+	st := GoalTaskState{Week: week, Said: map[int64]string{week: "missed"}}
+	return l.makeGoalTask(ctx, t, st, goalMadeKeyPrefix+goalTeamKey(t.Goal, t.TeamID), week, by)
 }
 
-// MakePeriodGoalTask is MakeGoalTask of a goal over a period, for the
-// occurrence that ended at end, in Unix seconds: kept as the latest one a
-// task was made for, so that Lapilli makes no other for it once this one
-// is done or dropped.
-func (l *Ledger) MakePeriodGoalTask(ctx context.Context, t Task, end int64, by string) (int64, error) {
-	return l.makeGoalTask(ctx, t, end, true, by)
+// MakePeriodGoalTask is MakeGoalTask of a goal over a period, for its
+// occurrence occ, which ended at end, in Unix seconds, said on from since
+// (the start of the last whole week): the occurrence is kept as one a task
+// was made for, so that Lapilli makes no other for it once this one is
+// done or dropped.
+func (l *Ledger) MakePeriodGoalTask(ctx context.Context, t Task, occ string, end, since int64, by string) (int64, error) {
+	st := GoalTaskState{Week: end, Period: true, Occurrence: occ, Since: since, Occs: map[string]GoalOccSaid{occ: {End: end, Said: "missed"}}}
+	return l.makeGoalTask(ctx, t, st, goalOccMadeKeyPrefix+GoalOccKey(t.Goal, t.TeamID, occ), end, by)
 }
 
-func (l *Ledger) makeGoalTask(ctx context.Context, t Task, week int64, period bool, by string) (int64, error) {
+func (l *Ledger) makeGoalTask(ctx context.Context, t Task, state GoalTaskState, key string, week int64, by string) (int64, error) {
 	if t.Goal == "" {
 		return 0, invalid("a goal's task names its goal")
 	}
@@ -698,13 +727,9 @@ func (l *Ledger) makeGoalTask(ctx context.Context, t Task, week int64, period bo
 		if id, err = l.putTaskIn(tx, 0, func(Task) (Task, error) { return t, nil }, by); err != nil {
 			return err
 		}
-		st, _ := json.Marshal(GoalTaskState{Week: week, Said: map[int64]string{week: "missed"}, Period: period})
+		st, _ := json.Marshal(state)
 		if err := setMeta(tx.ctx, tx, goalTaskKey(id), string(st)); err != nil {
 			return err
-		}
-		key := goalMadeKeyPrefix + goalTeamKey(t.Goal, t.TeamID)
-		if period {
-			key = goalOccMadeKeyPrefix + goalTeamKey(t.Goal, t.TeamID)
 		}
 		was, err := l.meta(tx.ctx, tx, key)
 		if err != nil {
@@ -721,7 +746,8 @@ func (l *Ledger) makeGoalTask(ctx context.Context, t Task, week int64, period bo
 // SayOnGoalTask comments on a goal's task, as by, and keeps what was said
 // (st), in one write: neither without the other. A week said missed on it
 // is one a task was made for: once it is done or dropped, Lapilli makes
-// none for that week again, but for the next missed.
+// none for that week again, but for the next missed. Of a goal over a
+// period, so is each occurrence said missed on it.
 func (l *Ledger) SayOnGoalTask(ctx context.Context, id int64, body string, st GoalTaskState, by string) error {
 	b, err := json.Marshal(st)
 	if err != nil {
@@ -733,6 +759,12 @@ func (l *Ledger) SayOnGoalTask(ctx context.Context, id int64, body string, st Go
 			latest = max(latest, w)
 		}
 	}
+	missed := map[string]int64{}
+	for occ, x := range st.Occs {
+		if x.Said == "missed" {
+			missed[occ] = x.End
+		}
+	}
 	return l.write(ctx, func(t *txn) error {
 		var goal string
 		var team int64
@@ -741,17 +773,23 @@ func (l *Ledger) SayOnGoalTask(ctx context.Context, id int64, body string, st Go
 		} else if err != nil {
 			return err
 		}
-		if goal != "" && latest > 0 {
-			key := goalMadeKeyPrefix + goalTeamKey(goal, team)
-			if st.Period {
-				key = goalOccMadeKeyPrefix + goalTeamKey(goal, team)
+		marks := map[string]int64{}
+		switch {
+		case goal == "":
+		case st.Period:
+			for occ, end := range missed {
+				marks[goalOccMadeKeyPrefix+GoalOccKey(goal, team, occ)] = end
 			}
+		case latest > 0:
+			marks[goalMadeKeyPrefix+goalTeamKey(goal, team)] = latest
+		}
+		for _, key := range slices.Sorted(maps.Keys(marks)) {
 			was, err := l.meta(t.ctx, t, key)
 			if err != nil {
 				return err
 			}
-			if n, _ := strconv.ParseInt(was, 10, 64); n < latest {
-				if err := setMeta(t.ctx, t, key, strconv.FormatInt(latest, 10)); err != nil {
+			if n, _ := strconv.ParseInt(was, 10, 64); n < marks[key] {
+				if err := setMeta(t.ctx, t, key, strconv.FormatInt(marks[key], 10)); err != nil {
 					return err
 				}
 			}

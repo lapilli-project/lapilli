@@ -348,6 +348,71 @@ func goalsScale(t *testing.T, s *Server, h http.Handler) {
 			t.Errorf("%s: %d rows, want %d; heap +%d MiB, most %d; %v", c.name, rows, c.rows, peak>>20, c.most>>20, err)
 		}
 	}
+	// Goals over a period (step 3): a sale each Friday, everyone's, and a
+	// launch each morning, of each team's. Besides the summary's rows, each
+	// reads the tallies of its occurrences' weeks and the four before,
+	// seventeen weeks at most, never the firings, and counts each
+	// occurrence once for each team it is of.
+	fri := s.l.Midnight(ledger.Week(s.l.Day(now)) - 7*weeks).Add(4*24*time.Hour + 18*time.Hour)
+	if _, err := s.l.SyncMarked(ctx, []ledger.Marked{
+		{Kind: "sale", Title: "Friday sale", Start: fri, End: fri.Add(4 * time.Hour), Every: "week"},
+		{Kind: "launch", Title: "Morning launch", Start: fri.Add(-4*24*time.Hour - 9*time.Hour), End: fri.Add(-4*24*time.Hour - 7*time.Hour), Every: "day",
+			Labels: map[string]string{"service": "search"}},
+	}, s.cfg.Options, ledger.MarkedRead{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.JudgePending(ctx, s.cfg.Options); err != nil {
+		t.Fatal(err)
+	}
+	declare(t, s, "goals:\n  - {name: precise, measure: precision, at_least: 0.5}\n  - {name: sale-no-worse, each: sale, measure: precision, no_worse_than: before}\n"+
+		"  - {name: launch-missed, team: \"*\", each: launch, measure: incidents.missed, at_most: 0}\n")
+	firings := 0
+	for _, w := range []int64{ledger.Week(s.l.Day(now)) - 7*weeks} {
+		ws, err := s.l.WeeksBy(ctx, w, ledger.Week(s.l.Day(now)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, x := range ws {
+			firings += x.Firings
+		}
+	}
+	for _, c := range []struct {
+		name      string
+		rows, who int
+		most      uint64
+		run       func() error
+	}{
+		{"/goals?team=team3, over a period", 13 * 2, 2, 48 << 20, func() error {
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/goals?team=team3", nil))
+			if w.Code != 200 {
+				return fmt.Errorf("%d", w.Code)
+			}
+			return nil
+		}},
+		{"the overview's card, over a period", 2, 1, 16 << 20, func() error {
+			_, _, err := s.goalsOverview(ctx, "en", &team3)
+			return err
+		}},
+		{"the leader's work, over a period", 13 * (1 + len(teams)), 1 + len(teams), 64 << 20, func() error { return s.goalsAfter(ctx) }},
+	} {
+		rows, read, weeksRead, occs, counted := 0, 0, 0, 0, 0
+		summaryRowSeen = func() { rows++ }
+		periodCounted = func(r, w, o, n int) { read, weeksRead, occs, counted = read+r, max(weeksRead, w), occs+o, counted+n }
+		var err error
+		peak := leastPeak(func() {
+			afresh()
+			rows, read, weeksRead, occs, counted = 0, 0, 0, 0, 0
+			err = c.run()
+		})
+		summaryRowSeen, periodCounted = nil, nil
+		t.Logf("%-32s %4d rows; over a period %d rows of %d weeks, %d occurrences counted %d times; heap +%d MiB (the least of three runs)",
+			c.name, rows, read, weeksRead, occs, counted, peak>>20)
+		if err != nil || rows != c.rows || peak > c.most || occs == 0 || weeksRead > 17 || counted > occs*c.who || read > firings/5 {
+			t.Errorf("%s: %d rows, want %d; %d rows of %d weeks over a period, of %d firings; %d occurrences counted %d times, of %d teams; heap +%d MiB, most %d; %v",
+				c.name, rows, c.rows, read, weeksRead, firings, occs, counted, c.who, peak>>20, c.most>>20, err)
+		}
+	}
 }
 
 // heapAfterGC is the live heap.

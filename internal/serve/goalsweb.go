@@ -168,8 +168,15 @@ func (s *Server) goalsPage(r *http.Request) (any, error) {
 		wa, _ := a.week(v.Last)
 		wb, _ := b.week(v.Last)
 		if a.Goal.OverPeriod() {
-			wa, _ = a.lastEnded()
-			wb, _ = b.lastEnded()
+			// A team with no occurrence ended is not known, not missed.
+			wa, wb = goalWeek{}, goalWeek{}
+			wa.Result, wb.Result = goalUnknown, goalUnknown
+			if w, ok := a.lastEnded(); ok {
+				wa = w
+			}
+			if w, ok := b.lastEnded(); ok {
+				wb = w
+			}
 		}
 		return order[wa.Result] - order[wb.Result]
 	})
@@ -470,7 +477,8 @@ func (s *Server) postPeriodGoalTask(w http.ResponseWriter, r *http.Request, g le
 		s.oops(w, r, bad("goal %s wasn't missed during %s, as it reads now", g.Name, key))
 		return
 	}
-	id, err := s.l.MakePeriodGoalTask(ctx, s.periodTaskIn(lang(r), g, team, gw), goalOccEnd(gw), s.user(r))
+	since := s.l.Midnight(ledger.Week(s.l.Day(s.now())) - 7).Unix()
+	id, err := s.l.MakePeriodGoalTask(ctx, s.periodTaskIn(lang(r), g, team, gw), key, goalOccEnd(gw), min(since, goalOccEnd(gw)), s.user(r))
 	if errors.Is(err, ledger.ErrGoalTaskOpen) {
 		back(w, r, urlContext(r.URL.Query()).Link(fmt.Sprintf("/tasks/%d", id)))
 		return

@@ -740,7 +740,8 @@ a week not known (`lapilli_goal_known` 0), and `lapilli_goal_weeks_met`
 counts of the twelve whole weeks before this one, as
 `lapilli_weeks_counted` does. A goal over a period (`each: KIND`) is of
 its latest occurrence that ended, and `lapilli_goal_weeks_met` counts its
-occurrences met that ended in those twelve weeks. 500 series of each at
+occurrences met that ended in those twelve weeks, so, of a kind more often
+than weekly, it can be over `lapilli_weeks_counted`. 500 series of each at
 most, the goals missed first, goals over a period among them. `lapilli_rule_incidents_first` and `lapilli_rule_incidents_alone`
 are left out of a report of some of the rules (`--rule`), as what a rule
 adds to the others can't be said there.

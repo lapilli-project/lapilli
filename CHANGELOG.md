@@ -29,6 +29,17 @@
   and MCP's `summary` and `overview` say them. No schema change. Goals of
   each week read as they did, byte for byte (`TestGoalsWeeklyUnchanged`).
 
+### Fixed
+
+- **An occurrence's four weeks before leave out the incidents during any
+  occurrence of its kind** (docs/design/marked.md, since 0.53.0). The
+  Marked windows page, a window's page, the overview's tile, and the
+  `marked` section of reports and the digest counted, in the weeks before
+  an occurrence, the incidents during an occurrence of its kind of a
+  window they didn't list: a window's page lists that window alone, and
+  the others the windows meeting their weeks, not the four before. They
+  now read every window meeting the weeks they count.
+
 ## [0.56.0] - 2026-11-18
 
 ### Changed

@@ -149,21 +149,29 @@ type markedData struct {
 	unjudged map[int64]map[int64]map[string]int
 	incs     map[int64][]ledger.Incident
 	at       verdict.NoisyAt
-	// all are the occurrences of the weeks read, by kind, of everyone's
-	// (0) and each team's windows, worked out as first asked.
+	// ex are every window meeting the weeks read, whichever its caller
+	// lists; all, their occurrences, by kind, of everyone's (0) and each
+	// team's windows, worked out as first asked: what "outside its kind"
+	// leaves out of an occurrence's weeks before, so that an occurrence
+	// counts alike whatever else is read with it.
+	ex  *markedSpan
 	all map[int64]map[string][]markedOcc
 	// rows are how many rows of tallies and incidents were read.
 	rows int
 }
 
 // readMarked reads what the occurrences of x's windows whose days run from
-// d1 to d2 are counted from. With only, its tallies are of the rules the
-// team owns, judged by the incidents it owns, as a page with the team
-// picked reads them; without, everyone's, as the summary reads a team's
-// row.
+// d1 to d2 are counted from, and every window meeting those weeks. With
+// only, its tallies are of the rules the team owns, judged by the
+// incidents it owns, as a page with the team picked reads them; without,
+// everyone's, as the summary reads a team's row.
 func (s *Server) readMarked(ctx context.Context, x *markedSpan, d1, d2 int64, only *ledger.Team) (*markedData, error) {
 	w1, w2 := ledger.Week(d1)-7*markedBefore, ledger.Week(d2)
 	t, err := s.talliesOver(ctx, w1, w2)
+	if err != nil {
+		return nil, err
+	}
+	ms, err := s.l.MarkedMeeting(ctx, s.l.Midnight(w1), s.l.Midnight(w2+7).Add(-time.Second))
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +183,8 @@ func (s *Server) readMarked(ctx context.Context, x *markedSpan, d1, d2 int64, on
 		return nil, err
 	}
 	d := &markedData{x: x, t: t, w1: w1, w2: w2, byDay: map[int64][]ledger.MarkedTally{}, byWeek: map[int64]map[int64]map[string]ledger.MarkedTally{},
-		unjudged: map[int64]map[int64]map[string]int{}, incs: map[int64][]ledger.Incident{}, at: noisyAt(t.o), all: map[int64]map[string][]markedOcc{}}
+		unjudged: map[int64]map[int64]map[string]int{}, incs: map[int64][]ledger.Incident{}, at: noisyAt(t.o), all: map[int64]map[string][]markedOcc{},
+		ex: &markedSpan{s: s, own: x.own, ms: ms}}
 	for _, m := range days {
 		d.byDay[m.At] = append(d.byDay[m.At], m)
 	}
@@ -221,7 +230,7 @@ func (d *markedData) occs(team *ledger.Team) map[string][]markedOcc {
 	if os, ok := d.all[id]; ok {
 		return os
 	}
-	os := d.x.occurrences(d.x.s.l.Midnight(d.w1), d.x.s.l.Midnight(d.w2+7), team)
+	os := d.ex.occurrences(d.x.s.l.Midnight(d.w1), d.x.s.l.Midnight(d.w2+7), team)
 	d.all[id] = os
 	return os
 }
@@ -255,7 +264,7 @@ func (d *markedData) count(o markedOcc, team *ledger.Team) (inside, before marke
 	// Another of its kind on one of its days is counted with it.
 	all := d.occs(team)[o.M.Kind]
 	for _, p := range all {
-		if p != o && s.l.Day(p.Start) <= s.l.Day(o.End) && s.l.Day(p.End) >= s.l.Day(o.Start) {
+		if (p.M.ID != o.M.ID || !p.Start.Equal(o.Start)) && s.l.Day(p.Start) <= s.l.Day(o.End) && s.l.Day(p.End) >= s.l.Day(o.Start) {
 			shared = true
 		}
 	}

@@ -519,7 +519,7 @@ func goalTarget(l string, g ledger.Goal) string {
 		return tr(l, "at most %s", text)
 	}
 	if by := goalBy(g); by != 0 {
-		return tr(l, "no worse than before, by %s", goalNumber(g.Measure, by))
+		return tr(l, "no worse than before, by %s", goalSlack(g.Measure, by))
 	}
 	return tr(l, "no worse than before")
 }
@@ -1034,12 +1034,14 @@ func (s *Server) goalTasks(ctx context.Context, lines []goalLine, last int64) (i
 		key := ledger.GoalKey(gl.Goal.Name, team)
 		if gl.Goal.OverPeriod() {
 			// The earliest occurrence missed that ended since the last
-			// whole week began, and after the one a task was made for
-			// last; the others missed are said on it, as missed again.
+			// whole week began, and that no task was made for, nor said
+			// missed on; the others missed are said on it, as missed again.
 			if open[key] != 0 {
 				continue
 			}
-			i := slices.IndexFunc(gl.endedSince(from), func(w goalWeek) bool { return w.Result == goalMissed && goalOccEnd(w) > wasP[key] })
+			i := slices.IndexFunc(gl.endedSince(from), func(w goalWeek) bool {
+				return w.Result == goalMissed && wasP[ledger.GoalOccKey(gl.Goal.Name, team, w.Occurrence)] == 0
+			})
 			if i < 0 {
 				continue
 			}
@@ -1049,8 +1051,8 @@ func (s *Server) goalTasks(ctx context.Context, lines []goalLine, last int64) (i
 			}
 			made++
 			w := gl.endedSince(from)[i]
-			if _, err := s.l.MakePeriodGoalTask(ctx, s.periodTaskIn(s.cfg.Lang, gl.Goal, gl.Team, w), goalOccEnd(w), ledger.GoalTasksBy); err != nil &&
-				!errors.Is(err, ledger.ErrGoalTaskOpen) {
+			if _, err := s.l.MakePeriodGoalTask(ctx, s.periodTaskIn(s.cfg.Lang, gl.Goal, gl.Team, w), w.Occurrence, goalOccEnd(w), from.Unix(),
+				ledger.GoalTasksBy); err != nil && !errors.Is(err, ledger.ErrGoalTaskOpen) {
 				errs = append(errs, err)
 			}
 			continue

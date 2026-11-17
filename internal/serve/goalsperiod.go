@@ -304,8 +304,17 @@ func (s *Server) periodGoals(ctx context.Context, w1, w2 int64, who []*ledger.Te
 			}
 		}
 	}
+	if periodCounted != nil {
+		periodCounted(d.rows, int((d.w2-d.w1)/7+1), len(occs), len(memo))
+	}
 	return out, nil
 }
+
+// periodCounted, when set, is told what periodGoals read and worked out:
+// the rows of tallies and incidents, the weeks of tallies, the occurrences
+// placed in the span, and the counts of an occurrence for a team. For
+// TestPagesScale, which holds them.
+var periodCounted func(rows, weeks, occs, counted int)
 
 // The texts of a goal over a period, as the pages, the digest, reports,
 // tasks and what is told say them.
@@ -329,9 +338,15 @@ func periodTarget(l string, g ledger.Goal, before *float64) string {
 	}
 	b := goalValueText(g.Measure, before)
 	if by := goalBy(g); by != 0 {
-		return tr(l, "no worse than the four weeks before, %s, by %s", b, goalNumber(g.Measure, by))
+		return tr(l, "no worse than the four weeks before, %s, by %s", b, goalSlack(g.Measure, by))
 	}
 	return tr(l, "no worse than the four weeks before, %s", b)
+}
+
+// goalSlack is a goal's by as a target says it: an amount, unsigned, as a
+// lead's time would read "+1m".
+func goalSlack(measure string, by float64) string {
+	return strings.TrimPrefix(goalNumber(measure, by), "+")
 }
 
 // periodMissedText says a goal over a period was missed during an
@@ -408,13 +423,22 @@ func cutText(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
+// goalToldARun is how many goal.missed notices of goals over a period a
+// run tells at most, as it makes 20 tasks and writes 20 comments: the
+// earliest ended first, the rest told by the runs after. A goal of each
+// week tells one a week, 50 at most, so it needs none. A variable, for
+// tests.
+var goalToldARun = 20
+
 // tellPeriodGoals tells goal.missed of the goals over a period, once for
 // each goal, team and occurrence that ended since the last whole week
-// began and was missed: to where what happens is told. A goal of each
-// team's is one notice an occurrence, of the teams that missed it and
-// weren't told of it. A team is marked told by the end of the occurrence
-// (ledger.TellPeriodGoalMissed): one ended no later than the latest told
-// of, as by a leader whose clock was ahead, is passed over.
+// began and was missed, when it is first found missed: an occurrence that
+// turns missed late (an incident written down a day after) is told then,
+// whatever was told of the others. A goal of each team's is one notice an
+// occurrence, of the teams that missed it and weren't told of it. Each
+// team is marked told of it by its own key (ledger.TellPeriodGoalMissed),
+// so two occurrences ending at once are told apart. goalToldARun a run at
+// most.
 func (s *Server) tellPeriodGoals(ctx context.Context, lines []goalLine, last int64) error {
 	dests := s.dests()
 	if len(dests) == 0 || !slices.ContainsFunc(lines, func(gl goalLine) bool { return gl.Goal.OverPeriod() }) {
@@ -438,7 +462,7 @@ func (s *Server) tellPeriodGoals(ctx context.Context, lines []goalLine, last int
 		}
 		team := teamIDOf(gl.Team)
 		for _, w := range gl.endedSince(since) {
-			if w.Result != goalMissed || told0[ledger.GoalKey(gl.Goal.Name, team)] >= goalOccEnd(w) {
+			if w.Result != goalMissed || told0[ledger.GoalOccKey(gl.Goal.Name, team, w.Occurrence)] != 0 {
 				continue
 			}
 			k := gl.Goal.Name + "\x00" + w.Occurrence
@@ -463,13 +487,22 @@ func (s *Server) tellPeriodGoals(ctx context.Context, lines []goalLine, last int
 			}
 		}
 	}
+	// The earliest ended first: they are the first to pass the last whole
+	// week's start, after which none is told.
+	slices.SortStableFunc(order, func(a, b *notice) int {
+		return cmp.Or(cmp.Compare(a.end, b.end), strings.Compare(a.about.Name, b.about.Name), strings.Compare(a.about.Occurrence, b.about.Occurrence))
+	})
+	if n := len(order) - goalToldARun; n > 0 {
+		s.log.Info("goal.missed of occurrences of goals over a period wait for the runs after", "waiting", n, "a run", goalToldARun)
+		order = order[:goalToldARun]
+	}
 	var errs []error
 	for _, n := range order {
 		told := make([]ledger.Told, 0, len(dests))
 		for _, d := range dests {
 			told = append(told, ledger.Told{Dest: d, About: map[string]any{"goal": n.about}})
 		}
-		errs = append(errs, s.l.TellPeriodGoalMissed(ctx, n.about.Name, n.teams, n.end, told))
+		errs = append(errs, s.l.TellPeriodGoalMissed(ctx, n.about.Name, n.teams, n.about.Occurrence, n.end, told))
 	}
 	return errors.Join(errs...)
 }
@@ -496,15 +529,22 @@ func (s *Server) periodTaskIn(l string, g ledger.Goal, team *ledger.Team, w goal
 }
 
 // sayOnPeriodTask says on a goal over a period's open task what became of
-// the occurrences that ended since the one it was made for, once each, as
-// a week's task is said on (sayOnGoalTasks): another missed, one met, one
-// missed and no longer. most at most; it returns how many it said.
+// its occurrences, once each, by each occurrence's key, as a week's task
+// is said on (sayOnGoalTasks): of those that ended since the last whole
+// week began as it was made (Since), another missed ("missed again"), one
+// it was made for or said missed that no longer is ("no longer missed"),
+// whenever each turns so, an occurrence that ended before the one it was
+// made for among them; and one met that ended after it ("met"). most at
+// most; it returns how many it said.
 func (s *Server) sayOnPeriodTask(ctx context.Context, id int64, gl goalLine, st ledger.GoalTaskState, most int) (int, error) {
 	l := s.cfg.Lang
 	oldest := s.l.Midnight(ledger.Week(s.l.Day(s.now())) - 12*7).Unix()
-	for at := range st.Said {
-		if at < oldest {
-			delete(st.Said, at) // long past every occurrence worked out
+	if st.Occs == nil {
+		st.Occs = map[string]ledger.GoalOccSaid{}
+	}
+	for k, x := range st.Occs {
+		if x.End < oldest {
+			delete(st.Occs, k) // long past every occurrence worked out
 		}
 	}
 	said := 0
@@ -513,15 +553,15 @@ func (s *Server) sayOnPeriodTask(ctx context.Context, id int64, gl goalLine, st 
 			continue
 		}
 		at := goalOccEnd(w)
-		if at < st.Week || said >= most {
+		if at < st.Since || said >= most {
 			continue
 		}
 		occ := occText(l, w.summaryGoal, s.cfg.Loc)
 		var body, now string
-		switch was := st.Said[at]; {
+		switch was := st.Occs[w.Occurrence].Said; {
 		case w.Result == goalMissed:
 			// Once an occurrence: the one it was made for is said already.
-			if at == st.Week || was == goalMissed || was == goalNoLonger {
+			if was == goalMissed || was == goalNoLonger {
 				continue
 			}
 			body, now = tr(l, "Missed again, %s: %s.", occ, goalMissedValue(gl.Goal, w.Value)), goalMissed
@@ -529,12 +569,12 @@ func (s *Server) sayOnPeriodTask(ctx context.Context, id int64, gl goalLine, st 
 			body, now = tr(l, "No longer missed, %s: %s.", occ, goalValueText(gl.Goal.Measure, w.Value)), goalNoLonger
 		case was == goalMissed:
 			body, now = tr(l, "No longer missed, %s: %s.", occ, goalResultText(l, w.summaryGoal)), goalNoLonger
-		case w.Result == goalMet && was == "":
+		case w.Result == goalMet && was == "" && at > st.Week:
 			body, now = tr(l, "Met, %s: %s.", occ, goalValueText(gl.Goal.Measure, w.Value)), goalMet
 		default:
 			continue
 		}
-		st.Said[at] = now
+		st.Occs[w.Occurrence] = ledger.GoalOccSaid{End: at, Said: now}
 		if err := s.l.SayOnGoalTask(ctx, id, body, st, ledger.GoalTasksBy); err != nil {
 			return said, err
 		}
