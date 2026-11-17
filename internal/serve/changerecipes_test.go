@@ -26,12 +26,14 @@ import (
 const changeRecipes = "../../recipes/changes/"
 
 // gitEnv is git with none of this machine's own settings: no signing, no
-// hooks, no credentials.
+// hooks, no credentials. Its HOME holds a .curlrc that sends everything
+// nowhere: the recipes' curl reads none (-q), or nothing they ask arrives.
 func gitEnv(t *testing.T) []string {
 	t.Helper()
 	home := t.TempDir()
 	empty := filepath.Join(home, "gitconfig")
 	os.WriteFile(empty, nil, 0o600)
+	os.WriteFile(filepath.Join(home, ".curlrc"), []byte("proxy = \"http://127.0.0.1:9\"\n"), 0o600)
 	return append(os.Environ(), "HOME="+home, "GIT_CONFIG_GLOBAL="+empty, "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0")
 }
 

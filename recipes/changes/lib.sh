@@ -46,10 +46,11 @@
 # A document no file in the clone is (rules rendered from a chart, read
 # back from a cluster) gets no edit: Lapilli is told it failed, and why, and
 # the proposal's page keeps its diff for a person. Tokens are read from
-# files and given to curl on stdin, never on a command line. A link Lapilli
-# or the host gives is never fetched: a pull request is asked about by its
-# number, checked, at the API given. Nothing is told to Lapilli when the
-# host fails: the next run tries again. What Lapilli sends is not trusted
+# files and given to curl on stdin, never on a command line; curl reads no
+# .curlrc. A link Lapilli or the host gives is never fetched: a pull
+# request is asked about by its number, checked, at the API given. Nothing
+# is told to Lapilli when the host fails: the next run tries again. What
+# Lapilli sends is not trusted
 # to name the file, or to be a rule file: a Lapilli someone took over could
 # otherwise push a workflow, a script or a build's configuration to the
 # repository, which a push runs with its secrets before anyone reviews it.
@@ -149,11 +150,11 @@ out=$tmp/out
 lapilli() {
   if [ $# -ge 3 ]; then
     printf 'Authorization: Bearer %s\n' "$ltoken" |
-      curl -sS --max-time 30 --proto '=http,https' -X "$1" -H @- -H 'Content-Type: application/json' \
+      curl -q -sS --max-time 30 --proto '=http,https' -X "$1" -H @- -H 'Content-Type: application/json' \
         --data-binary "@$3" -o "$out" -w '%{http_code}' "$LAPILLI_URL$2" || echo failed
   else
     printf 'Authorization: Bearer %s\n' "$ltoken" |
-      curl -sS --max-time 30 --proto '=http,https' -X "$1" -H @- -o "$out" -w '%{http_code}' "$LAPILLI_URL$2" || echo failed
+      curl -q -sS --max-time 30 --proto '=http,https' -X "$1" -H @- -o "$out" -w '%{http_code}' "$LAPILLI_URL$2" || echo failed
   fi
 }
 
@@ -161,10 +162,10 @@ lapilli() {
 # the HTTP status.
 host() {
   if [ $# -ge 3 ]; then
-    host_auth | curl -sS --max-time 30 --proto '=http,https' -X "$1" -H @- -H 'Content-Type: application/json' \
+    host_auth | curl -q -sS --max-time 30 --proto '=http,https' -X "$1" -H @- -H 'Content-Type: application/json' \
       --data-binary "@$3" -o "$out" -w '%{http_code}' "$2" || echo failed
   else
-    host_auth | curl -sS --max-time 30 --proto '=http,https' -X "$1" -H @- -o "$out" -w '%{http_code}' "$2" || echo failed
+    host_auth | curl -q -sS --max-time 30 --proto '=http,https' -X "$1" -H @- -o "$out" -w '%{http_code}' "$2" || echo failed
   fi
 }
 

@@ -158,7 +158,7 @@ kept='def kept($m): [. // "" | split("\n")[] | rtrimstr("\r") | select(startswit
 # for gone.
 fetch() {
   : >"$work/answer"
-  if ! code=$(curl -sS --max-time 30 --retry 3 -o "$work/answer" -w '%{http_code}' "$@"); then
+  if ! code=$(curl -q -sS --max-time 30 --retry 3 -o "$work/answer" -w '%{http_code}' "$@"); then
     code=000
   fi
   printf '%s\n' "$code" >"$work/status"
@@ -235,7 +235,7 @@ lapilli_comments() {
 lapilli_copy() {
   : >"$work/copied"
   printf 'Authorization: Bearer %s\n' "$lapilli_token" |
-    curl -sS --max-time 30 --retry 3 -X POST -H @- -H 'Content-Type: application/json' \
+    curl -q -sS --max-time 30 --retry 3 -X POST -H @- -H 'Content-Type: application/json' \
       --data-binary "$2" -o "$work/copied" -w '%{http_code}' "$lapilli/api/v1/tasks/$1/comments" || printf '000'
 }
 
