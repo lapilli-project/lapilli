@@ -1,8 +1,8 @@
 # Impact signals: several, each named, with its own `for`, `match` and start
 
-Status: accepted; step 1 built (`lapilli verdict`, "Step 1, as built"
-below), step 2 (`lapilli serve`, "Step 2, as built") built but for its
-pages, step 3 not. Under [GOVERNANCE.md](../../GOVERNANCE.md)
+Status: accepted; steps 1 (`lapilli verdict`, 0.53.0, "Step 1, as built"
+below) and 2 (`lapilli serve`, schema 022, 0.55.0, "Step 2, as built")
+built, step 3 not. Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this changes how a firing is judged (an incident, and a rule beside a
 signal, get labels of their own to be matched on, and a rule can be judged
 against some signals only) and adds a new kind of data to the ledger (the
@@ -953,6 +953,19 @@ What building the first settled:
   held, its match or record, the entries or the match in effect change.
   The Settings page lists the signals as started, with no form for one
   with no name beside them, until step 3.
+- **The pages** (the second pull request). `/incidents` picks a signal's
+  windows (`?source=impact&signal=NAME`, a tab each), says each window's
+  signal, and the other signals' windows on with it (three named, the rest
+  counted). A window's page says its signal, its `for` and `match`, the
+  rule entries that keep their rules from it, and the other signals'
+  windows at the time with what caught each; "Dismiss it and the other
+  signals' windows at the time" dismisses the undecided ones with it, each
+  noted on its own. An incident a confirmation wrote says it is matched as
+  its window was, and its form that other labels make it a person's. A
+  rule's page says its entry, the signals it is judged against with the
+  labels each is matched on, and what its record waits for: "No record by
+  reading them before 2026-11-09: it waits for errors, probe." The digest
+  and reports name no window's signal yet.
 - **Not built here.** The UI's `impact` and `impact-for` stay in
   `settings`, the unnamed signal's, until step 3 makes the section by
   signal. Hours (asleep, off hours) count black stones by firing as
@@ -968,7 +981,7 @@ What building the first settled:
 2. `serve`: the next schema; the runs read each signal, missed on its own;
    each signal's start; ties by alert, and the tallies by them; keys and
    decisions by signal; the Incidents page, a rule's page, the summary,
-   `/metrics`, MCP; numbers.md's invariants. (Built but for the pages,
-   which follow in their own pull request: "Step 2, as built".)
+   `/metrics`, MCP; numbers.md's invariants. (Built, in two pull
+   requests: "Step 2, as built".)
 3. v0.49.0's section by signal: the list and the rule entries, the try,
    reading again a signal alone, a row a signal in the sources panel.

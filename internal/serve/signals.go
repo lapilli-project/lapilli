@@ -662,6 +662,7 @@ type ruleSignals struct {
 	// signals its record waits for comes with each alert, by its labels.
 	NoAlert bool       `json:"no_alert_yet,omitempty"`
 	From    *time.Time `json:"no_record_before,omitempty"`
+	FromAt  time.Time  `json:"-"`
 	Never   bool       `json:"never,omitempty"`
 }
 
@@ -718,7 +719,7 @@ func (s *Server) ruleSignalsOf(ctx context.Context, o verdict.Options, rule stri
 	}
 	if !out.Never && !latest.IsZero() {
 		at := latest.UTC()
-		out.From = &at
+		out.From, out.FromAt = &at, at
 	}
 	return out, nil
 }

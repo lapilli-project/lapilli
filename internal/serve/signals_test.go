@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -20,6 +22,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/firing"
+	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/ledger/ledgertest"
 	"lapilli.dev/internal/prom"
@@ -1707,4 +1710,222 @@ func TestQuickSignalReadWithWhatIsLeft(t *testing.T) {
 			t.Errorf("round %d, which the probe answers at once in: unread", k)
 		}
 	}
+}
+
+// The pages by signal (docs/design/signals.md, "Where it shows"): the
+// Incidents page picks a signal's windows, says each line's signal and
+// the other signals' windows on with it; a window's page says its signal,
+// what caught the others at the time, and dismisses them together; a
+// confirmation's says it is matched as its window was; a rule's page what
+// it is judged against and what its record waits for.
+func TestSignalPages(t *testing.T) {
+	ctx := context.Background()
+	s := signalServer(t, signalWindowsHistory(), func(c *Config) { c.Editors = []string{"bo@example.com"} })
+	h := s.Handler()
+	page := func(path string) string {
+		t.Helper()
+		code, body := askAs(t, h, http.MethodGet, path, nil, "ana@example.com", "same-origin")
+		if code != http.StatusOK {
+			t.Fatalf("%s: %d %s", path, code, body)
+		}
+		return body
+	}
+	body := page("/incidents?source=impact")
+	for _, want := range []string{`<a href="/incidents?signal=probe&amp;source=impact&amp;weeks=4"><bdi>probe</bdi></a>`, "found by <bdi>errors</bdi>",
+		"with <bdi>probe</bdi>, <bdi>2026-11-02 06:00</bdi> to <bdi>2026-11-02 06:11</bdi>", "user impact (probe)"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/incidents?source=impact has no %s\n%s", want, body)
+		}
+	}
+	body = page("/incidents?source=impact&signal=probe")
+	if !strings.Contains(body, "impact-probe-20261102T0600Z") || strings.Contains(body, `>impact-errors-20261102T0600Z<`) {
+		t.Errorf("the probe's windows alone:\n%s", body)
+	}
+	body = page("/incidents/impact-probe-20261102T0600Z")
+	for _, want := range []string{`<h2 id="signal">Impact signal</h2>`, "Found by <bdi>probe</bdi>: a window once a series returns something for <bdi>2m</bdi>, matched on <bdi>service</bdi>.",
+		`impact-errors-20261102T0600Z</a> <bdi>errors</bdi>`, "caught by Errors", `name="together" value="1"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the probe's window's page has no %s", want)
+		}
+	}
+	body = page("/rules/Errors")
+	if !strings.Contains(body, "Judged against every impact signal&#39;s windows: errors (service), probe (service).") ||
+		!strings.Contains(body, "No record by reading them before 2026-11-09: it waits for errors, probe.") {
+		t.Errorf("the rule's page:\n%s", body)
+	}
+	// Dismissed together: the errors' window too, each noted on its own.
+	code, body := askAs(t, h, http.MethodPost, "/incidents/impact-probe-20261102T0600Z/decide", url.Values{"state": {"dismissed"}, "together": {"1"}}, "bo@example.com", "same-origin")
+	if code != http.StatusSeeOther {
+		t.Fatalf("dismissed together: %d %s", code, body)
+	}
+	for _, id := range []string{"impact-probe-20261102T0600Z", "impact-errors-20261102T0600Z"} {
+		if in, err := s.l.IncidentByID(ctx, id); err != nil || in.State != "dismissed" {
+			t.Errorf("%s: %q %v", id, in.State, err)
+		}
+	}
+	// Undone and confirmed, the probe's window is written down with its
+	// signal: its page says how it is matched.
+	o, _ := s.options(ctx)
+	if _, err := s.l.Decide(ctx, "impact-probe-20261102T0600Z", "", "", "bo@example.com", o); err != nil {
+		t.Fatal(err)
+	}
+	made, err := s.l.Decide(ctx, "impact-probe-20261102T0600Z", "confirmed", "", "bo@example.com", o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = page("/incidents/" + made)
+	if !strings.Contains(body, "Written down by confirming a window of <bdi>probe</bdi>: matched on <bdi>service</bdi>") ||
+		!strings.Contains(body, "matched as its window was; with other labels, on service, as any written down") {
+		t.Errorf("the confirmation's page:\n%s", body)
+	}
+}
+
+// A rule an entry names says so on its page, and what its record waits
+// for: the entry's signals alone.
+func TestSignalRulePageEntry(t *testing.T) {
+	s := signalServer(t, shopHistory(), func(c *Config) {
+		c.ImpactRules = []verdict.RuleEntry{{Rules: "^Errors$", Signals: []string{"probe"}, Match: []string{}}}
+	})
+	_, body := askAs(t, s.Handler(), http.MethodGet, "/rules/Errors", nil, "ana@example.com", "same-origin")
+	if !strings.Contains(body, "Rule entry #1: judged against the windows of probe (–) alone.") || !strings.Contains(body, "it waits for probe.") {
+		t.Errorf("the rule's page:\n%s", body)
+	}
+	_, body = askAs(t, s.Handler(), http.MethodGet, "/incidents", nil, "ana@example.com", "same-origin")
+	if strings.Contains(body, "Signal</") {
+		t.Error("signal tabs with no source picked")
+	}
+}
+
+// windowsWith, by sorted spans, names and counts the same windows as each
+// line against each window would: the first withMost to start, the rest
+// counted.
+func TestWindowsWithAsEachAgainstEach(t *testing.T) {
+	rnd := rand.New(rand.NewPCG(1, 2))
+	base := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	at := func() time.Time { return base.Add(time.Duration(rnd.IntN(600)) * time.Minute) }
+	signals := []string{"errors", "probe", "latency", ""}
+	for round := range 200 {
+		var ws []ledger.Incident
+		for i := range rnd.IntN(40) {
+			a := at()
+			b := a.Add(time.Duration(rnd.IntN(120)) * time.Minute)
+			if rnd.IntN(30) == 0 {
+				b = a.Add(-time.Minute) // one that ends before it starts
+			}
+			ws = append(ws, ledger.Incident{Incident: incident.Incident{ID: fmt.Sprintf("w%02d", i), Signal: signals[rnd.IntN(len(signals))], Start: a, End: b}, Origin: "impact"})
+		}
+		var lines, naive []incidentLine
+		for i := range rnd.IntN(20) {
+			a := at()
+			in := ledger.Incident{Incident: incident.Incident{ID: fmt.Sprintf("l%02d", i), Signal: signals[rnd.IntN(3)], Start: a, End: a.Add(time.Duration(rnd.IntN(90)) * time.Minute)}, Origin: "impact"}
+			lines, naive = append(lines, incidentLine{Incident: in}), append(naive, incidentLine{Incident: in})
+		}
+		windowsWith(lines, slices.Clone(ws))
+		sorted := slices.Clone(ws)
+		slices.SortFunc(sorted, byStart)
+		for i := range naive {
+			in := &naive[i]
+			for _, w := range sorted {
+				if w.Signal == "" || w.Signal == in.Signal || w.Start.After(in.End) || w.End.Before(in.Start) {
+					continue
+				}
+				if len(in.With) < withMost {
+					in.With = append(in.With, withWindow{ID: w.ID, Signal: w.Signal, Start: w.Start, End: w.End})
+				} else {
+					in.WithMore++
+				}
+			}
+		}
+		if !reflect.DeepEqual(lines, naive) {
+			t.Fatalf("round %d:\n got %+v\nwant %+v", round, lines, naive)
+		}
+	}
+}
+
+// A signal picked on the Incidents page stays picked by its other tabs:
+// the period, the week's chip, and how they were caught.
+func TestSignalPickedKeptByTabs(t *testing.T) {
+	s := signalServer(t, signalWindowsHistory(), nil)
+	_, body := askAs(t, s.Handler(), http.MethodGet, "/incidents?source=impact&signal=probe&weeks=4", nil, "ana@example.com", "same-origin")
+	links := regexp.MustCompile(`href="(/incidents\?[^"]*)"`).FindAllStringSubmatch(body, -1)
+	kept := 0
+	for _, m := range links {
+		q, _ := url.ParseQuery(strings.SplitN(strings.ReplaceAll(m[1], "&amp;", "&"), "?", 2)[1])
+		if q.Get("source") != "impact" {
+			continue // the Of tabs: another source, no signal
+		}
+		if _, picks := q["signal"]; !picks && q.Get("state") == "" && q.Get("weeks") == "4" {
+			continue // the Signal tab's all
+		}
+		if q.Get("signal") != "probe" && !(q.Get("signal") != "" && q.Get("weeks") == "4") {
+			t.Errorf("%s drops the signal picked", m[1])
+		}
+		kept++
+	}
+	if kept < 3 {
+		t.Errorf("%d links keep the signal: %q", kept, links)
+	}
+}
+
+// A rule that hasn't fired says what its record waits for comes with its
+// alerts, not that no signal keeps it; a window's page says the other
+// signals' windows caught, or not, as states; a confirmation with no
+// match in effect says so, not "on ,".
+func TestSignalPagesSayIt(t *testing.T) {
+	ctx := context.Background()
+	s := signalServer(t, signalWindowsHistory(), func(c *Config) {
+		c.Editors = []string{"bo@example.com"}
+		os.WriteFile(filepath.Join(c.RulesPath, "quiet.yaml"), []byte("groups:\n- name: quiet\n  rules:\n  - alert: Quiet\n    expr: never_seen > 1\n"), 0o644)
+	})
+	h := s.Handler()
+	_, body := askAs(t, h, http.MethodGet, "/rules/Quiet", nil, "ana@example.com", "same-origin")
+	if !strings.Contains(body, "No alert yet: which of them") || strings.Contains(body, "None of them keeps the record") {
+		t.Errorf("a rule with no alert: %s", between(body, "Judged against", "</p>"))
+	}
+	_, body = askAs(t, h, http.MethodGet, "/incidents/impact-probe-20261102T0600Z", nil, "ana@example.com", "same-origin")
+	others := func() string {
+		t.Helper()
+		_, body := askAs(t, h, http.MethodGet, "/incidents/impact-probe-20261102T0600Z", nil, "ana@example.com", "same-origin")
+		return between(body, "Other signals&#39; windows at the time", "</ul>")
+	}
+	// As the Incidents page draws each: caught ok, caught only by noisy
+	// rules warn, covered by one written down with no colour.
+	if o := others(); !strings.Contains(o, `<span class="status-ok"><span aria-hidden="true">○</span> caught by Errors</span>`) {
+		t.Errorf("the other window caught: %s", o)
+	}
+	if err := s.l.SetSettings(ctx, map[string]string{"noisy-firings": "1", "noisy-precision": "1"}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if o := others(); !strings.Contains(o, `<span class="status-warn"><span aria-hidden="true">◐</span> caught by Errors, noisy</span>`) {
+		t.Errorf("the other window caught by a noisy rule alone: %s", o)
+	}
+	if err := s.l.SetSettings(ctx, map[string]string{"noisy-firings": "", "noisy-precision": ""}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	o, _ := s.options(ctx)
+	at := time.Date(2026, 11, 2, 5, 55, 0, 0, time.UTC)
+	if _, err := s.l.Put(ctx, incident.Incident{ID: "INC-9", Title: "checkout down", Start: at, End: at.Add(30 * time.Minute), Labels: incident.Labels{"service": {"checkout"}}}, "ana@example.com", o); err != nil {
+		t.Fatal(err)
+	}
+	if o := others(); !strings.Contains(o, "covered by one written down") || strings.Contains(o, "status-") {
+		t.Errorf("the other window covered by one written down: %s", o)
+	}
+	made, err := s.l.Decide(ctx, "impact-probe-20261102T0600Z", "confirmed", "", "bo@example.com", o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.SetSettings(ctx, map[string]string{"match": "none"}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	_, body = askAs(t, h, http.MethodGet, "/incidents/"+url.PathEscape(made), nil, "bo@example.com", "same-origin")
+	if !strings.Contains(body, "matched as its window was; with other labels, on no label, as any written down") {
+		t.Errorf("the confirmation with no match in effect: %s", between(body, `name="labels"`, "</label>"))
+	}
+}
+
+// between is what of s is after from, up to the first to after it.
+func between(s, from, to string) string {
+	_, after, _ := strings.Cut(s, from)
+	x, _, _ := strings.Cut(after, to)
+	return x
 }

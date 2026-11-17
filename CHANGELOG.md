@@ -2,34 +2,37 @@
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-11-18
+
 ### Added
 
 - **Named impact signals, in `lapilli serve`** (docs/design/signals.md,
-  step 2, but for the pages). `lapilli serve` takes `--impact
-  NAME=PROMQL`, up to eight, `--impact-for NAME=DUR`, `--impact-match`,
-  `--impact-record` and `--impact-file` with rule entries, as `lapilli
-  verdict` does since 0.53.0; the chart's `impact`, as a mapping of
-  `signals` and `rules`, is that file. The runs read each signal on its
-  own, in turn within `--timeout`: any number that hang leave the others
-  their time, asked again after a round, then two, four, up to a day of
-  rounds; and one that fits in `--timeout` alone, though not beside the
-  others, is read on its turn. One that fails, or finds more than 1,000
-  windows in a read or 2,000 in a week, is missed for the run, which
-  records the rest, and a later run reads it from where it was missed,
-  within a week, a piece at a time, no more at once than a run reads, the
-  pieces of a turn held together to `--max-samples` as one range is, each
-  turn going on a little before where the last ended, as runs overlap; a
-  window found begun before where a read reads goes on from the one with
-  its labels, or is new. What is left of a round goes to those left over
-  for what they took before. Each signal's windows are its own, keyed by
-  its name (`impact-probe-20261110T1404Z`), with what was decided of them,
-  their tasks and comments carried over among its own; each keeps the
-  record from its own start, where the data it reads begins, read again
-  alone over the last four weeks when its expression or `for` changes. A
-  firing is judged by the signals tied to its alert: its rule's entry's,
-  or else those that could have seen it, by what each has seen. Confirming
-  a window writes down an incident carrying its signal and match, caught
-  as the window was, until its labels change. `/api/v1/report` gives
+  step 2). `lapilli serve` takes `--impact NAME=PROMQL`, up to eight,
+  `--impact-for NAME=DUR`, `--impact-match`, `--impact-record` and
+  `--impact-file` with rule entries, as `lapilli verdict` does since
+  0.53.0; the chart's `impact`, as a mapping of `signals` and `rules`, is
+  that file. The runs read each signal on its own, in turn within
+  `--timeout`: each that hangs costs the others a round at most each time
+  serve starts, then about one round in 24, asked again after a round,
+  then two, four, up to a day of rounds; and one that fits in `--timeout`
+  alone, though not beside the others, is read on its turn. One that
+  fails, or finds more than 1,000 windows in a read or 2,000 in a week, is
+  missed for the run, which records the rest, and a later run reads it
+  from where it was missed, within a week, a piece at a time, no more at
+  once than a run reads, the pieces of a turn held together to
+  `--max-samples` as one range is, each turn going on a little before
+  where the last ended, as runs overlap; a window found begun before where
+  a read reads goes on from the one with its labels, or is new. What is
+  left of a round goes to those left over for what they took before. Each
+  signal's windows are its own, keyed by its name
+  (`impact-probe-20261110T1404Z`), with what was decided of them, their
+  tasks and comments carried over among its own; each keeps the record
+  from its own start, where the data it reads begins, read again alone
+  over the last four weeks when its expression or `for` changes. A firing
+  is judged by the signals tied to its alert: its rule's entry's, or else
+  those that could have seen it, by what each has seen. Confirming a
+  window writes down an incident carrying its signal and match, caught as
+  the window was, until its labels change. `/api/v1/report` gives
   `settings.impact_signals`, `settings.impact_rules`,
   `rules[].impact_rule`, `firings[].signals` and `incidents[].signal`;
   `/api/v1/summary` gives each row's `unjudged`, `impacts.by_signal` (`{}`
@@ -44,18 +47,28 @@
   proposal waiting is held when any signal's criterion, its match or
   record, the rule entries or the match in effect change. The Settings
   page lists the signals as serve was started with them; changing them
-  there, and the Incidents page and a rule's page by signal, come in a
-  later release. `lapilli preflight` reads and counts each signal, and the
-  requests of each beside its reads (what it reads, a round, and where its
-  data begins, once). Each run asks, of each signal, one query; after the
-  runs, one a selector, for what it reads (below). **Ledger schema 022**,
-  after 021: `impact_signals` (what meta kept of the impact signal, moved
-  to its row, and a row a named one), `impact_rules`, `incidents.signal`
-  and `incidents.match_labels`, `series.signals`, and `days`, `weeks`,
+  there comes in a later release. The Incidents page picks a signal's
+  windows, says each one's signal and the other signals' windows on with
+  it; a window's page says its signal, the rule entries that keep rules
+  from it and the other signals' windows at the time, with what caught
+  each, and dismisses them together; a rule's page says what it is judged
+  against and what its record waits for. `lapilli preflight` reads and
+  counts each signal, and the requests of each beside its reads (what it
+  reads, a round, and where its data begins, once). Each run asks each
+  signal one query, and one catching up a piece at a time one a piece;
+  after the runs, one a selector, for what it reads (below). A named
+  signal's window labels are held to 4 KB, as an incident's; the unnamed
+  signal's are kept as before. With named signals, `/settings.yaml` gives
+  no `impact`, and the Settings page's try of a criterion is refused. A
+  match name of `--match` or the Settings page that isn't a label's name
+  is never put in PromQL. **Ledger schema 022**, after 021:
+  `impact_signals` (what meta kept of the impact signal, moved to its row,
+  and a row a named one), `impact_rules`, `incidents.signal` and
+  `incidents.match_labels`, `series.signals`, and `days`, `weeks`,
   `marked_days` and `marked_weeks` keyed by `signals` too, every row
   copied in once. A ledger with one impact signal with no name upgrades
   with its windows, keys, decisions, tasks, comments and start unchanged,
-  and judges as it did. A lapilli before 0.54 doesn't open a ledger this
+  and judges as it did. A lapilli before 0.55 doesn't open a ledger this
   one has migrated: take a snapshot of its disk, or of its database,
   before upgrading, to go back to.
 

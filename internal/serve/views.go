@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"html/template"
@@ -892,6 +893,9 @@ func (s *Server) reviews(ctx context.Context, rule string, limit int) ([]reviewV
 
 type ruleView struct {
 	ruleLine
+	// Signals are, with named impact signals, the rule entry that names
+	// it, the signals it is judged against, and what its record waits for.
+	Signals *ruleSignals
 	// Kinds are the kinds of marked window it fired in over the weeks
 	// shown, each inside beside outside.
 	Kinds []ruleKind
@@ -1028,6 +1032,11 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 	}
 	v := ruleView{ruleLine: ruleLine{Name: name, Precision: "–"}, Path: "/rules/" + url.PathEscape(name), Tab: ruleTabOf(q), Period: n,
 		EditNote: q.Get("edit") == "note"}
+	// With named impact signals, what it is judged against, and what its
+	// record waits for (docs/design/signals.md, "Where it shows").
+	if v.Signals, err = s.ruleSignalsOf(ctx, t.o, name); err != nil {
+		return ruleView{}, err
+	}
 	id := t.id(name)
 	if i := slices.IndexFunc(lines, func(l ruleLine) bool { return l.Name == name }); i >= 0 {
 		v.ruleLine, v.Known = lines[i], true
@@ -1292,18 +1301,195 @@ type incidentLine struct {
 	NearlyMore int
 	// Kinds are the kinds of marked window it started during.
 	Kinds []string
+	// With are, of a named signal's window, the other signals' windows on
+	// at some time in it, withMost at most; WithMore how many more.
+	With     []withWindow
+	WithMore int
 }
 
 // impactTitle is the title an impact window is found with.
 const impactTitle = "user impact (--impact)"
 
 // shown is an incident as shown in a language: an impact window's title is
-// the UI's own, so it is translated.
+// the UI's own, so it is translated, a named signal's with its name.
 func shown(lang string, in ledger.Incident) ledger.Incident {
-	if in.Origin == "impact" && in.Title == impactTitle {
+	switch {
+	case in.Origin == "impact" && in.Title == impactTitle:
 		in.Title = tr(lang, impactTitle)
+	case in.Origin == "impact" && in.Signal != "" && in.Title == "user impact ("+in.Signal+")":
+		in.Title = tr(lang, "user impact (%s)", in.Signal)
 	}
 	return in
+}
+
+// withWindow is another signal's window on at the same time as one, as
+// its line and its page say it (docs/design/signals.md, "Windows: each
+// signal's own"): its signal, its span, and on its page what caught it.
+type withWindow struct {
+	ID, Signal string
+	Start, End time.Time
+	State      string
+	Caught     []string
+	// Status is, on its page, as the Incidents page says a window's:
+	// caught, noisy, missed, covered (by one written down), or what was
+	// decided of it.
+	Status string
+}
+
+// withMost is how many other signals' windows a line names; the rest are
+// counted.
+const withMost = 3
+
+// windowsWith gives each named window of lines the other signals' windows
+// of ws on at some time in it, withMost named, the first to start, and the
+// rest counted. By signal, each one's windows sorted once: how many are on
+// in a span is two binary searches, and the first ones on found down a
+// tree of the latest each range of them lasts to, so that a page of many
+// windows over many weeks isn't each line against each window.
+func windowsWith(lines []incidentLine, ws []ledger.Incident) {
+	by := map[string][]ledger.Incident{}
+	var names []string
+	for _, w := range ws {
+		if w.Signal == "" {
+			continue
+		}
+		if _, ok := by[w.Signal]; !ok {
+			names = append(names, w.Signal)
+		}
+		by[w.Signal] = append(by[w.Signal], w)
+	}
+	slices.Sort(names)
+	idx := make(map[string]*spans, len(names))
+	for _, n := range names {
+		idx[n] = newSpans(by[n])
+	}
+	for i := range lines {
+		in := &lines[i]
+		if in.Origin != "impact" || in.Signal == "" {
+			continue
+		}
+		var first []ledger.Incident
+		total := 0
+		for _, n := range names {
+			if n == in.Signal {
+				continue
+			}
+			sp := idx[n]
+			total += sp.count(in.Start, in.End)
+			first = append(first, sp.first(in.Start, in.End, withMost)...)
+		}
+		slices.SortFunc(first, byStart)
+		for _, w := range first[:min(len(first), withMost)] {
+			in.With = append(in.With, withWindow{ID: w.ID, Signal: w.Signal, Start: w.Start, End: w.End, State: w.State})
+		}
+		in.WithMore = total - len(in.With)
+	}
+}
+
+func byStart(x, y ledger.Incident) int {
+	return cmp.Or(x.Start.Compare(y.Start), strings.Compare(x.ID, y.ID))
+}
+
+// spans are one signal's windows, to say which are on at some time in [a,
+// b]: those that start by b and end at a or later. A window that ends
+// before it starts, which the ledger doesn't keep, is looked at of its own.
+type spans struct {
+	ws   []ledger.Incident // by start
+	ends []time.Time       // sorted
+	// last is a tree over ws: last[1] the latest any ends, last[size+i]
+	// ws[i]'s end, each node the later of its two.
+	last []time.Time
+	size int
+	odd  []ledger.Incident
+}
+
+func newSpans(ws []ledger.Incident) *spans {
+	sp := &spans{}
+	for _, w := range ws {
+		if w.End.Before(w.Start) {
+			sp.odd = append(sp.odd, w)
+		} else {
+			sp.ws = append(sp.ws, w)
+		}
+	}
+	slices.SortFunc(sp.ws, byStart)
+	sp.size = 1
+	for sp.size < len(sp.ws) {
+		sp.size *= 2
+	}
+	sp.last = make([]time.Time, 2*sp.size)
+	for i, w := range sp.ws {
+		sp.ends = append(sp.ends, w.End)
+		sp.last[sp.size+i] = w.End
+	}
+	slices.SortFunc(sp.ends, time.Time.Compare)
+	for i := sp.size - 1; i >= 1; i-- {
+		sp.last[i] = sp.last[2*i]
+		if sp.last[2*i+1].After(sp.last[i]) {
+			sp.last[i] = sp.last[2*i+1]
+		}
+	}
+	return sp
+}
+
+func on(w ledger.Incident, a, b time.Time) bool { return !w.Start.After(b) && !w.End.Before(a) }
+
+// by is how many windows start by b.
+func (sp *spans) by(b time.Time) int {
+	return sort.Search(len(sp.ws), func(i int) bool { return sp.ws[i].Start.After(b) })
+}
+
+// count is how many are on in [a, b]: those that start by b, less those
+// that end before a, each of which starts before a, so by b.
+func (sp *spans) count(a, b time.Time) int {
+	n := 0
+	if !b.Before(a) {
+		n = sp.by(b) - sort.Search(len(sp.ends), func(i int) bool { return !sp.ends[i].Before(a) })
+	}
+	for _, w := range sp.odd {
+		if on(w, a, b) {
+			n++
+		}
+	}
+	return n
+}
+
+// first are the most first to start of those on in [a, b].
+func (sp *spans) first(a, b time.Time, most int) []ledger.Incident {
+	var out []ledger.Incident
+	if !b.Before(a) {
+		j := sp.by(b)
+		for lo := 0; len(out) < most; {
+			i := sp.from(1, 0, sp.size, lo, j, a)
+			if i < 0 {
+				break
+			}
+			out = append(out, sp.ws[i])
+			lo = i + 1
+		}
+	}
+	for _, w := range sp.odd {
+		if on(w, a, b) {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// from is the first i in [lo, hi) whose window ends at a or later, or -1,
+// looked for under node, which holds [nlo, nhi).
+func (sp *spans) from(node, nlo, nhi, lo, hi int, a time.Time) int {
+	if nhi <= lo || nlo >= hi || sp.last[node].Before(a) {
+		return -1
+	}
+	if nhi-nlo == 1 {
+		return nlo
+	}
+	mid := (nlo + nhi) / 2
+	if i := sp.from(2*node, nlo, mid, lo, hi, a); i >= 0 {
+		return i
+	}
+	return sp.from(2*node+1, mid, nhi, lo, hi, a)
 }
 
 func (s *Server) incidentLine(lang string, in ledger.Incident, state string) incidentLine {
@@ -1342,6 +1528,11 @@ type incidentsView struct {
 	// (caught only by noisy rules) or missed. Week is the week shown, when
 	// one is asked for (week=), its Monday.
 	State, Week string
+	// Signal is the named impact signal whose windows are listed, when
+	// asked (signal=, with source=impact); Signals, the signals to pick
+	// from: those in effect, then those the windows shown have.
+	Signal  string
+	Signals []string
 }
 
 // leadText says how long before an incident's start its first alert came,
@@ -1400,12 +1591,33 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 	if src := q.Get("source"); src == "impact" || src == "written" {
 		v.Source = src
 	}
+	// Named signals: each one's windows apart, picked by signal=.
+	if t.o.Signals.Named() {
+		for _, x := range t.o.Signals.List {
+			v.Signals = append(v.Signals, x.Name)
+		}
+		for _, in := range incs {
+			if in.Origin == "impact" && in.Signal != "" && !slices.Contains(v.Signals, in.Signal) {
+				v.Signals = append(v.Signals, in.Signal)
+			}
+		}
+		if sg := q.Get("signal"); v.Source == "impact" && slices.Contains(v.Signals, sg) {
+			v.Signal = sg
+		}
+	}
+	var windows []ledger.Incident
 	var leads []time.Duration
 	for _, in := range incs {
+		if in.Origin == "impact" && in.Signal != "" {
+			windows = append(windows, in)
+		}
 		if team != nil && !own.ownsIncident(*team, in) {
 			continue
 		}
 		if (v.Source == "impact") != (in.Origin == "impact") && v.Source != "" {
+			continue
+		}
+		if v.Signal != "" && in.Signal != v.Signal {
 			continue
 		}
 		w := ledger.Week(s.l.Day(in.Start))
@@ -1441,6 +1653,7 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 	if m := medianSeconds(leads); m != nil {
 		v.Lead = leadText(l, time.Duration(*m)*time.Second)
 	}
+	windowsWith(v.Lines, windows)
 	slices.Reverse(v.Lines)
 	return v, s.incidentKinds(ctx, v.Lines)
 }
@@ -1454,6 +1667,22 @@ type incidentView struct {
 	Nearly   []nearLine
 	// Timeline is when the rules fired around it.
 	Timeline *timelineView
+	// Signal is, of a named signal's window, or an incident a confirmation
+	// of one wrote, its signal as it judges (docs/design/signals.md).
+	Signal *signalOfView
+}
+
+// signalOfView is a named signal as a window's page says it: its "for",
+// the labels its windows are matched on, the rule entries that keep their
+// rules from its windows, and the other signals' windows at the time, each
+// with what caught it; Together, that some of those are undecided, to be
+// dismissed with it.
+type signalOfView struct {
+	Name, For, Match string
+	Gone             bool
+	KeptFrom         []string
+	With             []withWindow
+	Together         bool
 }
 
 // nearLine is a rule that nearly caught an incident, as a person reads it.
@@ -1555,8 +1784,59 @@ func (s *Server) incidentPage(r *http.Request) (any, error) {
 		return nil, err
 	}
 	v.Kinds = one[0].Kinds
+	if in.Signal != "" {
+		if v.Signal, err = s.signalOf(ctx, t, in); err != nil {
+			return nil, err
+		}
+	}
 	v.Comments, err = s.commentsView(r, "incident", in.ID)
 	return v, err
+}
+
+// signalOf is the named signal of a window, or of what a confirmation of
+// one wrote, as its page says it.
+func (s *Server) signalOf(ctx context.Context, t *tallies, in ledger.Incident) (*signalOfView, error) {
+	o := t.o
+	v := &signalOfView{Name: in.Signal, Match: strings.Join(in.Match, ", "), Gone: true}
+	if in.Match == nil {
+		v.Match = strings.Join(o.Match, ", ")
+	}
+	if o.Signals.Named() {
+		for _, x := range o.Signals.List {
+			if x.Name == in.Signal {
+				v.Gone, v.For = false, verdict.Duration(x.For)
+			}
+		}
+		for i, e := range o.Signals.Entries {
+			if !slices.Contains(e.Signals, in.Signal) {
+				what := e.Rules
+				if what == "" {
+					what = labelText(e.Labels)
+				}
+				v.KeptFrom = append(v.KeptFrom, fmt.Sprintf("#%d %s", i+1, what))
+			}
+		}
+	}
+	if in.Origin != "impact" {
+		return v, nil
+	}
+	ws, err := s.l.ImpactWindowsMeeting(ctx, in.Start, in.End)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range ws {
+		if w.Signal == "" || w.Signal == in.Signal {
+			continue
+		}
+		x := withWindow{ID: w.ID, Signal: w.Signal, Start: w.Start, End: w.End, State: w.State}
+		for _, c := range w.CaughtBy {
+			x.Caught = append(x.Caught, c.Rule)
+		}
+		x.Status = s.incidentLine("en", w, t.state(w, ledger.Week(s.l.Day(w.Start)))).Status
+		v.With = append(v.With, x)
+		v.Together = v.Together || w.State == "" && in.State == ""
+	}
+	return v, nil
 }
 
 func labelText(l incident.Labels) string {
@@ -1935,6 +2215,19 @@ var funcs = template.FuncMap{
 	"delay": verdict.Delay,
 	"path":  url.PathEscape,
 	"join":  strings.Join,
+	// signalsOn says the signals a rule is judged against, each with the
+	// labels it is matched on: probe (service).
+	"signalsOn": func(on []ruleSignalOn) string {
+		var out []string
+		for _, x := range on {
+			m := strings.Join(x.Match, ", ")
+			if m == "" {
+				m = "–"
+			}
+			out = append(out, x.Signal+" ("+m+")")
+		}
+		return strings.Join(out, ", ")
+	},
 	// labelsum is a window's or an incident's labels summed up, for the
 	// "labelsum" template.
 	"labelsum": labelsum,
