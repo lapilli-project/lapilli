@@ -372,3 +372,15 @@ func TestSignalSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A signal with no bit yet (-1, before the ledger keeps it) is in no
+// bits, and none of them is its: no shift by -1.
+func TestSignalWithNoBit(t *testing.T) {
+	s := Signals{List: []Signal{{Name: "errors", Bit: 0}, {Name: "probe", Bit: -1}}}
+	if got := s.Bits([]int{0, 1}, false); got != 1 {
+		t.Errorf("bits %b", got)
+	}
+	if got := s.FromBits(3); !slices.Equal(got, []int{0}) {
+		t.Errorf("from bits %v", got)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -49,6 +50,8 @@ type signalHistory struct {
 	// counted are, by selector, the label sets of its series, all along,
 	// as count by (LABELS) (SELECTOR) answers: none for one not named.
 	counted map[string][]map[string]string
+	// failing are the selectors a count of fails.
+	failing map[string]bool
 	asked   *[]string
 }
 
@@ -59,6 +62,9 @@ func (h signalHistory) QueryRange(_ context.Context, expr string, start, end tim
 	if rest, ok := strings.CutPrefix(expr, "count by ("); ok {
 		by, sel, _ := strings.Cut(rest, ") (")
 		sel = strings.TrimSuffix(sel, ")")
+		if h.failing[sel] {
+			return nil, errors.New("query timed out")
+		}
 		var out []prom.Series
 		for _, l := range h.counted[sel] {
 			kept := map[string]string{}
@@ -824,6 +830,32 @@ func TestMatchIsLabelNames(t *testing.T) {
 		_, err := parseFlags([]string{"--rules", "x.yaml", "--prometheus", "http://p", "--match", v}, func(string, string) (bool, error) { return false, nil })
 		if err == nil || !strings.Contains(err.Error(), "want a label's name") {
 			t.Errorf("--match %q: %v", v, err)
+		}
+	}
+}
+
+// A selector of what a signal reads whose count fails adds nothing: the
+// run goes on, says so on stderr, and the others' counts still tie.
+func TestNamedSignalsSeenFails(t *testing.T) {
+	h, file, args := namedSignals(t)
+	h.counted = map[string][]map[string]string{"http_requests_total": {{"service": "web", "team": "edge"}}}
+	h.failing = map[string]bool{"probe_success": true}
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return h, nil }
+	now = func() time.Time { return sigBase.Add(8 * 24 * time.Hour) }
+	var stdout, stderr bytes.Buffer
+	if code := run(append(args, "--impact-file", file, "--json"), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d\n%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "a selector failed: ") {
+		t.Errorf("stderr: %s", stderr.String())
+	}
+	var rep verdict.Report
+	if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range rep.Firings {
+		if f.Rule == "NightPage" && (f.NoRecord || !slices.Equal(f.Signals, []string{"errors", "payments"})) {
+			t.Errorf("with one count failed: no record %v, tied to %v; want judged, by errors", f.NoRecord, f.Signals)
 		}
 	}
 }
