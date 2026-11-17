@@ -315,7 +315,8 @@ Each is held by the code and a test, not only said:
   of the last ten minutes. The credential endpoints are matched by host
   and action, `AssumeRole` among them.
 - **No write to the ledger.** SQLite is opened `mode=ro`, with `PRAGMA
-  query_only = ON`. Postgres is connected with
+  query_only = ON`, and so that nothing is made or written beside it (As
+  built, below). Postgres is connected with
   `default_transaction_read_only = on`, so a write fails at the server,
   whatever asked it.
 - **No call that opens the ledger for serve.** `internal/preflight` reads
@@ -473,11 +474,22 @@ can do:
   ALERTS count are asked as a range whose start is its end. The allowlist
   holds that form: the query's text exactly, the start and end within the
   last ten minutes, a step, nothing else.
-- **SQLite read-only takes `immutable` too.** Opened `mode=ro` alone, SQLite
-  makes a `-wal` and a `-shm` beside a ledger that has none, as a ledger
-  serve closed hasn't (`TestProbeSQLite` fails so). The probe adds
-  `immutable=1` when there is no `-wal`, so nothing is made; with one, a
-  serve has it open, and it is read through it, `mode=ro`.
+- **SQLite read-only takes `immutable` too, or more.** Opened `mode=ro`
+  alone, SQLite makes a `-wal` and a `-shm` beside a ledger that has none,
+  as a ledger serve closed hasn't (`TestProbeSQLite` fails so); makes the
+  `-shm` beside a `-wal` that has none (a serve that stopped hard and its
+  `-shm` cleared, a copy of the two files); and writes in a `-shm` that is
+  there, a reader's mark, or the whole index where it finds it stale. So
+  the probe opens it by what is beside it (`ledger.Probe`,
+  `TestProbeSQLiteBeside`): with no `-wal`, `immutable=1`; with a `-wal`
+  and a `-shm`, a serve's or one left, `readonly_shm=1`, so that SQLite
+  reads the index without writing it, or, where no serve holds it, builds
+  one of its own in memory; with a `-wal` and no `-shm`, through a file
+  system that has no write (`modernc.org/sqlite/vfs`), the index kept in
+  memory (`locking_mode=EXCLUSIVE`). Each reads what the `-wal` holds, a
+  migration not yet checkpointed among it; 0.53.0 to 0.55.0 made the
+  `-shm` in the third case, 32 KiB, which a serve run as another user
+  might not then open.
 - **`history.grafana` asks through the proxy for Loki's data sources
   alone.** serve replays Grafana's rules of PromQL against `--prometheus`,
   not through Grafana's data source proxy; only a Loki data source's are

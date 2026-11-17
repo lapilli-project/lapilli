@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"modernc.org/sqlite/vfs"
 )
 
 // Probed is what a probe of a ledger read of it, writing nothing
@@ -34,10 +36,10 @@ type Probed struct {
 	Warning string
 }
 
-// Probe reads the SQLite ledger serve keeps in dir (DIR/ledger.db): opened
-// read-only (mode=ro), its connection taking no write (PRAGMA query_only);
-// and, with no write-ahead log beside it, as immutable, so that SQLite
-// makes nothing beside it either. A ledger that isn't there is a new one:
+// Probe reads the SQLite ledger serve keeps in dir (DIR/ledger.db): its
+// connection read-only (mode=ro) and taking no write (PRAGMA query_only),
+// and opened so that SQLite neither makes nor changes a file beside it,
+// whatever is there (beside). A ledger that isn't there is a new one:
 // There false, and nothing made.
 func Probe(ctx context.Context, dir string) (Probed, error) {
 	p := Probed{}
@@ -59,12 +61,15 @@ func Probe(ctx context.Context, dir string) (Probed, error) {
 		return p, fmt.Errorf("%s isn't a file", abs)
 	}
 	p.There = true
-	_, err = os.Stat(abs + "-wal")
-	db, err := openProbe(abs, errors.Is(err, os.ErrNotExist))
+	how, err := beside(abs)
 	if err != nil {
 		return p, err
 	}
-	defer db.Close()
+	db, done, err := openProbe(abs, how, probeQuery(how))
+	if err != nil {
+		return p, err
+	}
+	defer done()
 	db.SetMaxOpenConns(1)
 	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&p.Version); err != nil {
 		return p, err
@@ -72,22 +77,105 @@ func Probe(ctx context.Context, dir string) (Probed, error) {
 	return p, nil
 }
 
-// probeQuery is the query of the URI a probe opens a SQLite ledger with:
-// read-only, its connection taking no write, and, with no write-ahead log
-// beside it (immutable), as nothing writes it now, or it would have one:
-// all of it is in the file, and SQLite makes nothing beside it.
-func probeQuery(immutable bool) string {
+// probing is how a probe opens a SQLite ledger, by what is beside it.
+type probing int
+
+const (
+	// alone: no write-ahead log beside it. Nothing writes it now, or it
+	// would have one: all of it is in the file, which is opened as
+	// immutable, and SQLite makes nothing beside it.
+	alone probing = iota
+	// indexed: a log and its index (-shm). A serve has it open, or had
+	// and stopped hard. The index is opened read-only too (readonly_shm),
+	// never written: SQLite reads through it where a serve holds it, and
+	// where none does, builds an index of its own in memory from the log.
+	// Opened read-write, as mode=ro alone opens it, a reader writes its
+	// mark in it, and one that finds it stale writes it anew.
+	indexed
+	// unindexed: a log and no index (a serve that stopped hard and its
+	// -shm cleared, a copy of the two files). No one has it open, and to
+	// read the log SQLite would make the index beside it. The two files
+	// are read through a file system of their own that has no write
+	// (modernc.org/sqlite/vfs), the index kept in memory, as SQLite keeps
+	// it with locking_mode EXCLUSIVE: that file system takes no lock, and
+	// no one has the ledger open to need one.
+	unindexed
+)
+
+// beside says how a probe opens the SQLite file at abs, by what is beside it.
+func beside(abs string) (probing, error) {
+	there := func(name string) (bool, error) {
+		_, err := os.Stat(name)
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return err == nil, err
+	}
+	wal, err := there(abs + "-wal")
+	if err != nil || !wal {
+		return alone, err
+	}
+	shm, err := there(abs + "-shm")
+	if err != nil {
+		return alone, err
+	}
+	if shm {
+		return indexed, nil
+	}
+	return unindexed, nil
+}
+
+// probeQuery is the query of the URI a probe opens a SQLite ledger with,
+// as what is beside it says (probing).
+func probeQuery(how probing) string {
 	q := "mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(10000)"
-	if immutable {
+	switch how {
+	case alone:
 		q += "&immutable=1"
+	case indexed:
+		q += "&readonly_shm=1"
+	case unindexed:
+		q += "&_pragma=locking_mode(EXCLUSIVE)"
 	}
 	return q
 }
 
-// openProbe opens the SQLite file at abs as a probe does.
-func openProbe(abs string, immutable bool) (*sql.DB, error) {
-	u := fileURI(abs)
-	return sql.Open("sqlite", u.String()+"?"+probeQuery(immutable))
+// openProbe opens the SQLite file at abs as a probe does, with the URI's
+// query q; done closes it, and what it was read through.
+func openProbe(abs string, how probing, q string) (db *sql.DB, done func(), err error) {
+	if how != unindexed {
+		u := fileURI(abs)
+		db, err = sql.Open("sqlite", u.String()+"?"+q)
+		if err != nil {
+			return nil, nil, err
+		}
+		return db, func() { db.Close() }, nil
+	}
+	name, fsys, err := vfs.New(readOnly{os.DirFS(filepath.Dir(abs)), filepath.Base(abs)})
+	if err != nil {
+		return nil, nil, err
+	}
+	db, err = sql.Open("sqlite", "file:"+filepath.Base(abs)+"?vfs="+name+"&"+q)
+	if err != nil {
+		fsys.Close()
+		return nil, nil, err
+	}
+	return db, func() { db.Close(); fsys.Close() }, nil
+}
+
+// readOnly is a directory as a probe reads a ledger in it through a file
+// system of its own: the ledger, its log and what SQLite asks of beside
+// it (a journal, which isn't there), nothing else.
+type readOnly struct {
+	dir  fs.FS
+	name string
+}
+
+func (r readOnly) Open(name string) (fs.File, error) {
+	if !strings.HasPrefix(name, r.name) || strings.ContainsRune(name[len(r.name):], '/') {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+	}
+	return r.dir.Open(name)
 }
 
 // ProbePostgres reads the Postgres ledger a connection string names, as

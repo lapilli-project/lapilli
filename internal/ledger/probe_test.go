@@ -1,11 +1,15 @@
 package ledger
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
+	"io"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -90,6 +94,137 @@ func TestProbeSQLite(t *testing.T) {
 	}
 }
 
+// logged makes a SQLite ledger in dir whose file is at schema 19 and its
+// write-ahead log at 23, as a serve that migrated it and hasn't
+// checkpointed since leaves it, and keeps it open: closed, the log would
+// be checkpointed and gone.
+func logged(t *testing.T, dir string) *sql.DB {
+	t.Helper()
+	u := fileURI(filepath.Join(dir, "ledger.db"))
+	db, err := sql.Open("sqlite", u.String()+"?_pragma=journal_mode(WAL)&_pragma=wal_autocheckpoint(0)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	for _, q := range []string{"CREATE TABLE t (x)", "PRAGMA user_version = 19", "PRAGMA wal_checkpoint(TRUNCATE)", "INSERT INTO t VALUES (1)", "PRAGMA user_version = 23"} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return db
+}
+
+// copied copies the files named from one directory to another, as a copy
+// of a volume, or what a serve that stopped hard left, would hold them.
+func copied(t *testing.T, from, to string, names ...string) {
+	t.Helper()
+	for _, n := range names {
+		b, err := os.ReadFile(filepath.Join(from, n))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(to, n), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// unchanged fails the test on a file made in dir, or one whose bytes
+// changed, since before.
+func unchanged(t *testing.T, dir string, before map[string][]byte) {
+	t.Helper()
+	after := files(t, dir)
+	for name, b := range after {
+		if was, ok := before[name]; !ok {
+			t.Errorf("%s was made (%d bytes)", name, len(b))
+		} else if !bytes.Equal(was, b) {
+			t.Errorf("%s changed", name)
+		}
+	}
+	if len(after) < len(before) {
+		t.Errorf("files %v, then %v", slices.Sorted(maps.Keys(before)), slices.Sorted(maps.Keys(after)))
+	}
+}
+
+// holdEnv names, to the test binary run again, a directory to hold a
+// ledger open in, as a serve in another process does: within a process
+// SQLite shares the index (-shm) between connections, so what a probe
+// does to a serve's index is seen only across two.
+const holdEnv = "LAPILLI_TEST_HOLD_LEDGER"
+
+// TestHoldLedger is that other process: it makes a ledger as logged does,
+// says so on its standard output, and holds it open until its standard
+// input is closed.
+func TestHoldLedger(t *testing.T) {
+	dir := os.Getenv(holdEnv)
+	if dir == "" {
+		t.Skip("TestProbeSQLiteBeside runs it, as another process")
+	}
+	db := logged(t, dir)
+	defer db.Close()
+	fmt.Println("held")
+	io.Copy(io.Discard, os.Stdin)
+}
+
+// Whatever is beside a SQLite ledger, the probe reads its schema as serve
+// would, and neither makes a file beside it nor changes one: its
+// write-ahead log with no index (a serve that stopped hard, its -shm
+// cleared; a copy of the two files), the log and its index left by a
+// serve that stopped hard, and a serve in another process holding both.
+// The schema is the log's, never the file's alone.
+func TestProbeSQLiteBeside(t *testing.T) {
+	ctx := context.Background()
+	src := t.TempDir()
+	db := logged(t, src)
+	defer db.Close()
+	for name, beside := range map[string][]string{
+		"a log, no index":          {"ledger.db", "ledger.db-wal"},
+		"a log and its index":      {"ledger.db", "ledger.db-wal", "ledger.db-shm"},
+		"a log, its index of 0400": {"ledger.db", "ledger.db-wal", "ledger.db-shm"},
+	} {
+		dir := t.TempDir()
+		copied(t, src, dir, beside...)
+		if strings.Contains(name, "0400") {
+			os.Chmod(filepath.Join(dir, "ledger.db-shm"), 0o400)
+		}
+		before := files(t, dir)
+		p, err := Probe(ctx, dir)
+		if err != nil || !p.There || p.Version != 23 {
+			t.Errorf("%s: %+v %v", name, p, err)
+		}
+		unchanged(t, dir, before)
+	}
+	// A serve in another process holds the ledger, its log and its index.
+	held := t.TempDir()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHoldLedger$", "-test.count=1")
+	cmd.Env = append(os.Environ(), holdEnv+"="+held)
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Wait()
+	defer in.Close()
+	if line, err := bufio.NewReader(out).ReadString('\n'); err != nil || line != "held\n" {
+		t.Fatalf("the other process: %q %v", line, err)
+	}
+	before := files(t, held)
+	if _, ok := before["ledger.db-shm"]; !ok {
+		t.Fatalf("a serve's ledger with no index: %v", slices.Sorted(maps.Keys(before)))
+	}
+	p, err := Probe(ctx, held)
+	if err != nil || p.Version != 23 {
+		t.Errorf("held by a serve: %+v %v", p, err)
+	}
+	unchanged(t, held, before)
+}
+
 // A ledger at an older schema says so, as serve would migrate it.
 func TestProbeSQLiteOlder(t *testing.T) {
 	dir := t.TempDir()
@@ -160,28 +295,47 @@ func TestProbePostgres(t *testing.T) {
 func TestProbeSQLiteRefusesWrites(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
-	abs := filepath.Join(dir, "ledger.db")
-	l, err := Open(ctx, abs, time.UTC)
+	l, err := Open(ctx, filepath.Join(dir, "ledger.db"), time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}
 	l.Close()
-	for _, immutable := range []bool{true, false} {
+	src := t.TempDir()
+	db := logged(t, src)
+	defer db.Close()
+	for how, files := range map[probing][]string{indexed: {"ledger.db", "ledger.db-wal", "ledger.db-shm"}, unindexed: {"ledger.db", "ledger.db-wal"}} {
+		d := t.TempDir()
+		copied(t, src, d, files...)
+		if got, err := beside(filepath.Join(d, "ledger.db")); got != how || err != nil {
+			t.Fatalf("%v is said %v %v", files, got, err)
+		}
+	}
+	for _, how := range []probing{alone, indexed, unindexed} {
+		at := dir
+		if how != alone {
+			at = t.TempDir()
+			files := []string{"ledger.db", "ledger.db-wal", "ledger.db-shm"}
+			if how == unindexed {
+				files = files[:2]
+			}
+			copied(t, src, at, files...)
+		}
+		abs := filepath.Join(at, "ledger.db")
 		for _, without := range []string{"", "mode=ro&", "&_pragma=query_only(1)"} {
-			q := strings.Replace(probeQuery(immutable), without, "", 1)
-			if without != "" && q == probeQuery(immutable) {
+			q := strings.Replace(probeQuery(how), without, "", 1)
+			if without != "" && q == probeQuery(how) {
 				t.Fatalf("%q isn't in the probe's query %q", without, q)
 			}
-			db, err := sql.Open("sqlite", "file:"+abs+"?"+q)
+			db, done, err := openProbe(abs, how, q)
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, w := range []string{"CREATE TABLE preflight_wrote (x)", "PRAGMA user_version = 7", "INSERT INTO meta (k, v) VALUES ('x', 'y')"} {
+			for _, w := range []string{"CREATE TABLE preflight_wrote (x)", "PRAGMA user_version = 7", "INSERT INTO meta (k, v) VALUES ('x', 'y')", "INSERT INTO t VALUES (2)"} {
 				if _, err := db.ExecContext(ctx, w); err == nil {
-					t.Errorf("immutable %v, without %q: %s was taken", immutable, without, w)
+					t.Errorf("%v, without %q: %s was taken", how, without, w)
 				}
 			}
-			db.Close()
+			done()
 		}
 	}
 	if p, err := Probe(ctx, dir); err != nil || p.Version != p.Knows {
