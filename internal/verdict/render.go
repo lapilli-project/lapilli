@@ -57,7 +57,7 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 	partial(w, r.Unreplayed, len(r.Rules), true)
 	switch {
 	case r.NoRecord && firings > 0:
-		fmt.Fprintln(w, NoRecordText)
+		fmt.Fprintln(w, NoRecordTextFor(r.Settings != nil && r.Settings.ImpactNoData))
 	case r.Unjudged > 0 && len(signals(r)) > 0:
 		fmt.Fprintf(w, SomeUnjudgedSignalsText+"\n", r.Unjudged, firings)
 	case r.Unjudged > 0:
@@ -215,6 +215,7 @@ func bySignal(r *Report) string {
 func signalsKept(w io.Writer, r *Report, loc *time.Location) {
 	ss := signals(r)
 	if len(ss) == 0 {
+		impactKept(w, r, loc)
 		return
 	}
 	var parts []string
@@ -229,6 +230,25 @@ func signalsKept(w io.Writer, r *Report, loc *time.Location) {
 		}
 	}
 	fmt.Fprintf(w, "Impact signals keep the record of the firings they could have seen: %s\n", strings.Join(parts, ", "))
+}
+
+// impactKept writes, of an impact signal with no name, from when it keeps
+// the record, when that is within the period: where the data of every
+// selector it reads begins; or that it keeps none, a selector it reads
+// having no data, unless the period's no record says so below, as it does
+// when anything fired. Nothing
+// when it keeps the record of all of the period, nor in lapilli serve's
+// digest (ByWeek), whose record by it starts where its ledger says.
+func impactKept(w io.Writer, r *Report, loc *time.Location) {
+	switch s := r.Settings; {
+	case s == nil, s.ByWeek:
+	case s.ImpactNoData:
+		if !r.NoRecord || !slices.ContainsFunc(r.Rules, func(rr RuleResult) bool { return rr.Firings > 0 }) {
+			fmt.Fprintln(w, "--impact keeps no record: a selector it reads has no data")
+		}
+	case s.ImpactFrom.After(r.From):
+		fmt.Fprintf(w, "--impact keeps the record from %s, where the data of every selector it reads begins\n", s.ImpactFrom.In(loc).Format("2006-01-02 15:04"))
+	}
 }
 
 // outlasting writes the rules replayed whose "for" one event can't

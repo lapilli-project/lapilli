@@ -68,7 +68,7 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 	text(fmt.Sprintf("Rules compared: **%d changed, %d added, %d taken away**, %d the same.", p.changed, p.added, p.gone, c.Same))
 	switch {
 	case c.noRecord():
-		text(" " + NoRecordCompared)
+		text(" " + c.noRecordText())
 	case !judged:
 		text(" No incidents were given: the firings are counted, not judged.")
 	}

@@ -202,7 +202,9 @@ func (r Record) JudgesAny(from, to time.Time) bool {
 
 func (r Record) judgesAny(from, to time.Time) bool {
 	if r.week == nil {
-		return r.Kept(from, to)
+		// The impact signal read from some time in it on, where its data
+		// begins (lapilli verdict), keeps the record of the rest.
+		return r.Kept(from, to) || !r.impactFrom.IsZero() && r.impactFrom.Before(to)
 	}
 	for at, n := from, 0; n == 0 || at.Before(to); n++ {
 		a, b := r.week(at)
@@ -220,6 +222,19 @@ func (r Record) judgesAny(from, to time.Time) bool {
 // NoRecordText says, for a person, what a period with no record means, and
 // how to keep one.
 const NoRecordText = `No incident was written down, or found by --impact, in the period or the two weeks before it: a firing that caught nothing can't be told from one nobody wrote down, so no rule is called noisy and no longer "for" is suggested. Give incidents with --incidents, or read users' impact over the period with --impact; in lapilli serve, write them down, or mark a firing This was real.`
+
+// NoRecordNoDataText says it when --impact was read and keeps no record,
+// a selector it reads having no data (Options.ImpactNoData).
+const NoRecordNoDataText = `No incident was written down in the period or the two weeks before it, and --impact keeps no record: a selector it reads has no data. A firing that caught nothing can't be told from one nobody wrote down, so no rule is called noisy and no longer "for" is suggested. Give incidents with --incidents, or an --impact whose metrics have data over the period.`
+
+// NoRecordTextFor is what a period with no record means: NoRecordText, or
+// NoRecordNoDataText when --impact had no data.
+func NoRecordTextFor(noData bool) string {
+	if noData {
+		return NoRecordNoDataText
+	}
+	return NoRecordText
+}
 
 // SomeUnjudgedSignalsText says it with named impact signals: a firing is
 // also judged by the windows of the signals that could have seen it, and

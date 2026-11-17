@@ -428,22 +428,33 @@ func (f *verdictFlags) readSignals(ctx context.Context, h history, incs []incide
 		}
 		x.Seen = seen
 		found = append(found, incident.FromSignal(in, f.step, x.For, x.Name, x.Match)...)
-		sels, err := source.FirstSamples(ctx, h, s.expr, from, f.opts.To, true)
-		if err != nil {
+		if x.Start, err = f.recordStart(ctx, h, s.expr, from); err != nil {
 			return nil, fmt.Errorf("--impact %s: looking for where the data it reads begins: %w", s.name, err)
-		}
-		d := ledger.ImpactData{From: from, CheckedTo: f.opts.To, Selectors: sels}
-		ledger.FloorBy(&d, func(t time.Time) time.Time { return t })
-		x.Start = time.Time{}
-		if !d.NoData {
-			x.Start = from
-			if d.Floor.After(from) {
-				x.Start = d.Floor
-			}
 		}
 	}
 	f.opts.Signals = verdict.NewSignals(list, f.opts.Signals.Entries)
 	return incident.Merge(incs, found, f.opts.UnknownLen, f.opts.Match), nil
+}
+
+// recordStart is from when an impact signal read from from on keeps the
+// record, named or not, by the one rule lapilli serve keeps it by
+// (ledger.FloorBy), each firing judged by its own time: from, or later,
+// where the data of every selector expr reads begins, the earliest series
+// of each, the latest of those; zero when a selector it reads has no data.
+func (f *verdictFlags) recordStart(ctx context.Context, h history, expr string, from time.Time) (time.Time, error) {
+	sels, err := source.FirstSamples(ctx, h, expr, from, f.opts.To, true)
+	if err != nil {
+		return time.Time{}, err
+	}
+	d := ledger.ImpactData{From: from, CheckedTo: f.opts.To, Selectors: sels}
+	ledger.FloorBy(&d, func(t time.Time) time.Time { return t })
+	if d.NoData {
+		return time.Time{}, nil
+	}
+	if d.Floor.After(from) {
+		return d.Floor, nil
+	}
+	return from, nil
 }
 
 // indexSignals is s with each rule's entry found once: by its name, or

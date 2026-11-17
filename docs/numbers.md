@@ -41,7 +41,8 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
 
 `settings` says what the firings were judged by (`lead_ns`, `match`,
 `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†,
-`record_by_week`†, `impact_signals`†, `impact_rules`†): the flags, or in
+`impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`†):
+the flags, or in
 `lapilli serve` the settings page. Durations are in nanoseconds, as
 everywhere in the report.
 
@@ -130,6 +131,22 @@ writing down what went wrong. A firing is **judged** when the record was
 kept at its time: an incident was on at some time in the two weeks
 (`record_lookback`) before it, or an impact signal (`--impact`) was read
 over its time (`impact_from`† at or before it), or it caught an incident.
+`impact_from` is where the signal was first read, or later, where the
+data of every selector it reads begins, as a named signal's `start`
+(below); it is missing, with `impact_no_data: true`†, when a selector it
+reads has no data, which keeps no record. But a selector that only
+narrows another the expression reads (the same offset and @, and each of
+the other's matchers, its metric's name among them, one of its own) is
+read whenever the widest of those is, so long as the labels it narrows
+by are there: it begins where that one's series with its metric's name
+and each label it narrows them by, any value, begin, when that is before
+its own data or it has none, as `http_requests_total{code!=""}` for
+`http_requests_total{code=~"5.."}` beside `http_requests_total`. A
+client library makes a 5xx series at the first 5xx, so a service that
+served none had nothing to match, not nothing to read; and a code label
+that came later (a relabelling, a rename) holds the record back to where
+it came. One read with nothing wider beside it keeps its own start. Not
+a selector an `absent()` or `absent_over_time()` reads, at any depth.
 The incidents that keep the record are all those given, from before the
 period too. Any other firing is black, with `no_record: true`†: counted,
 in `firings` and `black`, and in its rule's `unjudged`†, but in no
@@ -150,7 +167,8 @@ window of one of its `signals` was, or it caught an incident, or the
 signals among its `signals` that keep the record, one at least, had each
 started by its time: `settings.impact_signals[].start`†, where the signal
 was first read, or later, where the data of every selector it reads
-begins (none for a selector with no data). `impact_from` is then missing:
+begins (none for a selector with no data, as above, but by its stand-in).
+`impact_from` is then missing:
 it is the start of an impact signal with no name.
 
 `lapilli verdict` judges each firing by its own time:
@@ -578,7 +596,7 @@ holds them, and this list.
 |---|---|
 | the report | `from`, `to`, `noisy_at`, `no_record`†, `unjudged`†, `some_rules`†, `rules`, `incidents`, `firings`, `settings` |
 | `noisy_at` | `firings`, `precision` |
-| `settings` | `lead_ns`, `match`, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `record_by_week`†, `impact_signals`†, `impact_rules`† |
+| `settings` | `lead_ns`, `match`, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by_week`†, `impact_signals`†, `impact_rules`† |
 | `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`† |
 | `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match` |
 | `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`† |

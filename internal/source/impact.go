@@ -6,28 +6,28 @@ import (
 
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/replay"
-	"lapilli.dev/internal/rules"
 )
 
-// FirstSamples are, of each selector expr reads (rules.Selectors), when it
-// first had data in [lo, hi]: the earliest sample of any of its series, so
-// that a series added late moves nothing (count over all of them, at a step
-// of an hour, or coarser over a long span: one request a selector). atStart
-// says lo is where the look begins: a selector with data there may have had
-// it before (AtStart). Where an impact signal's data begins, for lapilli
-// serve's record by it and lapilli verdict's by each named signal alike.
+// FirstSamples are, of each selector expr reads and each stand-in
+// (ledger.SelectorsOf), when it first had data in [lo, hi]: the earliest
+// sample of any of its series, so that a series added late moves nothing
+// (count over all of them, at a step of an hour, or coarser over a long
+// span: one request a selector). atStart says lo is where the look begins:
+// a selector with data there may have had it before (AtStart). Where an
+// impact signal's data begins, for lapilli serve's record by it and
+// lapilli verdict's alike.
 func FirstSamples(ctx context.Context, h replay.History, expr string, lo, hi time.Time, atStart bool) ([]ledger.SelectorData, error) {
-	sels, err := rules.Selectors(expr)
+	sels, err := ledger.SelectorsOf(expr)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]ledger.SelectorData, 0, len(sels))
 	for _, sel := range sels {
-		x, err := FirstSample(ctx, h, sel, lo, hi, atStart)
+		x, err := FirstSample(ctx, h, sel.Sel, lo, hi, atStart)
 		if err != nil {
 			return nil, err
 		}
-		x.To = hi
+		x.For, x.Of, x.To = sel.For, sel.Of, hi
 		out = append(out, x)
 	}
 	return out, nil

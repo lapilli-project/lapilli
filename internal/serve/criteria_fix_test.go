@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -129,6 +130,176 @@ func TestImpactDataSelectors(t *testing.T) {
 				t.Errorf("%s: the page doesn't say so:\n%s", c.name, page)
 			}
 		}
+	}
+}
+
+// A selector with no data that only narrows one with data had nothing to
+// match: the 5xx of a service that served none, beside all its requests.
+// It holds nothing back, and the page says why, not that there is no
+// record.
+func TestImpactDataNarrowed(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {}}
+	expr := `sum(probe_failed{code="5"}) / sum(probe_failed) > 0.5`
+	code, body := askAs(t, s.Handler(), http.MethodPost, "/settings/impact", url.Values{"impact": {expr}}, "ana@example.com", "same-origin")
+	if code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	s.jobs(ctx, false)
+	k, err := s.l.ImpactKept(ctx)
+	if err != nil || !k.AgainDone("5m "+expr) || k.Data == nil || k.Data.NoData {
+		t.Fatalf("%+v %v", k, err)
+	}
+	if began, _ := s.l.RunsFrom(ctx); !options(t, s).Equal(began) {
+		t.Errorf("kept from %s, not %s", options(t, s), began)
+	}
+	_, page := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
+	if !strings.Contains(page, "nothing matched since") || !strings.Contains(page, "<bdi>probe_failed{code!=&#34;&#34;}</bdi> has data") || strings.Contains(page, "keeps no record") {
+		t.Errorf("the page doesn't say why:\n%s", page)
+	}
+}
+
+// A selector that narrows another by a label the series got later (a
+// rename, a relabelling) had nothing it could match before: its stand-in,
+// the series with that label, holds the record back to where it begins.
+func TestImpactDataLabelLater(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {}, `probe_failed{code!=""}`: {now.Add(-30 * time.Hour)}}
+	expr := `sum(probe_failed{code="5"}) / sum(probe_failed) > 0.5`
+	if code, body := askAs(t, s.Handler(), http.MethodPost, "/settings/impact", url.Values{"impact": {expr}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	s.jobs(ctx, false)
+	k, err := s.l.ImpactKept(ctx)
+	if err != nil || k.Data == nil || k.Data.NoData || k.Data.Late() != `probe_failed{code="5"}` {
+		t.Fatalf("%+v %v", k.Data, err)
+	}
+	if want := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC); !options(t, s).Equal(want) {
+		t.Errorf("kept from %s, not %s", options(t, s), want)
+	}
+}
+
+// A ledger whose impact data a lapilli before stand-ins kept, no record by
+// a selector that only narrows another: at the next round its stand-in is
+// looked for, and the record is kept from impact_since; the sources panel
+// no longer says no data.
+func TestImpactDataStandInUpgrade(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {}}
+	expr := `sum(probe_failed{code="5"}) / sum(probe_failed) > 0.5`
+	if code, body := askAs(t, s.Handler(), http.MethodPost, "/settings/impact", url.Values{"impact": {expr}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	s.jobs(ctx, false)
+	k, err := s.l.ImpactKept(ctx)
+	if err != nil || k.Data == nil {
+		t.Fatal(k, err)
+	}
+	// As the release before kept it: the selectors read, no stand-in.
+	old := *k.Data
+	old.Selectors = slices.DeleteFunc(slices.Clone(old.Selectors), func(x ledger.SelectorData) bool { return x.For != "" })
+	if err := s.l.SetImpactData(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	if k, _ := s.l.ImpactKept(ctx); !k.Data.NoData || !k.From().IsZero() {
+		t.Fatalf("as before: no data %v, from %s", k.Data.NoData, k.From())
+	}
+	_, page := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
+	if !strings.Contains(sourceRowOf(page, "Impact signal"), "no data") {
+		t.Fatalf("as before, the sources row:\n%s", sourceRowOf(page, "Impact signal"))
+	}
+	runDue(s, 2)
+	s.jobs(ctx, true)
+	k, err = s.l.ImpactKept(ctx)
+	if err != nil || k.Data.NoData || !k.From().Equal(k.Since) {
+		t.Fatalf("at the next round: no data %v, from %s, since %s (%v)", k.Data.NoData, k.From(), k.Since, err)
+	}
+	_, page = askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
+	if strings.Contains(sourceRowOf(page, "Impact signal"), "no data") {
+		t.Errorf("the sources row still says no data:\n%s", sourceRowOf(page, "Impact signal"))
+	}
+}
+
+// A ledger a lapilli before stand-ins wrote back, a stand-in's "for" and
+// "of" let go: given back at the next round, not taken for a selector the
+// expression reads, nor looked for twice.
+func TestImpactDataStandInDowngraded(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {}}
+	expr := `sum(probe_failed{code="5"}) / sum(probe_failed) > 0.5`
+	if code, body := askAs(t, s.Handler(), http.MethodPost, "/settings/impact", url.Values{"impact": {expr}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	s.jobs(ctx, false)
+	k, err := s.l.ImpactKept(ctx)
+	if err != nil || k.Data == nil {
+		t.Fatal(k, err)
+	}
+	old := *k.Data
+	old.Selectors = slices.Clone(old.Selectors)
+	for i := range old.Selectors {
+		old.Selectors[i].For, old.Selectors[i].Of = "", ""
+	}
+	if err := s.l.SetImpactData(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	runDue(s, 2)
+	s.jobs(ctx, true)
+	k, err = s.l.ImpactKept(ctx)
+	if err != nil || k.Data.NoData || len(k.Data.Selectors) != 3 || k.Data.Selectors[2].For != `probe_failed{code="5"}` || k.Data.Selectors[2].Of != "probe_failed" {
+		t.Fatalf("at the next round: %+v %v", k.Data, err)
+	}
+	_, page := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
+	if strings.Contains(page, "<bdi>probe_failed{code!=&#34;&#34;}</bdi></code>:") {
+		t.Errorf("the stand-in listed as a selector:\n%s", page)
+	}
+}
+
+// A selector whose own data begins later than its stand-in's, a first 5xx,
+// begins by its stand-in: the page says from when, and by what.
+func TestImpactDataStandInEarlier(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {now.Add(-30 * time.Hour)}}
+	expr := `sum(probe_failed{code="5"}) / sum(probe_failed) > 0.5`
+	if code, body := askAs(t, s.Handler(), http.MethodPost, "/settings/impact", url.Values{"impact": {expr}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	s.jobs(ctx, false)
+	if began, _ := s.l.RunsFrom(ctx); !options(t, s).Equal(began) {
+		t.Errorf("kept from %s, not %s", options(t, s), began)
+	}
+	_, page := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
+	if !strings.Contains(page, "kept from") || !strings.Contains(page, "<bdi>probe_failed{code!=&#34;&#34;}</bdi> begins") {
+		t.Errorf("the page doesn't say by what:\n%s", page)
+	}
+}
+
+// A record a stand-in kept stays when the selector's own first sample
+// comes: a first 5xx moves impact_since nowhere.
+func TestImpactDataFirstMatchKeeps(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, false, nil)
+	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {}}
+	expr := `sum(probe_failed{code="5"}) / sum(probe_failed) > 0.5`
+	if code, body := askAs(t, s.Handler(), http.MethodPost, "/settings/impact", url.Values{"impact": {expr}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Fatalf("%d %s", code, body)
+	}
+	s.jobs(ctx, false)
+	k, err := s.l.ImpactKept(ctx)
+	if err != nil || k.From().IsZero() {
+		t.Fatalf("kept from %s (%v)", k.From(), err)
+	}
+	since, from := k.Since, k.From()
+	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {now.Add(time.Hour)}}
+	runDue(s, 3)
+	s.jobs(ctx, true)
+	if k, err = s.l.ImpactKept(ctx); err != nil || !k.Since.Equal(since) || !k.From().Equal(from) || k.Data.Selectors[0].First.IsZero() {
+		t.Errorf("after the first 5xx: since %s, from %s, its first %s; not %s, %s (%v)", k.Since, k.From(), k.Data.Selectors[0].First, since, from, err)
 	}
 }
 

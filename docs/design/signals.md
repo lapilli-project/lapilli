@@ -774,7 +774,11 @@ Open:
   v0.49.0's rule (`ledger.FloorBy`); `lapilli verdict` judges each firing
   by its own time, so the start is that time itself, not the first whole
   week after it. A selector with no data at all: no start, the signal
-  never keeps the record.
+  never keeps the record; but one that only narrows another selector of
+  the expression begins where its stand-in's data does (the other's
+  series with each label it narrows by: `http_requests_total{code!=""}`
+  for `http_requests_total{code=~"5.."}`, `rules.StandIns`), as in
+  `lapilli serve`.
 - **A signal that can't be read** fails the run, as `--impact` does: "missed
   for the run" is serve's runs'. The bounds on windows are serve's runs'
   too; a read is held to `--max-samples`.

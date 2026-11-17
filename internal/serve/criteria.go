@@ -372,15 +372,24 @@ type againView struct {
 }
 
 // dataView is where the data of a criterion's selectors begins, as a page
-// says it: each selector (when it first had data, from before From, or
-// none since From), the one that holds the record back (Late), and whether
-// one has none at all.
+// says it: each selector it reads (when it first had data, from before
+// From, or none since From, and then the stand-in its record is kept by,
+// if any: nothing it matches happened), the one that holds the record back
+// (Late), and whether one has none at all.
 type dataView struct {
-	From      time.Time             `json:"from"`
-	Selectors []ledger.SelectorData `json:"selectors"`
-	Late      string                `json:"late,omitempty"`
-	NoData    bool                  `json:"no_data,omitempty"`
-	Floor     time.Time             `json:"floor,omitzero"`
+	From      time.Time      `json:"from"`
+	Selectors []selectorView `json:"selectors"`
+	Late      string         `json:"late,omitempty"`
+	NoData    bool           `json:"no_data,omitempty"`
+	Floor     time.Time      `json:"floor,omitzero"`
+}
+
+type selectorView struct {
+	ledger.SelectorData
+	// StandIn is the stand-in it begins by, from Kept, with no data of its
+	// own or before it.
+	StandIn string    `json:"stand_in,omitempty"`
+	Kept    time.Time `json:"kept_from,omitzero"`
 }
 
 // dataOf is where the data of a criterion's selectors begins, as the
@@ -397,7 +406,16 @@ func dataViewOf(d *ledger.ImpactData) *dataView {
 	if d == nil {
 		return nil
 	}
-	return &dataView{From: d.From, Selectors: d.Selectors, Late: d.Late(), NoData: d.NoData, Floor: d.Floor}
+	v := &dataView{From: d.From, Selectors: []selectorView{}, Late: d.Late(), NoData: d.NoData, Floor: d.Floor}
+	for _, x := range d.Selectors {
+		if x.For != "" {
+			continue // a stand-in: said of the selector it stands in for
+		}
+		sv := selectorView{SelectorData: x}
+		sv.StandIn, sv.Kept = d.StandInOf(x.Sel)
+		v.Selectors = append(v.Selectors, sv)
+	}
+	return v
 }
 
 // showCriterion is a criteria setting as it is in c, as text: off for no
@@ -778,18 +796,20 @@ func (s *Server) impactData(ctx context.Context) error {
 // keeps what it found: of each it could look at, a selector that fails
 // passing to the next, and returning the last failure.
 func (s *Server) lookFor(ctx context.Context, d *ledger.ImpactData, cursor time.Time) error {
+	if d.Selectors != nil {
+		if err := withStandIns(d); err != nil {
+			return err
+		}
+	}
 	if d.Selectors != nil && d.Complete() || !cursor.After(d.From) {
 		return nil
 	}
 	if d.Selectors == nil {
-		sels, err := rules.Selectors(exprOfKey(d.Criterion))
+		sels, err := ledger.SelectorsOf(exprOfKey(d.Criterion))
 		if err != nil {
 			return err
 		}
-		d.Selectors = []ledger.SelectorData{}
-		for _, sel := range sels {
-			d.Selectors = append(d.Selectors, ledger.SelectorData{Sel: sel})
-		}
+		d.Selectors = append([]ledger.SelectorData{}, sels...)
 		if len(sels) == 0 {
 			// Reading no selector (vector(1)), it has data all along.
 			d.CheckedTo = cursor
@@ -798,8 +818,8 @@ func (s *Server) lookFor(ctx context.Context, d *ledger.ImpactData, cursor time.
 	}
 	var failed error
 	for i, x := range d.Selectors {
-		if !x.First.IsZero() {
-			continue
+		if !x.First.IsZero() || x.For != "" && !d.HasData(x.Of) {
+			continue // a stand-in of a selector with no data has none either
 		}
 		lo := x.To
 		if lo.IsZero() {
@@ -813,7 +833,7 @@ func (s *Server) lookFor(ctx context.Context, d *ledger.ImpactData, cursor time.
 			failed = err
 			continue
 		}
-		got.To = cursor
+		got.For, got.Of, got.To = x.For, x.Of, cursor
 		d.Selectors[i] = got
 	}
 	d.CheckedTo = cursor
@@ -821,6 +841,38 @@ func (s *Server) lookFor(ctx context.Context, d *ledger.ImpactData, cursor time.
 		return err
 	}
 	return failed
+}
+
+// withStandIns gives d, kept by a lapilli before stand-ins
+// (ledger.SelectorsOf), those of its criterion, to be looked for: a
+// stand-in a lapilli before kept as a selector, its "for" let go, gets it
+// back, so that it isn't taken for one the expression reads.
+func withStandIns(d *ledger.ImpactData) error {
+	expr := exprOfKey(d.Criterion)
+	read, err := rules.Selectors(expr)
+	if err != nil {
+		return err
+	}
+	want, err := ledger.SelectorsOf(expr)
+	if err != nil {
+		return err
+	}
+	for _, w := range want {
+		if w.For == "" {
+			continue
+		}
+		if slices.ContainsFunc(d.Selectors, func(x ledger.SelectorData) bool { return x.Sel == w.Sel && x.For == w.For }) {
+			continue
+		}
+		if i := slices.IndexFunc(d.Selectors, func(x ledger.SelectorData) bool {
+			return x.Sel == w.Sel && x.For == "" && !slices.Contains(read, x.Sel)
+		}); i >= 0 {
+			d.Selectors[i].For, d.Selectors[i].Of = w.For, w.Of
+			continue
+		}
+		d.Selectors = append(d.Selectors, w)
+	}
+	return nil
 }
 
 // sourcesSeen is what the replica that leads saw of where incidents come

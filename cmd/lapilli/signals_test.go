@@ -145,8 +145,9 @@ func unnamedImpact(t *testing.T) (signalHistory, []string) {
 		"--from", ts(sigBase), "--to", ts(sigBase.Add(7 * 24 * time.Hour)), "--match", "service", "--match", "team", "--tz", "UTC"}
 }
 
-// A single --impact with no name judges as it did before signals had
-// names: the report, the text, the metrics and the CSV are, byte for byte,
+// A single --impact with no name, whose data is there all along, judges
+// as it did before signals had names: the report, the text, the metrics
+// and the CSV are, byte for byte,
 // what lapilli verdict wrote before (testdata/unnamed-impact, written by
 // the release before named signals; LAPILLI_GOLDEN=update writes them
 // again), but for the CSV's marked column, added at its end since
@@ -182,14 +183,15 @@ func TestUnnamedImpactUnchanged(t *testing.T) {
 			t.Errorf("%s differs from what an unnamed --impact gave before:\n%s\nwant\n%s", out.file, got, want)
 		}
 	}
-	// One question of the signal a run, and none of where its data begins.
-	for _, q := range asked {
-		if q != "impact" {
-			t.Errorf("asked %q", q)
+	// One question of the signal a run, and one of where its data begins,
+	// all along here: the record from where it was first read, as before.
+	for i, q := range asked {
+		if want := []string{"impact", "count(impact)"}[i%2]; q != want {
+			t.Errorf("asked %q, want %q", q, want)
 		}
 	}
-	if len(asked) != 4 {
-		t.Errorf("asked %d times, want once a run", len(asked))
+	if len(asked) != 8 {
+		t.Errorf("asked %d times, want twice a run", len(asked))
 	}
 }
 
@@ -353,12 +355,13 @@ func TestNamedSignals(t *testing.T) {
 	for _, q := range asked {
 		count[q]++
 	}
-	for _, q := range []string{errorsExpr, probeExpr, latencyExpr, paymentsExpr, "count(probe_success)", `count(http_requests_total{code=~"5.."})`} {
+	// And the errors' 5xx selector's stand-in: the requests with a code.
+	for _, q := range []string{errorsExpr, probeExpr, latencyExpr, paymentsExpr, "count(probe_success)", `count(http_requests_total{code=~"5.."})`, `count(http_requests_total{code!=""})`} {
 		if count[q] != 1 {
 			t.Errorf("asked %q %d times", q, count[q])
 		}
 	}
-	if len(asked) != 10 {
+	if len(asked) != 11 {
 		t.Errorf("%d questions: %q", len(asked), asked)
 	}
 
@@ -664,6 +667,68 @@ func TestIndexSignals(t *testing.T) {
 	for rule, want := range map[string]int{"Slow": 1, "Gone": 1, "Recorded": 1, "Mixed": 0, "Half": 0} {
 		if got := s.EntryNumber(rule); got != want {
 			t.Errorf("%s's entry %d, want %d", rule, got, want)
+		}
+	}
+}
+
+// An --impact with no name keeps the record by the one rule a named
+// signal does: from the latest of where its selectors' data begins; a
+// selector with no data that only narrows one with data (the 5xx, of a
+// service that served none) from where its stand-in's does, the series
+// with the label it narrows by; not one an absent() reads.
+func TestUnnamedImpactSelectors(t *testing.T) {
+	const ratio = `sum(rate(http_requests_total{code=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05`
+	// Everyone's 5xx with a route: everyone's 5xx's stand-in for the route's,
+	// with data only once a 5xx came.
+	const payFive, allFive, allFiveRouted = `x{code=~"5..",route="/pay"}`, `x{code=~"5.."}`, `x{code=~"5..",route!=""}`
+	const payAndAll = `sum(rate(x{code=~"5..",route="/pay"}[5m])) / sum(rate(x{route="/pay"}[5m])) > 0.1 or sum(rate(x{code=~"5.."}[5m])) / sum(rate(x[5m])) > 0.05`
+	const payAlone = `sum(rate(x{code=~"5..",route="/pay"}[5m])) / sum(rate(x{route="/pay"}[5m])) > 0.1`
+	never := sigBase.Add(365 * 24 * time.Hour)
+	readFrom := sigBase.Add(-verdict.RecordLookback)
+	for _, c := range []struct {
+		name, expr string
+		begins     map[string]time.Time
+		from       time.Time // zero: no data
+	}{
+		{"no 5xx", ratio, map[string]time.Time{`http_requests_total{code=~"5.."}`: never}, readFrom},
+		{"and a probe from Thursday", ratio + ` or probe_success == 0`, map[string]time.Time{`http_requests_total{code=~"5.."}`: never, "probe_success": at(3, 7, 0)}, at(3, 7, 0)},
+		{"requests from Tuesday", ratio, map[string]time.Time{`http_requests_total{code=~"5.."}`: never, "http_requests_total": at(1, 0, 0)}, at(1, 0, 0)},
+		{"5xx alone, none", `sum(rate(http_requests_total{code=~"5.."}[5m])) > 1`, map[string]time.Time{`http_requests_total{code=~"5.."}`: never}, time.Time{}},
+		// The code label from Wednesday on (a relabelling): nothing could
+		// be matched before.
+		{"the code label later", ratio, map[string]time.Time{`http_requests_total{code=~"5.."}`: never, `http_requests_total{code!=""}`: at(2, 0, 0)}, at(2, 0, 0)},
+		{"absent", `absent(up{job="new"}) and on() count(up) > 0`, map[string]time.Time{`up{job="new"}`: never}, time.Time{}},
+		// A route's 5xx and everyone's, with none anywhere: kept from the
+		// first, though everyone's 5xx stand-in for the route's has none.
+		{"a route's and everyone's, no 5xx", payAndAll, map[string]time.Time{payFive: never, allFive: never, allFiveRouted: never}, readFrom},
+		// Everyone's first 5xx on Wednesday, of another route: kept from
+		// the first, as everyone's requests were read with their codes.
+		{"a route's and everyone's, a 5xx Wednesday", payAndAll, map[string]time.Time{payFive: never, allFive: at(2, 0, 0), allFiveRouted: at(2, 0, 0)}, readFrom},
+		// The route from Tuesday on, read beside everyone's requests: kept
+		// from the first, as everyone's were read.
+		{"a route from Tuesday, beside everyone's", payAndAll, map[string]time.Time{payFive: never, allFive: never, allFiveRouted: never, `x{route="/pay"}`: at(1, 0, 0), `x{route="/pay",code!=""}`: at(1, 0, 0)}, readFrom},
+		// Read alone: from Tuesday, where the route's requests begin.
+		{"a route alone from Tuesday", payAlone, map[string]time.Time{payFive: never, `x{route="/pay"}`: at(1, 0, 0), `x{route="/pay",code!=""}`: at(1, 0, 0)}, at(1, 0, 0)},
+	} {
+		h := signalHistory{series: map[string][]on{c.expr: {}}, begins: c.begins}
+		_, args := unnamedImpact(t)
+		for i, a := range args {
+			if a == "--impact" {
+				args[i+1] = c.expr
+			}
+		}
+		newHistory = func(context.Context, *verdictFlags) (history, error) { return h, nil }
+		now = func() time.Time { return sigBase.Add(8 * 24 * time.Hour) }
+		var stdout, stderr bytes.Buffer
+		if code := run(append(args, "--json"), &stdout, &stderr); code != 0 {
+			t.Fatalf("%s: exit %d\n%s", c.name, code, stderr.String())
+		}
+		var rep verdict.Report
+		if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+			t.Fatal(err)
+		}
+		if !rep.Settings.ImpactFrom.Equal(c.from) || rep.Settings.ImpactNoData != c.from.IsZero() {
+			t.Errorf("%s: impact_from %v, no data %v; want %v", c.name, rep.Settings.ImpactFrom, rep.Settings.ImpactNoData, c.from)
 		}
 	}
 }

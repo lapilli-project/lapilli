@@ -492,7 +492,38 @@ read) and `impact_floor`.
   (`vector(1)`) has data all along: the record is kept from
   `impact_since`. Across selectors, the latest of those: the record starts no
   earlier than the first whole week after it, as only there did every
-  selector have data, and not at all while one has none. It moves
+  selector have data, and not at all while one has none. But a selector
+  that only narrows another the expression reads (`rules.Covers`: the same
+  offset and @, each of the other's matchers, its metric's name among
+  them, one of its own) is read whenever the widest of those is, so long
+  as the labels it narrows by are there: it begins where its stand-ins'
+  data does (`rules.StandIns`, made of the widest selectors only, 32 at
+  most, looked for as the selectors are, kept in `impact_data` with `for`
+  and `of`), when that is before its own data, or it has none. A stand-in
+  is that selector's series with the narrower one's metric name and each
+  label it narrows them by with a matcher the empty value doesn't match,
+  any value: `http_requests_total{code!=""}` for
+  `http_requests_total{code=~"5.."}` beside `http_requests_total`; of
+  several, the latest, every one made of a selector with data of its own
+  having data. A client library makes a 5xx series at the first 5xx, so a
+  service that served none, or whose first 5xx came late, had nothing to
+  match, not nothing to read, and a first 5xx moves no start; a code label
+  that came later, by a relabelling or a rename, holds the record back to
+  where it came. A selector the expression reads with nothing wider beside
+  it keeps its own start: a probe on a job that came later, a route's
+  requests read alone. What it takes on trust: beside everyone's requests,
+  a route's that doesn't exist yet, or is mistyped, is read as everyone's
+  are; and values of another form (`Internal` where `5..` is matched) have
+  the label, so a selector that can never match keeps the record. Not a
+  selector an `absent()` or `absent_over_time()` reads, at any depth. A
+  stand-in made of a selector with no data of its own says nothing, and
+  isn't looked for; while one isn't looked for yet as far as the first
+  sample of a selector with data, that selector keeps its own start, and
+  `impact_since` isn't moved by it. A ledger kept before stand-ins looks
+  for them at the next round, and gives back their `for` to entries a
+  lapilli before them wrote back. The settings page says of such a
+  selector "nothing matched since" or "kept from", with its stand-in.
+  It moves
   `impact_since` forward, never back, on a first start, after an upgrade
   (from the `impact_since` the ledger has), and once a criterion is read
   again; a run that moves `impact_since` back before where the data was

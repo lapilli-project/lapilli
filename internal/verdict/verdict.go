@@ -51,8 +51,13 @@ type Options struct {
 	Hours *Hours
 	// ImpactFrom, when not zero, is from when an impact signal (--impact)
 	// was read, all of it: a measure of whether users were hurt, found or
-	// not, that keeps the record of every firing from then (Record).
+	// not, that keeps the record of every firing from then (Record). In
+	// lapilli verdict, where the data of every selector it reads begins,
+	// when that is after it was first read.
 	ImpactFrom time.Time
+	// ImpactNoData says an impact signal with no name was read, and a
+	// selector it reads had no data: it keeps no record (ImpactFrom zero).
+	ImpactNoData bool
 	// RecordWeek, when not nil, is the week a time is in, [from, to), as
 	// lapilli serve aligns its weeks: a firing is judged when the record of
 	// its week is kept, as serve's stones are kept by week. Nil judges each
@@ -357,6 +362,10 @@ type Settings struct {
 	// ImpactFrom is from when an impact signal was read, all of it: a
 	// firing from then has a record. Zero for none.
 	ImpactFrom time.Time `json:"impact_from,omitzero"`
+	// ImpactNoData says an impact signal with no name was read, and a
+	// selector it reads had no data: it keeps no record, and ImpactFrom
+	// is missing.
+	ImpactNoData bool `json:"impact_no_data,omitempty"`
 	// ByWeek says a firing's record is its week's (lapilli serve), not its
 	// own time's.
 	ByWeek bool `json:"record_by_week,omitempty"`
@@ -375,7 +384,7 @@ func (o Options) Settings() *Settings {
 		match = []string{}
 	}
 	s := &Settings{Lead: o.Lead, Match: match, Refire: o.RefireWithin, UnknownLength: o.UnknownLen,
-		RecordLookback: RecordLookback, ImpactFrom: o.ImpactFrom, ByWeek: o.RecordWeek != nil}
+		RecordLookback: RecordLookback, ImpactFrom: o.ImpactFrom, ImpactNoData: o.ImpactNoData, ByWeek: o.RecordWeek != nil}
 	if o.Signals.Named() {
 		s.ImpactSignals, s.ImpactRules = slices.Clone(o.Signals.List), slices.Clone(o.Signals.Entries)
 	}

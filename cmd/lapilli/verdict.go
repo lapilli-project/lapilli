@@ -216,7 +216,9 @@ What went wrong (with --compare, if you have them):
   --impact PROMQL     an expression that returns something while users are
                       hurt, such as a 5xx ratio above 1%; its windows become
                       incidents too, so a thin incident log still works. By
-                      service, they carry the services hit, for --match
+                      service, they carry the services hit, for --match.
+                      It keeps the record from where the data it reads
+                      begins, none for a selector with no data
   --impact NAME=PROMQL
                       one of several signals of user impact, each named
                       (repeatable, 8 at most): a probe failing, the 5xx
@@ -1394,8 +1396,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	// Impact first: it is one query, and a replay that runs out of time
-	// should still be judged against it.
+	// Impact first: a query, and one a selector for where its data
+	// begins, and a replay that runs out of time should still be judged
+	// against it.
 	if f.anyImpact() {
 		var err error
 		if incs, err = f.readImpact(ctx, h, incs); err != nil {

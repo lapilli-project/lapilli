@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -87,7 +88,8 @@ func (k ImpactKept) From() time.Time {
 // after the latest of them, of a selector that had none at From: the
 // record is kept by the signal from there at the earliest, as only there
 // did every selector it reads have data. Zero when each had data at From.
-// NoData says one had none at all: the record isn't kept by it.
+// NoData says one had none at all, nor its stand-ins, each (Effective):
+// the record isn't kept by it.
 type ImpactData struct {
 	Criterion string         `json:"criterion"`
 	Selectors []SelectorData `json:"selectors"`
@@ -99,9 +101,13 @@ type ImpactData struct {
 
 // SelectorData is a selector, as written in the expression with its
 // offset or @, and when its first sample was found: zero for none yet;
-// AtStart, where the look began, so it may have had data before.
+// AtStart, where the look began, so it may have had data before. With For,
+// it is a stand-in, read for that selector's sake, made of Of
+// (rules.StandIns).
 type SelectorData struct {
 	Sel     string    `json:"sel"`
+	For     string    `json:"for,omitempty"`
+	Of      string    `json:"of,omitempty"`
 	First   time.Time `json:"first,omitzero"`
 	AtStart bool      `json:"at_start,omitempty"`
 	// To is how far it was looked for, zero before it was: a look that
@@ -109,29 +115,59 @@ type SelectorData struct {
 	To time.Time `json:"to,omitzero"`
 }
 
-// Complete reports whether every selector had data.
+// SelectorsOf are the selectors whose data an impact signal's expression
+// is kept by: those it reads (rules.Selectors), then their stand-ins
+// (rules.StandIns), none found yet.
+func SelectorsOf(expr string) ([]SelectorData, error) {
+	sels, err := rules.Selectors(expr)
+	if err != nil {
+		return nil, err
+	}
+	stands, err := rules.StandIns(expr)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SelectorData, 0, len(sels)+len(stands))
+	for _, sel := range sels {
+		out = append(out, SelectorData{Sel: sel})
+	}
+	for _, x := range stands {
+		out = append(out, SelectorData{Sel: x.Sel, For: x.For, Of: x.Of})
+	}
+	return out, nil
+}
+
+// Complete reports whether every selector, and stand-in, had data.
 func (d *ImpactData) Complete() bool {
 	return !slices.ContainsFunc(d.Selectors, func(x SelectorData) bool { return x.First.IsZero() })
 }
 
 // Late is the selector whose data begins the latest, after the look began,
-// and the others': what holds the record back, when more than one selector
-// is read and they don't begin together. "" for none.
+// and the others' earlier: what holds the record back, when more than one
+// selector is read and they don't begin together; the first of those that
+// begin the latest. "" for none. A selector with no data of its own begins
+// where its stand-ins say (Effective).
 func (d *ImpactData) Late() string {
-	late, at, earlier := "", time.Time{}, false
-	for _, x := range d.Selectors {
-		switch {
-		case x.First.IsZero():
+	sels := d.Effective()
+	var latest time.Time
+	for _, x := range sels {
+		if x.First.IsZero() {
 			return ""
-		case x.First.After(at):
-			if late != "" || x.AtStart {
-				earlier = true
-			}
-			if !x.AtStart {
-				late, at = x.Sel, x.First
-			}
-		default:
+		}
+		if !x.AtStart && x.First.After(latest) {
+			latest = x.First
+		}
+	}
+	if latest.IsZero() {
+		return ""
+	}
+	late, earlier := "", false
+	for _, x := range sels {
+		switch {
+		case x.AtStart || x.First.Before(latest):
 			earlier = true
+		case late == "":
+			late = x.Sel
 		}
 	}
 	if !earlier {
@@ -145,21 +181,116 @@ func (l *Ledger) Floor(d *ImpactData) { l.floor(d) }
 
 func (l *Ledger) floor(d *ImpactData) { FloorBy(d, l.WeekOnOrAfter) }
 
-// FloorBy works d's Floor and NoData out, by the one rule: NoData when a
-// selector had no data at all; else the latest of when each selector that
-// had none at d.From first had some, each moved to onOrAfter it (the
-// ledger's first whole week then, or, judging each firing by its own time,
-// that time itself); zero when each had data at From.
+// FloorBy works d's Floor and NoData out, by the one rule, of its
+// selectors as they keep the record (Effective): NoData when a selector
+// had no data at all; else the latest of when each selector that had none
+// at d.From first had some, each moved to onOrAfter it (the ledger's first
+// whole week then, or, judging each firing by its own time, that time
+// itself); zero when each had data at From.
 func FloorBy(d *ImpactData, onOrAfter func(time.Time) time.Time) {
-	d.Floor, d.NoData = time.Time{}, !d.Complete()
+	sels := d.Effective()
+	d.Floor = time.Time{}
+	d.NoData = slices.ContainsFunc(sels, func(x SelectorData) bool { return x.First.IsZero() })
 	if d.NoData {
 		return
 	}
-	for _, x := range d.Selectors {
+	for _, x := range sels {
 		if !x.AtStart {
 			d.Floor = later(d.Floor, onOrAfter(x.First))
 		}
 	}
+}
+
+// Effective are d's selectors as they keep the record, its stand-ins left
+// out: each whose stand-ins (SelectorData.For), of those made of a
+// selector with data of its own, all had data, from the latest of them,
+// when that is before its own data or it has none. The expression reads
+// the selectors they are made of, which see what it would, so long as the
+// labels it narrows by were there: nothing it matches happened, as a 5xx
+// of a service that served none. One whose stand-ins weren't all looked
+// for yet keeps its own (Pending).
+func (d *ImpactData) Effective() []SelectorData {
+	out := d.read()
+	for i, b := range out {
+		if x, ok, _ := d.stoodIn(b.Sel); ok && (b.First.IsZero() || x.First.Before(b.First)) {
+			out[i].First, out[i].AtStart = x.First, x.AtStart
+		}
+	}
+	return out
+}
+
+// Pending reports whether a selector of d with data of its own has a
+// stand-in not looked for yet as far as that data, which may begin it
+// earlier: its start holds for now, but moves impact_since nowhere.
+func (d *ImpactData) Pending() bool {
+	for _, b := range d.read() {
+		if _, _, unknown := d.stoodIn(b.Sel); unknown && !b.First.IsZero() {
+			return true
+		}
+	}
+	return false
+}
+
+// read are d's selectors, its stand-ins left out.
+func (d *ImpactData) read() []SelectorData {
+	var out []SelectorData
+	for _, x := range d.Selectors {
+		if x.For == "" {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+// stoodIn is, of sel's stand-ins made of a selector with data of its own,
+// the one whose data begins the latest, when every one had data: each
+// reads more series than sel does, the latest the fewest. Unknown, when
+// one of them with no data found wasn't looked for yet, or not as far as
+// sel's own first sample: none, till it is. A stand-in made of a selector
+// with no data, which has none either, says nothing of sel's labels.
+func (d *ImpactData) stoodIn(sel string) (x SelectorData, ok, unknown bool) {
+	var own time.Time
+	for _, b := range d.read() {
+		if b.Sel == sel {
+			own = b.First
+		}
+	}
+	for _, s := range d.Selectors {
+		if s.For != sel || !d.HasData(s.Of) {
+			continue
+		}
+		switch {
+		case s.First.IsZero() && (s.To.IsZero() || !own.IsZero() && s.To.Before(own)):
+			return SelectorData{}, false, true
+		case s.First.IsZero():
+			return SelectorData{}, false, false
+		case !ok || s.First.After(x.First):
+			x, ok = s, true
+		}
+	}
+	return x, ok, false
+}
+
+// HasData reports whether d's selector sel had data of its own; "" as
+// had.
+func (d *ImpactData) HasData(sel string) bool {
+	return sel == "" || slices.ContainsFunc(d.Selectors, func(x SelectorData) bool { return x.Sel == sel && x.For == "" && !x.First.IsZero() })
+}
+
+// StandInOf is, of a selector of d, the stand-in it begins by
+// (Effective), and from when: nothing it matches happened, though what it
+// would read was there; "" for none, it beginning by its own data.
+func (d *ImpactData) StandInOf(sel string) (string, time.Time) {
+	x, ok, _ := d.stoodIn(sel)
+	if !ok {
+		return "", time.Time{}
+	}
+	for _, b := range d.read() {
+		if b.Sel == sel && !b.First.IsZero() && !x.First.Before(b.First) {
+			return "", time.Time{}
+		}
+	}
+	return x.Sel, x.First
 }
 
 func later(a, b time.Time) time.Time {
@@ -251,7 +382,7 @@ func (l *Ledger) SetImpactData(ctx context.Context, d ImpactData) error {
 		if err != nil {
 			return err
 		}
-		if n, err := strconv.ParseInt(was, 10, 64); err == nil && !d.Floor.IsZero() && n < d.Floor.Unix() {
+		if n, err := strconv.ParseInt(was, 10, 64); err == nil && !d.Floor.IsZero() && n < d.Floor.Unix() && !d.Pending() {
 			return setMeta(t.ctx, t, metaImpactSince, strconv.FormatInt(d.Floor.Unix(), 10))
 		}
 		return nil
