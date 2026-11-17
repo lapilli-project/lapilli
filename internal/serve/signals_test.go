@@ -878,3 +878,31 @@ func TestSignalsBacktestRecord(t *testing.T) {
 		t.Errorf("a proposal backtested just now, with a record by a named signal's window, is held: %s", ls[0].StaleWhy.Format)
 	}
 }
+
+// A signal taken away leaves its windows as incidents, on both sides: they
+// keep everyone's record, and any rule may catch them, a rule entry
+// keeping its rules only from the windows of signals in use.
+func TestSignalRemovedWindowsCaughtByAnyRule(t *testing.T) {
+	ctx := context.Background()
+	h := signalWindowsHistory()
+	h.history.begins["latency_seconds"] = []time.Time{}
+	s := signalServer(t, h, func(c *Config) {
+		c.Signals = append(c.Signals, ledger.SignalDef{Name: "latency", Expr: "latency_seconds > 1", For: 10 * time.Minute, Record: true})
+		c.ImpactRules = []verdict.RuleEntry{{Rules: "^Errors$", Signals: []string{"latency"}}}
+	})
+	s.cfg.Signals = []ledger.SignalDef{s.cfg.Signals[0], s.cfg.Signals[2]} // the probe taken away
+	runDue(s, 1)
+	s.jobs(ctx, true)
+	// The checkout firing over the window catches it: white, not black for
+	// a window it may not catch. (The search firings of that week are
+	// judged, as an incident on in it keeps everyone's record.)
+	for _, f := range reportOf(t, s).Firings {
+		if f.Labels["service"] == "checkout" && !f.White {
+			t.Errorf("the checkout firing over the removed probe's window is black (no record %v)", f.NoRecord)
+		}
+	}
+	in, err := s.l.IncidentByID(ctx, "impact-probe-20261102T0600Z")
+	if err != nil || len(in.CaughtBy) != 1 {
+		t.Errorf("the removed probe's window, caught by any rule: %+v %v", in.CaughtBy, err)
+	}
+}

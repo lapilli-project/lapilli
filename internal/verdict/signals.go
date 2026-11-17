@@ -562,7 +562,10 @@ func (o Options) Agrees(rule string, labels map[string]string, in incident.Incid
 	if in.Match != nil {
 		match = in.Match
 	}
-	if in.Signal != "" && o.Signals.Named() {
+	// A rule entry keeps its rules from the windows of signals in use; a
+	// window of a signal no longer read is an incident, as the record
+	// takes it, anyone's to catch.
+	if in.Signal != "" && o.Signals.Named() && o.Signals.signal(in.Signal) >= 0 {
 		if e := o.Signals.Entry(rule); e != nil {
 			if !slices.Contains(e.Signals, in.Signal) {
 				return false
