@@ -124,13 +124,15 @@ func trIn(lang, ctx, msg string) string {
 // sentence is: one written right to left, or holding what turns text
 // around, doesn't turn the sentence around it. The text is escaped, the
 // translation's and each argument's. A number is as its verb (%d) has it:
-// digits, nothing to set apart.
+// digits, nothing to set apart. One given as asCode is set in <code> too.
 func trBDI(lang, msg string, args ...any) template.HTML {
 	set := make([]any, len(args))
 	for i, a := range args {
-		switch a.(type) {
+		switch a := a.(type) {
 		case int, int64:
 			set[i] = a
+		case asCode:
+			set[i] = template.HTML("<code><bdi>" + template.HTMLEscapeString(string(a)) + "</bdi></code>")
 		default:
 			set[i] = template.HTML("<bdi>" + template.HTMLEscapeString(fmt.Sprint(a)) + "</bdi>")
 		}
@@ -138,6 +140,10 @@ func trBDI(lang, msg string, args ...any) template.HTML {
 	// tr without arguments is the translation as it is, its verbs too.
 	return template.HTML(fmt.Sprintf(template.HTMLEscapeString(tr(lang, msg)), set...))
 }
+
+// asCode is an argument trBDI sets in <code>: a selector or an expression
+// within a sentence, set as the page sets one beside it.
+type asCode string
 
 // lang is the language to answer a request in: the one chosen on the page,
 // or else the browser's.

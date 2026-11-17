@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **The settings page sets a stand-in in code, as the selector beside it.**
+  Where the impact signal's data begins, "nothing matched since …: … has
+  data" and "kept from …, where … begins" named the stand-in in the
+  sentence's own type, so it read as prose beside the selector set as code
+  before it. It is now in `<code>` too, in every language (0.53.1).
+
 ## [0.53.1] - 2026-11-17
 
 ### Fixed

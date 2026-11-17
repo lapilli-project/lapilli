@@ -88,6 +88,16 @@ func TestNamesInSentencesSetApart(t *testing.T) {
 			t.Errorf("%s: %q", l.Code, got)
 		}
 	}
+	// A selector within a sentence is set as code too, as the one beside
+	// it is, in every language.
+	if got := string(trBDI("en", "Group %s.", funcs["code"].(func(string) asCode)("a<b>"))); got != "Group <code><bdi>a&lt;b&gt;</bdi></code>." {
+		t.Errorf("%q", got)
+	}
+	for _, l := range names {
+		if got := string(trBDI(l.Code, "nothing matched since %s: %s has data", "then", asCode("up"))); !strings.Contains(got, "<code><bdi>up</bdi></code>") || !strings.Contains(got, "<bdi>then</bdi>") || strings.Contains(got, "<code><bdi>then") {
+			t.Errorf("%s: %q", l.Code, got)
+		}
+	}
 	if got := funcs["shown"].(func(string) string)("up{x=\"\u202e\"}"); got != "up{x=\"\uFFFD\"}" {
 		t.Errorf("an expression shown: %q", got)
 	}

@@ -155,7 +155,7 @@ func TestImpactDataNarrowed(t *testing.T) {
 		t.Errorf("kept from %s, not %s", options(t, s), began)
 	}
 	_, page := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
-	if !strings.Contains(page, "nothing matched since") || !strings.Contains(page, "<bdi>probe_failed{code!=&#34;&#34;}</bdi> has data") || strings.Contains(page, "keeps no record") {
+	if !strings.Contains(page, "nothing matched since") || !strings.Contains(page, "<code><bdi>probe_failed{code!=&#34;&#34;}</bdi></code> has data") || strings.Contains(page, "keeps no record") {
 		t.Errorf("the page doesn't say why:\n%s", page)
 	}
 }
@@ -274,7 +274,7 @@ func TestImpactDataStandInEarlier(t *testing.T) {
 		t.Errorf("kept from %s, not %s", options(t, s), began)
 	}
 	_, page := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
-	if !strings.Contains(page, "kept from") || !strings.Contains(page, "<bdi>probe_failed{code!=&#34;&#34;}</bdi> begins") {
+	if !strings.Contains(page, "kept from") || !strings.Contains(page, "<code><bdi>probe_failed{code!=&#34;&#34;}</bdi></code> begins") {
 		t.Errorf("the page doesn't say by what:\n%s", page)
 	}
 }
