@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.53.1] - 2026-11-17
+
 ### Fixed
 
 - **`lapilli preflight` no longer calls the caps' bound a problem.** With
