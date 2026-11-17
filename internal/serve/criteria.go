@@ -861,18 +861,53 @@ func (s *Server) impactDataOf(ctx context.Context, name string, kept *ledger.Imp
 		rctx, cancel = context.WithTimeout(ctx, s.cfg.Timeout)
 		defer cancel()
 	}
+	// What is looked for is of the expression serve holds, not of the one
+	// the ledger names: a record kept by another, until it is read again,
+	// has nothing of it looked for.
+	expr, err := s.heldExpr(ctx, name)
+	if err != nil {
+		return err
+	}
+	if expr == "" || exprOfKey(k.Criterion) != expr {
+		return nil
+	}
 	d := k.Data
 	if d == nil || d.Criterion != k.Criterion {
 		d = &ledger.ImpactData{Criterion: k.Criterion, From: k.Since}
 	}
-	return s.lookFor(rctx, name, d, cursor)
+	return s.lookFor(rctx, name, d, cursor, expr)
+}
+
+// heldExpr is the expression serve holds for a signal, by name, "" for the
+// unnamed one: a named one's as serve was started (--impact NAME=PROMQL,
+// --impact-file), and the unnamed one's, the criterion in effect, which
+// the runs read; "" for none.
+func (s *Server) heldExpr(ctx context.Context, name string) (string, error) {
+	if name != "" {
+		for _, d := range s.cfg.Signals {
+			if d.Name == name {
+				return d.Expr, nil
+			}
+		}
+		return "", nil
+	}
+	c, err := s.criterion(ctx)
+	return c.Expr, err
 }
 
 // lookFor looks, of d's selectors, for where the data of those with none
 // found yet begins, each from where its last look got to up to cursor, and
 // keeps what it found: of each it could look at, a selector that fails
-// passing to the next, and returning the last failure.
-func (s *Server) lookFor(ctx context.Context, name string, d *ledger.ImpactData, cursor time.Time) error {
+// passing to the next, and returning the last failure. Only the selectors
+// expr, the expression serve holds, reads (ledger.SelectorsOf) are asked
+// for: those d names are the ledger's, which whoever can write it writes,
+// a database's user who holds no token for Prometheus among them, and
+// another is let be, so that serve runs no PromQL of theirs with its own.
+func (s *Server) lookFor(ctx context.Context, name string, d *ledger.ImpactData, cursor time.Time, expr string) error {
+	want, err := ledger.SelectorsOf(expr)
+	if err != nil {
+		return err
+	}
 	if d.Selectors != nil {
 		if err := withStandIns(d); err != nil {
 			return err
@@ -882,12 +917,8 @@ func (s *Server) lookFor(ctx context.Context, name string, d *ledger.ImpactData,
 		return nil
 	}
 	if d.Selectors == nil {
-		sels, err := ledger.SelectorsOf(exprOfKey(d.Criterion))
-		if err != nil {
-			return err
-		}
-		d.Selectors = append([]ledger.SelectorData{}, sels...)
-		if len(sels) == 0 {
+		d.Selectors = append([]ledger.SelectorData{}, want...)
+		if len(want) == 0 {
 			// Reading no selector (vector(1)), it has data all along.
 			d.CheckedTo = cursor
 			return s.l.SetSignalData(ctx, name, *d)
@@ -897,6 +928,9 @@ func (s *Server) lookFor(ctx context.Context, name string, d *ledger.ImpactData,
 	for i, x := range d.Selectors {
 		if !x.First.IsZero() || x.For != "" && !d.HasData(x.Of) {
 			continue // a stand-in of a selector with no data has none either
+		}
+		if !slices.ContainsFunc(want, func(w ledger.SelectorData) bool { return w.Sel == x.Sel }) {
+			continue // not one expr reads
 		}
 		lo := x.To
 		if lo.IsZero() {
