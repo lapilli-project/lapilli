@@ -49,6 +49,19 @@ type weekView struct {
 	Unjudged, deploysUnjudged int
 }
 
+// NotJudged are, of Black, those counted and not judged, with no record to
+// judge them by: a week's whole with none kept, or, with named signals,
+// those the signals tied to them don't judge (Unjudged). Nothing are the
+// rest of Black, judged: black stones.
+func (w weekView) NotJudged() int {
+	if !w.Kept {
+		return w.Black
+	}
+	return w.Unjudged
+}
+
+func (w weekView) Nothing() int { return w.Black - w.NotJudged() }
+
 // Without is the week's precision leaving out the firings during deploys;
 // "–" with no record to judge them by.
 func (w weekView) Without() string {
@@ -162,8 +175,8 @@ type columnChart struct {
 	Ticks   []tick
 	Base    float64
 	// Changed, Deploys and Quiet say a week has that mark, which the
-	// legend then names.
-	Changed, Deploys, Quiet bool
+	// legend then names; Unjudged, a week has firings counted, not judged.
+	Changed, Deploys, Quiet, Unjudged bool
 }
 
 type point struct {
@@ -221,17 +234,21 @@ type dashboard struct {
 	Cursor         time.Time
 	Run            *ledger.Run
 	From, To       time.Time // the last whole week
-	Tiles          []tile
-	Stones         columnChart
-	Precision      lineChart
-	Incidents      columnChart
-	Heat           []heatRow
-	HeatWeeks      []string
-	HeatLeft       bool // weeks with no record left out of it
-	Actions        []action
-	Weeks          []weekView // the latest first, for the table
-	Review         *reviewView
-	Team           teamFilter
+	// NoRecord says the last whole week had firings and no record to
+	// judge them by: the page says so once, above its tiles, and the
+	// tiles it leaves unknown say only that.
+	NoRecord  bool
+	Tiles     []tile
+	Stones    columnChart
+	Precision lineChart
+	Incidents columnChart
+	Heat      []heatRow
+	HeatWeeks []string
+	HeatLeft  bool // weeks with no record left out of it
+	Actions   []action
+	Weeks     []weekView // the latest first, for the table
+	Review    *reviewView
+	Team      teamFilter
 	// Marks are the marks on the charts, as asked (marks=).
 	Marks marksView
 	// Check is the replay beside what really fired over the last whole
@@ -410,6 +427,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	if v.Deploys, err = s.l.HasDeploys(ctx); err != nil {
 		return nil, err
 	}
+	v.NoRecord = last.NoRecord
 	v.Tiles = s.tiles(l, ws, last, before, asleep, since, v.Deploys, func() (int, int) {
 		return t.refireWeeks(t.weeks, func(int64) bool { return true }) // the team's, when one is picked
 	})
@@ -572,10 +590,11 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 	}
 	pct := func(f float64) string { return fmt.Sprintf("%.0f%%", 100*f) }
 	count := func(f float64) string { return fmt.Sprintf("%d", int(f)) }
-	// With no record, what isn't known says why.
+	// With no record, what isn't known says so, in short: the notice
+	// above the tiles says why, once.
 	caught, unjudged := tr(l, "of firings caught something"), ""
 	if last.NoRecord {
-		caught = tr(l, "not known: no incident written down to judge the firings by")
+		caught = tr(l, "not known: no record")
 		unjudged = caught
 	}
 	add("Precision", func(w *weekView) (float64, bool) { return w.precision() }, pct,
@@ -616,6 +635,10 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 			if last.NoRecord {
 				asleep = tr(l, "%s, with no incident written down to judge them by", asleep)
 			}
+		case unknown(last) && last.NoRecord && since != "":
+			asleep = tr(l, "not known: no record; %d notifications came while people slept that week (counted since %s)", last.Asleep, since)
+		case unknown(last) && last.NoRecord:
+			asleep = tr(l, "not known: no record; %d came while people slept (%s)", last.Asleep, asleep)
 		case unknown(last) && since != "":
 			asleep = tr(l, "not known: no incident written down to judge their firings by; %d notifications came while people slept that week (counted since %s)", last.Asleep, since)
 		case unknown(last):
@@ -772,6 +795,7 @@ func stacked(l string, ws []*weekView, loc *time.Location, parts func(*weekView)
 			if p := columnPath(x, cw, lo, hi, j == top); p != "" {
 				col.Segments = append(col.Segments, segment{classes[j], p,
 					tr(l, "week of %s: %d %s", w.Start.In(loc).Format("2006-01-02"), n, tr(l, names[j]))})
+				c.Unjudged = c.Unjudged || classes[j] == "unjudged"
 			}
 			y = hi
 		}
@@ -792,8 +816,8 @@ func compact(v float64) string {
 }
 
 func stonesChart(l string, ws []*weekView, loc *time.Location) columnChart {
-	return stacked(l, ws, loc, func(w *weekView) []int { return []int{w.White, w.Black} },
-		[]string{"caught", "nothing"}, []string{"caught something", "caught nothing"})
+	return stacked(l, ws, loc, func(w *weekView) []int { return []int{w.White, w.Nothing(), w.NotJudged()} },
+		[]string{"caught", "nothing", "unjudged"}, []string{"caught something", "caught nothing", "not judged: no record"})
 }
 
 func incidentsChart(l string, ws []*weekView, loc *time.Location) columnChart {

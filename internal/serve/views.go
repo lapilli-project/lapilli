@@ -62,8 +62,11 @@ type tallies struct {
 	recs          []ledger.Incident
 	rec           verdict.Record
 	team          *ledger.Team
-	mid           func(int64) time.Time
-	at            time.Time
+	// keeps is which of the incidents keep the record, nil for all: a
+	// team's, by what it owns (keep).
+	keeps func(ledger.Incident) bool
+	mid   func(int64) time.Time
+	at    time.Time
 	// parts are the tallies apart by the signals the firings' alerts are
 	// tied to (ledger.WeeksBy), as read, nil when by was read summed; jby
 	// is by of the firings judged (keep), and jeveryone everyone's, before
@@ -274,6 +277,9 @@ type ruleLine struct {
 	Deploys, DeploysCaught int
 	Without                string
 }
+
+// Nothing are, of Black, those judged: black stones, not Unjudged.
+func (l ruleLine) Nothing() int { return l.Black - l.Unjudged }
 
 // pct is a share as a page shows it: "–" for none.
 func pct(n, of int) string {
@@ -1165,6 +1171,15 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 	for _, f := range fs {
 		v.Latest = append(v.Latest, s.firingLine(f))
 	}
+	if n := len(fs); n > 0 {
+		// Judged as the rule's numbers are: by the incidents that keep its
+		// page's record, the team's when it is seen from the team's.
+		j, err := s.judgeOver(ctx, fs[n-1].Start, s.now(), t.o, t.keeps)
+		if err != nil {
+			return ruleView{}, err
+		}
+		judged(v.Latest, j)
+	}
 	if err := s.notifiedFirings(ctx, v.Latest); err != nil {
 		return ruleView{}, err
 	}
@@ -1857,6 +1872,18 @@ type firingLine struct {
 	// it paged no one.
 	Notified int
 	Counted  bool
+	// Unjudged says it caught nothing in a week with no record to judge it
+	// by: counted, not judged, neither ○ nor ● (judged).
+	Unjudged bool
+}
+
+// judged marks, of lines, those that caught nothing and that j doesn't
+// judge.
+func judged(lines []firingLine, j firingJudge) {
+	for i := range lines {
+		f := &lines[i]
+		f.Unjudged = !f.White && !f.Excused && !j(f.Rule, f.Start, f.Signals)
+	}
 }
 
 func (s *Server) firingLine(f ledger.Firing) firingLine {

@@ -607,13 +607,10 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 		if f.Excused {
 			continue // counted in the rule's Excused, not judged
 		}
-		w := Week(l.day(f.Start.Unix()))
-		judged := l.weekKept(rec, w)
+		judged := l.FiringJudged(rec, o, f.Rule, f.Start, f.Signals)
 		var signals []string
 		if named {
-			ties := o.Signals.TiedOf(f.Rule, f.Signals)
-			judged = rec.JudgesTied(unix(l.midnight(w)), ties)
-			signals = o.Signals.Names(ties)
+			signals = o.Signals.Names(o.Signals.TiedOf(f.Rule, f.Signals))
 		}
 		j := verdict.Judged{Firing: f.Firing, White: f.White, NoRecord: !f.White && !judged,
 			Refired: f.Refired, DuringDeploy: f.Deploy, Marked: f.Kinds, Signals: signals}
@@ -741,6 +738,22 @@ func (l *Ledger) RecordKept(ctx context.Context, from, to time.Time, o verdict.O
 	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM incidents i WHERE "+recordOn+" LIMIT 1) x",
 		recordArgs(verdict.RecordFrom(wf, wt), wt, o.UnknownLen)...).Scan(&n)
 	return n > 0, err
+}
+
+// FiringJudged reports whether a firing of rule that started at start, its
+// alert tied to signals (as the ledger keeps them, Firing.Signals), is
+// judged by rec should it catch nothing: by its week's record, or, with
+// named signals, by the signals tied to it (docs/design/signals.md). One
+// that caught something is judged whatever (verdict.RuleResult.Judged).
+// Report says each firing so, and a page that lists or draws firings asks
+// the same, so that none of them calls black what the report doesn't
+// judge.
+func (l *Ledger) FiringJudged(rec verdict.Record, o verdict.Options, rule string, start time.Time, signals int64) bool {
+	w := Week(l.day(start.Unix()))
+	if o.Signals.Named() {
+		return rec.JudgesTied(unix(l.midnight(w)), o.Signals.TiedOf(rule, signals))
+	}
+	return l.weekKept(rec, w)
 }
 
 // WeekKept reports whether a week's record is kept, by rec: the granularity

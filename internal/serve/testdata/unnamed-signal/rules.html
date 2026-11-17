@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rules · Lapilli</title>
-<link rel="icon" href="/static/icon.svg?v=4d8cd2be2c2b" type="image/svg+xml">
-<link rel="stylesheet" href="/static/lapilli.css?v=4d8cd2be2c2b">
+<link rel="icon" href="/static/icon.svg?v=9274fc721d5d" type="image/svg+xml">
+<link rel="stylesheet" href="/static/lapilli.css?v=9274fc721d5d">
 </head>
 <body>
 <a class="skip" href="#main">Skip to the page</a>
 <header class="side">
-  <a class="brand" href="/"><img src="/static/icon.svg?v=4d8cd2be2c2b" alt="" width="24" height="24">Lapilli</a>
+  <a class="brand" href="/"><img src="/static/icon.svg?v=9274fc721d5d" alt="" width="24" height="24">Lapilli</a>
   <details class="menu"><summary>Menu<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>Rules</span></summary>
   <nav class="nav-menu" aria-label="Menu">
   <p class="nav-group" id="menu-see">Monitoring</p>
@@ -120,6 +120,7 @@
 
 <p class="notice status-unknown"><span class="sign" aria-hidden="true">?</span> 1 of the 4 weeks shown had no incident written down in them or the two weeks before them: their firings are counted, not judged, and are in no precision. <a href="/incidents">Write incidents down</a></p>
 <form method="post" action="/rules/bulk" class="bulk"><input type="hidden" name="back" value="/rules"><button type="submit" disabled hidden></button>
+
 <fieldset class="bulk-bar"><legend>With the rules picked</legend>
 <span class="action-off"><button type="button" disabled aria-describedby="bulk-why">Make a task for each</button> <span id="bulk-why" class="why">Editors only</span></span>
 <span class="bulk-set"><label>Team <select name="team" disabled aria-describedby="bulk-why"><option value="0">by the teams&#39; patterns</option></select></label>
@@ -139,12 +140,12 @@
   <td class="rule"><a href="/rules/Errors?weeks=4"><bdi>Errors</bdi></a> <span class="badges"><span class="badge perf-unrecorded status-unknown"><span aria-hidden="true">?</span> No record</span></span></td>
   <td class="name">–</td>
   <td class="name"><bdi>page</bdi></td>
-  <td class="n">21</td><td class="n">1</td><td class="n">20</td><td class="n">14%</td><td class="n">19<br><span class="quiet">90% of firings</span></td>
+  <td class="n">21</td><td class="n">1</td><td class="n">6<br><span class="quiet">14 not judged</span></td><td class="n">14%</td><td class="n">19<br><span class="quiet">90% of firings</span></td>
   <td class="n">1<br><span class="quiet">first 1, alone 1</span></td>
   <td><svg class="spark" width="72" height="18" viewBox="0 0 72 18" role="img" aria-label="Stones by week: 08-17: 0 ○ 0 ●; 08-24: 0 ○ 0 ●; 08-31: 0 ○ 0 ●; 09-07: 0 ○ 0 ●; 09-14: 0 ○ 0 ●; 09-21: 0 ○ 0 ●; 09-28: 0 ○ 0 ●; 10-05: 0 ○ 0 ●; 10-12: 0 ○ 0 ●; 10-19: 0 ○ 0 ●; 10-26: 0 ○ 14 ●; 11-02: 1 ○ 6 ●"><g><title>08-17: 0 ○ 0 ●</title><rect class="w" x="0" y="18" width="5" height="0"/><rect class="b" x="0" y="18" width="5" height="0"/></g><g><title>08-24: 0 ○ 0 ●</title><rect class="w" x="6" y="18" width="5" height="0"/><rect class="b" x="6" y="18" width="5" height="0"/></g><g><title>08-31: 0 ○ 0 ●</title><rect class="w" x="12" y="18" width="5" height="0"/><rect class="b" x="12" y="18" width="5" height="0"/></g><g><title>09-07: 0 ○ 0 ●</title><rect class="w" x="18" y="18" width="5" height="0"/><rect class="b" x="18" y="18" width="5" height="0"/></g><g><title>09-14: 0 ○ 0 ●</title><rect class="w" x="24" y="18" width="5" height="0"/><rect class="b" x="24" y="18" width="5" height="0"/></g><g><title>09-21: 0 ○ 0 ●</title><rect class="w" x="30" y="18" width="5" height="0"/><rect class="b" x="30" y="18" width="5" height="0"/></g><g><title>09-28: 0 ○ 0 ●</title><rect class="w" x="36" y="18" width="5" height="0"/><rect class="b" x="36" y="18" width="5" height="0"/></g><g><title>10-05: 0 ○ 0 ●</title><rect class="w" x="42" y="18" width="5" height="0"/><rect class="b" x="42" y="18" width="5" height="0"/></g><g><title>10-12: 0 ○ 0 ●</title><rect class="w" x="48" y="18" width="5" height="0"/><rect class="b" x="48" y="18" width="5" height="0"/></g><g><title>10-19: 0 ○ 0 ●</title><rect class="w" x="54" y="18" width="5" height="0"/><rect class="b" x="54" y="18" width="5" height="0"/></g><g><title>10-26: 0 ○ 14 ●</title><rect class="w" x="60" y="18" width="5" height="0"/><rect class="b" x="60" y="0" width="5" height="18"/></g><g><title>11-02: 1 ○ 6 ●</title><rect class="w" x="66" y="16.714285714285715" width="5" height="1.2857142857142858"/><rect class="b" x="66" y="9" width="5" height="7.714285714285714"/></g></svg></td>
 </tr></tbody>
 <tfoot><tr><th scope="row" colspan="4">The rule shown</th>
-  <td class="n">21</td><td class="n">1</td><td class="n">20</td><td class="n">14%</td><td class="n">19</td><td></td><td></td></tr></tfoot>
+  <td class="n">21</td><td class="n">1</td><td class="n">6<br><span class="quiet">14 not judged</span></td><td class="n">14%</td><td class="n">19</td><td></td><td></td></tr></tfoot>
 </table></div></form>
 
 

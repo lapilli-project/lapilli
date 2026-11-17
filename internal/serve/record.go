@@ -49,7 +49,7 @@ func (t *tallies) keep(keeps func(ledger.Incident) bool) {
 			plain = append(plain, in.Incident)
 		}
 	}
-	t.rec = verdict.RecordOf(plain, t.o)
+	t.rec, t.keeps = verdict.RecordOf(plain, t.o), keeps
 	t.kept = make(map[int64]bool, len(t.weeks))
 	for _, w := range t.weeks {
 		t.kept[w] = t.rec.Kept(t.mid(w), t.mid(w+7))
@@ -113,6 +113,30 @@ func (t *tallies) unjudgedAll(w, id int64) ledger.Tally {
 		return t.unjudged(w, id)
 	}
 	return minus(t.everyone[w][id], t.jeveryone[w][id])
+}
+
+// firingJudge says, of a firing of rule that started at start, its alert
+// tied to signals, whether it is judged should it catch nothing, or only
+// counted, as the report says it (ledger.Ledger.FiringJudged). A page that
+// lists or draws firings one by one, or by day or hour, asks it, so that
+// none of them calls black what the weeks and the summary count unjudged.
+type firingJudge func(rule string, start time.Time, signals int64) bool
+
+// judgeOver is what judges the firings from from to to, by the incidents
+// keeps keeps (every one when nil), with o.
+func (s *Server) judgeOver(ctx context.Context, from, to time.Time, o verdict.Options, keeps func(ledger.Incident) bool) (firingJudge, error) {
+	rec, err := s.l.RecordOf(ctx, from, to, o, keeps)
+	if err != nil {
+		return nil, err
+	}
+	return func(rule string, start time.Time, signals int64) bool {
+		return s.l.FiringJudged(rec, o, rule, start, signals)
+	}, nil
+}
+
+// spansOf is j as RuleSpansJudged asks it, of one rule.
+func (j firingJudge) spansOf(rule string) func(time.Time, int64) bool {
+	return func(start time.Time, signals int64) bool { return j(rule, start, signals) }
 }
 
 // minus is a's counts less b's.

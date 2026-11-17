@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/verdict"
 )
 
 // The firings of a day (docs/design/ui.md): each with its labels as chips,
@@ -110,20 +112,22 @@ type hourCell struct {
 	Firings, White, Excused int
 	Clock                   int
 	X                       int
-	// Black are those that caught nothing; where its parts are drawn, from
-	// the foot up: caught nothing, excused, caught something.
-	Black          int
-	BlackY, BlackH float64
-	ExcusedY       float64
-	ExcusedH       float64
-	WhiteY, WhiteH float64
+	// Black are those that caught nothing, Unjudged of them those with no
+	// record to judge them by; where its parts are drawn, from the foot
+	// up: caught nothing (judged), not judged, excused, caught something.
+	Black, Unjudged      int
+	BlackY, BlackH       float64
+	UnjudgedY, UnjudgedH float64
+	ExcusedY             float64
+	ExcusedH             float64
+	WhiteY, WhiteH       float64
 }
 
 // dayStrip is a day's firings an hour at a time, as the page lists them.
 type dayStrip struct {
-	Hours                []hourCell
-	Width                int
-	Excused, Odd, Capped bool
+	Hours                          []hourCell
+	Width                          int
+	Excused, Odd, Capped, Unjudged bool
 }
 
 type firingsView struct {
@@ -203,10 +207,21 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 	}
 	from, to := s.l.Midnight(a.day), s.l.Midnight(a.day+1)
 	fq := ledger.FiringQuery{From: from, To: to, Rule: a.rule, Black: a.black, Kind: a.kind}
+	// A firing that caught nothing is judged, or only counted, as the
+	// report says it: by everyone's incidents (the page has no team), its
+	// week's record or the signals tied to it.
+	o, err := s.options(ctx)
+	if err != nil {
+		return nil, err
+	}
+	judge, err := s.judgeOver(ctx, from, to, o, nil)
+	if err != nil {
+		return nil, err
+	}
 
 	// The firings listed, and those the strip counts: the day's whole.
 	var fs []ledger.Firing
-	var starts []ledger.StartCount
+	var starts []startCount
 	if len(a.labels) == 0 {
 		var err error
 		list := fq
@@ -214,7 +229,7 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 		if fs, err = s.l.Firings(ctx, list); err != nil {
 			return nil, err
 		}
-		if starts, err = s.l.FiringStarts(ctx, fq); err != nil {
+		if starts, err = s.startsJudged(ctx, fq, o, judge); err != nil {
 			return nil, err
 		}
 	} else {
@@ -238,12 +253,14 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 			if !hasLabels(f.Labels, a.labels) {
 				continue
 			}
-			x := ledger.StartCount{Start: f.Start, Firings: 1}
+			x := startCount{StartCount: ledger.StartCount{Start: f.Start, Firings: 1}}
 			switch {
 			case f.White:
 				x.White = 1
 			case f.Excused:
 				x.Excused = 1
+			case !judge(f.Rule, f.Start, f.Signals):
+				x.Unjudged = 1
 			}
 			starts = append(starts, x)
 			if after != nil && !(f.Start.Before(after.Start) || f.Start.Equal(after.Start) && f.ID < after.ID) {
@@ -260,6 +277,7 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 	for _, f := range fs {
 		lines = append(lines, s.firingLine(f))
 	}
+	judged(lines, judge)
 	if err := s.notifiedFirings(ctx, lines); err != nil {
 		return nil, err
 	}
@@ -306,7 +324,37 @@ func hasLabels(ls map[string]string, want [][2]string) bool {
 // the clocks skip, from 01:00), each hour as often as the clocks came to
 // it that day: from starts, counted by a quarter of an hour, or a firing
 // at a time, which each fall in one hour of the clock.
-func (s *Server) hourStrip(day int64, starts []ledger.StartCount, capped bool) dayStrip {
+// startCount is a count of firings by when they started, and, of those
+// that caught nothing, Unjudged: those with no record to judge them by.
+type startCount struct {
+	ledger.StartCount
+	Unjudged int
+}
+
+// startsJudged are the firings fq picks counted by the quarter hour, as
+// FiringStarts counts them, each count's Unjudged by judge: with no named
+// signal, a day's firings are judged alike, by its week; with named
+// signals, by rule and by the signals tied to them, counted apart.
+func (s *Server) startsJudged(ctx context.Context, fq ledger.FiringQuery, o verdict.Options, judge firingJudge) ([]startCount, error) {
+	read := s.l.FiringStarts
+	if o.Signals.Named() {
+		read = s.l.FiringStartsBy
+	}
+	xs, err := read(ctx, fq)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]startCount, len(xs))
+	for i, x := range xs {
+		out[i].StartCount = x
+		if black := x.Firings - x.White - x.Excused; black > 0 && !judge(x.Rule, x.Start, x.Signals) {
+			out[i].Unjudged = black
+		}
+	}
+	return out, nil
+}
+
+func (s *Server) hourStrip(day int64, starts []startCount, capped bool) dayStrip {
 	st := dayStrip{Width: 24 * hourStep, Capped: capped}
 	loc := s.cfg.Loc
 	for h := range 24 {
@@ -321,7 +369,9 @@ func (s *Server) hourStrip(day int64, starts []ledger.StartCount, capped bool) d
 		c.Firings += x.Firings
 		c.White += x.White
 		c.Excused += x.Excused
+		c.Unjudged += x.Unjudged
 		st.Excused = st.Excused || x.Excused > 0
+		st.Unjudged = st.Unjudged || x.Unjudged > 0
 	}
 	most := 1
 	for i := range st.Hours {
@@ -343,12 +393,16 @@ func (s *Server) hourStrip(day int64, starts []ledger.StartCount, capped bool) d
 			y--
 			return top, h
 		}
-		c.BlackY, c.BlackH = part(c.Black)
+		c.BlackY, c.BlackH = part(c.Black - c.Unjudged)
+		c.UnjudgedY, c.UnjudgedH = part(c.Unjudged)
 		c.ExcusedY, c.ExcusedH = part(c.Excused)
 		c.WhiteY, c.WhiteH = part(c.White)
 	}
 	return st
 }
+
+// Nothing are, of Black, those judged: black stones.
+func (c hourCell) Nothing() int { return c.Black - c.Unjudged }
 
 // Cell is where an hour's bar is drawn.
 func (c hourCell) Cell() int { return c.X + (hourStep-hourBar)/2 }

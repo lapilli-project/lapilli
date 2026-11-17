@@ -17,6 +17,10 @@ const Quarter = 15 * time.Minute
 type StartCount struct {
 	Start                   time.Time
 	Firings, White, Excused int
+	// Rule and Signals, of a count by them (FiringStartsBy): the rule's
+	// name and the signals its firings' alerts are tied to.
+	Rule    string
+	Signals int64
 }
 
 // FiringStarts counts the firings q picks by the quarter of an hour, in
@@ -24,10 +28,26 @@ type StartCount struct {
 // (Black, Excused, Refired, Deploy, Kind), not by Before or Limit. The database
 // counts them: a row a quarter, 96 a day, however many fired.
 func (l *Ledger) FiringStarts(ctx context.Context, q FiringQuery) ([]StartCount, error) {
+	return l.firingStarts(ctx, q, false)
+}
+
+// FiringStartsBy are FiringStarts, apart by rule and by the signals the
+// firings' alerts are tied to: what judges a firing with named signals
+// (FiringJudged). A row a quarter for each rule and set of signals that
+// fired in it.
+func (l *Ledger) FiringStartsBy(ctx context.Context, q FiringQuery) ([]StartCount, error) {
+	return l.firingStarts(ctx, q, true)
+}
+
+func (l *Ledger) firingStarts(ctx context.Context, q FiringQuery, by bool) ([]StartCount, error) {
 	const quarter = int64(Quarter / time.Second)
+	sel, from, group := "", "firings f", ""
+	if by {
+		sel, from, group = ", r.name, s.signals", "firings f JOIN series s ON s.id = f.series_id JOIN rules r ON r.id = f.rule_id", ", r.name, s.signals"
+	}
 	sq := `SELECT f.start_at - f.start_at % ? AS q, count(*), count(CASE WHEN f.white <> 0 THEN 1 END),
-		count(CASE WHEN f.white = 0 AND f.excused <> 0 THEN 1 END)
-		FROM firings f WHERE f.start_at >= ? AND f.start_at < ?`
+		count(CASE WHEN f.white = 0 AND f.excused <> 0 THEN 1 END)` + sel + `
+		FROM ` + from + ` WHERE f.start_at >= ? AND f.start_at < ?`
 	args := []any{quarter, q.From.Unix(), q.To.Unix()}
 	if q.Rule != "" {
 		sq += " AND f.rule_id = (SELECT id FROM rules WHERE name = ?)"
@@ -49,7 +69,7 @@ func (l *Ledger) FiringStarts(ctx context.Context, q FiringQuery) ([]StartCount,
 		sq += " AND f.marked != 0 AND (f.marked & (" + kindBit + ")) != 0"
 		args = append(args, q.Kind)
 	}
-	rows, err := l.r.QueryContext(ctx, sq+" GROUP BY q ORDER BY q DESC", args...)
+	rows, err := l.r.QueryContext(ctx, sq+" GROUP BY q"+group+" ORDER BY q DESC"+group, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +78,11 @@ func (l *Ledger) FiringStarts(ctx context.Context, q FiringQuery) ([]StartCount,
 	for rows.Next() {
 		var x StartCount
 		var at int64
-		if err := rows.Scan(&at, &x.Firings, &x.White, &x.Excused); err != nil {
+		dest := []any{&at, &x.Firings, &x.White, &x.Excused}
+		if by {
+			dest = append(dest, &x.Rule, &x.Signals)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}
 		x.Start = unix(at)

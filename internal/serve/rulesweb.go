@@ -142,6 +142,9 @@ type ruleSum struct {
 	Notifications, Repeats, Woken, WokenUnjudged int
 }
 
+// Nothing are, of Black, those judged: black stones, not Unjudged.
+func (x ruleSum) Nothing() int { return x.Black - x.Unjudged }
+
 // legendGroup is a facet's badges, in the list's legend: each its sign,
 // its name as the facet names it, and a line on what it means.
 type legendGroup struct {

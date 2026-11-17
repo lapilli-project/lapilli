@@ -475,7 +475,8 @@ func TestNotificationsShown(t *testing.T) {
 	_, body, _ = get(t, h, "/")
 	i := strings.Index(body, "Woken for nothing")
 	if i < 0 || !strings.Contains(body[i:min(len(body), i+400)], ">–<") ||
-		!strings.Contains(body, "not known: no incident written down to judge their firings by; 2 notifications came while people slept that week (counted since 2026-11-01)") {
+		!strings.Contains(body, "not known: no record; 2 notifications came while people slept that week (counted since 2026-11-01)") ||
+		strings.Count(body, "No incident was written down in the week of") != 1 {
 		t.Errorf("overview: %s", body)
 	}
 	// The rules that week, which the tile leads to, say the same: not "for

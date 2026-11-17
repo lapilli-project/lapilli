@@ -10,14 +10,15 @@
 {{if .Backlog}}<strong class="status-info"><span aria-hidden="true">↻</span> {{t "Catching up: firings are in up to %s." (at $loc .Cursor)}}</strong>{{end}}
 {{with .Check}}<br>{{t "That week, the replay beside what really fired: %d%% alike, of %d firings." .Share .Either}}{{with .Differ}} {{t "Replayed differently:"}}{{range $i, $r := .}}{{if $i}},{{end}} <a href="{{$.Rule $r}}"><bdi>{{$r}}</bdi></a>{{end}}.{{end}}{{end}}</p>
 
-<section class="tiles" aria-label="{{t "Last week"}}">
+{{if .NoRecord}}<p class="notice status-unknown"><span class="sign" aria-hidden="true">?</span> {{t "No incident was written down in the week of %s or the two weeks before it: a firing that caught nothing can't be told from one nobody wrote down, so no precision is known and no rule is called noisy." (day $loc .From)}} <a href="{{$.Link "/settings"}}#incident-sources">{{t "Where incidents come from, and whether each is alive"}}</a> · <a href="{{$.Link "/incidents"}}">{{t "Write incidents down"}}</a></p>{{end}}
+<section class="tiles tiles-{{len .Tiles}}" aria-label="{{t "Last week"}}">
 {{range .Tiles}}<div class="tile">
   <div class="tile-label">{{.Label}}</div>
   <div class="tile-value">{{.Value}}</div>
   <div class="tile-of">{{or .Of " "}}</div>
   {{template "tiledelta" .}}
   {{if .Spark}}<svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="{{t "%s, eleven weeks: %s" .Label .Values}}"><path d="{{.Spark}}"/>{{if .Has}}<circle cx="{{.DotX}}" cy="{{.DotY}}" r="3"/>{{end}}</svg>{{end}}
-  {{if .Href}}<a class="tile-more" href="{{$.Link .Href}}">{{t .More}}<span class="vh">: {{.Label}}</span> <span aria-hidden="true">→</span></a>{{end}}
+  {{if .Href}}<a class="tile-more" href="{{$.Link .Href}}">{{t .More}}<span class="vh">: {{.Label}}</span>&nbsp;<span aria-hidden="true">→</span></a>{{end}}
 </div>{{end}}
 </section>
 
@@ -29,7 +30,7 @@
 <div class="cards">
 <figure class="card">
   <figcaption><h2>{{t "Firings by week"}}</h2>
-    <ul class="legend"><li><span class="key caught"></span>{{t "caught something"}}</li><li><span class="key nothing"></span>{{t "caught nothing"}}</li>{{template "marklegend" .Stones}}</ul></figcaption>
+    <ul class="legend"><li><span class="key caught"></span>{{t "caught something"}}</li><li><span class="key nothing"></span>{{t "caught nothing"}}</li>{{if .Stones.Unjudged}}<li><span class="key unjudged"></span>{{t "not judged: no record"}}</li>{{end}}{{template "marklegend" .Stones}}</ul></figcaption>
   <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="{{t "Firings by week, caught something and caught nothing; the same numbers are in the table below"}}">
     {{range .Stones.Ticks}}<line class="grid" x1="44" x2="550" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="38" y="{{.Y}}" dy="4">{{.Label}}</text>{{end}}
     {{range .Stones.Columns}}<g>{{range .Segments}}<path class="{{.Class}}" d="{{.Path}}"><title>{{.Title}}</title></path>{{end}}
@@ -113,11 +114,11 @@
 
 <h2 id="by-week">{{t "By week"}}</h2>
 <div class="scroll" tabindex="0" role="region" aria-labelledby="by-week"><table class="weeks">
-<thead><tr><th scope="col">{{t "Week of"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th><th scope="col" class="n">{{t "Precision"}}</th><th scope="col" class="n">{{t "Noisy rules"}}</th><th scope="col" class="n">{{t "Refired"}}</th>{{if .Deploys}}<th scope="col" class="n">{{t "During deploys"}}</th>{{end}}<th scope="col" class="n">{{t "Incidents"}}</th><th scope="col" class="n">{{t "✓ Caught"}}</th><th scope="col" class="n">{{t "◐ Noisy only"}}</th><th scope="col" class="n">{{t "✗ Missed"}}</th></tr></thead>
+<thead><tr><th scope="col">{{t "Week of"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th>{{if .Stones.Unjudged}}<th scope="col" class="n">{{t "? Not judged"}}</th>{{end}}<th scope="col" class="n">{{t "Precision"}}</th><th scope="col" class="n">{{t "Noisy rules"}}</th><th scope="col" class="n">{{t "Refired"}}</th>{{if .Deploys}}<th scope="col" class="n">{{t "During deploys"}}</th>{{end}}<th scope="col" class="n">{{t "Incidents"}}</th><th scope="col" class="n">{{t "✓ Caught"}}</th><th scope="col" class="n">{{t "◐ Noisy only"}}</th><th scope="col" class="n">{{t "✗ Missed"}}</th></tr></thead>
 <tbody>{{range .Weeks}}
 <tr{{if .Current}} class="current"{{end}}>
   <td class="t"><span class="d">{{day $loc .Start}}</span>{{if .Current}} {{t "(so far)"}}{{end}}{{if .Changed}} <span class="tag" title="{{t "the rules changed this week"}}">{{t "rules changed"}}</span>{{end}}{{if .DeployMark}} <span class="tag">{{t "deploys"}}</span>{{end}}{{if .Quiet}} <span class="tag">{{t "a quiet window"}}</span>{{end}}{{if .NoRecord}} <span class="tag status-unknown" title="{{t "no incident written down in it or in the two weeks before it: its firings are counted, not judged"}}">{{t "no record"}}</span>{{end}}</td>
-  <td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Black}}</td><td class="n">{{.Precision}}</td><td class="n">{{if .NoRecord}}–{{else}}{{.Noisy}}{{end}}</td><td class="n">{{.Refired}}</td>{{if $.View.Deploys}}<td class="n">{{.Deploys}}</td>{{end}}
+  <td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Nothing}}</td>{{if $.View.Stones.Unjudged}}<td class="n">{{.NotJudged}}</td>{{end}}<td class="n">{{.Precision}}</td><td class="n">{{if .NoRecord}}–{{else}}{{.Noisy}}{{end}}</td><td class="n">{{.Refired}}</td>{{if $.View.Deploys}}<td class="n">{{.Deploys}}</td>{{end}}
   <td class="n">{{.Incidents}}</td><td class="n">{{.Caught}}</td><td class="n">{{.NoisyOnly}}</td><td class="n">{{if .Missed}}<span class="status-bad">{{.Missed}}</span>{{else}}{{.Missed}}{{end}}</td>
 </tr>{{end}}</tbody>
 </table></div>
