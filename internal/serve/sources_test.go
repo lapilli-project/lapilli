@@ -2,6 +2,8 @@ package serve
 
 import (
 	"context"
+	"fmt"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -341,6 +343,44 @@ func TestRunsFailedPathsAnAdminsAlone(t *testing.T) {
 		_, body := askAs(t, h, http.MethodGet, "/runs", nil, who, "same-origin")
 		if strings.Contains(body, hook+".d") == (who == "carl@example.com") || !strings.Contains(body, "SomeRule") {
 			t.Errorf("%s: why a rule couldn't be replayed, as shown: the path there %v", who, strings.Contains(body, hook+".d"))
+		}
+	}
+}
+
+// TestRunsUnreachedAnAdminsToRead: a run that failed because the ledger's
+// database couldn't be reached says why (its server, its user, its
+// database) to an admin alone, on the runs' page, their API and the
+// overview, as the status banner does; and so does a tool's error to an
+// agent acting for anyone else.
+func TestRunsUnreachedAnAdminsToRead(t *testing.T) {
+	ctx := context.Background()
+	s := criteriaServer(t, true, nil)
+	why := fmt.Errorf(`the ledger: %w: the server says: password authentication failed for user "svc-user", database "store-db" at 10.1.2.3`, ledger.ErrConnect)
+	if err := s.l.AddRun(ctx, ledger.Run{Kind: "hourly", Started: s.now(), Finished: s.now(), From: s.now().Add(-time.Hour), To: s.now(), Error: why.Error(),
+		Failed: map[string]string{"SomeRule": why.Error()}}); err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	for _, p := range []string{"/runs", "/api/v1/runs", "/"} {
+		for _, who := range []string{"carl@example.com", "bo@example.com"} {
+			_, body := askAs(t, h, http.MethodGet, p, nil, who, "same-origin")
+			for _, name := range []string{"svc-user", "store-db", "10.1.2.3"} {
+				if strings.Contains(body, name) {
+					t.Errorf("%s, %s: says %s", who, p, name)
+				}
+			}
+		}
+		if _, body := askAs(t, h, http.MethodGet, p, nil, "ana@example.com", "same-origin"); !strings.Contains(body, "store-db") {
+			t.Errorf("%s: an admin doesn't read why", p)
+		}
+	}
+	tool := guarded(func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+		return nil, nil, why
+	})
+	for admin, want := range map[bool]bool{false: false, true: true} {
+		c := context.WithValue(ctx, agentErrors{}, s.errorsFor(admin))
+		if _, _, err := tool(c, nil, struct{}{}); err == nil || strings.Contains(err.Error(), "store-db") != want {
+			t.Errorf("an agent for an admin %v: %v", admin, err)
 		}
 	}
 }

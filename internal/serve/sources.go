@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -49,17 +50,46 @@ func (s *Server) runsFor(runs []ledger.Run, adminReads bool, l string) []ledger.
 		return runs
 	}
 	ps := s.filePaths()
+	// Why the ledger's database couldn't be reached names its server, its
+	// user and its database: said as the status banner says it.
+	hide := func(text string) string {
+		if unreached(text) {
+			return tr(l, unreachedText)
+		}
+		return hidePaths(text, ps, l)
+	}
 	out := slices.Clone(runs)
 	for i, r := range out {
-		out[i].Error = hidePaths(r.Error, ps, l)
+		out[i].Error = hide(r.Error)
 		if len(r.Failed) > 0 {
 			out[i].Failed = make(map[string]string, len(r.Failed))
 			for rule, why := range r.Failed {
-				out[i].Failed[rule] = hidePaths(why, ps, l)
+				out[i].Failed[rule] = hide(why)
 			}
 		}
 	}
 	return out
+}
+
+// errorsFor is how a tool's error is said to an agent acting for a
+// reader, an admin or not: as runs are (runsFor), without a path serve
+// was started with, nor why the ledger's database couldn't be reached,
+// but to an admin.
+func (s *Server) errorsFor(adminReads bool) func(error) error {
+	if adminReads {
+		return func(err error) error { return err }
+	}
+	return func(err error) error {
+		if err == nil {
+			return nil
+		}
+		if t := err.Error(); unreached(t) {
+			return errors.New(unreachedText)
+		} else if hidden := s.redactPaths(t, ""); hidden != t {
+			return errors.New(hidden)
+		}
+		return err
+	}
 }
 
 // hidePaths is text with each of ps it says whole said by what it is

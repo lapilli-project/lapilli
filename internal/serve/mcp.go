@@ -95,9 +95,15 @@ func (s *Server) mcpHandler() http.Handler {
 		// tools are called with this request's context, which holds it,
 		// never with a request made up of its headers alone, which would
 		// hold no one signed in by lapilli or in front.
-		h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), agentFor{}, s.user(r))))
+		ctx := context.WithValue(r.Context(), agentFor{}, s.user(r))
+		ctx = context.WithValue(ctx, agentErrors{}, s.errorsFor(s.role(r) == admin))
+		h.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
+
+// agentErrors is how a tool's error is said to the agent, in the context
+// its tools are called with (Server.errorsFor): for whom it acts.
+type agentErrors struct{}
 
 // agentFor is who an agent acts for, in the context its tools are called
 // with: the person the request to /mcp came from, however they are signed
@@ -124,12 +130,16 @@ func originOf(u string) string {
 }
 
 // guarded turns a tool's panic into its error, as net/http does a page's:
-// one tool call going wrong shouldn't take the server down.
+// one tool call going wrong shouldn't take the server down. Its error is
+// said as the reader the agent acts for may read it (agentErrors).
 func guarded[In, Out any](h mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
 	return func(ctx context.Context, req *mcp.CallToolRequest, in In) (res *mcp.CallToolResult, out Out, err error) {
 		defer func() {
 			if p := recover(); p != nil {
 				res, err = nil, fmt.Errorf("lapilli: %v", p)
+			}
+			if say, ok := ctx.Value(agentErrors{}).(func(error) error); ok && err != nil {
+				err = say(err)
 			}
 		}()
 		return h(ctx, req, in)
