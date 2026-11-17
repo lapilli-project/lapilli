@@ -386,10 +386,8 @@ type dataView struct {
 
 type selectorView struct {
 	ledger.SelectorData
-	// StandIn is the stand-in it begins by, when that moved its start:
-	// Kept, before its own data, or with none.
-	StandIn string    `json:"stand_in,omitempty"`
-	Kept    time.Time `json:"kept_from,omitzero"`
+	// StandIn is the stand-in it begins by, with no data of its own.
+	StandIn string `json:"stand_in,omitempty"`
 }
 
 // dataOf is where the data of a criterion's selectors begins, as the
@@ -407,14 +405,13 @@ func dataViewOf(d *ledger.ImpactData) *dataView {
 		return nil
 	}
 	v := &dataView{From: d.From, Selectors: []selectorView{}, Late: d.Late(), NoData: d.NoData, Floor: d.Floor}
-	eff := d.Effective()
 	for _, x := range d.Selectors {
 		if x.For != "" {
 			continue // a stand-in: said of the selector it stands in for
 		}
 		sv := selectorView{SelectorData: x}
-		if i := slices.IndexFunc(eff, func(e ledger.SelectorData) bool { return e.Sel == x.Sel }); i >= 0 && !eff[i].First.IsZero() && !eff[i].First.Equal(x.First) {
-			sv.StandIn, sv.Kept = d.StandInOf(x.Sel), eff[i].First
+		if x.First.IsZero() {
+			sv.StandIn = d.StandInOf(x.Sel)
 		}
 		v.Selectors = append(v.Selectors, sv)
 	}
@@ -821,8 +818,10 @@ func (s *Server) lookFor(ctx context.Context, d *ledger.ImpactData, cursor time.
 	}
 	var failed error
 	for i, x := range d.Selectors {
-		if !x.First.IsZero() || x.For != "" && !d.HasData(x.Of) {
-			continue // a stand-in of a selector with no data has none either
+		if !x.First.IsZero() || x.For != "" && (!d.HasData(x.Of) || d.HasData(x.For)) {
+			// A stand-in of a selector with no data has none either; one
+			// for a selector with data of its own isn't asked.
+			continue
 		}
 		lo := x.To
 		if lo.IsZero() {
@@ -861,7 +860,10 @@ func withStandIns(d *ledger.ImpactData) error {
 		return err
 	}
 	for _, w := range want {
-		if w.For == "" || slices.ContainsFunc(d.Selectors, func(x ledger.SelectorData) bool { return x.Sel == w.Sel && x.For == w.For }) {
+		if w.For == "" {
+			continue
+		}
+		if slices.ContainsFunc(d.Selectors, func(x ledger.SelectorData) bool { return x.Sel == w.Sel && x.For == w.For }) {
 			continue
 		}
 		if i := slices.IndexFunc(d.Selectors, func(x ledger.SelectorData) bool {

@@ -145,8 +145,8 @@ func (d *ImpactData) Complete() bool {
 // Late is the selector whose data begins the latest, after the look began,
 // and the others' earlier: what holds the record back, when more than one
 // selector is read and they don't begin together; the first of those that
-// begin the latest. "" for none. A selector with stand-ins begins where
-// they say (Effective).
+// begin the latest. "" for none. A selector with no data of its own begins
+// where its stand-ins say (Effective).
 func (d *ImpactData) Late() string {
 	sels := d.Effective()
 	var latest time.Time
@@ -202,19 +202,19 @@ func FloorBy(d *ImpactData, onOrAfter func(time.Time) time.Time) {
 }
 
 // Effective are d's selectors as they keep the record, its stand-ins left
-// out: each with stand-ins (SelectorData.For) that all had data, of those
-// made of a selector with data of its own, from the latest of them, when
-// that is before its own; had nothing it matches happened yet, where its
-// data would have begun. One a stand-in has no data for, as its own; one
-// a stand-in wasn't looked for yet, as having none, till it is.
+// out: each with no data of its own whose stand-ins (SelectorData.For),
+// of those made of a selector with data of its own, all had data, from
+// the latest of them: nothing it matches happened, though what it would
+// read was there. One whose own data begins later keeps that start, as
+// what it matches may have been there, unread, before: a job that came
+// later, not only a first 5xx.
 func (d *ImpactData) Effective() []SelectorData {
 	out := d.read()
 	for i, b := range out {
-		x, ok, unknown := d.stoodIn(b.Sel)
-		switch {
-		case unknown:
-			out[i].First, out[i].AtStart = time.Time{}, false
-		case ok && (b.First.IsZero() || x.First.Before(b.First)):
+		if !b.First.IsZero() {
+			continue
+		}
+		if x, ok, _ := d.stoodIn(b.Sel); ok {
 			out[i].First, out[i].AtStart = x.First, x.AtStart
 		}
 	}
@@ -235,8 +235,9 @@ func (d *ImpactData) read() []SelectorData {
 // stoodIn is, of sel's stand-ins made of a selector with data of its own,
 // the one whose data begins the latest, when every one had data: each
 // reads more series than sel does, the latest the fewest. Unknown, when
-// one of them wasn't looked for yet. A stand-in made of a selector with no
-// data, which has none either, says nothing of sel's labels.
+// one of them wasn't looked for yet: none, till it is. A stand-in made of
+// a selector with no data, which has none either, says nothing of sel's
+// labels.
 func (d *ImpactData) stoodIn(sel string) (x SelectorData, ok, unknown bool) {
 	for _, s := range d.Selectors {
 		if s.For != sel || !d.HasData(s.Of) {
@@ -260,12 +261,12 @@ func (d *ImpactData) HasData(sel string) bool {
 	return sel == "" || slices.ContainsFunc(d.Selectors, func(x SelectorData) bool { return x.Sel == sel && x.For == "" && !x.First.IsZero() })
 }
 
-// StandInOf is, of a selector of d, the stand-in it begins by
-// (Effective): nothing it matches happened, though what it would read was
-// there; "" for none.
+// StandInOf is, of a selector of d with no data of its own, the stand-in
+// it begins by (Effective): nothing it matches happened, though what it
+// would read was there; "" for none.
 func (d *ImpactData) StandInOf(sel string) string {
 	x, ok, _ := d.stoodIn(sel)
-	if !ok {
+	if !ok || d.HasData(sel) {
 		return ""
 	}
 	return x.Sel

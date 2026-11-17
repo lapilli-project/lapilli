@@ -666,10 +666,10 @@ func TestDecidedImpact(t *testing.T) {
 	}
 }
 
-// A selector with no data, or later data, whose stand-ins all had data,
-// begins where the latest of them does: nothing it matches had happened,
-// though what it would read was there; one with a stand-in with no data,
-// or with none, by its own.
+// A selector with no data of its own whose stand-ins all had data begins
+// where the latest of them does: nothing it matches had happened, though
+// what it would read was there; one with a stand-in with no data, or with
+// none, has none; one with data of its own, by its own.
 func TestFloorByStandIn(t *testing.T) {
 	lo := t0.Add(-14 * 24 * time.Hour)
 	all := SelectorData{Sel: `http_requests_total`, First: lo, AtStart: true}
@@ -689,7 +689,9 @@ func TestFloorByStandIn(t *testing.T) {
 		standIn string
 	}{
 		{"none matched", []SelectorData{five, all, coded}, time.Time{}, false, "", coded.Sel},
-		{"matched later", []SelectorData{at(five, t0.Add(-time.Hour), false), all, coded}, time.Time{}, false, "", coded.Sel},
+		// Its own data later: its own start, as what it matches may have
+		// been there unread before (a job that came later).
+		{"matched later", []SelectorData{at(five, t0.Add(-time.Hour), false), all, coded}, t0.Add(-time.Hour), false, five.Sel, ""},
 		{"with a later selector", []SelectorData{five, all, probe, coded}, probe.First, false, probe.Sel, coded.Sel},
 		{"the code label later", []SelectorData{five, all, at(coded, t0.Add(-2*24*time.Hour), false)}, t0.Add(-2 * 24 * time.Hour), false, five.Sel, coded.Sel},
 		{"the metric later", []SelectorData{five, at(all, t0.Add(-2*24*time.Hour), false), at(coded, t0.Add(-2*24*time.Hour), false)}, t0.Add(-2 * 24 * time.Hour), false, "", coded.Sel},
@@ -701,7 +703,7 @@ func TestFloorByStandIn(t *testing.T) {
 		{"alone", []SelectorData{five}, time.Time{}, true, "", ""},
 		// Not looked for yet (an upgrade, a look that failed): no record
 		// this round, not the later start of its own.
-		{"a stand-in not looked for yet", []SelectorData{at(five, t0.Add(-time.Hour), false), all, {Sel: coded.Sel, For: five.Sel, Of: all.Sel}}, time.Time{}, true, "", ""},
+		{"a stand-in not looked for yet", []SelectorData{five, all, {Sel: coded.Sel, For: five.Sel, Of: all.Sel}}, time.Time{}, true, "", ""},
 	} {
 		d := ImpactData{From: lo, CheckedTo: t0, Selectors: c.sels}
 		FloorBy(&d, func(t time.Time) time.Time { return t })

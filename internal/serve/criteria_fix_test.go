@@ -259,23 +259,24 @@ func TestImpactDataStandInDowngraded(t *testing.T) {
 	}
 }
 
-// A selector whose own data begins later than its stand-in's: the page
-// says from when it keeps the record, and by what.
-func TestImpactDataStandInEarlier(t *testing.T) {
+// A selector whose own data begins later than its stand-in's keeps its own
+// start: what it matches may have been there, unread, before it. The page
+// says its data, and nothing of a stand-in.
+func TestImpactDataOwnLater(t *testing.T) {
 	ctx := context.Background()
 	s := criteriaServer(t, false, nil)
-	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {now.Add(-20 * time.Hour)}}
+	hist(s).begins = map[string][]time.Time{`probe_failed{code="5"}`: {now.Add(-30 * time.Hour)}}
 	expr := `sum(probe_failed{code="5"}) / sum(probe_failed) > 0.5`
 	if code, body := askAs(t, s.Handler(), http.MethodPost, "/settings/impact", url.Values{"impact": {expr}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
 		t.Fatalf("%d %s", code, body)
 	}
 	s.jobs(ctx, false)
-	if began, _ := s.l.RunsFrom(ctx); !options(t, s).Equal(began) {
-		t.Errorf("kept from %s, not %s", options(t, s), began)
+	if want := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC); !options(t, s).Equal(want) {
+		t.Errorf("kept from %s, not %s", options(t, s), want)
 	}
 	_, page := askAs(t, s.Handler(), http.MethodGet, "/settings", nil, "ana@example.com", "same-origin")
-	if !strings.Contains(page, "kept from") || !strings.Contains(page, "<bdi>probe_failed{code!=&#34;&#34;}</bdi> begins") {
-		t.Errorf("the page doesn't say by what:\n%s", page)
+	if strings.Contains(page, "nothing matched") || !strings.Contains(page, "probe_failed{code=&#34;5&#34;}</bdi></code>: data from") {
+		t.Errorf("the page:\n%s", page)
 	}
 }
 

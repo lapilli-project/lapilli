@@ -678,6 +678,10 @@ func TestIndexSignals(t *testing.T) {
 // with the label it narrows by; not one an absent() reads.
 func TestUnnamedImpactSelectors(t *testing.T) {
 	const ratio = `sum(rate(http_requests_total{code=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05`
+	// Everyone's 5xx with a route: everyone's 5xx's stand-in for the route's,
+	// with data only once a 5xx came.
+	const payFive, allFive, allFiveRouted = `x{code=~"5..",route="/pay"}`, `x{code=~"5.."}`, `x{code=~"5..",route!=""}`
+	const payAndAll = `sum(rate(x{code=~"5..",route="/pay"}[5m])) / sum(rate(x{route="/pay"}[5m])) > 0.1 or sum(rate(x{code=~"5.."}[5m])) / sum(rate(x[5m])) > 0.05`
 	never := sigBase.Add(365 * 24 * time.Hour)
 	readFrom := sigBase.Add(-verdict.RecordLookback)
 	for _, c := range []struct {
@@ -693,6 +697,15 @@ func TestUnnamedImpactSelectors(t *testing.T) {
 		// be matched before.
 		{"the code label later", ratio, map[string]time.Time{`http_requests_total{code=~"5.."}`: never, `http_requests_total{code!=""}`: at(2, 0, 0)}, at(2, 0, 0)},
 		{"absent", `absent(up{job="new"}) and on() count(up) > 0`, map[string]time.Time{`up{job="new"}`: never}, time.Time{}},
+		// A route's 5xx and everyone's, with none anywhere: kept from the
+		// first, though everyone's 5xx stand-in for the route's has none.
+		{"a route's and everyone's, no 5xx", payAndAll, map[string]time.Time{payFive: never, allFive: never, allFiveRouted: never}, readFrom},
+		// Everyone's first 5xx on Wednesday, of another route: everyone's
+		// 5xx holds the record back to it, its own data beginning then.
+		{"a route's and everyone's, a 5xx Wednesday", payAndAll, map[string]time.Time{payFive: never, allFive: at(2, 0, 0), allFiveRouted: at(2, 0, 0)}, at(2, 0, 0)},
+		// The route from Tuesday on: from then, not from where everyone's
+		// requests begin.
+		{"a route from Tuesday", payAndAll, map[string]time.Time{payFive: never, allFive: never, allFiveRouted: never, `x{route="/pay"}`: at(1, 0, 0), `x{route="/pay",code!=""}`: at(1, 0, 0)}, at(1, 0, 0)},
 	} {
 		h := signalHistory{series: map[string][]on{c.expr: {}}, begins: c.begins}
 		_, args := unnamedImpact(t)

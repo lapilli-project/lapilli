@@ -27,7 +27,7 @@ func FirstSamples(ctx context.Context, h replay.History, expr string, lo, hi tim
 		if err != nil {
 			return nil, err
 		}
-		x.For, x.To = sel.For, hi
+		x.For, x.Of, x.To = sel.For, sel.Of, hi
 		out = append(out, x)
 	}
 	return out, nil

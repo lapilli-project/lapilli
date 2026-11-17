@@ -134,11 +134,11 @@ over its time (`impact_from`† at or before it), or it caught an incident.
 `impact_from` is where the signal was first read, or later, where the
 data of every selector it reads begins, as a named signal's `start`
 (below); it is missing, with `impact_no_data: true`†, when a selector it
-reads has no data, which keeps no record. A selector with no data, or
-later data, that only narrows another (the same offset and @, and each
-of the other's matchers, its metric's name among them, one of its own)
-begins where its stand-ins' data does: the other's series with its
-metric's name and each label it narrows them by, any value, as
+reads has no data, which keeps no record. A selector with no data of its
+own that only narrows another (the same offset and @, and each of the
+other's matchers, its metric's name among them, one of its own) begins
+where its stand-ins' data does: the other's series with its metric's
+name and each label it narrows them by, any value, as
 `http_requests_total{code!=""}` for `http_requests_total{code=~"5.."}`
 beside `http_requests_total`. A client library makes a 5xx series at the
 first 5xx, so a service that served none had nothing to match, not
