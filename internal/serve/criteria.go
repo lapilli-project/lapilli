@@ -866,8 +866,8 @@ func (s *Server) impactDataOf(ctx context.Context, name string, kept *ledger.Imp
 		rctx, cancel = context.WithTimeout(ctx, s.cfg.Timeout)
 		defer cancel()
 	}
-	// What is looked for is of the expression serve holds, not of the one
-	// the ledger names: a record kept by another, until it is read again,
+	// What is looked for is of the expression serve runs, not of the one
+	// the record names: a record kept by another, until it is read again,
 	// has nothing of it looked for.
 	expr, err := s.heldExpr(ctx, name)
 	if err != nil {
@@ -883,10 +883,13 @@ func (s *Server) impactDataOf(ctx context.Context, name string, kept *ledger.Imp
 	return s.lookFor(rctx, name, d, cursor, expr)
 }
 
-// heldExpr is the expression serve holds for a signal, by name, "" for the
+// heldExpr is the expression serve runs for a signal, by name, "" for the
 // unnamed one: a named one's as serve was started (--impact NAME=PROMQL,
 // --impact-file), and the unnamed one's, the criterion in effect, which
-// the runs read; "" for none.
+// the runs read; "" for none. The criterion in effect is the one the
+// Settings page keeps in the ledger, when it keeps one (criterionOf), so
+// the unnamed signal's can be what whoever can write the ledger wrote
+// there: the ledger is guarded as serve's tokens are (SECURITY.md).
 func (s *Server) heldExpr(ctx context.Context, name string) (string, error) {
 	if name != "" {
 		for _, d := range s.cfg.Signals {
@@ -904,10 +907,10 @@ func (s *Server) heldExpr(ctx context.Context, name string) (string, error) {
 // found yet begins, each from where its last look got to up to cursor, and
 // keeps what it found: of each it could look at, a selector that fails
 // passing to the next, and returning the last failure. Only the selectors
-// expr, the expression serve holds, reads (ledger.SelectorsOf) are asked
-// for: those d names are the ledger's, which whoever can write it writes,
-// a database's user who holds no token for Prometheus among them, and
-// another is let be, so that serve runs no PromQL of theirs with its own.
+// expr, the expression serve runs (heldExpr), reads (ledger.SelectorsOf)
+// are asked for: a selector kept beside the record, in d, is asked for
+// when it is one of them, never one outside the expression serve runs.
+// That is all this guards: it doesn't say who wrote expr.
 func (s *Server) lookFor(ctx context.Context, name string, d *ledger.ImpactData, cursor time.Time, expr string) error {
 	want, err := ledger.SelectorsOf(expr)
 	if err != nil {
