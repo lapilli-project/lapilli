@@ -1295,6 +1295,32 @@ func TestPRBodyIDsAsCode(t *testing.T) {
 	}
 }
 
+// TestPRBodyNamesAsCode: the rule's name, and a finding's detail, come
+// from whoever writes the rule's source: in the pull request's description,
+// and the task made of it, each is a code span, so a mention, an image or a
+// link in one notifies no one and shows nothing but its text.
+func TestPRBodyNamesAsCode(t *testing.T) {
+	s, _ := restartsServer(t, nil)
+	rule := "Errors @example-org/everyone <img src=https://evil.example/p.png> [approve](https://evil.example/x)"
+	detail := "runbook_url `https://evil.example` @example-org/everyone ![i](https://evil.example/i.png)"
+	ev := evidence{Finding: &contentFinding{Kind: "no_runbook", Key: "has no runbook", Detail: detail}}
+	raw, _ := json.Marshal(ev)
+	pr := s.prBody(proposalLine{Proposal: ledger.Proposal{ID: 1, Rule: rule, Kind: ledger.KindSays, Path: ledger.PathGit, Evidence: raw, Diff: "-a\n+b\n"}})
+	for _, want := range []string{"for the rule `" + rule + "`.",
+		"It answers the content check's no_runbook: has no runbook (`runbook_url 'https://evil.example' @example-org/everyone ![i](https://evil.example/i.png)`)."} {
+		if !strings.Contains(pr, want) {
+			t.Errorf("its description doesn't say %q:\n%s", want, pr)
+		}
+	}
+	// Outside its code spans and its diff, nothing of the names is left.
+	text, _, _ := strings.Cut(pr, "```diff")
+	for i, part := range strings.Split(text, "`") {
+		if i%2 == 0 && (strings.Contains(part, "@") || strings.Contains(part, "<img") || strings.Contains(part, "](")) {
+			t.Errorf("a name is read as Markdown: %q in\n%s", part, pr)
+		}
+	}
+}
+
 // TestReadTimeFailsSoft: what a proposal says when it is read is shown,
 // not decided by: an older version that won't parse leaves a proposal made
 // against it saying the for_outlasts it kept, the read going on; and when

@@ -128,13 +128,17 @@ epoch='def epoch: sub("\\.[0-9]+"; "") |
 
 # issue_text: the task on stdin as an issue's text, in Markdown, ending with
 # the marker its issue is found again by: a line of its own, always after
-# the task's text, so nothing in that text comes after it.
+# the task's text, so nothing in that text comes after it. The rule's, the
+# incident's, the team's and the assignee's names are each a code span: a
+# name chosen by whoever writes a rule's source, or an incident's, mentions
+# no one and shows no link or image in the issue.
 issue_text() {
-  jq -r '[.body // empty, "",
-    (if .rule then "Rule: \(.rule)" else empty end),
-    (if .incident then "Incident: \(.incident)" else empty end),
-    (if .team then "Team: \(.team)" else empty end),
-    (if .assignee then "Assignee: \(.assignee)" else empty end),
+  jq -r 'def code: gsub("`"; "'"'"'") | gsub("[\r\n]"; " ") | "`" + . + "`";
+    [.body // empty, "",
+    (if .rule then "Rule: \(.rule | code)" else empty end),
+    (if .incident then "Incident: \(.incident | code)" else empty end),
+    (if .team then "Team: \(.team | code)" else empty end),
+    (if .assignee then "Assignee: \(.assignee | code)" else empty end),
     (if .due then "Due: \(.due[0:10])" else empty end),
     (if .url then "In Lapilli: \(.url)" else empty end),
     "", "Kept in step with Lapilli: lapilli-task-\(.id)"] | join("\n")'

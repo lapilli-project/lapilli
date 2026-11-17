@@ -627,7 +627,10 @@ func (s *Server) prBody(l proposalLine) string {
 	p := l.Proposal
 	ev := proposalEvidence(p)
 	var b strings.Builder
-	fmt.Fprintf(&b, "Lapilli proposal #%d: %s, for the rule %s.\n\n", p.ID, kindText(p.Kind), p.Rule)
+	// The rule's name, as every name and text from a rule's source here, as
+	// code: one chosen by whoever writes that source mentions no one, and
+	// shows no image or link, in the pull request or the task made of it.
+	fmt.Fprintf(&b, "Lapilli proposal #%d: %s, for the rule %s.\n\n", p.ID, kindText(p.Kind), mdCode(p.Rule))
 	if p.Kind == ledger.KindUndo {
 		// Nothing of why the change was made, nor its backtest, which says
 		// what it did: an undo made before kept them.
@@ -667,7 +670,7 @@ func (s *Server) prBody(l proposalLine) string {
 	if f := ev.Finding; f != nil {
 		fmt.Fprintf(&b, "It answers the content check's %s: %s", f.Kind, f.Key)
 		if f.Detail != "" {
-			fmt.Fprintf(&b, " (%s)", strings.ReplaceAll(f.Detail, "`", "'"))
+			fmt.Fprintf(&b, " (%s)", mdCode(clip(f.Detail, 300)))
 		}
 		b.WriteString(".\n\n")
 	}
@@ -699,13 +702,19 @@ var mdID = strings.NewReplacer("`", "'", "\r", " ", "\n", " ")
 func mdIDs(ids []string) string {
 	out := make([]string, len(ids))
 	for i, id := range ids {
-		if x := mdID.Replace(id); strings.TrimSpace(x) == "" {
-			out[i] = "(none)"
-		} else {
-			out[i] = "`" + x + "`"
-		}
+		out[i] = mdCode(id)
 	}
 	return strings.Join(out, ", ")
+}
+
+// mdCode is a name or a text from outside as one code span (mdID), so
+// that nothing in it (a mention, a link, an image, HTML) is read as
+// Markdown; one with nothing in it is "(none)".
+func mdCode(s string) string {
+	if x := mdID.Replace(s); strings.TrimSpace(x) != "" {
+		return "`" + x + "`"
+	}
+	return "(none)"
 }
 
 // kindText is what a kind of proposal does, in English.
