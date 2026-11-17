@@ -862,11 +862,18 @@ What building the first settled:
   `match_labels`, `keeps_record`, `last_read`, `floor_at`, `pattern`).
 - **Kept as started.** The leader keeps the signals and entries it was
   started with each round (`ledger.SyncSignals`), writing only when they
-  differ: a signal added gets the lowest free bit; one taken away is turned
-  off, its row gone and its windows kept, with its name; one whose match or
-  record changed, or the entries, judges every firing again, as `--match`
-  does. A signal renamed on the command line is one taken away and one
-  added, read again; renaming in place is step 3's, in the UI.
+  differ: a signal added gets the lowest bit no signal has and no alert
+  or tally carries, or, with none such (eight, one replaced), the lowest
+  no signal has, every alert tied again and every firing judged again in
+  the same write; no two signals ever share one (a unique index). One
+  taken away is turned off, its row gone and its windows kept, with its
+  name; one whose match or record changed, or the entries, judges every
+  firing again, as `--match` does. A signal renamed on the command line is
+  one taken away and one added, read again; renaming in place is step 3's,
+  in the UI. Only this keeps a named signal's row: a run, or a read
+  again, of a signal it doesn't keep (keeping them failed, or a replica
+  started with another set than the leader) reads it not, and keeps
+  nothing of it.
 - **The runs.** Each named signal is read on its own, in turn within
   `--timeout` (see "Cost"). One that fails, or finds more than 1,000
   windows in a read or 2,000 in its week, is missed: the run records the
