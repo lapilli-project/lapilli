@@ -1346,11 +1346,42 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, wrapBad(err))
 		return
 	}
+	// Dismissed with the other signals' windows at that time, those not
+	// decided yet, each noted on its own (docs/design/signals.md).
+	if r.PostFormValue("state") == "dismissed" && r.PostFormValue("together") != "" {
+		if err := s.dismissWith(r, o); err != nil {
+			s.oops(w, r, wrapBad(err))
+			return
+		}
+	}
 	if made != "" {
 		back(w, r, "/incidents/"+url.PathEscape(made))
 		return
 	}
 	back(w, r, "/incidents")
+}
+
+// dismissWith dismisses the windows of other named signals on at some time
+// in the window r names, that nothing was decided of.
+func (s *Server) dismissWith(r *http.Request, o verdict.Options) error {
+	ctx := r.Context()
+	in, err := s.l.IncidentByID(ctx, r.PathValue("id"))
+	if err != nil || in.Origin != "impact" || in.Signal == "" {
+		return err
+	}
+	ws, err := s.l.ImpactWindowsMeeting(ctx, in.Start, in.End)
+	if err != nil {
+		return err
+	}
+	for _, x := range ws {
+		if x.Signal == "" || x.Signal == in.Signal || x.State != "" {
+			continue
+		}
+		if _, err := s.l.Decide(ctx, x.ID, "dismissed", "", s.user(r), o); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // real writes an incident from a black stone: the firing caught something

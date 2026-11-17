@@ -958,3 +958,11 @@ func (l *Ledger) RuleSignals(ctx context.Context, rule string) ([]int64, error) 
 	}
 	return out, rows.Err()
 }
+
+// ImpactWindowsMeeting are the impact windows on at some time in [from,
+// to], decided or not, the earliest first: those of other signals beside
+// one, as a window's page shows them.
+func (l *Ledger) ImpactWindowsMeeting(ctx context.Context, from, to time.Time) ([]Incident, error) {
+	return l.incidents(ctx, `SELECT `+incidentCols+` FROM incidents i WHERE i.origin = 'impact' AND i.start_at <= ? AND i.end_at >= ?
+		ORDER BY i.start_at, i.key LIMIT 200`, to.Unix(), from.Unix())
+}

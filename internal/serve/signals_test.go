@@ -1708,3 +1708,87 @@ func TestQuickSignalReadWithWhatIsLeft(t *testing.T) {
 		}
 	}
 }
+
+// The pages by signal (docs/design/signals.md, "Where it shows"): the
+// Incidents page picks a signal's windows, says each line's signal and
+// the other signals' windows on with it; a window's page says its signal,
+// what caught the others at the time, and dismisses them together; a
+// confirmation's says it is matched as its window was; a rule's page what
+// it is judged against and what its record waits for.
+func TestSignalPages(t *testing.T) {
+	ctx := context.Background()
+	s := signalServer(t, signalWindowsHistory(), func(c *Config) { c.Editors = []string{"bo@example.com"} })
+	h := s.Handler()
+	page := func(path string) string {
+		t.Helper()
+		code, body := askAs(t, h, http.MethodGet, path, nil, "ana@example.com", "same-origin")
+		if code != http.StatusOK {
+			t.Fatalf("%s: %d %s", path, code, body)
+		}
+		return body
+	}
+	body := page("/incidents?source=impact")
+	for _, want := range []string{`<a href="/incidents?signal=probe&amp;source=impact&amp;weeks=4"><bdi>probe</bdi></a>`, "found by <bdi>errors</bdi>",
+		"with <bdi>probe</bdi>, <bdi>2026-11-02 06:00</bdi> to <bdi>2026-11-02 06:11</bdi>", "user impact (probe)"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/incidents?source=impact has no %s\n%s", want, body)
+		}
+	}
+	body = page("/incidents?source=impact&signal=probe")
+	if !strings.Contains(body, "impact-probe-20261102T0600Z") || strings.Contains(body, `>impact-errors-20261102T0600Z<`) {
+		t.Errorf("the probe's windows alone:\n%s", body)
+	}
+	body = page("/incidents/impact-probe-20261102T0600Z")
+	for _, want := range []string{`<h2 id="signal">Impact signal</h2>`, "Found by <bdi>probe</bdi>: a window once a series returns something for <bdi>2m</bdi>, matched on <bdi>service</bdi>.",
+		`impact-errors-20261102T0600Z</a> <bdi>errors</bdi>`, "caught by Errors", `name="together" value="1"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the probe's window's page has no %s", want)
+		}
+	}
+	body = page("/rules/Errors")
+	if !strings.Contains(body, "Judged against every impact signal&#39;s windows: errors (service), probe (service).") ||
+		!strings.Contains(body, "No record by reading them before 2026-11-09: it waits for errors, probe.") {
+		t.Errorf("the rule's page:\n%s", body)
+	}
+	// Dismissed together: the errors' window too, each noted on its own.
+	code, body := askAs(t, h, http.MethodPost, "/incidents/impact-probe-20261102T0600Z/decide", url.Values{"state": {"dismissed"}, "together": {"1"}}, "bo@example.com", "same-origin")
+	if code != http.StatusSeeOther {
+		t.Fatalf("dismissed together: %d %s", code, body)
+	}
+	for _, id := range []string{"impact-probe-20261102T0600Z", "impact-errors-20261102T0600Z"} {
+		if in, err := s.l.IncidentByID(ctx, id); err != nil || in.State != "dismissed" {
+			t.Errorf("%s: %q %v", id, in.State, err)
+		}
+	}
+	// Undone and confirmed, the probe's window is written down with its
+	// signal: its page says how it is matched.
+	o, _ := s.options(ctx)
+	if _, err := s.l.Decide(ctx, "impact-probe-20261102T0600Z", "", "", "bo@example.com", o); err != nil {
+		t.Fatal(err)
+	}
+	made, err := s.l.Decide(ctx, "impact-probe-20261102T0600Z", "confirmed", "", "bo@example.com", o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = page("/incidents/" + made)
+	if !strings.Contains(body, "Written down by confirming a window of <bdi>probe</bdi>: matched on <bdi>service</bdi>") ||
+		!strings.Contains(body, "matched as its window was; with other labels, on service, as any written down") {
+		t.Errorf("the confirmation's page:\n%s", body)
+	}
+}
+
+// A rule an entry names says so on its page, and what its record waits
+// for: the entry's signals alone.
+func TestSignalRulePageEntry(t *testing.T) {
+	s := signalServer(t, shopHistory(), func(c *Config) {
+		c.ImpactRules = []verdict.RuleEntry{{Rules: "^Errors$", Signals: []string{"probe"}, Match: []string{}}}
+	})
+	_, body := askAs(t, s.Handler(), http.MethodGet, "/rules/Errors", nil, "ana@example.com", "same-origin")
+	if !strings.Contains(body, "Rule entry #1: judged against the windows of probe (–) alone.") || !strings.Contains(body, "it waits for probe.") {
+		t.Errorf("the rule's page:\n%s", body)
+	}
+	_, body = askAs(t, s.Handler(), http.MethodGet, "/incidents", nil, "ana@example.com", "same-origin")
+	if strings.Contains(body, "Signal</") {
+		t.Error("signal tabs with no source picked")
+	}
+}

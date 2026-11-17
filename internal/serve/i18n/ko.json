@@ -2079,5 +2079,22 @@
  "the match in effect": "적용 중인 라벨",
  "no label": "라벨 없음",
  "no": "아니요",
- "yes, since %s": "예, %s 부터"
+ "yes, since %s": "예, %s 부터",
+ "caught by %s": "%s 가 잡음",
+ "Dismiss it and the other signals' windows at the time": "같은 시간의 다른 지표 구간과 함께 기각",
+ "Judged against every impact signal's windows: %s.": "모든 영향 지표의 구간으로 판정해요: %s.",
+ "matched as its window was; with other labels, on %s, as any written down": "구간과 같은 라벨로 맞춰 봐요. 라벨을 바꾸면 직접 기록한 것처럼 %s 로 맞춰 봐요",
+ "No record by reading them before %s: it waits for %s.": "%s 이전에는 지표를 읽어도 기록이 없어요: %s 를 기다려요.",
+ "No record by reading them: one of %s keeps none yet.": "지표를 읽어도 기록이 없어요: %s 중 하나가 아직 기록을 남기지 않아요.",
+ "None of them keeps the record: no record by reading them.": "기록을 남기는 지표가 없어요: 지표를 읽어도 기록이 없어요.",
+ "nothing caught it": "아무것도 잡지 못함",
+ "Other signals' windows at the time": "같은 시간의 다른 지표 구간",
+ "Rule entries keep their rules from its windows": "이 구간에서 룰을 빼는 룰 항목",
+ "Rule entry #%d: judged against the windows of %s alone.": "룰 항목 #%d: %s 의 구간으로만 판정해요.",
+ "user impact (%s)": "사용자 영향 (%s)",
+ "with %s, %s to %s": "%s 와 함께, %s ~ %s",
+ "found by %s": "%s 로 찾음",
+ "Written down by confirming a window of %s: matched on %s, as the window was, while its labels are those it was confirmed with.": "%s 구간을 확인해 기록했어요: 확인할 때의 라벨 그대로면 구간처럼 %s 로 맞춰 봐요.",
+ "Found by %s, a signal no longer read: its windows stay, as incidents, matched on %s.": "더 이상 읽지 않는 지표 %s 로 찾았어요: 구간은 인시던트로 남고 %s 로 맞춰 봐요.",
+ "Found by %s: a window once a series returns something for %s, matched on %s.": "%s 로 찾았어요: 시계열이 %s 동안 값을 내면 구간이 되고, %s 로 맞춰 봐요."
 }

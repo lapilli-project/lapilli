@@ -2079,5 +2079,22 @@
  "the match in effect": "las etiquetas en vigor",
  "no label": "ninguna etiqueta",
  "no": "no",
- "yes, since %s": "sí, desde %s"
+ "yes, since %s": "sí, desde %s",
+ "caught by %s": "detectado por %s",
+ "Dismiss it and the other signals' windows at the time": "Descartarla junto con las ventanas de las otras señales a esa hora",
+ "Judged against every impact signal's windows: %s.": "Se juzga frente a las ventanas de todas las señales de impacto: %s.",
+ "matched as its window was; with other labels, on %s, as any written down": "se compara como su ventana; con otras etiquetas, por %s, como cualquiera escrita",
+ "No record by reading them before %s: it waits for %s.": "Sin registro por leerlas antes del %s: espera a %s.",
+ "No record by reading them: one of %s keeps none yet.": "Sin registro por leerlas: una de %s aún no mantiene ninguno.",
+ "None of them keeps the record: no record by reading them.": "Ninguna mantiene el registro: sin registro por leerlas.",
+ "nothing caught it": "nada lo detectó",
+ "Other signals' windows at the time": "Ventanas de otras señales a esa hora",
+ "Rule entries keep their rules from its windows": "Entradas de reglas que apartan sus reglas de sus ventanas",
+ "Rule entry #%d: judged against the windows of %s alone.": "Entrada de regla n.º %d: se juzga solo frente a las ventanas de %s.",
+ "user impact (%s)": "impacto en usuarios (%s)",
+ "with %s, %s to %s": "con %s, de %s a %s",
+ "found by %s": "encontrado por %s",
+ "Written down by confirming a window of %s: matched on %s, as the window was, while its labels are those it was confirmed with.": "Escrito al confirmar una ventana de %s: se compara por %s, como la ventana, mientras sus etiquetas sean las de la confirmación.",
+ "Found by %s, a signal no longer read: its windows stay, as incidents, matched on %s.": "Encontrado por %s, una señal que ya no se lee: sus ventanas quedan como incidentes, comparadas por %s.",
+ "Found by %s: a window once a series returns something for %s, matched on %s.": "Encontrado por %s: una ventana cuando una serie devuelve algo durante %s, comparada por %s."
 }

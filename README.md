@@ -205,7 +205,8 @@ a load balancer's "no backend" rule matched on `backend` alone (see
 `lapilli serve`, the runs read each signal on its own, one that fails
 missed and read from there by a later run; each keeps its own start in
 the ledger, a firing is judged by the signals tied to its alert, and the
-summary, `/metrics` and MCP say each signal's windows apart. The chart's
+summary, `/metrics`, MCP and the Incidents page say each signal's windows
+apart, and a rule's page what its record waits for. The chart's
 `impact` takes the file's `signals` and `rules` as a mapping. The Settings
 page lists them; changing them there comes in a later release.
 

@@ -44,20 +44,24 @@
   proposal waiting is held when any signal's criterion, its match or
   record, the rule entries or the match in effect change. The Settings
   page lists the signals as serve was started with them; changing them
-  there, and the Incidents page and a rule's page by signal, come in a
-  later release. `lapilli preflight` reads and counts each signal, and the
-  requests of each beside its reads (what it reads, a round, and where its
-  data begins, once). Each run asks, of each signal, one query; after the
-  runs, one a selector, for what it reads (below). **Ledger schema 022**,
-  after 021: `impact_signals` (what meta kept of the impact signal, moved
-  to its row, and a row a named one), `impact_rules`, `incidents.signal`
-  and `incidents.match_labels`, `series.signals`, and `days`, `weeks`,
-  `marked_days` and `marked_weeks` keyed by `signals` too, every row
-  copied in once. A ledger with one impact signal with no name upgrades
-  with its windows, keys, decisions, tasks, comments and start unchanged,
-  and judges as it did. A lapilli before 0.54 doesn't open a ledger this
-  one has migrated: take a snapshot of its disk, or of its database,
-  before upgrading, to go back to.
+  there comes in a later release. The Incidents page picks a signal's
+  windows, says each one's signal and the other signals' windows on with
+  it; a window's page says its signal, the rule entries that keep rules
+  from it and the other signals' windows at the time, with what caught
+  each, and dismisses them together; a rule's page says what it is judged
+  against and what its record waits for. `lapilli preflight` reads and
+  counts each signal, and the requests of each beside its reads (what it
+  reads, a round, and where its data begins, once). Each run asks, of each
+  signal, one query; after the runs, one a selector, for what it reads
+  (below). **Ledger schema 022**, after 021: `impact_signals` (what meta
+  kept of the impact signal, moved to its row, and a row a named one),
+  `impact_rules`, `incidents.signal` and `incidents.match_labels`,
+  `series.signals`, and `days`, `weeks`, `marked_days` and `marked_weeks`
+  keyed by `signals` too, every row copied in once. A ledger with one
+  impact signal with no name upgrades with its windows, keys, decisions,
+  tasks, comments and start unchanged, and judges as it did. A lapilli
+  before 0.54 doesn't open a ledger this one has migrated: take a snapshot
+  of its disk, or of its database, before upgrading, to go back to.
 
 ### Changed
 
