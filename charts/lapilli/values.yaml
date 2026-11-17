@@ -412,8 +412,9 @@ serve:
   # by its name alone is another, and the old one is deleted.
   configPrune: false
   # Make a task, of kind decide, for each goal serve.config declares (goals:)
-  # that a whole week missed, 20 a run at most (--goal-tasks); an open one
-  # is commented on as weeks are missed again, met, or no longer missed.
+  # that a whole week missed, or an occurrence of a goal over a period
+  # (each: KIND), 20 a run at most (--goal-tasks); an open one is commented
+  # on as weeks (occurrences) are missed again, met, or no longer missed.
   goalTasks: false
   # Close a proposal no one approved that waited longer than this since it
   # began to wait (made, or backtested again), such as 30d, as expired, so

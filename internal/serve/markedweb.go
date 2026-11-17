@@ -112,61 +112,13 @@ func (s *Server) markedLines(ctx context.Context, ms []ledger.Marked, from, to t
 	for _, o := range occs {
 		d2 = max(d2, s.l.Day(o.End))
 	}
-	w1, w2 := ledger.Week(d1)-7*markedBefore, ledger.Week(d2)
-	t, err := s.talliesOver(ctx, w1, w2)
-	if err != nil {
-		return nil, false, err
-	}
-	if team != nil {
-		t.only(own, *team)
-	}
-	mine := func(id int64) bool { return team == nil || own.rule[t.rules[id].Name] == team.ID }
-	days, err := s.l.MarkedDaysBy(ctx, d1, d2)
-	if err != nil {
-		return nil, false, err
-	}
-	byDay := map[int64][]ledger.MarkedTally{}
-	for _, d := range days {
-		byDay[d.At] = append(byDay[d.At], d)
-	}
-	weeks, err := s.l.MarkedWeeksBy(ctx, w1, w2)
-	if err != nil {
-		return nil, false, err
-	}
-	// Each rule's firings of a kind in a week, and, of them, those that
-	// caught nothing and had no record by the signals tied to them.
-	byWeek := map[int64]map[int64]map[string]ledger.MarkedTally{}
-	unjudged := map[int64]map[int64]map[string]int{}
-	for _, m := range weeks {
-		if byWeek[m.At] == nil {
-			byWeek[m.At], unjudged[m.At] = map[int64]map[string]ledger.MarkedTally{}, map[int64]map[string]int{}
-		}
-		if byWeek[m.At][m.Rule] == nil {
-			byWeek[m.At][m.Rule], unjudged[m.At][m.Rule] = map[string]ledger.MarkedTally{}, map[string]int{}
-		}
-		k := byWeek[m.At][m.Rule][m.Kind]
-		k.At, k.Rule, k.Kind = m.At, m.Rule, m.Kind
-		k.Firings += m.Firings
-		k.White += m.White
-		k.Refired += m.Refired
-		byWeek[m.At][m.Rule][m.Kind] = k
-		if !t.judgedPart(m.At, m.Rule, m.Signals) {
-			unjudged[m.At][m.Rule][m.Kind] += m.Firings - m.White
-		}
-	}
-	incs, err := s.l.Incidents(ctx, s.l.Midnight(w1), s.l.Midnight(w2+7), false)
+	d, err := s.readMarked(ctx, x, d1, d2, team)
 	if err != nil {
 		return nil, false, err
 	}
 	if markedRows != nil {
-		n := len(days) + len(weeks) + len(incs)
-		for _, w := range t.weeks {
-			n += len(t.by[w])
-		}
-		markedRows(n)
+		markedRows(d.rows)
 	}
-	all := x.occurrences(s.l.Midnight(w1), s.l.Midnight(w2+7), team)
-	at := noisyAt(t.o)
 	var out []occLine
 	for _, o := range occs {
 		l := occLine{markedOcc: o, Kind: o.M.Kind, Title: o.M.Title, Labels: ledger.MarkedText(*o.M), On: !now.Before(o.Start) && !now.After(o.End),
@@ -175,69 +127,175 @@ func (s *Server) markedLines(ctx context.Context, ms []ledger.Marked, from, to t
 			l.Team = own.byID[o.M.TeamID].Name
 		}
 		l.Firings = (firingsAsk{day: s.l.Day(o.Start), kind: o.M.Kind}).url(s.l)
-		// Inside: the kind's firings on the days it covers, by rule.
-		inRules := map[int64][3]int{}
-		judged := 0
-		for d := s.l.Day(o.Start); d <= s.l.Day(o.End); d++ {
-			for _, m := range byDay[d] {
-				if m.Kind != o.M.Kind || !mine(m.Rule) {
-					continue
-				}
-				c := inRules[m.Rule]
-				inRules[m.Rule] = [3]int{c[0] + m.Firings, c[1] + m.White, c[2] + m.Refired}
-				if t.judgedPart(ledger.Week(d), m.Rule, m.Signals) {
-					judged += m.Firings
-				} else {
-					judged += m.White
-				}
-			}
-		}
-		l.Inside = markedTotals(inRules, judged, at)
-		// Another of its kind on one of its days is counted with it.
-		for _, p := range all[o.M.Kind] {
-			if p != o && s.l.Day(p.Start) <= s.l.Day(o.End) && s.l.Day(p.End) >= s.l.Day(o.Start) {
-				l.Shared = true
-			}
-		}
-		// Before: the four whole weeks before its first, outside its kind.
-		first := ledger.Week(s.l.Day(o.Start))
-		beRules := map[int64][3]int{}
-		judged = 0
-		for w := first - 7*markedBefore; w < first; w += 7 {
-			for id, x := range t.by[w] {
-				if !mine(id) {
-					continue
-				}
-				m := byWeek[w][id][o.M.Kind]
-				n, white := x.Firings-m.Firings, x.White-m.White
-				c := beRules[id]
-				beRules[id] = [3]int{c[0] + n, c[1] + white, c[2] + x.Refired - m.Refired}
-				// Outside its kind: the rule's firings judged, less those
-				// of the kind.
-				u := t.unjudged(w, id)
-				judged += n - (u.Firings - u.White - unjudged[w][id][o.M.Kind])
-			}
-		}
-		l.Before = markedTotals(beRules, judged, at)
-		// The incidents: those during it, and those of the weeks before
-		// during none of its kind.
-		bFrom, bTo := s.l.Midnight(first-7*markedBefore), s.l.Midnight(first)
-		for _, in := range incs {
-			if team != nil && !own.ownsIncident(*team, in) {
-				continue
-			}
-			w := ledger.Week(s.l.Day(in.Start))
-			switch {
-			case x.during(in, []markedOcc{o}):
-				countIncident(&l.Inside, in, t, w)
-			case !in.Start.Before(bFrom) && in.Start.Before(bTo) && !x.during(in, all[o.M.Kind]):
-				countIncident(&l.Before, in, t, w)
-			}
-		}
+		l.Inside, l.Before, l.Shared = d.count(o, team)
 		finishLeads(lg, &l.Inside, &l.Before)
 		out = append(out, l)
 	}
 	return out, cut, nil
+}
+
+// markedData is what the counts of occurrences are worked out from, read
+// once for all of them: the tallies of the weeks from the four before the
+// first's to the last's, with their record; the kinds' days and weeks, by
+// rule; and the incidents of those weeks, by the week each started in.
+type markedData struct {
+	x      *markedSpan
+	t      *tallies
+	w1, w2 int64
+	byDay  map[int64][]ledger.MarkedTally
+	// Each rule's firings of a kind in a week, and, of them, those that
+	// caught nothing and had no record by the signals tied to them.
+	byWeek   map[int64]map[int64]map[string]ledger.MarkedTally
+	unjudged map[int64]map[int64]map[string]int
+	incs     map[int64][]ledger.Incident
+	at       verdict.NoisyAt
+	// all are the occurrences of the weeks read, by kind, of everyone's
+	// (0) and each team's windows, worked out as first asked.
+	all map[int64]map[string][]markedOcc
+	// rows are how many rows of tallies and incidents were read.
+	rows int
+}
+
+// readMarked reads what the occurrences of x's windows whose days run from
+// d1 to d2 are counted from. With only, its tallies are of the rules the
+// team owns, judged by the incidents it owns, as a page with the team
+// picked reads them; without, everyone's, as the summary reads a team's
+// row.
+func (s *Server) readMarked(ctx context.Context, x *markedSpan, d1, d2 int64, only *ledger.Team) (*markedData, error) {
+	w1, w2 := ledger.Week(d1)-7*markedBefore, ledger.Week(d2)
+	t, err := s.talliesOver(ctx, w1, w2)
+	if err != nil {
+		return nil, err
+	}
+	if only != nil {
+		t.only(x.own, *only)
+	}
+	days, err := s.l.MarkedDaysBy(ctx, d1, d2)
+	if err != nil {
+		return nil, err
+	}
+	d := &markedData{x: x, t: t, w1: w1, w2: w2, byDay: map[int64][]ledger.MarkedTally{}, byWeek: map[int64]map[int64]map[string]ledger.MarkedTally{},
+		unjudged: map[int64]map[int64]map[string]int{}, incs: map[int64][]ledger.Incident{}, at: noisyAt(t.o), all: map[int64]map[string][]markedOcc{}}
+	for _, m := range days {
+		d.byDay[m.At] = append(d.byDay[m.At], m)
+	}
+	weeks, err := s.l.MarkedWeeksBy(ctx, w1, w2)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range weeks {
+		if d.byWeek[m.At] == nil {
+			d.byWeek[m.At], d.unjudged[m.At] = map[int64]map[string]ledger.MarkedTally{}, map[int64]map[string]int{}
+		}
+		if d.byWeek[m.At][m.Rule] == nil {
+			d.byWeek[m.At][m.Rule], d.unjudged[m.At][m.Rule] = map[string]ledger.MarkedTally{}, map[string]int{}
+		}
+		k := d.byWeek[m.At][m.Rule][m.Kind]
+		k.At, k.Rule, k.Kind = m.At, m.Rule, m.Kind
+		k.Firings += m.Firings
+		k.White += m.White
+		k.Refired += m.Refired
+		d.byWeek[m.At][m.Rule][m.Kind] = k
+		if !t.judgedPart(m.At, m.Rule, m.Signals) {
+			d.unjudged[m.At][m.Rule][m.Kind] += m.Firings - m.White
+		}
+	}
+	incs, err := s.l.Incidents(ctx, s.l.Midnight(w1), s.l.Midnight(w2+7), false)
+	if err != nil {
+		return nil, err
+	}
+	for _, in := range incs {
+		w := ledger.Week(s.l.Day(in.Start))
+		d.incs[w] = append(d.incs[w], in)
+	}
+	d.rows = len(days) + len(weeks) + len(incs)
+	for _, w := range t.weeks {
+		d.rows += len(t.by[w])
+	}
+	return d, nil
+}
+
+// occs are the occurrences of the weeks read that apply to team, by kind.
+func (d *markedData) occs(team *ledger.Team) map[string][]markedOcc {
+	id := teamIDOf(team)
+	if os, ok := d.all[id]; ok {
+		return os
+	}
+	os := d.x.occurrences(d.x.s.l.Midnight(d.w1), d.x.s.l.Midnight(d.w2+7), team)
+	d.all[id] = os
+	return os
+}
+
+// count is an occurrence's firings and incidents for team (nil for
+// everyone), of the rules it owns and the incidents it owns: inside its
+// kind, on the days it covers; before, over the four whole weeks before
+// its first, outside its kind; and whether another occurrence of its kind
+// is on one of its days, counted with it.
+func (d *markedData) count(o markedOcc, team *ledger.Team) (inside, before markedCount, shared bool) {
+	s, t, own := d.x.s, d.t, d.x.own
+	mine := func(id int64) bool { return team == nil || own.rule[t.rules[id].Name] == team.ID }
+	// Inside: the kind's firings on the days it covers, by rule.
+	inRules := map[int64][3]int{}
+	judged := 0
+	for day := s.l.Day(o.Start); day <= s.l.Day(o.End); day++ {
+		for _, m := range d.byDay[day] {
+			if m.Kind != o.M.Kind || !mine(m.Rule) {
+				continue
+			}
+			c := inRules[m.Rule]
+			inRules[m.Rule] = [3]int{c[0] + m.Firings, c[1] + m.White, c[2] + m.Refired}
+			if t.judgedPart(ledger.Week(day), m.Rule, m.Signals) {
+				judged += m.Firings
+			} else {
+				judged += m.White
+			}
+		}
+	}
+	inside = markedTotals(inRules, judged, d.at)
+	// Another of its kind on one of its days is counted with it.
+	all := d.occs(team)[o.M.Kind]
+	for _, p := range all {
+		if p != o && s.l.Day(p.Start) <= s.l.Day(o.End) && s.l.Day(p.End) >= s.l.Day(o.Start) {
+			shared = true
+		}
+	}
+	// Before: the four whole weeks before its first, outside its kind.
+	first := ledger.Week(s.l.Day(o.Start))
+	beRules := map[int64][3]int{}
+	judged = 0
+	for w := first - 7*markedBefore; w < first; w += 7 {
+		for id, x := range t.by[w] {
+			if !mine(id) {
+				continue
+			}
+			m := d.byWeek[w][id][o.M.Kind]
+			n, white := x.Firings-m.Firings, x.White-m.White
+			c := beRules[id]
+			beRules[id] = [3]int{c[0] + n, c[1] + white, c[2] + x.Refired - m.Refired}
+			// Outside its kind: the rule's firings judged, less those
+			// of the kind.
+			u := t.unjudged(w, id)
+			judged += n - (u.Firings - u.White - d.unjudged[w][id][o.M.Kind])
+		}
+	}
+	before = markedTotals(beRules, judged, d.at)
+	// The incidents: those during it, and those of the weeks before
+	// during none of its kind.
+	bFrom, bTo := s.l.Midnight(first-7*markedBefore), s.l.Midnight(first)
+	for w := first - 7*markedBefore; w <= ledger.Week(s.l.Day(o.End)); w += 7 {
+		for _, in := range d.incs[w] {
+			if team != nil && !own.ownsIncident(*team, in) {
+				continue
+			}
+			switch {
+			case d.x.during(in, []markedOcc{o}):
+				countIncident(&inside, in, t, w)
+			case !in.Start.Before(bFrom) && in.Start.Before(bTo) && !d.x.during(in, all):
+				countIncident(&before, in, t, w)
+			}
+		}
+	}
+	return inside, before, shared
 }
 
 // markedTotals sums each rule's firings, those that caught something and

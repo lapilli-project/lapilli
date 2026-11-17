@@ -327,7 +327,9 @@ renamed by its name alone, it is another team.
 the repository): what the alerting is held to, each a bound on one of the
 summary's numbers, for everyone, a team or each team (`team: "*"`), each
 whole week met, missed or not known on the Goals page, the overview, the
-digest, reports and `/metrics`. Only the file declares a goal: one it no
+digest, reports and `/metrics`; or, with `each: KIND`, each occurrence of
+a kind of marked window, such as a sale, beside the four weeks before it
+with `no_worse_than: before`. Only the file declares a goal: one it no
 longer declares is deleted, with or without `serve.configPrune`.
 `serve.goalTasks` makes a task, of kind decide, for each goal a whole week
 missed, 20 a run at most (`--goal-tasks`); it needs `serve.config`.

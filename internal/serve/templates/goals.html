@@ -6,7 +6,7 @@
 {{else}}
 <p class="quiet">{{t "The last whole week is the week of %s." (day $loc .Last)}} {{t "✓ met, ✕ not met, ? not known, … so far."}}</p>
 {{if .ByCatching}}<p class="notice status-unknown"><span class="sign" aria-hidden="true">?</span> {{t "A goal on incidents isn't known for a team with no labels: it owns only the incidents its rules caught, so it never missed one. Give the team labels on the Teams page."}} <a href="{{$.Link "/teams"}}">{{t "Teams"}}</a></p>{{end}}
-<h2 id="goal-weeks">{{t "Week by week"}}</h2>
+{{if .Rows}}<h2 id="goal-weeks">{{t "Week by week"}}</h2>
 <div class="scroll" tabindex="0" role="region" aria-labelledby="goal-weeks"><table class="goals">
 <thead><tr><th scope="col">{{t "Goal"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Target"}}</th><th scope="col">{{t "Last week"}}</th>{{range .Weeks}}<th scope="col" class="hw">{{if .Current}}{{t "so far"}}{{else}}{{.Label}}{{end}}</th>{{end}}<th scope="col">{{t "Task"}}</th></tr></thead>
 <tbody>{{range .Rows}}<tr{{with .ID}} id="{{.}}"{{end}}>
@@ -17,7 +17,20 @@
   {{range .Cells}}<td class="gw {{.Class}}" title="{{.Text}}"><span aria-hidden="true">{{.Sign}}<span class="v">{{.Value}}</span></span><span class="vh">{{.Text}}</span></td>{{end}}
   <td>{{if .Task}}<a class="pill open {{status "task" "open"}}" href="{{$.Link (printf "/tasks/%d" .Task)}}">{{t "task #%d" .Task}}</a>{{else}}–{{end}}</td>
 </tr>{{end}}</tbody>
-</table></div>
-{{with .More}}<p class="quiet">{{t "And %d more teams' rows of goals of each team: pick a team to see its own." .}}</p>{{end}}
+</table></div>{{end}}
+{{with .More}}<p class="quiet">{{t "And %d more teams' rows of goals of each team: pick a team to see its own." .}}</p>{{end}}{{if .Periods}}
+<h2 id="goal-periods">{{t "Occurrence by occurrence"}}</h2>
+<p class="quiet">{{t "A goal over a period is checked for each occurrence of its kind of marked window that ended in the weeks above, and for the one on now, as it stands: the firings marked with the kind on the days it covers, and the incidents during it, as the Marked windows page counts them. A goal of no worse than before sets it beside the four whole weeks before the occurrence's first week, outside the kind."}} <a href="{{$.Link "/marked"}}">{{t "Marked windows"}}</a></p>
+<div class="scroll" tabindex="0" role="region" aria-labelledby="goal-periods"><table class="goals">
+<thead><tr><th scope="col">{{t "Goal"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Target"}}</th><th scope="col">{{t "Last ended"}}</th>{{if .Slots}}<th scope="col" colspan="{{.Slots}}">{{t "Occurrences, the earliest first"}}</th>{{end}}<th scope="col">{{t "Task"}}</th></tr></thead>
+<tbody>{{range .Periods}}<tr{{with .ID}} id="{{.}}"{{end}}>
+  <th scope="row"><code>{{.Name}}</code> {{template "declared"}}</th>
+  <td>{{if .Team}}<bdi>{{.Team}}</bdi>{{if .EveryTeam}} <span class="quiet">{{t "(each team)"}}</span>{{end}}{{else}}{{t "everyone"}}{{end}}</td>
+  <td>{{t "each %s" .Kind}}: {{.Measure}}: {{.Target}}</td>
+  {{if .LastOcc}}<td class="{{.Last.Class}}"><span aria-hidden="true">{{.Last.Sign}} {{.Last.Value}}</span><span class="vh">{{.Last.Text}}</span><br><span class="quiet"><bdi>{{.LastOcc}}</bdi></span>{{with .LastWhy}}<br><span class="quiet">{{.}}</span>{{end}}{{with .Earlier}}<br><span class="quiet">{{t "%d earlier occurrences left out" .}}</span>{{end}}</td>{{else}}<td><span class="quiet">{{t "None ended in the weeks shown."}}</span></td>{{end}}
+  {{range .Cells}}<td class="gw {{.Class}}" title="{{.Text}}"><span aria-hidden="true">{{.Sign}}<span class="v">{{.Value}}</span></span><span class="vh">{{.Text}}</span></td>{{end}}{{range .Pad}}<td></td>{{end}}
+  <td>{{if .Task}}<a class="pill open {{status "task" "open"}}" href="{{$.Link (printf "/tasks/%d" .Task)}}">{{t "task #%d" .Task}}</a>{{else}}–{{end}}</td>
+</tr>{{end}}</tbody>
+</table></div>{{end}}
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}

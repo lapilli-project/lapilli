@@ -13,8 +13,9 @@ import (
 
 // Each rule of a goal's: exactly one bound; a share's from 0 to 1, a
 // count's from 0; by only with no_worse_than; critical only with a
-// critical.* measure; each: deploy refused; a goal over a period refused,
-// saying why, until marked windows are kept.
+// critical.* measure; each: deploy refused; a goal over a period of the
+// measures marked windows count inside an occurrence, and no_worse_than of
+// precision and the median lead alone, over a period alone.
 func TestCheckGoal(t *testing.T) {
 	for _, c := range []struct {
 		g    Goal
@@ -42,8 +43,12 @@ func TestCheckGoal(t *testing.T) {
 		{Goal{Name: "a", Measure: "firings", NoWorseThan: "before", Each: "sale"}, "no_worse_than sets firings beside the weeks before"},
 		{Goal{Name: "a", Measure: "precision", NoWorseThan: "before"}, "no_worse_than holds over a period: give each"},
 		{Goal{Name: "a", Measure: "precision", NoWorseThan: "after", Each: "sale"}, "no_worse_than is before"},
-		{Goal{Name: "a", Measure: "precision", NoWorseThan: "before", By: "0.05", Each: "sale"}, "each: sale is a goal over a kind of marked window, which this lapilli doesn't keep yet"},
-		{Goal{Name: "a", Measure: "incidents.missed", AtMost: "0", Each: "sale"}, "which this lapilli doesn't keep yet"},
+		{Goal{Name: "a", Measure: "precision", NoWorseThan: "before", By: "0.05", Each: "sale"}, ""},
+		{Goal{Name: "a", Measure: "incidents.median_lead_seconds", NoWorseThan: "before", By: "60", Each: "launch"}, ""},
+		{Goal{Name: "a", Measure: "incidents.missed", AtMost: "0", Each: "sale"}, ""},
+		{Goal{Name: "a", Measure: "precision", AtLeast: "0.5", Each: "sale"}, ""},
+		{Goal{Name: "a", Measure: "precision", NoWorseThan: "before", By: "1.5", Each: "sale"}, "by is how much worse is no worse"},
+		{Goal{Name: "a", Measure: "precision", NoWorseThan: "before", By: "-1", Each: "sale"}, "by is how much worse is no worse"},
 		{Goal{Name: "a", Measure: "precision", AtLeast: "0.8", Each: "Sale!"}, "each is week, or a kind of marked window"},
 		{Goal{Name: "a", Measure: "precision", AtLeast: "0.8", Each: "1sale"}, "each is week, or a kind of marked window"},
 		{Goal{Name: "a", Measure: "precision", AtLeast: "0.8", Each: strings.Repeat("s", 33)}, "each is week, or a kind of marked window"},
@@ -55,6 +60,31 @@ func TestCheckGoal(t *testing.T) {
 			t.Errorf("%+v: %v", c.g, err)
 		case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)):
 			t.Errorf("%+v: %v, want %q", c.g, err, c.want)
+		}
+	}
+	// The measures with each: KIND, and those with no_worse_than, as the
+	// design's table of measures says them: every other refused, saying
+	// which are.
+	withEach := map[string]bool{"firings": true, "precision": true, "refired.firings": true, "incidents.missed": true, "impacts.missed": true,
+		"incidents.noisy_only": true, "incidents.median_lead_seconds": true}
+	withNoWorse := map[string]bool{"precision": true, "incidents.median_lead_seconds": true}
+	for _, m := range GoalMeasureNames {
+		g := Goal{Name: "a", Measure: m, AtMost: "0", Each: "sale"}
+		if err := CheckGoal(&g); withEach[m] != (err == nil) {
+			t.Errorf("each: sale, %s, at_most: %v", m, err)
+		} else if err != nil && !strings.Contains(err.Error(), "with each: KIND, a goal is of firings, precision, refired.firings, incidents.missed, impacts.missed, incidents.noisy_only or incidents.median_lead_seconds") {
+			t.Errorf("each: sale, %s: %v", m, err)
+		}
+		if g := (Goal{Name: "a", Measure: m, AtMost: "0"}); CheckGoal(&g) != nil {
+			t.Errorf("each week, %s: refused", m)
+		}
+		g = Goal{Name: "a", Measure: m, NoWorseThan: "before", Each: "sale"}
+		if err := CheckGoal(&g); withNoWorse[m] != (err == nil) {
+			t.Errorf("each: sale, %s, no_worse_than: %v", m, err)
+		}
+		g = Goal{Name: "a", Measure: m, NoWorseThan: "before"}
+		if err := CheckGoal(&g); err == nil {
+			t.Errorf("each week, %s, no_worse_than: taken", m)
 		}
 	}
 	g := Goal{Name: "paged", Measure: "critical.firings", Critical: []string{" page ", "page", "critical"}, AtMost: "40"}

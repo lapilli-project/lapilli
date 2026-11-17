@@ -118,6 +118,12 @@ const (
 	goalMissedKeyPrefix = "goal-missed."
 	goalMadeKeyPrefix   = "goal-made."
 	goalTaskKeyPrefix   = "goal-task."
+	// What was told of a goal over a period, and what tasks were made for:
+	// by the end of the occurrence, in Unix seconds, under prefixes of their
+	// own, so that a goal changed from each week to each kind, or back,
+	// takes neither's marks for the other's.
+	goalOccMissedKeyPrefix = "goal-occ-missed."
+	goalOccMadeKeyPrefix   = "goal-occ-made."
 )
 
 // goalName is what a goal is named by: a small alphabet, as a label's
@@ -149,9 +155,9 @@ func goalNumber(key, s string) (float64, error) {
 // in its defaults: exactly one bound, at_least, at_most or no_worse_than;
 // a share's bound from 0 to 1, a count's from 0; by only with
 // no_worse_than; critical only with a critical.* measure; each, week or a
-// kind of marked window, never deploy. Goals over a period (each: KIND)
-// wait for marked windows (#90), which this lapilli doesn't keep: refused,
-// once every other rule is kept, with that said.
+// kind of marked window, never deploy. A goal over a period (each: KIND)
+// is of a measure marked windows count inside an occurrence, and only
+// such a goal takes no_worse_than, of precision or the median lead.
 func CheckGoal(g *Goal) error {
 	g.Name, g.Measure, g.Each = strings.TrimSpace(g.Name), strings.TrimSpace(g.Measure), strings.TrimSpace(g.Each)
 	if err := CheckGoalName(g.Name); err != nil {
@@ -229,11 +235,13 @@ func CheckGoal(g *Goal) error {
 		return invalid("no_worse_than sets %s beside the weeks before, which only precision and incidents.median_lead_seconds can be", g.Measure)
 	case g.NoWorseThan != "" && g.Each == goalWeek:
 		return invalid("no_worse_than holds over a period: give each, a kind of marked window")
-	case g.Each != goalWeek:
-		return invalid("each: %s is a goal over a kind of marked window, which this lapilli doesn't keep yet: each takes week alone for now", g.Each)
 	}
 	return nil
 }
+
+// OverPeriod reports whether a goal is over each occurrence of a kind of
+// marked window (each: KIND), not each week.
+func (g Goal) OverPeriod() bool { return g.Each != "" && g.Each != goalWeek }
 
 // criticalKey is a list of severities as one text, to tell the lists apart.
 func criticalKey(cs []string) string {
@@ -340,11 +348,23 @@ func sameGoal(a, b Goal) bool {
 // its last byte, a dot, raised to a slash: a goal's name holds _, which
 // LIKE would read as any character.
 func (l *Ledger) PruneGoalMarks(ctx context.Context, before int64) (int, error) {
+	return l.pruneGoalMarks(ctx, before, goalMissedKeyPrefix, goalMadeKeyPrefix)
+}
+
+// PrunePeriodGoalMarks is PruneGoalMarks of the goals over a period: what
+// was told of them, and made tasks for, of occurrences that ended before
+// before.
+func (l *Ledger) PrunePeriodGoalMarks(ctx context.Context, before time.Time) (int, error) {
+	return l.pruneGoalMarks(ctx, before.Unix(), goalOccMissedKeyPrefix, goalOccMadeKeyPrefix)
+}
+
+func (l *Ledger) pruneGoalMarks(ctx context.Context, before int64, prefixes ...string) (int, error) {
 	n := 0
 	err := l.writeAside(ctx, func(t *txn) error {
 		n = 0
-		// A statement a prefix: each mark is a week's day, a number.
-		for _, p := range []string{goalMissedKeyPrefix, goalMadeKeyPrefix} {
+		// A statement a prefix: each mark is a week's day, or an end in
+		// Unix seconds, a number.
+		for _, p := range prefixes {
 			res, err := t.ExecContext(t.ctx, "DELETE FROM meta WHERE key > ? AND key < ? AND CAST(value AS BIGINT) < ?", p, strings.TrimSuffix(p, ".")+"/", before)
 			if err != nil {
 				return err
@@ -482,6 +502,17 @@ func goalTeamKey(name string, team int64) string { return name + "." + strconv.F
 // or said missed on (made): read at once, so that the leader's work over
 // every team reads them once a round, not once a team.
 func (l *Ledger) GoalMarks(ctx context.Context) (told, made map[string]int64, err error) {
+	return l.goalMarks(ctx, goalMissedKeyPrefix, goalMadeKeyPrefix)
+}
+
+// PeriodGoalMarks are GoalMarks of the goals over a period, by GoalKey: the
+// end of the latest occurrence goal.missed was told of (told), and of the
+// latest a task was made for or said missed on (made), in Unix seconds.
+func (l *Ledger) PeriodGoalMarks(ctx context.Context) (told, made map[string]int64, err error) {
+	return l.goalMarks(ctx, goalOccMissedKeyPrefix, goalOccMadeKeyPrefix)
+}
+
+func (l *Ledger) goalMarks(ctx context.Context, toldPrefix, madePrefix string) (told, made map[string]int64, err error) {
 	read := func(prefix string) (map[string]int64, error) {
 		rows, err := l.r.QueryContext(ctx, "SELECT key, value FROM meta WHERE key > ? AND key < ?", prefix, strings.TrimSuffix(prefix, ".")+"/")
 		if err != nil {
@@ -500,10 +531,10 @@ func (l *Ledger) GoalMarks(ctx context.Context) (told, made map[string]int64, er
 		}
 		return out, rows.Err()
 	}
-	if told, err = read(goalMissedKeyPrefix); err != nil {
+	if told, err = read(toldPrefix); err != nil {
 		return nil, nil, err
 	}
-	made, err = read(goalMadeKeyPrefix)
+	made, err = read(madePrefix)
 	return told, made, err
 }
 
@@ -518,6 +549,17 @@ func GoalKey(name string, team int64) string { return goalTeamKey(name, team) }
 // (its caller leaves it out of told). A goal of each team's tells its
 // teams missed in one notice.
 func (l *Ledger) TellGoalMissed(ctx context.Context, name string, teams []int64, week int64, told []Told) error {
+	return l.tellGoalMissed(ctx, goalMissedKeyPrefix, name, teams, week, told)
+}
+
+// TellPeriodGoalMissed is TellGoalMissed of a goal over a period, of the
+// occurrence that ended at end, in Unix seconds: each team's mark set to
+// it, a team marked for it, or a later end, passed over.
+func (l *Ledger) TellPeriodGoalMissed(ctx context.Context, name string, teams []int64, end int64, told []Told) error {
+	return l.tellGoalMissed(ctx, goalOccMissedKeyPrefix, name, teams, end, told)
+}
+
+func (l *Ledger) tellGoalMissed(ctx context.Context, prefix, name string, teams []int64, week int64, told []Told) error {
 	return l.writeAside(ctx, func(t *txn) error {
 		now := wallNow()
 		for _, x := range told {
@@ -533,7 +575,7 @@ func (l *Ledger) TellGoalMissed(ctx context.Context, name string, teams []int64,
 			}
 		}
 		for _, team := range teams {
-			key := goalMissedKeyPrefix + goalTeamKey(name, team)
+			key := prefix + goalTeamKey(name, team)
 			was, err := l.meta(t.ctx, t, key)
 			if err != nil {
 				return err
@@ -594,10 +636,13 @@ func (l *Ledger) GoalsShown(ctx context.Context) ([]byte, error) {
 // GoalTaskState is what a goal's task was made for, and what has been said
 // on it since, week by week (Mondays, as days): "missed" for a week said
 // missed (the one it was made for, or missed again), "met" for one said
-// met, "no_longer" for one missed and said no longer missed.
+// met, "no_longer" for one missed and said no longer missed. Of a goal
+// over a period (Period), occurrence by occurrence instead, each by its
+// end, in Unix seconds.
 type GoalTaskState struct {
-	Week int64            `json:"week"`
-	Said map[int64]string `json:"said,omitempty"`
+	Week   int64            `json:"week"`
+	Said   map[int64]string `json:"said,omitempty"`
+	Period bool             `json:"period,omitempty"`
 }
 
 func goalTaskKey(id int64) string { return goalTaskKeyPrefix + strconv.FormatInt(id, 10) }
@@ -622,6 +667,18 @@ var ErrGoalTaskOpen = errors.New("a task for this goal and team is open already"
 // make another for it once this one is done or dropped. A task about the
 // goal and team open already is refused (ErrGoalTaskOpen), with its id.
 func (l *Ledger) MakeGoalTask(ctx context.Context, t Task, week int64, by string) (int64, error) {
+	return l.makeGoalTask(ctx, t, week, false, by)
+}
+
+// MakePeriodGoalTask is MakeGoalTask of a goal over a period, for the
+// occurrence that ended at end, in Unix seconds: kept as the latest one a
+// task was made for, so that Lapilli makes no other for it once this one
+// is done or dropped.
+func (l *Ledger) MakePeriodGoalTask(ctx context.Context, t Task, end int64, by string) (int64, error) {
+	return l.makeGoalTask(ctx, t, end, true, by)
+}
+
+func (l *Ledger) makeGoalTask(ctx context.Context, t Task, week int64, period bool, by string) (int64, error) {
 	if t.Goal == "" {
 		return 0, invalid("a goal's task names its goal")
 	}
@@ -641,11 +698,14 @@ func (l *Ledger) MakeGoalTask(ctx context.Context, t Task, week int64, by string
 		if id, err = l.putTaskIn(tx, 0, func(Task) (Task, error) { return t, nil }, by); err != nil {
 			return err
 		}
-		st, _ := json.Marshal(GoalTaskState{Week: week, Said: map[int64]string{week: "missed"}})
+		st, _ := json.Marshal(GoalTaskState{Week: week, Said: map[int64]string{week: "missed"}, Period: period})
 		if err := setMeta(tx.ctx, tx, goalTaskKey(id), string(st)); err != nil {
 			return err
 		}
 		key := goalMadeKeyPrefix + goalTeamKey(t.Goal, t.TeamID)
+		if period {
+			key = goalOccMadeKeyPrefix + goalTeamKey(t.Goal, t.TeamID)
+		}
 		was, err := l.meta(tx.ctx, tx, key)
 		if err != nil {
 			return err
@@ -683,6 +743,9 @@ func (l *Ledger) SayOnGoalTask(ctx context.Context, id int64, body string, st Go
 		}
 		if goal != "" && latest > 0 {
 			key := goalMadeKeyPrefix + goalTeamKey(goal, team)
+			if st.Period {
+				key = goalOccMadeKeyPrefix + goalTeamKey(goal, team)
+			}
 			was, err := l.meta(t.ctx, t, key)
 			if err != nil {
 				return err

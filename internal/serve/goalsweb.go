@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,6 +59,22 @@ type goalRowView struct {
 	Task int64
 }
 
+// goalPeriodRow is a goal over a period for a team on the Goals page: its
+// latest occurrence that ended, and its occurrences that ended in the
+// weeks shown and the one on now, goalOccsShown of them at most, the
+// earliest first, in cells as a week's are (Pad, empty cells after them,
+// so that the rows line up); Earlier, those left out.
+type goalPeriodRow struct {
+	ID, Name, Team, Measure, Target, Kind string
+	EveryTeam                             bool
+	Last                                  goalCell
+	LastOcc, LastWhy                      string
+	Cells                                 []goalCell
+	Pad                                   []struct{}
+	Earlier                               int
+	Task                                  int64
+}
+
 // goalHead is a week's column: its Monday, or the week under way.
 type goalHead struct {
 	Label   string
@@ -78,6 +95,10 @@ type goalsView struct {
 	// ByCatching says some team's goal on incidents isn't known for its
 	// team having no labels.
 	ByCatching bool
+	// Periods are the goals over a period, occurrence by occurrence;
+	// Slots, how many cells the widest of them has.
+	Periods []goalPeriodRow
+	Slots   int
 }
 
 // goalTeamsShown is how many teams a goal of each team's (team: "*") is
@@ -146,6 +167,10 @@ func (s *Server) goalsPage(r *http.Request) (any, error) {
 		}
 		wa, _ := a.week(v.Last)
 		wb, _ := b.week(v.Last)
+		if a.Goal.OverPeriod() {
+			wa, _ = a.lastEnded()
+			wb, _ = b.lastEnded()
+		}
 		return order[wa.Result] - order[wb.Result]
 	})
 	seen := map[string]bool{}
@@ -157,6 +182,14 @@ func (s *Server) goalsPage(r *http.Request) (any, error) {
 				continue
 			}
 			shown[g.Name]++
+		}
+		if g.OverPeriod() {
+			v.Periods = append(v.Periods, s.goalPeriodRowOf(l, gl, open, seen))
+			if w, ok := gl.lastEnded(); ok && w.Why == whyByCatching {
+				v.ByCatching = true
+			}
+			v.Slots = max(v.Slots, len(v.Periods[len(v.Periods)-1].Cells))
+			continue
 		}
 		row := goalRowView{Name: g.Name, Team: gl.TeamName(), Measure: goalMeasureText(l, g.Measure), Target: goalTarget(l, g), EveryTeam: g.EveryTeam,
 			Task: open[ledger.GoalKey(g.Name, teamIDOf(gl.Team))]}
@@ -178,7 +211,35 @@ func (s *Server) goalsPage(r *http.Request) (any, error) {
 		}
 		v.Rows = append(v.Rows, row)
 	}
+	for i := range v.Periods {
+		v.Periods[i].Pad = make([]struct{}, v.Slots-len(v.Periods[i].Cells))
+	}
 	return v, nil
+}
+
+// goalPeriodRowOf is a goal over a period for a team, as the Goals page
+// shows it.
+func (s *Server) goalPeriodRowOf(l string, gl goalLine, open map[string]int64, seen map[string]bool) goalPeriodRow {
+	g := gl.Goal
+	row := goalPeriodRow{Name: g.Name, Team: gl.TeamName(), Measure: goalMeasureText(l, g.Measure), Target: goalTarget(l, g), Kind: g.Each,
+		EveryTeam: g.EveryTeam, Task: open[ledger.GoalKey(g.Name, teamIDOf(gl.Team))]}
+	if !seen[g.Name] {
+		row.ID, seen[g.Name] = "goal-"+g.Name, true
+	}
+	occs := gl.Occs
+	if n := len(occs) - goalOccsShown; n > 0 {
+		row.Earlier, occs = n, occs[n:]
+	}
+	for _, w := range occs {
+		row.Cells = append(row.Cells, periodCellOf(l, w, s.cfg.Loc))
+	}
+	if w, ok := gl.lastEnded(); ok {
+		row.Last, row.LastOcc = periodCellOf(l, w, s.cfg.Loc), occText(l, w.summaryGoal, s.cfg.Loc)
+		if w.Result == goalUnknown {
+			row.LastWhy = goalResultText(l, w.summaryGoal)
+		}
+	}
+	return row
 }
 
 // goalsCard is the overview's Goals card: the last whole week's results
@@ -191,6 +252,14 @@ type goalsCard struct {
 	Missed []string
 	// Unknown are those not known that week.
 	Unknown int
+	// WMissed are how many were missed that week, each in Missed.
+	WMissed int
+	// Of the goals over a period, the occurrences that ended since the
+	// last whole week began: how many met, missed and not known, of how
+	// many (each missed in Missed too); PeriodsOnly says no goal of whom
+	// is of each week.
+	PMet, PMissed, PUnknown, POf int
+	PeriodsOnly                  bool
 }
 
 // goalsOverview is the overview's Goals card, nil with no goals for whom
@@ -198,11 +267,17 @@ type goalsCard struct {
 // last week, with the task it would make, or the one open about it.
 func (s *Server) goalsOverview(ctx context.Context, l string, team *ledger.Team) (*goalsCard, []action, error) {
 	gs, err := s.goalsNow(ctx)
-	if err != nil || len(rowGoals(gs, team)) == 0 {
+	if err != nil || len(teamGoals(gs, team)) == 0 {
 		return nil, nil, err
 	}
 	last := ledger.Week(s.l.Day(s.now())) - 7
-	lines, err := s.goalTable(ctx, last, last, []*ledger.Team{team})
+	// Of a goal over a period, the occurrences that ended since the last
+	// whole week began: this week's rows too.
+	to := last
+	if hasPeriodGoals(gs, []*ledger.Team{team}) {
+		to = last + 7
+	}
+	lines, err := s.goalTable(ctx, last, to, []*ledger.Team{team})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -210,9 +285,13 @@ func (s *Server) goalsOverview(ctx context.Context, l string, team *ledger.Team)
 	if err != nil {
 		return nil, nil, err
 	}
-	c := &goalsCard{Week: s.l.Midnight(last)}
+	c := &goalsCard{Week: s.l.Midnight(last), PeriodsOnly: len(rowGoals(gs, team)) == 0}
 	var as []action
 	for _, gl := range lines {
+		if gl.Goal.OverPeriod() {
+			as = append(as, s.periodsOverview(l, c, gl, open)...)
+			continue
+		}
 		w, ok := gl.week(c.Week)
 		if !ok {
 			continue
@@ -222,6 +301,7 @@ func (s *Server) goalsOverview(ctx context.Context, l string, team *ledger.Team)
 		case goalMet:
 			c.Met++
 		case goalMissed:
+			c.WMissed++
 			text := goalMissedText(l, gl.Goal, gl.TeamName(), w.From, w.Value, s.cfg.Loc)
 			c.Missed = append(c.Missed, text)
 			href := "/goals"
@@ -237,6 +317,35 @@ func (s *Server) goalsOverview(ctx context.Context, l string, team *ledger.Team)
 		}
 	}
 	return c, as, nil
+}
+
+// periodsOverview counts in the card a goal over a period's occurrences
+// that ended since the last whole week began, and gives the lines of What
+// to look at of those missed, each with the task it would make, or the
+// one open about the goal.
+func (s *Server) periodsOverview(l string, c *goalsCard, gl goalLine, open map[string]int64) []action {
+	var as []action
+	for _, w := range gl.endedSince(c.Week) {
+		c.POf++
+		switch w.Result {
+		case goalMet:
+			c.PMet++
+		case goalMissed:
+			c.PMissed++
+			text := periodMissedText(l, gl.Goal, gl.TeamName(), w.summaryGoal, s.cfg.Loc)
+			c.Missed = append(c.Missed, text)
+			href := "/goals"
+			if gl.Team != nil {
+				href += "?team=" + url.QueryEscape(gl.Team.Name)
+			}
+			as = append(as, action{Text: tr(l, "Goal %s missed during %s %s", gl.Goal.Name, w.Each, verdict.Clean(w.Title)), Detail: text,
+				Href: href + "#goal-" + gl.Goal.Name, Kind: "decide", Goal: gl.Goal.Name, GoalTeam: gl.TeamName(), GoalTeamID: teamIDOf(gl.Team),
+				Occurrence: w.Occurrence, Task: open[ledger.GoalKey(gl.Goal.Name, teamIDOf(gl.Team))]})
+		default:
+			c.PUnknown++
+		}
+	}
+	return as
 }
 
 // postGoalTask makes the task a goal missed in a week becomes, with one
@@ -291,6 +400,10 @@ func (s *Server) postGoalTask(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, ledger.ErrNotYourTeam)
 		return
 	}
+	if occ := r.PostFormValue("occurrence"); occ != "" || g.OverPeriod() {
+		s.postPeriodGoalTask(w, r, g, team, occ)
+		return
+	}
 	d, err := dateDay(day)
 	if err != nil || ledger.Week(d) != d {
 		s.oops(w, r, bad("week %q: want its Monday, like 2026-11-09", day))
@@ -324,11 +437,84 @@ func (s *Server) postGoalTask(w http.ResponseWriter, r *http.Request) {
 	s.written(w, r, err, to)
 }
 
+// postPeriodGoalTask makes the task a goal over a period missed during an
+// occurrence becomes, with one press: the occurrence by its key, worked
+// out again, refused when it wasn't missed, as it reads now.
+func (s *Server) postPeriodGoalTask(w http.ResponseWriter, r *http.Request, g ledger.Goal, team *ledger.Team, key string) {
+	ctx := r.Context()
+	if !g.OverPeriod() {
+		s.oops(w, r, bad("goal %s is of each week: give its week, not an occurrence", g.Name))
+		return
+	}
+	o, err := s.occurrenceOf(ctx, key)
+	if err != nil || o.M.Kind != g.Each {
+		s.oops(w, r, bad("occurrence %q: want an occurrence of %s, its marked window's id and its start, like 7@2026-11-06T11:00Z", key, g.Each))
+		return
+	}
+	week := ledger.Week(s.l.Day(occPlaced(o.Occurrence, s.now())))
+	lines, err := s.goalTable(ctx, week, week, []*ledger.Team{team})
+	if err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	var gw goalWeek
+	found := false
+	for _, gl := range lines {
+		for _, x := range gl.Occs {
+			if gl.Goal.Name == g.Name && x.Occurrence == key {
+				gw, found = x, true
+			}
+		}
+	}
+	if !found || gw.Result != goalMissed {
+		s.oops(w, r, bad("goal %s wasn't missed during %s, as it reads now", g.Name, key))
+		return
+	}
+	id, err := s.l.MakePeriodGoalTask(ctx, s.periodTaskIn(lang(r), g, team, gw), goalOccEnd(gw), s.user(r))
+	if errors.Is(err, ledger.ErrGoalTaskOpen) {
+		back(w, r, urlContext(r.URL.Query()).Link(fmt.Sprintf("/tasks/%d", id)))
+		return
+	}
+	to := r.PostFormValue("back")
+	if to == "" {
+		to = urlContext(r.URL.Query()).Link(fmt.Sprintf("/tasks/%d", id))
+	}
+	s.written(w, r, err, to)
+}
+
+// occurrenceOf is the occurrence a key names (ledger.OccurrenceKey): its
+// window's id and its start.
+func (s *Server) occurrenceOf(ctx context.Context, key string) (markedOcc, error) {
+	id, at, ok := strings.Cut(key, "@")
+	n, err := strconv.ParseInt(id, 10, 64)
+	if !ok || err != nil {
+		return markedOcc{}, ledger.ErrNotFound
+	}
+	start, err := time.Parse("2006-01-02T15:04Z", at)
+	if err != nil {
+		if start, err = time.Parse("2006-01-02T15:04:05Z", at); err != nil {
+			return markedOcc{}, ledger.ErrNotFound
+		}
+	}
+	m, err := s.l.MarkedByID(ctx, n)
+	if err != nil {
+		return markedOcc{}, err
+	}
+	os, _ := m.Occurrences(start, start, ledger.MarkedKindWeek)
+	for _, o := range os {
+		if o.Start.Equal(start) {
+			return markedOcc{o, &m}, nil
+		}
+	}
+	return markedOcc{}, ledger.ErrNotFound
+}
+
 // weekGoals are the goals of a week, from Monday week, for everyone's (team
-// nil) or a team's, as the digest and what it tells say them.
+// nil) or a team's, as the digest and what it tells say them: of a goal
+// over a period, the occurrences that ended in it.
 func (s *Server) weekGoals(ctx context.Context, week int64, team *ledger.Team) ([]goalLine, error) {
 	gs, err := s.goalsNow(ctx)
-	if err != nil || len(rowGoals(gs, team)) == 0 {
+	if err != nil || len(teamGoals(gs, team)) == 0 {
 		return nil, err
 	}
 	return s.goalTable(ctx, week, week, []*ledger.Team{team})
@@ -347,6 +533,22 @@ func (s *Server) goalsLine(ctx context.Context, from time.Time, team *ledger.Tea
 	var said []string
 	var out []summaryGoal
 	for _, gl := range lines {
+		// Of a goal over a period, each occurrence that ended in the week.
+		for _, w := range gl.Occs {
+			if w.Result == goalOpen {
+				continue
+			}
+			out = append(out, w.summaryGoal)
+			switch w.Result {
+			case goalMet:
+				met++
+			case goalMissed:
+				missed++
+				said = append(said, periodMissedText(l, gl.Goal, "", w.summaryGoal, s.cfg.Loc))
+			default:
+				unknown++
+			}
+		}
 		w, ok := gl.week(from)
 		if !ok {
 			continue
@@ -361,6 +563,9 @@ func (s *Server) goalsLine(ctx context.Context, from time.Time, team *ledger.Tea
 		default:
 			unknown++
 		}
+	}
+	if len(out) == 0 {
+		return "", nil, nil
 	}
 	line := tr(l, "Goals: %d of %d met, %d missed, %d not known.", met, len(out), missed, unknown)
 	if len(said) > 0 {
@@ -380,7 +585,8 @@ func (s *Server) aboutGoals(ctx context.Context, about map[string]any, from time
 }
 
 // goalsSection: each goal over the span's whole weeks, for whom the report
-// is for, and how many it met; its numbers, each week's result.
+// is for, and how many it met; its numbers, each week's result. A goal
+// over a period, over the occurrences of its kind that ended in the span.
 func (s *Server) goalsSection(ctx context.Context, from, to time.Time, team *ledger.Team, loc *time.Location) (string, any, error) {
 	l := s.cfg.Lang
 	gs, err := s.goalsNow(ctx)
@@ -393,15 +599,59 @@ func (s *Server) goalsSection(ctx context.Context, from, to time.Time, team *led
 		summaryGoal
 	}
 	type goalNums struct {
-		Name  string     `json:"name"`
-		Team  string     `json:"team,omitempty"`
-		Met   int        `json:"met"`
-		Of    int        `json:"of"`
-		Weeks []weekNums `json:"weeks"`
+		Name        string        `json:"name"`
+		Team        string        `json:"team,omitempty"`
+		Each        string        `json:"each,omitempty"`
+		Met         int           `json:"met"`
+		Of          int           `json:"of"`
+		Weeks       []weekNums    `json:"weeks"`
+		Occurrences []summaryGoal `json:"occurrences,omitempty"`
 	}
 	nums := []goalNums{}
-	if len(rowGoals(gs, team)) == 0 {
+	if len(teamGoals(gs, team)) == 0 {
 		return tr(l, "No goals are declared for whom this report is for."), nums, nil
+	}
+	var said []string
+	if hasPeriodGoals(gs, []*ledger.Team{team}) {
+		// The occurrences that ended in the span: of the weeks it meets,
+		// the latest 53.
+		p1, p2 := ledger.Week(s.l.Day(from)), ledger.Week(s.l.Day(to.Add(-time.Second)))
+		p1 = max(p1, p2-(summaryMaxWeeks-1)*7)
+		lines, err := s.goalTable(ctx, p1, p2, []*ledger.Team{team})
+		if err != nil {
+			return "", nil, err
+		}
+		for _, gl := range lines {
+			if !gl.Goal.OverPeriod() {
+				continue
+			}
+			n := goalNums{Name: gl.Goal.Name, Team: gl.TeamName(), Each: gl.Goal.Each, Weeks: []weekNums{}, Occurrences: []summaryGoal{}}
+			var missed []string
+			for _, w := range gl.Occs {
+				if w.Result == goalOpen || w.To.Before(from) || !w.To.Before(to) {
+					continue
+				}
+				n.Occurrences = append(n.Occurrences, w.summaryGoal)
+				switch w.Result {
+				case goalMet:
+					n.Met++
+					n.Of++
+				case goalMissed:
+					n.Of++
+					missed = append(missed, occText(l, w.summaryGoal, loc))
+				}
+			}
+			line := tr(l, "Goal %s (%s, %s), each %s: met in %d of %d occurrences known that ended in the span, of %d.", gl.Goal.Name,
+				goalMeasureText(l, gl.Goal.Measure), goalTarget(l, gl.Goal), gl.Goal.Each, n.Met, n.Of, len(n.Occurrences))
+			if len(missed) > 0 {
+				line += " " + tr(l, "Missed during %s.", strings.Join(missed, "; "))
+			}
+			said = append(said, verdict.Clean(line))
+			nums = append(nums, n)
+		}
+		if len(rowGoals(gs, team)) == 0 {
+			return strings.Join(said, "\n"), nums, nil
+		}
 	}
 	// The whole weeks the span holds, 53 at most, the latest.
 	w1 := ledger.Week(s.l.Day(from))
@@ -413,15 +663,17 @@ func (s *Server) goalsSection(ctx context.Context, from, to time.Time, team *led
 		w2 -= 7
 	}
 	if w2 < w1 {
-		return tr(l, "Goals: the span holds no whole week to hold them to."), nums, nil
+		return strings.Join(append(said, tr(l, "Goals: the span holds no whole week to hold them to.")), "\n"), nums, nil
 	}
 	w1 = max(w1, w2-(summaryMaxWeeks-1)*7)
 	lines, err := s.goalTable(ctx, w1, w2, []*ledger.Team{team})
 	if err != nil {
 		return "", nil, err
 	}
-	var said []string
 	for _, gl := range lines {
+		if gl.Goal.OverPeriod() {
+			continue // above
+		}
 		n := goalNums{Name: gl.Goal.Name, Team: gl.TeamName(), Weeks: []weekNums{}}
 		var missed []string
 		for _, w := range gl.Weeks {
@@ -454,4 +706,9 @@ type goalsCardOut struct {
 	Of      int       `json:"of"`
 	Unknown int       `json:"not_known"`
 	Missed  []string  `json:"missed" jsonschema:"each goal missed, with its value and target"`
+	// Of the goals over a period: the occurrences of their kinds that
+	// ended since the last whole week began.
+	OccurrencesMet     int `json:"occurrences_met,omitempty" jsonschema:"of the goals over a period (each: KIND), the occurrences that ended since the last whole week began and met their goal"`
+	OccurrencesOf      int `json:"occurrences_of,omitempty" jsonschema:"of the goals over a period, the occurrences that ended since the last whole week began"`
+	OccurrencesUnknown int `json:"occurrences_not_known,omitempty" jsonschema:"of the goals over a period, the occurrences not known"`
 }

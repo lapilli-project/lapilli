@@ -208,11 +208,13 @@ type heatRow struct {
 
 // action is something to look at, and the task it would make, or the
 // one open about it. A goal missed (Goal) makes its task through its own
-// form, of its team (GoalTeam, GoalTeamID) and the week of Monday Week.
+// form, of its team (GoalTeam, GoalTeamID) and the week of Monday Week,
+// or, of a goal over a period, the occurrence (its key, Occurrence).
 type action struct {
 	Text, Detail, Href          string
 	Kind, Rule, Incident, Title string
 	Goal, GoalTeam, Week        string
+	Occurrence                  string
 	GoalTeamID                  int64
 	Task                        int64
 	// May says the reader may make the task; else Why is why, WhyOf the

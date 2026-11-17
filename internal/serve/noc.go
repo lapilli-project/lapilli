@@ -285,6 +285,12 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 	if err != nil {
 		return nil, err
 	}
+	// The goals over a period, each occurrence in the row of the week it
+	// ended in (goalsperiod.go): none without such a goal.
+	periods, err := s.periodGoals(ctx, w1, w2, who, gs, own, cursor, firstWeek, firstOK)
+	if err != nil {
+		return nil, err
+	}
 	for _, w := range t.weeks {
 		from, to := s.l.Midnight(w), s.l.Midnight(w+7)
 		refired, err := s.l.MostRefired(ctx, from, to, -1, nil)
@@ -456,6 +462,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 					row.Goals = append(row.Goals, goalOn(g, &row))
 				}
 			}
+			row.Goals = append(row.Goals, periods[periodAt{w, teamIDOf(team)}]...)
 			row.Marked = marked.row(w, team, mine, row, t, weekOf[w], judged)
 			out.Rows = append(out.Rows, row)
 		}

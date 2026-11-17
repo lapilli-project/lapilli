@@ -1,7 +1,8 @@
 # Goals: what an operations team holds its alerting to
 
-Status: steps 1 and 2 built, for the next release, schema 020; step 3
-waits for marked windows (#90). Under [GOVERNANCE.md](../../GOVERNANCE.md)
+Status: built. Steps 1 and 2 in 0.53.0, schema 020; step 3, goals over a
+period, for the next release, over marked windows' schema 021 (#90), with
+no schema of its own. Under [GOVERNANCE.md](../../GOVERNANCE.md)
 this is a new kind of data in the ledger (the next schema at build time),
 so it was designed first, as a pull request (#91); it was merged on
 2026-11-16, before its week was out, by the maintainer's decision, with the
@@ -220,8 +221,7 @@ not each week:
 
 A goal over a span that is neither a week nor a marked window, such as a
 month, is a marked window of a kind written for it. A marked window lasts
-31 days at most, so a quarter isn't one ("Open questions"). Until #90 is
-built, `each:` takes `week` alone.
+31 days at most, so a quarter isn't one ("Open questions").
 
 ## Where it shows
 
@@ -445,11 +445,12 @@ Open:
    and test. Built.
 2. The overview's card and line, tasks (`tasks.goal`, `--goal-tasks`), the
    digest, reports' `goals` section, `goal.missed`. Built, with step 1.
-3. Goals over a period (`each: KIND`), once marked windows are built. Until
-   then `each:` is read, a kind's name checked as [marked.md](marked.md)
-   names one (`[a-z][a-z0-9-]`, 32 bytes at most) and `deploy` refused as
-   above, and a goal of any kind but `week` refused, saying it waits for
-   marked windows; so is `no_worse_than`, which holds over a period alone.
+3. Goals over a period (`each: KIND`), once marked windows are built.
+   Built, after #90: `each:` takes a kind's name as [marked.md](marked.md)
+   names one (`[a-z][a-z0-9-]`, 32 bytes at most), `deploy` refused as
+   above; a measure the table doesn't count inside an occurrence is
+   refused with its line, and so is `no_worse_than` but over a period, of
+   precision or the median lead.
 
 ## As built
 
@@ -528,3 +529,96 @@ Small things the design left open, settled as they were built:
   team's alone.
 - **Words.** A week missed reads "not met" on the Goals page, beside
   "met" and "not known"; a sentence about a goal still says "missed".
+
+### Goals over a period (step 3)
+
+Settled as step 3 was built, over [marked.md](marked.md)'s occurrences:
+
+- **Which occurrences, and where.** An occurrence has ended once the
+  ledger's cursor is past its end, as a week is whole once the cursor is
+  past its Sunday; until then it is `open`, as it stands. It is in the
+  summary's row of the week its end falls in (the week of its last day,
+  as #90 counts its days), and, while it is on, in this week's: so a row
+  holds, besides its weekly goals, each goal over a period once for each
+  occurrence of its kind placed in it, by when each ended. Its entry is a
+  week's goal's with `each` (the kind), `occurrence` (its key,
+  `7@2026-11-06T11:00Z`), `title`, `from` and `to` (its start and end),
+  and, of `no_worse_than`, `no_worse_than`, `by` and `before`. None of
+  these is a week's, so a weekly goal's entry reads as it did, byte for
+  byte (`TestGoalsWeeklyUnchanged`, held to what 0.55.0 gave).
+- **Counted as #90 counts.** Inside and before are worked out by the
+  code the Marked windows page reads (`markedData.count`): the kind's
+  firings on the days the occurrence covers, by rule; before, the four
+  whole weeks before its first week, less the kind's firings, and the
+  incidents of those weeks during no occurrence of the kind. A team's is
+  of the rules it owns and the incidents it owns, of everyone's windows
+  and its own, and judged by everyone's record, as the summary's row of a
+  team is (the decision above on a team's record), not by the team's as
+  the Marked windows page with a team picked judges it.
+- **Not known** is tried in a week's order, then one more:
+  `not_whole` (the occurrence started in the week the ledger's first
+  firing fell in, or before), `team_owns_by_catching`, `no_record` (of a
+  measure that needs it: the firings inside all counted and not judged,
+  or, with none inside, no week it covers keeps its record, as
+  `verdict.NoRecordOf` says of a week), `no_value` (precision with no
+  firing judged inside, a median with nothing caught), then `no_before`
+  (of `no_worse_than`: the weeks before have nothing to divide, no firing
+  judged for precision, no incident caught for the median). An
+  occurrence with no firing, in a week whose record is kept, is known:
+  "no incident missed during the sale" is met or missed by its
+  incidents. `before` is given whenever the weeks before have it, the
+  occurrence known or not, as it is a number of its own.
+- **No worse than before** is met when inside is at least before less
+  `by` (both measures that take it are better higher), within 1e-9, as a
+  quotient and a difference are that far off what they mean. Its target
+  reads "no worse than before, by 5%" on the Goals page, and, of an
+  occurrence, "no worse than the four weeks before, 20%, by 5%".
+- **The Goals page** has a second table, "Occurrence by occurrence", of
+  the goals over a period: the latest occurrence that ended, and those
+  ended in the weeks shown and the one on now, the latest 13, the
+  earliest first, each a cell as a week's is; how many are left out.
+  The weekly table is shown when there are weekly goals.
+- **The overview's card** counts, besides the last whole week's goals,
+  the occurrences that ended since the last whole week began (so this
+  week's rows are read too, when a goal of whom it is for is over a
+  period); each missed is a line of What to look at, whose Make it a task
+  posts the occurrence's key (`occurrence`) in place of the week, worked
+  out again by `POST /goals/task`. A team with goals over a period alone
+  isn't told of a week. MCP's `overview` gives `occurrences_met`,
+  `occurrences_of` and `occurrences_not_known`, left out at 0.
+- **The digest** of a week counts the occurrences that ended in it with
+  its weekly goals, and says each missed; `digest.ready`'s `goals` has
+  their entries. **A report's `goals` section** says, of a goal over a
+  period, the occurrences that ended in the span, whole weeks or not (of
+  the 53 latest weeks it meets), with `each` and `occurrences` in its
+  numbers.
+- **`/metrics`.** A goal over a period's `lapilli_goal_met`,
+  `lapilli_goal_known` and `lapilli_goal_value` are of its latest
+  occurrence that ended, in the thirteen weeks the leader reads, and
+  `lapilli_goal_weeks_met` counts its occurrences met that ended in the
+  twelve whole weeks before this one. They are among the 500 series of
+  each family, those missed first. The HELP lines are as before.
+- **`goal.missed`** is told of the occurrences that ended since the last
+  whole week began and were missed, once for each goal, team and
+  occurrence: each team marked by the occurrence's end, in Unix seconds,
+  under keys of their own (`goal-occ-missed.`), so that a goal changed
+  from each week to each kind, or back, takes neither's marks for the
+  other's; one ended no later than the latest told of isn't told. A goal
+  of each team's is one notice an occurrence. The notice carries `each`,
+  `occurrence`, `title`, `no_worse_than`, `by` and `before`, and `from`
+  and `to` are the occurrence's.
+- **Tasks.** `--goal-tasks` makes one for the earliest occurrence missed
+  that ended since the last whole week began and after the one a task
+  was made for last (`goal-occ-made.`), titled with the occurrence
+  ("Goal sale-none-missed missed during sale Autumn sale, 2026-10-27",
+  its window's title cut to fit), and says on it the occurrences that
+  ended since, each by its end: missed again, met, no longer missed. A
+  task kept as made for a week isn't said on as a period's, nor the other
+  way round, once the goal's `each` changes.
+- **Cost.** A summary, a page and the leader's round read the windows of
+  the goals' kinds meeting the weeks once, and then, once for all of the
+  occurrences placed in them, their days of `marked_days`, `marked_weeks`
+  and the tallies from the four weeks before the first's week to the
+  last's, and their incidents; each occurrence counted once a team.
+  Nothing is read with no goal over a period.
+
