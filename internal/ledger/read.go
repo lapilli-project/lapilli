@@ -535,11 +535,18 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 			}
 		}
 	}
+	total := 0
 	for _, rr := range byName {
 		rr.NoRecord = rr.Firings > 0 && rr.Unjudged == rr.Firings
 		rr.Noisy = verdict.IsNoisy(rr.Judged(), rr.White, at)
 		rr.ImpactRule = o.Signals.EntryNumber(rr.Rule)
 		rep.Rules = append(rep.Rules, *rr)
+		total += rr.Firings
+	}
+	if named {
+		// None of its firings judged, as the summary's rows say it.
+		whole := rep.NoRecord
+		rep.NoRecord = verdict.NoRecordOf(total, rep.Unjudged, func() bool { return whole })
 	}
 	if o.Hours != nil && to.Sub(from) <= HoursLongest {
 		rep.Hours = o.Hours.Used()

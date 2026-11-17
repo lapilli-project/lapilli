@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/ledger/ledgertest"
 	"lapilli.dev/internal/prom"
@@ -904,5 +905,61 @@ func TestSignalRemovedWindowsCaughtByAnyRule(t *testing.T) {
 	in, err := s.l.IncidentByID(ctx, "impact-probe-20261102T0600Z")
 	if err != nil || len(in.CaughtBy) != 1 {
 		t.Errorf("the removed probe's window, caught by any rule: %+v %v", in.CaughtBy, err)
+	}
+}
+
+// With named signals, the report, /metrics and the summary say no record
+// alike: none of the period's, or the row's, firings judged.
+func TestSignalsNoRecordAlike(t *testing.T) {
+	s := signalServer(t, shopHistory(), func(c *Config) {
+		c.ImpactRules = []verdict.RuleEntry{{Rules: "^Errors$", Signals: []string{"probe"}}}
+	})
+	rep := reportOf(t, s)
+	judged := 0
+	for _, f := range rep.Firings {
+		if !f.NoRecord {
+			judged++
+		}
+	}
+	var sum summary
+	_, body, _ := get(t, s.Handler(), "/api/v1/summary?from=2026-11-02&to=2026-11-02")
+	if err := json.Unmarshal([]byte(body), &sum); err != nil || len(sum.Rows) != 1 {
+		t.Fatal(body)
+	}
+	if judged != 0 || !rep.NoRecord || !sum.Rows[0].NoRecord {
+		t.Errorf("%d of %d firings judged; the report's no record %v, the summary's %v", judged, len(rep.Firings), rep.NoRecord, sum.Rows[0].NoRecord)
+	}
+	// verdict.Judge, as lapilli verdict and a backtest judge, says so too.
+	o, _ := s.options(context.Background())
+	o.From, o.To = time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC), time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	var fs []firing.Firing
+	for _, f := range rep.Firings {
+		fs = append(fs, f.Firing)
+	}
+	if r := verdict.Judge(nil, fs, nil, o); !r.NoRecord {
+		t.Errorf("verdict.Judge: no record %v, %d unjudged of %d", r.NoRecord, r.Unjudged, len(r.Firings))
+	}
+}
+
+// With named signals, a white stone is judged whatever its signals, as
+// the report counts it (verdict.RuleResult.Judged): of a rule's week with
+// no record by its signals, the judged firings, which say whether it is
+// noisy, are its white ones.
+func TestSignalsJudgedHoldsWhite(t *testing.T) {
+	mid := func(w int64) time.Time { return time.Unix(w*86400, 0).UTC() }
+	w := ledger.Week(20393)                                                                 // a Monday's day
+	sig := verdict.NewSignals([]verdict.Signal{{Name: "probe", Record: true, Bit: 0}}, nil) // no start: no record by reading
+	tl := &tallies{weeks: []int64{w}, by: map[int64]map[int64]ledger.Tally{w: {}}, rules: map[int64]ledger.RuleRow{1: {ID: 1, Rule: ledger.Rule{Name: "Errors"}}},
+		o: verdict.Options{Signals: sig, RecordWeek: func(at time.Time) (time.Time, time.Time) { return mid(w), mid(w + 7) }}, mid: mid}
+	part := ledger.Tally{At: w, Rule: 1, Firings: 5, White: 2, Signals: 1}
+	tl.parts = []ledger.Tally{part}
+	tl.by[w][1] = part
+	tl.keep(nil)
+	if j, u := tl.judged(w, 1), tl.unjudged(w, 1); j.Firings != 2 || j.White != 2 || u.Firings != 3 || u.White != 0 {
+		t.Errorf("judged %+v, unjudged %+v; want the 2 white judged, the 3 black not", j, u)
+	}
+	rr := verdict.RuleResult{Firings: 5, White: 2, Unjudged: 3}
+	if j := tl.judged(w, 1); j.Firings != rr.Judged() {
+		t.Errorf("judged %d, the report's %d", j.Firings, rr.Judged())
 	}
 }

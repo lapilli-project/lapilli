@@ -309,8 +309,9 @@ func TestRecordBySignal(t *testing.T) {
 }
 
 // With named signals, a period whose signals that keep the record never
-// started, and no incident near it, has no record; one that starts within
-// it has.
+// started, and no incident near it, has no record; nor one none of whose
+// firings is judged, though a signal started within it that ties none of
+// them; one whose firing is judged has.
 func TestNoRecordBySignal(t *testing.T) {
 	o := signalOpts()
 	for i := range o.Signals.List {
@@ -326,8 +327,12 @@ func TestNoRecordBySignal(t *testing.T) {
 		t.Error("a signal that doesn't keep the record, started: the period has a record")
 	}
 	o.Signals.List[1].Start = sigAt(150)
-	if rep := Judge(nil, fs, nil, o); rep.NoRecord || rep.Unjudged != 1 {
-		t.Errorf("probe starts in the period: no record %v, %d unjudged", rep.NoRecord, rep.Unjudged)
+	if rep := Judge(nil, fs, nil, o); !rep.NoRecord || rep.Unjudged != 1 {
+		t.Errorf("probe, which ties no firing, starts in the period: no record %v, %d unjudged", rep.NoRecord, rep.Unjudged)
+	}
+	o.Signals.List[0].Start = sigAt(5)
+	if rep := Judge(nil, fs, nil, o); rep.NoRecord || rep.Unjudged != 0 {
+		t.Errorf("errors started before its firing: no record %v, %d unjudged", rep.NoRecord, rep.Unjudged)
 	}
 }
 

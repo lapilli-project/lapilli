@@ -357,7 +357,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 			// signal.
 			row.NoRecord = !t.kept[w]
 			if t.o.Signals.Named() {
-				row.NoRecord = row.Firings > 0 && row.Unjudged == row.Firings || row.Firings == 0 && !t.keptAny(w)
+				row.NoRecord = verdict.NoRecordOf(row.Firings, row.Unjudged, func() bool { return !t.keptAny(w) })
 			}
 			judged := func(n, of, unjudged int) *float64 {
 				if row.NoRecord {

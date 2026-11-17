@@ -108,7 +108,9 @@ func seenSelectors(expr string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	narrows := func(sel string) bool { return slices.ContainsFunc(stands, func(x rules.StandIn) bool { return x.For == sel }) }
+	narrows := func(sel string) bool {
+		return slices.ContainsFunc(stands, func(x rules.StandIn) bool { return x.For == sel })
+	}
 	var out []string
 	for _, sel := range sels {
 		if !narrows(sel) {

@@ -69,11 +69,23 @@ func (t *tallies) keep(keeps func(ledger.Incident) bool) {
 		return
 	}
 	for _, x := range t.parts {
-		if m := t.jby[x.At]; m != nil && t.judgedPart(x.At, x.Rule, x.Signals) {
-			j := m[x.Rule].Add(x)
-			j.At, j.Rule, j.Signals = x.At, x.Rule, 0
-			m[x.Rule] = j
+		m := t.jby[x.At]
+		if m == nil {
+			continue
 		}
+		judged := x
+		if !t.judgedPart(x.At, x.Rule, x.Signals) {
+			if !t.o.Signals.Named() {
+				continue // a week with no record: none of its firings, as before
+			}
+			// A firing that caught something is judged whatever its
+			// signals, as the report has it (verdict.RuleResult.Judged):
+			// of a part with no record, its white stones alone.
+			judged = ledger.Tally{Firings: x.White, White: x.White, Deploy: x.DeployWhite, DeployWhite: x.DeployWhite}
+		}
+		j := m[x.Rule].Add(judged)
+		j.At, j.Rule, j.Signals = x.At, x.Rule, 0
+		m[x.Rule] = j
 	}
 }
 

@@ -77,11 +77,17 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		// By the weeks the seven days have some of, as their firings are.
 		rep := &verdict.Report{NoRecord: !t.rec.JudgesAny(s.l.Midnight(today-6), s.now())}
 		at := noisyAt(o)
+		total := 0
 		for _, rr := range sum {
 			rr.NoRecord = rr.Firings > 0 && rr.Unjudged == rr.Firings
 			rr.Noisy = verdict.IsNoisy(rr.Firings-rr.Unjudged, rr.White, at)
 			rep.Unjudged += rr.Unjudged
 			rep.Rules = append(rep.Rules, *rr)
+			total += rr.Firings
+		}
+		if o.Signals.Named() {
+			whole := rep.NoRecord
+			rep.NoRecord = verdict.NoRecordOf(total, rep.Unjudged, func() bool { return whole })
 		}
 		// Each rule's by its team's hours, or the server's.
 		if sc := own.schedules(o.Hours); !sc.none() {
