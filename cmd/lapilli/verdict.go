@@ -814,11 +814,10 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 		case "--lead":
 			f.opts.Lead, err = dur(0)
 		case "--match":
-			// A label's name, as Prometheus names it: each named signal
-			// counts what it reads by it, in PromQL.
-			if !labelName.MatchString(val) {
-				return nil, fmt.Errorf("--match %s: want a label's name, letters, digits and _, not starting with a digit", nameText(val))
-			}
+			// Any name, as ever: one that isn't a label's name, as PromQL
+			// names one (an OpenTelemetry name with dots), is never put in
+			// a query; a named signal takes it to have seen every value of
+			// it (source.SeenFrom).
 			f.opts.Match = append(f.opts.Match, val)
 		case "--refire":
 			f.opts.RefireWithin, err = dur(0)

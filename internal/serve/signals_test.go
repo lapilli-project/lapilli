@@ -1043,22 +1043,21 @@ func TestSignalWeekBoundCountsOnce(t *testing.T) {
 	}
 }
 
-// The match in effect is a list of label names: each named signal counts
-// what it reads by them, in PromQL, so the Settings page refuses what
-// isn't one, and nothing of it is asked.
-func TestSignalsMatchIsLabelNames(t *testing.T) {
+// The match in effect takes any name, as it always has; what isn't a
+// label's name, as PromQL names one, is never put in a query a named
+// signal asks (source.SeenFrom).
+func TestSignalsMatchNeverInPromQL(t *testing.T) {
 	ctx := context.Background()
 	h := shopHistory()
 	s := signalServer(t, h, nil)
-	for _, v := range []string{"a)\t(up)\tor\tvector(1)\tor\tcount\tby\t(b", "service.name"} {
-		if code, body := askAs(t, s.Handler(), http.MethodPost, "/settings", url.Values{"match": {v}}, "ana@example.com", "same-origin"); code == http.StatusSeeOther {
-			t.Errorf("match %q saved: %d %.200s", v, code, body)
+	inj := "a)\t(up)\tor\tvector(1)\tor\tcount\tby\t(b"
+	for _, v := range []string{"service.name", inj} {
+		if code, body := askAs(t, s.Handler(), http.MethodPost, "/settings", url.Values{"match": {v}}, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
+			t.Errorf("match %q refused: %d %.200s", v, code, body)
 		}
 	}
-	// One a release before kept: the command line's in its place, and
-	// nothing of it asked.
-	if err := s.l.SetSettings(ctx, map[string]string{"match": "a)\t(up)\tor\tvector(1)\tor\tcount\tby\t(b"}, "ana@example.com"); err != nil {
-		t.Fatal(err)
+	if o, _ := s.options(ctx); len(o.Match) != 1 || o.Match[0] != inj {
+		t.Fatalf("the match kept: %q", o.Match)
 	}
 	h.mu.Lock()
 	h.asked = nil
@@ -1068,7 +1067,7 @@ func TestSignalsMatchIsLabelNames(t *testing.T) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, q := range h.asked {
-		if strings.Contains(q, "vector(1)") {
+		if strings.Contains(q, "vector(1)") || strings.Contains(q, "(up)") {
 			t.Errorf("asked %q", q)
 		}
 	}

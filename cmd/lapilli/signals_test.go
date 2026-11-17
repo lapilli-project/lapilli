@@ -823,12 +823,13 @@ func TestNamedSignalsSeenFromReads(t *testing.T) {
 	}
 }
 
-// --match names labels, which each named signal counts what it reads by:
-// what isn't a label's name is refused.
-func TestMatchIsLabelNames(t *testing.T) {
-	for _, v := range []string{"service.name", "a) or vector(1)", "9lives"} {
-		_, err := parseFlags([]string{"--rules", "x.yaml", "--prometheus", "http://p", "--match", v}, func(string, string) (bool, error) { return false, nil })
-		if err == nil || !strings.Contains(err.Error(), "want a label's name") {
+// --match takes any name, as it always has: an OpenTelemetry name with
+// dots is no label PromQL names, and a named signal never puts it in a
+// query (source.SeenFrom takes it to have seen every value).
+func TestMatchTakesAnyName(t *testing.T) {
+	for _, v := range []string{"service.name", "9lives"} {
+		f, err := parseFlags([]string{"--rules", "x.yaml", "--prometheus", "http://p", "--match", v}, func(string, string) (bool, error) { return false, nil })
+		if err != nil || !slices.Equal(f.opts.Match, []string{v}) {
 			t.Errorf("--match %q: %v", v, err)
 		}
 	}

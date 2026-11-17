@@ -80,11 +80,6 @@
   `/metrics` and each summary row: since 0.53.0 a report said it had a
   record once any signal had started within it, though none of its
   firings was judged.
-- **`--match` takes label names** (letters, digits and `_`, not starting
-  with a digit), as does the Settings page's match: each named signal
-  counts what it reads by them, in PromQL. Another value is refused; one
-  the Settings page kept before is passed over for the command line's, as
-  a setting that doesn't parse is.
 - **`/api/v1/summary`'s rows say `unjudged`, and `impacts.by_signal`**,
   for every ledger: the firings that caught nothing counted and not
   judged, as the report counts them, and each named signal's windows
