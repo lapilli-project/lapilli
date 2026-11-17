@@ -403,6 +403,9 @@ type ImpactRead struct {
 	Signal    string
 	Match     []string
 	Seen      *verdict.Seen
+	// By is the admin who asked for it on the Settings page, noted in the
+	// activity log; "" for the runs'.
+	By string
 }
 
 // ErrRunsMoved is an ImpactRead the runs went past while it was read: it is
@@ -438,6 +441,10 @@ func (l *Ledger) ReadAgain(ctx context.Context, r ImpactRead, o verdict.Options)
 			if err := t.QueryRowContext(t.ctx, "SELECT count(*) FROM impact_signals WHERE name = ?", r.Signal).Scan(&n); err != nil || n == 0 {
 				return err
 			}
+		} else if named, err := t.named(); err != nil || named {
+			// Nor does the one with no name, beside named ones: a read
+			// again under way when the first was saved, which made it one.
+			return err
 		}
 		from := r.From.Unix()
 		lo, err := l.impact(t, signalRun{name: r.Signal, match: r.Match, from: r.From, since: r.From, on: true}, r.Windows, true)
@@ -458,6 +465,12 @@ func (l *Ledger) ReadAgain(ctx context.Context, r ImpactRead, o verdict.Options)
 		}
 		if err := delSigMeta(t, r.Signal, metaImpactFloor); err != nil {
 			return err
+		}
+		if r.By != "" {
+			if err := change(t, r.By, "setting impact signal "+r.Signal+" read again", nil,
+				map[string]any{"from": r.From.UTC(), "to": r.To.UTC(), "windows": len(r.Windows)}); err != nil {
+				return err
+			}
 		}
 		if r.Signal != "" {
 			// What it has seen is of the expression read now: read again

@@ -1108,8 +1108,9 @@ func TestSignalWindowLabelsBounded(t *testing.T) {
 	}
 }
 
-// With named signals, the Settings page's try is refused, and asks
-// nothing: there is no one criterion to try beside them.
+// With named signals, the try of the criterion with no name is refused,
+// and asks nothing: there is no one criterion with no name beside them
+// (each signal's form has a try of its own: TestSignalsTry).
 func TestSignalsTryRefused(t *testing.T) {
 	h := shopHistory()
 	s := signalServer(t, h, nil)

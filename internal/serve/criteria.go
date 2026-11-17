@@ -123,7 +123,7 @@ func (s *Server) criterionOf(set map[string]ledger.Setting) criterion {
 			c.For = d
 		}
 	}
-	if s.h == nil || s.namedSignals() {
+	if s.h == nil || s.signalsIn(set).named() {
 		// Read from Prometheus, which there is none of; or, with named
 		// signals, none has no name: one the UI kept stands aside.
 		c.Expr = ""
@@ -161,10 +161,15 @@ func (s *Server) impactFrom(ctx context.Context, c criterion) (time.Time, error)
 }
 
 // maxQueryOf is the longest query a page takes: a try of the incident
-// criteria carries an expression of maxImpactExpr characters, escaped.
+// criteria carries an expression of maxImpactExpr characters, escaped; a
+// try of the rule entries, maxEntriesText bytes of them.
 func maxQueryOf(page string, r *http.Request) int {
-	if page == "settings" && strings.Contains(r.URL.RawQuery, "impact-try=") {
+	switch q := r.URL.RawQuery; {
+	case page != "settings":
+	case strings.Contains(q, "impact-try=") || strings.Contains(q, "signal-try="):
 		return maxQuery + 8*maxImpactExpr
+	case strings.Contains(q, "rules-try="):
+		return maxQuery + 3*maxEntriesText
 	}
 	return maxQuery
 }
@@ -177,12 +182,16 @@ func maxQueryOf(page string, r *http.Request) int {
 // against them is held once the criterion in effect is read again, the
 // one kept among them.
 func (s *Server) impactHeld(ctx context.Context) (string, error) {
-	if s.namedSignals() {
-		return s.signalsHeld(ctx)
-	}
-	c, err := s.criterion(ctx)
-	if err != nil || c.Expr == "" {
+	n, set, err := s.signalsNowOf(ctx)
+	if err != nil {
 		return "", err
+	}
+	if n.named() {
+		return s.signalsHeld(ctx, n)
+	}
+	c := s.criterionOf(set)
+	if c.Expr == "" {
+		return "", nil
 	}
 	k, err := s.l.ImpactKept(ctx)
 	switch {
@@ -376,22 +385,71 @@ type criteriaView struct {
 	// last four weeks: when it last failed, why, and when it is tried again.
 	Again *againView `json:"read_again,omitempty"`
 	Tried *impactTry `json:"-"`
-	// Named are the named impact signals serve was started with
-	// (docs/design/signals.md), shown as they are: set where serve starts,
-	// for now.
-	Named []namedView `json:"named,omitempty"`
+	// Named are the named impact signals in effect (docs/design/signals.md):
+	// those serve was started with and those an admin set here, by name;
+	// Removed, those serve was started with that an admin took away here;
+	// Aside, those set here past the most; Entries, the rule entries.
+	Named   []namedView  `json:"named,omitempty"`
+	Removed []namedView  `json:"removed,omitempty"`
+	Aside   []string     `json:"aside,omitempty"`
+	Entries *entriesView `json:"rule_entries,omitempty"`
+	// Add is the form a signal is added with, as typed when tried; Renames
+	// says the impact signal with no name in effect becomes a named one
+	// when one is added (the first).
+	Add          signalForm  `json:"-"`
+	AddOpen      bool        `json:"-"`
+	Renames      bool        `json:"-"`
+	SignalsTried *signalsTry `json:"-"`
 }
 
 // namedView is a named impact signal as the Settings page lists it: its
-// "for", the labels it is matched on (Follows, the match in effect), and
-// whether it keeps the record, and from when.
+// expression, its "for", the labels it is matched on (Follows, the match
+// in effect), and whether it keeps the record, and from when; what serve
+// was started with of its name (Started, nil for one added here), and,
+// changed here (Changed), by whom and when; Off, one serve was started with
+// taken away here. Since, Floor, Data and Again are what keeps the record
+// by it, as the criterion with no name's are; Form, its form, as typed when
+// tried (Open).
 type namedView struct {
-	Name    string    `json:"name"`
-	For     string    `json:"for"`
-	Match   []string  `json:"match"`
-	Follows bool      `json:"follows,omitempty"`
-	Record  bool      `json:"record"`
-	Start   time.Time `json:"start,omitzero"`
+	Name    string       `json:"name"`
+	Expr    string       `json:"expr"`
+	For     string       `json:"for"`
+	Match   []string     `json:"match"`
+	Follows bool         `json:"follows,omitempty"`
+	Record  bool         `json:"record"`
+	Start   time.Time    `json:"start,omitzero"`
+	Started *startedView `json:"-"`
+	Off     bool         `json:"off,omitempty"`
+	Changed bool         `json:"changed,omitempty"`
+	By      string       `json:"changed_by,omitempty"`
+	Updated time.Time    `json:"changed_at,omitzero"`
+	Floor   time.Time    `json:"floor,omitzero"`
+	Data    *dataView    `json:"-"`
+	Again   *againView   `json:"read_again,omitempty"`
+	Form    signalForm   `json:"-"`
+	Open    bool         `json:"-"`
+}
+
+// startedView is a named signal as serve was started with it, as the
+// Settings page says it.
+type startedView struct {
+	Expr, For       string
+	Match           []string
+	Follows, Record bool
+}
+
+// entriesView is the rule entries as the Settings page lists them: the
+// entries in effect, whether they are the UI's (Changed), by whom and
+// when, how many serve was started with (Started), and the form's text, as
+// typed when tried (Open).
+type entriesView struct {
+	List    []entryView `json:"entries"`
+	Changed bool        `json:"changed,omitempty"`
+	By      string      `json:"changed_by,omitempty"`
+	Updated time.Time   `json:"changed_at,omitzero"`
+	Started int         `json:"started"`
+	Text    string      `json:"-"`
+	Open    bool        `json:"-"`
 }
 
 type againView struct {
@@ -466,20 +524,11 @@ func (s *Server) criteriaView(ctx context.Context, set map[string]ledger.Setting
 	c := s.criterionOf(set)
 	started := criterion{s.cfg.Impact, s.cfg.ImpactFor}
 	v := &criteriaView{NoHistory: s.h == nil, Expr: c.Expr, For: verdict.Duration(c.For)}
-	if s.namedSignals() {
-		rows, err := s.l.SignalRows(ctx)
-		if err != nil {
-			return nil, err
-		}
-		for _, d := range s.cfg.Signals {
-			x := namedView{Name: d.Name, For: verdict.Duration(d.For), Match: d.Match, Follows: d.Match == nil, Record: d.Record}
-			if i := slices.IndexFunc(rows, func(r ledger.SignalRow) bool { return r.Name == d.Name }); i >= 0 {
-				x.Start = rows[i].Kept.From()
-			}
-			v.Named = append(v.Named, x)
-		}
-		return v, nil
+	v.Add = signalForm{For: verdict.Duration(s.cfg.ImpactFor), Follows: true, Record: true}
+	if n := s.signalsIn(set); n.named() {
+		return v, s.namedViews(ctx, v, n)
 	}
+	v.Renames = c.Expr != ""
 	for _, st := range criteriaSettable {
 		x := settingView{Key: st.key, Flag: st.flag, CommandLine: showCriterion(started, st.key), Value: showCriterion(c, st.key)}
 		if st.key == "impact" && started.Expr == "" {
@@ -514,6 +563,21 @@ func (s *Server) criteriaView(ctx context.Context, set map[string]ledger.Setting
 func (s *Server) readOver(ctx context.Context, c criterion, from, to time.Time) ([]incident.Incident, ledger.ImpactData, error) {
 	ctx, cancel := context.WithTimeout(ctx, min(s.cfg.Timeout, tryWithin))
 	defer cancel()
+	series, d, err := s.readSpan(ctx, c, from, to)
+	if err != nil {
+		return nil, d, err
+	}
+	ws, err := incident.FromImpact(ctx, series, s.cfg.Step, c.For)
+	return ws, d, err
+}
+
+// readSpan reads a criterion over the span a try reads, and a save that
+// reads first, named or not: its series, and where the data of its
+// selectors begins. Within tryWithin and --max-samples, in the heavy turn
+// the caller holds.
+func (s *Server) readSpan(ctx context.Context, c criterion, from, to time.Time) ([]prom.Series, ledger.ImpactData, error) {
+	ctx, cancel := context.WithTimeout(ctx, min(s.cfg.Timeout, tryWithin))
+	defer cancel()
 	d := ledger.ImpactData{Criterion: c.key(), From: from, CheckedTo: to}
 	series, err := s.h.QueryRange(ctx, c.Expr, from, to, s.cfg.Step)
 	if err != nil {
@@ -522,8 +586,39 @@ func (s *Server) readOver(ctx context.Context, c criterion, from, to time.Time) 
 	if d.Selectors, err = s.firstSamples(ctx, c.Expr, from, to, true); err != nil {
 		return nil, d, err
 	}
-	ws, err := incident.FromImpact(ctx, series, s.cfg.Step, c.For)
-	return ws, d, err
+	return series, d, nil
+}
+
+// windowsTried works out, of the windows a try found, which would count, as
+// the ledger has it (ledger.ReadAgain, then cover): those no incident
+// written down covers, on the window's match or o's, and nothing decided
+// before holds for (found, decidedOver); the first triedWindows of them to
+// show, and how many more. It gives up when ctx is done.
+func windowsTried(ctx context.Context, windows, written []incident.Incident, found []ledger.Incident, from time.Time, o verdict.Options) ([]triedWindow, int, []incident.Incident, error) {
+	var shown []triedWindow
+	var counting []incident.Incident
+	more := 0
+	for _, w := range windows {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, nil, err
+		}
+		tw := triedWindow{Start: w.Start, End: w.End, Len: w.End.Sub(w.Start), Labels: w.Labels}
+		tw.Decided = decidedOver(found, from, w)
+		for _, x := range written {
+			if len(incident.Merge([]incident.Incident{x}, []incident.Incident{w}, o.UnknownLen, o.Match)) == 1 {
+				tw.Written = append(tw.Written, x.ID)
+			}
+		}
+		if tw.Decided == "" && len(tw.Written) == 0 {
+			counting = append(counting, w)
+		}
+		if len(shown) < triedWindows {
+			shown = append(shown, tw)
+		} else {
+			more++
+		}
+	}
+	return shown, more, counting, nil
 }
 
 // postImpact saves the incident criteria, an admin's: an expression that
@@ -543,8 +638,8 @@ func (s *Server) postImpact(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	if s.namedSignals() {
-		s.oops(w, r, bad("serve reads named impact signals, set where it starts (--impact NAME=PROMQL, --impact-file): one with no name doesn't go beside them, and changing them here comes in a later release"))
+	if s.signalsIn(set).named() {
+		s.oops(w, r, errBesideNamed)
 		return
 	}
 	values := map[string]string{}
@@ -562,13 +657,17 @@ func (s *Server) postImpact(w http.ResponseWriter, r *http.Request) {
 			s.oops(w, r, errNoHistory)
 			return
 		}
-		if err := checkImpact(expr); err != nil {
-			s.oops(w, r, err)
-			return
-		}
-		values["impact"] = expr
-		if expr == s.cfg.Impact {
-			values["impact"] = ""
+		// The form posts the expression back whatever was changed: the
+		// one serve was started with is the command line's, which the UI's
+		// checks aren't for, and a change of --impact-for alone is no
+		// change of it. Only one an admin changed is checked.
+		values["impact"] = ""
+		if expr != impactText(s.cfg.Impact) {
+			if err := checkImpact(expr); err != nil {
+				s.oops(w, r, err)
+				return
+			}
+			values["impact"] = expr
 		}
 	}
 	forText := strings.TrimSpace(r.PostFormValue("impact-for"))
@@ -754,12 +853,16 @@ type againState struct {
 // criterion meanwhile from where they are, under a floor: no record by the
 // signal until it is read. It reports whether it read it again.
 func (s *Server) impactAgain(ctx context.Context, o verdict.Options) (bool, error) {
-	if s.namedSignals() {
-		return s.signalsAgain(ctx, o)
-	}
-	c, err := s.criterion(ctx)
-	if err != nil || c.Expr == "" {
+	n, set, err := s.signalsNowOf(ctx)
+	if err != nil {
 		return false, err
+	}
+	if n.named() {
+		return s.signalsAgain(ctx, o, n)
+	}
+	c := s.criterionOf(set)
+	if c.Expr == "" {
+		return false, nil
 	}
 	plan, _, err := s.againPlan(ctx, c)
 	switch {
@@ -807,7 +910,7 @@ func (s *Server) impactAgain(ctx context.Context, o verdict.Options) (bool, erro
 	}
 	s.readImpact(err, c.key())
 	if err == nil {
-		err = s.l.JudgePending(ctx, o)
+		err = s.judgePending(ctx, o)
 	}
 	s.sources.Lock()
 	defer s.sources.Unlock()
@@ -836,8 +939,12 @@ func (s *Server) impactAgain(ctx context.Context, o verdict.Options) (bool, erro
 // which keeps no record whatever the data, until a read again brings its
 // own.
 func (s *Server) impactData(ctx context.Context) error {
-	if len(s.cfg.Signals) > 0 {
-		return s.signalsData(ctx)
+	n, _, err := s.signalsNowOf(ctx)
+	if err != nil {
+		return err
+	}
+	if n.named() {
+		return s.signalsData(ctx, n)
 	}
 	return s.impactDataOf(ctx, "", nil)
 }
@@ -884,20 +991,23 @@ func (s *Server) impactDataOf(ctx context.Context, name string, kept *ledger.Imp
 }
 
 // heldExpr is the expression serve runs for a signal, by name, "" for the
-// unnamed one: a named one's as serve was started (--impact NAME=PROMQL,
-// --impact-file), and the unnamed one's, the criterion in effect, which
+// unnamed one: a named one's in effect, as serve was started
+// (--impact NAME=PROMQL, --impact-file) or as an admin set it on the
+// Settings page, and the unnamed one's, the criterion in effect, which
 // the runs read; "" for none. The criterion in effect is the one the
 // Settings page keeps in the ledger, when it keeps one (criterionOf), so
 // the unnamed signal's can be what whoever can write the ledger wrote
 // there: the ledger is guarded as serve's tokens are (SECURITY.md).
 func (s *Server) heldExpr(ctx context.Context, name string) (string, error) {
 	if name != "" {
-		for _, d := range s.cfg.Signals {
-			if d.Name == name {
-				return d.Expr, nil
-			}
+		// Of the named signals in effect: serve's start, with what an
+		// admin set on the Settings page over it (signalsIn).
+		n, _, err := s.signalsNowOf(ctx)
+		if err != nil {
+			return "", err
 		}
-		return "", nil
+		d, _ := n.def(name)
+		return d.Expr, nil
 	}
 	c, err := s.criterion(ctx)
 	return c.Expr, err
@@ -1268,26 +1378,12 @@ func (s *Server) judgeTried(ctx context.Context, l string, try *impactTry, c cri
 	}
 	// Each window found: whether it would count, as the ledger has it
 	// (ledger.ReadAgain, then cover).
-	var counting []incident.Incident
 	try.Found = len(windows)
-	for _, w := range windows {
-		tw := triedWindow{Start: w.Start, End: w.End, Len: w.End.Sub(w.Start), Labels: w.Labels}
-		tw.Decided = decidedOver(found, from, w)
-		for _, x := range written {
-			if len(incident.Merge([]incident.Incident{x}, []incident.Incident{w}, o.UnknownLen, o.Match)) == 1 {
-				tw.Written = append(tw.Written, x.ID)
-			}
-		}
-		if tw.Decided == "" && len(tw.Written) == 0 {
-			counting = append(counting, w)
-			try.Counted++
-		}
-		if len(try.Windows) < triedWindows {
-			try.Windows = append(try.Windows, tw)
-		} else {
-			try.MoreWindows++
-		}
+	var counting []incident.Incident
+	if try.Windows, try.MoreWindows, counting, err = windowsTried(ctx, windows, written, found, from, o); err != nil {
+		return err
 	}
+	try.Counted = len(counting)
 	nowIncs := make([]incident.Incident, 0, len(around))
 	for _, in := range around {
 		nowIncs = append(nowIncs, in.Incident)
@@ -1449,13 +1545,27 @@ func triedSumOf(rep *verdict.Report, rec verdict.Record, weeks []int64, mid func
 // windows of another criterion than it (staleImpact), or their backtest's
 // period would have a record where it had none, or none where it had one.
 func (s *Server) triedStale(ctx context.Context, try *impactTry, c criterion, with verdict.Options, from time.Time, counting []incident.Incident) error {
+	var err error
+	try.StaleN, try.Stale, try.StaleMore, err = s.staleBy(ctx, c.key(), with, func(around []ledger.Incident) []incident.Incident {
+		return triedIncidents(around, from, try.Off, counting)
+	})
+	return err
+}
+
+// staleBy are the proposals waiting for approval, not held now, that a
+// change tried would hold, as triedStale says: how many, the first
+// triedProposals of them, and how many more; key is what the windows the
+// ledger would hold were read with (impactHeld, as it will be), with the
+// options in effect with the change, and withAround, the incidents that
+// would keep the record, of those around now.
+func (s *Server) staleBy(ctx context.Context, key string, with verdict.Options, withAround func([]ledger.Incident) []incident.Incident) (int, []triedProposal, int, error) {
 	ps, err := s.l.Proposals(ctx, ledger.ProposalQuery{States: []string{ledger.StateProposed}})
 	if err != nil || len(ps) == 0 {
-		return err
+		return 0, nil, 0, err
 	}
 	ls, err := s.linesNow(ctx, ps)
 	if err != nil {
-		return err
+		return 0, nil, 0, err
 	}
 	type held struct {
 		line proposalLine
@@ -1476,30 +1586,32 @@ func (s *Server) triedStale(ctx context.Context, try *impactTry, c criterion, wi
 		hi = later(hi, bt.To)
 	}
 	if len(hs) == 0 {
-		return nil
+		return 0, nil, 0, nil
 	}
 	wf, _ := s.l.WeekOf(lo)
 	_, wt := s.l.WeekOf(hi.Add(-time.Nanosecond))
 	around, err := s.l.RecordIncidents(ctx, verdict.RecordFrom(wf, wt), wt, with.UnknownLen)
 	if err != nil {
-		return err
+		return 0, nil, 0, err
 	}
-	rec := verdict.RecordOf(triedIncidents(around, from, try.Off, counting), with)
+	rec := verdict.RecordOf(withAround(around), with)
 	slices.SortFunc(hs, func(a, b held) int { return int(a.line.ID - b.line.ID) })
+	n, more := 0, 0
+	var out []triedProposal
 	for _, h := range hs {
 		bt := h.ev.Backtest
 		kept := slices.ContainsFunc(s.l.SpanWeeks(bt.From, bt.To), func(w int64) bool { return s.l.WeekKept(rec, w) })
-		read := h.ev.Impact != "" && h.ev.Impact != c.key()
+		read := h.ev.Impact != "" && h.ev.Impact != key
 		if read || bt.NoRecord != nil && *bt.NoRecord == kept {
-			try.StaleN++
-			if len(try.Stale) < triedProposals {
-				try.Stale = append(try.Stale, triedProposal{h.line.ID, h.line.Rule})
+			n++
+			if len(out) < triedProposals {
+				out = append(out, triedProposal{h.line.ID, h.line.Rule})
 			} else {
-				try.StaleMore++
+				more++
 			}
 		}
 	}
-	return nil
+	return n, out, more, nil
 }
 
 // shareLabels reports whether, for every label both have, they have a

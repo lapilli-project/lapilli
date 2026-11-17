@@ -340,7 +340,15 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 		if err != nil {
 			return err
 		}
-		if f.ImpactOn {
+		// With named signals kept, the one with no name keeps nothing of a
+		// run that read it: one under way when the first named signal was
+		// saved, which made it a named one (renameSignal), whose read of
+		// the hour that run read is the next run's, as one missed.
+		named, err := t.named()
+		if err != nil {
+			return err
+		}
+		if f.ImpactOn && !named {
 			// Read with another criterion than the runs before, a window
 			// on at the start is this one's own, not one of theirs going on.
 			ilo, err := l.impact(t, f.unnamed(), f.Impact, changed)
@@ -349,8 +357,22 @@ func (l *Ledger) Record(ctx context.Context, f Found, o verdict.Options) error {
 			}
 			lo = min(lo, ilo)
 		}
-		if err := l.impactSince(t, f.unnamed()); err != nil {
-			return err
+		// The mirror: a run of named signals under way when the last of
+		// them was taken away, the one with no name given its own back
+		// (unnameSignal), read by name the criterion it has. That read is
+		// its, not a run that didn't read it, which would turn it off.
+		var adopted bool
+		if !f.ImpactOn && !named {
+			ilo, ok, err := l.adoptRead(t, f, o)
+			if err != nil {
+				return err
+			}
+			adopted, lo = ok, min(lo, ilo)
+		}
+		if !adopted && (!f.ImpactOn || !named) {
+			if err := l.impactSince(t, f.unnamed()); err != nil {
+				return err
+			}
 		}
 		for _, r := range f.Signals {
 			ilo, err := l.signalRecord(t, f, r, o)
@@ -979,12 +1001,16 @@ func decidedFor(before []oldWindow, in incident.Incident) *oldWindow {
 // window found now is: it started in the same minute (its key is the
 // minute's, or that with -2, -3 …), shares a value of each label both have,
 // and the two share half of each (halfOfBoth); "" for none, or one taken
-// already.
+// already. Of a named signal, a key with no name in it is the minute's
+// too: the windows of the signal with no name kept their keys when the
+// first named signal saved in the UI made it a named one (renameSignal).
 func sameImpact(before []oldWindow, from int64, taken map[string]bool, name string, in incident.Incident) string {
 	base := windowKeyBase(name, in)
+	plain := windowKeyBase("", in)
+	of := func(key, base string) bool { return key == base || strings.HasPrefix(key, base+"-") }
 	s, e := in.Start.Unix(), in.End.Unix()
 	for _, o := range before {
-		if o.start < from || taken[o.key] || o.key != base && !strings.HasPrefix(o.key, base+"-") {
+		if o.start < from || taken[o.key] || !of(o.key, base) && (name == "" || !of(o.key, plain)) {
 			continue
 		}
 		if halfOfBoth(o.start, o.end, s, e) && share(o.labels, in.Labels) {

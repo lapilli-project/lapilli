@@ -99,14 +99,29 @@ func sigMetaSet(t *txn, name string, keys ...string) (int, error) {
 // SignalDef is a signal as serve was started with it, or an admin set it:
 // what it reads, for how long a series returns something before it is a
 // window, the labels its windows are matched on (nil for the match in
-// effect), and whether reading it keeps the record.
+// effect), and whether reading it keeps the record; and, of one an admin
+// set on the Settings page, who and when (SetBy "" for the command
+// line's or the file's).
 type SignalDef struct {
 	Name   string
 	Expr   string
 	For    time.Duration
 	Match  []string
 	Record bool
+	SetBy  string
+	SetAt  time.Time
 }
+
+// sameDef reports whether a signal's row keeps def as given: its
+// expression, "for", match and record, and who set it in the UI and when.
+func sameDef(r SignalRow, d SignalDef) bool {
+	return r.Expr == d.Expr && r.For == d.For && sameMatch(r.Match, d.Match) && r.Record == d.Record &&
+		r.SetBy == d.SetBy && unixOr0(r.SetAt) == unixOr0(d.SetAt)
+}
+
+// sameMatch reports whether two matches are the same: nil, the match in
+// effect, is not empty, none.
+func sameMatch(a, b []string) bool { return slices.Equal(a, b) && (a == nil) == (b == nil) }
 
 // SignalRow is a signal as the ledger keeps it: as it was set, its bit in
 // the signals an alert is tied to, what keeps the record by it, and from
@@ -154,8 +169,8 @@ func matchOf(v sql.NullString) []string {
 func (l *Ledger) SignalRows(ctx context.Context) ([]SignalRow, error) { return l.signalRows(ctx, l.r) }
 
 func (l *Ledger) signalRows(ctx context.Context, q reader) ([]SignalRow, error) {
-	rows, err := q.QueryContext(ctx, `SELECT name, bit, expr, for_ns, match_labels, keeps_record, since, criterion, again, data, last_read, floor_at, missed_at
-		FROM impact_signals ORDER BY bit, name`)
+	rows, err := q.QueryContext(ctx, `SELECT name, bit, expr, for_ns, match_labels, keeps_record, since, criterion, again, data, last_read, floor_at, missed_at,
+		set_by, set_at FROM impact_signals ORDER BY bit, name`)
 	if err != nil {
 		return nil, err
 	}
@@ -163,13 +178,16 @@ func (l *Ledger) signalRows(ctx context.Context, q reader) ([]SignalRow, error) 
 	var out []SignalRow
 	for rows.Next() {
 		var r SignalRow
-		var forNS, missed int64
+		var forNS, missed, setAt int64
 		var match sql.NullString
 		var since, crit, again, data, read, floor string
-		if err := rows.Scan(&r.Name, &r.Bit, &r.Expr, &forNS, &match, &r.Record, &since, &crit, &again, &data, &read, &floor, &missed); err != nil {
+		if err := rows.Scan(&r.Name, &r.Bit, &r.Expr, &forNS, &match, &r.Record, &since, &crit, &again, &data, &read, &floor, &missed, &r.SetBy, &setAt); err != nil {
 			return nil, err
 		}
 		r.For, r.Match = time.Duration(forNS), matchOf(match)
+		if setAt > 0 {
+			r.SetAt = unix(setAt)
+		}
 		r.Kept = keptOf(since, crit, again, data, read, floor)
 		if missed > 0 {
 			r.Missed = unix(missed)
@@ -282,14 +300,60 @@ func matchKey(m []string) string {
 // is tied to is worked out again at once, on match, the match in effect;
 // its tallies are counted again by the judging a change asks for.
 func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []verdict.RuleEntry, match []string) (SignalsSynced, error) {
+	return l.SyncSignalSet(ctx, func(map[string]Setting) (SignalSet, []string) { return SignalSet{Defs: defs, Entries: entries}, match })
+}
+
+// SignalsFrom works out, from the settings the UI changed as a write reads
+// them, the named signals in effect, the rule entries and the match in
+// effect: lapilli serve's, the command line's with the UI's over them. It
+// is called within the write that keeps them, so that what another write
+// changed before it is never undone by a set worked out before.
+type SignalsFrom func(set map[string]Setting) (SignalSet, []string)
+
+// SignalSet is what SyncSignalSet keeps: the named signals in effect, each
+// with who set it in the UI and when, and the rule entries, EntriesUI when
+// they are the UI's, in place of the start's (docs/design/signals.md,
+// step 3).
+type SignalSet struct {
+	Defs      []SignalDef
+	Entries   []verdict.RuleEntry
+	EntriesUI bool
+}
+
+// SyncSignalSet is SyncSignals of the signals in effect, the start's and
+// the UI's, worked out from the settings as its write reads them (from):
+// who set each in the UI and when, and whether the entries are the UI's,
+// kept beside them (impact_signals.set_by and set_at, impact_rules.ui),
+// changing no judging.
+func (l *Ledger) SyncSignalSet(ctx context.Context, from SignalsFrom) (SignalsSynced, error) {
 	var out SignalsSynced
 	// Read first: a round that changes nothing writes nothing, and keeps
 	// every page kept for the ledger's generation.
-	if same, err := l.signalsAre(ctx, defs, entries, match); err != nil || same {
+	settings, err := l.Settings(ctx)
+	if err != nil {
 		return out, err
 	}
-	err := l.write(ctx, func(t *txn) error {
-		out = SignalsSynced{}
+	set, match := from(settings)
+	if same, err := l.signalsAre(ctx, set, match); err != nil || same {
+		return out, err
+	}
+	err = l.write(ctx, func(t *txn) error {
+		settings, err := settingsOf(t.ctx, t)
+		if err != nil {
+			return err
+		}
+		set, match := from(settings)
+		out, err = l.syncSignals(t, set, match)
+		return err
+	})
+	return out, err
+}
+
+// syncSignals is SyncSignalSet within a write.
+func (l *Ledger) syncSignals(t *txn, set SignalSet, match []string) (SignalsSynced, error) {
+	defs, entries := set.Defs, set.Entries
+	out := SignalsSynced{}
+	err := func() error {
 		t.naming = 0 // read again after this write's own
 		have, err := l.signalRows(t.ctx, t)
 		if err != nil {
@@ -334,26 +398,32 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 					return fmt.Errorf("more than %d named signals", verdict.MaxSignals)
 				}
 				used[bit] = true
-				if _, err := t.ExecContext(t.ctx, `INSERT INTO impact_signals (name, bit, expr, for_ns, match_labels, keeps_record) VALUES (?, ?, ?, ?, ?, ?)`,
-					d.Name, bit, d.Expr, int64(d.For), matchText(d.Match), d.Record); err != nil {
+				if _, err := t.ExecContext(t.ctx, `INSERT INTO impact_signals (name, bit, expr, for_ns, match_labels, keeps_record, set_by, set_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+					d.Name, bit, d.Expr, int64(d.For), matchText(d.Match), d.Record, d.SetBy, unixOr0(d.SetAt)); err != nil {
 					return err
 				}
 				out.Set = true
 				continue
 			}
-			if r.Expr == d.Expr && r.For == d.For && slices.Equal(r.Match, d.Match) && (r.Match == nil) == (d.Match == nil) && r.Record == d.Record {
+			if sameDef(r, d) {
 				continue
 			}
-			if !slices.Equal(r.Match, d.Match) || (r.Match == nil) != (d.Match == nil) || r.Record != d.Record {
+			if !sameMatch(r.Match, d.Match) || r.Record != d.Record {
 				out.Set = true
 			}
-			if _, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET expr = ?, for_ns = ?, match_labels = ?, keeps_record = ? WHERE name = ?",
-				d.Expr, int64(d.For), matchText(d.Match), d.Record, d.Name); err != nil {
+			if _, err := t.ExecContext(t.ctx, "UPDATE impact_signals SET expr = ?, for_ns = ?, match_labels = ?, keeps_record = ?, set_by = ?, set_at = ? WHERE name = ?",
+				d.Expr, int64(d.For), matchText(d.Match), d.Record, d.SetBy, unixOr0(d.SetAt), d.Name); err != nil {
 				return err
 			}
-			if !slices.Equal(r.Match, d.Match) || (r.Match == nil) != (d.Match == nil) {
-				// Of other labels, what it has seen begins again.
+			if !sameMatch(r.Match, d.Match) {
+				// Of other labels, what it has seen begins again; and its
+				// windows are matched on its labels now, as the judging
+				// again this asks for judges them (a confirmation's
+				// incident keeps the labels it was confirmed with).
 				if err := seenAgain(t, r); err != nil {
+					return err
+				}
+				if _, err := t.ExecContext(t.ctx, "UPDATE incidents SET match_labels = ? WHERE origin = 'impact' AND signal = ?", matchText(d.Match), d.Name); err != nil {
 					return err
 				}
 			}
@@ -362,7 +432,12 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 		if err != nil {
 			return err
 		}
-		if !sameEntries(was, entries) {
+		wasUI, err := entriesUI(t.ctx, t)
+		if err != nil {
+			return err
+		}
+		switch {
+		case !sameEntries(was, entries):
 			out.Entries = true
 			if _, err := t.ExecContext(t.ctx, "DELETE FROM impact_rules"); err != nil {
 				return err
@@ -376,10 +451,16 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 				if err != nil {
 					return err
 				}
-				if _, err := t.ExecContext(t.ctx, "INSERT INTO impact_rules (pos, pattern, labels, signals, match_labels) VALUES (?, ?, ?, ?, ?)",
-					i+1, e.Rules, string(labels), string(signals), matchText(e.Match)); err != nil {
+				if _, err := t.ExecContext(t.ctx, "INSERT INTO impact_rules (pos, pattern, labels, signals, match_labels, ui) VALUES (?, ?, ?, ?, ?, ?)",
+					i+1, e.Rules, string(labels), string(signals), matchText(e.Match), set.EntriesUI); err != nil {
 					return err
 				}
+			}
+		case len(entries) > 0 && wasUI != set.EntriesUI:
+			// The same entries, the UI's now or the start's again:
+			// nothing is judged otherwise.
+			if _, err := t.ExecContext(t.ctx, "UPDATE impact_rules SET ui = ?", set.EntriesUI); err != nil {
+				return err
 			}
 		}
 		// The match in effect, which the signals with none of their own
@@ -415,12 +496,24 @@ func (l *Ledger) SyncSignals(ctx context.Context, defs []SignalDef, entries []ve
 		}
 		if out.Set || out.Entries {
 			// Every firing judged again, a week at a time (JudgePending):
-			// pended here, so that a restart or another leader takes it up.
+			// pended here, so that a restart or another leader takes it up;
+			// by options read after this write (bumpSignalsGen).
+			if err := bumpSignalsGen(t); err != nil {
+				return err
+			}
 			return pendAll(t)
 		}
 		return nil
-	})
+	}()
 	return out, err
+}
+
+// entriesUI reports whether the rule entries the ledger keeps are the
+// UI's: none kept says no.
+func entriesUI(ctx context.Context, q reader) (bool, error) {
+	var n int
+	err := q.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT 1 FROM impact_rules WHERE ui != 0 LIMIT 1) AS one").Scan(&n)
+	return n > 0, err
 }
 
 // seenAgain begins again what a signal has seen, of other labels: looked
@@ -530,7 +623,8 @@ func (l *Ledger) retieSignal(t *txn, name string, match []string) error {
 
 // signalsAre reports whether the ledger keeps the named signals and rule
 // entries given, as given.
-func (l *Ledger) signalsAre(ctx context.Context, defs []SignalDef, entries []verdict.RuleEntry, match []string) (bool, error) {
+func (l *Ledger) signalsAre(ctx context.Context, set SignalSet, match []string) (bool, error) {
+	defs, entries := set.Defs, set.Entries
 	if slices.ContainsFunc(defs, func(d SignalDef) bool { return d.Name != "" }) {
 		if was, err := l.meta(ctx, l.r, metaSignalsMatch); err != nil || was != matchKey(match) {
 			return false, err
@@ -550,8 +644,7 @@ func (l *Ledger) signalsAre(ctx context.Context, defs []SignalDef, entries []ver
 		if i < 0 {
 			return false, nil
 		}
-		d := defs[i]
-		if r.Expr != d.Expr || r.For != d.For || !slices.Equal(r.Match, d.Match) || (r.Match == nil) != (d.Match == nil) || r.Record != d.Record {
+		if !sameDef(r, defs[i]) {
 			return false, nil
 		}
 	}
@@ -559,7 +652,11 @@ func (l *Ledger) signalsAre(ctx context.Context, defs []SignalDef, entries []ver
 		return false, nil
 	}
 	was, err := ruleEntries(ctx, l.r)
-	return err == nil && sameEntries(was, entries), err
+	if err != nil || !sameEntries(was, entries) {
+		return false, err
+	}
+	ui, err := entriesUI(ctx, l.r)
+	return err == nil && (len(entries) == 0 || ui == set.EntriesUI), err
 }
 
 // SignalWindowsBetween counts a signal's windows that started in [from,
@@ -571,19 +668,40 @@ func (l *Ledger) SignalWindowsBetween(ctx context.Context, name string, from, to
 	return n, err
 }
 
-// sameEntries reports whether two lists of rule entries say the same.
+// SameEntries reports whether two lists of rule entries say the same, as
+// impact_rules keeps them: each as the JSON it is kept as, so that one a
+// write keeps and reads back otherwise (a value that isn't UTF-8, kept
+// with U+FFFD) is the same, and a round that keeps the start's never
+// writes them again, and judges every firing again, for nothing.
+func SameEntries(a, b []verdict.RuleEntry) bool { return sameEntries(a, b) }
+
 func sameEntries(a, b []verdict.RuleEntry) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		x, y := a[i], b[i]
-		if x.Rules != y.Rules || !slices.Equal(x.Signals, y.Signals) || !slices.Equal(x.Match, y.Match) || (x.Match == nil) != (y.Match == nil) ||
-			!maps.EqualFunc(x.Labels, y.Labels, slices.Equal[[]string]) {
+		if entryKey(a[i]) != entryKey(b[i]) {
 			return false
 		}
 	}
 	return true
+}
+
+// entryKey is a rule entry as impact_rules keeps it: its pattern, labels,
+// signals and match (null for each signal's own), as JSON.
+func entryKey(e verdict.RuleEntry) string {
+	b, _ := json.Marshal(struct {
+		Rules   string
+		Labels  incident.Labels
+		Signals []string
+		Match   any
+	}{e.Rules, orEmpty(e.Labels), orNone(e.Signals), matchText(e.Match)})
+	// As read back: the bytes JSON keeps as U+FFFD are that, written out.
+	var v any
+	if json.Unmarshal(b, &v) == nil {
+		b, _ = json.Marshal(v)
+	}
+	return string(b)
 }
 
 // seenOf is what each named signal has returned and read, by name, of the
@@ -692,6 +810,17 @@ func (l *Ledger) tieUntied(t *txn, o verdict.Options) error {
 		}
 	}
 	return nil
+}
+
+// named reports whether the ledger keeps a named impact signal, within a
+// write: read once (untied's).
+func (t *txn) named() (bool, error) {
+	if t.naming == 0 {
+		if _, err := t.untied(); err != nil {
+			return false, err
+		}
+	}
+	return t.naming == 1, nil
 }
 
 // untied is what a new alert's signals are as it is made: -1, to be tied in

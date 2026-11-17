@@ -409,7 +409,16 @@ the UI too, by an admin (ui.md, "Incident criteria"), though they read
 Prometheus: they decide what an incident is, the cheapest way to verdicts
 with no incident written down. They are kept in `settings` as the others
 are, the UI's over the command line's, `off` for none; settings.yaml gives
-them as the chart's `impact` and `--impact-for` in `extraArgs`.
+them as the chart's `impact` and `--impact-for` in `extraArgs`. An
+expression the Settings page takes is 4,096 characters at most, as its
+field counts them, read as Lapilli reads PromQL and then by Prometheus
+(ui.md, "Incident criteria"); one the form posts back as serve was
+started with, a change of `--impact-for` alone, is the command line's,
+and isn't checked again. Named
+impact signals and the rule entries are kept there too, a signal's under
+`impact-signal/NAME` and the entries under `impact-rules`
+([signals.md](signals.md), "Step 3, as built"), and settings.yaml gives
+them as the chart's `impact` mapping.
 
 The record by the impact signal follows one rule: **it holds only for
 weeks that were read, with data, by the criterion in effect, and, after a

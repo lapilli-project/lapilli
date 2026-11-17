@@ -18,7 +18,13 @@ type Setting struct {
 
 // Settings are the judging settings changed through the UI, by name.
 func (l *Ledger) Settings(ctx context.Context) (map[string]Setting, error) {
-	rows, err := l.r.QueryContext(ctx, "SELECT key, value, updated, updated_by FROM settings")
+	return settingsOf(ctx, l.r)
+}
+
+// settingsOf reads the settings changed through the UI, as Settings, or
+// within a write.
+func settingsOf(ctx context.Context, q reader) (map[string]Setting, error) {
+	rows, err := q.QueryContext(ctx, "SELECT key, value, updated, updated_by FROM settings")
 	if err != nil {
 		return nil, err
 	}
@@ -40,33 +46,40 @@ func (l *Ledger) Settings(ctx context.Context) (map[string]Setting, error) {
 // SetSettings changes judging settings; an empty value goes back to the
 // one the command line gives.
 func (l *Ledger) SetSettings(ctx context.Context, values map[string]string, by string) error {
-	return l.write(ctx, func(t *txn) error {
-		now := time.Now().Unix()
-		for k, v := range values {
-			var was string
-			err := t.QueryRowContext(t.ctx, "SELECT value FROM settings WHERE key = ?", k).Scan(&was)
-			if err != nil && err != sql.ErrNoRows {
-				return err
-			}
-			if was == v {
-				continue
-			}
-			if v == "" {
-				_, err = t.ExecContext(t.ctx, "DELETE FROM settings WHERE key = ?", k)
-			} else {
-				_, err = t.ExecContext(t.ctx, `INSERT INTO settings (key, value, updated, updated_by) VALUES (?, ?, ?, ?)
-					ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated = excluded.updated, updated_by = excluded.updated_by`,
-					k, v, now, by)
-			}
-			if err != nil {
-				return err
-			}
+	return l.write(ctx, func(t *txn) error { return putSettings(t, values, by, true) })
+}
+
+// putSettings changes judging settings within a write, each noted in the
+// activity log with its before and after when logged; else the caller
+// notes them, as it says them.
+func putSettings(t *txn, values map[string]string, by string, logged bool) error {
+	now := time.Now().Unix()
+	for k, v := range values {
+		var was string
+		err := t.QueryRowContext(t.ctx, "SELECT value FROM settings WHERE key = ?", k).Scan(&was)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if was == v {
+			continue
+		}
+		if v == "" {
+			_, err = t.ExecContext(t.ctx, "DELETE FROM settings WHERE key = ?", k)
+		} else {
+			_, err = t.ExecContext(t.ctx, `INSERT INTO settings (key, value, updated, updated_by) VALUES (?, ?, ?, ?)
+				ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated = excluded.updated, updated_by = excluded.updated_by`,
+				k, v, now, by)
+		}
+		if err != nil {
+			return err
+		}
+		if logged {
 			if err := change(t, by, "setting "+k, was, v); err != nil {
 				return err
 			}
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // Change is a change made through the UI or API.

@@ -225,3 +225,38 @@ func (s *Server) inTurn(parent context.Context, kind string, asks []turnAsk, sto
 	}
 	return errs
 }
+
+// rename moves what this process keeps of a signal's turns to its new
+// name, as the ledger renames it in place (ledger.ChangeSignals): the
+// same signal, which takes as long as it did.
+func (tu *turns) rename(from, to string) {
+	tu.Lock()
+	defer tu.Unlock()
+	for _, kind := range []string{"read", "seen", "data"} {
+		a, b := kind+"\x00"+from, kind+"\x00"+to
+		if v, ok := tu.took[a]; ok {
+			tu.took[b] = v
+			delete(tu.took, a)
+		}
+		if v, ok := tu.turn[a]; ok {
+			tu.turn[b] = v
+			delete(tu.turn, a)
+		}
+		if v, ok := tu.behind[a]; ok {
+			tu.behind[b] = v
+			delete(tu.behind, a)
+		}
+		if v, ok := tu.outs[a]; ok {
+			tu.outs[b] = v
+			delete(tu.outs, a)
+		}
+		if v, ok := tu.due[a]; ok {
+			tu.due[b] = v
+			delete(tu.due, a)
+		}
+		if v, ok := tu.round[a]; ok {
+			tu.round[b] = v
+			delete(tu.round, a)
+		}
+	}
+}

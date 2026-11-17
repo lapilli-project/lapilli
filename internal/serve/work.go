@@ -90,7 +90,12 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 		s.rejudge.Store(rejudge || s.rejudge.Load())
 		return
 	}
-	if err := s.l.JudgePending(ctx, o); err != nil {
+	if err := s.l.JudgePending(ctx, o); errors.Is(err, ledger.ErrSignalsMoved) {
+		// The signals changed since the options were read: judged by the
+		// next round, with them read anew.
+		pended = false
+		s.poke()
+	} else if err != nil {
 		s.fail("judging again", err)
 		pended = false
 	}
@@ -215,8 +220,8 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 			s.fail("reading what the impact signals read", err)
 		}
 		// The firings of the alerts it ties otherwise counted again.
-		if s.namedSignals() {
-			if err := s.l.JudgePending(ctx, o); err != nil {
+		if o.Signals.Named() {
+			if err := s.judgePending(ctx, o); err != nil {
 				s.fail("judging again", err)
 			}
 		}
@@ -541,12 +546,13 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 	}
 	// Impact first, with time of its own: one query, which a replay that
 	// runs out of time shouldn't take along.
-	c, err := s.criterion(parent)
+	n, set, err := s.signalsNowOf(parent)
 	if err != nil {
 		return f, false, err
 	}
-	if s.namedSignals() {
-		if err := s.signalsRead(parent, from, to, &f); err != nil {
+	c := s.criterionOf(set)
+	if n.named() {
+		if err := s.signalsRead(parent, from, to, &f, n); err != nil {
 			return f, false, err
 		}
 	}

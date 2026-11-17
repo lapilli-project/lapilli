@@ -282,6 +282,12 @@ type sourceRow struct {
 	// Data is, of the impact signal, where the data of the selectors it
 	// reads begins.
 	Data *dataView
+	// Signal is, of a named impact signal's row, its name; Since, from when
+	// it keeps the record, and NoRecord, one that keeps none
+	// (docs/design/signals.md, step 3).
+	Signal   string
+	Since    time.Time
+	NoRecord bool
 }
 
 // sourcesView is the incident sources: the rows, whether no incident was
@@ -421,11 +427,25 @@ func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, 
 	}
 	v.Rows = append(v.Rows, file)
 
-	// The impact signal.
-	c, err := s.criterion(ctx)
+	// The impact signal; with named ones, a row each.
+	n, set, err := s.signalsNowOf(ctx)
 	if err != nil {
 		return nil, err
 	}
+	if n.named() {
+		rows, err := s.signalSources(ctx, n, seen, now)
+		if err != nil {
+			return nil, err
+		}
+		v.Rows = append(v.Rows, rows...)
+		out, err := s.outcomes(ctx)
+		if err != nil {
+			return nil, err
+		}
+		v.Quiet = out.Record.Quiet
+		return v, nil
+	}
+	c := s.criterionOf(set)
 	imp := sourceRow{Name: "Impact signal", State: "off", About: "Off: set it under Incident criteria."}
 	if c.Expr != "" {
 		imp = sourceRow{Name: "Impact signal", State: "ok", Last: seen.ImpactRead, LastWhat: "last read", N: got.Impact, Counts: true,
@@ -458,4 +478,50 @@ func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, 
 	}
 	v.Quiet = out.Record.Quiet
 	return v, nil
+}
+
+// signalSources are the named impact signals in effect, n, as the
+// Incident sources panel lists them, a row each: when it was last read,
+// its windows in the last four weeks, failing with Prometheus's error,
+// each selector and where its data begins, and from when it keeps the
+// record.
+func (s *Server) signalSources(ctx context.Context, n signalsNow, seen sourcesSeen, now time.Time) ([]sourceRow, error) {
+	counts, err := s.l.SignalWindowsSince(ctx, now.Add(-sourcesSpan))
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.l.SignalRows(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []sourceRow
+	for _, d := range n.Defs {
+		got := seen.Signals[d.Name]
+		row := sourceRow{Name: "Impact signal", Signal: d.Name, State: "ok", Last: got.Read, LastWhat: "last read", N: counts[d.Name], Counts: true, NoRecord: !d.Record,
+			About: "Each run reads it on its own over the hours it replays; a window counts unless an incident written down covers it."}
+		key := signalCriterion(d).key()
+		var r ledger.SignalRow
+		if i := slices.IndexFunc(rows, func(r ledger.SignalRow) bool { return r.Name == d.Name }); i >= 0 {
+			r = rows[i]
+		}
+		k := r.Kept
+		row.Since = k.From()
+		row.Data = dataViewOf(dataOf(k, key))
+		switch {
+		case got.Err != "" && !got.Failed.Before(got.Read):
+			row.State, row.Err = "failing", got.Err
+		case !r.Missed.IsZero():
+			row.State, row.About = "failing", "Missed by a run, which recorded the rest: a later one reads it from where it was missed, within a week."
+		case got.Read.IsZero() || k.Read != key:
+			row.State, row.About = "pending", "Not read with the criterion in effect yet."
+		case now.Sub(got.Read) > impactStale(s.cfg):
+			row.State, row.About = "quiet", "Not read for longer than two runs: are the runs running?"
+		case !k.Floor.IsZero():
+			row.State, row.About = "unread", "Read, waiting to be read again over the last four weeks: no record is kept by it meanwhile."
+		case row.Data != nil && row.Data.NoData:
+			row.State, row.About = "nodata", "A selector it reads has no data: it keeps no record until each has some."
+		}
+		out = append(out, row)
+	}
+	return out, nil
 }

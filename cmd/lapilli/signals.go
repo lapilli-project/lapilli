@@ -330,6 +330,12 @@ func readImpactFile(path string) ([]impactSignal, []verdict.RuleEntry, error) {
 	case len(b) > maxImpactFile:
 		return nil, nil, fmt.Errorf("more than %d MiB: a file of impact signals is less", maxImpactFile>>20)
 	}
+	// What is written is what is read: no anchor or alias, which would
+	// repeat a value past what the file's bytes bound, and no tag that
+	// gives other than text (!!binary).
+	if err := serve.PlainYAML(b); err != nil {
+		return nil, nil, err
+	}
 	var doc impactFileDoc
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	dec.KnownFields(true)
@@ -401,6 +407,9 @@ func readImpactFile(path string) ([]impactSignal, []verdict.RuleEntry, error) {
 			if !labelName.MatchString(k) || len(vs) == 0 || slices.Contains(vs, "") {
 				return nil, nil, fmt.Errorf("%s: labels: want a label's name and a value, or a list of them, for each", at)
 			}
+		}
+		if err := ledger.CheckLabels(e.Labels); err != nil {
+			return nil, nil, fmt.Errorf("%s: labels: %w", at, err)
 		}
 		for j, name := range e.Signals {
 			switch {
