@@ -2096,5 +2096,6 @@
  "found by %s": "%s 로 찾음",
  "Written down by confirming a window of %s: matched on %s, as the window was, while its labels are those it was confirmed with.": "%s 구간을 확인해 기록했어요: 확인할 때의 라벨 그대로면 구간처럼 %s 로 맞춰 봐요.",
  "Found by %s, a signal no longer read: its windows stay, as incidents, matched on %s.": "더 이상 읽지 않는 지표 %s 로 찾았어요: 구간은 인시던트로 남고 %s 로 맞춰 봐요.",
- "Found by %s: a window once a series returns something for %s, matched on %s.": "%s 로 찾았어요: 시계열이 %s 동안 값을 내면 구간이 되고, %s 로 맞춰 봐요."
+ "Found by %s: a window once a series returns something for %s, matched on %s.": "%s 로 찾았어요: 시계열이 %s 동안 값을 내면 구간이 되고, %s 로 맞춰 봐요.",
+ "No alert yet: which of them its record waits for comes with each alert, by its labels.": "아직 알림이 없습니다: 기록이 그중 어느 것을 기다리는지는 알림마다 라벨로 정해집니다."
 }

@@ -42,7 +42,7 @@
 <p>{{if ne $.View.Origin "impact"}}{{tbdi "Written down by confirming a window of %s: matched on %s, as the window was, while its labels are those it was confirmed with." .Name (or .Match (t "no label"))}}{{else if .Gone}}{{tbdi "Found by %s, a signal no longer read: its windows stay, as incidents, matched on %s." .Name (or .Match (t "no label"))}}{{else}}{{tbdi "Found by %s: a window once a series returns something for %s, matched on %s." .Name .For (or .Match (t "no label"))}}{{end}}</p>
 {{with .KeptFrom}}<p>{{t "Rule entries keep their rules from its windows"}}: {{range $i, $e := .}}{{if $i}}, {{end}}<code><bdi>{{$e}}</bdi></code>{{end}}</p>{{end}}
 {{with .With}}<h3>{{t "Other signals' windows at the time"}}</h3>
-<ul class="plain">{{range .}}<li><a href="{{$.Incident .ID}}">{{.ID}}</a> <bdi>{{.Signal}}</bdi>, {{at $loc .Start}} → {{at $loc .End}}: {{with .Caught}}{{t "caught by %s" (join . ", ")}}{{else}}{{t "nothing caught it"}}{{end}}{{with .State}} · {{t .}}{{end}}</li>{{end}}</ul>{{end}}
+<ul class="plain">{{range .}}<li><a href="{{$.Incident .ID}}">{{.ID}}</a> <bdi>{{.Signal}}</bdi>, {{at $loc .Start}} → {{at $loc .End}}: {{if .Caught}}<span class="status-ok"><span aria-hidden="true">✓</span> {{t "caught by %s" (join .Caught ", ")}}</span>{{else if eq .State "dismissed"}}{{t "nothing caught it"}}{{else}}<span class="status-bad"><span aria-hidden="true">✗</span> {{t "nothing caught it"}}</span>{{end}}{{with .State}} · {{t .}}{{end}}</li>{{end}}</ul>{{end}}
 {{end}}
 <h2>{{t "Caught by"}}</h2>
 {{if .CaughtBy}}<ul class="plain">{{range .CaughtBy}}<li><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a> {{delay .Delay}}</li>{{end}}</ul>
@@ -92,7 +92,7 @@
   <label>{{t "Title"}} <input name="title" maxlength="200" value="{{.Title}}"></label>
   <label>{{t "Start"}} <input name="start" type="datetime-local" required value="{{input $loc .Start}}"></label>
   <label>{{t "End"}} <input name="end" type="datetime-local" value="{{input $loc .End}}"></label>
-  <label>{{t "Labels"}} <input name="labels" value="{{.Labels}}"> <span class="quiet">{{if .Signal}}{{t "matched as its window was; with other labels, on %s, as any written down" $.View.Match}}{{else}}{{with .Match}}{{t "matched on %s" .}}{{end}}{{end}}</span></label>
+  <label>{{t "Labels"}} <input name="labels" value="{{.Labels}}"> <span class="quiet">{{if .Signal}}{{t "matched as its window was; with other labels, on %s, as any written down" (or $.View.Match (t "no label"))}}{{else}}{{with .Match}}{{t "matched on %s" .}}{{end}}{{end}}</span></label>
   <button>{{t "Save"}}</button>
 </form>
 <form method="post" action="/incidents/{{path .ID}}/delete"><button class="quiet-button">{{t "Delete it"}}</button></form>

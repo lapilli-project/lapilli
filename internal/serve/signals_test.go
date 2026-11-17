@@ -1866,3 +1866,43 @@ func TestSignalPickedKeptByTabs(t *testing.T) {
 		t.Errorf("%d links keep the signal: %q", kept, links)
 	}
 }
+
+// A rule that hasn't fired says what its record waits for comes with its
+// alerts, not that no signal keeps it; a window's page says the other
+// signals' windows caught, or not, as states; a confirmation with no
+// match in effect says so, not "on ,".
+func TestSignalPagesSayIt(t *testing.T) {
+	ctx := context.Background()
+	s := signalServer(t, signalWindowsHistory(), func(c *Config) {
+		c.Editors = []string{"bo@example.com"}
+		os.WriteFile(filepath.Join(c.RulesPath, "quiet.yaml"), []byte("groups:\n- name: quiet\n  rules:\n  - alert: Quiet\n    expr: never_seen > 1\n"), 0o644)
+	})
+	h := s.Handler()
+	_, body := askAs(t, h, http.MethodGet, "/rules/Quiet", nil, "ana@example.com", "same-origin")
+	if !strings.Contains(body, "No alert yet: which of them") || strings.Contains(body, "None of them keeps the record") {
+		t.Errorf("a rule with no alert: %s", between(body, "Judged against", "</p>"))
+	}
+	_, body = askAs(t, h, http.MethodGet, "/incidents/impact-probe-20261102T0600Z", nil, "ana@example.com", "same-origin")
+	if others := between(body, "Other signals&#39; windows at the time", "</ul>"); !strings.Contains(others, `<span class="status-ok"><span aria-hidden="true">✓</span> caught by Errors</span>`) {
+		t.Errorf("the other windows, without a state's class: %s", others)
+	}
+	o, _ := s.options(ctx)
+	made, err := s.l.Decide(ctx, "impact-probe-20261102T0600Z", "confirmed", "", "bo@example.com", o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.l.SetSettings(ctx, map[string]string{"match": "none"}, "ana@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	_, body = askAs(t, h, http.MethodGet, "/incidents/"+url.PathEscape(made), nil, "bo@example.com", "same-origin")
+	if !strings.Contains(body, "matched as its window was; with other labels, on no label, as any written down") {
+		t.Errorf("the confirmation with no match in effect: %s", between(body, `name="labels"`, "</label>"))
+	}
+}
+
+// between is what of s is after from, up to the first to after it.
+func between(s, from, to string) string {
+	_, after, _ := strings.Cut(s, from)
+	x, _, _ := strings.Cut(after, to)
+	return x
+}

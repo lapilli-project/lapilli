@@ -2096,5 +2096,6 @@
  "found by %s": "%s で検出",
  "Written down by confirming a window of %s: matched on %s, as the window was, while its labels are those it was confirmed with.": "%s のウィンドウを確認して記録しました: 確認時のラベルのままなら、ウィンドウと同じく %s で照合します。",
  "Found by %s, a signal no longer read: its windows stay, as incidents, matched on %s.": "もう読んでいない指標 %s で検出: ウィンドウはインシデントとして残り、%s で照合します。",
- "Found by %s: a window once a series returns something for %s, matched on %s.": "%s で検出: 系列が %s 続けて値を返すとウィンドウになり、%s で照合します。"
+ "Found by %s: a window once a series returns something for %s, matched on %s.": "%s で検出: 系列が %s 続けて値を返すとウィンドウになり、%s で照合します。",
+ "No alert yet: which of them its record waits for comes with each alert, by its labels.": "まだアラートはありません。記録がどれを待つかは、アラートごとにラベルで決まります。"
 }
