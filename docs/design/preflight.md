@@ -400,8 +400,12 @@ rule source, 20 data sources at two each, Grafana's three templates reads
 and one permissions read, a discovery document and keys, a credential from
 each cloud's chain, each on-call feed. Each is asked under `--max-rate`,
 as serve asks, within ten seconds, and the whole within
-`--preflight-timeout`. It holds the rules in memory as serve's watcher
-does, and nothing else of size.
+`--preflight-timeout`. So are the estimates, which ask nothing but count
+a run's requests a run at a time over a day of runs, and the backfill's a
+day at a time: a pull request's flags and rules (a run every minute, ten
+years of backfill, `--backfill`'s most, thousands of rules) make that
+seconds, and what isn't counted once the time is up is unknown. It holds
+the rules in memory as serve's watcher does, and nothing else of size.
 
 ## Alternatives
 

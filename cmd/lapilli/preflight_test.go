@@ -369,6 +369,26 @@ func TestPreflightAgainstFakes(t *testing.T) {
 	}
 }
 
+// --backfill is ten years at most, for serve and for lapilli preflight,
+// which counts it a day at a time; ten years is taken.
+func TestBackfillAtMost(t *testing.T) {
+	rules := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - alert: Down\n        expr: up == 0\n")
+	// Its --ledger is a file, so that a serve that took the flag stops
+	// at once, and makes no ledger.
+	for _, args := range [][]string{{"serve"}, {"preflight", "--offline"}} {
+		var out, errOut bytes.Buffer
+		code := run(append(args, "--rules", rules, "--prometheus", "http://prometheus:9090", "--backfill", "3651d", "--keep", "0", "--ledger", rules), &out, &errOut)
+		if code != 2 || !strings.Contains(errOut.String(), "--backfill 3651d: at most 3650d") {
+			t.Errorf("%s: exit %d\n%s%s", args[0], code, out.String(), errOut.String())
+		}
+	}
+	var out, errOut bytes.Buffer
+	if code := run([]string{"preflight", "--rules", rules, "--prometheus", "http://prometheus:9090", "--offline", "--json", "--backfill", "3650d", "--keep", "0"}, &out, &errOut); code != 0 ||
+		!strings.Contains(out.String(), `"estimate.backfill"`) {
+		t.Errorf("3650d: exit %d\n%s%s", code, out.String(), errOut.String())
+	}
+}
+
 // Its own flags are taken out before serve's reader, which refuses what
 // serve refuses, and it exits 2 then; -h says its options.
 func TestPreflightFlags(t *testing.T) {

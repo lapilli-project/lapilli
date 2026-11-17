@@ -127,7 +127,7 @@ type Config struct {
 	History  *source.GrafanaHistory
 	Every    time.Duration
 	Settle   time.Duration
-	Backfill time.Duration
+	Backfill time.Duration // MaxBackfill at most
 	Keep     time.Duration // 0 keeps everything
 	Watch    time.Duration
 	Digest   Weekly
@@ -1032,6 +1032,12 @@ func show(o verdict.Options, key string) string {
 	}
 	return ""
 }
+
+// MaxBackfill is the longest --backfill: ten years. A first start replays
+// it a day at a time, and lapilli preflight counts its requests a day at a
+// time, both as long as it is; a longer one is a typing error more often
+// than a history that keeps more.
+const MaxBackfill = 3650 * 24 * time.Hour
 
 // ParseDuration takes Go durations and, as Prometheus does, days: 7d, 1d12h.
 func ParseDuration(s string) (time.Duration, error) {

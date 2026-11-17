@@ -128,7 +128,7 @@ func Run(ctx context.Context, c Config) *Report {
 	p.ledger(ctx)
 	p.signin(ctx)
 	p.access()
-	p.estimate(read)
+	p.estimate(ctx, read)
 	p.r.Asked = al.asked()
 	p.redact()
 	return p.r

@@ -269,7 +269,7 @@ func TestEstimateRequests(t *testing.T) {
 	c.Serve.CatchUpHours = &w
 	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
 	p := &run{c: c, al: newAllowlist(time.Now), r: &Report{}, now: now}
-	p.estimate(&read{all: rulesOf(t, 200, 0)})
+	p.estimate(context.Background(), &read{all: rulesOf(t, 200, 0)})
 	h, b, n := p.r.Estimates.Hourly, p.r.Estimates.Backfill, p.r.Estimates.Nights
 	// Each run replays from 2h15m back (settle, every, a 15m margin) and
 	// 5m more: some 10% of runs cross midnight.
@@ -285,9 +285,75 @@ func TestEstimateRequests(t *testing.T) {
 	// Three rules for a day have a margin of seven days: each run reads
 	// eight or nine days of each again.
 	p = &run{c: c, al: newAllowlist(time.Now), r: &Report{}, now: now}
-	p.estimate(&read{all: rulesOf(t, 200, 3)})
+	p.estimate(context.Background(), &read{all: rulesOf(t, 200, 3)})
 	if more := p.r.Estimates.Hourly.Requests - h.Requests; more < 24 || more > 30 {
 		t.Errorf("three rules for a day add %d requests a run", more)
+	}
+}
+
+// timeUp is a context whose time is up once Err has been asked n times:
+// the preflight's time running out where a test says, by count, not by a
+// clock.
+type timeUp struct {
+	context.Context
+	n, asked int
+}
+
+func (c *timeUp) Err() error {
+	c.asked++
+	if c.asked > c.n {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+// The estimates are worked out within the preflight's time: once it is up,
+// what isn't counted yet is unknown, and no more is counted, whatever a
+// pull request's flags and rules ask (ten years of backfill, a run every
+// minute). Each run and each day of backfill looks at the time.
+func TestEstimateWithinTime(t *testing.T) {
+	c := config()
+	c.MaxRate, c.Serve.CatchUpRate = 0.5, 0.5
+	w, _ := serve.ParseWindow("01:00-06:00")
+	c.Serve.CatchUpHours = &w
+	rs := rulesOf(t, 200, 0)
+	states := func(p *run) map[string]State {
+		out := map[string]State{}
+		for _, it := range p.r.Items {
+			out[it.ID] = it.State
+			if it.State == Unknown && strings.HasPrefix(it.ID, "estimate.") && it.ID != "estimate.memory" && !strings.Contains(it.What, "--preflight-timeout") {
+				t.Errorf("%s: %q", it.ID, it.What)
+			}
+		}
+		return out
+	}
+	// Up from the start: nothing counted, ten years of runs every minute
+	// or not; the hourly runs and the backfill each look once in their
+	// first piece and once after it.
+	big := c
+	big.Serve.Backfill, big.Serve.Every = serve.MaxBackfill, time.Minute
+	for _, c := range []Config{c, big} {
+		ctx := &timeUp{Context: context.Background()}
+		p := newRun(c)
+		p.estimate(ctx, &read{all: rs})
+		if s := states(p); s["estimate.hourly"] != Unknown || s["estimate.backfill"] != Unknown || s["estimate.nights"] != Unknown ||
+			p.r.Estimates.Hourly != nil || p.r.Estimates.Backfill != nil || ctx.asked > 4 {
+			t.Errorf("up from the start: %v %+v, Err asked %d times", s, p.r.Estimates, ctx.asked)
+		}
+	}
+	// Up in the backfill: the hourly runs are counted (a day of them, one
+	// rule's group each: two looks a run), the backfill stops at once.
+	ctx := &timeUp{Context: context.Background(), n: 2*24 + 10}
+	p := newRun(c)
+	p.estimate(ctx, &read{all: rs})
+	if s := states(p); s["estimate.hourly"] != OK || s["estimate.backfill"] != Unknown || s["estimate.nights"] != Unknown || ctx.asked > ctx.n+2 {
+		t.Errorf("up in the backfill: %v, Err asked %d times of %d", s, ctx.asked, ctx.n)
+	}
+	// With time enough, all of it.
+	p = newRun(c)
+	p.estimate(context.Background(), &read{all: rs})
+	if s := states(p); s["estimate.hourly"] != OK || s["estimate.backfill"] != OK || s["estimate.nights"] != OK {
+		t.Errorf("with time enough: %v", s)
 	}
 }
 
@@ -298,7 +364,7 @@ func TestEstimateTooSlow(t *testing.T) {
 	c := config()
 	c.MaxRate = 0.05
 	p := &run{c: c, al: newAllowlist(time.Now), r: &Report{}, now: time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)}
-	p.estimate(&read{all: rulesOf(t, 200, 0)})
+	p.estimate(context.Background(), &read{all: rulesOf(t, 200, 0)})
 	states := map[string]State{}
 	for _, it := range p.r.Items {
 		states[it.ID] = it.State
@@ -750,7 +816,7 @@ func TestEstimateSettleAndGuard(t *testing.T) {
 		c := config()
 		c.Serve.Settle, c.Serve.Guard = settle, "x > 0"
 		p := newRun(c)
-		p.hourly(oneRule())
+		p.hourly(context.Background(), oneRule())
 		return p.r.Estimates.Hourly
 	}
 	with, without := day(time.Hour), day(0)
@@ -760,7 +826,7 @@ func TestEstimateSettleAndGuard(t *testing.T) {
 	c := config()
 	c.Serve.Settle, c.Serve.Guard, c.Serve.Backfill = 0, "x > 0", 3*24*time.Hour
 	p := newRun(c)
-	p.backfill(oneRule())
+	p.backfill(context.Background(), oneRule())
 	if b := p.r.Estimates.Backfill; b.Pieces != 3 || b.Guard != 3 {
 		t.Errorf("%+v", b)
 	}
@@ -772,7 +838,7 @@ func TestEstimateImpact(t *testing.T) {
 	c := config()
 	c.Serve.Settle, c.Serve.Impact, c.Serve.Backfill = 0, "x > 1", 3*24*time.Hour
 	p := newRun(c)
-	p.backfill(oneRule())
+	p.backfill(context.Background(), oneRule())
 	if b := p.r.Estimates.Backfill; b.Impact != 6 {
 		t.Errorf("%+v", b)
 	}
@@ -792,14 +858,14 @@ func TestEstimateSignals(t *testing.T) {
 		{Name: "payments", Expr: "sum(rate(payments_succeeded_total[5m])) == 0", For: time.Minute, Match: []string{}},
 	}
 	p := newRun(c)
-	p.backfill(oneRule())
+	p.backfill(context.Background(), oneRule())
 	// Each day's piece two requests a signal; once, the errors' three data
 	// looks (two selectors and a stand-in) and payments' one, and the
 	// errors' one look at what it reads (payments is matched on none).
 	if b := p.r.Estimates.Backfill; b.Impact != 2*6+3+1+1 {
 		t.Errorf("backfill: %+v", b)
 	}
-	p.hourly(oneRule())
+	p.hourly(context.Background(), oneRule())
 	if h := p.r.Estimates.Hourly; h.Impact != h.Runs*(2+1) {
 		t.Errorf("hourly: %d runs, %d impact requests; want a read of each signal and a look at errors' a run", h.Runs, h.Impact)
 	}
@@ -813,7 +879,7 @@ func TestEstimateCatchUp(t *testing.T) {
 		c := config()
 		c.Serve.Settle, c.Serve.Backfill, c.Serve.CatchUpRate, c.MaxRate = 0, 3*24*time.Hour, catchUp, maxRate
 		p := newRun(c)
-		p.backfill(oneRule()) // each day two requests: it crosses midnight
+		p.backfill(context.Background(), oneRule()) // each day two requests: it crosses midnight
 		return p.r.Estimates.Backfill
 	}
 	if b := at(0, 1); b.Requests != 6 || b.Rate != 1 || b.Seconds != 4 {
@@ -867,7 +933,7 @@ func TestEstimateEachAPI(t *testing.T) {
 	c.Serve.Loki = "http://loki:3100"
 	c.MaxRate = 0.07 // a run crossing midnight: 200 to each, 2,857s; 400 together, 5,714s
 	p := newRun(c)
-	p.hourly(rs)
+	p.hourly(context.Background(), rs)
 	h, it := p.r.Estimates.Hourly, itemOf(p, "estimate.hourly")
 	if h.By["loki"] == 0 || h.By["prometheus"] == 0 || it.State != OK || h.Seconds > 3600 {
 		t.Errorf("%+v %+v", h, it)
