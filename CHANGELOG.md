@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+## [0.54.0] - 2026-11-17
+
+### Added
+
+- **An alert that came after its incident is said, not only counted
+  black.** A firing whose condition held in an incident, by its rule's
+  `for` and how late its metrics arrive (`--late`, `query_offset`), but
+  that fired once the incident was over, its labels agreeing, read as one
+  more black stone and the incident as missed, the same as an alert for
+  nothing. It still is black, and the incident missed by its rule, but the
+  incident's row now names the rule and how long after its end it fired
+  (`✗ nothing in time; after its end: LB5xx +3m`), and a line under the
+  rules counts such firings, by rule. Of a rule replayed as several
+  versions, the least `for` and lag of them says when its condition held.
+  In `--json`: a rule's `late`, an
+  incident's `fired_after`, a firing's `after`, and `held_from`, when its
+  condition held, which `--firings` reads back, so a report's firings
+  judged again say the same. Before, only a near miss said a rule fired
+  too late, in the step after the replays that `--extras` cuts and that
+  firings from `--firings` never reach. No stone, precision or number
+  changes; `lapilli serve` doesn't say it yet.
+
 ### Fixed
 
 - **The settings page sets a stand-in in code, as the selector beside it.**
@@ -9,6 +31,15 @@
   data" and "kept from …, where … begins" named the stand-in in the
   sentence's own type, so it read as prose beside the selector set as code
   before it. It is now in `<code>` too, in every language (0.53.1).
+- **The note on impact shorter than a rule fires on counts how late its
+  metrics arrive.** A rule with `for: 3m`, evaluated every minute, whose
+  metrics arrive 3m late (`--late`, its group's `query_offset`, or a
+  Grafana query's time range ending 3m before now), sees
+  impact 3m late and fires 7m into it; the note, which counted only `for`
+  and one evaluation, left it out of the rules `--impact-for 6m` is too
+  short for. The rule's lag is now in what it needs, and the
+  note says how many of the rules it names read late metrics
+  (`impact_short.late_rules` in `--json`).
 
 ## [0.53.1] - 2026-11-17
 

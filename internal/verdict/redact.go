@@ -483,7 +483,7 @@ func (x *Redactor) report(r *Report) *Report {
 	sortRules(out.Rules)
 	out.Incidents = make([]IncidentResult, len(r.Incidents))
 	for i, in := range r.Incidents {
-		out.Incidents[i] = IncidentResult{Incident: x.incident(in.Incident), CaughtBy: x.catches(in.CaughtBy)}
+		out.Incidents[i] = IncidentResult{Incident: x.incident(in.Incident), CaughtBy: x.catches(in.CaughtBy), FiredAfter: x.catches(in.FiredAfter)}
 	}
 	slices.SortStableFunc(out.Incidents, func(a, b IncidentResult) int { return byStart(a.Incident, b.Incident) })
 	place := map[string]int{} // an incident's place in the list
@@ -599,7 +599,7 @@ func (x *Redactor) firings(fs []Judged) []Judged {
 	for i, f := range fs {
 		f.Rule = x.alias("rule", f.Rule)
 		f.Labels = x.labels(f.Labels)
-		f.Start, f.End = utc(f.Start), utc(f.End)
+		f.Start, f.End, f.Held = utc(f.Start), utc(f.End), utc(f.Held)
 		if f.Signals != nil {
 			sigs := make([]string, len(f.Signals))
 			for i, sg := range f.Signals {
@@ -613,6 +613,12 @@ func (x *Redactor) firings(fs []Judged) []Judged {
 		}
 		slices.Sort(ids)
 		f.Incidents = ids
+		var afters []string
+		for _, id := range f.After {
+			afters = append(afters, x.alias("incident", id))
+		}
+		slices.Sort(afters)
+		f.After = afters
 		var kinds []string
 		for _, k := range f.Marked {
 			kinds = append(kinds, x.alias("kind", k))

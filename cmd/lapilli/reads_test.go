@@ -650,6 +650,35 @@ func TestImpactShort(t *testing.T) {
 	}
 }
 
+// TestImpactShortLate: a rule whose metrics arrive late (--late, or its
+// query_offset) sees the impact that much later, and needs that much
+// longer: "for" 3m, evaluated every minute, 3m late, needs 7m, longer
+// than impact of 6m.
+func TestImpactShortLate(t *testing.T) {
+	rs := []rules.Rule{
+		{Name: "LB5xx", For: 3 * time.Minute, Interval: time.Minute, Late: 3 * time.Minute},
+		{Name: "Offset", For: 3 * time.Minute, Interval: time.Minute, QueryOffset: 2 * time.Minute},
+		{Name: "OnTime", For: 3 * time.Minute, Interval: time.Minute},
+	}
+	replayed := map[string]bool{"LB5xx": true, "Offset": true, "OnTime": true}
+	got := impactShort(rs, replayed, 6*time.Minute, 15*time.Second)
+	if got == nil || got.Rules != 1 || got.Judged != 3 || got.Need != 7*time.Minute || got.Lagged != 1 {
+		t.Fatalf("%+v: LB5xx alone, needing 7m, late", got)
+	}
+	if got := impactShort(rs, replayed, 5*time.Minute, 15*time.Second); got == nil || got.Rules != 2 || got.Lagged != 2 {
+		t.Errorf("--impact-for 5m: %+v, LB5xx and Offset, both late", got)
+	}
+	rs[0].Late = 0
+	if got := impactShort(rs, replayed, 6*time.Minute, 15*time.Second); got != nil {
+		t.Errorf("on time, 4m is within 6m: %+v", got)
+	}
+	// A Grafana query whose time range ends 3m before now reads as late.
+	rs[0].Graph = &rules.Graph{Shift: map[string]time.Duration{"A": 3 * time.Minute, "B": 0}}
+	if got := impactShort(rs, replayed, 6*time.Minute, 15*time.Second); got == nil || got.Need != 7*time.Minute || got.Lagged != 1 {
+		t.Errorf("a Grafana query 3m back: %+v", got)
+	}
+}
+
 // TestSuggestParallel: a longer "for" for the noisy rules is tried for as
 // many at once as --parallel, and what is suggested, in the rules' order,
 // is the same as one at a time.

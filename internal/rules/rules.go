@@ -452,6 +452,19 @@ func gcd(a, b time.Duration) time.Duration {
 // longer.
 func (r Rule) Lag() time.Duration { return max(r.QueryOffset, r.Late) }
 
+// Slowest is how long, at the most, before an evaluation the history a
+// rule's condition reads ends: its Lag, or a Grafana query's own time
+// range ending before now (Graph.Shift), whichever is longer.
+func (r Rule) Slowest() time.Duration {
+	d := r.Lag()
+	if r.Graph != nil {
+		for _, s := range r.Graph.Shift {
+			d = max(d, s)
+		}
+	}
+	return d
+}
+
 // ErrNoneInDir is a directory with no file of alert rules in it.
 var ErrNoneInDir = errors.New("no file in it holds alert rules")
 

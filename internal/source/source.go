@@ -566,6 +566,12 @@ func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdic
 		}
 		caught := caughtBy(rep, t.rr.Rule)
 		for _, d := range t.fors {
+			// Its firings with the longer "for" held that much before.
+			for i := range a[d] {
+				if a[d][i].Held.IsZero() && d+t.rule.Lag() > 0 {
+					a[d][i].Held = a[d][i].Start.Add(-d - t.rule.Lag())
+				}
+			}
 			alt := verdict.Judge(nil, a[d], incs, o)
 			after := verdict.RuleResult{Rule: t.rr.Rule}
 			if j := slices.IndexFunc(alt.Rules, func(r verdict.RuleResult) bool { return r.Rule == t.rr.Rule }); j >= 0 {

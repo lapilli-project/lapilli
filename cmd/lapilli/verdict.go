@@ -1479,6 +1479,13 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 		// Each rule's entry, found once, by the rules' labels or its
 		// firings'.
 		f.opts.Signals = indexSignals(f.opts.Signals, versions, fs)
+		// Replayed as several versions, a rule is known as the last: when
+		// its firings' conditions held is told by every one of them.
+		if len(versions) > 1 {
+			for _, v := range versions {
+				f.opts.Versions = append(f.opts.Versions, v.Rules...)
+			}
+		}
 		rep = verdict.Judge(known, fs, incs, f.opts)
 		for _, v := range versions {
 			if v.From.After(f.opts.From) && v.From.Before(f.opts.To) {
@@ -2201,7 +2208,9 @@ func loadRules(f *verdictFlags, path string) ([]rules.Rule, error) {
 // are longer than impactFor: impact that short, counted as an incident,
 // they can't be sure to catch. A rule with no "for" fires on its first
 // evaluation in the impact, so it needs as long as its evaluations are apart.
-// Nil when there are none.
+// A rule whose metrics arrive late (--late, its query_offset, or a Grafana
+// query's time range ending before now: its Slowest) sees the impact that
+// much later, and needs that much longer. Nil when there are none.
 func impactShort(rs []rules.Rule, replayed map[string]bool, impactFor, step time.Duration) *verdict.ImpactShort {
 	need := map[time.Duration]int{}
 	out := verdict.ImpactShort{For: impactFor}
@@ -2212,9 +2221,12 @@ func impactShort(rs []rules.Rule, replayed map[string]bool, impactFor, step time
 		}
 		seen[r.Name] = true
 		out.Judged++
-		if d := max(r.For, 0) + replay.Every(r, step); d > impactFor {
+		if d := max(r.For, 0) + replay.Every(r, step) + r.Slowest(); d > impactFor {
 			out.Rules++
 			need[d]++
+			if r.Slowest() > 0 {
+				out.Lagged++
+			}
 		}
 	}
 	if out.Rules == 0 {

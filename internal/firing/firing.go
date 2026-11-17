@@ -24,6 +24,13 @@ type Firing struct {
 	// End is when it resolved; zero when it was still firing at the end of
 	// the period.
 	End time.Time `json:"end,omitzero"`
+	// Held, when not zero, is from when, by the time of the history it
+	// read, its condition held before it fired: its start, less its rule's
+	// "for" and how late the rule's metrics arrive, as a report judged it
+	// (verdict.Judge). Zero is its start. Read back with the rest, a
+	// report's firings judged again say what the report said; one after
+	// its start is not believed, and read as none.
+	Held time.Time `json:"held_from,omitzero"`
 }
 
 // Active reports whether the firing was on at any time in [from, to].
@@ -48,6 +55,9 @@ func ReadJSONL(r io.Reader) ([]Firing, error) {
 		}
 		if f.Rule == "" || f.Start.IsZero() {
 			return nil, fmt.Errorf("line %d: a firing needs rule and start", n)
+		}
+		if f.Held.After(f.Start) {
+			f.Held = time.Time{} // a condition holds before it fires: not believed
 		}
 		out = append(out, f)
 	}

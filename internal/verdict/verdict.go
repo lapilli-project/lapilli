@@ -63,6 +63,12 @@ type Options struct {
 	// its week is kept, as serve's stones are kept by week. Nil judges each
 	// firing by the record at its own time, as lapilli verdict does.
 	RecordWeek func(t time.Time) (from, to time.Time) `json:"-"`
+	// Versions are, when the rules replayed stood as several versions over
+	// the period (a rules history), every one of them: from when a
+	// firing's condition held (Judged.After) is its start less the least
+	// "for" and lag of its rule among known and these, so it is said to
+	// have held in an incident only when every version would have.
+	Versions []rules.Rule `json:"-"`
 	// Signals, when named, are the impact signals and the rule entries
 	// firings are judged by (docs/design/signals.md): each window matched
 	// on its signal's labels, each firing judged by the signals that could
@@ -105,6 +111,11 @@ type Judged struct {
 	// Refired says it came within Options.RefireWithin of the same alert
 	// last resolving: one of its rule's Refired.
 	Refired bool `json:"refired,omitempty"`
+	// After are, of a black firing, the incidents it came after the end
+	// of, its condition having held in them (Firing.Held) and its labels
+	// agreeing: their alert, too late to catch them. It stays black. Its
+	// rule's Late counts it.
+	After []string `json:"after,omitempty"`
 	// DuringDeploy says, in lapilli serve, it came during a deploy of what
 	// it is about: one of its rule's DuringDeploys.
 	DuringDeploy bool `json:"during_deploy,omitempty"`
@@ -133,7 +144,12 @@ type RuleResult struct {
 	White    int    `json:"white"`
 	Black    int    `json:"black"`
 	Refired  int    `json:"refired"` // firings that came within RefireWithin of the last one resolving
-	Replayed bool   `json:"replayed"`
+	// Late are of its black firings (its unjudged among them, as Black
+	// counts them) those that came after an incident was over, its
+	// condition having held in it (Judged.After): black all the same, as
+	// nothing came in time.
+	Late     int  `json:"late,omitempty"`
+	Replayed bool `json:"replayed"`
 	// Noisy says the rule fires whatever happens: see Options.
 	Noisy bool `json:"noisy"`
 	// Unjudged are its firings with no record at their time (Record): in
@@ -247,12 +263,18 @@ func (r RuleResult) noisy(at NoisyAt) bool { return IsNoisy(r.Judged(), r.White,
 type IncidentResult struct {
 	incident.Incident
 	CaughtBy []Catch `json:"caught_by"`
+	// FiredAfter are the rules that didn't catch it but fired once it was
+	// over, their condition having held in it (Judged.After), each by its
+	// first such firing: Delay from its start, as CaughtBy's.
+	FiredAfter []Catch `json:"fired_after,omitempty"`
 }
 
 // ImpactShort is of the rules judged, those that fire only once their
 // condition held longer than --impact-for (For): Rules of Judged, Need the
 // most common of how long they need, their "for" and one evaluation (with
-// no "for", an evaluation), and Most how many need that. An incident found by --impact as short as For
+// no "for", an evaluation), and how late their metrics arrive, and Most
+// how many need that. Lagged are of Rules those whose metrics arrive late
+// (--late, query_offset, a Grafana query's time range). An incident found by --impact as short as For
 // can't be caught by them: shown, it is still judged as any other. With
 // named signals, Signal is the one whose "for" is shortest, and the rules
 // judged are those judged against its windows.
@@ -263,6 +285,7 @@ type ImpactShort struct {
 	Judged int           `json:"judged"`
 	Need   time.Duration `json:"need"`
 	Most   int           `json:"need_rules"`
+	Lagged int           `json:"late_rules,omitempty"`
 }
 
 // Missed reports whether no rule caught the incident.
@@ -322,7 +345,8 @@ type Report struct {
 	NearMissesCut bool `json:"near_misses_cut,omitempty"`
 	// ImpactShort, with --impact, says how many of the rules judged can't
 	// fire on impact as short as --impact-for counts as an incident: their
-	// condition must hold for their "for" and one evaluation more.
+	// condition must hold for their "for" and one evaluation more, and
+	// their metrics arrive late.
 	ImpactShort *ImpactShort `json:"impact_short,omitempty"`
 	// Extras says the steps after the replays (a longer "for" for the noisy
 	// rules, near misses, what fired with no record) were "skipped", by
@@ -429,6 +453,15 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		return r
 	}
 	named := o.Signals.Named()
+	// How long before a firing its rule's condition held, by the time of
+	// the history it read: its "for" and how late its metrics arrive, of
+	// a rule as it was at several times the least (Options.Versions).
+	held := map[string]time.Duration{}
+	for _, k := range slices.Concat(known, o.Versions) {
+		if d, ok := held[k.Name]; !ok || max(k.For, 0)+k.Lag() < d {
+			held[k.Name] = max(k.For, 0) + k.Lag()
+		}
+	}
 	for _, k := range known {
 		// A name can stand for several rules, or a rule as it was at
 		// several times; if any of them couldn't be replayed, say so.
@@ -457,8 +490,9 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		}
 	}
 	catches := make([]map[string]time.Duration, len(inPeriod))
+	after := make([]map[string]time.Duration, len(inPeriod))
 	for i := range catches {
-		catches[i] = map[string]time.Duration{}
+		catches[i], after[i] = map[string]time.Duration{}, map[string]time.Duration{}
 	}
 
 	last := map[string]time.Time{} // rule and labels to when it last resolved
@@ -483,6 +517,12 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 				}
 			}
 		}
+		if j.Held.IsZero() && held[f.Rule] > 0 {
+			j.Held = f.Start.Add(-held[f.Rule])
+		}
+		if !j.White {
+			j.After = cameAfter(f, j.Held, inPeriod, catches, after, o)
+		}
 		r := result(f.Rule, "")
 		if len(known) == 0 {
 			addSeverity(f.Rule, f.Labels["severity"])
@@ -492,6 +532,9 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			r.White++
 		} else {
 			r.Black++
+			if len(j.After) > 0 {
+				r.Late++
+			}
 			if named && !rec.JudgesTied(f.Start, ties) || !named && !rec.Judges(f.Start) {
 				j.NoRecord = true
 				r.Unjudged++
@@ -519,12 +562,11 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		for rule, d := range catches[i] {
 			ir.CaughtBy = append(ir.CaughtBy, Catch{Rule: rule, Delay: d, Noisy: byRule[rule].Noisy})
 		}
-		sort.Slice(ir.CaughtBy, func(a, b int) bool {
-			if ir.CaughtBy[a].Delay != ir.CaughtBy[b].Delay {
-				return ir.CaughtBy[a].Delay < ir.CaughtBy[b].Delay
-			}
-			return ir.CaughtBy[a].Rule < ir.CaughtBy[b].Rule
-		})
+		sortCatches(ir.CaughtBy)
+		for rule, d := range after[i] {
+			ir.FiredAfter = append(ir.FiredAfter, Catch{Rule: rule, Delay: d, Noisy: byRule[rule].Noisy})
+		}
+		sortCatches(ir.FiredAfter)
 		rep.Incidents = append(rep.Incidents, ir)
 	}
 
@@ -544,6 +586,42 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	})
 	rep.Credit(nil)
 	return rep
+}
+
+// sortCatches puts catches in order of their delay, then of their rule.
+func sortCatches(cs []Catch) {
+	sort.Slice(cs, func(a, b int) bool {
+		if cs[a].Delay != cs[b].Delay {
+			return cs[a].Delay < cs[b].Delay
+		}
+		return cs[a].Rule < cs[b].Rule
+	})
+}
+
+// cameAfter is, of a black firing whose condition held from held (zero
+// for its start), the incidents it came after the end of while its
+// condition had held in them, its labels agreeing, of those its rule
+// hasn't caught (catches): their alert, too late. Each is noted in after,
+// by the delay from its start of the rule's first such firing. A firing
+// from elsewhere, with no rule or Held to say when its condition held,
+// held from its start, and so came after none.
+func cameAfter(f firing.Firing, held time.Time, ins []incident.Incident, catches, after []map[string]time.Duration, o Options) []string {
+	if held.IsZero() {
+		held = f.Start
+	}
+	var ids []string
+	for i, in := range ins {
+		end := in.EndOr(o.UnknownLen)
+		if _, caught := catches[i][f.Rule]; caught || !f.Start.After(end) || held.After(end) || !o.Agrees(f.Rule, f.Labels, in) {
+			continue
+		}
+		ids = append(ids, in.ID)
+		d := f.Start.Sub(in.Start)
+		if have, ok := after[i][f.Rule]; !ok || d < have {
+			after[i][f.Rule] = d
+		}
+	}
+	return ids
 }
 
 // Catches reports whether a firing catches an incident: it started between

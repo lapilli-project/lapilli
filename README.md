@@ -148,7 +148,9 @@ again yourself from the report, in [docs/numbers.md](docs/numbers.md).
 - `--alerts`: the `ALERTS` series Prometheus keeps for its own rules.
 - `--firings FILE`: firings recorded elsewhere, one JSON object a line
   (`{"rule":"...","labels":{...},"start":"...","end":"..."}`), such as the
-  history of a cloud's own alarms (see "A cloud's own alarms" below).
+  history of a cloud's own alarms (see "A cloud's own alarms" below), or a
+  report's own `firings`, judged again: their `held_from` says when their
+  condition held (see "An alert after the incident").
 
 **Incidents** come from a file, from a signal of user impact, or both:
 
@@ -204,7 +206,9 @@ rule with `for: 5m` evaluated every minute fires once its condition held for
 six minutes, so a burst of errors under a minute, which `rate(...[5m])` shows
 for exactly five, reads as an incident it missed. When some rules judged
 can't fire on impact as short as `--impact-for` (their `for` and one
-evaluation; with no `for`, as long as their evaluations are apart), the
+evaluation; with no `for`, as long as their evaluations are apart; and how
+late their metrics arrive, by `--late`, a group's `query_offset` or a
+Grafana query's time range), the
 report says how many, and what `--impact-for` they can catch
 (`impact_short` in `--json`); the incidents are judged as any others.
 
@@ -356,6 +360,25 @@ history page says when each was last read and whom its turns name that the
 file
 doesn't. A person's hours changed in the file count for every turn they
 had.
+
+**An alert after the incident.** A black firing can be an incident's own
+alert, come too late: its condition held in the incident, but its `for`
+and how late its metrics arrive (`--late`, `query_offset`) ran past the
+incident's end, and it fired once the incident was over, its labels
+agreeing. It stays black, and the incident missed by its rule, as nothing
+came in time; the report says so all the same. The incident's row names the
+rule and how long after its end it fired (`✗ nothing in time; after its
+end: LB5xx +3m`), and a line under the rules counts the black firings that
+came after an incident, by rule (`late` of a rule, `fired_after` of an
+incident, `after` of a firing in `--json`). When a firing's condition held
+is its start, less the least `for` and lag of its rule as it stood in the
+period: a rule with no `for`, on time, held only once it fired. It is worked
+out from the rules replayed, with no step after the replays, so `--extras`
+doesn't cut it. A firing says when its condition held (`held_from`), so a
+report's firings, read back with `--firings`, say the same; firings from
+elsewhere, with no `held_from`, came after nothing, and a `held_from` after
+its firing's start is read as none. `lapilli serve` doesn't
+say it yet.
 
 **What nearly caught it.** For an incident nothing caught, or only noisy rules
 did, each rule replayed from `--rules`, as it stood then, is looked at about
