@@ -523,11 +523,12 @@ func (l *Ledger) signalsAre(ctx context.Context, defs []SignalDef, entries []ver
 	return err == nil && sameEntries(was, entries), err
 }
 
-// SignalWindowsSince counts a signal's windows that started from a time
-// on: what bounds the windows it keeps in a week.
-func (l *Ledger) SignalWindowsSince(ctx context.Context, name string, from time.Time) (int, error) {
+// SignalWindowsBetween counts a signal's windows that started in [from,
+// to): what, beside a read's own, bounds the windows it keeps in a week.
+func (l *Ledger) SignalWindowsBetween(ctx context.Context, name string, from, to time.Time) (int, error) {
 	var n int
-	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM incidents WHERE origin = 'impact' AND signal = ? AND start_at >= ?", name, from.Unix()).Scan(&n)
+	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM incidents WHERE origin = 'impact' AND signal = ? AND start_at >= ? AND start_at < ?",
+		name, from.Unix(), to.Unix()).Scan(&n)
 	return n, err
 }
 

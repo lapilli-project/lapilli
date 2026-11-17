@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -978,5 +979,66 @@ func TestSignalsSettingsYAML(t *testing.T) {
 		if strings.HasPrefix(l, "impact:") || strings.Contains(l, "--impact-for") {
 			t.Errorf("/settings.yaml gives %q beside named signals:\n%s", l, body)
 		}
+	}
+}
+
+// A signal that hangs runs out its own share of --timeout, not the
+// others': each signal is asked each round, the slow one alone missed.
+func TestSlowSignalStarvesNone(t *testing.T) {
+	ctx := context.Background()
+	h := shopHistory()
+	s := signalServer(t, h, func(c *Config) {
+		c.Timeout = 2 * time.Second
+		c.Signals[0].Expr = "slow" // waits until its context is done
+	})
+	for k := 1; k <= 3; k++ {
+		h.mu.Lock()
+		h.asked = nil
+		h.mu.Unlock()
+		runDue(s, k)
+		s.jobs(ctx, true)
+		h.mu.Lock()
+		probeRead := slices.Contains(h.asked, "probe_success == 0")
+		h.mu.Unlock()
+		rows, _ := s.l.SignalRows(ctx)
+		for _, r := range rows {
+			if r.Name == "probe" && (!probeRead || !r.Missed.IsZero()) {
+				t.Errorf("round %d: the probe asked %v, missed since %s", k, probeRead, r.Missed)
+			}
+			if r.Name == "errors" && r.Missed.IsZero() {
+				t.Errorf("round %d: the slow signal isn't missed", k)
+			}
+		}
+	}
+}
+
+// The windows a signal keeps in a week are bounded beside those kept
+// before its read alone: those a run reads again, over the hour it
+// replays, aren't counted twice.
+func TestSignalWeekBoundCountsOnce(t *testing.T) {
+	ctx := context.Background()
+	was := maxSignalWeek
+	maxSignalWeek = 30
+	t.Cleanup(func() { maxSignalWeek = was })
+	h := shopHistory()
+	var ws []prom.Series
+	for i := range 24 { // one every five minutes, over the two hours to now
+		at := now.Add(-2*time.Hour + time.Duration(i)*5*time.Minute)
+		ws = append(ws, minutes(map[string]string{"service": fmt.Sprintf("svc-%02d", i)}, at, at.Add(2*time.Minute)))
+	}
+	h.windows = map[string][]prom.Series{"probe_success == 0": ws}
+	s := signalServer(t, h, nil)
+	for k := 1; k <= 2; k++ {
+		runDue(s, k)
+		s.jobs(ctx, true)
+	}
+	rows, _ := s.l.SignalRows(ctx)
+	for _, r := range rows {
+		if r.Name == "probe" && !r.Missed.IsZero() {
+			t.Errorf("24 windows, read again by each run's hour, counted as more than %d: missed since %s", maxSignalWeek, r.Missed)
+		}
+	}
+	if got, _ := s.l.SignalWindowsBetween(ctx, "probe", now.Add(-3*time.Hour), now.Add(4*time.Hour)); got != 24 {
+		t.Errorf("%d windows kept", got)
 	}
 }

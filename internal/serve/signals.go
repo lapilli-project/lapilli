@@ -34,8 +34,8 @@ import (
 const maxSignalWindows = 1000
 
 // maxSignalWeek is how many windows a signal keeps in a week at most: past
-// it, a run's read of it is missed.
-const maxSignalWeek = 2000
+// it, a run's read of it is missed. A variable for tests.
+var maxSignalWeek = 2000
 
 // errTooManyWindows is a signal's read that found more than
 // maxSignalWindows windows, or past maxSignalWeek in its week.
@@ -164,21 +164,25 @@ func (s *Server) signalsRead(parent context.Context, from, to time.Time, f *ledg
 		}
 		return 0
 	})
-	ctx, cancel := context.WithTimeout(parent, s.cfg.Timeout)
-	defer cancel()
-	for _, d := range order {
+	// Each in turn, with its share of what is left of --timeout: one that
+	// hangs runs out its own share, and leaves the rest theirs.
+	deadline := time.Now().Add(s.cfg.Timeout)
+	for i, d := range order {
 		start := from
 		if at, ok := missed[d.Name]; ok {
 			start = at
 		}
 		r := ledger.SignalRead{Name: d.Name, Criterion: signalCriterion(d).key(), Match: d.Match, Since: start.Add(-time.Hour), From: start}
-		if ctx.Err() != nil {
+		share := time.Until(deadline) / time.Duration(len(order)-i)
+		if share <= 0 || parent.Err() != nil {
 			r.Missed = true
-			s.readSignal(d.Name, ctx.Err())
+			s.readSignal(d.Name, context.DeadlineExceeded)
 			f.Signals = append(f.Signals, r)
 			continue
 		}
+		ctx, cancel := context.WithTimeout(parent, share)
 		series, err := s.h.QueryRange(ctx, d.Expr, r.Since, to, s.cfg.Step)
+		cancel()
 		switch {
 		case err != nil && prom.IsYielded(err):
 			return fmt.Errorf("--impact %s: %w", d.Name, err)
@@ -187,12 +191,22 @@ func (s *Server) signalsRead(parent context.Context, from, to time.Time, f *ledg
 			s.readSignal(d.Name, err)
 		default:
 			r.Windows = incident.FromSignal(series, s.cfg.Step, d.For, d.Name, d.Match)
+			// Those of its week kept before its read, which it doesn't put
+			// in place of.
 			week, _ := s.l.WeekOf(r.From)
-			before, err := s.l.SignalWindowsSince(parent, d.Name, week)
+			before, err := s.l.SignalWindowsBetween(parent, d.Name, week, r.From)
 			if err != nil {
 				return err
 			}
-			if len(r.Windows) > maxSignalWindows || before+len(r.Windows) > maxSignalWeek {
+			// Of its own, those it puts in place from where it reads: the
+			// hour before is read to carry on a window, not counted again.
+			fresh := 0
+			for _, w := range r.Windows {
+				if !w.Start.Before(r.From) {
+					fresh++
+				}
+			}
+			if len(r.Windows) > maxSignalWindows || before+fresh > maxSignalWeek {
 				r.Windows, r.Missed = nil, true
 				s.readSignal(d.Name, errTooManyWindows)
 				break
