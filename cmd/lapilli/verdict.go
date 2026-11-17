@@ -1721,14 +1721,13 @@ func (f *verdictFlags) forComment(c *verdict.Comparison, stderr io.Writer) {
 // scrubber takes where the history is out of a text: the URLs given, the
 // user names in them and their hosts, each as a whole word, any IP
 // address with its port, an IPv6 one written without brackets among them,
-// the tenants, and a Google Cloud project, a whole word or a domain's
-// first label, as Google names a service account
-// (writer@PROJECT.iam.gserviceaccount.com); more, those of more flags
+// the tenants, and a Google Cloud project, a whole word or the first label
+// of a name Google gives under it (googleNames); more, those of more flags
 // (lapilli preflight's).
 func (f *verdictFlags) scrubber(more ...[2]string) func(string) string {
 	type hid struct {
 		val, as string
-		label   bool // a domain's first label too
+		google  bool // the first label of a name Google gives under a project too
 	}
 	var hide []hid
 	given := [][2]string{{"--prometheus", f.promURL}, {"--loki", f.loki}, {"--grafana", f.grafana},
@@ -1750,7 +1749,7 @@ func (f *verdictFlags) scrubber(more ...[2]string) func(string) string {
 	return func(s string) string {
 		s = userinfo.ReplaceAllString(s, "$1")
 		for _, h := range hide {
-			s = replaceName(s, h.val, h.as, h.label)
+			s = replaceName(s, h.val, h.as, h.google)
 		}
 		for _, h := range hide {
 			s = replaceCut(s, h.val, h.as)
@@ -1837,12 +1836,20 @@ const UnreadHistory = "query failed: the history couldn't be read; the job's log
 var (
 	// userinfo is a URL's user and password.
 	userinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s"']*@`)
-	// address is an IP address, with its port if it has one.
-	address = regexp.MustCompile(`\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*\](:[0-9]+)?|\b([0-9]{1,3}\.){3}[0-9]{1,3}(:[0-9]+)?\b`)
+	// address is an IP address, with its port if it has one; in brackets,
+	// with its zone if it has one, as Go writes one ([fe80::1%en0]:5432)
+	// and a URL ([fe80::1%25en0]).
+	address = regexp.MustCompile(`\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(%[^\]\s]*)?\](:[0-9]+)?|\b([0-9]{1,3}\.){3}[0-9]{1,3}(:[0-9]+)?\b`)
 	// address6 is what may be an IPv6 address without brackets: addresses6
 	// says which is one.
 	address6 = regexp.MustCompile(`[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(%[0-9A-Za-z_.-]*[0-9A-Za-z_-])?`)
 )
+
+// googleNames are what follows a Google Cloud project in the names Google
+// gives under it, the project their first label: a service account's
+// email (writer@PROJECT.iam.gserviceaccount.com) and a workload identity
+// pool (PROJECT.svc.id.goog).
+var googleNames = []string{".iam.gserviceaccount.com", ".svc.id.goog"}
 
 // replaceWord replaces in s each old that is a whole word, with with: no
 // letter, digit, dot, dash or underscore before it, and none but a dot
@@ -1851,12 +1858,11 @@ var (
 // but is out of "failed at prom.": as recipes/backtest/lib.sh takes it out.
 func replaceWord(s, old, with string) string { return replaceName(s, old, with, false) }
 
-// replaceName is replaceWord, and, with label, old as a domain's first
-// label as well, which a dot and a letter or a digit may follow: a Google
-// Cloud project, in a service account's email
-// (writer@PROJECT.iam.gserviceaccount.com) or a workload identity pool
-// (PROJECT.svc.id.goog).
-func replaceName(s, old, with string, label bool) string {
+// replaceName is replaceWord, and, with google, old as the first label of
+// a name Google gives under a Cloud project as well (googleNames). As the
+// first label of any other domain it is left: a project named monitoring
+// isn't taken out of monitoring.googleapis.com.
+func replaceName(s, old, with string, google bool) string {
 	if old == "" {
 		return s
 	}
@@ -1872,7 +1878,10 @@ func replaceName(s, old, with string, label bool) string {
 		rest := s[i+len(old):]
 		after, n := utf8.DecodeRuneInString(rest)
 		next, _ := utf8.DecodeRuneInString(rest[n:])
-		whole := (i == 0 || !(before == '.' || alnum(before))) && (rest == "" || !(alnum(after) || after == '.' && alnum(next) && !label))
+		under := google && slices.ContainsFunc(googleNames, func(name string) bool {
+			return len(rest) >= len(name) && strings.EqualFold(rest[:len(name)], name)
+		})
+		whole := (i == 0 || !(before == '.' || alnum(before))) && (rest == "" || under || !(alnum(after) || after == '.' && alnum(next)))
 		b.WriteString(s[:i])
 		if whole {
 			b.WriteString(with)

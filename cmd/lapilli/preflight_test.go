@@ -621,9 +621,9 @@ func TestScrubberCut(t *testing.T) {
 
 // An IPv6 address written without brackets, as x509 and Postgres write
 // one, is an address too, as is one with a zone, or an IPv4 one inside
-// it; and --gcp-project is taken out of a domain it is the first label
-// of, as Google names a service account. A time, a MAC address, a "::"
-// in other text, or a word that only holds the project, isn't.
+// it; and --gcp-project is taken out of a service account's email and a
+// workload identity pool, as Google names them. A time, a MAC address, a
+// "::" in other text, or a word that only holds the project, isn't.
 func TestScrubberAddressesAndProject(t *testing.T) {
 	f := &verdictFlags{promURL: "https://prom.example.invalid", gcpProj: "sample-proj-123"}
 	scrub := f.scrubber()
@@ -650,6 +650,29 @@ func TestScrubberAddressesAndProject(t *testing.T) {
 	f = &verdictFlags{promURL: "http://prom:9090"}
 	if got := f.scrubber()("prom.example and prom"); got != "prom.example and [--prometheus]" {
 		t.Errorf("%q", got)
+	}
+}
+
+// An IPv6 address in brackets with a zone, as Go writes one dialing it
+// ([fe80::1%en0]:5432) and a URL holds one (%25), is an address with its
+// port. A project is taken out as the first label of the names Google
+// gives under it, and of no other domain: a project named monitoring
+// leaves monitoring.googleapis.com as it is.
+func TestScrubberZoneAndGoogleNames(t *testing.T) {
+	f := &verdictFlags{promURL: "https://prom.example.invalid", gcpProj: "monitoring"}
+	scrub := f.scrubber()
+	for in, want := range map[string]string{
+		"dial tcp [fe80::1%en0]:5432: connect: connection refused":  "dial tcp [address]: connect: connection refused",
+		"dial tcp [fe80::1%25en0]:5432: x":                          "dial tcp [address]: x",
+		"at [fd12::17%eth0-1], then [2001:db8::9]":                  "at [address], then [address]",
+		"monitoring.googleapis.com said 403 for project monitoring": "monitoring.googleapis.com said 403 for project [--gcp-project]",
+		"writer@monitoring.iam.gserviceaccount.com may not":         "writer@[--gcp-project].iam.gserviceaccount.com may not",
+		"pool monitoring.svc.id.goog, at monitoring.example.com":    "pool [--gcp-project].svc.id.goog, at monitoring.example.com",
+		"https://monitoring.example.com/x and monitoring-2.iam":     "https://monitoring.example.com/x and monitoring-2.iam",
+	} {
+		if got := scrub(in); got != want {
+			t.Errorf("%q:\n got %q\nwant %q", in, got, want)
+		}
 	}
 }
 
