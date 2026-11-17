@@ -139,6 +139,15 @@ case $LAPILLI_URL in
   *) say "LAPILLI_URL $LAPILLI_URL: want an http or https URL"; exit 1 ;;
 esac
 
+# mdcut: jq's cut($n), a description in Markdown cut to $n characters at
+# most at a line's end, never within one, so that no code span is cut open
+# and what it holds read as Markdown after it; a fenced block cut open is
+# closed.
+# shellcheck disable=SC2034,SC2016 # the recipes use it; $n is jq's
+mdcut='def cut($n): if length <= $n then . else .[0:$n - 4]
+  | (if test("\n") then sub("\n[^\n]*$"; "\n") else "" end)
+  | if ([scan("(?m)^```")] | length) % 2 == 1 then . + "```\n" else . end end;'
+
 ltoken=$(cat "$LAPILLI_TOKEN_FILE")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT

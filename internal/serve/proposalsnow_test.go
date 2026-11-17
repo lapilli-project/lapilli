@@ -1894,3 +1894,35 @@ func TestCloseOnce(t *testing.T) {
 		t.Errorf("the ledger closed %d times", n.Load())
 	}
 }
+
+// TestBodyCutClosed: a description cut to fit (a task's 10,000 bytes, a
+// host's limit) is cut at a line's end, so no code span is cut open and a
+// long name's mentions, images and links read as Markdown after it; a
+// fenced block cut open is closed. A name is cut before it is a span.
+func TestBodyCutClosed(t *testing.T) {
+	s, _ := restartsServer(t, nil)
+	evil := " @example-org/everyone ![i](https://evil.example/i.png) [x](https://evil.example/x)"
+	rule := "Errors" + strings.Repeat(evil, 120)
+	diff := strings.Repeat("-for: 1m\n+for: 5m\n", 1000)
+	pr := s.prBody(proposalLine{Proposal: ledger.Proposal{ID: 1, Rule: rule, Kind: ledger.KindFor, Path: ledger.PathGit, Diff: diff}})
+	for _, n := range []int{200, 400, 2000, 10000} {
+		got := mdCut(pr, n)
+		if len(got) > n {
+			t.Errorf("cut to %d: %d bytes", n, len(got))
+		}
+		open := false
+		for line := range strings.Lines(got) {
+			if strings.HasPrefix(line, "```") {
+				open = !open
+			} else if !open && strings.Count(line, "`")%2 != 0 {
+				t.Errorf("cut to %d: a span left open: %q", n, line)
+			}
+		}
+		if open {
+			t.Errorf("cut to %d: a fenced block left open:\n%s", n, got)
+		}
+	}
+	if line, _, _ := strings.Cut(pr, "\n"); len(line) > 2*mdMost {
+		t.Errorf("the first line is %d bytes", len(line))
+	}
+}
