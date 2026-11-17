@@ -1841,3 +1841,28 @@ func TestWindowsWithAsEachAgainstEach(t *testing.T) {
 		}
 	}
 }
+
+// A signal picked on the Incidents page stays picked by its other tabs:
+// the period, the week's chip, and how they were caught.
+func TestSignalPickedKeptByTabs(t *testing.T) {
+	s := signalServer(t, signalWindowsHistory(), nil)
+	_, body := askAs(t, s.Handler(), http.MethodGet, "/incidents?source=impact&signal=probe&weeks=4", nil, "ana@example.com", "same-origin")
+	links := regexp.MustCompile(`href="(/incidents\?[^"]*)"`).FindAllStringSubmatch(body, -1)
+	kept := 0
+	for _, m := range links {
+		q, _ := url.ParseQuery(strings.SplitN(strings.ReplaceAll(m[1], "&amp;", "&"), "?", 2)[1])
+		if q.Get("source") != "impact" {
+			continue // the Of tabs: another source, no signal
+		}
+		if _, picks := q["signal"]; !picks && q.Get("state") == "" && q.Get("weeks") == "4" {
+			continue // the Signal tab's all
+		}
+		if q.Get("signal") != "probe" && !(q.Get("signal") != "" && q.Get("weeks") == "4") {
+			t.Errorf("%s drops the signal picked", m[1])
+		}
+		kept++
+	}
+	if kept < 3 {
+		t.Errorf("%d links keep the signal: %q", kept, links)
+	}
+}
