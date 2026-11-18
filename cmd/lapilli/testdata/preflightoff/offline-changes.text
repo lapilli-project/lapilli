@@ -1,0 +1,34 @@
+exit 0
+lapilli preflight: 15 items: 6 ok, 0 problems, 9 unknown; 0 requests asked
+unknown  rules.read          13 alert rules (Prometheus), 1 recording rule, from --rules
+                             why: --offline: --alarms cw not asked
+ok       rules.replayable    13 can be replayed
+ok       expressions         --impact and --guard read, and not sent
+                             why: Lapilli has no PromQL parser of its own: whether the history takes
+                                  them as written, the first run says
+unknown  history.reach       [--prometheus] not asked
+                             why: --offline: nothing is asked
+unknown  history.alerts      not asked: memory is the caps' bound
+                             why: --offline: nothing is asked
+unknown  changes.cloud       the identities serve writes as not taken
+                             why: --offline: nothing is asked
+unknown  changes.aws         what --changes-aws-role may write not asked
+                             why: --offline: nothing is asked
+ok       inputs.files        --incidents read, as serve reads them
+unknown  secrets.files       2 secret files not read: they are where serve runs
+                             why: --offline: nothing is asked
+unknown  ledger.sqlite       the ledger is where serve runs
+                             why: --offline: nothing is asked
+ok       access              roles: those --editors and --admins name change what their role allows;
+                             everyone else may only look; --listen (the UI, the API, /mcp),
+                             --incidents-listen (what its tokens write)
+Estimates
+unknown  hourly run          not worked out: the rules couldn't all be read
+unknown  backfill            not worked out: the rules couldn't all be read
+ok       beside              147 requests a day beside the runs: the alarms read every
+                             --alarms-every 144, the replay check 3
+ok       memory              no firing read: the caps' bound, 80 MB (2 x 100,000 x 64 bytes, beside
+                             64 MB of caches): a request of 134 MB, a limit of 268 MB
+Left out of the estimates: change reviews, a week of each new version of the rules; the weekly
+                           digest's backtests; what people and agents ask for (a proposal's
+                           backtest, MCP's compare, the settings tried)

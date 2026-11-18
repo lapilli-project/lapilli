@@ -1,0 +1,41 @@
+exit 0
+lapilli preflight: 15 items: 15 ok, 0 problems, 0 unknown; 4 requests asked
+ok       rules.read          13 alert rules (Prometheus), 1 recording rule, from --rules
+ok       rules.replayable    13 can be replayed
+ok       expressions         --impact and --guard read, and not sent
+                             why: Lapilli has no PromQL parser of its own: whether the history takes
+                                  them as written, the first run says
+ok       history.reach       [--prometheus] answered vector(1) in <took>, with no credentials
+ok       history.alerts      1 alert name fired in the last day, 120 samples in all: for the memory
+                             estimate
+ok       inputs.files        --incidents read, as serve reads them
+ok       secrets.files       2 secret files read: --incidents-token-file incidents-token: 26
+                             characters; --firings-token-file firings-token: 24 characters
+ok       ledger.sqlite       schema 023, this release's
+                             why: <free> free
+ok       signin              --oidc-issuer's configuration read, its issuer as given, 1 public key
+ok       access              roles: those --editors and --admins name change what their role allows;
+                             everyone else may only look; --listen (the UI, the API, /mcp),
+                             --incidents-listen (what its tokens write)
+Estimates
+ok       hourly run          about 25 requests a run, the most 36, 590 a day, the guard's and
+                             --impact's among them: at --max-rate 0.5 a run takes 49s at least, the
+                             most 1m; once caught up, with what is asked beside them, 1% of
+                             --max-rate
+ok       backfill            1,036 requests over 28d, 28 pieces of a day at most, the most 37: at
+                             least 35m at 0.5 a second
+                             why: each day's in 1m at most, within --timeout 50m
+ok       nights              1 night at least, in 01:00-06:00 at 0.5 a second, 9,000 of the
+                             backfill's requests a night
+                             why: each day the catch-up waits outside its hours is a day more to
+                                  catch up, counted; each 429 with --yield-on-429, or each time the
+                                  guard holds the runs, makes it longer; nothing newer is recorded
+                                  meanwhile, so the pages show the ledger days behind until it is
+                                  done
+ok       beside              3 requests a day beside the runs: the replay check 3
+ok       memory              about 67 MB at the peak: the 1 largest reads of what fired in the last
+                             day at once, beside 64 MB of caches: a request of 134 MB, a limit of
+                             268 MB
+Left out of the estimates: change reviews, a week of each new version of the rules; the weekly
+                           digest's backtests; what people and agents ask for (a proposal's
+                           backtest, MCP's compare, the settings tried)
