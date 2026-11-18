@@ -81,9 +81,9 @@
     field's name stands before it. A rule's tabs and the lists' orders are
     underlined by a bar. Cards have no shadow.
   - The overview's What to look at is under the tiles, before the charts,
-    a line each. Refired's change from the week before is no longer
-    called worse or better: more re-fires may be an alert that really went
-    off again. Precision by week with no week judged is a line saying so,
+    a line each. Refired's change from the week before, and a rule's
+    firings beside the span before on its page, are no longer called worse
+    or better: more may be an alert that really went off again. Precision by week with no week judged is a line saying so,
     not an empty grid.
   - The rules list's numbers are alone in their cells, and what they come
     with is a line under the row, each note saying what it is of: a row

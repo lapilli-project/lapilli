@@ -761,8 +761,10 @@ are sent, so a receiver that stops sending isn't told from a quiet rule), and on
 weeks shown), whatever the replay holds. Precision is set beside only
 when the rule fired in both. The shares' changes are in points, each
 signed (+3, −2, ±0), and a change better or worse says so in words as
-well as colour ("+27 worse"). The period's line says how they changed
-only when one is set beside.
+well as colour ("+1 pt better"). The firings' change is told, never
+called better or worse (bundle 59): more firings may be an alert that
+really went off more. The period's line says how they changed only when
+one is set beside.
 
 ### The strip
 
