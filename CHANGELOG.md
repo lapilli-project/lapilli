@@ -142,6 +142,17 @@ the ledger stays at 022.
 - **Settings.** A named signal's choice to follow the match in effect says
   what that match is.
 - **Sign out** is a quiet button, no longer the boldest on the page.
+- **Going back after a schema upgrade, step by step** (the chart's
+  README). The changelog said, of each release that changed the ledger's
+  schema, to take a snapshot first, to go back to, but not how to go
+  back, and the plain way doesn't work: the release before refuses the
+  upgraded ledger, and a claim deleted to be made from the snapshot under
+  its own name comes back empty from a GitOps tool that heals. The steps:
+  the copy as a claim (or a database) of its own name, then the release
+  before and `serve.ledger.existingClaim` (or
+  `serve.ledger.postgres.secret.name` with one replica) in one change,
+  and what is lost and kept. docs/serve.md points to it, and CONTRIBUTING
+  says a schema change's entry does.
 
 ## [0.58.0] - 2026-11-18
 

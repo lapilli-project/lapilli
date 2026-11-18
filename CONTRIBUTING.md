@@ -46,6 +46,9 @@ LAPILLI_TEST_POSTGRES='postgres://postgres:pw@127.0.0.1:55432/postgres?sslmode=d
 A statement that Postgres takes otherwise than SQLite is given for both
 (`internal/ledger/dialect.go`); `TestDialectSeam` says where one isn't. A
 migration comes in a pair: `schema/NNN.sql` and `schema/postgres/NNN.sql`.
+Its changelog entry says **Ledger schema NNN**, which release can't open
+the ledger after, and to keep a copy first, pointing to the chart's
+README, "Going back after a schema upgrade".
 
 `go test ./internal/ledger ./internal/serve -run Scale -v` times the ledger
 and the pages over a busy ledger: two million firings in the ledger, 200,000

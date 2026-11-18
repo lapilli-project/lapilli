@@ -246,6 +246,73 @@ is killed, another leads within some 17 seconds; when it stops, within 2.
   the ServiceMonitor scrapes each pod. What the leader's work counts
   (`lapilli_serve_runs_total`, notices sent) is in its pod's alone.
 
+### Going back after a schema upgrade
+
+A release that changes the ledger's schema says so in the changelog
+(**Ledger schema 022**, after 021), and the new release's `lapilli
+preflight` says so beforehand: `serve upgrades the ledger from 021 to 022
+as it starts, and a release before 022 can't open it after`. serve
+upgrades the ledger as it starts, and a release before can't open it: it
+stops as it starts, saying `--ledger: the ledger was written by a newer
+lapilli (schema 22; this one knows 21)`, and its pod restarts over and
+over. So going back is going back to the ledger as it was, and only a
+copy taken before the upgrade gives that.
+
+Before upgrading, take the copy:
+
+- **SQLite, the chart's PersistentVolumeClaim** (`FULLNAME-ledger`): a
+  snapshot of its disk. With CSI snapshots, a `VolumeSnapshot` whose
+  `source.persistentVolumeClaimName` is `FULLNAME-ledger`; without them,
+  the cloud's own snapshot of the disk behind its PersistentVolume
+  (`kubectl get pv` gives its volume handle). A snapshot of the running
+  disk is to SQLite as a power cut, which it recovers from.
+- **Postgres**: a backup of the database, or know the time to restore it
+  to.
+
+To go back, make the copy a new volume, or a new database, under a name of
+its own, and point the release before at it in one change:
+
+1. **Don't go back to the release before first.** It refuses the upgraded
+   ledger, and its pod doesn't start.
+2. **SQLite: a new claim from the snapshot**, not `FULLNAME-ledger` again:
+   that one is kept by Helm (`helm.sh/resource-policy: keep`), and a GitOps
+   tool that heals would make it again, empty, if it were deleted. With CSI
+   snapshots, a PersistentVolumeClaim such as `lapilli-ledger-restore`
+   whose `dataSource` is the `VolumeSnapshot`, its `storageClassName` and a
+   size at least `serve.ledger.size`. Without them, a disk made from the
+   cloud's snapshot in the zone of the old one (a ReadWriteOnce disk
+   attaches to a node in its zone), a PersistentVolume for it copied from
+   the old one's (`kubectl get pv NAME -o yaml`: its CSI driver, the new
+   disk's volume handle, its node affinity) with
+   `persistentVolumeReclaimPolicy: Retain`, and a claim that names it in
+   `volumeName`, with the same `storageClassName`.
+3. **One change: the release before, and `serve.ledger.existingClaim:
+   lapilli-ledger-restore`.** Every chart that runs serve takes
+   `existingClaim`, and with it renders no `FULLNAME-ledger`. One replica
+   is `Recreate`: the upgraded pod stops before the one before starts.
+4. **Postgres: the copy restored into a new database**, a Secret of its
+   own holding its connection string under the same key (such as
+   `lapilli-ledger-restore`), and one change: the release before, `serve.ledger.postgres.secret.name`
+   naming that Secret, and `serve.replicas: 1`, so that no pod of the
+   upgraded release still runs beside it on the upgraded database. Raise
+   `serve.replicas` again once it runs.
+5. **Check it**: the pod is ready, and its `lapilli preflight` says
+   `schema 021, this release's`. The first runs replay the hours since
+   the copy, catching up as after any stop. What came in after the copy
+   and can't be replayed isn't there: incidents, tasks, comments,
+   proposals and settings written in the UI or the API, and what was sent
+   to its ports.
+6. **The upgraded ledger.** `FULLNAME-ledger`, no longer rendered, is
+   left by Helm, and by a GitOps tool unless it prunes; its disk goes with
+   it when its PersistentVolume's reclaim policy is `Delete`. To keep it,
+   for an upgrade tried again, set that policy to `Retain` first (`kubectl
+   patch pv NAME -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'`);
+   otherwise delete it once the release before runs. The upgraded database
+   is yours to drop.
+
+Upgrading again later keeps `existingClaim`, or the Secret: that is the
+ledger now.
+
 ### Teams, quiet windows, reports and roles in Git
 
 ```yaml
