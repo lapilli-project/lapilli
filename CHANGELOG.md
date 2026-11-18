@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Fixed (security)
+
+- **A backslash before a `|` in a rule's name could end a cell of the pull
+  request comment's tables** (affected: 0.32.0 to 0.59.0, on a host whose
+  Markdown reads `\\|` as a backslash and the cell's end: comrak 1.0.0, as
+  tested). `lapilli verdict --compare --markdown` wrote each `|` of a name
+  in a table as `\|` and a backslash before it as it was, so
+  `x\|@all [x](https://evil.example)` was written `x\\|@all …`; read so,
+  what followed was the next cell, outside the code span, and its mention,
+  link and HTML were read as Markdown. A backslash before a `|` is shown as
+  `\u{5c}` now, so that each `|` in a table has exactly one backslash
+  before it, which every host reads as a `|` in the cell. GitHub's
+  cmark-gfm, goldmark 1.8.7 (Gitea, Forgejo), markdown-it 14 and comrak
+  0.59 (GitLab's) read the old text as one cell, as tested.
+
 ### Added
 
 - **`lapilli preflight` asks what Grafana's token and each cloud's

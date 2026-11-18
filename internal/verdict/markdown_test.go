@@ -145,6 +145,7 @@ func TestCompareMarkdownHostile(t *testing.T) {
 		"**bold** _em_ ~~gone~~", "line\nbreak", "car\rriage", "tab\there", "right\u202eto left", "zero\u200bwidth",
 		"line\u2028sep", "no\u00a0break", "filler\u3164x", ":smile: :+1:", "[//]: # (lapilli-backtest default)",
 		"$`x`$", "&lt;b&gt;", "&#64;octocat", "\\@octocat", "디스크 부족 @팀", strings.Repeat("long", 200),
+		`x\|@all [x](https://evil.example) <b>bold</b>`, `x\\|@all <b>two</b>`, `x\\\|@all <b>three</b>`, `\|`, `\\|`, `|\`,
 	}
 	var rs []rules.Rule
 	var fs []firing.Firing
@@ -161,9 +162,22 @@ func TestCompareMarkdownHostile(t *testing.T) {
 	after := Judge(rs, fs, incs, opts())
 	c := Compare(before, after, append(names, hostile[0]+" broken"), 0)
 	c.Summarize(true)
+	// The expectations' table too: each name held to no firing a week, and
+	// to catching an incident of its own name.
+	var es Expectations
+	zero := 0
+	for _, h := range names {
+		es.Expectations = append(es.Expectations, Expectation{Rule: h, Budget: &Budget{Week: &zero}, Catches: []ExpectCatch{{Incident: h}}})
+	}
+	if err := c.Expect(&es, nil, DefaultHours(time.UTC)); err != nil {
+		t.Fatal(err)
+	}
 	var b bytes.Buffer
 	if err := CompareMarkdown(&b, c, time.UTC); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "#### Expectations\n\n") || !strings.Contains(b.String(), "| Rule | Held to |") {
+		t.Fatalf("no expectations table:\n%s", b.String())
 	}
 	checkMarkdown(t, b.String(), hostile)
 }
@@ -208,6 +222,10 @@ func TestCompareMarkdownLimit(t *testing.T) {
 // or an emphasis, but for the headings, the summary line and <details>.
 func checkMarkdown(t *testing.T, out string, hostile []string) {
 	t.Helper()
+	// A carriage return ends a line, and a table's row, as \n does.
+	if i := strings.IndexByte(out, '\r'); i >= 0 {
+		t.Errorf("a carriage return, at %q", out[max(0, i-40):min(len(out), i+40)])
+	}
 	cells := 0
 	for i, line := range strings.Split(out, "\n") {
 		if i == 0 {
@@ -217,7 +235,26 @@ func checkMarkdown(t *testing.T, out string, hostile []string) {
 			continue
 		}
 		if strings.HasPrefix(line, "|") {
-			n := strings.Count(line, "|") - strings.Count(line, `\|`)
+			// A | with no backslash before it ends a cell, and one with one
+			// is in it; one with more is read either way by one host or
+			// another (comrak 1.0 takes \\| for the cell's end).
+			n := 0
+			for j := range len(line) {
+				if line[j] != '|' {
+					continue
+				}
+				k := 0
+				for k < j && line[j-1-k] == '\\' {
+					k++
+				}
+				switch k {
+				case 0:
+					n++
+				case 1:
+				default:
+					t.Errorf("a | with %d backslashes before it, which hosts read differently: %q", k, line)
+				}
+			}
 			if cells == 0 {
 				cells = n
 			} else if n != cells {

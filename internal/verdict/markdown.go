@@ -307,7 +307,10 @@ func mdRow(cells []string) string { return "| " + strings.Join(cells, " | ") + "
 // does for a terminal; it is cut to most characters; the fence is one backtick
 // longer than the longest run of them in it. In a table, a | is escaped as
 // GitHub's tables take it (\|), which every host's tables read as a | in
-// the cell, not the cell's end.
+// the cell, not the cell's end; a backslash right before one is shown as
+// \u{5c}, so that each | has one backslash before it, never more: hosts
+// differ on a run of them (comrak 1.0 reads \\| as a backslash and the
+// cell's end, cmark-gfm as a \| in the cell).
 func md(s string, most int, table bool) string {
 	// Cut before anything is made of it: a name of megabytes is read no
 	// further than it is shown.
@@ -342,7 +345,7 @@ func md(s string, most int, table bool) string {
 		return "–"
 	}
 	if table {
-		s = strings.ReplaceAll(s, "|", `\|`)
+		s = tablePipes(s)
 	}
 	run, longest := 0, 0
 	for _, r := range s {
@@ -360,6 +363,27 @@ func md(s string, most int, table bool) string {
 		s = " " + s + " "
 	}
 	return fence + s + fence
+}
+
+// tablePipes escapes each | of s as \|, a backslash right before one
+// written \u{5c}: in a table, every | of it has exactly one backslash
+// before it.
+func tablePipes(s string) string {
+	if !strings.Contains(s, "|") {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		switch {
+		case s[i] == '\\' && i+1 < len(s) && s[i+1] == '|':
+			b.WriteString(`\u{5c}`)
+		case s[i] == '|':
+			b.WriteString(`\|`)
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
 }
 
 // mdSeverities is a rule's severity before → after, or the one it keeps,
