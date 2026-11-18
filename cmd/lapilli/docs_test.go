@@ -77,31 +77,33 @@ func TestDocsLinks(t *testing.T) {
 
 	// The pages' addresses on lapilli.dev, as the help and the site give them.
 	site := regexp.MustCompile(`lapilli\.dev/docs/([a-z0-9-]+)|'/docs/([a-z0-9-]+)/'`)
-	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		name, _ := filepath.Rel(root, path)
-		if d.IsDir() {
-			if name == ".git" || name == filepath.Join("site", "docs") {
-				return filepath.SkipDir
+	for _, dir := range []string{"cmd", "internal", "site"} {
+		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
 			}
-			return nil
-		}
-		if name == "CHANGELOG.md" || !(strings.HasSuffix(name, ".go") || strings.HasPrefix(name, "site"+string(filepath.Separator))) {
-			return nil
-		}
-		for i, line := range strings.Split(readDoc(t, path), "\n") {
-			for _, m := range site.FindAllStringSubmatch(line, -1) {
-				if _, err := os.Stat(filepath.Join(root, "docs", m[1]+m[2]+".md")); err != nil {
-					t.Errorf("%s:%d: %s isn't a page of docs/", name, i+1, m[0])
+			name, _ := filepath.Rel(root, path)
+			if d.IsDir() {
+				if name == filepath.Join("site", "docs") { // site/docs.sh's copies
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if dir != "site" && !strings.HasSuffix(name, ".go") {
+				return nil
+			}
+			for i, line := range strings.Split(readDoc(t, path), "\n") {
+				for _, m := range site.FindAllStringSubmatch(line, -1) {
+					if _, err := os.Stat(filepath.Join(root, "docs", m[1]+m[2]+".md")); err != nil {
+						t.Errorf("%s:%d: %s isn't a page of docs/", name, i+1, m[0])
+					}
 				}
 			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }
 
