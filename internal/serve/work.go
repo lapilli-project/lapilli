@@ -66,6 +66,10 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	if !s.still(ctx) {
 		return
 	}
+	// Pull request backtests ended a day ago go, the port on or not.
+	if err := s.l.PruneBacktests(ctx, s.now()); err != nil && ctx.Err() == nil {
+		s.log.Warn("letting go of the pull request backtests kept", "err", err)
+	}
 	// The named impact signals and the rule entries serve was started
 	// with, kept: a change to which there are, or what they match, pends
 	// every firing to be judged again, in the ledger (JudgePending, below).

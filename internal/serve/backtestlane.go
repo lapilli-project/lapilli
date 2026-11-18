@@ -54,6 +54,9 @@ func (s *Server) lane(ctx context.Context) {
 	}
 }
 
+// laneHook is called as the lane runs each backtest: nil but in tests.
+var laneHook func(ledger.Backtest)
+
 // trustNamed is the entry of --backtest-trust named so, nil for none.
 func (s *Server) trustNamed(name string) *trusted {
 	for _, t := range s.btPort.trust {
@@ -73,10 +76,23 @@ func (s *Server) trustNamed(name string) *trusted {
 // again from its start.
 func (s *Server) runBacktest(ctx context.Context, b ledger.Backtest, body []byte) {
 	p := s.btPort
+	p.busy.Store(true)
+	defer p.busy.Store(false)
 	start := s.now()
 	base := p.asked.Requests.Load()
 	made := func() int { return int(p.asked.Requests.Load() - base) }
 	fail := func(why string) { s.endBacktest(ctx, b, ledger.BacktestFailed, why, made(), nil, start) }
+	// What a request makes the lane do that it didn't foresee ends that
+	// backtest, not the leader.
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.Error("backtest lane: a backtest stopped", "id", b.ID, "panic", fmt.Sprintf("%T", r))
+			fail("lapilli serve couldn't run it")
+		}
+	}()
+	if laneHook != nil {
+		laneHook(b)
+	}
 	var req backtestRequest
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
@@ -152,7 +168,7 @@ func (s *Server) runBacktest(ctx context.Context, b ledger.Backtest, body []byte
 			}
 		}
 	}
-	result, why := s.backtestResult(cmp, pr, o)
+	result, why := s.backtestResult(cmp, pr, o, t.IncidentTitles)
 	if why != "" {
 		fail(why)
 		return
@@ -214,7 +230,7 @@ func scrubFor(own map[string]bool) func(string) string {
 // rule read (an alert's labels), which a rule could make of whatever
 // serve's access reads; no reason of the history's; nothing of serve's
 // settings.
-func (s *Server) backtestResult(cmp *verdict.Comparison, pr *prepared, o verdict.Options) ([]byte, string) {
+func (s *Server) backtestResult(cmp *verdict.Comparison, pr *prepared, o verdict.Options, titles bool) ([]byte, string) {
 	cmp.Recording, cmp.JudgedBy, cmp.ChangedOnly = pr.recording, verdict.JudgedByServe, true
 	if len(pr.passedOver) > 0 {
 		cmp.PassedOver = pr.passedOver
@@ -247,16 +263,23 @@ func (s *Server) backtestResult(cmp *verdict.Comparison, pr *prepared, o verdict
 			}
 		}
 	}
+	// Of the incidents, those caught differently, by their ids: a title
+	// written in a tracker is said only where the entry says so.
+	for i := range cmp.Incidents {
+		if !titles {
+			cmp.Incidents[i].Title = ""
+		}
+		cmp.Incidents[i].Signal = ""
+	}
 	var md bytes.Buffer
 	if err := verdict.CompareMarkdown(&md, cmp, pr.loc); err != nil {
 		return nil, "its comment couldn't be written"
 	}
-	trimForPullRequest(cmp)
-	var js bytes.Buffer
-	if err := verdict.JSON(&js, cmp); err != nil {
+	js, err := reportForPullRequest(cmp)
+	if err != nil {
 		return nil, "its report couldn't be written"
 	}
-	out, err := json.Marshal(map[string]any{"state": ledger.BacktestDone, "markdown": md.String(), "report": json.RawMessage(js.Bytes())})
+	out, err := json.Marshal(map[string]any{"state": ledger.BacktestDone, "markdown": md.String(), "report": json.RawMessage(js)})
 	if err == nil && len(out) > ledger.MaxBacktestResult {
 		out, err = json.Marshal(map[string]any{"state": ledger.BacktestDone, "markdown": md.String(), "report": nil,
 			"note": fmt.Sprintf("the report is past %d MiB, and is left out: the Markdown alone", ledger.MaxBacktestResult>>20)})
@@ -267,23 +290,46 @@ func (s *Server) backtestResult(cmp *verdict.Comparison, pr *prepared, o verdict
 	return out, ""
 }
 
-// trimForPullRequest leaves out of a comparison's JSON what a job has no
-// use for and serve's record or settings would say: each firing (the
-// counts stay), each incident's labels and an impact window's series, the
-// settings it was judged by, and what only lapilli verdict works out.
-func trimForPullRequest(c *verdict.Comparison) {
-	for _, rep := range []*verdict.Report{c.Before, c.After} {
-		if rep == nil {
-			continue
-		}
-		rep.Firings, rep.Settings, rep.Unrecorded, rep.NearMisses, rep.Suggestions = nil, nil, nil, nil, nil
-		for i := range rep.Incidents {
-			rep.Incidents[i].Labels, rep.Incidents[i].Spans = nil, nil
+// reportForPullRequest is a comparison's JSON as verdict.JSON writes it,
+// less what a job has no use for and serve's record or settings would say:
+// each side's firings (the counts stay) and incidents (the comparison's
+// own, caught differently, stay, each its id, start and catches, and its
+// title where CompareMarkdown said it), the thresholds and hours it was
+// judged by, the impact signals, and what only lapilli verdict works out.
+func reportForPullRequest(c *verdict.Comparison) ([]byte, error) {
+	var b bytes.Buffer
+	if err := verdict.JSON(&b, c); err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b.Bytes(), &m); err != nil {
+		return nil, err
+	}
+	for _, side := range []string{"before", "after"} {
+		if rep, ok := m[side].(map[string]any); ok {
+			for _, k := range []string{"firings", "incidents", "settings", "noisy_at", "hours", "impact_short", "near_misses", "near_misses_cut",
+				"unrecorded", "suggestions", "extras", "rules_changed"} {
+				delete(rep, k)
+			}
 		}
 	}
-	for i := range c.Incidents {
-		c.Incidents[i].Labels, c.Incidents[i].Spans = nil, nil
+	if incs, ok := m["incidents"].([]any); ok {
+		for _, x := range incs {
+			if in, ok := x.(map[string]any); ok {
+				for k := range in {
+					switch k {
+					case "id", "title", "start", "before", "after":
+					default:
+						delete(in, k)
+					}
+				}
+				if in["title"] == "" {
+					delete(in, "title")
+				}
+			}
+		}
 	}
+	return json.Marshal(m)
 }
 
 // endBacktest keeps how a backtest ended, logs its one line, and counts

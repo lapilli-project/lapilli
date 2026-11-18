@@ -2,6 +2,7 @@ package verdict
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"lapilli.dev/internal/rules"
 )
 
 // Expectations are what rules are held to, written beside them
@@ -88,6 +91,12 @@ func ReadExpectations(r io.Reader) (*Expectations, error) {
 	}
 	if len(b) > MaxExpectations {
 		return nil, fmt.Errorf("more than %d bytes", MaxExpectations)
+	}
+	// Read first as the rules are, in time linear in it, its values and
+	// what its aliases expand to bounded: a file from a pull request,
+	// which lapilli serve's backtests read too.
+	if _, err := rules.DecodeYAML(context.Background(), b); err != nil {
+		return nil, err
 	}
 	var e Expectations
 	dec := yaml.NewDecoder(bytes.NewReader(b))

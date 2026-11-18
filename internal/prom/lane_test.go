@@ -9,73 +9,76 @@ import (
 	"time"
 )
 
-// TestLaneShare: a lane paced by a quarter of a rate and by the whole rate
-// the runs are paced by takes no more than its quarter, the two together
-// no more than the rate, and the runs, asking all the while, have the
-// rest: turns counted on a clock moved by hand, a millisecond at a time.
+// TestLaneShare: while the lane has work, it has its quarter of the rate
+// whatever the runs ask, the runs asking all the while, a millisecond at a
+// time, before the lane each time; the two together no more than the rate;
+// and once the lane has none, the runs have the whole rate again: turns
+// counted on a clock moved by hand.
 func TestLaneShare(t *testing.T) {
 	const rate, share, secs = 4.0, 0.25, 600
 	whole := NewPace(rate)
-	own := NewPace(rate * share)
+	own := whole.Share(share)
+	busy := true
+	whole.Reserve(share, func() bool { return busy })
+	if whole.Reserved() != share {
+		t.Fatalf("reserved %g", whole.Reserved())
+	}
 	at := time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC)
-	lane, runs := 0, 0
-	for ms := 0; ms < secs*1000; ms++ {
-		now := at.Add(time.Duration(ms) * time.Millisecond)
-		// The lane asks first, each time: it is never kept back by the
-		// runs, only by its paces.
-		if _, ok := takeBoth(now, own, whole); ok {
-			lane++
+	count := func(from, to int, lane bool) (l, r int) {
+		for ms := from; ms < to; ms++ {
+			now := at.Add(time.Duration(ms) * time.Millisecond)
+			// The runs ask first, each time: they can't take the lane's
+			// share.
+			if _, ok := whole.take(now); ok {
+				r++
+			}
+			if _, ok := own.take(now); lane && ok {
+				l++
+			}
 		}
-		if _, ok := whole.take(now); ok {
-			runs++
-		}
+		return l, r
 	}
-	if most := int(secs*rate*share) + 1; lane > most || lane < most-2 {
-		t.Errorf("the lane took %d turns in %ds, want its share, %d", lane, secs, most)
+	lane, runs := count(0, secs*1000, true)
+	if want := int(secs * rate * share); lane < want || lane > want+1 {
+		t.Errorf("the lane took %d turns in %ds beside runs asking all the while, want its share, %d", lane, secs, want)
 	}
-	if most := int(secs*rate) + 1; lane+runs > most {
+	if most := int(secs*rate) + 2; lane+runs > most {
 		t.Errorf("the lane and the runs took %d turns in %ds together, past the rate's %d", lane+runs, secs, most)
 	}
-	if least := int(secs * rate * (1 - share)); runs < least {
+	// Within the clock's milliseconds: a turn 333.3 ms apart comes at 334.
+	if least := int(secs * rate * (1 - share) * 0.995); runs < least {
 		t.Errorf("the runs took %d turns in %ds, want the rest of the rate, %d at least", runs, secs, least)
+	}
+	busy = false
+	if _, runs := count(secs*1000, 2*secs*1000, false); runs < int(secs*rate*0.995) {
+		t.Errorf("the lane idle, the runs took %d turns in %ds, want the whole rate, %d", runs, secs, int(secs*rate))
 	}
 }
 
-// TestLaneLimiter: a Limiter AlsoPaced waits for both of its paces' turns,
-// as take asks them, and takes a turn of each: one the runs just took
-// holds the lane's next back too.
+// TestLaneLimiter: the lane's Limiter waits for its own pace alone, which
+// the runs don't take turns of: a second apart at a quarter of 4 a second,
+// however often the runs asked meanwhile.
 func TestLaneLimiter(t *testing.T) {
 	clk := fakeTime(t)
-	whole := NewPace(4)                                  // every 250ms
-	lane := NewLimiterPaced(NewPace(1)).AlsoPaced(whole) // every second
-	runs := NewLimiterPaced(whole)
-	if lane.Pace() == whole || runs.Pace() != whole {
-		t.Fatal("Pace isn't the Limiter's own")
+	whole := NewPace(4)
+	lane := NewLimiterPaced(whole.Share(0.25))
+	runs := NewLimiterPaced(whole.Reserve(0.25, func() bool { return true }))
+	if lane.Pace() == whole || runs.Pace() != whole || lane.Pace().Rate() != 1 {
+		t.Fatal("the lane's pace isn't its share")
 	}
 	start := clk.now()
 	for range 5 {
+		if err := runs.take(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		runs.done(200, 0)
 		if err := lane.take(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 		lane.done(200, 0)
 	}
-	if took := clk.now().Sub(start); took < 4*time.Second {
-		t.Errorf("the lane asked 5 in %s: want a second apart, its own pace", took)
-	}
-	// The runs take the whole pace's next turn: the lane's own has come,
-	// and it waits for the whole's.
-	clk.move(time.Second)
-	if err := runs.take(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	runs.done(200, 0)
-	before := clk.now()
-	if err := lane.take(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	lane.done(200, 0)
-	if waited := clk.now().Sub(before); waited < 250*time.Millisecond {
-		t.Errorf("the lane waited %s after the runs took the rate's turn: want the rate's next", waited)
+	if took := clk.now().Sub(start); took < 4*time.Second || took > 6*time.Second {
+		t.Errorf("five each in %s of the clock: want the lane's a second apart, the runs' within", took)
 	}
 }
 

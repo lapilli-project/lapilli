@@ -33,6 +33,10 @@ type Trust struct {
 	Hourly   int            `yaml:"hourly"`
 	// TokenFile holds a plain token, read for each request.
 	TokenFile string `yaml:"token_file"`
+	// IncidentTitles shows the incidents' titles in its comments, beside
+	// their ids: off by default, as a title written in a tracker is then
+	// read by whoever reads the pull request.
+	IncidentTitles bool `yaml:"incident_titles"`
 }
 
 // Pin is a claim's value an entry pins: one, or, for the claim that names
@@ -93,10 +97,27 @@ var knownCIs = map[string]struct {
 	"gitlab":  {"project_id", "pipeline_source", "project_path", []string{"merge_request_event", "push"}},
 }
 
+// GitHub Enterprise Cloud's issuer of an enterprise's own (its slug after
+// GitHub's), and GitHub Enterprise Server's (its host's /_services/token).
+var (
+	ghec = regexp.MustCompile(`^https://token\.actions\.githubusercontent\.com/[A-Za-z0-9][A-Za-z0-9-]{0,99}$`)
+	ghes = regexp.MustCompile(`^https://[A-Za-z0-9.-]+(:[0-9]+)?/_services/token$`)
+)
+
+// eventClaims are the claims that say which event a job runs for, as the
+// CIs known name them, and the events of each taken: never one a fork's
+// pull request runs in the repository's own context with
+// (pull_request_target, workflow_run, issue_comment), nor one no person
+// asked for (schedule).
+var eventClaims = map[string][]string{
+	"event_name":      {"pull_request", "push"},
+	"pipeline_source": {"merge_request_event", "push"},
+}
+
 // ciOf is the CI an issuer is known as, when ci: doesn't say.
 func ciOf(issuer string) string {
 	switch {
-	case issuer == "https://token.actions.githubusercontent.com":
+	case issuer == "https://token.actions.githubusercontent.com", ghec.MatchString(issuer), ghes.MatchString(issuer):
 		return "github"
 	case issuer == "https://gitlab.com":
 		return "gitlab"
@@ -256,12 +277,25 @@ func (t *Trust) check(seen map[string]bool, tokens map[string]string, secretsLat
 			}
 		}
 	}
+	for name, events := range eventClaims {
+		if p, ok := t.Claims[name]; ok && !slices.Contains(events, p.Values[0]) {
+			return fmt.Errorf("claims: %s %q: want %s; another can run a fork's pull request in the repository's own context, or runs with no one asking", name, p.Values[0], strings.Join(events, " or "))
+		}
+	}
 	known, ok := knownCIs[t.CI]
 	if !ok {
-		// Another issuer: pinned by sub, or another claim, each one value.
+		// Another issuer: pinned by sub and by the event, each one value.
 		for name, p := range t.Claims {
 			if p.List {
 				return fmt.Errorf("claims: %s is a list: only the claim that names the repository by its id may be one, of a CI given as ci:", name)
+			}
+		}
+		if _, ok := t.Claims["sub"]; !ok {
+			return errors.New("claims: an issuer Lapilli doesn't know by its URL needs ci: (github, gitlab or forgejo), or sub pinned, and the event (event_name or pipeline_source)")
+		}
+		if _, ok := t.Claims["event_name"]; !ok {
+			if _, ok := t.Claims["pipeline_source"]; !ok {
+				return errors.New("claims: pin the event the job runs for, event_name or pipeline_source, beside sub: or give ci: for a CI Lapilli knows")
 			}
 		}
 		return nil

@@ -13,7 +13,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"math"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -21,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -46,11 +49,17 @@ const (
 	// given; backtestRules the most rules that differ, on either side.
 	backtestDays, backtestDefaultDays = 14, 7
 	backtestRules                     = 50
-	// backtestsOfEntry are how many of an entry's may wait at once.
-	backtestsOfEntry = 3
+	// backtestsOfEntry are how many of an entry's may wait at once;
+	// backtestReading, how many requests' bodies are read and checked at
+	// once.
+	backtestsOfEntry, backtestReading = 3, 2
 	// backtestFiles are the most files of a side, backtestPath the longest
 	// path, backtestZone the longest zone's name.
 	backtestFiles, backtestPath, backtestZone = 2000, 512, 64
+	// backtestReach is how far back a pull request's rule reads at most,
+	// by a range, a subquery or an offset; backtestPoints, the most points
+	// a subquery has, as Prometheus holds a range query to.
+	backtestReach, backtestPoints = 7 * 24 * time.Hour, 11000
 	// backtestQueryTimeout is sent with each range query the lane asks, so
 	// that a shared Prometheus gives up on a pull request's query before
 	// its own default does.
@@ -80,12 +89,22 @@ type backtestPort struct {
 	// it replayed.
 	asked    prom.Counts
 	progress replay.Progress
-	// reads is how fast the job's reads (GET, DELETE) are taken, in this
-	// process.
-	reads *limiter
+	// reads are how fast a backtest is read (GET, DELETE) with its key,
+	// by its id; misses, how fast an id that isn't, or a key that's wrong,
+	// is answered, by the client's address: one who guesses can't keep a
+	// job from reading its own.
+	reads, misses perKey
 	// wake is poked when a backtest is queued here, so the leader, if it
 	// is this process, takes it at once.
 	wake chan struct{}
+	// tokens are the plain entries' tokens, as their files hold them.
+	tokens plainTokens
+	// busy is set while the lane runs a backtest: its share of the rate
+	// is kept for it then.
+	busy atomic.Bool
+	// reading are the turns to read a request's body and check its rules,
+	// backtestReading at once.
+	reading chan struct{}
 
 	mu sync.Mutex
 	// ended are the backtests ended, and refused, since start, by entry
@@ -107,7 +126,7 @@ type trusted struct {
 // by every entry that names it; each entry's hour, shared among the
 // replicas; and the lane's history.
 func (s *Server) newBacktestPort() *backtestPort {
-	p := &backtestPort{reads: &limiter{rate: 20, burst: 100}, wake: make(chan struct{}, 1), ended: map[[2]string]int{}, said: map[string]time.Time{}}
+	p := &backtestPort{reads: perKey{rate: 1, burst: 10}, misses: perKey{rate: 1, burst: 20}, wake: make(chan struct{}, 1), reading: make(chan struct{}, backtestReading), ended: map[[2]string]int{}, said: map[string]time.Time{}}
 	cis := map[[2]string]*signin.CI{}
 	for _, t := range s.cfg.Trust {
 		tr := &trusted{Trust: t, hourly: &limiter{rate: float64(t.Hourly) / 3600, burst: float64(t.Hourly)}}
@@ -130,10 +149,14 @@ func (s *Server) newBacktestPort() *backtestPort {
 	p.parallel = max(1, parallel/4)
 	base := replay.Base(s.h)
 	if c, ok := base.(*prom.Client); ok {
+		// The lane's share of --max-rate is kept for it while it runs a
+		// backtest: the runs' pace slows by as much then, and the lane
+		// asks at its own, which nothing else takes turns of.
 		runs := c.Limiter()
 		own := runs.Pace().Share(s.share())
+		runs.Pace().Reserve(s.share(), p.busy.Load)
 		p.rate = own.Rate()
-		p.lane = c.Lane(prom.NewLimiterPaced(own).AlsoPaced(runs.Pace()), backtestQueryTimeout)
+		p.lane = c.Lane(prom.NewLimiterPaced(own), backtestQueryTimeout)
 	} else {
 		p.lane = base
 	}
@@ -232,11 +255,11 @@ func bearerOf(r *http.Request) string {
 }
 
 // who says which entry a request's token is of, before its body is read:
-// a plain token, held to each plain entry's file, read again, both hashed
-// and compared in constant time; or an ID token, whose iss alone is read
-// before it is verified, to pick the entries of its issuer, and is then
-// checked by the issuer's keys, for each entry's audience, its pins held.
-// An iss no entry names asks nothing of anyone.
+// a plain token, held to each plain entry's token (plainTokens), both
+// hashed and compared in constant time; or an ID token, whose iss alone is
+// read before it is verified, to pick the entries of its issuer, checked
+// once by the issuer's keys, and then held to each entry's audience and
+// pins. An iss no entry names asks nothing of anyone.
 func (s *Server) who(ctx context.Context, w http.ResponseWriter, r *http.Request) (asker, bool) {
 	raw := bearerOf(r)
 	if raw == "" || len(raw) > 8<<10 {
@@ -244,18 +267,17 @@ func (s *Server) who(ctx context.Context, w http.ResponseWriter, r *http.Request
 		return asker{}, false
 	}
 	x := sha256.Sum256([]byte(raw))
+	plain := s.btPort.tokens.of(s)
 	for _, t := range s.btPort.trust {
 		if t.TokenFile == "" {
 			continue
 		}
-		b, err := os.ReadFile(t.TokenFile)
-		want := strings.TrimSpace(string(b))
-		if err != nil || len(want) < minBacktestToken || s.backtestTokenShared(want, t) {
+		want, ok := plain[t.Name]
+		if !ok {
 			s.noteRefused(t.Name, "its token_file can't be read, is shorter than 32 characters, or holds another token serve takes: none is taken with it until it is put right")
 			continue
 		}
-		y := sha256.Sum256([]byte(want))
-		if subtle.ConstantTimeCompare(x[:], y[:]) == 1 {
+		if subtle.ConstantTimeCompare(x[:], want[:]) == 1 {
 			return asker{t: t}, true
 		}
 	}
@@ -265,21 +287,40 @@ func (s *Server) who(ctx context.Context, w http.ResponseWriter, r *http.Request
 		return asker{}, false
 	}
 	why, of := "no entry names its issuer", ""
+	verified := map[*signin.CI]signin.CIToken{}
+	failed := map[*signin.CI]string{}
 	for _, t := range s.btPort.trust {
 		if t.ci == nil || t.Issuer != iss {
 			continue
 		}
 		of = t.Name
-		tok, err := t.ci.Verify(ctx, raw, t.Audience)
-		if err != nil {
-			why = refusedWhy(err)
+		if f, ok := failed[t.ci]; ok {
+			why = f
+			continue
+		}
+		tok, ok := verified[t.ci]
+		if !ok {
+			var err error
+			if tok, err = t.ci.VerifyToken(ctx, raw); err != nil {
+				why = refusedWhy(err)
+				failed[t.ci] = why
+				continue
+			}
+			verified[t.ci] = tok
+		}
+		if !tok.For(t.Audience) {
+			why = "its audience isn't the entry's"
 			continue
 		}
 		if claim, ok := t.pinned(tok.Claims); !ok {
 			why = "its " + claim + " claim isn't as the entry pins it"
 			continue
 		}
-		key := "raw:" + hex.EncodeToString(x[:])
+		// Known by its jti; or, with none, by what it says as it was
+		// signed, never how it was written, which a lax decoder reads in
+		// several ways as one.
+		p := sha256.Sum256(tok.Payload)
+		key := "claims:" + hex.EncodeToString(p[:])
 		if jti, ok := signin.ClaimString(tok.Claims["jti"]); ok && jti != "" && len(jti) <= 256 {
 			j := sha256.Sum256([]byte(jti))
 			key = "jti:" + hex.EncodeToString(j[:])
@@ -290,24 +331,96 @@ func (s *Server) who(ctx context.Context, w http.ResponseWriter, r *http.Request
 	return asker{}, false
 }
 
-// backtestTokenShared reports whether a plain token is one another token
-// file serve takes holds too: none is taken until each has its own.
-func (s *Server) backtestTokenShared(tk string, of *trusted) bool {
-	files := []string{s.cfg.IncidentsToken, s.cfg.FiringsToken, s.cfg.NotifyToken, s.cfg.TasksToken, s.cfg.ChangesToken}
+// plainTokens are the plain entries' tokens, by entry, as their files hold
+// them, hashed: read again only when a file serve takes a token from
+// changed (its size, its time, what it is), and each held to the others
+// then, not at each request. An entry whose file can't be read, holds
+// fewer than 32 characters, or holds a token another file of serve's holds
+// too, has none: none is taken with it until it is put right.
+type plainTokens struct {
+	mu    sync.Mutex
+	stats map[string]tokenStat
+	by    map[string][sha256.Size]byte
+}
+
+type tokenStat struct {
+	size  int64
+	mod   time.Time
+	ok    bool
+	inode string
+}
+
+// tokenFiles are the files of every token and secret serve takes but the
+// backtest port's own: none of them may hold a plain entry's token.
+func (s *Server) tokenFiles() []string {
+	c := s.cfg
+	return []string{c.IncidentsToken, c.FiringsToken, c.NotifyToken, c.TasksToken, c.ChangesToken, c.GrafanaToken, c.RulerToken,
+		c.LokiToken, c.ChangesGrafanaToken, c.ChangesRulerToken, c.NotifyGrafanaSecret}
+}
+
+func statOf(path string) tokenStat {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return tokenStat{}
+	}
+	return tokenStat{size: fi.Size(), mod: fi.ModTime(), ok: true, inode: fmt.Sprint(fi.Sys())}
+}
+
+// of are the tokens as the files now hold them: each file stat'ed, and all
+// read again only when one changed.
+func (p *plainTokens) of(s *Server) map[string][sha256.Size]byte {
+	var files []string
+	for _, f := range s.tokenFiles() {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
 	for _, t := range s.btPort.trust {
-		if t != of && t.TokenFile != "" {
+		if t.TokenFile != "" {
 			files = append(files, t.TokenFile)
 		}
 	}
+	now := map[string]tokenStat{}
 	for _, f := range files {
-		if f == "" {
-			continue
+		now[f] = statOf(f)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.by != nil && maps.Equal(p.stats, now) {
+		return p.by
+	}
+	read := func(f string) string {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return ""
 		}
-		if b, err := os.ReadFile(f); err == nil && strings.TrimSpace(string(b)) == tk {
-			return true
+		return strings.TrimSpace(string(b))
+	}
+	held := map[string]int{}
+	for _, f := range s.tokenFiles() {
+		if f != "" {
+			if tk := read(f); tk != "" {
+				held[tk]++
+			}
 		}
 	}
-	return false
+	mine := map[string]string{}
+	for _, t := range s.btPort.trust {
+		if t.TokenFile != "" {
+			if tk := read(t.TokenFile); tk != "" {
+				mine[t.Name] = tk
+				held[tk]++
+			}
+		}
+	}
+	p.by = map[string][sha256.Size]byte{}
+	for name, tk := range mine {
+		if len(tk) >= minBacktestToken && held[tk] == 1 {
+			p.by[name] = sha256.Sum256([]byte(tk))
+		}
+	}
+	p.stats = now
+	return p.by
 }
 
 // issuerOf is the iss a compact JWS says, unverified: only to pick the
@@ -391,8 +504,8 @@ func sortedClaims(m map[string]Pin) []string {
 type backtestRequest struct {
 	Before       []backtestFile `json:"before"`
 	After        []backtestFile `json:"after"`
-	Expect       string         `json:"expect"`
-	ExpectBefore string         `json:"expect_before"`
+	Expect       *string        `json:"expect"`
+	ExpectBefore *string        `json:"expect_before"`
 	RulesSelect  string         `json:"rules_select"`
 	Days         int            `json:"days"`
 	TZ           string         `json:"tz"`
@@ -465,7 +578,7 @@ func (s *Server) prepare(req backtestRequest, t Trust) (*prepared, string) {
 		return nil, "pull_request is a pull request's number"
 	case req.Commit != "" && !commitSHA.MatchString(req.Commit):
 		return nil, "commit is a commit's hash, in lowercase hex"
-	case req.ExpectBefore != "" && req.Expect == "":
+	case req.ExpectBefore != nil && req.Expect == nil:
 		return nil, "expect_before goes with expect"
 	case len(req.TZ) > backtestZone || req.TZ == "Local":
 		return nil, "tz is a zone's name, such as Asia/Seoul"
@@ -557,16 +670,22 @@ func (s *Server) prepare(req backtestRequest, t Trust) (*prepared, string) {
 		if sel, wide := rules.Wide(r.Expr); wide {
 			return nil, fmt.Sprintf("%s reads %s, which names no metric, or names it by a pattern: here each selector reads one metric, by its name", name, clip(verdict.Clean(sel), 200))
 		}
+		if what := rules.Reach(r.Expr, backtestReach, backtestReach, backtestPoints); what != "" {
+			return nil, fmt.Sprintf("%s reads %s: here a range or an offset reaches a week back at most, a subquery %d points, and no @", name, clip(verdict.Clean(what), 200), backtestPoints)
+		}
 	}
 	p.recording = verdict.RecordingChanges(recBefore, recAfter)
+	// Given, however empty, as --expect takes an empty file: a field
+	// left out is none.
 	for _, e := range []struct {
-		side, text string
-		into       **verdict.Expectations
+		side string
+		text *string
+		into **verdict.Expectations
 	}{{"expect", req.Expect, &p.expect}, {"expect_before", req.ExpectBefore, &p.before}} {
-		if e.text == "" {
+		if e.text == nil {
 			continue
 		}
-		x, err := verdict.ReadExpectations(strings.NewReader(e.text))
+		x, err := verdict.ReadExpectations(strings.NewReader(*e.text))
 		if err != nil {
 			return nil, e.side + ": " + clip(verdict.Clean(err.Error()), 600)
 		}
@@ -649,19 +768,20 @@ func (a asker) repository() string {
 }
 
 // pullRequest is the pull request's number: from GitHub's or Forgejo's
-// ref when the token says it, which the job's must agree with; or the
-// job's.
-func (a asker) pullRequest(given int64) (int64, bool) {
+// ref when the token says it (byToken), which the job's must agree with;
+// or the job's, which a newer backtest of it doesn't take the place of: a
+// job that says another's number can't push that one out of the queue.
+func (a asker) pullRequest(given int64) (n int64, byToken, ok bool) {
 	ref, _ := signin.ClaimString(a.claims["ref"])
 	m := gitRef.FindStringSubmatch(ref)
 	if m == nil || (a.t.CI != "github" && a.t.CI != "forgejo") {
-		return given, true
+		return given, false, true
 	}
 	n, err := strconv.ParseInt(m[1], 10, 64)
 	if err != nil || n > math.MaxInt32 || given != 0 && given != n {
-		return 0, false
+		return 0, false, false
 	}
-	return n, true
+	return n, true, true
 }
 
 // backtestReady says why the port can't take a backtest now, "" when it can: the
@@ -690,6 +810,36 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		s.backtestEnded(a.t.Name, "refused")
 		backtestError(w, code, why)
 	}
+	// The entry's hour is taken before the body is read, so that past it a
+	// body costs nothing to send; given back for one not queued.
+	if !a.t.hourly.allow(s.now()) {
+		w.Header().Set("Retry-After", strconv.Itoa(a.t.hourly.wait()))
+		refused(http.StatusTooManyRequests, fmt.Sprintf("this entry starts %d backtests an hour at most", a.t.Hourly))
+		return
+	}
+	queued := false
+	defer func() {
+		if !queued {
+			a.t.hourly.give()
+		}
+	}()
+	// A few bodies read and their rules checked at once, whoever sends
+	// them.
+	select {
+	case s.btPort.reading <- struct{}{}:
+	default:
+		w.Header().Set("Retry-After", "1")
+		refused(http.StatusTooManyRequests, "as many requests are being read as the port reads at once: try again in a second")
+		return
+	}
+	reading := true
+	done := func() {
+		if reading {
+			<-s.btPort.reading
+			reading = false
+		}
+	}
+	defer done()
 	body, req, code, why := readBacktestBody(w, r)
 	if code != 0 {
 		refused(code, why)
@@ -703,7 +853,7 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		backtestError(w, http.StatusServiceUnavailable, why)
 		return
 	}
-	pr, ok := a.pullRequest(req.PullRequest)
+	pr, byToken, ok := a.pullRequest(req.PullRequest)
 	if !ok {
 		refused(http.StatusBadRequest, "pull_request isn't the one the token's ref names")
 		return
@@ -718,30 +868,23 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		refused(http.StatusBadRequest, why)
 		return
 	}
-	if !a.t.hourly.allow(s.now()) {
-		w.Header().Set("Retry-After", strconv.Itoa(a.t.hourly.wait()))
-		refused(http.StatusTooManyRequests, fmt.Sprintf("this entry starts %d backtests an hour at most", a.t.Hourly))
-		return
-	}
+	done()
 	id, key := randomHex(16), randomKey()
 	kh, bh := sha256.Sum256([]byte(key)), sha256.Sum256(body)
 	ask := ledger.BacktestAsk{Backtest: ledger.Backtest{ID: id, Trust: a.t.Name, Repository: a.repository(), PullRequest: pr, Commit: req.Commit,
 		Rules: max(len(p.gone), len(p.came)), Requests: requests, KeyHash: hex.EncodeToString(kh[:])},
 		Body: body, Token: a.token, BodyHash: hex.EncodeToString(bh[:]), Until: a.iat.Add(backtestTokenKept),
-		Queue: s.backtestQueue(), PerTrust: backtestsOfEntry}
+		Queue: s.backtestQueue(), PerTrust: backtestsOfEntry, Supersede: byToken}
 	b, again, superseded, err := s.l.AskBacktest(ctx, ask, s.now())
 	switch {
 	case errors.Is(err, ledger.ErrBacktestToken):
-		a.t.hourly.give()
 		refused(http.StatusConflict, "this token started another backtest: a job asks once, with a token of its own")
 		return
 	case errors.Is(err, ledger.ErrBacktestsFull):
-		a.t.hourly.give()
 		w.Header().Set("Retry-After", "60")
 		refused(http.StatusTooManyRequests, "as many backtests wait as the queue takes: try again in a minute")
 		return
 	case err != nil:
-		a.t.hourly.give()
 		s.log.Error("backtest port: queueing a backtest", "trust", a.t.Name, "err", err)
 		backtestError(w, http.StatusServiceUnavailable, "the backtest couldn't be queued: try again in a minute")
 		return
@@ -752,10 +895,10 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 	if again {
 		// The same job asked twice: its backtest, without its key, which
 		// was given once.
-		a.t.hourly.give()
 		backtestJSON(w, http.StatusOK, map[string]any{"id": b.ID, "state": b.State, "position": b.Position})
 		return
 	}
+	queued = true
 	select {
 	case s.btPort.wake <- struct{}{}:
 	default:
@@ -769,11 +912,6 @@ var backtestID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // kept is the backtest a job reads with its key: none, the same 404, for an
 // id that isn't and a key that's wrong, compared in constant time.
 func (s *Server) kept(w http.ResponseWriter, r *http.Request) (ledger.Backtest, bool) {
-	if !s.btPort.reads.allow(s.now()) {
-		w.Header().Set("Retry-After", "1")
-		backtestError(w, http.StatusTooManyRequests, "too many reads: try again in a second")
-		return ledger.Backtest{}, false
-	}
 	id, key := r.PathValue("id"), bearerOf(r)
 	var b ledger.Backtest
 	var found bool
@@ -791,10 +929,51 @@ func (s *Server) kept(w http.ResponseWriter, r *http.Request) (ledger.Backtest, 
 		want = strings.Repeat("0", 64)
 	}
 	if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(got[:])), []byte(want)) != 1 || !found || key == "" {
+		if !s.btPort.misses.allow(clientAddr(r), s.now()) {
+			w.Header().Set("Retry-After", "10")
+			backtestError(w, http.StatusTooManyRequests, "too many backtests not found: try again in a while")
+			return ledger.Backtest{}, false
+		}
 		backtestError(w, http.StatusNotFound, "no such backtest")
 		return ledger.Backtest{}, false
 	}
+	if !s.btPort.reads.allow(id, s.now()) {
+		w.Header().Set("Retry-After", "1")
+		backtestError(w, http.StatusTooManyRequests, "too many reads of this backtest: try again in a second")
+		return ledger.Backtest{}, false
+	}
 	return b, true
+}
+
+// clientAddr is the address a request came from, without its port.
+func clientAddr(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// perKey are rate limits by a key, a bucket each, in this process; 4,096
+// buckets at most, all let go and begun afresh past them.
+type perKey struct {
+	mu          sync.Mutex
+	rate, burst float64
+	m           map[string]*limiter
+}
+
+func (p *perKey) allow(key string, now time.Time) bool {
+	p.mu.Lock()
+	if p.m == nil || len(p.m) >= 4096 {
+		p.m = map[string]*limiter{}
+	}
+	l := p.m[key]
+	if l == nil {
+		l = &limiter{rate: p.rate, burst: p.burst}
+		p.m[key] = l
+	}
+	p.mu.Unlock()
+	return l.allow(now)
 }
 
 // getBacktest says where a backtest is, and once it ended, what it came

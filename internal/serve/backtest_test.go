@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -413,6 +414,9 @@ func TestBacktestRequestsRefused(t *testing.T) {
 		"interval 2h":        {btBody(ruleFile, strings.Replace(changedRules, "- name: shop\n", "- name: shop\n    interval: 2h\n", 1), nil), 400, "interval"},
 		"no metric":          {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `'{job="api"} > 1'`, 1), nil), 400, `{job="api"}`},
 		"__name__ =~":        {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `'{__name__=~"secret_.+"} > 41'`, 1), nil), 400, "names no metric"},
+		"a subquery of 1s":   {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `max_over_time(errors[30d:1s]) > 1`, 1), nil), 400, "a range past"},
+		"offset 5y":          {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `errors offset 5y > 1`, 1), nil), 400, "offset 5y"},
+		"@ 0":                {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `errors @ 0 > 1`, 1), nil), 400, "no @"},
 		"expect_before only": {btBody(ruleFile, changedRules, map[string]any{"expect_before": "expectations: []"}), 400, "expect_before goes with expect"},
 		"expect broken":      {btBody(ruleFile, changedRules, map[string]any{"expect": "expectations: [{rule: Errors, nope: 1}]"}), 400, "expect"},
 		"a path control":     {[]byte(`{"before":[],"after":[{"path":"a\u0007b.yaml","content":"groups: []"}]}`), 400, "path"},
@@ -468,17 +472,25 @@ func TestBacktestQueueBounds(t *testing.T) {
 	if code != 429 || hd.Get("Retry-After") == "" {
 		t.Errorf("a fourth of the entry's: %d %v", code, hd)
 	}
-	// A newer commit of pull request 2 takes its place.
-	if code, m, _ := post(b.plain, 2); code != 202 || m["position"] != float64(2) {
-		t.Errorf("a newer commit: %d %v", code, m)
+	// A plain token's pull request is the job's word: it supersedes no
+	// backtest waiting, the entry's third.
+	if code, _, _ := post(b.plain, 2); code != 429 || b.s.btPort.ended[[2]string{"plain", ledger.BacktestSuperseded}] != 0 {
+		t.Errorf("a plain token's pull request 2 again: %d", code)
 	}
-	ended := b.s.btPort.ended[[2]string{"plain", ledger.BacktestSuperseded}]
-	if ended != 1 {
-		t.Errorf("superseded counted %d", ended)
+	// A newer commit of GitHub's pull request 50, by its token's ref,
+	// takes the place of the one waiting.
+	for i := range 2 {
+		tok := b.github(map[string]any{"jti": fmt.Sprint("s", i), "ref": "refs/pull/50/merge"})
+		if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, btBody(ruleFile, changedRules, nil)); code != 202 || m["position"] != float64(3) {
+			t.Errorf("pull request 50, the %dth: %d %v", i+1, code, m)
+		}
 	}
-	// Past --backtest-queue in all: the GitHub entry's first two fit.
-	for i, want := range []int{202, 202, 429} {
-		tok := b.github(map[string]any{"jti": fmt.Sprint("q", i), "ref": fmt.Sprintf("refs/pull/%d/merge", 50+i)})
+	if n := b.s.btPort.ended[[2]string{"alerts", ledger.BacktestSuperseded}]; n != 1 {
+		t.Errorf("superseded counted %d", n)
+	}
+	// Past --backtest-queue in all: 4 wait, the fifth fits.
+	for i, want := range []int{202, 429} {
+		tok := b.github(map[string]any{"jti": fmt.Sprint("q", i), "ref": fmt.Sprintf("refs/pull/%d/merge", 60+i)})
 		code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, btBody(ruleFile, changedRules, nil))
 		if code != want {
 			t.Errorf("%d in the queue: %d %v, want %d", i+4, code, m, want)
@@ -495,6 +507,40 @@ func TestBacktestQueueBounds(t *testing.T) {
 			t.Errorf("the %dth in the hour: %d %v %v", i+1, code, m, hd)
 		}
 	}
+	// Past the hour, the body isn't read.
+	read := &countingReader{r: bytes.NewReader(btBody(ruleFile, changedRules, nil))}
+	r := httptest.NewRequest("POST", "/v1/backtests", read)
+	r.Header.Set("Authorization", "Bearer "+b2.gl.Token(btAudience, idptest.GitLab("42")))
+	w := httptest.NewRecorder()
+	b2.h.ServeHTTP(w, r)
+	if w.Code != 429 || read.n != 0 {
+		t.Errorf("past the hour: %d, %d bytes read", w.Code, read.n)
+	}
+	// What is refused before it is queued gives its hour back.
+	b3 := btServer(t, nil, "", nil)
+	t3 := b3.s.trustNamed("plain")
+	t3.hourly, t3.Hourly = &limiter{rate: 1.0 / 3600, burst: 1}, 1
+	for range 3 {
+		if code, _, _ := btAsk(t, b3.h, "POST", "/v1/backtests", b3.plain, btBody(ruleFile, changedRules, map[string]any{"days": 15})); code != 400 {
+			t.Errorf("a bad request: %d", code)
+		}
+	}
+	if code, m, _ := btAsk(t, b3.h, "POST", "/v1/backtests", b3.plain, btBody(ruleFile, changedRules, nil)); code != 202 {
+		t.Errorf("after three refused, the hour's one: %d %v", code, m)
+	}
+	// As many bodies being read as the port reads at once: refused, the
+	// body unread.
+	for range cap(b3.s.btPort.reading) {
+		b3.s.btPort.reading <- struct{}{}
+	}
+	read = &countingReader{r: bytes.NewReader(btBody(ruleFile, changedRules, nil))}
+	r = httptest.NewRequest("POST", "/v1/backtests", read)
+	r.Header.Set("Authorization", "Bearer "+b3.github(nil))
+	w = httptest.NewRecorder()
+	b3.h.ServeHTTP(w, r)
+	if w.Code != 429 || read.n != 0 {
+		t.Errorf("the reads full: %d, %d bytes read", w.Code, read.n)
+	}
 }
 
 // The lane's share of --max-rate: its own Limiter, paced at the share and
@@ -509,8 +555,8 @@ func TestBacktestLaneShare(t *testing.T) {
 		t.Fatalf("the lane asks %T", b.s.btPort.lane)
 	}
 	l := lane.Limiter()
-	if l == runs || c.Limiter() != runs || l.Pace().Rate() != 0.5 || l.AlsoPace() != runs.Pace() || b.s.btPort.rate != 0.5 {
-		t.Errorf("the lane's Limiter: own %g, also the runs' %t; rate %g", l.Pace().Rate(), l.AlsoPace() == runs.Pace(), b.s.btPort.rate)
+	if l == runs || c.Limiter() != runs || l.Pace().Rate() != 0.5 || runs.Pace().Reserved() != 0.25 || b.s.btPort.rate != 0.5 {
+		t.Errorf("the lane's Limiter: own %g; the runs' reserving %g; rate %g", l.Pace().Rate(), runs.Pace().Reserved(), b.s.btPort.rate)
 	}
 	none := btServer(t, prom.New("http://127.0.0.1:1", "test"), "", func(cfg *Config) { cfg.Parallel = 2 })
 	if none.s.btPort.rate != 0 || none.s.btPort.parallel != 1 {
@@ -594,27 +640,35 @@ func TestBacktestNoLeaks(t *testing.T) {
 			t.Errorf("the result doesn't say %q", want)
 		}
 	}
-	// The JSON holds no firing, no setting it was judged by, and no
-	// incident's labels: the counts and the names the request wrote.
+	// The JSON holds no firing, no incident of a side, no setting it was
+	// judged by: the counts, the names the request wrote, and the
+	// incidents caught differently by their ids alone.
 	var res struct {
-		Report struct {
-			Before, After struct {
-				Firings   []any            `json:"firings"`
-				Settings  any              `json:"settings"`
-				Incidents []map[string]any `json:"incidents"`
+		Markdown string
+		Report   map[string]any
+	}
+	json.Unmarshal([]byte(got), &res)
+	for _, side := range []string{"before", "after"} {
+		rep := res.Report[side].(map[string]any)
+		for _, k := range []string{"firings", "incidents", "settings", "noisy_at", "hours", "impact_short"} {
+			if _, ok := rep[k]; ok {
+				t.Errorf("the report's %s has %s", side, k)
 			}
 		}
 	}
-	json.Unmarshal([]byte(got), &res)
-	for _, side := range []any{res.Report.Before, res.Report.After} {
-		r := side.(struct {
-			Firings   []any            `json:"firings"`
-			Settings  any              `json:"settings"`
-			Incidents []map[string]any `json:"incidents"`
-		})
-		if len(r.Firings) > 0 || r.Settings != nil || len(r.Incidents) == 0 || r.Incidents[0]["labels"] != nil {
-			t.Errorf("the report: %+v", r)
+	incs, _ := res.Report["incidents"].([]any)
+	if len(incs) == 0 {
+		t.Fatal("no incident caught differently")
+	}
+	for _, x := range incs {
+		for k := range x.(map[string]any) {
+			if k != "id" && k != "start" && k != "before" && k != "after" {
+				t.Errorf("an incident caught differently has %s", k)
+			}
 		}
+	}
+	if strings.Contains(res.Markdown, "Checkout down") || strings.Contains(got, "Checkout down") {
+		t.Error("an incident's title is in the result, the entry not asking for it")
 	}
 }
 
@@ -834,7 +888,7 @@ func TestBacktestNothingChanged(t *testing.T) {
 	h.Lock()
 	before := h.asked
 	h.Unlock()
-	md, rep := b.done(t, b.plain, btBody(ruleFile, same, map[string]any{"expect": "expectations: []"}))
+	md, rep := b.done(t, b.plain, btBody(ruleFile, same, map[string]any{"expect": ""}))
 	// As lapilli verdict's summary says it then: nothing held.
 	if sum := rep["summary"].(map[string]any); !strings.Contains(md, verdict.NothingChangedHeading) || sum["nothing_changed"] != true || sum["expected"] != false {
 		t.Errorf("%s", md)
@@ -843,5 +897,165 @@ func TestBacktestNothingChanged(t *testing.T) {
 	defer h.Unlock()
 	if n := h.asked - before; n != 0 {
 		t.Errorf("asked the history %d times for nothing that changed", n)
+	}
+}
+
+// An expectations file of no bytes is given, as --expect takes one: held
+// to it, the summary says it was.
+func TestBacktestEmptyExpect(t *testing.T) {
+	b := btServer(t, nil, "", nil)
+	_, rep := b.done(t, b.plain, btBody(ruleFile, changedRules, map[string]any{"expect": ""}))
+	if sum := rep["summary"].(map[string]any); sum["expected"] != true {
+		t.Errorf("an empty expect: %v", sum)
+	}
+	_, rep = b.done(t, b.plain, btBody(ruleFile, changedRules, nil))
+	if sum := rep["summary"].(map[string]any); sum["expected"] != false {
+		t.Errorf("no expect: %v", sum)
+	}
+}
+
+// An entry that asks for the incidents' titles (incident_titles) gets them
+// in its comments; others, ids alone.
+func TestBacktestIncidentTitles(t *testing.T) {
+	b := btServer(t, nil, "", nil)
+	b.s.trustNamed("plain").IncidentTitles = true
+	md, rep := b.done(t, b.plain, btBody(ruleFile, changedRules, nil))
+	if !strings.Contains(md, "`Checkout down`") || !strings.Contains(fmt.Sprint(rep["incidents"]), "Checkout down") {
+		t.Errorf("titles asked for: %s", md)
+	}
+	md, _ = b.done(t, b.github(nil), btBody(ruleFile, changedRules, nil))
+	if strings.Contains(md, "Checkout down") || !strings.Contains(md, "`INC-1`") {
+		t.Errorf("titles not asked for: %s", md)
+	}
+}
+
+// A backtest that makes the lane panic ends failed, and the lane goes on.
+func TestBacktestPanicFails(t *testing.T) {
+	b := btServer(t, nil, "", nil)
+	laneHook = func(ledger.Backtest) { panic("made to") }
+	t.Cleanup(func() { laneHook = nil })
+	code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.plain, btBody(ruleFile, changedRules, nil))
+	if code != 202 {
+		t.Fatal(code, m)
+	}
+	if got := laneOnce(t, b.s); got.State != ledger.BacktestFailed || got.Error != "lapilli serve couldn't run it" {
+		t.Errorf("%+v", got)
+	}
+	if strings.Contains(b.log.String(), "made to") {
+		t.Error("the log holds what the panic said")
+	}
+}
+
+// The leader's rounds let go of backtests ended a day ago, the port off.
+func TestBacktestPrunedPortOff(t *testing.T) {
+	s, _ := server(t, nil)
+	ctx := context.Background()
+	if _, _, _, err := s.l.AskBacktest(ctx, ledger.BacktestAsk{Backtest: ledger.Backtest{ID: strings.Repeat("a", 32), Trust: "gone", KeyHash: "k"},
+		Body: []byte("{}"), Queue: 1, PerTrust: 1}, now.Add(-50*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	s.l.StartBacktest(ctx, now.Add(-49*time.Hour))
+	s.l.EndBacktest(ctx, strings.Repeat("a", 32), ledger.BacktestDone, "", 0, nil, now.Add(-48*time.Hour))
+	s.jobs(ctx, false)
+	if _, ok, _ := s.l.Backtest(ctx, strings.Repeat("a", 32)); ok {
+		t.Error("a backtest ended two days ago is kept, the port off")
+	}
+}
+
+// Guesses don't keep a job from reading its backtest: a wrong key or an id
+// that isn't is limited by the address it comes from, and comes to 429;
+// the job's own read, from the same address, is still answered, and is
+// limited by its backtest alone.
+func TestBacktestReadsNotStarved(t *testing.T) {
+	b := btServer(t, nil, "", nil)
+	_, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.plain, btBody(ruleFile, changedRules, nil))
+	id, key := m["id"].(string), m["key"].(string)
+	codes := map[int]int{}
+	for i := range 150 {
+		c, _, _ := btAsk(t, b.h, "GET", fmt.Sprintf("/v1/backtests/%032x", i), key, nil)
+		codes[c]++
+	}
+	if codes[404] == 0 || codes[429] == 0 {
+		t.Errorf("150 guesses: %v", codes)
+	}
+	if c, m, _ := btAsk(t, b.h, "GET", "/v1/backtests/"+id, key, nil); c != 202 || m["state"] != "waiting" {
+		t.Errorf("the job's own read after them: %d %v", c, m)
+	}
+	reads := map[int]int{}
+	for range 30 {
+		c, _, _ := btAsk(t, b.h, "GET", "/v1/backtests/"+id, key, nil)
+		reads[c]++
+	}
+	if reads[202] == 0 || reads[429] == 0 {
+		t.Errorf("30 reads of one backtest at once: %v", reads)
+	}
+}
+
+// What the lane asks of the history is in lapilli_serve_history_*'s totals,
+// beside the runs' and people's.
+func TestBacktestLaneInHistoryMetrics(t *testing.T) {
+	var asked atomic.Int64
+	prometheus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"success","data":{"resultType":"matrix","result":[]}}`))
+	}))
+	defer prometheus.Close()
+	b := btServer(t, prom.New(prometheus.URL, "test"), "", nil)
+	count := func() int64 {
+		_, metrics, _ := get(t, b.s.Handler(), "/metrics")
+		var n int64
+		for _, line := range strings.Split(metrics, "\n") {
+			if strings.HasPrefix(line, `lapilli_serve_history_requests_total{api="prometheus",answer="2xx"} `) {
+				fmt.Sscan(strings.Fields(line)[1], &n)
+			}
+		}
+		return n
+	}
+	before, sent := count(), asked.Load()
+	b.done(t, b.plain, btBody(ruleFile, changedRules, map[string]any{"days": 2}))
+	lane := b.s.btPort.asked.Requests.Load()
+	if lane == 0 || count()-before != lane || asked.Load()-sent != lane {
+		t.Errorf("the lane asked %d (the history saw %d more); the totals grew %d", lane, asked.Load()-sent, count()-before)
+	}
+}
+
+// variant is raw with its signature's last character changed in the bits
+// base64url carries past the last byte: another string, the same token.
+func variant(raw string) string {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	last := strings.IndexByte(alphabet, raw[len(raw)-1])
+	return raw[:len(raw)-1] + string(alphabet[last^1])
+}
+
+// A token without jti, as Forgejo's are, starts one backtest however it is
+// written: the same token with a bit flipped past its signature's last
+// byte, and another body, is 409.
+func TestBacktestTokenWithoutJTI(t *testing.T) {
+	b := btServer(t, nil, "", nil)
+	claims := idptest.Forgejo(9007199254)
+	claims["jti"] = nil
+	tok := b.fj.Token(btAudience, claims)
+	if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", tok, btBody(ruleFile, changedRules, map[string]any{"days": 3})); code != 202 {
+		t.Fatal(code, m)
+	}
+	other := variant(tok)
+	if other == tok {
+		t.Fatal("no variant")
+	}
+	if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", other, btBody(ruleFile, changedRules, map[string]any{"days": 2})); code != 409 {
+		t.Errorf("the same token written another way, another body: %d %v", code, m)
+	}
+}
+
+// The lane is busy while it runs a backtest, and keeps its share then.
+func TestBacktestLaneBusy(t *testing.T) {
+	b := btServer(t, nil, "", nil)
+	var during bool
+	laneHook = func(ledger.Backtest) { during = b.s.btPort.busy.Load() }
+	t.Cleanup(func() { laneHook = nil })
+	b.done(t, b.plain, btBody(ruleFile, changedRules, nil))
+	if !during || b.s.btPort.busy.Load() {
+		t.Errorf("busy while it ran %t, after %t", during, b.s.btPort.busy.Load())
 	}
 }

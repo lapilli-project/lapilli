@@ -141,6 +141,7 @@ trust:
     hourly: 30                   # backtests it may start in an hour
   - name: monitoring-gitlab
     issuer: https://gitlab.example.com
+    ci: gitlab                   # a GitLab of one's own isn't known by its URL
     audience: https://lapilli-ci.example.com
     claims:
       project_id: "42"
@@ -743,6 +744,51 @@ Where step 1 does otherwise than the sections above say, or says more:
 - **The Run history** shows each backtest's state, not its error, which
   may name a rule; and no pull request's number.
   `lapilli_serve_backtests_waiting` is by entry too.
+- **Incidents by their ids.** Of the incidents, the comment and the JSON
+  keep those the change catches differently, by their ids (and starts, as
+  the comment's table has them); their titles, written in a tracker, only
+  for an entry that says `incident_titles: true`, as a public
+  repository's pull request is read by anyone. The JSON leaves out each
+  side's incidents, the thresholds (`noisy_at`), the hours and the impact
+  signals (`impact_short`). Case 3's INC-43 is said by its id.
+- **The share is kept for the lane.** A share only as a ceiling left the
+  lane what the runs didn't take: under load, a third of its share, and
+  `fits` planned on what it didn't have. While the lane runs a backtest,
+  the runs' pace slows by the share (`prom.Pace.Reserve`), and the lane
+  asks at its own pace, which nothing else takes; idle, the runs have the
+  whole rate. `fits` plans on that share, which the lane is sure of.
+- **The hour before the body.** An entry's `hourly` is taken right after
+  the token, before the body is read, and given back for one refused
+  before it is queued; two bodies are read and checked at once at most,
+  past them 429.
+- **A token without `jti`** (Forgejo's) is known by the SHA-256 of its
+  payload as it was signed, not of the string sent: base64url's bits past
+  the last byte, which go-jose passes over, write one token many ways. A
+  token is verified once by its issuer's keys, then held to each entry's
+  audience and pins.
+- **Issuers.** GitHub Enterprise Cloud's issuer of an enterprise
+  (`https://token.actions.githubusercontent.com/SLUG`) and GitHub
+  Enterprise Server's (`https://HOST/_services/token`) are GitHub's. An
+  issuer known neither so nor by `ci:` must pin `sub` and the event; an
+  event pinned under any issuer is `pull_request` or `push`
+  (`merge_request_event` or `push`), never `pull_request_target`,
+  `workflow_run` or `schedule`.
+- **What a rule reads back.** Beside `for`, a range, a subquery or an
+  offset a week back at most, a subquery of 11,000 points at most, and no
+  `@` (`rules.Reach`).
+- **A pull request superseded by its token's word alone.** Only a number
+  the token names (GitHub's and Forgejo's `ref`) supersedes the backtest
+  waiting for it; one the job said (GitLab, a plain token, a `push`)
+  supersedes none. The leader takes the oldest of the entry that started
+  one least lately. One started twice whose leader stopped each time
+  (`attempts`, in 023) fails, saying so; one that panics fails. What ended
+  a day ago goes at each of the leader's rounds, the port on or not.
+- **Reads by the key.** `GET` and `DELETE` check the key first: a wrong
+  key or an unknown id is limited by the client's address, a backtest's
+  reads by its id, so guesses don't keep a job from its own.
+- **`expect` given when it is there**, however empty, as `--expect` takes an
+  empty file; read, as every expectations file is now, by the rules'
+  bounded YAML reader first.
 - **The chart.** `serve.backtest` takes the trust file from a ConfigMap
   (`trust.configMap`) and the plain tokens from Secrets (`tokens`, each
   mounted at `/var/run/lapilli/backtest/tokens/SECRET/KEY`), and has

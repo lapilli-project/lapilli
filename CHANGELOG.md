@@ -23,15 +23,19 @@
   32 characters at least. A token starts one backtest, with the body it
   came with. Prometheus-format rules alone, 50 that differ at most, each
   selector of one metric by its name; the request 4 MiB at most, read
-  only once its token verified. The lane asks through a Limiter of its
-  own, at `--backtest-share` of `--max-rate` (0.25 by default, 0.05 to
-  0.75) and within the runs' pace, so that the two never pass the rate
-  together; `--backtest-queue` (20), 3 of an entry, one of a pull
-  request, a newer commit's superseding the one waiting; an entry's
-  `hourly` from a bucket the replicas share; `--backtest-timeout` (15m),
-  one that couldn't finish in it refused before it waits, saying what
-  period would fit. The comment holds no label of a series a rule read,
-  no word of what the history answered, nothing of where it is; the log
+  only once its token verified and its entry's hour taken; a range,
+  subquery or offset a week back at most, and no `@`. While the lane runs
+  a backtest, its share of `--max-rate` (`--backtest-share`, 0.25 by
+  default, 0.05 to 0.75) is kept for it, the runs asking at the rest, so
+  that the two never pass the rate together; `--backtest-queue` (20), 3
+  of an entry, one of a pull request its token names, a newer commit's
+  superseding the one waiting; an entry's `hourly` from a bucket the
+  replicas share; `--backtest-timeout` (15m), one that couldn't finish in
+  it refused before it waits, saying what period would fit. The comment
+  holds no label of a series a rule read, no word of what the history
+  answered, nothing of where it is, and the incidents caught differently
+  by their ids, their titles only for an entry with `incident_titles:
+  true`; the log
   a line a backtest, with counts. The Run history lists each, and
   `/metrics` has `lapilli_serve_backtests_total{trust,result}` and
   `lapilli_serve_backtests_waiting{trust}`. Without `--backtest-listen`,
@@ -52,6 +56,18 @@
   (룰러 stays), and 자는 시간 오탐 in the digests, not 자는 동안 깨운 or
   헛알림. What to look at's line for no record no longer says why again,
   as the notice above it does.
+
+### Fixed
+
+- **`lapilli verdict --compare` with `--rules-select` keeping nothing on
+  one side** exited 1, `no document of rules has the labels asked for`.
+  That side is now one with no rules, as an empty directory is: the rules
+  the other holds are added, or taken away. lapilli serve's backtests take
+  it so.
+- **An expectations file is read as a rule file is** (`--expect`,
+  `--expect-before`): its values and what its aliases expand to bounded
+  before it is decoded, in time linear in it. One denser than a rule
+  file may be is refused, saying so.
 
 ## [0.60.0] - 2026-11-18
 

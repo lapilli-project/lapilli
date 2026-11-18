@@ -20,7 +20,7 @@ import (
 // ask is a backtest asked for, for the tests.
 func ask(id, trust string, pr int64, token string) BacktestAsk {
 	return BacktestAsk{Backtest: Backtest{ID: id, Trust: trust, Repository: "example/alerts", PullRequest: pr, Commit: "0123abcd", Rules: 2, Requests: 80, KeyHash: "k-" + id},
-		Body: []byte(`{"after":[]}` + id), Token: token, BodyHash: "h-" + id, Until: t0.Add(2 * time.Hour), Queue: 20, PerTrust: 3}
+		Body: []byte(`{"after":[]}` + id), Token: token, BodyHash: "h-" + id, Until: t0.Add(2 * time.Hour), Queue: 20, PerTrust: 3, Supersede: pr > 0}
 }
 
 // A backtest waits, is taken by the leader, says what it asked, and ends
@@ -157,6 +157,13 @@ func TestBacktestQueue(t *testing.T) {
 	}
 	if _, _, _, err := l.AskBacktest(ctx, ask("a3", "alerts", 4, "t3"), t0); !errors.Is(err, ErrBacktestsFull) {
 		t.Fatalf("a fourth of one entry: %v", err)
+	}
+	// A pull request's number the job said, not its token, supersedes
+	// nothing.
+	said := ask("a5", "alerts", 1, "t5")
+	said.Supersede = false
+	if _, _, sup, err := l.AskBacktest(ctx, said, t0); !errors.Is(err, ErrBacktestsFull) || sup != 0 {
+		t.Errorf("a number the job said: %d %v", sup, err)
 	}
 	// The token that was refused didn't start anything, and may ask again.
 	newer := ask("a4", "alerts", 2, "t3")
@@ -362,5 +369,80 @@ func TestMigrate023(t *testing.T) {
 	}
 	if want := schemaVersion(t); v != want || want < 23 {
 		t.Errorf("migrated to %d, want %d", v, want)
+	}
+}
+
+// A backtest started twice whose leader stopped each time isn't started a
+// third: it fails, saying so. And the next taken is of the entry that
+// started one least lately: one entry's many don't keep another's few
+// waiting.
+func TestBacktestAttemptsAndTurns(t *testing.T) {
+	ctx := context.Background()
+	l, err := openAt(ctx, place(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	if _, _, _, err := l.AskBacktest(ctx, ask("crash", "alerts", 0, ""), t0); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 2 {
+		if b, _, ok, err := l.StartBacktest(ctx, t0.Add(time.Duration(i)*time.Minute)); err != nil || !ok || b.ID != "crash" {
+			t.Fatalf("start %d: %+v %t %v", i+1, b, ok, err)
+		}
+	}
+	if b, _, ok, err := l.StartBacktest(ctx, t0.Add(3*time.Minute)); err != nil || ok {
+		t.Fatalf("a third start: %+v %t %v", b, ok, err)
+	}
+	if c, _, _ := l.Backtest(ctx, "crash"); c.State != BacktestFailed || c.Error != BacktestCrashed {
+		t.Errorf("after two: %+v", c)
+	}
+	for i := range 3 {
+		a := ask(fmt.Sprint("a", i), "many", 0, "")
+		if _, _, _, err := l.AskBacktest(ctx, a, t0.Add(time.Duration(10+i)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, _, err := l.AskBacktest(ctx, ask("b0", "few", 0, ""), t0.Add(20*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for i := range 4 {
+		b, _, ok, err := l.StartBacktest(ctx, t0.Add(time.Duration(30+i)*time.Minute))
+		if err != nil || !ok {
+			t.Fatal(ok, err)
+		}
+		order = append(order, b.ID)
+		if err := l.EndBacktest(ctx, b.ID, BacktestDone, "", 0, nil, t0.Add(time.Duration(30+i)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !slices.Equal(order, []string{"a0", "b0", "a1", "a2"}) {
+		t.Errorf("taken in the order %v", order)
+	}
+}
+
+// PruneBacktests lets go of what ended a day ago, as the leader's rounds
+// do, whether or not the port is on.
+func TestPruneBacktests(t *testing.T) {
+	ctx := context.Background()
+	l, err := openAt(ctx, place(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	if err := l.PruneBacktests(ctx, t0); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := l.AskBacktest(ctx, ask("old", "alerts", 0, "jti"), t0); err != nil {
+		t.Fatal(err)
+	}
+	l.StartBacktest(ctx, t0)
+	l.EndBacktest(ctx, "old", BacktestDone, "", 0, nil, t0)
+	if err := l.PruneBacktests(ctx, t0.Add(25*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := l.Backtest(ctx, "old"); ok {
+		t.Error("a backtest ended a day ago is kept")
 	}
 }

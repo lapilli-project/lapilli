@@ -589,43 +589,66 @@ trust:
   pair, never `none` or HMAC, and an RSA key of 2048 to 4096 bits; `aud`
   the entry's `audience` and nothing beside it; `exp` and `nbf`; `iat`
   within the last hour, whatever `exp` says; each claim pinned exactly,
-  a string as it is, an integer by its decimal. `jti`, or the token's hash,
-  starts one backtest, with the body it first came with: sent again with
-  it, the same backtest (200, without its key); with another, 409.
+  a string as it is, an integer by its decimal. `jti`, or with none (as
+  Forgejo's) the hash of what it says as it was signed, never how it was
+  written, starts one backtest, with the body it first came with: sent
+  again with it, the same backtest (200, without its key); with another,
+  409.
 - **The audience** is required, and should be the port's URL. GitHub's
   default (the repository owner's URL), one at the issuer's own origin,
   `sigstore`, and the audiences of AWS STS, Microsoft Entra's token
   exchange and Google Cloud's workload identity federation are refused:
   a token made for one of them could be sent here, or one made here sent
   there.
-- **Pins.** For GitHub Actions (`ci: github`, known from its issuer),
-  Forgejo Actions (`ci: forgejo`, known from an issuer ending in
-  `/api/actions`) and GitLab CI (`ci: gitlab`), the entry must pin the
+- **Pins.** For GitHub Actions (`ci: github`, known from its issuer, an
+  enterprise's on GitHub Enterprise Cloud, `.../<slug>`, and GitHub
+  Enterprise Server's, `https://HOST/_services/token`), Forgejo Actions 16
+  or later, whose tokens carry `repository_id` (`ci: forgejo`, known from
+  an issuer ending in `/api/actions`), and GitLab CI (`ci: gitlab`, known
+  for `https://gitlab.com`, given for a GitLab of one's own), the entry must pin the
   repository's id (`repository_id`, or GitLab's `project_id`), which may be
   a list, one of them enough; and the event, `event_name` (GitLab's
   `pipeline_source`), to `pull_request` or `push` (`merge_request_event`
   or `push`): another can run a fork's pull request in the repository's
   own context. Every other pin is one value, `repository_owner_id` among
-  them, which narrows, never replaces, the repository's. Another issuer's
-  entry pins `sub` or another claim, one value each. A fork's pull request
-  is never backtested: GitHub gives a fork's `pull_request` run no ID
-  token, and GitLab names a fork's merge request by its own project.
+  them, which narrows, never replaces, the repository's. An issuer known
+  neither by its URL nor by `ci:` must pin `sub` and the event, one value
+  each, or serve doesn't start; and under every issuer, an event pinned
+  is one of those, never `pull_request_target`, `workflow_run` or
+  `schedule`.
+- **Forks.** A fork's pull request isn't backtested, by the pins and what
+  each CI gives a fork's run. GitHub gives a fork's `pull_request` run a
+  read-only token and no ID token, unless, on a private repository, "Send
+  write tokens to workflows from pull requests" is on: then a fork's run
+  gets one no claim tells from the repository's own. Keep that setting
+  off; a workflow's `if:` keeps no one out, as the pull request can
+  change it. GitLab names a fork's merge request by the fork's own
+  project, which the entry doesn't pin. Forgejo's documentation doesn't
+  say whether a fork's pull request gets an ID token: keep OpenID Connect
+  from forks' runs there, as from secrets.
 - **A plain token**, for a CI with no ID token (Azure Pipelines, Gitea,
   Jenkins), is read for each request, and refused while it is the same as
   another token serve takes. It is a long-lived secret: whoever holds it
   backtests as that entry until it is rotated.
 
 The replica that leads runs the queue, one backtest at a time, beside the
-runs and not in them. It asks the history through a lane of its own, at
-`--backtest-share` of `--max-rate` (a quarter by default) and within the
-runs' pace too, so that together they never pass it, and the runs always
-have the rest; without `--max-rate`, a quarter of `--parallel` at once,
+runs and not in them, the oldest of the entry that started one least
+lately first. While it runs one, its share of `--max-rate`
+(`--backtest-share`, a quarter by default) is kept for it: the runs ask
+at the rest, and the lane at its share, which nothing else takes, so the
+two never pass the rate together; once it runs none, the runs have the
+whole rate again. Without `--max-rate`, a quarter of `--parallel` at once,
 one at least. A backtest that couldn't finish within `--backtest-timeout`
-at the lane's rate is refused before it waits, saying how many requests it
-needs and what period would fit. 20 wait at most (`--backtest-queue`), 3
-of an entry, one of a pull request (a newer commit's takes the place of the
-one waiting); past them, and past an entry's `hourly`, 429 with
-`Retry-After`. With replicas, the queue and each entry's hour are the
+at its share is refused before it waits, saying how many requests it needs
+and what period would fit. An entry's `hourly` is taken before the body
+is read, and given back for one refused; two bodies are read at once at
+most, whoever sends them. 20 wait at most (`--backtest-queue`), 3 of an
+entry, one of a pull request the token's `ref` names (a newer commit's
+takes the place of the one waiting; a number the job said takes none's);
+past them, 429 with `Retry-After`. One the leader stopped while running is
+run again by the next, twice at most. A job reads its backtest by its key:
+one that guesses is limited by its address, and can't keep the job from
+reading its own. With replicas, the queue and each entry's hour are the
 ledger's: any replica takes a backtest and answers for it.
 
 What the pull request's PromQL can do: it runs as range queries, with
@@ -634,13 +657,22 @@ time in the firings the comment says. Give serve's history credential what
 the rules need and no more. The port takes rules in Prometheus's format
 alone; 50 that differ at most, a `for` or `keep_firing_for` of 48 hours and
 a group interval of an hour at most; each selector one metric's, by its
-name (`{job="api"}` and `{__name__=~"..."}` are refused); each range query
-with a timeout of a minute; days 1 to 14, and the entry's `days`.
+name (`{job="api"}` and `{__name__=~"..."}` are refused); a range, a
+subquery or an offset a week back at most, a subquery of 11,000 points at
+most, and no `@`; each range query with a timeout of a minute; days 1 to
+14, and the entry's `days`. What it learns comes a bit at a time, as a rule
+fires or doesn't: an entry's `hourly` is what bounds how fast. Keep it as
+low as the pull requests need; a day's cap, of the rules that differ
+times the backtests, is the `hourly` times 24 times 50 at most.
 
 The comment's heading says lapilli serve's record judged it. It holds the
 rules' names and labels as the pull request wrote them, the counts, and
-the incidents' ids and titles: no label of a series a rule read, no word
-of what the history answered, nothing of where it is. The Run history page
+the incidents the change catches differently, by their ids: their titles,
+written in a tracker, only for an entry that says `incident_titles:
+true`. No label of a series a rule read, no word of what the history
+answered, nothing of where it is; the JSON leaves out each side's
+incidents, the thresholds and hours it was judged by, and the impact
+signals. The Run history page
 lists each backtest (when, the entry, the repository, the rules that
 differ, the requests, how long, how it ended; no rule's name), and
 `/metrics` has `lapilli_serve_backtests_total{trust,result}` and

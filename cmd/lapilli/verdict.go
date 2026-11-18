@@ -1342,7 +1342,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	if len(f.compare) > 0 {
 		for _, p := range f.compare {
 			rs, err := loadRules(f, p)
-			if err != nil && !errors.Is(err, rules.ErrNoneInDir) {
+			// None there, or none the selector keeps: a side with no
+			// rules, as lapilli serve's backtests take it.
+			if err != nil && !errors.Is(err, rules.ErrNoneInDir) && !errors.Is(err, rules.ErrNoneSelected) {
 				return fail(err)
 			}
 			f.replaying().Apply(rs)
@@ -2189,7 +2191,7 @@ func loadVersions(f *verdictFlags) ([]replay.Version, error) {
 			i = len(versions) - 1
 		}
 		rs, err := loadRules(f, rf.path)
-		if err != nil && !(len(f.compare) > 0 && errors.Is(err, rules.ErrNoneInDir)) {
+		if err != nil && !(len(f.compare) > 0 && (errors.Is(err, rules.ErrNoneInDir) || errors.Is(err, rules.ErrNoneSelected))) {
 			return nil, err
 		}
 		f.replaying().Apply(rs)

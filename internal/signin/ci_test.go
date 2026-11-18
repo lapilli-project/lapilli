@@ -1,6 +1,7 @@
 package signin
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -11,7 +12,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -238,5 +241,76 @@ func TestClaimString(t *testing.T) {
 		if got, ok := ClaimString(json.RawMessage(raw)); ok {
 			t.Errorf("%s matched as %q", raw, got)
 		}
+	}
+}
+
+// samePayload is raw with the last character of its signature changed in
+// the bits base64url carries past the last byte: another string, which a
+// lax decoder reads as the same token.
+func samePayload(t *testing.T, raw string) string {
+	t.Helper()
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	i := strings.LastIndexByte(raw, '.')
+	sig := raw[i+1:]
+	last := strings.IndexByte(alphabet, sig[len(sig)-1])
+	// 256 bytes of RS256 are 342 characters: the last carries 2 bits of
+	// the signature, and 4 passed over.
+	other := raw[:len(raw)-1] + string(alphabet[last^1])
+	if other == raw {
+		t.Fatal("no variant")
+	}
+	return other
+}
+
+// A token written another way, in the bits a decoder passes over, verifies
+// as the same token, with the same payload: what a token is known by, once
+// it has no jti, is its payload, not how it was written.
+func TestCITokenPayload(t *testing.T) {
+	idp, ci, _ := newCI(t, "/api/actions")
+	raw := idp.Token(ciAudience, map[string]any{"jti": nil, "repository_id": 7})
+	a, err := ci.Verify(context.Background(), raw, ciAudience)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := ci.Verify(context.Background(), samePayload(t, raw), ciAudience)
+	if err != nil {
+		t.Skipf("this go-jose refuses the variant: %v", err)
+	}
+	if !bytes.Equal(a.Payload, b.Payload) || len(a.Payload) == 0 || a.Claims["jti"] != nil {
+		t.Errorf("payloads %q and %q", a.Payload, b.Payload)
+	}
+}
+
+// One request asks the issuer for its discovery document; another, while
+// it is being asked, doesn't wait on it, and asks nothing.
+func TestCIDiscoveryAlone(t *testing.T) {
+	var asked atomic.Int64
+	hold, held := make(chan struct{}), make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if asked.Add(1) == 1 {
+			close(held)
+			<-hold
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	clk := &ciClock{at: time.Now()}
+	ci := &CI{Issuer: srv.URL, Client: Client(nil), Now: clk.now}
+	first := make(chan error)
+	go func() {
+		_, err := ci.Verify(context.Background(), "x.y.z", ciAudience)
+		first <- err
+	}()
+	<-held
+	_, err := ci.Verify(context.Background(), "x.y.z", ciAudience)
+	if !errors.Is(err, ErrUnreachable) || !strings.Contains(err.Error(), "being asked") {
+		t.Errorf("while being asked: %v", err)
+	}
+	close(hold)
+	if err := <-first; !errors.Is(err, ErrUnreachable) {
+		t.Errorf("the first: %v", err)
+	}
+	if n := asked.Load(); n != 1 {
+		t.Errorf("asked %d times", n)
 	}
 }

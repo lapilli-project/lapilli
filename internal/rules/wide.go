@@ -1,6 +1,10 @@
 package rules
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+	"time"
+)
 
 // Wide is the first series selector of a PromQL expression that reads past
 // one metric: matchers with no metric's name ({job="api"}), or a name
@@ -53,4 +57,74 @@ func unquoteLabel(label string) (string, bool) {
 		return v, !ok
 	}
 	return label, false
+}
+
+// Reach says the first thing an expression reads past where a pull
+// request's rule backtested through lapilli serve may: a range, or a
+// subquery's, past most; a subquery's step that makes it more than points
+// points; an offset past offset, either way; an @, which reads a time of
+// its own choosing. "" when there is none. A range written so that
+// Lapilli doesn't read it is said as itself.
+func Reach(expr string, most, offset time.Duration, points int) string {
+	rs, err := Ranges(expr)
+	if err != nil {
+		return "an expression that doesn't read"
+	}
+	for _, r := range rs {
+		span, step, sub := strings.Cut(r, ":")
+		d, ok := readRange(strings.TrimSpace(span))
+		switch {
+		case !ok:
+			return "[" + r + "], a range Lapilli doesn't read"
+		case d > most:
+			return "[" + r + "], a range past " + promDuration(most)
+		case sub && strings.TrimSpace(step) != "":
+			s, ok := readRange(strings.TrimSpace(step))
+			if !ok || s <= 0 || int64(d/s) > int64(points) {
+				return "[" + r + "], a subquery of more than " + strconv.Itoa(points) + " points"
+			}
+		}
+	}
+	// What follows the selectors and subqueries, outside quoted strings.
+	var quote byte
+	for i := 0; i < len(expr); i++ {
+		c := expr[i]
+		switch {
+		case quote != 0 && c == '\\' && quote != '`':
+			i++
+		case quote != 0 && c == quote:
+			quote = 0
+		case quote != 0:
+		case c == '"' || c == '\'' || c == '`':
+			quote = c
+		case c == '@':
+			return "@, which reads a time of its own"
+		case (c == 'o' || c == 'O') && (i == 0 || !isWordByte(expr[i-1])) && len(expr) >= i+6 && strings.EqualFold(expr[i:i+6], "offset") &&
+			(len(expr) == i+6 || !isWordByte(expr[i+6])):
+			j := i + 6
+			for j < len(expr) && (expr[j] == ' ' || expr[j] == '\t' || expr[j] == '\n' || expr[j] == '\r') {
+				j++
+			}
+			k := j
+			if k < len(expr) && (expr[k] == '-' || expr[k] == '+') {
+				k++
+			}
+			end := k
+			for end < len(expr) && (isWordByte(expr[end]) || expr[end] == '.') {
+				end++
+			}
+			if end == k {
+				continue // a label or a function named so
+			}
+			d, ok := readRange(expr[k:end])
+			if !ok {
+				return "offset " + expr[j:end] + ", which Lapilli doesn't read"
+			}
+			if d > offset {
+				return "offset " + expr[j:end] + ", past " + promDuration(offset)
+			}
+			i = end - 1
+		}
+	}
+	return ""
 }

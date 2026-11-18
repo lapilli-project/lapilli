@@ -287,15 +287,23 @@ func (s *Server) historyMetrics(w io.Writer) {
 	}
 	loads := map[string]prom.Load{}
 	for _, api := range apis {
-		a, b := s.asked.Of(api), s.othersAsked.Of(api)
-		for k, v := range b.Answers {
-			a.Answers[k] += v
+		a := s.asked.Of(api)
+		more := []prom.Load{s.othersAsked.Of(api)}
+		if s.btPort != nil {
+			// The pull request backtests' lane, counted apart from the
+			// runs: in the totals too.
+			more = append(more, s.btPort.asked.Of(api))
 		}
-		a.TooMany += b.TooMany
-		a.Retries += b.Retries
-		a.Yields += b.Yields
-		a.Waited += b.Waited
-		a.Paced += b.Paced
+		for _, b := range more {
+			for k, v := range b.Answers {
+				a.Answers[k] += v
+			}
+			a.TooMany += b.TooMany
+			a.Retries += b.Retries
+			a.Yields += b.Yields
+			a.Waited += b.Waited
+			a.Paced += b.Paced
+		}
 		loads[api] = a
 	}
 	var b strings.Builder

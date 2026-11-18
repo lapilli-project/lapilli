@@ -36,7 +36,14 @@ const (
 	// ended going first; backtestKeep how long one is kept once it ended.
 	backtestsKept = 200
 	backtestKeep  = 24 * time.Hour
+	// backtestAttempts is how often a backtest is started at most: one
+	// whose leader stopped while it ran is put back to wait, once.
+	backtestAttempts = 2
 )
+
+// BacktestCrashed is why a backtest failed that its leader stopped while
+// running, twice.
+const BacktestCrashed = "lapilli serve stopped twice while it ran it: it isn't run again"
 
 // Backtest is a backtest asked for, as kept.
 type Backtest struct {
@@ -70,6 +77,10 @@ type BacktestAsk struct {
 	Until           time.Time
 	// Queue is how many may wait in all, PerTrust how many of one entry.
 	Queue, PerTrust int
+	// Supersede says the pull request's number is the token's own (its
+	// ref): one waiting for the same entry, repository and pull request
+	// is superseded. A number the job said supersedes nothing.
+	Supersede bool
 }
 
 var (
@@ -124,7 +135,7 @@ func (l *Ledger) AskBacktest(ctx context.Context, a BacktestAsk, now time.Time) 
 				return err
 			}
 		}
-		if a.PullRequest > 0 {
+		if a.Supersede && a.PullRequest > 0 {
 			res, err := t.ExecContext(t.ctx, `UPDATE backtests SET state = ?, ended_at = ?, body = NULL
 				WHERE trust = ? AND repository = ? AND pull_request = ? AND state = ?`,
 				BacktestSuperseded, now.Unix(), a.Trust, a.Repository, a.PullRequest, BacktestWaiting)
@@ -158,6 +169,17 @@ func (l *Ledger) AskBacktest(ctx context.Context, a BacktestAsk, now time.Time) 
 		return Backtest{}, false, 0, err
 	}
 	return b, again, superseded, nil
+}
+
+// PruneBacktests lets go, at now, of what pruneBacktests does, as the
+// leader's every round does whether or not the port is on: a ledger with
+// none kept isn't written to.
+func (l *Ledger) PruneBacktests(ctx context.Context, now time.Time) error {
+	var some bool
+	if err := l.r.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM backtests) OR EXISTS (SELECT 1 FROM backtest_tokens)").Scan(&some); err != nil || !some {
+		return err
+	}
+	return l.writeAside(ctx, func(t *txn) error { return pruneBacktests(t, now) })
 }
 
 // pruneBacktests lets go of the tokens past their time, the backtests
@@ -285,15 +307,24 @@ func (l *Ledger) StartBacktest(ctx context.Context, now time.Time) (b Backtest, 
 		if _, err := t.ExecContext(t.ctx, "UPDATE backtests SET state = ?, started_at = 0, asked = 0 WHERE state = ?", BacktestWaiting, BacktestRunning); err != nil {
 			return err
 		}
+		// Started twice and stopped with its leader each time: a third
+		// would likely stop the next. Failed, its request let go.
+		if _, err := t.ExecContext(t.ctx, "UPDATE backtests SET state = ?, error = ?, ended_at = ?, body = NULL WHERE state = ? AND attempts >= ?",
+			BacktestFailed, BacktestCrashed, now.Unix(), BacktestWaiting, backtestAttempts); err != nil {
+			return err
+		}
 		var id string
-		err := t.QueryRowContext(t.ctx, "SELECT id, body FROM backtests WHERE state = ? ORDER BY n LIMIT 1", BacktestWaiting).Scan(&id, &raw)
+		// The oldest of the entry that started one least lately: one
+		// entry's many don't keep another's few waiting.
+		err := t.QueryRowContext(t.ctx, `SELECT id, body FROM backtests b WHERE state = ?
+			ORDER BY coalesce((SELECT max(s.started_at) FROM backtests s WHERE s.trust = b.trust), 0), n LIMIT 1`, BacktestWaiting).Scan(&id, &raw)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		if _, err := t.ExecContext(t.ctx, "UPDATE backtests SET state = ?, started_at = ? WHERE id = ?", BacktestRunning, now.Unix(), id); err != nil {
+		if _, err := t.ExecContext(t.ctx, "UPDATE backtests SET state = ?, started_at = ?, attempts = attempts + 1 WHERE id = ?", BacktestRunning, now.Unix(), id); err != nil {
 			return err
 		}
 		ok = true

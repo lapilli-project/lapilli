@@ -1216,7 +1216,10 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 		err = fmt.Errorf("--backtest-listen replays a pull request's rules against the history: add --prometheus URL or --gcp-project ID")
 	}
 	if err == nil && trustFile != "" {
-		cfg.Trust, err = serve.ReadTrust(trustFile, []string{cfg.IncidentsToken, cfg.FiringsToken, cfg.NotifyToken, cfg.TasksToken, cfg.ChangesToken}, secretsLater)
+		// Every token and secret serve takes or sends: none may be a plain
+		// entry's too.
+		cfg.Trust, err = serve.ReadTrust(trustFile, []string{cfg.IncidentsToken, cfg.FiringsToken, cfg.NotifyToken, cfg.TasksToken, cfg.ChangesToken,
+			cfg.ChangesGrafanaToken, cfg.ChangesRulerToken, cfg.NotifyGrafanaSecret, f.grafanaTk, f.rulerTk, f.lokiTk, f.tokenFile}, secretsLater)
 	}
 	if err == nil {
 		cfg.Marks, err = serve.ParseMarks(marks, markMatches)

@@ -30,9 +30,8 @@ type Limiter struct {
 	// cut is when limit was last halved, changed when it last changed.
 	cut, changed time.Time
 	// pace spaces the requests out, nil for no rate; several Limiters may
-	// share one. also, when set, spaces them too: a request goes once both
-	// have its turn (AlsoPaced).
-	pace, also *Pace
+	// share one.
+	pace *Pace
 	// parent, when set, holds a place for each request in flight too.
 	parent *Limiter
 	// fair, for a cap (NewCap), shares its places among its children.
@@ -81,6 +80,37 @@ type Pace struct {
 	// go.
 	every time.Duration
 	next  time.Time
+	// reserved is the share of the rate kept for another Pace while held
+	// says it has work (Reserve).
+	reserved float64
+	held     func() bool
+}
+
+// Reserve keeps share of p's rate for another Pace, of that share of it
+// (Share), while held says that one has work: p's turns come then
+// 1/(1-share) as far apart, so that the two ask no more than the rate
+// together, and the other has its share whatever p's askers do; and as
+// they did once it has none. Pull request backtests' lane has its quarter
+// of --max-rate so, and the runs the rest. It returns p.
+func (p *Pace) Reserve(share float64, held func() bool) *Pace {
+	if p == nil || !(share > 0 && share < 1) {
+		return p
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.reserved, p.held = share, held
+	return p
+}
+
+// Reserved is the share of p's rate Reserve keeps for another, 0 for
+// none.
+func (p *Pace) Reserved() float64 {
+	if p == nil {
+		return 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.reserved
 }
 
 const (
@@ -122,7 +152,7 @@ func (p *Pace) Rate() float64 {
 }
 
 // Share is a Pace of f of p's rate, nil for a nil Pace or an f of 0 or
-// less: the lane's own pace, which AlsoPaced holds to p too.
+// less: the lane's own pace, whose share p keeps for it (Reserve).
 func (p *Pace) Share(f float64) *Pace {
 	if p == nil || !(f > 0) {
 		return nil
@@ -141,23 +171,8 @@ func NewLimiterPaced(p *Pace) *Limiter {
 	return &Limiter{limit: maxInFlight, most: maxInFlight, pace: p, now: func() time.Time { return clock() }}
 }
 
-// AlsoPaced spaces l's requests by p too, besides its own pace: a request
-// goes once each has its turn, and takes a turn of each. A Limiter paced by
-// a share of a rate and by the whole rate that others are paced by asks no
-// more than its share, and, with the others, no more than the rate: so
-// pull request backtests are held to their share of --max-rate, and the
-// runs keep the rest. It returns l.
-func (l *Limiter) AlsoPaced(p *Pace) *Limiter {
-	l.also = p
-	return l
-}
-
 // Pace is the pace l's requests are spaced by, nil for none.
 func (l *Limiter) Pace() *Pace { return l.pace }
-
-// AlsoPace is the pace AlsoPaced spaces l's requests by too, nil for
-// none.
-func (l *Limiter) AlsoPace() *Pace { return l.also }
 
 // NewCap is a Limiter of n requests in flight at most, and no rate, which
 // no answer changes: a parent (Within) for the Limiters of the data sources
@@ -313,7 +328,7 @@ func (l *Limiter) take(ctx context.Context) error {
 		}
 		if !at.After(now) {
 			var ok bool
-			if at, ok = takeBoth(now, l.pace, l.also); ok {
+			if at, ok = l.pace.take(now); ok {
 				l.mu.Unlock()
 				return l.inParent(ctx)
 			}
@@ -460,37 +475,12 @@ func (p *Pace) take(now time.Time) (time.Time, bool) {
 	if p.next.After(now) {
 		return p.next, false
 	}
-	p.next = now.Add(p.every)
+	every := p.every
+	if p.reserved > 0 && p.held != nil && p.held() {
+		every = time.Duration(float64(every) / (1 - p.reserved))
+	}
+	p.next = now.Add(every)
 	return now, true
-}
-
-// takeBoth takes the next turn of a and of b, either of them nil for no
-// pace, once both have come by now; otherwise it takes neither, and says
-// when the later of them comes. a is locked before b, and a Limiter with
-// one pace locks it alone, so no two lock them in the other order.
-func takeBoth(now time.Time, a, b *Pace) (time.Time, bool) {
-	switch {
-	case b == nil || b == a:
-		return a.take(now)
-	case a == nil:
-		return b.take(now)
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if at := later(a.next, b.next); at.After(now) {
-		return at, false
-	}
-	a.next, b.next = now.Add(a.every), now.Add(b.every)
-	return now, true
-}
-
-func later(a, b time.Time) time.Time {
-	if a.After(b) {
-		return a
-	}
-	return b
 }
 
 // recover lets one more in at once for each recoverEvery since the limit

@@ -13,7 +13,9 @@
 -- rules that differ, on either side; requests those it was counted to ask
 -- of the history before it was queued, asked those it asked. key_hash is
 -- the SHA-256 of the key it is read by, in hex. cancel is 1 once its job
--- cancelled it while it ran. body is the request as it was sent, gzipped,
+-- cancelled it while it ran; attempts how often it was started, a leader
+-- that stopped while it ran (a restart, a crash) putting it back to wait:
+-- past twice, it fails. body is the request as it was sent, gzipped,
 -- until it ends; result what it came to (its Markdown and JSON), gzipped,
 -- once done; error why it failed, in words of Lapilli's own.
 CREATE TABLE backtests (
@@ -32,6 +34,7 @@ CREATE TABLE backtests (
 	asked INTEGER NOT NULL DEFAULT 0,
 	key_hash TEXT NOT NULL,
 	cancel INTEGER NOT NULL DEFAULT 0,
+	attempts INTEGER NOT NULL DEFAULT 0,
 	body BLOB,
 	result BLOB,
 	error TEXT NOT NULL DEFAULT ''

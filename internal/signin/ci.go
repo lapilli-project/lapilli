@@ -37,6 +37,9 @@ type CI struct {
 	keys   *Keys
 	tried  time.Time
 	failed error
+	// asking says the discovery document is being asked for: one at a
+	// time, and no one waits for it.
+	asking bool
 }
 
 const (
@@ -59,8 +62,13 @@ const (
 // JSON it was written as, and when it was issued and expires.
 type CIToken struct {
 	Claims   map[string]json.RawMessage
+	Audience []string
 	IssuedAt time.Time
 	Expiry   time.Time
+	// Payload is the claims as they were signed, decoded: one token
+	// written in several ways (base64url's bits past the last byte, which
+	// a decoder passes over) has one payload.
+	Payload []byte
 }
 
 // ErrCIToken is a token that isn't one a CI's issuer gave for this
@@ -71,11 +79,30 @@ var ErrCIToken = errors.New("not an ID token taken here")
 // says. An error wraps ErrUnreachable or ErrMisconfigured when the issuer
 // couldn't be asked or answered as it shouldn't, ErrCIToken otherwise.
 func (c *CI) Verify(ctx context.Context, raw, audience string) (CIToken, error) {
+	t, err := c.VerifyToken(ctx, raw)
+	if err != nil {
+		return t, err
+	}
+	if !t.For(audience) {
+		return CIToken{}, fmt.Errorf("%w: its audience isn't the one given", ErrCIToken)
+	}
+	return t, nil
+}
+
+// For reports whether the token was made for audience alone.
+func (t CIToken) For(audience string) bool {
+	return len(t.Audience) == 1 && t.Audience[0] == audience
+}
+
+// VerifyToken checks raw as Verify does, but for its audience, which it
+// gives for its caller to hold to its own (For): one check of the
+// signature for every entry of the issuer's.
+func (c *CI) VerifyToken(ctx context.Context, raw string) (CIToken, error) {
 	keys, err := c.keysOf(ctx)
 	if err != nil {
 		return CIToken{}, err
 	}
-	v := oidc.NewVerifier(c.Issuer, keys, &oidc.Config{ClientID: audience, SupportedSigningAlgs: keys.Algs(), Now: c.Now})
+	v := oidc.NewVerifier(c.Issuer, keys, &oidc.Config{SkipClientIDCheck: true, SupportedSigningAlgs: keys.Algs(), Now: c.Now})
 	t, err := v.Verify(ctx, raw)
 	if err != nil {
 		return CIToken{}, fmt.Errorf("%w: %v", ErrCIToken, err)
@@ -84,8 +111,12 @@ func (c *CI) Verify(ctx context.Context, raw, audience string) (CIToken, error) 
 		// Made for several services, any of which could send it on.
 		return CIToken{}, fmt.Errorf("%w: it names %d audiences, not one", ErrCIToken, len(t.Audience))
 	}
+	var payload json.RawMessage
+	if err := t.Claims(&payload); err != nil {
+		return CIToken{}, fmt.Errorf("%w: its claims: %v", ErrCIToken, err)
+	}
 	var claims map[string]json.RawMessage
-	if err := t.Claims(&claims); err != nil {
+	if err := json.Unmarshal(payload, &claims); err != nil {
 		return CIToken{}, fmt.Errorf("%w: its claims: %v", ErrCIToken, err)
 	}
 	iat, ok := ClaimString(claims["iat"])
@@ -105,7 +136,7 @@ func (c *CI) Verify(ctx context.Context, raw, audience string) (CIToken, error) 
 	case now.Sub(at) > ciMaxAge:
 		return CIToken{}, fmt.Errorf("%w: it was issued more than an hour ago", ErrCIToken)
 	}
-	return CIToken{Claims: claims, IssuedAt: at, Expiry: t.Expiry}, nil
+	return CIToken{Claims: claims, Audience: t.Audience, IssuedAt: at, Expiry: t.Expiry, Payload: payload}, nil
 }
 
 // Discover asks the issuer for its discovery document now, as at start.
@@ -126,17 +157,29 @@ func (c *CI) now() time.Time {
 // failure given meanwhile.
 func (c *CI) keysOf(ctx context.Context) (*Keys, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.keys != nil {
-		return c.keys, nil
+	switch {
+	case c.keys != nil:
+		k := c.keys
+		c.mu.Unlock()
+		return k, nil
+	case c.asking:
+		// Asked by another request: none waits on it, the lock not held
+		// across the fetch.
+		c.mu.Unlock()
+		return nil, fmt.Errorf("%w: its discovery document is being asked for: try again in a moment", ErrUnreachable)
+	case !c.tried.IsZero() && c.now().Sub(c.tried) < ciDiscoverRetry:
+		err := c.failed
+		c.mu.Unlock()
+		return nil, err
 	}
-	if !c.tried.IsZero() && c.now().Sub(c.tried) < ciDiscoverRetry {
-		return nil, c.failed
-	}
-	c.tried = c.now()
+	c.tried, c.asking = c.now(), true
+	c.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fetchTimeout)
 	defer cancel()
 	k, err := c.discover(ctx)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.asking = false
 	if err != nil {
 		c.failed = err
 		return nil, err
