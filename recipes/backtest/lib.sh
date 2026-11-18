@@ -127,9 +127,14 @@
 #                    the audience to ask the CI for an ID token for, where
 #                    the host's script asks (github.sh, and gitea.sh in
 #                    Forgejo Actions: ACTIONS_ID_TOKEN_REQUEST_URL), as the
-#                    trust file names it: the port's URL (the job's log
-#                    says when it isn't LAPILLI_SERVE), never the CI's
-#                    default nor a cloud's, which are refused
+#                    trust file names it: the port's URL, LAPILLI_SERVE's
+#                    (another is refused, unless SERVE_AUDIENCE_ANY=1),
+#                    never the CI's default nor a cloud's, which are
+#                    refused whatever SERVE_AUDIENCE_ANY says
+#   SERVE_AUDIENCE_ANY
+#                    1: LAPILLI_SERVE_AUDIENCE may be other than
+#                    LAPILLI_SERVE's URL, for a trust file whose audience
+#                    is another, the job's log saying so
 #                    (sts.amazonaws.com, api://AzureADTokenExchange,
 #                    //iam.googleapis.com/..., https://github.com/...):
 #                    other services take a token for those. In GitHub
@@ -348,6 +353,7 @@ if [ -n "${LAPILLI_SERVE:-}" ]; then
   done
 else
   for v in "SERVE_WAIT ${SERVE_WAIT:-}" "SERVE_POLL ${SERVE_POLL:-}" "SERVE_RETRY_MIN ${SERVE_RETRY_MIN:-}" "LAPILLI_SERVE_AUDIENCE ${LAPILLI_SERVE_AUDIENCE:-}" \
+    "SERVE_AUDIENCE_ANY ${SERVE_AUDIENCE_ANY:-}" \
     "LAPILLI_SERVE_TOKEN_FILE ${LAPILLI_SERVE_TOKEN_FILE:-}" "LAPILLI_ID_TOKEN ${LAPILLI_ID_TOKEN:+x}"; do
     if [ -n "${v#* }" ]; then
       say "${v%% *} is for a backtest through lapilli serve: give LAPILLI_SERVE, its backtest port, too"
@@ -499,8 +505,19 @@ if [ -n "${LAPILLI_SERVE:-}" ]; then
         exit 1
         ;;
     esac
+    # The port's own URL alone, unless SERVE_AUDIENCE_ANY=1 says the trust
+    # file names another: a list of what others take is never whole (a
+    # registry's, an enterprise's, another cloud's region).
+    case ${SERVE_AUDIENCE_ANY:-} in
+      '' | 1) ;;
+      *) say "SERVE_AUDIENCE_ANY ${SERVE_AUDIENCE_ANY}: want 1, to ask for an audience other than LAPILLI_SERVE's URL"; exit 1 ;;
+    esac
     if [ "${LAPILLI_SERVE_AUDIENCE%/}" != "$serve" ]; then
-      say "LAPILLI_SERVE_AUDIENCE $LAPILLI_SERVE_AUDIENCE isn't LAPILLI_SERVE, $serve, where the token goes: an audience of its own, the port's URL, is one no other service takes"
+      if [ "${SERVE_AUDIENCE_ANY:-}" != 1 ]; then
+        say "LAPILLI_SERVE_AUDIENCE $LAPILLI_SERVE_AUDIENCE isn't LAPILLI_SERVE, $serve, where the token goes: give the port's URL, an audience no other service takes, or SERVE_AUDIENCE_ANY=1 for a trust file that names another"
+        exit 1
+      fi
+      say "LAPILLI_SERVE_AUDIENCE $LAPILLI_SERVE_AUDIENCE isn't LAPILLI_SERVE, $serve, where the token goes (SERVE_AUDIENCE_ANY=1)"
     fi
     token_from=actions
   fi

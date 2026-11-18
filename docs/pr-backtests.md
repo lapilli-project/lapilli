@@ -198,7 +198,7 @@ permissions:
   id-token: write
 jobs:
   backtest:
-    if: github.event.pull_request.head.repo.full_name == github.repository # skips a fork's run; serve's pins are what keep it out
+    if: github.event.pull_request.head.repo.full_name == github.repository # skips a fork's run; GitHub gives one no ID token
     runs-on: ubuntu-latest # needs no access to the metrics
     steps:
       - uses: actions/checkout@v4
@@ -212,10 +212,12 @@ jobs:
 ```
 
 The `if:` saves a fork's run the job; it keeps no one out, as the pull
-request can change it. What keeps a fork out is the trust entry's pins and
-GitHub giving a fork's `pull_request` run no ID token, unless, on a
-private repository, "Send write tokens to workflows from pull requests" is
-on: keep that setting off ([serve.md](serve.md#pull-request-backtests)).
+request can change it. What keeps a fork out is GitHub giving a fork's
+`pull_request` run no ID token, unless, on a private repository, "Send
+write tokens to workflows from pull requests" is on: keep that setting off
+([serve.md](serve.md#pull-request-backtests)). The trust entry's pins
+don't: a fork's run in the repository carries the repository's own
+`repository_id`.
 
 The rules are read from git, and `render` run, in the job as before;
 `expect` is read from both commits and held by serve, and the job's gate

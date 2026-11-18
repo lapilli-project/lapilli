@@ -449,7 +449,11 @@ has none, a plain token. One of:
   audience, as `core.getIDToken(audience)` does
   (`ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN`),
   right before it is sent, for each request. The action does this with
-  `audience`. A cloud's audience, or the CI's own default, is refused:
+  `audience`. The audience is `LAPILLI_SERVE`'s URL, which no other
+  service takes; another is refused unless `SERVE_AUDIENCE_ANY=1` (the
+  action's `audience-any: true`) says the trust file names another, the
+  job's log saying so. A cloud's audience, or the CI's own default, is
+  refused either way:
   `sts.amazonaws.com` (any under `amazonaws.com`),
   `api://AzureADTokenExchange`, `//iam.googleapis.com/...`,
   `https://iam.googleapis.com/...`, `https://sts.googleapis.com...`,
@@ -670,16 +674,18 @@ runner inside your network:
   `pull_request_target` with the pull request checked out: that hands the
   fork's code your secrets and a token that writes. The `if:` above skips
   forks' runs, a convenience: it keeps no one out, as the pull request can
-  change it. Through lapilli serve, what keeps a fork out is the trust
-  entry's pins and GitHub giving a fork's `pull_request` run no ID token,
-  unless, on a private repository, "Send write tokens to workflows from
-  pull requests" is on: keep that setting off. Self-hosted runners that
+  change it. Through lapilli serve, what keeps a fork out is GitHub giving
+  a fork's `pull_request` run no ID token, unless, on a private
+  repository, "Send write tokens to workflows from pull requests" is on:
+  keep that setting off. The trust entry's pins don't: a fork's run in the
+  repository carries the repository's own `repository_id`, as a branch's
+  does. Self-hosted runners that
   reach your Prometheus: require approval for workflows from outside
   collaborators, and don't give them to public repositories.
-- **Forgejo.** Its documentation doesn't say whether a fork's pull request
-  gets an ID token: through lapilli serve, pin the repository, and keep
-  OpenID Connect (`enable-openid-connect`) from forks' runs. Forgejo's
-  tokens carry `repository_id` from Forgejo 16 on.
+- **Forgejo.** Its reference says `enable-openid-connect` "is disabled for
+  `pull_request` events from forked repositories": a fork's run gets no
+  ID token to send lapilli serve. Forgejo's tokens carry `repository_id`
+  from Forgejo 16 on.
 - **GitLab.** A fork's merge request pipeline runs in the fork, without
   your project's variables. Running it in the parent project (a
   maintainer's "Run pipeline") hands it them: review the merge request

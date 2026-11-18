@@ -418,7 +418,7 @@ func TestBacktestServeRecipeAsksForIDToken(t *testing.T) {
 			if c.actions {
 				rr.env = append(rr.env, "GITHUB_ACTIONS=true", "FORGEJO_ACTIONS=true")
 			}
-			stdout, stderr, err := rr.runSplit([]string{"PATHS=alerts", "LAPILLI_SERVE=" + srv.url, "LAPILLI_SERVE_AUDIENCE=" + audience, "SERVE_POLL=0",
+			stdout, stderr, err := rr.runSplit([]string{"PATHS=alerts", "LAPILLI_SERVE=" + srv.url, "LAPILLI_SERVE_AUDIENCE=" + audience, "SERVE_AUDIENCE_ANY=1", "SERVE_POLL=0",
 				"ACTIONS_ID_TOKEN_REQUEST_URL=" + oidc.URL + "/idtoken?api-version=2.0", "ACTIONS_ID_TOKEN_REQUEST_TOKEN=request-token-0123456789"})
 			if err != nil || *asked != 1 || !strings.Contains(rr.body(), "`CheckoutErrors`") {
 				t.Fatalf("%v, asked %d\n%s%s", err, *asked, stdout, stderr)
@@ -486,7 +486,16 @@ func TestBacktestServeRecipeAudience(t *testing.T) {
 	if posts, _, _ := srv.counts(); posts != 0 || len(rr.host.comments) != 0 {
 		t.Errorf("%d POSTs, %d comments", posts, len(rr.host.comments))
 	}
-	// Serve's own, and one that isn't its URL, said.
+	// Another than serve's own URL is refused, those a list of others'
+	// misses among them, unless SERVE_AUDIENCE_ANY=1.
+	for _, aud := range []string{"https://lapilli-ci.example.com", "sts.amazonaws.com.cn", "pypi", "npm:registry.npmjs.org", "https://github.example.com/example"} {
+		out, err := rr.run(append(slices.Clone(ask), "LAPILLI_SERVE_AUDIENCE="+aud))
+		if err == nil || !strings.Contains(out, "SERVE_AUDIENCE_ANY=1 for a trust file that names another") {
+			t.Errorf("%s: %v\n%s", aud, err, out)
+		}
+	}
+	// Serve's own, and, with SERVE_AUDIENCE_ANY=1, one that isn't its
+	// URL, said.
 	for _, c := range []struct {
 		aud  string
 		said bool
@@ -497,6 +506,9 @@ func TestBacktestServeRecipeAudience(t *testing.T) {
 		rr.host.set(func(h *commentHost) { h.comments = nil })
 		settings := append(slices.Clone(ask[:3]), "LAPILLI_SERVE_AUDIENCE="+c.aud, "ACTIONS_ID_TOKEN_REQUEST_URL="+oidc.URL+"/idtoken?api-version=2.0",
 			"ACTIONS_ID_TOKEN_REQUEST_TOKEN=request-token-0123456789")
+		if c.said {
+			settings = append(settings, "SERVE_AUDIENCE_ANY=1")
+		}
 		out, err := rr.run(settings)
 		said := strings.Contains(out, "LAPILLI_SERVE_AUDIENCE "+c.aud+" isn't LAPILLI_SERVE, "+srv.url+", where the token goes")
 		if err != nil || said != c.said || !strings.Contains(rr.body(), "`CheckoutErrors`") {
@@ -927,7 +939,13 @@ func TestBacktestActionServe(t *testing.T) {
 	os.WriteFile(fake, []byte("#!/bin/sh\ntouch '"+ran+"'\nexit 1\n"), 0o755)
 	idTokens := []string{"ACTIONS_ID_TOKEN_REQUEST_URL=" + oidc.URL + "/idtoken?api-version=2.0", "ACTIONS_ID_TOKEN_REQUEST_TOKEN=request-token-0123456789",
 		"LAPILLI=" + fake, "SERVE_POLL=0"}
-	out, err := runAction(t, rr, map[string]string{"paths": "alerts", "serve-url": srv.url, "audience": audience, "since": "14d", "args": "--tz UTC"}, idTokens...)
+	// The stand-in's URL isn't the audience its trust would name: taken
+	// only with audience-any.
+	if out, err := runAction(t, rr, map[string]string{"paths": "alerts", "serve-url": srv.url, "audience": audience}, idTokens...); err == nil ||
+		!strings.Contains(out, "SERVE_AUDIENCE_ANY=1 for a trust file that names another") {
+		t.Errorf("an audience not serve-url's, no audience-any: %v\n%s", err, out)
+	}
+	out, err := runAction(t, rr, map[string]string{"paths": "alerts", "serve-url": srv.url, "audience": audience, "audience-any": "true", "since": "14d", "args": "--tz UTC"}, idTokens...)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
@@ -947,14 +965,15 @@ func TestBacktestActionServe(t *testing.T) {
 		want   string
 	}{
 		{map[string]string{"paths": "alerts", "serve-url": srv.url}, idTokens, "action.yml: serve-url needs audience"},
-		{map[string]string{"paths": "alerts", "audience": audience}, idTokens, "action.yml: audience and serve-wait are for serve-url: give it too"},
-		{map[string]string{"paths": "alerts", "serve-wait": "10m"}, idTokens, "action.yml: audience and serve-wait are for serve-url"},
+		{map[string]string{"paths": "alerts", "audience": audience}, idTokens, "action.yml: audience, audience-any and serve-wait are for serve-url: give it too"},
+		{map[string]string{"paths": "alerts", "serve-wait": "10m"}, idTokens, "action.yml: audience, audience-any and serve-wait are for serve-url"},
 		{map[string]string{"paths": "alerts", "serve-url": srv.url, "audience": audience, "prometheus-url": "http://prometheus:9090"}, idTokens,
 			"action.yml: prometheus-url: lapilli serve decides where the history is"},
 		{map[string]string{"paths": "alerts", "serve-url": srv.url, "audience": audience, "incidents": "incidents.yaml"}, idTokens, "INCIDENTS: lapilli serve judges"},
-		{map[string]string{"paths": "alerts", "serve-url": srv.url, "audience": audience, "serve-wait": "a while"}, idTokens, "SERVE_WAIT a while: want how long"},
+		{map[string]string{"paths": "alerts", "serve-url": srv.url, "audience": audience, "audience-any": "true", "serve-wait": "a while"}, idTokens, "SERVE_WAIT a while: want how long"},
+		{map[string]string{"paths": "alerts", "serve-url": srv.url, "audience": audience, "audience-any": "maybe"}, idTokens, "audience-any: want true or false"},
 		// Without id-token: write, GitHub gives the job no way to ask.
-		{map[string]string{"paths": "alerts", "serve-url": srv.url, "audience": audience}, []string{"LAPILLI=" + fake},
+		{map[string]string{"paths": "alerts", "serve-url": srv.url, "audience": audience, "audience-any": "true"}, []string{"LAPILLI=" + fake},
 			"give it permissions: id-token: write (GitHub Actions)"},
 	} {
 		if out, err := runAction(t, rr, c.inputs, c.env...); err == nil || !strings.Contains(out, c.want) {
