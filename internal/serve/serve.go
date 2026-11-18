@@ -209,11 +209,14 @@ type Config struct {
 	// What happens (tasks, incidents, quiet windows, comments) is told to
 	// the webhook whose URL is in NotifyWebhook, as JSON, and with
 	// NotifySlack to Slack; their links are under ExternalURL. Lang is the
-	// language of what goes to Slack.
-	NotifyWebhook string
-	NotifySlack   bool
-	ExternalURL   string
-	Lang          string
+	// language of what goes to Slack. With NotifyWebhookSecret, a file
+	// holding a key, each post to the webhook is signed with it
+	// (report.Sign).
+	NotifyWebhook       string
+	NotifyWebhookSecret string
+	NotifySlack         bool
+	ExternalURL         string
+	Lang                string
 	// TeamDigests are files holding the incoming webhooks that take a
 	// team's own weekly digest, by the team's name.
 	TeamDigests map[string]string
@@ -395,8 +398,8 @@ type Server struct {
 	// backtesting are the proposals being backtested again here, which
 	// expiry leaves.
 	backtesting inFlight
-	// wall is the clock proposals are made and expire by: time.Now but in
-	// tests.
+	// wall is the clock proposals are made and expire by, and the
+	// webhook's posts are signed at: time.Now but in tests.
 	wall func() time.Time
 	// heavy is the one turn there is for a request that takes hundreds of
 	// megabytes: every firing of a month, the settings tried over a week.

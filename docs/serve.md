@@ -285,7 +285,10 @@ the flags", gives it back to the flags; see
 What happens (a task made, assigned, done or overdue, an incident written
 down, a quiet window kept, a comment) can be told to a webhook, as JSON,
 with `--notify-webhook-file`, and to Slack, as a line in `--lang`, with
-`--notify-slack`. A tracker, a chat or a script takes the webhook. To keep
+`--notify-slack`. A tracker, a chat or a script takes the webhook; with
+`--notify-webhook-secret-file`, each post to it is signed, so the receiver
+can tell it came from this Lapilli
+([Signed posts to the webhook](#signed-posts-to-the-webhook)). To keep
 tasks in step with issues in GitHub, GitLab, Jira or Linear, run the
 tracker's script in [recipes/trackers](../recipes/trackers) every few minutes
 with `--tasks-token-file` (below). Notices are written in the
@@ -656,3 +659,54 @@ retitle a task, read anything else, or hold the same value as another token.
 What it writes is noted as `tasks-token` and isn't counted as anyone's use.
 In the chart, `serve.trackers` names its Secret and, with `tracker`, runs the
 script as a CronJob.
+
+## Signed posts to the webhook
+
+Whoever learns the webhook's URL can post to it, and a receiver that turns
+what comes into issues, pages or review items would take what they post.
+With `--notify-webhook-secret-file FILE`, beside `--notify-webhook-file`,
+every post to the webhook is signed, of every event (`task.*`,
+`incident.written`, `digest.ready`, `report.ready` and the rest), in the
+shape Grafana signs what it sends Lapilli in ([Notifications as they were
+sent](notifications.md)), with headers of its own:
+
+| Header | |
+|---|---|
+| `X-Lapilli-Timestamp` | when it was sent, in Unix seconds |
+| `X-Lapilli-Signature` | `sha256=` and the HMAC-SHA256, with the key, of the timestamp, a `.` and the body, in lowercase hex |
+
+The body is signed as the bytes sent. A post tried again is signed again,
+at its own time, with the same body and `id` (and `Idempotency-Key`). The
+key is what the file holds, less one line break at its end (`\n` or
+`\r\n`), 32 bytes at least; `serve` refuses to start with one shorter, one
+it can't read, or without `--notify-webhook-file`. It is read for each post,
+so it can be rotated, and it and the signatures are never shown or logged.
+A key that can't be read later fails the post, which is tried again: nothing
+is sent unsigned. Without the flag, a post carries neither header, as
+before.
+
+To check a post, read its body as it came, before parsing it:
+
+1. Work out the HMAC-SHA256, with the key, of `X-Lapilli-Timestamp`, a `.`
+   and the body, and compare `sha256=` and its hex with
+   `X-Lapilli-Signature` in constant time (Python's `hmac.compare_digest`,
+   Go's `hmac.Equal`, Node's `crypto.timingSafeEqual`), not with `==`.
+2. Refuse a timestamp more than five minutes from your clock, either side,
+   so that a post someone saw can't be sent again later.
+3. Within those five minutes, keep the `id` of each post taken: the same one
+   again is a post tried again, or sent again by someone else.
+
+```python
+import hashlib, hmac, time
+
+def verify(key: bytes, timestamp: str, signature: str, body: bytes) -> bool:
+    mac = hmac.new(key, timestamp.encode() + b"." + body, hashlib.sha256)
+    return (timestamp.isdigit() and abs(time.time() - int(timestamp)) <= 300
+            and hmac.compare_digest("sha256=" + mac.hexdigest(), signature))
+```
+
+To rotate the key, have the receiver take either while the file changes:
+each post is signed with what the file holds as it is sent, and one the
+receiver refuses is tried again. In the chart,
+`serve.notify.webhookSecret.signingKey` names the key of the webhook's
+Secret that holds it.

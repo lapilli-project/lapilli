@@ -257,7 +257,8 @@ func (s *Server) send(ctx context.Context, x ledger.Notice) error {
 		if err != nil {
 			return err
 		}
-		return report.Webhook(ctx, s.cfg.NotifyWebhook, b, body["id"].(string))
+		// Signed, with NotifyWebhookSecret, at the time of each try.
+		return report.Webhook(ctx, s.cfg.NotifyWebhook, b, body["id"].(string), s.cfg.NotifyWebhookSecret, s.wall())
 	case "slack":
 		text := s.line(n)
 		if link != "" {

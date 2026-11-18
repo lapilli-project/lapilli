@@ -805,6 +805,14 @@ written down; quiet windows kept; comments):
                       a tracker, a chat or anything else that takes a
                       webhook. Sent apart from the writes, and tried again,
                       further apart, for about eight hours when it fails
+  --notify-webhook-secret-file FILE
+                      the file holding a key, 32 bytes at least (a line break
+                      at its end isn't of it), to sign each post to
+                      --notify-webhook-file with: X-Lapilli-Timestamp, the
+                      Unix seconds it is sent at, and X-Lapilli-Signature,
+                      sha256= and the HMAC-SHA256 of the timestamp, a dot
+                      and the body, in hex. Read for each post, so it can be
+                      rotated
   --notify-slack      also post each, as a line, to --slack-webhook-file
   --external-url URL  where people reach the UI, such as
                       https://lapilli.example.com; what is told links to it

@@ -11,6 +11,7 @@ import (
 
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/oncall"
+	"lapilli.dev/internal/report"
 	"lapilli.dev/internal/serve"
 )
 
@@ -125,6 +126,7 @@ func (p *run) secrets() {
 		add(x.flag, x.path, least, false)
 	}
 	add("--session-key-file", s.SessionKey, 32, false)
+	add("--notify-webhook-secret-file", s.NotifyWebhookSecret, report.SigningKeyLeast, false)
 	if s.OIDC != nil {
 		add("--oidc-client-secret-file", s.OIDC.SecretFile, 1, false)
 	}
@@ -148,6 +150,9 @@ func (p *run) secrets() {
 	for _, x := range all {
 		b, err := os.ReadFile(x.path)
 		text := strings.TrimSpace(string(b))
+		if x.flag == "--notify-webhook-secret-file" {
+			text = string(report.TrimKey(b)) // as serve reads it: spaces are of the key
+		}
 		switch {
 		case err != nil:
 			bad = append(bad, fmt.Sprintf("%s %s: can't be read", x.flag, x.path))

@@ -18,6 +18,7 @@ import (
 
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/report"
 	"lapilli.dev/internal/serve"
 	"lapilli.dev/internal/signin"
 	"lapilli.dev/internal/source"
@@ -401,6 +402,14 @@ written down; quiet windows kept; comments):
                       a tracker, a chat or anything else that takes a
                       webhook. Sent apart from the writes, and tried again,
                       further apart, for about eight hours when it fails
+  --notify-webhook-secret-file FILE
+                      the file holding a key, 32 bytes at least (a line break
+                      at its end isn't of it), to sign each post to
+                      --notify-webhook-file with: X-Lapilli-Timestamp, the
+                      Unix seconds it is sent at, and X-Lapilli-Signature,
+                      sha256= and the HMAC-SHA256 of the timestamp, a dot
+                      and the body, in hex. Read for each post, so it can be
+                      rotated
   --notify-slack      also post each, as a line, to --slack-webhook-file
   --external-url URL  where people reach the UI, such as
                       https://lapilli.example.com; what is told links to it
@@ -866,6 +875,17 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 				return true, fmt.Errorf("--notify-webhook-file: %v", err)
 			}
 			cfg.NotifyWebhook = val
+		case "--notify-webhook-secret-file":
+			// Read once here, to say at once what is wrong; serve reads it
+			// again for each post, and never shows it.
+			b, err := secret(val, report.SigningKeyLeast)
+			if err != nil {
+				return true, fmt.Errorf("%s: %v", name, err)
+			}
+			if n := len(report.TrimKey(b)); n < report.SigningKeyLeast {
+				return true, fmt.Errorf("%s: want a key of %d bytes at least, not %d", name, report.SigningKeyLeast, n)
+			}
+			cfg.NotifyWebhookSecret = val
 		case "--notify-slack":
 			cfg.NotifySlack = val == "true"
 		case "--external-url":
@@ -1055,6 +1075,8 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 		err = fmt.Errorf("--editors and --admins need a sign-in, --user-header, --oidc-issuer or --proxy-jwt: who is who comes from it")
 	case cfg.NotifySlack && f.slackFile == "":
 		err = fmt.Errorf("--notify-slack needs --slack-webhook-file")
+	case cfg.NotifyWebhookSecret != "" && cfg.NotifyWebhook == "":
+		err = fmt.Errorf("--notify-webhook-secret-file signs the posts to --notify-webhook-file: give it too")
 	case cfg.IncidentsListen != "" && cfg.IncidentsToken == "" && cfg.FiringsToken == "" && cfg.TasksToken == "" && cfg.ChangesToken == "":
 		err = fmt.Errorf("--incidents-listen takes what a token writes: add --incidents-token-file, --firings-token-file, --tasks-token-file, --changes-token-file or more than one")
 	case cfg.IncidentsListen == "" && (cfg.IncidentsToken != "" || cfg.FiringsToken != "" || cfg.TasksToken != "" || cfg.ChangesToken != ""):

@@ -319,6 +319,14 @@ your own needs from. */ -}}
 {{- if and (eq .Values.mode "serve") $s.teamDigests.teams (not $s.teamDigests.secretName) }}
 {{- fail "serve.teamDigests.teams needs serve.teamDigests.secretName" }}
 {{- end }}
+{{- with $s.notify.webhookSecret }}
+{{- if and (eq $.Values.mode "serve") .signingKey (not .name) }}
+{{- fail "serve.notify.webhookSecret.signingKey is a key of serve.notify.webhookSecret.name's Secret: give the Secret's name" }}
+{{- end }}
+{{- if and (eq $.Values.mode "serve") .signingKey (eq (toString .signingKey) (toString .key)) }}
+{{- fail "serve.notify.webhookSecret.signingKey is the key holding the URL: give the signing key a key of its own" }}
+{{- end }}
+{{- end }}
 {{- $dests := dict }}
 {{- range ($s.reports).destinations }}
 {{- if not (regexMatch "^[a-z0-9][a-z0-9._-]{0,62}$" (toString .name)) }}

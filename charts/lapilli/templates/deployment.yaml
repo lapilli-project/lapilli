@@ -136,6 +136,9 @@ spec:
             {{- end }}
             {{- if $s.notify.webhookSecret.name }}
             - {{ printf "--notify-webhook-file=/var/run/lapilli/notify/%s" $s.notify.webhookSecret.key | quote }}
+            {{- with $s.notify.webhookSecret.signingKey }}
+            - {{ printf "--notify-webhook-secret-file=/var/run/lapilli/notify/%s" . | quote }}
+            {{- end }}
             {{- end }}
             {{- if $s.notify.slack }}
             - --notify-slack

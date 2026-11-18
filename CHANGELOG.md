@@ -17,6 +17,22 @@
   Its line in the text says how many, and that they were cut; the names and
   labels in `items` are as written, as every field that names a thing is.
   No schema change: a report's sections are kept as a list already.
+- **The posts to the webhook, signed**, with `--notify-webhook-secret-file
+  FILE` beside `--notify-webhook-file` (the chart's
+  `serve.notify.webhookSecret.signingKey`, a key of the same Secret): every
+  event, each try signed again at its own time, with `X-Lapilli-Timestamp`,
+  the Unix seconds it is sent at, and `X-Lapilli-Signature`, `sha256=` and
+  the HMAC-SHA256 of the timestamp, a `.` and the bytes sent, in lowercase
+  hex. The key is what the file holds less one line break at its end, 32
+  bytes at least, read for each post so that it can be rotated, and never
+  shown or logged, nor are the signatures. `serve` refuses to start with a
+  key shorter, one it can't read, or no webhook to sign for; a post whose
+  key can't be read later fails, and is tried again, never sent unsigned.
+  `lapilli preflight` reads it with the other secrets. docs/serve.md,
+  "Signed posts to the webhook", says how a receiver checks a post: the
+  HMAC worked out again over the body as it came, compared in constant
+  time, and a timestamp more than five minutes off refused, as Lapilli
+  takes Grafana's. Without the flag, a post is as it was.
 
 ### Changed
 
