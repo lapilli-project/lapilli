@@ -451,7 +451,10 @@ a.chip:hover { background: var(--accent-soft); }
 .rules-main tfoot tr.more > td { border-top: 0; font-weight: 400; }
 .rules-main tbody tr.has-more:has(+ tr.more:hover) td { background: color-mix(in srgb, var(--panel) 55%, transparent); }
 .rules-main tbody tr.has-more:hover + tr.more td { background: color-mix(in srgb, var(--panel) 55%, transparent); }
-p.row-notes { margin: 0; display: flex; flex-wrap: wrap; gap: .1rem 1.1rem; font-size: .85rem; color: var(--dim); }
+/* The line is as wide as the row, and no wider: it doesn't make the
+   columns it spans wider, as a long one did the numbers', narrowing the
+   rule's (1280 px, the demo: 396 px to 323). */
+p.row-notes { margin: 0; display: flex; flex-wrap: wrap; gap: .1rem 1.1rem; font-size: .85rem; color: var(--dim); width: 0; min-width: 100%; }
 p.row-notes .hint { font-size: inherit; }
 td.rule { min-width: 10rem; }
 td.rule bdi { overflow-wrap: anywhere; }

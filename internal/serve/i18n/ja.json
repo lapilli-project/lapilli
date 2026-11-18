@@ -1531,7 +1531,6 @@
  "the time for one request was up: %d not tried; pick them again": "1 回のリクエストの時間切れ: %d 件は未実施。もう一度選んでください",
  "None of the proposals picked is here.": "選んだ変更提案はここにありません。",
  "No incident written down to judge the firings by": "発火を判定するための記録済みインシデントがありません",
- "in the last four weeks or the two before them: a firing that caught nothing can't be told from one nobody wrote down, so no rule is called noisy. Write incidents down, or mark the firings that were real.": "過去 4 週間とその前の 2 週間です。何も検知しなかった発火が、誤検知なのか誰も記録しなかった実際の問題なのか区別できないため、どのルールもノイズルールとは判定しません。インシデントを記録するか、実際の問題だった発火に印を付けてください。",
  "not known: no incident written down to judge the firings by": "不明: 発火を判定するための記録済みインシデントがありません",
  "No incident written down from %s, or in the two weeks before: a firing that caught nothing can't be told from one nobody wrote down, so no rule is called noisy. Write incidents down, or mark the firings that were real.": "%s 以降も、その前の 2 週間も、記録されたインシデントがありません。何も検知しなかった発火が、誤検知なのか誰も記録しなかった実際の問題なのか区別できないため、どのルールもノイズルールとは判定しません。インシデントを記録するか、実際の問題だった発火に印を付けてください。",
  "Fired often over the weeks shown, with no incident written down to judge it by: whether its firings mattered isn't known.": "表示中の期間によく発火しましたが、判定するための記録済みインシデントがありません。その発火が重要だったかは分かりません。",
@@ -2240,5 +2239,6 @@
  "No firing in these weeks, so there is no precision to draw.": "この期間に発火がないため、適合率を描けません。",
  "Pick rules to act on several at once.": "ルールを選んでまとめて操作できます。",
  "At most %d rules at a time, %d for proposals, and only those you may change; each proposal is backtested and waits for a person to approve it.": "一度に最大 %d 件のルール、変更提案は %d 件までで、変更できるルールだけが変わります。提案ごとにバックテストを行い、人の承認を待ちます。",
- "caught nothing or not judged: %d asleep, %d off hours": "検知なしまたは判定なしのうち睡眠時間 %d、業務時間外 %d"
+ "caught nothing or not judged: %d asleep, %d off hours": "検知なしまたは判定なしのうち睡眠時間 %d、業務時間外 %d",
+ "in the last four weeks or the two before them: write incidents down, or mark the firings that were real.": "直近 4 週とその前の 2 週。インシデントを記録するか、実際に問題だった発火を示してください。"
 }

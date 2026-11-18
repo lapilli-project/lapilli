@@ -98,6 +98,20 @@ type labelChip struct {
 	On         bool
 }
 
+// chipParts are a label's name and value apart, so that a chip wider than
+// the rules list's column breaks after its "=", not inside a word
+// (docs/design/ui.md, "The table fits a laptop's screen").
+type chipParts struct {
+	Name, Value string
+	Eq          bool
+}
+
+// Parts are the chip's label's name and value.
+func (c labelChip) Parts() chipParts {
+	k, v, ok := strings.Cut(c.Text, "=")
+	return chipParts{k, v, ok}
+}
+
 // firingRow is a firing as the page lists it, its labels as chips.
 type firingRow struct {
 	firingLine

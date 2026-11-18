@@ -964,7 +964,7 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 	}
 	if noRecord && slices.ContainsFunc(lines, func(x ruleLine) bool { return x.Firings > 0 }) {
 		out = append(out, action{Text: tr(l, "No incident written down to judge the firings by"),
-			Detail: tr(l, "in the last four weeks or the two before them: a firing that caught nothing can't be told from one nobody wrote down, so no rule is called noisy. Write incidents down, or mark the firings that were real."),
+			Detail: tr(l, "in the last four weeks or the two before them: write incidents down, or mark the firings that were real."),
 			Href:   "/incidents"})
 	}
 	// What speaks of four weeks links to the rule's page over them.
