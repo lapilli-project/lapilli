@@ -238,21 +238,33 @@ func TestBacktestIssuersSaid(t *testing.T) {
 	gone := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no keys.example.com/jwks here", http.StatusNotFound)
 	})
-	h := standIns(t, map[string]http.Handler{"token.actions.githubusercontent.com": public, "github.example.com": ghes, "keys.example.com": gone})
+	h := standIns(t, map[string]http.Handler{"token.actions.githubusercontent.com": public, "github.example.com": ghes, "keys.example.com": gone,
+		"ghe2.example.com": gone})
 	server := ghEntry("server", "https://github.example.com/_services/token")
 	server.JWKSURL = "https://keys.example.com/jwks"
-	c := backtestConfig(ghEntry("alerts", "https://token.actions.githubusercontent.com"), server)
+	other := ghEntry("other", "https://ghe2.example.com/_services/token")
+	c := backtestConfig(ghEntry("alerts", "https://token.actions.githubusercontent.com"), server, other)
 	rep := Run(context.Background(), c)
 	it := reportItem(rep, "backtest.issuers")
 	b, _ := json.Marshal(rep)
 	if it == nil || it.State != Problem || !strings.Contains(it.What, "https://token.actions.githubusercontent.com (alerts), 1 key for RS256") ||
-		!strings.Contains(it.Why, "[--backtest-trust's issuer 2] (server): [--backtest-trust's jwks_url 1]: 404") || len(slices.DeleteFunc(h.all(), func(s string) bool { return strings.Contains(s, "prometheus") })) != 4 {
+		!strings.Contains(it.Why, "[--backtest-trust's issuer 2] (server): [--backtest-trust's jwks_url 1]: 404") ||
+		!strings.Contains(it.Why, "[--backtest-trust's issuer 3] (other): ") ||
+		len(slices.DeleteFunc(h.all(), func(s string) bool { return strings.Contains(s, "prometheus") })) != 5 {
 		t.Errorf("sent %v: %+v", h.all(), it)
 	}
-	for _, hidden := range []string{"github.example.com", "keys.example.com"} {
+	// What a server answered names the issuer it was asked at: hidden.
+	for _, hidden := range []string{"github.example.com", "keys.example.com", "ghe2.example.com"} {
 		if strings.Contains(string(b), hidden) {
 			t.Errorf("the report says %q: %s", hidden, b)
 		}
+	}
+	// Named by number in Lapilli's own words, before anything is hidden.
+	p := guarded(t, c)
+	p.backtestIssuers(context.Background())
+	if it := itemOf(p, "backtest.issuers"); !strings.Contains(it.Why, "[--backtest-trust's issuer 2] (server): ") ||
+		!strings.Contains(it.Why, "[--backtest-trust's issuer 3] (other): ") || strings.Contains(it.Why, "_services/token (") {
+		t.Errorf("%+v", it)
 	}
 }
 

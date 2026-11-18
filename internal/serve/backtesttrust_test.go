@@ -258,3 +258,18 @@ func TestReadTrust(t *testing.T) {
 		t.Errorf("offline: %v", err)
 	}
 }
+
+// The key a refusal's line is at is said only when it is one of an
+// entry's own: a key of the file's own naming, which may hold a value
+// (repository_id:987650013), never.
+func TestTrustAtLine(t *testing.T) {
+	b := []byte("trust:\n  - name: a\n    repository_id:987650013:\n      - x\n    days:\n      - 1\n  - {name: b, days: x, hourly: y}\n")
+	for _, c := range []struct {
+		line, entry int
+		key         string
+	}{{2, 1, "name"}, {3, 1, ""}, {4, 1, ""}, {5, 1, "days"}, {6, 1, "days"}, {7, 2, ""}, {0, 0, ""}, {1, 0, ""}} {
+		if entry, key := trustAtLine(b, c.line); entry != c.entry || key != c.key {
+			t.Errorf("line %d: entry %d, %q; want %d, %q", c.line, entry, key, c.entry, c.key)
+		}
+	}
+}
