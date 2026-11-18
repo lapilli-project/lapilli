@@ -77,9 +77,10 @@
   user impact and declared configuration among serve's parts; the ledger in
   Postgres with several replicas; Loki's rules; that a firing with no record
   isn't judged; immutable releases and the Sigstore bundles; and the pages'
-  accessibility target. The sample report, there and in the README, is in
-  the order and form `lapilli verdict` writes it now (the incidents'
-  `LASTED`, the zone's offset).
+  accessibility target. The sample report there is in the order and form
+  `lapilli verdict` writes it now (the incidents' `LASTED`, the zone's
+  offset, what `--impact-for` can't be sure of), and so is the README's, up
+  to the near misses it leaves out.
 - **An RSA key under 2048 bits verifies no signature**: one in an identity
   provider's JWKS (`--oidc-issuer`'s, `--proxy-jwt-jwks`) isn't taken: a
   set of such keys alone is refused saying so, and so is a token one of

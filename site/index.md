@@ -84,6 +84,9 @@ INC-43 Batch stuck               2026-10-31 02:40  –       ✗ nothing fired
 impact-1 user impact (--impact)  2026-11-01 21:27  24m     ✗ nothing fired
 
 ✗ 2 of 4 incidents had no alert.
+! --impact-for 5m counts impact that lasted 5m as an incident, but 9 of the 43 rules judged fire only once
+  their condition held longer: their "for" and one evaluation, with no "for" an evaluation (6m for 6
+  of them). Impact shorter than that they can't be sure to catch. --impact-for 6m counts only what they can.
 
 Rules that nearly caught them: their condition held, but not for their "for", or fired too late; or their value came within a fifth of their threshold.
 INCIDENT  RULE             HELD          CHANGE         WOULD FIRE  FIRED  ● NOTHING
@@ -105,7 +108,7 @@ Pushgateway.
 `--check-replay` sets a replay beside what really fired, rule by rule, as
 Prometheus, Grafana's own alert state history or a cloud's alarms kept it,
 so you can check the replay on your own rules before you believe a verdict.
-`--check-content` says what each alert says when it fires, and `--redact`
+`--check-content` checks what each alert says when it fires, and `--redact`
 gives every name an alias, for a report shown outside.
 
 ## Every hour: `lapilli serve`
@@ -122,7 +125,7 @@ runs will take. It reads, and writes nothing.
   <div><h3>Every change replayed</h3><p>A new version of the rules is replayed over the week before it, so you see what the change would have done.</p></div>
   <div><h3>Incidents written down</h3><p>Write an incident, or say a black stone was real, and the whole ledger is judged again at once, without asking Prometheus.</p></div>
   <div><h3>Quiet windows</h3><p>A deploy, maintenance, a nightly batch: firings in a window that caught nothing are excused, once or every day or week.</p></div>
-  <div><h3>Marked windows</h3><p>A sale, a launch, a campaign: named from a file, the UI or a PromQL expression. Nothing is excused; every count is read inside them and outside, beside the four weeks before.</p></div>
+  <div><h3>Marked windows</h3><p>A sale, a launch, a campaign: named from a file, the UI or a PromQL expression. Nothing is excused; every count is read inside them and outside, and precision during each beside the four weeks before.</p></div>
   <div><h3>Goals</h3><p>What a team holds its alerting to: a bound on precision, incidents missed, critical firings or re-fires, week by week or for each sale. A goal missed is told, and becomes a task with a press.</p></div>
   <div><h3>Signals of user impact</h3><p>Name the signals that say users are hurt, an error ratio, a latency, and the windows where one holds are incidents too, each week's firings judged by the signals tied to them.</p></div>
   <div><h3>Teams, tasks, comments</h3><p>Teams own rules and incidents; a suggestion becomes a task with a press, with an assignee, a due date and a link to your tracker.</p></div>
@@ -139,9 +142,9 @@ runs will take. It reads, and writes nothing.
 </div>
 
 The ledger is one SQLite file, or a Postgres database that several
-replicas share, one of them leading. Over two million firings an hourly run
-takes 0.18 s and twelve weeks by rule 2 ms, and these budgets are part of
-the tests. `/metrics` gives the stones to Prometheus, and the Helm chart a Grafana
+replicas share, one of them leading. On SQLite, over two million firings,
+an hourly run takes 0.18 s and twelve weeks by rule 2 ms, and these budgets
+are part of the tests. `/metrics` gives the stones to Prometheus, and the Helm chart a Grafana
 dashboard of them. The UI runs no scripts.
 
 ## How it judges
@@ -174,8 +177,9 @@ The rest, the noisy rules, what to change and the near misses, is in
 
 Any Prometheus-compatible API works: Prometheus, Thanos, Mimir,
 VictoriaMetrics, the managed Prometheus of AWS, Azure or Google Cloud, or
-CloudWatch's PromQL API, with the credentials the machine or pod already has,
-and Loki for rules on logs.
+CloudWatch's PromQL API, with the credentials the machine or pod already has.
+Rules on logs are replayed against Loki
+([Rules on logs]({{ '/docs/loki/' | relative_url }})).
 Oracle Cloud has no managed Prometheus; on OKE, use the one you run there.
 Alarms in a cloud's own terms (CloudWatch, Azure Monitor, Cloud Monitoring,
 OCI Monitoring) are judged from their history, with a small script for each
@@ -192,17 +196,19 @@ Integrations are generic: a webhook, not a particular tracker.
   fires, and an agent can only propose.
 - **Secrets stay put.** Tokens and webhook URLs are read from files and
   never shown, and nothing is sent anywhere it wasn't told to go.
-- **Checked releases.** Every release is checked with govulncheck before it
-  is published and again every day, can't be changed once published, and
-  carries build provenance: `gh attestation verify` works on each binary,
-  the chart and the image, also offline from the Sigstore bundles kept
-  with each release
+- **Checked releases.** A release is checked with govulncheck before it is
+  published, and the latest again every day. Releases can't be changed once
+  published (from v0.14.0), and carry build provenance: `gh attestation
+  verify` works on each binary, the chart and the image, and, from the
+  Sigstore bundles each release has kept since v0.28.0, on the binaries and
+  the chart offline
   ([Checking a release](https://github.com/lapilli-project/lapilli/blob/main/SECURITY.md#checking-a-release)).
 - **Out in the open.** Reports go through private GitHub security
   advisories, and the code is scanned by CodeQL and OpenSSF Scorecard.
-- **For everyone on call.** The pages aim at WCAG 2.2 AA, on a screen
-  reader, the keyboard alone, at 200% zoom and on a phone, and tests hold
-  them to it in every language: a target, not a claim they conform
+- **For everyone on call.** `lapilli serve`'s pages aim at WCAG 2.2 AA, on
+  a screen reader, the keyboard alone, at 200% zoom and on a phone, and CI
+  holds their structure and contrast in every language: a target, not a
+  claim they conform
   ([Accessibility](https://github.com/lapilli-project/lapilli/blob/main/ACCESSIBILITY.md)).
 
 ## Help build it
