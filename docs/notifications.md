@@ -148,6 +148,11 @@ UI's port does: every request carries its own proof.
   the secret does, and someone who saw a request could send it again
   later.
 
+Lapilli signs what it posts to its own webhook in the same shape, an
+HMAC-SHA256 of a timestamp and the body, with `--notify-webhook-secret-file`,
+for the receiver to check: [Signed posts to the
+webhook](serve.md#signed-posts-to-the-webhook).
+
 Annotations aren't kept. Who was on call, and whether they acknowledged, is
 for PagerDuty, incident.io or Grafana IRM. Each path is tested against its
 source's documented payloads, a cloud's own alarms' among them, with

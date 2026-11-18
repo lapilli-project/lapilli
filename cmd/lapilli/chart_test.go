@@ -769,3 +769,36 @@ func TestChartImpactSignals(t *testing.T) {
 		t.Errorf("the file: %+v %+v %v\n%s", signals, entries, err, strings.Join(file, "\n"))
 	}
 }
+
+// serve.notify.webhookSecret.signingKey, a key of the webhook's Secret,
+// signs the webhook's posts with what it holds: passed as
+// --notify-webhook-secret-file from the Secret mounted already. None
+// without it, and refused without the Secret, or as the URL's own key.
+func TestChartNotifySigningKey(t *testing.T) {
+	hook := append(slices.Clone(serveValues), "--set", "serve.notify.webhookSecret.name=lapilli-hook")
+	out, err := helmTemplate(t, hook...)
+	if err != nil || !strings.Contains(out, `- "--notify-webhook-file=/var/run/lapilli/notify/url"`) || strings.Contains(out, "--notify-webhook-secret-file") {
+		t.Fatalf("without a signing key: %v\n%s", err, out)
+	}
+	out, err = helmTemplate(t, append(slices.Clone(hook), "--set", "serve.notify.webhookSecret.signingKey=signing-key")...)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, want := range []string{`- "--notify-webhook-file=/var/run/lapilli/notify/url"`, `- "--notify-webhook-secret-file=/var/run/lapilli/notify/signing-key"`,
+		"mountPath: /var/run/lapilli/notify", "secretName: lapilli-hook"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no %s in\n%s", want, out)
+		}
+	}
+	for _, c := range []struct {
+		args []string
+		says string
+	}{
+		{append(slices.Clone(serveValues), "--set", "serve.notify.webhookSecret.signingKey=signing-key"), "give the Secret's name"},
+		{append(slices.Clone(hook), "--set", "serve.notify.webhookSecret.signingKey=url"), "a key of its own"},
+	} {
+		if out, err := helmTemplate(t, c.args...); err == nil || !strings.Contains(out, c.says) {
+			t.Errorf("%v: %v\n%s", c.args, err, out)
+		}
+	}
+}

@@ -424,10 +424,16 @@ serve:
   # written down; quiet windows kept; comments.
   notify:
     # A Secret holding a URL each is POSTed to, as JSON: a tracker's, a
-    # chat's, or anything else that takes a webhook.
+    # chat's, or anything else that takes a webhook. With signingKey, the
+    # key in the same Secret that holds a key of 32 bytes or more, each post
+    # is signed with it (--notify-webhook-secret-file): X-Lapilli-Timestamp
+    # and X-Lapilli-Signature, sha256= and the HMAC-SHA256 of the timestamp,
+    # a dot and the body (docs/serve.md, "Signed posts to the webhook"). Empty
+    # signs none.
     webhookSecret:
       name: ""
       key: url
+      signingKey: ""
     slack: false  # also post each, as a line, to report.slackWebhookSecret
     lang: en      # the language of what is posted to Slack: en, es, ja or ko
   # A team's own weekly digest: its rules and the incidents it owns, posted to
