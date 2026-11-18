@@ -449,7 +449,11 @@ It writes nothing and replays nothing, held by the code: every request it
 sends goes through an allowlist that refuses any other before it is sent
 (the history's `vector(1)` and a day's count of ALERTS; the rules, the data
 sources and the notifications Grafana is read for; the sign-in's discovery
-and keys; the clouds' credentials), the ledger is read through a probe that
+and keys; the clouds' credentials; and, with `--changes`, what a token or a
+cloud's identity may write: Grafana's list of the token's actions, IAM's
+policy simulator, Cloud Resource Manager's `testIamPermissions`, Azure's
+permissions, deny assignments and locks, OCI's policies), the ledger is
+read through a probe that
 opens SQLite read-only and Postgres in read-only transactions, and no rule,
 `--impact` nor `--guard` is evaluated. What the clouds' credential chains
 do of their own is outside the allowlist: Google's metadata server (and
@@ -464,8 +468,17 @@ one (or an unknown, with `--fail-unknown`), 2 when the flags are wrong;
 volume, as a Job or `kubectl run` of the image; in CI, `--offline` asks
 nothing, reads no secret's file nor `--ledger-url-file`, and works out what
 needs no credential: the flags, the rule files, `--config` and the
-estimates of requests and time. Whether a token
-may write (`--changes`) isn't asked yet: it says unknown.
+estimates of requests and time. With `--changes`, it asks what
+`--changes-grafana-token-file`'s token and each `--changes-*` identity may
+write, of an API that says so without anything being written
+(`grafana.write`, `changes.aws`, `changes.azure`, `changes.google`,
+`changes.oci`): AWS's needs `iam:SimulatePrincipalPolicy` on the role's own
+ARN, Azure's `Microsoft.Authorization/permissions/read`,
+`denyAssignments/read` and `locks/read`, and OCI's that the user may
+inspect groups, users, compartments and policies in the tenancy, or the
+item is unknown; an OCI policy with a condition is never counted as a
+grant. A Mimir's or a Cortex's `rules:write` can't be known without
+writing: unknown.
 
 ## The ledger in Postgres
 
