@@ -69,7 +69,15 @@ func (p *run) changes(ctx context.Context) {
 		{cloud: "azure", id: "changes.azure", flag: "--changes-azure-client-id", who: s.ChangesAzureClientID},
 		{cloud: "google", id: "changes.google", flag: "--changes-google-service-account", who: s.ChangesGoogleServiceAccount},
 		{cloud: "oci", id: "changes.oci", flag: "--changes-oci-config", who: s.ChangesOCIConfig}} {
-		if x.who != "" {
+		// Without --changes-google-service-account, the pod's own identity
+		// writes Google's alerting policies, with a token of the scope
+		// that writes (cloud.Writes): it is asked about as serve's other
+		// write identities are.
+		own := x.cloud == "google" && x.who == "" && len(p.googleProjects()) > 0
+		if own {
+			x.flag = "the pod's own Google identity (no --changes-google-service-account)"
+		}
+		if x.who != "" || own {
 			x.endpoint = endpoint(x.cloud)
 			ws = append(ws, x)
 		}
@@ -114,6 +122,11 @@ func (p *run) changes(ctx context.Context) {
 	p.cloudWrites(ctx, taken)
 }
 
+// writeCredential is the credential serve writes with, as serve makes it
+// (cloud.Writes: Google's, without a service account, of the scope that
+// writes); tests replace it.
+var writeCredential = cloud.Writes
+
 // take makes the credential serve writes as for a cloud, signing a request
 // to endpoint that is never sent: AWS assumes the role, Google Cloud asks
 // IAM Credentials for the service account's token, Azure asks Microsoft
@@ -129,7 +142,7 @@ var take = func(ctx context.Context, kind, endpoint, as string) (sign, iam func(
 	if _, region, ok := iamOf(as); kind == "aws" && ok {
 		sign, iam, err = cloud.AWSAs(each, endpoint, as, "iam", region)
 	} else {
-		sign, err = cloud.Request(each, kind, endpoint, as)
+		sign, err = writeCredential(each, kind, endpoint, as)
 	}
 	if err != nil {
 		return nil, nil, err

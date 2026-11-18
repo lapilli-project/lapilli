@@ -18,7 +18,6 @@ import (
 	"lapilli.dev/internal/cloud"
 	"lapilli.dev/internal/egress"
 	"lapilli.dev/internal/prom"
-	"lapilli.dev/internal/serve"
 	"lapilli.dev/internal/source"
 )
 
@@ -83,6 +82,35 @@ func ask(req *http.Request) (http.Header, []byte, error) {
 	return resp.Header, b, nil
 }
 
+// cloudSaid is said for what a cloud answered, or an error in asking it:
+// redacted first as the run redacts, so that what it knows is said by
+// what it is, then without any other GUID or run of ten digits or more,
+// which a cloud's error names beside what was asked (an object's id, a
+// project's number). Lapilli's own words aren't so read.
+func (p *run) cloudSaid(err error) string {
+	if err == nil {
+		return ""
+	}
+	return p.cloudSaidText(err.Error())
+}
+
+func (p *run) cloudSaidText(s string) string {
+	if p.c.Scrubber != nil {
+		s = p.c.Scrubber(p.hiddenSaid...)(p.c.Scrubber(p.hidden...)(s))
+	}
+	return saidText(cloudIDs(s))
+}
+
+var (
+	guidText   = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
+	digitsText = regexp.MustCompile(`\b[0-9]{10,}\b`)
+)
+
+// cloudIDs is s without a GUID or a run of ten digits or more.
+func cloudIDs(s string) string {
+	return digitsText.ReplaceAllString(guidText.ReplaceAllString(s, "[an id]"), "[a number]")
+}
+
 // errorText is what an API's error says, its code and message, as the
 // APIs asked here give them: IAM's query API in XML (Error, Code and
 // Message), Google's and Azure's JSON (error, its code or status and
@@ -141,23 +169,20 @@ func (p *run) allowAsking() {
 	if host, path, ok := at(s.Grafana); ok && s.ChangesGrafanaToken != "" {
 		a.add(allow{api: "grafana", method: http.MethodGet, host: host, path: path + grafanaPermissions})
 	}
-	if s.ChangesGoogleServiceAccount != "" {
-		for _, x := range googleProjects(s.Alarms) {
+	{
+		for _, x := range p.googleProjects() {
 			a.add(allow{api: "iam:google", method: http.MethodPost, host: crmHost, path: "/v1/projects/" + x.project + ":testIamPermissions",
 				body: onlyPermissions})
 		}
 	}
 	if role := s.ChangesAWSRole; role != "" {
 		if host, _, ok := iamOf(role); ok {
-			a.add(allow{api: "iam:aws", method: http.MethodPost, host: host, path: "/", form: simulateOnly(role)})
+			a.add(allow{api: "iam:aws", method: http.MethodPost, host: host, path: "/", form: simulateOnly(role, p.awsRegions())})
 		}
 	}
-	if s.ChangesAzureClientID != "" {
-		for _, sc := range p.azureScopes() {
-			a.add(allow{api: "iam:azure", method: http.MethodGet, host: sc.host, path: sc.path + azurePermissionsPath,
-				query: exactly("api-version", azurePermissionsAPI)})
-		}
-	}
+	// Azure's are allowed as they are asked (azureList): each at its scope,
+	// a path and a query exactly, and the resources the alert rules read
+	// name, learned.
 }
 
 // hideScopes has the report redact what the URLs of --alarms and --ruler
@@ -222,15 +247,21 @@ var (
 	grafanaRuleWrites = []string{"alert.rules:write", "alert.rules:delete", "alert.rules:create", "alert.provisioning.provenance:write"}
 )
 
+// mostFolders is how many folders a token may read are counted, at most.
+const mostFolders = 10000
+
 // grafanaMay judges what a token may do, from Grafana's list of its
 // actions: ok when it reads and writes every rule; a problem, naming what
 // it lacks, when it can't make every change serve makes; unknown when it
 // writes folder by folder, which rule is in which folder not read here.
 func grafanaMay(perms map[string][]string) Item {
 	has := func(a string) bool { return len(perms[a]) > 0 }
+	// A scope that covers every folder: an empty one covers none, as
+	// Grafana's evaluator matches it (pkg/services/accesscontrol's
+	// evaluator.go, match: false for an empty scope).
 	everywhere := func(a string) bool {
 		for _, sc := range perms[a] {
-			if sc == "" || sc == "*" || sc == "folders:*" || sc == "folders:uid:*" {
+			if sc == "*" || sc == "folders:*" || sc == "folders:uid:*" {
 				return true
 			}
 		}
@@ -264,14 +295,22 @@ func grafanaMay(perms map[string][]string) Item {
 	default:
 		// The folders it may read, but for Grafana's own: the root
 		// (general) and "Shared with me", which hold no alert rule.
-		var folders []string
+		// Counted once each, mostFolders at most: a list of 4 MB is some
+		// 190,000 of them.
+		folders := map[string]bool{}
 		for _, sc := range perms["folders:read"] {
-			if uid, ok := strings.CutPrefix(sc, "folders:uid:"); ok && uid != "general" && uid != "sharedwithme" && !slices.Contains(folders, uid) {
-				folders = append(folders, uid)
+			if len(folders) > mostFolders {
+				break
+			}
+			if uid, ok := strings.CutPrefix(sc, "folders:uid:"); ok && uid != "general" && uid != "sharedwithme" {
+				folders[uid] = true
 			}
 		}
-		n := len(folders)
-		it.State, it.What = Unknown, fmt.Sprintf("--changes-grafana-token-file's token may write alert rules folder by folder: it may read %s", plural(n, "folder"))
+		n := plural(len(folders), "folder")
+		if len(folders) > mostFolders {
+			n = fmt.Sprintf("more than %d folders", mostFolders)
+		}
+		it.State, it.What = Unknown, "--changes-grafana-token-file's token may write alert rules folder by folder: it may read "+n
 		it.Why = "Grafana checks each rule's folder as it writes it, and which folder each rule is in isn't read here: a rule in a folder it may not read is refused then"
 		it.Fix = "to write in every folder, give its service account the Admin role (alert.provisioning:write); or give it the Editor role on each folder the rules are in"
 	}
@@ -424,11 +463,13 @@ var googlePoliciesPath = regexp.MustCompile(`^/v3/projects/([a-z0-9][-a-z0-9.:]{
 
 type googleProject struct{ src, project string }
 
-// googleProjects are the projects of Google's --alarms, each once.
-func googleProjects(alarms []serve.AlarmsAt) []googleProject {
+// googleProjects are the projects of Google's --alarms that --changes-in
+// names a policy of, each once: serve writes in no other.
+func (p *run) googleProjects() []googleProject {
+	s := p.c.Serve
 	var out []googleProject
-	for _, a := range alarms {
-		if k, _ := source.AlarmsKind(a.URL); k != source.AlarmsGoogle {
+	for _, a := range s.Alarms {
+		if k, _ := source.AlarmsKind(a.URL); k != source.AlarmsGoogle || !slices.ContainsFunc(s.ChangesIn, func(x string) bool { return strings.HasPrefix(x, a.Source+":") }) {
 			continue
 		}
 		u, err := url.Parse(a.URL)
@@ -466,31 +507,31 @@ func (p *run) googleWrites(ctx context.Context, w writer) Item {
 	each, cancel := context.WithTimeout(ctx, eachTime)
 	defer cancel()
 	var oks, problems, unknowns []string
-	projects := googleProjects(p.c.Serve.Alarms)
+	projects := p.googleProjects()
 	if len(projects) == 0 {
 		return verdictOf(id, w.flag, nil, nil, nil, "", "")
 	}
 	sign, err := googleAs(each, w.who, readOnly)
 	if err != nil {
-		return Item{ID: id, State: Unknown, What: "whether " + w.flag + " may write isn't asked", Why: said(err)}
+		return Item{ID: id, State: Unknown, What: "whether " + w.flag + " may write isn't asked", Why: p.cloudSaid(err)}
 	}
 	for _, x := range projects {
 		where := "in the project of --alarms " + x.src
 		body, _ := json.Marshal(map[string][]string{"permissions": googleAlarmWrites})
 		req, err := http.NewRequestWithContext(each, http.MethodPost, crmHost+"/v1/projects/"+x.project+":testIamPermissions", bytes.NewReader(body))
 		if err != nil {
-			unknowns = append(unknowns, where+": "+said(err))
+			unknowns = append(unknowns, where+": "+p.cloudSaid(err))
 			continue
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("User-Agent", p.agent())
 		if err := sign(req); err != nil {
-			unknowns = append(unknowns, where+": "+said(err))
+			unknowns = append(unknowns, where+": "+p.cloudSaid(err))
 			continue
 		}
 		_, b, err := ask(req)
 		if err != nil {
-			unknowns = append(unknowns, where+": Cloud Resource Manager didn't say: "+said(err))
+			unknowns = append(unknowns, where+": Cloud Resource Manager didn't say: "+p.cloudSaid(err))
 			continue
 		}
 		var out struct {
@@ -512,6 +553,8 @@ func (p *run) googleWrites(ctx context.Context, w writer) Item {
 		}
 		oks = append(oks, where+": it holds "+strings.Join(googleAlarmWrites, ", "))
 	}
-	return verdictOf(id, w.flag, oks, problems, unknowns, "the alerting policies' create, update and delete, in "+plural(len(projects), "project")+", as testIamPermissions says",
+	return verdictOf(id, w.flag, oks, problems, unknowns, "the alerting policies' create, update and delete, in "+plural(len(projects), "project")+
+		", as testIamPermissions says of the project's allow policies; whether its answer counts IAM deny policies, principal access boundaries or VPC "+
+		"Service Controls isn't documented, so those aren't judged",
 		"give the service account the permissions named on the project (charts/lapilli/README.md has the least privilege)")
 }

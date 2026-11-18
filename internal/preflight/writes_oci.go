@@ -6,18 +6,24 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/source"
 )
 
 // ---- OCI ----
 
 // What serve's writes to OCI's alarms as --changes-oci-config's user
-// need: UpdateAlarm takes ALARM_UPDATE, which only manage alarms gives,
-// and METRIC_READ, which read metrics gives
-// (https://docs.oracle.com/en-us/iaas/Content/Identity/Reference/monitoringpolicyreference.htm).
-// serve never deletes nor makes again an OCI alarm.
+// need: UpdateAlarm takes ALARM_UPDATE, which only manage alarms gives, in
+// the alarm's compartment, and METRIC_READ, which read metrics gives, "for
+// the metric compartment and metric namespace"
+// (https://docs.oracle.com/en-us/iaas/Content/Identity/Reference/monitoringpolicyreference.htm):
+// the alarm's metricCompartmentId, the tenancy where its metric is read in
+// the subtree (metricCompartmentIdInSubtree: "requires the user to have
+// tenancy-level permissions"). serve never deletes nor makes again an OCI
+// alarm.
 var ociNeeds = []string{"ALARM_UPDATE", "METRIC_READ"}
 
 // ociSays is how a policy grants what is needed, for the item.
@@ -27,10 +33,12 @@ var ociSays = map[string]string{"ALARM_UPDATE": "manage alarms", "METRIC_READ": 
 // below the tenancy at most, so eight levels; the user's groups, each a
 // read; the pages of each list; the statements, all told.
 const (
-	mostLevels     = 8
-	mostGroups     = 20
-	mostStatements = 5000
-	ociVersion     = "/20160918"
+	mostLevels       = 8
+	mostGroups       = 20
+	mostMemberships  = 1000
+	mostCompartments = 10
+	mostStatements   = 5000
+	ociVersion       = "/20160918"
 )
 
 // ociStatement is a policy statement as far as it is read: allow, deny,
@@ -247,11 +255,12 @@ const (
 	yes
 )
 
-// ociGroups are the user's groups: their OCIDs, the names of those read,
-// and whether some weren't read.
+// ociGroups are the user's groups: the OCIDs and the names of those read
+// and ACTIVE; more, the OCIDs of those not read, past mostGroups; and
+// whether some weren't read, those or past mostMemberships.
 type ociGroups struct {
-	ids, names []string
-	unread     bool
+	ids, names, more []string
+	unread           bool
 }
 
 // applies says whether a statement is of the user: any user; any group,
@@ -266,12 +275,18 @@ func (x ociStatement) applies(g ociGroups) tri {
 		case "any-user":
 			t = yes
 		case "any-group":
-			if len(g.ids) > 0 {
+			switch {
+			case len(g.ids) > 0:
 				t = yes
+			case len(g.more) > 0 || g.unread:
+				t = maybe
 			}
 		case "group-id":
-			if containsFold(g.ids, s.name) {
+			switch {
+			case containsFold(g.ids, s.name):
 				t = yes
+			case containsFold(g.more, s.name) || g.unread:
+				t = maybe
 			}
 		case "group":
 			switch {
@@ -327,7 +342,8 @@ type ociCompartment struct{ id, name string }
 // path from one under it (policies.htm, "If you attach the policy to the
 // compartment or its parent, you can simply specify the compartment name.
 // If you attach the policy further up the hierarchy, you must specify the
-// path"). With every compartment of the tenancy read (subtree), only the
+// path"); the compartment itself by its own name is maybe (below). With
+// a metric read in every compartment of the tenancy (subtree), only the
 // tenancy covers them all; another is maybe.
 func (l ociLoc) covers(chain []ociCompartment, k int, subtree bool) tri {
 	switch {
@@ -357,8 +373,12 @@ func (l ociLoc) covers(chain []ociCompartment, k int, subtree bool) tri {
 			return yes
 		}
 	}
+	// The compartment the policy is attached to, by its own name: a
+	// compartment under it of the same name, which the name would read as
+	// as well, can't be ruled out without listing its children, which
+	// isn't asked.
 	if len(l.path) == 1 && k > 0 && strings.EqualFold(chain[k].name, l.path[0]) {
-		return yes
+		return maybe
 	}
 	return no
 }
@@ -430,12 +450,6 @@ func ociJudge(chain []ociCompartment, policies [][]string, g ociGroups, subtree 
 	return j
 }
 
-// ociTarget is a compartment OCI's --alarms reads alarms in.
-type ociTarget struct {
-	src, compartment string
-	subtree          bool
-}
-
 // ociReader reads OCI's Identity API as the user, allowing each request
 // as it learns what it is.
 type ociReader struct {
@@ -444,6 +458,8 @@ type ociReader struct {
 	host     string
 	tenancy  string
 	compared int // the statements read
+	// read are the statements of each compartment's policies, read once.
+	read map[string][]string
 }
 
 // get asks Identity for path, with query, once allowed; gives the answer
@@ -522,19 +538,28 @@ func (o *ociReader) list(ctx context.Context, path string, q url.Values, each fu
 	}
 }
 
-// groups reads the user's groups: its memberships in the tenancy, then
-// each group, mostGroups at most, for its name.
+// groups reads the user's groups: its ACTIVE memberships in the tenancy,
+// mostMemberships at most, then each group, mostGroups at most, for its
+// name, if it is ACTIVE. A membership or a group in another state gives
+// the user nothing.
 func (o *ociReader) groups(ctx context.Context, user string) (ociGroups, error) {
 	var g ociGroups
+	seen := map[string]bool{}
 	err := o.list(ctx, "/userGroupMemberships", url.Values{"compartmentId": {o.tenancy}, "userId": {user}, "limit": {"1000"}}, func(b []byte) error {
 		var ms []struct {
 			GroupID string `json:"groupId"`
+			State   string `json:"lifecycleState"`
 		}
 		if err := json.Unmarshal(b, &ms); err != nil {
 			return fmt.Errorf("not a list of group memberships: %w", err)
 		}
 		for _, m := range ms {
-			if m.GroupID != "" && !containsFold(g.ids, m.GroupID) {
+			switch {
+			case m.GroupID == "" || m.State != "ACTIVE" || seen[m.GroupID]:
+			case len(g.ids) >= mostMemberships:
+				g.unread = true
+			default:
+				seen[m.GroupID] = true
 				g.ids = append(g.ids, m.GroupID)
 			}
 		}
@@ -543,25 +568,31 @@ func (o *ociReader) groups(ctx context.Context, user string) (ociGroups, error) 
 	if err != nil {
 		return g, err
 	}
+	var active []string
 	for i, id := range g.ids {
-		o.p.hide("--changes-oci-config's group", id)
 		if i >= mostGroups {
-			g.unread = true
-			continue
+			g.unread, g.more = true, g.ids[i:]
+			break
 		}
+		o.p.hide("--changes-oci-config's group", id)
 		b, _, err := o.get(ctx, "/groups/"+url.PathEscape(id), nil, nil)
 		if err != nil {
 			return g, err
 		}
 		var grp struct {
-			Name string `json:"name"`
+			Name  string `json:"name"`
+			State string `json:"lifecycleState"`
 		}
 		if err := json.Unmarshal(b, &grp); err != nil {
 			return g, fmt.Errorf("not a group: %w", err)
 		}
 		o.p.hideSaid("--changes-oci-config's group's name", grp.Name)
-		g.names = append(g.names, grp.Name)
+		if grp.State == "ACTIVE" {
+			active = append(active, id)
+			g.names = append(g.names, grp.Name)
+		}
 	}
+	g.ids = active
 	return g, nil
 }
 
@@ -601,15 +632,26 @@ func (o *ociReader) chain(ctx context.Context, c string) ([]ociCompartment, erro
 // compartment of chain, mostStatements all told.
 func (o *ociReader) policies(ctx context.Context, chain []ociCompartment) ([][]string, error) {
 	out := make([][]string, len(chain))
+	if o.read == nil {
+		o.read = map[string][]string{}
+	}
 	for k, c := range chain {
+		if st, ok := o.read[c.id]; ok {
+			out[k] = st
+			continue
+		}
 		err := o.list(ctx, "/policies", url.Values{"compartmentId": {c.id}, "limit": {"1000"}}, func(b []byte) error {
 			var ps []struct {
 				Statements []string `json:"statements"`
+				State      string   `json:"lifecycleState"`
 			}
 			if err := json.Unmarshal(b, &ps); err != nil {
 				return fmt.Errorf("not a list of policies: %w", err)
 			}
 			for _, p := range ps {
+				if p.State != "ACTIVE" {
+					continue // one being made, or deleted, gives nothing
+				}
 				o.compared += len(p.Statements)
 				if o.compared > mostStatements {
 					return fmt.Errorf("more than %d statements", mostStatements)
@@ -621,89 +663,162 @@ func (o *ociReader) policies(ctx context.Context, chain []ociCompartment) ([][]s
 		if err != nil {
 			return nil, err
 		}
+		o.read[c.id] = out[k]
 	}
 	return out, nil
 }
 
-// ociTargets are the compartments OCI's --alarms read alarms in.
-func (p *run) ociTargets() []ociTarget {
-	var out []ociTarget
-	for _, a := range p.c.Serve.Alarms {
+// ociAlarm is an alarm --changes-in names, as this run read it: its
+// compartment, its metric's, and whether its metric is read in every
+// compartment of the tenancy.
+type ociAlarm struct {
+	compartment, metric string
+	metricSubtree       bool
+}
+
+// ociAlarms are the alarms of OCI's --alarms that --changes-in names, as
+// read in this run (rules.read): an alarm is written where it is, its
+// metric read where it is, and serve writes no other. unnamed says of an
+// entry that names none read.
+func (p *run) ociAlarms() (alarms []ociAlarm, unnamed []string) {
+	s := p.c.Serve
+	for _, a := range s.Alarms {
 		if k, _ := source.AlarmsKind(a.URL); k != source.AlarmsOCI {
 			continue
 		}
-		u, err := url.Parse(a.URL)
-		if err != nil {
-			continue
+		for _, pat := range s.ChangesIn {
+			src, name, ok := strings.Cut(pat, ":")
+			if !ok || src != a.Source {
+				continue
+			}
+			found := 0
+			for _, d := range p.docs["alarms:"+a.Source] {
+				if !namedBy(name, rules.AlarmName(d.Data, "oci")) {
+					continue
+				}
+				var doc struct {
+					Data []struct {
+						Compartment   string `json:"compartmentId"`
+						Metric        string `json:"metricCompartmentId"`
+						MetricSubtree bool   `json:"metricCompartmentIdInSubtree"`
+					} `json:"data"`
+				}
+				if json.Unmarshal(d.Data, &doc) != nil || len(doc.Data) != 1 || doc.Data[0].Compartment == "" || doc.Data[0].Metric == "" {
+					unnamed = append(unnamed, "--alarms "+a.Source+": an alarm read without its compartments")
+					continue
+				}
+				found++
+				x := ociAlarm{doc.Data[0].Compartment, doc.Data[0].Metric, doc.Data[0].MetricSubtree}
+				if !slices.Contains(alarms, x) {
+					alarms = append(alarms, x)
+				}
+			}
+			if found == 0 {
+				unnamed = append(unnamed, "--alarms "+a.Source+": no alarm read that an entry of --changes-in names")
+			}
 		}
-		q := u.Query()
-		out = append(out, ociTarget{a.Source, q.Get("compartmentId"), q.Get("compartmentIdInSubtree") == "true"})
 	}
-	return out
+	slices.Sort(unnamed)
+	return alarms, slices.Compact(unnamed)
 }
 
-// ociWrites reads the user's groups and the policies of the compartment
-// OCI's alarms are in and of each above it, and judges what they give the
-// user there: manage alarms and read metrics, as UpdateAlarm takes. A
+// namedBy reports whether an entry of --changes-in names a name, as serve
+// reads one: the name, or a prefix ending in *.
+func namedBy(pat, name string) bool {
+	if p, ok := strings.CutSuffix(pat, "*"); ok {
+		return strings.HasPrefix(name, p)
+	}
+	return pat == name
+}
+
+// ociWrites reads the user's groups and, for each alarm --changes-in
+// names, the policies of its compartment and of each above it, and of its
+// metric's, and judges what they give the user: manage alarms where the
+// alarm is, read metrics where its metric is, as UpdateAlarm takes. A
 // statement with a condition, or one not understood, is never a grant.
 // Reading them takes inspect groups, users, compartments and policies in
 // the tenancy (iampolicyreference.htm): without it, the item is unknown.
 func (p *run) ociWrites(ctx context.Context, w writer) Item {
 	id := w.id
-	targets := p.ociTargets()
-	if len(targets) == 0 {
-		return verdictOf(id, w.flag, nil, nil, nil, "", "")
+	alarms, unnamed := p.ociAlarms()
+	var oks, problems, unknowns []string
+	unknowns = append(unknowns, unnamed...)
+	if len(alarms) == 0 {
+		return verdictOf(id, w.flag, nil, nil, unknowns, "", "")
 	}
 	u, err := ociConfigUser(w.who)
 	if err != nil {
-		return Item{ID: id, State: Unknown, What: "whether " + w.flag + " may write isn't asked", Why: said(err)}
+		return Item{ID: id, State: Unknown, What: "whether " + w.flag + " may write isn't asked", Why: p.cloudSaid(err)}
 	}
 	each, cancel := context.WithTimeout(ctx, eachTime)
 	defer cancel()
 	o := &ociReader{p: p, sign: w.sign, host: u.Identity, tenancy: u.Tenancy}
 	cantRead := func(err error) Item {
-		return Item{ID: id, State: Unknown, What: "whether " + w.flag + " may write isn't known: its user's groups and the policies couldn't be read", Why: said(err),
+		return Item{ID: id, State: Unknown, What: "whether " + w.flag + " may write isn't known: its user's groups and the policies couldn't be read", Why: p.cloudSaid(err),
 			Fix: "let the user inspect groups, users, compartments and policies in the tenancy, which reads them and changes nothing, and this is known; serve itself never needs it"}
 	}
 	g, err := o.groups(each, u.User)
 	if err != nil {
 		return cantRead(err)
 	}
-	var oks, problems, unknowns []string
-	for _, t := range targets {
-		where := "in the compartment of --alarms " + t.src
-		if t.subtree {
-			where = "in every compartment of the tenancy, --alarms " + t.src + "'s"
+	// Each compartment asked once, for what is needed there: ALARM_UPDATE
+	// where an alarm is, METRIC_READ where its metric is (the tenancy, in
+	// the subtree, where only a grant in the tenancy covers it).
+	type need struct {
+		compartment, perm string
+		subtree           bool
+	}
+	var needs []need
+	for _, a := range alarms {
+		m := need{a.metric, "METRIC_READ", a.metricSubtree}
+		if a.metricSubtree {
+			m.compartment = u.Tenancy
 		}
-		c := t.compartment
-		if t.subtree {
-			c = u.Tenancy
-		}
-		chain, err := o.chain(each, c)
-		if err != nil {
-			return cantRead(err)
-		}
-		pols, err := o.policies(each, chain)
-		if err != nil {
-			return cantRead(err)
-		}
-		j := ociJudge(chain, pols, g, t.subtree)
-		var lacks, perhaps []string
-		for _, n := range ociNeeds {
-			switch {
-			case j.granted[n]:
-			case j.perhaps[n]:
-				perhaps = append(perhaps, ociSays[n])
-			default:
-				lacks = append(lacks, ociSays[n])
+		for _, n := range []need{{a.compartment, "ALARM_UPDATE", false}, m} {
+			if !slices.Contains(needs, n) {
+				needs = append(needs, n)
 			}
 		}
-		switch {
-		case len(lacks) > 0 && !t.subtree:
-			problems = append(problems, where+": no policy gives the user "+strings.Join(lacks, ", "))
-		case len(lacks) > 0:
-			unknowns = append(unknowns, where+": no policy of the tenancy's gives the user "+strings.Join(lacks, ", ")+" in the tenancy, and those in its compartments aren't read")
-		case len(perhaps) > 0 || j.denies > 0:
+	}
+	type read struct {
+		chain    []ociCompartment
+		policies [][]string
+	}
+	cache := map[string]read{}
+	for _, n := range needs {
+		where := "where an alarm --changes-in names is"
+		if n.perm == "METRIC_READ" {
+			where = "where its metric is"
+			if n.subtree {
+				where = "in every compartment of the tenancy, where its metric is read"
+			}
+		}
+		r, ok := cache[n.compartment]
+		if !ok {
+			if len(cache) >= mostCompartments {
+				unknowns = append(unknowns, where+": past the first "+fmt.Sprint(mostCompartments)+" compartments, not asked")
+				continue
+			}
+			chain, err := o.chain(each, n.compartment)
+			if err != nil {
+				return cantRead(err)
+			}
+			pols, err := o.policies(each, chain)
+			if err != nil {
+				return cantRead(err)
+			}
+			r = read{chain, pols}
+			cache[n.compartment] = r
+		}
+		j := ociJudge(r.chain, r.policies, g, n.subtree)
+		switch says := ociSays[n.perm]; {
+		case j.granted[n.perm] && j.denies == 0:
+			oks = append(oks, where+": "+says)
+		case !j.granted[n.perm] && !j.perhaps[n.perm] && n.subtree:
+			unknowns = append(unknowns, where+": no policy of the tenancy's gives the user "+says+" in the tenancy, and those in its compartments aren't read")
+		case !j.granted[n.perm] && !j.perhaps[n.perm]:
+			problems = append(problems, where+": no policy gives the user "+says)
+		default:
 			var why []string
 			if j.conds > 0 {
 				why = append(why, "a policy with a condition")
@@ -715,13 +830,11 @@ func (p *run) ociWrites(ctx context.Context, w writer) Item {
 				why = append(why, "a statement not understood")
 			}
 			if j.others > 0 {
-				why = append(why, "a group not read, a permission list or a location only partly covering")
+				why = append(why, "a group not read, a permission list, a compartment named by its own name or a location only partly covering")
 			}
-			unknowns = append(unknowns, where+": "+strings.Join(perhaps, ", ")+" given only by "+strings.Join(why, ", ")+", which isn't counted as a grant")
-		default:
-			oks = append(oks, where+": manage alarms, read metrics")
+			unknowns = append(unknowns, where+": "+says+" given only by "+strings.Join(why, ", ")+", which isn't counted as a grant")
 		}
 	}
-	return verdictOf(id, w.flag, oks, problems, unknowns, fmt.Sprintf("as %s of the policies above the alarms say, read and judged here", plural(o.compared, "statement")),
-		"give the user's group a policy to manage alarms and read metrics in the compartment (charts/lapilli/README.md has the least privilege)")
+	return verdictOf(id, w.flag, oks, problems, unknowns, fmt.Sprintf("as %s of the policies above the alarms and their metrics say, read and judged here", plural(o.compared, "statement")),
+		"give the user's group a policy to manage alarms where each alarm is, and read metrics where its metric is (charts/lapilli/README.md has the least privilege)")
 }

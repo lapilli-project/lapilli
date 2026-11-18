@@ -602,21 +602,30 @@ kind of ruler, are used only for writes:
     "IsCustom": true,
     "Actions": [
       "Microsoft.AlertsManagement/prometheusRuleGroups/read",
-      "Microsoft.AlertsManagement/prometheusRuleGroups/write"
+      "Microsoft.AlertsManagement/prometheusRuleGroups/write",
+      "Microsoft.Authorization/permissions/read",
+      "Microsoft.Authorization/denyAssignments/read",
+      "Microsoft.Authorization/locks/read"
     ],
     "AssignableScopes": ["/subscriptions/SUB/resourceGroups/RG"]
   }
   ```
 
-  It has no `delete`: Lapilli never deletes a rule group.
+  It has no `delete`: Lapilli never deletes a rule group. The three
+  `Microsoft.Authorization` reads are `lapilli preflight`'s, below; serve
+  doesn't need them.
 
 `lapilli preflight` (docs/design/preflight.md) says whether each write
 identity may make these writes, asked without writing: for the Amazon role,
 IAM's policy simulator, which takes **`iam:SimulatePrincipalPolicy` on the
 role's own ARN** (it shows the role only what its own policies allow; serve
 never needs it, and without it `changes.aws` is unknown); for Azure's
-identity, its permissions on the resource group, or on the rule group
-named.
+identity, its permissions, the deny assignments and the locks at the
+resource group, or at the rule group named, and the subscription's locks,
+which take `Microsoft.Authorization/permissions/read`,
+`denyAssignments/read` and `locks/read` (without them, `changes.azure` is
+unknown), and its read of what each rule group names (the workspace, an
+action group).
 
 Without one, a Mimir's or a Cortex's writes are sent with no token, for a
 ruler reached only inside the cluster, and Amazon's and Azure's with the
@@ -703,14 +712,24 @@ for writes, is given only this:
       "Microsoft.Insights/scheduledQueryRules/read",
       "Microsoft.Insights/scheduledQueryRules/write",
       "Microsoft.Insights/activityLogAlerts/read",
-      "Microsoft.Insights/activityLogAlerts/write"
+      "Microsoft.Insights/activityLogAlerts/write",
+      "Microsoft.Insights/actionGroups/read",
+      "Microsoft.Authorization/permissions/read",
+      "Microsoft.Authorization/denyAssignments/read",
+      "Microsoft.Authorization/locks/read"
     ],
     "AssignableScopes": ["/subscriptions/SUB/resourceGroups/RG"]
   }
   ```
 
   Only a PromQL metric alert is ever deleted, so only `metricAlerts` has
-  `delete`.
+  `delete`. Azure Monitor asks, as an alert rule is written, for "read
+  permission on the target resource of the alert rule" and "on any action
+  group associated to the alert rule" (alerts-create-metric-alert-rule):
+  `actionGroups/read` here, assigned also where the action groups are,
+  and read on each rule's targets (Reader, or Monitoring Reader, on
+  them). The three `Microsoft.Authorization` reads are `lapilli
+  preflight`'s; serve doesn't need them.
 - Google Cloud: `serve.changes.googleServiceAccount`, a service account the
   pod's identity impersonates (it holds
   `roles/iam.serviceAccountTokenCreator` on that one account, and nothing
@@ -752,14 +771,20 @@ for writes, is given only this:
 without writing (docs/design/preflight.md): CloudWatch's role through IAM's
 policy simulator, which takes `iam:SimulatePrincipalPolicy` on the role's
 own ARN (without it, `changes.aws` is unknown); Azure's identity by its
-permissions on the resource group of each alert rule named (one given on
-the alert rule alone reads as unknown); Google's service account by Cloud
-Resource Manager's `testIamPermissions` on the project, which needs no
-permission; OCI's user by its groups and the policies of the compartment
-and those above it, which takes `inspect groups`, `inspect users`,
-`inspect compartments` and `inspect policies` in the tenancy. The OCI
-policy above has a condition, which `lapilli preflight` never counts as a
-grant: it says `changes.oci` is unknown, "a policy with a condition".
+permissions, the deny assignments and the locks at the resource group of
+each alert rule named (one given on the alert rule alone reads as
+unknown), and its read on what each rule names, with the three
+`Microsoft.Authorization` reads in the role above; Google's service
+account, or without it the pod's own identity, by Cloud Resource
+Manager's `testIamPermissions` on the project, which needs no
+permission; OCI's user by its groups and the policies of each alarm's
+compartment and its metric's compartment and those above them, which
+takes `inspect groups`, `inspect users`, `inspect compartments` and
+`inspect policies` in the tenancy (give `read metrics` where each
+alarm's metric is, its `metricCompartmentId`, which may be another
+compartment than the alarm's). The OCI policy above has a condition,
+which `lapilli preflight` never counts as a grant: it says `changes.oci`
+is unknown, "a policy with a condition".
 
 None of the four was run against an account: each was tested against a
 stand-in answering as its API documents show.

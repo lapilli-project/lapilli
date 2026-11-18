@@ -262,6 +262,7 @@ func TestPreflightAgainstFakes(t *testing.T) {
 		return true
 	})
 	cw := alarmtest.NewCloudWatch("eu-west-1")
+	cw.Account = "123456789012" // the role's: serve writes no alarm of another account
 	cw.Add(map[string]any{"AlarmName": "QueueDepth", "Namespace": "AWS/SQS", "MetricName": "ApproximateNumberOfMessagesVisible",
 		"Statistic": "Average", "Period": 60, "EvaluationPeriods": 5, "Threshold": 1000, "ComparisonOperator": "GreaterThanThreshold"}, "OK", nil)
 	cloudwatch := newFake(t, "CloudWatch", func(w http.ResponseWriter, r *http.Request, _ url.Values) bool {
@@ -877,7 +878,7 @@ func TestPreflightWritesRedacted(t *testing.T) {
 	var out bytes.Buffer
 	run([]string{"preflight", "--json", "--rules", rules, "--prometheus", "http://127.0.0.1:1", "--alarms", "cw=https://monitoring.eu-west-1.amazonaws.com",
 		"--user-header", "X-Email", "--admins", "ops@example.com", "--changes", "--changes-aws-role", "arn:aws:iam::123456789012:role/lapilli-rules",
-		"--changes-in", "cw:checkout-*", "--check-content=false", "--check-replay=false"}, &out, io.Discard)
+		"--changes-in", "cw:Checkout", "--check-content=false", "--check-replay=false"}, &out, io.Discard)
 	var rep map[string]any
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())

@@ -217,11 +217,22 @@ func Request(ctx context.Context, kind, endpoint, as string) (func(*http.Request
 			return nil
 		}, nil
 	case "google":
-		return googleRequest(ctx, as)
+		return googleRequest(ctx, as, googleMonitoringRead)
 	case "oci":
 		return ociRequest(as)
 	}
 	return nil, fmt.Errorf("no credentials for %q to send with a request", kind)
+}
+
+// Writes authenticates a write to a cloud's API as Request does, but for
+// Google Cloud without as, where the pod's own token is asked for Cloud
+// Monitoring's write scope, monitoring, not the read's: a write sent with
+// a monitoring.read token is refused.
+func Writes(ctx context.Context, kind, endpoint, as string) (func(*http.Request) error, error) {
+	if kind == "google" && as == "" {
+		return googleRequest(ctx, "", googleMonitoring)
+	}
+	return Request(ctx, kind, endpoint, as)
 }
 
 // awsCredentials are the machine's or pod's own AWS credentials, loaded

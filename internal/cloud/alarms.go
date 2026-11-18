@@ -46,14 +46,15 @@ var googleSource = func(ctx context.Context, scope string) (oauth2.TokenSource, 
 }
 
 // googleRequest sends a token for Cloud Monitoring: the pod's own, from
-// Application Default Credentials, to read; or, with as, a service
-// account's, impersonated through IAM Credentials' generateAccessToken with
-// the pod's identity, to write.
-func googleRequest(ctx context.Context, as string) (func(*http.Request) error, error) {
+// Application Default Credentials, of scope own (monitoring.read to read,
+// monitoring to write); or, with as, a service account's, impersonated
+// through IAM Credentials' generateAccessToken with the pod's identity, to
+// write.
+func googleRequest(ctx context.Context, as, own string) (func(*http.Request) error, error) {
 	var ts oauth2.TokenSource
 	var err error
 	if as == "" {
-		if ts, err = googleSource(ctx, googleMonitoringRead); err != nil {
+		if ts, err = googleSource(ctx, own); err != nil {
 			return nil, fmt.Errorf("Google credentials: %w", err)
 		}
 	} else {
@@ -77,9 +78,23 @@ func googleRequest(ctx context.Context, as string) (func(*http.Request) error, e
 // through IAM Credentials' generateAccessToken with the pod's identity, as
 // googleRequest does to write: lapilli preflight's, to ask Cloud Resource
 // Manager what the account may do (cloud-platform.read-only).
+//
+// Without as, the token is the pod's own, of scope, from Application
+// Default Credentials.
 func GoogleAs(ctx context.Context, as, scope string) (func(*http.Request) error, error) {
 	if as == "" {
-		return nil, errors.New("no service account to impersonate")
+		ts, err := googleSource(ctx, scope)
+		if err != nil {
+			return nil, fmt.Errorf("Google credentials: %w", err)
+		}
+		return func(req *http.Request) error {
+			t, err := ts.Token()
+			if err != nil {
+				return fmt.Errorf("Google credentials: %w", err)
+			}
+			req.Header.Set("Authorization", "Bearer "+t.AccessToken)
+			return nil
+		}, nil
 	}
 	base, err := googleSource(ctx, "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {

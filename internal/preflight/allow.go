@@ -82,10 +82,19 @@ func (a *allowlist) check(req *http.Request) error {
 			b.Close()
 		}
 		if strings.HasPrefix(req.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
-			form, _ = url.ParseQuery(string(raw))
+			var err error
+			if form, err = url.ParseQuery(string(raw)); err != nil {
+				return a.refuse()
+			}
 		}
 	}
-	q := req.URL.Query()
+	// A form or a query that doesn't read whole (a ; between its pairs,
+	// a bad escape) is refused: what reads of it would be judged, and the
+	// rest sent.
+	q, err := url.ParseQuery(req.URL.RawQuery)
+	if err != nil {
+		return a.refuse()
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, x := range a.allows {
@@ -107,6 +116,14 @@ func (a *allowlist) check(req *http.Request) error {
 		}
 	}
 	a.refused++
+	return ErrOffList
+}
+
+// refuse counts a request refused.
+func (a *allowlist) refuse() error {
+	a.mu.Lock()
+	a.refused++
+	a.mu.Unlock()
 	return ErrOffList
 }
 

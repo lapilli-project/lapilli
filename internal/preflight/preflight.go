@@ -153,6 +153,9 @@ type run struct {
 	// hidden are what the run learned is to be redacted, by flag;
 	// hiddenSaid what is to be redacted of what a server said only.
 	hidden, hiddenSaid [][2]string
+	// docs are the documents the rules were read from, by where
+	// (ruler, alarms:SOURCE): the alarms and the namespaces there are.
+	docs map[string][]rules.Doc
 }
 
 // hide has what is printed redact value, as of flag.

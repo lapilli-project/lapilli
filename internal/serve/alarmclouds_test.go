@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -366,5 +367,57 @@ func TestAlarmOneUnitAtATime(t *testing.T) {
 	az.jobs(ctx, false)
 	if u := state(t, az, locID(hd)); u.State != ledger.StateRefused || !strings.Contains(u.Reason, "changed in the cloud since the change") {
 		t.Errorf("undo over a criterion renamed since: %s %q", u.State, u.Reason)
+	}
+}
+
+// With --changes and Google's alarms but no --changes-google-service-
+// account, the pod's own identity writes: with a write credential of its
+// own (writeAuth, which asks the monitoring scope), not the reads', whose
+// token is of monitoring.read and is refused every write. With the
+// service account, it is impersonated, as before; other clouds' writes,
+// without their identity, stay the reads'.
+func TestGooglePodWritesWithTheWriteScope(t *testing.T) {
+	was, wasW := requestAuth, writeAuth
+	t.Cleanup(func() { requestAuth, writeAuth = was, wasW })
+	var asked []string
+	requestAuth = func(_ context.Context, kind, endpoint, as string) (func(*http.Request) error, error) {
+		asked = append(asked, "read "+kind+" "+as)
+		return func(r *http.Request) error { r.Header.Set("X-Signed", "read "+as); return nil }, nil
+	}
+	writeAuth = func(_ context.Context, kind, endpoint, as string) (func(*http.Request) error, error) {
+		asked = append(asked, "write "+kind+" "+as)
+		return func(r *http.Request) error { r.Header.Set("X-Signed", "write "+as); return nil }, nil
+	}
+	signedBy := func(s *Server, src string) string {
+		r, _ := http.NewRequest("GET", "https://example.invalid/", nil)
+		s.alarmWrites[src].Sign(r)
+		return r.Header.Get("X-Signed")
+	}
+	cfg := Config{Changes: true, Alarms: []AlarmsAt{{Source: "gcp", URL: "https://monitoring.googleapis.com/v3/projects/example-project/alertPolicies"},
+		{Source: "cw", URL: "https://monitoring.eu-west-1.amazonaws.com"}}}
+	s := &Server{cfg: cfg, log: slog.New(slog.DiscardHandler), now: time.Now}
+	if err := s.newAlarms(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := signedBy(s, "gcp"); got != "write " || !slices.Contains(asked, "write google ") {
+		t.Errorf("the pod's Google writes are signed %q; asked %v", got, asked)
+	}
+	if got := signedBy(s, "cw"); got != "read " || slices.Contains(asked, "write aws ") {
+		t.Errorf("CloudWatch's, without a role: %q; asked %v", got, asked)
+	}
+	asked = nil
+	cfg.ChangesGoogleServiceAccount = "writer@example-project.iam.gserviceaccount.com"
+	s = &Server{cfg: cfg, log: slog.New(slog.DiscardHandler), now: time.Now}
+	if err := s.newAlarms(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := signedBy(s, "gcp"); got != "read writer@example-project.iam.gserviceaccount.com" || slices.Contains(asked, "write google ") {
+		t.Errorf("with the service account: %q; asked %v", got, asked)
+	}
+	cfg.Changes, cfg.ChangesGoogleServiceAccount = false, ""
+	asked = nil
+	s = &Server{cfg: cfg, log: slog.New(slog.DiscardHandler), now: time.Now}
+	if err := s.newAlarms(context.Background()); err != nil || slices.Contains(asked, "write google ") {
+		t.Errorf("without --changes: %v %v", err, asked)
 	}
 }

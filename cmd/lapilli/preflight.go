@@ -54,9 +54,11 @@ production credentials. With --changes, what each write token or identity
 may write is asked of an API that says so without writing: Grafana's list
 of the token's actions, IAM's policy simulator (the role needs
 iam:SimulatePrincipalPolicy on its own ARN, or the item is unknown), Cloud
-Resource Manager's testIamPermissions, Azure's permissions of the identity,
-and OCI's policies (the user needs to inspect groups, users, compartments
-and policies in the tenancy; a policy with a condition is never a grant). What it prints is redacted as a pull request's
+Resource Manager's testIamPermissions, Azure's permissions, deny
+assignments and locks (Microsoft.Authorization's permissions, denyAssignments
+and locks read), and OCI's policies (the user needs to inspect groups,
+users, compartments and policies in the tenancy; a policy with a condition
+is never a grant). What it prints is redacted as a pull request's
 backtest comment is: the URLs given as their flag's name, their hosts and
 users, addresses, tenants, a --gcp-project; a secret by its file's path and
 length.
