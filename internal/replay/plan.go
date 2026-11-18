@@ -29,10 +29,22 @@ type Planned struct {
 // to be asked (a rule in LogQL needs a Loki, WithLogs). A rule whose
 // replay Run would fail before asking, as Unsupported, asks nothing.
 func Plan(h History, versions []Version, from, to time.Time, step time.Duration) Planned {
+	return PlanEach(h, [][]Version{versions}, from, to, step)
+}
+
+// PlanEach counts what RunEach would ask h for to replay each set of
+// versions over [from, to] at step, the sets sharing their requests as
+// RunEach shares them: a pull request's backtest counted before it is
+// queued, its rules before and after it set side by side.
+func PlanEach(h History, sets [][]Version, from, to time.Time, step time.Duration) Planned {
 	p := Planned{By: map[string]int{}}
 	seen := map[request]bool{}
 	names := map[string]int{"": 0}
-	for _, run := range lineUp(versions, from, to, step) {
+	var runs [][]stint
+	for _, versions := range sets {
+		runs = append(runs, lineUp(versions, from, to, step)...)
+	}
+	for _, run := range runs {
 		last := run[len(run)-1].Rule
 		if _, err := historyFor(h, last); err != nil {
 			continue

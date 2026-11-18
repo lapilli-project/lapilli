@@ -129,6 +129,21 @@ func longNamed(t *testing.T, s *Server) {
 // stopped, for test/a11y/axe.sh; /a11y-paths lists them.
 func TestA11yServe(t *testing.T) {
 	addr := serveAddr(t, "LAPILLI_A11Y_SERVE")
+	s, mux, paths := a11yServed(t)
+	mux.HandleFunc("GET /a11y-paths", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintln(w, strings.Join(paths, "\n"))
+	})
+	t.Logf("serving %d pages", len(paths))
+	serveTest(t, s, addr, mux)
+}
+
+// a11yBacktests is where TestA11yServe serves backtestsServer's pages.
+const a11yBacktests = "/pr-backtests"
+
+// a11yServed are the pages TestA11yServe serves, on mux, and their paths:
+// a11yServer's, and other deployments' under a path each.
+func a11yServed(t *testing.T) (*Server, *http.ServeMux, []string) {
+	t.Helper()
 	s, paths := a11yServer(t)
 	longNamed(t, s)
 	more, _ := statusStates(t, s) // each status kind drawn
@@ -150,12 +165,192 @@ func TestA11yServe(t *testing.T) {
 		mux.Handle(prefix+"/", http.StripPrefix(prefix, src.Handler()))
 		paths = append(paths, prefix+"/settings")
 	}
-	mux.HandleFunc("GET /a11y-paths", func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintln(w, strings.Join(paths, "\n"))
-	})
+	// The backtest port on, a backtest in each state on the Run history.
+	bt := backtestsServer(t)
+	bt.cfg.AllowedHosts = append(bt.cfg.AllowedHosts, "host.docker.internal")
+	mux.Handle(a11yBacktests+"/", http.StripPrefix(a11yBacktests, bt.Handler()))
+	paths = append(paths, a11yBacktests+"/runs")
 	mux.Handle("/", s.Handler())
-	t.Logf("serving %d pages", len(paths))
-	serveTest(t, s, addr, mux)
+	return s, mux, paths
+}
+
+// backtestsServer is serve with the backtest port on (btServer) and a pull
+// request backtest of each state kept, as the leader's lane leaves them:
+// done and failed within the second they started, done in 2m5s, failed in
+// 12s, of a plain token with no repository, one cancelled as it ran,
+// within the second, one superseded by a newer commit, one cancelled
+// while it waited, one running and one waiting. Each says which it is by
+// its rules that differ, 1 to 9 in that order.
+func backtestsServer(t *testing.T) *Server {
+	t.Helper()
+	ctx := context.Background()
+	s := btServer(t, nil, "", nil).s
+	at := now.Add(-3 * time.Hour)
+	n := 0
+	// Each of a pull request its token's ref names, as a CI's ID token's.
+	ask := func(trust, repo string, pr int64) string {
+		t.Helper()
+		n++
+		id := fmt.Sprintf("bt-%d", n)
+		if _, _, _, err := s.l.AskBacktest(ctx, ledger.BacktestAsk{Backtest: ledger.Backtest{ID: id, Trust: trust, Repository: repo, PullRequest: pr,
+			Commit: "0123abcd", Rules: n, Requests: 40, KeyHash: "k-" + id}, Body: []byte(`{"after":[]}`), BodyHash: "h-" + id,
+			Until: at.Add(2 * time.Hour), Queue: 20, PerTrust: 10, Supersede: pr > 0}, at); err != nil {
+			t.Fatal(err)
+		}
+		at = at.Add(10 * time.Minute)
+		return id
+	}
+	run := func(state string, took time.Duration, made int) {
+		t.Helper()
+		b, _, ok, err := s.l.StartBacktest(ctx, at)
+		if err != nil || !ok {
+			t.Fatalf("nothing to start: %t %v", ok, err)
+		}
+		why := ""
+		if state == ledger.BacktestFailed {
+			why = "the history didn't answer"
+		}
+		if err := s.l.EndBacktest(ctx, b.ID, state, why, made, nil, at.Add(took)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ask("alerts", "example/alerts", 1)
+	run(ledger.BacktestDone, 0, 37)
+	ask("monitoring-gitlab", "example/monitoring", 2)
+	run(ledger.BacktestFailed, 0, 3)
+	ask("forgejo", "example/forgejo-rules", 3)
+	run(ledger.BacktestDone, 2*time.Minute+5*time.Second, 80)
+	ask("plain", "", 0)
+	run(ledger.BacktestFailed, 12*time.Second, 9)
+	ask("forgejo", "example/forgejo-rules", 4)
+	run(ledger.BacktestCancelled, 0, 2)
+	ask("alerts", "example/alerts", 6)
+	ask("alerts", "example/alerts", 6) // the one before superseded
+	cancelled := ask("monitoring-gitlab", "example/monitoring", 8)
+	if ok, err := s.l.CancelBacktest(ctx, cancelled, at); err != nil || !ok {
+		t.Fatalf("cancelled: %t %v", ok, err)
+	}
+	if _, _, ok, err := s.l.StartBacktest(ctx, at); err != nil || !ok { // the newer commit's
+		t.Fatalf("nothing to start: %t %v", ok, err)
+	}
+	ask("forgejo", "example/forgejo-rules", 9)
+	return s
+}
+
+// backtestsShownIn are, by language, the Run history's backtests' column
+// heads, and what a backtest that ran and ended within the second it
+// started took.
+var backtestsShownIn = map[string]struct {
+	heads []string
+	under string
+}{
+	"en": {[]string{"Asked", "Trust entry", "Repository", "Rules that differ", "Queries", "Took", "How it ended"}, "under a second"},
+	"es": {[]string{"Pedido", "Entrada de confianza", "Repositorio", "Reglas que difieren", "Consultas", "Duración", "Cómo terminó"}, "menos de un segundo"},
+	"ja": {[]string{"依頼", "信頼エントリ", "リポジトリ", "違うルール", "クエリ数", "所要時間", "結果"}, "1秒未満"},
+	"ko": {[]string{"요청 시각", "신뢰 항목", "저장소", "달라진 규칙", "쿼리 수", "걸린 시간", "결과"}, "1초 미만"},
+}
+
+// backtestsTable is the Run history's backtests, as a page has them: its
+// column heads, and each row's cells by its rules that differ.
+func backtestsTable(t *testing.T, body string) (heads []string, rows map[string][]string) {
+	t.Helper()
+	doc, err := html.Parse(strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var table *html.Node
+	seen := false
+	for _, n := range allNodes(doc) {
+		if nodeAttr(n, "id") == "backtests" {
+			seen = true
+		} else if seen && n.DataAtom == atom.Table {
+			table = n
+			break
+		}
+	}
+	if table == nil {
+		return nil, nil
+	}
+	rows = map[string][]string{}
+	for _, n := range allNodes(table) {
+		switch {
+		case n.DataAtom == atom.Th && nodeWithin(n, atom.Thead):
+			heads = append(heads, nodeText(n))
+		case n.DataAtom == atom.Tr && nodeWithin(n, atom.Tbody):
+			var cells []string
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				if c.DataAtom == atom.Td {
+					cells = append(cells, nodeText(c))
+				}
+			}
+			if len(cells) == 7 {
+				rows[cells[3]] = cells
+			}
+		}
+	}
+	return heads, rows
+}
+
+// The Run history's pull request backtests, in every language: their
+// parts where assistive technology looks for them, as every page's, and
+// each text translated; the trust entry and the queries asked of the
+// history so named; and the time taken of one that ran and ended within
+// the second it started (done, failed, or cancelled as it ran) said as
+// under a second, of one waiting, running, superseded or cancelled before
+// it ran, nothing.
+func TestBacktestsAccessible(t *testing.T) {
+	s := backtestsServer(t)
+	missing.Lock()
+	clear(missing.m)
+	missing.Unlock()
+	pageA11y(t, s.Handler(), "", "/runs")
+	missing.Lock()
+	for k := range missing.m {
+		lang, msg, _ := strings.Cut(k, "\x00")
+		t.Errorf("%s has no translation for %q", lang, msg)
+	}
+	missing.Unlock()
+	for _, n := range names {
+		want := backtestsShownIn[n.Code]
+		r := httptest.NewRequest(http.MethodGet, "/runs", nil)
+		r.Header.Set("Accept-Language", n.Code)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		heads, rows := backtestsTable(t, w.Body.String())
+		if !slices.Equal(heads, want.heads) {
+			t.Errorf("%s: the column heads are %q, not %q", n.Code, heads, want.heads)
+		}
+		for rules, took := range map[string]string{"1": want.under, "2": want.under, "3": "2m5s", "4": "12s", "5": want.under, "6": "", "7": "", "8": "", "9": ""} {
+			if row := rows[rules]; row == nil {
+				t.Errorf("%s: no backtest with %s rules that differ: %q", n.Code, rules, rows)
+			} else if row[5] != took {
+				t.Errorf("%s: the backtest with %s rules that differ took %q, not %q: %q", n.Code, rules, row[5], took, row)
+			}
+		}
+		if row := rows["1"]; row != nil && (row[1] != "alerts" || row[2] != "example/alerts" || row[4] != "37") {
+			t.Errorf("%s: the first backtest's entry, repository and queries: %q", n.Code, row)
+		}
+	}
+}
+
+// What test/a11y/axe.sh checks has the Run history's pull request
+// backtests, a backtest of each state on it.
+func TestA11yServedBacktests(t *testing.T) {
+	_, mux, paths := a11yServed(t)
+	if !slices.Contains(paths, a11yBacktests+"/runs") {
+		t.Fatalf("TestA11yServe doesn't list %s/runs: %q", a11yBacktests, paths)
+	}
+	_, body, _ := get(t, mux, a11yBacktests+"/runs")
+	_, rows := backtestsTable(t, body)
+	states := map[string]bool{}
+	for _, row := range rows {
+		states[row[6]] = true
+	}
+	for _, want := range []string{"✓ done", "✕ failed", "waiting", "↻ running", "superseded by a newer commit", "cancelled"} {
+		if !states[want] {
+			t.Errorf("%s/runs has no backtest %s: %q", a11yBacktests, want, rows)
+		}
+	}
 }
 
 // Every page, in every language, has its parts where assistive technology

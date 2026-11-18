@@ -1,0 +1,183 @@
+# HELP lapilli_rule_firings Times the rule fired in the period.
+# TYPE lapilli_rule_firings gauge
+lapilli_rule_firings{rule="Flapping"} 4
+lapilli_rule_firings{rule="Errors",severity="page",team="payments"} 1
+lapilli_rule_firings{rule="Limited"} 1
+# HELP lapilli_rule_caught Firings that caught an incident (white stones).
+# TYPE lapilli_rule_caught gauge
+lapilli_rule_caught{rule="Flapping"} 0
+lapilli_rule_caught{rule="Errors",severity="page",team="payments"} 1
+lapilli_rule_caught{rule="Limited"} 1
+# HELP lapilli_rule_nothing Firings with no incident (black stones).
+# TYPE lapilli_rule_nothing gauge
+lapilli_rule_nothing{rule="Flapping"} 4
+lapilli_rule_nothing{rule="Errors",severity="page",team="payments"} 0
+lapilli_rule_nothing{rule="Limited"} 0
+# HELP lapilli_rule_refired Firings that came soon after the same alert resolved.
+# TYPE lapilli_rule_refired gauge
+lapilli_rule_refired{rule="Flapping"} 3
+lapilli_rule_refired{rule="Errors",severity="page",team="payments"} 0
+lapilli_rule_refired{rule="Limited"} 0
+# HELP lapilli_rule_incidents Incidents the rule caught.
+# TYPE lapilli_rule_incidents gauge
+lapilli_rule_incidents{rule="Flapping"} 0
+lapilli_rule_incidents{rule="Errors",severity="page",team="payments"} 1
+lapilli_rule_incidents{rule="Limited"} 1
+# HELP lapilli_rule_incidents_first Incidents the rule caught before any other rule; a noisy rule's catch doesn't count beside another's.
+# TYPE lapilli_rule_incidents_first gauge
+lapilli_rule_incidents_first{rule="Flapping"} 0
+lapilli_rule_incidents_first{rule="Errors",severity="page",team="payments"} 0
+lapilli_rule_incidents_first{rule="Limited"} 1
+# HELP lapilli_rule_incidents_alone Incidents no other rule caught; a noisy rule's catch doesn't count beside another's.
+# TYPE lapilli_rule_incidents_alone gauge
+lapilli_rule_incidents_alone{rule="Flapping"} 0
+lapilli_rule_incidents_alone{rule="Errors",severity="page",team="payments"} 0
+lapilli_rule_incidents_alone{rule="Limited"} 0
+# HELP lapilli_incidents Incidents in the period: caught, caught only by noisy rules, or missed.
+# TYPE lapilli_incidents gauge
+lapilli_incidents{state="caught",source="written"} 1
+lapilli_incidents{state="caught",source="impact"} 0
+lapilli_incidents{state="noisy_only",source="written"} 0
+lapilli_incidents{state="noisy_only",source="impact"} 0
+lapilli_incidents{state="missed",source="written"} 1
+lapilli_incidents{state="missed",source="impact"} 1
+# HELP lapilli_incident_detection_delay_seconds From an incident's start to the first alert from a rule that isn't noisy; negative when the alert came first.
+# TYPE lapilli_incident_detection_delay_seconds gauge
+lapilli_incident_detection_delay_seconds{incident="INC-1"} -60
+# HELP lapilli_last_run_timestamp_seconds When lapilli last ran, in Unix seconds.
+# TYPE lapilli_last_run_timestamp_seconds gauge
+lapilli_last_run_timestamp_seconds 1793707200
+# HELP lapilli_rule_firings_during_deploys Firings judged that came during a deploy of what they are about, or within --deploy-after of its end: in lapilli_rule_firings too.
+# TYPE lapilli_rule_firings_during_deploys gauge
+lapilli_rule_firings_during_deploys{rule="Flapping"} 1
+lapilli_rule_firings_during_deploys{rule="Errors",severity="page",team="payments"} 0
+lapilli_rule_firings_during_deploys{rule="Limited"} 0
+# HELP lapilli_rule_caught_during_deploys Of the firings during deploys, those that caught an incident: in lapilli_rule_caught too.
+# TYPE lapilli_rule_caught_during_deploys gauge
+lapilli_rule_caught_during_deploys{rule="Flapping"} 0
+lapilli_rule_caught_during_deploys{rule="Errors",severity="page",team="payments"} 0
+lapilli_rule_caught_during_deploys{rule="Limited"} 0
+# HELP lapilli_serve_deploys_last_timestamp_seconds When the latest deploy the deploys file holds that has started started, in Unix seconds.
+# TYPE lapilli_serve_deploys_last_timestamp_seconds gauge
+lapilli_serve_deploys_last_timestamp_seconds 1793613600
+# HELP lapilli_weeks_counted Whole weeks, of the twelve before this one, the ledger has all of (not the one its first firing fell in): what lapilli_refired_weeks and lapilli_rule_refired_weeks count of.
+# TYPE lapilli_weeks_counted gauge
+lapilli_weeks_counted 0
+# HELP lapilli_refired_weeks Whole weeks, of lapilli_weeks_counted, in which a firing re-fired: everyone's without a team label, and each team's rules'.
+# TYPE lapilli_refired_weeks gauge
+lapilli_refired_weeks 0
+lapilli_refired_weeks{team="payments"} 0
+# HELP lapilli_rule_refired_weeks Whole weeks, of lapilli_weeks_counted, in which a firing of the rule re-fired.
+# TYPE lapilli_rule_refired_weeks gauge
+# HELP lapilli_incident_state Each incident of the last seven days, written down or an impact window found by --impact, as caught, caught only by noisy rules, or missed, by the rules' stones in its week: 1. The latest 500 at most.
+# TYPE lapilli_incident_state gauge
+lapilli_incident_state{incident="impact-20261103T0600Z",source="impact",state="missed"} 1
+lapilli_incident_state{incident="INC-1",source="written",state="caught"} 1
+lapilli_incident_state{incident="INC-0",source="written",state="missed"} 1
+# HELP lapilli_incident_lead_seconds How long before each caught incident's start the first alert from a rule that isn't noisy came: negative when it came after.
+# TYPE lapilli_incident_lead_seconds gauge
+lapilli_incident_lead_seconds{incident="INC-1",source="written"} 60
+# HELP lapilli_incident_team Each team that owns an incident of lapilli_incident_state (one of its rules caught it, or it has a value of a label the team owns by): 1, without a team label for an incident no team owns. 500 series at most, the latest incidents first.
+# TYPE lapilli_incident_team gauge
+lapilli_incident_team{incident="impact-20261103T0600Z"} 1
+lapilli_incident_team{incident="INC-1",team="payments"} 1
+lapilli_incident_team{incident="INC-0"} 1
+# HELP lapilli_rule_firings_marked Firings judged that came during a marked window of the kind (a sale, a launch): in lapilli_rule_firings too. Deploys are lapilli_rule_firings_during_deploys.
+# TYPE lapilli_rule_firings_marked gauge
+lapilli_rule_firings_marked{rule="Errors",severity="page",team="payments",kind="sale"} 1
+lapilli_rule_firings_marked{rule="Flapping",kind="launch"} 4
+lapilli_rule_firings_marked{rule="Flapping",kind="sale"} 4
+lapilli_rule_firings_marked{rule="Limited",kind="sale"} 1
+# HELP lapilli_rule_caught_marked Of the firings during marked windows of the kind, those that caught an incident: in lapilli_rule_caught too.
+# TYPE lapilli_rule_caught_marked gauge
+lapilli_rule_caught_marked{rule="Errors",severity="page",team="payments",kind="sale"} 1
+lapilli_rule_caught_marked{rule="Flapping",kind="launch"} 0
+lapilli_rule_caught_marked{rule="Flapping",kind="sale"} 0
+lapilli_rule_caught_marked{rule="Limited",kind="sale"} 1
+# HELP lapilli_serve_cursor_timestamp_seconds How far the ledger has firings up to, in Unix seconds.
+# TYPE lapilli_serve_cursor_timestamp_seconds gauge
+lapilli_serve_cursor_timestamp_seconds 1793707200
+# HELP lapilli_serve_run_duration_seconds How long the last run took.
+# TYPE lapilli_serve_run_duration_seconds gauge
+lapilli_serve_run_duration_seconds <clock>
+# HELP lapilli_serve_runs_total Runs since lapilli serve started, by kind and result.
+# TYPE lapilli_serve_runs_total counter
+lapilli_serve_runs_total{kind="backfill",result="ok"} 2
+lapilli_serve_runs_total{kind="hourly",result="ok"} 1
+# HELP lapilli_serve_firings_avoided How many fewer times the changed rules fired since each reviewed change than at their rates before it.
+# TYPE lapilli_serve_firings_avoided gauge
+lapilli_serve_firings_avoided 0
+# HELP lapilli_serve_nothing_avoided How many fewer firings with no incident (black stones) the changed rules made since each reviewed change than at their rates before it.
+# TYPE lapilli_serve_nothing_avoided gauge
+lapilli_serve_nothing_avoided 0
+# HELP lapilli_serve_rule_changes Reviewed changes to rules, by how they came out against the prediction.
+# TYPE lapilli_serve_rule_changes gauge
+lapilli_serve_rule_changes{outcome="as_predicted"} 0
+lapilli_serve_rule_changes{outcome="otherwise"} 0
+lapilli_serve_rule_changes{outcome="measuring"} 0
+# HELP lapilli_serve_incident_last_timestamp_seconds When the latest incident written down started (from the incidents file, the UI or the API, impact windows confirmed among them), in Unix seconds; 0 for none.
+# TYPE lapilli_serve_incident_last_timestamp_seconds gauge
+lapilli_serve_incident_last_timestamp_seconds 1793599260
+# HELP lapilli_serve_edits Edits made in the UI or the API in the last four weeks.
+# TYPE lapilli_serve_edits gauge
+lapilli_serve_edits 0
+# HELP lapilli_serve_source_last_timestamp_seconds When firings were last copied in from each source, in Unix seconds.
+# TYPE lapilli_serve_source_last_timestamp_seconds gauge
+lapilli_serve_source_last_timestamp_seconds{source="test-src"} <clock>
+# HELP lapilli_serve_source_firings Firings in the period last copied in from each source.
+# TYPE lapilli_serve_source_firings gauge
+lapilli_serve_source_firings{source="test-src"} 4
+# HELP lapilli_serve_source_quiet_seconds How long a source may go without firings copied in before it is told of (--source-quiet).
+# TYPE lapilli_serve_source_quiet_seconds gauge
+lapilli_serve_source_quiet_seconds 93600
+# HELP lapilli_rule_replay_check The replay beside what really fired over the seven whole days before today, by rule: firings alike, only in the replay, and only in what really fired. Rules that share an alert name, which what really fired doesn't tell apart, each carry the counts of them all.
+# TYPE lapilli_rule_replay_check gauge
+lapilli_rule_replay_check{rule="Errors",way="alike"} 16
+lapilli_rule_replay_check{rule="Errors",way="replayed"} 5
+lapilli_rule_replay_check{rule="Errors",way="real"} 1
+lapilli_rule_replay_check{rule="Limited",way="alike"} 0
+lapilli_rule_replay_check{rule="Limited",way="replayed"} 21
+lapilli_rule_replay_check{rule="Limited",way="real"} 0
+# HELP lapilli_serve_replay_checked_to_timestamp_seconds How far the replay has been set beside what really fired, in Unix seconds.
+# TYPE lapilli_serve_replay_checked_to_timestamp_seconds gauge
+lapilli_serve_replay_checked_to_timestamp_seconds 1793664000
+# HELP lapilli_rule_content_problems Problems with what each rule says when it fires, or how it is written, by check: facts and what was measured, not guesses (docs/design/content.md).
+# TYPE lapilli_rule_content_problems gauge
+lapilli_rule_content_problems{rule="Errors",check="no_text"} 1
+lapilli_rule_content_problems{rule="Errors",check="no_runbook"} 1
+lapilli_rule_content_problems{rule="Limited",check="no_text"} 1
+lapilli_rule_content_problems{rule="Limited",check="no_runbook"} 1
+lapilli_rule_content_problems{rule="Limited",check="no_severity"} 1
+# HELP lapilli_serve_history_requests_total Requests lapilli serve sent to each history API since it started, by the kind of API and the class of the answer: 2xx, 3xx, 4xx, 5xx, or none (refused, dropped, timed out).
+# TYPE lapilli_serve_history_requests_total counter
+lapilli_serve_history_requests_total{api="prometheus",answer="2xx"} 0
+lapilli_serve_history_requests_total{api="prometheus",answer="3xx"} 0
+lapilli_serve_history_requests_total{api="prometheus",answer="4xx"} 0
+lapilli_serve_history_requests_total{api="prometheus",answer="5xx"} 0
+lapilli_serve_history_requests_total{api="prometheus",answer="none"} 0
+# HELP lapilli_serve_history_throttled_total Answers of HTTP 429, too many requests, from each history API since lapilli serve started.
+# TYPE lapilli_serve_history_throttled_total counter
+lapilli_serve_history_throttled_total{api="prometheus"} 0
+# HELP lapilli_serve_history_retries_total Requests to each history API asked again after an answer that said to (HTTP 429, 5xx) or a connection dropped, since lapilli serve started.
+# TYPE lapilli_serve_history_retries_total counter
+lapilli_serve_history_retries_total{api="prometheus"} 0
+# HELP lapilli_serve_history_wait_seconds_total Seconds requests to each history API waited before they were sent, summed over the requests, since lapilli serve started: for the API (reason api: a wait it asked for, Retry-After, and before asking again) and for a turn by a rate (reason rate: --max-rate, --catch-up-rate).
+# TYPE lapilli_serve_history_wait_seconds_total counter
+lapilli_serve_history_wait_seconds_total{api="prometheus",reason="api"} <clock>
+lapilli_serve_history_wait_seconds_total{api="prometheus",reason="rate"} <clock>
+# HELP lapilli_serve_history_yields_total Times the runs yielded to each history API, as it answered HTTP 429 (--yield-on-429), since lapilli serve started.
+# TYPE lapilli_serve_history_yields_total counter
+lapilli_serve_history_yields_total{api="prometheus"} 0
+# HELP lapilli_marked_on Whether an occurrence of a marked window of the kind is on: 1 or 0.
+# TYPE lapilli_marked_on gauge
+lapilli_marked_on{kind="campaign"} 0
+lapilli_marked_on{kind="launch"} 0
+lapilli_marked_on{kind="sale"} 0
+# HELP lapilli_serve_incidents_passed_over Incidents in the incidents file whose ids the ledger holds from people, and so not read from it.
+# TYPE lapilli_serve_incidents_passed_over gauge
+lapilli_serve_incidents_passed_over 0
+# HELP lapilli_serve_notices_total Notices since lapilli serve started, by where to and whether they were sent.
+# TYPE lapilli_serve_notices_total counter
+# HELP lapilli_serve_notices_unsent Notices not sent yet, or given up on.
+# TYPE lapilli_serve_notices_unsent gauge
+lapilli_serve_notices_unsent 0

@@ -2231,6 +2231,28 @@ type runsView struct {
 	// GoalTasksWait are the tasks for goals missed the leader's last
 	// round left for the runs after (--goal-tasks makes 20 a run).
 	GoalTasksWait int
+	// Backtests are the pull request backtests kept, with
+	// --backtest-listen: nil without it.
+	Backtests *backtestsShown
+}
+
+// backtestsShown are the pull request backtests the Run history lists.
+type backtestsShown struct{ Rows []backtestShown }
+
+// backtestShown is a pull request backtest as the Run history lists it:
+// when, the trust entry, the repository, how many rules differed, the
+// queries it asked of the history, how long, and how it ended; no rule's
+// name. Instant is one that ran and ended (done, failed, or cancelled as
+// it ran) within the second it started, the ledger keeping whole seconds:
+// said as under a second, not as nothing, which is one that hasn't ended,
+// or never ran.
+type backtestShown struct {
+	Asked             time.Time
+	Trust, Repository string
+	Rules, Queries    int
+	Took              time.Duration
+	Instant           bool
+	State             string
 }
 
 // runsCheck is how far the replay has been set beside what really fired,
@@ -2274,7 +2296,22 @@ func (s *Server) runsPage(r *http.Request) (any, error) {
 	}
 	// The leader's, on a replica that follows.
 	st := s.shownStatus()
-	v := runsView{runs, cs, cursor, st.Runs, st.Took, srcs, s.cfg.FiringsToken != "", nil, nil, s.onCallShown(st), s.configFor(r), 0}
+	v := runsView{runs, cs, cursor, st.Runs, st.Took, srcs, s.cfg.FiringsToken != "", nil, nil, s.onCallShown(st), s.configFor(r), 0, nil}
+	if s.btPort != nil {
+		bs, err := s.l.Backtests(r.Context(), 50)
+		if err != nil {
+			return nil, err
+		}
+		v.Backtests = &backtestsShown{}
+		for _, b := range bs {
+			took, ran := time.Duration(0), !b.Started.IsZero() && !b.Ended.IsZero()
+			if ran {
+				took = b.Ended.Sub(b.Started)
+			}
+			instant := ran && took >= 0 && took < time.Second
+			v.Backtests.Rows = append(v.Backtests.Rows, backtestShown{b.Asked, b.Trust, b.Repository, b.Rules, b.Made, took, instant, b.State})
+		}
+	}
 	if v.Stopped, err = s.stoppedReports(r.Context()); err != nil {
 		return nil, err
 	}

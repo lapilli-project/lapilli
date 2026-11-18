@@ -286,6 +286,20 @@ type Config struct {
 	// ProposalsExpire closes a proposal that waited for approval longer
 	// (docs/design/changes.md): 0 for never.
 	ProposalsExpire time.Duration
+	// BacktestListen, when set, is where pull request backtests are taken
+	// (docs/design/backtests.md), from a CI job holding a token an entry of
+	// Trust (--backtest-trust, read at start) takes, and nothing else.
+	// BacktestShare is the lane's share of --max-rate (0.25 when 0),
+	// BacktestQueue how many may wait (20 when 0), BacktestTimeout one's
+	// time from its start (15m when 0). BacktestTransport carries what the
+	// issuers are asked: nil but in tests.
+	BacktestListen    string
+	Trust             []Trust
+	BacktestShare     float64
+	BacktestQueue     int
+	BacktestTimeout   time.Duration
+	BacktestTransport http.RoundTripper
+
 	// GoalTasks makes a task for each goal --config declares that a whole
 	// week missed, 20 a run at most (docs/design/goals.md): off unless
 	// turned on, as Lapilli would make tasks nobody asked for.
@@ -520,6 +534,9 @@ type Server struct {
 	// none.
 	heldFor     atomic.Value
 	catchUpPace *prom.Paces
+	// btPort is what the backtest port keeps, nil without
+	// --backtest-listen.
+	btPort *backtestPort
 }
 
 // status is what the worker is doing, for the UI: a text to be shown in
@@ -622,7 +639,32 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 		s.yield = &prom.Yield{For: cfg.YieldFor, Now: func() time.Time { return s.now() }}
 	}
 	s.catchUpPace = prom.NewPaces(cfg.CatchUpRate)
+	if cfg.BacktestListen != "" {
+		if err := s.backtestable(); err != nil {
+			l.Close()
+			return nil, err
+		}
+		s.btPort = s.newBacktestPort()
+	}
 	return s, nil
+}
+
+// backtestable says why the backtest port can't be served, nil when it
+// can: who may ask, rules to replay, a history to ask, and writes taken.
+func (s *Server) backtestable() error {
+	switch {
+	case len(s.cfg.Trust) == 0:
+		return errors.New("--backtest-listen needs --backtest-trust: who may ask")
+	case s.cfg.Alerts:
+		return errors.New("--backtest-listen replays a pull request's rules, and --alerts judges the ALERTS series, not rules")
+	case !s.replaying() || s.h == nil:
+		return errors.New("--backtest-listen replays a pull request's rules against the history: it needs rules to replay and --prometheus or --gcp-project")
+	case s.cfg.ReadOnly:
+		return errors.New("--backtest-listen queues backtests in the ledger, and --read-only refuses writes")
+	case s.cfg.BacktestShare != 0 && (s.cfg.BacktestShare < 0.05 || s.cfg.BacktestShare > 0.75):
+		return errors.New("--backtest-share is 0.05 to 0.75")
+	}
+	return nil
 }
 
 // openLedger opens the ledger: in Postgres, with --ledger-url-file, else
@@ -857,7 +899,7 @@ func (s *Server) Run(ctx context.Context) error {
 	} else {
 		s.log.Info("serving", "listen", ln.Addr().String(), "ledger", where)
 	}
-	served := make(chan error, 4)
+	served := make(chan error, 5)
 	go func() { served <- srv.Serve(ln) }()
 	if s.cfg.MetricsListen != "" {
 		mln, err := net.Listen("tcp", s.cfg.MetricsListen)
@@ -896,6 +938,18 @@ func (s *Server) Run(ctx context.Context) error {
 		s.log.Info("taking notifications", "listen", nln.Addr().String())
 		go func() { served <- nsrv.Serve(nln) }()
 		defer nsrv.Close()
+	}
+	if s.btPort != nil {
+		bln, err := net.Listen("tcp", s.cfg.BacktestListen)
+		if err != nil {
+			srv.Close()
+			return fmt.Errorf("--backtest-listen: %w", err)
+		}
+		bsrv := s.backtestServer(ctx)
+		s.log.Info("taking pull request backtests", "listen", bln.Addr().String(), "trust", len(s.btPort.trust))
+		go func() { served <- bsrv.Serve(bln) }()
+		defer bsrv.Close()
+		go s.discoverIssuers(ctx)
 	}
 	failed := make(chan error, 1)
 	var wg sync.WaitGroup

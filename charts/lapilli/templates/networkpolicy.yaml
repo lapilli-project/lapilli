@@ -63,6 +63,15 @@ spec:
         - port: notifications
           protocol: TCP
     {{- end }}
+    {{- if and .Values.serve.backtest.enabled .Values.serve.backtest.from }}
+    # Pull request backtests: the CI runners in serve.backtest.from, or the
+    # ingress controller or load balancer in front of them.
+    - from:
+        {{- toYaml .Values.serve.backtest.from | nindent 8 }}
+      ports:
+        - port: backtest
+          protocol: TCP
+    {{- end }}
 {{- end }}
 {{- $e := .Values.serve.networkPolicy.egress }}
 {{- if and (eq .Values.mode "serve") $e.enabled }}

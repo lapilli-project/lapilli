@@ -177,6 +177,19 @@ beside the evaluator's own errors ([design/quota.md](design/quota.md)).
 `--catch-up-hours`, and `lapilli_serve_incidents_passed_over` with
 `--incidents`, on the replica that read the file.
 
+## Pull request backtests
+
+With `--backtest-listen` alone:
+
+| Metric | Type | Labels | What it counts |
+|---|---|---|---|
+| `lapilli_serve_backtests_total` | counter | `trust`, `result` | Pull request backtests since the process started, by entry of `--backtest-trust` and how they ended: `done`, `failed`, `cancelled`, `superseded`, or `refused` before they were queued |
+| `lapilli_serve_backtests_waiting` | gauge | `trust` | Pull request backtests waiting, by entry, as the ledger keeps them |
+
+`trust` is an entry's name, which whoever runs serve wrote: never a
+repository, a branch or a rule. What the backtests ask of the history is
+in the `lapilli_serve_history_*` counters too.
+
 ## Firings copied in
 
 With `--firings-token-file`, or once firings have been copied in from a

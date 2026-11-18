@@ -429,7 +429,10 @@ type verdictFlags struct {
 	picked       rules.Picked // what reading the rule files passed over
 	// recorded are, with --compare, the recording rules the files read
 	// held; passedOver what each set's files passed over, as said.
-	recorded           []rules.Recording
+	recorded []rules.Recording
+	// noneSelected is what --rules-select keeping no rule of --rules
+	// said, nil when it kept some or none was asked.
+	noneSelected       error
 	passedOver         map[string]string
 	loadedRules        bool
 	grafana, grafanaTk string
@@ -1340,13 +1343,31 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	}
 	var same, before, after, was []rules.Rule
 	if len(f.compare) > 0 {
+		var noneSelected error
 		for _, p := range f.compare {
 			rs, err := loadRules(f, p)
-			if err != nil && !errors.Is(err, rules.ErrNoneInDir) {
+			// None there, or none the selector keeps: a side with no
+			// rules, as lapilli serve's backtests take it.
+			if err != nil && !errors.Is(err, rules.ErrNoneInDir) && !errors.Is(err, rules.ErrNoneSelected) {
 				return fail(err)
+			}
+			if errors.Is(err, rules.ErrNoneSelected) && noneSelected == nil {
+				noneSelected = err
 			}
 			f.replaying().Apply(rs)
 			was = append(was, rs...)
+		}
+		// No rule left on either side, and the selector kept nothing of a
+		// side it was given documents of: a selector that matches nothing
+		// (a label's name mistyped), said as ever, not taken for two sets
+		// alike, the other side empty or not (a pull request's first
+		// rules).
+		held := len(was)
+		for _, v := range versions {
+			held += len(v.Rules)
+		}
+		if held == 0 && (noneSelected != nil || f.noneSelected != nil) {
+			return fail(fmt.Errorf("--rules-select %s keeps no document of rules of --rules or of --compare: %w", f.rulesSelect, cmp.Or(noneSelected, f.noneSelected)))
 		}
 		f.sayPicked(stderr, "--compare")
 	}
@@ -1697,27 +1718,9 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 // their hosts, each as a whole word, any IP address with its port, the
 // tenants, and a Google Cloud project.
 func (f *verdictFlags) forComment(c *verdict.Comparison, stderr io.Writer) {
-	scrub := f.scrubber()
-	for _, rep := range []*verdict.Report{c.Before, c.After} {
-		if rep == nil {
-			continue
-		}
-		side := "after"
-		if rep == c.Before {
-			side = "before"
-		}
-		for i := range rep.Rules {
-			r := &rep.Rules[i]
-			switch {
-			case r.Unsupported == "" || r.Unsupported == replay.Unfinished:
-			case strings.HasPrefix(r.Unsupported, rules.HistoryUnread):
-				fmt.Fprintf(stderr, "lapilli verdict: %s (%s) couldn't be replayed: %s\n", verdict.Clean(r.Rule), side, verdict.Clean(r.Unsupported))
-				r.Unsupported = UnreadHistory
-			default:
-				r.Unsupported = scrub(r.Unsupported)
-			}
-		}
-	}
+	verdict.ForComment(c, UnreadHistory, f.scrubber(), func(rule, side, why string) {
+		fmt.Fprintf(stderr, "lapilli verdict: %s (%s) couldn't be replayed: %s\n", verdict.Clean(rule), side, verdict.Clean(why))
+	})
 }
 
 // scrubber takes where the history is out of a text: the URLs given, the
@@ -1833,7 +1836,7 @@ func replaceCut(s, old, with string) string {
 
 // UnreadHistory is, in --markdown, why a rule whose query the history
 // didn't answer couldn't be replayed: rules.HistoryUnread, without why.
-const UnreadHistory = "query failed: the history couldn't be read; the job's log says why"
+const UnreadHistory = verdict.UnreadHistory
 
 var (
 	// userinfo is a URL's user and password.
@@ -2186,42 +2189,10 @@ func (f *verdictFlags) sayPicked(stderr io.Writer, side string) {
 	f.picked = rules.Picked{}
 }
 
-// recordingChanges are the recording rules that differ between was, those
-// in place, and is, those proposed: by what each records and its group,
-// changed when both have it otherwise, added or removed when one hasn't.
+// recordingChanges are the recording rules that differ between was and
+// is (verdict.RecordingChanges).
 func recordingChanges(was, is []rules.Recording) []verdict.RecordingChange {
-	type id struct{ record, group string }
-	keys := func(rs []rules.Recording) map[id][]string {
-		m := map[id][]string{}
-		for _, r := range rs {
-			k := id{r.Record, r.Group}
-			m[k] = append(m[k], r.Key())
-		}
-		for k := range m {
-			slices.Sort(m[k])
-		}
-		return m
-	}
-	before, after := keys(was), keys(is)
-	var out []verdict.RecordingChange
-	for k, b := range before {
-		a, ok := after[k]
-		switch {
-		case !ok:
-			out = append(out, verdict.RecordingChange{Record: k.record, Group: k.group, Change: "removed"})
-		case !slices.Equal(a, b):
-			out = append(out, verdict.RecordingChange{Record: k.record, Group: k.group, Change: "changed"})
-		}
-	}
-	for k := range after {
-		if _, ok := before[k]; !ok {
-			out = append(out, verdict.RecordingChange{Record: k.record, Group: k.group, Change: "added"})
-		}
-	}
-	slices.SortFunc(out, func(a, b verdict.RecordingChange) int {
-		return cmp.Or(strings.Compare(a.Record, b.Record), strings.Compare(a.Group, b.Group))
-	})
-	return out
+	return verdict.RecordingChanges(was, is)
 }
 
 // loadVersions reads the --rules files, one version of the rules for each
@@ -2239,8 +2210,11 @@ func loadVersions(f *verdictFlags) ([]replay.Version, error) {
 			i = len(versions) - 1
 		}
 		rs, err := loadRules(f, rf.path)
-		if err != nil && !(len(f.compare) > 0 && errors.Is(err, rules.ErrNoneInDir)) {
+		if err != nil && !(len(f.compare) > 0 && (errors.Is(err, rules.ErrNoneInDir) || errors.Is(err, rules.ErrNoneSelected))) {
 			return nil, err
+		}
+		if errors.Is(err, rules.ErrNoneSelected) && f.noneSelected == nil {
+			f.noneSelected = err
 		}
 		f.replaying().Apply(rs)
 		versions[i].Rules = append(versions[i].Rules, rs...)

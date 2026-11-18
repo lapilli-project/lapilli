@@ -457,6 +457,121 @@ since it began to wait (made, or backtested again), such as `30d`, and
 that no one approved, as expired, so its rule can have another. Empty, the default, keeps it waiting however
 long. Neither goes with `serve.readOnly`, which the chart refuses.
 
+## Pull request backtests
+
+`serve.backtest` opens a port of its own that takes pull request backtests
+from CI jobs, and nothing else: `POST /v1/backtests`, and `GET` and
+`DELETE /v1/backtests/ID`. A job sends the rules before and after a pull
+request, and serve replays them with its own access to the history, judges
+them by its record, and gives back the comment `lapilli verdict --compare
+--changed-only --markdown` writes: CI holds no credential for the metrics,
+and the backtests and the hourly runs share one quota. The design is
+[docs/design/backtests.md](https://github.com/lapilli-project/lapilli/blob/main/docs/design/backtests.md), and what serve
+does with it [docs/serve.md](https://github.com/lapilli-project/lapilli/blob/main/docs/serve.md#pull-request-backtests).
+It runs PromQL the pull request writes, with serve's access: give that
+access what the rules need and no more. Off unless enabled; it needs
+`prometheus.url` or `gcpProject` and rules serve replays, and is refused
+with `serve.readOnly`, which keeps the queue's writes out.
+
+```yaml
+serve:
+  backtest:
+    enabled: true
+    trust:
+      configMap: {name: lapilli-backtest-trust}   # key: trust.yaml
+    tokens:
+      - {secretName: lapilli-backtest-azure, key: token}
+```
+
+- `serve.backtest.trust.configMap` is the ConfigMap holding
+  `--backtest-trust`'s file under `key` (`trust.yaml`), mounted at
+  `/etc/lapilli/backtest/`: who may ask, each entry a CI's issuer of ID
+  tokens, with the audience and the claims its tokens must hold, or a plain
+  token. It is required, and read as serve starts: one serve can't use
+  stops it from starting, and a change takes a restart (`kubectl rollout
+  restart deployment/FULLNAME`).
+
+  ```yaml
+  trust:
+    - name: alerts
+      issuer: https://token.actions.githubusercontent.com
+      audience: https://lapilli-ci.example.com
+      claims: {repository_id: ["123456789"], event_name: pull_request}
+    - name: monitoring-azure
+      token_file: /var/run/lapilli/backtest/tokens/lapilli-backtest-azure/token
+  ```
+
+  ```sh
+  kubectl -n monitoring create configmap lapilli-backtest-trust --from-file=trust.yaml
+  ```
+
+- `serve.backtest.tokens` are the Secrets holding the plain tokens the
+  trust file's `token_file` entries name, for a CI with no ID token
+  (Azure Pipelines, Gitea, Jenkins): each `{secretName, key}` (`key`
+  `token` when left out) is mounted at
+  `/var/run/lapilli/backtest/tokens/SECRET/KEY`, and read for each
+  request, so a token is rotated without a restart. A token is 32
+  characters at least, and none may be another port's
+  (`serve.incidentsAPI`, `firings`, `trackers`, `notificationsAPI`,
+  `changes`): the chart refuses the same Secret and key, serve the same
+  token.
+- `serve.backtest.port` (8084) is the container's, `--backtest-listen`;
+  `share` (0.25, 0.05 to 0.75, of `--max-rate`), `queue` (20, 1 to 1000)
+  and `timeout` (15m, 1m to 2h) are `--backtest-share`, `--backtest-queue`
+  and `--backtest-timeout`, the defaults when empty.
+
+The port is apart from the UI's: it takes neither the UI's sign-in nor its
+host check, each request carrying a token of its own, and a request a page
+sent (with an `Origin`) is refused. It is on `FULLNAME`, which has every
+port, and on a Service of its own, `FULLNAME-backtest`, this port alone,
+which `serve.backtest.service` and `serve.backtest.ingress` serve as
+`serve.service` and `serve.ingress` serve the UI's. Where that fits:
+
+1. **Runners inside the cluster or the network.** `FULLNAME-backtest` is a
+   ClusterIP by default: runners in the cluster reach it at
+   `FULLNAME-backtest.NAMESPACE:8084`, in plain http, and nothing new is
+   exposed. With `serve.networkPolicy`, `serve.backtest.from` names them,
+   as NetworkPolicy peers, and lets them in to this port alone.
+2. **A CI provider's own runners**, with the port exposed on its own,
+   apart from the UI and whatever signs people in to it, and only over
+   TLS, which lapilli doesn't serve: the chart refuses it otherwise.
+   - `serve.backtest.ingress`: an Ingress for `FULLNAME-backtest` alone
+     (`className`, `annotations`, `hosts`, `tls`), its paths
+     `/v1/backtests` and below. It needs `tls`, or, for TLS ended at the
+     load balancer in front with a certificate of its own (an ALB's
+     `alb.ingress.kubernetes.io/certificate-arn`, a GKE managed
+     certificate), `loadBalancerEndsTLS: true` saying so.
+   - `serve.backtest.service.type: LoadBalancer` (or `NodePort`), with
+     `annotations`, `loadBalancerClass`, `loadBalancerSourceRanges`,
+     `externalTrafficPolicy`, `nodePort` and `port`, for a load balancer
+     that ends TLS (an AWS Network Load Balancer's TLS listener, an OCI
+     load balancer's), which `loadBalancerEndsTLS: true` says. GKE's and
+     AKS's load balancers for a Service are TCP, and don't: use the
+     Ingress there.
+
+   The port answers nothing but its API, so a load balancer's HTTP health
+   check of `/` fails: point it at `/healthz` on `serve.metricsPort` (on
+   GKE, a BackendConfig's `healthCheck.port` and `requestPath`, named by
+   `cloud.google.com/backend-config` in `serve.backtest.service.annotations`;
+   on EKS, `alb.ingress.kubernetes.io/healthcheck-port` and
+   `healthcheck-path`), and with `serve.networkPolicy` let the health
+   checks in through `metricsFrom`. `serve.backtest.from` then names the
+   ingress controller's pods, or the load balancer's addresses as
+   `ipBlock`s.
+
+Where it doesn't: serve reached only through an identity-aware proxy, a VPN
+or a private network, with a provider's runners, which can't pass the proxy
+without a credential of the proxy's own (a cloud identity, a long-lived
+secret: what this was to save). There, keep the recipe running Lapilli in
+CI, or a runner inside. Letting runners in by address is no fence for
+GitHub-hosted runners, whose published ranges are many and change; runners
+with fixed addresses can be let in so (`loadBalancerSourceRanges`, an
+`ipBlock` in `from`), beside the token.
+
+To check a CI's ID tokens, serve fetches each issuer's discovery document
+and keys: with `serve.networkPolicy.egress`, its `to` must let serve reach
+them over https, port 443, as it must an identity provider.
+
 ## Who people are
 
 

@@ -93,6 +93,7 @@ func TestRedactEveryField(t *testing.T) {
 		"Unreplayed.Side":          true, // before or after
 		"RecordingChange.Change":   true, // changed, added, removed
 		"Comparison.PassedOver":    true, // Lapilli's own words and counts
+		"Comparison.JudgedBy":      true, // whose record judged: Lapilli's own words
 		"ExpectResult.Limit":       true, // numbers and durations Lapilli writes
 		"ExpectResult.Before":      true,
 		"ExpectResult.After":       true,

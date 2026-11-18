@@ -66,6 +66,10 @@ func (s *Server) jobs(ctx context.Context, run bool) {
 	if !s.still(ctx) {
 		return
 	}
+	// Pull request backtests ended a day ago go, the port on or not.
+	if err := s.l.PruneBacktests(ctx, s.now()); err != nil && ctx.Err() == nil {
+		s.log.Warn("letting go of the pull request backtests kept", "err", err)
+	}
 	// The named impact signals and the rule entries serve was started
 	// with, kept: a change to which there are, or what they match, pends
 	// every firing to be judged again, in the ledger (JudgePending, below).
@@ -1410,9 +1414,21 @@ func (s *Server) reviewChange(ctx context.Context, before, after ledger.Version,
 // over [from, to), within timeout, and sets them side by side, judged
 // against the ledger's incidents; same is how many rules it left alike.
 func (s *Server) replayChange(ctx context.Context, gone, came []rules.Rule, same int, from, to time.Time, timeout time.Duration, o verdict.Options) (*verdict.Comparison, error) {
+	cmp, err := s.replayCompared(ctx, s.h, s.cfg.Parallel, gone, came, same, from, to, timeout, o)
+	if err != nil {
+		return nil, err
+	}
+	cmp.Before.Firings, cmp.After.Firings = nil, nil
+	return cmp, nil
+}
+
+// replayCompared is replayChange against h, parallel rules at once, its
+// firings kept: a pull request's backtest's, in the lane (backtestResult),
+// counts them.
+func (s *Server) replayCompared(ctx context.Context, h replay.History, parallel int, gone, came []rules.Rule, same int, from, to time.Time, timeout time.Duration, o verdict.Options) (*verdict.Comparison, error) {
 	rctx, cancel := context.WithTimeout(s.askedFor(ctx), timeout)
 	defer cancel()
-	ran, fired := replay.RunEach(rctx, s.h, [][]replay.Version{{{Rules: gone}}, {{Rules: came}}}, from, to, s.cfg.Step, s.cfg.Parallel)
+	ran, fired := replay.RunEach(rctx, h, [][]replay.Version{{{Rules: gone}}, {{Rules: came}}}, from, to, s.cfg.Step, parallel)
 	incs, err := s.l.Incidents(ctx, from, to, false)
 	if err != nil {
 		return nil, err
@@ -1431,7 +1447,6 @@ func (s *Server) replayChange(ctx context.Context, gone, came []rules.Rule, same
 	}
 	cmp := verdict.Compare(verdict.Judge(ran[0], fired[0], plain, o), verdict.Judge(ran[1], fired[1], plain, o), changed, same)
 	cmp.ChangedOnly = true
-	cmp.Before.Firings, cmp.After.Firings = nil, nil
 	return cmp, nil
 }
 
