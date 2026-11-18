@@ -56,10 +56,12 @@
   as its own, the gates reading its summary line as they read Lapilli's:
   that line as serve wrote it, or no report, and of the rest only the
   lines Lapilli writes, any other (a GitLab quick action, a mention, a
-  link, HTML) left out, saying so. The token is the CI's ID token
+  link, HTML, a line inside the HTML block a `<details>` tag starts) left
+  out, saying so. The token is the CI's ID token
   (`LAPILLI_ID_TOKEN`: GitLab's `id_tokens:`), one `github.sh` and
   `gitea.sh` ask GitHub's or Forgejo's Actions for
-  (`LAPILLI_SERVE_AUDIENCE`: never a cloud's audience nor the CI's
+  (`LAPILLI_SERVE_AUDIENCE`: `LAPILLI_SERVE`'s URL, another only with
+  `SERVE_AUDIENCE_ANY=1`, and never a cloud's audience nor the CI's
   default; masked in GitHub Actions' log), or a plain token
   (`LAPILLI_SERVE_TOKEN_FILE`), each given to curl on stdin. What serve
   decides is refused with it: `INCIDENTS`, `IMPACT`, `MATCH`, and every
@@ -67,8 +69,9 @@
   `--rules-select`. The URL is https, or plain http, through no proxy, to
   this machine or to a Service in the cluster
   (`FULLNAME-backtest.NAMESPACE.svc`). The action's
-  `serve-url`, `audience` and `serve-wait`, with `permissions: id-token:
-  write`; without `serve-url`, the action is as it was.
+  `serve-url`, `audience`, `audience-any` and `serve-wait`, with
+  `permissions: id-token: write`; without `serve-url`, the action is as it
+  was.
 
 ### Changed
 

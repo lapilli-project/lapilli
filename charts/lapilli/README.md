@@ -535,7 +535,13 @@ which `serve.backtest.service` and `serve.backtest.ingress` serve as
    through no proxy: `FULLNAME-backtest` alone is looked up under the
    runner's search domains, which needn't be the cluster's, and
    `NAME.NAMESPACE` could be a name on the internet, as a namespace named
-   as a top-level domain is. With `serve.networkPolicy`,
+   as a top-level domain is. Their ID token's audience is, as a rule, the
+   URL they send to: a trust entry of their own with `audience:
+   http://FULLNAME-backtest.NAMESPACE.svc:8084`, beside one with the
+   external URL for runners elsewhere. The recipes refuse an audience that
+   isn't `LAPILLI_SERVE`'s URL unless `SERVE_AUDIENCE_ANY=1` (the action's
+   `audience-any: true`): set it for runners here that ask for the
+   external URL's audience. With `serve.networkPolicy`,
    `serve.backtest.from` names them, as NetworkPolicy peers, and lets them
    in to this port alone.
 2. **A CI provider's own runners**, with the port exposed on its own,

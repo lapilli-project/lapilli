@@ -1184,8 +1184,18 @@ func TestBacktestServeRecipeReportLeftOut(t *testing.T) {
 		left("`a | @all | b` and so on"), kept(""),
 		left("x `a|@all` y"), kept("--- | ---"), kept(""),
 		kept("- `Typo`, before: `query failed: a|b`"), kept(""),
-		kept("<details><summary>1 changed rules fire as they did</summary>"), kept(""), kept("- `x`"), kept(""), kept("</details>"),
-		left("</details>"), kept(""), left("<details><summary>3 changed rules fire as they did</summary>"), kept("- `y`"),
+		kept("<details><summary>1 changed rules fire as they did</summary>"), kept(""), kept("- `x`"), kept(""), kept("</details>"), kept(""),
+		left("</details>"), kept(""),
+		// A line right after a tag, before a blank line, is in the HTML
+		// block the tag starts, its code spans read as nothing (comrak
+		// 1.0: a live <img> and a raw @all): the tag left out, and what
+		// follows it up to a blank line; a pair whose close is left out
+		// so, its open too.
+		left("<details><summary>2 changed rules fire as they did</summary>"), left("`<img src=https://evil.example/p.png>` `@all`"), left("- `z`"), kept(""),
+		left("</details>"), kept(""),
+		left("<details><summary>4 changed rules fire as they did</summary>"), kept(""), kept("- `w`"), kept(""),
+		left("</details>"), left("`<img src=https://evil.example/p.png>` `@all`"), kept(""),
+		left("<details><summary>3 changed rules fire as they did</summary>"), left("- `y`"),
 	}
 	md := serveMarkdown(changedSummary)
 	md = md[:strings.Index(md, "\n")+1]

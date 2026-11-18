@@ -1614,7 +1614,8 @@ serve_report() {
 # outside them only its own text: letters, digits, spaces and the
 # punctuation of its tables, times and counts; a # only to start a
 # heading; <details><summary>N ...</summary> and </details>, each opened
-# and then closed. Not what a host reads as a
+# and then closed, each with a blank line after it, as an HTML block runs
+# to one. Not what a host reads as a
 # mention (@), a reference (#1, !1, ~x, $1, &1, %x, GH-1), HTML or an
 # entity (<, &), a link or an image ([, //, www., mailto:), an escape (\),
 # a fence, or a quick action (a / first on a line, as GitLab runs one from
@@ -1686,7 +1687,17 @@ report_of_serve() {
         | [$rest[] | test("^ *$")] as $blank
         | (reduce range(0; $n) as $i ([];
             . + [$piped[$i] or $delim[$i] or ($delim[$i + 1] // false) or ($i > 0 and .[$i - 1] and ($blank[$i] | not))])) as $table
-        | [range(0; $n) as $i | $rest[$i] | kind($table[$i])] as $kind
+        | [range(0; $n) as $i | $rest[$i] | kind($table[$i])] as $tags
+        # A <details> line, or </details>, starts an HTML block, which only
+        # a blank line ends: a line after one before a blank line is in
+        # it, its code spans read as nothing, its HTML as HTML. Lapilli
+        # writes a blank line after each; a tag with none after it is left
+        # out, and the lines after it up to a blank line.
+        | (reduce range(0; $n) as $i ({html: false, out: []};
+            if ($tags[$i] == "open" or $tags[$i] == "close") and $i + 1 < $n and ($blank[$i + 1] | not) then .html = true | .out += [true]
+            elif .html and ($blank[$i] | not) then .out += [true]
+            else .html = false | .out += [false] end) | .out) as $glued
+        | [range(0; $n) as $i | if $glued[$i] then "left" else $tags[$i] end] as $kind
         | (reduce range(0; $n) as $i ({open: null, odd: [range(0; $n) | false]};
             if $kind[$i] == "open" then (if .open == null then .open = $i else .odd[$i] = true end)
             elif $kind[$i] == "close" then (if .open == null then .odd[$i] = true else .open = null end)

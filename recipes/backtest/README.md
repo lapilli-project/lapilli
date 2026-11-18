@@ -570,6 +570,14 @@ backtest that took this one's place; one that failed in serve, or didn't
 finish within its `--backtest-timeout`; one that didn't come back within
 `SERVE_WAIT`.
 
+**A newer commit takes the place** of a backtest of the same pull request
+still waiting only on GitHub and Forgejo, whose ID token names the pull
+request (`ref`, `refs/pull/N/merge`). GitLab's names a merge request's
+source branch, not its number, so a GitLab merge request's older
+backtests aren't superseded: each waits its turn and is posted, the
+newest last, and the entry's three waiting at most bound how many; nor
+are those of a plain token, or of a `push`.
+
 ## The release the action installs
 
 Without `version`, the action installs the release it is at: the first
