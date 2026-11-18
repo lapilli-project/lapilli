@@ -155,6 +155,28 @@ Before upgrading:
   HMAC worked out again over the body as it came, compared in constant
   time, and a timestamp more than five minutes off refused, as Lapilli
   takes Grafana's. Without the flag, a post is as it was.
+- **`lapilli preflight` reads the backtest lane** (docs/design/preflight.md,
+  step 3). With `--backtest-listen`: `backtest.trust` says what serve does
+  with `--backtest-trust` at start, read by serve's own reader: it takes
+  the file, naming each entry, its CI and the claims it pins, never what a
+  claim is pinned to, a plain token's file read as serve reads it and said
+  long enough, never its text or length; or it stops, a problem saying why
+  in serve's words, what the file pins taken out of them. The file needs no
+  credential, and is read with `--offline` too. `backtest.issuers` asks each
+  issuer the file names for its discovery document and keys, once, as a
+  token's first check does (its issuer to the byte, its keys at its own
+  origin or `jwks_url`, no redirect, 1 MB and 100 keys), GETs of exactly
+  those through the allowlist, counted as `backtest` in `asked.by`: ok when
+  a key verifies a token of an algorithm it names. `estimate.backtests`
+  says how many requests a backtest fits in `--backtest-timeout` at the
+  lane's share of `--max-rate`, and how many days of ten of the rules
+  changed, counted by the planner the port refuses one by; the hourly runs
+  are timed at `--max-rate` less `--backtest-share` too, as while a
+  backtest runs the whole hour (`while_backtest`), a run past `--every`
+  only then unknown; and memory says the lane's reads beside the runs'
+  (`backtest_bytes`). A trust file serve refuses is the item's problem,
+  exit 1, where serve exits 2. Without `--backtest-listen`, the report is
+  what it was, to the byte.
 
 ### Changed
 

@@ -626,6 +626,11 @@ lead; docs/design/noc.md). MCP: /mcp. Also /metrics, /healthz, /readyz.
 type serveSetup struct {
 	cfg serve.Config
 	f   *verdictFlags
+	// trustFile is --backtest-trust; trustErr why serve.ReadTrust refused
+	// it, which serve stops at, and lapilli preflight says as an item
+	// (readServeAs).
+	trustFile string
+	trustErr  error
 }
 
 // readServe reads lapilli serve's flags, and refuses a flag, or a
@@ -634,6 +639,14 @@ type serveSetup struct {
 // secrets aren't), the files of secrets are taken as given, unread: a
 // token, a key, a webhook's URL, the ledger's connection string.
 func readServe(args []string, secretsLater bool) (serveSetup, error) {
+	return readServeAs(args, secretsLater, false)
+}
+
+// readServeAs is readServe; with trustSaid (lapilli preflight), a trust
+// file serve.ReadTrust refuses, as serve refuses it, is kept in the setup,
+// for the report to say, not refused as a flag is: it is a file serve
+// reads, as --config and --incidents are.
+func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error) {
 	cfg := serve.Config{
 		Ledger: "lapilli-ledger", Listen: "127.0.0.1:8080", Every: time.Hour, Settle: time.Hour,
 		Backfill: 28 * 24 * time.Hour, Keep: 400 * 24 * time.Hour, Watch: time.Minute,
@@ -1237,11 +1250,15 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 	case cfg.BacktestListen != "" && f.promURL == "" && f.gcpProj == "":
 		err = fmt.Errorf("--backtest-listen replays a pull request's rules against the history: add --prometheus URL or --gcp-project ID")
 	}
+	var trustErr error
 	if err == nil && trustFile != "" {
 		// Every token and secret serve takes or sends: none may be a plain
 		// entry's too.
-		cfg.Trust, err = serve.ReadTrust(trustFile, []string{cfg.IncidentsToken, cfg.FiringsToken, cfg.NotifyToken, cfg.TasksToken, cfg.ChangesToken,
+		cfg.Trust, trustErr = serve.ReadTrust(trustFile, []string{cfg.IncidentsToken, cfg.FiringsToken, cfg.NotifyToken, cfg.TasksToken, cfg.ChangesToken,
 			cfg.ChangesGrafanaToken, cfg.ChangesRulerToken, cfg.NotifyGrafanaSecret, f.grafanaTk, f.rulerTk, f.lokiTk, f.tokenFile}, secretsLater)
+		if !trustSaid {
+			err = trustErr
+		}
 	}
 	if err == nil {
 		cfg.Marks, err = serve.ParseMarks(marks, markMatches)
@@ -1294,7 +1311,7 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 		px.Claims = claims
 		cfg.Proxy = &px
 	}
-	return serveSetup{cfg: cfg, f: f}, nil
+	return serveSetup{cfg: cfg, f: f, trustFile: trustFile, trustErr: trustErr}, nil
 }
 
 func runServe(args []string, stdout, stderr io.Writer) int {

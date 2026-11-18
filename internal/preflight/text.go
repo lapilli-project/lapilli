@@ -9,11 +9,12 @@ import (
 
 // estimateLabels are how the text names each estimate.
 var estimateLabels = map[string]string{
-	"estimate.hourly":   "hourly run",
-	"estimate.backfill": "backfill",
-	"estimate.nights":   "nights",
-	"estimate.beside":   "beside",
-	"estimate.memory":   "memory",
+	"estimate.hourly":    "hourly run",
+	"estimate.backfill":  "backfill",
+	"estimate.nights":    "nights",
+	"estimate.beside":    "beside",
+	"estimate.backtests": "backtests",
+	"estimate.memory":    "memory",
 }
 
 // Text writes the report for a person: a line of counts, an item a line,

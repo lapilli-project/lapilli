@@ -237,6 +237,9 @@ func (p *run) access() {
 	if s.NotifyListen != "" {
 		ports = append(ports, "--notify-listen (notifications)")
 	}
+	if s.BacktestListen != "" {
+		ports = append(ports, "--backtest-listen (pull request backtests, from the CI jobs --backtest-trust names)")
+	}
 	it := Item{ID: "access", State: OK, What: who + "; " + strings.Join(ports, ", ")}
 	if s.UserHeader != "" && !serve.LoopbackOnly(s.Listen) {
 		it.Why = "--user-header is taken from whatever reaches --listen: only a proxy that sets it, and strips it from callers, should reach it"

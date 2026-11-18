@@ -16,6 +16,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rsa"
 	"encoding/json"
 	"errors"
@@ -228,6 +229,46 @@ func (k *Keys) Fetch(ctx context.Context) (int, error) {
 	defer cancel()
 	ks, err := k.fetch(ctx)
 	return len(ks), err
+}
+
+// URL is where the keys are fetched from.
+func (k *Keys) URL() string { return k.url }
+
+// Usable fetches the keys once, as the first token would (fetchSet),
+// within ctx, and says how many of them verify a token signed with one of
+// the algorithms taken (Algs), as go-jose verifies one: an RSA key for
+// RS* and PS*, an ECDSA key of P-256, P-384 or P-521 for ES256, ES384 or
+// ES512, an Ed25519 key for EdDSA. It keeps none.
+func (k *Keys) Usable(ctx context.Context) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	defer cancel()
+	keys, _, err := k.fetchSet(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, key := range keys {
+		if slices.ContainsFunc(k.algs, func(a jose.SignatureAlgorithm) bool { return verifies(key, a) }) {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// verifies reports whether key can verify a signature of alg: by its
+// type, and an ECDSA key by its curve, which go-jose holds to the
+// algorithm's.
+func verifies(key jose.JSONWebKey, alg jose.SignatureAlgorithm) bool {
+	switch pub := key.Key.(type) {
+	case *rsa.PublicKey:
+		return strings.HasPrefix(string(alg), "RS") || strings.HasPrefix(string(alg), "PS")
+	case *ecdsa.PublicKey:
+		return alg == jose.ES256 && pub.Curve == elliptic.P256() || alg == jose.ES384 && pub.Curve == elliptic.P384() ||
+			alg == jose.ES512 && pub.Curve == elliptic.P521()
+	case ed25519.PublicKey:
+		return alg == jose.EdDSA
+	}
+	return false
 }
 
 // fetch reads the keys at the URL: public keys of a key pair alone.

@@ -503,7 +503,18 @@ ARN, Azure's `Microsoft.Authorization/permissions/read`,
 inspect groups, users, compartments and policies in the tenancy, or the
 item is unknown; an OCI policy with a condition is never counted as a
 grant. A Mimir's or a Cortex's `rules:write` can't be known without
-writing: unknown.
+writing: unknown. With `--backtest-listen` ([below](#pull-request-backtests)),
+it reads `--backtest-trust` as serve reads it at start and says what serve
+does with it (`backtest.trust`: the entries by their names, CIs and the
+claims they pin, never what a claim is pinned to; or why serve stops), asks
+each issuer the file names for its discovery document and keys, once, as a
+token's first check would (`backtest.issuers`; GETs of those alone, the
+keys at the issuer's own origin or the entry's `jwks_url`), and estimates
+the lane: the hourly runs timed at `--max-rate` less `--backtest-share`
+too, as while a backtest runs, and how many requests a backtest, and how
+many days of ten of the rules changed, fit in `--backtest-timeout`
+(`estimate.backtests`). The trust file needs no credential, and is read
+with `--offline` too; a plain token's file isn't, then.
 
 ## The ledger in Postgres
 

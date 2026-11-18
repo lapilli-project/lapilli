@@ -1,11 +1,13 @@
 # `lapilli preflight`: what serve will meet, before it is deployed
 
-Status: accepted; steps 1 and 2 built. Merged on 2026-11-16, before its
-week was out, by the maintainer's decision (#92), after a review whose
+Status: accepted; steps 1, 2 and 3 built. Merged on 2026-11-16, before
+its week was out, by the maintainer's decision (#92), after a review whose
 changes are in it. Step 2, what Grafana's token and each cloud's identity
 may write, asked without writing, followed the maintainer's decision of
-open question 3 on 2026-11-18. What building each step found the design
-said otherwise than the code can do is in "As built" below.
+open question 3 on 2026-11-18. Step 3, the backtest lane, followed the
+lane's own first step in serve ([backtests.md](backtests.md), #135). What
+building each step found the design said otherwise than the code can do
+is in "As built" below.
 Under [GOVERNANCE.md](../../GOVERNANCE.md) a new command is designed first,
 as a pull request. It adds nothing to the ledger, takes no input from
 outside but the answers of the APIs serve already reads, and changes no
@@ -166,6 +168,17 @@ unknown here: that history isn't read for an estimate.
 | `signin` | `--oidc-issuer`'s discovery (`OIDC.Discover`), `--proxy-jwt`'s keys, once | what serve would say at start: an issuer that differs, an endpoint that isn't https |
 | `access` | nothing | who may change what, in the sentence serve logs at start: with no roles, everyone may only look on a listener beyond loopback (`LoopbackOnly`); `--user-header` without a proxy in front; each port and what it takes |
 
+### The backtest lane
+
+With `--backtest-listen` ([backtests.md](backtests.md)); without it, none
+of these, and the report is what it was before them, to the byte ("As
+built (step 3)").
+
+| Id | Read | Says |
+|---|---|---|
+| `backtest.trust` | nothing more: `--backtest-trust` as serve read it in reading the flags (`serve.ReadTrust`, with the other token files serve takes), and the port's flags as `serve.New` holds them (`serve.BacktestRefused`) | what serve does at start: it takes the file, naming each entry, its CI (`github`, `gitlab`, `forgejo` or `generic`) and the claims it pins, never what a claim is pinned to; or it stops, a problem, saying why in serve's words. A plain token's file is read as serve reads it (there, 32 characters at least, no other token file's), and said to be long enough, never its text or its length. No credential is needed: with `--offline` the file is read all the same, the plain tokens' files not, and with one the item is unknown |
+| `backtest.issuers` | for each issuer the file names (with its `jwks_url`, as serve asks it, once for all its entries), its discovery document, then its keys, as `signin.CI` asks them at a token's first check: its issuer to the byte, its keys at its own origin or the entry's `jwks_url`, no redirect, 1 MB and 100 keys, ten seconds; 20 issuers at most | ok when a key it holds verifies a token of an algorithm its discovery document names; a problem when either can't be read, or no key does: serve starts, and refuses those entries' tokens (401) until it does; unknown with `--offline`, past 20 issuers, or once `--preflight-timeout` is up |
+
 ## Estimates
 
 **Requests**, counted from the rules read, without asking for any of them.
@@ -189,6 +202,7 @@ by the API asked (`--prometheus`, each Loki, each Grafana data source):
 | `estimate.backfill` | the backfill: requests in all, its pieces, the most in one, and one `--guard` query before each day of it |
 | `estimate.nights` | how many nights the backfill takes, with `--catch-up-hours` |
 | `estimate.beside` | beside the runs: reading the rules every `--watch` from an API (one request a minute each, to the history's API for `--loaded-rules`), each `--alarms` every `--alarms-every`, the replay check (some three requests a day for each series it reads, `checkDay`), the scrape intervals (two a day), Grafana's templates (three an hour), the on-call feeds |
+| `estimate.backtests` | with `--backtest-listen`: the requests a backtest asks within `--backtest-timeout` at the lane's share of `--max-rate`, and what a pull request changing ten of the rules read asks over the recipe's seven days, counted as the port counts one before it is queued (`fits`), and the days of it that fit (below) |
 | `estimate.memory` | below |
 
 **Left out of the estimate**, and said so in it: the `--alerts` mode, which
@@ -213,6 +227,24 @@ requests over the lower of the two. Two problems follow:
 
 It also says what share of `--max-rate` the runs use once caught up, and,
 with several replicas, that each asks at it ([replicas.md](replicas.md)).
+
+**The backtest lane.** While the lane runs a backtest, its share of
+`--max-rate` (`--backtest-share`) is kept for it, and the runs' requests
+to `--prometheus` are spaced by the rest (`prom.Pace.Reserve`). So, with
+`--backtest-listen`, the hourly runs are timed twice: at `--max-rate`, and
+in the worst case, a backtest running the whole hour, at `--max-rate` less
+the share. A run that takes longer than `--every` only then is unknown,
+not a problem: the runs fall behind while backtests run back to back,
+which is the pull requests' to say. And `estimate.backtests` says how much
+a backtest can ask: at the lane's rate (the share of `--max-rate`'s pace,
+as serve makes it, `prom.Pace.Share`), the most requests within
+`--backtest-timeout`; and, with the planner the port refuses a backtest
+by (`replay.PlanEach`, the rules before and after side by side, over days
+ending at now less `--settle`), ten of the rules read changed, over seven
+days, their expressions (the two sides asked apart) or their `for` alone
+(the two sides sharing their reads), and the most days of each that fit,
+14 at most. Not one rule over a day fitting is a problem: the port refuses
+every backtest before it is queued.
 Without either rate, how long is the API's to say: unknown, with the floor
 at `--parallel` requests at once. `vector(1)`'s time is no measure of a
 range read's.
@@ -245,7 +277,12 @@ With no ALERTS to read, it says the bound the caps give, as a bound:
 `--parallel` times `--max-samples` times 64 bytes, some 5 GB at the
 defaults. A memory limit under that bound is **unknown**, not a problem:
 what a run holds can't be told from nothing read, and the bound is reached
-only when every read at once holds `--max-samples`.
+only when every read at once holds `--max-samples`. With
+`--backtest-listen`, the lane's reads are beside the runs' (a quarter of
+`--parallel` at once, one at least), of a pull request's rules, which
+nothing read here sizes: they are said at their bound, each
+`--max-samples`, and a memory limit the runs' peak fits and the two
+don't is unknown.
 
 **What it finds, say.** 200 Prometheus rules, a `for` of 5 minutes or less,
 the defaults: an hourly run replays each from 2h15m back (settle, every,
@@ -327,7 +364,10 @@ Each is held by the code and a test, not only said:
   `aws:RequestedRegion` of a region serve writes in; Cloud Resource
   Manager's to the `:testIamPermissions` path of each project of
   `--alarms` that `--changes-in` names, with the alerting policies'
-  permissions as its body. Any other action or path on those hosts is
+  permissions as its body. The backtest port's issuers are asked by GETs
+  of exactly their discovery documents and keys, the keys a discovery
+  document names allowed only at the issuer's own origin: a URL in the
+  operator's trust file, and held to the list all the same. Any other action or path on those hosts is
   refused, and so is a form or a query that doesn't read whole (a `;`
   between its pairs). An answer that says "allowed" is judged, and
   nothing more is done with it.
@@ -390,11 +430,11 @@ is met, not even over the last day: that would be a replay and a verdict,
 which are the other's. The ALERTS count is read for memory alone, and isn't
 shown by rule, where it would read as how often a rule fires.
 
-With [backtests.md](backtests.md) (proposed beside this, #89), the
-backtest lane's share of `--max-rate` is taken out of what the runs have,
-in the estimate, and its trust file is read and its issuers' discovery
-fetched; the planner here is what refuses there a backtest that couldn't
-finish in its time.
+With [backtests.md](backtests.md) (proposed beside this, #89; built in
+serve, #135, and here as step 3), the backtest lane's share of
+`--max-rate` is taken out of what the runs have, in the estimate, and its
+trust file is read and its issuers' discovery fetched; the planner here
+is what refuses there a backtest that couldn't finish in its time.
 
 ## What comes from outside
 
@@ -424,9 +464,11 @@ named at most, and the permissions at ten resources the alert rules name
 at most, five pages each; and OCI's memberships (a
 thousand at most), twenty groups, and for ten compartments at most their
 chains up to the tenancy (eight at most) and the policies of each, read
-once each (five pages each, 5,000 statements all told). Each is counted in
-`asked.by`, as `grafana` and `iam:aws`, `iam:azure`, `iam:google` and
-`iam:oci`. Each is asked under `--max-rate`,
+once each (five pages each, 5,000 statements all told); and, with
+`--backtest-listen`, the discovery document and keys of each issuer the
+trust file names, twenty at most. Each is counted in `asked.by`, as
+`grafana` and `iam:aws`, `iam:azure`, `iam:google`, `iam:oci` and
+`backtest`. Each is asked under `--max-rate`,
 as serve asks, within ten seconds, and the whole within
 `--preflight-timeout`. So are the estimates, which ask nothing but count
 a run's requests a run at a time over a day of runs, and the backfill's a
@@ -802,6 +844,73 @@ that says so without anything being written (`internal/preflight`,
   write is each cloud's item. `--offline` takes no identity, reads no
   config file of OCI's, and says each item unknown.
 
+## As built (step 3)
+
+The backtest lane, with `--backtest-listen` (`internal/preflight`,
+`backtests.go`):
+
+- **A trust file serve refuses is an item, not a flag refused.** Flags
+  serve refuses, alone or together, still exit 2; the trust file is a
+  file serve reads at start, as it reads `--config` and `--incidents`, so
+  its refusal is `backtest.trust`'s problem, exit 1, and the rest of the
+  report is said too. It is serve's refusal, not one like it: the flags
+  are read by serve's reader, which reads the file with
+  `serve.ReadTrust` and the other token files serve takes, and keeps the
+  error for the report (`readServeAs`) where serve stops at it; a test
+  runs both on each of a set of files and holds them to the same answer
+  and the same words (`TestPreflightTrustAsServe`). What `serve.New`
+  refuses of the port beside the file (rules to replay, a history) is
+  said from the same function, `serve.BacktestRefused`, which `New` calls.
+- **ReadTrust's words are said whole**, on one line, cut at 600 bytes,
+  not 200: they are Lapilli's own, the file's path and an entry's name
+  before the reason, not a server's answer. A value it couldn't take is
+  in them (`"0x75bcd15": want a string or an integer written in decimal`),
+  so what the file pins, every claim's values but the events' (one of a
+  few words, which the refusal names), and the audiences are read from
+  the file as YAML, whatever ReadTrust made of it, and taken out as
+  `[--backtest-trust's repository_id]` and the like. They are taken out
+  of what was said alone, not of the whole report: an id may be `42`.
+- **An issuer's keys are counted as a token would be verified by them**:
+  of the keys the set holds as a token's check holds them (`fetchSet`:
+  public, for signatures, an RSA key of 2048 to 4096 bits, 100 at most),
+  those of an algorithm the discovery document names, as go-jose verifies
+  (an RSA key for `RS*` and `PS*`, an ECDSA key of P-256, P-384 or P-521
+  for `ES256`, `ES384` or `ES512`, Ed25519 for `EdDSA`): none is a
+  problem (`signin.Keys.Usable`).
+- **Asked in the preflight's time.** serve's `CI.Discover` asks in ten
+  seconds of its own, whatever its caller's context says, and keeps what
+  it found; preflight asks the same `discover` once through
+  `CI.DiscoverKeys`, under its context, and keeps nothing. An issuer not
+  yet asked when `--preflight-timeout` is up, or cut short by it, is
+  unknown, never a problem.
+- **The keys a discovery document names are pinned here too.** signin.CI
+  takes them only at the issuer's own origin; the allowlist allows them
+  only so (`keysAllowed`), once read, so a discovery document can't have
+  preflight fetch from anywhere else even if signin's check went.
+- **What a typical pull request is.** Ten of the rules read that the
+  port takes (Prometheus's format, replayed), each of an expression of
+  its own, the first ten in the order read: a rule in Prometheus's format
+  asks one query a day it touches, so any ten ask alike, and none shares
+  a read with another. The expressions changed are counted as twice one
+  side's plan, the two sides sharing no read; the `for` alone, as both
+  sides planned together, sharing theirs. The design's case reads as
+  [backtests.md](backtests.md) says: 160 requests over 7 days, 112 fit at
+  0.125 a second in 15 minutes, so four days; the `for` alone, 80
+  (`TestEstimateBacktests`). An entry's own `days` isn't counted: 14 at
+  most, the port's.
+- **The backfill and the nights aren't timed again.** A backtest is
+  taken once a run is recorded, so it can run while the backfill catches
+  up, and slows it as it slows the hourly runs; the backfill and the
+  nights are floors already, and say so.
+- **Memory**: the lane's reads at their bound beside the runs' peak
+  (`backtest_bytes`); the request and the limit stay the runs'.
+- **`access`** names `--backtest-listen` among the ports.
+- **Byte for byte without it.** `TestPreflightOffGolden` holds the text
+  and the JSON, offline (with and without `--changes`) and against
+  stand-ins, to what main gave before step 3 (`cd32f629`), but for the
+  directory the test runs in, how long the history took to answer and
+  the free space beside the ledger.
+
 ## Steps
 
 1. The command: serve's flags, the rules, the history's probe and the
@@ -812,4 +921,6 @@ that says so without anything being written (`internal/preflight`,
    `Run` by a test.
 2. Grafana's permissions, once OSS is checked; the clouds' that can be
    asked: all four (built, "As built (step 2)").
-3. The backtest lane ([backtests.md](backtests.md)), when it is built.
+3. The backtest lane ([backtests.md](backtests.md)): its trust file, its
+   issuers' discovery and keys, its share in the estimates (built, "As
+   built (step 3)").

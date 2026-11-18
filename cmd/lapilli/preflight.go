@@ -58,10 +58,17 @@ Resource Manager's testIamPermissions, Azure's permissions, deny
 assignments and locks (Microsoft.Authorization's permissions, denyAssignments
 and locks read), and OCI's policies (the user needs to inspect groups,
 users, compartments and policies in the tenancy; a policy with a condition
-is never a grant). What it prints is redacted as a pull request's
+is never a grant). With --backtest-listen, --backtest-trust is read as
+serve reads it at start, and said as serve would take it, by its entries'
+names, CIs and the claims they pin, or as serve would refuse it; each
+issuer it names is asked once for its discovery document and its keys, as
+a token's first check asks them; and the estimates time the hourly runs at
+--max-rate less --backtest-share too, as while a backtest runs, and say how
+many requests, and how many days of ten of the rules changed, a backtest
+fits in --backtest-timeout. What it prints is redacted as a pull request's
 backtest comment is: the URLs given as their flag's name, their hosts and
 users, addresses, tenants, a --gcp-project; a secret by its file's path and
-length.
+length; what a trust file pins, and its audiences, never.
 `
 
 func runPreflight(args []string, stdout, stderr io.Writer) int {
@@ -114,13 +121,13 @@ func runPreflight(args []string, stdout, stderr io.Writer) int {
 		}
 		rest = append(rest, a)
 	}
-	st, err := readServe(rest, offline)
+	st, err := readServeAs(rest, offline, true)
 	if err != nil {
 		return refuse(err)
 	}
 	f := st.f
 	c := preflight.Config{Serve: st.cfg, MaxRate: f.maxRate, MaxSamples: f.maxSamples, Offline: offline, Timeout: timeout,
-		Version: buildVersion(), Now: now}
+		Version: buildVersion(), Now: now, TrustFile: st.trustFile, TrustErr: st.trustErr}
 	if f.promURL != "" || f.gcpProj != "" {
 		c.History = f.prometheus()
 	}

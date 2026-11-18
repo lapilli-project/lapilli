@@ -284,6 +284,7 @@ func (p *run) allowAll() {
 		}
 		p.allowURL("signin", keys)
 	}
+	p.allowIssuers()
 	p.allowCredentials()
 }
 
