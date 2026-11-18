@@ -183,7 +183,7 @@ A CI job can send a pull request's rules to `lapilli serve` instead of
 running Lapilli itself: serve replays them with its own access to the
 history, at its share of the rate, judges them by its record, and gives
 back the same report, summary line and all, which the job posts as it
-would its own ([serve.md](serve.md#pull-request-backtests); the design,
+would its own, the lines Lapilli writes and no other ([serve.md](serve.md#pull-request-backtests); the design,
 [design/backtests.md](design/backtests.md)). The job holds no credential
 for the metrics, only a token that says which repository it runs for: the
 CI's own ID token where it has one (GitHub Actions, GitLab CI, Forgejo

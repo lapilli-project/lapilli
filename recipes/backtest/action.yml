@@ -120,10 +120,10 @@ inputs:
     description: The account the token comments as, for a GitHub App's token (NAME[bot]). GitHub says it for a person's, and the job's own is github-actions[bot].
     default: ""
   serve-url:
-    description: lapilli serve's backtest port (--backtest-listen), such as https://lapilli-ci.example.com, to send the rules to instead of installing Lapilli; serve backtests them with its own access to the history, judged by its record. https, or plain http to a name inside the cluster (FULLNAME-backtest.NAMESPACE.svc:8084). It needs audience, and the job's permissions id-token write. Serve decides where the history is and what judges the firings, so prometheus-url, auth, gcp-project, aws-region, incidents, impact, impact-for and match are refused with it, and of args only --tz and --rules-select are taken.
+    description: lapilli serve's backtest port (--backtest-listen), such as https://lapilli-ci.example.com, to send the rules to instead of installing Lapilli; serve backtests them with its own access to the history, judged by its record. https, or plain http, through no proxy, to a Service in the cluster (FULLNAME-backtest.NAMESPACE.svc:8084). It needs audience, and the job's permissions id-token write. Serve decides where the history is and what judges the firings, so prometheus-url, auth, gcp-project, aws-region, incidents, impact, impact-for and match are refused with it, and of args only --tz and --rules-select are taken.
     default: ""
   audience:
-    description: The audience of the ID token asked of GitHub for serve-url, as serve's trust file names it for this repository; the port's URL, never GitHub's default.
+    description: The audience of the ID token asked of GitHub for serve-url, as serve's trust file names it for this repository; the port's URL (the step's log says when it isn't serve-url). A cloud's audience (sts.amazonaws.com, api://AzureADTokenExchange, //iam.googleapis.com/...) and GitHub's default (https://github.com/OWNER) are refused, as other services take a token for them. The token is masked in the job's log.
     default: ""
   serve-wait:
     description: How long to wait for serve-url's report, such as 30m (the default); past it, the backtest is cancelled, and the comment says so.

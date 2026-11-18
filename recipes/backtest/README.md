@@ -423,14 +423,19 @@ jobs:
           since: 14d
 ```
 
-`LAPILLI_SERVE` is https, or plain http to this machine or to a name
-inside a cluster: one with no dot, or ending in `.svc` or
-`.cluster.local`, as a runner in the cluster reaches the chart's Service,
-`http://FULLNAME-backtest.NAMESPACE.svc:8084`. `NAME.NAMESPACE` alone
-isn't taken in plain http: a namespace may be named as a top-level domain,
-and the name then be one on the internet, which the token would go to in
-the clear. That is wider than what a host's API and a release are taken
-at, plain http to the machine itself.
+`LAPILLI_SERVE` is https, or plain http to this machine (`127.0.0.1`,
+`[::1]`, `localhost`) or to a Service in the cluster,
+`NAME.NAMESPACE.svc` or `NAME.NAMESPACE.svc.cluster.local` (each a DNS
+label, a letter first), as a runner in the cluster reaches the chart's
+Service, `http://FULLNAME-backtest.NAMESPACE.svc:8084`; plain http goes
+through no proxy (`--noproxy '*'`), whatever `http_proxy` says, as the
+token would cross it in the clear. A name of one label isn't taken in
+plain http: it is looked up under the runner's search domains, which
+needn't be the cluster's; nor is `NAME.NAMESPACE` alone: a namespace may
+be named as a top-level domain, and the name then be one on the
+internet. That is wider than what a host's API and a release are taken
+at, plain http to the machine itself, and narrower than what serve takes
+an identity provider at.
 
 **The token.** Serve takes what its trust file (`--backtest-trust`) names
 for the repository: a CI's ID token for the audience the entry names,
@@ -444,7 +449,18 @@ has none, a plain token. One of:
   audience, as `core.getIDToken(audience)` does
   (`ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN`),
   right before it is sent, for each request. The action does this with
-  `audience`.
+  `audience`. A cloud's audience, or the CI's own default, is refused:
+  `sts.amazonaws.com` (any under `amazonaws.com`),
+  `api://AzureADTokenExchange`, `//iam.googleapis.com/...`,
+  `https://iam.googleapis.com/...`, `https://sts.googleapis.com...`,
+  `sigstore`, and GitHub's own, `https://github.com/...`: other services
+  take a token for those, and serve, or whoever is on the way to it, could
+  use it there. The job's log says when the audience isn't
+  `LAPILLI_SERVE` (without a trailing slash): the port's URL is one no
+  other service takes. In GitHub Actions, `github.sh` masks the token in
+  the job's log (`::add-mask::`, on stdout) as soon as it has it, as
+  `core.getIDToken` does; `gitea.sh` doesn't, as Forgejo documents no such
+  command.
 
 By CI:
 
@@ -488,8 +504,9 @@ commit's files, as `--rules` would read them, named by their path under
 what `PATHS` names (`alerts/team/api.yaml` as `team/api.yaml`, a file
 `PATHS` names by its own name, what `RENDER` wrote as `rules.yaml`), those
 whose names begin with a dot passed over, as `--rules` passes them over;
-the expectations, the pull request's and the commit it goes into's; the
-days `--since` gives; `--tz` and `--rules-select`; the pull request's
+the expectations, the pull request's and the commit it goes into's (a
+file of no bytes is sent, as `""`, as `--expect` takes one; a commit
+without the file sends none); the days `--since` gives; `--tz` and `--rules-select`; the pull request's
 number and the commit checked out. Its files are sent as text, so a rule
 file that isn't UTF-8 isn't sent, and two of `PATHS` holding a file of one
 name can't be: each is said in the comment, which file in the job's log.
@@ -500,7 +517,9 @@ where its backtest is every `SERVE_POLL` seconds (10), the job's log
 saying where it is in the queue and, while it runs, how many of its
 requests to the history it has asked, when that changes and every 30
 seconds. When serve says to wait (`Retry-After`: a full queue, the entry's
-hour, serve not ready yet), it waits so long, 5 minutes at most. Past
+hour, serve not ready yet), it waits so long, 5 minutes at most, and 5
+seconds at least, or `SERVE_POLL` if longer, so that a `Retry-After` of 0
+isn't a loop of requests (`SERVE_RETRY_MIN`, for tests, lowers the 5). Past
 `SERVE_WAIT` (`30m`; the action's `serve-wait`), the backtest is cancelled
 (`DELETE`), and the comment says it didn't come back; a job that stops
 first, cancelled say, cancels it as it exits.
@@ -724,7 +743,22 @@ reasons forks are kept out.
   own), follows no redirect from a host's API or serve, and a release's
   download only to HTTPS. What serve answers is read with `jq` alone; what
   it says goes to the job's log made inert, as `lapilli`'s stderr does,
-  and to the comment only in the fenced block, or as its report. What it downloads is capped (16 MiB from a host,
+  and to the comment only in the fenced block, or as its report. Of the
+  report, its first line is posted as serve wrote it only when it is the
+  summary line lapilli writes, a JSON object of numbers and `true` or
+  `false`, or there is no report; and each line after it only when it is
+  one lapilli writes: what came from the rules in code spans, each closed
+  on its own line (in a table, with no `|` in it but `\|`, as a host
+  splits a row's cells first), outside them only lapilli's own words and
+  punctuation, and `<details>` as lapilli writes it, opened then closed.
+  Any other line (a quick action, which GitLab runs from a note with the
+  job's token; a mention, a reference, HTML, a link, an image; a fence; a
+  character that doesn't show) is left out whole, a line saying so in
+  place of each run of them, and is in the job's log; so is what is past
+  the first 65,536 characters, more than lapilli writes. A comment is kept
+  under 60,000 bytes: a report longer than that is cut to its first lines,
+  saying so.
+  Plain http to serve goes through no proxy. What it downloads is capped (16 MiB from a host,
   256 MiB for a release) as it streams, not only by `--max-filesize`,
   which before curl 8.4.0 (Ubuntu 22.04 has 7.81) caps only an answer that
   says its length first.

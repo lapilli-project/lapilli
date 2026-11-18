@@ -103,9 +103,11 @@
 # metrics.
 #
 #   LAPILLI_SERVE    serve's backtest port (--backtest-listen), such as
-#                    https://lapilli-ci.example.com: https, or plain http
-#                    to this machine or to a name inside a cluster (no dot,
-#                    or ending in .svc or .cluster.local). The rules of both
+#                    https://lapilli-ci.example.com: https, or plain http,
+#                    through no proxy, to this machine (127.0.0.1, [::1],
+#                    localhost) or to a Service in the cluster,
+#                    NAME.NAMESPACE.svc or NAME.NAMESPACE.svc.cluster.local.
+#                    The rules of both
 #                    commits and the expectations are sent there (POST
 #                    /v1/backtests), and its report read back every
 #                    SERVE_POLL seconds; the comment, and the job's exit, are
@@ -125,13 +127,21 @@
 #                    the audience to ask the CI for an ID token for, where
 #                    the host's script asks (github.sh, and gitea.sh in
 #                    Forgejo Actions: ACTIONS_ID_TOKEN_REQUEST_URL), as the
-#                    trust file names it: the port's URL, never the CI's
-#                    default
+#                    trust file names it: the port's URL (the job's log
+#                    says when it isn't LAPILLI_SERVE), never the CI's
+#                    default nor a cloud's, which are refused
+#                    (sts.amazonaws.com, api://AzureADTokenExchange,
+#                    //iam.googleapis.com/..., https://github.com/...):
+#                    other services take a token for those. In GitHub
+#                    Actions, github.sh masks the token (::add-mask::) as
+#                    soon as it has it
 #   SERVE_WAIT       how long to wait for serve's report (default 30m), a
 #                    second to a day, as IMPACT_FOR is read; past it, the
 #                    backtest is cancelled (DELETE) and said in the comment
 #   SERVE_POLL       how many seconds apart serve is asked (default 10, 0
 #                    to 60)
+#   SERVE_RETRY_MIN  for tests: the least serve's Retry-After is waited, in
+#                    seconds (default 5, 0 to 5), or SERVE_POLL if longer
 #
 # What can fail once it runs (the install, the commits, RENDER, the
 # backtest) is said in the comment, and the job succeeds unless
@@ -158,7 +168,9 @@
 # line; so is serve's, and the key its backtest is read by. What serve
 # answers is read with jq alone, and what it says copied to the job's log
 # as lapilli's stderr is, and to the comment only in the fenced block or as
-# its report. RENDER and RENDER_PREPARE run what the pull request holds, with the
+# its report: its summary line as serve wrote it, or no report, and of the
+# rest only lines lapilli writes, any other left out (report_of_serve).
+# RENDER and RENDER_PREPARE run what the pull request holds, with the
 # job's rights: they run without the variables CIs keep tokens in, and with a
 # HOME of their own for each commit, the base first, but can read whatever
 # the job can, the token's file included, and on Linux the environment the
@@ -208,13 +220,16 @@ safe_url() {
   return 1
 }
 # serve_url URL: whether lapilli serve's backtest port may be at URL, which
-# the CI's token goes to: https, or plain http to this machine or to a name
-# inside a cluster (no dot, or ending in .svc or .cluster.local, a letter
-# first, so that it isn't an address), as serve takes an identity
-# provider's URL (signin.SafeURL); no user in its authority, no query.
-# Wider than safe_url, which a host's API and a release go to: a runner in
-# the cluster reaches the chart's Service, FULLNAME-backtest, in plain http.
-# NAME.NAMESPACE isn't taken: a namespace may be a top-level domain's name.
+# the CI's token goes to: https, or plain http to this machine (127.0.0.1,
+# [::1], localhost) or to a Service in a cluster, NAME.NAMESPACE.svc or
+# NAME.NAMESPACE.svc.cluster.local, each a DNS label with a letter first;
+# no user in its authority, no query. Wider than safe_url, which a host's
+# API and a release go to: a runner in the cluster reaches the chart's
+# Service, FULLNAME-backtest, in plain http. Narrower than serve's own
+# signin.SafeURL: a name of one label is looked up under the resolver's
+# search domains, which needn't be the cluster's, and NAME.NAMESPACE may be
+# a name on the internet (a namespace may be a top-level domain's name).
+# Plain http goes through no proxy (serve_curl).
 serve_url() {
   case $1 in
     https://*) rest=${1#https://} ;;
@@ -228,16 +243,19 @@ serve_url() {
   case $rest in *\?* | *\#*) return 1 ;; esac
   case $1 in https://*) return 0 ;; esac
   case $auth in
-    127.0.0.1 | 127.0.0.1:* | localhost | localhost:* | '[::1]' | '[::1]':*) return 0 ;;
+    '[::1]') name='[::1]' port= ;;
+    '[::1]':*) name='[::1]' port=${auth#'[::1]:'} ;;
     \[*) return 1 ;;
+    *:*) name=${auth%%:*} port=${auth#*:} ;;
+    *) name=$auth port= ;;
   esac
-  name=$(printf '%s' "${auth%:*}" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')
+  case $port in *[!0-9]* | ??????*) return 1 ;; esac
+  name=$(printf '%s' "$name" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')
   case $name in
-    '' | *[!a-z0-9.-]* | [!a-z]*) return 1 ;;
-    *.svc | *.cluster.local) return 0 ;;
-    *.*) return 1 ;;
+    127.0.0.1 | localhost | '[::1]') return 0 ;;
   esac
-  return 0
+  label='[a-z]([a-z0-9-]{0,61}[a-z0-9])?'
+  printf '%s\n' "$name" | grep -Eqx "$label\\.$label\\.svc(\\.cluster\\.local)?"
 }
 # token_ok TOKEN: whether TOKEN can go in a header as it is, as lapilli
 # serve takes a bearer token: visible characters, none a space, 8 KiB at
@@ -329,7 +347,7 @@ if [ -n "${LAPILLI_SERVE:-}" ]; then
     fi
   done
 else
-  for v in "SERVE_WAIT ${SERVE_WAIT:-}" "SERVE_POLL ${SERVE_POLL:-}" "LAPILLI_SERVE_AUDIENCE ${LAPILLI_SERVE_AUDIENCE:-}" \
+  for v in "SERVE_WAIT ${SERVE_WAIT:-}" "SERVE_POLL ${SERVE_POLL:-}" "SERVE_RETRY_MIN ${SERVE_RETRY_MIN:-}" "LAPILLI_SERVE_AUDIENCE ${LAPILLI_SERVE_AUDIENCE:-}" \
     "LAPILLI_SERVE_TOKEN_FILE ${LAPILLI_SERVE_TOKEN_FILE:-}" "LAPILLI_ID_TOKEN ${LAPILLI_ID_TOKEN:+x}"; do
     if [ -n "${v#* }" ]; then
       say "${v%% *} is for a backtest through lapilli serve: give LAPILLI_SERVE, its backtest port, too"
@@ -393,7 +411,7 @@ fi
 if [ -n "${LAPILLI_SERVE:-}" ]; then
   serve=${LAPILLI_SERVE%/}
   if ! serve_url "$serve"; then
-    say "LAPILLI_SERVE $LAPILLI_SERVE: want lapilli serve's backtest port, an https URL, or plain http to this machine or to a name inside a cluster (no dot, or ending in .svc or .cluster.local)"
+    say "LAPILLI_SERVE $LAPILLI_SERVE: want lapilli serve's backtest port, an https URL, or plain http to this machine (127.0.0.1, [::1], localhost) or to a Service in the cluster, NAME.NAMESPACE.svc or NAME.NAMESPACE.svc.cluster.local"
     exit 1
   fi
   case $serve in https://*) serve_proto='=https' ;; *) serve_proto='=http' ;; esac
@@ -413,6 +431,14 @@ if [ -n "${LAPILLI_SERVE:-}" ]; then
     [0-9] | [1-5][0-9] | 60) ;;
     *) say "SERVE_POLL $serve_poll: want how many seconds apart to ask lapilli serve, 0 to 60"; exit 1 ;;
   esac
+  # The least serve's Retry-After is waited: a Retry-After of 0, or none,
+  # isn't a loop of requests. Lowered only for tests.
+  retry_min=${SERVE_RETRY_MIN:-5}
+  case $retry_min in
+    [0-5]) ;;
+    *) say "SERVE_RETRY_MIN $retry_min: want the least seconds lapilli serve's Retry-After is waited, 0 to 5 (for tests; 5 unless set)"; exit 1 ;;
+  esac
+  [ "$retry_min" -ge "$serve_poll" ] || retry_min=$serve_poll
   case $(date +%s 2>/dev/null) in
     '' | *[!0-9]*) say "date +%s doesn't say the time in seconds here: SERVE_WAIT can't be kept"; exit 1 ;;
   esac
@@ -455,6 +481,26 @@ if [ -n "${LAPILLI_SERVE:-}" ]; then
     if [ "${#LAPILLI_SERVE_AUDIENCE}" -gt 1024 ] || [ -n "$(printf '%s' "$LAPILLI_SERVE_AUDIENCE" | tr -d '\041-\176')" ]; then
       say "LAPILLI_SERVE_AUDIENCE: want the audience serve's trust file names, such as https://lapilli-ci.example.com"
       exit 1
+    fi
+    # A cloud's audience, or the CI's own default, is one other services
+    # take: serve, and whoever is on the way to it, could take a token for
+    # it there (AWS's STS, Azure's and Google Cloud's workload identity
+    # federation, Sigstore, GitHub's default, the owner's URL).
+    aud=$(printf '%s' "$LAPILLI_SERVE_AUDIENCE" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')
+    aud_host=${aud#https://}
+    aud_host=${aud_host#http://}
+    aud_host=${aud_host%%/*}
+    aud_host=${aud_host%%:*}
+    case $aud_host in amazonaws.com | *.amazonaws.com) aud=refused ;; esac
+    case $aud in
+      refused | api://azureadtokenexchange* | //iam.googleapis.com | //iam.googleapis.com/* | https://iam.googleapis.com | \
+        https://iam.googleapis.com/* | https://sts.googleapis.com* | sigstore | https://github.com | https://github.com/* | https://github.com:*)
+        say "LAPILLI_SERVE_AUDIENCE $LAPILLI_SERVE_AUDIENCE: a cloud's audience, or the CI's own default, which other services take a token for: give serve's own, the one its trust file names, its port's URL"
+        exit 1
+        ;;
+    esac
+    if [ "${LAPILLI_SERVE_AUDIENCE%/}" != "$serve" ]; then
+      say "LAPILLI_SERVE_AUDIENCE $LAPILLI_SERVE_AUDIENCE isn't LAPILLI_SERVE, $serve, where the token goes: an audience of its own, the port's URL, is one no other service takes"
     fi
     token_from=actions
   fi
@@ -1254,14 +1300,18 @@ serve_ask() {
   fi
 }
 
+# Plain http goes through no proxy (--noproxy '*', whatever http_proxy
+# says): the token would cross it in the clear, and leave the cluster.
 serve_curl() {
+  sc_method=$1 sc_path=$2 sc_bearer=$3
   if [ $# -ge 4 ]; then
-    printf 'Authorization: Bearer %s\n' "$3" | curl -q -sS --connect-timeout 10 --max-time 60 --max-filesize 2097152 --proto "$serve_proto" \
-      -X "$1" -H @- -H 'Content-Type: application/json' -H 'Accept: application/json' --data-binary "@$4" -D "$tmp/serve.headers" -o - "$serve$2"
+    set -- --max-time 60 -H 'Content-Type: application/json' --data-binary "@$4"
   else
-    printf 'Authorization: Bearer %s\n' "$3" | curl -q -sS --connect-timeout 10 --max-time 30 --max-filesize 2097152 --proto "$serve_proto" \
-      -X "$1" -H @- -H 'Accept: application/json' -D "$tmp/serve.headers" -o - "$serve$2"
+    set -- --max-time 30
   fi
+  case $serve in http://*) set -- "$@" --noproxy '*' ;; esac
+  printf 'Authorization: Bearer %s\n' "$sc_bearer" | curl -q -sS --connect-timeout 10 --max-filesize 2097152 --proto "$serve_proto" \
+    -X "$sc_method" -H @- -H 'Accept: application/json' "$@" -D "$tmp/serve.headers" -o - "$serve$sc_path"
 }
 
 # serve_field FIELD: the answer's FIELD, a string, or nothing.
@@ -1282,11 +1332,12 @@ serve_said() {
     say "lapilli serve answered: $(shown "$tmp/serve.out")"
   fi
 }
-# retry_after: the seconds serve's Retry-After says, 300 at most, or
-# nothing.
+# retry_after DEFAULT: the seconds serve's Retry-After says, or DEFAULT
+# without one; 300 at most, and SERVE_RETRY_MIN (5), or SERVE_POLL if
+# longer, at least: a Retry-After of 0 isn't a loop of requests.
 retry_after() {
   tr -d '\r' <"$tmp/serve.headers" | sed -n 's/^[Rr][Ee][Tt][Rr][Yy]-[Aa][Ff][Tt][Ee][Rr]: *\([0-9][0-9]*\) *$/\1/p' | tail -n 1 |
-    awk '{ n = $1 + 0; print (n > 300 ? 300 : n) }'
+    awk -v def="$1" -v least="$retry_min" '{ v = $1 + 0 } END { n = (NR ? v : def); if (n > 300) n = 300; if (n < least) n = least; print n }'
 }
 # pause SECONDS: sleeps, no further than the deadline.
 pause() {
@@ -1317,6 +1368,13 @@ actions_token() {
   fi
   code=$(sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$tmp/oidc.headers" | tail -n 1)
   serve_token=$(jq -r '.value // empty | strings' "$tmp/oidc.json" 2>/dev/null) || serve_token=
+  # Masked in GitHub Actions' log, before anything could log it, as
+  # core.getIDToken masks the token it gets: on stdout, % as %25, as the
+  # runner reads a command's value. Only a token that could be sent: one
+  # line of visible characters.
+  if [ "${ci_masks:-}" = github ] && [ "${GITHUB_ACTIONS:-}" = true ] && token_ok "$serve_token"; then
+    printf '::add-mask::%s\n' "$(printf '%s' "$serve_token" | sed 's/%/%25/g')"
+  fi
   case $code in
     2??) ;;
     *)
@@ -1382,8 +1440,7 @@ through_serve() {
         ;;
       429 | 503)
         serve_said
-        wait_s=$(retry_after)
-        [ -n "$wait_s" ] || wait_s=60
+        wait_s=$(retry_after 60)
         if [ $(($(date +%s) + wait_s)) -lt "$deadline" ]; then
           say "lapilli serve can't take the backtest yet ($code): asking again in ${wait_s}s"
           pause "$wait_s"
@@ -1478,8 +1535,7 @@ through_serve() {
         return 1
         ;;
       429 | 503)
-        wait_s=$(retry_after)
-        pause "${wait_s:-$serve_poll}"
+        pause "$(retry_after "$serve_poll")"
         ;;
       *)
         # A request lost on the way, or a replica restarting: asked again,
@@ -1508,11 +1564,118 @@ serve_report() {
     trouble "lapilli serve's answer holds no report"
     return 1
   fi
-  jq -j '.markdown' "$tmp/serve.out" >"$tmp/report.md"
+  if ! report_of_serve >"$tmp/report.json" 2>/dev/null || ! jq -e '.markdown | strings' "$tmp/report.json" >/dev/null 2>&1; then
+    trouble "lapilli serve's report doesn't begin with the summary line lapilli writes: not shown"
+    return 1
+  fi
+  jq -j '.markdown' "$tmp/report.json" >"$tmp/report.md"
+  if jq -e '.long' "$tmp/report.json" >/dev/null 2>&1; then
+    say "lapilli serve's report is longer than lapilli writes one (64000 bytes): read to its first 65536 characters, the rest left out"
+  fi
+  n=$(jq '.leaving' "$tmp/report.json" 2>/dev/null) || n=
+  case $n in '' | *[!0-9]*) n=0 ;; esac
+  if [ "$n" -gt 0 ]; then
+    say "lapilli serve's report has $n lines of Markdown lapilli doesn't write (HTML, a link, a mention, a reference, a command): each left out of the comment, the first of them here"
+    jq -r '.left[]' "$tmp/report.json" >"$tmp/left.log" 2>/dev/null || :
+    logged "$tmp/left.log"
+  fi
   note=$(serve_field note)
   [ -z "$note" ] || say "lapilli serve: $note"
   say "lapilli serve backtested the rules"
   verdict=0
+}
+
+# report_of_serve: the Markdown in serve's answer ($tmp/serve.out), as
+# {markdown, leaving, left, long}: its first line, the summary line, as
+# serve wrote it, or nothing when it isn't one (no report, then); and each
+# line after it as serve wrote it when it is one lapilli writes, any other
+# left out, a line saying so in place of each run of them, leaving counting
+# them and left holding the first five, 300 characters of each. Past
+# 65,536 characters, more than lapilli writes (64,000 bytes), it is read
+# no further (long), what is past it left out too. Lapilli writes what
+# came from the rules as code spans, each closed on its own line, and
+# outside them only its own text: letters, digits, spaces and the
+# punctuation of its tables, times and counts; a # only to start a
+# heading; <details><summary>N ...</summary> and </details>, each opened
+# and then closed. Not what a host reads as a
+# mention (@), a reference (#1, !1, ~x, $1, &1, %x, GH-1), HTML or an
+# entity (<, &), a link or an image ([, //, www., mailto:), an escape (\),
+# a fence, or a quick action (a / first on a line, as GitLab runs one from
+# a note with the job's token); nor, even in a code span, a character that
+# doesn't show or moves the text around it. In a table, which every host
+# splits into cells at each | before it reads a code span, a code span's |
+# is \| (a line that starts with |, a delimiter row and the line above it,
+# and each line after one until a blank line). A line is let through, or
+# left out, whole: what each host makes of a line changed in part isn't
+# known here. jq alone reads it.
+report_of_serve() {
+  # shellcheck disable=SC2016
+  jq -c '
+    # A line as {plain, code}, the text outside its code spans and in
+    # them, each joined by spaces; or null when a run of backticks is left
+    # open on it. A run of n opens a span, the next run of n closes it, as
+    # CommonMark reads them. Split at each backtick, an empty part is one
+    # more of a run.
+    def spans:
+      split("`") as $p
+      | [foreach ($p[1:][], null) as $q ({run: 0, open: 0};
+          if $q == null then
+            (if .run == 0 then . elif .open == .run then .open = 0 else .open = -1 end)
+            | .k = (if .open == 0 then "closed" else "open" end)
+          else
+            .run += 1
+            | if $q == "" then .k = "" else
+                (if .open == 0 then .open = .run elif .run == .open then .open = 0 else . end)
+                | .k = (if .open == 0 then "plain" else "code" end) | .run = 0
+              end
+          end;
+          [.k, $q])] as $t
+      | if $t[-1][0] != "closed" then null
+        else {plain: ([$p[0]] + [$t[] | select(.[0] == "plain") | .[1]] | join(" ")), code: ([$t[] | select(.[0] == "code") | .[1]] | join(" "))} end;
+    def plain:
+      test("^[A-Za-z0-9 |:;,.\u0027+%?()*/_\u2192\u2013\u2717\u25cb\u25cf-]*$")
+      and (test("//|www\\.|mailto:|gh-[0-9]|\\*iteration:|%[a-z0-9_\"]"; "i") | not);
+    # Nothing that does not show, or moves the text around it: control
+    # and format characters, line and paragraph separators, spaces but the
+    # space (every other of Zs), Hangul fillers, as lapilli shows them.
+    def shows:
+      test("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\u115f\u1160\u3164\uffa0\u2800]") | not;
+    def ours($table):
+      shows and (test("^ */") | not)
+      and ((if test("^#{1,6} ") then sub("^#{1,6} "; "") else . end | spans) as $s
+        | $s != null and ($s.plain | plain) and (($table | not) or ($s.code | test("(?<!\\\\)[|]") | not)));
+    def kind($table):
+      if test("^<details><summary>[0-9]+ [a-z ]+</summary>$") then "open"
+      elif . == "</details>" then "close"
+      elif ours($table) then "ours"
+      else "left" end;
+    (.markdown | strings) as $md
+    | ($md | length > 65536) as $long
+    | (if $long then $md[:65536] | split("\n") | .[:-1] else $md | split("\n") end) as $all
+    | ($all[0] // "") as $first
+    | if ($first | test("^\\[//\\]: # \\(lapilli-compare \\{[a-z0-9_\":,.+-]*\\}\\)$"))
+        and ($first | ltrimstr("[//]: # (lapilli-compare ") | rtrimstr(")") | (try fromjson catch null) | type == "object")
+      then
+        $all[1:] as $rest
+        | ($rest | length) as $n
+        | [$rest[] | test("^ *[|]")] as $piped
+        | [$rest[] | test("^ *[|]? *:?-+:? *([|] *:?-+:? *)*[|]? *$")] as $delim
+        | [$rest[] | test("^ *$")] as $blank
+        | (reduce range(0; $n) as $i ([];
+            . + [$piped[$i] or $delim[$i] or ($delim[$i + 1] // false) or ($i > 0 and .[$i - 1] and ($blank[$i] | not))])) as $table
+        | [range(0; $n) as $i | $rest[$i] | kind($table[$i])] as $kind
+        | (reduce range(0; $n) as $i ({open: null, odd: [range(0; $n) | false]};
+            if $kind[$i] == "open" then (if .open == null then .open = $i else .odd[$i] = true end)
+            elif $kind[$i] == "close" then (if .open == null then .odd[$i] = true else .open = null end)
+            else . end)
+          | if .open == null then .odd else (.odd[.open] = true | .odd) end) as $odd
+        | [range(0; $n) as $i | $kind[$i] == "left" or $odd[$i]] as $out
+        | "(what lapilli serve wrote here isn\u0027t Markdown lapilli writes: left out, the job\u0027s log has it)" as $left
+        | {markdown: ([$first] + [range(0; $n) as $i | if ($out[$i] | not) then $rest[$i] elif $i > 0 and $out[$i - 1] then empty else $left end]
+              + (if $long and ($n == 0 or ($out[$n - 1] | not)) then [$left] else [] end)
+            | join("\n") | if endswith("\n") then . else . + "\n" end), long: $long,
+           left: [limit(5; range(0; $n) as $i | select($out[$i]) | $rest[$i][:300])], leaving: ([$out[] | select(.)] | length)}
+      else {unusable: true} end' "$tmp/serve.out"
 }
 
 # serve_cancel: the backtest serve took, waiting or running, cancelled
@@ -1536,26 +1699,45 @@ nothing_changed() {
 # compose: the comment, in $tmp/comment.md: the marker; the report, if
 # lapilli wrote one; what went wrong, if anything did, in a fenced block.
 # Under the 65,536 characters GitHub takes, the least of the hosts: a
-# shorter log, or none, beside a long report.
+# shorter log, or none, beside a long report; and a report too long even
+# so (lapilli's is 64,000 bytes at most, serve's isn't taken on trust) cut
+# to its first lines, within 60,000 bytes with the rest, saying so.
 compose() {
   for logged_bytes in 4000 1000 0; do
-    {
-      printf '%s\n' "$marker"
-      if [ -s "$tmp/report.md" ] && [ "${verdict:-0}" -le 1 ]; then
-        cat "$tmp/report.md"
-      fi
-      if [ -n "$problem" ]; then
-        printf '\n### Lapilli backtest failed\n\n'
-        if [ "$logged_bytes" -gt 0 ]; then
-          fenced "$problem" "$tmp/problem.log" "$logged_bytes"
-        else
-          fenced "$problem" /dev/null 0
-        fi
-        printf '\nThe rest is in the job'"'"'s log.\n'
-      fi
-    } >"$tmp/comment.md"
+    comment "$tmp/report.md" "$logged_bytes"
     [ "$(wc -c <"$tmp/comment.md")" -gt 65000 ] || return 0
   done
+  comment /dev/null 0
+  room=$((60000 - 200 - $(wc -c <"$tmp/comment.md")))
+  # Whole lines, a <details> left open closed: each line is one lapilli
+  # writes, or one in place of what serve wrote that it doesn't.
+  LC_ALL=C awk -v room="$room" '
+    { n += length($0) + 1; if (n > room) exit; print }
+    /^<details>/ { open = 1 }
+    $0 == "</details>" { open = 0 }
+    END { if (open) printf "\n</details>\n" }' "$tmp/report.md" >"$tmp/report.cut"
+  printf '\n**Cut short** by the recipe, to keep the comment under 60000 bytes: the rest of the report isn'"'"'t shown.\n' >>"$tmp/report.cut"
+  comment "$tmp/report.cut" 0
+}
+
+# comment REPORT BYTES: the comment, in $tmp/comment.md, with REPORT and
+# BYTES of the problem's log at most.
+comment() {
+  {
+    printf '%s\n' "$marker"
+    if [ -s "$1" ] && [ -s "$tmp/report.md" ] && [ "${verdict:-0}" -le 1 ]; then
+      cat "$1"
+    fi
+    if [ -n "$problem" ]; then
+      printf '\n### Lapilli backtest failed\n\n'
+      if [ "$2" -gt 0 ]; then
+        fenced "$problem" "$tmp/problem.log" "$2"
+      else
+        fenced "$problem" /dev/null 0
+      fi
+      printf '\nThe rest is in the job'"'"'s log.\n'
+    fi
+  } >"$tmp/comment.md"
 }
 
 # post: the comment on the pull request, in place of the one posted

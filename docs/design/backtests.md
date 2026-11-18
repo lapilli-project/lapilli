@@ -839,14 +839,18 @@ Where step 1 does otherwise than the sections above say, or says more:
   front holds; a `LoadBalancer` or `NodePort` Service needs
   `service.loadBalancerEndsTLS`, an internal load balancer's too, as the
   port is plain http. No HTTPRoute of its own.
-- **The recipe takes plain http to a name inside a cluster too**, where
+- **The recipe takes plain http to a Service in the cluster too**, where
   "Flags and API" says to the machine itself: `LAPILLI_SERVE` is https, or
-  http to this machine or to a name with no dot, or ending in `.svc` or
-  `.cluster.local`, as serve takes an identity provider's URL
-  (`signin.SafeURL`), so that a runner in the cluster reaches
-  `FULLNAME-backtest.NAMESPACE.svc:8084`. `NAME.NAMESPACE` alone isn't
-  taken: a namespace may be named as a top-level domain. A host's API and
-  a release are taken as before.
+  http to this machine (`127.0.0.1`, `[::1]`, `localhost`) or to
+  `NAME.NAMESPACE.svc` or `NAME.NAMESPACE.svc.cluster.local`, each a DNS
+  label with a letter first, so that a runner in the cluster reaches
+  `FULLNAME-backtest.NAMESPACE.svc:8084`; and plain http through no proxy
+  (`--noproxy '*'`), which would see the token. Narrower than what serve
+  takes an identity provider at (`signin.SafeURL`): a name of one label is
+  looked up under the runner's search domains, which needn't be the
+  cluster's, and `NAME.NAMESPACE` may be a name on the internet, a
+  namespace named as a top-level domain. A host's API and a release are
+  taken as before.
 - **The recipe's serve mode, as built.** The files are named by their path
   under what `PATHS` names, as `--rules` reads a directory (a file it holds
   is the directory's, and what doesn't read in it is said, not passed
@@ -862,11 +866,41 @@ Where step 1 does otherwise than the sections above say, or says more:
   or `LAPILLI_SERVE_AUDIENCE`, for which `github.sh`, and `gitea.sh` in
   Forgejo Actions, ask Actions for an ID token right before each request;
   it is kept in a variable of the recipe's own, out of what it runs, and
-  given to curl on stdin, as the key is. `Retry-After` is waited, 5 minutes
-  at most and never past `SERVE_WAIT`; a read that fails is asked again,
-  five times in a row at most; past `SERVE_WAIT`, and when the job ends
-  first, the backtest is cancelled. `SERVE_POLL` (10 seconds) is how often
-  it is read.
+  given to curl on stdin, as the key is. `LAPILLI_SERVE_AUDIENCE` is
+  refused when it is a cloud's audience or the CI's own default
+  (`sts.amazonaws.com` and the rest of `amazonaws.com`,
+  `api://AzureADTokenExchange`, Google Cloud's `//iam.googleapis.com/...`,
+  `https://iam.googleapis.com/...` and `https://sts.googleapis.com...`,
+  `sigstore`, `https://github.com/...`), which other services take a token
+  for, and the job's log says when it isn't `LAPILLI_SERVE`; the action's
+  `audience` is it. In GitHub Actions, `github.sh` masks the ID token it
+  gets (`::add-mask::`) before anything else could log it, as
+  `core.getIDToken` does; `gitea.sh` doesn't, Forgejo documenting no such
+  command. An expectations file of no bytes is sent as `"expect": ""`,
+  given, as `--expect` takes it; the field is left out only when the
+  commit has no file. `Retry-After` is waited, 5 minutes at most, 5
+  seconds at least (or `SERVE_POLL` if longer: a `Retry-After` of 0 isn't
+  a loop; `SERVE_RETRY_MIN` lowers the 5 for tests), and never past
+  `SERVE_WAIT`; a read that fails is asked again, five times in a row at
+  most; past `SERVE_WAIT`, and when the job ends first, the backtest is
+  cancelled. `SERVE_POLL` (10 seconds) is how often it is read.
+- **The recipe posts of serve's report only what lapilli writes.** Serve
+  is trusted with the summary line the gates read, but not with the
+  job's token on GitLab, which runs a quick action from a note, nor with
+  who is pinged: the first line is kept as serve wrote it only when it is
+  `[//]: # (lapilli-compare {...})` with a JSON object of numbers and
+  booleans, or there is no report (a problem, in the comment); each line
+  after it only when it is one `CompareMarkdown` writes (code spans closed
+  on their line, with no `|` but `\|` in a table; outside them only
+  Lapilli's words and punctuation, `#` only to start a heading;
+  `<details><summary>N ...</summary>` and `</details>`, opened then
+  closed), within its first 65,536 characters, more than `CompareMarkdown`
+  writes. Any other line is left out whole, a line saying so in place of
+  each run of them, and is in the job's log: lines are let through as they
+  are or not at all, since what each host would make of a line changed in
+  part isn't known to the recipe, and a report lapilli wrote passes byte
+  for byte. A comment past 65,000 bytes even without a log is cut to the
+  report's first lines, within 60,000 bytes, saying so.
 
 ## Steps
 

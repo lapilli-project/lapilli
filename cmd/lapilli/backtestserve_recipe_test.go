@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -15,7 +17,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"lapilli.dev/internal/firing"
+	"lapilli.dev/internal/incident"
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -382,30 +388,126 @@ func actionsIDTokens(t *testing.T, audience, token string) (*httptest.Server, *i
 
 // github.sh, and gitea.sh in Forgejo Actions, ask Actions for the job's ID
 // token for LAPILLI_SERVE_AUDIENCE, its request's token on stdin and the
-// audience URL-encoded, right before the request, once for each.
+// audience URL-encoded, right before the request, once for each. In GitHub
+// Actions, github.sh masks it first thing, on stdout, as core.getIDToken
+// does (a % as %25, as the runner reads a command); gitea.sh doesn't, as
+// Forgejo documents no ::add-mask::, though its runner says GITHUB_ACTIONS
+// too.
 func TestBacktestServeRecipeAsksForIDToken(t *testing.T) {
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
 	audience := "https://lapilli-ci.example.com/?team=a&b=c"
-	for _, h := range []backtestHost{backtestHosts[0], backtestHosts[1]} {
-		t.Run(h.kind, func(t *testing.T) {
+	for _, c := range []struct {
+		h       backtestHost
+		actions bool
+		mask    string
+	}{
+		{backtestHosts[0], true, "::add-mask::eyJ.actions%25id-token.github\n"},
+		{backtestHosts[0], false, ""},
+		{backtestHosts[1], true, ""},
+	} {
+		t.Run(fmt.Sprintf("%s, in Actions %v", c.h.kind, c.actions), func(t *testing.T) {
 			srv := newServeStandIn(t)
-			srv.token = "eyJ.actions-id-token." + h.kind
+			srv.token = "eyJ.actions%id-token." + c.h.kind
 			srv.answers(nil, []serveAnswer{serveDone(serveMarkdown(changedSummary))})
 			oidc, asked := actionsIDTokens(t, audience, srv.token)
-			rr := newRecipeRun(t, h, repo)
+			rr := newRecipeRun(t, c.h, repo)
 			var argv string
 			rr.env, argv, _ = curlShim(t, rr.env)
-			out, err := rr.run([]string{"PATHS=alerts", "LAPILLI_SERVE=" + srv.url, "LAPILLI_SERVE_AUDIENCE=" + audience, "SERVE_POLL=0",
+			if c.actions {
+				rr.env = append(rr.env, "GITHUB_ACTIONS=true", "FORGEJO_ACTIONS=true")
+			}
+			stdout, stderr, err := rr.runSplit([]string{"PATHS=alerts", "LAPILLI_SERVE=" + srv.url, "LAPILLI_SERVE_AUDIENCE=" + audience, "SERVE_POLL=0",
 				"ACTIONS_ID_TOKEN_REQUEST_URL=" + oidc.URL + "/idtoken?api-version=2.0", "ACTIONS_ID_TOKEN_REQUEST_TOKEN=request-token-0123456789"})
 			if err != nil || *asked != 1 || !strings.Contains(rr.body(), "`CheckoutErrors`") {
-				t.Fatalf("%v, asked %d\n%s", err, *asked, out)
+				t.Fatalf("%v, asked %d\n%s%s", err, *asked, stdout, stderr)
 			}
 			if args, _ := os.ReadFile(argv); strings.Contains(string(args), "request-token-0123456789") || strings.Contains(string(args), srv.token) {
 				t.Errorf("a token on curl's command line:\n%s", args)
 			}
+			if c.mask != "" && !strings.HasPrefix(stdout, c.mask) || c.mask == "" && strings.Contains(stdout+stderr, "add-mask") {
+				t.Errorf("stdout %q, want it to begin %q", stdout, c.mask)
+			}
+			if strings.Contains(stdout+stderr, srv.token) {
+				t.Errorf("the token in the job's log:\n%s%s", stdout, stderr)
+			}
 		})
+	}
+}
+
+// runSplit is run, what the recipe wrote on stdout apart from its stderr:
+// GitHub Actions reads ::add-mask:: on stdout.
+func (rr *recipeRun) runSplit(settings []string, args ...string) (string, string, error) {
+	rr.t.Helper()
+	script, err := filepath.Abs(backtestRecipes + rr.h.script)
+	if err != nil {
+		rr.t.Fatal(err)
+	}
+	shell := os.Getenv("RECIPE_SH")
+	if shell == "" {
+		shell = "sh"
+	}
+	cmd := exec.Command(shell, append([]string{script}, args...)...)
+	cmd.Dir = rr.repo.dir
+	cmd.Env = append(append([]string{}, rr.env...), settings...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	rr.host.set(func(*commentHost) {}) // as run orders them
+	err = cmd.Run()
+	rr.host.set(func(*commentHost) {})
+	return stdout.String(), stderr.String(), err
+}
+
+// LAPILLI_SERVE_AUDIENCE, the audience the recipe asks Actions for an ID
+// token for, isn't a cloud's, nor the CI's own default, which other
+// services take a token for, and serve, or whoever is on the way to it,
+// could use there; the job's log says when it isn't LAPILLI_SERVE. The
+// action's audience is it.
+func TestBacktestServeRecipeAudience(t *testing.T) {
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	srv := newServeStandIn(t)
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	ask := []string{"PATHS=alerts", "LAPILLI_SERVE=" + srv.url, "SERVE_POLL=0",
+		"ACTIONS_ID_TOKEN_REQUEST_URL=https://token.example.com/idtoken?api-version=2.0", "ACTIONS_ID_TOKEN_REQUEST_TOKEN=request-token-0123456789"}
+	for _, aud := range []string{"sts.amazonaws.com", "https://sts.amazonaws.com", "sts.us-east-1.amazonaws.com", "STS.AmazonAWS.com",
+		"api://AzureADTokenExchange", "API://azureadtokenexchange", "api://AzureADTokenExchangeUSGov",
+		"//iam.googleapis.com/projects/123456789/locations/global/workloadIdentityPools/ci/providers/github",
+		"https://iam.googleapis.com/projects/123456789/locations/global/workloadIdentityPools/ci/providers/github",
+		"https://sts.googleapis.com", "https://sts.googleapis.com/v1/token", "sigstore", "https://github.com", "https://github.com/",
+		"https://GitHub.com/example"} {
+		out, err := rr.run(append(slices.Clone(ask), "LAPILLI_SERVE_AUDIENCE="+aud))
+		if err == nil || !strings.Contains(out, "LAPILLI_SERVE_AUDIENCE "+aud+": a cloud's audience, or the CI's own default") {
+			t.Errorf("%s: %v\n%s", aud, err, out)
+		}
+	}
+	if posts, _, _ := srv.counts(); posts != 0 || len(rr.host.comments) != 0 {
+		t.Errorf("%d POSTs, %d comments", posts, len(rr.host.comments))
+	}
+	// Serve's own, and one that isn't its URL, said.
+	for _, c := range []struct {
+		aud  string
+		said bool
+	}{{srv.url + "/", false}, {srv.url, false}, {"https://lapilli-ci.example.com", true}, {"https://github.community/x", true}} {
+		srv.token = "eyJ.for." + c.aud
+		srv.answers(nil, []serveAnswer{serveDone(serveMarkdown(changedSummary))})
+		oidc, _ := actionsIDTokens(t, c.aud, srv.token)
+		rr.host.set(func(h *commentHost) { h.comments = nil })
+		settings := append(slices.Clone(ask[:3]), "LAPILLI_SERVE_AUDIENCE="+c.aud, "ACTIONS_ID_TOKEN_REQUEST_URL="+oidc.URL+"/idtoken?api-version=2.0",
+			"ACTIONS_ID_TOKEN_REQUEST_TOKEN=request-token-0123456789")
+		out, err := rr.run(settings)
+		said := strings.Contains(out, "LAPILLI_SERVE_AUDIENCE "+c.aud+" isn't LAPILLI_SERVE, "+srv.url+", where the token goes")
+		if err != nil || said != c.said || !strings.Contains(rr.body(), "`CheckoutErrors`") {
+			t.Errorf("%s: %v, said %v\n%s", c.aud, err, said, out)
+		}
+	}
+	// The action's audience.
+	out, err := runAction(t, rr, map[string]string{"paths": "alerts", "serve-url": srv.url, "audience": "api://AzureADTokenExchange"},
+		"ACTIONS_ID_TOKEN_REQUEST_URL=https://token.example.com/idtoken?api-version=2.0", "ACTIONS_ID_TOKEN_REQUEST_TOKEN=request-token-0123456789")
+	if err == nil || !strings.Contains(out, "LAPILLI_SERVE_AUDIENCE api://AzureADTokenExchange: a cloud's audience") {
+		t.Errorf("the action's audience: %v\n%s", err, out)
 	}
 }
 
@@ -479,13 +581,15 @@ func TestBacktestServeRecipeFails(t *testing.T) {
 }
 
 // Asked to wait (429, 503), the recipe waits as Retry-After says, and asks
-// again: the POST, and the GET.
+// again: the POST, and the GET. SERVE_RETRY_MIN, for tests, lowers the
+// least it waits from 5 seconds to Retry-After's 1.
 func TestBacktestServeRecipeRetryAfter(t *testing.T) {
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
 	srv := newServeStandIn(t)
 	rr := serveRun(t, backtestHosts[0], repo, srv)
+	rr.env = append(rr.env, "SERVE_RETRY_MIN=1")
 	srv.answers([]serveAnswer{
 		{429, map[string]string{"Retry-After": "1"}, `{"error":"as many backtests wait as the queue takes: try again in a minute"}`},
 		{503, map[string]string{"Retry-After": "1"}, `{"error":"the rules in effect haven't been read yet: try again in a minute"}`},
@@ -662,25 +766,35 @@ func TestBacktestServeRecipeRequest(t *testing.T) {
 	}
 }
 
-// LAPILLI_SERVE is https, or plain http to this machine or to a name inside
-// a cluster, as serve takes an identity provider's URL: a runner in the
-// cluster reaches the chart's Service in plain http.
+// LAPILLI_SERVE is https, or plain http to this machine or to a Service in
+// a cluster, NAME.NAMESPACE.svc and NAME.NAMESPACE.svc.cluster.local: a
+// runner in the cluster reaches the chart's Service in plain http, through
+// no proxy, whatever http_proxy says, where the token would be in the
+// clear.
 func TestBacktestServeRecipeClusterURL(t *testing.T) {
 	needRecipeTools(t)
 	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
 	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
 	srv := newServeStandIn(t)
 	u, _ := url.Parse(srv.url)
-	for _, name := range []string{"lapilli-backtest", "lapilli-backtest.monitoring.svc", "Lapilli-Backtest.Monitoring.svc.cluster.local"} {
+	// A proxy that takes nothing: a request that went to it would fail. The
+	// stand-in host's API, at 127.0.0.1, is passed by.
+	proxy := []string{"http_proxy=http://127.0.0.1:9", "HTTP_PROXY=http://127.0.0.1:9", "all_proxy=http://127.0.0.1:9", "ALL_PROXY=http://127.0.0.1:9",
+		"no_proxy=127.0.0.1", "NO_PROXY=127.0.0.1"}
+	for _, name := range []string{"lapilli-backtest.monitoring.svc", "Lapilli-Backtest.Monitoring.svc.cluster.local", "localhost"} {
 		t.Run(name, func(t *testing.T) {
 			srv.answers(nil, []serveAnswer{serveDone(serveMarkdown(changedSummary))})
 			rr := serveRun(t, backtestHosts[0], repo, srv)
 			// The name, as the cluster's DNS would answer it: here.
-			rr.env, _, _ = curlShim(t, rr.env, "--connect-to", strings.ToLower(name)+":8084:"+u.Host)
-			rr.env = append(rr.env, "LAPILLI_SERVE=http://"+name+":8084/")
+			var argv string
+			rr.env, argv, _ = curlShim(t, rr.env, "--connect-to", strings.ToLower(name)+":8084:"+u.Host)
+			rr.env = append(append(rr.env, proxy...), "LAPILLI_SERVE=http://"+name+":8084/")
 			out, err := rr.run([]string{"PATHS=alerts"})
 			if posts, _, _ := srv.counts(); err != nil || posts != 1 || !strings.Contains(rr.body(), "`CheckoutErrors`") {
 				t.Errorf("%v, %d POSTs\n%s\n%s", err, posts, rr.body(), out)
+			}
+			if args, _ := os.ReadFile(argv); !strings.Contains(string(args), "\n--noproxy\n*\n") {
+				t.Errorf("no --noproxy '*' for plain http:\n%s", args)
 			}
 		})
 	}
@@ -744,6 +858,22 @@ func TestBacktestServeRecipeSettings(t *testing.T) {
 		// Where serve is: the token goes there.
 		{[]string{"LAPILLI_SERVE=http://lapilli.example.com"}, nil, "want lapilli serve's backtest port"},
 		{[]string{"LAPILLI_SERVE=http://lapilli-backtest.monitoring:8084"}, nil, "want lapilli serve's backtest port"},
+		// A name of one label is looked up under the resolver's search
+		// domains; NAME.NAMESPACE.svc's labels are DNS labels, a letter
+		// first.
+		{[]string{"LAPILLI_SERVE=http://lapilli-backtest:8084"}, nil, "want lapilli serve's backtest port"},
+		{[]string{"LAPILLI_SERVE=http://lapilli-backtest"}, nil, "want lapilli serve's backtest port"},
+		{[]string{"LAPILLI_SERVE=http://lapilli-backtest.monitoring.svc.example.com"}, nil, "want lapilli serve's backtest port"},
+		{[]string{"LAPILLI_SERVE=http://a.lapilli-backtest.monitoring.svc"}, nil, "want lapilli serve's backtest port"},
+		{[]string{"LAPILLI_SERVE=http://1backtest.monitoring.svc"}, nil, "want lapilli serve's backtest port"},
+		{[]string{"LAPILLI_SERVE=http://backtest.monitoring-.svc"}, nil, "want lapilli serve's backtest port"},
+		{[]string{"LAPILLI_SERVE=http://backtest..svc"}, nil, "want lapilli serve's backtest port"},
+		{[]string{"LAPILLI_SERVE=http://" + strings.Repeat("a", 64) + ".monitoring.svc"}, nil, "want lapilli serve's backtest port"},
+		{[]string{"LAPILLI_SERVE=http://backtest.monitoring.svc:80x"}, nil, "want lapilli serve's backtest port"},
+		{[]string{"LAPILLI_SERVE=http://backtest.monitoring.svc:123456"}, nil, "want lapilli serve's backtest port"},
+		{[]string{"LAPILLI_SERVE=http://localhost.:8084"}, nil, "want lapilli serve's backtest port"},
+		{[]string{"LAPILLI_SERVE=http://127.0.0.2:8084"}, nil, "want lapilli serve's backtest port"},
+		{[]string{"LAPILLI_SERVE=http://cluster.local"}, nil, "want lapilli serve's backtest port"},
 		{[]string{"LAPILLI_SERVE=http://10.0.0.8:8084"}, nil, "want lapilli serve's backtest port"},
 		{[]string{"LAPILLI_SERVE=http://[fd00::1]:8084"}, nil, "want lapilli serve's backtest port"},
 		{[]string{"LAPILLI_SERVE=http://ci@127.0.0.1:8084"}, nil, "want lapilli serve's backtest port"},
@@ -753,8 +883,11 @@ func TestBacktestServeRecipeSettings(t *testing.T) {
 		{[]string{"SERVE_WAIT=2d"}, nil, "SERVE_WAIT 2d: want how long"},
 		{[]string{"SERVE_POLL=61"}, nil, "SERVE_POLL 61: want how many seconds apart"},
 		{[]string{"SERVE_POLL=x"}, nil, "SERVE_POLL x: want how many seconds apart"},
+		{[]string{"SERVE_RETRY_MIN=6"}, nil, "SERVE_RETRY_MIN 6: want the least seconds"},
+		{[]string{"SERVE_RETRY_MIN=-1"}, nil, "SERVE_RETRY_MIN -1: want the least seconds"},
 		// Serve mode's alone, without it.
 		{[]string{"LAPILLI_SERVE=", "SERVE_WAIT=30m"}, nil, "SERVE_WAIT is for a backtest through lapilli serve: give LAPILLI_SERVE"},
+		{[]string{"LAPILLI_SERVE=", "SERVE_POLL=", "SERVE_RETRY_MIN=0"}, nil, "SERVE_RETRY_MIN is for a backtest through lapilli serve"},
 		{[]string{"LAPILLI_SERVE=", "SERVE_POLL=", "LAPILLI_SERVE_TOKEN_FILE=" + tok}, nil, "LAPILLI_SERVE_TOKEN_FILE is for a backtest through lapilli serve"},
 		{[]string{"LAPILLI_SERVE=", "SERVE_POLL=", "LAPILLI_SERVE_TOKEN_FILE=", "LAPILLI_ID_TOKEN=eyJ.a.b"}, nil, "LAPILLI_ID_TOKEN is for a backtest through lapilli serve"},
 		{[]string{"LAPILLI_SERVE=", "SERVE_POLL=", "LAPILLI_SERVE_TOKEN_FILE=", "LAPILLI_SERVE_AUDIENCE=https://lapilli-ci.example.com"}, nil,
@@ -801,6 +934,10 @@ func TestBacktestActionServe(t *testing.T) {
 	if *asked != 1 || srv.sent()["days"] != json.Number("14") || srv.sent()["tz"] != "UTC" || !strings.Contains(rr.body(), "`CheckoutErrors`") {
 		t.Errorf("asked %d, sent %v\n%s\n%s", *asked, srv.sent(), rr.body(), out)
 	}
+	// Masked, as core.getIDToken masks it.
+	if !strings.Contains(out, "::add-mask::"+srv.token+"\n") || strings.Count(out, srv.token) != 1 {
+		t.Errorf("the ID token isn't masked first:\n%s", out)
+	}
 	if _, err := os.Stat(ran); err == nil || strings.Contains(out, "the release this action is at") || strings.Contains(out, "installed Lapilli") {
 		t.Errorf("installed or ran lapilli:\n%s", out)
 	}
@@ -827,4 +964,409 @@ func TestBacktestActionServe(t *testing.T) {
 	if _, err := os.Stat(ran); err == nil {
 		t.Error("lapilli ran")
 	}
+}
+
+// leftOut is the line the recipe puts in place of lines of serve's it
+// doesn't post, one for each run of them.
+const leftOut = "(what lapilli serve wrote here isn't Markdown lapilli writes: left out, the job's log has it)"
+
+// realReports are comparisons as CompareMarkdown writes them, as lapilli
+// serve does, judged by its record: rules that differ, are added and taken
+// away, that couldn't be replayed, fire alike (<details>), incidents
+// caught differently, expectations, recording rules, what was passed over,
+// names that would be a mention, a link, HTML or a quick action were they
+// not code spans, a report cut short, one with nothing changed.
+func realReports(t *testing.T) map[string]string {
+	t.Helper()
+	t0 := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
+	m := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Minute) }
+	opts := verdict.Options{From: t0, To: t0.Add(7 * 24 * time.Hour), Lead: 15 * time.Minute, Match: []string{"service"},
+		RefireWithin: time.Hour, UnknownLen: time.Hour}
+	page, ticket := map[string]string{"severity": "page"}, map[string]string{"severity": "ticket"}
+	incs := []incident.Incident{{ID: "INC-1", Title: "Checkout errors", Start: m(100), End: m(140)},
+		{ID: "INC-2", Title: "Search slow", Start: m(2000), End: m(2020)}}
+	judged := func() *verdict.Comparison {
+		before := verdict.Judge(
+			[]rules.Rule{{Name: "CheckoutErrors", Expr: "x", Labels: page}, {Name: "Flappy", Expr: "y", Labels: ticket},
+				{Name: "Typo", Unsupported: "query failed: bad_data"}, {Name: "Same", Expr: "s"}},
+			[]firing.Firing{{Rule: "CheckoutErrors", Labels: page, Start: m(102), End: m(130)}, {Rule: "Flappy", Labels: ticket, Start: m(10), End: m(12)},
+				{Rule: "Flappy", Labels: ticket, Start: m(40), End: m(42)}, {Rule: "Flappy", Labels: ticket, Start: m(500), End: m(502)}}, incs, opts)
+		after := verdict.Judge(
+			[]rules.Rule{{Name: "CheckoutErrors", Expr: "x", For: 20 * time.Minute, Labels: page}, {Name: "SearchLatency", Expr: "w"},
+				{Name: "Typo", Expr: "z"}, {Name: "Same", Expr: "s2"}},
+			[]firing.Firing{{Rule: "CheckoutErrors", Labels: page, Start: m(120), End: m(130)}, {Rule: "SearchLatency", Start: m(2005), End: m(2015)}}, incs, opts)
+		c := verdict.Compare(before, after, []string{"CheckoutErrors", "Flappy", "SearchLatency", "Typo", "Same"}, 40)
+		c.JudgedBy = verdict.JudgedByServe
+		return c
+	}
+	write := func(c *verdict.Comparison, incidents bool, loc *time.Location) string {
+		t.Helper()
+		if c.Summary == nil {
+			c.Summarize(incidents)
+		}
+		var b bytes.Buffer
+		if err := verdict.CompareMarkdown(&b, c, loc); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	zone := func(name string) *time.Location {
+		loc, err := time.LoadLocation(name)
+		if err != nil {
+			t.Skipf("no zone database: %v", err)
+		}
+		return loc
+	}
+	out := map[string]string{}
+	out["judged"] = write(judged(), true, zone("Asia/Seoul"))
+
+	// Counted, not judged, in a zone whose clocks change in the period;
+	// what reading the rules passed over; recording rules that differ.
+	c := judged()
+	for _, r := range []*verdict.Report{c.Before, c.After} {
+		r.Incidents = nil
+	}
+	c.Incidents = nil
+	c.From, c.To = time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC), time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)
+	c.PassedOver = map[string]string{"rules": "1 document that holds no rules", "compare": "2 documents of rules the selector doesn't match"}
+	c.Recording = []verdict.RecordingChange{{Record: "shop:errors:rate5m", Group: "shop", Change: "changed"}, {Record: "@octocat", Group: "#1", Change: "added"}}
+	out["counted"] = write(c, false, zone("Europe/Berlin"))
+
+	// No record of the period: counted, saying why.
+	c = judged()
+	c.Before.NoRecord = true
+	c.Before.Settings = &verdict.Settings{ImpactNoData: true}
+	out["no record"] = write(c, true, time.UTC)
+
+	// Held to expectations: one broken by the change, a catch, rules added
+	// that none holds.
+	c = judged()
+	c.Summarize(true)
+	after, err := verdict.ReadExpectations(strings.NewReader("expectations:\n  - rule: CheckoutErrors\n    budget: {week: 0}\n" +
+		"    catches: [{incident: INC-1, within: 10m}]\n  - rule: Flappy\n    budget: {week: 1, asleep: 0}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := verdict.ReadExpectations(strings.NewReader("expectations:\n  - rule: CheckoutErrors\n    budget: {week: 3}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Expect(after, before, nil); err != nil {
+		t.Fatal(err)
+	}
+	out["expectations"] = write(c, true, time.UTC)
+
+	// What comes from the rules, anything at all, as code spans.
+	hostile := []string{"@octocat please look", "@example-org/oncall", "#123", "example/repo#5", "GH-7", "!12", "~3", "$4", "&5", "%v1",
+		"/merge", "/approve", "  /label ~x", "<!-- the rest is hidden", "<img src=x onerror=alert(1)>", "</details><details open>", "</summary>",
+		"[click](https://evil.example)", "https://evil.example/x", "www.evil.example", "![x](https://evil.example/p.png)", "mailto:a@example.com",
+		"a`b", "``fenced``", "```\ncode\n```", "`", " lead and trail ", "a|b", `a\|b`, `a\`, "| x | y |", "**bold** _em_ ~~gone~~",
+		"line\nbreak", "car\rriage", "tab\there", "right‮to left", "zero​width", "line sep", "no break", "fillerㅤx",
+		":smile:", "[//]: # (lapilli-backtest default)", "&#64;octocat", "\\@octocat", "디스크 부족 @팀", strings.Repeat("long", 200)}
+	var rs []rules.Rule
+	var fs []firing.Firing
+	var hincs []incident.Incident
+	for i, h := range hostile {
+		labels := map[string]string{"severity": h}
+		rs = append(rs, rules.Rule{Name: h, Expr: "x", Labels: labels})
+		fs = append(fs, firing.Firing{Rule: h, Labels: labels, Start: m(100 + 10*i), End: m(105 + 10*i)})
+		hincs = append(hincs, incident.Incident{ID: h, Title: h, Start: m(100 + 10*i), End: m(108 + 10*i)})
+	}
+	alike := rules.Rule{Name: "@channel alike", Expr: "q"}
+	hb := verdict.Judge(append(slices.Clone(rs), rules.Rule{Name: hostile[0] + " broken", Unsupported: hostile[14] + " " + hostile[17]}, alike), nil, hincs, opts)
+	ha := verdict.Judge(append(slices.Clone(rs), rules.Rule{Name: "@channel alike", Expr: "q2"}), fs, hincs, opts)
+	c = verdict.Compare(hb, ha, append(slices.Clone(hostile), hostile[0]+" broken", alike.Name), 0)
+	c.JudgedBy = verdict.JudgedByServe
+	out["hostile"] = write(c, true, time.UTC)
+
+	// Cut short by CompareMarkdown itself, near its 64000 bytes.
+	var lrs []rules.Rule
+	var lfs []firing.Firing
+	var names []string
+	for i := range 3000 {
+		name := fmt.Sprintf("Rule%04d%s", i, strings.Repeat("x", 150))
+		lrs = append(lrs, rules.Rule{Name: name, Expr: "x"})
+		lfs = append(lfs, firing.Firing{Rule: name, Start: m(i), End: m(i + 1)})
+		names = append(names, name)
+	}
+	c = verdict.Compare(verdict.Judge(lrs, lfs[2000:], nil, opts), verdict.Judge(lrs, lfs, nil, opts), names, 0)
+	c.JudgedBy = verdict.JudgedByServe
+	out["cut short"] = write(c, false, time.UTC)
+	if n := len(out["cut short"]); n < verdict.MarkdownLimit-1000 || !strings.Contains(out["cut short"], "**Cut short**") {
+		t.Fatalf("a report cut short of %d bytes", n)
+	}
+
+	none := &verdict.Comparison{From: t0, To: m(60), Same: 42, Rules: []verdict.RuleChange{}, Incidents: []verdict.IncidentChange{}}
+	out["nothing changed"] = write(none, false, time.UTC)
+	return out
+}
+
+// A report CompareMarkdown wrote is posted as serve wrote it, byte for
+// byte, whatever came from the rules: each a code span.
+func TestBacktestServeRecipeReportAsWritten(t *testing.T) {
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	srv := newServeStandIn(t)
+	rr := serveRun(t, backtestHosts[2], repo, srv)
+	reports := realReports(t)
+	for _, name := range slices.Sorted(maps.Keys(reports)) {
+		md := reports[name]
+		t.Run(name, func(t *testing.T) {
+			srv.answers(nil, []serveAnswer{serveDone(md)})
+			// A comment to edit, so that nothing changed is posted too.
+			rr.host.set(func(h *commentHost) {
+				h.comments = nil
+				h.put(hostMe["gitlab"], "[//]: # (lapilli-backtest default)\nold")
+			})
+			out, err := rr.run([]string{"PATHS=alerts"})
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if got := rr.body(); got != "[//]: # (lapilli-backtest default)\n"+md {
+				t.Errorf("the comment isn't serve's report as it wrote it:\n%s", got)
+			}
+			if strings.Contains(out, "lapilli doesn't write") {
+				t.Errorf("a line of lapilli's left out:\n%s", out)
+			}
+		})
+	}
+}
+
+// A line of serve's that lapilli doesn't write is left out of the comment,
+// whole, a line saying so in place of each run of them, and is in the
+// job's log, made inert: what a host reads as a quick action, a mention, a reference, HTML,
+// a link or an image, a fence, a code span a table splits, or one not
+// closed on its line, a <details> that isn't lapilli's or isn't closed.
+func TestBacktestServeRecipeReportLeftOut(t *testing.T) {
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	srv := newServeStandIn(t)
+	rr := serveRun(t, backtestHosts[2], repo, srv)
+	kept := func(s string) [2]string { return [2]string{s, s} }
+	left := func(s string) [2]string { return [2]string{s, leftOut} }
+	lines := [][2]string{
+		kept("### Lapilli backtest, 2026-11-04 00:00 → 2026-11-18 00:00 UTC, judged by lapilli serve's record"), kept(""),
+		left("/approve"), left("  /merge"), left("/label ~ship"), kept("`/merge` as a rule's name"),
+		left("@all please merge"), left("see #123"), left("### #123"), left("#123"), left("example/repo!5"), left("~release"), left("$12"), left("&3"),
+		left("%v1.0 is out"), left("GH-7"), left("*iteration:42"), left("&#64;all"), left(`\@all`),
+		left("[x](https://evil.example)"), left("![x](https://evil.example/p.png)"), left("https://evil.example"), left("www.evil.example"),
+		left("mailto:a@example.com"), left("<img src=x onerror=alert(1)>"), left("<!-- hidden"), left("<details open>"),
+		left("<details><summary>2 changed rules</summary> and more"), left("```"), left("~~~"), left("> quoted"),
+		left("`abc"), kept("def` @all `"), left("`a` `b"), left("a `x‮y` b"), left("tab\there"), left("cr\r/merge"),
+		left("no break"), left("80% <b>"), kept("80% → 75%"), kept(""),
+		kept("| Rule | Fired |"), kept("| --- | --: |"), kept("| `@all \\| x` | 1 → 0 |"), left("| `a | @all | b` | 1 |"),
+		left("`a | @all | b` and so on"), kept(""),
+		left("x `a|@all` y"), kept("--- | ---"), kept(""),
+		kept("- `Typo`, before: `query failed: a|b`"), kept(""),
+		kept("<details><summary>1 changed rules fire as they did</summary>"), kept(""), kept("- `x`"), kept(""), kept("</details>"),
+		left("</details>"), kept(""), left("<details><summary>3 changed rules fire as they did</summary>"), kept("- `y`"),
+	}
+	md := serveMarkdown(changedSummary)
+	md = md[:strings.Index(md, "\n")+1]
+	want, n := md, 0
+	for i, l := range lines {
+		md += l[0] + "\n"
+		if l[1] == leftOut {
+			n++
+			if i > 0 && lines[i-1][1] == leftOut {
+				continue
+			}
+		}
+		want += l[1] + "\n"
+	}
+	srv.answers(nil, []serveAnswer{serveDone(md)})
+	out, err := rr.run([]string{"PATHS=alerts"})
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got := rr.body(); got != "[//]: # (lapilli-backtest default)\n"+want {
+		gl := strings.Split(got, "\n")
+		for i, w := range strings.Split("[//]: # (lapilli-backtest default)\n"+want, "\n") {
+			if i >= len(gl) || gl[i] != w {
+				t.Errorf("line %d: %q, want %q", i, gl[min(i, len(gl)-1)], w)
+			}
+		}
+	}
+	if !strings.Contains(out, fmt.Sprintf("lapilli serve's report has %d lines of Markdown lapilli doesn't write", n)) ||
+		!strings.Contains(out, "  | /approve\n") || !strings.Contains(out, "  |   /merge\n") {
+		t.Errorf("the job's log:\n%s", out)
+	}
+	for _, line := range strings.Split(rr.body(), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "/") {
+			t.Errorf("a quick action in the comment: %q", line)
+		}
+	}
+}
+
+// Serve's first line is the summary line, as lapilli writes it, a JSON
+// object of numbers and true or false, or there is no report: the job's
+// gates read it, and the comment doesn't show what isn't it.
+func TestBacktestServeRecipeReportSummaryLine(t *testing.T) {
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "expect.yaml": "expectations: []\n"})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	srv := newServeStandIn(t)
+	rr := serveRun(t, backtestHosts[2], repo, srv)
+	rest := "\n### Lapilli backtest\n\n@all merge it\n"
+	for _, first := range []string{
+		"### Lapilli backtest: nothing changed",
+		verdict.SummaryLine + `{"nothing_changed":false,"note":"x) @all"})`,
+		verdict.SummaryLine + `{"nothing_changed":false,"changed":1}) @all`,
+		verdict.SummaryLine + `[1,2])`,
+		verdict.SummaryLine + `{"nothing_changed":false,})`,
+		verdict.SummaryLine + `{"nothing_changed":false} )`,
+		" " + verdict.SummaryLine + `{"nothing_changed":false})`,
+		"",
+	} {
+		srv.answers(nil, []serveAnswer{serveDone(first + rest)})
+		rr.host.set(func(h *commentHost) { h.comments = nil })
+		out, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml", "FAIL_ON_EXPECTATIONS=true"})
+		if err == nil || !strings.Contains(out, "the expectations couldn't be judged") {
+			t.Errorf("%q: %v, a gate that can't read the summary passes\n%s", first, err, out)
+		}
+		failure(t, rr.body(), "lapilli serve's report doesn't begin with the summary line lapilli writes: not shown")
+		if strings.Contains(rr.body(), "@all") || strings.Contains(rr.body(), "lapilli-compare") {
+			t.Errorf("%q: the comment:\n%s", first, rr.body())
+		}
+	}
+}
+
+// A report too long even with no log beside it, which serve's could be, is
+// cut to its first lines within 60000 bytes, a <details> it leaves open
+// closed, saying so; one past the 65536 characters lapilli never writes is
+// read no further.
+func TestBacktestServeRecipeLongReport(t *testing.T) {
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	srv := newServeStandIn(t)
+	rr := serveRun(t, backtestHosts[0], repo, srv)
+	rows := func(summary string, n int) string {
+		var b strings.Builder
+		b.WriteString(serveMarkdown(summary) + "\n<details><summary>" + strconv.Itoa(n) + " changed rules fire as they did</summary>\n\n")
+		for i := range n {
+			fmt.Fprintf(&b, "- `Rule%04d%s`\n", i, strings.Repeat("x", 40))
+		}
+		b.WriteString("\n</details>\n")
+		return b.String()
+	}
+	// Just past 65000 bytes, as lapilli never writes; then far past it.
+	near, far := rows(changedSummary, 1224), rows(changedSummary, 3000)
+	if len(near) < 65000 || len(near) > 65536 || len(far) < 100000 {
+		t.Fatalf("%d and %d bytes", len(near), len(far))
+	}
+	for _, c := range []struct {
+		name, md      string
+		problem, long bool
+	}{{"long", near, false, false}, {"past what lapilli writes", far, false, true},
+		{"long, and a problem", rows(`{"nothing_changed":false,"changed":1,"unreplayed":1}`, 1222), true, false}} {
+		t.Run(c.name, func(t *testing.T) {
+			srv.answers(nil, []serveAnswer{serveDone(c.md)})
+			rr.host.set(func(h *commentHost) { h.comments = nil })
+			settings := []string{"PATHS=alerts"}
+			if c.problem {
+				settings = append(settings, "FAIL_ON_ERROR=true")
+			}
+			out, _ := rr.run(settings)
+			body := rr.body()
+			if len(body) > 60000 || !strings.Contains(body, "\n**Cut short** by the recipe, to keep the comment under 60000 bytes: the rest of the report isn't shown.\n") ||
+				!strings.HasPrefix(body, "[//]: # (lapilli-backtest default)\n"+verdict.SummaryLine) {
+				t.Errorf("%d bytes:\n%s\n%s", len(body), body[max(0, len(body)-400):], out)
+			}
+			if strings.Count(body, "<details>") != strings.Count(body, "</details>") || !c.long && !strings.Contains(body, "<details><summary>") {
+				t.Errorf("a <details> left open: %d, %d", strings.Count(body, "<details>"), strings.Count(body, "</details>"))
+			}
+			if c.long != strings.Contains(out, "lapilli serve's report is longer than lapilli writes one (64000 bytes): read to its first 65536 characters") {
+				t.Errorf("past 65536 characters %v:\n%s", c.long, out)
+			}
+			if c.problem {
+				failure(t, body, "1 of the rules that differ couldn't be replayed (FAIL_ON_ERROR=true)")
+			}
+		})
+	}
+}
+
+// An expectations file of no bytes is given, as --expect takes it: serve
+// is sent "expect": "", and "expect_before" when the commit it goes into
+// has one; a field is left out only when there is no file.
+func TestBacktestServeRecipeEmptyExpect(t *testing.T) {
+	needRecipeTools(t)
+	srv := newServeStandIn(t)
+	empty := func(r *prRepo) {
+		if err := os.WriteFile(filepath.Join(r.dir, "expect.yaml"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		r.git("add", "expect.yaml")
+		r.git("commit", "--quiet", "-m", "no expectations")
+	}
+	for _, c := range []struct {
+		name         string
+		base, head   bool // an empty file, or none
+		want, before any
+	}{
+		{"both", true, true, "", ""},
+		{"the pull request's", false, true, "", nil},
+		{"the base's, taken away", true, false, "expectations: []\n", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+			if c.base {
+				empty(repo)
+			}
+			repo.git("checkout", "--quiet", "-B", "pr")
+			repo.write(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+			repo.git("add", "-A")
+			repo.git("commit", "--quiet", "-m", "change the rules")
+			if c.head && !c.base {
+				empty(repo)
+			}
+			if !c.head && c.base {
+				repo.git("rm", "--quiet", "expect.yaml")
+				repo.git("commit", "--quiet", "-m", "no file")
+			}
+			repo.git("checkout", "--quiet", "--detach", "main")
+			repo.git("merge", "--quiet", "--no-ff", "--no-edit", "pr")
+			srv.answers(nil, []serveAnswer{serveDone(serveMarkdown(changedSummary))})
+			rr := serveRun(t, backtestHosts[0], repo, srv)
+			out, err := rr.run([]string{"PATHS=alerts", "EXPECT=expect.yaml"})
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			body := srv.sent()
+			for field, want := range map[string]any{"expect": c.want, "expect_before": c.before} {
+				got, ok := body[field]
+				if want == nil && ok || want != nil && (!ok || got != want) {
+					t.Errorf("%s %q (sent: %v), want %q", field, got, ok, want)
+				}
+			}
+		})
+	}
+}
+
+// A Retry-After of 0, or none, is waited 5 seconds at least, or
+// SERVE_POLL if longer: serve asked to wait isn't asked in a loop.
+func TestBacktestServeRecipeRetryAfterZero(t *testing.T) {
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	srv := newServeStandIn(t)
+	rr := serveRun(t, backtestHosts[0], repo, srv)
+	busy := serveAnswer{429, map[string]string{"Retry-After": "0"}, `{"error":"try again"}`}
+	// Taking it: 5 seconds is past SERVE_WAIT, so it isn't asked again.
+	srv.answers([]serveAnswer{busy}, nil)
+	out, err := rr.run([]string{"PATHS=alerts", "SERVE_WAIT=3s"})
+	if posts, _, _ := srv.counts(); err != nil || posts != 1 {
+		t.Errorf("%v: %d POSTs\n%s", err, posts, out)
+	}
+	failure(t, rr.body(), "lapilli serve had no room for the backtest within SERVE_WAIT (3s)")
+	// Reading it: asked once, then waited to SERVE_WAIT, and cancelled.
+	srv.answers([]serveAnswer{{202, nil, `{"id":"` + serveID + `","key":"` + serveKey + `","position":0,"requests":1}`}}, []serveAnswer{busy})
+	rr.host.set(func(h *commentHost) { h.comments = nil })
+	out, err = rr.run([]string{"PATHS=alerts", "SERVE_WAIT=2s"})
+	if _, gets, deletes := srv.counts(); err != nil || gets > 2 || deletes != 1 {
+		t.Errorf("%v: %d GETs, %d DELETEs\n%s", err, gets, deletes, out)
+	}
+	failure(t, rr.body(), "the backtest didn't come back within SERVE_WAIT (2s): cancelled in lapilli serve")
 }
