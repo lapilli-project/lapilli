@@ -1,0 +1,63 @@
+name: A replay that differs
+description: A rule Lapilli can't replay, or replays differently from how it really fired.
+labels: ["replay"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the most useful report there is: a verdict is only as good as the replay under it.
+        `lapilli verdict --check-replay` sets a replay beside what really fired.
+
+        Change rule names, label values, hosts and thresholds as you like, but keep the shape of the
+        rule: its functions, its `for`, its labels' names. Nothing private: no tokens, no real
+        incident titles.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: What `lapilli version` says.
+      placeholder: lapilli v0.58.0
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: Where the rule was read from
+      options:
+        - Rule files (--rules)
+        - A Prometheus-compatible API's loaded rules (--loaded-rules)
+        - A managed ruler (--ruler)
+        - Grafana (--grafana)
+        - Loki (--loki-rules or --loki-loaded-rules)
+        - A cloud's own alarm (--alarms)
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: rule
+    attributes:
+      label: The rule
+      description: As it is kept, with names changed if you like.
+      render: yaml
+    validations:
+      required: true
+  - type: textarea
+    id: fired
+    attributes:
+      label: What really fired
+      description: When it started and ended, from Alertmanager, Grafana's state history, a notification or the ALERTS series.
+    validations:
+      required: true
+  - type: textarea
+    id: replayed
+    attributes:
+      label: What Lapilli replayed
+      description: The `--check-replay` lines for the rule, or what the verdict said of it.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: The history behind it (Prometheus, Thanos, Mimir, VictoriaMetrics, a cloud's), its scrape interval, a gap in the data.

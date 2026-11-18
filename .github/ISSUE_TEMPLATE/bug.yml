@@ -1,0 +1,50 @@
+name: Something else wrong
+description: A crash, an error, a page or a chart value that isn't right.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A rule that replays differently from how it fired has a form of its own. Nothing private
+        here: no tokens or webhook URLs, no real rule names, hostnames or incident titles.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: What `lapilli version` says, or the chart's version.
+      placeholder: lapilli v0.58.0
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - lapilli verdict
+        - lapilli serve
+        - lapilli serve's pages
+        - lapilli preflight
+        - The Helm chart
+        - A recipe
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: did
+    attributes:
+      label: What you ran
+      description: The command and its flags, or the values you gave the chart.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: What it printed
+      render: text

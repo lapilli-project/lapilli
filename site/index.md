@@ -185,6 +185,8 @@ workspace, Loki alerts, an incident tool.
   the principles, and how decisions are made
 - [Contributing](https://github.com/lapilli-project/lapilli/blob/main/CONTRIBUTING.md):
   build, test, send a change
+- [Discussions](https://github.com/lapilli-project/lapilli/discussions):
+  questions, ideas, and what Lapilli found in your alerts
 
 The most useful report there is: a rule that replays differently from how it
 really fired.

@@ -58,6 +58,13 @@ written down in its pull request:
 - **Numbering:** while the version is 0.x, a minor release may change flags
   or the API, and its changelog entry says how.
 
+## Conduct
+
+Everyone taking part in the project, in its repositories, discussions and
+anywhere it is represented, follows the
+[Code of Conduct](CODE_OF_CONDUCT.md). The maintainers enforce it, and
+keep who reported what to themselves.
+
 ## Security
 
 Vulnerabilities are reported privately, as [SECURITY.md](SECURITY.md)
