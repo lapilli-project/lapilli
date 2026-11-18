@@ -449,8 +449,63 @@ func TestGoogleIAP(t *testing.T) {
 	}
 }
 
+// An RSA key under 2048 bits isn't taken from a JWKS: a token it signs
+// isn't verified, a set of such keys alone is no keys and says why, and one
+// beside a longer key leaves the longer, a token the short one signed
+// refused saying why.
+func TestKeysRSAOf2048BitsAtLeast(t *testing.T) {
+	ctx := context.Background()
+	gen := func(bits int) *rsa.PrivateKey {
+		k, err := rsa.GenerateKey(rand.Reader, bits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return k
+	}
+	short, shortish, long := gen(1024), gen(2047), gen(2048)
+	jwk := func(k *rsa.PrivateKey, kid string) jose.JSONWebKey {
+		return jose.JSONWebKey{Key: &k.PublicKey, KeyID: kid, Algorithm: "RS256", Use: "sig"}
+	}
+	keysOf := func(set ...jose.JSONWebKey) *Keys {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: set})
+		}))
+		t.Cleanup(srv.Close)
+		return NewKeys(srv.URL, Client(nil), nil, time.Now)
+	}
+	claims := map[string]any{"sub": "x"}
+	if keys, err := keysOf(jwk(short, "short"), jwk(shortish, "shortish")).fetch(ctx); err == nil || !strings.Contains(err.Error(), "2 RSA under 2048 bits") {
+		t.Errorf("keys of 1024 and 2047 bits: %v, %v", keys, err)
+	}
+	// Each token asks keys of its own, fetched for it: never refused for
+	// a fetch too soon after another.
+	for _, c := range []struct {
+		key *rsa.PrivateKey
+		kid string
+	}{{short, "short"}, {shortish, "shortish"}, {short, ""}} {
+		_, err := keysOf(jwk(c.key, "k")).VerifySignature(ctx, idptest.Sign(c.key, c.kid, jose.RS256, claims))
+		if err == nil || !strings.Contains(err.Error(), "under 2048 bits") {
+			t.Errorf("a token signed with a key of %d bits alone, kid %q: %v", c.key.N.BitLen(), c.kid, err)
+		}
+	}
+	k := keysOf(jwk(short, "short"), jwk(long, "long"))
+	if keys, err := k.fetch(ctx); err != nil || len(keys) != 1 || keys[0].KeyID != "long" {
+		t.Errorf("keys of 1024 and 2048 bits: %v, %v", keys, err)
+	}
+	if _, err := k.VerifySignature(ctx, idptest.Sign(long, "long", jose.RS256, claims)); err != nil {
+		t.Errorf("a token signed with the 2048-bit key: %v", err)
+	}
+	if _, err := k.VerifySignature(ctx, idptest.Sign(short, "short", jose.RS256, claims)); err == nil || !strings.Contains(err.Error(), "under 2048 bits") {
+		t.Errorf("a token signed with the 1024-bit key beside a longer one: %v", err)
+	}
+	if _, err := k.VerifySignature(ctx, idptest.Sign(short, "long", jose.RS256, claims)); err == nil || strings.Contains(err.Error(), "under 2048 bits") {
+		t.Errorf("a token signed with the 1024-bit key, naming the longer: %v", err)
+	}
+}
+
 // Any sign-in in front whose JWT the keys at a URL verify: oauth2-proxy's
 // ID token as a bearer token, here.
+
 func TestJWKSProxy(t *testing.T) {
 	c := &clock{t0}
 	idp := idptest.New(t, "proxy-client", "", c.now)
