@@ -3,6 +3,8 @@
   <img alt="Lapilli" src="assets/lapilli-lockup.png" width="300">
 </picture>
 
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16891/badge)](https://www.bestpractices.dev/projects/16891)
+
 **Which of your alerts are worth their page?** `lapilli verdict` judges every
 firing against what actually went wrong: a white stone when the alert caught an
 incident, a black stone when nothing was wrong. Count a rule's stones over a
