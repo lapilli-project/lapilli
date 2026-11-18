@@ -4,7 +4,7 @@ body:
       value: |
         What did Lapilli find in your alerts? A noisy rule you dropped, an incident no rule caught,
         a `for` that would have paged less. `--redact` gives every name in a report an alias, so it
-        can be shown outside: run `lapilli verdict ... --redact --markdown` and paste what it prints.
+        can be shown outside: run `lapilli verdict ... --redact` and paste what it prints.
   - type: textarea
     id: found
     attributes:
@@ -17,7 +17,7 @@ body:
     attributes:
       label: The report
       description: The redacted report, or the part of it that matters.
-      render: markdown
+      render: text
   - type: input
     id: stack
     attributes:
