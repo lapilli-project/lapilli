@@ -4,13 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Your alerts, the last twelve weeks · Lapilli</title>
-<link rel="icon" href="/static/icon.svg?v=ace9ecbdd9ee" type="image/svg+xml">
-<link rel="stylesheet" href="/static/lapilli.css?v=ace9ecbdd9ee">
+<link rel="icon" href="/static/mark-32.png?v=c531d44e6a01" sizes="32x32" type="image/png">
+<link rel="icon" href="/static/mark-16.png?v=c531d44e6a01" sizes="16x16" type="image/png">
+<link rel="stylesheet" href="/static/lapilli.css?v=c531d44e6a01">
 </head>
 <body>
 <a class="skip" href="#main">Skip to the page</a>
 <header class="side">
-  <a class="brand" href="/"><img src="/static/icon.svg?v=ace9ecbdd9ee" alt="" width="24" height="24">Lapilli</a>
+  <a class="brand" href="/"><img src="/static/mark-48.png?v=c531d44e6a01" alt="" width="24" height="24">Lapilli</a>
   <details class="menu"><summary>Menu<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>Overview</span></summary>
   <nav class="nav-menu" aria-label="Menu">
   <p class="nav-group" id="menu-see">Monitoring</p>
@@ -45,19 +46,19 @@
 <div class="bar">
 
 <form method="get" action="/search" role="search" class="find" aria-label="Search">
-  <label>Search <input type="search" name="q" value="" maxlength="500" placeholder="Rules, incidents, teams"></label>
+  <label><span class="vh">Search</span> <input type="search" name="q" value="" maxlength="500" placeholder="Rules, incidents, teams"></label>
   <button class="quiet-button">Search</button>
 </form>
 </div>
 
 
 <h1>Your alerts, the last twelve weeks</h1>
-<p class="lede">Each firing gets a stone: ○ when it caught an incident, ● when nothing was wrong. The numbers are the week of 2026-10-26, beside the week before.
+<p class="lede">The numbers are the week of 2026-10-26, beside the week before.
 Last run 2026-11-03 12:00.
 
 </p>
 
-<p class="notice status-unknown"><span class="sign" aria-hidden="true">?</span> No incident was written down in the week of 2026-10-26 or the two weeks before it: a firing that caught nothing can&#39;t be told from one nobody wrote down, so no precision is known and no rule is called noisy. <a href="/settings#incident-sources">Where incidents come from, and whether each is alive</a> · <a href="/incidents">Write incidents down</a></p>
+<div class="notice status-unknown"><p><span class="sign" aria-hidden="true">?</span> No incident written down for the week of 2026-10-26 or the two weeks before: precision isn&#39;t known, and no rule is called noisy. <a href="/incidents">Write incidents down</a> · <a href="/settings#incident-sources">Where incidents come from, and whether each is alive</a></p><details class="why"><summary>Why</summary><p>A firing is judged by the incidents written down in its week and the two weeks before. With none, a firing that caught nothing can&#39;t be told from one nobody wrote down.</p></details></div>
 <section class="tiles tiles-6" aria-label="Last week">
 <div class="tile">
   <div class="tile-label">Precision</div>
@@ -65,43 +66,53 @@ Last run 2026-11-03 12:00.
   <div class="tile-of">not known: no record</div>
   <div class="tile-delta"> </div>
   
-  <a class="tile-more" href="/rules?week=2026-10-26">The rules that week<span class="vh">: Precision</span>&nbsp;<span aria-hidden="true">→</span></a>
+  <a class="tile-more" href="/rules?week=2026-10-26">The rules that week<span class="vh">: Precision</span></a>
 </div><div class="tile">
   <div class="tile-label">Firings</div>
   <div class="tile-value">14</div>
   <div class="tile-of"> </div>
   <div class="tile-delta">&#43;14 on the week before</div>
   <svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="Firings, eleven weeks: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 14"><path d="M2.0 22.0 L11.2 22.0 L20.4 22.0 L29.6 22.0 L38.8 22.0 L48.0 22.0 L57.2 22.0 L66.4 22.0 L75.6 22.0 L84.8 22.0 L94.0 2.0"/><circle cx="94" cy="2" r="3"/></svg>
-  <a class="tile-more" href="/rules?week=2026-10-26">The rules that week<span class="vh">: Firings</span>&nbsp;<span aria-hidden="true">→</span></a>
+  <a class="tile-more" href="/rules?week=2026-10-26">The rules that week<span class="vh">: Firings</span></a>
 </div><div class="tile">
   <div class="tile-label">Incidents missed</div>
   <div class="tile-value">0</div>
   <div class="tile-of">of 0</div>
   <div class="tile-delta">as the week before</div>
   <svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="Incidents missed, eleven weeks: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0"><path d="M2.0 12.0 L11.2 12.0 L20.4 12.0 L29.6 12.0 L38.8 12.0 L48.0 12.0 L57.2 12.0 L66.4 12.0 L75.6 12.0 L84.8 12.0 L94.0 12.0"/><circle cx="94" cy="12" r="3"/></svg>
-  <a class="tile-more" href="/incidents?state=missed&amp;week=2026-10-26">The incidents missed<span class="vh">: Incidents missed</span>&nbsp;<span aria-hidden="true">→</span></a>
+  <a class="tile-more" href="/incidents?state=missed&amp;week=2026-10-26">The incidents missed<span class="vh">: Incidents missed</span></a>
 </div><div class="tile">
   <div class="tile-label">Time to catch</div>
   <div class="tile-value">–</div>
   <div class="tile-of">median, by a rule that isn&#39;t noisy</div>
   <div class="tile-delta"> </div>
   
-  <a class="tile-more" href="/incidents?state=caught&amp;week=2026-10-26">The incidents caught<span class="vh">: Time to catch</span>&nbsp;<span aria-hidden="true">→</span></a>
+  <a class="tile-more" href="/incidents?state=caught&amp;week=2026-10-26">The incidents caught<span class="vh">: Time to catch</span></a>
 </div><div class="tile">
   <div class="tile-label">Noisy rules</div>
   <div class="tile-value">–</div>
   <div class="tile-of">not known: no record</div>
   <div class="tile-delta"> </div>
   <svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="Noisy rules, eleven weeks: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, –"><path d="M2.0 12.0 L11.2 12.0 L20.4 12.0 L29.6 12.0 L38.8 12.0 L48.0 12.0 L57.2 12.0 L66.4 12.0 L75.6 12.0 L84.8 12.0"/></svg>
-  <a class="tile-more" href="/rules?perf=noisy&amp;week=2026-10-26">The noisy rules<span class="vh">: Noisy rules</span>&nbsp;<span aria-hidden="true">→</span></a>
+  <a class="tile-more" href="/rules?perf=noisy&amp;week=2026-10-26">The noisy rules<span class="vh">: Noisy rules</span></a>
 </div><div class="tile">
   <div class="tile-label">Refired</div>
   <div class="tile-value">13</div>
   <div class="tile-of"> </div>
-  <div class="tile-delta status-bad">&#43;13 on the week before, worse</div>
+  <div class="tile-delta">&#43;13 on the week before</div>
   <svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="Refired, eleven weeks: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 13"><path d="M2.0 22.0 L11.2 22.0 L20.4 22.0 L29.6 22.0 L38.8 22.0 L48.0 22.0 L57.2 22.0 L66.4 22.0 L75.6 22.0 L84.8 22.0 L94.0 2.0"/><circle cx="94" cy="2" r="3"/></svg>
-  <a class="tile-more" href="/rules?sort=refired&amp;week=2026-10-26">The rules, the most re-fired first<span class="vh">: Refired</span>&nbsp;<span aria-hidden="true">→</span></a>
+  <a class="tile-more" href="/rules?sort=refired&amp;week=2026-10-26">The rules, the most re-fired first<span class="vh">: Refired</span></a>
 </div>
+</section>
+
+<section class="card look" aria-labelledby="look-h">
+  <h2 id="look-h">What to look at</h2>
+  <ol class="actions"><li><span class="look-what"><a href="/incidents/impact-20261103T0600Z"><bdi>No alert caught impact-20261103T0600Z user impact (--impact)</bdi></a> <span class="quiet">2026-11-03 06:00: a rule for it, or a lower threshold?</span></span>
+    <a class="pill open status-info" href="/tasks/1">task #1</a>
+    </li><li><span class="look-what"><a href="/incidents"><bdi>Decide on 1 impact windows</bdi></a> <span class="quiet">confirm the real ones, dismiss the rest: the verdict sharpens either way</span></span>
+    </li></ol>
+  
+  
 </section>
 
 
@@ -142,7 +153,7 @@ Last run 2026-11-03 12:00.
 </figure>
 
 <figure class="card">
-  <figcaption><h2>Precision by week</h2><p class="quiet">The share of firings that caught something.</p></figcaption>
+  <figcaption><h2>Precision by week</h2></figcaption>
   <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="Precision by week; the same numbers are in the table below">
     <line class="grid" x1="44" x2="550" y1="172" y2="172"/><text class="tick" x="38" y="172" dy="4">0%</text><line class="grid" x1="44" x2="550" y1="118.66666666666666" y2="118.66666666666666"/><text class="tick" x="38" y="118.66666666666666" dy="4">5%</text><line class="grid" x1="44" x2="550" y1="65.33333333333333" y2="65.33333333333333"/><text class="tick" x="38" y="65.33333333333333" dy="4">10%</text><line class="grid" x1="44" x2="550" y1="12" y2="12"/><text class="tick" x="38" y="12" dy="4">15%</text>
     <line class="base" x1="44" x2="550" y1="172" y2="172"/>
@@ -187,15 +198,6 @@ Last run 2026-11-03 12:00.
   </svg>
 </figure>
 
-<section class="card">
-  <h2>What to look at</h2>
-  <ol class="actions"><li><a href="/incidents/impact-20261103T0600Z"><bdi>No alert caught impact-20261103T0600Z user impact (--impact)</bdi></a><br><span class="quiet">2026-11-03 06:00: a rule for it, or a lower threshold?</span>
-    <br><a class="pill open status-info" href="/tasks/1">task #1</a>
-    </li><li><a href="/incidents"><bdi>Decide on 1 impact windows</bdi></a><br><span class="quiet">confirm the real ones, dismiss the rest: the verdict sharpens either way</span>
-    </li></ol>
-  
-  
-</section>
 
 <section class="card">
   <h2>Open tasks</h2>

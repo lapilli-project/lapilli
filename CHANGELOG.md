@@ -71,6 +71,36 @@
 
 ### Changed
 
+- **The pages, plainer: one shape for every control, fewer words, the
+  logo's mark** (docs/design/ui.md, bundle 59), from using them on a real
+  deployment at 1070 px:
+  - A field, a select and a button are one height and one corner, and
+    none is a pill: the main action filled, one beside it outlined, a way
+    elsewhere a link, with no arrow after it. The team, period and search
+    bar is a toolbar on the page, not a card of bordered controls; a
+    field's name stands before it. A rule's tabs and the lists' orders are
+    underlined by a bar. Cards have no shadow.
+  - The overview's What to look at is under the tiles, before the charts,
+    a line each. Refired's change from the week before is no longer
+    called worse or better: more re-fires may be an alert that really went
+    off again. Precision by week with no week judged is a line saying so,
+    not an empty grid.
+  - The rules list's numbers are alone in their cells, and what they come
+    with is a line under the row, each note saying what it is of: a row
+    was up to fifteen lines tall. Firings not judged have a column of
+    their own, "? Not judged", where there are any.
+  - A rule's five numbers are in one row from 960 px, never four and one.
+  - No record is said in a line, once a page ("No incident written down
+    for … : precision isn't known, and no rule is called noisy."), its why
+    behind "Why". The overview no longer explains ○ and ●, the rules list
+    its order, the Precision chart its name, or an empty list how to fill
+    it.
+  - The header and the browser's tab have the logo's micro-mark, on a
+    light plate in dark mode, in place of the two circles.
+  - Korean says 정탐 and 오탐 everywhere for caught something and caught
+    nothing, and 백테스트 for a replay; Woken for nothing is 자는 시간 오탐,
+    What to look at 검토 대상, Cleanup 옛 규칙 정리.
+
 - **An RSA key under 2048 bits verifies no signature**: one in an identity
   provider's JWKS (`--oidc-issuer`'s, `--proxy-jwt-jwks`) isn't taken: a
   set of such keys alone is refused saying so, and so is a token one of

@@ -4,13 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{with .Title}}{{.}} · {{end}}Lapilli</title>
-<link rel="icon" href="{{static "icon.svg"}}" type="image/svg+xml">
+<link rel="icon" href="{{static "mark-32.png"}}" sizes="32x32" type="image/png">
+<link rel="icon" href="{{static "mark-16.png"}}" sizes="16x16" type="image/png">
 <link rel="stylesheet" href="{{static "lapilli.css"}}">
 </head>
 <body>
 <a class="skip" href="#main">{{t "Skip to the page"}}</a>
 <header class="side">
-  <a class="brand" href="{{.Link "/"}}"><img src="{{static "icon.svg"}}" alt="" width="24" height="24">Lapilli</a>
+  <a class="brand" href="{{.Link "/"}}"><img src="{{static "mark-48.png"}}" alt="" width="24" height="24">Lapilli</a>
   <details class="menu"><summary>{{t "Menu"}}{{with .HereName}}<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>{{t .}}</span>{{end}}</summary>
   {{template "navlist" (navOf . "menu")}}
   </details>
@@ -26,12 +27,12 @@
 <nav class="crumbs" aria-label="{{t "Breadcrumb"}}"><ol>{{with .Crumb}}{{if .Group}}<li>{{with .GroupHref}}<a href="{{$.Link .}}">{{t $.Crumb.Group}}</a>{{else}}{{t $.Crumb.Group}}{{end}}</li>{{end}}{{if .Name}}<li>{{if .Item}}<a href="{{$.Link .Href}}">{{t .Name}}</a>{{else}}<span aria-current="page">{{t .Name}}</span>{{end}}</li>{{end}}{{if .Item}}<li><span aria-current="page"><bdi>{{or $.Short $.Title}}</bdi></span></li>{{end}}{{end}}</ol></nav>
 <div class="bar">
 {{with .Bar}}{{if .Action}}<form method="get" action="{{.Action}}" class="ctx" aria-label="{{t .Label}}">{{range .Keep}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
-  {{if .Team}}<label>{{t "Team"}} <select name="team"><option value=""{{if not $.Ctx.Team}} selected{{end}}>{{t "All teams"}}</option>{{range $.Ctx.Teams}}<option value="{{.}}"{{if eq . $.Ctx.Team}} selected{{end}}>{{.}}{{if and $.Ctx.Mine (eq . $.Ctx.Team)}} ({{t "your team"}}){{end}}</option>{{end}}</select></label>{{end}}
-  {{if .Weeks}}<label>{{t "Period"}} <select name="weeks">{{range $w := list "1" "4" "12"}}<option value="{{$w}}"{{if eq $w (print $.Bar.WeeksIn)}} selected{{end}}>{{if eq $w "1"}}{{t "1 week"}}{{else if eq $w "4"}}{{t "4 weeks"}}{{else}}{{t "12 weeks"}}{{end}}</option>{{end}}</select></label>{{end}}
+  {{if .Team}}<label><span class="bar-k">{{t "Team"}}</span> <select name="team"><option value=""{{if not $.Ctx.Team}} selected{{end}}>{{t "All teams"}}</option>{{range $.Ctx.Teams}}<option value="{{.}}"{{if eq . $.Ctx.Team}} selected{{end}}>{{.}}{{if and $.Ctx.Mine (eq . $.Ctx.Team)}} ({{t "your team"}}){{end}}</option>{{end}}</select></label>{{end}}
+  {{if .Weeks}}<label><span class="bar-k">{{t "Period"}}</span> <select name="weeks">{{range $w := list "1" "4" "12"}}<option value="{{$w}}"{{if eq $w (print $.Bar.WeeksIn)}} selected{{end}}>{{if eq $w "1"}}{{t "1 week"}}{{else if eq $w "4"}}{{t "4 weeks"}}{{else}}{{t "12 weeks"}}{{end}}</option>{{end}}</select></label>{{end}}
   <button class="quiet-button">{{t "Show"}}</button>
 </form>{{end}}
 <form method="get" action="/search" role="search" class="find" aria-label="{{t "Search"}}">{{range .Search}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
-  <label>{{t "Search"}} <input type="search" name="q" value="{{.Q}}" maxlength="500" placeholder="{{t "Rules, incidents, teams"}}"></label>
+  <label><span class="vh">{{t "Search"}}</span> <input type="search" name="q" value="{{.Q}}" maxlength="500" placeholder="{{t "Rules, incidents, teams"}}"></label>
   <button class="quiet-button">{{t "Search"}}</button>
 </form>{{end}}
 </div>
@@ -51,6 +52,10 @@ screen opens and the sidebar a wide one keeps, and shown one at a time. */}}
 (notfound), or nothing left to do (done); all clear (Clear), ok, only where
 nothing stands out on the overview. */}}
 {{define "empty"}}<div class="empty empty-{{.Kind}}{{if .Clear}} empty-clear{{end}}">{{with .Title}}<p class="empty-title">{{if $.Clear}}<span class="status-ok"><span aria-hidden="true">✓</span> {{t .}}</span>{{else}}{{t .}}{{end}}</p>{{end}}{{with .Text}}<p class="quiet">{{t .}}</p>{{end}}{{with .Links}}<p class="row">{{range .}}<a href="{{.Href}}">{{t .Name}}</a>{{end}}</p>{{end}}</div>{{end}}
+
+{{/* Why no record leaves precision unknown, behind a details, under a
+notice that says so in a line (docs/design/ui.md, "What a page says"). */}}
+{{define "norecordwhy"}}<details class="why"><summary>{{t "Why"}}</summary><p>{{t "A firing is judged by the incidents written down in its week and the two weeks before. With none, a firing that caught nothing can't be told from one nobody wrote down."}}</p></details>{{end}}
 
 {{define "bottom"}}
 </main>

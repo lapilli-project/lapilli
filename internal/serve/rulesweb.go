@@ -123,6 +123,20 @@ type rulesList struct {
 	FiredOn []firedOnView
 }
 
+// Cols are how many columns the list has after the one to pick a rule
+// by: what the line of notes under a row spans. Ten, and a column each
+// for the firings not judged and those during deploys, when shown.
+func (v rulesList) Cols() int {
+	n := 10 // rule, team, severity, fired, ○, ●, precision, refired, incidents, 12 weeks
+	if v.Sum.Unjudged > 0 {
+		n++
+	}
+	if v.Deploys {
+		n++
+	}
+	return n
+}
+
 // ruleSum is the rules shown, all told: the overview's tiles link to the
 // list whose sum each is.
 type ruleSum struct {

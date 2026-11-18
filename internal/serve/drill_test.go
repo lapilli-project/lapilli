@@ -303,7 +303,7 @@ func TestWeekAsked(t *testing.T) {
 	}
 	h := s.Handler()
 	_, body, _ := get(t, h, "/rules?week=2026-10-26&perf=noisy&sort=refired")
-	for _, want := range []string{"Each rule&#39;s stones in the week of 2026-10-26, the noisiest first.",
+	for _, want := range []string{`<p class="lede">The week of 2026-10-26.</p>`,
 		`<a class="chip" href="/rules?perf=noisy&amp;sort=refired"><span class="vh">Remove filter: </span>Week of: <bdi>2026-10-26</bdi>`,
 		`<a href="/rules?perf=noisy&amp;week=2026-10-26">caught nothing, the most first</a>`,
 		`<input type="hidden" name="back" value="/rules?perf=noisy&amp;sort=refired&amp;week=2026-10-26">`} {
