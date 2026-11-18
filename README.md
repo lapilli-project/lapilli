@@ -40,11 +40,11 @@ A noisy rule's catch doesn't count beside one by a rule that isn't noisy.
 
 38 rules never fired.
 
-INCIDENT                         START             CAUGHT BY
-INC-41 Checkout errors           2026-10-28 12:01  DBPrimaryCPU +2m, CheckoutLatencyP99 +6m (noisy)
-INC-42 Search timeouts           2026-10-30 09:15  ReadReplicaLag -3m
-INC-43 Batch stuck               2026-10-31 02:40  ✗ nothing fired
-impact-1 user impact (--impact)  2026-11-01 21:27  ✗ nothing fired
+INCIDENT                         START             LASTED  CAUGHT BY
+INC-41 Checkout errors           2026-10-28 12:01  38m     DBPrimaryCPU +2m, CheckoutLatencyP99 +6m (noisy)
+INC-42 Search timeouts           2026-10-30 09:15  1h12m   ReadReplicaLag -3m
+INC-43 Batch stuck               2026-10-31 02:40  –       ✗ nothing fired
+impact-1 user impact (--impact)  2026-11-01 21:27  24m     ✗ nothing fired
 
 ✗ 2 of 4 incidents had no alert.
 ```
