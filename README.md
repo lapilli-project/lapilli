@@ -3,6 +3,8 @@
   <img alt="Lapilli" src="assets/lapilli-lockup.png" width="300">
 </picture>
 
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16891/badge)](https://www.bestpractices.dev/projects/16891)
+
 **Which of your alerts are worth their page?** `lapilli verdict` judges every
 firing against what actually went wrong: a white stone when the alert caught an
 incident, a black stone when nothing was wrong. Count a rule's stones over a
@@ -31,6 +33,15 @@ RULE                FOR       FIRED     INCIDENTS  CAUGHT LATER BY
 ExportJob5xx        5m → 15m  118 → 31  0          –
 CheckoutLatencyP99  5m → 10m  14 → 6    1          up to 4m
 
+Out of hours, in Asia/Seoul (at work mon-fri 08:00-18:00, asleep 22:00-08:00):
+of the firings that caught nothing, 57 came while people slept, and 37 more off hours.
+RULE                SEVERITY  ● ASLEEP  ● OFF HOURS  ● AT WORK
+ExportJob5xx        critical  52        31           35
+NodeNotReady        critical  3         0            1
+ReadReplicaLag      warning   2         1            5
+CheckoutLatencyP99  warning   0         4            8
+DBPrimaryCPU        critical  0         1            0
+
 What each rule adds: the incidents it caught, those it caught before any other rule, those no other rule caught:
 RULE                INCIDENTS  FIRST  ALONE
 CheckoutLatencyP99  1          0      0
@@ -40,13 +51,16 @@ A noisy rule's catch doesn't count beside one by a rule that isn't noisy.
 
 38 rules never fired.
 
-INCIDENT                         START             CAUGHT BY
-INC-41 Checkout errors           2026-10-28 12:01  DBPrimaryCPU +2m, CheckoutLatencyP99 +6m (noisy)
-INC-42 Search timeouts           2026-10-30 09:15  ReadReplicaLag -3m
-INC-43 Batch stuck               2026-10-31 02:40  ✗ nothing fired
-impact-1 user impact (--impact)  2026-11-01 21:27  ✗ nothing fired
+INCIDENT                         START             LASTED  CAUGHT BY
+INC-41 Checkout errors           2026-10-28 12:01  38m     DBPrimaryCPU +2m, CheckoutLatencyP99 +6m (noisy)
+INC-42 Search timeouts           2026-10-30 09:15  1h12m   ReadReplicaLag -3m
+INC-43 Batch stuck               2026-10-31 02:40  –       ✗ nothing fired
+impact-1 user impact (--impact)  2026-11-01 21:27  24m     ✗ nothing fired
 
 ✗ 2 of 4 incidents had no alert.
+! --impact-for 5m counts impact that lasted 5m as an incident, but 9 of the 43 rules judged fire only once
+  their condition held longer: their "for" and one evaluation, with no "for" an evaluation (6m for 6
+  of them). Impact shorter than that they can't be sure to catch. --impact-for 6m counts only what they can.
 ```
 
 > Status: early, with one maintainer and room for more
