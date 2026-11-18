@@ -1385,9 +1385,11 @@ func TestWritesNothingWrittenAndRedacted(t *testing.T) {
 		states["changes.azure"] != Unknown || states["changes.oci"] != Unknown {
 		t.Errorf("%v\n%s", states, all.String())
 	}
-	// Each by what it is: the whole identity, not only its parts.
+	// Each by what it is: the whole identity, not only its parts. The
+	// role's session ARN, in the role's own account, is hidden whole, not
+	// as its account and name with the session's beside them.
 	for _, as := range []string{"[--changes-google-service-account]", "[--changes-azure-client-id]", "[--changes-oci-config's user]", "[--changes-in's resource group]",
-		"[--changes-aws-role's account]", "[--changes-aws-role's name]", "[--alarms gcp's project]", "[--alarms oci's compartment]", "[an id]", "[a number]"} {
+		"User: [an ARN] is not authorized", "[--changes-aws-role's name]", "[--alarms gcp's project]", "[--alarms oci's compartment]", "[an id]", "[a number]"} {
 		if !strings.Contains(all.String(), as) {
 			t.Errorf("the report doesn't say %s:\n%s", as, all.String())
 		}
@@ -1448,6 +1450,35 @@ func TestTakeWrites(t *testing.T) {
 // an account written with dashes or glued to a word, none printed; the
 // role serve writes as, by its flag.
 func TestTakeErrorRedacted(t *testing.T) {
+	t.Run("same account", func(t *testing.T) {
+		// The pod's role in the role's own account, whose number the
+		// scrubber hides first: each ARN of it is hidden whole still.
+		was := take
+		t.Cleanup(func() { take = was })
+		take = func(context.Context, string, string, string) (func(*http.Request) error, func(*http.Request) error, error) {
+			return nil, nil, errors.New("api error AccessDenied: User: arn:aws:sts::123456789012:assumed-role/pod-role/i-0abc " +
+				"is not authorized to perform: sts:AssumeRole on resource: arn:aws:iam::123456789012:role/example-writer, " +
+				"as arn:aws:iam::123456789012:role/other-role is, nor arn:aws:sts::123456789012:assumed-role/example-writer/s-1")
+		}
+		c := writesConfig(t)
+		c.Serve.Alarms, c.Serve.ChangesIn = c.Serve.Alarms[:1], []string{"cw:QueueDepth"}
+		c.Serve.ChangesAzureClientID, c.Serve.ChangesGoogleServiceAccount, c.Serve.ChangesOCIConfig = "", "", ""
+		p := guarded(t, c)
+		p.changes(context.Background())
+		p.redact()
+		it := itemOf(p, "changes.cloud")
+		if it == nil || it.State != Problem {
+			t.Fatalf("%+v", it)
+		}
+		for _, hidden := range []string{"123456789012", "pod-role", "i-0abc", "other-role", "example-writer", "s-1", "assumed-role"} {
+			if strings.Contains(it.Why, hidden) {
+				t.Errorf("the report says %q: %s", hidden, it.Why)
+			}
+		}
+		if !strings.Contains(it.Why, "[--changes-aws-role]") || strings.Count(it.Why, "[an ARN]") != 3 {
+			t.Errorf("%s", it.Why)
+		}
+	})
 	was := take
 	t.Cleanup(func() { take = was })
 	take = func(context.Context, string, string, string) (func(*http.Request) error, func(*http.Request) error, error) {
@@ -1493,6 +1524,10 @@ func TestCloudIDs(t *testing.T) {
 		"arn:aws:iam::123456789012:role/a,b,c=d@e then":                            "[an ARN] then",
 		"roles arn:aws:iam::123456789012:role/a,arn:aws:iam::123456789012:role/b.": "roles [an ARN]",
 		"arn:aws:iam::123456789012:role/x,":                                        "[an ARN],",
+		"arn:aws:iam::123456789012:role/a,,b then":                                 "[an ARN] then",
+		"arn:aws:iam::[--changes-aws-role's account]:role/other, then":             "[an ARN], then",
+		"arn:aws:sts::[x's account]:assumed-role/[x's name]/i-0abc is":             "[an ARN] is",
+		"arn:aws:iam::aws:policy/[x] stays":                                        "arn:aws:iam::aws:policy/[x] stays",
 		"arn:aws:s3:::bucket stays":                                                "arn:aws:s3:::bucket stays",
 		"object 00000000-0000-0000-0000-00000000000d":                              "object [an id]",
 	} {

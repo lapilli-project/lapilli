@@ -108,13 +108,23 @@ var (
 	// another account's, whose name is the role's. In any partition, not
 	// only those Lapilli writes to (aws-iso, aws-iso-b, aws-eusc, and any
 	// to come): an error may name an ARN of one. A comma is the ARN's when
-	// what follows it is too (a role's name may hold one, role/a,b), the
-	// sentence's when a space or the end does.
-	arnText = regexp.MustCompile(`arn:aws(?:-[a-z]+)*:[a-z0-9-]*:[a-z0-9-]*:[0-9]{12}:(?:[^\s"'<>,;()\[\]{}]|,[^\s"'<>,;()\[\]{}])+`)
+	// what follows it is too (a role's name may hold them, role/a,,b), the
+	// sentence's when a space or the end does. Its account, or a name in
+	// it, may be what the report's scrubber put in its place already
+	// ([--changes-aws-role's account]): an ARN of the role's own account,
+	// as the pod's often is, is hidden whole all the same.
+	arnText = regexp.MustCompile(`arn:aws(?:-[a-z]+)*:[a-z0-9-]*:[a-z0-9-]*:(?:[0-9]{12}|` + arnHidden + `):(?:` + arnPart + `|,+` + arnPart + `|` + arnHidden + `)+`)
 	// numberText is what may be an account's or a project's number: ten
 	// digits or more, or 1234-5678-9012 as AWS writes an account, whatever
 	// is beside it but another digit (acct_123456789012).
 	numberText = regexp.MustCompile(`[0-9]{4}-[0-9]{4}-[0-9]{4}|[0-9]{10,}`)
+)
+
+// arnPart is a character of an ARN after its account; arnHidden is what
+// the report's scrubber writes in a value's place, [what it was].
+const (
+	arnPart   = `[^\s"'<>,;()\[\]{}]`
+	arnHidden = `\[[^\[\]\n]{1,128}\]`
 )
 
 // cloudIDs is s without an ARN of an account, a GUID, or a number of ten
