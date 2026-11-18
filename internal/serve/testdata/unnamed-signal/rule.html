@@ -4,13 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Errors · Lapilli</title>
-<link rel="icon" href="/static/icon.svg?v=ace9ecbdd9ee" type="image/svg+xml">
-<link rel="stylesheet" href="/static/lapilli.css?v=ace9ecbdd9ee">
+<link rel="icon" href="/static/mark-32.png?v=f9602dd71b35" sizes="32x32" type="image/png">
+<link rel="icon" href="/static/mark-16.png?v=f9602dd71b35" sizes="16x16" type="image/png">
+<link rel="stylesheet" href="/static/lapilli.css?v=f9602dd71b35">
 </head>
 <body>
 <a class="skip" href="#main">Skip to the page</a>
 <header class="side">
-  <a class="brand" href="/"><img src="/static/icon.svg?v=ace9ecbdd9ee" alt="" width="24" height="24">Lapilli</a>
+  <a class="brand" href="/"><img src="/static/mark-48.png?v=f9602dd71b35" alt="" width="24" height="24">Lapilli</a>
   <details class="menu"><summary>Menu<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>Rules</span></summary>
   <nav class="nav-menu" aria-label="Menu">
   <p class="nav-group" id="menu-see">Monitoring</p>
@@ -45,11 +46,11 @@
 <div class="bar">
 <form method="get" action="/rules/Errors" class="ctx" aria-label="Period">
   
-  <label>Period <select name="weeks"><option value="1">1 week</option><option value="4">4 weeks</option><option value="12" selected>12 weeks</option></select></label>
+  <label><span class="bar-k">Period</span> <select name="weeks"><option value="1">1 week</option><option value="4">4 weeks</option><option value="12" selected>12 weeks</option></select></label>
   <button class="quiet-button">Show</button>
 </form>
 <form method="get" action="/search" role="search" class="find" aria-label="Search">
-  <label>Search <input type="search" name="q" value="" maxlength="500" placeholder="Rules, incidents, teams"></label>
+  <label><span class="vh">Search</span> <input type="search" name="q" value="" maxlength="500" placeholder="Rules, incidents, teams"></label>
   <button class="quiet-button">Search</button>
 </form>
 </div>

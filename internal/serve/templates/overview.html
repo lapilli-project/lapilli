@@ -5,12 +5,12 @@
 {{with .Run}}{{if eq .Kind "held"}}<p class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "The first run waits: %s." .Error}}</p>{{end}}{{end}}
 {{else}}
 <h1>{{$title}}</h1>
-<p class="lede">{{t "Each firing gets a stone: ○ when it caught an incident, ● when nothing was wrong."}} {{t "The numbers are the week of %s, beside the week before." (day $loc .From)}}
+<p class="lede">{{t "The numbers are the week of %s, beside the week before." (day $loc .From)}}
 {{with .Run}}{{if eq .Kind "held"}}<span class="status-warn">{{t "Last run %s, held: %s." (at $loc .Finished) .Error}}</span>{{else if .Error}}<span class="status-bad">{{t "Last run %s, failed: %s." (at $loc .Finished) .Error}}</span>{{else}}{{t "Last run %s." (at $loc .Finished)}}{{end}}{{end}}
 {{if .Backlog}}<strong class="status-info"><span aria-hidden="true">↻</span> {{t "Catching up: firings are in up to %s." (at $loc .Cursor)}}</strong>{{end}}
 {{with .Check}}<br>{{t "That week, the replay beside what really fired: %d%% alike, of %d firings." .Share .Either}}{{with .Differ}} {{t "Replayed differently:"}}{{range $i, $r := .}}{{if $i}},{{end}} <a href="{{$.Rule $r}}"><bdi>{{$r}}</bdi></a>{{end}}.{{end}}{{end}}</p>
 
-{{if .NoRecord}}<p class="notice status-unknown"><span class="sign" aria-hidden="true">?</span> {{t "No incident was written down in the week of %s or the two weeks before it: a firing that caught nothing can't be told from one nobody wrote down, so no precision is known and no rule is called noisy." (day $loc .From)}} <a href="{{$.Link "/settings"}}#incident-sources">{{t "Where incidents come from, and whether each is alive"}}</a> · <a href="{{$.Link "/incidents"}}">{{t "Write incidents down"}}</a></p>{{end}}
+{{if .NoRecord}}<div class="notice status-unknown"><p><span class="sign" aria-hidden="true">?</span> {{t "No incident written down for the week of %s or the two weeks before: precision isn't known, and no rule is called noisy." (day $loc .From)}} <a href="{{$.Link "/incidents"}}">{{t "Write incidents down"}}</a> · <a href="{{$.Link "/settings"}}#incident-sources">{{t "Where incidents come from, and whether each is alive"}}</a></p>{{template "norecordwhy"}}</div>{{end}}
 <section class="tiles tiles-{{len .Tiles}}" aria-label="{{t "Last week"}}">
 {{range .Tiles}}<div class="tile">
   <div class="tile-label">{{.Label}}</div>
@@ -18,13 +18,25 @@
   <div class="tile-of">{{or .Of " "}}</div>
   {{template "tiledelta" .}}
   {{if .Spark}}<svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="{{t "%s, eleven weeks: %s" .Label .Values}}"><path d="{{.Spark}}"/>{{if .Has}}<circle cx="{{.DotX}}" cy="{{.DotY}}" r="3"/>{{end}}</svg>{{end}}
-  {{if .Href}}<a class="tile-more" href="{{$.Link .Href}}">{{t .More}}<span class="vh">: {{.Label}}</span>&nbsp;<span aria-hidden="true">→</span></a>{{end}}
+  {{if .Href}}<a class="tile-more" href="{{$.Link .Href}}">{{t .More}}<span class="vh">: {{.Label}}</span></a>{{end}}
 </div>{{end}}
+</section>
+
+<section class="card look" aria-labelledby="look-h">
+  <h2 id="look-h">{{t "What to look at"}}</h2>
+  {{if .Actions}}<ol class="actions">{{range .Actions}}<li><span class="look-what"><a href="{{$.Link .Href}}"><bdi>{{.Text}}</bdi></a> <span class="quiet">{{.Detail}}</span></span>
+    {{if .Task}}<a class="pill open {{status "task" "open"}}" href="{{$.Link (printf "/tasks/%d" .Task)}}">{{t "task #%d" .Task}}</a>
+    {{else if and .May .Goal}}<form method="post" action="/goals/task" class="track"><input type="hidden" name="goal" value="{{.Goal}}"><input type="hidden" name="team" value="{{.GoalTeam}}"><input type="hidden" name="week" value="{{.Week}}">{{with .Occurrence}}<input type="hidden" name="occurrence" value="{{.}}">{{end}}<input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
+    {{else if .May}}<form method="post" action="/tasks" class="track"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="rule" value="{{.Rule}}"><input type="hidden" name="incident" value="{{.Incident}}"><input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
+    {{else if .Kind}}{{template "off" .Off}}{{end}}</li>{{end}}</ol>
+  {{else}}{{template "empty" (allClear (emptyOf "done" "Nothing to look at now." "Nothing stands out: no noisy rules, no incident missed."))}}{{end}}
+  {{with .Review}}<p class="quiet">{{t "The last change to the rules, replayed over the week before %s:" (at $loc .At)}}
+  {{range $i, $x := .Rules}}{{if $i}}, {{end}}<a href="{{$.Rule $x.Rule}}"><bdi>{{$x.Rule}}</bdi></a> {{t "fired %d → %d" (fired $x.Before) (fired $x.After)}}{{end}}</p>{{end}}
 </section>
 
 {{with .Marked}}<section class="card marked-tile" aria-labelledby="marked-tile-h">
 <h2 id="marked-tile-h">{{if .On}}{{t "On now"}}{{else}}{{t "The latest marked window"}}{{end}}: <a href="{{$.Link (printf "/marked/%d" .M.ID)}}"><bdi>{{.Title}}</bdi></a> <span class="quiet"><bdi>{{.Kind}}</bdi></span></h2>
-<p>{{at $loc .Start}} → {{at $loc .End}}. {{t "Precision inside %s, the four weeks before %s; incidents missed in it: %d." .Inside.Precision .Before.Precision (inMissed .Inside)}} <a href="{{$.Link "/marked"}}">{{t "Marked windows"}} <span aria-hidden="true">→</span></a></p>
+<p>{{at $loc .Start}} → {{at $loc .End}}. {{t "Precision inside %s, the four weeks before %s; incidents missed in it: %d." .Inside.Precision .Before.Precision (inMissed .Inside)}} <a href="{{$.Link "/marked"}}">{{t "Marked windows"}}</a></p>
 </section>{{end}}
 <p class="tabs marks">{{t "Marked on the charts"}}:{{if .Marks.HasDeploys}} <a href="{{$.Link "/" "marks" .Marks.DeploysTo}}">{{if .Marks.Deploys}}{{t "Hide deploys"}}{{else}}{{t "Show deploys"}}{{end}}</a>{{end}} <a href="{{$.Link "/" "marks" .Marks.WindowsTo}}">{{if .Marks.Windows}}{{t "Hide quiet windows"}}{{else}}{{t "Show quiet windows"}}{{end}}</a></p>
 <div class="cards">
@@ -41,15 +53,16 @@
 </figure>
 
 <figure class="card">
-  <figcaption><h2>{{t "Precision by week"}}</h2><p class="quiet">{{t "The share of firings that caught something."}}</p></figcaption>
-  <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="{{t "Precision by week; the same numbers are in the table below"}}">
+  <figcaption><h2>{{t "Precision by week"}}</h2></figcaption>
+  {{if not .Precision.HasPoints}}<p class="chart-none">{{if .Precision.Fired}}<span class="status-unknown"><span aria-hidden="true">?</span> {{t "No week has judged firings, so there is no precision to draw."}}</span>{{else}}{{t "No firing in these weeks, so there is no precision to draw."}}{{end}} <a href="#by-week">{{t "By week"}}</a></p>
+  {{else}}<svg class="chart" viewBox="0 0 560 200" role="img" aria-label="{{t "Precision by week; the same numbers are in the table below"}}">
     {{range .Precision.Ticks}}<line class="grid" x1="44" x2="550" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="38" y="{{.Y}}" dy="4">{{.Label}}</text>{{end}}
     <line class="base" x1="44" x2="550" y1="{{.Precision.Base}}" y2="{{.Precision.Base}}"/>
     {{range .Precision.Labels}}<text class="wk{{if .Current}} now{{end}}{{if .Alt}} alt{{end}}" x="{{.Mid}}" y="192">{{if .Current}}{{t "so far"}}{{else}}{{.Label}}{{end}}</text>{{end}}
-    {{if .Precision.HasPoints}}<path class="line" d="{{.Precision.Path}}"/>
+    <path class="line" d="{{.Precision.Path}}"/>
     {{range .Precision.Points}}<circle class="pt" cx="{{.X}}" cy="{{.Y}}" r="4.5"><title>{{.Title}}</title></circle>{{end}}
-    <text class="end" x="{{.Precision.End.X}}" y="{{.Precision.End.Y}}" dy="-11">{{.Precision.EndLabel}}</text>{{end}}
-  </svg>
+    <text class="end" x="{{.Precision.End.X}}" y="{{.Precision.End.Y}}" dy="-11">{{.Precision.EndLabel}}</text>
+  </svg>{{end}}
 </figure>
 
 <figure class="card">
@@ -64,24 +77,13 @@
   </svg>
 </figure>
 
-<section class="card">
-  <h2>{{t "What to look at"}}</h2>
-  {{if .Actions}}<ol class="actions">{{range .Actions}}<li><a href="{{$.Link .Href}}"><bdi>{{.Text}}</bdi></a><br><span class="quiet">{{.Detail}}</span>
-    {{if .Task}}<br><a class="pill open {{status "task" "open"}}" href="{{$.Link (printf "/tasks/%d" .Task)}}">{{t "task #%d" .Task}}</a>
-    {{else if and .May .Goal}}<form method="post" action="/goals/task" class="track"><input type="hidden" name="goal" value="{{.Goal}}"><input type="hidden" name="team" value="{{.GoalTeam}}"><input type="hidden" name="week" value="{{.Week}}">{{with .Occurrence}}<input type="hidden" name="occurrence" value="{{.}}">{{end}}<input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
-    {{else if .May}}<form method="post" action="/tasks" class="track"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="rule" value="{{.Rule}}"><input type="hidden" name="incident" value="{{.Incident}}"><input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
-    {{else if .Kind}}{{template "off" .Off}}{{end}}</li>{{end}}</ol>
-  {{else}}{{template "empty" (allClear (emptyOf "done" "Nothing to look at now." "Nothing stands out: no noisy rules, no incident missed."))}}{{end}}
-  {{with .Review}}<p class="quiet">{{t "The last change to the rules, replayed over the week before %s:" (at $loc .At)}}
-  {{range $i, $x := .Rules}}{{if $i}}, {{end}}<a href="{{$.Rule $x.Rule}}"><bdi>{{$x.Rule}}</bdi></a> {{t "fired %d → %d" (fired $x.Before) (fired $x.After)}}{{end}}</p>{{end}}
-</section>
 
 <section class="card">
   <h2>{{t "Open tasks"}}</h2>
   {{if .Tasks}}<ul class="plain">{{range .Tasks}}<li><a href="{{$.Link (printf "/tasks/%d" .ID)}}">#{{.ID}} {{.Title}}</a> <span class="pill {{.Status}} {{status "task" .Status}}">{{t .Status}}</span><br>
     <span class="quiet">{{with .Assignee}}{{.}} · {{end}}{{with .Team}}{{.}} · {{end}}{{if .DueText}}{{if .Overdue}}<span class="status-bad">{{t "due %s, overdue" .DueText}}</span>{{else}}{{t "due %s" .DueText}}{{end}}{{else}}{{t "no due date"}}{{end}}</span></li>{{end}}</ul>
   <p><a href="{{$.Link "/tasks"}}">{{t "All tasks"}}</a></p>
-  {{else}}<p class="quiet">{{t "None open. A suggestion under What to look at becomes one with a press."}}</p>{{end}}
+  {{else}}<p class="quiet">{{t "None open."}}</p>{{end}}
 </section>
 
 {{with .Goals}}<section class="card">

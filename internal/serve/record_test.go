@@ -89,12 +89,12 @@ func TestFacetsNoRecord(t *testing.T) {
 		t.Errorf("is:unrecorded: %d %q", code, hd.Get("Location"))
 	}
 	_, body, _ := get(t, h, "/rules?weeks=4")
-	for _, want := range []string{"No incident was written down in these weeks or the two weeks before them", `<span aria-hidden="true">?</span> No record`} {
+	for _, want := range []string{"No incident written down for these weeks or the two weeks before", `<span aria-hidden="true">?</span> No record`} {
 		if !strings.Contains(html.UnescapeString(body), want) {
 			t.Errorf("/rules: no %q", want)
 		}
 	}
-	if strings.Count(body, "No incident was written down in these weeks") != 1 {
+	if strings.Count(body, "No incident written down for these weeks") != 1 {
 		t.Error("/rules: said more than once")
 	}
 	// No record, no verdict: a rule none of whose firings was judged, R06
@@ -127,7 +127,7 @@ func TestFacetsNoRecord(t *testing.T) {
 	}
 
 	_, body, _ = get(t, h, "/rules/R00")
-	if b := html.UnescapeString(body); !strings.Contains(b, "not known: no record") || !strings.Contains(b, "No incident was written down in the weeks it fired or the two weeks before") {
+	if b := html.UnescapeString(body); !strings.Contains(b, "not known: no record") || !strings.Contains(b, "No incident written down for the weeks it fired or the two weeks before") {
 		t.Error("/rules/R00: its precision isn't said to be unknown, and why, once")
 	}
 
@@ -243,7 +243,7 @@ func TestNoRecordPages(t *testing.T) {
 		t.Errorf("%s has no translation for %q", lang, msg)
 	}
 	missing.Unlock()
-	if _, body, _ := get(t, week.Handler(), "/rules?week=2026-10-26"); !strings.Contains(body, "No incident was written down in the week of 2026-10-26") {
+	if _, body, _ := get(t, week.Handler(), "/rules?week=2026-10-26"); !strings.Contains(body, "No incident written down for the week of 2026-10-26") {
 		t.Error("a week's list doesn't say it has no record")
 	}
 }

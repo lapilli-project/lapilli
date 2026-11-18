@@ -202,7 +202,7 @@ func TestPanelBesideNone(t *testing.T) {
 	s := besideServer(t)
 	_, body, _ := get(t, s.Handler(), "/rules/Fresh?weeks=1")
 	panel, _, _ := strings.Cut(body[strings.Index(body, `<dl class="panel">`):], "</dl>")
-	if strings.Contains(panel, " pt") || !strings.Contains(panel, `<span class="delta worse status-bad">&#43;2`) || !strings.Contains(body, "Beside each number") {
+	if strings.Contains(panel, " pt") || !strings.Contains(panel, `<span class="delta">&#43;2</span>`) || !strings.Contains(body, "Beside each number") {
 		t.Errorf("/rules/Fresh?weeks=1: a precision beside none, or firings not beside:\n%s", panel)
 	}
 }
@@ -313,9 +313,10 @@ func TestMoved(t *testing.T) {
 	// is set beside another only then.
 	keepRecordIn(t, s)
 	for lang, want := range map[string][]string{
-		"en": {`<span class="delta worse status-bad">&#43;2 worse</span>`, `<span class="delta">±0</span>`},
-		"ko": {`<span class="delta worse status-bad">&#43;2 나빠짐</span>`, `<summary>알림 부담 <span`},
-		"es": {`<span class="delta worse status-bad">&#43;2 peor</span>`},
+		// More firings, told in no colour and as neither better nor worse.
+		"en": {`<span class="delta">&#43;2</span>`, `<span class="delta">±0</span>`},
+		"ko": {`<span class="delta">&#43;2</span>`, `<summary>알림 부담 <span`},
+		"es": {`<span class="delta">&#43;2</span>`},
 	} {
 		r := httptest.NewRequest(http.MethodGet, "/rules/Fresh?weeks=1", nil)
 		r.Header.Set("Accept-Language", lang)

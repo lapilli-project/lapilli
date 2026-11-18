@@ -220,9 +220,9 @@ func TestOverviewNoRecordSaidOnce(t *testing.T) {
 	}
 	s.jobs(ctx, true)
 	_, body, _ := get(t, s.Handler(), "/")
-	notice := strings.Index(body, "No incident was written down in the week of")
+	notice := strings.Index(body, "No incident written down for the week of")
 	tiles := strings.Index(body, `<section class="tiles tiles-`)
-	if notice < 0 || tiles < 0 || notice > tiles || strings.Count(body, "No incident was written down in the week of") != 1 {
+	if notice < 0 || tiles < 0 || notice > tiles || strings.Count(body, "No incident written down for the week of") != 1 {
 		t.Errorf("the notice, once, before the tiles: at %d, the tiles at %d", notice, tiles)
 	}
 	if !strings.Contains(body, `href="/settings#incident-sources"`) || !strings.Contains(body, `href="/incidents"`) {

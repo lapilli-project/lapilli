@@ -19,7 +19,7 @@ lapilli serve --rules alert-rules/ --prometheus http://prometheus:9090 --match s
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/serve-dashboard-dark.png">
-  <img alt="The lapilli serve overview, with its pages in a sidebar: last week's precision, firings, incidents missed, time to catch (none), noisy rules, notifications for firings that caught nothing while people slept, re-fires and firings during deploys, each with a line of its weeks, most beside the week before, and a link to the list that makes it; under them, links to hide the charts' marks of deploys and quiet windows" src="../assets/serve-dashboard.png" width="820">
+  <img alt="The lapilli serve overview, with its pages in a sidebar: last week's precision, firings, incidents missed, time to catch (none), noisy rules, notifications for firings that caught nothing while people slept, re-fires and firings during deploys, each with a line of its weeks, most beside the week before, and a link to the list that makes it; under them, what to look at: rules to quiet or look at, each with a button to make it a task" src="../assets/serve-dashboard.png" width="820">
 </picture>
 
 A web UI opens on a dashboard of the last twelve weeks: last week's
@@ -91,7 +91,7 @@ its digest.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/serve-rules-dark.png">
-  <img alt="The rules list filtered to the noisy rules over four weeks: the filters above it, side by side with their counts, the filter in effect as a chip, a bar to make a task for each rule picked, set their team or disposition, or propose a change for each, and the rules, each with a checkbox, its badges, its labels as chips and its numbers" src="../assets/serve-rules.png" width="820">
+  <img alt="The rules list filtered to the noisy rules over four weeks: the filters above it, side by side with their counts, the filter in effect as a chip, the orders, a line saying rules can be picked to act on several at once, and the rules, each with a checkbox, its badges, its labels as chips and its numbers, and under it a line of what they come with: the for suggested, notifications, the firings that caught nothing while people slept and off hours, re-fires, those excused, precision without the deploys' firings" src="../assets/serve-rules.png" width="820">
 </picture>
 
 Many can be changed at once: rules picked on the list get a task each, a
@@ -119,7 +119,7 @@ window was over it; and its sections in tabs: summary, firings, versions
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/serve-rule-dark.png">
-  <img alt="A noisy rule's page over four weeks: its name, its badges (noisy six weeks, to tune) and three actions; its team, severity, for, group and the runbook the rule names; precision and firings beside the four weeks before, one better, one worse, incidents caught the same, the notifications it sent and its backtest with nothing beside; its last 84 days as a strip of cells, marked where the rule changed and on the days it fired during a deploy of checkout; its tabs; and what to do first" src="../assets/serve-rule.png" width="820">
+  <img alt="A noisy rule's page over four weeks: its name, its badges (noisy six weeks, to tune) and three actions; its team, severity, for, group and the runbook the rule names; five numbers in a row: precision beside the four weeks before, better, firings beside them, told as neither better nor worse, incidents caught the same, the notifications it sent and its backtest with nothing beside; its last 84 days as a strip of cells, marked where the rule changed and on the days it fired during a deploy of checkout; its tabs; and what to do first" src="../assets/serve-rule.png" width="820">
 </picture>
 
 A proposal's page shows the change as a diff (unified or side by side, the

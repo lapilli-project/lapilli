@@ -71,6 +71,39 @@
 
 ### Changed
 
+- **The pages, plainer: one shape for every control, fewer words, the
+  logo's mark** (docs/design/ui.md, bundle 59), from using them on a real
+  deployment at 1070 px:
+  - A field, a select and a button are one height and one corner, and
+    none is a pill: the main action filled, one beside it outlined, a way
+    elsewhere a link, with no arrow after it. The team, period and search
+    bar is a toolbar on the page, not a card of bordered controls; a
+    field's name stands before it. A rule's tabs and the lists' orders are
+    underlined by a bar. Cards have no shadow.
+  - The overview's What to look at is under the tiles, before the charts,
+    a line each. Refired's change from the week before, and a rule's
+    firings beside the span before on its page, are no longer called worse
+    or better: more may be an alert that really went off again. Precision by week with no week judged is a line saying so,
+    not an empty grid.
+  - The rules list's numbers are alone in their cells, and what they come
+    with is a line under the row, each note saying what it is of: a row
+    was up to fifteen lines tall. Firings not judged have a column of
+    their own, "? Not judged", where there are any, and a row with some
+    says its firings asleep are of those that "caught nothing or not
+    judged".
+  - A rule's five numbers are in one row from 960 px, never four and one.
+  - No record is said in a line, once a page ("No incident written down
+    for … : precision isn't known, and no rule is called noisy."), its why
+    behind "Why". The overview no longer explains ○ and ●, the rules list
+    its order, the Precision chart its name, or an empty list how to fill
+    it.
+  - The header and the browser's tab have the logo's micro-mark, on a
+    light plate in dark mode, in place of the two circles.
+  - Korean says 정탐 and 오탐 everywhere for caught something and caught
+    nothing, and 백테스트 for a replay; Woken for nothing is 자는 시간 오탐,
+    What to look at 검토 대상, Cleanup 남은 기록 정리. Where a count may
+    hold firings not judged, Korean says 인시던트를 잡지 못한 발화, not 오탐.
+
 - **lapilli.dev says what came since 0.37**: a Get started button; the
   status, as the README says it; `lapilli preflight`; `--expect`,
   `--check-content` and `--redact`; marked windows, goals, named signals of
@@ -81,6 +114,7 @@
   `lapilli verdict` writes it now (the incidents' `LASTED`, the zone's
   offset, what `--impact-for` can't be sure of), and so is the README's, up
   to the near misses it leaves out.
+
 - **An RSA key under 2048 bits verifies no signature**: one in an identity
   provider's JWKS (`--oidc-issuer`'s, `--proxy-jwt-jwks`) isn't taken: a
   set of such keys alone is refused saying so, and so is a token one of

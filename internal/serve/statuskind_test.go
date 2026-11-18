@@ -316,7 +316,7 @@ var statusWant = []struct {
 	{regexp.MustCompile(`^⊘ closed \((refused|dropped|changed in review)\)$`), "unknown",
 		[]string{"/proposals?state=all", "@proposal:refused", "@proposal:dropped", "@proposal:amended"}},
 	{regexp.MustCompile(`^\? the rule changed since$`), "unknown", []string{"@proposal:refused"}},
-	{regexp.MustCompile(`^\? No incident was written down`), "unknown", []string{"/facet/rules?weeks=4", "@proposal:amended"}},
+	{regexp.MustCompile(`^\? No incident (was )?written down`), "unknown", []string{"/facet/rules?weeks=4", "@proposal:amended"}},
 	{regexp.MustCompile(`^dropped$`), "unknown", []string{"/tasks?status=all", "@task:dropped"}},
 	{regexp.MustCompile(`^rule taken away$`), "unknown", []string{"/outcomes/outcomes"}},
 	// Where incidents come from (sources.go).

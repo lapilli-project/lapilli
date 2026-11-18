@@ -4,13 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rules · Lapilli</title>
-<link rel="icon" href="/static/icon.svg?v=ace9ecbdd9ee" type="image/svg+xml">
-<link rel="stylesheet" href="/static/lapilli.css?v=ace9ecbdd9ee">
+<link rel="icon" href="/static/mark-32.png?v=f9602dd71b35" sizes="32x32" type="image/png">
+<link rel="icon" href="/static/mark-16.png?v=f9602dd71b35" sizes="16x16" type="image/png">
+<link rel="stylesheet" href="/static/lapilli.css?v=f9602dd71b35">
 </head>
 <body>
 <a class="skip" href="#main">Skip to the page</a>
 <header class="side">
-  <a class="brand" href="/"><img src="/static/icon.svg?v=ace9ecbdd9ee" alt="" width="24" height="24">Lapilli</a>
+  <a class="brand" href="/"><img src="/static/mark-48.png?v=f9602dd71b35" alt="" width="24" height="24">Lapilli</a>
   <details class="menu"><summary>Menu<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>Rules</span></summary>
   <nav class="nav-menu" aria-label="Menu">
   <p class="nav-group" id="menu-see">Monitoring</p>
@@ -45,17 +46,16 @@
 <div class="bar">
 <form method="get" action="/rules" class="ctx" aria-label="Period">
   
-  <label>Period <select name="weeks"><option value="1">1 week</option><option value="4" selected>4 weeks</option><option value="12">12 weeks</option></select></label>
+  <label><span class="bar-k">Period</span> <select name="weeks"><option value="1">1 week</option><option value="4" selected>4 weeks</option><option value="12">12 weeks</option></select></label>
   <button class="quiet-button">Show</button>
 </form>
 <form method="get" action="/search" role="search" class="find" aria-label="Search"><input type="hidden" name="weeks" value="4">
-  <label>Search <input type="search" name="q" value="" maxlength="500" placeholder="Rules, incidents, teams"></label>
+  <label><span class="vh">Search</span> <input type="search" name="q" value="" maxlength="500" placeholder="Rules, incidents, teams"></label>
   <button class="quiet-button">Search</button>
 </form>
 </div>
 
 <div class="head"><h1>Rules</h1><p class="of">1 of 1 rules</p></div>
-<p class="lede">Each rule&#39;s stones over the last 4 weeks, the noisiest first.</p>
 <p class="note">No team owns a rule yet, so the Team column is empty. <a href="/teams#add">Add a team</a></p>
 
 <div class="rules-body">
@@ -118,7 +118,7 @@
 
 <p class="tabs">In order of: <a href="/rules" aria-current="page">caught nothing, the most first</a> <a href="/rules?sort=refired">re-fired, the most first</a></p>
 
-<p class="notice status-unknown"><span class="sign" aria-hidden="true">?</span> 1 of the 4 weeks shown had no incident written down in them or the two weeks before them: their firings are counted, not judged, and are in no precision. <a href="/incidents">Write incidents down</a></p>
+<div class="notice status-unknown"><p><span class="sign" aria-hidden="true">?</span> 1 of the 4 weeks shown had no incident written down for them or the two weeks before: their firings are counted, not judged. <a href="/incidents">Write incidents down</a></p><details class="why"><summary>Why</summary><p>A firing is judged by the incidents written down in its week and the two weeks before. With none, a firing that caught nothing can&#39;t be told from one nobody wrote down.</p></details></div>
 <form method="post" action="/rules/bulk" class="bulk"><input type="hidden" name="back" value="/rules"><button type="submit" disabled hidden></button>
 
 <fieldset class="bulk-bar"><legend>With the rules picked</legend>
@@ -130,22 +130,22 @@
 <span class="bulk-set"><label>Propose for each <select name="propose" disabled aria-describedby="bulk-why"><option value="for">a new for</option><option value="suggested">the for suggested for it</option><option value="retire">retiring it</option></select></label>
 <label>A new for <input name="for" maxlength="20" size="8" placeholder="15m" disabled aria-describedby="bulk-why"></label>
 <span class="action-off"><button class="quiet-button" type="button" disabled aria-describedby="bulk-why">Propose</button></span></span>
-<p class="quiet">Each rule picked is changed as its own page would change it, and only if you may: at most 100 at a time. A proposal for each is the one its page would make, with its backtest, for a person to approve: at most 20 at a time.</p>
+<p class="quiet">At most 100 rules at a time, 20 for proposals, and only those you may change; each proposal is backtested and waits for a person to approve it.</p>
 </fieldset>
-<div class="scroll"><table>
-<thead><tr><th scope="col" class="pick"><span class="vh">Pick</span></th><th scope="col">Rule</th><th scope="col">Team</th><th scope="col">Severity</th><th scope="col" class="n">Fired</th><th scope="col" class="n">○ Caught</th><th scope="col" class="n">● Nothing</th><th scope="col" class="n">Precision</th><th scope="col" class="n">Refired</th><th scope="col" class="n">Incidents</th><th scope="col">12 weeks</th></tr></thead>
+<div class="scroll"><table class="rules-table">
+<thead><tr><th scope="col" class="pick"><span class="vh">Pick</span></th><th scope="col">Rule</th><th scope="col">Team</th><th scope="col">Severity</th><th scope="col" class="n">Fired</th><th scope="col" class="n">○ Caught</th><th scope="col" class="n">● Nothing</th><th scope="col" class="n">? Not judged</th><th scope="col" class="n">Precision</th><th scope="col" class="n">Refired</th><th scope="col" class="n">Incidents</th><th scope="col">12 weeks</th></tr></thead>
 <tbody>
-<tr>
+<tr class=" has-more">
   <td class="pick"><input type="checkbox" name="rule" value="Errors" aria-label="Errors" disabled></td>
   <td class="rule"><a href="/rules/Errors?weeks=4"><bdi>Errors</bdi></a> <span class="badges"><span class="badge perf-unrecorded status-unknown"><span aria-hidden="true">?</span> No record</span></span></td>
   <td class="name">–</td>
   <td class="name"><bdi>page</bdi></td>
-  <td class="n">21</td><td class="n">1</td><td class="n">6<br><span class="quiet">14 not judged</span></td><td class="n">14%</td><td class="n">19<br><span class="quiet">90% of firings</span></td>
-  <td class="n">1<br><span class="quiet">first 1, alone 1</span></td>
+  <td class="n">21</td><td class="n">1</td><td class="n">6</td><td class="n">14</td><td class="n">14%</td><td class="n">19</td><td class="n">1</td>
   <td><svg class="spark" width="72" height="18" viewBox="0 0 72 18" role="img" aria-label="Stones by week: 08-17: 0 ○ 0 ●; 08-24: 0 ○ 0 ●; 08-31: 0 ○ 0 ●; 09-07: 0 ○ 0 ●; 09-14: 0 ○ 0 ●; 09-21: 0 ○ 0 ●; 09-28: 0 ○ 0 ●; 10-05: 0 ○ 0 ●; 10-12: 0 ○ 0 ●; 10-19: 0 ○ 0 ●; 10-26: 0 ○ 0 ●, 14 not judged; 11-02: 1 ○ 6 ●"><g><title>08-17: 0 ○ 0 ●</title><rect class="w" x="0" y="18" width="5" height="0"/><rect class="b" x="0" y="18" width="5" height="0"/></g><g><title>08-24: 0 ○ 0 ●</title><rect class="w" x="6" y="18" width="5" height="0"/><rect class="b" x="6" y="18" width="5" height="0"/></g><g><title>08-31: 0 ○ 0 ●</title><rect class="w" x="12" y="18" width="5" height="0"/><rect class="b" x="12" y="18" width="5" height="0"/></g><g><title>09-07: 0 ○ 0 ●</title><rect class="w" x="18" y="18" width="5" height="0"/><rect class="b" x="18" y="18" width="5" height="0"/></g><g><title>09-14: 0 ○ 0 ●</title><rect class="w" x="24" y="18" width="5" height="0"/><rect class="b" x="24" y="18" width="5" height="0"/></g><g><title>09-21: 0 ○ 0 ●</title><rect class="w" x="30" y="18" width="5" height="0"/><rect class="b" x="30" y="18" width="5" height="0"/></g><g><title>09-28: 0 ○ 0 ●</title><rect class="w" x="36" y="18" width="5" height="0"/><rect class="b" x="36" y="18" width="5" height="0"/></g><g><title>10-05: 0 ○ 0 ●</title><rect class="w" x="42" y="18" width="5" height="0"/><rect class="b" x="42" y="18" width="5" height="0"/></g><g><title>10-12: 0 ○ 0 ●</title><rect class="w" x="48" y="18" width="5" height="0"/><rect class="b" x="48" y="18" width="5" height="0"/></g><g><title>10-19: 0 ○ 0 ●</title><rect class="w" x="54" y="18" width="5" height="0"/><rect class="b" x="54" y="18" width="5" height="0"/></g><g><title>10-26: 0 ○ 0 ●, 14 not judged</title><rect class="w" x="60" y="18" width="5" height="0"/><rect class="b" x="60" y="18" width="5" height="0"/><rect class="u" x="60" y="0" width="5" height="18"/></g><g><title>11-02: 1 ○ 6 ●</title><rect class="w" x="66" y="16.714285714285715" width="5" height="1.2857142857142858"/><rect class="b" x="66" y="9" width="5" height="7.714285714285714"/></g></svg></td>
-</tr></tbody>
+</tr>
+<tr class="more"><td class="pick"></td><td colspan="11"><p class="row-notes"><span class="vh"><bdi>Errors</bdi>: </span><span>re-fired: 90% of firings</span><span>incidents: first 1, alone 1</span></p></td></tr></tbody>
 <tfoot><tr><th scope="row" colspan="4">The rule shown</th>
-  <td class="n">21</td><td class="n">1</td><td class="n">6<br><span class="quiet">14 not judged</span></td><td class="n">14%</td><td class="n">19</td><td></td><td></td></tr></tfoot>
+  <td class="n">21</td><td class="n">1</td><td class="n">6</td><td class="n">14</td><td class="n">14%</td><td class="n">19</td><td></td><td></td></tr></tfoot>
 </table></div></form>
 
 

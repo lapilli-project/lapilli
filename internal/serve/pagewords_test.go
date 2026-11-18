@@ -14,12 +14,12 @@ import (
 // put the whole first, and said "0 of 3" as "3 of 0".
 func TestRefiredWeeksInOrder(t *testing.T) {
 	for lang, want := range map[string]string{
-		"en": "11% of firings, 1 of 3 whole weeks",
-		"ko": "발화의 11%, 온전한 3주 중 1주",
-		"ja": "発火の 11%、まるごとの 3 週のうち 1 週",
-		"es": "11% de los disparos, 1 de 3 semanas completas",
+		"en": "re-fired: 11% of firings, 1 of 3 whole weeks",
+		"ko": "재발화: 발화의 11%, 온전한 3주 중 1주",
+		"ja": "再発火: 発火の 11%、まるごとの 3 週のうち 1 週",
+		"es": "redisparos: 11% de los disparos, 1 de 3 semanas completas",
 	} {
-		if got := tr(lang, "%s of firings, %d of %d whole weeks", "11%", 1, 3); got != want {
+		if got := tr(lang, "re-fired: %s of firings, %d of %d whole weeks", "11%", 1, 3); got != want {
 			t.Errorf("%s: %q, want %q", lang, got, want)
 		}
 	}

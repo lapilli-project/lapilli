@@ -537,7 +537,9 @@ func (s *Server) glance(ctx context.Context, v *ruleView, t *tallies, vs []versi
 func besides(l ruleLine, was ledger.Span) (precision, firings, incidents moved) {
 	now, okNow := sharePct(l.White, l.Firings-l.Unjudged)
 	then, okThen := sharePct(was.White, was.Firings-was.Unjudged)
-	return moved{On: okNow && okThen, By: now - then, Up: true, Pt: true}, moved{On: true, By: l.Firings - was.Firings},
+	// More firings are told, not called worse: they may be an alert that
+	// really went off more (docs/design/ui.md, "The panel").
+	return moved{On: okNow && okThen, By: now - then, Up: true, Pt: true}, moved{On: true, By: l.Firings - was.Firings, Plain: true},
 		moved{On: true, By: l.Incidents - was.Caught, Up: true}
 }
 

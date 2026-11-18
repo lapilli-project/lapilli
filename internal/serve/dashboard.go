@@ -193,6 +193,9 @@ type lineChart struct {
 	EndLabel  string
 	Base      float64
 	HasPoints bool
+	// Fired says a week drawn had firings: with no point, none of them
+	// judged, as against none at all.
+	Fired bool
 }
 
 type heatCell struct {
@@ -424,7 +427,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		return nil, err
 	} else if ok && asleep != "" {
 		since = first.In(s.cfg.Loc).Format("2006-01-02")
-		asleep = tr(l, "notifications for firings that caught nothing, while people slept, since %s", since)
+		asleep = tr(l, "notifications, counted since %s", since)
 	}
 	if v.Deploys, err = s.l.HasDeploys(ctx); err != nil {
 		return nil, err
@@ -655,8 +658,10 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 	if with, of := refired(); of > 0 {
 		weeksOf = tr(l, "%d of the last %d whole weeks had one", with, of)
 	}
+	// More re-fires are told, not called worse: an alert that re-fires may
+	// be one that really went off again, a restart say (docs/design/ui.md).
 	add("Refired", func(w *weekView) (float64, bool) { return float64(w.Refired), true }, count,
-		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, weeksOf)
+		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, 0, weeksOf)
 	if deploys {
 		add("During deploys", func(w *weekView) (float64, bool) { return float64(w.Deploys), true }, count,
 			func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, 0, tr(l, "firings; precision %s without them", last.Without()))
@@ -852,6 +857,7 @@ func precisionChart(l string, ws []*weekView, loc *time.Location) lineChart {
 	for i, w := range ws {
 		x := plotL + band*float64(i) + band/2
 		c.Labels = append(c.Labels, column{X: x, Mid: x, Label: w.Start.In(loc).Format("01-02"), Current: w.Current, Alt: (len(ws)-1-i)%2 == 1})
+		c.Fired = c.Fired || w.Firings > 0
 		p, ok := w.precision()
 		if !ok {
 			pen = "M"
