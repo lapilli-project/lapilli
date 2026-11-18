@@ -162,10 +162,12 @@ The near misses' judging (`internal/verdict/nearmiss.go:105`, `:154`,
   is at least the span's end plus the most, over every pair of a signal
   and a rule entry that judges against it, of the lead and the signal's
   `for` (with the signal with no name, `--lead` and `--impact-for`; with
-  written incidents alone, `--lead`), so that every window a firing in
-  the span can catch has been found. The same for a week and for an
-  occurrence of `each: KIND` ([goals.md](goals.md)). With the defaults
-  that is 20 minutes later than today.
+  written incidents alone, `--lead`), and `--settle` after that: every
+  window a firing in the span can catch has been found, and a run has
+  read again the samples that came late, so no stone of the span turns
+  after it was told. The same for a week and for an occurrence of `each:
+  KIND` ([goals.md](goals.md)). With the defaults (15m, 5m and 1h) that is
+  an hour and 20 minutes later than today.
 
 ### Judged again when a lead changes
 
@@ -551,11 +553,24 @@ on an incident's page. Counted (below):
   a verdict. Flipping stones twelve weeks back would turn those weeks'
   goals met, put "no longer missed" on their tasks (which a person then
   closes, reading it), and move the four weeks before that a
-  `no_worse_than: before` occurrence is set beside. Fourteen days covers the week's review and the
-  one before it. Past that, it is an admin's, as the judging settings
-  are. Whatever its age, a goal's notice and its task's comment say when
-  people's verdicts moved it: "no longer missed, with 3 people's verdicts
-  since it was told".
+  `no_worse_than: before` occurrence is set beside. Fourteen days covers
+  the week's review and the one before it. Past that, it is an admin's,
+  as the judging settings are. Whatever its age, a goal's notice and its
+  task's comment say when people's verdicts moved it: "no longer missed,
+  with 3 people's verdicts since it was told".
+- **A verdict moved on an old firing** (an admin's signal change reads
+  four weeks again, and a window under it moves) is said again, or
+  undone, by an admin alone, as any verdict on a firing that old is; the
+  overview's "Look at these first" names those to an admin ("2 people's
+  verdicts older than 14 days to look at again"), and to an editor only
+  those they may say again.
+- **"This was real" is held the same.** Today it has no limit of age: an
+  editor can turn a black stone of any week white. It moves the same
+  numbers as "unrelated", the other way, so from step 3 it is an
+  editor's on the last 14 days' firings and an admin's beyond. Writing an
+  incident down by hand stays an editor's at any age: an incident log is
+  copied in late as a matter of course, and an incident written is said
+  as such, `real` counting only those "This was real" wrote.
 - **The trail.** Every set and every undo is noted in `changes` with its
   before and after (`verdict on RULE {labels} at START`), as an incident's
   decision is (`change` in `internal/ledger/incidents.go:501`), and the
@@ -566,8 +581,19 @@ on an incident's page. Counted (below):
   on the Run history page, `internal/serve/views.go:2284`), so a post of
   100 firings noted a change each would push every other change off it.
   One row a post ("needed action: yes, on 100 firings of 3 rules", the
-  firings in its after), and 20 bulk posts an hour a person at most (429
-  past that, as a person's proposals are 20 an hour).
+  firings in its after).
+- **30 verdict writes an hour a person, of every kind.** A form's post, a
+  bulk post and a call of `PUT` or `DELETE /api/v1/verdicts` each count
+  one, by the name the write is noted under, across replicas (kept in the
+  ledger, as the tries of the Settings page are counted). Past 30 in the
+  hour, the write is refused with 429 and `Retry-After`, and nothing is
+  written: no verdict, no change row, nothing judged again. Thirty is
+  room for a person: the bulk form takes 100 firings in one. It bounds
+  what one name can put among the activity log's latest 100 to 30 rows an
+  hour, and the log, besides, shows each person's verdict rows of an hour
+  as one line ("NAME: 30 verdicts"), reading its latest 100 other changes
+  beside them, so a script holding one token can't push the rest off it;
+  `changes` keeps every row.
 
 ### Which firing a post is about
 
@@ -598,11 +624,19 @@ moved.
   the ledger and in every replay (below): the firing of the same rule and
   match values (its own alert's first) that is on at the verdict's start;
   else the first that starts within the span it was said of, its start to
-  its end as kept. A run whose replay starts the firing a step later
-  (late samples) moves the verdict so in its write, and marks it moved
-  ("its firing starts at 14:03 now"). With none, it stays, on no firing,
-  listed on the Cleanup page with what it said, and is pruned with
-  `--keep`.
+  its end as kept. A verdict set while its firing was still on (no end
+  kept) has a span of its start to its start plus its rule's `for` and
+  `--refire`, so that it never reaches a firing hours later. A run whose
+  replay starts the firing a step later (late samples) moves the verdict
+  so in its write, and marks it moved ("its firing starts at 14:03 now").
+  With none, it stays, on no firing, listed on the Cleanup page with what
+  it said, and is pruned with `--keep`.
+- **Two verdicts, one firing.** A replay can merge two firings into one,
+  and the fallback can come to another pod's firing that has a verdict of
+  its own. The verdict said of that very alert (its series) wins; between
+  two of other alerts, the one set latest; the other is marked moved
+  ("another verdict holds this firing"), listed with the rest, and judges
+  nothing until it is said again.
 - **Where an incident's key moves, its verdicts' keys move, in the same
   write.** Three places move keys today, each with the tasks and comments
   on them:
@@ -777,18 +811,25 @@ them, each summary row gains `people`:
   would have them: every "unrelated" white, those excused for it counted
   again, and the incidents "This was real" wrote left out, their firings
   black, or not judged where only such an incident kept their week's
-  record (the record read without them). So a team's precision reads with
+  record (the record read without them), or excused where they came in a
+  quiet window that matches them, as a black firing there is. Bit 8 alone
+  can't tell the last, so `stones`, which has the quiet windows in hand
+  (`excuses`), sets bit 16 too, white only by such incidents and in a
+  matching quiet window, tallied as `real_excused`, which leaves
+  `firings`, `refired.firings`, `critical.firings` and the denominators
+  of the numbers as Lapilli judged them. So a team's precision reads with
   people's word, and without it, both ways.
 - `action`: the row's `firings`, those `answered`, `yes` and `no`, the
   two crossings above, and `share`, yes over those answered, given only
-  once 80% of the row's firings are answered (null below, and `no_value`
-  for a goal). Of the two ways to keep a self-reported share honest, this
-  one: divided by every firing, an unanswered one would count as "no", and
-  the share would follow how much was answered, falling in a busy week and
-  rising as the team catches up, a fact about answering more than about
-  the alerts. With a bar of answers, it stays a share of the alerts, and
-  answering only the firings that needed action gives no share at all,
-  not 100%. The bar is fixed, and shown beside ("110 of 120 answered").
+  once 80% of the row's firings are answered (null below it, and a goal on
+  it missed: "Goals", below). Of the two ways to keep a self-reported
+  share honest, this one: divided by every firing, an unanswered one
+  would count as "no", and the share would follow how much was answered,
+  falling in a busy week and rising as the team catches up, a fact about
+  answering more than about the alerts. With a bar of answers, it stays a
+  share of the alerts, and answering only the firings that needed action
+  gives no share at all, not 100%. The bar is fixed, and shown beside
+  ("110 of 120 answered").
 
 **What people's verdicts move**, which the Goals page says beside each
 goal whose measure they moved in a week, with how many verdicts, "This was
@@ -822,7 +863,12 @@ Elsewhere:
   `/api/v1/verdicts`'.
 - **The CSV**: `unrelated` and `action` columns, at the end.
 - **Goals**: a measure, `action.share` (higher is better, needs no record,
-  not with `each: KIND`), not known below 80% answered (`no_value`).
+  not with `each: KIND`). A whole week under 80% answered is **missed**,
+  "under 80% answered", not unknown: a week not known is neither met nor
+  missed ([goals.md](goals.md), "Checked each week"), so a team about to
+  miss could stop answering at 79% and never be missed. A week with no
+  firing is not known (`no_value`), as nothing was to answer; the week
+  under way is `open`, as every goal's is.
 - **`/metrics`**: `lapilli_rule_action` (`rule`, [`severity`], [`team`],
   `answer`: `yes`, `no`), over the last seven days.
 - **The digest**: a line, "People said 2 firings were unrelated, and
@@ -938,7 +984,7 @@ says:
   fields to "The report's fields". Every number of a ledger with no lead
   of a signal's or an entry's stays as it is. The digest's and the goals'
   wait ("`--settle`, a signal's `for`, a rule's `for`") is the one thing
-  that changes with the defaults: 20 minutes later.
+  that changes with the defaults: an hour and 20 minutes later.
 - **Step 2** changes no number. It adds "Episodes", `rules[].episodes`†,
   `firings[].episode`†, `firings[].day`† and `settings.zone`† to the
   report's fields
@@ -1005,8 +1051,9 @@ As counts and bytes, which the tests hold, not times:
 - **Verdicts.** One a firing at most, 16 incidents each, two notes of
   500 characters. A verdict's write judges again its firing's span and the
   days it falls in: less than an incident's write, which judges from its
-  lead before to its end. A bulk post is 100 firings and one change row,
-  20 posts an hour a person. `stones` reads the verdicts of the firings it
+  lead before to its end. A bulk post is 100 firings and one change row;
+  30 verdict writes of any kind an hour a person. `stones` reads the
+  verdicts of the firings it
   judges in one query by alert and start, along an index on
   `(series_id, start_at)`; a replay judged in memory reads those of its
   period once, and looks each replayed firing's up by rule and match
@@ -1047,9 +1094,11 @@ isn't a browser, and writes as the name the token gives.
   line, its incidents 16; written again, it is the same row. Its write
   judges again one firing's span and its days, less than an editor's
   incident write already does.
-- A bulk post: 100 firings, one change row, 20 posts an hour a person:
-  so one post can't push the activity log's other changes off its latest
-  100, nor a person's posts drown it.
+- Writes: 30 verdict writes an hour a person, a form's post, a bulk post
+  (100 firings, one change row) and an API call alike; past that, 429 and
+  nothing written. The activity log shows a person's verdict rows of an
+  hour as one line, so neither one post nor a script holding a token can
+  push its other changes off its latest 100.
 - A lead: an admin's, 24h at most, pending its signal's windows, among
   the twelve saves an hour.
 
@@ -1085,7 +1134,9 @@ used to make the numbers say something:
   say when verdicts moved it.
 - **Needed action** is the team's own word, and changes no stone. A share
   is given only once 80% of the firings are answered, so answering the
-  firings that needed action alone gives none, not 100%.
+  firings that needed action alone gives none, not 100%; and a goal on it
+  is missed under the bar, so answering less can't move a missed week to
+  not known.
 - **Judged by nothing.** `judged: false` takes a whole rule's black stones
   out of precision, noisy, the digest's noisy rules and suggestions, and
   every goal that needs the record: a rule that does nothing but page
@@ -1209,7 +1260,8 @@ taking `lead` and `judged`.
    engineer says it again. That week the team answered 110 of its 120
    firings, 30 of them needing action, 27%: its goal of `action.share` at
    least 25% is met, "110 of 120 answered". The week before it answered
-   60 of 115, and the goal was not known: under 80% answered.
+   60 of 115, and the goal was missed, "under 80% answered", whatever
+   share those 60 gave.
 
 ## Open questions
 
@@ -1281,7 +1333,8 @@ maintainer to decide:
    part, and `stones`; verdicts in every replay, on both sides; the keys
    moved with incidents' keys; the forms (with series and start, "This
    was real"'s among them), `/api/v1/verdicts`, roles, the 14 days and the
-   trail, a bulk post one change; moved verdicts on the Cleanup page and
+   trail, a bulk post one change, 30 verdict writes an hour a person, the
+   same 14 days for "This was real"; moved verdicts on the Cleanup page and
    the overview; entries apart from named signals, and `judged: false`;
    the summary's `people` and `not_judged`, the report, the CSV,
    `action.share` and `lapilli_rule_action`; what the Goals page says
