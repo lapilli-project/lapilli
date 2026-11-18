@@ -578,3 +578,14 @@ func TestEstimateMemoryBacktests(t *testing.T) {
 		t.Errorf("%+v", it)
 	}
 }
+
+// The port's most days, which the estimate counts up to, are serve's: an
+// entry that gives none is given them as ReadTrust reads it.
+func TestLaneDaysAsServe(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "trust.yaml")
+	os.WriteFile(file, []byte("trust:\n  - {name: plain, token_file: /etc/lapilli/backtest/token}\n"), 0o600)
+	ts, err := serve.ReadTrust(file, nil, true)
+	if err != nil || len(ts) != 1 || ts[0].Days != laneDays {
+		t.Errorf("%v %+v, want %d days", err, ts, laneDays)
+	}
+}

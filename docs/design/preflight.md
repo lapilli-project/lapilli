@@ -227,6 +227,9 @@ requests over the lower of the two. Two problems follow:
 
 It also says what share of `--max-rate` the runs use once caught up, and,
 with several replicas, that each asks at it ([replicas.md](replicas.md)).
+Without either rate, how long is the API's to say: unknown, with the floor
+at `--parallel` requests at once. `vector(1)`'s time is no measure of a
+range read's.
 
 **The backtest lane.** While the lane runs a backtest, its share of
 `--max-rate` (`--backtest-share`) is kept for it, and the runs' requests
@@ -245,9 +248,6 @@ days, their expressions (the two sides asked apart) or their `for` alone
 (the two sides sharing their reads), and the most days of each that fit,
 14 at most. Not one rule over a day fitting is a problem: the port refuses
 every backtest before it is queued.
-Without either rate, how long is the API's to say: unknown, with the floor
-at `--parallel` requests at once. `vector(1)`'s time is no measure of a
-range read's.
 
 **Nights.** With `--catch-up-hours`, a catch-up runs only within them: a
 day of it begins only while the hours last, and one the hours end in is
@@ -367,9 +367,9 @@ Each is held by the code and a test, not only said:
   permissions as its body. The backtest port's issuers are asked by GETs
   of exactly their discovery documents and keys, the keys a discovery
   document names allowed only at the issuer's own origin: a URL in the
-  operator's trust file, and held to the list all the same. Any other action or path on those hosts is
-  refused, and so is a form or a query that doesn't read whole (a `;`
-  between its pairs). An answer that says "allowed" is judged, and
+  operator's trust file, and held to the list all the same. Any other
+  action or path on those hosts is refused, and so is a form or a query
+  that doesn't read whole (a `;` between its pairs). An answer that says "allowed" is judged, and
   nothing more is done with it.
 - **No write to the ledger.** SQLite is opened `mode=ro`, with `PRAGMA
   query_only = ON`, and so that nothing is made or written beside it (As
