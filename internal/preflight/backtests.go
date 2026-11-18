@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -196,16 +197,50 @@ func (p *run) hideIssuers() {
 	}
 	for url, n := range p.issuerNumbers() {
 		if !slices.Contains(publicIssuers, url) {
-			p.hide(fmt.Sprintf("--backtest-trust's issuer %d", n), url)
+			p.hide(fmt.Sprintf("--backtest-trust's issuer %d", n), hidden(url))
 		}
 	}
 	keys := map[string]bool{}
 	for _, t := range p.c.Serve.Trust {
 		if t.JWKSURL != "" && !keys[t.JWKSURL] {
 			keys[t.JWKSURL] = true
-			p.hide(fmt.Sprintf("--backtest-trust's jwks_url %d", len(keys)), t.JWKSURL)
+			p.hide(fmt.Sprintf("--backtest-trust's jwks_url %d", len(keys)), hidden(t.JWKSURL))
 		}
 	}
+}
+
+// hidden is what of a URL is hidden: the URL, with its host, which the
+// scrubber hides wherever it is said; but on a public CI's host (GitHub
+// Enterprise Cloud's issuer of an enterprise, under GitHub's), the URL
+// without its scheme, so that its slug is hidden and the public host,
+// which other entries' issuers are on, isn't on its own.
+func hidden(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return raw
+	}
+	for _, pub := range publicIssuers {
+		if pu, err := url.Parse(pub); err == nil && strings.EqualFold(pu.Host, u.Host) {
+			return strings.TrimPrefix(raw, u.Scheme+"://")
+		}
+	}
+	return raw
+}
+
+// issuerErr is why an issuer's discovery or keys couldn't be read: what
+// it answered, but, of an issuer no public CI's, not what its discovery
+// document names, another issuer (the same in another case, a slug
+// beside it) or keys elsewhere (another host of one's own), which isn't
+// the trust file's and so isn't hidden: said in Lapilli's words alone.
+func (p *run) issuerErr(url string, err error) string {
+	if !slices.Contains(publicIssuers, url) {
+		for _, kind := range []error{signin.ErrOtherIssuer, signin.ErrKeysElsewhere} {
+			if errors.Is(err, kind) {
+				return kind.Error()
+			}
+		}
+	}
+	return said(err)
 }
 
 // issuersAtOnce is how many issuers are asked at once: twelve that don't
@@ -272,7 +307,7 @@ func (p *run) backtestIssuers(ctx context.Context) {
 		case a.unasked:
 			unasked = append(unasked, name)
 		case a.err != nil:
-			bad = append(bad, name+": "+said(a.err))
+			bad = append(bad, name+": "+p.issuerErr(x.url, a.err))
 		case a.n == 0:
 			bad = append(bad, fmt.Sprintf("%s: no key its JWKS holds verifies a token of %s", name, algs))
 		default:
@@ -544,7 +579,11 @@ func (p *run) backtests(ctx context.Context, rd *read) {
 	if len(rs) > 0 {
 		b.Changed, b.Shared = changed(rs, b.Days), forOnly(rs, b.Days)
 		b.ChangedDays, b.SharedDays = most(changed), most(forOnly)
-		least = forOnly(rs[:1], 1)
+		// The least of a rule added, taken away, or its for changed, over a
+		// day: what the cheapest backtest of a rule that differs asks.
+		one := rs[:1]
+		least = min(serve.BacktestRequests(h, nil, one, 1, p.now, s.Settle, s.Step), serve.BacktestRequests(h, one, nil, 1, p.now, s.Settle, s.Step),
+			forOnly(one, 1))
 		if b.ChangedDays < b.Days {
 			b.WeekRules, b.DayRules = mostRules(b.Days), mostRules(1)
 		}
@@ -591,7 +630,7 @@ func (p *run) backtests(ctx context.Context, rd *read) {
 	}
 	if laneAt > 0 && !fits(least) {
 		it.State = Problem
-		it.Why = fmt.Sprintf("the port refuses every backtest of a rule that differs before it is queued: one rule's for changed over a day asks %s, past what fits",
+		it.Why = fmt.Sprintf("the port refuses every backtest of a rule that differs before it is queued: one rule added, taken away or its for changed over a day asks %s at least, past what fits",
 			plural(least, "request"))
 		it.Fix = "raise --max-rate or --backtest-share, or give --backtest-timeout longer"
 	}

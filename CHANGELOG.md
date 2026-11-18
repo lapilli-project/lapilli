@@ -176,8 +176,8 @@ Before upgrading:
   `--backtest-timeout` at the lane's share of `--max-rate`, and how many
   days of ten of the rules changed fit, their expressions or their `for`
   alone, counted by the count the port refuses one by
-  (`serve.BacktestRequests`); a problem only when one rule's `for` over a
-  day doesn't fit; the hourly runs
+  (`serve.BacktestRequests`); a problem only when one rule added, taken
+  away or its `for` changed over a day doesn't fit; the hourly runs
   are timed at `--max-rate` less `--backtest-share` too, as while a
   backtest runs the whole hour (`while_backtest`), a run past `--every`
   only then unknown; and memory says the lane's reads beside the runs'

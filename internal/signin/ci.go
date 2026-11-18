@@ -222,12 +222,14 @@ func (c *CI) discover(ctx context.Context) (*Keys, error) {
 		return nil, fmt.Errorf("%w: %s isn't an issuer's discovery document: %v", ErrMisconfigured, redact(where), err)
 	}
 	if doc.Issuer != c.Issuer {
-		return nil, fmt.Errorf("%w: the issuer is %q, and its discovery document says %q: give exactly that", ErrMisconfigured, c.Issuer, doc.Issuer)
+		return nil, &discoveryError{kind: ErrOtherIssuer,
+			err: fmt.Errorf("%w: the issuer is %q, and its discovery document says %q: give exactly that", ErrMisconfigured, c.Issuer, doc.Issuer)}
 	}
 	jwks := c.JWKS
 	if jwks == "" {
 		if !SafeURL(doc.JWKS) || !SameOrigin(doc.JWKS, c.Issuer) {
-			return nil, fmt.Errorf("%w: its discovery document names keys at %q, which isn't https at the issuer's own origin: give jwks_url", ErrMisconfigured, redact(doc.JWKS))
+			return nil, &discoveryError{kind: ErrKeysElsewhere,
+				err: fmt.Errorf("%w: its discovery document names keys at %q, which isn't https at the issuer's own origin: give jwks_url", ErrMisconfigured, redact(doc.JWKS))}
 		}
 		jwks = doc.JWKS
 	}
@@ -235,6 +237,24 @@ func (c *CI) discover(ctx context.Context) (*Keys, error) {
 	k.maxRSA = ciRSAMax
 	return k, nil
 }
+
+// The two ways a discovery document answers otherwise than its issuer as
+// given, each said in Lapilli's words alone where what the document names
+// is not to be printed (lapilli preflight, of an issuer no public CI's):
+// it names another issuer, or keys elsewhere than at the issuer's origin.
+var (
+	ErrOtherIssuer   = errors.New("the discovery document names another issuer than the one given, exactly")
+	ErrKeysElsewhere = errors.New("its jwks_uri isn't https at the issuer's own origin: give jwks_url")
+)
+
+// discoveryError is a discovery document that names another issuer, or
+// keys elsewhere (kind), its message serve's, which quotes what it names.
+type discoveryError struct {
+	kind, err error
+}
+
+func (e *discoveryError) Error() string   { return e.err.Error() }
+func (e *discoveryError) Unwrap() []error { return []error{e.kind, e.err} }
 
 // SameOrigin reports whether two URLs have the same scheme, host and port.
 func SameOrigin(a, b string) bool {

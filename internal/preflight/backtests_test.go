@@ -144,7 +144,8 @@ func TestBacktestIssuers(t *testing.T) {
 		jwks   bool // the entry's jwks_url is elsewhere's
 		state  State
 		says   string
-		asked  int // of the issuer's
+		hidden string // what the document names that the item never says
+		asked  int    // of the issuer's
 		usable int
 	}{
 		{name: "ok", keys: good, state: OK, says: "1 key for RS256", asked: 2},
@@ -164,11 +165,15 @@ func TestBacktestIssuers(t *testing.T) {
 			doc: func(*issuerAt) func(map[string]any) {
 				return func(d map[string]any) { d["pad"] = strings.Repeat("x", 1<<20) }
 			}},
-		{name: "another issuer", state: Problem, says: "its discovery document says", asked: 1,
-			doc: func(*issuerAt) func(map[string]any) {
-				return func(d map[string]any) { d["issuer"] = "https://token.example.com" }
+		{name: "another issuer", state: Problem, says: "names another issuer than the one given, exactly", asked: 1, hidden: "ACME-SLUG",
+			doc: func(x *issuerAt) func(map[string]any) {
+				return func(d map[string]any) { d["issuer"] = x.URL + "/ACME-SLUG/" }
 			}},
-		{name: "keys at another origin", state: Problem, says: "which isn't https at the issuer's own origin: give jwks_url", asked: 1,
+		{name: "keys at another origin", state: Problem, says: "its jwks_uri isn't https at the issuer's own origin: give jwks_url", asked: 1, hidden: "keys.internal.example",
+			doc: func(*issuerAt) func(map[string]any) {
+				return func(d map[string]any) { d["jwks_uri"] = "https://keys.internal.example/jwks" }
+			}},
+		{name: "keys at another origin of one's own", state: Problem, says: "its jwks_uri isn't https at the issuer's own origin", asked: 1,
 			doc: func(*issuerAt) func(map[string]any) {
 				return func(d map[string]any) { d["jwks_uri"] = elsewhere.URL + "/.well-known/jwks" }
 			}},
@@ -200,8 +205,8 @@ func TestBacktestIssuers(t *testing.T) {
 			p := guarded(t, backtestConfig(e))
 			p.backtestIssuers(context.Background())
 			it := judged(p, *itemOf(p, "backtest.issuers"))
-			if it.State != x.state || !strings.Contains(it.What+" "+it.Why, x.says) {
-				t.Errorf("%+v, want %s saying %q", it, x.state, x.says)
+			if it.State != x.state || !strings.Contains(it.What+" "+it.Why, x.says) || x.hidden != "" && strings.Contains(it.What+it.Why, x.hidden) {
+				t.Errorf("%+v, want %s saying %q, never %q", it, x.state, x.says, x.hidden)
 			}
 			a := p.al.asked()
 			if is.count() != x.asked || a.Refused != 0 || a.By["backtest"] != a.Requests {
@@ -264,6 +269,21 @@ func TestBacktestIssuersSaid(t *testing.T) {
 	p.backtestIssuers(context.Background())
 	if it := itemOf(p, "backtest.issuers"); !strings.Contains(it.Why, "[--backtest-trust's issuer 2] (server): ") ||
 		!strings.Contains(it.Why, "[--backtest-trust's issuer 3] (other): ") || strings.Contains(it.Why, "_services/token (") {
+		t.Errorf("%+v", it)
+	}
+}
+
+// A public CI's issuer keeps the detail of what its discovery document
+// names: it is the same for everyone.
+func TestBacktestIssuerPublicDetail(t *testing.T) {
+	standIns(t, map[string]http.Handler{"gitlab.com": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issuer": "https://gitlab.com/", "jwks_uri": "https://gitlab.com/oauth/discovery/keys"})
+	})})
+	e := ghEntry("monitoring", "https://gitlab.com")
+	e.CI = "gitlab"
+	p := guarded(t, backtestConfig(e))
+	p.backtestIssuers(context.Background())
+	if it := itemOf(p, "backtest.issuers"); it.State != Problem || !strings.Contains(it.Why, `its discovery document says "https://gitlab.com/"`) {
 		t.Errorf("%+v", it)
 	}
 }
@@ -659,8 +679,17 @@ func TestEstimateBacktests(t *testing.T) {
 	c.MaxRate, c.Serve.BacktestShare = 0.001, 0.05
 	p = newRun(c)
 	p.estimate(context.Background(), &read{all: rulesOf(t, 12, 0)})
-	if it := itemOf(p, "estimate.backtests"); it.State != Problem || !strings.Contains(it.Why, "one rule's for changed over a day asks 3 requests") {
+	if it := itemOf(p, "estimate.backtests"); it.State != Problem || !strings.Contains(it.Why, "over a day asks 2 requests at least") {
 		t.Errorf("%+v %+v", it, p.r.Estimates.Backtests)
+	}
+	// Two requests fit, which a rule added alone asks over a day: not a
+	// problem, though its for changed (3) doesn't fit.
+	c = backtestConfig()
+	c.MaxRate, c.Serve.BacktestTimeout = 0.16, time.Minute
+	p = newRun(c)
+	p.estimate(context.Background(), &read{all: rulesOf(t, 12, 0)})
+	if it, b := itemOf(p, "estimate.backtests"), p.r.Estimates.Backtests; b.Fit != 2 || it.State != OK {
+		t.Errorf("%+v %+v", it, b)
 	}
 	// The rules not all read: what a backtest of them asks is unknown.
 	c = backtestConfig()

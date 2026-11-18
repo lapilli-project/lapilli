@@ -95,8 +95,8 @@ func TestReadTrustRefused(t *testing.T) {
 
 // trustWords are the words of Lapilli's own a trust file holds too, which
 // a refusal may say: its keys, the claims and events it names, its CIs.
-var trustWords = append(append([]string{"trust", "true", "false", "repository_id", "project_id", "event_name", "pipeline_source", "sub",
-	"repository", "project_path", "pull_request", "push", "merge_request_event", "github", "gitlab", "forgejo", "https", "http", "sigstore"}, trustFields...), checkedClaims...)
+var trustWords = append(append(append([]string{}, knownClaims...), []string{"trust", "true", "false", "repository_id", "project_id", "event_name", "pipeline_source", "sub",
+	"repository", "project_path", "pull_request", "push", "merge_request_event", "github", "gitlab", "forgejo", "https", "http", "sigstore"}...), append(trustFields, checkedClaims...)...)
 
 // leaked is a word of the file's that said says, "" for none: every
 // scalar of the file, keys among them, outside trust: too, and every run
@@ -155,7 +155,7 @@ func TestReadTrustSaid(t *testing.T) {
 		"no space after the colon": {"trust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n    audience: https://lapilli-ci.example.com\n" +
 			"    claims: {repository_id:987650001, event_name: pull_request}\n", "no value", 5, "claims"},
 		"a key and a value the other way": {"trust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n    audience: https://lapilli-ci.example.com\n" +
-			"    claims:\n      \"987650002\": repository_id\n      event_name: pull_request\n", "a claim's name that isn't one", 5, "claims"},
+			"    claims:\n      \"987650002\": repository_id\n      event_name: pull_request\n", "a claim's name that isn't one", 6, "claims"},
 		"an alias from outside trust:": {"ids: &ids [\"987650003\", 0x3ade]\ntrust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n    audience: https://lapilli-ci.example.com\n" +
 			"    claims:\n      repository_id: *ids\n      event_name: pull_request\n", "decimal", 1, ""},
 		"a merge key from outside trust:": {"base: &base\n  repository_id: \"987650004\"\n  event_name: workflow_run\ntrust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n" +
@@ -166,6 +166,10 @@ func TestReadTrustSaid(t *testing.T) {
 			"days is 1 to 14", 2, "days"},
 		"an unknown ci":  {"trust:\n  - {name: a, ci: jenkins-987650007, issuer: 'https://ci.example.com', audience: x, claims: {sub: y}}\n", "github, gitlab or forgejo", 2, "ci"},
 		"an unknown key": {"trust:\n  - name: a\n    token_file: /x\n    weekly_987650008: 3\n", "isn't one of an entry's", 4, ""},
+		"a list of events, at its line": {"trust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n    audience: https://lapilli-ci.example.com\n" +
+			"    claims:\n      repository_id: \"987650014\"\n      event_name: [pull_request, push]\n", "event_name is a list: only repository_id", 7, "claims"},
+		"a list of a claim of the file's naming": {"trust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n    audience: https://lapilli-ci.example.com\n" +
+			"    claims:\n      event_name: push\n      repository_id: \"987650015\"\n      team_987650016: [a, b]\n", "a claim is a list", 8, "claims"},
 		"a merge key in an entry": {"base: &base\n  repository_id: \"987650011\"\n  event_name: workflow_run\ntrust:\n  - name: alerts\n    issuer: https://token.actions.githubusercontent.com\n" +
 			"    audience: https://lapilli-ci.example.com\n    claims: {event_name: push}\n    <<: *base\n", "a key other than trust:", 1, ""},
 		"YAML that doesn't read":  {"trust:\n  - name: a\n   issuer: \"https://ci-987650009.example.com\n", "doesn't read as YAML", 0, ""},

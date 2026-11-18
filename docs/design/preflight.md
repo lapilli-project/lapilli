@@ -250,9 +250,10 @@ reads their `for` doesn't move), and the most days of each that fit, 14 at
 most; where ten don't fit seven days, how many do, and a day. Each rule is
 counted with its own `for` and `keep_firing_for`, which start its reads
 earlier: one that reaches back past midnight UTC asks a day more, so the
-count is the preflight's hour's. One rule's `for` changed over a day not
-fitting is a problem: the port refuses every backtest of a rule that
-differs before it is queued.
+count is the preflight's hour's. The least a backtest of a rule that
+differs asks (one rule added, taken away or its `for` changed, over a
+day) not fitting is a problem: the port refuses every such backtest
+before it is queued.
 
 **Nights.** With `--catch-up-hours`, a catch-up runs only within them: a
 day of it begins only while the hours last, and one the hours end in is
@@ -878,8 +879,9 @@ The backtest lane, with `--backtest-listen` (`internal/preflight`,
   beside it the line, the entry, one of an entry's own keys and what is
   wrong in Lapilli's words (`Said`), with no value of the file's: a claim
   is named only when it is one of Lapilli's (`repository_id`,
-  `event_name`, the claims a token's check holds), YAML's own errors by
-  their line and their kind. preflight prints `Said` alone
+  `event_name`, the claims a token's check holds, those the CIs'
+  documentation names), at its own line, YAML's own errors by their line
+  and their kind. preflight prints `Said` alone
   (`TestReadTrustSaid`, `TestBacktestTrustHidden`).
 - **An issuer's keys are counted as a token would be verified by them**:
   of the keys the set holds as a token's check holds them (`fetchSet`:
@@ -917,8 +919,8 @@ The backtest lane, with `--backtest-listen` (`internal/preflight`,
 - **A problem only when nothing that differs fits.** At a low
   `--max-rate`, ten rules may not fit a day while one does: it says how
   many of the rules changed fit seven days and a day, and is a problem
-  only when one rule's `for` changed over a day, the least a backtest of
-  a rule that differs asks, doesn't fit. With the rules not all read
+  only when the least a backtest of a rule that differs asks, one rule
+  added, taken away or its `for` changed over a day, doesn't fit. With the rules not all read
   (`--offline` with `--ruler` or `--grafana`), what a backtest of them asks
   is unknown.
 - **Issuers four at a time, named by number.** Twelve that don't answer
@@ -927,7 +929,14 @@ The backtest lane, with `--backtest-listen` (`internal/preflight`,
   Server's host, an enterprise's slug on GitHub's, a GitLab of one's
   own) and every `jwks_url` are hidden, with their hosts, wherever the
   report would say them (`hideIssuers`), and named as `[--backtest-trust's
-  issuer N]`; a discovery document that names an algorithm many times
+  issuer N]`; one on a public CI's host (an enterprise's under GitHub's)
+  by its URL without the scheme, its slug hidden and not the public host,
+  which other entries' issuers are on. Of such an issuer, a discovery
+  document that names another issuer (the same in another case, another
+  slug) or keys at another origin (another host of one's own) is said in
+  Lapilli's words alone, as what it names isn't the trust file's and so
+  isn't hidden (`signin.ErrOtherIssuer`, `ErrKeysElsewhere`); a public
+  CI's keeps the detail. A discovery document that names an algorithm many times
   names it once (`signin.NewKeys`, which serve's checks use too), and four
   are listed at most.
 - **`CI.DiscoverKeys` is preflight's alone.** It skips what `keysOf`

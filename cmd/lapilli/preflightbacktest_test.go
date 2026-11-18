@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -300,6 +303,59 @@ func TestPreflightBacktestsRulesUnread(t *testing.T) {
 		if items["rules.read"]["state"] != "unknown" || items["estimate.backtests"]["state"] != "unknown" ||
 			!strings.Contains(items["estimate.backtests"]["why"].(string), "couldn't all be read") {
 			t.Errorf("%s: %v %v", src[0], items["rules.read"], items["estimate.backtests"])
+		}
+	}
+}
+
+// An enterprise's issuer under GitHub's (GitHub Enterprise Cloud's,
+// .../SLUG) is hidden by its slug, not by GitHub's host, which the public
+// issuer beside it is on: that one is said as it is, with the scrubber
+// the command has.
+func TestPreflightBacktestsEnterpriseIssuer(t *testing.T) {
+	was := now
+	now = time.Now
+	t.Cleanup(func() { now = was })
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := fmt.Sprintf(`{"keys":[{"kty":"RSA","kid":"k1","use":"sig","n":%q,"e":"AQAB"}]}`, base64.RawURLEncoding.EncodeToString(key.N.Bytes()))
+	github := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		base := "https://token.actions.githubusercontent.com" + strings.TrimSuffix(r.URL.Path, "/.well-known/openid-configuration")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/.well-known/openid-configuration"):
+			fmt.Fprintf(w, `{"issuer":%q,"jwks_uri":%q,"id_token_signing_alg_values_supported":["RS256"]}`, strings.TrimSuffix(base, "/"), strings.TrimSuffix(base, "/")+"/.well-known/jwks")
+		case strings.HasSuffix(r.URL.Path, "/.well-known/jwks"):
+			fmt.Fprint(w, keys)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	before := http.DefaultTransport
+	http.DefaultTransport = &routed{next: before, hosts: map[string]http.Handler{"token.actions.githubusercontent.com": github}}
+	t.Cleanup(func() { http.DefaultTransport = before })
+	rules := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - alert: Down\n        expr: up == 0\n")
+	trust := write(t, "trust.yaml", `trust:
+  - name: alerts
+    issuer: https://token.actions.githubusercontent.com
+    audience: https://lapilli-ci.example.com
+    claims: {repository_id: "123456789", event_name: pull_request}
+  - name: enterprise
+    issuer: https://token.actions.githubusercontent.com/example-enterprise-slug
+    audience: https://lapilli-ci.example.com
+    claims: {repository_id: "987654321", event_name: pull_request}
+`)
+	rep, _, out := pfReport(t, "--rules", rules, "--prometheus", "http://127.0.0.1:1", "--ledger", t.TempDir(), "--check-content=false", "--check-replay=false",
+		"--backtest-listen", ":8084", "--backtest-trust", trust)
+	iss := pfItems(rep)["backtest.issuers"]
+	what, _ := iss["what"].(string)
+	if iss["state"] != "ok" || !strings.Contains(what, "https://token.actions.githubusercontent.com (alerts), 1 key for RS256") ||
+		!strings.Contains(what, "[--backtest-trust's issuer 2] (enterprise), 1 key for RS256") {
+		t.Errorf("%v", iss)
+	}
+	for _, hidden := range []string{"example-enterprise-slug", "https://[--backtest-trust"} {
+		if strings.Contains(out, hidden) {
+			t.Errorf("the report says %q:\n%s", hidden, out)
 		}
 	}
 }

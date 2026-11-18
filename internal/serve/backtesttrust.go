@@ -134,7 +134,10 @@ func (e *TrustRefused) Said() string {
 // Lapilli's words, and serve's message.
 type entryRefusal struct {
 	field, why string
-	err        error
+	// claim is the file's name of the claim refused, to find its line by,
+	// never said: a name of the file's own may hold a value.
+	claim string
+	err   error
 }
 
 func (e *entryRefusal) Error() string { return e.err.Error() }
@@ -144,6 +147,27 @@ func (e *entryRefusal) Unwrap() error { return e.err }
 // err in serve's.
 func refuse(field, why string, err error) error {
 	return &entryRefusal{field: field, why: why, err: err}
+}
+
+// refuseClaim is an entry refused for one of its claims, named: said by
+// its name where that is one of Lapilli's (claimSaid), its line looked up
+// by the file's.
+func refuseClaim(name, why string, err error) error {
+	return &entryRefusal{field: "claims", why: why, claim: name, err: err}
+}
+
+// knownClaims are the claims Lapilli's documentation names, which a
+// refusal says by name: of the CIs it knows, and the checks a token has.
+var knownClaims = []string{"repository_id", "repository_owner_id", "repository", "event_name", "runner_environment", "ref", "workflow_ref",
+	"job_workflow_ref", "project_id", "project_path", "pipeline_source", "namespace_id", "job_project_id", "sub", "repositoryUuid", "workspaceUuid"}
+
+// claimSaid is how a refusal names a claim: by its name when Lapilli's
+// documentation names it, otherwise "a claim".
+func claimSaid(name string) string {
+	if slices.Contains(knownClaims, name) {
+		return name
+	}
+	return "a claim"
 }
 
 // refuseAs is an entry refused for field with a message that holds nothing
@@ -273,10 +297,11 @@ func ReadTrust(path string, others []string, secretsLater bool) ([]Trust, error)
 			}
 			r := &TrustRefused{Entry: i + 1, Why: "an entry that can't be used", msg: fmt.Sprintf("--backtest-trust %s: %s: %v", path, name, err), err: err}
 			var er *entryRefusal
+			claim := ""
 			if errors.As(err, &er) {
-				r.Field, r.Why = er.field, er.why
+				r.Field, r.Why, claim = er.field, er.why, er.claim
 			}
-			r.Line = entryLine(b, i, r.Field)
+			r.Line = entryLine(b, i, r.Field, claim)
 			return nil, r
 		}
 	}
@@ -369,17 +394,26 @@ func deref(n *yaml.Node) *yaml.Node {
 	return n
 }
 
-// entryLine is the line of entry i's field, or of the entry; 0 for none.
-func entryLine(b []byte, i int, field string) int {
+// entryLine is the line of entry i's field, of the claim under it when
+// one is named, or of the entry; 0 for none.
+func entryLine(b []byte, i int, field, claim string) int {
 	es := trustEntries(b)
 	if i >= len(es) {
 		return 0
 	}
 	e := es[i]
 	for j := 0; field != "" && j+1 < len(e.Content); j += 2 {
-		if e.Content[j].Value == field {
-			return e.Content[j].Line
+		if e.Content[j].Value != field {
+			continue
 		}
+		if v := deref(e.Content[j+1]); claim != "" && v.Kind == yaml.MappingNode {
+			for k := 0; k+1 < len(v.Content); k += 2 {
+				if v.Content[k].Value == claim {
+					return v.Content[k].Line
+				}
+			}
+		}
+		return e.Content[j].Line
 	}
 	return e.Line
 }
@@ -495,19 +529,20 @@ func (t *Trust) check(seen map[string]bool, tokens map[string]string, secretsLat
 		p := t.Claims[name]
 		switch {
 		case !claimName.MatchString(name):
-			return refuse("claims", "a claim's name that isn't one: a letter or _, then letters, digits and _ . : -, 128 at most",
+			return refuseClaim(name, "a claim's name that isn't one: a letter or _, then letters, digits and _ . : -, 128 at most",
 				fmt.Errorf("claims: %q isn't a claim's name", name))
 		case slices.Contains(checkedClaims, name):
 			// One of a few names of Lapilli's own: said as it is.
-			return refuseAs("claims", fmt.Sprintf("claims: %s is checked as the token is, and isn't pinned", name))
+			return refuseClaim(name, fmt.Sprintf("claims: %s is checked as the token is, and isn't pinned", name),
+				fmt.Errorf("claims: %s is checked as the token is, and isn't pinned", name))
 		case len(p.Values) == 0:
-			return refuse("claims", "a claim pinned to no value", fmt.Errorf("claims: %s: give a value", name))
+			return refuseClaim(name, claimSaid(name)+" pinned to no value", fmt.Errorf("claims: %s: give a value", name))
 		case len(p.Values) > 100:
-			return refuse("claims", "a claim pinned to more than 100 values", fmt.Errorf("claims: %s: 100 values at most", name))
+			return refuseClaim(name, claimSaid(name)+" pinned to more than 100 values", fmt.Errorf("claims: %s: 100 values at most", name))
 		}
 		for _, v := range p.Values {
 			if v == "" || len(v) > 256 || strings.ContainsFunc(v, unicode.IsControl) {
-				return refuse("claims", "a claim's value isn't 1 to 256 bytes, with nothing that doesn't show",
+				return refuseClaim(name, claimSaid(name)+": a value isn't 1 to 256 bytes, with nothing that doesn't show",
 					fmt.Errorf("claims: %s: a value of 1 to 256 bytes, with nothing that doesn't show", name))
 			}
 		}
@@ -515,7 +550,7 @@ func (t *Trust) check(seen map[string]bool, tokens map[string]string, secretsLat
 	for _, name := range slices.Sorted(maps.Keys(eventClaims)) {
 		events := eventClaims[name]
 		if p, ok := t.Claims[name]; ok && !slices.Contains(events, p.Values[0]) {
-			return refuse("claims", fmt.Sprintf("claims: %s: want %s; another can run a fork's pull request in the repository's own context, or runs with no one asking", name, strings.Join(events, " or ")),
+			return refuseClaim(name, fmt.Sprintf("claims: %s: want %s; another can run a fork's pull request in the repository's own context, or runs with no one asking", name, strings.Join(events, " or ")),
 				fmt.Errorf("claims: %s %q: want %s; another can run a fork's pull request in the repository's own context, or runs with no one asking", name, p.Values[0], strings.Join(events, " or ")))
 		}
 	}
@@ -524,7 +559,7 @@ func (t *Trust) check(seen map[string]bool, tokens map[string]string, secretsLat
 		// Another issuer: pinned by sub and by the event, each one value.
 		for _, name := range slices.Sorted(maps.Keys(t.Claims)) {
 			if t.Claims[name].List {
-				return refuse("claims", "a claim is a list: only the claim that names the repository by its id may be one, of a CI given as ci:",
+				return refuseClaim(name, claimSaid(name)+" is a list: only the claim that names the repository by its id may be one, of a CI given as ci:",
 					fmt.Errorf("claims: %s is a list: only the claim that names the repository by its id may be one, of a CI given as ci:", name))
 			}
 		}
@@ -540,7 +575,7 @@ func (t *Trust) check(seen map[string]bool, tokens map[string]string, secretsLat
 	}
 	for _, name := range slices.Sorted(maps.Keys(t.Claims)) {
 		if t.Claims[name].List && name != known.repoID {
-			return refuse("claims", fmt.Sprintf("a claim other than %s is a list: only %s may be one, each repository by its id", known.repoID, known.repoID),
+			return refuseClaim(name, fmt.Sprintf("%s is a list: only %s may be one, each repository by its id", claimSaid(name), known.repoID),
 				fmt.Errorf("claims: %s is a list: only %s may be one, each repository by its id", name, known.repoID))
 		}
 	}
@@ -552,7 +587,7 @@ func (t *Trust) check(seen map[string]bool, tokens map[string]string, secretsLat
 		return refuseAs("claims", fmt.Sprintf("claims: pin %s to %s: the event the job runs for", known.event, strings.Join(known.events, " or ")))
 	}
 	if !slices.Contains(known.events, ev.Values[0]) {
-		return refuse("claims", fmt.Sprintf("claims: %s: want %s; another can run a fork's pull request in the repository's own context", known.event, strings.Join(known.events, " or ")),
+		return refuseClaim(known.event, fmt.Sprintf("claims: %s: want %s; another can run a fork's pull request in the repository's own context", known.event, strings.Join(known.events, " or ")),
 			fmt.Errorf("claims: %s %q: want %s; another can run a fork's pull request in the repository's own context", known.event, ev.Values[0], strings.Join(known.events, " or ")))
 	}
 	return nil
