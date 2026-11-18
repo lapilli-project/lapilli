@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"testing"
+
+	"lapilli.dev/internal/ledger/ledgertest"
 )
 
 // updateBacktestOff writes testdata/backtestoff afresh. It was run once,
@@ -49,6 +51,9 @@ func backtestOffNormal(s string) string {
 // one with something on every page (pagesServer); in English and in
 // another language; as anyone and as an admin.
 func TestBacktestOffGolden(t *testing.T) {
+	// The goldens are main's on SQLite: a Postgres ledger's /metrics has
+	// the replicas' series beside them, which main has as well.
+	ledgertest.SQLiteOnly(t, "the goldens were captured from main's code on a SQLite ledger")
 	ctx := context.Background()
 	plain, _ := server(t, func(c *Config) { c.UserHeader, c.Admins = "X-Forwarded-Email", []string{"ana@example.com"} })
 	raw := ""
