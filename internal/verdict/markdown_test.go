@@ -145,6 +145,7 @@ func TestCompareMarkdownHostile(t *testing.T) {
 		"**bold** _em_ ~~gone~~", "line\nbreak", "car\rriage", "tab\there", "right\u202eto left", "zero\u200bwidth",
 		"line\u2028sep", "no\u00a0break", "filler\u3164x", ":smile: :+1:", "[//]: # (lapilli-backtest default)",
 		"$`x`$", "&lt;b&gt;", "&#64;octocat", "\\@octocat", "디스크 부족 @팀", strings.Repeat("long", 200),
+		`x\|@all [x](https://evil.example) <b>bold</b>`, `x\\|@all <b>two</b>`, `x\\\|@all <b>three</b>`, `\|`, `\\|`, `|\`,
 	}
 	var rs []rules.Rule
 	var fs []firing.Firing
@@ -217,7 +218,26 @@ func checkMarkdown(t *testing.T, out string, hostile []string) {
 			continue
 		}
 		if strings.HasPrefix(line, "|") {
-			n := strings.Count(line, "|") - strings.Count(line, `\|`)
+			// A | with no backslash before it ends a cell, and one with one
+			// is in it; one with more is read either way by one host or
+			// another (comrak 1.0 takes \\| for the cell's end).
+			n := 0
+			for j := range len(line) {
+				if line[j] != '|' {
+					continue
+				}
+				k := 0
+				for k < j && line[j-1-k] == '\\' {
+					k++
+				}
+				switch k {
+				case 0:
+					n++
+				case 1:
+				default:
+					t.Errorf("a | with %d backslashes before it, which hosts read differently: %q", k, line)
+				}
+			}
 			if cells == 0 {
 				cells = n
 			} else if n != cells {
