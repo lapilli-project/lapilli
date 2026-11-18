@@ -1,0 +1,74 @@
+name: wiki
+
+# The GitHub wiki is a copy of docs/, written again by .github/wiki.sh on
+# every change to main, so the pages are read on GitHub too and still
+# changed in one place. A pull request that changes them writes the pages
+# and pushes nothing; only main's own code runs in the job that may push to
+# the wiki, and only its last step, which runs no code of the repository's,
+# has the token.
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/*.md", ".github/wiki.sh", ".github/workflows/wiki.yml"]
+  pull_request:
+    paths: ["docs/*.md", ".github/wiki.sh", ".github/workflows/wiki.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('wiki-{0}', github.ref) || 'wiki' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  write:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Write the pages
+        run: |
+          set -eu
+          mkdir "$RUNNER_TEMP/wiki"
+          sh .github/wiki.sh "$RUNNER_TEMP/wiki"
+          ls "$RUNNER_TEMP/wiki"
+
+  push:
+    # On main alone: a run dispatched from another branch writes nothing.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the wiki is the repository's, and so is its token
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      # The wiki is public: it is cloned, and written, without the token,
+      # which only the last step has.
+      - name: Write the pages into a clone of the wiki
+        run: |
+          set -eu
+          git clone -q --depth 1 "https://github.com/$GITHUB_REPOSITORY.wiki.git" "$RUNNER_TEMP/wiki"
+          sh .github/wiki.sh "$RUNNER_TEMP/wiki"
+      - name: Push them, if they changed
+        env:
+          TOKEN: ${{ github.token }}
+        working-directory: ${{ runner.temp }}/wiki
+        run: |
+          set -eu
+          git add -A
+          if git diff --cached --quiet; then
+            echo "The wiki already has docs/ as it is."
+            exit 0
+          fi
+          git diff --cached --stat
+          # No hook runs beside the token, whatever the clone holds.
+          git -c core.hooksPath=/dev/null -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -q -m "Copy docs/ from $GITHUB_SHA"
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git -c core.hooksPath=/dev/null -c http.extraheader="$auth" push -q origin HEAD
