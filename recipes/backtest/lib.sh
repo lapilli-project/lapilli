@@ -1621,10 +1621,11 @@ serve_report() {
 # a note with the job's token); nor, even in a code span, a character that
 # doesn't show or moves the text around it. In a table, which every host
 # splits into cells at each | before it reads a code span, a code span's |
-# is \| (a line that starts with |, a delimiter row and the line above it,
-# and each line after one until a blank line). A line is let through, or
-# left out, whole: what each host makes of a line changed in part isn't
-# known here. jq alone reads it.
+# is \|, and no | has two backslashes or more before it, which hosts read
+# differently (a line that starts with |, a delimiter row and the line
+# above it, and each line after one until a blank line). A line is let
+# through, or left out, whole: what each host makes of a line changed in
+# part isn't known here. jq alone reads it.
 report_of_serve() {
   # shellcheck disable=SC2016
   jq -c '
@@ -1657,8 +1658,13 @@ report_of_serve() {
     # space (every other of Zs), Hangul fillers, as lapilli shows them.
     def shows:
       test("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\u115f\u1160\u3164\uffa0\u2800]") | not;
+    # In a table, a | with no backslash before it ends a cell, one with
+    # one is in it; one with two or more is read either way by one host
+    # or another (comrak 1.0 takes \\| for the end of the cell), and
+    # lapilli writes none: a backslash right before a | is \u{5c}.
     def ours($table):
       shows and (test("^ */") | not)
+      and (($table | not) or (test("\\\\\\\\[|]") | not))
       and ((if test("^#{1,6} ") then sub("^#{1,6} "; "") else . end | spans) as $s
         | $s != null and ($s.plain | plain) and (($table | not) or ($s.code | test("(?<!\\\\)[|]") | not)));
     def kind($table):

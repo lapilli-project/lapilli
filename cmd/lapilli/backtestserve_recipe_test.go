@@ -1176,6 +1176,11 @@ func TestBacktestServeRecipeReportLeftOut(t *testing.T) {
 		left("`abc"), kept("def` @all `"), left("`a` `b"), left("a `x‮y` b"), left("tab\there"), left("cr\r/merge"),
 		left("no break"), left("80% <b>"), kept("80% → 75%"), kept(""),
 		kept("| Rule | Fired |"), kept("| --- | --: |"), kept("| `@all \\| x` | 1 → 0 |"), left("| `a | @all | b` | 1 |"),
+		// One backslash before a | in a table, never two or more, which
+		// hosts read differently (comrak 1.0: a backslash and the cell's
+		// end); a backslash right before one is \u{5c}, as md writes it.
+		kept("| `a\\u{5c}\\| b` | 1 |"), left("| `@all \\\\| x` | 1 → 0 |"), left("| `x` \\\\| `@all` | 1 |"),
+		left("| `@all \\\\\\| x` | 1 |"), left("| `a` | 1 |\r"), left("| `a\r@all` | 1 |"),
 		left("`a | @all | b` and so on"), kept(""),
 		left("x `a|@all` y"), kept("--- | ---"), kept(""),
 		kept("- `Typo`, before: `query failed: a|b`"), kept(""),

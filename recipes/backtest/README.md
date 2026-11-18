@@ -763,7 +763,9 @@ reasons forks are kept out.
   `false`, or there is no report; and each line after it only when it is
   one lapilli writes: what came from the rules in code spans, each closed
   on its own line (in a table, with no `|` in it but `\|`, as a host
-  splits a row's cells first), outside them only lapilli's own words and
+  splits a row's cells first, and no `|` with two backslashes or more
+  before it, which hosts read differently: lapilli writes a backslash
+  right before a `|` as `\u{5c}`), outside them only lapilli's own words and
   punctuation, and `<details>` as lapilli writes it, opened then closed.
   Any other line (a quick action, which GitLab runs from a note with the
   job's token; a mention, a reference, HTML, a link, an image; a fence; a
