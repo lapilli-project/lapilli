@@ -2240,5 +2240,8 @@
  "Pick rules to act on several at once.": "규칙을 골라 한 번에 처리할 수 있어요.",
  "At most %d rules at a time, %d for proposals, and only those you may change; each proposal is backtested and waits for a person to approve it.": "한 번에 규칙 %d개까지, 변경 제안은 %d개까지이고, 바꿀 권한이 있는 규칙만 바뀌어요. 제안마다 백테스트를 하고 사람의 승인을 기다려요.",
  "caught nothing or not judged: %d asleep, %d off hours": "인시던트를 잡지 못했거나 판정 안 된 발화 중 자는 시간 %d, 업무 외 %d",
- "in the last four weeks or the two before them: write incidents down, or mark the firings that were real.": "지난 4주와 그 전 2주. 인시던트를 기록하거나, 실제 문제였던 발화를 표시하세요."
+ "in the last four weeks or the two before them: write incidents down, or mark the firings that were real.": "지난 4주와 그 전 2주. 인시던트를 기록하거나, 실제 문제였던 발화를 표시하세요.",
+ "No firing started in the span.": "이 기간에 시작된 발화가 없어요.",
+ "Firings that started in the span: %d; the JSON lists the first %d.": "이 기간에 시작된 발화는 %d건이고, JSON에는 앞의 %d건만 있어요.",
+ "Firings that started in the span: %d, each listed in the JSON.": "이 기간에 시작된 발화는 %d건이고, JSON에 하나씩 모두 있어요."
 }

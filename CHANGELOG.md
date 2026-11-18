@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Added
+
+- **A report's `firings` section: the span's firings one by one**, for a
+  receiver that makes something of its own of each, a review item for each
+  alert that keeps coming back, say. It is picked as the others are: on the
+  Reports page, in `/api/v1/reports` and in `serve.config`'s `reports:`.
+  `report.ready`'s `numbers.firings` is `items`, each firing that started in
+  the span as `/api/v1/report`'s `firings[]` has it, with its rule's
+  `severity` and `team` as the CSV's columns have them, in order of their
+  start, then of their rule; `total`; and `truncated`, true past the 5,000
+  it lists, which are all it reads whole: the rest are counted. A team's
+  report lists its rules' firings alone, judged by the incidents it owns.
+  Its line in the text says how many, and that they were cut; the names and
+  labels in `items` are as written, as every field that names a thing is.
+  No schema change: a report's sections are kept as a list already.
+
 ### Changed
 
 - **The rules list and the Korean, as 0.60.0 read on a real deployment** (docs/design/ui.md,

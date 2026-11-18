@@ -239,7 +239,8 @@ the month before it; a cron expression, the time since the one before, or a
 span given with it (`24h`, `7d`). A report is for everyone or one team, and
 holds the sections picked: `summary` (beside the span before), `noise` (and
 what turned noisy), `missed`, `woken`, `notifications`, `replay`, `sources`,
-`tasks`, `content` and, for a week or longer, `suggestions`. It goes to
+`tasks`, `content`, for a week or longer, `suggestions`, and `firings`
+(below). It goes to
 destinations by name, never a URL typed in a page: `--report-dest NAME=FILE`
 (repeatable, a Slack-style incoming webhook; in the chart,
 `serve.reports.destinations`), `slack`, `team:NAME`, and `webhook`, which gets
@@ -254,6 +255,18 @@ skips falls due when the clocks jump; a repeated time, the first time.
 Admins make and change reports; everyone sees them and a preview of each.
 A team's editors, and editors, make a team's, sent to the team's own
 destination (`team:NAME`).
+
+`firings` lists the span's firings one by one, for a receiver that makes
+something of its own of each: a review item for each alert that keeps
+coming back, say. In `report.ready`, `numbers.firings` is `items`, the
+firings that started in the span, each as `/api/v1/report`'s `firings[]`
+has it ([fields](numbers.md#the-reports-fields)) with its rule's `severity`
+and `team` as the CSV's columns have them, in order of their start, then of
+their rule; `total`, how many there were; and `truncated`, true when there
+were more than the 5,000 it lists, the first of them. A team's report lists
+its own rules' firings alone, judged by the incidents it owns. Its line in
+the text says only how many; the rules' names and the labels in `items` are
+as written, so escape them as `digest.ready`'s.
 
 The weekly digest is shown first among them. The flags define it until an
 admin changes it on the Reports page or with `PUT /api/v1/reports/digest`

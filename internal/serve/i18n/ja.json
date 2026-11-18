@@ -2240,5 +2240,8 @@
  "Pick rules to act on several at once.": "ルールを選んでまとめて操作できます。",
  "At most %d rules at a time, %d for proposals, and only those you may change; each proposal is backtested and waits for a person to approve it.": "一度に最大 %d 件のルール、変更提案は %d 件までで、変更できるルールだけが変わります。提案ごとにバックテストを行い、人の承認を待ちます。",
  "caught nothing or not judged: %d asleep, %d off hours": "検知なしまたは判定なしのうち睡眠時間 %d、業務時間外 %d",
- "in the last four weeks or the two before them: write incidents down, or mark the firings that were real.": "直近 4 週とその前の 2 週。インシデントを記録するか、実際に問題だった発火を示してください。"
+ "in the last four weeks or the two before them: write incidents down, or mark the firings that were real.": "直近 4 週とその前の 2 週。インシデントを記録するか、実際に問題だった発火を示してください。",
+ "No firing started in the span.": "この期間に始まった発火はありません。",
+ "Firings that started in the span: %d; the JSON lists the first %d.": "この期間に始まった発火は %d 件で、JSON には最初の %d 件を載せています。",
+ "Firings that started in the span: %d, each listed in the JSON.": "この期間に始まった発火は %d 件で、JSON にすべてを 1 件ずつ載せています。"
 }

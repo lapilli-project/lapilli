@@ -583,14 +583,9 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 		rep.Firings = nil
 		return rep, nil
 	}
-	// Which incidents each firing caught: those near the period.
-	cs, err := l.counting(ctx, l.r, from.Unix(), to.Unix(), o)
+	jd, err := l.judger(ctx, from, to, o, rec)
 	if err != nil {
 		return nil, err
-	}
-	near := make([]incident.Incident, len(cs))
-	for i, c := range cs {
-		near[i] = c.Incident
 	}
 	fs, err := l.Firings(ctx, FiringQuery{From: from, To: to})
 	if err != nil {
@@ -607,21 +602,161 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 		if f.Excused {
 			continue // counted in the rule's Excused, not judged
 		}
-		judged := l.FiringJudged(rec, o, f.Rule, f.Start, f.Signals)
-		var signals []string
-		if named {
-			signals = o.Signals.Names(o.Signals.TiedOf(f.Rule, f.Signals))
-		}
-		j := verdict.Judged{Firing: f.Firing, White: f.White, NoRecord: !f.White && !judged,
-			Refired: f.Refired, DuringDeploy: f.Deploy, Marked: f.Kinds, Signals: signals}
-		for _, in := range near {
-			if verdict.Catches(f.Firing, in, o) {
-				j.Incidents = append(j.Incidents, in.ID)
-			}
-		}
-		rep.Firings = append(rep.Firings, j)
+		rep.Firings = append(rep.Firings, jd.judge(f))
 	}
 	return rep, nil
+}
+
+// judger gives a report's firings their stones one at a time, as a report
+// has them: each judged or not by the record, and the incidents near the
+// span it caught.
+type judger struct {
+	l     *Ledger
+	rec   verdict.Record
+	o     verdict.Options
+	named bool
+	near  []incident.Incident
+}
+
+func (l *Ledger) judger(ctx context.Context, from, to time.Time, o verdict.Options, rec verdict.Record) (*judger, error) {
+	// Which incidents each firing caught: those near the period.
+	cs, err := l.counting(ctx, l.r, from.Unix(), to.Unix(), o)
+	if err != nil {
+		return nil, err
+	}
+	jd := &judger{l: l, rec: rec, o: o, named: o.Signals.Named(), near: make([]incident.Incident, len(cs))}
+	for i, c := range cs {
+		jd.near[i] = c.Incident
+	}
+	return jd, nil
+}
+
+func (jd *judger) judge(f Firing) verdict.Judged {
+	judged := jd.l.FiringJudged(jd.rec, jd.o, f.Rule, f.Start, f.Signals)
+	var signals []string
+	if jd.named {
+		signals = jd.o.Signals.Names(jd.o.Signals.TiedOf(f.Rule, f.Signals))
+	}
+	j := verdict.Judged{Firing: f.Firing, White: f.White, NoRecord: !f.White && !judged,
+		Refired: f.Refired, DuringDeploy: f.Deploy, Marked: f.Kinds, Signals: signals}
+	for _, in := range jd.near {
+		if verdict.Catches(f.Firing, in, jd.o) {
+			j.Incidents = append(j.Incidents, in.ID)
+		}
+	}
+	return j
+}
+
+// ReportFirings are the firings ReportFor gives with firings, judged alike
+// and in the same order (of their start, then of their rule), of the rules
+// in says, every rule's when nil: the first most of them, and how many
+// there are. Only those most are read whole, so a span of millions costs
+// their count beside them, not their labels.
+func (l *Ledger) ReportFirings(ctx context.Context, from, to time.Time, o verdict.Options, keeps func(Incident) bool,
+	in func(string) bool, most int) ([]verdict.Judged, int, error) {
+	o.From, o.To = from, to
+	if in == nil {
+		in = func(string) bool { return true }
+	}
+	most = max(most, 0)
+	table, err := l.RuleTable(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	rec, err := l.record(ctx, from, to, o, keeps)
+	if err != nil {
+		return nil, 0, err
+	}
+	jd, err := l.judger(ctx, from, to, o, rec)
+	if err != nil {
+		return nil, 0, err
+	}
+	kinds, err := l.kinds(ctx, l.r)
+	if err != nil {
+		return nil, 0, err
+	}
+	// In order of their start, then of their id, as Firings gives them
+	// reversed; each start's put in order of their rule once all are read,
+	// as ReportFor's are, before any is cut.
+	rows, err := l.r.QueryContext(ctx, `SELECT f.rule_id, s.id, s.labels, f.start_at, f.end_at, f.white, f.refired, f.deploy, f.marked, s.signals
+		FROM firings f JOIN series s ON s.id = f.series_id WHERE f.start_at >= ? AND f.start_at < ? AND f.excused = 0
+		ORDER BY f.start_at, f.id`, from.Unix(), to.Unix())
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	type row struct {
+		f                Firing
+		sid, bits, start int64
+		labels           string
+		end              sql.NullInt64
+	}
+	out := []verdict.Judged{}
+	var start []row
+	more := false
+	flush := func() error {
+		slices.SortStableFunc(start, func(a, b row) int { return strings.Compare(a.f.Rule, b.f.Rule) })
+		for _, r := range start {
+			if len(out) == most {
+				more = true
+				break
+			}
+			var err error
+			if r.f.Labels, err = l.labels(r.sid, r.labels); err != nil {
+				return err
+			}
+			r.f.Start, r.f.End, r.f.Kinds = unix(r.start), fromNull(r.end), KindsOf(r.bits, kinds)
+			out = append(out, jd.judge(r.f))
+		}
+		start = start[:0]
+		return nil
+	}
+	for rows.Next() {
+		var r row
+		var rule int64
+		if err := rows.Scan(&rule, &r.sid, &r.labels, &r.start, &r.end, &r.f.White, &r.f.Refired, &r.f.Deploy, &r.bits, &r.f.Signals); err != nil {
+			return nil, 0, err
+		}
+		if r.f.Rule = table[rule].Name; !in(r.f.Rule) {
+			continue
+		}
+		if len(start) > 0 && r.start != start[0].start {
+			if err := flush(); err != nil {
+				return nil, 0, err
+			}
+			if more || len(out) == most {
+				more = true // this one, at least, is past them
+				break
+			}
+		}
+		start = append(start, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if !more {
+		if err := flush(); err != nil {
+			return nil, 0, err
+		}
+	}
+	rows.Close()
+	if !more {
+		return out, len(out), nil
+	}
+	n := 0
+	err = l.eachRow(ctx, func(sc scanner) error {
+		var rule int64
+		var c int
+		if err := sc.Scan(&rule, &c); err != nil {
+			return err
+		}
+		if in(table[rule].Name) {
+			n += c
+		}
+		return nil
+	}, "SELECT rule_id, count(*) FROM firings WHERE start_at >= ? AND start_at < ? AND excused = 0 GROUP BY rule_id", from.Unix(), to.Unix())
+	// Counted after: one written since is counted, one taken away isn't.
+	return out, max(n, len(out)+1), err
 }
 
 // reportPart is a query of a report's counts over [a, b).

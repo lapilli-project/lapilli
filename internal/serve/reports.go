@@ -373,6 +373,8 @@ func (s *Server) buildReport(ctx context.Context, r ledger.Scheduled, team *ledg
 			}
 		case "suggestions":
 			line, nums, err = s.suggestionsSection(ctx, from, to, in, team)
+		case "firings":
+			line, nums, err = s.firingsSection(ctx, rep, from, to, o, in, team)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", sec, err)
@@ -776,6 +778,60 @@ func (s *Server) suggestionsSection(ctx context.Context, from, to time.Time, in 
 		return tr(l, "No suggestions."), nums, nil
 	}
 	return strings.Join(lines, " "), nums, nil
+}
+
+// reportFiringsMost is how many firings the firings section lists, at
+// most, so that report.ready is held to them whatever its span, a firing's
+// labels 4 KB at most as the ledger keeps them: its total says how many
+// there were. A var, for the tests.
+var reportFiringsMost = 5000
+
+// listedFiring is a firing as the firings section lists it: as
+// /api/v1/report's firings[] has it, and its rule's severity and team, as
+// the CSV's columns have them.
+type listedFiring struct {
+	verdict.Judged
+	Severity string `json:"severity,omitempty"`
+	Team     string `json:"team,omitempty"`
+}
+
+// firingsList is the firings section's numbers.
+type firingsList struct {
+	Items     []listedFiring `json:"items"`
+	Total     int            `json:"total"`
+	Truncated bool           `json:"truncated"`
+}
+
+// firingsSection: the firings that started in the span, one by one, for a
+// receiver that makes something of its own of them; a team's, its rules'
+// alone, judged by the incidents it owns, as its other numbers are. The
+// text says only how many: the JSON lists them.
+func (s *Server) firingsSection(ctx context.Context, rep *verdict.Report, from, to time.Time, o verdict.Options, in func(string) bool,
+	team *ledger.Team) (string, any, error) {
+	own, err := s.owners(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	fs, total, err := s.l.ReportFirings(ctx, from, to, o, teamKeeps(own, team), in, reportFiringsMost)
+	if err != nil {
+		return "", nil, err
+	}
+	severity := map[string]string{}
+	for _, r := range rep.Rules {
+		severity[r.Rule] = r.Severity
+	}
+	list := firingsList{Items: make([]listedFiring, 0, len(fs)), Total: total, Truncated: total > len(fs)}
+	for _, f := range fs {
+		list.Items = append(list.Items, listedFiring{Judged: f, Severity: severity[f.Rule], Team: own.teamOf(f.Rule)})
+	}
+	l := s.cfg.Lang
+	switch {
+	case total == 0:
+		return tr(l, "No firing started in the span."), list, nil
+	case list.Truncated:
+		return tr(l, "Firings that started in the span: %d; the JSON lists the first %d.", total, len(fs)), list, nil
+	}
+	return tr(l, "Firings that started in the span: %d, each listed in the JSON.", total), list, nil
 }
 
 // preview is a report as it would be sent now, for the last span it fell
