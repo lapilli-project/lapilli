@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -414,8 +415,8 @@ func TestBacktestRequestsRefused(t *testing.T) {
 		"interval 2h":        {btBody(ruleFile, strings.Replace(changedRules, "- name: shop\n", "- name: shop\n    interval: 2h\n", 1), nil), 400, "interval"},
 		"no metric":          {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `'{job="api"} > 1'`, 1), nil), 400, `{job="api"}`},
 		"__name__ =~":        {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `'{__name__=~"secret_.+"} > 41'`, 1), nil), 400, "names no metric"},
-		"a subquery of 1s":   {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `max_over_time(errors[30d:1s]) > 1`, 1), nil), 400, "a range past"},
-		"offset 5y":          {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `errors offset 5y > 1`, 1), nil), 400, "offset 5y"},
+		"a subquery of 1s":   {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `max_over_time(errors[30d:1s]) > 1`, 1), nil), 400, "points"},
+		"offset 5y":          {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `errors offset 5y > 1`, 1), nil), 400, "1825d"},
 		"@ 0":                {btBody(ruleFile, strings.Replace(changedRules, "errors > 1", `errors @ 0 > 1`, 1), nil), 400, "no @"},
 		"expect_before only": {btBody(ruleFile, changedRules, map[string]any{"expect_before": "expectations: []"}), 400, "expect_before goes with expect"},
 		"expect broken":      {btBody(ruleFile, changedRules, map[string]any{"expect": "expectations: [{rule: Errors, nope: 1}]"}), 400, "expect"},
@@ -445,7 +446,7 @@ func TestBacktestPlanRefused(t *testing.T) {
 	b.s.btPort.rate = 0.05 // 3 requests a minute
 	code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.github(nil), btBody(ruleFile, changedRules, map[string]any{"days": 7}))
 	why, _ := m["error"].(string)
-	if code != 400 || !strings.Contains(why, "requests of the history") || !strings.Contains(why, "--backtest-timeout 1m") {
+	if code != 400 || !strings.Contains(why, "requests of the history") || !strings.Contains(why, "--backtest-timeout 1m") || strings.Contains(why, "0.05") || strings.Contains(why, "a second") {
 		t.Errorf("%d %q", code, why)
 	}
 	b.s.btPort.rate = 0.25 // 15 a minute: a day or two fits
@@ -516,17 +517,46 @@ func TestBacktestQueueBounds(t *testing.T) {
 	if w.Code != 429 || read.n != 0 {
 		t.Errorf("past the hour: %d, %d bytes read", w.Code, read.n)
 	}
-	// What is refused before it is queued gives its hour back.
+	// A request refused as it was sent, a 400, keeps its hour taken: past
+	// one an hour, the next is 429, its body unread.
 	b3 := btServer(t, nil, "", nil)
 	t3 := b3.s.trustNamed("plain")
 	t3.hourly, t3.Hourly = &limiter{rate: 1.0 / 3600, burst: 1}, 1
-	for range 3 {
-		if code, _, _ := btAsk(t, b3.h, "POST", "/v1/backtests", b3.plain, btBody(ruleFile, changedRules, map[string]any{"days": 15})); code != 400 {
-			t.Errorf("a bad request: %d", code)
+	if code, _, _ := btAsk(t, b3.h, "POST", "/v1/backtests", b3.plain, btBody(ruleFile, changedRules, map[string]any{"days": 15})); code != 400 {
+		t.Errorf("a bad request: %d", code)
+	}
+	for range 4 {
+		if code, m, _ := btAsk(t, b3.h, "POST", "/v1/backtests", b3.plain, btBody(ruleFile, changedRules, map[string]any{"days": 15})); code != 429 {
+			t.Errorf("past the hour, after a 400: %d %v", code, m)
 		}
 	}
+	// One the port couldn't take for want of room gives its hour back.
+	t3.hourly = &limiter{rate: 1.0 / 3600, burst: 1}
+	for range cap(b3.s.btPort.reading) {
+		b3.s.btPort.reading <- struct{}{}
+	}
+	if code, _, _ := btAsk(t, b3.h, "POST", "/v1/backtests", b3.plain, btBody(ruleFile, changedRules, nil)); code != 429 {
+		t.Errorf("the reads full: %d", code)
+	}
+	for range cap(b3.s.btPort.reading) {
+		<-b3.s.btPort.reading
+	}
 	if code, m, _ := btAsk(t, b3.h, "POST", "/v1/backtests", b3.plain, btBody(ruleFile, changedRules, nil)); code != 202 {
-		t.Errorf("after three refused, the hour's one: %d %v", code, m)
+		t.Errorf("the hour given back after the reads were full: %d %v", code, m)
+	}
+	// An entry's body being read holds its own turn, not another's.
+	gl := b3.s.trustNamed("monitoring-gitlab")
+	gl.reading <- struct{}{}
+	if code, _, _ := btAsk(t, b3.h, "POST", "/v1/backtests", b3.gl.Token(btAudience, idptest.GitLab("42")), btBody(ruleFile, changedRules, nil)); code != 429 {
+		t.Errorf("the entry's own turn held: %d", code)
+	}
+	if code, m, _ := btAsk(t, b3.h, "POST", "/v1/backtests", b3.github(nil), btBody(ruleFile, changedRules, nil)); code != 202 {
+		t.Errorf("another entry, its turn free: %d %v", code, m)
+	}
+	select {
+	case <-gl.reading:
+	default:
+		t.Error("the entry's turn, held here, was given back by a request that never had it")
 	}
 	// As many bodies being read as the port reads at once: refused, the
 	// body unread.
@@ -962,29 +992,50 @@ func TestBacktestPrunedPortOff(t *testing.T) {
 	}
 }
 
-// Guesses don't keep a job from reading its backtest: a wrong key or an id
-// that isn't is limited by the address it comes from, and comes to 429;
-// the job's own read, from the same address, is still answered, and is
-// limited by its backtest alone.
+// What isn't known is charged to the address it came from before the
+// ledger is asked: a wrong key, or an id that isn't, comes to 429 from an
+// address past its bucket, the right key from it too; reads from another
+// address are answered, and the job's own, the key right, gives its
+// charge back; a backtest's reads are limited by its id too.
 func TestBacktestReadsNotStarved(t *testing.T) {
 	b := btServer(t, nil, "", nil)
 	_, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.plain, btBody(ruleFile, changedRules, nil))
 	id, key := m["id"].(string), m["key"].(string)
+	from := func(addr, path, key string) int {
+		r := httptest.NewRequest("GET", path, nil)
+		r.RemoteAddr = addr + ":1234"
+		r.Header.Set("Authorization", "Bearer "+key)
+		w := httptest.NewRecorder()
+		b.h.ServeHTTP(w, r)
+		return w.Code
+	}
+	// The job's own reads cost its address nothing: past the address's
+	// bucket of misses, a miss from it is still a 404.
+	for range 4 {
+		from("192.0.2.9", "/v1/backtests/"+id, key)
+	}
+	for i := range 20 {
+		if c := from("192.0.2.9", fmt.Sprintf("/v1/backtests/%032x", i), key); c != 404 {
+			t.Errorf("miss %d after the job's reads: %d", i+1, c)
+			break
+		}
+	}
 	codes := map[int]int{}
 	for i := range 150 {
-		c, _, _ := btAsk(t, b.h, "GET", fmt.Sprintf("/v1/backtests/%032x", i), key, nil)
-		codes[c]++
+		codes[from("192.0.2.1", fmt.Sprintf("/v1/backtests/%032x", i), key)]++
 	}
 	if codes[404] == 0 || codes[429] == 0 {
 		t.Errorf("150 guesses: %v", codes)
 	}
-	if c, m, _ := btAsk(t, b.h, "GET", "/v1/backtests/"+id, key, nil); c != 202 || m["state"] != "waiting" {
-		t.Errorf("the job's own read after them: %d %v", c, m)
+	if c := from("192.0.2.1", "/v1/backtests/"+id, key); c != 429 {
+		t.Errorf("past its bucket, the right key from that address: %d", c)
+	}
+	if c := from("192.0.2.2", "/v1/backtests/"+id, key); c != 202 {
+		t.Errorf("from another address: %d", c)
 	}
 	reads := map[int]int{}
 	for range 30 {
-		c, _, _ := btAsk(t, b.h, "GET", "/v1/backtests/"+id, key, nil)
-		reads[c]++
+		reads[from("192.0.2.3", "/v1/backtests/"+id, key)]++
 	}
 	if reads[202] == 0 || reads[429] == 0 {
 		t.Errorf("30 reads of one backtest at once: %v", reads)
@@ -1057,5 +1108,83 @@ func TestBacktestLaneBusy(t *testing.T) {
 	b.done(t, b.plain, btBody(ruleFile, changedRules, nil))
 	if !during || b.s.btPort.busy.Load() {
 		t.Errorf("busy while it ran %t, after %t", during, b.s.btPort.busy.Load())
+	}
+}
+
+// A body that doesn't come within backtestBodyWithin is refused, its hour
+// kept taken: a body sent slowly holds a turn that long at most.
+func TestBacktestSlowBody(t *testing.T) {
+	was := backtestBodyWithin
+	backtestBodyWithin = 50 * time.Millisecond
+	t.Cleanup(func() { backtestBodyWithin = was })
+	b := btServer(t, nil, "", nil)
+	tr := b.s.trustNamed("plain")
+	tr.hourly, tr.Hourly = &limiter{rate: 1.0 / 3600, burst: 1}, 1
+	srv := httptest.NewServer(b.h)
+	defer srv.Close()
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	req, _ := http.NewRequest("POST", srv.URL+"/v1/backtests", pr)
+	req.Header.Set("Authorization", "Bearer "+b.plain)
+	req.ContentLength = 1 << 20
+	go pw.Write([]byte(`{"before": [`)) // and nothing more
+	// The server answers it while the body is still to come: waited for
+	// with a guard against a server that holds it, not a measure.
+	answered := make(chan int, 1)
+	go func() {
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			answered <- 0
+			return
+		}
+		resp.Body.Close()
+		answered <- resp.StatusCode
+	}()
+	select {
+	case code := <-answered:
+		if code != 400 {
+			t.Errorf("a body that doesn't come: %d", code)
+		}
+	case <-time.After(30 * time.Second):
+		pw.CloseWithError(errors.New("given up"))
+		t.Fatal("the server held a body that doesn't come")
+	}
+	if code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.plain, btBody(ruleFile, changedRules, nil)); code != 429 {
+		t.Errorf("after a body too slow, the hour: %d %v", code, m)
+	}
+}
+
+// A rules_select that keeps nothing on either side, as a label's name
+// mistyped makes it, is refused, as lapilli verdict refuses it; one side
+// kept, the other empty, is a backtest.
+func TestBacktestNoneSelected(t *testing.T) {
+	b := btServer(t, nil, "", nil)
+	doc := func(team string) string {
+		return "apiVersion: monitoring.coreos.com/v1\nkind: PrometheusRule\nmetadata: {name: r, labels: {team: " + team + "}}\nspec:\n  groups:\n  - name: g\n    rules:\n    - {alert: A, expr: errors > 5}\n"
+	}
+	code, m, _ := btAsk(t, b.h, "POST", "/v1/backtests", b.plain, btBody(doc("shop"), doc("shop"), map[string]any{"rules_select": "tem=shop"}))
+	if why, _ := m["error"].(string); code != 400 || !strings.Contains(why, "either side") {
+		t.Errorf("neither side: %d %v", code, m)
+	}
+	md, _ := b.done(t, b.plain, btBody(doc("other"), doc("shop"), map[string]any{"rules_select": "team=shop"}))
+	if !strings.Contains(md, "1 added") {
+		t.Errorf("one side: %s", md)
+	}
+}
+
+// A rule whose expression doesn't read as PromQL is refused as written,
+// alone, as lapilli verdict says it, the rest backtested; asked nothing.
+func TestBacktestSyntaxError(t *testing.T) {
+	h := &history{}
+	b := btServer(t, h, "", nil)
+	after := changedRules + "      - alert: Broken\n        expr: sum(x\n"
+	md, _ := b.done(t, b.plain, btBody(ruleFile, after, nil))
+	if !strings.Contains(md, "`Broken`") || !strings.Contains(md, "refused as written") || !strings.Contains(md, "`MoreErrors`") {
+		t.Errorf("%s", md)
+	}
+	h.Lock()
+	defer h.Unlock()
+	if h.exprs["sum(x"] != 0 {
+		t.Error("a query that doesn't read was asked of the history")
 	}
 }

@@ -430,6 +430,9 @@ type verdictFlags struct {
 	// recorded are, with --compare, the recording rules the files read
 	// held; passedOver what each set's files passed over, as said.
 	recorded           []rules.Recording
+	// noneSelected is what --rules-select keeping no rule of --rules
+	// said, nil when it kept some or none was asked.
+	noneSelected error
 	passedOver         map[string]string
 	loadedRules        bool
 	grafana, grafanaTk string
@@ -1340,6 +1343,7 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 	}
 	var same, before, after, was []rules.Rule
 	if len(f.compare) > 0 {
+		var noneSelected error
 		for _, p := range f.compare {
 			rs, err := loadRules(f, p)
 			// None there, or none the selector keeps: a side with no
@@ -1347,8 +1351,21 @@ func runVerdict(args []string, stdout, stderr io.Writer) int {
 			if err != nil && !errors.Is(err, rules.ErrNoneInDir) && !errors.Is(err, rules.ErrNoneSelected) {
 				return fail(err)
 			}
+			if errors.Is(err, rules.ErrNoneSelected) && noneSelected == nil {
+				noneSelected = err
+			}
 			f.replaying().Apply(rs)
 			was = append(was, rs...)
+		}
+		// Neither side kept by the selector: a selector that matches
+		// nothing (a label's name mistyped), said as ever, not taken for
+		// two sets alike.
+		held := len(was)
+		for _, v := range versions {
+			held += len(v.Rules)
+		}
+		if held == 0 && noneSelected != nil && f.noneSelected != nil {
+			return fail(fmt.Errorf("--rules-select %s keeps no document of rules of --rules or of --compare: %w", f.rulesSelect, noneSelected))
 		}
 		f.sayPicked(stderr, "--compare")
 	}
@@ -2193,6 +2210,9 @@ func loadVersions(f *verdictFlags) ([]replay.Version, error) {
 		rs, err := loadRules(f, rf.path)
 		if err != nil && !(len(f.compare) > 0 && (errors.Is(err, rules.ErrNoneInDir) || errors.Is(err, rules.ErrNoneSelected))) {
 			return nil, err
+		}
+		if errors.Is(err, rules.ErrNoneSelected) && f.noneSelected == nil {
+			f.noneSelected = err
 		}
 		f.replaying().Apply(rs)
 		versions[i].Rules = append(versions[i].Rules, rs...)

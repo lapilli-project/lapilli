@@ -100,3 +100,18 @@ func TestCompareNoneSelected(t *testing.T) {
 		t.Errorf("exit %d: %s\n%s", code, out.String(), errs.String())
 	}
 }
+
+// Neither side kept by --rules-select, as a label's name mistyped makes
+// it: an error, as it was before a side could be empty, never two sets
+// alike.
+func TestCompareNoneSelectedEither(t *testing.T) {
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return fakeHistory{}, nil }
+	now = func() time.Time { return t0 }
+	doc := "apiVersion: monitoring.coreos.com/v1\nkind: PrometheusRule\nmetadata: {name: r, labels: {team: shop}}\nspec:\n  groups:\n  - name: g\n    rules:\n    - {alert: A, expr: errors > 5}\n"
+	head, base := write(t, "head.yaml", doc), write(t, "base.yaml", doc)
+	var out, errs bytes.Buffer
+	code := run([]string{"verdict", "--rules", head, "--compare", base, "--rules-select", "tem=shop", "--changed-only", "--markdown", "--prometheus", "http://x"}, &out, &errs)
+	if code != 1 || !strings.Contains(errs.String(), "keeps no document of rules") {
+		t.Errorf("exit %d: %s\n%s", code, out.String(), errs.String())
+	}
+}

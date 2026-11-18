@@ -616,16 +616,17 @@ trust:
   each, or serve doesn't start; and under every issuer, an event pinned
   is one of those, never `pull_request_target`, `workflow_run` or
   `schedule`.
-- **Forks.** A fork's pull request isn't backtested, by the pins and what
-  each CI gives a fork's run. GitHub gives a fork's `pull_request` run a
-  read-only token and no ID token, unless, on a private repository, "Send
-  write tokens to workflows from pull requests" is on: then a fork's run
-  gets one no claim tells from the repository's own. Keep that setting
-  off; a workflow's `if:` keeps no one out, as the pull request can
-  change it. GitLab names a fork's merge request by the fork's own
-  project, which the entry doesn't pin. Forgejo's documentation doesn't
-  say whether a fork's pull request gets an ID token: keep OpenID Connect
-  from forks' runs there, as from secrets.
+- **Forks.** A fork's pull request isn't backtested because its CI gives
+  its run no token, not because of a pin: a run of a fork's pull request
+  in the repository carries the repository's own `repository_id`, as a
+  branch's does. GitHub gives a fork's `pull_request` run a read-only token
+  and no ID token, unless, on a private repository, "Send write tokens to
+  workflows from pull requests" is on: then a fork's run gets one no claim
+  tells from the repository's own. Keep that setting off; a workflow's
+  `if:` keeps no one out, as the pull request can change it. Forgejo's
+  reference says `enable-openid-connect` "is disabled for `pull_request`
+  events from forked repositories". GitLab names a fork's merge request by
+  the fork's own project (`project_id`), which the entry doesn't pin.
 - **A plain token**, for a CI with no ID token (Azure Pipelines, Gitea,
   Jenkins), is read for each request, and refused while it is the same as
   another token serve takes. It is a long-lived secret: whoever holds it
@@ -641,14 +642,18 @@ whole rate again. Without `--max-rate`, a quarter of `--parallel` at once,
 one at least. A backtest that couldn't finish within `--backtest-timeout`
 at its share is refused before it waits, saying how many requests it needs
 and what period would fit. An entry's `hourly` is taken before the body
-is read, and given back for one refused; two bodies are read at once at
-most, whoever sends them. 20 wait at most (`--backtest-queue`), 3 of an
+is read, and stays taken for one refused as it was sent; an entry has one
+body read at a time, two of all entries at once, each within 5 seconds of
+its headers. 20 wait at most (`--backtest-queue`), 3 of an
 entry, one of a pull request the token's `ref` names (a newer commit's
-takes the place of the one waiting; a number the job said takes none's);
+takes the place of the one waiting; a number the job said takes none's:
+GitLab's ID token names a merge request's source branch, not its number,
+so a GitLab merge request's backtests don't take each other's place);
 past them, 429 with `Retry-After`. One the leader stopped while running is
 run again by the next, twice at most. A job reads its backtest by its key:
-one that guesses is limited by its address, and can't keep the job from
-reading its own. With replicas, the queue and each entry's hour are the
+each read is charged to the address it comes from before anything is
+looked up, and given back when the key is right, so one that guesses is
+held to a few a second. With replicas, the queue and each entry's hour are the
 ledger's: any replica takes a backtest and answers for it.
 
 What the pull request's PromQL can do: it runs as range queries, with
@@ -663,7 +668,16 @@ most, and no `@`; each range query with a timeout of a minute; days 1 to
 14, and the entry's `days`. What it learns comes a bit at a time, as a rule
 fires or doesn't: an entry's `hourly` is what bounds how fast. Keep it as
 low as the pull requests need; a day's cap, of the rules that differ
-times the backtests, is the `hourly` times 24 times 50 at most.
+times the backtests, is the `hourly` times 24 times 50 at most. `hourly`
+bounds what an entry costs the runs too: the share is kept for the lane
+for the whole of each backtest, so one entry asking back to back can hold
+serve's runs at three quarters of `--max-rate` (at the default share) for
+as long as its backtests last, and a backtest whose queries hang keeps the
+share while asking little, until `--backtest-timeout`. The lane asks a
+quarter of `--parallel` at once: with a high `--max-rate` and a history
+that answers slowly, it asks fewer a second than its share, and a
+backtest the port counted as fitting in `--backtest-timeout` can run out
+of it, which the comment says.
 
 The comment's heading says lapilli serve's record judged it. It holds the
 rules' names and labels as the pull request wrote them, the counts, and

@@ -783,9 +783,32 @@ Where step 1 does otherwise than the sections above say, or says more:
   one least lately. One started twice whose leader stopped each time
   (`attempts`, in 023) fails, saying so; one that panics fails. What ended
   a day ago goes at each of the leader's rounds, the port on or not.
-- **Reads by the key.** `GET` and `DELETE` check the key first: a wrong
-  key or an unknown id is limited by the client's address, a backtest's
-  reads by its id, so guesses don't keep a job from its own.
+- **Reads by the key.** Each lookup is charged to the client's address
+  before the ledger is asked, and given back when the key is right; a
+  backtest's reads are limited by its id too.
+- **The second round.** An entry has one turn to have a body read, within
+  the two of all entries, and a body comes within 5 seconds of its
+  headers; the hour taken stays taken for a request refused as sent (a
+  400, a body too slow), given back only when the port couldn't take one
+  it could have (the reads or the queue full, the ledger out of reach, the
+  same request again, a token's once). What a rule reads back is added up
+  through its subqueries and offsets, 8 days at most in all, a week over
+  week of a day's range; a subquery needs a step of its own, and a range
+  or an offset is a duration as written (`offset (700d)`, Prometheus's
+  duration expressions, refused). A rule whose expression doesn't read as
+  PromQL is refused as written, alone, as lapilli verdict says it, asking
+  nothing; a `rules_select` that keeps nothing on either side is refused,
+  as lapilli verdict refuses it. The planner's refusal says no rate.
+  GitLab's ID token names a merge request's source branch (`ref`,
+  `ref_path`), not its number, so a GitLab merge request's backtests don't
+  supersede each other. The lane asks a quarter of `--parallel` at once,
+  which a slow history holds below its share: `fits` doesn't count that,
+  and the docs say so. What keeps a fork out is that its CI gives its run
+  no token, not the pins ("Forks" above says the pins keep forks out): a
+  run of a fork's pull request in the repository carries the repository's
+  own `repository_id`. GitHub's "Send write tokens to workflows from pull
+  requests" kept off, and Forgejo's reference says its OpenID Connect is
+  off for a fork's `pull_request`; GitLab's `project_id` is a fork's own.
 - **`expect` given when it is there**, however empty, as `--expect` takes an
   empty file; read, as every expectations file is now, by the rules'
   bounded YAML reader first.

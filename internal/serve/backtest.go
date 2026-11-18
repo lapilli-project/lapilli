@@ -57,9 +57,10 @@ const (
 	// path, backtestZone the longest zone's name.
 	backtestFiles, backtestPath, backtestZone = 2000, 512, 64
 	// backtestReach is how far back a pull request's rule reads at most,
-	// by a range, a subquery or an offset; backtestPoints, the most points
-	// a subquery has, as Prometheus holds a range query to.
-	backtestReach, backtestPoints = 7 * 24 * time.Hour, 11000
+	// its ranges, subqueries and offsets added up: a week-over-week
+	// comparison of a day's range; backtestPoints, the most points a
+	// subquery has, as Prometheus holds a range query to.
+	backtestReach, backtestPoints = 8 * 24 * time.Hour, 11000
 	// backtestQueryTimeout is sent with each range query the lane asks, so
 	// that a shared Prometheus gives up on a pull request's query before
 	// its own default does.
@@ -71,6 +72,10 @@ const (
 	// a token is taken for, from its iat, and the clocks' leeway.
 	backtestTokenKept = time.Hour + 10*time.Minute
 )
+
+// backtestBodyWithin is how long a request's body may take to come, from
+// its headers: shorter in tests.
+var backtestBodyWithin = 5 * time.Second
 
 // backtestPoll is how often the leader looks for a backtest waiting, and
 // whether one running was cancelled: shorter in tests.
@@ -120,6 +125,8 @@ type trusted struct {
 	Trust
 	ci     *signin.CI // nil for a plain token
 	hourly *limiter
+	// reading is the entry's one turn to have a body read.
+	reading chan struct{}
 }
 
 // newBacktestPort readies the port: each issuer asked once for its keys,
@@ -129,7 +136,7 @@ func (s *Server) newBacktestPort() *backtestPort {
 	p := &backtestPort{reads: perKey{rate: 1, burst: 10}, misses: perKey{rate: 1, burst: 20}, wake: make(chan struct{}, 1), reading: make(chan struct{}, backtestReading), ended: map[[2]string]int{}, said: map[string]time.Time{}}
 	cis := map[[2]string]*signin.CI{}
 	for _, t := range s.cfg.Trust {
-		tr := &trusted{Trust: t, hourly: &limiter{rate: float64(t.Hourly) / 3600, burst: float64(t.Hourly)}}
+		tr := &trusted{Trust: t, hourly: &limiter{rate: float64(t.Hourly) / 3600, burst: float64(t.Hourly)}, reading: make(chan struct{}, 1)}
 		if t.Issuer != "" {
 			k := [2]string{t.Issuer, t.JWKSURL}
 			if cis[k] == nil {
@@ -600,6 +607,7 @@ func (s *Server) prepare(req backtestRequest, t Trust) (*prepared, string) {
 		return nil, "rules_select: " + clip(verdict.Clean(err.Error()), 300)
 	}
 	var recBefore, recAfter []rules.Recording
+	noneSelected := map[string]bool{}
 	read := func(side string, files []backtestFile, rec *[]rules.Recording) ([]rules.Rule, string) {
 		if len(files) > backtestFiles {
 			return nil, fmt.Sprintf("%s: %d files at most", side, backtestFiles)
@@ -614,6 +622,7 @@ func (s *Server) prepare(req backtestRequest, t Trust) (*prepared, string) {
 			in = append(in, rules.File{Path: f.Path, Data: []byte(f.Content)})
 		}
 		rs, _, picked, err := rules.PickedFiles(in, rules.Picking{Select: sel, Trim: true, Recordings: rec})
+		noneSelected[side] = errors.Is(err, rules.ErrNoneSelected)
 		if err != nil && !errors.Is(err, rules.ErrNoneSelected) {
 			return nil, fmt.Sprintf("the rules %s: %s", side, clip(verdict.Clean(err.Error()), 600))
 		}
@@ -634,6 +643,11 @@ func (s *Server) prepare(req backtestRequest, t Trust) (*prepared, string) {
 	if why != "" {
 		return nil, why
 	}
+	// Neither side kept by the selector: a selector that matches nothing,
+	// as lapilli verdict refuses it, never two sets alike.
+	if len(before)+len(after) == 0 && noneSelected["before"] && noneSelected["after"] {
+		return nil, fmt.Sprintf("rules_select %s keeps no document of rules on either side", clip(verdict.Clean(req.RulesSelect), 200))
+	}
 	for _, rs := range [][]rules.Rule{before, after} {
 		for _, r := range rs {
 			switch {
@@ -652,26 +666,11 @@ func (s *Server) prepare(req backtestRequest, t Trust) (*prepared, string) {
 	// Replayed as the rules in effect are: --late, --scrape-interval.
 	s.replayedAs().Apply(p.gone)
 	s.replayedAs().Apply(p.came)
-	for _, r := range slices.Concat(p.gone, p.came) {
-		name := verdict.Clean(r.Name)
-		switch {
-		case r.For < 0 || r.KeepFiringFor < 0 || r.Interval < 0:
-			return nil, name + ": a duration is negative"
-		case r.For > compareFor || r.KeepFiringFor > compareFor:
-			return nil, fmt.Sprintf("%s: for and keep_firing_for are %s at most here", name, verdict.Duration(compareFor))
-		case r.Interval > compareEvery:
-			return nil, fmt.Sprintf("%s: its group's interval is %s at most here", name, verdict.Duration(compareEvery))
-		case r.Unsupported != "":
-			// Asks nothing (a query that doesn't parse): said as read, in
-			// the request's own words.
-			p.reasons[r.Unsupported] = true
-			continue
-		}
-		if sel, wide := rules.Wide(r.Expr); wide {
-			return nil, fmt.Sprintf("%s reads %s, which names no metric, or names it by a pattern: here each selector reads one metric, by its name", name, clip(verdict.Clean(sel), 200))
-		}
-		if what := rules.Reach(r.Expr, backtestReach, backtestReach, backtestPoints); what != "" {
-			return nil, fmt.Sprintf("%s reads %s: here a range or an offset reaches a week back at most, a subquery %d points, and no @", name, clip(verdict.Clean(what), 200), backtestPoints)
+	for _, side := range [][]rules.Rule{p.gone, p.came} {
+		for i := range side {
+			if why := p.checkRule(&side[i]); why != "" {
+				return nil, why
+			}
 		}
 	}
 	p.recording = verdict.RecordingChanges(recBefore, recAfter)
@@ -693,6 +692,44 @@ func (s *Server) prepare(req backtestRequest, t Trust) (*prepared, string) {
 	}
 	return p, ""
 }
+
+// checkRule holds a rule that differs to what the port takes: its for,
+// keep_firing_for and interval; each selector one metric's, by its name;
+// what it reads back. One whose expression doesn't read as PromQL asks
+// nothing, and is said refused as written, as lapilli verdict says it, the
+// rest backtested; one already unsupported as read is said in its own
+// words.
+func (p *prepared) checkRule(r *rules.Rule) string {
+	name := verdict.Clean(r.Name)
+	switch {
+	case r.For < 0 || r.KeepFiringFor < 0 || r.Interval < 0:
+		return name + ": a duration is negative"
+	case r.For > compareFor || r.KeepFiringFor > compareFor:
+		return fmt.Sprintf("%s: for and keep_firing_for are %s at most here", name, verdict.Duration(compareFor))
+	case r.Interval > compareEvery:
+		return fmt.Sprintf("%s: its group's interval is %s at most here", name, verdict.Duration(compareEvery))
+	case r.Unsupported != "":
+		p.reasons[r.Unsupported] = true
+		return ""
+	}
+	if _, err := rules.Selectors(r.Expr); err != nil {
+		r.Unsupported = refusedAsWritten
+		p.reasons[r.Unsupported] = true
+		return ""
+	}
+	if sel, wide := rules.Wide(r.Expr); wide {
+		return fmt.Sprintf("%s reads %s, which names no metric, or names it by a pattern: here each selector reads one metric, by its name", name, clip(verdict.Clean(sel), 200))
+	}
+	if what := rules.Reach(r.Expr, backtestReach, backtestPoints); what != "" {
+		return fmt.Sprintf("%s reads %s: here what a rule reads, its ranges and offsets and its subqueries' added up, reaches %d days back at most, a subquery %d points with a step of its own, each written as a duration, and no @",
+			name, clip(verdict.Clean(what), 300), int(backtestReach/(24*time.Hour)), backtestPoints)
+	}
+	return ""
+}
+
+// refusedAsWritten is why a rule whose expression doesn't read as PromQL
+// isn't replayed: as lapilli verdict says one the history refused.
+const refusedAsWritten = rules.QueryFailed + "it doesn't read as PromQL, and is refused as written"
 
 func isControl(r rune) bool { return r < 0x20 || r == 0x7f || r >= 0x80 && r < 0xa0 }
 
@@ -722,8 +759,9 @@ func (s *Server) fits(p *prepared) (int, string) {
 	if took(n) <= limit {
 		return n, ""
 	}
-	why := fmt.Sprintf("it needs %d requests of the history, which at the lane's %g a second take %s, past --backtest-timeout %s:", n, rate,
-		verdict.Duration(took(n).Round(time.Minute)), verdict.Duration(limit))
+	// What the rate is stays serve's: said as more than fits, not as a
+	// number a job could read --max-rate from.
+	why := fmt.Sprintf("it needs %d requests of the history, more than the backtests' share of the rate asks within --backtest-timeout %s:", n, verdict.Duration(limit))
 	for d := p.days - 1; d >= 1; d-- {
 		if took(plan(d)) <= limit {
 			return n, fmt.Sprintf("%s %d days would fit", why, d)
@@ -811,23 +849,37 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		backtestError(w, code, why)
 	}
 	// The entry's hour is taken before the body is read, so that past it a
-	// body costs nothing to send; given back for one not queued.
+	// body costs nothing to send. It stays taken for a request refused as
+	// it was sent (a 400, a body too slow or too large): given back only
+	// when the port couldn't take one it could have (the reads or the
+	// queue full, the ledger out of reach, the same request again, a
+	// token's once).
 	if !a.t.hourly.allow(s.now()) {
 		w.Header().Set("Retry-After", strconv.Itoa(a.t.hourly.wait()))
 		refused(http.StatusTooManyRequests, fmt.Sprintf("this entry starts %d backtests an hour at most", a.t.Hourly))
 		return
 	}
-	queued := false
+	refund := false
 	defer func() {
-		if !queued {
+		if refund {
 			a.t.hourly.give()
 		}
 	}()
-	// A few bodies read and their rules checked at once, whoever sends
-	// them.
+	// One body of an entry read at a time, and two of all of them: one
+	// entry's slow bodies hold its own turn, not every entry's.
+	select {
+	case a.t.reading <- struct{}{}:
+	default:
+		refund = true
+		w.Header().Set("Retry-After", "1")
+		refused(http.StatusTooManyRequests, "another request of this entry is being read: one at a time")
+		return
+	}
+	defer func() { <-a.t.reading }()
 	select {
 	case s.btPort.reading <- struct{}{}:
 	default:
+		refund = true
 		w.Header().Set("Retry-After", "1")
 		refused(http.StatusTooManyRequests, "as many requests are being read as the port reads at once: try again in a second")
 		return
@@ -840,6 +892,9 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	defer done()
+	// The body within backtestBodyWithin of its headers, well within the
+	// server's ReadTimeout: a body sent slowly holds a turn no longer.
+	http.NewResponseController(w).SetReadDeadline(time.Now().Add(backtestBodyWithin))
 	body, req, code, why := readBacktestBody(w, r)
 	if code != 0 {
 		refused(code, why)
@@ -849,6 +904,7 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			s.log.Error("backtest port: reading the ledger", "err", err)
 		}
+		refund = true
 		w.Header().Set("Retry-After", "60")
 		backtestError(w, http.StatusServiceUnavailable, why)
 		return
@@ -878,13 +934,16 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 	b, again, superseded, err := s.l.AskBacktest(ctx, ask, s.now())
 	switch {
 	case errors.Is(err, ledger.ErrBacktestToken):
+		refund = true
 		refused(http.StatusConflict, "this token started another backtest: a job asks once, with a token of its own")
 		return
 	case errors.Is(err, ledger.ErrBacktestsFull):
+		refund = true
 		w.Header().Set("Retry-After", "60")
 		refused(http.StatusTooManyRequests, "as many backtests wait as the queue takes: try again in a minute")
 		return
 	case err != nil:
+		refund = true
 		s.log.Error("backtest port: queueing a backtest", "trust", a.t.Name, "err", err)
 		backtestError(w, http.StatusServiceUnavailable, "the backtest couldn't be queued: try again in a minute")
 		return
@@ -895,10 +954,10 @@ func (s *Server) postBacktest(w http.ResponseWriter, r *http.Request) {
 	if again {
 		// The same job asked twice: its backtest, without its key, which
 		// was given once.
+		refund = true
 		backtestJSON(w, http.StatusOK, map[string]any{"id": b.ID, "state": b.State, "position": b.Position})
 		return
 	}
-	queued = true
 	select {
 	case s.btPort.wake <- struct{}{}:
 	default:
@@ -913,6 +972,15 @@ var backtestID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // id that isn't and a key that's wrong, compared in constant time.
 func (s *Server) kept(w http.ResponseWriter, r *http.Request) (ledger.Backtest, bool) {
 	id, key := r.PathValue("id"), bearerOf(r)
+	// Each lookup is charged to the address it comes from before the
+	// ledger is asked, and given back once the key is right: what isn't
+	// known costs the ledger no more than the bucket lets through.
+	addr := clientAddr(r)
+	if !s.btPort.misses.allow(addr, s.now()) {
+		w.Header().Set("Retry-After", "10")
+		backtestError(w, http.StatusTooManyRequests, "too many backtests not found from here: try again in a while")
+		return ledger.Backtest{}, false
+	}
 	var b ledger.Backtest
 	var found bool
 	if backtestID.MatchString(id) {
@@ -929,14 +997,10 @@ func (s *Server) kept(w http.ResponseWriter, r *http.Request) (ledger.Backtest, 
 		want = strings.Repeat("0", 64)
 	}
 	if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(got[:])), []byte(want)) != 1 || !found || key == "" {
-		if !s.btPort.misses.allow(clientAddr(r), s.now()) {
-			w.Header().Set("Retry-After", "10")
-			backtestError(w, http.StatusTooManyRequests, "too many backtests not found: try again in a while")
-			return ledger.Backtest{}, false
-		}
 		backtestError(w, http.StatusNotFound, "no such backtest")
 		return ledger.Backtest{}, false
 	}
+	s.btPort.misses.give(addr)
 	if !s.btPort.reads.allow(id, s.now()) {
 		w.Header().Set("Retry-After", "1")
 		backtestError(w, http.StatusTooManyRequests, "too many reads of this backtest: try again in a second")
@@ -960,6 +1024,16 @@ type perKey struct {
 	mu          sync.Mutex
 	rate, burst float64
 	m           map[string]*limiter
+}
+
+// give gives back what allow took from key's bucket.
+func (p *perKey) give(key string) {
+	p.mu.Lock()
+	l := p.m[key]
+	p.mu.Unlock()
+	if l != nil {
+		l.give()
+	}
 }
 
 func (p *perKey) allow(key string, now time.Time) bool {

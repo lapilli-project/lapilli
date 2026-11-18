@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"testing"
-
-	"lapilli.dev/internal/ledger/ledgertest"
 )
 
 // updateBacktestOff writes testdata/backtestoff afresh. It was run once,
@@ -35,7 +33,13 @@ var (
 // backtestOffNormal is a page or /metrics with what one run of the test
 // gives otherwise than the next, on either side, stood in for by <clock>:
 // the same on main and on this branch.
+// replicaSeries are what /metrics says of a ledger replicas share, a
+// Postgres one, which main's goldens, taken on SQLite, don't have: left out
+// of both sides, so the goldens hold on either ledger.
+var replicaSeries = regexp.MustCompile(`(?m)^(# (HELP|TYPE) )?lapilli_serve_(leader|replicas|session_keys|ledger_writes_waiting|jobs_round_timestamp_seconds)\b.*\n`)
+
 func backtestOffNormal(s string) string {
+	s = replicaSeries.ReplaceAllString(s, "")
 	s = backtestOffSeries.ReplaceAllString(s, "$1 <clock>")
 	return backtestOffClock.ReplaceAllStringFunc(s, func(t string) string {
 		if t[:10] > "2026-11-10" {
@@ -51,9 +55,9 @@ func backtestOffNormal(s string) string {
 // one with something on every page (pagesServer); in English and in
 // another language; as anyone and as an admin.
 func TestBacktestOffGolden(t *testing.T) {
-	// The goldens are main's on SQLite: a Postgres ledger's /metrics has
-	// the replicas' series beside them, which main has as well.
-	ledgertest.SQLiteOnly(t, "the goldens were captured from main's code on a SQLite ledger")
+	// The goldens are main's on SQLite; on Postgres, /metrics has the
+	// replicas' series beside them too, which main has as well, left out
+	// of both (replicaSeries).
 	ctx := context.Background()
 	plain, _ := server(t, func(c *Config) { c.UserHeader, c.Admins = "X-Forwarded-Email", []string{"ana@example.com"} })
 	raw := ""

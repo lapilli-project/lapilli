@@ -60,32 +60,53 @@ func unquoteLabel(label string) (string, bool) {
 }
 
 // Reach says the first thing an expression reads past where a pull
-// request's rule backtested through lapilli serve may: a range, or a
-// subquery's, past most; a subquery's step that makes it more than points
-// points; an offset past offset, either way; an @, which reads a time of
-// its own choosing. "" when there is none. A range written so that
-// Lapilli doesn't read it is said as itself.
-func Reach(expr string, most, offset time.Duration, points int) string {
-	rs, err := Ranges(expr)
-	if err != nil {
-		return "an expression that doesn't read"
+// request's rule backtested through lapilli serve may: a selector whose
+// range and offset, with those of every subquery around it, reach further
+// back than most in all; a subquery's step that makes it more than points
+// points, or none given (the server's own would be the evaluation's); an
+// offset or a range written other than as a duration (Prometheus's
+// duration expressions, offset (700d)); an @, which reads a time of its
+// own choosing. "" when there is none. An expression that doesn't read is
+// said so.
+func Reach(expr string, most time.Duration, points int) string {
+	type subquery struct {
+		open, close int // the parentheses it ranges over
+		reach       time.Duration
 	}
-	for _, r := range rs {
-		span, step, sub := strings.Cut(r, ":")
-		d, ok := readRange(strings.TrimSpace(span))
-		switch {
-		case !ok:
-			return "[" + r + "], a range Lapilli doesn't read"
-		case d > most:
-			return "[" + r + "], a range past " + promDuration(most)
-		case sub && strings.TrimSpace(step) != "":
-			s, ok := readRange(strings.TrimSpace(step))
-			if !ok || s <= 0 || int64(d/s) > int64(points) {
-				return "[" + r + "], a subquery of more than " + strconv.Itoa(points) + " points"
-			}
+	type read struct {
+		at    int // where the selector ends
+		reach time.Duration
+	}
+	var subs []subquery
+	var reads []read
+	var opens []int
+	space := func(i int) int {
+		for i < len(expr) && (expr[i] == ' ' || expr[i] == '\t' || expr[i] == '\n' || expr[i] == '\r') {
+			i++
 		}
+		return i
 	}
-	// What follows the selectors and subqueries, outside quoted strings.
+	// offsetAt reads an offset at i, if one is there: its duration, where
+	// it ends, and why it can't be taken.
+	offsetAt := func(i int) (time.Duration, int, string) {
+		j := space(i)
+		if len(expr) < j+6 || !strings.EqualFold(expr[j:j+6], "offset") || len(expr) > j+6 && isWordByte(expr[j+6]) {
+			return 0, i, ""
+		}
+		k := space(j + 6)
+		if k < len(expr) && (expr[k] == '-' || expr[k] == '+') {
+			k++
+		}
+		end := k
+		for end < len(expr) && (isWordByte(expr[end]) || expr[end] == '.') {
+			end++
+		}
+		d, ok := readRange(expr[k:end])
+		if end == k || !ok {
+			return 0, end, "an offset written other than as a duration"
+		}
+		return d, end, ""
+	}
 	var quote byte
 	for i := 0; i < len(expr); i++ {
 		c := expr[i]
@@ -99,32 +120,129 @@ func Reach(expr string, most, offset time.Duration, points int) string {
 			quote = c
 		case c == '@':
 			return "@, which reads a time of its own"
-		case (c == 'o' || c == 'O') && (i == 0 || !isWordByte(expr[i-1])) && len(expr) >= i+6 && strings.EqualFold(expr[i:i+6], "offset") &&
-			(len(expr) == i+6 || !isWordByte(expr[i+6])):
-			j := i + 6
-			for j < len(expr) && (expr[j] == ' ' || expr[j] == '\t' || expr[j] == '\n' || expr[j] == '\r') {
+		case c == '(':
+			opens = append(opens, i)
+		case c == ')':
+			if len(opens) == 0 {
+				return "an expression that doesn't read"
+			}
+			open := opens[len(opens)-1]
+			opens = opens[:len(opens)-1]
+			j := space(i + 1)
+			if j < len(expr) && expr[j] == '[' {
+				end := strings.IndexByte(expr[j:], ']')
+				if end < 0 {
+					return "an expression that doesn't read"
+				}
+				r := expr[j+1 : j+end]
+				span, step, _ := strings.Cut(r, ":")
+				d, ok := readRange(strings.TrimSpace(span))
+				switch {
+				case !ok:
+					return "[" + r + "], a range written other than as a duration"
+				case !strings.Contains(r, ":"):
+					return "[" + r + "] after a parenthesis, which doesn't read"
+				case strings.TrimSpace(step) == "":
+					return "[" + r + "], a subquery with no step: give it one"
+				}
+				s, ok := readRange(strings.TrimSpace(step))
+				if !ok || s <= 0 || int64(d/s) > int64(points) {
+					return "[" + r + "], a subquery of more than " + strconv.Itoa(points) + " points"
+				}
+				off, after, why := offsetAt(j + end + 1)
+				if why != "" {
+					return why
+				}
+				subs = append(subs, subquery{open, i, d + absDuration(off)})
+				i = after - 1
+			}
+		case c == '[':
+			// A selector's range, or a subquery of a selector.
+			end := strings.IndexByte(expr[i:], ']')
+			if end < 0 {
+				return "an expression that doesn't read"
+			}
+			r := expr[i+1 : i+end]
+			span, step, sub := strings.Cut(r, ":")
+			d, ok := readRange(strings.TrimSpace(span))
+			switch {
+			case !ok:
+				return "[" + r + "], a range written other than as a duration"
+			case sub && strings.TrimSpace(step) == "":
+				return "[" + r + "], a subquery with no step: give it one"
+			case sub:
+				s, ok := readRange(strings.TrimSpace(step))
+				if !ok || s <= 0 || int64(d/s) > int64(points) {
+					return "[" + r + "], a subquery of more than " + strconv.Itoa(points) + " points"
+				}
+			}
+			off, after, why := offsetAt(i + end + 1)
+			if why != "" {
+				return why
+			}
+			reads = append(reads, read{i, d + absDuration(off)})
+			i = after - 1
+		case c == '}' || isWordByte(c):
+			// The end of a selector, or of a word: an offset after it
+			// moves what it reads.
+			j := i
+			for j+1 < len(expr) && c != '}' && isWordByte(expr[j+1]) {
 				j++
 			}
-			k := j
-			if k < len(expr) && (expr[k] == '-' || expr[k] == '+') {
-				k++
+			i = j
+			next := space(j + 1)
+			if next < len(expr) && expr[next] == '[' {
+				continue // its range, read at the bracket
 			}
-			end := k
-			for end < len(expr) && (isWordByte(expr[end]) || expr[end] == '.') {
-				end++
+			if off, after, why := offsetAt(j + 1); why != "" {
+				return why
+			} else if after > j+1 {
+				reads = append(reads, read{j, absDuration(off)})
+				i = after - 1
 			}
-			if end == k {
-				continue // a label or a function named so
+		}
+	}
+	if quote != 0 || len(opens) > 0 {
+		return "an expression that doesn't read"
+	}
+	// Each read, with the subqueries around it: what it reads back in all.
+	for _, r := range reads {
+		total := r.reach
+		for _, s := range subs {
+			if s.open < r.at && r.at < s.close {
+				total += s.reach
 			}
-			d, ok := readRange(expr[k:end])
-			if !ok {
-				return "offset " + expr[j:end] + ", which Lapilli doesn't read"
+		}
+		if total > most {
+			return "a range and an offset, with the subqueries around them, reaching " + reachOf(total) + " back, past " + reachOf(most)
+		}
+	}
+	// A subquery with nothing read inside it reaches its own range.
+	for _, s := range subs {
+		total := s.reach
+		for _, t := range subs {
+			if t.open < s.open && s.close < t.close {
+				total += t.reach
 			}
-			if d > offset {
-				return "offset " + expr[j:end] + ", past " + promDuration(offset)
-			}
-			i = end - 1
+		}
+		if total > most {
+			return "subqueries reaching " + reachOf(total) + " back, past " + reachOf(most)
 		}
 	}
 	return ""
+}
+
+// reachOf is a reach as a comment says it: in days when whole ones.
+func reachOf(d time.Duration) string {
+	if d > 0 && d%(24*time.Hour) == 0 {
+		return strconv.FormatInt(int64(d/(24*time.Hour)), 10) + "d"
+	}
+	return promDuration(d)
+}
+
+func absDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
+	}
+	return d
 }
