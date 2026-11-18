@@ -2,9 +2,13 @@
 
 ## [Unreleased]
 
-What the pages showed in use on a real deployment: the incidents list named
-a noisy rule beside another rule's lead, Korean read "caught" as noise, and
-a few pages said more than they needed to. No schema change.
+## [0.59.0] - 2026-11-18
+
+The docs as pages of their own, at lapilli.dev/docs, and the pages of
+`lapilli serve` as they read in use on a real deployment: the incidents
+list named a noisy rule beside another rule's lead, Korean read "caught"
+as noise, and a few pages said more than they needed to. No schema change:
+the ledger stays at 022.
 
 ### Fixed
 
