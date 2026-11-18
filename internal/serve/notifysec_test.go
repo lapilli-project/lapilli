@@ -172,6 +172,30 @@ func TestSNSProvenStays(t *testing.T) {
 	}
 }
 
+// A signing certificate whose RSA key is under 2048 bits proves nothing,
+// under either SignatureVersion; the same message under a longer key is
+// taken.
+func TestSNSCertKeyOf2048BitsAtLeast(t *testing.T) {
+	subject := "[FIRING:1]"
+	for _, version := range []string{"1", "2"} {
+		for _, bits := range []int{1024, 2047, 2048} {
+			s := notifyServer(t, nil)
+			g := newSNSSignerOf(t, bits)
+			s.port.sns.fetches = &limiter{rate: 1000, burst: 1000}
+			s.port.sns.get = func(_ context.Context, url string) ([]byte, error) { return g.cert, nil }
+			m := snsMessage{Type: "Notification", MessageID: fmt.Sprint("k-", version, "-", bits), TopicArn: snsTopicARN, Subject: &subject,
+				Message: string(notifyFixture(t, "amp-sns-message.json")), Timestamp: snsTime(now), SigningCertURL: snsCertURL, SignatureVersion: version}
+			code, out, _ := send(t, s.NotifyHandler(), "/v1/sns", g.sign(t, m), nil)
+			if want := map[bool]int{true: 200, false: http.StatusForbidden}[bits >= 2048]; code != want {
+				t.Errorf("SignatureVersion %s, a key of %d bits: %d %s, want %d", version, bits, code, out, want)
+			}
+			if s.port.sns.proven[snsCertURL] != (bits >= 2048) {
+				t.Errorf("SignatureVersion %s, a key of %d bits: proven %v", version, bits, s.port.sns.proven[snsCertURL])
+			}
+		}
+	}
+}
+
 // A message SNS signed more than an hour ago, or ahead of the clock, isn't
 // taken; the same message again is answered as kept without a turn, and
 // one source's notifications don't use up another's.

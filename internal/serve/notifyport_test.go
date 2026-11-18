@@ -308,7 +308,13 @@ type snsSigner struct {
 
 func newSNSSigner(t *testing.T) *snsSigner {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	return newSNSSignerOf(t, 2048)
+}
+
+// newSNSSignerOf signs with an RSA key of bits.
+func newSNSSignerOf(t *testing.T, bits int) *snsSigner {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, bits)
 	if err != nil {
 		t.Fatal(err)
 	}

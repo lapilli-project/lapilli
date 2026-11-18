@@ -233,13 +233,19 @@ func (k *Keys) fetch(ctx context.Context) ([]jose.JSONWebKey, error) {
 		return nil, fmt.Errorf("%s: not a JWKS: %v", k.url, err)
 	}
 	var out []jose.JSONWebKey
+	short := 0
 	for _, raw := range set.Keys {
 		var key jose.JSONWebKey
 		if json.Unmarshal(raw, &key) != nil || !key.Valid() || !key.IsPublic() || key.Use == "enc" {
 			continue // a key of a kind not known, or not for signatures
 		}
-		switch key.Key.(type) {
-		case *rsa.PublicKey, *ecdsa.PublicKey, ed25519.PublicKey:
+		switch pub := key.Key.(type) {
+		case *rsa.PublicKey:
+			if pub.N.BitLen() < MinRSABits {
+				short++
+				continue
+			}
+		case *ecdsa.PublicKey, ed25519.PublicKey:
 		default:
 			continue // a shared secret, never
 		}
@@ -249,10 +255,17 @@ func (k *Keys) fetch(ctx context.Context) ([]jose.JSONWebKey, error) {
 		}
 	}
 	if len(out) == 0 {
+		if short > 0 {
+			return nil, fmt.Errorf("%s: no public keys (%d RSA under %d bits, which aren't taken)", k.url, short, MinRSABits)
+		}
 		return nil, fmt.Errorf("%s: no public keys", k.url)
 	}
 	return out, nil
 }
+
+// MinRSABits is the shortest RSA key a signature is verified with: NIST's
+// floor through 2030 (SP 800-57 Part 1, SP 800-131A). Go takes 1024.
+const MinRSABits = 2048
 
 // get fetches a URL, reading at most limit bytes of a 200's body.
 func get(ctx context.Context, c *http.Client, u string, limit int64) ([]byte, error) {

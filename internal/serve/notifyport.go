@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/ledger"
+	"lapilli.dev/internal/signin"
 )
 
 // The notifications port takes notifications as an alert manager sent
@@ -1168,6 +1169,9 @@ func (t *snsTrust) verify(ctx context.Context, m snsMessage, sig []byte, now tim
 	pub, ok := c.PublicKey.(*rsa.PublicKey)
 	if !ok {
 		return errors.New("the signing certificate's key isn't RSA")
+	}
+	if pub.N.BitLen() < signin.MinRSABits {
+		return fmt.Errorf("the signing certificate's key is under %d bits", signin.MinRSABits)
 	}
 	switch m.SignatureVersion {
 	case "1":
