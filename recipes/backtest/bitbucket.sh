@@ -20,6 +20,10 @@
 #                         destination (BITBUCKET_PR_DESTINATION_BRANCH),
 #                         fetched: Bitbucket Pipelines clones the pull
 #                         request's branch alone, and lets the step fetch
+#
+# Through lapilli serve (LAPILLI_SERVE, see lib.sh), a plain token,
+# LAPILLI_SERVE_TOKEN_FILE: serve doesn't take Bitbucket's ID token yet
+# (docs/design/backtests.md, step 2).
 recipe=bitbucket.sh
 here=$(dirname "$0")
 : "${BITBUCKET_TOKEN_FILE:?a file holding a repository access token}"

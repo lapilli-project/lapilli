@@ -17,8 +17,18 @@
 #                     fetch-depth: 0 fetched it: Actions checks out the
 #                     pull request's own commit. Fetched only when the
 #                     checkout didn't, which needs its credentials kept
+#
+# Through lapilli serve (LAPILLI_SERVE, see lib.sh), LAPILLI_SERVE_AUDIENCE
+# asks Forgejo Actions for the job's ID token for that audience, which the
+# workflow's enable-openid-connect: true allows, as GitHub Actions is asked
+# (ACTIONS_ID_TOKEN_REQUEST_URL). Gitea Actions gives no ID token: a plain
+# token, LAPILLI_SERVE_TOKEN_FILE.
 recipe=gitea.sh
 here=$(dirname "$0")
+# Forgejo's ID token is asked of Actions (lib.sh's actions_token). It
+# isn't masked: Forgejo documents no ::add-mask::, and its FORGEJO_ACTIONS
+# is GITHUB_ACTIONS too, as each FORGEJO_ variable is a GITHUB_ one.
+ci_tokens=actions
 if [ "${GITEA_ACTIONS:-}" = true ] || [ "${FORGEJO_ACTIONS:-}" = true ]; then
   GITEA_API=${GITEA_API:-${GITHUB_API_URL:-}}
   GITEA_REPO=${GITEA_REPO:-${GITHUB_REPOSITORY:-}}

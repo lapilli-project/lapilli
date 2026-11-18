@@ -529,9 +529,21 @@ which `serve.backtest.service` and `serve.backtest.ingress` serve as
 
 1. **Runners inside the cluster or the network.** `FULLNAME-backtest` is a
    ClusterIP by default: runners in the cluster reach it at
-   `FULLNAME-backtest.NAMESPACE:8084`, in plain http, and nothing new is
-   exposed. With `serve.networkPolicy`, `serve.backtest.from` names them,
-   as NetworkPolicy peers, and lets them in to this port alone.
+   `http://FULLNAME-backtest.NAMESPACE.svc:8084`, in plain http, and nothing
+   new is exposed. The recipes take plain http to
+   `NAME.NAMESPACE.svc` or `NAME.NAMESPACE.svc.cluster.local` alone, and
+   through no proxy: `FULLNAME-backtest` alone is looked up under the
+   runner's search domains, which needn't be the cluster's, and
+   `NAME.NAMESPACE` could be a name on the internet, as a namespace named
+   as a top-level domain is. Their ID token's audience is, as a rule, the
+   URL they send to: a trust entry of their own with `audience:
+   http://FULLNAME-backtest.NAMESPACE.svc:8084`, beside one with the
+   external URL for runners elsewhere. The recipes refuse an audience that
+   isn't `LAPILLI_SERVE`'s URL unless `SERVE_AUDIENCE_ANY=1` (the action's
+   `audience-any: true`): set it for runners here that ask for the
+   external URL's audience. With `serve.networkPolicy`,
+   `serve.backtest.from` names them, as NetworkPolicy peers, and lets them
+   in to this port alone.
 2. **A CI provider's own runners**, with the port exposed on its own,
    apart from the UI and whatever signs people in to it, and only over
    TLS, which lapilli doesn't serve: the chart refuses it otherwise.

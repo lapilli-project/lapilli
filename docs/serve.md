@@ -557,7 +557,10 @@ lapilli serve --rules rules/ --prometheus http://prometheus:9090 --max-rate 2 \
 
 The port takes `POST /v1/backtests`, and `GET` and `DELETE
 /v1/backtests/{id}`, and nothing else (the API is in
-[docs/design/backtests.md](design/backtests.md), "Flags and API"). The trust
+[docs/design/backtests.md](design/backtests.md), "Flags and API").
+[recipes/backtest](../recipes/backtest) sends it the rules in its serve
+mode (`LAPILLI_SERVE`, and the action's `serve-url` and `audience`),
+reads the report back, and posts it as its own. The trust
 file says who may ask, each entry
 a CI's issuer of ID tokens or a plain token, and is read at start: one
 that can't be used stops serve from starting.
