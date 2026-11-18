@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Fixed (security)
+
+- **`lapilli preflight` hides each ARN of an account in what a cloud
+  says** (0.60.0 to 0.61.0). One in the account of `--changes-aws-role`,
+  as the pod's own role often is, had its number hidden as that role's
+  account first, and was then no longer read as an ARN: its role's name
+  and a session's (`assumed-role/pod-role/i-0abc`) were shown. So were the
+  names in an ARN of a partition but `aws`, `aws-cn` and `aws-us-gov`
+  (`aws-iso`, `aws-iso-b`, `aws-eusc`), and what followed a comma in a
+  role's name (`role/a,b`). Each is hidden whole now.
+
 ### Changed
 
 - **lapilli.dev can be found, and is checked like serve's pages.** It has a
@@ -146,14 +157,6 @@ Before upgrading:
 
 ### Fixed
 
-- **`lapilli preflight` hides each ARN of an account in what a cloud says**
-  (0.60.0). One in the account of `--changes-aws-role`, as the pod's own
-  role often is, had its number hidden as that role's account first, and
-  was then no longer read as an ARN: its role's name and a session's
-  (`assumed-role/pod-role/i-0abc`) were shown. So were the names in an ARN
-  of a partition but `aws`, `aws-cn` and `aws-us-gov` (`aws-iso`,
-  `aws-iso-b`, `aws-eusc`), and what followed a comma in a role's name
-  (`role/a,b`). Each is hidden whole now.
 - **`lapilli verdict --compare` with `--rules-select` keeping nothing on
   one side** exited 1, `no document of rules has the labels asked for`.
   That side is now one with no rules, as an empty directory is: the rules
