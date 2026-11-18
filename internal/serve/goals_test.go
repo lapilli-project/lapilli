@@ -561,8 +561,9 @@ func TestGoalTaskButton(t *testing.T) {
 func TestGoalsPage(t *testing.T) {
 	s := goalServer(t, nil)
 	h := s.Handler()
-	if _, body, _ := get(t, h, "/goals"); !strings.Contains(body, "No goals are declared") {
-		t.Error("no goals: the page doesn't say how to declare them")
+	if _, body, _ := get(t, h, "/goals"); !strings.Contains(body, "No goals are declared") || !strings.Contains(body, "<pre class=\"example\"><code>goals:\n  - name: critical-caught\n") ||
+		!strings.Contains(body, `href="`+goalsDocURL+`"`) || strings.Contains(body, "/api/v1/summary") {
+		t.Error("no goals: the page doesn't say how to declare them, with an example and every measure a link away")
 	}
 	declare(t, s, theGoals)
 	_, body, _ := get(t, h, "/goals")

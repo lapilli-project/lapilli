@@ -265,7 +265,7 @@ func TestNOCIncidents(t *testing.T) {
 		t.Error("/incidents?source=impact: the impact window alone")
 	}
 	for _, want := range []string{"Of the 1 judged against: 1 caught, 0 caught only by noisy rules, 0 missed.",
-		"The first alert of a rule that isn&#39;t noisy came, at the median, 5m before.", "<td>5m before</td>"} {
+		"The first alert of a rule that isn&#39;t noisy came, at the median, 5m before.", `<td class="t">5m before</td>`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/incidents?source=impact: no %q", want)
 		}

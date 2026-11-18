@@ -524,9 +524,19 @@ func (s *Server) criteriaView(ctx context.Context, set map[string]ledger.Setting
 	c := s.criterionOf(set)
 	started := criterion{s.cfg.Impact, s.cfg.ImpactFor}
 	v := &criteriaView{NoHistory: s.h == nil, Expr: c.Expr, For: verdict.Duration(c.For)}
-	v.Add = signalForm{For: verdict.Duration(s.cfg.ImpactFor), Follows: true, Record: true}
+	// The match in effect, as a signal that follows it is matched on.
+	o := s.cfg.Options
+	if x, ok := set["match"]; ok {
+		_ = apply(&o, "match", x.Value) // one that doesn't parse leaves the command line's, as options does
+	}
+	inEffect := strings.Join(o.Match, ", ")
+	v.Add = signalForm{For: verdict.Duration(s.cfg.ImpactFor), Follows: true, Record: true, InEffect: inEffect}
 	if n := s.signalsIn(set); n.named() {
-		return v, s.namedViews(ctx, v, n)
+		err := s.namedViews(ctx, v, n)
+		for i := range v.Named {
+			v.Named[i].Form.InEffect = inEffect
+		}
+		return v, err
 	}
 	v.Renames = c.Expr != ""
 	for _, st := range criteriaSettable {

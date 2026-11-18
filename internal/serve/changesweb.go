@@ -422,6 +422,12 @@ func (s *Server) proposalsPage(r *http.Request) (any, error) {
 	case v.Total == 0:
 		v.Empty = &emptyView{Kind: "done", Title: "No proposals yet.",
 			Text: "A rule's page proposes a change to it, with its backtest; Lapilli proposes of itself with --changes, after the weekly digest."}
+	case len(v.Lines) == 0 && !pick.Active && !staleOnly:
+		// None open, as the list is unless asked: nothing to clear, the
+		// closed ones a link away.
+		q := maps.Clone(p)
+		q["state"] = []string{"all"}
+		v.Empty = &emptyView{Kind: "done", Title: "No proposal is waiting for approval or under way.", Links: []emptyLink{{"Show the closed ones too", pickURL("/proposals", c, proposalFacets, q)}}}
 	case len(v.Lines) == 0:
 		v.Empty = &emptyView{Kind: "notfound", Title: "No proposal matches these filters.", Links: []emptyLink{{"Clear filters", pick.Clear}}}
 	}

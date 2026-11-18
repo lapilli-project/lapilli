@@ -1558,7 +1558,13 @@ Firings and Woken for nothing go to the rules over the week; Noisy rules
 to `perf=noisy`; Refired and During deploys to the order by each; the
 incidents missed and caught to the incidents, `state=missed|caught`
 (`state=` takes caught, noisy or missed, each a link with its count, the
-counts and the median lead of every one). The rules list ends with a row
+counts and the median lead of every one). An incident's Caught cell names
+the rule its state and lead rest on: of one caught, the first rule to
+catch it that wasn't noisy that week; of one caught only by noisy rules,
+the first of those. A noisy rule that caught it before is said apart,
+beneath, so that it doesn't read as the catch (until 0.58.0 the cell named
+the first of all, beside another rule's lead); its page marks each rule
+that caught it and was noisy that week. The rules list ends with a row
 of what the rules shown come to: firings, caught, nothing (and asleep, off
 hours, and the notifications for nothing while people slept, once
 notifications are kept), precision, re-fires, during deploys.
