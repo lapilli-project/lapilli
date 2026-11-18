@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **lapilli.dev can be found, and is checked like serve's pages.** It has a
+  `sitemap.xml` of every page and a `robots.txt` naming it
+  (`jekyll-sitemap`), each page a canonical link, and each docs page a
+  description of its own, the words beside it in docs/README.md, where all
+  had the site's. The pages workflow runs axe-core over every page the
+  sitemap lists, light and dark, and at 320px (`test/a11y/site.mjs`); its
+  first run found code blocks and tables that scroll sideways and couldn't
+  be reached by the keyboard (16 pages), and each now takes the focus.
+
 ## [0.61.0] - 2026-11-19
 
 Pull request backtests through `lapilli serve`: a CI job sends a pull

@@ -11,8 +11,8 @@ way.
 The pages of `lapilli serve`: the overview, the rules, incidents,
 proposals, settings and the rest. `lapilli verdict` prints text, or
 `--json`, `--csv` and `--metrics` for other tools, and with `--compare`,
-`--markdown` for a pull request. The docs at [lapilli.dev](https://lapilli.dev)
-haven't had the same checks as serve's pages.
+`--markdown` for a pull request. And [lapilli.dev](https://lapilli.dev), its
+front page and the docs, checked as below.
 
 ## What the pages aim for
 
@@ -47,6 +47,12 @@ who uses a screen reader day to day has reviewed them yet.
   WCAG A and AA rules, and checks for sideways scrolling at 320px. It needs
   Docker and pulls a browser image, so it is run by hand; the Go tests above
   hold what it found.
+- lapilli.dev, in CI on every change to it: the pages workflow builds the
+  site and [`test/a11y/site.mjs`](test/a11y/site.mjs) runs axe-core over
+  every page its sitemap lists, with the same rules, light and dark, and
+  checks for sideways scrolling at 320px. Its first run, on 2026-11-19,
+  found code blocks and tables that scroll sideways and couldn't be reached
+  by the keyboard; each now takes the focus.
 
 [docs/design/access.md](docs/design/access.md) says what the first review
 found, and what it fixed.

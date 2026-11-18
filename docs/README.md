@@ -80,7 +80,8 @@ Lapilli is, and how to install it.
 
 - [When something goes wrong](troubleshooting.md): what an error or an odd
   number means, and what to do
-- [What it doesn't do yet](limits.md)
+- [What it doesn't do yet](limits.md): the queries, states and timings a
+  replay can't reproduce yet, and what it reads only in part
 - The Helm chart: [charts/lapilli](../charts/lapilli/README.md)
 - Scripts that copy in incidents, firings, tasks and earlier versions of the
   rules, open a pull request for an approved change, and run backtests in
