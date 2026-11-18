@@ -87,13 +87,14 @@ func (p *run) changes(ctx context.Context) {
 	for _, w := range ws {
 		p.hideWho(w.cloud, w.flag, w.who)
 	}
-	var took, failed []string
-	var taken []writer
+	var took, failed, ids []string
+	var taken, untaken []writer
 	for _, w := range ws {
 		var err error
+		ids = append(ids, w.id)
 		if w.sign, w.iam, err = take(ctx, w.cloud, w.endpoint, w.who); err != nil {
 			failed = append(failed, w.flag+": "+said(err))
-			p.add(Item{ID: w.id, State: Unknown, What: "what " + w.flag + " may write isn't asked: the identity couldn't be taken (changes.cloud)"})
+			untaken = append(untaken, w)
 			continue
 		}
 		took = append(took, w.flag)
@@ -105,7 +106,10 @@ func (p *run) changes(ctx context.Context) {
 			Fix: "a change approved then fails as it is carried out: check the role, the federation or the key, and that the pod's identity may take it"})
 	} else {
 		p.add(Item{ID: "changes.cloud", State: OK, What: fmt.Sprintf("%s: the identity taken, a credential made, nothing written", strings.Join(took, ", ")),
-			Why: "what each may write is its cloud's item, changes.aws, changes.azure, changes.google or changes.oci"})
+			Why: "what each may write is said apart: " + strings.Join(ids, ", ")})
+	}
+	for _, w := range untaken {
+		p.add(Item{ID: w.id, State: Unknown, What: "what " + w.flag + " may write isn't asked: the identity couldn't be taken (changes.cloud)"})
 	}
 	p.cloudWrites(ctx, taken)
 }
