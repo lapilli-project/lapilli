@@ -1882,8 +1882,10 @@ woken in vain where only the hours are known; 검토 대상 for What to look at,
 from 알림, a notification sent; 알림 for both would read the notifications'
 count into the firings'. The Korean is 해요체 throughout; bundle 59 says
 less in it, not otherwise, as a page in another register beside the rest
-would read worse than either. `TestKoreanTerms` fails on the words it
-replaced.
+would read worse than either. What to look at's lines, and the lines
+that ask whether a feed still runs, say what to check, not ask it ("중요했다면
+기록하세요", "기록이 이어지는지 확인하세요"). `TestKoreanTerms` fails on the
+words it replaced.
 
 `TestA11yServe` serves a first-time user's deployment under `/first`
 (`firstUseServer`: labelled rules and no team, changes on and the only
