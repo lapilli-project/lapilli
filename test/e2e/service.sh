@@ -359,8 +359,10 @@ check "the rule's page says so" "$rule_page" "$caught of $firings caught somethi
 check "the rule's page: its re-fire" "$rule_firings" "$refired of its $firings firings re-fired \(50%\)\."
 check "the rule's page: the firing during the deploy" "$rule_firings" \
   "Of its firings, $deployed came during a deploy of what they are about, $deployed_caught of them catching something: precision 100% with them"
+# Its row's numbers alone in their cells, what they come with on the line
+# under it (docs/design/ui.md, bundle 59).
 check "/rules: its re-fire, and its firing during the deploy" "$(page /rules)" \
-  "ShopErrors .* $refired 50% of firings $deployed precision 100% without them"
+  "ShopErrors .* $refired $deployed .*re-fired: 50% of firings.* during deploys: precision 100% without them"
 check "/firings: the second firing, re-fired" "$(page /firings)" '○ refired ShopErrors'
 
 # Grafana's notifications: each kept, each of a firing Lapilli replayed,
