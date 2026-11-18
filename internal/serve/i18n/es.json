@@ -2120,7 +2120,6 @@
  "not known: no record": "no se sabe: sin registro",
  "not known: no record; %d notifications came while people slept that week (counted since %s)": "no se sabe: sin registro; %d notificaciones llegaron mientras la gente dormía esa semana (contadas desde %s)",
  "not known: no record; %d came while people slept (%s)": "no se sabe: sin registro; %d llegaron mientras la gente dormía (%s)",
- "Pick rules in the list to make a task for each, set their team or disposition, or propose a change for each.": "Elige reglas en la lista para crear una tarea para cada una, fijar su equipo o su disposición, o proponer un cambio para cada una.",
  "A firing that caught nothing but was a real problem nobody wrote down: say so, and it is written down as an incident, from the firing's start and end.": "Un disparo que no detectó nada pero fue un problema real que nadie registró: indícalo y se registra como incidente, con el inicio y el fin del disparo.",
  "no record to judge it by: counted, not judged": "sin registro con que juzgarlo: se cuenta, no se juzga",
  "a try of the settings judges the last week again, so it is asked for from the Settings page, in a browser, on this site": "probar los ajustes vuelve a juzgar la última semana, así que se pide desde la página de Ajustes, en un navegador, en este sitio",
@@ -2230,7 +2229,6 @@
  "No incident written down for the weeks it fired or the two weeks before: its precision isn't known, and it isn't called noisy.": "No hay incidentes anotados en las semanas en que disparó ni en las dos anteriores: su precisión no se conoce y no se considera ruidosa.",
  "A firing is judged by the incidents written down in its week and the two weeks before. With none, a firing that caught nothing can't be told from one nobody wrote down.": "Un disparo se juzga por los incidentes anotados en su semana y en las dos anteriores. Sin ninguno, un disparo que no detectó nada no se distingue de uno que nadie anotó.",
  "The week of %s.": "La semana del %s.",
- "At most %d rules at a time, %d for proposals; each proposal is backtested and waits for a person to approve it.": "Como mucho %d reglas a la vez, %d para propuestas; cada propuesta se prueba con un backtest y espera a que una persona la apruebe.",
  "None open.": "Ninguna abierta.",
  "caught nothing: %d asleep, %d off hours": "sin detectar nada: %d en horas de sueño, %d fuera de horario",
  "re-fired: %s of firings, %d of %d whole weeks": "redisparos: %s de los disparos, %d de %d semanas completas",
@@ -2238,5 +2236,9 @@
  "during deploys: precision %s without them": "durante despliegues: precisión %s sin ellos",
  "incidents: first %d, alone %d": "incidentes: primero %d, en solitario %d",
  "notifications, counted since %s": "notificaciones, contadas desde el %s",
- "No week has judged firings, so there is no precision to draw.": "Ninguna semana tiene disparos juzgados: no hay precisión que dibujar."
+ "No week has judged firings, so there is no precision to draw.": "Ninguna semana tiene disparos juzgados: no hay precisión que dibujar.",
+ "No firing in these weeks, so there is no precision to draw.": "No hubo disparos en estas semanas: no hay precisión que dibujar.",
+ "Pick rules to act on several at once.": "Elige reglas para actuar sobre varias a la vez.",
+ "At most %d rules at a time, %d for proposals, and only those you may change; each proposal is backtested and waits for a person to approve it.": "Como mucho %d reglas a la vez, %d para propuestas, y solo las que puedes cambiar; cada propuesta se prueba con un backtest y espera a que una persona la apruebe.",
+ "caught nothing or not judged: %d asleep, %d off hours": "sin detectar nada o sin juzgar: %d en horas de sueño, %d fuera de horario"
 }

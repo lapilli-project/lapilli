@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -108,24 +109,42 @@ func TestOverviewLookFirst(t *testing.T) {
 }
 
 // TestRuleNumbersAlone: a rule's row holds its numbers alone, and what
-// they come with is a line under it, as wide as the row; with firings not
-// judged, they have a column of their own, not a note under ● Nothing.
+// they come with is a line under it, as wide as the row, in tbody and
+// tfoot, with the columns there are; with firings not judged, they have a
+// column of their own, not a note under ● Nothing, and the firings
+// asleep among those that caught nothing aren't said to be all judged.
 func TestRuleNumbersAlone(t *testing.T) {
 	notes := regexp.MustCompile(`<tr class="more"><td class="pick"></td><td colspan="(\d+)"><p class="row-notes">`)
 	cellNotes := regexp.MustCompile(`<td class="n">[^<]*<br>`)
-	t.Run("judged", func(t *testing.T) {
-		s := pagesServer(t)
-		_, body, _ := get(t, s.Handler(), "/rules?weeks=12")
+	// spans checks each line of notes spans every column but the pick's,
+	// as the header has them, and says how many lines there are.
+	spans := func(t *testing.T, body string) int {
+		t.Helper()
+		head := body[strings.Index(body, `<table class="rules-table">`):]
+		head = head[:strings.Index(head, "</thead>")]
+		cols := strings.Count(head, "<th ")
+		ms := notes.FindAllStringSubmatch(body, -1)
+		for _, m := range ms {
+			if m[1] != strconv.Itoa(cols-1) {
+				t.Errorf("a line of notes spans %s columns of %d", m[1], cols)
+			}
+		}
 		if cellNotes.MatchString(body) {
 			t.Error("a number's cell holds its notes")
 		}
-		m := notes.FindStringSubmatch(body)
-		if m == nil || !strings.Contains(body, "re-fired: ") {
+		return len(ms)
+	}
+	t.Run("judged", func(t *testing.T) {
+		s := pagesServer(t)
+		_, body, _ := get(t, s.Handler(), "/rules?weeks=12")
+		if spans(t, body) == 0 || !strings.Contains(body, "re-fired: ") {
 			t.Fatal("no line of notes under a row")
 		}
-		v := rulesFor(t, s, "weeks=12")
-		if want := (rulesList{rulesView: rulesView{Deploys: v.Deploys}, Sum: v.Sum}).Cols(); m[1] != strconv.Itoa(want) {
-			t.Errorf("the notes span %s columns, want %d", m[1], want)
+		if !strings.Contains(body, `<p class="row-notes"><span class="vh"><bdi>`) {
+			t.Error("a line of notes doesn't name its rule to a screen reader")
+		}
+		if strings.Contains(body, `<th scope="col" class="n">? Not judged</th>`) {
+			t.Error("a column of firings not judged, with none")
 		}
 	})
 	t.Run("not judged", func(t *testing.T) {
@@ -142,6 +161,10 @@ func TestRuleNumbersAlone(t *testing.T) {
 		}
 		if strings.Contains(body, " not judged</span>") {
 			t.Error("firings not judged are a note under ● Nothing")
+		}
+		spans(t, body)
+		if !strings.Contains(body, "caught nothing or not judged: ") {
+			t.Error("the firings asleep of a rule with some not judged are said to have caught nothing")
 		}
 	})
 }
@@ -169,6 +192,20 @@ func TestNoRecordInALine(t *testing.T) {
 			t.Errorf("%s says why in the line", path)
 		}
 	}
+	// A rule's page, in a ledger with no incident at all.
+	none := filepath.Join(t.TempDir(), "incidents.yaml")
+	if err := os.WriteFile(none, []byte("incidents: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bare, _ := server(t, func(c *Config) { c.Incidents, c.Impact = none, "" })
+	if err := bare.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	bare.jobs(ctx, true)
+	_, body, _ := get(t, bare.Handler(), "/rules/Errors")
+	if line := "No incident written down for the weeks it fired or the two weeks before: its precision isn&#39;t known, and it isn&#39;t called noisy."; strings.Count(body, line) != 1 || strings.Count(body, why) != 1 {
+		t.Errorf("a rule's page: the line %d times, why %d times", strings.Count(body, line), strings.Count(body, why))
+	}
 }
 
 // TestPrecisionChartNone: with no week to draw a precision for, the chart
@@ -191,9 +228,18 @@ func TestPrecisionChartNone(t *testing.T) {
 		strings.Contains(body, "Precision by week; the same numbers are in the table below") {
 		t.Error("no precision to draw, and the chart is drawn empty")
 	}
-	_, body, _ = get(t, pagesServer(t).Handler(), "/")
+	ps := pagesServer(t)
+	_, body, _ = get(t, ps.Handler(), "/")
 	if strings.Contains(body, `class="chart-none"`) || !strings.Contains(body, "Precision by week; the same numbers are in the table below") {
 		t.Error("a precision to draw, and no chart")
+	}
+	// No firing at all isn't no record: said in no status's colour.
+	if _, err := ps.l.PutTeam(ctx, ledger.Team{Name: "quiet", Rules: "^NothingIsCalledThis$"}, "ana"); err != nil {
+		t.Fatal(err)
+	}
+	_, body, _ = get(t, ps.Handler(), "/?team=quiet")
+	if !strings.Contains(body, `<p class="chart-none">No firing in these weeks, so there is no precision to draw. <a href="#by-week">By week</a></p>`) {
+		t.Error("no firing, and it is said as none judged")
 	}
 }
 

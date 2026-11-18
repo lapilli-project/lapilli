@@ -53,19 +53,23 @@ what is left.
   took out what a real deployment's pages said that their reader knew
   already: the overview's ○ and ● (its legends and headers have them), the
   rules list's first paragraph (the bar, the sort and the count say it),
-  the line before the rules list's checkboxes (read out still, for the bar
-  it shows), the Precision chart's definition, and how to make a task where
-  there is none.
+  the Precision chart's definition, and how to make a task where there is
+  none. The line before the rules list's checkboxes stays, shorter ("Pick
+  rules to act on several at once."): until one is picked, the bar is
+  hidden and the column shows no header, so without it nothing says what
+  picking does.
 - **Controls.** A field, a select and a button are one height (2.25rem)
   and one corner (8px); none is a pill. A pill is a status (a badge, a
-  task's state) or a filter in effect (a chip), never a thing to press.
-  The page's main action is filled with the accent; one beside it is
-  outlined; a way elsewhere is a link, underlined, with no arrow after it
-  (an arrow is a span of time, between its ends). A select keeps its
-  browser's own arrow, and nothing is drawn beside it; a `<details>`, its
-  own marker, or one sign that stands for it (a number's "?", a row's
-  "+N"). Cards have an edge, no shadow under it, so that a card in a card
-  isn't two boxes and a shadow.
+  task's state) or a filter in effect (a chip), never a thing to press,
+  though it may be a link to what it names (a task, a proposal). The
+  page's main action is filled with the accent; one beside it is outlined;
+  a way elsewhere is a link, underlined, with no arrow after it. An arrow
+  is a span of time, between its ends, or the way through a list a page at
+  a time (the firings' "Earlier →"). A select keeps its browser's own
+  arrow, and nothing is drawn beside it; a `<details>`, its own marker, or
+  one sign that stands for it (a number's "?", a row's "+N"). Cards have
+  an edge, no shadow under it, so that a card in a card isn't two boxes
+  and a shadow.
 - **Bounds.** A page asked with a query of more than 8192 bytes is
   refused, 414, before anything is read for it. A search (`q=`, the bar's
   or the rules') of more than 500 characters is left out whole, and the
@@ -286,7 +290,7 @@ Firings and Proposals tabs. The URLs, the API and MCP are as they were.
 | `/firings` | Alert history | 발화 이력 | アラート履歴 | Historial de alertas |
 | `/outcomes` | Outcomes | 변경 효과 | 変更の効果 | Resultados |
 | `/runs` | Run history | 실행 이력 | 実行履歴 | Historial de ejecuciones |
-| `/orphans` | Cleanup | 옛 규칙 정리 | 整理対象 | Limpieza |
+| `/orphans` | Cleanup | 남은 기록 정리 | 整理対象 | Limpieza |
 
 Roles is listed for admins, who alone may open it. A group's name isn't a
 link, but Administration's, which goes to `/manage`, the page of its own
@@ -645,16 +649,19 @@ in each language: against the stylesheet before, it found 96 (Spanish at
 On the same deployment at 1070 px, a number's notes under it, in a column
 as narrow as its numbers and wrapped at each word, made a row up to
 fifteen lines tall. Since bundle 59 a cell holds its number alone, and
-what the numbers come with is a line under the row, each note saying what
-it is of ("re-fired: 20% of firings, 3 of 3 whole weeks", "caught nothing:
+what the numbers come with is a line under the row, each note saying what it is of, after the rule's name read out alone, so
+that a screen reader knows whose they are ("re-fired: 20% of firings, 3 of 3 whole weeks", "caught nothing:
 41 asleep, 35 off hours", "during deploys: precision 2% without them"),
 after the for suggested, which was in the rule's cell. The line spans the
 row from the rule's column, wraps between its notes, and is the row's: it
 has no edge above it, and is shaded with it. The firings not judged, a note
 under ● Nothing before, have a column of their own, "? Not judged", when
 any of those shown have some, so that a 0 under ● isn't read as a rule
-none of whose firings caught nothing. The sum's notes are a line under it
-alike.
+none of whose firings caught nothing. The firings asleep and off hours
+of those that caught nothing count the ones not judged too, so a row
+with some not judged says "caught nothing or not judged: 1 asleep, 0 off
+hours". The sum's notes are a line under it alike, in the line's weight,
+with no edge between them and the sum.
 
 ### The search box
 
@@ -1628,7 +1635,9 @@ change is told, never called better or worse, as Firings' and During
 deploys' are: more re-fires may be an alert that really went off again, a
 pod restarting say, which the record can't tell from noise. A chart with
 nothing to draw, Precision by week with no week judged, is a line saying
-so and the way to the table, not an empty grid.
+so and the way to the table, not an empty grid: "?" in the unknown
+status when weeks had firings and none was judged, no status when none
+fired.
 
 Each tile links to the list that makes its number, with the same team,
 over the tiles' week, last week: `week=DATE` on the rules and the
@@ -1878,7 +1887,13 @@ rule's panel says it and as Korean DevOps does, not 재생, so that the
 overview's check of the replay and a rule's Backtest are one word; 자는
 시간 오탐 for Woken for nothing, not 괜히 깨운 발화, which said people were
 woken in vain where only the hours are known; 검토 대상 for What to look at,
-옛 규칙 정리 for Cleanup. 발화 stays: a firing, as Prometheus has it, apart
+남은 기록 정리 for Cleanup, which holds what is left of rules no longer in
+effect and of impact windows. 오탐 is the ● stone's name, a verdict: where
+a count may hold firings not judged (the hours asleep and off hours of
+the firings that caught nothing, a rule's notifications for them, a
+backtest's prediction), Korean says what they are, 인시던트를 잡지 못한
+발화, and the rules list's line says "caught nothing or not judged" for a
+rule with some not judged. 발화 stays: a firing, as Prometheus has it, apart
 from 알림, a notification sent; 알림 for both would read the notifications'
 count into the firings'. The Korean is 해요체 throughout; bundle 59 says
 less in it, not otherwise, as a page in another register beside the rest

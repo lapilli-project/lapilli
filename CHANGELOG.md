@@ -88,7 +88,9 @@
   - The rules list's numbers are alone in their cells, and what they come
     with is a line under the row, each note saying what it is of: a row
     was up to fifteen lines tall. Firings not judged have a column of
-    their own, "? Not judged", where there are any.
+    their own, "? Not judged", where there are any, and a row with some
+    says its firings asleep are of those that "caught nothing or not
+    judged".
   - A rule's five numbers are in one row from 960 px, never four and one.
   - No record is said in a line, once a page ("No incident written down
     for … : precision isn't known, and no rule is called noisy."), its why
@@ -99,7 +101,8 @@
     light plate in dark mode, in place of the two circles.
   - Korean says 정탐 and 오탐 everywhere for caught something and caught
     nothing, and 백테스트 for a replay; Woken for nothing is 자는 시간 오탐,
-    What to look at 검토 대상, Cleanup 옛 규칙 정리.
+    What to look at 검토 대상, Cleanup 남은 기록 정리. Where a count may
+    hold firings not judged, Korean says 인시던트를 잡지 못한 발화, not 오탐.
 
 - **An RSA key under 2048 bits verifies no signature**: one in an identity
   provider's JWKS (`--oidc-issuer`'s, `--proxy-jwt-jwks`) isn't taken: a

@@ -2120,7 +2120,6 @@
  "not known: no record": "不明: 記録なし",
  "not known: no record; %d notifications came while people slept that week (counted since %s)": "不明: 記録なし。その週、人が寝ている時間に通知が %d 件届いた (%s から数えている)",
  "not known: no record; %d came while people slept (%s)": "不明: 記録なし。人が寝ている時間に %d 件 (%s)",
- "Pick rules in the list to make a task for each, set their team or disposition, or propose a change for each.": "一覧でルールを選ぶと、それぞれにタスクを作る、チームや対応方針を設定する、変更を提案する、ができます。",
  "A firing that caught nothing but was a real problem nobody wrote down: say so, and it is written down as an incident, from the firing's start and end.": "何も検知しなかったものの、実際には誰も記録していない問題だった発火があれば、そう指定してください。その発火の開始と終了でインシデントとして記録します。",
  "no record to judge it by: counted, not judged": "判定する記録がない: 数えるだけで判定しない",
  "a try of the settings judges the last week again, so it is asked for from the Settings page, in a browser, on this site": "設定を試すと直近 1 週間を判定し直すため、このサイトの設定ページから、ブラウザでだけ依頼できます",
@@ -2230,7 +2229,6 @@
  "No incident written down for the weeks it fired or the two weeks before: its precision isn't known, and it isn't called noisy.": "発火した週とその前の 2 週にインシデントの記録がないため、適合率は分からず、ノイズかどうかも決めません。",
  "A firing is judged by the incidents written down in its week and the two weeks before. With none, a firing that caught nothing can't be told from one nobody wrote down.": "発火は、その週と前の 2 週に記録されたインシデントで判定します。記録がなければ、本当に何もなかった発火か、誰も記録しなかった障害かを見分けられません。",
  "The week of %s.": "%s の週。",
- "At most %d rules at a time, %d for proposals; each proposal is backtested and waits for a person to approve it.": "一度に最大 %d 件のルール、変更提案は %d 件までです。提案ごとにバックテストを行い、人の承認を待ちます。",
  "None open.": "未完了のタスクはありません。",
  "caught nothing: %d asleep, %d off hours": "検知なしのうち睡眠時間 %d、業務時間外 %d",
  "re-fired: %s of firings, %d of %d whole weeks": "再発火: 発火の %[1]s、まるごとの %[3]d 週のうち %[2]d 週",
@@ -2238,5 +2236,9 @@
  "during deploys: precision %s without them": "デプロイ中の発火を除くと適合率 %s",
  "incidents: first %d, alone %d": "インシデント: 最初 %d、単独 %d",
  "notifications, counted since %s": "通知の件数、%s から集計",
- "No week has judged firings, so there is no precision to draw.": "判定された発火のある週がないため、適合率を描けません。"
+ "No week has judged firings, so there is no precision to draw.": "判定された発火のある週がないため、適合率を描けません。",
+ "No firing in these weeks, so there is no precision to draw.": "この期間に発火がないため、適合率を描けません。",
+ "Pick rules to act on several at once.": "ルールを選んでまとめて操作できます。",
+ "At most %d rules at a time, %d for proposals, and only those you may change; each proposal is backtested and waits for a person to approve it.": "一度に最大 %d 件のルール、変更提案は %d 件までで、変更できるルールだけが変わります。提案ごとにバックテストを行い、人の承認を待ちます。",
+ "caught nothing or not judged: %d asleep, %d off hours": "検知なしまたは判定なしのうち睡眠時間 %d、業務時間外 %d"
 }

@@ -193,6 +193,9 @@ type lineChart struct {
 	EndLabel  string
 	Base      float64
 	HasPoints bool
+	// Fired says a week drawn had firings: with no point, none of them
+	// judged, as against none at all.
+	Fired bool
 }
 
 type heatCell struct {
@@ -854,6 +857,7 @@ func precisionChart(l string, ws []*weekView, loc *time.Location) lineChart {
 	for i, w := range ws {
 		x := plotL + band*float64(i) + band/2
 		c.Labels = append(c.Labels, column{X: x, Mid: x, Label: w.Start.In(loc).Format("01-02"), Current: w.Current, Alt: (len(ws)-1-i)%2 == 1})
+		c.Fired = c.Fired || w.Firings > 0
 		p, ok := w.precision()
 		if !ok {
 			pen = "M"

@@ -54,7 +54,7 @@
 
 <figure class="card">
   <figcaption><h2>{{t "Precision by week"}}</h2></figcaption>
-  {{if not .Precision.HasPoints}}<p class="chart-none"><span class="status-unknown"><span aria-hidden="true">?</span> {{t "No week has judged firings, so there is no precision to draw."}}</span> <a href="#by-week">{{t "By week"}}</a></p>
+  {{if not .Precision.HasPoints}}<p class="chart-none">{{if .Precision.Fired}}<span class="status-unknown"><span aria-hidden="true">?</span> {{t "No week has judged firings, so there is no precision to draw."}}</span>{{else}}{{t "No firing in these weeks, so there is no precision to draw."}}{{end}} <a href="#by-week">{{t "By week"}}</a></p>
   {{else}}<svg class="chart" viewBox="0 0 560 200" role="img" aria-label="{{t "Precision by week; the same numbers are in the table below"}}">
     {{range .Precision.Ticks}}<line class="grid" x1="44" x2="550" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="38" y="{{.Y}}" dy="4">{{.Label}}</text>{{end}}
     <line class="base" x1="44" x2="550" y1="{{.Precision.Base}}" y2="{{.Precision.Base}}"/>

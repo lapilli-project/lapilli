@@ -107,7 +107,7 @@ func TestTeamHours(t *testing.T) {
 	if x := tile("/?team=search", "en"); !strings.Contains(x, ">–<") || !strings.Contains(x, "10 came while people slept (firings that caught nothing, 22:00–08:00 in Asia/Tokyo)") {
 		t.Errorf("the team's overview: %s", x)
 	}
-	if x := tile("/?team=search", "ko"); !strings.Contains(x, "사람이 자는 시간에 10번 울렸어요 (오탐 발화, Asia/Tokyo 기준 22:00–08:00)") || strings.Contains(x, ">10<") {
+	if x := tile("/?team=search", "ko"); !strings.Contains(x, "사람이 자는 시간에 10번 울렸어요 (인시던트를 잡지 못한 발화, Asia/Tokyo 기준 22:00–08:00)") || strings.Contains(x, ">10<") {
 		t.Errorf("in Korean: %s", x)
 	}
 	if _, body, _ := get(t, h, "/teams"); !strings.Contains(body, "at work mon-sun 08:00-18:00, asleep 22:00-08:00, in Asia/Tokyo") ||
