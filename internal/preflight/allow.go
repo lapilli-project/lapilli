@@ -35,7 +35,10 @@ type allow struct {
 	hostIs, pathIs *regexp.Regexp
 	query          func(url.Values) bool // nil: no query
 	form           func(url.Values) bool // a POST's form; nil: none
-	header         func(http.Header) bool
+	// body, when set, is what a POST's body of another type must be: the
+	// JSON Cloud Resource Manager's testIamPermissions takes.
+	body   func([]byte) bool
+	header func(http.Header) bool
 }
 
 // allowlist is every request the preflight may send. Anything else is
@@ -58,15 +61,27 @@ func (a *allowlist) add(x allow) {
 	a.mu.Unlock()
 }
 
+// first adds x before the rest, so that a request it holds is counted by
+// its API, not by a wider read's that holds it too: Azure's permissions
+// are under the subscription --alarms reads.
+func (a *allowlist) first(x allow) {
+	a.mu.Lock()
+	a.allows = append([]allow{x}, a.allows...)
+	a.mu.Unlock()
+}
+
 // check lets a request go when an allow holds it, counted by its API;
 // refuses it otherwise.
 func (a *allowlist) check(req *http.Request) error {
 	host := strings.ToLower(req.URL.Scheme + "://" + req.URL.Host)
 	var form url.Values
-	if req.Method == http.MethodPost && req.GetBody != nil && strings.HasPrefix(req.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
+	var raw []byte
+	if req.Method == http.MethodPost && req.GetBody != nil {
 		if b, err := req.GetBody(); err == nil {
-			raw, _ := io.ReadAll(io.LimitReader(b, 1<<20))
+			raw, _ = io.ReadAll(io.LimitReader(b, 1<<20))
 			b.Close()
+		}
+		if strings.HasPrefix(req.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
 			form, _ = url.ParseQuery(string(raw))
 		}
 	}
@@ -84,6 +99,7 @@ func (a *allowlist) check(req *http.Request) error {
 		case x.query != nil && !x.query(q):
 		case x.form != nil && (form == nil || !x.form(form)):
 		case x.form == nil && form != nil:
+		case x.body != nil && (form != nil || raw == nil || !x.body(raw)):
 		case x.header != nil && !x.header(req.Header):
 		default:
 			a.by[x.api]++
@@ -186,6 +202,7 @@ func alertsCount(series string) string {
 // sign-in's keys, the on-call feeds) are allowed when it learns them.
 func (p *run) allowAll() {
 	c, a := p.c, p.al
+	p.allowAsking()
 	if base := p.historyBase(); base != "" {
 		if host, path, ok := at(base); ok {
 			for _, expr := range []string{vectorOne, alertsCount(serve.AlertsSeries), alertsCount(serve.GrafanaAlertsSeries)} {
@@ -267,12 +284,21 @@ func ociOrAzureRoot(kind, path string) string {
 
 // allowURL allows a GET of exactly this URL, its query too.
 func (p *run) allowURL(api, raw string) {
+	p.allowURLAt(api, raw, false)
+}
+
+// allowURLAt is allowURL, the allow first when first is true.
+func (p *run) allowURLAt(api, raw string, first bool) {
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return
 	}
 	q := u.Query()
-	p.al.add(allow{api: api, method: http.MethodGet, host: strings.ToLower(u.Scheme + "://" + u.Host), path: u.Path,
+	add := p.al.add
+	if first {
+		add = p.al.first
+	}
+	add(allow{api: api, method: http.MethodGet, host: strings.ToLower(u.Scheme + "://" + u.Host), path: u.Path,
 		query: func(got url.Values) bool {
 			if len(q) == 0 {
 				return len(got) == 0

@@ -10,6 +10,44 @@ list named a noisy rule beside another rule's lead, Korean read "caught"
 as noise, and a few pages said more than they needed to. No schema change:
 the ledger stays at 022.
 
+### Added
+
+- **`lapilli preflight` asks what Grafana's token and each cloud's
+  identity may write, without writing** (docs/design/preflight.md, step
+  2; open question 3, decided by the maintainer on 2026-11-18: ask all
+  four clouds). With `--changes`:
+  - `grafana.write` reads Grafana's list of the token's own actions,
+    `GET /api/access-control/user/permissions`, which Grafana OSS 12.4.15
+    and 13.3.1 serve, as measured. It is ok when the token may read and
+    write every rule (an Admin's `alert.provisioning:write`), or write in
+    every folder; unknown when it writes folder by folder (an Editor's);
+    a problem naming what it lacks (a Viewer's), or when Grafana doesn't
+    take it.
+  - `changes.aws` asks IAM's policy simulator, as the role, whether its
+    policies allow `cloudwatch:PutMetricAlarm`, `DisableAlarmActions`,
+    `EnableAlarmActions`, `DeleteAlarms`, `TagResource` and
+    `ListTagsForResource`, and `aps:PutRuleGroupsNamespace`, on what
+    `--changes-in` names. It needs `iam:SimulatePrincipalPolicy` on the
+    role's own ARN, which serve never needs: without it, unknown, never a
+    problem.
+  - `changes.azure` reads the identity's permissions on each resource
+    group `--changes-in` names (a rule group named whole, on itself), each
+    entry's `actions` less its `notActions`, wildcards included.
+  - `changes.google` asks Cloud Resource Manager's `testIamPermissions` on
+    the project, as the service account, for the alerting policies'
+    create, update and delete.
+  - `changes.oci` reads the user's groups and the policies of the alarms'
+    compartment and each above it, and judges their statements for
+    `manage alarms` and `read metrics`. A statement with a condition, or
+    one not understood, is never a grant: "unknown: a policy with a
+    condition". Reading them takes `inspect` of groups, users,
+    compartments and policies in the tenancy.
+
+  Every new request reads, or, IAM's simulation and `testIamPermissions`,
+  only answers; the allowlist holds each to its path, and IAM's to
+  `Action=SimulatePrincipalPolicy` of the role alone. Nothing is written.
+  No schema change; `lapilli serve` is unchanged.
+
 ### Fixed
 
 - **The incidents list named a noisy rule as the catch** (0.31.0 to
@@ -57,6 +95,12 @@ the ledger stays at 022.
 - **Settings.** A named signal's choice to follow the match in effect says
   what that match is.
 - **Sign out** is a quiet button, no longer the boldest on the page.
+- **`changes.cloud` is ok once the identity is taken.** It was unknown, as
+  what the identity may write wasn't asked; that is now each cloud's item.
+- **`lapilli preflight` redacts what the URLs of `--alarms` and `--ruler`
+  name inside them**: an OCI compartment's OCID, an Azure subscription and
+  resource group, an Amazon workspace, a Google project, where an error
+  repeats the URL with more beside it, which 0.53.0 to 0.58.0 printed.
 
 ## [0.58.0] - 2026-11-18
 

@@ -116,6 +116,34 @@ groups:
             model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [10]}}]}
 `
 
+// pfGrafanaAdmin is the part of Grafana OSS 13.3.1's answer to GET
+// /api/access-control/user/permissions for an Admin service account's
+// token that alert rules' provisioning reads, as measured
+// (docs/design/preflight.md, "As built (step 2)").
+const pfGrafanaAdmin = `{"alert.provisioning:read":[""],"alert.provisioning:write":[""],"alert.provisioning.provenance:write":[""],
+"alert.rules:read":["folders:*"],"alert.rules:write":["folders:*"],"alert.rules:create":["folders:*"],"alert.rules:delete":["folders:*"],
+"folders:read":["folders:*","folders:uid:general"],"datasources:query":["datasources:*"]}`
+
+// simulatedAnswer is IAM's answer to SimulatePrincipalPolicy, as its query
+// API gives one (API_SimulatePrincipalPolicy.html): each action asked, on
+// each resource asked, decided so.
+func simulatedAnswer(form url.Values, decision string) string {
+	var b strings.Builder
+	b.WriteString(`<SimulatePrincipalPolicyResponse xmlns="https://iam.amazonaws.com/doc/2010-05-08/"><SimulatePrincipalPolicyResult>` +
+		`<IsTruncated>false</IsTruncated><EvaluationResults>`)
+	for i := 1; form.Get(fmt.Sprintf("ActionNames.member.%d", i)) != ""; i++ {
+		fmt.Fprintf(&b, `<member><EvalActionName>%s</EvalActionName><EvalResourceName>*</EvalResourceName><EvalDecision>%s</EvalDecision><ResourceSpecificResults>`,
+			form.Get(fmt.Sprintf("ActionNames.member.%d", i)), decision)
+		for j := 1; form.Get(fmt.Sprintf("ResourceArns.member.%d", j)) != ""; j++ {
+			fmt.Fprintf(&b, `<member><EvalResourceName>%s</EvalResourceName><EvalResourceDecision>%s</EvalResourceDecision></member>`,
+				form.Get(fmt.Sprintf("ResourceArns.member.%d", j)), decision)
+		}
+		b.WriteString(`</ResourceSpecificResults><MissingContextValues/></member>`)
+	}
+	b.WriteString(`</EvaluationResults></SimulatePrincipalPolicyResult><ResponseMetadata><RequestId>r2</RequestId></ResponseMetadata></SimulatePrincipalPolicyResponse>`)
+	return b.String()
+}
+
 // stsAnswer is STS's answer to AssumeRole.
 const stsAnswer = `<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleResult><Credentials>
 <AccessKeyId>ASIAEXAMPLEEXAMPLE</AccessKeyId><SecretAccessKey>example-secret</SecretAccessKey><SessionToken>example-session</SessionToken>
@@ -201,6 +229,9 @@ func TestPreflightAgainstFakes(t *testing.T) {
 			fmt.Fprint(w, `[]`)
 		case r.URL.Path == "/api/v1/provisioning/policies":
 			fmt.Fprint(w, `{"receiver":"default"}`)
+		case r.URL.Path == "/api/access-control/user/permissions" && r.Header.Get("Authorization") == "Bearer glsa_example_editor_token":
+			// As Grafana OSS 13.3.1 lists an Admin service account's.
+			fmt.Fprint(w, pfGrafanaAdmin)
 		default:
 			return false
 		}
@@ -221,6 +252,15 @@ func TestPreflightAgainstFakes(t *testing.T) {
 		}
 		return false
 	})
+	iam := newFake(t, "IAM", func(w http.ResponseWriter, r *http.Request, form url.Values) bool {
+		if r.Method != "POST" || r.URL.Path != "/" || form.Get("Action") != "SimulatePrincipalPolicy" ||
+			form.Get("PolicySourceArn") != "arn:aws:iam::123456789012:role/lapilli-rules" {
+			return false
+		}
+		w.Header().Set("Content-Type", "text/xml")
+		fmt.Fprint(w, simulatedAnswer(form, "allowed"))
+		return true
+	})
 	cw := alarmtest.NewCloudWatch("eu-west-1")
 	cw.Add(map[string]any{"AlarmName": "QueueDepth", "Namespace": "AWS/SQS", "MetricName": "ApproximateNumberOfMessagesVisible",
 		"Statistic": "Average", "Period": 60, "EvaluationPeriods": 5, "Threshold": 1000, "ComparisonOperator": "GreaterThanThreshold"}, "OK", nil)
@@ -239,7 +279,8 @@ func TestPreflightAgainstFakes(t *testing.T) {
 	}
 	idp := idptest.New(t, "lapilli", "", time.Now)
 	before := http.DefaultTransport
-	http.DefaultTransport = &routed{next: before, hosts: map[string]http.Handler{"sts.eu-west-1.amazonaws.com": sts, "monitoring.eu-west-1.amazonaws.com": cloudwatch}}
+	http.DefaultTransport = &routed{next: before, hosts: map[string]http.Handler{"sts.eu-west-1.amazonaws.com": sts, "monitoring.eu-west-1.amazonaws.com": cloudwatch,
+		"iam.amazonaws.com": iam}}
 	t.Cleanup(func() { http.DefaultTransport = before })
 	// AWS's credentials from the environment alone: nothing of this
 	// machine's is read.
@@ -259,7 +300,7 @@ func TestPreflightAgainstFakes(t *testing.T) {
 		"--prometheus", servers["prometheus"].URL, "--loki", servers["loki"].URL,
 		"--alarms", "cw=https://monitoring.eu-west-1.amazonaws.com",
 		"--oidc-issuer", idp.URL, "--oidc-client-id", "lapilli", "--external-url", "https://lapilli.example.com", "--admins", "ops@example.com",
-		"--changes", "--changes-aws-role", "arn:aws:iam::123456789012:role/lapilli-rules",
+		"--changes", "--changes-aws-role", "arn:aws:iam::123456789012:role/lapilli-rules", "--changes-in", "cw:Queue*",
 		"--changes-grafana-token-file", write(t, "grafana-writes", "glsa_example_editor_token"),
 		"--incidents", write(t, "incidents.yaml", "incidents: []\n"), "--config", write(t, "config.yaml", "teams: []\n"),
 		"--incidents-listen", "127.0.0.1:9091", "--incidents-token-file", write(t, "incidents-token", "incidents-token-0123456789"),
@@ -299,7 +340,7 @@ func TestPreflightAgainstFakes(t *testing.T) {
 	rep, code, out := pfReport(t, args...)
 	items := pfItems(rep)
 	for _, id := range []string{"rules.read", "rules.replayable", "expressions", "history.reach", "history.loki", "history.grafana", "history.alerts",
-		"history.intervals", "grafana.notifications", "grafana.write", "changes.cloud", "inputs.files", "secrets.files", "signin", "access",
+		"history.intervals", "grafana.notifications", "grafana.write", "changes.cloud", "changes.aws", "inputs.files", "secrets.files", "signin", "access",
 		"estimate.hourly", "estimate.backfill", "estimate.nights", "estimate.beside", "estimate.memory"} {
 		if items[id] == nil {
 			t.Errorf("no %s", id)
@@ -313,11 +354,7 @@ func TestPreflightAgainstFakes(t *testing.T) {
 		t.Errorf("%v", items["ledger.sqlite"])
 	}
 	for id, it := range items {
-		want := "ok"
-		if id == "grafana.write" || id == "changes.cloud" {
-			want = "unknown"
-		}
-		if it["state"] != want {
+		if it["state"] != "ok" {
 			t.Errorf("%s: %v", id, it)
 		}
 	}
@@ -334,12 +371,23 @@ func TestPreflightAgainstFakes(t *testing.T) {
 	// Every request a stand-in served is one the report counted, and none
 	// was refused.
 	asked := rep["asked"].(map[string]any)
-	sent := prometheus.count() + grafana.count() + loki.count() + sts.count() + cloudwatch.count() + int(idp.KeyFetches.Load()) + 1
+	sent := prometheus.count() + grafana.count() + loki.count() + sts.count() + cloudwatch.count() + iam.count() + int(idp.KeyFetches.Load()) + 1
 	if int(asked["requests"].(float64)) != sent || asked["refused"].(float64) != 0 {
 		t.Errorf("asked %v; the stand-ins were sent %d", asked, sent)
 	}
-	if sts.count() != 1 || prometheus.count() != 5 || loki.count() != 1 || idp.KeyFetches.Load() != 1 {
-		t.Errorf("STS %d, Prometheus %d %v, Loki %d, keys %d", sts.count(), prometheus.count(), prometheus.asked, loki.count(), idp.KeyFetches.Load())
+	if sts.count() != 1 || prometheus.count() != 5 || loki.count() != 1 || idp.KeyFetches.Load() != 1 || iam.count() != 1 {
+		t.Errorf("STS %d, Prometheus %d %v, Loki %d, keys %d, IAM %d", sts.count(), prometheus.count(), prometheus.asked, loki.count(), idp.KeyFetches.Load(), iam.count())
+	}
+	if by := asked["by"].(map[string]any); by["iam:aws"] != 1.0 {
+		t.Errorf("asked by %v", by)
+	}
+	// What the stand-ins were sent is reads, and the simulator's POST.
+	for _, f := range []*fake{grafana, iam} {
+		for k := range f.asked {
+			if !strings.HasPrefix(k, "GET ") && k != "POST /" {
+				t.Errorf("%s was sent %s", f.name, k)
+			}
+		}
 	}
 	if len(cw.Errs) > 0 {
 		t.Errorf("CloudWatch: %v", cw.Errs)
@@ -776,5 +824,75 @@ func TestPreflightPostgresNames(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// What the role serve writes as may write is asked of IAM's policy
+// simulator. Without iam:SimulatePrincipalPolicy, IAM refuses, naming the
+// role and its account: the item is unknown, never a problem, and says
+// what would make it known; the report says neither the account nor the
+// role, as the real scrubber has them.
+func TestPreflightWritesRedacted(t *testing.T) {
+	was := now
+	now = time.Now
+	t.Cleanup(func() { now = was })
+	sts := newFake(t, "STS", func(w http.ResponseWriter, r *http.Request, form url.Values) bool {
+		if form.Get("Action") != "AssumeRole" {
+			return false
+		}
+		w.Header().Set("Content-Type", "text/xml")
+		fmt.Fprint(w, stsAnswer)
+		return true
+	})
+	iam := newFake(t, "IAM", func(w http.ResponseWriter, r *http.Request, form url.Values) bool {
+		if form.Get("Action") != "SimulatePrincipalPolicy" {
+			return false
+		}
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `<ErrorResponse xmlns="https://iam.amazonaws.com/doc/2010-05-08/"><Error><Type>Sender</Type><Code>AccessDenied</Code>`+
+			`<Message>User: arn:aws:sts::123456789012:assumed-role/lapilli-rules/lapilli is not authorized to perform: iam:SimulatePrincipalPolicy `+
+			`on resource: role lapilli-rules because no identity-based policy allows the iam:SimulatePrincipalPolicy action</Message></Error></ErrorResponse>`)
+		return true
+	})
+	cloudwatch := newFake(t, "CloudWatch", func(w http.ResponseWriter, r *http.Request, _ url.Values) bool {
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"__type":"AccessDenied","message":"no"}`)
+		return true
+	})
+	before := http.DefaultTransport
+	http.DefaultTransport = &routed{next: before, hosts: map[string]http.Handler{"sts.eu-west-1.amazonaws.com": sts, "iam.amazonaws.com": iam,
+		"monitoring.eu-west-1.amazonaws.com": cloudwatch}}
+	t.Cleanup(func() { http.DefaultTransport = before })
+	dir := t.TempDir()
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLEEXAMPLE")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "example-secret")
+	t.Setenv("AWS_CONFIG_FILE", filepath.Join(dir, "none"))
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(dir, "none"))
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	for _, k := range []string{"AWS_PROFILE", "AWS_SESSION_TOKEN", "AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL_STS", "AWS_ROLE_ARN", "AWS_WEB_IDENTITY_TOKEN_FILE",
+		"AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"} {
+		t.Setenv(k, "")
+	}
+	rules := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - alert: Down\n        expr: up == 0\n")
+	var out bytes.Buffer
+	run([]string{"preflight", "--json", "--rules", rules, "--prometheus", "http://127.0.0.1:1", "--alarms", "cw=https://monitoring.eu-west-1.amazonaws.com",
+		"--user-header", "X-Email", "--admins", "ops@example.com", "--changes", "--changes-aws-role", "arn:aws:iam::123456789012:role/lapilli-rules",
+		"--changes-in", "cw:checkout-*", "--check-content=false", "--check-replay=false"}, &out, io.Discard)
+	var rep map[string]any
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	it := pfItems(rep)["changes.aws"]
+	if it == nil || it["state"] != "unknown" || !strings.Contains(it["fix"].(string), "iam:SimulatePrincipalPolicy on its own ARN") ||
+		!strings.Contains(it["why"].(string), "is not authorized to perform: iam:SimulatePrincipalPolicy") {
+		t.Errorf("%v", it)
+	}
+	if iam.count() != 1 {
+		t.Errorf("IAM asked %d times", iam.count())
+	}
+	for _, hidden := range []string{"123456789012", "lapilli-rules"} {
+		if strings.Contains(out.String(), hidden) {
+			t.Errorf("the report says %q:\n%s", hidden, out.String())
+		}
 	}
 }

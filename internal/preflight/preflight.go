@@ -118,6 +118,7 @@ func Run(ctx context.Context, c Config) *Report {
 	defer cancel()
 	p := &run{c: c, al: al, r: &Report{Version: 1, Lapilli: c.Version}, now: c.Now().UTC()}
 	p.allowAll()
+	p.hideScopes()
 	read := p.rules(ctx)
 	p.expressions()
 	p.history(ctx, read)

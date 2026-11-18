@@ -73,6 +73,60 @@ func googleRequest(ctx context.Context, as string) (func(*http.Request) error, e
 	}, nil
 }
 
+// GoogleAs sends a token of scope for a service account, impersonated
+// through IAM Credentials' generateAccessToken with the pod's identity, as
+// googleRequest does to write: lapilli preflight's, to ask Cloud Resource
+// Manager what the account may do (cloud-platform.read-only).
+func GoogleAs(ctx context.Context, as, scope string) (func(*http.Request) error, error) {
+	if as == "" {
+		return nil, errors.New("no service account to impersonate")
+	}
+	base, err := googleSource(ctx, "https://www.googleapis.com/auth/cloud-platform")
+	if err != nil {
+		return nil, fmt.Errorf("Google credentials: %w", err)
+	}
+	ts := oauth2.ReuseTokenSource(nil, &impersonated{ctx: ctx, base: base, email: as, scope: scope})
+	return func(req *http.Request) error {
+		t, err := ts.Token()
+		if err != nil {
+			return fmt.Errorf("Google credentials: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+t.AccessToken)
+		return nil
+	}, nil
+}
+
+// OCIUser is what an OCI config file names: the tenancy, the user and the
+// region, and Identity's host in that region, where the user's groups and
+// the policies are read.
+type OCIUser struct {
+	Tenancy, User, Region, Identity string
+}
+
+// OCIConfigUser reads an OCI config file as ociRequest does, and gives
+// what it names.
+func OCIConfigUser(file string) (OCIUser, error) {
+	p, err := common.ConfigurationProviderFromFile(file, "")
+	if err != nil {
+		return OCIUser{}, fmt.Errorf("OCI credentials: %w", err)
+	}
+	var u OCIUser
+	if u.Tenancy, err = p.TenancyOCID(); err != nil {
+		return OCIUser{}, fmt.Errorf("OCI credentials: %w", err)
+	}
+	if u.User, err = p.UserOCID(); err != nil {
+		return OCIUser{}, fmt.Errorf("OCI credentials: %w", err)
+	}
+	if u.Region, err = p.Region(); err != nil {
+		return OCIUser{}, fmt.Errorf("OCI credentials: %w", err)
+	}
+	u.Identity = common.StringToRegion(u.Region).EndpointForTemplate("identity", "https://identity.{region}.oci.{secondLevelDomain}")
+	if !strings.HasPrefix(u.Identity, "https://") {
+		u.Identity = "https://" + u.Identity
+	}
+	return u, nil
+}
+
 // impersonated is a service account's token, asked of IAM Credentials with
 // the pod's: the pod holds roles/iam.serviceAccountTokenCreator on that one
 // account, and the account what writing alerting policies needs.

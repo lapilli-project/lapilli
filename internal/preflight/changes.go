@@ -34,15 +34,13 @@ func (p *run) grafana(ctx context.Context) {
 			}
 		}
 	}
-	if s.ChangesGrafanaToken != "" {
-		p.add(Item{ID: "grafana.write", State: Unknown, What: "whether --changes-grafana-token-file's token may write alert rules isn't asked",
-			Why: "no API every Grafana serves says what a token may write without its writing; the first change approved finds out"})
-	}
+	p.grafanaWrite(ctx)
 }
 
 // changes takes each cloud identity serve writes as, with --changes: a
 // credential is made, on a request never sent, and nothing is written.
-// Whether it may write the rules or alarms named isn't known.
+// Then each is asked what it may write, of an API that says so without
+// writing (writes.go).
 func (p *run) changes(ctx context.Context) {
 	s := p.c.Serve
 	if !s.Changes {
@@ -54,8 +52,6 @@ func (p *run) changes(ctx context.Context) {
 				Why: "a Mimir's or a Cortex's can't say without writing"})
 		}
 	}
-	type as struct{ cloud, flag, who, endpoint string }
-	var ids []as
 	endpoint := func(kind string) string {
 		if k, _ := source.RulerKind(s.Ruler); s.Ruler != "" && (kind == "aws" && k == source.RulerAmazon || kind == "azure" && k == source.RulerAzure) {
 			return s.Ruler
@@ -68,55 +64,75 @@ func (p *run) changes(ctx context.Context) {
 		}
 		return ""
 	}
-	for _, x := range []as{{"aws", "--changes-aws-role", s.ChangesAWSRole, ""}, {"azure", "--changes-azure-client-id", s.ChangesAzureClientID, ""},
-		{"google", "--changes-google-service-account", s.ChangesGoogleServiceAccount, ""}, {"oci", "--changes-oci-config", s.ChangesOCIConfig, ""}} {
+	var ws []writer
+	for _, x := range []writer{{cloud: "aws", id: "changes.aws", flag: "--changes-aws-role", who: s.ChangesAWSRole},
+		{cloud: "azure", id: "changes.azure", flag: "--changes-azure-client-id", who: s.ChangesAzureClientID},
+		{cloud: "google", id: "changes.google", flag: "--changes-google-service-account", who: s.ChangesGoogleServiceAccount},
+		{cloud: "oci", id: "changes.oci", flag: "--changes-oci-config", who: s.ChangesOCIConfig}} {
 		if x.who != "" {
 			x.endpoint = endpoint(x.cloud)
-			ids = append(ids, x)
+			ws = append(ws, x)
 		}
 	}
-	if len(ids) == 0 {
+	if len(ws) == 0 {
 		return
 	}
 	if p.c.Offline {
 		p.offline("changes.cloud", "the identities serve writes as not taken")
+		for _, w := range ws {
+			p.offline(w.id, "what "+w.flag+" may write not asked")
+		}
 		return
 	}
+	for _, w := range ws {
+		p.hideWho(w.cloud, w.flag, w.who)
+	}
 	var took, failed []string
-	for _, x := range ids {
-		if err := p.take(ctx, x.cloud, x.endpoint, x.who); err != nil {
-			failed = append(failed, x.flag+": "+said(err))
+	var taken []writer
+	for _, w := range ws {
+		var err error
+		if w.sign, w.iam, err = take(ctx, w.cloud, w.endpoint, w.who); err != nil {
+			failed = append(failed, w.flag+": "+said(err))
+			p.add(Item{ID: w.id, State: Unknown, What: "what " + w.flag + " may write isn't asked: the identity couldn't be taken (changes.cloud)"})
 			continue
 		}
-		took = append(took, x.flag)
+		took = append(took, w.flag)
+		taken = append(taken, w)
 	}
 	slices.Sort(took)
 	if len(failed) > 0 {
 		p.add(Item{ID: "changes.cloud", State: Problem, What: "an identity serve writes as couldn't be taken", Why: strings.Join(failed, "; "),
 			Fix: "a change approved then fails as it is carried out: check the role, the federation or the key, and that the pod's identity may take it"})
-		return
+	} else {
+		p.add(Item{ID: "changes.cloud", State: OK, What: fmt.Sprintf("%s: the identity taken, a credential made, nothing written", strings.Join(took, ", ")),
+			Why: "what each may write is its cloud's item, changes.aws, changes.azure, changes.google or changes.oci"})
 	}
-	p.add(Item{ID: "changes.cloud", State: Unknown, What: fmt.Sprintf("%s: the identity taken, a credential made, nothing written", strings.Join(took, ", ")),
-		Why: "whether it may write the rules or alarms named isn't asked in this release; the first change approved finds out"})
+	p.cloudWrites(ctx, taken)
 }
 
 // take makes the credential serve writes as for a cloud, signing a request
 // to endpoint that is never sent: AWS assumes the role, Google Cloud asks
 // IAM Credentials for the service account's token, Azure asks Microsoft
-// Entra for the identity's, OCI reads the config and its key.
-func (p *run) take(ctx context.Context, kind, endpoint, as string) error {
+// Entra for the identity's, OCI reads the config and its key. It gives
+// the signer, and, for AWS, one for IAM's API with the same credentials.
+// Tests replace it.
+var take = func(ctx context.Context, kind, endpoint, as string) (sign, iam func(*http.Request) error, err error) {
 	if endpoint == "" {
-		return fmt.Errorf("no --ruler or --alarms of %s to write", kind)
+		return nil, nil, fmt.Errorf("no --ruler or --alarms of %s to write", kind)
 	}
 	each, cancel := context.WithTimeout(ctx, eachTime)
 	defer cancel()
-	sign, err := cloud.Request(each, kind, endpoint, as)
+	if _, region, ok := iamOf(as); kind == "aws" && ok {
+		sign, iam, err = cloud.AWSAs(each, endpoint, as, "iam", region)
+	} else {
+		sign, err = cloud.Request(each, kind, endpoint, as)
+	}
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	req, err := http.NewRequestWithContext(each, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	return sign(req)
+	return sign, iam, sign(req)
 }

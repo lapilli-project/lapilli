@@ -610,6 +610,14 @@ kind of ruler, are used only for writes:
 
   It has no `delete`: Lapilli never deletes a rule group.
 
+`lapilli preflight` (docs/design/preflight.md) says whether each write
+identity may make these writes, asked without writing: for the Amazon role,
+IAM's policy simulator, which takes **`iam:SimulatePrincipalPolicy` on the
+role's own ARN** (it shows the role only what its own policies allow; serve
+never needs it, and without it `changes.aws` is unknown); for Azure's
+identity, its permissions on the resource group, or on the rule group
+named.
+
 Without one, a Mimir's or a Cortex's writes are sent with no token, for a
 ruler reached only inside the cluster, and Amazon's and Azure's with the
 pod's own identity. The Amazon and Azure paths were tested against
@@ -739,6 +747,19 @@ for writes, is given only this:
   `manage` is the only verb with `ALARM_UPDATE`; the condition leaves out
   the rest. OCI's alarms aren't PromQL, so Lapilli never deletes or makes
   one again.
+
+`lapilli preflight` says whether each of these may make the writes, asked
+without writing (docs/design/preflight.md): CloudWatch's role through IAM's
+policy simulator, which takes `iam:SimulatePrincipalPolicy` on the role's
+own ARN (without it, `changes.aws` is unknown); Azure's identity by its
+permissions on the resource group of each alert rule named (one given on
+the alert rule alone reads as unknown); Google's service account by Cloud
+Resource Manager's `testIamPermissions` on the project, which needs no
+permission; OCI's user by its groups and the policies of the compartment
+and those above it, which takes `inspect groups`, `inspect users`,
+`inspect compartments` and `inspect policies` in the tenancy. The OCI
+policy above has a condition, which `lapilli preflight` never counts as a
+grant: it says `changes.oci` is unknown, "a policy with a condition".
 
 None of the four was run against an account: each was tested against a
 stand-in answering as its API documents show.

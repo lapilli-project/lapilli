@@ -588,7 +588,8 @@ func TestOffline(t *testing.T) {
 
 // IDs are every item's id a preflight gives.
 var IDs = []string{"rules.read", "rules.replayable", "rules.history", "expressions", "history.reach", "history.loki", "history.grafana",
-	"history.alerts", "history.intervals", "grafana.notifications", "grafana.write", "changes.cloud", "changes.ruler", "inputs.files",
+	"history.alerts", "history.intervals", "grafana.notifications", "grafana.write", "changes.cloud", "changes.aws", "changes.azure",
+	"changes.google", "changes.oci", "changes.ruler", "inputs.files",
 	"secrets.files", "ledger.sqlite", "ledger.postgres", "signin", "access", "estimate.hourly", "estimate.backfill", "estimate.nights",
 	"estimate.beside", "estimate.memory"}
 
@@ -663,6 +664,9 @@ func TestPreflightStable(t *testing.T) {
 			given[part[:strings.Index(part, `"`)]] = true
 		}
 		for _, part := range strings.Split(string(src), `p.offline("`)[1:] {
+			given[part[:strings.Index(part, `"`)]] = true
+		}
+		for _, part := range strings.Split(string(src), `id: "`)[1:] {
 			given[part[:strings.Index(part, `"`)]] = true
 		}
 		for _, part := range strings.Split(string(src), `"estimate.`)[1:] {
