@@ -9,8 +9,9 @@ way.
 ## What it covers
 
 The pages of `lapilli serve`: the overview, the rules, incidents,
-proposals, settings and the rest. `lapilli verdict` prints text, JSON
-with `--json`, and Markdown for a pull request's backtest. The docs at [lapilli.dev](https://lapilli.dev)
+proposals, settings and the rest. `lapilli verdict` prints text, or
+`--json`, `--csv` and `--metrics` for other tools, and with `--compare`,
+`--markdown` for a pull request. The docs at [lapilli.dev](https://lapilli.dev)
 haven't had the same checks as serve's pages.
 
 ## What the pages aim for
@@ -23,10 +24,10 @@ who uses a screen reader day to day has reviewed them yet.
   without JavaScript.
 - A skip link to the main content, landmarks, one h1, headings in order,
   and a name for every control.
-- Every chart's numbers are in a table below it, and a state is never told
-  by colour alone.
-- Text at 4.5:1 contrast or more, borders and the focus ring at 3:1, light
-  and dark.
+- Every chart's numbers are in text too: in a table below it, or for a
+  sparkline, in its label. A state is never told by colour alone.
+- Text at 4.5:1 contrast or more; field borders, link underlines and the
+  focus ring at 3:1; light and dark.
 - Nothing scrolls sideways at 320 CSS pixels, which is 200% zoom on a 640px
   window.
 - Each page says its language, and the language picker names each language
@@ -38,12 +39,14 @@ who uses a screen reader day to day has reviewed them yet.
   every language and holds its structure (`TestPagesAccessible`,
   `TestPagesAccessibleInMoreStates`), the colours' contrast
   (`TestContrast`), each state to more than a colour (`TestStatusKinds`),
-  each chart against its table (`TestChartsInTables`), and the stylesheet's
-  focus ring and lack of motion (`TestCSSAccessible`).
+  the overview's and outcomes' charts against their tables
+  (`TestChartsInTables`), and the stylesheet's focus ring and lack of
+  motion (`TestCSSAccessible`).
 - By hand: [`test/a11y/axe.sh`](test/a11y/axe.sh) runs axe-core over every
   page in a headless Chromium, in each language, light and dark, with the
   WCAG A and AA rules, and checks for sideways scrolling at 320px. It needs
-  Docker, which is why it isn't in CI.
+  Docker and pulls a browser image, so it is run by hand; the Go tests above
+  hold what it found.
 
 [docs/design/access.md](docs/design/access.md) says what the first review
 found, and what it fixed.
@@ -78,6 +81,6 @@ rest.
 
 ## Who looks after it
 
-The maintainers in [MAINTAINERS.md](MAINTAINERS.md), as part of
+The maintainer in [MAINTAINERS.md](MAINTAINERS.md), as part of
 `lapilli serve`. Someone who would look after accessibility as an area of
 their own is welcome; [ROADMAP.md](ROADMAP.md) lists what's left.
