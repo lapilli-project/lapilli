@@ -6,7 +6,11 @@ fired, which `lapilli verdict --check-replay` finds. Include the rule, with name
 if you can, what really fired; the issue form "A replay that differs" asks
 for each. After that, see [ROADMAP.md](ROADMAP.md) for areas that need
 someone, and [MAINTAINERS.md](MAINTAINERS.md) for how contributing leads to
-maintaining.
+maintaining. To start small, an issue labelled
+[good first issue](https://github.com/lapilli-project/lapilli/labels/good%20first%20issue) says where its change goes
+and when it's done; one labelled
+[help wanted](https://github.com/lapilli-project/lapilli/labels/help%20wanted) needs an account or a language
+the maintainer doesn't have. Say in a comment which one you're taking.
 
 Questions and ideas are welcome in
 [Discussions](https://github.com/lapilli-project/lapilli/discussions), and

@@ -182,6 +182,8 @@ workspace, Loki alerts, an incident tool.
 
 - [Roadmap](https://github.com/lapilli-project/lapilli/blob/main/ROADMAP.md):
   what it doesn't do yet, area by area, with where each lives in the code
+- [Good first issues](https://github.com/lapilli-project/lapilli/labels/good%20first%20issue):
+  small changes, each saying where it goes and when it's done
 - [Maintainers](https://github.com/lapilli-project/lapilli/blob/main/MAINTAINERS.md):
   how contributing in an area leads to maintaining it
 - [Governance](https://github.com/lapilli-project/lapilli/blob/main/GOVERNANCE.md):
