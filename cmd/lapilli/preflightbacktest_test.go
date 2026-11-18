@@ -287,3 +287,19 @@ func TestPreflightTrustAsServe(t *testing.T) {
 		t.Errorf("exit %d: %v, want %v", code, it, want)
 	}
 }
+
+// --offline with rules read from an API (--ruler, --grafana): the rules
+// aren't read, so what a backtest of them asks is unknown, never ok.
+func TestPreflightBacktestsRulesUnread(t *testing.T) {
+	trust := write(t, "trust.yaml", "trust:\n  - {name: plain, token_file: /etc/lapilli/backtest/token}\n")
+	for _, src := range [][]string{{"--ruler", "http://mimir.example.com/prometheus/config/v1/rules"},
+		{"--grafana", "https://grafana.example.com", "--grafana-token-file", "/etc/lapilli/grafana-token"}} {
+		rep, _, _ := pfReport(t, append(src, "--offline", "--prometheus", "https://prometheus.example.com", "--max-rate", "0.5",
+			"--backtest-listen", ":8084", "--backtest-trust", trust)...)
+		items := pfItems(rep)
+		if items["rules.read"]["state"] != "unknown" || items["estimate.backtests"]["state"] != "unknown" ||
+			!strings.Contains(items["estimate.backtests"]["why"].(string), "couldn't all be read") {
+			t.Errorf("%s: %v %v", src[0], items["rules.read"], items["estimate.backtests"])
+		}
+	}
+}
