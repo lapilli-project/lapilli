@@ -154,6 +154,35 @@ func TestReportFirings(t *testing.T) {
 		t.Errorf("a team's, cut: %d of %d, truncated %v", len(cutMine.Items), cutMine.Total, cutMine.Truncated)
 	}
 
+	// Cut by length too: the items, as report.ready encodes them, kept
+	// within reportFiringsBytes; whichever cut comes first.
+	_, _, _, _, whole := ready(everyone)
+	var enc struct{ Items json.RawMessage }
+	if err := json.Unmarshal([]byte(whole), &enc); err != nil {
+		t.Fatal(err)
+	}
+	wasBytes := reportFiringsBytes
+	t.Cleanup(func() { reportFiringsMost, reportFiringsBytes = was, wasBytes })
+	n := len(rep.Firings)
+	for _, c := range []struct{ most, bytes, want int }{
+		{was, len(enc.Items), n}, {was, len(enc.Items) - 1, n - 1}, {was, len("[]"), 0}, {3, len(enc.Items) - 1, 3}, {n, len(enc.Items) - 1, n - 1},
+	} {
+		reportFiringsMost, reportFiringsBytes = c.most, c.bytes
+		_, _, text, sec, raw := ready(everyone)
+		var got struct{ Items json.RawMessage }
+		json.Unmarshal([]byte(raw), &got)
+		cut := c.want < n
+		line := fmt.Sprintf("Firings that started in the span: %d, each listed in the JSON.", n)
+		if cut {
+			line = fmt.Sprintf("Firings that started in the span: %d; the JSON lists the first %d.", n, c.want)
+		}
+		if !reflect.DeepEqual(bare(sec.Items), rep.Firings[:c.want]) || sec.Total != n || sec.Truncated != cut || len(got.Items) > c.bytes ||
+			!strings.Contains(text, line) {
+			t.Errorf("%d at most, %d bytes: %d of %d, truncated %v, %d bytes, %q", c.most, c.bytes, len(sec.Items), sec.Total, sec.Truncated, len(got.Items), text)
+		}
+	}
+	reportFiringsMost, reportFiringsBytes = was, wasBytes
+
 	// None: a team that owns no rule, and a span nothing started in.
 	for _, r := range []ledger.Scheduled{ofNone, quiet} {
 		_, _, text, sec, raw := ready(r)

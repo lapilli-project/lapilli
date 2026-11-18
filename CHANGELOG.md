@@ -11,8 +11,11 @@
   `report.ready`'s `numbers.firings` is `items`, each firing that started in
   the span as `/api/v1/report`'s `firings[]` has it, with its rule's
   `severity` and `team` as the CSV's columns have them, in order of their
-  start, then of their rule; `total`; and `truncated`, true past the 5,000
-  it lists, which are all it reads whole: the rest are counted. A team's
+  start, then of their rule; `total`; and `truncated`, true when it was cut:
+  at 5,000, which are all it reads whole (the rest are counted), or at 1
+  MiB of `items`, whichever comes first, as receivers often cap a post at
+  a few MiB and one refused is tried again for about eight hours, then
+  dropped. A team's
   report lists its rules' firings alone, judged by the incidents it owns.
   Its line in the text says how many, and that they were cut; the names and
   labels in `items` are as written, as every field that names a thing is.

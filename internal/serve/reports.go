@@ -3,6 +3,7 @@ package serve
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -781,10 +782,16 @@ func (s *Server) suggestionsSection(ctx context.Context, from, to time.Time, in 
 }
 
 // reportFiringsMost is how many firings the firings section lists, at
-// most, so that report.ready is held to them whatever its span, a firing's
-// labels 4 KB at most as the ledger keeps them: its total says how many
-// there were. A var, for the tests.
-var reportFiringsMost = 5000
+// most, and reportFiringsBytes how long they are, as JSON: whichever is
+// reached first cuts the list, and its total says how many there were.
+// Receivers often cap a body at a few MiB, and a post one refuses is tried
+// again, ten times over about eight hours, and then not at all, so
+// report.ready keeps well under that whatever its span. Vars, for the
+// tests.
+var (
+	reportFiringsMost  = 5000
+	reportFiringsBytes = 1 << 20
+)
 
 // listedFiring is a firing as the firings section lists it: as
 // /api/v1/report's firings[] has it, and its rule's severity and team, as
@@ -820,16 +827,28 @@ func (s *Server) firingsSection(ctx context.Context, rep *verdict.Report, from, 
 	for _, r := range rep.Rules {
 		severity[r.Rule] = r.Severity
 	}
-	list := firingsList{Items: make([]listedFiring, 0, len(fs)), Total: total, Truncated: total > len(fs)}
+	list := firingsList{Items: make([]listedFiring, 0, len(fs)), Total: total}
+	// items as report.ready encodes them: [, each, a comma between, ].
+	size := len("[]")
 	for _, f := range fs {
-		list.Items = append(list.Items, listedFiring{Judged: f, Severity: severity[f.Rule], Team: own.teamOf(f.Rule)})
+		x := listedFiring{Judged: f, Severity: severity[f.Rule], Team: own.teamOf(f.Rule)}
+		b, err := json.Marshal(x)
+		if err != nil {
+			return "", nil, err
+		}
+		if size+len(b)+min(len(list.Items), 1) > reportFiringsBytes {
+			break
+		}
+		size += len(b) + min(len(list.Items), 1)
+		list.Items = append(list.Items, x)
 	}
+	list.Truncated = total > len(list.Items)
 	l := s.cfg.Lang
 	switch {
 	case total == 0:
 		return tr(l, "No firing started in the span."), list, nil
 	case list.Truncated:
-		return tr(l, "Firings that started in the span: %d; the JSON lists the first %d.", total, len(fs)), list, nil
+		return tr(l, "Firings that started in the span: %d; the JSON lists the first %d.", total, len(list.Items)), list, nil
 	}
 	return tr(l, "Firings that started in the span: %d, each listed in the JSON.", total), list, nil
 }

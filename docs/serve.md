@@ -262,11 +262,15 @@ coming back, say. In `report.ready`, `numbers.firings` is `items`, the
 firings that started in the span, each as `/api/v1/report`'s `firings[]`
 has it ([fields](numbers.md#the-reports-fields)) with its rule's `severity`
 and `team` as the CSV's columns have them, in order of their start, then of
-their rule; `total`, how many there were; and `truncated`, true when there
-were more than the 5,000 it lists, the first of them. A team's report lists
-its own rules' firings alone, judged by the incidents it owns. Its line in
-the text says only how many; the rules' names and the labels in `items` are
-as written, so escape them as `digest.ready`'s.
+their rule; `total`, how many there were; and `truncated`, true when it
+lists only the first of them. It lists 5,000 at most, and `items` is 1 MiB
+of JSON at most, whichever comes first: receivers often cap what a post
+may carry at a few MiB, and a post one refuses is tried again, ten times
+over about eight hours, then not at all, so `report.ready` keeps well under
+that. A team's report lists its own rules' firings alone, judged by the
+incidents it owns. Its line in the text says only how many, and how many
+it lists when it was cut; the rules' names and the labels in `items` are as
+written, so escape them as `digest.ready`'s.
 
 The weekly digest is shown first among them. The flags define it until an
 admin changes it on the Reports page or with `PUT /api/v1/reports/digest`

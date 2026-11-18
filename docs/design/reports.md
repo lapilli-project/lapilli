@@ -277,8 +277,10 @@ What was built differs from the above, or settles it, here:
   its own of each. Its numbers are `items`, each as `/api/v1/report`'s
   `firings[]` has it with its rule's `severity` and `team`, in order of their
   start, then of their rule; `total`; and `truncated`. It lists 5,000 at
-  most, so that `report.ready` is held to them whatever the span, with a
-  firing's labels 4 KB at most as the ledger keeps them: only those are
-  read whole, the rest counted. A team's report lists its rules'
+  most, and `items` is 1 MiB of JSON at most, whichever comes first:
+  receivers often cap a post at a few MiB, and one refused is tried again,
+  ten times over about eight hours, then not at all, so `report.ready` keeps
+  well under that whatever the span. Only those 5,000 are read whole, the
+  rest counted. A team's report lists its rules'
   firings alone, judged by the incidents it owns, as its other numbers are.
   The text says how many, and that they were cut; it names none.
