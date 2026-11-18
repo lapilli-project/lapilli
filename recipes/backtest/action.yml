@@ -26,6 +26,23 @@
 #             incidents: incidents.yaml
 #             prometheus-url: ${{ vars.PROMETHEUS_URL }}
 #             since: 14d
+#
+# Or through lapilli serve's backtest port (serve-url), which backtests the
+# rules with its own access to the history, judged by its record: nothing
+# is installed, and the job holds no credential for the metrics, only the
+# ID token it asks GitHub for (audience), which needs id-token: write:
+#
+#   permissions:
+#     contents: read
+#     pull-requests: write
+#     id-token: write
+#   ...
+#         - uses: lapilli-project/lapilli/recipes/backtest@COMMIT # vX.Y.Z
+#           with:
+#             paths: alerts
+#             serve-url: https://lapilli-ci.example.com
+#             audience: https://lapilli-ci.example.com
+#             since: 14d
 name: Lapilli alert rules backtest
 description: Backtest the alert rules a pull request changes against your metric history, and comment the report on the pull request.
 author: Lapilli
@@ -102,6 +119,18 @@ inputs:
   login:
     description: The account the token comments as, for a GitHub App's token (NAME[bot]). GitHub says it for a person's, and the job's own is github-actions[bot].
     default: ""
+  serve-url:
+    description: lapilli serve's backtest port (--backtest-listen), such as https://lapilli-ci.example.com, to send the rules to instead of installing Lapilli; serve backtests them with its own access to the history, judged by its record. https, or plain http, through no proxy, to a Service in the cluster (FULLNAME-backtest.NAMESPACE.svc:8084). It needs audience, and the job's permissions id-token write. Serve decides where the history is and what judges the firings, so prometheus-url, auth, gcp-project, aws-region, incidents, impact, impact-for and match are refused with it, and of args only --tz and --rules-select are taken.
+    default: ""
+  audience:
+    description: The audience of the ID token asked of GitHub for serve-url, as serve's trust file names it for this repository; serve-url itself, as no other service takes it. Another is refused unless audience-any is true. A cloud's audience (sts.amazonaws.com, api://AzureADTokenExchange, //iam.googleapis.com/...) and GitHub's default (https://github.com/OWNER) are refused either way, as other services take a token for them. The token is masked in the job's log.
+    default: ""
+  audience-any:
+    description: true to take an audience other than serve-url, for a trust file whose audience is another; the step's log says so.
+    default: "false"
+  serve-wait:
+    description: How long to wait for serve-url's report, such as 30m (the default); past it, the backtest is cancelled, and the comment says so.
+    default: ""
 runs:
   using: composite
   steps:
@@ -131,29 +160,62 @@ runs:
         FAIL_ON_EXPECTATIONS: ${{ inputs.fail-on-expectations }}
         EXPECT_REQUIRED: ${{ inputs.expect-required }}
         GITHUB_LOGIN: ${{ inputs.login }}
+        LAPILLI_SERVE: ${{ inputs.serve-url }}
+        LAPILLI_SERVE_AUDIENCE: ${{ inputs.audience }}
+        LAPILLI_AUDIENCE_ANY: ${{ inputs.audience-any }}
+        SERVE_WAIT: ${{ inputs.serve-wait }}
         PR: ${{ github.event.pull_request.number }}
       run: |
         set -eu
-        # The release this action is at: the first CHANGELOG.md names, in
-        # the files GitHub fetched for the uses line, when they are
-        # Lapilli's (its go.mod says so): at a release's tag, that release;
-        # at a commit between two, the one before it. Nothing is asked.
-        tree=$GITHUB_ACTION_PATH/../..
-        own=
-        if [ "$(head -n 1 "$tree/go.mod" 2>/dev/null)" = "module lapilli.dev" ]; then
-          own=$(awk 'match($0, /^## \[[0-9]+\.[0-9]+\.[0-9]+\]/) { print "v" substr($0, 5, RLENGTH - 5); exit }' "$tree/CHANGELOG.md" 2>/dev/null || :)
-        fi
-        if [ -z "$LAPILLI_VERSION" ]; then
-          if [ -z "$own" ]; then
-            echo "action.yml: give version, the Lapilli release to install: this action's files don't say which release they are" >&2
+        if [ -n "$LAPILLI_SERVE" ]; then
+          # Through lapilli serve: nothing is installed. github.sh asks
+          # GitHub for the job's ID token for audience, as
+          # core.getIDToken(audience) does, right before it is sent.
+          if [ -z "$LAPILLI_SERVE_AUDIENCE" ]; then
+            echo "action.yml: serve-url needs audience, the audience serve's trust file names for this repository (its URL, as a rule)" >&2
             exit 1
           fi
-          LAPILLI_VERSION=$own
-          echo "action.yml: Lapilli $own, the release this action is at" >&2
-        elif [ -n "$own" ] && [ "$LAPILLI_VERSION" != "$own" ]; then
-          echo "action.yml: version isn't $own, the release this action is at: leave it out, and the uses line pins the release too" >&2
+          for given in "prometheus-url $LAPILLI_PROMETHEUS" "auth $LAPILLI_AUTH" "gcp-project $LAPILLI_GCP_PROJECT" "aws-region $LAPILLI_AWS_REGION"; do
+            if [ -n "${given#* }" ]; then
+              echo "action.yml: ${given%% *}: lapilli serve decides where the history is, and how it is asked: leave it out with serve-url" >&2
+              exit 1
+            fi
+          done
+          if [ -n "$LAPILLI_VERSION$LAPILLI_SHA256" ]; then
+            echo "action.yml: version and sha256 install Lapilli, which serve-url doesn't: passed over" >&2
+          fi
+          unset LAPILLI_VERSION LAPILLI_SHA256
+          case $LAPILLI_AUDIENCE_ANY in
+            true) export SERVE_AUDIENCE_ANY=1 ;;
+            false | '') ;;
+            *) echo "action.yml: audience-any: want true or false" >&2; exit 1 ;;
+          esac
+        else
+          if [ -n "$LAPILLI_SERVE_AUDIENCE$SERVE_WAIT" ] || [ "$LAPILLI_AUDIENCE_ANY" = true ]; then
+            echo "action.yml: audience, audience-any and serve-wait are for serve-url: give it too" >&2
+            exit 1
+          fi
+          # The release this action is at: the first CHANGELOG.md names, in
+          # the files GitHub fetched for the uses line, when they are
+          # Lapilli's (its go.mod says so): at a release's tag, that release;
+          # at a commit between two, the one before it. Nothing is asked.
+          tree=$GITHUB_ACTION_PATH/../..
+          own=
+          if [ "$(head -n 1 "$tree/go.mod" 2>/dev/null)" = "module lapilli.dev" ]; then
+            own=$(awk 'match($0, /^## \[[0-9]+\.[0-9]+\.[0-9]+\]/) { print "v" substr($0, 5, RLENGTH - 5); exit }' "$tree/CHANGELOG.md" 2>/dev/null || :)
+          fi
+          if [ -z "$LAPILLI_VERSION" ]; then
+            if [ -z "$own" ]; then
+              echo "action.yml: give version, the Lapilli release to install: this action's files don't say which release they are" >&2
+              exit 1
+            fi
+            LAPILLI_VERSION=$own
+            echo "action.yml: Lapilli $own, the release this action is at" >&2
+          elif [ -n "$own" ] && [ "$LAPILLI_VERSION" != "$own" ]; then
+            echo "action.yml: version isn't $own, the release this action is at: leave it out, and the uses line pins the release too" >&2
+          fi
+          export LAPILLI_VERSION
         fi
-        export LAPILLI_VERSION
         # The token, in a file only this job's user can read, gone when the
         # step ends; github.sh gives it to curl on stdin.
         umask 077

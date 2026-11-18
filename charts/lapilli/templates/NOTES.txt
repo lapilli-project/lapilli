@@ -54,6 +54,17 @@ the UI, or anyone who may make a ConfigMap here runs:
 
 Deleting it resumes them.
 {{- end }}
+{{- with $s.backtest }}
+{{- if .enabled }}
+
+Pull request backtests are taken at {{ include "lapilli.fullname" $ }}-backtest:{{ .service.port | default .port }}, from the CI jobs the trust file in the ConfigMap {{ .trust.configMap.name }} names. serve reads it as it starts: after changing it, run
+
+  kubectl -n {{ $.Release.Namespace }} rollout restart deployment/{{ include "lapilli.fullname" $ }}
+{{- if $s.networkPolicy.egress.enabled }}
+serve.networkPolicy.egress must let lapilli reach each CI issuer's discovery document and keys, over https.
+{{- end }}
+{{- end }}
+{{- end }}
 {{- else }}
 lapilli verdict runs at "{{ .Values.schedule }}" ({{ .Values.timeZone }}). To run it now:
 

@@ -85,6 +85,15 @@ func (s *Server) lead(ctx context.Context, failed chan<- error) {
 			s.notify(ctx)
 		}()
 	}
+	if s.btPort != nil {
+		// Pull request backtests, beside the worker: neither waits for
+		// the other.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.lane(ctx)
+		}()
+	}
 	if s.cfg.OnCall != nil {
 		wg.Add(1)
 		go func() {

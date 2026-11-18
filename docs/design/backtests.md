@@ -1,16 +1,23 @@
 # Pull request backtests through serve: no metric credentials in CI
 
-Status: accepted. Merged on 2026-11-18, before its week was out, by the
-maintainer's decision, with open questions 1, 5 and 6 decided ("Open
-questions" below); 2, 3 and 4 wait for the steps that need them. Under
-[GOVERNANCE.md](../../GOVERNANCE.md) this is a new
-kind of data in the ledger (the backtests CI jobs ask for, kept a day), and
-a port that takes input from outside with a token of a new kind, so it is
-designed first, as a pull request, and reviewed as an attacker would
-([CONTRIBUTING.md](../../CONTRIBUTING.md); "Security" below). The companion
-to [expectations.md](expectations.md) (#81), whose first step (#86,
-`--expect`) it carries as it is, and to
+Status: accepted; step 1 built.
+Merged on 2026-11-18, before its week was out, by the maintainer's
+decision, with open questions 1, 5 and 6 decided ("Open questions"
+below); 2, 3 and 4 wait for the steps that need them. Under
+[GOVERNANCE.md](../../GOVERNANCE.md) this is a new kind of data in the
+ledger (the backtests CI jobs ask for, kept a day), and a port that takes
+input from outside with a token of a new kind, so it is designed first,
+as a pull request, and reviewed as an attacker would
+([CONTRIBUTING.md](../../CONTRIBUTING.md); "Security" below). The
+companion to [expectations.md](expectations.md) (#81), whose first step
+(#86, `--expect`) it carries as it is, and to
 [recipes/backtest](../../recipes/backtest).
+
+Step 1 is built: in serve, the port, the trust file, the lane and schema
+023, and the chart's `serve.backtest`; in the recipes, their serve mode
+(`LAPILLI_SERVE`) and the action's inputs (`serve-url`, `audience`,
+`serve-wait`). Where the code had to do otherwise than this note says, "As
+built (step 1)" below says so.
 
 ## Why
 
@@ -136,6 +143,7 @@ trust:
     hourly: 30                   # backtests it may start in an hour
   - name: monitoring-gitlab
     issuer: https://gitlab.example.com
+    ci: gitlab                   # a GitLab of one's own isn't known by its URL
     audience: https://lapilli-ci.example.com
     claims:
       project_id: "42"
@@ -662,6 +670,237 @@ on stdin).
    maintainer: a list of repositories**, each by its id; an entry never
    trusts an organization whole, so a repository made in it later is not
    trusted until it is named.
+
+## As built (step 1)
+
+Where step 1 does otherwise than the sections above say, or says more:
+
+- **The event is pinned too.** For the three CIs known, an entry must pin
+  the event as well as the repository's id: `event_name` to
+  `pull_request` or `push` (GitHub, Forgejo), `pipeline_source` to
+  `merge_request_event` or `push` (GitLab). `pull_request_target`,
+  `workflow_run` and the like run a fork's pull request in the
+  repository's own context, so an entry naming one, or none, doesn't
+  start. A CI is known by `ci:` (`github`, `gitlab`, `forgejo`), or from
+  its issuer: GitHub's, `https://gitlab.com`, an issuer ending in
+  `/api/actions`. Any other issuer's entry pins `sub` or another claim,
+  one value each.
+- **Keys at the issuer's own origin.** The JWKS a discovery document names
+  is taken only when it is https at the issuer's origin; `jwks_url` names
+  it otherwise. A CI's RSA keys are taken at 4096 bits at most, beside
+  the 2048 bits at least every identity provider's are held to (#136),
+  and a failed discovery is asked again once a minute at most, not every
+  ten seconds as a sign-in's is.
+- **One audience.** A token naming several audiences is refused, even with
+  the entry's among them: it was made for others too. `iat` may be up to
+  five minutes ahead, the leeway `Bearer` gives.
+- **The audiences refused are listed**: GitHub's default (under
+  `https://github.com/`), one at the issuer's own origin (Forgejo's
+  default is its owner's URL there), `sigstore`, `sts.amazonaws.com` and
+  `*.amazonaws.com`, `api://AzureADTokenExchange`, and Google Cloud's
+  `//iam.googleapis.com/`, `https://iam.googleapis.com/` and
+  `https://sts.googleapis.com`.
+- **A token's once is a table of its own.** Schema 023 has two tables:
+  `backtests`, and `backtest_tokens`, a row a token that started one, by
+  its entry and its `jti` (or its hash), with the body's hash. Its key is
+  the check, so replicas given one token at once start one backtest; the
+  row is kept an hour and ten minutes past `iat`, past the hour a token is
+  taken for, whatever becomes of the backtest's own row. A token that
+  started one is refused (409) before its body is read, whatever the body
+  (the third round, below); two of one token at once, the first not yet
+  kept when the second was read, are told apart by the body's hash, the
+  same body answered 200 with the id and the state, without the key,
+  which is given once: a token stolen from a job's log gets no key to read
+  or cancel with. A plain token's requests aren't tied to a body: its hash is
+  the same for every request, and would start one backtest ever.
+- **The comment holds nothing a rule read.** An alert's labels are its
+  series', which a rule can make of any value serve's access reads
+  (`label_replace`), so they are dropped before the Markdown is written:
+  its severity rows count each firing by its rule's own `severity` label,
+  as the pull request wrote it. The JSON leaves out the firings (the
+  counts stay), the settings it was judged by, and each incident's labels
+  and an impact window's series. A reason a rule couldn't be replayed is
+  the request's own words where it read so (a query that doesn't parse),
+  and otherwise one of a few of Lapilli's: `query failed: the history
+  couldn't be read by lapilli serve`, `query failed: the history refused
+  it as written`, `too many labels on its series to replay`, `it couldn't
+  be replayed`. What the history said isn't logged either: the log has a
+  line a backtest, with counts.
+- **Each selector one metric's.** A rule that differs whose selector names
+  no metric (`{job="api"}`), or names it by a pattern or a negation
+  (`{__name__=~"..."}`), is refused 400 (`rules.Wide`), and each range
+  query the lane asks carries `timeout=1m`.
+- **The pull request's number** is taken from GitHub's and Forgejo's
+  `ref` (`refs/pull/N/merge`, `refs/pull/N/head`); a body's that
+  disagrees is refused. The repository shown is `repository` (GitLab's
+  `project_path`).
+- **Ran out of time is failed.** A backtest that didn't finish within
+  `--backtest-timeout` ends `failed`, saying so, not with a part of a
+  comparison. One whose leader stopped leading while it ran waits again,
+  and the next leader runs it from its start.
+- **The lane looks at the queue every 5 seconds**, and at once when a
+  backtest is queued on the replica that leads; and, while one runs,
+  whether its job cancelled it. `GET` and `DELETE` are 20 a second at
+  most, a burst of 100, on each replica; one with an `Origin` is 403.
+- **Bounds of the flags.** `--backtest-queue` 1 to 1000;
+  `--backtest-timeout` 1 minute to 2 hours. A backtest with nothing that
+  differs is queued all the same, and answered by the lane without
+  asking anything, as `lapilli verdict` answers it.
+- **The Run history** shows each backtest's state, not its error, which
+  may name a rule; and no pull request's number.
+  `lapilli_serve_backtests_waiting` is by entry too.
+- **Incidents by their ids.** Of the incidents, the comment and the JSON
+  keep those the change catches differently, by their ids (and starts, as
+  the comment's table has them); their titles, written in a tracker, only
+  for an entry that says `incident_titles: true`, as a public
+  repository's pull request is read by anyone. The JSON leaves out each
+  side's incidents, the thresholds (`noisy_at`), the hours and the impact
+  signals (`impact_short`). Case 3's INC-43 is said by its id.
+- **The share is kept for the lane.** A share only as a ceiling left the
+  lane what the runs didn't take: under load, a third of its share, and
+  `fits` planned on what it didn't have. While the lane runs a backtest,
+  the runs' pace slows by the share (`prom.Pace.Reserve`), and the lane
+  asks at its own pace, which nothing else takes; idle, the runs have the
+  whole rate. `fits` plans on that share, which the lane is sure of.
+- **The hour before the body.** An entry's `hourly` is taken right after
+  the token, before the body is read, and given back for one refused
+  before it is queued; two bodies are read and checked at once at most,
+  past them 429.
+- **A token without `jti`** (Forgejo's) is known by the SHA-256 of its
+  payload as it was signed, not of the string sent: base64url's bits past
+  the last byte, which go-jose passes over, write one token many ways. A
+  token is verified once by its issuer's keys, then held to each entry's
+  audience and pins.
+- **Issuers.** GitHub Enterprise Cloud's issuer of an enterprise
+  (`https://token.actions.githubusercontent.com/SLUG`) and GitHub
+  Enterprise Server's (`https://HOST/_services/token`) are GitHub's. An
+  issuer known neither so nor by `ci:` must pin `sub` and the event; an
+  event pinned under any issuer is `pull_request` or `push`
+  (`merge_request_event` or `push`), never `pull_request_target`,
+  `workflow_run` or `schedule`.
+- **What a rule reads back.** Beside `for`, a range, a subquery or an
+  offset a week back at most, a subquery of 11,000 points at most, and no
+  `@` (`rules.Reach`; added up, 8 days, from the second round).
+- **A pull request superseded by its token's word alone.** Only a number
+  the token names (GitHub's and Forgejo's `ref`) supersedes the backtest
+  waiting for it; one the job said (GitLab, a plain token, a `push`)
+  supersedes none. The leader takes the oldest of the entry that started
+  one least lately. One started twice whose leader stopped each time
+  (`attempts`, in 023) fails, saying so; one that panics fails. What ended
+  a day ago goes at each of the leader's rounds, the port on or not.
+- **Reads by the key.** Each lookup is charged to the client's address
+  before the ledger is asked, and given back when the key is right; a
+  backtest's reads are limited by its id too.
+- **The second round.** An entry has one turn to have a body read, within
+  the two of all entries, and a body comes within 5 seconds of its
+  headers; the hour taken stays taken for a request refused as sent (a
+  400, a body too slow), given back only when the port couldn't take one
+  it could have (the reads or the queue full, the ledger out of reach, the
+  same request again, a token's once). What a rule reads back is added up
+  through its subqueries and offsets, 8 days at most in all, a week over
+  week of a day's range; a subquery needs a step of its own, and a range
+  or an offset is a duration as written (`offset (700d)`, Prometheus's
+  duration expressions, refused). A rule whose expression doesn't read as
+  PromQL is refused as written, alone, as lapilli verdict says it, asking
+  nothing; a `rules_select` that keeps nothing on either side is refused,
+  as lapilli verdict refuses it (the third round takes in a side with no
+  documents). The planner's refusal says no rate.
+  GitLab's ID token names a merge request's source branch (`ref`,
+  `ref_path`), not its number, so a GitLab merge request's backtests don't
+  supersede each other. The lane asks a quarter of `--parallel` at once,
+  which a slow history holds below its share: `fits` doesn't count that,
+  and the docs say so. What keeps a fork out is that its CI gives its run
+  no token, not the pins ("Forks" above says the pins keep forks out): a
+  run of a fork's pull request in the repository carries the repository's
+  own `repository_id`. GitHub's "Send write tokens to workflows from pull
+  requests" kept off, and Forgejo's reference says its OpenID Connect is
+  off for a fork's `pull_request`; GitLab's `project_id` is a fork's own.
+- **The third round.** What can be told without the body is asked before
+  it is read (`ledger.BacktestRoom`): a token that started a backtest, and
+  the queue's room for the entry, less a newer commit's pull request's
+  waiting one; each refused cheaply, its hour given back. Once the body is
+  read, a request refused keeps its hour, the queue's and the token's own
+  checks at `AskBacktest` among them: an entry keeping its three waiting
+  can't send heavy bodies to be read and checked, refused, again and
+  again. `rules.Reach` reads past comments as Prometheus does, a quote in
+  one starting no string. `rules_select` keeping nothing of a side it was
+  given documents of, with no rule left on either side, is refused, the
+  other side empty or not: a pull request's first rules.
+- **`expect` given when it is there**, however empty, as `--expect` takes an
+  empty file; read, as every expectations file is now, by the rules'
+  bounded YAML reader first.
+- **The chart.** `serve.backtest` takes the trust file from a ConfigMap
+  (`trust.configMap`) and the plain tokens from Secrets (`tokens`, each
+  mounted at `/var/run/lapilli/backtest/tokens/SECRET/KEY`), and has
+  `share`, `queue`, `timeout`, `from` (the NetworkPolicy's peers for the
+  port alone), and a Service and an Ingress of its own,
+  `FULLNAME-backtest`. Off the cluster only over TLS: the Ingress needs
+  `tls`, or `loadBalancerEndsTLS` for a certificate the load balancer in
+  front holds; a `LoadBalancer` or `NodePort` Service needs
+  `service.loadBalancerEndsTLS`, an internal load balancer's too, as the
+  port is plain http. No HTTPRoute of its own.
+- **The recipe takes plain http to a Service in the cluster too**, where
+  "Flags and API" says to the machine itself: `LAPILLI_SERVE` is https, or
+  http to this machine (`127.0.0.1`, `[::1]`, `localhost`) or to
+  `NAME.NAMESPACE.svc` or `NAME.NAMESPACE.svc.cluster.local`, each a DNS
+  label with a letter first, so that a runner in the cluster reaches
+  `FULLNAME-backtest.NAMESPACE.svc:8084`; and plain http through no proxy
+  (`--noproxy '*'`), which would see the token. Narrower than what serve
+  takes an identity provider at (`signin.SafeURL`): a name of one label is
+  looked up under the runner's search domains, which needn't be the
+  cluster's, and `NAME.NAMESPACE` may be a name on the internet, a
+  namespace named as a top-level domain. A host's API and a release are
+  taken as before.
+- **The recipe's serve mode, as built.** The files are named by their path
+  under what `PATHS` names, as `--rules` reads a directory (a file it holds
+  is the directory's, and what doesn't read in it is said, not passed
+  over), and what `RENDER` wrote as `rules.yaml`; files whose names begin
+  with a dot are passed over, as `--rules` passes them over. Two of `PATHS`
+  holding a file of one name, a file that isn't UTF-8 text, and a body past
+  4 MiB are said in the comment before anything is sent. `--since` is
+  taken in whole days, `1d` to `14d`; every argument but it, `--tz` and
+  `--rules-select` is refused, as are `INCIDENTS`, `IMPACT`, `IMPACT_FOR`
+  and `MATCH`. `LAPILLI_VERSION` and the other settings of the install are
+  passed over, the job's log saying so. The token is one of
+  `LAPILLI_ID_TOKEN`, `LAPILLI_SERVE_TOKEN_FILE` (read for each request),
+  or `LAPILLI_SERVE_AUDIENCE`, for which `github.sh`, and `gitea.sh` in
+  Forgejo Actions, ask Actions for an ID token right before each request;
+  it is kept in a variable of the recipe's own, out of what it runs, and
+  given to curl on stdin, as the key is. `LAPILLI_SERVE_AUDIENCE` is
+  refused when it is a cloud's audience or the CI's own default
+  (`sts.amazonaws.com` and the rest of `amazonaws.com`,
+  `api://AzureADTokenExchange`, Google Cloud's `//iam.googleapis.com/...`,
+  `https://iam.googleapis.com/...` and `https://sts.googleapis.com...`,
+  `sigstore`, `https://github.com/...`), which other services take a token
+  for, and the job's log says when it isn't `LAPILLI_SERVE`; the action's
+  `audience` is it. In GitHub Actions, `github.sh` masks the ID token it
+  gets (`::add-mask::`) before anything else could log it, as
+  `core.getIDToken` does; `gitea.sh` doesn't, Forgejo documenting no such
+  command. An expectations file of no bytes is sent as `"expect": ""`,
+  given, as `--expect` takes it; the field is left out only when the
+  commit has no file. `Retry-After` is waited, 5 minutes at most, 5
+  seconds at least (or `SERVE_POLL` if longer: a `Retry-After` of 0 isn't
+  a loop; `SERVE_RETRY_MIN` lowers the 5 for tests), and never past
+  `SERVE_WAIT`; a read that fails is asked again, five times in a row at
+  most; past `SERVE_WAIT`, and when the job ends first, the backtest is
+  cancelled. `SERVE_POLL` (10 seconds) is how often it is read.
+- **The recipe posts of serve's report only what lapilli writes.** Serve
+  is trusted with the summary line the gates read, but not with the
+  job's token on GitLab, which runs a quick action from a note, nor with
+  who is pinged: the first line is kept as serve wrote it only when it is
+  `[//]: # (lapilli-compare {...})` with a JSON object of numbers and
+  booleans, or there is no report (a problem, in the comment); each line
+  after it only when it is one `CompareMarkdown` writes (code spans closed
+  on their line, with no `|` but `\|` in a table; outside them only
+  Lapilli's words and punctuation, `#` only to start a heading;
+  `<details><summary>N ...</summary>` and `</details>`, opened then
+  closed), within its first 65,536 characters, more than `CompareMarkdown`
+  writes. Any other line is left out whole, a line saying so in place of
+  each run of them, and is in the job's log: lines are let through as they
+  are or not at all, since what each host would make of a line changed in
+  part isn't known to the recipe, and a report lapilli wrote passes byte
+  for byte. A comment past 65,000 bytes even without a log is cut to the
+  report's first lines, within 60,000 bytes, saying so.
 
 ## Steps
 

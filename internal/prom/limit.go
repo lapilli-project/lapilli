@@ -80,6 +80,37 @@ type Pace struct {
 	// go.
 	every time.Duration
 	next  time.Time
+	// reserved is the share of the rate kept for another Pace while held
+	// says it has work (Reserve).
+	reserved float64
+	held     func() bool
+}
+
+// Reserve keeps share of p's rate for another Pace, of that share of it
+// (Share), while held says that one has work: p's turns come then
+// 1/(1-share) as far apart, so that the two ask no more than the rate
+// together, and the other has its share whatever p's askers do; and as
+// they did once it has none. Pull request backtests' lane has its quarter
+// of --max-rate so, and the runs the rest. It returns p.
+func (p *Pace) Reserve(share float64, held func() bool) *Pace {
+	if p == nil || !(share > 0 && share < 1) {
+		return p
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.reserved, p.held = share, held
+	return p
+}
+
+// Reserved is the share of p's rate Reserve keeps for another, 0 for
+// none.
+func (p *Pace) Reserved() float64 {
+	if p == nil {
+		return 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.reserved
 }
 
 const (
@@ -111,6 +142,24 @@ func NewPace(rate float64) *Pace {
 	return &Pace{every: time.Duration(float64(time.Second) / max(rate, MinRate))}
 }
 
+// Rate is how many requests a second p lets through at most, 0 for a nil
+// Pace, which is no rate.
+func (p *Pace) Rate() float64 {
+	if p == nil {
+		return 0
+	}
+	return float64(time.Second) / float64(p.every)
+}
+
+// Share is a Pace of f of p's rate, nil for a nil Pace or an f of 0 or
+// less: the lane's own pace, whose share p keeps for it (Reserve).
+func (p *Pace) Share(f float64) *Pace {
+	if p == nil || !(f > 0) {
+		return nil
+	}
+	return NewPace(p.Rate() * f)
+}
+
 // NewLimiter is a Limiter of rate requests a second at most; 0 for no rate.
 func NewLimiter(rate float64) *Limiter {
 	return NewLimiterPaced(NewPace(rate))
@@ -121,6 +170,9 @@ func NewLimiter(rate float64) *Limiter {
 func NewLimiterPaced(p *Pace) *Limiter {
 	return &Limiter{limit: maxInFlight, most: maxInFlight, pace: p, now: func() time.Time { return clock() }}
 }
+
+// Pace is the pace l's requests are spaced by, nil for none.
+func (l *Limiter) Pace() *Pace { return l.pace }
 
 // NewCap is a Limiter of n requests in flight at most, and no rate, which
 // no answer changes: a parent (Within) for the Limiters of the data sources
@@ -423,7 +475,11 @@ func (p *Pace) take(now time.Time) (time.Time, bool) {
 	if p.next.After(now) {
 		return p.next, false
 	}
-	p.next = now.Add(p.every)
+	every := p.every
+	if p.reserved > 0 && p.held != nil && p.held() {
+		every = time.Duration(float64(every) / (1 - p.reserved))
+	}
+	p.next = now.Add(every)
 	return now, true
 }
 

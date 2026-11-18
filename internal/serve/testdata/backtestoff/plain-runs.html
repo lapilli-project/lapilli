@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run history · Lapilli</title>
+<link rel="icon" href="/static/mark-32.png?v=0ad4d9e620b2" sizes="32x32" type="image/png">
+<link rel="icon" href="/static/mark-16.png?v=0ad4d9e620b2" sizes="16x16" type="image/png">
+<link rel="stylesheet" href="/static/lapilli.css?v=0ad4d9e620b2">
+</head>
+<body>
+<a class="skip" href="#main">Skip to the page</a>
+<header class="side">
+  <a class="brand" href="/"><img src="/static/mark-48.png?v=0ad4d9e620b2" alt="" width="24" height="24">Lapilli</a>
+  <details class="menu"><summary>Menu<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>Run history</span></summary>
+  <nav class="nav-menu" aria-label="Menu">
+  <p class="nav-group" id="menu-see">Monitoring</p>
+  <ul aria-labelledby="menu-see"><li><a href="/">Overview</a></li><li><a href="/rules">Rules</a></li><li><a href="/incidents">Incidents</a></li><li><a href="/marked">Marked windows</a></li><li><a href="/firings">Alert history</a></li></ul>
+  <p class="nav-group" id="menu-fix">Improve</p>
+  <ul aria-labelledby="menu-fix"><li><a href="/tasks">Tasks</a></li><li><a href="/proposals">Proposals</a></li><li><a href="/windows">Quiet windows</a></li></ul>
+  <p class="nav-group" id="menu-report">Reporting</p>
+  <ul aria-labelledby="menu-report"><li><a href="/reports">Reports</a></li><li><a href="/outcomes">Outcomes</a></li><li><a href="/goals">Goals</a></li></ul>
+  <p class="nav-group" id="menu-manage"><a href="/manage">Administration</a></p>
+  <ul aria-labelledby="menu-manage"><li><a href="/teams">Teams</a></li><li><a href="/settings">Settings</a></li><li><a href="/runs" aria-current="page">Run history</a></li><li><a href="/orphans">Cleanup</a></li></ul>
+</nav>
+  </details>
+  <nav class="nav-side" aria-label="Pages">
+  <p class="nav-group" id="side-see">Monitoring</p>
+  <ul aria-labelledby="side-see"><li><a href="/">Overview</a></li><li><a href="/rules">Rules</a></li><li><a href="/incidents">Incidents</a></li><li><a href="/marked">Marked windows</a></li><li><a href="/firings">Alert history</a></li></ul>
+  <p class="nav-group" id="side-fix">Improve</p>
+  <ul aria-labelledby="side-fix"><li><a href="/tasks">Tasks</a></li><li><a href="/proposals">Proposals</a></li><li><a href="/windows">Quiet windows</a></li></ul>
+  <p class="nav-group" id="side-report">Reporting</p>
+  <ul aria-labelledby="side-report"><li><a href="/reports">Reports</a></li><li><a href="/outcomes">Outcomes</a></li><li><a href="/goals">Goals</a></li></ul>
+  <p class="nav-group" id="side-manage"><a href="/manage">Administration</a></p>
+  <ul aria-labelledby="side-manage"><li><a href="/teams">Teams</a></li><li><a href="/settings">Settings</a></li><li><a href="/runs" aria-current="page">Run history</a></li><li><a href="/orphans">Cleanup</a></li></ul>
+</nav>
+  <nav class="langs" aria-label="Language"><strong lang="en" aria-current="true">English</strong><span aria-hidden="true"> · </span><a href="/lang?to=es&amp;back=%2Fruns" lang="es" hreflang="es">Español</a><span aria-hidden="true"> · </span><a href="/lang?to=ja&amp;back=%2Fruns" lang="ja" hreflang="ja">日本語</a><span aria-hidden="true"> · </span><a href="/lang?to=ko&amp;back=%2Fruns" lang="ko" hreflang="ko">한국어</a></nav>
+</header>
+<div class="page">
+<section class="statuses" aria-label="Status">
+
+<p class="status notice status-info"><span class="sign" aria-hidden="true">↻</span> the weekly digest</p>
+</section>
+<main id="main">
+<nav class="crumbs" aria-label="Breadcrumb"><ol><li><a href="/manage">Administration</a></li><li><span aria-current="page">Run history</span></li></ol></nav>
+<div class="bar">
+
+<form method="get" action="/search" role="search" class="find" aria-label="Search">
+  <label><span class="vh">Search</span> <input type="search" name="q" value="" maxlength="500" placeholder="Rules, incidents, teams"></label>
+  <button class="quiet-button">Search</button>
+</form>
+</div>
+
+<h1>Run history</h1>
+<p class="lede">Firings are in up to 2026-11-03 12:00.</p>
+
+<div class="scroll"><table>
+<thead><tr><th scope="col">Kind</th><th scope="col">Started</th><th scope="col">Period</th><th scope="col" class="n">Firings</th><th scope="col">Not replayed</th><th scope="col">Error</th></tr></thead>
+<tbody>
+<tr><td>digest</td><td class="t">2026-11-03 12:00</td><td class="t">2026-10-26 00:00 → 2026-11-02 00:00</td><td class="n">0</td>
+<td></td><td></td></tr>
+<tr><td>hourly</td><td class="t">2026-11-03 12:00</td><td class="t">2026-11-02 11:00 → 2026-11-03 12:00</td><td class="n">0</td>
+<td></td><td></td></tr>
+<tr><td>backfill</td><td class="t">2026-11-03 12:00</td><td class="t">2026-11-01 11:00 → 2026-11-02 12:00</td><td class="n">20</td>
+<td></td><td></td></tr>
+<tr><td>backfill</td><td class="t">2026-11-03 12:00</td><td class="t">2026-10-31 12:00 → 2026-11-01 12:00</td><td class="n">2</td>
+<td></td><td></td></tr></tbody>
+</table></div>
+
+
+
+
+
+<h2>Changes made here</h2>
+<p class="quiet">None.</p>
+
+</main>
+<footer>lapilli test · times in UTC · you are anonymous, viewer</footer>
+</div>
+</body>
+</html>

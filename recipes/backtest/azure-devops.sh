@@ -27,6 +27,10 @@
 # that comments be resolved doesn't wait for. The token's identity
 # (connectionData's authenticatedUser) and a comment's author are told
 # apart by their id, as Azure DevOps documents both.
+#
+# Through lapilli serve (LAPILLI_SERVE, see lib.sh), a plain token,
+# LAPILLI_SERVE_TOKEN_FILE: a job's ID token in Azure Pipelines is for a
+# service connection, made for Microsoft Entra (docs/design/backtests.md).
 recipe=azure-devops.sh
 here=$(dirname "$0")
 : "${AZURE_DEVOPS_TOKEN_FILE:?a file holding a token that may comment on the pull request}"

@@ -972,6 +972,45 @@ Agents, over MCP at /mcp:
                       rule (the propose tool), kept as an agent's for a
                       person to approve. An agent never approves or applies
 
+Pull request backtests, from CI jobs (off by default; docs/serve.md, "Pull
+request backtests"):
+  --backtest-listen ADDR
+                      take pull request backtests here, and nothing else:
+                      POST /v1/backtests from a CI job, with the rules before
+                      and after (recipes/backtest's serve mode), replayed by
+                      the replica that leads, one at a time, with this
+                      serve's access to the history and judged by its
+                      record; GET /v1/backtests/ID, with the key given, says
+                      where it is and, once done, gives the comment lapilli
+                      verdict --compare --changed-only --markdown writes;
+                      DELETE cancels it. Prometheus-format rules only, 50
+                      that differ at most, each selector of one metric by its
+                      name. It runs PromQL the pull request writes, with this
+                      serve's access: give that access what the rules need
+                      and no more. Needs --backtest-trust
+  --backtest-trust FILE
+                      who may ask, read at start: a YAML file of entries
+                      under trust:, each a CI's issuer of ID tokens (issuer,
+                      audience, the claims each token must hold: the
+                      repository's id, as one or a list, and the event, for
+                      GitHub Actions, GitLab CI and Forgejo Actions) or a
+                      plain token (token_file, 32 characters at least, read
+                      for each request), with days (14) and hourly (30). One
+                      that can't be used stops serve from starting
+  --backtest-share F  of --max-rate, the share the backtests ask the history
+                      at, besides the runs' own pace, so that together they
+                      never pass it (default 0.25; 0.05 to 0.75). Without
+                      --max-rate, a quarter of --parallel at once, one at
+                      least
+  --backtest-queue N  backtests waiting at most, 3 of an entry and one of a
+                      pull request, a newer commit's taking the place of the
+                      one waiting (default 20; 1 to 1000)
+  --backtest-timeout DUR
+                      one backtest's time, from its start (default 15m; 1m
+                      to 2h): one that couldn't finish in it at the lane's
+                      rate is refused before it is queued, saying what
+                      period would fit
+
 Pages: / (overview), /rules, /incidents, /firings, /settings, /runs, /teams,
 /windows, /tasks, /proposals, /outcomes. API: /api/v1/report?from=&to=
 (&format=csv: the firings a row each, docs/numbers.md; &redact=true: every

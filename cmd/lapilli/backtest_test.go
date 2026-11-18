@@ -140,7 +140,8 @@ func withoutCI(env []string) []string {
 	for _, kv := range env {
 		k, _, _ := strings.Cut(kv, "=")
 		ci := false
-		for _, p := range []string{"GITHUB_", "GITEA_", "FORGEJO_", "GITLAB_", "CI_", "BITBUCKET_", "SYSTEM_", "BUILD_", "AZURE_DEVOPS_", "LAPILLI", "RENDER", "MAX_TREE_"} {
+		for _, p := range []string{"GITHUB_", "GITEA_", "FORGEJO_", "GITLAB_", "CI_", "BITBUCKET_", "SYSTEM_", "BUILD_", "AZURE_DEVOPS_", "LAPILLI", "RENDER", "MAX_TREE_",
+			"ACTIONS_", "SERVE_"} {
 			if strings.HasPrefix(k, p) {
 				ci = true
 			}

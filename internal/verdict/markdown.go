@@ -64,7 +64,11 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 	}
 	p := c.parts()
 	judged := c.judged()
-	text(fmt.Sprintf("### Lapilli backtest, %s → %s %s\n\n", c.From.In(loc).Format(stamp), c.To.In(loc).Format(stamp), Zone(loc, c.From, c.To)))
+	by := ""
+	if c.JudgedBy == JudgedByServe {
+		by = ", judged by lapilli serve's record"
+	}
+	text(fmt.Sprintf("### Lapilli backtest, %s → %s %s%s\n\n", c.From.In(loc).Format(stamp), c.To.In(loc).Format(stamp), Zone(loc, c.From, c.To), by))
 	text(fmt.Sprintf("Rules compared: **%d changed, %d added, %d taken away**, %d the same.", p.changed, p.added, p.gone, c.Same))
 	switch {
 	case c.noRecord():

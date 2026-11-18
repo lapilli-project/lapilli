@@ -97,6 +97,57 @@
 #                    read with: with RENDER all of its files, without, those
 #                    PATHS names
 #
+# Or through lapilli serve (docs/design/backtests.md), which backtests the
+# rules with its own access to the history, judged by its record: nothing
+# is installed or run here, and the job holds no credential for the
+# metrics.
+#
+#   LAPILLI_SERVE    serve's backtest port (--backtest-listen), such as
+#                    https://lapilli-ci.example.com: https, or plain http,
+#                    through no proxy, to this machine (127.0.0.1, [::1],
+#                    localhost) or to a Service in the cluster,
+#                    NAME.NAMESPACE.svc or NAME.NAMESPACE.svc.cluster.local.
+#                    The rules of both
+#                    commits and the expectations are sent there (POST
+#                    /v1/backtests), and its report read back every
+#                    SERVE_POLL seconds; the comment, and the job's exit, are
+#                    as they are without it. LAPILLI_VERSION, LAPILLI_SHA256,
+#                    LAPILLI and LAPILLI_RELEASES are passed over. Serve
+#                    decides what judges the firings and where the history
+#                    is: INCIDENTS, IMPACT, IMPACT_FOR and MATCH are refused,
+#                    and of the arguments only --since (whole days, 1d to
+#                    14d), --tz and --rules-select are taken
+#   LAPILLI_ID_TOKEN the CI's ID token for the audience serve's trust file
+#                    names (GitLab's id_tokens:, Bitbucket's
+#                    BITBUCKET_STEP_OIDC_TOKEN once serve takes it); or
+#   LAPILLI_SERVE_TOKEN_FILE
+#                    a file holding the plain token serve's trust file
+#                    names, for a CI with no ID token; or
+#   LAPILLI_SERVE_AUDIENCE
+#                    the audience to ask the CI for an ID token for, where
+#                    the host's script asks (github.sh, and gitea.sh in
+#                    Forgejo Actions: ACTIONS_ID_TOKEN_REQUEST_URL), as the
+#                    trust file names it: the port's URL, LAPILLI_SERVE's
+#                    (another is refused, unless SERVE_AUDIENCE_ANY=1),
+#                    never the CI's default nor a cloud's, which are
+#                    refused whatever SERVE_AUDIENCE_ANY says
+#   SERVE_AUDIENCE_ANY
+#                    1: LAPILLI_SERVE_AUDIENCE may be other than
+#                    LAPILLI_SERVE's URL, for a trust file whose audience
+#                    is another, the job's log saying so
+#                    (sts.amazonaws.com, api://AzureADTokenExchange,
+#                    //iam.googleapis.com/..., https://github.com/...):
+#                    other services take a token for those. In GitHub
+#                    Actions, github.sh masks the token (::add-mask::) as
+#                    soon as it has it
+#   SERVE_WAIT       how long to wait for serve's report (default 30m), a
+#                    second to a day, as IMPACT_FOR is read; past it, the
+#                    backtest is cancelled (DELETE) and said in the comment
+#   SERVE_POLL       how many seconds apart serve is asked (default 10, 0
+#                    to 60)
+#   SERVE_RETRY_MIN  for tests: the least serve's Retry-After is waited, in
+#                    seconds (default 5, 0 to 5), or SERVE_POLL if longer
+#
 # What can fail once it runs (the install, the commits, RENDER, the
 # backtest) is said in the comment, and the job succeeds unless
 # FAIL_ON_ERROR=true; a setting that is wrong fails it at once.
@@ -119,7 +170,12 @@
 # holding a symbolic link where the rules are read, or anywhere with RENDER,
 # isn't read: a link could lead to any file the job can read. The host's
 # token is read from a file and given to curl on stdin, never on a command
-# line. RENDER and RENDER_PREPARE run what the pull request holds, with the
+# line; so is serve's, and the key its backtest is read by. What serve
+# answers is read with jq alone, and what it says copied to the job's log
+# as lapilli's stderr is, and to the comment only in the fenced block or as
+# its report: its summary line as serve wrote it, or no report, and of the
+# rest only lines lapilli writes, any other left out (report_of_serve).
+# RENDER and RENDER_PREPARE run what the pull request holds, with the
 # job's rights: they run without the variables CIs keep tokens in, and with a
 # HOME of their own for each commit, the base first, but can read whatever
 # the job can, the token's file included, and on Linux the environment the
@@ -167,6 +223,50 @@ safe_url() {
     127.0.0.1 | 127.0.0.1:* | localhost | localhost:* | '[::1]' | '[::1]':*) return 0 ;;
   esac
   return 1
+}
+# serve_url URL: whether lapilli serve's backtest port may be at URL, which
+# the CI's token goes to: https, or plain http to this machine (127.0.0.1,
+# [::1], localhost) or to a Service in a cluster, NAME.NAMESPACE.svc or
+# NAME.NAMESPACE.svc.cluster.local, each a DNS label with a letter first;
+# no user in its authority, no query. Wider than safe_url, which a host's
+# API and a release go to: a runner in the cluster reaches the chart's
+# Service, FULLNAME-backtest, in plain http. Narrower than serve's own
+# signin.SafeURL: a name of one label is looked up under the resolver's
+# search domains, which needn't be the cluster's, and NAME.NAMESPACE may be
+# a name on the internet (a namespace may be a top-level domain's name).
+# Plain http goes through no proxy (serve_curl).
+serve_url() {
+  case $1 in
+    https://*) rest=${1#https://} ;;
+    http://*) rest=${1#http://} ;;
+    *) return 1 ;;
+  esac
+  auth=${rest%%/*}
+  case $auth in
+    *@* | '' | *[!]A-Za-z0-9.:_[-]*) return 1 ;;
+  esac
+  case $rest in *\?* | *\#*) return 1 ;; esac
+  case $1 in https://*) return 0 ;; esac
+  case $auth in
+    '[::1]') name='[::1]' port= ;;
+    '[::1]':*) name='[::1]' port=${auth#'[::1]:'} ;;
+    \[*) return 1 ;;
+    *:*) name=${auth%%:*} port=${auth#*:} ;;
+    *) name=$auth port= ;;
+  esac
+  case $port in *[!0-9]* | ??????*) return 1 ;; esac
+  name=$(printf '%s' "$name" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')
+  case $name in
+    127.0.0.1 | localhost | '[::1]') return 0 ;;
+  esac
+  label='[a-z]([a-z0-9-]{0,61}[a-z0-9])?'
+  printf '%s\n' "$name" | grep -Eqx "$label\\.$label\\.svc(\\.cluster\\.local)?"
+}
+# token_ok TOKEN: whether TOKEN can go in a header as it is, as lapilli
+# serve takes a bearer token: visible characters, none a space, 8 KiB at
+# most. Read through printf, a builtin, never on a command line.
+token_ok() {
+  [ -n "$1" ] && [ "${#1}" -le 8192 ] && [ -z "$(printf '%s' "$1" | tr -d '\041-\176')" ]
 }
 
 # The settings, checked before anything runs.
@@ -240,6 +340,27 @@ for p in ${PATHS:-}; do
   in_repo "$p" || { say "PATHS: $p isn't a path in the repository"; exit 1; }
 done
 set +f
+# Through lapilli serve, serve judges the firings: by the incidents and the
+# impact windows it keeps, and its own settings, which a pull request
+# doesn't choose. What only serve mode reads is refused without it.
+serve=
+if [ -n "${LAPILLI_SERVE:-}" ]; then
+  for v in "INCIDENTS ${INCIDENTS:-}" "IMPACT ${IMPACT:-}" "IMPACT_FOR ${IMPACT_FOR:-}" "MATCH ${MATCH:-}"; do
+    if [ -n "${v#* }" ]; then
+      say "${v%% *}: lapilli serve judges the firings by the incidents and impact windows it keeps, by its own settings: leave it out with LAPILLI_SERVE"
+      exit 1
+    fi
+  done
+else
+  for v in "SERVE_WAIT ${SERVE_WAIT:-}" "SERVE_POLL ${SERVE_POLL:-}" "SERVE_RETRY_MIN ${SERVE_RETRY_MIN:-}" "LAPILLI_SERVE_AUDIENCE ${LAPILLI_SERVE_AUDIENCE:-}" \
+    "SERVE_AUDIENCE_ANY ${SERVE_AUDIENCE_ANY:-}" \
+    "LAPILLI_SERVE_TOKEN_FILE ${LAPILLI_SERVE_TOKEN_FILE:-}" "LAPILLI_ID_TOKEN ${LAPILLI_ID_TOKEN:+x}"; do
+    if [ -n "${v#* }" ]; then
+      say "${v%% *} is for a backtest through lapilli serve: give LAPILLI_SERVE, its backtest port, too"
+      exit 1
+    fi
+  done
+fi
 # A file, not a directory: a path ending in / is refused, as git would
 # take it for the one file a directory holds.
 if [ -n "${INCIDENTS:-}" ] && { ! in_repo "$INCIDENTS" || [ "${INCIDENTS%/}" != "$INCIDENTS" ]; }; then
@@ -254,7 +375,9 @@ fi
 # as it reads one: whole days first, if any (1d, 1d12h), then numbers each
 # with its unit, h, m or s, a fraction allowed (90s, 1.5h, 1h30m). Not a
 # bare number, nor ms, nor a sign.
-duration() {
+duration() { seconds "$1" >/dev/null; }
+# seconds DUR: DUR, as duration takes it, in whole seconds.
+seconds() {
   case $1 in '' | *[!0-9dhms.]*) return 1 ;; esac
   printf '%s\n' "$1" | awk '{
     s = $0; total = 0
@@ -265,7 +388,8 @@ duration() {
       total += substr(s, 1, RLENGTH - 1) * (u == "h" ? 3600 : u == "m" ? 60 : 1)
       s = substr(s, RLENGTH + 1)
     }
-    exit !(total >= 1)
+    if (total < 1) exit 1
+    printf "%d\n", (total > 999999999 ? 999999999 : total)
   }'
 }
 if [ -n "${IMPACT_FOR:-}" ] && ! duration "$IMPACT_FOR"; then
@@ -290,7 +414,118 @@ if [ -z "${EXPECT:-}" ] && { [ -n "$held" ] || [ -n "$required" ]; }; then
   say "FAIL_ON_EXPECTATIONS and EXPECT_REQUIRED hold the rules to EXPECT: give EXPECT, the expectations file"
   exit 1
 fi
-if [ -z "${LAPILLI:-}" ]; then
+if [ -n "${LAPILLI_SERVE:-}" ]; then
+  serve=${LAPILLI_SERVE%/}
+  if ! serve_url "$serve"; then
+    say "LAPILLI_SERVE $LAPILLI_SERVE: want lapilli serve's backtest port, an https URL, or plain http to this machine (127.0.0.1, [::1], localhost) or to a Service in the cluster, NAME.NAMESPACE.svc or NAME.NAMESPACE.svc.cluster.local"
+    exit 1
+  fi
+  case $serve in https://*) serve_proto='=https' ;; *) serve_proto='=http' ;; esac
+  # Nothing is installed or run here.
+  passed=
+  for v in "LAPILLI_VERSION ${LAPILLI_VERSION:-}" "LAPILLI_SHA256 ${LAPILLI_SHA256:-}" "LAPILLI ${LAPILLI:-}" "LAPILLI_RELEASES ${LAPILLI_RELEASES:-}"; do
+    [ -z "${v#* }" ] || passed="$passed ${v%% *}"
+  done
+  [ -z "$passed" ] || say "lapilli serve backtests the rules, and nothing is installed or run here:$passed passed over"
+  serve_wait_given=${SERVE_WAIT:-30m}
+  if ! serve_wait=$(seconds "$serve_wait_given") || [ "$serve_wait" -gt 86400 ]; then
+    say "SERVE_WAIT $serve_wait_given: want how long to wait for lapilli serve, a second to a day, such as 30m or 1h"
+    exit 1
+  fi
+  serve_poll=${SERVE_POLL:-10}
+  case $serve_poll in
+    [0-9] | [1-5][0-9] | 60) ;;
+    *) say "SERVE_POLL $serve_poll: want how many seconds apart to ask lapilli serve, 0 to 60"; exit 1 ;;
+  esac
+  # The least serve's Retry-After is waited: a Retry-After of 0, or none,
+  # isn't a loop of requests. Lowered only for tests.
+  retry_min=${SERVE_RETRY_MIN:-5}
+  case $retry_min in
+    [0-5]) ;;
+    *) say "SERVE_RETRY_MIN $retry_min: want the least seconds lapilli serve's Retry-After is waited, 0 to 5 (for tests; 5 unless set)"; exit 1 ;;
+  esac
+  [ "$retry_min" -ge "$serve_poll" ] || retry_min=$serve_poll
+  case $(date +%s 2>/dev/null) in
+    '' | *[!0-9]*) say "date +%s doesn't say the time in seconds here: SERVE_WAIT can't be kept"; exit 1 ;;
+  esac
+  # The token: one of three, kept in a variable of the recipe's own,
+  # never in the environment of what it runs.
+  token_from=
+  serve_token=
+  if [ -n "${LAPILLI_ID_TOKEN:-}" ]; then
+    serve_token=$LAPILLI_ID_TOKEN
+    token_from=LAPILLI_ID_TOKEN
+    if ! token_ok "$serve_token"; then
+      say "LAPILLI_ID_TOKEN: want an ID token, visible characters and no space, 8 KiB at most"
+      exit 1
+    fi
+  fi
+  unset LAPILLI_ID_TOKEN
+  one="give lapilli serve one token: LAPILLI_ID_TOKEN, LAPILLI_SERVE_TOKEN_FILE or LAPILLI_SERVE_AUDIENCE"
+  if [ -n "${LAPILLI_SERVE_TOKEN_FILE:-}" ]; then
+    [ -z "$token_from" ] || { say "$one"; exit 1; }
+    if [ ! -f "$LAPILLI_SERVE_TOKEN_FILE" ] || [ ! -r "$LAPILLI_SERVE_TOKEN_FILE" ]; then
+      say "LAPILLI_SERVE_TOKEN_FILE $LAPILLI_SERVE_TOKEN_FILE can't be read"
+      exit 1
+    fi
+    token_from=LAPILLI_SERVE_TOKEN_FILE
+  fi
+  if [ -n "${LAPILLI_SERVE_AUDIENCE:-}" ]; then
+    [ -z "$token_from" ] || { say "$one"; exit 1; }
+    if [ "${ci_tokens:-}" != actions ]; then
+      say "LAPILLI_SERVE_AUDIENCE: ${recipe:-lib.sh} asks its CI for no ID token: give LAPILLI_ID_TOKEN, the one the CI gives the job for serve's audience (GitLab's id_tokens:), or LAPILLI_SERVE_TOKEN_FILE"
+      exit 1
+    fi
+    if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+      say "LAPILLI_SERVE_AUDIENCE: the job can't ask for an ID token (no ACTIONS_ID_TOKEN_REQUEST_URL): give it permissions: id-token: write (GitHub Actions), or enable-openid-connect: true (Forgejo Actions)"
+      exit 1
+    fi
+    if ! safe_url "$ACTIONS_ID_TOKEN_REQUEST_URL"; then
+      say "ACTIONS_ID_TOKEN_REQUEST_URL: want an https URL"
+      exit 1
+    fi
+    if [ "${#LAPILLI_SERVE_AUDIENCE}" -gt 1024 ] || [ -n "$(printf '%s' "$LAPILLI_SERVE_AUDIENCE" | tr -d '\041-\176')" ]; then
+      say "LAPILLI_SERVE_AUDIENCE: want the audience serve's trust file names, such as https://lapilli-ci.example.com"
+      exit 1
+    fi
+    # A cloud's audience, or the CI's own default, is one other services
+    # take: serve, and whoever is on the way to it, could take a token for
+    # it there (AWS's STS, Azure's and Google Cloud's workload identity
+    # federation, Sigstore, GitHub's default, the owner's URL).
+    aud=$(printf '%s' "$LAPILLI_SERVE_AUDIENCE" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')
+    aud_host=${aud#https://}
+    aud_host=${aud_host#http://}
+    aud_host=${aud_host%%/*}
+    aud_host=${aud_host%%:*}
+    case $aud_host in amazonaws.com | *.amazonaws.com) aud=refused ;; esac
+    case $aud in
+      refused | api://azureadtokenexchange* | //iam.googleapis.com | //iam.googleapis.com/* | https://iam.googleapis.com | \
+        https://iam.googleapis.com/* | https://sts.googleapis.com* | sigstore | https://github.com | https://github.com/* | https://github.com:*)
+        say "LAPILLI_SERVE_AUDIENCE $LAPILLI_SERVE_AUDIENCE: a cloud's audience, or the CI's own default, which other services take a token for: give serve's own, the one its trust file names, its port's URL"
+        exit 1
+        ;;
+    esac
+    # The port's own URL alone, unless SERVE_AUDIENCE_ANY=1 says the trust
+    # file names another: a list of what others take is never whole (a
+    # registry's, an enterprise's, another cloud's region).
+    case ${SERVE_AUDIENCE_ANY:-} in
+      '' | 1) ;;
+      *) say "SERVE_AUDIENCE_ANY ${SERVE_AUDIENCE_ANY}: want 1, to ask for an audience other than LAPILLI_SERVE's URL"; exit 1 ;;
+    esac
+    if [ "${LAPILLI_SERVE_AUDIENCE%/}" != "$serve" ]; then
+      if [ "${SERVE_AUDIENCE_ANY:-}" != 1 ]; then
+        say "LAPILLI_SERVE_AUDIENCE $LAPILLI_SERVE_AUDIENCE isn't LAPILLI_SERVE, $serve, where the token goes: give the port's URL, an audience no other service takes, or SERVE_AUDIENCE_ANY=1 for a trust file that names another"
+        exit 1
+      fi
+      say "LAPILLI_SERVE_AUDIENCE $LAPILLI_SERVE_AUDIENCE isn't LAPILLI_SERVE, $serve, where the token goes (SERVE_AUDIENCE_ANY=1)"
+    fi
+    token_from=actions
+  fi
+  if [ -z "$token_from" ]; then
+    say "LAPILLI_SERVE: give the token lapilli serve takes: LAPILLI_ID_TOKEN, the CI's ID token for serve's audience; LAPILLI_SERVE_TOKEN_FILE, a file holding a plain token; or, with github.sh or gitea.sh, LAPILLI_SERVE_AUDIENCE, to ask the CI for one"
+    exit 1
+  fi
+elif [ -z "${LAPILLI:-}" ]; then
   case ${LAPILLI_VERSION:-} in
     v[0-9]*.[0-9]*.[0-9]*) ;;
     *) say "LAPILLI_VERSION ${LAPILLI_VERSION:-}: want the Lapilli release to install, such as v0.33.0"; exit 1 ;;
@@ -319,6 +554,10 @@ fi
 for tool in git curl jq tar; do
   command -v "$tool" >/dev/null 2>&1 || { say "$tool isn't installed: the recipe needs sh, git, curl, jq and tar"; exit 1; }
 done
+if [ -n "$serve" ] && ! command -v cmp >/dev/null 2>&1; then
+  say "cmp isn't installed: through lapilli serve, the recipe needs it too (diffutils, or busybox's)"
+  exit 1
+fi
 # The clone, all of it, whichever of its directories REPO is, and where
 # this runs: a file an argument names in the clone is the pull request's,
 # which is judged by it.
@@ -337,14 +576,63 @@ in_clone() {
   case $d/ in "$clone"/*) return 0 ;; esac
   return 1
 }
+# serve_since DUR: --since, through lapilli serve: whole days, 1 to 14,
+# ending at what serve has settled, into serve_days.
+serve_since() {
+  case $1 in
+    [1-9]d | 1[0-4]d) serve_days=${1%d} ;;
+    *) say "--since $1: through lapilli serve, whole days, 1d to 14d, ending where serve has settled"; exit 1 ;;
+  esac
+}
+serve_days='' serve_tz='' serve_select=''
 # Each argument in turn, to the end and around: the same, in order, after.
-# incidents_given: an argument gives incidents, or impact.
+# incidents_given: an argument gives incidents, or impact. Through lapilli
+# serve, want is the flag the next argument is the value of, and taken
+# says the argument is one serve is sent.
 incidents_given=
+want=
 n=$#
 while [ "$n" -gt 0 ]; do
   a=$1
   shift
   n=$((n - 1))
+  if [ -n "$want" ]; then
+    case $want in
+      --since) serve_since "$a" ;;
+      --tz) serve_tz=$a ;;
+      --rules-select) serve_select=$a ;;
+    esac
+    want=
+    set -- "$@" "$a"
+    continue
+  fi
+  taken=
+  if [ -n "$serve" ]; then
+    case $a in
+      --since | --tz | --rules-select) want=$a taken=1 ;;
+      --since=*) serve_since "${a#*=}"; taken=1 ;;
+      --tz=*) serve_tz=${a#*=} taken=1 ;;
+      --rules-select=*) serve_select=${a#*=} taken=1 ;;
+      --prometheus | --prometheus=* | --gcp-project | --gcp-project=* | --auth | --auth=* | --aws-region | --aws-region=* | \
+        --bearer-token-file | --bearer-token-file=* | --step | --step=* | --late | --late=* | --scrape-interval | --scrape-interval=*)
+        say "${a%%=*}: lapilli serve decides where the history is, and how it is asked: leave it out with LAPILLI_SERVE"
+        exit 1
+        ;;
+      --lead | --lead=* | --match | --match=* | --refire | --refire=* | --sleep-hours | --sleep-hours=* | --work-hours | --work-hours=* | \
+        --shifts | --shifts=* | --on-call | --on-call=* | --noisy-* | --impact | --impact=* | --impact-* | --incidents | --incidents=*)
+        say "${a%%=*}: lapilli serve judges the firings, by its record and its own settings, which a pull request doesn't choose: leave it out with LAPILLI_SERVE"
+        exit 1
+        ;;
+      --from | --from=* | --to | --to=*)
+        say "${a%%=*}: lapilli serve replays only what has settled: give --since, whole days, 1d to 14d"
+        exit 1
+        ;;
+      --loki | --loki=* | --loki-* | --grafana | --grafana=* | --grafana-* | --ruler | --ruler=* | --ruler-* | --alarms | --alarms=*)
+        say "${a%%=*}: lapilli serve backtests rules in Prometheus's format, read from PATHS or RENDER, against its own history: leave it out with LAPILLI_SERVE"
+        exit 1
+        ;;
+    esac
+  fi
   case $a in
     --incidents | --incidents=* | --impact | --impact=*) incidents_given=1 ;;
   esac
@@ -389,15 +677,26 @@ while [ "$n" -gt 0 ]; do
       fi
       ;;
   esac
+  if [ -n "$serve" ] && [ -z "$taken" ]; then
+    say "${a%%=*}: through lapilli serve, the recipe sends it --since, --tz and --rules-select alone, and serve decides the rest: leave it out with LAPILLI_SERVE"
+    exit 1
+  fi
   set -- "$@" "$a"
 done
+if [ -n "$want" ]; then
+  say "$want: want a value"
+  exit 1
+fi
 if [ -n "$match" ] && [ -z "${INCIDENTS:-}${IMPACT:-}$incidents_given" ]; then
   say "MATCH is what a firing and an incident must agree on: give IMPACT or INCIDENTS too"
   exit 1
 fi
 
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+# A backtest serve took and hasn't ended is cancelled when the job ends
+# first (bt_live), so that serve doesn't run what no one waits for.
+bt_live=
+trap '[ -z "$bt_live" ] || serve_cancel || :; rm -rf "$tmp"' EXIT
 trap 'exit 1' INT TERM HUP
 out=$tmp/out
 mkdir "$tmp/empty"
@@ -467,6 +766,8 @@ sha256() {
 # release's SHA256SUMS (and LAPILLI_SHA256, when given) before it is
 # unpacked.
 fetch_lapilli() {
+  # Through lapilli serve, nothing is run here.
+  [ -z "$serve" ] || return 0
   if [ -n "${LAPILLI:-}" ]; then
     bin=$LAPILLI
     return 0
@@ -670,7 +971,7 @@ expectations() {
 in_tree() {
   mkdir -p "$tmp/$1-home"
   (cd "$tmp/$1" && env -u GITHUB_TOKEN_FILE -u GITLAB_TOKEN_FILE -u BITBUCKET_TOKEN_FILE -u AZURE_DEVOPS_TOKEN_FILE \
-    -u GITEA_TOKEN_FILE -u LAPILLI_INPUT_TOKEN -u GITHUB_TOKEN -u GH_TOKEN -u GITEA_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+    -u GITEA_TOKEN_FILE -u LAPILLI_INPUT_TOKEN -u LAPILLI_ID_TOKEN -u LAPILLI_SERVE_TOKEN_FILE -u GITHUB_TOKEN -u GH_TOKEN -u GITEA_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
     -u ACTIONS_ID_TOKEN_REQUEST_URL -u ACTIONS_RUNTIME_TOKEN -u CI_JOB_TOKEN -u CI_JOB_JWT -u CI_JOB_JWT_V1 -u CI_JOB_JWT_V2 \
     -u CI_REGISTRY_PASSWORD -u CI_DEPLOY_PASSWORD -u CI_REPOSITORY_URL -u CI_DEPENDENCY_PROXY_PASSWORD -u CI_BUILD_TOKEN \
     -u SYSTEM_ACCESSTOKEN -u BITBUCKET_STEP_OIDC_TOKEN HOME="$tmp/$1-home" REPO="$clone" sh -c "$2")
@@ -770,10 +1071,23 @@ summary() {
 }
 
 # backtest ARG...: lapilli verdict on the rules of both commits, with the
-# arguments given; the report in $tmp/report.md, lapilli's exit status in
-# $verdict.
+# arguments given, or lapilli serve, with what it is sent of them; the
+# report in $tmp/report.md, lapilli's exit status in $verdict (0 for a
+# report serve gave); then what the report says of the expectations, and
+# of the rules that couldn't be replayed.
 verdict=
 backtest() {
+  if [ -n "$serve" ]; then
+    : >"$tmp/lapilli.said"
+    through_serve || :
+  else
+    run_lapilli "$@"
+  fi
+  judge
+}
+
+# run_lapilli ARG...: lapilli verdict, run here, as backtest says.
+run_lapilli() {
   # MATCH's labels, the last first, so that each lands in its order.
   rest=$match
   while [ -n "$rest" ]; do
@@ -833,6 +1147,11 @@ backtest() {
       ;;
     *) trouble "lapilli didn't run (exit status $verdict)" "$tmp/lapilli.said" ;;
   esac
+}
+
+# judge: what the report's summary line says decides, whoever wrote it,
+# lapilli here or lapilli serve.
+judge() {
   # Asked to fail when it does, a backtest of rules that couldn't be
   # replayed is one that failed, whatever why: the history out of reach,
   # or a query it refuses as written, which is the pull request's to mend.
@@ -855,7 +1174,11 @@ backtest() {
     case $broken$unexpected$unreplayed in
       '' | *[!0-9]*)
         judged=
-        trouble "the report doesn't say what became of the expectations: give LAPILLI_VERSION a release with --expect" "$tmp/lapilli.said"
+        if [ -n "$serve" ]; then
+          trouble "lapilli serve's report doesn't say what became of the expectations"
+        else
+          trouble "the report doesn't say what became of the expectations: give LAPILLI_VERSION a release with --expect" "$tmp/lapilli.said"
+        fi
         ;;
       *)
         if [ -n "$held" ] && [ "$broken" -gt 0 ]; then
@@ -880,6 +1203,527 @@ backtest() {
   fi
 }
 
+# text FILE: whether FILE is UTF-8 text, which jq reads back as it is: a
+# rule file is sent to lapilli serve as a JSON string.
+text() { jq -Rsj . "$1" | cmp -s - "$1"; }
+
+# side SIDE WHAT: a commit's rules as lapilli serve takes them, a JSON
+# object a line, {"path", "content"}, in $tmp/SIDE.jsonl: each file
+# --rules would read, named by its path under what PATHS names, as --rules
+# reads a directory (a file it holds is the directory's, one below it a
+# directory's below), a file PATHS names by its own name, and what RENDER
+# wrote as rules.yaml; files and directories whose names begin with a dot
+# passed over, as --rules passes them over. WHAT names the commit.
+side() {
+  s=$1 what=$2
+  : >"$tmp/$s.jsonl"
+  rm -f "$tmp/$s.unsent"
+  set -f
+  if [ -n "${RENDER:-}" ]; then
+    set -- "$tmp/rules/$s"
+  else
+    set --
+    for p in $PATHS; do
+      set -- "$@" "$tmp/$s/${p%/}"
+    done
+  fi
+  set +f
+  for root; do
+    [ -e "$root" ] || continue
+    # shellcheck disable=SC2016
+    if ! find "$root" ! -path "$root" -name '.*' -prune -o -type f -exec sh -c '
+      root=$1 out=$2
+      shift 2
+      for f; do
+        if [ -d "$root" ]; then rel=${f#"$root"/}; else rel=${f##*/}; fi
+        if ! jq -Rsj . "$f" | cmp -s - "$f"; then
+          printf "%s" "$rel" >"$out.unsent"
+          exit 1
+        fi
+        jq -nc --arg path "$rel" --rawfile content "$f" "{path: \$path, content: \$content}" >>"$out.jsonl" || exit 1
+      done' sh "$root" "$tmp/$s" {} + 2>"$tmp/find.log"; then
+      if [ -e "$tmp/$s.unsent" ]; then
+        # Its path is the pull request's: in the job's log, not the comment.
+        say "not UTF-8 text, in $what: $(cat "$tmp/$s.unsent")"
+        trouble "a rule file in $what isn't UTF-8 text, which lapilli serve takes alone: not sent (the job's log says which)"
+      else
+        trouble "the rules of $what couldn't be read" "$tmp/find.log"
+      fi
+      return 1
+    fi
+  done
+  dup=$(jq -rs 'group_by(.path) | map(select(length > 1) | .[0].path) | first // empty' "$tmp/$s.jsonl" 2>/dev/null) || dup=
+  if [ -n "$dup" ]; then
+    say "two of PATHS hold $dup, in $what"
+    trouble "two of PATHS hold a file of the same name in $what, which lapilli serve reads as one directory's: name them apart (the job's log says which)"
+    return 1
+  fi
+}
+
+# request: the body of POST /v1/backtests, in $tmp/serve.json, built by jq
+# alone: both sides' files, the expectations as expectations() wrote them,
+# --rules-select, the period's days, the zone, the pull request's number
+# and its commit. 4 MiB at most, as serve takes it: past it, said before
+# anything is sent.
+request() {
+  side base "the commit it goes into" && side head "the pull request's commit" || return 1
+  # The pull request's expectations, for the rules it proposes, and the
+  # commit it goes into's, for those in place, when it has them.
+  expect_head=/dev/null expect_base=/dev/null
+  if [ -f "$tmp/expect.head.yaml" ]; then
+    expect_head=$tmp/expect.head.yaml
+    text "$expect_head" || { trouble "EXPECT $EXPECT isn't UTF-8 text in the pull request's commit, which lapilli serve takes alone"; return 1; }
+  fi
+  if [ -f "$tmp/expect.base.yaml" ]; then
+    expect_base=$tmp/expect.base.yaml
+    text "$expect_base" || { trouble "EXPECT $EXPECT isn't UTF-8 text in the commit it goes into, which lapilli serve takes alone"; return 1; }
+  fi
+  if ! jq -n --slurpfile before "$tmp/base.jsonl" --slurpfile after "$tmp/head.jsonl" \
+    --rawfile expect "$expect_head" --rawfile expect_before "$expect_base" \
+    --arg expect_given "${expect_head#/dev/null}" --arg before_given "${expect_base#/dev/null}" --arg select "$serve_select" \
+    --arg tz "$serve_tz" --arg days "$serve_days" --argjson pr "$PR" --arg commit "$head" '
+      {before: $before, after: $after}
+      + (if $expect_given != "" then {expect: $expect} else {} end)
+      + (if $before_given != "" then {expect_before: $expect_before} else {} end)
+      + (if $select != "" then {rules_select: $select} else {} end)
+      + (if $days != "" then {days: ($days | tonumber)} else {} end)
+      + (if $tz != "" then {tz: $tz} else {} end)
+      + {pull_request: $pr, commit: $commit}' >"$tmp/serve.json" 2>"$tmp/jq.log"; then
+    trouble "the request to lapilli serve couldn't be written" "$tmp/jq.log"
+    return 1
+  fi
+  size=$(wc -c <"$tmp/serve.json")
+  if [ "$size" -gt 4194304 ]; then
+    trouble "the rules and expectations are $(((size + 1048575) / 1048576)) MiB as lapilli serve's request, past the 4 MiB it takes: backtest fewer files"
+    return 1
+  fi
+  say "sending lapilli serve $(jq -s length "$tmp/head.jsonl") files of the pull request's commit, and $(jq -s length "$tmp/base.jsonl") of the commit it goes into"
+}
+
+# serve_ask METHOD PATH BEARER [FILE]: asks lapilli serve's port, the
+# bearer token (the CI's, or a backtest's key) given to curl on stdin; the
+# answer in $tmp/serve.out, 2 MiB at most, its headers in
+# $tmp/serve.headers, what curl said in $tmp/serve.curl. Writes the HTTP
+# status, or "failed". curl reads no .curlrc (-q), follows no redirect, and
+# speaks only the URL's own scheme.
+serve_ask() {
+  rm -f "$tmp/failed"
+  : >"$tmp/serve.headers"
+  if { serve_curl "$@" 2>"$tmp/serve.curl" || : >"$tmp/failed"; } | capped 2097152 "$tmp/serve.out" && [ ! -e "$tmp/failed" ]; then
+    code=$(sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$tmp/serve.headers" | tail -n 1)
+    echo "${code:-failed}"
+  else
+    echo failed
+  fi
+}
+
+# Plain http goes through no proxy (--noproxy '*', whatever http_proxy
+# says): the token would cross it in the clear, and leave the cluster.
+serve_curl() {
+  sc_method=$1 sc_path=$2 sc_bearer=$3
+  if [ $# -ge 4 ]; then
+    set -- --max-time 60 -H 'Content-Type: application/json' --data-binary "@$4"
+  else
+    set -- --max-time 30
+  fi
+  case $serve in http://*) set -- "$@" --noproxy '*' ;; esac
+  printf 'Authorization: Bearer %s\n' "$sc_bearer" | curl -q -sS --connect-timeout 10 --max-filesize 2097152 --proto "$serve_proto" \
+    -X "$sc_method" -H @- -H 'Accept: application/json' "$@" -D "$tmp/serve.headers" -o - "$serve$sc_path"
+}
+
+# serve_field FIELD: the answer's FIELD, a string, or nothing.
+serve_field() { jq -r --arg f "$1" '.[$f] // empty | strings' "$tmp/serve.out" 2>/dev/null | head -n 1; }
+# serve_number FIELD: the answer's FIELD, a whole number, or nothing.
+serve_number() {
+  jq -r --arg f "$1" '.[$f] // empty | numbers | floor | tostring' "$tmp/serve.out" 2>/dev/null | head -n 1 | sed -n '/^[0-9][0-9]*$/p'
+}
+# serve_said: what serve's answer says went wrong, its error, into
+# $tmp/serve.said, and in the job's log, made inert: of an answer that
+# isn't serve's JSON, a proxy's page say, the job's log alone has it.
+serve_said() {
+  jq -r 'if type == "object" and (.error | type) == "string" then .error else empty end' "$tmp/serve.out" >"$tmp/serve.said" 2>/dev/null ||
+    : >"$tmp/serve.said"
+  if [ -s "$tmp/serve.said" ]; then
+    logged "$tmp/serve.said"
+  elif [ -s "$tmp/serve.out" ]; then
+    say "lapilli serve answered: $(shown "$tmp/serve.out")"
+  fi
+}
+# retry_after DEFAULT: the seconds serve's Retry-After says, or DEFAULT
+# without one; 300 at most, and SERVE_RETRY_MIN (5), or SERVE_POLL if
+# longer, at least: a Retry-After of 0 isn't a loop of requests.
+retry_after() {
+  tr -d '\r' <"$tmp/serve.headers" | sed -n 's/^[Rr][Ee][Tt][Rr][Yy]-[Aa][Ff][Tt][Ee][Rr]: *\([0-9][0-9]*\) *$/\1/p' | tail -n 1 |
+    awk -v def="$1" -v least="$retry_min" '{ v = $1 + 0 } END { n = (NR ? v : def); if (n > 300) n = 300; if (n < least) n = least; print n }'
+}
+# pause SECONDS: sleeps, no further than the deadline.
+pause() {
+  left=$((deadline - $(date +%s)))
+  [ "$left" -gt 0 ] || return 0
+  sleep "$((${1:-0} < left ? ${1:-0} : left))"
+}
+
+# actions_token: an ID token for LAPILLI_SERVE_AUDIENCE, asked of GitHub's
+# or Forgejo's Actions as core.getIDToken asks it, in serve_token: the
+# request's token given to curl on stdin, the audience URL-encoded, the
+# answer's value read with jq.
+actions_token() {
+  aud=$(jq -rn --arg a "$LAPILLI_SERVE_AUDIENCE" '$a | @uri')
+  case $ACTIONS_ID_TOKEN_REQUEST_URL in
+    *\?*) u="$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$aud" ;;
+    *) u="$ACTIONS_ID_TOKEN_REQUEST_URL?audience=$aud" ;;
+  esac
+  case $u in https://*) proto='=https' ;; *) proto='=http' ;; esac
+  rm -f "$tmp/failed"
+  : >"$tmp/oidc.headers"
+  if ! { printf 'Authorization: Bearer %s\nAccept: application/json\n' "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" |
+    curl -q -sS --max-time 30 --max-filesize 65536 --proto "$proto" -H @- -D "$tmp/oidc.headers" -o - "$u" 2>"$tmp/curl.log" ||
+    : >"$tmp/failed"; } | capped 65536 "$tmp/oidc.json" || [ -e "$tmp/failed" ]; then
+    logged "$tmp/curl.log"
+    trouble "the CI gave the job no ID token for LAPILLI_SERVE_AUDIENCE (the job's log says why)"
+    return 1
+  fi
+  code=$(sed -n 's/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "$tmp/oidc.headers" | tail -n 1)
+  serve_token=$(jq -r '.value // empty | strings' "$tmp/oidc.json" 2>/dev/null) || serve_token=
+  # Masked in GitHub Actions' log, before anything could log it, as
+  # core.getIDToken masks the token it gets: on stdout, % as %25, as the
+  # runner reads a command's value. Only a token that could be sent: one
+  # line of visible characters.
+  if [ "${ci_masks:-}" = github ] && [ "${GITHUB_ACTIONS:-}" = true ] && token_ok "$serve_token"; then
+    printf '::add-mask::%s\n' "$(printf '%s' "$serve_token" | sed 's/%/%25/g')"
+  fi
+  case $code in
+    2??) ;;
+    *)
+      say "the CI didn't give an ID token (${code:-failed}): $(shown "$tmp/oidc.json")"
+      serve_token=
+      ;;
+  esac
+  if ! token_ok "$serve_token"; then
+    serve_token=
+    trouble "the CI gave the job no ID token for LAPILLI_SERVE_AUDIENCE (the job's log says why)"
+    return 1
+  fi
+}
+
+# through_serve: the rules of both commits, and the expectations, sent to
+# lapilli serve's backtest port, which replays them with its own access to
+# the history, judged by its record, in a queue of its own; then read back
+# every SERVE_POLL seconds, saying where it is in the job's log, until it
+# ends or SERVE_WAIT does. Its report in $tmp/report.md, where lapilli
+# verdict would have written it, and $verdict 0; what went wrong is
+# trouble, in serve's words where it has them.
+through_serve() {
+  request || return 1
+  deadline=$(($(date +%s) + serve_wait))
+  # The token is asked for, or read, for each request: an ID token is
+  # taken within its hour, and a plain one may be rotated.
+  while :; do
+    case $token_from in
+      actions) actions_token || return 1 ;;
+      LAPILLI_SERVE_TOKEN_FILE)
+        serve_token=$(tr -d '\r\n' <"$LAPILLI_SERVE_TOKEN_FILE" 2>/dev/null) || serve_token=
+        if ! token_ok "$serve_token"; then
+          trouble "LAPILLI_SERVE_TOKEN_FILE holds no token lapilli serve could take: visible characters, no space, 8 KiB at most"
+          return 1
+        fi
+        ;;
+    esac
+    code=$(serve_ask POST /v1/backtests "$serve_token" "$tmp/serve.json")
+    case $code in
+      202) break ;;
+      200)
+        trouble "lapilli serve had this request already, from this token, and gave the key to read it by to the first: a job asks once"
+        return 1
+        ;;
+      400)
+        serve_said
+        trouble "lapilli serve refused the backtest" "$tmp/serve.said"
+        return 1
+        ;;
+      401)
+        trouble "lapilli serve didn't take the job's token: the entry of its --backtest-trust for this repository says what it takes (its log says why)"
+        return 1
+        ;;
+      409)
+        serve_said
+        trouble "the job's token started another backtest in lapilli serve: a job asks once, with a token of its own" "$tmp/serve.said"
+        return 1
+        ;;
+      413)
+        serve_said
+        trouble "the request is past what lapilli serve takes" "$tmp/serve.said"
+        return 1
+        ;;
+      429 | 503)
+        serve_said
+        wait_s=$(retry_after 60)
+        if [ $(($(date +%s) + wait_s)) -lt "$deadline" ]; then
+          say "lapilli serve can't take the backtest yet ($code): asking again in ${wait_s}s"
+          pause "$wait_s"
+          continue
+        fi
+        if [ "$code" = 429 ]; then
+          trouble "lapilli serve had no room for the backtest within SERVE_WAIT ($serve_wait_given)" "$tmp/serve.said"
+        else
+          trouble "lapilli serve couldn't take the backtest within SERVE_WAIT ($serve_wait_given)" "$tmp/serve.said"
+        fi
+        return 1
+        ;;
+      failed)
+        logged "$tmp/serve.curl"
+        trouble "lapilli serve couldn't be reached (the job's log says why)"
+        return 1
+        ;;
+      *)
+        serve_said
+        trouble "lapilli serve answered HTTP $code" "$tmp/serve.said"
+        return 1
+        ;;
+    esac
+  done
+  serve_token=
+  bt_id=$(serve_field id)
+  bt_key=$(serve_field key)
+  case $bt_id in '' | *[!0-9a-f]*) bt_id= ;; esac
+  case $bt_key in '' | *[!A-Za-z0-9_-]*) bt_key= ;; esac
+  if [ "${#bt_id}" -ne 32 ] || [ -z "$bt_key" ] || [ "${#bt_key}" -gt 256 ]; then
+    trouble "lapilli serve took the backtest, but gave no id and key to read it by"
+    return 1
+  fi
+  bt_live=1
+  of=$(serve_number requests) p=$(serve_number position)
+  say "lapilli serve took the backtest ($bt_id): ${of:-?} requests to the history, ${p:-?} before it in the queue"
+  said_at=$(date +%s) said_state='' failures=0
+  while :; do
+    pause "$serve_poll"
+    code=$(serve_ask GET "/v1/backtests/$bt_id" "$bt_key")
+    case $code in
+      200 | 202)
+        failures=0
+        state=$(serve_field state)
+        case $code/$state in
+          202/waiting)
+            p=$(serve_number position)
+            what="waiting in lapilli serve's queue, ${p:-?} before it"
+            ;;
+          202/running)
+            asked=$(serve_number asked) of=$(serve_number requests)
+            what="running in lapilli serve: ${asked:-?} of its ${of:-?} requests to the history asked"
+            ;;
+          200/done)
+            bt_live=
+            serve_report
+            return
+            ;;
+          200/failed)
+            bt_live=
+            serve_said
+            trouble "lapilli serve couldn't backtest the rules" "$tmp/serve.said"
+            return 1
+            ;;
+          200/superseded)
+            bt_live=
+            trouble "a newer commit's backtest took this one's place in lapilli serve's queue"
+            return 1
+            ;;
+          200/cancelled)
+            bt_live=
+            trouble "the backtest was cancelled in lapilli serve"
+            return 1
+            ;;
+          *)
+            say "lapilli serve said the backtest is $(printf '%s' "$state" | head -c 64) ($code)"
+            serve_cancel
+            trouble "lapilli serve said the backtest is in a state the recipe doesn't know: cancelled"
+            return 1
+            ;;
+        esac
+        # Where it is, when that changes, and every 30 seconds.
+        now=$(date +%s)
+        if [ "$state" != "$said_state" ] || [ $((now - said_at)) -ge 30 ]; then
+          say "$what"
+          said_at=$now said_state=$state
+        fi
+        ;;
+      404)
+        bt_live=
+        trouble "lapilli serve has no such backtest: kept a day after it ends, or another serve's"
+        return 1
+        ;;
+      429 | 503)
+        pause "$(retry_after "$serve_poll")"
+        ;;
+      *)
+        # A request lost on the way, or a replica restarting: asked again,
+        # five times in a row at most.
+        failures=$((failures + 1))
+        if [ "$code" = failed ]; then logged "$tmp/serve.curl"; else serve_said; fi
+        if [ "$failures" -ge 5 ]; then
+          serve_cancel
+          trouble "lapilli serve couldn't be read while it backtested (the job's log says why)"
+          return 1
+        fi
+        ;;
+    esac
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      serve_cancel
+      trouble "the backtest didn't come back within SERVE_WAIT ($serve_wait_given): cancelled in lapilli serve"
+      return 1
+    fi
+  done
+}
+
+# serve_report: the report of a backtest done, as lapilli verdict would
+# have written it, its summary line first.
+serve_report() {
+  if ! jq -e '.markdown | type == "string"' "$tmp/serve.out" >/dev/null 2>&1; then
+    trouble "lapilli serve's answer holds no report"
+    return 1
+  fi
+  if ! report_of_serve >"$tmp/report.json" 2>/dev/null || ! jq -e '.markdown | strings' "$tmp/report.json" >/dev/null 2>&1; then
+    trouble "lapilli serve's report doesn't begin with the summary line lapilli writes: not shown"
+    return 1
+  fi
+  jq -j '.markdown' "$tmp/report.json" >"$tmp/report.md"
+  if jq -e '.long' "$tmp/report.json" >/dev/null 2>&1; then
+    say "lapilli serve's report is longer than lapilli writes one (64000 bytes): read to its first 65536 characters, the rest left out"
+  fi
+  n=$(jq '.leaving' "$tmp/report.json" 2>/dev/null) || n=
+  case $n in '' | *[!0-9]*) n=0 ;; esac
+  if [ "$n" -gt 0 ]; then
+    say "lapilli serve's report has $n lines of Markdown lapilli doesn't write (HTML, a link, a mention, a reference, a command): each left out of the comment, the first of them here"
+    jq -r '.left[]' "$tmp/report.json" >"$tmp/left.log" 2>/dev/null || :
+    logged "$tmp/left.log"
+  fi
+  note=$(serve_field note)
+  [ -z "$note" ] || say "lapilli serve: $note"
+  say "lapilli serve backtested the rules"
+  verdict=0
+}
+
+# report_of_serve: the Markdown in serve's answer ($tmp/serve.out), as
+# {markdown, leaving, left, long}: its first line, the summary line, as
+# serve wrote it, or nothing when it isn't one (no report, then); and each
+# line after it as serve wrote it when it is one lapilli writes, any other
+# left out, a line saying so in place of each run of them, leaving counting
+# them and left holding the first five, 300 characters of each. Past
+# 65,536 characters, more than lapilli writes (64,000 bytes), it is read
+# no further (long), what is past it left out too. Lapilli writes what
+# came from the rules as code spans, each closed on its own line, and
+# outside them only its own text: letters, digits, spaces and the
+# punctuation of its tables, times and counts; a # only to start a
+# heading; <details><summary>N ...</summary> and </details>, each opened
+# and then closed, each with a blank line after it, as an HTML block runs
+# to one. Not what a host reads as a
+# mention (@), a reference (#1, !1, ~x, $1, &1, %x, GH-1), HTML or an
+# entity (<, &), a link or an image ([, //, www., mailto:), an escape (\),
+# a fence, or a quick action (a / first on a line, as GitLab runs one from
+# a note with the job's token); nor, even in a code span, a character that
+# doesn't show or moves the text around it. In a table, which every host
+# splits into cells at each | before it reads a code span, a code span's |
+# is \|, and no | has two backslashes or more before it, which hosts read
+# differently (a line that starts with |, a delimiter row and the line
+# above it, and each line after one until a blank line). A line is let
+# through, or left out, whole: what each host makes of a line changed in
+# part isn't known here. jq alone reads it.
+report_of_serve() {
+  # shellcheck disable=SC2016
+  jq -c '
+    # A line as {plain, code}, the text outside its code spans and in
+    # them, each joined by spaces; or null when a run of backticks is left
+    # open on it. A run of n opens a span, the next run of n closes it, as
+    # CommonMark reads them. Split at each backtick, an empty part is one
+    # more of a run.
+    def spans:
+      split("`") as $p
+      | [foreach ($p[1:][], null) as $q ({run: 0, open: 0};
+          if $q == null then
+            (if .run == 0 then . elif .open == .run then .open = 0 else .open = -1 end)
+            | .k = (if .open == 0 then "closed" else "open" end)
+          else
+            .run += 1
+            | if $q == "" then .k = "" else
+                (if .open == 0 then .open = .run elif .run == .open then .open = 0 else . end)
+                | .k = (if .open == 0 then "plain" else "code" end) | .run = 0
+              end
+          end;
+          [.k, $q])] as $t
+      | if $t[-1][0] != "closed" then null
+        else {plain: ([$p[0]] + [$t[] | select(.[0] == "plain") | .[1]] | join(" ")), code: ([$t[] | select(.[0] == "code") | .[1]] | join(" "))} end;
+    def plain:
+      test("^[A-Za-z0-9 |:;,.\u0027+%?()*/_\u2192\u2013\u2717\u25cb\u25cf-]*$")
+      and (test("//|www\\.|mailto:|gh-[0-9]|\\*iteration:|%[a-z0-9_\"]"; "i") | not);
+    # Nothing that does not show, or moves the text around it: control
+    # and format characters, line and paragraph separators, spaces but the
+    # space (every other of Zs), Hangul fillers, as lapilli shows them.
+    def shows:
+      test("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\u115f\u1160\u3164\uffa0\u2800]") | not;
+    # In a table, a | with no backslash before it ends a cell, one with
+    # one is in it; one with two or more is read either way by one host
+    # or another (comrak 1.0 takes \\| for the end of the cell), and
+    # lapilli writes none: a backslash right before a | is \u{5c}.
+    def ours($table):
+      shows and (test("^ */") | not)
+      and (($table | not) or (test("\\\\\\\\[|]") | not))
+      and ((if test("^#{1,6} ") then sub("^#{1,6} "; "") else . end | spans) as $s
+        | $s != null and ($s.plain | plain) and (($table | not) or ($s.code | test("(?<!\\\\)[|]") | not)));
+    def kind($table):
+      if test("^<details><summary>[0-9]+ [a-z ]+</summary>$") then "open"
+      elif . == "</details>" then "close"
+      elif ours($table) then "ours"
+      else "left" end;
+    (.markdown | strings) as $md
+    | ($md | length > 65536) as $long
+    | (if $long then $md[:65536] | split("\n") | .[:-1] else $md | split("\n") end) as $all
+    | ($all[0] // "") as $first
+    | if ($first | test("^\\[//\\]: # \\(lapilli-compare \\{[a-z0-9_\":,.+-]*\\}\\)$"))
+        and ($first | ltrimstr("[//]: # (lapilli-compare ") | rtrimstr(")") | (try fromjson catch null) | type == "object")
+      then
+        $all[1:] as $rest
+        | ($rest | length) as $n
+        | [$rest[] | test("^ *[|]")] as $piped
+        | [$rest[] | test("^ *[|]? *:?-+:? *([|] *:?-+:? *)*[|]? *$")] as $delim
+        | [$rest[] | test("^ *$")] as $blank
+        | (reduce range(0; $n) as $i ([];
+            . + [$piped[$i] or $delim[$i] or ($delim[$i + 1] // false) or ($i > 0 and .[$i - 1] and ($blank[$i] | not))])) as $table
+        | [range(0; $n) as $i | $rest[$i] | kind($table[$i])] as $tags
+        # A <details> line, or </details>, starts an HTML block, which only
+        # a blank line ends: a line after one before a blank line is in
+        # it, its code spans read as nothing, its HTML as HTML. Lapilli
+        # writes a blank line after each; a tag with none after it is left
+        # out, and the lines after it up to a blank line.
+        | (reduce range(0; $n) as $i ({html: false, out: []};
+            if ($tags[$i] == "open" or $tags[$i] == "close") and $i + 1 < $n and ($blank[$i + 1] | not) then .html = true | .out += [true]
+            elif .html and ($blank[$i] | not) then .out += [true]
+            else .html = false | .out += [false] end) | .out) as $glued
+        | [range(0; $n) as $i | if $glued[$i] then "left" else $tags[$i] end] as $kind
+        | (reduce range(0; $n) as $i ({open: null, odd: [range(0; $n) | false]};
+            if $kind[$i] == "open" then (if .open == null then .open = $i else .odd[$i] = true end)
+            elif $kind[$i] == "close" then (if .open == null then .odd[$i] = true else .open = null end)
+            else . end)
+          | if .open == null then .odd else (.odd[.open] = true | .odd) end) as $odd
+        | [range(0; $n) as $i | $kind[$i] == "left" or $odd[$i]] as $out
+        | "(what lapilli serve wrote here isn\u0027t Markdown lapilli writes: left out, the job\u0027s log has it)" as $left
+        | {markdown: ([$first] + [range(0; $n) as $i | if ($out[$i] | not) then $rest[$i] elif $i > 0 and $out[$i - 1] then empty else $left end]
+              + (if $long and ($n == 0 or ($out[$n - 1] | not)) then [$left] else [] end)
+            | join("\n") | if endswith("\n") then . else . + "\n" end), long: $long,
+           left: [limit(5; range(0; $n) as $i | select($out[$i]) | $rest[$i][:300])], leaving: ([$out[] | select(.)] | length)}
+      else {unusable: true} end' "$tmp/serve.out"
+}
+
+# serve_cancel: the backtest serve took, waiting or running, cancelled
+# (DELETE): a job that stops waiting leaves serve nothing to do.
+serve_cancel() {
+  [ -n "$bt_live" ] || return 0
+  bt_live=
+  c=$(serve_ask DELETE "/v1/backtests/$bt_id" "$bt_key") || c=failed
+  case $c in
+    2??) say "cancelled the backtest in lapilli serve" ;;
+    *) say "the backtest couldn't be cancelled in lapilli serve ($c)" ;;
+  esac
+}
+
 # nothing_changed: whether the report says nothing that decides when a rule
 # fires changed, on its first line, from a run that went well.
 nothing_changed() {
@@ -889,26 +1733,45 @@ nothing_changed() {
 # compose: the comment, in $tmp/comment.md: the marker; the report, if
 # lapilli wrote one; what went wrong, if anything did, in a fenced block.
 # Under the 65,536 characters GitHub takes, the least of the hosts: a
-# shorter log, or none, beside a long report.
+# shorter log, or none, beside a long report; and a report too long even
+# so (lapilli's is 64,000 bytes at most, serve's isn't taken on trust) cut
+# to its first lines, within 60,000 bytes with the rest, saying so.
 compose() {
   for logged_bytes in 4000 1000 0; do
-    {
-      printf '%s\n' "$marker"
-      if [ -s "$tmp/report.md" ] && [ "${verdict:-0}" -le 1 ]; then
-        cat "$tmp/report.md"
-      fi
-      if [ -n "$problem" ]; then
-        printf '\n### Lapilli backtest failed\n\n'
-        if [ "$logged_bytes" -gt 0 ]; then
-          fenced "$problem" "$tmp/problem.log" "$logged_bytes"
-        else
-          fenced "$problem" /dev/null 0
-        fi
-        printf '\nThe rest is in the job'"'"'s log.\n'
-      fi
-    } >"$tmp/comment.md"
+    comment "$tmp/report.md" "$logged_bytes"
     [ "$(wc -c <"$tmp/comment.md")" -gt 65000 ] || return 0
   done
+  comment /dev/null 0
+  room=$((60000 - 200 - $(wc -c <"$tmp/comment.md")))
+  # Whole lines, a <details> left open closed: each line is one lapilli
+  # writes, or one in place of what serve wrote that it doesn't.
+  LC_ALL=C awk -v room="$room" '
+    { n += length($0) + 1; if (n > room) exit; print }
+    /^<details>/ { open = 1 }
+    $0 == "</details>" { open = 0 }
+    END { if (open) printf "\n</details>\n" }' "$tmp/report.md" >"$tmp/report.cut"
+  printf '\n**Cut short** by the recipe, to keep the comment under 60000 bytes: the rest of the report isn'"'"'t shown.\n' >>"$tmp/report.cut"
+  comment "$tmp/report.cut" 0
+}
+
+# comment REPORT BYTES: the comment, in $tmp/comment.md, with REPORT and
+# BYTES of the problem's log at most.
+comment() {
+  {
+    printf '%s\n' "$marker"
+    if [ -s "$1" ] && [ -s "$tmp/report.md" ] && [ "${verdict:-0}" -le 1 ]; then
+      cat "$1"
+    fi
+    if [ -n "$problem" ]; then
+      printf '\n### Lapilli backtest failed\n\n'
+      if [ "$2" -gt 0 ]; then
+        fenced "$problem" "$tmp/problem.log" "$2"
+      else
+        fenced "$problem" /dev/null 0
+      fi
+      printf '\nThe rest is in the job'"'"'s log.\n'
+    fi
+  } >"$tmp/comment.md"
 }
 
 # post: the comment on the pull request, in place of the one posted
@@ -938,6 +1801,8 @@ post() {
 
 main() {
   hidden "$@" >"$tmp/hidden"
+  # Where lapilli serve is, too: an address inside a cluster, say.
+  [ -z "$serve" ] || hidden --prometheus "$serve" >>"$tmp/hidden"
   # The base first, then the pull request's: what the pull request runs
   # comes last.
   if commits && fetch_lapilli && files "$base" "$tmp/base" "the commit it goes into" &&

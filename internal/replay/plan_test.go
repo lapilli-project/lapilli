@@ -136,3 +136,41 @@ func TestPlanNothing(t *testing.T) {
 		t.Errorf("%+v", p)
 	}
 }
+
+// TestPlanEachIsRunEach: PlanEach counts what RunEach asks for two sets of
+// rules set side by side, as a pull request's backtest replays them: a
+// rule alike in both, or one whose "for" alone changed, shares its reads
+// with the other side's, and is counted once.
+func TestPlanEachIsRunEach(t *testing.T) {
+	r := rand.New(rand.NewPCG(57, 1))
+	for c := range 60 {
+		step := []time.Duration{time.Minute, 30 * time.Second}[r.IntN(2)]
+		from := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(r.IntN(48*60)) * time.Minute).Truncate(step)
+		to := from.Add(time.Duration(30+r.IntN(4*24*60)) * time.Minute).Truncate(step)
+		before := randomRules(t, r, 2+r.IntN(20))
+		after := append([]rules.Rule{}, before[r.IntN(len(before)):]...)
+		for i := range after {
+			if r.IntN(2) == 0 {
+				after[i].For += time.Minute // the same reads, longer
+			}
+		}
+		after = append(after, randomRules(t, r, r.IntN(4))...)
+		mu := &sync.Mutex{}
+		prometheus := &tallied{mu: mu, name: "", by: map[string]int{}, asks: map[request]int{}}
+		sets := [][]Version{{{Rules: before}}, {{Rules: after}}}
+		plan := PlanEach(prometheus, sets, from, to, step)
+		RunEach(context.Background(), prometheus, sets, from, to, step, 1+r.IntN(8))
+		sent := 0
+		for _, n := range prometheus.by {
+			sent += n
+		}
+		if plan.Requests != sent {
+			t.Fatalf("case %d: PlanEach counts %d requests, RunEach sent %d", c, plan.Requests, sent)
+		}
+		one := Plan(prometheus, []Version{{Rules: before}}, from, to, step).Requests
+		two := Plan(prometheus, []Version{{Rules: after}}, from, to, step).Requests
+		if plan.Requests > one+two {
+			t.Fatalf("case %d: PlanEach counts %d, more than each side alone (%d + %d)", c, plan.Requests, one, two)
+		}
+	}
+}

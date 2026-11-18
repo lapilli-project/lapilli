@@ -1,0 +1,1105 @@
+---
+# Source: lapilli/templates/networkpolicy.yaml
+# Only those named may reach lapilli serve's UI: the sign-in proxy, whose
+# headers then alone name people, or the ingress controller, the Gateway
+# or the load balancer in front of a sign-in of lapilli's own. Prometheus, in
+# metricsFrom, reaches /metrics and the health checks, and nothing else; a job
+# in incidentsAPI.from (and the chart's trackers job) reaches the port that
+# takes incidents, firings and tasks, and nothing else;
+# an alert manager in notificationsAPI.from, the port that takes
+# notifications.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ops-lapilli
+  labels:
+    app.kubernetes.io/name: lapilli
+    app.kubernetes.io/instance: ops
+    app.kubernetes.io/version: "dev"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: lapilli-0.0.0
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: lapilli
+      app.kubernetes.io/instance: ops
+      app.kubernetes.io/component: serve
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: proxy
+      ports:
+        - port: http
+          protocol: TCP
+    - from:
+        # The chart's own job keeping tasks in step with a tracker.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: lapilli
+              app.kubernetes.io/instance: ops
+              app.kubernetes.io/component: trackers
+      ports:
+        - port: incidents
+          protocol: TCP
+    - from:
+        - podSelector:
+            matchLabels:
+              app: alertmanager
+      ports:
+        - port: notifications
+          protocol: TCP
+---
+# Source: lapilli/templates/networkpolicy.yaml
+# Where lapilli serve, and its rules history's containers, may
+# connect: the cluster's DNS, and those named in egress.to. Nothing else,
+# a cloud's metadata server (169.254.169.254) and the Kubernetes API among
+# them, unless named.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ops-lapilli-egress
+  labels:
+    app.kubernetes.io/name: lapilli
+    app.kubernetes.io/instance: ops
+    app.kubernetes.io/version: "dev"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: lapilli-0.0.0
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: lapilli
+      app.kubernetes.io/instance: ops
+      app.kubernetes.io/component: serve
+  policyTypes: [Egress]
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - ports:
+      - port: 443
+      to:
+      - ipBlock:
+          cidr: 0.0.0.0/0
+          except:
+          - 169.254.169.254/32
+---
+# Source: lapilli/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ops-lapilli
+  labels:
+    app.kubernetes.io/name: lapilli
+    app.kubernetes.io/instance: ops
+    app.kubernetes.io/version: "dev"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: lapilli-0.0.0
+automountServiceAccountToken: false
+---
+# Source: lapilli/templates/trackers.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ops-lapilli-trackers
+  labels:
+    app.kubernetes.io/name: lapilli
+    app.kubernetes.io/instance: ops
+    app.kubernetes.io/version: "dev"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: lapilli-0.0.0
+data:
+  # recipes/trackers, as the job runs them.
+  lib.sh: |
+    # shellcheck shell=sh
+    # What the tracker recipes do with Lapilli, alike for every tracker. A
+    # recipe sets name, defines these, then calls sync_tasks:
+    #
+    #   t_me                who the tracker's token is: an id of its account,
+    #                       which the others find in $me
+    #   t_find MARKER       the URL of an issue this job made for MARKER, or
+    #                       nothing: one $me wrote, labelled lapilli where the
+    #                       tracker has labels by name, its text kept($m) (the
+    #                       line issue_text ends it with), or Jira's one label
+    #                       MARKER
+    #   t_create FILE       make an issue from the task in FILE (JSON); print its URL
+    #   t_ref URL           the issue's own reference (a number, a key) when URL
+    #                       is one of this tracker's issues; nothing when it isn't
+    #   t_state REF MARKER  print STATE UPDATED [CHANGED]: STATE open, done or
+    #                       dropped; when the issue last changed, and when its
+    #                       state did (UPDATED where the tracker doesn't say), in
+    #                       Unix seconds: a comment changes the one, not the
+    #                       other; nothing
+    #                       when the issue isn't one this job made for MARKER
+    #                       ($me wrote it, marked for MARKER as t_find says, and
+    #                       it is in the project or team the recipe is for);
+    #                       gone when the tracker says it isn't there (deleted)
+    #                       and gives the project or team itself
+    #   t_close REF STATUS  close the issue, as done or dropped
+    #
+    # And, to keep comments in step (COMMENTS=true), where the recipe has them:
+    #
+    #   t_comments REF      the issue's comments, the earliest first, a JSON
+    #                       object a line: {"id", "author", "mine", "at",
+    #                       "body"}: id the tracker's (letters, digits and
+    #                       ._:-), mine whether $me wrote it, at an RFC 3339
+    #                       time; people's only, not the tracker's own notes,
+    #                       nor those only some may read; it touches
+    #                       $work/capped when it stopped before the last
+    #   t_comment REF FILE  post FILE's text as a comment on the issue; print
+    #                       the tracker's id for it
+    #
+    # Anyone may write lapilli-task-ID in an issue, and an editor in Lapilli
+    # may link a task to any issue: an issue someone else wrote is never taken
+    # for a task's, followed or closed. Nor is the job's issue for one task
+    # taken for another's because the first task's text names the second's
+    # marker: the text is the task's (an editor's, or an agent's proposal's),
+    # and only the line the recipe writes after it counts.
+    #
+    # Lapilli's side, on the port --incidents-listen opens:
+    #
+    #   LAPILLI_URL         such as http://lapilli:8082 (or the first argument)
+    #   LAPILLI_TOKEN_FILE  a file holding the token in --tasks-token-file
+    #   CLOSE_ISSUES        true to close an issue whose task was done or dropped
+    #                       in Lapilli (default false)
+    #   MAX_ISSUES          issues made in one run, at most (default 50)
+    #   MAX_PAGES           of 200 tasks, at most (default 20)
+    #   SYNC_DAYS           a task done or dropped, and not changed for this
+    #                       long, isn't checked against its issue any more
+    #                       (default 30, at most 3650); Lapilli leaves it out
+    #                       of what it gives, so they aren't paged through
+    #   COMMENTS            true to keep comments in step, both ways (default
+    #                       false): each comment people wrote on a task in
+    #                       Lapilli is posted to its issue once, quoted, with
+    #                       who wrote it and the line it is found again by;
+    #                       each comment on the issue that isn't this job's is
+    #                       copied to the task once. An edit or a deletion
+    #                       after that isn't followed, either way
+    #   MAX_COMMENTS        comments sent each way for a task in a run, at
+    #                       most (default 200)
+    #   COMMENT_NAMES       true to say who wrote a comment posted from Lapilli,
+    #                       as the sign-in proxy names them (often an email);
+    #                       by default it says "Written in Lapilli:" alone
+    
+    # shellcheck disable=SC2154 # name is set by the recipe sourcing this
+    say() { printf '%s: %s\n' "$name" "$*" >&2; }
+    
+    # number NAME VALUE: refuse a VALUE that isn't a whole number.
+    number() {
+      case $2 in
+        '' | *[!0-9]*)
+          say "$1 is a number, not $(printf '%s' "$2" | jq -Rc .)"
+          exit 1
+          ;;
+      esac
+    }
+    
+    lapilli=${1:-${LAPILLI_URL:-}}
+    case $lapilli in
+      http://* | https://*) ;;
+      *)
+        say "LAPILLI_URL is where --incidents-listen is, such as http://lapilli:8082"
+        exit 1
+        ;;
+    esac
+    lapilli=${lapilli%/}
+    : "${LAPILLI_TOKEN_FILE:?a file holding the token in --tasks-token-file}"
+    lapilli_token=$(cat "$LAPILLI_TOKEN_FILE")
+    close=${CLOSE_ISSUES:-false}
+    max_issues=${MAX_ISSUES:-50}
+    max_pages=${MAX_PAGES:-20}
+    sync_days=${SYNC_DAYS:-30}
+    number MAX_ISSUES "$max_issues"
+    number MAX_PAGES "$max_pages"
+    number SYNC_DAYS "$sync_days"
+    comments=${COMMENTS:-false}
+    comment_names=${COMMENT_NAMES:-false}
+    max_comments=${MAX_COMMENTS:-200}
+    number MAX_COMMENTS "$max_comments"
+    case $comments in
+      true | false) ;;
+      *)
+        say "COMMENTS is true or false"
+        exit 1
+        ;;
+    esac
+    if [ "${#sync_days}" -gt 4 ] || [ "$sync_days" -gt 3650 ]; then
+      say "SYNC_DAYS is 3650 at most"
+      exit 1
+    fi
+    work=$(mktemp -d)
+    trap 'rm -rf "$work"' EXIT
+    trap 'exit 1' INT TERM HUP
+    
+    # jq's epoch: a time as trackers write it (with or without fractions, Z or
+    # an offset) in Unix seconds.
+    epoch='def epoch: sub("\\.[0-9]+"; "") |
+      if test("Z$") then fromdateiso8601
+      else capture("^(?<t>.*T[0-9:]{8})(?<s>[+-])(?<h>[0-9]{2}):?(?<m>[0-9]{2})$") |
+        ((.t + "Z") | fromdateiso8601) - ((if .s == "+" then 1 else -1 end) * ((.h | tonumber) * 3600 + (.m | tonumber) * 60))
+      end;'
+    
+    # issue_text: the task on stdin as an issue's text, in Markdown, ending with
+    # the marker its issue is found again by: a line of its own, always after
+    # the task's text, so nothing in that text comes after it. The rule's, the
+    # incident's, the team's and the assignee's names are each a code span: a
+    # name chosen by whoever writes a rule's source, or an incident's, mentions
+    # no one and shows no link or image in the issue.
+    issue_text() {
+      jq -r 'def code: gsub("`"; "'"'"'") | gsub("[\r\n]"; " ") | "`" + . + "`";
+        [.body // empty, "",
+        (if .rule then "Rule: \(.rule | code)" else empty end),
+        (if .incident then "Incident: \(.incident | code)" else empty end),
+        (if .team then "Team: \(.team | code)" else empty end),
+        (if .assignee then "Assignee: \(.assignee | code)" else empty end),
+        (if .due then "Due: \(.due[0:10])" else empty end),
+        (if .url then "In Lapilli: \(.url)" else empty end),
+        "", "Kept in step with Lapilli: lapilli-task-\(.id)"] | join("\n")'
+    }
+    
+    # jq's kept($m): whether an issue's text (.) is marked for $m as issue_text
+    # marks it: its last line starting "Kept in step with Lapilli:" is the one
+    # for $m, exactly. One the task's own text holds comes before the recipe's,
+    # so it is never the last; lines people add below it in the tracker are
+    # left out.
+    # shellcheck disable=SC2016,SC2034 # $m is jq's; the recipes use kept
+    kept='def kept($m): [. // "" | split("\n")[] | rtrimstr("\r") | select(startswith("Kept in step with Lapilli:"))]
+      | last == "Kept in step with Lapilli: " + $m;'
+    
+    # fetch CURL-ARGUMENTS: the tracker's answer, taken whole before it is
+    # read, for a 2xx; anything else is said and fails, its HTTP status kept
+    # for gone.
+    fetch() {
+      : >"$work/answer"
+      if ! code=$(curl -q -sS --max-time 30 --retry 3 -o "$work/answer" -w '%{http_code}' "$@"); then
+        code=000
+      fi
+      printf '%s\n' "$code" >"$work/status"
+      case $code in
+        2??) cat "$work/answer" ;;
+        *)
+          say "the tracker answered $code: $(head -c 300 "$work/answer" | jq -Rsc .)"
+          return 1
+          ;;
+      esac
+    }
+    
+    # gone: whether the tracker's last answer said what was asked for isn't
+    # there: 404, or GitHub's 410 for an issue deleted.
+    gone() {
+      case $(cat "$work/status" 2>/dev/null) in
+        404 | 410) return 0 ;;
+      esac
+      return 1
+    }
+    
+    # lapilli_tasks QUERY FILE: every task the query finds, a JSON object a line.
+    lapilli_tasks() {
+      after=0
+      pages=0
+      : >"$2"
+      while :; do
+        pages=$((pages + 1))
+        if [ "$pages" -gt "$max_pages" ]; then
+          say "more than $max_pages pages of tasks; stopping (raise MAX_PAGES)"
+          exit 1
+        fi
+        if ! printf 'Authorization: Bearer %s\n' "$lapilli_token" |
+          curl -q -fsS --max-time 30 --retry 3 -H @- -o "$work/page" "$lapilli/api/v1/tasks?$1&after=$after"; then
+          say "Lapilli didn't give the tasks"
+          exit 1
+        fi
+        if ! jq -e '.tasks | type == "array"' "$work/page" >/dev/null 2>&1; then
+          say "Lapilli's answer isn't a page of tasks"
+          exit 1
+        fi
+        jq -c '.tasks[]' "$work/page" >>"$2"
+        next=$(jq -r '.next // empty' "$work/page")
+        [ -n "$next" ] || return 0
+        number "the next page" "$next"
+        if [ "$next" -le "$after" ]; then
+          say "Lapilli gave the same page again; stopping"
+          exit 1
+        fi
+        after=$next
+      done
+    }
+    
+    # lapilli_patch ID JSON: set a task's link or status.
+    lapilli_patch() {
+      printf 'Authorization: Bearer %s\n' "$lapilli_token" |
+        curl -q -fsS --max-time 30 --retry 3 -X PATCH -H @- -H 'Content-Type: application/json' \
+          --data-binary "$2" -o /dev/null "$lapilli/api/v1/tasks/$1"
+    }
+    
+    # lapilli_comments ID FILE: a task's comments, as Lapilli has them.
+    lapilli_comments() {
+      if ! printf 'Authorization: Bearer %s\n' "$lapilli_token" |
+        curl -q -fsS --max-time 30 --retry 3 -H @- -o "$2" "$lapilli/api/v1/tasks/$1/comments"; then
+        return 1
+      fi
+      jq -e '.comments | type == "array"' "$2" >/dev/null 2>&1
+    }
+    
+    # lapilli_copy ID JSON: a comment from the issue, copied to the task. It
+    # prints Lapilli's HTTP status: 2xx taken, 4xx refused, anything else
+    # failed; what Lapilli said is in $work/copied: whether it was kept (not
+    # when the task keeps as many as it does), and as sent.
+    lapilli_copy() {
+      : >"$work/copied"
+      printf 'Authorization: Bearer %s\n' "$lapilli_token" |
+        curl -q -sS --max-time 30 --retry 3 -X POST -H @- -H 'Content-Type: application/json' \
+          --data-binary "$2" -o "$work/copied" -w '%{http_code}' "$lapilli/api/v1/tasks/$1/comments" || printf '000'
+    }
+    
+    # lapilli_mark ID COMMENT REF: note that a comment people wrote was posted to
+    # the task's issue as REF, so it is never posted again.
+    lapilli_mark() {
+      printf 'Authorization: Bearer %s\n' "$lapilli_token" |
+        curl -q -fsS --max-time 30 --retry 3 -X PATCH -H @- -H 'Content-Type: application/json' \
+          --data-binary "$(jq -cn --arg r "$3" '{posted: $r}')" -o /dev/null "$lapilli/api/v1/tasks/$1/comments/$2"
+    }
+    
+    # comment_text: a comment people wrote in Lapilli, on stdin, as the issue's
+    # comment's text: the comment quoted line by line (so nothing in it starts
+    # a line of its own: no quick action, no heading), and the line it is found
+    # again by, always last; who wrote it only with COMMENT_NAMES=true, since
+    # the sign-in proxy's name for them is often their email, and the issue
+    # may be public.
+    comment_text() {
+      jq -r --arg names "$comment_names" '[(if $names == "true" then "\(.by // "someone" | gsub("[\r\n]"; " ")) wrote in Lapilli:" else "Written in Lapilli:" end), "",
+        (.body | split("\n") | map("> " + rtrimstr("\r")) | join("\n")),
+        "", "Kept in step with Lapilli: lapilli-comment-\(.id)"] | join("\n")'
+    }
+    
+    # copy_text: a comment from the tracker, on stdin, as Lapilli takes it: one
+    # with no text (an image, a table) says so, and one longer than Lapilli
+    # keeps is cut, and says where the rest is.
+    # shellcheck disable=SC2016 # jq's
+    copy_text='def copy_text: if (gsub("[\\s]"; "") == "") then "(no text here: see the issue)"
+      elif length > 10000 then .[0:9900] + "\n\n(cut here: the rest is in the issue)" else . end;'
+    
+    
+    # sync_comments ID REF: the task's comments and its issue's, each way, once.
+    sync_comments() {
+      if ! lapilli_comments "$1" "$work/lc"; then
+        fail "Lapilli didn't give task $1's comments; skipped"
+        return 0
+      fi
+      rm -f "$work/capped"
+      if ! t_comments "$2" >"$work/tc"; then
+        fail "the tracker didn't give the comments of task $1's issue; skipped"
+        return 0
+      fi
+      # What the tracker said is checked before any of it goes on.
+      if ! jq -e -s 'all(.[]; (.id | type == "string" and test("\\A[A-Za-z0-9._:-]{1,100}\\z"))
+          and (.mine | type == "boolean") and (.at | type == "string") and (.body | type == "string")
+          and (.author | type == "string"))' "$work/tc" >/dev/null; then
+        say "the tracker's comments on task $1's issue aren't as they should be; stopping"
+        exit 1
+      fi
+      # Lapilli to the tracker: people's comments Lapilli doesn't know were
+      # posted (it keeps the tracker's id for each, ref). One this job posted
+      # but couldn't note is found among its own by the line it ends with,
+      # and noted now. What Lapilli knows is never inferred from a read of the
+      # tracker's comments, which can be pushed past what is read: with more
+      # comments on the issue than are read, nothing is posted to it.
+      if [ -e "$work/capped" ]; then
+        say "task $1's issue has more comments than are read: nothing is posted to it this run"
+      else
+        # shellcheck disable=SC2016 # $kept and $m are jq's
+        jq -c --slurpfile tc "$work/tc" "$kept"'[$tc[] | select(.mine)] as $ours
+          | .comments[] | select((.origin // "") == "" and (.ref // "") == "")
+          | ("lapilli-comment-\(.id)") as $m
+          | . + {found: ([$ours[] | select(.body | kept($m)) | .id][0] // "")}' "$work/lc" | head -n "$max_comments" >"$work/out"
+        while IFS= read -r c; do
+          cid=$(printf '%s' "$c" | jq -r '.id')
+          number "a comment's id" "$cid"
+          cref=$(printf '%s' "$c" | jq -r '.found')
+          if [ -z "$cref" ]; then
+            printf '%s' "$c" | comment_text >"$work/ctext"
+            if ! cref=$(t_comment "$2" "$work/ctext"); then
+              fail "the tracker didn't take a comment on task $1's issue; skipped"
+              return 0
+            fi
+            posted=$((posted + 1))
+          fi
+          if ! printf '%s' "$cref" | grep -Eq '^[A-Za-z0-9._:-]{1,100}$'; then
+            say "the tracker didn't say the id of the comment posted on task $1's issue: it is found again by its last line"
+            continue
+          fi
+          if ! lapilli_mark "$1" "$cid" "$cref"; then
+            fail "Lapilli didn't note comment $cid as posted; skipped"
+            return 0
+          fi
+        done <"$work/out"
+      fi
+      # The tracker to Lapilli: comments not this job's whose ids no comment
+      # on the task has (copied in, or posted from it), MAX_COMMENTS of them,
+      # counted after those are left out. One with no text, or too long, is
+      # made to fit; Lapilli keeps a text or a name that doesn't show as what
+      # does, under the comment's id, so it isn't sent again ahead of the
+      # rest. One Lapilli still refuses is said and passed over, and doesn't
+      # hold up the others or fail the run. Once the task keeps as many as
+      # it does, Lapilli keeps no more: nothing more is sent for it.
+      # shellcheck disable=SC2016 # $copy_text is jq's
+      jq -c --slurpfile lc "$work/lc" "$copy_text"'[$lc[0].comments[] | .ref // "" | select(. != "")] as $have
+        | select(.mine | not) | select(.id as $i | $have | index($i) | not)
+        | {text: (.body | copy_text), author: .author, ref: .id, at: .at}' "$work/tc" | head -n "$max_comments" >"$work/in"
+      while IFS= read -r c; do
+        code=$(lapilli_copy "$1" "$c")
+        case $code in
+          2??)
+            if ! jq -e '.kept == true' "$work/copied" >/dev/null 2>&1; then
+              say "task $1 keeps as many comments copied from its issue as a task does: no more are copied to it"
+              break
+            fi
+            copied=$((copied + 1))
+            if ! jq -e '.as_sent == true' "$work/copied" >/dev/null 2>&1; then
+              altered=$((altered + 1))
+            fi
+            ;;
+          4??)
+            say "Lapilli refused comment $(printf '%s' "$c" | jq -r '.ref') on task $1's issue ($code); passed over"
+            refused=$((refused + 1))
+            ;;
+          *)
+            fail "a comment on task $1's issue couldn't be copied ($code); skipped"
+            return 0
+            ;;
+        esac
+      done <"$work/in"
+    }
+    
+    # fail WHAT: say what failed for one task, and count it.
+    fail() {
+      say "$*"
+      failed=$((failed + 1))
+    }
+    
+    # whoami: who the tracker's token is, in $me, asked the first time it is
+    # needed: an id, or a login (a GitHub App's is NAME[bot]), on one line.
+    me=
+    whoami() {
+      [ -z "$me" ] || return 0
+      if ! me=$(t_me) || ! jq -en --arg me "$me" '$me | test("\\A[A-Za-z0-9:_.-]{1,128}(\\[bot\\])?\\z")' >/dev/null; then
+        say "the tracker didn't say who its token is"
+        exit 1
+      fi
+    }
+    
+    # sync_tasks: an issue for each open task without one, its link back; then
+    # each linked task checked against its issue, by who set the task's status
+    # and when (Lapilli's status_by and status_at: a later edit of anything
+    # else, the job's link among them, doesn't count):
+    #
+    #   - open or doing, its issue closed since the task's status was set: the
+    #     task is done or dropped, as the issue was closed;
+    #   - done or dropped by this job, because its issue was, the issue open
+    #     again: the task is open again;
+    #   - done or dropped by someone in Lapilli, the issue open and unchanged
+    #     since: with CLOSE_ISSUES=true, the issue is closed. Who set it not
+    #     known (the changes saying so were pruned) is someone, not this job.
+    #
+    # Anything else is left as it is: a task reopened in Lapilli doesn't reopen
+    # its issue, and an issue someone is still at isn't closed under them. An
+    # issue deleted in the tracker is said, and its task left as it is: there
+    # is nothing to follow or close.
+    #
+    # What fails for one task (an issue the tracker won't make, or can't give,
+    # or close; a write Lapilli refuses) is said and skipped, and the rest are
+    # done; the run then fails. The tracker unreachable, or Lapilli's answer
+    # not to be trusted, stops it there.
+    sync_tasks() {
+      made=0
+      linked=0
+      moved=0
+      closed=0
+      alone=0
+      failed=0
+      posted=0
+      copied=0
+      altered=0
+      refused=0
+      lapilli_tasks "linked=false&status=open,doing" "$work/new"
+      while IFS= read -r task; do
+        id=$(printf '%s' "$task" | jq -r '.id')
+        number "a task's id" "$id"
+        whoami
+        # Found again by its marker, among the issues this job made: one made
+        # in a run that couldn't put its link back isn't made twice.
+        if ! url=$(t_find "lapilli-task-$id"); then
+          say "the tracker couldn't be searched for task $id's issue"
+          exit 1
+        fi
+        if [ -z "$url" ]; then
+          if [ "$made" -ge "$max_issues" ]; then
+            say "made $max_issues issues (MAX_ISSUES); the rest wait for the next run"
+            break
+          fi
+          printf '%s' "$task" >"$work/task"
+          if ! url=$(t_create "$work/task") || [ -z "$url" ]; then
+            fail "the tracker didn't make an issue for task $id; skipped"
+            continue
+          fi
+          made=$((made + 1))
+        fi
+        if [ -z "$(t_ref "$url")" ]; then
+          say "the tracker gave an issue link that isn't one of its own: $(printf '%s' "$url" | jq -Rc .)"
+          exit 1
+        fi
+        if ! lapilli_patch "$id" "$(jq -cn --arg l "$url" '{link: $l}')"; then
+          fail "task $id's link couldn't be written; skipped"
+          continue
+        fi
+        linked=$((linked + 1))
+      done <"$work/new"
+    
+      # Those done or dropped only while lately changed: Lapilli leaves out
+      # the rest, so however many were closed before, they aren't paged through.
+      lapilli_tasks "linked=true&status=open,doing" "$work/open"
+      since=$(jq -nr --arg d "$sync_days" 'now - ($d | tonumber) * 86400 | floor | todate')
+      lapilli_tasks "linked=true&status=done,dropped&updated_after=$since" "$work/closed"
+      cat "$work/open" "$work/closed" >"$work/linked"
+      while IFS= read -r task; do
+        id=$(printf '%s' "$task" | jq -r '.id')
+        number "a task's id" "$id"
+        status=$(printf '%s' "$task" | jq -r '.status')
+        # Who set its status, and when; when the changes saying so were
+        # pruned, no one known, at its last change.
+        set_by=$(printf '%s' "$task" | jq -r '.status_by // empty')
+        set_at=$(printf '%s' "$task" | jq -r "$epoch"' (.status_at // .updated) | epoch')
+        number "a task's time" "$set_at"
+        ref=$(t_ref "$(printf '%s' "$task" | jq -r '.link')")
+        # Another tracker's issue, or a link written by hand: left alone.
+        [ -n "$ref" ] || continue
+        whoami
+        if ! state=$(t_state "$ref" "lapilli-task-$id"); then
+          fail "the tracker didn't give task $id's issue; skipped"
+          continue
+        fi
+        if [ -z "$state" ]; then
+          # Someone else's issue, or this job's for another task: linked by
+          # hand, it is neither followed nor closed.
+          say "task $id's issue isn't one this job made for it; left alone"
+          alone=$((alone + 1))
+          continue
+        fi
+        if [ "$state" = gone ]; then
+          # Deleted in the tracker: said each run, and not a failure. A person
+          # clearing the task's link in Lapilli has a new issue made.
+          say "task $id's issue is gone from the tracker; left alone"
+          alone=$((alone + 1))
+          continue
+        fi
+        was=${state%% *}
+        rest=${state#* }
+        when=${rest%% *}
+        changed=${rest#* }
+        number "an issue's time" "$when"
+        number "an issue's time" "$changed"
+        if [ "$comments" = true ]; then
+          sync_comments "$id" "$ref"
+        fi
+        case $status:$was in
+          open:done | open:dropped | doing:done | doing:dropped)
+            # Closed since the task's status was set: the task follows. By when
+            # its state changed, not when it last changed: a comment on a
+            # closed issue, this job's own among them, doesn't close it again.
+            [ "$changed" -ge "$set_at" ] || continue
+            if ! lapilli_patch "$id" "$(jq -cn --arg s "$was" '{status: $s}')"; then
+              fail "task $id's status couldn't be written; skipped"
+              continue
+            fi
+            moved=$((moved + 1))
+            ;;
+          done:open | dropped:open)
+            if [ "$set_by" = tasks-token ]; then
+              # Closed here because its issue was, and the issue is open again:
+              # reopened, so the task is too.
+              if ! lapilli_patch "$id" '{"status":"open"}'; then
+                fail "task $id's status couldn't be written; skipped"
+                continue
+              fi
+              moved=$((moved + 1))
+            elif [ "$close" = true ] && [ "$when" -le "$set_at" ]; then
+              # Done or dropped in Lapilli, and the issue unchanged since. One
+              # changed since is left open: someone is still at it.
+              # In a subshell, as the others are: what it sets is its own.
+              if ! (t_close "$ref" "$status"); then
+                fail "the tracker didn't close task $id's issue; skipped"
+                continue
+              fi
+              closed=$((closed + 1))
+            fi
+            ;;
+        esac
+      done <"$work/linked"
+      if [ "$comments" = true ]; then
+        say "posted $posted comments to issues, copied $copied comments to tasks ($altered with a text or a name that doesn't show kept as what does), passed over $refused Lapilli refused"
+      fi
+      say "made $made issues, linked $linked tasks, moved $moved tasks, closed $closed issues, left $alone alone"
+      if [ "$failed" -gt 0 ]; then
+        say "$failed failed (above)"
+        exit 1
+      fi
+    }
+  github.sh: |
+    #!/bin/sh
+    # Keeps Lapilli's tasks in step with issues in a GitHub repository: an
+    # issue for each task without one, its link put back on the task, a task
+    # closed or reopened as its issue was, and with CLOSE_ISSUES an issue closed
+    # as its task was. Run it every few minutes.
+    #
+    #   GITHUB_REPO        such as example/alerts
+    #   GITHUB_TOKEN_FILE  a file holding a token that may read and write the
+    #                      repository's issues
+    #   GITHUB_API         default https://api.github.com (GitHub Enterprise
+    #                      Server: https://HOST/api/v3)
+    #   GITHUB_WEB         default https://github.com (Enterprise: https://HOST)
+    #   GITHUB_LOGIN       the account the token writes issues as, when GET /user
+    #                      can't say: a GitHub App's installation token, or
+    #                      Actions' GITHUB_TOKEN (github-actions[bot]), is
+    #                      NAME[bot]
+    #
+    # The issue made for a task is in github.jq. And Lapilli's side, as
+    # recipes/trackers/lib.sh says: LAPILLI_URL, LAPILLI_TOKEN_FILE,
+    # CLOSE_ISSUES, MAX_ISSUES, MAX_PAGES, SYNC_DAYS.
+    set -eu
+    name=github.sh
+    here=$(dirname "$0")
+    # shellcheck source=recipes/trackers/lib.sh
+    . "$here/lib.sh"
+    : "${GITHUB_REPO:?such as example/alerts}"
+    : "${GITHUB_TOKEN_FILE:?a file holding a GitHub token}"
+    api=${GITHUB_API:-https://api.github.com}
+    web=${GITHUB_WEB:-https://github.com}
+    api=${api%/}
+    web=${web%/}
+    repo=$GITHUB_REPO
+    if ! printf '%s' "$repo" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
+      say "GITHUB_REPO is OWNER/NAME"
+      exit 1
+    fi
+    gh_token=$(cat "$GITHUB_TOKEN_FILE")
+    
+    # gh METHOD PATH [BODY]: GitHub's answer, or a failure for anything but a
+    # 2xx. Taken whole before it is read, so a failure isn't read as nothing.
+    gh() {
+      if [ $# -gt 2 ]; then
+        printf 'Authorization: Bearer %s\n' "$gh_token" | fetch -X "$1" -H @- \
+          -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+          -H 'Content-Type: application/json' --data-binary "$3" "$api$2"
+      else
+        printf 'Authorization: Bearer %s\n' "$gh_token" | fetch -X "$1" -H @- \
+          -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "$api$2"
+      fi
+    }
+    
+    # ours: whether the issue on stdin is one this job made for the marker $m:
+    # written by $me (GitHub's logins are the same in any case), marked for $m.
+    # shellcheck disable=SC2016 # $me and $m are jq's
+    ours=$kept'def ours: (.user.login // "" | ascii_downcase) == ($me | ascii_downcase)
+      and (.body | kept($m));'
+    
+    t_me() {
+      if [ -n "${GITHUB_LOGIN:-}" ]; then
+        printf '%s' "$GITHUB_LOGIN"
+        return 0
+      fi
+      if ! out=$(gh GET /user); then
+        say "GET /user didn't say who the token is (a GitHub App's or Actions' token can't): set GITHUB_LOGIN, such as NAME[bot]"
+        return 1
+      fi
+      printf '%s' "$out" | jq -r '.login // empty'
+    }
+    
+    t_find() {
+      # A GitHub App's issues are searched for as app/NAME.
+      author=$me
+      case $me in *\[bot\]) author=app/${me%\[bot\]} ;; esac
+      q=$(printf 'repo:%s is:issue in:body "%s" author:%s label:lapilli' "$repo" "$1" "$author" | jq -sRr @uri)
+      out=$(gh GET "/search/issues?q=$q&per_page=20") || return 1
+      printf '%s' "$out" | jq -r --arg m "$1" --arg me "$me" "$ours"'
+        [.items[] | select(ours and ([.labels[]? | .name? // .] | index("lapilli")))][0].html_url // empty'
+    }
+    
+    t_create() {
+      text=$(issue_text <"$1")
+      body=$(jq -c --arg text "$text" -f "$here/github.jq" "$1")
+      out=$(gh POST "/repos/$repo/issues" "$body") || return 1
+      printf '%s' "$out" | jq -r '.html_url // empty'
+    }
+    
+    t_ref() {
+      # GitHub may spell the repository's name in other cases than GITHUB_REPO.
+      printf '%s' "$1" | jq -Rr --arg w "$web/$repo/issues/" \
+        'if ascii_downcase | startswith($w | ascii_downcase) then .[($w | length):] | select(test("\\A[0-9]+\\z")) else empty end'
+    }
+    
+    t_state() {
+      if ! out=$(gh GET "/repos/$repo/issues/$1"); then
+        # Not there (deleted: 410), in a repository the token still reads.
+        gone || return 1
+        gh GET "/repos/$repo" >/dev/null || return 1
+        echo gone
+        return 0
+      fi
+      printf '%s' "$out" | jq -r --arg m "$2" --arg me "$me" "$epoch$ours"'
+        select(ours) | (if .state == "open" then "open" elif .state_reason == "not_planned" then "dropped" else "done" end)
+        + " " + (.updated_at | epoch | tostring) + " " + (.closed_at // .updated_at | epoch | tostring)'
+    }
+    
+    t_close() {
+      reason=completed
+      [ "$2" != dropped ] || reason=not_planned
+      gh PATCH "/repos/$repo/issues/$1" "$(jq -cn --arg r "$reason" '{state: "closed", state_reason: $r}')" >/dev/null
+    }
+    
+    # t_comments: the issue's comments, ten pages of 100 at most, people's;
+    # the page number is the recipe's own, not a link GitHub gives.
+    t_comments() {
+      page=1
+      while [ "$page" -le 10 ]; do
+        out=$(gh GET "/repos/$repo/issues/$1/comments?per_page=100&page=$page") || return 1
+        printf '%s' "$out" | jq -c --arg me "$me" '.[] | {id: (.id | tostring), author: (.user.login // "someone"),
+          mine: ((.user.login // "" | ascii_downcase) == ($me | ascii_downcase)), at: .created_at, body: (.body // "")}'
+        [ "$(printf '%s' "$out" | jq 'length')" -eq 100 ] || return 0
+        page=$((page + 1))
+      done
+      : >"$work/capped"
+    }
+    
+    t_comment() {
+      out=$(gh POST "/repos/$repo/issues/$1/comments" "$(jq -Rsc '{body: .}' "$2")") || return 1
+      printf '%s' "$out" | jq -r '.id // empty | tostring'
+    }
+    
+    sync_tasks
+  github.jq: |
+    # The issue github.sh makes for a task, as POST /repos/{owner}/{repo}/issues
+    # takes it: the task (as Lapilli's GET /api/v1/tasks gives it) in, $text the
+    # issue's text (with the line it is found again by, which must stay, as
+    # must the label lapilli). Change the title or the labels here; GitHub
+    # makes a label it hasn't seen, of 50 characters at most.
+    {
+      title: .title,
+      body: $text,
+      labels: (["lapilli", .kind] + (if .team then [.team[0:50] | sub("\\s+$"; "")] else [] end))
+    }
+---
+# Source: lapilli/templates/service.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ops-lapilli-ledger
+  labels:
+    app.kubernetes.io/name: lapilli
+    app.kubernetes.io/instance: ops
+    app.kubernetes.io/version: "dev"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: lapilli-0.0.0
+  annotations:
+    # The ledger outlives the release unless deleted by hand.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+# Source: lapilli/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: ops-lapilli
+  labels:
+    app.kubernetes.io/name: lapilli
+    app.kubernetes.io/instance: ops
+    app.kubernetes.io/version: "dev"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: lapilli-0.0.0
+spec:
+  # Inside the cluster: every port, as jobs, alert managers and Prometheus
+  # reach them. The UI outside it is FULLNAME-ui's (serve.service.type).
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: lapilli
+    app.kubernetes.io/instance: ops
+    app.kubernetes.io/component: serve
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    # /metrics and the health checks, alone: what Prometheus needs.
+    - name: metrics
+      port: 9091
+      targetPort: metrics
+    # Incidents, firings, tasks and changes, each with a token, alone: what
+    # jobs copying them, keeping tasks in step with a tracker, and the change
+    # recipes need.
+    - name: incidents
+      port: 8082
+      targetPort: incidents
+    # Notifications as alert managers sent them, alone.
+    - name: notifications
+      port: 8083
+      targetPort: notifications
+---
+# Source: lapilli/templates/service.yaml
+# The UI outside the cluster, alone: a load balancer's or a node's port.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ops-lapilli-ui
+  labels:
+    app.kubernetes.io/name: lapilli
+    app.kubernetes.io/instance: ops
+    app.kubernetes.io/version: "dev"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: lapilli-0.0.0
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+spec:
+  type: LoadBalancer
+  loadBalancerClass: "example.com/lb"
+  loadBalancerSourceRanges:
+    - 203.0.113.0/24
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: lapilli
+    app.kubernetes.io/instance: ops
+    app.kubernetes.io/component: serve
+  ports:
+    - name: http
+      port: 8443
+      targetPort: http
+      nodePort: 30080
+---
+# Source: lapilli/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ops-lapilli
+  labels:
+    app.kubernetes.io/name: lapilli
+    app.kubernetes.io/instance: ops
+    app.kubernetes.io/version: "dev"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: lapilli-0.0.0
+spec:
+  replicas: 1
+  strategy:
+    # One pod: the old stops before the new one starts. A SQLite ledger is
+    # its volume's; a Postgres one, upgraded from 0.35 or before,
+    # is refused to a new pod while an old one holds it alone.
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: lapilli
+      app.kubernetes.io/instance: ops
+      app.kubernetes.io/component: serve
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: serve
+        app.kubernetes.io/name: lapilli
+        app.kubernetes.io/instance: ops
+        app.kubernetes.io/version: "dev"
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: lapilli-0.0.0
+    spec:
+      serviceAccountName: ops-lapilli
+      # Mounted in lapilli's container alone, when a cloud's identity may
+      # need it (lapilli.saToken), not in the rules history's.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: lapilli
+          image: "ghcr.io/lapilli-project/lapilli:dev"
+          imagePullPolicy: IfNotPresent
+          args:
+            - serve
+            - --ledger=/var/lib/lapilli
+            - --listen=:8080
+            - "--metrics-listen=:9091"
+            - "--every=1h"
+            - "--settle=1h"
+            - "--backfill=28d"
+            - "--keep=400d"
+            - "--digest=mon@09:00"
+            - "--timeout=50m"
+            - "--lang=en"
+            - "--incidents-listen=:8082"
+            - "--tasks-token-file=/var/run/lapilli/tasks-token/token"
+            - "--notify-listen=:8083"
+            - "--notify-token-file=/var/run/lapilli/notify-token/token"
+            - "--tz=Etc/UTC"
+            - "--prometheus=http://prometheus:9090"
+            - "--rules=/etc/lapilli/rules/0"
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics
+              containerPort: 9091
+            - name: incidents
+              containerPort: 8082
+            - name: notifications
+              containerPort: 8083
+          env:
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.memory
+                  # Said, not left to the API server's default ("0"): resourceFieldRef
+                  # is atomic, so a GitOps diff of the applied fields sees the default
+                  # as a change. "1" is the same value, in bytes.
+                  divisor: "1"
+          # Ready once the first run is done (serve.readinessPath), so a
+          # load balancer sends people to a UI with something in it.
+          readinessProbe:
+            httpGet: {path: /readyz, port: metrics}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 30
+            failureThreshold: 4
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            limits:
+              memory: 1Gi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          volumeMounts:
+            - name: ledger
+              mountPath: /var/lib/lapilli
+            - name: rules-0
+              mountPath: /etc/lapilli/rules/0
+              readOnly: true
+            - name: tasks-token
+              mountPath: /var/run/lapilli/tasks-token
+              readOnly: true
+            - name: notify-token
+              mountPath: /var/run/lapilli/notify-token
+              readOnly: true
+      volumes:
+        - name: ledger
+          persistentVolumeClaim:
+            claimName: ops-lapilli-ledger
+        - name: rules-0
+          projected:
+            sources:
+              - configMap:
+                  name: rules
+        - name: tasks-token
+          secret:
+            secretName: tasks
+        - name: notify-token
+          secret:
+            secretName: notify
+---
+# Source: lapilli/templates/trackers.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ops-lapilli-trackers
+  labels:
+    app.kubernetes.io/name: lapilli
+    app.kubernetes.io/instance: ops
+    app.kubernetes.io/version: "dev"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: lapilli-0.0.0
+    app.kubernetes.io/component: trackers
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  # A run that hangs shouldn't keep every later one from starting.
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # Each run starts again from what is in Lapilli and the tracker: a
+      # failed one is tried at the next, not now.
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: lapilli
+            app.kubernetes.io/instance: ops
+            app.kubernetes.io/version: "dev"
+            app.kubernetes.io/managed-by: Helm
+            helm.sh/chart: lapilli-0.0.0
+            app.kubernetes.io/component: trackers
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: trackers
+              image: "example/tools@sha256:abababababababababababababababababababababababababababababababab"
+              imagePullPolicy: IfNotPresent
+              command: [sh, "/recipes/github.sh"]
+              env:
+                - name: LAPILLI_URL
+                  value: "http://ops-lapilli:8082"
+                - name: LAPILLI_TOKEN_FILE
+                  value: "/var/run/lapilli/tasks-token/token"
+                - name: GITHUB_TOKEN_FILE
+                  value: "/var/run/lapilli/tracker-token/token"
+                - name: CLOSE_ISSUES
+                  value: "false"
+                - name: COMMENTS
+                  value: "false"
+                - name: TMPDIR
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              volumeMounts:
+                - name: recipes
+                  mountPath: /recipes
+                  readOnly: true
+                - name: tasks-token
+                  mountPath: /var/run/lapilli/tasks-token
+                  readOnly: true
+                - name: tracker-token
+                  mountPath: /var/run/lapilli/tracker-token
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: recipes
+              configMap:
+                name: ops-lapilli-trackers
+            - name: tasks-token
+              secret:
+                secretName: tasks
+            - name: tracker-token
+              secret:
+                secretName: gh
+            - name: tmp
+              emptyDir: {}

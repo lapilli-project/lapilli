@@ -22,6 +22,11 @@ values, not the new chart's): every template reads them through this. */}}
 {{- if not (hasKey $s "replicas") }}{{ $_ := set $s "replicas" 1 }}{{ end -}}
 {{- include "lapilli.fill" (dict "in" $s "key" "podDisruptionBudget" "with" (dict "maxUnavailable" 1)) -}}
 {{- if not (hasKey $s "readinessPath") }}{{ $_ := set $s "readinessPath" "/readyz" }}{{ end -}}
+{{- include "lapilli.fill" (dict "in" $s "key" "backtest" "with" (dict "enabled" false "port" 8084 "tokens" (list) "share" "" "queue" "" "timeout" "" "from" (list))) -}}
+{{- include "lapilli.fill" (dict "in" $s.backtest "key" "trust" "with" (dict)) -}}
+{{- include "lapilli.fill" (dict "in" $s.backtest.trust "key" "configMap" "with" (dict "name" "" "key" "trust.yaml")) -}}
+{{- include "lapilli.fill" (dict "in" $s.backtest "key" "service" "with" (dict "type" "ClusterIP" "port" 8084 "annotations" (dict) "loadBalancerClass" "" "loadBalancerSourceRanges" (list) "externalTrafficPolicy" "" "nodePort" nil "loadBalancerEndsTLS" false)) -}}
+{{- include "lapilli.fill" (dict "in" $s.backtest "key" "ingress" "with" (dict "enabled" false "className" "" "annotations" (dict) "hosts" (list) "tls" (list) "loadBalancerEndsTLS" false)) -}}
 {{- end -}}
 
 {{/* fill sets in[key] to the dict it holds, or a new one, with each key of
@@ -347,6 +352,97 @@ your own needs from. */ -}}
 {{- if not (has ($s.notify.lang | default "en") (list "en" "es" "ja" "ko")) }}
 {{- fail "serve.notify.lang: en, es, ja or ko" }}
 {{- end }}
+{{- /* Pull request backtests from CI jobs, on a port of their own
+(docs/design/backtests.md): refused where lapilli serve refuses
+--backtest-listen, and outside the cluster without TLS. */}}
+{{- $b := $s.backtest }}
+{{- if and $b.enabled (ne .Values.mode "serve") }}
+{{- fail "serve.backtest is lapilli serve's: set mode: serve" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") (not $b.enabled) (or $b.trust.configMap.name $b.tokens $b.share $b.queue $b.timeout $b.ingress.enabled (ne ($b.service.type | default "ClusterIP") "ClusterIP")) }}
+{{- fail "serve.backtest.trust, tokens, share, queue, timeout, service and ingress go with serve.backtest.enabled" }}
+{{- end }}
+{{- if and (eq .Values.mode "serve") $b.enabled }}
+{{- if not $b.trust.configMap.name }}
+{{- fail "serve.backtest.trust.configMap.name: the ConfigMap holding --backtest-trust's file, who may ask; the port takes no one without it" }}
+{{- end }}
+{{- if $s.readOnly }}
+{{- fail "serve.backtest queues backtests in the ledger, and serve.readOnly refuses writes" }}
+{{- end }}
+{{- if not $history }}
+{{- fail "serve.backtest replays a pull request's rules against the history: give prometheus.url or gcpProject" }}
+{{- end }}
+{{- if and (eq (int $from) 0) (not $r.alarms) (not $loki) }}
+{{- fail "serve.backtest needs rules lapilli serve replays (rules.configMaps, rules.loaded, rules.grafana.url, rules.ruler.url, serve.rulesHistory or rules.alarms): with firings copied in alone, it refuses the port" }}
+{{- end }}
+{{- range .Values.extraArgs }}
+{{- if has (toString .) (list "--alerts" "--alerts=true") }}
+{{- fail "serve.backtest replays a pull request's rules, and --alerts (extraArgs) judges the ALERTS series, not rules" }}
+{{- end }}
+{{- end }}
+{{- $used := list 8080 (int $s.metricsPort) }}
+{{- if include "lapilli.incidentsPort" . }}{{ $used = append $used (int $s.incidentsAPI.port) }}{{ end }}
+{{- if or $s.notificationsAPI.tokenSecret.name $s.notificationsAPI.grafanaSecret.name $s.notificationsAPI.snsTopics }}{{ $used = append $used (int $s.notificationsAPI.port) }}{{ end }}
+{{- $bp := int $b.port }}
+{{- if or (lt $bp 1) (gt $bp 65535) (has $bp $used) }}
+{{- fail (printf "serve.backtest.port: %v: a port of its own, 1 to 65535, none of the pod's others (%s)" $b.port (join ", " $used)) }}
+{{- end }}
+{{- with $b.share }}
+{{- if or (not (regexMatch "^[0-9]*\\.?[0-9]+$" (toString .))) (lt (float64 (toString .)) 0.05) (gt (float64 (toString .)) 0.75) }}
+{{- fail "serve.backtest.share: of --max-rate, the backtests' share, 0.05 to 0.75" }}
+{{- end }}
+{{- end }}
+{{- with $b.queue }}
+{{- if or (not (regexMatch "^[0-9]+$" (toString .))) (lt (int .) 1) (gt (int .) 1000) }}
+{{- fail "serve.backtest.queue: backtests waiting at most, 1 to 1000" }}
+{{- end }}
+{{- end }}
+{{- /* A plain token is the entry's alone: another port's would let a job
+that may write there backtest too, and the reverse. */}}
+{{- $taken := list }}
+{{- range (list $s.incidentsAPI.tokenSecret $s.firings.tokenSecret $s.trackers.tokenSecret $s.notificationsAPI.tokenSecret $s.changes.tokenSecret) }}
+{{- if .name }}{{ $taken = append $taken (printf "%s/%s" .name .key) }}{{ end }}
+{{- end }}
+{{- $seen := dict }}
+{{- range $b.tokens }}
+{{- if not .secretName }}
+{{- fail "serve.backtest.tokens: each names a secretName, the Secret holding a plain token, and its key" }}
+{{- end }}
+{{- $id := printf "%s/%s" .secretName (.key | default "token") }}
+{{- if hasKey $seen $id }}
+{{- fail (printf "serve.backtest.tokens: %s twice" $id) }}
+{{- end }}
+{{- if has $id $taken }}
+{{- fail (printf "serve.backtest.tokens: %s is another port's token: give the backtests a token of their own" $id) }}
+{{- end }}
+{{- $_ := set $seen $id true }}
+{{- end }}
+{{- $type := $b.service.type | default "ClusterIP" }}
+{{- if not (has $type (list "ClusterIP" "LoadBalancer" "NodePort")) }}
+{{- fail "serve.backtest.service.type: ClusterIP, LoadBalancer or NodePort" }}
+{{- end }}
+{{- if and (ne $type "ClusterIP") (not $b.service.loadBalancerEndsTLS) }}
+{{- fail (printf "serve.backtest.service.type %s puts the backtest port outside the cluster, where it is taken only over TLS, and lapilli serves it in plain http: end TLS at the load balancer (an AWS NLB's TLS listener, an OCI load balancer's) and say so with serve.backtest.service.loadBalancerEndsTLS, or keep the Service a ClusterIP and use serve.backtest.ingress, with tls" $type) }}
+{{- end }}
+{{- if and $b.ingress.enabled (not $b.ingress.tls) (not $b.ingress.loadBalancerEndsTLS) }}
+{{- fail "serve.backtest.ingress: the backtest port is exposed outside the cluster only with TLS: give serve.backtest.ingress.tls, or, for TLS ended at the load balancer in front with a certificate of its own (an ALB's certificate-arn, a GKE managed certificate), say so with serve.backtest.ingress.loadBalancerEndsTLS" }}
+{{- end }}
+{{- if and $s.networkPolicy.enabled (not $b.from) }}
+{{- fail "serve.backtest.from: name who may reach the port that takes pull request backtests: the runners in the cluster, the ingress controller's pods, or the load balancer's addresses (ipBlock); with serve.networkPolicy, no one else can" }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/* serve.backtest.tokens by Secret, as JSON: each Secret's keys, mounted
+together at /var/run/lapilli/backtest/tokens/SECRET/. */}}
+{{- define "lapilli.backtestTokens" -}}
+{{- $by := dict -}}
+{{- range .Values.serve.backtest.tokens -}}
+{{- $k := .key | default "token" -}}
+{{- $have := index $by .secretName | default list -}}
+{{- if not (has $k $have) }}{{ $_ := set $by .secretName (append $have $k) }}{{ end -}}
+{{- end -}}
+{{- toJson $by -}}
 {{- end -}}
 
 {{/* The kind of ruler rules.ruler.url is, by its host, as lapilli tells it:
@@ -642,6 +738,12 @@ true
 - name: notifications
   port: {{ $n.port }}
   targetPort: notifications
+{{- end }}
+{{- if .Values.serve.backtest.enabled }}
+# Pull request backtests from CI jobs, alone; FULLNAME-backtest has it too.
+- name: backtest
+  port: {{ int .Values.serve.backtest.port }}
+  targetPort: backtest
 {{- end }}
 {{- end -}}
 

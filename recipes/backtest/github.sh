@@ -18,10 +18,22 @@
 #                      the job's own, github-actions[bot]
 #   PR                 the pull request's number (default: the event's)
 #
+# Through lapilli serve (LAPILLI_SERVE, see lib.sh), LAPILLI_SERVE_AUDIENCE
+# asks GitHub Actions for the job's ID token for that audience, as
+# core.getIDToken does, which the job's permissions: id-token: write
+# allows: ACTIONS_ID_TOKEN_REQUEST_URL, with ACTIONS_ID_TOKEN_REQUEST_TOKEN
+# given to curl on stdin. In GitHub Actions (GITHUB_ACTIONS=true), the
+# token is masked in the job's log (::add-mask::) as soon as it is had, as
+# core.getIDToken masks it.
+#
 #   GITHUB_TOKEN_FILE=/run/secrets/github GITHUB_REPO=example/monitoring PR=42 \
 #   LAPILLI_VERSION=v0.33.0 PATHS=alerts ./github.sh --prometheus http://prometheus:9090 --since 14d
 recipe=github.sh
 here=$(dirname "$0")
+# The job's ID token is asked of Actions (lib.sh's actions_token), and
+# masked in GitHub Actions' log (::add-mask::).
+ci_tokens=actions
+ci_masks=github
 : "${GITHUB_TOKEN_FILE:?a file holding a token that may comment on the pull request}"
 [ -r "$GITHUB_TOKEN_FILE" ] || { echo "github.sh: GITHUB_TOKEN_FILE $GITHUB_TOKEN_FILE can't be read" >&2; exit 1; }
 GITHUB_REPO=${GITHUB_REPO:-${GITHUB_REPOSITORY:-}}

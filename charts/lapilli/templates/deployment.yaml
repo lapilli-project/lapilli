@@ -205,6 +205,21 @@ spec:
             - {{ printf "--notify-sns=%s" (join "," .) | quote }}
             {{- end }}
             {{- end }}
+            {{- with $s.backtest }}
+            {{- if .enabled }}
+            - {{ printf "--backtest-listen=:%d" (int .port) | quote }}
+            - {{ printf "--backtest-trust=/etc/lapilli/backtest/%s" (.trust.configMap.key | default "trust.yaml") | quote }}
+            {{- with .share }}
+            - {{ printf "--backtest-share=%s" (toString .) | quote }}
+            {{- end }}
+            {{- with .queue }}
+            - {{ printf "--backtest-queue=%d" (int .) | quote }}
+            {{- end }}
+            {{- with .timeout }}
+            - {{ printf "--backtest-timeout=%s" (toString .) | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- with include "lapilli.externalURL" . }}
             - {{ printf "--external-url=%s" . | quote }}
             {{- end }}
@@ -320,6 +335,10 @@ spec:
             {{- if (or $s.notificationsAPI.tokenSecret.name $s.notificationsAPI.grafanaSecret.name $s.notificationsAPI.snsTopics) }}
             - name: notifications
               containerPort: {{ $s.notificationsAPI.port }}
+            {{- end }}
+            {{- if $s.backtest.enabled }}
+            - name: backtest
+              containerPort: {{ int $s.backtest.port }}
             {{- end }}
           env:
             - name: GOMEMLIMIT
@@ -456,6 +475,19 @@ spec:
             - name: notify-grafana
               mountPath: /var/run/lapilli/notify-grafana
               readOnly: true
+            {{- end }}
+            {{- if $s.backtest.enabled }}
+            # Who may ask, read as serve starts; the plain tokens its
+            # token_file entries name, read for each request.
+            - name: backtest-trust
+              mountPath: /etc/lapilli/backtest
+              readOnly: true
+            {{- $tokens := include "lapilli.backtestTokens" . | fromJson }}
+            {{- range $i, $name := keys $tokens | sortAlpha }}
+            - name: backtest-token-{{ $i }}
+              mountPath: /var/run/lapilli/backtest/tokens/{{ $name }}
+              readOnly: true
+            {{- end }}
             {{- end }}
             {{- if $s.rulesHistory.repository }}
             - name: rules-history
@@ -595,6 +627,22 @@ spec:
         - name: notify-grafana
           secret:
             secretName: {{ $s.notificationsAPI.grafanaSecret.name }}
+        {{- end }}
+        {{- if $s.backtest.enabled }}
+        - name: backtest-trust
+          configMap:
+            name: {{ $s.backtest.trust.configMap.name }}
+        {{- $tokens := include "lapilli.backtestTokens" . | fromJson }}
+        {{- range $i, $name := keys $tokens | sortAlpha }}
+        - name: backtest-token-{{ $i }}
+          secret:
+            secretName: {{ $name }}
+            items:
+              {{- range index $tokens $name }}
+              - key: {{ . }}
+                path: {{ . }}
+              {{- end }}
+        {{- end }}
         {{- end }}
         {{- if $s.rulesHistory.repository }}
         {{- include "lapilli.historyVolumes" . | nindent 8 }}

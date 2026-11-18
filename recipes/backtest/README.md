@@ -17,7 +17,11 @@ already is, and posts with a token of the host's that may comment.
 Each takes the pull request's number, the repository and the API from its
 CI's own variables; outside it, set them (each script's header lists
 them). An API is asked over https, or plain http to the machine itself
-only: the token goes with each request. Each also needs:
+only: the token goes with each request. Each runs Lapilli in the job, or
+sends the rules to `lapilli serve` instead, which backtests them with its
+own access to the history and judges them by its record, so that the job
+holds no credential for the metrics ([Through lapilli
+serve](#through-lapilli-serve)). Each also needs:
 
 - `LAPILLI_VERSION`, the Lapilli release to install, such as `v0.33.0` (one
   with `--markdown`); the action's `version`, which is the release the
@@ -28,7 +32,8 @@ only: the token goes with each request. Each also needs:
   later can't match. `LAPILLI_RELEASES` downloads from a mirror holding the
   same files, over https and only with `LAPILLI_SHA256`: whoever serves an
   archive could serve a `SHA256SUMS` that agrees. `LAPILLI` runs a
-  `lapilli` already on the machine instead.
+  `lapilli` already on the machine instead. Through `lapilli serve`,
+  nothing is installed: these are passed over, the job's log saying so.
 - Where the rules are: `PATHS`, directories in the repository,
   space-separated (`alerts`), as `--rules` reads them; or `RENDER`, a
   command that writes them on its stdout, run in each commit's files
@@ -91,7 +96,8 @@ They need `sh`, `git`, `curl`, `jq` and `tar`, on Linux or macOS.
 
 ## What a run does
 
-1. Finds the two commits, and installs Lapilli, unless `LAPILLI` is given.
+1. Finds the two commits, and installs Lapilli, unless `LAPILLI` is given
+   or the rules go to `lapilli serve`.
 2. Reads the rules of the commit the pull request goes into, then of the
    pull request's, from git, as git keeps them (`git archive`, so a
    commit's `.gitattributes` neither leaves a file out nor runs a filter):
@@ -105,7 +111,9 @@ They need `sh`, `git`, `curl`, `jq` and `tar`, on Linux or macOS.
    rules.
 4. Runs `lapilli verdict --rules PULL-REQUEST --compare TARGET
    --changed-only --markdown`, with the arguments given: only the rules
-   that differ are replayed. A recording rule that differs is a change, and
+   that differ are replayed. Or sends both commits' rules to `lapilli
+   serve`, which does the same with its own access and record, and waits
+   for its report. A recording rule that differs is a change, and
    the comment says it isn't replayed (the alerts that read it are,
    against what it recorded).
 5. Finds the comment it posted before: the token's account's, whose first
@@ -158,11 +166,14 @@ the release the action is at), `sha256`, `paths` or `render` and
 `7d`), `args` (more flags, split at spaces and never expanded by a shell),
 `target`, `key`, `fail-on-error`, `expect`, `fail-on-expectations`,
 `expect-required`, `token` (default the job's own) and `login` (the
-account a GitHub App's token comments as, `NAME[bot]`). For a cloud's
+account a GitHub App's token comments as, `NAME[bot]`); and, to backtest
+through `lapilli serve`, `serve-url`, `audience` and `serve-wait`
+([below](#through-lapilli-serve)). For a cloud's
 managed Prometheus, sign in first
 with the cloud's own action through OpenID Connect (`id-token: write`):
 `aws-actions/configure-aws-credentials`, `azure/login` or
-`google-github-actions/auth`, and give `auth`.
+`google-github-actions/auth`, and give `auth`; or send the rules to
+`lapilli serve`, which needs no sign-in in the job.
 
 ### GitLab CI
 
@@ -314,6 +325,7 @@ helm template monitoring charts/monitoring`.
 templates, a Kustomize plugin) with the job's rights. Each commit's run has
 a `HOME` of its own, the base's first, and runs without the variables CIs
 keep tokens in (`GITHUB_TOKEN_FILE` and the other scripts' token files,
+`LAPILLI_ID_TOKEN`, `LAPILLI_SERVE_TOKEN_FILE`,
 `GITHUB_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, `CI_JOB_TOKEN`,
 `CI_REPOSITORY_URL`, `CI_DEPENDENCY_PROXY_PASSWORD`, `SYSTEM_ACCESSTOKEN`,
 `BITBUCKET_STEP_OIDC_TOKEN` and the like), so a chart doesn't take one by
@@ -369,6 +381,202 @@ lapilli would take the last. `--match` among the arguments adds to
 `MATCH`. `MATCH` without `IMPACT`, `INCIDENTS` or an argument giving
 either, and `IMPACT_FOR` without `IMPACT` or that lapilli wouldn't take,
 fail the job at once.
+
+## Through lapilli serve
+
+With `LAPILLI_SERVE`, the URL of `lapilli serve`'s backtest port
+(`--backtest-listen`, [docs/serve.md](../../docs/serve.md#pull-request-backtests);
+the chart's `serve.backtest`), the recipe installs and runs nothing. It
+reads both commits' rules as it always does (`git archive`, a symbolic
+link refused; `RENDER` and `RENDER_PREPARE` run here, in the job, and
+serve gets what they wrote) and the expectations of `EXPECT`, sends them
+to serve, and posts the report serve gives back, which is the one
+`lapilli verdict --compare --changed-only --markdown` writes, with the
+same summary line. Serve replays the rules that differ with its own access
+to the history, at its share of the rate, and judges them by its record:
+the job needs no credential for the metrics, and no cloud sign-in. The
+comment, `FAIL_ON_ERROR`, `FAIL_ON_EXPECTATIONS` and `EXPECT_REQUIRED` are
+as they are without it. The design is
+[docs/design/backtests.md](../../docs/design/backtests.md).
+
+On GitHub Actions, give the action `serve-url` and `audience`, and the
+job `id-token: write`:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write # the ID token the action asks GitHub for
+jobs:
+  backtest:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 2, persist-credentials: false}
+      - uses: lapilli-project/lapilli/recipes/backtest@COMMIT-OF-THE-vX.Y.Z-TAG # vX.Y.Z
+        with:
+          paths: alerts
+          expect: expectations.yaml
+          serve-url: https://lapilli-ci.example.com
+          audience: https://lapilli-ci.example.com
+          since: 14d
+```
+
+`LAPILLI_SERVE` is https, or plain http to this machine (`127.0.0.1`,
+`[::1]`, `localhost`) or to a Service in the cluster,
+`NAME.NAMESPACE.svc` or `NAME.NAMESPACE.svc.cluster.local` (each a DNS
+label, a letter first), as a runner in the cluster reaches the chart's
+Service, `http://FULLNAME-backtest.NAMESPACE.svc:8084`; plain http goes
+through no proxy (`--noproxy '*'`), whatever `http_proxy` says, as the
+token would cross it in the clear. A name of one label isn't taken in
+plain http: it is looked up under the runner's search domains, which
+needn't be the cluster's; nor is `NAME.NAMESPACE` alone: a namespace may
+be named as a top-level domain, and the name then be one on the
+internet. That is wider than what a host's API and a release are taken
+at, plain http to the machine itself, and narrower than what serve takes
+an identity provider at.
+
+**The token.** Serve takes what its trust file (`--backtest-trust`) names
+for the repository: a CI's ID token for the audience the entry names,
+which should be the port's URL, never the CI's default; or, where the CI
+has none, a plain token. One of:
+
+- `LAPILLI_ID_TOKEN`, the ID token itself, in a variable.
+- `LAPILLI_SERVE_TOKEN_FILE`, a file holding the plain token.
+- `LAPILLI_SERVE_AUDIENCE`, for `github.sh`, and `gitea.sh` in Forgejo
+  Actions: the recipe asks the CI for the job's ID token for that
+  audience, as `core.getIDToken(audience)` does
+  (`ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN`),
+  right before it is sent, for each request. The action does this with
+  `audience`. The audience is `LAPILLI_SERVE`'s URL, which no other
+  service takes; another is refused unless `SERVE_AUDIENCE_ANY=1` (the
+  action's `audience-any: true`) says the trust file names another, the
+  job's log saying so. A cloud's audience, or the CI's own default, is
+  refused either way:
+  `sts.amazonaws.com` (any under `amazonaws.com`),
+  `api://AzureADTokenExchange`, `//iam.googleapis.com/...`,
+  `https://iam.googleapis.com/...`, `https://sts.googleapis.com...`,
+  `sigstore`, and GitHub's own, `https://github.com/...`: other services
+  take a token for those, and serve, or whoever is on the way to it, could
+  use it there. The job's log says when the audience isn't
+  `LAPILLI_SERVE` (without a trailing slash): the port's URL is one no
+  other service takes. In GitHub Actions, `github.sh` masks the token in
+  the job's log (`::add-mask::`, on stdout) as soon as it has it, as
+  `core.getIDToken` does; `gitea.sh` doesn't, as Forgejo documents no such
+  command.
+
+By CI:
+
+- **GitHub Actions.** `permissions: id-token: write` for the job, then
+  the action's `serve-url` and `audience` (or `LAPILLI_SERVE` and
+  `LAPILLI_SERVE_AUDIENCE` for `github.sh`). Without the permission, the
+  job can't ask, and the step fails at once, saying so.
+- **GitLab CI.** The job names its ID token, with serve's audience, as
+  `LAPILLI_ID_TOKEN`:
+
+  ```yaml
+  backtest-rules:
+    image: alpine:3.20
+    rules:
+      - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+        changes: [alerts/**/*]
+    id_tokens:
+      LAPILLI_ID_TOKEN:
+        aud: https://lapilli-ci.example.com
+    variables:
+      GIT_DEPTH: 0
+      PATHS: alerts
+      LAPILLI_SERVE: https://lapilli-ci.example.com
+      GITLAB_TOKEN_FILE: $BACKTEST_TOKEN
+    script:
+      - apk add --no-cache git curl jq
+      - sh ci/backtest/gitlab.sh --since 14d
+  ```
+
+- **Forgejo Actions.** The workflow sets `enable-openid-connect: true`,
+  and `gitea.sh` asks for the token with `LAPILLI_SERVE_AUDIENCE`.
+- **Gitea Actions, Azure Pipelines and Bitbucket Pipelines.** A plain
+  token, in `LAPILLI_SERVE_TOKEN_FILE`, from a secret, as the host's own
+  token is kept: Gitea gives no ID token; Azure Pipelines' is for a
+  service connection, made for Microsoft Entra; and serve doesn't take
+  Bitbucket's yet. It is a long-lived secret: whoever holds it backtests as
+  that entry until it is rotated.
+
+**What is sent**, as `POST /v1/backtests`, a JSON body jq writes: each
+commit's files, as `--rules` would read them, named by their path under
+what `PATHS` names (`alerts/team/api.yaml` as `team/api.yaml`, a file
+`PATHS` names by its own name, what `RENDER` wrote as `rules.yaml`), those
+whose names begin with a dot passed over, as `--rules` passes them over;
+the expectations, the pull request's and the commit it goes into's (a
+file of no bytes is sent, as `""`, as `--expect` takes one; a commit
+without the file sends none); the days `--since` gives; `--tz` and `--rules-select`; the pull request's
+number and the commit checked out. Its files are sent as text, so a rule
+file that isn't UTF-8 isn't sent, and two of `PATHS` holding a file of one
+name can't be: each is said in the comment, which file in the job's log.
+A request past the 4 MiB serve takes is said before anything is sent.
+
+**Waiting.** Serve answers with an id and a key, and the recipe asks
+where its backtest is every `SERVE_POLL` seconds (10), the job's log
+saying where it is in the queue and, while it runs, how many of its
+requests to the history it has asked, when that changes and every 30
+seconds. When serve says to wait (`Retry-After`: a full queue, the entry's
+hour, serve not ready yet), it waits so long, 5 minutes at most, and 5
+seconds at least, or `SERVE_POLL` if longer, so that a `Retry-After` of 0
+isn't a loop of requests (`SERVE_RETRY_MIN`, for tests, lowers the 5). Past
+`SERVE_WAIT` (`30m`; the action's `serve-wait`), the backtest is cancelled
+(`DELETE`), and the comment says it didn't come back; a job that stops
+first, cancelled say, cancels it as it exits.
+
+**What serve decides, refused here.** Where the history is and how it is
+asked, and what judges the firings, are serve's: a pull request doesn't
+choose the judging that flatters it. With `LAPILLI_SERVE`, `INCIDENTS`,
+`IMPACT`, `IMPACT_FOR` and `MATCH` fail the job at once, and so does every
+argument but `--since` (whole days, `1d` to `14d`: serve replays what has
+settled), `--tz` and `--rules-select`: `--prometheus`, `--gcp-project`,
+`--auth`, `--aws-region`, `--bearer-token-file`, `--step`, `--late`,
+`--scrape-interval`, `--lead`, `--match`, `--refire`, `--sleep-hours`,
+`--shifts`, `--on-call`, the `--impact` flags, `--incidents`, `--from`,
+`--to`, the `--loki`, `--grafana` and `--ruler` flags, `--alarms`, and any
+other. The action's `prometheus-url`, `auth`, `gcp-project` and
+`aws-region` too. `LAPILLI_VERSION`, `LAPILLI_SHA256`, `LAPILLI` and
+`LAPILLI_RELEASES` are passed over, and `SERVE_WAIT`, `SERVE_POLL` and the
+tokens' variables are refused without `LAPILLI_SERVE`.
+
+**What reads differently through serve**, as the comment's heading says
+("judged by lapilli serve's record"):
+
+- Catches are judged against the incidents and impact windows serve keeps:
+  a catch that is "not known" in CI with no `INCIDENTS` can be met or
+  broken through serve.
+- Firings are judged by serve's weeks and its settings, as its change
+  reviews are, where `lapilli verdict` judges each by the two weeks before
+  it: the same pull request can read differently through serve than in CI
+  with a file of the same incidents.
+- "While people slept" is by serve's `--sleep-hours` and `--shifts`, not
+  the job's flags.
+- The comment holds no label of a series a rule read, and a reason a rule
+  couldn't be replayed is one of a few of Lapilli's words, never what the
+  history said.
+
+**When it can't**, the comment says so, in serve's words where it has
+them, and the job succeeds unless `FAIL_ON_ERROR=true`; held to the
+expectations, it fails as one whose expectations couldn't be judged:
+serve out of reach; the token refused (401: serve's log says why); the
+request refused (400: the rules, a bound, or the period, with what period
+would fit); a token that started another backtest (409); the same request
+asked twice; no room in the queue within `SERVE_WAIT`; a newer commit's
+backtest that took this one's place; one that failed in serve, or didn't
+finish within its `--backtest-timeout`; one that didn't come back within
+`SERVE_WAIT`.
+
+**A newer commit takes the place** of a backtest of the same pull request
+still waiting only on GitHub and Forgejo, whose ID token names the pull
+request (`ref`, `refs/pull/N/merge`). GitLab's names a merge request's
+source branch, not its number, so a GitLab merge request's older
+backtests aren't superseded: each waits its turn and is posted, the
+newest last, and the entry's three waiting at most bound how many; nor
+are those of a plain token, or of a `push`.
 
 ## The release the action installs
 
@@ -473,9 +681,19 @@ runner inside your network:
   token, so the job can't comment; leave it so. Never run this on
   `pull_request_target` with the pull request checked out: that hands the
   fork's code your secrets and a token that writes. The `if:` above skips
-  forks. Self-hosted runners that reach your Prometheus: require approval
-  for workflows from outside collaborators, and don't give them to public
-  repositories.
+  forks' runs, a convenience: it keeps no one out, as the pull request can
+  change it. Through lapilli serve, what keeps a fork out is GitHub giving
+  a fork's `pull_request` run no ID token, unless, on a private
+  repository, "Send write tokens to workflows from pull requests" is on:
+  keep that setting off. The trust entry's pins don't: a fork's run in the
+  repository carries the repository's own `repository_id`, as a branch's
+  does. Self-hosted runners that
+  reach your Prometheus: require approval for workflows from outside
+  collaborators, and don't give them to public repositories.
+- **Forgejo.** Its reference says `enable-openid-connect` "is disabled for
+  `pull_request` events from forked repositories": a fork's run gets no
+  ID token to send lapilli serve. Forgejo's tokens carry `repository_id`
+  from Forgejo 16 on.
 - **GitLab.** A fork's merge request pipeline runs in the fork, without
   your project's variables. Running it in the parent project (a
   maintainer's "Run pipeline") hands it them: review the merge request
@@ -540,9 +758,31 @@ reasons forks are kept out.
   `::` commands are read only at a line's start, so none of it is a
   command, an annotation or a mask.
 - The token is read from a file and given to `curl` on stdin, never on a
-  command line, which `ps` shows. `curl` reads no `.curlrc`, speaks only
-  HTTP and HTTPS, follows no redirect from a host's API, and a release's
-  download only to HTTPS. What it downloads is capped (16 MiB from a host,
+  command line, which `ps` shows; so are the token `lapilli serve` takes
+  and the key its backtest is read by, which the recipe keeps in a
+  variable of its own, out of the environment of what it runs. `curl`
+  reads no `.curlrc`, speaks only HTTP and HTTPS (to serve, only its URL's
+  own), follows no redirect from a host's API or serve, and a release's
+  download only to HTTPS. What serve answers is read with `jq` alone; what
+  it says goes to the job's log made inert, as `lapilli`'s stderr does,
+  and to the comment only in the fenced block, or as its report. Of the
+  report, its first line is posted as serve wrote it only when it is the
+  summary line lapilli writes, a JSON object of numbers and `true` or
+  `false`, or there is no report; and each line after it only when it is
+  one lapilli writes: what came from the rules in code spans, each closed
+  on its own line (in a table, with no `|` in it but `\|`, as a host
+  splits a row's cells first, and no `|` with two backslashes or more
+  before it, which hosts read differently: lapilli writes a backslash
+  right before a `|` as `\u{5c}`), outside them only lapilli's own words and
+  punctuation, and `<details>` as lapilli writes it, opened then closed.
+  Any other line (a quick action, which GitLab runs from a note with the
+  job's token; a mention, a reference, HTML, a link, an image; a fence; a
+  character that doesn't show) is left out whole, a line saying so in
+  place of each run of them, and is in the job's log; so is what is past
+  the first 65,536 characters, more than lapilli writes. A comment is kept
+  under 60,000 bytes: a report longer than that is cut to its first lines,
+  saying so.
+  Plain http to serve goes through no proxy. What it downloads is capped (16 MiB from a host,
   256 MiB for a release) as it streams, not only by `--max-filesize`,
   which before curl 8.4.0 (Ubuntu 22.04 has 7.81) caps only an answer that
   says its length first.

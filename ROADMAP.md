@@ -165,7 +165,14 @@ A pull request that changes alert rules gets its backtest as a comment, on
 GitHub, GitLab, Bitbucket, Azure DevOps and Gitea alike, and through an
 action on GitHub. The Markdown is checked by its structure in the tests,
 and as Gitea renders it against a real Gitea in CI; GitHub's rendering was
-checked by hand. Still to do:
+checked by hand. A job can backtest through `lapilli serve` instead, with
+no metric credential, judged by serve's record, by the ID token of GitHub
+Actions, GitLab CI or Forgejo Actions or a plain token
+([docs/design/backtests.md](docs/design/backtests.md), step 1). Still to
+do:
+
+- Through serve: Bitbucket Pipelines' ID token, and Azure Pipelines' if
+  decided (step 2); Grafana-managed and Loki rules, if decided (step 3).
 
 - The recipes checked against real GitHub, GitLab, Bitbucket and Azure
   DevOps accounts, and how each renders the comment. Today each is tested

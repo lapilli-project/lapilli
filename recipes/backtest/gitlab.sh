@@ -18,6 +18,13 @@
 #                      branch's commit (CI_MERGE_REQUEST_TARGET_BRANCH_SHA,
 #                      in a merged results pipeline) or the merge base
 #                      (CI_MERGE_REQUEST_DIFF_BASE_SHA)
+#
+# Through lapilli serve (LAPILLI_SERVE, see lib.sh), the job names its ID
+# token for serve's audience under id_tokens:, as LAPILLI_ID_TOKEN:
+#
+#   id_tokens:
+#     LAPILLI_ID_TOKEN:
+#       aud: https://lapilli-ci.example.com
 recipe=gitlab.sh
 here=$(dirname "$0")
 : "${GITLAB_TOKEN_FILE:?a file holding a token that may comment on the merge request}"

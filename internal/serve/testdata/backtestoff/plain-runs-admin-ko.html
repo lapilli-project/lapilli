@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>실행 이력 · Lapilli</title>
+<link rel="icon" href="/static/mark-32.png?v=0ad4d9e620b2" sizes="32x32" type="image/png">
+<link rel="icon" href="/static/mark-16.png?v=0ad4d9e620b2" sizes="16x16" type="image/png">
+<link rel="stylesheet" href="/static/lapilli.css?v=0ad4d9e620b2">
+</head>
+<body>
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+<header class="side">
+  <a class="brand" href="/"><img src="/static/mark-48.png?v=0ad4d9e620b2" alt="" width="24" height="24">Lapilli</a>
+  <details class="menu"><summary>메뉴<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>실행 이력</span></summary>
+  <nav class="nav-menu" aria-label="메뉴">
+  <p class="nav-group" id="menu-see">모니터링</p>
+  <ul aria-labelledby="menu-see"><li><a href="/">개요</a></li><li><a href="/rules">규칙</a></li><li><a href="/incidents">인시던트</a></li><li><a href="/marked">이벤트 구간</a></li><li><a href="/firings">발화 이력</a></li></ul>
+  <p class="nav-group" id="menu-fix">개선</p>
+  <ul aria-labelledby="menu-fix"><li><a href="/tasks">작업</a></li><li><a href="/proposals">변경 제안</a></li><li><a href="/windows">메인터넌스 윈도우</a></li></ul>
+  <p class="nav-group" id="menu-report">리포트</p>
+  <ul aria-labelledby="menu-report"><li><a href="/reports">리포트</a></li><li><a href="/outcomes">변경 효과</a></li><li><a href="/goals">목표</a></li></ul>
+  <p class="nav-group" id="menu-manage"><a href="/manage">관리</a></p>
+  <ul aria-labelledby="menu-manage"><li><a href="/teams">팀</a></li><li><a href="/roles">권한</a></li><li><a href="/settings">설정</a></li><li><a href="/runs" aria-current="page">실행 이력</a></li><li><a href="/orphans">남은 기록 정리</a></li></ul>
+</nav>
+  </details>
+  <nav class="nav-side" aria-label="페이지">
+  <p class="nav-group" id="side-see">모니터링</p>
+  <ul aria-labelledby="side-see"><li><a href="/">개요</a></li><li><a href="/rules">규칙</a></li><li><a href="/incidents">인시던트</a></li><li><a href="/marked">이벤트 구간</a></li><li><a href="/firings">발화 이력</a></li></ul>
+  <p class="nav-group" id="side-fix">개선</p>
+  <ul aria-labelledby="side-fix"><li><a href="/tasks">작업</a></li><li><a href="/proposals">변경 제안</a></li><li><a href="/windows">메인터넌스 윈도우</a></li></ul>
+  <p class="nav-group" id="side-report">리포트</p>
+  <ul aria-labelledby="side-report"><li><a href="/reports">리포트</a></li><li><a href="/outcomes">변경 효과</a></li><li><a href="/goals">목표</a></li></ul>
+  <p class="nav-group" id="side-manage"><a href="/manage">관리</a></p>
+  <ul aria-labelledby="side-manage"><li><a href="/teams">팀</a></li><li><a href="/roles">권한</a></li><li><a href="/settings">설정</a></li><li><a href="/runs" aria-current="page">실행 이력</a></li><li><a href="/orphans">남은 기록 정리</a></li></ul>
+</nav>
+  <nav class="langs" aria-label="언어"><a href="/lang?to=en&amp;back=%2Fruns" lang="en" hreflang="en">English</a><span aria-hidden="true"> · </span><a href="/lang?to=es&amp;back=%2Fruns" lang="es" hreflang="es">Español</a><span aria-hidden="true"> · </span><a href="/lang?to=ja&amp;back=%2Fruns" lang="ja" hreflang="ja">日本語</a><span aria-hidden="true"> · </span><strong lang="ko" aria-current="true">한국어</strong></nav>
+</header>
+<div class="page">
+<section class="statuses" aria-label="상태">
+
+<p class="status notice status-info"><span class="sign" aria-hidden="true">↻</span> 주간 요약</p>
+</section>
+<main id="main">
+<nav class="crumbs" aria-label="현재 위치"><ol><li><a href="/manage">관리</a></li><li><span aria-current="page">실행 이력</span></li></ol></nav>
+<div class="bar">
+
+<form method="get" action="/search" role="search" class="find" aria-label="검색">
+  <label><span class="vh">검색</span> <input type="search" name="q" value="" maxlength="500" placeholder="규칙, 인시던트, 팀"></label>
+  <button class="quiet-button">검색</button>
+</form>
+</div>
+
+<h1>실행 이력</h1>
+<p class="lede">발화는 2026-11-03 12:00까지 들어와 있어요.</p>
+
+<div class="scroll"><table>
+<thead><tr><th scope="col">종류</th><th scope="col">시작</th><th scope="col">기간</th><th scope="col" class="n">발화</th><th scope="col">백테스트 불가</th><th scope="col">오류</th></tr></thead>
+<tbody>
+<tr><td>주간 요약</td><td class="t">2026-11-03 12:00</td><td class="t">2026-10-26 00:00 → 2026-11-02 00:00</td><td class="n">0</td>
+<td></td><td></td></tr>
+<tr><td>매시간</td><td class="t">2026-11-03 12:00</td><td class="t">2026-11-02 11:00 → 2026-11-03 12:00</td><td class="n">0</td>
+<td></td><td></td></tr>
+<tr><td>백필</td><td class="t">2026-11-03 12:00</td><td class="t">2026-11-01 11:00 → 2026-11-02 12:00</td><td class="n">20</td>
+<td></td><td></td></tr>
+<tr><td>백필</td><td class="t">2026-11-03 12:00</td><td class="t">2026-10-31 12:00 → 2026-11-01 12:00</td><td class="n">2</td>
+<td></td><td></td></tr></tbody>
+</table></div>
+
+
+
+
+
+<h2>여기서 바꾼 것</h2>
+<p class="quiet">없음.</p>
+
+</main>
+<footer>lapilli test · 시간대 UTC · ana@example.com · 관리자 권한</footer>
+</div>
+</body>
+</html>

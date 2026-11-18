@@ -578,6 +578,80 @@ serve:
     snsTopics: []
     port: 8083
     from: []
+  # A port that takes pull request backtests from CI jobs, and nothing else
+  # (docs/design/backtests.md; docs/serve.md, "Pull request backtests"): a
+  # job sends the rules before and after a pull request, and serve replays
+  # them with its own access to the history, judges them by its record, and
+  # gives back the comment lapilli verdict --compare writes, so CI holds no
+  # credential for the metrics. It runs PromQL the pull request writes, with
+  # serve's access: give that access what the rules need and no more. Off
+  # unless enabled. It needs prometheus.url or gcpProject and rules serve
+  # replays, and is refused with serve.readOnly, which keeps the queue's
+  # writes out.
+  backtest:
+    enabled: false
+    port: 8084   # the container's port: --backtest-listen
+    # Who may ask: a ConfigMap holding --backtest-trust's file under key,
+    # mounted at /etc/lapilli/backtest/, each entry a CI's issuer of ID
+    # tokens (issuer, audience, the claims its tokens must hold) or a plain
+    # token (token_file). Required. It is read as serve starts, and one that
+    # can't be used stops serve from starting: after changing it, restart
+    # serve (kubectl rollout restart).
+    trust:
+      configMap:
+        name: ""
+        key: trust.yaml
+    # Secrets holding the plain tokens the trust file's token_file entries
+    # name, for a CI with no ID tokens, each key mounted at
+    # /var/run/lapilli/backtest/tokens/SECRET/KEY and read for each
+    # request, so a token can be rotated without a restart; 32 characters
+    # at least, and none another port's token. For
+    #   tokens:
+    #     - {secretName: lapilli-backtest-azure, key: token}
+    # an entry gives token_file: /var/run/lapilli/backtest/tokens/lapilli-backtest-azure/token.
+    tokens: []
+    share: ""     # of --max-rate, the backtests' share: 0.25 when empty, 0.05 to 0.75
+    queue: ""     # backtests waiting at most: 20 when empty, 1 to 1000
+    timeout: ""   # one backtest's time, from its start: 15m when empty, 1m to 2h
+    # With networkPolicy, who may reach this port, and only it, as
+    # NetworkPolicy peers: the runners inside the cluster, the ingress
+    # controller's pods for ingress below, or a load balancer's addresses
+    # (ipBlock) for a LoadBalancer. With networkPolicy.egress, its to must
+    # let serve reach each issuer's discovery document and keys over https
+    # (port 443): serve fetches them to check the CI's ID tokens.
+    from: []
+    # The port on a Service of its own, FULLNAME-backtest, this port alone:
+    # a ClusterIP for runners inside the cluster or the network, which reach
+    # it at http://FULLNAME-backtest.NAMESPACE.svc:port; or a LoadBalancer or a
+    # NodePort, for a CI provider's runners. FULLNAME has the port too, as
+    # it has every port.
+    service:
+      type: ClusterIP   # ClusterIP, LoadBalancer or NodePort
+      port: 8084        # FULLNAME-backtest's port
+      annotations: {}
+      loadBalancerClass: ""
+      loadBalancerSourceRanges: []   # the addresses let through the cloud's load balancer
+      externalTrafficPolicy: ""      # Local keeps the clients' addresses; Cluster when empty
+      nodePort: null
+      # lapilli serves the port in plain http, and outside the cluster it is
+      # taken only over TLS: a LoadBalancer or a NodePort is refused unless
+      # this says the load balancer in front ends TLS (an AWS NLB's TLS
+      # listener, an OCI load balancer's). GKE's and AKS's load balancers
+      # for a Service are TCP, and don't: use ingress there.
+      loadBalancerEndsTLS: false
+    # An Ingress for FULLNAME-backtest alone (networking.k8s.io/v1), apart
+    # from the UI's, its paths /v1/backtests and below. Refused without tls,
+    # unless loadBalancerEndsTLS says TLS is ended at the load balancer in
+    # front with a certificate of its own (an ALB's certificate-arn, a GKE
+    # managed certificate). The port answers nothing but its API: point a
+    # load balancer's health check at /healthz on serve.metricsPort.
+    ingress:
+      enabled: false
+      className: ""
+      annotations: {}
+      hosts: []         # such as lapilli-ci.example.com
+      tls: []           # - {secretName: lapilli-ci-tls, hosts: [lapilli-ci.example.com]}
+      loadBalancerEndsTLS: false
   # Where people reach the UI, such as https://lapilli.example.com; what is
   # told links to it, and signIn.oidc sends people back to. Worked out from
   # ingress's first host (https when its tls names it) or httpRoute's first
@@ -755,10 +829,12 @@ serve:
     # With it, name each place it talks to: the Prometheus, the rules' API
     # (Grafana, a ruler), the rules history's repository and the chart
     # repositories its renderPrepare fetches from, Slack and the
-    # webhooks, and a cloud's APIs and its identity's token endpoint. A
-    # cloud's workload identity may need its metadata server let through
-    # (GKE's does: see Google's documentation on network policies with
-    # Workload Identity), which every container in the pod can then reach.
+    # webhooks, the CI issuers serve.backtest's trust names (their
+    # discovery documents and keys, over https), and a cloud's APIs and its
+    # identity's token endpoint. A cloud's workload identity may need its
+    # metadata server let through (GKE's does: see Google's documentation
+    # on network policies with Workload Identity), which every container in
+    # the pod can then reach.
     #   to:
     #     - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}}]
     #       ports: [{port: 9090, protocol: TCP}]
