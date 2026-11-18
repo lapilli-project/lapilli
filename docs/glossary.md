@@ -88,7 +88,8 @@ missed or not known, never met for a week nobody wrote anything down. See
 
 A window in which a signal of impact returned something for at least
 `--impact-for` (5m): an incident nobody wrote down, with an id
-`impact-1`, `impact-2` and so on. One that overlaps an incident written
+`impact-1`, `impact-2` and so on, or a named signal's `impact-NAME-1`,
+`impact-NAME-2`. One that overlaps an incident written
 down, agreeing on its `--match` labels, is that incident. In `lapilli
 serve` a person confirms it, which writes it down, or dismisses it. See
 [The numbers](numbers.md#impact-windows).

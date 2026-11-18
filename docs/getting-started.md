@@ -52,7 +52,8 @@ incidents:
   is taken to last an hour; one can't be before `start`. `labels` say
   where it went wrong, a value or a list of values a label: with `--match
   service`, a firing with a `service` label catches only an incident that
-  lists its value, and one without the label isn't held to it.
+  lists its value or has no `service` label; a firing or an incident
+  without the label isn't held to it.
 
 Write down the incidents of the two weeks before the period too: a firing
 that caught nothing is judged only when an incident was on at some time in

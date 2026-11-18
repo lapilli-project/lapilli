@@ -96,16 +96,16 @@ turn.
 | 021 | 0.53.0 | Marked windows: their kinds, the windows, the kinds each firing is marked with, and tallies of them by day and week |
 | 022 | 0.55.0 | Named impact signals and the rule entries in effect; an incident's signal and match labels; the signals each alert is tied to; and the tallies by day and week keyed by them too, every row copied in once |
 
-The schema a ledger is at: `sqlite3 DIR/ledger.db 'PRAGMA user_version'`,
-or `SELECT version FROM schema_version` in its Postgres database.
+The image has no shell and no `sqlite3`, so the schema a ledger is at is
+read where its data can be reached: `sqlite3 COPY/ledger.db 'PRAGMA
+user_version'` on a copy of a SQLite ledger's files, or `SELECT version
+FROM schema_version` in its Postgres database.
 
 ## Before an upgrade that changes the schema
 
 - Read the changelog's entries for each release between the two. From
   0.12.0 on, the entry of a release that changes the schema says so, as
   0.55.0's does: **Ledger schema 022**, after 021.
-- Run the new release's `lapilli preflight` with serve's flags, where serve
-  runs: it says whether serve will upgrade the ledger.
 - Take a copy of the ledger, and upgrade once it is taken: a snapshot of
   the disk behind the PersistentVolumeClaim, the files copied out with
   serve stopped, or a backup of the Postgres database. The chart's README
@@ -113,6 +113,16 @@ or `SELECT version FROM schema_version` in its Postgres database.
   upgrade](../charts/lapilli/README.md#going-back-after-a-schema-upgrade).
   Not with the new release's `lapilli ledger copy`: it brings the ledger to
   its own schema first.
+- Run the new release's `lapilli preflight`, with serve's flags, against
+  the ledger: for SQLite, the new binary on a machine that holds the
+  copied files, with `--ledger` naming their directory; for Postgres, with
+  `--ledger-url-file`, from where the database can be reached (it connects
+  read-only). Its `ledger.sqlite` or `ledger.postgres` line says whether
+  serve will upgrade the ledger; off the cluster, the items that need what
+  only the cluster has (the history, the tokens' files) may say problem or
+  unknown. The running pod's `lapilli preflight` is the old release's, and
+  one run in a pod that mounts the claim read-only says the directory isn't
+  writable, and reads no schema.
 
 ## Going back after a schema upgrade
 

@@ -10,10 +10,20 @@
 # (.github/workflows/wiki.yml), its other pages removed.
 #
 # wiki.sh DIR writes the pages into DIR, an empty directory or a checkout
-# of the wiki, whose files other than .git are removed first.
+# of the wiki, whose files other than .git are removed first: DIR outside
+# the repository, read where wiki.sh is run from.
 set -eu
-out=${1:?wiki.sh DIR}
+[ -d "${1:?wiki.sh DIR}" ] || { echo "$1 isn't a directory" >&2; exit 1; }
+out=$(cd "$1" && pwd -P)
 cd "$(dirname "$0")/.."
+here=$(pwd -P)
+case "$out/" in
+"$here"/*) echo "$out is in the repository: give a directory outside it" >&2; exit 1 ;;
+esac
+if [ ! -d "$out/.git" ] && [ -n "$(ls -A "$out")" ]; then
+  echo "$out is neither empty nor a checkout of the wiki" >&2
+  exit 1
+fi
 repo=https://github.com/lapilli-project/lapilli
 blob=$repo/blob/main
 raw=https://raw.githubusercontent.com/lapilli-project/lapilli/main
@@ -32,21 +42,31 @@ done
 
 # A page's wiki name: its title, without what GitHub says a wiki title
 # can't hold (\ / : * ? " < > |) and without backticks, spaces as hyphens.
+# What is left is letters, digits and , . ' ( ) - alone, as the name goes
+# into sed's rules below and into file names.
 name() {
+  [ -f "docs/$1.md" ] || { echo "docs/README.md lists docs/$1.md, which isn't there" >&2; exit 1; }
   t=$(sed -n 's/^# //p' "docs/$1.md" | head -n 1)
   [ -n "$t" ] || { echo "docs/$1.md has no # title" >&2; exit 1; }
-  printf '%s' "$t" | tr -d '\\/:*?"<>|`' | tr -s ' ' '-'
+  w=$(printf '%s' "$t" | tr -d '\\/:*?"<>|`' | tr -s ' ' '-')
+  printf '%s' "$w" | grep -Eqx "[A-Za-z0-9][A-Za-z0-9,.'()-]*" || {
+    echo "docs/$1.md: the title \"$t\" makes a wiki name of more than letters, digits and , . ' ( ) -" >&2
+    exit 1
+  }
+  printf '%s' "$w"
 }
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+# The wiki's own pages, which no page may be named as.
+printf '%s\n' Home _Sidebar _Footer >"$tmp/names"
 # One rule a page, so a link to it, with its #anchor, goes to its wiki
 # page; then the docs home, images, and the rest of the repository.
 : >"$tmp/links.sed"
 for n in $pages; do
   w=$(name "$n")
-  grep -qx -- "$w" "$tmp/names" 2>/dev/null && {
-    echo "two pages are named $w" >&2
+  grep -qix -- "$w" "$tmp/names" && {
+    echo "docs/$n.md would be the wiki's page $w, which is another's" >&2
     exit 1
   }
   printf '%s\n' "$w" >>"$tmp/names"
@@ -62,10 +82,10 @@ s#\\]\\(([a-z][^):]*)\\)#]($blob/docs/\\1)#g
 EOF
 
 page() { # page SOURCE WIKINAME
+  # The title is the wiki's own: the page starts below it.
+  awk 'done || !/^# / { print; next } { done = 1; getline; if ($0 != "") print }' "$1" >"$tmp/body"
   {
-    # The title is the wiki's own: the page starts below it.
-    awk 'done || !/^# / { print; next } { done = 1; getline; if ($0 != "") print }' "$1" |
-      sed -E -f "$tmp/links.sed"
+    sed -E -f "$tmp/links.sed" "$tmp/body"
     printf '\n---\n\nThis page is copied from [%s](%s/%s), where it is changed: a pull request there changes it here.\n' \
       "$1" "$blob" "$1"
   } >"$out/$2.md"

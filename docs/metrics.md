@@ -156,8 +156,9 @@ The Outcomes page's numbers ([Keep judging](serve.md)), from the ledger.
 |---|---|---|---|
 | `lapilli_serve_runs_total` | counter | `kind`, `result` | Runs since the process started, by `kind`, `hourly` or `backfill` (one whose period ends before now), and `result`, `ok`, `failed` or `held` |
 | `lapilli_serve_run_duration_seconds` | gauge | | How long the last run that ended `ok` took; 0 before one |
-| `lapilli_serve_cursor_timestamp_seconds` | gauge | | How far the ledger has firings up to, in Unix seconds; there once a run has finished |
-| `lapilli_last_run_timestamp_seconds` | gauge | | When the latest run in the run history finished, held and failed ones among them, in Unix seconds |
+| `lapilli_serve_cursor_timestamp_seconds` | gauge | | How far the ledger has firings up to, in Unix seconds; there once a run is recorded |
+| `lapilli_last_run_timestamp_seconds` | gauge | | When the latest entry of the run history finished, in Unix seconds: a run (held and failed ones among them), a review of a change to the rules, or a digest |
+| `lapilli_serve_replay_checked_to_timestamp_seconds` | gauge | | How far the replay has been set beside what really fired, in Unix seconds; there with the check on (`--check-replay`), once a day is checked |
 | `lapilli_serve_runs_held` | gauge | `reason` | 1 for why this round's run waited for a later one, `catch_up_hours`, `guard` or `yield`, and 0 for the others; all 0 when it didn't wait |
 | `lapilli_serve_history_requests_total` | counter | `api`, `answer` | Requests sent to each history API, by the class of the answer: `2xx`, `3xx`, `4xx`, `5xx`, or `none` (refused, dropped, timed out) |
 | `lapilli_serve_history_throttled_total` | counter | `api` | Answers of HTTP 429 from each history API |
@@ -262,12 +263,17 @@ A few rules a team's own Prometheus can keep on `lapilli serve`. The
 groups:
   - name: lapilli
     rules:
-      # No incident written down for two weeks, as the Outcomes page flags.
+      # No incident written down for two weeks, once the ledger holds two
+      # whole weeks: the gauge is 0 before the first incident.
       - alert: LapilliRecordQuiet
-        expr: time() - max(lapilli_serve_incident_last_timestamp_seconds) > 14 * 86400
-      # A job stopped copying firings in from a source (--source-quiet's 26h).
+        expr: >-
+          time() - max(lapilli_serve_incident_last_timestamp_seconds) > 14 * 86400
+          and on() max(lapilli_weeks_counted) >= 2
+      # A job stopped copying firings in from a source, past --source-quiet.
       - alert: LapilliSourceQuiet
-        expr: time() - max by (source) (lapilli_serve_source_last_timestamp_seconds) > 26 * 3600
+        expr: >-
+          time() - max by (source) (lapilli_serve_source_last_timestamp_seconds)
+          > on() group_left max(lapilli_serve_source_quiet_seconds)
       # A goal missed last week.
       - alert: LapilliGoalMissed
         expr: max by (goal, team) (lapilli_goal_met) == 0

@@ -39,6 +39,10 @@ wrote down ([How it judges](how-it-judges.md)).
   opened by a recipe that runs where the repository's credentials are, or
   a write through Grafana's, a ruler's or a cloud's API with credentials
   given for writing ([Changing rules](changing-rules.md)).
+- `lapilli ledger copy` writes a ledger into another, empty one: with
+  `--to-url-file`, into the Postgres database the file names, and it brings
+  the ledger it copies from to its own schema first
+  ([Commands](commands.md#lapilli-ledger)).
 - The scripts in [recipes](../recipes) run apart, with tokens of their
   own: those that keep tasks in step with a tracker make an issue there
   for each open task
@@ -48,7 +52,10 @@ wrote down ([How it judges](how-it-judges.md)).
 
 Only where its flags and files say. It sends requests to the APIs and
 feeds they name, and to what those need in turn: a cloud's credential
-chain, an OpenID Connect provider's endpoints, an SNS subscription to
+chain, an OpenID Connect provider's endpoints, the keys a sign-in in front
+signs with (`--proxy-jwt google-iap` fetches Google's from
+`www.gstatic.com`, `aws-alb` the load balancer's from
+`public-keys.auth.elb.REGION.amazonaws.com`), an SNS subscription to
 confirm. There is no telemetry and no update check. What is written for
 people to read goes only to a destination a flag names:
 
@@ -80,8 +87,9 @@ metrics six weeks only, and points older than six weeks ten minutes apart
 
 ### How much does it ask of Prometheus?
 
-A replay asks for each query a day at a time, once for every rule that
-needs it, `--parallel` (8) rules at once against each API. It waits when
+A replay asks for each query a day at a time, one request for each query
+and day shared by every rule that needs it, `--parallel` (8) rules at once
+against each API. It waits when
 an API pushes back (HTTP 429, 5xx), asks fewer at once after a 429 or a
 503, and `--max-rate N` keeps it to N requests a second. `--max-samples`
 (10,000,000) bounds what one read of a rule's query may hold, some 64
@@ -96,11 +104,12 @@ is deployed ([Use `lapilli verdict`](verdict.md),
 
 Rules: Prometheus rule files, `PrometheusRule` resources, Grafana alerting
 provisioning files, each cloud's managed rule groups and its alarms written
-in PromQL, ConfigMaps holding any of them, and directories of them; or as
-an API holds them: `--loaded-rules` (Prometheus, Thanos, Mimir, vmalert,
-Amazon Managed Service for Prometheus), `--grafana`, `--ruler` (Mimir,
-Cortex, Amazon's, Azure's), a Loki ruler's (`--loki-rules`,
-`--loki-loaded-rules`), and a cloud's own alarms (`--alarms`). What
+in PromQL, ConfigMaps holding any of them, Loki ruler rule files
+(`--loki-rules`), and directories of them; or as an API holds them:
+`--loaded-rules` (Prometheus, Thanos, Mimir, vmalert, Amazon Managed
+Service for Prometheus), `--grafana`, `--ruler` (Mimir, Cortex, Amazon's,
+Azure's), a Loki's ruler (`--loki-loaded-rules`), and a cloud's own alarms
+(`--alarms`). What
 Prometheus fired (`--alerts`) and firings recorded elsewhere (`--firings`)
 are judged as they are ([How it judges](how-it-judges.md)).
 

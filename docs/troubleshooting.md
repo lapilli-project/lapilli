@@ -9,9 +9,10 @@ options.`, and the command exits 2; one about what a run met exits 1.
 `lapilli serve` and `lapilli preflight` read the flags `lapilli verdict`
 reads, and say the same of them after `lapilli serve:` or `lapilli
 preflight:`. A rule that couldn't be replayed doesn't stop a run: it is
-named with its reason under `Could not replay N rules:` at the foot of the
-report, and in `unreplayed` in `--json`; one whose replay failed for the
-run, as the history couldn't be read, is named at the top too, under
+named with its reason under `Could not replay N rules:`, after the rules'
+tables and before the incidents', and in `unreplayed` in `--json`; one
+whose replay failed for the run, as the history couldn't be read, is named
+at the top too, under
 `! N of M rules couldn't be replayed, and are left out of what follows:`.
 
 ## The command line
@@ -100,7 +101,9 @@ lapilli verdict: --auth aws: the URL doesn't say which region; give --aws-region
 credentials the machine or pod already has; the table in
 [Use `lapilli verdict`](verdict.md) gives each cloud's URL and the
 permission it needs. AWS's region is read from the URL; give
-`--aws-region` when the URL doesn't name it.
+`--aws-region` when the URL doesn't name it. That one is found when the
+run starts, not among the flags: it exits 1, without the `Run "lapilli
+verdict -h"` line.
 
 ## Reaching the history
 
@@ -134,9 +137,10 @@ lapilli verdict: N of M rules couldn't be replayed, as the history couldn't be r
   RULE: query failed: the history couldn't be read: HTTP 403: TEXT
 ```
 
-The history didn't let lapilli in. `TEXT` is the server's own words, cut to
-300 bytes, with any token lapilli sent taken out; `not a Prometheus API
-response:` comes before them when they aren't the API's JSON. Give a token
+The history didn't let lapilli in. `TEXT` is the server's own words, with
+any token lapilli sent taken out: the API's JSON error cut to 300 bytes,
+or, when the answer isn't the API's JSON, its body cut to 200, after `not a
+Prometheus API response:`. Give a token
 with `--bearer-token-file`, or `--auth` for a cloud's managed Prometheus,
 with the read permission [Use `lapilli verdict`](verdict.md) names.
 
@@ -494,9 +498,12 @@ The log says at start which applies ([Keep judging](serve.md)).
 lapilli serve doesn't answer to this host name: give it in --allowed-hosts or --external-url
 ```
 
-HTTP 421. serve answers an address, `localhost`, names under `.svc`,
-`.cluster.local` or `.internal`, the name in `--external-url`, and those
-`--allowed-hosts` adds, such as the name a proxy passes on.
+HTTP 421, against DNS rebinding. serve answers an address, `localhost`
+and names under `.localhost`; a name without dots, or under `.svc`,
+`.cluster.local` or `.internal`, unless the request came over loopback (a
+port-forward, a sidecar); the name in `--external-url`; and those
+`--allowed-hosts` adds, such as the name a proxy passes on. `/healthz` and
+`/readyz` answer whatever the name.
 
 ### Signed out after a restart
 
@@ -582,9 +589,10 @@ replay N rules:` with its reason: the history (above), `paused`, `its
 condition reads a TYPE data source: only PromQL and LogQL are replayed`,
 or a cloud's alarm in its own terms (`a CloudWatch metric alarm isn't
 PromQL`). [What it doesn't do yet](limits.md) lists what can't be
-replayed. On `lapilli serve`'s rules list, a rule that didn't fire over the
-weeks shown is left out unless the Silent filter is picked; Not replayed
-picks those it couldn't replay. A rule that fired for real but not in the
+replayed. On `lapilli serve`'s rules list, the rules that didn't fire over
+the weeks shown are below the table, folded away (`N rules didn't fire in
+the last N weeks`); the Silent filter lists them in the table, and Not
+replayed those it couldn't replay. A rule that fired for real but not in the
 replay is for `--check-replay`
 ([below](#the-replay-differs-from-what-really-fired)).
 

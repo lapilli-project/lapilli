@@ -51,7 +51,8 @@ With `--oidc-issuer` or `--proxy-jwt`, every path but `/healthz`,
 under `/api/` or to `/mcp` from no one gets 401 and
 `{"error": "..."}`. With `--oidc-issuer` the 401 carries
 `WWW-Authenticate: Bearer realm="lapilli", resource_metadata="..."`,
-naming `/.well-known/oauth-protected-resource`, and a token refused adds
+naming `/.well-known/oauth-protected-resource` (which, with
+`--oidc-bearer=false`, answers 404), and a token refused adds
 `error="invalid_token"` and an `error_description` of a few fixed words
 ("the token has expired"); a browser asking for a page is sent to sign in
 instead.
@@ -68,15 +69,18 @@ above.
 | viewer | read every `GET` but `GET /api/v1/roles`, `/roles` and `/config.yaml` |
 | a team's editor | what an editor may, of what is their team's alone: its tasks, quiet windows, marked windows and reports, notes on the rules it owns, comments on what is its |
 | editor | write incidents, tasks, comments, notes on rules, quiet and marked windows, and a team's reports |
-| admin | also the teams, the roles, any report and the weekly digest |
+| admin | also the settings (`POST /settings` and its forms), the teams, the roles, any report and the weekly digest |
 
 A role is given by:
 
 - `--editors` and `--admins`: people (as the sign-in names them), groups,
-  `user:NAME`, `group:NAME`, `*@DOMAIN` or `*`; everyone else is a
-  viewer. The ledger checks a team's editor's writes in the write itself.
+  `user:NAME`, `group:NAME`, `*@DOMAIN` or `*`. Whom no list and no role
+  in the ledger names is a viewer, or, with `--oidc-issuer`, `--proxy-jwt`
+  or `--viewers`, isn't let in (403). The ledger checks a team's editor's
+  writes in the write itself.
 - `POST /api/v1/roles`, the Roles page, or `--config`'s `grants:`: an
-  editor's role, of every team or of one, kept in the ledger. Only with
+  editor's role, of every team (an editor) or of one (a team's editor),
+  kept in the ledger. Only with
   `--admins` and a sign-in that names people (`--user-header`,
   `--oidc-issuer`, `--proxy-jwt`). An admin's and an approver's stay the
   flags'.
@@ -94,9 +98,10 @@ more of each flag.
 
 Approving a change, or asking for one to be undone, is no role of the
 API's: it is a form on the proposal's page, sent by a browser from that
-page (`Sec-Fetch-Site: same-origin`), with a session, not a bearer token,
-by someone `--approvers` names ([Changing rules](changing-rules.md)). No
-API route, token or MCP tool approves.
+page (`Sec-Fetch-Site: same-origin`), not with a bearer token, by someone
+`--approvers` names, or, without it, an admin
+([Changing rules](changing-rules.md)). No API route, token or MCP tool
+approves.
 
 ## From a browser
 
@@ -108,11 +113,17 @@ browser that reaches it:
   `Host` (Go's `http.CrossOriginProtection`). A request with neither, as
   a script's is, goes on.
 - A request to a host name lapilli doesn't answer to gets 421 (DNS
-  rebinding): it answers an address, `localhost`, names under `.svc`,
-  `.cluster.local` or `.internal`, `--external-url`'s, and those
-  `--allowed-hosts` adds. `/healthz` and `/readyz` answer any name.
-- Every answer, on every port, has `Content-Security-Policy: default-src
-  'none'; ...`, `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`.
+  rebinding). It answers an address, `localhost`, names under
+  `.localhost`, `--external-url`'s name and those `--allowed-hosts` adds;
+  and, from another machine, a name without dots and names under `.svc`,
+  `.cluster.local` or `.internal`. Over loopback (this machine, a
+  port-forward, a sidecar) those are refused: a port-forward asked as
+  `lapilli.monitoring.svc` gets 421. `/healthz` and `/readyz` answer any
+  name. The same holds on `--metrics-listen` and `--incidents-listen`.
+- Every answer past that check, on every port, has
+  `Content-Security-Policy: default-src 'none'; ...`,
+  `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`; a 421 has
+  none of them.
 
 ## Requests and answers
 
@@ -141,8 +152,11 @@ An error from a route under `/api/` is JSON, its words in English:
 ```
 
 What is refused before a route is reached is plain text: `--read-only`,
-a cross-origin write, a host name, a token missing or wrong, a path that
-isn't there (404), a method a path doesn't take (405, with `Allow`).
+a cross-origin write, a host name, a path that isn't there (404), a
+method a path doesn't take (405, with `Allow`), and, on the incidents
+port, a token missing or wrong and a token's rate. On `--listen`, a
+request under `/api/` or to `/mcp` from no one is JSON, as above. The
+notifications port answers its refusals in plain text.
 
 | Code | When |
 |---|---|
@@ -150,10 +164,12 @@ isn't there (404), a method a path doesn't take (405, with `Allow`).
 | 401 | no one signed in; a token missing or wrong |
 | 403 | a role that doesn't allow it; someone no role lets in; `--read-only`; a cross-origin write; another's comment; another team's row |
 | 404 | no such row |
+| 408 | a notification that came too slowly, or was cut off |
 | 409 | what `--config` declares; an incident that comes from elsewhere; an id taken; a proposal that moved on |
-| 413 | firings past 16 MB, a tracker job's body past 64 KB, a notification past 1 MB or of too many alerts |
+| 413 | firings past 16 MB; `POST /api/v1/tasks/{id}/comments` or a tracker job's `PATCH /api/v1/tasks/{id}` past 64 KB; a notification past 1 MB or of too many alerts |
+| 414 | a page's query past 8,192 bytes (more for a try on the Settings page) |
 | 421 | a host name lapilli doesn't answer to |
-| 429 | a token's or a source's rate, another write with the same token, or a source's alerts for the day: `Retry-After` says when |
+| 429 | on the incidents and notifications ports, with `Retry-After`: a token's or a source's rate, another request with the same token, the notifications' turn at the ledger after five seconds, a source's alerts for the day. A page's form past the proposals, tries or backtests an hour gets it without `Retry-After` |
 | 503 | busy: a heavy request waited 30 seconds for its turn, a page 10 (with `Retry-After`), signed notifications arriving too many at once, or OCI's after two seconds; no run recorded yet, or the ledger's database out of reach (`/readyz`) |
 
 Bounds:
@@ -253,8 +269,8 @@ A quiet window's repeats are in [Keep judging](serve.md) and
 | `GET /api/v1/comments` | viewer | `on` (`rule`, `incident` or `task`) and `key` (its name or id) | its comments, the earliest first |
 | `GET /api/v1/comments/{id}` | viewer | | the comment |
 | `POST /api/v1/comments` | editor; a team's editor, on what is its | `on`, `key`, `body` | 201, the comment |
-| `PUT /api/v1/comments/{id}` | as `POST`, and its author | `body` | the comment |
-| `DELETE /api/v1/comments/{id}` | as `POST`, and its author | | 204 |
+| `PUT /api/v1/comments/{id}` | as `POST`, and only its author, but for a comment `anonymous` wrote | `body` | the comment |
+| `DELETE /api/v1/comments/{id}` | as `PUT` | | 204 |
 
 ## Reports
 
@@ -290,9 +306,11 @@ person approves in a browser ([Changing rules](changing-rules.md)).
 `--incidents-listen` takes what jobs write, each kind with a token of its
 own, and nothing else. A job sends its token as
 `Authorization: Bearer TOKEN`. Each token's file is read for each request,
-so it can be rotated; it holds 16 characters at least, and none is taken
-while two of the files hold the same. The headers that name people mean
-nothing here; host names are checked as on `--listen`.
+so it can be rotated; it holds 16 characters at least. Serve doesn't
+start while two token files, `--notify-token-file` among them, hold the
+same token, and one rotated to another's is taken from no one until they
+differ. The headers that name people mean nothing here; host names are
+checked as on `--listen`.
 
 | Token | Routes | Rate | Body |
 |---|---|---|---|
@@ -301,9 +319,10 @@ nothing here; host names are checked as on `--listen`.
 | `--tasks-token-file` | `GET /api/v1/tasks`, `PATCH /api/v1/tasks/{id}`, `GET /api/v1/tasks/{id}/comments`, `POST /api/v1/tasks/{id}/comments`, `PATCH /api/v1/tasks/{id}/comments/{comment}` | 5 a second, bursts of 100 | 64 KB |
 | `--changes-token-file` | `GET /api/v1/changes`, `PATCH /api/v1/changes/{id}` | 1 a second, bursts of 30 | 64 KB |
 
-A token makes one request at a time: another gets 429 and
-`Retry-After: 1`. Past its rate, 429 with how long to wait. With several
-replicas the rates are the ledger's, shared by every replica
+A token makes one request at a time on each replica: another gets 429
+and `Retry-After: 1`. Past its rate, 429 with how long to wait. With
+several replicas the rates are the ledger's, shared by every replica;
+the one request at a time stays each replica's
 ([Several replicas](serve.md#several-replicas)).
 
 - **Incidents.** As on `--listen`, writing alone: an incident a job writes
@@ -313,7 +332,8 @@ replicas the rates are the ledger's, shared by every replica
 - **Firings.** `PUT /api/v1/firings/{source}?from=&to=` takes the firings
   that start in `[from, to)`, one JSON object a line as `--firings` reads
   them, in place of those the ledger has from that source then. The source
-  is lowercase letters, digits and dashes, 40 at most. It gives `source`,
+  is lowercase letters, digits and dashes, 40 at most, neither starting
+  nor ending with a dash. It gives `source`,
   `from`, `to`, `firings`, `added`, `removed` and `changed`
   ([Firings recorded elsewhere](serve.md#firings-recorded-elsewhere)).
 - **Tasks.** `GET /api/v1/tasks` takes `linked` (`false` unless given),
@@ -369,10 +389,10 @@ source sends and how.
 | Route | What it is |
 |---|---|
 | `GET /healthz` | `ok`, to anyone, at any host name |
-| `GET /readyz` | `ok` once the ledger has a run recorded, 503 before. On a Postgres ledger, 503 while its database is out of reach, and, on `--metrics-listen`, which replica leads |
+| `GET /readyz` | `ok` once the ledger has a run recorded, or, on the replica that leads, once its first round of work is done, whatever it recorded; 503 before. On a Postgres ledger, 503 while its database is out of reach, and, on `--metrics-listen`, which replica leads |
 | `GET /metrics` | the metrics, over the last seven days ([Metrics](metrics.md)). On `--listen` it is behind the sign-in, as a page is; `--metrics-listen` serves it with none |
 | `/mcp` | MCP, over Streamable HTTP, any method, behind the same sign-in ([Ask it from an agent](mcp.md)) |
-| `GET /.well-known/oauth-protected-resource` | with `--oidc-issuer`, to anyone: this server as an OAuth 2.0 protected resource (RFC 9728), with the provider to get a token from (`authorization_servers`); not with `--oidc-bearer=false` |
+| `GET /.well-known/oauth-protected-resource` | with `--oidc-issuer`, to anyone: this server as an OAuth 2.0 protected resource (RFC 9728), with the provider to get a token from (`authorization_servers`); with `--oidc-bearer=false`, 404 |
 | `GET /auth/login`, `GET /auth/callback`, `GET /auth/signed-out` | with `--oidc-issuer`: the sign-in, sent to the provider and back |
 | `POST /auth/logout` | with `--oidc-issuer`: signs the person out, ending every session of theirs, and every bearer token issued to them, up to then |
 | `GET /settings.yaml` | viewer: the judging settings changed in the UI, as Helm values to commit |
@@ -385,9 +405,11 @@ Lapilli serves no ruler's API: `/loki/api/v1/rules` and
 
 ## The pages
 
-The UI's pages are HTML for people: `/` (the overview), `/rules`,
-`/rules/{name}`, `/incidents`, `/firings`, `/tasks`, `/proposals`,
-`/windows`, `/marked`, `/reports`, `/outcomes`, `/goals`, `/teams`,
+The UI's pages are HTML for people: `/` (the overview), `/rules` and
+`/rules/{name}`, `/incidents` and `/incidents/{id}`, `/firings`, `/tasks`
+and `/tasks/{id}`, `/proposals` and `/proposals/{id}`, `/windows` and
+`/windows/{id}`, `/marked` and `/marked/{id}`, `/reports`,
+`/reports/digest` and `/reports/{id}`, `/outcomes`, `/goals`, `/teams`,
 `/roles`, `/settings`, `/runs`, `/orphans`, `/manage` and `/search`. Their
 forms post to paths of their own (`POST /incidents`, `POST /rules/bulk`,
 `POST /settings`, ...), and need the roles the API's writes of the same

@@ -58,13 +58,16 @@
   Nothing is written. No schema change.
 - **Eight pages more of docs, and the docs in the wiki too.** Getting
   started, Words, Questions and When something goes wrong; and four of
-  reference, each held to the code by a test: Commands, every command's
-  `-h` as it prints it, written from the help itself; The HTTP API, every
-  route of `/api/v1` and the role it needs; Metrics, every metric
+  reference: Commands, every command's `-h` as it prints it, written from
+  the help itself; The HTTP API, every route of `/api/v1` and of the
+  notifications port, and the role each needs; Metrics, every metric
   `/metrics` exposes; and Upgrading, which version added each schema of
-  the ledger. The GitHub wiki is now a copy of docs/, written again by
-  `.github/workflows/wiki.yml` on each change to main, its pages named by
-  their titles; the pages are still changed in docs/ alone.
+  the ledger. A test holds each to the code's list (an option, a route, a
+  metric or a schema added without its line, or a line left after it is
+  gone, fails), not what the page says of each. The GitHub wiki is now a
+  copy of docs/, written again by `.github/workflows/wiki.yml` on each
+  change to main, its pages named by their titles; the pages are still
+  changed in docs/ alone.
 
 ### Changed
 
