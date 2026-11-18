@@ -2,14 +2,6 @@
 
 ## [Unreleased]
 
-## [0.59.0] - 2026-11-18
-
-The docs as pages of their own, at lapilli.dev/docs, and the pages of
-`lapilli serve` as they read in use on a real deployment: the incidents
-list named a noisy rule beside another rule's lead, Korean read "caught"
-as noise, and a few pages said more than they needed to. No schema change:
-the ledger stays at 022.
-
 ### Added
 
 - **`lapilli preflight` asks what Grafana's token and each cloud's
@@ -65,6 +57,44 @@ the ledger stays at 022.
   to `Action=SimulatePrincipalPolicy` of the role, with the region alone.
   Nothing is written. No schema change.
 
+### Changed
+
+- **`changes.cloud` is ok once the identity is taken.** It was unknown, as
+  what the identity may write wasn't asked; that is now each cloud's item.
+- **`lapilli preflight` redacts what the URLs of `--alarms` and `--ruler`
+  name inside them**: an OCI compartment's OCID, an Azure subscription and
+  resource group, an Amazon workspace, a Google project, where an error
+  repeats the URL with more beside it, which 0.53.0 to 0.59.0 printed;
+  and, in what a cloud says, an identity's that couldn't be taken among
+  it, any other ARN of an account, GUID, or number of ten digits or more,
+  or written `1234-5678-9012` (the pod's own role, an Azure object id, a
+  Google project's number).
+- **`lapilli preflight`'s allowlist refuses a form or a query that
+  doesn't read whole** (a `;` between its pairs), which was read without
+  the pair, and the rest judged.
+- The chart README's Azure roles have the reads `lapilli preflight` asks
+  (`Microsoft.Authorization/permissions/read`, `denyAssignments/read`,
+  `locks/read`) and `Microsoft.Insights/actionGroups/read`, with read on
+  each alert rule's targets, which Azure Monitor asks for as one is
+  written.
+
+### Fixed
+
+- **Google Cloud's alerting policies written as the pod's own identity**
+  (`--changes` without `--changes-google-service-account`) were sent with
+  the reads' token, of the `monitoring.read` scope, which every write is
+  refused with, since 0.24.0, whose help says "without it, the pod's
+  identity writes". serve now makes the pod's write credential of its
+  own, of the `monitoring` scope.
+
+## [0.59.0] - 2026-11-18
+
+The docs as pages of their own, at lapilli.dev/docs, and the pages of
+`lapilli serve` as they read in use on a real deployment: the incidents
+list named a noisy rule beside another rule's lead, Korean read "caught"
+as noise, and a few pages said more than they needed to. No schema change:
+the ledger stays at 022.
+
 ### Fixed
 
 - **The incidents list named a noisy rule as the catch** (0.31.0 to
@@ -79,12 +109,6 @@ the ledger stays at 022.
   (0.31.0 to 0.58.0): "of 0 whole weeks, 3" for 3 of them, where 0 had one.
 - **The overview's table of the weeks was wider than its box** in Spanish
   on a laptop's screen: a long tag in its first column now wraps.
-- **Google Cloud's alerting policies written as the pod's own identity**
-  (`--changes` without `--changes-google-service-account`) were sent with
-  the reads' token, of the `monitoring.read` scope, which every write is
-  refused with, since 0.24.0, whose help says "without it, the pod's
-  identity writes". serve now makes the pod's write credential of its
-  own, of the `monitoring` scope.
 
 ### Changed
 
@@ -118,24 +142,6 @@ the ledger stays at 022.
 - **Settings.** A named signal's choice to follow the match in effect says
   what that match is.
 - **Sign out** is a quiet button, no longer the boldest on the page.
-- **`changes.cloud` is ok once the identity is taken.** It was unknown, as
-  what the identity may write wasn't asked; that is now each cloud's item.
-- **`lapilli preflight` redacts what the URLs of `--alarms` and `--ruler`
-  name inside them**: an OCI compartment's OCID, an Azure subscription and
-  resource group, an Amazon workspace, a Google project, where an error
-  repeats the URL with more beside it, which 0.53.0 to 0.58.0 printed;
-  and, in what a cloud says, an identity's that couldn't be taken among
-  it, any other ARN of an account, GUID, or number of ten digits or more,
-  or written `1234-5678-9012` (the pod's own role, an Azure object id, a
-  Google project's number).
-- **`lapilli preflight`'s allowlist refuses a form or a query that
-  doesn't read whole** (a `;` between its pairs), which was read without
-  the pair, and the rest judged.
-- The chart README's Azure roles have the reads `lapilli preflight` asks
-  (`Microsoft.Authorization/permissions/read`, `denyAssignments/read`,
-  `locks/read`) and `Microsoft.Insights/actionGroups/read`, with read on
-  each alert rule's targets, which Azure Monitor asks for as one is
-  written.
 
 ## [0.58.0] - 2026-11-18
 
