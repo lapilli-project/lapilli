@@ -208,5 +208,8 @@ Both were checked against v0.27.0's attestation, as `gh attestation
 download` gives it (gh 2.92.0, cosign 3.1.4): each passes with v0.27.0's
 tag, and fails with v0.26.0's.
 
+How the project meets the OpenSSF Best Practices criteria, each with what
+it rests on: [bestpractices.dev/projects/16891](https://www.bestpractices.dev/projects/16891).
+
 There is one maintainer today ([MAINTAINERS.md](MAINTAINERS.md)), so fixes
 are best effort.
