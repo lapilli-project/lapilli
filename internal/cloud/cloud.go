@@ -191,14 +191,9 @@ func Request(ctx context.Context, kind, endpoint, as string) (func(*http.Request
 		if service == "aps-workspaces" {
 			service = "aps"
 		}
-		cfg, err := config.LoadDefaultConfig(ctx, awsOptions(region)...)
+		creds, err := awsCredentials(ctx, region, as)
 		if err != nil {
-			return nil, fmt.Errorf("AWS credentials: %w", err)
-		}
-		creds := cfg.Credentials
-		if as != "" {
-			creds = aws.NewCredentialsCache(stscreds.NewAssumeRoleProvider(sts.NewFromConfig(cfg), as,
-				func(o *stscreds.AssumeRoleOptions) { o.RoleSessionName = "lapilli" }))
+			return nil, err
 		}
 		return SignRequest(creds, service, region, time.Now), nil
 	case "azure":
@@ -222,11 +217,60 @@ func Request(ctx context.Context, kind, endpoint, as string) (func(*http.Request
 			return nil
 		}, nil
 	case "google":
-		return googleRequest(ctx, as)
+		return googleRequest(ctx, as, googleMonitoringRead)
 	case "oci":
 		return ociRequest(as)
 	}
 	return nil, fmt.Errorf("no credentials for %q to send with a request", kind)
+}
+
+// Writes authenticates a write to a cloud's API as Request does, but for
+// Google Cloud without as, where the pod's own token is asked for Cloud
+// Monitoring's write scope, monitoring, not the read's: a write sent with
+// a monitoring.read token is refused.
+func Writes(ctx context.Context, kind, endpoint, as string) (func(*http.Request) error, error) {
+	if kind == "google" && as == "" {
+		return googleRequest(ctx, "", googleMonitoring)
+	}
+	return Request(ctx, kind, endpoint, as)
+}
+
+// awsCredentials are the machine's or pod's own AWS credentials, loaded
+// for a region, or, with as, a role's they assume, named lapilli.
+func awsCredentials(ctx context.Context, region, as string) (aws.CredentialsProvider, error) {
+	cfg, err := config.LoadDefaultConfig(ctx, awsOptions(region)...)
+	if err != nil {
+		return nil, fmt.Errorf("AWS credentials: %w", err)
+	}
+	creds := cfg.Credentials
+	if as != "" {
+		creds = aws.NewCredentialsCache(stscreds.NewAssumeRoleProvider(sts.NewFromConfig(cfg), as,
+			func(o *stscreds.AssumeRoleOptions) { o.RoleSessionName = "lapilli" }))
+	}
+	return creds, nil
+}
+
+// AWSAs signs a request to an Amazon endpoint as Request does (as, a role
+// to assume), and gives a second signer, for another service and region,
+// with the same credentials, made once: lapilli preflight's request to
+// IAM's policy simulator, as the role serve writes as.
+func AWSAs(ctx context.Context, endpoint, as, service, region string) (sign, other func(*http.Request) error, err error) {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, nil, err
+	}
+	at, in, ok := AWSHost(u.Hostname())
+	if !ok {
+		return nil, nil, fmt.Errorf("%s isn't an Amazon endpoint", u.Hostname())
+	}
+	if at == "aps-workspaces" {
+		at = "aps"
+	}
+	creds, err := awsCredentials(ctx, in, as)
+	if err != nil {
+		return nil, nil, err
+	}
+	return SignRequest(creds, at, in, time.Now), SignRequest(creds, service, region, time.Now), nil
 }
 
 // AWSAccount is the account the machine's or pod's own AWS identity is

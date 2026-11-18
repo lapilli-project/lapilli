@@ -58,6 +58,25 @@ func TestGoogleImpersonated(t *testing.T) {
 	if read(r); r.Header.Get("Authorization") != "Bearer pod-token https://www.googleapis.com/auth/monitoring.read" {
 		t.Errorf("a read: %q", r.Header.Get("Authorization"))
 	}
+	// The pod's own writes, without a service account: its token of the
+	// scope that writes, not the read's; with one, impersonated as above.
+	write, _ := Writes(context.Background(), "google", "https://monitoring.googleapis.com/v3/projects/p/alertPolicies", "")
+	r = httptest.NewRequest(http.MethodPatch, "https://monitoring.googleapis.com/v3/projects/p/alertPolicies/1", nil)
+	if write(r); r.Header.Get("Authorization") != "Bearer pod-token https://www.googleapis.com/auth/monitoring" {
+		t.Errorf("the pod's write: %q", r.Header.Get("Authorization"))
+	}
+	as, _ := Writes(context.Background(), "google", "https://monitoring.googleapis.com/v3/projects/p/alertPolicies", "lapilli-writes@p.iam.gserviceaccount.com")
+	r = httptest.NewRequest(http.MethodPatch, "https://monitoring.googleapis.com/v3/projects/p/alertPolicies/1", nil)
+	if as(r); r.Header.Get("Authorization") != "Bearer writer-token" {
+		t.Errorf("a write as the service account: %q", r.Header.Get("Authorization"))
+	}
+	// lapilli preflight's read-only token: the pod's own without a
+	// service account.
+	own, _ := GoogleAs(context.Background(), "", "https://www.googleapis.com/auth/cloud-platform.read-only")
+	r = httptest.NewRequest(http.MethodPost, "https://cloudresourcemanager.googleapis.com/v1/projects/p:testIamPermissions", nil)
+	if own(r); r.Header.Get("Authorization") != "Bearer pod-token https://www.googleapis.com/auth/cloud-platform.read-only" {
+		t.Errorf("the pod's read-only token: %q", r.Header.Get("Authorization"))
+	}
 }
 
 // OCI's writes are signed as the user an OCI config file names, with the

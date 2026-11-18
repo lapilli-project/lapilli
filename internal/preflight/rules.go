@@ -333,8 +333,19 @@ func (p *run) readRuler(ctx context.Context) ([]rules.Rule, error) {
 			return nil, err
 		}
 	}
-	rs, _, err := r.Read(ctx)
+	rs, docs, err := r.Read(ctx)
+	p.read("ruler", docs)
 	return rs, err
+}
+
+// read keeps the documents a read of the rules gave, by where they were
+// read (ruler, alarms:SOURCE): what --changes-in names among them is what
+// the checks of writes ask about.
+func (p *run) read(where string, docs []rules.Doc) {
+	if p.docs == nil {
+		p.docs = map[string][]rules.Doc{}
+	}
+	p.docs[where] = docs
 }
 
 // readAlarms reads a cloud's alarms once, with its credentials, as serve
@@ -355,6 +366,7 @@ func (p *run) readAlarms(ctx context.Context, src, raw string) ([]rules.Rule, er
 	if err != nil {
 		return nil, err
 	}
+	p.read("alarms:"+src, docs)
 	return rules.FromDocs(docs)
 }
 

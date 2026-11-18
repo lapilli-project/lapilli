@@ -2,6 +2,91 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`lapilli preflight` asks what Grafana's token and each cloud's
+  identity may write, without writing** (docs/design/preflight.md, step
+  2; open question 3, decided by the maintainer on 2026-11-18: ask all
+  four clouds). With `--changes`:
+  - `grafana.write` reads Grafana's list of the token's own actions,
+    `GET /api/access-control/user/permissions`, which Grafana OSS 12.4.15
+    and 13.3.1 serve, as measured. It is ok when the token may read and
+    write every rule (an Admin's `alert.provisioning:write`), or write in
+    every folder (an empty scope covers none, as Grafana's evaluator has
+    it); unknown when it writes folder by folder (an Editor's); a problem
+    naming what it lacks (a Viewer's), or when Grafana doesn't take it.
+  - `changes.aws` asks IAM's policy simulator, as the role, whether its
+    policies allow `cloudwatch:PutMetricAlarm`, `DisableAlarmActions`,
+    `EnableAlarmActions`, `DeleteAlarms` and `TagResource`, and
+    `aps:PutRuleGroupsNamespace`, on what `--changes-in` names: a name
+    given whole as its ARN, a prefix as each alarm or namespace read
+    under it, with the region as `aws:RequestedRegion`. A decision with a
+    context key the simulation lacks, a prefix with nothing read under
+    it, and an SCP's conditions on other keys are never an ok. It needs
+    `iam:SimulatePrincipalPolicy` on the role's own ARN, which serve never
+    needs: without it, unknown, never a problem.
+  - `changes.azure` reads, at each resource group `--changes-in` names (a
+    rule group named whole, at itself), the identity's permissions, each
+    entry's `actions` less its `notActions`, wildcards included, for the
+    writes of the alert rule types that may be named there; the deny
+    assignments at or above it, any that may refuse a write unknown; and
+    the locks there and on the subscription, a `ReadOnly` one a problem, a
+    `CanNotDelete` one where a metric alert may be deleted a problem; the
+    deny assignments at each alert rule read, below the group (a
+    deployment stack's); and read on what each alert rule read names (its
+    targets, its action groups), which Azure Monitor asks for as a metric
+    alert is written. What it doesn't take, a subscription-wide target
+    say, is unknown.
+  - `changes.google` asks Cloud Resource Manager's `testIamPermissions` on
+    each project `--changes-in` names a policy of, as the service account,
+    or as the pod's own identity without one, for the alerting policies'
+    create, update and delete. Deny policies, principal access boundaries
+    and VPC Service Controls aren't judged, as an ok says.
+  - `changes.oci` reads the user's ACTIVE groups and, for each alarm
+    `--changes-in` names, the ACTIVE policies of its compartment, of its
+    metric's compartment and of each above them, and judges their
+    statements for `manage alarms` where the alarm is and `read metrics`
+    where its metric is. A statement with a condition, or one not
+    understood, is never a grant: "unknown: a policy with a condition";
+    nor is a compartment named by its own name in a policy attached to
+    it. Reading them takes `inspect` of groups, users, compartments and
+    policies in the tenancy.
+
+  Every new request reads, or, IAM's simulation and `testIamPermissions`,
+  only answers; the allowlist holds each to its path and query, and IAM's
+  to `Action=SimulatePrincipalPolicy` of the role, with the region alone.
+  Nothing is written. No schema change.
+
+### Changed
+
+- **`changes.cloud` is ok once the identity is taken.** It was unknown, as
+  what the identity may write wasn't asked; that is now each cloud's item.
+- **`lapilli preflight` redacts what the URLs of `--alarms` and `--ruler`
+  name inside them**: an OCI compartment's OCID, an Azure subscription and
+  resource group, an Amazon workspace, a Google project, where an error
+  repeats the URL with more beside it, which 0.53.0 to 0.59.0 printed;
+  and, in what a cloud says, an identity's that couldn't be taken among
+  it, any other ARN of an account, GUID, or number of ten digits or more,
+  or written `1234-5678-9012` (the pod's own role, an Azure object id, a
+  Google project's number).
+- **`lapilli preflight`'s allowlist refuses a form or a query that
+  doesn't read whole** (a `;` between its pairs), which was read without
+  the pair, and the rest judged.
+- The chart README's Azure roles have the reads `lapilli preflight` asks
+  (`Microsoft.Authorization/permissions/read`, `denyAssignments/read`,
+  `locks/read`) and `Microsoft.Insights/actionGroups/read`, with read on
+  each alert rule's targets, which Azure Monitor asks for as one is
+  written.
+
+### Fixed
+
+- **Google Cloud's alerting policies written as the pod's own identity**
+  (`--changes` without `--changes-google-service-account`) were sent with
+  the reads' token, of the `monitoring.read` scope, which every write is
+  refused with, since 0.24.0, whose help says "without it, the pod's
+  identity writes". serve now makes the pod's write credential of its
+  own, of the `monitoring` scope.
+
 ## [0.59.0] - 2026-11-18
 
 The docs as pages of their own, at lapilli.dev/docs, and the pages of

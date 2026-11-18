@@ -675,6 +675,11 @@ func ledgerID(ctx context.Context, l *ledger.Ledger) (string, error) {
 // tests replace it.
 var requestAuth = cloud.Request
 
+// writeAuth authenticates a cloud's writes as the pod's own identity where
+// they take credentials of their own (Google Cloud's write scope); tests
+// replace it.
+var writeAuth = cloud.Writes
+
 // callerAccount is the AWS account the pod's own identity is in.
 var callerAccount = cloud.AWSAccount
 
@@ -736,6 +741,12 @@ func (s *Server) newAlarms(ctx context.Context) error {
 		writes := a.Reads
 		if as := s.writeAs(a.Kind); s.cfg.Changes && as != "" {
 			if writes.Sign, err = requestAuth(ctx, kind, a.URL, as); err != nil {
+				return fmt.Errorf("--alarms %s: the write credentials: %w", a.Source, err)
+			}
+		} else if s.cfg.Changes && a.Kind == source.AlarmsGoogle {
+			// The pod's own identity writes: its token of the scope that
+			// writes, as the reads' is of the one that reads.
+			if writes.Sign, err = writeAuth(ctx, kind, a.URL, ""); err != nil {
 				return fmt.Errorf("--alarms %s: the write credentials: %w", a.Source, err)
 			}
 		}

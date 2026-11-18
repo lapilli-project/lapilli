@@ -1,9 +1,11 @@
 # `lapilli preflight`: what serve will meet, before it is deployed
 
-Status: accepted; step 1 built. Merged on 2026-11-16, before its week was
-out, by the maintainer's decision (#92), after a review whose changes are in
-it. What building step 1 found the design said otherwise than the code can
-do is in "As built" below.
+Status: accepted; steps 1 and 2 built. Merged on 2026-11-16, before its
+week was out, by the maintainer's decision (#92), after a review whose
+changes are in it. Step 2, what Grafana's token and each cloud's identity
+may write, asked without writing, followed the maintainer's decision of
+open question 3 on 2026-11-18. What building each step found the design
+said otherwise than the code can do is in "As built" below.
 Under [GOVERNANCE.md](../../GOVERNANCE.md) a new command is designed first,
 as a pull request. It adds nothing to the ledger, takes no input from
 outside but the answers of the APIs serve already reads, and changes no
@@ -145,8 +147,12 @@ unknown here: that history isn't read for an estimate.
 | Id | Read | Says |
 |---|---|---|
 | `grafana.notifications` | the templates, contact points and policies (`source.GrafanaNotifications`), with `--check-content` | a 403 is a problem: the template part of the content check stays as it was |
-| `grafana.write` | with `--changes-grafana-token-file`: `GET /api/access-control/user/permissions`, which lists the caller's own actions | where it answers, ok when the actions include writing alert rules, a problem when not; where it isn't served, unknown: no other API says what a token may write without its writing, and the first change approved finds out. Grafana's documentation says its RBAC API is Grafana Enterprise's and Grafana Cloud's; whether OSS answers this one path is checked against a real OSS Grafana before step 2 builds the item |
-| `changes.cloud` | AWS (`--changes-aws-role`): STS's `AssumeRole`; Google Cloud (`--changes-google-service-account`): IAM Credentials' `generateAccessToken`; Azure (`--changes-azure-client-id`): a token for that identity from Microsoft Entra, as serve's credential chain gets one; OCI (`--changes-oci-config`): the config file and the API key it names, read | the identity can be taken, or the key read: a credential is made, nothing is written. Whether it may write the rules or alarms named is **unknown** on all four in the first step |
+| `grafana.write` | with `--changes-grafana-token-file`: `GET /api/access-control/user/permissions`, which lists the caller's own actions, each with its scopes; Grafana OSS serves it (12.4 and 13.3, "As built (step 2)") | ok when the actions include what serve's changes send through the provisioning API (a read of the rule and the export; a change, a deletion, a rule made again): `alert.provisioning:write` (an Admin's), or `alert.rules:write`, `:delete` and `:create` with `alert.provisioning.provenance:write` in every folder (`*`, `folders:*`; an empty scope covers none, as Grafana's evaluator has it); a problem naming what it lacks (a Viewer's lacks them all); unknown for a token that writes folder by folder (an Editor's: `folders:read` is the folders its role is given), as which folder each rule is in isn't read; a token Grafana doesn't take (401) is a problem; where the path isn't served (404), unknown |
+| `changes.cloud` | AWS (`--changes-aws-role`): STS's `AssumeRole`; Google Cloud (`--changes-google-service-account`): IAM Credentials' `generateAccessToken`; Azure (`--changes-azure-client-id`): a token for that identity from Microsoft Entra, as serve's credential chain gets one; OCI (`--changes-oci-config`): the config file and the API key it names, read | the identity can be taken, or the key read: a credential is made, nothing is written. What each may write is its own item, below |
+| `changes.aws` | IAM's policy simulator, `SimulatePrincipalPolicy`, as the role, of the role's own policies, for the actions serve's writes send (`cloudwatch:PutMetricAlarm`, `DisableAlarmActions`, `EnableAlarmActions`, `DeleteAlarms`, `TagResource`; `aps:PutRuleGroupsNamespace`) on the ARNs of what `--changes-in` names, in the role's account: a name given whole as its ARN, a prefix as each alarm or namespace this run read under it, twenty at most; the region the writes are made in given as the one context entry, `aws:RequestedRegion`; one request a region for CloudWatch's, one for Amazon's namespaces | ok when every action is allowed on every name; a problem naming what is denied; unknown for a decision with a context key the simulation lacks, allowed or not, a prefix with nothing read under it, and names past twenty. An SCP's conditions on another key than the region aren't judged: the simulator doesn't say which an SCP lacks. It needs **`iam:SimulatePrincipalPolicy` on the role's own ARN**, a permission serve itself never needs: without it, IAM refuses, and the item is unknown, never a problem, and says so |
+| `changes.azure` | at each resource group `--changes-in` names (a rule group named whole, at itself): the identity's permissions, `GET {scope}/providers/Microsoft.Authorization/permissions`, the deny assignments at or above it (`denyAssignments`, `$filter=atScope()`) and its locks (`locks`); the subscription's locks; and, for the alert rules named that this run read, the permissions at each resource they name (their targets, their action groups) | each action serve's writes need (`Microsoft.AlertsManagement/prometheusRuleGroups/write`; the write of each alert rule type that may be named there, `metricAlerts`, `scheduledQueryRules`, `activityLogAlerts`, and `metricAlerts/delete` where a metric alert may be) matched against each entry's `actions` less its `notActions`, `*` and letter case as Azure has them: ok, or a problem naming what isn't given; an alert rule named whole, not given on its group, is unknown (it may be given on the rule alone). A `ReadOnly` lock on the group, the subscription or a rule written is a problem; a `CanNotDelete` one where a metric alert may be deleted, a problem; a deny assignment that may refuse a write, unknown, naming it. Read on a metric alert's target or action group not given there is a problem (Azure Monitor asks for it); on another kind's, unknown |
+| `changes.google` | Cloud Resource Manager's `testIamPermissions` on the project of each Google `--alarms` that `--changes-in` names a policy of, as the service account, or, without `--changes-google-service-account`, as the pod's own identity, which then writes; with a read-only token, for `monitoring.alertPolicies.create`, `.update` and `.delete` | ok when it holds all three, a problem naming those it doesn't; an error (its API not enabled, say) unknown. Whether its answer counts IAM deny policies, principal access boundaries or VPC Service Controls isn't documented: not judged, and the ok says so |
+| `changes.oci` | as the user, through Identity: its groups (`ListUserGroupMemberships`, then each group), and for each alarm `--changes-in` names that this run read, the compartments from its own up to the tenancy, and from its metric's (`GetCompartment`), and the policies of each (`ListPolicies`, every page), each compartment read once | the ACTIVE statements read and judged here, of the user's ACTIVE memberships and groups: `manage alarms` (`ALARM_UPDATE`) where the alarm is, and `read metrics` (`METRIC_READ`) where its metric is, "for the metric compartment and metric namespace" as `UpdateAlarm` takes it (in the tenancy, for a metric read in the subtree): ok, or a problem naming what no policy gives; a statement with a condition, or one not understood, is never a grant: "unknown: a policy with a condition". An entry that names no alarm read is unknown. Reading them takes `inspect` of groups, users, compartments and policies in the tenancy; without it, unknown |
 | `changes.ruler` | nothing | a Mimir's or a Cortex's `rules:write` can't be known without writing: unknown |
 
 ### Files, the ledger, the ports
@@ -262,7 +268,8 @@ ok       rules.read          206 alert rules, 40 recording rules, from /etc/lapi
 ok       rules.replayable    203 can be replayed; 3 can't, each with why (below)
 ok       history.reach       [--prometheus] answered vector(1) in 41ms, signed for google
 unknown  history.alerts      no firing alert in the last day, or no ALERTS kept: memory is the caps' bound
-unknown  grafana.write       this Grafana doesn't say what a token may write without its writing
+unknown  grafana.write       --changes-grafana-token-file's token may write alert rules folder by folder:
+                             it may read 12 folders
 ok       ledger.sqlite       schema 018; serve upgrades it to 019 as it starts, and a release before
                              019 can't open it after: keep a copy first
 ...
@@ -313,7 +320,17 @@ Each is held by the code and a test, not only said:
   query aren't on an allowlist, and counts it. The two PromQL queries are
   matched by their exact text, and Loki's times by their keys and a range
   of the last ten minutes. The credential endpoints are matched by host
-  and action, `AssumeRole` among them.
+  and action, `AssumeRole` among them. Of what is asked of what may be
+  written, the two POSTs answer and change nothing, and are held to that:
+  IAM's to `Action=SimulatePrincipalPolicy` of the role's own ARN, with
+  only its actions, resources, page size and one context entry,
+  `aws:RequestedRegion` of a region serve writes in; Cloud Resource
+  Manager's to the `:testIamPermissions` path of each project of
+  `--alarms` that `--changes-in` names, with the alerting policies'
+  permissions as its body. Any other action or path on those hosts is
+  refused, and so is a form or a query that doesn't read whole (a `;`
+  between its pairs). An answer that says "allowed" is judged, and
+  nothing more is done with it.
 - **No write to the ledger.** SQLite is opened `mode=ro`, with `PRAGMA
   query_only = ON`, and so that nothing is made or written beside it (As
   built, below). Postgres is connected with
@@ -398,7 +415,18 @@ A few dozen requests at most, whatever the number of rules: one probe of
 each history, one ALERTS query each, two scrape reads, one read of each
 rule source, 20 data sources at two each, Grafana's three templates reads
 and one permissions read, a discovery document and keys, a credential from
-each cloud's chain, each on-call feed. Each is asked under `--max-rate`,
+each cloud's chain, each on-call feed; and, with `--changes`, what each
+identity may write: one simulation of IAM's a region named, and one for
+Amazon's namespaces; one `testIamPermissions` a Google project named;
+Azure's permissions, deny assignments and locks at ten scopes at most,
+each subscription's locks once, the deny assignments at ten alert rules
+named at most, and the permissions at ten resources the alert rules name
+at most, five pages each; and OCI's memberships (a
+thousand at most), twenty groups, and for ten compartments at most their
+chains up to the tenancy (eight at most) and the policies of each, read
+once each (five pages each, 5,000 statements all told). Each is counted in
+`asked.by`, as `grafana` and `iam:aws`, `iam:azure`, `iam:google` and
+`iam:oci`. Each is asked under `--max-rate`,
 as serve asks, within ten seconds, and the whole within
 `--preflight-timeout`. So are the estimates, which ask nothing but count
 a run's requests a run at a time over a day of runs, and the backfill's a
@@ -456,13 +484,18 @@ the rules in memory as serve's watcher does, and nothing else of size.
    the chart's `Recreate` Deployment and ReadWriteOnce ledger ("Output, and
    where it shows").
 
+**Decided on 2026-11-18, by the maintainer:**
+
+3. **Writes, where a cloud says without writing**: ask all four clouds,
+   in step 2. Google Cloud's `testIamPermissions` and Azure's permissions
+   of the caller on a scope say what may be written; AWS's policy
+   simulator needs `iam:SimulatePrincipalPolicy`, a permission of its
+   own, without which the item is unknown; OCI's policies are read and
+   judged here, a statement with a condition never counted as a grant
+   ("As built (step 2)").
+
 **Open:**
 
-3. **Writes, where a cloud says without writing**: Google Cloud's
-   `testIamPermissions` and Azure's permissions of the caller on a scope
-   say what may be written; AWS needs `iam:SimulatePrincipalPolicy`, a
-   permission of its own; OCI's policies are read by a policy's own API.
-   Ask them in step 2, or leave writes unknown?
 4. **Each rule's expression** asked once, behind `--queries`?
 5. **In serve**: the same items on the Settings page, worked out once a
    day, for a deployment that has drifted (a token rotated without its
@@ -563,7 +596,7 @@ can do:
   token and discovery paths, Google's token endpoints and IAM Credentials'
   `generateAccessToken`, the instance metadata's credential paths.
 - **`grafana.write` is unknown in step 1.** It isn't asked; step 2 builds
-  it, once OSS is checked.
+  it, once OSS is checked (it is: "As built (step 2)").
 - **An AWS load balancer's keys can't be fetched before a request.** They
   are fetched by the key each token names: `signin` is unknown for
   `--proxy-jwt aws-alb`.
@@ -577,6 +610,198 @@ can do:
 - **The memory's limit is twice its request**: Go's collector lets the heap
   grow to about twice what is live before it collects (`GOGC=100`).
 
+## As built (step 2)
+
+What Grafana's token and each cloud's identity may write, asked of an API
+that says so without anything being written (`internal/preflight`,
+`writes*.go`):
+
+- **Grafana OSS serves `/api/access-control/user/permissions`.** Measured
+  on 2026-11-18 against Grafana OSS 12.4.15 (commit `22e86c4f`) and
+  13.3.1 (commit `da3aa3ff`), the official darwin-arm64 tarballs from
+  dl.grafana.com, their SHA-256 checked against grafana.com's download
+  API and the `.sha256` file beside each, run on 127.0.0.1 on a port of
+  their own with a data directory made for the run and removed after. On
+  both, the path answers 200 for a Viewer's, an Editor's and an Admin's
+  service account token, and for the admin user: an object of each
+  action to its scopes (24, 58 and 135 actions on 12.4.15, 30, 76 and
+  169 on 13.3.1). With no credential it answers 401 `auth.unauthorized`,
+  and with a token Grafana doesn't know, 401 `api-key.invalid`, "Invalid
+  API key". Grafana's documentation names the access control API
+  Enterprise's and Cloud's; this path, the caller's own actions, is
+  OSS's too.
+- **What the roles hold, and what they may write, measured.** An Admin's
+  token lists `alert.provisioning:read`, `:write`,
+  `alert.rules.provisioning:read`, `:write`,
+  `alert.provisioning.secrets:read` and
+  `alert.provisioning.provenance:write`, and `folders:read` on
+  `folders:*`. An Editor's lists `alert.rules:read`, `:write`, `:create`
+  and `:delete` on `folders:*` and on each folder,
+  `alert.provisioning.provenance:write`, and `folders:read` only on the
+  folders its role is given, none of `alert.provisioning:*`. A Viewer's,
+  `alert.rules:read` and `folders:read`. Through the provisioning API,
+  with `X-Disable-Provenance` as serve sends it, a rule was made (POST,
+  201), changed and paused (PUT, 200, read back paused) and deleted
+  (DELETE, 204) by the Admin's token and by the Editor's, in a folder the
+  Editor may read, on both versions; the Viewer's read (GET of the rule
+  and of the export, 200) and was refused each write, 403, "Permissions
+  needed: any of alert.provisioning:write, alert.rules.provisioning:write,
+  all of alert.rules:create, …". An Editor whose actions Grafana had
+  listed before the folder was made, and so without `folders:read` on it,
+  was refused in it: 403 "user is not authorized to access rule group … in
+  folder …" on 13.3.1, a 500 on 12.4.15's POST and PUT. So the folder is
+  checked as the rule is written, and a token that writes folder by
+  folder is unknown here. The actions are those Grafana's
+  `pkg/services/ngalert/api/authorization.go` asks of each route, alike in
+  12.4.15 and 13.3.1.
+- **Grafana keeps each identity's list a while.** A role or a folder's
+  permissions changed just before may be listed as they were; the path's
+  `reloadcache` isn't asked, and the allowlist refuses any query on it.
+- **What serve writes as each identity, asked once.** AWS: IAM's policy
+  simulator, as the role (its credentials made once, for the write's
+  service and for IAM's), at IAM's endpoint of the role's partition,
+  signed for `us-east-1`, `us-gov-west-1` or `cn-north-1`, one simulation
+  a region, the region given as `aws:RequestedRegion`, so that an SCP's
+  region guardrail (a `StringNotEquals` on it) reads as it would for the
+  write. A name given whole is asked as its ARN; a `--changes-in` prefix
+  (`NAME*`) as each alarm, or namespace, this run read under it, in the
+  role's account (one of another account serve doesn't write): a policy's
+  `Deny` or `NotResource` for some names under a prefix never matches
+  the prefix written as an ARN, so a prefix is never asked so. Twenty
+  names a simulation at most; a prefix with nothing read under it, or
+  names past twenty, are unknown. A decision with a context key the
+  simulation lacks is unknown, allowed or not. The simulator reads the
+  role's policies, its permissions boundary and the organization's SCPs,
+  not resource control policies (`API_SimulatePrincipalPolicy.html`), and
+  "for security reasons, SCP evaluation does not return missing context
+  values": an SCP's conditions on any other key than the region aren't
+  judged, as an ok says. An alarm's tags are read with the pod's own
+  identity, so `cloudwatch:ListTagsForResource` isn't asked of the role.
+- **Azure, at each scope, three lists.** The identity's permissions; the
+  deny assignments at or above the scope (`$filter=atScope()`, "all deny
+  assignments at or above the scope"), a deny that may refuse a write
+  unknown, naming it, as whom it applies to isn't read (the identity's
+  object id isn't known here), one that doesn't apply below its scope
+  passed over; and its management locks, `ReadOnly` ("can't delete or
+  update it") a problem, `CanNotDelete` a problem where a metric alert
+  may be deleted. A lock applies on the scope, above it, or on a resource
+  under it that serve may write (of a type written there, named by
+  `--changes-in`); one on another resource is passed over. Whether a
+  resource group's list holds the subscription's locks, which its
+  resources inherit, isn't documented, so the subscription's list is
+  read too, once, and its locks on the subscription itself judged. Each
+  list's next page is followed on the same host and path alone. A name
+  given whole is of the type this run read it as; one not read, or a
+  prefix, may be of any type, `metricAlerts/delete` needed where a metric
+  alert may be named. Reading the three lists takes
+  `Microsoft.Authorization/permissions/read`, `denyAssignments/read` and
+  `locks/read`; without one, unknown.
+- **A deny assignment below the group.** `atScope()` gives those at or
+  above the scope asked, and a deployment stack puts its deny on the
+  resources it manages: one on an alert rule itself is never in its
+  resource group's list. So each alert rule and rule group `--changes-in`
+  names that this run read is asked too, its own `atScope()`, ten at
+  most; past ten, or where an entry names nothing this run read (a
+  prefix with nothing under it, a name not read), unknown. Each deny is
+  said once, whichever list gives it.
+- **Azure's linked reads.** "Read permission on the target resource of
+  the alert rule" and "on any action group associated to the alert rule"
+  (alerts-create-metric-alert-rule): for each alert rule and rule group
+  `--changes-in` names that this run read, every resource its document
+  names beside itself (a resource id under a resource group) is asked
+  at itself, ten at most, for its provider's `.../read`. Not given there
+  is a problem for a metric alert's; for another kind's, whose
+  documentation says nothing of it, unknown. An id it names that isn't a
+  resource under a resource group (the subscription itself, a
+  management group) or is past 1 KB isn't asked, and is unknown, never
+  passed over; past ten, unknown. Azure Monitor may also ask for
+  `Microsoft.Insights/metricDefinitions/read` on a metric alert's target,
+  which its documentation doesn't settle: not asked, so an ok doesn't
+  cover it.
+- **Google Cloud: one `testIamPermissions` a project named**, with a
+  token of the `cloud-platform.read-only` scope, impersonated as serve's
+  is, or the pod's own without a service account; it needs no permission
+  of its own. Whether it counts IAM deny policies, principal access
+  boundaries or VPC Service Controls isn't documented (testing-permissions
+  says it gives "the set of permissions that the caller is allowed"), so
+  an ok says those aren't judged.
+- **Google's writes as the pod's own identity** were made with the
+  reads' token, of `monitoring.read`, which a write is refused with, since
+  0.24.0: without `--changes-google-service-account`, serve now makes the
+  pod's write credential of its own, of the `monitoring` scope
+  (`cloud.Writes`), and preflight takes and asks about that identity.
+- **OCI: as the user, read through Identity in the config's region**,
+  for each alarm `--changes-in` names that this run read: `manage alarms`
+  where it is, and `read metrics` where its metric is
+  (`metricCompartmentId`: "the compartment containing the metric being
+  evaluated by the alarm"), or in the tenancy where it is read in the
+  subtree (`metricCompartmentIdInSubtree` "requires the user to have
+  tenancy-level permissions"). Only an `ACTIVE` membership, group and
+  policy count. Groups in an identity domain other than Default aren't
+  read, and a statement naming one is unknown; past twenty groups, or a
+  thousand memberships, a statement of a group not read is unknown.
+- **OCI's policies, read conservatively.** A statement is read as `Allow
+  SUBJECTS to VERB RESOURCE-TYPE in LOCATION [where CONDITIONS]`: subjects
+  `group NAME`, `group id OCID`, `group 'DOMAIN'/'NAME'`, `any-user`,
+  `any-group` (and `dynamic-group` and `service`, which are never the
+  user), the verbs `inspect`, `read`, `use` and `manage`, the resource
+  types `alarms`, `metrics` and `all-resources`, and `in tenancy`, `in
+  compartment id OCID` or `in compartment NAME` or `A:B`, from where the
+  policy is attached: a path from one under it, as OCI's documentation
+  has it, or the compartment itself by its name, which is unknown, as a
+  compartment under it of the same name can't be ruled out without
+  listing its children. Access given in a compartment is given under it. A statement with `where` is never a
+  grant: what it would give is "unknown: a policy with a condition". So is
+  a list of permissions in braces, a group of another domain or one past
+  the twenty read, a `deny` that names what is needed, and a statement
+  that doesn't read so (but for `define`, `endorse` and `admit`, which
+  give the user nothing here) when it names alarms, metrics or
+  all-resources. For a metric read in the subtree, only a grant in the
+  tenancy covers every compartment, and the policies of its compartments
+  aren't read: anything less is unknown. The chart's least-privilege
+  policy for OCI has a condition, so it reads as unknown.
+- **What is asked is allowed as it is learned, and counted by its own
+  API.** The asks the flags say (Grafana's list, each project's, the
+  role's) are allowed as `allowAll` starts; each of Azure's as it is
+  asked, and its next page and OCI's compartments, groups and policies
+  when learned: each before the wider reads that hold some of them too,
+  so it is counted by its own API. For Azure, that allow is made from the
+  same URL just before it is sent, and step 1's read of a subscription's
+  `--alarms` already lets any GET under the subscription through: it
+  counts, and doesn't guard. What guards Azure's asks is that each is a
+  GET, to Resource Manager's host as `--alarms` or `--ruler` gives it, of
+  a path that ends in one of the three `Microsoft.Authorization` lists
+  (`permissions`, `denyAssignments`, `locks`), built here; the resources
+  an alert rule names come from Azure's own answer, and are asked only as
+  a resource's id under a resource group, 1 KB at most.
+- **Bounded, by count.** Grafana's folders are counted once each, ten
+  thousand at most (a list of 4 MB is some 190,000); OCI's memberships
+  once each, a thousand at most, and only the twenty groups read are
+  hidden.
+- **Redacted, each by what it is.** The role's ARN and account, the
+  service account, the client ID and `AZURE_TENANT_ID`, the OCI tenancy,
+  user, groups and compartments everywhere; the role's name, the part of
+  the service account before its `@`, the groups' and compartments'
+  names, a project and a resource group, short names that may be words of
+  the report's own, only in what a server said. What the URLs of `--alarms`
+  and `--ruler` name inside them (an OCI compartment, an Azure
+  subscription, an Amazon workspace; a Google project and a resource
+  group in what a server said) is redacted with `--changes` or not: step
+  1 printed them where an error repeated the URL with more beside it. An
+  API's error is said by its code and message, before the 200 bytes cut.
+  What a cloud says is redacted as the run redacts first, so that what it
+  knows is said by what it is, then without any other ARN that names an
+  account (the pod's own role, another account's), GUID (an Azure object
+  id), or number of ten digits or more, or written `1234-5678-9012`,
+  whatever is beside it but another digit (`acct_123456789012`, a Google
+  project's number): a cloud's error names those beside what was asked.
+  So is an identity that couldn't be taken (STS's `AssumeRole`, Microsoft
+  Entra, IAM Credentials, in `changes.cloud`). Lapilli's own words aren't
+  so read.
+- **`changes.cloud` is ok once the identity is taken**: what it may
+  write is each cloud's item. `--offline` takes no identity, reads no
+  config file of OCI's, and says each item unknown.
+
 ## Steps
 
 1. The command: serve's flags, the rules, the history's probe and the
@@ -586,5 +811,5 @@ can do:
    ledger, the source check and the test by count; the planner held to
    `Run` by a test.
 2. Grafana's permissions, once OSS is checked; the clouds' that can be
-   asked.
+   asked: all four (built, "As built (step 2)").
 3. The backtest lane ([backtests.md](backtests.md)), when it is built.
