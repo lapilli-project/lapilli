@@ -7,8 +7,9 @@
 Pull request backtests through `lapilli serve`: a CI job sends a pull
 request's rules to serve, which replays them with its own access to the
 history and judges them by its record, so CI holds no metric credentials;
-the backtest recipes and the action send them so. The rules list and the
-Korean as 0.60.0 read on a real deployment.
+the backtest recipes and the action send them so. A report's `firings`
+section, and the posts to the webhook signed (`--notify-webhook-secret-file`).
+The rules list and the Korean as 0.60.0 read on a real deployment.
 
 Before upgrading:
 - **Ledger schema 023**, after 022, even without `--backtest-listen`:
