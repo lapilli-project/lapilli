@@ -78,6 +78,7 @@ type Keys struct {
 
 	mu    sync.Mutex
 	keys  []jose.JSONWebKey
+	short []string  // the kids of RSA keys left out, under MinRSABits
 	at    time.Time // when keys were fetched
 	tried time.Time // when they were last asked for
 	// fetching is held while they are fetched: one fetch at a time.
@@ -133,6 +134,12 @@ func (k *Keys) VerifySignature(ctx context.Context, raw string) ([]byte, error) 
 		if p, err := jws.Verify(&keys[i]); err == nil {
 			return p, nil
 		}
+	}
+	k.mu.Lock()
+	short := kid != "" && slices.Contains(k.short, kid)
+	k.mu.Unlock()
+	if short {
+		return nil, fmt.Errorf("the identity provider signed with an RSA key under %d bits, which isn't taken", MinRSABits)
 	}
 	return nil, errors.New("no key of the identity provider's verifies the signature")
 }
@@ -198,7 +205,7 @@ func (k *Keys) refetch(ctx context.Context, tried time.Time) ([]jose.JSONWebKey,
 	// a fetch others wait for.
 	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fetchTimeout)
 	defer cancel()
-	fresh, err := k.fetch(fctx)
+	fresh, short, err := k.fetchSet(fctx)
 	if err != nil {
 		if len(held) > 0 {
 			return held, nil // keep using those held
@@ -206,7 +213,7 @@ func (k *Keys) refetch(ctx context.Context, tried time.Time) ([]jose.JSONWebKey,
 		return nil, fmt.Errorf("the identity provider's keys: %w", err)
 	}
 	k.mu.Lock()
-	k.keys, k.at = fresh, now
+	k.keys, k.short, k.at = fresh, short, now
 	k.mu.Unlock()
 	return fresh, nil
 }
@@ -222,17 +229,25 @@ func (k *Keys) Fetch(ctx context.Context) (int, error) {
 
 // fetch reads the keys at the URL: public keys of a key pair alone.
 func (k *Keys) fetch(ctx context.Context) ([]jose.JSONWebKey, error) {
+	keys, _, err := k.fetchSet(ctx)
+	return keys, err
+}
+
+// fetchSet reads the keys at the URL, and the kids of the RSA keys it
+// leaves out for being under MinRSABits, maxKeys of them at most.
+func (k *Keys) fetchSet(ctx context.Context) ([]jose.JSONWebKey, []string, error) {
 	b, err := get(ctx, k.client, k.url, keysBody)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var set struct {
 		Keys []json.RawMessage `json:"keys"`
 	}
 	if err := json.Unmarshal(b, &set); err != nil {
-		return nil, fmt.Errorf("%s: not a JWKS: %v", k.url, err)
+		return nil, nil, fmt.Errorf("%s: not a JWKS: %v", k.url, err)
 	}
 	var out []jose.JSONWebKey
+	var shortKids []string
 	short := 0
 	for _, raw := range set.Keys {
 		var key jose.JSONWebKey
@@ -242,7 +257,9 @@ func (k *Keys) fetch(ctx context.Context) ([]jose.JSONWebKey, error) {
 		switch pub := key.Key.(type) {
 		case *rsa.PublicKey:
 			if pub.N.BitLen() < MinRSABits {
-				short++
+				if short++; key.KeyID != "" && len(shortKids) < maxKeys {
+					shortKids = append(shortKids, key.KeyID)
+				}
 				continue
 			}
 		case *ecdsa.PublicKey, ed25519.PublicKey:
@@ -256,11 +273,11 @@ func (k *Keys) fetch(ctx context.Context) ([]jose.JSONWebKey, error) {
 	}
 	if len(out) == 0 {
 		if short > 0 {
-			return nil, fmt.Errorf("%s: no public keys (%d RSA under %d bits, which aren't taken)", k.url, short, MinRSABits)
+			return nil, nil, fmt.Errorf("%s: no public keys (%d RSA under %d bits, which aren't taken)", k.url, short, MinRSABits)
 		}
-		return nil, fmt.Errorf("%s: no public keys", k.url)
+		return nil, nil, fmt.Errorf("%s: no public keys", k.url)
 	}
-	return out, nil
+	return out, shortKids, nil
 }
 
 // MinRSABits is the shortest RSA key a signature is verified with: NIST's

@@ -60,11 +60,11 @@
 ### Changed
 
 - **An RSA key under 2048 bits verifies no signature**: one in an identity
-  provider's JWKS (`--oidc-issuer`'s, `--proxy-jwt-jwks`) isn't taken, and
-  a set of such keys alone is refused saying so; an SNS signing
-  certificate's key under it proves no message (403). Go takes 1024;
-  NIST's floor through 2030 is 2048. A load balancer's keys are P-256, as
-  before.
+  provider's JWKS (`--oidc-issuer`'s, `--proxy-jwt-jwks`) isn't taken: a
+  set of such keys alone is refused saying so, and so is a token one of
+  them signed, beside longer keys; an SNS signing certificate's key under
+  it proves no message (403). Go takes 1024; NIST's floor through 2030 is
+  2048. A load balancer's keys are P-256, as before.
 - **`changes.cloud` is ok once the identity is taken.** It was unknown, as
   what the identity may write wasn't asked; that is now each cloud's item.
 - **`lapilli preflight` redacts what the URLs of `--alarms` and `--ruler`
