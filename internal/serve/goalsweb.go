@@ -81,10 +81,14 @@ type goalHead struct {
 	Current bool
 }
 
+// goalsDocURL is where every measure a goal can take is listed.
+const goalsDocURL = "https://github.com/lapilli-project/lapilli/blob/main/docs/design/goals.md#what-a-goal-is"
+
 type goalsView struct {
 	// Empty says no goal is declared; NoneFor, none of the team picked or
-	// of everyone.
+	// of everyone. Doc is where every measure a goal takes is listed.
 	Empty, NoneFor bool
+	Doc            string
 	Team           teamFilter
 	Weeks          []goalHead // the earliest first
 	Last           time.Time
@@ -117,7 +121,7 @@ func (s *Server) goalsPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var v goalsView
+	v := goalsView{Doc: goalsDocURL}
 	var team *ledger.Team
 	v.Team, team = s.teamFilter(o, r.URL.Query().Get("team"))
 	if len(gs) == 0 {

@@ -182,7 +182,7 @@ entries. */}}
 <textarea id="signal-{{.Was}}-expr" name="expr" rows="3" maxlength="4096" spellcheck="false" required>{{$f.Expr}}</textarea></div>
 <div class="field"><label for="signal-{{.Was}}-for">{{t "How long it must last"}}</label> <input id="signal-{{.Was}}-for" name="for" value="{{.For}}" size="10"></div>
 <fieldset class="field"><legend>{{t "Matched on"}}</legend>
-<label class="check"><input type="radio" name="match-mode" value="effect"{{if .Follows}} checked{{end}}> {{t "the match in effect"}}</label>
+<label class="check"><input type="radio" name="match-mode" value="effect"{{if .Follows}} checked{{end}}> {{t "the match in effect"}} <span class="quiet">({{with .InEffect}}<code><bdi>{{.}}</bdi></code>{{else}}{{t "no label"}}{{end}})</span></label>
 <label class="check"><input type="radio" name="match-mode" value="labels"{{if not .Follows}} checked{{end}}> {{t "these labels, comma-separated, none for no label"}}</label>
 <input name="match" value="{{.Match}}" size="30" aria-label="{{t "Labels to match on"}}"></fieldset>
 <label class="check"><input type="checkbox" name="record" value="1"{{if .Record}} checked{{end}}> {{t "Keeps the record: read all of a week, it says nothing it measures was hurt"}}</label>{{end}}

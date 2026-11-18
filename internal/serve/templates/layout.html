@@ -55,7 +55,7 @@ nothing stands out on the overview. */}}
 {{define "bottom"}}
 </main>
 <footer>lapilli{{with .Status.Version}} {{.}}{{end}} · {{t "times in %s" .Status.Zone}}{{with .Status.User}} · {{t "you are %s, %s" (who .) (t $.Status.Role)}}{{else}}{{if .Status.ReadOnly}} · {{t "read-only"}}{{end}}{{end}}{{if .Status.SignOut}}
-<form class="signout" method="post" action="/auth/logout"><button type="submit">{{t "Sign out"}}</button></form>{{end}}</footer>
+<form class="signout" method="post" action="/auth/logout"><button type="submit" class="quiet-button">{{t "Sign out"}}</button></form>{{end}}</footer>
 </div>
 </body>
 </html>

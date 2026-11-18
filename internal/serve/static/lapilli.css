@@ -223,6 +223,7 @@ table.weeks th, table.weeks td { padding: .5rem .4rem; }
 table.weeks th { white-space: normal; word-break: keep-all; font-size: .85rem; }
 table.weeks td.t { white-space: normal; }
 table.weeks td.t .d { white-space: nowrap; }
+table.weeks td.t .tag { white-space: normal; }
 
 /* The dashboard. Chart colours were checked for colour blindness and
    contrast against the card: caught and nothing separate by ΔE 15 or more,
@@ -561,6 +562,8 @@ section.todo div.row { display: flex; flex-wrap: wrap; align-items: center; gap:
 section.todo form { margin: 0; }
 p.moved { display: none; }
 p.moved:target { display: block; padding: .6rem 1rem; background: var(--accent-soft); border-radius: 12px; }
+pre.example { margin: .4rem 0 .8rem; padding: .6rem .8rem; background: var(--card); border: 1px solid var(--line-strong); border-radius: 10px; }
+pre.example code { background: none; padding: 0; font-size: inherit; }
 pre.diff { margin: .4rem 0 1rem; padding: .6rem .8rem; background: var(--card); border: 1px solid var(--line-strong); border-radius: 10px; font-family: var(--mono); }
 /* A line a span, each ending in its own newline: copied, the diff is its
    lines alone, with no blank line between. */

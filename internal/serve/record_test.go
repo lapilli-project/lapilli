@@ -127,8 +127,8 @@ func TestFacetsNoRecord(t *testing.T) {
 	}
 
 	_, body, _ = get(t, h, "/rules/R00")
-	if !strings.Contains(html.UnescapeString(body), "not known: no incident written down to judge the firings by") {
-		t.Error("/rules/R00: its precision isn't said to be unknown")
+	if b := html.UnescapeString(body); !strings.Contains(b, "not known: no record") || !strings.Contains(b, "No incident was written down in the weeks it fired or the two weeks before") {
+		t.Error("/rules/R00: its precision isn't said to be unknown, and why, once")
 	}
 
 	_, out, err := s.toolRules(ctx, nil, rulesIn{Weeks: 4})

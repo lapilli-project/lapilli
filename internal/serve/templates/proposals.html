@@ -23,7 +23,7 @@
 {{if .On}}<p class="quiet">{{t "%d approvals each; at most %d deletions a day and %d changes an hour." .Need .Limits.Deletions .Limits.Changes}}</p>{{end}}
 {{if and .On $.Status.Admin}}<form method="post" action="/settings/changes">{{if .Paused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>
 {{else}}{{with .PauseOff}}<p>{{template "off" .}}</p>{{end}}{{end}}
-{{template "pickfacets" .Pick}}
+{{if .Total}}{{template "pickfacets" .Pick}}{{end}}
 {{with .StaleLink}}<p class="quiet"><a href="{{.}}">{{t "Show the stale ones alone"}}</a></p>{{end}}
 {{if .Lines}}{{template "proposallist" (on $ .Lines)}}{{end}}
 {{if .More}}<p class="quiet">{{t "The first %d are shown: pick fewer to see the rest." (len .Lines)}}</p>{{end}}

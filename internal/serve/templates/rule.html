@@ -17,11 +17,12 @@
 
 {{with .Signals}}<p class="rule-signals" id="signals">{{if .Entry}}{{t "Rule entry #%d: judged against the windows of %s alone." .Entry (signalsOn .Against)}}{{else}}{{t "Judged against every impact signal's windows: %s." (signalsOn .Against)}}{{end}}
 {{if .NoAlert}} {{t "No alert yet: which of them its record waits for comes with each alert, by its labels."}}{{else if .Never}} {{t "No record by reading them: one of %s keeps none yet." (join .Waits ", ")}}{{else if .From}} {{t "No record by reading them before %s: it waits for %s." (day $loc .FromAt) (join .Waits ", ")}}{{else if not .Waits}} {{t "None of them keeps the record: no record by reading them."}}{{end}}</p>
-{{end}}<p class="period">{{if eq .Period 1}}{{t "The last week, from %s." (day $loc .From)}}{{else}}{{t "The last %d weeks, from %s." .Period (day $loc .From)}}{{end}}{{if .Panel.Beside}} {{t "Beside each number, how it changed from as long before."}}{{end}}</p>
+{{end}}<p class="period">{{if eq .Period 1}}{{t "The last week, from %s." (day $loc .From)}}{{else}}{{t "The last %d weeks, from %s." .Period (day $loc .From)}}{{end}}{{if .Panel.Beside}} {{t "Beside each number, how it changed from as long before."}}{{end}}</p>{{if .NoRecord}}
+<p class="notice status-unknown"><span class="sign" aria-hidden="true">?</span> {{t "No incident was written down in the weeks it fired or the two weeks before: a firing that caught nothing can't be told from one nobody wrote down, so its precision isn't known and it isn't called noisy."}} <a href="{{$.Link "/incidents"}}">{{t "Write incidents down"}}</a></p>{{end}}
 {{with .Panel}}<dl class="panel">
 <div><dt><details class="def"><summary>{{t "Precision"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "Firings that caught an incident, of all its firings."}}</p></details></dt>
 <dd class="big">{{.Precision}}{{template "delta" .PrecisionBy}}</dd>
-<dd>{{if $v.NoRecord}}{{t "not known: no incident written down to judge the firings by"}}{{else if .Firings}}{{t "%d of %d caught something" $v.White .Firings}}{{else}}{{t "no firing"}}{{end}}</dd></div>
+<dd>{{if $v.NoRecord}}{{t "not known: no record"}}{{else if .Firings}}{{t "%d of %d caught something" $v.White .Firings}}{{else}}{{t "no firing"}}{{end}}</dd></div>
 <div><dt><details class="def"><summary>{{t "Firings"}} <span class="q" aria-hidden="true">?</span></summary><p>{{t "The times it fired and was judged; those a quiet window excused are counted apart."}}</p></details></dt>
 <dd class="big">{{.Firings}}{{template "delta" .FiringsBy}}</dd>
 <dd>{{if .Unjudged}}{{t "%d caught nothing, %d not judged, %d excused" .Nothing .Unjudged .Excused}}{{else}}{{t "%d caught nothing, %d excused" .Black .Excused}}{{end}}</dd></div>
@@ -193,7 +194,7 @@ lands here, and is shown the way to it. */}}
 {{if .Spare}}<p class="hint">{{t "Another rule caught every one of them as soon, at the same severity or above: taken away, none would have been missed or caught later."}}</p>{{end}}
 {{if .Caught}}<div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Incident"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "First caught by"}}</th></tr></thead>
-<tbody>{{range .Caught}}<tr><td><a href="{{$.Incident .ID}}">{{.ID}}</a> {{.Title}}</td><td class="t">{{at $loc .Start}}</td><td>{{.First}}</td></tr>{{end}}</tbody>
+<tbody>{{range .Caught}}<tr><td><a href="{{$.Incident .ID}}">{{.ID}}</a> {{.Title}}</td><td class="t">{{at $loc .Start}}</td><td>{{.First}}{{with .Earlier}}<br><span class="quiet">{{t "%s caught it first, noisy that week" .}}</span>{{end}}</td></tr>{{end}}</tbody>
 </table></div>{{else}}<p class="quiet">{{t "None."}}</p>{{end}}
 </section>
 

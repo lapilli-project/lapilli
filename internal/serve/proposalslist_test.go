@@ -184,9 +184,18 @@ func TestProposalsFacets(t *testing.T) {
 		t.Errorf("clear: %q, active %v", v.Pick.Clear, v.Pick.Active)
 	}
 	// The form: none ticked is all of them, not the open ones.
-	_, body, _ := ui(t, s.Handler(), http.MethodGet, "/proposals?team=payments", cy, "", nil)
-	if !strings.Contains(body, `<form method="get" action="/proposals" class="facets pick" aria-label="Filters"><input type="hidden" name="team" value="payments"><input type="hidden" name="state" value="all">`) {
-		t.Error("the form doesn't keep the team and say all")
+	_, body, _ := ui(t, s.Handler(), http.MethodGet, "/proposals", cy, "", nil)
+	if !strings.Contains(body, `<form method="get" action="/proposals" class="facets pick" aria-label="Filters"><input type="hidden" name="state" value="all">`) {
+		t.Error("the form doesn't say all")
+	}
+	// A team with no proposal has no filters to pick by, only the bar's
+	// team, and says why the list is empty.
+	_, body, _ = ui(t, s.Handler(), http.MethodGet, "/proposals?team=payments", cy, "", nil)
+	if v := proposalsFor(t, s, "team=payments"); v.Total != 0 {
+		t.Fatalf("payments has %d proposals: the rules aren't known to the ledger, so none", v.Total)
+	}
+	if strings.Contains(body, `class="facets pick"`) || !strings.Contains(body, "No proposals of this team yet.") || !strings.Contains(body, `href="/proposals?team=">Every team&#39;s</a>`) {
+		t.Error("a team with no proposal is offered filters, or isn't told why there are none and where every team's are")
 	}
 	if !strings.Contains(body, `<label>Team <select name="team">`) {
 		t.Error("no team in the bar")

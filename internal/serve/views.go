@@ -1186,7 +1186,7 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 		return ruleView{}, err
 	}
 	for _, in := range caught {
-		v.Caught = append(v.Caught, s.incidentLine(lang(r), in, t.state(in, ledger.Week(s.l.Day(in.Start)))))
+		v.Caught = append(v.Caught, s.incidentLine(lang(r), in, t))
 	}
 	fs, err := s.l.Firings(ctx, ledger.FiringQuery{From: time.Unix(0, 0), To: s.now().Add(time.Hour), Rule: name, Limit: 50})
 	if err != nil {
@@ -1329,8 +1329,19 @@ type incidentLine struct {
 	// Status is caught, noisy (only noisy rules caught it) or missed; or
 	// why an impact window doesn't count: covered, confirmed, dismissed.
 	Status string
-	First  string
-	Mine   bool // written in the UI, so it can be changed there
+	// First is the rule its state rests on, with its delay: of one
+	// caught, the first to catch it of the rules that weren't noisy that
+	// week, the rule its Lead is of; of one caught only by noisy rules,
+	// the first of those. Earlier is, of one caught, a noisy rule that
+	// caught it before First did, the first of them, said apart so that
+	// it doesn't read as the catch; and Catches are all that caught it,
+	// in order, each with whether it was noisy that week.
+	First   string
+	Earlier string
+	Catches []catchLine
+	// lead is, of one caught, how long before its start First fired.
+	lead time.Duration
+	Mine bool // written in the UI, so it can be changed there
 	// Lead is, for one caught, how long before its start the first alert
 	// of a rule that isn't noisy came, or after; Nearly, for one that
 	// wasn't, the rule that nearly caught it, and NearlyMore how many more
@@ -1531,7 +1542,19 @@ func (sp *spans) from(node, nlo, nhi, lo, hi int, a time.Time) int {
 	return sp.from(2*node+1, mid, nhi, lo, hi, a)
 }
 
-func (s *Server) incidentLine(lang string, in ledger.Incident, state string) incidentLine {
+// catchLine is a rule that caught an incident, as its page lists it.
+type catchLine struct {
+	verdict.Catch
+	Noisy bool // noisy the week the incident started
+}
+
+// incidentLine is an incident as it is listed, judged by t as of the week
+// it started in, against everyone's rules, as the incidents page judges
+// it: a rule's page kept to a team's tallies (tallies.only) says the same
+// of it.
+func (s *Server) incidentLine(lang string, in ledger.Incident, t *tallies) incidentLine {
+	w := ledger.Week(s.l.Day(in.Start))
+	state := t.stateAll(in, w)
 	in = shown(lang, in)
 	l := incidentLine{Incident: in, Status: state, Mine: in.Origin == "ui"}
 	if in.Origin == "impact" && !in.Counts {
@@ -1542,9 +1565,21 @@ func (s *Server) incidentLine(lang string, in ledger.Incident, state string) inc
 			l.Status = in.State
 		}
 	}
-	if len(in.CaughtBy) > 0 {
-		c := in.CaughtBy[0]
-		l.First = c.Rule + " " + verdict.Delay(c.Delay)
+	first := -1
+	for i, c := range in.CaughtBy {
+		noisy := t.noisyAll(w, t.id(c.Rule))
+		l.Catches = append(l.Catches, catchLine{Catch: c, Noisy: noisy})
+		if first < 0 && (!noisy || state != "caught") {
+			first = i
+		}
+	}
+	if first >= 0 {
+		c := in.CaughtBy[first]
+		l.First, l.lead = c.Rule+" "+verdict.Delay(c.Delay), -c.Delay
+		if first > 0 {
+			e := in.CaughtBy[0]
+			l.Earlier = e.Rule + " " + verdict.Delay(e.Delay)
+		}
 	}
 	return l
 }
@@ -1659,20 +1694,14 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 		if v.Signal != "" && in.Signal != v.Signal {
 			continue
 		}
-		w := ledger.Week(s.l.Day(in.Start))
-		line := s.incidentLine(l, in, t.state(in, w))
+		line := s.incidentLine(l, in, t)
 		if in.Counts {
 			v.Judged.Total++
 			switch line.Status {
 			case "caught":
 				v.Judged.Caught++
-				for _, c := range in.CaughtBy {
-					if !t.noisy(w, t.id(c.Rule)) {
-						line.Lead = leadText(l, -c.Delay)
-						leads = append(leads, -c.Delay)
-						break
-					}
-				}
+				line.Lead = leadText(l, line.lead)
+				leads = append(leads, line.lead)
 			case "noisy":
 				v.Judged.NoisyOnly++
 			default:
@@ -1794,7 +1823,7 @@ func (s *Server) incidentPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := incidentView{incidentLine: s.incidentLine(lang(r), in, t.state(in, ledger.Week(s.l.Day(in.Start)))), Labels: labelText(in.Labels), Match: strings.Join(t.o.Match, ", ")}
+	v := incidentView{incidentLine: s.incidentLine(lang(r), in, t), Labels: labelText(in.Labels), Match: strings.Join(t.o.Match, ", ")}
 	o, err := s.owners(ctx)
 	if err != nil {
 		return nil, err
@@ -1871,7 +1900,7 @@ func (s *Server) signalOf(ctx context.Context, t *tallies, in ledger.Incident) (
 		for _, c := range w.CaughtBy {
 			x.Caught = append(x.Caught, c.Rule)
 		}
-		x.Status = s.incidentLine("en", w, t.state(w, ledger.Week(s.l.Day(w.Start)))).Status
+		x.Status = s.incidentLine("en", w, t).Status
 		v.With = append(v.With, x)
 		v.Together = v.Together || w.State == "" && in.State == ""
 	}

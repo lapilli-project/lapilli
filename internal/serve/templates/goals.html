@@ -1,7 +1,15 @@
 {{define "goals"}}{{$title := t "Goals"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
 <h1>{{$title}}</h1>
-<p class="lede">{{t "What the alerts are held to, as --config declares under goals: each whole week met, missed or not known, from the numbers /api/v1/summary gives, as they read now. The week under way is shown as it stands. A goal is changed in values, not here."}}</p>
-{{if .Empty}}{{template "empty" (emptyOf "first" "No goals are declared" "Declare them in --config, under goals: each a bound on one of the summary's numbers, for everyone, for a team, or for each team (docs/design/goals.md).")}}
+<p class="lede">{{t "What the alerts are held to: each whole week met, not met or not known, as its numbers read now, and the week under way as it stands. Goals are declared in --config, under goals:, and changed there, not here."}}</p>
+{{if .Empty}}<div class="empty empty-first"><p class="empty-title">{{t "No goals are declared"}}</p><p class="quiet">{{t "A goal is a bound on one of the weekly numbers, for everyone, for a team or for each team. Declare goals in --config (serve.config in the Helm chart's values), under goals:, for example:"}}</p>
+<pre class="example"><code>goals:
+  - name: critical-caught
+    measure: critical.share_caught
+    at_least: 0.8
+  - name: none-missed
+    measure: incidents.missed
+    at_most: 0</code></pre>
+<p class="row"><a href="{{.Doc}}">{{t "Every number a goal can be held to"}}</a></p></div>
 {{else if .NoneFor}}{{template "empty" (emptyOf "notfound" "No goal is of this team, or of everyone" "A team's goals are those --config declares for it, and those declared for each team, with team set to *.")}}
 {{else}}
 <p class="quiet">{{t "The last whole week is the week of %s." (day $loc .Last)}} {{t "✓ met, ✕ not met, ? not known, … so far."}}</p>

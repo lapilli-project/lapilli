@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+What the pages showed in use on a real deployment: the incidents list named
+a noisy rule beside another rule's lead, Korean read "caught" as noise, and
+a few pages said more than they needed to. No schema change.
+
+### Fixed
+
+- **The incidents list named a noisy rule as the catch** (0.31.0 to
+  0.58.0). When a noisy rule fired first and one that isn't noisy after
+  it, the Caught column named the noisy rule, while the lead and the state
+  beside it were the other's. It now names the rule they rest on, the
+  first that isn't noisy that week; a noisy rule that fired before it is
+  said apart, beneath. An incident's page marks each rule that caught it
+  and was noisy that week, and a rule's page lists the incidents it caught
+  by the same rule, a team picked or not.
+- **Korean and Japanese said the rules list's refired weeks backwards**
+  (0.31.0 to 0.58.0): "of 0 whole weeks, 3" for 3 of them, where 0 had one.
+- **The overview's table of the weeks was wider than its box** in Spanish
+  on a laptop's screen: a long tag in its first column now wraps.
+
 ### Changed
 
 - **The docs are pages of their own**, in docs/ and at
@@ -17,6 +36,23 @@
   chart's README and the recipes' to a file or a heading that is there.
   The help of `--markdown` and `--on-call` names the page instead of the
   README.
+- **Korean says 정탐 and 탐지, not 잡음.** 잡음 alone reads as noise. The
+  columns of firings say ○ 정탐 and ● 오탐, as the overview's opening names
+  them; the incidents list's column is 탐지한 규칙, and an incident caught
+  is ✓ 탐지.
+- **A rule's page says once why its precision isn't known.** With no
+  record for the weeks it fired, a notice above its numbers says why, with
+  where to write incidents down, and the card says only "not known: no
+  record", as the overview has it.
+- **Proposals.** With none, the page offers no filters; a team with none
+  says so, with a link to every team's. With none waiting or under way, it
+  says so, with a link to the closed ones and nothing to clear.
+- **Goals.** The page no longer names the API it reads; with no goal
+  declared, it shows two as an example, with a link to every number a goal
+  can be held to.
+- **Settings.** A named signal's choice to follow the match in effect says
+  what that match is.
+- **Sign out** is a quiet button, no longer the boldest on the page.
 
 ## [0.58.0] - 2026-11-18
 

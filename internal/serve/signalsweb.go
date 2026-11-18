@@ -143,6 +143,9 @@ type signalForm struct {
 	Follows              bool
 	Match                string
 	Record               bool
+	// InEffect is the match in effect, --match's, said beside the choice
+	// to follow it: "" for no label.
+	InEffect string
 }
 
 // signalFormOf reads a signal's form, posted or tried.
