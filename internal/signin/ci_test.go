@@ -314,3 +314,50 @@ func TestCIDiscoveryAlone(t *testing.T) {
 		t.Errorf("asked %d times", n)
 	}
 }
+
+// DiscoverKeys reads the issuer's discovery document as a token's first
+// check does, under its caller's context, keeping nothing; Usable fetches
+// the keys under it too, and counts those that verify a token of an
+// algorithm the document names. A context already done sends nothing.
+func TestCIDiscoverKeys(t *testing.T) {
+	idp, ci, _ := newCI(t, "/api/actions")
+	keys, err := ci.DiscoverKeys(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keys.URL() != idp.Issuer+"/.well-known/jwks" || strings.Join(keys.Algs(), ",") != "RS256" || idp.Discoveries.Load() != 1 || idp.KeyFetches.Load() != 0 {
+		t.Fatalf("%s %v, %d discoveries, %d key fetches", keys.URL(), keys.Algs(), idp.Discoveries.Load(), idp.KeyFetches.Load())
+	}
+	if n, err := keys.Usable(context.Background()); n != 1 || err != nil || idp.KeyFetches.Load() != 1 {
+		t.Errorf("%d usable, %v, %d fetches", n, err, idp.KeyFetches.Load())
+	}
+	// Kept nothing: asked again, asked again.
+	if _, err := ci.DiscoverKeys(context.Background()); err != nil || idp.Discoveries.Load() != 2 {
+		t.Errorf("%v, %d discoveries", err, idp.Discoveries.Load())
+	}
+	done, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := ci.DiscoverKeys(done); err == nil || idp.Discoveries.Load() != 2 {
+		t.Errorf("a context done: %v, %d discoveries", err, idp.Discoveries.Load())
+	}
+	if _, err := keys.Usable(done); err == nil || idp.KeyFetches.Load() != 1 {
+		t.Errorf("a context done: %v, %d key fetches", err, idp.KeyFetches.Load())
+	}
+	// The keys the algorithms named verify, by type and curve.
+	rsaKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	for _, x := range []struct {
+		algs []string
+		want int
+	}{{[]string{"RS256"}, 1}, {[]string{"PS512"}, 1}, {[]string{"ES256"}, 0}, {[]string{"EdDSA"}, 0}, {nil, 1}} {
+		k := NewKeys("", nil, x.algs, nil)
+		n := 0
+		for _, a := range k.algs {
+			if verifies(jose.JSONWebKey{Key: &rsaKey.PublicKey}, a) {
+				n = 1
+			}
+		}
+		if n != x.want {
+			t.Errorf("%v: %d", x.algs, n)
+		}
+	}
+}

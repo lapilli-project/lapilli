@@ -580,9 +580,11 @@ backtests](serve.md#pull-request-backtests) says what an entry needs.
 What an entry pins is never shown, as `[--backtest-trust's CLAIM]`. The
 second is serve's first check of a token, for the entries of that issuer:
 its discovery document's `issuer` must be the entry's to the byte, and its
-keys at the issuer's own origin, or the entry's `jwks_url`; `no key its
+keys at the issuer's own origin, or the entry's `jwks_url`. `no key its
 JWKS holds verifies a token of ALG` is a set of keys of another type, or
-an RSA key under 2048 or over 4096 bits.
+curve, than the algorithms its discovery document names; `no public
+keys` a set of none serve takes, an RSA key under 2048 or over 4096 bits
+among them.
 
 ### `hourly run`, `memory`
 
