@@ -86,8 +86,8 @@ type Backtests struct {
 	Rules int `json:"rules"`
 	Days  int `json:"days"`
 	// Changed is its requests with each rule's expression changed, the
-	// two sides' reads apart; Shared with each rule's for alone, the two
-	// sides sharing their reads.
+	// two sides' reads apart; Shared with each rule's for alone, 5 minutes
+	// longer, the two sides sharing the reads their for doesn't move.
 	Changed int `json:"changed"`
 	Shared  int `json:"shared"`
 	// ChangedDays and SharedDays are the most days of each that fit within
@@ -95,6 +95,10 @@ type Backtests struct {
 	// --max-rate, as none is refused for its time then; 0 with no rule.
 	ChangedDays int `json:"changed_days"`
 	SharedDays  int `json:"shared_days"`
+	// WeekRules and DayRules are, when the rules changed don't fit Days,
+	// how many of them changed fit Days, and a day.
+	WeekRules int `json:"week_rules,omitempty"`
+	DayRules  int `json:"day_rules,omitempty"`
 }
 
 // Backfill is a first start's: a day at a time from --backfill before now.

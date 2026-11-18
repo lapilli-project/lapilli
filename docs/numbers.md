@@ -771,7 +771,7 @@ out when it is zero or empty, as in the report.
 | `estimates.backfill` | `pieces`, `requests`, `most`, `by`, `guard`, `impact`, `rate`†, `seconds`†, `piece_hours`† |
 | `estimates.nights` | `hours`, `nights` (`-1`: never, the catch-up falls further behind), `per_night` |
 | `estimates.beside` | `day`, `by` |
-| `estimates.backtests` | `share`, `rate`†, `parallel`, `timeout_seconds`, `fit`†, `rules`, `days`, `changed`, `shared`, `changed_days`, `shared_days` (`0`: not a day fits) |
+| `estimates.backtests` | `share`, `rate`†, `parallel`, `timeout_seconds`, `fit`†, `rules`, `days`, `changed`, `shared`, `changed_days`, `shared_days` (`0`: not a day fits), `week_rules`†, `day_rules`† (how many of the rules changed fit 7 days, and a day, when all of them don't) |
 | `estimates.memory` | `from` (`alerts`, `caps`), `peak_bytes`, `request_bytes`, `limit_bytes`, `cgroup_bytes`†, `backtest_bytes`† |
 
 The ids: `rules.read`, `rules.replayable`, `rules.history`, `expressions`,

@@ -738,18 +738,30 @@ func isControl(r rune) bool { return r < 0x20 || r == 0x7f || r >= 0x80 && r < 0
 // period is a backtest's period at now: days, ending at now less
 // --settle, on --step.
 func (s *Server) backtestPeriod(days int) (time.Time, time.Time) {
-	to := s.now().Add(-s.cfg.Settle).Truncate(s.cfg.Step).UTC()
+	return backtestPeriod(s.now(), days, s.cfg.Settle, s.cfg.Step)
+}
+
+func backtestPeriod(now time.Time, days int, settle, step time.Duration) (time.Time, time.Time) {
+	to := now.Add(-settle).Truncate(step).UTC()
 	return to.Add(-time.Duration(days) * 24 * time.Hour), to
+}
+
+// BacktestRequests counts what a backtest asks h for, the rules before a
+// pull request (gone) and after it (came) replayed side by side over days
+// ending at now less settle, on step, sharing their reads as RunEach
+// shares them: what the port counts a backtest by before it is queued
+// (fits), and lapilli preflight its estimate.
+func BacktestRequests(h replay.History, gone, came []rules.Rule, days int, now time.Time, settle, step time.Duration) int {
+	from, to := backtestPeriod(now, days, settle, step)
+	return replay.PlanEach(h, [][]replay.Version{{{Rules: gone}}, {{Rules: came}}}, from, to, step).Requests
 }
 
 // fits says whether a backtest of p's rules fits in --backtest-timeout at
 // the lane's rate, and, when it doesn't, why, with how many requests it
 // needs and the days that would fit; and how many requests it needs.
 func (s *Server) fits(p *prepared) (int, string) {
-	sets := [][]replay.Version{{{Rules: p.gone}}, {{Rules: p.came}}}
 	plan := func(days int) int {
-		from, to := s.backtestPeriod(days)
-		return replay.PlanEach(s.btPort.lane, sets, from, to, s.cfg.Step).Requests
+		return BacktestRequests(s.btPort.lane, p.gone, p.came, days, s.now(), s.cfg.Settle, s.cfg.Step)
 	}
 	n := plan(p.days)
 	rate := s.btPort.rate

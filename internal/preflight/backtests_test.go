@@ -21,6 +21,7 @@ import (
 
 	jose "github.com/go-jose/go-jose/v4"
 
+	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/serve"
 )
 
@@ -477,28 +478,36 @@ func TestBacktestTrustHidden(t *testing.T) {
 }
 
 // A backtest's requests are counted as serve's port counts them before it
-// is queued: the design's case, ten rules that differ over seven days at
-// --max-rate 0.5 with a quarter for the lane, 160 requests, of which 112
-// fit in fifteen minutes, so four days; their for alone, 80, which fits.
+// is queued (serve.BacktestRequests, which fits calls): the design's case,
+// ten rules that differ over seven days at --max-rate 0.5 with a quarter
+// for the lane, 160 requests, of which 112 fit in fifteen minutes, so four
+// days, and seven of the rules for the seven; their for alone, 5m to 10m,
+// 90, as each rule's first read starts where its for says, 9 days.
 func TestEstimateBacktests(t *testing.T) {
 	c := backtestConfig()
 	c.MaxRate = 0.5
 	p := newRun(c)
 	p.estimate(context.Background(), &read{all: rulesOf(t, 12, 0)})
 	b := p.r.Estimates.Backtests
-	if b == nil || b.Rate != 0.125 || b.Fit != 112 || b.Rules != 10 || b.Days != 7 || b.Changed != 160 || b.Shared != 80 || b.ChangedDays != 4 ||
-		b.SharedDays != 10 || b.Parallel != 2 || b.TimeoutSeconds != 900 {
+	if b == nil || b.Rate != 0.125 || b.Fit != 112 || b.Rules != 10 || b.Days != 7 || b.Changed != 160 || b.Shared != 90 || b.ChangedDays != 4 ||
+		b.SharedDays != 9 || b.Parallel != 2 || b.TimeoutSeconds != 900 || b.WeekRules != 7 || b.DayRules != 10 {
 		t.Fatalf("%+v", b)
 	}
 	it := itemOf(p, "estimate.backtests")
-	if it.State != OK || !strings.Contains(it.What, "160 over 7 days") || !strings.Contains(it.What, ": 4 days fit") {
+	if it.State != OK || !strings.Contains(it.What, "160 over 7 days") || !strings.Contains(it.What, ": 4 days fit") ||
+		!strings.Contains(it.What, "5 minutes longer, 90: 9 days fit") || !strings.Contains(it.What, "7 fit over 7 days, 10 over a day") {
 		t.Errorf("%+v", it)
+	}
+	// As serve counts it: the same planner, for the same rules and now.
+	rs := changedRules(rulesOf(t, 12, 0))
+	if got := serve.BacktestRequests(p.planned(), rs, forBumped(rs), 7, p.now, c.Serve.Settle, c.Serve.Step); got != b.Shared {
+		t.Errorf("serve counts %d, preflight %d", got, b.Shared)
 	}
 	// A share and a time of the flags', as serve takes them.
 	c.Serve.BacktestShare, c.Serve.BacktestTimeout = 0.5, 30*time.Minute
 	p = newRun(c)
 	p.estimate(context.Background(), &read{all: rulesOf(t, 12, 0)})
-	if b := p.r.Estimates.Backtests; b.Rate != 0.25 || b.Fit != 450 || b.ChangedDays != 14 {
+	if b := p.r.Estimates.Backtests; b.Rate != 0.25 || b.Fit != 450 || b.ChangedDays != 14 || b.WeekRules != 0 {
 		t.Errorf("%+v", b)
 	}
 	// Without --max-rate, none is refused for its time.
@@ -508,18 +517,65 @@ func TestEstimateBacktests(t *testing.T) {
 	if b := p.r.Estimates.Backtests; b.Rate != 0 || b.Fit != 0 || b.ChangedDays != 14 || b.Changed != 160 {
 		t.Errorf("%+v", b)
 	}
-	// So low a rate that not a day of one rule fits: the port takes none.
+	// So low a rate that ten rules don't fit a day, and one rule's for over
+	// a day does: not a problem, and how many fit is said.
+	c = backtestConfig()
+	c.MaxRate = 0.05
+	p = newRun(c)
+	p.estimate(context.Background(), &read{all: rulesOf(t, 12, 0)})
+	if it, b := itemOf(p, "estimate.backtests"), p.r.Estimates.Backtests; it.State != OK || b.Fit != 11 || b.SharedDays != 0 || b.WeekRules != 0 || b.DayRules != 2 ||
+		!strings.Contains(it.What, "none fit over 7 days, 2 over a day") {
+		t.Errorf("%+v %+v", it, b)
+	}
+	// So low that one rule's for over a day doesn't fit: the port takes
+	// none.
 	c.MaxRate, c.Serve.BacktestShare = 0.001, 0.05
 	p = newRun(c)
-	p.estimate(context.Background(), &read{all: rulesOf(t, 1, 0)})
-	if it := itemOf(p, "estimate.backtests"); it.State != Problem || p.r.Estimates.Backtests.SharedDays != 0 {
+	p.estimate(context.Background(), &read{all: rulesOf(t, 12, 0)})
+	if it := itemOf(p, "estimate.backtests"); it.State != Problem || !strings.Contains(it.Why, "one rule's for changed over a day asks 3 requests") {
 		t.Errorf("%+v %+v", it, p.r.Estimates.Backtests)
+	}
+	// The rules not all read: what a backtest of them asks is unknown.
+	c = backtestConfig()
+	c.MaxRate = 0.5
+	p = newRun(c)
+	p.estimate(context.Background(), &read{all: rulesOf(t, 12, 0), failed: true})
+	if it := itemOf(p, "estimate.backtests"); it.State != Unknown || !strings.Contains(it.Why, "couldn't all be read") || p.r.Estimates.Backtests.Changed != 0 {
+		t.Errorf("%+v", it)
 	}
 	// Off, none.
 	p = newRun(config())
 	p.estimate(context.Background(), &read{all: rulesOf(t, 12, 0)})
 	if p.r.Estimates.Backtests != nil || itemOf(p, "estimate.backtests") != nil {
 		t.Error("counted without --backtest-listen")
+	}
+}
+
+// Each rule is planned with its own for: one that reaches back past
+// midnight UTC asks a day more. At 02:30 UTC, with --settle 1h, ten rules
+// for 2h start their reads at 23:30 the day before: 9 days a side, 180.
+func TestEstimateBacktestsOwnFor(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("groups:\n  - name: shop\n    interval: 1m\n    rules:\n")
+	for i := range 10 {
+		fmt.Fprintf(&b, "      - alert: Slow%d\n        expr: latency_seconds{job=\"svc%d\"} > 2\n        for: 2h\n", i, i)
+	}
+	rs, err := rules.Parse([]byte(b.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := backtestConfig()
+	c.MaxRate = 0.5
+	p := newRun(c)
+	p.now = time.Date(2026, 11, 16, 2, 30, 0, 0, time.UTC)
+	p.estimate(context.Background(), &read{all: rs})
+	if got := p.r.Estimates.Backtests; got.Changed != 180 {
+		t.Errorf("%+v", got)
+	}
+	p = newRun(c)
+	p.estimate(context.Background(), &read{all: rulesOf(t, 12, 0)})
+	if got := p.r.Estimates.Backtests; got.Changed != 160 {
+		t.Errorf("for 5m: %+v", got)
 	}
 }
 

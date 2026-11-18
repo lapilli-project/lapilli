@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"lapilli.dev/internal/prom"
-	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/serve"
 	"lapilli.dev/internal/signin"
@@ -365,7 +365,9 @@ func itemByID(p *run, id string) *Item {
 // changedRules are the rules the estimate's backtest changes: ten of those
 // read that the port takes, in Prometheus's format and replayed, each of
 // an expression of its own, so that none shares a read with another, in
-// the order read.
+// the order read, each with its own for and keep_firing_for, which start
+// its reads earlier: one that reaches back past midnight UTC asks a day
+// more.
 func changedRules(rs []rules.Rule) []rules.Rule {
 	var out []rules.Rule
 	seen := map[string]bool{}
@@ -382,14 +384,24 @@ func changedRules(rs []rules.Rule) []rules.Rule {
 	return out
 }
 
+// forBumped are rs with their for 5 minutes longer: the other side of a
+// pull request that changes their for alone.
+func forBumped(rs []rules.Rule) []rules.Rule {
+	out := slices.Clone(rs)
+	for i := range out {
+		out[i].For += 5 * time.Minute
+	}
+	return out
+}
+
 // backtests works out what a pull request's backtest can ask within
-// --backtest-timeout at the lane's rate, with the planner serve's port
-// counts one with before it is queued (fits: replay.PlanEach, the rules
-// before and after it side by side, over days ending at now less
-// --settle, on --step): ten of the rules read changed, each rule's
-// expression (the two sides' reads apart) or its for alone (the two
-// sides sharing their reads, as RunEach shares them), over the recipe's
-// seven days, and the most days of each that fit.
+// --backtest-timeout at the lane's rate, counted as serve's port counts
+// one before it is queued (serve.BacktestRequests, fits' own): ten of the
+// rules read changed, over the recipe's seven days, each rule's
+// expression (the two sides' reads apart) or its for alone (5 minutes
+// longer, the sides sharing the reads their for doesn't move), and the
+// most days of each that fit. It says the port refuses every backtest only
+// when one rule's for over a day doesn't fit; fewer rules than ten may.
 func (p *run) backtests(ctx context.Context, rd *read) {
 	if !p.backtesting() {
 		return
@@ -406,41 +418,6 @@ func (p *run) backtests(ctx context.Context, rd *read) {
 			b.Fit++
 		}
 	}
-	var rs []rules.Rule
-	if rd != nil {
-		rs = changedRules(rd.all)
-	}
-	b.Rules = len(rs)
-	h := p.planned()
-	plan := func(sets [][]replay.Version, days int) int {
-		to := p.now.Add(-s.Settle).Truncate(s.Step)
-		return replay.PlanEach(h, sets, to.Add(-time.Duration(days)*24*time.Hour), to, s.Step).Requests
-	}
-	changed := func(days int) int {
-		// Each side alone: the two share no expression, so no read.
-		return 2 * plan([][]replay.Version{{{Rules: rs}}}, days)
-	}
-	shared := func(days int) int {
-		return plan([][]replay.Version{{{Rules: rs}}, {{Rules: rs}}}, days)
-	}
-	most := func(of func(int) int) int {
-		d := laneDays
-		for ; d >= 1 && ctx.Err() == nil; d-- {
-			if fits(of(d)) {
-				break
-			}
-		}
-		return d
-	}
-	if len(rs) > 0 {
-		b.Changed, b.Shared = changed(b.Days), shared(b.Days)
-		b.ChangedDays, b.SharedDays = most(changed), most(shared)
-	}
-	if ctx.Err() != nil {
-		p.unworked("estimate.backtests")
-		return
-	}
-	p.r.Estimates.Backtests = b
 	it := Item{ID: "estimate.backtests", State: OK}
 	lane := fmt.Sprintf("the lane asks %d at once", b.Parallel)
 	if laneAt > 0 {
@@ -450,8 +427,61 @@ func (p *run) backtests(ctx context.Context, rd *read) {
 		it.What = fmt.Sprintf("without --max-rate, %s and keeps to no rate: how long a backtest takes is the API's to say, and none is refused for its time", lane)
 		it.Why = fmt.Sprintf("one that doesn't end within --backtest-timeout %s ends failed", dur(limit))
 	}
+	if rd == nil || rd.failed {
+		// What a backtest of the rules asks needs the rules.
+		p.r.Estimates.Backtests = b
+		it.State = Unknown
+		it.Why = strings.TrimPrefix(it.Why+"; what a backtest of these rules asks isn't worked out: the rules couldn't all be read", "; ")
+		p.add(it)
+		return
+	}
+	rs := changedRules(rd.all)
+	b.Rules = len(rs)
+	h := p.planned()
+	changed := func(rs []rules.Rule, days int) int {
+		// Each side alone: the two share no expression, so no read.
+		return 2 * serve.BacktestRequests(h, rs, nil, days, p.now, s.Settle, s.Step)
+	}
+	forOnly := func(rs []rules.Rule, days int) int {
+		return serve.BacktestRequests(h, rs, forBumped(rs), days, p.now, s.Settle, s.Step)
+	}
+	most := func(of func([]rules.Rule, int) int) int {
+		d := laneDays
+		for ; d >= 1 && ctx.Err() == nil; d-- {
+			if fits(of(rs, d)) {
+				break
+			}
+		}
+		return d
+	}
+	// The most of the rules that fit, changed, over days.
+	mostRules := func(days int) int {
+		n := len(rs)
+		for ; n >= 1 && ctx.Err() == nil && !fits(changed(rs[:n], days)); n-- {
+		}
+		return n
+	}
+	least := 0 // what the cheapest backtest of a rule that differs asks
+	if len(rs) > 0 {
+		b.Changed, b.Shared = changed(rs, b.Days), forOnly(rs, b.Days)
+		b.ChangedDays, b.SharedDays = most(changed), most(forOnly)
+		least = forOnly(rs[:1], 1)
+		if b.ChangedDays < b.Days {
+			b.WeekRules, b.DayRules = mostRules(b.Days), mostRules(1)
+		}
+	}
+	if ctx.Err() != nil {
+		p.unworked("estimate.backtests")
+		return
+	}
+	p.r.Estimates.Backtests = b
 	if len(rs) == 0 {
 		it.What += "; no rule read is one the port takes (Prometheus's format, replayed), so none is counted"
+		if laneAt > 0 && b.Fit == 0 {
+			it.State = Problem
+			it.Why = "the port refuses every backtest of a rule that differs before it is queued: not a request fits within --backtest-timeout at the lane's rate"
+			it.Fix = "raise --max-rate or --backtest-share, or give --backtest-timeout longer"
+		}
 		p.add(it)
 		return
 	}
@@ -470,20 +500,34 @@ func (p *run) backtests(ctx context.Context, rd *read) {
 			return fmt.Sprintf(": all %d days a backtest may ask fit", laneDays)
 		case d < 1:
 			return ": not a day fits"
-		}
-		if d == 1 {
+		case d == 1:
 			return ": a day fits"
 		}
 		return fmt.Sprintf(": %d days fit", d)
 	}
-	it.What += fmt.Sprintf("; %s changed ask %s over %d days, the recipe's default%s; with only their for changed, the two sides' reads shared, %s%s",
+	it.What += fmt.Sprintf("; %s changed ask %s over %d days, the recipe's default%s; with only their for changed, 5 minutes longer, %s%s",
 		of, num(b.Changed), b.Days, daysFit(b.ChangedDays), num(b.Shared), daysFit(b.SharedDays))
-	if laneAt > 0 && b.SharedDays < 1 {
+	if laneAt > 0 && b.ChangedDays < b.Days && len(rs) > 1 {
+		it.What += fmt.Sprintf("; of these rules with their expressions changed, %s fit over %d days, %s over a day", rulesSaid(b.WeekRules), b.Days, rulesSaid(b.DayRules))
+	}
+	if laneAt > 0 && !fits(least) {
 		it.State = Problem
-		it.Why = "the port refuses every backtest before it is queued: not one rule changed over a day fits within --backtest-timeout at the lane's rate"
+		it.Why = fmt.Sprintf("the port refuses every backtest of a rule that differs before it is queued: one rule's for changed over a day asks %s, past what fits",
+			plural(least, "request"))
 		it.Fix = "raise --max-rate or --backtest-share, or give --backtest-timeout longer"
 	}
 	p.add(it)
+}
+
+// rulesSaid is how many of the rules: none, one, or N.
+func rulesSaid(n int) string {
+	switch n {
+	case 0:
+		return "none"
+	case 1:
+		return "one"
+	}
+	return strconv.Itoa(n)
 }
 
 // laneMemory is what the lane's reads hold at once at most, beside the
