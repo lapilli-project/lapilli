@@ -158,16 +158,30 @@ The near misses' judging (`internal/verdict/nearmiss.go:105`, `:154`,
   firing in the week's last minutes that a window after midnight makes
   white is told as black, with `--lead` alone as much as with longer
   ones. This makes the wait the reach: the digest, `goal.missed`, the
-  goals' tasks and the leader's goals work wait, always, until the cursor
-  is at least the span's end plus the most, over every pair of a signal
-  and a rule entry that judges against it, of the lead and the signal's
-  `for` (with the signal with no name, `--lead` and `--impact-for`; with
-  written incidents alone, `--lead`), and `--settle` after that: every
-  window a firing in the span can catch has been found, and a run has
-  read again the samples that came late, so no stone of the span turns
-  after it was told. The same for a week and for an occurrence of `each:
-  KIND` ([goals.md](goals.md)). With the defaults (15m, 5m and 1h) that is
-  an hour and 20 minutes later than today.
+  goals' tasks and the leader's goals work wait, always, until the run
+  cursor is at least the span's end plus the most, over every pair of a
+  signal and a rule entry that judges against it, of the lead and the
+  signal's `for` (with the signal with no name, `--lead` and
+  `--impact-for`; with written incidents alone, `--lead`), and `--settle`
+  after that: every window a firing in the span can catch has been
+  found, and a run has read again the samples that came late, so no stone
+  of the span turns after it was told. The same for a week and for an
+  occurrence of `each: KIND` ([goals.md](goals.md)).
+- **What moves with the defaults** (15m, 5m and 1h, an hour and 20
+  minutes): not the digest, which goes out at `--digest`, Monday 09:00
+  by default (`cmd/lapilli/serve.go:631`), well after the wait. What
+  moves is what is worked out as soon as the week is whole: `goal.missed`,
+  the goals' tasks and the goals' `/metrics`, from about 00:00 on Monday
+  to about 01:20.
+- **A ledger with no runs**, whose firings are copied in, waits on
+  `copiedTo` in place of the run cursor
+  (`internal/serve/work.go:1466-1472`). Nothing reads samples again there,
+  so `--settle` buys nothing and isn't added: a source that copies up to
+  the week's end in one batch would otherwise hold the digest until its
+  next copy. Nor is there a signal's
+  `for`: without runs no signal is read, so there are no windows, and
+  copied firings are judged against written incidents by `--lead`. Such a
+  ledger waits for the span's end plus `--lead`.
 
 ### Judged again when a lead changes
 
@@ -583,12 +597,14 @@ on an incident's page. Counted (below):
   One row a post ("needed action: yes, on 100 firings of 3 rules", the
   firings in its after).
 - **30 verdict writes an hour a person, of every kind.** A form's post, a
-  bulk post and a call of `PUT` or `DELETE /api/v1/verdicts` each count
-  one, by the name the write is noted under, across replicas (kept in the
-  ledger, as the tries of the Settings page are counted). Past 30 in the
-  hour, the write is refused with 429 and `Retry-After`, and nothing is
+  bulk post and a call of `PUT /api/v1/verdicts`, `PUT
+  /api/v1/verdicts/bulk` or `DELETE /api/v1/verdicts` each count one, by
+  the name the write is noted under, across replicas (kept in the ledger,
+  as the tries of the Settings page are counted). Past 30 in the hour,
+  the write is refused with 429 and `Retry-After`, and nothing is
   written: no verdict, no change row, nothing judged again. Thirty is
-  room for a person: the bulk form takes 100 firings in one. It bounds
+  room for a person: the bulk form and the bulk call take 100 firings in
+  one. It bounds
   what one name can put among the activity log's latest 100 to 30 rows an
   hour, and the log, besides, shows each person's verdict rows of an hour
   as one line ("NAME: 30 verdicts"), reading its latest 100 other changes
@@ -634,9 +650,15 @@ moved.
 - **Two verdicts, one firing.** A replay can merge two firings into one,
   and the fallback can come to another pod's firing that has a verdict of
   its own. The verdict said of that very alert (its series) wins; between
-  two of other alerts, the one set latest; the other is marked moved
-  ("another verdict holds this firing"), listed with the rest, and judges
-  nothing until it is said again.
+  two of other alerts, the one set latest. In the ledger the other is
+  marked moved ("another verdict holds this firing"), listed with the
+  rest, and judges nothing until it is said again. A replay judged in
+  memory writes nothing, so there the other is dropped, not marked. When
+  both say "unrelated", the firing they share keeps the union of their
+  incidents as unrelated, whichever wins the rest: otherwise it would be
+  white by the incidents the other was said of, and a replay that merges
+  two firings would bring back the very bias that carrying verdicts into
+  replays takes away.
 - **Where an incident's key moves, its verdicts' keys move, in the same
   write.** Three places move keys today, each with the tasks and comments
   on them:
@@ -767,6 +789,16 @@ rules:
     that caught nothing, or one "This was real" wrote an incident from;
     403 for a part the caller's role doesn't have, or a firing older than
     14 days for one who isn't an admin.
+  - `PUT /api/v1/verdicts/bulk`: `{"firings": [{"rule", "labels",
+    "start"}, ...], "action", "action_note"}`, up to 100 firings with one
+    answer to "needed action", as the bulk form takes them. One call is
+    one write against the cap and one row of the activity log, so a tool
+    that copies a team's answers in reaches 3,000 firings an hour, enough
+    for a busy team to reach the 80% bar. It is all or nothing: a firing
+    not found, of another team for a team's editor, or older than 14 days
+    for one who isn't an admin refuses the call with what was wrong, and
+    nothing is written. "Unrelated" isn't taken in bulk, as on the form:
+    a person looks at each.
   - `DELETE /api/v1/verdicts` with `rule`, `labels`, `start` and `part`
     (`unrelated`, `action`, or both when left out): undone, part by part,
     as the caller may.
@@ -982,9 +1014,11 @@ says:
   `lead_ns`), and its recount block reads `lead_ns` from
   `settings.impact_signals` and `settings.impact_rules`. It adds those two
   fields to "The report's fields". Every number of a ledger with no lead
-  of a signal's or an entry's stays as it is. The digest's and the goals'
-  wait ("`--settle`, a signal's `for`, a rule's `for`") is the one thing
-  that changes with the defaults: an hour and 20 minutes later.
+  of a signal's or an entry's stays as it is. The goals' wait
+  ("`--settle`, a signal's `for`, a rule's `for`") is the one thing that
+  changes with the defaults: `goal.missed`, the goals' tasks and their
+  `/metrics` move from about 00:00 on Monday to about 01:20; the digest,
+  at Monday 09:00, doesn't move.
 - **Step 2** changes no number. It adds "Episodes", `rules[].episodes`†,
   `firings[].episode`†, `firings[].day`† and `settings.zone`† to the
   report's fields
@@ -1067,9 +1101,10 @@ As counts and bytes, which the tests hold, not times:
 
 **What can someone send before they prove who they are?** Nothing new.
 Every new write is on the UI's port, behind its sign-in and roles: `POST
-/firings/{id}/verdict`, `POST /firings/verdict`, and `PUT` and `DELETE
-/api/v1/verdicts`, under `s.teamWrite`, which lets a team's editor in for
-their team's rules alone; the verdict's write goes part by part, so a
+/firings/{id}/verdict`, `POST /firings/verdict`, `PUT` and `DELETE
+/api/v1/verdicts` and `PUT /api/v1/verdicts/bulk` (100 firings), under
+`s.teamWrite`, which lets a team's editor in for their team's rules
+alone; the verdict's write goes part by part, so a
 team's editor can neither set, clear nor delete "unrelated"; each body cut
 at 1 MiB, as `teamWrite` cuts it (`http.MaxBytesReader`). Leads and rule
 entries, `judged: false` among them, are set on the command line, in
@@ -1095,10 +1130,11 @@ isn't a browser, and writes as the name the token gives.
   judges again one firing's span and its days, less than an editor's
   incident write already does.
 - Writes: 30 verdict writes an hour a person, a form's post, a bulk post
-  (100 firings, one change row) and an API call alike; past that, 429 and
-  nothing written. The activity log shows a person's verdict rows of an
-  hour as one line, so neither one post nor a script holding a token can
-  push its other changes off its latest 100.
+  or a bulk call (100 firings, one change row) and any other API call
+  alike; past that, 429 and nothing written. The activity log shows a
+  person's verdict rows of an hour as one line, so neither one post nor a
+  script holding a token can push its other changes off its latest
+  100.
 - A lead: an admin's, 24h at most, pending its signal's windows, among
   the twelve saves an hour.
 
