@@ -147,9 +147,12 @@ func (c *CI) Discover(ctx context.Context) error {
 
 // DiscoverKeys reads the issuer's discovery document once, as a token's
 // first check does (discover), within ctx, and gives its keys, not yet
-// fetched, keeping nothing: lapilli preflight's, which asks each issuer
-// once, in its own time, where keysOf asks in fetchTimeout's whatever ctx
-// says, and remembers.
+// fetched, keeping nothing. It is lapilli preflight's alone, which asks
+// each issuer once, in its own time: it skips what keysOf holds a request
+// from anyone to, discovery asked once a minute at most after a failure,
+// and one ask at a time with none waiting on it. serve's paths, which a
+// token from anyone leads to, call Discover and VerifyToken, never this
+// (TestDiscoverKeysPreflightAlone reads the source).
 func (c *CI) DiscoverKeys(ctx context.Context) (*Keys, error) {
 	return c.discover(ctx)
 }

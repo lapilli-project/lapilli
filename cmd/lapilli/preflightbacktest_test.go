@@ -143,10 +143,12 @@ func TestPreflightBacktests(t *testing.T) {
 	if w := est["hourly"].(map[string]any)["while_backtest"].(map[string]any); w["rate"] != 0.375 {
 		t.Errorf("%v", w)
 	}
-	// The issuers are public, and said; what the entries pin, the audience
-	// and the plain token are not, nor how long the token is.
-	if !strings.Contains(out, "/api/actions") {
-		t.Errorf("the issuers aren't said:\n%s", out)
+	// Issuers of no public CI's are said as the trust file's issuer N, and
+	// hidden wherever the report would say them; nor are what the entries
+	// pin, the audience and the plain token said, nor how long the token is.
+	if iss := items["backtest.issuers"]["what"].(string); !strings.Contains(iss, "[--backtest-trust's issuer 1] (alerts, alerts-push)") ||
+		!strings.Contains(iss, "[--backtest-trust's issuer 2] (monitoring)") || strings.Contains(out, "/api/actions") {
+		t.Errorf("the issuers are said as they are:\n%s", out)
 	}
 	for _, hidden := range []string{"123456789", "987654321", "4200917", "lapilli-ci.example.com", plainToken} {
 		if strings.Contains(out, hidden) {

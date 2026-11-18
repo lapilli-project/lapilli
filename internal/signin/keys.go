@@ -94,8 +94,9 @@ type Keys struct {
 func NewKeys(jwksURL string, client *http.Client, algs []string, now func() time.Time) *Keys {
 	k := &Keys{url: jwksURL, client: client, now: now}
 	for _, a := range algs {
-		if slices.Contains(Asymmetric, jose.SignatureAlgorithm(a)) {
-			k.algs = append(k.algs, jose.SignatureAlgorithm(a))
+		// Each once: a discovery document may name one many times.
+		if alg := jose.SignatureAlgorithm(a); slices.Contains(Asymmetric, alg) && !slices.Contains(k.algs, alg) {
+			k.algs = append(k.algs, alg)
 		}
 	}
 	if len(k.algs) == 0 {

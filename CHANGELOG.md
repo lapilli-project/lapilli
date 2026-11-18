@@ -160,17 +160,24 @@ Before upgrading:
   with `--backtest-trust` at start, read by serve's own reader: it takes
   the file, naming each entry, its CI and the claims it pins, never what a
   claim is pinned to, a plain token's file read as serve reads it and said
-  long enough, never its text or length; or it stops, a problem saying why
-  in serve's words, what the file pins taken out of them. The file needs no
+  long enough, never its text or length; or it stops, a problem saying
+  where (the line, the entry, the key) and why in Lapilli's words, never a
+  value the file holds: `serve.ReadTrust` refuses a file as a
+  `TrustRefused`, its message to serve's log as it was. The file needs no
   credential, and is read with `--offline` too. `backtest.issuers` asks each
-  issuer the file names for its discovery document and keys, once, as a
-  token's first check does (its issuer to the byte, its keys at its own
-  origin or `jwks_url`, no redirect, 1 MB and 100 keys), GETs of exactly
-  those through the allowlist, counted as `backtest` in `asked.by`: ok when
-  a key verifies a token of an algorithm it names. `estimate.backtests`
-  says how many requests a backtest fits in `--backtest-timeout` at the
-  lane's share of `--max-rate`, and how many days of ten of the rules
-  changed, counted by the planner the port refuses one by; the hourly runs
+  issuer the file names for its discovery document and keys, once, four
+  at a time, as a token's first check does (its issuer to the byte, its
+  keys at its own origin or `jwks_url`, no redirect, 1 MB and 100 keys),
+  GETs of exactly those through the allowlist, counted as `backtest` in
+  `asked.by`: ok when a key verifies a token of an algorithm it names. An
+  issuer of no public CI's, and a `jwks_url`, are said as
+  `[--backtest-trust's issuer N]` and hidden wherever the report would say
+  them. `estimate.backtests` says how many requests a backtest fits in
+  `--backtest-timeout` at the lane's share of `--max-rate`, and how many
+  days of ten of the rules changed fit, their expressions or their `for`
+  alone, counted by the count the port refuses one by
+  (`serve.BacktestRequests`); a problem only when one rule's `for` over a
+  day doesn't fit; the hourly runs
   are timed at `--max-rate` less `--backtest-share` too, as while a
   backtest runs the whole hour (`while_backtest`), a run past `--every`
   only then unknown; and memory says the lane's reads beside the runs'

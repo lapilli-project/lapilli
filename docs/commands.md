@@ -1082,7 +1082,8 @@ many requests, and how many days of ten of the rules changed, a backtest
 fits in --backtest-timeout. What it prints is redacted as a pull request's
 backtest comment is: the URLs given as their flag's name, their hosts and
 users, addresses, tenants, a --gcp-project; a secret by its file's path and
-length; what a trust file pins, and its audiences, never.
+length; what a trust file pins, its audiences, and an issuer of no public
+CI's or a jwks_url (said as the file's issuer N), never.
 ```
 
 ## `lapilli ledger`

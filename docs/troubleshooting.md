@@ -569,16 +569,22 @@ The second gives each source that couldn't be read, and why, as
 
 ```
 problem  backtest.trust      serve doesn't start: it refuses --backtest-trust
-                             why: --backtest-trust FILE: ENTRY: claims: pin repository_id, the repository's id (...)
+                             why: line 7, entry 2: claims: pin repository_id, the repository's id (...)
+unknown  backtest.issuers    not asked: serve refuses --backtest-trust (backtest.trust)
+```
+
+```
 problem  backtest.issuers    no issuer's keys read
-                             why: ISSUER (ENTRY): the identity provider can't be reached: ...
+                             why: [--backtest-trust's issuer 1] (ENTRY): the identity provider can't be reached: ...
                              fix: serve starts, and refuses these entries' tokens (401) until the issuer answers as a CI's should: check issuer and jwks_url, and that the pod reaches it
 ```
 
-The first is why serve stops at start, in its words: [Pull request
+The first is why serve stops at start, by the line, the entry and the
+key, never a value of the file's (serve's log quotes it): [Pull request
 backtests](serve.md#pull-request-backtests) says what an entry needs.
-What an entry pins is never shown, as `[--backtest-trust's CLAIM]`. The
-second is serve's first check of a token, for the entries of that issuer:
+The issuers then aren't asked. The second is serve's first check of a
+token, for the entries of that issuer, said by its number in the file
+unless it is a public CI's (GitHub's, gitlab.com, codeberg.org):
 its discovery document's `issuer` must be the entry's to the byte, and its
 keys at the issuer's own origin, or the entry's `jwks_url`. `no key its
 JWKS holds verifies a token of ALG` is a set of keys of another type, or

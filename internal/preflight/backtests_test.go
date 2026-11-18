@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -147,7 +148,7 @@ func TestBacktestIssuers(t *testing.T) {
 		usable int
 	}{
 		{name: "ok", keys: good, state: OK, says: "1 key for RS256", asked: 2},
-		{name: "two algorithms, keys of each", keys: jwks(t, rsaOf(2048), ecOf(t, elliptic.P256()), ecOf(t, elliptic.P384())), state: OK, says: "2 keys for RS256, ES256", asked: 2,
+		{name: "two algorithms, keys of each", keys: jwks(t, rsaOf(2048), ecOf(t, elliptic.P256()), ecOf(t, elliptic.P384())), state: OK, says: "2 keys for ES256, RS256", asked: 2,
 			doc: func(*issuerAt) func(map[string]any) {
 				return func(d map[string]any) { d["id_token_signing_alg_values_supported"] = []string{"RS256", "ES256"} }
 			}},
@@ -213,6 +214,120 @@ func TestBacktestIssuers(t *testing.T) {
 				t.Errorf("%+v counted, %d sent", a, is.count()+elsewhere.count())
 			}
 		})
+	}
+}
+
+// An issuer is said as it is when it is a public CI's, GitHub's, and
+// otherwise as the trust file's issuer N, its jwks_url never: a GitHub
+// Enterprise Server's host and the keys' are hidden wherever the report
+// would say them, in what a server answered too.
+func TestBacktestIssuersSaid(t *testing.T) {
+	keys := jwks(t, rsaOf(2048))
+	public := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			json.NewEncoder(w).Encode(map[string]any{"issuer": "https://token.actions.githubusercontent.com",
+				"jwks_uri": "https://token.actions.githubusercontent.com/.well-known/jwks", "id_token_signing_alg_values_supported": []string{"RS256"}})
+		case "/.well-known/jwks":
+			w.Write(keys)
+		}
+	})
+	ghes := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issuer": "https://github.example.com/_services/token", "id_token_signing_alg_values_supported": []string{"RS256"}})
+	})
+	gone := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "no keys.example.com/jwks here", http.StatusNotFound)
+	})
+	h := standIns(t, map[string]http.Handler{"token.actions.githubusercontent.com": public, "github.example.com": ghes, "keys.example.com": gone})
+	server := ghEntry("server", "https://github.example.com/_services/token")
+	server.JWKSURL = "https://keys.example.com/jwks"
+	c := backtestConfig(ghEntry("alerts", "https://token.actions.githubusercontent.com"), server)
+	rep := Run(context.Background(), c)
+	it := reportItem(rep, "backtest.issuers")
+	b, _ := json.Marshal(rep)
+	if it == nil || it.State != Problem || !strings.Contains(it.What, "https://token.actions.githubusercontent.com (alerts), 1 key for RS256") ||
+		!strings.Contains(it.Why, "[--backtest-trust's issuer 2] (server): [--backtest-trust's jwks_url 1]: 404") || len(slices.DeleteFunc(h.all(), func(s string) bool { return strings.Contains(s, "prometheus") })) != 4 {
+		t.Errorf("sent %v: %+v", h.all(), it)
+	}
+	for _, hidden := range []string{"github.example.com", "keys.example.com"} {
+		if strings.Contains(string(b), hidden) {
+			t.Errorf("the report says %q: %s", hidden, b)
+		}
+	}
+}
+
+// A discovery document that names an algorithm many times names it once:
+// a key set's algorithms are each once (signin.NewKeys), and the item is
+// short whatever the document says.
+func TestBacktestIssuerAlgorithmsOnce(t *testing.T) {
+	is := newIssuerAt(t, jwks(t, rsaOf(2048)))
+	is.doc = func(d map[string]any) {
+		algs := make([]string, 120000)
+		for i := range algs {
+			algs[i] = "RS256"
+		}
+		d["id_token_signing_alg_values_supported"] = algs
+	}
+	p := guarded(t, backtestConfig(ghEntry("alerts", is.URL)))
+	p.backtestIssuers(context.Background())
+	if it := itemOf(p, "backtest.issuers"); it.State != OK || len(it.What) > 200 || !strings.HasSuffix(it.What, "1 key for RS256") {
+		t.Errorf("%d bytes: %.300s", len(it.What), it.What)
+	}
+	// Every algorithm of a key pair named: four said, and how many more.
+	is.doc = func(d map[string]any) {
+		d["id_token_signing_alg_values_supported"] = []string{"RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512", "EdDSA"}
+	}
+	p = guarded(t, backtestConfig(ghEntry("alerts", is.URL)))
+	p.backtestIssuers(context.Background())
+	if it := itemOf(p, "backtest.issuers"); it.State != OK || !strings.HasSuffix(it.What, "and 6 more") {
+		t.Errorf("%s", it.What)
+	}
+}
+
+// Issuers are asked four at a time: eight that each wait for the others
+// are asked four at once, never more, and the eight answered.
+func TestBacktestIssuersAtOnce(t *testing.T) {
+	var mu sync.Mutex
+	in, most := 0, 0
+	release := make(chan struct{})
+	var trust []serve.Trust
+	var all []*issuerAt
+	for i := range 8 {
+		x := newIssuerAt(t, jwks(t, rsaOf(2048)))
+		x.serve = func(w http.ResponseWriter, r *http.Request) bool {
+			if r.URL.Path != "/.well-known/openid-configuration" {
+				return false
+			}
+			mu.Lock()
+			in++
+			most = max(most, in)
+			if in == 4 {
+				select {
+				case <-release:
+				default:
+					close(release)
+				}
+			}
+			mu.Unlock()
+			// Until four are asked at once; a client that gives up first
+			// ends it.
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+			mu.Lock()
+			in--
+			mu.Unlock()
+			return false
+		}
+		all = append(all, x)
+		trust = append(trust, ghEntry(fmt.Sprint("e", i), x.URL))
+	}
+	p := guarded(t, backtestConfig(trust...))
+	p.backtestIssuers(context.Background())
+	it := itemOf(p, "backtest.issuers")
+	if most != 4 || it.State != OK || strings.Count(it.What, "1 key for RS256") != 8 {
+		t.Errorf("%d at once: %+v", most, it)
 	}
 }
 

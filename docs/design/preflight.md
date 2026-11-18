@@ -176,8 +176,8 @@ built (step 3)").
 
 | Id | Read | Says |
 |---|---|---|
-| `backtest.trust` | nothing more: `--backtest-trust` as serve read it in reading the flags (`serve.ReadTrust`, with the other token files serve takes), and the port's flags as `serve.New` holds them (`serve.BacktestRefused`) | what serve does at start: it takes the file, naming each entry, its CI (`github`, `gitlab`, `forgejo` or `generic`) and the claims it pins, never what a claim is pinned to; or it stops, a problem, saying why in serve's words. A plain token's file is read as serve reads it (there, 32 characters at least, no other token file's), and said to be long enough, never its text or its length. No credential is needed: with `--offline` the file is read all the same, the plain tokens' files not, and with one the item is unknown |
-| `backtest.issuers` | for each issuer the file names (with its `jwks_url`, as serve asks it, once for all its entries), its discovery document, then its keys, as `signin.CI` asks them at a token's first check: its issuer to the byte, its keys at its own origin or the entry's `jwks_url`, no redirect, 1 MB and 100 keys, ten seconds; 20 issuers at most | ok when a key it holds verifies a token of an algorithm its discovery document names; a problem when either can't be read, or no key does: serve starts, and refuses those entries' tokens (401) until it does; unknown with `--offline`, past 20 issuers, or once `--preflight-timeout` is up |
+| `backtest.trust` | nothing more: `--backtest-trust` as serve read it in reading the flags (`serve.ReadTrust`, with the other token files serve takes), and the port's flags as `serve.New` holds them (`serve.BacktestRefused`) | what serve does at start: it takes the file, naming each entry, its CI (`github`, `gitlab`, `forgejo` or `generic`) and the claims it pins, never what a claim is pinned to; or it stops, a problem, saying why from serve's own refusal (`serve.TrustRefused`: the line, the entry, the field, what is wrong) in Lapilli's words, nothing the file holds. A plain token's file is read as serve reads it (there, 32 characters at least, no other token file's), and said to be long enough, never its text or its length. No credential is needed: with `--offline` the file is read all the same, the plain tokens' files not, and with one the item is unknown |
+| `backtest.issuers` | for each issuer the file names (with its `jwks_url`, as serve asks it, once for all its entries), its discovery document, then its keys, as `signin.CI` asks them at a token's first check: its issuer to the byte, its keys at its own origin or the entry's `jwks_url`, no redirect, 1 MB and 100 keys, ten seconds; four at a time, 20 at most | said as it is when it is a public CI's (GitHub's, gitlab.com, codeberg.org), otherwise as `[--backtest-trust's issuer N]`, hidden wherever the report would say it, as a `jwks_url` is; ok when a key it holds verifies a token of an algorithm its discovery document names; a problem when either can't be read, or no key does: serve starts, and refuses those entries' tokens (401) until it does; unknown with `--offline`, past 20 issuers, or once `--preflight-timeout` is up |
 
 ## Estimates
 
@@ -241,13 +241,18 @@ not a problem: the runs fall behind while backtests run back to back,
 which is the pull requests' to say. And `estimate.backtests` says how much
 a backtest can ask: at the lane's rate (the share of `--max-rate`'s pace,
 as serve makes it, `prom.Pace.Share`), the most requests within
-`--backtest-timeout`; and, with the planner the port refuses a backtest
-by (`replay.PlanEach`, the rules before and after side by side, over days
-ending at now less `--settle`), ten of the rules read changed, over seven
-days, their expressions (the two sides asked apart) or their `for` alone
-(the two sides sharing their reads), and the most days of each that fit,
-14 at most. Not one rule over a day fitting is a problem: the port refuses
-every backtest before it is queued.
+`--backtest-timeout`; and, counted by the port's own count
+(`serve.BacktestRequests`, which `fits` calls: the rules before and after
+side by side, over days ending at now less `--settle`), ten of the rules
+read changed, over seven days, their expressions (the two sides asked
+apart) or their `for` alone, 5 minutes longer (the two sides sharing the
+reads their `for` doesn't move), and the most days of each that fit, 14 at
+most; where ten don't fit seven days, how many do, and a day. Each rule is
+counted with its own `for` and `keep_firing_for`, which start its reads
+earlier: one that reaches back past midnight UTC asks a day more, so the
+count is the preflight's hour's. One rule's `for` changed over a day not
+fitting is a problem: the port refuses every backtest of a rule that
+differs before it is queued.
 
 **Nights.** With `--catch-up-hours`, a catch-up runs only within them: a
 day of it begins only while the hours last, and one the hours end in is
@@ -858,18 +863,24 @@ The backtest lane, with `--backtest-listen` (`internal/preflight`,
   `serve.ReadTrust` and the other token files serve takes, and keeps the
   error for the report (`readServeAs`) where serve stops at it; a test
   runs both on each of a set of files and holds them to the same answer
-  and the same words (`TestPreflightTrustAsServe`). What `serve.New`
-  refuses of the port beside the file (rules to replay, a history) is
-  said from the same function, `serve.BacktestRefused`, which `New` calls.
-- **ReadTrust's words are said whole**, on one line, cut at 600 bytes,
-  not 200: they are Lapilli's own, the file's path and an entry's name
-  before the reason, not a server's answer. A value it couldn't take is
-  in them (`"0x75bcd15": want a string or an integer written in decimal`),
-  so what the file pins, every claim's values but the events' (one of a
-  few words, which the refusal names), and the audiences are read from
-  the file as YAML, whatever ReadTrust made of it, and taken out as
-  `[--backtest-trust's repository_id]` and the like. They are taken out
-  of what was said alone, not of the whole report: an id may be `42`.
+  (`TestPreflightTrustAsServe`). What `serve.New` refuses of the port
+  beside the file (rules to replay, a history) is said by
+  `serve.BacktestRefused`, made of the check `New` makes (`backtestable`).
+- **A refusal said from its structure, not from serve's text.** serve's
+  message quotes what it couldn't take, a claim's value or an audience;
+  scrubbing that text missed values a key held (no space after a colon),
+  keys and values the other way about, aliases and merge keys from
+  outside `trust:`, an audience with spaces after it, and changed
+  Lapilli's own words (`days is 1 to 14` with a pin of `"1"`). So
+  `ReadTrust` gives a `*TrustRefused`: serve's message as it was
+  (`Error`, compared byte for byte with main's over 39 refusals while
+  this was built), and
+  beside it the line, the entry, one of an entry's own keys and what is
+  wrong in Lapilli's words (`Said`), with no value of the file's: a claim
+  is named only when it is one of Lapilli's (`repository_id`,
+  `event_name`, the claims a token's check holds), YAML's own errors by
+  their line and their kind. preflight prints `Said` alone
+  (`TestReadTrustSaid`, `TestBacktestTrustHidden`).
 - **An issuer's keys are counted as a token would be verified by them**:
   of the keys the set holds as a token's check holds them (`fetchSet`:
   public, for signatures, an RSA key of 2048 to 4096 bits, 100 at most),
@@ -889,15 +900,40 @@ The backtest lane, with `--backtest-listen` (`internal/preflight`,
   preflight fetch from anywhere else even if signin's check went.
 - **What a typical pull request is.** Ten of the rules read that the
   port takes (Prometheus's format, replayed), each of an expression of
-  its own, the first ten in the order read: a rule in Prometheus's format
-  asks one query a day it touches, so any ten ask alike, and none shares
-  a read with another. The expressions changed are counted as twice one
-  side's plan, the two sides sharing no read; the `for` alone, as both
-  sides planned together, sharing theirs. The design's case reads as
-  [backtests.md](backtests.md) says: 160 requests over 7 days, 112 fit at
-  0.125 a second in 15 minutes, so four days; the `for` alone, 80
+  its own, the first ten in the order read, each with its own `for` and
+  `keep_firing_for`: a rule in Prometheus's format asks one query a day
+  its reads touch, and its `for` starts them earlier, so one whose `for`
+  reaches back past midnight UTC asks a day more (`for: 2h` at 02:30 UTC:
+  180 for ten, not 160, `TestEstimateBacktestsOwnFor`). Counted by
+  `serve.BacktestRequests`, the count `fits` makes: an expression changed
+  as twice one side, the two sharing no read; a `for` alone as the rules
+  and a copy of them with their `for` 5 minutes longer, side by side, as
+  `fits` plans `gone` and `came`, each rule's first read starting where
+  its `for` says. The design's case: 160 requests over 7 days, 112 fit at
+  0.125 a second in 15 minutes, so four days, and seven of the rules for
+  the seven; the `for` alone (5m to 10m), 90, nine days
   (`TestEstimateBacktests`). An entry's own `days` isn't counted: 14 at
   most, the port's.
+- **A problem only when nothing that differs fits.** At a low
+  `--max-rate`, ten rules may not fit a day while one does: it says how
+  many of the rules changed fit seven days and a day, and is a problem
+  only when one rule's `for` changed over a day, the least a backtest of
+  a rule that differs asks, doesn't fit. With the rules not all read
+  (`--offline` with `--ruler` or `--grafana`), what a backtest of them asks
+  is unknown.
+- **Issuers four at a time, named by number.** Twelve that don't answer
+  take their ten seconds four at a time, not one by one, out of
+  `--preflight-timeout`. An issuer of no public CI's (GitHub Enterprise
+  Server's host, an enterprise's slug on GitHub's, a GitLab of one's
+  own) and every `jwks_url` are hidden, with their hosts, wherever the
+  report would say them (`hideIssuers`), and named as `[--backtest-trust's
+  issuer N]`; a discovery document that names an algorithm many times
+  names it once (`signin.NewKeys`, which serve's checks use too), and four
+  are listed at most.
+- **`CI.DiscoverKeys` is preflight's alone.** It skips what `keysOf`
+  holds a token from anyone to (discovery once a minute after a failure,
+  one ask at a time); a test reads the source and fails on a call of it
+  outside `internal/preflight` (`TestDiscoverKeysPreflightAlone`).
 - **The backfill and the nights aren't timed again.** A backtest is
   taken once a run is recorded, so it can run while the backfill catches
   up, and slows it as it slows the hourly runs; the backfill and the

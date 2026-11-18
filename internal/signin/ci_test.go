@@ -10,8 +10,13 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -359,5 +364,47 @@ func TestCIDiscoverKeys(t *testing.T) {
 		if n != x.want {
 			t.Errorf("%v: %d", x.algs, n)
 		}
+	}
+}
+
+// NewKeys takes each algorithm once, however many times a discovery
+// document names it.
+func TestKeysAlgorithmsOnce(t *testing.T) {
+	k := NewKeys("", nil, []string{"RS256", "RS256", "ES256", "HS256", "RS256", "ES256"}, nil)
+	if got := strings.Join(k.Algs(), ","); got != "RS256,ES256" {
+		t.Errorf("%s", got)
+	}
+}
+
+// DiscoverKeys skips what keysOf holds a token from anyone to (once a
+// minute after a failure, one ask at a time): no code but lapilli
+// preflight's calls it, so no path a request to serve takes does.
+func TestDiscoverKeysPreflightAlone(t *testing.T) {
+	var files []string
+	for _, root := range []string{"../../internal", "../../cmd"} {
+		filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() && strings.HasSuffix(p, ".go") && !strings.HasSuffix(p, "_test.go") {
+				files = append(files, p)
+			}
+			return nil
+		})
+	}
+	read := 0
+	for _, f := range files {
+		file, err := parser.ParseFile(token.NewFileSet(), f, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		read++
+		ast.Inspect(file, func(n ast.Node) bool {
+			if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "DiscoverKeys" &&
+				!strings.HasPrefix(filepath.ToSlash(f), "../../internal/preflight/") && !strings.HasPrefix(filepath.ToSlash(f), "../../internal/signin/") {
+				t.Errorf("%s calls DiscoverKeys: serve's paths call Discover and VerifyToken", f)
+			}
+			return true
+		})
+	}
+	if read < 50 {
+		t.Fatalf("%d files read", read)
 	}
 }

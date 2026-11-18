@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"lapilli.dev/internal/prom"
@@ -160,13 +161,65 @@ func (p *run) backtestTrust() {
 	p.add(it)
 }
 
+// publicIssuers are the CIs' issuers everyone's tokens come from, said as
+// they are: any other (a GitHub Enterprise Server's host, an enterprise's
+// slug on GitHub's, a GitLab of one's own) is said as the trust file's
+// issuer N, and hidden wherever the report would say it (hideIssuers).
+var publicIssuers = []string{"https://token.actions.githubusercontent.com", "https://gitlab.com", "https://codeberg.org", "https://codeberg.org/api/actions"}
+
+// issuerNumbers are the trust file's issuers by their number, from 1, in
+// the order the file names them.
+func (p *run) issuerNumbers() map[string]int {
+	out := map[string]int{}
+	for _, t := range p.c.Serve.Trust {
+		if t.Issuer != "" && out[t.Issuer] == 0 {
+			out[t.Issuer] = len(out) + 1
+		}
+	}
+	return out
+}
+
+// issuerSaid is how the report names an issuer.
+func (p *run) issuerSaid(url string) string {
+	if slices.Contains(publicIssuers, url) {
+		return url
+	}
+	return fmt.Sprintf("[--backtest-trust's issuer %d]", p.issuerNumbers()[url])
+}
+
+// hideIssuers has what is printed redact each issuer that isn't a public
+// CI's, and each jwks_url, with its host, wherever it is said: what a
+// server answered names the URL it was asked at.
+func (p *run) hideIssuers() {
+	if !p.backtesting() {
+		return
+	}
+	for url, n := range p.issuerNumbers() {
+		if !slices.Contains(publicIssuers, url) {
+			p.hide(fmt.Sprintf("--backtest-trust's issuer %d", n), url)
+		}
+	}
+	keys := map[string]bool{}
+	for _, t := range p.c.Serve.Trust {
+		if t.JWKSURL != "" && !keys[t.JWKSURL] {
+			keys[t.JWKSURL] = true
+			p.hide(fmt.Sprintf("--backtest-trust's jwks_url %d", len(keys)), t.JWKSURL)
+		}
+	}
+}
+
+// issuersAtOnce is how many issuers are asked at once: twelve that don't
+// answer take their ten seconds each four at a time, not one by one, out
+// of --preflight-timeout.
+const issuersAtOnce = 4
+
 // backtestIssuers asks each issuer of the trust file serve read for its
 // discovery document and its keys, once, as a token's first check asks
 // them (signin.CI): its issuer to the byte, its keys at its own origin or
 // at the entry's jwks_url, no redirect, 1 MB and 100 keys, ten seconds,
-// within the preflight's time. Each is ok when a key it holds verifies a
-// token of an algorithm its discovery document names; a problem when it
-// can't be read, or none does.
+// within the preflight's time, four at a time. Each is ok when a key it
+// holds verifies a token of an algorithm its discovery document names; a
+// problem when it can't be read, or none does.
 func (p *run) backtestIssuers(ctx context.Context) {
 	if p.c.TrustErr != nil {
 		p.add(Item{ID: "backtest.issuers", State: Unknown, What: "not asked: serve refuses --backtest-trust (backtest.trust)"})
@@ -180,24 +233,50 @@ func (p *run) backtestIssuers(ctx context.Context) {
 		p.offline("backtest.issuers", plural(len(iss), "issuer")+" not asked for their discovery documents and keys")
 		return
 	}
-	var ok, bad, unasked []string
+	type asked struct {
+		n       int
+		algs    []string
+		err     error
+		unasked bool
+	}
+	got := make([]asked, len(iss))
+	turns := make(chan struct{}, issuersAtOnce)
+	var wg sync.WaitGroup
 	for i, x := range iss {
-		of := " (" + strings.Join(x.entries, ", ") + ")"
-		if i >= mostIssuers || ctx.Err() != nil {
-			unasked = append(unasked, x.url+of)
+		if i >= mostIssuers {
+			got[i].unasked = true
 			continue
 		}
-		n, algs, err := p.issuerKeys(ctx, x)
+		turns <- struct{}{}
+		if ctx.Err() != nil {
+			<-turns
+			got[i].unasked = true
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-turns }()
+			n, algs, err := p.issuerKeys(ctx, x)
+			// The preflight's time, not the issuer's answer: unknown.
+			got[i] = asked{n: n, algs: algs, err: err, unasked: err != nil && ctx.Err() != nil}
+		}()
+	}
+	wg.Wait()
+	var ok, bad, unasked []string
+	for i, x := range iss {
+		name := p.issuerSaid(x.url) + " (" + strings.Join(x.entries, ", ") + ")"
+		a := got[i]
+		algs := listed(a.algs, 4)
 		switch {
-		case err != nil && ctx.Err() != nil:
-			// The preflight's time, not the issuer's answer.
-			unasked = append(unasked, x.url+of)
-		case err != nil:
-			bad = append(bad, x.url+of+": "+said(err))
-		case n == 0:
-			bad = append(bad, fmt.Sprintf("%s%s: no key its JWKS holds verifies a token of %s", x.url, of, strings.Join(algs, ", ")))
+		case a.unasked:
+			unasked = append(unasked, name)
+		case a.err != nil:
+			bad = append(bad, name+": "+said(a.err))
+		case a.n == 0:
+			bad = append(bad, fmt.Sprintf("%s: no key its JWKS holds verifies a token of %s", name, algs))
 		default:
-			ok = append(ok, fmt.Sprintf("%s%s, %s for %s", x.url, of, plural(n, "key"), strings.Join(algs, ", ")))
+			ok = append(ok, fmt.Sprintf("%s, %s for %s", name, plural(a.n, "key"), algs))
 		}
 	}
 	it := Item{ID: "backtest.issuers", State: OK, What: "discovery and keys read: " + strings.Join(ok, "; ")}
